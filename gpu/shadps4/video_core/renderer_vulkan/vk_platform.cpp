@@ -419,6 +419,36 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*instance);
 
+    // Vulkan-Hpp's header-only dispatcher only fills the VK_USE_PLATFORM_* surface entry points when
+    // those macros are defined in the translation unit that provides DispatchLoaderDynamic::init.
+    // They are defined here (and not in every file), so the global dispatcher can end up without
+    // them and instance.create*SurfaceKHR() then calls a null pointer and the game segfaults in
+    // CreateSurface. Load the entry points explicitly from this file, which defines the macros.
+    const auto get_instance_proc_addr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr;
+    const auto surface_proc = [&](const char* name) {
+        return get_instance_proc_addr(*instance, name);
+    };
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+    VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateWin32SurfaceKHR =
+        reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>(surface_proc("vkCreateWin32SurfaceKHR"));
+#endif
+#if defined(VK_USE_PLATFORM_XLIB_KHR)
+    VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateXlibSurfaceKHR =
+        reinterpret_cast<PFN_vkCreateXlibSurfaceKHR>(surface_proc("vkCreateXlibSurfaceKHR"));
+#endif
+#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+    VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateWaylandSurfaceKHR =
+        reinterpret_cast<PFN_vkCreateWaylandSurfaceKHR>(surface_proc("vkCreateWaylandSurfaceKHR"));
+#endif
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateAndroidSurfaceKHR =
+        reinterpret_cast<PFN_vkCreateAndroidSurfaceKHR>(surface_proc("vkCreateAndroidSurfaceKHR"));
+#endif
+#if defined(VK_USE_PLATFORM_METAL_EXT)
+    VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateMetalSurfaceEXT =
+        reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(surface_proc("vkCreateMetalSurfaceEXT"));
+#endif
+
     return std::move(instance);
 }
 
