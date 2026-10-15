@@ -48,7 +48,17 @@ else()
     set(DCP_LOG_SOURCE ${PROJECT_SOURCE_DIR}/src/runtime_log_posix.c)
 endif()
 
-add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp)
+# The Controller prompts patch (prompts/xbox-prompts.dcpx) as a byte array, prompts_patch.h.
+set(DCP_PROMPTS_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/prompts/xbox-prompts.dcpx)
+set(DCP_PROMPTS_PATCH_SOURCE ${CMAKE_BINARY_DIR}/generated/prompts_patch_data.cpp)
+add_custom_command(OUTPUT ${DCP_PROMPTS_PATCH_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${DCP_PROMPTS_PATCH} -DOUTPUT=${DCP_PROMPTS_PATCH_SOURCE} -DSYMBOL=kXboxPromptsPatch
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+    DEPENDS ${DCP_PROMPTS_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+    COMMENT "Embedding prompts/xbox-prompts.dcpx")
+
+add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp
+    ${DCP_PROMPTS_PATCH_SOURCE})
 target_compile_definitions(dcp_launcher PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
 target_link_libraries(dcp_launcher PUBLIC dcp_launcher_core trg_launcher dcp_imgui_sdl ${CMAKE_DL_LIBS})
 

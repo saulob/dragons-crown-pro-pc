@@ -27,7 +27,7 @@
 - **Menu & Subtitles language**: English, French, German, Italian or Spanish
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time)
 - An in-game settings menu: **Insert** on the keyboard, or **R3 + L2** on the controller
-- Xbox controllers without setup, and keyboard support
+- Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
 
 ## What you need
