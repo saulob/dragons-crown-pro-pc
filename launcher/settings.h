@@ -30,6 +30,8 @@ inline constexpr char kAnisotropyKey[] = "anisotropy";
 inline constexpr char kTextLanguageKey[] = "text_language";
 inline constexpr char kShowFpsTitleKey[] = "show_fps_title";
 inline constexpr char kShowFrameCounterKey[] = "show_fps";
+// Which controller's buttons the game's prompts show; the launcher keeps the installed archives in step with it.
+inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 inline constexpr char kLauncherXKey[] = "launcher_x";
 inline constexpr char kLauncherYKey[] = "launcher_y";
 inline constexpr char kLauncherWidthKey[] = "launcher_width";

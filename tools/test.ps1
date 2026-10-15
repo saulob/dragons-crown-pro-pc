@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
   Builds and runs the focused launcher tests: game file validation, the settings file, the Play gate, the window
-  placement and the Display options. They use synthetic files in a temporary folder: no window, no game files.
+  placement, the Display options and the Controller prompts patch. They use synthetic files in a temporary folder: no
+  window, no game files.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The tests are not part of the default build.
 #>

@@ -30,6 +30,7 @@ constexpr ManagedSetting kManagedSettings[] = {
     {kTextLanguageKey, "english"},
     {kShowFpsTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
+    {kControllerPromptsKey, "playstation"},
     {kLauncherXKey, ""},
     {kLauncherYKey, ""},
     {kLauncherWidthKey, ""},
@@ -64,6 +65,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (key == kTextLanguageKey) {
         return std::any_of(std::begin(kTextLanguages), std::end(kTextLanguages),
                            [&](const TextLanguage& language) { return value == language.key; });
+    }
+    if (key == kControllerPromptsKey) {
+        return one_of({"playstation", "xbox"});
     }
     if (key == kRenderResolutionKey) {
         return std::any_of(std::begin(dcp_resolutions), std::end(dcp_resolutions),

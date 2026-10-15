@@ -29,11 +29,11 @@ add_library(dcp_imgui_sdl STATIC ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMG
 target_include_directories(dcp_imgui_sdl PUBLIC ${IMGUI_DIR})
 target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 
-# Game files (check, PKG unpacking, install, boot image), the settings file and the Display options: no window needed (tests link
-# only this).
+# Game files (check, PKG unpacking, install, boot image), the settings file, the Display options and the Controller prompts patch:
+# no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
-add_library(dcp_launcher_core STATIC boot_image.cpp file_browser.cpp game_files.cpp game_install.cpp options.cpp paths.cpp
-    pkg_extract.cpp resolution.c settings.cpp)
+add_library(dcp_launcher_core STATIC boot_image.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
+    game_install.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c settings.cpp)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 PRIVATE ZLIB::ZLIB)
 # Hashes and ciphers: CNG on Windows, OpenSSL's libcrypto elsewhere.
