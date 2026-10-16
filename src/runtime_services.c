@@ -487,6 +487,21 @@ static ABI int32_t ime_result(uint32_t *result) {
     return 0;
 }
 static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+/* The system panel's size, which the game centers the dialog with. Sizes of SDK 2.00 and later
+ * (the eboot is SDK 4.50); the port draws its own box, so `extended` does not change them. */
+#define IME_TYPE_NUMBER 4
+#define IME_OPTION_MULTILINE 1u
+#define IME_OPTION_OVER_2K 0x4000u
+static ABI int32_t ime_panel_size_extended(const ImeParam *param, const void *extended, uint32_t *width, uint32_t *height) {
+    (void)extended;
+    if (!param || !width || !height) return (int32_t)0x80BC0031; /* IME INVALID_ADDRESS */
+    if (param->type>IME_TYPE_NUMBER) return (int32_t)0x80BC0011; /* IME INVALID_TYPE */
+    uint32_t w=0x319, h=param->option&IME_OPTION_MULTILINE ? 0x274 : 0x210;
+    if (param->type==IME_TYPE_NUMBER) { w=0x172; h=0x20a; }
+    if (param->option&IME_OPTION_OVER_2K) { w<<=1; h<<=1; }
+    *width=w; *height=h;
+    return 0;
+}
 
 /* ---- Trophies: accepted locally, recorded in the log ---- */
 static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
@@ -794,6 +809,7 @@ static const RuntimeExport exports[]={
     {"sceNpCommerceDialogUpdateStatus",commerce_status}, {"sceNpCommerceDialogTerminate",commerce_term},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
+    {"sceImeDialogGetPanelSizeExtended",ime_panel_size_extended},
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",trophy_register}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},

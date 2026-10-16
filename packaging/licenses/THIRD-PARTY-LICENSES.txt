@@ -32,6 +32,10 @@ SMAA 1x                     MIT. Copyright (C) 2013 Jorge Jimenez, Jose I. Echev
 DejaVu Sans (embedded font) Bitstream Vera Fonts licence with the Arev additions; DejaVu changes are
                             public domain. Copyright (c) 2003 Bitstream, Inc.; (c) 2006 Tavmjong Bah.
                                                                                                  licenses\DejaVu
+Noto Sans 2.015 (embedded font; stands in for the PS4 system font set)
+                            SIL Open Font License 1.1. Copyright 2022 The Noto Project Authors.  licenses\NotoSans
+                            NotoSans-Regular.ttf unmodified from https://github.com/notofonts/notofonts.github.io,
+                            fonts/NotoSans/hinted/ttf at commit 28b15b4b43b7bed62b5cf6e6b0b5ff5846270535.
 Dear ImGui 1.92.9b          MIT. Copyright (c) 2014-2025 Omar Cornut.                            licenses\imgui
 magic_enum                  MIT. Copyright (c) 2019 - 2024 Daniil Goncharov.                     licenses\magic_enum
 miniz                       MIT. Copyright 2013-2014 RAD Game Tools and Valve Software;

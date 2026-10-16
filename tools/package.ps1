@@ -47,6 +47,7 @@ $BuiltInLicenses = [ordered]@{
     'half'          = 'gpu\third_party\half\LICENSE.txt'
     'SMAA'          = 'gpu\shadps4\video_core\host_shaders\smaa\LICENSE.txt'
     'DejaVu'        = 'gpu\third_party\fonts\LICENSE-DejaVu.txt'
+    'NotoSans'      = 'third_party\fonts\LICENSE-NotoSans.txt'
     'imgui'         = 'gpu\third_party\imgui\LICENSE.txt'
     'magic_enum'    = 'gpu\third_party\magic_enum\LICENSE'
     'miniz'         = 'gpu\third_party\miniz\LICENSE'

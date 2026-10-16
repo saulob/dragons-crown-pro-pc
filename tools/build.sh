@@ -4,7 +4,7 @@
 #
 #   tools/build.sh            build build/cmake/linux/bin/dcp-loader
 #   tools/build.sh --clean    delete build/cmake/linux first
-#   tools/build.sh --test     also build and run the focused launcher and runtime tests
+#   tools/build.sh --test     also build and run the focused tests
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
 #
 # Missing tools or libraries are listed; packaging/linux/ci-deps.sh installs them on Ubuntu 20.04 (the release baseline).
@@ -75,7 +75,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dcp-loader)
-((test)) && targets+=(dcp-launcher-tests dcp-cheats-tests dcp-runtime-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-cheats-tests dcp-runtime-tests dcp-text-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dcp-loader
 [[ -x $loader ]] || die "Missing $loader"
@@ -87,6 +87,8 @@ if ((test)); then
     "$build_dir/bin/dcp-cheats-tests"
     step 'Running the runtime tests (memory, fibers)'
     "$build_dir/bin/dcp-runtime-tests"
+    step 'Running the text tests (text dialog, system font set)'
+    "$build_dir/bin/dcp-text-tests"
 fi
 
 view=$root/game/prepared/v1.03 image=$root/build/image/v1.03

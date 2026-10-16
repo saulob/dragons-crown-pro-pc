@@ -62,6 +62,10 @@ set(DCP_RUNTIME_SOURCES
     src/runtime_services.c
     src/runtime_thread.c
     src/runtime_time.c)
+# The built-in system font is assembled into runtime_font.c (.incbin): rebuild it when the font changes.
+set(DCP_NOTO_SANS ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSans-Regular.ttf)
+set_source_files_properties(src/runtime_font.c PROPERTIES
+    COMPILE_DEFINITIONS DCP_NOTO_SANS_PATH="${DCP_NOTO_SANS}" OBJECT_DEPENDS ${DCP_NOTO_SANS})
 
 if (WIN32)
     enable_language(RC)
@@ -102,6 +106,21 @@ set_target_properties(dcp-cheats-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_R
 target_include_directories(dcp-cheats-tests PRIVATE src gpu/third_party/imgui)
 target_compile_definitions(dcp-cheats-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-cheats-tests PRIVATE -Wall -Wextra -fno-omit-frame-pointer)
+
+# Focused tests of the text dialog and the system font set through the import resolver (tools/test.ps1,
+# tools/build.sh --test); not part of the default build.
+add_executable(dcp-text-tests EXCLUDE_FROM_ALL tests/text_tests.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES}
+    $<$<BOOL:${WIN32}>:src/compat_win.c src/runtime_log.c> $<$<NOT:$<BOOL:${WIN32}>>:src/runtime_log_posix.c>)
+set_target_properties(dcp-text-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-text-tests PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
+target_compile_definitions(dcp-text-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-text-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+if (WIN32)
+    target_compile_definitions(dcp-text-tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_link_libraries(dcp-text-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt ws2_32 -pthread)
+else()
+    target_link_libraries(dcp-text-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
 
 if (NOT WIN32)
     # Focused tests of the memory and fiber layers (tools/build.sh --test); not part of the default build.

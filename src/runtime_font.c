@@ -44,6 +44,7 @@ typedef struct {
 } FontMemory;
 typedef struct { float width, height, h_bearing_x, h_bearing_y, h_advance, v_bearing_x, v_bearing_y, v_advance; } GlyphMetrics;
 typedef struct { float baseline_offset, line_advance, decoration_extent; } HorizontalLayout;
+typedef struct { float baseline_offset_x, column_advance, decoration_span; } VerticalLayout;
 typedef struct { float offset_x, offset_y, position_x, position_y; } Kerning;
 typedef struct {
     void *buffer;
@@ -68,6 +69,7 @@ typedef struct { uint32_t magic, size; uintptr_t functions[3]; } RendererSelecti
 _Static_assert(sizeof(FontMemory)==64,"SceFontMemory");
 _Static_assert(sizeof(GlyphMetrics)==32,"SceFontGlyphMetrics");
 _Static_assert(sizeof(HorizontalLayout)==12,"SceFontHorizontalLayout");
+_Static_assert(sizeof(VerticalLayout)==12,"SceFontVerticalLayout");
 _Static_assert(sizeof(Kerning)==16,"SceFontKerning");
 _Static_assert(sizeof(RenderSurface)==128,"SceFontRenderSurface");
 _Static_assert(sizeof(RenderOutput)==64,"SceFontRenderOutput");
@@ -86,6 +88,38 @@ typedef struct {
     FT_F26Dot6 size_w, size_h;       /* char size currently set on the face */
     uint8_t guest_reserved[256];     /* the PS4 handle is a 256-byte object */
 } Font;
+
+/* Noto Sans (third_party/fonts, SIL OFL 1.1) stands in for the firmware's system font sets.
+ * The bytes are static, so faces opened on them never outlive their data. */
+#ifdef _WIN32
+__asm__(".section .rdata,\"dr\"\n"
+        ".balign 16\n"
+        ".global dcp_noto_sans\n"
+        "dcp_noto_sans:\n"
+        ".incbin \"" DCP_NOTO_SANS_PATH "\"\n"
+        ".global dcp_noto_sans_end\n"
+        "dcp_noto_sans_end:\n"
+        ".text\n");
+#else
+__asm__(".section .rodata\n"
+        ".balign 16\n"
+        ".hidden dcp_noto_sans\n"
+        ".global dcp_noto_sans\n"
+        "dcp_noto_sans:\n"
+        ".incbin \"" DCP_NOTO_SANS_PATH "\"\n"
+        ".hidden dcp_noto_sans_end\n"
+        ".global dcp_noto_sans_end\n"
+        "dcp_noto_sans_end:\n"
+        ".previous\n");
+#endif
+extern const unsigned char dcp_noto_sans[];
+extern const unsigned char dcp_noto_sans_end[];
+
+/* The game's own font covers Latin and Japanese; the set only supplies the glyphs it lacks. */
+#define FONTSET_SST_STD_EUROPEAN_JPCJK 0x1807A444u
+static const struct { uint32_t set; const char *name; } builtin_sets[]={
+    {FONTSET_SST_STD_EUROPEAN_JPCJK,"Noto Sans"},
+};
 
 static const LibrarySelection library_ft={0x53464C46u /* "FLFS" */,0,NULL,{0,0,0,0}};
 static const RendererSelection renderer_ft={0x53524646u /* "FFRS" */,sizeof(RendererSelection),{0,0,0}};
@@ -106,6 +140,28 @@ static int set_size(Font *font, float w, float h) {
     font->size_w=cw; font->size_h=ch;
     return 0;
 }
+
+/* Bounding-box top and bottom (head.yMax / yMin) in 26.6 at the size currently set on the face. */
+static void line_extent(const Font *font, FT_Long *top, FT_Long *bottom) {
+    FT_Fixed y_scale=font->face->size->metrics.y_scale;
+    *top=FT_MulFix(font->face->bbox.yMax,y_scale); *bottom=FT_MulFix(font->face->bbox.yMin,y_scale);
+    if (!FT_IS_SCALABLE(font->face)) {
+        *top=font->face->size->metrics.ascender; *bottom=font->face->size->metrics.descender;
+    }
+}
+
+static int load_glyph(Font *font, uint32_t code) {
+    FT_UInt index=FT_Get_Char_Index(font->face,code);
+    return index && !FT_Load_Glyph(font->face,index,FT_LOAD_NO_HINTING|FT_LOAD_NO_BITMAP) ? 0 : -1;
+}
+
+static void fill_metrics(const FT_Glyph_Metrics *m, GlyphMetrics *out) {
+    out->width=m->width/64.0f; out->height=m->height/64.0f;
+    out->h_bearing_x=m->horiBearingX/64.0f; out->h_bearing_y=m->horiBearingY/64.0f; out->h_advance=m->horiAdvance/64.0f;
+    out->v_bearing_x=m->vertBearingX/64.0f; out->v_bearing_y=m->vertBearingY/64.0f; out->v_advance=m->vertAdvance/64.0f;
+}
+
+static int64_t floor_div64(int64_t v) { return v>=0 ? v/64 : -((-v+63)/64); }
 
 /* ---- Memory, library, renderer ---- */
 static ABI int32_t font_memory_init(FontMemory *memory, void *region, uint32_t size, const void *interface,
@@ -211,19 +267,16 @@ static ABI int32_t font_destroy_renderer(Renderer **pointer) {
 }
 
 /* ---- Fonts ---- */
-static ABI int32_t font_open_memory(Library *library, const void *data, uint32_t size, const OpenParams *params, Font **out) {
-    if (!library || library->magic!=LIBRARY_MAGIC) { if (out) *out=NULL; return ERR_INVALID_LIBRARY; }
-    if (!data || !size || !out) { if (out) *out=NULL; return ERR_INVALID_PARAMETER; }
-    *out=NULL;
+/* `data` must stay valid until the font is closed. */
+static int32_t font_create(Library *library, const void *data, size_t size, const OpenParams *params, Font **out) {
     Font *font=calloc(1,sizeof(*font));
     if (!font) return ERR_ALLOCATION_FAILED;
     FT_Long index=params ? (FT_Long)params->subfont_index : 0;
     pthread_mutex_lock(&lock);
-    /* The data stays owned by the guest, which keeps it mapped while the font is open. */
-    FT_Error error=FT_New_Memory_Face(freetype,data,size,index,&font->face);
+    FT_Error error=FT_New_Memory_Face(freetype,data,(FT_Long)size,index,&font->face);
     if (error) {
         pthread_mutex_unlock(&lock); free(font);
-        fprintf(stderr,"Font: open failed (%u bytes at %p, FreeType error %d)\n",size,data,error);
+        fprintf(stderr,"Font: open failed (%zu bytes at %p, face %ld, FreeType error %d)\n",size,data,(long)index,error);
         return ERR_FONT_OPEN_FAILED;
     }
     if (!font->face->charmap) FT_Select_Charmap(font->face,FT_ENCODING_UNICODE);
@@ -236,11 +289,28 @@ static ABI int32_t font_open_memory(Library *library, const void *data, uint32_t
     return FONT_OK;
 }
 
-/* The PS4 system font sets live in the firmware and are not part of the game. */
-static ABI int32_t font_open_font_set(Library *library, uint32_t set, uint32_t flags, const OpenParams *params, Font **out) {
-    (void)set; (void)flags; (void)params;
-    if (out) *out=NULL;
-    return library && library->magic==LIBRARY_MAGIC ? ERR_FONT_OPEN_FAILED : ERR_INVALID_LIBRARY;
+static ABI int32_t font_open_memory(Library *library, const void *data, uint32_t size, const OpenParams *params, Font **out) {
+    if (!library || library->magic!=LIBRARY_MAGIC) { if (out) *out=NULL; return ERR_INVALID_LIBRARY; }
+    if (!data || !size || !out) { if (out) *out=NULL; return ERR_INVALID_PARAMETER; }
+    *out=NULL;
+    /* The data stays owned by the guest, which keeps it mapped while the font is open. */
+    return font_create(library,data,size,params,out);
+}
+
+/* The PS4 system font sets live in the firmware; known sets open a built-in font instead. */
+static ABI int32_t font_open_font_set(Library *library, uint32_t set, uint32_t mode, const OpenParams *params, Font **out) {
+    (void)mode;
+    if (!library || library->magic!=LIBRARY_MAGIC) { if (out) *out=NULL; return ERR_INVALID_LIBRARY; }
+    if (!out) return ERR_INVALID_PARAMETER;
+    *out=NULL;
+    for (size_t i=0;i<sizeof(builtin_sets)/sizeof(*builtin_sets);++i) {
+        if (builtin_sets[i].set!=set) continue;
+        int32_t result=font_create(library,dcp_noto_sans,(size_t)(dcp_noto_sans_end-dcp_noto_sans),params,out);
+        if (result==FONT_OK) printf("Font: system font set %#x -> built-in %s\n",set,builtin_sets[i].name);
+        return result;
+    }
+    printf("Font: system font set %#x is not supported\n",set);
+    return ERR_FONT_OPEN_FAILED;
 }
 
 static ABI int32_t font_close(Font *handle) {
@@ -299,8 +369,7 @@ static ABI int32_t font_setup_render_scale_pixel(Font *handle, float w, float h)
     return result;
 }
 
-/* Baseline and line height from the font bounding box (head.yMax / yMin), at the font scale.
- * decorationExtent only grows with weight effects, which the game never sets. */
+/* decorationExtent only grows with weight effects, which the game never sets. */
 static ABI int32_t font_get_horizontal_layout(Font *handle, HorizontalLayout *layout) {
     pthread_mutex_lock(&lock);
     Font *font=font_of(handle);
@@ -309,14 +378,32 @@ static ABI int32_t font_get_horizontal_layout(Font *handle, HorizontalLayout *la
     else if (!layout) result=ERR_INVALID_PARAMETER;
     else if (set_size(font,font->scale_w,font->scale_h)) result=ERR_INVALID_PARAMETER;
     else {
-        FT_Fixed y_scale=font->face->size->metrics.y_scale;
-        FT_Long top=FT_MulFix(font->face->bbox.yMax,y_scale), bottom=FT_MulFix(font->face->bbox.yMin,y_scale);
-        if (!FT_IS_SCALABLE(font->face)) {
-            top=font->face->size->metrics.ascender; bottom=font->face->size->metrics.descender;
-        }
+        FT_Long top, bottom;
+        line_extent(font,&top,&bottom);
         layout->baseline_offset=top/64.0f;
         layout->line_advance=(top-bottom)/64.0f;
         layout->decoration_extent=0.0f;
+    }
+    if (result!=FONT_OK && layout) memset(layout,0,sizeof(*layout));
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+
+/* Column width and centre line from the font bounding box (head.xMax / xMin), at the font scale. */
+static ABI int32_t font_get_vertical_layout(Font *handle, VerticalLayout *layout) {
+    pthread_mutex_lock(&lock);
+    Font *font=font_of(handle);
+    int32_t result=FONT_OK;
+    if (!font) result=ERR_INVALID_FONT_HANDLE;
+    else if (!layout) result=ERR_INVALID_PARAMETER;
+    else if (set_size(font,font->scale_w,font->scale_h)) result=ERR_INVALID_PARAMETER;
+    else {
+        FT_Fixed x_scale=font->face->size->metrics.x_scale;
+        FT_Long left=FT_MulFix(font->face->bbox.xMin,x_scale), right=FT_MulFix(font->face->bbox.xMax,x_scale);
+        if (!FT_IS_SCALABLE(font->face)) { left=0; right=font->face->size->metrics.max_advance; }
+        layout->baseline_offset_x=-(right-left)/128.0f;
+        layout->column_advance=(right-left)/64.0f;
+        layout->decoration_span=0.0f;
     }
     if (result!=FONT_OK && layout) memset(layout,0,sizeof(*layout));
     pthread_mutex_unlock(&lock);
@@ -332,6 +419,100 @@ static ABI void font_render_surface_init(RenderSurface *surface, void *buffer, i
     surface->buffer=buffer; surface->width_byte=width_byte; surface->pixel_size_byte=(int8_t)pixel_size_byte;
     surface->width=width; surface->height=height;
     surface->scissor_x1=(uint32_t)width; surface->scissor_y1=(uint32_t)height;
+}
+
+static int ceil_int(float v) { return (int)ceilf(v); }
+static int floor_int(float v) { return (int)floorf(v); }
+
+/* Rasterizes `code` into the surface (pixels, y down), clipped to the scissor. Unlike the
+ * ...Horizontal variant, y is the top of the line: the baseline is y plus the horizontal layout's
+ * baseline offset at the render scale, which is what the game's glyph cells rely on. A missing
+ * glyph returns ERR_NO_SUPPORT_GLYPH: the game then asks its next font. */
+static ABI int32_t font_render_char_glyph_image(Font *handle, uint32_t code, RenderSurface *surface,
+                                                float x, float y, GlyphMetrics *metrics, RenderOutput *output) {
+    if (metrics) memset(metrics,0,sizeof(*metrics));
+    if (output) memset(output,0,sizeof(*output));
+    if (!code) return ERR_NO_SUPPORT_CODE;
+    if (!surface || !metrics || !output) return ERR_INVALID_PARAMETER;
+    pthread_mutex_lock(&lock);
+    Font *font=font_of(handle);
+    int32_t result=FONT_OK;
+    int bpp=surface->pixel_size_byte;
+    if (!font) result=ERR_INVALID_FONT_HANDLE;
+    else if (!font->renderer) result=ERR_NOT_BOUND_RENDERER;
+    else if (!surface->buffer || surface->width<=0 || surface->height<=0 || surface->width_byte<=0 || (bpp!=1 && bpp!=4))
+        result=ERR_NO_SUPPORT_SURFACE;
+    else if (!isfinite(x) || !isfinite(y) || fabsf(x)>1e6f || fabsf(y)>1e6f) result=ERR_INVALID_PARAMETER;
+    else if (set_size(font,font->render_w,font->render_h)) result=ERR_INVALID_PARAMETER;
+    else if (load_glyph(font,code)) result=ERR_NO_SUPPORT_GLYPH;
+    else {
+        FT_GlyphSlot slot=font->face->glyph;
+        fill_metrics(&slot->metrics,metrics);
+        FT_Long baseline, descent;
+        line_extent(font,&baseline,&descent);
+        const float pen_origin_y=y+baseline/64.0f;
+        int64_t pen_x=llrintf(x*64.0f), pen_y=llrintf(pen_origin_y*64.0f);
+        int64_t cell_x=floor_div64(pen_x), cell_y=floor_div64(pen_y);
+        if (slot->format==FT_GLYPH_FORMAT_OUTLINE)
+            FT_Outline_Translate(&slot->outline,(FT_Pos)(pen_x-cell_x*64),(FT_Pos)-(pen_y-cell_y*64));
+        int update_x=0, update_y=0, update_w=0, update_h=0;
+        if (FT_Render_Glyph(slot,FT_RENDER_MODE_NORMAL)) result=ERR_NO_SUPPORT_GLYPH;
+        else {
+            const FT_Bitmap *bitmap=&slot->bitmap;
+            int glyph_w=(int)bitmap->width, glyph_h=(int)bitmap->rows;
+            int64_t dest_x=cell_x+slot->bitmap_left, dest_y=cell_y-slot->bitmap_top;
+            int64_t clip_x0=surface->scissor_x0, clip_y0=surface->scissor_y0;
+            int64_t clip_x1=surface->scissor_x1<(uint32_t)surface->width ? surface->scissor_x1 : (uint32_t)surface->width;
+            int64_t clip_y1=surface->scissor_y1<(uint32_t)surface->height ? surface->scissor_y1 : (uint32_t)surface->height;
+            if ((int64_t)surface->width_byte<clip_x1*bpp) clip_x1=surface->width_byte/bpp;
+            int64_t x0=dest_x>clip_x0 ? dest_x : clip_x0, y0=dest_y>clip_y0 ? dest_y : clip_y0;
+            int64_t x1=dest_x+glyph_w<clip_x1 ? dest_x+glyph_w : clip_x1, y1=dest_y+glyph_h<clip_y1 ? dest_y+glyph_h : clip_y1;
+            if (x1>x0 && y1>y0 && (bitmap->pixel_mode==FT_PIXEL_MODE_GRAY || bitmap->pixel_mode==FT_PIXEL_MODE_MONO)) {
+                uint8_t *base=surface->buffer;
+                /* A negative pitch stores the rows bottom-up: the top row is the last one in the buffer. */
+                const uint8_t *top_row=bitmap->pitch<0 ? bitmap->buffer-(ptrdiff_t)bitmap->pitch*(glyph_h-1) : bitmap->buffer;
+                for (int64_t row=y0;row<y1;++row) {
+                    const uint8_t *source=top_row+(row-dest_y)*bitmap->pitch;
+                    uint8_t *target=base+row*surface->width_byte;
+                    for (int64_t column=x0;column<x1;++column) {
+                        int64_t sx=column-dest_x;
+                        uint8_t value=bitmap->pixel_mode==FT_PIXEL_MODE_GRAY
+                            ? (bitmap->num_grays==256 || bitmap->num_grays<2 ? source[sx] : (uint8_t)(source[sx]*255/(bitmap->num_grays-1)))
+                            : ((source[sx>>3]>>(7-(sx&7)))&1 ? 255 : 0);
+                        if (bpp==1) target[column]=value;
+                        else memset(target+column*4,value,4);
+                    }
+                }
+                update_x=(int)x0; update_y=(int)y0; update_w=(int)(x1-x0); update_h=(int)(y1-y0);
+            } else {
+                update_x=(int)(x0<clip_x1 ? x0 : clip_x1); update_y=(int)(y0<clip_y1 ? y0 : clip_y1);
+                if (update_x<0) update_x=0;
+                if (update_y<0) update_y=0;
+            }
+        }
+        if (result==FONT_OK) {
+            output->stage=NULL;
+            output->image.address=(uint8_t *)surface->buffer+(size_t)update_y*(size_t)surface->width_byte+(size_t)update_x*(size_t)bpp;
+            output->image.width_byte=(uint32_t)surface->width_byte;
+            output->image.pixel_size_byte=(uint8_t)bpp;
+            output->update.x=(uint32_t)update_x; output->update.y=(uint32_t)update_y;
+            output->update.w=(uint32_t)update_w; output->update.h=(uint32_t)update_h;
+            /* Image metrics: integer pixel box of the glyph relative to the pen position. */
+            float left=x+metrics->h_bearing_x, top=pen_origin_y-metrics->h_bearing_y;
+            float right=left+metrics->width, bottom=top+metrics->height;
+            int left_i=floor_int(left), top_i=floor_int(top), right_i=ceil_int(right), bottom_i=ceil_int(bottom);
+            int advance_i=ceil_int(x+metrics->h_advance);
+            output->metrics.bearing_x=(float)left_i-x;
+            output->metrics.bearing_y=pen_origin_y-(float)top_i;
+            output->metrics.advance=(float)advance_i-x;
+            output->metrics.stride=(float)(advance_i>right_i ? advance_i : right_i)-x;
+            output->metrics.width=right_i>left_i ? (uint32_t)(right_i-left_i) : 0;
+            output->metrics.height=bottom_i>top_i ? (uint32_t)(bottom_i-top_i) : 0;
+        }
+    }
+    if (result!=FONT_OK) { memset(metrics,0,sizeof(*metrics)); memset(output,0,sizeof(*output)); }
+    pthread_mutex_unlock(&lock);
+    return result;
 }
 
 static const RuntimeExport exports[]={
@@ -355,6 +536,8 @@ static const RuntimeExport exports[]={
     {"sceFontSetupRenderScalePixel",font_setup_render_scale_pixel},
     {"sceFontGetHorizontalLayout",font_get_horizontal_layout},
     {"sceFontRenderSurfaceInit",font_render_surface_init},
+    {"sceFontGetVerticalLayout",font_get_vertical_layout},
+    {"sceFontRenderCharGlyphImage",font_render_char_glyph_image},
 };
 uintptr_t runtime_font_resolve(const char *name) {
     return RUNTIME_LOOKUP(exports,name);
