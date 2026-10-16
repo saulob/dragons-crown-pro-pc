@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include "common/assert.h"
 #include "dcp_displays.h"
+#include "dcp_window_fit.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
 #include "dcp_overlay.h"
@@ -38,6 +39,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, window_width);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, window_height);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
     base_title = title;
     title_shown = title;
@@ -64,7 +66,19 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     } else {
         UNREACHABLE_MSG("Unsupported SDL video driver {}", driver ? driver : "(none)");
     }
+    if (display) {
+        // Hidden until the real title bar and frame are known, so the decorated window is fitted and centred once.
+        dcp::WindowBorders borders;
+        SDL_GetWindowBordersSize(window, &borders.top, &borders.left, &borders.bottom, &borders.right);
+        const dcp::WindowFit fit = dcp::FitWindowToArea(window_width, window_height, borders, display->usable.x,
+                                                        display->usable.y, display->usable.w, display->usable.h);
+        window_width = fit.width;
+        window_height = fit.height;
+        SDL_SetWindowSize(window, fit.width, fit.height);
+        SDL_SetWindowPosition(window, fit.x, fit.y);
+    }
     ApplyDisplayMode(DcpSettings::Get().display_mode);
+    SDL_ShowWindow(window);
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
     width = w;

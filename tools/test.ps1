@@ -17,7 +17,7 @@ $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
 
 Write-Step 'Building the launcher tests'
-& ninja -C $buildDir dcp-launcher-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests
+& ninja -C $buildDir dcp-launcher-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 
 Write-Step 'Running the launcher tests'
@@ -34,6 +34,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the cursor auto-hide tests'
 & (Join-Path $buildDir 'bin\dcp-cursor-tests.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Step 'Running the window fit tests'
+& (Join-Path $buildDir 'bin\dcp-window-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the tiling tests (GPU tile layouts and addresses)'
