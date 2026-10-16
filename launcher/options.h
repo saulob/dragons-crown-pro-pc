@@ -19,10 +19,10 @@ struct WindowSize {
 inline constexpr WindowSize kWindowSizes[] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
 inline constexpr WindowSize kGamePictureSize{1920, 1080};
 
-enum class PageId { kPlay, kDisplay, kGraphics, kGameplay, kControls, kAbout };
+enum class PageId { kPlay, kDisplay, kGraphics, kGameplay, kCheats, kControls, kAbout };
 
-inline constexpr PageId kPageOrder[] = {PageId::kPlay,     PageId::kDisplay,  PageId::kGraphics,
-                                        PageId::kGameplay, PageId::kControls, PageId::kAbout};
+inline constexpr PageId kPageOrder[] = {PageId::kPlay,   PageId::kDisplay, PageId::kGraphics, PageId::kGameplay,
+                                        PageId::kCheats, PageId::kControls, PageId::kAbout};
 
 const char* PageName(PageId page);
 

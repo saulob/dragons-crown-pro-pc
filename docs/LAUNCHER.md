@@ -2,7 +2,7 @@
 
 The PC launcher is [TRG Launcher](https://github.com/TekRantGaming/trg-launcher) 1.1.0 (pinned in `gpu/deps.txt`, the
 same revision as geometry-wars-retro-evolved-2-recompiled), in the same loader process as the game. Pages: Play, Display,
-Graphics, Gameplay, Controls and About.
+Graphics, Gameplay, Cheats, Controls and About.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ exist at a time. The Dear ImGui copy is the one compiled into the video core lib
 | `launcher/settings.cpp` | `LauncherSettings`, the view of `user\dcp.ini` |
 | `launcher/options.cpp`, `placement.h`, `play_gate.h` | Display options, window placement, the Play gate |
 | `src/dcp_displays.h` | the display list shared by the Monitor row and the game window |
-| `tests/launcher_tests.cpp` | focused tests (`tools\test.ps1`) |
+| `tests/launcher_tests.cpp`, `tests/cheats_tests.cpp` | focused tests (`tools\test.ps1`) |
 
 ## Folders and defaults
 
@@ -137,6 +137,7 @@ use the same defaults).
 | `render_resolution` | `native`, `480p`, `720p`, `1440p`, `1800p`, `4K` | `native` | at start |
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_fps` | 1, 0 | 0 | live |
+| `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
 | `menu_tab` | 0 (Image), 1 (Overlay) | 0 | the in-game menu's last tab |
 | `launcher_x`, `_y`, `_width`, `_height`, `_maximized`, `_fullscreen` | | | launcher window only |
@@ -204,13 +205,23 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   a second on the window thread.
 - **Frame counter**: the video core's corner readout (`show_fps`).
 
-No cheats, skip-intro or frame rate limit.
+No skip-intro or frame rate limit.
+
+## Cheats
+
+Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, About. Subtitle "Optional gameplay modifiers", with the
+line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session." and Off / On
+rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
+Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**, each with its one-line description
+(`src/dcp_cheats.h`). All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
+settings puts them back to Off. The saved values are the start of every game session; the F10 menu changes the running
+session only and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
 ## Controls
 
 Xbox controllers work without setup; the keyboard is always on. The page lists the layout implemented in
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
-Tab, Backspace). Nothing is remappable and the dead zone is not a setting.
+Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 1,000 Gold**, which is not a setting). Nothing is remappable and the dead zone is not a setting.
 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
 atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port

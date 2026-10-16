@@ -31,6 +31,14 @@ constexpr ManagedSetting kManagedSettings[] = {
     {kShowFpsTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
     {kControllerPromptsKey, "playstation"},
+    {cheats::kInfiniteHealthKey, "0"},
+    {cheats::kInfiniteManaKey, "0"},
+    {cheats::kInfiniteLivesKey, "0"},
+    {cheats::kInfiniteDurabilityKey, "0"},
+    {cheats::kInfiniteArrowsKey, "0"},
+    {cheats::kInfiniteSkillPointsKey, "0"},
+    {cheats::kInfiniteGoldKey, "0"},
+    {cheats::kMovementSpeedKey, "0"},
     {kLauncherXKey, ""},
     {kLauncherYKey, ""},
     {kLauncherWidthKey, ""},
@@ -183,6 +191,18 @@ extern "C" int dcp_render_resolution(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return dcp_resolution_index(settings.Get(kRenderResolutionKey, kNativeResolution).c_str());
+}
+
+extern "C" unsigned dcp_saved_cheats(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    unsigned mask = 0;
+    for (const cheats::CheatInfo& cheat : cheats::kCheats) {
+        if (settings.GetBool(cheat.key, cheats::kCheatDefault)) {
+            mask |= cheats::Bit(cheat.cheat);
+        }
+    }
+    return mask;
 }
 
 extern "C" int dcp_text_language(const char* settings_file) {

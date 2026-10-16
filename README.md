@@ -124,6 +124,9 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 
 The game runs at its own 60 frames per second.
 
+### Cheats
+- **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x** (Player 1; gold is shared by the save), all Off by default. Press **F10** while playing to open the Cheats menu; what you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).
+
 ### Controls
 - Xbox controllers work without setup
 - The **keyboard** is always on, together with the controller:
@@ -141,7 +144,7 @@ The game runs at its own 60 frames per second.
 | Options (Start) | Enter |
 | Touchpad left / right (Back) | Tab / Backspace |
 
-- **F11** switches Windowed and Borderless Fullscreen. **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
+- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu. **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
 - One player: local multiplayer and online play are not supported.
 
 ### About

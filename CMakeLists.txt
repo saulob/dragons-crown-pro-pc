@@ -72,9 +72,11 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-add_executable(dcp-loader src/loader.c ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+add_executable(dcp-loader src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set_target_properties(dcp-loader PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-loader PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(dcp-loader PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+target_compile_options(dcp-loader PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>)
 if (WIN32)
     # Windows 10 1903+ APIs (VirtualAlloc2, MapViewOfFile3).
     target_compile_definitions(dcp-loader PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
@@ -87,6 +89,19 @@ else()
     target_link_options(dcp-loader PRIVATE -rdynamic)
     target_link_libraries(dcp-loader PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
+
+# Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
+# (tools/test.ps1); not part of the default build.
+set(DCP_IMGUI_TEST_SOURCES
+    gpu/third_party/imgui/imgui.cpp gpu/third_party/imgui/imgui_draw.cpp
+    gpu/third_party/imgui/imgui_tables.cpp gpu/third_party/imgui/imgui_widgets.cpp)
+set_source_files_properties(${DCP_IMGUI_TEST_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
+add_executable(dcp-cheats-tests EXCLUDE_FROM_ALL tests/cheats_tests.cpp src/cheat_hooks.cpp src/guest_hook.c src/runtime_cheats.cpp
+    ${DCP_IMGUI_TEST_SOURCES})
+set_target_properties(dcp-cheats-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-cheats-tests PRIVATE src gpu/third_party/imgui)
+target_compile_definitions(dcp-cheats-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-cheats-tests PRIVATE -Wall -Wextra -fno-omit-frame-pointer)
 
 if (NOT WIN32)
     # Focused tests of the memory and fiber layers (tools/build.sh --test); not part of the default build.

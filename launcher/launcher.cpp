@@ -21,6 +21,8 @@
 #include "trg/platform.h"
 
 #include "controller_prompts.h"
+#include "dcp_accent.h"
+#include "dcp_cheats.h"
 #include "dcp_displays.h"
 #include "dcp_resolution.h"
 #include "game_files.h"
@@ -44,8 +46,7 @@
 namespace dcp {
 namespace {
 
-// The gold of the Dragon's Crown logo lettering (#E0BB32).
-const ImVec4 kAccent = ImVec4(0.878f, 0.733f, 0.196f, 1.0f);
+const ImVec4 kAccent = ImVec4(kAccentRed / 255.0f, kAccentGreen / 255.0f, kAccentBlue / 255.0f, 1.0f);
 constexpr double kPlayFeedbackSeconds = 0.4;
 constexpr char kPortTitle[] = "Dragon's Crown Pro PC";
 constexpr char kGameFilesHelp[] =
@@ -363,6 +364,8 @@ private:
                     nullptr};
         case PageId::kGameplay:
             return {name, "Frame rate readouts.", [this](trg::Ui& ui) { PageGameplay(ui); }, nullptr};
+        case PageId::kCheats:
+            return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr};
         case PageId::kControls:
             return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr};
         case PageId::kAbout:
@@ -581,12 +584,22 @@ private:
         ui.EndRows();
     }
 
+    void PageCheats(trg::Ui& ui) {
+        ui.Help(cheats::kLauncherHelp);
+        ui.Spacer(12);
+        for (const cheats::CheatInfo& cheat : cheats::kCheats) {
+            ui.Toggle(cheat.label, cheat.description, cheat.key, cheats::kCheatDefault, "Off", "On");
+        }
+        ui.EndRows();
+    }
+
     void PageControls(trg::Ui& ui) {
         ui.Info("Controller", "Automatic: Xbox controllers work without setup.");
         ui.Row("Controller prompts", kControllerPromptsHelp);
         ControllerPromptsCombo(ui);
         ui.Info("Keyboard", "Always on, together with the controller.");
         ui.Info("Window mode", "F11 switches Windowed and Borderless Fullscreen.");
+        ui.Info("Cheats menu", "F10 opens it while playing.");
         if (ui.Section("Keyboard keys", true)) {
             for (const KeyBinding& binding : KeyboardBindings()) {
                 ui.Info(binding.action, binding.keys);

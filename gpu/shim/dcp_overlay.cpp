@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bitset>
 #include <cfloat>
 #include <chrono>
 #include <cmath>
@@ -13,8 +14,11 @@
 #include <vector>
 
 #include <SDL3/SDL.h>
+#include "dcp_accent.h"
+#include "dcp_cheat_menu.h"
 #include "dcp_settings.h"
 #include "dcp_graphics.h"
+#include "runtime_cheats.h"
 #include "common/elf_info.h"
 #include "imgui.h"
 #include "imgui_internal.h" // RegisterUserTexture (save pictures)
@@ -54,6 +58,12 @@ namespace {
 std::mutex imgui_mutex; // the ImGui context: window thread (input) and present thread
 bool initialized = false;
 std::atomic<bool> menu_open{false};
+// The cheat menu (F10): open, or closing and still holding the game's input until what it received is released.
+std::atomic<bool> cheat_open{false};
+dcp::cheats::CloseGate cheat_close;
+std::bitset<ImGuiKey_NamedKey_COUNT> cheat_pressed;
+bool cheat_focused = false;
+std::atomic<float> display_scale{1.0f};
 bool r3_down = false, l2_down = false;
 std::atomic<bool> loading{false};
 std::atomic<u32> loading_done{0}, loading_total{0};
@@ -81,6 +91,9 @@ std::chrono::steady_clock::time_point last_present{};
 float frame_ms_avg = 0.0f;
 
 void SetOpen(bool value) {
+    if (value && cheat_open) {
+        return;
+    }
     if (menu_open.exchange(value) == value) {
         return;
     }
@@ -392,6 +405,168 @@ void Menu() {
     }
 }
 
+struct FpsBox {
+    ImVec2 p0, p1, pad;
+    float size;
+};
+
+FpsBox FpsCounterBox(const char* text) {
+    const auto& s = DcpSettings::Get();
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float size = ImGui::GetFontSize() * s.overlay_scale / 100.0f;
+    const ImVec2 text_size = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.0f, text);
+    const ImVec2 pad(size * 0.6f, size * 0.3f);
+    const ImVec2 box(text_size.x + pad.x * 2, text_size.y + pad.y * 2);
+    const int corner = s.overlay_corner;
+    const bool right = corner == 1 || corner == 3, bottom = corner >= 2;
+    const ImVec2 p0(right ? viewport->WorkPos.x + viewport->WorkSize.x - size - box.x : viewport->WorkPos.x + size,
+                    bottom ? viewport->WorkPos.y + viewport->WorkSize.y - size - box.y : viewport->WorkPos.y + size);
+    return {p0, ImVec2(p0.x + box.x, p0.y + box.y), pad, size};
+}
+
+bool FpsCounterShown() {
+    return DcpSettings::Get().show_fps && frame_ms_avg > 0.0f;
+}
+
+ImVec4 Accent() {
+    return ImVec4(dcp::kAccentRed / 255.0f, dcp::kAccentGreen / 255.0f, dcp::kAccentBlue / 255.0f, 1.0f);
+}
+
+// The keys and buttons that went down while the menu was open, until they come up again.
+void TrackCheatKeys() {
+    for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
+        if (key >= ImGuiKey_MouseLeft && key <= ImGuiKey_MouseWheelY) {
+            continue;
+        }
+        const size_t index = size_t(key - ImGuiKey_NamedKey_BEGIN);
+        if (ImGui::IsKeyPressed(ImGuiKey(key), false)) {
+            cheat_pressed.set(index);
+        } else if (!ImGui::IsKeyDown(ImGuiKey(key))) {
+            cheat_pressed.reset(index);
+        }
+    }
+}
+
+void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, const ImVec4& accent,
+                  const ImVec4& focus, const ImVec4& dim) {
+    const float height = ImGui::GetFrameHeight() + 4.0f * scale;
+    ImGui::PushID(int(index));
+    const bool pressed = ImGui::Selectable("##row", false, ImGuiSelectableFlags_None, ImVec2(0.0f, height));
+    if (index == 0) {
+        ImGui::SetItemDefaultFocus();
+    }
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    if (ImGui::IsItemFocused()) {
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(focus), 3.0f * scale);
+    }
+    const float pad = ImGui::GetFontSize() * 0.4f;
+    const float y = min.y + (height - ImGui::GetFontSize()) * 0.5f;
+    const bool action = row.kind == dcp::cheats::RowKind::Action;
+    const bool on = !action && runtime_cheat_enabled(int(row.cheat)) != 0;
+    const char* state = action ? row.verb : (on ? "On" : "Off");
+    draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
+    draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y),
+                  ImGui::GetColorU32(action || on ? accent : dim), state);
+    ImGui::PopID();
+    if (!pressed) {
+        return;
+    }
+    if (action) {
+        runtime_cheat_action(int(row.action));
+        std::printf("Cheats: %s requested\n", row.label);
+    } else {
+        runtime_cheat_toggle(int(row.cheat));
+        std::printf("Cheats: %s %s (this session)\n", row.label, runtime_cheat_enabled(int(row.cheat)) ? "On" : "Off");
+    }
+}
+
+void CloseCheatMenu() {
+    runtime_cheat_clear_actions();
+    cheat_open = false;
+    cheat_close = {};
+    cheat_pressed.reset();
+    cheat_focused = false;
+    ImGuiIO& io = ImGui::GetIO();
+    io.ClearInputKeys();
+    io.MouseDrawCursor = menu_open;
+}
+
+void CheatMenu() {
+    ImGuiIO& io = ImGui::GetIO();
+    TrackCheatKeys();
+    if (!cheat_close.requested() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
+        cheat_close.Request();
+    }
+    if (cheat_close.requested()) {
+        if (cheat_close.Step(cheat_pressed.any(), ImGui::GetTime())) {
+            CloseCheatMenu();
+        }
+        return;
+    }
+    const ImVec4 accent = Accent();
+    const ImVec4 dim(0.64f, 0.66f, 0.76f, 1.0f);
+    const ImVec4 focus(accent.x, accent.y, accent.z, 0.42f);
+    const float scale = dcp::cheats::MenuScale(display_scale, io.DisplaySize.x, ImGui::GetFontSize());
+    const float em = ImGui::GetFontSize() * scale;
+    const float margin = em * 0.8f;
+    float top = margin;
+    if (FpsCounterShown() && DcpSettings::Get().overlay_corner == 1) {
+        top = FpsCounterBox(OverlayText().c_str()).p1.y + margin * 0.5f;
+    }
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - margin, top), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(em * dcp::cheats::kMenuWidthEm, 0.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, std::max(io.DisplaySize.y - top - margin, em)));
+    if (!cheat_focused) {
+        cheat_focused = true;
+        ImGui::SetNextWindowFocus();
+    }
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.05f, 0.11f, 0.92f));
+    ImGui::PushStyleColor(ImGuiCol_Border, accent);
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, accent);
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, focus);
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, focus);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(em * 0.7f, em * 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x * scale, style.FramePadding.y * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x * scale, style.ItemSpacing.y * scale));
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
+    if (ImGui::Begin("##dcp_cheat_menu", nullptr, flags)) {
+        ImGui::SetWindowFontScale(scale);
+        ImGui::TextColored(accent, "%s", dcp::cheats::kMenuTitle);
+        ImGui::Separator();
+        for (size_t i = 0; i < dcp::cheats::kMenuRows.size(); ++i) {
+            DrawCheatRow(dcp::cheats::kMenuRows[i], i, scale, accent, focus, dim);
+        }
+        ImGui::Separator();
+        ImGui::TextColored(dim, "%s", dcp::cheats::kMenuCloseHint);
+        ImGui::TextColored(dim, "%s", dcp::cheats::kMenuNote);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(4);
+    ImGui::PopStyleColor(5);
+}
+
+// F10 opens and closes the cheat menu; it stays away from the settings menu and the game's own dialogs.
+void ToggleCheatMenu() {
+    if (cheat_open) {
+        cheat_close.Request();
+        return;
+    }
+    if (menu_open || text_entry_active || choice_active || loading) {
+        return;
+    }
+    cheat_open = true;
+    cheat_close = {};
+    cheat_pressed.reset();
+    cheat_focused = false;
+    ImGui::GetIO().MouseDrawCursor = true;
+}
+
 // The game's text dialog: what is typed, and how to finish (keyboard or controller).
 void TextEntryBox() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -494,30 +669,19 @@ void LoadingScreen() {
 }
 
 void FpsCounter() {
-    const auto& s = DcpSettings::Get();
     if (frame_ms_avg <= 0.0f) {
         return;
     }
     const std::string label = OverlayText();
-    const char* text = label.c_str();
     constexpr ImU32 panel_color = IM_COL32(7, 10, 22, 190);
-    constexpr ImU32 border_color = IM_COL32(224, 187, 50, 255);
+    constexpr ImU32 border_color = IM_COL32(dcp::kAccentRed, dcp::kAccentGreen, dcp::kAccentBlue, 255);
     constexpr ImU32 text_color = IM_COL32(255, 255, 255, 255);
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImFont* font = ImGui::GetFont();
-    const float size = ImGui::GetFontSize() * s.overlay_scale / 100.0f;
-    const ImVec2 text_size = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text);
-    const ImVec2 pad(size * 0.6f, size * 0.3f);
-    const ImVec2 box(text_size.x + pad.x * 2, text_size.y + pad.y * 2);
-    const int corner = s.overlay_corner;
-    const bool right = corner == 1 || corner == 3, bottom = corner >= 2;
-    const ImVec2 p0(right ? viewport->WorkPos.x + viewport->WorkSize.x - size - box.x : viewport->WorkPos.x + size,
-                    bottom ? viewport->WorkPos.y + viewport->WorkSize.y - size - box.y : viewport->WorkPos.y + size);
-    const ImVec2 p1(p0.x + box.x, p0.y + box.y);
+    const FpsBox box = FpsCounterBox(label.c_str());
     ImDrawList* draw = ImGui::GetForegroundDrawList();
-    draw->AddRectFilled(p0, p1, panel_color, size * 0.5f);
-    draw->AddRect(p0, p1, border_color, size * 0.5f, 0, 1.0f);
-    draw->AddText(font, size, ImVec2(p0.x + pad.x, p0.y + pad.y), text_color, text);
+    draw->AddRectFilled(box.p0, box.p1, panel_color, box.size * 0.5f);
+    draw->AddRect(box.p0, box.p1, border_color, box.size * 0.5f, 0, 1.0f);
+    draw->AddText(ImGui::GetFont(), box.size, ImVec2(box.p0.x + box.pad.x, box.p0.y + box.pad.y), text_color,
+                  label.c_str());
 }
 
 void BackgroundLoading() {
@@ -751,16 +915,30 @@ bool HandleEvent(const SDL_Event& event) {
     }
     ImGuiIO& io = ImGui::GetIO();
     const bool is_open = menu_open;
+    const bool cheats_open = cheat_open;
+    const bool captured = is_open || cheats_open;
     switch (event.type) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
+        if (event.key.key == SDLK_F10) {
+            if (down && !event.key.repeat) {
+                ToggleCheatMenu();
+            }
+            return true;
+        }
+        if (cheats_open && event.key.key == SDLK_ESCAPE && down) {
+            if (!event.key.repeat) {
+                cheat_close.Request();
+            }
+            return true;
+        }
         if (down && !event.key.repeat &&
             (event.key.key == SDLK_INSERT || (is_open && event.key.key == SDLK_ESCAPE))) {
             SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
             return true;
         }
-        if (!is_open) {
+        if (!captured) {
             return false;
         }
         io.AddKeyEvent(ImGuiMod_Ctrl, (event.key.mod & SDL_KMOD_CTRL) != 0);
@@ -783,7 +961,7 @@ bool HandleEvent(const SDL_Event& event) {
                 return true;
             }
         }
-        if (!is_open) {
+        if (!captured) {
             return false;
         }
         if (const ImGuiKey key = KeyFromGamepad(button); key != ImGuiKey_None) {
@@ -792,6 +970,16 @@ bool HandleEvent(const SDL_Event& event) {
         return true;
     }
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+        if (cheats_open && (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)) {
+            constexpr float kStickDeadZone = 0.25f;
+            const float amount = event.gaxis.value / 32767.0f;
+            const bool vertical = event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
+            const ImGuiKey negative = vertical ? ImGuiKey_GamepadLStickUp : ImGuiKey_GamepadLStickLeft;
+            const ImGuiKey positive = vertical ? ImGuiKey_GamepadLStickDown : ImGuiKey_GamepadLStickRight;
+            io.AddKeyAnalogEvent(negative, amount < -kStickDeadZone, std::max(-amount, 0.0f));
+            io.AddKeyAnalogEvent(positive, amount > kStickDeadZone, std::max(amount, 0.0f));
+            return true;
+        }
         if (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
             const bool down = event.gaxis.value > 16000;
             if (down && !l2_down && r3_down) {
@@ -806,14 +994,14 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_TEXT_INPUT: {
         // Typed characters (Ctrl+click on a slider, a text field): key events alone erase but
         // do not type. SDL sends them while text input is on (UpdateTextInput).
-        if (!is_open) {
+        if (!captured) {
             return false;
         }
         io.AddInputCharactersUTF8(event.text.text);
         return true;
     }
     case SDL_EVENT_MOUSE_MOTION: {
-        if (!is_open) {
+        if (!captured) {
             return false;
         }
         const float density = PixelDensity(event.motion.windowID);
@@ -822,7 +1010,7 @@ bool HandleEvent(const SDL_Event& event) {
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
-        if (!is_open) {
+        if (!captured) {
             return false;
         }
         const int button = event.button.button == SDL_BUTTON_LEFT    ? 0
@@ -835,7 +1023,7 @@ bool HandleEvent(const SDL_Event& event) {
         return true;
     }
     case SDL_EVENT_MOUSE_WHEEL:
-        if (!is_open) {
+        if (!captured) {
             return false;
         }
         io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
@@ -858,12 +1046,16 @@ void SetLoading(bool active, u32 done, u32 total) {
 
 bool Visible() {
     const auto& s = DcpSettings::Get();
-    return initialized && (loading || background_total || menu_open || text_entry_active || choice_active ||
-                           choice_retiring || s.show_fps);
+    return initialized && (loading || background_total || menu_open || cheat_open || text_entry_active ||
+                           choice_active || choice_retiring || s.show_fps);
+}
+
+void SetDisplayScale(float scale) {
+    display_scale = scale > 0.0f ? scale : 1.0f;
 }
 
 bool CapturesInput() {
-    return menu_open || text_entry_active || choice_active;
+    return menu_open || cheat_open || text_entry_active || choice_active;
 }
 
 void BeginChoice(const std::string& title, const std::vector<std::string>& items,
@@ -933,6 +1125,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
     if (menu_open) {
         Menu();
+    }
+    if (cheat_open) {
+        CheatMenu();
     }
     if (DcpSettings::Get().show_fps && !menu_open) {
         FpsCounter();

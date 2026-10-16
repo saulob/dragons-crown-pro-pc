@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "dcp_cheats.h"
 #include "trg/settings.h"
 
 namespace dcp {

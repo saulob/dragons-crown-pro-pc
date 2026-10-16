@@ -176,6 +176,7 @@ bool WindowSDL::PollEvents() {
         ApplyDisplayMode(mode);
     }
     UpdateFpsTitle();
+    DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {

@@ -27,6 +27,7 @@
 
 #include "controller_prompts.h"
 #include "cpk_patch.h"
+#include "dcp_cheats.h"
 #include "dcp_launcher.h"
 #include "dcp_graphics.h"
 #include "dcp_png.h"
@@ -867,6 +868,78 @@ void TestDefaultsAgree() {
     CHECK(!IsValidSetting(kRenderResolutionKey, "8K") && IsValidSetting(kRenderResolutionKey, "4K"));
 }
 
+bool WrittenValue(const std::string& text, const std::string& key, const std::string& value);
+
+void TestCheatSettings(const fs::path& base) {
+    const fs::path file = base / "cheats" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto launcher_default = [](std::string_view key) {
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            if (setting.key == key) {
+                return std::string(setting.default_value);
+            }
+        }
+        return std::string("<missing>");
+    };
+    for (const cheats::CheatInfo& cheat : cheats::kCheats) {
+        CHECK(launcher_default(cheat.key) == (cheats::kCheatDefault ? "1" : "0"));
+        CHECK(!IsLauncherPlacementSetting(cheat.key));
+    }
+
+    // All are off without a file, and after a file that does not mention them.
+    CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
+    CHECK(dcp_saved_cheats(nullptr) == 0);
+    WriteAll(file, "vsync=0\n");
+    CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
+
+    // Save keeps them as ordinary settings, one bit each for the loader.
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(cheats::kInfiniteHealthKey, true);
+        CHECK(dcp_saved_cheats(file.string().c_str()) == 0); // pending until Save
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_saved_cheats(file.string().c_str()) == cheats::Bit(cheats::Cheat::InfiniteHealth));
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(cheats::kInfiniteHealthKey, false));
+        CHECK(!settings.GetBool(cheats::kInfiniteManaKey, false));
+        settings.SetBool(cheats::kInfiniteManaKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_saved_cheats(file.string().c_str()) ==
+          (cheats::Bit(cheats::Cheat::InfiniteHealth) | cheats::Bit(cheats::Cheat::InfiniteMana)));
+    CHECK(WrittenValue(ReadAll(file), cheats::kInfiniteHealthKey, "1"));
+    {
+        // Every cheat is its own saved setting, and all of them come back from the file.
+        LauncherSettings settings(file);
+        for (const cheats::CheatInfo& cheat : cheats::kCheats) {
+            settings.SetBool(cheat.key, true);
+        }
+        CHECK(settings.Save());
+        CHECK(dcp_saved_cheats(file.string().c_str()) == (1u << cheats::kCheatCount) - 1);
+        settings.SetBool(cheats::kMovementSpeedKey, false);
+        CHECK(settings.Save());
+        CHECK(dcp_saved_cheats(file.string().c_str()) == (1u << (cheats::kCheatCount - 1)) - 1);
+    }
+    CHECK(WrittenValue(ReadAll(file), "vsync", "0")); // unrelated lines survive
+
+    // Reset all settings puts them all back to Off, pending until Save.
+    {
+        LauncherSettings settings(file);
+        settings.ResetToDefaults();
+        for (const cheats::CheatInfo& cheat : cheats::kCheats) {
+            CHECK(!settings.GetBool(cheat.key, true));
+        }
+        CHECK(dcp_saved_cheats(file.string().c_str()) != 0);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
+
+    // The in-game menu never writes them: the video core's settings file code has no cheat key.
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp").find("cheat") == std::string::npos);
+}
+
 bool WrittenValue(const std::string& text, const std::string& key, const std::string& value) {
     return text.find(key + "=" + value) != std::string::npos || text.find(key + " = " + value) != std::string::npos;
 }
@@ -1197,10 +1270,12 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 6);
+    CHECK(count == 7);
     CHECK(std::string(PageName(kPageOrder[0])) == "Play");
     CHECK(std::string(PageName(kPageOrder[2])) == "Graphics");
-    CHECK(std::string(PageName(kPageOrder[5])) == "About");
+    CHECK(std::string(PageName(kPageOrder[3])) == "Gameplay");
+    CHECK(std::string(PageName(kPageOrder[4])) == "Cheats"); // directly below Gameplay
+    CHECK(std::string(PageName(kPageOrder[6])) == "About");
     CHECK(!KeyboardBindings().empty());
 }
 
@@ -1626,6 +1701,7 @@ int main(int argc, char** argv) {
     TestDefaultsAgree();
     TestRenderResolution(base);
     TestTextLanguage(base);
+    TestCheatSettings(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
     TestLauncherWanted();

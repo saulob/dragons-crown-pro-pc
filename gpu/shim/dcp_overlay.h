@@ -42,6 +42,9 @@ u64 PresentedFrames();
 /// Present thread: draws into `view` (layout ColorAttachmentOptimal).
 void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent);
 
+/// The window's display content scale (DPI): the cheat menu grows with it.
+void SetDisplayScale(float scale);
+
 /// The menu is open or a text entry is shown: the game's input is held neutral.
 bool CapturesInput();
 

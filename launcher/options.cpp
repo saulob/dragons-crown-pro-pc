@@ -17,6 +17,7 @@ const char* PageName(PageId page) {
     case PageId::kDisplay: return "Display";
     case PageId::kGraphics: return "Graphics";
     case PageId::kGameplay: return "Gameplay";
+    case PageId::kCheats: return "Cheats";
     case PageId::kControls: return "Controls";
     case PageId::kAbout: return "About";
     }

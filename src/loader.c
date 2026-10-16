@@ -7,6 +7,7 @@
 #include <time.h>
 #include <inttypes.h>
 #include "runtime.h"
+#include "runtime_cheats.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
@@ -410,6 +411,7 @@ int main(int argc, char **argv) {
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file)];
     runtime_dcp_set_neo_mode(render_resolution->pro_memory);
     runtime_set_language(dcp_text_language(settings_file));
+    runtime_cheats_start(dcp_saved_cheats(settings_file));
     if (content_profile) {
         FILE *profile=fopen(content_profile,"rb");
         unsigned char data[28];
@@ -540,7 +542,8 @@ int main(int argc, char **argv) {
             if (!executable) fail("native function is not executable");
         }
     }
-    image = allocate(round_page(size));
+    const size_t hook_bytes = round_page(runtime_cheat_hooks_stub_bytes());
+    image = allocate(round_page(size) + hook_bytes); /* the cheat hook stubs follow the image, within a jump of it */
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
     if (!cpu_only && !dcpgpu_available()) puts("GPU: no video core in this build; running CPU-side only");
@@ -608,6 +611,7 @@ int main(int argc, char **argv) {
         char error[160];
         if (!dcp_apply_resolution(image,size,render_resolution,error,sizeof(error))) fail(error);
     }
+    runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_resolution->width,render_resolution->height,render_resolution->key,
            render_resolution->pro_memory ? ", PS4 Pro memory path" : "");
 #ifdef _WIN32
@@ -615,6 +619,7 @@ int main(int argc, char **argv) {
 #endif
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
+    protect(image + round_page(size), hook_bytes, 5);
     int executable_entry = 0;
     for (uint64_t i = 0; i < ns; ++i) {
         protect(image + segments[i].address, round_page(segments[i].size), (unsigned)segments[i].flags);
