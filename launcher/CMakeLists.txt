@@ -29,11 +29,11 @@ add_library(dcp_imgui_sdl STATIC ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMG
 target_include_directories(dcp_imgui_sdl PUBLIC ${IMGUI_DIR})
 target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 
-# Game files (check, PKG unpacking, install, boot image), the settings file and the Display options: no window needed (tests link
-# only this).
+# Game files (check, PKG unpacking, install, boot image), the settings file, the Display options and the Controller prompts patch:
+# no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
-add_library(dcp_launcher_core STATIC boot_image.cpp file_browser.cpp game_files.cpp game_install.cpp options.cpp paths.cpp
-    pkg_extract.cpp resolution.c settings.cpp)
+add_library(dcp_launcher_core STATIC boot_image.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
+    game_install.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c settings.cpp)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 PRIVATE ZLIB::ZLIB)
 # Hashes and ciphers: CNG on Windows, OpenSSL's libcrypto elsewhere.
@@ -48,7 +48,17 @@ else()
     set(DCP_LOG_SOURCE ${PROJECT_SOURCE_DIR}/src/runtime_log_posix.c)
 endif()
 
-add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp)
+# The Controller prompts patch (prompts/xbox-prompts.dcpx) as a byte array, prompts_patch.h.
+set(DCP_PROMPTS_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/prompts/xbox-prompts.dcpx)
+set(DCP_PROMPTS_PATCH_SOURCE ${CMAKE_BINARY_DIR}/generated/prompts_patch_data.cpp)
+add_custom_command(OUTPUT ${DCP_PROMPTS_PATCH_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${DCP_PROMPTS_PATCH} -DOUTPUT=${DCP_PROMPTS_PATCH_SOURCE} -DSYMBOL=kXboxPromptsPatch
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+    DEPENDS ${DCP_PROMPTS_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+    COMMENT "Embedding prompts/xbox-prompts.dcpx")
+
+add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp
+    ${DCP_PROMPTS_PATCH_SOURCE})
 target_compile_definitions(dcp_launcher PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
 target_link_libraries(dcp_launcher PUBLIC dcp_launcher_core trg_launcher dcp_imgui_sdl ${CMAKE_DL_LIBS})
 

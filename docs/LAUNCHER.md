@@ -70,7 +70,7 @@ while the game files are not valid. If its window cannot be opened, the game sta
    `VERSION 01.03`.
 3. The eight game files are present and not empty (`eboot.bin`, `sce_discmap.plt`, `DRACRO.CPK`,
    `DRACRO_US.CPK`, the three `sce_module` libraries, `param.sfo`). The archives are not hashed: the marker records that
-   their extraction finished.
+   their extraction finished (and the Controller prompts setting appends to them, see Controls).
 4. `eboot.bin` SHA-256 equals `f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a` (about 21 MB).
 5. `build\image\v1.03`: `boot.bin`, `content.bin`, `image.json`, and `image.json` names the same title and eboot hash.
 
@@ -212,6 +212,27 @@ Xbox controllers work without setup; the keyboard is always on. The page lists t
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace). Nothing is remappable and the dead zone is not a setting.
 
+**Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
+atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port
+has no way to swap textures at run time, so the choice is made in the installed game files: Xbox applies a block patch
+to `DRACRO_US.CPK` and `DRACRO.CPK` (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it.
+The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the
+4 × 4 blocks that differ between the game's atlas and the repainted one, about 480 KB, with the CRC32 of each pack
+before and after, and the repainted glyphs sit in the same rectangles as the game's, so the sprite definitions
+(`Interface_US.mbs`) are untouched: Circle, Triangle, Cross and Square become B, Y, A and X in the Xbox colours, L1/R1
+and L2/R2 become LB/RB and LT/RT on the game's own shoulder shapes, START/OPTIONS and SELECT/SHARE become MENU and VIEW,
+the PS-logo discs become a plain guide ring, and the touchpad glyphs stay. `scripts/prompts/README.md` describes how
+the patch is made.
+
+Applying is a background task on the page (a few seconds; Play waits for it): each pack is read from the archive,
+decompressed (CRILAYLA), checked against the patch's CRC, patched, written uncompressed to the end of the archive (the
+archives grow by 67 MB and 31 MB) and its table-of-contents row pointed at the copy; the original data is not
+overwritten. The original TOC and header bytes and the original length go to `DRACRO_US.CPK.undo` and
+`DRACRO.CPK.undo` next to the archives, and PlayStation puts them back byte for byte. The header's `EnableTocCrc` flag
+is cleared so the rewritten TOC is accepted. The page shows what the archives hold (the undo records), not the
+setting: `controller_prompts` in `dcp.ini` only remembers the choice, and after a reinstall from the Play page the
+launcher re-applies Xbox by itself. A pack that is not the one the patch was made for is skipped and named in the log.
+
 ## Launcher input
 
 Mouse, keyboard (arrows, Enter = Play, Esc = Quit, Ctrl+S = Save) and controller (D-pad or left stick, A, B, Start =
@@ -227,7 +248,7 @@ window is centred on the primary display.
 ## Logging
 
 The launcher prints `Launcher: ...` lines (shown or skipped and why, game file state and hashes, settings path, settings
-saved, install request, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`. The game window logs
+saved, install request, controller prompts installed and switched, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`. The game window logs
 `Window: display ... VSync ... frame rate in title ...`.
 
 ## Diagnostics
@@ -245,3 +266,7 @@ game file state of real folders without writing anything.
 5. Turn Frame rate in title On and play: the title shows `| FPS: ...` after about a second.
 6. Start with Show this launcher Off: the game starts directly; hold Shift while starting: the launcher opens.
 7. Navigate the launcher with the keyboard and an Xbox controller.
+8. On Controls set Controller prompts to Xbox: a progress bar runs for a few seconds, then "Controller prompts:
+   Xbox.". Play: the tutorial and menus show A/B/X/Y, LB/RB, MENU and VIEW. Set PlayStation (original): the archives
+   are back to their original size and the `.undo` files are gone. Reinstall the game with Xbox chosen: it is
+   re-applied after the install.

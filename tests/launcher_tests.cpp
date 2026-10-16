@@ -1,5 +1,6 @@
 // Focused tests for the launcher's logic: game file validation, the settings file, the Play gate, the window
-// placement and the Display options. They use synthetic files in a temporary folder; no window is opened.
+// placement, the Display options and the Controller prompts patch. They use synthetic files in a temporary folder; no
+// window is opened.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -17,11 +18,15 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
 
+#include "controller_prompts.h"
+#include "cpk_patch.h"
 #include "dcp_launcher.h"
 #include "dcp_graphics.h"
 #include "dcp_png.h"
@@ -1199,6 +1204,339 @@ void TestOptions() {
     CHECK(!KeyboardBindings().empty());
 }
 
+// ---- Controller prompts: block patches on synthetic CPK archives ----
+
+namespace cpk_test {
+
+void Be16(std::string& o, uint32_t v) { o += char(v >> 8); o += char(v); }
+void Be32(std::string& o, uint32_t v) { for (int i = 3; i >= 0; --i) o += char(v >> (8 * i)); }
+void Be64(std::string& o, uint64_t v) { for (int i = 7; i >= 0; --i) o += char(v >> (8 * i)); }
+void Le32(std::string& o, uint32_t v) { for (int i = 0; i < 4; ++i) o += char(v >> (8 * i)); }
+void Le64(std::string& o, uint64_t v) { for (int i = 0; i < 8; ++i) o += char(v >> (8 * i)); }
+
+struct Column {
+    const char* name;
+    int type;    // @UTF type: 2 u16, 4 u32, 6 u64, 0xA string
+    int storage; // 0x50 per row, 0x30 constant
+};
+struct Cell {
+    uint64_t number;
+    std::string text;
+};
+using Row = std::vector<std::pair<std::string, Cell>>;
+
+Cell N(uint64_t n) { return {n, {}}; }
+Cell S(std::string s) { return {0, std::move(s)}; }
+
+// A @UTF table packet, as scripts/prompts/cpk.py's self-test builds it.
+std::string Utf(const std::string& name, const std::vector<Column>& columns, const std::vector<Row>& rows) {
+    std::string strings("<NULL>", 7);
+    const auto intern = [&](const std::string& text) {
+        const uint32_t off = uint32_t(strings.size());
+        strings += text;
+        strings += '\0';
+        return off;
+    };
+    const auto cell = [](const Row& row, const char* key) {
+        for (const auto& [k, v] : row) {
+            if (k == key) return v;
+        }
+        return Cell{};
+    };
+    const uint32_t name_off = intern(name);
+    std::string cols;
+    for (const Column& c : columns) {
+        cols += char(c.storage | c.type);
+        Be32(cols, intern(c.name));
+        if (c.storage == 0x30) {
+            const uint64_t v = cell(rows.at(0), c.name).number;
+            if (c.type == 2) Be16(cols, uint32_t(v)); else if (c.type == 4) Be32(cols, uint32_t(v)); else Be64(cols, v);
+        }
+    }
+    std::string rowbuf;
+    uint32_t row_len = 0;
+    for (const Row& row : rows) {
+        const size_t start = rowbuf.size();
+        for (const Column& c : columns) {
+            if (c.storage != 0x50) continue;
+            const Cell v = cell(row, c.name);
+            if (c.type == 0xA) Be32(rowbuf, intern(v.text));
+            else if (c.type == 2) Be16(rowbuf, uint32_t(v.number));
+            else if (c.type == 4) Be32(rowbuf, uint32_t(v.number));
+            else Be64(rowbuf, v.number);
+        }
+        row_len = uint32_t(rowbuf.size() - start);
+    }
+    const uint32_t rows_off = 32 + uint32_t(cols.size()) - 8;
+    const uint32_t strings_off = rows_off + uint32_t(rowbuf.size());
+    std::string packet("@UTF");
+    Be32(packet, 0);
+    Be32(packet, rows_off);
+    Be32(packet, strings_off);
+    Be32(packet, strings_off + uint32_t(strings.size()));
+    Be32(packet, name_off);
+    Be16(packet, uint32_t(columns.size()));
+    Be16(packet, row_len);
+    Be32(packet, uint32_t(rows.size()));
+    packet += cols + rowbuf + strings;
+    const uint32_t size = uint32_t(packet.size() - 8);
+    for (int i = 0; i < 4; ++i) packet[4 + i] = char(size >> (8 * (3 - i)));
+    return packet;
+}
+
+// CRI's XOR, its own inverse.
+std::string Crypt(std::string packet) {
+    uint32_t m = 0x5F;
+    for (char& b : packet) {
+        b = char(uint8_t(b) ^ uint8_t(m));
+        m = (m * 0x15) & 0xFF;
+    }
+    return packet;
+}
+
+std::string Section(const char* magic, const std::string& packet) {
+    std::string out(magic, 4);
+    Le32(out, 0xFF);
+    Le64(out, packet.size());
+    return out + packet;
+}
+
+// A CRILAYLA block storing `payload` with literal bytes only: the stream is read backwards and writes the output
+// backwards, and the file's first 0x100 bytes are stored raw after it.
+std::string CrilaylaLiterals(const std::string& payload) {
+    std::string out;
+    uint64_t acc = 0;
+    int bits = 0;
+    for (size_t i = payload.size(); i > 0x100; --i) {
+        acc = (acc << 9) | uint8_t(payload[i - 1]);
+        bits += 9;
+        while (bits >= 8) {
+            bits -= 8;
+            out += char(acc >> bits);
+        }
+        acc &= (1u << bits) - 1;
+    }
+    if (bits) out += char(acc << (8 - bits));
+    std::string block("CRILAYLA");
+    Le32(block, uint32_t(payload.size() - 0x100));
+    Le32(block, uint32_t(out.size()));
+    block.append(out.rbegin(), out.rend());
+    return block + payload.substr(0, 0x100);
+}
+
+struct Entry {
+    std::string path;
+    std::string data;
+    bool compressed;
+};
+
+// A CPK with an encrypted header (EnableTocCrc on), an optionally encrypted TOC and 2 KB alignment, as the game's.
+std::string BuildCpk(const std::vector<Entry>& entries, bool encrypt_toc) {
+    const uint64_t toc_offset = 0x800, content_offset = 0x3000, align = 0x800;
+    std::string content;
+    std::vector<Row> rows;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const std::string stored = entries[i].compressed ? CrilaylaLiterals(entries[i].data) : entries[i].data;
+        while ((content_offset + content.size()) % align) content += '\0';
+        const size_t slash = entries[i].path.rfind('/');
+        rows.push_back({{"DirName", S(entries[i].path.substr(0, slash))},
+                        {"FileName", S(entries[i].path.substr(slash + 1))},
+                        {"FileSize", N(stored.size())},
+                        {"ExtractSize", N(entries[i].data.size())},
+                        {"FileOffset", N(content_offset + content.size() - toc_offset)},
+                        {"ID", N(i)},
+                        {"UserString", S("<NULL>")}});
+        content += stored;
+    }
+    std::string toc = Utf("CpkTocInfo",
+                          {{"DirName", 0xA, 0x50}, {"FileName", 0xA, 0x50}, {"FileSize", 4, 0x50}, {"ExtractSize", 4, 0x50},
+                           {"FileOffset", 6, 0x50}, {"ID", 4, 0x50}, {"UserString", 0xA, 0x50}},
+                          rows);
+    if (encrypt_toc) toc = Crypt(toc);
+    const std::string header = Utf("CpkHeader",
+                                   {{"TocOffset", 6, 0x50}, {"ContentOffset", 6, 0x50}, {"Files", 4, 0x50}, {"Align", 2, 0x50},
+                                    {"EnableTocCrc", 2, 0x50}, {"EnableFileCrc", 2, 0x50}, {"Version", 2, 0x30}},
+                                   {{{"TocOffset", N(toc_offset)}, {"ContentOffset", N(content_offset)}, {"Files", N(entries.size())},
+                                     {"Align", N(align)}, {"EnableTocCrc", N(1)}, {"EnableFileCrc", N(0)}, {"Version", N(7)}}});
+    std::string blob = Section("CPK ", Crypt(header));
+    blob.resize(toc_offset, '\0');
+    blob += Section("TOC ", toc);
+    blob.resize(content_offset, '\0');
+    return blob + content;
+}
+
+// A DCPX patch turning `before` into `after` (same size), as scripts/prompts/make_dcpx.py writes it.
+std::string MakePatch(const std::vector<std::pair<std::string, std::pair<std::string, std::string>>>& targets) {
+    std::string out("DCPX1\0\0\0", 8);
+    Le32(out, uint32_t(targets.size()));
+    for (const auto& [name, versions] : targets) {
+        const auto& [before, after] = versions;
+        std::vector<size_t> runs;
+        for (size_t i = 0; i + 16 <= before.size(); i += 16) {
+            if (before.compare(i, 16, after, i, 16) != 0) runs.push_back(i);
+        }
+        out += char(name.size() & 255);
+        out += char(name.size() >> 8);
+        out += name;
+        Le32(out, uint32_t(before.size()));
+        Le32(out, Crc32({reinterpret_cast<const uint8_t*>(before.data()), before.size()}));
+        Le32(out, Crc32({reinterpret_cast<const uint8_t*>(after.data()), after.size()}));
+        Le32(out, uint32_t(runs.size()));
+        for (const size_t off : runs) {
+            Le32(out, uint32_t(off));
+            out += after.substr(off, 16);
+        }
+    }
+    return out;
+}
+
+std::string Bytes(const std::vector<uint8_t>& v) { return std::string(v.begin(), v.end()); }
+std::span<const uint8_t> Span(const std::string& s) { return {reinterpret_cast<const uint8_t*>(s.data()), s.size()}; }
+
+} // namespace cpk_test
+
+void TestControllerPrompts(const fs::path& base) {
+    using namespace cpk_test;
+    // The setting and its labels.
+    CHECK(ParsePromptStyle("xbox") == PromptStyle::kXbox && ParsePromptStyle("playstation") == PromptStyle::kPlayStation);
+    CHECK(!ParsePromptStyle("nintendo") && std::string(PromptStyleKey(PromptStyle::kXbox)) == "xbox");
+    CHECK(IsValidSetting(kControllerPromptsKey, "xbox") && !IsValidSetting(kControllerPromptsKey, "Xbox"));
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kControllerPromptsKey && setting.default_value == kPromptsPlayStation;
+    }
+    CHECK(managed);
+
+    // The shipped patch parses and names the two button atlas packs.
+    {
+        const std::string shipped = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "prompts" / "xbox-prompts.dcpx");
+        std::string error;
+        const std::optional<BlockPatch> patch = ParseBlockPatch(Span(shipped), &error);
+        CHECK(patch && patch->targets.size() == 2);
+        if (patch) {
+            CHECK(patch->targets[0].name == "stage/Interface.ftx" && patch->targets[1].name == "stage/Interface_US.ftx");
+            CHECK(patch->targets[0].size == 31461008 && patch->targets[1].size == 35655696);
+            CHECK(patch->targets[0].runs.size() > 10000 && patch->targets[0].runs.size() == patch->targets[1].runs.size());
+        }
+        CHECK(!ParseBlockPatch(Span(shipped.substr(0, 100)), &error) && error.find("truncated") != std::string::npos);
+        CHECK(!ParseBlockPatch(Span(std::string("hello")), &error));
+    }
+
+    // Two archives holding fake button atlas packs: 20 KB of pattern, one stored raw, one CRILAYLA-compressed.
+    std::string iface(20480, '\0'), iface_us(24576, '\0');
+    for (size_t i = 0; i < iface.size(); ++i) iface[i] = char((i * 7 + i / 64) & 255);
+    for (size_t i = 0; i < iface_us.size(); ++i) iface_us[i] = char((i * 13 + i / 32) & 255);
+    std::string want = iface, want_us = iface_us;
+    for (size_t off : {0x340u, 0x1000u, 0x4ff0u}) want.replace(off, 16, 16, 'X');
+    for (size_t off : {0x380u, 0x2000u}) want_us.replace(off, 16, 16, 'Y');
+    const std::string patch_bytes = MakePatch({{"stage/Interface.ftx", {iface, want}}, {"stage/Interface_US.ftx", {iface_us, want_us}}});
+    const std::string fms = "FMSB" + std::string(600, '\0');
+    const fs::path app0 = base / "prompts_app0";
+    fs::create_directories(app0);
+    const std::string original_us = BuildCpk({{"msgsheet/x.fms", fms, true}, {"stage/Interface.ftx", iface, false},
+                                              {"stage/Interface_US.ftx", iface_us, true}}, true);
+    const std::string original = BuildCpk({{"stage/Interface.ftx", iface, true}}, false);
+    WriteAll(app0 / "DRACRO_US.CPK", original_us);
+    WriteAll(app0 / "DRACRO.CPK", original);
+    CHECK(PromptArchives(app0).size() == 2 && InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
+
+    // Reading: header, TOC (encrypted), case-insensitive lookup, CRILAYLA.
+    {
+        CpkArchive archive;
+        std::string error;
+        CHECK(archive.Open(app0 / "DRACRO_US.CPK", &error));
+        CHECK(archive.entries().size() == 3 && archive.align() == 0x800 && archive.enable_toc_crc() == 1);
+        CHECK(archive.Find("STAGE/interface_us.ftx") != nullptr && !archive.Find("stage/missing.ftx"));
+        CHECK(Bytes(archive.Read(*archive.Find("msgsheet/x.fms"))) == fms);
+        CHECK(Bytes(archive.Read(*archive.Find("stage/Interface.ftx"))) == iface);
+        CHECK(Bytes(archive.Read(*archive.Find("stage/Interface_US.ftx"))) == iface_us);
+        CHECK(archive.Find("stage/Interface_US.ftx")->size != iface_us.size()); // stored as a CRILAYLA stream
+        CHECK(archive.Find("stage/Interface.ftx")->size == iface.size() && !archive.Find("stage/Interface.ftx")->compressed());
+        CpkArchive not_cpk;
+        CHECK(!not_cpk.Open(app0 / "missing.CPK", &error));
+        WriteAll(app0 / "text.CPK", "not an archive at all, just text");
+        CHECK(!not_cpk.Open(app0 / "text.CPK", &error) && !error.empty());
+        fs::remove(app0 / "text.CPK");
+    }
+
+    // Xbox: both archives patched, entries re-read as patched, uncompressed, the CRC flag cleared, the setting
+    // file untouched (the launcher saves it).
+    std::vector<std::string> phases;
+    PatchHooks hooks;
+    hooks.phase = [&phases](const char* text) { phases.emplace_back(text); };
+    PromptsResult r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes), hooks);
+    CHECK(r.ok && !r.cancelled);
+    CHECK(InstalledPromptStyle(app0) == PromptStyle::kXbox);
+    CHECK(fs::exists(UndoPath(app0 / "DRACRO_US.CPK")) && fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+    CHECK(!phases.empty() && phases[0] == "Patching DRACRO_US.CPK...");
+    {
+        CpkArchive archive;
+        CHECK(archive.Open(app0 / "DRACRO_US.CPK"));
+        CHECK(archive.enable_toc_crc() == 0);
+        CHECK(Bytes(archive.Read(*archive.Find("stage/Interface.ftx"))) == want);
+        CHECK(Bytes(archive.Read(*archive.Find("stage/Interface_US.ftx"))) == want_us);
+        CHECK(Bytes(archive.Read(*archive.Find("msgsheet/x.fms"))) == fms);
+        CHECK(archive.Find("stage/Interface_US.ftx")->size == want_us.size() && !archive.Find("stage/Interface_US.ftx")->compressed());
+        CHECK(archive.Find("stage/Interface_US.ftx")->offset >= original_us.size());
+        CHECK(archive.Find("stage/Interface_US.ftx")->offset % 0x800 == 0);
+        CpkArchive other;
+        CHECK(other.Open(app0 / "DRACRO.CPK") && Bytes(other.Read(*other.Find("stage/Interface.ftx"))) == want);
+        // the original data is still there, untouched, before the appended copies
+        CHECK(ReadAll(app0 / "DRACRO_US.CPK").compare(0x3000, original_us.size() - 0x3000, original_us, 0x3000, std::string::npos) == 0);
+    }
+    // Choosing Xbox again changes nothing.
+    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes));
+    CHECK(r.ok && r.detail.find("already patched") != std::string::npos);
+    const auto aligned = [](size_t n) { return (n + 0x7FF) / 0x800 * 0x800; };
+    CHECK(fs::file_size(app0 / "DRACRO_US.CPK") == aligned(aligned(original_us.size()) + iface.size()) + iface_us.size());
+
+    // PlayStation: byte-identical archives, undo records gone.
+    r = SetPromptStyle(app0, PromptStyle::kPlayStation, {});
+    CHECK(r.ok);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && ReadAll(app0 / "DRACRO.CPK") == original);
+    CHECK(InstalledPromptStyle(app0) == PromptStyle::kPlayStation && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+    r = SetPromptStyle(app0, PromptStyle::kPlayStation, {});
+    CHECK(r.ok && r.detail.find("not patched") != std::string::npos);
+
+    // A half-patched install reads as PlayStation; Xbox completes it, PlayStation cleans it up.
+    CHECK(ApplyBlockPatch(app0 / "DRACRO.CPK", *ParseBlockPatch(Span(patch_bytes))).ok);
+    CHECK(InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
+    CHECK(SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes)).ok && InstalledPromptStyle(app0) == PromptStyle::kXbox);
+    CHECK(SetPromptStyle(app0, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
+
+    // Cancelling while writing leaves the archive as it was.
+    hooks.phase = nullptr;
+    hooks.progress = [](uint64_t, uint64_t) { return false; };
+    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes), hooks);
+    CHECK(!r.ok && r.cancelled);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
+
+    // An archive whose entry is not the file the patch was made for is skipped and named; others are patched.
+    std::string foreign = iface;
+    foreign[0x2000] = char(foreign[0x2000] + 1);
+    WriteAll(app0 / "DRACRO.CPK", BuildCpk({{"stage/Interface.ftx", foreign, false}}, false));
+    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes));
+    CHECK(r.ok && r.detail.find("stage/Interface.ftx is not the file the patch was made for") != std::string::npos);
+    CHECK(InstalledPromptStyle(app0) == PromptStyle::kPlayStation); // DRACRO.CPK stayed original: no undo record
+    CHECK(ArchiveState(app0 / "DRACRO_US.CPK") == ArchivePatchState::kPatched);
+    CHECK(SetPromptStyle(app0, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+
+    // An unreadable patch is refused before anything is touched; a folder without archives too.
+    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(std::string("DCPX1")));
+    CHECK(!r.ok && r.detail.find("unreadable") != std::string::npos && InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
+    CHECK(!SetPromptStyle(base / "nowhere", PromptStyle::kXbox, Span(patch_bytes)).ok);
+    CHECK(PromptArchives(base / "nowhere").empty() && InstalledPromptStyle(base / "nowhere") == PromptStyle::kPlayStation);
+
+    // CRILAYLA: a corrupt block is an error, not a crash.
+    {
+        std::string block = CrilaylaLiterals(iface);
+        block.resize(block.size() - 0x100 - 10);
+        std::string error;
+        CHECK(CrilaylaDecompress(Span(block), &error).empty() && !error.empty());
+        CHECK(CrilaylaDecompress(Span(std::string("CRILAYLA")), &error).empty());
+    }
+}
+
 } // namespace
 
 void TestFileBrowser(const fs::path& base) {
@@ -1295,6 +1633,7 @@ int main(int argc, char** argv) {
     TestPlacement();
     TestOptions();
     TestFileBrowser(base);
+    TestControllerPrompts(base);
 
     std::error_code ec;
     fs::remove_all(base, ec);
