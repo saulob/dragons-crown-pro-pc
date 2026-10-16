@@ -157,8 +157,10 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   offers the same two.
 - **Window size**: 1280 × 720, 1600 × 900, 1920 × 1080 (the game's own size), 2560 × 1440, 3840 × 2160, in pixels, listed
   when they fit the selected monitor's usable area with the title bar; the current value is always listed. A size that
-  does not fit when the game opens is reduced keeping its shape. The picture is always 16:9 and letterboxed, so there is
-  no aspect option.
+  does not fit when the game opens is reduced keeping its shape, so that the whole window, title bar included, takes at
+  most 80% of the monitor's usable area, and the window opens centred there. This is applied at start only: the saved
+  Window size is not changed, and a window you resize afterwards is left alone. The picture is always 16:9 and
+  letterboxed, so there is no aspect option.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -169,6 +171,8 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 - **VSync**: On is FIFO (the stable default). Off uses Mailbox, else Immediate.
 - **F11** in the game switches Windowed and Borderless Fullscreen at once and saves the Display mode. In the launcher it
   switches the launcher's own fullscreen, saved in `launcher_fullscreen`, and never changes the Display mode.
+- **Mouse cursor**: in the game's Borderless Fullscreen the cursor hides after 5 seconds without mouse movement and comes back
+  when the mouse moves, when the game window loses focus, in Windowed mode and while the in-game menu is open.
 
 Scaling and sharpening, below those on the Display page, are what the presenter already supports: **Upscaling** (AMD
 FSR 1, off by default) enlarges the game's picture (the render resolution) in a bigger window; **Sharpening** (AMD

@@ -75,7 +75,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dcp-loader)
-((test)) && targets+=(dcp-launcher-tests dcp-cheats-tests dcp-runtime-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-cheats-tests dcp-runtime-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dcp-loader
 [[ -x $loader ]] || die "Missing $loader"
@@ -91,6 +91,8 @@ if ((test)); then
     "$build_dir/bin/dcp-text-tests"
     step 'Running the cursor auto-hide tests'
     "$build_dir/bin/dcp-cursor-tests"
+    step 'Running the window fit tests'
+    "$build_dir/bin/dcp-window-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'
     "$build_dir/bin/dcp-tiling-tests"
 fi

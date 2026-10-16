@@ -89,7 +89,7 @@ Without any `libvulkan.so.1` it cannot start at all.
 the build needs. The package contains no game files, no drivers and no local paths (`package-linux.sh`
 checks the staged folder before it writes the AppImage).
 
-## Verified without Linux hardware
+## Verification
 
 Everything below ran on Ubuntu 24.04 (WSL2) with Xvfb and Mesa's software Vulkan driver (llvmpipe), against the real
 package:
@@ -106,8 +106,12 @@ package:
 - the launcher's own file chooser installing the package, Shift at start on an X11 server, and the launcher on WSLg's
   Wayland compositor.
 
-Not verified: a real GPU (RADV on the Steam Deck, NVIDIA, Intel), a real Wayland desktop, gamepads, gamescope / Gaming
-Mode, longer play, performance. Those need a real Linux PC or Steam Deck.
+Reported by community testers (issue #5): Bazzite with KDE Plasma on Wayland and an AMD Radeon RX 9070 XT (RADV), 4K
+borderless fullscreen, and a Steam Deck LCD. Without a graphical session (`DISPLAY` and `WAYLAND_DISPLAY` both unset, or
+the window cannot be created) the game prints the SDL error and exits with status 1 before Vulkan starts.
+
+Not verified: NVIDIA and Intel GPUs, other distributions, the Steam Deck OLED, gamescope / Gaming Mode, longer play,
+performance.
 
 Known validation-layer findings, shared with Windows and upstream shadPS4: images of 4,194,304 texels or more (a
 2048×2048 texture) are detiled with one compute dispatch of more than 65535 workgroups
