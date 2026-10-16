@@ -27,6 +27,7 @@ constexpr ManagedSetting kManagedSettings[] = {
     {kGraphicsCardKey, kAutomaticGpu},
     {kAntiAliasingKey, "0"},
     {kAnisotropyKey, "0"},
+    {kTextLanguageKey, "english"},
     {kShowFpsTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
     {kLauncherXKey, ""},
@@ -60,11 +61,24 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (key == kAnisotropyKey) {
         return one_of({"0", "2", "4", "8", "16"});
     }
+    if (key == kTextLanguageKey) {
+        return std::any_of(std::begin(kTextLanguages), std::end(kTextLanguages),
+                           [&](const TextLanguage& language) { return value == language.key; });
+    }
     if (key == kRenderResolutionKey) {
         return std::any_of(std::begin(dcp_resolutions), std::end(dcp_resolutions),
                            [&](const DcpResolution& resolution) { return value == resolution.key; });
     }
     return true;
+}
+
+int TextLanguageId(std::string_view key) {
+    for (const TextLanguage& language : kTextLanguages) {
+        if (language.key == key) {
+            return language.ps4_id;
+        }
+    }
+    return kTextLanguages[0].ps4_id;
 }
 
 bool IsLauncherPlacementSetting(std::string_view key) {
@@ -165,4 +179,10 @@ extern "C" int dcp_render_resolution(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return dcp_resolution_index(settings.Get(kRenderResolutionKey, kNativeResolution).c_str());
+}
+
+extern "C" int dcp_text_language(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return TextLanguageId(settings.Get(kTextLanguageKey, kTextLanguages[0].key));
 }

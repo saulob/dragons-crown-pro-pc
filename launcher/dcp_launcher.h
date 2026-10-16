@@ -47,6 +47,10 @@ int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
  * file or the value is missing. */
 int dcp_render_resolution(const char *settings_file);
 
+/* The system language the game is told for the text_language in the settings file; 1 (English) when the file or the
+ * value is missing. */
+int dcp_text_language(const char *settings_file);
+
 /* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
  * usable Vulkan on Linux); enumerates only, no device is created. */
 int dcp_gpu_names(char (*names)[256], int max);

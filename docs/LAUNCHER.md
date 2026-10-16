@@ -197,6 +197,9 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
 
 ## Gameplay
 
+- **Menu & Subtitles**: the language of the game's menus and subtitle text (`text_language`: `english`, `french`,
+  `german`, `italian`, `spanish`; English by default). The game ships text for these five. An explicit `DCP_LANGUAGE`
+  environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
 - **Frame counter**: the video core's corner readout (`show_fps`).

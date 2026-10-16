@@ -866,6 +866,41 @@ bool WrittenValue(const std::string& text, const std::string& key, const std::st
     return text.find(key + "=" + value) != std::string::npos || text.find(key + " = " + value) != std::string::npos;
 }
 
+void TestTextLanguage(const fs::path& base) {
+    const fs::path file = base / "language" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    CHECK(dcp_text_language(file.string().c_str()) == 1); // no file: English
+    CHECK(dcp_text_language(nullptr) == 1);
+
+    struct Expected { const char* key; int id; };
+    const Expected expected[] = {{"english", 1}, {"french", 2}, {"german", 4}, {"italian", 5}, {"spanish", 3}};
+    CHECK(std::size(kTextLanguages) == std::size(expected));
+    for (size_t i = 0; i < std::size(expected); ++i) {
+        CHECK(kTextLanguages[i].key == expected[i].key); // launcher order
+        CHECK(TextLanguageId(expected[i].key) == expected[i].id);
+        LauncherSettings settings(file);
+        settings.Set(kTextLanguageKey, expected[i].key);
+        CHECK(settings.Save());
+        CHECK(WrittenValue(ReadAll(file), "text_language", expected[i].key));
+        CHECK(dcp_text_language(file.string().c_str()) == expected[i].id);
+    }
+    CHECK(kTextLanguages[0].name == "English" && kTextLanguages[4].name == "Spanish");
+
+    for (const char* unlisted : {"English", "japanese", "fr", "2", ""}) {
+        CHECK(TextLanguageId(unlisted) == 1);
+        WriteAll(file, std::string("text_language=") + unlisted + "\n");
+        CHECK(dcp_text_language(file.string().c_str()) == 1);
+    }
+    WriteAll(file, "show_fps=1\n"); // an existing file without the key
+    CHECK(dcp_text_language(file.string().c_str()) == 1);
+    CHECK(IsValidSetting(kTextLanguageKey, "german") && !IsValidSetting(kTextLanguageKey, "japanese"));
+
+    LauncherSettings settings(file);
+    settings.ResetToDefaults();
+    CHECK(settings.Save());
+    CHECK(WrittenValue(ReadAll(file), "text_language", "english"));
+}
+
 void TestRenderResolution(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "render" / "dcp.ini";
@@ -1252,6 +1287,7 @@ int main(int argc, char** argv) {
     TestVideoCoreSettings(base);
     TestDefaultsAgree();
     TestRenderResolution(base);
+    TestTextLanguage(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
     TestLauncherWanted();

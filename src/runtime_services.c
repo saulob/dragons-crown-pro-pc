@@ -72,11 +72,13 @@ static ABI int32_t user_event(int32_t *event) {
 }
 
 /* ---- SystemService ---- */
-static int language(void) { const char *v=getenv("DCP_LANGUAGE"); return v ? atoi(v) : 1; }
+static int launcher_language=1;
+void runtime_set_language(int ps4_language) { launcher_language=ps4_language; }
+static int language(void) { const char *v=getenv("DCP_LANGUAGE"); return v ? atoi(v) : launcher_language; }
 static ABI int32_t system_param(int32_t id,int32_t *value) {
     if (!value) return SYSTEM_PARAMETER;
     switch (id) {
-    case 1: *value=language(); break;           /* language (1 = English US, 8 = Russian) */
+    case 1: *value=language(); break;           /* language (1 = English US) */
     case 2: *value=1; break;                    /* date format DD/MM/YYYY */
     case 3: *value=1; break;                    /* 24-hour clock */
 #ifdef _WIN32

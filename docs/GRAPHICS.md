@@ -73,7 +73,7 @@ The PS4 runtime's own environment variables, for testing and diagnosis:
 
 | Variable | Effect |
 |---|---|
-| `DCP_LANGUAGE` | System language number reported to the game (default 1, English) |
+| `DCP_LANGUAGE` | System language number reported to the game (default 1, English); overrides the launcher's Menu & Subtitles |
 | `DCP_USER_NAME` | Player name reported to the game (default `Player`) |
 | `DCP_KEY_MAP`, `DCP_PAD_MAP` | Keyboard or controller button remap, e.g. `cross=Q,square=Left Shift` (`runtime_pad.c`) |
 | `DCP_PAD_FILE`, `DCP_PAD_RECORD`, `DCP_PAD_REPLAY` | Scripted input, F9 recording and replay for automated runs |

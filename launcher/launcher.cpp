@@ -76,6 +76,7 @@ constexpr char kAntiAliasingHelp[] =
     "SMAA smooths jagged edges on the finished picture, at a small cost in performance.";
 constexpr char kAnisotropyHelp[] =
     "Sharper textures on floors and walls seen at an angle. Game uses the game's own filtering.";
+constexpr char kTextLanguageHelp[] = "Language used by game menus and subtitles.";
 constexpr char kShowFpsTitleHelp[] = "Shows the frame rate in the window title: Dragon's Crown Pro | FPS: 60.00";
 constexpr char kFrameCounterHelp[] = "Shows the frame rate and frame time in a corner of the game.";
 
@@ -549,6 +550,11 @@ private:
     }
 
     void PageGameplay(trg::Ui& ui) {
+        std::vector<trg::Option> languages;
+        for (const TextLanguage& language : kTextLanguages) {
+            languages.push_back({std::string(language.key), std::string(language.name)});
+        }
+        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, kTextLanguages[0].key.data(), languages);
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
         ui.EndRows();
