@@ -94,6 +94,16 @@ void GUEST_HOOK_ABI ArrowHook(GuestRegs* regs) {
     regs->rsi = static_cast<uint32_t>(ProtectedArrowAmount(true, UnitKind::PlayerOne, true, static_cast<int32_t>(regs->rsi)));
 }
 
+// Before the return of the experience-gain function (rax = the experience this call gains, int64). The stage result
+// and the result screen's display both come through here, so the display shows the multiplied gain too.
+void GUEST_HOOK_ABI ExperienceHook(GuestRegs* regs) {
+    const int multiplier = runtime_cheat_experience_multiplier();
+    if (multiplier == kExperienceMultiplierOff) {
+        return;
+    }
+    regs->rax = static_cast<uint64_t>(MultipliedExperience(multiplier, static_cast<int64_t>(regs->rax)));
+}
+
 // In the pad-driven walk, once its speed multiplier is final (the unit is at [rbp-0x80], the float at [rbp-0x48]).
 void GUEST_HOOK_ABI MovementHook(GuestRegs* regs) {
     if (!Enabled(Cheat::MovementSpeed)) {
@@ -217,15 +227,35 @@ void ApplyAddGold(uint64_t unit) {
 
 } // namespace
 
+namespace {
+
+// Holds Player 1's Elf at the held arrow count while Infinite Arrows is On. The shot hook already keeps a shot from
+// taking arrows, so this only puts back what other code changed.
+void HoldArrows(uint64_t unit) {
+    const HostMemory memory;
+    const uint64_t owner = memory.U64(unit + kUnitOwnerOffset);
+    const int32_t count = memory.S32(owner + kArrowCountOffset);
+    const int32_t held = HeldArrowCount(true, UnitKind::PlayerOne, IsElf(memory, owner), count);
+    if (held != count) {
+        std::memcpy(reinterpret_cast<void*>(static_cast<uintptr_t>(owner + kArrowCountOffset)), &held, sizeof(held));
+    }
+}
+
+} // namespace
+
 // At the entry of the player unit's per-tick update (rdi = the unit). Only players' units have this method.
 void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
     const unsigned refills = runtime_cheat_refills_pending();
     const bool add_gold = runtime_cheat_action_pending(static_cast<int>(Action::AddGold)) != 0;
-    if (refills == 0 && !add_gold) {
+    const bool arrows = Enabled(Cheat::InfiniteArrows);
+    if (refills == 0 && !add_gold && !arrows) {
         return;
     }
     if (Classify(regs->rdi) != UnitKind::PlayerOne) {
         return;
+    }
+    if (arrows) {
+        HoldArrows(regs->rdi);
     }
     if ((refills & (Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteMana))) != 0) {
         ApplyRefills(regs->rdi, refills);
@@ -259,6 +289,7 @@ std::span<const GuestHook> Hooks() {
         {"gold list", 0x4953cd, 7, {0x41, 0x89, 0x96, 0x38, 0xf2, 0x0a, 0x00}, GoldStoreHook<&GuestRegs::r14, &GuestRegs::rdx>},
         {"gold list 2", 0x49562d, 7, {0x41, 0x89, 0xb6, 0x38, 0xf2, 0x0a, 0x00}, GoldStoreHook<&GuestRegs::r14, &GuestRegs::rsi>},
         {"gold equip", 0x4cc47a, 6, {0x89, 0x82, 0x38, 0xf2, 0x0a, 0x00}, GoldStoreHook<&GuestRegs::rdx, &GuestRegs::rax>},
+        {"experience", 0x27511, 7, {0x48, 0x83, 0xc4, 0x08, 0x5b, 0x41, 0x5c}, ExperienceHook},
     };
     return hooks;
 }

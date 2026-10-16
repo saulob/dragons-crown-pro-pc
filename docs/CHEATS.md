@@ -1,6 +1,6 @@
 # Cheats
 
-Eight optional cheats, in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**. All default to Off and apply to Player 1 (Infinite Gold to the whole save, see below). The launcher page and the in-game menu are described in [LAUNCHER.md](LAUNCHER.md). They are meant for offline and local play. Nothing switches them off automatically for an online session: the port has no online play and no way to detect one, so `OnlineSessionActive()` in `src/runtime_cheats.cpp` always returns false. It is the one place where such a check would go.
+Eight optional cheats, in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**. All default to Off and apply to Player 1 (Infinite Gold to the whole save, see below). **Experience Multiplier** is a setting of its own, Off, 2x, 5x or 10x, and applies to every player's experience (see below). The launcher page and the in-game menu are described in [LAUNCHER.md](LAUNCHER.md). They are meant for offline and local play. Nothing switches them off automatically for an online session: the port has no online play and no way to detect one, so `OnlineSessionActive()` in `src/runtime_cheats.cpp` always returns false. It is the one place where such a check would go.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ Eight optional cheats, in this order: **Infinite Health**, **Infinite Mana**, **
 
 ## The F10 menu
 
-F10 opens and closes it over the game; it lists the eight cheats and the **Add 1,000 Gold** action (right below Infinite Gold) and scrolls with the selection if the screen is too short; Up and Down (or the D-pad, or the left stick) move, Enter or A toggles a cheat or runs the action once without closing the menu, F10, Escape or B close. The panel is the display's content scale a step down (0.75x, at least 1.25x), and no more than 45% of the screen's width. It is drawn by the overlay the Insert menu already uses, in the top right corner, with the launcher's gold (`src/dcp_accent.h`).
+F10 opens and closes it over the game; it lists the eight cheats, the **Add 1,000 Gold** action (right below Infinite Gold) and, last, the **Experience Multiplier** row, and scrolls with the selection if the screen is too short; Up and Down (or the D-pad, or the left stick) move, Enter or A toggles a cheat, moves the Experience Multiplier to its next value or runs the action once without closing the menu, F10, Escape or B close. The panel is the display's content scale a step down (0.75x, at least 1.25x), and no more than 45% of the screen's width. It is drawn by the overlay the Insert menu already uses, in the top right corner, with the launcher's gold (`src/dcp_accent.h`).
 
 While it is open the runtime reads neutral input for every pad and the keyboard (`dcpgpu_overlay_captures_input`). Closing starts a release gate: the menu waits until what was pressed in it is released (one second at most), and `runtime_pad.c` keeps hiding any button still held until it is released, so the closing press never reaches the game. F10 does nothing while the Insert menu, a game dialog or the start-up loading screen is shown; the menu does not exist before the game window.
 
@@ -40,7 +40,8 @@ All offsets are image offsets, the same as the eboot offsets cheat tools use. Ev
 | Skill Points | `0x537e8a`, in `BuySkill`, before the points are stored | `66 44 89 ab c8 00 00 00` | The stored points stay at what Player 1 had |
 | Gold | ten stores `mov [base+0xaf238], reg` (`0x52e0b3` shop, `0x43d562` continue, `0x3bc693`, `0x3bff22`, `0x3c2420`, `0x3c3b82`, `0x3c40da`, `0x4953cd`, `0x49562d`, `0x4cc47a`) | the store itself, 6 to 8 bytes | A store that would lower gold keeps the old value |
 | Movement Speed 2x | `0x2ecd0a`, in the pad-driven walk `0x2ec9d0` | `48 8b 5d 80 48 8b 03` | Doubles the walk's speed multiplier (a float at `[rbp-0x48]`) for Player 1 |
-| Refill, Add 1,000 Gold | `0x2ea420`, entry of the player unit's per-tick update | `55 48 89 e5 41 57` | Applies a pending Health or Mana refill and a pending Add 1,000 Gold to Player 1's unit |
+| Refill, Add 1,000 Gold, Arrows | `0x2ea420`, entry of the player unit's per-tick update | `55 48 89 e5 41 57` | Applies a pending Health or Mana refill and a pending Add 1,000 Gold to Player 1's unit; holds Player 1's Elf at 10 arrows while Infinite Arrows is On |
+| Experience | `0x27511`, the return of the experience-gain function `0x27430` | `48 83 c4 08 5b 41 5c` | The gain (rax) is multiplied by 2, 5 or 10 for every award; see Experience Multiplier |
 
 ### Infinite Health
 
@@ -68,6 +69,8 @@ Turning it On also restores Player 1's worn gear once, for free. On the player t
 
 The Elf's arrow count is an int at owner `+0x3ad4` (maximum at `+0x3ad8`) and falls in one function, `ConsumeArrow`, reached from the Elf's shot event only (species 8). The hook sets the amount to 0 for Player 1's Elf, so the count is unchanged and the shot goes out. `AddArrows` (pickups) is a different function. The other classes use the same fields for something else and never reach it.
 
+While Infinite Arrows is On, the player tick holds Player 1's Elf at 10: the count is set to 10 at the next tick, so enabling it takes effect at once, and it is set back to 10 whenever it differs, so a pickup does not stay above 10. Turning it Off stops the hold and leaves the count as it is. `ConsumeArrow` also caps the count at the maximum (`+0x3ad8`) after a shot, so the hold of 10 assumes that maximum is at least 10; the Elf's maximum was not checked in play.
+
 ### Infinite Skill Points
 
 Skill points are an int16 at `+0x24` of the player's save record (record 0 is Player 1). Only the skill menu's purchase (`BuySkill`) subtracts the cost; earning at the stage result and the refund of Reset skills are other code. The hook writes back the points Player 1 had, for the record and for the unit's mirror at `+0xc8`. The game's own checks still apply (level, prerequisites, maximum level, enough points to afford the skill: with fewer points than the cost the purchase is still refused).
@@ -79,6 +82,14 @@ Gold is a single value for the whole save (`[saveData+0xaf238]`, at most 99,999,
 ### Add 1,000 Gold
 
 A one-shot action of the F10 menu, not a cheat: it has no Off / On, no launcher entry and no saved setting. Each press files one request (`ActionRequests`); the player tick hook runs it on the game thread for Player 1's unit, asking the game for its own `GetGold` (`0x43d460`) and `AddGold` (`0x43d490`) with the object the continue payment uses (`unit->vtable[+0xd0]()` then `+0x88`). `AddGold` clamps to the game's maximum, 99,999,999, and keeps the per-player gold counters; when the gold is within 1,000 of it only what fits is added, and at the maximum the game is not called. It changes the running game's gold, not the save file, and Dragon's Crown saves it as it saves any gold. One physical press is one addition: ImGui's activation fires on the press only, so a held Enter or A does not repeat; requests that were not run when the menu closes are dropped.
+
+### Experience Multiplier
+
+The launcher's Cheats page has an **Experience Multiplier** combo (Off, 2x, 5x, 10x), saved as `cheat_experience_multiplier` with the values 1, 2, 5 or 10; a missing or other value is Off. It is a setting, not a cheat: F10 moves it to the next value for the session, and the saved value starts each session.
+
+The award is the function at `0x27430`, which computes the experience one player's stage result gains (the score fields and a base score, with a bonus and a rate) and returns it as an int64 in `rax`. The four per-player blocks of the CALCSCORETOEXP case of the server command dispatch add it to the character's total (a 32-bit field at character record `+0xa8`, clamped to the class's maximum after the add), and the result screen calls the same function to show the gain. The hook sits at the function's only return, so the total, the level and the displayed gain all follow the multiplied value. Each call is multiplied once and nothing is kept between calls; a zero or negative gain is left alone, and a product above the int32 maximum stops at that maximum.
+
+The scope is the function's: every player the dispatch case awards (Players 1 to 4 in local play), not only Player 1. Enemy kills and treasure give score, which the stage result converts; that comes from the static reading and the real game test should confirm it.
 
 ### Movement Speed 2x
 
@@ -94,4 +105,4 @@ A unit belongs to a human player when its owner's category word (owner `+0x2a0c`
 
 ## Not covered
 
-Pits and scripted kills that set HP directly, damage that arrives through the replicated hit packet instead of `0xd8360`, whether slot 0 is always the player on the first pad, jump and air speed, dashes under Movement Speed 2x, and whether any scripted path lowers lives, durability or arrows without the hooked code were not proved statically; they are what the real-game test should watch.
+Pits and scripted kills that set HP directly, damage that arrives through the replicated hit packet instead of `0xd8360`, whether slot 0 is always the player on the first pad, jump and air speed, dashes under Movement Speed 2x, and whether any scripted path lowers lives, durability or arrows without the hooked code were not proved statically; they are what the real-game test should watch. For the Experience Multiplier: whether the stage result is the only path that gives a player experience (quest rewards were not checked, and the `UPDATE_THEIF_EXP` message, whose name suggests the thief NPC, is left alone), whether the award runs once per stage in play, and whether the result screen shows the multiplied gain.

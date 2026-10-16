@@ -464,11 +464,15 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     const float pad = ImGui::GetFontSize() * 0.4f;
     const float y = min.y + (height - ImGui::GetFontSize()) * 0.5f;
     const bool action = row.kind == dcp::cheats::RowKind::Action;
-    const bool on = !action && runtime_cheat_enabled(int(row.cheat)) != 0;
-    const char* state = action ? row.verb : (on ? "On" : "Off");
+    const bool experience = row.kind == dcp::cheats::RowKind::Experience;
+    const int multiplier = experience ? runtime_cheat_experience_multiplier() : dcp::cheats::kExperienceMultiplierOff;
+    const bool on = row.kind == dcp::cheats::RowKind::Toggle && runtime_cheat_enabled(int(row.cheat)) != 0;
+    const char* state = action ? row.verb
+                        : experience ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
+                        : (on ? "On" : "Off");
+    const bool lit = action || on || multiplier != dcp::cheats::kExperienceMultiplierOff;
     draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
-    draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y),
-                  ImGui::GetColorU32(action || on ? accent : dim), state);
+    draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y), ImGui::GetColorU32(lit ? accent : dim), state);
     ImGui::PopID();
     if (!pressed) {
         return;
@@ -476,6 +480,9 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     if (action) {
         runtime_cheat_action(int(row.action));
         std::printf("Cheats: %s requested\n", row.label);
+    } else if (experience) {
+        std::printf("Cheats: %s %s (this session)\n", row.label,
+                    dcp::cheats::ExperienceMultiplierLabel(runtime_cheat_experience_cycle()));
     } else {
         runtime_cheat_toggle(int(row.cheat));
         std::printf("Cheats: %s %s (this session)\n", row.label, runtime_cheat_enabled(int(row.cheat)) ? "On" : "Off");

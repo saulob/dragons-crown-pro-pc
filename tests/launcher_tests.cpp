@@ -964,6 +964,15 @@ void TestCheatSettings(const fs::path& base) {
     }
     CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
 
+    // Experience Multiplier: the saved value is the multiplier; a value that is not listed is Off.
+    CHECK(launcher_default(cheats::kExperienceMultiplierKey) == "1");
+    CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_experience_multiplier=5\n");
+    CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 5);
+    WriteAll(file, "cheat_experience_multiplier=7\n");
+    CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 1);
+    CHECK(dcp_saved_experience_multiplier(nullptr) == 1);
+
     // The in-game menu never writes them: the video core's settings file code has no cheat key.
     CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp").find("cheat") == std::string::npos);
 }

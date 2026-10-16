@@ -9,9 +9,15 @@
 extern "C" {
 #endif
 
-/* Called once, after the launcher: `saved_mask` is dcp_saved_cheats(), the start of this game session. Starting
- * clears every override the menu made. */
-void runtime_cheats_start(unsigned saved_mask);
+/* Called once, after the launcher: `saved_mask` is dcp_saved_cheats() and `experience_multiplier` is
+ * dcp_saved_experience_multiplier(), the start of this game session. Starting clears every override the menu made. */
+void runtime_cheats_start(unsigned saved_mask, int experience_multiplier);
+
+/* The Experience Multiplier this session (1 = Off, 2, 5 or 10): the saved value, or the menu's change of it. */
+int runtime_cheat_experience_multiplier(void);
+
+/* The F10 menu's Experience Multiplier: moves to the next value for this session and returns it. */
+int runtime_cheat_experience_cycle(void);
 
 /* 1 when the cheat (a dcp::cheats::Cheat value) is on: the saved value, or the menu's override of it this session. */
 int runtime_cheat_enabled(int cheat);

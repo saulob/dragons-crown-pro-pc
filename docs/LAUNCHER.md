@@ -139,6 +139,7 @@ use the same defaults).
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
 | `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
+| `cheat_experience_multiplier` | 1 (Off), 2, 5, 10 | 1 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
 | `menu_tab` | 0 (Image), 1 (Overlay) | 0 | the in-game menu's last tab |
 | `launcher_x`, `_y`, `_width`, `_height`, `_maximized`, `_fullscreen` | | | launcher window only |
@@ -217,7 +218,7 @@ line "Press F10 while playing to open the Cheats menu. Changes made there apply 
 offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
 Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**, each with its one-line description
-(`src/dcp_cheats.h`). All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
+(`src/dcp_cheats.h`), and below them the **Experience Multiplier** combo (Off, 2x, 5x, 10x). All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
 settings puts them back to Off. The saved values are the start of every game session; the F10 menu changes the running
 session only and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
@@ -232,7 +233,7 @@ A gamepad that is found takes the lowest free slot and logs its user in once; th
 `LOGIN` event. The keyboard, `DCP_PAD_FILE`, pad recording and replay and the save list's controls belong to Player 1
 only. Unplugging a gamepad closes it and frees its slot, but no `LOGOUT` is sent: the player stays logged in, and the
 next gamepad connected takes the lowest free slot, which is not necessarily the same player. A fifth gamepad is ignored.
-The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted); see [CHEATS.md](CHEATS.md).
+The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted). The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
 atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port

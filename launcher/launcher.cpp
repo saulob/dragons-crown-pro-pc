@@ -593,6 +593,12 @@ private:
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
             ui.Toggle(cheat.label, cheat.description, cheat.key, cheats::kCheatDefault, "Off", "On");
         }
+        std::vector<trg::Option> experience;
+        for (const cheats::ExperienceChoice& choice : cheats::kExperienceChoices) {
+            experience.push_back({choice.saved, choice.label});
+        }
+        ui.Combo(cheats::kExperienceMultiplierName, cheats::kExperienceMultiplierHelp, cheats::kExperienceMultiplierKey,
+                 "1", experience);
         ui.EndRows();
     }
 

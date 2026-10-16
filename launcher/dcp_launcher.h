@@ -54,6 +54,10 @@ int dcp_text_language(const char *settings_file);
 /* The cheats the settings file turns on, one bit per cheat (dcp_cheats.h); 0 when the file or the keys are missing. */
 unsigned dcp_saved_cheats(const char *settings_file);
 
+/* The Experience Multiplier the settings file sets (1 = Off, 2, 5 or 10); Off when the file or the value is missing or not
+ * one of those. */
+int dcp_saved_experience_multiplier(const char *settings_file);
+
 /* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
  * usable Vulkan on Linux); enumerates only, no device is created. */
 int dcp_gpu_names(char (*names)[256], int max);

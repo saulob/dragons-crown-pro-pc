@@ -11,7 +11,9 @@ using dcp::cheats::Cheat;
 dcp::cheats::SessionCheats g_session;
 dcp::cheats::RefillRequests g_refills;
 dcp::cheats::ActionRequests g_actions;
+dcp::cheats::SessionExperience g_experience;
 std::atomic<unsigned> g_saved{0};
+std::atomic<int> g_saved_experience{dcp::cheats::kExperienceMultiplierOff};
 
 bool Valid(int cheat) {
     return cheat >= 0 && static_cast<size_t>(cheat) < dcp::cheats::kCheatCount;
@@ -32,16 +34,32 @@ bool OnlineSessionActive() {
 
 } // namespace
 
-extern "C" void runtime_cheats_start(unsigned saved_mask) {
+extern "C" void runtime_cheats_start(unsigned saved_mask, int experience_multiplier) {
     g_session.Reset();
+    g_experience.Reset();
     g_refills.Clear();
     g_actions.Clear();
     g_saved.store(saved_mask, std::memory_order_relaxed);
+    g_saved_experience.store(dcp::cheats::ListedExperienceMultiplier(experience_multiplier), std::memory_order_relaxed);
     for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
         if (dcp::cheats::RefillsOnEnable(info.cheat) && (saved_mask & dcp::cheats::Bit(info.cheat)) != 0) {
             g_refills.Request(info.cheat);
         }
     }
+}
+
+extern "C" int runtime_cheat_experience_multiplier(void) {
+    if (OnlineSessionActive()) {
+        return dcp::cheats::kExperienceMultiplierOff;
+    }
+    return g_experience.Effective(g_saved_experience.load(std::memory_order_relaxed));
+}
+
+extern "C" int runtime_cheat_experience_cycle(void) {
+    if (OnlineSessionActive()) {
+        return dcp::cheats::kExperienceMultiplierOff;
+    }
+    return g_experience.Cycle(g_saved_experience.load(std::memory_order_relaxed));
 }
 
 extern "C" int runtime_cheat_enabled(int cheat) {

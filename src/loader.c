@@ -411,7 +411,7 @@ int main(int argc, char **argv) {
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file)];
     runtime_dcp_set_neo_mode(render_resolution->pro_memory);
     runtime_set_language(dcp_text_language(settings_file));
-    runtime_cheats_start(dcp_saved_cheats(settings_file));
+    runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file));
     if (content_profile) {
         FILE *profile=fopen(content_profile,"rb");
         unsigned char data[28];

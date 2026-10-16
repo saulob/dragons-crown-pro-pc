@@ -40,6 +40,7 @@ constexpr ManagedSetting kManagedSettings[] = {
     {cheats::kInfiniteSkillPointsKey, "0"},
     {cheats::kInfiniteGoldKey, "0"},
     {cheats::kMovementSpeedKey, "0"},
+    {cheats::kExperienceMultiplierKey, "1"},
     {kLauncherXKey, ""},
     {kLauncherYKey, ""},
     {kLauncherWidthKey, ""},
@@ -77,6 +78,10 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == kControllerPromptsKey) {
         return one_of({"playstation", "xbox"});
+    }
+    if (key == cheats::kExperienceMultiplierKey) {
+        return std::any_of(std::begin(cheats::kExperienceChoices), std::end(cheats::kExperienceChoices),
+                           [&](const cheats::ExperienceChoice& choice) { return value == choice.saved; });
     }
     if (key == kRenderResolutionKey) {
         return std::any_of(std::begin(dcp_resolutions), std::end(dcp_resolutions),
@@ -204,6 +209,12 @@ extern "C" unsigned dcp_saved_cheats(const char* settings_file) {
         }
     }
     return mask;
+}
+
+extern "C" int dcp_saved_experience_multiplier(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return cheats::ExperienceMultiplierFromSaved(settings.Get(cheats::kExperienceMultiplierKey, "1"));
 }
 
 extern "C" int dcp_text_language(const char* settings_file) {

@@ -117,7 +117,7 @@ void TestSessionOverride() {
     CHECK(session.Effective(Cheat::InfiniteMana, true));
 
     // The runtime layer: the saved mask is the start, the menu's toggle never changes it, a new start resets it.
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth));
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
     CHECK(runtime_cheat_enabled(int(Cheat::InfiniteHealth)) == 1);
     CHECK(runtime_cheat_enabled(int(Cheat::InfiniteMana)) == 0);
     runtime_cheat_toggle(int(Cheat::InfiniteHealth));
@@ -126,7 +126,7 @@ void TestSessionOverride() {
     CHECK(runtime_cheat_enabled(int(Cheat::InfiniteMana)) == 1);
     CHECK(runtime_cheat_enabled(-1) == 0 && runtime_cheat_enabled(int(kCheatCount)) == 0);
     runtime_cheat_toggle(99); // ignored
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth)); // the next game start: the saved values win again
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1); // the next game start: the saved values win again
     CHECK(runtime_cheat_enabled(int(Cheat::InfiniteHealth)) == 1);
     CHECK(runtime_cheat_enabled(int(Cheat::InfiniteMana)) == 0);
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
@@ -138,7 +138,7 @@ void TestRefillTransitions() {
     const int health = int(Cheat::InfiniteHealth), mana = int(Cheat::InfiniteMana);
 
     // Off -> On from the menu asks for one refill; nothing else does.
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     CHECK(runtime_cheat_take_refill(health) == 0 && runtime_cheat_take_refill(mana) == 0);
     runtime_cheat_toggle(health);
     CHECK(runtime_cheat_take_refill(mana) == 0);
@@ -151,7 +151,7 @@ void TestRefillTransitions() {
     CHECK(runtime_cheat_take_refill(health) == 0);
 
     // The launcher's saved On asks once at the start, and a new start asks again.
-    runtime_cheats_start(Bit(Cheat::InfiniteMana));
+    runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
     CHECK(runtime_cheat_take_refill(health) == 0);
     CHECK(runtime_cheat_take_refill(mana) == 1);
     CHECK(runtime_cheat_take_refill(mana) == 0);
@@ -159,11 +159,11 @@ void TestRefillTransitions() {
     CHECK(runtime_cheat_take_refill(mana) == 0);
     runtime_cheat_toggle(mana); // and On again: a refill
     CHECK(runtime_cheat_take_refill(mana) == 1);
-    runtime_cheats_start(Bit(Cheat::InfiniteMana));
+    runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
     CHECK(runtime_cheat_take_refill(mana) == 1);
 
     // Only Health, Mana and Durability fill anything; the other cheats never queue a request.
-    runtime_cheats_start(0xff);
+    runtime_cheats_start(0xff, 1);
     for (const CheatInfo& info : kCheats) {
         CHECK(runtime_cheat_take_refill(int(info.cheat)) == (RefillsOnEnable(info.cheat) ? 1 : 0));
     }
@@ -176,18 +176,19 @@ void TestRefillTransitions() {
     SessionCheats session;
     CHECK(session.Toggle(Cheat::InfiniteHealth, false));
     CHECK(!session.Toggle(Cheat::InfiniteHealth, false));
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
 }
 
 void TestMenuModel() {
-    CHECK(kMenuRows.size() == 9);
-    CHECK(kMenuRows.size() == kCheatCount + kActionCount);
+    CHECK(kMenuRows.size() == 10);
+    CHECK(kMenuRows.size() == kCheatCount + kActionCount + 1);
     CHECK(std::string(kMenuTitle) == "CHEATS");
     CHECK(std::string(kMenuCloseHint) == "F10 Close");
     CHECK(std::string(kMenuNote) == "Not saved to the launcher");
     const char* const order[] = {"Infinite Health",      "Infinite Mana",  "Infinite Lives",
                                  "Infinite Durability",  "Infinite Arrows", "Infinite Skill Points",
-                                 "Infinite Gold",        "Add 1,000 Gold",  "Movement Speed 2x"};
+                                 "Infinite Gold",        "Add 1,000 Gold",  "Movement Speed 2x",
+                                 "Experience Multiplier"};
     for (size_t i = 0; i < kMenuRows.size(); ++i) {
         CHECK(std::string(kMenuRows[i].label) == order[i]);
     }
@@ -205,6 +206,7 @@ void TestMenuModel() {
     CHECK(kMenuRows[7].kind == RowKind::Action && kMenuRows[7].action == Action::AddGold);
     CHECK(std::string(kMenuRows[7].verb) == "Add");
     CHECK(kMenuRows[8].kind == RowKind::Toggle && kMenuRows[8].cheat == Cheat::MovementSpeed);
+    CHECK(kMenuRows[9].kind == RowKind::Experience && std::string(kMenuRows[9].label) == "Experience Multiplier");
     CHECK(std::string(kActions[0].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
     for (const CheatInfo& info : kCheats) { // an action is no cheat: nothing saved, nothing in the launcher's list
         CHECK(std::string(info.key).find("add_gold") == std::string::npos);
@@ -296,7 +298,7 @@ struct TestMemory {
 };
 
 void SetCheats(bool health, bool mana) {
-    runtime_cheats_start((health ? Bit(Cheat::InfiniteHealth) : 0) | (mana ? Bit(Cheat::InfiniteMana) : 0));
+    runtime_cheats_start((health ? Bit(Cheat::InfiniteHealth) : 0) | (mana ? Bit(Cheat::InfiniteMana) : 0), 1);
 }
 
 void TestRules() {
@@ -452,7 +454,7 @@ void TestArrowsAndSkillPoints() {
     shot.rsi = 1;
     ArrowHook(&shot);
     CHECK(shot.rsi == 1);
-    runtime_cheats_start(Bit(Cheat::InfiniteArrows));
+    runtime_cheats_start(Bit(Cheat::InfiniteArrows), 1);
     ArrowHook(&shot);
     CHECK(shot.rsi == 0 && shot.skip == 0); // the shot still goes out
     shot.rsi = 1;
@@ -475,10 +477,10 @@ void TestArrowsAndSkillPoints() {
     buy.r12 = 0;
     buy.r13 = 0xffffffffffff0000ull | 20; // 20 left after the purchase
     buy.r14 = reinterpret_cast<uint64_t>(record);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     SkillPointsHook(&buy);
     CHECK(static_cast<uint16_t>(buy.r13) == 20);
-    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints));
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints), 1);
     SkillPointsHook(&buy);
     CHECK(static_cast<uint16_t>(buy.r13) == 30 && (buy.r13 >> 16) == 0xffffffffffffull); // only the word changes
     buy.r13 = 45;
@@ -492,7 +494,7 @@ void TestArrowsAndSkillPoints() {
     buy.r14 = 0;
     SkillPointsHook(&buy); // no record: nothing happens, nothing is read
     CHECK(static_cast<uint16_t>(buy.r13) == 20);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
 }
 
 struct FakeRefill {
@@ -554,14 +556,14 @@ void TestMovement() {
     };
     SetCheats(false, false);
     CHECK(walk(player1, 1.0f) == 1.0f); // Off: the game's own movement
-    runtime_cheats_start(Bit(Cheat::MovementSpeed));
+    runtime_cheats_start(Bit(Cheat::MovementSpeed), 1);
     CHECK(walk(player1, 1.0f) == 2.0f);
     CHECK(walk(player1, 1.5f) == 3.0f);
     CHECK(walk(player2, 1.0f) == 1.0f); // Players 2 to 4
     CHECK(walk(enemy, 1.0f) == 1.0f);   // enemies, NPC allies and everything that is not a human player
     runtime_cheat_toggle(int(Cheat::MovementSpeed)); // Off from the menu: the normal speed is back at once
     CHECK(walk(player1, 1.0f) == 1.0f);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
 }
 
 void TestLives() {
@@ -584,14 +586,14 @@ void TestLives() {
     };
     SetCheats(false, false);
     CHECK(respawn(player1, 2) == 1 && respawn(player1, 0) == -1);
-    runtime_cheats_start(Bit(Cheat::InfiniteLives));
+    runtime_cheats_start(Bit(Cheat::InfiniteLives), 1);
     CHECK(respawn(player1, 2) == 2);
     CHECK(respawn(player1, 0) == 0); // the last life is not lost either: no continue prompt, no game over
     CHECK(respawn(player1, -1) == -1);
     CHECK(respawn(player2, 2) == 1); // Player 2 loses a life
     runtime_cheat_toggle(int(Cheat::InfiniteLives));
     CHECK(respawn(player1, 2) == 1); // Off: lives decrease again at once
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
 }
 
 void TestGold() {
@@ -632,14 +634,14 @@ void TestGold() {
         };
         SetCheats(false, false);
         CHECK(store(500, 350) == 350); // Off: the purchase goes through
-        runtime_cheats_start(Bit(Cheat::InfiniteGold));
+        runtime_cheats_start(Bit(Cheat::InfiniteGold), 1);
         CHECK(store(500, 350) == 500);
         CHECK(store(500, 0) == 500);
         CHECK(store(500, 900) == 900);
         CHECK(store(500, 500) == 500);
         runtime_cheat_toggle(int(Cheat::InfiniteGold)); // the menu turns it Off: spending resumes at once
         CHECK(store(500, 350) == 350);
-        runtime_cheats_start(0);
+        runtime_cheats_start(0, 1);
     }
 }
 
@@ -691,7 +693,7 @@ void TestAddGold() {
 
     SetGuestFunctions({FakeIsDead, FakeRefillFunction, FakeGoldContext, FakeGetGold, FakeAddGold});
     FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     const int add = int(Action::AddGold);
     const auto tick = [](const FakeGame& game) {
         GuestRegs regs = TickRegs(game);
@@ -774,14 +776,14 @@ void TestAddGold() {
     runtime_cheat_clear_actions();
     CHECK(runtime_cheat_action_pending(add) == 0);
     runtime_cheat_action(add);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     CHECK(runtime_cheat_action_pending(add) == 0 && runtime_cheat_take_action(add) == 0);
     runtime_cheat_action(-1);
     runtime_cheat_action(int(kActionCount));
     CHECK(runtime_cheat_action_pending(-1) == 0 && runtime_cheat_action_pending(int(kActionCount)) == 0);
 
     // It is an action, not a cheat: it leaves every toggle and every refill as it was, whatever the saved value.
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth));
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
     const unsigned refills = runtime_cheat_refills_pending();
     g_gold = {};
     runtime_cheat_action(add);
@@ -793,13 +795,13 @@ void TestAddGold() {
     CHECK(runtime_cheat_refills_pending() == 0 && refills == Bit(Cheat::InfiniteHealth)); // that refill ran on the tick
 
     // Infinite Gold stays what it was: spending is kept, the added gold is a gain.
-    runtime_cheats_start(Bit(Cheat::InfiniteGold));
+    runtime_cheats_start(Bit(Cheat::InfiniteGold), 1);
     CHECK(ProtectedGold(true, 1000, 2000) == 2000 && ProtectedGold(true, 1000, 400) == 1000);
     CHECK(runtime_cheat_action_pending(add) == 0);
     runtime_cheat_action(add);
     tick(player1);
     CHECK(g_gold.gold == 2000);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     SetGuestFunctions({nullptr, nullptr});
 
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
@@ -915,14 +917,14 @@ void TestDurability() {
     };
     SetCheats(false, false);
     CHECK(wear(player1, -1000) == -1000);
-    runtime_cheats_start(Bit(Cheat::InfiniteDurability));
+    runtime_cheats_start(Bit(Cheat::InfiniteDurability), 1);
     CHECK(wear(player1, -1000) == 0);
     CHECK(wear(player1, 700) == 700);
     CHECK(wear(player2, -1000) == -1000);
     CHECK(wear(enemy, -1000) == -1000);
     runtime_cheat_toggle(int(Cheat::InfiniteDurability)); // the menu turns it Off: wear comes back at once
     CHECK(wear(player1, -1000) == -1000);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
 }
 
 // Worn gear in the fake unit's equipment list, as the game's own list functions would hand it out.
@@ -1010,7 +1012,7 @@ void TestDurabilityRefill() {
     // Off -> On: one piece, then several with their own maximums, an empty slot and invalid items.
     GiveEquipment(player1, 3);
     SetItem(player1, 0, 835, 1000);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     tick(player1);
     CHECK(Durability(player1, 0) == 835 && g_equipment.set_calls == 0); // nothing asked, nothing touched
     runtime_cheat_toggle(durability);
@@ -1030,7 +1032,7 @@ void TestDurabilityRefill() {
     SetItem(player1, 7, 300, -1);                // no durability
     SetItem(player1, 8, -4, 900);                // invalid value
     SetItem(player1, 9, 1000, 1000);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     runtime_cheat_toggle(durability);
     tick(player1);
     CHECK(Durability(player1, 0) == 1000 && Durability(player1, 1) == 500 && Durability(player1, 2) == 1200);
@@ -1072,7 +1074,7 @@ void TestDurabilityRefill() {
     FakeGame::Store<int32_t>(Slot(player1, 0) + kItemDurabilityOffset, 600);
     GiveEquipment(player2, 2);
     SetItem(player2, 0, 100, 1000);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     runtime_cheat_toggle(durability);
     const int calls = g_equipment.set_calls;
     tick(player2);
@@ -1085,7 +1087,7 @@ void TestDurabilityRefill() {
     // Enabled before Player 1's gear exists (the launcher's value, or the menu): it waits, then runs once.
     FakeGame late(true, 0);
     SetItem(late, 0, 300, 1000);
-    runtime_cheats_start(Bit(Cheat::InfiniteDurability));
+    runtime_cheats_start(Bit(Cheat::InfiniteDurability), 1);
     CHECK(runtime_cheat_refills_pending() == Bit(Cheat::InfiniteDurability));
     for (int i = 0; i < 30; ++i) {
         tick(late);
@@ -1103,7 +1105,7 @@ void TestDurabilityRefill() {
     FakeGame later(true, 0);
     GiveEquipment(later, 1);
     SetItem(later, 0, 300, 1000);
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     runtime_cheat_toggle(durability);
     runtime_cheat_toggle(durability);
     tick(later);
@@ -1124,11 +1126,11 @@ void TestDurabilityRefill() {
     // Without the game's item functions (or in a wrong build) nothing is called and the request waits.
     SetGuestFunctions({FakeIsDead, FakeRefillFunction});
     g_equipment.set_calls = 0;
-    runtime_cheats_start(Bit(Cheat::InfiniteDurability));
+    runtime_cheats_start(Bit(Cheat::InfiniteDurability), 1);
     SetItem(later, 0, 5, 50);
     tick(later);
     CHECK(g_equipment.set_calls == 0 && runtime_cheat_refills_pending() == Bit(Cheat::InfiniteDurability));
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     SetGuestFunctions({nullptr, nullptr});
 }
 
@@ -1152,7 +1154,7 @@ void TestRefillOnEnable() {
 
     // Nothing pending: the tick does nothing, whatever the unit.
     g_refill = {};
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     GuestRegs regs = TickRegs(player1);
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 0);
@@ -1185,13 +1187,13 @@ void TestRefillOnEnable() {
 
     // A launcher value that is already On refills once, when Player 1's unit first ticks.
     g_refill = {};
-    runtime_cheats_start(Bit(Cheat::InfiniteMana));
+    runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
     FakeGame fighter(true, 0);
     fighter.SetClass(0);
     regs = TickRegs(fighter);
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 0 && runtime_cheat_refills_pending() == 0); // no mana class: dropped, nothing filled
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteMana));
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteMana), 1);
     g_refill.dead = true;
     regs = TickRegs(player1);
     PlayerTickHook(&regs);
@@ -1201,7 +1203,7 @@ void TestRefillOnEnable() {
     CHECK(g_refill.calls == 1 && runtime_cheat_refills_pending() == 0);
 
     // The unit is validated before anything is read through it: an empty pointer or a unit without an owner is skipped.
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth));
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
     g_refill.calls = 0;
     regs = TickRegs(player1);
     regs.rdi = 0;
@@ -1218,13 +1220,14 @@ void TestRefillOnEnable() {
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 0);
     SetGuestFunctions({FakeIsDead, FakeRefillFunction});
-    runtime_cheats_start(0);
+    runtime_cheats_start(0, 1);
     SetGuestFunctions({nullptr, nullptr});
 }
 
 void TestHookTable() {
     const std::span<const GuestHook> hooks = Hooks();
-    CHECK(hooks.size() == 19);
+    CHECK(hooks.size() == 20);
+    CHECK(hooks[19].offset == 0x27511 && hooks[19].length == 7); // the experience award, at the end of the table
     CHECK(kSupportedImage.size == 0x11f8060 && kSupportedImage.entry == 0x54c690);
     for (const GuestHook& hook : hooks) {
         CHECK(hook.length >= GUEST_HOOK_MIN_LENGTH && hook.length <= GUEST_HOOK_MAX_LENGTH);
@@ -1621,6 +1624,130 @@ void TestNativeHooks() {
     CHECK(g_hook_calls == 8);
 }
 
+// Infinite Arrows holds Player 1's Elf at 10 from the next tick on, whatever the count was; Off lets the count go.
+void TestArrowHold() {
+    FakeGame elf(true, 0), fighter(true, 0), player2(true, 1), enemy(false, 0);
+    fighter.SetClass(0);
+    const auto tick = [](const FakeGame& game) {
+        GuestRegs regs = TickRegs(game);
+        PlayerTickHook(&regs);
+    };
+    const auto set = [](FakeGame& game, int32_t value) { FakeGame::Store<int32_t>(game.owner + kArrowCountOffset, value); };
+    const auto count = [](const FakeGame& game) { return TestMemory{}.S32(game.Owner() + kArrowCountOffset); };
+
+    SetGuestFunctions({nullptr, nullptr});
+    runtime_cheats_start(Bit(Cheat::InfiniteArrows), 1); // the launcher's On: from the first tick
+    for (const int32_t start : {0, 1, 5, 10}) {
+        set(elf, start);
+        tick(elf);
+        CHECK(count(elf) == 10);
+    }
+    set(elf, 15); // a pickup while the cheat is On does not stay
+    tick(elf);
+    CHECK(count(elf) == 10);
+
+    runtime_cheats_start(0, 1); // the menu's On: the same at the next tick
+    set(elf, 1);
+    tick(elf);
+    CHECK(count(elf) == 1);
+    runtime_cheat_toggle(int(Cheat::InfiniteArrows));
+    tick(elf);
+    CHECK(count(elf) == 10);
+    runtime_cheat_toggle(int(Cheat::InfiniteArrows)); // Off: nothing is forced, the game's count stands
+    set(elf, 3);
+    tick(elf);
+    CHECK(count(elf) == 3);
+
+    runtime_cheats_start(Bit(Cheat::InfiniteArrows), 1); // only Player 1's Elf: other players, classes and enemies keep theirs
+    set(player2, 1);
+    set(fighter, 2);
+    set(enemy, 4);
+    tick(player2);
+    tick(fighter);
+    tick(enemy);
+    CHECK(count(player2) == 1 && count(fighter) == 2 && count(enemy) == 4);
+    runtime_cheats_start(0, 1);
+}
+
+// Experience Multiplier: the saved value, the menu's cycle, the award rule and the hook on the award.
+void TestExperienceMultiplier() {
+    CHECK(kExperienceMultiplierOff == 1);
+    CHECK(std::string(kExperienceMultiplierKey) == "cheat_experience_multiplier");
+    CHECK(std::string(kExperienceMultiplierName) == "Experience Multiplier");
+
+    // The saved value is the multiplier; 1, or a missing or unknown value, is Off.
+    CHECK(ExperienceMultiplierFromSaved("1") == 1 && ExperienceMultiplierFromSaved("2") == 2);
+    CHECK(ExperienceMultiplierFromSaved("5") == 5 && ExperienceMultiplierFromSaved("10") == 10);
+    for (const char* saved : {"", "0", "3", "Off", "2x", "-5"}) {
+        CHECK(ExperienceMultiplierFromSaved(saved) == 1);
+    }
+    CHECK(ListedExperienceMultiplier(5) == 5 && ListedExperienceMultiplier(3) == 1);
+
+    // The menu's order: Off, 2x, 5x, 10x, and Off again.
+    CHECK(NextExperienceMultiplier(1) == 2 && NextExperienceMultiplier(2) == 5);
+    CHECK(NextExperienceMultiplier(5) == 10 && NextExperienceMultiplier(10) == 1);
+    CHECK(NextExperienceMultiplier(7) == 2); // unlisted: from Off
+    CHECK(std::string(ExperienceMultiplierLabel(1)) == "Off" && std::string(ExperienceMultiplierLabel(2)) == "2x");
+    CHECK(std::string(ExperienceMultiplierLabel(5)) == "5x" && std::string(ExperienceMultiplierLabel(10)) == "10x");
+
+    // The award: the gain is multiplied once, with no wrap; a zero or negative gain is left as it is.
+    CHECK(MultipliedExperience(1, 100) == 100);
+    CHECK(MultipliedExperience(2, 100) == 200);
+    CHECK(MultipliedExperience(5, 100) == 500);
+    CHECK(MultipliedExperience(10, 100) == 1000);
+    CHECK(MultipliedExperience(10, 0) == 0 && MultipliedExperience(10, -40) == -40);
+    CHECK(MultipliedExperience(2, INT32_MAX / 2) == int64_t{INT32_MAX / 2} * 2);
+    CHECK(MultipliedExperience(2, INT32_MAX / 2 + 1) == INT32_MAX);
+    CHECK(MultipliedExperience(10, int64_t{1} << 40) == INT32_MAX);
+
+    // The menu's change is a difference from the saved value: cycling back to it follows the launcher again.
+    SessionExperience session;
+    CHECK(session.Effective(5) == 5);
+    CHECK(session.Cycle(5) == 10 && session.Effective(5) == 10);
+    CHECK(session.Cycle(5) == 1 && session.Cycle(5) == 2 && session.Cycle(5) == 5);
+    CHECK(session.Effective(5) == 5);
+
+    // The runtime: the saved value starts each session, the menu's cycle changes it, an unlisted saved value is Off.
+    runtime_cheats_start(0, 5);
+    CHECK(runtime_cheat_experience_multiplier() == 5);
+    CHECK(runtime_cheat_experience_cycle() == 10 && runtime_cheat_experience_multiplier() == 10);
+    runtime_cheats_start(0, 2);
+    CHECK(runtime_cheat_experience_multiplier() == 2);
+    runtime_cheats_start(0, 3);
+    CHECK(runtime_cheat_experience_multiplier() == 1);
+
+    // The award hook changes only the gain the function returns (rax); the character's total is never touched.
+    const GuestHook* hook = FindHook("experience");
+    CHECK(hook != nullptr && hook->offset == 0x27511 && hook->length == 7);
+    GuestRegs award{};
+    award.rax = 100;
+    award.r12 = 4000;
+    runtime_cheats_start(0, 1);
+    ExperienceHook(&award);
+    CHECK(award.rax == 100);
+    for (const int saved : {2, 5, 10}) {
+        runtime_cheats_start(0, saved);
+        award = {};
+        award.rax = 100;
+        award.r12 = 4000;
+        ExperienceHook(&award);
+        CHECK(award.rax == uint64_t(saved) * 100 && award.r12 == 4000);
+    }
+    // Each award is multiplied on its own: the handler keeps nothing between awards.
+    runtime_cheats_start(0, 10);
+    award = {};
+    award.rax = 100;
+    ExperienceHook(&award);
+    award.rax = 100;
+    ExperienceHook(&award);
+    CHECK(award.rax == 1000);
+    runtime_cheats_start(0, 1);
+
+    const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
+    CHECK(overlay.find("runtime_cheat_experience_cycle()") != std::string::npos);
+    CHECK(ReadSource("launcher/launcher.cpp").find("kExperienceChoices") != std::string::npos);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1635,6 +1762,8 @@ int main(int argc, char** argv) {
     TestHookHandlers();
     TestArrowsAndSkillPoints();
     TestRefillOnEnable();
+    TestArrowHold();
+    TestExperienceMultiplier();
     TestDurability();
     TestDurabilityRefill();
     TestLives();

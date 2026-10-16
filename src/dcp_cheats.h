@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <string_view>
 
 namespace dcp::cheats {
 
@@ -115,6 +116,95 @@ private:
     static constexpr uint8_t kOn = 2;
 
     std::array<std::atomic<uint8_t>, kCheatCount> states_{};
+};
+
+// Experience Multiplier is one setting, not a cheat: Off (1), 2x, 5x or 10x. The saved text is the multiplier itself.
+inline constexpr char kExperienceMultiplierKey[] = "cheat_experience_multiplier";
+inline constexpr char kExperienceMultiplierName[] = "Experience Multiplier";
+inline constexpr char kExperienceMultiplierHelp[] = "Multiplies the experience each award adds";
+
+struct ExperienceChoice {
+    int multiplier;
+    const char* saved;
+    const char* label;
+};
+
+inline constexpr ExperienceChoice kExperienceChoices[] = {
+    {1, "1", "Off"}, {2, "2", "2x"}, {5, "5", "5x"}, {10, "10", "10x"},
+};
+inline constexpr int kExperienceMultiplierOff = 1;
+
+constexpr int ListedExperienceMultiplier(int multiplier) {
+    for (const ExperienceChoice& choice : kExperienceChoices) {
+        if (choice.multiplier == multiplier) {
+            return multiplier;
+        }
+    }
+    return kExperienceMultiplierOff;
+}
+
+// The launcher's saved text as a multiplier; anything that is not listed is Off.
+constexpr int ExperienceMultiplierFromSaved(std::string_view saved) {
+    for (const ExperienceChoice& choice : kExperienceChoices) {
+        if (saved == choice.saved) {
+            return choice.multiplier;
+        }
+    }
+    return kExperienceMultiplierOff;
+}
+
+constexpr const char* ExperienceMultiplierLabel(int multiplier) {
+    for (const ExperienceChoice& choice : kExperienceChoices) {
+        if (choice.multiplier == multiplier) {
+            return choice.label;
+        }
+    }
+    return kExperienceChoices[0].label;
+}
+
+// The menu's next value in list order; after 10x it is Off again.
+constexpr int NextExperienceMultiplier(int multiplier) {
+    size_t index = 0;
+    for (size_t i = 0; i < std::size(kExperienceChoices); ++i) {
+        if (kExperienceChoices[i].multiplier == multiplier) {
+            index = i;
+        }
+    }
+    return kExperienceChoices[(index + 1) % std::size(kExperienceChoices)].multiplier;
+}
+
+// The experience an award adds, multiplied once. Only a positive award is multiplied; the result stops at the int32
+// maximum, which keeps the sum with the character's total (a 32-bit field, clamped to the cap after) from wrapping.
+constexpr int64_t MultipliedExperience(int multiplier, int64_t awarded) {
+    if (multiplier <= kExperienceMultiplierOff || awarded <= 0) {
+        return awarded;
+    }
+    if (awarded > INT32_MAX / multiplier) {
+        return INT32_MAX;
+    }
+    return awarded * multiplier;
+}
+
+// The menu's Experience Multiplier for this session. Like SessionCheats, a change is kept as a difference from the
+// saved value, so cycling back to the saved value follows the launcher again.
+class SessionExperience {
+public:
+    int Effective(int saved) const {
+        const int changed = changed_.load(std::memory_order_relaxed);
+        return changed == 0 ? saved : changed;
+    }
+
+    // Returns the new multiplier.
+    int Cycle(int saved) {
+        const int next = NextExperienceMultiplier(Effective(saved));
+        changed_.store(next == saved ? 0 : next, std::memory_order_relaxed);
+        return next;
+    }
+
+    void Reset() { changed_.store(0, std::memory_order_relaxed); }
+
+private:
+    std::atomic<int> changed_{0};
 };
 
 // The game's unit (the object that holds HP and MP) and its owner, as laid out in v1.03. A unit's slot is the player
@@ -240,6 +330,14 @@ constexpr bool NeedsDurabilityRefill(uint32_t flags, int32_t current, int32_t ma
 // The Elf's arrow count drops by the amount of a shot; with 0 the shot still goes out and the count stays.
 constexpr int32_t ProtectedArrowAmount(bool enabled, UnitKind kind, bool elf, int32_t amount) {
     return enabled && kind == UnitKind::PlayerOne && elf && amount > 0 ? 0 : amount;
+}
+
+// The Elf's arrow count is an int at owner+0x3ad4. Infinite Arrows holds it at 10 while the cheat is On.
+inline constexpr uint32_t kArrowCountOffset = 0x3ad4;
+inline constexpr int32_t kInfiniteArrowCount = 10;
+
+constexpr int32_t HeldArrowCount(bool enabled, UnitKind kind, bool elf, int32_t count) {
+    return enabled && kind == UnitKind::PlayerOne && elf ? kInfiniteArrowCount : count;
 }
 
 // The skill purchase stores the points left; Player 1 keeps what they had. Earning and refunds never come here.

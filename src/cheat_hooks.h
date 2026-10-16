@@ -21,6 +21,7 @@ void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs);
 void GUEST_HOOK_ABI DurabilityHook(GuestRegs* regs);
 void GUEST_HOOK_ABI LivesHook(GuestRegs* regs);
 void GUEST_HOOK_ABI MovementHook(GuestRegs* regs);
+void GUEST_HOOK_ABI ExperienceHook(GuestRegs* regs);
 
 // The game functions the refills and Add 1,000 Gold call; set from the image when the hooks are installed, replaced in
 // the tests. gold_context is the object AddGold and GetGold take, found from a player's unit.
