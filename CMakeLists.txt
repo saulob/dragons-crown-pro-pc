@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 project(dragons_crown_pro_pc LANGUAGES C CXX)
-set(DCP_PORT_VERSION "0.3.0")
+set(DCP_PORT_VERSION "0.4.0")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "Build with Clang: MSYS2 CLANG64 (tools\\build.ps1) on Windows, tools/build.sh on Linux.")

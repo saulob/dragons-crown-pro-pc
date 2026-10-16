@@ -86,6 +86,8 @@ PLAYING
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
   Steam Deck's own controls.
 - The keyboard works too; the launcher's Controls page lists the keys.
+- The Controls page also chooses the button prompts the game shows: PlayStation
+  (original) or Xbox. It can be switched back at any time.
 - Local multiplayer: up to four players, one controller each; the keyboard is always
   Player 1's. A controller connected later takes the lowest free player slot, and a
   player stays logged in when their controller is unplugged. Online play is not

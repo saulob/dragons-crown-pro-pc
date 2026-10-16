@@ -54,7 +54,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.3.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v0.4.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dcp-loader.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -130,6 +130,7 @@ The game runs at its own 60 frames per second.
 
 ### Controls
 - Xbox controllers work without setup
+- **Controller prompts**: PlayStation (original) or Xbox. Xbox changes the button pictures the game shows (A/B/X/Y, LB/RB, LT/RT, MENU and VIEW) in the port's own copy of the game; PlayStation puts the originals back. Your `.pkg` file is never changed.
 - The **keyboard** is always on, together with the controller:
 
 | Action | Keys |
@@ -186,7 +187,7 @@ git clone https://github.com/saulob/dragons-crown-pro-pc.git
 cd dragons-crown-pro-pc
 sudo bash packaging/linux/ci-deps.sh   # Ubuntu 20.04: toolchain and pinned libraries (docs/LINUX.md)
 bash tools/build.sh               # fetches the pinned dependencies, builds build/cmake/linux/bin/dcp-loader
-bash tools/build.sh --test        # also builds and runs the focused launcher and runtime tests
+bash tools/build.sh --test        # also builds and runs the focused tests
 bash tools/package-linux.sh       # dist/DragonsCrownProPC-v<version>-x86_64.AppImage and its .sha256 (--out-dir DIR: elsewhere)
 ```
 
