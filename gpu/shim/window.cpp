@@ -1,6 +1,7 @@
 // The game window (SDL3) the Vulkan swapchain presents to.
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 #include <SDL3/SDL.h>
@@ -14,12 +15,28 @@
 #include "dcp_settings.h"
 #include "dcp_title.h"
 
+extern "C" void runtime_log_flush(void);
+
 namespace Frontend {
+namespace {
+
+// No window means no game: say why and exit with an error, not through UNREACHABLE (no crash, no abort).
+[[noreturn]] void ExitNoWindow(const char* what, const char* sdl_error) {
+    std::fprintf(stderr,
+                 "Error: %s: %s\nNo display is available. Run from a graphical session "
+                 "(DISPLAY for X11 or WAYLAND_DISPLAY for Wayland must be set).\n",
+                 what, sdl_error && *sdl_error ? sdl_error : "unknown SDL error");
+    std::fflush(stderr);
+    runtime_log_flush();
+    std::_Exit(1);
+}
+
+} // namespace
 
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-        UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
+        ExitNoWindow("Cannot initialize SDL video", SDL_GetError());
     }
     // The launcher's Window size and Monitor settings; the same display list as its Monitor row.
     const auto& settings = DcpSettings::Get();
@@ -45,7 +62,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     title_shown = title;
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
-    ASSERT_MSG(window, "Failed to create window: {}", SDL_GetError());
+    if (!window) {
+        ExitNoWindow("Cannot create the game window", SDL_GetError());
+    }
 
     const char* driver = SDL_GetCurrentVideoDriver();
     const SDL_PropertiesID wp = SDL_GetWindowProperties(window);
