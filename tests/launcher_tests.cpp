@@ -32,6 +32,7 @@
 #include "dcp_graphics.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
+#include "dcp_title.h"
 #include "file_browser.h"
 #include "game_files.h"
 #include "game_install.h"
@@ -289,6 +290,7 @@ void TestSettings(const fs::path& base) {
         settings.SetInt(kWindowHeightKey, 1440);
         settings.SetInt(kMonitorKey, 2);
         settings.SetBool(kShowFpsTitleKey, true);
+        settings.SetBool(kShowResolutionTitleKey, true);
         const std::string before_save = ReadAll(file);
         CHECK(before_save.find("vsync=1") != std::string::npos); // pending until Save
         CHECK(settings.Save());
@@ -307,6 +309,7 @@ void TestSettings(const fs::path& base) {
         CHECK(reread.GetInt(kWindowHeightKey, 0) == 1440);
         CHECK(reread.GetInt(kMonitorKey, 0) == 2);
         CHECK(reread.GetBool(kShowFpsTitleKey, false));
+        CHECK(reread.GetBool(kShowResolutionTitleKey, false));
         CHECK(reread.Get(kDisplayModeKey, "windowed") == "windowed");
     }
 
@@ -720,7 +723,8 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(!DcpSettings::Read(file.string(), v)); // no file: the defaults stay
         CHECK(v.vsync && !v.fsr1 && v.rcas && v.rcas_strength == 75 && !v.smaa && v.anisotropy == 0);
         CHECK(v.display_mode == DcpGraphics::Windowed && v.graphics_card.empty() && v.monitor == 1);
-        CHECK(!v.show_fps && !v.show_fps_title && v.requested_width == 0 && v.requested_height == 0);
+        CHECK(!v.show_fps && !v.show_fps_title && !v.show_resolution_title && v.requested_width == 0 &&
+              v.requested_height == 0);
     }
     WriteAll(file,
              "# Dragon's Crown Pro user settings\n"
@@ -737,6 +741,7 @@ void TestVideoCoreSettings(const fs::path& base) {
              "window_height = 1440\n"
              "show_fps = true\n"
              "show_fps_title = 1\n"
+             "show_resolution_title = on\n"
              "overlay_scale = 150\n"
              "overlay_corner = 3\n"
              "menu_tab = 1\n"
@@ -751,7 +756,8 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(v.display_mode == DcpGraphics::Borderless);
         CHECK(v.graphics_card == "Intel(R) UHD Graphics 730"); // a trailing " # comment" is not part of the value
         CHECK(v.monitor == 2 && v.requested_width == 2560 && v.requested_height == 1440);
-        CHECK(v.show_fps && v.show_fps_title && v.overlay_scale == 150 && v.overlay_corner == 3 && v.menu_tab == 1);
+        CHECK(v.show_fps && v.show_fps_title && v.show_resolution_title);
+        CHECK(v.overlay_scale == 150 && v.overlay_corner == 3 && v.menu_tab == 1);
     }
 
     // Values the game does not accept fall back to the defaults; the last of duplicate keys wins (as in the launcher).
@@ -834,6 +840,27 @@ void TestVideoCoreSettings(const fs::path& base) {
     }
 }
 
+// The window title the game composes: the game's title, then the render resolution and the frame rate when shown.
+// A text entry takes the place of the frame rate and keeps the resolution.
+void TestWindowTitle() {
+    const auto compose = [](bool resolution, bool fps) {
+        return DcpTitle::Compose({.base = "Dragon's Crown Pro", .show_resolution = resolution, .width = 2560,
+                                  .height = 1440, .show_fps = fps, .fps = 60.0});
+    };
+    CHECK(compose(false, false) == "Dragon's Crown Pro");
+    CHECK(compose(true, false) == "Dragon's Crown Pro | 2560x1440");
+    CHECK(compose(false, true) == "Dragon's Crown Pro | FPS: 60.00");
+    CHECK(compose(true, true) == "Dragon's Crown Pro | 2560x1440 | FPS: 60.00");
+
+    CHECK(DcpTitle::Compose({.base = "G", .show_resolution = true, .show_fps = true}) == "G"); // nothing known yet
+    CHECK(DcpTitle::Compose({.base = "G", .show_fps = true, .fps = -1.0}) == "G");
+    CHECK(DcpTitle::Compose({.base = "G", .show_fps = true, .fps = 59.999}) == "G | FPS: 60.00");
+    CHECK(DcpTitle::Compose({.base = "G", .show_resolution = true, .width = 3840, .height = 2160, .show_fps = true,
+                             .fps = 60.0}) == "G | 3840x2160 | FPS: 60.00");
+    CHECK(DcpTitle::Compose({.base = "G", .show_resolution = true, .width = 1280, .height = 720, .show_fps = true,
+                             .fps = 30.0, .entry = " \u2014 Name: ab_"}) == "G | 1280x720 \u2014 Name: ab_");
+}
+
 // One default per setting: what the launcher shows for a missing key is what the game uses.
 void TestDefaultsAgree() {
     const DcpSettings::Values game;
@@ -856,6 +883,7 @@ void TestDefaultsAgree() {
     CHECK(launcher_default(kGraphicsCardKey) == "automatic" && game.graphics_card.empty());
     CHECK(launcher_default(kMonitorKey) == std::to_string(game.monitor.load()));
     CHECK(launcher_default(kShowFpsTitleKey) == flag(game.show_fps_title));
+    CHECK(launcher_default(kShowResolutionTitleKey) == flag(game.show_resolution_title));
     CHECK(launcher_default(kShowFrameCounterKey) == flag(game.show_fps));
     // 0 is "the loader's size", 1920 x 1080 (src/loader.c), the launcher's default.
     CHECK(game.requested_width == 0 && launcher_default(kWindowWidthKey) == "1920");
@@ -1753,6 +1781,7 @@ int main(int argc, char** argv) {
     TestInstaller(base);
     TestVideoCoreSettings(base);
     TestDefaultsAgree();
+    TestWindowTitle();
     TestRenderResolution(base);
     TestTextLanguage(base);
     TestCheatSettings(base);

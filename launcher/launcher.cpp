@@ -81,6 +81,8 @@ constexpr char kAnisotropyHelp[] =
     "Sharper textures on floors and walls seen at an angle. Game uses the game's own filtering.";
 constexpr char kTextLanguageHelp[] = "Language used by game menus and subtitles.";
 constexpr char kShowFpsTitleHelp[] = "Shows the frame rate in the window title: Dragon's Crown Pro | FPS: 60.00";
+constexpr char kShowResolutionTitleHelp[] =
+    "Shows the game's render resolution in the window title: Dragon's Crown Pro | 1920x1080";
 constexpr char kFrameCounterHelp[] = "Shows the frame rate and frame time in a corner of the game.";
 constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
@@ -580,6 +582,7 @@ private:
         }
         ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, kTextLanguages[0].key.data(), languages);
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
+        ui.Toggle("Render resolution in title", kShowResolutionTitleHelp, kShowResolutionTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
         ui.EndRows();
     }

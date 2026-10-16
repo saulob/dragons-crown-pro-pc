@@ -11,6 +11,7 @@
 #include "dcp_overlay.h"
 #include "dcp_graphics.h"
 #include "dcp_settings.h"
+#include "dcp_title.h"
 
 namespace Frontend {
 
@@ -39,6 +40,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
     base_title = title;
+    title_shown = title;
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     ASSERT_MSG(window, "Failed to create window: {}", SDL_GetError());
@@ -69,9 +71,11 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
     const std::string display_name = display && !display->name.empty() ? " (" + display->name + ")" : "";
-    std::printf("Window: display %d of %zu%s, requested %dx%d, VSync %s, frame rate in title %s\n",
+    std::printf("Window: display %d of %zu%s, requested %dx%d, VSync %s, frame rate in title %s, "
+                "resolution in title %s\n",
                 display ? int(display - displays.data()) + 1 : 0, displays.size(), display_name.c_str(),
-                window_width, window_height, settings.vsync ? "on" : "off", settings.show_fps_title ? "on" : "off");
+                window_width, window_height, settings.vsync ? "on" : "off", settings.show_fps_title ? "on" : "off",
+                settings.show_resolution_title ? "on" : "off");
 }
 
 // Borderless is a desktop-sized fullscreen window, without a display mode change. Window thread only (SDL); the
@@ -110,16 +114,22 @@ void WindowSDL::UpdateTextTitle() {
     DcpOverlay::SetTextEntry(text_active, text_prompt, text);
 }
 
-// Window thread. The title is the game's, then the text being typed, or the frame rate.
+// Window thread. The title is the game's, then the render resolution, then the text being typed or the frame rate.
 void WindowSDL::RefreshTitle() {
-    std::string title = base_title;
+    const auto& settings = DcpSettings::Get();
+    std::string entry;
     if (text_active) {
-        title += " \u2014 " + text_prompt + ": " + text + "_  (Enter = OK, Esc = cancel)";
-    } else if (fps >= 0.0) {
-        char digits[32];
-        std::snprintf(digits, sizeof(digits), "%.2f", fps);
-        title += std::string(" | FPS: ") + digits;
+        entry = " \u2014 " + text_prompt + ": " + text + "_  (Enter = OK, Esc = cancel)";
     }
+    const std::string title = DcpTitle::Compose({
+        .base = base_title,
+        .show_resolution = settings.show_resolution_title,
+        .width = settings.image_width,
+        .height = settings.image_height,
+        .show_fps = settings.show_fps_title,
+        .fps = fps,
+        .entry = entry,
+    });
     if (title != title_shown) {
         SDL_SetWindowTitle(window, title.c_str());
         title_shown = title;
@@ -129,10 +139,7 @@ void WindowSDL::RefreshTitle() {
 // The frame rate of the presented game frames, measured about once a second.
 void WindowSDL::UpdateFpsTitle() {
     if (!DcpSettings::Get().show_fps_title) {
-        if (fps >= 0.0) {
-            fps = -1.0;
-            RefreshTitle();
-        }
+        fps = -1.0;
         return;
     }
     const auto now = std::chrono::steady_clock::now();
@@ -149,7 +156,6 @@ void WindowSDL::UpdateFpsTitle() {
     fps = double(frames - fps_frames) / elapsed;
     fps_started = now;
     fps_frames = frames;
-    RefreshTitle();
 }
 
 // F11: Windowed and Borderless, saved as the Display mode like the launcher's row.
@@ -190,6 +196,7 @@ bool WindowSDL::PollEvents() {
         ApplyDisplayMode(mode);
     }
     UpdateFpsTitle();
+    RefreshTitle();
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     SDL_Event event;
     while (SDL_PollEvent(&event)) {

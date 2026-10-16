@@ -25,10 +25,11 @@ struct Values {
     // Set by the presenter: sharpening ran on the last frame, the game's image and the window it is shown in.
     std::atomic<bool> rcas_applied{false};
     std::atomic<int> image_width{0}, image_height{0}, window_width{0}, window_height{0};
-    // The game window: size in pixels (0: the loader's size), 1-based monitor (dcp_displays.h), frame rate in the title.
+    // The game window: size in pixels (0: the loader's size), 1-based monitor (dcp_displays.h), frame rate and render
+    // resolution in the title.
     std::atomic<int> requested_width{0}, requested_height{0};
     std::atomic<int> monitor{1};
-    std::atomic<bool> show_fps_title{false};
+    std::atomic<bool> show_fps_title{false}, show_resolution_title{false};
 };
 
 Values& Get();

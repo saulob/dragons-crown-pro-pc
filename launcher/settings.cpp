@@ -29,6 +29,7 @@ constexpr ManagedSetting kManagedSettings[] = {
     {kAnisotropyKey, "0"},
     {kTextLanguageKey, "english"},
     {kShowFpsTitleKey, "0"},
+    {kShowResolutionTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
     {kControllerPromptsKey, "playstation"},
     {cheats::kInfiniteHealthKey, "0"},

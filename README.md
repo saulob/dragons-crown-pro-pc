@@ -121,6 +121,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 ### Gameplay
 - **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish. Voices are chosen inside the game.
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
+- **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
 - **Frame counter**: shows the frame rate and frame time in a corner of the game
 
 The game runs at its own 60 frames per second.

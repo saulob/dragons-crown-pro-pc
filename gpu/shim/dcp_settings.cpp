@@ -81,6 +81,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.monitor = std::max(ParseInt(value, 1), 1);
     } else if (key == "show_fps_title") {
         v.show_fps_title = ParseBool(value, v.show_fps_title);
+    } else if (key == "show_resolution_title") {
+        v.show_resolution_title = ParseBool(value, v.show_resolution_title);
     }
 }
 

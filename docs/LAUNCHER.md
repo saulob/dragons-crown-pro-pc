@@ -136,6 +136,7 @@ use the same defaults).
 | `anisotropy` | 0 (game), 2, 4, 8, 16 | 0 | live |
 | `render_resolution` | `native`, `480p`, `720p`, `1440p`, `1800p`, `4K` | `native` | at start |
 | `show_fps_title` | 1, 0 | 0 | live |
+| `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
 | `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
@@ -203,6 +204,8 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
+- **Render resolution in title**: `Dragon's Crown Pro | 1920x1080`, the render resolution of the game's presented image (not the
+  window size). It follows a change of the game's resolution while it runs.
 - **Frame counter**: the video core's corner readout (`show_fps`).
 
 No skip-intro or frame rate limit.
@@ -285,7 +288,8 @@ game file state of real folders without writing anything.
 2. Change Display mode and Window size, press Save, quit, start again: the values are kept.
 3. Press PLAY: "Settings saved. Starting game...", then the game window opens on the chosen monitor at the chosen size.
 4. In the game press F11 twice: Windowed, Borderless Fullscreen, back; the picture keeps its size.
-5. Turn Frame rate in title On and play: the title shows `| FPS: ...` after about a second.
+5. Turn Frame rate in title and Render resolution in title On and play: the title shows `| 1920x1080 | FPS: ...` (the
+   resolution appears with the first frame, the FPS after about a second).
 6. Start with Show this launcher Off: the game starts directly; hold Shift while starting: the launcher opens.
 7. Navigate the launcher with the keyboard and an Xbox controller.
 8. On Controls set Controller prompts to Xbox: a progress bar runs for a few seconds, then "Controller prompts:
