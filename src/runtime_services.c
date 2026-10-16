@@ -1,5 +1,5 @@
-/* System services for an offline, single-user console:
- *   - one local user (id 1) who is logged in but not signed in to PSN;
+/* System services for an offline console:
+ *   - up to four local users (ids 1-4, one per controller slot), logged in but not signed in to PSN;
  *   - network cable unplugged: NetCtl disconnected, sockets unavailable;
  *   - common dialogs complete immediately (no UI is drawn yet);
  *   - the whole package is installed (PlayGo reports every chunk local).
@@ -47,28 +47,61 @@ static int new_id(void) { pthread_mutex_lock(&lock); int id=next_id++; pthread_m
 static void note(const char *what) { printf("Runtime: %s\n",what); }
 
 /* ---- UserService ---- */
-static int login_event_pending=1;
+#define MAX_USERS 4
+#define USER_EVENT_LOGIN 0
+static unsigned logged_in=1; /* bit N-1: player N; player 1 from the start */
+typedef struct { int32_t type, user; } UserEvent;
+static UserEvent user_events[MAX_USERS]={{USER_EVENT_LOGIN,USER_ID}}; /* a player logs in at most once */
+static int user_events_pending=1;
+static int32_t player_user(int player) { return USER_ID+player-1; }
+int runtime_user_player(int32_t user) {
+    if (user<USER_ID || user>=USER_ID+MAX_USERS) return 0;
+    const int player=user-USER_ID+1;
+    pthread_mutex_lock(&lock);
+    const int known=logged_in>>(player-1)&1;
+    pthread_mutex_unlock(&lock);
+    return known ? player : 0;
+}
+/* Called when a controller first takes slot `player`; the game opens that user's pad on the LOGIN event. */
+void runtime_user_login(int player) {
+    if (player<1 || player>MAX_USERS) return;
+    pthread_mutex_lock(&lock);
+    if (!(logged_in>>(player-1)&1)) {
+        logged_in|=1u<<(player-1);
+        user_events[user_events_pending++]=(UserEvent){USER_EVENT_LOGIN,player_user(player)};
+    }
+    pthread_mutex_unlock(&lock);
+}
 static ABI int32_t user_initialize(const void *params) { (void)params; note("UserService initialized (user 1 logged in)"); return 0; }
 static ABI int32_t user_terminate(void) { return 0; }
 static ABI int32_t user_initial(int32_t *id) { if (!id) return USER_INVALID_ARGUMENT; *id=USER_ID; return 0; }
 static ABI int32_t user_list(int32_t *ids) {
     if (!ids) return USER_INVALID_ARGUMENT;
-    ids[0]=USER_ID; ids[1]=ids[2]=ids[3]=-1; return 0;
+    pthread_mutex_lock(&lock);
+    for (int i=0;i<MAX_USERS;++i) ids[i]=-1;
+    for (int player=1,n=0;player<=MAX_USERS;++player) if (logged_in>>(player-1)&1) ids[n++]=player_user(player);
+    pthread_mutex_unlock(&lock);
+    return 0;
 }
 static ABI int32_t user_name(int32_t id,char *name,uint64_t size) {
-    if (id!=USER_ID || !name) return USER_INVALID_ARGUMENT;
-    const char *value=getenv("DCP_USER_NAME") ? getenv("DCP_USER_NAME") : "Player";
+    const int player=runtime_user_player(id);
+    if (!player || !name) return USER_INVALID_ARGUMENT;
+    char numbered[16];
+    snprintf(numbered,sizeof(numbered),"Player %d",player);
+    const char *value=player>1 ? numbered : getenv("DCP_USER_NAME") ? getenv("DCP_USER_NAME") : "Player";
     if (strlen(value)+1>size) return (int32_t)0x8096000a; /* BUFFER_TOO_SHORT */
     strcpy(name,value); return 0;
 }
 static ABI int32_t user_event(int32_t *event) {
     if (!event) return USER_INVALID_ARGUMENT;
     pthread_mutex_lock(&lock);
-    int pending=login_event_pending; login_event_pending=0;
+    const int pending=user_events_pending;
+    if (pending) {
+        event[0]=user_events[0].type; event[1]=user_events[0].user;
+        memmove(user_events,user_events+1,(size_t)--user_events_pending*sizeof(*user_events));
+    }
     pthread_mutex_unlock(&lock);
-    if (!pending) return USER_NO_EVENT;
-    event[0]=0; event[1]=USER_ID; /* LOGIN */
-    return 0;
+    return pending ? 0 : USER_NO_EVENT;
 }
 
 /* ---- SystemService ---- */

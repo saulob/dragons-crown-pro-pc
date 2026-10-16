@@ -44,6 +44,8 @@ void runtime_audio_report(void);
 uintptr_t runtime_dcp_resolve(const char *name);
 void runtime_dcp_set_neo_mode(int on);
 void runtime_set_language(int ps4_language);
+void runtime_user_login(int player);
+int runtime_user_player(int32_t user);
 uintptr_t runtime_font_resolve(const char *name);
 uintptr_t runtime_eventflag_resolve(const char *name);
 uintptr_t runtime_pad_resolve(const char *name);
