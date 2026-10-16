@@ -159,6 +159,20 @@ void WindowSDL::ToggleBorderless() {
     DcpSettings::SaveDisplayMode();
 }
 
+// Window thread. Hidden only in borderless fullscreen with focus and no mouse-driven overlay open.
+void WindowSDL::UpdateCursor() {
+    const SDL_WindowFlags flags = SDL_GetWindowFlags(window);
+    const bool active = (flags & SDL_WINDOW_FULLSCREEN) != 0 && (flags & SDL_WINDOW_INPUT_FOCUS) != 0 &&
+                        !DcpOverlay::CapturesInput();
+    if (const auto visible = cursor.Update(active, DcpCursor::Hider::Clock::now())) {
+        if (*visible) {
+            SDL_ShowCursor();
+        } else {
+            SDL_HideCursor();
+        }
+    }
+}
+
 bool WindowSDL::PollEvents() {
     {
         std::scoped_lock lock{text_mutex};
@@ -179,6 +193,9 @@ bool WindowSDL::PollEvents() {
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            cursor.MouseMoved(DcpCursor::Hider::Clock::now());
+        }
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
@@ -231,6 +248,7 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
+    UpdateCursor();
     return is_open;
 }
 

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include "common/types.h"
+#include "dcp_cursor.h"
 
 struct SDL_Window;
 
@@ -44,6 +45,8 @@ private:
     void ApplyDisplayMode(int mode);
     void ToggleBorderless();
     void UpdateFpsTitle();
+    void UpdateCursor();
+    DcpCursor::Hider cursor; ///< window thread
     void RefreshTitle();
     std::chrono::steady_clock::time_point fps_started{};
     u64 fps_frames = 0;
