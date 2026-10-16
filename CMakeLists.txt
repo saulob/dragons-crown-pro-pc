@@ -122,6 +122,15 @@ else()
     target_link_libraries(dcp-text-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
+# Focused tests of the GPU tiling parameters and macro-tiled addresses against the game's own tiler (tools/test.ps1);
+# not part of the default build.
+add_executable(dcp-tiling-tests EXCLUDE_FROM_ALL tests/tiling_tests.cpp)
+set_target_properties(dcp-tiling-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-tiling-tests PRIVATE gpu/shim gpu/shadps4 tests src ${CMAKE_BINARY_DIR}/gpu/include
+    gpu/third_party/gcn/include gpu/third_party/half/include gpu/third_party/xbyak)
+target_compile_options(dcp-tiling-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-tiling-tests PRIVATE dcpgpu)
+
 if (NOT WIN32)
     # Focused tests of the memory and fiber layers (tools/build.sh --test); not part of the default build.
     add_executable(dcp-runtime-tests EXCLUDE_FROM_ALL tests/runtime_tests.c src/runtime_memory.c src/runtime_fiber.c src/runtime_thread.c)

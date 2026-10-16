@@ -91,6 +91,7 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
         .tile_mode = info.tile_mode,
         .num_bits = info.num_bits,
         .num_samples = info.num_samples,
+        .alt_tile = info.alt_tile,
         .is_tiler = is_tiler,
     };
     if (const auto it = tiling_pipelines.find(key); it != tiling_pipelines.end()) {
@@ -107,17 +108,17 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
         u32(is_tiler),
     };
     if (is_macro) {
-        const auto macro_tile_mode =
-            AmdGpu::CalculateMacrotileMode(info.tile_mode, info.num_bits, info.num_samples);
+        const auto layout = AmdGpu::GetMacroTileLayout(info.tile_mode, info.num_bits,
+                                                       info.num_samples, info.alt_tile);
         spec_data[4] = u32(info.array_mode);
-        spec_data[5] = u32(AmdGpu::GetPipeConfig(info.tile_mode));
-        spec_data[6] = AmdGpu::GetBankWidth(macro_tile_mode);
-        spec_data[7] = AmdGpu::GetBankHeight(macro_tile_mode);
-        spec_data[8] = AmdGpu::GetNumBanks(macro_tile_mode);
+        spec_data[5] = u32(layout.pipe_config);
+        spec_data[6] = layout.bank_width;
+        spec_data[7] = layout.bank_height;
+        spec_data[8] = layout.num_banks;
         spec_data[9] = std::bit_width(spec_data[8]) - 1;
         spec_data[10] = AmdGpu::CalculateTileSplit(info.tile_mode, info.array_mode, micro_tile_mode,
                                                    info.num_bits);
-        spec_data[11] = AmdGpu::GetMacrotileAspect(macro_tile_mode);
+        spec_data[11] = layout.macro_tile_aspect;
     }
 
     std::span<const u32> code;

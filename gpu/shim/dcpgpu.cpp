@@ -159,7 +159,7 @@ u64 PS4_SYSV_ABI sceKernelReadTsc() { return Common::FencedRDTSC(); }
 u64 PS4_SYSV_ABI sceKernelGetProcessTime() { return runtime_process_time_us(); }
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounter() { return runtime_process_time_counter(); }
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounterFrequency() { return 1'000'000'000; }
-// The video core's own GnmDriver packets and tiling stay base PS4; the game's answer comes from runtime_dcp.c.
+// The video core's own GnmDriver packets stay base PS4; the game's answer comes from runtime_dcp.c.
 s32 PS4_SYSV_ABI sceKernelIsNeoMode() { return 0; }
 s32 PS4_SYSV_ABI sceKernelGetCompiledSdkVersion(s32* ver) {
     if (!ver) return ORBIS_KERNEL_ERROR_EINVAL;

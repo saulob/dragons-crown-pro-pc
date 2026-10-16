@@ -25,6 +25,7 @@ class TileManager {
         AmdGpu::TileMode tile_mode;
         u32 num_bits;
         u32 num_samples;
+        bool alt_tile;
         bool is_tiler;
 
         bool operator==(const TilingKey&) const = default;
@@ -35,6 +36,7 @@ class TileManager {
                 boost::hash_combine(hash, key.tile_mode);
                 boost::hash_combine(hash, key.num_bits);
                 boost::hash_combine(hash, key.num_samples);
+                boost::hash_combine(hash, key.alt_tile);
                 boost::hash_combine(hash, key.is_tiler);
                 return hash;
             }

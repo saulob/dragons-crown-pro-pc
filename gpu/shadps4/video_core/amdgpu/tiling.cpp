@@ -171,7 +171,7 @@ PipeConfig GetAltPipeConfig(TileMode tile_mode) {
     case TileMode::Thick3DThickPrt:
     case TileMode::Thick2DXThick:
     case TileMode::Thick3DXThick:
-        return PipeConfig::P16_32x32_8x16;
+        return PipeConfig::P16;
     case TileMode::DisplayLinearGeneral:
         return PipeConfig::P2;
     default:
@@ -522,6 +522,7 @@ u32 GetPipeCount(PipeConfig pipe_cfg) {
     case PipeConfig::P8_32x32_16x16:
         return 8;
     case PipeConfig::P16_32x32_8x16:
+    case PipeConfig::P16:
         return 16;
     default:
         UNREACHABLE_MSG("Unknown pipe config = {}", u32(pipe_cfg));
@@ -555,6 +556,16 @@ MacroTileMode CalculateMacrotileMode(TileMode tile_mode, u32 bpp, u32 num_sample
     const u32 tile_bytes = std::min(tilesplic, num_samples * tile_bytes_1x);
     const u32 mtm_idx = std::bit_width(tile_bytes / 64) - 1;
     return IsPrt(array_mode) ? MacroTileMode(mtm_idx + 8) : MacroTileMode(mtm_idx);
+}
+
+MacroTileLayout GetMacroTileLayout(TileMode tile_mode, u32 bpp, u32 num_samples, bool alt_tile) {
+    const MacroTileMode mode = CalculateMacrotileMode(tile_mode, bpp, num_samples);
+    if (alt_tile) {
+        return {GetAltPipeConfig(tile_mode), GetBankWidth(mode), GetAltBankHeight(mode),
+                GetAltNumBanks(mode), GetAltMacrotileAspect(mode)};
+    }
+    return {GetPipeConfig(tile_mode), GetBankWidth(mode), GetBankHeight(mode), GetNumBanks(mode),
+            GetMacrotileAspect(mode)};
 }
 
 } // namespace AmdGpu

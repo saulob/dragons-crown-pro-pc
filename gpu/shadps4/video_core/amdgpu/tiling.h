@@ -149,4 +149,14 @@ u32 CalculateTileSplit(TileMode tile_mode, ArrayMode array_mode, MicroTileMode m
 
 MacroTileMode CalculateMacrotileMode(TileMode tile_mode, u32 bpp, u32 num_samples);
 
+struct MacroTileLayout {
+    PipeConfig pipe_config;
+    u32 bank_width;
+    u32 bank_height;
+    u32 num_banks;
+    u32 macro_tile_aspect;
+};
+
+MacroTileLayout GetMacroTileLayout(TileMode tile_mode, u32 bpp, u32 num_samples, bool alt_tile);
+
 } // namespace AmdGpu
