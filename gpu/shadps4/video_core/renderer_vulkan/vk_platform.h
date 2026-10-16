@@ -25,6 +25,9 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
 vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
                                   bool enable_crash_diagnostic);
 
+// dcp: a bare instance for asking what Vulkan offers; loads its commands like CreateInstance.
+vk::ResultValue<vk::UniqueInstance> CreateProbeInstance();
+
 vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance);
 
 template <typename T>

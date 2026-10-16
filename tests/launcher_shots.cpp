@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
     setenv("DCP_LAUNCHER_SHOTS", out.string().c_str(), 1);
 #endif
     const std::string user_dir = user.string();
-    const DcpLauncherConfig config{argv[1], argv[2], user_dir.c_str(), settings.c_str(), nullptr, 0, 0};
+    const DcpLauncherConfig config{argv[1], argv[2], user_dir.c_str(), settings.c_str(), nullptr, 0, 0, nullptr};
     const DcpLauncherResult result = dcp_launcher_run(&config);
     std::printf("launcher returned %s\n", result == DCP_LAUNCHER_PLAY ? "PLAY" : "QUIT");
     return 0;

@@ -48,7 +48,7 @@ else()
     set(DCP_LOG_SOURCE ${PROJECT_SOURCE_DIR}/src/runtime_log_posix.c)
 endif()
 
-add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp shift_key.cpp)
+add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp)
 target_compile_definitions(dcp_launcher PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
 target_link_libraries(dcp_launcher PUBLIC dcp_launcher_core trg_launcher dcp_imgui_sdl ${CMAKE_DL_LIBS})
 

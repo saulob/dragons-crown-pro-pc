@@ -7,7 +7,9 @@ Graphics, Gameplay, Controls and About.
 ## Architecture
 
 `dcp-loader.exe` calls `dcp_launcher_run()` (`launcher/dcp_launcher.h`) early in `main`, after the PS4 address range is
-reserved and before the boot image is read. There is no second executable and no helper process.
+reserved and before the boot image is read. There is no second executable and no helper process. On Linux the loader
+passes `dcp_check_vulkan` as the launcher's graphics check: Play runs it (the launcher itself needs no Vulkan) and, if
+it fails, `launcher/problem_dialog.cpp` explains why and the launcher stays open.
 
 The launcher cannot live in the game's own window: the Vulkan presenter and its Dear ImGui context are created by the
 guest, and a missing game has no guest at all. So it opens a window of its own (SDL3, an SDL renderer, Dear ImGui) and
@@ -18,6 +20,7 @@ exist at a time. The Dear ImGui copy is the one compiled into the video core lib
 |---|---|
 | `launcher/launcher.cpp` | pages, Play flow, startup decision, the C entry point |
 | `launcher/host.cpp` | the launcher window: SDL3, renderer, Dear ImGui, F11, placement |
+| `launcher/problem_dialog.cpp` | the graphics error dialog, in the launcher or in a window of its own |
 | `launcher/game_files.cpp` | `CheckGameFiles`, SHA-256 (BCrypt), param.sfo and marker reading |
 | `launcher/settings.cpp` | `LauncherSettings`, the view of `user\dcp.ini` |
 | `launcher/options.cpp`, `placement.h`, `play_gate.h` | Display options, window placement, the Play gate |

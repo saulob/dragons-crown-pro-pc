@@ -8,6 +8,9 @@
 extern "C" {
 #endif
 
+/* 1 when the graphics system can run the game. Otherwise 0, with what is wrong and what to do about it in the buffers. */
+typedef int (*DcpGraphicsCheck)(char *cause, size_t cause_size, char *advice, size_t advice_size);
+
 typedef struct {
     const char *app0;          /* prepared game folder (/app0) */
     const char *image_dir;     /* folder with boot.bin, content.bin and image.json */
@@ -16,6 +19,7 @@ typedef struct {
     const char *logs_dir;      /* NULL when unknown */
     int skip_once;             /* --dcp-skip-launcher: do not show it unless the game files are not ready */
     int force_show;            /* --launcher: show it even when "Show this launcher" is off, like holding Shift */
+    DcpGraphicsCheck check_graphics; /* NULL: Play does not check; see dcp_check_vulkan */
 } DcpLauncherConfig;
 
 /* NULL asks for the default, which is relative to the executable (launcher/paths.h). */
@@ -43,22 +47,24 @@ int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
  * file or the value is missing. */
 int dcp_render_resolution(const char *settings_file);
 
-/* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many; enumerates
- * only, no device is created. */
+/* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
+ * usable Vulkan on Linux); enumerates only, no device is created. */
 int dcp_gpu_names(char (*names)[256], int max);
 
-/* 1 when Vulkan can run the renderer. Otherwise logs why, shows it in an error window until the player closes it (on
- * stderr only without a display) and returns 0. */
-int dcp_check_vulkan(void);
+/* A DcpGraphicsCheck: 1 when Vulkan can run the renderer. Otherwise logs why and returns 0. It asks again on every call
+ * until it succeeds, so a driver installed meanwhile is found. */
+int dcp_check_vulkan(char *cause, size_t cause_size, char *advice, size_t advice_size);
 
 /* Builds boot.bin, content.bin and image.json in `out` from the prepared game folder `app0` (UTF-8 paths). 0 on
  * success; otherwise 1 and the reason in `error`. */
 int dcp_build_boot_image(const char *app0, const char *out, char *error, size_t error_size);
 
-typedef enum { DCP_LAUNCHER_PLAY = 0, DCP_LAUNCHER_QUIT = 1 } DcpLauncherResult;
+typedef enum { DCP_LAUNCHER_PLAY = 0, DCP_LAUNCHER_QUIT = 1, DCP_LAUNCHER_BLOCKED = 2 } DcpLauncherResult;
 
 /* Shows the launcher when its rules say so (game files not ready, "Show this launcher" on, or Shift held) and returns
- * once the player pressed Play or quit. Returns DCP_LAUNCHER_PLAY at once when it is not shown. */
+ * once the player pressed Play or quit. Returns DCP_LAUNCHER_PLAY at once when it is not shown.
+ * While check_graphics fails, Play is refused: the launcher says why and stays open. A launcher that is not shown
+ * explains in a window of its own and returns DCP_LAUNCHER_BLOCKED. */
 DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig *config);
 
 #ifdef __cplusplus

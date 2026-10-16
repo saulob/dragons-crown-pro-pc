@@ -29,6 +29,7 @@
 #include "package_browser.h"
 #include "placement.h"
 #include "play_gate.h"
+#include "problem_dialog.h"
 #include "settings.h"
 #include "shift_key.h"
 #include "utf8.h"
@@ -44,6 +45,7 @@ namespace {
 // The gold of the Dragon's Crown logo lettering (#E0BB32).
 const ImVec4 kAccent = ImVec4(0.878f, 0.733f, 0.196f, 1.0f);
 constexpr double kPlayFeedbackSeconds = 0.4;
+constexpr char kPortTitle[] = "Dragon's Crown Pro PC";
 constexpr char kGameFilesHelp[] =
     "Select your own legally obtained Dragon's Crown Pro package (.pkg, CUSA10454, version 01.03). It is unpacked into "
     "the game folder next to the program (about 6 GB). No game files are included. Reinstalling keeps your saves and "
@@ -225,6 +227,7 @@ private:
         if (play_.starting()) {
             DrawStartingMessage();
         }
+        problem_.Draw(fonts_, LauncherTheme());
         switch (result) {
         case trg::Result::kPlay:
             RequestPlay();
@@ -246,6 +249,9 @@ private:
             return;
         }
         files_ = CheckAndLog(paths_).state;
+        if (files_ == GameFileState::kValid && !GraphicsUsable()) {
+            return;
+        }
         switch (play_.Request(false, files_ == GameFileState::kValid, [this] { return launcher_->Save(); })) {
         case PlayRequest::kStarting:
             play_started_ = ImGui::GetTime();
@@ -260,6 +266,19 @@ private:
             Log("could not save the settings");
             break;
         }
+    }
+
+    bool GraphicsUsable() {
+        if (!config_.check_graphics) {
+            return true;
+        }
+        char cause[320] = "", advice[320] = "";
+        if (config_.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
+            return true;
+        }
+        problem_.Show(cause, advice);
+        Log("graphics unavailable, staying open");
+        return false;
     }
 
     void TrackPlacement() {
@@ -596,6 +615,7 @@ private:
     trg::Fonts fonts_;
     std::unique_ptr<trg::Launcher> launcher_;
     PlayGate play_;
+    ProblemDialog problem_;
     PlacementTracker placement_;
     int frames_ = 0;
     double play_started_ = 0.0;
@@ -605,6 +625,39 @@ private:
     std::string install_failure_;
     std::string install_failure_text_;
 };
+
+// Play without the launcher on screen: the same check, explained in a window of its own.
+DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
+    char cause[320] = "", advice[320] = "";
+    if (!config.check_graphics || config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
+        return DCP_LAUNCHER_PLAY;
+    }
+    LauncherHost host;
+    HostOptions options;
+    options.title = kPortTitle;
+    options.width = 640;
+    options.height = 300;
+    options.min_width = 360;
+    options.min_height = 220;
+    if (!host.Open(options)) {
+        std::fprintf(stderr, "Graphics: %s %s\n", cause, advice);
+        return DCP_LAUNCHER_BLOCKED;
+    }
+    const trg::Fonts fonts = trg::LoadSystemFonts(18.0f);
+    const trg::Theme theme = LauncherTheme();
+    ProblemDialog dialog;
+    dialog.Show(cause, advice);
+    while (dialog.open() && host.PumpEvents()) {
+        if (host.Minimized()) {
+            SDL_Delay(30);
+            continue;
+        }
+        host.BeginFrame();
+        dialog.Draw(fonts, theme);
+        host.EndFrame(theme.bg);
+    }
+    return DCP_LAUNCHER_BLOCKED;
+}
 
 } // namespace
 } // namespace dcp
@@ -619,7 +672,7 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     const bool shift = ShiftHeldAtStart() || config->force_show != 0;
     if (!LauncherWanted(ready, show_setting, shift, config->skip_once != 0)) {
         Log("skipped (show_launcher %s%s)", show_setting ? "on" : "off", config->skip_once ? ", skip requested" : "");
-        return DCP_LAUNCHER_PLAY;
+        return PlayOrExplain(*config);
     }
     Log("settings file %s", Utf8(settings.file()).c_str());
     Log("opening: %s%s%s", ready ? "game ready" : "game files not ready", show_setting ? ", show_launcher on" : "",
@@ -629,7 +682,7 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     Outcome outcome = Outcome::kRunning;
     if (!app.Run(outcome)) {
         std::fprintf(stderr, "Launcher: could not open its window; %s\n", ready ? "starting the game" : "game files are not ready");
-        return ready ? DCP_LAUNCHER_PLAY : DCP_LAUNCHER_QUIT;
+        return ready ? PlayOrExplain(*config) : DCP_LAUNCHER_QUIT;
     }
     return outcome == Outcome::kPlay ? DCP_LAUNCHER_PLAY : DCP_LAUNCHER_QUIT;
 }

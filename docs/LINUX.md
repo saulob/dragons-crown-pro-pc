@@ -81,7 +81,10 @@ shader cache, per-run logs, audio, reinstalling without losing user data) is the
 libcrypto, fmt, Zydis, xxHash and their dependencies); no `LD_LIBRARY_PATH` is set, so programs the launcher starts
 (`zenity`, `xdg-open`) are not affected. glibc, the Vulkan loader and drivers, X11/Wayland and the audio libraries come
 from the system. The Vulkan loader must support Vulkan 1.3: Ubuntu 20.04's own `libvulkan1` (1.2.131) does not, and
-the program then says so in an error window and exits. Without any `libvulkan.so.1` it cannot start at all.
+the launcher still opens, and Play explains the problem in a dialog of the launcher's own (no `zenity` or other helper)
+and stays open, so a driver can be installed and Play pressed again. When the launcher is not shown (**Show this
+launcher** off, `--dcp-skip-launcher`) the same text appears in a small window and the program exits with status 1.
+Without any `libvulkan.so.1` it cannot start at all.
 `libstdc++` and `libgcc_s` are carried in `usr/lib/compat` and used by `AppRun` only when the system's are older than
 the build needs. The package contains no game files, no drivers and no local paths (`package-linux.sh`
 checks the staged folder before it writes the AppImage).

@@ -398,11 +398,14 @@ int main(int argc, char **argv) {
     static char settings_file[4200];
     snprintf(settings_file,sizeof(settings_file),"%s/dcp.ini",user_dir);
     if (!cpu_only && !check_imports) {
+        DcpGraphicsCheck check_graphics=NULL;
 #ifndef _WIN32
-        if (!dcp_check_vulkan()) exit(1);
+        check_graphics=dcp_check_vulkan;
 #endif
-        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,paths.logs_dir,skip_launcher,force_launcher};
-        if (dcp_launcher_run(&launcher)==DCP_LAUNCHER_QUIT) exit(0);
+        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,paths.logs_dir,skip_launcher,force_launcher,check_graphics};
+        DcpLauncherResult launched=dcp_launcher_run(&launcher);
+        if (launched==DCP_LAUNCHER_QUIT) exit(0);
+        if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
     }
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file)];
     runtime_dcp_set_neo_mode(render_resolution->pro_memory);
