@@ -2,7 +2,6 @@
 
 #include <system_error>
 
-#include "game_profile.h"
 #include "utf8.h"
 
 namespace dcp {

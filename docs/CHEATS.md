@@ -56,7 +56,7 @@ Turning Infinite Health, Infinite Mana or Infinite Durability On, in the menu or
 
 ### Infinite Lives
 
-A life is consumed in one place: the RESPAWN_NOTIFY handler computes `lp - 1` (a signed byte at unit `+0xce`) and posts it as event `0x13f1`. The hook hands that code `lp + 1` for Player 1, so the count stays where it was. Death, the respawn itself and the continue flow are unchanged; at 0 lives the count stays 0 instead of becoming -1 (the calculation floors at -1), so Player 1 respawns with 0 lives. What the game does with a count of -1 elsewhere was not traced. Increases (the GET_LP buff, ally revive, continue) are other code. Players 2 to 4 lose lives as always.
+A life is consumed in one place: the RESPAWN_NOTIFY handler computes `lp - 1` (a signed byte at unit `+0xce`) and posts it as event `0x13f1`. The hook hands that code `lp + 1` for Player 1, so the count stays where it was. Death, the respawn itself and the continue flow are unchanged; at 0 lives the count stays 0 instead of becoming -1 (the calculation floors at -1). What the game does with a count of -1, and so what a death at 0 lives does without the cheat, was not traced and has not been tried in play. Increases (the GET_LP buff, ally revive, continue) are other code. Players 2 to 4 lose lives as always.
 
 ### Infinite Durability
 

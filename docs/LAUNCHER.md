@@ -210,7 +210,8 @@ No skip-intro or frame rate limit.
 ## Cheats
 
 Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, About. Subtitle "Optional gameplay modifiers", with the
-line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session." and Off / On
+line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for
+offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
 Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**, each with its one-line description
 (`src/dcp_cheats.h`). All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
@@ -222,6 +223,13 @@ session only and never writes them. The hooks, the menu and Player 1 targeting a
 Xbox controllers work without setup; the keyboard is always on. The page lists the layout implemented in
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 1,000 Gold**, which is not a setting). Nothing is remappable and the dead zone is not a setting.
+
+**Local multiplayer**: up to four SDL gamepads, player N on pad handle N and user N (`runtime_pad.c`, `runtime_services.c`).
+A gamepad that is found takes the lowest free slot and logs its user in once; the game opens that user's pad on the
+`LOGIN` event. The keyboard, `DCP_PAD_FILE`, pad recording and replay and the save list's controls belong to Player 1
+only. Unplugging a gamepad closes it and frees its slot, but no `LOGOUT` is sent: the player stays logged in, and the
+next gamepad connected takes the lowest free slot, which is not necessarily the same player. A fifth gamepad is ignored.
+The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted); see [CHEATS.md](CHEATS.md).
 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
 atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port
@@ -243,6 +251,9 @@ overwritten. The original TOC and header bytes and the original length go to `DR
 is cleared so the rewritten TOC is accepted. The page shows what the archives hold (the undo records), not the
 setting: `controller_prompts` in `dcp.ini` only remembers the choice, and after a reinstall from the Play page the
 launcher re-applies Xbox by itself. A pack that is not the one the patch was made for is skipped and named in the log.
+An archive that is a hard link to the game folder the install was made from (same drive) first gets a file of its own,
+so that folder is never changed. If a step fails, the archive is put back as it was; an undo record that does not belong
+to the archive, or an interrupted earlier run, is detected before anything is written.
 
 ## Launcher input
 

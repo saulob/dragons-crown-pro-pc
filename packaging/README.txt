@@ -61,7 +61,12 @@ PLAYING
 - Insert (or R3 + L2 on a controller) opens the in-game settings menu.
 - Xbox controllers work without setup.
 - The keyboard works too; the launcher's Controls page lists the keys.
-- One player: local multiplayer and online play are not supported.
+- Local multiplayer: up to four players, one controller each; the keyboard is always
+  Player 1's. A controller connected later takes the lowest free player slot, and a
+  player stays logged in when their controller is unplugged. Online play is not
+  supported.
+- F10 opens the Cheats menu (meant for offline and local play); the launcher has a
+  Cheats page for the values saved for the next start.
 - To open the launcher again after turning it off, hold Shift while starting.
 
 

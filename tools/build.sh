@@ -75,7 +75,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dcp-loader)
-((test)) && targets+=(dcp-launcher-tests dcp-runtime-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-cheats-tests dcp-runtime-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dcp-loader
 [[ -x $loader ]] || die "Missing $loader"
@@ -83,6 +83,8 @@ loader=$build_dir/bin/dcp-loader
 if ((test)); then
     step 'Running the launcher tests'
     "$build_dir/bin/dcp-launcher-tests"
+    step 'Running the cheat tests'
+    "$build_dir/bin/dcp-cheats-tests"
     step 'Running the runtime tests (memory, fibers)'
     "$build_dir/bin/dcp-runtime-tests"
 fi

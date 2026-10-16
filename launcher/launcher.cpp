@@ -425,7 +425,7 @@ private:
     }
 
     void StartInstall(const std::string& picked) {
-        if (picked.empty()) {
+        if (picked.empty() || prompts_.running()) {
             return;
         }
         install_failure_.clear();

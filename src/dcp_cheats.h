@@ -55,7 +55,8 @@ static_assert(std::size(kCheats) == kCheatCount);
 
 inline constexpr char kLauncherPageSubtitle[] = "Optional gameplay modifiers";
 inline constexpr char kLauncherHelp[] =
-    "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session.";
+    "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for "
+    "offline and local play.";
 
 constexpr size_t Index(Cheat cheat) {
     return static_cast<size_t>(cheat);

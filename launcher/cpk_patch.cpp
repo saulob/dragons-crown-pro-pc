@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <system_error>
 #include <utility>
@@ -65,8 +66,12 @@ void WriteNumber(uint8_t* p, int type, uint64_t v) {
 }
 
 bool ReadFileRange(std::ifstream& in, uint64_t offset, size_t size, std::vector<uint8_t>& out) {
-    out.resize(size);
+    out.clear();
     in.clear();
+    in.seekg(0, std::ios::end);
+    const std::streamoff length = in.tellg();
+    if (length < 0 || offset > uint64_t(length) || size > uint64_t(length) - offset) return false;
+    out.resize(size);
     in.seekg(std::streamoff(offset));
     in.read(reinterpret_cast<char*>(out.data()), std::streamsize(size));
     return in.gcount() == std::streamsize(size);
@@ -119,7 +124,7 @@ struct UtfTable {
         const uint16_t ncols = ReadBe16(p + 24);
         const uint16_t row_len = ReadBe16(p + 26);
         const uint32_t nrows = ReadBe32(p + 28);
-        if (strings_off > packet.size() || rows_off > packet.size() ||
+        if (strings_off > packet.size() || rows_off > packet.size() || nrows > (1u << 22) ||
             uint64_t(rows_off) + uint64_t(row_len) * nrows > packet.size()) {
             if (error) *error = "@UTF offsets out of range";
             return false;
@@ -381,6 +386,10 @@ struct PatchWriter {
         a.content_offset_ = header.Number(0, "ContentOffset").value_or(0);
         a.align_ = uint32_t(header.Number(0, "Align").value_or(0x800));
         if (a.align_ == 0) a.align_ = 0x800;
+        if (a.align_ > (1u << 20)) {
+            if (error) *error = "unsupported alignment";
+            return false;
+        }
         a.enable_toc_crc_ = uint32_t(header.Number(0, "EnableTocCrc").value_or(0));
         if (!a.toc_offset_) {
             if (error) *error = "no table of contents";
@@ -532,6 +541,7 @@ struct UndoRecord {
 bool WriteWhole(const std::filesystem::path& path, const std::vector<uint8_t>& bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    out.flush();
     return out.good();
 }
 
@@ -546,6 +556,61 @@ bool ReadWhole(const std::filesystem::path& path, std::vector<uint8_t>& bytes) {
     return in.gcount() == size;
 }
 
+// Whether the undo record belongs to this file: the sections it restores are where it says, of the sizes it holds, and
+// the file has not shrunk below the length it would be cut back to.
+bool UndoMatches(const std::filesystem::path& cpk, const UndoRecord& undo) {
+    std::error_code ec;
+    if (std::filesystem::file_size(cpk, ec) < undo.original_len || ec) return false;
+    std::ifstream in(cpk, std::ios::binary);
+    const auto section_is = [&](uint64_t packet_pos, const char* magic, size_t size) {
+        std::vector<uint8_t> head;
+        return packet_pos >= 16 && ReadFileRange(in, packet_pos - 16, 16, head) && std::memcmp(head.data(), magic, 4) == 0 &&
+               ReadLe64(head.data() + 8) == size;
+    };
+    return in && section_is(undo.toc_pos, "TOC ", undo.toc.size()) && section_is(undo.header_pos, "CPK ", undo.header.size());
+}
+
+// Whether every entry of the patch that the archive holds is the patched file. False when it holds none of them.
+bool PatchHolds(const std::filesystem::path& cpk, const BlockPatch& patch) {
+    CpkArchive archive;
+    if (!archive.Open(cpk)) return false;
+    bool found = false;
+    for (const BlockPatchTarget& target : patch.targets) {
+        const CpkEntry* entry = archive.Find(target.name);
+        if (!entry) continue;
+        const std::vector<uint8_t> data = archive.Read(*entry);
+        if (data.size() != target.size || Crc32(data) != target.crc_after) return false;
+        found = true;
+    }
+    return found;
+}
+
+// The install hard-links the game's files from the folder it was made from, and writing through such a link would
+// change that folder's archive too: the patch gets a file of its own first.
+bool Unshare(const std::filesystem::path& file, std::string* error) {
+    std::error_code ec;
+    const uintmax_t links = std::filesystem::hard_link_count(file, ec);
+    if (ec || links <= 1) return true;
+    std::filesystem::path copy = file;
+    copy += ".copy";
+    std::filesystem::remove(copy, ec);
+    std::filesystem::copy_file(file, copy, std::filesystem::copy_options::none, ec);
+    if (!ec) {
+        std::filesystem::rename(copy, file, ec);
+        if (ec) {
+            std::filesystem::remove(file, ec);
+            std::filesystem::rename(copy, file, ec);
+        }
+    }
+    if (ec) {
+        std::error_code ignored;
+        std::filesystem::remove(copy, ignored);
+        *error = "cannot make a file of its own (" + ec.message() + ")";
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 PatchResult PatchWriter::Apply(const std::filesystem::path& cpk, const BlockPatch& patch, const PatchHooks& hooks) {
@@ -557,9 +622,14 @@ PatchResult PatchWriter::Apply(const std::filesystem::path& cpk, const BlockPatc
     };
     const std::string name = Utf8(cpk.filename());
     if (ArchiveState(cpk) == ArchivePatchState::kPatched) {
-        result.ok = true;
-        result.detail = name + ": already patched";
-        return result;
+        if (PatchHolds(cpk, patch)) {
+            result.ok = true;
+            result.detail = name + ": already patched";
+            return result;
+        }
+        // An earlier run was interrupted: back to the original first.
+        const PatchResult undone = RevertBlockPatch(cpk);
+        if (!undone.ok) return fail(undone.detail);
     }
     CpkArchive archive;
     std::string error;
@@ -598,8 +668,9 @@ PatchResult PatchWriter::Apply(const std::filesystem::path& cpk, const BlockPatc
     std::error_code ec;
     const uint64_t original_len = std::filesystem::file_size(cpk, ec);
     if (ec) return fail(name + ": cannot read the size");
+    if (!Unshare(cpk, &error)) return fail(name + ": " + error);
 
-    // The undo record goes first: a write that fails half way stays revertible.
+    // The undo record goes first, and any failure from here on puts the archive back as it was.
     UndoRecord undo;
     undo.original_len = original_len;
     undo.toc_pos = archive.toc_.file_pos;
@@ -607,66 +678,75 @@ PatchResult PatchWriter::Apply(const std::filesystem::path& cpk, const BlockPatc
     undo.header_pos = archive.header_.file_pos;
     undo.header = PatchWriter::Stored(archive.header_);
     for (const auto& [entry, data] : patched) undo.entries.push_back(entry->path);
-    if (!WriteWhole(UndoPath(cpk), undo.Serialize())) return fail(name + ": cannot write the undo record");
+    if (!WriteWhole(UndoPath(cpk), undo.Serialize())) {
+        std::filesystem::remove(UndoPath(cpk), ec);
+        return fail(name + ": cannot write the undo record");
+    }
 
     std::fstream out(cpk, std::ios::binary | std::ios::in | std::ios::out);
-    if (!out) return fail(name + ": cannot open for writing");
-    uint64_t total = 0;
-    for (const auto& [entry, data] : patched) total += data.size();
-    uint64_t done = 0;
-    uint64_t pos = original_len;
-    const uint64_t align = archive.align();
-    for (const auto& [entry, data] : patched) {
-        if (hooks.phase) hooks.phase(("Writing " + entry->path + "...").c_str());
-        const uint64_t aligned = (pos + align - 1) / align * align;
-        out.seekp(std::streamoff(pos));
-        const std::vector<char> zeros(size_t(aligned - pos), 0);
-        out.write(zeros.data(), std::streamsize(zeros.size()));
-        pos = aligned;
-        out.seekp(std::streamoff(pos));
-        constexpr size_t kChunk = 4u << 20;
-        for (size_t off = 0; off < data.size(); off += kChunk) {
-            const size_t n = std::min(kChunk, data.size() - off);
-            out.write(reinterpret_cast<const char*>(data.data() + off), std::streamsize(n));
-            done += n;
-            if (hooks.progress && !hooks.progress(done, total)) {
-                // Appended bytes past the original length are harmless; the table of contents is untouched.
-                out.close();
-                std::filesystem::resize_file(cpk, original_len, ec);
-                std::filesystem::remove(UndoPath(cpk), ec);
-                result.cancelled = true;
-                return fail("cancelled");
+    const auto fail_undone = [&](std::string why) {
+        out.close();
+        const PatchResult undone = RevertBlockPatch(cpk);
+        if (!undone.ok) why += " (" + undone.detail + ")";
+        return fail(std::move(why));
+    };
+    if (!out) return fail_undone(name + ": cannot open for writing");
+    try {
+        uint64_t total = 0;
+        for (const auto& [entry, data] : patched) total += data.size();
+        uint64_t done = 0;
+        uint64_t pos = original_len;
+        const uint64_t align = archive.align();
+        for (const auto& [entry, data] : patched) {
+            if (hooks.phase) hooks.phase(("Writing " + entry->path + "...").c_str());
+            const uint64_t aligned = (pos + align - 1) / align * align;
+            out.seekp(std::streamoff(pos));
+            const std::vector<char> zeros(size_t(aligned - pos), 0);
+            out.write(zeros.data(), std::streamsize(zeros.size()));
+            pos = aligned;
+            out.seekp(std::streamoff(pos));
+            constexpr size_t kChunk = 4u << 20;
+            for (size_t off = 0; off < data.size(); off += kChunk) {
+                const size_t n = std::min(kChunk, data.size() - off);
+                out.write(reinterpret_cast<const char*>(data.data() + off), std::streamsize(n));
+                done += n;
+                if (hooks.progress && !hooks.progress(done, total)) {
+                    result.cancelled = true;
+                    return fail_undone("cancelled");
+                }
             }
+            if (!out.good()) return fail_undone(name + ": write failed (disk full?)");
+            PatchWriter::Set(archive.toc_, entry->row, "FileOffset", pos - archive.toc_base());
+            PatchWriter::Set(archive.toc_, entry->row, "FileSize", data.size());
+            PatchWriter::Set(archive.toc_, entry->row, "ExtractSize", data.size());
+            result.appended += data.size();
+            pos += data.size();
         }
-        if (!out.good()) return fail(name + ": write failed (disk full?)");
-        PatchWriter::Set(archive.toc_, entry->row, "FileOffset", pos - archive.toc_base());
-        PatchWriter::Set(archive.toc_, entry->row, "FileSize", data.size());
-        PatchWriter::Set(archive.toc_, entry->row, "ExtractSize", data.size());
-        result.appended += data.size();
-        pos += data.size();
-    }
-    // Repoint the table of contents, and clear the CRC flags so a checked TOC is still accepted.
-    if (archive.enable_toc_crc()) {
-        PatchWriter::Set(archive.header_, 0, "EnableTocCrc", 0);
-        PatchWriter::Set(archive.header_, 0, "EnableFileCrc", 0);
-    }
-    const std::vector<uint8_t> toc = PatchWriter::Stored(archive.toc_);
-    const std::vector<uint8_t> header = PatchWriter::Stored(archive.header_);
-    out.seekp(std::streamoff(archive.toc_.file_pos));
-    out.write(reinterpret_cast<const char*>(toc.data()), std::streamsize(toc.size()));
-    out.seekp(std::streamoff(archive.header_.file_pos));
-    out.write(reinterpret_cast<const char*>(header.data()), std::streamsize(header.size()));
-    out.flush();
-    if (!out.good()) return fail(name + ": write failed");
-    out.close();
+        // Repoint the table of contents, and clear the CRC flags so a checked TOC is still accepted.
+        if (archive.enable_toc_crc()) {
+            PatchWriter::Set(archive.header_, 0, "EnableTocCrc", 0);
+            PatchWriter::Set(archive.header_, 0, "EnableFileCrc", 0);
+        }
+        const std::vector<uint8_t> toc = PatchWriter::Stored(archive.toc_);
+        const std::vector<uint8_t> header = PatchWriter::Stored(archive.header_);
+        out.seekp(std::streamoff(archive.toc_.file_pos));
+        out.write(reinterpret_cast<const char*>(toc.data()), std::streamsize(toc.size()));
+        out.seekp(std::streamoff(archive.header_.file_pos));
+        out.write(reinterpret_cast<const char*>(header.data()), std::streamsize(header.size()));
+        out.flush();
+        if (!out.good()) return fail_undone(name + ": write failed");
+        out.close();
 
-    // Read back through the normal path.
-    CpkArchive check;
-    if (!check.Open(cpk, &error)) return fail(name + ": verify: " + error);
-    for (const auto& [entry, data] : patched) {
-        const CpkEntry* e = check.Find(entry->path);
-        std::vector<uint8_t> back = e ? check.Read(*e, &error) : std::vector<uint8_t>();
-        if (back != data) return fail(name + ": verify failed for " + entry->path);
+        // Read back through the normal path.
+        CpkArchive check;
+        if (!check.Open(cpk, &error)) return fail_undone(name + ": verify: " + error);
+        for (const auto& [entry, data] : patched) {
+            const CpkEntry* e = check.Find(entry->path);
+            std::vector<uint8_t> back = e ? check.Read(*e, &error) : std::vector<uint8_t>();
+            if (back != data) return fail_undone(name + ": verify failed for " + entry->path);
+        }
+    } catch (const std::exception& e) {
+        return fail_undone(name + ": " + e.what());
     }
     result.ok = true;
     result.patched = patched.size();
@@ -695,6 +775,10 @@ PatchResult RevertBlockPatch(const std::filesystem::path& cpk) {
     UndoRecord undo;
     if (!ReadWhole(undo_path, bytes) || !undo.Parse(bytes)) {
         result.detail = name + ": the undo record is unreadable";
+        return result;
+    }
+    if (!UndoMatches(cpk, undo)) {
+        result.detail = name + ": the undo record is not for this archive";
         return result;
     }
     {

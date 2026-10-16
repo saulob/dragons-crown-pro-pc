@@ -1602,6 +1602,60 @@ void TestControllerPrompts(const fs::path& base) {
     CHECK(!SetPromptStyle(base / "nowhere", PromptStyle::kXbox, Span(patch_bytes)).ok);
     CHECK(PromptArchives(base / "nowhere").empty() && InstalledPromptStyle(base / "nowhere") == PromptStyle::kPlayStation);
 
+    // Failures and interruptions leave the archive usable: it is put back, or recognised and redone.
+    {
+        const fs::path dir = base / "prompts_safety";
+        const fs::path us = dir / "DRACRO_US.CPK";
+        WriteAll(us, original_us);
+        const BlockPatch parsed = *ParseBlockPatch(Span(patch_bytes));
+        PatchHooks cancel_writing;
+        cancel_writing.progress = [](uint64_t, uint64_t total) { return total == 0; };
+        const PatchResult cancelled = ApplyBlockPatch(us, parsed, cancel_writing);
+        CHECK(!cancelled.ok && cancelled.cancelled && ReadAll(us) == original_us && !fs::exists(UndoPath(us)));
+
+        // Cut off after the undo record and before the table of contents.
+        CHECK(ApplyBlockPatch(us, parsed).ok);
+        WriteAll(us, original_us);
+        CHECK(ArchiveState(us) == ArchivePatchState::kPatched);
+        const PatchResult redone = ApplyBlockPatch(us, parsed);
+        CpkArchive redone_archive;
+        CHECK(redone.ok && redone.patched == 2 && redone_archive.Open(us) &&
+              Bytes(redone_archive.Read(*redone_archive.Find("stage/Interface_US.ftx"))) == want_us);
+        CHECK(RevertBlockPatch(us).ok && ReadAll(us) == original_us);
+
+        // An undo record that is not this archive's, or is garbage, is refused and nothing is written.
+        CHECK(ApplyBlockPatch(us, parsed).ok);
+        const std::string patched_bytes = ReadAll(us);
+        const std::string other = BuildCpk({{"stage/Interface.ftx", foreign, false}}, false);
+        WriteAll(us, other);
+        const PatchResult not_ours = RevertBlockPatch(us);
+        CHECK(!not_ours.ok && not_ours.detail.find("not for this archive") != std::string::npos && ReadAll(us) == other);
+        WriteAll(us, patched_bytes);
+        WriteAll(UndoPath(us), "DCPUNDO1 not a record");
+        CHECK(!RevertBlockPatch(us).ok && ReadAll(us) == patched_bytes);
+        fs::remove(UndoPath(us));
+
+        // Entries pointing past the end of a truncated archive are a read error.
+        WriteAll(dir / "cut.CPK", original_us.substr(0, 0x3000));
+        CpkArchive cut;
+        std::string error;
+        const CpkEntry* missing = cut.Open(dir / "cut.CPK", &error) ? cut.Find("stage/Interface.ftx") : nullptr;
+        CHECK(missing && cut.Read(*missing, &error).empty() && !error.empty());
+
+        // An archive hard-linked to the folder the install was made from is patched on a copy of its own.
+        const fs::path shared = base / "prompts_shared", linked = base / "prompts_linked";
+        WriteAll(shared / "DRACRO_US.CPK", original_us);
+        fs::create_directories(linked);
+        std::error_code ec;
+        fs::create_hard_link(shared / "DRACRO_US.CPK", linked / "DRACRO_US.CPK", ec);
+        if (!ec) {
+            CHECK(SetPromptStyle(linked, PromptStyle::kXbox, Span(patch_bytes)).ok);
+            CHECK(InstalledPromptStyle(linked) == PromptStyle::kXbox && ReadAll(shared / "DRACRO_US.CPK") == original_us);
+            CHECK(fs::hard_link_count(linked / "DRACRO_US.CPK") == 1 && !fs::exists(linked / "DRACRO_US.CPK.copy"));
+            CHECK(SetPromptStyle(linked, PromptStyle::kPlayStation, {}).ok && ReadAll(linked / "DRACRO_US.CPK") == original_us);
+        }
+    }
+
     // CRILAYLA: a corrupt block is an error, not a crash.
     {
         std::string block = CrilaylaLiterals(iface);

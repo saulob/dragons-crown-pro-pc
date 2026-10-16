@@ -90,7 +90,8 @@ void TestCheatList() {
     CHECK(keys.size() == kCheatCount && labels.size() == kCheatCount);
     CHECK(std::string(kLauncherPageSubtitle) == "Optional gameplay modifiers");
     CHECK(std::string(kLauncherHelp) ==
-          "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session.");
+          "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant "
+          "for offline and local play.");
     CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 2 && Bit(Cheat::MovementSpeed) == 128);
     CHECK(std::string(kMovementSpeedKey) == "cheat_movement_speed_2x");
 }

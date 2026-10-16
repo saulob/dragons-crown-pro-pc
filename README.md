@@ -28,6 +28,7 @@
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time)
 - An in-game settings menu: **Insert** on the keyboard, or **R3 + L2** on the controller
 - Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
+- Local multiplayer with up to four controllers
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
 
 ## What you need
@@ -145,7 +146,7 @@ The game runs at its own 60 frames per second.
 | Touchpad left / right (Back) | Tab / Backspace |
 
 - **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu. **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
-- One player: local multiplayer and online play are not supported.
+- **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged. Online play is not supported.
 
 ### About
 - The port version, game version, renderer and library versions

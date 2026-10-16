@@ -86,7 +86,12 @@ PLAYING
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
   Steam Deck's own controls.
 - The keyboard works too; the launcher's Controls page lists the keys.
-- One player: local multiplayer and online play are not supported.
+- Local multiplayer: up to four players, one controller each; the keyboard is always
+  Player 1's. A controller connected later takes the lowest free player slot, and a
+  player stays logged in when their controller is unplugged. Online play is not
+  supported.
+- F10 opens the Cheats menu (meant for offline and local play); the launcher has a
+  Cheats page for the values saved for the next start.
 - To open the launcher again after turning it off, hold Shift while starting
   (X11 sessions), start the AppImage with the option --launcher, or use the
   "Show launcher" action of its desktop entry. On the Steam Deck: Steam > the
