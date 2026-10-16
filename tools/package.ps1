@@ -16,7 +16,7 @@
   Only checks an existing staged folder, then exits.
 .EXAMPLE
   .\tools\package.ps1
-  .\tools\package.ps1 -VerifyOnly dist\DragonsCrownProPC-v0.2.0-windows-x64
+  .\tools\package.ps1 -VerifyOnly dist\DragonsCrownProPC-v0.3.0-windows-x64
 #>
 [CmdletBinding()]
 param(

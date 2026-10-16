@@ -24,6 +24,7 @@
 - **Render resolution** from 480p to 4K (3840×2160), with the game's native 1080p as the default
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
+- **Menu & Subtitles language**: English, French, German, Italian or Spanish
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time)
 - An in-game settings menu: **Insert** on the keyboard, or **R3 + L2** on the controller
 - Xbox controllers without setup, and keyboard support
@@ -52,7 +53,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.2.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v0.3.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dcp-loader.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -117,6 +118,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 - **Texture filtering**: Game, 2x, 4x, 8x or 16x
 
 ### Gameplay
+- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish. Voices are chosen inside the game.
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Frame counter**: shows the frame rate and frame time in a corner of the game
 

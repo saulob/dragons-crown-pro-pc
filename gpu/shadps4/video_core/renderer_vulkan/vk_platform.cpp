@@ -452,6 +452,16 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     return std::move(instance);
 }
 
+// dcp: init(Instance) must run in this file, the only one that defines VK_USE_PLATFORM_*.
+vk::ResultValue<vk::UniqueInstance> CreateProbeInstance() {
+    const vk::ApplicationInfo application{.apiVersion = TargetVulkanApiVersion};
+    auto created = vk::createInstanceUnique({.pApplicationInfo = &application});
+    if (created.result == vk::Result::eSuccess) {
+        VULKAN_HPP_DEFAULT_DISPATCHER.init(*created.value);
+    }
+    return created;
+}
+
 vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance) {
     const vk::DebugUtilsMessengerCreateInfoEXT msg_ci = {
         .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
