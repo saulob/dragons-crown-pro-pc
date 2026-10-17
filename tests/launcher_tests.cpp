@@ -1445,12 +1445,14 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 7);
+    CHECK(count == 8);
     CHECK(std::string(PageName(kPageOrder[0])) == "Play");
     CHECK(std::string(PageName(kPageOrder[2])) == "Graphics");
     CHECK(std::string(PageName(kPageOrder[3])) == "Gameplay");
     CHECK(std::string(PageName(kPageOrder[4])) == "Cheats"); // directly below Gameplay
-    CHECK(std::string(PageName(kPageOrder[6])) == "About");
+    CHECK(std::string(PageName(kPageOrder[5])) == "Controls");
+    CHECK(std::string(PageName(kPageOrder[6])) == "Trophies"); // after Controls, before About
+    CHECK(std::string(PageName(kPageOrder[7])) == "About");
     CHECK(!KeyboardBindings().empty());
 }
 

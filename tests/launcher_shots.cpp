@@ -1,5 +1,6 @@
 // Renders every launcher page into <out dir>/page_N_Name.png with a hidden window and exits, to check the layout
-// without a person: dcp-launcher-shots <app0> <image dir> <out dir>. Settings go to a temporary folder.
+// without a person: dcp-launcher-shots <app0> <image dir> <out dir> [user seed dir]. Settings go to a temporary user
+// folder that starts as a copy of the seed folder.
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -18,7 +19,7 @@ __thread sigjmp_buf* runtime_fault_recover;
 #endif
 
 int main(int argc, char** argv) {
-    if (argc != 4) {
+    if (argc != 4 && argc != 5) {
         std::fprintf(stderr, "usage: %s <app0> <image dir> <out dir>\n", argv[0]);
         return 2;
     }
@@ -28,6 +29,9 @@ int main(int argc, char** argv) {
     const fs::path user = fs::temp_directory_path() / "dcp_launcher_shots_user";
     fs::remove_all(user);
     fs::create_directories(user);
+    if (argc == 5) {
+        fs::copy(argv[4], user, fs::copy_options::recursive);
+    }
     const std::string settings = (user / "dcp.ini").string();
 #ifdef _WIN32
     _putenv_s("DCP_LAUNCHER_SHOTS", out.string().c_str());

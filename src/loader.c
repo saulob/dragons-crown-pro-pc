@@ -7,6 +7,7 @@
 #include <time.h>
 #include <inttypes.h>
 #include "runtime.h"
+#include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
 #include "startup_save_hook.h"
 #include "dcpgpu.h"
@@ -441,6 +442,7 @@ int main(int argc, char **argv) {
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0);
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))
             runtime_savedata_configure(id);
+        trophy_runtime_configure(app0, user_dir ? user_dir : "user");
     }
     dcpgpu_register_kernel();
 #ifdef _WIN32

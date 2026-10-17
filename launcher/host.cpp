@@ -118,7 +118,28 @@ bool LauncherHost::Open(const HostOptions& options) {
     return true;
 }
 
+ImTextureID LauncherHost::CreateTexture(const uint8_t* rgba, int width, int height) {
+    if (!renderer_ || !rgba || width <= 0 || height <= 0) {
+        return ImTextureID{};
+    }
+    SDL_Texture* texture = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, width, height);
+    if (!texture) {
+        return ImTextureID{};
+    }
+    if (!SDL_UpdateTexture(texture, nullptr, rgba, width * 4)) {
+        SDL_DestroyTexture(texture);
+        return ImTextureID{};
+    }
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    textures_.push_back(texture);
+    return static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture));
+}
+
 void LauncherHost::Close() {
+    for (SDL_Texture* texture : textures_) {
+        SDL_DestroyTexture(texture);
+    }
+    textures_.clear();
     if (imgui_) {
         ImGui_ImplSDLRenderer3_Shutdown();
         ImGui_ImplSDL3_Shutdown();

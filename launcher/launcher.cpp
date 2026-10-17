@@ -36,6 +36,7 @@
 #include "prompts_patch.h"
 #include "settings.h"
 #include "shift_key.h"
+#include "trophy_page.h"
 #include "utf8.h"
 
 #ifndef DCP_PORT_VERSION
@@ -187,6 +188,7 @@ public:
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         placement_ = PlacementTracker(host_.Restored());
         fonts_ = trg::LoadSystemFonts(18.0f);
+        trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         Log("shown");
 
@@ -219,6 +221,7 @@ public:
         }
         SavePlacement(placement_.Flush());
         launcher_.reset();
+        trophy_page_.reset();
         host_.Close();
         Log(outcome == Outcome::kPlay ? "closed, starting the game" : "closed");
         return true;
@@ -387,6 +390,8 @@ private:
             return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr};
         case PageId::kControls:
             return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr};
+        case PageId::kTrophies:
+            return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr};
         case PageId::kAbout:
             return {name, "This port, and where your files and settings live.", [this](trg::Ui& ui) { PageAbout(ui); },
                     nullptr};
@@ -494,6 +499,9 @@ private:
             }
             paths_ = ActiveBuildPaths(RootsOf(paths_));
             Recheck();
+            if (trophy_page_) {
+                trophy_page_->Invalidate();
+            }
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
             // The fresh archives show the game's own prompts; put the chosen ones back.
@@ -751,6 +759,13 @@ private:
         launcher_->SetStatus("Could not change the controller prompts. See the log.", 8.0);
     }
 
+    std::filesystem::path UserDir() const { return PathFromUtf8(config_.user_dir ? config_.user_dir : "user"); }
+
+    void PageTrophies(trg::Ui& ui) {
+        trophy_page_->SetGame(files_ == GameFileState::kValid ? paths_.app0 : std::filesystem::path());
+        trophy_page_->Draw(ui);
+    }
+
     void PageAbout(trg::Ui& ui) {
         ui.Paragraph("Dragon's Crown Pro for PlayStation 4, running natively on this PC. No game files are included; "
                      "the game runs from the user's own copy.");
@@ -802,6 +817,7 @@ private:
     std::vector<std::string> gpu_names_;
     trg::Fonts fonts_;
     std::unique_ptr<trg::Launcher> launcher_;
+    std::unique_ptr<TrophyPage> trophy_page_;
     PlayGate play_;
     ProblemDialog problem_;
     PlacementTracker placement_;

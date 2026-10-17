@@ -128,6 +128,9 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 
 The game runs at its own 60 frames per second.
 
+### Trophies
+- The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package; the **Trophies** launcher page shows them. See [docs/TROPHIES.md](docs/TROPHIES.md).
+
 ### Cheats
 - **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x** (Player 1; gold is shared by the save), all Off by default; **Experience Multiplier** (Off, 2x, 5x or 10x) multiplies the experience every award adds. Press **F10** while playing to open the Cheats menu; what you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).
 

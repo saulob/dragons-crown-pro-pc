@@ -29,11 +29,15 @@ add_library(dcp_imgui_sdl STATIC ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMG
 target_include_directories(dcp_imgui_sdl PUBLIC ${IMGUI_DIR})
 target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 
-# Game files (check, PKG unpacking, install, boot image), the settings file, the Display options and the Controller prompts patch:
+# Game files (check, PKG unpacking, install, boot image), the trophies (src/trophies), the settings file, the Display options and the Controller prompts patch:
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
-    game_install.cpp game_profile.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c settings.cpp)
+    game_install.cpp game_profile.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c settings.cpp trophy_content.cpp
+    ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
+    ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
+    ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
+    ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 PRIVATE ZLIB::ZLIB)
 # Hashes and ciphers: CNG on Windows, OpenSSL's libcrypto elsewhere.
@@ -57,9 +61,10 @@ add_custom_command(OUTPUT ${DCP_PROMPTS_PATCH_SOURCE}
     DEPENDS ${DCP_PROMPTS_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
     COMMENT "Embedding prompts/xbox-prompts.dcpx")
 
-add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp
+add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp
     ${DCP_PROMPTS_PATCH_SOURCE})
 target_compile_definitions(dcp_launcher PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
+target_include_directories(dcp_launcher PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 target_link_libraries(dcp_launcher PUBLIC dcp_launcher_core trg_launcher dcp_imgui_sdl ${CMAKE_DL_LIBS})
 
 set_target_properties(dcp_launcher_core dcp_launcher PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -80,3 +85,11 @@ target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core PNG::PNG)
 target_include_directories(dcp-launcher-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 set_target_properties(dcp-launcher-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-launcher-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the local trophies (tools/test.ps1); not part of the default build.
+add_executable(dcp-trophy-tests EXCLUDE_FROM_ALL ../tests/trophy_tests.cpp ${DCP_LOG_SOURCE} ../gpu/shim/dcp_png.cpp)
+target_link_libraries(dcp-trophy-tests PRIVATE dcp_launcher_core PNG::PNG)
+target_include_directories(dcp-trophy-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
+target_compile_definitions(dcp-trophy-tests PRIVATE DCP_TROPHY_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src/trophies")
+set_target_properties(dcp-trophy-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-trophy-tests PRIVATE -Wall -Wextra)

@@ -2,7 +2,7 @@
 
 The PC launcher is [TRG Launcher](https://github.com/TekRantGaming/trg-launcher) 1.1.0 (pinned in `gpu/deps.txt`, the
 same revision as geometry-wars-retro-evolved-2-recompiled), in the same loader process as the game. Pages: Play, Display,
-Graphics, Gameplay, Cheats, Controls and About.
+Graphics, Gameplay, Cheats, Controls, Trophies and About.
 
 ## Architecture
 
@@ -247,7 +247,7 @@ No skip-intro or frame rate limit.
 
 ## Cheats
 
-Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, About. Subtitle "Optional gameplay modifiers", with the
+Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the
 line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for
 offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
@@ -294,6 +294,14 @@ launcher re-applies Xbox by itself. A pack that is not the one the patch was mad
 An archive that is a hard link to the game folder the install was made from (same drive) first gets a file of its own,
 so that folder is never changed. If a step fails, the archive is put back as it was; an undo record that does not belong
 to the archive, or an interrupted earlier run, is detected before anything is written.
+
+## Trophies
+
+Subtitle "Your trophies on this PC.". Shows the installed game's PlayStation trophies: "12 / 49 unlocked  24%", a progress bar,
+the count per grade, then one row per trophy (icon, name, grade, description; unlocked rows are highlighted with their date).
+A hidden trophy that is still locked shows "Hidden Trophy" and no description. Without an installed game the page says
+"Install a supported game to view its trophies."; when the list is encrypted and no valid Trophy Key is configured it shows Enter Trophy Key and Import from shadPS4... buttons, and with a key a "Trophy Key: Configured" row with Change... and Remove. The list scrolls inside the page.
+The page reads the same files the game writes. See [TROPHIES.md](TROPHIES.md).
 
 ## Launcher input
 

@@ -2,14 +2,17 @@
 // creates the game window and its Vulkan presenter, so only one SDL window and one ImGui context are alive at a time.
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 
 #include "placement.h"
 
 struct SDL_Renderer;
+struct SDL_Texture;
 struct SDL_Window;
 
 namespace dcp {
@@ -47,6 +50,9 @@ public:
     void SetFullscreen(bool fullscreen);
     std::optional<WindowState> State() const;
 
+    // A picture for ImGui to draw (RGBA8, width * height * 4 bytes). The host owns it until Close; 0 when it could not be made.
+    ImTextureID CreateTexture(const uint8_t* rgba, int width, int height);
+
     // The saved placement the window was opened with, when it lay on a display.
     const std::optional<WindowPlacement>& Restored() const { return restored_; }
 
@@ -55,6 +61,7 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     ImGuiContext* imgui_ = nullptr;
+    std::vector<SDL_Texture*> textures_;
     bool video_ = false;
     bool gamepad_ = false;
     bool quit_ = false;
