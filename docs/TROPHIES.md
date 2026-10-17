@@ -14,6 +14,7 @@ this key; it stays on this PC and is never sent anywhere. The Trophies page offe
 - **Enter Trophy Key**: type your own key (32 hexadecimal digits, hidden while typing; "Show key" reveals it).
 - **Import from shadPS4...**: pick an existing shadPS4 `keys.json` (`TrophyKeySet.ReleaseTrophyKey`) or an old `config.toml`
   (`[Keys]` `TrophyKey`). Only the key is read; nothing else from that file is copied and its location is not remembered.
+  On Linux it needs the desktop's file chooser (`zenity` or `kdialog`); without one the page says so and the key can still be typed in.
 - **Change...** and **Remove** once a key is configured. The page only shows "Configured", never the value. Replacing a
   configured key asks first.
 
@@ -25,7 +26,7 @@ Anything other than exactly 32 hexadecimal digits is rejected. Saving or importi
 that does not decrypt this game is reported on the page and kept until you change or remove it. Without a valid key the
 icons are unpacked but the list is not, and the unlocks the game reports are still saved by id and appear once the key works.
 Removing the key blanks `ReleaseTrophyKey` only: trophy progress, the unpacked list and your saves are untouched. The key
-is never written to the log. Decryption follows shadPS4's `trp.cpp`.
+is never written to the log.
 
 ## Progress
 
@@ -36,5 +37,5 @@ unreadable file is set aside as `.corrupt`.
 ## Behaviour
 
 The game's libSceNpTrophy calls (create/register context, unlock, game and trophy info, unlock state) are answered from these
-files. The Platinum trophy unlocks automatically with the last trophy that has a platinum link and a group above 0 (shadPS4's rule, read from `TROPCONF.XML`). The unlock-state count is the number of trophies in the list. Trophy text uses English when the pack has
-it. The launcher hides a locked hidden trophy's name and description; the game's own queries are answered as shadPS4 answers them. There is no in-game notification yet.
+files. The Platinum trophy unlocks automatically with the last of the trophies linked to it (`pid` in `TROPCONF.XML`). The unlock-state count is the number of trophies in the list. Trophy text uses English when the pack has
+it. The launcher hides a locked hidden trophy's name and description; the game's own queries return the stored trophy data. There is no in-game notification yet.

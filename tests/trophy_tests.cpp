@@ -1,5 +1,3 @@
-// Focused tests of the local trophies: the trophy list, the progress file, the trophy00.trp unpacker and the
-// libSceNpTrophy service the runtime calls. Everything is synthetic and lives in a temporary folder.
 #include <cstdio>
 #include <fcntl.h>
 #include <cstring>
@@ -196,7 +194,7 @@ std::string KeyJson(const TrophyKey& key) {
     return "{\"TrophyKeySet\":{\"ReleaseTrophyKey\":\"" + Hex(key.data(), key.size()) + "\"}}";
 }
 
-// A prepared game folder with npbind.dat and a trophy pack (upper-case names, as some dumps have them).
+// Upper-case pack file names, as some dumps have them.
 fs::path MakeGame(const fs::path& base, const char* name, const std::string& trp, const char* np_id = kNpId) {
     const fs::path app0 = base / name;
     WriteAll(app0 / "sce_sys" / "npbind.dat", NpBind(np_id));
@@ -263,7 +261,7 @@ void TestParsing() {
 
     const std::optional<TrophySet> no_group = ParseTrophyConf(
         "<trophyconf><trophy id=\"1\" ttype=\"B\" pid=\"0\"/><trophy id=\"2\" ttype=\"B\" pid=\"0\" gid=\"2\"/></trophyconf>");
-    CHECK(no_group && no_group->Find(1)->group == -1 && !CountsTowardPlatinum(*no_group->Find(1)) &&
+    CHECK(no_group && no_group->Find(1)->group == -1 && CountsTowardPlatinum(*no_group->Find(1)) &&
           CountsTowardPlatinum(*no_group->Find(2)));
 
     CHECK(!ParseTrophyConf("") && !ParseTrophyTexts(""));
@@ -643,7 +641,6 @@ void TestService(const fs::path& base) {
 void TestPlatinum(const fs::path& base) {
     const fs::path user = base / "plat-user";
     WriteAll(user / "keys.json", KeyJson(kKey));
-    // Only trophies with a platinum link and a group above 0 count; the Platinum trophy follows the last of them.
     const std::vector<Spec> specs = {
         {0, 'P', false, -1, 0, "P", "p"}, {1, 'G', false, 0, 1, "A", "a"}, {2, 'B', false, 0, 1, "B", "b"},
         {3, 'B', false, 0, 0, "Base group", "c"}, {4, 'S', false, -1, 1, "Unlinked", "d"}};
@@ -651,10 +648,10 @@ void TestPlatinum(const fs::path& base) {
     int32_t platinum = 5;
     CHECK(s.Unlock(3, &platinum) == 0 && platinum == kNoTrophy);
     CHECK(s.Unlock(1, &platinum) == 0 && platinum == kNoTrophy);
+    CHECK(s.Unlock(4, &platinum) == 0 && platinum == kNoTrophy);
     CHECK(s.Unlock(2, &platinum) == 0 && platinum == 0);
     FlagArray flags{};
     CHECK(s.Count(flags) == 5 && (flags.bits[0] & 1u));
-    CHECK(s.Unlock(4, &platinum) == 0 && platinum == kNoTrophy);
     UnlockNotice notice;
     int notices = 0;
     while (s.service.TakeNotice(notice)) ++notices;
@@ -709,7 +706,6 @@ void TestRegionsAndMissingData(const fs::path& base) {
         CHECK(!fs::exists(empty_user / "trophy"));
     }
 
-    // A missing or malformed key is not fatal: unlocks are still recorded by id.
     const fs::path keyless_user = base / "keyless-user";
     {
         Session s(reinstalled, keyless_user);
@@ -823,7 +819,6 @@ void TestKeyStorage(const fs::path& base) {
     WriteAll(broken / "keys.json", "this is not json");
     CHECK(!StoreTrophyKey(broken, kKey, KeySource::kEntered) && ReadAll(broken / "keys.json") == "this is not json");
 
-    // Importing reads only the key: the user's file gets nothing else from the source.
     const fs::path source = base / "ks-source";
     WriteAll(source / "keys.json", "{\"Secret2\": \"do-not-copy\", \"TrophyKeySet\": {\"ReleaseTrophyKey\": \"" +
                                        Hex(kKey.data(), kKey.size()) + "\", \"Extra\": \"do-not-copy-either\"}}");
@@ -833,7 +828,6 @@ void TestKeyStorage(const fs::path& base) {
     const std::string copied = ReadAll(target / "keys.json");
     CHECK(copied.find("do-not-copy") == std::string::npos && copied.find("Secret2") == std::string::npos);
 
-    // Reading a candidate never touches the configured key.
     CHECK(KeyFromFile(source / "keys.json") == kKey && LoadTrophyKey(user) == kKey);
 
     CHECK(ClearTrophyKey(user) && !LoadTrophyKey(user));
@@ -855,7 +849,6 @@ void TestKeyManagementFlow(const fs::path& base) {
     content = LoadTrophyPage(app0, user);
     CHECK(content.state == TrophyPageState::kNoList && content.pack == PackStatus::kKeyMissing && !content.key_configured);
 
-    // Progress saved while the list was unavailable survives every key change.
     {
         Session s(app0, user);
         CHECK(s.Unlock(2) == 0);
@@ -892,7 +885,6 @@ void TestKeyManagementFlow(const fs::path& base) {
     CHECK(log.find("imported from shadPS4 configuration") != std::string::npos);
     CHECK(log.find(wrong_hex) == std::string::npos && log.find(Upper(wrong_hex)) == std::string::npos);
 
-    // A key that does not decrypt this game leaves the page safe and the key in place.
     const fs::path user2 = base / "flow-user2";
     CHECK(StoreTrophyKey(user2, wrong, KeySource::kEntered));
     content = LoadTrophyPage(app0, user2);
@@ -904,7 +896,6 @@ void TestKeyManagementFlow(const fs::path& base) {
     content = LoadTrophyPage(app0, user2);
     CHECK(content.state == TrophyPageState::kNoList && content.pack == PackStatus::kKeyMissing && !content.key_configured);
 
-    // Removing the key keeps progress and the unpacked list.
     CHECK(ClearTrophyKey(user));
     CHECK(ReadAll(TrophyDirectory(user, kNpId) / "progress_user1.txt").find("unlocked 2 ") != std::string::npos);
     CHECK(ReadAll(TrophyDirectory(user, kNpId) / "progress_user1.txt").find("unlocked 1 ") != std::string::npos);

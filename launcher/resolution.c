@@ -39,7 +39,7 @@ DcpResolution dcp_render_target(const DcpResolution *resolution, const DcpAspect
     while (height > 8 && (long)aligned_width(height, aspect) * height > budget) height -= 8;
     target.width = aligned_width(height, aspect);
     target.height = height;
-    if ((long)target.width * height > 1920L * 1080) target.pro_memory = 1;
+    if (target.width > 1920 || height > 1080 || (long)target.width * height > 1920L * 1080) target.pro_memory = 1;
     return target;
 }
 

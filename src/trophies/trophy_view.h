@@ -1,5 +1,3 @@
-// What a trophy list looks like to the player: the package's list joined with the user's progress. The launcher's
-// Trophies page and the tests read this; the runtime writes the progress it reads.
 #pragma once
 
 #include <array>
@@ -20,7 +18,7 @@ struct TrophyRow {
     int id = 0;
     Grade grade = Grade::kBronze;
     bool unlocked = false;
-    bool masked = false; // hidden and still locked: name and detail are placeholders
+    bool masked = false;
     int64_t unlock_time = 0;
     std::string name;
     std::string detail;
@@ -37,7 +35,6 @@ struct TrophyView {
     std::array<int, 5> unlocked_by_grade{}; // indexed by Grade
 };
 
-// Whole percent of `unlocked` in `total`, rounded down; 0 for an empty list.
 int ProgressPercent(int unlocked, int total);
 
 TrophyView BuildTrophyView(const TrophySet& set, const TrophyStore& store);

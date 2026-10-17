@@ -106,7 +106,8 @@ WHERE THINGS ARE
 ----------------
 - Game files:     the "game" folder next to the AppImage file
 - Logs:           the "logs" folder next to the AppImage file
-- Settings (dcp.ini), saves and shader cache:
+- Settings (dcp.ini), saves, trophy progress, the Trophy Key (keep it
+                  private) and shader cache:
                   the "user" folder next to the AppImage file
 
 These folders are created when they are first needed and are not part of the

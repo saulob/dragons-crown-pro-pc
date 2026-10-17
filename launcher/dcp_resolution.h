@@ -23,9 +23,9 @@ extern const DcpResolution dcp_resolutions[DCP_RESOLUTION_COUNT];
 int dcp_resolution_index(const char *key);
 
 typedef struct {
-    const char *key;  /* aspect_ratio in dcp.ini */
-    const char *name; /* launcher label */
-    int width, height; /* the ratio's terms */
+    const char *key;
+    const char *name;
+    int width, height;
 } DcpAspectRatio;
 
 #define DCP_ASPECT_COUNT 6
@@ -34,9 +34,7 @@ extern const DcpAspectRatio dcp_aspect_ratios[DCP_ASPECT_COUNT];
 /* Index of the key, 0 (16:9 Original) when it is not listed. */
 int dcp_aspect_index(const char *key);
 
-/* The render target of a resolution in an aspect ratio: the resolution's height, the width that ratio gives it aligned
- * to the 8-pixel tile, and the PS4 Pro memory path when the target is bigger than 1080p. 16:9 returns the resolution
- * unchanged. A target above the 4K pixel count keeps its ratio and loses height until it fits. */
+/* The width is aligned to the 8-pixel tile; a target above the 4K pixel count keeps its ratio and loses height. */
 DcpResolution dcp_render_target(const DcpResolution *resolution, const DcpAspectRatio *aspect);
 
 /* One `mov reg, imm32` in the game that holds a render width or height. */

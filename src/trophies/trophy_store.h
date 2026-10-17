@@ -1,4 +1,3 @@
-// A user's unlocked trophies of one game (NP Communication ID): a small text file, written atomically.
 #pragma once
 
 #include <cstdint>
@@ -18,9 +17,7 @@ public:
     TrophyStore() = default;
     TrophyStore(std::filesystem::path trophy_dir, std::string np_comm_id, int user);
 
-    // Reads the progress file. A missing file is no progress; an unreadable one is set aside as *.corrupt and ignored.
     void Load();
-    // False when the file could not be replaced; the previous file is then untouched.
     bool Save() const;
 
     bool IsUnlocked(int id) const { return unlocked_.count(id) != 0; }

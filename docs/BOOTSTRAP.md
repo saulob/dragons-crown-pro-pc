@@ -46,7 +46,7 @@ The profile is `scripts/game_profiles.py`; only the facts above are in it.
 | Path | Content | Tracked |
 |---|---|---|
 | `game\*.pkg` | User's package, never modified | no |
-| `game\extracted\base` | Unpacked package (resumable, `.pkg_extracted` marker). `core` scope = eboot, modules, `sce_sys`, `.plt` (25 MB); `full` = also both CPK archives (5.7 GB) | no |
+| `game\extracted\<folder>` | Unpacked package (resumable, `.pkg_extracted` marker). `core` scope = eboot, modules, `sce_sys`, `.plt` (25 MB); `full` = also both CPK archives (5.7 GB) | no |
 | `game\prepared\v1.03` | Hard-link view that reproduces `/app0` | no |
 | `build\image\v1.03` | Boot image and `image.json` | no |
 | `user\` | Saves, caches at run time | no |

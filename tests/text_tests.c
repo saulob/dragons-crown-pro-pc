@@ -67,7 +67,7 @@ static void test_ime_panel_size(void) {
 #define ERR_FONT_OPEN_FAILED ((int32_t)0x80460036)
 #define ERR_NO_SUPPORT_GLYPH ((int32_t)0x80460042)
 #define ERR_NO_SUPPORT_SURFACE ((int32_t)0x80460050)
-#define FONTSET_SST_STD_EUROPEAN_JPCJK 0x1807A444u /* the one set Dragon's Crown opens */
+#define FONTSET_SST_STD_EUROPEAN_JPCJK 0x1807A444u /* the set the US and Japanese builds open */
 #define FONTSET_SST_STD_SCHINESE_GBCJK 0x180CAC44u
 #define FONTSET_SST_STD_JAPANESE_JP 0x18080444u
 

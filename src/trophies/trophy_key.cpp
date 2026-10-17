@@ -45,7 +45,6 @@ std::string_view Trim(std::string_view text) {
     return text;
 }
 
-// The quoted string whose opening quote is at `at`: its contents and the index after the closing quote.
 bool QuotedAt(std::string_view text, size_t at, char quote, std::string_view& contents, size_t& end) {
     if (at >= text.size() || text[at] != quote) {
         return false;
@@ -64,7 +63,6 @@ size_t FindKeyName(std::string_view text) {
     return set_at == std::string_view::npos ? std::string_view::npos : text.find(kKeyName, set_at);
 }
 
-// Position of the value's opening quote after `"ReleaseTrophyKey"` at `name_at`.
 std::optional<size_t> JsonValueQuote(std::string_view text, size_t name_at) {
     size_t at = SkipSpace(text, name_at + kKeyName.size());
     if (at >= text.size() || text[at] != ':') {
@@ -119,7 +117,6 @@ bool ObjectIsEmptyAfter(const std::string& text, size_t open) {
     return next < text.size() && text[next] == '}';
 }
 
-// `text` with ReleaseTrophyKey set to `hex`, adding the member (and TrophyKeySet) when the file lacks them.
 std::optional<std::string> WithKeyValue(std::string text, const std::string& hex) {
     if (Trim(text).empty()) {
         return "{\n  \"TrophyKeySet\": {\n    \"ReleaseTrophyKey\": \"" + hex + "\"\n  }\n}\n";

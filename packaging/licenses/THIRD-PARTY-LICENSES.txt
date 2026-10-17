@@ -36,7 +36,7 @@ Noto Sans 2.015 (embedded font; stands in for the PS4 system font set)
                             SIL Open Font License 1.1. Copyright 2022 The Noto Project Authors.  licenses\NotoSans
                             NotoSans-Regular.ttf unmodified from https://github.com/notofonts/notofonts.github.io,
                             fonts/NotoSans/hinted/ttf at commit 28b15b4b43b7bed62b5cf6e6b0b5ff5846270535.
-Noto Sans TC (embedded font; stands in for the PS4 Chinese system font set)
+Noto Sans TC 2.004 (embedded font; stands in for the PS4 Chinese system font set)
                             SIL Open Font License 1.1. Copyright 2014-2021 Adobe.                licenses\NotoSansTC
                             NotoSansTC-Regular.otf unmodified from https://github.com/notofonts/noto-cjk,
                             Sans/SubsetOTF/TC at commit f8d157532fbfaeda587e826d4cd5b21a49186f7c.

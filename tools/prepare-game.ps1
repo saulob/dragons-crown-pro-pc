@@ -9,7 +9,7 @@
 .PARAMETER Title
   CUSA10454 (USA), CUSA07001 (Japan) or CUSA10209 (Asia, Hong Kong). Empty: the title of the packages.
 .PARAMETER Version
-  1.00, 1.02 or 1.03 (CUSA07001); 1.03 (CUSA10454); 1.00 or 1.02 (CUSA10209). Empty: the one build the packages complete.
+  1.00, 1.02 or 1.03 (CUSA07001); 1.00 (CUSA10454); 1.00 or 1.02 (CUSA10209). Empty: the one build the packages complete.
 .PARAMETER Scope
   core: executables, modules and metadata only (about 25 MB). full: all game data (about 5.7 GB, the CPK archives).
 #>

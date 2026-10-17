@@ -1,4 +1,3 @@
-// The launcher's Trophies page: the trophy list of the installed game with the progress the game has saved on this PC.
 #pragma once
 
 #include <filesystem>
@@ -18,9 +17,7 @@ class TrophyPage {
 public:
     TrophyPage(LauncherHost& host, std::filesystem::path user_dir) : host_(host), user_dir_(std::move(user_dir)) {}
 
-    // The game folder to show, or empty when the game is not installed.
     void SetGame(const std::filesystem::path& app0);
-    // The next Draw reads the trophy files again.
     void Invalidate();
     void Draw(trg::Ui& ui);
 

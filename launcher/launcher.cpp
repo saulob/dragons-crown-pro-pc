@@ -134,7 +134,7 @@ std::string StatusDetail(GameFileState state) {
     switch (state) {
     case GameFileState::kValid: return "";
     case GameFileState::kMissing: return "Install the game from your own .pkg file.";
-    case GameFileState::kDifferentVersion: return "Install " + SupportedBuildsText() + " from your own .pkg file.";
+    case GameFileState::kDifferentVersion: return "Install a supported build from your own .pkg file.";
     case GameFileState::kReadError: return "Check that the game folder can be read, then install again.";
     }
     return "";
@@ -460,8 +460,10 @@ private:
         outcome_ = std::make_shared<InstallResult>();
         const bool started = install_.Start(
             "Checking the package...",
-            [outcome = outcome_, source = PathFromUtf8(picked), roots = RootsOf(paths_)](trg::Task& task) {
+            [outcome = outcome_, source = PathFromUtf8(picked), roots = RootsOf(paths_),
+             replace = files_ == GameFileState::kValid](trg::Task& task) {
                 InstallHooks hooks;
+                hooks.replace_active = replace;
                 hooks.phase = [&task](const char* text) {
                     task.SetLabel(text);
                     task.Progress(0, 0);

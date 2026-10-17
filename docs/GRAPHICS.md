@@ -32,9 +32,11 @@ out of the free queue while it shows it, so the GPU thread can neither draw into
 
 ## Render resolution
 
-`launcher/resolution.c` rewrites the game's 23 display-target sizes (`mov reg, imm32` of 1920 / 3840 and 1080 / 2160)
-after checking each still holds its original instruction; the game does not start if one does not. Native leaves the code
-untouched. `sceKernelIsNeoMode` answers PS4 Pro to the game for 1440p, 1800p and 4K, which selects its larger graphics
+`launcher/resolution.c` rewrites the build's 23 display-target sizes (`mov reg, imm32` of 1920 / 3840 and 1080 / 2160;
+the tables are in `launcher/game_profile.cpp`) after checking each still holds its original instruction; the game does not
+start if one does not. Native in 16:9 leaves the code untouched; the Aspect Ratio setting changes the width of the target
+(docs/LAUNCHER.md). `sceKernelIsNeoMode` answers PS4 Pro to the game for a target larger than 1920 × 1080 (1440p, 1800p,
+4K and the wider shapes), which selects its larger graphics
 memory path; the video core's own GnmDriver packets stay base PS4, which the emulated command processor accepts either
 way. In that mode the game tiles textures with the PS4 Pro (alt tile) layout, which the detiler follows from the texture
 descriptor: 16 pipes and the alternate bank parameters.

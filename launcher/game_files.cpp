@@ -125,8 +125,7 @@ const GameBuild* BuildOfImageReport(const std::string& report, std::span<const G
     return found;
 }
 
-// Installs made before the build was named by its APP_VER carry the marker version 1.03; only the tree that already
-// passed the check as the verified CUSA10454 build is renamed. The marker keeps its modification time, which orders builds.
+// v0.5.0 markers say version 1.03: only a tree already verified as the US build is renamed, keeping the marker's time.
 bool MigrateLegacyMarker(const std::filesystem::path& marker_file, const std::string& marker, const GameBuild& build,
                          const std::string& version) {
     constexpr std::string_view kLegacy = "\"version\": \"1.03\"";

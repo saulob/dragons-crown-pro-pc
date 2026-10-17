@@ -1202,6 +1202,9 @@ void TestAspectRatio(const fs::path& base) {
     CHECK(narrow1440.width == 1920 && narrow1440.height == 1440 && narrow1440.pro_memory == 1);
     CHECK(dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[2]).pro_memory == 1);
     CHECK(dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[4]).pro_memory == 0);
+    const DcpResolution wide720 = dcp_render_target(&dcp_resolutions[2], &dcp_aspect_ratios[3]);
+    CHECK(wide720.width == 2560 && wide720.height == 720 && wide720.pro_memory == 1);
+    CHECK(dcp_render_target(&dcp_resolutions[2], &dcp_aspect_ratios[4]).pro_memory == 0);
     for (const DcpResolution& resolution : dcp_resolutions) {
         for (const DcpAspectRatio& aspect : dcp_aspect_ratios) {
             const DcpResolution target = dcp_render_target(&resolution, &aspect);
@@ -2004,6 +2007,9 @@ void TestLayers(const fs::path& base) {
     fs::copy(installed.paths.app0, BuildPaths(present, kJp103).app0, fs::copy_options::recursive);
     fs::copy(installed.paths.image_dir, BuildPaths(present, kJp103).image_dir, fs::copy_options::recursive);
     CHECK(InstallGame(pkg / "jp-103.pkg", present, {}, installed.builds).status == InstallStatus::kUpToDate);
+    InstallHooks reinstall;
+    reinstall.replace_active = true;
+    CHECK(InstallGame(pkg / "jp-103.pkg", present, reinstall, installed.builds).status != InstallStatus::kUpToDate);
 
     // Each version's own files: 1.00 is complete without any update file; 1.02 and 1.03 need theirs.
     {
@@ -2321,8 +2327,8 @@ void TestActivation(const fs::path& base) {
     CHECK(std::string(DescribeInstall(InstallStatus::kActivated).title) == "Game activated");
 }
 
-// The two supported builds: their identities, archives, flags and the boot image report that names them, and the
-// checks that keep one build's files out of the other build's folders.
+// The supported builds: their identities, archives, flags and the boot image report that names them, and the
+// checks that keep one build's files out of another build's folders.
 void TestBuilds(const fs::path& base) {
     CHECK(SupportedBuilds().size() == 6);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
@@ -2354,7 +2360,7 @@ void TestBuilds(const fs::path& base) {
                                     {"APP_VER", std::string(FinishedLayer(kCk).app_ver)},
                                     {"VERSION", std::string(FinishedLayer(kCk).sfo_version)}})).state == GameFileState::kDifferentVersion);
 
-    // The boot image report names its build by title and eboot hash; the issue #14 hash names no build.
+    // The boot image report names its build by title and eboot hash; an unknown hash names no build.
     const fs::path report_dir = base / "build-report";
     const auto build_label = [&](const char* title, const char* sha, const char* app_ver = nullptr) {
         const std::string app = app_ver ? std::string(",\n  \"app_ver\": \"") + app_ver + "\"" : std::string();

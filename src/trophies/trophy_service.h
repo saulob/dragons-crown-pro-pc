@@ -1,5 +1,3 @@
-// libSceNpTrophy for a console that is offline: contexts, handles and registration as the game's SDK expects them, with
-// the trophies and the progress kept on this PC. The runtime's import wrappers call straight into this class.
 #pragma once
 
 #include <cstdint>
@@ -47,8 +45,6 @@ struct UnlockNotice {
 
 class TrophyService {
 public:
-    // Unpacks the game's trophy pack when needed, loads its list and logs the outcome. Without it (or without a trophy
-    // list) unlocks are still recorded by id when the NP Communication ID is known.
     void Configure(const std::filesystem::path& app0, const std::filesystem::path& user_dir);
     void SetClock(std::function<int64_t()> unix_seconds);
 

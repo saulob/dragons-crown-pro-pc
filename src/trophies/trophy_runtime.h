@@ -1,5 +1,3 @@
-/* The runtime's side of libSceNpTrophy: C entry points over dcp::trophies::TrophyService. Return values are the SDK's
- * error codes (0 on success). */
 #ifndef DCP_TROPHY_RUNTIME_H
 #define DCP_TROPHY_RUNTIME_H
 
@@ -9,7 +7,6 @@
 extern "C" {
 #endif
 
-/* Called once with the prepared game folder and the user folder (UTF-8): unpacks the trophy pack if needed and loads it. */
 void trophy_runtime_configure(const char *app0, const char *user_dir);
 
 int32_t trophy_runtime_create_context(int32_t *context, int32_t user, uint32_t label, uint64_t options);

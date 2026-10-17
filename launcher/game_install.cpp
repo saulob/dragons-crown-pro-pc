@@ -152,7 +152,7 @@ DWORD CALLBACK CopyProgress(LARGE_INTEGER, LARGE_INTEGER transferred, LARGE_INTE
     return PROGRESS_CONTINUE;
 }
 
-// A hard link, as the development preparation makes, costs no space; another drive gets a copy.
+// A hard link costs no space; another drive gets a copy.
 Transfer TransferFile(const fs::path& from, const fs::path& to, CopyContext& copy, std::string& error) {
     if (CreateHardLinkW(to.c_str(), from.c_str(), nullptr)) {
         return Transfer::kLinked;
@@ -442,8 +442,11 @@ bool ActivatePrepared(const fs::path& app0) {
 // that passes the readiness check becomes the active one, whether it is older or newer. Nothing is returned when the
 // build has to be installed.
 std::optional<InstallResult> ReuseInstalledBuild(const GameRoots& roots, std::span<const GameBuild> builds,
-                                                 const GameBuild& build) {
+                                                 const GameBuild& build, bool replace_active) {
     if (ActiveValidBuild(roots, builds) == &build) {
+        if (replace_active) {
+            return std::nullopt;
+        }
         return Failure(InstallStatus::kUpToDate, build.label);
     }
     const GamePaths target = BuildPaths(roots, build);
@@ -520,6 +523,9 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
     if (const GameCheck base_check = CheckGameTree(base.app0, builds);
         base_check.state != GameFileState::kValid || base_check.build != base_build) {
         return Failure(InstallStatus::kUpdateNeedsBase, base_check.detail);
+    }
+    if (!IsReplaceable(layout.app0, kPreparedMarker) || !IsReplaceable(layout.image, "boot.bin")) {
+        return Failure(InstallStatus::kForeignFolder, Utf8(layout.app0) + " or " + Utf8(layout.image));
     }
     if (const PackageResult loaded = package.LoadFiles(); !loaded.ok()) {
         return Failure(FromPackage(loaded.code), loaded.detail);
@@ -606,7 +612,7 @@ InstallResult InstallFromPackage(const fs::path& package_file, const GameRoots& 
         return Failure(FromCheck(identity), identity.detail);
     }
     const GameBuild& build = *identity.build;
-    if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build)) {
+    if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build, hooks.replace_active)) {
         return *reused;
     }
     const Layout layout(BuildPaths(roots, build));
@@ -638,7 +644,7 @@ InstallResult InstallFromFolder(const fs::path& source_dir, const GameRoots& roo
         return Failure(FromCheck(check), check.detail);
     }
     const GameBuild& build = *check.build;
-    if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build)) {
+    if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build, hooks.replace_active)) {
         return *reused;
     }
     const Layout layout(BuildPaths(roots, build));

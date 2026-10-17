@@ -98,7 +98,6 @@ bool WriteText(const fs::path& path, const std::string& text) {
     return static_cast<bool>(out);
 }
 
-// Replaces <dir>/<name> by <from>/<name>.
 bool SwapIn(const fs::path& from, const fs::path& dir, const char* name) {
     std::error_code ec;
     fs::remove_all(dir / name, ec);

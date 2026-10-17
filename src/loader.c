@@ -48,6 +48,8 @@ static int entered_game;
 static int gpu_enabled;
 
 static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
+/* For failures after the GPU threads started: exit() would run destructors under them. */
+static void fail_running(const char *message) { fprintf(stderr, "ERROR: %s\n", message); runtime_log_flush(); _exit(1); }
 static uint64_t read64(FILE *f) {
     unsigned char b[8];
     if (fread(b, 1, 8, f) != 8) fail("truncated boot file");
@@ -622,12 +624,12 @@ int main(int argc, char **argv) {
     }
     if (render_resolution!=&dcp_resolutions[0] || aspect_ratio!=&dcp_aspect_ratios[0]) {
         char error[320];
-        if (!known_build) fail("render resolution and aspect ratio need a supported game build");
+        if (!known_build) fail_running("render resolution and aspect ratio need a supported game build");
         if (!dcp_apply_resolution(image,size,game_build.resolution_sites,game_build.resolution_site_count,
                                   &render_target,error,sizeof(error))) {
             char message[400];
             snprintf(message,sizeof(message),"%s, game build %s",error,game_build.label);
-            fail(message);
+            fail_running(message);
         }
     }
     if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);

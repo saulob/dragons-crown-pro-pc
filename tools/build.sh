@@ -75,7 +75,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dcp-loader)
-((test)) && targets+=(dcp-launcher-tests dcp-cheats-tests dcp-runtime-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dcp-loader
 [[ -x $loader ]] || die "Missing $loader"
@@ -83,12 +83,16 @@ loader=$build_dir/bin/dcp-loader
 if ((test)); then
     step 'Running the launcher tests'
     "$build_dir/bin/dcp-launcher-tests"
+    step 'Running the trophy tests'
+    "$build_dir/bin/dcp-trophy-tests"
     step 'Running the cheat tests'
     "$build_dir/bin/dcp-cheats-tests"
     step 'Running the runtime tests (memory, fibers)'
     "$build_dir/bin/dcp-runtime-tests"
     step 'Running the text tests (text dialog, system font set)'
     "$build_dir/bin/dcp-text-tests"
+    step 'Running the save-data tests (mounts, Japanese startup save hook)'
+    "$build_dir/bin/dcp-savedata-tests"
     step 'Running the cursor auto-hide tests'
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the window fit tests'

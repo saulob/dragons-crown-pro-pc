@@ -274,7 +274,8 @@ int32_t TrophyService::UnlockTrophy(int32_t context, int32_t handle, int32_t tro
     const int64_t now = clock_ ? clock_() : static_cast<int64_t>(std::time(nullptr));
     store.Unlock(trophy_id, now);
     std::vector<const Trophy*> earned{trophy};
-    if (platinum && !store.IsUnlocked(platinum->id) && base - 1 == base_unlocked) {
+    const int after = base_unlocked + (trophy && CountsTowardPlatinum(*trophy) ? 1 : 0);
+    if (platinum && !store.IsUnlocked(platinum->id) && base > 0 && after == base) {
         store.Unlock(platinum->id, now);
         *platinum_id = platinum->id;
         earned.push_back(platinum);

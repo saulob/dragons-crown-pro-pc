@@ -16,7 +16,7 @@
   Only checks an existing staged folder, then exits.
 .EXAMPLE
   .\tools\package.ps1
-  .\tools\package.ps1 -VerifyOnly dist\DragonsCrownProPC-v0.5.0-windows-x64
+  .\tools\package.ps1 -VerifyOnly dist\DragonsCrownProPC-v0.6.0-windows-x64
 #>
 [CmdletBinding()]
 param(
@@ -167,7 +167,7 @@ function Test-ReleaseFolder([string]$Dir) {
             }
         }
     }
-    foreach ($leaf in $RootFiles + @('licenses\THIRD-PARTY-LICENSES.txt', 'licenses\MSYS2-PACKAGES.txt')) {
+    foreach ($leaf in $RootFiles + @('licenses\THIRD-PARTY-LICENSES.txt', 'licenses\MSYS2-PACKAGES.txt', 'licenses\NotoSansTC\LICENSE-NotoSansTC.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $base $leaf) -PathType Leaf)) { $problems.Add("missing: $leaf") }
     }
     return $problems

@@ -1,4 +1,3 @@
-// What the Trophies page shows for a game folder and user folder: the same files the game's runtime reads and writes.
 #pragma once
 
 #include <filesystem>
@@ -26,7 +25,6 @@ struct TrophyPageContent {
     trophies::TrophyView view;
 };
 
-// An empty app0 means no game is installed. Unpacks the trophy pack when that is needed.
 TrophyPageContent LoadTrophyPage(const std::filesystem::path& app0, const std::filesystem::path& user_dir);
 
 } // namespace dcp

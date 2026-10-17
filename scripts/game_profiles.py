@@ -1,6 +1,6 @@
 """Per-title facts for the games this port knows, keyed by TITLE_ID in sce_sys/param.sfo.
 
-Everything here was read from the supplied packages; nothing is assumed. A version's layers are its packages, the base
+A version's layers are its packages, the base
 first and then the updates applied over it; the last layer's param.sfo is the finished game's. launcher/game_profile.cpp
 mirrors these values, and tests/launcher_tests.cpp checks that the two agree.
 """
@@ -14,7 +14,6 @@ PROFILES = {
         'region': 'USA',
         'content_id': 'UP2611-CUSA10454_00-DRAGONSCROWNPRO1',
         'versions': {
-            # The only package seen is a base ('gd') declaring APP_VER 01.00 and VERSION 01.03.
             '1.00': {
                 'layers': ({'app_ver': '01.00', 'sfo_version': '01.03', 'update': False},),
                 'eboot_sha256': 'f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a',
@@ -33,7 +32,6 @@ PROFILES = {
         'region': 'Japan',
         'content_id': 'JP0005-CUSA07001_00-DRAGONSCROWN0001',
         'versions': {
-            # The base package alone is a complete game.
             '1.00': {
                 'layers': ({'app_ver': '01.00', 'sfo_version': '01.00', 'update': False},),
                 'eboot_sha256': 'e838e5c551f4ea2d13a13246dcd5474a888c56aa8abf5110f1219c0ceb0ae05f',

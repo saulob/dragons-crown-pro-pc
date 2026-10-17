@@ -16,12 +16,15 @@
 
 ## Features
 
+- **Regions**: the US (`CUSA10454`), Japanese (`CUSA07001` 1.00, 1.02 and 1.03) and Asia / Hong Kong (`CUSA10209` 1.00 and 1.02) PS4 releases
 - **Native PC port**: the game's own x86-64 code runs directly on the PC. It is not an emulator. Windows is the primary tested platform, and there is an experimental native Linux / Steam Deck AppImage with the same intended feature set. Linux needs no Proton or Wine.
 - **TRG launcher** that installs the game directly from your own `.pkg` file, with no Python or other tools needed, and remembers its window position
 - **Windowed** and **Borderless Fullscreen**, switched with **F11** while playing, with window size and monitor selection
 - **Graphics card selection**: Automatic, or any Vulkan graphics card the renderer can use
 - **VSync** on or off
 - **Render resolution** from 480p to 4K (3840×2160), with the game's native 1080p as the default
+- **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4
+- **Local PS4 trophies**, offline on this PC, shown on the launcher's Trophies page
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
 - **Menu & Subtitles language**: English, French, German, Italian or Spanish
@@ -46,7 +49,7 @@
 | Japan builds | Title ID `CUSA07001`, Content ID `JP0005-CUSA07001_00-DRAGONSCROWN0001`: version 1.00 is the base package (APP_VER `01.00`, `eboot.bin` SHA-256 `e838e5c551f4ea2d13a13246dcd5474a888c56aa8abf5110f1219c0ceb0ae05f`); version 1.02 is the base plus the 1.02 update (APP_VER `01.02`, SHA-256 `e512685aef4fa1e50eafec8c9699b611992356cbae84e9b0147febceb49843fe`); version 1.03 is the base plus the 1.03 update (APP_VER `01.03`, SHA-256 `dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64`) |
 | Asia and Hong Kong builds | Title ID `CUSA10209`, Content ID `HP0177-CUSA10209_00-DRAGONSCROWN0001`, both with `eboot.bin` SHA-256 `d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b`: 1.00 is APP_VER `01.00`, version `01.02`; 1.02 is APP_VER `01.02`, version `01.00` |
 
-The Japanese 1.00 base package is a complete game on its own. The 1.02 and 1.03 updates are installed over that base, each into its own folder; the 1.03 update replaces every file the 1.02 update changes. The Japanese and Asia and Hong Kong builds are not yet fully tested. Their cheats and Xbox controller prompts are not available. Japanese render resolutions use a table checked against the eboot, and are not yet tested in game.
+The Japanese 1.00 base package is a complete game on its own. The 1.02 and 1.03 updates are installed over that base, each into its own folder; the 1.03 update replaces every file the 1.02 update changes. The Japanese and Asia and Hong Kong builds are not yet fully tested. Their cheats and Xbox controller prompts are not available. Their render resolution and Aspect Ratio patches use tables checked against each build's `eboot.bin`, and are not yet tested in game. The Asia and Hong Kong build shows Chinese text with the bundled Noto Sans TC font.
 
 The launcher checks the Title ID, Content ID and versions in the package's `param.sfo` before it unpacks anything, and the `eboot.bin` hash before it installs the result. Any other version is refused, because the port is built for this exact game code. A package encrypted for a PS4 console cannot be unpacked on a PC.
 
@@ -54,7 +57,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.5.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v0.6.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dcp-loader.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -72,6 +75,8 @@ Everything is kept next to the program, so copying the whole folder to another P
 | --- | --- |
 | `user\dcp.ini` | Launcher and game settings |
 | `user\savedata\` | Your saves |
+| `user\trophy\` | Your trophy progress and the trophy list and icons unpacked from your game |
+| `user\keys.json` | Your Trophy Key, if you configure one |
 | `user\cache\CUSA10454\` | Shader cache, so later starts load faster |
 | `logs\` | One `dragons_crown_pro_NNN.log` per run |
 | `game\` | The installed game (unpacked from your own package) |
@@ -108,7 +113,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 ### Display
 - **Display mode**: Windowed or Borderless Fullscreen. Press **F11** while playing to switch between them.
 - **Window size** (1280×720 to 3840×2160 in 16:9; the choices follow the Aspect Ratio) and **Monitor**. A window that would not fit the monitor opens smaller, centred and within 80% of its usable area; your saved size is not changed.
-- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders at the Render resolution's height and the ratio's width, and the picture is letterboxed or pillarboxed in the window, never stretched. Camera framing, HUD and prerendered videos are not adjusted in this first implementation.
+- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders at the Render resolution's height and the ratio's width, and the picture is letterboxed or pillarboxed in the window, never stretched. The game was not authored for these shapes: camera framing, HUD and prerendered videos are not adjusted, so you may see cropped or exposed areas and bars on videos. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
 - In Borderless Fullscreen the mouse cursor hides after 5 seconds without movement.
 - **Graphics card**: Automatic or a specific Vulkan graphics card. A card that is no longer present falls back to Automatic.
 - **VSync** on or off
@@ -129,7 +134,9 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 The game runs at its own 60 frames per second.
 
 ### Trophies
-- The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package; the **Trophies** launcher page shows them. See [docs/TROPHIES.md](docs/TROPHIES.md).
+- The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package, and the **Trophies** launcher page shows your progress, the trophies and their grades.
+- The trophy list is encrypted in the package. The port does not include, generate or download the Trophy Key it needs: enter your own on the Trophies page, or import it from a shadPS4 `keys.json` or `config.toml`. It is stored only in `user\keys.json`, and the launcher never shows it again. Without it the game still records your unlocks, and the page shows them once a key works.
+- There is no in-game "Trophy unlocked" notification yet. See [docs/TROPHIES.md](docs/TROPHIES.md).
 
 ### Cheats
 - **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x** (Player 1; gold is shared by the save), all Off by default; **Experience Multiplier** (Off, 2x, 5x or 10x) multiplies the experience every award adds. Press **F10** while playing to open the Cheats menu; what you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).

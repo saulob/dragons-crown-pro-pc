@@ -2,6 +2,7 @@
 
 #include <cfloat>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -192,6 +193,12 @@ void TrophyPage::ShowNotice(std::string text) {
 }
 
 void TrophyPage::ImportKey() {
+#ifndef _WIN32
+    if (std::system("command -v zenity >/dev/null 2>&1 || command -v kdialog >/dev/null 2>&1") != 0) {
+        ShowNotice("No file chooser (zenity or kdialog) is installed, so a key file cannot be imported here. Use Enter Trophy Key instead.");
+        return;
+    }
+#endif
     const std::string chosen = trg::BrowseForFile("Select a shadPS4 keys.json or config.toml",
                                                   {{"shadPS4 key files", "*.json;*.toml"}});
     if (chosen.empty()) {

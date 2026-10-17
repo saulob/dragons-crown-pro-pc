@@ -1,5 +1,3 @@
-// Unpacking a game's trophy00.trp: its icons and its (encrypted) trophy lists. The archive is game input: every size,
-// offset and name is checked before it is used.
 #pragma once
 
 #include <array>
@@ -35,8 +33,6 @@ bool DeriveListKey(const TrophyKey& trophy_key, const std::string& np_comm_id, T
 bool DecryptTrophyList(const TrophyKey& trophy_key, const std::string& np_comm_id, const uint8_t* entry, size_t size,
                        std::string& xml);
 
-// Writes <dest>/Icons/<NAME>.PNG and, with the key, <dest>/Xml/<NAME>.XML (names upper-cased; TROP_01.ESFM becomes
-// TROP_01.XML). `dest` must be a folder this call may fill.
 TrpResult ExtractTrp(const std::filesystem::path& trp, const std::string& np_comm_id, const std::optional<TrophyKey>& key,
                      const std::filesystem::path& dest);
 

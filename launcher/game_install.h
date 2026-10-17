@@ -48,6 +48,7 @@ struct InstallHooks {
     std::function<void(const char* phase)> phase;
     // Returns false to cancel. Cancelling is possible until the new files are activated.
     std::function<bool(uint64_t done, uint64_t total)> progress;
+    bool replace_active = false; // install the package even when its build is the active, ready one
 };
 
 // The build is the one the source identifies as; it is installed into BuildPaths(roots, build). An update is laid over the

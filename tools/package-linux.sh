@@ -44,8 +44,8 @@ excluded='^(ld-linux.*|libc|libm|libdl|librt|libpthread|libresolv|libutil|libnsl
 # Fallback copies, used only when the system's are older than the build's.
 compat_libs='^(libstdc\+\+|libgcc_s)\.so'
 
-forbidden_names='^(game|user|logs|cache|build|prepared|extracted|image|sce_sys|sce_module|eboot\.bin|param\.sfo|dcp\.ini|boot\.bin|content\.bin|image\.json|imports\.json|symbols)$'
-forbidden_patterns='\.(pkg|pdb|debug|log|dmp|ini|bin|self|sprx|prx|elf|cpk|sfo|json|spv|pipeline_cache|o|a|tmp|bak|sav|py|ps1|c|cpp|h)$'
+forbidden_names='^(game|user|logs|cache|build|prepared|extracted|image|trophy|sce_sys|sce_module|eboot\.bin|param\.sfo|dcp\.ini|boot\.bin|content\.bin|image\.json|imports\.json|symbols)$'
+forbidden_patterns='\.(pkg|pdb|debug|log|dmp|ini|bin|self|sprx|prx|elf|cpk|sfo|json|trp|spv|pipeline_cache|o|a|tmp|bak|sav|py|ps1|c|cpp|h)$'
 glibc_parts='^(ld-linux.*|libc|libm|libdl|libpthread|librt|libresolv|libutil|libmvec|libanl|libnsl|libBrokenLocale|libthread_db|libnss_.*)\.so'
 
 newer_than() { [[ $1 != "$2" && $(printf '%s\n' "$1" "$2" | sort -V | tail -1) == "$1" ]]; }
@@ -93,7 +93,8 @@ check_appdir() { # dir [the AppImage file, whose runtime is an ELF too]
         fi
     done < <(find "$dir" -mindepth 1 -print0)
     for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dcp-loader \
-                usr/share/licenses/DragonsCrownProPC/THIRD-PARTY-LICENSES.txt usr/share/doc/DragonsCrownProPC/README.txt; do
+                usr/share/licenses/DragonsCrownProPC/THIRD-PARTY-LICENSES.txt \
+                usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/doc/DragonsCrownProPC/README.txt; do
         [[ -e $dir/$leaf ]] || problem "missing: $leaf"
     done
     local missing

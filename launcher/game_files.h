@@ -34,7 +34,7 @@ struct GameCheck {
     size_t layer = 0;                 // for a package: its index in build->layers
 };
 
-// The "scope" of a folder's preparation marker: "full", "base" (the base package only) or empty.
+// The "scope" of a folder's preparation marker: "full", "core" (development) or empty.
 std::string PreparationScope(const std::filesystem::path& app0);
 GamePaths BuildPaths(const GameRoots& roots, const GameBuild& build);
 // The build whose complete folder was prepared last, or nullptr when no supported build is complete.

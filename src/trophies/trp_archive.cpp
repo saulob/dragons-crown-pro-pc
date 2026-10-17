@@ -44,7 +44,7 @@ bool ReadFile(const fs::path& path, std::vector<uint8_t>& data) {
     return in.gcount() == static_cast<std::streamsize>(data.size());
 }
 
-// Letters, digits, '.', '_' and '-' only: nothing that could name another folder.
+// Archive entry names are untrusted: reject anything that could escape the destination folder.
 bool SafeName(const std::string& name) {
     if (name.empty() || name[0] == '.' || name.find("..") != std::string::npos) {
         return false;

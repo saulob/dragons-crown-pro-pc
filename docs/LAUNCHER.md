@@ -36,13 +36,13 @@ and `--logs` win, and everything else is found next to the executable (`launcher
 |---|---|---|
 | Prepared game (`/app0`) | `game\prepared\<build>` | `<repository>\game\prepared\<build>` |
 | Boot image | `game\image\<build>` | `<repository>\build\image\<build>` |
+| User data, `dcp.ini` | `user` | `<repository>\user` |
+| Logs | `logs` | `<repository>\build\logs` |
 
 `<build>` is `v1.03` for CUSA10454 (US), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
 `CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
 selected last is active. Selecting a package makes its exact build active: a complete prepared folder of it is activated
 without copying, and only the build that is already active is reported as up to date.
-| User data, `dcp.ini` | `user` | `<repository>\user` |
-| Logs | `logs` | `<repository>\build\logs` |
 
 The settings file is always `<user>\dcp.ini`; the loader hands its path to the launcher and the video core. The
 correctness defaults (draw preparation workers 0, asynchronous shaders off, vertex descriptor validation, linear image
@@ -84,7 +84,7 @@ while the game files are not valid. If its window cannot be opened, the game sta
 Steps 2 to 4 are `CheckGameTree`, which the installer also runs on the folder the player selects.
 
 **Japanese builds.** The base package (`drcpro.pkg`, CATEGORY `gd`, APP_VER 01.00) is a complete game: it is installed
-into `CUSA07001-1.00`. The 1.02 and 1.03 updates (`drcpro v102.pkg`, `drcpro v103.pkg`, CATEGORY `gp`) are each laid over
+into `CUSA07001-1.00`. The 1.02 and 1.03 updates (CATEGORY `gp`) are each laid over
 a hard-linked copy of the 1.00 folder, into `CUSA07001-1.02` or `CUSA07001-1.03`. The base's data is linked, not copied.
 Each result is checked as its finished game and gets its own boot image. The 1.03 update replaces every file the 1.02
 update changes, so 1.03 does not need 1.02. An update needs the 1.00 folder to be installed; the launcher says so
@@ -175,15 +175,17 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 - **Display mode**: Windowed or Borderless Fullscreen (SDL desktop fullscreen, no display mode change). The in-game menu
   offers the same two.
 - **Window size**: 1280 × 720, 1600 × 900, 1920 × 1080 (the game's own size), 2560 × 1440, 3840 × 2160, in pixels, listed
-  when they fit the selected monitor's usable area with the title bar; the current value is always listed. A size that
+  when they fit the selected monitor's usable area with the title bar; the current value is shown. A size that
   does not fit when the game opens is reduced keeping its shape, so that the whole window, title bar included, takes at
   most 80% of the monitor's usable area, and the window opens centred there. This is applied at start only: the saved
   Window size is not changed, and a window you resize afterwards is left alone. The picture keeps its shape and is
   letterboxed or pillarboxed in the window. The listed sizes (heights 720, 900, 1080, 1440, 2160) follow the Aspect Ratio.
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
   an unknown value is 16:9). It sets the shape of the game's render target, not a stretch of the 16:9 picture. Changing it
-  moves the saved Window size to the same height in the new shape. Camera framing, HUD and prerendered videos are not
-  adjusted in this first implementation, so wider or narrower shapes can show cropped or exposed areas and bars on videos.
+  moves the saved Window size to the same height in the new shape. The game was not authored for other shapes: camera
+  framing, HUD and prerendered videos are not adjusted, so wider or narrower shapes can show cropped or exposed areas and
+  bars on videos. Borderless Fullscreen on a monitor of another shape shows bars. The Japanese and Asia and Hong Kong
+  builds are not yet tested in game.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -208,16 +210,20 @@ RCAS, on) with a
 1280 × 720, 1440p 2560 × 1440, 1800p 3200 × 1800, 4K 3840 × 2160. It is the game's own render size, separate from the window size: the picture is scaled to the window.
 
 The game chooses its display render targets with `mov reg, imm32` of 1920 / 3840 and 1080 / 2160, picked by
-`sceKernelIsNeoMode`. For anything but Native the loader rewrites those 23 immediates (`launcher/resolution.c`) to the
-chosen width and height after checking that each still holds the original instruction; if one does not, the game does
-not start. Native leaves the code untouched. `sceKernelIsNeoMode` answers "PS4 Pro" for 1440p, 1800p and 4K, which is the
-game's larger graphics memory path (sized for 3840 × 2160); 480p, 720p and Native use the base PS4 path. The size
+`sceKernelIsNeoMode`. Each supported build has its own 23 sites (`launcher/game_profile.cpp`). Unless the render target is
+the unchanged Native 16:9 one, the loader rewrites them (`launcher/resolution.c`) to the chosen width and height after
+checking that each still holds the original instruction; if one does not, the game does not start. Native 16:9 leaves the
+code untouched. `sceKernelIsNeoMode` answers "PS4 Pro" for a target larger than 1920 × 1080 in either dimension or in
+area (1440p, 1800p, 4K and the wider shapes), which is the game's larger graphics memory path, taken to be sized for
+3840 × 2160; the other targets use the base PS4 path. The size
 reported by `sceVideoOutGetResolutionStatus` plays no part. The run log prints `DCP: render resolution WxH (key)`.
 
 **Aspect Ratio** reuses the same 23 sites: the height sites get the Render resolution's height and the width sites the
 width of the ratio at that height, rounded to a multiple of 8 (the tile width). 16:9 Original writes the Render
-resolution unchanged and, with Native, still patches nothing. A target larger than 1080p uses the PS4 Pro memory path; one
-above 3840 × 2160 pixels (for example 32:9 at 4K) keeps its ratio and loses height until it fits. The run log prints
+resolution unchanged and, with Native, still patches nothing. A target above 3840 × 2160 pixels keeps its ratio and loses
+height until it fits: 21:9 at 4K is 4384 × 1880, and 32:9 at 1800p and at 4K are both 5408 × 1520. That cap is a
+conservative memory guard, not a measured limit, and the Render resolution list shows the nominal sizes whatever the
+ratio. The render width is rounded to a multiple of 8, so a window of the same height can differ by a few pixels (5:4). The run log prints
 `DCP: Aspect ratio: 21:9 Ultrawide, render target 2520x1080`. The presenter already sizes its frame from the game's image
 shape.
 
@@ -252,7 +258,7 @@ line "Press F10 while playing to open the Cheats menu. Changes made there apply 
 offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
 Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**, each with its one-line description
-(`src/dcp_cheats.h`), and below them the **Experience Multiplier** combo (Off, 2x, 5x, 10x). Cheats work on the CUSA10454 build only; on the CUSA10209 build the menu shows them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
+(`src/dcp_cheats.h`), and below them the **Experience Multiplier** combo (Off, 2x, 5x, 10x). Cheats work on the CUSA10454 (US) build only; on the Japanese and Asia and Hong Kong builds the page and the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
 settings puts them back to Off. The saved values are the start of every game session; the F10 menu changes the running
 session only and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 

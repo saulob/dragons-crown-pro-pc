@@ -105,7 +105,6 @@ std::string Trim(std::string_view text) {
     return std::string(text);
 }
 
-// Elements, attributes, text, CDATA; comments, processing instructions and DOCTYPE are skipped.
 class Parser {
 public:
     explicit Parser(std::string_view text) : s_(text) {}
@@ -139,7 +138,6 @@ private:
         return true;
     }
 
-    // True when something was skipped.
     bool SkipMisc() {
         const size_t start = p_;
         while (p_ < s_.size() && IsSpace(s_[p_])) ++p_;
@@ -408,7 +406,7 @@ void ApplyTrophyTexts(TrophySet& set, const TrophyTexts& texts) {
 }
 
 bool CountsTowardPlatinum(const Trophy& trophy) {
-    return trophy.platinum_link != kNoTrophy && trophy.group > 0;
+    return trophy.grade != Grade::kPlatinum && trophy.platinum_link != kNoTrophy;
 }
 
 } // namespace dcp::trophies
