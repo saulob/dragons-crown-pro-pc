@@ -37,6 +37,8 @@ static char (*names)[128];
 static uint64_t import_count;
 static unsigned char *image;
 static const DcpResolution *render_resolution=&dcp_resolutions[0];
+static const DcpAspectRatio *aspect_ratio=&dcp_aspect_ratios[0];
+static DcpResolution render_target;
 static size_t page_size;
 typedef struct { uint64_t base, size, init, tls_address, tls_memsz, tls_filesz, tls_module; } LinkedModule;
 static LinkedModule modules[16];
@@ -415,7 +417,9 @@ int main(int argc, char **argv) {
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
     printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file)];
-    runtime_dcp_set_neo_mode(render_resolution->pro_memory);
+    aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file)];
+    render_target=dcp_render_target(render_resolution,aspect_ratio);
+    runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file));
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file));
     if (content_profile) {
@@ -614,11 +618,11 @@ int main(int argc, char **argv) {
         runtime_log_flush();
         _exit(missing ? 1 : 0); /* no destructors: GPU threads are running */
     }
-    if (render_resolution!=&dcp_resolutions[0]) {
+    if (render_resolution!=&dcp_resolutions[0] || aspect_ratio!=&dcp_aspect_ratios[0]) {
         char error[320];
-        if (!known_build) fail("render resolution needs a supported game build");
+        if (!known_build) fail("render resolution and aspect ratio need a supported game build");
         if (!dcp_apply_resolution(image,size,game_build.resolution_sites,game_build.resolution_site_count,
-                                  render_resolution,error,sizeof(error))) {
+                                  &render_target,error,sizeof(error))) {
             char message[400];
             snprintf(message,sizeof(message),"%s, game build %s",error,game_build.label);
             fail(message);
@@ -626,8 +630,9 @@ int main(int argc, char **argv) {
     }
     if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
-    printf("DCP: render resolution %dx%d (%s)%s\n",render_resolution->width,render_resolution->height,render_resolution->key,
-           render_resolution->pro_memory ? ", PS4 Pro memory path" : "");
+    printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
+           render_target.pro_memory ? ", PS4 Pro memory path" : "");
+    printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif

@@ -49,6 +49,10 @@ int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
  * file or the value is missing. */
 int dcp_render_resolution(const char *settings_file);
 
+/* Index into dcp_aspect_ratios of the aspect_ratio in the settings file; 0 (16:9 Original) when the file or the value
+ * is missing. */
+int dcp_aspect_ratio(const char *settings_file);
+
 /* The system language the game is told for the text_language in the settings file; 1 (English) when the file or the
  * value is missing. */
 int dcp_text_language(const char *settings_file);

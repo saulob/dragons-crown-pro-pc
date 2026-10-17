@@ -1149,6 +1149,106 @@ void TestRenderResolution(const fs::path& base) {
     CHECK(ReadAll(source / "src" / "runtime_dcp.c").find("is_neo_mode(void) { return neo_mode; }") != std::string::npos);
 }
 
+void TestAspectRatio(const fs::path& base) {
+    const fs::path file = base / "aspect" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    CHECK(dcp_aspect_ratio(file.string().c_str()) == 0 && dcp_aspect_ratio(nullptr) == 0);
+
+    struct Expected { const char* key; const char* name; int width_1080; int width_720; };
+    const Expected expected[] = {{"16:9", "16:9 Original", 1920, 1280}, {"16:10", "16:10", 1728, 1152},
+                                 {"21:9", "21:9 Ultrawide", 2520, 1680}, {"32:9", "32:9 Super Ultrawide", 3840, 2560},
+                                 {"4:3", "4:3", 1440, 960}, {"5:4", "5:4", 1352, 904}};
+    for (int i = 0; i < DCP_ASPECT_COUNT; ++i) {
+        CHECK(std::string(dcp_aspect_ratios[i].key) == expected[i].key);
+        CHECK(std::string(dcp_aspect_ratios[i].name) == expected[i].name);
+        CHECK(dcp_aspect_index(expected[i].key) == i);
+        {
+            LauncherSettings settings(file);
+            settings.Set(kAspectRatioKey, expected[i].key);
+            CHECK(settings.Save());
+        }
+        CHECK(WrittenValue(ReadAll(file), "aspect_ratio", expected[i].key));
+        CHECK(dcp_aspect_ratio(file.string().c_str()) == i);
+        CHECK(IsValidSetting(kAspectRatioKey, expected[i].key));
+
+        const DcpResolution native = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[i]);
+        const DcpResolution p720 = dcp_render_target(&dcp_resolutions[2], &dcp_aspect_ratios[i]);
+        CHECK(native.width == expected[i].width_1080 && native.height == 1080);
+        CHECK(p720.width == expected[i].width_720 && p720.height == 720);
+        CHECK(native.width % 8 == 0 && p720.width % 8 == 0);
+    }
+    for (const char* invalid : {"", "16:9 Original", "2:1", "21x9", "4:3x", "16:9:"}) {
+        WriteAll(file, std::string("aspect_ratio=") + invalid + "\n");
+        CHECK(dcp_aspect_ratio(file.string().c_str()) == 0);
+        CHECK(!std::string(invalid).empty() ? !IsValidSetting(kAspectRatioKey, invalid) : true);
+    }
+    CHECK(dcp_aspect_index(nullptr) == 0);
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == "aspect_ratio" && setting.default_value == "16:9";
+    }
+    CHECK(managed);
+
+    // 16:9 is the resolution itself, whatever it is.
+    for (const DcpResolution& resolution : dcp_resolutions) {
+        const DcpResolution same = dcp_render_target(&resolution, &dcp_aspect_ratios[0]);
+        CHECK(same.width == resolution.width && same.height == resolution.height && same.pro_memory == resolution.pro_memory);
+    }
+    // Render resolution sets the height, the ratio the width; a bigger target than 1080p takes the Pro memory path.
+    const DcpResolution wide1440 = dcp_render_target(&dcp_resolutions[3], &dcp_aspect_ratios[2]);
+    CHECK(wide1440.width == 3360 && wide1440.height == 1440 && wide1440.pro_memory == 1);
+    const DcpResolution narrow1440 = dcp_render_target(&dcp_resolutions[3], &dcp_aspect_ratios[4]);
+    CHECK(narrow1440.width == 1920 && narrow1440.height == 1440 && narrow1440.pro_memory == 1);
+    CHECK(dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[2]).pro_memory == 1);
+    CHECK(dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[4]).pro_memory == 0);
+    for (const DcpResolution& resolution : dcp_resolutions) {
+        for (const DcpAspectRatio& aspect : dcp_aspect_ratios) {
+            const DcpResolution target = dcp_render_target(&resolution, &aspect);
+            CHECK(static_cast<long>(target.width) * target.height <= 3840L * 2160 || &aspect == &dcp_aspect_ratios[0]);
+            CHECK(target.height <= resolution.height);
+        }
+    }
+    const DcpResolution capped = dcp_render_target(&dcp_resolutions[5], &dcp_aspect_ratios[3]);
+    CHECK(capped.height < 2160 && static_cast<long>(capped.width) * capped.height <= 3840L * 2160);
+
+    // The patch writes the target into the build's sites; a damaged site refuses the whole image.
+    for (const GameBuild& build : SupportedBuilds()) {
+        const auto sites = build.resolution_sites;
+        uint64_t size = 0;
+        for (const DcpResolutionSite& site : sites) {
+            size = std::max<uint64_t>(size, site.offset + site.opcode_length + 4u);
+        }
+        std::vector<unsigned char> image(size + 16, 0x90);
+        for (const DcpResolutionSite& site : sites) {
+            std::memcpy(&image[site.offset], site.opcode, site.opcode_length);
+            std::memcpy(&image[site.offset + site.opcode_length], &site.value, 4);
+        }
+        char error[160];
+        const DcpResolution wide = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[2]);
+        std::vector<unsigned char> damaged = image;
+        damaged[sites[3].offset + sites[3].opcode_length] ^= 1;
+        const std::vector<unsigned char> before = damaged;
+        CHECK(!dcp_apply_resolution(damaged.data(), damaged.size(), sites.data(), sites.size(), &wide, error, sizeof(error)));
+        CHECK(damaged == before);
+        CHECK(dcp_apply_resolution(image.data(), image.size(), sites.data(), sites.size(), &wide, error, sizeof(error)));
+        for (const DcpResolutionSite& site : sites) {
+            uint32_t value = 0;
+            std::memcpy(&value, &image[site.offset + site.opcode_length], 4);
+            CHECK(value == static_cast<uint32_t>(site.height ? wide.height : wide.width));
+        }
+    }
+
+    // Window size choices follow the ratio; 16:9 keeps the list the launcher always had.
+    const std::vector<WindowSize> classic = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+    CHECK(WindowSizesFor(dcp_aspect_ratios[0]) == classic);
+    const std::vector<WindowSize> ultrawide = {{1680, 720}, {2100, 900}, {2520, 1080}, {3360, 1440}, {5040, 2160}};
+    CHECK(WindowSizesFor(dcp_aspect_ratios[2]) == ultrawide);
+    CHECK(WindowSizesFor(dcp_aspect_ratios[4])[2] == WindowSize({1440, 1080}));
+    CHECK(WindowSizesFor(dcp_aspect_ratios[5])[2] == WindowSize({1350, 1080}));
+    CHECK(WindowSizeOf(1080, dcp_aspect_ratios[1]) == WindowSize({1728, 1080}));
+    CHECK(WindowSizeOf(1080, dcp_aspect_ratios[3]) == WindowSize({3840, 1080}));
+}
+
 void TestGraphicsQuality(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "quality" / "dcp.ini";
@@ -2401,6 +2501,7 @@ int main(int argc, char** argv) {
     TestRenderResolution(base);
     TestTextLanguage(base);
     TestCheatSettings(base);
+    TestAspectRatio(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
     TestLauncherWanted();

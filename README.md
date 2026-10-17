@@ -107,7 +107,8 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 
 ### Display
 - **Display mode**: Windowed or Borderless Fullscreen. Press **F11** while playing to switch between them.
-- **Window size** (1280×720 to 3840×2160) and **Monitor**. A window that would not fit the monitor opens smaller, centred and within 80% of its usable area; your saved size is not changed.
+- **Window size** (1280×720 to 3840×2160 in 16:9; the choices follow the Aspect Ratio) and **Monitor**. A window that would not fit the monitor opens smaller, centred and within 80% of its usable area; your saved size is not changed.
+- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders at the Render resolution's height and the ratio's width, and the picture is letterboxed or pillarboxed in the window, never stretched. Camera framing, HUD and prerendered videos are not adjusted in this first implementation.
 - In Borderless Fullscreen the mouse cursor hides after 5 seconds without movement.
 - **Graphics card**: Automatic or a specific Vulkan graphics card. A card that is no longer present falls back to Automatic.
 - **VSync** on or off

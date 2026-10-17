@@ -11,6 +11,19 @@ std::string Dimensions(int width, int height) {
 
 } // namespace
 
+WindowSize WindowSizeOf(int height, const DcpAspectRatio& aspect) {
+    const long width = (static_cast<long>(height) * aspect.width * 2 + aspect.height) / (2 * aspect.height);
+    return {static_cast<int>(width), height};
+}
+
+std::vector<WindowSize> WindowSizesFor(const DcpAspectRatio& aspect) {
+    std::vector<WindowSize> sizes;
+    for (const int height : kWindowHeights) {
+        sizes.push_back(WindowSizeOf(height, aspect));
+    }
+    return sizes;
+}
+
 const char* PageName(PageId page) {
     switch (page) {
     case PageId::kPlay: return "Play";

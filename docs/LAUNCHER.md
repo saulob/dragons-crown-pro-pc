@@ -153,6 +153,7 @@ use the same defaults).
 | `smaa` | 1, 0 | 0 | live |
 | `anisotropy` | 0 (game), 2, 4, 8, 16 | 0 | live |
 | `render_resolution` | `native`, `480p`, `720p`, `1440p`, `1800p`, `4K` | `native` | at start |
+| `aspect_ratio` | `16:9`, `16:10`, `21:9`, `32:9`, `4:3`, `5:4` | `16:9` | at start |
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
@@ -177,8 +178,12 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   when they fit the selected monitor's usable area with the title bar; the current value is always listed. A size that
   does not fit when the game opens is reduced keeping its shape, so that the whole window, title bar included, takes at
   most 80% of the monitor's usable area, and the window opens centred there. This is applied at start only: the saved
-  Window size is not changed, and a window you resize afterwards is left alone. The picture is always 16:9 and
-  letterboxed, so there is no aspect option.
+  Window size is not changed, and a window you resize afterwards is left alone. The picture keeps its shape and is
+  letterboxed or pillarboxed in the window. The listed sizes (heights 720, 900, 1080, 1440, 2160) follow the Aspect Ratio.
+- **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
+  an unknown value is 16:9). It sets the shape of the game's render target, not a stretch of the 16:9 picture. Changing it
+  moves the saved Window size to the same height in the new shape. Camera framing, HUD and prerendered videos are not
+  adjusted in this first implementation, so wider or narrower shapes can show cropped or exposed areas and bars on videos.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -208,6 +213,13 @@ chosen width and height after checking that each still holds the original instru
 not start. Native leaves the code untouched. `sceKernelIsNeoMode` answers "PS4 Pro" for 1440p, 1800p and 4K, which is the
 game's larger graphics memory path (sized for 3840 × 2160); 480p, 720p and Native use the base PS4 path. The size
 reported by `sceVideoOutGetResolutionStatus` plays no part. The run log prints `DCP: render resolution WxH (key)`.
+
+**Aspect Ratio** reuses the same 23 sites: the height sites get the Render resolution's height and the width sites the
+width of the ratio at that height, rounded to a multiple of 8 (the tile width). 16:9 Original writes the Render
+resolution unchanged and, with Native, still patches nothing. A target larger than 1080p uses the PS4 Pro memory path; one
+above 3840 × 2160 pixels (for example 32:9 at 4K) keeps its ratio and loses height until it fits. The run log prints
+`DCP: Aspect ratio: 21:9 Ultrawide, render target 2520x1080`. The presenter already sizes its frame from the game's image
+shape.
 
 **Anti-aliasing** is SMAA 1x (tlg_pc's host pass, MIT): a post-process on the finished picture at the game's render
 resolution, before FSR 1 and sharpening. **Texture filtering** forces 2x to 16x anisotropic filtering on the game's

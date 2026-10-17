@@ -74,6 +74,7 @@ constexpr char kUpscaleHelp[] =
 constexpr char kSharpenHelp[] =
     "Sharpens the final picture (AMD RCAS). It applies when the window is the size of the render resolution, or "
     "together with FSR 1 in a bigger window.";
+constexpr char kAspectRatioHelp[] = "Sets the game's target rendering format and the Window size choices.";
 constexpr char kRenderResolutionHelp[] =
     "The resolution the game renders at. It is separate from the window size: the picture is scaled to the window. "
     "1440p and above need a powerful graphics card.";
@@ -519,10 +520,20 @@ private:
     void PageDisplay(trg::Ui& ui) {
         ui.Choice("Display mode", "Borderless Fullscreen fills the monitor. F11 switches while playing.", kDisplayModeKey,
                   "windowed", {{"windowed", "Windowed"}, {"borderless", "Borderless Fullscreen"}}, 2);
+        const DcpAspectRatio& previous_aspect = SavedAspectRatio();
         ui.Row("Window size", kWindowSizeHelp);
         WindowSizeCombo();
         ui.Row("Monitor", kMonitorHelp);
         MonitorCombo();
+        std::vector<trg::Option> aspects;
+        for (const DcpAspectRatio& aspect : dcp_aspect_ratios) {
+            aspects.push_back({aspect.key, aspect.name});
+        }
+        ui.Combo("Aspect Ratio", kAspectRatioHelp, kAspectRatioKey, kDefaultAspectRatio, aspects);
+        if (&SavedAspectRatio() != &previous_aspect) {
+            const int height = settings_.GetInt(kWindowHeightKey, kDefaultWindowHeight);
+            settings_.SetInt(kWindowWidthKey, WindowSizeOf(height, SavedAspectRatio()).width);
+        }
         ui.Row("Graphics card", kGraphicsCardHelp);
         GraphicsCardCombo();
         ui.Toggle("VSync", kVSyncHelp, kVSyncKey, true, "Off", "On");
@@ -535,6 +546,10 @@ private:
         ui.EndRows();
     }
 
+    const DcpAspectRatio& SavedAspectRatio() const {
+        return dcp_aspect_ratios[dcp_aspect_index(settings_.Get(kAspectRatioKey, kDefaultAspectRatio).c_str())];
+    }
+
     void WindowSizeCombo() {
         int width = settings_.GetInt(kWindowWidthKey, kDefaultWindowWidth);
         int height = settings_.GetInt(kWindowHeightKey, kDefaultWindowHeight);
@@ -545,7 +560,7 @@ private:
         const WindowSize current{width, height};
         const Display* display = SelectedDisplay();
         if (ImGui::BeginCombo("##window_size", WindowSizeLabel(current).c_str())) {
-            for (const WindowSize size : kWindowSizes) {
+            for (const WindowSize size : WindowSizesFor(SavedAspectRatio())) {
                 const bool selected = size == current;
                 if (!selected && display && !WindowSizeFits(size, *display)) {
                     continue;

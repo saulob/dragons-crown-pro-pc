@@ -16,8 +16,14 @@ struct WindowSize {
 };
 
 // In pixels. The game's own picture is 1920 x 1080.
-inline constexpr WindowSize kWindowSizes[] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+inline constexpr int kWindowHeights[] = {720, 900, 1080, 1440, 2160};
 inline constexpr WindowSize kGamePictureSize{1920, 1080};
+
+// The window size of this height in the aspect ratio.
+WindowSize WindowSizeOf(int height, const DcpAspectRatio& aspect);
+
+// The window sizes the Display page offers for the aspect ratio.
+std::vector<WindowSize> WindowSizesFor(const DcpAspectRatio& aspect);
 
 enum class PageId { kPlay, kDisplay, kGraphics, kGameplay, kCheats, kControls, kAbout };
 

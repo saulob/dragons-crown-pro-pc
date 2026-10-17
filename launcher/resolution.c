@@ -15,6 +15,34 @@ int dcp_resolution_index(const char *key) {
     return 0;
 }
 
+const DcpAspectRatio dcp_aspect_ratios[DCP_ASPECT_COUNT] = {
+    {"16:9", "16:9 Original", 16, 9}, {"16:10", "16:10", 16, 10},       {"21:9", "21:9 Ultrawide", 21, 9},
+    {"32:9", "32:9 Super Ultrawide", 32, 9}, {"4:3", "4:3", 4, 3},      {"5:4", "5:4", 5, 4},
+};
+
+int dcp_aspect_index(const char *key) {
+    for (int i = 0; key && i < DCP_ASPECT_COUNT; ++i)
+        if (!strcmp(key, dcp_aspect_ratios[i].key)) return i;
+    return 0;
+}
+
+static int aligned_width(int height, const DcpAspectRatio *aspect) {
+    const long width = ((long)height * aspect->width * 2 + aspect->height) / (2 * aspect->height);
+    return (int)((width + 4) / 8 * 8);
+}
+
+DcpResolution dcp_render_target(const DcpResolution *resolution, const DcpAspectRatio *aspect) {
+    DcpResolution target = *resolution;
+    if (aspect == &dcp_aspect_ratios[0]) return target;
+    const long budget = 3840L * 2160;
+    int height = resolution->height;
+    while (height > 8 && (long)aligned_width(height, aspect) * height > budget) height -= 8;
+    target.width = aligned_width(height, aspect);
+    target.height = height;
+    if ((long)target.width * height > 1920L * 1080) target.pro_memory = 1;
+    return target;
+}
+
 static int fail(char *error, size_t size, const char *what, uint32_t offset) {
     snprintf(error, size, "render resolution patch: %s at image offset 0x%x", what, (unsigned)offset);
     return 0;

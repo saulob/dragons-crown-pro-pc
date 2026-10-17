@@ -24,6 +24,7 @@ constexpr ManagedSetting kManagedSettings[] = {
     {kSharpenKey, "1"},
     {kSharpenStrengthKey, "75"},
     {kRenderResolutionKey, kNativeResolution},
+    {kAspectRatioKey, kDefaultAspectRatio},
     {kGraphicsCardKey, kAutomaticGpu},
     {kAntiAliasingKey, "0"},
     {kAnisotropyKey, "0"},
@@ -86,6 +87,10 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (key == kRenderResolutionKey) {
         return std::any_of(std::begin(dcp_resolutions), std::end(dcp_resolutions),
                            [&](const DcpResolution& resolution) { return value == resolution.key; });
+    }
+    if (key == kAspectRatioKey) {
+        return std::any_of(std::begin(dcp_aspect_ratios), std::end(dcp_aspect_ratios),
+                           [&](const DcpAspectRatio& aspect) { return value == aspect.key; });
     }
     return true;
 }
@@ -197,6 +202,12 @@ extern "C" int dcp_render_resolution(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return dcp_resolution_index(settings.Get(kRenderResolutionKey, kNativeResolution).c_str());
+}
+
+extern "C" int dcp_aspect_ratio(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return dcp_aspect_index(settings.Get(kAspectRatioKey, kDefaultAspectRatio).c_str());
 }
 
 extern "C" unsigned dcp_saved_cheats(const char* settings_file) {
