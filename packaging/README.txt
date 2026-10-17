@@ -16,7 +16,7 @@ Crown Pro PS4 package (.pkg). This port runs these releases:
 
   US:                 Title ID CUSA10454, version 1.00 (APP_VER 01.00, VERSION 01.03)
   Japan:              Title ID CUSA07001, versions 1.00 (the base package), 1.02 and 1.03 (the base package, then the update)
-  Asia, Hong Kong:    Title ID CUSA10209, version 01.02 (APP_VER 01.02)
+  Asia, Hong Kong:    Title ID CUSA10209, versions 1.00 (APP_VER 01.00) and 1.02 (APP_VER 01.02)
 
 Any other version is refused with "Different version of Dragon's Crown Pro". The Japanese and Asia, Hong Kong releases
 are not yet fully tested; their cheats and Xbox controller prompts are not available.

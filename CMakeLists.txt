@@ -62,10 +62,12 @@ set(DCP_RUNTIME_SOURCES
     src/runtime_services.c
     src/runtime_thread.c
     src/runtime_time.c)
-# The built-in system font is assembled into runtime_font.c (.incbin): rebuild it when the font changes.
+# The built-in system fonts are assembled into runtime_font.c (.incbin): rebuild it when a font changes.
 set(DCP_NOTO_SANS ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSans-Regular.ttf)
+set(DCP_NOTO_SANS_TC ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSansTC-Regular.otf)
 set_source_files_properties(src/runtime_font.c PROPERTIES
-    COMPILE_DEFINITIONS DCP_NOTO_SANS_PATH="${DCP_NOTO_SANS}" OBJECT_DEPENDS ${DCP_NOTO_SANS})
+    COMPILE_DEFINITIONS "DCP_NOTO_SANS_PATH=\"${DCP_NOTO_SANS}\";DCP_NOTO_SANS_TC_PATH=\"${DCP_NOTO_SANS_TC}\""
+    OBJECT_DEPENDS "${DCP_NOTO_SANS};${DCP_NOTO_SANS_TC}")
 
 if (WIN32)
     enable_language(RC)

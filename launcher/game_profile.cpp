@@ -24,21 +24,19 @@ constexpr DcpResolutionSite kUsResolutionSites[] = {
     {0x59a028, 2, {0x41, 0xb8}, 1080, kHeight},
 };
 
-// Offsets not yet confirmed on the official CUSA10209 eboot; the US opcodes and immediates are checked at each site
-// before anything is written.
 constexpr DcpResolutionSite kAsiaResolutionSites[] = {
-    {0x597708, 1, {0xb8}, 1920, kWidth},  {0x59770d, 1, {0xb9}, 3840, kWidth},
-    {0x597723, 1, {0xb8}, 1080, kHeight},  {0x597728, 1, {0xb9}, 2160, kHeight},
-    {0x597881, 1, {0xb8}, 1920, kWidth},  {0x597886, 1, {0xb9}, 3840, kWidth},
-    {0x59789c, 1, {0xb8}, 1080, kHeight},  {0x5978a1, 1, {0xb9}, 2160, kHeight},
-    {0x597a8f, 1, {0xb8}, 3840, kWidth},  {0x597a94, 1, {0xbb}, 1920, kWidth},
-    {0x597a99, 2, {0x41, 0xbe}, 1920, kWidth},  {0x597aaa, 2, {0x41, 0xbd}, 2160, kHeight},
-    {0x597ab0, 1, {0xba}, 1080, kHeight},  {0x597aba, 2, {0x41, 0xbf}, 1080, kHeight},
-    {0x597ad9, 1, {0xb8}, 3840, kWidth},  {0x597d3c, 1, {0xb9}, 3840, kWidth},
-    {0x597d41, 1, {0xb8}, 1920, kWidth},  {0x597d5c, 1, {0xb9}, 2160, kHeight},
-    {0x597d61, 1, {0xb8}, 1080, kHeight},  {0x597f64, 1, {0xb8}, 3840, kWidth},
-    {0x597f69, 2, {0x41, 0xbc}, 1920, kWidth},  {0x597f83, 1, {0xb8}, 2160, kHeight},
-    {0x597f88, 2, {0x41, 0xb8}, 1080, kHeight},
+    {0x5978a8, 1, {0xb8}, 1920, kWidth},  {0x5978ad, 1, {0xb9}, 3840, kWidth},
+    {0x5978c3, 1, {0xb8}, 1080, kHeight},  {0x5978c8, 1, {0xb9}, 2160, kHeight},
+    {0x597a21, 1, {0xb8}, 1920, kWidth},  {0x597a26, 1, {0xb9}, 3840, kWidth},
+    {0x597a3c, 1, {0xb8}, 1080, kHeight},  {0x597a41, 1, {0xb9}, 2160, kHeight},
+    {0x597c2f, 1, {0xb8}, 3840, kWidth},  {0x597c34, 1, {0xbb}, 1920, kWidth},
+    {0x597c39, 2, {0x41, 0xbe}, 1920, kWidth},  {0x597c4a, 2, {0x41, 0xbd}, 2160, kHeight},
+    {0x597c50, 1, {0xba}, 1080, kHeight},  {0x597c5a, 2, {0x41, 0xbf}, 1080, kHeight},
+    {0x597c79, 1, {0xb8}, 3840, kWidth},  {0x597edc, 1, {0xb9}, 3840, kWidth},
+    {0x597ee1, 1, {0xb8}, 1920, kWidth},  {0x597efc, 1, {0xb9}, 2160, kHeight},
+    {0x597f01, 1, {0xb8}, 1080, kHeight},  {0x598104, 1, {0xb8}, 3840, kWidth},
+    {0x598109, 2, {0x41, 0xbc}, 1920, kWidth},  {0x598123, 1, {0xb8}, 2160, kHeight},
+    {0x598128, 2, {0x41, 0xb8}, 1080, kHeight},
 };
 
 constexpr DcpResolutionSite kJapan100ResolutionSites[] = {
@@ -90,7 +88,8 @@ constexpr PackageLayer kUsLayers[] = {{"01.00", "01.03", false}};
 constexpr PackageLayer kJapanBaseLayers[] = {{"01.00", "01.00", false}};
 constexpr PackageLayer kJapan102Layers[] = {{"01.00", "01.00", false}, {"01.02", "01.00", true}};
 constexpr PackageLayer kJapan103Layers[] = {{"01.00", "01.00", false}, {"01.03", "01.00", true}};
-constexpr PackageLayer kAsiaLayers[] = {{"01.02", "01.00", false}};
+constexpr PackageLayer kAsia100Layers[] = {{"01.00", "01.02", false}};
+constexpr PackageLayer kAsia102Layers[] = {{"01.02", "01.00", false}};
 
 constexpr const char* kJapanUpdateFiles[] = {"sce_discmap_patch.plt"};
 
@@ -158,6 +157,21 @@ constexpr GameBuild kGameBuilds[] = {
     {
         "CUSA10209",
         "HP0177-CUSA10209_00-DRAGONSCROWN0001",
+        "1.00",
+        "CUSA10209-1.00",
+        "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b",
+        "DRACRO_CK.CPK",
+        {},
+        "CUSA10209 1.00 Asia/Hong Kong",
+        "Asia/Hong Kong",
+        false,
+        false,
+        kAsia100Layers,
+        kAsiaResolutionSites,
+    },
+    {
+        "CUSA10209",
+        "HP0177-CUSA10209_00-DRAGONSCROWN0001",
         "1.02",
         "CUSA10209-1.02",
         "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b",
@@ -167,7 +181,7 @@ constexpr GameBuild kGameBuilds[] = {
         "Asia/Hong Kong",
         false,
         false,
-        kAsiaLayers,
+        kAsia102Layers,
         kAsiaResolutionSites,
     },
 };

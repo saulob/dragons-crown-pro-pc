@@ -38,7 +38,7 @@ and `--logs` win, and everything else is found next to the executable (`launcher
 | Boot image | `game\image\<build>` | `<repository>\build\image\<build>` |
 
 `<build>` is `v1.03` for CUSA10454 (US), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
-`CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
+`CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
 selected last is active. Selecting a package makes its exact build active: a complete prepared folder of it is activated
 without copying, and only the build that is already active is reported as up to date.
 | User data, `dcp.ini` | `user` | `<repository>\user` |

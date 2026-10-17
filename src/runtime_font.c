@@ -89,36 +89,28 @@ typedef struct {
     uint8_t guest_reserved[256];     /* the PS4 handle is a 256-byte object */
 } Font;
 
-/* Noto Sans (third_party/fonts, SIL OFL 1.1) stands in for the firmware's system font sets.
+/* Noto Sans and Noto Sans TC (third_party/fonts, SIL OFL 1.1) stand in for the firmware's system font sets.
  * The bytes are static, so faces opened on them never outlive their data. */
 #ifdef _WIN32
-__asm__(".section .rdata,\"dr\"\n"
-        ".balign 16\n"
-        ".global dcp_noto_sans\n"
-        "dcp_noto_sans:\n"
-        ".incbin \"" DCP_NOTO_SANS_PATH "\"\n"
-        ".global dcp_noto_sans_end\n"
-        "dcp_noto_sans_end:\n"
-        ".text\n");
+#define DCP_EMBED(symbol, path) \
+    __asm__(".section .rdata,\"dr\"\n.balign 16\n.global " #symbol "\n" #symbol ":\n.incbin \"" path "\"\n" \
+            ".global " #symbol "_end\n" #symbol "_end:\n.text\n")
 #else
-__asm__(".section .rodata\n"
-        ".balign 16\n"
-        ".hidden dcp_noto_sans\n"
-        ".global dcp_noto_sans\n"
-        "dcp_noto_sans:\n"
-        ".incbin \"" DCP_NOTO_SANS_PATH "\"\n"
-        ".hidden dcp_noto_sans_end\n"
-        ".global dcp_noto_sans_end\n"
-        "dcp_noto_sans_end:\n"
-        ".previous\n");
+#define DCP_EMBED(symbol, path) \
+    __asm__(".section .rodata\n.balign 16\n.hidden " #symbol "\n.global " #symbol "\n" #symbol ":\n.incbin \"" path "\"\n" \
+            ".hidden " #symbol "_end\n.global " #symbol "_end\n" #symbol "_end:\n.previous\n")
 #endif
-extern const unsigned char dcp_noto_sans[];
-extern const unsigned char dcp_noto_sans_end[];
+DCP_EMBED(dcp_noto_sans, DCP_NOTO_SANS_PATH);
+DCP_EMBED(dcp_noto_sans_tc, DCP_NOTO_SANS_TC_PATH);
+extern const unsigned char dcp_noto_sans[], dcp_noto_sans_end[];
+extern const unsigned char dcp_noto_sans_tc[], dcp_noto_sans_tc_end[];
 
 /* The game's own font covers Latin and Japanese; the set only supplies the glyphs it lacks. */
 #define FONTSET_SST_STD_EUROPEAN_JPCJK 0x1807A444u
-static const struct { uint32_t set; const char *name; } builtin_sets[]={
-    {FONTSET_SST_STD_EUROPEAN_JPCJK,"Noto Sans"},
+#define FONTSET_SST_STD_SCHINESE_GBCJK 0x180CAC44u
+static const struct { uint32_t set; const char *name; const unsigned char *data, *end; } builtin_sets[]={
+    {FONTSET_SST_STD_EUROPEAN_JPCJK,"Noto Sans",dcp_noto_sans,dcp_noto_sans_end},
+    {FONTSET_SST_STD_SCHINESE_GBCJK,"Noto Sans TC",dcp_noto_sans_tc,dcp_noto_sans_tc_end},
 };
 
 static const LibrarySelection library_ft={0x53464C46u /* "FLFS" */,0,NULL,{0,0,0,0}};
@@ -305,7 +297,7 @@ static ABI int32_t font_open_font_set(Library *library, uint32_t set, uint32_t m
     *out=NULL;
     for (size_t i=0;i<sizeof(builtin_sets)/sizeof(*builtin_sets);++i) {
         if (builtin_sets[i].set!=set) continue;
-        int32_t result=font_create(library,dcp_noto_sans,(size_t)(dcp_noto_sans_end-dcp_noto_sans),params,out);
+        int32_t result=font_create(library,builtin_sets[i].data,(size_t)(builtin_sets[i].end-builtin_sets[i].data),params,out);
         if (result==FONT_OK) printf("Font: system font set %#x -> built-in %s\n",set,builtin_sets[i].name);
         return result;
     }

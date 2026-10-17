@@ -104,7 +104,8 @@ const GameBuild& kUs = SupportedBuilds()[0];
 const GameBuild& kJp100 = SupportedBuilds()[1];
 const GameBuild& kJp102 = SupportedBuilds()[2];
 const GameBuild& kJp103 = SupportedBuilds()[3];
-const GameBuild& kCk = SupportedBuilds()[4];
+const GameBuild& kCk100 = SupportedBuilds()[4];
+const GameBuild& kCk = SupportedBuilds()[5];
 
 constexpr char kEboot[] = "synthetic eboot bytes";
 
@@ -286,7 +287,7 @@ void TestFingerprintMatchesProfile() {
         }
     }
     CHECK(SupportedBuildsText() ==
-          "CUSA10454 1.00 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan and CUSA10209 1.02 Asia/Hong Kong");
+          "CUSA10454 1.00 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong and CUSA10209 1.02 Asia/Hong Kong");
     CHECK(std::string(kUs.folder) != kCk.folder);
     std::string modules = "'modules': (";
     for (const char* module : kBundledModules) {
@@ -1951,6 +1952,7 @@ void TestLayers(const fs::path& base) {
     CheckSites(kJp102);
     CheckSites(kJp103);
     CheckSites(kCk);
+    CheckSites(kCk100);
     CHECK(std::string(kJp100.title_id) == "CUSA07001" && std::string(kJp100.content_id) == "JP0005-CUSA07001_00-DRAGONSCROWN0001");
     CHECK(std::string(FinishedLayer(kJp100).app_ver) == "01.00" && std::string(FinishedLayer(kJp100).sfo_version) == "01.00");
     CHECK(std::string(FinishedLayer(kJp102).app_ver) == "01.02" && std::string(FinishedLayer(kJp103).app_ver) == "01.03");
@@ -2322,7 +2324,7 @@ void TestActivation(const fs::path& base) {
 // The two supported builds: their identities, archives, flags and the boot image report that names them, and the
 // checks that keep one build's files out of the other build's folders.
 void TestBuilds(const fs::path& base) {
-    CHECK(SupportedBuilds().size() == 5);
+    CHECK(SupportedBuilds().size() == 6);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
     CHECK(std::string(kUs.folder) == "v1.03" && std::string(kCk.folder) == "CUSA10209-1.02");
     CHECK(std::string(kCk.content_id) == "HP0177-CUSA10209_00-DRAGONSCROWN0001");
@@ -2331,9 +2333,18 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(kCk.regional_archive) == "DRACRO_CK.CPK" && std::string(kUs.regional_archive) == "DRACRO_US.CPK");
     CHECK(!kCk.cheats && !kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
     CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.size() == 23);
-    CHECK(kCk.resolution_sites.front().offset == 0x597708 && kCk.resolution_sites.back().offset == 0x597f88);
+    CHECK(kCk.resolution_sites.front().offset == 0x5978a8 && kCk.resolution_sites.back().offset == 0x598128);
 
     CHECK(CheckSfoIdentity(SfoFor(kCk)).build == &kCk);
+    CHECK(CheckSfoIdentity(SfoFor(kCk100)).build == &kCk100);
+    CHECK(std::string(kCk100.label) == "CUSA10209 1.00 Asia/Hong Kong" && std::string(kCk100.folder) == "CUSA10209-1.00");
+    CHECK(std::string(FinishedLayer(kCk100).app_ver) == "01.00" && std::string(FinishedLayer(kCk100).sfo_version) == "01.02");
+    CHECK(std::string(kCk100.eboot_sha256) == kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
+    CHECK(!kCk100.cheats && !kCk100.xbox_prompts && kCk100.resolution_sites.data() == kCk.resolution_sites.data());
+    CHECK(kCk100.resolution_sites.size() == 23 && kCk100.layers.size() == 1 && BaseBuildOf(kCk) == nullptr);
+    CHECK(CheckSfoIdentity(SfoFor(kCk100, "01.02")).build == nullptr);
+    CHECK(CheckSfoIdentity(SfoFor(kCk100, nullptr, "01.00")).build == nullptr);
+    CHECK(CheckPackageIdentity(PackageSfo(kCk100, "01.00", "01.02", "gd")).build == &kCk100);
     CHECK(CheckSfoIdentity(SfoFor(kUs)).build == &kUs);
     CHECK(CheckSfoIdentity(SfoFor(kCk, "01.01")).state == GameFileState::kDifferentVersion);
     CHECK(CheckSfoIdentity(SfoFor(kCk, nullptr, "01.03")).state == GameFileState::kDifferentVersion);
@@ -2345,12 +2356,16 @@ void TestBuilds(const fs::path& base) {
 
     // The boot image report names its build by title and eboot hash; the issue #14 hash names no build.
     const fs::path report_dir = base / "build-report";
-    const auto build_label = [&](const char* title, const char* sha) {
-        WriteAll(report_dir / "image.json", std::string("{\n  \"title_id\": \"") + title + "\",\n  \"eboot_sha256\": \"" + sha + "\"\n}");
+    const auto build_label = [&](const char* title, const char* sha, const char* app_ver = nullptr) {
+        const std::string app = app_ver ? std::string(",\n  \"app_ver\": \"") + app_ver + "\"" : std::string();
+        WriteAll(report_dir / "image.json", std::string("{\n  \"title_id\": \"") + title + "\",\n  \"eboot_sha256\": \"" + sha + "\"" + app + "\n}");
         DcpGameBuild game{};
         return dcp_game_build(report_dir.string().c_str(), &game) ? std::string(game.label) : std::string();
     };
-    CHECK(build_label("CUSA10209", kCk.eboot_sha256) == kCk.label);
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.02") == kCk.label);
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.00") == kCk100.label);
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256).empty());
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.01").empty());
     CHECK(build_label("CUSA10454", kUs.eboot_sha256) == kUs.label);
     CHECK(build_label("CUSA10209", "05dad7c244e76df186eb440818bed6c567aadec1180595a04975fab6d848edf2").empty());
     CHECK(build_label("CUSA10209", kUs.eboot_sha256).empty());
@@ -2358,7 +2373,7 @@ void TestBuilds(const fs::path& base) {
     CHECK(build_label("CUSA07001", kJp100.eboot_sha256) == kJp100.label);
     CHECK(build_label("CUSA07001", kJp102.eboot_sha256) == kJp102.label);
     CHECK(build_label("CUSA07001", kJp103.eboot_sha256) == kJp103.label);
-    WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\"\n}");
+    WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\",\n  \"app_ver\": \"01.02\"\n}");
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
     CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 23 && ck_game.resolution_sites == kCk.resolution_sites.data());

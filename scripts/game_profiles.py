@@ -65,6 +65,12 @@ PROFILES = {
         'region': 'Asia/Hong Kong',
         'content_id': 'HP0177-CUSA10209_00-DRAGONSCROWN0001',
         'versions': {
+            # Same executable as 1.02; the package metadata tells the builds apart.
+            '1.00': {
+                'layers': ({'app_ver': '01.00', 'sfo_version': '01.02', 'update': False},),
+                'eboot_sha256': 'd37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b',
+                'folder': 'CUSA10209-1.00', 'regional_archive': 'DRACRO_CK.CPK', 'extra_files': (),
+            },
             # TARGET_APP_VER (01.01 in this build) is not an identity field.
             '1.02': {
                 'layers': ({'app_ver': '01.02', 'sfo_version': '01.00', 'update': False},),

@@ -5,7 +5,7 @@
   game/prepared/<folder>           the /app0 tree the loader uses: the build's layers laid over each other (hard links)
 
 A build is its base package and then its updates (scripts/game_profiles.py). <folder> is the build's folder: v1.03 for
-CUSA10454, CUSA07001-1.00, CUSA07001-1.02 or CUSA07001-1.03 for CUSA07001, CUSA10209-1.02 for CUSA10209. A package that
+CUSA10454, CUSA07001-1.00, CUSA07001-1.02 or CUSA07001-1.03 for CUSA07001, CUSA10209-1.00 or CUSA10209-1.02 for CUSA10209. A package that
 several builds share (the base) is extracted once.
 
 Usage: python scripts/prepare_game.py [--title CUSA07001] [--version 1.02] [--scope core|full] [--game-root DIR]

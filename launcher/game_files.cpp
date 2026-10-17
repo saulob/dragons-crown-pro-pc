@@ -105,12 +105,24 @@ const GameBuild* BuildOfSfo(const std::string& sfo, std::span<const GameBuild> b
 const GameBuild* BuildOfImageReport(const std::string& report, std::span<const GameBuild> builds) {
     const std::string title = JsonString(report, "title_id");
     const std::string sha = JsonString(report, "eboot_sha256");
+    const std::string app_ver = JsonString(report, "app_ver");
+    const GameBuild* found = nullptr;
     for (const GameBuild& build : builds) {
-        if (title == build.title_id && sha == build.eboot_sha256) {
-            return &build;
+        if (title != build.title_id || sha != build.eboot_sha256) {
+            continue;
         }
+        if (!app_ver.empty()) {
+            if (app_ver == FinishedLayer(build).app_ver) {
+                return &build;
+            }
+            continue;
+        }
+        if (found) {
+            return nullptr;
+        }
+        found = &build;
     }
-    return nullptr;
+    return found;
 }
 
 // Installs made before the build was named by its APP_VER carry the marker version 1.03; only the tree that already

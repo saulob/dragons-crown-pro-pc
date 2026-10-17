@@ -68,6 +68,7 @@ static void test_ime_panel_size(void) {
 #define ERR_NO_SUPPORT_GLYPH ((int32_t)0x80460042)
 #define ERR_NO_SUPPORT_SURFACE ((int32_t)0x80460050)
 #define FONTSET_SST_STD_EUROPEAN_JPCJK 0x1807A444u /* the one set Dragon's Crown opens */
+#define FONTSET_SST_STD_SCHINESE_GBCJK 0x180CAC44u
 #define FONTSET_SST_STD_JAPANESE_JP 0x18080444u
 
 typedef struct { float width, height, h_bearing_x, h_bearing_y, h_advance, v_bearing_x, v_bearing_y, v_advance; } GlyphMetrics;
@@ -329,6 +330,33 @@ static void test_font_set(void) {
         if (other) CHECK(font.close(other) == FONT_OK);
     }
     CHECK(render(set, 'A', &inked) == FONT_OK && inked > 0);
+
+    const uint32_t chinese[] = {0x89D2 /* 角 */, 0x8272 /* 色 */, 0x5275 /* 創 */, 0x5EFA /* 建 */, 0x540D /* 名 */, 0x7A31 /* 稱 */};
+    CHECK(render(set, chinese[0], &inked) == ERR_NO_SUPPORT_GLYPH && inked == 0);
+    void *chinese_set = NULL;
+    CHECK(font.open_set(library, FONTSET_SST_STD_SCHINESE_GBCJK, 2, &detail, &chinese_set) == FONT_OK && chinese_set);
+    if (chinese_set) {
+        CHECK(font.bind(chinese_set, renderer) == FONT_OK);
+        CHECK(font.set_scale(chinese_set, 24.0f, 24.0f) == FONT_OK);
+        Layout chinese_layout = {0};
+        CHECK(font.horizontal_layout(chinese_set, &chinese_layout) == FONT_OK && chinese_layout.b > chinese_layout.a);
+        CHECK(font.setup_render_scale(chinese_set, 24.0f * 24.0f / chinese_layout.b, 24.0f * 24.0f / chinese_layout.b) == FONT_OK);
+        font.surface_init(surface, pixels, SURFACE, 1, SURFACE, SURFACE);
+        CHECK(render(chinese_set, 'A', &inked) == FONT_OK && inked > 0);
+        for (size_t i = 0; i < sizeof(chinese) / sizeof(*chinese); ++i) {
+            GlyphMetrics metrics;
+            RenderOutput out;
+            memset(pixels, 0, sizeof(pixels));
+            int drawn = font.render(chinese_set, chinese[i], surface, 16.0f, 64.0f, &metrics, &out) == FONT_OK &&
+                        out.update.w > 0 && out.update.h > 0 && metrics.h_advance > 0.0f;
+            int ink = 0;
+            for (size_t j = 0; j < sizeof(pixels); ++j) ink += pixels[j] != 0;
+            CHECK(drawn && ink > 0);
+        }
+        CHECK(render(chinese_set, 0xE000 /* private use: unmapped */, &inked) == ERR_NO_SUPPORT_GLYPH && inked == 0);
+        CHECK(font.unbind(chinese_set) == FONT_OK);
+        CHECK(font.close(chinese_set) == FONT_OK);
+    }
 
     void *missing = (void *)1;
     CHECK(font.open_set(library, FONTSET_SST_STD_JAPANESE_JP, 2, &detail, &missing) == ERR_FONT_OPEN_FAILED && !missing);
