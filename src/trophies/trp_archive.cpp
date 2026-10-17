@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -66,7 +67,17 @@ bool EndsWith(const std::string& text, const std::string& suffix) {
 
 bool LooksLikeXml(const std::string& text) {
     size_t start = text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
-    while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start]))) ++start;
+    for (;;) {
+        while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start]))) ++start;
+        if (text.compare(start, 4, "<!--") != 0) {
+            break;
+        }
+        const size_t end = text.find("-->", start + 4);
+        if (end == std::string::npos) {
+            return false;
+        }
+        start = end + 3;
+    }
     return text.compare(start, 5, "<?xml") == 0 || text.compare(start, 11, "<trophyconf") == 0;
 }
 
@@ -187,6 +198,7 @@ TrpResult ExtractTrp(const fs::path& trp, const std::string& np_comm_id, const s
             }
             std::string xml;
             if (!DecryptTrophyList(*key, np_comm_id, data, static_cast<size_t>(entry.size), xml)) {
+                std::printf("Trophies: %s did not decrypt to a trophy list\n", entry.name.c_str());
                 result.status = TrpStatus::kKeyRejected;
                 return result;
             }

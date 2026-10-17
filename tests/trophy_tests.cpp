@@ -373,6 +373,12 @@ void TestKeyAndCrypto(const fs::path& base) {
     CHECK(!DecryptTrophyList(fips, kNpId, bytes, 16, xml) && !DecryptTrophyList(fips, kNpId, bytes, 0, xml));
     CHECK(!DecryptTrophyList(fips, kNpId, bytes, entry.size() - 1, xml));
     CHECK(!DecryptTrophyList(fips, kNpId, bytes, entry.size() - 16 + 3, xml));
+
+    const std::string signed_entry = FromHex(
+        "0908070605040302010009080706050424af038e8f0d28965203111990965997ee8dff9f7264c040ce41c81d5e43cc66d36a2f091ed2388faf228c"
+        "4682c7e3476be99bd9051f949f17320e99dcf50784");
+    CHECK(DecryptTrophyList(fips, kNpId, reinterpret_cast<const uint8_t*>(signed_entry.data()), signed_entry.size(), xml) &&
+          xml == "<!--Sce-Np-Trophy-Signature: x-->\n<trophyconf/>");
 }
 
 void TestTrp(const fs::path& base) {

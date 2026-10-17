@@ -114,7 +114,7 @@ const char* DescribePack(PackStatus status) {
     case PackStatus::kNoNpBind: return "no NP Communication ID (sce_sys/npbind.dat)";
     case PackStatus::kNoPack: return "no trophy pack (sce_sys/trophy/trophy00.trp)";
     case PackStatus::kKeyMissing: return "trophy key missing or invalid (user/keys.json)";
-    case PackStatus::kKeyRejected: return "trophy key does not match this game";
+    case PackStatus::kKeyRejected: return "the Trophy Key could not decrypt this game's trophy metadata";
     case PackStatus::kDamaged: return "trophy pack damaged or not writable";
     }
     return "";
