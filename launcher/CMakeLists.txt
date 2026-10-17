@@ -39,7 +39,7 @@ add_library(dcp_launcher_core STATIC boot_image.cpp controller_prompts.cpp cpk_p
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 PRIVATE ZLIB::ZLIB)
+target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_keys PRIVATE ZLIB::ZLIB)
 # Hashes and ciphers: CNG on Windows, OpenSSL's libcrypto elsewhere.
 if (WIN32)
     target_sources(dcp_launcher_core PRIVATE crypto_win.cpp)

@@ -268,7 +268,7 @@ bool WindowSDL::PollEvents() {
         }
         switch (event.type) {
         case SDL_EVENT_KEY_DOWN:
-            if (event.key.key == SDLK_F11 && !event.key.repeat) {
+            if (event.key.scancode == DcpSettings::Get().window_mode_key && !event.key.repeat) {
                 ToggleBorderless();
             }
             break;

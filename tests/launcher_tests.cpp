@@ -31,6 +31,7 @@
 #include "dcp_cheats.h"
 #include "dcp_launcher.h"
 #include "dcp_graphics.h"
+#include "dcp_keys.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
@@ -1458,7 +1459,141 @@ void TestOptions() {
     CHECK(std::string(PageName(kPageOrder[5])) == "Controls");
     CHECK(std::string(PageName(kPageOrder[6])) == "Trophies"); // after Controls, before About
     CHECK(std::string(PageName(kPageOrder[7])) == "About");
-    CHECK(!KeyboardBindings().empty());
+}
+
+// ---- Keyboard bindings ----
+
+std::string KeyNameOf(int scancode) {
+    char name[32];
+    return dcp_key_name(scancode, name, sizeof(name));
+}
+
+void TestKeyBindings(const fs::path& base) {
+    const fs::path file = base / "keys" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    fs::create_directories(file.parent_path());
+
+    // The defaults are the layout the runtime had before the bindings were configurable.
+    DcpKeyMap map;
+    dcp_keys_defaults(&map);
+    CHECK(map.scancode[DCP_KEY_LEFT_STICK_UP] == SDL_SCANCODE_W && map.scancode[DCP_KEY_LEFT_STICK_DOWN] == SDL_SCANCODE_S);
+    CHECK(map.scancode[DCP_KEY_LEFT_STICK_LEFT] == SDL_SCANCODE_A && map.scancode[DCP_KEY_LEFT_STICK_RIGHT] == SDL_SCANCODE_D);
+    CHECK(map.scancode[DCP_KEY_RIGHT_STICK_UP] == SDL_SCANCODE_UP && map.scancode[DCP_KEY_RIGHT_STICK_RIGHT] == SDL_SCANCODE_RIGHT);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE && map.scancode[DCP_KEY_CIRCLE] == SDL_SCANCODE_LSHIFT);
+    CHECK(map.scancode[DCP_KEY_SQUARE] == SDL_SCANCODE_E && map.scancode[DCP_KEY_TRIANGLE] == SDL_SCANCODE_Q);
+    CHECK(map.scancode[DCP_KEY_L1] == SDL_SCANCODE_1 && map.scancode[DCP_KEY_R1] == SDL_SCANCODE_3);
+    CHECK(map.scancode[DCP_KEY_L2] == SDL_SCANCODE_R && map.scancode[DCP_KEY_R2] == SDL_SCANCODE_F);
+    CHECK(map.scancode[DCP_KEY_L3] == SDL_SCANCODE_Z && map.scancode[DCP_KEY_R3] == SDL_SCANCODE_C);
+    CHECK(map.scancode[DCP_KEY_DPAD_UP] == SDL_SCANCODE_I && map.scancode[DCP_KEY_DPAD_RIGHT] == SDL_SCANCODE_L);
+    CHECK(map.scancode[DCP_KEY_OPTIONS] == SDL_SCANCODE_RETURN);
+    CHECK(map.scancode[DCP_KEY_TOUCHPAD_LEFT] == SDL_SCANCODE_TAB && map.scancode[DCP_KEY_TOUCHPAD_RIGHT] == SDL_SCANCODE_BACKSPACE);
+    CHECK(map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10 && map.scancode[DCP_KEY_HOTKEY_WINDOW_MODE] == SDL_SCANCODE_F11);
+    for (int i = 0; i < DCP_KEY_COUNT; ++i) {
+        CHECK(map.scancode[i] != SDL_SCANCODE_F12);
+    }
+
+    // Saved names: the shadPS4 ones, lowercase.
+    CHECK(KeyNameOf(SDL_SCANCODE_SPACE) == "space" && KeyNameOf(SDL_SCANCODE_LSHIFT) == "lshift");
+    CHECK(KeyNameOf(SDL_SCANCODE_F10) == "f10" && KeyNameOf(SDL_SCANCODE_UP) == "up" && KeyNameOf(SDL_SCANCODE_Q) == "q");
+    CHECK(KeyNameOf(SDL_SCANCODE_RETURN) == "enter" && KeyNameOf(SDL_SCANCODE_PAGEUP) == "pgup");
+    CHECK(KeyNameOf(SDL_SCANCODE_ESCAPE).empty() && KeyNameOf(SDL_SCANCODE_UNKNOWN).empty());
+    for (const int scancode : {SDL_SCANCODE_A, SDL_SCANCODE_5, SDL_SCANCODE_F1, SDL_SCANCODE_F12, SDL_SCANCODE_TAB,
+                               SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_DELETE, SDL_SCANCODE_INSERT, SDL_SCANCODE_HOME,
+                               SDL_SCANCODE_END, SDL_SCANCODE_PAGEDOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RSHIFT,
+                               SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL, SDL_SCANCODE_LALT, SDL_SCANCODE_RALT,
+                               SDL_SCANCODE_KP_5, SDL_SCANCODE_KP_ENTER, SDL_SCANCODE_SEMICOLON}) {
+        CHECK(dcp_key_from_name(KeyNameOf(scancode).c_str()) == scancode);
+    }
+
+    // Parsing: case-insensitive, SDL's own names work too, anything else is refused.
+    CHECK(dcp_key_from_name("SPACE") == SDL_SCANCODE_SPACE && dcp_key_from_name("Left Shift") == SDL_SCANCODE_LSHIFT);
+    CHECK(dcp_key_from_name("F10") == SDL_SCANCODE_F10 && dcp_key_from_name("pgdown") == SDL_SCANCODE_PAGEDOWN);
+    CHECK(dcp_key_from_name("") == 0 && dcp_key_from_name(nullptr) == 0 && dcp_key_from_name("notakey") == 0);
+    CHECK(dcp_key_from_name("escape") == 0 && !dcp_key_bindable(SDL_SCANCODE_ESCAPE));
+
+    // Reading the file: valid lines apply, invalid ones keep the default, other lines are ignored.
+    {
+        std::ofstream(file) << "# comment\nshow_launcher = 0\nkey_cross = Q\nkey_circle = notakey\nkey_l1 = \n"
+                               "key_left_stick_up = up\nhotkey_window_mode = f9 # note\nkey_unknown = a\n";
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_Q);
+    CHECK(map.scancode[DCP_KEY_CIRCLE] == SDL_SCANCODE_LSHIFT && map.scancode[DCP_KEY_L1] == SDL_SCANCODE_1);
+    CHECK(map.scancode[DCP_KEY_LEFT_STICK_UP] == SDL_SCANCODE_UP && map.scancode[DCP_KEY_LEFT_STICK_DOWN] == SDL_SCANCODE_S);
+    CHECK(map.scancode[DCP_KEY_HOTKEY_WINDOW_MODE] == SDL_SCANCODE_F9 && map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10);
+
+    // The same key on two controls is allowed: both read it.
+    {
+        std::ofstream(file) << "key_cross = e\n";
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_E && map.scancode[DCP_KEY_SQUARE] == SDL_SCANCODE_E);
+
+    // A missing file and a config without any binding (an older build's) are the defaults.
+    dcp_keys_load((file.parent_path() / "missing.ini").string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE);
+    {
+        std::ofstream(file) << "show_launcher = 0\nvsync = 1\n";
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE && map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10);
+    {
+        const LauncherSettings settings(file);
+        for (int i = 0; i < DCP_KEY_COUNT; ++i) {
+            CHECK(SavedKey(settings, static_cast<DcpKeyAction>(i)) == dcp_key_actions[i].default_scancode);
+        }
+    }
+
+    // Persistence: the launcher writes names, the runtime and the video core read them.
+    {
+        LauncherSettings settings(file);
+        settings.Set(kVSyncKey, "0");
+        SetKey(settings, DCP_KEY_CROSS, SDL_SCANCODE_J);
+        SetKey(settings, DCP_KEY_LEFT_STICK_UP, SDL_SCANCODE_KP_8);
+        SetKey(settings, DCP_KEY_HOTKEY_CHEATS, SDL_SCANCODE_F9);
+        SetKey(settings, DCP_KEY_CIRCLE, SDL_SCANCODE_ESCAPE); // not bindable: ignored
+        CHECK(settings.Save());
+    }
+    const std::string written = ReadAll(file);
+    CHECK(WrittenValue(written, "key_cross", "j") && WrittenValue(written, "key_left_stick_up", "kp8"));
+    CHECK(WrittenValue(written, "hotkey_cheats_menu", "f9") && written.find("key_circle") == std::string::npos);
+    {
+        const LauncherSettings settings(file);
+        CHECK(SavedKey(settings, DCP_KEY_CROSS) == SDL_SCANCODE_J && SavedKey(settings, DCP_KEY_CIRCLE) == SDL_SCANCODE_LSHIFT);
+        CHECK(KeyDisplayName(SavedKey(settings, DCP_KEY_LEFT_STICK_UP)) == "Keypad 8");
+        CHECK(KeyDisplayName(SDL_SCANCODE_RETURN) == "Enter" && KeyDisplayName(SDL_SCANCODE_SPACE) == "Space");
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_J && map.scancode[DCP_KEY_LEFT_STICK_UP] == SDL_SCANCODE_KP_8);
+    DcpSettings::Values values;
+    CHECK(values.menu_key == SDL_SCANCODE_F10 && values.window_mode_key == SDL_SCANCODE_F11);
+    CHECK(DcpSettings::Read(file.string(), values));
+    CHECK(values.menu_key == SDL_SCANCODE_F9 && values.window_mode_key == SDL_SCANCODE_F11 && !values.vsync);
+
+    // A bad saved name is the default for the launcher too.
+    CHECK(IsValidSetting("key_cross", "q") && !IsValidSetting("key_cross", "notakey") && !IsValidSetting("hotkey_window_mode", "escape"));
+
+    // Reset puts back the keys alone.
+    {
+        LauncherSettings settings(file);
+        ResetKeys(settings);
+        CHECK(settings.Save());
+        for (int i = 0; i < DCP_KEY_COUNT; ++i) {
+            CHECK(SavedKey(settings, static_cast<DcpKeyAction>(i)) == dcp_key_actions[i].default_scancode);
+        }
+    }
+    CHECK(WrittenValue(ReadAll(file), "key_cross", "space") && WrittenValue(ReadAll(file), "vsync", "0"));
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE && map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10);
+
+    // Every action has a managed setting with its default name.
+    for (const DcpKeyInfo& action : dcp_key_actions) {
+        bool managed = false;
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            managed |= setting.key == action.ini_key && setting.default_value == KeyNameOf(action.default_scancode);
+        }
+        CHECK(managed);
+    }
 }
 
 // ---- Controller prompts: block patches on synthetic CPK archives ----
@@ -2608,6 +2743,7 @@ int main(int argc, char** argv) {
     TestPlayGate();
     TestPlacement();
     TestOptions();
+    TestKeyBindings(base);
     TestFileBrowser(base);
     TestControllerPrompts(base);
     TestSafeMode(base);

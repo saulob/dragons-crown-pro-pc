@@ -261,7 +261,7 @@ void ImageTab() {
     ImGui::SeparatorText("Display");
     if (BeginRows("##display")) {
         ChoiceRow("Display mode", s.display_mode, G::DisplayModeNames.data(), nullptr, G::DisplayModeCount,
-                  "Windowed or borderless fullscreen. F11 switches while playing.");
+                  "Windowed or borderless fullscreen. The Window mode hotkey (F11 by default) switches while playing.");
         CheckRow("VSync", s.vsync, "Waits for the monitor: no tearing, a little more input delay.");
         ImGui::EndTable();
     }
@@ -930,7 +930,7 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
-        if (event.key.key == SDLK_F10) {
+        if (event.key.scancode == DcpSettings::Get().menu_key) {
             if (down && !event.key.repeat) {
                 ToggleCheatMenu();
             }

@@ -45,12 +45,30 @@
 #endif
 #define DCP_TRG_LAUNCHER_VERSION "1.1.0"
 
+// Dear ImGui's SDL3 backend; it is not declared in its header.
+ImGuiKey ImGui_ImplSDL3_KeyEventToImGuiKey(SDL_Keycode keycode, SDL_Scancode scancode);
+
 namespace dcp {
 namespace {
 
 const ImVec4 kAccent = ImVec4(kAccentRed / 255.0f, kAccentGreen / 255.0f, kAccentBlue / 255.0f, 1.0f);
 constexpr double kPlayFeedbackSeconds = 0.4;
 constexpr char kPortTitle[] = "Dragon's Crown Pro PC";
+
+ImGuiKey ImGuiKeyOf(int scancode) {
+    const SDL_Keycode keycode = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(scancode), SDL_KMOD_NONE, false);
+    return ImGui_ImplSDL3_KeyEventToImGuiKey(keycode, static_cast<SDL_Scancode>(scancode));
+}
+
+// The physical key behind a key ImGui reported; 0 when none is bindable.
+int ScancodeOf(ImGuiKey key) {
+    for (int scancode = 1; scancode < SDL_SCANCODE_COUNT; ++scancode) {
+        if (dcp_key_bindable(scancode) && ImGuiKeyOf(scancode) == key) {
+            return scancode;
+        }
+    }
+    return 0;
+}
 std::string GameFilesHelp() {
     return "Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported: " + SupportedBuildsText() +
            ". The Japanese 1.02 and 1.03 updates are installed over the 1.00 base package. The game is unpacked into the "
@@ -651,7 +669,9 @@ private:
     }
 
     void PageCheats(trg::Ui& ui) {
-        ui.Help(cheats::kLauncherHelp);
+        std::string help = cheats::kLauncherHelp;
+        help.replace(help.find("F10"), 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
+        ui.Help(help.c_str());
         ui.Spacer(12);
         const bool blocked = build_ && !build_->cheats;
         if (blocked) {
@@ -680,12 +700,34 @@ private:
             ui.Help("Xbox prompts are not available for this game build.");
         }
         ui.Info("Keyboard", "Always on, together with the controller.");
-        ui.Info("Window mode", "F11 switches Windowed and Borderless Fullscreen.");
-        ui.Info("Cheats menu", "F10 opens it while playing.");
-        if (ui.Section("Keyboard keys", true)) {
-            for (const KeyBinding& binding : KeyboardBindings()) {
-                ui.Info(binding.action, binding.keys);
+        if (ui.ConfirmRow("Keyboard defaults", "Puts the keyboard controls and the port hotkeys back to their defaults.",
+                          "Reset to defaults", "Put every key back to its default?", "Reset")) {
+            ResetKeys(settings_);
+            ui.SetStatus("Keys reset to defaults.");
+        }
+        if (ui.Section("Keyboard controls", true)) {
+            ui.Help("Click a key, then press the new one. Esc cancels. A key can be used for more than one control.");
+            for (int action = 0; action < DCP_KEY_FIRST_HOTKEY; ++action) {
+                KeyRow(ui, static_cast<DcpKeyAction>(action));
             }
+        }
+        if (ui.Section("Port hotkeys", true)) {
+            for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {
+                KeyRow(ui, static_cast<DcpKeyAction>(action));
+            }
+        }
+    }
+
+    void KeyRow(trg::Ui& ui, DcpKeyAction action) {
+        const std::optional<ImGuiKey> key =
+            ui.KeyBindRow(dcp_key_actions[action].label, nullptr, KeyDisplayName(SavedKey(settings_, action)));
+        if (!key) {
+            return;
+        }
+        if (const int scancode = ScancodeOf(*key)) {
+            SetKey(settings_, action, scancode);
+        } else {
+            ui.SetStatus("That key cannot be used.");
         }
     }
 

@@ -157,6 +157,7 @@ use the same defaults).
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
+| `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_experience_multiplier` | 1 (Off), 2, 5, 10 | 1 | at game start (F10 changes the session only) |
@@ -275,7 +276,11 @@ session only and never writes them. The hooks, the menu and Player 1 targeting a
 
 Xbox controllers work without setup; the keyboard is always on. The page lists the layout implemented in
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
-Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 1,000 Gold**, which is not a setting). Nothing is remappable and the dead zone is not a setting.
+Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 1,000 Gold**, which is not a setting). The dead zone is not a setting.
+
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the host functions that exist (Cheats menu, Window mode). Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+
+Each binding is one line in `dcp.ini`: `key_cross = space`, `key_left_stick_up = w`, `hotkey_cheats_menu = f10`, `hotkey_window_mode = f11` (the full list is `src/dcp_keys.c`). The value is a key name, case-insensitive: the shadPS4 names for common keys (`space`, `enter`, `lshift`, `rctrl`, `pgup`, `kp5`, ...) or SDL's own key names (`F10`, `Left Shift`, `Keypad 5`); the launcher writes lowercase. A missing or invalid line is the default, so a config from an older build keeps the old layout. The same key may be bound to several controls and all of them follow it; a port hotkey is not exclusive of a game control either. The bindings are read when the game starts (`dcp_keys.c`, shared by the launcher, `runtime_pad.c` and the video core); the controller mapping and `DCP_PAD_MAP` are unchanged, and `DCP_KEY_MAP` still overrides the buttons it names.
 
 **Local multiplayer**: up to four SDL gamepads, player N on pad handle N and user N (`runtime_pad.c`, `runtime_services.c`).
 A gamepad that is found takes the lowest free slot and logs its user in once; the game opens that user's pad on the

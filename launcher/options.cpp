@@ -1,5 +1,7 @@
 #include "options.h"
 
+#include <SDL3/SDL_keyboard.h>
+
 namespace dcp {
 namespace {
 
@@ -73,22 +75,38 @@ std::string MonitorLabel(int monitor, const std::vector<Display>& displays) {
     return label;
 }
 
-const std::vector<KeyBinding>& KeyboardBindings() {
-    static const std::vector<KeyBinding> bindings = {
-        {"Left stick", "W A S D"},
-        {"Right stick", "Arrow keys"},
-        {"Cross (A)", "Space"},
-        {"Circle (B)", "Left Shift"},
-        {"Square (X)", "E"},
-        {"Triangle (Y)", "Q"},
-        {"L1 / R1", "1 / 3"},
-        {"L2 / R2", "R / F"},
-        {"L3 / R3", "Z / C"},
-        {"D-pad up / down / left / right", "I / K / J / L"},
-        {"Options (Start)", "Enter"},
-        {"Touchpad left / right (Back)", "Tab / Backspace"},
-    };
-    return bindings;
+std::string KeyDisplayName(int scancode) {
+    if (scancode == SDL_SCANCODE_RETURN) {
+        return "Enter";
+    }
+    return dcp_key_bindable(scancode) ? SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode)) : std::string();
+}
+
+namespace {
+
+std::string DefaultKeyName(DcpKeyAction action) {
+    char name[32];
+    return dcp_key_name(dcp_key_actions[action].default_scancode, name, sizeof(name));
+}
+
+} // namespace
+
+int SavedKey(const trg::SettingsStore& settings, DcpKeyAction action) {
+    const int saved = dcp_key_from_name(settings.Get(dcp_key_actions[action].ini_key).c_str());
+    return saved ? saved : dcp_key_actions[action].default_scancode;
+}
+
+void SetKey(trg::SettingsStore& settings, DcpKeyAction action, int scancode) {
+    char name[32];
+    if (dcp_key_name(scancode, name, sizeof(name))[0]) {
+        settings.Set(dcp_key_actions[action].ini_key, name);
+    }
+}
+
+void ResetKeys(trg::SettingsStore& settings) {
+    for (int action = 0; action < DCP_KEY_COUNT; ++action) {
+        settings.Set(dcp_key_actions[action].ini_key, DefaultKeyName(static_cast<DcpKeyAction>(action)));
+    }
 }
 
 } // namespace dcp

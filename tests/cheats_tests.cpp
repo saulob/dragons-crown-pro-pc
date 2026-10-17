@@ -254,7 +254,7 @@ void TestMenuModel() {
     CHECK(overlay.find("MenuScale(") != std::string::npos);
     CHECK(overlay.find("FpsCounterBox(OverlayText()") != std::string::npos); // below the frame counter, not over it
     CHECK(ReadSource("gpu/shim/window.cpp").find("SetDisplayScale(SDL_GetWindowDisplayScale") != std::string::npos);
-    CHECK(overlay.find("SDLK_F10") != std::string::npos);
+    CHECK(overlay.find("Get().menu_key") != std::string::npos);
     CHECK(overlay.find("ImGuiKey_GamepadFaceRight") != std::string::npos); // B closes
     CHECK(overlay.find("ImGuiKey_GamepadLStickUp") != std::string::npos);  // the left stick moves
     CHECK(overlay.find("kAccentRed") != std::string::npos); // the launcher's accent, not a colour of its own

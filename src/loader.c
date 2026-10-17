@@ -424,6 +424,7 @@ int main(int argc, char **argv) {
     render_target=dcp_render_target(render_resolution,aspect_ratio);
     runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file));
+    runtime_pad_set_settings(settings_file);
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file));
     if (content_profile) {
         FILE *profile=fopen(content_profile,"rb");

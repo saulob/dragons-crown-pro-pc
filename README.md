@@ -145,7 +145,7 @@ The game runs at its own 60 frames per second.
 ### Controls
 - Xbox controllers work without setup
 - **Controller prompts**: PlayStation (original) or Xbox. Xbox changes the button pictures the game shows (A/B/X/Y, LB/RB, LT/RT, MENU and VIEW) in the port's own copy of the game; PlayStation puts the originals back. Your `.pkg` file is never changed.
-- The **keyboard** is always on, together with the controller:
+- The **keyboard** is always on, together with the controller. The keys below are the defaults; change any of them on the launcher's **Controls** page (click a key, press the new one, Esc cancels) and use **Reset to defaults** to restore them:
 
 | Action | Keys |
 | --- | --- |
@@ -160,7 +160,7 @@ The game runs at its own 60 frames per second.
 | Options (Start) | Enter |
 | Touchpad left / right (Back) | Tab / Backspace |
 
-- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu. **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
+- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
 - **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged. Online play is not supported.
 
 ### About

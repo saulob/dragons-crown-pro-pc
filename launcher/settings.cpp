@@ -1,11 +1,14 @@
 #include "settings.h"
 
 #include <algorithm>
+#include <deque>
 #include <fstream>
 #include <initializer_list>
 #include <system_error>
 #include <utility>
+#include <vector>
 
+#include "dcp_keys.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
 #include "utf8.h"
@@ -13,7 +16,7 @@
 namespace dcp {
 namespace {
 
-constexpr ManagedSetting kManagedSettings[] = {
+constexpr ManagedSetting kBaseSettings[] = {
     {kShowLauncherKey, "1"},
     {kDisplayModeKey, "windowed"},
     {kWindowWidthKey, "1920"},
@@ -61,13 +64,27 @@ constexpr char kFileHeader[] =
 } // namespace
 
 std::span<const ManagedSetting> ManagedSettings() {
-    return kManagedSettings;
+    static const std::vector<ManagedSetting> settings = [] {
+        static std::deque<std::string> default_names;
+        std::vector<ManagedSetting> all(std::begin(kBaseSettings), std::end(kBaseSettings));
+        for (const DcpKeyInfo& action : dcp_key_actions) {
+            char name[32];
+            default_names.emplace_back(dcp_key_name(action.default_scancode, name, sizeof(name)));
+            all.push_back({action.ini_key, default_names.back()});
+        }
+        return all;
+    }();
+    return settings;
 }
 
 bool IsValidSetting(std::string_view key, std::string_view value) {
     const auto one_of = [&](std::initializer_list<std::string_view> values) {
         return std::find(values.begin(), values.end(), value) != values.end();
     };
+    if (std::any_of(std::begin(dcp_key_actions), std::end(dcp_key_actions),
+                    [&](const DcpKeyInfo& action) { return key == action.ini_key; })) {
+        return dcp_key_from_name(std::string(value).c_str()) != 0;
+    }
     if (key == kDisplayModeKey) {
         return one_of({"windowed", "borderless"});
     }
@@ -118,7 +135,7 @@ LauncherSettings::LauncherSettings(std::filesystem::path file) : file_(std::move
     true_value = "1";
     false_value = "0";
     const trg::TextFileSettings stored(Utf8(file_));
-    for (const ManagedSetting& setting : kManagedSettings) {
+    for (const ManagedSetting& setting : ManagedSettings()) {
         if (stored.Has(setting.key)) {
             saved_[std::string(setting.key)] = stored.Get(setting.key);
         }
@@ -170,7 +187,7 @@ bool LauncherSettings::SaveNow(const Values& values) {
 }
 
 void LauncherSettings::ResetToDefaults() {
-    for (const ManagedSetting& setting : kManagedSettings) {
+    for (const ManagedSetting& setting : ManagedSettings()) {
         if (!IsLauncherPlacementSetting(setting.key)) {
             pending_[std::string(setting.key)] = std::string(setting.default_value);
         }

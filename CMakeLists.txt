@@ -39,6 +39,12 @@ find_package(SDL3 CONFIG REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(Threads REQUIRED)
 
+# Keyboard bindings shared by the launcher, the runtime pad and the video core.
+add_library(dcp_keys STATIC src/dcp_keys.c)
+target_include_directories(dcp_keys PUBLIC src)
+target_link_libraries(dcp_keys PUBLIC SDL3::SDL3)
+target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
+
 add_subdirectory(gpu)
 add_subdirectory(launcher)
 
