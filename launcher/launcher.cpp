@@ -49,10 +49,12 @@ namespace {
 const ImVec4 kAccent = ImVec4(kAccentRed / 255.0f, kAccentGreen / 255.0f, kAccentBlue / 255.0f, 1.0f);
 constexpr double kPlayFeedbackSeconds = 0.4;
 constexpr char kPortTitle[] = "Dragon's Crown Pro PC";
-constexpr char kGameFilesHelp[] =
-    "Select your own legally obtained Dragon's Crown Pro package (.pkg, CUSA10454, version 01.03). It is unpacked into "
-    "the game folder next to the program (about 6 GB). No game files are included. Reinstalling keeps your saves and "
-    "settings.";
+std::string GameFilesHelp() {
+    return "Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported: " + SupportedBuildsText() +
+           ". The Japanese 1.02 and 1.03 updates are installed over the 1.00 base package. The game is unpacked into the "
+           "game folder next to the program (about 6 GB). No game files are included. Reinstalling keeps your saves and "
+           "settings.";
+}
 #ifdef _WIN32
 constexpr char kShowLauncherHelp[] = "Off starts the game directly. Hold Shift while starting to bring it back.";
 #else
@@ -126,11 +128,11 @@ const char* StatusTitle(GameFileState state) {
     return "";
 }
 
-const char* StatusDetail(GameFileState state) {
+std::string StatusDetail(GameFileState state) {
     switch (state) {
     case GameFileState::kValid: return "";
     case GameFileState::kMissing: return "Install the game from your own .pkg file.";
-    case GameFileState::kDifferentVersion: return "Install version 01.03 (CUSA10454) from your own .pkg file.";
+    case GameFileState::kDifferentVersion: return "Install " + SupportedBuildsText() + " from your own .pkg file.";
     case GameFileState::kReadError: return "Check that the game folder can be read, then install again.";
     }
     return "";
@@ -140,6 +142,10 @@ GameCheck CheckAndLog(const GamePaths& paths) {
     const GameCheck check = CheckGameFiles(paths);
     Log("game files in %s: %s%s%s%s", Utf8(paths.app0).c_str(), StateName(check.state), check.detail.empty() ? "" : " (",
         check.detail.c_str(), check.detail.empty() ? "" : ")");
+    if (check.build) {
+        Log("build %s, regional archive %s", check.build->label,
+            check.build->regional_archive ? check.build->regional_archive : "none");
+    }
     if (!check.eboot_sha256.empty()) {
         Log("eboot.bin SHA-256 %s", check.eboot_sha256.c_str());
     }
@@ -158,7 +164,7 @@ enum class Outcome { kRunning, kPlay, kQuit };
 class LauncherApp {
 public:
     LauncherApp(const DcpLauncherConfig& config, LauncherSettings& settings, GamePaths paths, GameCheck check)
-        : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state) {}
+        : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state), build_(check.build) {}
 
     // Runs the launcher window until Play or Quit. False when no window could be opened.
     bool Run(Outcome& outcome) {
@@ -176,7 +182,7 @@ public:
         }
         displays_ = ListDisplays();
         gpu_names_ = ListGpuNames();
-        prompts_installed_ = InstalledPromptStyle(paths_.app0);
+        prompts_installed_ = InstalledPrompts();
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         placement_ = PlacementTracker(host_.Restored());
         fonts_ = trg::LoadSystemFonts(18.0f);
@@ -260,7 +266,7 @@ private:
         if (play_.starting()) {
             return;
         }
-        files_ = CheckAndLog(paths_).state;
+        Recheck();
         if (files_ == GameFileState::kValid && !GraphicsUsable()) {
             return;
         }
@@ -294,6 +300,16 @@ private:
         problem_.Show(cause, advice);
         Log("graphics unavailable, staying open");
         return false;
+    }
+
+    void Recheck() {
+        const GameCheck check = CheckAndLog(paths_);
+        files_ = check.state;
+        build_ = check.build;
+    }
+
+    PromptStyle InstalledPrompts() const {
+        return build_ ? InstalledPromptStyle(paths_.app0, *build_) : PromptStyle::kPlayStation;
     }
 
     void TrackPlacement() {
@@ -380,8 +396,10 @@ private:
     void PagePlay(trg::Ui& ui) {
         const bool ready = files_ == GameFileState::kValid;
         const std::string dir = Utf8(paths_.app0);
-        ui.StatusCard(ready ? trg::Status::kReady : trg::Status::kAttention, StatusTitle(files_),
-                      ready ? dir.c_str() : StatusDetail(files_));
+        const std::string title = ready && build_ ? std::string(StatusTitle(files_)) + " \xC2\xB7 " + build_->label
+                                                  : StatusTitle(files_);
+        const std::string detail = ready ? dir : StatusDetail(files_);
+        ui.StatusCard(ready ? trg::Status::kReady : trg::Status::kAttention, title.c_str(), detail.c_str());
         if (!install_failure_.empty()) {
             ui.Spacer(4);
             ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().warn_dot);
@@ -390,7 +408,8 @@ private:
             ui.Help(install_failure_text_.c_str());
             ui.Spacer(4);
         }
-        ui.Row("Game files", kGameFilesHelp);
+        const std::string files_help = GameFilesHelp();
+        ui.Row("Game files", files_help.c_str());
         if (!ui.TaskProgress(install_)) {
             const bool clicked = ready ? ImGui::Button("Reinstall game...", ImVec2(-FLT_MIN, 0))
                                        : ui.AccentButton("Install game...");
@@ -435,7 +454,7 @@ private:
         outcome_ = std::make_shared<InstallResult>();
         const bool started = install_.Start(
             "Checking the package...",
-            [outcome = outcome_, source = PathFromUtf8(picked), paths = paths_](trg::Task& task) {
+            [outcome = outcome_, source = PathFromUtf8(picked), roots = RootsOf(paths_)](trg::Task& task) {
                 InstallHooks hooks;
                 hooks.phase = [&task](const char* text) {
                     task.SetLabel(text);
@@ -445,7 +464,7 @@ private:
                     task.Progress(static_cast<long long>(done), static_cast<long long>(total));
                     return !task.cancelled();
                 };
-                *outcome = InstallGame(source, paths, hooks);
+                *outcome = InstallGame(source, roots, hooks);
                 return outcome->ok() ? std::string() : std::string(DescribeInstall(outcome->status).title);
             });
         if (started) {
@@ -464,14 +483,21 @@ private:
         }
         const InstallMessage message = DescribeInstall(outcome->status);
         if (outcome->ok()) {
-            Log("game installed: %zu files (%zu linked), %llu bytes", outcome->files, outcome->linked,
-                static_cast<unsigned long long>(outcome->bytes));
-            files_ = CheckAndLog(paths_).state;
+            if (outcome->status == InstallStatus::kUpToDate) {
+                Log("game already up to date: %s", outcome->detail.c_str());
+            } else if (outcome->status == InstallStatus::kActivated) {
+                Log("game activated: %s", outcome->build->label);
+            } else {
+                Log("game installed: %zu files (%zu linked), %llu bytes", outcome->files, outcome->linked,
+                    static_cast<unsigned long long>(outcome->bytes));
+            }
+            paths_ = ActiveBuildPaths(RootsOf(paths_));
+            Recheck();
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
-            prompts_installed_ = InstalledPromptStyle(paths_.app0);
+            prompts_installed_ = InstalledPrompts();
             // The fresh archives show the game's own prompts; put the chosen ones back.
-            if (SavedPromptStyle() == PromptStyle::kXbox && prompts_installed_ != PromptStyle::kXbox &&
-                files_ == GameFileState::kValid) {
+            if (SavedPromptStyle() == PromptStyle::kXbox && build_ && build_->xbox_prompts &&
+                prompts_installed_ != PromptStyle::kXbox && files_ == GameFileState::kValid) {
                 Log("controller prompts: re-applying xbox after the install");
                 StartPrompts(PromptStyle::kXbox);
             }
@@ -482,7 +508,7 @@ private:
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             return;
         }
-        Log("game install failed: %s (%s)", message.title, outcome->detail.c_str());
+        Log("game install failed: %s (%s)", message.title.c_str(), outcome->detail.c_str());
         install_failure_ = message.title;
         install_failure_text_ = message.text;
         launcher_->SetStatus(std::string("Install failed: ") + install_failure_, 8.0);
@@ -590,6 +616,12 @@ private:
     void PageCheats(trg::Ui& ui) {
         ui.Help(cheats::kLauncherHelp);
         ui.Spacer(12);
+        const bool blocked = build_ && !build_->cheats;
+        if (blocked) {
+            ui.Help((std::string("Cheats are not available for ") + build_->label + ".").c_str());
+            ui.Spacer(8);
+        }
+        ImGui::BeginDisabled(blocked);
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
             ui.Toggle(cheat.label, cheat.description, cheat.key, cheats::kCheatDefault, "Off", "On");
         }
@@ -599,6 +631,7 @@ private:
         }
         ui.Combo(cheats::kExperienceMultiplierName, cheats::kExperienceMultiplierHelp, cheats::kExperienceMultiplierKey,
                  "1", experience);
+        ImGui::EndDisabled();
         ui.EndRows();
     }
 
@@ -606,6 +639,9 @@ private:
         ui.Info("Controller", "Automatic: Xbox controllers work without setup.");
         ui.Row("Controller prompts", kControllerPromptsHelp);
         ControllerPromptsCombo(ui);
+        if (build_ && !build_->xbox_prompts) {
+            ui.Help("Xbox prompts are not available for this game build.");
+        }
         ui.Info("Keyboard", "Always on, together with the controller.");
         ui.Info("Window mode", "F11 switches Windowed and Borderless Fullscreen.");
         ui.Info("Cheats menu", "F10 opens it while playing.");
@@ -622,7 +658,8 @@ private:
             return;
         }
         const bool ready = files_ == GameFileState::kValid && !install_.running();
-        ImGui::BeginDisabled(!ready);
+        const bool xbox_allowed = !build_ || build_->xbox_prompts;
+        ImGui::BeginDisabled(!ready || !xbox_allowed);
         const char* shown = ready ? PromptStyleLabel(prompts_installed_) : "Install the game first";
         if (ImGui::BeginCombo("##controller_prompts", shown)) {
             for (const PromptStyle style : {PromptStyle::kPlayStation, PromptStyle::kXbox}) {
@@ -645,13 +682,13 @@ private:
     }
 
     void StartPrompts(PromptStyle style) {
-        if (prompts_.running() || install_.running()) {
+        if (prompts_.running() || install_.running() || !build_) {
             return;
         }
         prompts_outcome_ = std::make_shared<PromptsResult>();
         const bool started = prompts_.Start(
             style == PromptStyle::kXbox ? "Switching to Xbox prompts..." : "Restoring PlayStation prompts...",
-            [outcome = prompts_outcome_, style, app0 = paths_.app0](trg::Task& task) {
+            [outcome = prompts_outcome_, style, app0 = paths_.app0, build = *build_](trg::Task& task) {
                 PatchHooks hooks;
                 hooks.phase = [&task](const char* text) {
                     task.SetLabel(text);
@@ -661,7 +698,7 @@ private:
                     task.Progress(static_cast<long long>(done), static_cast<long long>(total));
                     return !task.cancelled();
                 };
-                *outcome = SetPromptStyle(app0, style, XboxPromptsPatch(), hooks);
+                *outcome = SetPromptStyle(app0, build, style, XboxPromptsPatch(), hooks);
                 if (outcome->ok) {
                     return std::string();
                 }
@@ -681,7 +718,7 @@ private:
         if (!outcome) {
             return;
         }
-        prompts_installed_ = InstalledPromptStyle(paths_.app0);
+        prompts_installed_ = InstalledPrompts();
         if (outcome->ok) {
             Log("controller prompts: %s (%s)", PromptStyleKey(prompts_installed_), outcome->detail.c_str());
             if (!settings_.SaveNow({{kControllerPromptsKey, PromptStyleKey(prompts_installed_)}})) {
@@ -724,7 +761,8 @@ private:
             Log("settings reset to defaults (pending)");
         }
         ui.Info("Port version", DCP_PORT_VERSION);
-        ui.Info("Game", "PS4 CUSA10454, Dragon's Crown Pro 1.03");
+        const std::string game = InstalledGameName(files_, build_);
+        ui.Info("Game", game.c_str());
         ui.Info("Renderer", "Vulkan");
 #ifdef _WIN32
         ui.Info("Platform", "Windows x64");
@@ -743,6 +781,7 @@ private:
     LauncherSettings& settings_;
     GamePaths paths_;
     GameFileState files_;
+    const GameBuild* build_ = nullptr;
     LauncherHost host_;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;

@@ -44,6 +44,10 @@ void runtime_cheat_toggle(int cheat);
 size_t runtime_cheat_hooks_stub_bytes(void);
 int runtime_cheat_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size);
 
+/* 1 when the cheat hooks are installed on the loaded image; the in-game menu offers cheats only then. */
+int runtime_cheats_available(void);
+void runtime_cheats_set_available(int available);
+
 #ifdef __cplusplus
 }
 #endif

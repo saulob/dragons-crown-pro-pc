@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 
+#include "dcp_resolution.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -69,6 +71,16 @@ int dcp_check_vulkan(char *cause, size_t cause_size, char *advice, size_t advice
 /* Builds boot.bin, content.bin and image.json in `out` from the prepared game folder `app0` (UTF-8 paths). 0 on
  * success; otherwise 1 and the reason in `error`. */
 int dcp_build_boot_image(const char *app0, const char *out, char *error, size_t error_size);
+
+typedef struct {
+    const char *label;
+    int cheats;                  /* the native cheat hooks are validated for this build */
+    const DcpResolutionSite *resolution_sites;
+    size_t resolution_site_count;
+} DcpGameBuild;
+
+/* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */
+int dcp_game_build(const char *image_dir, DcpGameBuild *build);
 
 typedef enum { DCP_LAUNCHER_PLAY = 0, DCP_LAUNCHER_QUIT = 1, DCP_LAUNCHER_BLOCKED = 2 } DcpLauncherResult;
 

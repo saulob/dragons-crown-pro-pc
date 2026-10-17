@@ -34,8 +34,13 @@ and `--logs` win, and everything else is found next to the executable (`launcher
 
 | | Packaged (next to the executable) | Executable in `build\cmake\<toolchain>\bin` |
 |---|---|---|
-| Prepared game (`/app0`) | `game\prepared\v1.03` | `<repository>\game\prepared\v1.03` |
-| Boot image | `game\image\v1.03` | `<repository>\build\image\v1.03` |
+| Prepared game (`/app0`) | `game\prepared\<build>` | `<repository>\game\prepared\<build>` |
+| Boot image | `game\image\<build>` | `<repository>\build\image\<build>` |
+
+`<build>` is `v1.03` for CUSA10454 (US), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
+`CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
+selected last is active. Selecting a package makes its exact build active: a complete prepared folder of it is activated
+without copying, and only the build that is already active is reported as up to date.
 | User data, `dcp.ini` | `user` | `<repository>\user` |
 | Logs | `logs` | `<repository>\build\logs` |
 
@@ -64,20 +69,33 @@ while the game files are not valid. If its window cannot be opened, the game sta
 
 `CheckGameFiles` is the one readiness check (launcher start, Play and the installer). It reads, in this order:
 
-1. `game\prepared\v1.03\.dcp_view.json`: version `1.03` and scope `full` (written last by the installer, or by
+1. `sce_sys\param.sfo` names a supported build: `TITLE_ID`, `CONTENT_ID`, `APP_VER` and `VERSION` of the finished game
+   (the builds listed in `launcher/game_profile.cpp`, each identified by its finished game). The build is logged with its
+   regional archive, or `none`.
+2. `game\prepared\<build>\.dcp_view.json`: the build's version and scope `full` (written last by the installer, or by
    `prepare_game.py`).
-2. `sce_sys\param.sfo`: `TITLE_ID CUSA10454`, `CONTENT_ID UP2611-CUSA10454_00-DRAGONSCROWNPRO1`, `APP_VER 01.00`,
-   `VERSION 01.03`.
-3. The eight game files are present and not empty (`eboot.bin`, `sce_discmap.plt`, `DRACRO.CPK`,
-   `DRACRO_US.CPK`, the three `sce_module` libraries, `param.sfo`). The archives are not hashed: the marker records that
-   their extraction finished (and the Controller prompts setting appends to them, see Controls).
-4. `eboot.bin` SHA-256 equals `f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a` (about 21 MB).
-5. `build\image\v1.03`: `boot.bin`, `content.bin`, `image.json`, and `image.json` names the same title and eboot hash.
+3. The shared files, the build's regional archive (`DRACRO_US.CPK`, `DRACRO_PATCH_JP.CPK` or `DRACRO_CK.CPK`, none for
+   Japanese 1.00) and its update files (`sce_discmap_patch.plt` for Japanese 1.02 and 1.03) are present and not empty.
+   The archives are not hashed: the marker records that their extraction finished (and the Controller prompts setting
+   appends to them, see Controls).
+4. `eboot.bin` SHA-256 equals the build's hash (about 21 MB).
+5. `game\image\<build>`: `boot.bin`, `content.bin`, `image.json`, and `image.json` names the same title and eboot hash.
 
 Steps 2 to 4 are `CheckGameTree`, which the installer also runs on the folder the player selects.
 
+**Japanese builds.** The base package (`drcpro.pkg`, CATEGORY `gd`, APP_VER 01.00) is a complete game: it is installed
+into `CUSA07001-1.00`. The 1.02 and 1.03 updates (`drcpro v102.pkg`, `drcpro v103.pkg`, CATEGORY `gp`) are each laid over
+a hard-linked copy of the 1.00 folder, into `CUSA07001-1.02` or `CUSA07001-1.03`. The base's data is linked, not copied.
+Each result is checked as its finished game and gets its own boot image. The 1.03 update replaces every file the 1.02
+update changes, so 1.03 does not need 1.02. An update needs the 1.00 folder to be installed; the launcher says so
+otherwise.
+
 States: missing, valid, different version, read error. The identity lives in `launcher/game_profile.h` and mirrors
 `scripts/game_profiles.py`; a test fails if they drift.
+
+The Play card's title names the active build ("Ready to play · CUSA10454 1.00 USA") and its detail is the prepared
+folder. About's **Game** row shows the same label after `PS4 `, or `Not installed`. The log's `build` line uses the same
+label.
 
 ## Install
 
@@ -222,7 +240,7 @@ line "Press F10 while playing to open the Cheats menu. Changes made there apply 
 offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
 Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**, each with its one-line description
-(`src/dcp_cheats.h`), and below them the **Experience Multiplier** combo (Off, 2x, 5x, 10x). All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
+(`src/dcp_cheats.h`), and below them the **Experience Multiplier** combo (Off, 2x, 5x, 10x). Cheats work on the CUSA10454 build only; on the CUSA10209 build the menu shows them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
 settings puts them back to Off. The saved values are the start of every game session; the F10 menu changes the running
 session only and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
@@ -242,7 +260,9 @@ The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
 atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port
 has no way to swap textures at run time, so the choice is made in the installed game files: Xbox applies a block patch
-to `DRACRO_US.CPK` and `DRACRO.CPK` (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it.
+to `DRACRO_US.CPK` and `DRACRO.CPK` (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. The
+Japanese and Asia and Hong Kong builds have no validated Xbox patch: they always show the PlayStation prompts and their
+archives are not touched.
 The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the
 4 × 4 blocks that differ between the game's atlas and the repainted one, about 480 KB, with the CRC32 of each pack
 before and after, and the repainted glyphs sit in the same rectangles as the game's, so the sprite definitions

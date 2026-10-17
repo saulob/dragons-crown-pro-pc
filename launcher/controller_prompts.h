@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "cpk_patch.h"
+#include "game_profile.h"
 
 namespace dcp {
 
@@ -25,13 +26,14 @@ const char* PromptStyleKey(PromptStyle style);
 const char* PromptStyleLabel(PromptStyle style);
 std::optional<PromptStyle> ParsePromptStyle(std::string_view key);
 
-// The archives the patch touches, among those present in the prepared game folder. Both hold the button atlas;
-// DRACRO_US.CPK is the one the game reads it from, DRACRO.CPK is patched too so the choice holds either way.
-std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0);
+// The archives the patch touches, among those present in the prepared game folder. Only a build whose Xbox patch is
+// validated has any: the regional archive holds the button atlas the game reads, DRACRO.CPK is patched too so the
+// choice holds either way.
+std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0, const GameBuild& build);
 
 // What the installed archives show: Xbox once every archive present is patched, PlayStation otherwise (a half-patched
 // install reads as PlayStation; choosing Xbox again completes it, choosing PlayStation cleans it up).
-PromptStyle InstalledPromptStyle(const std::filesystem::path& app0);
+PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build);
 
 struct PromptsResult {
     bool ok = false;
@@ -41,7 +43,7 @@ struct PromptsResult {
 
 // Patches or reverts every archive so the game shows `style`. `xbox_patch` is the DCPX patch (the embedded
 // xbox-prompts.dcpx); it is only needed for kXbox. Progress and cancellation go through the hooks.
-PromptsResult SetPromptStyle(const std::filesystem::path& app0, PromptStyle style, std::span<const uint8_t> xbox_patch,
-                             const PatchHooks& hooks = {});
+PromptsResult SetPromptStyle(const std::filesystem::path& app0, const GameBuild& build, PromptStyle style,
+                             std::span<const uint8_t> xbox_patch, const PatchHooks& hooks = {});
 
 } // namespace dcp

@@ -7,8 +7,7 @@
 namespace dcp {
 namespace {
 
-// The order matters for progress: the larger archive (two entries) first, so the bar moves early.
-constexpr const char* kArchives[] = {"DRACRO_US.CPK", "DRACRO.CPK"};
+constexpr const char* kSharedArchive = "DRACRO.CPK";
 
 } // namespace
 
@@ -30,10 +29,13 @@ std::optional<PromptStyle> ParsePromptStyle(std::string_view key) {
     return std::nullopt;
 }
 
-std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0) {
+std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0, const GameBuild& build) {
     std::vector<std::filesystem::path> out;
+    if (!build.xbox_prompts || !build.regional_archive) {
+        return out;
+    }
     std::error_code ec;
-    for (const char* name : kArchives) {
+    for (const char* name : {build.regional_archive, kSharedArchive}) {
         const std::filesystem::path archive = app0 / name;
         if (std::filesystem::is_regular_file(archive, ec)) {
             out.push_back(archive);
@@ -42,8 +44,8 @@ std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& a
     return out;
 }
 
-PromptStyle InstalledPromptStyle(const std::filesystem::path& app0) {
-    const std::vector<std::filesystem::path> archives = PromptArchives(app0);
+PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build) {
+    const std::vector<std::filesystem::path> archives = PromptArchives(app0, build);
     if (archives.empty()) {
         return PromptStyle::kPlayStation;
     }
@@ -55,10 +57,19 @@ PromptStyle InstalledPromptStyle(const std::filesystem::path& app0) {
     return PromptStyle::kXbox;
 }
 
-PromptsResult SetPromptStyle(const std::filesystem::path& app0, PromptStyle style, std::span<const uint8_t> xbox_patch,
-                             const PatchHooks& hooks) {
+PromptsResult SetPromptStyle(const std::filesystem::path& app0, const GameBuild& build, PromptStyle style,
+                             std::span<const uint8_t> xbox_patch, const PatchHooks& hooks) {
     PromptsResult result;
-    const std::vector<std::filesystem::path> archives = PromptArchives(app0);
+    if (!build.xbox_prompts) {
+        if (style == PromptStyle::kXbox) {
+            result.detail = std::string("Xbox prompts are not validated for ") + build.label;
+            return result;
+        }
+        result.ok = true;
+        result.detail = "the game's own prompts";
+        return result;
+    }
+    const std::vector<std::filesystem::path> archives = PromptArchives(app0, build);
     if (archives.empty()) {
         result.detail = "no game archives in " + Utf8(app0);
         return result;

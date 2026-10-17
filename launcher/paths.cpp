@@ -16,7 +16,7 @@
 #include <cstring>
 
 #include "dcp_launcher.h"
-#include "game_profile.h"
+#include "game_files.h"
 #include "utf8.h"
 
 namespace fs = std::filesystem;
@@ -25,23 +25,20 @@ namespace dcp {
 namespace {
 
 struct Defaults {
-    fs::path app0;
-    fs::path image_dir;
+    GameRoots roots;
     fs::path user_dir;
     fs::path logs_dir;
 };
 
 Defaults DefaultsFor(const fs::path& exe_dir) {
-    const fs::path version = fs::path("v" + std::string(kSupportedGame.version));
     const fs::path build = exe_dir.parent_path().parent_path().parent_path();
     const bool in_build_tree = exe_dir.filename() == "bin" && exe_dir.parent_path().parent_path().filename() == "cmake" &&
                                build.filename() == "build";
     if (in_build_tree) {
         const fs::path root = build.parent_path();
-        return {root / "game" / "prepared" / version, build / "image" / version, root / "user", build / "logs"};
+        return {{root / "game" / "prepared", build / "image"}, root / "user", build / "logs"};
     }
-    return {exe_dir / "game" / "prepared" / version, exe_dir / "game" / "image" / version, exe_dir / "user",
-            exe_dir / "logs"};
+    return {{exe_dir / "game" / "prepared", exe_dir / "game" / "image"}, exe_dir / "user", exe_dir / "logs"};
 }
 
 fs::path OrDefault(const std::string& given, const fs::path& fallback) {
@@ -61,9 +58,10 @@ bool Copy(char (&out)[4096], const fs::path& path) {
 
 Paths ResolvePaths(const PathRequest& request, const fs::path& exe_dir) {
     const Defaults defaults = DefaultsFor(exe_dir);
+    const GamePaths active = ActiveBuildPaths(defaults.roots);
     Paths paths;
     if (request.boot.empty()) {
-        paths.image_dir = defaults.image_dir;
+        paths.image_dir = active.image_dir;
         paths.boot = paths.image_dir / "boot.bin";
     } else {
         paths.boot = PathFromUtf8(request.boot);
@@ -71,7 +69,7 @@ Paths ResolvePaths(const PathRequest& request, const fs::path& exe_dir) {
     }
     paths.content_profile = request.content_profile.empty() ? paths.image_dir / "content.bin"
                                                             : PathFromUtf8(request.content_profile);
-    paths.app0 = OrDefault(request.app0, defaults.app0);
+    paths.app0 = OrDefault(request.app0, active.app0);
     paths.user_dir = OrDefault(request.user_dir, defaults.user_dir);
     paths.logs_dir = OrDefault(request.logs_dir, defaults.logs_dir);
     return paths;

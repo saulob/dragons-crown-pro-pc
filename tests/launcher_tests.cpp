@@ -100,44 +100,59 @@ std::string MakeSfo(const std::vector<std::pair<std::string, std::string>>& item
     return sfo + entries + keys + values;
 }
 
+const GameBuild& kUs = SupportedBuilds()[0];
+const GameBuild& kJp100 = SupportedBuilds()[1];
+const GameBuild& kJp102 = SupportedBuilds()[2];
+const GameBuild& kJp103 = SupportedBuilds()[3];
+const GameBuild& kCk = SupportedBuilds()[4];
+
 constexpr char kEboot[] = "synthetic eboot bytes";
 
 struct Fixture {
     fs::path root;
     GamePaths paths;
-    GameFingerprint fingerprint = kSupportedGame;
+    GameBuild build;
+    std::vector<GameBuild> builds;
     std::string eboot_sha;
 
-    explicit Fixture(const fs::path& base, const char* name) : root(base / name) {
+    explicit Fixture(const fs::path& base, const char* name, const GameBuild& original = kUs)
+        : root(base / name), build(original) {
         fs::remove_all(root);
         paths.app0 = root / "app0";
         paths.image_dir = root / "image";
         WriteAll(paths.app0 / "eboot.bin", kEboot);
         eboot_sha = Sha256Hex(paths.app0 / "eboot.bin");
-        fingerprint.eboot_sha256 = eboot_sha;
+        build.eboot_sha256 = eboot_sha.c_str();
+        builds = {build};
         Rebuild();
     }
 
-    // The complete, valid layout.
+    // The complete, valid layout of this build.
     void Rebuild() {
-        WriteAll(paths.app0 / ".dcp_view.json", "{\n  \"version\": \"1.03\",\n  \"scope\": \"full\"\n}");
+        WriteAll(paths.app0 / ".dcp_view.json", "{\n  \"version\": \"" + std::string(build.version) + "\",\n  \"scope\": \"full\"\n}");
         WriteAll(paths.app0 / "sce_sys" / "param.sfo",
                  MakeSfo({{"TITLE", "Dragon's Crown Pro"},
-                          {"TITLE_ID", std::string(kSupportedGame.title_id)},
-                          {"CONTENT_ID", std::string(kSupportedGame.content_id)},
-                          {"APP_VER", std::string(kSupportedGame.app_ver)},
-                          {"VERSION", std::string(kSupportedGame.sfo_version)}}));
-        for (const char* name : {"sce_discmap.plt", "DRACRO.CPK", "DRACRO_US.CPK", "sce_module/libc.prx",
-                                 "sce_module/libSceFios2.prx", "sce_module/libSceNpToolkit2.prx"}) {
+                          {"TITLE_ID", std::string(build.title_id)},
+                          {"CONTENT_ID", std::string(build.content_id)},
+                          {"APP_VER", std::string(FinishedLayer(build).app_ver)},
+                          {"VERSION", std::string(FinishedLayer(build).sfo_version)}}));
+        for (const char* name : {"sce_discmap.plt", "DRACRO.CPK", "sce_module/libc.prx", "sce_module/libSceFios2.prx",
+                                 "sce_module/libSceNpToolkit2.prx"}) {
+            WriteAll(paths.app0 / name, "data");
+        }
+        if (build.regional_archive) {
+            WriteAll(paths.app0 / build.regional_archive, "data");
+        }
+        for (const char* name : build.extra_files) {
             WriteAll(paths.app0 / name, "data");
         }
         WriteAll(paths.image_dir / "boot.bin", "boot");
         WriteAll(paths.image_dir / "content.bin", "content");
         WriteAll(paths.image_dir / "image.json",
-                 "{\n  \"title_id\": \"" + std::string(kSupportedGame.title_id) + "\",\n  \"eboot_sha256\": \"" + eboot_sha + "\"\n}");
+                 "{\n  \"title_id\": \"" + std::string(build.title_id) + "\",\n  \"eboot_sha256\": \"" + eboot_sha + "\"\n}");
     }
 
-    GameFileState State() const { return CheckGameFiles(paths, fingerprint).state; }
+    GameFileState State() const { return CheckGameFiles(paths, builds).state; }
 };
 
 void TestSha256AndJson(const fs::path& base) {
@@ -157,7 +172,7 @@ void TestSha256AndJson(const fs::path& base) {
 void TestGameFiles(const fs::path& base) {
     {
         Fixture f(base, "valid");
-        const GameCheck check = CheckGameFiles(f.paths, f.fingerprint);
+        const GameCheck check = CheckGameFiles(f.paths, f.builds);
         CHECK(check.state == GameFileState::kValid);
         CHECK(check.eboot_sha256 == f.eboot_sha);
     }
@@ -190,17 +205,17 @@ void TestGameFiles(const fs::path& base) {
         Fixture f(base, "other-title");
         WriteAll(f.paths.app0 / "sce_sys" / "param.sfo",
                  MakeSfo({{"TITLE_ID", "CUSA00000"},
-                          {"CONTENT_ID", std::string(kSupportedGame.content_id)},
-                          {"APP_VER", std::string(kSupportedGame.app_ver)},
-                          {"VERSION", std::string(kSupportedGame.sfo_version)}}));
+                          {"CONTENT_ID", std::string(kUs.content_id)},
+                          {"APP_VER", std::string(FinishedLayer(kUs).app_ver)},
+                          {"VERSION", std::string(FinishedLayer(kUs).sfo_version)}}));
         CHECK(f.State() == GameFileState::kDifferentVersion);
     }
     {
         Fixture f(base, "other-sfo-version");
         WriteAll(f.paths.app0 / "sce_sys" / "param.sfo",
-                 MakeSfo({{"TITLE_ID", std::string(kSupportedGame.title_id)},
-                          {"CONTENT_ID", std::string(kSupportedGame.content_id)},
-                          {"APP_VER", std::string(kSupportedGame.app_ver)},
+                 MakeSfo({{"TITLE_ID", std::string(kUs.title_id)},
+                          {"CONTENT_ID", std::string(kUs.content_id)},
+                          {"APP_VER", std::string(FinishedLayer(kUs).app_ver)},
                           {"VERSION", "01.00"}}));
         CHECK(f.State() == GameFileState::kDifferentVersion);
     }
@@ -232,27 +247,47 @@ void TestGameFiles(const fs::path& base) {
     {
         Fixture f(base, "stale-image");
         WriteAll(f.paths.image_dir / "image.json",
-                 "{\"title_id\": \"" + std::string(kSupportedGame.title_id) + "\", \"eboot_sha256\": \"" + std::string(64, '0') + "\"}");
+                 "{\"title_id\": \"" + std::string(kUs.title_id) + "\", \"eboot_sha256\": \"" + std::string(64, '0') + "\"}");
         CHECK(f.State() == GameFileState::kDifferentVersion);
     }
     {
-        // The supported fingerprint rejects the synthetic eboot.
-        Fixture f(base, "supported-fingerprint");
+        // The supported builds reject the synthetic eboot.
+        Fixture f(base, "supported-builds");
         CHECK(CheckGameFiles(f.paths).state == GameFileState::kDifferentVersion);
     }
 }
 
-// The C++ fingerprint must not drift from the profile the Python tools use.
+// The C++ builds must not drift from the profiles the Python tools use.
 void TestFingerprintMatchesProfile() {
     const std::string profile = ReadAll(fs::path(DCP_SOURCE_DIR) / "scripts" / "game_profiles.py");
     CHECK(!profile.empty());
-    for (const std::string_view value : {kSupportedGame.title_id, kSupportedGame.content_id, kSupportedGame.eboot_sha256}) {
-        CHECK(profile.find(std::string(value)) != std::string::npos);
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(profile.find("'" + std::string(build.title_id) + "': {") != std::string::npos);
+        CHECK(profile.find("'" + std::string(build.version) + "': {") != std::string::npos);
+        CHECK(profile.find("'content_id': '" + std::string(build.content_id) + "'") != std::string::npos);
+        CHECK(profile.find("'app_ver': '" + std::string(FinishedLayer(build).app_ver) + "'") != std::string::npos);
+        CHECK(profile.find("'sfo_version': '" + std::string(FinishedLayer(build).sfo_version) + "'") != std::string::npos);
+        CHECK(profile.find("'eboot_sha256': '" + std::string(build.eboot_sha256) + "'") != std::string::npos);
+        CHECK(profile.find("'folder': '" + std::string(build.folder) + "'") != std::string::npos);
+        const std::string archive = build.regional_archive ? "'" + std::string(build.regional_archive) + "'" : "None";
+        CHECK(profile.find("'regional_archive': " + archive) != std::string::npos);
+        std::string extra = "(";
+        for (const char* name : build.extra_files) {
+            extra += std::string("'") + name + "',";
+        }
+        CHECK(profile.find("'extra_files': " + extra + ")") != std::string::npos);
+        CHECK(std::string(build.eboot_sha256).size() == 64);
+        CHECK(profile.find("'region': '" + std::string(build.region) + "'") != std::string::npos);
+        CHECK(std::string(build.label) == std::string(build.title_id) + " " + build.version + " " + build.region);
+        for (const PackageLayer& layer : build.layers) {
+            CHECK(profile.find("'app_ver': '" + std::string(layer.app_ver) + "', 'sfo_version': '" +
+                               std::string(layer.sfo_version) + "', 'update': " + (layer.update ? "True" : "False") + "}") !=
+                  std::string::npos);
+        }
     }
-    CHECK(profile.find("'app_ver': '" + std::string(kSupportedGame.app_ver) + "'") != std::string::npos);
-    CHECK(profile.find("'sfo_version': '" + std::string(kSupportedGame.sfo_version) + "'") != std::string::npos);
-    CHECK(profile.find("'" + std::string(kSupportedGame.version) + "': {") != std::string::npos);
-    CHECK(kSupportedGame.eboot_sha256.size() == 64);
+    CHECK(SupportedBuildsText() ==
+          "CUSA10454 1.00 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan and CUSA10209 1.02 Asia/Hong Kong");
+    CHECK(std::string(kUs.folder) != kCk.folder);
     std::string modules = "'modules': (";
     for (const char* module : kBundledModules) {
         modules += std::string(module == kBundledModules[0] ? "" : ", ") + "'" + module + "'";
@@ -414,8 +449,9 @@ void TestPaths() {
     CHECK(dcp_resolve_paths(&nothing, &found) == 1);
     const fs::path repository = DCP_SOURCE_DIR;
     CHECK(fs::weakly_canonical(PathFromUtf8(found.user_dir)) == fs::weakly_canonical(repository / "user"));
-    CHECK(fs::weakly_canonical(PathFromUtf8(found.app0)) == fs::weakly_canonical(repository / "game" / "prepared" / version));
-    CHECK(fs::weakly_canonical(PathFromUtf8(found.boot)) == fs::weakly_canonical(repository / "build" / "image" / version / "boot.bin"));
+    const GamePaths active = ActiveBuildPaths({repository / "game" / "prepared", repository / "build" / "image"});
+    CHECK(fs::weakly_canonical(PathFromUtf8(found.app0)) == fs::weakly_canonical(active.app0));
+    CHECK(fs::weakly_canonical(PathFromUtf8(found.boot)) == fs::weakly_canonical(active.image_dir / "boot.bin"));
     CHECK(fs::weakly_canonical(PathFromUtf8(found.logs_dir)) == fs::weakly_canonical(repository / "build" / "logs"));
     const DcpPathRequest explicit_user{nullptr, nullptr, nullptr, "D:/elsewhere", nullptr};
     CHECK(dcp_resolve_paths(&explicit_user, &found) == 1 && std::string(found.user_dir) == "D:/elsewhere");
@@ -606,7 +642,8 @@ std::string MakePackage(const std::string& sfo, uint64_t declared = 0) {
 // behind: the previous installation stays as it was and no staging folder remains.
 void TestInstaller(const fs::path& base) {
     Fixture source(base, "install-source");
-    const GamePaths target{base / "install-target" / "prepared" / "v1.03", base / "install-target" / "image" / "v1.03"};
+    const GameRoots roots{base / "install-target" / "prepared", base / "install-target" / "image"};
+    const GamePaths target = BuildPaths(roots, kUs);
     WriteAll(target.app0 / kPreparedMarker, "previous");
     WriteAll(target.image_dir / "boot.bin", "previous boot");
     const auto unchanged = [&] {
@@ -615,63 +652,63 @@ void TestInstaller(const fs::path& base) {
                !fs::exists(target.app0.parent_path() / "v1.03.install-temp") &&
                !fs::exists(target.image_dir.parent_path() / "v1.03.install-temp");
     };
-    const auto install = [&](const fs::path& from, const GamePaths& to, const InstallHooks& hooks = {}) {
-        return InstallGame(from, to, hooks, source.fingerprint).status;
+    const auto install = [&](const fs::path& from, const GameRoots& to, const InstallHooks& hooks = {}) {
+        return InstallGame(from, to, hooks, source.builds).status;
     };
 
     fs::create_directories(base / "install-empty");
-    CHECK(install(base / "install-empty", target) == InstallStatus::kNotGameFolder);
+    CHECK(install(base / "install-empty", roots) == InstallStatus::kNotGameFolder);
     // The synthetic eboot.bin is copied, then the boot image cannot be built from it.
-    CHECK(install(source.paths.app0, target) == InstallStatus::kPrepareFailed);
+    CHECK(install(source.paths.app0, roots) == InstallStatus::kPrepareFailed);
     CHECK(unchanged());
     InstallHooks cancel;
     cancel.progress = [](uint64_t, uint64_t) { return false; };
-    CHECK(install(source.paths.app0, target, cancel) == InstallStatus::kCancelled);
+    CHECK(install(source.paths.app0, roots, cancel) == InstallStatus::kCancelled);
     CHECK(unchanged());
 
     const fs::path inside = target.app0 / "copy";
     WriteAll(inside / "eboot.bin", kEboot);
     WriteAll(inside / "sce_sys" / "param.sfo", ReadAll(source.paths.app0 / "sce_sys" / "param.sfo"));
-    CHECK(install(inside, target) == InstallStatus::kOverlapping);
+    CHECK(install(inside, roots) == InstallStatus::kOverlapping);
     fs::remove_all(inside);
 
-    const GamePaths foreign{base / "install-foreign" / "v1.03", base / "install-foreign" / "image"};
-    WriteAll(foreign.app0 / "notes.txt", "mine");
+    const GameRoots foreign{base / "install-foreign" / "prepared", base / "install-foreign" / "image"};
+    WriteAll(BuildPaths(foreign, kUs).app0 / "notes.txt", "mine");
     CHECK(install(source.paths.app0, foreign) == InstallStatus::kForeignFolder);
-    CHECK(ReadAll(foreign.app0 / "notes.txt") == "mine");
+    CHECK(ReadAll(BuildPaths(foreign, kUs).app0 / "notes.txt") == "mine");
 
     const auto sfo_with = [](const char* title_id, const char* app_ver) {
         return MakeSfo({{"TITLE_ID", title_id},
-                        {"CONTENT_ID", std::string(kSupportedGame.content_id)},
+                        {"CONTENT_ID", std::string(kUs.content_id)},
                         {"APP_VER", app_ver},
-                        {"VERSION", std::string(kSupportedGame.sfo_version)}});
+                        {"VERSION", std::string(FinishedLayer(kUs).sfo_version)}});
     };
     WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA00001", "01.00"));
-    CHECK(install(source.paths.app0, target) == InstallStatus::kWrongGame);
+    CHECK(install(source.paths.app0, roots) == InstallStatus::kWrongGame);
     WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA10454", "01.01"));
-    CHECK(install(source.paths.app0, target) == InstallStatus::kWrongVersion);
+    CHECK(install(source.paths.app0, roots) == InstallStatus::kWrongVersion);
     source.Rebuild();
     fs::remove(source.paths.app0 / "DRACRO.CPK");
-    CHECK(install(source.paths.app0, target) == InstallStatus::kIncomplete);
+    CHECK(install(source.paths.app0, roots) == InstallStatus::kIncomplete);
     CHECK(unchanged());
     CHECK(std::string(DescribeInstall(InstallStatus::kNotGameFolder).text).find("eboot.bin") != std::string::npos);
 
     const fs::path pkg = base / "install-packages";
     const std::string sfo = ReadAll(source.paths.app0 / "sce_sys" / "param.sfo");
     WriteAll(pkg / "notes.pkg", "not a package");
-    CHECK(install(pkg / "notes.pkg", target) == InstallStatus::kNotPackage);
-    CHECK(install(pkg / "missing.pkg", target) == InstallStatus::kNotPackage);
+    CHECK(install(pkg / "notes.pkg", roots) == InstallStatus::kNotPackage);
+    CHECK(install(pkg / "missing.pkg", roots) == InstallStatus::kNotPackage);
     WriteAll(pkg / "short.pkg", MakePackage(sfo, 6ull << 30));
-    CHECK(install(pkg / "short.pkg", target) == InstallStatus::kIncomplete);
+    CHECK(install(pkg / "short.pkg", roots) == InstallStatus::kIncomplete);
     WriteAll(pkg / "other.pkg", MakePackage(sfo_with("CUSA00001", "01.00")));
-    CHECK(install(pkg / "other.pkg", target) == InstallStatus::kWrongGame);
+    CHECK(install(pkg / "other.pkg", roots) == InstallStatus::kWrongGame);
     WriteAll(pkg / "patch.pkg", MakePackage(sfo_with("CUSA10454", "01.03")));
-    CHECK(install(pkg / "patch.pkg", target) == InstallStatus::kWrongVersion);
+    CHECK(install(pkg / "patch.pkg", roots) == InstallStatus::kWrongVersion);
     // The right game without the fake-package keys, as a package encrypted for a console looks here.
     WriteAll(pkg / "console.pkg", MakePackage(sfo));
-    CHECK(install(pkg / "console.pkg", target) == InstallStatus::kUnsupportedPackage);
+    CHECK(install(pkg / "console.pkg", roots) == InstallStatus::kUnsupportedPackage);
     WriteAll(target.app0 / "game.pkg", MakePackage(sfo));
-    CHECK(install(target.app0 / "game.pkg", target) == InstallStatus::kOverlapping);
+    CHECK(install(target.app0 / "game.pkg", roots) == InstallStatus::kOverlapping);
     fs::remove(target.app0 / "game.pkg");
     CHECK(unchanged());
 
@@ -688,7 +725,7 @@ void TestInstaller(const fs::path& base) {
         InstallHooks cancel_unpacking;
         bool unpacking = false;
         cancel_unpacking.progress = [&](uint64_t done, uint64_t) { return !(unpacking = done > 0); };
-        CHECK(InstallGame(real, target, cancel_unpacking).status == InstallStatus::kCancelled);
+        CHECK(InstallGame(real, roots, cancel_unpacking).status == InstallStatus::kCancelled);
         CHECK(unpacking);
         CHECK(unchanged());
     }
@@ -1061,7 +1098,8 @@ void TestRenderResolution(const fs::path& base) {
     CHECK(managed);
 
     size_t count = 0;
-    const DcpResolutionSite* sites = dcp_resolution_sites(&count);
+    const DcpResolutionSite* sites = kUs.resolution_sites.data();
+    count = kUs.resolution_sites.size();
     CHECK(count == 23);
     uint64_t image_size = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -1086,7 +1124,7 @@ void TestRenderResolution(const fs::path& base) {
     char error[160];
     for (const DcpResolution& resolution : dcp_resolutions) {
         std::vector<unsigned char> image = make_image();
-        CHECK(dcp_apply_resolution(image.data(), image.size(), &resolution, error, sizeof(error)));
+        CHECK(dcp_apply_resolution(image.data(), image.size(), sites, count, &resolution, error, sizeof(error)));
         for (size_t i = 0; i < count; ++i) {
             uint32_t value = 0;
             std::memcpy(&value, &image[sites[i].offset + sites[i].opcode_length], 4);
@@ -1098,10 +1136,10 @@ void TestRenderResolution(const fs::path& base) {
         std::vector<unsigned char> image = make_image();
         image[sites[7].offset + sites[7].opcode_length] ^= 1; // one site no longer holds the original value
         const std::vector<unsigned char> before = image;
-        CHECK(!dcp_apply_resolution(image.data(), image.size(), &dcp_resolutions[3], error, sizeof(error)));
+        CHECK(!dcp_apply_resolution(image.data(), image.size(), sites, count, &dcp_resolutions[3], error, sizeof(error)));
         CHECK(image == before); // nothing written
         CHECK(std::string(error).find("unexpected instruction") != std::string::npos);
-        CHECK(!dcp_apply_resolution(image.data(), 0x1000, &dcp_resolutions[3], error, sizeof(error)));
+        CHECK(!dcp_apply_resolution(image.data(), 0x1000, sites, count, &dcp_resolutions[3], error, sizeof(error)));
     }
 
     const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
@@ -1550,7 +1588,7 @@ void TestControllerPrompts(const fs::path& base) {
     const std::string original = BuildCpk({{"stage/Interface.ftx", iface, true}}, false);
     WriteAll(app0 / "DRACRO_US.CPK", original_us);
     WriteAll(app0 / "DRACRO.CPK", original);
-    CHECK(PromptArchives(app0).size() == 2 && InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
+    CHECK(PromptArchives(app0, kUs).size() == 2 && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
 
     // Reading: header, TOC (encrypted), case-insensitive lookup, CRILAYLA.
     {
@@ -1576,9 +1614,9 @@ void TestControllerPrompts(const fs::path& base) {
     std::vector<std::string> phases;
     PatchHooks hooks;
     hooks.phase = [&phases](const char* text) { phases.emplace_back(text); };
-    PromptsResult r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes), hooks);
+    PromptsResult r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes), hooks);
     CHECK(r.ok && !r.cancelled);
-    CHECK(InstalledPromptStyle(app0) == PromptStyle::kXbox);
+    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
     CHECK(fs::exists(UndoPath(app0 / "DRACRO_US.CPK")) && fs::exists(UndoPath(app0 / "DRACRO.CPK")));
     CHECK(!phases.empty() && phases[0] == "Patching DRACRO_US.CPK...");
     {
@@ -1597,47 +1635,47 @@ void TestControllerPrompts(const fs::path& base) {
         CHECK(ReadAll(app0 / "DRACRO_US.CPK").compare(0x3000, original_us.size() - 0x3000, original_us, 0x3000, std::string::npos) == 0);
     }
     // Choosing Xbox again changes nothing.
-    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes));
+    r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes));
     CHECK(r.ok && r.detail.find("already patched") != std::string::npos);
     const auto aligned = [](size_t n) { return (n + 0x7FF) / 0x800 * 0x800; };
     CHECK(fs::file_size(app0 / "DRACRO_US.CPK") == aligned(aligned(original_us.size()) + iface.size()) + iface_us.size());
 
     // PlayStation: byte-identical archives, undo records gone.
-    r = SetPromptStyle(app0, PromptStyle::kPlayStation, {});
+    r = SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {});
     CHECK(r.ok);
     CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && ReadAll(app0 / "DRACRO.CPK") == original);
-    CHECK(InstalledPromptStyle(app0) == PromptStyle::kPlayStation && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
-    r = SetPromptStyle(app0, PromptStyle::kPlayStation, {});
+    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+    r = SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {});
     CHECK(r.ok && r.detail.find("not patched") != std::string::npos);
 
     // A half-patched install reads as PlayStation; Xbox completes it, PlayStation cleans it up.
     CHECK(ApplyBlockPatch(app0 / "DRACRO.CPK", *ParseBlockPatch(Span(patch_bytes))).ok);
-    CHECK(InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
-    CHECK(SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes)).ok && InstalledPromptStyle(app0) == PromptStyle::kXbox);
-    CHECK(SetPromptStyle(app0, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
+    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
 
     // Cancelling while writing leaves the archive as it was.
     hooks.phase = nullptr;
     hooks.progress = [](uint64_t, uint64_t) { return false; };
-    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes), hooks);
+    r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes), hooks);
     CHECK(!r.ok && r.cancelled);
-    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
 
     // An archive whose entry is not the file the patch was made for is skipped and named; others are patched.
     std::string foreign = iface;
     foreign[0x2000] = char(foreign[0x2000] + 1);
     WriteAll(app0 / "DRACRO.CPK", BuildCpk({{"stage/Interface.ftx", foreign, false}}, false));
-    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(patch_bytes));
+    r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes));
     CHECK(r.ok && r.detail.find("stage/Interface.ftx is not the file the patch was made for") != std::string::npos);
-    CHECK(InstalledPromptStyle(app0) == PromptStyle::kPlayStation); // DRACRO.CPK stayed original: no undo record
+    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation); // DRACRO.CPK stayed original: no undo record
     CHECK(ArchiveState(app0 / "DRACRO_US.CPK") == ArchivePatchState::kPatched);
-    CHECK(SetPromptStyle(app0, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+    CHECK(SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
 
     // An unreadable patch is refused before anything is touched; a folder without archives too.
-    r = SetPromptStyle(app0, PromptStyle::kXbox, Span(std::string("DCPX1")));
-    CHECK(!r.ok && r.detail.find("unreadable") != std::string::npos && InstalledPromptStyle(app0) == PromptStyle::kPlayStation);
-    CHECK(!SetPromptStyle(base / "nowhere", PromptStyle::kXbox, Span(patch_bytes)).ok);
-    CHECK(PromptArchives(base / "nowhere").empty() && InstalledPromptStyle(base / "nowhere") == PromptStyle::kPlayStation);
+    r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(std::string("DCPX1")));
+    CHECK(!r.ok && r.detail.find("unreadable") != std::string::npos && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(!SetPromptStyle(base / "nowhere", kUs, PromptStyle::kXbox, Span(patch_bytes)).ok);
+    CHECK(PromptArchives(base / "nowhere", kUs).empty() && InstalledPromptStyle(base / "nowhere", kUs) == PromptStyle::kPlayStation);
 
     // Failures and interruptions leave the archive usable: it is put back, or recognised and redone.
     {
@@ -1686,10 +1724,10 @@ void TestControllerPrompts(const fs::path& base) {
         std::error_code ec;
         fs::create_hard_link(shared / "DRACRO_US.CPK", linked / "DRACRO_US.CPK", ec);
         if (!ec) {
-            CHECK(SetPromptStyle(linked, PromptStyle::kXbox, Span(patch_bytes)).ok);
-            CHECK(InstalledPromptStyle(linked) == PromptStyle::kXbox && ReadAll(shared / "DRACRO_US.CPK") == original_us);
+            CHECK(SetPromptStyle(linked, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok);
+            CHECK(InstalledPromptStyle(linked, kUs) == PromptStyle::kXbox && ReadAll(shared / "DRACRO_US.CPK") == original_us);
             CHECK(fs::hard_link_count(linked / "DRACRO_US.CPK") == 1 && !fs::exists(linked / "DRACRO_US.CPK.copy"));
-            CHECK(SetPromptStyle(linked, PromptStyle::kPlayStation, {}).ok && ReadAll(linked / "DRACRO_US.CPK") == original_us);
+            CHECK(SetPromptStyle(linked, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(linked / "DRACRO_US.CPK") == original_us);
         }
     }
 
@@ -1744,6 +1782,574 @@ void TestFileBrowser(const fs::path& base) {
     CHECK(FormatSize(6ull << 30) == "6.0 GB");
 }
 
+// A param.sfo of a build with its identity values, unless one of them is given.
+std::string SfoFor(const GameBuild& build, const char* app_ver = nullptr, const char* version = nullptr) {
+    return MakeSfo({{"TITLE_ID", build.title_id},
+                    {"CONTENT_ID", build.content_id},
+                    {"APP_VER", app_ver ? app_ver : FinishedLayer(build).app_ver},
+                    {"VERSION", version ? version : FinishedLayer(build).sfo_version}});
+}
+
+// A package's param.sfo: the identity of a base package ('gd') or an update ('gp') of a build.
+std::string PackageSfo(const GameBuild& build, const char* app_ver, const char* version, const char* category) {
+    return MakeSfo({{"TITLE_ID", build.title_id},
+                    {"CONTENT_ID", build.content_id},
+                    {"APP_VER", app_ver},
+                    {"VERSION", version},
+                    {"CATEGORY", category}});
+}
+
+// Each site of the build is checked before any is written: a damaged site leaves the whole image as it was.
+void CheckSites(const GameBuild& build) {
+    const auto sites = build.resolution_sites;
+    CHECK(sites.size() == 23);
+    uint64_t size = 0;
+    for (const DcpResolutionSite& site : sites) {
+        size = std::max<uint64_t>(size, site.offset + site.opcode_length + 4u);
+    }
+    std::vector<unsigned char> image(size + 16, 0x90);
+    for (const DcpResolutionSite& site : sites) {
+        std::memcpy(&image[site.offset], site.opcode, site.opcode_length);
+        std::memcpy(&image[site.offset + site.opcode_length], &site.value, 4);
+    }
+    char error[160];
+    std::vector<unsigned char> patched = image;
+    CHECK(dcp_apply_resolution(patched.data(), patched.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
+    std::vector<unsigned char> damaged = image;
+    const DcpResolutionSite& bad = sites[11];
+    damaged[bad.offset + bad.opcode_length] ^= 1;
+    const std::vector<unsigned char> before = damaged;
+    CHECK(!dcp_apply_resolution(damaged.data(), damaged.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
+    CHECK(damaged == before);
+    char at[32];
+    snprintf(at, sizeof(at), "0x%x", unsigned(bad.offset));
+    CHECK(std::string(error).find(at) != std::string::npos);
+}
+
+// The Japanese build is a base package and then its 1.03 update: a base alone is not the finished game, the update
+// must match the base, and every other package is refused.
+void TestLayers(const fs::path& base) {
+    const fs::path root = base / "layers";
+    fs::remove_all(root);
+
+    CHECK(kJp100.layers.size() == 1 && !kJp100.layers[0].update);
+    CHECK(kJp102.layers.size() == 2 && !kJp102.layers[0].update && kJp102.layers[1].update);
+    CHECK(kJp103.layers.size() == 2 && !kJp103.layers[0].update && kJp103.layers[1].update);
+    CHECK(std::string(kJp100.folder) == "CUSA07001-1.00" && kJp100.regional_archive == nullptr && kJp100.extra_files.empty());
+    CHECK(std::string(kJp102.folder) == "CUSA07001-1.02" && std::string(kJp102.regional_archive) == "DRACRO_PATCH_JP.CPK");
+    CHECK(std::string(kJp103.folder) == "CUSA07001-1.03" && std::string(kJp103.regional_archive) == "DRACRO_PATCH_JP.CPK");
+    CHECK(kJp102.extra_files.size() == 1 && std::string(kJp102.extra_files[0]) == "sce_discmap_patch.plt");
+    CHECK(kJp103.extra_files.size() == 1 && std::string(kJp103.extra_files[0]) == "sce_discmap_patch.plt");
+    CHECK(std::string(kJp100.eboot_sha256) == "e838e5c551f4ea2d13a13246dcd5474a888c56aa8abf5110f1219c0ceb0ae05f");
+    CHECK(std::string(kJp102.eboot_sha256) == "e512685aef4fa1e50eafec8c9699b611992356cbae84e9b0147febceb49843fe");
+    CHECK(std::string(kJp103.eboot_sha256) == "dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64");
+    CHECK(!kJp100.cheats && !kJp100.xbox_prompts && !kJp102.cheats && !kJp102.xbox_prompts && !kJp103.cheats &&
+          !kJp103.xbox_prompts);
+    CheckSites(kJp100);
+    CheckSites(kJp102);
+    CheckSites(kJp103);
+    CheckSites(kCk);
+    CHECK(std::string(kJp100.title_id) == "CUSA07001" && std::string(kJp100.content_id) == "JP0005-CUSA07001_00-DRAGONSCROWN0001");
+    CHECK(std::string(FinishedLayer(kJp100).app_ver) == "01.00" && std::string(FinishedLayer(kJp100).sfo_version) == "01.00");
+    CHECK(std::string(FinishedLayer(kJp102).app_ver) == "01.02" && std::string(FinishedLayer(kJp103).app_ver) == "01.03");
+
+    // A package names the build whose finished game it is: the base names 1.00, each update names its own version.
+    const GameCheck base_package = CheckPackageIdentity(PackageSfo(kJp100, "01.00", "01.00", "gd"));
+    CHECK(base_package.build == &kJp100 && base_package.layer == 0);
+    const GameCheck identity102 = CheckPackageIdentity(PackageSfo(kJp102, "01.02", "01.00", "gp"));
+    CHECK(identity102.build == &kJp102 && identity102.layer == 1);
+    const GameCheck identity103 = CheckPackageIdentity(PackageSfo(kJp103, "01.03", "01.00", "gp"));
+    CHECK(identity103.build == &kJp103 && identity103.layer == 1);
+    CHECK(CheckPackageIdentity(PackageSfo(kJp100, "01.03", "01.00", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kJp100, "01.01", "01.00", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.03", "01.00", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kCk, "01.03", "01.00", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(MakeSfo({{"TITLE_ID", "CUSA07001"}, {"CONTENT_ID", std::string(kCk.content_id)},
+                                        {"APP_VER", "01.00"}, {"VERSION", "01.00"}, {"CATEGORY", "gd"}})).state ==
+          GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(MakeSfo({{"TITLE_ID", "CUSA00000"}, {"CONTENT_ID", std::string(kJp103.content_id)},
+                                        {"APP_VER", "01.03"}, {"VERSION", "01.00"}, {"CATEGORY", "gp"}})).state ==
+          GameFileState::kDifferentVersion);
+
+    // The finished game is identified by its finished layer: each Japanese version names its own build.
+    CHECK(CheckSfoIdentity(SfoFor(kJp100)).build == &kJp100);
+    CHECK(CheckSfoIdentity(SfoFor(kJp102)).build == &kJp102);
+    CHECK(CheckSfoIdentity(SfoFor(kJp103)).build == &kJp103);
+    CHECK(CheckSfoIdentity(SfoFor(kJp100, "01.01")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kJp103, "01.00")).build == &kJp100);
+
+    // Packages reach the installer as identities: a base starts an install, an update needs its base build, and a
+    // Japanese update is never laid over another region's game.
+    const fs::path pkg = root / "packages";
+    const GameRoots empty{root / "install" / "prepared", root / "install" / "image"};
+    WriteAll(pkg / "jp-base.pkg", MakePackage(PackageSfo(kJp100, "01.00", "01.00", "gd")));
+    CHECK(InstallGame(pkg / "jp-base.pkg", empty).status == InstallStatus::kUnsupportedPackage);
+    WriteAll(pkg / "jp-102.pkg", MakePackage(PackageSfo(kJp102, "01.02", "01.00", "gp")));
+    CHECK(InstallGame(pkg / "jp-102.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
+    WriteAll(pkg / "jp-103.pkg", MakePackage(PackageSfo(kJp103, "01.03", "01.00", "gp")));
+    CHECK(InstallGame(pkg / "jp-103.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
+    WriteAll(pkg / "us-update.pkg", MakePackage(PackageSfo(kUs, "01.03", "01.00", "gp")));
+    CHECK(InstallGame(pkg / "us-update.pkg", empty).status == InstallStatus::kWrongVersion);
+    CHECK(BaseBuildOf(kJp102) == &SupportedBuilds()[1] && BaseBuildOf(kJp103) == &SupportedBuilds()[1]);
+    CHECK(BaseBuildOf(kJp100) == nullptr && BaseBuildOf(kUs) == nullptr && BaseBuildOf(kCk) == nullptr);
+
+    Fixture installed(root, "installed-1.03", kJp103);
+    const GameRoots present{root / "present" / "prepared", root / "present" / "image"};
+    fs::create_directories(BuildPaths(present, kJp103).app0.parent_path());
+    fs::create_directories(BuildPaths(present, kJp103).image_dir.parent_path());
+    fs::copy(installed.paths.app0, BuildPaths(present, kJp103).app0, fs::copy_options::recursive);
+    fs::copy(installed.paths.image_dir, BuildPaths(present, kJp103).image_dir, fs::copy_options::recursive);
+    CHECK(InstallGame(pkg / "jp-103.pkg", present, {}, installed.builds).status == InstallStatus::kUpToDate);
+
+    // Each version's own files: 1.00 is complete without any update file; 1.02 and 1.03 need theirs.
+    {
+        Fixture base_game(root, "jp100-complete", kJp100);
+        CHECK(!fs::exists(base_game.paths.app0 / "DRACRO_PATCH_JP.CPK") && !fs::exists(base_game.paths.app0 / "sce_discmap_patch.plt"));
+        CHECK(base_game.State() == GameFileState::kValid);
+    }
+    for (const GameBuild* build : {&kJp102, &kJp103}) {
+        Fixture update(root, "jp-update-complete", *build);
+        CHECK(update.State() == GameFileState::kValid);
+        fs::remove(update.paths.app0 / "DRACRO_PATCH_JP.CPK");
+        CHECK(update.State() == GameFileState::kMissing);
+        WriteAll(update.paths.app0 / "DRACRO_PATCH_JP.CPK", "jp archive");
+        fs::remove(update.paths.app0 / "sce_discmap_patch.plt");
+        CHECK(update.State() == GameFileState::kMissing);
+    }
+    for (const GameBuild* build : {&kJp100, &kJp102, &kJp103}) {
+        Fixture other(root, "jp-other-eboot", *build);
+        WriteAll(other.paths.app0 / "eboot.bin", "a different eboot");
+        CHECK(other.State() == GameFileState::kDifferentVersion);
+    }
+
+    // The base 1.00 with an update laid over it: the merged tree is that update's build, the base is not changed, and
+    // a 1.02 folder installed earlier survives the 1.03 update.
+    Fixture base_game(root, "base-1.00", kJp100);
+    const fs::path update102 = root / "update-1.02";
+    WriteAll(update102 / "eboot.bin", "eboot 1.02");
+    WriteAll(update102 / "DRACRO_PATCH_JP.CPK", "archive 1.02");
+    WriteAll(update102 / "sce_discmap_patch.plt", "discmap 1.02");
+    WriteAll(update102 / "sce_sys" / "param.sfo", PackageSfo(kJp102, "01.02", "01.00", "gp"));
+    const fs::path update103 = root / "update-1.03";
+    WriteAll(update103 / "eboot.bin", "eboot 1.03");
+    WriteAll(update103 / "DRACRO_PATCH_JP.CPK", "archive 1.03");
+    WriteAll(update103 / "sce_discmap_patch.plt", "discmap 1.03");
+    WriteAll(update103 / "sce_sys" / "param.sfo", PackageSfo(kJp103, "01.03", "01.00", "gp"));
+    const std::string sha102 = Sha256Hex(update102 / "eboot.bin"), sha103 = Sha256Hex(update103 / "eboot.bin");
+    GameBuild jp102 = kJp102, jp103 = kJp103;
+    jp102.eboot_sha256 = sha102.c_str();
+    jp103.eboot_sha256 = sha103.c_str();
+    const std::vector<GameBuild> builds = {base_game.build, jp102, jp103};
+    // Overlaying moves the update's files into the staged game, so each staging needs its own copy.
+    const auto write_update103 = [&] {
+        WriteAll(update103 / "eboot.bin", "eboot 1.03");
+        WriteAll(update103 / "DRACRO_PATCH_JP.CPK", "archive 1.03");
+        WriteAll(update103 / "sce_discmap_patch.plt", "discmap 1.03");
+        WriteAll(update103 / "sce_sys" / "param.sfo", PackageSfo(kJp103, "01.03", "01.00", "gp"));
+    };
+
+    const fs::path staged102 = root / "staged-1.02";
+    CHECK(StageUpdate(base_game.paths.app0, update102, staged102).ok());
+    CHECK(CheckGameTree(staged102, builds).build == &builds[1]);
+    CHECK(CheckGameTree(staged102, builds).state == GameFileState::kValid);
+    CHECK(ReadAll(staged102 / "eboot.bin") == "eboot 1.02" && ReadAll(staged102 / "DRACRO.CPK") == "data");
+    CHECK(!fs::exists(staged102 / "DRACRO_US.CPK"));
+
+    const fs::path staged103 = root / "staged-1.03";
+    CHECK(StageUpdate(base_game.paths.app0, update103, staged103).ok());
+    CHECK(CheckGameTree(staged103, builds).state == GameFileState::kValid && CheckGameTree(staged103, builds).build == &builds[2]);
+
+    const fs::path installed102 = root / "installed-1.02";
+    fs::rename(staged102, installed102);
+    const fs::path upgraded103 = root / "upgraded-1.03";
+    write_update103();
+    CHECK(StageUpdate(base_game.paths.app0, update103, upgraded103).ok());
+    CHECK(CheckGameTree(upgraded103, builds).build == &builds[2]);
+    CHECK(CheckGameTree(installed102, builds).build == &builds[1] && ReadAll(installed102 / "eboot.bin") == "eboot 1.02");
+    CHECK(CheckGameTree(base_game.paths.app0, builds).build == &builds[0] && ReadAll(base_game.paths.app0 / "eboot.bin") == kEboot);
+
+    {
+        Fixture merged(root, "jp-merged", kJp103);
+        CHECK(merged.State() == GameFileState::kValid);
+        CHECK(!fs::exists(merged.paths.app0 / "DRACRO_US.CPK"));
+        WriteAll(merged.paths.app0 / "eboot.bin", "base eboot");
+        CHECK(merged.State() == GameFileState::kDifferentVersion);
+    }
+    {
+        const fs::path prompts = root / "jp-prompts";
+        WriteAll(prompts / "DRACRO_PATCH_JP.CPK", "jp archive");
+        WriteAll(prompts / "DRACRO.CPK", "shared archive");
+        CHECK(PromptArchives(prompts, kJp103).empty() && InstalledPromptStyle(prompts, kJp103) == PromptStyle::kPlayStation);
+        CHECK(!SetPromptStyle(prompts, kJp103, PromptStyle::kXbox, {}).ok);
+        CHECK(ReadAll(prompts / "DRACRO_PATCH_JP.CPK") == "jp archive" && ReadAll(prompts / "DRACRO.CPK") == "shared archive");
+    }
+}
+
+// The CUSA10454 base is the only verified US build; an APP_VER 01.01 package is not part of any supported build.
+void TestUsBuild() {
+    CHECK(std::string(kUs.label) == "CUSA10454 1.00 USA" && std::string(kUs.version) == "1.00");
+    CHECK(kUs.layers.size() == 1 && std::string(FinishedLayer(kUs).app_ver) == "01.00" &&
+          std::string(FinishedLayer(kUs).sfo_version) == "01.03");
+    CHECK(std::string(kUs.eboot_sha256) == "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a");
+    CHECK(kUs.cheats && kUs.xbox_prompts && kUs.resolution_sites.size() == 23 && BaseBuildOf(kUs) == nullptr);
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK((build.cheats || build.xbox_prompts) == (&build == &kUs));
+        CHECK(std::string(build.label).find("1.01") == std::string::npos);
+    }
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.00", "01.03")).build == &kUs);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gd")).build == &kUs);
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01", "01.03")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.01", "01.03", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.01", "01.03", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(SupportedBuildsText().find("CUSA10454 1.00 USA, ") == 0);
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("The Japanese 1.02 and 1.03 updates are installed over the 1.00 base package.") != std::string::npos);
+    CHECK(launcher.find("USA update") == std::string::npos);
+}
+
+// Prepared CUSA10454 folders made before the build was named 1.00 carry the marker version 1.03.
+void TestLegacyMarker(const fs::path& base) {
+    const auto write_marker = [](Fixture& f, const char* version) {
+        WriteAll(f.paths.app0 / kPreparedMarker, std::string("{\n  \"version\": \"") + version + "\",\n  \"scope\": \"full\"\n}");
+    };
+    const auto marker_of = [](const Fixture& f) { return ReadAll(f.paths.app0 / kPreparedMarker); };
+
+    Fixture us(base, "legacy-us", kUs);
+    write_marker(us, "1.03");
+    const fs::file_time_type marker_time = fs::last_write_time(us.paths.app0 / kPreparedMarker) - std::chrono::hours(2);
+    fs::last_write_time(us.paths.app0 / kPreparedMarker, marker_time);
+    const fs::file_time_type eboot_time = fs::last_write_time(us.paths.app0 / "eboot.bin");
+    const GameCheck migrated = CheckGameFiles(us.paths, us.builds);
+    CHECK(migrated.state == GameFileState::kValid && migrated.build == &us.builds[0]);
+    CHECK(JsonString(marker_of(us), "version") == "1.00" && JsonString(marker_of(us), "scope") == "full");
+    CHECK(fs::last_write_time(us.paths.app0 / kPreparedMarker) == marker_time);
+    CHECK(fs::last_write_time(us.paths.app0 / "eboot.bin") == eboot_time && us.paths.app0.filename() == "app0");
+    CHECK(InstalledGameName(migrated.state, migrated.build) == "PS4 CUSA10454 1.00 USA");
+    const std::string after = marker_of(us);
+    CHECK(CheckGameFiles(us.paths, us.builds).state == GameFileState::kValid && marker_of(us) == after);
+
+    Fixture current(base, "current-us", kUs);
+    const std::string current_marker = marker_of(current);
+    CHECK(JsonString(current_marker, "version") == "1.00" && current.State() == GameFileState::kValid &&
+          marker_of(current) == current_marker);
+
+    Fixture wrong_hash(base, "legacy-us-hash", kUs);
+    write_marker(wrong_hash, "1.03");
+    fs::remove(wrong_hash.paths.app0 / "eboot.bin");
+    WriteAll(wrong_hash.paths.app0 / "eboot.bin", "another eboot");
+    CHECK(wrong_hash.State() == GameFileState::kDifferentVersion && JsonString(marker_of(wrong_hash), "version") == "1.03");
+
+    Fixture update(base, "legacy-us-update", kUs);
+    WriteAll(update.paths.app0 / "sce_sys" / "param.sfo", SfoFor(kUs, "01.01", "01.03"));
+    write_marker(update, "1.03");
+    CHECK(update.State() == GameFileState::kDifferentVersion && JsonString(marker_of(update), "version") == "1.03");
+
+    for (const GameBuild* other : {&kJp100, &kJp102, &kJp103, &kCk}) {
+        Fixture f(base, "legacy-other", *other);
+        const std::string version = other->version;
+        write_marker(f, "1.03");
+        const std::string before = marker_of(f);
+        CHECK((f.State() == GameFileState::kValid) == (version == "1.03") && marker_of(f) == before);
+    }
+}
+
+// What the About page names the installed game: each complete build by its own label, and nothing when no supported
+// build is complete. The active build is the complete game prepared last.
+void TestInstalledGameName(const fs::path& base) {
+    const fs::path root = base / "installed-name";
+    fs::remove_all(root);
+    const GameRoots roots{root / "prepared", root / "image"};
+
+    const GameCheck none = CheckGameFiles(ActiveBuildPaths(roots));
+    CHECK(none.state == GameFileState::kMissing && none.build == nullptr);
+    CHECK(InstalledGameName(none.state, none.build) == "Not installed");
+
+    const auto named = [](const Fixture& fixture) {
+        const GameCheck check = CheckGameFiles(fixture.paths, fixture.builds);
+        return InstalledGameName(check.state, check.build);
+    };
+    Fixture us(root, "us", kUs);
+    Fixture jp100(root, "jp100", kJp100);
+    Fixture jp102(root, "jp102", kJp102);
+    Fixture jp103(root, "jp103", kJp103);
+    Fixture ck(root, "ck", kCk);
+    CHECK(named(us) == "PS4 CUSA10454 1.00 USA");
+    CHECK(named(jp100) == "PS4 CUSA07001 1.00 Japan");
+    CHECK(named(jp102) == "PS4 CUSA07001 1.02 Japan");
+    CHECK(named(jp103) == "PS4 CUSA07001 1.03 Japan");
+    CHECK(named(ck) == "PS4 CUSA10209 1.02 Asia/Hong Kong");
+    fs::remove(jp102.paths.app0 / "DRACRO_PATCH_JP.CPK");
+    CHECK(named(jp102) == "Not installed");
+
+    const GameRoots active{root / "active" / "prepared", root / "active" / "image"};
+    const GamePaths base_paths = BuildPaths(active, kJp100), update_paths = BuildPaths(active, kJp103);
+    WriteAll(base_paths.app0 / kPreparedMarker, "{\n  \"version\": \"1.00\",\n  \"scope\": \"full\"\n}");
+    CHECK(ActiveBuildPaths(active).app0 == base_paths.app0);
+    WriteAll(update_paths.app0 / kPreparedMarker, "{\n  \"version\": \"1.03\",\n  \"scope\": \"full\"\n}");
+    fs::last_write_time(base_paths.app0 / kPreparedMarker,
+                        fs::last_write_time(update_paths.app0 / kPreparedMarker) - std::chrono::hours(1));
+    CHECK(ActiveBuildPaths(active).app0 == update_paths.app0);
+}
+
+// Gives an installed fixture its own eboot, so its fingerprint names it among the builds of its title.
+void GiveEboot(Fixture& fixture, const char* eboot) {
+    WriteAll(fixture.paths.app0 / "eboot.bin", eboot);
+    fixture.eboot_sha = Sha256Hex(fixture.paths.app0 / "eboot.bin");
+    fixture.build.eboot_sha256 = fixture.eboot_sha.c_str();
+    fixture.builds = {fixture.build};
+    fixture.Rebuild();
+}
+
+// Selecting a package makes the exact build it names the active one, older or newer than the active build. A complete
+// prepared folder is activated without copying; a missing one goes through the installation path.
+void TestActivation(const fs::path& base) {
+    const fs::path root = base / "activation";
+    fs::remove_all(root);
+    Fixture us(root, "us", kUs), ck(root, "ck", kCk);
+    Fixture jp100(root, "jp100", kJp100), jp102(root, "jp102", kJp102), jp103(root, "jp103", kJp103);
+    GiveEboot(jp100, "eboot 1.00");
+    GiveEboot(jp102, "eboot 1.02");
+    GiveEboot(jp103, "eboot 1.03");
+    const std::vector<GameBuild> builds = {us.build, jp100.build, jp102.build, jp103.build, ck.build};
+    // Indexes: 0 US, 1 Japan 1.00, 2 Japan 1.02, 3 Japan 1.03, 4 CUSA10209. The roots are laid out like the game's
+    // folder next to the executable, so ResolvePaths sees the same builds.
+    const GameRoots roots{root / "exe" / "game" / "prepared", root / "exe" / "game" / "image"};
+    const auto place = [&](const Fixture& fixture) {
+        const GamePaths target = BuildPaths(roots, fixture.build);
+        fs::create_directories(target.app0.parent_path());
+        fs::create_directories(target.image_dir.parent_path());
+        const auto copy = fs::copy_options::recursive | fs::copy_options::overwrite_existing;
+        fs::copy(fixture.paths.app0, target.app0, copy);
+        fs::copy(fixture.paths.image_dir, target.image_dir, copy);
+    };
+    const auto remove_build = [&](size_t index) {
+        fs::remove_all(BuildPaths(roots, builds[index]).app0);
+        fs::remove_all(BuildPaths(roots, builds[index]).image_dir);
+    };
+    for (const Fixture* fixture : {&us, &jp100, &jp102, &jp103, &ck}) {
+        place(*fixture);
+    }
+    CHECK(LastPreparedBuild(GameRoots{root / "none", root / "none-image"}, builds) == nullptr);
+
+    // Makes builds[active] the newest prepared build; the others are older.
+    const auto make_active = [&](size_t active) {
+        const auto now = fs::file_time_type::clock::now();
+        for (size_t i = 0; i < builds.size(); ++i) {
+            fs::last_write_time(BuildPaths(roots, builds[i]).app0 / kPreparedMarker,
+                                i == active ? now : now - std::chrono::hours(1));
+        }
+    };
+    const auto active = [&] { return CheckGameFiles(ActiveBuildPaths(roots, builds), builds); };
+
+    const fs::path pkg = root / "packages";
+    WriteAll(pkg / "jp-100.pkg", MakePackage(PackageSfo(kJp100, "01.00", "01.00", "gd")));
+    WriteAll(pkg / "jp-102.pkg", MakePackage(PackageSfo(kJp102, "01.02", "01.00", "gp")));
+    WriteAll(pkg / "jp-103.pkg", MakePackage(PackageSfo(kJp103, "01.03", "01.00", "gp")));
+    WriteAll(pkg / "us.pkg", MakePackage(PackageSfo(kUs, "01.00", "01.03", "gd")));
+    WriteAll(pkg / "ck.pkg", MakePackage(SfoFor(kCk)));
+    const auto select = [&](const char* name) { return InstallGame(pkg / name, roots, {}, builds); };
+    // Selects a package while builds[from] is active; true when builds[to] is activated with no game data copied.
+    const auto switches = [&](size_t from, const char* name, size_t to) {
+        make_active(from);
+        const InstallResult result = select(name);
+        return result.status == InstallStatus::kActivated && result.build == &builds[to] && result.bytes == 0 &&
+               result.files == 0 && active().build == &builds[to];
+    };
+
+    CHECK(switches(1, "jp-102.pkg", 2));
+    CHECK(switches(1, "jp-103.pkg", 3));
+    CHECK(switches(2, "jp-100.pkg", 1));
+    CHECK(switches(2, "jp-103.pkg", 3));
+    CHECK(switches(3, "jp-100.pkg", 1));
+    CHECK(switches(3, "jp-102.pkg", 2));
+
+    // Only the exact active build is up to date; its game files and the other builds' are left alone.
+    make_active(3);
+    const fs::path archive_102 = BuildPaths(roots, builds[2]).app0 / "DRACRO.CPK";
+    const fs::file_time_type archive_time = fs::last_write_time(archive_102);
+    CHECK(select("jp-103.pkg").status == InstallStatus::kUpToDate && active().build == &builds[3]);
+    CHECK(select("jp-102.pkg").status == InstallStatus::kActivated && fs::last_write_time(archive_102) == archive_time);
+    make_active(1);
+    CHECK(select("jp-100.pkg").status == InstallStatus::kUpToDate && active().build == &builds[1]);
+
+    // A prepared 1.03 that fails the check is not activated; the active 1.00 stays.
+    make_active(1);
+    const fs::path eboot_103 = BuildPaths(roots, builds[3]).app0 / "eboot.bin";
+    WriteAll(eboot_103, "changed");
+    CHECK(!select("jp-103.pkg").ok() && active().build == &builds[1]);
+    WriteAll(eboot_103, "eboot 1.03");
+
+    // A missing 1.03 goes through the installation path: the base 1.00 is enough, 1.02 is not needed. A missing base
+    // is reported as such.
+    make_active(1);
+    remove_build(2);
+    remove_build(3);
+    CHECK(select("jp-103.pkg").status == InstallStatus::kUnsupportedPackage && active().build == &builds[1]);
+    remove_build(1);
+    CHECK(select("jp-103.pkg").status == InstallStatus::kUpdateNeedsBase);
+    place(jp100);
+    place(jp102);
+    place(jp103);
+
+    // The three Japanese builds are prepared side by side; switching between them leaves each one whole.
+    make_active(2);
+    for (const size_t index : {1, 2, 3}) {
+        const GameCheck check = CheckGameFiles(BuildPaths(roots, builds[index]), builds);
+        CHECK(check.state == GameFileState::kValid && check.build == &builds[index]);
+    }
+
+    // The Play card, About page and loader all follow the selected build.
+    CHECK(std::string(active().build->label) == "CUSA07001 1.02 Japan");
+    CHECK(InstalledGameName(active().state, active().build) == "PS4 CUSA07001 1.02 Japan");
+    const Paths loader = ResolvePaths(PathRequest{}, root / "exe");
+    CHECK(loader.app0 == BuildPaths(roots, builds[2]).app0 && loader.image_dir == BuildPaths(roots, builds[2]).image_dir);
+    CHECK(switches(3, "jp-100.pkg", 1));
+    const Paths loader_100 = ResolvePaths(PathRequest{}, root / "exe");
+    CHECK(loader_100.app0 == BuildPaths(roots, builds[1]).app0);
+
+    // The US and CUSA10209 builds keep their single version: selecting the active one is up to date.
+    CHECK(switches(3, "us.pkg", 0));
+    CHECK(select("us.pkg").status == InstallStatus::kUpToDate && active().build == &builds[0]);
+    CHECK(switches(0, "ck.pkg", 4));
+    CHECK(select("ck.pkg").status == InstallStatus::kUpToDate && active().build == &builds[4]);
+
+    CHECK(std::string(DescribeInstall(InstallStatus::kUpToDate).title) == "Already up to date");
+    CHECK(std::string(DescribeInstall(InstallStatus::kActivated).title) == "Game activated");
+}
+
+// The two supported builds: their identities, archives, flags and the boot image report that names them, and the
+// checks that keep one build's files out of the other build's folders.
+void TestBuilds(const fs::path& base) {
+    CHECK(SupportedBuilds().size() == 5);
+    CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
+    CHECK(std::string(kUs.folder) == "v1.03" && std::string(kCk.folder) == "CUSA10209-1.02");
+    CHECK(std::string(kCk.content_id) == "HP0177-CUSA10209_00-DRAGONSCROWN0001");
+    CHECK(std::string(FinishedLayer(kCk).app_ver) == "01.02" && std::string(FinishedLayer(kCk).sfo_version) == "01.00" && std::string(kCk.version) == "1.02");
+    CHECK(std::string(kCk.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
+    CHECK(std::string(kCk.regional_archive) == "DRACRO_CK.CPK" && std::string(kUs.regional_archive) == "DRACRO_US.CPK");
+    CHECK(!kCk.cheats && !kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
+    CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.size() == 23);
+    CHECK(kCk.resolution_sites.front().offset == 0x597708 && kCk.resolution_sites.back().offset == 0x597f88);
+
+    CHECK(CheckSfoIdentity(SfoFor(kCk)).build == &kCk);
+    CHECK(CheckSfoIdentity(SfoFor(kUs)).build == &kUs);
+    CHECK(CheckSfoIdentity(SfoFor(kCk, "01.01")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kCk, nullptr, "01.03")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(MakeSfo({{"TITLE_ID", "CUSA00000"},
+                                    {"CONTENT_ID", std::string(kCk.content_id)},
+                                    {"APP_VER", std::string(FinishedLayer(kCk).app_ver)},
+                                    {"VERSION", std::string(FinishedLayer(kCk).sfo_version)}})).state == GameFileState::kDifferentVersion);
+
+    // The boot image report names its build by title and eboot hash; the issue #14 hash names no build.
+    const fs::path report_dir = base / "build-report";
+    const auto build_label = [&](const char* title, const char* sha) {
+        WriteAll(report_dir / "image.json", std::string("{\n  \"title_id\": \"") + title + "\",\n  \"eboot_sha256\": \"" + sha + "\"\n}");
+        DcpGameBuild game{};
+        return dcp_game_build(report_dir.string().c_str(), &game) ? std::string(game.label) : std::string();
+    };
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256) == kCk.label);
+    CHECK(build_label("CUSA10454", kUs.eboot_sha256) == kUs.label);
+    CHECK(build_label("CUSA10209", "05dad7c244e76df186eb440818bed6c567aadec1180595a04975fab6d848edf2").empty());
+    CHECK(build_label("CUSA10209", kUs.eboot_sha256).empty());
+    CHECK(build_label("CUSA10454", kCk.eboot_sha256).empty());
+    CHECK(build_label("CUSA07001", kJp100.eboot_sha256) == kJp100.label);
+    CHECK(build_label("CUSA07001", kJp102.eboot_sha256) == kJp102.label);
+    CHECK(build_label("CUSA07001", kJp103.eboot_sha256) == kJp103.label);
+    WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\"\n}");
+    DcpGameBuild ck_game{};
+    CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
+    CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 23 && ck_game.resolution_sites == kCk.resolution_sites.data());
+
+    {
+        Fixture ck(base, "ck-valid", kCk);
+        CHECK(ck.State() == GameFileState::kValid);
+        CHECK(!fs::exists(ck.paths.app0 / "DRACRO_US.CPK"));
+    }
+    {
+        Fixture ck(base, "ck-no-archive", kCk);
+        fs::remove(ck.paths.app0 / "DRACRO_CK.CPK");
+        WriteAll(ck.paths.app0 / "DRACRO_US.CPK", "data"); // the US archive does not stand in for it
+        CHECK(ck.State() == GameFileState::kMissing);
+    }
+    {
+        Fixture ck(base, "ck-other-eboot", kCk);
+        WriteAll(ck.paths.app0 / "eboot.bin", "a different build");
+        CHECK(ck.State() == GameFileState::kDifferentVersion);
+    }
+    {
+        Fixture us(base, "us-no-regional", kUs);
+        fs::remove(us.paths.app0 / "DRACRO_US.CPK");
+        CHECK(us.State() == GameFileState::kMissing);
+    }
+
+    {
+        Fixture ck_source(base, "ck-install-source", kCk);
+        const GameRoots roots{base / "ck-install" / "prepared", base / "ck-install" / "image"};
+        WriteAll(BuildPaths(roots, kUs).app0 / kPreparedMarker, "us installed");
+        CHECK(InstallGame(ck_source.paths.app0, roots, {}, ck_source.builds).status == InstallStatus::kPrepareFailed);
+        CHECK(ReadAll(BuildPaths(roots, kUs).app0 / kPreparedMarker) == "us installed");
+        CHECK(!fs::exists(BuildPaths(roots, kCk).app0));
+    }
+
+    {
+        const GameRoots roots{base / "active" / "prepared", base / "active" / "image"};
+        fs::remove_all(base / "active");
+        CHECK(ActiveBuildPaths(roots).app0 == BuildPaths(roots, kUs).app0);
+        const fs::path us_marker = BuildPaths(roots, kUs).app0 / kPreparedMarker;
+        const fs::path ck_marker = BuildPaths(roots, kCk).app0 / kPreparedMarker;
+        WriteAll(us_marker, "{\"version\": \"1.03\", \"scope\": \"full\"}");
+        WriteAll(ck_marker, "{\"version\": \"1.02\", \"scope\": \"full\"}");
+        fs::last_write_time(us_marker, fs::last_write_time(ck_marker) - std::chrono::hours(1));
+        CHECK(ActiveBuildPaths(roots).app0 == BuildPaths(roots, kCk).app0);
+        CHECK(ActiveBuildPaths(roots).image_dir == BuildPaths(roots, kCk).image_dir);
+        CHECK(RootsOf(BuildPaths(roots, kCk)).prepared == roots.prepared);
+        fs::last_write_time(us_marker, fs::last_write_time(ck_marker) + std::chrono::hours(1));
+        CHECK(ActiveBuildPaths(roots).app0 == BuildPaths(roots, kUs).app0);
+    }
+
+    {
+        const fs::path app0 = base / "ck-prompts";
+        fs::remove_all(app0);
+        WriteAll(app0 / "DRACRO_CK.CPK", "ck archive");
+        WriteAll(app0 / "DRACRO.CPK", "shared archive");
+        CHECK(PromptArchives(app0, kCk).empty() && InstalledPromptStyle(app0, kCk) == PromptStyle::kPlayStation);
+        CHECK(!SetPromptStyle(app0, kCk, PromptStyle::kXbox, {}).ok);
+        CHECK(SetPromptStyle(app0, kCk, PromptStyle::kPlayStation, {}).ok);
+        CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == "ck archive" && ReadAll(app0 / "DRACRO.CPK") == "shared archive");
+    }
+
+    {
+        const auto sites = kCk.resolution_sites;
+        uint64_t size = 0;
+        for (const DcpResolutionSite& site : sites) {
+            size = std::max<uint64_t>(size, site.offset + site.opcode_length + 4u);
+        }
+        std::vector<unsigned char> image(size + 16, 0x90);
+        for (const DcpResolutionSite& site : sites) {
+            std::memcpy(&image[site.offset], site.opcode, site.opcode_length);
+            std::memcpy(&image[site.offset + site.opcode_length], &site.value, 4);
+        }
+        char error[160];
+        std::vector<unsigned char> patched = image;
+        CHECK(dcp_apply_resolution(patched.data(), patched.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
+        for (const DcpResolutionSite& site : sites) {
+            uint32_t value = 0;
+            std::memcpy(&value, &patched[site.offset + site.opcode_length], 4);
+            CHECK(value == uint32_t(site.height ? dcp_resolutions[5].height : dcp_resolutions[5].width));
+        }
+        std::vector<unsigned char> damaged = image;
+        const DcpResolutionSite& bad = sites[11];
+        damaged[bad.offset + bad.opcode_length] ^= 1;
+        const std::vector<unsigned char> before = damaged;
+        CHECK(!dcp_apply_resolution(damaged.data(), damaged.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
+        CHECK(damaged == before);
+        char at[32];
+        snprintf(at, sizeof(at), "0x%x", unsigned(bad.offset));
+        CHECK(std::string(error).find(at) != std::string::npos);
+    }
+}
+
 int main(int argc, char** argv) {
     // dcp-launcher-tests --check-game <app0> <image dir>: the readiness check on real folders, read-only.
     if (argc == 4 && std::string(argv[1]) == "--check-game") {
@@ -1752,7 +2358,7 @@ int main(int argc, char** argv) {
                     check.detail.c_str(), check.eboot_sha256.c_str());
         return check.state == GameFileState::kValid ? 0 : 1;
     }
-    // dcp-launcher-tests --install <.pkg or game folder> <app0> <image dir>: the launcher's installer without its
+    // dcp-launcher-tests --install <.pkg or game folder> <prepared root> <image root>: the launcher's installer without its
     // window.
     if (argc == 5 && std::string(argv[1]) == "--install") {
         InstallHooks hooks;
@@ -1767,9 +2373,10 @@ int main(int argc, char** argv) {
         };
         const InstallResult result =
             InstallGame(PathFromUtf8(argv[2]), {PathFromUtf8(argv[3]), PathFromUtf8(argv[4])}, hooks);
-        std::printf("%s: %s%s%s (%zu files, %zu linked, %llu bytes)\n", DescribeInstall(result.status).title,
-                    DescribeInstall(result.status).text, result.detail.empty() ? "" : " - ", result.detail.c_str(),
-                    result.files, result.linked, static_cast<unsigned long long>(result.bytes));
+        const InstallMessage message = DescribeInstall(result.status);
+        std::printf("%s: %s%s%s (%zu files, %zu linked, %llu bytes)\n", message.title.c_str(), message.text.c_str(),
+                    result.detail.empty() ? "" : " - ", result.detail.c_str(), result.files, result.linked,
+                    static_cast<unsigned long long>(result.bytes));
         return result.ok() ? 0 : 1;
     }
 
@@ -1802,6 +2409,12 @@ int main(int argc, char** argv) {
     TestOptions();
     TestFileBrowser(base);
     TestControllerPrompts(base);
+    TestBuilds(base);
+    TestLayers(base);
+    TestUsBuild();
+    TestLegacyMarker(base);
+    TestInstalledGameName(base);
+    TestActivation(base);
 
     std::error_code ec;
     fs::remove_all(base, ec);

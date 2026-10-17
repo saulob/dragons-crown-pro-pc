@@ -10,6 +10,9 @@ import os
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import game_profiles  # noqa: E402
+
 PKG_MAGIC = 0x7F434E54
 ENTRY_PARAM_SFO = 0x1000
 ENTRY_IMAGE_KEY = 0x20
@@ -118,6 +121,8 @@ def main():
         return 1
     info['kind'] = classify(info)
     info['title_id'] = title_id(info)
+    layer = game_profiles.package_layer(info)
+    info['profile'] = None if layer is None else {'title_id': layer[0], 'version': layer[1], 'layer': layer[2]}
     if args.json:
         print(json.dumps(info, indent=2))
         return 0
@@ -136,6 +141,8 @@ def main():
     print(f"entries       : {info['entry_count']} (within file: {info['entries_within_file']}), "
           f"delta info: {info['has_delta_info']}")
     print(f"PFS image     : {info['pfs_size']} bytes at {info['pfs_offset']:#x} (within file: {info['pfs_within_file']})")
+    print(f"profile       : " + (f"{layer[0]} {layer[1]}, layer {layer[2] + 1} of "
+          f"{len(game_profiles.PROFILES[layer[0]]['versions'][layer[1]]['layers'])}" if layer else "not a supported build"))
     print(f"image key idx : {info['image_key_index']} -> "
           f"{'fake PKG (extractable with public keys)' if info['fake_pkg'] else 'NOT a fake PKG (needs console keys)'}")
     return 0

@@ -28,7 +28,7 @@ unresolved import stops the process (exit 20) with its name and caller.
 | | |
 |---|---|
 | Package | A fake PKG of the game in `game\`, 5,839,257,600 B (header agrees), the only file |
-| Title / title ID | Dragon's Crown Pro / **CUSA10454** |
+| Title / title ID | Dragon's Crown Pro / **CUSA10454** (US build; the Japanese build is CUSA07001 and the Asia and Hong Kong build CUSA10209, see [LAUNCHER.md](LAUNCHER.md)) |
 | Content ID | `UP2611-CUSA10454_00-DRAGONSCROWNPRO1` |
 | Category | `gd` (base game); fake PKG (image key index 3), no delta info |
 | `APP_VER` / `VERSION` | `01.00` / **`01.03`**; `SYSTEM_VER` 0x4700000 |

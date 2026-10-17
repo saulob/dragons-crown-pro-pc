@@ -1,12 +1,17 @@
 #include "game_files.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <string_view>
 #include <fstream>
 #include <system_error>
 #include <vector>
 
 #include "crypto.h"
+#include "dcp_launcher.h"
+#include "utf8.h"
 
 namespace dcp {
 namespace {
@@ -68,15 +73,83 @@ bool IsRegularNonEmpty(const std::filesystem::path& path) {
     return std::filesystem::is_regular_file(path, ec) && std::filesystem::file_size(path, ec) > 0 && !ec;
 }
 
-GameCheck Result(GameFileState state, std::string detail, std::string sha = {}) {
+GameCheck Result(GameFileState state, std::string detail, std::string sha = {}, const GameBuild* build = nullptr) {
     GameCheck check;
     check.state = state;
     check.detail = std::move(detail);
     check.eboot_sha256 = std::move(sha);
+    check.build = build;
     return check;
 }
 
+std::string Shown(const std::string& value) {
+    return value.empty() ? "missing" : value;
+}
+
+bool SameIdentity(const std::string& sfo, const PackageLayer& layer) {
+    return SfoString(sfo, "APP_VER") == layer.app_ver && SfoString(sfo, "VERSION") == layer.sfo_version &&
+           (SfoString(sfo, "CATEGORY") == "gp") == layer.update;
+}
+
+const GameBuild* BuildOfSfo(const std::string& sfo, std::span<const GameBuild> builds) {
+    for (const GameBuild& build : builds) {
+        const PackageLayer& finished = FinishedLayer(build);
+        if (SfoString(sfo, "TITLE_ID") == build.title_id && SfoString(sfo, "CONTENT_ID") == build.content_id &&
+            SfoString(sfo, "APP_VER") == finished.app_ver && SfoString(sfo, "VERSION") == finished.sfo_version) {
+            return &build;
+        }
+    }
+    return nullptr;
+}
+
+const GameBuild* BuildOfImageReport(const std::string& report, std::span<const GameBuild> builds) {
+    const std::string title = JsonString(report, "title_id");
+    const std::string sha = JsonString(report, "eboot_sha256");
+    for (const GameBuild& build : builds) {
+        if (title == build.title_id && sha == build.eboot_sha256) {
+            return &build;
+        }
+    }
+    return nullptr;
+}
+
+// Installs made before the build was named by its APP_VER carry the marker version 1.03; only the tree that already
+// passed the check as the verified CUSA10454 build is renamed. The marker keeps its modification time, which orders builds.
+bool MigrateLegacyMarker(const std::filesystem::path& marker_file, const std::string& marker, const GameBuild& build,
+                         const std::string& version) {
+    constexpr std::string_view kLegacy = "\"version\": \"1.03\"";
+    const size_t at = marker.find(kLegacy);
+    if (std::string_view(build.title_id) != "CUSA10454" || std::string_view(build.version) != "1.00" ||
+        version != "1.03" || at == std::string::npos) {
+        return false;
+    }
+    std::error_code ec;
+    const auto time = std::filesystem::last_write_time(marker_file, ec);
+    std::string updated = marker;
+    updated.replace(at, kLegacy.size(), "\"version\": \"" + std::string(build.version) + "\"");
+    {
+        std::ofstream out(marker_file, std::ios::binary | std::ios::trunc);
+        out << updated;
+        if (!out.flush()) {
+            return false;
+        }
+    }
+    if (!ec) {
+        std::filesystem::last_write_time(marker_file, time, ec);
+    }
+    std::printf("Game files: %s prepared folder marker updated from version 1.03\n", build.label);
+    return true;
+}
+
 } // namespace
+
+std::string PreparationScope(const std::filesystem::path& app0) {
+    std::string marker;
+    if (!ReadSmallFile(app0 / kPreparedMarker, marker)) {
+        return {};
+    }
+    return JsonString(marker, "scope");
+}
 
 std::string SfoString(const std::string& sfo, const char* key) {
     const std::optional<SfoEntry> entry = FindSfoEntry(sfo, key);
@@ -148,7 +221,97 @@ const char* StateName(GameFileState state) {
     return "unknown";
 }
 
-GameCheck CheckGameTree(const std::filesystem::path& app0, const GameFingerprint& expected) {
+std::string InstalledGameName(GameFileState state, const GameBuild* build) {
+    if (build && state == GameFileState::kValid) {
+        return std::string("PS4 ") + build->label;
+    }
+    return "Not installed";
+}
+
+GamePaths BuildPaths(const GameRoots& roots, const GameBuild& build) {
+    return {roots.prepared / build.folder, roots.image / build.folder};
+}
+
+const GameBuild* LastPreparedBuild(const GameRoots& roots, std::span<const GameBuild> builds) {
+    const GameBuild* chosen = nullptr;
+    std::filesystem::file_time_type chosen_time;
+    for (const GameBuild& build : builds) {
+        const GamePaths paths = BuildPaths(roots, build);
+        std::error_code ec;
+        const std::filesystem::file_time_type time = std::filesystem::last_write_time(paths.app0 / kPreparedMarker, ec);
+        if (PreparationScope(paths.app0) != "full" || ec) {
+            continue;
+        }
+        if (!chosen || time > chosen_time) {
+            chosen = &build;
+            chosen_time = time;
+        }
+    }
+    return chosen;
+}
+
+GamePaths ActiveBuildPaths(const GameRoots& roots, std::span<const GameBuild> builds) {
+    const GameBuild* last = LastPreparedBuild(roots, builds);
+    return BuildPaths(roots, last ? *last : builds[0]);
+}
+
+GameRoots RootsOf(const GamePaths& paths) {
+    return {paths.app0.parent_path(), paths.image_dir.parent_path()};
+}
+
+GameCheck CheckSfoIdentity(const std::string& sfo, std::span<const GameBuild> builds) {
+    if (const GameBuild* build = BuildOfSfo(sfo, builds)) {
+        return Result(GameFileState::kValid, {}, {}, build);
+    }
+    const std::string title = SfoString(sfo, "TITLE_ID");
+    const auto same_title = std::find_if(builds.begin(), builds.end(),
+                                         [&](const GameBuild& build) { return title == build.title_id; });
+    if (same_title == builds.end()) {
+        return Result(GameFileState::kDifferentVersion, "param.sfo TITLE_ID is " + Shown(title));
+    }
+    const PackageLayer& finished = FinishedLayer(*same_title);
+    const struct {
+        const char* key;
+        const char* wanted;
+    } identity[] = {
+        {"CONTENT_ID", same_title->content_id},
+        {"APP_VER", finished.app_ver},
+        {"VERSION", finished.sfo_version},
+    };
+    for (const auto& item : identity) {
+        const std::string found = SfoString(sfo, item.key);
+        if (found != item.wanted) {
+            return Result(GameFileState::kDifferentVersion, std::string("param.sfo ") + item.key + " is " + Shown(found));
+        }
+    }
+    return Result(GameFileState::kDifferentVersion, "param.sfo matches no supported build");
+}
+
+GameCheck CheckPackageIdentity(const std::string& sfo, std::span<const GameBuild> builds) {
+    const std::string title = SfoString(sfo, "TITLE_ID");
+    const auto same_title = std::find_if(builds.begin(), builds.end(),
+                                         [&](const GameBuild& build) { return title == build.title_id; });
+    if (same_title == builds.end()) {
+        return Result(GameFileState::kDifferentVersion, "param.sfo TITLE_ID is " + Shown(title));
+    }
+    const std::string content = SfoString(sfo, "CONTENT_ID");
+    if (content != same_title->content_id) {
+        return Result(GameFileState::kDifferentVersion, "param.sfo CONTENT_ID is " + Shown(content));
+    }
+    for (const GameBuild& build : builds) {
+        if (title == build.title_id && SameIdentity(sfo, FinishedLayer(build))) {
+            GameCheck check = Result(GameFileState::kValid, {}, {}, &build);
+            check.layer = build.layers.size() - 1;
+            return check;
+        }
+    }
+    return Result(GameFileState::kDifferentVersion,
+                  "param.sfo APP_VER " + Shown(SfoString(sfo, "APP_VER")) + " / VERSION " +
+                      Shown(SfoString(sfo, "VERSION")) + " is not part of a supported build",
+                  {}, &*same_title);
+}
+
+GameCheck CheckGameTree(const std::filesystem::path& app0, std::span<const GameBuild> builds) {
     std::error_code ec;
     if (!std::filesystem::is_directory(app0, ec)) {
         return Result(GameFileState::kMissing, "game folder not found");
@@ -159,47 +322,37 @@ GameCheck CheckGameTree(const std::filesystem::path& app0, const GameFingerprint
                                                                                   : GameFileState::kMissing,
                       "cannot read sce_sys/param.sfo");
     }
-    if (GameCheck identity = CheckSfoIdentity(sfo, expected); identity.state != GameFileState::kValid) {
+    const GameCheck identity = CheckSfoIdentity(sfo, builds);
+    if (identity.state != GameFileState::kValid) {
         return identity;
     }
+    const GameBuild& build = *identity.build;
 
-    for (const char* name : kGameFiles) {
+    for (const char* name : kSharedGameFiles) {
         if (!IsRegularNonEmpty(app0 / name)) {
-            return Result(GameFileState::kMissing, std::string("missing ") + name);
+            return Result(GameFileState::kMissing, std::string("missing ") + name, {}, &build);
+        }
+    }
+    if (build.regional_archive && !IsRegularNonEmpty(app0 / build.regional_archive)) {
+        return Result(GameFileState::kMissing, std::string("missing ") + build.regional_archive, {}, &build);
+    }
+    for (const char* name : build.extra_files) {
+        if (!IsRegularNonEmpty(app0 / name)) {
+            return Result(GameFileState::kMissing, std::string("missing ") + name, {}, &build);
         }
     }
 
     const std::string sha = Sha256Hex(app0 / "eboot.bin");
     if (sha.empty()) {
-        return Result(GameFileState::kReadError, "cannot read eboot.bin");
+        return Result(GameFileState::kReadError, "cannot read eboot.bin", {}, &build);
     }
-    if (sha != expected.eboot_sha256) {
-        return Result(GameFileState::kDifferentVersion, "eboot.bin is not the supported build", sha);
+    if (sha != build.eboot_sha256) {
+        return Result(GameFileState::kDifferentVersion, "eboot.bin is not the supported build", sha, &build);
     }
-    return Result(GameFileState::kValid, {}, sha);
+    return Result(GameFileState::kValid, {}, sha, &build);
 }
 
-GameCheck CheckSfoIdentity(const std::string& sfo, const GameFingerprint& expected) {
-    const struct {
-        const char* key;
-        std::string_view wanted;
-    } identity[] = {
-        {"TITLE_ID", expected.title_id},
-        {"CONTENT_ID", expected.content_id},
-        {"APP_VER", expected.app_ver},
-        {"VERSION", expected.sfo_version},
-    };
-    for (const auto& item : identity) {
-        const std::string found = SfoString(sfo, item.key);
-        if (found != item.wanted) {
-            return Result(GameFileState::kDifferentVersion, std::string("param.sfo ") + item.key + " is " +
-                                                                (found.empty() ? "missing" : found));
-        }
-    }
-    return Result(GameFileState::kValid, {});
-}
-
-GameCheck CheckGameFiles(const GamePaths& paths, const GameFingerprint& expected) {
+GameCheck CheckGameFiles(const GamePaths& paths, std::span<const GameBuild> builds) {
     std::error_code ec;
     if (!std::filesystem::is_directory(paths.app0, ec)) {
         return Result(GameFileState::kMissing, "game folder not found");
@@ -218,31 +371,49 @@ GameCheck CheckGameFiles(const GamePaths& paths, const GameFingerprint& expected
     if (version.empty() || scope.empty()) {
         return Result(GameFileState::kMissing, "game preparation did not finish");
     }
-    if (version != expected.version) {
-        return Result(GameFileState::kDifferentVersion, "prepared version " + version);
-    }
     if (scope != "full") {
         return Result(GameFileState::kMissing, "only the " + scope + " files were prepared");
     }
 
-    const GameCheck tree = CheckGameTree(paths.app0, expected);
+    const GameCheck tree = CheckGameTree(paths.app0, builds);
     if (tree.state != GameFileState::kValid) {
         return tree;
     }
+    const GameBuild& build = *tree.build;
     const std::string& sha = tree.eboot_sha256;
+    if (version != build.version && !MigrateLegacyMarker(marker_file, marker, build, version)) {
+        return Result(GameFileState::kDifferentVersion, "prepared version " + version, sha, &build);
+    }
     for (const char* name : kImageFiles) {
         if (!IsRegularNonEmpty(paths.image_dir / name)) {
-            return Result(GameFileState::kMissing, std::string("boot image: missing ") + name, sha);
+            return Result(GameFileState::kMissing, std::string("boot image: missing ") + name, sha, &build);
         }
     }
     std::string report;
     if (!ReadSmallFile(paths.image_dir / "image.json", report)) {
-        return Result(GameFileState::kReadError, "cannot read the boot image report", sha);
+        return Result(GameFileState::kReadError, "cannot read the boot image report", sha, &build);
     }
-    if (JsonString(report, "title_id") != expected.title_id || JsonString(report, "eboot_sha256") != expected.eboot_sha256) {
-        return Result(GameFileState::kDifferentVersion, "the boot image was built from another eboot.bin", sha);
+    if (BuildOfImageReport(report, builds) != &build) {
+        return Result(GameFileState::kDifferentVersion, "the boot image was built from another eboot.bin", sha, &build);
     }
-    return Result(GameFileState::kValid, {}, sha);
+    return Result(GameFileState::kValid, {}, sha, &build);
 }
 
 } // namespace dcp
+
+// The supported build a boot image folder was built from, for the loader; 0 when it is not one.
+extern "C" int dcp_game_build(const char* image_dir, DcpGameBuild* out) {
+    std::string report;
+    if (!image_dir || !out || !dcp::ReadSmallFile(dcp::PathFromUtf8(image_dir) / "image.json", report)) {
+        return 0;
+    }
+    const dcp::GameBuild* build = dcp::BuildOfImageReport(report, dcp::SupportedBuilds());
+    if (!build) {
+        return 0;
+    }
+    out->label = build->label;
+    out->cheats = build->cheats;
+    out->resolution_sites = build->resolution_sites.data();
+    out->resolution_site_count = build->resolution_sites.size();
+    return 1;
+}

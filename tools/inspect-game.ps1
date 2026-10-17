@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Reads the package metadata (read-only) and, when already extracted, the executables and modules.
+  Reads the package metadata (read-only), the build each package belongs to, and the executables of the prepared
+  folders.
 .PARAMETER GameRoot
   Folder holding the .pkg (default: <repo>\game).
 .PARAMETER List
@@ -48,25 +49,34 @@ foreach ($pkg in $packages) {
 }
 
 Write-Step 'Profile'
-$base = @($infos | Where-Object { $_.kind -eq 'base' -and $_.title_id -eq 'CUSA10454' })
-$other = @($infos | Where-Object { $_.kind -ne 'base' -or $_.title_id -ne 'CUSA10454' })
-if ($base.Count -eq 0) { Write-Bad 'no Dragon''s Crown Pro (CUSA10454) base package'; $verdict = 1 }
-elseif ($base.Count -gt 1) { Write-Bad 'more than one base package for CUSA10454'; $verdict = 1 }
-else {
-    $b = $base[0]
-    if ($b.content_id -eq 'UP2611-CUSA10454_00-DRAGONSCROWNPRO1') { Write-Ok 'content id matches the profile' } else { Write-Bad "unexpected content id $($b.content_id)"; $verdict = 1 }
-    if ($b.param_sfo.APP_VER -eq '01.00' -and $b.param_sfo.VERSION -eq '01.03') { Write-Ok 'APP_VER 01.00 / VERSION 01.03: supported (profile version 1.03)' }
-    else { Write-Bad "APP_VER $($b.param_sfo.APP_VER) / VERSION $($b.param_sfo.VERSION) is not a supported version"; $verdict = 1 }
-    if ($b.fake_pkg) { Write-Ok 'extractable with the public fake-PKG keys' } else { Write-Bad 'retail PKG (needs console keys)'; $verdict = 1 }
+foreach ($info in $infos) {
+    if (-not $info.profile) {
+        Write-Warn "$($info.file): not a package of a supported build (APP_VER $($info.param_sfo.APP_VER), $($info.kind)); ignored"
+        continue
+    }
+    $build = $info.profile
+    if (-not $info.fake_pkg) { Write-Bad "$($info.file): retail PKG (needs console keys)"; $verdict = 1 }
+    if ($build.layer -eq 0) {
+        Write-Ok ("{0}: {1} {2}, a complete game" -f $info.file, $build.title_id, $build.version)
+        continue
+    }
+    $base = @($infos | Where-Object { $_.profile -and $_.profile.title_id -eq $build.title_id -and $_.profile.layer -eq 0 })
+    if ($base.Count -gt 0) {
+        Write-Ok ("{0}: {1} {2}, an update of the base package" -f $info.file, $build.title_id, $build.version)
+    }
+    else {
+        Write-Bad ("{0}: {1} {2} needs the base package of {1}, which is missing" -f $info.file, $build.title_id, $build.version)
+        $verdict = 1
+    }
 }
-foreach ($o in $other) { Write-Warn "$($o.file): not the supported base package (kind $($o.kind), $($o.title_id)); ignored" }
+if (-not ($infos | Where-Object { $_.profile })) { Write-Bad 'no package of a supported build (CUSA10454, CUSA07001 or CUSA10209)'; $verdict = 1 }
 
-$extracted = Join-Path $GameRoot 'extracted\base'
-if (Test-Path -LiteralPath (Join-Path $extracted 'eboot.bin')) {
-    Write-Step "Executables ($extracted)"
-    $code = Invoke-Script 'game_report.py' @($extracted)
+$prepared = Join-Path $GameRoot 'prepared'
+$views = @(Get-ChildItem -LiteralPath $prepared -Directory -ErrorAction SilentlyContinue)
+if ($views.Count -eq 0) { Write-Warn 'nothing prepared yet: run tools\prepare-game.ps1 to read the executables' }
+foreach ($view in $views) {
+    Write-Step "Executables ($($view.FullName))"
+    $code = Invoke-Script 'game_report.py' @($view.FullName)
     if ($code -ne 0) { $verdict = 1 }
-} else {
-    Write-Warn 'not extracted yet: run tools\prepare-game.ps1 to read the executables'
 }
 exit $verdict

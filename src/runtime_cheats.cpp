@@ -14,6 +14,7 @@ dcp::cheats::ActionRequests g_actions;
 dcp::cheats::SessionExperience g_experience;
 std::atomic<unsigned> g_saved{0};
 std::atomic<int> g_saved_experience{dcp::cheats::kExperienceMultiplierOff};
+std::atomic<int> g_available{0};
 
 bool Valid(int cheat) {
     return cheat >= 0 && static_cast<size_t>(cheat) < dcp::cheats::kCheatCount;
@@ -60,6 +61,14 @@ extern "C" int runtime_cheat_experience_cycle(void) {
         return dcp::cheats::kExperienceMultiplierOff;
     }
     return g_experience.Cycle(g_saved_experience.load(std::memory_order_relaxed));
+}
+
+extern "C" int runtime_cheats_available(void) {
+    return g_available.load(std::memory_order_relaxed);
+}
+
+extern "C" void runtime_cheats_set_available(int available) {
+    g_available.store(available, std::memory_order_relaxed);
 }
 
 extern "C" int runtime_cheat_enabled(int cheat) {

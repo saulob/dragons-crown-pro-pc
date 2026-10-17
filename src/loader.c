@@ -8,6 +8,7 @@
 #include <inttypes.h>
 #include "runtime.h"
 #include "runtime_cheats.h"
+#include "startup_save_hook.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
@@ -408,6 +409,11 @@ int main(int argc, char **argv) {
         if (launched==DCP_LAUNCHER_QUIT) exit(0);
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
     }
+    if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
+    boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
+    DcpGameBuild game_build;
+    const int known_build=dcp_game_build(paths.image_dir,&game_build);
+    printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file)];
     runtime_dcp_set_neo_mode(render_resolution->pro_memory);
     runtime_set_language(dcp_text_language(settings_file));
@@ -542,8 +548,9 @@ int main(int argc, char **argv) {
             if (!executable) fail("native function is not executable");
         }
     }
-    const size_t hook_bytes = round_page(runtime_cheat_hooks_stub_bytes());
-    image = allocate(round_page(size) + hook_bytes); /* the cheat hook stubs follow the image, within a jump of it */
+    const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
+    const size_t hook_bytes = round_page(cheat_stub_bytes + startup_save_hook_stub_bytes());
+    image = allocate(round_page(size) + hook_bytes); /* the hook stubs follow the image, within a jump of it */
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
     if (!cpu_only && !dcpgpu_available()) puts("GPU: no video core in this build; running CPU-side only");
@@ -608,10 +615,17 @@ int main(int argc, char **argv) {
         _exit(missing ? 1 : 0); /* no destructors: GPU threads are running */
     }
     if (render_resolution!=&dcp_resolutions[0]) {
-        char error[160];
-        if (!dcp_apply_resolution(image,size,render_resolution,error,sizeof(error))) fail(error);
+        char error[320];
+        if (!known_build) fail("render resolution needs a supported game build");
+        if (!dcp_apply_resolution(image,size,game_build.resolution_sites,game_build.resolution_site_count,
+                                  render_resolution,error,sizeof(error))) {
+            char message[400];
+            snprintf(message,sizeof(message),"%s, game build %s",error,game_build.label);
+            fail(message);
+        }
     }
-    runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
+    if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
+    if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_resolution->width,render_resolution->height,render_resolution->key,
            render_resolution->pro_memory ? ", PS4 Pro memory path" : "");
 #ifdef _WIN32

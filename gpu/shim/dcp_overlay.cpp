@@ -466,15 +466,17 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     const bool action = row.kind == dcp::cheats::RowKind::Action;
     const bool experience = row.kind == dcp::cheats::RowKind::Experience;
     const int multiplier = experience ? runtime_cheat_experience_multiplier() : dcp::cheats::kExperienceMultiplierOff;
+    const bool available = runtime_cheats_available() != 0;
     const bool on = row.kind == dcp::cheats::RowKind::Toggle && runtime_cheat_enabled(int(row.cheat)) != 0;
-    const char* state = action ? row.verb
+    const char* state = !available ? "Unavailable"
+                        : action ? row.verb
                         : experience ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
                         : (on ? "On" : "Off");
-    const bool lit = action || on || multiplier != dcp::cheats::kExperienceMultiplierOff;
+    const bool lit = available && (action || on || multiplier != dcp::cheats::kExperienceMultiplierOff);
     draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
     draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y), ImGui::GetColorU32(lit ? accent : dim), state);
     ImGui::PopID();
-    if (!pressed) {
+    if (!pressed || !available) {
         return;
     }
     if (action) {

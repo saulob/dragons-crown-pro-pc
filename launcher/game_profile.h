@@ -1,37 +1,57 @@
-// The supported game build. Mirrors scripts/game_profiles.py; tests/launcher_tests.cpp checks they agree.
+// The supported game builds. scripts/game_profiles.py mirrors the identity fields; tests/launcher_tests.cpp checks they agree.
 #pragma once
 
-#include <string_view>
+#include <cstddef>
+#include <span>
+#include <string>
+
+#include "dcp_resolution.h"
 
 namespace dcp {
 
 inline constexpr char kGameTitle[] = "Dragon's Crown Pro";
 inline constexpr char kPortRepository[] = "github.com/saulob/dragons-crown-pro-pc";
 
-struct GameFingerprint {
-    std::string_view title_id;
-    std::string_view content_id;
-    std::string_view app_ver;      // param.sfo APP_VER
-    std::string_view sfo_version;  // param.sfo VERSION
-    std::string_view version;      // the profile version, as in game\prepared\v<version>
-    std::string_view eboot_sha256; // lower-case hex of the prepared eboot.bin
+// A package of a build, by its param.sfo APP_VER and VERSION. An update (CATEGORY gp) is applied over the packages
+// before it.
+struct PackageLayer {
+    const char* app_ver;
+    const char* sfo_version;
+    bool update;
 };
 
-inline constexpr GameFingerprint kSupportedGame{
-    "CUSA10454",
-    "UP2611-CUSA10454_00-DRAGONSCROWNPRO1",
-    "01.00",
-    "01.03",
-    "1.03",
-    "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a",
+struct GameBuild {
+    const char* title_id;
+    const char* content_id;
+    const char* version;          // the profile version: the preparation marker's "version"
+    const char* folder;           // under game\prepared and game\image; distinct for each build
+    const char* eboot_sha256;     // lower-case hex of the finished game's eboot.bin
+    const char* regional_archive; // nullptr when the build has none
+    std::span<const char* const> extra_files; // the other files of the build's update, required like the archive
+    const char* label;            // the name the log, the launcher and the loader show
+    const char* region;
+    bool cheats;                  // the native cheat hooks are validated for this build
+    bool xbox_prompts;            // the Xbox prompt patch is validated for this build's archives
+    std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
+    std::span<const DcpResolutionSite> resolution_sites;
 };
 
-// Files every complete game folder has, the player's and the prepared one alike.
-inline constexpr const char* kGameFiles[] = {
+// The supported builds, US first.
+std::span<const GameBuild> SupportedBuilds();
+
+// The finished game's layer: its param.sfo is the one of the installed game.
+const PackageLayer& FinishedLayer(const GameBuild& build);
+
+// The build whose base package a build's update is laid over, or nullptr when the build has no update.
+const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> builds = SupportedBuilds());
+
+std::string SupportedBuildsText();
+
+// Files every complete game folder has, whatever the build. The build's regional archive is required too.
+inline constexpr const char* kSharedGameFiles[] = {
     "eboot.bin",
     "sce_discmap.plt",
     "DRACRO.CPK",
-    "DRACRO_US.CPK",
     "sce_module/libc.prx",
     "sce_module/libSceFios2.prx",
     "sce_module/libSceNpToolkit2.prx",

@@ -392,6 +392,7 @@ extern "C" int runtime_cheat_hooks_install(uint8_t* image, uint64_t size, uint64
         std::printf("Cheats: Infinite Durability refill not available, the game's item functions differ\n");
     }
     dcp::cheats::SetGuestFunctions(functions);
+    runtime_cheats_set_available(1);
     std::printf("Cheats: %zu of %zu native hooks installed\n", installed, hooks.size());
     return 1;
 }

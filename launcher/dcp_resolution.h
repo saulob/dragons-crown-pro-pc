@@ -31,12 +31,10 @@ typedef struct {
     int height;
 } DcpResolutionSite;
 
-const DcpResolutionSite *dcp_resolution_sites(size_t *count);
-
 /* Writes the resolution's width and height into every site after checking each one still holds the original
  * instruction. Returns 0 and a message in `error` when the image does not match; nothing is written then. */
-int dcp_apply_resolution(unsigned char *image, uint64_t image_size, const DcpResolution *resolution, char *error,
-                         size_t error_size);
+int dcp_apply_resolution(unsigned char *image, uint64_t image_size, const DcpResolutionSite *sites, size_t count,
+                         const DcpResolution *resolution, char *error, size_t error_size);
 
 #ifdef __cplusplus
 }
