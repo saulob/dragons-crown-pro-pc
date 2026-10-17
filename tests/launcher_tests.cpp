@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "controller_prompts.h"
+#include "game_patches.h"
 #include "cpk_patch.h"
 #include "dcp_cheats.h"
 #include "dcp_launcher.h"
@@ -2329,6 +2330,82 @@ void TestActivation(const fs::path& base) {
 
 // The supported builds: their identities, archives, flags and the boot image report that names them, and the
 // checks that keep one build's files out of another build's folders.
+void TestSafeMode(const fs::path& base) {
+    using namespace cpk_test;
+    CHECK(std::string(kArachnophobiaSafeModeKey) == "arachnophobia_safe_mode");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kArachnophobiaSafeModeKey && setting.default_value == "0";
+    }
+    CHECK(managed);
+
+    {
+        const std::string shipped = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "prompts" / "arachnophobia-spider.dcpx");
+        const std::optional<BlockPatch> patch = ParseBlockPatch(Span(shipped));
+        CHECK(patch && patch->targets.size() == 1);
+        if (patch) {
+            CHECK(patch->targets[0].name == kSpiderEntry && patch->targets[0].size == 8389072);
+            CHECK(patch->targets[0].runs.size() > 10000);
+        }
+    }
+
+    std::string iface(20480, '\0'), iface_us(24576, '\0'), spider(16384, '\0');
+    for (size_t i = 0; i < iface.size(); ++i) iface[i] = char((i * 7 + i / 64) & 255);
+    for (size_t i = 0; i < iface_us.size(); ++i) iface_us[i] = char((i * 13 + i / 32) & 255);
+    for (size_t i = 0; i < spider.size(); ++i) spider[i] = char((i * 5 + i / 16) & 255);
+    std::string want = iface, want_us = iface_us, want_spider = spider;
+    for (size_t off : {0x340u, 0x1000u}) want.replace(off, 16, 16, 'X');
+    for (size_t off : {0x380u, 0x2000u}) want_us.replace(off, 16, 16, 'Y');
+    for (size_t off : {0x100u, 0x2000u, 0x3ff0u}) want_spider.replace(off, 16, 16, 'W');
+    const std::string xbox = MakePatch({{"stage/Interface.ftx", {iface, want}}, {"stage/Interface_US.ftx", {iface_us, want_us}}});
+    const std::string safe = MakePatch({{kSpiderEntry, {spider, want_spider}}});
+
+    const fs::path app0 = base / "safe_mode_app0";
+    fs::create_directories(app0);
+    const std::string original_us = BuildCpk({{"stage/Interface_US.ftx", iface_us, true}}, true);
+    const std::string original = BuildCpk({{"stage/Interface.ftx", iface, true}, {kSpiderEntry, spider, true}}, false);
+    WriteAll(app0 / "DRACRO_US.CPK", original_us);
+    WriteAll(app0 / "DRACRO.CPK", original);
+    const auto read = [&](const char* archive, const char* entry) {
+        CpkArchive a;
+        const CpkEntry* e = a.Open(app0 / archive) ? a.Find(entry) : nullptr;
+        return e ? Bytes(a.Read(*e)) : std::string("<missing>");
+    };
+    const auto set = [&](PromptStyle style, bool on) {
+        return SetGamePatches(app0, kUs, style, on, Span(xbox), Span(safe));
+    };
+    CHECK(!InstalledSafeMode(app0));
+
+    CHECK(set(PromptStyle::kXbox, true).ok);
+    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(read("DRACRO.CPK", kSpiderEntry) == want_spider && read("DRACRO.CPK", "stage/Interface.ftx") == want);
+    CHECK(read("DRACRO_US.CPK", "stage/Interface_US.ftx") == want_us);
+    const std::string both = ReadAll(app0 / "DRACRO.CPK");
+    PromptsResult again = set(PromptStyle::kXbox, true);
+    CHECK(again.ok && ReadAll(app0 / "DRACRO.CPK") == both);
+
+    CHECK(set(PromptStyle::kXbox, false).ok);
+    CHECK(!InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(read("DRACRO.CPK", kSpiderEntry) == spider && read("DRACRO.CPK", "stage/Interface.ftx") == want);
+
+    CHECK(set(PromptStyle::kPlayStation, true).ok);
+    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(read("DRACRO.CPK", kSpiderEntry) == want_spider && read("DRACRO.CPK", "stage/Interface.ftx") == iface);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+
+    CHECK(set(PromptStyle::kXbox, true).ok && InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(set(PromptStyle::kPlayStation, false).ok);
+    CHECK(ReadAll(app0 / "DRACRO.CPK") == original && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+    CHECK(!InstalledSafeMode(app0) && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+
+    CHECK(!SetGamePatches(app0, kUs, PromptStyle::kXbox, true, Span(xbox), Span(std::string("DCPX1"))).ok);
+    CHECK(!InstalledSafeMode(app0) && ReadAll(app0 / "DRACRO.CPK") == original);
+
+    CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, true, {}, Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(!SetGamePatches(app0, kJp103, PromptStyle::kXbox, true, Span(xbox), Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, false, {}, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
+}
+
 void TestBuilds(const fs::path& base) {
     CHECK(SupportedBuilds().size() == 6);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
@@ -2533,6 +2610,7 @@ int main(int argc, char** argv) {
     TestOptions();
     TestFileBrowser(base);
     TestControllerPrompts(base);
+    TestSafeMode(base);
     TestBuilds(base);
     TestLayers(base);
     TestUsBuild();

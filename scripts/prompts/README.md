@@ -15,6 +15,7 @@ is needed to build the port: the patch is committed.
 | `ftex.py` | Vanillaware FTEX packs: `list` the textures, `dump` them as PNG (GNF, BC7, Thin_1dThin tiling). |
 | `draw_dcp.py` | Paints the Xbox glyphs into the decoded atlas, in place, and writes a mask of the changed pixels. |
 | `bc7.py` | A BC7 mode 6 encoder (numpy). |
+| `draw_spider.py` | Arachnophobia Safe Mode: draws the replacement Giant Spider atlas (`launcher/prompts/arachnophobia-spider-atlas.png`, plus a preview) from the decoded original, leaving web and smoke effects; `patch_ftx.py` and `make_dcpx.py` turn that exact PNG into `launcher/prompts/arachnophobia-spider.dcpx`. |
 | `patch_ftx.py` | Re-encodes only the changed 4 × 4 blocks, re-tiles them and splices them into the pack. |
 | `make_dcpx.py` | Diffs the original and patched packs into the `.dcpx` block patch the launcher embeds. |
 | `patch_cpk.py` | The launcher's apply/revert, as a script: `apply <folder> <patch.dcpx>`, `revert`, `status`. Same undo record format, so the launcher and the script recognise each other's work. |
@@ -43,6 +44,18 @@ encoding. `--verify` on `patch_ftx.py` decodes the spliced pack again and report
 The patch records the CRC32 of each pack before and after, so it only ever applies to the packs it was made from
 (version 1.03 of the game). Another style (Nintendo, Steam Deck) is another `draw_dcp.py` glyph table and another
 `.dcpx` target set; the launcher side takes a style and a patch.
+
+## Rebuilding the Arachnophobia Safe Mode patch
+
+```
+python scripts/prompts/cpk.py extract game/prepared/CUSA10209-1.00/DRACRO.CPK character/GiantSpider00.ftx work
+python scripts/prompts/ftex.py dump work/GiantSpider00.ftx work/atlas
+python scripts/prompts/draw_spider.py work/atlas/GiantSpider00_arranged000.png launcher/prompts/arachnophobia-spider-atlas.png launcher/prompts/arachnophobia-spider-preview.png work/changed.npy
+python scripts/prompts/patch_ftx.py work/GiantSpider00.ftx GiantSpider00_arranged000.gnf launcher/prompts/arachnophobia-spider-atlas.png work/changed.npy work/GiantSpider00.safe.ftx
+python scripts/prompts/make_dcpx.py launcher/prompts/arachnophobia-spider.dcpx character/GiantSpider00.ftx=work/GiantSpider00.ftx:work/GiantSpider00.safe.ftx
+```
+
+The atlas PNG is the only drawing path: the patch is encoded from that exact file. The preview is for looking at.
 
 ## Formats, briefly
 

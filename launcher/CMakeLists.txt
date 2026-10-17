@@ -33,7 +33,7 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
-    game_install.cpp game_profile.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c settings.cpp trophy_content.cpp
+    game_install.cpp game_patches.cpp game_profile.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c settings.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
@@ -61,8 +61,16 @@ add_custom_command(OUTPUT ${DCP_PROMPTS_PATCH_SOURCE}
     DEPENDS ${DCP_PROMPTS_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
     COMMENT "Embedding prompts/xbox-prompts.dcpx")
 
+set(DCP_SPIDER_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/prompts/arachnophobia-spider.dcpx)
+set(DCP_SPIDER_PATCH_SOURCE ${CMAKE_BINARY_DIR}/generated/spider_patch_data.cpp)
+add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${DCP_SPIDER_PATCH} -DOUTPUT=${DCP_SPIDER_PATCH_SOURCE} -DSYMBOL=kSpiderSafeModePatch
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+    DEPENDS ${DCP_SPIDER_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+    COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
+
 add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp
-    ${DCP_PROMPTS_PATCH_SOURCE})
+    ${DCP_PROMPTS_PATCH_SOURCE} ${DCP_SPIDER_PATCH_SOURCE})
 target_compile_definitions(dcp_launcher PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
 target_include_directories(dcp_launcher PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 target_link_libraries(dcp_launcher PUBLIC dcp_launcher_core trg_launcher dcp_imgui_sdl ${CMAKE_DL_LIBS})

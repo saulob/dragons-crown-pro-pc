@@ -21,6 +21,7 @@
 #include "trg/platform.h"
 
 #include "controller_prompts.h"
+#include "game_patches.h"
 #include "dcp_accent.h"
 #include "dcp_cheats.h"
 #include "dcp_displays.h"
@@ -88,9 +89,14 @@ constexpr char kShowFpsTitleHelp[] = "Shows the frame rate in the window title: 
 constexpr char kShowResolutionTitleHelp[] =
     "Shows the game's render resolution in the window title: Dragon's Crown Pro | 1920x1080";
 constexpr char kFrameCounterHelp[] = "Shows the frame rate and frame time in a corner of the game.";
+constexpr char kArachnophobiaHelp[] =
+    "Redraws the Giant Spider as two soft cream bodies with two orange eyes, with no legs or fangs. Gameplay does not "
+    "change. It rewrites one picture file in the installed game archive (a few seconds, reversible); the change is kept across reinstalls.";
 constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
+
+enum class PatchAction { kPrompts, kSafeMode, kRestore };
 
 std::vector<std::string> ListGpuNames() {
     char names[16][256] = {};
@@ -186,6 +192,8 @@ public:
         gpu_names_ = ListGpuNames();
         prompts_installed_ = InstalledPrompts();
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
+        safe_mode_installed_ = InstalledSafeMode(paths_.app0);
+        Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
         placement_ = PlacementTracker(host_.Restored());
         fonts_ = trg::LoadSystemFonts(18.0f);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
@@ -285,7 +293,7 @@ private:
             launcher_->SetStatus(std::string(StatusTitle(files_)) + ". Install the game files first.", 6.0);
             break;
         case PlayRequest::kBusy:
-            launcher_->SetStatus("Wait for the controller prompts to finish.", 6.0);
+            launcher_->SetStatus("Wait for the game file changes to finish.", 6.0);
             break;
         case PlayRequest::kSaveFailed:
             Log("could not save the settings");
@@ -362,7 +370,7 @@ private:
                 return trg::PlayCheck{false, "Wait for the installation to finish.", 0};
             }
             if (prompts_.running()) {
-                return trg::PlayCheck{false, "Wait for the controller prompts to finish.", 0};
+                return trg::PlayCheck{false, "Wait for the game file changes to finish.", 0};
             }
             if (files_ == GameFileState::kValid) {
                 return trg::PlayCheck{};
@@ -506,11 +514,13 @@ private:
             }
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
-            // The fresh archives show the game's own prompts; put the chosen ones back.
-            if (SavedPromptStyle() == PromptStyle::kXbox && build_ && build_->xbox_prompts &&
-                prompts_installed_ != PromptStyle::kXbox && files_ == GameFileState::kValid) {
-                Log("controller prompts: re-applying xbox after the install");
-                StartPrompts(PromptStyle::kXbox);
+            safe_mode_installed_ = InstalledSafeMode(paths_.app0);
+            // The fresh archives are the game's own; put the chosen patches back.
+            const PromptStyle style = build_ && build_->xbox_prompts ? SavedPromptStyle() : PromptStyle::kPlayStation;
+            const bool safe_mode = settings_.GetBool(kArachnophobiaSafeModeKey, false);
+            if ((style != prompts_installed_ || safe_mode != safe_mode_installed_) && files_ == GameFileState::kValid) {
+                Log("game patches: re-applying after the install");
+                StartPatches(style, safe_mode, PatchAction::kRestore);
             }
             return;
         }
@@ -635,6 +645,8 @@ private:
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
         ui.Toggle("Render resolution in title", kShowResolutionTitleHelp, kShowResolutionTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
+        ui.Row("Arachnophobia Safe Mode", kArachnophobiaHelp);
+        ArachnophobiaToggle(ui);
         ui.EndRows();
     }
 
@@ -690,7 +702,7 @@ private:
             for (const PromptStyle style : {PromptStyle::kPlayStation, PromptStyle::kXbox}) {
                 const bool selected = style == prompts_installed_;
                 if (ImGui::Selectable(PromptStyleLabel(style), selected) && !selected) {
-                    StartPrompts(style);
+                    StartPatches(style, safe_mode_installed_, PatchAction::kPrompts);
                 }
                 if (selected) {
                     ImGui::SetItemDefaultFocus();
@@ -706,14 +718,33 @@ private:
         return ParsePromptStyle(saved).value_or(PromptStyle::kPlayStation);
     }
 
-    void StartPrompts(PromptStyle style) {
+    // The installed state is the truth here too; the setting only remembers the choice for the next install.
+    void ArachnophobiaToggle(trg::Ui& ui) {
+        if (ui.TaskProgress(prompts_)) {
+            return;
+        }
+        const bool ready = files_ == GameFileState::kValid && !install_.running();
+        ImGui::BeginDisabled(!ready);
+        const int chosen = ui.Segmented(kArachnophobiaSafeModeKey, {"Off", "On"}, safe_mode_installed_ ? 1 : 0);
+        ImGui::EndDisabled();
+        if (chosen >= 0 && (chosen == 1) != safe_mode_installed_) {
+            StartPatches(prompts_installed_, chosen == 1, PatchAction::kSafeMode);
+        }
+    }
+
+    void StartPatches(PromptStyle style, bool safe_mode, PatchAction action) {
         if (prompts_.running() || install_.running() || !build_) {
             return;
         }
+        patch_action_ = action;
         prompts_outcome_ = std::make_shared<PromptsResult>();
+        const char* title = action == PatchAction::kSafeMode
+                                ? (safe_mode ? "Enabling Arachnophobia Safe Mode..." : "Disabling Arachnophobia Safe Mode...")
+                            : style == PromptStyle::kXbox ? "Switching to Xbox prompts..."
+                                                          : "Restoring PlayStation prompts...";
         const bool started = prompts_.Start(
-            style == PromptStyle::kXbox ? "Switching to Xbox prompts..." : "Restoring PlayStation prompts...",
-            [outcome = prompts_outcome_, style, app0 = paths_.app0, build = *build_](trg::Task& task) {
+            title,
+            [outcome = prompts_outcome_, style, safe_mode, app0 = paths_.app0, build = *build_](trg::Task& task) {
                 PatchHooks hooks;
                 hooks.phase = [&task](const char* text) {
                     task.SetLabel(text);
@@ -723,18 +754,18 @@ private:
                     task.Progress(static_cast<long long>(done), static_cast<long long>(total));
                     return !task.cancelled();
                 };
-                *outcome = SetPromptStyle(app0, build, style, XboxPromptsPatch(), hooks);
+                *outcome = SetGamePatches(app0, build, style, safe_mode, XboxPromptsPatch(), SpiderSafeModePatch(), hooks);
                 if (outcome->ok) {
                     return std::string();
                 }
-                return std::string(outcome->cancelled ? "Cancelled" : "Could not change the controller prompts");
+                return std::string(outcome->cancelled ? "Cancelled" : "Could not change the game files");
             });
         if (started) {
-            Log("controller prompts: switching to %s", PromptStyleKey(style));
+            Log("game patches: prompts %s, arachnophobia safe mode %s", PromptStyleKey(style), safe_mode ? "on" : "off");
         }
     }
 
-    // Runs every frame so a finished switch is picked up whichever page is open.
+    // Runs every frame so a finished change is picked up whichever page is open.
     void PollPrompts() {
         if (prompts_.Finish() == trg::Task::State::kIdle) {
             return;
@@ -744,21 +775,33 @@ private:
             return;
         }
         prompts_installed_ = InstalledPrompts();
+        safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         if (outcome->ok) {
-            Log("controller prompts: %s (%s)", PromptStyleKey(prompts_installed_), outcome->detail.c_str());
-            if (!settings_.SaveNow({{kControllerPromptsKey, PromptStyleKey(prompts_installed_)}})) {
-                Log("could not save the controller prompts setting");
+            Log("game patches: prompts %s, arachnophobia safe mode %s (%s)", PromptStyleKey(prompts_installed_),
+                safe_mode_installed_ ? "on" : "off", outcome->detail.c_str());
+            Values saved;
+            if (patch_action_ != PatchAction::kSafeMode) {
+                saved[kControllerPromptsKey] = PromptStyleKey(prompts_installed_);
             }
-            launcher_->SetStatus(std::string("Controller prompts: ") + PromptStyleLabel(prompts_installed_) + ".", 6.0);
+            if (patch_action_ != PatchAction::kPrompts) {
+                saved[kArachnophobiaSafeModeKey] = safe_mode_installed_ ? "1" : "0";
+            }
+            if (!settings_.SaveNow(saved)) {
+                Log("could not save the game patch settings");
+            }
+            launcher_->SetStatus(patch_action_ == PatchAction::kSafeMode
+                                     ? std::string("Arachnophobia Safe Mode: ") + (safe_mode_installed_ ? "On." : "Off.")
+                                     : std::string("Controller prompts: ") + PromptStyleLabel(prompts_installed_) + ".",
+                                 6.0);
             return;
         }
         if (outcome->cancelled) {
-            Log("controller prompts: cancelled, %s installed", PromptStyleKey(prompts_installed_));
-            launcher_->SetStatus("Controller prompts unchanged.", 6.0);
+            Log("game patches: cancelled");
+            launcher_->SetStatus("Game files unchanged.", 6.0);
             return;
         }
-        Log("controller prompts: failed: %s", outcome->detail.c_str());
-        launcher_->SetStatus("Could not change the controller prompts. See the log.", 8.0);
+        Log("game patches: failed: %s", outcome->detail.c_str());
+        launcher_->SetStatus("Could not change the game files. See the log.", 8.0);
     }
 
     std::filesystem::path UserDir() const { return PathFromUtf8(config_.user_dir ? config_.user_dir : "user"); }
@@ -831,6 +874,8 @@ private:
     std::string install_failure_;
     std::string install_failure_text_;
     PromptStyle prompts_installed_ = PromptStyle::kPlayStation;
+    bool safe_mode_installed_ = false;
+    PatchAction patch_action_ = PatchAction::kPrompts;
     std::shared_ptr<PromptsResult> prompts_outcome_;
     trg::Task prompts_;
 };

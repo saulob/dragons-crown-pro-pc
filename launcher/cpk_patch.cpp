@@ -613,6 +613,13 @@ bool Unshare(const std::filesystem::path& file, std::string* error) {
 
 } // namespace
 
+std::vector<std::string> PatchedEntries(const std::filesystem::path& cpk) {
+    std::vector<uint8_t> bytes;
+    UndoRecord undo;
+    if (!ReadWhole(UndoPath(cpk), bytes) || !undo.Parse(bytes)) return {};
+    return undo.entries;
+}
+
 PatchResult PatchWriter::Apply(const std::filesystem::path& cpk, const BlockPatch& patch, const PatchHooks& hooks) {
     PatchResult result;
     const auto fail = [&](std::string why) {

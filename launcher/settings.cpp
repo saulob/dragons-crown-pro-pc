@@ -33,6 +33,7 @@ constexpr ManagedSetting kManagedSettings[] = {
     {kShowResolutionTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
     {kControllerPromptsKey, "playstation"},
+    {kArachnophobiaSafeModeKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
     {cheats::kInfiniteManaKey, "0"},
     {cheats::kInfiniteLivesKey, "0"},

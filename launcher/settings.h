@@ -36,6 +36,8 @@ inline constexpr char kShowResolutionTitleKey[] = "show_resolution_title";
 inline constexpr char kShowFrameCounterKey[] = "show_fps";
 // Which controller's buttons the game's prompts show; the launcher keeps the installed archives in step with it.
 inline constexpr char kControllerPromptsKey[] = "controller_prompts";
+// Replaces the Giant Spider's pictures with placeholder blocks; the launcher keeps the installed archive in step with it.
+inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 inline constexpr char kLauncherXKey[] = "launcher_x";
 inline constexpr char kLauncherYKey[] = "launcher_y";
 inline constexpr char kLauncherWidthKey[] = "launcher_width";

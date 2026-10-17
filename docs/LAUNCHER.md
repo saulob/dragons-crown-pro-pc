@@ -157,6 +157,7 @@ use the same defaults).
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
+| `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_experience_multiplier` | 1 (Off), 2, 5, 10 | 1 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
@@ -248,6 +249,14 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
 - **Render resolution in title**: `Dragon's Crown Pro | 1920x1080`, the render resolution of the game's presented image (not the
   window size). It follows a change of the game's resolution while it runs.
 - **Frame counter**: the video core's corner readout (`show_fps`).
+- **Arachnophobia Safe Mode**: Off / On (`arachnophobia_safe_mode`). Replaces the Giant Spider's atlas
+  (`character/GiantSpider00.ftx` in `DRACRO.CPK`) with a redrawn one: a cream rear body, a cream front body with two
+  orange eyes, no legs, fangs or claws; web and smoke effects are kept. The enemy's animations, hitboxes and behaviour
+  are the game's own. The drawn atlas is `launcher/prompts/arachnophobia-spider-atlas.png` (the preview next to it is for
+  looking at only); `scripts/prompts/draw_spider.py` draws both. Like the Controller prompts it is a block patch on the installed archive (`launcher/cpk_patch.h`,
+  `launcher/game_patches.h`, `launcher/prompts/arachnophobia-spider.dcpx`) applied when toggled, in the background, and
+  reapplied after a reinstall. An archive has one undo record, so the prompts and this patch are applied together:
+  changing either reverts what the other left and writes both again.
 
 No skip-intro or frame rate limit.
 
