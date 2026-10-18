@@ -89,7 +89,7 @@ constexpr PackageLayer kJapanBaseLayers[] = {{"01.00", "01.00", false}};
 constexpr PackageLayer kJapan102Layers[] = {{"01.00", "01.00", false}, {"01.02", "01.00", true}};
 constexpr PackageLayer kJapan103Layers[] = {{"01.00", "01.00", false}, {"01.03", "01.00", true}};
 constexpr PackageLayer kAsia100Layers[] = {{"01.00", "01.02", false}};
-constexpr PackageLayer kAsia102Layers[] = {{"01.02", "01.00", false}};
+constexpr PackageLayer kAsia102Layers[] = {{"01.00", "01.02", false}, {"01.02", "01.00", true}};
 
 constexpr const char* kJapanUpdateFiles[] = {"sce_discmap_patch.plt"};
 

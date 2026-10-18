@@ -751,7 +751,9 @@ InstallMessage DescribeInstall(InstallStatus status) {
     case InstallStatus::kPrepareFailed:
         return {"Could not prepare the game", "The game's code could not be prepared. The log has the details."};
     case InstallStatus::kUpdateNeedsBase:
-        return {"Install the base package first", "This update is laid over the game's base package. Install that one first."};
+        return {"Base game required",
+                "This package is an update. Install the 1.00 base package of the same game first (CUSA10209 1.00 "
+                "Asia/Hong Kong or CUSA07001 1.00 Japan), then install the update."};
     case InstallStatus::kActivated:
         return {"Game activated", "The selected build is now the active game."};
     case InstallStatus::kUpToDate:

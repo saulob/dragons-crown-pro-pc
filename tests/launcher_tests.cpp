@@ -2232,7 +2232,11 @@ void TestLayers(const fs::path& base) {
     WriteAll(pkg / "us-update.pkg", MakePackage(PackageSfo(kUs, "01.03", "01.00", "gp")));
     CHECK(InstallGame(pkg / "us-update.pkg", empty).status == InstallStatus::kWrongVersion);
     CHECK(BaseBuildOf(kJp102) == &SupportedBuilds()[1] && BaseBuildOf(kJp103) == &SupportedBuilds()[1]);
-    CHECK(BaseBuildOf(kJp100) == nullptr && BaseBuildOf(kUs) == nullptr && BaseBuildOf(kCk) == nullptr);
+    CHECK(BaseBuildOf(kJp100) == nullptr && BaseBuildOf(kUs) == nullptr && BaseBuildOf(kCk) == &kCk100);
+    WriteAll(pkg / "ck-102.pkg", MakePackage(PackageSfo(kCk, "01.02", "01.00", "gp")));
+    CHECK(InstallGame(pkg / "ck-102.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
+    CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).title == "Base game required");
+    CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).text.find("CUSA10209 1.00 Asia/Hong Kong") != std::string::npos);
 
     Fixture installed(root, "installed-1.03", kJp103);
     const GameRoots present{root / "present" / "prepared", root / "present" / "image"};
@@ -2313,6 +2317,25 @@ void TestLayers(const fs::path& base) {
     CHECK(CheckGameTree(base_game.paths.app0, builds).build == &builds[0] && ReadAll(base_game.paths.app0 / "eboot.bin") == kEboot);
 
     {
+        Fixture ck_base(root, "ck-base-1.00", kCk100);
+        const fs::path ck_update = root / "ck-update-1.02";
+        WriteAll(ck_update / "sce_sys" / "param.sfo", PackageSfo(kCk, "01.02", "01.00", "gp"));
+        GameBuild ck102 = kCk;
+        ck102.eboot_sha256 = ck_base.build.eboot_sha256;
+        const std::vector<GameBuild> ck_builds = {ck_base.build, ck102};
+        CHECK(BaseBuildOf(ck_builds[1], ck_builds) == &ck_builds[0]);
+        const std::string base_sfo = ReadAll(ck_base.paths.app0 / "sce_sys" / "param.sfo");
+        const fs::path ck_staged = root / "ck-staged-1.02";
+        CHECK(StageUpdate(ck_base.paths.app0, ck_update, ck_staged).ok());
+        const GameCheck staged = CheckGameTree(ck_staged, ck_builds);
+        CHECK(staged.state == GameFileState::kValid && staged.build == &ck_builds[1]);
+        const GameCheck untouched = CheckGameTree(ck_base.paths.app0, ck_builds);
+        CHECK(untouched.state == GameFileState::kValid && untouched.build == &ck_builds[0]);
+        CHECK(ReadAll(ck_base.paths.app0 / "sce_sys" / "param.sfo") == base_sfo);
+        CHECK(std::string(ck_builds[0].folder) == "CUSA10209-1.00" && std::string(ck_builds[1].folder) == "CUSA10209-1.02");
+        CHECK(std::string(ck_builds[0].eboot_sha256) == ck_builds[1].eboot_sha256);
+    }
+    {
         Fixture merged(root, "jp-merged", kJp103);
         CHECK(merged.State() == GameFileState::kValid);
         CHECK(!fs::exists(merged.paths.app0 / "DRACRO_US.CPK"));
@@ -2347,7 +2370,7 @@ void TestUsBuild() {
     CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.01", "01.03", "gd")).state == GameFileState::kDifferentVersion);
     CHECK(SupportedBuildsText().find("CUSA10454 1.00 USA, ") == 0);
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
-    CHECK(launcher.find("The Japanese 1.02 and 1.03 updates are installed over the 1.00 base package.") != std::string::npos);
+    CHECK(launcher.find("The Japanese 1.02 and 1.03 updates and the Asia/Hong Kong 1.02 update are installed over their respective 1.00 base packages.") != std::string::npos);
     CHECK(launcher.find("USA update") == std::string::npos);
 }
 
@@ -2490,7 +2513,7 @@ void TestActivation(const fs::path& base) {
     WriteAll(pkg / "jp-102.pkg", MakePackage(PackageSfo(kJp102, "01.02", "01.00", "gp")));
     WriteAll(pkg / "jp-103.pkg", MakePackage(PackageSfo(kJp103, "01.03", "01.00", "gp")));
     WriteAll(pkg / "us.pkg", MakePackage(PackageSfo(kUs, "01.00", "01.03", "gd")));
-    WriteAll(pkg / "ck.pkg", MakePackage(SfoFor(kCk)));
+    WriteAll(pkg / "ck.pkg", MakePackage(PackageSfo(kCk, "01.02", "01.00", "gp")));
     const auto select = [&](const char* name) { return InstallGame(pkg / name, roots, {}, builds); };
     // Selects a package while builds[from] is active; true when builds[to] is activated with no game data copied.
     const auto switches = [&](size_t from, const char* name, size_t to) {
@@ -2657,7 +2680,12 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(FinishedLayer(kCk100).app_ver) == "01.00" && std::string(FinishedLayer(kCk100).sfo_version) == "01.02");
     CHECK(std::string(kCk100.eboot_sha256) == kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
     CHECK(!kCk100.cheats && !kCk100.xbox_prompts && kCk100.resolution_sites.data() == kCk.resolution_sites.data());
-    CHECK(kCk100.resolution_sites.size() == 23 && kCk100.layers.size() == 1 && BaseBuildOf(kCk) == nullptr);
+    CHECK(kCk100.resolution_sites.size() == 23 && kCk100.layers.size() == 1 && BaseBuildOf(kCk) == &kCk100 && BaseBuildOf(kCk100) == nullptr);
+    CHECK(kCk.layers.size() == 2 && kCk.layers[1].update);
+    const GameCheck ck_update = CheckPackageIdentity(PackageSfo(kCk, "01.02", "01.00", "gp"));
+    CHECK(ck_update.build == &kCk && ck_update.layer == 1);
+    CHECK(CheckPackageIdentity(PackageSfo(kCk, "01.02", "01.00", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kCk100, "01.00", "01.02", "gd")).layer == 0);
     CHECK(CheckSfoIdentity(SfoFor(kCk100, "01.02")).build == nullptr);
     CHECK(CheckSfoIdentity(SfoFor(kCk100, nullptr, "01.00")).build == nullptr);
     CHECK(CheckPackageIdentity(PackageSfo(kCk100, "01.00", "01.02", "gd")).build == &kCk100);

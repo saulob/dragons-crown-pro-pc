@@ -71,7 +71,7 @@ int ScancodeOf(ImGuiKey key) {
 }
 std::string GameFilesHelp() {
     return "Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported: " + SupportedBuildsText() +
-           ". The Japanese 1.02 and 1.03 updates are installed over the 1.00 base package. The game is unpacked into the "
+           ". The Japanese 1.02 and 1.03 updates and the Asia/Hong Kong 1.02 update are installed over their respective 1.00 base packages. The game is unpacked into the "
            "game folder next to the program (about 6 GB). No game files are included. Reinstalling keeps your saves and "
            "settings.";
 }

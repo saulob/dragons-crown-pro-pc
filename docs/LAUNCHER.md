@@ -87,7 +87,11 @@ Steps 2 to 4 are `CheckGameTree`, which the installer also runs on the folder th
 into `CUSA07001-1.00`. The 1.02 and 1.03 updates (CATEGORY `gp`) are each laid over
 a hard-linked copy of the 1.00 folder, into `CUSA07001-1.02` or `CUSA07001-1.03`. The base's data is linked, not copied.
 Each result is checked as its finished game and gets its own boot image. The 1.03 update replaces every file the 1.02
-update changes, so 1.03 does not need 1.02. An update needs the 1.00 folder to be installed; the launcher says so
+update changes, so 1.03 does not need 1.02.
+
+**Asia and Hong Kong builds.** The 1.00 package (CATEGORY `gd`) is a complete game, installed into `CUSA10209-1.00`. The 1.02 package
+(CATEGORY `gp`, APP_VER 01.02) is an update laid over a hard-linked copy of the 1.00 folder, into `CUSA10209-1.02`. Both share one
+`eboot.bin`. An update needs the 1.00 folder to be installed; the launcher says so
 otherwise.
 
 States: missing, valid, different version, read error. The identity lives in `launcher/game_profile.h` and mirrors
