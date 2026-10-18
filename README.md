@@ -92,7 +92,7 @@ These folders are created the first time they are needed and are not part of the
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file, exactly as on Windows. The launcher uses the desktop's file chooser (`zenity` or `kdialog`) when there is one, and its own file chooser otherwise, which works with the mouse, the keyboard and a controller. Wait until **Ready to play** appears, then press **PLAY**.
 4. `game`, `user` and `logs` are kept next to the AppImage file when that folder is writable (in `$XDG_DATA_HOME/DragonsCrownProPC` otherwise; `DCP_PORTABLE_DIR` chooses another folder). The AppImage itself is never written to.
 
-An AppImage needs FUSE 2 to start. On a system without a working FUSE, run it as `./DragonsCrownProPC-*-x86_64.AppImage --appimage-extract-and-run`.
+An AppImage normally mounts itself with FUSE. Where that is not possible it unpacks itself into a temporary folder and runs from there automatically; `APPIMAGE_EXTRACT_AND_RUN=1` forces that mode.
 
 To bring the launcher back after turning **Show this launcher** off, hold **Shift** while starting (in an X11 session) or start the AppImage with `--launcher`. The AppImage's desktop entry also has a **Show launcher** action. On a Steam Deck, which has no keyboard in Gaming Mode, put `--launcher` in the shortcut's **Launch Options** for a run, then remove it.
 

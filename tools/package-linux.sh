@@ -7,9 +7,10 @@
 #   tools/package-linux.sh --out-dir DIR  write the AppImage, .sha256 and symbols to DIR instead of dist/
 #   tools/package-linux.sh --verify DIR check an existing AppDir
 #
-# Needs patchelf, binutils, curl and dpkg (Debian/Ubuntu: licence texts come from the packages of the bundled
+# Needs patchelf, binutils, curl, git and dpkg (Debian/Ubuntu: licence texts come from the packages of the bundled
 # libraries). Build on Ubuntu 20.04 (packaging/linux/ci-deps.sh): the glibc of the build host is the oldest one the
 # AppImage runs on. GPU drivers, the Vulkan loader, X11/Wayland and glibc always come from the player's system.
+# The patched AppImage runtime is built by tools/build-appimage-runtime.sh, which needs root or sudo (docs/LINUX.md).
 set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 skip_build=0 verify_dir= out_dir=
@@ -36,8 +37,6 @@ max_glibc=2.31
 desktop_file="Dragon's_Crown_Pro_PC.desktop"
 appimagetool_version=1.9.1
 appimagetool_sha256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
-runtime_version=20251108
-runtime_sha256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 
 # Libraries the player's system provides: glibc, the Vulkan loader and drivers, the display servers, audio daemons.
 excluded='^(ld-linux.*|libc|libm|libdl|librt|libpthread|libresolv|libutil|libnsl|libanl|libcrypt|libmvec|libvulkan|libGL|libGLX|libGLdispatch|libEGL|libOpenGL|libgbm|libdrm.*|libX11|libX11-xcb|libxcb.*|libXau|libXdmcp|libXext|libXfixes|libXrender|libXi|libXcursor|libXrandr|libxkbcommon.*|libwayland-.*|libasound|libudev|libpulse.*|libpipewire.*|libdbus-1|libfontconfig|libOpenCL|libva.*|libvdpau|libnvidia-.*|libcuda|libz|libselinux|libpcre2-.*|libsystemd|libcap)\.so'
@@ -251,16 +250,12 @@ if [[ ! -x $tool ]]; then
     mv "$tool.part" "$tool"
 fi
 # appimagetool would otherwise download the unpinned "continuous" runtime.
-runtime=$work/runtime-$runtime_version-x86_64
-if [[ ! -f $runtime ]]; then
-    curl -fL --retry 3 -o "$runtime.part" \
-        "https://github.com/AppImage/type2-runtime/releases/download/$runtime_version/runtime-x86_64"
-    echo "$runtime_sha256  $runtime.part" | sha256sum -c - || die 'the AppImage runtime does not match the pinned checksum'
-    mv "$runtime.part" "$runtime"
-fi
+runtime=$work/runtime-dcp-x86_64
+bash tools/build-appimage-runtime.sh "$runtime" "$work/appimage-runtime"
 ARCH=x86_64 "$tool" --appimage-extract-and-run --runtime-file "$runtime" "$appdir" "$dist/$name.AppImage.new" \
     >"$work/appimagetool.log" 2>&1 || { cat "$work/appimagetool.log" >&2; die 'appimagetool failed'; }
 chmod 755 "$dist/$name.AppImage.new"
+bash tools/build-appimage-runtime.sh --check "$dist/$name.AppImage.new"
 
 step 'Checking the contents of the written AppImage'
 rm -rf "$work/written"
