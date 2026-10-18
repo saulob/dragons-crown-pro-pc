@@ -22,8 +22,10 @@ them. The same worker code exists in the other ports of this lineage (docs/REFER
 Every frame, on the GPU command thread: the game's display buffer, at the render resolution, goes through **SMAA 1x**
 (`host_passes/smaa_pass.cpp`, optional), then **FSR 1** when the window is larger than the picture and **RCAS** sharpening
 (`host_passes/fsr_pass.cpp`), then the post-process pass into the presentation frame: the largest size with the picture's
-aspect ratio that fits the window. The present thread blits that frame, letterboxed, into the swapchain image and draws the
-in-game menu and the frame counter over it. FSR 1 does nothing when the window is the picture's size or smaller; RCAS alone runs only when the
+aspect ratio that fits the window. The present thread blits that frame into the swapchain image and draws the in-game menu
+and the frame counter over it. Presentation Letterbox (the default) fits it with its aspect ratio, bars included
+(`FitImage`, `MakeImageBlitFit`); Presentation Stretch fills the whole swapchain (`MakeImageBlitStretch`). The value comes
+from `dcp.ini` at game start and the presenter checks it every frame. FSR 1 does nothing when the window is the picture's size or smaller; RCAS alone runs only when the
 window and the picture have the same size. All of them follow the settings live.
 
 Swapchain recreation (a window resize, F11, a display mode or VSync change) waits for the device under the queue submission

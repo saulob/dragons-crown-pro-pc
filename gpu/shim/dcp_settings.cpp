@@ -62,6 +62,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.display_mode = DcpGraphics::ParseDisplayMode(value);
     } else if (key == "vsync") {
         v.vsync = ParseBool(value, v.vsync);
+    } else if (key == "presentation") {
+        v.presentation = DcpGraphics::ParsePresentation(value);
     } else if (key == "fsr1") {
         v.fsr1 = ParseBool(value, v.fsr1);
     } else if (key == "rcas") {

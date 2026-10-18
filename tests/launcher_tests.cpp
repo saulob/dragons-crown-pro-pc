@@ -1255,6 +1255,104 @@ void TestAspectRatio(const fs::path& base) {
     CHECK(WindowSizeOf(1080, dcp_aspect_ratios[3]) == WindowSize({3840, 1080}));
 }
 
+// Presentation only fits the finished frame into the window: its own key and default, Letterbox unless Stretch is chosen,
+// and no change to the render target or the aspect ratio.
+void TestPresentation(const fs::path& base) {
+    const fs::path file = base / "presentation" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+
+    CHECK(std::string(kPresentationKey) == "presentation" && std::string(kDefaultPresentation) == "letterbox");
+    CHECK(std::string(kPresentationChoices[0].key) == "letterbox" && std::string(kPresentationChoices[0].name) == "Letterbox");
+    CHECK(std::string(kPresentationChoices[1].key) == "stretch" && std::string(kPresentationChoices[1].name) == "Stretch");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kPresentationKey && setting.default_value == "letterbox";
+    }
+    CHECK(managed);
+
+    // A missing file or key is Letterbox.
+    CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == "letterbox");
+    DcpSettings::Values v;
+    CHECK(!DcpSettings::Read(file.string(), v) && v.presentation == DcpGraphics::Letterbox);
+
+    // So is an invalid value.
+    for (const char* invalid : {"", "fit", "Stretch", "1"}) {
+        WriteAll(file, std::string("presentation=") + invalid + "\n");
+        CHECK(!IsValidSetting(kPresentationKey, invalid));
+        CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == "letterbox");
+        DcpSettings::Values bad;
+        CHECK(DcpSettings::Read(file.string(), bad) && bad.presentation == DcpGraphics::Letterbox);
+    }
+
+    CHECK(IsValidSetting(kPresentationKey, "letterbox") && IsValidSetting(kPresentationKey, "stretch"));
+    CHECK(DcpGraphics::ParsePresentation("letterbox") == DcpGraphics::Letterbox);
+    CHECK(DcpGraphics::ParsePresentation("stretch") == DcpGraphics::Stretch);
+    CHECK(DcpGraphics::ParsePresentation("bogus") == DcpGraphics::Letterbox);
+
+    // The choice is saved and read back by both the launcher and the video core.
+    for (const char* value : {"letterbox", "stretch"}) {
+        fs::remove_all(file.parent_path());
+        {
+            LauncherSettings settings(file);
+            settings.Set(kPresentationKey, value);
+            CHECK(settings.Save());
+        }
+        CHECK(WrittenValue(ReadAll(file), "presentation", value));
+        CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == value);
+        DcpSettings::Values saved;
+        CHECK(DcpSettings::Read(file.string(), saved) && saved.presentation == DcpGraphics::ParsePresentation(value));
+    }
+
+    // An existing file without the key stays valid, and the other settings read as before.
+    WriteAll(file, "vsync=0\naspect_ratio=21:9\nrender_resolution=1440p\n");
+    CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == "letterbox");
+    DcpSettings::Values old;
+    CHECK(DcpSettings::Read(file.string(), old) && !old.vsync && old.presentation == DcpGraphics::Letterbox);
+    CHECK(dcp_aspect_ratio(file.string().c_str()) == 2 && dcp_render_resolution(file.string().c_str()) == 3);
+
+    // Changing Presentation leaves the aspect ratio and the render resolution as they are, at every ratio.
+    for (const int aspect : {0, 2, 4}) {
+        WriteAll(file, std::string("aspect_ratio=") + dcp_aspect_ratios[aspect].key + "\nrender_resolution=1440p\n");
+        for (const char* value : {"stretch", "letterbox"}) {
+            {
+                LauncherSettings settings(file);
+                settings.Set(kPresentationKey, value);
+                CHECK(settings.Save());
+            }
+            CHECK(WrittenValue(ReadAll(file), "aspect_ratio", dcp_aspect_ratios[aspect].key));
+            CHECK(WrittenValue(ReadAll(file), "render_resolution", "1440p"));
+            CHECK(dcp_aspect_ratio(file.string().c_str()) == aspect);
+            CHECK(dcp_render_resolution(file.string().c_str()) == 3);
+            DcpSettings::Values fit;
+            CHECK(DcpSettings::Read(file.string(), fit) && fit.presentation == DcpGraphics::ParsePresentation(value));
+        }
+    }
+
+    // The launcher's Display page: the label, the choices and the row order (Presentation after VSync).
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    const size_t vsync = launcher.find("ui.Toggle(\"VSync\"");
+    const size_t presentation = launcher.find("ui.Choice(\"Presentation\", kPresentationHelp, kPresentationKey, kDefaultPresentation");
+    const size_t sharpening = launcher.find("ui.Heading(\"Scaling and sharpening\");");
+    CHECK(vsync != std::string::npos && presentation != std::string::npos && sharpening != std::string::npos);
+    CHECK(vsync < presentation && presentation < sharpening);
+    CHECK(launcher.find("\"Controls how the rendered image fits a window or display with a different aspect ratio.\"") !=
+          std::string::npos);
+
+    // Letterbox is the aspect-preserving fit; Stretch is the whole swapchain.
+    const std::string presenter =
+        ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_presenter.cpp");
+    const size_t pick = presenter.find("const vk::ImageBlit blit = stretch");
+    const size_t stretch_blit = presenter.find("MakeImageBlitStretch(frame->width", pick);
+    const size_t fit_blit = presenter.find("MakeImageBlitFit(frame->width", pick);
+    CHECK(pick != std::string::npos && stretch_blit != std::string::npos && fit_blit != std::string::npos);
+    CHECK(stretch_blit < fit_blit);
+    CHECK(presenter.find("DcpSettings::Get().presentation.load() == DcpGraphics::Stretch") != std::string::npos);
+    CHECK(presenter.find("return MakeImageBlit(frame_width, frame_height, swapchain_width, swapchain_height, 0, 0);") !=
+          std::string::npos);
+    CHECK(presenter.find("return MakeImageBlit(frame_width, frame_height, dst_rect.extent.width") != std::string::npos);
+}
+
 void TestGraphicsQuality(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "quality" / "dcp.ini";
@@ -2737,6 +2835,7 @@ int main(int argc, char** argv) {
     TestTextLanguage(base);
     TestCheatSettings(base);
     TestAspectRatio(base);
+    TestPresentation(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
     TestLauncherWanted();

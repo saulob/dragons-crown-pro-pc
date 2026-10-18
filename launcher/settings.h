@@ -19,6 +19,7 @@ inline constexpr char kWindowWidthKey[] = "window_width";
 inline constexpr char kWindowHeightKey[] = "window_height";
 inline constexpr char kMonitorKey[] = "monitor";
 inline constexpr char kVSyncKey[] = "vsync";
+inline constexpr char kPresentationKey[] = "presentation";
 inline constexpr char kUpscaleKey[] = "fsr1";
 inline constexpr char kSharpenKey[] = "rcas";
 inline constexpr char kSharpenStrengthKey[] = "rcas_strength";
@@ -59,6 +60,18 @@ inline constexpr TextLanguage kTextLanguages[] = {
     {"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
     {"italian", "Italian", 5}, {"spanish", "Spanish", 3},
 };
+
+struct PresentationChoice {
+    std::string_view key;
+    std::string_view name;
+};
+
+// How the rendered frame fits the window or display, in launcher order; the first is the default.
+inline constexpr PresentationChoice kPresentationChoices[] = {
+    {"letterbox", "Letterbox"},
+    {"stretch", "Stretch"},
+};
+inline constexpr char kDefaultPresentation[] = "letterbox";
 
 // The system language the game is told for a text_language value; English when the value is not listed.
 int TextLanguageId(std::string_view key);

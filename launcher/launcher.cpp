@@ -88,6 +88,8 @@ constexpr char kGraphicsCardHelp[] =
     "to Automatic.";
 constexpr char kMonitorHelp[] = "The display the game opens on.";
 constexpr char kVSyncHelp[] = "On prevents tearing. Off allows it, for the lowest latency and G-Sync/FreeSync.";
+constexpr char kPresentationHelp[] =
+    "Controls how the rendered image fits a window or display with a different aspect ratio.";
 constexpr char kUpscaleHelp[] =
     "Enlarges the game's picture to a bigger window with AMD FidelityFX Super Resolution 1. It has no effect when the "
     "window is the size of the render resolution or smaller.";
@@ -575,6 +577,11 @@ private:
         ui.Row("Graphics card", kGraphicsCardHelp);
         GraphicsCardCombo();
         ui.Toggle("VSync", kVSyncHelp, kVSyncKey, true, "Off", "On");
+        std::vector<trg::Option> presentations;
+        for (const PresentationChoice& choice : kPresentationChoices) {
+            presentations.push_back({std::string(choice.key), std::string(choice.name)});
+        }
+        ui.Choice("Presentation", kPresentationHelp, kPresentationKey, kDefaultPresentation, presentations, 2);
         ui.Heading("Scaling and sharpening");
         ui.Toggle("Upscaling", kUpscaleHelp, kUpscaleKey, false, "Off", "FSR 1");
         ui.Toggle("Sharpening", kSharpenHelp, kSharpenKey, true, "Off", "On");

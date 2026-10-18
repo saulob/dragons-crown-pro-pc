@@ -183,11 +183,11 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   Window size is not changed, and a window you resize afterwards is left alone. The picture keeps its shape and is
   letterboxed or pillarboxed in the window. The listed sizes (heights 720, 900, 1080, 1440, 2160) follow the Aspect Ratio.
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
-  an unknown value is 16:9). It sets the shape of the game's render target, not a stretch of the 16:9 picture. Changing it
-  moves the saved Window size to the same height in the new shape. The game was not authored for other shapes: camera
-  framing, HUD and prerendered videos are not adjusted, so wider or narrower shapes can show cropped or exposed areas and
-  bars on videos. Borderless Fullscreen on a monitor of another shape shows bars. The Japanese and Asia and Hong Kong
-  builds are not yet tested in game.
+  an unknown value is 16:9). It sets the shape of the game's render target. The game's 2D scene is still laid out for its
+  original 1280 × 720 canvas, so only 16:9 Original is undistorted: 21:9 and 32:9 stretch the gameplay horizontally instead
+  of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not
+  adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
+  of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -196,6 +196,11 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   that is not there any more, or not usable, falls back to Automatic. The game's log shows `GPU: selection Automatic` or
   `GPU: requested <name>`, then `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11.
 - **VSync**: On is FIFO (the stable default). Off uses Mailbox, else Immediate.
+- **Presentation**: Letterbox (the default) or Stretch. It controls how the finished frame fits the window or display when
+  their shape differs: Letterbox keeps the frame's aspect ratio with bars, Stretch fills the window and may distort the
+  picture. It does not change the render target or the Aspect Ratio, and it applies in Windowed and Borderless Fullscreen
+  alike. Saved as `presentation=letterbox` or `presentation=stretch` in `dcp.ini`; a missing or unknown value is Letterbox.
+  The game reads it when it starts, so a change takes effect the next time the game starts.
 - **F11** in the game switches Windowed and Borderless Fullscreen at once and saves the Display mode. In the launcher it
   switches the launcher's own fullscreen, saved in `launcher_fullscreen`, and never changes the Display mode.
 - **Mouse cursor**: in the game's Borderless Fullscreen the cursor hides after 5 seconds without mouse movement and comes back

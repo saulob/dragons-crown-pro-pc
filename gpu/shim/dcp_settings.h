@@ -18,6 +18,7 @@ struct Values {
     std::atomic<int> menu_tab{0};
     std::atomic<int> display_mode{0};
     std::atomic<bool> vsync{true};
+    std::atomic<int> presentation{0}; ///< DcpGraphics::Presentation: letterbox or stretch
     std::atomic<bool> fsr1{false};
     std::atomic<bool> rcas{true};
     std::atomic<int> rcas_strength{75};
