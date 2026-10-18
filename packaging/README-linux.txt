@@ -33,8 +33,10 @@ REQUIREMENTS
 - A graphics card and Mesa or proprietary driver with Vulkan 1.3,
   VK_EXT_robustness2, VK_KHR_push_descriptor and
   VK_EXT_vertex_attribute_divisor (AMD RADV on the Steam Deck qualifies)
-- FUSE 2 to start an AppImage (libfuse2; SteamOS has it). Without it:
-  ./DragonsCrownProPC-*.AppImage --appimage-extract-and-run
+- FUSE is optional. The AppImage normally mounts itself with FUSE; if that is
+  not possible it unpacks itself into a temporary folder and runs from there
+  automatically, with no special option. Setting APPIMAGE_EXTRACT_AND_RUN=1
+  (or starting with --appimage-extract-and-run) forces that mode
 - Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next
   to the AppImage for the installed game
 - Nothing else: no Python or other tools are needed; the AppImage carries its
