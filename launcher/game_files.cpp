@@ -410,15 +410,19 @@ GameCheck CheckGameFiles(const GamePaths& paths, std::span<const GameBuild> buil
     return Result(GameFileState::kValid, {}, sha, &build);
 }
 
+const GameBuild* BuildOfImageDir(const char* image_dir) {
+    std::string report;
+    if (!image_dir || !ReadSmallFile(PathFromUtf8(image_dir) / "image.json", report)) {
+        return nullptr;
+    }
+    return BuildOfImageReport(report, SupportedBuilds());
+}
+
 } // namespace dcp
 
 // The supported build a boot image folder was built from, for the loader; 0 when it is not one.
 extern "C" int dcp_game_build(const char* image_dir, DcpGameBuild* out) {
-    std::string report;
-    if (!image_dir || !out || !dcp::ReadSmallFile(dcp::PathFromUtf8(image_dir) / "image.json", report)) {
-        return 0;
-    }
-    const dcp::GameBuild* build = dcp::BuildOfImageReport(report, dcp::SupportedBuilds());
+    const dcp::GameBuild* build = out ? dcp::BuildOfImageDir(image_dir) : nullptr;
     if (!build) {
         return 0;
     }

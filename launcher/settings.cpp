@@ -11,6 +11,7 @@
 #include "dcp_keys.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "game_files.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -93,8 +94,11 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
         return one_of({"0", "2", "4", "8", "16"});
     }
     if (key == kTextLanguageKey) {
-        return std::any_of(std::begin(kTextLanguages), std::end(kTextLanguages),
-                           [&](const TextLanguage& language) { return value == language.key; });
+        const std::span<const GameBuild> builds = SupportedBuilds();
+        return std::any_of(builds.begin(), builds.end(), [&](const GameBuild& build) {
+            return std::any_of(build.text_languages.begin(), build.text_languages.end(),
+                               [&](const TextLanguage& language) { return value == language.key; });
+        });
     }
     if (key == kPresentationKey) {
         return std::any_of(std::begin(kPresentationChoices), std::end(kPresentationChoices),
@@ -116,15 +120,6 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
                            [&](const DcpAspectRatio& aspect) { return value == aspect.key; });
     }
     return true;
-}
-
-int TextLanguageId(std::string_view key) {
-    for (const TextLanguage& language : kTextLanguages) {
-        if (language.key == key) {
-            return language.ps4_id;
-        }
-    }
-    return kTextLanguages[0].ps4_id;
 }
 
 bool IsLauncherPlacementSetting(std::string_view key) {
@@ -251,8 +246,9 @@ extern "C" int dcp_saved_experience_multiplier(const char* settings_file) {
     return cheats::ExperienceMultiplierFromSaved(settings.Get(cheats::kExperienceMultiplierKey, "1"));
 }
 
-extern "C" int dcp_text_language(const char* settings_file) {
+extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {
     using namespace dcp;
+    const GameBuild* build = BuildOfImageDir(image_dir);
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
-    return TextLanguageId(settings.Get(kTextLanguageKey, kTextLanguages[0].key));
+    return ResolveTextLanguage(build, settings.Get(kTextLanguageKey)).ps4_id;
 }

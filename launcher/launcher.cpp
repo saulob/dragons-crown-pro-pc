@@ -662,11 +662,17 @@ private:
     }
 
     void PageGameplay(trg::Ui& ui) {
+        const std::span<const TextLanguage> available = TextLanguagesOf(build_);
         std::vector<trg::Option> languages;
-        for (const TextLanguage& language : kTextLanguages) {
+        for (const TextLanguage& language : available) {
             languages.push_back({std::string(language.key), std::string(language.name)});
         }
-        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, kTextLanguages[0].key.data(), languages);
+        const std::string saved = settings_.Get(kTextLanguageKey, available.front().key);
+        const std::string_view effective = ResolveTextLanguage(build_, saved).key;
+        if (saved != effective) {
+            settings_.Set(kTextLanguageKey, std::string(effective));
+        }
+        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, available.front().key.data(), languages);
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
         ui.Toggle("Render resolution in title", kShowResolutionTitleHelp, kShowResolutionTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");

@@ -93,6 +93,12 @@ constexpr PackageLayer kAsia102Layers[] = {{"01.00", "01.02", false}, {"01.02", 
 
 constexpr const char* kJapanUpdateFiles[] = {"sce_discmap_patch.plt"};
 
+constexpr TextLanguage kWesternLanguages[] = {
+    {"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
+    {"italian", "Italian", 5}, {"spanish", "Spanish", 3},
+};
+constexpr TextLanguage kAsiaLanguages[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
+
 constexpr GameBuild kGameBuilds[] = {
     {
         "CUSA10454",
@@ -108,6 +114,7 @@ constexpr GameBuild kGameBuilds[] = {
         true,
         kUsLayers,
         kUsResolutionSites,
+        kWesternLanguages,
     },
     {
         "CUSA07001",
@@ -123,6 +130,7 @@ constexpr GameBuild kGameBuilds[] = {
         false,
         kJapanBaseLayers,
         kJapan100ResolutionSites,
+        kWesternLanguages,
     },
     {
         "CUSA07001",
@@ -138,6 +146,7 @@ constexpr GameBuild kGameBuilds[] = {
         false,
         kJapan102Layers,
         kJapan102ResolutionSites,
+        kWesternLanguages,
     },
     {
         "CUSA07001",
@@ -153,6 +162,7 @@ constexpr GameBuild kGameBuilds[] = {
         false,
         kJapan103Layers,
         kJapan103ResolutionSites,
+        kWesternLanguages,
     },
     {
         "CUSA10209",
@@ -168,6 +178,7 @@ constexpr GameBuild kGameBuilds[] = {
         false,
         kAsia100Layers,
         kAsiaResolutionSites,
+        kAsiaLanguages,
     },
     {
         "CUSA10209",
@@ -183,6 +194,7 @@ constexpr GameBuild kGameBuilds[] = {
         false,
         kAsia102Layers,
         kAsiaResolutionSites,
+        kAsiaLanguages,
     },
 };
 
@@ -212,6 +224,20 @@ const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> 
         }
     }
     return nullptr;
+}
+
+std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build) {
+    return build ? build->text_languages : std::span<const TextLanguage>(kWesternLanguages);
+}
+
+const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view key) {
+    const std::span<const TextLanguage> languages = TextLanguagesOf(build);
+    for (const TextLanguage& language : languages) {
+        if (language.key == key) {
+            return language;
+        }
+    }
+    return languages.front();
 }
 
 std::string SupportedBuildsText() {

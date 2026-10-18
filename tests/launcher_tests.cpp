@@ -1024,31 +1024,81 @@ bool WrittenValue(const std::string& text, const std::string& key, const std::st
 void TestTextLanguage(const fs::path& base) {
     const fs::path file = base / "language" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    CHECK(dcp_text_language(file.string().c_str()) == 1); // no file: English
-    CHECK(dcp_text_language(nullptr) == 1);
+    const std::string ini = file.string();
+    const fs::path us_dir = base / "language" / "us";
+    const fs::path asia_dir = base / "language" / "asia";
+    WriteAll(us_dir / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") + kUs.eboot_sha256 + "\"\n}");
+    WriteAll(asia_dir / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") + kCk.eboot_sha256 + "\",\n  \"app_ver\": \"01.02\"\n}");
+    const std::string us = us_dir.string();
+    const std::string asia = asia_dir.string();
 
-    struct Expected { const char* key; int id; };
-    const Expected expected[] = {{"english", 1}, {"french", 2}, {"german", 4}, {"italian", 5}, {"spanish", 3}};
-    CHECK(std::size(kTextLanguages) == std::size(expected));
-    for (size_t i = 0; i < std::size(expected); ++i) {
-        CHECK(kTextLanguages[i].key == expected[i].key); // launcher order
-        CHECK(TextLanguageId(expected[i].key) == expected[i].id);
-        LauncherSettings settings(file);
-        settings.Set(kTextLanguageKey, expected[i].key);
-        CHECK(settings.Save());
-        CHECK(WrittenValue(ReadAll(file), "text_language", expected[i].key));
-        CHECK(dcp_text_language(file.string().c_str()) == expected[i].id);
+    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1); // no file: English
+    CHECK(dcp_text_language(nullptr, nullptr) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10); // no file: Traditional Chinese
+
+    struct Expected { const char* key; const char* name; int id; };
+    const Expected western[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
+                                {"italian", "Italian", 5}, {"spanish", "Spanish", 3}};
+    const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
+    const auto check_list = [&](const GameBuild* build, std::span<const Expected> expected) {
+        const std::span<const TextLanguage> languages = TextLanguagesOf(build);
+        CHECK(languages.size() == expected.size());
+        for (size_t i = 0; i < expected.size() && i < languages.size(); ++i) {
+            CHECK(languages[i].key == expected[i].key && languages[i].name == expected[i].name);
+            CHECK(languages[i].ps4_id == expected[i].id);
+        }
+    };
+    check_list(nullptr, western);
+    for (const GameBuild& build : SupportedBuilds()) {
+        check_list(&build, std::string_view(build.title_id) == "CUSA10209" ? std::span<const Expected>(asian)
+                                                                          : std::span<const Expected>(western));
     }
-    CHECK(kTextLanguages[0].name == "English" && kTextLanguages[4].name == "Spanish");
+
+    for (const char* image : {us.c_str(), static_cast<const char*>(nullptr)}) {
+        for (const Expected& language : western) {
+            LauncherSettings settings(file);
+            settings.Set(kTextLanguageKey, language.key);
+            CHECK(settings.Save());
+            CHECK(WrittenValue(ReadAll(file), "text_language", language.key));
+            CHECK(dcp_text_language(ini.c_str(), image) == language.id);
+        }
+    }
+    for (const Expected& language : asian) {
+        LauncherSettings settings(file);
+        settings.Set(kTextLanguageKey, language.key);
+        CHECK(settings.Save());
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == language.id);
+    }
+
+    // A saved language the active build does not have gives that build's default, and the file keeps it.
+    WriteAll(file, "text_language=korean\n");
+    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 9);
+    for (const Expected& language : western) {
+        WriteAll(file, std::string("text_language=") + language.key + "\n");
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
+        CHECK(dcp_text_language(ini.c_str(), us.c_str()) == language.id);
+    }
+    CHECK(ResolveTextLanguage(&kCk, "english").key == "traditional_chinese");
+    CHECK(ResolveTextLanguage(&kCk, "korean").key == "korean");
+    CHECK(ResolveTextLanguage(&kUs, "korean").key == "english");
+    CHECK(ResolveTextLanguage(&kUs, "traditional_chinese").key == "english");
+    CHECK(ResolveTextLanguage(&kJp100, "korean").key == "english");
+    for (const char* absent : {"chinese", "simplified_chinese", "japanese"}) {
+        CHECK(!IsValidSetting(kTextLanguageKey, absent));
+        CHECK(ResolveTextLanguage(&kCk, absent).ps4_id == 10);
+    }
 
     for (const char* unlisted : {"English", "japanese", "fr", "2", ""}) {
-        CHECK(TextLanguageId(unlisted) == 1);
         WriteAll(file, std::string("text_language=") + unlisted + "\n");
-        CHECK(dcp_text_language(file.string().c_str()) == 1);
+        CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
     }
     WriteAll(file, "show_fps=1\n"); // an existing file without the key
-    CHECK(dcp_text_language(file.string().c_str()) == 1);
-    CHECK(IsValidSetting(kTextLanguageKey, "german") && !IsValidSetting(kTextLanguageKey, "japanese"));
+    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
+    CHECK(IsValidSetting(kTextLanguageKey, "german") && IsValidSetting(kTextLanguageKey, "korean") &&
+          IsValidSetting(kTextLanguageKey, "traditional_chinese") && !IsValidSetting(kTextLanguageKey, "japanese"));
 
     LauncherSettings settings(file);
     settings.ResetToDefaults();

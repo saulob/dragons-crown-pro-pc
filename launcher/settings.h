@@ -49,18 +49,6 @@ inline constexpr char kLauncherFullscreenKey[] = "launcher_fullscreen";
 inline constexpr int kDefaultWindowWidth = 1920;
 inline constexpr int kDefaultWindowHeight = 1080;
 
-struct TextLanguage {
-    std::string_view key;
-    std::string_view name;
-    int ps4_id;
-};
-
-// The languages the game has text for, in launcher order; the first is the default.
-inline constexpr TextLanguage kTextLanguages[] = {
-    {"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
-    {"italian", "Italian", 5}, {"spanish", "Spanish", 3},
-};
-
 struct PresentationChoice {
     std::string_view key;
     std::string_view name;
@@ -72,9 +60,6 @@ inline constexpr PresentationChoice kPresentationChoices[] = {
     {"stretch", "Stretch"},
 };
 inline constexpr char kDefaultPresentation[] = "letterbox";
-
-// The system language the game is told for a text_language value; English when the value is not listed.
-int TextLanguageId(std::string_view key);
 
 using Values = std::map<std::string, std::string, std::less<>>;
 

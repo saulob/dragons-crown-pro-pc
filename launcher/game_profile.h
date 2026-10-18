@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include "dcp_resolution.h"
 
@@ -20,6 +21,13 @@ struct PackageLayer {
     bool update;
 };
 
+// A system language the game can be told for its menus and subtitles; a build lists the ones its executable maps.
+struct TextLanguage {
+    std::string_view key;
+    std::string_view name;
+    int ps4_id;
+};
+
 struct GameBuild {
     const char* title_id;
     const char* content_id;
@@ -34,6 +42,7 @@ struct GameBuild {
     bool xbox_prompts;            // the Xbox prompt patch is validated for this build's archives
     std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
     std::span<const DcpResolutionSite> resolution_sites;
+    std::span<const TextLanguage> text_languages; // the first is the default
 };
 
 // The supported builds, US first.
@@ -44,6 +53,12 @@ const PackageLayer& FinishedLayer(const GameBuild& build);
 
 // The build whose base package a build's update is laid over, or nullptr when the build has no update.
 const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> builds = SupportedBuilds());
+
+// The build's languages; the Western ones when the build is not known.
+std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);
+
+// The build's language for a saved key; the build's default when the key is not one of its languages.
+const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view key);
 
 std::string SupportedBuildsText();
 

@@ -53,9 +53,10 @@ int dcp_render_resolution(const char *settings_file);
  * is missing. */
 int dcp_aspect_ratio(const char *settings_file);
 
-/* The system language the game is told for the text_language in the settings file; 1 (English) when the file or the
- * value is missing. */
-int dcp_text_language(const char *settings_file);
+/* The system language the game is told for the text_language in the settings file, among the languages of the build
+ * image_dir was built from: the build's default (English when the build is unknown) when the file or the value is
+ * missing or not one of them. */
+int dcp_text_language(const char *settings_file, const char *image_dir);
 
 /* The cheats the settings file turns on, one bit per cheat (dcp_cheats.h); 0 when the file or the keys are missing. */
 unsigned dcp_saved_cheats(const char *settings_file);
