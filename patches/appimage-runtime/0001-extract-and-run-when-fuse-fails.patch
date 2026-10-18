@@ -1,0 +1,179 @@
+diff --git a/src/runtime/runtime.c b/src/runtime/runtime.c
+index 2ebb3c8..36d57ec 100644
+--- a/src/runtime/runtime.c
++++ b/src/runtime/runtime.c
+@@ -522,6 +522,16 @@ char* find_fusermount(bool verbose) {
+  */
+ #define EXIT_EXECERROR  127     /* Execution error exit status.  */
+ 
++/* Exit status of the FUSE helper process when the kernel refused to mount the image. */
++#define EXIT_FUSE_MOUNT_FAILED 100
++
++static volatile pid_t extracted_child;
++
++static void forward_signal(int sig) {
++    if (extracted_child > 0)
++        kill(extracted_child, sig);
++}
++
+ struct stat st;
+ 
+ static ssize_t fs_offset; // The offset at which a filesystem image is expected = end of this ELF
+@@ -970,7 +980,8 @@ bool rm_recursive(const char* const path) {
+     // FTW_MOUNT: prevent deletion of files on other mounted filesystems
+     // FTW_PHYS: do not follow symlinks, but report symlinks as such; this way, the symlink targets, which might point
+     //           to locations outside path will not be deleted accidentally (attackers might abuse this)
+-    int rv = nftw(path, &rm_recursive_callback, 0, FTW_DEPTH | FTW_MOUNT | FTW_PHYS);
++    /* musl's nftw does nothing, and still returns 0, when the descriptor limit is 0 */
++    int rv = nftw(path, &rm_recursive_callback, 64, FTW_DEPTH | FTW_MOUNT | FTW_PHYS);
+ 
+     return rv == 0;
+ }
+@@ -1011,6 +1022,7 @@ int fusefs_main(int argc, char* argv[], void (* mounted)(void)) {
+ #endif
+ 
+     int err;
++    int mount_failed = 0;
+     sqfs_ll* ll;
+     struct fuse_opt fuse_opts[] = {
+             {"offset=%zu", offsetof(sqfs_opts, offset), 0},
+@@ -1114,6 +1126,8 @@ int fusefs_main(int argc, char* argv[], void (* mounted)(void)) {
+             }
+             sqfs_ll_destroy(ll);
+             sqfs_ll_unmount(&ch, fuse_cmdline_opts.mountpoint);
++        } else {
++            mount_failed = 1;
+         }
+     }
+     fuse_opt_free_args(&args);
+@@ -1122,7 +1136,7 @@ int fusefs_main(int argc, char* argv[], void (* mounted)(void)) {
+     free(ll);
+     free(fuse_cmdline_opts.mountpoint);
+ 
+-    return -err;
++    return mount_failed ? EXIT_FUSE_MOUNT_FAILED : -err;
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+@@ -1577,44 +1591,31 @@ int main(int argc, char* argv[]) {
+         free(abspath);
+     }
+ 
+-    if (getenv("APPIMAGE_EXTRACT_AND_RUN") != NULL || (arg && strcmp(arg, "appimage-extract-and-run") == 0)) {
+-        char* hexlified_digest = NULL;
+-
+-        // calculate MD5 hash of file, and use it to make extracted directory name "content-aware"
+-        // see https://github.com/AppImage/AppImageKit/issues/841 for more information
+-        {
+-            FILE* f = fopen(appimage_path, "rb");
+-            if (f == NULL) {
+-                perror("Failed to open AppImage file");
+-                exit(EXIT_EXECERROR);
+-            }
+-
+-            Md5Context ctx;
+-            Md5Initialise(&ctx);
+-
+-            char buf[4096];
+-            size_t bytes_read;
+-            while ((bytes_read = fread(buf, sizeof(char), sizeof(buf), f)) > 0) {
+-                Md5Update(&ctx, buf, (uint32_t) bytes_read);
+-            }
+-
+-            MD5_HASH digest;
+-            Md5Finalise(&ctx, &digest);
++    bool extract_and_run = getenv("APPIMAGE_EXTRACT_AND_RUN") != NULL || (arg && strcmp(arg, "appimage-extract-and-run") == 0);
+ 
+-            hexlified_digest = appimage_hexlify((const char*)digest.bytes, sizeof(digest.bytes));
++run_extracted:
++    if (extract_and_run) {
++        /* A directory per process: a second instance started by the application, such as its own restart,
++         * must not extract over or clean up the files this one still runs from. */
++        char* prefix = malloc(strlen(temp_base) + 32);
++        sprintf(prefix, "%s/appimage_extracted_XXXXXX", temp_base);
++        if (mkdtemp(prefix) == NULL) {
++            perror("create extraction dir error");
++            exit(EXIT_EXECERROR);
+         }
+ 
+-        char* prefix = malloc(strlen(temp_base) + 20 + strlen(hexlified_digest) + 2);
+-        strcpy(prefix, temp_base);
+-        strcat(prefix, "/appimage_extracted_");
+-        strcat(prefix, hexlified_digest);
+-        free(hexlified_digest);
+-
+         if (!extract_appimage(appimage_path, prefix, NULL, false, verbose)) {
+             fprintf(stderr, "Failed to extract AppImage\n");
++            rm_recursive(prefix);
+             exit(EXIT_EXECERROR);
+         }
+ 
++        static const int forwarded_signals[] = {SIGINT, SIGTERM, SIGHUP, SIGQUIT};
++        struct sigaction forward = {.sa_handler = forward_signal, .sa_flags = SA_RESTART};
++        sigemptyset(&forward.sa_mask);
++        for (size_t i = 0; i < sizeof(forwarded_signals) / sizeof(*forwarded_signals); ++i)
++            sigaction(forwarded_signals[i], &forward, NULL);
++
+         int pid;
+         if ((pid = fork()) == -1) {
+             int error = errno;
+@@ -1654,8 +1655,11 @@ int main(int argc, char* argv[]) {
+             exit(EXIT_EXECERROR);
+         }
+ 
++        extracted_child = pid;
++
+         int status = 0;
+-        int rv = waitpid(pid, &status, 0);
++        int rv;
++        while ((rv = waitpid(pid, &status, 0)) == -1 && errno == EINTR) {}
+         status = rv > 0 && WIFEXITED (status) ? WEXITSTATUS (status) : EXIT_EXECERROR;
+ 
+         if (getenv("NO_CLEANUP") == NULL) {
+@@ -1746,7 +1750,7 @@ int main(int argc, char* argv[]) {
+                     fprintf(stderr, "FUSERMOUNT_PROG set to %s\n", new_prog);
+                 }
+                 free(new_prog);
+-            } else {
++            } else if (verbose) {
+                 printf("Error: No suitable fusermount binary found on the $PATH\n");
+             }
+         }
+@@ -1767,7 +1771,11 @@ int main(int argc, char* argv[]) {
+         child_argv[3] = dir;
+         child_argv[4] = mount_dir;
+ 
+-        if (0 != fusefs_main(5, child_argv, fuse_mounted)) {
++        int mount_result = fusefs_main(5, child_argv, fuse_mounted);
++        if (mount_result == EXIT_FUSE_MOUNT_FAILED)
++            exit(EXIT_FUSE_MOUNT_FAILED);
++
++        if (0 != mount_result) {
+             char* title;
+             char* body;
+             title = "Cannot mount AppImage, please check your FUSE setup.";
+@@ -1786,10 +1794,22 @@ int main(int argc, char* argv[]) {
+         close(keepalive_pipe[1]);
+ 
+         /* Pause until mounted */
+-        read(keepalive_pipe[0], &c, 1);
++        ssize_t mounted = read(keepalive_pipe[0], &c, 1);
+ 
+         /* Fuse process has now daemonized, reap our child */
+-        waitpid(pid, NULL, 0);
++        int fuse_status = 0;
++        waitpid(pid, &fuse_status, 0);
++
++        /* The kernel refused the mount, for example because no usable fusermount exists in a restricted
++         * environment: run from an extracted copy instead. Any other failure is reported as before. */
++        if (mounted < 1 && WIFEXITED(fuse_status) && WEXITSTATUS(fuse_status) == EXIT_FUSE_MOUNT_FAILED) {
++            if (verbose)
++                fprintf(stderr, "Cannot mount the AppImage through FUSE, extracting it instead\n");
++            close(keepalive_pipe[0]);
++            rmdir(mount_dir);
++            extract_and_run = true;
++            goto run_extracted;
++        }
+ 
+         dir_fd = open(mount_dir, O_RDONLY);
+         if (dir_fd == -1) {

@@ -89,6 +89,29 @@ Without any `libvulkan.so.1` it cannot start at all.
 the build needs. The package contains no game files, no drivers and no local paths (`package-linux.sh`
 checks the staged folder before it writes the AppImage).
 
+### FUSE and the AppImage runtime
+
+An AppImage mounts itself with FUSE before `AppRun` runs. The runtime still tries that mount first and nothing changes
+where it works. If the mount cannot be made (no usable `fusermount`, a restricted environment such as Steam's launcher),
+the runtime unpacks the AppImage into a private folder under `/tmp`, runs `AppRun` from there with the same arguments,
+returns its exit status and removes the folder afterwards. Termination signals are passed on to the game. A damaged
+AppImage is not mistaken for a FUSE failure and is reported as before. `APPIMAGE_EXTRACT_AND_RUN=1` (or
+`--appimage-extract-and-run`) still forces the unpacked mode without trying FUSE. `$APPIMAGE` keeps naming the original
+file, so `game`, `user` and `logs` stay next to it (or in the fallback folder above), never in the temporary folder.
+
+The released upstream runtime stops when FUSE fails, so the project builds its own:
+
+- `patches/appimage-runtime/baseline.env` pins the upstream [AppImage/type2-runtime](https://github.com/AppImage/type2-runtime)
+  commit (`dd6cebe`, tag `20251108`, the runtime used before), the Alpine root file system the build runs in, and the
+  SHA-256 of the reviewed result.
+- `patches/appimage-runtime/0001-extract-and-run-when-fuse-fails.patch` adds the fallback, gives each run its own
+  extraction folder and fixes the cleanup, which upstream's musl build skips (`nftw` ignores a descriptor limit of 0).
+- `tools/build-appimage-runtime.sh` fetches the pinned commit, applies the patch and runs upstream's chroot build; it
+  needs root or passwordless `sudo`, `git`, `tar`, `unshare` and network access, and rebuilds only when the pins, the patches or the
+  script changed. The result must match the pinned SHA-256, otherwise packaging stops. `--check FILE` verifies a runtime or
+  a finished AppImage. `tools/package-linux.sh` runs both; `DcpFocalBuild` runs as root, so `tools/package-release.ps1` needs
+  nothing extra; the CI container is started with `--privileged` for the chroot and mounts.
+
 ## Verification
 
 Everything below ran on Ubuntu 24.04 (WSL2) with Xvfb and Mesa's software Vulkan driver (llvmpipe), against the real
