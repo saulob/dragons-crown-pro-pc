@@ -50,10 +50,30 @@ fi
 step "Toolchain $($cc --version | head -1), $config"
 
 step 'Video core dependencies (gpu/deps.txt)'
+patches_of() {
+    local LC_ALL=C dir=$1 file
+    PATCHES=()
+    for file in "$dir"/*.patch; do
+        [[ -f $file ]] || continue
+        PATCHES+=("$file")
+    done
+}
+patches_fingerprint() {
+    local file hash
+    (($#)) || return 0
+    for file in "$@"; do
+        hash=$(sha256sum < "$file" | cut -d' ' -f1)
+        printf '%s:%s\n' "$(basename "$file")" "${hash^^}"
+    done | sha256sum | cut -d' ' -f1 | tr 'a-f' 'A-F'
+}
 while read -r path url commit; do
     [[ -z ${path:-} || $path == \#* ]] && continue
     dir=$root/gpu/$path
-    [[ -f $dir/.dcp_commit && $(<"$dir/.dcp_commit") == "$commit" ]] && continue
+    patches_of "$root/gpu/patches/$(basename "$path")"
+    fingerprint=$(patches_fingerprint "${PATCHES[@]}")
+    expected=$commit
+    [[ -n $fingerprint ]] && expected=$commit$'\n'$fingerprint
+    [[ -f $dir/.dcp_commit && $(<"$dir/.dcp_commit") == "$expected" ]] && continue
     echo "Fetching $path (${commit:0:7})"
     rm -rf "$dir"
     mkdir -p "$dir"
@@ -61,10 +81,10 @@ while read -r path url commit; do
     git -C "$dir" fetch --quiet --depth 1 "$url" "$commit"
     git -C "$dir" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
     [[ -f $dir/.gitmodules ]] && git -C "$dir" submodule update --quiet --init --recursive --depth 1
-    for patch in "$root/gpu/patches/$(basename "$path")"/*.patch; do
-        [[ -f $patch ]] && git -C "$dir" apply "$patch"
+    for patch in "${PATCHES[@]}"; do
+        git -C "$dir" apply "$patch"
     done
-    echo "$commit" > "$dir/.dcp_commit"
+    printf '%s' "$expected" > "$dir/.dcp_commit"
 done < "$root/gpu/deps.txt"
 
 ((clean)) && { step 'Cleaning build/cmake/linux'; rm -rf "$build_dir"; }

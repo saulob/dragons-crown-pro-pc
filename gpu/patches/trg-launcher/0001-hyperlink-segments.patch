@@ -1,0 +1,121 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index 0e14dd7..00b405c 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -95,9 +95,16 @@ struct HeaderContext {
+ };
+ using HeaderPainter = std::function<void(const HeaderContext&)>;
+ 
++// A piece of the branding subtitle. A segment with a url is a hyperlink.
++struct SubtitleSegment {
++  std::string text;
++  std::string url;
++};
++
+ struct Branding {
+   std::string title;                                     // "OUTPOST KALOKI X"
+   std::string subtitle = "PC PORT   \xC2\xB7   LAUNCHER";
++  std::vector<SubtitleSegment> subtitle_segments;        // when set, drawn instead of `subtitle`
+   ImTextureID icon{};                                    // optional square icon left of the title
+   HeaderPainter background;                              // see headers.h; default: a theme gradient
+   bool shade_title_side = true;                          // darken behind the title for contrast
+@@ -235,6 +242,7 @@ class Ui {
+   void Heading(const char* text);
+   void Paragraph(const char* text);  // dim, wrapped
+   void Help(const char* text);       // small, dim, wrapped
++  void Link(const char* text, const std::string& url);  // small, dim hyperlink
+   void Spacer(float height = 8.0f);
+   bool Section(const char* title, bool open_by_default = false);  // collapsing header
+ 
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 849c466..330babd 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -5,6 +5,7 @@
+ #include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ #include <string>
+ 
+ #include "trg/platform.h"
+@@ -88,6 +89,34 @@ void PushAccent(const Theme& t) {
+   ImGui::PushStyleColor(ImGuiCol_Text, t.on_accent);
+ }
+ 
++// Draws `text` at `pos` and returns its advance. A non-empty url makes it a
++// hyperlink: always underlined except while hovered, then the hand cursor and a
++// click that opens it.
++float LinkText(ImDrawList* dl, const char* id, ImVec2 pos, ImFont* font, float size, ImU32 color,
++               const char* text, const std::string& url) {
++  const char* end = text + std::strlen(text);
++  const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text, end);
++  bool hovered = false;
++  if (!url.empty()) {
++    ImGui::PushID(id);
++    ImGui::SetCursorScreenPos(pos);
++    if (ImGui::InvisibleButton("##link", extent)) OpenUrl(url);
++    hovered = ImGui::IsItemHovered();
++    if (hovered) {
++      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
++      ImGui::SetItemTooltip("%s", url.c_str());
++    }
++    ImGui::PopID();
++  }
++  dl->AddText(font, size, pos, color, text, end);
++  if (!url.empty() && !hovered) {
++    const float thickness = std::max(extent.y * 0.06f, 1.0f);
++    const float y = pos.y + extent.y - thickness;
++    dl->AddLine(ImVec2(pos.x, y), ImVec2(pos.x + extent.x, y), color, thickness);
++  }
++  return extent.x;
++}
++
+ }  // namespace
+ 
+ // ------------------------------------------------------------------- theme --
+@@ -542,6 +571,15 @@ void Ui::Help(const char* text) {
+   ImGui::PopStyleColor();
+ }
+ 
++void Ui::Link(const char* text, const std::string& url) {
++  ImGui::PushStyleColor(ImGuiCol_Text, theme().dim);
++  ImGui::PushFont(nullptr, fonts().size * 0.84f);
++  LinkText(ImGui::GetWindowDrawList(), text, ImGui::GetCursorScreenPos(), ImGui::GetFont(), ImGui::GetFontSize(),
++           ImGui::GetColorU32(ImGuiCol_Text), text, url);
++  ImGui::PopFont();
++  ImGui::PopStyleColor();
++}
++
+ void Ui::Spacer(float height) {
+   LeaveRows();
+   ImGui::Dummy(ImVec2(0, height * scale_));
+@@ -880,9 +918,25 @@ void Launcher::DrawHeader(ImVec2 origin, float w, float h) {
+   const char* title = b.title.c_str();
+   dl->AddText(config_.fonts.bold, title_size, ImVec2(x + 2 * s_, title_y + 3 * s_), b.title_shadow, title);
+   dl->AddText(config_.fonts.bold, title_size, ImVec2(x, title_y), IM_COL32_WHITE, title);
+-  if (!b.subtitle.empty())
+-    dl->AddText(config_.fonts.semibold, 16 * s_, ImVec2(x + 2 * s_, title_y + title_size * 1.15f),
+-                Col(b.subtitle_color.value_or(t.accent)), b.subtitle.c_str());
++  const float subtitle_size = 16 * s_;
++  const ImU32 subtitle_color = Col(b.subtitle_color.value_or(t.accent));
++  const float subtitle_x = x + 2 * s_;
++  const float subtitle_y = title_y + title_size * 1.15f;
++  if (!b.subtitle_segments.empty()) {
++    float sx = subtitle_x;
++    ImGui::PushID("##subtitle");
++    for (size_t i = 0; i < b.subtitle_segments.size(); ++i) {
++      const SubtitleSegment& segment = b.subtitle_segments[i];
++      ImGui::PushID(int(i));
++      sx += LinkText(dl, "##segment", ImVec2(sx, subtitle_y), config_.fonts.semibold, subtitle_size, subtitle_color,
++                     segment.text.c_str(), segment.url);
++      ImGui::PopID();
++    }
++    ImGui::PopID();
++  } else if (!b.subtitle.empty()) {
++    dl->AddText(config_.fonts.semibold, subtitle_size, ImVec2(subtitle_x, subtitle_y), subtitle_color,
++                b.subtitle.c_str());
++  }
+   dl->PopClipRect();
+ }
+ 

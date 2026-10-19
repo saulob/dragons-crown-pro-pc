@@ -54,6 +54,7 @@ namespace {
 const ImVec4 kAccent = ImVec4(kAccentRed / 255.0f, kAccentGreen / 255.0f, kAccentBlue / 255.0f, 1.0f);
 constexpr double kPlayFeedbackSeconds = 0.4;
 constexpr char kPortTitle[] = "Dragon's Crown Pro PC";
+const std::string kPortUrl = std::string("https://") + kPortRepository;
 
 ImGuiKey ImGuiKeyOf(int scancode) {
     const SDL_Keycode keycode = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(scancode), SDL_KMOD_NONE, false);
@@ -397,8 +398,11 @@ private:
         c.theme = LauncherTheme();
         c.fonts = fonts_;
         c.branding.title = "DRAGON'S CROWN PRO";
-        c.branding.subtitle = "PC PORT  \xC2\xB7  LAUNCHER";
         c.branding.subtitle_color = kAccent;
+        c.branding.subtitle_segments = {
+            {"PC PORT   \xC2\xB7   ", ""},
+            {"BY SAULOB", kAuthorUrl},
+        };
         c.branding.background = LauncherHeader();
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
@@ -930,7 +934,7 @@ private:
                       SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
                       SDL_VERSIONNUM_MICRO(SDL_GetVersion()), IMGUI_VERSION, DCP_TRG_LAUNCHER_VERSION);
         ui.Info("Libraries", libraries);
-        ui.Help(kPortRepository);
+        ui.Link(kPortRepository, kPortUrl);
     }
 
     const DcpLauncherConfig& config_;
