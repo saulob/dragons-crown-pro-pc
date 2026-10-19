@@ -85,13 +85,14 @@ constexpr DcpResolutionSite kJapan103ResolutionSites[] = {
 };
 
 constexpr PackageLayer kUsLayers[] = {{"01.00", "01.03", false}};
+constexpr PackageLayer kUs101Layers[] = {{"01.00", "01.03", false}, {"01.01", "01.03", true}};
 constexpr PackageLayer kJapanBaseLayers[] = {{"01.00", "01.00", false}};
 constexpr PackageLayer kJapan102Layers[] = {{"01.00", "01.00", false}, {"01.02", "01.00", true}};
 constexpr PackageLayer kJapan103Layers[] = {{"01.00", "01.00", false}, {"01.03", "01.00", true}};
 constexpr PackageLayer kAsia100Layers[] = {{"01.00", "01.02", false}};
 constexpr PackageLayer kAsia102Layers[] = {{"01.00", "01.02", false}, {"01.02", "01.00", true}};
 
-constexpr const char* kJapanUpdateFiles[] = {"sce_discmap_patch.plt"};
+constexpr const char* kDiscmapPatchFiles[] = {"sce_discmap_patch.plt"};
 
 constexpr TextLanguage kWesternLanguages[] = {
     {"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
@@ -117,6 +118,22 @@ constexpr GameBuild kGameBuilds[] = {
         kWesternLanguages,
     },
     {
+        "CUSA10454",
+        "UP2611-CUSA10454_00-DRAGONSCROWNPRO1",
+        "1.01",
+        "CUSA10454-1.01",
+        "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0",
+        "DRACRO_US.CPK",
+        kDiscmapPatchFiles,
+        "CUSA10454 1.01 USA",
+        "USA",
+        false,
+        false,
+        kUs101Layers,
+        {},
+        kWesternLanguages,
+    },
+    {
         "CUSA07001",
         "JP0005-CUSA07001_00-DRAGONSCROWN0001",
         "1.00",
@@ -139,7 +156,7 @@ constexpr GameBuild kGameBuilds[] = {
         "CUSA07001-1.02",
         "e512685aef4fa1e50eafec8c9699b611992356cbae84e9b0147febceb49843fe",
         "DRACRO_PATCH_JP.CPK",
-        kJapanUpdateFiles,
+        kDiscmapPatchFiles,
         "CUSA07001 1.02 Japan",
         "Japan",
         false,
@@ -155,7 +172,7 @@ constexpr GameBuild kGameBuilds[] = {
         "CUSA07001-1.03",
         "dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64",
         "DRACRO_PATCH_JP.CPK",
-        kJapanUpdateFiles,
+        kDiscmapPatchFiles,
         "CUSA07001 1.03 Japan",
         "Japan",
         false,

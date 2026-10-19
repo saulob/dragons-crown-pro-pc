@@ -39,7 +39,7 @@ and `--logs` win, and everything else is found next to the executable (`launcher
 | User data, `dcp.ini` | `user` | `<repository>\user` |
 | Logs | `logs` | `<repository>\build\logs` |
 
-`<build>` is `v1.03` for CUSA10454 (US), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
+`<build>` is `v1.03` or `CUSA10454-1.01` for CUSA10454 (USA), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
 `CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
 selected last is active. Selecting a package makes its exact build active: a complete prepared folder of it is activated
 without copying, and only the build that is already active is reported as up to date.
@@ -82,6 +82,11 @@ while the game files are not valid. If its window cannot be opened, the game sta
 5. `game\image\<build>`: `boot.bin`, `content.bin`, `image.json`, and `image.json` names the same title and eboot hash.
 
 Steps 2 to 4 are `CheckGameTree`, which the installer also runs on the folder the player selects.
+
+**USA builds.** The 1.00 package (CATEGORY `gd`, APP_VER 01.00) is a complete game, installed into `v1.03` (its legacy
+folder name). The 1.01 patch (CATEGORY `gp`, APP_VER 01.01) is an update laid over a hard-linked copy of the 1.00 folder,
+into `CUSA10454-1.01`. The two builds have different `eboot.bin` files. An update needs the 1.00 folder to be installed;
+the launcher says so otherwise.
 
 **Japanese builds.** The base package (`drcpro.pkg`, CATEGORY `gd`, APP_VER 01.00) is a complete game: it is installed
 into `CUSA07001-1.00`. The 1.02 and 1.03 updates (CATEGORY `gp`) are each laid over
@@ -225,9 +230,9 @@ RCAS, on) with a
 
 The game chooses its display render targets with `mov reg, imm32` of 1920 / 3840 and 1080 / 2160, picked by
 `sceKernelIsNeoMode`. Each supported build with verified sites has its own 23 of them (`launcher/game_profile.cpp`); the
-Asia and Hong Kong 1.02 build has none yet, so it renders only at its native size and its Render resolution and Aspect
-Ratio rows offer Native 16:9 alone (a saved custom value falls back to Native 16:9 for it, and the loader refuses to
-patch a build with no sites). Unless the render target is
+USA 1.01 and Asia and Hong Kong 1.02 builds have none yet, so they render only at their native size and their Render
+resolution and Aspect Ratio rows offer Native 16:9 alone (a saved custom value falls back to Native 16:9 for them, and the
+loader refuses to patch a build with no sites). Unless the render target is
 the unchanged Native 16:9 one, the loader rewrites them (`launcher/resolution.c`) to the chosen width and height after
 checking that each still holds the original instruction; if one does not, the game does not start. Native 16:9 leaves the
 code untouched. `sceKernelIsNeoMode` answers "PS4 Pro" for a target larger than 1920 × 1080 in either dimension or in

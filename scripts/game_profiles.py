@@ -19,6 +19,14 @@ PROFILES = {
                 'eboot_sha256': 'f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a',
                 'folder': 'v1.03', 'regional_archive': 'DRACRO_US.CPK', 'extra_files': (),
             },
+            # The 1.01 patch is laid over the base package; it replaces the base's DRACRO_US.CPK and eboot.bin.
+            '1.01': {
+                'layers': ({'app_ver': '01.00', 'sfo_version': '01.03', 'update': False},
+                           {'app_ver': '01.01', 'sfo_version': '01.03', 'update': True}),
+                'eboot_sha256': '434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0',
+                'folder': 'CUSA10454-1.01', 'regional_archive': 'DRACRO_US.CPK',
+                'extra_files': ('sce_discmap_patch.plt',),
+            },
         },
         'entry': 'eboot.bin',
         'extra_executables': (),

@@ -103,11 +103,12 @@ std::string MakeSfo(const std::vector<std::pair<std::string, std::string>>& item
 }
 
 const GameBuild& kUs = SupportedBuilds()[0];
-const GameBuild& kJp100 = SupportedBuilds()[1];
-const GameBuild& kJp102 = SupportedBuilds()[2];
-const GameBuild& kJp103 = SupportedBuilds()[3];
-const GameBuild& kCk100 = SupportedBuilds()[4];
-const GameBuild& kCk = SupportedBuilds()[5];
+const GameBuild& kUs101 = SupportedBuilds()[1];
+const GameBuild& kJp100 = SupportedBuilds()[2];
+const GameBuild& kJp102 = SupportedBuilds()[3];
+const GameBuild& kJp103 = SupportedBuilds()[4];
+const GameBuild& kCk100 = SupportedBuilds()[5];
+const GameBuild& kCk = SupportedBuilds()[6];
 
 constexpr char kEboot[] = "synthetic eboot bytes";
 
@@ -289,7 +290,7 @@ void TestFingerprintMatchesProfile() {
         }
     }
     CHECK(SupportedBuildsText() ==
-          "CUSA10454 1.00 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong and CUSA10209 1.02 Asia/Hong Kong");
+          "CUSA10454 1.00 USA, CUSA10454 1.01 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong and CUSA10209 1.02 Asia/Hong Kong");
     CHECK(std::string(kUs.folder) != kCk.folder);
     std::string modules = "'modules': (";
     for (const char* module : kBundledModules) {
@@ -688,7 +689,7 @@ void TestInstaller(const fs::path& base) {
     };
     WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA00001", "01.00"));
     CHECK(install(source.paths.app0, roots) == InstallStatus::kWrongGame);
-    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA10454", "01.01"));
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA10454", "01.04"));
     CHECK(install(source.paths.app0, roots) == InstallStatus::kWrongVersion);
     source.Rebuild();
     fs::remove(source.paths.app0 / "DRACRO.CPK");
@@ -2293,8 +2294,11 @@ void TestLayers(const fs::path& base) {
     CHECK(InstallGame(pkg / "jp-103.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
     WriteAll(pkg / "us-update.pkg", MakePackage(PackageSfo(kUs, "01.03", "01.00", "gp")));
     CHECK(InstallGame(pkg / "us-update.pkg", empty).status == InstallStatus::kWrongVersion);
-    CHECK(BaseBuildOf(kJp102) == &SupportedBuilds()[1] && BaseBuildOf(kJp103) == &SupportedBuilds()[1]);
+    WriteAll(pkg / "us-101.pkg", MakePackage(PackageSfo(kUs101, "01.01", "01.03", "gp")));
+    CHECK(InstallGame(pkg / "us-101.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
+    CHECK(BaseBuildOf(kJp102) == &SupportedBuilds()[2] && BaseBuildOf(kJp103) == &SupportedBuilds()[2]);
     CHECK(BaseBuildOf(kJp100) == nullptr && BaseBuildOf(kUs) == nullptr && BaseBuildOf(kCk) == &kCk100);
+    CHECK(BaseBuildOf(kUs101) == &kUs);
     WriteAll(pkg / "ck-102.pkg", MakePackage(PackageSfo(kCk, "01.02", "01.00", "gp")));
     CHECK(InstallGame(pkg / "ck-102.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
     CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).title == "Base game required");
@@ -2398,6 +2402,32 @@ void TestLayers(const fs::path& base) {
         CHECK(std::string(ck_builds[0].eboot_sha256) == ck_builds[1].eboot_sha256);
     }
     {
+        Fixture us_base(root, "us-base-1.00", kUs);
+        const fs::path us_update = root / "us-update-1.01";
+        WriteAll(us_update / "eboot.bin", "eboot 1.01");
+        WriteAll(us_update / "DRACRO_US.CPK", "archive 1.01");
+        WriteAll(us_update / "sce_discmap.plt", "discmap 1.01");
+        WriteAll(us_update / "sce_discmap_patch.plt", "discmap patch 1.01");
+        WriteAll(us_update / "sce_sys" / "param.sfo", PackageSfo(kUs101, "01.01", "01.03", "gp"));
+        const std::string sha101 = Sha256Hex(us_update / "eboot.bin");
+        GameBuild us101 = kUs101;
+        us101.eboot_sha256 = sha101.c_str();
+        const std::vector<GameBuild> us_builds = {us_base.build, us101};
+        CHECK(BaseBuildOf(us_builds[1], us_builds) == &us_builds[0]);
+        const std::string base_sfo = ReadAll(us_base.paths.app0 / "sce_sys" / "param.sfo");
+        const fs::path us_staged = root / "us-staged-1.01";
+        CHECK(StageUpdate(us_base.paths.app0, us_update, us_staged).ok());
+        const GameCheck staged = CheckGameTree(us_staged, us_builds);
+        CHECK(staged.state == GameFileState::kValid && staged.build == &us_builds[1]);
+        CHECK(ReadAll(us_staged / "eboot.bin") == "eboot 1.01" && ReadAll(us_staged / "DRACRO_US.CPK") == "archive 1.01");
+        CHECK(fs::exists(us_staged / "sce_discmap_patch.plt")); // the update's discmap patch survives the overlay
+        const GameCheck untouched = CheckGameTree(us_base.paths.app0, us_builds);
+        CHECK(untouched.state == GameFileState::kValid && untouched.build == &us_builds[0]);
+        CHECK(ReadAll(us_base.paths.app0 / "sce_sys" / "param.sfo") == base_sfo);
+        CHECK(std::string(us_builds[0].folder) == "v1.03" && std::string(us_builds[1].folder) == "CUSA10454-1.01");
+        CHECK(std::string(us_builds[0].eboot_sha256) != us_builds[1].eboot_sha256);
+    }
+    {
         Fixture merged(root, "jp-merged", kJp103);
         CHECK(merged.State() == GameFileState::kValid);
         CHECK(!fs::exists(merged.paths.app0 / "DRACRO_US.CPK"));
@@ -2414,26 +2444,40 @@ void TestLayers(const fs::path& base) {
     }
 }
 
-// The CUSA10454 base is the only verified US build; an APP_VER 01.01 package is not part of any supported build.
+// The CUSA10454 base and its 1.01 update: the update is a second layer, never a base package on its own.
 void TestUsBuild() {
     CHECK(std::string(kUs.label) == "CUSA10454 1.00 USA" && std::string(kUs.version) == "1.00");
     CHECK(kUs.layers.size() == 1 && std::string(FinishedLayer(kUs).app_ver) == "01.00" &&
           std::string(FinishedLayer(kUs).sfo_version) == "01.03");
     CHECK(std::string(kUs.eboot_sha256) == "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a");
     CHECK(kUs.cheats && kUs.xbox_prompts && kUs.resolution_sites.size() == 23 && BaseBuildOf(kUs) == nullptr);
+
+    CHECK(std::string(kUs101.label) == "CUSA10454 1.01 USA" && std::string(kUs101.version) == "1.01");
+    CHECK(std::string(kUs101.folder) == "CUSA10454-1.01" && std::string(kUs101.folder) != kUs.folder);
+    CHECK(kUs101.layers.size() == 2 && !kUs101.layers[0].update && kUs101.layers[1].update);
+    CHECK(std::string(FinishedLayer(kUs101).app_ver) == "01.01" &&
+          std::string(FinishedLayer(kUs101).sfo_version) == "01.03");
+    CHECK(std::string(kUs101.eboot_sha256) == "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0");
+    CHECK(std::string(kUs101.eboot_sha256) != kUs.eboot_sha256);
+    CHECK(!kUs101.cheats && !kUs101.xbox_prompts && kUs101.resolution_sites.empty());
+    CHECK(BaseBuildOf(kUs101) == &kUs && BaseBuildOf(kUs) == nullptr);
     for (const GameBuild& build : SupportedBuilds()) {
         CHECK((build.cheats || build.xbox_prompts) == (&build == &kUs));
-        CHECK(std::string(build.label).find("1.01") == std::string::npos);
     }
+
     CHECK(CheckSfoIdentity(SfoFor(kUs, "01.00", "01.03")).build == &kUs);
     CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gd")).build == &kUs);
-    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01", "01.03")).state == GameFileState::kDifferentVersion);
-    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.01", "01.03", "gp")).state == GameFileState::kDifferentVersion);
-    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.01", "01.03", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kUs101)).build == &kUs101);
+    CHECK(CheckSfoIdentity(SfoFor(kUs101, "01.00", "01.03")).build == &kUs);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs101, "01.00", "01.03", "gd")).build == &kUs);
+    const GameCheck us_update = CheckPackageIdentity(PackageSfo(kUs101, "01.01", "01.03", "gp"));
+    CHECK(us_update.build == &kUs101 && us_update.layer == 1);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs101, "01.01", "01.03", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.02", "01.03")).state == GameFileState::kDifferentVersion);
     CHECK(SupportedBuildsText().find("CUSA10454 1.00 USA, ") == 0);
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
-    CHECK(launcher.find("The Japanese 1.02 and 1.03 updates and the Asia/Hong Kong 1.02 update are installed over their respective 1.00 base packages.") != std::string::npos);
-    CHECK(launcher.find("USA update") == std::string::npos);
+    CHECK(launcher.find("The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages.") != std::string::npos);
 }
 
 // Prepared CUSA10454 folders made before the build was named 1.00 carry the marker version 1.03.
@@ -2473,7 +2517,7 @@ void TestLegacyMarker(const fs::path& base) {
     write_marker(update, "1.03");
     CHECK(update.State() == GameFileState::kDifferentVersion && JsonString(marker_of(update), "version") == "1.03");
 
-    for (const GameBuild* other : {&kJp100, &kJp102, &kJp103, &kCk}) {
+    for (const GameBuild* other : {&kUs101, &kJp100, &kJp102, &kJp103, &kCk}) {
         Fixture f(base, "legacy-other", *other);
         const std::string version = other->version;
         write_marker(f, "1.03");
@@ -2725,7 +2769,7 @@ void TestSafeMode(const fs::path& base) {
 }
 
 void TestBuilds(const fs::path& base) {
-    CHECK(SupportedBuilds().size() == 6);
+    CHECK(SupportedBuilds().size() == 7);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
     CHECK(std::string(kUs.folder) == "v1.03" && std::string(kCk.folder) == "CUSA10209-1.02");
     CHECK(std::string(kCk.content_id) == "HP0177-CUSA10209_00-DRAGONSCROWN0001");
@@ -2760,7 +2804,8 @@ void TestBuilds(const fs::path& base) {
     CHECK(CheckSfoIdentity(SfoFor(kUs)).build == &kUs);
     CHECK(CheckSfoIdentity(SfoFor(kCk, "01.01")).state == GameFileState::kDifferentVersion);
     CHECK(CheckSfoIdentity(SfoFor(kCk, nullptr, "01.03")).state == GameFileState::kDifferentVersion);
-    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01")).build == &kUs101); // the USA 1.01 update is now a build
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.02")).state == GameFileState::kDifferentVersion);
     CHECK(CheckSfoIdentity(MakeSfo({{"TITLE_ID", "CUSA00000"},
                                     {"CONTENT_ID", std::string(kCk.content_id)},
                                     {"APP_VER", std::string(FinishedLayer(kCk).app_ver)},
@@ -2782,6 +2827,10 @@ void TestBuilds(const fs::path& base) {
     CHECK(build_label("CUSA10209", kCk100.eboot_sha256, "01.02").empty());
     CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.01").empty());
     CHECK(build_label("CUSA10454", kUs.eboot_sha256) == kUs.label);
+    CHECK(build_label("CUSA10454", kUs101.eboot_sha256, "01.01") == kUs101.label);
+    CHECK(build_label("CUSA10454", kUs101.eboot_sha256) == kUs101.label);   // each distinct hash names its own build
+    CHECK(build_label("CUSA10454", kUs.eboot_sha256, "01.01").empty());     // and never the other one
+    CHECK(build_label("CUSA10454", kUs101.eboot_sha256, "01.00").empty());
     CHECK(build_label("CUSA10209", "05dad7c244e76df186eb440818bed6c567aadec1180595a04975fab6d848edf2").empty());
     CHECK(build_label("CUSA10209", kUs.eboot_sha256).empty());
     CHECK(build_label("CUSA10454", kCk.eboot_sha256).empty());
@@ -2891,6 +2940,42 @@ void TestCusa10209Graphics(const fs::path& base) {
     CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);
 }
 
+// CUSA10454 1.01 has no verified render resolution sites, so only the native render resolution and 16:9 are effective;
+// CUSA10454 1.00 keeps the whole list.
+void TestUs101Graphics(const fs::path& base) {
+    const fs::path root = base / "cusa10454-graphics";
+    fs::remove_all(root);
+    const fs::path file = root / "dcp.ini";
+    const fs::path dir100 = root / "image-1.00", dir101 = root / "image-1.01";
+    WriteAll(dir100 / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
+                                        kUs.eboot_sha256 + "\",\n  \"app_ver\": \"01.00\"\n}");
+    WriteAll(dir101 / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
+                                        kUs101.eboot_sha256 + "\",\n  \"app_ver\": \"01.01\"\n}");
+    CHECK(BuildOfImageDir(dir100.string().c_str()) == &kUs);
+    CHECK(BuildOfImageDir(dir101.string().c_str()) == &kUs101);
+    CHECK(RestrictedToNativeResolution(&kUs101) && !RestrictedToNativeResolution(&kUs));
+    CHECK(kUs101.resolution_sites.empty() && kUs.resolution_sites.size() == 23);
+    CHECK(kUs101.resolution_sites.data() != kUs.resolution_sites.data());
+
+    WriteAll(file, "render_resolution=4K\naspect_ratio=21:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) == 0); // 1.01 falls back to native
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) == 0);      // and to 16:9
+    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0); // 1.00 keeps them
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir100.string().c_str()) != 0);
+
+    // 1.01 can never receive the 1.00 table: its own table is empty, and applying it writes nothing.
+    std::vector<unsigned char> image(64, 0x90);
+    const std::vector<unsigned char> before = image;
+    char error[160];
+    CHECK(dcp_apply_resolution(image.data(), image.size(), kUs101.resolution_sites.data(),
+                               kUs101.resolution_sites.size(), &dcp_resolutions[5], error, sizeof(error)));
+    CHECK(image == before);
+
+    WriteAll(file, "render_resolution=native\naspect_ratio=16:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) == 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) == 0);
+}
+
 // The launcher shows the finished package's APP_VER and VERSION under the unchanged short build label.
 void TestBuildMetadata() {
     struct Expected {
@@ -2900,6 +2985,7 @@ void TestBuildMetadata() {
     };
     const Expected expected[] = {
         {&kUs, "CUSA10454 1.00 USA", "APP_VER 1.00 \xC2\xB7 VERSION 1.03"},
+        {&kUs101, "CUSA10454 1.01 USA", "APP_VER 1.01 \xC2\xB7 VERSION 1.03"},
         {&kJp100, "CUSA07001 1.00 Japan", "APP_VER 1.00 \xC2\xB7 VERSION 1.00"},
         {&kJp102, "CUSA07001 1.02 Japan", "APP_VER 1.02 \xC2\xB7 VERSION 1.00"},
         {&kJp103, "CUSA07001 1.03 Japan", "APP_VER 1.03 \xC2\xB7 VERSION 1.00"},
@@ -2979,6 +3065,7 @@ int main(int argc, char** argv) {
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);
+    TestUs101Graphics(base);
     TestBuildMetadata();
     TestLayers(base);
     TestUsBuild();
