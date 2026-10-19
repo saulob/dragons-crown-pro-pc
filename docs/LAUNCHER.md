@@ -90,8 +90,8 @@ Each result is checked as its finished game and gets its own boot image. The 1.0
 update changes, so 1.03 does not need 1.02.
 
 **Asia and Hong Kong builds.** The 1.00 package (CATEGORY `gd`) is a complete game, installed into `CUSA10209-1.00`. The 1.02 package
-(CATEGORY `gp`, APP_VER 01.02) is an update laid over a hard-linked copy of the 1.00 folder, into `CUSA10209-1.02`. Both share one
-`eboot.bin`. An update needs the 1.00 folder to be installed; the launcher says so
+(CATEGORY `gp`, APP_VER 01.02) is an update laid over a hard-linked copy of the 1.00 folder, into `CUSA10209-1.02`. The two builds have
+different `eboot.bin` files. An update needs the 1.00 folder to be installed; the launcher says so
 otherwise.
 
 States: missing, valid, different version, read error. The identity lives in `launcher/game_profile.h` and mirrors
@@ -192,6 +192,8 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not
   adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
   of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
+  The Asia and Hong Kong 1.02 build has no verified render resolution sites of its own, so it renders at its original size in
+  16:9 and offers no other shape, whatever was saved.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -221,7 +223,10 @@ RCAS, on) with a
 1280 × 720, 1440p 2560 × 1440, 1800p 3200 × 1800, 4K 3840 × 2160. It is the game's own render size, separate from the window size: the picture is scaled to the window.
 
 The game chooses its display render targets with `mov reg, imm32` of 1920 / 3840 and 1080 / 2160, picked by
-`sceKernelIsNeoMode`. Each supported build has its own 23 sites (`launcher/game_profile.cpp`). Unless the render target is
+`sceKernelIsNeoMode`. Each supported build with verified sites has its own 23 of them (`launcher/game_profile.cpp`); the
+Asia and Hong Kong 1.02 build has none yet, so it renders only at its native size and its Render resolution and Aspect
+Ratio rows offer Native 16:9 alone (a saved custom value falls back to Native 16:9 for it, and the loader refuses to
+patch a build with no sites). Unless the render target is
 the unchanged Native 16:9 one, the loader rewrites them (`launcher/resolution.c`) to the chosen width and height after
 checking that each still holds the original instruction; if one does not, the game does not start. Native 16:9 leaves the
 code untouched. `sceKernelIsNeoMode` answers "PS4 Pro" for a target larger than 1920 × 1080 in either dimension or in

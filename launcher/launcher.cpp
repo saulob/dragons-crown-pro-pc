@@ -100,6 +100,10 @@ constexpr char kAspectRatioHelp[] = "Sets the game's target rendering format and
 constexpr char kRenderResolutionHelp[] =
     "The resolution the game renders at. It is separate from the window size: the picture is scaled to the window. "
     "1440p and above need a powerful graphics card.";
+constexpr char kRestrictedAspectRatioHelp[] =
+    "This game build renders at 16:9; the other aspect ratios are not available for it.";
+constexpr char kRestrictedRenderResolutionHelp[] =
+    "This game build renders at its original size; the custom render resolutions are not available for it.";
 constexpr char kAntiAliasingHelp[] =
     "SMAA smooths jagged edges on the finished picture, at a small cost in performance.";
 constexpr char kAnisotropyHelp[] =
@@ -260,6 +264,7 @@ private:
         TrackPlacement();
         PollInstall();
         PollPrompts();
+        NormalizeGraphicsSettings();
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
             return Outcome::kPlay;
         }
@@ -338,6 +343,20 @@ private:
         const GameCheck check = CheckAndLog(paths_);
         files_ = check.state;
         build_ = check.build;
+    }
+
+    // A build whose executable has no verified render resolution sites runs at its native 16:9 size; a saved custom
+    // value is put back to the supported one, as a language the build does not have is.
+    void NormalizeGraphicsSettings() {
+        if (!RestrictedToNativeResolution(build_)) {
+            return;
+        }
+        if (settings_.Get(kRenderResolutionKey, kNativeResolution) != kNativeResolution) {
+            settings_.Set(kRenderResolutionKey, kNativeResolution);
+        }
+        if (settings_.Get(kAspectRatioKey, kDefaultAspectRatio) != kDefaultAspectRatio) {
+            settings_.Set(kAspectRatioKey, kDefaultAspectRatio);
+        }
     }
 
     PromptStyle InstalledPrompts() const {
@@ -566,10 +585,14 @@ private:
         ui.Row("Monitor", kMonitorHelp);
         MonitorCombo();
         std::vector<trg::Option> aspects;
+        const bool restricted = RestrictedToNativeResolution(build_);
         for (const DcpAspectRatio& aspect : dcp_aspect_ratios) {
-            aspects.push_back({aspect.key, aspect.name});
+            if (!restricted || std::string_view(aspect.key) == kDefaultAspectRatio) {
+                aspects.push_back({aspect.key, aspect.name});
+            }
         }
-        ui.Combo("Aspect Ratio", kAspectRatioHelp, kAspectRatioKey, kDefaultAspectRatio, aspects);
+        ui.Combo("Aspect Ratio", restricted ? kRestrictedAspectRatioHelp : kAspectRatioHelp, kAspectRatioKey,
+                 kDefaultAspectRatio, aspects);
         if (&SavedAspectRatio() != &previous_aspect) {
             const int height = settings_.GetInt(kWindowHeightKey, kDefaultWindowHeight);
             settings_.SetInt(kWindowWidthKey, WindowSizeOf(height, SavedAspectRatio()).width);
@@ -650,11 +673,15 @@ private:
     }
 
     void PageGraphics(trg::Ui& ui) {
+        const bool custom = !RestrictedToNativeResolution(build_);
         std::vector<trg::Option> options;
         for (const DcpResolution& resolution : dcp_resolutions) {
-            options.push_back({resolution.key, ResolutionLabel(resolution)});
+            if (custom || std::string_view(resolution.key) == kNativeResolution) {
+                options.push_back({resolution.key, ResolutionLabel(resolution)});
+            }
         }
-        ui.Combo("Render resolution", kRenderResolutionHelp, kRenderResolutionKey, kNativeResolution, options);
+        ui.Combo("Render resolution", custom ? kRenderResolutionHelp : kRestrictedRenderResolutionHelp,
+                 kRenderResolutionKey, kNativeResolution, options);
         ui.Toggle("Anti-aliasing", kAntiAliasingHelp, kAntiAliasingKey, false, "Off", "SMAA");
         ui.Combo("Texture filtering", kAnisotropyHelp, kAnisotropyKey, "0",
                  {{"0", "Game"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}});

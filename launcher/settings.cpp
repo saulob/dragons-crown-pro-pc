@@ -216,14 +216,20 @@ bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool sk
 
 } // namespace dcp
 
-extern "C" int dcp_render_resolution(const char* settings_file) {
+extern "C" int dcp_render_resolution(const char* settings_file, const char* image_dir) {
     using namespace dcp;
+    if (RestrictedToNativeResolution(BuildOfImageDir(image_dir))) {
+        return 0;
+    }
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return dcp_resolution_index(settings.Get(kRenderResolutionKey, kNativeResolution).c_str());
 }
 
-extern "C" int dcp_aspect_ratio(const char* settings_file) {
+extern "C" int dcp_aspect_ratio(const char* settings_file, const char* image_dir) {
     using namespace dcp;
+    if (RestrictedToNativeResolution(BuildOfImageDir(image_dir))) {
+        return 0;
+    }
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return dcp_aspect_index(settings.Get(kAspectRatioKey, kDefaultAspectRatio).c_str());
 }

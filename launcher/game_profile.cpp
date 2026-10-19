@@ -185,7 +185,7 @@ constexpr GameBuild kGameBuilds[] = {
         "HP0177-CUSA10209_00-DRAGONSCROWN0001",
         "1.02",
         "CUSA10209-1.02",
-        "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b",
+        "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5",
         "DRACRO_CK.CPK",
         {},
         "CUSA10209 1.02 Asia/Hong Kong",
@@ -193,7 +193,7 @@ constexpr GameBuild kGameBuilds[] = {
         false,
         false,
         kAsia102Layers,
-        kAsiaResolutionSites,
+        {},
         kAsiaLanguages,
     },
 };
@@ -228,6 +228,10 @@ const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> 
 
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build) {
     return build ? build->text_languages : std::span<const TextLanguage>(kWesternLanguages);
+}
+
+bool RestrictedToNativeResolution(const GameBuild* build) {
+    return build && build->resolution_sites.empty();
 }
 
 const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view key) {

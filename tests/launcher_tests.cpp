@@ -1088,6 +1088,16 @@ void TestTextLanguage(const fs::path& base) {
         CHECK(!IsValidSetting(kTextLanguageKey, absent));
         CHECK(ResolveTextLanguage(&kCk, absent).ps4_id == 10);
     }
+    // Both CUSA10209 builds share one list: Traditional Chinese and Korean, no Western or Simplified Chinese language.
+    for (const GameBuild* asia : {&kCk100, &kCk}) {
+        const std::span<const TextLanguage> languages = TextLanguagesOf(asia);
+        CHECK(languages.size() == 2 && languages[0].key == "traditional_chinese" && languages[1].key == "korean");
+        CHECK(languages[0].ps4_id == 10 && languages[1].ps4_id == 9);
+        for (const char* absent : {"english", "french", "german", "italian", "spanish", "simplified_chinese"}) {
+            CHECK(std::none_of(languages.begin(), languages.end(),
+                               [&](const TextLanguage& language) { return language.key == absent; }));
+        }
+    }
 
     for (const char* unlisted : {"English", "japanese", "fr", "2", ""}) {
         WriteAll(file, std::string("text_language=") + unlisted + "\n");
@@ -1110,8 +1120,8 @@ void TestRenderResolution(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "render" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    CHECK(dcp_render_resolution(file.string().c_str()) == 0); // no file: native
-    CHECK(dcp_render_resolution(nullptr) == 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 0); // no file: native
+    CHECK(dcp_render_resolution(nullptr, nullptr) == 0);
 
     struct Expected { const char* key; const char* name; int width, height, pro; };
     const Expected expected[] = {{"native", "Native (1080p)", 1920, 1080, 0}, {"480p", "480p", 854, 480, 0},
@@ -1129,7 +1139,7 @@ void TestRenderResolution(const fs::path& base) {
             CHECK(settings.Save());
         }
         CHECK(WrittenValue(ReadAll(file), "render_resolution", expected[i].key));
-        CHECK(dcp_render_resolution(file.string().c_str()) == i);
+        CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == i);
     }
     CHECK(ResolutionLabel(dcp_resolutions[0]) == "Native (1080p) \xE2\x80\x94 1920 \xC3\x97 1080");
     {
@@ -1138,10 +1148,10 @@ void TestRenderResolution(const fs::path& base) {
         CHECK(settings.Save());
     }
     CHECK(WrittenValue(ReadAll(file), "render_resolution", "native"));
-    CHECK(dcp_render_resolution(file.string().c_str()) == 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 0);
     for (const char* unlisted : {"720P", "900p", "8K", ""}) {
         WriteAll(file, std::string("render_resolution=") + unlisted + "\n");
-        CHECK(dcp_render_resolution(file.string().c_str()) == 0);
+        CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 0);
     }
 
     bool managed = false;
@@ -1205,7 +1215,7 @@ void TestRenderResolution(const fs::path& base) {
 void TestAspectRatio(const fs::path& base) {
     const fs::path file = base / "aspect" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    CHECK(dcp_aspect_ratio(file.string().c_str()) == 0 && dcp_aspect_ratio(nullptr) == 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == 0 && dcp_aspect_ratio(nullptr, nullptr) == 0);
 
     struct Expected { const char* key; const char* name; int width_1080; int width_720; };
     const Expected expected[] = {{"16:9", "16:9 Original", 1920, 1280}, {"16:10", "16:10", 1728, 1152},
@@ -1221,7 +1231,7 @@ void TestAspectRatio(const fs::path& base) {
             CHECK(settings.Save());
         }
         CHECK(WrittenValue(ReadAll(file), "aspect_ratio", expected[i].key));
-        CHECK(dcp_aspect_ratio(file.string().c_str()) == i);
+        CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == i);
         CHECK(IsValidSetting(kAspectRatioKey, expected[i].key));
 
         const DcpResolution native = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[i]);
@@ -1232,7 +1242,7 @@ void TestAspectRatio(const fs::path& base) {
     }
     for (const char* invalid : {"", "16:9 Original", "2:1", "21x9", "4:3x", "16:9:"}) {
         WriteAll(file, std::string("aspect_ratio=") + invalid + "\n");
-        CHECK(dcp_aspect_ratio(file.string().c_str()) == 0);
+        CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == 0);
         CHECK(!std::string(invalid).empty() ? !IsValidSetting(kAspectRatioKey, invalid) : true);
     }
     CHECK(dcp_aspect_index(nullptr) == 0);
@@ -1270,6 +1280,9 @@ void TestAspectRatio(const fs::path& base) {
     // The patch writes the target into the build's sites; a damaged site refuses the whole image.
     for (const GameBuild& build : SupportedBuilds()) {
         const auto sites = build.resolution_sites;
+        if (sites.empty()) {
+            continue;
+        }
         uint64_t size = 0;
         for (const DcpResolutionSite& site : sites) {
             size = std::max<uint64_t>(size, site.offset + site.opcode_length + 4u);
@@ -1358,7 +1371,7 @@ void TestPresentation(const fs::path& base) {
     CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == "letterbox");
     DcpSettings::Values old;
     CHECK(DcpSettings::Read(file.string(), old) && !old.vsync && old.presentation == DcpGraphics::Letterbox);
-    CHECK(dcp_aspect_ratio(file.string().c_str()) == 2 && dcp_render_resolution(file.string().c_str()) == 3);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == 2 && dcp_render_resolution(file.string().c_str(), nullptr) == 3);
 
     // Changing Presentation leaves the aspect ratio and the render resolution as they are, at every ratio.
     for (const int aspect : {0, 2, 4}) {
@@ -1371,8 +1384,8 @@ void TestPresentation(const fs::path& base) {
             }
             CHECK(WrittenValue(ReadAll(file), "aspect_ratio", dcp_aspect_ratios[aspect].key));
             CHECK(WrittenValue(ReadAll(file), "render_resolution", "1440p"));
-            CHECK(dcp_aspect_ratio(file.string().c_str()) == aspect);
-            CHECK(dcp_render_resolution(file.string().c_str()) == 3);
+            CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == aspect);
+            CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 3);
             DcpSettings::Values fit;
             CHECK(DcpSettings::Read(file.string(), fit) && fit.presentation == DcpGraphics::ParsePresentation(value));
         }
@@ -2238,7 +2251,6 @@ void TestLayers(const fs::path& base) {
     CheckSites(kJp100);
     CheckSites(kJp102);
     CheckSites(kJp103);
-    CheckSites(kCk);
     CheckSites(kCk100);
     CHECK(std::string(kJp100.title_id) == "CUSA07001" && std::string(kJp100.content_id) == "JP0005-CUSA07001_00-DRAGONSCROWN0001");
     CHECK(std::string(FinishedLayer(kJp100).app_ver) == "01.00" && std::string(FinishedLayer(kJp100).sfo_version) == "01.00");
@@ -2624,7 +2636,7 @@ void TestActivation(const fs::path& base) {
     const Paths loader_100 = ResolvePaths(PathRequest{}, root / "exe");
     CHECK(loader_100.app0 == BuildPaths(roots, builds[1]).app0);
 
-    // The US and CUSA10209 builds keep their single version: selecting the active one is up to date.
+    // The US build keeps its single version; the CUSA10209 1.02 update activates over its own prepared folder.
     CHECK(switches(3, "us.pkg", 0));
     CHECK(select("us.pkg").status == InstallStatus::kUpToDate && active().build == &builds[0]);
     CHECK(switches(0, "ck.pkg", 4));
@@ -2718,19 +2730,25 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(kUs.folder) == "v1.03" && std::string(kCk.folder) == "CUSA10209-1.02");
     CHECK(std::string(kCk.content_id) == "HP0177-CUSA10209_00-DRAGONSCROWN0001");
     CHECK(std::string(FinishedLayer(kCk).app_ver) == "01.02" && std::string(FinishedLayer(kCk).sfo_version) == "01.00" && std::string(kCk.version) == "1.02");
-    CHECK(std::string(kCk.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
+    CHECK(std::string(kCk.eboot_sha256) == "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5");
     CHECK(std::string(kCk.regional_archive) == "DRACRO_CK.CPK" && std::string(kUs.regional_archive) == "DRACRO_US.CPK");
     CHECK(!kCk.cheats && !kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
-    CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.size() == 23);
-    CHECK(kCk.resolution_sites.front().offset == 0x5978a8 && kCk.resolution_sites.back().offset == 0x598128);
+    // 1.00 and 1.02 are different executables: only 1.00 has verified render resolution sites.
+    CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.empty());
+    CHECK(kCk100.resolution_sites.size() == 23);
+    CHECK(kCk100.resolution_sites.front().offset == 0x5978a8 && kCk100.resolution_sites.back().offset == 0x598128);
+    CHECK(!RestrictedToNativeResolution(&kUs) && !RestrictedToNativeResolution(&kCk100));
+    CHECK(RestrictedToNativeResolution(&kCk) && !RestrictedToNativeResolution(nullptr));
 
     CHECK(CheckSfoIdentity(SfoFor(kCk)).build == &kCk);
     CHECK(CheckSfoIdentity(SfoFor(kCk100)).build == &kCk100);
     CHECK(std::string(kCk100.label) == "CUSA10209 1.00 Asia/Hong Kong" && std::string(kCk100.folder) == "CUSA10209-1.00");
     CHECK(std::string(FinishedLayer(kCk100).app_ver) == "01.00" && std::string(FinishedLayer(kCk100).sfo_version) == "01.02");
-    CHECK(std::string(kCk100.eboot_sha256) == kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
-    CHECK(!kCk100.cheats && !kCk100.xbox_prompts && kCk100.resolution_sites.data() == kCk.resolution_sites.data());
-    CHECK(kCk100.resolution_sites.size() == 23 && kCk100.layers.size() == 1 && BaseBuildOf(kCk) == &kCk100 && BaseBuildOf(kCk100) == nullptr);
+    CHECK(std::string(kCk100.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
+    CHECK(std::string(kCk100.eboot_sha256) != kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
+    CHECK(!kCk100.cheats && !kCk100.xbox_prompts);
+    CHECK(std::string(kCk100.folder) != kCk.folder);
+    CHECK(kCk100.layers.size() == 1 && BaseBuildOf(kCk) == &kCk100 && BaseBuildOf(kCk100) == nullptr);
     CHECK(kCk.layers.size() == 2 && kCk.layers[1].update);
     const GameCheck ck_update = CheckPackageIdentity(PackageSfo(kCk, "01.02", "01.00", "gp"));
     CHECK(ck_update.build == &kCk && ck_update.layer == 1);
@@ -2757,8 +2775,11 @@ void TestBuilds(const fs::path& base) {
         return dcp_game_build(report_dir.string().c_str(), &game) ? std::string(game.label) : std::string();
     };
     CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.02") == kCk.label);
-    CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.00") == kCk100.label);
-    CHECK(build_label("CUSA10209", kCk.eboot_sha256).empty());
+    CHECK(build_label("CUSA10209", kCk100.eboot_sha256, "01.00") == kCk100.label);
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256) == kCk.label);       // each distinct hash names its own build
+    CHECK(build_label("CUSA10209", kCk100.eboot_sha256) == kCk100.label);
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.00").empty());   // and never the other one
+    CHECK(build_label("CUSA10209", kCk100.eboot_sha256, "01.02").empty());
     CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.01").empty());
     CHECK(build_label("CUSA10454", kUs.eboot_sha256) == kUs.label);
     CHECK(build_label("CUSA10209", "05dad7c244e76df186eb440818bed6c567aadec1180595a04975fab6d848edf2").empty());
@@ -2770,7 +2791,7 @@ void TestBuilds(const fs::path& base) {
     WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\",\n  \"app_ver\": \"01.02\"\n}");
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
-    CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 23 && ck_game.resolution_sites == kCk.resolution_sites.data());
+    CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
 
     {
         Fixture ck(base, "ck-valid", kCk);
@@ -2830,35 +2851,44 @@ void TestBuilds(const fs::path& base) {
         CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == "ck archive" && ReadAll(app0 / "DRACRO.CPK") == "shared archive");
     }
 
+    // CUSA10209 1.02 has no verified render resolution sites, so it can never receive the 1.00 table: its table is empty
+    // and applying it writes nothing.
+    CHECK(kCk.resolution_sites.empty() && kCk.resolution_sites.data() != kCk100.resolution_sites.data());
     {
-        const auto sites = kCk.resolution_sites;
-        uint64_t size = 0;
-        for (const DcpResolutionSite& site : sites) {
-            size = std::max<uint64_t>(size, site.offset + site.opcode_length + 4u);
-        }
-        std::vector<unsigned char> image(size + 16, 0x90);
-        for (const DcpResolutionSite& site : sites) {
-            std::memcpy(&image[site.offset], site.opcode, site.opcode_length);
-            std::memcpy(&image[site.offset + site.opcode_length], &site.value, 4);
-        }
+        std::vector<unsigned char> image(64, 0x90);
+        const std::vector<unsigned char> before = image;
         char error[160];
-        std::vector<unsigned char> patched = image;
-        CHECK(dcp_apply_resolution(patched.data(), patched.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
-        for (const DcpResolutionSite& site : sites) {
-            uint32_t value = 0;
-            std::memcpy(&value, &patched[site.offset + site.opcode_length], 4);
-            CHECK(value == uint32_t(site.height ? dcp_resolutions[5].height : dcp_resolutions[5].width));
-        }
-        std::vector<unsigned char> damaged = image;
-        const DcpResolutionSite& bad = sites[11];
-        damaged[bad.offset + bad.opcode_length] ^= 1;
-        const std::vector<unsigned char> before = damaged;
-        CHECK(!dcp_apply_resolution(damaged.data(), damaged.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
-        CHECK(damaged == before);
-        char at[32];
-        snprintf(at, sizeof(at), "0x%x", unsigned(bad.offset));
-        CHECK(std::string(error).find(at) != std::string::npos);
+        CHECK(dcp_apply_resolution(image.data(), image.size(), kCk.resolution_sites.data(), kCk.resolution_sites.size(),
+                                   &dcp_resolutions[5], error, sizeof(error)));
+        CHECK(image == before);
     }
+}
+
+// CUSA10209 1.02 has no verified render resolution sites, so only the native render resolution and 16:9 are effective,
+// whatever `dcp.ini` saved; CUSA10209 1.00 keeps the whole list.
+void TestCusa10209Graphics(const fs::path& base) {
+    const fs::path root = base / "cusa10209-graphics";
+    fs::remove_all(root);
+    const fs::path file = root / "dcp.ini";
+    const fs::path dir100 = root / "image-1.00", dir102 = root / "image-1.02";
+    WriteAll(dir100 / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") +
+                                        kCk100.eboot_sha256 + "\",\n  \"app_ver\": \"01.00\"\n}");
+    WriteAll(dir102 / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") +
+                                        kCk.eboot_sha256 + "\",\n  \"app_ver\": \"01.02\"\n}");
+    CHECK(BuildOfImageDir(dir100.string().c_str()) == &kCk100);
+    CHECK(BuildOfImageDir(dir102.string().c_str()) == &kCk);
+
+    WriteAll(file, "render_resolution=4K\naspect_ratio=21:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir102.string().c_str()) == 0); // 1.02 falls back to native
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);      // and to 16:9
+    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0); // 1.00 keeps them
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir100.string().c_str()) != 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), nullptr) != 0);                 // the unknown build too
+    CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) != 0);
+
+    WriteAll(file, "render_resolution=native\naspect_ratio=16:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir102.string().c_str()) == 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);
 }
 
 int main(int argc, char** argv) {
@@ -2925,6 +2955,7 @@ int main(int argc, char** argv) {
     TestControllerPrompts(base);
     TestSafeMode(base);
     TestBuilds(base);
+    TestCusa10209Graphics(base);
     TestLayers(base);
     TestUsBuild();
     TestLegacyMarker(base);

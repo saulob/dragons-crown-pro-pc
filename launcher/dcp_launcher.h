@@ -45,13 +45,14 @@ typedef struct {
 /* 0 when the executable's folder is unknown or a path does not fit. */
 int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
 
-/* Index into dcp_resolutions (dcp_resolution.h) of the render_resolution in the settings file; 0 (native) when the
- * file or the value is missing. */
-int dcp_render_resolution(const char *settings_file);
+/* Index into dcp_resolutions (dcp_resolution.h) of the render_resolution in the settings file, among the resolutions the
+ * build image_dir was built from: 0 (native) when the file or the value is missing or the build has no verified render
+ * resolution sites. */
+int dcp_render_resolution(const char *settings_file, const char *image_dir);
 
-/* Index into dcp_aspect_ratios of the aspect_ratio in the settings file; 0 (16:9 Original) when the file or the value
- * is missing. */
-int dcp_aspect_ratio(const char *settings_file);
+/* Index into dcp_aspect_ratios of the aspect_ratio in the settings file, among the shapes the build image_dir was built
+ * from: 0 (16:9 Original) when the file or the value is missing or the build has no verified render resolution sites. */
+int dcp_aspect_ratio(const char *settings_file, const char *image_dir);
 
 /* The system language the game is told for the text_language in the settings file, among the languages of the build
  * image_dir was built from: the build's default (English when the build is unknown) when the file or the value is

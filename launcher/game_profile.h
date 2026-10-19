@@ -54,6 +54,11 @@ const PackageLayer& FinishedLayer(const GameBuild& build);
 // The build whose base package a build's update is laid over, or nullptr when the build has no update.
 const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> builds = SupportedBuilds());
 
+// True when the build's executable has no verified render resolution sites: it then runs only at its native 16:9 size.
+// The launcher hides and the loader refuses the custom Render resolution and Aspect Ratio for such a build; the unknown
+// build (nullptr) is not restricted here, and the loader refuses to patch it anyway.
+bool RestrictedToNativeResolution(const GameBuild* build);
+
 // The build's languages; the Western ones when the build is not known.
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);
 

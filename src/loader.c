@@ -419,8 +419,8 @@ int main(int argc, char **argv) {
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
     printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");
-    render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file)];
-    aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file)];
+    render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
+    aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
     runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
@@ -626,6 +626,8 @@ int main(int argc, char **argv) {
     if (render_resolution!=&dcp_resolutions[0] || aspect_ratio!=&dcp_aspect_ratios[0]) {
         char error[320];
         if (!known_build) fail_running("render resolution and aspect ratio need a supported game build");
+        if (game_build.resolution_site_count==0)
+            fail_running("render resolution and aspect ratio are not available for this game build");
         if (!dcp_apply_resolution(image,size,game_build.resolution_sites,game_build.resolution_site_count,
                                   &render_target,error,sizeof(error))) {
             char message[400];
