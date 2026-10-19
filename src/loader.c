@@ -10,6 +10,7 @@
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
 #include "startup_save_hook.h"
+#include "voice_hooks.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
@@ -436,6 +437,13 @@ int main(int argc, char **argv) {
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
     runtime_pad_set_settings(settings_file);
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file));
+    voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
+    dcp_log_gameplay_settings(settings_file, paths.image_dir);
+    if (known_build && game_build.cheats) {
+        runtime_cheats_log_enabled();
+    } else {
+        printf("Cheats: enabled: none\n");
+    }
     if (content_profile) {
         FILE *profile=fopen(content_profile,"rb");
         unsigned char data[28];
@@ -568,7 +576,9 @@ int main(int argc, char **argv) {
         }
     }
     const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
-    const size_t hook_bytes = round_page(cheat_stub_bytes + startup_save_hook_stub_bytes());
+    const size_t save_stub_bytes = startup_save_hook_stub_bytes();
+    const size_t voice_stub_bytes = voice_hooks_stub_bytes();
+    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes);
     image = allocate(round_page(size) + hook_bytes); /* the hook stubs follow the image, within a jump of it */
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
@@ -647,6 +657,8 @@ int main(int argc, char **argv) {
     }
     if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
+    if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
+        voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);

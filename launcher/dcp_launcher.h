@@ -70,8 +70,14 @@ unsigned dcp_saved_cheats(const char *settings_file);
  * one of those. */
 int dcp_saved_experience_multiplier(const char *settings_file);
 
+/* 1 when the settings file routes the NPC voice cues to the Japanese banks (dcp_japanese_npc_voices; 0 by default). */
+int dcp_japanese_npc_voices(const char *settings_file);
+
 /* 1 when the settings file keeps the logs of normal sessions (detailed_logging; 1 by default). */
 int dcp_detailed_logging(const char *settings_file);
+
+/* Prints the effective Gameplay page settings, including the Japanese NPC Voices state after build gating. */
+void dcp_log_gameplay_settings(const char *settings_file, const char *image_dir);
 
 /* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
  * usable Vulkan on Linux); enumerates only, no device is created. */
@@ -88,6 +94,7 @@ int dcp_build_boot_image(const char *app0, const char *out, char *error, size_t 
 typedef struct {
     const char *label;
     int cheats;                  /* the native cheat hooks are validated for this build */
+    int japanese_npc_voices;     /* the NPC voice routing hook is validated for this build */
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
 } DcpGameBuild;

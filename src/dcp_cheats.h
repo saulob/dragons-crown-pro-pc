@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <string>
 #include <string_view>
 
 namespace dcp::cheats {
@@ -365,6 +366,20 @@ constexpr RefillPlan PlanRefill(bool health_pending, bool mana_pending, uint32_t
 // The saved settings as a bit per cheat, the form the loader hands to the runtime.
 constexpr uint32_t Bit(Cheat cheat) {
     return uint32_t{1} << Index(cheat);
+}
+
+inline std::string EnabledCheatsText(uint32_t mask) {
+    std::string text;
+    for (const CheatInfo& info : kCheats) {
+        if ((mask & Bit(info.cheat)) == 0) {
+            continue;
+        }
+        if (!text.empty()) {
+            text += ", ";
+        }
+        text += info.label;
+    }
+    return text.empty() ? "none" : text;
 }
 
 constexpr bool RefillsOnEnable(Cheat cheat) {

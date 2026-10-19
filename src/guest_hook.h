@@ -18,7 +18,7 @@ extern "C" {
 typedef struct {
     uint8_t xmm[8][16];
     uint64_t r15, r14, r13, r12, rbp, rbx, r11, r10, r9, r8, rdi, rsi, rdx, rcx, rax, rflags;
-    uint64_t skip; /* set by a handler at a function's first instruction: return to the caller now, rax as left */
+    uint64_t skip; /* set by a handler: return to the caller now, rax as left; only where the return address is still on top */
 } GuestRegs;
 
 typedef void (GUEST_HOOK_ABI *GuestHookHandler)(GuestRegs *regs);

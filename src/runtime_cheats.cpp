@@ -1,6 +1,7 @@
 #include "runtime_cheats.h"
 
 #include <atomic>
+#include <cstdio>
 
 #include "dcp_cheats.h"
 
@@ -102,6 +103,18 @@ extern "C" unsigned runtime_cheat_refills_pending(void) {
         }
     }
     return mask;
+}
+
+extern "C" void runtime_cheats_log_enabled(void) {
+    uint32_t mask = 0;
+    for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
+        if (runtime_cheat_enabled(static_cast<int>(info.cheat))) {
+            mask |= dcp::cheats::Bit(info.cheat);
+        }
+    }
+    std::printf("Cheats: enabled: %s\n", dcp::cheats::EnabledCheatsText(mask).c_str());
+    std::printf("Cheats: Experience Multiplier %s\n",
+                dcp::cheats::ExperienceMultiplierLabel(runtime_cheat_experience_multiplier()));
 }
 
 extern "C" int runtime_cheat_take_refill(int cheat) {

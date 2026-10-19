@@ -20,6 +20,9 @@ void runtime_log_mark_crash(void) { crash_reported = 1; }
 
 void runtime_log_set_session_path(const char *path) {
     snprintf(session_log_path, sizeof(session_log_path), "%s", path ? path : "");
+    clean_exit = 0;
+    crash_reported = 0;
+    finalized = 0;
 }
 
 void runtime_log_finalize(void) {

@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dcp-loader)
-((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dcp-loader
 [[ -x $loader ]] || die "Missing $loader"
@@ -107,6 +107,8 @@ if ((test)); then
     "$build_dir/bin/dcp-trophy-tests"
     step 'Running the cheat tests'
     "$build_dir/bin/dcp-cheats-tests"
+    step 'Running the Japanese NPC voice tests'
+    "$build_dir/bin/dcp-voice-tests"
     step 'Running the runtime tests (memory, fibers)'
     "$build_dir/bin/dcp-runtime-tests"
     step 'Running the text tests (text dialog, system font set)'

@@ -94,6 +94,13 @@ void TestCheatList() {
           "for offline and local play.");
     CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 2 && Bit(Cheat::MovementSpeed) == 128);
     CHECK(std::string(kMovementSpeedKey) == "cheat_movement_speed_2x");
+    CHECK(EnabledCheatsText(0) == "none");
+    CHECK(EnabledCheatsText(Bit(Cheat::InfiniteHealth)) == "Infinite Health");
+    CHECK(EnabledCheatsText(Bit(Cheat::InfiniteHealth) | Bit(Cheat::MovementSpeed)) ==
+          "Infinite Health, Movement Speed 2x");
+    CHECK(EnabledCheatsText(0xffffffffu) ==
+          "Infinite Health, Infinite Mana, Infinite Lives, Infinite Durability, Infinite Arrows, Infinite Skill "
+          "Points, Infinite Gold, Movement Speed 2x");
 }
 
 void TestSessionOverride() {

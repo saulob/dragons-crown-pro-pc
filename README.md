@@ -128,6 +128,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 
 ### Gameplay
 - **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
+- **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. CUSA10454 1.00 USA only; narrator and player-character choices are unchanged
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
 - **Frame counter**: shows the frame rate and frame time in a corner of the game

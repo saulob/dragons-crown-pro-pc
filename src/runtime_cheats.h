@@ -39,6 +39,9 @@ void runtime_cheat_clear_actions(void);
 /* The in-game menu's toggle. Only this session changes; nothing is written to the settings file. */
 void runtime_cheat_toggle(int cheat);
 
+/* Prints the enabled cheats and the Experience Multiplier, once the saved settings are in effect. */
+void runtime_cheats_log_enabled(void);
+
 /* The native hooks the cheats need: the room for their stubs, and the installation on the loaded image (before its
  * relocations are made executable). 0 when the image is not the supported v1.03: the game then runs without cheats. */
 size_t runtime_cheat_hooks_stub_bytes(void);

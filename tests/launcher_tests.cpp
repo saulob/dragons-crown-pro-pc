@@ -459,6 +459,18 @@ void TestPaths() {
     CHECK(fs::weakly_canonical(PathFromUtf8(found.logs_dir)) == fs::weakly_canonical(repository / "build" / "logs"));
     const DcpPathRequest explicit_user{nullptr, nullptr, nullptr, "D:/elsewhere", nullptr};
     CHECK(dcp_resolve_paths(&explicit_user, &found) == 1 && std::string(found.user_dir) == "D:/elsewhere");
+
+    // The log folder follows the executable, never the current working directory.
+    const fs::path cwd = fs::current_path();
+    std::error_code ec;
+    fs::current_path(fs::temp_directory_path(), ec);
+    if (!ec) {
+        DcpPaths from_elsewhere;
+        CHECK(dcp_resolve_paths(&nothing, &from_elsewhere) == 1);
+        CHECK(fs::path(from_elsewhere.logs_dir) == fs::path(found.logs_dir));
+        fs::current_path(cwd, ec);
+        CHECK(!ec);
+    }
 }
 
 // Creates a log the way the loader does and writes some text into it; the path, or empty on failure.
@@ -486,6 +498,9 @@ void TestLogNumbering(const fs::path& base) {
     const fs::path dir = base / "numbered" / "logs";
     const std::string first = CreateLog(dir, nullptr, "one");
     CHECK(fs::path(first).filename() == "dragons_crown_pro_001.log");
+    char folder[4096];
+    CHECK(dcp_logs_directory(dir.string().c_str(), first.c_str(), folder, sizeof(folder)) == 1);
+    CHECK(fs::path(folder) == dir); // the launcher's logs folder is the loader's log directory
     const std::string second = CreateLog(dir, nullptr, "two");
     CHECK(fs::path(second).filename() == "dragons_crown_pro_002.log");
     CHECK(ReadAll(first) == "one" && ReadAll(second) == "two"); // an earlier log is never overwritten
@@ -527,13 +542,14 @@ void TestDefaultLogFolders(const fs::path& base) {
 // Last: it redirects this process's stdout and stderr.
 void TestLogRedirect(const fs::path& base) {
     char path[4096];
-    CHECK(runtime_log_start((base / "tee").string().c_str(), nullptr, path, sizeof(path)) == 1);
+    const fs::path capture = base / "tee" / "test_capture.log";
+    CHECK(runtime_log_start((base / "tee").string().c_str(), capture.string().c_str(), path, sizeof(path)) == 1);
     std::printf("stdout marker\n");
     std::fflush(stdout);
     std::fprintf(stderr, "stderr marker\n");
     runtime_log_flush();
     const std::string text = ReadAll(path);
-    CHECK(fs::path(path).filename() == "dragons_crown_pro_001.log");
+    CHECK(fs::path(path) == capture); // a test capture, never a dragons_crown_pro_*.log
     CHECK(text.find("stdout marker\nstderr marker\n") != std::string::npos);
 }
 
@@ -1045,20 +1061,112 @@ void TestLogRetention(const fs::path& base) {
     CHECK(!runtime_log_should_remove(0, 0, 0));
     CHECK(!runtime_log_should_remove(0, 1, 1));
 
-    const fs::path file = base / "logging" / "run.log";
-    fs::create_directories(file.parent_path());
-    WriteAll(file, "run\n");
-    runtime_log_set_session_path(file.string().c_str());
+    const fs::path dir = base / "logging";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const auto session = [&](const char* name) {
+        const fs::path file = dir / name;
+        WriteAll(file, name);
+        runtime_log_set_session_path(file.string().c_str());
+        return file;
+    };
+
+    // Off: the session log is active, then a clean shutdown deletes it.
+    const fs::path off_clean = session("dragons_crown_pro_001.log");
     runtime_log_set_detailed(0);
+    CHECK(fs::exists(off_clean));
     runtime_log_mark_clean_exit();
     runtime_log_finalize();
-    CHECK(!fs::exists(file));
+    CHECK(!fs::exists(off_clean));
+
+    // Off: a crash keeps the log, even with a clean mark present.
+    const fs::path off_crash = session("dragons_crown_pro_002.log");
+    runtime_log_set_detailed(0);
+    runtime_log_mark_clean_exit();
+    runtime_log_mark_crash();
+    runtime_log_finalize();
+    CHECK(fs::exists(off_crash));
+
+    // Off: a path that never marked a clean exit is abnormal and keeps the log.
+    const fs::path off_abnormal = session("dragons_crown_pro_003.log");
+    runtime_log_set_detailed(0);
+    runtime_log_finalize();
+    CHECK(fs::exists(off_abnormal));
+
+    // On: the session log is active and kept after a clean shutdown.
+    const fs::path on_clean = session("dragons_crown_pro_004.log");
+    runtime_log_set_detailed(1);
+    CHECK(fs::exists(on_clean));
+    runtime_log_mark_clean_exit();
+    runtime_log_finalize();
+    CHECK(fs::exists(on_clean));
+
+    const fs::path on_crash = session("dragons_crown_pro_005.log");
+    runtime_log_set_detailed(1);
+    runtime_log_mark_clean_exit();
+    runtime_log_mark_crash();
+    runtime_log_finalize();
+    CHECK(fs::exists(on_crash));
+
+    // History: a new numbered log never overwrites an older one.
+    const fs::path history = dir / "history";
+    CHECK(fs::path(CreateLog(history, nullptr, "one")).filename() == "dragons_crown_pro_001.log");
+    CHECK(fs::path(CreateLog(history, nullptr, "two")).filename() == "dragons_crown_pro_002.log");
+    CHECK(fs::exists(history / "dragons_crown_pro_001.log"));
 
     const fs::path source(DCP_SOURCE_DIR);
     const std::string loader = ReadAll(source / "src" / "loader.c");
     CHECK(loader.find("runtime_log_install_cleanup()") != std::string::npos);
     CHECK(loader.find("dcp_detailed_logging(settings_file)") != std::string::npos);
+    CHECK(loader.find("runtime_log_mark_clean_exit()") != std::string::npos);
+    CHECK(loader.find("runtime_log_mark_crash()") != std::string::npos);
     CHECK(ReadAll(source / "gpu" / "shim" / "dcpgpu.cpp").find("runtime_log_finalize()") != std::string::npos);
+}
+
+void TestJapaneseNpcVoiceSetting(const fs::path& base) {
+    const fs::path file = base / "npc_voices" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto launcher_default = [](std::string_view key) {
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            if (setting.key == key) {
+                return std::string(setting.default_value);
+            }
+        }
+        return std::string("<missing>");
+    };
+    CHECK(launcher_default(kJapaneseNpcVoicesKey) == "0");
+    CHECK(dcp_japanese_npc_voices(nullptr) == 0);
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kJapaneseNpcVoicesKey, true);
+        CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0); // pending until Save
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 1);
+    CHECK(WrittenValue(ReadAll(file), kJapaneseNpcVoicesKey, "1"));
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kJapaneseNpcVoicesKey, false));
+        settings.SetBool(kJapaneseNpcVoicesKey, false);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+    CHECK(WrittenValue(ReadAll(file), kJapaneseNpcVoicesKey, "0"));
+    WriteAll(file, "dcp_japanese_npc_voices = on\n");
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 1);
+    WriteAll(file, "dcp_japanese_npc_voices = garbage\n");
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+
+    // A saved On is inert on every build without the verified hook.
+    CHECK(!SupportsJapaneseNpcVoices(&kUs101));
+    CHECK(!SupportsJapaneseNpcVoices(&kJp100));
+    CHECK(!SupportsJapaneseNpcVoices(&kJp102));
+    CHECK(!SupportsJapaneseNpcVoices(&kJp103));
+    CHECK(!SupportsJapaneseNpcVoices(&kCk100));
+    CHECK(!SupportsJapaneseNpcVoices(&kCk));
+    CHECK(!SupportsJapaneseNpcVoices(nullptr));
 }
 
 void TestCheatSettings(const fs::path& base) {
@@ -2573,6 +2681,9 @@ void TestUsBuild() {
           std::string(FinishedLayer(kUs).sfo_version) == "01.03");
     CHECK(std::string(kUs.eboot_sha256) == "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a");
     CHECK(kUs.cheats && kUs.xbox_prompts && kUs.resolution_sites.size() == 23 && BaseBuildOf(kUs) == nullptr);
+    CHECK(kUs.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs));
+    CHECK(!kUs101.japanese_npc_voices && !SupportsJapaneseNpcVoices(&kUs101));
+    CHECK(!SupportsJapaneseNpcVoices(nullptr));
 
     CHECK(std::string(kUs101.label) == "CUSA10454 1.01 USA" && std::string(kUs101.version) == "1.01");
     CHECK(std::string(kUs101.folder) == "CUSA10454-1.01" && std::string(kUs101.folder) != kUs.folder);
@@ -2581,7 +2692,11 @@ void TestUsBuild() {
           std::string(FinishedLayer(kUs101).sfo_version) == "01.03");
     CHECK(std::string(kUs101.eboot_sha256) == "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0");
     CHECK(std::string(kUs101.eboot_sha256) != kUs.eboot_sha256);
-    CHECK(!kUs101.cheats && !kUs101.xbox_prompts && kUs101.resolution_sites.empty());
+    CHECK(!kUs101.cheats && !kUs101.xbox_prompts && !kUs101.japanese_npc_voices && kUs101.resolution_sites.empty());
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(build.japanese_npc_voices == (&build == &kUs));
+        CHECK(SupportsJapaneseNpcVoices(&build) == (&build == &kUs));
+    }
     CHECK(BaseBuildOf(kUs101) == &kUs && BaseBuildOf(kUs) == nullptr);
     for (const GameBuild& build : SupportedBuilds()) {
         CHECK((build.cheats || build.xbox_prompts) == (&build == &kUs));
@@ -3130,6 +3245,11 @@ int main(int argc, char** argv) {
                     check.detail.c_str(), check.eboot_sha256.c_str());
         return check.state == GameFileState::kValid ? 0 : 1;
     }
+    // dcp-launcher-tests --log-gameplay <dcp.ini> <image dir>: the startup Gameplay summary, read-only.
+    if (argc == 4 && std::string(argv[1]) == "--log-gameplay") {
+        dcp_log_gameplay_settings(argv[2], argv[3]);
+        return 0;
+    }
     // dcp-launcher-tests --install <.pkg or game folder> <prepared root> <image root>: the launcher's installer without its
     // window.
     if (argc == 5 && std::string(argv[1]) == "--install") {
@@ -3176,6 +3296,7 @@ int main(int argc, char** argv) {
     TestRenderResolution(base);
     TestTextLanguage(base);
     TestCheatSettings(base);
+    TestJapaneseNpcVoiceSetting(base);
     TestAspectRatio(base);
     TestPresentation(base);
     TestGraphicsQuality(base);

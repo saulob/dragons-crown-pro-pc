@@ -121,6 +121,7 @@ constexpr char kArachnophobiaHelp[] =
 constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
+constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
 
 enum class PatchAction { kPrompts, kSafeMode, kRestore };
 
@@ -705,6 +706,9 @@ private:
             settings_.Set(kTextLanguageKey, std::string(effective));
         }
         ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, available.front().key.data(), languages);
+        if (SupportsJapaneseNpcVoices(build_)) {
+            ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
+        }
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
         ui.Toggle("Render resolution in title", kShowResolutionTitleHelp, kShowResolutionTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");

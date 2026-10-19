@@ -1,6 +1,7 @@
 #include "settings.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <deque>
 #include <fstream>
 #include <initializer_list>
@@ -40,6 +41,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kDetailedLoggingKey, "1"},
     {kControllerPromptsKey, "playstation"},
     {kArachnophobiaSafeModeKey, "0"},
+    {kJapaneseNpcVoicesKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
     {cheats::kInfiniteManaKey, "0"},
     {cheats::kInfiniteLivesKey, "0"},
@@ -253,6 +255,15 @@ extern "C" int dcp_saved_experience_multiplier(const char* settings_file) {
     return cheats::ExperienceMultiplierFromSaved(settings.Get(cheats::kExperienceMultiplierKey, "1"));
 }
 
+extern "C" int dcp_japanese_npc_voices(const char* settings_file) {
+    using namespace dcp;
+    if (!settings_file || !*settings_file) {
+        return 0;
+    }
+    const LauncherSettings settings(PathFromUtf8(settings_file));
+    return settings.GetBool(kJapaneseNpcVoicesKey, false) ? 1 : 0;
+}
+
 extern "C" int dcp_detailed_logging(const char* settings_file) {
     using namespace dcp;
     if (!settings_file || !*settings_file) {
@@ -260,6 +271,24 @@ extern "C" int dcp_detailed_logging(const char* settings_file) {
     }
     const LauncherSettings settings(PathFromUtf8(settings_file));
     return settings.GetBool(kDetailedLoggingKey, true) ? 1 : 0;
+}
+
+extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char* image_dir) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const GameBuild* build = BuildOfImageDir(image_dir);
+    const TextLanguage& language = ResolveTextLanguage(build, settings.Get(kTextLanguageKey));
+    std::printf("Gameplay: Menu & Subtitles %.*s\n", static_cast<int>(language.name.size()), language.name.data());
+    std::printf("Gameplay: Frame rate in title %s\n", settings.GetBool(kShowFpsTitleKey, false) ? "on" : "off");
+    std::printf("Gameplay: Render resolution in title %s\n",
+                settings.GetBool(kShowResolutionTitleKey, false) ? "on" : "off");
+    std::printf("Gameplay: Frame counter %s\n", settings.GetBool(kShowFrameCounterKey, false) ? "on" : "off");
+    std::printf("Gameplay: Arachnophobia Safe Mode %s\n",
+                settings.GetBool(kArachnophobiaSafeModeKey, false) ? "on" : "off");
+    const bool supported = SupportsJapaneseNpcVoices(build);
+    const bool voices = supported && settings.GetBool(kJapaneseNpcVoicesKey, false);
+    std::printf("Gameplay: Japanese NPC Voices %s\n", supported ? (voices ? "on" : "off") : "unsupported");
+    std::printf("Japanese NPC Voices: %s\n", supported ? (voices ? "on" : "off") : "unsupported");
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {

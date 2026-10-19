@@ -170,6 +170,7 @@ use the same defaults).
 | `detailed_logging` | 1, 0 | 1 | at exit |
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
+| `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
 | `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_experience_multiplier` | 1 (Off), 2, 5, 10 | 1 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
@@ -269,6 +270,10 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   default) and has no Western or Simplified Chinese text. A saved language the active build does not have shows that build's
   default and is kept in `dcp.ini`. An explicit `DCP_LANGUAGE` environment variable (a PS4 language number) overrides it.
   Voices are chosen inside the game.
+- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 USA only; the option is hidden for
+  the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
+  town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
+  are untouched.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
 - **Render resolution in title**: `Dragon's Crown Pro | 1920x1080`, the render resolution of the game's presented image (not the

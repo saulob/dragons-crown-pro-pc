@@ -428,6 +428,7 @@ extern "C" int dcp_game_build(const char* image_dir, DcpGameBuild* out) {
     }
     out->label = build->label;
     out->cheats = build->cheats;
+    out->japanese_npc_voices = build->japanese_npc_voices;
     out->resolution_sites = build->resolution_sites.data();
     out->resolution_site_count = build->resolution_sites.size();
     return 1;

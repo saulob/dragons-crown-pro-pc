@@ -85,7 +85,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-add_executable(dcp-loader src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/startup_save_hook.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+add_executable(dcp-loader src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/startup_save_hook.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 set_target_properties(dcp-loader PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-loader PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(dcp-loader PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
@@ -151,6 +151,11 @@ add_executable(dcp-window-tests EXCLUDE_FROM_ALL tests/window_fit_tests.cpp)
 set_target_properties(dcp-window-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-window-tests PRIVATE src)
 target_compile_options(dcp-window-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the Japanese NPC voice routing (tools/test.ps1); not part of the default build.
+add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)
+target_include_directories(dcp-voice-tests PRIVATE src)
+target_compile_options(dcp-voice-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
 
 # Focused tests of the save-data mounts and the Japanese startup save hook (tools/test.ps1); not part of the default build.
 add_executable(dcp-savedata-tests EXCLUDE_FROM_ALL tests/savedata_tests.c src/guest_hook.c src/startup_save_hook.c)
