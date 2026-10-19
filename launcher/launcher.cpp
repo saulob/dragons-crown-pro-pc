@@ -448,10 +448,9 @@ private:
 
     void PagePlay(trg::Ui& ui) {
         const bool ready = files_ == GameFileState::kValid;
-        const std::string dir = Utf8(paths_.app0);
         const std::string title = ready && build_ ? std::string(StatusTitle(files_)) + " \xC2\xB7 " + build_->label
                                                   : StatusTitle(files_);
-        const std::string detail = ready ? dir : StatusDetail(files_);
+        const std::string detail = ready && build_ ? BuildMetadataText(*build_) : StatusDetail(files_);
         ui.StatusCard(ready ? trg::Status::kReady : trg::Status::kAttention, title.c_str(), detail.c_str());
         if (!install_failure_.empty()) {
             ui.Spacer(4);

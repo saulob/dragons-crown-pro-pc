@@ -2891,6 +2891,29 @@ void TestCusa10209Graphics(const fs::path& base) {
     CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);
 }
 
+// The launcher shows the finished package's APP_VER and VERSION under the unchanged short build label.
+void TestBuildMetadata() {
+    struct Expected {
+        const GameBuild* build;
+        const char* label;
+        const char* metadata;
+    };
+    const Expected expected[] = {
+        {&kUs, "CUSA10454 1.00 USA", "APP_VER 1.00 \xC2\xB7 VERSION 1.03"},
+        {&kJp100, "CUSA07001 1.00 Japan", "APP_VER 1.00 \xC2\xB7 VERSION 1.00"},
+        {&kJp102, "CUSA07001 1.02 Japan", "APP_VER 1.02 \xC2\xB7 VERSION 1.00"},
+        {&kJp103, "CUSA07001 1.03 Japan", "APP_VER 1.03 \xC2\xB7 VERSION 1.00"},
+        {&kCk100, "CUSA10209 1.00 Asia/Hong Kong", "APP_VER 1.00 \xC2\xB7 VERSION 1.02"},
+        {&kCk, "CUSA10209 1.02 Asia/Hong Kong", "APP_VER 1.02 \xC2\xB7 VERSION 1.00"},
+    };
+    for (const Expected& item : expected) {
+        CHECK(std::string(item.build->label) == item.label);
+        CHECK(BuildMetadataText(*item.build) == item.metadata);
+        CHECK(std::string(FinishedLayer(*item.build).app_ver).size() == 5);
+        CHECK(std::string(FinishedLayer(*item.build).sfo_version).size() == 5);
+    }
+}
+
 int main(int argc, char** argv) {
     // dcp-launcher-tests --check-game <app0> <image dir>: the readiness check on real folders, read-only.
     if (argc == 4 && std::string(argv[1]) == "--check-game") {
@@ -2956,6 +2979,7 @@ int main(int argc, char** argv) {
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);
+    TestBuildMetadata();
     TestLayers(base);
     TestUsBuild();
     TestLegacyMarker(base);

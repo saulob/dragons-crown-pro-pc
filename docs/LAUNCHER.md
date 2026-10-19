@@ -97,9 +97,10 @@ otherwise.
 States: missing, valid, different version, read error. The identity lives in `launcher/game_profile.h` and mirrors
 `scripts/game_profiles.py`; a test fails if they drift.
 
-The Play card's title names the active build ("Ready to play · CUSA10454 1.00 USA") and its detail is the prepared
-folder. About's **Game** row shows the same label after `PS4 `, or `Not installed`. The log's `build` line uses the same
-label.
+The Play card's title names the active build ("Ready to play · CUSA10454 1.00 USA"); its number is the package's
+APP_VER, and a second line shows the finished package's metadata (`APP_VER 1.00 · VERSION 1.03`; PS4 metadata is `NN.NN`,
+shown as `N.NN`). About's **Game** row shows the same label after `PS4 `, or `Not installed`. The log's `build` line uses
+the same label.
 
 ## Install
 

@@ -203,6 +203,15 @@ bool SameLayer(const PackageLayer& a, const PackageLayer& b) {
            a.update == b.update;
 }
 
+// PS4 metadata is "NN.NN"; the launcher shows "N.NN".
+std::string DisplayVersion(std::string_view version) {
+    size_t first = 0;
+    while (first + 1 < version.size() && version[first] == '0' && version[first + 1] != '.') {
+        ++first;
+    }
+    return std::string(version.substr(first));
+}
+
 } // namespace
 
 std::span<const GameBuild> SupportedBuilds() {
@@ -211,6 +220,11 @@ std::span<const GameBuild> SupportedBuilds() {
 
 const PackageLayer& FinishedLayer(const GameBuild& build) {
     return build.layers.back();
+}
+
+std::string BuildMetadataText(const GameBuild& build) {
+    const PackageLayer& finished = FinishedLayer(build);
+    return "APP_VER " + DisplayVersion(finished.app_ver) + " \xC2\xB7 VERSION " + DisplayVersion(finished.sfo_version);
 }
 
 const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> builds) {

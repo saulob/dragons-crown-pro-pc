@@ -51,6 +51,9 @@ std::span<const GameBuild> SupportedBuilds();
 // The finished game's layer: its param.sfo is the one of the installed game.
 const PackageLayer& FinishedLayer(const GameBuild& build);
 
+// The finished package's APP_VER and VERSION, formatted for display (01.00 becomes 1.00).
+std::string BuildMetadataText(const GameBuild& build);
+
 // The build whose base package a build's update is laid over, or nullptr when the build has no update.
 const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> builds = SupportedBuilds());
 
