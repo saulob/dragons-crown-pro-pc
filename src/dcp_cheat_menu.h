@@ -12,10 +12,10 @@ inline constexpr char kMenuTitle[] = "CHEATS";
 inline constexpr char kMenuCloseHint[] = "F10 Close";
 inline constexpr char kMenuNote[] = "Not saved to the launcher";
 
-enum class RowKind { Toggle, Action, Experience };
+enum class RowKind { Toggle, Action, MovementSpeed, Experience };
 
-// A toggle row shows Off / On for its cheat; an action row shows its verb and runs once per press; the experience row
-// shows its multiplier and moves to the next one per press.
+// A toggle row shows Off / On for its cheat; an action row shows its verb and runs once per press; a setting row shows
+// its multiplier and moves to the next one per press.
 struct MenuRow {
     RowKind kind;
     Cheat cheat;
@@ -24,7 +24,7 @@ struct MenuRow {
     const char* verb;
 };
 
-inline constexpr size_t kMenuRowCount = kCheatCount + kActionCount + 1;
+inline constexpr size_t kMenuRowCount = kCheatCount + kActionCount + 2;
 
 constexpr std::array<MenuRow, kMenuRowCount> MakeMenuRows() {
     std::array<MenuRow, kMenuRowCount> rows{};
@@ -37,6 +37,7 @@ constexpr std::array<MenuRow, kMenuRowCount> MakeMenuRows() {
             }
         }
     }
+    rows[next++] = {RowKind::MovementSpeed, Cheat{}, Action{}, kMovementSpeedName, nullptr};
     rows[next] = {RowKind::Experience, Cheat{}, Action{}, kExperienceMultiplierName, nullptr};
     return rows;
 }

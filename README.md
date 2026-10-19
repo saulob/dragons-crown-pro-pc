@@ -142,7 +142,7 @@ The game runs at its own 60 frames per second.
 - There is no in-game "Trophy unlocked" notification yet. See [docs/TROPHIES.md](docs/TROPHIES.md).
 
 ### Cheats
-- **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x** (Player 1; gold is shared by the save), all Off by default; **Experience Multiplier** (Off, 2x, 5x or 10x) multiplies the experience every award adds. Press **F10** while playing to open the Cheats menu; what you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).
+- **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Skill Uses** and **Infinite Gold** (Player 1, except the ally cheats; gold is shared by the save), all Off by default. **Movement Speed** (Off, 2x or 4x) and **Experience Multiplier** (Off, 2x, 5x, 10x or 100x) are settings of their own. Press **F10** while playing to open the Cheats menu; it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**. What you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).
 
 ### Controls
 - Xbox controllers work without setup

@@ -464,15 +464,23 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     const float pad = ImGui::GetFontSize() * 0.4f;
     const float y = min.y + (height - ImGui::GetFontSize()) * 0.5f;
     const bool action = row.kind == dcp::cheats::RowKind::Action;
+    const bool movement = row.kind == dcp::cheats::RowKind::MovementSpeed;
     const bool experience = row.kind == dcp::cheats::RowKind::Experience;
-    const int multiplier = experience ? runtime_cheat_experience_multiplier() : dcp::cheats::kExperienceMultiplierOff;
+    const bool choice = movement || experience;
+    const int off = movement ? dcp::cheats::kMovementSpeedOff : dcp::cheats::kExperienceMultiplierOff;
+    const int multiplier = movement   ? runtime_cheat_movement_speed()
+                          : experience ? runtime_cheat_experience_multiplier()
+                                       : off;
+    const char* choice_label = movement   ? dcp::cheats::MovementSpeedLabel(multiplier)
+                               : experience ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
+                                            : nullptr;
     const bool available = runtime_cheats_available() != 0;
     const bool on = row.kind == dcp::cheats::RowKind::Toggle && runtime_cheat_enabled(int(row.cheat)) != 0;
     const char* state = !available ? "Unavailable"
                         : action ? row.verb
-                        : experience ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
+                        : choice ? choice_label
                         : (on ? "On" : "Off");
-    const bool lit = available && (action || on || multiplier != dcp::cheats::kExperienceMultiplierOff);
+    const bool lit = available && (action || on || (choice && multiplier != off));
     draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
     draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y), ImGui::GetColorU32(lit ? accent : dim), state);
     ImGui::PopID();
@@ -482,9 +490,11 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     if (action) {
         runtime_cheat_action(int(row.action));
         std::printf("Cheats: %s requested\n", row.label);
-    } else if (experience) {
-        std::printf("Cheats: %s %s (this session)\n", row.label,
-                    dcp::cheats::ExperienceMultiplierLabel(runtime_cheat_experience_cycle()));
+    } else if (choice) {
+        const int next = movement ? runtime_cheat_movement_cycle() : runtime_cheat_experience_cycle();
+        const char* label = movement ? dcp::cheats::MovementSpeedLabel(next)
+                                     : dcp::cheats::ExperienceMultiplierLabel(next);
+        std::printf("Cheats: %s %s (this session)\n", row.label, label);
     } else {
         runtime_cheat_toggle(int(row.cheat));
         std::printf("Cheats: %s %s (this session)\n", row.label, runtime_cheat_enabled(int(row.cheat)) ? "On" : "Off");

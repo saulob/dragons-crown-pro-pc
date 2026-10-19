@@ -43,13 +43,18 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kArachnophobiaSafeModeKey, "0"},
     {kJapaneseNpcVoicesKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
+    {cheats::kInfiniteAllyHealthKey, "0"},
     {cheats::kInfiniteManaKey, "0"},
+    {cheats::kInfiniteAllyManaKey, "0"},
     {cheats::kInfiniteLivesKey, "0"},
     {cheats::kInfiniteDurabilityKey, "0"},
+    {cheats::kInfiniteAllyDurabilityKey, "0"},
     {cheats::kInfiniteArrowsKey, "0"},
     {cheats::kInfiniteSkillPointsKey, "0"},
+    {cheats::kInfiniteSkillUsesKey, "0"},
     {cheats::kInfiniteGoldKey, "0"},
-    {cheats::kMovementSpeedKey, "0"},
+    {cheats::kMovementSpeedKey, "1"},
+    {cheats::kLegacyMovementSpeedKey, "0"},
     {cheats::kExperienceMultiplierKey, "1"},
     {kLauncherXKey, ""},
     {kLauncherYKey, ""},
@@ -112,7 +117,11 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == cheats::kExperienceMultiplierKey) {
         return std::any_of(std::begin(cheats::kExperienceChoices), std::end(cheats::kExperienceChoices),
-                           [&](const cheats::ExperienceChoice& choice) { return value == choice.saved; });
+                           [&](const cheats::Choice& choice) { return value == choice.saved; });
+    }
+    if (key == cheats::kMovementSpeedKey) {
+        return std::any_of(std::begin(cheats::kMovementSpeedChoices), std::end(cheats::kMovementSpeedChoices),
+                           [&](const cheats::Choice& choice) { return value == choice.saved; });
     }
     if (key == kRenderResolutionKey) {
         return std::any_of(std::begin(dcp_resolutions), std::end(dcp_resolutions),
@@ -253,6 +262,15 @@ extern "C" int dcp_saved_experience_multiplier(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return cheats::ExperienceMultiplierFromSaved(settings.Get(cheats::kExperienceMultiplierKey, "1"));
+}
+
+extern "C" int dcp_saved_movement_speed(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    if (settings.Has(cheats::kMovementSpeedKey)) {
+        return cheats::MovementSpeedFromSaved(settings.Get(cheats::kMovementSpeedKey));
+    }
+    return cheats::MovementSpeedFromLegacy(settings.Get(cheats::kLegacyMovementSpeedKey));
 }
 
 extern "C" int dcp_japanese_npc_voices(const char* settings_file) {

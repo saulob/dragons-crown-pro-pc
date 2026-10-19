@@ -224,6 +224,11 @@ static void key_axis(uint8_t *axis, bool negative, bool positive) {
 }
 /* Player 1 is always connected: the keyboard stands in for a missing gamepad. */
 static bool slot_connected(int slot) { return slot==0 || slots[slot].gamepad; }
+
+int runtime_pad_slot_human(int slot) {
+    if (slot==0) return 1;
+    return slot>0 && slot<MAX_PADS && slots[slot].gamepad;
+}
 static void sample_host(int slot, PadData *d) {
     memset(d,0,sizeof(*d));
     d->left_x=d->left_y=d->right_x=d->right_y=128;

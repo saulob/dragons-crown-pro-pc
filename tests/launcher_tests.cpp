@@ -1217,9 +1217,6 @@ void TestCheatSettings(const fs::path& base) {
         }
         CHECK(settings.Save());
         CHECK(dcp_saved_cheats(file.string().c_str()) == (1u << cheats::kCheatCount) - 1);
-        settings.SetBool(cheats::kMovementSpeedKey, false);
-        CHECK(settings.Save());
-        CHECK(dcp_saved_cheats(file.string().c_str()) == (1u << (cheats::kCheatCount - 1)) - 1);
     }
     CHECK(WrittenValue(ReadAll(file), "vsync", "0")); // unrelated lines survive
 
@@ -1230,19 +1227,53 @@ void TestCheatSettings(const fs::path& base) {
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
             CHECK(!settings.GetBool(cheat.key, true));
         }
+        CHECK(settings.Get(cheats::kMovementSpeedKey, "") == "1");
+        CHECK(settings.Get(cheats::kLegacyMovementSpeedKey, "") == "0");
         CHECK(dcp_saved_cheats(file.string().c_str()) != 0);
         CHECK(settings.Save());
     }
     CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
 
     // Experience Multiplier: the saved value is the multiplier; a value that is not listed is Off.
     CHECK(launcher_default(cheats::kExperienceMultiplierKey) == "1");
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 1);
     WriteAll(file, "cheat_experience_multiplier=5\n");
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 5);
+    WriteAll(file, "cheat_experience_multiplier=100\n");
+    CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 100);
     WriteAll(file, "cheat_experience_multiplier=7\n");
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 1);
     CHECK(dcp_saved_experience_multiplier(nullptr) == 1);
+
+    // Movement Speed: 1, 2 or 4; a missing or invalid value is Off. The old boolean key gives 2x only when the newer
+    // setting is absent, and an explicit value (even an invalid one) wins.
+    CHECK(launcher_default(cheats::kMovementSpeedKey) == "1");
+    CHECK(launcher_default(cheats::kLegacyMovementSpeedKey) == "0");
+    CHECK(cheats::IsListedChoice(cheats::kMovementSpeedChoices, 1));
+    CHECK(cheats::IsListedChoice(cheats::kMovementSpeedChoices, 2));
+    CHECK(cheats::IsListedChoice(cheats::kMovementSpeedChoices, 4));
+    CHECK(!cheats::IsListedChoice(cheats::kMovementSpeedChoices, 3));
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed=2\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 2);
+    WriteAll(file, "cheat_movement_speed=4\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 4);
+    WriteAll(file, "cheat_movement_speed=3\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed_2x=1\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 2);
+    WriteAll(file, "cheat_movement_speed_2x=0\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed_2x=true\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 2);
+    WriteAll(file, "cheat_movement_speed=4\ncheat_movement_speed_2x=0\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 4);
+    WriteAll(file, "cheat_movement_speed=1\ncheat_movement_speed_2x=1\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed=9\ncheat_movement_speed_2x=1\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    CHECK(dcp_saved_movement_speed(nullptr) == 1);
 
     // The in-game menu never writes them: the video core's settings file code has no cheat key.
     CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp").find("cheat") == std::string::npos);

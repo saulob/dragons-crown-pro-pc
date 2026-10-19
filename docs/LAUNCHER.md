@@ -171,8 +171,10 @@ use the same defaults).
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
-| `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
-| `cheat_experience_multiplier` | 1 (Off), 2, 5, 10 | 1 | at game start (F10 changes the session only) |
+| `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
+| `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
+| `cheat_movement_speed_2x` (old) | 1, 0 | 0 | read only when `cheat_movement_speed` is missing: 1 means 2x |
+| `cheat_experience_multiplier` | 1 (Off), 2, 5, 10, 100 | 1 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
 | `menu_tab` | 0 (Image), 1 (Overlay) | 0 | the in-game menu's last tab |
 | `launcher_x`, `_y`, `_width`, `_height`, `_maximized`, `_fullscreen` | | | launcher window only |
@@ -295,17 +297,21 @@ No skip-intro or frame rate limit.
 Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the
 line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for
 offline and local play." and Off / On
-rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
-Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**, each with its one-line description
-(`src/dcp_cheats.h`), and below them the **Experience Multiplier** combo (Off, 2x, 5x, 10x). Cheats work on the CUSA10454 (US) build only; on the Japanese and Asia and Hong Kong builds the page and the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
-settings puts them back to Off. The saved values are the start of every game session; the F10 menu changes the running
-session only and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
+rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**,
+**Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill
+Points**, **Infinite Skill Uses**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
+below them the **Movement Speed** combo
+(Off, 2x, 4x) and the **Experience Multiplier** combo (Off, 2x, 5x, 10x, 100x).
+Cheats work on the CUSA10454 (US) build only; on the Japanese and Asia and Hong Kong builds the page and the menu show
+them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
+them back to Off. The saved values are the start of every game session; the F10 menu changes the running session only
+and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
 ## Controls
 
 Xbox controllers work without setup; the keyboard is always on. The page lists the layout implemented in
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
-Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 1,000 Gold**, which is not a setting). The dead zone is not a setting.
+Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 
 The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the host functions that exist (Cheats menu, Window mode). Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
 
@@ -316,7 +322,7 @@ A gamepad that is found takes the lowest free slot and logs its user in once; th
 `LOGIN` event. The keyboard, `DCP_PAD_FILE`, pad recording and replay and the save list's controls belong to Player 1
 only. Unplugging a gamepad closes it and frees its slot, but no `LOGOUT` is sent: the player stays logged in, and the
 next gamepad connected takes the lowest free slot, which is not necessarily the same player. A fifth gamepad is ignored.
-The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted). The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
+The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted); Infinite Ally Health, Infinite Ally Mana and Infinite Ally Durability act on AI-controlled party allies instead. Add 100 Skill Points and Level Up (+1 Level) change Player 1's save record. The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
 atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port

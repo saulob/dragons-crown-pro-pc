@@ -89,6 +89,7 @@ public:
 
     std::string Get(std::string_view key, std::string_view def = {}) const override;
     void Set(std::string_view key, std::string value) override;
+    bool Has(std::string_view key) const { return pending_.find(key) != pending_.end(); }
     bool Save() override;
     void ResetToDefaults() override;
 

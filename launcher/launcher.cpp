@@ -731,8 +731,13 @@ private:
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
             ui.Toggle(cheat.label, cheat.description, cheat.key, cheats::kCheatDefault, "Off", "On");
         }
+        std::vector<trg::Option> movement;
+        for (const cheats::Choice& choice : cheats::kMovementSpeedChoices) {
+            movement.push_back({choice.saved, choice.label});
+        }
+        ui.Combo(cheats::kMovementSpeedName, cheats::kMovementSpeedHelp, cheats::kMovementSpeedKey, "1", movement);
         std::vector<trg::Option> experience;
-        for (const cheats::ExperienceChoice& choice : cheats::kExperienceChoices) {
+        for (const cheats::Choice& choice : cheats::kExperienceChoices) {
             experience.push_back({choice.saved, choice.label});
         }
         ui.Combo(cheats::kExperienceMultiplierName, cheats::kExperienceMultiplierHelp, cheats::kExperienceMultiplierKey,

@@ -436,7 +436,9 @@ int main(int argc, char **argv) {
     runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
     runtime_pad_set_settings(settings_file);
-    runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file));
+    runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
+                         dcp_saved_movement_speed(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
     dcp_log_gameplay_settings(settings_file, paths.image_dir);
     if (known_build && game_build.cheats) {

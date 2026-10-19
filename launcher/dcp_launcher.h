@@ -70,6 +70,10 @@ unsigned dcp_saved_cheats(const char *settings_file);
  * one of those. */
 int dcp_saved_experience_multiplier(const char *settings_file);
 
+/* The Movement Speed the settings file sets (1 = Off, 2 or 4); Off when the file or the value is missing, invalid or the
+ * old 2x setting is off. The old boolean setting is read only when the newer setting is absent. */
+int dcp_saved_movement_speed(const char *settings_file);
+
 /* 1 when the settings file routes the NPC voice cues to the Japanese banks (dcp_japanese_npc_voices; 0 by default). */
 int dcp_japanese_npc_voices(const char *settings_file);
 

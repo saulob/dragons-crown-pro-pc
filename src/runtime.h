@@ -50,6 +50,8 @@ uintptr_t runtime_font_resolve(const char *name);
 uintptr_t runtime_eventflag_resolve(const char *name);
 /* The dcp.ini whose keyboard bindings the pad reads, once, at the first sample. */
 void runtime_pad_set_settings(const char *settings_file);
+/* 1 when the slot is Player 1 or has a live gamepad; 0 for a slot the game may drive with AI. */
+int runtime_pad_slot_human(int slot);
 uintptr_t runtime_pad_resolve(const char *name);
 void runtime_pad_report(void);
 void runtime_sema_report(void);
