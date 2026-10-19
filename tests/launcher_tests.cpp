@@ -2222,16 +2222,33 @@ void TestControllerPrompts(const fs::path& base) {
     }
     CHECK(managed);
 
-    // The shipped patch parses and names the two button atlas packs.
+    // The shipped patch parses and names the button atlas packs of every language (the plain pack and the English one,
+    // then the German, Spanish, French, Italian and UK packs, which hold the same bytes as the English one), and the
+    // translated message sheets whose touchpad wording it changes.
     {
         const std::string shipped = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "prompts" / "xbox-prompts.dcpx");
         std::string error;
         const std::optional<BlockPatch> patch = ParseBlockPatch(Span(shipped), &error);
-        CHECK(patch && patch->targets.size() == 2);
-        if (patch) {
-            CHECK(patch->targets[0].name == "stage/Interface.ftx" && patch->targets[1].name == "stage/Interface_US.ftx");
-            CHECK(patch->targets[0].size == 31461008 && patch->targets[1].size == 35655696);
-            CHECK(patch->targets[0].runs.size() > 10000 && patch->targets[0].runs.size() == patch->targets[1].runs.size());
+        const std::vector<std::string> atlas_names = {
+            "stage/Interface.ftx",    "stage/Interface_US.ftx", "stage/Interface_DE.ftx", "stage/Interface_ES.ftx",
+            "stage/Interface_FR.ftx", "stage/Interface_IT.ftx", "stage/Interface_UK.ftx"};
+        const std::vector<std::string> message_names = {"msgsheet/SystemMsg_DE.fms", "msgsheet/SystemMsg_ES.fms",
+                                                        "msgsheet/SystemMsg_FR.fms", "msgsheet/SystemMsg_IT.fms"};
+        CHECK(patch && patch->targets.size() == atlas_names.size() + message_names.size());
+        if (patch && patch->targets.size() == atlas_names.size() + message_names.size()) {
+            const BlockPatchTarget& us = patch->targets[1];
+            for (size_t i = 0; i < atlas_names.size(); ++i) {
+                const BlockPatchTarget& target = patch->targets[i];
+                CHECK(target.name == atlas_names[i]);
+                CHECK(target.size == (i == 0 ? 31461008u : 35655696u));
+                CHECK(target.runs.size() > 10000);
+                CHECK(i == 0 || (target.runs.size() == us.runs.size() && target.crc_before == us.crc_before));
+            }
+            for (size_t i = 0; i < message_names.size(); ++i) {
+                const BlockPatchTarget& target = patch->targets[atlas_names.size() + i];
+                CHECK(target.name == message_names[i]);
+                CHECK(!target.runs.empty() && target.runs.size() < 100);
+            }
         }
         CHECK(!ParseBlockPatch(Span(shipped.substr(0, 100)), &error) && error.find("truncated") != std::string::npos);
         CHECK(!ParseBlockPatch(Span(std::string("hello")), &error));
@@ -2253,7 +2270,7 @@ void TestControllerPrompts(const fs::path& base) {
     const std::string original = BuildCpk({{"stage/Interface.ftx", iface, true}}, false);
     WriteAll(app0 / "DRACRO_US.CPK", original_us);
     WriteAll(app0 / "DRACRO.CPK", original);
-    CHECK(PromptArchives(app0, kUs).size() == 2 && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(PromptArchives(app0, kUs).size() == 2 && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
 
     // Reading: header, TOC (encrypted), case-insensitive lookup, CRILAYLA.
     {
@@ -2281,7 +2298,7 @@ void TestControllerPrompts(const fs::path& base) {
     hooks.phase = [&phases](const char* text) { phases.emplace_back(text); };
     PromptsResult r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes), hooks);
     CHECK(r.ok && !r.cancelled);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kXbox);
     CHECK(fs::exists(UndoPath(app0 / "DRACRO_US.CPK")) && fs::exists(UndoPath(app0 / "DRACRO.CPK")));
     CHECK(!phases.empty() && phases[0] == "Patching DRACRO_US.CPK...");
     {
@@ -2309,14 +2326,14 @@ void TestControllerPrompts(const fs::path& base) {
     r = SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {});
     CHECK(r.ok);
     CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && ReadAll(app0 / "DRACRO.CPK") == original);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
     r = SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {});
     CHECK(r.ok && r.detail.find("not patched") != std::string::npos);
 
     // A half-patched install reads as PlayStation; Xbox completes it, PlayStation cleans it up.
     CHECK(ApplyBlockPatch(app0 / "DRACRO.CPK", *ParseBlockPatch(Span(patch_bytes))).ok);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
-    CHECK(SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
+    CHECK(SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kXbox);
     CHECK(SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
 
     // Cancelling while writing leaves the archive as it was.
@@ -2324,7 +2341,7 @@ void TestControllerPrompts(const fs::path& base) {
     hooks.progress = [](uint64_t, uint64_t) { return false; };
     r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes), hooks);
     CHECK(!r.ok && r.cancelled);
-    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
 
     // An archive whose entry is not the file the patch was made for is skipped and named; others are patched.
     std::string foreign = iface;
@@ -2332,15 +2349,15 @@ void TestControllerPrompts(const fs::path& base) {
     WriteAll(app0 / "DRACRO.CPK", BuildCpk({{"stage/Interface.ftx", foreign, false}}, false));
     r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes));
     CHECK(r.ok && r.detail.find("stage/Interface.ftx is not the file the patch was made for") != std::string::npos);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation); // DRACRO.CPK stayed original: no undo record
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation); // DRACRO.CPK stayed original: no undo record
     CHECK(ArchiveState(app0 / "DRACRO_US.CPK") == ArchivePatchState::kPatched);
     CHECK(SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
 
     // An unreadable patch is refused before anything is touched; a folder without archives too.
     r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(std::string("DCPX1")));
-    CHECK(!r.ok && r.detail.find("unreadable") != std::string::npos && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(!r.ok && r.detail.find("unreadable") != std::string::npos && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
     CHECK(!SetPromptStyle(base / "nowhere", kUs, PromptStyle::kXbox, Span(patch_bytes)).ok);
-    CHECK(PromptArchives(base / "nowhere", kUs).empty() && InstalledPromptStyle(base / "nowhere", kUs) == PromptStyle::kPlayStation);
+    CHECK(PromptArchives(base / "nowhere", kUs).empty() && InstalledPromptStyle(base / "nowhere", kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
 
     // Failures and interruptions leave the archive usable: it is put back, or recognised and redone.
     {
@@ -2390,10 +2407,54 @@ void TestControllerPrompts(const fs::path& base) {
         fs::create_hard_link(shared / "DRACRO_US.CPK", linked / "DRACRO_US.CPK", ec);
         if (!ec) {
             CHECK(SetPromptStyle(linked, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok);
-            CHECK(InstalledPromptStyle(linked, kUs) == PromptStyle::kXbox && ReadAll(shared / "DRACRO_US.CPK") == original_us);
+            CHECK(InstalledPromptStyle(linked, kUs, Span(patch_bytes)) == PromptStyle::kXbox && ReadAll(shared / "DRACRO_US.CPK") == original_us);
             CHECK(fs::hard_link_count(linked / "DRACRO_US.CPK") == 1 && !fs::exists(linked / "DRACRO_US.CPK.copy"));
             CHECK(SetPromptStyle(linked, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(linked / "DRACRO_US.CPK") == original_us);
         }
+    }
+
+    // An install patched by an earlier patch, which lacks a language pack, reads as PlayStation until the newer patch is
+    // applied, and then holds that pack too.
+    {
+        const fs::path upgrade = base / "prompts_upgrade";
+        fs::create_directories(upgrade);
+        WriteAll(upgrade / "DRACRO_US.CPK",
+                 BuildCpk({{"stage/Interface_US.ftx", iface_us, true}, {"stage/Interface_ES.ftx", iface_us, true}}, true));
+        const std::string earlier = MakePatch({{"stage/Interface_US.ftx", {iface_us, want_us}}});
+        const std::string later =
+            MakePatch({{"stage/Interface_US.ftx", {iface_us, want_us}}, {"stage/Interface_ES.ftx", {iface_us, want_us}}});
+        CHECK(ApplyBlockPatch(upgrade / "DRACRO_US.CPK", *ParseBlockPatch(Span(earlier))).ok);
+        CHECK(InstalledPromptStyle(upgrade, kUs, Span(earlier)) == PromptStyle::kXbox);
+        CHECK(InstalledPromptStyle(upgrade, kUs, Span(later)) == PromptStyle::kPlayStation);
+        CHECK(SetPromptStyle(upgrade, kUs, PromptStyle::kXbox, Span(later)).ok &&
+              InstalledPromptStyle(upgrade, kUs, Span(later)) == PromptStyle::kXbox);
+        CpkArchive archive;
+        CHECK(archive.Open(upgrade / "DRACRO_US.CPK") && Bytes(archive.Read(*archive.Find("stage/Interface_ES.ftx"))) == want_us);
+    }
+
+    // An install patched by a patch that held an entry the current one does not is stale: it is restored to the original
+    // and patched again, so the dropped entry is not left behind and the undo record keeps the original length.
+    {
+        const fs::path stale = base / "prompts_stale";
+        fs::create_directories(stale);
+        const std::string archive_bytes =
+            BuildCpk({{"stage/Interface_US.ftx", iface_us, true}, {"msgsheet/SystemMsg_DE.fms", fms, true}}, true);
+        WriteAll(stale / "DRACRO_US.CPK", archive_bytes);
+        std::string fms_patched = fms;
+        fms_patched.replace(96, 16, 16, 'T');
+        const std::string earlier = MakePatch(
+            {{"stage/Interface_US.ftx", {iface_us, want_us}}, {"msgsheet/SystemMsg_DE.fms", {fms, fms_patched}}});
+        const std::string later = MakePatch({{"stage/Interface_US.ftx", {iface_us, want_us}}});
+        CHECK(ApplyBlockPatch(stale / "DRACRO_US.CPK", *ParseBlockPatch(Span(earlier))).ok);
+        CHECK(InstalledPromptStyle(stale, kUs, Span(earlier)) == PromptStyle::kXbox);
+        CHECK(InstalledPromptStyle(stale, kUs, Span(later)) == PromptStyle::kPlayStation);
+        CHECK(SetPromptStyle(stale, kUs, PromptStyle::kXbox, Span(later)).ok &&
+              InstalledPromptStyle(stale, kUs, Span(later)) == PromptStyle::kXbox);
+        CpkArchive archive;
+        CHECK(archive.Open(stale / "DRACRO_US.CPK"));
+        CHECK(Bytes(archive.Read(*archive.Find("msgsheet/SystemMsg_DE.fms"))) == fms);
+        CHECK(Bytes(archive.Read(*archive.Find("stage/Interface_US.ftx"))) == want_us);
+        CHECK(SetPromptStyle(stale, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(stale / "DRACRO_US.CPK") == archive_bytes);
     }
 
     // CRILAYLA: a corrupt block is an error, not a crash.
@@ -2699,7 +2760,7 @@ void TestLayers(const fs::path& base) {
         const fs::path prompts = root / "jp-prompts";
         WriteAll(prompts / "DRACRO_PATCH_JP.CPK", "jp archive");
         WriteAll(prompts / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(prompts, kJp103).empty() && InstalledPromptStyle(prompts, kJp103) == PromptStyle::kPlayStation);
+        CHECK(PromptArchives(prompts, kJp103).empty() && InstalledPromptStyle(prompts, kJp103, {}) == PromptStyle::kPlayStation);
         CHECK(!SetPromptStyle(prompts, kJp103, PromptStyle::kXbox, {}).ok);
         CHECK(ReadAll(prompts / "DRACRO_PATCH_JP.CPK") == "jp archive" && ReadAll(prompts / "DRACRO.CPK") == "shared archive");
     }
@@ -3007,7 +3068,7 @@ void TestSafeMode(const fs::path& base) {
     CHECK(!InstalledSafeMode(app0));
 
     CHECK(set(PromptStyle::kXbox, true).ok);
-    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
     CHECK(read("DRACRO.CPK", kSpiderEntry) == want_spider && read("DRACRO.CPK", "stage/Interface.ftx") == want);
     CHECK(read("DRACRO_US.CPK", "stage/Interface_US.ftx") == want_us);
     const std::string both = ReadAll(app0 / "DRACRO.CPK");
@@ -3015,15 +3076,15 @@ void TestSafeMode(const fs::path& base) {
     CHECK(again.ok && ReadAll(app0 / "DRACRO.CPK") == both);
 
     CHECK(set(PromptStyle::kXbox, false).ok);
-    CHECK(!InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(!InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
     CHECK(read("DRACRO.CPK", kSpiderEntry) == spider && read("DRACRO.CPK", "stage/Interface.ftx") == want);
 
     CHECK(set(PromptStyle::kPlayStation, true).ok);
-    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kPlayStation);
     CHECK(read("DRACRO.CPK", kSpiderEntry) == want_spider && read("DRACRO.CPK", "stage/Interface.ftx") == iface);
     CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us);
 
-    CHECK(set(PromptStyle::kXbox, true).ok && InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(set(PromptStyle::kXbox, true).ok && InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
     CHECK(set(PromptStyle::kPlayStation, false).ok);
     CHECK(ReadAll(app0 / "DRACRO.CPK") == original && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
     CHECK(!InstalledSafeMode(app0) && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
@@ -3162,7 +3223,7 @@ void TestBuilds(const fs::path& base) {
         fs::remove_all(app0);
         WriteAll(app0 / "DRACRO_CK.CPK", "ck archive");
         WriteAll(app0 / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(app0, kCk).empty() && InstalledPromptStyle(app0, kCk) == PromptStyle::kPlayStation);
+        CHECK(PromptArchives(app0, kCk).empty() && InstalledPromptStyle(app0, kCk, {}) == PromptStyle::kPlayStation);
         CHECK(!SetPromptStyle(app0, kCk, PromptStyle::kXbox, {}).ok);
         CHECK(SetPromptStyle(app0, kCk, PromptStyle::kPlayStation, {}).ok);
         CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == "ck archive" && ReadAll(app0 / "DRACRO.CPK") == "shared archive");

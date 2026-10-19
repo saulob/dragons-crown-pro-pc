@@ -1,8 +1,9 @@
 # Controller prompts: how `launcher/prompts/xbox-prompts.dcpx` is made
 
-The game draws every button prompt from one 1024 × 512 BC7 atlas, `Interface_arranged000`, held in both
-`stage/Interface.ftx` and `stage/Interface_US.ftx` inside `DRACRO_US.CPK` (and `DRACRO.CPK`). The sprite definitions in
-`Interface_US.mbs` cut fixed rectangles out of it (`BUTTON00`–`BUTTON46`), so painting an Xbox glyph into the same
+The game draws every button prompt from one 1024 × 512 BC7 atlas, `Interface_arranged000`, held in
+`stage/Interface.ftx` (in `DRACRO.CPK`) and in each language's `stage/Interface_XX.ftx` (DE, ES, FR, IT, UK, US; in
+`DRACRO_US.CPK`). The language packs hold the same bytes, so one patch serves them all. The sprite definitions in
+`Interface_XX.mbs` cut fixed rectangles out of the atlas (`BUTTON00`–`BUTTON46`), so painting an Xbox glyph into the same
 rectangle as the PlayStation one changes the prompts without touching anything else. The launcher applies the result as
 a block patch to the installed archives (`launcher/cpk_patch.h`, `launcher/controller_prompts.h`).
 
@@ -13,7 +14,9 @@ is needed to build the port: the patch is committed.
 | --- | --- |
 | `cpk.py` | CRI CPK reader: `list`, `header`, `extract`, `extract-matching`, `selftest` (standard library only). |
 | `ftex.py` | Vanillaware FTEX packs: `list` the textures, `dump` them as PNG (GNF, BC7, Thin_1dThin tiling). |
-| `draw_dcp.py` | Paints the Xbox glyphs into the decoded atlas, in place, and writes a mask of the changed pixels. |
+| `draw_dcp.py` | Paints the Xbox glyphs into the decoded atlas, in place (the touchpad surface and word take the VIEW oval and label), and writes a mask of the changed pixels. |
+| `paint_add_word.py` | Paints the VIEW label over the TOUCH PAD word of `Interface_Add_arranged000` (the second interface atlas), with the mask. |
+| `touch_text.py` | Xbox wording of the touchpad button in the translated message sheets: the five sentences that name it get the glyph `@#(34)` that the English sentences have. Same file size; every other record is checked to be unchanged (`touch_text.py selftest` covers the checker). |
 | `bc7.py` | A BC7 mode 6 encoder (numpy). |
 | `draw_spider.py` | Arachnophobia Safe Mode: draws the replacement Giant Spider atlas (`launcher/prompts/arachnophobia-spider-atlas.png`, plus a preview) from the decoded original, leaving web and smoke effects; `patch_ftx.py` and `make_dcpx.py` turn that exact PNG into `launcher/prompts/arachnophobia-spider.dcpx`. |
 | `patch_ftx.py` | Re-encodes only the changed 4 × 4 blocks, re-tiles them and splices them into the pack. |
@@ -23,23 +26,42 @@ is needed to build the port: the patch is committed.
 ## Rebuilding the patch
 
 From the installed game (`game\prepared\v1.03`), with the Poppins Bold font (SIL OFL, fonts.google.com/specimen/Poppins)
-at hand:
+at hand. `DRACRO.CPK` holds the shared pack, `DRACRO_US.CPK` the English and translated ones:
 
 ```
-python scripts/prompts/cpk.py extract game/prepared/v1.03/DRACRO_US.CPK stage/Interface.ftx work
-python scripts/prompts/cpk.py extract game/prepared/v1.03/DRACRO_US.CPK stage/Interface_US.ftx work
-python scripts/prompts/ftex.py dump work/Interface_US.ftx work/atlas          # Interface_arranged000.png among others
+python scripts/prompts/cpk.py extract game/prepared/v1.03/DRACRO.CPK stage/Interface.ftx work/orig/shared
+python scripts/prompts/cpk.py extract game/prepared/v1.03/DRACRO_US.CPK stage/Interface_US.ftx work/orig
+python scripts/prompts/cpk.py extract game/prepared/v1.03/DRACRO_US.CPK stage/Interface_DE.ftx work/orig  # and ES, FR, IT, UK
+python scripts/prompts/cpk.py extract game/prepared/v1.03/DRACRO_US.CPK msgsheet/SystemMsg_DE.fms work/orig  # and ES, FR, IT
+python scripts/prompts/ftex.py dump work/orig/Interface_US.ftx work/atlas
 python scripts/prompts/draw_dcp.py work/atlas/Interface_arranged000.png work/atlas_xbox.png --font Poppins-Bold.ttf
-python scripts/prompts/patch_ftx.py work/Interface.ftx    Interface_arranged000.gnf work/atlas_xbox.png work/atlas_xbox.changed.npy work/Interface.xbox.ftx    --verify
-python scripts/prompts/patch_ftx.py work/Interface_US.ftx Interface_arranged000.gnf work/atlas_xbox.png work/atlas_xbox.changed.npy work/Interface_US.xbox.ftx --verify
+python scripts/prompts/patch_ftx.py work/orig/shared/Interface.ftx Interface_arranged000.gnf work/atlas_xbox.png work/atlas_xbox.changed.npy work/Interface.xbox.ftx --verify
+python scripts/prompts/patch_ftx.py work/orig/Interface_US.ftx Interface_arranged000.gnf work/atlas_xbox.png work/atlas_xbox.changed.npy work/Interface_US.xbox.ftx --verify
+python scripts/prompts/paint_add_word.py work/atlas/Interface_Add_arranged000.png work/atlas_xbox.png work/atlas_add_xbox.png
+python scripts/prompts/patch_ftx.py work/Interface_US.xbox.ftx Interface_Add_arranged000.gnf work/atlas_add_xbox.png work/atlas_add_xbox.changed.npy work/Interface_US.xbox.ftx --verify
+python scripts/prompts/touch_text.py work/orig/SystemMsg_DE.fms work/orig/SystemMsg_DE.xbox.fms  # and ES, FR, IT
 python scripts/prompts/make_dcpx.py launcher/prompts/xbox-prompts.dcpx \
-    "stage/Interface.ftx=work/Interface.ftx:work/Interface.xbox.ftx" \
-    "stage/Interface_US.ftx=work/Interface_US.ftx:work/Interface_US.xbox.ftx"
+    "stage/Interface.ftx=work/orig/shared/Interface.ftx:work/Interface.xbox.ftx" \
+    "stage/Interface_US.ftx=work/orig/Interface_US.ftx:work/Interface_US.xbox.ftx" \
+    "stage/Interface_DE.ftx=work/orig/Interface_DE.ftx:work/Interface_US.xbox.ftx" \
+    "stage/Interface_ES.ftx=work/orig/Interface_ES.ftx:work/Interface_US.xbox.ftx" \
+    "stage/Interface_FR.ftx=work/orig/Interface_FR.ftx:work/Interface_US.xbox.ftx" \
+    "stage/Interface_IT.ftx=work/orig/Interface_IT.ftx:work/Interface_US.xbox.ftx" \
+    "stage/Interface_UK.ftx=work/orig/Interface_UK.ftx:work/Interface_US.xbox.ftx" \
+    "msgsheet/SystemMsg_DE.fms=work/orig/SystemMsg_DE.fms:work/orig/SystemMsg_DE.xbox.fms" \
+    "msgsheet/SystemMsg_ES.fms=work/orig/SystemMsg_ES.fms:work/orig/SystemMsg_ES.xbox.fms" \
+    "msgsheet/SystemMsg_FR.fms=work/orig/SystemMsg_FR.fms:work/orig/SystemMsg_FR.xbox.fms" \
+    "msgsheet/SystemMsg_IT.fms=work/orig/SystemMsg_IT.fms:work/orig/SystemMsg_IT.xbox.fms"
 ```
 
 `draw_dcp.py` also writes `dcp_compare.png` next to its output, the atlas before and after, to check the result before
-encoding. `--verify` on `patch_ftx.py` decodes the spliced pack again and reports the PSNR of the changed pixels (about
-34 dB with mode 6 alone) and that untouched pixels are untouched.
+encoding. `--verify` on `patch_ftx.py` decodes the spliced pack again and reports the PSNR of the changed pixels and that
+untouched pixels are untouched.
+
+The committed patch was made by applying only the touchpad steps to the packs of the previous patch:
+`draw_dcp.py ... --touchpad-only` over the already-painted `Interface_arranged000`, then `paint_add_word.py` and the same
+`patch_ftx.py` / `make_dcpx.py` steps. That keeps the existing letters byte for byte, because another Pillow or FreeType
+build can rasterise them slightly differently.
 
 The patch records the CRC32 of each pack before and after, so it only ever applies to the packs it was made from
 (version 1.03 of the game). Another style (Nintendo, Steam Deck) is another `draw_dcp.py` glyph table and another

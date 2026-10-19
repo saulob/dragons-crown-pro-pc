@@ -33,6 +33,10 @@ LABELS = {(739, 3, 876, 53): 'MENU', (201, 399, 385, 449): 'MENU',
 OVALS = {(203, 249, 347, 339): 'MENU', (2, 112, 178, 203): 'VIEW'}
 DIGITS = {(854, 193, 889, 243): 'T', (635, 249, 667, 299): 'B'}
 BUMPERS = {(407, 342, 510, 435): 'LB', (2, 406, 105, 499): 'RB'}
+VIEW_OVAL = (2, 112, 178, 203)
+VIEW_LABEL = (203, 455, 370, 505)
+TOUCHPAD_SOURCES = {(8, 4, 196, 104): VIEW_OVAL, (204, 344, 400, 392): VIEW_LABEL}
+ADD_TOUCHPAD_WORD = (1424, 688, 1636, 736)
 
 
 def glyph_mask(a, box, thresh=80):
@@ -94,15 +98,46 @@ def fit_px(box, frac):
     return max(8, int((box[3] - box[1]) * frac))
 
 
+def ink_crop(a, box, thr=40):
+    x0, y0, x1, y1 = box
+    ys, xs = np.nonzero(a[y0:y1, x0:x1, 3] > thr)
+    return a[y0 + ys.min():y0 + ys.max() + 1, x0 + xs.min():x0 + xs.max() + 1].copy()
+
+
+def fit_into(a, box, src):
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    s = min(w / src.shape[1], h / src.shape[0])
+    tw, th = max(1, round(src.shape[1] * s)), max(1, round(src.shape[0] * s))
+    layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    layer.paste(Image.fromarray(src).resize((tw, th), Image.LANCZOS), ((w - tw) // 2, (h - th) // 2))
+    a[y0:y1, x0:x1] = 0
+    paste(a, box, layer)
+
+
+def paint_touchpad(a, changed):
+    for box, source in TOUCHPAD_SOURCES.items():
+        fit_into(a, box, ink_crop(a, source))
+        changed[box[1]:box[3], box[0]:box[2]] = True
+
+
+def paint_add_word(add, button_atlas, changed):
+    fit_into(add, ADD_TOUCHPAD_WORD, ink_crop(button_atlas, VIEW_LABEL))
+    x0, y0, x1, y1 = ADD_TOUCHPAD_WORD
+    changed[y0:y1, x0:x1] = True
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('atlas'); ap.add_argument('out')
     ap.add_argument('--font', help='Poppins-Bold.ttf (default: the first of %s that exists)' % ', '.join(FONT_CANDIDATES))
+    ap.add_argument('--touchpad-only', action='store_true',
+                    help='paint only the touchpad surface and word, over an atlas that already has the other Xbox glyphs')
     args = ap.parse_args()
     global FONT_BOLD, FONT_LABEL
     if args.font:
         FONT_BOLD = FONT_LABEL = args.font
-    if not Path(FONT_BOLD).is_file():
+    if not args.touchpad_only and not Path(FONT_BOLD).is_file():
         ap.error(f'font not found: {FONT_BOLD} (pass --font)')
     src = Image.open(args.atlas).convert('RGBA')
     a = np.array(src)
@@ -111,81 +146,83 @@ def main():
     def mark(box):
         changed[box[1]:box[3], box[0]:box[2]] = True
 
-    # face buttons: inpaint the symbol, draw the letter with a soft dark edge so it sits in the gloss
-    for box, letter in DISCS.items():
-        rebuild_disc(a, box)
-        size = (box[2] - box[0], box[3] - box[1])
-        shadow = text_layer(size, letter, FONT_BOLD, fit_px(box, 0.6), (0, 0, 0, 200)).filter(ImageFilter.GaussianBlur(1.5))
-        paste(a, box, shadow)
-        paste(a, box, text_layer(size, letter, FONT_BOLD, fit_px(box, 0.6), XBOX[letter] + (255,)))
-        mark(box)
-    # PS logo discs -> a plain ring (guide button), same ink as the logo
-    for box in GUIDE:
-        rebuild_disc(a, box)
-        w, h = box[2] - box[0], box[3] - box[1]
-        size = (w, h)
-        ring = Image.new('RGBA', (w * 4, h * 4), (0, 0, 0, 0)); d = ImageDraw.Draw(ring)
-        cx, cy, r = w * 2, h * 2, min(w, h) * 4 * 0.22
-        d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(235, 235, 235, 255), width=int(min(w, h) * 4 * 0.055))
-        d.ellipse((cx - r * 0.35, cy - r * 0.35, cx + r * 0.35, cy + r * 0.35), fill=(235, 235, 235, 255))
-        paste(a, box, ring.resize(size, Image.LANCZOS)); mark(box)
-    # small outline glyphs -> white letters with a dark edge (they sit on text)
-    for box, letter in SMALL.items():
-        x0, y0, x1, y1 = box
-        a[y0:y1, x0:x1] = 0
-        size = (x1 - x0, y1 - y0)
-        paste(a, box, text_layer(size, letter, FONT_BOLD, fit_px(box, 0.95), (255, 255, 255, 255), stroke=2)); mark(box)
-    # word labels (START/OPTIONS/SELECT/SHARE) -> MENU / VIEW in the same bold outlined style
-    for box, word in LABELS.items():
-        x0, y0, x1, y1 = box
-        a[y0:y1, x0:x1] = 0
-        size = (x1 - x0, y1 - y0)
-        paste(a, box, text_layer(size, word, FONT_LABEL, fit_px(box, 0.78), (255, 255, 255, 255), stroke=3)); mark(box)
-    # oval START/SELECT buttons: blank the white word inside the oval, draw MENU/VIEW
-    for box, word in OVALS.items():
-        x0, y0, x1, y1 = box
-        sub = a[y0:y1, x0:x1]
-        lum = sub[..., :3].astype(int).max(-1)
-        h, w = lum.shape; yy, xx = np.mgrid[0:h, 0:w]
-        rho = ((xx - (w - 1) / 2) / (w * 0.5)) ** 2 + ((yy - (h - 1) / 2) / (h * 0.5)) ** 2
-        inside = rho < 0.96
-        # the word is a horizontal band; bridge it column by column with a linear gradient
-        rows = np.nonzero(((lum > 90) & inside).any(1))[0]
-        top, bot = max(rows.min() - 4, 1), min(rows.max() + 5, h - 2)
-        f = sub.astype(np.float64)
-        t = ((np.arange(top, bot) - (top - 1)) / (bot - top + 1))[:, None, None]
-        band = f[top - 1][None] * (1 - t) + f[bot][None] * t
-        m = inside[top:bot]
-        sub[top:bot][m] = band.round().astype(np.uint8)[m]
-        size = (w, h)
-        paste(a, box, text_layer(size, word, FONT_LABEL, fit_px(box, 0.40), (255, 255, 255, 255), stroke=1)); mark(box)
-    # the 1 / 2 glyphs composed onto L/R bodies -> B / T
-    for box, ch in DIGITS.items():
-        x0, y0, x1, y1 = box
-        a[y0:y1, x0:x1] = 0
-        size = (x1 - x0, y1 - y0)
-        paste(a, box, text_layer(size, ch, FONT_LABEL, fit_px(box, 0.95), (255, 255, 255, 255), stroke=2)); mark(box)
-    # the L / R bumper shapes with the letter inside -> LB / RB
-    for box, word in BUMPERS.items():
-        x0, y0, x1, y1 = box
-        sub = a[y0:y1, x0:x1]
-        lum = sub[..., :3].astype(int).max(-1)
-        light = (lum > 170) & (sub[..., 3] > 200)
-        interior = ndimage.binary_erosion(ndimage.binary_fill_holes(light), iterations=4)
-        # the letter is whatever is darker than its row's body colour
-        rowmed = np.array([np.median(lum[y][interior[y]]) if interior[y].any() else 255 for y in range(lum.shape[0])])
-        letter = ndimage.binary_dilation(interior & (lum < rowmed[:, None] - 12), iterations=3) & interior
-        # the body is a vertical gradient: fill each row of the letter with that row's light median
-        for y in np.unique(np.nonzero(letter)[0]):
-            row_light = light[y] & ~letter[y]
-            if row_light.sum() < 3:
-                continue
-            sub[y, letter[y]] = np.median(sub[y, row_light], axis=0).round().astype(np.uint8)
-        h, w = lum.shape
-        size = (w, h)
-        shadow = text_layer(size, word, FONT_LABEL, fit_px(box, 0.42), (255, 255, 255, 255), stroke=2, stroke_fill=(140, 140, 140, 255))
-        paste(a, box, text_layer(size, word, FONT_LABEL, fit_px(box, 0.42), (70, 70, 70, 255), stroke=1, stroke_fill=(120, 120, 120, 255)))
-        mark(box)
+    if not args.touchpad_only:
+        # face buttons: inpaint the symbol, draw the letter with a soft dark edge so it sits in the gloss
+        for box, letter in DISCS.items():
+            rebuild_disc(a, box)
+            size = (box[2] - box[0], box[3] - box[1])
+            shadow = text_layer(size, letter, FONT_BOLD, fit_px(box, 0.6), (0, 0, 0, 200)).filter(ImageFilter.GaussianBlur(1.5))
+            paste(a, box, shadow)
+            paste(a, box, text_layer(size, letter, FONT_BOLD, fit_px(box, 0.6), XBOX[letter] + (255,)))
+            mark(box)
+        # PS logo discs -> a plain ring (guide button), same ink as the logo
+        for box in GUIDE:
+            rebuild_disc(a, box)
+            w, h = box[2] - box[0], box[3] - box[1]
+            size = (w, h)
+            ring = Image.new('RGBA', (w * 4, h * 4), (0, 0, 0, 0)); d = ImageDraw.Draw(ring)
+            cx, cy, r = w * 2, h * 2, min(w, h) * 4 * 0.22
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(235, 235, 235, 255), width=int(min(w, h) * 4 * 0.055))
+            d.ellipse((cx - r * 0.35, cy - r * 0.35, cx + r * 0.35, cy + r * 0.35), fill=(235, 235, 235, 255))
+            paste(a, box, ring.resize(size, Image.LANCZOS)); mark(box)
+        # small outline glyphs -> white letters with a dark edge (they sit on text)
+        for box, letter in SMALL.items():
+            x0, y0, x1, y1 = box
+            a[y0:y1, x0:x1] = 0
+            size = (x1 - x0, y1 - y0)
+            paste(a, box, text_layer(size, letter, FONT_BOLD, fit_px(box, 0.95), (255, 255, 255, 255), stroke=2)); mark(box)
+        # word labels (START/OPTIONS/SELECT/SHARE) -> MENU / VIEW in the same bold outlined style
+        for box, word in LABELS.items():
+            x0, y0, x1, y1 = box
+            a[y0:y1, x0:x1] = 0
+            size = (x1 - x0, y1 - y0)
+            paste(a, box, text_layer(size, word, FONT_LABEL, fit_px(box, 0.78), (255, 255, 255, 255), stroke=3)); mark(box)
+        # oval START/SELECT buttons: blank the white word inside the oval, draw MENU/VIEW
+        for box, word in OVALS.items():
+            x0, y0, x1, y1 = box
+            sub = a[y0:y1, x0:x1]
+            lum = sub[..., :3].astype(int).max(-1)
+            h, w = lum.shape; yy, xx = np.mgrid[0:h, 0:w]
+            rho = ((xx - (w - 1) / 2) / (w * 0.5)) ** 2 + ((yy - (h - 1) / 2) / (h * 0.5)) ** 2
+            inside = rho < 0.96
+            # the word is a horizontal band; bridge it column by column with a linear gradient
+            rows = np.nonzero(((lum > 90) & inside).any(1))[0]
+            top, bot = max(rows.min() - 4, 1), min(rows.max() + 5, h - 2)
+            f = sub.astype(np.float64)
+            t = ((np.arange(top, bot) - (top - 1)) / (bot - top + 1))[:, None, None]
+            band = f[top - 1][None] * (1 - t) + f[bot][None] * t
+            m = inside[top:bot]
+            sub[top:bot][m] = band.round().astype(np.uint8)[m]
+            size = (w, h)
+            paste(a, box, text_layer(size, word, FONT_LABEL, fit_px(box, 0.40), (255, 255, 255, 255), stroke=1)); mark(box)
+        # the 1 / 2 glyphs composed onto L/R bodies -> B / T
+        for box, ch in DIGITS.items():
+            x0, y0, x1, y1 = box
+            a[y0:y1, x0:x1] = 0
+            size = (x1 - x0, y1 - y0)
+            paste(a, box, text_layer(size, ch, FONT_LABEL, fit_px(box, 0.95), (255, 255, 255, 255), stroke=2)); mark(box)
+        # the L / R bumper shapes with the letter inside -> LB / RB
+        for box, word in BUMPERS.items():
+            x0, y0, x1, y1 = box
+            sub = a[y0:y1, x0:x1]
+            lum = sub[..., :3].astype(int).max(-1)
+            light = (lum > 170) & (sub[..., 3] > 200)
+            interior = ndimage.binary_erosion(ndimage.binary_fill_holes(light), iterations=4)
+            # the letter is whatever is darker than its row's body colour
+            rowmed = np.array([np.median(lum[y][interior[y]]) if interior[y].any() else 255 for y in range(lum.shape[0])])
+            letter = ndimage.binary_dilation(interior & (lum < rowmed[:, None] - 12), iterations=3) & interior
+            # the body is a vertical gradient: fill each row of the letter with that row's light median
+            for y in np.unique(np.nonzero(letter)[0]):
+                row_light = light[y] & ~letter[y]
+                if row_light.sum() < 3:
+                    continue
+                sub[y, letter[y]] = np.median(sub[y, row_light], axis=0).round().astype(np.uint8)
+            h, w = lum.shape
+            size = (w, h)
+            shadow = text_layer(size, word, FONT_LABEL, fit_px(box, 0.42), (255, 255, 255, 255), stroke=2, stroke_fill=(140, 140, 140, 255))
+            paste(a, box, text_layer(size, word, FONT_LABEL, fit_px(box, 0.42), (70, 70, 70, 255), stroke=1, stroke_fill=(120, 120, 120, 255)))
+            mark(box)
+    paint_touchpad(a, changed)
     out = Image.fromarray(a)
     out.save(args.out)
     np.save(Path(args.out).with_suffix('.changed.npy'), changed)
@@ -194,7 +231,9 @@ def main():
     for k, im in enumerate((src, out)):
         bg = Image.new('RGBA', im.size, (60, 60, 60, 255)); bg.alpha_composite(im); S.paste(bg, (0, k * 516))
     S.save(Path(args.out).with_name('dcp_compare.png'))
-    print(f'edited {changed.sum()} px in {len(DISCS) + len(GUIDE) + len(SMALL) + len(LABELS) + len(OVALS) + len(DIGITS) + len(BUMPERS)} boxes -> {args.out}')
+    boxes = len(TOUCHPAD_SOURCES) if args.touchpad_only else (
+        len(DISCS) + len(GUIDE) + len(SMALL) + len(LABELS) + len(OVALS) + len(DIGITS) + len(BUMPERS) + len(TOUCHPAD_SOURCES))
+    print(f'edited {changed.sum()} px in {boxes} boxes -> {args.out}')
 
 
 if __name__ == '__main__':

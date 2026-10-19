@@ -325,27 +325,32 @@ next gamepad connected takes the lowest free slot, which is not necessarily the 
 The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted); Infinite Ally Health, Infinite Ally Mana and Infinite Ally Durability act on AI-controlled party allies instead. Add 100 Skill Points and Level Up (+1 Level) change Player 1's save record. The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
-atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port
-has no way to swap textures at run time, so the choice is made in the installed game files: Xbox applies a block patch
-to `DRACRO_US.CPK` and `DRACRO.CPK` (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. The
-Japanese and Asia and Hong Kong builds have no validated Xbox patch: they always show the PlayStation prompts and their
-archives are not touched.
+atlas (`Interface_arranged000`) in `stage/Interface.ftx` and in each language's `stage/Interface_XX.ftx` (DE, ES, FR, IT,
+UK and US, the same bytes in all of them), and the port has no way to swap textures at run time, so the choice is made
+in the installed game files: Xbox applies a block patch to `DRACRO_US.CPK` and `DRACRO.CPK`
+(`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. The Japanese and Asia and Hong Kong
+builds have no validated Xbox patch: they always show the PlayStation prompts and their archives are not touched.
 The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the
-4 × 4 blocks that differ between the game's atlas and the repainted one, about 480 KB, with the CRC32 of each pack
+4 × 4 blocks that differ between the game's atlas and the repainted one, about 2 MB, with the CRC32 of each pack
 before and after, and the repainted glyphs sit in the same rectangles as the game's, so the sprite definitions
-(`Interface_US.mbs`) are untouched: Circle, Triangle, Cross and Square become B, Y, A and X in the Xbox colours, L1/R1
+(`Interface_XX.mbs`) are untouched: Circle, Triangle, Cross and Square become B, Y, A and X in the Xbox colours, L1/R1
 and L2/R2 become LB/RB and LT/RT on the game's own shoulder shapes, START/OPTIONS and SELECT/SHARE become MENU and VIEW,
-the PS-logo discs become a plain guide ring, and the touchpad glyphs stay. `scripts/prompts/README.md` describes how
-the patch is made.
+the touchpad and its TOUCH PAD word become VIEW (the port maps View to the touchpad button, `src/runtime_pad.c`), the
+PS-logo discs become a plain guide ring, and the finger-cursor hand stays. The translated message sheets
+(`msgsheet/SystemMsg_XX.fms`, DE, ES, FR and IT) take the glyph the English text has where they name the touchpad button
+(same length, so the patch stays a block patch, and every other string is untouched). `scripts/prompts/README.md`
+describes how the patch is made.
 
 Applying is a background task on the page (a few seconds; Play waits for it): each pack is read from the archive,
 decompressed (CRILAYLA), checked against the patch's CRC, patched, written uncompressed to the end of the archive (the
-archives grow by 67 MB and 31 MB) and its table-of-contents row pointed at the copy; the original data is not
+archives grow by about 250 MB and 31 MB) and its table-of-contents row pointed at the copy; the original data is not
 overwritten. The original TOC and header bytes and the original length go to `DRACRO_US.CPK.undo` and
 `DRACRO.CPK.undo` next to the archives, and PlayStation puts them back byte for byte. The header's `EnableTocCrc` flag
-is cleared so the rewritten TOC is accepted. The page shows what the archives hold (the undo records), not the
-setting: `controller_prompts` in `dcp.ini` only remembers the choice, and after a reinstall from the Play page the
-launcher re-applies Xbox by itself. A pack that is not the one the patch was made for is skipped and named in the log.
+is cleared so the rewritten TOC is accepted. The page shows what the archives hold, not the setting: an install counts as
+Xbox only when its patched entries are this patch's files and no others, so an install patched by an earlier patch shows
+PlayStation and is restored and patched again. When the launcher starts, and after a reinstall from the Play page, a
+saved Xbox setting applies the patch again, and a patch left by an earlier build is removed even when PlayStation is
+selected. A pack that is not the one the patch was made for is skipped and named in the log.
 An archive that is a hard link to the game folder the install was made from (same drive) first gets a file of its own,
 so that folder is never changed. If a step fails, the archive is put back as it was; an undo record that does not belong
 to the archive, or an interrupted earlier run, is detected before anything is written.

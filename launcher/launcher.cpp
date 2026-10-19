@@ -225,6 +225,7 @@ public:
         fonts_ = trg::LoadSystemFonts(18.0f);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
+        ApplySavedPatches();
         Log("shown");
 
         outcome = Outcome::kRunning;
@@ -363,7 +364,26 @@ private:
     }
 
     PromptStyle InstalledPrompts() const {
-        return build_ ? InstalledPromptStyle(paths_.app0, *build_) : PromptStyle::kPlayStation;
+        return build_ ? InstalledPromptStyle(paths_.app0, *build_, XboxPromptsPatch()) : PromptStyle::kPlayStation;
+    }
+
+    bool PromptPatchInstalled() const {
+        if (!build_ || !build_->xbox_prompts) {
+            return false;
+        }
+        const std::optional<BlockPatch> patch = ParseBlockPatch(XboxPromptsPatch());
+        if (!patch) {
+            return false;
+        }
+        for (const std::filesystem::path& archive : PromptArchives(paths_.app0, *build_)) {
+            for (const std::string& entry : PatchedEntries(archive)) {
+                if (std::any_of(patch->targets.begin(), patch->targets.end(),
+                                [&](const BlockPatchTarget& target) { return target.name == entry; })) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     void TrackPlacement() {
@@ -560,13 +580,7 @@ private:
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
             safe_mode_installed_ = InstalledSafeMode(paths_.app0);
-            // The fresh archives are the game's own; put the chosen patches back.
-            const PromptStyle style = build_ && build_->xbox_prompts ? SavedPromptStyle() : PromptStyle::kPlayStation;
-            const bool safe_mode = settings_.GetBool(kArachnophobiaSafeModeKey, false);
-            if ((style != prompts_installed_ || safe_mode != safe_mode_installed_) && files_ == GameFileState::kValid) {
-                Log("game patches: re-applying after the install");
-                StartPatches(style, safe_mode, PatchAction::kRestore);
-            }
+            ApplySavedPatches();
             return;
         }
         if (outcome->status == InstallStatus::kCancelled) {
@@ -812,6 +826,20 @@ private:
     PromptStyle SavedPromptStyle() const {
         const std::string saved = settings_.Get(kControllerPromptsKey, kPromptsPlayStation);
         return ParsePromptStyle(saved).value_or(PromptStyle::kPlayStation);
+    }
+
+    // A patch left by an earlier version is removed even when PlayStation is selected, so the archives follow the setting.
+    void ApplySavedPatches() {
+        if (files_ != GameFileState::kValid) {
+            return;
+        }
+        const PromptStyle style = build_ && build_->xbox_prompts ? SavedPromptStyle() : PromptStyle::kPlayStation;
+        const bool safe_mode = settings_.GetBool(kArachnophobiaSafeModeKey, false);
+        if (style != prompts_installed_ || safe_mode != safe_mode_installed_ ||
+            (style == PromptStyle::kPlayStation && PromptPatchInstalled())) {
+            Log("game patches: applying the saved settings");
+            StartPatches(style, safe_mode, PatchAction::kRestore);
+        }
     }
 
     // The installed state is the truth here too; the setting only remembers the choice for the next install.

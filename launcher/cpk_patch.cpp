@@ -570,19 +570,26 @@ bool UndoMatches(const std::filesystem::path& cpk, const UndoRecord& undo) {
     return in && section_is(undo.toc_pos, "TOC ", undo.toc.size()) && section_is(undo.header_pos, "CPK ", undo.header.size());
 }
 
-// Whether every entry of the patch that the archive holds is the patched file. False when it holds none of them.
+// Whether the archive holds this patch and nothing else: every entry of the patch it contains is the patched file, and
+// the undo record names exactly those entries. False when it holds none of them.
 bool PatchHolds(const std::filesystem::path& cpk, const BlockPatch& patch) {
     CpkArchive archive;
     if (!archive.Open(cpk)) return false;
-    bool found = false;
+    std::vector<std::string> present;
     for (const BlockPatchTarget& target : patch.targets) {
         const CpkEntry* entry = archive.Find(target.name);
         if (!entry) continue;
         const std::vector<uint8_t> data = archive.Read(*entry);
         if (data.size() != target.size || Crc32(data) != target.crc_after) return false;
-        found = true;
+        present.push_back(entry->path);
     }
-    return found;
+    std::vector<uint8_t> bytes;
+    UndoRecord undo;
+    if (present.empty() || !ReadWhole(UndoPath(cpk), bytes) || !undo.Parse(bytes)) return false;
+    std::vector<std::string> recorded = undo.entries;
+    std::sort(present.begin(), present.end());
+    std::sort(recorded.begin(), recorded.end());
+    return present == recorded;
 }
 
 // The install hard-links the game's files from the folder it was made from, and writing through such a link would

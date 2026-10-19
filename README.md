@@ -146,7 +146,7 @@ The game runs at its own 60 frames per second.
 
 ### Controls
 - Xbox controllers work without setup
-- **Controller prompts**: PlayStation (original) or Xbox. Xbox changes the button pictures the game shows (A/B/X/Y, LB/RB, LT/RT, MENU and VIEW) in the port's own copy of the game; PlayStation puts the originals back. Your `.pkg` file is never changed.
+- **Controller prompts**: PlayStation (original) or Xbox. Xbox changes the button pictures the game shows (A/B/X/Y, LB/RB, LT/RT, MENU and VIEW) in the port's own copy of the game; the touchpad prompt becomes VIEW as well, because View performs that action. PlayStation puts the originals back. Your `.pkg` file is never changed.
 - The **keyboard** is always on, together with the controller. The keys below are the defaults; change any of them on the launcher's **Controls** page (click a key, press the new one, Esc cancels) and use **Reset to defaults** to restore them:
 
 | Action | Keys |
