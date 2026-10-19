@@ -348,7 +348,7 @@ The page reads the same files the game writes. See [TROPHIES.md](TROPHIES.md).
 
 ## Launcher input
 
-Mouse, keyboard (arrows, Enter = Play, Esc = Quit, Ctrl+S = Save) and controller (D-pad or left stick, A, B, Start =
+Mouse, keyboard (arrows, Enter = Play, Alt+F4 = Quit, Ctrl+S = Save) and controller (D-pad or left stick, A, B, Start =
 Play). The launcher closes before the game starts, so its input cannot reach the game.
 
 ## Window and display scaling

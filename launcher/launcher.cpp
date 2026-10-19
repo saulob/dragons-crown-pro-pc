@@ -29,6 +29,7 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "host.h"
+#include "launcher_quit.h"
 #include "options.h"
 #include "package_browser.h"
 #include "placement.h"
@@ -289,7 +290,7 @@ private:
             RequestPlay();
             break;
         case trg::Result::kQuit:
-            if (!play_.starting()) {
+            if (!play_.starting() && LauncherQuitAllowed(ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
                 return Outcome::kQuit;
             }
             break;
@@ -396,6 +397,7 @@ private:
         c.settings = &settings_;
         c.save_on_play = false;
         c.theme = LauncherTheme();
+        c.hints = "Enter  Play     Alt+F4  Quit     Ctrl+S  Save";
         c.fonts = fonts_;
         c.branding.title = "DRAGON'S CROWN PRO";
         c.branding.subtitle_color = kAccent;
