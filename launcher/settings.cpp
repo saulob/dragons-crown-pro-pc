@@ -37,6 +37,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kShowFpsTitleKey, "0"},
     {kShowResolutionTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
+    {kDetailedLoggingKey, "1"},
     {kControllerPromptsKey, "playstation"},
     {kArachnophobiaSafeModeKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
@@ -250,6 +251,15 @@ extern "C" int dcp_saved_experience_multiplier(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return cheats::ExperienceMultiplierFromSaved(settings.Get(cheats::kExperienceMultiplierKey, "1"));
+}
+
+extern "C" int dcp_detailed_logging(const char* settings_file) {
+    using namespace dcp;
+    if (!settings_file || !*settings_file) {
+        return 1;
+    }
+    const LauncherSettings settings(PathFromUtf8(settings_file));
+    return settings.GetBool(kDetailedLoggingKey, true) ? 1 : 0;
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {

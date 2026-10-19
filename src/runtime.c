@@ -2,6 +2,7 @@
 #define _CRT_RAND_S
 #include "runtime.h"
 #include "dcpgpu.h"
+#include "runtime_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,6 +178,7 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
     printf("Runtime: guest requested exit(%d)\n", status);
     runtime_finalize(NULL);
     runtime_report();
+    if (status == 0) runtime_log_mark_clean_exit();
     exit(status);
 }
 /* Imports are spelled NID#library by the boot image builder, the same for every game. libScePosix

@@ -909,9 +909,6 @@ private:
         const std::filesystem::path user = PathFromUtf8(config_.user_dir ? config_.user_dir : "user");
         std::filesystem::create_directories(user, ec);
         ui.FolderRow("Saves and settings", "Settings, saves and caches.", "Open user folder", Utf8(user));
-        if (config_.logs_dir && *config_.logs_dir && std::filesystem::is_directory(PathFromUtf8(config_.logs_dir), ec)) {
-            ui.FolderRow("Logs", "One numbered log per run.", "Open logs folder", config_.logs_dir);
-        }
         if (ui.ButtonRow("Settings file", "Launcher choices stored as plain text.", "Show settings file") &&
             launcher_->Save()) {
             trg::OpenInFileManager(Utf8(std::filesystem::exists(settings_.file(), ec) ? settings_.file() : user));
@@ -921,6 +918,12 @@ private:
             settings_.ResetToDefaults();
             launcher_->SetStatus("Settings reset to defaults. Save or press Play to keep them.", 6.0);
             Log("settings reset to defaults (pending)");
+        }
+        ui.Heading("Diagnostics");
+        ui.Toggle("Detailed logging", "Keeps logs for normal sessions. Crash diagnostics are always preserved.",
+                  kDetailedLoggingKey, true);
+        if (ui.ButtonRow("Logs folder", "Open the folder containing session and crash logs", "Open logs folder")) {
+            OpenLogsFolder();
         }
         ui.Info("Port version", DCP_PORT_VERSION);
         const std::string game = InstalledGameName(files_, build_);
@@ -937,6 +940,28 @@ private:
                       SDL_VERSIONNUM_MICRO(SDL_GetVersion()), IMGUI_VERSION, DCP_TRG_LAUNCHER_VERSION);
         ui.Info("Libraries", libraries);
         ui.Link(kPortRepository, kPortUrl);
+    }
+
+    void OpenLogsFolder() {
+        if (!config_.logs_dir || !*config_.logs_dir) {
+            Log("could not open the logs folder: no logs directory is configured");
+            launcher_->SetStatus("Could not open the logs folder.", 6.0);
+            return;
+        }
+        std::error_code ec;
+        std::filesystem::path folder = PathFromUtf8(config_.logs_dir);
+        std::filesystem::create_directories(folder, ec);
+        if (!std::filesystem::is_directory(folder, ec)) {
+            Log("could not create the logs folder %s: %s", Utf8(folder).c_str(), ec.message().c_str());
+            const std::filesystem::path parent = folder.parent_path();
+            ec.clear();
+            if (parent.empty() || !std::filesystem::is_directory(parent, ec)) {
+                launcher_->SetStatus("Could not open the logs folder.", 6.0);
+                return;
+            }
+            folder = parent;
+        }
+        trg::OpenInFileManager(Utf8(folder));
     }
 
     const DcpLauncherConfig& config_;

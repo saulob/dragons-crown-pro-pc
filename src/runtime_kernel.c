@@ -3,6 +3,7 @@
  * use FreeBSD numbering; host errno values never reach the guest directly. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "runtime_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -160,6 +161,8 @@ static ABI __attribute__((noreturn)) void hard_exit(int status) {
     printf("Runtime: guest requested _exit(%d)\n",status);
     runtime_report();
     fflush(stdout);
+    if (status == 0) runtime_log_mark_clean_exit();
+    runtime_log_finalize();
     _exit(status);
 }
 static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t argument) {

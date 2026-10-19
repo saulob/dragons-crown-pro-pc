@@ -50,13 +50,13 @@ int runtime_log_create(const char *dir, const char *file, char *path, size_t siz
             make_directories(path);
             *separator = folder;
         }
-        *handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        *handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         return *handle != INVALID_HANDLE_VALUE;
     }
     make_directories(dir);
     for (unsigned number = last_number(dir) + 1, tries = 0; tries < 1000; ++number, ++tries) {
         if (snprintf(path, size, "%s\\dragons_crown_pro_%03u.log", dir, number) >= (int)size) return 0;
-        *handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        *handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
         if (*handle != INVALID_HANDLE_VALUE) return 1;
         if (GetLastError() != ERROR_FILE_EXISTS) return 0;
     }
@@ -80,6 +80,7 @@ static DWORD WINAPI echo_log(LPVOID unused) {
 int runtime_log_start(const char *dir, const char *file, char *path, size_t size) {
     void *log;
     if (!runtime_log_create(dir, file, path, size, &log)) return 0;
+    runtime_log_set_session_path(path);
     HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE), original = NULL;
     /* _dup2 below closes the handle that fd 1 owns now. */
     if (console && console != INVALID_HANDLE_VALUE)
@@ -93,7 +94,7 @@ int runtime_log_start(const char *dir, const char *file, char *path, size_t size
     _dup2(fd, 1);
     _dup2(fd, 2);
     _close(fd);
-    HANDLE reader = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE reader = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (original && reader != INVALID_HANDLE_VALUE) {
         echo_source = reader;
         echo_target = original;

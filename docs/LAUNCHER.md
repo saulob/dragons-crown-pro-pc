@@ -167,6 +167,7 @@ use the same defaults).
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
+| `detailed_logging` | 1, 0 | 1 | at exit |
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
@@ -363,6 +364,11 @@ window is centred on the primary display.
 The launcher prints `Launcher: ...` lines (shown or skipped and why, game file state and hashes, settings path, settings
 saved, install request, controller prompts installed and switched, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`. The game window logs
 `Window: display ... VSync ... frame rate in title ...`.
+
+**Detailed logging** (About, Diagnostics) is on by default and keeps that log after every session. Turned off, a run
+still writes its log while it runs, but a normal exit discards it, so normal sessions do not accumulate files. A crash
+or abnormal exit keeps the log. Crash diagnostics are never discarded. **Open logs folder** opens the folder that holds
+these logs, creating it first when it does not exist yet.
 
 ## Diagnostics
 

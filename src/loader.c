@@ -124,6 +124,7 @@ static void describe_address(char *out, size_t size, uintptr_t address) {
 static int fatal_reported;
 static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) { Sleep(INFINITE); }
+    runtime_log_mark_crash();
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
     const CONTEXT *c=info->ContextRecord;
     char where[MAX_PATH+64];
@@ -224,6 +225,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
         pthread_sigmask(SIG_UNBLOCK, &unblock, NULL);
         siglongjmp(*recover, 1);
     }
+    runtime_log_mark_crash();
     /* The process is terminating: dladdr/snprintf are acceptable here. */
     ucontext_t *uc = context;
     uintptr_t rip = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
@@ -283,6 +285,7 @@ static void dump_frames(ucontext_t *uc) {
 static void thread_dump(int sig, siginfo_t *info, void *context) { (void)sig; (void)info; dump_frames(context); }
 static void watchdog(int sig, siginfo_t *info, void *context) {
     (void)info;
+    runtime_log_mark_crash();
     const char head[]="STOP: watchdog timeout; thread stacks:\n";
     { ssize_t written_=write(2,head,sizeof(head)-1); (void)written_; }
     dump_frames(context);
@@ -394,24 +397,31 @@ int main(int argc, char **argv) {
     const DcpPathRequest request={boot,content_profile,app0,user_dir,logs_dir};
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0; user_dir=paths.user_dir;
+    static char settings_file[4200];
+    snprintf(settings_file,sizeof(settings_file),"%s/dcp.ini",user_dir);
     char log_path[4200];
+    static char log_folder[4200];
+    snprintf(log_folder,sizeof(log_folder),"%s",paths.logs_dir);
     if (runtime_log_start(paths.logs_dir,log_file,log_path,sizeof(log_path))) {
         time_t now=time(NULL);
         char stamp[32];
         strftime(stamp,sizeof(stamp),"%Y-%m-%dT%H:%M:%S",localtime(&now));
         printf("[run] %s\n[run] %s\n[run] log %s\n[run] prepared root %s\n",stamp,command_line(argc,argv),log_path,app0);
         atexit(runtime_log_flush);
+        runtime_log_set_detailed(dcp_detailed_logging(settings_file));
+        runtime_log_install_cleanup();
+        if (!dcp_logs_directory(paths.logs_dir,log_path,log_folder,sizeof(log_folder)))
+            snprintf(log_folder,sizeof(log_folder),"%s",paths.logs_dir);
     } else fprintf(stderr,"Cannot create the log %s\n",log_file ? log_file : paths.logs_dir);
-    static char settings_file[4200];
-    snprintf(settings_file,sizeof(settings_file),"%s/dcp.ini",user_dir);
     if (!cpu_only && !check_imports) {
         DcpGraphicsCheck check_graphics=NULL;
 #ifndef _WIN32
         check_graphics=dcp_check_vulkan;
 #endif
-        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,paths.logs_dir,skip_launcher,force_launcher,check_graphics};
+        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics};
         DcpLauncherResult launched=dcp_launcher_run(&launcher);
-        if (launched==DCP_LAUNCHER_QUIT) exit(0);
+        runtime_log_set_detailed(dcp_detailed_logging(settings_file));
+        if (launched==DCP_LAUNCHER_QUIT) { runtime_log_mark_clean_exit(); exit(0); }
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
     }
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");

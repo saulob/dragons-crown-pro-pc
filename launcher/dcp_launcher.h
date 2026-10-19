@@ -45,6 +45,10 @@ typedef struct {
 /* 0 when the executable's folder is unknown or a path does not fit. */
 int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
 
+/* The folder holding this run's log: the log_file's parent when one is given, else logs_dir. 0 when
+ * neither yields a path. */
+int dcp_logs_directory(const char *logs_dir, const char *log_file, char *out, size_t size);
+
 /* Index into dcp_resolutions (dcp_resolution.h) of the render_resolution in the settings file, among the resolutions the
  * build image_dir was built from: 0 (native) when the file or the value is missing or the build has no verified render
  * resolution sites. */
@@ -65,6 +69,9 @@ unsigned dcp_saved_cheats(const char *settings_file);
 /* The Experience Multiplier the settings file sets (1 = Off, 2, 5 or 10); Off when the file or the value is missing or not
  * one of those. */
 int dcp_saved_experience_multiplier(const char *settings_file);
+
+/* 1 when the settings file keeps the logs of normal sessions (detailed_logging; 1 by default). */
+int dcp_detailed_logging(const char *settings_file);
 
 /* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
  * usable Vulkan on Linux); enumerates only, no device is created. */

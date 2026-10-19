@@ -35,6 +35,8 @@ inline constexpr char kTextLanguageKey[] = "text_language";
 inline constexpr char kShowFpsTitleKey[] = "show_fps_title";
 inline constexpr char kShowResolutionTitleKey[] = "show_resolution_title";
 inline constexpr char kShowFrameCounterKey[] = "show_fps";
+// Keeps the run log of normal sessions; crash logs are kept whatever it says.
+inline constexpr char kDetailedLoggingKey[] = "detailed_logging";
 // Which controller's buttons the game's prompts show; the launcher keeps the installed archives in step with it.
 inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 // Replaces the Giant Spider's pictures with placeholder blocks; the launcher keeps the installed archive in step with it.

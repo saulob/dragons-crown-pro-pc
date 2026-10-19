@@ -939,6 +939,128 @@ void TestDefaultsAgree() {
 
 bool WrittenValue(const std::string& text, const std::string& key, const std::string& value);
 
+void TestDetailedLogging(const fs::path& base) {
+    const fs::path file = base / "logging" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kDetailedLoggingKey && setting.default_value == "1";
+    }
+    CHECK(managed);
+    CHECK(LauncherSettings(file).GetBool(kDetailedLoggingKey, true));
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    CHECK(dcp_detailed_logging(nullptr) == 1);
+
+    WriteAll(file, "detailed_logging = 0\n");
+    CHECK(!LauncherSettings(file).GetBool(kDetailedLoggingKey, true));
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 0);
+    WriteAll(file, "detailed_logging = 1\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    WriteAll(file, "detailed_logging = true\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    WriteAll(file, "detailed_logging = garbage\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    WriteAll(file, "vsync = 0\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kDetailedLoggingKey, false);
+        CHECK(settings.Save());
+        CHECK(WrittenValue(ReadAll(file), kDetailedLoggingKey, "0"));
+        CHECK(dcp_detailed_logging(file.string().c_str()) == 0);
+    }
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kDetailedLoggingKey, true));
+        settings.ResetToDefaults();
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kDetailedLoggingKey, "1"));
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("ui.Heading(\"Diagnostics\")") != std::string::npos);
+    CHECK(launcher.find("ui.Toggle(\"Detailed logging\"") != std::string::npos);
+    CHECK(launcher.find("Keeps logs for normal sessions. Crash diagnostics are always preserved.") != std::string::npos);
+}
+
+void TestLogsDirectory(const fs::path& base) {
+    const fs::path root = base / "logs-directory";
+    fs::remove_all(root);
+    fs::create_directories(root / "nested");
+    char out[4096];
+
+    const fs::path default_dir = root / "logs";
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), nullptr, out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == default_dir);
+    CHECK(!fs::exists(default_dir));
+
+    const fs::path log = root / "nested" / "run.log";
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), Utf8(log).c_str(), out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == log.parent_path());
+
+    const fs::path created_dir = root / "created";
+    const std::string created = CreateLog(created_dir, nullptr, "run\n");
+    CHECK(!created.empty());
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), created.c_str(), out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == created_dir);
+
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), "", out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == default_dir);
+    CHECK(!dcp_logs_directory(nullptr, nullptr, out, sizeof(out)));
+    CHECK(!dcp_logs_directory(Utf8(default_dir).c_str(), Utf8(log).c_str(), nullptr, sizeof(out)));
+    CHECK(!dcp_logs_directory(Utf8(default_dir).c_str(), Utf8(log).c_str(), out, 0));
+
+    const fs::path unicode =
+        root / "logs with space" / PathFromUtf8("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E");
+    CHECK(dcp_logs_directory(Utf8(unicode).c_str(), nullptr, out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == unicode);
+    CHECK(fs::create_directories(unicode));
+    CHECK(fs::is_directory(unicode));
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("ui.ButtonRow(\"Logs folder\"") != std::string::npos);
+    CHECK(launcher.find("\"Open the folder containing session and crash logs\"") != std::string::npos);
+    CHECK(launcher.find("\"Open logs folder\"") != std::string::npos);
+    CHECK(launcher.find("OpenLogsFolder") != std::string::npos);
+    CHECK(launcher.find("std::filesystem::create_directories(folder, ec)") != std::string::npos);
+    CHECK(launcher.find("trg::OpenInFileManager(Utf8(folder))") != std::string::npos);
+
+    const std::string loader = ReadAll(source / "src" / "loader.c");
+    CHECK(loader.find("dcp_logs_directory(paths.logs_dir,log_path") != std::string::npos);
+    CHECK(loader.find("DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder") !=
+          std::string::npos);
+
+    const std::string paths = ReadAll(source / "launcher" / "paths.cpp");
+    CHECK(paths.find("DCP_PORTABLE_DIR") != std::string::npos);
+    CHECK(paths.find("XDG_DATA_HOME") != std::string::npos);
+    CHECK(paths.find("/tmp/.mount") == std::string::npos);
+}
+
+void TestLogRetention(const fs::path& base) {
+    CHECK(runtime_log_should_remove(0, 1, 0));
+    CHECK(!runtime_log_should_remove(1, 1, 0));
+    CHECK(!runtime_log_should_remove(0, 0, 0));
+    CHECK(!runtime_log_should_remove(0, 1, 1));
+
+    const fs::path file = base / "logging" / "run.log";
+    fs::create_directories(file.parent_path());
+    WriteAll(file, "run\n");
+    runtime_log_set_session_path(file.string().c_str());
+    runtime_log_set_detailed(0);
+    runtime_log_mark_clean_exit();
+    runtime_log_finalize();
+    CHECK(!fs::exists(file));
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string loader = ReadAll(source / "src" / "loader.c");
+    CHECK(loader.find("runtime_log_install_cleanup()") != std::string::npos);
+    CHECK(loader.find("dcp_detailed_logging(settings_file)") != std::string::npos);
+    CHECK(ReadAll(source / "gpu" / "shim" / "dcpgpu.cpp").find("runtime_log_finalize()") != std::string::npos);
+}
+
 void TestCheatSettings(const fs::path& base) {
     const fs::path file = base / "cheats" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -3047,6 +3169,9 @@ int main(int argc, char** argv) {
     TestInstaller(base);
     TestVideoCoreSettings(base);
     TestDefaultsAgree();
+    TestDetailedLogging(base);
+    TestLogsDirectory(base);
+    TestLogRetention(base);
     TestWindowTitle();
     TestRenderResolution(base);
     TestTextLanguage(base);

@@ -51,6 +51,7 @@ else()
     target_link_libraries(dcp_launcher_core PRIVATE OpenSSL::Crypto)
     set(DCP_LOG_SOURCE ${PROJECT_SOURCE_DIR}/src/runtime_log_posix.c)
 endif()
+set(DCP_LOG_SOURCES ${DCP_LOG_SOURCE} ${PROJECT_SOURCE_DIR}/src/runtime_session_log.c)
 
 # The Controller prompts patch (prompts/xbox-prompts.dcpx) as a byte array, prompts_patch.h.
 set(DCP_PROMPTS_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/prompts/xbox-prompts.dcpx)
@@ -86,7 +87,7 @@ set_target_properties(dcp-launcher-shots PROPERTIES CXX_STANDARD 20 CXX_STANDARD
 
 # Focused tests with synthetic data and temporary folders (tools\test.ps1); not part of the default build.
 find_package(PNG REQUIRED)
-add_executable(dcp-launcher-tests EXCLUDE_FROM_ALL ../tests/launcher_tests.cpp ${DCP_LOG_SOURCE}
+add_executable(dcp-launcher-tests EXCLUDE_FROM_ALL ../tests/launcher_tests.cpp ${DCP_LOG_SOURCES}
     ../gpu/shim/dcp_settings.cpp ../gpu/shim/dcp_png.cpp)
 target_compile_definitions(dcp-launcher-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core PNG::PNG)
@@ -95,7 +96,7 @@ set_target_properties(dcp-launcher-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD
 target_compile_options(dcp-launcher-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the local trophies (tools/test.ps1); not part of the default build.
-add_executable(dcp-trophy-tests EXCLUDE_FROM_ALL ../tests/trophy_tests.cpp ${DCP_LOG_SOURCE} ../gpu/shim/dcp_png.cpp)
+add_executable(dcp-trophy-tests EXCLUDE_FROM_ALL ../tests/trophy_tests.cpp ${DCP_LOG_SOURCES} ../gpu/shim/dcp_png.cpp)
 target_link_libraries(dcp-trophy-tests PRIVATE dcp_launcher_core PNG::PNG)
 target_include_directories(dcp-trophy-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 target_compile_definitions(dcp-trophy-tests PRIVATE DCP_TROPHY_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src/trophies")

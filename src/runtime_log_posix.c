@@ -101,6 +101,7 @@ static void *echo_log(void *unused) {
 int runtime_log_start(const char *dir, const char *file, char *path, size_t size) {
     void *created;
     if (!runtime_log_create(dir, file, path, size, &created)) return 0;
+    runtime_log_set_session_path(path);
     log_fd = (int)(intptr_t)created;
     int pipes[2];
     if (pipe2(pipes, O_CLOEXEC)) {
