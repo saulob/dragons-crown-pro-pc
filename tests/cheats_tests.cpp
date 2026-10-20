@@ -1371,6 +1371,7 @@ struct MenuInputRig {
     MenuInputRig() {
         ImGuiIO& io = ImGui::GetIO();
         io.IniFilename = nullptr;
+        io.LogFilename = nullptr;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
         io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
         io.DisplaySize = ImVec2(800.0f, 600.0f);
@@ -1419,6 +1420,22 @@ struct MenuInputRig {
 };
 
 void TestMenuInput() {
+    const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
+    CHECK(overlay.find("io.IniFilename = nullptr;") != std::string::npos);
+    CHECK(overlay.find("io.LogFilename = nullptr;") != std::string::npos);
+    const std::string host = ReadSource("launcher/host.cpp");
+    CHECK(host.find("io.IniFilename = nullptr;") != std::string::npos);
+    CHECK(host.find("io.LogFilename = nullptr;") != std::string::npos);
+
+    const fs::path ini = fs::current_path() / "imgui.ini";
+    std::error_code error;
+    fs::remove(ini, error);
+    {
+        MenuInputRig rig;
+        rig.Frames(1);
+    }
+    CHECK(!fs::exists(ini));
+
     for (const ImGuiKey key : {ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space, ImGuiKey_GamepadFaceDown}) {
         MenuInputRig rig;
         rig.Frames(3);

@@ -753,6 +753,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr; // window positions are not kept
+    io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     io.BackendPlatformName = "dcp";
