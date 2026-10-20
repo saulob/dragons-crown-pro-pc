@@ -1,0 +1,361 @@
+diff --git a/include/trg/download.h b/include/trg/download.h
+index a375b63..cda6755 100644
+--- a/include/trg/download.h
++++ b/include/trg/download.h
+@@ -4,16 +4,37 @@
+ #pragma once
+ 
+ #include <string>
++#include <vector>
+ 
+ namespace trg {
+ 
+ class Task;
+ 
++struct HttpHeader {
++  std::string name;
++  std::string value;
++};
++
++struct HttpOptions {
++  std::vector<HttpHeader> headers;
++  std::string user_agent = "TRG-Launcher/1.1";
++  int connect_timeout_ms = 15000;
++  int receive_timeout_ms = 30000;
++  // 0 leaves the transfer unlimited; otherwise the whole request is aborted.
++  int total_timeout_ms = 0;
++  // 0 leaves the size unlimited.
++  long long max_bytes = 0;
++  // 0 uses the size the server reports; otherwise this is the expected total.
++  long long progress_total = 0;
++};
++
+ // GETs `url` (following redirects) into `out`. When `task` is given it reports
+ // progress and stops on Cancel. Returns "" on success, else an error message.
+-std::string HttpGet(const std::string& url, std::string& out, Task* task = nullptr);
++std::string HttpGet(const std::string& url, std::string& out, Task* task = nullptr,
++                    const HttpOptions& options = {});
+ 
+ // Downloads `url` to `utf8_path` on a Task, through `<path>.part`.
+-std::string DownloadFile(Task& task, const std::string& url, const std::string& utf8_path);
++std::string DownloadFile(Task& task, const std::string& url, const std::string& utf8_path,
++                         const HttpOptions& options = {});
+ 
+ }  // namespace trg
+diff --git a/src/download.cpp b/src/download.cpp
+index 9661a44..3096280 100644
+--- a/src/download.cpp
++++ b/src/download.cpp
+@@ -1,6 +1,12 @@
+ #include "trg/download.h"
+ 
++#include <algorithm>
++#include <cctype>
++#include <chrono>
+ #include <cstdio>
++#include <limits>
++#include <string_view>
++#include <vector>
+ 
+ #include "trg/platform.h"
+ 
+@@ -16,56 +22,153 @@
+ #endif
+ 
+ namespace trg {
++namespace {
++
++bool ValidHeader(const HttpHeader& header) {
++  if (header.name.empty()) {
++    return false;
++  }
++  for (const char c : header.name) {
++    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_') {
++      return false;
++    }
++  }
++  for (const char c : header.value) {
++    if (c == '\r' || c == '\n' || c == '\0') {
++      return false;
++    }
++  }
++  return true;
++}
++
++bool ValidOptions(const HttpOptions& options) {
++  if (options.user_agent.find_first_of("\r\n") != std::string::npos) {
++    return false;
++  }
++  for (const HttpHeader& header : options.headers) {
++    if (!ValidHeader(header)) {
++      return false;
++    }
++  }
++  return true;
++}
++
++}  // namespace
+ 
+ #if defined(_WIN32)
+-std::string HttpGet(const std::string& url, std::string& out, Task* task) {
++
++namespace {
++
++std::wstring Widen(const std::string& text) {
++  if (text.empty()) {
++    return {};
++  }
++  const int length = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), int(text.size()), nullptr, 0);
++  if (length <= 0) {
++    return {};
++  }
++  std::wstring wide(size_t(length), L'\0');
++  MultiByteToWideChar(CP_UTF8, 0, text.c_str(), int(text.size()), wide.data(), length);
++  return wide;
++}
++
++}  // namespace
++
++std::string HttpGet(const std::string& url, std::string& out, Task* task, const HttpOptions& options) {
+   out.clear();
+-  const int wlen = MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, nullptr, 0);
+-  std::wstring wurl(wlen > 0 ? size_t(wlen - 1) : 0, L'\0');
+-  if (wlen > 1) MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, wurl.data(), wlen);
++  if (!ValidOptions(options)) {
++    return "The request headers are not valid.";
++  }
++  const std::wstring wurl = Widen(url);
++  const std::wstring user_agent = Widen(options.user_agent);
++  if (wurl.empty() || user_agent.empty()) {
++    return "Not a valid web address.";
++  }
++
+   URL_COMPONENTSW parts{};
+   parts.dwStructSize = sizeof(parts);
+-  wchar_t host[256], path[4096];
+-  parts.lpszHostName = host;
+-  parts.dwHostNameLength = 256;
+-  parts.lpszUrlPath = path;
+-  parts.dwUrlPathLength = 4096;
+-  if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &parts)) return "Not a valid web address.";
+-  HINTERNET session = WinHttpOpen(L"TRG-Launcher/1.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+-                                  WINHTTP_NO_PROXY_BYPASS, 0);
+-  if (!session) return "Could not start the download.";
++  std::vector<wchar_t> host(wurl.size() + 1);
++  std::vector<wchar_t> path(wurl.size() + 1);
++  parts.lpszHostName = host.data();
++  parts.dwHostNameLength = DWORD(host.size());
++  parts.lpszUrlPath = path.data();
++  parts.dwUrlPathLength = DWORD(path.size());
++  if (!WinHttpCrackUrl(wurl.c_str(), DWORD(wurl.size()), 0, &parts)) {
++    return "Not a valid web address.";
++  }
++  if (parts.nScheme != INTERNET_SCHEME_HTTPS && parts.nScheme != INTERNET_SCHEME_HTTP) {
++    return "Only web addresses can be downloaded.";
++  }
++
++  std::wstring headers;
++  for (const HttpHeader& header : options.headers) {
++    headers += Widen(header.name + ": " + header.value + "\r\n");
++  }
++
++  HINTERNET session =
++      WinHttpOpen(user_agent.c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
++                  WINHTTP_NO_PROXY_BYPASS, 0);
++  if (!session) {
++    return "Could not start the download.";
++  }
++  WinHttpSetTimeouts(session, options.connect_timeout_ms, options.connect_timeout_ms, options.receive_timeout_ms,
++                     options.receive_timeout_ms);
+   std::string error = "Could not reach the server. Check your internet connection and try again.";
+-  if (HINTERNET conn = WinHttpConnect(session, host, parts.nPort, 0)) {
++  if (HINTERNET conn = WinHttpConnect(session, host.data(), parts.nPort, 0)) {
+     const DWORD flags = parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0;
+-    if (HINTERNET req = WinHttpOpenRequest(conn, L"GET", path, nullptr, WINHTTP_NO_REFERER,
++    if (HINTERNET req = WinHttpOpenRequest(conn, L"GET", path.data(), nullptr, WINHTTP_NO_REFERER,
+                                            WINHTTP_DEFAULT_ACCEPT_TYPES, flags)) {
+-      DWORD code = 0, len = sizeof(code);
+-      if (WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
++      DWORD redirects = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
++      WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY, &redirects, sizeof(redirects));
++      DWORD code = 0;
++      DWORD length = sizeof(code);
++      if (WinHttpSendRequest(req, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
++                             DWORD(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+           WinHttpReceiveResponse(req, nullptr) &&
+-          WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &len,
++          WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &length,
+                               nullptr)) {
+         if (code != 200) {
+           error = "The server answered " + std::to_string(code) + ".";
+         } else {
+           DWORD content = 0;
+-          len = sizeof(content);
++          length = sizeof(content);
+           const bool sized = WinHttpQueryHeaders(req, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+-                                                 nullptr, &content, &len, nullptr);
++                                                 nullptr, &content, &length, nullptr) != FALSE;
+           error.clear();
+-          for (DWORD avail = 0; WinHttpQueryDataAvailable(req, &avail) && avail;) {
++          const auto started = std::chrono::steady_clock::now();
++          for (DWORD available = 0; WinHttpQueryDataAvailable(req, &available) && available;) {
+             if (task && task->cancelled()) {
+               error = "Cancelled.";
+               break;
+             }
++            if (options.total_timeout_ms > 0) {
++              const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                       std::chrono::steady_clock::now() - started)
++                                       .count();
++              if (elapsed > options.total_timeout_ms) {
++                error = "The server took too long to answer.";
++                break;
++              }
++            }
+             const size_t at = out.size();
+-            out.resize(at + avail);
++            if (options.max_bytes > 0 && at + size_t(available) > size_t(options.max_bytes)) {
++              error = "The server sent more data than expected.";
++              break;
++            }
++            out.resize(at + available);
+             DWORD read = 0;
+-            if (!WinHttpReadData(req, out.data() + at, avail, &read)) {
++            if (!WinHttpReadData(req, out.data() + at, available, &read)) {
+               error = "The download was interrupted.";
++              out.resize(at);
+               break;
+             }
+             out.resize(at + read);
+-            if (task) task->Progress((long long)out.size(), sized ? (long long)content : -1);
++            if (task) {
++              const long long total =
++                  options.progress_total > 0 ? options.progress_total
++                                             : (sized ? static_cast<long long>(content) : -1);
++              task->Progress(static_cast<long long>(out.size()), total);
++            }
+           }
+         }
+       }
+@@ -76,41 +179,99 @@ std::string HttpGet(const std::string& url, std::string& out, Task* task) {
+   WinHttpCloseHandle(session);
+   return error;
+ }
++
+ #else
+-std::string HttpGet(const std::string& url, std::string& out, Task* task) {
++
++namespace {
++
++std::string ShellQuote(std::string_view text) {
++  std::string quoted = "'";
++  for (const char c : text) {
++    if (c == '\'') {
++      quoted += "'\\''";
++    } else {
++      quoted += c;
++    }
++  }
++  quoted += '\'';
++  return quoted;
++}
++
++long long Seconds(int milliseconds) {
++  if (milliseconds <= 0) {
++    return 0;
++  }
++  return std::max<long long>(1, (static_cast<long long>(milliseconds) + 999) / 1000);
++}
++
++}  // namespace
++
++std::string HttpGet(const std::string& url, std::string& out, Task* task, const HttpOptions& options) {
+   out.clear();
+-  // Only plain web addresses reach the shell (no quotes or other specials).
+-  for (char c : url)
+-    if (c == '\'' || c == '"' || c == '\\' || c == '`' || c == '$' || (unsigned char)c < 0x21)
++  if (!ValidOptions(options)) {
++    return "The request headers are not valid.";
++  }
++  for (const char c : url) {
++    if (c == '\'' || c == '"' || c == '\\' || c == '`' || c == '$' || static_cast<unsigned char>(c) < 0x21) {
+       return "Not a valid web address.";
+-  FILE* p = popen(("curl -fsSL '" + url + "'").c_str(), "r");
+-  if (!p) return "curl is needed to download. Install it with your package manager.";
+-  char buf[1 << 16];
+-  for (size_t n; (n = fread(buf, 1, sizeof(buf), p)) > 0;) {
+-    out.append(buf, n);
++    }
++  }
++
++  std::string command = "curl -fsSL --proto-redir =https --connect-timeout " +
++                        std::to_string(Seconds(options.connect_timeout_ms));
++  if (const long long total = Seconds(options.total_timeout_ms); total > 0) {
++    command += " --max-time " + std::to_string(total);
++  }
++  command += " -A " + ShellQuote(options.user_agent);
++  for (const HttpHeader& header : options.headers) {
++    command += " -H " + ShellQuote(header.name + ": " + header.value);
++  }
++  command += " " + ShellQuote(url);
++
++  FILE* pipe = popen(command.c_str(), "r");
++  if (!pipe) {
++    return "curl is needed to download. Install it with your package manager.";
++  }
++  std::string error;
++  char buffer[1 << 16];
++  for (size_t count; (count = fread(buffer, 1, sizeof(buffer), pipe)) > 0;) {
++    if (options.max_bytes > 0 && out.size() + count > size_t(options.max_bytes)) {
++      error = "The server sent more data than expected.";
++      break;
++    }
++    out.append(buffer, count);
+     if (task) {
+-      task->Progress((long long)out.size(), -1);
++      task->Progress(static_cast<long long>(out.size()),
++                     options.progress_total > 0 ? options.progress_total : -1);
+       if (task->cancelled()) {
+-        pclose(p);
+-        return "Cancelled.";
++        error = "Cancelled.";
++        break;
+       }
+     }
+   }
+-  const int status = pclose(p);
+-  if (status != 0) return "The download failed. Check your internet connection and try again.";
+-  return "";
++  const int status = pclose(pipe);
++  if (error.empty() && status != 0) {
++    error = "The download failed. Check your internet connection and try again.";
++  }
++  return error;
+ }
++
+ #endif
+ 
+-std::string DownloadFile(Task& task, const std::string& url, const std::string& utf8_path) {
++std::string DownloadFile(Task& task, const std::string& url, const std::string& utf8_path,
++                         const HttpOptions& options) {
+   std::string data;
+-  if (std::string error = HttpGet(url, data, &task); !error.empty()) return error;
++  if (std::string error = HttpGet(url, data, &task, options); !error.empty()) {
++    return error;
++  }
+   const std::string part = utf8_path + ".part";
+-  FILE* f = OpenFile(part, "wb");
+-  if (!f) return "Cannot write " + utf8_path + ".";
+-  const bool ok = std::fwrite(data.data(), 1, data.size(), f) == data.size();
+-  std::fclose(f);
+-  if (!ok || !MoveFileOver(part, utf8_path)) {
++  FILE* file = OpenFile(part, "wb");
++  if (!file) {
++    return "Cannot write " + utf8_path + ".";
++  }
++  const bool ok = std::fwrite(data.data(), 1, data.size(), file) == data.size();
++  const bool closed = std::fclose(file) == 0;
++  if (!ok || !closed || !MoveFileOver(part, utf8_path)) {
+     RemoveFile(part);
+     return "Cannot write " + utf8_path + ".";
+   }

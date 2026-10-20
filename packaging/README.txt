@@ -49,6 +49,15 @@ settings and saves are kept. If an installation fails or is cancelled, the
 previous one is left as it was.
 
 
+UPDATES
+-------
+The launcher checks the project's GitHub releases once per start. When a newer
+release exists, an update banner appears in the header; nothing is installed
+until you choose UPDATE NOW and then RESTART TO UPDATE. The update replaces
+only the port's own program files. Game files, user data, saves, settings,
+logs, shader caches and DLC are kept.
+
+
 WINDOWS SMARTSCREEN
 -------------------
 The first time you run dcp-loader.exe, Windows SmartScreen may show a warning,

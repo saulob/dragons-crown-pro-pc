@@ -120,8 +120,8 @@ host_glibc=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
 newer_than "$host_glibc" "$max_glibc" &&
     die "This system has glibc $host_glibc. Release AppImages are built on Ubuntu 20.04 (glibc $max_glibc): see packaging/linux/ci-deps.sh."
 
-version=$(sed -n 's/^set(DCP_PORT_VERSION "\([^"]*\)").*/\1/p' CMakeLists.txt)
-[[ -n $version ]] || die 'DCP_PORT_VERSION not found in CMakeLists.txt'
+version=$(sed -nE 's/^project\(dragons_crown_pro_pc VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)
+[[ -n $version ]] || die 'project VERSION not found in CMakeLists.txt'
 name=DragonsCrownProPC-v$version-x86_64
 loader=$root/build/cmake/linux/bin/dcp-loader
 dist=${out_dir:-$root/dist}

@@ -65,6 +65,15 @@ settings and saves are kept. If an installation fails or is cancelled, the
 previous one is left as it was.
 
 
+UPDATES
+-------
+The launcher checks the project's GitHub releases once per start. When a newer
+AppImage exists, an update banner appears in the header; nothing is installed
+until you choose UPDATE NOW and then RESTART TO UPDATE. The update replaces the
+AppImage you started from and restarts it. Game files, user data, saves,
+settings, logs and shader caches in the folders beside the AppImage are kept.
+
+
 STEAM DECK
 ----------
 Desktop Mode: copy the AppImage to a folder such as ~/Games/DragonsCrownPro,

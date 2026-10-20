@@ -4,12 +4,12 @@
   nothing is published, tagged or uploaded.
 .DESCRIPTION
   Builds with tools\build.ps1 (the one RelWithDebInfo configuration) unless -SkipBuild, then stages dcp-loader.exe
-  without its debug information, the MSYS2 DLLs it loads (found by walking its imports), README.txt, LICENSE.txt and
-  the licence texts. The debug information goes to dist\<name>-symbols\dcp-loader.debug, which is not packaged.
+  and trg-updater.exe without their debug information, the MSYS2 DLLs it loads (found by walking its imports), README.txt, LICENSE.txt and
+  the licence texts. The debug information goes to dist\<name>-symbols\, which is not packaged.
   The staging folder is checked for game data, user files, local paths and anything unexpected before the ZIP is
-  written. The version is DCP_PORT_VERSION in CMakeLists.txt.
+  written. The version is the project VERSION in CMakeLists.txt.
 .PARAMETER SkipBuild
-  Packages the existing build\cmake\clang64\bin\dcp-loader.exe.
+  Packages the existing build\cmake\clang64\bin\dcp-loader.exe and trg-updater.exe.
 .PARAMETER Clean
   Passes -Clean to tools\build.ps1.
 .PARAMETER VerifyOnly
@@ -29,6 +29,7 @@ param(
 
 $root = $script:RepoRoot
 $loader = Join-Path $root 'build\cmake\clang64\bin\dcp-loader.exe'
+$updater = Join-Path $root 'build\cmake\clang64\bin\trg-updater.exe'
 $tc = Resolve-Toolchain 'auto'
 $bin = $tc.Bin
 $prefix = Split-Path $bin -Parent
@@ -63,7 +64,7 @@ $DllPackages = @('sdl3', 'freetype', 'libpng', 'zydis', 'xxhash', 'libc++', 'lib
 # Provided by the graphics driver.
 $SystemProvided = @('vulkan-1.dll')
 
-$RootFiles = @('dcp-loader.exe', 'README.txt', 'LICENSE.txt')
+$RootFiles = @('dcp-loader.exe', 'trg-updater.exe', 'README.txt', 'LICENSE.txt')
 $AssetFiles = @('assets\launcher\header-art.png')
 $ForbiddenNames = @('game', 'user', 'logs', 'cache', 'build', 'prepared', 'extracted', 'image', 'sce_sys', 'sce_module',
     'eboot.bin', 'param.sfo', 'dcp.ini', 'boot.bin', 'content.bin', 'image.json', 'imports.json', 'symbols')
@@ -133,9 +134,19 @@ function Test-ReleaseFolder([string]$Dir) {
     if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { Stop-Tool "Not a folder: $Dir" }
     $base = (Resolve-Path -LiteralPath $Dir).Path.TrimEnd('\')
     $exe = Join-Path $base 'dcp-loader.exe'
+    $updaterExe = Join-Path $base 'trg-updater.exe'
     $dlls = if (Test-Path -LiteralPath $exe) { Get-DllClosure $exe $base } else { [ordered]@{} }
+    if (Test-Path -LiteralPath $updaterExe) {
+        $updaterDlls = Get-DllClosure $updaterExe $base
+        foreach ($dllName in $updaterDlls.Keys) { if (-not $dlls.Contains($dllName)) { $dlls[$dllName] = $updaterDlls[$dllName] } }
+    }
     if (Test-Path -LiteralPath $exe) {
         foreach ($name in (Get-DllClosure $exe $bin).Keys) {
+            if (-not $dlls.Contains($name)) { $problems.Add("missing DLL: $name") }
+        }
+    }
+    if (Test-Path -LiteralPath $updaterExe) {
+        foreach ($name in (Get-DllClosure $updaterExe $bin).Keys) {
             if (-not $dlls.Contains($name)) { $problems.Add("missing DLL: $name") }
         }
     }
@@ -202,7 +213,7 @@ if ($VerifyOnly) {
 }
 
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
-if ($cmake -notmatch '(?m)^set\(DCP_PORT_VERSION "([^"]+)"\)') { Stop-Tool 'DCP_PORT_VERSION not found in CMakeLists.txt' }
+if ($cmake -notmatch '(?m)^project\(dragons_crown_pro_pc VERSION ([0-9]+\.[0-9]+\.[0-9]+)') { Stop-Tool 'project VERSION not found in CMakeLists.txt' }
 $version = $Matches[1]
 $name = "DragonsCrownProPC-v$version-windows-x64"
 $dist = Join-Path $root 'dist'
@@ -219,6 +230,7 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { Stop-Tool 'Build failed' }
 }
 if (-not (Test-Path -LiteralPath $loader)) { Stop-Tool "Missing $loader (run without -SkipBuild)" }
+if (-not (Test-Path -LiteralPath $updater)) { Stop-Tool "Missing $updater (run without -SkipBuild)" }
 $built = (Get-Item -LiteralPath $loader).VersionInfo.ProductVersion
 if ($built -ne $version) { Stop-Tool "dcp-loader.exe is version $built, CMakeLists.txt says $version (run without -SkipBuild)" }
 
@@ -236,8 +248,17 @@ if ($LASTEXITCODE -ne 0) { Stop-Tool 'llvm-objcopy --only-keep-debug failed' }
 & $objcopy --strip-debug "--add-gnu-debuglink=$debugFile" $loader (Join-Path $stage 'dcp-loader.exe')
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'llvm-objcopy --strip-debug failed' }
 
+Write-Step 'Staging trg-updater.exe without debug information'
+$updaterDebug = Join-Path $symbols 'trg-updater.debug'
+& $objcopy --only-keep-debug $updater $updaterDebug
+if ($LASTEXITCODE -ne 0) { Stop-Tool 'llvm-objcopy --only-keep-debug failed on trg-updater.exe' }
+& $objcopy --strip-debug "--add-gnu-debuglink=$updaterDebug" $updater (Join-Path $stage 'trg-updater.exe')
+if ($LASTEXITCODE -ne 0) { Stop-Tool 'llvm-objcopy --strip-debug failed on trg-updater.exe' }
+
 Write-Step 'Staging the DLLs it loads'
 $dlls = Get-DllClosure $loader $bin
+$updaterDlls = Get-DllClosure $updater $bin
+foreach ($dllName in $updaterDlls.Keys) { if (-not $dlls.Contains($dllName)) { $dlls[$dllName] = $updaterDlls[$dllName] } }
 $owners = [ordered]@{}
 foreach ($dll in $dlls.Values) {
     $owner = & $pacman -Qqo $dll.Substring($msys.Length).Replace('\', '/') 2>$null
@@ -323,6 +344,6 @@ Write-Host 'RELEASE PACKAGE READY (nothing was published)' -ForegroundColor Gree
 Write-Host "  Folder:   $stage ($(Format-Size $stageBytes), $($files.Count) files)"
 Write-Host "  ZIP:      $zip ($(Format-Size (Get-Item -LiteralPath $zip).Length))"
 Write-Host "  SHA-256:  $hash"
-Write-Host "  Symbols:  $debugFile (not in the package)"
+Write-Host "  Symbols:  $symbols (not in the package)"
 Write-Host "  Loader:   $(Format-Size (Get-Item -LiteralPath $loader).Length) built, $(Format-Size (Get-Item -LiteralPath (Join-Path $stage 'dcp-loader.exe')).Length) packaged"
 Write-Host "  DLLs:     $($dlls.Count), $(Format-Size $dllBytes)"

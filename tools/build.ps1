@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds dcp-loader.exe incrementally (MSYS2 CLANG64, CMake + Ninja). -Run launches it.
+  Builds dcp-loader.exe and, on Windows, trg-updater.exe incrementally (MSYS2 CLANG64, CMake + Ninja). -Run launches it.
 .DESCRIPTION
   Reuses what is current and updates only what is stale: the video core dependencies (gpu\deps.txt), the CMake
   configuration and, once the game is installed, its boot image (build\image\v1.03). The one build configuration,
@@ -74,7 +74,7 @@ if (-not $configured) {
     if ($LASTEXITCODE -ne 0) { Stop-Tool 'CMake configuration failed' }
 }
 Write-Step 'Building'
-& ninja -C $buildDir dcp-loader
+& ninja -C $buildDir dcp-loader trg-updater
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Build failed' }
 if (-not (Test-Path -LiteralPath $loader)) { Stop-Tool "Missing $loader" }
 

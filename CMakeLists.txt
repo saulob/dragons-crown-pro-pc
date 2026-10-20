@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc LANGUAGES C CXX)
-set(DCP_PORT_VERSION "0.6.0")
+project(dragons_crown_pro_pc VERSION 0.6.0 LANGUAGES C CXX)
+set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "Build with Clang: MSYS2 CLANG64 (tools\\build.ps1) on Windows, tools/build.sh on Linux.")
@@ -28,12 +28,12 @@ if (NOT WIN32)
     add_link_options(-no-pie)
 endif()
 
-if (NOT DCP_PORT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
-    message(FATAL_ERROR "DCP_PORT_VERSION must start with MAJOR.MINOR.PATCH")
+if (NOT PROJECT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(FATAL_ERROR "project VERSION must start with MAJOR.MINOR.PATCH")
 endif()
 file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/generated/dcp_version.h CONTENT "#define DCP_VERSION_NUMBERS \
 ${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0\n#define DCP_FILE_VERSION_STRING \
-\"${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.0\"\n#define DCP_VERSION_STRING \"${DCP_PORT_VERSION}\"\n")
+\"${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.0\"\n#define DCP_VERSION_STRING \"${PROJECT_VERSION}\"\n")
 
 find_package(SDL3 CONFIG REQUIRED)
 find_package(Freetype REQUIRED)
