@@ -264,9 +264,14 @@ public:
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         ApplySavedPatches();
-        Log("shown");
 
         outcome = Outcome::kRunning;
+        host_.BeginFrame();
+        outcome = Frame();
+        host_.EndFrame(LauncherTheme().bg);
+        host_.Show();
+        Log("shown");
+
         while (outcome == Outcome::kRunning) {
             if (!host_.PumpEvents()) {
                 outcome = Outcome::kQuit;
@@ -1090,6 +1095,10 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
     const trg::Theme theme = LauncherTheme();
     ProblemDialog dialog;
     dialog.Show(cause, advice);
+    host.BeginFrame();
+    dialog.Draw(fonts, theme);
+    host.EndFrame(theme.bg);
+    host.Show();
     while (dialog.open() && host.PumpEvents()) {
         if (host.Minimized()) {
             SDL_Delay(30);
