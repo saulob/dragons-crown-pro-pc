@@ -534,10 +534,21 @@ void CheatMenu() {
     if (FpsCounterShown() && DcpSettings::Get().overlay_corner == 1) {
         top = FpsCounterBox(OverlayText().c_str()).p1.y + margin * 0.5f;
     }
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float spacing = style.ItemSpacing.y * scale;
+    const float separator = std::max(style.SeparatorSize, 1.0f);
+    const float row_height = em + 2.0f * style.FramePadding.y * scale + 4.0f * scale;
+    const float body_height =
+        dcp::cheats::MenuBodyHeight(dcp::cheats::kMenuRows.size(), row_height, spacing);
+    const float header_height = em + spacing + separator + spacing;
+    const float footer_height = spacing + separator + spacing + em + spacing + em;
+    const float window_padding = em * 0.5f;
+    const float available_height = std::max(io.DisplaySize.y - top - margin, em);
+    const bool opening = !cheat_focused;
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - margin, top), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowSize(ImVec2(em * dcp::cheats::kMenuWidthEm, 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, std::max(io.DisplaySize.y - top - margin, em)));
-    if (!cheat_focused) {
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, available_height));
+    if (opening) {
         cheat_focused = true;
         ImGui::SetNextWindowFocus();
     }
@@ -546,11 +557,10 @@ void CheatMenu() {
     ImGui::PushStyleColor(ImGuiCol_NavCursor, accent);
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered, focus);
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, focus);
-    const ImGuiStyle& style = ImGui::GetStyle();
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(em * 0.7f, em * 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(em * 0.7f, window_padding));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x * scale, style.FramePadding.y * scale));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x * scale, style.ItemSpacing.y * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x * scale, spacing));
     constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
@@ -558,9 +568,22 @@ void CheatMenu() {
         ImGui::SetWindowFontScale(scale);
         ImGui::TextColored(accent, "%s", dcp::cheats::kMenuTitle);
         ImGui::Separator();
+        const float body_available = available_height - window_padding * 2.0f - header_height - footer_height;
+        const float child_height = std::max(std::min(body_height, body_available), 1.0f);
+        const bool needs_scrollbar = dcp::cheats::MenuNeedsScrollbar(body_height, child_height);
+        const ImGuiWindowFlags child_flags =
+            needs_scrollbar ? ImGuiWindowFlags_AlwaysVerticalScrollbar : ImGuiWindowFlags_NoScrollbar;
+        // Focus the list itself so Up/Down enters it and the first row's default focus applies.
+        if (opening) {
+            ImGui::SetNextWindowFocus();
+        }
+        ImGui::BeginChild("##cheat_rows", ImVec2(0.0f, child_height), ImGuiChildFlags_None, child_flags);
+        // The child does not inherit the outer window's font scale.
+        ImGui::SetWindowFontScale(scale);
         for (size_t i = 0; i < dcp::cheats::kMenuRows.size(); ++i) {
             DrawCheatRow(dcp::cheats::kMenuRows[i], i, scale, accent, focus, dim);
         }
+        ImGui::EndChild();
         ImGui::Separator();
         ImGui::TextColored(dim, "%s", dcp::cheats::kMenuCloseHint);
         ImGui::TextColored(dim, "%s", dcp::cheats::kMenuNote);

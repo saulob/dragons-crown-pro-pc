@@ -262,8 +262,9 @@ void TestMenuModel() {
     CHECK(!stuck.Step(true, 10.0));
     CHECK(stuck.Step(true, 11.0)); // never released: given up after a second
 
-    // The panel follows the display's content scale a step down (0.75x), never under 1.25x, and takes at most 45% of
-    // the screen's width.
+    // The panel follows the display's content scale a step down (0.75x), never under 1.25x, and shrinks to 45% of the
+    // screen's width but not below 1x.
+    CHECK(kMenuWidthEm >= 21.0f && kMenuWidthEm <= 22.0f);
     CHECK(MenuScale(1.0f, 1920, 18) == kMenuMinScale);
     CHECK(MenuScale(0.5f, 1920, 18) == kMenuMinScale);
     CHECK(MenuScale(1.5f, 1920, 18) == kMenuMinScale);
@@ -271,8 +272,16 @@ void TestMenuModel() {
     CHECK(MenuScale(2.25f, 1280, 13.5f) == 2.25f * kMenuScaleStep);
     CHECK(MenuScale(3.0f, 3840, 18) == 2.25f);
     CHECK(MenuScale(5.0f, 3840, 18) == kMenuMaxScale * kMenuScaleStep);
-    CHECK(MenuScale(2.25f, 800, 18) < 2.25f * kMenuScaleStep && MenuScale(2.25f, 800, 18) > 1.0f);
+    CHECK(MenuScale(2.25f, 800, 18) == 1.0f); // narrower than the menu's minimum: the 1.0 floor still fits
+    CHECK(MenuScale(2.25f, 1000, 18) < 2.25f * kMenuScaleStep && MenuScale(2.25f, 1000, 18) > 1.0f);
     CHECK(MenuScale(2.0f, 200, 18) == 1.0f);
+    CHECK(MenuBodyHeight(16, 20.0f, 4.0f) == 16.0f * 20.0f + 15.0f * 4.0f);
+    CHECK(MenuBodyHeight(1, 20.0f, 4.0f) == 20.0f);
+    CHECK(MenuBodyHeight(0, 20.0f, 4.0f) == 0.0f);
+    CHECK(MenuNeedsScrollbar(100.0f, 50.0f));
+    CHECK(!MenuNeedsScrollbar(50.0f, 50.0f));
+    CHECK(!MenuNeedsScrollbar(51.0f, 50.0f));
+    CHECK(MenuNeedsScrollbar(51.5f, 50.0f));
     for (const float display : {2.0f, 2.5f, 3.0f}) { // smaller than the first oversized menu, larger than the tiny one
         CHECK(MenuScale(display, 3840, 18) < display && MenuScale(display, 3840, 18) > 1.0f);
     }
@@ -285,6 +294,14 @@ void TestMenuModel() {
 
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
     CHECK(overlay.find("MenuScale(") != std::string::npos);
+    CHECK(overlay.find("MenuBodyHeight(") != std::string::npos);
+    CHECK(overlay.find("MenuNeedsScrollbar(") != std::string::npos);
+    CHECK(overlay.find("needs_scrollbar ? ImGuiWindowFlags_AlwaysVerticalScrollbar : ImGuiWindowFlags_NoScrollbar") !=
+          std::string::npos);
+    const size_t child = overlay.find("BeginChild(\"##cheat_rows\"");
+    CHECK(child != std::string::npos); // the rows scroll, header and footer stay
+    CHECK(overlay.find("SetWindowFontScale(scale)", child) != std::string::npos); // the rows keep the menu scale
+    CHECK(overlay.find("NavFlattened") == std::string::npos);                    // plain child: no beta nav flattening
     CHECK(overlay.find("FpsCounterBox(OverlayText()") != std::string::npos); // below the frame counter, not over it
     CHECK(ReadSource("gpu/shim/window.cpp").find("SetDisplayScale(SDL_GetWindowDisplayScale") != std::string::npos);
     CHECK(overlay.find("Get().menu_key") != std::string::npos);

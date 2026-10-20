@@ -45,8 +45,8 @@ constexpr std::array<MenuRow, kMenuRowCount> MakeMenuRows() {
 inline constexpr std::array<MenuRow, kMenuRowCount> kMenuRows = MakeMenuRows();
 
 // The panel is kMenuWidthEm wide. It grows with the display's content scale, a step below it (kMenuScaleStep) and never
-// under kMenuMinScale, and never takes more than kMenuMaxWidthShare of the screen.
-inline constexpr float kMenuWidthEm = 18.0f;
+// under kMenuMinScale, and shrinks to fit kMenuMaxWidthShare of the screen down to the 1x floor.
+inline constexpr float kMenuWidthEm = 21.0f;
 inline constexpr float kMenuMaxScale = 3.0f;
 inline constexpr float kMenuScaleStep = 0.75f;
 inline constexpr float kMenuMinScale = 1.25f;
@@ -58,6 +58,18 @@ constexpr float MenuScale(float display_scale, float screen_width, float em_pixe
     const float wanted = stepped < kMenuMinScale ? kMenuMinScale : stepped;
     const float fits = kMenuMaxWidthShare * screen_width / (kMenuWidthEm * em_pixels);
     return wanted < fits ? wanted : (fits > 1.0f ? fits : 1.0f);
+}
+
+// The scrollable rows only: each row is row_height tall, with item_spacing between them.
+constexpr float MenuBodyHeight(size_t row_count, float row_height, float item_spacing) {
+    return row_count == 0 ? 0.0f : row_count * row_height + (row_count - 1) * item_spacing;
+}
+
+// The row content can be up to a pixel shorter than the calculated height because ImGui truncates layout positions.
+constexpr float kMenuScrollbarTolerance = 1.0f;
+
+constexpr bool MenuNeedsScrollbar(float body_height, float child_height) {
+    return body_height > child_height + kMenuScrollbarTolerance;
 }
 
 // A button that is never reported released (a controller unplugged as the menu closes) cannot block the game forever.
