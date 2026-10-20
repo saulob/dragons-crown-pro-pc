@@ -3,7 +3,7 @@
 # only: nothing is published, tagged or uploaded. The Linux counterpart of tools/package.ps1.
 #
 #   tools/package-linux.sh              build with tools/build.sh, then package
-#   tools/package-linux.sh --skip-build package the existing build/cmake/linux/bin/dcp-loader
+#   tools/package-linux.sh --skip-build package the existing build/cmake/linux/bin/dragons_crown_pro
 #   tools/package-linux.sh --out-dir DIR  write the AppImage, .sha256 and symbols to DIR instead of dist/
 #   tools/package-linux.sh --verify DIR check an existing AppDir
 #
@@ -91,14 +91,14 @@ check_appdir() { # dir [the AppImage file, whose runtime is an ELF too]
             done
         fi
     done < <(find "$dir" -mindepth 1 -print0)
-    for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dcp-loader \
+    for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dragons_crown_pro \
                 usr/bin/assets/launcher/header-art.png \
                 usr/share/licenses/DragonsCrownProPC/THIRD-PARTY-LICENSES.txt \
                 usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/doc/DragonsCrownProPC/README.txt; do
         [[ -e $dir/$leaf ]] || problem "missing: $leaf"
     done
     local missing
-    missing=$(env -u LD_LIBRARY_PATH ldd "$dir/usr/bin/dcp-loader" | grep 'not found' || true)
+    missing=$(env -u LD_LIBRARY_PATH ldd "$dir/usr/bin/dragons_crown_pro" | grep 'not found' || true)
     [[ -z $missing ]] || problem "unresolved libraries: $missing"
     echo "glibc needed by each ELF (baseline $max_glibc):"
     check_glibc 'the AppDir:' "$dir" "${files[@]}"
@@ -123,7 +123,7 @@ newer_than "$host_glibc" "$max_glibc" &&
 version=$(sed -nE 's/^project\(dragons_crown_pro_pc VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)
 [[ -n $version ]] || die 'project VERSION not found in CMakeLists.txt'
 name=DragonsCrownProPC-v$version-x86_64
-loader=$root/build/cmake/linux/bin/dcp-loader
+loader=$root/build/cmake/linux/bin/dragons_crown_pro
 dist=${out_dir:-$root/dist}
 work=$root/build/appimage
 appdir=$work/AppDir
@@ -139,10 +139,10 @@ mkdir -p "$dist" "$symbols" "$appdir/usr/bin" "$appdir/usr/lib/compat" "$appdir/
          "$appdir/usr/share/icons/hicolor/256x256/apps"
 rm -f "$dist/$name.AppImage" "$dist/$name.AppImage.sha256"
 
-step 'Staging dcp-loader without debug information'
-objcopy --only-keep-debug "$loader" "$symbols/dcp-loader.debug"
-objcopy --strip-debug --add-gnu-debuglink="$symbols/dcp-loader.debug" "$loader" "$appdir/usr/bin/dcp-loader"
-chmod 755 "$appdir/usr/bin/dcp-loader"
+step 'Staging dragons_crown_pro without debug information'
+objcopy --only-keep-debug "$loader" "$symbols/dragons_crown_pro.debug"
+objcopy --strip-debug --add-gnu-debuglink="$symbols/dragons_crown_pro.debug" "$loader" "$appdir/usr/bin/dragons_crown_pro"
+chmod 755 "$appdir/usr/bin/dragons_crown_pro"
 
 step 'Staging the launcher header art'
 install -d "$appdir/usr/bin/assets/launcher"
@@ -176,14 +176,14 @@ for lib in "$appdir"/usr/lib/*.so*; do
 done
 strip --strip-unneeded "$appdir"/usr/lib/compat/*.so* 2>/dev/null || true
 # DT_RPATH (not RUNPATH) is inherited by the libraries' own dependencies and wins over LD_LIBRARY_PATH.
-patchelf --force-rpath --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/dcp-loader"
+patchelf --force-rpath --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/dragons_crown_pro"
 echo "Bundled: $(cd "$appdir/usr/lib" && ls -- *.so* | tr '\n' ' ')"
 echo "Fallback: $(cd "$appdir/usr/lib/compat" && ls -- *.so* | tr '\n' ' ')"
 
 step 'Staging AppRun, desktop entry, icon, licences and README'
-glibcxx_need=$(objdump -T "$appdir/usr/bin/dcp-loader" "$appdir"/usr/lib/*.so* | grep -o 'GLIBCXX_3\.4\.[0-9]*' |
+glibcxx_need=$(objdump -T "$appdir/usr/bin/dragons_crown_pro" "$appdir"/usr/lib/*.so* | grep -o 'GLIBCXX_3\.4\.[0-9]*' |
                sed 's/.*\.//' | sort -n | tail -1)
-gcc_need=$(objdump -T "$appdir/usr/bin/dcp-loader" "$appdir"/usr/lib/*.so* | grep -o 'GCC_[0-9][0-9.]*' |
+gcc_need=$(objdump -T "$appdir/usr/bin/dragons_crown_pro" "$appdir"/usr/lib/*.so* | grep -o 'GCC_[0-9][0-9.]*' |
            sed 's/^GCC_//; s/\..*//' | sort -n | tail -1)
 sed "s/@GLIBCXX_NEED@/${glibcxx_need:-0}/g; s/@GCC_NEED@/${gcc_need:-0}/g" \
     packaging/linux/AppRun > "$appdir/AppRun"
@@ -274,4 +274,4 @@ mv -f "$dist/$name.AppImage.new" "$dist/$name.AppImage"
 printf '\nAPPIMAGE READY (nothing was published)\n'
 printf '  AppImage: %s (%s)\n' "$dist/$name.AppImage" "$(du -h "$dist/$name.AppImage" | cut -f1)"
 printf '  SHA-256:  %s\n' "$(cut -d' ' -f1 "$dist/$name.AppImage.sha256")"
-printf '  Symbols:  %s (not in the package)\n' "$symbols/dcp-loader.debug"
+printf '  Symbols:  %s (not in the package)\n' "$symbols/dragons_crown_pro.debug"

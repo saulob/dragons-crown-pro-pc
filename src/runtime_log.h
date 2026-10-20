@@ -11,6 +11,10 @@ int runtime_log_create(const char *dir, const char *file, char *path, size_t siz
 /* Sends stdout and stderr to that log and echoes them to the console the process started with. */
 int runtime_log_start(const char *dir, const char *file, char *path, size_t size);
 
+/* Appends directly with Win32 file APIs: the run log once it exists, else DEBUG_SAULO_startup.log
+ * next to the executable. Safe before stdio is usable and from the exception handler. */
+int runtime_log_write_direct(const char *text);
+
 /* Waits until what was written so far has reached the console. */
 void runtime_log_flush(void);
 

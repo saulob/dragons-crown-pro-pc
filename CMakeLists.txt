@@ -79,37 +79,49 @@ set_source_files_properties(src/runtime_font.c PROPERTIES
 if (WIN32)
     enable_language(RC)
     # Relink when the application icon, the manifest or the version changes.
-    set_source_files_properties(src/dcp-loader.rc PROPERTIES OBJECT_DEPENDS
-        "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dcp-loader.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
-    set(DCP_PLATFORM_SOURCES src/compat_win.c src/runtime_log.c src/dcp-loader.rc)
+    set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
+    set(DCP_PLATFORM_SOURCES src/compat_win.c src/runtime_log.c src/dragons_crown_pro.rc)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-add_executable(dcp-loader src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/startup_save_hook.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
-set_target_properties(dcp-loader PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-target_include_directories(dcp-loader PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
-target_compile_options(dcp-loader PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
-target_compile_options(dcp-loader PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>)
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/startup_save_hook.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+if (WIN32)
+    add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
+else()
+    add_executable(dragons_crown_pro ${DCP_MAIN_SOURCES})
+endif()
+set_target_properties(dragons_crown_pro PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dragons_crown_pro PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
+target_compile_options(dragons_crown_pro PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+target_compile_options(dragons_crown_pro PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>)
 if (WIN32)
     # Windows 10 1903+ APIs (VirtualAlloc2, MapViewOfFile3).
-    target_compile_definitions(dcp-loader PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_compile_definitions(dragons_crown_pro PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
     # The PS4 user range (64 GiB - 1 TiB) must stay free of host allocations: no high-entropy ASLR.
     # The guest main thread runs on the process stack: 16 MiB, committed (guest code has no stack probes).
-    target_link_options(dcp-loader PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
-    target_link_libraries(dcp-loader PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt ws2_32 -pthread)
+    target_link_options(dragons_crown_pro PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
+    target_link_libraries(dragons_crown_pro PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt ws2_32 -pthread)
 else()
     # -rdynamic: fault reports name host symbols (dladdr).
-    target_link_options(dcp-loader PRIVATE -rdynamic)
-    target_link_libraries(dcp-loader PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
+    target_link_options(dragons_crown_pro PRIVATE -rdynamic)
+    target_link_libraries(dragons_crown_pro PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
 # The launcher reads its header art next to the executable.
-add_custom_command(TARGET dcp-loader POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dcp-loader>/assets/launcher"
+add_custom_command(TARGET dragons_crown_pro POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/header-art.png"
-        "$<TARGET_FILE_DIR:dcp-loader>/assets/launcher/header-art.png"
+        "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/header-art.png"
     VERBATIM)
+
+if (WIN32)
+    # GUI-subsystem processes start with closed standard streams; the log must still work. Not part of the default build.
+    add_executable(dcp-log-tests EXCLUDE_FROM_ALL tests/log_tests.c src/runtime_log.c src/runtime_session_log.c)
+    target_include_directories(dcp-log-tests PRIVATE src)
+    target_compile_options(dcp-log-tests PRIVATE -Wall -Wextra -Werror)
+endif()
 
 # Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
 # (tools/test.ps1); not part of the default build.

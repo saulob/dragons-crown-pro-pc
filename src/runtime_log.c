@@ -7,6 +7,31 @@
 
 static HANDLE echo_source, echo_target;
 static volatile LONG64 echoed;
+static char direct_log_path[4200];
+
+int runtime_log_write_direct(const char *text) {
+    char fallback[4200];
+    const char *path = direct_log_path[0] ? direct_log_path : NULL;
+    if (!text) return 0;
+    if (!path) {
+        char module[4200];
+        DWORD length = GetModuleFileNameA(NULL, module, sizeof(module));
+        if (length == 0 || length >= sizeof(module)) return 0;
+        char *separator = strrchr(module, '\\');
+        if (!separator) return 0;
+        snprintf(separator + 1, sizeof(module) - (size_t)(separator + 1 - module), "DEBUG_SAULO_startup.log");
+        snprintf(fallback, sizeof(fallback), "%s", module);
+        path = fallback;
+    }
+    HANDLE file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return 0;
+    const DWORD size = (DWORD)strlen(text);
+    DWORD written = 0;
+    const int ok = WriteFile(file, text, size, &written, NULL) && written == size && FlushFileBuffers(file);
+    CloseHandle(file);
+    return ok;
+}
 
 static void make_directories(const char *dir) {
     char path[4096];
@@ -78,22 +103,30 @@ static DWORD WINAPI echo_log(LPVOID unused) {
 }
 
 int runtime_log_start(const char *dir, const char *file, char *path, size_t size) {
-    void *log;
-    if (!runtime_log_create(dir, file, path, size, &log)) return 0;
+    void *created;
+    if (!runtime_log_create(dir, file, path, size, &created)) return 0;
+    CloseHandle((HANDLE)created);
     runtime_log_set_session_path(path);
+    snprintf(direct_log_path, sizeof(direct_log_path), "%s", path);
     HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE), original = NULL;
-    /* _dup2 below closes the handle that fd 1 owns now. */
-    if (console && console != INVALID_HANDLE_VALUE)
+    DWORD console_mode = 0;
+    if (console && console != INVALID_HANDLE_VALUE && GetConsoleMode(console, &console_mode))
         DuplicateHandle(GetCurrentProcess(), console, GetCurrentProcess(), &original, 0, FALSE, DUPLICATE_SAME_ACCESS);
-    int fd = _open_osfhandle((intptr_t)log, _O_WRONLY | _O_BINARY);
-    if (fd < 0) {
-        CloseHandle(log);
-        return 0;
-    }
     fflush(NULL);
-    _dup2(fd, 1);
-    _dup2(fd, 2);
-    _close(fd);
+    FILE *out = freopen(path, "w", stdout);
+    FILE *err = out ? freopen(path, "a", stderr) : NULL;
+    if (!out || !err) return 0;
+    const int out_fd = _fileno(stdout), err_fd = _fileno(stderr);
+    if (out_fd >= 0) _setmode(out_fd, _O_BINARY);
+    if (err_fd >= 0) _setmode(err_fd, _O_BINARY);
+    if (out_fd >= 0 && err_fd >= 0 && out_fd != err_fd) _dup2(out_fd, err_fd);
+    if (out_fd >= 0) {
+        _dup2(out_fd, 1);
+        _dup2(out_fd, 2);
+    }
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    if (_fileno(stdin) < 0 && freopen("NUL", "r", stdin)) setvbuf(stdin, NULL, _IONBF, 0);
     HANDLE reader = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (original && reader != INVALID_HANDLE_VALUE) {
         echo_source = reader;

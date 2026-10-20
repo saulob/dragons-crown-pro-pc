@@ -1,7 +1,7 @@
 """Import inventory of a prepared image, for planning only.
 
 Sources: build/image/<ver>/image.json (written by prepare_image.py) and the output of
-`dcp-loader --check-imports` (the runtime's own answer to "which imports can you bind").
+`dragons_crown_pro --check-imports` (the runtime's own answer to "which imports can you bind").
 
 Usage: python scripts/import_inventory.py [--version 1.03] [--check-log FILE]
            [--reference NAME=import_names.inc ...] [--source NAME=DIR ...]
@@ -26,7 +26,7 @@ def library(scoped):
 
 
 def run_check(version):
-    loader = next(iter(sorted((ROOT / 'build' / 'cmake').glob('*/bin/dcp-loader.exe'), key=lambda p: p.stat().st_mtime, reverse=True)), None)
+    loader = next(iter(sorted((ROOT / 'build' / 'cmake').glob('*/bin/dragons_crown_pro.exe'), key=lambda p: p.stat().st_mtime, reverse=True)), None)
     image = ROOT / 'build' / 'image' / f'v{version}'
     if not loader or not (image / 'boot.bin').is_file():
         sys.exit('No loader or boot image: run tools/build.ps1 and tools/prepare-game.ps1, or pass --check-log')

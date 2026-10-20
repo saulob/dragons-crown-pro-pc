@@ -218,7 +218,7 @@ void TestZipAndStaging() {
 
   const std::filesystem::path wrapped_archive = temp.path / "wrapped.zip";
   const std::string wrapped = MakeZip({
-      {"DragonsCrownProPC-v0.7.0-windows-x64/dcp-loader.exe", "launcher"},
+      {"DragonsCrownProPC-v0.7.0-windows-x64/dragons_crown_pro.exe", "launcher"},
       {"DragonsCrownProPC-v0.7.0-windows-x64/assets/launcher/header-art.png", "art"},
       {"DragonsCrownProPC-v0.7.0-windows-x64/licenses/THIRD-PARTY-LICENSES.txt", "license"},
   });
@@ -227,32 +227,32 @@ void TestZipAndStaging() {
   const std::filesystem::path wrapped_staging = temp.path / "wrapped-staging";
   CHECK(ExtractZip(wrapped_archive, wrapped_staging, {}, error));
   std::filesystem::path wrapped_root;
-  CHECK(ResolveStagingRoot(wrapped_staging, {"dcp-loader.exe"}, wrapped_root, error));
+  CHECK(ResolveStagingRoot(wrapped_staging, {"dragons_crown_pro.exe"}, wrapped_root, error));
   CHECK(wrapped_root == wrapped_staging / "DragonsCrownProPC-v0.7.0-windows-x64");
-  CHECK(ReadFile(wrapped_root / "dcp-loader.exe") == "launcher");
-  CHECK(ValidateStaging(wrapped_root, {"dcp-loader.exe", "assets/launcher/header-art.png"}, error));
+  CHECK(ReadFile(wrapped_root / "dragons_crown_pro.exe") == "launcher");
+  CHECK(ValidateStaging(wrapped_root, {"dragons_crown_pro.exe", "assets/launcher/header-art.png"}, error));
   CHECK(ListStagingFiles(wrapped_root, error).size() == 3);
 
   const std::filesystem::path flat_archive = temp.path / "flat.zip";
-  WriteFile(flat_archive, MakeZip({{"dcp-loader.exe", "launcher"},
+  WriteFile(flat_archive, MakeZip({{"dragons_crown_pro.exe", "launcher"},
                                    {"assets/launcher/header-art.png", "art"},
                                    {"licenses/THIRD-PARTY-LICENSES.txt", "license"}}));
   const std::filesystem::path flat_staging = temp.path / "flat-staging";
   CHECK(ExtractZip(flat_archive, flat_staging, {}, error));
   std::filesystem::path flat_root;
-  CHECK(ResolveStagingRoot(flat_staging, {"dcp-loader.exe"}, flat_root, error));
+  CHECK(ResolveStagingRoot(flat_staging, {"dragons_crown_pro.exe"}, flat_root, error));
   CHECK(flat_root == flat_staging);
 
   WriteFile(flat_root / "game" / "eboot.bin", "game");
-  CHECK(!ValidateStaging(flat_root, {"dcp-loader.exe"}, error));
+  CHECK(!ValidateStaging(flat_root, {"dragons_crown_pro.exe"}, error));
   std::filesystem::remove_all(flat_root / "game");
 
   WriteFile(flat_root / "dcp.ini", "settings");
-  CHECK(!ValidateStaging(flat_root, {"dcp-loader.exe"}, error));
+  CHECK(!ValidateStaging(flat_root, {"dragons_crown_pro.exe"}, error));
   std::filesystem::remove(flat_root / "dcp.ini");
 
   WriteFile(flat_root / "logs" / "a.log", "log");
-  CHECK(!ValidateStaging(flat_root, {"dcp-loader.exe"}, error));
+  CHECK(!ValidateStaging(flat_root, {"dragons_crown_pro.exe"}, error));
   std::filesystem::remove_all(flat_root / "logs");
 
   CHECK(!ValidateStaging(flat_root, {"missing.exe"}, error));
@@ -283,17 +283,17 @@ void TestZipAndStaging() {
   CHECK(!IsSymlinkZipEntry(0));
 
   const std::filesystem::path two_folders = temp.path / "two-folders.zip";
-  WriteFile(two_folders, MakeZip({{"one/dcp-loader.exe", "one"}, {"two/dcp-loader.exe", "two"}}));
+  WriteFile(two_folders, MakeZip({{"one/dragons_crown_pro.exe", "one"}, {"two/dragons_crown_pro.exe", "two"}}));
   const std::filesystem::path two_staging = temp.path / "two-staging";
   CHECK(ExtractZip(two_folders, two_staging, {}, error));
   std::filesystem::path two_root;
-  CHECK(!ResolveStagingRoot(two_staging, {"dcp-loader.exe"}, two_root, error));
+  CHECK(!ResolveStagingRoot(two_staging, {"dragons_crown_pro.exe"}, two_root, error));
 
   const std::filesystem::path dot_archive = temp.path / "dot.zip";
-  WriteFile(dot_archive, MakeZip({{"./dcp-loader.exe", "launcher"}}));
+  WriteFile(dot_archive, MakeZip({{"./dragons_crown_pro.exe", "launcher"}}));
   const std::filesystem::path dot_staging = temp.path / "dot-staging";
   CHECK(ExtractZip(dot_archive, dot_staging, {}, error));
-  CHECK(std::filesystem::exists(dot_staging / "dcp-loader.exe"));
+  CHECK(std::filesystem::exists(dot_staging / "dragons_crown_pro.exe"));
 }
 
 std::filesystem::path MakeJob(UpdateJob& job, const std::filesystem::path& temp, const std::string& manifest_text) {
@@ -310,7 +310,7 @@ std::filesystem::path MakeJob(UpdateJob& job, const std::filesystem::path& temp,
   job.staging_dir = staging;
   job.backup_dir = backup;
   job.manifest_file = manifest;
-  job.restart_executable = install / "dcp-loader.exe";
+  job.restart_executable = install / "dragons_crown_pro.exe";
   job.log_file = temp / "updater.log";
   return install;
 }
@@ -319,9 +319,9 @@ void TestJobs() {
   std::printf("update jobs\n");
   TempDir temp;
   UpdateJob job;
-  const std::filesystem::path install = MakeJob(job, temp.path, "dcp-loader.exe\n");
-  WriteFile(install / "dcp-loader.exe", "old launcher");
-  WriteFile(job.staging_dir / "dcp-loader.exe", "launcher");
+  const std::filesystem::path install = MakeJob(job, temp.path, "dragons_crown_pro.exe\n");
+  WriteFile(install / "dragons_crown_pro.exe", "old launcher");
+  WriteFile(job.staging_dir / "dragons_crown_pro.exe", "launcher");
   job.restart_arguments = {"--user=with space", "--launcher", ""};
 
   std::string error;
@@ -360,18 +360,18 @@ void TestManifest() {
   TempDir temp;
   UpdateJob job;
   const std::filesystem::path install = MakeJob(job, temp.path, "../evil\n");
-  WriteFile(install / "dcp-loader.exe", "old launcher");
-  WriteFile(job.staging_dir / "dcp-loader.exe", "new launcher");
+  WriteFile(install / "dragons_crown_pro.exe", "old launcher");
+  WriteFile(job.staging_dir / "dragons_crown_pro.exe", "new launcher");
   std::string error;
   InstallOutcome outcome = InstallFiles(job, {}, false);
   CHECK(outcome.status == InstallStatus::kInvalidJob);
-  CHECK(ReadFile(install / "dcp-loader.exe") == "old launcher");
+  CHECK(ReadFile(install / "dragons_crown_pro.exe") == "old launcher");
 
   WriteFile(job.manifest_file, "user/dcp.ini\n");
   WriteFile(job.staging_dir / "user" / "dcp.ini", "replacement");
   outcome = InstallFiles(job, {}, false);
   CHECK(outcome.status == InstallStatus::kInvalidJob);
-  CHECK(ReadFile(install / "dcp-loader.exe") == "old launcher");
+  CHECK(ReadFile(install / "dragons_crown_pro.exe") == "old launcher");
 
   WriteFile(job.manifest_file, "missing.dll\n");
   outcome = InstallFiles(job, {}, false);
@@ -381,11 +381,11 @@ void TestManifest() {
   outcome = InstallFiles(job, {}, false);
   CHECK(outcome.status == InstallStatus::kInvalidJob);
 
-  WriteFile(job.manifest_file, "dcp-loader.exe\nrexruntime.dll\ndcp-loader.exe\n");
+  WriteFile(job.manifest_file, "dragons_crown_pro.exe\nrexruntime.dll\ndragons_crown_pro.exe\n");
   WriteFile(job.staging_dir / "rexruntime.dll", "new runtime");
   outcome = InstallFiles(job, {}, false);
   CHECK(outcome.status == InstallStatus::kSuccess);
-  CHECK(ReadFile(install / "dcp-loader.exe") == "new launcher");
+  CHECK(ReadFile(install / "dragons_crown_pro.exe") == "new launcher");
   CHECK(ReadFile(install / "rexruntime.dll") == "new runtime");
 }
 
@@ -417,7 +417,7 @@ void TestRollback() {
   const std::filesystem::path install = MakeJob(job, temp.path, "");
   const std::filesystem::path staging = job.staging_dir;
   const std::filesystem::path manifest = job.manifest_file;
-  WriteFile(install / "dcp-loader.exe", "old launcher");
+  WriteFile(install / "dragons_crown_pro.exe", "old launcher");
   WriteFile(install / "rexruntime.dll", "old runtime");
   WriteFile(install / "user" / "dcp.ini", "player settings");
   WriteFile(install / "user" / "savedata" / "1" / "CUSA10454" / "SAVE0.DAT", "save data");
@@ -427,11 +427,11 @@ void TestRollback() {
   WriteFile(install / "custom-notes.txt", "keep me");
 
   auto stage = [&] {
-    WriteFile(staging / "dcp-loader.exe", "new launcher");
+    WriteFile(staging / "dragons_crown_pro.exe", "new launcher");
     WriteFile(staging / "trg-updater.exe", "new helper");
     WriteFile(staging / "rexruntime.dll", "new runtime");
     WriteFile(staging / "assets" / "new" / "data.png", "new nested file");
-    WriteFile(manifest, "dcp-loader.exe\ntrg-updater.exe\nrexruntime.dll\nassets/new/data.png\n");
+    WriteFile(manifest, "dragons_crown_pro.exe\ntrg-updater.exe\nrexruntime.dll\nassets/new/data.png\n");
   };
   stage();
 
@@ -448,7 +448,7 @@ void TestRollback() {
   };
   InstallOutcome failed = InstallFiles(job, fail, false);
   CHECK(failed.status == InstallStatus::kInstallFailedRolledBack);
-  CHECK(ReadFile(install / "dcp-loader.exe") == "old launcher");
+  CHECK(ReadFile(install / "dragons_crown_pro.exe") == "old launcher");
   CHECK(!std::filesystem::exists(install / "trg-updater.exe"));
   CHECK(ReadFile(install / "rexruntime.dll") == "old runtime");
   CHECK(ReadFile(install / "user" / "dcp.ini") == "player settings");
@@ -462,7 +462,7 @@ void TestRollback() {
   replacements = 0;
   const InstallOutcome success = InstallFiles(job, {}, false);
   CHECK(success.status == InstallStatus::kSuccess);
-  CHECK(ReadFile(install / "dcp-loader.exe") == "new launcher");
+  CHECK(ReadFile(install / "dragons_crown_pro.exe") == "new launcher");
   CHECK(ReadFile(install / "trg-updater.exe") == "new helper");
   CHECK(ReadFile(install / "rexruntime.dll") == "new runtime");
   CHECK(ReadFile(install / "assets" / "new" / "data.png") == "new nested file");
@@ -498,14 +498,14 @@ void TestPackagingNames() {
 
 void TestPaths() {
   std::printf("path safety\n");
-  CHECK(IsSafeRelativePath("dcp-loader.exe"));
+  CHECK(IsSafeRelativePath("dragons_crown_pro.exe"));
   CHECK(IsSafeRelativePath("trg-updater.exe"));
   CHECK(IsSafeRelativePath("assets/launcher/header-art.png"));
-  CHECK(IsSafeRelativePath("./dcp-loader.exe"));
-  CHECK(IsSafeRelativePath("DragonsCrownProPC-v0.7.0-windows-x64/dcp-loader.exe"));
-  CHECK(!IsSafeRelativePath("../dcp-loader.exe"));
+  CHECK(IsSafeRelativePath("./dragons_crown_pro.exe"));
+  CHECK(IsSafeRelativePath("DragonsCrownProPC-v0.7.0-windows-x64/dragons_crown_pro.exe"));
+  CHECK(!IsSafeRelativePath("../dragons_crown_pro.exe"));
   CHECK(!IsSafeRelativePath("/absolute"));
-  CHECK(!IsSafeRelativePath("C:/dcp-loader.exe"));
+  CHECK(!IsSafeRelativePath("C:/dragons_crown_pro.exe"));
   CHECK(!IsSafeRelativePath("\\\\server\\share"));
   CHECK(!IsSafeRelativePath("a//b"));
   CHECK(!IsSafeRelativePath("a/./../b"));
@@ -524,7 +524,7 @@ void TestPaths() {
   CHECK(IsProtectedRelativePath("sce_sys/param.sfo"));
   CHECK(IsProtectedRelativePath("DLC/a.bin"));
   CHECK(IsProtectedRelativePath("game.pkg"));
-  CHECK(!IsProtectedRelativePath("dcp-loader.exe"));
+  CHECK(!IsProtectedRelativePath("dragons_crown_pro.exe"));
   CHECK(!IsProtectedRelativePath("trg-updater.exe"));
   CHECK(!IsProtectedRelativePath("rexruntime.dll"));
   CHECK(!IsProtectedRelativePath("assets/launcher/header-art.png"));

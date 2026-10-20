@@ -3,13 +3,13 @@
   Packages the tested build as dist\DragonsCrownProPC-v<version>-windows-x64 (folder, ZIP and .zip.sha256). Local only:
   nothing is published, tagged or uploaded.
 .DESCRIPTION
-  Builds with tools\build.ps1 (the one RelWithDebInfo configuration) unless -SkipBuild, then stages dcp-loader.exe
+  Builds with tools\build.ps1 (the one RelWithDebInfo configuration) unless -SkipBuild, then stages dragons_crown_pro.exe
   and trg-updater.exe without their debug information, the MSYS2 DLLs it loads (found by walking its imports), README.txt, LICENSE.txt and
   the licence texts. The debug information goes to dist\<name>-symbols\, which is not packaged.
   The staging folder is checked for game data, user files, local paths and anything unexpected before the ZIP is
   written. The version is the project VERSION in CMakeLists.txt.
 .PARAMETER SkipBuild
-  Packages the existing build\cmake\clang64\bin\dcp-loader.exe and trg-updater.exe.
+  Packages the existing build\cmake\clang64\bin\dragons_crown_pro.exe and trg-updater.exe.
 .PARAMETER Clean
   Passes -Clean to tools\build.ps1.
 .PARAMETER VerifyOnly
@@ -28,7 +28,7 @@ param(
 . (Join-Path $PSScriptRoot '_common.ps1')
 
 $root = $script:RepoRoot
-$loader = Join-Path $root 'build\cmake\clang64\bin\dcp-loader.exe'
+$loader = Join-Path $root 'build\cmake\clang64\bin\dragons_crown_pro.exe'
 $updater = Join-Path $root 'build\cmake\clang64\bin\trg-updater.exe'
 $tc = Resolve-Toolchain 'auto'
 $bin = $tc.Bin
@@ -40,7 +40,7 @@ $objcopy = Join-Path $bin 'llvm-objcopy.exe'
 $objdump = Join-Path $bin 'llvm-objdump.exe'
 $packagePrefix = 'mingw-w64-clang-x86_64-'
 
-# Licence texts of the code compiled into dcp-loader.exe from this repository and its fetched dependencies.
+# Licence texts of the code compiled into dragons_crown_pro.exe from this repository and its fetched dependencies.
 $BuiltInLicenses = [ordered]@{
     'shadPS4'       = 'gpu\shadps4\LICENSE'
     'sirit'         = 'gpu\third_party\sirit\LICENSE.txt'
@@ -64,7 +64,7 @@ $DllPackages = @('sdl3', 'freetype', 'libpng', 'zydis', 'xxhash', 'libc++', 'lib
 # Provided by the graphics driver.
 $SystemProvided = @('vulkan-1.dll')
 
-$RootFiles = @('dcp-loader.exe', 'trg-updater.exe', 'README.txt', 'LICENSE.txt')
+$RootFiles = @('dragons_crown_pro.exe', 'trg-updater.exe', 'README.txt', 'LICENSE.txt')
 $AssetFiles = @('assets\launcher\header-art.png')
 $ForbiddenNames = @('game', 'user', 'logs', 'cache', 'build', 'prepared', 'extracted', 'image', 'sce_sys', 'sce_module',
     'eboot.bin', 'param.sfo', 'dcp.ini', 'boot.bin', 'content.bin', 'image.json', 'imports.json', 'symbols')
@@ -133,7 +133,7 @@ function Test-ReleaseFolder([string]$Dir) {
     $problems = New-Object System.Collections.Generic.List[string]
     if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { Stop-Tool "Not a folder: $Dir" }
     $base = (Resolve-Path -LiteralPath $Dir).Path.TrimEnd('\')
-    $exe = Join-Path $base 'dcp-loader.exe'
+    $exe = Join-Path $base 'dragons_crown_pro.exe'
     $updaterExe = Join-Path $base 'trg-updater.exe'
     $dlls = if (Test-Path -LiteralPath $exe) { Get-DllClosure $exe $base } else { [ordered]@{} }
     if (Test-Path -LiteralPath $updaterExe) {
@@ -232,7 +232,7 @@ if (-not $SkipBuild) {
 if (-not (Test-Path -LiteralPath $loader)) { Stop-Tool "Missing $loader (run without -SkipBuild)" }
 if (-not (Test-Path -LiteralPath $updater)) { Stop-Tool "Missing $updater (run without -SkipBuild)" }
 $built = (Get-Item -LiteralPath $loader).VersionInfo.ProductVersion
-if ($built -ne $version) { Stop-Tool "dcp-loader.exe is version $built, CMakeLists.txt says $version (run without -SkipBuild)" }
+if ($built -ne $version) { Stop-Tool "dragons_crown_pro.exe is version $built, CMakeLists.txt says $version (run without -SkipBuild)" }
 
 New-Item -ItemType Directory -Force $dist | Out-Null
 foreach ($old in @($stage, $symbols, $zip, $shaFile, (Join-Path $dist "$name.sha256"))) {
@@ -241,11 +241,11 @@ foreach ($old in @($stage, $symbols, $zip, $shaFile, (Join-Path $dist "$name.sha
 $licenses = Join-Path $stage 'licenses'
 New-Item -ItemType Directory $stage, $licenses, $symbols | Out-Null
 
-Write-Step 'Staging dcp-loader.exe without debug information'
-$debugFile = Join-Path $symbols 'dcp-loader.debug'
+Write-Step 'Staging dragons_crown_pro.exe without debug information'
+$debugFile = Join-Path $symbols 'dragons_crown_pro.debug'
 & $objcopy --only-keep-debug $loader $debugFile
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'llvm-objcopy --only-keep-debug failed' }
-& $objcopy --strip-debug "--add-gnu-debuglink=$debugFile" $loader (Join-Path $stage 'dcp-loader.exe')
+& $objcopy --strip-debug "--add-gnu-debuglink=$debugFile" $loader (Join-Path $stage 'dragons_crown_pro.exe')
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'llvm-objcopy --strip-debug failed' }
 
 Write-Step 'Staging trg-updater.exe without debug information'
@@ -282,7 +282,7 @@ foreach ($component in $BuiltInLicenses.Keys) {
     Copy-Item -LiteralPath $source (Join-Path $licenses $component)
 }
 $manifest = New-Object System.Collections.Generic.List[string]
-$manifest.Add("MSYS2 CLANG64 packages in dcp-loader.exe $version and next to it. Source packages: the URL on each line.")
+$manifest.Add("MSYS2 CLANG64 packages in dragons_crown_pro.exe $version and next to it. Source packages: the URL on each line.")
 foreach ($short in @($owners.Keys) + $StaticPackages) {
     $info = Get-PackageInfo $short
     if ($info.Licenses.Count -eq 0) { Stop-Tool "MSYS2 package $short installs no licence file" }
@@ -345,5 +345,5 @@ Write-Host "  Folder:   $stage ($(Format-Size $stageBytes), $($files.Count) file
 Write-Host "  ZIP:      $zip ($(Format-Size (Get-Item -LiteralPath $zip).Length))"
 Write-Host "  SHA-256:  $hash"
 Write-Host "  Symbols:  $symbols (not in the package)"
-Write-Host "  Loader:   $(Format-Size (Get-Item -LiteralPath $loader).Length) built, $(Format-Size (Get-Item -LiteralPath (Join-Path $stage 'dcp-loader.exe')).Length) packaged"
+Write-Host "  Loader:   $(Format-Size (Get-Item -LiteralPath $loader).Length) built, $(Format-Size (Get-Item -LiteralPath (Join-Path $stage 'dragons_crown_pro.exe')).Length) packaged"
 Write-Host "  DLLs:     $($dlls.Count), $(Format-Size $dllBytes)"

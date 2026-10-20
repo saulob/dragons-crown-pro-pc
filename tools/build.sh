@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Builds dcp-loader on Linux x86_64 incrementally (Clang, CMake + Ninja): the Linux counterpart of tools/build.ps1.
+# Builds dragons_crown_pro on Linux x86_64 incrementally (Clang, CMake + Ninja): the Linux counterpart of tools/build.ps1.
 # The one build configuration, RelWithDebInfo, is what is tested and what an AppImage contains.
 #
-#   tools/build.sh            build build/cmake/linux/bin/dcp-loader
+#   tools/build.sh            build build/cmake/linux/bin/dragons_crown_pro
 #   tools/build.sh --clean    delete build/cmake/linux first
 #   tools/build.sh --test     also build and run the focused tests
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
@@ -94,10 +94,10 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
         -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx"
 fi
 step 'Building'
-targets=(dcp-loader)
+targets=(dragons_crown_pro)
 ((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-update-tests)
 ninja -C "$build_dir" "${targets[@]}"
-loader=$build_dir/bin/dcp-loader
+loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
 
 if ((test)); then

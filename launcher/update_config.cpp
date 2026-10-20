@@ -83,8 +83,8 @@ trg::update::UpdateConfig MakeUpdateConfig(const std::filesystem::path& install_
     config.checksum_asset_name = [](const SemanticVersion& version) {
         return "DragonsCrownProPC-v" + version.CoreString() + "-windows-x64.zip.sha256";
     };
-    config.restart_executable = install_dir / "dcp-loader.exe";
-    config.required_staged_files = {"dcp-loader.exe"};
+    config.restart_executable = install_dir / "dragons_crown_pro.exe";
+    config.required_staged_files = {"dragons_crown_pro.exe"};
     config.install_supported = std::filesystem::exists(install_dir / "trg-updater.exe");
     if (!config.install_supported) {
         config.install_unsupported_reason =

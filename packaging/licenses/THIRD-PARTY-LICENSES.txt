@@ -3,11 +3,11 @@ code is at https://github.com/saulob/dragons-crown-pro-pc. The loader, runtime a
 docs/REFERENCES.md and gpu/VENDOR.txt of the source.
 
 In the release package, the licence texts named below are in licenses\<folder>\, and licenses\MSYS2-PACKAGES.txt
-lists the exact version and source package of every DLL that ships next to dcp-loader.exe.
+lists the exact version and source package of every DLL that ships next to dragons_crown_pro.exe.
 
 
 ========================================================================
-Compiled into dcp-loader.exe
+Compiled into dragons_crown_pro.exe
 ========================================================================
 
 shadPS4
@@ -58,7 +58,7 @@ TRG Launcher 1.1.0 (https://github.com/TekRantGaming/trg-launcher, b384a28c712c9
 
 
 ========================================================================
-DLLs next to dcp-loader.exe (MSYS2 CLANG64)
+DLLs next to dragons_crown_pro.exe (MSYS2 CLANG64)
 ========================================================================
 
 SDL3                        Zlib                                                                 licenses\SDL3

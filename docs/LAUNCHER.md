@@ -6,7 +6,7 @@ Graphics, Gameplay, Cheats, Controls, Trophies and About.
 
 ## Architecture
 
-`dcp-loader.exe` calls `dcp_launcher_run()` (`launcher/dcp_launcher.h`) early in `main`, after the PS4 address range is
+`dragons_crown_pro.exe` calls `dcp_launcher_run()` (`launcher/dcp_launcher.h`) early in `main`, after the PS4 address range is
 reserved and before the boot image is read. There is no second executable and no helper process. On Linux the loader
 passes `dcp_check_vulkan` as the launcher's graphics check: Play runs it (the launcher itself needs no Vulkan) and, if
 it fails, `launcher/problem_dialog.cpp` explains why and the launcher stays open.
@@ -29,7 +29,7 @@ exist at a time. The Dear ImGui copy is the one compiled into the video core lib
 
 ## Folders and defaults
 
-`dcp-loader.exe` needs no arguments, Python or environment: explicit `boot.bin`, `--content-profile`, `--app0`, `--user`
+`dragons_crown_pro.exe` needs no arguments, Python or environment: explicit `boot.bin`, `--content-profile`, `--app0`, `--user`
 and `--logs` win, and everything else is found next to the executable (`launcher/paths.cpp`).
 
 | | Packaged (next to the executable) | Executable in `build\cmake\<toolchain>\bin` |

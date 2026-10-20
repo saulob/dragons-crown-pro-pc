@@ -36,7 +36,7 @@ REQUIREMENTS
 INSTALL
 -------
 1. Extract the ZIP anywhere you can write to (not "Program Files").
-2. Run dcp-loader.exe. The launcher opens.
+2. Run dragons_crown_pro.exe. The launcher opens.
 3. On the Play page, click "Install game...".
 4. Select your Dragon's Crown Pro .pkg file.
 5. Wait while the launcher checks the package and unpacks it into the "game"
@@ -60,7 +60,7 @@ logs, shader caches and DLC are kept.
 
 WINDOWS SMARTSCREEN
 -------------------
-The first time you run dcp-loader.exe, Windows SmartScreen may show a warning,
+The first time you run dragons_crown_pro.exe, Windows SmartScreen may show a warning,
 because the program is not digitally signed. If you downloaded the release
 from the project's GitHub releases page, choose "More info", then
 "Run anyway".
@@ -85,11 +85,11 @@ PLAYING
 
 WHERE THINGS ARE
 ----------------
-- Game files:     the "game" folder next to dcp-loader.exe
-- Logs:           the "logs" folder next to dcp-loader.exe
+- Game files:     the "game" folder next to dragons_crown_pro.exe
+- Logs:           the "logs" folder next to dragons_crown_pro.exe
 - Settings (dcp.ini), saves, trophy progress, the Trophy Key (keep it
                   private) and shader cache:
-                  the "user" folder next to dcp-loader.exe
+                  the "user" folder next to dragons_crown_pro.exe
 
 These folders are created when they are first needed and are not part of the
 download. When updating the port, keep "user" (and "game", to skip

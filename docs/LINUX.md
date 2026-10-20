@@ -15,7 +15,7 @@ PipeWire headers SDL needs to build those backends (SDL loads both at run time; 
 
 | Command | Result |
 | --- | --- |
-| `tools/build.sh` | fetches `gpu/deps.txt`, builds `build/cmake/linux/bin/dcp-loader` |
+| `tools/build.sh` | fetches `gpu/deps.txt`, builds `build/cmake/linux/bin/dragons_crown_pro` |
 | `tools/build.sh --test` | also runs `dcp-launcher-tests`, `dcp-cheats-tests`, `dcp-runtime-tests` and `dcp-text-tests` |
 | `tools/build.sh --run` | starts the loader that was just built |
 | `tools/package-linux.sh` | `dist/DragonsCrownProPC-v<version>-x86_64.AppImage` and `.sha256`; debug symbols in `dist/<name>-symbols/` (`--out-dir DIR` writes all three to DIR instead) |
@@ -68,7 +68,7 @@ Linux offers every Windows feature. Where the platforms differ, this is the Linu
 | Hold Shift while starting | Shift is read from the X server in an X11 session; a Wayland desktop shows X11 programs no keys while another window has focus, so there, and in Gaming Mode, use `--launcher` (the Steam Deck's Launch Options) or the desktop entry's **Show launcher** action |
 | **Show settings file** selects the file in Explorer | opens the settings folder with `xdg-open` |
 | Launcher and game window positions are restored | restored on X11; a Wayland compositor decides where windows go, so the position may not be restored there |
-| Data next to `dcp-loader.exe` | next to the AppImage file (the AppImage's own mount is read-only); `$XDG_DATA_HOME/DragonsCrownProPC` when that folder is not writable |
+| Data next to `dragons_crown_pro.exe` | next to the AppImage file (the AppImage's own mount is read-only); `$XDG_DATA_HOME/DragonsCrownProPC` when that folder is not writable |
 | `tools\package-release.ps1` | builds the AppImage in WSL2 with `tools/package-release-linux.sh`, or run `tools/package-linux.sh` on Linux |
 
 Everything else (display mode, F11, window size, monitor and graphics card selection, VSync, render resolutions,
@@ -77,7 +77,7 @@ shader cache, per-run logs, audio, reinstalling without losing user data) is the
 
 ## AppImage
 
-`usr/bin/dcp-loader` with `DT_RPATH=$ORIGIN/../lib` finds the bundled libraries (SDL3, FreeType, libpng, OpenSSL's
+`usr/bin/dragons_crown_pro` with `DT_RPATH=$ORIGIN/../lib` finds the bundled libraries (SDL3, FreeType, libpng, OpenSSL's
 libcrypto, fmt, Zydis, xxHash and their dependencies); no `LD_LIBRARY_PATH` is set, so programs the launcher starts
 (`zenity`, `xdg-open`) are not affected. glibc, the Vulkan loader and drivers, X11/Wayland and the audio libraries come
 from the system. The Vulkan loader must support Vulkan 1.3: Ubuntu 20.04's own `libvulkan1` (1.2.131) does not, and

@@ -3,7 +3,7 @@
 #include "dcp_version.h"
 
 1 ICON "../packaging/icons/app-icon.ico"
-CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "dcp-loader.manifest"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "dragons_crown_pro.manifest"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION DCP_VERSION_NUMBERS
@@ -21,8 +21,8 @@ BEGIN
             VALUE "CompanyName", "saulob"
             VALUE "FileDescription", "Dragon's Crown Pro PC"
             VALUE "FileVersion", DCP_FILE_VERSION_STRING
-            VALUE "InternalName", "dcp-loader"
-            VALUE "OriginalFilename", "dcp-loader.exe"
+            VALUE "InternalName", "dragons_crown_pro"
+            VALUE "OriginalFilename", "dragons_crown_pro.exe"
             VALUE "ProductName", "Dragon's Crown Pro PC"
             VALUE "ProductVersion", DCP_VERSION_STRING
             VALUE "Comments", "https://github.com/saulob/dragons-crown-pro-pc"
