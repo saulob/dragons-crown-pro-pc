@@ -219,8 +219,8 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   The game reads it when it starts, so a change takes effect the next time the game starts.
 - **F11** in the game switches Windowed and Borderless Fullscreen at once and saves the Display mode. In the launcher it
   switches the launcher's own fullscreen, saved in `launcher_fullscreen`, and never changes the Display mode.
-- **Mouse cursor**: in the game's Borderless Fullscreen the cursor hides after 5 seconds without mouse movement and comes back
-  when the mouse moves, when the game window loses focus, in Windowed mode and while the in-game menu is open.
+- **Mouse cursor**: mouse movement, clicks and the wheel show the cursor in Windowed and Borderless Fullscreen; keyboard or
+  controller input hides it. It stays visible while the in-game menu or a dialog is open and when the game window loses focus.
 
 Scaling and sharpening, below those on the Display page, are what the presenter already supports: **Upscaling** (AMD
 FSR 1, off by default) enlarges the game's picture (the render resolution) in a bigger window; **Sharpening** (AMD

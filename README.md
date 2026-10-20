@@ -115,7 +115,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 - **Window size** (1280×720 to 3840×2160 in 16:9; the choices follow the Aspect Ratio) and **Monitor**. A window that would not fit the monitor opens smaller, centred and within 80% of its usable area; your saved size is not changed.
 - **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders a frame of the ratio's shape at the Render resolution's height. Only 16:9 Original is undistorted: the game's 2D scene is still laid out for its original 1280 × 720 canvas, so 21:9 and 32:9 stretch the gameplay horizontally instead of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not adjusted either. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
 - **Presentation**: Letterbox (the default) fits the finished frame into the window with its aspect ratio kept and bars where the shapes differ; Stretch fills the whole window with it. It applies in Windowed and Borderless Fullscreen and does not change the Aspect Ratio or the render resolution.
-- In Borderless Fullscreen the mouse cursor hides after 5 seconds without movement.
+- In Windowed and Borderless Fullscreen, mouse movement, clicks and the wheel show the cursor; keyboard or controller input hides it. Mouse-driven menus and dialogs keep it visible.
 - **Graphics card**: Automatic or a specific Vulkan graphics card. A card that is no longer present falls back to Automatic.
 - **VSync** on or off
 - **Upscaling**: AMD FSR 1 enlarges the picture when the window is bigger than the render resolution

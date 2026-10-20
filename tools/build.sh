@@ -115,7 +115,7 @@ if ((test)); then
     "$build_dir/bin/dcp-text-tests"
     step 'Running the save-data tests (mounts, Japanese startup save hook)'
     "$build_dir/bin/dcp-savedata-tests"
-    step 'Running the cursor auto-hide tests'
+    step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the window fit tests'
     "$build_dir/bin/dcp-window-tests"

@@ -2,7 +2,7 @@
 .SYNOPSIS
   Builds and runs the focused launcher, cheat, text, cursor and tiling tests: game file validation, the settings file, the
   Play gate, the window placement, the Display options, the Controller prompts patch, the text dialog, the system font
-  set, the cursor auto-hide timer and the GPU tile layouts. They use synthetic files in a temporary folder: no window,
+  set, the cursor visibility rules and the GPU tile layouts. They use synthetic files in a temporary folder: no window,
   no game files.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The tests are not part of the default build.
@@ -40,7 +40,7 @@ Write-Step 'Running the text tests (text dialog, system font set)'
 & (Join-Path $buildDir 'bin\dcp-text-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Step 'Running the cursor auto-hide tests'
+Write-Step 'Running the cursor visibility tests'
 & (Join-Path $buildDir 'bin\dcp-cursor-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

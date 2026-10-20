@@ -148,10 +148,11 @@ target_include_directories(dcp-tiling-tests PRIVATE gpu/shim gpu/shadps4 tests s
 target_compile_options(dcp-tiling-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-tiling-tests PRIVATE dcpgpu)
 
-# Focused tests of the game window's cursor auto-hide timer (tools/test.ps1); not part of the default build.
+# Focused tests of the game window's cursor visibility (tools/test.ps1); not part of the default build.
 add_executable(dcp-cursor-tests EXCLUDE_FROM_ALL tests/cursor_tests.cpp)
 set_target_properties(dcp-cursor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-cursor-tests PRIVATE gpu/shim)
+target_compile_definitions(dcp-cursor-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-cursor-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the windowed-mode size and centring arithmetic; not part of the default build.

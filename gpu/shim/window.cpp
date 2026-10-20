@@ -125,6 +125,7 @@ void WindowSDL::ApplyDisplayMode(int mode) {
 }
 
 WindowSDL::~WindowSDL() {
+    SDL_ShowCursor();
     SDL_DestroyWindow(window);
 }
 
@@ -198,17 +199,52 @@ void WindowSDL::ToggleBorderless() {
     DcpSettings::SaveDisplayMode();
 }
 
-// Window thread. Hidden only in borderless fullscreen with focus and no mouse-driven overlay open.
+// Window thread. Visible while an overlay needs the mouse or focus is away; otherwise the last
+// gameplay input device decides, in Windowed and Borderless alike.
 void WindowSDL::UpdateCursor() {
-    const SDL_WindowFlags flags = SDL_GetWindowFlags(window);
-    const bool active = (flags & SDL_WINDOW_FULLSCREEN) != 0 && (flags & SDL_WINDOW_INPUT_FOCUS) != 0 &&
-                        !DcpOverlay::CapturesInput();
-    if (const auto visible = cursor.Update(active, DcpCursor::Hider::Clock::now())) {
+    const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    if (const auto visible = cursor.Update(true, focused, DcpOverlay::CapturesInput())) {
         if (*visible) {
             SDL_ShowCursor();
         } else {
             SDL_HideCursor();
         }
+    }
+}
+
+// Window thread. Only the gamepads runtime_pad.c opened produce these events.
+bool WindowSDL::TrackControllerEvent(const SDL_Event& event) {
+    switch (event.type) {
+    case SDL_EVENT_GAMEPAD_ADDED:
+    case SDL_EVENT_GAMEPAD_REMOVED:
+        pad_activity.erase(event.gdevice.which);
+        return false;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+        PadActivity& pad = pad_activity[event.gbutton.which];
+        const u32 bit = event.gbutton.button < 32 ? 1u << event.gbutton.button : 0u;
+        if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            pad.state.buttons |= bit;
+        } else {
+            pad.state.buttons &= ~bit;
+        }
+        return pad.filter.Update(pad.state);
+    }
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+        PadActivity& pad = pad_activity[event.gaxis.which];
+        switch (event.gaxis.axis) {
+        case SDL_GAMEPAD_AXIS_LEFTX: pad.state.left_x = event.gaxis.value; break;
+        case SDL_GAMEPAD_AXIS_LEFTY: pad.state.left_y = event.gaxis.value; break;
+        case SDL_GAMEPAD_AXIS_RIGHTX: pad.state.right_x = event.gaxis.value; break;
+        case SDL_GAMEPAD_AXIS_RIGHTY: pad.state.right_y = event.gaxis.value; break;
+        case SDL_GAMEPAD_AXIS_LEFT_TRIGGER: pad.state.left_trigger = event.gaxis.value; break;
+        case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: pad.state.right_trigger = event.gaxis.value; break;
+        default: return false;
+        }
+        return pad.filter.Update(pad.state);
+    }
+    default:
+        return false;
     }
 }
 
@@ -233,9 +269,8 @@ bool WindowSDL::PollEvents() {
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            cursor.MouseMoved(DcpCursor::Hider::Clock::now());
-        }
+        const bool ui = DcpOverlay::CapturesInput();
+        const bool controller_activity = TrackControllerEvent(event);
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
@@ -266,12 +301,36 @@ bool WindowSDL::PollEvents() {
         if (DcpOverlay::HandleEvent(event)) {
             continue;
         }
+        if (controller_activity && !ui) {
+            cursor.ControllerActivity();
+        }
         switch (event.type) {
-        case SDL_EVENT_KEY_DOWN:
-            if (event.key.scancode == DcpSettings::Get().window_mode_key && !event.key.repeat) {
-                ToggleBorderless();
+        case SDL_EVENT_MOUSE_MOTION:
+            if (!ui) {
+                cursor.MouseMoved();
             }
             break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            if (!ui) {
+                cursor.MouseButtonPressed();
+            }
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            if (!ui) {
+                cursor.MouseWheelMoved();
+            }
+            break;
+        case SDL_EVENT_KEY_DOWN: {
+            const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
+            const bool host_shortcut = window_shortcut || event.key.scancode == DcpSettings::Get().menu_key ||
+                                       event.key.scancode == SDL_SCANCODE_INSERT;
+            if (window_shortcut && !event.key.repeat) {
+                ToggleBorderless();
+            } else if (DcpCursor::IsGameplayKey(event.key.repeat, host_shortcut) && !ui) {
+                cursor.KeyboardActivity();
+            }
+            break;
+        }
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         case SDL_EVENT_WINDOW_RESIZED: {
             int w = 0, h = 0;
