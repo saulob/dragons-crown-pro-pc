@@ -64,6 +64,7 @@ $DllPackages = @('sdl3', 'freetype', 'libpng', 'zydis', 'xxhash', 'libc++', 'lib
 $SystemProvided = @('vulkan-1.dll')
 
 $RootFiles = @('dcp-loader.exe', 'README.txt', 'LICENSE.txt')
+$AssetFiles = @('assets\launcher\header-art.png')
 $ForbiddenNames = @('game', 'user', 'logs', 'cache', 'build', 'prepared', 'extracted', 'image', 'sce_sys', 'sce_module',
     'eboot.bin', 'param.sfo', 'dcp.ini', 'boot.bin', 'content.bin', 'image.json', 'imports.json', 'symbols')
 $ForbiddenPatterns = @('*.pkg', '*.pdb', '*.debug', '*.log', '*.dmp', '*.ini', '*.bin', '*.self', '*.sprx', '*.prx',
@@ -147,9 +148,16 @@ function Test-ReleaseFolder([string]$Dir) {
             if ($parts[0] -ne 'licenses' -and $item.Name -like $pattern) { $problems.Add("forbidden file type: $relative") }
         }
         if ($parts.Count -eq 1) {
-            if ($item.PSIsContainer) { if ($item.Name -ne 'licenses') { $problems.Add("unexpected folder: $relative") } }
-            elseif ($RootFiles -notcontains $item.Name -and -not $dlls.Contains($item.Name.ToLowerInvariant())) {
+            if ($item.PSIsContainer) {
+                if ($item.Name -notin @('licenses', 'assets')) { $problems.Add("unexpected folder: $relative") }
+            } elseif ($RootFiles -notcontains $item.Name -and -not $dlls.Contains($item.Name.ToLowerInvariant())) {
                 $problems.Add("unexpected file: $relative")
+            }
+        } elseif ($parts[0] -eq 'assets') {
+            if ($item.PSIsContainer) {
+                if ($relative -ne 'assets\launcher') { $problems.Add("unexpected folder: $relative") }
+            } elseif ($AssetFiles -notcontains $relative) {
+                $problems.Add("unexpected item: $relative")
             }
         } elseif ($parts[0] -ne 'licenses' -or $item.Name -like '*.exe' -or $item.Name -like '*.dll') {
             $problems.Add("unexpected item: $relative")
@@ -169,6 +177,9 @@ function Test-ReleaseFolder([string]$Dir) {
     }
     foreach ($leaf in $RootFiles + @('licenses\THIRD-PARTY-LICENSES.txt', 'licenses\MSYS2-PACKAGES.txt', 'licenses\NotoSansTC\LICENSE-NotoSansTC.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $base $leaf) -PathType Leaf)) { $problems.Add("missing: $leaf") }
+    }
+    foreach ($asset in $AssetFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $base $asset) -PathType Leaf)) { $problems.Add("missing: $asset") }
     }
     return $problems
 }
@@ -269,6 +280,13 @@ foreach ($short in @($owners.Keys) + $StaticPackages) {
 Write-Text (Join-Path $licenses 'MSYS2-PACKAGES.txt') (($manifest -join "`n") + "`n")
 $readme = (Get-Content -LiteralPath (Join-Path $root 'packaging\README.txt') -Raw).Replace('@VERSION@', $version)
 Write-Text (Join-Path $stage 'README.txt') $readme
+
+Write-Step 'Staging the launcher header art'
+$asset_dir = Join-Path $stage 'assets\launcher'
+New-Item -ItemType Directory -Force $asset_dir | Out-Null
+$header_art = Join-Path $root 'assets\launcher\header-art.png'
+if (-not (Test-Path -LiteralPath $header_art -PathType Leaf)) { Stop-Tool "Missing launcher header art: $header_art" }
+Copy-Item -LiteralPath $header_art $asset_dir
 
 Write-Step 'Checking the release folder'
 $problems = @(Test-ReleaseFolder $stage)

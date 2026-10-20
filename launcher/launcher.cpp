@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,6 +25,7 @@
 #include "controller_prompts.h"
 #include "game_patches.h"
 #include "dcp_accent.h"
+#include "dcp_png.h"
 #include "dcp_cheats.h"
 #include "dcp_displays.h"
 #include "dcp_resolution.h"
@@ -139,9 +142,20 @@ trg::Theme LauncherTheme() {
     return theme;
 }
 
-trg::HeaderPainter LauncherHeader() {
-    return trg::headers::Gradient(IM_COL32(12, 18, 26, 255), IM_COL32(62, 42, 12, 255), IM_COL32(8, 34, 44, 255),
-                                  IM_COL32(8, 10, 16, 255));
+constexpr float kHeaderArtAspect = 1600.0f / 180.0f;
+
+trg::HeaderPainter LauncherHeader(ImTextureID art, float art_aspect) {
+    const trg::HeaderPainter gradient = trg::headers::Gradient(
+        IM_COL32(12, 18, 26, 255), IM_COL32(62, 42, 12, 255), IM_COL32(8, 34, 44, 255), IM_COL32(8, 10, 16, 255));
+    return [gradient, art, art_aspect](const trg::HeaderContext& c) {
+        gradient(c);
+        if (art == ImTextureID{}) {
+            return;
+        }
+        const float height = c.max.y - c.min.y;
+        const float width = height * art_aspect;
+        c.draw->AddImage(ImTextureRef(art), ImVec2(c.max.x - width, c.min.y), c.max);
+    };
 }
 
 __attribute__((format(printf, 1, 2))) void Log(const char* format, ...) {
@@ -151,6 +165,29 @@ __attribute__((format(printf, 1, 2))) void Log(const char* format, ...) {
     std::vprintf(format, args);
     va_end(args);
     std::printf("\n");
+}
+
+ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
+    const char* base = SDL_GetBasePath();
+    if (!base) {
+        return ImTextureID{};
+    }
+    const std::filesystem::path path = PathFromUtf8(base) / "assets" / "launcher" / "header-art.png";
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return ImTextureID{};
+    }
+    const std::vector<unsigned char> encoded((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    DcpPng::Image image;
+    if (!DcpPng::DecodeRgba(encoded.data(), encoded.size(), image)) {
+        Log("launcher header art could not be decoded: %s", Utf8(path).c_str());
+        return ImTextureID{};
+    }
+    const ImTextureID texture = host.CreateTexture(image.rgba.data(), image.width, image.height);
+    if (texture != ImTextureID{}) {
+        aspect = float(image.width) / float(image.height);
+    }
+    return texture;
 }
 
 const char* StatusTitle(GameFileState state) {
@@ -223,6 +260,7 @@ public:
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
         placement_ = PlacementTracker(host_.Restored());
         fonts_ = trg::LoadSystemFonts(18.0f);
+        header_art_ = LoadHeaderArt(host_, header_art_aspect_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         ApplySavedPatches();
@@ -426,7 +464,7 @@ private:
             {"PC PORT   \xC2\xB7   ", ""},
             {"BY SAULOB", kAuthorUrl},
         };
-        c.branding.background = LauncherHeader();
+        c.branding.background = LauncherHeader(header_art_, header_art_aspect_);
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
@@ -1007,6 +1045,8 @@ private:
     GameFileState files_;
     const GameBuild* build_ = nullptr;
     LauncherHost host_;
+    ImTextureID header_art_{};
+    float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;
     trg::Fonts fonts_;
