@@ -45,6 +45,8 @@ static const uint8_t stub_call[] = {
     0x41, 0x5b, 0x41, 0x5a, 0x41, 0x59, 0x41, 0x58, /* pop r11, r10, r9, r8 */
     0x5f, 0x5e, 0x5a, 0x59, 0x58,                   /* pop rdi, rsi, rdx, rcx, rax */
     0x48, 0x83, 0x7c, 0x24, 0x08, 0x00,             /* cmp qword ptr [rsp+8], 0: skip? */
+};
+static const uint8_t stub_skip_return[] = {
     0x74, 0x07,                                     /* je run */
     0x9d,                                           /* popfq */
     0x48, 0x8d, 0x64, 0x24, 0x08,                   /* lea rsp, [rsp+8] */
@@ -52,11 +54,27 @@ static const uint8_t stub_call[] = {
     0x9d,                                           /* run: popfq */
     0x48, 0x8d, 0x64, 0x24, 0x08,                   /* lea rsp, [rsp+8]: no flags touched */
 };
+/* A replaced call has no return address on top: skipping it goes on after it. */
+static const uint8_t stub_skip_call[] = {
+    0x74, 0x08,                                     /* je run */
+    0x9d,                                           /* popfq */
+    0x48, 0x8d, 0x64, 0x24, 0x08,                   /* lea rsp, [rsp+8] */
+    0xeb, 0x16,                                     /* jmp over the call to stub_return */
+    0x9d,                                           /* run: popfq */
+    0x48, 0x8d, 0x64, 0x24, 0x08,                   /* lea rsp, [rsp+8]: no flags touched */
+};
+static const uint8_t stub_call_absolute[] = {0xff, 0x15, 0x02, 0, 0, 0, 0xeb, 0x08}; /* call [rip+2]; jmp over the address */
+static const uint8_t stub_jmp_absolute[] = {0xff, 0x25, 0, 0, 0, 0};                 /* jmp [rip+0]; the address follows */
 static const uint8_t stub_return[] = {0xff, 0x25, 0, 0, 0, 0}; /* jmp [rip+0]; the address follows */
 
 size_t guest_hook_stub_size(void) {
-    const size_t used = sizeof(stub_save) + 8 + sizeof(stub_call) + GUEST_HOOK_MAX_LENGTH + sizeof(stub_return) + 8;
+    const size_t used = sizeof(stub_save) + 8 + sizeof(stub_call) + sizeof(stub_skip_call) + GUEST_HOOK_MAX_LENGTH +
+                        sizeof(stub_return) + 8;
     return (used + STUB_ALIGN - 1) / STUB_ALIGN * STUB_ALIGN;
+}
+
+static int is_relative_branch(const GuestHook *hook) {
+    return hook->length == 5 && (hook->original[0] == 0xe8 || hook->original[0] == 0xe9);
 }
 
 const char *guest_hook_status_text(GuestHookStatus status) {
@@ -121,7 +139,20 @@ GuestHookStatus guest_hooks_install(uint8_t *image, uint64_t size, uint64_t entr
         at = emit(at, stub_save, sizeof(stub_save));
         at = emit(at, &handler, 8);
         at = emit(at, stub_call, sizeof(stub_call));
-        at = emit(at, hook->original, hook->length);
+        if (is_relative_branch(hook)) {
+            int32_t displacement;
+            memcpy(&displacement, hook->original + 1, 4);
+            const uint64_t target = (uint64_t)(uintptr_t)(image + hook->offset + 5) + (uint64_t)(int64_t)displacement;
+            const int is_call = hook->original[0] == 0xe8;
+            at = is_call ? emit(at, stub_skip_call, sizeof(stub_skip_call))
+                         : emit(at, stub_skip_return, sizeof(stub_skip_return));
+            at = is_call ? emit(at, stub_call_absolute, sizeof(stub_call_absolute))
+                         : emit(at, stub_jmp_absolute, sizeof(stub_jmp_absolute));
+            at = emit(at, &target, 8);
+        } else {
+            at = emit(at, stub_skip_return, sizeof(stub_skip_return));
+            at = emit(at, hook->original, hook->length);
+        }
         at = emit(at, stub_return, sizeof(stub_return));
         at = emit(at, &resume, 8);
         memset(at, 0xcc, (size_t)(stub + stride - at));

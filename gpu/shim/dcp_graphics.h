@@ -24,6 +24,14 @@ constexpr int IndexOf(const std::array<T, N>& values, const T& value, int fallba
 inline int ParseDisplayMode(std::string_view text) {
     return IndexOf(DisplayModeKeys, text, Windowed);
 }
+
+/// Letterbox keeps the frame's aspect ratio in the window; Stretch fills the window with it.
+enum Presentation : int { Letterbox = 0, Stretch = 1, PresentationCount };
+inline constexpr std::array<std::string_view, PresentationCount> PresentationKeys = {"letterbox", "stretch"};
+
+inline int ParsePresentation(std::string_view text) {
+    return IndexOf(PresentationKeys, text, Letterbox);
+}
 /// RCAS strength in percent; invalid values fall back to 75.
 inline int ParseRcasStrength(int value) {
     return value >= 0 && value <= 100 ? value : 75;

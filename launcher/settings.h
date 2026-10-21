@@ -19,6 +19,7 @@ inline constexpr char kWindowWidthKey[] = "window_width";
 inline constexpr char kWindowHeightKey[] = "window_height";
 inline constexpr char kMonitorKey[] = "monitor";
 inline constexpr char kVSyncKey[] = "vsync";
+inline constexpr char kPresentationKey[] = "presentation";
 inline constexpr char kUpscaleKey[] = "fsr1";
 inline constexpr char kSharpenKey[] = "rcas";
 inline constexpr char kSharpenStrengthKey[] = "rcas_strength";
@@ -34,8 +35,14 @@ inline constexpr char kTextLanguageKey[] = "text_language";
 inline constexpr char kShowFpsTitleKey[] = "show_fps_title";
 inline constexpr char kShowResolutionTitleKey[] = "show_resolution_title";
 inline constexpr char kShowFrameCounterKey[] = "show_fps";
+// Keeps the run log of normal sessions; crash logs are kept whatever it says.
+inline constexpr char kDetailedLoggingKey[] = "detailed_logging";
 // Which controller's buttons the game's prompts show; the launcher keeps the installed archives in step with it.
 inline constexpr char kControllerPromptsKey[] = "controller_prompts";
+// Replaces the Giant Spider's pictures with a simplified creature; the launcher keeps the installed archive in step with it.
+inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
+// Routes NPC voice cues to the Japanese banks already present in the USA installation.
+inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
 inline constexpr char kLauncherXKey[] = "launcher_x";
 inline constexpr char kLauncherYKey[] = "launcher_y";
 inline constexpr char kLauncherWidthKey[] = "launcher_width";
@@ -46,20 +53,17 @@ inline constexpr char kLauncherFullscreenKey[] = "launcher_fullscreen";
 inline constexpr int kDefaultWindowWidth = 1920;
 inline constexpr int kDefaultWindowHeight = 1080;
 
-struct TextLanguage {
+struct PresentationChoice {
     std::string_view key;
     std::string_view name;
-    int ps4_id;
 };
 
-// The languages the game has text for, in launcher order; the first is the default.
-inline constexpr TextLanguage kTextLanguages[] = {
-    {"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
-    {"italian", "Italian", 5}, {"spanish", "Spanish", 3},
+// How the rendered frame fits the window or display, in launcher order; the first is the default.
+inline constexpr PresentationChoice kPresentationChoices[] = {
+    {"letterbox", "Letterbox"},
+    {"stretch", "Stretch"},
 };
-
-// The system language the game is told for a text_language value; English when the value is not listed.
-int TextLanguageId(std::string_view key);
+inline constexpr char kDefaultPresentation[] = "letterbox";
 
 using Values = std::map<std::string, std::string, std::less<>>;
 
@@ -85,6 +89,7 @@ public:
 
     std::string Get(std::string_view key, std::string_view def = {}) const override;
     void Set(std::string_view key, std::string value) override;
+    bool Has(std::string_view key) const { return pending_.find(key) != pending_.end(); }
     bool Save() override;
     void ResetToDefaults() override;
 

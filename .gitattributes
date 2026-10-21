@@ -1,2 +1,6 @@
 * text=auto eol=lf
 LICENSE -text
+
+# Blank context lines in patches carry a leading space; git apply needs them.
+patches/appimage-runtime/*.patch -whitespace
+gpu/patches/*/*.patch -whitespace

@@ -5,7 +5,9 @@
 #include <vector>
 
 #include "dcp_displays.h"
+#include "dcp_keys.h"
 #include "dcp_resolution.h"
+#include "trg/settings.h"
 
 namespace dcp {
 
@@ -46,11 +48,13 @@ std::string WindowSizeLabel(WindowSize size);
 // "Display 2 (primary)   2560 × 1440   Name". Monitor settings are 1-based.
 std::string MonitorLabel(int monitor, const std::vector<Display>& displays);
 
-// "Key: Action" lines of the Controls page: the keyboard layout runtime_pad.c implements.
-struct KeyBinding {
-    const char* action;
-    const char* keys;
-};
-const std::vector<KeyBinding>& KeyboardBindings();
+// The Controls page's bindings, stored one key name per action in the settings (dcp_keys.h).
+// "Space", "Left Shift", "Enter", "F10".
+std::string KeyDisplayName(int scancode);
+// The saved key of an action; the default when the setting is missing or names no usable key.
+int SavedKey(const trg::SettingsStore& settings, DcpKeyAction action);
+void SetKey(trg::SettingsStore& settings, DcpKeyAction action, int scancode);
+// Puts every keyboard control and port hotkey back to its default and nothing else.
+void ResetKeys(trg::SettingsStore& settings);
 
 } // namespace dcp

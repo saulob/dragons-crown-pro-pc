@@ -16,7 +16,7 @@
 
 ## Features
 
-- **Regions**: the US (`CUSA10454`), Japanese (`CUSA07001` 1.00, 1.02 and 1.03) and Asia / Hong Kong (`CUSA10209` 1.00 and 1.02) PS4 releases
+- **Regions**: the US (`CUSA10454` 1.00 and 1.01), Japanese (`CUSA07001` 1.00, 1.02 and 1.03) and Asia / Hong Kong (`CUSA10209` 1.00 and 1.02) PS4 releases
 - **Native PC port**: the game's own x86-64 code runs directly on the PC. It is not an emulator. Windows is the primary tested platform, and there is an experimental native Linux / Steam Deck AppImage with the same intended feature set. Linux needs no Proton or Wine.
 - **TRG launcher** that installs the game directly from your own `.pkg` file, with no Python or other tools needed, and remembers its window position
 - **Windowed** and **Borderless Fullscreen**, switched with **F11** while playing, with window size and monitor selection
@@ -27,12 +27,13 @@
 - **Local PS4 trophies**, offline on this PC, shown on the launcher's Trophies page
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
-- **Menu & Subtitles language**: English, French, German, Italian or Spanish
+- **Menu & Subtitles language**: English, French, German, Italian or Spanish; Traditional Chinese or Korean on the Asia/Hong Kong build
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time)
 - An in-game settings menu: **Insert** on the keyboard, or **R3 + L2** on the controller
 - Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
 - Local multiplayer with up to four controllers
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
+- **Update check**: the launcher looks for a newer release of the port at start and installs it only when you choose to; the game files and the `user` folder are kept
 
 ## What you need
 
@@ -45,11 +46,11 @@
 | --- | --- |
 | Game | Dragon's Crown Pro |
 | Platform | PlayStation 4 |
-| US build | Title ID `CUSA10454`, Content ID `UP2611-CUSA10454_00-DRAGONSCROWNPRO1`, APP_VER `01.00`, version `01.03`, `eboot.bin` SHA-256 `f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a` |
+| US builds | Title ID `CUSA10454`, Content ID `UP2611-CUSA10454_00-DRAGONSCROWNPRO1`: version 1.00 is the base package (`gd`, APP_VER `01.00`, version `01.03`, `eboot.bin` SHA-256 `f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a`); version 1.01 is an update (`gp`, APP_VER `01.01`, version `01.03`, SHA-256 `434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0`) installed over 1.00 |
 | Japan builds | Title ID `CUSA07001`, Content ID `JP0005-CUSA07001_00-DRAGONSCROWN0001`: version 1.00 is the base package (APP_VER `01.00`, `eboot.bin` SHA-256 `e838e5c551f4ea2d13a13246dcd5474a888c56aa8abf5110f1219c0ceb0ae05f`); version 1.02 is the base plus the 1.02 update (APP_VER `01.02`, SHA-256 `e512685aef4fa1e50eafec8c9699b611992356cbae84e9b0147febceb49843fe`); version 1.03 is the base plus the 1.03 update (APP_VER `01.03`, SHA-256 `dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64`) |
-| Asia and Hong Kong builds | Title ID `CUSA10209`, Content ID `HP0177-CUSA10209_00-DRAGONSCROWN0001`, both with `eboot.bin` SHA-256 `d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b`: 1.00 is APP_VER `01.00`, version `01.02`; 1.02 is APP_VER `01.02`, version `01.00` |
+| Asia and Hong Kong builds | Title ID `CUSA10209`, Content ID `HP0177-CUSA10209_00-DRAGONSCROWN0001`: 1.00 is the base package (`gd`, APP_VER `01.00`, version `01.02`, `eboot.bin` SHA-256 `d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b`); 1.02 is an update (`gp`, APP_VER `01.02`, version `01.00`, SHA-256 `927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5`) installed over 1.00 |
 
-The Japanese 1.00 base package is a complete game on its own. The 1.02 and 1.03 updates are installed over that base, each into its own folder; the 1.03 update replaces every file the 1.02 update changes. The Japanese and Asia and Hong Kong builds are not yet fully tested. Their cheats and Xbox controller prompts are not available. Their render resolution and Aspect Ratio patches use tables checked against each build's `eboot.bin`, and are not yet tested in game. The Asia and Hong Kong build shows Chinese text with the bundled Noto Sans TC font.
+The Japanese 1.00 base package is a complete game on its own. The 1.02 and 1.03 updates are installed over that base, as are the USA 1.01 update over its 1.00 base and the Asia and Hong Kong 1.02 update over its 1.00 base, each into its own folder; the 1.03 update replaces every file the 1.02 update changes. The Japanese and Asia and Hong Kong builds are not yet fully tested. Their cheats and Xbox controller prompts are not available, and neither are the USA 1.01 update's. The USA 1.00 and Asia and Hong Kong 1.00 builds support the custom Render resolution and Aspect Ratio options; the USA 1.01 and Asia and Hong Kong 1.02 builds render at their original size in 16:9 because their own render resolution sites have not been verified yet. Both Asia and Hong Kong builds offer Traditional Chinese and Korean text. Traditional Chinese uses the bundled Noto Sans TC font; Korean is not yet tested in game, and that font has no Korean characters. The render resolution and Aspect Ratio patches use tables checked against each build's `eboot.bin`, and are not yet tested in game.
 
 The launcher checks the Title ID, Content ID and versions in the package's `param.sfo` before it unpacks anything, and the `eboot.bin` hash before it installs the result. Any other version is refused, because the port is built for this exact game code. A package encrypted for a PS4 console cannot be unpacked on a PC.
 
@@ -57,8 +58,8 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.6.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
-2. Run **dcp-loader.exe**. The launcher opens.
+1. Download **DragonsCrownProPC-v0.7.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
 5. Press **PLAY**.
@@ -92,7 +93,7 @@ These folders are created the first time they are needed and are not part of the
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file, exactly as on Windows. The launcher uses the desktop's file chooser (`zenity` or `kdialog`) when there is one, and its own file chooser otherwise, which works with the mouse, the keyboard and a controller. Wait until **Ready to play** appears, then press **PLAY**.
 4. `game`, `user` and `logs` are kept next to the AppImage file when that folder is writable (in `$XDG_DATA_HOME/DragonsCrownProPC` otherwise; `DCP_PORTABLE_DIR` chooses another folder). The AppImage itself is never written to.
 
-An AppImage needs FUSE 2 to start. On a system without a working FUSE, run it as `./DragonsCrownProPC-*-x86_64.AppImage --appimage-extract-and-run`.
+An AppImage normally mounts itself with FUSE. Where that is not possible it unpacks itself into a temporary folder and runs from there automatically; `APPIMAGE_EXTRACT_AND_RUN=1` forces that mode.
 
 To bring the launcher back after turning **Show this launcher** off, hold **Shift** while starting (in an X11 session) or start the AppImage with `--launcher`. The AppImage's desktop entry also has a **Show launcher** action. On a Steam Deck, which has no keyboard in Gaming Mode, put `--launcher` in the shortcut's **Launch Options** for a run, then remove it.
 
@@ -113,8 +114,9 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 ### Display
 - **Display mode**: Windowed or Borderless Fullscreen. Press **F11** while playing to switch between them.
 - **Window size** (1280×720 to 3840×2160 in 16:9; the choices follow the Aspect Ratio) and **Monitor**. A window that would not fit the monitor opens smaller, centred and within 80% of its usable area; your saved size is not changed.
-- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders at the Render resolution's height and the ratio's width, and the picture is letterboxed or pillarboxed in the window, never stretched. The game was not authored for these shapes: camera framing, HUD and prerendered videos are not adjusted, so you may see cropped or exposed areas and bars on videos. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
-- In Borderless Fullscreen the mouse cursor hides after 5 seconds without movement.
+- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders a frame of the ratio's shape at the Render resolution's height. Only 16:9 Original is undistorted: the game's 2D scene is still laid out for its original 1280 × 720 canvas, so 21:9 and 32:9 stretch the gameplay horizontally instead of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not adjusted either. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
+- **Presentation**: Letterbox (the default) fits the finished frame into the window with its aspect ratio kept and bars where the shapes differ; Stretch fills the whole window with it. It applies in Windowed and Borderless Fullscreen and does not change the Aspect Ratio or the render resolution.
+- In Windowed and Borderless Fullscreen, mouse movement, clicks and the wheel show the cursor; keyboard or controller input hides it. Mouse-driven menus and dialogs keep it visible.
 - **Graphics card**: Automatic or a specific Vulkan graphics card. A card that is no longer present falls back to Automatic.
 - **VSync** on or off
 - **Upscaling**: AMD FSR 1 enlarges the picture when the window is bigger than the render resolution
@@ -126,10 +128,12 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 - **Texture filtering**: Game, 2x, 4x, 8x or 16x
 
 ### Gameplay
-- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish. Voices are chosen inside the game.
+- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
+- **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. CUSA10454 1.00 USA only; narrator and player-character choices are unchanged
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
 - **Frame counter**: shows the frame rate and frame time in a corner of the game
+- **Arachnophobia Safe Mode**: redraws the Giant Spider as two soft cream bodies with two orange eyes, without legs or fangs; gameplay does not change
 
 The game runs at its own 60 frames per second.
 
@@ -139,12 +143,12 @@ The game runs at its own 60 frames per second.
 - There is no in-game "Trophy unlocked" notification yet. See [docs/TROPHIES.md](docs/TROPHIES.md).
 
 ### Cheats
-- **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x** (Player 1; gold is shared by the save), all Off by default; **Experience Multiplier** (Off, 2x, 5x or 10x) multiplies the experience every award adds. Press **F10** while playing to open the Cheats menu; what you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).
+- **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Skill Uses** and **Infinite Gold** (Player 1, except the ally cheats; gold is shared by the save), all Off by default. **Movement Speed** (Off, 2x or 4x) and **Experience Multiplier** (Off, 2x, 5x, 10x or 100x) are settings of their own. Press **F10** while playing to open the Cheats menu; it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**. What you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).
 
 ### Controls
 - Xbox controllers work without setup
-- **Controller prompts**: PlayStation (original) or Xbox. Xbox changes the button pictures the game shows (A/B/X/Y, LB/RB, LT/RT, MENU and VIEW) in the port's own copy of the game; PlayStation puts the originals back. Your `.pkg` file is never changed.
-- The **keyboard** is always on, together with the controller:
+- **Controller prompts**: PlayStation (original) or Xbox. Xbox changes the button pictures the game shows (A/B/X/Y, LB/RB, LT/RT, MENU and VIEW) in the port's own copy of the game; the touchpad prompt becomes VIEW as well, because View performs that action. PlayStation puts the originals back. Your `.pkg` file is never changed.
+- The **keyboard** is always on, together with the controller. The keys below are the defaults; change any of them on the launcher's **Controls** page (click a key, press the new one, Esc cancels) and use **Reset to defaults** to restore them:
 
 | Action | Keys |
 | --- | --- |
@@ -159,7 +163,7 @@ The game runs at its own 60 frames per second.
 | Options (Start) | Enter |
 | Touchpad left / right (Back) | Tab / Backspace |
 
-- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu. **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
+- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
 - **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged. Online play is not supported.
 
 ### About
@@ -186,9 +190,9 @@ git clone https://github.com/saulob/dragons-crown-pro-pc.git
 ```
 
 1. Install [MSYS2](https://www.msys2.org) with the CLANG64 toolchain. `.\tools\setup.ps1` checks it and prints the `pacman` command for anything missing.
-2. `.\tools\build.ps1` fetches the pinned dependencies (TRG Launcher, Dear ImGui and a few small libraries) and builds `build\cmake\clang64\bin\dcp-loader.exe`.
+2. `.\tools\build.ps1` fetches the pinned dependencies (TRG Launcher, Dear ImGui and a few small libraries) and builds `build\cmake\clang64\bin\dragons_crown_pro.exe`.
 3. `.\tools\build.ps1 -Run` also starts it. Install the game from the launcher's Play page, as in a release; the development build keeps it in `game\` and the boot image in `build\image\` of the repository.
-4. `.\tools\package.ps1` makes the release folder, ZIP and `.zip.sha256` file in `dist\` from the same build: the program without debug information (the symbols stay in `dist\`), the DLLs it needs and the licences. It is local only and never uploads, tags or publishes anything. The release version is `DCP_PORT_VERSION` in `CMakeLists.txt`.
+4. `.\tools\package.ps1` makes the release folder, ZIP and `.zip.sha256` file in `dist\` from the same build: the program without debug information (the symbols stay in `dist\`), the DLLs it needs and the licences. It is local only and never uploads, tags or publishes anything. The release version is the project `VERSION` in `CMakeLists.txt`.
 5. `.\tools\package-release.ps1` prepares the whole release in `dist\`: that Windows ZIP, and the Linux AppImage built in WSL2 (`tools/package-release-linux.sh`, which runs `tools/package-linux.sh`), each with its `.sha256` file. It needs the Ubuntu 20.04 WSL2 distribution `DcpFocalBuild`, prepared once as [docs/LINUX.md](docs/LINUX.md#building) describes, installs nothing, fails if either platform fails, and never uploads anything.
 
 `.\tools\test.ps1` runs the focused tests. Python is not needed to build, test or play. Only the optional development scripts in `scripts\` use it, such as the Python cross-checks of the package extractor and the boot image builder (`.\tools\setup.ps1 -InstallPython`).
@@ -199,7 +203,7 @@ git clone https://github.com/saulob/dragons-crown-pro-pc.git
 git clone https://github.com/saulob/dragons-crown-pro-pc.git
 cd dragons-crown-pro-pc
 sudo bash packaging/linux/ci-deps.sh   # Ubuntu 20.04: toolchain and pinned libraries (docs/LINUX.md)
-bash tools/build.sh               # fetches the pinned dependencies, builds build/cmake/linux/bin/dcp-loader
+bash tools/build.sh               # fetches the pinned dependencies, builds build/cmake/linux/bin/dragons_crown_pro
 bash tools/build.sh --test        # also builds and runs the focused tests
 bash tools/package-linux.sh       # dist/DragonsCrownProPC-v<version>-x86_64.AppImage and its .sha256 (--out-dir DIR: elsewhere)
 ```

@@ -10,6 +10,7 @@
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
 #include "startup_save_hook.h"
+#include "voice_hooks.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
@@ -124,10 +125,14 @@ static void describe_address(char *out, size_t size, uintptr_t address) {
 static int fatal_reported;
 static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) { Sleep(INFINITE); }
+    runtime_log_mark_crash();
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
     const CONTEXT *c=info->ContextRecord;
     char where[MAX_PATH+64];
     describe_address(where,sizeof(where),(uintptr_t)c->Rip);
+    char crash[768];
+    snprintf(crash,sizeof(crash),"FATAL exception 0x%08lx at %p (%s) thread %lu\n",
+             record->ExceptionCode,(void *)c->Rip,where,GetCurrentThreadId());
     if (record->ExceptionCode==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2)
         fprintf(stderr,"Fault: %s access to %p at %s (thread %lu)\n",
                 record->ExceptionInformation[0]==1 ? "write" : record->ExceptionInformation[0]==8 ? "execute" : "read",
@@ -156,6 +161,7 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
         rbp=frame[0];
     }
     runtime_log_flush();
+    runtime_log_write_direct(crash);
     TerminateProcess(GetCurrentProcess(),3);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -224,6 +230,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
         pthread_sigmask(SIG_UNBLOCK, &unblock, NULL);
         siglongjmp(*recover, 1);
     }
+    runtime_log_mark_crash();
     /* The process is terminating: dladdr/snprintf are acceptable here. */
     ucontext_t *uc = context;
     uintptr_t rip = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
@@ -283,6 +290,7 @@ static void dump_frames(ucontext_t *uc) {
 static void thread_dump(int sig, siginfo_t *info, void *context) { (void)sig; (void)info; dump_frames(context); }
 static void watchdog(int sig, siginfo_t *info, void *context) {
     (void)info;
+    runtime_log_mark_crash();
     const char head[]="STOP: watchdog timeout; thread stacks:\n";
     { ssize_t written_=write(2,head,sizeof(head)-1); (void)written_; }
     dump_frames(context);
@@ -394,24 +402,35 @@ int main(int argc, char **argv) {
     const DcpPathRequest request={boot,content_profile,app0,user_dir,logs_dir};
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0; user_dir=paths.user_dir;
+    static char settings_file[4200];
+    snprintf(settings_file,sizeof(settings_file),"%s/dcp.ini",user_dir);
     char log_path[4200];
+    static char log_folder[4200];
+    snprintf(log_folder,sizeof(log_folder),"%s",paths.logs_dir);
     if (runtime_log_start(paths.logs_dir,log_file,log_path,sizeof(log_path))) {
         time_t now=time(NULL);
         char stamp[32];
         strftime(stamp,sizeof(stamp),"%Y-%m-%dT%H:%M:%S",localtime(&now));
         printf("[run] %s\n[run] %s\n[run] log %s\n[run] prepared root %s\n",stamp,command_line(argc,argv),log_path,app0);
         atexit(runtime_log_flush);
+        runtime_log_set_detailed(dcp_detailed_logging(settings_file));
+        runtime_log_install_cleanup();
+        if (!dcp_logs_directory(paths.logs_dir,log_path,log_folder,sizeof(log_folder)))
+            snprintf(log_folder,sizeof(log_folder),"%s",paths.logs_dir);
     } else fprintf(stderr,"Cannot create the log %s\n",log_file ? log_file : paths.logs_dir);
-    static char settings_file[4200];
-    snprintf(settings_file,sizeof(settings_file),"%s/dcp.ini",user_dir);
+#ifdef _WIN32
+    AddVectoredExceptionHandler(1, vectored_fault);
+    SetUnhandledExceptionFilter(unhandled_fault);
+#endif
     if (!cpu_only && !check_imports) {
         DcpGraphicsCheck check_graphics=NULL;
 #ifndef _WIN32
         check_graphics=dcp_check_vulkan;
 #endif
-        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,paths.logs_dir,skip_launcher,force_launcher,check_graphics};
+        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics};
         DcpLauncherResult launched=dcp_launcher_run(&launcher);
-        if (launched==DCP_LAUNCHER_QUIT) exit(0);
+        runtime_log_set_detailed(dcp_detailed_logging(settings_file));
+        if (launched==DCP_LAUNCHER_QUIT) { runtime_log_mark_clean_exit(); exit(0); }
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
     }
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
@@ -419,12 +438,22 @@ int main(int argc, char **argv) {
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
     printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");
-    render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file)];
-    aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file)];
+    render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
+    aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
     runtime_dcp_set_neo_mode(render_target.pro_memory);
-    runtime_set_language(dcp_text_language(settings_file));
-    runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file));
+    runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
+    runtime_pad_set_settings(settings_file);
+    runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
+                         dcp_saved_movement_speed(settings_file));
+    voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
+    dcp_log_gameplay_settings(settings_file, paths.image_dir);
+    if (known_build && game_build.cheats) {
+        runtime_cheats_log_enabled();
+    } else {
+        printf("Cheats: enabled: none\n");
+    }
     if (content_profile) {
         FILE *profile=fopen(content_profile,"rb");
         unsigned char data[28];
@@ -449,8 +478,6 @@ int main(int argc, char **argv) {
     dcpgpu_register_kernel();
 #ifdef _WIN32
     SYSTEM_INFO system_info; GetSystemInfo(&system_info); page_size = system_info.dwPageSize;
-    AddVectoredExceptionHandler(1, vectored_fault);
-    SetUnhandledExceptionFilter(unhandled_fault);
     if (getenv("DCP_STRICT_HANDLES")) {
         PROCESS_MITIGATION_STRICT_HANDLE_CHECK_POLICY strict={0};
         strict.RaiseExceptionOnInvalidHandleReference=1;
@@ -557,7 +584,9 @@ int main(int argc, char **argv) {
         }
     }
     const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
-    const size_t hook_bytes = round_page(cheat_stub_bytes + startup_save_hook_stub_bytes());
+    const size_t save_stub_bytes = startup_save_hook_stub_bytes();
+    const size_t voice_stub_bytes = voice_hooks_stub_bytes();
+    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes);
     image = allocate(round_page(size) + hook_bytes); /* the hook stubs follow the image, within a jump of it */
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
@@ -625,6 +654,8 @@ int main(int argc, char **argv) {
     if (render_resolution!=&dcp_resolutions[0] || aspect_ratio!=&dcp_aspect_ratios[0]) {
         char error[320];
         if (!known_build) fail_running("render resolution and aspect ratio need a supported game build");
+        if (game_build.resolution_site_count==0)
+            fail_running("render resolution and aspect ratio are not available for this game build");
         if (!dcp_apply_resolution(image,size,game_build.resolution_sites,game_build.resolution_site_count,
                                   &render_target,error,sizeof(error))) {
             char message[400];
@@ -634,6 +665,8 @@ int main(int argc, char **argv) {
     }
     if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
+    if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
+        voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);

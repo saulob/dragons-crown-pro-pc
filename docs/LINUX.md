@@ -15,8 +15,8 @@ PipeWire headers SDL needs to build those backends (SDL loads both at run time; 
 
 | Command | Result |
 | --- | --- |
-| `tools/build.sh` | fetches `gpu/deps.txt`, builds `build/cmake/linux/bin/dcp-loader` |
-| `tools/build.sh --test` | also runs `dcp-launcher-tests`, `dcp-cheats-tests`, `dcp-runtime-tests` and `dcp-text-tests` |
+| `tools/build.sh` | fetches `gpu/deps.txt`, builds `build/cmake/linux/bin/dragons_crown_pro` |
+| `tools/build.sh --test` | also builds and runs the focused tests (`dcp-launcher-tests`, `dcp-cheats-tests`, `dcp-update-tests` and the others) |
 | `tools/build.sh --run` | starts the loader that was just built |
 | `tools/package-linux.sh` | `dist/DragonsCrownProPC-v<version>-x86_64.AppImage` and `.sha256`; debug symbols in `dist/<name>-symbols/` (`--out-dir DIR` writes all three to DIR instead) |
 | `tools\package-release.ps1` (Windows) | the Windows ZIP and this AppImage, in one run: the AppImage is built in the WSL2 distribution `DcpFocalBuild` (`tools/package-release-linux.sh` mirrors the sources into `~/.cache/dragons-crown-pro-pc-build`, runs `package-linux.sh` there and copies the result back) |
@@ -68,7 +68,7 @@ Linux offers every Windows feature. Where the platforms differ, this is the Linu
 | Hold Shift while starting | Shift is read from the X server in an X11 session; a Wayland desktop shows X11 programs no keys while another window has focus, so there, and in Gaming Mode, use `--launcher` (the Steam Deck's Launch Options) or the desktop entry's **Show launcher** action |
 | **Show settings file** selects the file in Explorer | opens the settings folder with `xdg-open` |
 | Launcher and game window positions are restored | restored on X11; a Wayland compositor decides where windows go, so the position may not be restored there |
-| Data next to `dcp-loader.exe` | next to the AppImage file (the AppImage's own mount is read-only); `$XDG_DATA_HOME/DragonsCrownProPC` when that folder is not writable |
+| Data next to `dragons_crown_pro.exe` | next to the AppImage file (the AppImage's own mount is read-only); `$XDG_DATA_HOME/DragonsCrownProPC` when that folder is not writable |
 | `tools\package-release.ps1` | builds the AppImage in WSL2 with `tools/package-release-linux.sh`, or run `tools/package-linux.sh` on Linux |
 
 Everything else (display mode, F11, window size, monitor and graphics card selection, VSync, render resolutions,
@@ -77,7 +77,7 @@ shader cache, per-run logs, audio, reinstalling without losing user data) is the
 
 ## AppImage
 
-`usr/bin/dcp-loader` with `DT_RPATH=$ORIGIN/../lib` finds the bundled libraries (SDL3, FreeType, libpng, OpenSSL's
+`usr/bin/dragons_crown_pro` with `DT_RPATH=$ORIGIN/../lib` finds the bundled libraries (SDL3, FreeType, libpng, OpenSSL's
 libcrypto, fmt, Zydis, xxHash and their dependencies); no `LD_LIBRARY_PATH` is set, so programs the launcher starts
 (`zenity`, `xdg-open`) are not affected. glibc, the Vulkan loader and drivers, X11/Wayland and the audio libraries come
 from the system. The Vulkan loader must support Vulkan 1.3: Ubuntu 20.04's own `libvulkan1` (1.2.131) does not, and
@@ -88,6 +88,29 @@ Without any `libvulkan.so.1` it cannot start at all.
 `libstdc++` and `libgcc_s` are carried in `usr/lib/compat` and used by `AppRun` only when the system's are older than
 the build needs. The package contains no game files, no drivers and no local paths (`package-linux.sh`
 checks the staged folder before it writes the AppImage).
+
+### FUSE and the AppImage runtime
+
+An AppImage mounts itself with FUSE before `AppRun` runs. The runtime still tries that mount first and nothing changes
+where it works. If the mount cannot be made (no usable `fusermount`, a restricted environment such as Steam's launcher),
+the runtime unpacks the AppImage into a private folder under `/tmp`, runs `AppRun` from there with the same arguments,
+returns its exit status and removes the folder afterwards. Termination signals are passed on to the game. A damaged
+AppImage is not mistaken for a FUSE failure and is reported as before. `APPIMAGE_EXTRACT_AND_RUN=1` (or
+`--appimage-extract-and-run`) still forces the unpacked mode without trying FUSE. `$APPIMAGE` keeps naming the original
+file, so `game`, `user` and `logs` stay next to it (or in the fallback folder above), never in the temporary folder.
+
+The released upstream runtime stops when FUSE fails, so the project builds its own:
+
+- `patches/appimage-runtime/baseline.env` pins the upstream [AppImage/type2-runtime](https://github.com/AppImage/type2-runtime)
+  commit (`dd6cebe`, tag `20251108`, the runtime used before), the Alpine root file system the build runs in, and the
+  SHA-256 of the reviewed result.
+- `patches/appimage-runtime/0001-extract-and-run-when-fuse-fails.patch` adds the fallback, gives each run its own
+  extraction folder and fixes the cleanup, which upstream's musl build skips (`nftw` ignores a descriptor limit of 0).
+- `tools/build-appimage-runtime.sh` fetches the pinned commit, applies the patch and runs upstream's chroot build; it
+  needs root or passwordless `sudo`, `git`, `tar`, `unshare` and network access, and rebuilds only when the pins, the patches or the
+  script changed. The result must match the pinned SHA-256, otherwise packaging stops. `--check FILE` verifies a runtime or
+  a finished AppImage. `tools/package-linux.sh` runs both; `DcpFocalBuild` runs as root, so `tools/package-release.ps1` needs
+  nothing extra; the CI container is started with `--privileged` for the chroot and mounts.
 
 ## Verification
 

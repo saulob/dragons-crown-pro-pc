@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Builds dcp-loader on Linux x86_64 incrementally (Clang, CMake + Ninja): the Linux counterpart of tools/build.ps1.
+# Builds dragons_crown_pro on Linux x86_64 incrementally (Clang, CMake + Ninja): the Linux counterpart of tools/build.ps1.
 # The one build configuration, RelWithDebInfo, is what is tested and what an AppImage contains.
 #
-#   tools/build.sh            build build/cmake/linux/bin/dcp-loader
+#   tools/build.sh            build build/cmake/linux/bin/dragons_crown_pro
 #   tools/build.sh --clean    delete build/cmake/linux first
 #   tools/build.sh --test     also build and run the focused tests
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
@@ -50,10 +50,30 @@ fi
 step "Toolchain $($cc --version | head -1), $config"
 
 step 'Video core dependencies (gpu/deps.txt)'
+patches_of() {
+    local LC_ALL=C dir=$1 file
+    PATCHES=()
+    for file in "$dir"/*.patch; do
+        [[ -f $file ]] || continue
+        PATCHES+=("$file")
+    done
+}
+patches_fingerprint() {
+    local file hash
+    (($#)) || return 0
+    for file in "$@"; do
+        hash=$(sha256sum < "$file" | cut -d' ' -f1)
+        printf '%s:%s\n' "$(basename "$file")" "${hash^^}"
+    done | sha256sum | cut -d' ' -f1 | tr 'a-f' 'A-F'
+}
 while read -r path url commit; do
     [[ -z ${path:-} || $path == \#* ]] && continue
     dir=$root/gpu/$path
-    [[ -f $dir/.dcp_commit && $(<"$dir/.dcp_commit") == "$commit" ]] && continue
+    patches_of "$root/gpu/patches/$(basename "$path")"
+    fingerprint=$(patches_fingerprint "${PATCHES[@]}")
+    expected=$commit
+    [[ -n $fingerprint ]] && expected=$commit$'\n'$fingerprint
+    [[ -f $dir/.dcp_commit && $(<"$dir/.dcp_commit") == "$expected" ]] && continue
     echo "Fetching $path (${commit:0:7})"
     rm -rf "$dir"
     mkdir -p "$dir"
@@ -61,10 +81,10 @@ while read -r path url commit; do
     git -C "$dir" fetch --quiet --depth 1 "$url" "$commit"
     git -C "$dir" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
     [[ -f $dir/.gitmodules ]] && git -C "$dir" submodule update --quiet --init --recursive --depth 1
-    for patch in "$root/gpu/patches/$(basename "$path")"/*.patch; do
-        [[ -f $patch ]] && git -C "$dir" apply "$patch"
+    for patch in "${PATCHES[@]}"; do
+        git -C "$dir" apply "$patch"
     done
-    echo "$commit" > "$dir/.dcp_commit"
+    printf '%s' "$expected" > "$dir/.dcp_commit"
 done < "$root/gpu/deps.txt"
 
 ((clean)) && { step 'Cleaning build/cmake/linux'; rm -rf "$build_dir"; }
@@ -74,10 +94,10 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
         -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx"
 fi
 step 'Building'
-targets=(dcp-loader)
-((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests)
+targets=(dragons_crown_pro)
+((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-update-tests)
 ninja -C "$build_dir" "${targets[@]}"
-loader=$build_dir/bin/dcp-loader
+loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
 
 if ((test)); then
@@ -87,18 +107,22 @@ if ((test)); then
     "$build_dir/bin/dcp-trophy-tests"
     step 'Running the cheat tests'
     "$build_dir/bin/dcp-cheats-tests"
+    step 'Running the Japanese NPC voice tests'
+    "$build_dir/bin/dcp-voice-tests"
     step 'Running the runtime tests (memory, fibers)'
     "$build_dir/bin/dcp-runtime-tests"
     step 'Running the text tests (text dialog, system font set)'
     "$build_dir/bin/dcp-text-tests"
     step 'Running the save-data tests (mounts, Japanese startup save hook)'
     "$build_dir/bin/dcp-savedata-tests"
-    step 'Running the cursor auto-hide tests'
+    step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the window fit tests'
     "$build_dir/bin/dcp-window-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'
     "$build_dir/bin/dcp-tiling-tests"
+    step 'Running the updater tests (versions, release JSON, SHA-256, ZIP safety, staging and rollback)'
+    "$build_dir/bin/dcp-update-tests"
 fi
 
 view=$root/game/prepared/v1.03 image=$root/build/image/v1.03

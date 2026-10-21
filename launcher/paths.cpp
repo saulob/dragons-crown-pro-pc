@@ -128,6 +128,28 @@ fs::path PortableRoot(const fs::path& exe_dir) {
 } // namespace
 } // namespace dcp
 
+extern "C" int dcp_logs_directory(const char* logs_dir, const char* log_file, char* out, size_t size) {
+    if (!out || size == 0) {
+        return 0;
+    }
+    fs::path directory = logs_dir && *logs_dir ? dcp::PathFromUtf8(logs_dir) : fs::path();
+    if (log_file && *log_file) {
+        std::error_code ec;
+        const fs::path file = dcp::PathFromUtf8(log_file);
+        const fs::path absolute = fs::absolute(file, ec);
+        directory = (ec ? file : absolute).parent_path();
+    }
+    if (directory.empty()) {
+        return 0;
+    }
+    const std::string text = dcp::Utf8(directory);
+    if (text.size() >= size) {
+        return 0;
+    }
+    std::memcpy(out, text.c_str(), text.size() + 1);
+    return 1;
+}
+
 extern "C" int dcp_resolve_paths(const DcpPathRequest* request, DcpPaths* out) {
     fs::path exe_dir;
     if (!dcp::ExecutableDirectory(exe_dir)) {

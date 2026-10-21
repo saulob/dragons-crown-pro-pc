@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "dcpgpu.h"
+#include "runtime_log.h"
 #include "trophies/trophy_runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,6 +146,8 @@ static ABI __attribute__((noreturn)) void load_exec(const char *path, char *cons
     if (path) runtime_file_translate(path,host,sizeof(host));
     printf("LoadExec: %s -> %s\n",path ? path : "(null)",host[0] ? host : "(no host file)");
     fflush(NULL);
+    runtime_log_mark_clean_exit();
+    runtime_log_finalize();
     _exit(LOAD_EXEC_EXIT); /* no destructors: GPU and guest threads are running */
 }
 

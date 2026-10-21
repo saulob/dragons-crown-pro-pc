@@ -104,7 +104,7 @@ set_source_files_properties(shim/dcp_overlay.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
 target_compile_options(dcpgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
 target_link_libraries(dcpgpu PUBLIC Vulkan::Headers Vulkan::Vulkan fmt::fmt Boost::headers magic_enum tsl::robin_map
-    VulkanMemoryAllocator PkgConfig::XXHASH SDL3::SDL3 PNG::PNG miniz Zydis::Zydis sirit)
+    VulkanMemoryAllocator PkgConfig::XXHASH SDL3::SDL3 PNG::PNG miniz Zydis::Zydis sirit dcp_keys)
 if (WIN32)
     # NOMINMAX/WIN32_LEAN_AND_MEAN keep <windows.h> out of the way of std::min/max and the Vulkan/SDL headers.
     target_compile_definitions(dcpgpu PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)

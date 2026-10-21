@@ -37,6 +37,8 @@ using namespace dcp::cheats;
 
 namespace {
 
+int FakeHumanSlot(int slot);
+
 int g_checks = 0;
 int g_failures = 0;
 
@@ -57,7 +59,7 @@ std::string ReadSource(const char* relative) {
 }
 
 void TestCheatList() {
-    CHECK(kCheatCount == 8);
+    CHECK(kCheatCount == 11);
     CHECK(std::size(kCheats) == kCheatCount);
     CHECK(!kCheatDefault);
     struct Expected {
@@ -67,13 +69,19 @@ void TestCheatList() {
     };
     const Expected expected[] = {
         {Cheat::InfiniteHealth, "Infinite Health", "Prevent normal damage from reducing player health"},
+        {Cheat::InfiniteAllyHealth, "Infinite Ally Health", "Prevent damage from reducing AI allies' health"},
         {Cheat::InfiniteMana, "Infinite Mana", "Prevent mana from decreasing when casting spells"},
+        {Cheat::InfiniteAllyMana, "Infinite Ally Mana",
+         "Prevent AI allies' mana from decreasing when casting spells"},
         {Cheat::InfiniteLives, "Infinite Lives", "Prevent remaining lives from decreasing"},
         {Cheat::InfiniteDurability, "Infinite Durability", "Prevent equipped gear from losing durability"},
+        {Cheat::InfiniteAllyDurability, "Infinite Ally Durability",
+         "Prevent AI allies' equipped gear from losing durability"},
         {Cheat::InfiniteArrows, "Infinite Arrows", "Prevent the Elf's arrows from decreasing"},
         {Cheat::InfiniteSkillPoints, "Infinite Skill Points", "Prevent skill points from decreasing when spent"},
+        {Cheat::InfiniteSkillUses, "Infinite Skill Uses",
+         "Prevent equipped skill uses from decreasing when used"},
         {Cheat::InfiniteGold, "Infinite Gold", "Prevent gold from decreasing when spent"},
-        {Cheat::MovementSpeed, "Movement Speed 2x", "Move at twice the normal speed"},
     };
     for (size_t i = 0; i < kCheatCount; ++i) { // the final order, in the launcher page and in the F10 menu
         CHECK(kCheats[i].cheat == expected[i].cheat);
@@ -92,8 +100,20 @@ void TestCheatList() {
     CHECK(std::string(kLauncherHelp) ==
           "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant "
           "for offline and local play.");
-    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 2 && Bit(Cheat::MovementSpeed) == 128);
-    CHECK(std::string(kMovementSpeedKey) == "cheat_movement_speed_2x");
+    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 4 && Bit(Cheat::InfiniteGold) == 1024);
+    CHECK(std::string(kMovementSpeedKey) == "cheat_movement_speed");
+    CHECK(std::string(kLegacyMovementSpeedKey) == "cheat_movement_speed_2x");
+    CHECK(std::string(kInfiniteAllyHealthKey) == "cheat_infinite_ally_health");
+    CHECK(std::string(kInfiniteAllyManaKey) == "cheat_infinite_ally_mana");
+    CHECK(std::string(kInfiniteSkillUsesKey) == "cheat_infinite_skill_uses");
+    CHECK(std::string(kInfiniteAllyDurabilityKey) == "cheat_infinite_ally_durability");
+    CHECK(EnabledCheatsText(0) == "none");
+    CHECK(EnabledCheatsText(Bit(Cheat::InfiniteHealth)) == "Infinite Health");
+    CHECK(EnabledCheatsText(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteGold)) == "Infinite Health, Infinite Gold");
+    CHECK(EnabledCheatsText(0xffffffffu) ==
+          "Infinite Health, Infinite Ally Health, Infinite Mana, Infinite Ally Mana, Infinite Lives, Infinite "
+          "Durability, Infinite Ally Durability, Infinite Arrows, Infinite Skill Points, Infinite Skill Uses, "
+          "Infinite Gold");
 }
 
 void TestSessionOverride() {
@@ -180,14 +200,16 @@ void TestRefillTransitions() {
 }
 
 void TestMenuModel() {
-    CHECK(kMenuRows.size() == 10);
-    CHECK(kMenuRows.size() == kCheatCount + kActionCount + 1);
+    CHECK(kMenuRows.size() == 16);
+    CHECK(kMenuRows.size() == kCheatCount + kActionCount + 2);
     CHECK(std::string(kMenuTitle) == "CHEATS");
     CHECK(std::string(kMenuCloseHint) == "F10 Close");
     CHECK(std::string(kMenuNote) == "Not saved to the launcher");
-    const char* const order[] = {"Infinite Health",      "Infinite Mana",  "Infinite Lives",
-                                 "Infinite Durability",  "Infinite Arrows", "Infinite Skill Points",
-                                 "Infinite Gold",        "Add 1,000 Gold",  "Movement Speed 2x",
+    const char* const order[] = {"Infinite Health",        "Infinite Ally Health", "Infinite Mana",
+                                 "Infinite Ally Mana",     "Infinite Lives",       "Infinite Durability",
+                                 "Infinite Ally Durability", "Infinite Arrows",    "Infinite Skill Points",
+                                 "Add 100 Skill Points",   "Infinite Skill Uses",  "Infinite Gold",
+                                 "Add 1,000 Gold",         "Level Up (+1 Level)",  "Movement Speed",
                                  "Experience Multiplier"};
     for (size_t i = 0; i < kMenuRows.size(); ++i) {
         CHECK(std::string(kMenuRows[i].label) == order[i]);
@@ -202,15 +224,26 @@ void TestMenuModel() {
         }
     }
     CHECK(next_cheat == kCheatCount);
-    CHECK(kMenuRows[6].kind == RowKind::Toggle && kMenuRows[6].cheat == Cheat::InfiniteGold);
-    CHECK(kMenuRows[7].kind == RowKind::Action && kMenuRows[7].action == Action::AddGold);
-    CHECK(std::string(kMenuRows[7].verb) == "Add");
-    CHECK(kMenuRows[8].kind == RowKind::Toggle && kMenuRows[8].cheat == Cheat::MovementSpeed);
-    CHECK(kMenuRows[9].kind == RowKind::Experience && std::string(kMenuRows[9].label) == "Experience Multiplier");
-    CHECK(std::string(kActions[0].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
+    CHECK(kMenuRows[6].kind == RowKind::Toggle && kMenuRows[6].cheat == Cheat::InfiniteAllyDurability);
+    CHECK(kMenuRows[8].kind == RowKind::Toggle && kMenuRows[8].cheat == Cheat::InfiniteSkillPoints);
+    CHECK(kMenuRows[9].kind == RowKind::Action && kMenuRows[9].action == Action::AddSkillPoints);
+    CHECK(std::string(kMenuRows[9].verb) == "Add");
+    CHECK(kMenuRows[10].kind == RowKind::Toggle && kMenuRows[10].cheat == Cheat::InfiniteSkillUses);
+    CHECK(kMenuRows[11].kind == RowKind::Toggle && kMenuRows[11].cheat == Cheat::InfiniteGold);
+    CHECK(kMenuRows[12].kind == RowKind::Action && kMenuRows[12].action == Action::AddGold);
+    CHECK(std::string(kMenuRows[12].verb) == "Add");
+    CHECK(kMenuRows[13].kind == RowKind::Action && kMenuRows[13].action == Action::AddLevel);
+    CHECK(std::string(kMenuRows[13].verb) == "Add");
+    CHECK(kMenuRows[14].kind == RowKind::MovementSpeed && std::string(kMenuRows[14].label) == "Movement Speed");
+    CHECK(kMenuRows[15].kind == RowKind::Experience && std::string(kMenuRows[15].label) == "Experience Multiplier");
+    CHECK(std::string(kActions[0].label) == "Add 100 Skill Points" && kSkillPointsPerAdd == 100);
+    CHECK(std::string(kActions[1].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
+    CHECK(std::string(kActions[2].label) == "Level Up (+1 Level)");
     for (const CheatInfo& info : kCheats) { // an action is no cheat: nothing saved, nothing in the launcher's list
         CHECK(std::string(info.key).find("add_gold") == std::string::npos);
+        CHECK(std::string(info.key).find("add_skill_points") == std::string::npos);
         CHECK(std::string(info.label) != "Add 1,000 Gold");
+        CHECK(std::string(info.label) != "Add 100 Skill Points");
     }
 
     // The menu opens only with F10 and closes with F10, Escape or B; the game's input waits for the release.
@@ -229,8 +262,9 @@ void TestMenuModel() {
     CHECK(!stuck.Step(true, 10.0));
     CHECK(stuck.Step(true, 11.0)); // never released: given up after a second
 
-    // The panel follows the display's content scale a step down (0.75x), never under 1.25x, and takes at most 45% of
-    // the screen's width.
+    // The panel follows the display's content scale a step down (0.75x), never under 1.25x, and shrinks to 45% of the
+    // screen's width but not below 1x.
+    CHECK(kMenuWidthEm >= 21.0f && kMenuWidthEm <= 22.0f);
     CHECK(MenuScale(1.0f, 1920, 18) == kMenuMinScale);
     CHECK(MenuScale(0.5f, 1920, 18) == kMenuMinScale);
     CHECK(MenuScale(1.5f, 1920, 18) == kMenuMinScale);
@@ -238,8 +272,16 @@ void TestMenuModel() {
     CHECK(MenuScale(2.25f, 1280, 13.5f) == 2.25f * kMenuScaleStep);
     CHECK(MenuScale(3.0f, 3840, 18) == 2.25f);
     CHECK(MenuScale(5.0f, 3840, 18) == kMenuMaxScale * kMenuScaleStep);
-    CHECK(MenuScale(2.25f, 800, 18) < 2.25f * kMenuScaleStep && MenuScale(2.25f, 800, 18) > 1.0f);
+    CHECK(MenuScale(2.25f, 800, 18) == 1.0f); // narrower than the menu's minimum: the 1.0 floor still fits
+    CHECK(MenuScale(2.25f, 1000, 18) < 2.25f * kMenuScaleStep && MenuScale(2.25f, 1000, 18) > 1.0f);
     CHECK(MenuScale(2.0f, 200, 18) == 1.0f);
+    CHECK(MenuBodyHeight(16, 20.0f, 4.0f) == 16.0f * 20.0f + 15.0f * 4.0f);
+    CHECK(MenuBodyHeight(1, 20.0f, 4.0f) == 20.0f);
+    CHECK(MenuBodyHeight(0, 20.0f, 4.0f) == 0.0f);
+    CHECK(MenuNeedsScrollbar(100.0f, 50.0f));
+    CHECK(!MenuNeedsScrollbar(50.0f, 50.0f));
+    CHECK(!MenuNeedsScrollbar(51.0f, 50.0f));
+    CHECK(MenuNeedsScrollbar(51.5f, 50.0f));
     for (const float display : {2.0f, 2.5f, 3.0f}) { // smaller than the first oversized menu, larger than the tiny one
         CHECK(MenuScale(display, 3840, 18) < display && MenuScale(display, 3840, 18) > 1.0f);
     }
@@ -252,9 +294,17 @@ void TestMenuModel() {
 
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
     CHECK(overlay.find("MenuScale(") != std::string::npos);
+    CHECK(overlay.find("MenuBodyHeight(") != std::string::npos);
+    CHECK(overlay.find("MenuNeedsScrollbar(") != std::string::npos);
+    CHECK(overlay.find("needs_scrollbar ? ImGuiWindowFlags_AlwaysVerticalScrollbar : ImGuiWindowFlags_NoScrollbar") !=
+          std::string::npos);
+    const size_t child = overlay.find("BeginChild(\"##cheat_rows\"");
+    CHECK(child != std::string::npos); // the rows scroll, header and footer stay
+    CHECK(overlay.find("SetWindowFontScale(scale)", child) != std::string::npos); // the rows keep the menu scale
+    CHECK(overlay.find("NavFlattened") == std::string::npos);                    // plain child: no beta nav flattening
     CHECK(overlay.find("FpsCounterBox(OverlayText()") != std::string::npos); // below the frame counter, not over it
     CHECK(ReadSource("gpu/shim/window.cpp").find("SetDisplayScale(SDL_GetWindowDisplayScale") != std::string::npos);
-    CHECK(overlay.find("SDLK_F10") != std::string::npos);
+    CHECK(overlay.find("Get().menu_key") != std::string::npos);
     CHECK(overlay.find("ImGuiKey_GamepadFaceRight") != std::string::npos); // B closes
     CHECK(overlay.find("ImGuiKey_GamepadLStickUp") != std::string::npos);  // the left stick moves
     CHECK(overlay.find("kAccentRed") != std::string::npos); // the launcher's accent, not a colour of its own
@@ -273,11 +323,22 @@ struct FakeGame {
         Store<uint64_t>(frame + 0x100, reinterpret_cast<uint64_t>(unit)); // [rbp-0x200] with rbp = frame + 0x300
         Store<uint64_t>(owner + kOwnerUnitOffset, reinterpret_cast<uint64_t>(unit));
         Store<uint32_t>(owner + kOwnerClassOffset, kElfClass);
+        Store<uint8_t>(unit + kUnitClassOffset, kElfClass);
     }
-    void SetClass(uint32_t class_index) { Store<uint32_t>(owner + kOwnerClassOffset, class_index); }
+    void SetClass(uint32_t class_index) {
+        Store<uint32_t>(owner + kOwnerClassOffset, class_index);
+        Store<uint8_t>(unit + kUnitClassOffset, static_cast<uint8_t>(class_index));
+    }
+
     template <typename T>
     static void Store(uint8_t* at, T value) {
         std::memcpy(at, &value, sizeof(value));
+    }
+    template <typename T>
+    static T Load(const uint8_t* at) {
+        T value;
+        std::memcpy(&value, at, sizeof(value));
+        return value;
     }
     uint64_t Unit() const { return reinterpret_cast<uint64_t>(unit); }
     uint64_t Owner() const { return reinterpret_cast<uint64_t>(owner); }
@@ -310,6 +371,16 @@ void TestRules() {
     CHECK(ClassifyUnit(TestMemory{}, enemy.Unit()) == UnitKind::Other); // slot 0 by default, but not a player
     CHECK(ClassifyUnit(TestMemory{}, npc.Unit()) == UnitKind::Other);
     CHECK(ClassifyUnit(TestMemory{}, 0) == UnitKind::Other);
+
+    // AI allies are player-slot characters the game controls; humans, enemies and invalid actors are not.
+    CHECK(IsAiAlly(0x8020009, 1, 5));  // the verified AI ally
+    CHECK(IsAiAlly(0x8028009, 1, 5));  // the transient category form
+    CHECK(IsAiAlly(0x8020009, 3, 0));  // another valid party slot
+    CHECK(!IsAiAlly(0x8020009, 0, 5)); // Player 1's slot is not an ally target
+    CHECK(!IsAiAlly(0x8020009, 1, 255)); // class 255 actors are not allies
+    CHECK(!IsAiAlly(0x8020009, 4, 5)); // outside the party slots
+    CHECK(!IsAiAlly(0x8020008, 1, 5)); // non-player category
+    CHECK(!IsAiAlly(0x80a0028, 1, 5)); // another non-player category
     FakeGame orphan(true, 0);
     FakeGame::Store<uint64_t>(orphan.unit + kUnitOwnerOffset, 0);
     CHECK(ClassifyUnit(TestMemory{}, orphan.Unit()) == UnitKind::Other);
@@ -417,6 +488,102 @@ void TestHookHandlers() {
     drain.rsi = static_cast<uint32_t>(-1);
     ManaDrainHook(&drain);
     CHECK(drain.skip == 0);
+    SetCheats(false, false);
+
+    // Infinite Ally Health: only AI-controlled player-slot allies, never Player 1, humans, enemies or healing.
+    FakeGame ally(true, 1);
+    ally.SetClass(kSorceressClass);
+    FakeGame human2(true, 1);
+    human2.SetClass(kSorceressClass);
+    GuestRegs hit = ally.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 50);
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth), 1);
+    hit = ally.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 0);
+    hit = player1.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 50);
+    hit = enemy.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 50);
+    hit = ally.DamageRegs(-30);
+    HealthDamageHook(&hit);
+    CHECK(static_cast<int32_t>(hit.rcx) == -30);
+    runtime_cheats_set_slot_human(FakeHumanSlot); // a live local controller takes the slot away from AI
+    hit = ally.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 50);
+    hit = human2.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 50);
+    runtime_cheats_set_slot_human(nullptr);
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteAllyHealth), 1);
+    hit = player1.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 0);
+    hit = ally.DamageRegs(50);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 0);
+
+    // Infinite Ally Mana uses the same cast and drain hooks, with the ally filter.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyMana), 1);
+    GuestRegs ally_cast{};
+    ally_cast.rdi = ally.Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 0);
+    ally_cast = {};
+    ally_cast.rdi = player1.Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 1);
+    ally_cast = {};
+    ally_cast.rdi = enemy.Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 1);
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    ally_cast = {};
+    ally_cast.rdi = human2.Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 1);
+    ally_cast = {};
+    ally_cast.rdi = ally.Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 1);
+    runtime_cheats_set_slot_human(nullptr);
+    GuestRegs ally_drain{};
+    ally_drain.rdi = ally.Unit();
+    ally_drain.rsi = static_cast<uint32_t>(-1);
+    ManaDrainHook(&ally_drain);
+    CHECK(ally_drain.skip == 1);
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    GuestRegs human_drain{};
+    human_drain.rdi = human2.Unit();
+    human_drain.rsi = static_cast<uint32_t>(-1);
+    ManaDrainHook(&human_drain);
+    CHECK(human_drain.skip == 0);
+    runtime_cheats_set_slot_human(nullptr);
+    GuestRegs enemy_drain{};
+    enemy_drain.rdi = enemy.Unit();
+    enemy_drain.rsi = static_cast<uint32_t>(-1);
+    ManaDrainHook(&enemy_drain);
+    CHECK(enemy_drain.skip == 0);
+    runtime_cheats_start(Bit(Cheat::InfiniteMana) | Bit(Cheat::InfiniteAllyMana), 1);
+    ally_cast = {};
+    ally_cast.rdi = player1.Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 0);
+    ally_cast = {};
+    ally_cast.rdi = ally.Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 0);
     SetCheats(false, false);
 }
 
@@ -533,11 +700,27 @@ const GuestHook* FindHook(const char* name) {
 }
 
 void TestMovement() {
-    CHECK(ScaledWalkMultiplier(true, UnitKind::PlayerOne, 1.0f) == 2.0f);
-    CHECK(ScaledWalkMultiplier(true, UnitKind::PlayerOne, 1.5f) == 3.0f); // on top of a MOVE_UP buff
-    CHECK(ScaledWalkMultiplier(false, UnitKind::PlayerOne, 1.0f) == 1.0f);
-    CHECK(ScaledWalkMultiplier(true, UnitKind::OtherPlayer, 1.0f) == 1.0f);
-    CHECK(ScaledWalkMultiplier(true, UnitKind::Other, 1.0f) == 1.0f);
+    CHECK(kMovementSpeedOff == 1);
+    CHECK(MovementSpeedFromSaved("1") == 1 && MovementSpeedFromSaved("2") == 2);
+    CHECK(MovementSpeedFromSaved("4") == 4);
+    for (const char* saved : {"", "0", "3", "Off", "2x", "-5"}) {
+        CHECK(MovementSpeedFromSaved(saved) == 1);
+    }
+    CHECK(ListedMovementSpeed(4) == 4 && ListedMovementSpeed(3) == 1);
+    CHECK(MovementSpeedFromLegacy("0") == 1 && MovementSpeedFromLegacy("false") == 1);
+    CHECK(MovementSpeedFromLegacy("1") == 2 && MovementSpeedFromLegacy("true") == 2);
+    CHECK(MovementSpeedFromLegacy("on") == 2 && MovementSpeedFromLegacy("") == 1);
+    CHECK(NextMovementSpeed(1) == 2 && NextMovementSpeed(2) == 4 && NextMovementSpeed(4) == 1);
+    CHECK(std::string(MovementSpeedLabel(1)) == "Off" && std::string(MovementSpeedLabel(2)) == "2x" &&
+          std::string(MovementSpeedLabel(4)) == "4x");
+
+    CHECK(ScaledWalkMultiplier(1, UnitKind::PlayerOne, 1.0f) == 1.0f);
+    CHECK(ScaledWalkMultiplier(2, UnitKind::PlayerOne, 1.0f) == 2.0f);
+    CHECK(ScaledWalkMultiplier(4, UnitKind::PlayerOne, 1.0f) == 4.0f);
+    CHECK(ScaledWalkMultiplier(2, UnitKind::PlayerOne, 1.5f) == 3.0f); // on top of a MOVE_UP buff
+    CHECK(ScaledWalkMultiplier(3, UnitKind::PlayerOne, 1.0f) == 1.0f); // not a listed value: Off
+    CHECK(ScaledWalkMultiplier(2, UnitKind::OtherPlayer, 1.0f) == 1.0f);
+    CHECK(ScaledWalkMultiplier(2, UnitKind::Other, 1.0f) == 1.0f);
 
     FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
     const auto walk = [](const FakeGame& game, float multiplier) {
@@ -554,16 +737,34 @@ void TestMovement() {
         std::memcpy(&after, frame + 0x1c0 - 0x48, 4);
         return after;
     };
-    SetCheats(false, false);
+    runtime_cheats_start(0, 1, 1);
     CHECK(walk(player1, 1.0f) == 1.0f); // Off: the game's own movement
-    runtime_cheats_start(Bit(Cheat::MovementSpeed), 1);
+    runtime_cheats_start(0, 1, 2);
     CHECK(walk(player1, 1.0f) == 2.0f);
     CHECK(walk(player1, 1.5f) == 3.0f);
+    CHECK(walk(player1, 1.0f) == 2.0f); // each frame starts from the game's own multiplier: scaled once
     CHECK(walk(player2, 1.0f) == 1.0f); // Players 2 to 4
     CHECK(walk(enemy, 1.0f) == 1.0f);   // enemies, NPC allies and everything that is not a human player
-    runtime_cheat_toggle(int(Cheat::MovementSpeed)); // Off from the menu: the normal speed is back at once
+
+    runtime_cheats_start(0, 1, 4);
+    CHECK(walk(player1, 1.0f) == 4.0f);
+    CHECK(walk(player1, 1.5f) == 6.0f);
+    CHECK(runtime_cheat_movement_cycle() == 1); // 4x -> Off
     CHECK(walk(player1, 1.0f) == 1.0f);
-    runtime_cheats_start(0, 1);
+    CHECK(runtime_cheat_movement_cycle() == 2); // Off -> 2x
+    CHECK(runtime_cheat_movement_cycle() == 4); // 2x -> 4x
+    CHECK(runtime_cheat_movement_cycle() == 1); // 4x -> Off
+    CHECK(runtime_cheat_movement_speed() == 1);
+
+    // The menu changes only the session; the launcher's saved value starts the next session.
+    runtime_cheats_start(0, 1, 2);
+    CHECK(runtime_cheat_movement_cycle() == 4);
+    runtime_cheats_start(0, 1, 2);
+    CHECK(runtime_cheat_movement_speed() == 2);
+    runtime_cheats_start(0, 1, 1);
+
+    CHECK(ReadSource("gpu/shim/dcp_overlay.cpp").find("runtime_cheat_movement_cycle()") != std::string::npos);
+    CHECK(ReadSource("launcher/launcher.cpp").find("kMovementSpeedChoices") != std::string::npos);
 }
 
 void TestLives() {
@@ -813,6 +1014,355 @@ void TestAddGold() {
     CHECK(launcher.find("add_gold") == std::string::npos && launcher.find("kActions") == std::string::npos);
 }
 
+alignas(16) uint8_t g_skill_record[0x40] = {};
+uint64_t g_skill_record_address = 0;
+
+uint64_t GUEST_HOOK_ABI FakeSaveRecord(uint64_t) {
+    return g_skill_record_address;
+}
+
+int FakeHumanSlot(int slot) {
+    return slot == 1;
+}
+
+int16_t SkillPoints() {
+    int16_t value;
+    std::memcpy(&value, g_skill_record + kSkillPointsOffset, sizeof(value));
+    return value;
+}
+
+void SetSkillPoints(int16_t value) {
+    std::memcpy(g_skill_record + kSkillPointsOffset, &value, sizeof(value));
+}
+
+void TestAddSkillPoints() {
+    CHECK(kSkillPointsPerAdd == 100 && kSkillPointsMaximum == INT16_MAX);
+    CHECK(SkillPointsIncrease(0) == 100 && SkillPointsAfterAdd(0) == 100);
+    CHECK(SkillPointsIncrease(1) == 100 && SkillPointsAfterAdd(1) == 101);
+    CHECK(SkillPointsIncrease(20) == 100 && SkillPointsAfterAdd(20) == 120);
+    CHECK(SkillPointsIncrease(100) == 100 && SkillPointsAfterAdd(100) == 200);
+    CHECK(SkillPointsIncrease(1000) == 100 && SkillPointsAfterAdd(1000) == 1100);
+    CHECK(SkillPointsIncrease(kSkillPointsMaximum - 50) == 50);
+    CHECK(SkillPointsAfterAdd(kSkillPointsMaximum - 50) == kSkillPointsMaximum);
+    CHECK(SkillPointsIncrease(kSkillPointsMaximum) == 0);
+    CHECK(SkillPointsAfterAdd(kSkillPointsMaximum) == kSkillPointsMaximum);
+    CHECK(SkillPointsIncrease(INT32_MAX) == 0 && SkillPointsAfterAdd(INT32_MAX) == kSkillPointsMaximum);
+    CHECK(SkillPointsIncrease(-5) == 100 && SkillPointsAfterAdd(-5) == 100);
+
+    ActionRequests requests;
+    requests.Request(Action::AddSkillPoints);
+    CHECK(requests.Pending(Action::AddSkillPoints));
+    CHECK(requests.Take(Action::AddSkillPoints) && !requests.Take(Action::AddSkillPoints));
+
+    GuestFunctions functions;
+    functions.gold_context = FakeGoldContext;
+    functions.get_gold = FakeGetGold;
+    functions.add_gold = FakeAddGold;
+    functions.save_record = FakeSaveRecord;
+    SetGuestFunctions(functions);
+    g_skill_record_address = reinterpret_cast<uint64_t>(g_skill_record);
+
+    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    runtime_cheats_start(0, 1, 1);
+    const int action = int(Action::AddSkillPoints);
+    const auto tick = [](const FakeGame& game) {
+        GuestRegs regs = TickRegs(game);
+        PlayerTickHook(&regs);
+    };
+    const auto press = [&](int16_t before) {
+        SetSkillPoints(before);
+        runtime_cheat_action(action);
+        tick(player1);
+        return SkillPoints();
+    };
+
+    CHECK(press(0) == 100);
+    CHECK(press(1) == 101);
+    CHECK(press(20) == 120);
+    CHECK(press(100) == 200);
+    CHECK(press(1000) == 1100);
+    CHECK(press(kSkillPointsMaximum - 50) == kSkillPointsMaximum);
+    CHECK(press(kSkillPointsMaximum) == kSkillPointsMaximum);
+    CHECK(press(INT16_MAX) == kSkillPointsMaximum);
+
+    // One press is one addition however many ticks follow it.
+    SetSkillPoints(100);
+    runtime_cheat_action(action);
+    for (int i = 0; i < 120; ++i) {
+        tick(player1);
+    }
+    CHECK(SkillPoints() == 200);
+    CHECK(runtime_cheat_action_pending(action) == 0);
+
+    // Two presses, two additions, one per tick.
+    SetSkillPoints(0);
+    runtime_cheat_action(action);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(SkillPoints() == 100);
+    tick(player1);
+    CHECK(SkillPoints() == 200);
+    tick(player1);
+    CHECK(SkillPoints() == 200);
+
+    // Only Player 1's unit runs it; the request waits for it.
+    SetSkillPoints(20);
+    runtime_cheat_action(action);
+    tick(player2);
+    tick(enemy);
+    CHECK(SkillPoints() == 20 && runtime_cheat_action_pending(action) == 1);
+    tick(player1);
+    CHECK(SkillPoints() == 120 && runtime_cheat_action_pending(action) == 0);
+
+    // No save record or no function: nothing runs, the request waits.
+    SetSkillPoints(20);
+    g_skill_record_address = 0;
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(SkillPoints() == 20 && runtime_cheat_action_pending(action) == 1);
+    g_skill_record_address = reinterpret_cast<uint64_t>(g_skill_record);
+    tick(player1);
+    CHECK(SkillPoints() == 120);
+    SetGuestFunctions(GuestFunctions{});
+    SetSkillPoints(20);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(SkillPoints() == 20 && runtime_cheat_action_pending(action) == 1);
+    SetGuestFunctions(functions);
+    runtime_cheat_clear_actions();
+
+    // The unit's mirror follows the record, and the write is a signed int16.
+    SetSkillPoints(1000);
+    FakeGame::Store<int16_t>(player1.unit + kSkillPointsMirrorOffset, 0);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(FakeGame::Load<int16_t>(player1.unit + kSkillPointsMirrorOffset) == 1100);
+
+    // Add 100 Skill Points leaves gold alone; Add 1,000 Gold leaves skill points alone.
+    g_gold = {};
+    g_gold.gold = 5000;
+    SetSkillPoints(100);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(g_gold.calls == 0 && g_gold.gold == 5000 && SkillPoints() == 200);
+    SetSkillPoints(200);
+    runtime_cheat_action(int(Action::AddGold));
+    tick(player1);
+    CHECK(g_gold.gold == 6000 && SkillPoints() == 200);
+
+    // Infinite Skill Points keeps its own behavior and does not interfere with the one-shot action.
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints), 1, 4);
+    SetSkillPoints(20);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(SkillPoints() == 120);
+    CHECK(ProtectedSkillPoints(true, 0, 120, 20) == 120); // the purchase still keeps the points
+
+    // Movement Speed and Experience Multiplier are unaffected by the action.
+    CHECK(runtime_cheat_movement_speed() == 4 && runtime_cheat_experience_multiplier() == 1);
+    runtime_cheats_start(0, 5, 1);
+    SetSkillPoints(0);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(SkillPoints() == 100 && runtime_cheat_movement_speed() == 1 &&
+          runtime_cheat_experience_multiplier() == 5);
+
+    for (const CheatInfo& info : kCheats) {
+        CHECK(runtime_cheat_enabled(int(info.cheat)) == 0);
+    }
+    runtime_cheats_start(0, 1, 1);
+    g_skill_record_address = 0;
+    SetGuestFunctions(GuestFunctions{});
+    SetSkillPoints(0);
+    g_gold = {};
+}
+
+alignas(16) uint8_t g_level_record[0x40] = {};
+alignas(16) uint8_t g_level_entries[256][0x2c] = {};
+uint64_t g_level_record_address = 0;
+int32_t g_max_level = 98;
+int g_stats_calls = 0;
+
+uint64_t GUEST_HOOK_ABI FakeLevelRecord(uint64_t) {
+    return g_level_record_address;
+}
+
+int32_t GUEST_HOOK_ABI FakeRecordMode(uint64_t) {
+    return 3;
+}
+
+uint8_t GUEST_HOOK_ABI FakeRecordStage(uint64_t) {
+    return 0;
+}
+
+int32_t GUEST_HOOK_ABI FakeMaxLevel(int32_t, int32_t, int32_t) {
+    return g_max_level;
+}
+
+uint64_t GUEST_HOOK_ABI FakeLevelEntry(int32_t, int32_t level) {
+    return level >= 0 && level < 256 ? reinterpret_cast<uint64_t>(g_level_entries[level]) : 0;
+}
+
+int32_t GUEST_HOOK_ABI FakeLevelPattern(uint64_t) {
+    return 0;
+}
+
+void GUEST_HOOK_ABI FakeSetLevel(uint64_t record, uint32_t level) {
+    FakeGame::Store<uint8_t>(reinterpret_cast<uint8_t*>(record) + kRecordLevelOffset, static_cast<uint8_t>(level));
+}
+
+void GUEST_HOOK_ABI FakeWriteStats(uint64_t, int32_t, int32_t, int32_t, int32_t) {
+    ++g_stats_calls;
+}
+
+void TestAddLevel() {
+    for (int32_t level = 0; level < 256; ++level) {
+        FakeGame::Store<int32_t>(g_level_entries[level] + kLevelXpOffset, level == 0 ? 0 : 100);
+    }
+    GuestFunctions functions;
+    functions.save_record = FakeLevelRecord;
+    functions.record_mode = FakeRecordMode;
+    functions.record_stage = FakeRecordStage;
+    functions.max_level = FakeMaxLevel;
+    functions.level_entry = FakeLevelEntry;
+    functions.level_pattern = FakeLevelPattern;
+    functions.set_level = FakeSetLevel;
+    functions.write_stats = FakeWriteStats;
+    SetGuestFunctions(functions);
+    g_level_record_address = reinterpret_cast<uint64_t>(g_level_record);
+
+    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    runtime_cheats_start(0, 1, 1);
+    const int action = int(Action::AddLevel);
+    const auto tick = [](const FakeGame& game) {
+        GuestRegs regs = TickRegs(game);
+        PlayerTickHook(&regs);
+    };
+    const auto reset = [&](int level, int16_t skill_points, int32_t progress) {
+        std::memset(g_level_record, 0, sizeof(g_level_record));
+        FakeGame::Store<uint8_t>(g_level_record + kRecordLevelOffset, static_cast<uint8_t>(level));
+        FakeGame::Store<uint8_t>(g_level_record + kRecordClassOffset, 0);
+        FakeGame::Store<int16_t>(g_level_record + kSkillPointsOffset, skill_points);
+        FakeGame::Store<int32_t>(g_level_record + kRecordXpProgressOffset, progress);
+        FakeGame::Store<uint8_t>(player1.unit + kUnitLevelOffset, static_cast<uint8_t>(level));
+        g_stats_calls = 0;
+    };
+
+    reset(12, 5, 0);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 13);
+    CHECK(FakeGame::Load<int16_t>(g_level_record + kSkillPointsOffset) == 6);
+    CHECK(FakeGame::Load<uint8_t>(player1.unit + kUnitLevelOffset) == 13);
+    CHECK(FakeGame::Load<int16_t>(player1.unit + kSkillPointsMirrorOffset) == 6);
+    CHECK(FakeGame::Load<int32_t>(g_level_record + kRecordXpProgressOffset) == 0);
+    CHECK(FakeGame::Load<int32_t>(g_level_record + kRecordXpPoolOffset) == 0);
+    CHECK(FakeGame::Load<int32_t>(player1.unit + kUnitXpOffset) == 0);
+    CHECK(FakeGame::Load<int32_t>(player1.unit + kUnitXpProgressOffset) == 0);
+    CHECK(g_stats_calls == 2);
+    CHECK(runtime_cheat_action_pending(action) == 0);
+
+    // One request is one level however many ticks follow it; two requests add two levels.
+    reset(20, 0, 0);
+    runtime_cheat_action(action);
+    for (int i = 0; i < 30; ++i) {
+        tick(player1);
+    }
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 21);
+    runtime_cheat_action(action);
+    runtime_cheat_action(action);
+    tick(player1);
+    tick(player1);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 23);
+
+    // Carried progress beyond the threshold goes back to the pool; the bar starts at zero.
+    reset(30, 0, 140);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 31);
+    CHECK(FakeGame::Load<int32_t>(g_level_record + kRecordXpProgressOffset) == 0);
+    CHECK(FakeGame::Load<int32_t>(g_level_record + kRecordXpPoolOffset) == 40);
+    CHECK(FakeGame::Load<int32_t>(player1.unit + kUnitXpOffset) == 40);
+    CHECK(FakeGame::Load<int32_t>(player1.unit + kUnitXpProgressOffset) == 0);
+
+    // Only Player 1's unit runs it; the request waits for it.
+    reset(40, 0, 0);
+    runtime_cheat_action(action);
+    tick(player2);
+    tick(enemy);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 40);
+    CHECK(runtime_cheat_action_pending(action) == 1);
+    tick(player1);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 41);
+
+    // At the current cap nothing advances and the request is consumed.
+    g_max_level = 41;
+    reset(41, 7, 0);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 41);
+    CHECK(FakeGame::Load<int16_t>(g_level_record + kSkillPointsOffset) == 7);
+    CHECK(runtime_cheat_action_pending(action) == 0);
+
+    // No save record: the request waits.
+    g_max_level = 98;
+    reset(50, 0, 0);
+    g_level_record_address = 0;
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(runtime_cheat_action_pending(action) == 1);
+    g_level_record_address = reinterpret_cast<uint64_t>(g_level_record);
+    tick(player1);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 51);
+
+    // The action is not a cheat and does not change the other cheat state.
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1, 1);
+    reset(60, 0, 0);
+    runtime_cheat_action(action);
+    tick(player1);
+    CHECK(FakeGame::Load<uint8_t>(g_level_record + kRecordLevelOffset) == 61);
+    CHECK(runtime_cheat_enabled(int(Cheat::InfiniteHealth)) == 1);
+
+    runtime_cheats_start(0, 1, 1);
+    SetGuestFunctions(GuestFunctions{});
+    g_level_record_address = 0;
+    std::memset(g_level_record, 0, sizeof(g_level_record));
+}
+
+void TestSkillUses() {
+    CHECK(PreservedSkillUse(true, UnitKind::PlayerOne, 5));
+    CHECK(PreservedSkillUse(true, UnitKind::PlayerOne, 1));
+    CHECK(!PreservedSkillUse(true, UnitKind::PlayerOne, 0));
+    CHECK(!PreservedSkillUse(false, UnitKind::PlayerOne, 5));
+    CHECK(!PreservedSkillUse(true, UnitKind::OtherPlayer, 5));
+    CHECK(!PreservedSkillUse(true, UnitKind::Other, 5));
+
+    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    alignas(16) uint8_t item[0x60] = {};
+    const auto use = [&](const FakeGame& game, uint8_t uses) {
+        FakeGame::Store<uint8_t>(item + kItemUsesOffset, uses);
+        GuestRegs regs{};
+        regs.rdi = reinterpret_cast<uint64_t>(item);
+        regs.r12 = game.Owner();
+        SkillUseHook(&regs);
+        return regs.skip != 0;
+    };
+
+    runtime_cheats_start(0, 1);
+    CHECK(!use(player1, 5));
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses), 1);
+    CHECK(use(player1, 5));
+    CHECK(FakeGame::Load<uint8_t>(item + kItemUsesOffset) == 5); // the hook only skips the decrement call
+    CHECK(use(player1, 1));
+    CHECK(!use(player1, 0)); // zero uses is left to the game's own empty handling
+    CHECK(!use(player2, 5));
+    CHECK(!use(enemy, 5));
+
+    runtime_cheats_start(0, 1);
+    CHECK(!use(player1, 5));
+    SetCheats(false, false);
+}
+
 // The real ImGui navigation with the overlay's flags: one press of Enter, Space or A on a row is one activation,
 // however long it stays held, and so is one click.
 struct MenuInputRig {
@@ -821,6 +1371,7 @@ struct MenuInputRig {
     MenuInputRig() {
         ImGuiIO& io = ImGui::GetIO();
         io.IniFilename = nullptr;
+        io.LogFilename = nullptr;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
         io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
         io.DisplaySize = ImVec2(800.0f, 600.0f);
@@ -869,6 +1420,22 @@ struct MenuInputRig {
 };
 
 void TestMenuInput() {
+    const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
+    CHECK(overlay.find("io.IniFilename = nullptr;") != std::string::npos);
+    CHECK(overlay.find("io.LogFilename = nullptr;") != std::string::npos);
+    const std::string host = ReadSource("launcher/host.cpp");
+    CHECK(host.find("io.IniFilename = nullptr;") != std::string::npos);
+    CHECK(host.find("io.LogFilename = nullptr;") != std::string::npos);
+
+    const fs::path ini = fs::current_path() / "imgui.ini";
+    std::error_code error;
+    fs::remove(ini, error);
+    {
+        MenuInputRig rig;
+        rig.Frames(1);
+    }
+    CHECK(!fs::exists(ini));
+
     for (const ImGuiKey key : {ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space, ImGuiKey_GamepadFaceDown}) {
         MenuInputRig rig;
         rig.Frames(3);
@@ -899,8 +1466,13 @@ void TestDurability() {
     CHECK(ProtectedDurabilityDelta(false, UnitKind::PlayerOne, -200) == -200);
     CHECK(ProtectedDurabilityDelta(true, UnitKind::OtherPlayer, -200) == -200);
     CHECK(ProtectedDurabilityDelta(true, UnitKind::Other, -200) == -200);
+    CHECK(ProtectedAllyDurabilityDelta(true, true, -200) == 0);
+    CHECK(ProtectedAllyDurabilityDelta(true, true, 500) == 500);
+    CHECK(ProtectedAllyDurabilityDelta(false, true, -200) == -200);
+    CHECK(ProtectedAllyDurabilityDelta(true, false, -200) == -200);
 
-    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    FakeGame player1(true, 0), player2(true, 1), ally(true, 1), enemy(false, 0);
+    ally.SetClass(kSorceressClass);
     auto wear = [](const FakeGame& game, int32_t delta) {
         // The handler reads the unit at [rbp-0x308] and the delta at [rbp-0x2fc] of the buff function's frame.
         alignas(16) static uint8_t frame[0x400];
@@ -921,9 +1493,23 @@ void TestDurability() {
     CHECK(wear(player1, -1000) == 0);
     CHECK(wear(player1, 700) == 700);
     CHECK(wear(player2, -1000) == -1000);
+    CHECK(wear(ally, -1000) == -1000);
     CHECK(wear(enemy, -1000) == -1000);
     runtime_cheat_toggle(int(Cheat::InfiniteDurability)); // the menu turns it Off: wear comes back at once
     CHECK(wear(player1, -1000) == -1000);
+
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyDurability), 1);
+    CHECK(wear(ally, -1000) == 0);
+    CHECK(wear(ally, 700) == 700);
+    CHECK(wear(player1, -1000) == -1000);
+    runtime_cheats_set_slot_human(FakeHumanSlot); // a human Player 2 on slot 1
+    CHECK(wear(player2, -1000) == -1000);
+    CHECK(wear(ally, -1000) == -1000); // the same slot with a live human controller is no longer an ally
+    runtime_cheats_set_slot_human(nullptr);
+    CHECK(wear(enemy, -1000) == -1000);
+    runtime_cheats_start(Bit(Cheat::InfiniteDurability) | Bit(Cheat::InfiniteAllyDurability), 1);
+    CHECK(wear(player1, -1000) == 0);
+    CHECK(wear(ally, -1000) == 0);
     runtime_cheats_start(0, 1);
 }
 
@@ -1224,10 +1810,84 @@ void TestRefillOnEnable() {
     SetGuestFunctions({nullptr, nullptr});
 }
 
+void TestAllyRefill() {
+    SetGuestFunctions({FakeIsDead, FakeRefillFunction});
+    FakeGame player1(true, 0), ally(true, 1), fighter(true, 2), human2(true, 1), enemy(false, 0);
+    ally.SetClass(kSorceressClass);
+    fighter.SetClass(0);
+    human2.SetClass(kSorceressClass);
+    for (FakeGame* game : {&player1, &ally, &fighter, &human2}) {
+        FakeGame::Store<int32_t>(game->unit + kUnitHpOffset, 500);
+    }
+
+    const auto tick = [](const FakeGame& game) {
+        GuestRegs regs = TickRegs(game);
+        PlayerTickHook(&regs);
+    };
+
+    g_refill = {};
+    runtime_cheats_start(0, 1);
+    tick(ally);
+    CHECK(g_refill.calls == 0);
+
+    // Infinite Ally Health fills a living ally and keeps doing so on later ticks.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth), 1);
+    tick(ally);
+    CHECK(g_refill.calls == 1 && g_refill.unit == ally.Unit());
+    CHECK(g_refill.health == 1 && g_refill.mana == 0 && g_refill.only_below_max == 1);
+    tick(ally);
+    CHECK(g_refill.calls == 2 && g_refill.health == 1);
+
+    // Player 1, a human-controlled party slot and enemies are not ally refills.
+    tick(player1);
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    tick(human2);
+    runtime_cheats_set_slot_human(nullptr);
+    tick(enemy);
+    CHECK(g_refill.calls == 2);
+
+    // A dead ally is not resurrected or filled, whether the game reports death or HP is already zero.
+    g_refill.dead = true;
+    tick(ally);
+    CHECK(g_refill.calls == 2);
+    g_refill.dead = false;
+    FakeGame::Store<int32_t>(ally.unit + kUnitHpOffset, 0);
+    tick(ally);
+    CHECK(g_refill.calls == 2);
+    FakeGame::Store<int32_t>(ally.unit + kUnitHpOffset, 500);
+
+    // Infinite Ally Mana fills a mana-using ally, keeps it full and leaves other classes alone.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyMana), 1);
+    tick(ally);
+    CHECK(g_refill.calls == 3 && g_refill.health == 0 && g_refill.mana == 1);
+    tick(ally);
+    CHECK(g_refill.calls == 4 && g_refill.mana == 1);
+    tick(fighter);
+    tick(player1);
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    tick(human2);
+    runtime_cheats_set_slot_human(nullptr);
+    tick(enemy);
+    CHECK(g_refill.calls == 4);
+
+    // Both ally cheats share one fill call, and turning them Off stops the refill.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth) | Bit(Cheat::InfiniteAllyMana), 1);
+    tick(ally);
+    CHECK(g_refill.calls == 5 && g_refill.health == 1 && g_refill.mana == 1);
+    runtime_cheats_start(0, 1);
+    tick(ally);
+    CHECK(g_refill.calls == 5);
+
+    SetGuestFunctions(GuestFunctions{});
+    g_refill = {};
+}
+
 void TestHookTable() {
     const std::span<const GuestHook> hooks = Hooks();
-    CHECK(hooks.size() == 20);
-    CHECK(hooks[19].offset == 0x27511 && hooks[19].length == 7); // the experience award, at the end of the table
+    CHECK(hooks.size() == 22);
+    CHECK(hooks[19].offset == 0x27511 && hooks[19].length == 7); // the experience award
+    CHECK(hooks[20].offset == 0x1af0dc && hooks[20].length == 5); // the skill item's count decrement
+    CHECK(hooks[21].offset == 0x1af12a && hooks[21].length == 5); // its mirror decrement
     CHECK(kSupportedImage.size == 0x11f8060 && kSupportedImage.entry == 0x54c690);
     for (const GuestHook& hook : hooks) {
         CHECK(hook.length >= GUEST_HOOK_MIN_LENGTH && hook.length <= GUEST_HOOK_MAX_LENGTH);
@@ -1283,8 +1943,20 @@ void TestHookTable() {
         for (uint8_t at = 5; at < hooks[i].length; ++at) {
             CHECK(site[at] == 0x90);
         }
-        // The replaced bytes live on in the stub, followed by the jump back to the next instruction.
         const uint8_t* stub = stubs + i * guest_hook_stub_size();
+        if (hooks[i].length == 5 && (hooks[i].original[0] == 0xe8 || hooks[i].original[0] == 0xe9)) {
+            // A call or jmp rel32 is carried as its absolute target, not as bytes relative to the stub.
+            int32_t displacement;
+            std::memcpy(&displacement, hooks[i].original + 1, 4);
+            const uint64_t target = reinterpret_cast<uint64_t>(site + 5 + displacement);
+            bool carried = false;
+            for (size_t at = 0; at + 8 <= guest_hook_stub_size() && !carried; ++at) {
+                carried = std::memcmp(stub + at, &target, 8) == 0;
+            }
+            CHECK(carried);
+            continue;
+        }
+        // The replaced bytes live on in the stub, followed by the jump back to the next instruction.
         const uint8_t* found = nullptr;
         for (size_t at = 0; at + hooks[i].length <= guest_hook_stub_size() && !found; ++at) {
             if (std::memcmp(stub + at, hooks[i].original, hooks[i].length) == 0) {
@@ -1397,6 +2069,25 @@ int CheckImage(const char* path) {
     for (const auto& function : item_functions) {
         if (std::memcmp(image.data() + function.offset, function.bytes.data(), function.bytes.size()) != 0) {
             std::printf("the game functions differ at 0x%llx\n", static_cast<unsigned long long>(function.offset));
+            return 1;
+        }
+    }
+    // The level-up helpers Level Up (+1 Level) uses.
+    const struct {
+        uint64_t offset;
+        std::vector<uint8_t> bytes;
+    } level_functions[] = {
+        {0x83ae0, {0x80, 0xbf, 0x01, 0x01, 0x00, 0x00, 0x00, 0xb8, 0x63, 0x00, 0x00, 0x00}},
+        {0x86ee0, {0x80, 0x7f, 0x6f, 0x2d, 0x0f, 0x92, 0xc0}},
+        {0x4f950, {0x84, 0xd2, 0xb9, 0xfe, 0x00, 0x00, 0x00, 0xb8, 0x22, 0x00, 0x00, 0x00}},
+        {0x2f9da0, {0x40, 0x80, 0xfe, 0xfe, 0xb9, 0xfe, 0x00, 0x00, 0x00, 0x89, 0xfa, 0x0f, 0x42, 0xce}},
+        {0x81fe0, {0x48, 0x0f, 0xbe, 0x47, 0x27, 0x48, 0x83, 0xf8, 0x05, 0x77, 0x0b, 0x48, 0x8d, 0x0d}},
+        {0x81fb0, {0x40, 0x80, 0xfe, 0xff, 0x75, 0x06, 0x80, 0x7f, 0x27, 0xff, 0x75, 0x0a}},
+        {0x82000, {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x53, 0x50, 0x89, 0xcb, 0x49, 0x89, 0xff}},
+    };
+    for (const auto& function : level_functions) {
+        if (std::memcmp(image.data() + function.offset, function.bytes.data(), function.bytes.size()) != 0) {
+            std::printf("the level functions differ at 0x%llx\n", static_cast<unsigned long long>(function.offset));
             return 1;
         }
     }
@@ -1622,6 +2313,41 @@ void TestNativeHooks() {
     const int rbx_value = read_rbx();
     CHECK(static_cast<int>(g_seen.rbx) == rbx_value);
     CHECK(g_hook_calls == 8);
+
+    // A replaced call or jmp rel32 still reaches its target from the stub. Skipping a call goes on after it; skipping a
+    // tail jmp returns to the caller.
+    const uint8_t callee[] = {0xc7, 0x07, 0x09, 0x00, 0x00, 0x00, 0xb8, 0x03, 0x00, 0x00, 0x00, 0xc3}; // mov [rdi],9; mov eax,3; ret
+    std::memcpy(image + 0x700, callee, sizeof(callee));
+    const auto relative = [&](uint32_t from, uint8_t opcode, uint8_t* out) {
+        const int32_t distance = int32_t(0x700) - int32_t(from + 5);
+        out[0] = opcode;
+        std::memcpy(out + 1, &distance, 4);
+    };
+    uint8_t caller[9];
+    relative(0x600, 0xe8, caller);
+    const uint8_t add_one_ret[] = {0x83, 0xc0, 0x01, 0xc3}; // add eax,1; ret
+    std::memcpy(caller + 5, add_one_ret, sizeof(add_one_ret));
+    std::memcpy(image + 0x600, caller, sizeof(caller));
+    uint8_t tail[5];
+    relative(0x800, 0xe9, tail);
+    std::memcpy(image + 0x800, tail, sizeof(tail));
+    GuestHook relocated[2] = {};
+    relocated[0] = {"call", 0x600, 5, {}, SkipWhenFive};
+    std::memcpy(relocated[0].original, caller, 5);
+    relocated[1] = {"tail jmp", 0x800, 5, {}, SkipWhenFive};
+    std::memcpy(relocated[1].original, tail, 5);
+    CHECK(guest_hooks_install(image, kImageSize, 0x40, &id, relocated, 2, stubs + 0x1000, 0x1000, &bad) == GUEST_HOOK_OK);
+    const StoreFunction call_site = reinterpret_cast<StoreFunction>(image + 0x600);
+    const StoreFunction tail_site = reinterpret_cast<StoreFunction>(image + 0x800);
+    cell = 0;
+    CHECK(call_site(&cell) == 4 && cell == 9);
+    cell = 5;
+    CHECK(call_site(&cell) == 8 && cell == 5);
+    cell = 0;
+    CHECK(tail_site(&cell) == 3 && cell == 9);
+    cell = 5;
+    CHECK(tail_site(&cell) == 7 && cell == 5);
+    CHECK(g_hook_calls == 12);
 }
 
 // Infinite Arrows holds Player 1's Elf at 10 from the next tick on, whatever the count was; Off lets the count go.
@@ -1678,39 +2404,47 @@ void TestExperienceMultiplier() {
     // The saved value is the multiplier; 1, or a missing or unknown value, is Off.
     CHECK(ExperienceMultiplierFromSaved("1") == 1 && ExperienceMultiplierFromSaved("2") == 2);
     CHECK(ExperienceMultiplierFromSaved("5") == 5 && ExperienceMultiplierFromSaved("10") == 10);
-    for (const char* saved : {"", "0", "3", "Off", "2x", "-5"}) {
+    CHECK(ExperienceMultiplierFromSaved("100") == 100);
+    for (const char* saved : {"", "0", "3", "Off", "2x", "-5", "1000"}) {
         CHECK(ExperienceMultiplierFromSaved(saved) == 1);
     }
     CHECK(ListedExperienceMultiplier(5) == 5 && ListedExperienceMultiplier(3) == 1);
+    CHECK(ListedExperienceMultiplier(100) == 100);
 
-    // The menu's order: Off, 2x, 5x, 10x, and Off again.
+    // The menu's order: Off, 2x, 5x, 10x, 100x, and Off again.
     CHECK(NextExperienceMultiplier(1) == 2 && NextExperienceMultiplier(2) == 5);
-    CHECK(NextExperienceMultiplier(5) == 10 && NextExperienceMultiplier(10) == 1);
+    CHECK(NextExperienceMultiplier(5) == 10 && NextExperienceMultiplier(10) == 100);
+    CHECK(NextExperienceMultiplier(100) == 1);
     CHECK(NextExperienceMultiplier(7) == 2); // unlisted: from Off
     CHECK(std::string(ExperienceMultiplierLabel(1)) == "Off" && std::string(ExperienceMultiplierLabel(2)) == "2x");
     CHECK(std::string(ExperienceMultiplierLabel(5)) == "5x" && std::string(ExperienceMultiplierLabel(10)) == "10x");
+    CHECK(std::string(ExperienceMultiplierLabel(100)) == "100x");
 
     // The award: the gain is multiplied once, with no wrap; a zero or negative gain is left as it is.
     CHECK(MultipliedExperience(1, 100) == 100);
     CHECK(MultipliedExperience(2, 100) == 200);
     CHECK(MultipliedExperience(5, 100) == 500);
     CHECK(MultipliedExperience(10, 100) == 1000);
-    CHECK(MultipliedExperience(10, 0) == 0 && MultipliedExperience(10, -40) == -40);
+    CHECK(MultipliedExperience(100, 100) == 10000);
+    CHECK(MultipliedExperience(100, 0) == 0 && MultipliedExperience(100, -40) == -40);
     CHECK(MultipliedExperience(2, INT32_MAX / 2) == int64_t{INT32_MAX / 2} * 2);
     CHECK(MultipliedExperience(2, INT32_MAX / 2 + 1) == INT32_MAX);
+    CHECK(MultipliedExperience(100, INT32_MAX / 100) == int64_t{INT32_MAX / 100} * 100);
+    CHECK(MultipliedExperience(100, INT32_MAX / 100 + 1) == INT32_MAX);
     CHECK(MultipliedExperience(10, int64_t{1} << 40) == INT32_MAX);
 
     // The menu's change is a difference from the saved value: cycling back to it follows the launcher again.
     SessionExperience session;
     CHECK(session.Effective(5) == 5);
     CHECK(session.Cycle(5) == 10 && session.Effective(5) == 10);
-    CHECK(session.Cycle(5) == 1 && session.Cycle(5) == 2 && session.Cycle(5) == 5);
+    CHECK(session.Cycle(5) == 100 && session.Cycle(5) == 1 && session.Cycle(5) == 2 && session.Cycle(5) == 5);
     CHECK(session.Effective(5) == 5);
 
     // The runtime: the saved value starts each session, the menu's cycle changes it, an unlisted saved value is Off.
     runtime_cheats_start(0, 5);
     CHECK(runtime_cheat_experience_multiplier() == 5);
     CHECK(runtime_cheat_experience_cycle() == 10 && runtime_cheat_experience_multiplier() == 10);
+    CHECK(runtime_cheat_experience_cycle() == 100 && runtime_cheat_experience_multiplier() == 100);
     runtime_cheats_start(0, 2);
     CHECK(runtime_cheat_experience_multiplier() == 2);
     runtime_cheats_start(0, 3);
@@ -1725,7 +2459,7 @@ void TestExperienceMultiplier() {
     runtime_cheats_start(0, 1);
     ExperienceHook(&award);
     CHECK(award.rax == 100);
-    for (const int saved : {2, 5, 10}) {
+    for (const int saved : {2, 5, 10, 100}) {
         runtime_cheats_start(0, saved);
         award = {};
         award.rax = 100;
@@ -1761,7 +2495,11 @@ int main(int argc, char** argv) {
     TestRules();
     TestHookHandlers();
     TestArrowsAndSkillPoints();
+    TestAddSkillPoints();
+    TestAddLevel();
+    TestSkillUses();
     TestRefillOnEnable();
+    TestAllyRefill();
     TestArrowHold();
     TestExperienceMultiplier();
     TestDurability();

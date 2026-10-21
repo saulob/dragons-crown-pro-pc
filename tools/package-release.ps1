@@ -6,7 +6,7 @@
   Runs tools\package.ps1 for Windows, then tools\package-release-linux.sh through wsl.exe for the AppImage (the Linux
   packaging itself is tools\package-linux.sh). Both run even if the first fails, so one run shows every problem, and the
   release counts as prepared only when both artifacts exist and their .sha256 files match. The version is
-  DCP_PORT_VERSION in CMakeLists.txt, the only place it is written.
+  the project VERSION in CMakeLists.txt, the only place it is written.
 
   The Linux side needs the WSL2 distribution DcpFocalBuild: Ubuntu 20.04, the AppImage's glibc baseline, prepared once
   by packaging/linux/ci-deps.sh (docs/LINUX.md). Nothing is installed or changed in WSL.
@@ -30,7 +30,7 @@ param(
 
 $root = $script:RepoRoot
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
-if ($cmake -notmatch '(?m)^set\(DCP_PORT_VERSION "([^"]+)"\)') { Stop-Tool 'DCP_PORT_VERSION not found in CMakeLists.txt' }
+if ($cmake -notmatch '(?m)^project\(dragons_crown_pro_pc VERSION ([0-9]+\.[0-9]+\.[0-9]+)') { Stop-Tool 'project VERSION not found in CMakeLists.txt' }
 $version = $Matches[1]
 $dist = Join-Path $root 'dist'
 $windowsName = "DragonsCrownProPC-v$version-windows-x64"

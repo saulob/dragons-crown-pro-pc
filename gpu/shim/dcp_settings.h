@@ -7,6 +7,8 @@
 #include <atomic>
 #include <string>
 
+#include <SDL3/SDL_scancode.h>
+
 namespace DcpSettings {
 
 struct Values {
@@ -16,6 +18,7 @@ struct Values {
     std::atomic<int> menu_tab{0};
     std::atomic<int> display_mode{0};
     std::atomic<bool> vsync{true};
+    std::atomic<int> presentation{0}; ///< DcpGraphics::Presentation: letterbox or stretch
     std::atomic<bool> fsr1{false};
     std::atomic<bool> rcas{true};
     std::atomic<int> rcas_strength{75};
@@ -30,6 +33,8 @@ struct Values {
     std::atomic<int> requested_width{0}, requested_height{0};
     std::atomic<int> monitor{1};
     std::atomic<bool> show_fps_title{false}, show_resolution_title{false};
+    // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu and the window mode switch.
+    std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11};
 };
 
 Values& Get();

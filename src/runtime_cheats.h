@@ -9,15 +9,30 @@
 extern "C" {
 #endif
 
-/* Called once, after the launcher: `saved_mask` is dcp_saved_cheats() and `experience_multiplier` is
- * dcp_saved_experience_multiplier(), the start of this game session. Starting clears every override the menu made. */
-void runtime_cheats_start(unsigned saved_mask, int experience_multiplier);
+/* Called once, after the launcher: `saved_mask` is dcp_saved_cheats(), `experience_multiplier` is
+ * dcp_saved_experience_multiplier() and `movement_speed` is dcp_saved_movement_speed(), the start of this game session.
+ * Starting clears every override the menu made. */
+#ifdef __cplusplus
+void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed = 1);
+#else
+void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed);
+#endif
 
 /* The Experience Multiplier this session (1 = Off, 2, 5 or 10): the saved value, or the menu's change of it. */
 int runtime_cheat_experience_multiplier(void);
 
 /* The F10 menu's Experience Multiplier: moves to the next value for this session and returns it. */
 int runtime_cheat_experience_cycle(void);
+
+/* Movement Speed this session (1 = Off, 2 or 4): the saved value, or the menu's change of it. */
+int runtime_cheat_movement_speed(void);
+
+/* The F10 menu's Movement Speed: moves to the next value for this session and returns it. */
+int runtime_cheat_movement_cycle(void);
+
+/* The port's live controller state: 1 for Player 1 or a slot with a gamepad. The loader sets this. */
+void runtime_cheats_set_slot_human(int (*is_human)(int slot));
+int runtime_cheat_slot_human(int slot);
 
 /* 1 when the cheat (a dcp::cheats::Cheat value) is on: the saved value, or the menu's override of it this session. */
 int runtime_cheat_enabled(int cheat);
@@ -38,6 +53,9 @@ void runtime_cheat_clear_actions(void);
 
 /* The in-game menu's toggle. Only this session changes; nothing is written to the settings file. */
 void runtime_cheat_toggle(int cheat);
+
+/* Prints the enabled cheats and the Experience Multiplier, once the saved settings are in effect. */
+void runtime_cheats_log_enabled(void);
 
 /* The native hooks the cheats need: the room for their stubs, and the installation on the loaded image (before its
  * relocations are made executable). 0 when the image is not the supported v1.03: the game then runs without cheats. */

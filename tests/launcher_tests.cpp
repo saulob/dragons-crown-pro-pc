@@ -26,10 +26,12 @@
 #include <vector>
 
 #include "controller_prompts.h"
+#include "game_patches.h"
 #include "cpk_patch.h"
 #include "dcp_cheats.h"
 #include "dcp_launcher.h"
 #include "dcp_graphics.h"
+#include "dcp_keys.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
@@ -101,11 +103,12 @@ std::string MakeSfo(const std::vector<std::pair<std::string, std::string>>& item
 }
 
 const GameBuild& kUs = SupportedBuilds()[0];
-const GameBuild& kJp100 = SupportedBuilds()[1];
-const GameBuild& kJp102 = SupportedBuilds()[2];
-const GameBuild& kJp103 = SupportedBuilds()[3];
-const GameBuild& kCk100 = SupportedBuilds()[4];
-const GameBuild& kCk = SupportedBuilds()[5];
+const GameBuild& kUs101 = SupportedBuilds()[1];
+const GameBuild& kJp100 = SupportedBuilds()[2];
+const GameBuild& kJp102 = SupportedBuilds()[3];
+const GameBuild& kJp103 = SupportedBuilds()[4];
+const GameBuild& kCk100 = SupportedBuilds()[5];
+const GameBuild& kCk = SupportedBuilds()[6];
 
 constexpr char kEboot[] = "synthetic eboot bytes";
 
@@ -287,7 +290,7 @@ void TestFingerprintMatchesProfile() {
         }
     }
     CHECK(SupportedBuildsText() ==
-          "CUSA10454 1.00 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong and CUSA10209 1.02 Asia/Hong Kong");
+          "CUSA10454 1.00 USA, CUSA10454 1.01 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong and CUSA10209 1.02 Asia/Hong Kong");
     CHECK(std::string(kUs.folder) != kCk.folder);
     std::string modules = "'modules': (";
     for (const char* module : kBundledModules) {
@@ -456,6 +459,18 @@ void TestPaths() {
     CHECK(fs::weakly_canonical(PathFromUtf8(found.logs_dir)) == fs::weakly_canonical(repository / "build" / "logs"));
     const DcpPathRequest explicit_user{nullptr, nullptr, nullptr, "D:/elsewhere", nullptr};
     CHECK(dcp_resolve_paths(&explicit_user, &found) == 1 && std::string(found.user_dir) == "D:/elsewhere");
+
+    // The log folder follows the executable, never the current working directory.
+    const fs::path cwd = fs::current_path();
+    std::error_code ec;
+    fs::current_path(fs::temp_directory_path(), ec);
+    if (!ec) {
+        DcpPaths from_elsewhere;
+        CHECK(dcp_resolve_paths(&nothing, &from_elsewhere) == 1);
+        CHECK(fs::path(from_elsewhere.logs_dir) == fs::path(found.logs_dir));
+        fs::current_path(cwd, ec);
+        CHECK(!ec);
+    }
 }
 
 // Creates a log the way the loader does and writes some text into it; the path, or empty on failure.
@@ -483,6 +498,9 @@ void TestLogNumbering(const fs::path& base) {
     const fs::path dir = base / "numbered" / "logs";
     const std::string first = CreateLog(dir, nullptr, "one");
     CHECK(fs::path(first).filename() == "dragons_crown_pro_001.log");
+    char folder[4096];
+    CHECK(dcp_logs_directory(dir.string().c_str(), first.c_str(), folder, sizeof(folder)) == 1);
+    CHECK(fs::path(folder) == dir); // the launcher's logs folder is the loader's log directory
     const std::string second = CreateLog(dir, nullptr, "two");
     CHECK(fs::path(second).filename() == "dragons_crown_pro_002.log");
     CHECK(ReadAll(first) == "one" && ReadAll(second) == "two"); // an earlier log is never overwritten
@@ -524,13 +542,14 @@ void TestDefaultLogFolders(const fs::path& base) {
 // Last: it redirects this process's stdout and stderr.
 void TestLogRedirect(const fs::path& base) {
     char path[4096];
-    CHECK(runtime_log_start((base / "tee").string().c_str(), nullptr, path, sizeof(path)) == 1);
+    const fs::path capture = base / "tee" / "test_capture.log";
+    CHECK(runtime_log_start((base / "tee").string().c_str(), capture.string().c_str(), path, sizeof(path)) == 1);
     std::printf("stdout marker\n");
     std::fflush(stdout);
     std::fprintf(stderr, "stderr marker\n");
     runtime_log_flush();
     const std::string text = ReadAll(path);
-    CHECK(fs::path(path).filename() == "dragons_crown_pro_001.log");
+    CHECK(fs::path(path) == capture); // a test capture, never a dragons_crown_pro_*.log
     CHECK(text.find("stdout marker\nstderr marker\n") != std::string::npos);
 }
 
@@ -686,7 +705,7 @@ void TestInstaller(const fs::path& base) {
     };
     WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA00001", "01.00"));
     CHECK(install(source.paths.app0, roots) == InstallStatus::kWrongGame);
-    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA10454", "01.01"));
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo_with("CUSA10454", "01.04"));
     CHECK(install(source.paths.app0, roots) == InstallStatus::kWrongVersion);
     source.Rebuild();
     fs::remove(source.paths.app0 / "DRACRO.CPK");
@@ -936,6 +955,220 @@ void TestDefaultsAgree() {
 
 bool WrittenValue(const std::string& text, const std::string& key, const std::string& value);
 
+void TestDetailedLogging(const fs::path& base) {
+    const fs::path file = base / "logging" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kDetailedLoggingKey && setting.default_value == "1";
+    }
+    CHECK(managed);
+    CHECK(LauncherSettings(file).GetBool(kDetailedLoggingKey, true));
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    CHECK(dcp_detailed_logging(nullptr) == 1);
+
+    WriteAll(file, "detailed_logging = 0\n");
+    CHECK(!LauncherSettings(file).GetBool(kDetailedLoggingKey, true));
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 0);
+    WriteAll(file, "detailed_logging = 1\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    WriteAll(file, "detailed_logging = true\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    WriteAll(file, "detailed_logging = garbage\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+    WriteAll(file, "vsync = 0\n");
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kDetailedLoggingKey, false);
+        CHECK(settings.Save());
+        CHECK(WrittenValue(ReadAll(file), kDetailedLoggingKey, "0"));
+        CHECK(dcp_detailed_logging(file.string().c_str()) == 0);
+    }
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kDetailedLoggingKey, true));
+        settings.ResetToDefaults();
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kDetailedLoggingKey, "1"));
+    CHECK(dcp_detailed_logging(file.string().c_str()) == 1);
+
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("ui.Heading(\"Diagnostics\")") != std::string::npos);
+    CHECK(launcher.find("ui.Toggle(\"Detailed logging\"") != std::string::npos);
+    CHECK(launcher.find("Keeps logs for normal sessions. Crash diagnostics are always preserved.") != std::string::npos);
+}
+
+void TestLogsDirectory(const fs::path& base) {
+    const fs::path root = base / "logs-directory";
+    fs::remove_all(root);
+    fs::create_directories(root / "nested");
+    char out[4096];
+
+    const fs::path default_dir = root / "logs";
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), nullptr, out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == default_dir);
+    CHECK(!fs::exists(default_dir));
+
+    const fs::path log = root / "nested" / "run.log";
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), Utf8(log).c_str(), out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == log.parent_path());
+
+    const fs::path created_dir = root / "created";
+    const std::string created = CreateLog(created_dir, nullptr, "run\n");
+    CHECK(!created.empty());
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), created.c_str(), out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == created_dir);
+
+    CHECK(dcp_logs_directory(Utf8(default_dir).c_str(), "", out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == default_dir);
+    CHECK(!dcp_logs_directory(nullptr, nullptr, out, sizeof(out)));
+    CHECK(!dcp_logs_directory(Utf8(default_dir).c_str(), Utf8(log).c_str(), nullptr, sizeof(out)));
+    CHECK(!dcp_logs_directory(Utf8(default_dir).c_str(), Utf8(log).c_str(), out, 0));
+
+    const fs::path unicode =
+        root / "logs with space" / PathFromUtf8("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E");
+    CHECK(dcp_logs_directory(Utf8(unicode).c_str(), nullptr, out, sizeof(out)));
+    CHECK(PathFromUtf8(out) == unicode);
+    CHECK(fs::create_directories(unicode));
+    CHECK(fs::is_directory(unicode));
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("ui.ButtonRow(\"Logs folder\"") != std::string::npos);
+    CHECK(launcher.find("\"Open the folder containing session and crash logs\"") != std::string::npos);
+    CHECK(launcher.find("\"Open logs folder\"") != std::string::npos);
+    CHECK(launcher.find("OpenLogsFolder") != std::string::npos);
+    CHECK(launcher.find("std::filesystem::create_directories(folder, ec)") != std::string::npos);
+    CHECK(launcher.find("trg::OpenInFileManager(Utf8(folder))") != std::string::npos);
+
+    const std::string loader = ReadAll(source / "src" / "loader.c");
+    CHECK(loader.find("dcp_logs_directory(paths.logs_dir,log_path") != std::string::npos);
+    CHECK(loader.find("DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder") !=
+          std::string::npos);
+
+    const std::string paths = ReadAll(source / "launcher" / "paths.cpp");
+    CHECK(paths.find("DCP_PORTABLE_DIR") != std::string::npos);
+    CHECK(paths.find("XDG_DATA_HOME") != std::string::npos);
+    CHECK(paths.find("/tmp/.mount") == std::string::npos);
+}
+
+void TestLogRetention(const fs::path& base) {
+    CHECK(runtime_log_should_remove(0, 1, 0));
+    CHECK(!runtime_log_should_remove(1, 1, 0));
+    CHECK(!runtime_log_should_remove(0, 0, 0));
+    CHECK(!runtime_log_should_remove(0, 1, 1));
+
+    const fs::path dir = base / "logging";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const auto session = [&](const char* name) {
+        const fs::path file = dir / name;
+        WriteAll(file, name);
+        runtime_log_set_session_path(file.string().c_str());
+        return file;
+    };
+
+    // Off: the session log is active, then a clean shutdown deletes it.
+    const fs::path off_clean = session("dragons_crown_pro_001.log");
+    runtime_log_set_detailed(0);
+    CHECK(fs::exists(off_clean));
+    runtime_log_mark_clean_exit();
+    runtime_log_finalize();
+    CHECK(!fs::exists(off_clean));
+
+    // Off: a crash keeps the log, even with a clean mark present.
+    const fs::path off_crash = session("dragons_crown_pro_002.log");
+    runtime_log_set_detailed(0);
+    runtime_log_mark_clean_exit();
+    runtime_log_mark_crash();
+    runtime_log_finalize();
+    CHECK(fs::exists(off_crash));
+
+    // Off: a path that never marked a clean exit is abnormal and keeps the log.
+    const fs::path off_abnormal = session("dragons_crown_pro_003.log");
+    runtime_log_set_detailed(0);
+    runtime_log_finalize();
+    CHECK(fs::exists(off_abnormal));
+
+    // On: the session log is active and kept after a clean shutdown.
+    const fs::path on_clean = session("dragons_crown_pro_004.log");
+    runtime_log_set_detailed(1);
+    CHECK(fs::exists(on_clean));
+    runtime_log_mark_clean_exit();
+    runtime_log_finalize();
+    CHECK(fs::exists(on_clean));
+
+    const fs::path on_crash = session("dragons_crown_pro_005.log");
+    runtime_log_set_detailed(1);
+    runtime_log_mark_clean_exit();
+    runtime_log_mark_crash();
+    runtime_log_finalize();
+    CHECK(fs::exists(on_crash));
+
+    // History: a new numbered log never overwrites an older one.
+    const fs::path history = dir / "history";
+    CHECK(fs::path(CreateLog(history, nullptr, "one")).filename() == "dragons_crown_pro_001.log");
+    CHECK(fs::path(CreateLog(history, nullptr, "two")).filename() == "dragons_crown_pro_002.log");
+    CHECK(fs::exists(history / "dragons_crown_pro_001.log"));
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string loader = ReadAll(source / "src" / "loader.c");
+    CHECK(loader.find("runtime_log_install_cleanup()") != std::string::npos);
+    CHECK(loader.find("dcp_detailed_logging(settings_file)") != std::string::npos);
+    CHECK(loader.find("runtime_log_mark_clean_exit()") != std::string::npos);
+    CHECK(loader.find("runtime_log_mark_crash()") != std::string::npos);
+    CHECK(ReadAll(source / "gpu" / "shim" / "dcpgpu.cpp").find("runtime_log_finalize()") != std::string::npos);
+}
+
+void TestJapaneseNpcVoiceSetting(const fs::path& base) {
+    const fs::path file = base / "npc_voices" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto launcher_default = [](std::string_view key) {
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            if (setting.key == key) {
+                return std::string(setting.default_value);
+            }
+        }
+        return std::string("<missing>");
+    };
+    CHECK(launcher_default(kJapaneseNpcVoicesKey) == "0");
+    CHECK(dcp_japanese_npc_voices(nullptr) == 0);
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kJapaneseNpcVoicesKey, true);
+        CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0); // pending until Save
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 1);
+    CHECK(WrittenValue(ReadAll(file), kJapaneseNpcVoicesKey, "1"));
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kJapaneseNpcVoicesKey, false));
+        settings.SetBool(kJapaneseNpcVoicesKey, false);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+    CHECK(WrittenValue(ReadAll(file), kJapaneseNpcVoicesKey, "0"));
+    WriteAll(file, "dcp_japanese_npc_voices = on\n");
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 1);
+    WriteAll(file, "dcp_japanese_npc_voices = garbage\n");
+    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+
+    // A saved On is inert on every build without the verified hook.
+    CHECK(!SupportsJapaneseNpcVoices(&kUs101));
+    CHECK(!SupportsJapaneseNpcVoices(&kJp100));
+    CHECK(!SupportsJapaneseNpcVoices(&kJp102));
+    CHECK(!SupportsJapaneseNpcVoices(&kJp103));
+    CHECK(!SupportsJapaneseNpcVoices(&kCk100));
+    CHECK(!SupportsJapaneseNpcVoices(&kCk));
+    CHECK(!SupportsJapaneseNpcVoices(nullptr));
+}
+
 void TestCheatSettings(const fs::path& base) {
     const fs::path file = base / "cheats" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -984,9 +1217,6 @@ void TestCheatSettings(const fs::path& base) {
         }
         CHECK(settings.Save());
         CHECK(dcp_saved_cheats(file.string().c_str()) == (1u << cheats::kCheatCount) - 1);
-        settings.SetBool(cheats::kMovementSpeedKey, false);
-        CHECK(settings.Save());
-        CHECK(dcp_saved_cheats(file.string().c_str()) == (1u << (cheats::kCheatCount - 1)) - 1);
     }
     CHECK(WrittenValue(ReadAll(file), "vsync", "0")); // unrelated lines survive
 
@@ -997,19 +1227,53 @@ void TestCheatSettings(const fs::path& base) {
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
             CHECK(!settings.GetBool(cheat.key, true));
         }
+        CHECK(settings.Get(cheats::kMovementSpeedKey, "") == "1");
+        CHECK(settings.Get(cheats::kLegacyMovementSpeedKey, "") == "0");
         CHECK(dcp_saved_cheats(file.string().c_str()) != 0);
         CHECK(settings.Save());
     }
     CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
 
     // Experience Multiplier: the saved value is the multiplier; a value that is not listed is Off.
     CHECK(launcher_default(cheats::kExperienceMultiplierKey) == "1");
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 1);
     WriteAll(file, "cheat_experience_multiplier=5\n");
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 5);
+    WriteAll(file, "cheat_experience_multiplier=100\n");
+    CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 100);
     WriteAll(file, "cheat_experience_multiplier=7\n");
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 1);
     CHECK(dcp_saved_experience_multiplier(nullptr) == 1);
+
+    // Movement Speed: 1, 2 or 4; a missing or invalid value is Off. The old boolean key gives 2x only when the newer
+    // setting is absent, and an explicit value (even an invalid one) wins.
+    CHECK(launcher_default(cheats::kMovementSpeedKey) == "1");
+    CHECK(launcher_default(cheats::kLegacyMovementSpeedKey) == "0");
+    CHECK(cheats::IsListedChoice(cheats::kMovementSpeedChoices, 1));
+    CHECK(cheats::IsListedChoice(cheats::kMovementSpeedChoices, 2));
+    CHECK(cheats::IsListedChoice(cheats::kMovementSpeedChoices, 4));
+    CHECK(!cheats::IsListedChoice(cheats::kMovementSpeedChoices, 3));
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed=2\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 2);
+    WriteAll(file, "cheat_movement_speed=4\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 4);
+    WriteAll(file, "cheat_movement_speed=3\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed_2x=1\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 2);
+    WriteAll(file, "cheat_movement_speed_2x=0\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed_2x=true\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 2);
+    WriteAll(file, "cheat_movement_speed=4\ncheat_movement_speed_2x=0\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 4);
+    WriteAll(file, "cheat_movement_speed=1\ncheat_movement_speed_2x=1\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    WriteAll(file, "cheat_movement_speed=9\ncheat_movement_speed_2x=1\n");
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
+    CHECK(dcp_saved_movement_speed(nullptr) == 1);
 
     // The in-game menu never writes them: the video core's settings file code has no cheat key.
     CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp").find("cheat") == std::string::npos);
@@ -1022,31 +1286,91 @@ bool WrittenValue(const std::string& text, const std::string& key, const std::st
 void TestTextLanguage(const fs::path& base) {
     const fs::path file = base / "language" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    CHECK(dcp_text_language(file.string().c_str()) == 1); // no file: English
-    CHECK(dcp_text_language(nullptr) == 1);
+    const std::string ini = file.string();
+    const fs::path us_dir = base / "language" / "us";
+    const fs::path asia_dir = base / "language" / "asia";
+    WriteAll(us_dir / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") + kUs.eboot_sha256 + "\"\n}");
+    WriteAll(asia_dir / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") + kCk.eboot_sha256 + "\",\n  \"app_ver\": \"01.02\"\n}");
+    const std::string us = us_dir.string();
+    const std::string asia = asia_dir.string();
 
-    struct Expected { const char* key; int id; };
-    const Expected expected[] = {{"english", 1}, {"french", 2}, {"german", 4}, {"italian", 5}, {"spanish", 3}};
-    CHECK(std::size(kTextLanguages) == std::size(expected));
-    for (size_t i = 0; i < std::size(expected); ++i) {
-        CHECK(kTextLanguages[i].key == expected[i].key); // launcher order
-        CHECK(TextLanguageId(expected[i].key) == expected[i].id);
-        LauncherSettings settings(file);
-        settings.Set(kTextLanguageKey, expected[i].key);
-        CHECK(settings.Save());
-        CHECK(WrittenValue(ReadAll(file), "text_language", expected[i].key));
-        CHECK(dcp_text_language(file.string().c_str()) == expected[i].id);
+    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1); // no file: English
+    CHECK(dcp_text_language(nullptr, nullptr) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10); // no file: Traditional Chinese
+
+    struct Expected { const char* key; const char* name; int id; };
+    const Expected western[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
+                                {"italian", "Italian", 5}, {"spanish", "Spanish", 3}};
+    const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
+    const auto check_list = [&](const GameBuild* build, std::span<const Expected> expected) {
+        const std::span<const TextLanguage> languages = TextLanguagesOf(build);
+        CHECK(languages.size() == expected.size());
+        for (size_t i = 0; i < expected.size() && i < languages.size(); ++i) {
+            CHECK(languages[i].key == expected[i].key && languages[i].name == expected[i].name);
+            CHECK(languages[i].ps4_id == expected[i].id);
+        }
+    };
+    check_list(nullptr, western);
+    for (const GameBuild& build : SupportedBuilds()) {
+        check_list(&build, std::string_view(build.title_id) == "CUSA10209" ? std::span<const Expected>(asian)
+                                                                          : std::span<const Expected>(western));
     }
-    CHECK(kTextLanguages[0].name == "English" && kTextLanguages[4].name == "Spanish");
+
+    for (const char* image : {us.c_str(), static_cast<const char*>(nullptr)}) {
+        for (const Expected& language : western) {
+            LauncherSettings settings(file);
+            settings.Set(kTextLanguageKey, language.key);
+            CHECK(settings.Save());
+            CHECK(WrittenValue(ReadAll(file), "text_language", language.key));
+            CHECK(dcp_text_language(ini.c_str(), image) == language.id);
+        }
+    }
+    for (const Expected& language : asian) {
+        LauncherSettings settings(file);
+        settings.Set(kTextLanguageKey, language.key);
+        CHECK(settings.Save());
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == language.id);
+    }
+
+    // A saved language the active build does not have gives that build's default, and the file keeps it.
+    WriteAll(file, "text_language=korean\n");
+    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 9);
+    for (const Expected& language : western) {
+        WriteAll(file, std::string("text_language=") + language.key + "\n");
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
+        CHECK(dcp_text_language(ini.c_str(), us.c_str()) == language.id);
+    }
+    CHECK(ResolveTextLanguage(&kCk, "english").key == "traditional_chinese");
+    CHECK(ResolveTextLanguage(&kCk, "korean").key == "korean");
+    CHECK(ResolveTextLanguage(&kUs, "korean").key == "english");
+    CHECK(ResolveTextLanguage(&kUs, "traditional_chinese").key == "english");
+    CHECK(ResolveTextLanguage(&kJp100, "korean").key == "english");
+    for (const char* absent : {"chinese", "simplified_chinese", "japanese"}) {
+        CHECK(!IsValidSetting(kTextLanguageKey, absent));
+        CHECK(ResolveTextLanguage(&kCk, absent).ps4_id == 10);
+    }
+    // Both CUSA10209 builds share one list: Traditional Chinese and Korean, no Western or Simplified Chinese language.
+    for (const GameBuild* asia : {&kCk100, &kCk}) {
+        const std::span<const TextLanguage> languages = TextLanguagesOf(asia);
+        CHECK(languages.size() == 2 && languages[0].key == "traditional_chinese" && languages[1].key == "korean");
+        CHECK(languages[0].ps4_id == 10 && languages[1].ps4_id == 9);
+        for (const char* absent : {"english", "french", "german", "italian", "spanish", "simplified_chinese"}) {
+            CHECK(std::none_of(languages.begin(), languages.end(),
+                               [&](const TextLanguage& language) { return language.key == absent; }));
+        }
+    }
 
     for (const char* unlisted : {"English", "japanese", "fr", "2", ""}) {
-        CHECK(TextLanguageId(unlisted) == 1);
         WriteAll(file, std::string("text_language=") + unlisted + "\n");
-        CHECK(dcp_text_language(file.string().c_str()) == 1);
+        CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
     }
     WriteAll(file, "show_fps=1\n"); // an existing file without the key
-    CHECK(dcp_text_language(file.string().c_str()) == 1);
-    CHECK(IsValidSetting(kTextLanguageKey, "german") && !IsValidSetting(kTextLanguageKey, "japanese"));
+    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
+    CHECK(IsValidSetting(kTextLanguageKey, "german") && IsValidSetting(kTextLanguageKey, "korean") &&
+          IsValidSetting(kTextLanguageKey, "traditional_chinese") && !IsValidSetting(kTextLanguageKey, "japanese"));
 
     LauncherSettings settings(file);
     settings.ResetToDefaults();
@@ -1058,8 +1382,8 @@ void TestRenderResolution(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "render" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    CHECK(dcp_render_resolution(file.string().c_str()) == 0); // no file: native
-    CHECK(dcp_render_resolution(nullptr) == 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 0); // no file: native
+    CHECK(dcp_render_resolution(nullptr, nullptr) == 0);
 
     struct Expected { const char* key; const char* name; int width, height, pro; };
     const Expected expected[] = {{"native", "Native (1080p)", 1920, 1080, 0}, {"480p", "480p", 854, 480, 0},
@@ -1077,7 +1401,7 @@ void TestRenderResolution(const fs::path& base) {
             CHECK(settings.Save());
         }
         CHECK(WrittenValue(ReadAll(file), "render_resolution", expected[i].key));
-        CHECK(dcp_render_resolution(file.string().c_str()) == i);
+        CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == i);
     }
     CHECK(ResolutionLabel(dcp_resolutions[0]) == "Native (1080p) \xE2\x80\x94 1920 \xC3\x97 1080");
     {
@@ -1086,10 +1410,10 @@ void TestRenderResolution(const fs::path& base) {
         CHECK(settings.Save());
     }
     CHECK(WrittenValue(ReadAll(file), "render_resolution", "native"));
-    CHECK(dcp_render_resolution(file.string().c_str()) == 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 0);
     for (const char* unlisted : {"720P", "900p", "8K", ""}) {
         WriteAll(file, std::string("render_resolution=") + unlisted + "\n");
-        CHECK(dcp_render_resolution(file.string().c_str()) == 0);
+        CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 0);
     }
 
     bool managed = false;
@@ -1153,7 +1477,7 @@ void TestRenderResolution(const fs::path& base) {
 void TestAspectRatio(const fs::path& base) {
     const fs::path file = base / "aspect" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    CHECK(dcp_aspect_ratio(file.string().c_str()) == 0 && dcp_aspect_ratio(nullptr) == 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == 0 && dcp_aspect_ratio(nullptr, nullptr) == 0);
 
     struct Expected { const char* key; const char* name; int width_1080; int width_720; };
     const Expected expected[] = {{"16:9", "16:9 Original", 1920, 1280}, {"16:10", "16:10", 1728, 1152},
@@ -1169,7 +1493,7 @@ void TestAspectRatio(const fs::path& base) {
             CHECK(settings.Save());
         }
         CHECK(WrittenValue(ReadAll(file), "aspect_ratio", expected[i].key));
-        CHECK(dcp_aspect_ratio(file.string().c_str()) == i);
+        CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == i);
         CHECK(IsValidSetting(kAspectRatioKey, expected[i].key));
 
         const DcpResolution native = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[i]);
@@ -1180,7 +1504,7 @@ void TestAspectRatio(const fs::path& base) {
     }
     for (const char* invalid : {"", "16:9 Original", "2:1", "21x9", "4:3x", "16:9:"}) {
         WriteAll(file, std::string("aspect_ratio=") + invalid + "\n");
-        CHECK(dcp_aspect_ratio(file.string().c_str()) == 0);
+        CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == 0);
         CHECK(!std::string(invalid).empty() ? !IsValidSetting(kAspectRatioKey, invalid) : true);
     }
     CHECK(dcp_aspect_index(nullptr) == 0);
@@ -1218,6 +1542,9 @@ void TestAspectRatio(const fs::path& base) {
     // The patch writes the target into the build's sites; a damaged site refuses the whole image.
     for (const GameBuild& build : SupportedBuilds()) {
         const auto sites = build.resolution_sites;
+        if (sites.empty()) {
+            continue;
+        }
         uint64_t size = 0;
         for (const DcpResolutionSite& site : sites) {
             size = std::max<uint64_t>(size, site.offset + site.opcode_length + 4u);
@@ -1251,6 +1578,104 @@ void TestAspectRatio(const fs::path& base) {
     CHECK(WindowSizesFor(dcp_aspect_ratios[5])[2] == WindowSize({1350, 1080}));
     CHECK(WindowSizeOf(1080, dcp_aspect_ratios[1]) == WindowSize({1728, 1080}));
     CHECK(WindowSizeOf(1080, dcp_aspect_ratios[3]) == WindowSize({3840, 1080}));
+}
+
+// Presentation only fits the finished frame into the window: its own key and default, Letterbox unless Stretch is chosen,
+// and no change to the render target or the aspect ratio.
+void TestPresentation(const fs::path& base) {
+    const fs::path file = base / "presentation" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+
+    CHECK(std::string(kPresentationKey) == "presentation" && std::string(kDefaultPresentation) == "letterbox");
+    CHECK(std::string(kPresentationChoices[0].key) == "letterbox" && std::string(kPresentationChoices[0].name) == "Letterbox");
+    CHECK(std::string(kPresentationChoices[1].key) == "stretch" && std::string(kPresentationChoices[1].name) == "Stretch");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kPresentationKey && setting.default_value == "letterbox";
+    }
+    CHECK(managed);
+
+    // A missing file or key is Letterbox.
+    CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == "letterbox");
+    DcpSettings::Values v;
+    CHECK(!DcpSettings::Read(file.string(), v) && v.presentation == DcpGraphics::Letterbox);
+
+    // So is an invalid value.
+    for (const char* invalid : {"", "fit", "Stretch", "1"}) {
+        WriteAll(file, std::string("presentation=") + invalid + "\n");
+        CHECK(!IsValidSetting(kPresentationKey, invalid));
+        CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == "letterbox");
+        DcpSettings::Values bad;
+        CHECK(DcpSettings::Read(file.string(), bad) && bad.presentation == DcpGraphics::Letterbox);
+    }
+
+    CHECK(IsValidSetting(kPresentationKey, "letterbox") && IsValidSetting(kPresentationKey, "stretch"));
+    CHECK(DcpGraphics::ParsePresentation("letterbox") == DcpGraphics::Letterbox);
+    CHECK(DcpGraphics::ParsePresentation("stretch") == DcpGraphics::Stretch);
+    CHECK(DcpGraphics::ParsePresentation("bogus") == DcpGraphics::Letterbox);
+
+    // The choice is saved and read back by both the launcher and the video core.
+    for (const char* value : {"letterbox", "stretch"}) {
+        fs::remove_all(file.parent_path());
+        {
+            LauncherSettings settings(file);
+            settings.Set(kPresentationKey, value);
+            CHECK(settings.Save());
+        }
+        CHECK(WrittenValue(ReadAll(file), "presentation", value));
+        CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == value);
+        DcpSettings::Values saved;
+        CHECK(DcpSettings::Read(file.string(), saved) && saved.presentation == DcpGraphics::ParsePresentation(value));
+    }
+
+    // An existing file without the key stays valid, and the other settings read as before.
+    WriteAll(file, "vsync=0\naspect_ratio=21:9\nrender_resolution=1440p\n");
+    CHECK(LauncherSettings(file).Get(kPresentationKey, kDefaultPresentation) == "letterbox");
+    DcpSettings::Values old;
+    CHECK(DcpSettings::Read(file.string(), old) && !old.vsync && old.presentation == DcpGraphics::Letterbox);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == 2 && dcp_render_resolution(file.string().c_str(), nullptr) == 3);
+
+    // Changing Presentation leaves the aspect ratio and the render resolution as they are, at every ratio.
+    for (const int aspect : {0, 2, 4}) {
+        WriteAll(file, std::string("aspect_ratio=") + dcp_aspect_ratios[aspect].key + "\nrender_resolution=1440p\n");
+        for (const char* value : {"stretch", "letterbox"}) {
+            {
+                LauncherSettings settings(file);
+                settings.Set(kPresentationKey, value);
+                CHECK(settings.Save());
+            }
+            CHECK(WrittenValue(ReadAll(file), "aspect_ratio", dcp_aspect_ratios[aspect].key));
+            CHECK(WrittenValue(ReadAll(file), "render_resolution", "1440p"));
+            CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) == aspect);
+            CHECK(dcp_render_resolution(file.string().c_str(), nullptr) == 3);
+            DcpSettings::Values fit;
+            CHECK(DcpSettings::Read(file.string(), fit) && fit.presentation == DcpGraphics::ParsePresentation(value));
+        }
+    }
+
+    // The launcher's Display page: the label, the choices and the row order (Presentation after VSync).
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    const size_t vsync = launcher.find("ui.Toggle(\"VSync\"");
+    const size_t presentation = launcher.find("ui.Choice(\"Presentation\", kPresentationHelp, kPresentationKey, kDefaultPresentation");
+    const size_t sharpening = launcher.find("ui.Heading(\"Scaling and sharpening\");");
+    CHECK(vsync != std::string::npos && presentation != std::string::npos && sharpening != std::string::npos);
+    CHECK(vsync < presentation && presentation < sharpening);
+    CHECK(launcher.find("\"Controls how the rendered image fits a window or display with a different aspect ratio.\"") !=
+          std::string::npos);
+
+    // Letterbox is the aspect-preserving fit; Stretch is the whole swapchain.
+    const std::string presenter =
+        ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_presenter.cpp");
+    const size_t pick = presenter.find("const vk::ImageBlit blit = stretch");
+    const size_t stretch_blit = presenter.find("MakeImageBlitStretch(frame->width", pick);
+    const size_t fit_blit = presenter.find("MakeImageBlitFit(frame->width", pick);
+    CHECK(pick != std::string::npos && stretch_blit != std::string::npos && fit_blit != std::string::npos);
+    CHECK(stretch_blit < fit_blit);
+    CHECK(presenter.find("DcpSettings::Get().presentation.load() == DcpGraphics::Stretch") != std::string::npos);
+    CHECK(presenter.find("return MakeImageBlit(frame_width, frame_height, swapchain_width, swapchain_height, 0, 0);") !=
+          std::string::npos);
+    CHECK(presenter.find("return MakeImageBlit(frame_width, frame_height, dst_rect.extent.width") != std::string::npos);
 }
 
 void TestGraphicsQuality(const fs::path& base) {
@@ -1457,7 +1882,141 @@ void TestOptions() {
     CHECK(std::string(PageName(kPageOrder[5])) == "Controls");
     CHECK(std::string(PageName(kPageOrder[6])) == "Trophies"); // after Controls, before About
     CHECK(std::string(PageName(kPageOrder[7])) == "About");
-    CHECK(!KeyboardBindings().empty());
+}
+
+// ---- Keyboard bindings ----
+
+std::string KeyNameOf(int scancode) {
+    char name[32];
+    return dcp_key_name(scancode, name, sizeof(name));
+}
+
+void TestKeyBindings(const fs::path& base) {
+    const fs::path file = base / "keys" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    fs::create_directories(file.parent_path());
+
+    // The defaults are the layout the runtime had before the bindings were configurable.
+    DcpKeyMap map;
+    dcp_keys_defaults(&map);
+    CHECK(map.scancode[DCP_KEY_LEFT_STICK_UP] == SDL_SCANCODE_W && map.scancode[DCP_KEY_LEFT_STICK_DOWN] == SDL_SCANCODE_S);
+    CHECK(map.scancode[DCP_KEY_LEFT_STICK_LEFT] == SDL_SCANCODE_A && map.scancode[DCP_KEY_LEFT_STICK_RIGHT] == SDL_SCANCODE_D);
+    CHECK(map.scancode[DCP_KEY_RIGHT_STICK_UP] == SDL_SCANCODE_UP && map.scancode[DCP_KEY_RIGHT_STICK_RIGHT] == SDL_SCANCODE_RIGHT);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE && map.scancode[DCP_KEY_CIRCLE] == SDL_SCANCODE_LSHIFT);
+    CHECK(map.scancode[DCP_KEY_SQUARE] == SDL_SCANCODE_E && map.scancode[DCP_KEY_TRIANGLE] == SDL_SCANCODE_Q);
+    CHECK(map.scancode[DCP_KEY_L1] == SDL_SCANCODE_1 && map.scancode[DCP_KEY_R1] == SDL_SCANCODE_3);
+    CHECK(map.scancode[DCP_KEY_L2] == SDL_SCANCODE_R && map.scancode[DCP_KEY_R2] == SDL_SCANCODE_F);
+    CHECK(map.scancode[DCP_KEY_L3] == SDL_SCANCODE_Z && map.scancode[DCP_KEY_R3] == SDL_SCANCODE_C);
+    CHECK(map.scancode[DCP_KEY_DPAD_UP] == SDL_SCANCODE_I && map.scancode[DCP_KEY_DPAD_RIGHT] == SDL_SCANCODE_L);
+    CHECK(map.scancode[DCP_KEY_OPTIONS] == SDL_SCANCODE_RETURN);
+    CHECK(map.scancode[DCP_KEY_TOUCHPAD_LEFT] == SDL_SCANCODE_TAB && map.scancode[DCP_KEY_TOUCHPAD_RIGHT] == SDL_SCANCODE_BACKSPACE);
+    CHECK(map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10 && map.scancode[DCP_KEY_HOTKEY_WINDOW_MODE] == SDL_SCANCODE_F11);
+    for (int i = 0; i < DCP_KEY_COUNT; ++i) {
+        CHECK(map.scancode[i] != SDL_SCANCODE_F12);
+    }
+
+    // Saved names: the shadPS4 ones, lowercase.
+    CHECK(KeyNameOf(SDL_SCANCODE_SPACE) == "space" && KeyNameOf(SDL_SCANCODE_LSHIFT) == "lshift");
+    CHECK(KeyNameOf(SDL_SCANCODE_F10) == "f10" && KeyNameOf(SDL_SCANCODE_UP) == "up" && KeyNameOf(SDL_SCANCODE_Q) == "q");
+    CHECK(KeyNameOf(SDL_SCANCODE_RETURN) == "enter" && KeyNameOf(SDL_SCANCODE_PAGEUP) == "pgup");
+    CHECK(KeyNameOf(SDL_SCANCODE_ESCAPE).empty() && KeyNameOf(SDL_SCANCODE_UNKNOWN).empty());
+    for (const int scancode : {SDL_SCANCODE_A, SDL_SCANCODE_5, SDL_SCANCODE_F1, SDL_SCANCODE_F12, SDL_SCANCODE_TAB,
+                               SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_DELETE, SDL_SCANCODE_INSERT, SDL_SCANCODE_HOME,
+                               SDL_SCANCODE_END, SDL_SCANCODE_PAGEDOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RSHIFT,
+                               SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL, SDL_SCANCODE_LALT, SDL_SCANCODE_RALT,
+                               SDL_SCANCODE_KP_5, SDL_SCANCODE_KP_ENTER, SDL_SCANCODE_SEMICOLON}) {
+        CHECK(dcp_key_from_name(KeyNameOf(scancode).c_str()) == scancode);
+    }
+
+    // Parsing: case-insensitive, SDL's own names work too, anything else is refused.
+    CHECK(dcp_key_from_name("SPACE") == SDL_SCANCODE_SPACE && dcp_key_from_name("Left Shift") == SDL_SCANCODE_LSHIFT);
+    CHECK(dcp_key_from_name("F10") == SDL_SCANCODE_F10 && dcp_key_from_name("pgdown") == SDL_SCANCODE_PAGEDOWN);
+    CHECK(dcp_key_from_name("") == 0 && dcp_key_from_name(nullptr) == 0 && dcp_key_from_name("notakey") == 0);
+    CHECK(dcp_key_from_name("escape") == 0 && !dcp_key_bindable(SDL_SCANCODE_ESCAPE));
+
+    // Reading the file: valid lines apply, invalid ones keep the default, other lines are ignored.
+    {
+        std::ofstream(file) << "# comment\nshow_launcher = 0\nkey_cross = Q\nkey_circle = notakey\nkey_l1 = \n"
+                               "key_left_stick_up = up\nhotkey_window_mode = f9 # note\nkey_unknown = a\n";
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_Q);
+    CHECK(map.scancode[DCP_KEY_CIRCLE] == SDL_SCANCODE_LSHIFT && map.scancode[DCP_KEY_L1] == SDL_SCANCODE_1);
+    CHECK(map.scancode[DCP_KEY_LEFT_STICK_UP] == SDL_SCANCODE_UP && map.scancode[DCP_KEY_LEFT_STICK_DOWN] == SDL_SCANCODE_S);
+    CHECK(map.scancode[DCP_KEY_HOTKEY_WINDOW_MODE] == SDL_SCANCODE_F9 && map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10);
+
+    // The same key on two controls is allowed: both read it.
+    {
+        std::ofstream(file) << "key_cross = e\n";
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_E && map.scancode[DCP_KEY_SQUARE] == SDL_SCANCODE_E);
+
+    // A missing file and a config without any binding (an older build's) are the defaults.
+    dcp_keys_load((file.parent_path() / "missing.ini").string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE);
+    {
+        std::ofstream(file) << "show_launcher = 0\nvsync = 1\n";
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE && map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10);
+    {
+        const LauncherSettings settings(file);
+        for (int i = 0; i < DCP_KEY_COUNT; ++i) {
+            CHECK(SavedKey(settings, static_cast<DcpKeyAction>(i)) == dcp_key_actions[i].default_scancode);
+        }
+    }
+
+    // Persistence: the launcher writes names, the runtime and the video core read them.
+    {
+        LauncherSettings settings(file);
+        settings.Set(kVSyncKey, "0");
+        SetKey(settings, DCP_KEY_CROSS, SDL_SCANCODE_J);
+        SetKey(settings, DCP_KEY_LEFT_STICK_UP, SDL_SCANCODE_KP_8);
+        SetKey(settings, DCP_KEY_HOTKEY_CHEATS, SDL_SCANCODE_F9);
+        SetKey(settings, DCP_KEY_CIRCLE, SDL_SCANCODE_ESCAPE); // not bindable: ignored
+        CHECK(settings.Save());
+    }
+    const std::string written = ReadAll(file);
+    CHECK(WrittenValue(written, "key_cross", "j") && WrittenValue(written, "key_left_stick_up", "kp8"));
+    CHECK(WrittenValue(written, "hotkey_cheats_menu", "f9") && written.find("key_circle") == std::string::npos);
+    {
+        const LauncherSettings settings(file);
+        CHECK(SavedKey(settings, DCP_KEY_CROSS) == SDL_SCANCODE_J && SavedKey(settings, DCP_KEY_CIRCLE) == SDL_SCANCODE_LSHIFT);
+        CHECK(KeyDisplayName(SavedKey(settings, DCP_KEY_LEFT_STICK_UP)) == "Keypad 8");
+        CHECK(KeyDisplayName(SDL_SCANCODE_RETURN) == "Enter" && KeyDisplayName(SDL_SCANCODE_SPACE) == "Space");
+    }
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_J && map.scancode[DCP_KEY_LEFT_STICK_UP] == SDL_SCANCODE_KP_8);
+    DcpSettings::Values values;
+    CHECK(values.menu_key == SDL_SCANCODE_F10 && values.window_mode_key == SDL_SCANCODE_F11);
+    CHECK(DcpSettings::Read(file.string(), values));
+    CHECK(values.menu_key == SDL_SCANCODE_F9 && values.window_mode_key == SDL_SCANCODE_F11 && !values.vsync);
+
+    // A bad saved name is the default for the launcher too.
+    CHECK(IsValidSetting("key_cross", "q") && !IsValidSetting("key_cross", "notakey") && !IsValidSetting("hotkey_window_mode", "escape"));
+
+    // Reset puts back the keys alone.
+    {
+        LauncherSettings settings(file);
+        ResetKeys(settings);
+        CHECK(settings.Save());
+        for (int i = 0; i < DCP_KEY_COUNT; ++i) {
+            CHECK(SavedKey(settings, static_cast<DcpKeyAction>(i)) == dcp_key_actions[i].default_scancode);
+        }
+    }
+    CHECK(WrittenValue(ReadAll(file), "key_cross", "space") && WrittenValue(ReadAll(file), "vsync", "0"));
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_CROSS] == SDL_SCANCODE_SPACE && map.scancode[DCP_KEY_HOTKEY_CHEATS] == SDL_SCANCODE_F10);
+
+    // Every action has a managed setting with its default name.
+    for (const DcpKeyInfo& action : dcp_key_actions) {
+        bool managed = false;
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            managed |= setting.key == action.ini_key && setting.default_value == KeyNameOf(action.default_scancode);
+        }
+        CHECK(managed);
+    }
 }
 
 // ---- Controller prompts: block patches on synthetic CPK archives ----
@@ -1663,16 +2222,33 @@ void TestControllerPrompts(const fs::path& base) {
     }
     CHECK(managed);
 
-    // The shipped patch parses and names the two button atlas packs.
+    // The shipped patch parses and names the button atlas packs of every language (the plain pack and the English one,
+    // then the German, Spanish, French, Italian and UK packs, which hold the same bytes as the English one), and the
+    // translated message sheets whose touchpad wording it changes.
     {
         const std::string shipped = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "prompts" / "xbox-prompts.dcpx");
         std::string error;
         const std::optional<BlockPatch> patch = ParseBlockPatch(Span(shipped), &error);
-        CHECK(patch && patch->targets.size() == 2);
-        if (patch) {
-            CHECK(patch->targets[0].name == "stage/Interface.ftx" && patch->targets[1].name == "stage/Interface_US.ftx");
-            CHECK(patch->targets[0].size == 31461008 && patch->targets[1].size == 35655696);
-            CHECK(patch->targets[0].runs.size() > 10000 && patch->targets[0].runs.size() == patch->targets[1].runs.size());
+        const std::vector<std::string> atlas_names = {
+            "stage/Interface.ftx",    "stage/Interface_US.ftx", "stage/Interface_DE.ftx", "stage/Interface_ES.ftx",
+            "stage/Interface_FR.ftx", "stage/Interface_IT.ftx", "stage/Interface_UK.ftx"};
+        const std::vector<std::string> message_names = {"msgsheet/SystemMsg_DE.fms", "msgsheet/SystemMsg_ES.fms",
+                                                        "msgsheet/SystemMsg_FR.fms", "msgsheet/SystemMsg_IT.fms"};
+        CHECK(patch && patch->targets.size() == atlas_names.size() + message_names.size());
+        if (patch && patch->targets.size() == atlas_names.size() + message_names.size()) {
+            const BlockPatchTarget& us = patch->targets[1];
+            for (size_t i = 0; i < atlas_names.size(); ++i) {
+                const BlockPatchTarget& target = patch->targets[i];
+                CHECK(target.name == atlas_names[i]);
+                CHECK(target.size == (i == 0 ? 31461008u : 35655696u));
+                CHECK(target.runs.size() > 10000);
+                CHECK(i == 0 || (target.runs.size() == us.runs.size() && target.crc_before == us.crc_before));
+            }
+            for (size_t i = 0; i < message_names.size(); ++i) {
+                const BlockPatchTarget& target = patch->targets[atlas_names.size() + i];
+                CHECK(target.name == message_names[i]);
+                CHECK(!target.runs.empty() && target.runs.size() < 100);
+            }
         }
         CHECK(!ParseBlockPatch(Span(shipped.substr(0, 100)), &error) && error.find("truncated") != std::string::npos);
         CHECK(!ParseBlockPatch(Span(std::string("hello")), &error));
@@ -1694,7 +2270,7 @@ void TestControllerPrompts(const fs::path& base) {
     const std::string original = BuildCpk({{"stage/Interface.ftx", iface, true}}, false);
     WriteAll(app0 / "DRACRO_US.CPK", original_us);
     WriteAll(app0 / "DRACRO.CPK", original);
-    CHECK(PromptArchives(app0, kUs).size() == 2 && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(PromptArchives(app0, kUs).size() == 2 && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
 
     // Reading: header, TOC (encrypted), case-insensitive lookup, CRILAYLA.
     {
@@ -1722,7 +2298,7 @@ void TestControllerPrompts(const fs::path& base) {
     hooks.phase = [&phases](const char* text) { phases.emplace_back(text); };
     PromptsResult r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes), hooks);
     CHECK(r.ok && !r.cancelled);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kXbox);
     CHECK(fs::exists(UndoPath(app0 / "DRACRO_US.CPK")) && fs::exists(UndoPath(app0 / "DRACRO.CPK")));
     CHECK(!phases.empty() && phases[0] == "Patching DRACRO_US.CPK...");
     {
@@ -1750,14 +2326,14 @@ void TestControllerPrompts(const fs::path& base) {
     r = SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {});
     CHECK(r.ok);
     CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && ReadAll(app0 / "DRACRO.CPK") == original);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
     r = SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {});
     CHECK(r.ok && r.detail.find("not patched") != std::string::npos);
 
     // A half-patched install reads as PlayStation; Xbox completes it, PlayStation cleans it up.
     CHECK(ApplyBlockPatch(app0 / "DRACRO.CPK", *ParseBlockPatch(Span(patch_bytes))).ok);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
-    CHECK(SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok && InstalledPromptStyle(app0, kUs) == PromptStyle::kXbox);
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
+    CHECK(SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kXbox);
     CHECK(SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
 
     // Cancelling while writing leaves the archive as it was.
@@ -1765,7 +2341,7 @@ void TestControllerPrompts(const fs::path& base) {
     hooks.progress = [](uint64_t, uint64_t) { return false; };
     r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes), hooks);
     CHECK(!r.ok && r.cancelled);
-    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
 
     // An archive whose entry is not the file the patch was made for is skipped and named; others are patched.
     std::string foreign = iface;
@@ -1773,15 +2349,15 @@ void TestControllerPrompts(const fs::path& base) {
     WriteAll(app0 / "DRACRO.CPK", BuildCpk({{"stage/Interface.ftx", foreign, false}}, false));
     r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(patch_bytes));
     CHECK(r.ok && r.detail.find("stage/Interface.ftx is not the file the patch was made for") != std::string::npos);
-    CHECK(InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation); // DRACRO.CPK stayed original: no undo record
+    CHECK(InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation); // DRACRO.CPK stayed original: no undo record
     CHECK(ArchiveState(app0 / "DRACRO_US.CPK") == ArchivePatchState::kPatched);
     CHECK(SetPromptStyle(app0, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
 
     // An unreadable patch is refused before anything is touched; a folder without archives too.
     r = SetPromptStyle(app0, kUs, PromptStyle::kXbox, Span(std::string("DCPX1")));
-    CHECK(!r.ok && r.detail.find("unreadable") != std::string::npos && InstalledPromptStyle(app0, kUs) == PromptStyle::kPlayStation);
+    CHECK(!r.ok && r.detail.find("unreadable") != std::string::npos && InstalledPromptStyle(app0, kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
     CHECK(!SetPromptStyle(base / "nowhere", kUs, PromptStyle::kXbox, Span(patch_bytes)).ok);
-    CHECK(PromptArchives(base / "nowhere", kUs).empty() && InstalledPromptStyle(base / "nowhere", kUs) == PromptStyle::kPlayStation);
+    CHECK(PromptArchives(base / "nowhere", kUs).empty() && InstalledPromptStyle(base / "nowhere", kUs, Span(patch_bytes)) == PromptStyle::kPlayStation);
 
     // Failures and interruptions leave the archive usable: it is put back, or recognised and redone.
     {
@@ -1831,10 +2407,65 @@ void TestControllerPrompts(const fs::path& base) {
         fs::create_hard_link(shared / "DRACRO_US.CPK", linked / "DRACRO_US.CPK", ec);
         if (!ec) {
             CHECK(SetPromptStyle(linked, kUs, PromptStyle::kXbox, Span(patch_bytes)).ok);
-            CHECK(InstalledPromptStyle(linked, kUs) == PromptStyle::kXbox && ReadAll(shared / "DRACRO_US.CPK") == original_us);
+            CHECK(InstalledPromptStyle(linked, kUs, Span(patch_bytes)) == PromptStyle::kXbox && ReadAll(shared / "DRACRO_US.CPK") == original_us);
             CHECK(fs::hard_link_count(linked / "DRACRO_US.CPK") == 1 && !fs::exists(linked / "DRACRO_US.CPK.copy"));
             CHECK(SetPromptStyle(linked, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(linked / "DRACRO_US.CPK") == original_us);
         }
+
+        // An update staged over a patched base starts from the original archive, and the base keeps its patch.
+        const fs::path patched_base = base / "update_base", staged = base / "update_staged", update_files = base / "update_files";
+        WriteAll(patched_base / "DRACRO_US.CPK", original_us);
+        CHECK(ApplyBlockPatch(patched_base / "DRACRO_US.CPK", parsed).ok);
+        const std::string patched_base_bytes = ReadAll(patched_base / "DRACRO_US.CPK");
+        CHECK(patched_base_bytes != original_us);
+        fs::create_directories(update_files);
+        CHECK(StageUpdate(patched_base, update_files, staged).ok());
+        CHECK(ReadAll(staged / "DRACRO_US.CPK") == original_us && !fs::exists(UndoPath(staged / "DRACRO_US.CPK")));
+        CHECK(ReadAll(patched_base / "DRACRO_US.CPK") == patched_base_bytes && fs::exists(UndoPath(patched_base / "DRACRO_US.CPK")));
+    }
+
+    // An install patched by an earlier patch, which lacks a language pack, reads as PlayStation until the newer patch is
+    // applied, and then holds that pack too.
+    {
+        const fs::path upgrade = base / "prompts_upgrade";
+        fs::create_directories(upgrade);
+        WriteAll(upgrade / "DRACRO_US.CPK",
+                 BuildCpk({{"stage/Interface_US.ftx", iface_us, true}, {"stage/Interface_ES.ftx", iface_us, true}}, true));
+        const std::string earlier = MakePatch({{"stage/Interface_US.ftx", {iface_us, want_us}}});
+        const std::string later =
+            MakePatch({{"stage/Interface_US.ftx", {iface_us, want_us}}, {"stage/Interface_ES.ftx", {iface_us, want_us}}});
+        CHECK(ApplyBlockPatch(upgrade / "DRACRO_US.CPK", *ParseBlockPatch(Span(earlier))).ok);
+        CHECK(InstalledPromptStyle(upgrade, kUs, Span(earlier)) == PromptStyle::kXbox);
+        CHECK(InstalledPromptStyle(upgrade, kUs, Span(later)) == PromptStyle::kPlayStation);
+        CHECK(SetPromptStyle(upgrade, kUs, PromptStyle::kXbox, Span(later)).ok &&
+              InstalledPromptStyle(upgrade, kUs, Span(later)) == PromptStyle::kXbox);
+        CpkArchive archive;
+        CHECK(archive.Open(upgrade / "DRACRO_US.CPK") && Bytes(archive.Read(*archive.Find("stage/Interface_ES.ftx"))) == want_us);
+    }
+
+    // An install patched by a patch that held an entry the current one does not is stale: it is restored to the original
+    // and patched again, so the dropped entry is not left behind and the undo record keeps the original length.
+    {
+        const fs::path stale = base / "prompts_stale";
+        fs::create_directories(stale);
+        const std::string archive_bytes =
+            BuildCpk({{"stage/Interface_US.ftx", iface_us, true}, {"msgsheet/SystemMsg_DE.fms", fms, true}}, true);
+        WriteAll(stale / "DRACRO_US.CPK", archive_bytes);
+        std::string fms_patched = fms;
+        fms_patched.replace(96, 16, 16, 'T');
+        const std::string earlier = MakePatch(
+            {{"stage/Interface_US.ftx", {iface_us, want_us}}, {"msgsheet/SystemMsg_DE.fms", {fms, fms_patched}}});
+        const std::string later = MakePatch({{"stage/Interface_US.ftx", {iface_us, want_us}}});
+        CHECK(ApplyBlockPatch(stale / "DRACRO_US.CPK", *ParseBlockPatch(Span(earlier))).ok);
+        CHECK(InstalledPromptStyle(stale, kUs, Span(earlier)) == PromptStyle::kXbox);
+        CHECK(InstalledPromptStyle(stale, kUs, Span(later)) == PromptStyle::kPlayStation);
+        CHECK(SetPromptStyle(stale, kUs, PromptStyle::kXbox, Span(later)).ok &&
+              InstalledPromptStyle(stale, kUs, Span(later)) == PromptStyle::kXbox);
+        CpkArchive archive;
+        CHECK(archive.Open(stale / "DRACRO_US.CPK"));
+        CHECK(Bytes(archive.Read(*archive.Find("msgsheet/SystemMsg_DE.fms"))) == fms);
+        CHECK(Bytes(archive.Read(*archive.Find("stage/Interface_US.ftx"))) == want_us);
+        CHECK(SetPromptStyle(stale, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(stale / "DRACRO_US.CPK") == archive_bytes);
     }
 
     // CRILAYLA: a corrupt block is an error, not a crash.
@@ -1954,7 +2585,6 @@ void TestLayers(const fs::path& base) {
     CheckSites(kJp100);
     CheckSites(kJp102);
     CheckSites(kJp103);
-    CheckSites(kCk);
     CheckSites(kCk100);
     CHECK(std::string(kJp100.title_id) == "CUSA07001" && std::string(kJp100.content_id) == "JP0005-CUSA07001_00-DRAGONSCROWN0001");
     CHECK(std::string(FinishedLayer(kJp100).app_ver) == "01.00" && std::string(FinishedLayer(kJp100).sfo_version) == "01.00");
@@ -1997,8 +2627,16 @@ void TestLayers(const fs::path& base) {
     CHECK(InstallGame(pkg / "jp-103.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
     WriteAll(pkg / "us-update.pkg", MakePackage(PackageSfo(kUs, "01.03", "01.00", "gp")));
     CHECK(InstallGame(pkg / "us-update.pkg", empty).status == InstallStatus::kWrongVersion);
-    CHECK(BaseBuildOf(kJp102) == &SupportedBuilds()[1] && BaseBuildOf(kJp103) == &SupportedBuilds()[1]);
-    CHECK(BaseBuildOf(kJp100) == nullptr && BaseBuildOf(kUs) == nullptr && BaseBuildOf(kCk) == nullptr);
+    WriteAll(pkg / "us-101.pkg", MakePackage(PackageSfo(kUs101, "01.01", "01.03", "gp")));
+    CHECK(InstallGame(pkg / "us-101.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
+    CHECK(BaseBuildOf(kJp102) == &SupportedBuilds()[2] && BaseBuildOf(kJp103) == &SupportedBuilds()[2]);
+    CHECK(BaseBuildOf(kJp100) == nullptr && BaseBuildOf(kUs) == nullptr && BaseBuildOf(kCk) == &kCk100);
+    CHECK(BaseBuildOf(kUs101) == &kUs);
+    WriteAll(pkg / "ck-102.pkg", MakePackage(PackageSfo(kCk, "01.02", "01.00", "gp")));
+    CHECK(InstallGame(pkg / "ck-102.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
+    CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).title == "Base game required");
+    CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).text.find("CUSA10209 1.00 Asia/Hong Kong") != std::string::npos);
+    CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).text.find("CUSA10454 1.00 USA") != std::string::npos);
 
     Fixture installed(root, "installed-1.03", kJp103);
     const GameRoots present{root / "present" / "prepared", root / "present" / "image"};
@@ -2079,6 +2717,51 @@ void TestLayers(const fs::path& base) {
     CHECK(CheckGameTree(base_game.paths.app0, builds).build == &builds[0] && ReadAll(base_game.paths.app0 / "eboot.bin") == kEboot);
 
     {
+        Fixture ck_base(root, "ck-base-1.00", kCk100);
+        const fs::path ck_update = root / "ck-update-1.02";
+        WriteAll(ck_update / "sce_sys" / "param.sfo", PackageSfo(kCk, "01.02", "01.00", "gp"));
+        GameBuild ck102 = kCk;
+        ck102.eboot_sha256 = ck_base.build.eboot_sha256;
+        const std::vector<GameBuild> ck_builds = {ck_base.build, ck102};
+        CHECK(BaseBuildOf(ck_builds[1], ck_builds) == &ck_builds[0]);
+        const std::string base_sfo = ReadAll(ck_base.paths.app0 / "sce_sys" / "param.sfo");
+        const fs::path ck_staged = root / "ck-staged-1.02";
+        CHECK(StageUpdate(ck_base.paths.app0, ck_update, ck_staged).ok());
+        const GameCheck staged = CheckGameTree(ck_staged, ck_builds);
+        CHECK(staged.state == GameFileState::kValid && staged.build == &ck_builds[1]);
+        const GameCheck untouched = CheckGameTree(ck_base.paths.app0, ck_builds);
+        CHECK(untouched.state == GameFileState::kValid && untouched.build == &ck_builds[0]);
+        CHECK(ReadAll(ck_base.paths.app0 / "sce_sys" / "param.sfo") == base_sfo);
+        CHECK(std::string(ck_builds[0].folder) == "CUSA10209-1.00" && std::string(ck_builds[1].folder) == "CUSA10209-1.02");
+        CHECK(std::string(ck_builds[0].eboot_sha256) == ck_builds[1].eboot_sha256);
+    }
+    {
+        Fixture us_base(root, "us-base-1.00", kUs);
+        const fs::path us_update = root / "us-update-1.01";
+        WriteAll(us_update / "eboot.bin", "eboot 1.01");
+        WriteAll(us_update / "DRACRO_US.CPK", "archive 1.01");
+        WriteAll(us_update / "sce_discmap.plt", "discmap 1.01");
+        WriteAll(us_update / "sce_discmap_patch.plt", "discmap patch 1.01");
+        WriteAll(us_update / "sce_sys" / "param.sfo", PackageSfo(kUs101, "01.01", "01.03", "gp"));
+        const std::string sha101 = Sha256Hex(us_update / "eboot.bin");
+        GameBuild us101 = kUs101;
+        us101.eboot_sha256 = sha101.c_str();
+        const std::vector<GameBuild> us_builds = {us_base.build, us101};
+        CHECK(BaseBuildOf(us_builds[1], us_builds) == &us_builds[0]);
+        const std::string base_sfo = ReadAll(us_base.paths.app0 / "sce_sys" / "param.sfo");
+        const fs::path us_staged = root / "us-staged-1.01";
+        CHECK(StageUpdate(us_base.paths.app0, us_update, us_staged).ok());
+        const GameCheck staged = CheckGameTree(us_staged, us_builds);
+        CHECK(staged.state == GameFileState::kValid && staged.build == &us_builds[1]);
+        CHECK(ReadAll(us_staged / "eboot.bin") == "eboot 1.01" && ReadAll(us_staged / "DRACRO_US.CPK") == "archive 1.01");
+        CHECK(fs::exists(us_staged / "sce_discmap_patch.plt")); // the update's discmap patch survives the overlay
+        const GameCheck untouched = CheckGameTree(us_base.paths.app0, us_builds);
+        CHECK(untouched.state == GameFileState::kValid && untouched.build == &us_builds[0]);
+        CHECK(ReadAll(us_base.paths.app0 / "sce_sys" / "param.sfo") == base_sfo);
+        CHECK(std::string(us_builds[0].folder) == "v1.03" && std::string(us_builds[1].folder) == "CUSA10454-1.01");
+        CHECK(std::string(us_builds[0].eboot_sha256) != us_builds[1].eboot_sha256);
+    }
+    {
         Fixture merged(root, "jp-merged", kJp103);
         CHECK(merged.State() == GameFileState::kValid);
         CHECK(!fs::exists(merged.paths.app0 / "DRACRO_US.CPK"));
@@ -2089,32 +2772,53 @@ void TestLayers(const fs::path& base) {
         const fs::path prompts = root / "jp-prompts";
         WriteAll(prompts / "DRACRO_PATCH_JP.CPK", "jp archive");
         WriteAll(prompts / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(prompts, kJp103).empty() && InstalledPromptStyle(prompts, kJp103) == PromptStyle::kPlayStation);
+        CHECK(PromptArchives(prompts, kJp103).empty() && InstalledPromptStyle(prompts, kJp103, {}) == PromptStyle::kPlayStation);
         CHECK(!SetPromptStyle(prompts, kJp103, PromptStyle::kXbox, {}).ok);
         CHECK(ReadAll(prompts / "DRACRO_PATCH_JP.CPK") == "jp archive" && ReadAll(prompts / "DRACRO.CPK") == "shared archive");
     }
 }
 
-// The CUSA10454 base is the only verified US build; an APP_VER 01.01 package is not part of any supported build.
+// The CUSA10454 base and its 1.01 update: the update is a second layer, never a base package on its own.
 void TestUsBuild() {
     CHECK(std::string(kUs.label) == "CUSA10454 1.00 USA" && std::string(kUs.version) == "1.00");
     CHECK(kUs.layers.size() == 1 && std::string(FinishedLayer(kUs).app_ver) == "01.00" &&
           std::string(FinishedLayer(kUs).sfo_version) == "01.03");
     CHECK(std::string(kUs.eboot_sha256) == "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a");
     CHECK(kUs.cheats && kUs.xbox_prompts && kUs.resolution_sites.size() == 23 && BaseBuildOf(kUs) == nullptr);
+    CHECK(kUs.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs));
+    CHECK(!kUs101.japanese_npc_voices && !SupportsJapaneseNpcVoices(&kUs101));
+    CHECK(!SupportsJapaneseNpcVoices(nullptr));
+
+    CHECK(std::string(kUs101.label) == "CUSA10454 1.01 USA" && std::string(kUs101.version) == "1.01");
+    CHECK(std::string(kUs101.folder) == "CUSA10454-1.01" && std::string(kUs101.folder) != kUs.folder);
+    CHECK(kUs101.layers.size() == 2 && !kUs101.layers[0].update && kUs101.layers[1].update);
+    CHECK(std::string(FinishedLayer(kUs101).app_ver) == "01.01" &&
+          std::string(FinishedLayer(kUs101).sfo_version) == "01.03");
+    CHECK(std::string(kUs101.eboot_sha256) == "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0");
+    CHECK(std::string(kUs101.eboot_sha256) != kUs.eboot_sha256);
+    CHECK(!kUs101.cheats && !kUs101.xbox_prompts && !kUs101.japanese_npc_voices && kUs101.resolution_sites.empty());
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(build.japanese_npc_voices == (&build == &kUs));
+        CHECK(SupportsJapaneseNpcVoices(&build) == (&build == &kUs));
+    }
+    CHECK(BaseBuildOf(kUs101) == &kUs && BaseBuildOf(kUs) == nullptr);
     for (const GameBuild& build : SupportedBuilds()) {
         CHECK((build.cheats || build.xbox_prompts) == (&build == &kUs));
-        CHECK(std::string(build.label).find("1.01") == std::string::npos);
     }
+
     CHECK(CheckSfoIdentity(SfoFor(kUs, "01.00", "01.03")).build == &kUs);
     CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gd")).build == &kUs);
-    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01", "01.03")).state == GameFileState::kDifferentVersion);
-    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.01", "01.03", "gp")).state == GameFileState::kDifferentVersion);
-    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.01", "01.03", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kUs101)).build == &kUs101);
+    CHECK(CheckSfoIdentity(SfoFor(kUs101, "01.00", "01.03")).build == &kUs);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs101, "01.00", "01.03", "gd")).build == &kUs);
+    const GameCheck us_update = CheckPackageIdentity(PackageSfo(kUs101, "01.01", "01.03", "gp"));
+    CHECK(us_update.build == &kUs101 && us_update.layer == 1);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs101, "01.01", "01.03", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.02", "01.03")).state == GameFileState::kDifferentVersion);
     CHECK(SupportedBuildsText().find("CUSA10454 1.00 USA, ") == 0);
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
-    CHECK(launcher.find("The Japanese 1.02 and 1.03 updates are installed over the 1.00 base package.") != std::string::npos);
-    CHECK(launcher.find("USA update") == std::string::npos);
+    CHECK(launcher.find("The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages.") != std::string::npos);
 }
 
 // Prepared CUSA10454 folders made before the build was named 1.00 carry the marker version 1.03.
@@ -2154,7 +2858,7 @@ void TestLegacyMarker(const fs::path& base) {
     write_marker(update, "1.03");
     CHECK(update.State() == GameFileState::kDifferentVersion && JsonString(marker_of(update), "version") == "1.03");
 
-    for (const GameBuild* other : {&kJp100, &kJp102, &kJp103, &kCk}) {
+    for (const GameBuild* other : {&kUs101, &kJp100, &kJp102, &kJp103, &kCk}) {
         Fixture f(base, "legacy-other", *other);
         const std::string version = other->version;
         write_marker(f, "1.03");
@@ -2256,7 +2960,7 @@ void TestActivation(const fs::path& base) {
     WriteAll(pkg / "jp-102.pkg", MakePackage(PackageSfo(kJp102, "01.02", "01.00", "gp")));
     WriteAll(pkg / "jp-103.pkg", MakePackage(PackageSfo(kJp103, "01.03", "01.00", "gp")));
     WriteAll(pkg / "us.pkg", MakePackage(PackageSfo(kUs, "01.00", "01.03", "gd")));
-    WriteAll(pkg / "ck.pkg", MakePackage(SfoFor(kCk)));
+    WriteAll(pkg / "ck.pkg", MakePackage(PackageSfo(kCk, "01.02", "01.00", "gp")));
     const auto select = [&](const char* name) { return InstallGame(pkg / name, roots, {}, builds); };
     // Selects a package while builds[from] is active; true when builds[to] is activated with no game data copied.
     const auto switches = [&](size_t from, const char* name, size_t to) {
@@ -2317,7 +3021,7 @@ void TestActivation(const fs::path& base) {
     const Paths loader_100 = ResolvePaths(PathRequest{}, root / "exe");
     CHECK(loader_100.app0 == BuildPaths(roots, builds[1]).app0);
 
-    // The US and CUSA10209 builds keep their single version: selecting the active one is up to date.
+    // The US build keeps its single version; the CUSA10209 1.02 update activates over its own prepared folder.
     CHECK(switches(3, "us.pkg", 0));
     CHECK(select("us.pkg").status == InstallStatus::kUpToDate && active().build == &builds[0]);
     CHECK(switches(0, "ck.pkg", 4));
@@ -2329,32 +3033,120 @@ void TestActivation(const fs::path& base) {
 
 // The supported builds: their identities, archives, flags and the boot image report that names them, and the
 // checks that keep one build's files out of another build's folders.
+void TestSafeMode(const fs::path& base) {
+    using namespace cpk_test;
+    CHECK(std::string(kArachnophobiaSafeModeKey) == "arachnophobia_safe_mode");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kArachnophobiaSafeModeKey && setting.default_value == "0";
+    }
+    CHECK(managed);
+
+    {
+        const std::string shipped = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "prompts" / "arachnophobia-spider.dcpx");
+        const std::optional<BlockPatch> patch = ParseBlockPatch(Span(shipped));
+        CHECK(patch && patch->targets.size() == 1);
+        if (patch) {
+            CHECK(patch->targets[0].name == kSpiderEntry && patch->targets[0].size == 8389072);
+            CHECK(patch->targets[0].runs.size() > 10000);
+        }
+    }
+
+    std::string iface(20480, '\0'), iface_us(24576, '\0'), spider(16384, '\0');
+    for (size_t i = 0; i < iface.size(); ++i) iface[i] = char((i * 7 + i / 64) & 255);
+    for (size_t i = 0; i < iface_us.size(); ++i) iface_us[i] = char((i * 13 + i / 32) & 255);
+    for (size_t i = 0; i < spider.size(); ++i) spider[i] = char((i * 5 + i / 16) & 255);
+    std::string want = iface, want_us = iface_us, want_spider = spider;
+    for (size_t off : {0x340u, 0x1000u}) want.replace(off, 16, 16, 'X');
+    for (size_t off : {0x380u, 0x2000u}) want_us.replace(off, 16, 16, 'Y');
+    for (size_t off : {0x100u, 0x2000u, 0x3ff0u}) want_spider.replace(off, 16, 16, 'W');
+    const std::string xbox = MakePatch({{"stage/Interface.ftx", {iface, want}}, {"stage/Interface_US.ftx", {iface_us, want_us}}});
+    const std::string safe = MakePatch({{kSpiderEntry, {spider, want_spider}}});
+
+    const fs::path app0 = base / "safe_mode_app0";
+    fs::create_directories(app0);
+    const std::string original_us = BuildCpk({{"stage/Interface_US.ftx", iface_us, true}}, true);
+    const std::string original = BuildCpk({{"stage/Interface.ftx", iface, true}, {kSpiderEntry, spider, true}}, false);
+    WriteAll(app0 / "DRACRO_US.CPK", original_us);
+    WriteAll(app0 / "DRACRO.CPK", original);
+    const auto read = [&](const char* archive, const char* entry) {
+        CpkArchive a;
+        const CpkEntry* e = a.Open(app0 / archive) ? a.Find(entry) : nullptr;
+        return e ? Bytes(a.Read(*e)) : std::string("<missing>");
+    };
+    const auto set = [&](PromptStyle style, bool on) {
+        return SetGamePatches(app0, kUs, style, on, Span(xbox), Span(safe));
+    };
+    CHECK(!InstalledSafeMode(app0));
+
+    CHECK(set(PromptStyle::kXbox, true).ok);
+    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
+    CHECK(read("DRACRO.CPK", kSpiderEntry) == want_spider && read("DRACRO.CPK", "stage/Interface.ftx") == want);
+    CHECK(read("DRACRO_US.CPK", "stage/Interface_US.ftx") == want_us);
+    const std::string both = ReadAll(app0 / "DRACRO.CPK");
+    PromptsResult again = set(PromptStyle::kXbox, true);
+    CHECK(again.ok && ReadAll(app0 / "DRACRO.CPK") == both);
+
+    CHECK(set(PromptStyle::kXbox, false).ok);
+    CHECK(!InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
+    CHECK(read("DRACRO.CPK", kSpiderEntry) == spider && read("DRACRO.CPK", "stage/Interface.ftx") == want);
+
+    CHECK(set(PromptStyle::kPlayStation, true).ok);
+    CHECK(InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kPlayStation);
+    CHECK(read("DRACRO.CPK", kSpiderEntry) == want_spider && read("DRACRO.CPK", "stage/Interface.ftx") == iface);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+
+    CHECK(set(PromptStyle::kXbox, true).ok && InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
+    CHECK(set(PromptStyle::kPlayStation, false).ok);
+    CHECK(ReadAll(app0 / "DRACRO.CPK") == original && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+    CHECK(!InstalledSafeMode(app0) && !fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+
+    CHECK(!SetGamePatches(app0, kUs, PromptStyle::kXbox, true, Span(xbox), Span(std::string("DCPX1"))).ok);
+    CHECK(!InstalledSafeMode(app0) && ReadAll(app0 / "DRACRO.CPK") == original);
+
+    CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, true, {}, Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(!SetGamePatches(app0, kJp103, PromptStyle::kXbox, true, Span(xbox), Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, false, {}, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
+}
+
 void TestBuilds(const fs::path& base) {
-    CHECK(SupportedBuilds().size() == 6);
+    CHECK(SupportedBuilds().size() == 7);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
     CHECK(std::string(kUs.folder) == "v1.03" && std::string(kCk.folder) == "CUSA10209-1.02");
     CHECK(std::string(kCk.content_id) == "HP0177-CUSA10209_00-DRAGONSCROWN0001");
     CHECK(std::string(FinishedLayer(kCk).app_ver) == "01.02" && std::string(FinishedLayer(kCk).sfo_version) == "01.00" && std::string(kCk.version) == "1.02");
-    CHECK(std::string(kCk.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
+    CHECK(std::string(kCk.eboot_sha256) == "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5");
     CHECK(std::string(kCk.regional_archive) == "DRACRO_CK.CPK" && std::string(kUs.regional_archive) == "DRACRO_US.CPK");
     CHECK(!kCk.cheats && !kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
-    CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.size() == 23);
-    CHECK(kCk.resolution_sites.front().offset == 0x5978a8 && kCk.resolution_sites.back().offset == 0x598128);
+    // 1.00 and 1.02 are different executables: only 1.00 has verified render resolution sites.
+    CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.empty());
+    CHECK(kCk100.resolution_sites.size() == 23);
+    CHECK(kCk100.resolution_sites.front().offset == 0x5978a8 && kCk100.resolution_sites.back().offset == 0x598128);
+    CHECK(!RestrictedToNativeResolution(&kUs) && !RestrictedToNativeResolution(&kCk100));
+    CHECK(RestrictedToNativeResolution(&kCk) && !RestrictedToNativeResolution(nullptr));
 
     CHECK(CheckSfoIdentity(SfoFor(kCk)).build == &kCk);
     CHECK(CheckSfoIdentity(SfoFor(kCk100)).build == &kCk100);
     CHECK(std::string(kCk100.label) == "CUSA10209 1.00 Asia/Hong Kong" && std::string(kCk100.folder) == "CUSA10209-1.00");
     CHECK(std::string(FinishedLayer(kCk100).app_ver) == "01.00" && std::string(FinishedLayer(kCk100).sfo_version) == "01.02");
-    CHECK(std::string(kCk100.eboot_sha256) == kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
-    CHECK(!kCk100.cheats && !kCk100.xbox_prompts && kCk100.resolution_sites.data() == kCk.resolution_sites.data());
-    CHECK(kCk100.resolution_sites.size() == 23 && kCk100.layers.size() == 1 && BaseBuildOf(kCk) == nullptr);
+    CHECK(std::string(kCk100.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
+    CHECK(std::string(kCk100.eboot_sha256) != kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
+    CHECK(!kCk100.cheats && !kCk100.xbox_prompts);
+    CHECK(std::string(kCk100.folder) != kCk.folder);
+    CHECK(kCk100.layers.size() == 1 && BaseBuildOf(kCk) == &kCk100 && BaseBuildOf(kCk100) == nullptr);
+    CHECK(kCk.layers.size() == 2 && kCk.layers[1].update);
+    const GameCheck ck_update = CheckPackageIdentity(PackageSfo(kCk, "01.02", "01.00", "gp"));
+    CHECK(ck_update.build == &kCk && ck_update.layer == 1);
+    CHECK(CheckPackageIdentity(PackageSfo(kCk, "01.02", "01.00", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kCk100, "01.00", "01.02", "gd")).layer == 0);
     CHECK(CheckSfoIdentity(SfoFor(kCk100, "01.02")).build == nullptr);
     CHECK(CheckSfoIdentity(SfoFor(kCk100, nullptr, "01.00")).build == nullptr);
     CHECK(CheckPackageIdentity(PackageSfo(kCk100, "01.00", "01.02", "gd")).build == &kCk100);
     CHECK(CheckSfoIdentity(SfoFor(kUs)).build == &kUs);
     CHECK(CheckSfoIdentity(SfoFor(kCk, "01.01")).state == GameFileState::kDifferentVersion);
     CHECK(CheckSfoIdentity(SfoFor(kCk, nullptr, "01.03")).state == GameFileState::kDifferentVersion);
-    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.01")).build == &kUs101); // the USA 1.01 update is now a build
+    CHECK(CheckSfoIdentity(SfoFor(kUs, "01.02")).state == GameFileState::kDifferentVersion);
     CHECK(CheckSfoIdentity(MakeSfo({{"TITLE_ID", "CUSA00000"},
                                     {"CONTENT_ID", std::string(kCk.content_id)},
                                     {"APP_VER", std::string(FinishedLayer(kCk).app_ver)},
@@ -2369,10 +3161,17 @@ void TestBuilds(const fs::path& base) {
         return dcp_game_build(report_dir.string().c_str(), &game) ? std::string(game.label) : std::string();
     };
     CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.02") == kCk.label);
-    CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.00") == kCk100.label);
-    CHECK(build_label("CUSA10209", kCk.eboot_sha256).empty());
+    CHECK(build_label("CUSA10209", kCk100.eboot_sha256, "01.00") == kCk100.label);
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256) == kCk.label);       // each distinct hash names its own build
+    CHECK(build_label("CUSA10209", kCk100.eboot_sha256) == kCk100.label);
+    CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.00").empty());   // and never the other one
+    CHECK(build_label("CUSA10209", kCk100.eboot_sha256, "01.02").empty());
     CHECK(build_label("CUSA10209", kCk.eboot_sha256, "01.01").empty());
     CHECK(build_label("CUSA10454", kUs.eboot_sha256) == kUs.label);
+    CHECK(build_label("CUSA10454", kUs101.eboot_sha256, "01.01") == kUs101.label);
+    CHECK(build_label("CUSA10454", kUs101.eboot_sha256) == kUs101.label);   // each distinct hash names its own build
+    CHECK(build_label("CUSA10454", kUs.eboot_sha256, "01.01").empty());     // and never the other one
+    CHECK(build_label("CUSA10454", kUs101.eboot_sha256, "01.00").empty());
     CHECK(build_label("CUSA10209", "05dad7c244e76df186eb440818bed6c567aadec1180595a04975fab6d848edf2").empty());
     CHECK(build_label("CUSA10209", kUs.eboot_sha256).empty());
     CHECK(build_label("CUSA10454", kCk.eboot_sha256).empty());
@@ -2382,7 +3181,7 @@ void TestBuilds(const fs::path& base) {
     WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\",\n  \"app_ver\": \"01.02\"\n}");
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
-    CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 23 && ck_game.resolution_sites == kCk.resolution_sites.data());
+    CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
 
     {
         Fixture ck(base, "ck-valid", kCk);
@@ -2436,40 +3235,109 @@ void TestBuilds(const fs::path& base) {
         fs::remove_all(app0);
         WriteAll(app0 / "DRACRO_CK.CPK", "ck archive");
         WriteAll(app0 / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(app0, kCk).empty() && InstalledPromptStyle(app0, kCk) == PromptStyle::kPlayStation);
+        CHECK(PromptArchives(app0, kCk).empty() && InstalledPromptStyle(app0, kCk, {}) == PromptStyle::kPlayStation);
         CHECK(!SetPromptStyle(app0, kCk, PromptStyle::kXbox, {}).ok);
         CHECK(SetPromptStyle(app0, kCk, PromptStyle::kPlayStation, {}).ok);
         CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == "ck archive" && ReadAll(app0 / "DRACRO.CPK") == "shared archive");
     }
 
+    // CUSA10209 1.02 has no verified render resolution sites, so it can never receive the 1.00 table: its table is empty
+    // and applying it writes nothing.
+    CHECK(kCk.resolution_sites.empty() && kCk.resolution_sites.data() != kCk100.resolution_sites.data());
     {
-        const auto sites = kCk.resolution_sites;
-        uint64_t size = 0;
-        for (const DcpResolutionSite& site : sites) {
-            size = std::max<uint64_t>(size, site.offset + site.opcode_length + 4u);
-        }
-        std::vector<unsigned char> image(size + 16, 0x90);
-        for (const DcpResolutionSite& site : sites) {
-            std::memcpy(&image[site.offset], site.opcode, site.opcode_length);
-            std::memcpy(&image[site.offset + site.opcode_length], &site.value, 4);
-        }
+        std::vector<unsigned char> image(64, 0x90);
+        const std::vector<unsigned char> before = image;
         char error[160];
-        std::vector<unsigned char> patched = image;
-        CHECK(dcp_apply_resolution(patched.data(), patched.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
-        for (const DcpResolutionSite& site : sites) {
-            uint32_t value = 0;
-            std::memcpy(&value, &patched[site.offset + site.opcode_length], 4);
-            CHECK(value == uint32_t(site.height ? dcp_resolutions[5].height : dcp_resolutions[5].width));
-        }
-        std::vector<unsigned char> damaged = image;
-        const DcpResolutionSite& bad = sites[11];
-        damaged[bad.offset + bad.opcode_length] ^= 1;
-        const std::vector<unsigned char> before = damaged;
-        CHECK(!dcp_apply_resolution(damaged.data(), damaged.size(), sites.data(), sites.size(), &dcp_resolutions[5], error, sizeof(error)));
-        CHECK(damaged == before);
-        char at[32];
-        snprintf(at, sizeof(at), "0x%x", unsigned(bad.offset));
-        CHECK(std::string(error).find(at) != std::string::npos);
+        CHECK(dcp_apply_resolution(image.data(), image.size(), kCk.resolution_sites.data(), kCk.resolution_sites.size(),
+                                   &dcp_resolutions[5], error, sizeof(error)));
+        CHECK(image == before);
+    }
+}
+
+// CUSA10209 1.02 has no verified render resolution sites, so only the native render resolution and 16:9 are effective,
+// whatever `dcp.ini` saved; CUSA10209 1.00 keeps the whole list.
+void TestCusa10209Graphics(const fs::path& base) {
+    const fs::path root = base / "cusa10209-graphics";
+    fs::remove_all(root);
+    const fs::path file = root / "dcp.ini";
+    const fs::path dir100 = root / "image-1.00", dir102 = root / "image-1.02";
+    WriteAll(dir100 / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") +
+                                        kCk100.eboot_sha256 + "\",\n  \"app_ver\": \"01.00\"\n}");
+    WriteAll(dir102 / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") +
+                                        kCk.eboot_sha256 + "\",\n  \"app_ver\": \"01.02\"\n}");
+    CHECK(BuildOfImageDir(dir100.string().c_str()) == &kCk100);
+    CHECK(BuildOfImageDir(dir102.string().c_str()) == &kCk);
+
+    WriteAll(file, "render_resolution=4K\naspect_ratio=21:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir102.string().c_str()) == 0); // 1.02 falls back to native
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);      // and to 16:9
+    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0); // 1.00 keeps them
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir100.string().c_str()) != 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), nullptr) != 0);                 // the unknown build too
+    CHECK(dcp_aspect_ratio(file.string().c_str(), nullptr) != 0);
+
+    WriteAll(file, "render_resolution=native\naspect_ratio=16:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir102.string().c_str()) == 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);
+}
+
+// CUSA10454 1.01 has no verified render resolution sites, so only the native render resolution and 16:9 are effective;
+// CUSA10454 1.00 keeps the whole list.
+void TestUs101Graphics(const fs::path& base) {
+    const fs::path root = base / "cusa10454-graphics";
+    fs::remove_all(root);
+    const fs::path file = root / "dcp.ini";
+    const fs::path dir100 = root / "image-1.00", dir101 = root / "image-1.01";
+    WriteAll(dir100 / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
+                                        kUs.eboot_sha256 + "\",\n  \"app_ver\": \"01.00\"\n}");
+    WriteAll(dir101 / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
+                                        kUs101.eboot_sha256 + "\",\n  \"app_ver\": \"01.01\"\n}");
+    CHECK(BuildOfImageDir(dir100.string().c_str()) == &kUs);
+    CHECK(BuildOfImageDir(dir101.string().c_str()) == &kUs101);
+    CHECK(RestrictedToNativeResolution(&kUs101) && !RestrictedToNativeResolution(&kUs));
+    CHECK(kUs101.resolution_sites.empty() && kUs.resolution_sites.size() == 23);
+    CHECK(kUs101.resolution_sites.data() != kUs.resolution_sites.data());
+
+    WriteAll(file, "render_resolution=4K\naspect_ratio=21:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) == 0); // 1.01 falls back to native
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) == 0);      // and to 16:9
+    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0); // 1.00 keeps them
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir100.string().c_str()) != 0);
+
+    // 1.01 can never receive the 1.00 table: its own table is empty, and applying it writes nothing.
+    std::vector<unsigned char> image(64, 0x90);
+    const std::vector<unsigned char> before = image;
+    char error[160];
+    CHECK(dcp_apply_resolution(image.data(), image.size(), kUs101.resolution_sites.data(),
+                               kUs101.resolution_sites.size(), &dcp_resolutions[5], error, sizeof(error)));
+    CHECK(image == before);
+
+    WriteAll(file, "render_resolution=native\naspect_ratio=16:9\n");
+    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) == 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) == 0);
+}
+
+// The launcher shows the finished package's APP_VER and VERSION under the unchanged short build label.
+void TestBuildMetadata() {
+    struct Expected {
+        const GameBuild* build;
+        const char* label;
+        const char* metadata;
+    };
+    const Expected expected[] = {
+        {&kUs, "CUSA10454 1.00 USA", "APP_VER 1.00 \xC2\xB7 VERSION 1.03"},
+        {&kUs101, "CUSA10454 1.01 USA", "APP_VER 1.01 \xC2\xB7 VERSION 1.03"},
+        {&kJp100, "CUSA07001 1.00 Japan", "APP_VER 1.00 \xC2\xB7 VERSION 1.00"},
+        {&kJp102, "CUSA07001 1.02 Japan", "APP_VER 1.02 \xC2\xB7 VERSION 1.00"},
+        {&kJp103, "CUSA07001 1.03 Japan", "APP_VER 1.03 \xC2\xB7 VERSION 1.00"},
+        {&kCk100, "CUSA10209 1.00 Asia/Hong Kong", "APP_VER 1.00 \xC2\xB7 VERSION 1.02"},
+        {&kCk, "CUSA10209 1.02 Asia/Hong Kong", "APP_VER 1.02 \xC2\xB7 VERSION 1.00"},
+    };
+    for (const Expected& item : expected) {
+        CHECK(std::string(item.build->label) == item.label);
+        CHECK(BuildMetadataText(*item.build) == item.metadata);
+        CHECK(std::string(FinishedLayer(*item.build).app_ver).size() == 5);
+        CHECK(std::string(FinishedLayer(*item.build).sfo_version).size() == 5);
     }
 }
 
@@ -2480,6 +3348,11 @@ int main(int argc, char** argv) {
         std::printf("%s%s%s\neboot.bin SHA-256 %s\n", StateName(check.state), check.detail.empty() ? "" : ": ",
                     check.detail.c_str(), check.eboot_sha256.c_str());
         return check.state == GameFileState::kValid ? 0 : 1;
+    }
+    // dcp-launcher-tests --log-gameplay <dcp.ini> <image dir>: the startup Gameplay summary, read-only.
+    if (argc == 4 && std::string(argv[1]) == "--log-gameplay") {
+        dcp_log_gameplay_settings(argv[2], argv[3]);
+        return 0;
     }
     // dcp-launcher-tests --install <.pkg or game folder> <prepared root> <image root>: the launcher's installer without its
     // window.
@@ -2520,20 +3393,30 @@ int main(int argc, char** argv) {
     TestInstaller(base);
     TestVideoCoreSettings(base);
     TestDefaultsAgree();
+    TestDetailedLogging(base);
+    TestLogsDirectory(base);
+    TestLogRetention(base);
     TestWindowTitle();
     TestRenderResolution(base);
     TestTextLanguage(base);
     TestCheatSettings(base);
+    TestJapaneseNpcVoiceSetting(base);
     TestAspectRatio(base);
+    TestPresentation(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
     TestLauncherWanted();
     TestPlayGate();
     TestPlacement();
     TestOptions();
+    TestKeyBindings(base);
     TestFileBrowser(base);
     TestControllerPrompts(base);
+    TestSafeMode(base);
     TestBuilds(base);
+    TestCusa10209Graphics(base);
+    TestUs101Graphics(base);
+    TestBuildMetadata();
     TestLayers(base);
     TestUsBuild();
     TestLegacyMarker(base);

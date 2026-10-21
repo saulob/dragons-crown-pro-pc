@@ -1,5 +1,6 @@
 #include "controller_prompts.h"
 
+#include <algorithm>
 #include <system_error>
 
 #include "utf8.h"
@@ -8,6 +9,43 @@ namespace dcp {
 namespace {
 
 constexpr const char* kSharedArchive = "DRACRO.CPK";
+
+bool IsPromptEntry(std::string_view name) {
+    return name.starts_with("stage/Interface") || name.starts_with("msgsheet/SystemMsg");
+}
+
+bool HoldsPromptTargets(const std::filesystem::path& archive, const BlockPatch& patch) {
+    CpkArchive cpk;
+    if (!cpk.Open(archive)) {
+        return false;
+    }
+    bool found = false;
+    for (const BlockPatchTarget& target : patch.targets) {
+        const CpkEntry* entry = cpk.Find(target.name);
+        if (!entry) {
+            continue;
+        }
+        const std::vector<uint8_t> data = cpk.Read(*entry);
+        if (data.size() != target.size || Crc32(data) != target.crc_after) {
+            return false;
+        }
+        found = true;
+    }
+    return found;
+}
+
+bool HasStalePromptEntry(const std::filesystem::path& archive, const BlockPatch& patch) {
+    for (const std::string& entry : PatchedEntries(archive)) {
+        if (!IsPromptEntry(entry)) {
+            continue;
+        }
+        if (std::none_of(patch.targets.begin(), patch.targets.end(),
+                         [&](const BlockPatchTarget& target) { return target.name == entry; })) {
+            return true;
+        }
+    }
+    return false;
+}
 
 } // namespace
 
@@ -44,13 +82,16 @@ std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& a
     return out;
 }
 
-PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build) {
+PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build,
+                                 std::span<const uint8_t> xbox_patch) {
     const std::vector<std::filesystem::path> archives = PromptArchives(app0, build);
-    if (archives.empty()) {
+    const std::optional<BlockPatch> patch = ParseBlockPatch(xbox_patch);
+    if (archives.empty() || !patch) {
         return PromptStyle::kPlayStation;
     }
     for (const std::filesystem::path& archive : archives) {
-        if (ArchiveState(archive) != ArchivePatchState::kPatched) {
+        if (ArchiveState(archive) != ArchivePatchState::kPatched || !HoldsPromptTargets(archive, *patch) ||
+            HasStalePromptEntry(archive, *patch)) {
             return PromptStyle::kPlayStation;
         }
     }

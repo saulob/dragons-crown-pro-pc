@@ -59,6 +59,9 @@ GameCheck CheckPackageIdentity(const std::string& sfo, std::span<const GameBuild
 
 // A string value of param.sfo, empty when the key is absent or not a string.
 std::string SfoString(const std::string& sfo, const char* key);
+// The supported build a boot image folder (UTF-8 path) was built from, or nullptr when it is not one.
+const GameBuild* BuildOfImageDir(const char* image_dir);
+
 // An integer value of param.sfo: `absent` when the key is missing, nothing when it is not an integer.
 std::optional<uint32_t> SfoInteger(const std::string& sfo, const char* key, uint32_t absent);
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "dcp_settings.h"
 #include "dcp_graphics.h"
+#include "dcp_keys.h"
 
 #include <algorithm>
 #include <climits>
@@ -61,6 +62,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.display_mode = DcpGraphics::ParseDisplayMode(value);
     } else if (key == "vsync") {
         v.vsync = ParseBool(value, v.vsync);
+    } else if (key == "presentation") {
+        v.presentation = DcpGraphics::ParsePresentation(value);
     } else if (key == "fsr1") {
         v.fsr1 = ParseBool(value, v.fsr1);
     } else if (key == "rcas") {
@@ -83,6 +86,13 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.show_fps_title = ParseBool(value, v.show_fps_title);
     } else if (key == "show_resolution_title") {
         v.show_resolution_title = ParseBool(value, v.show_resolution_title);
+    } else if (const int scancode = dcp_key_from_name(value.c_str()); scancode != 0) {
+        std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key};
+        for (int i = 0; i < DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY; ++i) {
+            if (key == dcp_key_actions[DCP_KEY_FIRST_HOTKEY + i].ini_key) {
+                *hotkeys[i] = scancode;
+            }
+        }
     }
 }
 

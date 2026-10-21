@@ -3,13 +3,14 @@
 # only: nothing is published, tagged or uploaded. The Linux counterpart of tools/package.ps1.
 #
 #   tools/package-linux.sh              build with tools/build.sh, then package
-#   tools/package-linux.sh --skip-build package the existing build/cmake/linux/bin/dcp-loader
+#   tools/package-linux.sh --skip-build package the existing build/cmake/linux/bin/dragons_crown_pro
 #   tools/package-linux.sh --out-dir DIR  write the AppImage, .sha256 and symbols to DIR instead of dist/
 #   tools/package-linux.sh --verify DIR check an existing AppDir
 #
-# Needs patchelf, binutils, curl and dpkg (Debian/Ubuntu: licence texts come from the packages of the bundled
+# Needs patchelf, binutils, curl, git and dpkg (Debian/Ubuntu: licence texts come from the packages of the bundled
 # libraries). Build on Ubuntu 20.04 (packaging/linux/ci-deps.sh): the glibc of the build host is the oldest one the
 # AppImage runs on. GPU drivers, the Vulkan loader, X11/Wayland and glibc always come from the player's system.
+# The patched AppImage runtime is built by tools/build-appimage-runtime.sh, which needs root or sudo (docs/LINUX.md).
 set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 skip_build=0 verify_dir= out_dir=
@@ -36,8 +37,6 @@ max_glibc=2.31
 desktop_file="Dragon's_Crown_Pro_PC.desktop"
 appimagetool_version=1.9.1
 appimagetool_sha256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
-runtime_version=20251108
-runtime_sha256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 
 # Libraries the player's system provides: glibc, the Vulkan loader and drivers, the display servers, audio daemons.
 excluded='^(ld-linux.*|libc|libm|libdl|librt|libpthread|libresolv|libutil|libnsl|libanl|libcrypt|libmvec|libvulkan|libGL|libGLX|libGLdispatch|libEGL|libOpenGL|libgbm|libdrm.*|libX11|libX11-xcb|libxcb.*|libXau|libXdmcp|libXext|libXfixes|libXrender|libXi|libXcursor|libXrandr|libxkbcommon.*|libwayland-.*|libasound|libudev|libpulse.*|libpipewire.*|libdbus-1|libfontconfig|libOpenCL|libva.*|libvdpau|libnvidia-.*|libcuda|libz|libselinux|libpcre2-.*|libsystemd|libcap)\.so'
@@ -92,13 +91,14 @@ check_appdir() { # dir [the AppImage file, whose runtime is an ELF too]
             done
         fi
     done < <(find "$dir" -mindepth 1 -print0)
-    for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dcp-loader \
+    for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dragons_crown_pro \
+                usr/bin/assets/launcher/header-art.png \
                 usr/share/licenses/DragonsCrownProPC/THIRD-PARTY-LICENSES.txt \
                 usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/doc/DragonsCrownProPC/README.txt; do
         [[ -e $dir/$leaf ]] || problem "missing: $leaf"
     done
     local missing
-    missing=$(env -u LD_LIBRARY_PATH ldd "$dir/usr/bin/dcp-loader" | grep 'not found' || true)
+    missing=$(env -u LD_LIBRARY_PATH ldd "$dir/usr/bin/dragons_crown_pro" | grep 'not found' || true)
     [[ -z $missing ]] || problem "unresolved libraries: $missing"
     echo "glibc needed by each ELF (baseline $max_glibc):"
     check_glibc 'the AppDir:' "$dir" "${files[@]}"
@@ -120,10 +120,10 @@ host_glibc=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)
 newer_than "$host_glibc" "$max_glibc" &&
     die "This system has glibc $host_glibc. Release AppImages are built on Ubuntu 20.04 (glibc $max_glibc): see packaging/linux/ci-deps.sh."
 
-version=$(sed -n 's/^set(DCP_PORT_VERSION "\([^"]*\)").*/\1/p' CMakeLists.txt)
-[[ -n $version ]] || die 'DCP_PORT_VERSION not found in CMakeLists.txt'
+version=$(sed -nE 's/^project\(dragons_crown_pro_pc VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)
+[[ -n $version ]] || die 'project VERSION not found in CMakeLists.txt'
 name=DragonsCrownProPC-v$version-x86_64
-loader=$root/build/cmake/linux/bin/dcp-loader
+loader=$root/build/cmake/linux/bin/dragons_crown_pro
 dist=${out_dir:-$root/dist}
 work=$root/build/appimage
 appdir=$work/AppDir
@@ -139,10 +139,14 @@ mkdir -p "$dist" "$symbols" "$appdir/usr/bin" "$appdir/usr/lib/compat" "$appdir/
          "$appdir/usr/share/icons/hicolor/256x256/apps"
 rm -f "$dist/$name.AppImage" "$dist/$name.AppImage.sha256"
 
-step 'Staging dcp-loader without debug information'
-objcopy --only-keep-debug "$loader" "$symbols/dcp-loader.debug"
-objcopy --strip-debug --add-gnu-debuglink="$symbols/dcp-loader.debug" "$loader" "$appdir/usr/bin/dcp-loader"
-chmod 755 "$appdir/usr/bin/dcp-loader"
+step 'Staging dragons_crown_pro without debug information'
+objcopy --only-keep-debug "$loader" "$symbols/dragons_crown_pro.debug"
+objcopy --strip-debug --add-gnu-debuglink="$symbols/dragons_crown_pro.debug" "$loader" "$appdir/usr/bin/dragons_crown_pro"
+chmod 755 "$appdir/usr/bin/dragons_crown_pro"
+
+step 'Staging the launcher header art'
+install -d "$appdir/usr/bin/assets/launcher"
+install -m644 assets/launcher/header-art.png "$appdir/usr/bin/assets/launcher/header-art.png"
 
 step 'Staging the libraries it loads'
 declare -A seen=()
@@ -172,14 +176,14 @@ for lib in "$appdir"/usr/lib/*.so*; do
 done
 strip --strip-unneeded "$appdir"/usr/lib/compat/*.so* 2>/dev/null || true
 # DT_RPATH (not RUNPATH) is inherited by the libraries' own dependencies and wins over LD_LIBRARY_PATH.
-patchelf --force-rpath --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/dcp-loader"
+patchelf --force-rpath --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/dragons_crown_pro"
 echo "Bundled: $(cd "$appdir/usr/lib" && ls -- *.so* | tr '\n' ' ')"
 echo "Fallback: $(cd "$appdir/usr/lib/compat" && ls -- *.so* | tr '\n' ' ')"
 
 step 'Staging AppRun, desktop entry, icon, licences and README'
-glibcxx_need=$(objdump -T "$appdir/usr/bin/dcp-loader" "$appdir"/usr/lib/*.so* | grep -o 'GLIBCXX_3\.4\.[0-9]*' |
+glibcxx_need=$(objdump -T "$appdir/usr/bin/dragons_crown_pro" "$appdir"/usr/lib/*.so* | grep -o 'GLIBCXX_3\.4\.[0-9]*' |
                sed 's/.*\.//' | sort -n | tail -1)
-gcc_need=$(objdump -T "$appdir/usr/bin/dcp-loader" "$appdir"/usr/lib/*.so* | grep -o 'GCC_[0-9][0-9.]*' |
+gcc_need=$(objdump -T "$appdir/usr/bin/dragons_crown_pro" "$appdir"/usr/lib/*.so* | grep -o 'GCC_[0-9][0-9.]*' |
            sed 's/^GCC_//; s/\..*//' | sort -n | tail -1)
 sed "s/@GLIBCXX_NEED@/${glibcxx_need:-0}/g; s/@GCC_NEED@/${gcc_need:-0}/g" \
     packaging/linux/AppRun > "$appdir/AppRun"
@@ -251,16 +255,12 @@ if [[ ! -x $tool ]]; then
     mv "$tool.part" "$tool"
 fi
 # appimagetool would otherwise download the unpinned "continuous" runtime.
-runtime=$work/runtime-$runtime_version-x86_64
-if [[ ! -f $runtime ]]; then
-    curl -fL --retry 3 -o "$runtime.part" \
-        "https://github.com/AppImage/type2-runtime/releases/download/$runtime_version/runtime-x86_64"
-    echo "$runtime_sha256  $runtime.part" | sha256sum -c - || die 'the AppImage runtime does not match the pinned checksum'
-    mv "$runtime.part" "$runtime"
-fi
+runtime=$work/runtime-dcp-x86_64
+bash tools/build-appimage-runtime.sh "$runtime" "$work/appimage-runtime"
 ARCH=x86_64 "$tool" --appimage-extract-and-run --runtime-file "$runtime" "$appdir" "$dist/$name.AppImage.new" \
     >"$work/appimagetool.log" 2>&1 || { cat "$work/appimagetool.log" >&2; die 'appimagetool failed'; }
 chmod 755 "$dist/$name.AppImage.new"
+bash tools/build-appimage-runtime.sh --check "$dist/$name.AppImage.new"
 
 step 'Checking the contents of the written AppImage'
 rm -rf "$work/written"
@@ -274,4 +274,4 @@ mv -f "$dist/$name.AppImage.new" "$dist/$name.AppImage"
 printf '\nAPPIMAGE READY (nothing was published)\n'
 printf '  AppImage: %s (%s)\n' "$dist/$name.AppImage" "$(du -h "$dist/$name.AppImage" | cut -f1)"
 printf '  SHA-256:  %s\n' "$(cut -d' ' -f1 "$dist/$name.AppImage.sha256")"
-printf '  Symbols:  %s (not in the package)\n' "$symbols/dcp-loader.debug"
+printf '  Symbols:  %s (not in the package)\n' "$symbols/dragons_crown_pro.debug"

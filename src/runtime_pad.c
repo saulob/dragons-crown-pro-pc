@@ -1,14 +1,12 @@
 /* libScePad on up to four SDL3 gamepads (pad handle N is player N), with a keyboard fallback for
  * player 1. SDL events are pumped by the window thread (gpu/shim/window.cpp); here state is only sampled.
  *
- * Default keyboard layout (DCP_KEY_MAP changes the buttons, see apply_button_map):
- *   WASD left stick, arrow keys right stick, Space Cross, LShift Circle,
- *   E Square, Q Triangle, 1 L1, 3 R1, R L2, F R2, Z L3, C R3,
- *   Enter Options, Tab left touchpad, Backspace right touchpad,
- *   IJKL d-pad (I up, K down, J left, L right). */
+ * Keyboard layout: dcp_keys.c holds the defaults; the launcher's bindings in dcp.ini and then DCP_KEY_MAP
+ * (see apply_button_map) change them. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "dcpgpu.h"
+#include "dcp_keys.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -131,7 +129,7 @@ static void refresh_gamepads(void) {
  * changed per PS4 button with DCP_PAD_MAP (gamepad) and DCP_KEY_MAP (keyboard), e.g.
  * DCP_KEY_MAP="cross=Q,square=Left Shift" or DCP_PAD_MAP="cross=b,circle=a": comma-separated
  * <ps4 button>=<SDL key or gamepad button name>. A mapped PS4 button loses its default sources.
- * Sticks, triggers and the overlay shortcuts are not remapped. */
+ * Sticks and the touchpad keys are set by the launcher only. */
 static const struct { const char *name; uint32_t ps; } ps_names[]={
     {"cross",BTN_CROSS}, {"circle",BTN_CIRCLE}, {"square",BTN_SQUARE}, {"triangle",BTN_TRIANGLE},
     {"l1",BTN_L1}, {"r1",BTN_R1}, {"l2",BTN_L2}, {"r2",BTN_R2}, {"l3",BTN_L3}, {"r3",BTN_R3},
@@ -150,13 +148,23 @@ static ButtonMap pad_map={{
     {SDL_GAMEPAD_BUTTON_DPAD_UP,BTN_UP}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN,BTN_DOWN},
     {SDL_GAMEPAD_BUTTON_DPAD_LEFT,BTN_LEFT}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT,BTN_RIGHT},
 },15};
-static ButtonMap key_map={{
-    {SDL_SCANCODE_SPACE,BTN_CROSS}, {SDL_SCANCODE_LSHIFT,BTN_CIRCLE}, {SDL_SCANCODE_E,BTN_SQUARE},
-    {SDL_SCANCODE_Q,BTN_TRIANGLE}, {SDL_SCANCODE_1,BTN_L1}, {SDL_SCANCODE_3,BTN_R1},
-    {SDL_SCANCODE_R,BTN_L2}, {SDL_SCANCODE_F,BTN_R2}, {SDL_SCANCODE_Z,BTN_L3}, {SDL_SCANCODE_C,BTN_R3},
-    {SDL_SCANCODE_RETURN,BTN_OPTIONS},
-    {SDL_SCANCODE_I,BTN_UP}, {SDL_SCANCODE_K,BTN_DOWN}, {SDL_SCANCODE_J,BTN_LEFT}, {SDL_SCANCODE_L,BTN_RIGHT},
-},15};
+static ButtonMap key_map;
+static DcpKeyMap keys;
+static char keys_file[4200];
+void runtime_pad_set_settings(const char *settings_file) { snprintf(keys_file,sizeof(keys_file),"%s",settings_file ? settings_file : ""); }
+
+static const struct { DcpKeyAction action; uint32_t ps; } key_buttons[]={
+    {DCP_KEY_CROSS,BTN_CROSS}, {DCP_KEY_CIRCLE,BTN_CIRCLE}, {DCP_KEY_SQUARE,BTN_SQUARE}, {DCP_KEY_TRIANGLE,BTN_TRIANGLE},
+    {DCP_KEY_L1,BTN_L1}, {DCP_KEY_R1,BTN_R1}, {DCP_KEY_L2,BTN_L2}, {DCP_KEY_R2,BTN_R2},
+    {DCP_KEY_L3,BTN_L3}, {DCP_KEY_R3,BTN_R3}, {DCP_KEY_OPTIONS,BTN_OPTIONS},
+    {DCP_KEY_DPAD_UP,BTN_UP}, {DCP_KEY_DPAD_DOWN,BTN_DOWN}, {DCP_KEY_DPAD_LEFT,BTN_LEFT}, {DCP_KEY_DPAD_RIGHT,BTN_RIGHT},
+};
+static void load_key_map(void) {
+    dcp_keys_load(keys_file,&keys);
+    key_map.count=0;
+    for (size_t i=0;i<sizeof(key_buttons)/sizeof(*key_buttons);++i)
+        key_map.entries[key_map.count++]=(ButtonSource){keys.scancode[key_buttons[i].action],key_buttons[i].ps};
+}
 
 static char *trim(char *text) {
     while (*text==' ' || *text=='\t') ++text;
@@ -205,6 +213,7 @@ static void load_button_maps(void) {
     static bool loaded;
     if (loaded) return;
     loaded=true;
+    load_key_map();
     const int pad=apply_button_map(&pad_map,getenv("DCP_PAD_MAP"),false);
     const int keys=apply_button_map(&key_map,getenv("DCP_KEY_MAP"),true);
     if (pad || keys) printf("Runtime: pad map: %d gamepad and %d keyboard buttons remapped\n",pad,keys);
@@ -215,6 +224,11 @@ static void key_axis(uint8_t *axis, bool negative, bool positive) {
 }
 /* Player 1 is always connected: the keyboard stands in for a missing gamepad. */
 static bool slot_connected(int slot) { return slot==0 || slots[slot].gamepad; }
+
+int runtime_pad_slot_human(int slot) {
+    if (slot==0) return 1;
+    return slot>0 && slot<MAX_PADS && slots[slot].gamepad;
+}
 static void sample_host(int slot, PadData *d) {
     memset(d,0,sizeof(*d));
     d->left_x=d->left_y=d->right_x=d->right_y=128;
@@ -256,15 +270,15 @@ static void sample_host(int slot, PadData *d) {
      * follows the keys only while one of them is held. */
     if (!k) return;
     for (size_t i=0;i<key_map.count;++i) if (k[key_map.entries[i].source]) d->buttons|=key_map.entries[i].ps;
-    if (k[SDL_SCANCODE_TAB]) touch_click(d,0);
+    if (k[keys.scancode[DCP_KEY_TOUCHPAD_LEFT]]) touch_click(d,0);
     if ((d->buttons & BTN_TOUCHPAD) && !d->touch_count) touch_click(d,0); /* a remapped touchpad key */
-    if (k[SDL_SCANCODE_BACKSPACE]) touch_click(d,1);
+    if (k[keys.scancode[DCP_KEY_TOUCHPAD_RIGHT]]) touch_click(d,1);
     if (d->buttons & BTN_L2) d->l2=255;
     if (d->buttons & BTN_R2) d->r2=255;
-    key_axis(&d->left_x,k[SDL_SCANCODE_A],k[SDL_SCANCODE_D]);
-    key_axis(&d->left_y,k[SDL_SCANCODE_W],k[SDL_SCANCODE_S]);
-    key_axis(&d->right_x,k[SDL_SCANCODE_LEFT],k[SDL_SCANCODE_RIGHT]);
-    key_axis(&d->right_y,k[SDL_SCANCODE_UP],k[SDL_SCANCODE_DOWN]);
+    key_axis(&d->left_x,k[keys.scancode[DCP_KEY_LEFT_STICK_LEFT]],k[keys.scancode[DCP_KEY_LEFT_STICK_RIGHT]]);
+    key_axis(&d->left_y,k[keys.scancode[DCP_KEY_LEFT_STICK_UP]],k[keys.scancode[DCP_KEY_LEFT_STICK_DOWN]]);
+    key_axis(&d->right_x,k[keys.scancode[DCP_KEY_RIGHT_STICK_LEFT]],k[keys.scancode[DCP_KEY_RIGHT_STICK_RIGHT]]);
+    key_axis(&d->right_y,k[keys.scancode[DCP_KEY_RIGHT_STICK_UP]],k[keys.scancode[DCP_KEY_RIGHT_STICK_DOWN]]);
 }
 
 /* DCP_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated

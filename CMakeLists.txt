@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc LANGUAGES C CXX)
-set(DCP_PORT_VERSION "0.6.0")
+project(dragons_crown_pro_pc VERSION 0.7.0 LANGUAGES C CXX)
+set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "Build with Clang: MSYS2 CLANG64 (tools\\build.ps1) on Windows, tools/build.sh on Linux.")
@@ -28,16 +28,22 @@ if (NOT WIN32)
     add_link_options(-no-pie)
 endif()
 
-if (NOT DCP_PORT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
-    message(FATAL_ERROR "DCP_PORT_VERSION must start with MAJOR.MINOR.PATCH")
+if (NOT PROJECT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(FATAL_ERROR "project VERSION must start with MAJOR.MINOR.PATCH")
 endif()
 file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/generated/dcp_version.h CONTENT "#define DCP_VERSION_NUMBERS \
 ${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0\n#define DCP_FILE_VERSION_STRING \
-\"${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.0\"\n#define DCP_VERSION_STRING \"${DCP_PORT_VERSION}\"\n")
+\"${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.0\"\n#define DCP_VERSION_STRING \"${PROJECT_VERSION}\"\n")
 
 find_package(SDL3 CONFIG REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(Threads REQUIRED)
+
+# Keyboard bindings shared by the launcher, the runtime pad and the video core.
+add_library(dcp_keys STATIC src/dcp_keys.c)
+target_include_directories(dcp_keys PUBLIC src)
+target_link_libraries(dcp_keys PUBLIC SDL3::SDL3)
+target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
 
 add_subdirectory(gpu)
 add_subdirectory(launcher)
@@ -58,6 +64,7 @@ set(DCP_RUNTIME_SOURCES
     src/runtime_rtc.c
     src/runtime_rwlock.c
     src/runtime_savedata.c
+    src/runtime_session_log.c
     src/runtime_sema.c
     src/runtime_services.c
     src/runtime_thread.c
@@ -72,28 +79,48 @@ set_source_files_properties(src/runtime_font.c PROPERTIES
 if (WIN32)
     enable_language(RC)
     # Relink when the application icon, the manifest or the version changes.
-    set_source_files_properties(src/dcp-loader.rc PROPERTIES OBJECT_DEPENDS
-        "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dcp-loader.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
-    set(DCP_PLATFORM_SOURCES src/compat_win.c src/runtime_log.c src/dcp-loader.rc)
+    set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
+    set(DCP_PLATFORM_SOURCES src/compat_win.c src/runtime_log.c src/dragons_crown_pro.rc)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-add_executable(dcp-loader src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/startup_save_hook.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
-set_target_properties(dcp-loader PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-target_include_directories(dcp-loader PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
-target_compile_options(dcp-loader PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
-target_compile_options(dcp-loader PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>)
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/startup_save_hook.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+if (WIN32)
+    add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
+else()
+    add_executable(dragons_crown_pro ${DCP_MAIN_SOURCES})
+endif()
+set_target_properties(dragons_crown_pro PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dragons_crown_pro PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
+target_compile_options(dragons_crown_pro PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+target_compile_options(dragons_crown_pro PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>)
 if (WIN32)
     # Windows 10 1903+ APIs (VirtualAlloc2, MapViewOfFile3).
-    target_compile_definitions(dcp-loader PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_compile_definitions(dragons_crown_pro PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
     # The PS4 user range (64 GiB - 1 TiB) must stay free of host allocations: no high-entropy ASLR.
     # The guest main thread runs on the process stack: 16 MiB, committed (guest code has no stack probes).
-    target_link_options(dcp-loader PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
-    target_link_libraries(dcp-loader PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt ws2_32 -pthread)
+    target_link_options(dragons_crown_pro PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
+    target_link_libraries(dragons_crown_pro PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt ws2_32 -pthread)
 else()
     # -rdynamic: fault reports name host symbols (dladdr).
-    target_link_options(dcp-loader PRIVATE -rdynamic)
-    target_link_libraries(dcp-loader PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
+    target_link_options(dragons_crown_pro PRIVATE -rdynamic)
+    target_link_libraries(dragons_crown_pro PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
+
+# The launcher reads its header art next to the executable.
+add_custom_command(TARGET dragons_crown_pro POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/header-art.png"
+        "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/header-art.png"
+    VERBATIM)
+
+if (WIN32)
+    # GUI-subsystem processes start with closed standard streams; the log must still work. Not part of the default build.
+    add_executable(dcp-log-tests EXCLUDE_FROM_ALL tests/log_tests.c src/runtime_log.c src/runtime_session_log.c)
+    target_include_directories(dcp-log-tests PRIVATE src)
+    target_compile_options(dcp-log-tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
 # Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
@@ -133,10 +160,11 @@ target_include_directories(dcp-tiling-tests PRIVATE gpu/shim gpu/shadps4 tests s
 target_compile_options(dcp-tiling-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-tiling-tests PRIVATE dcpgpu)
 
-# Focused tests of the game window's cursor auto-hide timer (tools/test.ps1); not part of the default build.
+# Focused tests of the game window's cursor visibility (tools/test.ps1); not part of the default build.
 add_executable(dcp-cursor-tests EXCLUDE_FROM_ALL tests/cursor_tests.cpp)
 set_target_properties(dcp-cursor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-cursor-tests PRIVATE gpu/shim)
+target_compile_definitions(dcp-cursor-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-cursor-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the windowed-mode size and centring arithmetic; not part of the default build.
@@ -144,6 +172,11 @@ add_executable(dcp-window-tests EXCLUDE_FROM_ALL tests/window_fit_tests.cpp)
 set_target_properties(dcp-window-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-window-tests PRIVATE src)
 target_compile_options(dcp-window-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the Japanese NPC voice routing (tools/test.ps1); not part of the default build.
+add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)
+target_include_directories(dcp-voice-tests PRIVATE src)
+target_compile_options(dcp-voice-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
 
 # Focused tests of the save-data mounts and the Japanese startup save hook (tools/test.ps1); not part of the default build.
 add_executable(dcp-savedata-tests EXCLUDE_FROM_ALL tests/savedata_tests.c src/guest_hook.c src/startup_save_hook.c)

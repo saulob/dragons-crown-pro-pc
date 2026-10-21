@@ -15,12 +15,12 @@ NO GAME FILES ARE INCLUDED
 You need your own legally obtained copy of the game: a decrypted Dragon's
 Crown Pro PS4 package (.pkg). This port runs these releases:
 
-  US:                 Title ID CUSA10454, version 1.00 (APP_VER 01.00, VERSION 01.03)
+  US:                 Title ID CUSA10454, versions 1.00 (the base package) and 1.01 (the base package, then the update)
   Japan:              Title ID CUSA07001, versions 1.00 (the base package), 1.02 and 1.03 (the base package, then the update)
-  Asia, Hong Kong:    Title ID CUSA10209, versions 1.00 (APP_VER 01.00) and 1.02 (APP_VER 01.02)
+  Asia, Hong Kong:    Title ID CUSA10209, versions 1.00 (the base package) and 1.02 (the base package, then the update)
 
-Any other version is refused with "Different version of Dragon's Crown Pro". The Japanese and Asia, Hong Kong releases
-are not yet fully tested; their cheats and Xbox controller prompts are not available.
+Any other version is refused with "Different version of Dragon's Crown Pro". The USA 1.01 update and the Japanese and
+Asia, Hong Kong releases are not yet fully tested; their cheats and Xbox controller prompts are not available.
 A package still encrypted for a PS4 console cannot be unpacked on a PC.
 
 
@@ -33,8 +33,10 @@ REQUIREMENTS
 - A graphics card and Mesa or proprietary driver with Vulkan 1.3,
   VK_EXT_robustness2, VK_KHR_push_descriptor and
   VK_EXT_vertex_attribute_divisor (AMD RADV on the Steam Deck qualifies)
-- FUSE 2 to start an AppImage (libfuse2; SteamOS has it). Without it:
-  ./DragonsCrownProPC-*.AppImage --appimage-extract-and-run
+- FUSE is optional. The AppImage normally mounts itself with FUSE; if that is
+  not possible it unpacks itself into a temporary folder and runs from there
+  automatically, with no special option. Setting APPIMAGE_EXTRACT_AND_RUN=1
+  (or starting with --appimage-extract-and-run) forces that mode
 - Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next
   to the AppImage for the installed game
 - Nothing else: no Python or other tools are needed; the AppImage carries its
@@ -61,6 +63,15 @@ INSTALL
 To repair the game files, use "Reinstall game..." on the Play page. Your
 settings and saves are kept. If an installation fails or is cancelled, the
 previous one is left as it was.
+
+
+UPDATES
+-------
+The launcher checks the project's GitHub releases once per start. When a newer
+AppImage exists, an update banner appears in the header; nothing is installed
+until you choose UPDATE NOW and then RESTART TO UPDATE. The update replaces the
+AppImage you started from and restarts it. Game files, user data, saves,
+settings, logs and shader caches in the folders beside the AppImage are kept.
 
 
 STEAM DECK

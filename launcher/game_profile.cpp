@@ -85,13 +85,20 @@ constexpr DcpResolutionSite kJapan103ResolutionSites[] = {
 };
 
 constexpr PackageLayer kUsLayers[] = {{"01.00", "01.03", false}};
+constexpr PackageLayer kUs101Layers[] = {{"01.00", "01.03", false}, {"01.01", "01.03", true}};
 constexpr PackageLayer kJapanBaseLayers[] = {{"01.00", "01.00", false}};
 constexpr PackageLayer kJapan102Layers[] = {{"01.00", "01.00", false}, {"01.02", "01.00", true}};
 constexpr PackageLayer kJapan103Layers[] = {{"01.00", "01.00", false}, {"01.03", "01.00", true}};
 constexpr PackageLayer kAsia100Layers[] = {{"01.00", "01.02", false}};
-constexpr PackageLayer kAsia102Layers[] = {{"01.02", "01.00", false}};
+constexpr PackageLayer kAsia102Layers[] = {{"01.00", "01.02", false}, {"01.02", "01.00", true}};
 
-constexpr const char* kJapanUpdateFiles[] = {"sce_discmap_patch.plt"};
+constexpr const char* kDiscmapPatchFiles[] = {"sce_discmap_patch.plt"};
+
+constexpr TextLanguage kWesternLanguages[] = {
+    {"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
+    {"italian", "Italian", 5}, {"spanish", "Spanish", 3},
+};
+constexpr TextLanguage kAsiaLanguages[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
 
 constexpr GameBuild kGameBuilds[] = {
     {
@@ -106,8 +113,27 @@ constexpr GameBuild kGameBuilds[] = {
         "USA",
         true,
         true,
+        true,
         kUsLayers,
         kUsResolutionSites,
+        kWesternLanguages,
+    },
+    {
+        "CUSA10454",
+        "UP2611-CUSA10454_00-DRAGONSCROWNPRO1",
+        "1.01",
+        "CUSA10454-1.01",
+        "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0",
+        "DRACRO_US.CPK",
+        kDiscmapPatchFiles,
+        "CUSA10454 1.01 USA",
+        "USA",
+        false,
+        false,
+        false,
+        kUs101Layers,
+        {},
+        kWesternLanguages,
     },
     {
         "CUSA07001",
@@ -121,8 +147,10 @@ constexpr GameBuild kGameBuilds[] = {
         "Japan",
         false,
         false,
+        false,
         kJapanBaseLayers,
         kJapan100ResolutionSites,
+        kWesternLanguages,
     },
     {
         "CUSA07001",
@@ -131,13 +159,15 @@ constexpr GameBuild kGameBuilds[] = {
         "CUSA07001-1.02",
         "e512685aef4fa1e50eafec8c9699b611992356cbae84e9b0147febceb49843fe",
         "DRACRO_PATCH_JP.CPK",
-        kJapanUpdateFiles,
+        kDiscmapPatchFiles,
         "CUSA07001 1.02 Japan",
         "Japan",
         false,
         false,
+        false,
         kJapan102Layers,
         kJapan102ResolutionSites,
+        kWesternLanguages,
     },
     {
         "CUSA07001",
@@ -146,13 +176,15 @@ constexpr GameBuild kGameBuilds[] = {
         "CUSA07001-1.03",
         "dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64",
         "DRACRO_PATCH_JP.CPK",
-        kJapanUpdateFiles,
+        kDiscmapPatchFiles,
         "CUSA07001 1.03 Japan",
         "Japan",
         false,
         false,
+        false,
         kJapan103Layers,
         kJapan103ResolutionSites,
+        kWesternLanguages,
     },
     {
         "CUSA10209",
@@ -166,29 +198,42 @@ constexpr GameBuild kGameBuilds[] = {
         "Asia/Hong Kong",
         false,
         false,
+        false,
         kAsia100Layers,
         kAsiaResolutionSites,
+        kAsiaLanguages,
     },
     {
         "CUSA10209",
         "HP0177-CUSA10209_00-DRAGONSCROWN0001",
         "1.02",
         "CUSA10209-1.02",
-        "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b",
+        "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5",
         "DRACRO_CK.CPK",
         {},
         "CUSA10209 1.02 Asia/Hong Kong",
         "Asia/Hong Kong",
         false,
         false,
+        false,
         kAsia102Layers,
-        kAsiaResolutionSites,
+        {},
+        kAsiaLanguages,
     },
 };
 
 bool SameLayer(const PackageLayer& a, const PackageLayer& b) {
     return std::string_view(a.app_ver) == b.app_ver && std::string_view(a.sfo_version) == b.sfo_version &&
            a.update == b.update;
+}
+
+// PS4 metadata is "NN.NN"; the launcher shows "N.NN".
+std::string DisplayVersion(std::string_view version) {
+    size_t first = 0;
+    while (first + 1 < version.size() && version[first] == '0' && version[first + 1] != '.') {
+        ++first;
+    }
+    return std::string(version.substr(first));
 }
 
 } // namespace
@@ -199,6 +244,11 @@ std::span<const GameBuild> SupportedBuilds() {
 
 const PackageLayer& FinishedLayer(const GameBuild& build) {
     return build.layers.back();
+}
+
+std::string BuildMetadataText(const GameBuild& build) {
+    const PackageLayer& finished = FinishedLayer(build);
+    return "APP_VER " + DisplayVersion(finished.app_ver) + " \xC2\xB7 VERSION " + DisplayVersion(finished.sfo_version);
 }
 
 const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> builds) {
@@ -212,6 +262,24 @@ const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> 
         }
     }
     return nullptr;
+}
+
+std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build) {
+    return build ? build->text_languages : std::span<const TextLanguage>(kWesternLanguages);
+}
+
+bool RestrictedToNativeResolution(const GameBuild* build) {
+    return build && build->resolution_sites.empty();
+}
+
+const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view key) {
+    const std::span<const TextLanguage> languages = TextLanguagesOf(build);
+    for (const TextLanguage& language : languages) {
+        if (language.key == key) {
+            return language;
+        }
+    }
+    return languages.front();
 }
 
 std::string SupportedBuildsText() {

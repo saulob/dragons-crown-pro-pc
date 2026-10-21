@@ -6,8 +6,8 @@ Graphics, Gameplay, Cheats, Controls, Trophies and About.
 
 ## Architecture
 
-`dcp-loader.exe` calls `dcp_launcher_run()` (`launcher/dcp_launcher.h`) early in `main`, after the PS4 address range is
-reserved and before the boot image is read. There is no second executable and no helper process. On Linux the loader
+`dragons_crown_pro.exe` calls `dcp_launcher_run()` (`launcher/dcp_launcher.h`) early in `main`, after the PS4 address range is
+reserved and before the boot image is read. The only other executable is the Windows update helper, `trg-updater.exe`. On Linux the loader
 passes `dcp_check_vulkan` as the launcher's graphics check: Play runs it (the launcher itself needs no Vulkan) and, if
 it fails, `launcher/problem_dialog.cpp` explains why and the launcher stays open.
 
@@ -29,7 +29,7 @@ exist at a time. The Dear ImGui copy is the one compiled into the video core lib
 
 ## Folders and defaults
 
-`dcp-loader.exe` needs no arguments, Python or environment: explicit `boot.bin`, `--content-profile`, `--app0`, `--user`
+`dragons_crown_pro.exe` needs no arguments, Python or environment: explicit `boot.bin`, `--content-profile`, `--app0`, `--user`
 and `--logs` win, and everything else is found next to the executable (`launcher/paths.cpp`).
 
 | | Packaged (next to the executable) | Executable in `build\cmake\<toolchain>\bin` |
@@ -39,7 +39,7 @@ and `--logs` win, and everything else is found next to the executable (`launcher
 | User data, `dcp.ini` | `user` | `<repository>\user` |
 | Logs | `logs` | `<repository>\build\logs` |
 
-`<build>` is `v1.03` for CUSA10454 (US), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
+`<build>` is `v1.03` or `CUSA10454-1.01` for CUSA10454 (USA), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
 `CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
 selected last is active. Selecting a package makes its exact build active: a complete prepared folder of it is activated
 without copying, and only the build that is already active is reported as up to date.
@@ -50,7 +50,8 @@ readbacks, the 60 Hz vblank, the stick dead zone) are code, and the environment 
 `tools\build.ps1 -Run` starts the executable with no folder arguments: it resolves the development folders itself.
 
 The loader writes the one numbered log itself, `logs\dragons_crown_pro_NNN.log` (the next free number, never an
-existing file) in the folder above, and echoes it to the console. `--logs <folder>` or `--log <file>` override it.
+existing file) in the folder above, and echoes it to the standard output the process started with, when it has one
+(a console, pipe or file). `--logs <folder>` or `--log <file>` override it.
 
 ## Startup
 
@@ -83,19 +84,29 @@ while the game files are not valid. If its window cannot be opened, the game sta
 
 Steps 2 to 4 are `CheckGameTree`, which the installer also runs on the folder the player selects.
 
+**USA builds.** The 1.00 package (CATEGORY `gd`, APP_VER 01.00) is a complete game, installed into `v1.03` (its legacy
+folder name). The 1.01 patch (CATEGORY `gp`, APP_VER 01.01) is an update laid over a hard-linked copy of the 1.00 folder,
+into `CUSA10454-1.01`. The two builds have different `eboot.bin` files. An update needs the 1.00 folder to be installed;
+the launcher says so otherwise.
+
 **Japanese builds.** The base package (`drcpro.pkg`, CATEGORY `gd`, APP_VER 01.00) is a complete game: it is installed
 into `CUSA07001-1.00`. The 1.02 and 1.03 updates (CATEGORY `gp`) are each laid over
 a hard-linked copy of the 1.00 folder, into `CUSA07001-1.02` or `CUSA07001-1.03`. The base's data is linked, not copied.
 Each result is checked as its finished game and gets its own boot image. The 1.03 update replaces every file the 1.02
-update changes, so 1.03 does not need 1.02. An update needs the 1.00 folder to be installed; the launcher says so
+update changes, so 1.03 does not need 1.02.
+
+**Asia and Hong Kong builds.** The 1.00 package (CATEGORY `gd`) is a complete game, installed into `CUSA10209-1.00`. The 1.02 package
+(CATEGORY `gp`, APP_VER 01.02) is an update laid over a hard-linked copy of the 1.00 folder, into `CUSA10209-1.02`. The two builds have
+different `eboot.bin` files. An update needs the 1.00 folder to be installed; the launcher says so
 otherwise.
 
 States: missing, valid, different version, read error. The identity lives in `launcher/game_profile.h` and mirrors
 `scripts/game_profiles.py`; a test fails if they drift.
 
-The Play card's title names the active build ("Ready to play · CUSA10454 1.00 USA") and its detail is the prepared
-folder. About's **Game** row shows the same label after `PS4 `, or `Not installed`. The log's `build` line uses the same
-label.
+The Play card's title names the active build ("Ready to play · CUSA10454 1.00 USA"); its number is the package's
+APP_VER, and a second line shows the finished package's metadata (`APP_VER 1.00 · VERSION 1.03`; PS4 metadata is `NN.NN`,
+shown as `N.NN`). About's **Game** row shows the same label after `PS4 `, or `Not installed`. The log's `build` line uses
+the same label.
 
 ## Install
 
@@ -157,8 +168,14 @@ use the same defaults).
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
-| `cheat_infinite_health`, `_mana`, `_lives`, `_durability`, `_arrows`, `_skill_points`, `_gold`; `cheat_movement_speed_2x` | 1, 0 | 0 | at game start (F10 changes the session only) |
-| `cheat_experience_multiplier` | 1 (Off), 2, 5, 10 | 1 | at game start (F10 changes the session only) |
+| `detailed_logging` | 1, 0 | 1 | at exit |
+| `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
+| `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
+| `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
+| `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
+| `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
+| `cheat_movement_speed_2x` (old) | 1, 0 | 0 | read only when `cheat_movement_speed` is missing: 1 means 2x |
+| `cheat_experience_multiplier` | 1 (Off), 2, 5, 10, 100 | 1 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
 | `menu_tab` | 0 (Image), 1 (Overlay) | 0 | the in-game menu's last tab |
 | `launcher_x`, `_y`, `_width`, `_height`, `_maximized`, `_fullscreen` | | | launcher window only |
@@ -181,11 +198,13 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   Window size is not changed, and a window you resize afterwards is left alone. The picture keeps its shape and is
   letterboxed or pillarboxed in the window. The listed sizes (heights 720, 900, 1080, 1440, 2160) follow the Aspect Ratio.
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
-  an unknown value is 16:9). It sets the shape of the game's render target, not a stretch of the 16:9 picture. Changing it
-  moves the saved Window size to the same height in the new shape. The game was not authored for other shapes: camera
-  framing, HUD and prerendered videos are not adjusted, so wider or narrower shapes can show cropped or exposed areas and
-  bars on videos. Borderless Fullscreen on a monitor of another shape shows bars. The Japanese and Asia and Hong Kong
-  builds are not yet tested in game.
+  an unknown value is 16:9). It sets the shape of the game's render target. The game's 2D scene is still laid out for its
+  original 1280 × 720 canvas, so only 16:9 Original is undistorted: 21:9 and 32:9 stretch the gameplay horizontally instead
+  of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not
+  adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
+  of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
+  The Asia and Hong Kong 1.02 build has no verified render resolution sites of its own, so it renders at its original size in
+  16:9 and offers no other shape, whatever was saved.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -194,10 +213,15 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   that is not there any more, or not usable, falls back to Automatic. The game's log shows `GPU: selection Automatic` or
   `GPU: requested <name>`, then `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11.
 - **VSync**: On is FIFO (the stable default). Off uses Mailbox, else Immediate.
+- **Presentation**: Letterbox (the default) or Stretch. It controls how the finished frame fits the window or display when
+  their shape differs: Letterbox keeps the frame's aspect ratio with bars, Stretch fills the window and may distort the
+  picture. It does not change the render target or the Aspect Ratio, and it applies in Windowed and Borderless Fullscreen
+  alike. Saved as `presentation=letterbox` or `presentation=stretch` in `dcp.ini`; a missing or unknown value is Letterbox.
+  The game reads it when it starts, so a change takes effect the next time the game starts.
 - **F11** in the game switches Windowed and Borderless Fullscreen at once and saves the Display mode. In the launcher it
   switches the launcher's own fullscreen, saved in `launcher_fullscreen`, and never changes the Display mode.
-- **Mouse cursor**: in the game's Borderless Fullscreen the cursor hides after 5 seconds without mouse movement and comes back
-  when the mouse moves, when the game window loses focus, in Windowed mode and while the in-game menu is open.
+- **Mouse cursor**: mouse movement, clicks and the wheel show the cursor in Windowed and Borderless Fullscreen; keyboard or
+  controller input hides it. It stays visible while the in-game menu or a dialog is open and when the game window loses focus.
 
 Scaling and sharpening, below those on the Display page, are what the presenter already supports: **Upscaling** (AMD
 FSR 1, off by default) enlarges the game's picture (the render resolution) in a bigger window; **Sharpening** (AMD
@@ -210,7 +234,10 @@ RCAS, on) with a
 1280 × 720, 1440p 2560 × 1440, 1800p 3200 × 1800, 4K 3840 × 2160. It is the game's own render size, separate from the window size: the picture is scaled to the window.
 
 The game chooses its display render targets with `mov reg, imm32` of 1920 / 3840 and 1080 / 2160, picked by
-`sceKernelIsNeoMode`. Each supported build has its own 23 sites (`launcher/game_profile.cpp`). Unless the render target is
+`sceKernelIsNeoMode`. Each supported build with verified sites has its own 23 of them (`launcher/game_profile.cpp`); the
+USA 1.01 and Asia and Hong Kong 1.02 builds have none yet, so they render only at their native size and their Render
+resolution and Aspect Ratio rows offer Native 16:9 alone (a saved custom value falls back to Native 16:9 for them, and the
+loader refuses to patch a build with no sites). Unless the render target is
 the unchanged Native 16:9 one, the loader rewrites them (`launcher/resolution.c`) to the chosen width and height after
 checking that each still holds the original instruction; if one does not, the game does not start. Native 16:9 leaves the
 code untouched. `sceKernelIsNeoMode` answers "PS4 Pro" for a target larger than 1920 × 1080 in either dimension or in
@@ -241,13 +268,28 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
 ## Gameplay
 
 - **Menu & Subtitles**: the language of the game's menus and subtitle text (`text_language`: `english`, `french`,
-  `german`, `italian`, `spanish`; English by default). The game ships text for these five. An explicit `DCP_LANGUAGE`
-  environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
+  `german`, `italian`, `spanish`; English by default). The game ships text for these five. The Asia/Hong Kong build
+  (CUSA10209) ships Traditional Chinese and Korean instead (`traditional_chinese`, `korean`; Traditional Chinese by
+  default) and has no Western or Simplified Chinese text. Korean is not yet tested in game. A saved language the active
+  build does not have is replaced by that build's default. An explicit `DCP_LANGUAGE` environment variable (a PS4 language number) overrides it.
+  Voices are chosen inside the game.
+- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 USA only; the option is hidden for
+  the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
+  town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
+  are untouched.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
 - **Render resolution in title**: `Dragon's Crown Pro | 1920x1080`, the render resolution of the game's presented image (not the
   window size). It follows a change of the game's resolution while it runs.
 - **Frame counter**: the video core's corner readout (`show_fps`).
+- **Arachnophobia Safe Mode**: Off / On (`arachnophobia_safe_mode`). Replaces the Giant Spider's atlas
+  (`character/GiantSpider00.ftx` in `DRACRO.CPK`) with a redrawn one: a cream rear body, a cream front body with two
+  orange eyes, no legs, fangs or claws; web and smoke effects are kept. The enemy's animations, hitboxes and behaviour
+  are the game's own. The drawn atlas is `launcher/prompts/arachnophobia-spider-atlas.png` (the preview next to it is for
+  looking at only); `scripts/prompts/draw_spider.py` draws both. Like the Controller prompts it is a block patch on the installed archive (`launcher/cpk_patch.h`,
+  `launcher/game_patches.h`, `launcher/prompts/arachnophobia-spider.dcpx`) applied when toggled, in the background, and
+  reapplied after a reinstall. An archive has one undo record, so the prompts and this patch are applied together:
+  changing either reverts what the other left and writes both again.
 
 No skip-intro or frame rate limit.
 
@@ -256,47 +298,60 @@ No skip-intro or frame rate limit.
 Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the
 line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for
 offline and local play." and Off / On
-rows in this order: **Infinite Health**, **Infinite Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite
-Arrows**, **Infinite Skill Points**, **Infinite Gold** and **Movement Speed 2x**, each with its one-line description
-(`src/dcp_cheats.h`), and below them the **Experience Multiplier** combo (Off, 2x, 5x, 10x). Cheats work on the CUSA10454 (US) build only; on the Japanese and Asia and Hong Kong builds the page and the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all
-settings puts them back to Off. The saved values are the start of every game session; the F10 menu changes the running
-session only and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
+rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**,
+**Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill
+Points**, **Infinite Skill Uses**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
+below them the **Movement Speed** combo
+(Off, 2x, 4x) and the **Experience Multiplier** combo (Off, 2x, 5x, 10x, 100x).
+Cheats work on the CUSA10454 1.00 (US) build only; on the USA 1.01, Japanese and Asia and Hong Kong builds the page and
+the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
+them back to Off. The saved values are the start of every game session; the F10 menu changes the running session only
+and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
 ## Controls
 
 Xbox controllers work without setup; the keyboard is always on. The page lists the layout implemented in
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
-Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 1,000 Gold**, which is not a setting). Nothing is remappable and the dead zone is not a setting.
+Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
+
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys; the in-game menu stays on Insert. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+
+Each binding is one line in `dcp.ini`: `key_cross = space`, `key_left_stick_up = w`, `hotkey_cheats_menu = f10`, `hotkey_window_mode = f11` (the full list is `src/dcp_keys.c`). The value is a key name, case-insensitive: the shadPS4 names for common keys (`space`, `enter`, `lshift`, `rctrl`, `pgup`, `kp5`, ...) or SDL's own key names (`F10`, `Left Shift`, `Keypad 5`); the launcher writes lowercase. A missing or invalid line is the default, so a config from an older build keeps the old layout. The same key may be bound to several controls and all of them follow it; a port hotkey is not exclusive of a game control either. The bindings are read when the game starts (`dcp_keys.c`, shared by the launcher, `runtime_pad.c` and the video core); the controller mapping and `DCP_PAD_MAP` are unchanged, and `DCP_KEY_MAP` still overrides the buttons it names.
 
 **Local multiplayer**: up to four SDL gamepads, player N on pad handle N and user N (`runtime_pad.c`, `runtime_services.c`).
 A gamepad that is found takes the lowest free slot and logs its user in once; the game opens that user's pad on the
 `LOGIN` event. The keyboard, `DCP_PAD_FILE`, pad recording and replay and the save list's controls belong to Player 1
 only. Unplugging a gamepad closes it and frees its slot, but no `LOGOUT` is sent: the player stays logged in, and the
 next gamepad connected takes the lowest free slot, which is not necessarily the same player. A fifth gamepad is ignored.
-The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted). The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
+The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted); Infinite Ally Health, Infinite Ally Mana and Infinite Ally Durability act on AI-controlled party allies instead. Add 100 Skill Points and Level Up (+1 Level) change Player 1's save record. The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
-atlas (`Interface_arranged000` in `stage/Interface.ftx` and `stage/Interface_US.ftx`, identical in both), and the port
-has no way to swap textures at run time, so the choice is made in the installed game files: Xbox applies a block patch
-to `DRACRO_US.CPK` and `DRACRO.CPK` (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. The
-Japanese and Asia and Hong Kong builds have no validated Xbox patch: they always show the PlayStation prompts and their
-archives are not touched.
+atlas (`Interface_arranged000`) in `stage/Interface.ftx` and in each language's `stage/Interface_XX.ftx` (DE, ES, FR, IT,
+UK and US, the same bytes in all of them), and the port has no way to swap textures at run time, so the choice is made
+in the installed game files: Xbox applies a block patch to `DRACRO_US.CPK` and `DRACRO.CPK`
+(`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. The Japanese and Asia and Hong Kong
+builds have no validated Xbox patch: they always show the PlayStation prompts and their archives are not touched.
 The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the
-4 × 4 blocks that differ between the game's atlas and the repainted one, about 480 KB, with the CRC32 of each pack
+4 × 4 blocks that differ between the game's atlas and the repainted one, about 2 MB, with the CRC32 of each pack
 before and after, and the repainted glyphs sit in the same rectangles as the game's, so the sprite definitions
-(`Interface_US.mbs`) are untouched: Circle, Triangle, Cross and Square become B, Y, A and X in the Xbox colours, L1/R1
+(`Interface_XX.mbs`) are untouched: Circle, Triangle, Cross and Square become B, Y, A and X in the Xbox colours, L1/R1
 and L2/R2 become LB/RB and LT/RT on the game's own shoulder shapes, START/OPTIONS and SELECT/SHARE become MENU and VIEW,
-the PS-logo discs become a plain guide ring, and the touchpad glyphs stay. `scripts/prompts/README.md` describes how
-the patch is made.
+the touchpad and its TOUCH PAD word become VIEW (the port maps View to the touchpad button, `src/runtime_pad.c`), the
+PS-logo discs become a plain guide ring, and the finger-cursor hand stays. The translated message sheets
+(`msgsheet/SystemMsg_XX.fms`, DE, ES, FR and IT) take the glyph the English text has where they name the touchpad button
+(same length, so the patch stays a block patch, and every other string is untouched). `scripts/prompts/README.md`
+describes how the patch is made.
 
 Applying is a background task on the page (a few seconds; Play waits for it): each pack is read from the archive,
 decompressed (CRILAYLA), checked against the patch's CRC, patched, written uncompressed to the end of the archive (the
-archives grow by 67 MB and 31 MB) and its table-of-contents row pointed at the copy; the original data is not
+archives grow by about 250 MB and 31 MB) and its table-of-contents row pointed at the copy; the original data is not
 overwritten. The original TOC and header bytes and the original length go to `DRACRO_US.CPK.undo` and
 `DRACRO.CPK.undo` next to the archives, and PlayStation puts them back byte for byte. The header's `EnableTocCrc` flag
-is cleared so the rewritten TOC is accepted. The page shows what the archives hold (the undo records), not the
-setting: `controller_prompts` in `dcp.ini` only remembers the choice, and after a reinstall from the Play page the
-launcher re-applies Xbox by itself. A pack that is not the one the patch was made for is skipped and named in the log.
+is cleared so the rewritten TOC is accepted. The page shows what the archives hold, not the setting: an install counts as
+Xbox only when its patched entries are this patch's files and no others, so an install patched by an earlier patch shows
+PlayStation and is restored and patched again. When the launcher starts, and after a reinstall from the Play page, a
+saved Xbox setting applies the patch again, and a patch left by an earlier build is removed even when PlayStation is
+selected. A pack that is not the one the patch was made for is skipped and named in the log.
 An archive that is a hard link to the game folder the install was made from (same drive) first gets a file of its own,
 so that folder is never changed. If a step fails, the archive is put back as it was; an undo record that does not belong
 to the archive, or an interrupted earlier run, is detected before anything is written.
@@ -311,7 +366,7 @@ The page reads the same files the game writes. See [TROPHIES.md](TROPHIES.md).
 
 ## Launcher input
 
-Mouse, keyboard (arrows, Enter = Play, Esc = Quit, Ctrl+S = Save) and controller (D-pad or left stick, A, B, Start =
+Mouse, keyboard (arrows, Enter = Play, Alt+F4 = Quit, Ctrl+S = Save) and controller (D-pad or left stick, A, B, Start =
 Play). The launcher closes before the game starts, so its input cannot reach the game.
 
 ## Window and display scaling
@@ -326,6 +381,11 @@ window is centred on the primary display.
 The launcher prints `Launcher: ...` lines (shown or skipped and why, game file state and hashes, settings path, settings
 saved, install request, controller prompts installed and switched, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`. The game window logs
 `Window: display ... VSync ... frame rate in title ...`.
+
+**Detailed logging** (About, Diagnostics) is on by default and keeps that log after every session. Turned off, a run
+still writes its log while it runs, but a normal exit discards it, so normal sessions do not accumulate files. A crash
+or abnormal exit keeps the log. Crash diagnostics are never discarded. **Open logs folder** opens the folder that holds
+these logs, creating it first when it does not exist yet.
 
 ## Diagnostics
 

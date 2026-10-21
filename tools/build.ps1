@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds dcp-loader.exe incrementally (MSYS2 CLANG64, CMake + Ninja). -Run launches it.
+  Builds dragons_crown_pro.exe and, on Windows, trg-updater.exe incrementally (MSYS2 CLANG64, CMake + Ninja). -Run launches it.
 .DESCRIPTION
   Reuses what is current and updates only what is stale: the video core dependencies (gpu\deps.txt), the CMake
   configuration and, once the game is installed, its boot image (build\image\v1.03). The one build configuration,
@@ -16,7 +16,7 @@
 .PARAMETER TimeoutSeconds
   Diagnostic for automated tests only: with -Run, kills the loader after this many seconds (and skips the launcher).
 .PARAMETER LoaderArgs
-  Extra arguments for dcp-loader.exe (with -Run).
+  Extra arguments for dragons_crown_pro.exe (with -Run).
 .EXAMPLE
   .\tools\build.ps1
   .\tools\build.ps1 -Run
@@ -35,11 +35,11 @@ $version = '1.03'
 $config = 'RelWithDebInfo'
 $root = $script:RepoRoot
 $buildDir = Join-Path $root 'build\cmake\clang64'
-$loader = Join-Path $buildDir 'bin\dcp-loader.exe'
+$loader = Join-Path $buildDir 'bin\dragons_crown_pro.exe'
 $view = Join-Path $root "game\prepared\v$version"
 $marker = Join-Path $view '.dcp_view.json'
 $image = Join-Path $root "build\image\v$version"
-$loadExecExit = 30 # dcp-loader: sceSystemServiceLoadExec ended the process
+$loadExecExit = 30 # dragons_crown_pro: sceSystemServiceLoadExec ended the process
 
 # Rebuilt when the game was installed again or the boot image builder changed.
 function Test-ImageCurrent {
@@ -74,7 +74,7 @@ if (-not $configured) {
     if ($LASTEXITCODE -ne 0) { Stop-Tool 'CMake configuration failed' }
 }
 Write-Step 'Building'
-& ninja -C $buildDir dcp-loader
+& ninja -C $buildDir dragons_crown_pro trg-updater
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Build failed' }
 if (-not (Test-Path -LiteralPath $loader)) { Stop-Tool "Missing $loader" }
 
@@ -90,9 +90,9 @@ Write-Host ''
 Write-Host "Built $loader" -ForegroundColor Green
 if (-not $Run) { return }
 
-$running = @(Get-Process dcp-loader -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $loader })
+$running = @(Get-Process dragons_crown_pro -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $loader })
 if ($running.Count -gt 0) {
-    Write-Warn "dcp-loader.exe is already running (PID $($running.Id -join ', ')); not launching another copy."
+    Write-Warn "dragons_crown_pro.exe is already running (PID $($running.Id -join ', ')); not launching another copy."
     return
 }
 # The loader finds the game, the boot image, user\ and build\logs by itself in this tree.
@@ -106,20 +106,22 @@ try {
         $process = Start-Process -FilePath $loader -ArgumentList $arguments -NoNewWindow -PassThru
         $null = $process.Handle # keeps the exit code readable after the process ends
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            Write-Warn "Stopping dcp-loader.exe after $TimeoutSeconds seconds"
+            Write-Warn "Stopping dragons_crown_pro.exe after $TimeoutSeconds seconds"
             $process.Kill()
             $process.WaitForExit()
         }
         $code = $process.ExitCode
     }
     else {
-        & $loader @arguments
-        $code = $LASTEXITCODE
+        # A Windows-subsystem program is not waited for by the call operator.
+        $start = @{ FilePath = $loader; NoNewWindow = $true; Wait = $true; PassThru = $true }
+        if ($arguments.Count -gt 0) { $start.ArgumentList = $arguments }
+        $code = (Start-Process @start).ExitCode
     }
 }
 finally {
     Pop-Location
 }
-Write-Host "dcp-loader.exe exit code $code"
+Write-Host "dragons_crown_pro.exe exit code $code"
 if ($code -eq $loadExecExit) { Write-Host 'The game requested sceSystemServiceLoadExec (see the LoadExec lines above).' }
 exit $code

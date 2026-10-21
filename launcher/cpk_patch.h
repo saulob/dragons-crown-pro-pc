@@ -104,6 +104,8 @@ enum class ArchivePatchState { kOriginal, kPatched };
 std::filesystem::path UndoPath(const std::filesystem::path& cpk);
 // Patched when the undo record next to the archive exists.
 ArchivePatchState ArchiveState(const std::filesystem::path& cpk);
+// The entries the archive's undo record says were rewritten; empty when it is not patched or the record is unreadable.
+std::vector<std::string> PatchedEntries(const std::filesystem::path& cpk);
 
 struct PatchHooks {
     std::function<void(const char* text)> phase;                     // "Reading stage/Interface_US.ftx..."

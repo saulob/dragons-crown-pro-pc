@@ -21,4 +21,4 @@ if ! host_has "$(find_library libstdc++.so.6)" 'GLIBCXX_3\.4\.' @GLIBCXX_NEED@ |
     export LD_LIBRARY_PATH="$here/usr/lib/compat${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
-exec "$here/usr/bin/dcp-loader" "$@"
+exec "$here/usr/bin/dragons_crown_pro" "$@"

@@ -14,12 +14,12 @@ NO GAME FILES ARE INCLUDED
 You need your own legally obtained copy of the game: a decrypted Dragon's
 Crown Pro PS4 package (.pkg). This port runs these releases:
 
-  US:                 Title ID CUSA10454, version 1.00 (APP_VER 01.00, VERSION 01.03)
+  US:                 Title ID CUSA10454, versions 1.00 (the base package) and 1.01 (the base package, then the update)
   Japan:              Title ID CUSA07001, versions 1.00 (the base package), 1.02 and 1.03 (the base package, then the update)
-  Asia, Hong Kong:    Title ID CUSA10209, versions 1.00 (APP_VER 01.00) and 1.02 (APP_VER 01.02)
+  Asia, Hong Kong:    Title ID CUSA10209, versions 1.00 (the base package) and 1.02 (the base package, then the update)
 
-Any other version is refused with "Different version of Dragon's Crown Pro". The Japanese and Asia, Hong Kong releases
-are not yet fully tested; their cheats and Xbox controller prompts are not available.
+Any other version is refused with "Different version of Dragon's Crown Pro". The USA 1.01 update and the Japanese and
+Asia, Hong Kong releases are not yet fully tested; their cheats and Xbox controller prompts are not available.
 A package still encrypted for a PS4 console cannot be unpacked on a PC.
 
 
@@ -36,7 +36,7 @@ REQUIREMENTS
 INSTALL
 -------
 1. Extract the ZIP anywhere you can write to (not "Program Files").
-2. Run dcp-loader.exe. The launcher opens.
+2. Run dragons_crown_pro.exe. The launcher opens.
 3. On the Play page, click "Install game...".
 4. Select your Dragon's Crown Pro .pkg file.
 5. Wait while the launcher checks the package and unpacks it into the "game"
@@ -49,9 +49,18 @@ settings and saves are kept. If an installation fails or is cancelled, the
 previous one is left as it was.
 
 
+UPDATES
+-------
+The launcher checks the project's GitHub releases once per start. When a newer
+release exists, an update banner appears in the header; nothing is installed
+until you choose UPDATE NOW and then RESTART TO UPDATE. The update replaces
+only the port's own program files. Game files, user data, saves, settings,
+logs, shader caches and DLC are kept.
+
+
 WINDOWS SMARTSCREEN
 -------------------
-The first time you run dcp-loader.exe, Windows SmartScreen may show a warning,
+The first time you run dragons_crown_pro.exe, Windows SmartScreen may show a warning,
 because the program is not digitally signed. If you downloaded the release
 from the project's GitHub releases page, choose "More info", then
 "Run anyway".
@@ -76,15 +85,16 @@ PLAYING
 
 WHERE THINGS ARE
 ----------------
-- Game files:     the "game" folder next to dcp-loader.exe
-- Logs:           the "logs" folder next to dcp-loader.exe
+- Game files:     the "game" folder next to dragons_crown_pro.exe
+- Logs:           the "logs" folder next to dragons_crown_pro.exe
 - Settings (dcp.ini), saves, trophy progress, the Trophy Key (keep it
                   private) and shader cache:
-                  the "user" folder next to dcp-loader.exe
+                  the "user" folder next to dragons_crown_pro.exe
 
 These folders are created when they are first needed and are not part of the
 download. When updating the port, keep "user" (and "game", to skip
-reinstalling).
+reinstalling). Versions before 0.7.0 were started with dcp-loader.exe;
+delete that file and use dragons_crown_pro.exe instead.
 
 If the game does not start or crashes, please attach the newest
 dragons_crown_pro_*.log file from the "logs" folder to a report at

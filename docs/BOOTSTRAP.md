@@ -14,7 +14,7 @@ game\*.pkg --pkg_extract--> game\extracted\base --hard links--> game\prepared\v1
                                                                   | prepare_image.py
                                                                   v
                                        build\image\v1.03\{boot.bin, content.bin, image.json}
-                                                                  | dcp-loader.exe
+                                                                  | dragons_crown_pro.exe
                                                                   v   log: build\logs\dragons_crown_pro_NNN.log
 ```
 
@@ -77,12 +77,12 @@ required by the loader.
 
 ## What is built
 
-`dcp-loader.exe`: `loader.c` + runtime (libc contracts, mutex/cond/rwlock/semaphore, threads/TLS, direct and flexible
+`dragons_crown_pro.exe`: `loader.c` + runtime (libc contracts, mutex/cond/rwlock/semaphore, threads/TLS, direct and flexible
 memory with the PS4 address reservation, kernel, files `/app0` and user dirs, time/RTC, system/user services, save data,
 AppContent, fibers, AudioOut and Pad on SDL3) + GPU stub. 19 C sources (loader, runtime, compat, GPU stub), `-Wall -Wextra -Werror`, no warnings.
 Dropped from the Uncharted copy: Ajm and MP3 (no `libSceAjm` import here).
 
-Names: public identifiers are `DCP_*` / `dcp-loader` / `dcpgpu_*`. Imports in `src/import_names.inc` are regenerated for
+Names: public identifiers are `DCP_*` / `dragons_crown_pro` / `dcpgpu_*`. Imports in `src/import_names.inc` are regenerated for
 this game (`scripts/gen_import_names.py --aerolib <medievil_pc\tools\aerolib.inl>`; `aerolib.inl` is not vendored).
 Environment variables keep the runtime's names with the `DCP_` prefix (`DCP_USER_NAME`, `DCP_FILE_TRACE`, `DCP_DMEM_MB`,
 `DCP_KEY_MAP`, `DCP_PAD_MAP`, ...).

@@ -1,5 +1,5 @@
-// The Controller prompts patch (prompts/xbox-prompts.dcpx) compiled into the executable: launcher/embed.cmake turns
-// the file into prompts_patch_data.cpp at build time.
+// The block patches (prompts/*.dcpx) compiled into the executable: launcher/embed.cmake turns each file into a source
+// with its bytes at build time.
 #pragma once
 
 #include <cstddef>
@@ -10,9 +10,15 @@ namespace dcp {
 
 extern const uint8_t kXboxPromptsPatch[];
 extern const size_t kXboxPromptsPatchSize;
+extern const uint8_t kSpiderSafeModePatch[];
+extern const size_t kSpiderSafeModePatchSize;
 
 inline std::span<const uint8_t> XboxPromptsPatch() {
     return {kXboxPromptsPatch, kXboxPromptsPatchSize};
+}
+
+inline std::span<const uint8_t> SpiderSafeModePatch() {
+    return {kSpiderSafeModePatch, kSpiderSafeModePatchSize};
 }
 
 } // namespace dcp

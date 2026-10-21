@@ -1,7 +1,7 @@
 // The Controller prompts setting: which controller's buttons the game's prompts show. The PlayStation glyphs are the
-// game's own; Xbox ones are painted over them in the button atlas (Interface_arranged000 in stage/Interface.ftx and
-// stage/Interface_US.ftx) by a block patch applied to the installed archives (cpk_patch.h), so the choice is made in
-// the game files, not at run time, and is reversible.
+// game's own; Xbox ones are painted over them in the button atlas (Interface_arranged000 in stage/Interface.ftx and in
+// each language's stage/Interface_XX.ftx) by a block patch applied to the installed archives (cpk_patch.h), so the
+// choice is made in the game files, not at run time, and is reversible.
 #pragma once
 
 #include <cstdint>
@@ -31,9 +31,10 @@ std::optional<PromptStyle> ParsePromptStyle(std::string_view key);
 // choice holds either way.
 std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0, const GameBuild& build);
 
-// What the installed archives show: Xbox once every archive present is patched, PlayStation otherwise (a half-patched
-// install reads as PlayStation; choosing Xbox again completes it, choosing PlayStation cleans it up).
-PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build);
+// What the installed archives show: Xbox once every archive present holds `xbox_patch`, PlayStation otherwise. A
+// half-patched install, or one patched by an earlier patch, reads as PlayStation; choosing Xbox applies the patch again.
+PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build,
+                                 std::span<const uint8_t> xbox_patch);
 
 struct PromptsResult {
     bool ok = false;

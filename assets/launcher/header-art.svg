@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 180" preserveAspectRatio="xMidYMid meet">
+  <style>
+    .gold { fill: #E0BB32; }
+    .gold-line { fill: none; stroke: #E0BB32; }
+    .amber { fill: #C9852C; }
+    .amber-line { fill: none; stroke: #C9852C; }
+    .highlight { fill: #FFE7AE; }
+    .highlight-line { fill: none; stroke: #FFE7AE; }
+    .deep-line { fill: none; stroke: #8B5A1B; }
+    .gold-stop { stop-color: #E0BB32; }
+    .amber-stop { stop-color: #C9852C; }
+  </style>
+
+  <defs>
+    <radialGradient id="glow" cx="1390" cy="90" r="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" class="gold-stop" stop-opacity=".11"/>
+      <stop offset=".55" class="amber-stop" stop-opacity=".035"/>
+      <stop offset="1" class="amber-stop" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="veil" x1="1040" y1="0" x2="1600" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" class="gold-stop" stop-opacity="0"/>
+      <stop offset=".62" class="gold-stop" stop-opacity=".025"/>
+      <stop offset="1" class="amber-stop" stop-opacity=".06"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="930" y1="0" x2="1330" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" class="gold-stop" stop-opacity="0"/>
+      <stop offset=".45" class="gold-stop" stop-opacity=".26"/>
+      <stop offset="1" class="gold-stop" stop-opacity=".14"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="980" y1="0" x2="1600" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" class="gold-stop" stop-opacity="0"/>
+      <stop offset=".55" class="amber-stop" stop-opacity=".16"/>
+      <stop offset="1" class="gold-stop" stop-opacity=".3"/>
+    </linearGradient>
+    <pattern id="grain" width="9" height="9" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r=".45" fill="#FFE7AE"/>
+    </pattern>
+  </defs>
+
+  <g id="ambient">
+    <rect x="0" y="0" width="1600" height="180" fill="url(#glow)"/>
+    <rect x="1040" y="0" width="560" height="180" fill="url(#veil)"/>
+    <g class="amber-line" stroke-opacity=".055" stroke-width="1">
+      <path d="M1296 0V180"/>
+      <path d="M1352 0V180"/>
+      <path d="M1408 0V180"/>
+      <path d="M1464 0V180"/>
+      <path d="M1520 0V180"/>
+      <path d="M1576 0V180"/>
+      <path d="M1120 46H1600"/>
+      <path d="M1120 138H1600"/>
+    </g>
+    <rect x="1104" y="0" width="496" height="180" fill="url(#grain)" opacity=".12"/>
+  </g>
+
+  <g id="arcade">
+    <path d="M1362 180V104Q1362 46 1420 24Q1478 46 1478 104V180" class="gold-line" stroke-opacity=".3" stroke-width="1.1"/>
+    <path d="M1380 180V111Q1380 62 1420 44Q1460 62 1460 111V180" class="amber-line" stroke-opacity=".22" stroke-width="1"/>
+    <path d="M1386 180V154Q1402 146 1420 146Q1438 146 1454 154V180" class="gold-line" stroke-opacity=".16" stroke-width="1"/>
+    <path d="M1420 44V146" class="amber-line" stroke-opacity=".18" stroke-width="1"/>
+    <path d="M1388 180V168H1452V180" class="deep-line" stroke-opacity=".28" stroke-width="1"/>
+    <path d="M1300 180V126Q1300 86 1346 64" class="amber-line" stroke-opacity=".14" stroke-width="1"/>
+  </g>
+
+  <g id="window">
+    <path d="M1446 90A108 108 0 0 1 1554 0" class="gold-line" stroke-opacity=".24" stroke-width="1"/>
+    <path d="M1446 90A108 108 0 0 0 1554 180" class="gold-line" stroke-opacity=".16" stroke-width="1"/>
+    <path d="M1474 90A80 80 0 0 1 1554 26" class="amber-line" stroke-opacity=".34" stroke-width="1"/>
+    <path d="M1474 90A80 80 0 0 0 1554 154" class="amber-line" stroke-opacity=".2" stroke-width="1"/>
+    <path d="M1502 90A52 52 0 0 1 1554 48" class="gold-line" stroke-opacity=".42" stroke-width="1.2"/>
+    <path d="M1502 90A52 52 0 0 0 1554 132" class="gold-line" stroke-opacity=".28" stroke-width="1"/>
+    <path d="M1420 90H1554" class="gold-line" stroke-opacity=".14" stroke-width="1"/>
+    <path d="M1520 28L1496 118" class="amber-line" stroke-opacity=".16" stroke-width="1"/>
+    <path d="M1546 38L1520 128" class="amber-line" stroke-opacity=".13" stroke-width="1"/>
+    <path d="M1508 90L1532 62" class="gold-line" stroke-opacity=".22" stroke-width="1"/>
+    <path d="M1508 90L1532 118" class="gold-line" stroke-opacity=".18" stroke-width="1"/>
+    <path d="M1554 62V90H1582" class="amber-line" stroke-opacity=".22" stroke-width="1"/>
+    <path d="M1554 90V118H1582" class="amber-line" stroke-opacity=".16" stroke-width="1"/>
+    <circle cx="1554" cy="90" r="5" class="gold-line" stroke-opacity=".32" stroke-width="1"/>
+    <circle cx="1554" cy="90" r="1.8" class="highlight" fill-opacity=".75"/>
+  </g>
+
+  <g id="filigree">
+    <path d="M902 96H1114" stroke="url(#stem)" stroke-width="1" stroke-linecap="round"/>
+    <path d="M1114 96C1162 96 1188 82 1218 82C1246 82 1268 92 1268 108C1268 124 1248 134 1232 126C1218 119 1220 102 1234 98" class="gold-line" stroke-opacity=".34" stroke-width="1.1" stroke-linecap="round"/>
+    <path d="M1114 96C1160 96 1192 110 1226 110C1258 110 1284 98 1308 84C1322 76 1334 72 1348 74" class="amber-line" stroke-opacity=".26" stroke-width="1" stroke-linecap="round"/>
+    <path d="M986 62C1074 38 1170 38 1242 60" class="gold-line" stroke-opacity=".2" stroke-width="1" stroke-dasharray="1 6" stroke-linecap="round"/>
+    <path d="M1006 150C1108 168 1248 166 1360 144" class="amber-line" stroke-opacity=".18" stroke-width="1" stroke-dasharray="1 6" stroke-linecap="round"/>
+    <path d="M1290 116C1318 128 1352 132 1382 128" class="gold-line" stroke-opacity=".16" stroke-width="1"/>
+  </g>
+
+  <g id="ornament">
+    <path d="M1188 38L1208 58L1188 78L1168 58Z" class="gold-line" stroke-opacity=".4" stroke-width="1.1"/>
+    <path d="M1188 47L1199 58L1188 69L1177 58Z" class="amber-line" stroke-opacity=".3" stroke-width="1"/>
+    <circle cx="1188" cy="58" r="1.9" class="highlight" fill-opacity=".64"/>
+    <path d="M1262 128L1272 138L1262 148L1252 138Z" class="amber-line" stroke-opacity=".26" stroke-width="1"/>
+    <circle cx="1262" cy="138" r="1.3" class="gold" fill-opacity=".52"/>
+    <path d="M1070 92L1078 84L1086 92L1078 100Z" class="amber-line" stroke-opacity=".3" stroke-width="1"/>
+    <circle cx="966" cy="96" r="2.4" class="gold-line" stroke-opacity=".3" stroke-width="1"/>
+    <circle cx="976" cy="96" r="1.4" class="gold" fill-opacity=".38"/>
+    <path d="M1540 18L1546 6L1552 18L1546 30Z" class="gold-line" stroke-opacity=".34" stroke-width="1"/>
+    <path d="M1476 158L1482 150L1488 158L1482 166Z" class="highlight-line" stroke-opacity=".24" stroke-width="1"/>
+  </g>
+
+  <g id="baseline">
+    <path d="M980 176H1600" stroke="url(#rule)" stroke-width="1"/>
+    <path d="M1136 12H1600" class="amber-line" stroke-opacity=".075" stroke-width="1" stroke-dasharray="2 8"/>
+  </g>
+
+  <g id="sparkles">
+    <path d="M1210 26V36M1205 31H1215" class="highlight-line" stroke-opacity=".4" stroke-width="1" stroke-linecap="round"/>
+    <path d="M1324 40V48M1320 44H1328" class="gold-line" stroke-opacity=".32" stroke-width="1" stroke-linecap="round"/>
+    <path d="M1160 132V140M1156 136H1164" class="gold-line" stroke-opacity=".26" stroke-width="1" stroke-linecap="round"/>
+    <path d="M1506 18V24M1503 21H1509" class="highlight-line" stroke-opacity=".3" stroke-width="1" stroke-linecap="round"/>
+    <circle cx="1052" cy="44" r="1" class="gold" fill-opacity=".3"/>
+    <circle cx="1098" cy="120" r="1.1" class="amber" fill-opacity=".28"/>
+    <circle cx="1142" cy="72" r=".9" class="highlight" fill-opacity=".3"/>
+    <circle cx="1176" cy="146" r="1" class="gold" fill-opacity=".24"/>
+    <circle cx="1244" cy="18" r="1.1" class="amber" fill-opacity=".3"/>
+    <circle cx="1276" cy="92" r=".8" class="highlight" fill-opacity=".22"/>
+    <circle cx="1338" cy="158" r="1" class="gold" fill-opacity=".26"/>
+    <circle cx="1398" cy="12" r="1.1" class="amber" fill-opacity=".24"/>
+    <circle cx="1436" cy="170" r=".9" class="highlight" fill-opacity=".2"/>
+    <circle cx="1502" cy="108" r="1" class="gold" fill-opacity=".28"/>
+    <circle cx="1562" cy="44" r="1.2" class="amber" fill-opacity=".26"/>
+    <circle cx="1584" cy="146" r=".9" class="gold" fill-opacity=".22"/>
+  </g>
+</svg>

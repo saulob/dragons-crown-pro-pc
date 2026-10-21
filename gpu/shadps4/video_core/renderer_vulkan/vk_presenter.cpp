@@ -655,10 +655,12 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         };
         cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
                                vk::DependencyFlagBits::eByRegion, clear_done, {}, {});
+        const bool stretch = DcpSettings::Get().presentation.load() == DcpGraphics::Stretch;
+        const vk::ImageBlit blit = stretch
+                                       ? MakeImageBlitStretch(frame->width, frame->height, extent.width, extent.height)
+                                       : MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height);
         cmdbuf.blitImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
-                         vk::ImageLayout::eTransferDstOptimal,
-                         MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height),
-                         vk::Filter::eLinear);
+                         vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
         // The settings menu and the frame counter over the frame, at display resolution.
         const bool overlay = DcpOverlay::Visible();
         const std::array post_barriers{

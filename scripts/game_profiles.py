@@ -19,6 +19,14 @@ PROFILES = {
                 'eboot_sha256': 'f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a',
                 'folder': 'v1.03', 'regional_archive': 'DRACRO_US.CPK', 'extra_files': (),
             },
+            # The 1.01 patch is laid over the base package; it replaces the base's DRACRO_US.CPK and eboot.bin.
+            '1.01': {
+                'layers': ({'app_ver': '01.00', 'sfo_version': '01.03', 'update': False},
+                           {'app_ver': '01.01', 'sfo_version': '01.03', 'update': True}),
+                'eboot_sha256': '434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0',
+                'folder': 'CUSA10454-1.01', 'regional_archive': 'DRACRO_US.CPK',
+                'extra_files': ('sce_discmap_patch.plt',),
+            },
         },
         'entry': 'eboot.bin',
         'extra_executables': (),
@@ -63,7 +71,6 @@ PROFILES = {
         'region': 'Asia/Hong Kong',
         'content_id': 'HP0177-CUSA10209_00-DRAGONSCROWN0001',
         'versions': {
-            # Same executable as 1.02; the package metadata tells the builds apart.
             '1.00': {
                 'layers': ({'app_ver': '01.00', 'sfo_version': '01.02', 'update': False},),
                 'eboot_sha256': 'd37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b',
@@ -71,8 +78,9 @@ PROFILES = {
             },
             # TARGET_APP_VER (01.01 in this build) is not an identity field.
             '1.02': {
-                'layers': ({'app_ver': '01.02', 'sfo_version': '01.00', 'update': False},),
-                'eboot_sha256': 'd37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b',
+                'layers': ({'app_ver': '01.00', 'sfo_version': '01.02', 'update': False},
+                           {'app_ver': '01.02', 'sfo_version': '01.00', 'update': True}),
+                'eboot_sha256': '927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5',
                 'folder': 'CUSA10209-1.02', 'regional_archive': 'DRACRO_CK.CPK', 'extra_files': (),
             },
         },

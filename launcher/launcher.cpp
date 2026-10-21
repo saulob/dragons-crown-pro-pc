@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -21,13 +23,16 @@
 #include "trg/platform.h"
 
 #include "controller_prompts.h"
+#include "game_patches.h"
 #include "dcp_accent.h"
+#include "dcp_png.h"
 #include "dcp_cheats.h"
 #include "dcp_displays.h"
 #include "dcp_resolution.h"
 #include "game_files.h"
 #include "game_install.h"
 #include "host.h"
+#include "launcher_quit.h"
 #include "options.h"
 #include "package_browser.h"
 #include "placement.h"
@@ -37,6 +42,9 @@
 #include "settings.h"
 #include "shift_key.h"
 #include "trophy_page.h"
+#include "update_config.h"
+#include "updater/update_platform.h"
+#include "updater/update_ui.h"
 #include "utf8.h"
 
 #ifndef DCP_PORT_VERSION
@@ -44,15 +52,34 @@
 #endif
 #define DCP_TRG_LAUNCHER_VERSION "1.1.0"
 
+// Dear ImGui's SDL3 backend; it is not declared in its header.
+ImGuiKey ImGui_ImplSDL3_KeyEventToImGuiKey(SDL_Keycode keycode, SDL_Scancode scancode);
+
 namespace dcp {
 namespace {
 
 const ImVec4 kAccent = ImVec4(kAccentRed / 255.0f, kAccentGreen / 255.0f, kAccentBlue / 255.0f, 1.0f);
 constexpr double kPlayFeedbackSeconds = 0.4;
 constexpr char kPortTitle[] = "Dragon's Crown Pro PC";
+const std::string kPortUrl = std::string("https://") + kPortRepository;
+
+ImGuiKey ImGuiKeyOf(int scancode) {
+    const SDL_Keycode keycode = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(scancode), SDL_KMOD_NONE, false);
+    return ImGui_ImplSDL3_KeyEventToImGuiKey(keycode, static_cast<SDL_Scancode>(scancode));
+}
+
+// The physical key behind a key ImGui reported; 0 when none is bindable.
+int ScancodeOf(ImGuiKey key) {
+    for (int scancode = 1; scancode < SDL_SCANCODE_COUNT; ++scancode) {
+        if (dcp_key_bindable(scancode) && ImGuiKeyOf(scancode) == key) {
+            return scancode;
+        }
+    }
+    return 0;
+}
 std::string GameFilesHelp() {
     return "Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported: " + SupportedBuildsText() +
-           ". The Japanese 1.02 and 1.03 updates are installed over the 1.00 base package. The game is unpacked into the "
+           ". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages. The game is unpacked into the "
            "game folder next to the program (about 6 GB). No game files are included. Reinstalling keeps your saves and "
            "settings.";
 }
@@ -69,6 +96,8 @@ constexpr char kGraphicsCardHelp[] =
     "to Automatic.";
 constexpr char kMonitorHelp[] = "The display the game opens on.";
 constexpr char kVSyncHelp[] = "On prevents tearing. Off allows it, for the lowest latency and G-Sync/FreeSync.";
+constexpr char kPresentationHelp[] =
+    "Controls how the rendered image fits a window or display with a different aspect ratio.";
 constexpr char kUpscaleHelp[] =
     "Enlarges the game's picture to a bigger window with AMD FidelityFX Super Resolution 1. It has no effect when the "
     "window is the size of the render resolution or smaller.";
@@ -79,6 +108,10 @@ constexpr char kAspectRatioHelp[] = "Sets the game's target rendering format and
 constexpr char kRenderResolutionHelp[] =
     "The resolution the game renders at. It is separate from the window size: the picture is scaled to the window. "
     "1440p and above need a powerful graphics card.";
+constexpr char kRestrictedAspectRatioHelp[] =
+    "This game build renders at 16:9; the other aspect ratios are not available for it.";
+constexpr char kRestrictedRenderResolutionHelp[] =
+    "This game build renders at its original size; the custom render resolutions are not available for it.";
 constexpr char kAntiAliasingHelp[] =
     "SMAA smooths jagged edges on the finished picture, at a small cost in performance.";
 constexpr char kAnisotropyHelp[] =
@@ -88,9 +121,15 @@ constexpr char kShowFpsTitleHelp[] = "Shows the frame rate in the window title: 
 constexpr char kShowResolutionTitleHelp[] =
     "Shows the game's render resolution in the window title: Dragon's Crown Pro | 1920x1080";
 constexpr char kFrameCounterHelp[] = "Shows the frame rate and frame time in a corner of the game.";
+constexpr char kArachnophobiaHelp[] =
+    "Redraws the Giant Spider as two soft cream bodies with two orange eyes, with no legs or fangs. Gameplay does not "
+    "change. It rewrites one picture file in the installed game archive (a few seconds, reversible); the change is kept across reinstalls.";
 constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
+constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
+
+enum class PatchAction { kPrompts, kSafeMode, kRestore };
 
 std::vector<std::string> ListGpuNames() {
     char names[16][256] = {};
@@ -106,9 +145,20 @@ trg::Theme LauncherTheme() {
     return theme;
 }
 
-trg::HeaderPainter LauncherHeader() {
-    return trg::headers::Gradient(IM_COL32(12, 18, 26, 255), IM_COL32(62, 42, 12, 255), IM_COL32(8, 34, 44, 255),
-                                  IM_COL32(8, 10, 16, 255));
+constexpr float kHeaderArtAspect = 1600.0f / 180.0f;
+
+trg::HeaderPainter LauncherHeader(ImTextureID art, float art_aspect) {
+    const trg::HeaderPainter gradient = trg::headers::Gradient(
+        IM_COL32(12, 18, 26, 255), IM_COL32(62, 42, 12, 255), IM_COL32(8, 34, 44, 255), IM_COL32(8, 10, 16, 255));
+    return [gradient, art, art_aspect](const trg::HeaderContext& c) {
+        gradient(c);
+        if (art == ImTextureID{}) {
+            return;
+        }
+        const float height = c.max.y - c.min.y;
+        const float width = height * art_aspect;
+        c.draw->AddImage(ImTextureRef(art), ImVec2(c.max.x - width, c.min.y), c.max);
+    };
 }
 
 __attribute__((format(printf, 1, 2))) void Log(const char* format, ...) {
@@ -118,6 +168,29 @@ __attribute__((format(printf, 1, 2))) void Log(const char* format, ...) {
     std::vprintf(format, args);
     va_end(args);
     std::printf("\n");
+}
+
+ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
+    const char* base = SDL_GetBasePath();
+    if (!base) {
+        return ImTextureID{};
+    }
+    const std::filesystem::path path = PathFromUtf8(base) / "assets" / "launcher" / "header-art.png";
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return ImTextureID{};
+    }
+    const std::vector<unsigned char> encoded((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    DcpPng::Image image;
+    if (!DcpPng::DecodeRgba(encoded.data(), encoded.size(), image)) {
+        Log("launcher header art could not be decoded: %s", Utf8(path).c_str());
+        return ImTextureID{};
+    }
+    const ImTextureID texture = host.CreateTexture(image.rgba.data(), image.width, image.height);
+    if (texture != ImTextureID{}) {
+        aspect = float(image.width) / float(image.height);
+    }
+    return texture;
 }
 
 const char* StatusTitle(GameFileState state) {
@@ -186,13 +259,24 @@ public:
         gpu_names_ = ListGpuNames();
         prompts_installed_ = InstalledPrompts();
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
+        safe_mode_installed_ = InstalledSafeMode(paths_.app0);
+        Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
         placement_ = PlacementTracker(host_.Restored());
         fonts_ = trg::LoadSystemFonts(18.0f);
+        header_art_ = LoadHeaderArt(host_, header_art_aspect_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
-        Log("shown");
+        updater_ = std::make_unique<trg::update::UpdateController>(MakeUpdateConfig(InstallDir()));
+        updater_->StartCheck();
+        ApplySavedPatches();
 
         outcome = Outcome::kRunning;
+        host_.BeginFrame();
+        outcome = Frame();
+        host_.EndFrame(LauncherTheme().bg);
+        host_.Show();
+        Log("shown");
+
         while (outcome == Outcome::kRunning) {
             if (!host_.PumpEvents()) {
                 outcome = Outcome::kQuit;
@@ -219,7 +303,16 @@ public:
             }
             host_.EndFrame(LauncherTheme().bg, shot.empty() ? nullptr : shot.c_str());
         }
-        SavePlacement(placement_.Flush());
+        if (!skip_finish_save_) {
+            SavePlacement(placement_.Flush());
+        }
+        if (updater_) {
+            updater_->Cancel();
+            if (updater_->Busy()) {
+                // Do not join a network call on the UI thread when the launcher leaves.
+                updater_.release();
+            }
+        }
         launcher_.reset();
         trophy_page_.reset();
         host_.Close();
@@ -232,6 +325,8 @@ private:
         TrackPlacement();
         PollInstall();
         PollPrompts();
+        PollUpdate();
+        NormalizeGraphicsSettings();
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
             return Outcome::kPlay;
         }
@@ -243,6 +338,12 @@ private:
         ImGui::BeginDisabled(play_.starting());
         const trg::Result result = launcher_->Frame();
         ImGui::EndDisabled();
+        if (result == trg::Result::kNone && !play_.starting()) {
+            if (HandleUpdateAction(
+                    trg::update::DrawUpdateBanner(updater_->snapshot(), launcher_->config().theme, fonts_))) {
+                return Outcome::kQuit;
+            }
+        }
         if (const std::optional<std::filesystem::path> picked = browser_.Draw(fonts_.regular, fonts_.size, LauncherTheme())) {
             StartInstall(Utf8(*picked));
         }
@@ -255,7 +356,7 @@ private:
             RequestPlay();
             break;
         case trg::Result::kQuit:
-            if (!play_.starting()) {
+            if (!play_.starting() && LauncherQuitAllowed(ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
                 return Outcome::kQuit;
             }
             break;
@@ -263,6 +364,60 @@ private:
             break;
         }
         return Outcome::kRunning;
+    }
+
+    std::filesystem::path InstallDir() const {
+        const std::filesystem::path executable = trg::update::CurrentExecutablePath();
+        return executable.has_parent_path() ? executable.parent_path() : std::filesystem::current_path();
+    }
+
+    void PollUpdate() {
+        if (updater_) {
+            updater_->Poll();
+        }
+    }
+
+    bool HandleUpdateAction(trg::update::UpdateUiAction action) {
+        switch (action) {
+        case trg::update::UpdateUiAction::kDownload:
+            updater_->StartDownload();
+            break;
+        case trg::update::UpdateUiAction::kRetry:
+            if (updater_->RetryNeedsInstall()) {
+                if (install_.running() || prompts_.running()) {
+                    launcher_->SetStatus("Wait for the current install to finish.", 5.0);
+                    break;
+                }
+                if (!launcher_->Save()) {
+                    break;
+                }
+                SavePlacement(placement_.Flush());
+                if (updater_->Retry()) {
+                    skip_finish_save_ = true;
+                    return true;
+                }
+            } else {
+                updater_->Retry();
+            }
+            break;
+        case trg::update::UpdateUiAction::kRestart:
+            if (install_.running() || prompts_.running()) {
+                launcher_->SetStatus("Wait for the current install to finish.", 5.0);
+                break;
+            }
+            if (!launcher_->Save()) {
+                break;
+            }
+            SavePlacement(placement_.Flush());
+            if (updater_->BeginInstall()) {
+                skip_finish_save_ = true;
+                return true;
+            }
+            break;
+        case trg::update::UpdateUiAction::kNone:
+            break;
+        }
+        return false;
     }
 
     // PLAY saves the settings once here, then starts the transition. A failed save keeps the launcher open.
@@ -285,7 +440,7 @@ private:
             launcher_->SetStatus(std::string(StatusTitle(files_)) + ". Install the game files first.", 6.0);
             break;
         case PlayRequest::kBusy:
-            launcher_->SetStatus("Wait for the controller prompts to finish.", 6.0);
+            launcher_->SetStatus("Wait for the game file changes to finish.", 6.0);
             break;
         case PlayRequest::kSaveFailed:
             Log("could not save the settings");
@@ -312,8 +467,41 @@ private:
         build_ = check.build;
     }
 
+    // A build whose executable has no verified render resolution sites runs at its native 16:9 size; a saved custom
+    // value is put back to the supported one, as a language the build does not have is.
+    void NormalizeGraphicsSettings() {
+        if (!RestrictedToNativeResolution(build_)) {
+            return;
+        }
+        if (settings_.Get(kRenderResolutionKey, kNativeResolution) != kNativeResolution) {
+            settings_.Set(kRenderResolutionKey, kNativeResolution);
+        }
+        if (settings_.Get(kAspectRatioKey, kDefaultAspectRatio) != kDefaultAspectRatio) {
+            settings_.Set(kAspectRatioKey, kDefaultAspectRatio);
+        }
+    }
+
     PromptStyle InstalledPrompts() const {
-        return build_ ? InstalledPromptStyle(paths_.app0, *build_) : PromptStyle::kPlayStation;
+        return build_ ? InstalledPromptStyle(paths_.app0, *build_, XboxPromptsPatch()) : PromptStyle::kPlayStation;
+    }
+
+    bool PromptPatchInstalled() const {
+        if (!build_ || !build_->xbox_prompts) {
+            return false;
+        }
+        const std::optional<BlockPatch> patch = ParseBlockPatch(XboxPromptsPatch());
+        if (!patch) {
+            return false;
+        }
+        for (const std::filesystem::path& archive : PromptArchives(paths_.app0, *build_)) {
+            for (const std::string& entry : PatchedEntries(archive)) {
+                if (std::any_of(patch->targets.begin(), patch->targets.end(),
+                                [&](const BlockPatchTarget& target) { return target.name == entry; })) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     void TrackPlacement() {
@@ -348,11 +536,16 @@ private:
         c.settings = &settings_;
         c.save_on_play = false;
         c.theme = LauncherTheme();
+        c.hints = "Enter  Play     Alt+F4  Quit     Ctrl+S  Save";
         c.fonts = fonts_;
         c.branding.title = "DRAGON'S CROWN PRO";
-        c.branding.subtitle = "PC PORT  \xC2\xB7  LAUNCHER";
         c.branding.subtitle_color = kAccent;
-        c.branding.background = LauncherHeader();
+        c.branding.subtitle_segments = {
+            {"PC PORT   \xC2\xB7   ", ""},
+            {"v" DCP_PORT_VERSION "   \xC2\xB7   ", ""},
+            {"BY SAULOB", kAuthorUrl},
+        };
+        c.branding.background = LauncherHeader(header_art_, header_art_aspect_);
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
@@ -362,7 +555,7 @@ private:
                 return trg::PlayCheck{false, "Wait for the installation to finish.", 0};
             }
             if (prompts_.running()) {
-                return trg::PlayCheck{false, "Wait for the controller prompts to finish.", 0};
+                return trg::PlayCheck{false, "Wait for the game file changes to finish.", 0};
             }
             if (files_ == GameFileState::kValid) {
                 return trg::PlayCheck{};
@@ -401,10 +594,9 @@ private:
 
     void PagePlay(trg::Ui& ui) {
         const bool ready = files_ == GameFileState::kValid;
-        const std::string dir = Utf8(paths_.app0);
         const std::string title = ready && build_ ? std::string(StatusTitle(files_)) + " \xC2\xB7 " + build_->label
                                                   : StatusTitle(files_);
-        const std::string detail = ready ? dir : StatusDetail(files_);
+        const std::string detail = ready && build_ ? BuildMetadataText(*build_) : StatusDetail(files_);
         ui.StatusCard(ready ? trg::Status::kReady : trg::Status::kAttention, title.c_str(), detail.c_str());
         if (!install_failure_.empty()) {
             ui.Spacer(4);
@@ -506,12 +698,8 @@ private:
             }
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
-            // The fresh archives show the game's own prompts; put the chosen ones back.
-            if (SavedPromptStyle() == PromptStyle::kXbox && build_ && build_->xbox_prompts &&
-                prompts_installed_ != PromptStyle::kXbox && files_ == GameFileState::kValid) {
-                Log("controller prompts: re-applying xbox after the install");
-                StartPrompts(PromptStyle::kXbox);
-            }
+            safe_mode_installed_ = InstalledSafeMode(paths_.app0);
+            ApplySavedPatches();
             return;
         }
         if (outcome->status == InstallStatus::kCancelled) {
@@ -536,10 +724,14 @@ private:
         ui.Row("Monitor", kMonitorHelp);
         MonitorCombo();
         std::vector<trg::Option> aspects;
+        const bool restricted = RestrictedToNativeResolution(build_);
         for (const DcpAspectRatio& aspect : dcp_aspect_ratios) {
-            aspects.push_back({aspect.key, aspect.name});
+            if (!restricted || std::string_view(aspect.key) == kDefaultAspectRatio) {
+                aspects.push_back({aspect.key, aspect.name});
+            }
         }
-        ui.Combo("Aspect Ratio", kAspectRatioHelp, kAspectRatioKey, kDefaultAspectRatio, aspects);
+        ui.Combo("Aspect Ratio", restricted ? kRestrictedAspectRatioHelp : kAspectRatioHelp, kAspectRatioKey,
+                 kDefaultAspectRatio, aspects);
         if (&SavedAspectRatio() != &previous_aspect) {
             const int height = settings_.GetInt(kWindowHeightKey, kDefaultWindowHeight);
             settings_.SetInt(kWindowWidthKey, WindowSizeOf(height, SavedAspectRatio()).width);
@@ -547,6 +739,11 @@ private:
         ui.Row("Graphics card", kGraphicsCardHelp);
         GraphicsCardCombo();
         ui.Toggle("VSync", kVSyncHelp, kVSyncKey, true, "Off", "On");
+        std::vector<trg::Option> presentations;
+        for (const PresentationChoice& choice : kPresentationChoices) {
+            presentations.push_back({std::string(choice.key), std::string(choice.name)});
+        }
+        ui.Choice("Presentation", kPresentationHelp, kPresentationKey, kDefaultPresentation, presentations, 2);
         ui.Heading("Scaling and sharpening");
         ui.Toggle("Upscaling", kUpscaleHelp, kUpscaleKey, false, "Off", "FSR 1");
         ui.Toggle("Sharpening", kSharpenHelp, kSharpenKey, true, "Off", "On");
@@ -615,11 +812,15 @@ private:
     }
 
     void PageGraphics(trg::Ui& ui) {
+        const bool custom = !RestrictedToNativeResolution(build_);
         std::vector<trg::Option> options;
         for (const DcpResolution& resolution : dcp_resolutions) {
-            options.push_back({resolution.key, ResolutionLabel(resolution)});
+            if (custom || std::string_view(resolution.key) == kNativeResolution) {
+                options.push_back({resolution.key, ResolutionLabel(resolution)});
+            }
         }
-        ui.Combo("Render resolution", kRenderResolutionHelp, kRenderResolutionKey, kNativeResolution, options);
+        ui.Combo("Render resolution", custom ? kRenderResolutionHelp : kRestrictedRenderResolutionHelp,
+                 kRenderResolutionKey, kNativeResolution, options);
         ui.Toggle("Anti-aliasing", kAntiAliasingHelp, kAntiAliasingKey, false, "Off", "SMAA");
         ui.Combo("Texture filtering", kAnisotropyHelp, kAnisotropyKey, "0",
                  {{"0", "Game"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}});
@@ -627,19 +828,32 @@ private:
     }
 
     void PageGameplay(trg::Ui& ui) {
+        const std::span<const TextLanguage> available = TextLanguagesOf(build_);
         std::vector<trg::Option> languages;
-        for (const TextLanguage& language : kTextLanguages) {
+        for (const TextLanguage& language : available) {
             languages.push_back({std::string(language.key), std::string(language.name)});
         }
-        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, kTextLanguages[0].key.data(), languages);
+        const std::string saved = settings_.Get(kTextLanguageKey, available.front().key);
+        const std::string_view effective = ResolveTextLanguage(build_, saved).key;
+        if (saved != effective) {
+            settings_.Set(kTextLanguageKey, std::string(effective));
+        }
+        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, available.front().key.data(), languages);
+        if (SupportsJapaneseNpcVoices(build_)) {
+            ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
+        }
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
         ui.Toggle("Render resolution in title", kShowResolutionTitleHelp, kShowResolutionTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
+        ui.Row("Arachnophobia Safe Mode", kArachnophobiaHelp);
+        ArachnophobiaToggle(ui);
         ui.EndRows();
     }
 
     void PageCheats(trg::Ui& ui) {
-        ui.Help(cheats::kLauncherHelp);
+        std::string help = cheats::kLauncherHelp;
+        help.replace(help.find("F10"), 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
+        ui.Help(help.c_str());
         ui.Spacer(12);
         const bool blocked = build_ && !build_->cheats;
         if (blocked) {
@@ -650,8 +864,13 @@ private:
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
             ui.Toggle(cheat.label, cheat.description, cheat.key, cheats::kCheatDefault, "Off", "On");
         }
+        std::vector<trg::Option> movement;
+        for (const cheats::Choice& choice : cheats::kMovementSpeedChoices) {
+            movement.push_back({choice.saved, choice.label});
+        }
+        ui.Combo(cheats::kMovementSpeedName, cheats::kMovementSpeedHelp, cheats::kMovementSpeedKey, "1", movement);
         std::vector<trg::Option> experience;
-        for (const cheats::ExperienceChoice& choice : cheats::kExperienceChoices) {
+        for (const cheats::Choice& choice : cheats::kExperienceChoices) {
             experience.push_back({choice.saved, choice.label});
         }
         ui.Combo(cheats::kExperienceMultiplierName, cheats::kExperienceMultiplierHelp, cheats::kExperienceMultiplierKey,
@@ -668,12 +887,34 @@ private:
             ui.Help("Xbox prompts are not available for this game build.");
         }
         ui.Info("Keyboard", "Always on, together with the controller.");
-        ui.Info("Window mode", "F11 switches Windowed and Borderless Fullscreen.");
-        ui.Info("Cheats menu", "F10 opens it while playing.");
-        if (ui.Section("Keyboard keys", true)) {
-            for (const KeyBinding& binding : KeyboardBindings()) {
-                ui.Info(binding.action, binding.keys);
+        if (ui.ConfirmRow("Keyboard defaults", "Puts the keyboard controls and the port hotkeys back to their defaults.",
+                          "Reset to defaults", "Put every key back to its default?", "Reset")) {
+            ResetKeys(settings_);
+            ui.SetStatus("Keys reset to defaults.");
+        }
+        if (ui.Section("Keyboard controls", true)) {
+            ui.Help("Click a key, then press the new one. Esc cancels. A key can be used for more than one control.");
+            for (int action = 0; action < DCP_KEY_FIRST_HOTKEY; ++action) {
+                KeyRow(ui, static_cast<DcpKeyAction>(action));
             }
+        }
+        if (ui.Section("Port hotkeys", true)) {
+            for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {
+                KeyRow(ui, static_cast<DcpKeyAction>(action));
+            }
+        }
+    }
+
+    void KeyRow(trg::Ui& ui, DcpKeyAction action) {
+        const std::optional<ImGuiKey> key =
+            ui.KeyBindRow(dcp_key_actions[action].label, nullptr, KeyDisplayName(SavedKey(settings_, action)));
+        if (!key) {
+            return;
+        }
+        if (const int scancode = ScancodeOf(*key)) {
+            SetKey(settings_, action, scancode);
+        } else {
+            ui.SetStatus("That key cannot be used.");
         }
     }
 
@@ -690,7 +931,7 @@ private:
             for (const PromptStyle style : {PromptStyle::kPlayStation, PromptStyle::kXbox}) {
                 const bool selected = style == prompts_installed_;
                 if (ImGui::Selectable(PromptStyleLabel(style), selected) && !selected) {
-                    StartPrompts(style);
+                    StartPatches(style, safe_mode_installed_, PatchAction::kPrompts);
                 }
                 if (selected) {
                     ImGui::SetItemDefaultFocus();
@@ -706,14 +947,47 @@ private:
         return ParsePromptStyle(saved).value_or(PromptStyle::kPlayStation);
     }
 
-    void StartPrompts(PromptStyle style) {
+    // A patch left by an earlier version is removed even when PlayStation is selected, so the archives follow the setting.
+    void ApplySavedPatches() {
+        if (files_ != GameFileState::kValid) {
+            return;
+        }
+        const PromptStyle style = build_ && build_->xbox_prompts ? SavedPromptStyle() : PromptStyle::kPlayStation;
+        const bool safe_mode = settings_.GetBool(kArachnophobiaSafeModeKey, false);
+        if (style != prompts_installed_ || safe_mode != safe_mode_installed_ ||
+            (style == PromptStyle::kPlayStation && PromptPatchInstalled())) {
+            Log("game patches: applying the saved settings");
+            StartPatches(style, safe_mode, PatchAction::kRestore);
+        }
+    }
+
+    // The installed state is the truth here too; the setting only remembers the choice for the next install.
+    void ArachnophobiaToggle(trg::Ui& ui) {
+        if (ui.TaskProgress(prompts_)) {
+            return;
+        }
+        const bool ready = files_ == GameFileState::kValid && !install_.running();
+        ImGui::BeginDisabled(!ready);
+        const int chosen = ui.Segmented(kArachnophobiaSafeModeKey, {"Off", "On"}, safe_mode_installed_ ? 1 : 0);
+        ImGui::EndDisabled();
+        if (chosen >= 0 && (chosen == 1) != safe_mode_installed_) {
+            StartPatches(prompts_installed_, chosen == 1, PatchAction::kSafeMode);
+        }
+    }
+
+    void StartPatches(PromptStyle style, bool safe_mode, PatchAction action) {
         if (prompts_.running() || install_.running() || !build_) {
             return;
         }
+        patch_action_ = action;
         prompts_outcome_ = std::make_shared<PromptsResult>();
+        const char* title = action == PatchAction::kSafeMode
+                                ? (safe_mode ? "Enabling Arachnophobia Safe Mode..." : "Disabling Arachnophobia Safe Mode...")
+                            : style == PromptStyle::kXbox ? "Switching to Xbox prompts..."
+                                                          : "Restoring PlayStation prompts...";
         const bool started = prompts_.Start(
-            style == PromptStyle::kXbox ? "Switching to Xbox prompts..." : "Restoring PlayStation prompts...",
-            [outcome = prompts_outcome_, style, app0 = paths_.app0, build = *build_](trg::Task& task) {
+            title,
+            [outcome = prompts_outcome_, style, safe_mode, app0 = paths_.app0, build = *build_](trg::Task& task) {
                 PatchHooks hooks;
                 hooks.phase = [&task](const char* text) {
                     task.SetLabel(text);
@@ -723,18 +997,18 @@ private:
                     task.Progress(static_cast<long long>(done), static_cast<long long>(total));
                     return !task.cancelled();
                 };
-                *outcome = SetPromptStyle(app0, build, style, XboxPromptsPatch(), hooks);
+                *outcome = SetGamePatches(app0, build, style, safe_mode, XboxPromptsPatch(), SpiderSafeModePatch(), hooks);
                 if (outcome->ok) {
                     return std::string();
                 }
-                return std::string(outcome->cancelled ? "Cancelled" : "Could not change the controller prompts");
+                return std::string(outcome->cancelled ? "Cancelled" : "Could not change the game files");
             });
         if (started) {
-            Log("controller prompts: switching to %s", PromptStyleKey(style));
+            Log("game patches: prompts %s, arachnophobia safe mode %s", PromptStyleKey(style), safe_mode ? "on" : "off");
         }
     }
 
-    // Runs every frame so a finished switch is picked up whichever page is open.
+    // Runs every frame so a finished change is picked up whichever page is open.
     void PollPrompts() {
         if (prompts_.Finish() == trg::Task::State::kIdle) {
             return;
@@ -744,21 +1018,33 @@ private:
             return;
         }
         prompts_installed_ = InstalledPrompts();
+        safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         if (outcome->ok) {
-            Log("controller prompts: %s (%s)", PromptStyleKey(prompts_installed_), outcome->detail.c_str());
-            if (!settings_.SaveNow({{kControllerPromptsKey, PromptStyleKey(prompts_installed_)}})) {
-                Log("could not save the controller prompts setting");
+            Log("game patches: prompts %s, arachnophobia safe mode %s (%s)", PromptStyleKey(prompts_installed_),
+                safe_mode_installed_ ? "on" : "off", outcome->detail.c_str());
+            Values saved;
+            if (patch_action_ != PatchAction::kSafeMode) {
+                saved[kControllerPromptsKey] = PromptStyleKey(prompts_installed_);
             }
-            launcher_->SetStatus(std::string("Controller prompts: ") + PromptStyleLabel(prompts_installed_) + ".", 6.0);
+            if (patch_action_ != PatchAction::kPrompts) {
+                saved[kArachnophobiaSafeModeKey] = safe_mode_installed_ ? "1" : "0";
+            }
+            if (!settings_.SaveNow(saved)) {
+                Log("could not save the game patch settings");
+            }
+            launcher_->SetStatus(patch_action_ == PatchAction::kSafeMode
+                                     ? std::string("Arachnophobia Safe Mode: ") + (safe_mode_installed_ ? "On." : "Off.")
+                                     : std::string("Controller prompts: ") + PromptStyleLabel(prompts_installed_) + ".",
+                                 6.0);
             return;
         }
         if (outcome->cancelled) {
-            Log("controller prompts: cancelled, %s installed", PromptStyleKey(prompts_installed_));
-            launcher_->SetStatus("Controller prompts unchanged.", 6.0);
+            Log("game patches: cancelled");
+            launcher_->SetStatus("Game files unchanged.", 6.0);
             return;
         }
-        Log("controller prompts: failed: %s", outcome->detail.c_str());
-        launcher_->SetStatus("Could not change the controller prompts. See the log.", 8.0);
+        Log("game patches: failed: %s", outcome->detail.c_str());
+        launcher_->SetStatus("Could not change the game files. See the log.", 8.0);
     }
 
     std::filesystem::path UserDir() const { return PathFromUtf8(config_.user_dir ? config_.user_dir : "user"); }
@@ -779,9 +1065,6 @@ private:
         const std::filesystem::path user = PathFromUtf8(config_.user_dir ? config_.user_dir : "user");
         std::filesystem::create_directories(user, ec);
         ui.FolderRow("Saves and settings", "Settings, saves and caches.", "Open user folder", Utf8(user));
-        if (config_.logs_dir && *config_.logs_dir && std::filesystem::is_directory(PathFromUtf8(config_.logs_dir), ec)) {
-            ui.FolderRow("Logs", "One numbered log per run.", "Open logs folder", config_.logs_dir);
-        }
         if (ui.ButtonRow("Settings file", "Launcher choices stored as plain text.", "Show settings file") &&
             launcher_->Save()) {
             trg::OpenInFileManager(Utf8(std::filesystem::exists(settings_.file(), ec) ? settings_.file() : user));
@@ -791,6 +1074,12 @@ private:
             settings_.ResetToDefaults();
             launcher_->SetStatus("Settings reset to defaults. Save or press Play to keep them.", 6.0);
             Log("settings reset to defaults (pending)");
+        }
+        ui.Heading("Diagnostics");
+        ui.Toggle("Detailed logging", "Keeps logs for normal sessions. Crash diagnostics are always preserved.",
+                  kDetailedLoggingKey, true);
+        if (ui.ButtonRow("Logs folder", "Open the folder containing session and crash logs", "Open logs folder")) {
+            OpenLogsFolder();
         }
         ui.Info("Port version", DCP_PORT_VERSION);
         const std::string game = InstalledGameName(files_, build_);
@@ -806,7 +1095,29 @@ private:
                       SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
                       SDL_VERSIONNUM_MICRO(SDL_GetVersion()), IMGUI_VERSION, DCP_TRG_LAUNCHER_VERSION);
         ui.Info("Libraries", libraries);
-        ui.Help(kPortRepository);
+        ui.Link(kPortRepository, kPortUrl);
+    }
+
+    void OpenLogsFolder() {
+        if (!config_.logs_dir || !*config_.logs_dir) {
+            Log("could not open the logs folder: no logs directory is configured");
+            launcher_->SetStatus("Could not open the logs folder.", 6.0);
+            return;
+        }
+        std::error_code ec;
+        std::filesystem::path folder = PathFromUtf8(config_.logs_dir);
+        std::filesystem::create_directories(folder, ec);
+        if (!std::filesystem::is_directory(folder, ec)) {
+            Log("could not create the logs folder %s: %s", Utf8(folder).c_str(), ec.message().c_str());
+            const std::filesystem::path parent = folder.parent_path();
+            ec.clear();
+            if (parent.empty() || !std::filesystem::is_directory(parent, ec)) {
+                launcher_->SetStatus("Could not open the logs folder.", 6.0);
+                return;
+            }
+            folder = parent;
+        }
+        trg::OpenInFileManager(Utf8(folder));
     }
 
     const DcpLauncherConfig& config_;
@@ -815,10 +1126,13 @@ private:
     GameFileState files_;
     const GameBuild* build_ = nullptr;
     LauncherHost host_;
+    ImTextureID header_art_{};
+    float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;
     trg::Fonts fonts_;
     std::unique_ptr<trg::Launcher> launcher_;
+    std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
     PlayGate play_;
     ProblemDialog problem_;
@@ -831,8 +1145,11 @@ private:
     std::string install_failure_;
     std::string install_failure_text_;
     PromptStyle prompts_installed_ = PromptStyle::kPlayStation;
+    bool safe_mode_installed_ = false;
+    PatchAction patch_action_ = PatchAction::kPrompts;
     std::shared_ptr<PromptsResult> prompts_outcome_;
     trg::Task prompts_;
+    bool skip_finish_save_ = false;
 };
 
 // Play without the launcher on screen: the same check, explained in a window of its own.
@@ -856,6 +1173,10 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
     const trg::Theme theme = LauncherTheme();
     ProblemDialog dialog;
     dialog.Show(cause, advice);
+    host.BeginFrame();
+    dialog.Draw(fonts, theme);
+    host.EndFrame(theme.bg);
+    host.Show();
     while (dialog.open() && host.PumpEvents()) {
         if (host.Minimized()) {
             SDL_Delay(30);

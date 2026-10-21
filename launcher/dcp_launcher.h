@@ -45,17 +45,23 @@ typedef struct {
 /* 0 when the executable's folder is unknown or a path does not fit. */
 int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
 
-/* Index into dcp_resolutions (dcp_resolution.h) of the render_resolution in the settings file; 0 (native) when the
- * file or the value is missing. */
-int dcp_render_resolution(const char *settings_file);
+/* The folder holding this run's log: the log_file's parent when one is given, else logs_dir. 0 when
+ * neither yields a path. */
+int dcp_logs_directory(const char *logs_dir, const char *log_file, char *out, size_t size);
 
-/* Index into dcp_aspect_ratios of the aspect_ratio in the settings file; 0 (16:9 Original) when the file or the value
- * is missing. */
-int dcp_aspect_ratio(const char *settings_file);
+/* Index into dcp_resolutions (dcp_resolution.h) of the render_resolution in the settings file, among the resolutions the
+ * build image_dir was built from: 0 (native) when the file or the value is missing or the build has no verified render
+ * resolution sites. */
+int dcp_render_resolution(const char *settings_file, const char *image_dir);
 
-/* The system language the game is told for the text_language in the settings file; 1 (English) when the file or the
- * value is missing. */
-int dcp_text_language(const char *settings_file);
+/* Index into dcp_aspect_ratios of the aspect_ratio in the settings file, among the shapes the build image_dir was built
+ * from: 0 (16:9 Original) when the file or the value is missing or the build has no verified render resolution sites. */
+int dcp_aspect_ratio(const char *settings_file, const char *image_dir);
+
+/* The system language the game is told for the text_language in the settings file, among the languages of the build
+ * image_dir was built from: the build's default (English when the build is unknown) when the file or the value is
+ * missing or not one of them. */
+int dcp_text_language(const char *settings_file, const char *image_dir);
 
 /* The cheats the settings file turns on, one bit per cheat (dcp_cheats.h); 0 when the file or the keys are missing. */
 unsigned dcp_saved_cheats(const char *settings_file);
@@ -63,6 +69,19 @@ unsigned dcp_saved_cheats(const char *settings_file);
 /* The Experience Multiplier the settings file sets (1 = Off, 2, 5 or 10); Off when the file or the value is missing or not
  * one of those. */
 int dcp_saved_experience_multiplier(const char *settings_file);
+
+/* The Movement Speed the settings file sets (1 = Off, 2 or 4); Off when the file or the value is missing, invalid or the
+ * old 2x setting is off. The old boolean setting is read only when the newer setting is absent. */
+int dcp_saved_movement_speed(const char *settings_file);
+
+/* 1 when the settings file routes the NPC voice cues to the Japanese banks (dcp_japanese_npc_voices; 0 by default). */
+int dcp_japanese_npc_voices(const char *settings_file);
+
+/* 1 when the settings file keeps the logs of normal sessions (detailed_logging; 1 by default). */
+int dcp_detailed_logging(const char *settings_file);
+
+/* Prints the effective Gameplay page settings, including the Japanese NPC Voices state after build gating. */
+void dcp_log_gameplay_settings(const char *settings_file, const char *image_dir);
 
 /* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
  * usable Vulkan on Linux); enumerates only, no device is created. */
@@ -79,6 +98,7 @@ int dcp_build_boot_image(const char *app0, const char *out, char *error, size_t 
 typedef struct {
     const char *label;
     int cheats;                  /* the native cheat hooks are validated for this build */
+    int japanese_npc_voices;     /* the NPC voice routing hook is validated for this build */
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
 } DcpGameBuild;
