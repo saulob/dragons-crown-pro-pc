@@ -93,7 +93,8 @@ WHERE THINGS ARE
 
 These folders are created when they are first needed and are not part of the
 download. When updating the port, keep "user" (and "game", to skip
-reinstalling).
+reinstalling). Versions before 0.7.0 were started with dcp-loader.exe;
+delete that file and use dragons_crown_pro.exe instead.
 
 If the game does not start or crashes, please attach the newest
 dragons_crown_pro_*.log file from the "logs" folder to a report at

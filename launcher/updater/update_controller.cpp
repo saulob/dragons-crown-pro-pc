@@ -238,14 +238,27 @@ void UpdateController::StartCheck(bool manual) {
 }
 
 void UpdateController::FinishCheck(trg::Task::State state, const std::string& error) {
+  const bool manual = snapshot_.manual_check;
   snapshot_.manual_check = false;
+  // The automatic check at start stays quiet when offline or rate-limited; only a retry the player asked for reports it.
+  const auto check_failed = [&](const std::string& why) {
+    if (manual) {
+      Fail(why, RetryKind::kCheck, true);
+      return;
+    }
+    snapshot_.state = UpdateState::kIdle;
+    snapshot_.error.clear();
+    snapshot_.progress = -1.0f;
+    snapshot_.retry_available = false;
+    Log(config_, "Update check failed: " + why);
+  };
   const std::shared_ptr<CheckOutcome> outcome = std::move(check_outcome_);
   if (state == trg::Task::State::kFailed || state == trg::Task::State::kCancelled || !outcome) {
-    Fail(error.empty() ? "The update check failed." : error, RetryKind::kCheck, true);
+    check_failed(error.empty() ? "The update check failed." : error);
     return;
   }
   if (!outcome->release) {
-    Fail("The update check failed.", RetryKind::kCheck, true);
+    check_failed("The update check failed.");
     return;
   }
 

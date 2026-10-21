@@ -10,20 +10,8 @@ static volatile LONG64 echoed;
 static char direct_log_path[4200];
 
 int runtime_log_write_direct(const char *text) {
-    char fallback[4200];
-    const char *path = direct_log_path[0] ? direct_log_path : NULL;
-    if (!text) return 0;
-    if (!path) {
-        char module[4200];
-        DWORD length = GetModuleFileNameA(NULL, module, sizeof(module));
-        if (length == 0 || length >= sizeof(module)) return 0;
-        char *separator = strrchr(module, '\\');
-        if (!separator) return 0;
-        snprintf(separator + 1, sizeof(module) - (size_t)(separator + 1 - module), "DEBUG_SAULO_startup.log");
-        snprintf(fallback, sizeof(fallback), "%s", module);
-        path = fallback;
-    }
-    HANDLE file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    if (!text || !direct_log_path[0]) return 0;
+    HANDLE file = CreateFileA(direct_log_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return 0;
     const DWORD size = (DWORD)strlen(text);
@@ -109,8 +97,7 @@ int runtime_log_start(const char *dir, const char *file, char *path, size_t size
     runtime_log_set_session_path(path);
     snprintf(direct_log_path, sizeof(direct_log_path), "%s", path);
     HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE), original = NULL;
-    DWORD console_mode = 0;
-    if (console && console != INVALID_HANDLE_VALUE && GetConsoleMode(console, &console_mode))
+    if (console && console != INVALID_HANDLE_VALUE && GetFileType(console) != FILE_TYPE_UNKNOWN)
         DuplicateHandle(GetCurrentProcess(), console, GetCurrentProcess(), &original, 0, FALSE, DUPLICATE_SAME_ACCESS);
     fflush(NULL);
     FILE *out = freopen(path, "w", stdout);
@@ -136,6 +123,21 @@ int runtime_log_start(const char *dir, const char *file, char *path, size_t size
         else echo_source = NULL;
     }
     return 1;
+}
+
+void runtime_log_release(void) {
+    if (!direct_log_path[0]) return;
+    fflush(NULL);
+    freopen("NUL", "w", stdout);
+    freopen("NUL", "w", stderr);
+    for (int fd = 1; fd <= 2; ++fd) {
+        const int nul = _open("NUL", _O_WRONLY | _O_BINARY);
+        if (nul < 0) break;
+        if (nul != fd) {
+            _dup2(nul, fd);
+            _close(nul);
+        }
+    }
 }
 
 void runtime_log_flush(void) {

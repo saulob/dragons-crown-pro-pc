@@ -18,7 +18,8 @@ extern "C" {
 typedef struct {
     uint8_t xmm[8][16];
     uint64_t r15, r14, r13, r12, rbp, rbx, r11, r10, r9, r8, rdi, rsi, rdx, rcx, rax, rflags;
-    uint64_t skip; /* set by a handler: return to the caller now, rax as left; only where the return address is still on top */
+    uint64_t skip; /* set by a handler: return to the caller now, rax as left, where the return address is still on top;
+                      at a replaced call, go on after it without making the call */
 } GuestRegs;
 
 typedef void (GUEST_HOOK_ABI *GuestHookHandler)(GuestRegs *regs);
@@ -29,7 +30,8 @@ typedef void (GUEST_HOOK_ABI *GuestHookHandler)(GuestRegs *regs);
 typedef struct {
     const char *name;
     uint32_t offset;     /* image offset of the first replaced byte */
-    uint8_t length;      /* whole instructions, GUEST_HOOK_MIN_LENGTH..GUEST_HOOK_MAX_LENGTH, no relative operands */
+    uint8_t length;      /* whole instructions, GUEST_HOOK_MIN_LENGTH..GUEST_HOOK_MAX_LENGTH, no relative operands
+                            except one call or jmp rel32 alone */
     uint8_t original[GUEST_HOOK_MAX_LENGTH];
     GuestHookHandler handler;
 } GuestHook;

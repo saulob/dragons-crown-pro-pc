@@ -48,26 +48,9 @@ static uint64_t module_count;
 static int entered_game;
 static int gpu_enabled;
 
-static void fail(const char *message) {
-    fprintf(stderr, "ERROR: %s\n", message);
-#ifdef _WIN32
-    char line[512];
-    snprintf(line, sizeof(line), "ERROR: %s\n", message);
-    runtime_log_write_direct(line);
-#endif
-    exit(1);
-}
+static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
 /* For failures after the GPU threads started: exit() would run destructors under them. */
-static void fail_running(const char *message) {
-    fprintf(stderr, "ERROR: %s\n", message);
-    runtime_log_flush();
-#ifdef _WIN32
-    char line[512];
-    snprintf(line, sizeof(line), "ERROR: %s\n", message);
-    runtime_log_write_direct(line);
-#endif
-    _exit(1);
-}
+static void fail_running(const char *message) { fprintf(stderr, "ERROR: %s\n", message); runtime_log_flush(); _exit(1); }
 static uint64_t read64(FILE *f) {
     unsigned char b[8];
     if (fread(b, 1, 8, f) != 8) fail("truncated boot file");
@@ -449,10 +432,8 @@ int main(int argc, char **argv) {
         runtime_log_set_detailed(dcp_detailed_logging(settings_file));
         if (launched==DCP_LAUNCHER_QUIT) { runtime_log_mark_clean_exit(); exit(0); }
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
-        printf("[run] launcher done: play\n");
     }
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
-    printf("[run] paths resolved\n");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
@@ -526,7 +507,6 @@ int main(int argc, char **argv) {
     import_count = read64(f);
     uint64_t capabilities = read64(f);
     if (capabilities & ~UINT64_C(1)) fail("unknown runtime capabilities");
-    printf("[run] runtime start\n");
     runtime_start(strict_imports ? 0 : capabilities);
     if (!size || size > 512*1024*1024 || entry >= size || !ns || ns > 64 || nr > 1000000 || import_count > 100000)
         fail("boot file limits exceeded");
@@ -622,7 +602,6 @@ int main(int argc, char **argv) {
         if (procparam) memcpy(&sdk,image+procparam+16,8); /* procparam: size, magic, count, sdk_version */
         DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
-        printf("[run] GPU init\n");
         if (dcpgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());
     }

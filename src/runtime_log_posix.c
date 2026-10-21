@@ -131,6 +131,8 @@ int runtime_log_start(const char *dir, const char *file, char *path, size_t size
     return redirected;
 }
 
+void runtime_log_release(void) {}
+
 void runtime_log_flush(void) {
     fflush(NULL);
     if (echo_source < 0) return;

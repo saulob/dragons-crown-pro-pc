@@ -33,7 +33,7 @@ struct Values {
     std::atomic<int> requested_width{0}, requested_height{0};
     std::atomic<int> monitor{1};
     std::atomic<bool> show_fps_title{false}, show_resolution_title{false};
-    // Port hotkeys as SDL scancodes (dcp_keys.h): the in-game menu and the window mode switch.
+    // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu and the window mode switch.
     std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11};
 };
 

@@ -31,6 +31,7 @@ void runtime_log_finalize(void) {
     if (!runtime_log_should_remove(detailed_logging, clean_exit, crash_reported)) return;
     if (!session_log_path[0]) return;
     runtime_log_flush();
+    runtime_log_release();
     remove(session_log_path);
 }
 

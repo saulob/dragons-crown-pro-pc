@@ -306,7 +306,6 @@ extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char*
     const bool supported = SupportsJapaneseNpcVoices(build);
     const bool voices = supported && settings.GetBool(kJapaneseNpcVoicesKey, false);
     std::printf("Gameplay: Japanese NPC Voices %s\n", supported ? (voices ? "on" : "off") : "unsupported");
-    std::printf("Japanese NPC Voices: %s\n", supported ? (voices ? "on" : "off") : "unsupported");
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {

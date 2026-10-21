@@ -8,15 +8,19 @@ extern "C" {
 /* Creates the next free dragons_crown_pro_NNN.log in dir, or exactly file when it is given. 0 on failure. */
 int runtime_log_create(const char *dir, const char *file, char *path, size_t size, void **handle);
 
-/* Sends stdout and stderr to that log and echoes them to the console the process started with. */
+/* Sends stdout and stderr to that log and echoes them to the standard output the process started with, if any. */
 int runtime_log_start(const char *dir, const char *file, char *path, size_t size);
 
-/* Appends directly with Win32 file APIs: the run log once it exists, else DEBUG_SAULO_startup.log
- * next to the executable. Safe before stdio is usable and from the exception handler. */
+/* Appends to the run log with Win32 file APIs, bypassing stdio; 0 before the log exists.
+ * Safe from the exception handler. */
 int runtime_log_write_direct(const char *text);
 
 /* Waits until what was written so far has reached the console. */
 void runtime_log_flush(void);
+
+/* Points stdout and stderr away from the log runtime_log_start opened. On Windows the C runtime opens them without
+ * delete sharing, so the log cannot be removed while they hold it. */
+void runtime_log_release(void);
 
 /* Whether a finished run's log should be discarded: only when Detailed logging is off, the exit was
  * clean, and no crash was reported. */

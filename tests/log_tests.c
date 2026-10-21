@@ -44,6 +44,11 @@ int main(void) {
         !strstr(text, "raw stdout") || !strstr(text, "raw stderr") ||
         !strstr(text, "direct line")) return 5;
 
+    runtime_log_set_detailed(0);
+    runtime_log_mark_clean_exit();
+    runtime_log_finalize();
+    if (GetFileAttributesA(log) != INVALID_FILE_ATTRIBUTES) return 6;
+
     fclose(stdout);
     fclose(stderr);
     DeleteFileA(log);

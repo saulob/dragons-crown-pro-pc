@@ -2411,6 +2411,17 @@ void TestControllerPrompts(const fs::path& base) {
             CHECK(fs::hard_link_count(linked / "DRACRO_US.CPK") == 1 && !fs::exists(linked / "DRACRO_US.CPK.copy"));
             CHECK(SetPromptStyle(linked, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(linked / "DRACRO_US.CPK") == original_us);
         }
+
+        // An update staged over a patched base starts from the original archive, and the base keeps its patch.
+        const fs::path patched_base = base / "update_base", staged = base / "update_staged", update_files = base / "update_files";
+        WriteAll(patched_base / "DRACRO_US.CPK", original_us);
+        CHECK(ApplyBlockPatch(patched_base / "DRACRO_US.CPK", parsed).ok);
+        const std::string patched_base_bytes = ReadAll(patched_base / "DRACRO_US.CPK");
+        CHECK(patched_base_bytes != original_us);
+        fs::create_directories(update_files);
+        CHECK(StageUpdate(patched_base, update_files, staged).ok());
+        CHECK(ReadAll(staged / "DRACRO_US.CPK") == original_us && !fs::exists(UndoPath(staged / "DRACRO_US.CPK")));
+        CHECK(ReadAll(patched_base / "DRACRO_US.CPK") == patched_base_bytes && fs::exists(UndoPath(patched_base / "DRACRO_US.CPK")));
     }
 
     // An install patched by an earlier patch, which lacks a language pack, reads as PlayStation until the newer patch is
@@ -2625,6 +2636,7 @@ void TestLayers(const fs::path& base) {
     CHECK(InstallGame(pkg / "ck-102.pkg", empty).status == InstallStatus::kUpdateNeedsBase);
     CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).title == "Base game required");
     CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).text.find("CUSA10209 1.00 Asia/Hong Kong") != std::string::npos);
+    CHECK(DescribeInstall(InstallStatus::kUpdateNeedsBase).text.find("CUSA10454 1.00 USA") != std::string::npos);
 
     Fixture installed(root, "installed-1.03", kJp103);
     const GameRoots present{root / "present" / "prepared", root / "present" / "image"};

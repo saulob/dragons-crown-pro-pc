@@ -21,6 +21,7 @@
 #endif
 
 #include "boot_image.h"
+#include "cpk_patch.h"
 #include "pkg_extract.h"
 #include "utf8.h"
 
@@ -379,6 +380,32 @@ InstallResult LinkTree(const fs::path& from, const fs::path& to) {
     return {};
 }
 
+// The base's own patches (Controller prompts, Arachnophobia Safe Mode) are not carried into an update: its archives are
+// put back to the originals here, and the saved settings patch the new build after the install.
+InstallResult RevertStagedPatches(const fs::path& staged) {
+    std::error_code ec;
+    std::vector<fs::path> records;
+    for (fs::recursive_directory_iterator it(staged, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec) && it->path().extension() == ".undo") {
+            records.push_back(it->path());
+        }
+    }
+    if (ec) {
+        return Failure(InstallStatus::kReadFailed, "cannot list " + Utf8(staged) + ": " + ec.message());
+    }
+    for (const fs::path& record : records) {
+        const fs::path archive = fs::path(record).replace_extension();
+        if (!fs::exists(archive, ec)) {
+            fs::remove(record, ec);
+            continue;
+        }
+        if (const PatchResult reverted = RevertBlockPatch(archive); !reverted.ok) {
+            return Failure(InstallStatus::kWriteFailed, "cannot restore the original " + reverted.detail);
+        }
+    }
+    return {};
+}
+
 // Lays the files of an unpacked update over the staged game. A staged file is replaced, never written through: it may
 // be a link into the installed game.
 InstallResult OverlayUpdate(const fs::path& update, const fs::path& staged) {
@@ -576,6 +603,9 @@ InstallResult StageUpdate(const fs::path& base_app0, const fs::path& update_dir,
     if (InstallResult linked = LinkTree(base_app0, staged_app0); !linked.ok()) {
         return linked;
     }
+    if (InstallResult reverted = RevertStagedPatches(staged_app0); !reverted.ok()) {
+        return reverted;
+    }
     return OverlayUpdate(update_dir, staged_app0);
 }
 
@@ -752,8 +782,8 @@ InstallMessage DescribeInstall(InstallStatus status) {
         return {"Could not prepare the game", "The game's code could not be prepared. The log has the details."};
     case InstallStatus::kUpdateNeedsBase:
         return {"Base game required",
-                "This package is an update. Install the 1.00 base package of the same game first (CUSA10209 1.00 "
-                "Asia/Hong Kong or CUSA07001 1.00 Japan), then install the update."};
+                "This package is an update. Install the 1.00 base package of the same game first (CUSA10454 1.00 "
+                "USA, CUSA07001 1.00 Japan or CUSA10209 1.00 Asia/Hong Kong), then install the update."};
     case InstallStatus::kActivated:
         return {"Game activated", "The selected build is now the active game."};
     case InstallStatus::kUpToDate:

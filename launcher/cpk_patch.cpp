@@ -795,6 +795,10 @@ PatchResult RevertBlockPatch(const std::filesystem::path& cpk) {
         result.detail = name + ": the undo record is not for this archive";
         return result;
     }
+    if (std::string error; !Unshare(cpk, &error)) {
+        result.detail = name + ": " + error;
+        return result;
+    }
     {
         std::fstream out(cpk, std::ios::binary | std::ios::in | std::ios::out);
         if (!out) {

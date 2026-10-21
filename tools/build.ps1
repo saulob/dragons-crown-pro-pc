@@ -113,8 +113,10 @@ try {
         $code = $process.ExitCode
     }
     else {
-        & $loader @arguments
-        $code = $LASTEXITCODE
+        # A Windows-subsystem program is not waited for by the call operator.
+        $start = @{ FilePath = $loader; NoNewWindow = $true; Wait = $true; PassThru = $true }
+        if ($arguments.Count -gt 0) { $start.ArgumentList = $arguments }
+        $code = (Start-Process @start).ExitCode
     }
 }
 finally {

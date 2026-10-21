@@ -39,7 +39,7 @@ inline constexpr char kShowFrameCounterKey[] = "show_fps";
 inline constexpr char kDetailedLoggingKey[] = "detailed_logging";
 // Which controller's buttons the game's prompts show; the launcher keeps the installed archives in step with it.
 inline constexpr char kControllerPromptsKey[] = "controller_prompts";
-// Replaces the Giant Spider's pictures with placeholder blocks; the launcher keeps the installed archive in step with it.
+// Replaces the Giant Spider's pictures with a simplified creature; the launcher keeps the installed archive in step with it.
 inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 // Routes NPC voice cues to the Japanese banks already present in the USA installation.
 inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";

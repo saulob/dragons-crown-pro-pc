@@ -1943,8 +1943,20 @@ void TestHookTable() {
         for (uint8_t at = 5; at < hooks[i].length; ++at) {
             CHECK(site[at] == 0x90);
         }
-        // The replaced bytes live on in the stub, followed by the jump back to the next instruction.
         const uint8_t* stub = stubs + i * guest_hook_stub_size();
+        if (hooks[i].length == 5 && (hooks[i].original[0] == 0xe8 || hooks[i].original[0] == 0xe9)) {
+            // A call or jmp rel32 is carried as its absolute target, not as bytes relative to the stub.
+            int32_t displacement;
+            std::memcpy(&displacement, hooks[i].original + 1, 4);
+            const uint64_t target = reinterpret_cast<uint64_t>(site + 5 + displacement);
+            bool carried = false;
+            for (size_t at = 0; at + 8 <= guest_hook_stub_size() && !carried; ++at) {
+                carried = std::memcmp(stub + at, &target, 8) == 0;
+            }
+            CHECK(carried);
+            continue;
+        }
+        // The replaced bytes live on in the stub, followed by the jump back to the next instruction.
         const uint8_t* found = nullptr;
         for (size_t at = 0; at + hooks[i].length <= guest_hook_stub_size() && !found; ++at) {
             if (std::memcmp(stub + at, hooks[i].original, hooks[i].length) == 0) {
@@ -2301,6 +2313,41 @@ void TestNativeHooks() {
     const int rbx_value = read_rbx();
     CHECK(static_cast<int>(g_seen.rbx) == rbx_value);
     CHECK(g_hook_calls == 8);
+
+    // A replaced call or jmp rel32 still reaches its target from the stub. Skipping a call goes on after it; skipping a
+    // tail jmp returns to the caller.
+    const uint8_t callee[] = {0xc7, 0x07, 0x09, 0x00, 0x00, 0x00, 0xb8, 0x03, 0x00, 0x00, 0x00, 0xc3}; // mov [rdi],9; mov eax,3; ret
+    std::memcpy(image + 0x700, callee, sizeof(callee));
+    const auto relative = [&](uint32_t from, uint8_t opcode, uint8_t* out) {
+        const int32_t distance = int32_t(0x700) - int32_t(from + 5);
+        out[0] = opcode;
+        std::memcpy(out + 1, &distance, 4);
+    };
+    uint8_t caller[9];
+    relative(0x600, 0xe8, caller);
+    const uint8_t add_one_ret[] = {0x83, 0xc0, 0x01, 0xc3}; // add eax,1; ret
+    std::memcpy(caller + 5, add_one_ret, sizeof(add_one_ret));
+    std::memcpy(image + 0x600, caller, sizeof(caller));
+    uint8_t tail[5];
+    relative(0x800, 0xe9, tail);
+    std::memcpy(image + 0x800, tail, sizeof(tail));
+    GuestHook relocated[2] = {};
+    relocated[0] = {"call", 0x600, 5, {}, SkipWhenFive};
+    std::memcpy(relocated[0].original, caller, 5);
+    relocated[1] = {"tail jmp", 0x800, 5, {}, SkipWhenFive};
+    std::memcpy(relocated[1].original, tail, 5);
+    CHECK(guest_hooks_install(image, kImageSize, 0x40, &id, relocated, 2, stubs + 0x1000, 0x1000, &bad) == GUEST_HOOK_OK);
+    const StoreFunction call_site = reinterpret_cast<StoreFunction>(image + 0x600);
+    const StoreFunction tail_site = reinterpret_cast<StoreFunction>(image + 0x800);
+    cell = 0;
+    CHECK(call_site(&cell) == 4 && cell == 9);
+    cell = 5;
+    CHECK(call_site(&cell) == 8 && cell == 5);
+    cell = 0;
+    CHECK(tail_site(&cell) == 3 && cell == 9);
+    cell = 5;
+    CHECK(tail_site(&cell) == 7 && cell == 5);
+    CHECK(g_hook_calls == 12);
 }
 
 // Infinite Arrows holds Player 1's Elf at 10 from the next tick on, whatever the count was; Off lets the count go.

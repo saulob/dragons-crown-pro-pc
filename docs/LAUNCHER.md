@@ -7,7 +7,7 @@ Graphics, Gameplay, Cheats, Controls, Trophies and About.
 ## Architecture
 
 `dragons_crown_pro.exe` calls `dcp_launcher_run()` (`launcher/dcp_launcher.h`) early in `main`, after the PS4 address range is
-reserved and before the boot image is read. There is no second executable and no helper process. On Linux the loader
+reserved and before the boot image is read. The only other executable is the Windows update helper, `trg-updater.exe`. On Linux the loader
 passes `dcp_check_vulkan` as the launcher's graphics check: Play runs it (the launcher itself needs no Vulkan) and, if
 it fails, `launcher/problem_dialog.cpp` explains why and the launcher stays open.
 
@@ -50,7 +50,8 @@ readbacks, the 60 Hz vblank, the stick dead zone) are code, and the environment 
 `tools\build.ps1 -Run` starts the executable with no folder arguments: it resolves the development folders itself.
 
 The loader writes the one numbered log itself, `logs\dragons_crown_pro_NNN.log` (the next free number, never an
-existing file) in the folder above, and echoes it to the console. `--logs <folder>` or `--log <file>` override it.
+existing file) in the folder above, and echoes it to the standard output the process started with, when it has one
+(a console, pipe or file). `--logs <folder>` or `--log <file>` override it.
 
 ## Startup
 
@@ -269,8 +270,8 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
 - **Menu & Subtitles**: the language of the game's menus and subtitle text (`text_language`: `english`, `french`,
   `german`, `italian`, `spanish`; English by default). The game ships text for these five. The Asia/Hong Kong build
   (CUSA10209) ships Traditional Chinese and Korean instead (`traditional_chinese`, `korean`; Traditional Chinese by
-  default) and has no Western or Simplified Chinese text. A saved language the active build does not have shows that build's
-  default and is kept in `dcp.ini`. An explicit `DCP_LANGUAGE` environment variable (a PS4 language number) overrides it.
+  default) and has no Western or Simplified Chinese text. Korean is not yet tested in game. A saved language the active
+  build does not have is replaced by that build's default. An explicit `DCP_LANGUAGE` environment variable (a PS4 language number) overrides it.
   Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 USA only; the option is hidden for
   the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
@@ -302,8 +303,8 @@ rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Ma
 Points**, **Infinite Skill Uses**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
 below them the **Movement Speed** combo
 (Off, 2x, 4x) and the **Experience Multiplier** combo (Off, 2x, 5x, 10x, 100x).
-Cheats work on the CUSA10454 (US) build only; on the Japanese and Asia and Hong Kong builds the page and the menu show
-them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
+Cheats work on the CUSA10454 1.00 (US) build only; on the USA 1.01, Japanese and Asia and Hong Kong builds the page and
+the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
 them back to Off. The saved values are the start of every game session; the F10 menu changes the running session only
 and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
@@ -313,7 +314,7 @@ Xbox controllers work without setup; the keyboard is always on. The page lists t
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 
-The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the host functions that exist (Cheats menu, Window mode). Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys; the in-game menu stays on Insert. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
 
 Each binding is one line in `dcp.ini`: `key_cross = space`, `key_left_stick_up = w`, `hotkey_cheats_menu = f10`, `hotkey_window_mode = f11` (the full list is `src/dcp_keys.c`). The value is a key name, case-insensitive: the shadPS4 names for common keys (`space`, `enter`, `lshift`, `rctrl`, `pgup`, `kp5`, ...) or SDL's own key names (`F10`, `Left Shift`, `Keypad 5`); the launcher writes lowercase. A missing or invalid line is the default, so a config from an older build keeps the old layout. The same key may be bound to several controls and all of them follow it; a port hotkey is not exclusive of a game control either. The bindings are read when the game starts (`dcp_keys.c`, shared by the launcher, `runtime_pad.c` and the video core); the controller mapping and `DCP_PAD_MAP` are unchanged, and `DCP_KEY_MAP` still overrides the buttons it names.
 
