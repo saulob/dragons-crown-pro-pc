@@ -219,6 +219,7 @@ constexpr GameBuild kGameBuilds[] = {
         kAsia102Layers,
         {},
         kAsiaLanguages,
+        true,
     },
 };
 

@@ -101,6 +101,7 @@ typedef struct {
     int japanese_npc_voices;     /* the NPC voice routing hook is validated for this build */
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
+    int resolution_probe;        /* DEBUG_SAULO: the loader logs the render resolution signature search */
 } DcpGameBuild;
 
 /* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */

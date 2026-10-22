@@ -651,6 +651,7 @@ int main(int argc, char **argv) {
         runtime_log_flush();
         _exit(missing ? 1 : 0); /* no destructors: GPU threads are running */
     }
+    if (known_build && game_build.resolution_probe) dcp_probe_render_sites(image,size,game_build.label);
     if (render_resolution!=&dcp_resolutions[0] || aspect_ratio!=&dcp_aspect_ratios[0]) {
         char error[320];
         if (!known_build) fail_running("render resolution and aspect ratio need a supported game build");

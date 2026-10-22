@@ -45,6 +45,7 @@ struct GameBuild {
     std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
     std::span<const DcpResolutionSite> resolution_sites;
     std::span<const TextLanguage> text_languages; // the first is the default
+    bool resolution_probe = false;                // DEBUG_SAULO: logs the render resolution signature search
 };
 
 // The supported builds, US first.
