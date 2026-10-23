@@ -220,7 +220,6 @@ constexpr GameBuild kGameBuilds[] = {
         {},
         kAsiaLanguages,
         true,
-        true,
     },
 };
 

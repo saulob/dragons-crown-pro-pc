@@ -102,7 +102,6 @@ typedef struct {
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
-    int resolution_probe;        /* DEBUG_SAULO: the loader logs the render resolution signature search */
 } DcpGameBuild;
 
 /* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */

@@ -80,9 +80,6 @@ extern const DcpResolutionSignature dcp_cusa10209_102_signatures[DCP_CUSA10209_1
 int dcp_find_resolution_sites(const unsigned char *image, uint64_t image_size, const DcpResolutionSignature *signatures,
                               size_t count, DcpResolutionSite *sites, DcpResolutionSignatureResult *results);
 
-/* DEBUG_SAULO: logs the CUSA10209 1.02 signature search for `label`; writes nothing to the image. */
-void dcp_probe_render_sites(const unsigned char *image, uint64_t image_size, const char *label);
-
 #ifdef __cplusplus
 }
 #endif

@@ -46,7 +46,6 @@ struct GameBuild {
     std::span<const DcpResolutionSite> resolution_sites;
     std::span<const TextLanguage> text_languages; // the first is the default
     bool resolution_by_signature = false;
-    bool resolution_probe = false;                // DEBUG_SAULO: logs the render resolution signature search
 };
 
 // The supported builds, US first.

@@ -1,7 +1,5 @@
-/* DEBUG_SAULO: temporary CUSA10209 1.02 render resolution site search; logs only, writes nothing. */
 #include "dcp_resolution.h"
 
-#include <stdio.h>
 #include <string.h>
 
 const DcpResolutionSignature dcp_cusa10209_102_signatures[DCP_CUSA10209_102_SIGNATURE_COUNT] = {
@@ -237,39 +235,4 @@ int dcp_find_resolution_sites(const unsigned char *image, uint64_t image_size, c
         sites[i].height = signatures[i].height;
     }
     return 1;
-}
-
-static void print_expected_bytes(const DcpResolutionSignature *signature) {
-    for (unsigned i = 0; i < signature->opcode_length; ++i) printf("%02x ", signature->opcode[i]);
-    for (unsigned i = 0; i < 4; ++i) printf("%02x%s", (signature->value >> (8 * i)) & 0xff, i < 3 ? " " : "");
-}
-
-void dcp_probe_render_sites(const unsigned char *image, uint64_t image_size, const char *label) {
-    const size_t count = DCP_CUSA10209_102_SIGNATURE_COUNT;
-    DcpResolutionSignatureResult results[DCP_CUSA10209_102_SIGNATURE_COUNT];
-    DcpResolutionSite sites[DCP_CUSA10209_102_SIGNATURE_COUNT];
-    const int complete =
-        dcp_find_resolution_sites(image, image_size, dcp_cusa10209_102_signatures, count, sites, results);
-    int validated = 0;
-    for (size_t i = 0; i < count; ++i) {
-        const DcpResolutionSignature *signature = &dcp_cusa10209_102_signatures[i];
-        const char *dimension = signature->height ? "height" : "width";
-        if (results[i].valid) {
-            ++validated;
-            printf("DEBUG_SAULO site %02zu %s %u: found at 0x%x, expected ", i, dimension, signature->value,
-                   results[i].offset);
-        } else if (results[i].matches == 0) {
-            printf("DEBUG_SAULO site %02zu %s %u: not found, expected ", i, dimension, signature->value);
-        } else if (results[i].matches > 1) {
-            printf("DEBUG_SAULO site %02zu %s %u: ambiguous, expected ", i, dimension, signature->value);
-        } else {
-            printf("DEBUG_SAULO site %02zu %s %u: bytes differ at 0x%x, expected ", i, dimension, signature->value,
-                   results[i].offset);
-        }
-        print_expected_bytes(signature);
-        printf("\n");
-    }
-    printf("DEBUG_SAULO render resolution %s: sites %d/%zu validated, image 0x%llx, %s\n", label, validated, count,
-           (unsigned long long)image_size,
-           complete ? "complete set, not applied by this diagnostic" : "custom resolutions stay disabled");
 }

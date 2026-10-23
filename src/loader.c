@@ -674,7 +674,6 @@ int main(int argc, char **argv) {
         runtime_log_flush();
         _exit(missing ? 1 : 0); /* no destructors: GPU threads are running */
     }
-    if (known_build && game_build.resolution_probe) dcp_probe_render_sites(image,size,game_build.label);
     if (render_resolution!=&dcp_resolutions[0] || aspect_ratio!=&dcp_aspect_ratios[0]) {
         char error[320];
         if (!known_build) fail_running("render resolution and aspect ratio need a supported game build");
@@ -702,7 +701,7 @@ int main(int argc, char **argv) {
     }
     if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
-    if (known_build && game_build.japanese_npc_voices)
+    if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
         voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
