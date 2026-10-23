@@ -48,6 +48,7 @@ struct GuestFunctions {
     void(GUEST_HOOK_ABI* set_level)(uint64_t record, uint32_t level) = nullptr;
     void(GUEST_HOOK_ABI* write_stats)(uint64_t record, int32_t pattern, int32_t arg2, int32_t level,
                                       int32_t arg1) = nullptr;
+    int64_t (*now_ms)() = nullptr;
 };
 void SetGuestFunctions(const GuestFunctions& functions);
 

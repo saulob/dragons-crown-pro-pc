@@ -50,9 +50,9 @@ struct CheatInfo {
 };
 
 inline constexpr CheatInfo kCheats[] = {
-    {Cheat::InfiniteHealth, kInfiniteHealthKey, "Infinite Health", "Prevent normal damage from reducing player health"},
+    {Cheat::InfiniteHealth, kInfiniteHealthKey, "Infinite Health", "Freezes Player 1's current health"},
     {Cheat::InfiniteAllyHealth, kInfiniteAllyHealthKey, "Infinite Ally Health",
-     "Prevent damage from reducing AI allies' health"},
+     "Freezes AI allies' current health"},
     {Cheat::InfiniteMana, kInfiniteManaKey, "Infinite Mana", "Prevent mana from decreasing when casting spells"},
     {Cheat::InfiniteAllyMana, kInfiniteAllyManaKey, "Infinite Ally Mana",
      "Prevent AI allies' mana from decreasing when casting spells"},
@@ -80,8 +80,8 @@ constexpr size_t Index(Cheat cheat) {
 }
 
 // One-shot commands of the in-game menu. They are not cheats: nothing is saved or kept On.
-enum class Action : uint8_t { AddSkillPoints, AddGold, AddLevel };
-inline constexpr size_t kActionCount = 3;
+enum class Action : uint8_t { AddSkillPoints, AddGold, AddLevel, FillHealth, SetLowHealth, FillAllyHealth, SetAllyLowHealth };
+inline constexpr size_t kActionCount = 7;
 
 struct ActionInfo {
     Action action;
@@ -94,6 +94,10 @@ inline constexpr ActionInfo kActions[] = {
     {Action::AddSkillPoints, Cheat::InfiniteSkillPoints, "Add 100 Skill Points", "Add"},
     {Action::AddGold, Cheat::InfiniteGold, "Add 1,000 Gold", "Add"},
     {Action::AddLevel, Cheat::InfiniteGold, "Level Up (+1 Level)", "Add"},
+    {Action::FillHealth, Cheat::InfiniteAllyHealth, "Fill Health", nullptr},
+    {Action::FillAllyHealth, Cheat::InfiniteAllyHealth, "Fill Ally Health", nullptr},
+    {Action::SetLowHealth, Cheat::InfiniteAllyHealth, "Set Low Health", nullptr},
+    {Action::SetAllyLowHealth, Cheat::InfiniteAllyHealth, "Set Ally Low Health", nullptr},
 };
 static_assert(std::size(kActions) == kActionCount);
 
@@ -341,14 +345,64 @@ bool IsElf(const Memory& memory, uint64_t owner) {
     return memory.U32(owner + kOwnerClassOffset) == kElfClass;
 }
 
-// The damage a hit takes from a unit's HP: positive is a loss, anything else heals and stays as it is.
-constexpr int32_t ProtectedDamage(bool enabled, UnitKind kind, int32_t amount) {
-    return enabled && kind == UnitKind::PlayerOne && amount > 0 ? 0 : amount;
+// Infinite Health freezes HP: neither a loss nor a heal reaches a frozen unit.
+constexpr int32_t FrozenHealthDelta(bool enabled, bool party_member, int32_t amount) {
+    return enabled && party_member ? 0 : amount;
 }
 
-constexpr int32_t ProtectedAllyDamage(bool enabled, bool ally, int32_t amount) {
-    return enabled && ally && amount > 0 ? 0 : amount;
+inline constexpr int32_t kLowHealthPercent = 20;
+
+constexpr int32_t LowHealth(int32_t max_hp) {
+    const int32_t low = static_cast<int32_t>(static_cast<int64_t>(max_hp) * kLowHealthPercent / 100);
+    return low < 1 ? 1 : low;
 }
+
+// The HP each party slot is held at while Infinite Health is On. A snapshot belongs to one unit and expires when the
+// unit stops ticking, so a unit that replaces it (map change, respawn) gets its own.
+class FrozenHealth {
+public:
+    static constexpr size_t kSlots = 4;
+    static constexpr int64_t kStaleMs = 250;
+
+    // The HP the unit must have. A dead unit (hp <= 0) drops its snapshot and is left as it is.
+    int32_t Hold(int32_t slot, uint64_t unit, int32_t hp, int64_t now_ms) {
+        if (slot < 0 || static_cast<size_t>(slot) >= kSlots) {
+            return hp;
+        }
+        Entry& entry = entries_[slot];
+        if (hp <= 0) {
+            entry = {};
+            return hp;
+        }
+        if (entry.unit != unit || now_ms - entry.seen_ms > kStaleMs) {
+            entry = {unit, hp, now_ms};
+        }
+        entry.seen_ms = now_ms;
+        return entry.hp;
+    }
+
+    void Set(int32_t slot, uint64_t unit, int32_t hp, int64_t now_ms) {
+        if (slot >= 0 && static_cast<size_t>(slot) < kSlots) {
+            entries_[slot] = {unit, hp, now_ms};
+        }
+    }
+
+    void Clear() { entries_ = {}; }
+
+    void ClearSlot(int32_t slot) {
+        if (slot >= 0 && static_cast<size_t>(slot) < kSlots) {
+            entries_[slot] = {};
+        }
+    }
+
+private:
+    struct Entry {
+        uint64_t unit = 0;
+        int32_t hp = 0;
+        int64_t seen_ms = 0;
+    };
+    std::array<Entry, kSlots> entries_{};
+};
 
 // UseMP deducts only when its consume flag is 1; with 0 the cast still succeeds and costs nothing.
 constexpr uint32_t ProtectedConsumeFlag(bool enabled, UnitKind kind, uint32_t consume) {
@@ -546,7 +600,7 @@ inline std::string EnabledCheatsText(uint32_t mask) {
 }
 
 constexpr bool RefillsOnEnable(Cheat cheat) {
-    return cheat == Cheat::InfiniteHealth || cheat == Cheat::InfiniteMana || cheat == Cheat::InfiniteDurability;
+    return cheat == Cheat::InfiniteMana || cheat == Cheat::InfiniteDurability;
 }
 
 // Cheats that fill a resource when they turn On: the request waits until the game thread can apply it to Player 1.

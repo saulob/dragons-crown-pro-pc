@@ -482,7 +482,9 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
                         : (on ? "On" : "Off");
     const bool lit = available && (action || on || (choice && multiplier != off));
     draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
-    draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y), ImGui::GetColorU32(lit ? accent : dim), state);
+    if (state != nullptr) {
+        draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y), ImGui::GetColorU32(lit ? accent : dim), state);
+    }
     ImGui::PopID();
     if (!pressed || !available) {
         return;
