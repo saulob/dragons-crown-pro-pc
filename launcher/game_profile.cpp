@@ -220,6 +220,7 @@ constexpr GameBuild kGameBuilds[] = {
         {},
         kAsiaLanguages,
         true,
+        true,
     },
 };
 
@@ -270,7 +271,7 @@ std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build) {
 }
 
 bool RestrictedToNativeResolution(const GameBuild* build) {
-    return build && build->resolution_sites.empty();
+    return build && build->resolution_sites.empty() && !build->resolution_by_signature;
 }
 
 const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view key) {

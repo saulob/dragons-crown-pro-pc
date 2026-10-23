@@ -3378,7 +3378,8 @@ void TestResolutionProbe() {
         if (asia_102) {
             CHECK(std::string(build.eboot_sha256) ==
                   "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5");
-            CHECK(RestrictedToNativeResolution(&build));
+            CHECK(build.resolution_by_signature && build.resolution_sites.empty());
+            CHECK(!RestrictedToNativeResolution(&build));
         } else if (!build.resolution_sites.empty()) {
             CHECK(build.resolution_sites.size() == 23);
         }

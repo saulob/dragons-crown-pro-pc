@@ -678,9 +678,22 @@ int main(int argc, char **argv) {
     if (render_resolution!=&dcp_resolutions[0] || aspect_ratio!=&dcp_aspect_ratios[0]) {
         char error[320];
         if (!known_build) fail_running("render resolution and aspect ratio need a supported game build");
-        if (game_build.resolution_site_count==0)
+        const DcpResolutionSite *sites=game_build.resolution_sites;
+        size_t site_count=game_build.resolution_site_count;
+        DcpResolutionSite found_sites[DCP_CUSA10209_102_SIGNATURE_COUNT];
+        if (site_count==0 && game_build.resolution_by_signature) {
+            DcpResolutionSignatureResult results[DCP_CUSA10209_102_SIGNATURE_COUNT];
+            site_count=DCP_CUSA10209_102_SIGNATURE_COUNT;
+            if (!dcp_find_resolution_sites(image,size,dcp_cusa10209_102_signatures,site_count,found_sites,results)) {
+                char message[400];
+                snprintf(message,sizeof(message),"render resolution sites do not match game build %s",game_build.label);
+                fail_running(message);
+            }
+            sites=found_sites;
+        }
+        if (site_count==0)
             fail_running("render resolution and aspect ratio are not available for this game build");
-        if (!dcp_apply_resolution(image,size,game_build.resolution_sites,game_build.resolution_site_count,
+        if (!dcp_apply_resolution(image,size,sites,site_count,
                                   &render_target,error,sizeof(error))) {
             char message[400];
             snprintf(message,sizeof(message),"%s, game build %s",error,game_build.label);
