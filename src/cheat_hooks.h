@@ -18,6 +18,8 @@ void GUEST_HOOK_ABI ManaDrainHook(GuestRegs* regs);
 void GUEST_HOOK_ABI ArrowHook(GuestRegs* regs);
 void GUEST_HOOK_ABI SkillPointsHook(GuestRegs* regs);
 void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs);
+void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs);
+void GUEST_HOOK_ABI SkillBudgetHook(GuestRegs* regs);
 void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs);
 void GUEST_HOOK_ABI DurabilityHook(GuestRegs* regs);
 void GUEST_HOOK_ABI LivesHook(GuestRegs* regs);
@@ -46,6 +48,7 @@ struct GuestFunctions {
     void(GUEST_HOOK_ABI* set_level)(uint64_t record, uint32_t level) = nullptr;
     void(GUEST_HOOK_ABI* write_stats)(uint64_t record, int32_t pattern, int32_t arg2, int32_t level,
                                       int32_t arg1) = nullptr;
+    int64_t (*now_ms)() = nullptr;
 };
 void SetGuestFunctions(const GuestFunctions& functions);
 

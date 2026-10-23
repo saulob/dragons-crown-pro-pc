@@ -3118,12 +3118,12 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(kCk.eboot_sha256) == "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5");
     CHECK(std::string(kCk.regional_archive) == "DRACRO_CK.CPK" && std::string(kUs.regional_archive) == "DRACRO_US.CPK");
     CHECK(!kCk.cheats && !kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
-    // 1.00 and 1.02 are different executables: only 1.00 has verified render resolution sites.
+    // 1.00 and 1.02 are different executables: 1.00 has verified render resolution sites, 1.02 finds them by signature.
     CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.empty());
     CHECK(kCk100.resolution_sites.size() == 23);
     CHECK(kCk100.resolution_sites.front().offset == 0x5978a8 && kCk100.resolution_sites.back().offset == 0x598128);
     CHECK(!RestrictedToNativeResolution(&kUs) && !RestrictedToNativeResolution(&kCk100));
-    CHECK(RestrictedToNativeResolution(&kCk) && !RestrictedToNativeResolution(nullptr));
+    CHECK(!RestrictedToNativeResolution(&kCk) && !RestrictedToNativeResolution(nullptr));
 
     CHECK(CheckSfoIdentity(SfoFor(kCk)).build == &kCk);
     CHECK(CheckSfoIdentity(SfoFor(kCk100)).build == &kCk100);
@@ -3254,8 +3254,8 @@ void TestBuilds(const fs::path& base) {
     }
 }
 
-// CUSA10209 1.02 has no verified render resolution sites, so only the native render resolution and 16:9 are effective,
-// whatever `dcp.ini` saved; CUSA10209 1.00 keeps the whole list.
+// CUSA10209 1.02's render size sites are found by signature rather than fixed offsets, so its render resolution and
+// aspect ratio are as effective as CUSA10209 1.00's whole-list ones.
 void TestCusa10209Graphics(const fs::path& base) {
     const fs::path root = base / "cusa10209-graphics";
     fs::remove_all(root);
@@ -3269,8 +3269,8 @@ void TestCusa10209Graphics(const fs::path& base) {
     CHECK(BuildOfImageDir(dir102.string().c_str()) == &kCk);
 
     WriteAll(file, "render_resolution=4K\naspect_ratio=21:9\n");
-    CHECK(dcp_render_resolution(file.string().c_str(), dir102.string().c_str()) == 0); // 1.02 falls back to native
-    CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);      // and to 16:9
+    CHECK(dcp_render_resolution(file.string().c_str(), dir102.string().c_str()) != 0); // 1.02 keeps them too
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) != 0);
     CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0); // 1.00 keeps them
     CHECK(dcp_aspect_ratio(file.string().c_str(), dir100.string().c_str()) != 0);
     CHECK(dcp_render_resolution(file.string().c_str(), nullptr) != 0);                 // the unknown build too
@@ -3341,6 +3341,110 @@ void TestBuildMetadata() {
     }
 }
 
+DcpResolutionSignature MakeSignature(std::initializer_list<uint8_t> pattern, std::initializer_list<uint8_t> compare,
+                                     int lead, uint8_t opcode, uint32_t value, int height) {
+    DcpResolutionSignature signature{};
+    signature.length = static_cast<uint8_t>(pattern.size());
+    signature.lead = static_cast<uint8_t>(lead);
+    signature.opcode_length = 1;
+    signature.opcode[0] = opcode;
+    signature.value = value;
+    signature.height = height;
+    std::copy(pattern.begin(), pattern.end(), signature.pattern);
+    std::copy(compare.begin(), compare.end(), signature.compare);
+    return signature;
+}
+
+void Plant(std::vector<unsigned char>& image, size_t at, std::initializer_list<unsigned char> bytes) {
+    std::copy(bytes.begin(), bytes.end(), image.begin() + static_cast<std::ptrdiff_t>(at));
+}
+
+void TestResolutionProbe() {
+    CHECK(DCP_RESOLUTION_COUNT == 6);
+    CHECK(DCP_CUSA10209_102_SIGNATURE_COUNT == 23);
+    for (const DcpResolutionSignature& signature : dcp_cusa10209_102_signatures) {
+        CHECK(signature.length <= DCP_SIGNATURE_MAX);
+        CHECK(signature.lead + signature.opcode_length + 4 <= signature.length);
+        CHECK(signature.opcode_length == 1 || signature.opcode_length == 2);
+        CHECK(std::any_of(signature.compare, signature.compare + signature.length, [](uint8_t c) { return c != 0; }));
+        CHECK(signature.value == 1920 || signature.value == 3840 || signature.value == 1080 || signature.value == 2160);
+    }
+
+    for (const GameBuild& build : SupportedBuilds()) {
+        const bool asia_102 = std::string(build.title_id) == "CUSA10209" && std::string(build.version) == "1.02";
+        if (asia_102) {
+            CHECK(std::string(build.eboot_sha256) ==
+                  "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5");
+            CHECK(build.resolution_by_signature && build.resolution_sites.empty());
+            CHECK(!RestrictedToNativeResolution(&build));
+        } else if (!build.resolution_sites.empty()) {
+            CHECK(build.resolution_sites.size() == 23);
+        }
+    }
+
+    const DcpResolutionSignature a =
+        MakeSignature({0x11, 0x22, 0xb8, 0x80, 0x07, 0x00, 0x00, 0x33}, {1, 1, 0, 0, 0, 0, 0, 1}, 2, 0xb8, 1920, 0);
+    const DcpResolutionSignature b =
+        MakeSignature({0x90, 0xb9, 0x38, 0x04, 0x00, 0x00}, {1, 1, 1, 1, 1, 1}, 1, 0xb9, 1080, 1);
+    const DcpResolutionSignature c =
+        MakeSignature({0xe8, 0x00, 0x00, 0x00, 0x00, 0xba, 0x00, 0x0f, 0x00, 0x00}, {1, 0, 0, 0, 0, 1, 1, 1, 1, 1}, 5,
+                      0xba, 3840, 0);
+    const DcpResolutionSignature set[] = {a, b, c};
+
+    std::vector<unsigned char> image(1024, 0x90);
+    Plant(image, 100, {0x11, 0x22, 0xb8, 0x80, 0x07, 0x00, 0x00, 0x33});
+    Plant(image, 300, {0x90, 0xb9, 0x38, 0x04, 0x00, 0x00});
+    Plant(image, 600, {0xe8, 0xde, 0xad, 0xbe, 0xef, 0xba, 0x00, 0x0f, 0x00, 0x00});
+    const std::vector<unsigned char> untouched = image;
+
+    DcpResolutionSite sites[3];
+    DcpResolutionSignatureResult results[3];
+    CHECK(dcp_find_resolution_sites(image.data(), image.size(), set, 3, sites, results) == 1);
+    CHECK(sites[0].offset == 102 && sites[0].value == 1920 && sites[0].height == 0 && sites[0].opcode_length == 1);
+    CHECK(sites[1].offset == 301 && sites[1].value == 1080 && sites[1].height == 1);
+    CHECK(sites[2].offset == 605 && sites[2].value == 3840 && sites[2].height == 0);
+    CHECK(image == untouched);
+
+    DcpResolutionSite one[1];
+    DcpResolutionSignatureResult one_result[1];
+    CHECK(dcp_find_resolution_sites(image.data(), image.size(), &a, 1, one, one_result) == 1 && one[0].offset == 102);
+
+    DcpResolutionSite kept[3]{};
+    kept[0].offset = 7;
+    auto missing = image;
+    Plant(missing, 300, {0x90, 0x90, 0x90, 0x90, 0x90, 0x90});
+    CHECK(dcp_find_resolution_sites(missing.data(), missing.size(), set, 3, kept, results) == 0);
+    CHECK(results[1].matches == 0 && results[0].valid && results[2].valid);
+    CHECK(kept[0].offset == 7);
+
+    auto twice = image;
+    Plant(twice, 800, {0x11, 0x22, 0xb8, 0x80, 0x07, 0x00, 0x00, 0x33});
+    CHECK(dcp_find_resolution_sites(twice.data(), twice.size(), set, 3, kept, results) == 0);
+    CHECK(results[0].matches == 2 && !results[0].valid);
+    CHECK(kept[0].offset == 7);
+
+    auto changed = image;
+    changed[104] = 0x81;
+    CHECK(dcp_find_resolution_sites(changed.data(), changed.size(), set, 3, kept, results) == 0);
+    CHECK(results[0].matches == 1 && !results[0].valid);
+    CHECK(kept[0].offset == 7);
+
+    const DcpResolutionSignature shifted =
+        MakeSignature({0x22, 0xb8, 0x80, 0x07, 0x00, 0x00, 0x33}, {1, 1, 1, 1, 1, 1, 1}, 1, 0xb8, 1920, 0);
+    const DcpResolutionSignature overlap[] = {a, shifted};
+    CHECK(dcp_find_resolution_sites(image.data(), image.size(), overlap, 2, kept, results) == 0);
+    CHECK(results[0].valid && results[1].valid && results[0].offset == results[1].offset);
+
+    const DcpResolutionSignature unanchored = MakeSignature({0x11, 0x22}, {0, 0}, 0, 0xb8, 1920, 0);
+    CHECK(dcp_find_resolution_sites(image.data(), image.size(), &unanchored, 1, one, one_result) == 0);
+    CHECK(one_result[0].matches == 0);
+
+    const std::vector<unsigned char> tiny(4, 0x11);
+    CHECK(dcp_find_resolution_sites(tiny.data(), tiny.size(), &a, 1, one, one_result) == 0);
+    CHECK(one_result[0].matches == 0);
+    CHECK(image == untouched);
+}
+
 int main(int argc, char** argv) {
     // dcp-launcher-tests --check-game <app0> <image dir>: the readiness check on real folders, read-only.
     if (argc == 4 && std::string(argv[1]) == "--check-game") {
@@ -3398,6 +3502,7 @@ int main(int argc, char** argv) {
     TestLogRetention(base);
     TestWindowTitle();
     TestRenderResolution(base);
+    TestResolutionProbe();
     TestTextLanguage(base);
     TestCheatSettings(base);
     TestJapaneseNpcVoiceSetting(base);

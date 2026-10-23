@@ -68,8 +68,8 @@ void TestCheatList() {
         const char* description;
     };
     const Expected expected[] = {
-        {Cheat::InfiniteHealth, "Infinite Health", "Prevent normal damage from reducing player health"},
-        {Cheat::InfiniteAllyHealth, "Infinite Ally Health", "Prevent damage from reducing AI allies' health"},
+        {Cheat::InfiniteHealth, "Infinite Health", "Freezes Player 1's current health"},
+        {Cheat::InfiniteAllyHealth, "Infinite Ally Health", "Freezes AI allies' current health"},
         {Cheat::InfiniteMana, "Infinite Mana", "Prevent mana from decreasing when casting spells"},
         {Cheat::InfiniteAllyMana, "Infinite Ally Mana",
          "Prevent AI allies' mana from decreasing when casting spells"},
@@ -157,18 +157,26 @@ void TestSessionOverride() {
 void TestRefillTransitions() {
     const int health = int(Cheat::InfiniteHealth), mana = int(Cheat::InfiniteMana);
 
-    // Off -> On from the menu asks for one refill; nothing else does.
+    // Infinite Health freezes the current HP: turning it On or Off never queues a refill.
     runtime_cheats_start(0, 1);
-    CHECK(runtime_cheat_take_refill(health) == 0 && runtime_cheat_take_refill(mana) == 0);
     runtime_cheat_toggle(health);
+    CHECK(runtime_cheat_take_refill(health) == 0);
+    runtime_cheat_toggle(health);
+    CHECK(runtime_cheat_take_refill(health) == 0);
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
+    CHECK(runtime_cheat_take_refill(health) == 0);
+
+    // Mana: Off -> On from the menu asks for one refill; nothing else does.
+    runtime_cheats_start(0, 1);
     CHECK(runtime_cheat_take_refill(mana) == 0);
-    CHECK(runtime_cheat_take_refill(health) == 1);
-    CHECK(runtime_cheat_take_refill(health) == 0); // taken: not again, and never every frame
-    runtime_cheat_toggle(health);                  // On -> Off: no refill, nothing pending
-    CHECK(runtime_cheat_take_refill(health) == 0);
-    runtime_cheat_toggle(health);
-    runtime_cheat_toggle(health); // turned Off again before the game thread took the request: cancelled
-    CHECK(runtime_cheat_take_refill(health) == 0);
+    runtime_cheat_toggle(mana);
+    CHECK(runtime_cheat_take_refill(mana) == 1);
+    CHECK(runtime_cheat_take_refill(mana) == 0); // taken: not again, and never every frame
+    runtime_cheat_toggle(mana);                  // On -> Off: no refill, nothing pending
+    CHECK(runtime_cheat_take_refill(mana) == 0);
+    runtime_cheat_toggle(mana);
+    runtime_cheat_toggle(mana); // turned Off again before the game thread took the request: cancelled
+    CHECK(runtime_cheat_take_refill(mana) == 0);
 
     // The launcher's saved On asks once at the start, and a new start asks again.
     runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
@@ -182,7 +190,7 @@ void TestRefillTransitions() {
     runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
     CHECK(runtime_cheat_take_refill(mana) == 1);
 
-    // Only Health, Mana and Durability fill anything; the other cheats never queue a request.
+    // Only Mana and Durability fill anything; the other cheats never queue a request.
     runtime_cheats_start(0xff, 1);
     for (const CheatInfo& info : kCheats) {
         CHECK(runtime_cheat_take_refill(int(info.cheat)) == (RefillsOnEnable(info.cheat) ? 1 : 0));
@@ -200,17 +208,17 @@ void TestRefillTransitions() {
 }
 
 void TestMenuModel() {
-    CHECK(kMenuRows.size() == 16);
+    CHECK(kMenuRows.size() == 20);
     CHECK(kMenuRows.size() == kCheatCount + kActionCount + 2);
     CHECK(std::string(kMenuTitle) == "CHEATS");
     CHECK(std::string(kMenuCloseHint) == "F10 Close");
     CHECK(std::string(kMenuNote) == "Not saved to the launcher");
-    const char* const order[] = {"Infinite Health",        "Infinite Ally Health", "Infinite Mana",
-                                 "Infinite Ally Mana",     "Infinite Lives",       "Infinite Durability",
-                                 "Infinite Ally Durability", "Infinite Arrows",    "Infinite Skill Points",
-                                 "Add 100 Skill Points",   "Infinite Skill Uses",  "Infinite Gold",
-                                 "Add 1,000 Gold",         "Level Up (+1 Level)",  "Movement Speed",
-                                 "Experience Multiplier"};
+    const char* const order[] = {"Infinite Health",        "Infinite Ally Health", "Fill Health",
+                                 "Fill Ally Health",       "Set Low Health",      "Set Ally Low Health", "Infinite Mana",       "Infinite Ally Mana",  "Infinite Lives",
+                                 "Infinite Durability",    "Infinite Ally Durability", "Infinite Arrows",
+                                 "Infinite Skill Points",  "Add 100 Skill Points", "Infinite Skill Uses",
+                                 "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
+                                 "Movement Speed",         "Experience Multiplier"};
     for (size_t i = 0; i < kMenuRows.size(); ++i) {
         CHECK(std::string(kMenuRows[i].label) == order[i]);
     }
@@ -224,21 +232,29 @@ void TestMenuModel() {
         }
     }
     CHECK(next_cheat == kCheatCount);
-    CHECK(kMenuRows[6].kind == RowKind::Toggle && kMenuRows[6].cheat == Cheat::InfiniteAllyDurability);
-    CHECK(kMenuRows[8].kind == RowKind::Toggle && kMenuRows[8].cheat == Cheat::InfiniteSkillPoints);
-    CHECK(kMenuRows[9].kind == RowKind::Action && kMenuRows[9].action == Action::AddSkillPoints);
-    CHECK(std::string(kMenuRows[9].verb) == "Add");
-    CHECK(kMenuRows[10].kind == RowKind::Toggle && kMenuRows[10].cheat == Cheat::InfiniteSkillUses);
-    CHECK(kMenuRows[11].kind == RowKind::Toggle && kMenuRows[11].cheat == Cheat::InfiniteGold);
-    CHECK(kMenuRows[12].kind == RowKind::Action && kMenuRows[12].action == Action::AddGold);
-    CHECK(std::string(kMenuRows[12].verb) == "Add");
-    CHECK(kMenuRows[13].kind == RowKind::Action && kMenuRows[13].action == Action::AddLevel);
+    const Action health_actions[] = {Action::FillHealth, Action::FillAllyHealth, Action::SetLowHealth,
+                                     Action::SetAllyLowHealth};
+    for (size_t i = 0; i < 4; ++i) {
+        CHECK(kMenuRows[2 + i].kind == RowKind::Action && kMenuRows[2 + i].action == health_actions[i]);
+        CHECK(kMenuRows[2 + i].verb == nullptr); // no value text beside them
+    }
+    CHECK(kMenuRows[10].kind == RowKind::Toggle && kMenuRows[10].cheat == Cheat::InfiniteAllyDurability);
+    CHECK(kMenuRows[12].kind == RowKind::Toggle && kMenuRows[12].cheat == Cheat::InfiniteSkillPoints);
+    CHECK(kMenuRows[13].kind == RowKind::Action && kMenuRows[13].action == Action::AddSkillPoints);
     CHECK(std::string(kMenuRows[13].verb) == "Add");
-    CHECK(kMenuRows[14].kind == RowKind::MovementSpeed && std::string(kMenuRows[14].label) == "Movement Speed");
-    CHECK(kMenuRows[15].kind == RowKind::Experience && std::string(kMenuRows[15].label) == "Experience Multiplier");
+    CHECK(kMenuRows[14].kind == RowKind::Toggle && kMenuRows[14].cheat == Cheat::InfiniteSkillUses);
+    CHECK(kMenuRows[15].kind == RowKind::Toggle && kMenuRows[15].cheat == Cheat::InfiniteGold);
+    CHECK(kMenuRows[16].kind == RowKind::Action && kMenuRows[16].action == Action::AddGold);
+    CHECK(std::string(kMenuRows[16].verb) == "Add");
+    CHECK(kMenuRows[17].kind == RowKind::Action && kMenuRows[17].action == Action::AddLevel);
+    CHECK(std::string(kMenuRows[17].verb) == "Add");
+    CHECK(kMenuRows[18].kind == RowKind::MovementSpeed && std::string(kMenuRows[18].label) == "Movement Speed");
+    CHECK(kMenuRows[19].kind == RowKind::Experience && std::string(kMenuRows[19].label) == "Experience Multiplier");
     CHECK(std::string(kActions[0].label) == "Add 100 Skill Points" && kSkillPointsPerAdd == 100);
     CHECK(std::string(kActions[1].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
     CHECK(std::string(kActions[2].label) == "Level Up (+1 Level)");
+    CHECK(std::string(kActions[3].label) == "Fill Health" && std::string(kActions[4].label) == "Fill Ally Health");
+    CHECK(std::string(kActions[5].label) == "Set Low Health" && std::string(kActions[6].label) == "Set Ally Low Health");
     for (const CheatInfo& info : kCheats) { // an action is no cheat: nothing saved, nothing in the launcher's list
         CHECK(std::string(info.key).find("add_gold") == std::string::npos);
         CHECK(std::string(info.key).find("add_skill_points") == std::string::npos);
@@ -385,16 +401,15 @@ void TestRules() {
     FakeGame::Store<uint64_t>(orphan.unit + kUnitOwnerOffset, 0);
     CHECK(ClassifyUnit(TestMemory{}, orphan.Unit()) == UnitKind::Other);
 
-    // Infinite Health: a loss becomes zero for Player 1; healing, other units and a disabled cheat are unchanged.
-    for (const int32_t amount : {1, 40, 99999}) {
-        CHECK(ProtectedDamage(true, UnitKind::PlayerOne, amount) == 0);
-        CHECK(ProtectedDamage(false, UnitKind::PlayerOne, amount) == amount);
-        CHECK(ProtectedDamage(true, UnitKind::OtherPlayer, amount) == amount);
-        CHECK(ProtectedDamage(true, UnitKind::Other, amount) == amount);
+    // Infinite Health: a loss or a heal becomes zero for a party member; others and a disabled cheat are unchanged.
+    for (const int32_t amount : {1, 40, 99999, -1, -250}) {
+        CHECK(FrozenHealthDelta(true, true, amount) == 0);
+        CHECK(FrozenHealthDelta(false, true, amount) == amount);
+        CHECK(FrozenHealthDelta(true, false, amount) == amount);
     }
-    for (const int32_t amount : {0, -1, -250}) {
-        CHECK(ProtectedDamage(true, UnitKind::PlayerOne, amount) == amount); // healing is untouched
-    }
+    CHECK(Hooks().size() > 0 && kActions[3].verb == nullptr && kActions[6].verb == nullptr);
+    CHECK(LowHealth(1000) == 200 && LowHealth(537) == 107 && LowHealth(3) == 1 && LowHealth(1) == 1);
+    CHECK(LowHealth(0) == 1 && LowHealth(INT32_MAX) == INT32_MAX / 5);
 
     // Infinite Mana: the consume flag becomes 0 for Player 1 only; recovery (positive deltas) always goes through.
     CHECK(ProtectedConsumeFlag(true, UnitKind::PlayerOne, 1) == 0);
@@ -423,10 +438,10 @@ void TestHookHandlers() {
     CHECK(regs.rcx == 0);
     regs = player1.DamageRegs(-30);
     HealthDamageHook(&regs);
-    CHECK(static_cast<int32_t>(regs.rcx) == -30); // healing
+    CHECK(regs.rcx == 0); // a heal is frozen out too
     regs = player2.DamageRegs(50);
     HealthDamageHook(&regs);
-    CHECK(regs.rcx == 50); // Player 2
+    CHECK(regs.rcx == 50); // an AI ally needs Infinite Ally Health
     regs = enemy.DamageRegs(50);
     HealthDamageHook(&regs);
     CHECK(regs.rcx == 50); // an enemy
@@ -490,11 +505,12 @@ void TestHookHandlers() {
     CHECK(drain.skip == 0);
     SetCheats(false, false);
 
-    // Infinite Ally Health: only AI-controlled player-slot allies, never Player 1, humans, enemies or healing.
+    // Infinite Health covers Player 1 and AI allies only: never humans, enemies or an unrelated frame.
     FakeGame ally(true, 1);
     ally.SetClass(kSorceressClass);
     FakeGame human2(true, 1);
     human2.SetClass(kSorceressClass);
+    SetCheats(false, false);
     GuestRegs hit = ally.DamageRegs(50);
     HealthDamageHook(&hit);
     CHECK(hit.rcx == 50);
@@ -505,12 +521,12 @@ void TestHookHandlers() {
     hit = player1.DamageRegs(50);
     HealthDamageHook(&hit);
     CHECK(hit.rcx == 50);
+    hit = ally.DamageRegs(-30);
+    HealthDamageHook(&hit);
+    CHECK(hit.rcx == 0);
     hit = enemy.DamageRegs(50);
     HealthDamageHook(&hit);
     CHECK(hit.rcx == 50);
-    hit = ally.DamageRegs(-30);
-    HealthDamageHook(&hit);
-    CHECK(static_cast<int32_t>(hit.rcx) == -30);
     runtime_cheats_set_slot_human(FakeHumanSlot); // a live local controller takes the slot away from AI
     hit = ally.DamageRegs(50);
     HealthDamageHook(&hit);
@@ -519,13 +535,6 @@ void TestHookHandlers() {
     HealthDamageHook(&hit);
     CHECK(hit.rcx == 50);
     runtime_cheats_set_slot_human(nullptr);
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteAllyHealth), 1);
-    hit = player1.DamageRegs(50);
-    HealthDamageHook(&hit);
-    CHECK(hit.rcx == 0);
-    hit = ally.DamageRegs(50);
-    HealthDamageHook(&hit);
-    CHECK(hit.rcx == 0);
 
     // Infinite Ally Mana uses the same cast and drain hooks, with the ally filter.
     runtime_cheats_start(Bit(Cheat::InfiniteAllyMana), 1);
@@ -669,8 +678,13 @@ struct FakeRefill {
     uint64_t unit = 0;
     uint32_t health = 0, mana = 0, only_below_max = 0;
     bool dead = false;
+    int32_t fill_hp = 0; // when set, a health fill stores it as the unit's HP
 };
 FakeRefill g_refill;
+int64_t g_now_ms = 1000;
+int64_t FakeNow() {
+    return g_now_ms;
+}
 
 uint8_t GUEST_HOOK_ABI FakeIsDead(uint64_t) {
     return g_refill.dead ? 1 : 0;
@@ -682,6 +696,9 @@ void GUEST_HOOK_ABI FakeRefillFunction(uint64_t unit, uint32_t health, uint32_t 
     g_refill.health = health;
     g_refill.mana = mana;
     g_refill.only_below_max = only_below_max;
+    if (health != 0 && g_refill.fill_hp > 0) {
+        FakeGame::Store<int32_t>(reinterpret_cast<uint8_t*>(unit) + kUnitHpOffset, g_refill.fill_hp);
+    }
 }
 
 GuestRegs TickRegs(const FakeGame& game) {
@@ -993,7 +1010,7 @@ void TestAddGold() {
     for (const CheatInfo& info : kCheats) {
         CHECK((runtime_cheat_enabled(int(info.cheat)) != 0) == (info.cheat == Cheat::InfiniteHealth));
     }
-    CHECK(runtime_cheat_refills_pending() == 0 && refills == Bit(Cheat::InfiniteHealth)); // that refill ran on the tick
+    CHECK(runtime_cheat_refills_pending() == 0 && refills == 0); // Infinite Health queues no refill
 
     // Infinite Gold stays what it was: spending is kept, the added gold is a gain.
     runtime_cheats_start(Bit(Cheat::InfiniteGold), 1);
@@ -1360,6 +1377,93 @@ void TestSkillUses() {
 
     runtime_cheats_start(0, 1);
     CHECK(!use(player1, 5));
+    SetCheats(false, false);
+}
+
+void TestSkillItemWear() {
+    // The skill effects the game's own test accepts, and the ones it does not.
+    for (uint32_t effect = 0; effect < 0x400; ++effect) {
+        const bool listed = effect >= 0x1d1 && effect <= 0x1f8 && ((0xe362e5f7ffull >> (effect - 0x1d1)) & 1) != 0;
+        CHECK(IsSkillItem(kItemEffectCountMask, static_cast<uint16_t>(effect)) == listed);
+        CHECK(!IsSkillItem(0, static_cast<uint16_t>(effect)));
+    }
+    CHECK(IsSkillItem(0x2e000000, 0x1d6) && IsSkillItem(0x2e000000, 0x1d7) && IsSkillItem(0x2e000000, 0x1d8));
+    CHECK(!IsSkillItem(kItemEffectCountMask, 0xffff));
+    CHECK(!IsSkillItem(kItemEffectCountMask, 0x1dc));
+
+    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    alignas(16) uint8_t item[0x60] = {};
+    const auto wear = [&](const FakeGame& game, uint16_t effect, uint32_t flags, uint8_t uses) {
+        FakeGame::Store<uint16_t>(item, effect);
+        FakeGame::Store<uint32_t>(item + kItemFlagsOffset, flags);
+        FakeGame::Store<uint8_t>(item + kItemUsesOffset, uses);
+        GuestRegs regs{};
+        regs.rdi = reinterpret_cast<uint64_t>(item);
+        regs.rbx = game.Unit() + kUnitEquipmentOffset;
+        SkillItemWearHook(&regs);
+        return regs.skip != 0;
+    };
+
+    runtime_cheats_start(0, 1);
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints), 1);
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5)); // the other cheat does not cover it
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses), 1);
+    CHECK(wear(player1, 0x1d7, kItemEffectCountMask, 5)); // Bomb Satchel
+    CHECK(wear(player1, 0x1d6, kItemEffectCountMask, 255));
+    CHECK(wear(player1, 0x1d8, kItemEffectCountMask, 1));
+    CHECK(FakeGame::Load<uint8_t>(item + kItemUsesOffset) == 1); // only the decrement call is skipped
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 0));
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 5));       // not a skill effect
+    CHECK(!wear(player1, 0x1d7, 0, 5));                          // no effects: not a skill item
+    CHECK(!wear(player1, 0x0100, 0x40000000 | kItemEffectCountMask, 5)); // gear and consumables
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5));
+    CHECK(!wear(enemy, 0x1d7, kItemEffectCountMask, 5));
+
+    GuestRegs none{};
+    SkillItemWearHook(&none); // no item: nothing is read
+    CHECK(none.skip == 0);
+
+    runtime_cheats_start(0, 1);
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
+    SetCheats(false, false);
+}
+
+void TestSkillBudget() {
+    // Owned = bought levels + points held; allowed = level allowance + quest bonus.
+    CHECK(SkillAllowance(true, 40, 3, 30, 5) == 40);  // within the budget
+    CHECK(SkillAllowance(true, 40, 3, 38, 5) == 40);  // exactly at it
+    CHECK(SkillAllowance(true, 40, 3, 50, 0) == 47);  // extra levels are covered
+    CHECK(SkillAllowance(true, 40, 3, 30, 100) == 127);
+    CHECK(SkillAllowance(false, 40, 3, 50, 0) == 40);
+    CHECK(SkillAllowance(false, 40, 3, 30, 5) == 40);
+    CHECK(SkillAllowance(true, 40, 3, 20, -5) == 40);
+
+    uint8_t frame[0x100] = {};
+    const auto check = [&](int32_t base, int32_t bonus, int32_t spent, int32_t available) {
+        FakeGame::Store<int32_t>(frame + 0x80 - 0x5c, available);
+        GuestRegs regs{};
+        regs.rbp = reinterpret_cast<uint64_t>(frame) + 0x80;
+        regs.r12 = static_cast<uint32_t>(base);
+        regs.r13 = static_cast<uint32_t>(spent);
+        regs.r14 = static_cast<uint32_t>(bonus);
+        SkillBudgetHook(&regs);
+        // The game's own comparison: (allowance + bonus) - (spent + available), negative means repair.
+        const int32_t margin = static_cast<int32_t>(regs.r12) + bonus - (spent + available);
+        CHECK(regs.r13 == static_cast<uint32_t>(spent) && regs.r14 == static_cast<uint32_t>(bonus));
+        return margin;
+    };
+
+    runtime_cheats_start(0, 1);
+    CHECK(check(40, 3, 50, 0) == -7); // vanilla: the check repairs
+    CHECK(check(40, 3, 30, 100) == -87);
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints), 1);
+    CHECK(check(40, 3, 50, 0) == 0);
+    CHECK(check(40, 3, 30, 100) == 0);
+    CHECK(check(40, 3, 30, 5) == 8);   // a legal record is left as the game computed it
+    CHECK(check(40, 3, 38, 5) == 0);
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses), 1);
+    CHECK(check(40, 3, 50, 0) == -7); // the other cheat does not cover it
     SetCheats(false, false);
 }
 
@@ -1745,31 +1849,30 @@ void TestRefillOnEnable() {
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 0);
 
-    // Off -> On from the menu: one refill of Player 1's unit, health and mana together, never lowering anything.
-    runtime_cheat_toggle(int(Cheat::InfiniteHealth));
+    // Off -> On from the menu: one refill of Player 1's unit, mana only, never lowering anything.
     runtime_cheat_toggle(int(Cheat::InfiniteMana));
     regs = TickRegs(player2);
     PlayerTickHook(&regs);
     regs = TickRegs(enemy);
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 0); // Players 2 to 4 and everything else are never refilled
-    CHECK(runtime_cheat_refills_pending() == (Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteMana)));
+    CHECK(runtime_cheat_refills_pending() == Bit(Cheat::InfiniteMana));
     regs = TickRegs(player1);
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 1 && g_refill.unit == player1.Unit());
-    CHECK(g_refill.health == 1 && g_refill.mana == 1 && g_refill.only_below_max == 1);
+    CHECK(g_refill.health == 0 && g_refill.mana == 1 && g_refill.only_below_max == 1);
     CHECK(runtime_cheat_refills_pending() == 0);
     PlayerTickHook(&regs); // every following tick: nothing
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 1);
 
     // On -> Off leaves everything as it is; Off -> On refills again.
-    runtime_cheat_toggle(int(Cheat::InfiniteHealth));
+    runtime_cheat_toggle(int(Cheat::InfiniteMana));
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 1);
-    runtime_cheat_toggle(int(Cheat::InfiniteHealth));
+    runtime_cheat_toggle(int(Cheat::InfiniteMana));
     PlayerTickHook(&regs);
-    CHECK(g_refill.calls == 2 && g_refill.health == 1 && g_refill.mana == 0);
+    CHECK(g_refill.calls == 2 && g_refill.health == 0 && g_refill.mana == 1);
 
     // A launcher value that is already On refills once, when Player 1's unit first ticks.
     g_refill = {};
@@ -1779,7 +1882,7 @@ void TestRefillOnEnable() {
     regs = TickRegs(fighter);
     PlayerTickHook(&regs);
     CHECK(g_refill.calls == 0 && runtime_cheat_refills_pending() == 0); // no mana class: dropped, nothing filled
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteMana), 1);
+    runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
     g_refill.dead = true;
     regs = TickRegs(player1);
     PlayerTickHook(&regs);
@@ -1789,7 +1892,7 @@ void TestRefillOnEnable() {
     CHECK(g_refill.calls == 1 && runtime_cheat_refills_pending() == 0);
 
     // The unit is validated before anything is read through it: an empty pointer or a unit without an owner is skipped.
-    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
+    runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
     g_refill.calls = 0;
     regs = TickRegs(player1);
     regs.rdi = 0;
@@ -1830,15 +1933,13 @@ void TestAllyRefill() {
     tick(ally);
     CHECK(g_refill.calls == 0);
 
-    // Infinite Ally Health fills a living ally and keeps doing so on later ticks.
-    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth), 1);
+    // Infinite Ally Mana fills a mana-using ally, keeps it full and leaves other classes alone.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyMana), 1);
     tick(ally);
-    CHECK(g_refill.calls == 1 && g_refill.unit == ally.Unit());
-    CHECK(g_refill.health == 1 && g_refill.mana == 0 && g_refill.only_below_max == 1);
+    CHECK(g_refill.calls == 1 && g_refill.unit == ally.Unit() && g_refill.health == 0 && g_refill.mana == 1);
     tick(ally);
-    CHECK(g_refill.calls == 2 && g_refill.health == 1);
-
-    // Player 1, a human-controlled party slot and enemies are not ally refills.
+    CHECK(g_refill.calls == 2 && g_refill.mana == 1);
+    tick(fighter);
     tick(player1);
     runtime_cheats_set_slot_human(FakeHumanSlot);
     tick(human2);
@@ -1846,7 +1947,7 @@ void TestAllyRefill() {
     tick(enemy);
     CHECK(g_refill.calls == 2);
 
-    // A dead ally is not resurrected or filled, whether the game reports death or HP is already zero.
+    // A dead ally is not filled, whether the game reports death or HP is already zero.
     g_refill.dead = true;
     tick(ally);
     CHECK(g_refill.calls == 2);
@@ -1856,38 +1957,318 @@ void TestAllyRefill() {
     CHECK(g_refill.calls == 2);
     FakeGame::Store<int32_t>(ally.unit + kUnitHpOffset, 500);
 
-    // Infinite Ally Mana fills a mana-using ally, keeps it full and leaves other classes alone.
-    runtime_cheats_start(Bit(Cheat::InfiniteAllyMana), 1);
-    tick(ally);
-    CHECK(g_refill.calls == 3 && g_refill.health == 0 && g_refill.mana == 1);
-    tick(ally);
-    CHECK(g_refill.calls == 4 && g_refill.mana == 1);
-    tick(fighter);
-    tick(player1);
-    runtime_cheats_set_slot_human(FakeHumanSlot);
-    tick(human2);
-    runtime_cheats_set_slot_human(nullptr);
-    tick(enemy);
-    CHECK(g_refill.calls == 4);
-
-    // Both ally cheats share one fill call, and turning them Off stops the refill.
-    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth) | Bit(Cheat::InfiniteAllyMana), 1);
-    tick(ally);
-    CHECK(g_refill.calls == 5 && g_refill.health == 1 && g_refill.mana == 1);
     runtime_cheats_start(0, 1);
     tick(ally);
-    CHECK(g_refill.calls == 5);
+    CHECK(g_refill.calls == 2);
 
+    SetGuestFunctions(GuestFunctions{});
+    g_refill = {};
+}
+
+int32_t Hp(const FakeGame& game) {
+    return FakeGame::Load<int32_t>(game.unit + kUnitHpOffset);
+}
+
+void SetHp(FakeGame& game, int32_t hp) {
+    FakeGame::Store<int32_t>(game.unit + kUnitHpOffset, hp);
+}
+
+GuestFunctions HealthFunctions() {
+    GuestFunctions functions;
+    functions.is_dead = FakeIsDead;
+    functions.refill = FakeRefillFunction;
+    functions.now_ms = FakeNow;
+    return functions;
+}
+
+void TestFrozenHealthModel() {
+    FrozenHealth frozen;
+    CHECK(frozen.Hold(0, 1, 734, 1000) == 734);
+    CHECK(frozen.Hold(0, 1, 500, 1016) == 734); // damage is put back
+    CHECK(frozen.Hold(0, 1, 900, 1032) == 734); // so is healing
+    CHECK(frozen.Hold(1, 2, 300, 1032) == 300); // each slot has its own snapshot
+    CHECK(frozen.Hold(0, 1, 800, 1048) == 734 && frozen.Hold(1, 2, 250, 1048) == 300);
+    CHECK(frozen.Hold(0, 9, 640, 1064) == 640); // another unit in the slot: a new snapshot
+    CHECK(frozen.Hold(0, 9, 700, 1080) == 640);
+    CHECK(frozen.Hold(0, 9, 700, 1080 + FrozenHealth::kStaleMs + 1) == 700); // it stopped ticking: a new snapshot
+    CHECK(frozen.Hold(0, 9, 0, 1700) == 0);                                  // dead stays dead
+    CHECK(frozen.Hold(0, 9, 55, 1716) == 55);                                // and the revive starts a new snapshot
+    CHECK(frozen.Hold(7, 1, 100, 1716) == 100 && frozen.Hold(-1, 1, 100, 1716) == 100); // not a party slot
+    frozen.Set(0, 9, 200, 1732);
+    CHECK(frozen.Hold(0, 9, 55, 1748) == 200);
+    frozen.Clear();
+    CHECK(frozen.Hold(0, 9, 77, 1764) == 77);
+}
+
+void TestHealthCheats() {
+    SetGuestFunctions(HealthFunctions());
+    g_refill = {};
+    g_now_ms = 1000;
+    FakeGame player1(true, 0), ally1(true, 1), ally2(true, 2), human3(true, 3), enemy(false, 0);
+    ally1.SetClass(kSorceressClass);
+    ally2.SetClass(0);
+    human3.SetClass(0);
+    const auto tick = [](const FakeGame& game) {
+        g_now_ms += 16;
+        GuestRegs regs = TickRegs(game);
+        PlayerTickHook(&regs);
+    };
+    const auto frame = [&]() {
+        for (const FakeGame* game : {&player1, &ally1, &ally2, &enemy}) {
+            tick(*game);
+        }
+    };
+    const auto press = [&](Action action) {
+        for (const FakeGame* game : {&ally1, &ally2, &human3}) {
+            tick(*game);
+        }
+        runtime_cheat_action(int(action));
+    };
+    const auto reset = [&]() {
+        SetHp(player1, 734);
+        SetHp(ally1, 400);
+        SetHp(ally2, 90);
+        SetHp(enemy, 900);
+        SetHp(human3, 321);
+        g_refill.fill_hp = 1000;
+    };
+
+    // Off: nothing is held, the game's damage and healing apply.
+    runtime_cheats_start(0, 1);
+    reset();
+    frame();
+    SetHp(player1, 100);
+    SetHp(ally1, 800);
+    frame();
+    CHECK(Hp(player1) == 100 && Hp(ally1) == 800);
+
+    // On: each party member keeps the HP it had when the cheat came on; the enemy and a human slot are left alone.
+    reset();
+    runtime_cheat_toggle(int(Cheat::InfiniteHealth));
+    runtime_cheat_toggle(int(Cheat::InfiniteAllyHealth));
+    frame();
+    SetHp(player1, 10);  // damage
+    SetHp(ally1, 1000);  // healing
+    SetHp(ally2, 91);    // regeneration
+    SetHp(enemy, 5);
+    SetHp(human3, 1);
+    frame();
+    tick(human3);
+    CHECK(Hp(player1) == 734 && Hp(ally1) == 400 && Hp(ally2) == 90);
+    CHECK(Hp(enemy) == 5);
+    FakeGame human1(true, 1);
+    human1.SetClass(0);
+    SetHp(human1, 600);
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    tick(human1);
+    SetHp(human1, 20);
+    tick(human1);
+    runtime_cheats_set_slot_human(nullptr);
+    CHECK(Hp(human1) == 20); // a human-controlled slot is not an ally
+
+    // A dead member is not brought back, and its revive starts a new snapshot.
+    SetHp(ally2, 0);
+    frame();
+    CHECK(Hp(ally2) == 0);
+    SetHp(ally2, 60);
+    frame();
+    SetHp(ally2, 100);
+    frame();
+    CHECK(Hp(ally2) == 60);
+
+    // A unit that replaces another in the slot after a gap gets its own snapshot.
+    FakeGame replacement(true, 1);
+    replacement.SetClass(0);
+    SetHp(replacement, 275);
+    g_now_ms += 1000;
+    tick(replacement);
+    SetHp(replacement, 999);
+    tick(replacement);
+    CHECK(Hp(replacement) == 275);
+
+    // Off: held HP no longer overrides anything.
+    runtime_cheat_toggle(int(Cheat::InfiniteHealth));
+    runtime_cheat_toggle(int(Cheat::InfiniteAllyHealth));
+    SetHp(player1, 10);
+    SetHp(ally1, 10);
+    frame();
+    CHECK(Hp(player1) == 10 && Hp(ally1) == 10);
+
+    // Each toggle freezes only its own side and keeps its own snapshots.
+    reset();
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
+    frame();
+    SetHp(player1, 5);
+    SetHp(ally1, 5);
+    frame();
+    CHECK(Hp(player1) == 734 && Hp(ally1) == 5);
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth), 1);
+    reset();
+    frame();
+    SetHp(player1, 5);
+    SetHp(ally1, 5);
+    frame();
+    CHECK(Hp(player1) == 5 && Hp(ally1) == 400 && Hp(ally2) == 90);
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteAllyHealth), 1);
+    reset();
+    frame();
+    runtime_cheat_toggle(int(Cheat::InfiniteHealth)); // Off clears only Player 1's snapshot
+    SetHp(player1, 5);
+    SetHp(ally1, 5);
+    frame();
+    CHECK(Hp(player1) == 5 && Hp(ally1) == 400);
+    runtime_cheat_toggle(int(Cheat::InfiniteHealth)); // back On: a new snapshot of the HP it has now
+    frame();
+    SetHp(player1, 700);
+    runtime_cheat_toggle(int(Cheat::InfiniteAllyHealth)); // Off clears only the allies
+    SetHp(ally1, 7);
+    frame();
+    CHECK(Hp(player1) == 5 && Hp(ally1) == 7);
+    runtime_cheats_start(0, 1);
+
+    // Fill Health: only Player 1 reaches the max, once; allies, enemies and humans stay.
+    reset();
+    press(Action::FillHealth);
+    frame();
+    CHECK(Hp(player1) == 1000 && Hp(ally1) == 400 && Hp(ally2) == 90 && Hp(enemy) == 900);
+    SetHp(player1, 50);
+    frame();
+    CHECK(Hp(player1) == 50); // one press, one run, and nothing stays active
+
+    // Fill Ally Health: only living AI allies; the dead stay dead.
+    reset();
+    SetHp(ally2, 0);
+    press(Action::FillAllyHealth);
+    frame();
+    CHECK(Hp(player1) == 734 && Hp(ally1) == 1000 && Hp(ally2) == 0 && Hp(enemy) == 900);
+    reset();
+    press(Action::FillAllyHealth);
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    frame(); // slot 1 has a live human controller: not an ally
+    runtime_cheats_set_slot_human(nullptr);
+    CHECK(Hp(ally1) == 400 && Hp(ally2) == 1000);
+    reset();
+    press(Action::FillAllyHealth);
+    tick(player1);
+    CHECK(Hp(human3) == 1000 && Hp(ally1) == 1000 && Hp(ally2) == 1000); // all allies in one call
+    reset();
+
+    // Set Low Health: only Player 1, 20% of the max, at least 1, no death.
+    press(Action::SetLowHealth);
+    frame();
+    CHECK(Hp(player1) == 200 && Hp(ally1) == 400 && Hp(ally2) == 90 && Hp(enemy) == 900);
+    reset();
+    g_refill.fill_hp = 3;
+    press(Action::SetLowHealth);
+    frame();
+    CHECK(Hp(player1) == 1 && Hp(ally1) == 400);
+    reset();
+    g_refill.fill_hp = 537;
+    press(Action::SetLowHealth);
+    frame();
+    CHECK(Hp(player1) == 107);
+    reset();
+    SetHp(player1, 0);
+    press(Action::SetLowHealth);
+    frame();
+    CHECK(Hp(player1) == 0);
+
+    // Set Ally Low Health: only living AI allies.
+    reset();
+    SetHp(ally2, 0);
+    press(Action::SetAllyLowHealth);
+    frame();
+    CHECK(Hp(player1) == 734 && Hp(ally1) == 200 && Hp(ally2) == 0 && Hp(enemy) == 900);
+    reset();
+    g_refill.fill_hp = 537;
+    press(Action::SetAllyLowHealth);
+    frame();
+    CHECK(Hp(ally1) == 107 && Hp(ally2) == 107 && Hp(human3) == 107 && Hp(player1) == 734 && Hp(enemy) == 900);
+    reset();
+    g_refill.fill_hp = 3;
+    press(Action::SetAllyLowHealth);
+    frame();
+    CHECK(Hp(ally1) == 1 && Hp(ally2) == 1);
+
+    // Each action retargets only the snapshots of its own toggle.
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteAllyHealth), 1);
+    reset();
+    frame();
+    press(Action::SetLowHealth);
+    frame();
+    SetHp(player1, 900);
+    SetHp(ally1, 900);
+    frame();
+    CHECK(Hp(player1) == 200 && Hp(ally1) == 400);
+    press(Action::SetAllyLowHealth);
+    frame();
+    SetHp(player1, 5);
+    SetHp(ally1, 5);
+    frame();
+    CHECK(Hp(player1) == 200 && Hp(ally1) == 200 && Hp(ally2) == 200);
+    press(Action::FillHealth);
+    frame();
+    SetHp(player1, 5);
+    SetHp(ally1, 5);
+    frame();
+    CHECK(Hp(player1) == 1000 && Hp(ally1) == 200);
+    press(Action::FillAllyHealth);
+    frame();
+    SetHp(ally1, 5);
+    frame();
+    CHECK(Hp(ally1) == 1000 && Hp(ally2) == 1000);
+
+    // With only one toggle On the other side's action just changes HP.
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
+    reset();
+    frame();
+    press(Action::SetAllyLowHealth);
+    frame();
+    SetHp(ally1, 900);
+    frame();
+    CHECK(Hp(ally1) == 900);
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth), 1);
+    reset();
+    frame();
+    press(Action::FillHealth);
+    frame();
+    SetHp(player1, 5);
+    frame();
+    CHECK(Hp(player1) == 5);
+
+    // The press is carried out by Player 1's tick alone, with no later ally tick, and not for a unit gone quiet.
+    runtime_cheats_start(0, 1);
+    reset();
+    press(Action::FillAllyHealth);
+    tick(player1);
+    CHECK(Hp(ally1) == 1000 && Hp(ally2) == 1000 && Hp(player1) == 734);
+    reset();
+    press(Action::FillAllyHealth);
+    g_now_ms += 1000;
+    tick(player1);
+    CHECK(Hp(ally1) == 400 && Hp(ally2) == 90);
+
+    // Without the game's functions nothing is written.
+    SetGuestFunctions(GuestFunctions{});
+    reset();
+    press(Action::SetLowHealth);
+    tick(player1);
+    CHECK(Hp(player1) == 734);
+
+    runtime_cheats_start(0, 1);
     SetGuestFunctions(GuestFunctions{});
     g_refill = {};
 }
 
 void TestHookTable() {
     const std::span<const GuestHook> hooks = Hooks();
-    CHECK(hooks.size() == 22);
+    CHECK(hooks.size() == 25);
     CHECK(hooks[19].offset == 0x27511 && hooks[19].length == 7); // the experience award
     CHECK(hooks[20].offset == 0x1af0dc && hooks[20].length == 5); // the skill item's count decrement
     CHECK(hooks[21].offset == 0x1af12a && hooks[21].length == 5); // its mirror decrement
+    CHECK(hooks[22].offset == 0x225f90 && hooks[22].length == 5); // the equipment wear's count decrement
+    CHECK(hooks[23].offset == 0x225fb1 && hooks[23].length == 5); // its mirror decrement
+    CHECK(hooks[24].offset == 0x8ab24 && hooks[24].length == 12); // the skill budget comparison
     CHECK(kSupportedImage.size == 0x11f8060 && kSupportedImage.entry == 0x54c690);
     for (const GuestHook& hook : hooks) {
         CHECK(hook.length >= GUEST_HOOK_MIN_LENGTH && hook.length <= GUEST_HOOK_MAX_LENGTH);
@@ -2498,8 +2879,12 @@ int main(int argc, char** argv) {
     TestAddSkillPoints();
     TestAddLevel();
     TestSkillUses();
+    TestSkillItemWear();
+    TestSkillBudget();
     TestRefillOnEnable();
     TestAllyRefill();
+    TestFrozenHealthModel();
+    TestHealthCheats();
     TestArrowHold();
     TestExperienceMultiplier();
     TestDurability();

@@ -51,6 +51,35 @@ typedef struct {
 int dcp_apply_resolution(unsigned char *image, uint64_t image_size, const DcpResolutionSite *sites, size_t count,
                          const DcpResolution *resolution, char *error, size_t error_size);
 
+#define DCP_SIGNATURE_MAX 64
+
+/* A render size site found by its instruction context: `pattern` is the window of `length` bytes that holds the site at
+ * `lead`; a byte with compare 0 is a relocated displacement and is not compared. */
+typedef struct {
+    uint8_t length;
+    uint8_t lead;
+    uint8_t opcode_length;
+    uint8_t opcode[2];
+    uint32_t value;
+    int height;
+    uint8_t pattern[DCP_SIGNATURE_MAX];
+    uint8_t compare[DCP_SIGNATURE_MAX];
+} DcpResolutionSignature;
+
+typedef struct {
+    int matches;  /* 2 means two or more */
+    uint32_t offset;
+    int valid;    /* one match, and the site's bytes hold */
+} DcpResolutionSignatureResult;
+
+#define DCP_CUSA10209_102_SIGNATURE_COUNT 23
+extern const DcpResolutionSignature dcp_cusa10209_102_signatures[DCP_CUSA10209_102_SIGNATURE_COUNT];
+
+/* Finds every signature's site and checks its bytes. Returns 1 and fills `sites` only when all of them are found once,
+ * valid and not overlapping; otherwise 0 and `sites` is left alone. Reads the image only. */
+int dcp_find_resolution_sites(const unsigned char *image, uint64_t image_size, const DcpResolutionSignature *signatures,
+                              size_t count, DcpResolutionSite *sites, DcpResolutionSignatureResult *results);
+
 #ifdef __cplusplus
 }
 #endif

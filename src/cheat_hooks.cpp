@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <chrono>
 #include <cstring>
 
 #include "dcp_cheats.h"
@@ -58,6 +59,30 @@ constexpr uint64_t kSaveRecordSize = 0x23b0;
 constexpr uint64_t kGameGoldContextOffset = 0x88;  // the object AddGold and GetGold take
 
 GuestFunctions g_guest{};
+FrozenHealth g_frozen;
+
+struct PartyUnit {
+    uint64_t unit = 0;
+    int64_t seen_ms = 0;
+};
+PartyUnit g_allies[FrozenHealth::kSlots];
+constexpr int64_t kAllyStaleMs = 250;
+bool g_applying_health_action = false;
+
+int64_t NowMs() {
+    if (g_guest.now_ms != nullptr) {
+        return g_guest.now_ms();
+    }
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+bool IsFrozen(const HostMemory& memory, uint64_t unit) {
+    if (Classify(unit) == UnitKind::PlayerOne) {
+        return Enabled(Cheat::InfiniteHealth);
+    }
+    return Enabled(Cheat::InfiniteAllyHealth) && IsAlly(memory, unit);
+}
 
 // Each spending path computes the new gold in a register and stores it at [base + kGoldOffset]; which registers
 // differ per site, so one handler is made for each pair.
@@ -76,27 +101,16 @@ void GUEST_HOOK_ABI GoldStoreHook(GuestRegs* regs) {
 // In the damage function (rcx = signed amount, positive is a loss; r15 = the victim's owner).
 void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     const int32_t amount = static_cast<int32_t>(regs->rcx);
-    if (amount <= 0) {
+    if (amount == 0 || g_applying_health_action ||
+        (!Enabled(Cheat::InfiniteHealth) && !Enabled(Cheat::InfiniteAllyHealth))) {
         return;
     }
     const HostMemory memory;
     const uint64_t unit = memory.U64(regs->rbp - kDamageUnitFrameOffset);
-    const bool player = Enabled(Cheat::InfiniteHealth);
-    const bool ally = Enabled(Cheat::InfiniteAllyHealth);
-    if (!player && !ally) {
-        return;
-    }
     if (unit == 0 || memory.U64(unit + kUnitOwnerOffset) != regs->r15) {
         return;
     }
-    int32_t kept = amount;
-    if (player) {
-        kept = ProtectedDamage(true, Classify(unit), kept);
-    }
-    if (ally) {
-        kept = ProtectedAllyDamage(true, IsAlly(memory, unit), kept);
-    }
-    regs->rcx = static_cast<uint32_t>(kept);
+    regs->rcx = static_cast<uint32_t>(FrozenHealthDelta(true, IsFrozen(memory, unit), amount));
 }
 
 // At the entry of UseMP (rdi = the caster's unit, ecx = the consume flag).
@@ -228,6 +242,33 @@ void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs) {
     }
 }
 
+// At the two item-count decrements of the equipment wear function (rdi = item, rbx = the unit's equipment list). Every
+// skill item the skill-item use function does not handle (the Dwarf's, for one) is counted down here.
+void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs) {
+    if (!Enabled(Cheat::InfiniteSkillUses) || regs->rdi == 0) {
+        return;
+    }
+    const HostMemory memory;
+    const bool skill_item =
+        IsSkillItem(memory.U32(regs->rdi + kItemFlagsOffset), HostMemory::Load<uint16_t>(regs->rdi));
+    const UnitKind kind = Classify(regs->rbx - kUnitEquipmentOffset);
+    if (skill_item && PreservedSkillUse(true, kind, memory.U8(regs->rdi + kItemUsesOffset))) {
+        regs->skip = 1;
+    }
+}
+
+// In the record's skill budget check, before it compares what the record owns with what it may own (r12 = level
+// allowance, r14 = quest bonus, r13 = points in bought levels, the points held at [rbp-0x5c]).
+void GUEST_HOOK_ABI SkillBudgetHook(GuestRegs* regs) {
+    if (!Enabled(Cheat::InfiniteSkillPoints)) {
+        return;
+    }
+    const int32_t available = HostMemory{}.S32(regs->rbp - 0x5c);
+    regs->r12 = static_cast<uint32_t>(SkillAllowance(true, static_cast<int32_t>(regs->r12),
+                                                     static_cast<int32_t>(regs->r14),
+                                                     static_cast<int32_t>(regs->r13), available));
+}
+
 void SetGuestFunctions(const GuestFunctions& functions) {
     g_guest = functions;
 }
@@ -240,12 +281,9 @@ void ApplyRefills(uint64_t unit, unsigned pending) {
     }
     const HostMemory memory;
     const uint64_t owner = memory.U64(unit + kUnitOwnerOffset);
-    const RefillPlan plan = PlanRefill((pending & Bit(Cheat::InfiniteHealth)) != 0,
+    const RefillPlan plan = PlanRefill(false,
                                        (pending & Bit(Cheat::InfiniteMana)) != 0, memory.U32(owner + kOwnerClassOffset),
                                        g_guest.is_dead(owner) != 0);
-    if (plan.take_health) {
-        runtime_cheat_take_refill(static_cast<int>(Cheat::InfiniteHealth));
-    }
     if (plan.take_mana) {
         runtime_cheat_take_refill(static_cast<int>(Cheat::InfiniteMana));
     }
@@ -280,26 +318,102 @@ void ApplyDurabilityRefill(uint64_t unit) {
     }
 }
 
-// Keeps a living AI ally's HP and, for a mana class, MP topped up through the game's own fill function.
-void ApplyAllyRefills(uint64_t unit, bool health, bool mana) {
+// Keeps a living AI ally's MP topped up through the game's own fill function.
+void ApplyAllyManaRefill(uint64_t unit) {
     if (g_guest.refill == nullptr || g_guest.is_dead == nullptr) {
         return;
     }
     const HostMemory memory;
     const uint64_t owner = memory.U64(unit + kUnitOwnerOffset);
-    if (owner == 0 || g_guest.is_dead(owner) != 0) {
-        return;
-    }
-    const int32_t hp = memory.S32(unit + kUnitHpOffset);
-    if (hp <= 0) {
+    if (owner == 0 || g_guest.is_dead(owner) != 0 || memory.S32(unit + kUnitHpOffset) <= 0) {
         return;
     }
     const uint8_t class_index = memory.U8(unit + kUnitClassOffset);
-    const bool has_mana = class_index == kSorceressClass || class_index == kWizardClass;
-    if (!health && (!mana || !has_mana)) {
+    if (class_index != kSorceressClass && class_index != kWizardClass) {
         return;
     }
-    g_guest.refill(unit, health ? 1u : 0u, mana && has_mana ? 1u : 0u, 1);
+    g_guest.refill(unit, 0, 1, 1);
+}
+
+bool UnitAlive(const HostMemory& memory, uint64_t unit) {
+    const uint64_t owner = memory.U64(unit + kUnitOwnerOffset);
+    return owner != 0 && (g_guest.is_dead == nullptr || g_guest.is_dead(owner) == 0) &&
+           memory.S32(unit + kUnitHpOffset) > 0;
+}
+
+void HoldFrozenHealth(uint64_t unit) {
+    const HostMemory memory;
+    const int32_t slot = memory.S32(unit + kUnitPlayerSlotOffset);
+    const int32_t hp = memory.S32(unit + kUnitHpOffset);
+    const int32_t held = g_frozen.Hold(slot, unit, hp, NowMs());
+    if (held != hp && hp > 0 && UnitAlive(memory, unit)) {
+        HostMemory::Store<int32_t>(unit + kUnitHpOffset, held);
+    }
+}
+
+// Fills a living party member through the game's fill function, then lowers it to 20% for Set Low Health.
+void ApplyHealthAction(uint64_t unit, bool low) {
+    const HostMemory memory;
+    if (g_guest.refill == nullptr || g_guest.is_dead == nullptr || !UnitAlive(memory, unit)) {
+        return;
+    }
+    g_applying_health_action = true;
+    g_guest.refill(unit, 1, 0, 1);
+    g_applying_health_action = false;
+    int32_t hp = memory.S32(unit + kUnitHpOffset);
+    if (low) {
+        hp = LowHealth(hp);
+        HostMemory::Store<int32_t>(unit + kUnitHpOffset, hp);
+    }
+    if (IsFrozen(memory, unit)) {
+        g_frozen.Set(memory.S32(unit + kUnitPlayerSlotOffset), unit, hp, NowMs());
+    }
+}
+
+bool TakeAction(Action action) {
+    return runtime_cheat_take_action(static_cast<int>(action)) != 0;
+}
+
+bool HealthActionPending() {
+    for (const Action action : {Action::FillHealth, Action::SetLowHealth, Action::FillAllyHealth, Action::SetAllyLowHealth}) {
+        if (runtime_cheat_action_pending(static_cast<int>(action)) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void RememberAlly(uint64_t unit) {
+    const int32_t slot = HostMemory{}.S32(unit + kUnitPlayerSlotOffset);
+    if (slot > kPlayerOneSlot && slot <= kLastPartySlot) {
+        g_allies[slot] = {unit, NowMs()};
+    }
+}
+
+void ApplyToAllies(bool low) {
+    const HostMemory memory;
+    const int64_t now = NowMs();
+    for (int32_t slot = kPlayerOneSlot + 1; slot <= kLastPartySlot; ++slot) {
+        const PartyUnit& ally = g_allies[slot];
+        if (ally.unit == 0 || now - ally.seen_ms > kAllyStaleMs || Classify(ally.unit) != UnitKind::OtherPlayer ||
+            !IsAlly(memory, ally.unit) || memory.S32(ally.unit + kUnitPlayerSlotOffset) != slot) {
+            continue;
+        }
+        ApplyHealthAction(ally.unit, low);
+    }
+}
+
+void ApplyHealthActions(uint64_t unit) {
+    const bool fill = TakeAction(Action::FillHealth);
+    const bool low = TakeAction(Action::SetLowHealth);
+    if (fill || low) {
+        ApplyHealthAction(unit, low);
+    }
+    const bool fill_allies = TakeAction(Action::FillAllyHealth);
+    const bool low_allies = TakeAction(Action::SetAllyLowHealth);
+    if (fill_allies || low_allies) {
+        ApplyToAllies(low_allies);
+    }
 }
 
 // One request, one AddGold: the game applies its own clamp, and at the maximum nothing is added.
@@ -420,18 +534,40 @@ void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
     const bool add_skill_points = runtime_cheat_action_pending(static_cast<int>(Action::AddSkillPoints)) != 0;
     const bool add_gold = runtime_cheat_action_pending(static_cast<int>(Action::AddGold)) != 0;
     const bool add_level = runtime_cheat_action_pending(static_cast<int>(Action::AddLevel)) != 0;
+    const bool health_action = HealthActionPending();
     const bool arrows = Enabled(Cheat::InfiniteArrows);
-    const bool ally_health = Enabled(Cheat::InfiniteAllyHealth);
+    const bool player_frozen = Enabled(Cheat::InfiniteHealth);
+    const bool ally_frozen = Enabled(Cheat::InfiniteAllyHealth);
     const bool ally_mana = Enabled(Cheat::InfiniteAllyMana);
-    if (refills == 0 && !add_skill_points && !add_gold && !add_level && !arrows && !ally_health && !ally_mana) {
-        return;
+    if (!player_frozen) {
+        g_frozen.ClearSlot(kPlayerOneSlot);
+    }
+    if (!ally_frozen) {
+        for (int32_t slot = kPlayerOneSlot + 1; slot <= kLastPartySlot; ++slot) {
+            g_frozen.ClearSlot(slot);
+        }
     }
     const UnitKind kind = Classify(regs->rdi);
+    const bool ally = kind == UnitKind::OtherPlayer && IsAlly(HostMemory{}, regs->rdi);
+    if (ally) {
+        RememberAlly(regs->rdi);
+    }
+    if (refills == 0 && !add_skill_points && !add_gold && !add_level && !arrows && !player_frozen && !ally_frozen &&
+        !ally_mana &&
+        !health_action) {
+        return;
+    }
     if (kind == UnitKind::PlayerOne) {
+        if (health_action) {
+            ApplyHealthActions(regs->rdi);
+        }
+        if (player_frozen) {
+            HoldFrozenHealth(regs->rdi);
+        }
         if (arrows) {
             HoldArrows(regs->rdi);
         }
-        if ((refills & (Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteMana))) != 0) {
+        if ((refills & Bit(Cheat::InfiniteMana)) != 0) {
             ApplyRefills(regs->rdi, refills);
         }
         if ((refills & Bit(Cheat::InfiniteDurability)) != 0) {
@@ -448,8 +584,13 @@ void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
         }
         return;
     }
-    if (kind == UnitKind::OtherPlayer && (ally_health || ally_mana) && IsAlly(HostMemory{}, regs->rdi)) {
-        ApplyAllyRefills(regs->rdi, ally_health, ally_mana);
+    if (ally) {
+        if (ally_frozen) {
+            HoldFrozenHealth(regs->rdi);
+        }
+        if (ally_mana) {
+            ApplyAllyManaRefill(regs->rdi);
+        }
     }
 }
 
@@ -477,6 +618,10 @@ std::span<const GuestHook> Hooks() {
         {"experience", 0x27511, 7, {0x48, 0x83, 0xc4, 0x08, 0x5b, 0x41, 0x5c}, ExperienceHook},
         {"skill use", 0x1af0dc, 5, {0xe8, 0x6f, 0x13, 0xe7, 0xff}, SkillUseHook},
         {"skill use mirror", 0x1af12a, 5, {0xe9, 0x21, 0x13, 0xe7, 0xff}, SkillUseHook},
+        {"skill item wear", 0x225f90, 5, {0xe8, 0xbb, 0xa4, 0xdf, 0xff}, SkillItemWearHook},
+        {"skill item wear mirror", 0x225fb1, 5, {0xe8, 0x9a, 0xa4, 0xdf, 0xff}, SkillItemWearHook},
+        {"skill budget", 0x8ab24, 12, {0x8b, 0x5d, 0xa4, 0x45, 0x01, 0xf4, 0x41, 0x01, 0xdd, 0x45, 0x29, 0xec},
+         SkillBudgetHook},
     };
     return hooks;
 }
