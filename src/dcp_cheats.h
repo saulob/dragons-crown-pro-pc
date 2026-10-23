@@ -452,6 +452,24 @@ constexpr bool PreservedSkillUse(bool enabled, UnitKind kind, int32_t uses) {
     return enabled && kind == UnitKind::PlayerOne && uses > 0;
 }
 
+inline constexpr uint32_t kItemEffectCountMask = 0x1e000000;
+inline constexpr uint32_t kFirstSkillEffect = 0x1d1;
+inline constexpr uint32_t kSkillEffectCount = 0x28;
+inline constexpr uint64_t kSkillEffectMask = 0xe362e5f7ffull;
+
+// The game's own skill-item test: a skill effect (0x1d1..0x1f8, the ids in the mask) as the item's first effect.
+constexpr bool IsSkillItem(uint32_t flags, uint16_t first_effect) {
+    const uint32_t index = static_cast<uint16_t>(first_effect - kFirstSkillEffect);
+    return (flags & kItemEffectCountMask) != 0 && index < kSkillEffectCount && ((kSkillEffectMask >> index) & 1) != 0;
+}
+
+// The record's skill budget check compares what it owns (levels bought plus points held) with what it may own. While
+// the cheat is On, the allowance grows to cover an excess; with no excess it stays what the game computed.
+constexpr int32_t SkillAllowance(bool enabled, int32_t base, int32_t bonus, int32_t spent, int32_t available) {
+    const int32_t excess = spent + available - (base + bonus);
+    return enabled && excess > 0 ? base + excess : base;
+}
+
 // The skill purchase stores the points left; Player 1 keeps what they had. Earning and refunds never come here.
 constexpr int32_t ProtectedSkillPoints(bool enabled, int32_t player_index, int32_t before, int32_t after) {
     return enabled && player_index == kPlayerOneSlot && after < before ? before : after;

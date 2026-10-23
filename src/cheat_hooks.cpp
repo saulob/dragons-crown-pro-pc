@@ -228,6 +228,33 @@ void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs) {
     }
 }
 
+// At the two item-count decrements of the equipment wear function (rdi = item, rbx = the unit's equipment list). Every
+// skill item the skill-item use function does not handle (the Dwarf's, for one) is counted down here.
+void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs) {
+    if (!Enabled(Cheat::InfiniteSkillUses) || regs->rdi == 0) {
+        return;
+    }
+    const HostMemory memory;
+    const bool skill_item =
+        IsSkillItem(memory.U32(regs->rdi + kItemFlagsOffset), HostMemory::Load<uint16_t>(regs->rdi));
+    const UnitKind kind = Classify(regs->rbx - kUnitEquipmentOffset);
+    if (skill_item && PreservedSkillUse(true, kind, memory.U8(regs->rdi + kItemUsesOffset))) {
+        regs->skip = 1;
+    }
+}
+
+// In the record's skill budget check, before it compares what the record owns with what it may own (r12 = level
+// allowance, r14 = quest bonus, r13 = points in bought levels, the points held at [rbp-0x5c]).
+void GUEST_HOOK_ABI SkillBudgetHook(GuestRegs* regs) {
+    if (!Enabled(Cheat::InfiniteSkillPoints)) {
+        return;
+    }
+    const int32_t available = HostMemory{}.S32(regs->rbp - 0x5c);
+    regs->r12 = static_cast<uint32_t>(SkillAllowance(true, static_cast<int32_t>(regs->r12),
+                                                     static_cast<int32_t>(regs->r14),
+                                                     static_cast<int32_t>(regs->r13), available));
+}
+
 void SetGuestFunctions(const GuestFunctions& functions) {
     g_guest = functions;
 }
@@ -477,6 +504,10 @@ std::span<const GuestHook> Hooks() {
         {"experience", 0x27511, 7, {0x48, 0x83, 0xc4, 0x08, 0x5b, 0x41, 0x5c}, ExperienceHook},
         {"skill use", 0x1af0dc, 5, {0xe8, 0x6f, 0x13, 0xe7, 0xff}, SkillUseHook},
         {"skill use mirror", 0x1af12a, 5, {0xe9, 0x21, 0x13, 0xe7, 0xff}, SkillUseHook},
+        {"skill item wear", 0x225f90, 5, {0xe8, 0xbb, 0xa4, 0xdf, 0xff}, SkillItemWearHook},
+        {"skill item wear mirror", 0x225fb1, 5, {0xe8, 0x9a, 0xa4, 0xdf, 0xff}, SkillItemWearHook},
+        {"skill budget", 0x8ab24, 12, {0x8b, 0x5d, 0xa4, 0x45, 0x01, 0xf4, 0x41, 0x01, 0xdd, 0x45, 0x29, 0xec},
+         SkillBudgetHook},
     };
     return hooks;
 }

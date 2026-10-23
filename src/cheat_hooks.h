@@ -18,6 +18,8 @@ void GUEST_HOOK_ABI ManaDrainHook(GuestRegs* regs);
 void GUEST_HOOK_ABI ArrowHook(GuestRegs* regs);
 void GUEST_HOOK_ABI SkillPointsHook(GuestRegs* regs);
 void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs);
+void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs);
+void GUEST_HOOK_ABI SkillBudgetHook(GuestRegs* regs);
 void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs);
 void GUEST_HOOK_ABI DurabilityHook(GuestRegs* regs);
 void GUEST_HOOK_ABI LivesHook(GuestRegs* regs);

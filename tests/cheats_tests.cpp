@@ -1363,6 +1363,93 @@ void TestSkillUses() {
     SetCheats(false, false);
 }
 
+void TestSkillItemWear() {
+    // The skill effects the game's own test accepts, and the ones it does not.
+    for (uint32_t effect = 0; effect < 0x400; ++effect) {
+        const bool listed = effect >= 0x1d1 && effect <= 0x1f8 && ((0xe362e5f7ffull >> (effect - 0x1d1)) & 1) != 0;
+        CHECK(IsSkillItem(kItemEffectCountMask, static_cast<uint16_t>(effect)) == listed);
+        CHECK(!IsSkillItem(0, static_cast<uint16_t>(effect)));
+    }
+    CHECK(IsSkillItem(0x2e000000, 0x1d6) && IsSkillItem(0x2e000000, 0x1d7) && IsSkillItem(0x2e000000, 0x1d8));
+    CHECK(!IsSkillItem(kItemEffectCountMask, 0xffff));
+    CHECK(!IsSkillItem(kItemEffectCountMask, 0x1dc));
+
+    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    alignas(16) uint8_t item[0x60] = {};
+    const auto wear = [&](const FakeGame& game, uint16_t effect, uint32_t flags, uint8_t uses) {
+        FakeGame::Store<uint16_t>(item, effect);
+        FakeGame::Store<uint32_t>(item + kItemFlagsOffset, flags);
+        FakeGame::Store<uint8_t>(item + kItemUsesOffset, uses);
+        GuestRegs regs{};
+        regs.rdi = reinterpret_cast<uint64_t>(item);
+        regs.rbx = game.Unit() + kUnitEquipmentOffset;
+        SkillItemWearHook(&regs);
+        return regs.skip != 0;
+    };
+
+    runtime_cheats_start(0, 1);
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints), 1);
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5)); // the other cheat does not cover it
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses), 1);
+    CHECK(wear(player1, 0x1d7, kItemEffectCountMask, 5)); // Bomb Satchel
+    CHECK(wear(player1, 0x1d6, kItemEffectCountMask, 255));
+    CHECK(wear(player1, 0x1d8, kItemEffectCountMask, 1));
+    CHECK(FakeGame::Load<uint8_t>(item + kItemUsesOffset) == 1); // only the decrement call is skipped
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 0));
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 5));       // not a skill effect
+    CHECK(!wear(player1, 0x1d7, 0, 5));                          // no effects: not a skill item
+    CHECK(!wear(player1, 0x0100, 0x40000000 | kItemEffectCountMask, 5)); // gear and consumables
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5));
+    CHECK(!wear(enemy, 0x1d7, kItemEffectCountMask, 5));
+
+    GuestRegs none{};
+    SkillItemWearHook(&none); // no item: nothing is read
+    CHECK(none.skip == 0);
+
+    runtime_cheats_start(0, 1);
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
+    SetCheats(false, false);
+}
+
+void TestSkillBudget() {
+    // Owned = bought levels + points held; allowed = level allowance + quest bonus.
+    CHECK(SkillAllowance(true, 40, 3, 30, 5) == 40);  // within the budget
+    CHECK(SkillAllowance(true, 40, 3, 38, 5) == 40);  // exactly at it
+    CHECK(SkillAllowance(true, 40, 3, 50, 0) == 47);  // extra levels are covered
+    CHECK(SkillAllowance(true, 40, 3, 30, 100) == 127);
+    CHECK(SkillAllowance(false, 40, 3, 50, 0) == 40);
+    CHECK(SkillAllowance(false, 40, 3, 30, 5) == 40);
+    CHECK(SkillAllowance(true, 40, 3, 20, -5) == 40);
+
+    uint8_t frame[0x100] = {};
+    const auto check = [&](int32_t base, int32_t bonus, int32_t spent, int32_t available) {
+        FakeGame::Store<int32_t>(frame + 0x80 - 0x5c, available);
+        GuestRegs regs{};
+        regs.rbp = reinterpret_cast<uint64_t>(frame) + 0x80;
+        regs.r12 = static_cast<uint32_t>(base);
+        regs.r13 = static_cast<uint32_t>(spent);
+        regs.r14 = static_cast<uint32_t>(bonus);
+        SkillBudgetHook(&regs);
+        // The game's own comparison: (allowance + bonus) - (spent + available), negative means repair.
+        const int32_t margin = static_cast<int32_t>(regs.r12) + bonus - (spent + available);
+        CHECK(regs.r13 == static_cast<uint32_t>(spent) && regs.r14 == static_cast<uint32_t>(bonus));
+        return margin;
+    };
+
+    runtime_cheats_start(0, 1);
+    CHECK(check(40, 3, 50, 0) == -7); // vanilla: the check repairs
+    CHECK(check(40, 3, 30, 100) == -87);
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints), 1);
+    CHECK(check(40, 3, 50, 0) == 0);
+    CHECK(check(40, 3, 30, 100) == 0);
+    CHECK(check(40, 3, 30, 5) == 8);   // a legal record is left as the game computed it
+    CHECK(check(40, 3, 38, 5) == 0);
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses), 1);
+    CHECK(check(40, 3, 50, 0) == -7); // the other cheat does not cover it
+    SetCheats(false, false);
+}
+
 // The real ImGui navigation with the overlay's flags: one press of Enter, Space or A on a row is one activation,
 // however long it stays held, and so is one click.
 struct MenuInputRig {
@@ -1884,10 +1971,13 @@ void TestAllyRefill() {
 
 void TestHookTable() {
     const std::span<const GuestHook> hooks = Hooks();
-    CHECK(hooks.size() == 22);
+    CHECK(hooks.size() == 25);
     CHECK(hooks[19].offset == 0x27511 && hooks[19].length == 7); // the experience award
     CHECK(hooks[20].offset == 0x1af0dc && hooks[20].length == 5); // the skill item's count decrement
     CHECK(hooks[21].offset == 0x1af12a && hooks[21].length == 5); // its mirror decrement
+    CHECK(hooks[22].offset == 0x225f90 && hooks[22].length == 5); // the equipment wear's count decrement
+    CHECK(hooks[23].offset == 0x225fb1 && hooks[23].length == 5); // its mirror decrement
+    CHECK(hooks[24].offset == 0x8ab24 && hooks[24].length == 12); // the skill budget comparison
     CHECK(kSupportedImage.size == 0x11f8060 && kSupportedImage.entry == 0x54c690);
     for (const GuestHook& hook : hooks) {
         CHECK(hook.length >= GUEST_HOOK_MIN_LENGTH && hook.length <= GUEST_HOOK_MAX_LENGTH);
@@ -2498,6 +2588,8 @@ int main(int argc, char** argv) {
     TestAddSkillPoints();
     TestAddLevel();
     TestSkillUses();
+    TestSkillItemWear();
+    TestSkillBudget();
     TestRefillOnEnable();
     TestAllyRefill();
     TestArrowHold();
