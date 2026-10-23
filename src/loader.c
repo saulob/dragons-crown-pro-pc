@@ -666,7 +666,7 @@ int main(int argc, char **argv) {
     }
     if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
-    if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
+    if (known_build && game_build.japanese_npc_voices)
         voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
