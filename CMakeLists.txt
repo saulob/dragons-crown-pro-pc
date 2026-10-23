@@ -85,7 +85,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/startup_save_hook.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/startup_save_hook.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -122,6 +122,11 @@ if (WIN32)
     target_include_directories(dcp-log-tests PRIVATE src)
     target_compile_options(dcp-log-tests PRIVATE -Wall -Wextra -Werror)
 endif()
+
+# Focused tests of the MOVBE emulation used when the host CPU lacks the instruction.
+add_executable(dcp-isa-tests EXCLUDE_FROM_ALL tests/isa_tests.c src/isa_emulate.c)
+target_include_directories(dcp-isa-tests PRIVATE src)
+target_compile_options(dcp-isa-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
 # (tools/test.ps1); not part of the default build.

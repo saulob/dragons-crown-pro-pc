@@ -1,5 +1,6 @@
 /* Native x86-64 loader: maps the prepared PS4 image and runs the original code on the host CPU. */
 #define _GNU_SOURCE
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,7 @@
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
 #include "runtime_log.h"
+#include "isa_emulate.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error Dragon's Crown Pro PC requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -184,6 +186,13 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
             return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
+    if (code==EXCEPTION_ILLEGAL_INSTRUCTION && image && (uintptr_t)info->ContextRecord->Rip-(uintptr_t)image<0x20000000) {
+        /* The game's code uses MOVBE; hosts without it (Sandy/Ivy Bridge, some VMs) trap. */
+        CONTEXT *c=info->ContextRecord;
+        _Static_assert(offsetof(CONTEXT,R15)-offsetof(CONTEXT,Rax)==15*sizeof(DWORD64),"CONTEXT register order");
+        size_t length=isa_emulate_movbe((const uint8_t *)(uintptr_t)c->Rip,c->Rip,&c->Rax);
+        if (length) { c->Rip+=length; return EXCEPTION_CONTINUE_EXECUTION; }
+    }
     if (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_ILLEGAL_INSTRUCTION || code==EXCEPTION_PRIV_INSTRUCTION ||
         code==EXCEPTION_STACK_OVERFLOW || code==EXCEPTION_INT_DIVIDE_BY_ZERO || code==EXCEPTION_DATATYPE_MISALIGNMENT) {
         /* Faults in guest code, the loader or the runtime end the process with a report; drivers
@@ -229,6 +238,20 @@ static void fault(int sig, siginfo_t *info, void *context) {
         sigaddset(&unblock, sig);
         pthread_sigmask(SIG_UNBLOCK, &unblock, NULL);
         siglongjmp(*recover, 1);
+    }
+    if (sig == SIGILL) {
+        static const int order[16] = {REG_RAX, REG_RCX, REG_RDX, REG_RBX, REG_RSP, REG_RBP, REG_RSI, REG_RDI,
+                                      REG_R8, REG_R9, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15};
+        ucontext_t *state = context;
+        uint64_t gpr[16];
+        for (int i = 0; i < 16; ++i) gpr[i] = (uint64_t)state->uc_mcontext.gregs[order[i]];
+        uint64_t at = (uint64_t)state->uc_mcontext.gregs[REG_RIP];
+        size_t length = at - (uintptr_t)image < 0x20000000 ? isa_emulate_movbe((const uint8_t *)(uintptr_t)at, at, gpr) : 0;
+        if (length) {
+            for (int i = 0; i < 16; ++i) state->uc_mcontext.gregs[order[i]] = (greg_t)gpr[i];
+            state->uc_mcontext.gregs[REG_RIP] = (greg_t)(at + length);
+            return;
+        }
     }
     runtime_log_mark_crash();
     /* The process is terminating: dladdr/snprintf are acceptable here. */
