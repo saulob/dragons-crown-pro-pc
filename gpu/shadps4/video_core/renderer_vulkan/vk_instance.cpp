@@ -674,6 +674,7 @@ bool Instance::CreateDevice() {
         return false;
     }
     device = std::move(dev);
+    fmt::print("GPU: Vulkan device extensions: {}\n", fmt::join(enabled_extensions, ", "));
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
     pipeline_binaries =

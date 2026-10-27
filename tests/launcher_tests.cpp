@@ -38,6 +38,7 @@
 #include "file_browser.h"
 #include "game_files.h"
 #include "game_install.h"
+#include "game_process.h"
 #include "options.h"
 #include "paths.h"
 #include "placement.h"
@@ -1169,6 +1170,124 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
 }
 
+void TestOverlayProgramsSetting(const fs::path& base) {
+    const fs::path file = base / "overlays" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    bool listed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        if (setting.key == kAllowOverlayProgramsKey) {
+            listed = true;
+            CHECK(setting.default_value == "0");
+        }
+    }
+    CHECK(listed);
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kAllowOverlayProgramsKey, false));
+        settings.SetBool(kAllowOverlayProgramsKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kAllowOverlayProgramsKey, "1"));
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kAllowOverlayProgramsKey, false));
+        settings.ResetToDefaults();
+        CHECK(!settings.GetBool(kAllowOverlayProgramsKey, true));
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kAllowOverlayProgramsKey, "0"));
+
+    // Only On, and only where the separate process exists, leaves the launcher's process.
+    CHECK(!SeparateGameProcessWanted(false, true));
+    CHECK(SeparateGameProcessWanted(true, true));
+    CHECK(!SeparateGameProcessWanted(false, false));
+    CHECK(!SeparateGameProcessWanted(true, false));
+#ifdef _WIN32
+    CHECK(kSeparateGameProcessAvailable);
+#else
+    CHECK(!kSeparateGameProcessAvailable);
+#endif
+
+    // Neither mode filters Vulkan layers or closes extension points, so overlays and a player's own
+    // VK_LOADER_LAYERS_DISABLE reach the game untouched.
+    const fs::path source(DCP_SOURCE_DIR);
+    for (const char* dir : {"src", "launcher"}) {
+        for (const auto& entry : fs::recursive_directory_iterator(source / dir)) {
+            const std::string ext = entry.path().extension().string();
+            if (!entry.is_regular_file() || (ext != ".c" && ext != ".cpp" && ext != ".h")) {
+                continue;
+            }
+            const std::string text = ReadAll(entry.path());
+            for (const char* absent : {"VK_LOADER_LAYERS_DISABLE", "ProcessExtensionPointDisablePolicy",
+                                       "EXTENSION_POINT_DISABLE", "PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY"}) {
+                if (text.find(absent) != std::string::npos) {
+                    std::printf("%s in %s\n", absent, entry.path().string().c_str());
+                    CHECK(false);
+                }
+            }
+        }
+    }
+    CHECK(!fs::exists(source / "launcher" / "overlay_protection.cpp"));
+    CHECK(!fs::exists(source / "launcher" / "vulkan_layers.cpp"));
+}
+
+void TestGameProcess() {
+    // The game process keeps the paths and options, never the launcher's own choices, and continues this run's log.
+    const std::vector<std::string> launcher = {"boot.bin", "--launcher", "--user", "D:\\Games\\DCP\\user", "--log",
+                                               "old.log", "--dcp-skip-launcher", "--strict-imports", "--dcp-game"};
+    const std::vector<std::string> game = GameProcessArguments(launcher, "D:\\logs\\dragons_crown_pro_042.log");
+    const std::vector<std::string> expected = {"boot.bin", "--user", "D:\\Games\\DCP\\user", "--strict-imports",
+                                               "--dcp-game", "--log", "D:\\logs\\dragons_crown_pro_042.log"};
+    CHECK(game == expected);
+    CHECK(std::count(game.begin(), game.end(), std::string(kGameProcessArgument)) == 1);
+    CHECK(GameProcessArguments({}, "") == std::vector<std::string>{kGameProcessArgument});
+    CHECK(GameProcessArguments(GameProcessArguments({"--app0", "a b"}, "x.log"), "x.log") ==
+          GameProcessArguments({"--app0", "a b"}, "x.log"));
+
+    std::string error;
+#ifdef _WIN32
+    CHECK(WindowsCommandLine(L"C:\\Games\\Dragon Crown\\dragons_crown_pro.exe",
+                             {"--user", "C:\\My Games\\user\\", "--log", "a\"b", "", "plain"}) ==
+          L"\"C:\\Games\\Dragon Crown\\dragons_crown_pro.exe\" --user \"C:\\My Games\\user\\\\\" --log \"a\\\"b\" \"\" plain");
+    // A failed creation reports why and leaves nothing to start.
+    CHECK(!CreateGameProcess(fs::temp_directory_path() / "dcp-missing" / "dragons_crown_pro.exe", {kGameProcessArgument},
+                             error));
+    CHECK(error.find("error 3") != std::string::npos || error.find("error 2") != std::string::npos);
+    CHECK(dcp_resume_game_process() == 0);
+#else
+    CHECK(!CreateGameProcess("dragons_crown_pro", {kGameProcessArgument}, error) && !error.empty());
+    CHECK(dcp_resume_game_process() == 0);
+#endif
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string loader = ReadAll(source / "src" / "loader.c");
+    const size_t child = loader.find("if (game_child) {");
+    const size_t startup_modules = loader.find("module_diagnostics_report_startup()");
+    const size_t launcher_run = loader.find("dcp_launcher_run(");
+    const size_t started = loader.find("launched==DCP_LAUNCHER_GAME_STARTED");
+    const size_t gpu = loader.find("dcpgpu_init(");
+    // The game process lists what it started with and never runs the launcher, so it cannot start another one.
+    CHECK(loader.find("module_diagnostics_baseline()") < loader.find("runtime_log_start("));
+    CHECK(child != std::string::npos && child < startup_modules && startup_modules < launcher_run);
+    CHECK(loader.find("!cpu_only && !check_imports && !game_child") < launcher_run);
+    CHECK(loader.find("Overlay compatibility: %s game process") != std::string::npos);
+    // This process ends once the game process exists: it never reaches the game's runtime.
+    CHECK(started != std::string::npos && started > launcher_run && started < gpu);
+    CHECK(loader.find("runtime_log_release()", started) < loader.find("dcp_resume_game_process()", started));
+    CHECK(loader.find("exit(0)", started) < gpu);
+    // Linux keeps the game in the launcher's process.
+    CHECK(loader.find("int game_process=0;\n#ifdef _WIN32\n        game_process=1;\n#else") != std::string::npos);
+    // Off returns to the loader exactly as before; only On reaches the game process, and a failure keeps the launcher.
+    const std::string launcher_source = ReadAll(source / "launcher" / "launcher.cpp");
+    const size_t window_off = launcher_source.find("if (!SeparateGameProcess(config_, settings_)) {\n                return Outcome::kPlay;");
+    const size_t direct_off = launcher_source.find("if (!SeparateGameProcess(config, settings)) {\n        return DCP_LAUNCHER_PLAY;");
+    CHECK(window_off != std::string::npos && window_off < launcher_source.find("StartGameProcess(config_, error)"));
+    CHECK(direct_off != std::string::npos && direct_off < launcher_source.find("StartGameProcess(config, error)"));
+    CHECK(launcher_source.find("game_process_started_ = true;") > launcher_source.find("StartGameProcess(config_, error)"));
+    CHECK(launcher_source.find("play_.Cancel();") != std::string::npos);
+    CHECK(launcher_source.find("Could not start the game.") != std::string::npos);
+}
+
 void TestCheatSettings(const fs::path& base) {
     const fs::path file = base / "cheats" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -1800,6 +1919,16 @@ void TestPlayGate() {
         PlayGate gate;
         CHECK(gate.Request(false, true, [] { return false; }) == PlayRequest::kSaveFailed);
         CHECK(!gate.starting());
+    }
+    {
+        // A game process that could not be created leaves PLAY usable again.
+        PlayGate gate;
+        int saves = 0;
+        const auto save = [&] { ++saves; return true; };
+        CHECK(gate.Request(false, true, save) == PlayRequest::kStarting);
+        gate.Cancel();
+        CHECK(!gate.starting());
+        CHECK(gate.Request(false, true, save) == PlayRequest::kStarting && saves == 2);
     }
 }
 
@@ -3506,6 +3635,8 @@ int main(int argc, char** argv) {
     TestTextLanguage(base);
     TestCheatSettings(base);
     TestJapaneseNpcVoiceSetting(base);
+    TestOverlayProgramsSetting(base);
+    TestGameProcess();
     TestAspectRatio(base);
     TestPresentation(base);
     TestGraphicsQuality(base);

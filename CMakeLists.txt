@@ -81,7 +81,7 @@ if (WIN32)
     # Relink when the application icon, the manifest or the version changes.
     set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
-    set(DCP_PLATFORM_SOURCES src/compat_win.c src/runtime_log.c src/dragons_crown_pro.rc)
+    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/runtime_log.c src/dragons_crown_pro.rc)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()

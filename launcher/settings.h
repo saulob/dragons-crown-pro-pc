@@ -43,6 +43,8 @@ inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 // Routes NPC voice cues to the Japanese banks already present in the USA installation.
 inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
+// Windows, on: Play starts the game as a separate process that overlay programs can attach to (game_process.h).
+inline constexpr char kAllowOverlayProgramsKey[] = "allow_overlay_programs";
 inline constexpr char kLauncherXKey[] = "launcher_x";
 inline constexpr char kLauncherYKey[] = "launcher_y";
 inline constexpr char kLauncherWidthKey[] = "launcher_width";

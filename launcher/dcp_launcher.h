@@ -22,6 +22,8 @@ typedef struct {
     int skip_once;             /* --dcp-skip-launcher: do not show it unless the game files are not ready */
     int force_show;            /* --launcher: show it even when "Show this launcher" is off, like holding Shift */
     DcpGraphicsCheck check_graphics; /* NULL: Play does not check; see dcp_check_vulkan */
+    int game_process;          /* Windows: with Allow overlay programs on, Play starts the game as a process of its own */
+    const char *log_file;      /* this run's log, continued by the game process; NULL when there is none */
 } DcpLauncherConfig;
 
 /* NULL asks for the default, which is relative to the executable (launcher/paths.h). */
@@ -83,6 +85,10 @@ int dcp_detailed_logging(const char *settings_file);
 /* Prints the effective Gameplay page settings, including the Japanese NPC Voices state after build gating. */
 void dcp_log_gameplay_settings(const char *settings_file, const char *image_dir);
 
+/* Starts the game process dcp_launcher_run created suspended. Call it once nothing writes to the log any more; 1 when
+ * it runs. A process that could not be started is ended. */
+int dcp_resume_game_process(void);
+
 /* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
  * usable Vulkan on Linux); enumerates only, no device is created. */
 int dcp_gpu_names(char (*names)[256], int max);
@@ -107,12 +113,20 @@ typedef struct {
 /* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */
 int dcp_game_build(const char *image_dir, DcpGameBuild *build);
 
-typedef enum { DCP_LAUNCHER_PLAY = 0, DCP_LAUNCHER_QUIT = 1, DCP_LAUNCHER_BLOCKED = 2 } DcpLauncherResult;
+typedef enum {
+    DCP_LAUNCHER_PLAY = 0,
+    DCP_LAUNCHER_QUIT = 1,
+    DCP_LAUNCHER_BLOCKED = 2,
+    DCP_LAUNCHER_GAME_STARTED = 3 /* game_process: the game process exists, suspended; this process ends */
+} DcpLauncherResult;
 
 /* Shows the launcher when its rules say so (game files not ready, "Show this launcher" on, or Shift held) and returns
  * once the player pressed Play or quit. Returns DCP_LAUNCHER_PLAY at once when it is not shown.
  * While check_graphics fails, Play is refused: the launcher says why and stays open. A launcher that is not shown
- * explains in a window of its own and returns DCP_LAUNCHER_BLOCKED. */
+ * explains in a window of its own and returns DCP_LAUNCHER_BLOCKED.
+ * With game_process and Allow overlay programs on, Play creates the game process instead and returns
+ * DCP_LAUNCHER_GAME_STARTED; when it cannot be created, the launcher stays open with the reason (or explains in a window
+ * of its own). */
 DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig *config);
 
 #ifdef __cplusplus

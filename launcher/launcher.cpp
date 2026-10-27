@@ -31,6 +31,7 @@
 #include "dcp_resolution.h"
 #include "game_files.h"
 #include "game_install.h"
+#include "game_process.h"
 #include "host.h"
 #include "launcher_quit.h"
 #include "options.h"
@@ -128,6 +129,9 @@ constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
+constexpr char kAllowOverlayProgramsHelp[] =
+    "For programs that draw over games (recording, chat, store and performance overlays). On, PLAY starts the game as a "
+    "separate program from this launcher, so they can attach to it cleanly. Off starts the game the usual way.";
 
 enum class PatchAction { kPrompts, kSafeMode, kRestore };
 
@@ -234,12 +238,30 @@ std::filesystem::path SettingsPath(const DcpLauncherConfig& config) {
     return PathFromUtf8(config.user_dir ? config.user_dir : "user") / "dcp.ini";
 }
 
+bool SeparateGameProcess(const DcpLauncherConfig& config, const LauncherSettings& settings) {
+    return config.game_process && SeparateGameProcessWanted(settings.GetBool(kAllowOverlayProgramsKey, false));
+}
+
+// The saved settings are final here: the game process reads them from the same file.
+bool StartGameProcess(const DcpLauncherConfig& config, std::string& error) {
+    Log("starting overlay-compatible game process");
+    const std::vector<std::string> arguments =
+        GameProcessArguments(trg::update::CurrentProcessArguments(), config.log_file ? config.log_file : "");
+    if (!CreateGameProcess(trg::update::CurrentExecutablePath(), arguments, error)) {
+        Log("could not start the game process: %s", error.c_str());
+        return false;
+    }
+    return true;
+}
+
 enum class Outcome { kRunning, kPlay, kQuit };
 
 class LauncherApp {
 public:
     LauncherApp(const DcpLauncherConfig& config, LauncherSettings& settings, GamePaths paths, GameCheck check)
         : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state), build_(check.build) {}
+
+    bool game_process_started() const { return game_process_started_; }
 
     // Runs the launcher window until Play or Quit. False when no window could be opened.
     bool Run(Outcome& outcome) {
@@ -328,7 +350,18 @@ private:
         PollUpdate();
         NormalizeGraphicsSettings();
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
-            return Outcome::kPlay;
+            if (!SeparateGameProcess(config_, settings_)) {
+                return Outcome::kPlay;
+            }
+            SavePlacement(placement_.Flush());
+            std::string error;
+            if (StartGameProcess(config_, error)) {
+                skip_finish_save_ = true;
+                game_process_started_ = true;
+                return Outcome::kPlay;
+            }
+            play_.Cancel();
+            launcher_->SetStatus("Could not start the game. " + error, 10.0);
         }
         ImGuiIO& io = ImGui::GetIO();
         if (play_.starting()) {
@@ -847,6 +880,9 @@ private:
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
         ui.Row("Arachnophobia Safe Mode", kArachnophobiaHelp);
         ArachnophobiaToggle(ui);
+        if (kSeparateGameProcessAvailable) {
+            ui.Toggle("Allow overlay programs", kAllowOverlayProgramsHelp, kAllowOverlayProgramsKey, false, "Off", "On");
+        }
         ui.EndRows();
     }
 
@@ -1150,14 +1186,10 @@ private:
     std::shared_ptr<PromptsResult> prompts_outcome_;
     trg::Task prompts_;
     bool skip_finish_save_ = false;
+    bool game_process_started_ = false;
 };
 
-// Play without the launcher on screen: the same check, explained in a window of its own.
-DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
-    char cause[320] = "", advice[320] = "";
-    if (!config.check_graphics || config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
-        return DCP_LAUNCHER_PLAY;
-    }
+DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const char* advice) {
     LauncherHost host;
     HostOptions options;
     options.title = kPortTitle;
@@ -1166,7 +1198,7 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
     options.min_width = 360;
     options.min_height = 220;
     if (!host.Open(options)) {
-        std::fprintf(stderr, "Graphics: %s %s\n", cause, advice);
+        std::fprintf(stderr, "%s: %s %s\n", topic, cause, advice);
         return DCP_LAUNCHER_BLOCKED;
     }
     const trg::Fonts fonts = trg::LoadSystemFonts(18.0f);
@@ -1189,6 +1221,22 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
     return DCP_LAUNCHER_BLOCKED;
 }
 
+// Play without the launcher on screen: the same checks, explained in a window of its own.
+DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherSettings& settings) {
+    char cause[320] = "", advice[320] = "";
+    if (config.check_graphics && !config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
+        return ExplainInWindow("Graphics", cause, advice);
+    }
+    if (!SeparateGameProcess(config, settings)) {
+        return DCP_LAUNCHER_PLAY;
+    }
+    std::string error;
+    if (StartGameProcess(config, error)) {
+        return DCP_LAUNCHER_GAME_STARTED;
+    }
+    return ExplainInWindow("Launcher", "Could not start the game.", error.c_str());
+}
+
 } // namespace
 } // namespace dcp
 
@@ -1202,7 +1250,7 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     const bool shift = ShiftHeldAtStart() || config->force_show != 0;
     if (!LauncherWanted(ready, show_setting, shift, config->skip_once != 0)) {
         Log("skipped (show_launcher %s%s)", show_setting ? "on" : "off", config->skip_once ? ", skip requested" : "");
-        return PlayOrExplain(*config);
+        return PlayOrExplain(*config, settings);
     }
     Log("settings file %s", Utf8(settings.file()).c_str());
     Log("opening: %s%s%s", ready ? "game ready" : "game files not ready", show_setting ? ", show_launcher on" : "",
@@ -1212,7 +1260,10 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     Outcome outcome = Outcome::kRunning;
     if (!app.Run(outcome)) {
         std::fprintf(stderr, "Launcher: could not open its window; %s\n", ready ? "starting the game" : "game files are not ready");
-        return ready ? PlayOrExplain(*config) : DCP_LAUNCHER_QUIT;
+        return ready ? PlayOrExplain(*config, settings) : DCP_LAUNCHER_QUIT;
+    }
+    if (app.game_process_started()) {
+        return DCP_LAUNCHER_GAME_STARTED;
     }
     return outcome == Outcome::kPlay ? DCP_LAUNCHER_PLAY : DCP_LAUNCHER_QUIT;
 }

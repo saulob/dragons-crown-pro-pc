@@ -24,6 +24,8 @@ public:
     }
 
     bool starting() const { return starting_; }
+    // The game could not be started: the launcher stays open and PLAY can be pressed again.
+    void Cancel() { starting_ = false; }
 
 private:
     bool starting_ = false;

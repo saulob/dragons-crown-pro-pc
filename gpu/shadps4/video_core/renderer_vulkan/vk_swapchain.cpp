@@ -37,6 +37,8 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& windo
     FindPresentMode();
 
     Create(window.GetWidth(), window.GetHeight());
+    std::printf("Swapchain: %s %s, %u images, %ux%u\n", vk::to_string(surface_format.format).c_str(),
+                vk::to_string(surface_format.colorSpace).c_str(), image_count, extent.width, extent.height);
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
 }
 

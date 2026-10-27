@@ -22,6 +22,7 @@
 #endif
 #ifdef _WIN32
 #include <windows.h>
+#include "module_diagnostics.h"
 #else
 #include <sys/mman.h>
 #include <malloc.h>
@@ -124,6 +125,14 @@ static void describe_address(char *out, size_t size, uintptr_t address) {
     }
     snprintf(out,size,"%p",(void *)address);
 }
+static void describe_module_path(uintptr_t address) {
+    HMODULE module=NULL;
+    char path[MAX_PATH];
+    if (image && address-(uintptr_t)image<0x20000000) return;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)address,&module) &&
+        module && module!=GetModuleHandleA(NULL) && GetModuleFileNameA(module,path,sizeof(path)))
+        fprintf(stderr,"  module %s at %p\n",path,(void *)module);
+}
 static int fatal_reported;
 static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) { Sleep(INFINITE); }
@@ -141,6 +150,7 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
                 (void *)record->ExceptionInformation[1],where,GetCurrentThreadId());
     else
         fprintf(stderr,"Fault: exception 0x%08lx at %s (thread %lu)\n",record->ExceptionCode,where,GetCurrentThreadId());
+    describe_module_path((uintptr_t)c->Rip);
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
     if (gpu_enabled) dcpgpu_dump_guest_writes(info);
@@ -397,10 +407,11 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     /* The guest TCB needs one of the 64 TEB TLS slots before DLLs (Vulkan drivers) take them. */
     runtime_thread_tcb_offset();
+    module_diagnostics_baseline();
 #endif
     int cpu_only = 0, strict_imports = 0, check_imports = 0;
     unsigned timeout_seconds = 0;
-    int skip_launcher = 0, force_launcher = 0;
+    int skip_launcher = 0, force_launcher = 0, game_child = 0;
     const char *boot=NULL, *content_profile=NULL, *app0=NULL, *user_dir=NULL, *logs_dir=NULL, *log_file=NULL;
     int first_option = 1;
     if (argc > 1 && strncmp(argv[1], "--", 2)) { boot = argv[1]; first_option = 2; }
@@ -415,6 +426,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--log") && i+1<argc) log_file=argv[++i];
         else if (!strcmp(argv[i], "--dcp-skip-launcher")) skip_launcher = 1;
         else if (!strcmp(argv[i], "--launcher")) force_launcher = 1;
+        else if (!strcmp(argv[i], "--dcp-game")) game_child = 1;
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
         else {
             fprintf(stderr, "Unknown option: %s\nUsage: %s [boot.bin] [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--logs dir] [--log file] [--dcp-skip-launcher] [--launcher] [--timeout seconds]\n", argv[i], argv[0]);
@@ -430,7 +442,12 @@ int main(int argc, char **argv) {
     char log_path[4200];
     static char log_folder[4200];
     snprintf(log_folder,sizeof(log_folder),"%s",paths.logs_dir);
-    if (runtime_log_start(paths.logs_dir,log_file,log_path,sizeof(log_path))) {
+    int log_started=0;
+#ifdef _WIN32
+    if (game_child) log_started=runtime_log_continue(log_file,log_path,sizeof(log_path));
+#endif
+    if (!log_started) log_started=runtime_log_start(paths.logs_dir,log_file,log_path,sizeof(log_path));
+    if (log_started) {
         time_t now=time(NULL);
         char stamp[32];
         strftime(stamp,sizeof(stamp),"%Y-%m-%dT%H:%M:%S",localtime(&now));
@@ -445,16 +462,37 @@ int main(int argc, char **argv) {
     AddVectoredExceptionHandler(1, vectored_fault);
     SetUnhandledExceptionFilter(unhandled_fault);
 #endif
-    if (!cpu_only && !check_imports) {
+    if (game_child) {
+        puts("Startup: game-only child process");
+#ifdef _WIN32
+        module_diagnostics_report_startup();
+#endif
+    }
+    if (!cpu_only && !check_imports && !game_child) {
         DcpGraphicsCheck check_graphics=NULL;
-#ifndef _WIN32
+        int game_process=0;
+#ifdef _WIN32
+        game_process=1;
+#else
         check_graphics=dcp_check_vulkan;
 #endif
-        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics};
+        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics,
+                                    game_process,log_started ? log_path : NULL};
         DcpLauncherResult launched=dcp_launcher_run(&launcher);
         runtime_log_set_detailed(dcp_detailed_logging(settings_file));
         if (launched==DCP_LAUNCHER_QUIT) { runtime_log_mark_clean_exit(); exit(0); }
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
+        if (launched==DCP_LAUNCHER_GAME_STARTED) {
+            /* The game process appends to this log: nothing here may write to it once it runs. */
+            puts("Launcher: the game process continues this log");
+            runtime_log_flush();
+            runtime_log_release();
+            if (!dcp_resume_game_process()) {
+                runtime_log_write_direct("Launcher: could not start the game process\n");
+                exit(1);
+            }
+            exit(0);
+        }
     }
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
@@ -472,6 +510,7 @@ int main(int argc, char **argv) {
                          dcp_saved_movement_speed(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
     dcp_log_gameplay_settings(settings_file, paths.image_dir);
+    printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
     if (known_build && game_build.cheats) {
         runtime_cheats_log_enabled();
     } else {
@@ -627,6 +666,9 @@ int main(int argc, char **argv) {
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
         if (dcpgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());
+#ifdef _WIN32
+        module_diagnostics_report();
+#endif
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);

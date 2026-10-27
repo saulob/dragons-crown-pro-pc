@@ -42,6 +42,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kControllerPromptsKey, "playstation"},
     {kArachnophobiaSafeModeKey, "0"},
     {kJapaneseNpcVoicesKey, "0"},
+    {kAllowOverlayProgramsKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
     {cheats::kInfiniteAllyHealthKey, "0"},
     {cheats::kInfiniteManaKey, "0"},
@@ -306,6 +307,8 @@ extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char*
     const bool supported = SupportsJapaneseNpcVoices(build);
     const bool voices = supported && settings.GetBool(kJapaneseNpcVoicesKey, false);
     std::printf("Gameplay: Japanese NPC Voices %s\n", supported ? (voices ? "on" : "off") : "unsupported");
+    std::printf("Gameplay: Allow overlay programs %s\n",
+                settings.GetBool(kAllowOverlayProgramsKey, false) ? "on" : "off");
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {

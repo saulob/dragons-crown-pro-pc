@@ -16,6 +16,15 @@ guest, and a missing game has no guest at all. So it opens a window of its own (
 closes all of it on Play, before the loader creates the game window. Only one SDL window and one Dear ImGui context
 exist at a time. The Dear ImGui copy is the one compiled into the video core library.
 
+With **Allow overlay programs** on (Windows only), the game does not run in the launcher's process. Play (or a start
+without the launcher) creates a new `dragons_crown_pro.exe` with the same arguments minus `--launcher`,
+`--dcp-skip-launcher` and `--log`, plus the internal `--dcp-game --log <this run's log>` (`launcher/game_process.cpp`).
+It is created suspended; the launcher process writes its last log line, lets go of the log, resumes it and exits. The
+game process never runs the launcher, so it never starts another one; it continues the same log and inherits the
+environment and working folder. Overlay and injection tools then attach to a clean game process instead of one that
+already holds what they put into the launcher. If the game process cannot be created, the launcher stays open with the
+reason. Off, and on Linux, the game continues in the launcher's process as it always has.
+
 | Path | Purpose |
 |---|---|
 | `launcher/launcher.cpp` | pages, Play flow, startup decision, the C entry point |
@@ -139,8 +148,9 @@ does. Both write byte-identical files from the game's package.
 
 - **Save** writes the pending settings and keeps the launcher open. **Quit** closes without saving.
 - **PLAY** is rejected while the files are not valid. Otherwise it saves the pending settings once, shows "Settings
-  saved. Starting game..." for 0.4 s with the controls disabled, closes the launcher window and lets the loader go on.
-  A failed save keeps the launcher open. No settings are written per frame.
+  saved. Starting game..." for 0.4 s with the controls disabled, closes the launcher window and lets the loader go on
+  (with Allow overlay programs on, Windows: starts the game process, see Architecture). A failed save, or a game
+  process that cannot be created, keeps the launcher open. No settings are written per frame.
 - The window placement is saved about half a second after a move or resize, and when the launcher closes.
 
 ## Settings
@@ -172,6 +182,7 @@ use the same defaults).
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
+| `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
 | `cheat_movement_speed_2x` (old) | 1, 0 | 0 | read only when `cheat_movement_speed` is missing: 1 means 2x |
@@ -290,6 +301,11 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   `launcher/game_patches.h`, `launcher/prompts/arachnophobia-spider.dcpx`) applied when toggled, in the background, and
   reapplied after a reinstall. An archive has one undo record, so the prompts and this patch are applied together:
   changing either reverts what the other left and writes both again.
+- **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
+  recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
+  separate process from the launcher (see Architecture), so these tools attach to a clean game process. Off keeps the
+  usual start in the launcher's process. Neither setting filters Vulkan layers or blocks any program; a
+  `VK_LOADER_LAYERS_DISABLE` set in the environment reaches the game as it is.
 
 No skip-intro or frame rate limit.
 
@@ -379,7 +395,12 @@ window is centred on the primary display.
 ## Logging
 
 The launcher prints `Launcher: ...` lines (shown or skipped and why, game file state and hashes, settings path, settings
-saved, install request, controller prompts installed and switched, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`. The game window logs
+saved, install request, controller prompts installed and switched, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`.
+`Overlay compatibility: original game process` or `separate game process` says where the game ran. A separate game
+process appends to the same log after `Launcher: the game process continues this log`, starting with its own `[run]`
+lines and `Startup: game-only child process`; a session is still one file. On Windows the log also lists the DLLs
+outside the Windows folder that the game process had at its start (separate process only) and the ones loaded before its
+first frame (`Modules: ...`), and the Vulkan layers that are installed. The game window logs
 `Window: display ... VSync ... frame rate in title ...`.
 
 **Detailed logging** (About, Diagnostics) is on by default and keeps that log after every session. Turned off, a run
