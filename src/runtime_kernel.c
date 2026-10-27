@@ -168,7 +168,8 @@ static ABI __attribute__((noreturn)) void hard_exit(int status) {
 static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t argument) {
     fprintf(stderr,"STOP: guest raised debug exception code=0x%x argument=0x%llx\n",code,(unsigned long long)argument);
     runtime_report();
-    exit(23);
+    runtime_log_flush();
+    _exit(23); /* GPU/guest workers are live: exit() would destruct their state under them. */
 }
 /* The process was started without arguments other than its own name. */
 static const char *guest_argv[]={"eboot.bin",NULL};
@@ -195,7 +196,8 @@ static ABI void pthread_cxa_finalize(void *dso) { (void)dso; }
 static ABI __attribute__((noreturn)) void unwind_resume(void) {
     fputs("STOP: guest C++ exception unwinding (sigreturn/__Ux86_64_setcontext) is not supported\n",stderr);
     runtime_report();
-    exit(23);
+    runtime_log_flush();
+    _exit(23); /* GPU/guest workers are live: exit() would destruct their state under them. */
 }
 static ABI int32_t print_backtrace(void) {
     fputs("Runtime: guest requested a backtrace (not available)\n",stderr);

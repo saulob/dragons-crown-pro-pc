@@ -78,6 +78,13 @@ set_source_files_properties(src/runtime_font.c PROPERTIES
 
 if (WIN32)
     enable_language(RC)
+    # Windows sparse-section commitment, direct aliasing, protection and pool regressions.
+    add_executable(dcp-memory-windows-tests EXCLUDE_FROM_ALL tests/memory_windows_tests.c)
+    target_include_directories(dcp-memory-windows-tests PRIVATE src)
+    target_compile_definitions(dcp-memory-windows-tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_compile_options(dcp-memory-windows-tests PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(dcp-memory-windows-tests PRIVATE onecore -pthread)
+    target_link_options(dcp-memory-windows-tests PRIVATE -Wl,--disable-high-entropy-va)
     # Relink when the application icon, the manifest or the version changes.
     set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
