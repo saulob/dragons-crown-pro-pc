@@ -112,6 +112,27 @@ __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
 #endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
+static void log_cpu(void) {
+    char name[64], sets[96];
+    const IsaHostFeatures host=isa_host_features();
+    isa_host_name(name,sizeof(name));
+    printf("CPU: %s\n",name);
+    if (isa_missing_sets(host,1,sets,sizeof(sets))) printf("CPU: emulating %s\n",sets);
+    if (isa_missing_sets(host,0,sets,sizeof(sets))) printf("CPU: missing %s, which cannot be emulated\n",sets);
+}
+/* A DcpGraphicsCheck for the processor, which runs the game's PS4 (Jaguar) code directly. */
+static int cpu_usable(char *cause, size_t cause_size, char *advice, size_t advice_size) {
+    char missing[96];
+    if (!isa_missing_sets(isa_host_features(),0,missing,sizeof(missing))) return 1;
+    snprintf(cause,cause_size,"This processor lacks %s, which the game's PS4 code needs.",missing);
+    snprintf(advice,advice_size,"The game needs an Intel Core 4th generation (Haswell), AMD FX or newer processor.");
+    return 0;
+}
+#ifndef _WIN32
+static int system_usable(char *cause, size_t cause_size, char *advice, size_t advice_size) {
+    return cpu_usable(cause,cause_size,advice,advice_size) && dcp_check_vulkan(cause,cause_size,advice,advice_size);
+}
+#endif
 #ifdef _WIN32
 static void describe_address(char *out, size_t size, uintptr_t address) {
     HMODULE module=NULL;
@@ -151,6 +172,15 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     else
         fprintf(stderr,"Fault: exception 0x%08lx at %s (thread %lu)\n",record->ExceptionCode,where,GetCurrentThreadId());
     describe_module_path((uintptr_t)c->Rip);
+    if (record->ExceptionCode==EXCEPTION_ILLEGAL_INSTRUCTION) {
+        unsigned char bytes[16];
+        SIZE_T got=0;
+        if (ReadProcessMemory(GetCurrentProcess(),(void *)c->Rip,bytes,sizeof(bytes),&got) && got==sizeof(bytes)) {
+            char hex[sizeof(bytes)*3+1];
+            for (size_t i=0;i<sizeof(bytes);++i) snprintf(hex+3*i,4,"%02x ",bytes[i]);
+            fprintf(stderr,"  DEBUG_SAULO instruction bytes: %s\n",hex);
+        }
+    }
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
     if (gpu_enabled) dcpgpu_dump_guest_writes(info);
@@ -177,6 +207,18 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     TerminateProcess(GetCurrentProcess(),3);
     return EXCEPTION_CONTINUE_SEARCH;
 }
+/* DEBUG_SAULO: the first emulated instruction, then a running count every 2^20. */
+static void debug_saulo_isa_emulated(uintptr_t rip) {
+    static long long count;
+    static ULONGLONG first;
+    const long long n=__atomic_add_fetch(&count,1,__ATOMIC_RELAXED);
+    if (n==1) {
+        first=GetTickCount64();
+        printf("DEBUG_SAULO ISA: first emulated instruction at guest offset 0x%" PRIxPTR "\n",rip-(uintptr_t)image);
+    } else if (!(n&((1<<20)-1)))
+        printf("DEBUG_SAULO ISA: %lld emulated instructions in %.1f s, latest at guest offset 0x%" PRIxPTR "\n",
+               n,(double)(GetTickCount64()-first)/1000.0,rip-(uintptr_t)image);
+}
 static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
     DWORD code=record->ExceptionCode;
@@ -197,11 +239,17 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
         }
     }
     if (code==EXCEPTION_ILLEGAL_INSTRUCTION && image && (uintptr_t)info->ContextRecord->Rip-(uintptr_t)image<0x20000000) {
-        /* The game's code uses MOVBE; hosts without it (Sandy/Ivy Bridge, some VMs) trap. */
+        /* Jaguar's MOVBE and BMI1 trap on hosts without them; cpu_usable refuses the sets that cannot be emulated. */
         CONTEXT *c=info->ContextRecord;
         _Static_assert(offsetof(CONTEXT,R15)-offsetof(CONTEXT,Rax)==15*sizeof(DWORD64),"CONTEXT register order");
-        size_t length=isa_emulate_movbe((const uint8_t *)(uintptr_t)c->Rip,c->Rip,&c->Rax);
-        if (length) { c->Rip+=length; return EXCEPTION_CONTINUE_EXECUTION; }
+        uint64_t flags=c->EFlags;
+        size_t length=isa_emulate((const uint8_t *)(uintptr_t)c->Rip,c->Rip,&c->Rax,&flags);
+        if (length) {
+            debug_saulo_isa_emulated(c->Rip);
+            c->EFlags=(DWORD)flags;
+            c->Rip+=length;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
     }
     if (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_ILLEGAL_INSTRUCTION || code==EXCEPTION_PRIV_INSTRUCTION ||
         code==EXCEPTION_STACK_OVERFLOW || code==EXCEPTION_INT_DIVIDE_BY_ZERO || code==EXCEPTION_DATATYPE_MISALIGNMENT) {
@@ -255,10 +303,11 @@ static void fault(int sig, siginfo_t *info, void *context) {
         ucontext_t *state = context;
         uint64_t gpr[16];
         for (int i = 0; i < 16; ++i) gpr[i] = (uint64_t)state->uc_mcontext.gregs[order[i]];
-        uint64_t at = (uint64_t)state->uc_mcontext.gregs[REG_RIP];
-        size_t length = at - (uintptr_t)image < 0x20000000 ? isa_emulate_movbe((const uint8_t *)(uintptr_t)at, at, gpr) : 0;
+        uint64_t at = (uint64_t)state->uc_mcontext.gregs[REG_RIP], flags = (uint64_t)state->uc_mcontext.gregs[REG_EFL];
+        size_t length = at - (uintptr_t)image < 0x20000000 ? isa_emulate((const uint8_t *)(uintptr_t)at, at, gpr, &flags) : 0;
         if (length) {
             for (int i = 0; i < 16; ++i) state->uc_mcontext.gregs[order[i]] = (greg_t)gpr[i];
+            state->uc_mcontext.gregs[REG_EFL] = (greg_t)flags;
             state->uc_mcontext.gregs[REG_RIP] = (greg_t)(at + length);
             return;
         }
@@ -467,14 +516,14 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
         module_diagnostics_report_startup();
 #endif
-    }
+    } else log_cpu();
     if (!cpu_only && !check_imports && !game_child) {
-        DcpGraphicsCheck check_graphics=NULL;
+        DcpGraphicsCheck check_graphics=cpu_usable;
         int game_process=0;
 #ifdef _WIN32
         game_process=1;
 #else
-        check_graphics=dcp_check_vulkan;
+        check_graphics=system_usable;
 #endif
         DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics,
                                     game_process,log_started ? log_path : NULL};
@@ -492,6 +541,13 @@ int main(int argc, char **argv) {
                 exit(1);
             }
             exit(0);
+        }
+    }
+    if (!check_imports) {
+        char cause[160], advice[160], message[330];
+        if (!cpu_usable(cause,sizeof(cause),advice,sizeof(advice))) {
+            snprintf(message,sizeof(message),"%s %s",cause,advice);
+            fail(message);
         }
     }
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");

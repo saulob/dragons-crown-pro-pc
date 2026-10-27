@@ -123,7 +123,7 @@ if (WIN32)
     target_compile_options(dcp-log-tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
-# Focused tests of the MOVBE emulation used when the host CPU lacks the instruction.
+# Focused tests of the MOVBE and BMI1 emulation used when the host CPU lacks the instructions.
 add_executable(dcp-isa-tests EXCLUDE_FROM_ALL tests/isa_tests.c src/isa_emulate.c)
 target_include_directories(dcp-isa-tests PRIVATE src)
 target_compile_options(dcp-isa-tests PRIVATE -Wall -Wextra -Werror)

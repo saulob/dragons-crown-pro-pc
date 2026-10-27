@@ -10,7 +10,8 @@
 extern "C" {
 #endif
 
-/* 1 when the graphics system can run the game. Otherwise 0, with what is wrong and what to do about it in the buffers. */
+/* 1 when the processor and graphics system can run the game. Otherwise 0, with what is wrong and what to do about it in
+ * the buffers. */
 typedef int (*DcpGraphicsCheck)(char *cause, size_t cause_size, char *advice, size_t advice_size);
 
 typedef struct {

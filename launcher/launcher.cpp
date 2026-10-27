@@ -490,7 +490,7 @@ private:
             return true;
         }
         problem_.Show(cause, advice);
-        Log("graphics unavailable, staying open");
+        Log("this system cannot run the game, staying open");
         return false;
     }
 
