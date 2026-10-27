@@ -4,9 +4,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <limits>
+#include <string>
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
+#include "dcp_present.h"
 #include "dcp_settings.h"
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
@@ -31,8 +33,13 @@ static constexpr vk::SurfaceFormatKHR SURFACE_FORMAT_HDR = {
     .colorSpace = vk::ColorSpaceKHR::eHdr10St2084EXT,
 };
 
+static_assert(vk::PresentModeKHR(DcpPresent::Mode::Immediate) == vk::PresentModeKHR::eImmediate &&
+              vk::PresentModeKHR(DcpPresent::Mode::Mailbox) == vk::PresentModeKHR::eMailbox &&
+              vk::PresentModeKHR(DcpPresent::Mode::Fifo) == vk::PresentModeKHR::eFifo);
+
 Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& window_)
-    : instance{instance_}, window{window_}, surface{CreateSurface(instance.GetInstance(), window)} {
+    : instance{instance_}, window{window_}, surface{CreateSurface(instance.GetInstance(), window)},
+      gamescope{DcpPresent::GamescopeSession()} {
     FindPresentFormat();
     FindPresentMode();
 
@@ -92,6 +99,21 @@ void Swapchain::Create(u32 width_, u32 height_) {
 
     SetupImages();
     RefreshSemaphores();
+    frame_index = 0; // the semaphores are new and sized for the returned image count
+    LogImages();
+}
+
+// Once per change of the image counts or the present mode: a window resize alone is not logged again.
+void Swapchain::LogImages() {
+    char counts[192];
+    std::snprintf(counts, sizeof(counts), "requested %u, got %u (surface min %u, max %u), %s, %s", requested_images,
+                  image_count, surface_min_images, surface_max_images, vk::to_string(present_mode).c_str(),
+                  gamescope ? "Gamescope low-latency count" : "default count");
+    if (logged_images == counts) {
+        return;
+    }
+    logged_images = counts;
+    std::printf("Swapchain: images %s, extent %ux%u\n", counts, extent.width, extent.height);
 }
 
 void Swapchain::Recreate(u32 width_, u32 height_) {
@@ -208,14 +230,18 @@ void Swapchain::FindPresentMode() {
         return;
     }
 
-    // VSync on is Fifo (no tearing, waits for the display); off is Mailbox when the driver has it,
-    // else Immediate (tearing allowed), else Fifo.
+    if (!logged_modes) {
+        logged_modes = true;
+        std::string names;
+        for (const vk::PresentModeKHR mode : modes) {
+            names += (names.empty() ? "" : ", ") + vk::to_string(mode);
+        }
+        std::printf("Swapchain: surface present modes %s\n", names.c_str());
+    }
     vsync = DcpSettings::Get().vsync;
     const auto has = [&](vk::PresentModeKHR mode) { return std::ranges::find(modes, mode) != modes.cend(); };
-    present_mode = vsync ? vk::PresentModeKHR::eFifo
-                   : has(vk::PresentModeKHR::eMailbox) ? vk::PresentModeKHR::eMailbox
-                   : has(vk::PresentModeKHR::eImmediate) ? vk::PresentModeKHR::eImmediate
-                                                         : vk::PresentModeKHR::eFifo;
+    present_mode = vk::PresentModeKHR(
+        DcpPresent::ChooseMode(vsync, has(vk::PresentModeKHR::eMailbox), has(vk::PresentModeKHR::eImmediate)));
     std::printf("Swapchain: VSync %s (%s)\n", vsync ? "on" : "off", vk::to_string(present_mode).c_str());
 }
 
@@ -242,11 +268,10 @@ void Swapchain::SetSurfaceProperties() {
                                  std::min(capabilities.maxImageExtent.height, height));
     }
 
-    // Select number of images in swap chain, we prefer one buffer in the background to work on
-    image_count = capabilities.minImageCount + 1;
-    if (capabilities.maxImageCount > 0) {
-        image_count = std::min(image_count, capabilities.maxImageCount);
-    }
+    surface_min_images = capabilities.minImageCount;
+    surface_max_images = capabilities.maxImageCount;
+    requested_images = DcpPresent::ImageCount(surface_min_images, surface_max_images, gamescope);
+    image_count = requested_images;
 
     // Prefer identity transform if possible
     transform = vk::SurfaceTransformFlagBitsKHR::eIdentity;

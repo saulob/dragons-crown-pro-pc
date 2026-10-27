@@ -13,6 +13,7 @@
 #include <boost/asio/io_context.hpp>
 #include "common/polyfill_thread.h"
 #include "dcp_copy_pool.h"
+#include "dcp_latency_trace.h"
 #include "dcp_overlay.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
@@ -303,6 +304,14 @@ ScreenshotRequests ConsumeScreenshotRequests() { return {}; }
 
 extern "C" int dcpgpu_overlay_captures_input(void) {
     return DcpOverlay::CapturesInput() ? 1 : 0;
+}
+
+extern "C" int dcpgpu_latency_trace_enabled(void) {
+    return DcpLatencyTrace::enabled ? 1 : 0;
+}
+
+extern "C" uint64_t dcpgpu_latency_press_ns(void) {
+    return DcpLatencyTrace::press_ns.load(std::memory_order_relaxed);
 }
 
 extern "C" int dcpgpu_text_input_begin(const char* initial, const char* prompt) {

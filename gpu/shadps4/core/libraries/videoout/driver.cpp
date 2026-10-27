@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <vector>
 #include <chrono>
@@ -15,6 +16,8 @@
 #include <sys/resource.h>
 #endif
 #include "common/assert.h"
+#include "dcp_latency_trace.h"
+#include "dcp_present.h"
 #include "dcp_toggles.h"
 #include "dcp_overlay.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -44,6 +47,31 @@ extern std::atomic<u32> g_dcp_pending_draws;
 } // namespace Vulkan
 
 namespace Libraries::VideoOut {
+
+static std::atomic<u32> g_trace_flip_waits;
+
+// Swap thread.
+static void TracePresent(std::chrono::steady_clock::time_point submitted) {
+    using Clock = std::chrono::steady_clock;
+    static Clock::time_point window_start = Clock::now();
+    static double sum_ms, max_ms;
+    static u32 flips;
+    const auto now = Clock::now();
+    const double ms = std::chrono::duration<double, std::milli>(now - submitted).count();
+    sum_ms += ms;
+    max_ms = std::max(max_ms, ms);
+    ++flips;
+    const double window = std::chrono::duration<double>(now - window_start).count();
+    if (window < 5.0) {
+        return;
+    }
+    std::printf("Latency trace: present: flip submitted -> presented avg %.1f ms, max %.1f ms, %.1f flips/s; "
+                "%u flips waited for the presenter\n",
+                sum_ms / flips, max_ms, flips / window, g_trace_flip_waits.exchange(0));
+    window_start = now;
+    sum_ms = max_ms = 0;
+    flips = 0;
+}
 
 constexpr static bool Is32BppPixelFormat(PixelFormat format) {
     switch (format) {
@@ -90,6 +118,31 @@ void VideoOutDriver::RunPresenter(std::function<void()> work, bool if_idle) {
         swap_queue.push_back(std::move(work));
     }
     swap_cv.notify_one();
+}
+
+// Gamescope only: its frame limit (30 FPS) runs below the vblank and must delay the guest's flips, as presenting on
+// the vblank thread did; otherwise frames pile up in the swap queue.
+bool VideoOutDriver::FlipWaitsForPresenter() {
+    if (!DcpPresent::GamescopeSession()) {
+        return false;
+    }
+    {
+        std::scoped_lock lock{swap_mutex};
+        if (swap_queue.empty()) {
+            return false;
+        }
+    }
+    std::scoped_lock lock{mutex};
+    if (!requests.empty()) {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            std::printf("VideoOut: a flip waited for the previous present (first time; "
+                        "DCP_INPUT_LATENCY_TRACE=1 counts them)\n");
+        }
+        g_trace_flip_waits.fetch_add(1, std::memory_order_relaxed);
+    }
+    return true;
 }
 
 void VideoOutDriver::SwapThread(std::stop_token token) {
@@ -298,9 +351,12 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
 
 void VideoOutDriver::Flip(const Request& req) {
     // Update HDR status before presenting, then present the frame on the swap thread.
-    RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
+    RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr, submitted = req.submitted] {
         presenter->SetHDR(hdr);
         presenter->Present(frame);
+        if (DcpLatencyTrace::enabled) {
+            TracePresent(submitted);
+        }
     });
     Vulkan::FrameCapture::OnFlip(req.index >= 0 ? req.port->buffer_slots[req.index].address_left
                                                 : 0);
@@ -618,6 +674,7 @@ bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
 }
 
 void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop) {
+    const auto submitted = std::chrono::steady_clock::now();
     Vulkan::Frame* frame;
     if (index == -1) {
         frame = presenter->PrepareBlankFrame(false);
@@ -636,6 +693,7 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
             .flip_arg = flip_arg,
             .index = index,
             .eop = is_eop,
+            .submitted = submitted,
         });
     }
 }
@@ -649,6 +707,9 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
     Common::AccurateTimer timer{vblank_period};
     std::printf("VideoOut: vblank %u Hz\n", EmulatorSettings.GetVblankFrequency());
+    if (DcpLatencyTrace::enabled) {
+        std::printf("Latency trace: on (DCP_INPUT_LATENCY_TRACE=1), pad and present lines every 5 s\n");
+    }
 
     const auto receive_request = [this] -> Request {
         std::scoped_lock lk{mutex};
@@ -671,7 +732,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
         // Check if it's time to take a request.
         auto& vblank_status = main_port.vblank_status;
-        if (vblank_status.count % (main_port.flip_rate + 1) == 0) {
+        if (vblank_status.count % (main_port.flip_rate + 1) == 0 && !FlipWaitsForPresenter()) {
             const auto request = receive_request();
             if (!request) {
                 // The save list, the menu and the text entry stay live while the game draws nothing.

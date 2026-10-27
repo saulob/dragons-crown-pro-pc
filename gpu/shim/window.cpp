@@ -12,6 +12,8 @@
 #include "sdl_window.h"
 #include "dcp_overlay.h"
 #include "dcp_graphics.h"
+#include "dcp_latency_trace.h"
+#include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
 
@@ -29,6 +31,12 @@ namespace {
     std::fflush(stderr);
     runtime_log_flush();
     std::_Exit(1);
+}
+
+void TracePress(const SDL_Event& event) {
+    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)) {
+        DcpLatencyTrace::press_ns.store(event.common.timestamp, std::memory_order_relaxed);
+    }
 }
 
 } // namespace
@@ -109,6 +117,12 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
                 display ? int(display - displays.data()) + 1 : 0, displays.size(), display_name.c_str(),
                 window_width, window_height, settings.vsync ? "on" : "off", settings.show_fps_title ? "on" : "off",
                 settings.show_resolution_title ? "on" : "off");
+#ifndef _WIN32
+    const SDL_DisplayMode* current = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
+    std::printf("Session: %s; display refresh %.2f Hz\n",
+                DcpPresent::DescribeSession(DcpPresent::GamescopeSession(), std::getenv).c_str(),
+                current ? current->refresh_rate : 0.0f);
+#endif
 }
 
 // Borderless is a desktop-sized fullscreen window, without a display mode change. Window thread only (SDL); the
@@ -269,6 +283,9 @@ bool WindowSDL::PollEvents() {
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (DcpLatencyTrace::enabled) {
+            TracePress(event);
+        }
         const bool ui = DcpOverlay::CapturesInput();
         const bool controller_activity = TrackControllerEvent(event);
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <deque>
 #include <functional>
 
@@ -102,6 +103,7 @@ private:
         s64 flip_arg;
         s32 index;
         bool eop;
+        std::chrono::steady_clock::time_point submitted;
 
         operator bool() const noexcept {
             return frame != nullptr;
@@ -118,6 +120,7 @@ private:
     /// vblank events on the vblank thread.
     void SwapThread(std::stop_token token);
     void RunPresenter(std::function<void()> work, bool if_idle = false);
+    bool FlipWaitsForPresenter();
 
     std::mutex swap_mutex;
     std::condition_variable_any swap_cv;

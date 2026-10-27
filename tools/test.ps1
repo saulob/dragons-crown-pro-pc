@@ -18,7 +18,7 @@ $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
 
 Write-Step 'Building the launcher tests'
-& ninja -C $buildDir dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-savedata-tests dcp-voice-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests
+& ninja -C $buildDir dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-savedata-tests dcp-voice-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 
 Write-Step 'Running the launcher tests'
@@ -47,6 +47,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the window fit tests'
 & (Join-Path $buildDir 'bin\dcp-window-tests.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Step 'Running the present tests (swapchain images, present mode, flip pacing)'
+& (Join-Path $buildDir 'bin\dcp-present-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the save-data tests (mounts, Japanese startup save hook)'
