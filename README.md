@@ -212,6 +212,14 @@ bash tools/package-linux.sh       # dist/DragonsCrownProPC-v<version>-x86_64.App
 
 The technical notes are in [docs](docs): [launcher and settings](docs/LAUNCHER.md), [Linux port](docs/LINUX.md), [graphics](docs/GRAPHICS.md), [first boot](docs/FIRST_BOOT.md), [bootstrap](docs/BOOTSTRAP.md) and [references](docs/REFERENCES.md).
 
+## Sponsoring
+
+Dragon's Crown Pro PC is maintained and developed in my free time. If you enjoy the project or find it useful, consider supporting its continued development.
+
+<p align="center">
+<a href="https://github.com/sponsors/saulob" target="_blank"><img src="https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></a>
+</p>
+
 ## Credits
 
 - Dragon's Crown Pro by Vanillaware, published by Atlus (2018). This is an unofficial fan-made PC port. It is not affiliated with or endorsed by Vanillaware, Atlus, SEGA, Sony Interactive Entertainment or any other rights holder, and it contains none of their files.
