@@ -4,6 +4,7 @@
 #include <xxhash.h>
 #include "video_core/amdgpu/liverpool.h"
 
+#include "dcp_amd_water_fix.h"
 #include "dcp_toggles.h"
 #include "common/assert.h"
 #include "common/debug.h"
@@ -14,6 +15,7 @@
 #include "core/memory.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
+#include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -1096,12 +1098,35 @@ ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc
     // If there is a stencil attachment, link depth and stencil.
     if (desc.info.stencil_addr != 0) {
         ImageId stencil_id{};
-        ForEachImageInRegion(desc.info.stencil_addr, desc.info.stencil_size,
-                             [&](ImageId image_id, Image& image) {
-                                 if (image.info.guest_address == desc.info.stencil_addr) {
-                                     stencil_id = image_id;
-                                 }
-                             });
+        const bool water_fix = DcpAmdWaterFix::State().On();
+        const u64 depth_uid = image.image_uid;
+        const vk::Format depth_format = image.info.pixel_format;
+        ForEachImageInRegion(
+            desc.info.stencil_addr, desc.info.stencil_size, [&](ImageId image_id, Image& image) {
+                if (image.info.guest_address != desc.info.stencil_addr) {
+                    return;
+                }
+                const bool stencil_format =
+                    image.info.pixel_format == vk::Format::eUndefined ||
+                    Vulkan::LiverpoolToVK::IsFormatStencilCompatible(image.info.pixel_format);
+                const bool link = DcpAmdWaterFix::FollowsStencilLink(water_fix, stencil_format);
+                // DEBUG_SAULO: issue #32.
+                if (!stencil_format && DcpAmdWaterFix::Hazards().Record(
+                                           DcpAmdWaterFix::Hazard::StencilLink, image.image_uid)) {
+                    std::printf("DEBUG_SAULO AMD water fix: stencil_link color image %llu %#llx "
+                                "%s %ux%u at the stencil of depth image %llu %s; %s\n",
+                                (unsigned long long)image.image_uid,
+                                (unsigned long long)image.info.guest_address,
+                                vk::to_string(image.info.pixel_format).c_str(),
+                                image.info.size.width, image.info.size.height,
+                                (unsigned long long)depth_uid, vk::to_string(depth_format).c_str(),
+                                link ? "linked (fix off)" : "not linked");
+                    std::fflush(stdout);
+                }
+                if (link) {
+                    stencil_id = image_id;
+                }
+            });
         if (!stencil_id) {
             ImageInfo info{};
             info.guest_address = desc.info.stencil_addr;

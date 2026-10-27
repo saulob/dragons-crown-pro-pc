@@ -6,6 +6,7 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include "common/assert.h"
+#include "dcp_amd_water_fix.h"
 #include "dcp_displays.h"
 #include "dcp_window_fit.h"
 #include "common/logging/log.h"
@@ -37,6 +38,17 @@ void TracePress(const SDL_Event& event) {
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)) {
         DcpLatencyTrace::press_ns.store(event.common.timestamp, std::memory_order_relaxed);
     }
+}
+
+void ToggleAmdWaterFix(bool repeat) {
+    auto& fix = DcpAmdWaterFix::State();
+    if (!fix.Press(repeat)) {
+        return;
+    }
+    const char* state = fix.On() ? "ON" : "OFF";
+    std::printf("DEBUG_SAULO AMD water fix: %s (%s)\n", state, DcpAmdWaterFix::Hazards().Summary().c_str());
+    std::fflush(stdout);
+    DcpOverlay::ShowNotice(std::string("AMD Water Fix: ") + state);
 }
 
 } // namespace
@@ -339,10 +351,14 @@ bool WindowSDL::PollEvents() {
             break;
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
-            const bool host_shortcut = window_shortcut || event.key.scancode == DcpSettings::Get().menu_key ||
+            const bool water_fix_key = event.key.scancode == SDL_SCANCODE_F3;
+            const bool host_shortcut = window_shortcut || water_fix_key ||
+                                       event.key.scancode == DcpSettings::Get().menu_key ||
                                        event.key.scancode == SDL_SCANCODE_INSERT;
             if (window_shortcut && !event.key.repeat) {
                 ToggleBorderless();
+            } else if (water_fix_key) {
+                ToggleAmdWaterFix(event.key.repeat);
             } else if (DcpCursor::IsGameplayKey(event.key.repeat, host_shortcut) && !ui) {
                 cursor.KeyboardActivity();
             }
