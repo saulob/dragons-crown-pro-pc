@@ -63,6 +63,7 @@ std::atomic<bool> cheat_open{false};
 dcp::cheats::CloseGate cheat_close;
 std::bitset<ImGuiKey_NamedKey_COUNT> cheat_pressed;
 bool cheat_focused = false;
+int cheat_selected_row = -1; // the row the list last scrolled to show
 std::atomic<float> display_scale{1.0f};
 bool r3_down = false, l2_down = false;
 std::atomic<bool> loading{false};
@@ -512,6 +513,7 @@ void CloseCheatMenu() {
     cheat_close = {};
     cheat_pressed.reset();
     cheat_focused = false;
+    cheat_selected_row = -1;
     ImGuiIO& io = ImGui::GetIO();
     io.ClearInputKeys();
     io.MouseDrawCursor = menu_open;
@@ -585,8 +587,24 @@ void CheatMenu() {
         ImGui::BeginChild("##cheat_rows", ImVec2(0.0f, child_height), ImGuiChildFlags_None, child_flags);
         // The child does not inherit the outer window's font scale.
         ImGui::SetWindowFontScale(scale);
+        int focused_row = -1;
+        ImVec2 focused_min{}, focused_max{};
         for (size_t i = 0; i < dcp::cheats::kMenuRows.size(); ++i) {
             DrawCheatRow(dcp::cheats::kMenuRows[i], i, scale, accent, focus, dim);
+            if (ImGui::IsItemFocused()) {
+                focused_row = int(i);
+                focused_min = ImGui::GetItemRectMin();
+                focused_max = ImGui::GetItemRectMax();
+            }
+        }
+        if (focused_row >= 0 && focused_row != cheat_selected_row) {
+            cheat_selected_row = focused_row;
+            const ImDrawList* rows = ImGui::GetWindowDrawList();
+            const float delta = dcp::cheats::MenuScrollToShowRow(
+                focused_min.y, focused_max.y, rows->GetClipRectMin().y, rows->GetClipRectMax().y);
+            if (delta != 0.0f) {
+                ImGui::SetScrollY(ImGui::GetScrollY() + delta);
+            }
         }
         ImGui::EndChild();
         ImGui::Separator();
@@ -611,6 +629,7 @@ void ToggleCheatMenu() {
     cheat_close = {};
     cheat_pressed.reset();
     cheat_focused = false;
+    cheat_selected_row = -1;
     ImGui::GetIO().MouseDrawCursor = true;
 }
 

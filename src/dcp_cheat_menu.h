@@ -72,6 +72,18 @@ constexpr bool MenuNeedsScrollbar(float body_height, float child_height) {
     return body_height > child_height + kMenuScrollbarTolerance;
 }
 
+// The least scroll movement that keeps [row_top, row_bottom] inside [view_top, view_bottom]: negative scrolls the
+// list up, positive scrolls it down, and zero leaves a row that is already fully visible alone.
+constexpr float MenuScrollToShowRow(float row_top, float row_bottom, float view_top, float view_bottom) {
+    if (row_top < view_top) {
+        return row_top - view_top;
+    }
+    if (row_bottom > view_bottom) {
+        return row_bottom - view_bottom;
+    }
+    return 0.0f;
+}
+
 // A button that is never reported released (a controller unplugged as the menu closes) cannot block the game forever.
 inline constexpr double kReleaseTimeoutSeconds = 1.0;
 
