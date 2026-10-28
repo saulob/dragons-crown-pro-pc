@@ -938,7 +938,7 @@ void TestDefaultsAgree() {
     CHECK(launcher_default(kSharpenStrengthKey) == std::to_string(game.rcas_strength.load()));
     CHECK(launcher_default(kAntiAliasingKey) == flag(game.smaa));
     CHECK(launcher_default(kAnisotropyKey) == std::to_string(game.anisotropy.load()));
-    CHECK(launcher_default(kGraphicsCardKey) == "automatic" && game.graphics_card.empty());
+    CHECK(launcher_default(kGraphicsCardKey).empty() && game.graphics_card.empty());
     CHECK(launcher_default(kMonitorKey) == std::to_string(game.monitor.load()));
     CHECK(launcher_default(kShowFpsTitleKey) == flag(game.show_fps_title));
     CHECK(launcher_default(kShowResolutionTitleKey) == flag(game.show_resolution_title));
@@ -2010,45 +2010,65 @@ void TestGraphicsCard(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "gpu" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    const std::vector<std::string> names = {"NVIDIA GeForce RTX 4070", "", "Intel(R) UHD Graphics 730"};
-    CHECK(DcpGraphics::FindGpuByName(names, "") == -1);
-    CHECK(DcpGraphics::FindGpuByName(names, "automatic") == -1);
-    CHECK(DcpGraphics::FindGpuByName(names, "NVIDIA GeForce RTX 4070") == 0);
-    CHECK(DcpGraphics::FindGpuByName(names, "Intel(R) UHD Graphics 730") == 2);
-    CHECK(DcpGraphics::FindGpuByName(names, "Intel(R) UHD Graphics 7") == -1); // exact names only
-    CHECK(DcpGraphics::FindGpuByName(names, "AMD Radeon RX 7800 XT") == -1);   // removed card: Automatic
-    CHECK(DcpGraphics::FindGpuByName({"", "Intel(R) UHD Graphics 730"}, "") == -1);
 
+    const std::vector<std::string> devices = {"NVIDIA GeForce RTX 4070", "", "Intel(R) UHD Graphics 730"};
+    const std::vector<std::string> choices = DcpGraphics::GpuChoices(devices);
+    CHECK(choices.size() == 2);
+    CHECK(choices[0] == "NVIDIA GeForce RTX 4070" && choices[1] == "Intel(R) UHD Graphics 730");
+    for (const std::string& choice : choices) {
+        CHECK(choice != "automatic" && choice.find("Automatic") == std::string::npos);
+    }
+    CHECK(DcpGraphics::GpuChoices({}).empty());
+
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "NVIDIA GeForce RTX 4070") == 0);
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "Intel(R) UHD Graphics 730") == 2);
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "Intel(R) UHD Graphics 7") == 0); // exact names only
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "automatic") == 0);                // retired value
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "") == 0);                         // no saved card
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "AMD Radeon RX 7800 XT") == 0);    // removed card
+    CHECK(DcpGraphics::ResolveGpuByName({"", "Intel(R) UHD Graphics 730"}, "") == 1);
+    CHECK(DcpGraphics::ResolveGpuByName({"", ""}, "automatic") == -1);
+
+    // The setting has no hardcoded default: the launcher resolves the first listed card, as the renderer does.
     bool managed = false;
     for (const ManagedSetting& setting : ManagedSettings()) {
-        managed |= setting.key == "graphics_card" && setting.default_value == "automatic";
+        managed |= setting.key == kGraphicsCardKey && setting.default_value.empty();
     }
     CHECK(managed);
-    {
-        LauncherSettings settings(file);
-        CHECK(settings.Get(kGraphicsCardKey, kAutomaticGpu) == "automatic");
-        settings.Set(kGraphicsCardKey, "Intel(R) UHD Graphics 730");
-        CHECK(settings.Save());
-    }
-    CHECK(WrittenValue(ReadAll(file), "graphics_card", "Intel(R) UHD Graphics 730"));
-    CHECK(LauncherSettings(file).Get(kGraphicsCardKey, kAutomaticGpu) == "Intel(R) UHD Graphics 730");
-    {
-        LauncherSettings settings(file);
-        settings.ResetToDefaults();
-        CHECK(settings.Save());
-    }
-    CHECK(WrittenValue(ReadAll(file), "graphics_card", "automatic"));
 
-    const std::string instance = ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_instance.cpp");
-    CHECK(instance.find("FindGpuByName(names, requested)") != std::string::npos);
-    CHECK(instance.find("IsDeviceUsable(physical) ? ") != std::string::npos);
-    CHECK(instance.find("const bool left_is_discrete") != std::string::npos); // the Automatic ranking is intact
-    CHECK(instance.find("IsDeviceUsable(physical));") != std::string::npos); // usable devices rank first
+    const auto resolve_and_save = [&](const std::string& stored) {
+        WriteAll(file, "graphics_card = " + stored + "\n");
+        LauncherSettings settings(file);
+        const int found = DcpGraphics::ResolveGpuByName(choices, settings.Get(kGraphicsCardKey));
+        CHECK(found >= 0);
+        settings.Set(kGraphicsCardKey, choices[found]);
+        CHECK(settings.Save());
+        return ReadAll(file);
+    };
+    const std::string legacy = resolve_and_save("automatic");
+    CHECK(WrittenValue(legacy, kGraphicsCardKey, choices[0]));
+    CHECK(legacy.find("automatic") == std::string::npos);
+    CHECK(WrittenValue(resolve_and_save(""), kGraphicsCardKey, choices[0]));
+    CHECK(WrittenValue(resolve_and_save("NVIDIA GeForce RTX 4070"), kGraphicsCardKey, choices[0]));
+    CHECK(WrittenValue(resolve_and_save("Intel(R) UHD Graphics 730"), kGraphicsCardKey, choices[1]));
+    CHECK(WrittenValue(resolve_and_save("AMD Radeon RX 7800 XT"), kGraphicsCardKey, choices[0]));
+
+    // The launcher offers the real devices alone; the renderer resolves the same stored name.
     const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("\"Automatic\"") == std::string::npos);
+    CHECK(launcher.find("kAutomaticGpu") == std::string::npos);
+    CHECK(launcher.find("Automatic prefers a discrete card") == std::string::npos);
+    CHECK(launcher.find("Automatic: Xbox controllers") != std::string::npos); // unrelated text stays
+    CHECK(launcher.find("DcpGraphics::ResolveGpuByName(gpu_names_") != std::string::npos);
     const size_t monitor = launcher.find("ui.Row(\"Monitor\"");
     const size_t card = launcher.find("ui.Row(\"Graphics card\"");
     const size_t vsync = launcher.find("ui.Toggle(\"VSync\"");
     CHECK(monitor != std::string::npos && monitor < card && card < vsync);
+
+    const std::string instance = ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_instance.cpp");
+    CHECK(instance.find("DcpGraphics::ResolveGpuByName(names, DcpSettings::Get().graphics_card)") != std::string::npos);
+    CHECK(instance.find("GPU: selection Automatic") == std::string::npos);
+    CHECK(instance.find("IsDeviceUsable(physical)") != std::string::npos);
 }
 
 void TestLauncherWanted() {

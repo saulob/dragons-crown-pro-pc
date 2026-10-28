@@ -167,7 +167,7 @@ use the same defaults).
 | `display_mode` | `windowed`, `borderless` | `windowed` | at window creation; live with F11 |
 | `window_width`, `window_height` | pixels | 1920, 1080 | at window creation |
 | `monitor` | 1-based display number | 1 | at window creation |
-| `graphics_card` | `automatic` or an exact Vulkan device name | `automatic` | at start |
+| `graphics_card` | an exact Vulkan device name | the first usable device | at start |
 | `vsync` | 1, 0 | 1 (FIFO) | live |
 | `fsr1` | 1, 0 | 0 | live |
 | `rcas`, `rcas_strength` | 1, 0; 0-100 | 1; 75 | live |
@@ -233,12 +233,11 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   CUSA10454 1.00, CUSA07001 1.00, 1.02 and 1.03 and CUSA10209 1.00, where its code was checked; elsewhere a saved On
   is ignored and the log says why.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
-- **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
+- **Graphics card**: each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
-  name. Automatic is the renderer's own ranking (usable devices first, then API version, discrete before integrated, then
-  device memory). A name
-  that is not there any more, or not usable, falls back to Automatic. The game's log shows `GPU: selection Automatic` or
-  `GPU: requested <name>`, then `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11.
+  name. The first listed device is the default. A name that is not there any more, or not usable, falls back to the first
+  usable device, and the launcher saves that name when you press Play. The game's log shows `GPU: selected <name>`, then
+  `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11.
 - **VSync**: On is FIFO (the stable default). Off uses Mailbox, else Immediate.
 - **Presentation**: Letterbox (the default) or Stretch. It controls how the finished frame fits the window or display when
   their shape differs: Letterbox keeps the frame's aspect ratio with bars, Stretch fills the window and may distort the

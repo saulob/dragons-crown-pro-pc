@@ -134,21 +134,17 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
     LOG_INFO(Render_Vulkan, "Found {} physical devices", num_physical_devices);
 
     if (physical_device_index < 0) {
-        const std::string& requested = DcpSettings::Get().graphics_card;
-        if (requested.empty()) {
-            std::printf("GPU: selection Automatic\n");
-        } else {
-            std::vector<std::string> names;
-            for (const auto& physical : physical_devices) {
-                names.push_back(IsDeviceUsable(physical) ? std::string(physical.getProperties().deviceName.data()) : "");
-            }
-            const int found = DcpGraphics::FindGpuByName(names, requested);
-            if (found >= 0) {
-                std::printf("GPU: requested %s\n", requested.c_str());
-                physical_device_index = found;
-            } else {
-                std::printf("GPU: requested device %s unavailable, falling back to Automatic\n", requested.c_str());
-            }
+        std::vector<std::string> names;
+        names.reserve(physical_devices.size());
+        for (const auto& physical : physical_devices) {
+            names.push_back(IsDeviceUsable(physical)
+                                ? std::string(physical.getProperties().deviceName.data())
+                                : std::string());
+        }
+        const int found = DcpGraphics::ResolveGpuByName(names, DcpSettings::Get().graphics_card);
+        if (found >= 0) {
+            std::printf("GPU: selected %s\n", names[found].c_str());
+            physical_device_index = found;
         }
     }
     if (physical_device_index < 0) {

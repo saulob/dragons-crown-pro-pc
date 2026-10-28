@@ -20,7 +20,7 @@
 - **Native PC port**: the game's own x86-64 code runs directly on the PC. It is not an emulator. Windows is the primary tested platform, and there is an experimental native Linux / Steam Deck AppImage with the same intended feature set. Linux needs no Proton or Wine.
 - **TRG launcher** that installs the game directly from your own `.pkg` file, with no Python or other tools needed, and remembers its window position
 - **Windowed** and **Borderless Fullscreen**, switched with **F11** while playing, with window size and monitor selection
-- **Graphics card selection**: Automatic, or any Vulkan graphics card the renderer can use
+- **Graphics card selection**: any Vulkan graphics card the renderer can use
 - **VSync** on or off
 - **Render resolution** from 480p to 4K (3840×2160), with the game's native 1080p as the default
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4
@@ -119,7 +119,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 - **True Ultrawide** (experimental, Off by default): with 21:9 or 32:9, the game shows more of the world at the sides instead of stretching it, with the same vertical view and proportions as 16:9. Distant background layers fill the whole width; the playfield and the layers that move with it stop where the stage and the playfield end, showing the background behind them. On the town facility pictures (the guilds, the shop, the inn) the character, titles and text keep their 16:9 size and place and only the room behind them is scaled up evenly to fill the sides, while their top and bottom bars, frame lines and dialogue backing reach the frame edges; the route map keeps its 16:9 composition, centred. The HUD and menus stay in their 16:9 layout; fades, the loading and saving fades and the bottom dialogue and narration bands reach the frame edges, other message bands keep their 16:9 width, and the town map fills the width (at 32:9 as far as its markers stay on screen, black beyond). Available on the USA 1.00, Japanese 1.00, 1.02 and 1.03 and Asia and Hong Kong 1.00 builds.
 - **Presentation**: Letterbox (the default) fits the finished frame into the window with its aspect ratio kept and bars where the shapes differ; Stretch fills the whole window with it. It applies in Windowed and Borderless Fullscreen and does not change the Aspect Ratio or the render resolution.
 - In Windowed and Borderless Fullscreen, mouse movement, clicks and the wheel show the cursor; keyboard or controller input hides it. Mouse-driven menus and dialogs keep it visible.
-- **Graphics card**: Automatic or a specific Vulkan graphics card. A card that is no longer present falls back to Automatic.
+- **Graphics card**: the Vulkan graphics card that renders the game, chosen from the cards the renderer can use. A card that is no longer present falls back to the first available card.
 - **VSync** on or off
 - **Upscaling**: AMD FSR 1 enlarges the picture when the window is bigger than the render resolution
 - **Sharpening** (AMD RCAS) and **Sharpening strength**

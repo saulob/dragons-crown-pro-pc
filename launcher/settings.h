@@ -30,7 +30,6 @@ inline constexpr char kDefaultAspectRatio[] = "16:9";
 // Widens the scene's horizontal view (Hor+) for the aspect ratios wider than 16:9 (dcp_true_ultrawide_scale).
 inline constexpr char kTrueUltrawideKey[] = "true_ultrawide";
 inline constexpr char kGraphicsCardKey[] = "graphics_card";
-inline constexpr char kAutomaticGpu[] = "automatic";
 inline constexpr char kAntiAliasingKey[] = "smaa";
 inline constexpr char kAnisotropyKey[] = "anisotropy";
 inline constexpr char kTextLanguageKey[] = "text_language";

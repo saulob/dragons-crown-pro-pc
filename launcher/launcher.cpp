@@ -28,6 +28,7 @@
 #include "dcp_png.h"
 #include "dcp_cheats.h"
 #include "dcp_displays.h"
+#include "dcp_graphics.h"
 #include "dcp_resolution.h"
 #include "game_files.h"
 #include "game_install.h"
@@ -93,8 +94,8 @@ constexpr char kShowLauncherHelp[] =
 constexpr char kWindowSizeHelp[] =
     "The game window's size in pixels in Windowed mode. The picture keeps its shape: other window shapes get black bars.";
 constexpr char kGraphicsCardHelp[] =
-    "The graphics card the game runs on. Automatic prefers a discrete card. A card that is no longer there falls back "
-    "to Automatic.";
+    "Selects which graphics card renders the game. If the selected card is no longer available, the first available "
+    "card is used.";
 constexpr char kMonitorHelp[] = "The display the game opens on.";
 constexpr char kVSyncHelp[] = "On prevents tearing. Off allows it, for the lowest latency and G-Sync/FreeSync.";
 constexpr char kPresentationHelp[] =
@@ -283,7 +284,7 @@ public:
             return false;
         }
         displays_ = ListDisplays();
-        gpu_names_ = ListGpuNames();
+        gpu_names_ = DcpGraphics::GpuChoices(ListGpuNames());
         prompts_installed_ = InstalledPrompts();
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
@@ -353,6 +354,7 @@ private:
         PollInstall();
         PollPrompts();
         PollUpdate();
+        NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
             if (!SeparateGameProcess(config_, settings_)) {
@@ -516,6 +518,14 @@ private:
         }
         if (settings_.Get(kAspectRatioKey, kDefaultAspectRatio) != kDefaultAspectRatio) {
             settings_.Set(kAspectRatioKey, kDefaultAspectRatio);
+        }
+    }
+
+    void NormalizeGraphicsCard() {
+        const std::string current = settings_.Get(kGraphicsCardKey);
+        const int found = DcpGraphics::ResolveGpuByName(gpu_names_, current);
+        if (found >= 0 && gpu_names_[found] != current) {
+            settings_.Set(kGraphicsCardKey, gpu_names_[found]);
         }
     }
 
@@ -825,14 +835,12 @@ private:
     }
 
     void GraphicsCardCombo() {
-        const std::string current = settings_.Get(kGraphicsCardKey, kAutomaticGpu);
-        const bool listed = current == kAutomaticGpu ||
-                            std::find(gpu_names_.begin(), gpu_names_.end(), current) != gpu_names_.end();
-        const std::string shown = current == kAutomaticGpu ? "Automatic" : listed ? current : current + " (not available)";
-        if (ImGui::BeginCombo("##graphics_card", shown.c_str())) {
-            if (ImGui::Selectable("Automatic", current == kAutomaticGpu) && current != kAutomaticGpu) {
-                settings_.Set(kGraphicsCardKey, kAutomaticGpu);
-            }
+        if (gpu_names_.empty()) {
+            ImGui::TextUnformatted("No graphics card found");
+            return;
+        }
+        const std::string current = settings_.Get(kGraphicsCardKey);
+        if (ImGui::BeginCombo("##graphics_card", current.c_str())) {
             for (const std::string& name : gpu_names_) {
                 if (ImGui::Selectable(name.c_str(), name == current) && name != current) {
                     settings_.Set(kGraphicsCardKey, name);
