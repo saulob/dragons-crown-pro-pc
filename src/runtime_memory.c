@@ -134,7 +134,7 @@ static void region_insert(size_t at, HostRegion r) {
     if (region_count==region_capacity) {
         size_t capacity=region_capacity ? region_capacity*2 : 256;
         HostRegion *next=realloc(regions,capacity*sizeof(*regions));
-        if (!next) { fputs("Out of memory (host regions)\n",stderr); exit(1); }
+        if (!next) { fputs("Out of memory (host regions)\n",stderr); runtime_log_flush(); _exit(1); }
         regions=next; region_capacity=capacity;
     }
     memmove(regions+at+1,regions+at,(region_count-at)*sizeof(*regions));
@@ -385,7 +385,7 @@ static int split_at(uintptr_t a) {
     if (i==vma_count || vmas[i].start>=a) return 0;
     Vma right=vmas[i];
     right.start=a;
-    if (right.kind==KIND_DIRECT) right.phys+=a-vmas[i].start;
+    if (right.kind!=KIND_RESERVED) right.phys+=a-vmas[i].start;
     vmas[i].end=a;
     return vma_insert(i+1,right);
 }

@@ -35,6 +35,14 @@ static uint64_t system_commit(void) {
     K32GetPerformanceInfo(&info,sizeof(info));
     return (uint64_t)info.CommitTotal*info.PageSize;
 }
+static DWORD state_at(const void *address) {
+    MEMORY_BASIC_INFORMATION info;
+    return VirtualQuery(address,&info,sizeof(info)) ? info.State : 0;
+}
+static DWORD protect_at(const void *address) {
+    MEMORY_BASIC_INFORMATION info;
+    return VirtualQuery(address,&info,sizeof(info)) ? info.Protect : 0;
+}
 int main(void) {
     setvbuf(stdout,NULL,_IONBF,0);
     MEMORY_BASIC_INFORMATION info;
@@ -62,6 +70,37 @@ int main(void) {
     CHECK(VirtualQuery(at,&info,sizeof(info)) && info.Protect==PAGE_READONLY);
     CHECK(kernel_mprotect(at,4*PAGE,7)==0);
     CHECK(VirtualQuery(at,&info,sizeof(info)) && info.Protect==PAGE_EXECUTE_READWRITE);
+    CHECK(kernel_mprotect(at,4*PAGE,5)==0);
+    CHECK(protect_at(at)==PAGE_EXECUTE_READ);
+    CHECK(((int (*)(void))at)()==42);
+    CHECK(kernel_mprotect(at,4*PAGE,3)==0);
+    CHECK(protect_at(at)==PAGE_READWRITE);
+    CHECK(state_at(backing_base+POOL_SIZE+4*PAGE)==MEM_RESERVE);
+
+    const unsigned char tracked=23;
+    runtime_memory_gpu_protect((uintptr_t)at,4*PAGE,0,0);
+    CHECK(protect_at(at)==PAGE_NOACCESS);
+    CHECK(runtime_memory_write_backing((uintptr_t)at+PAGE,&tracked,1));
+    runtime_memory_gpu_protect((uintptr_t)at,4*PAGE,1,0);
+    CHECK(protect_at(at)==PAGE_READONLY);
+    runtime_memory_gpu_protect((uintptr_t)at,4*PAGE,1,1);
+    CHECK(protect_at(at)==PAGE_READWRITE);
+    CHECK(((unsigned char *)at)[PAGE]==tracked);
+    runtime_memory_gpu_protect((uintptr_t)at+PAGE,PAGE,0,0);
+    CHECK(protect_at(at)==PAGE_READWRITE && protect_at((char *)at+PAGE)==PAGE_NOACCESS && protect_at((char *)at+2*PAGE)==PAGE_READWRITE);
+    runtime_memory_gpu_protect((uintptr_t)at+PAGE,PAGE,1,1);
+    CHECK(protect_at((char *)at+PAGE)==PAGE_READWRITE);
+    runtime_memory_gpu_protect((uintptr_t)at,4*PAGE,0,0);
+    CHECK(kernel_mprotect(at,4*PAGE,3)==0);
+    CHECK(protect_at(at)==PAGE_READWRITE);
+    CHECK(kernel_mprotect(at,4*PAGE,1)==0);
+    runtime_memory_gpu_protect((uintptr_t)at,4*PAGE,1,1);
+    CHECK(protect_at(at)==PAGE_READONLY);
+    CHECK(kernel_mprotect(at,4*PAGE,5)==0);
+    runtime_memory_gpu_protect((uintptr_t)at,4*PAGE,0,0);
+    CHECK(protect_at(at)==PAGE_EXECUTE);
+    runtime_memory_gpu_protect((uintptr_t)at,4*PAGE,1,1);
+    CHECK(protect_at(at)==PAGE_EXECUTE_READ);
     CHECK(kernel_mprotect(at,4*PAGE,1)==0);
     const unsigned char marker=17;
     CHECK(runtime_memory_write_backing((uintptr_t)at,&marker,1));
@@ -73,17 +112,74 @@ int main(void) {
     void *executable=NULL;
     CHECK(map_flexible(&executable,PAGE,7,0)==0);
     if (executable) { *(unsigned char *)executable=0xc3; CHECK(VirtualQuery(executable,&info,sizeof(info)) && info.Protect==PAGE_EXECUTE_READWRITE); CHECK(direct_unmap(executable,PAGE)==0); }
+    const unsigned char ret=0xc3;
+    CHECK(map_flexible(&executable,PAGE,5,0)==0);
+    if (executable) {
+        CHECK(protect_at(executable)==PAGE_EXECUTE_READ);
+        CHECK(runtime_memory_write_backing((uintptr_t)executable,&ret,1));
+        ((void (*)(void))executable)();
+        CHECK(kernel_mprotect(executable,PAGE,7)==0 && protect_at(executable)==PAGE_EXECUTE_READWRITE);
+        CHECK(kernel_mprotect(executable,PAGE,3)==0 && protect_at(executable)==PAGE_READWRITE);
+        CHECK(direct_unmap(executable,PAGE)==0);
+    }
+    int64_t phys=-1;
+    void *direct_code=NULL;
+    CHECK(direct_allocate(0,INT64_MAX,PAGE,0,3,&phys)==0);
+    CHECK(direct_map(&direct_code,PAGE,7,0,phys,0)==0);
+    if (direct_code) {
+        *(unsigned char *)direct_code=ret;
+        CHECK(protect_at(direct_code)==PAGE_EXECUTE_READWRITE);
+        ((void (*)(void))direct_code)();
+        CHECK(kernel_mprotect(direct_code,PAGE,5)==0 && protect_at(direct_code)==PAGE_EXECUTE_READ);
+        CHECK(kernel_mprotect(direct_code,PAGE,3)==0 && protect_at(direct_code)==PAGE_READWRITE);
+        CHECK(direct_unmap(direct_code,PAGE)==0);
+    }
+    direct_code=NULL;
+    CHECK(direct_map(&direct_code,PAGE,5,0,phys,0)==0);
+    if (direct_code) {
+        CHECK(protect_at(direct_code)==PAGE_EXECUTE_READ);
+        ((void (*)(void))direct_code)();
+        CHECK(kernel_mprotect(direct_code,PAGE,7)==0 && protect_at(direct_code)==PAGE_EXECUTE_READWRITE);
+        CHECK(direct_unmap(direct_code,PAGE)==0);
+    }
+    CHECK(direct_release(phys,PAGE)==0);
 
-    const uint64_t charged=64u<<20;
-    int64_t phys=-1; CHECK(direct_allocate(0,INT64_MAX,charged,0,3,&phys)==0);
+    unsigned char *split=NULL;
+    CHECK(map_flexible((void **)&split,8*PAGE,3,0)==0);
+    if (split) {
+        split[0]=0x11; split[7*PAGE]=0x77;
+        CHECK(direct_unmap(split+4*PAGE,4*PAGE)==0);
+        CHECK(split[0]==0x11);
+        void *other=NULL; CHECK(map_flexible(&other,4*PAGE,3,0)==0);
+        if (other) { memset(other,0x22,4*PAGE); CHECK(split[0]==0x11 && split[3*PAGE]==0); CHECK(direct_unmap(other,4*PAGE)==0); }
+        CHECK(direct_unmap(split,2*PAGE)==0);
+        const unsigned char patch=0x33;
+        CHECK(runtime_memory_write_backing((uintptr_t)split+3*PAGE,&patch,1));
+        CHECK(split[3*PAGE]==patch && split[2*PAGE]==0);
+        CHECK(direct_unmap(split+2*PAGE,2*PAGE)==0);
+        CHECK(flexible_bytes==0);
+    }
+    unsigned char *middle=NULL;
+    CHECK(map_flexible((void **)&middle,8*PAGE,3,0)==0);
+    if (middle) {
+        void *hole=middle+3*PAGE;
+        CHECK(map_flexible(&hole,2*PAGE,3,MAP_FIXED_FLAG)==0);
+        CHECK(flexible_bytes==8*PAGE);
+        CHECK(direct_unmap(middle,3*PAGE)==0 && direct_unmap(middle+5*PAGE,3*PAGE)==0);
+        CHECK(direct_unmap(hole,2*PAGE)==0);
+        CHECK(flexible_bytes==0);
+    }
+
+    const uint64_t charged=128u<<20;
+    CHECK(direct_allocate(0,INT64_MAX,charged,0,3,&phys)==0);
     void *first=NULL,*second=NULL;
     const uint64_t commit_before=system_commit();
     CHECK(direct_map(&first,charged,3,0,phys,0)==0);
     const uint64_t commit_first=system_commit();
     CHECK(direct_map(&second,charged,3,0,phys,0)==0);
     const uint64_t commit_second=system_commit();
-    CHECK(commit_first-commit_before>=charged*3/4);
-    CHECK(commit_second-commit_first<charged/4);
+    CHECK((int64_t)(commit_first-commit_before)>=(int64_t)(charged*3/4));
+    CHECK((int64_t)(commit_second-commit_first)<(int64_t)(charged/2));
     CHECK(direct_unmap(first,charged)==0); CHECK(direct_unmap(second,charged)==0); CHECK(direct_release(phys,charged)==0);
 
     CHECK(direct_allocate(0,INT64_MAX,8*PAGE,0,3,&phys)==0);
@@ -92,6 +188,8 @@ int main(void) {
     CHECK(first && second && first!=second);
     ((uint64_t *)first)[3]=UINT64_C(0x1122334455667788);
     CHECK(((uint64_t *)second)[3]==UINT64_C(0x1122334455667788));
+    ((uint64_t *)second)[5]=UINT64_C(0x8877665544332211);
+    CHECK(((uint64_t *)first)[5]==UINT64_C(0x8877665544332211));
 
     void *failed=NULL; fail_commit=1;
     CHECK(map_flexible(&failed,PAGE,3,0)==NO_MEMORY);
@@ -99,9 +197,16 @@ int main(void) {
     CHECK(((uint64_t *)first)[3]==UINT64_C(0x1122334455667788));
     void *replacement=first; fail_commit=1;
     CHECK(map_flexible(&replacement,PAGE,3,MAP_FIXED_FLAG)==NO_MEMORY);
+    replacement=first;
+    CHECK(direct_map(&replacement,PAGE,3,MAP_FIXED_FLAG,phys,0)==NO_MEMORY);
     fail_commit=0;
     CHECK(((uint64_t *)first)[3]==UINT64_C(0x1122334455667788));
     CHECK(((uint64_t *)second)[3]==UINT64_C(0x1122334455667788));
+    void *start=NULL,*end=NULL; uint32_t prot=0;
+    CHECK(query_protection(first,&start,&end,&prot)==0 && start==first && end>=(void *)((char *)first+8*PAGE) && prot==3);
+    replacement=first;
+    CHECK(direct_map(&replacement,PAGE,3,MAP_FIXED_FLAG,phys,0)==0 && replacement==first);
+    CHECK(((uint64_t *)first)[3]==UINT64_C(0x1122334455667788) && ((uint64_t *)second)[5]==UINT64_C(0x8877665544332211));
     CHECK(map_flexible(&failed,PAGE,3,0)==0); CHECK(direct_unmap(failed,PAGE)==0);
 
     CHECK(kernel_mprotect(first,2*PAGE,1)==0);
@@ -114,6 +219,43 @@ int main(void) {
     CHECK(direct_map(&reused,8*PAGE,3,0,phys,0)==0);
     CHECK(((uint64_t *)reused)[3]==0);
     CHECK(direct_unmap(reused,8*PAGE)==0); CHECK(direct_release(phys,8*PAGE)==0);
+
+    const int64_t untouched=INT64_C(2)<<30;
+    CHECK(direct_allocate(untouched,INT64_MAX,8*PAGE,0,3,&phys)==0 && phys==untouched);
+    void *partial=NULL; CHECK(direct_map(&partial,2*PAGE,3,0,phys,0)==0);
+    if (partial) *(unsigned char *)partial=0x77;
+    CHECK(state_at(backing_base+phys+2*PAGE)==MEM_RESERVE);
+    CHECK(direct_unmap(partial,2*PAGE)==0); CHECK(direct_release(phys,8*PAGE)==0);
+    CHECK(state_at(backing_base+phys+2*PAGE)==MEM_RESERVE);
+    partial=NULL; CHECK(direct_allocate(untouched,INT64_MAX,8*PAGE,0,3,&phys)==0 && phys==untouched);
+    CHECK(direct_map(&partial,2*PAGE,3,0,phys,0)==0 && partial && *(unsigned char *)partial==0);
+    CHECK(direct_unmap(partial,2*PAGE)==0); CHECK(direct_release(phys,8*PAGE)==0);
+
+    unsigned char *whole=NULL,*alias=NULL;
+    CHECK(direct_allocate(untouched,INT64_MAX,8*PAGE,0,3,&phys)==0 && phys==untouched);
+    CHECK(direct_map((void **)&whole,8*PAGE,3,0,phys,0)==0 && direct_map((void **)&alias,8*PAGE,3,0,phys,0)==0);
+    if (whole && alias) {
+        whole[0]=0x10; whole[3*PAGE]=0x13; whole[7*PAGE]=0x17;
+        CHECK(direct_release(phys+2*PAGE,3*PAGE)==0);
+        CHECK(state_at(whole+2*PAGE)==MEM_RESERVE && state_at(alias+2*PAGE)==MEM_RESERVE);
+        CHECK(state_at(whole)==MEM_COMMIT && state_at(whole+5*PAGE)==MEM_COMMIT);
+        CHECK(whole[0]==0x10 && alias[0]==0x10 && whole[7*PAGE]==0x17 && alias[7*PAGE]==0x17);
+        alias[PAGE]=0x21;
+        CHECK(whole[PAGE]==0x21);
+        CHECK(direct_release(phys,8*PAGE)==INVALID);
+        void *refilled=NULL; int64_t again=-1;
+        CHECK(direct_allocate(phys+2*PAGE,INT64_MAX,3*PAGE,0,3,&again)==0 && again==phys+(int64_t)(2*PAGE));
+        CHECK(direct_map(&refilled,3*PAGE,3,0,again,0)==0);
+        if (refilled) {
+            CHECK(((unsigned char *)refilled)[PAGE]==0);
+            CHECK(direct_unmap(refilled,3*PAGE)==0);
+        }
+        CHECK(direct_release(again,3*PAGE)==0);
+        CHECK(whole[0]==0x10 && alias[7*PAGE]==0x17);
+        CHECK(direct_unmap(whole,2*PAGE)==0 && direct_unmap(whole+5*PAGE,3*PAGE)==0);
+        CHECK(direct_unmap(alias,2*PAGE)==0 && direct_unmap(alias+5*PAGE,3*PAGE)==0);
+        CHECK(direct_release(phys,2*PAGE)==0 && direct_release(phys+5*PAGE,3*PAGE)==0);
+    }
 
     int64_t high=(int64_t)(POOL_SIZE-65536); CHECK(direct_allocate(high,(int64_t)POOL_SIZE,65536,65536,3,&phys)==0);
     CHECK(direct_release(phys,65536)==0);
