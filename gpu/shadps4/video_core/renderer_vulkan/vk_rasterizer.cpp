@@ -6,6 +6,7 @@
 #include "dcp_amd_water_fix.h"
 #include "dcp_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
+#include "video_core/renderer_vulkan/vk_ultrawide_capture.h"
 #include "common/debug.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
@@ -393,7 +394,8 @@ bool Rasterizer::DrawPipeWanted() {
 }
 
 bool Rasterizer::UseDrawPipe() const {
-    return draw_pipe && !host_markers_enabled && !DcpToggle::Disabled(DcpToggle::DrawPipeline);
+    return draw_pipe && !host_markers_enabled && !DcpToggle::Disabled(DcpToggle::DrawPipeline) &&
+           !UltrawideCapture::Active(); // DEBUG_SAULO
 }
 
 bool Rasterizer::OnStageA() const {
@@ -1002,6 +1004,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
+    if (UltrawideCapture::Active()) [[unlikely]] {
+        CaptureBeforeDraw(pipeline); // DEBUG_SAULO
+    }
     scheduler.BeginRendering(state);
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
@@ -1042,6 +1047,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                           u32(regs.depth_control.depth_write_enable));
             FrameCapture::Note(note);
         }
+    }
+    if (UltrawideCapture::Active()) [[unlikely]] {
+        CaptureAfterDraw(pipeline, state, Regs(), num_indices, num_instances, is_indexed, false); // DEBUG_SAULO
     }
     DebugState.IncDrawCall();
 
@@ -1125,6 +1133,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
+    if (UltrawideCapture::Active()) [[unlikely]] {
+        CaptureBeforeDraw(pipeline); // DEBUG_SAULO
+    }
     scheduler.BeginRendering(state);
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
@@ -1155,6 +1166,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
             }
         }
     });
+    if (UltrawideCapture::Active()) [[unlikely]] {
+        CaptureAfterDraw(pipeline, state, Regs(), 0, 0, is_indexed, true); // DEBUG_SAULO
+    }
     DebugState.IncDrawCall();
 
     ResetBindings(false);
@@ -2305,6 +2319,9 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             if (FrameCapture::Active()) {
                 FrameCapture::Sampled(image.info, is_storage);
             }
+            if (UltrawideCapture::Active() && stage.sw_stage != Shader::SwStage::Compute) {
+                CaptureSampled(image, is_storage); // DEBUG_SAULO
+            }
 
             image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
                                      image.backing->state.layout);
@@ -2419,7 +2436,8 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
                                      u32 first_image_idx, bool& barrier, TextureSet*& slot) {
     const u32 count = static_cast<u32>(stage.images.size());
     if (!prepared || count == 0 || count > TextureSet::MaxImages ||
-        DcpToggle::Disabled(DcpToggle::TextureSetMemo) || FrameCapture::Active()) {
+        DcpToggle::Disabled(DcpToggle::TextureSetMemo) || FrameCapture::Active() ||
+        UltrawideCapture::Active()) {
         return false;
     }
     for (const auto& image : stage.images) {

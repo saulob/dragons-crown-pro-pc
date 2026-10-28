@@ -80,6 +80,9 @@ int dcp_saved_movement_speed(const char *settings_file);
 /* 1 when the settings file routes the NPC voice cues to the Japanese banks (dcp_japanese_npc_voices; 0 by default). */
 int dcp_japanese_npc_voices(const char *settings_file);
 
+/* 1 when the settings file asks for True Ultrawide (true_ultrawide; 0 by default, and for a missing or unknown value). */
+int dcp_true_ultrawide(const char *settings_file);
+
 /* 1 when the settings file keeps the logs of normal sessions (detailed_logging; 1 by default). */
 int dcp_detailed_logging(const char *settings_file);
 
@@ -106,6 +109,7 @@ typedef struct {
     const char *label;
     int cheats;                  /* the native cheat hooks are validated for this build */
     int japanese_npc_voices;     /* the NPC voice routing hook is validated for this build */
+    int true_ultrawide;          /* dcp_pass_ortho_sites are verified for this build */
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */

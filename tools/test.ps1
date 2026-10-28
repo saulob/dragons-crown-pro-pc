@@ -18,7 +18,7 @@ $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
 
 Write-Step 'Building the launcher tests'
-& ninja -C $buildDir dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-amd-water-tests dcp-savedata-tests dcp-voice-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests
+& ninja -C $buildDir dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-amd-water-tests dcp-savedata-tests dcp-voice-tests dcp-ultrawide-tests dcp-ultrawide-capture-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 
 Write-Step 'Running the launcher tests'
@@ -35,6 +35,14 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the Japanese NPC voice tests'
 & (Join-Path $buildDir 'bin\dcp-voice-tests.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Step 'Running the True Ultrawide hook tests'
+& (Join-Path $buildDir 'bin\dcp-ultrawide-tests.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Step 'Running the DEBUG_SAULO ultrawide capture tests'
+& (Join-Path $buildDir 'bin\dcp-ultrawide-capture-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the text tests (text dialog, system font set)'

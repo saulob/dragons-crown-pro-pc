@@ -17,6 +17,7 @@
 #include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
+#include "video_core/renderer_vulkan/vk_ultrawide_capture.h"
 
 extern "C" void runtime_log_flush(void);
 
@@ -352,13 +353,16 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
             const bool water_fix_key = event.key.scancode == SDL_SCANCODE_F3;
-            const bool host_shortcut = window_shortcut || water_fix_key ||
+            const bool capture_key = event.key.scancode == SDL_SCANCODE_F9; // DEBUG_SAULO
+            const bool host_shortcut = window_shortcut || water_fix_key || capture_key ||
                                        event.key.scancode == DcpSettings::Get().menu_key ||
                                        event.key.scancode == SDL_SCANCODE_INSERT;
             if (window_shortcut && !event.key.repeat) {
                 ToggleBorderless();
             } else if (water_fix_key) {
                 ToggleAmdWaterFix(event.key.repeat);
+            } else if (capture_key) {
+                UltrawideCapture::Press(event.key.repeat); // DEBUG_SAULO
             } else if (DcpCursor::IsGameplayKey(event.key.repeat, host_shortcut) && !ui) {
                 cursor.KeyboardActivity();
             }

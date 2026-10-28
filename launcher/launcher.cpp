@@ -111,6 +111,11 @@ constexpr char kRenderResolutionHelp[] =
     "1440p and above need a powerful graphics card.";
 constexpr char kRestrictedAspectRatioHelp[] =
     "This game build renders at 16:9; the other aspect ratios are not available for it.";
+constexpr char kTrueUltrawideHelp[] =
+    "Experimental. Expands gameplay beyond 16:9. Some scenes may show unintended background elements. Available with "
+    "21:9 and 32:9.";
+constexpr char kUnverifiedTrueUltrawideHelp[] =
+    "This game build's scene projection is not verified; True Ultrawide is not available for it.";
 constexpr char kRestrictedRenderResolutionHelp[] =
     "This game build renders at its original size; the custom render resolutions are not available for it.";
 constexpr char kAntiAliasingHelp[] =
@@ -769,6 +774,11 @@ private:
             const int height = settings_.GetInt(kWindowHeightKey, kDefaultWindowHeight);
             settings_.SetInt(kWindowWidthKey, WindowSizeOf(height, SavedAspectRatio()).width);
         }
+        const bool ultrawide_available = TrueUltrawideAvailable(build_);
+        ImGui::BeginDisabled(!ultrawide_available || !dcp_true_ultrawide_applies(&SavedAspectRatio()));
+        ui.Toggle("True Ultrawide", ultrawide_available ? kTrueUltrawideHelp : kUnverifiedTrueUltrawideHelp,
+                  kTrueUltrawideKey, false, "Off", "On");
+        ImGui::EndDisabled();
         ui.Row("Graphics card", kGraphicsCardHelp);
         GraphicsCardCombo();
         ui.Toggle("VSync", kVSyncHelp, kVSyncKey, true, "Off", "On");

@@ -31,6 +31,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kSharpenStrengthKey, "75"},
     {kRenderResolutionKey, kNativeResolution},
     {kAspectRatioKey, kDefaultAspectRatio},
+    {kTrueUltrawideKey, "0"},
     {kGraphicsCardKey, kAutomaticGpu},
     {kAntiAliasingKey, "0"},
     {kAnisotropyKey, "0"},
@@ -281,6 +282,15 @@ extern "C" int dcp_japanese_npc_voices(const char* settings_file) {
     }
     const LauncherSettings settings(PathFromUtf8(settings_file));
     return settings.GetBool(kJapaneseNpcVoicesKey, false) ? 1 : 0;
+}
+
+extern "C" int dcp_true_ultrawide(const char* settings_file) {
+    using namespace dcp;
+    if (!settings_file || !*settings_file) {
+        return 0;
+    }
+    const LauncherSettings settings(PathFromUtf8(settings_file));
+    return settings.GetBool(kTrueUltrawideKey, false) ? 1 : 0;
 }
 
 extern "C" int dcp_detailed_logging(const char* settings_file) {

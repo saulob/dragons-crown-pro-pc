@@ -175,6 +175,7 @@ use the same defaults).
 | `anisotropy` | 0 (game), 2, 4, 8, 16 | 0 | live |
 | `render_resolution` | `native`, `480p`, `720p`, `1440p`, `1800p`, `4K` | `native` | at start |
 | `aspect_ratio` | `16:9`, `16:10`, `21:9`, `32:9`, `4:3`, `5:4` | `16:9` | at start |
+| `true_ultrawide` | 1, 0 (`true`, `false` are read too) | 0 | at start (21:9 and 32:9 only) |
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
@@ -211,11 +212,26 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
   an unknown value is 16:9). It sets the shape of the game's render target. The game's 2D scene is still laid out for its
   original 1280 × 720 canvas, so only 16:9 Original is undistorted: 21:9 and 32:9 stretch the gameplay horizontally instead
-  of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not
-  adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
+  of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and
+  prerendered videos are not adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
   of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
   The Asia and Hong Kong 1.02 build has no verified render resolution sites of its own, so it renders at its original size in
   16:9 and offers no other shape, whatever was saved.
+- **True Ultrawide** (experimental, Off by default; `true_ultrawide` in `dcp.ini`, a missing or unknown value is Off): with
+  21:9 or 32:9 the game draws more of the world instead of stretching it. The vertical view stays the one of 16:9 and the
+  horizontal view grows by the render target's shape over 16:9 (× 1.3125 for 21:9, × 2 for 32:9), so characters and
+  scenery keep their proportions. Distant background layers fill the whole width; the playfield and the layers that
+  move with it stop where the stage's camera limits and the playfield layer end (never narrower than 16:9), showing
+  the background behind them. On a single-screen town facility picture (the guilds, the shop, the inn) the character,
+  props, titles and text keep their 16:9 size and place and only the room behind them is scaled up evenly to fill the
+  sides, within the picture's own top and bottom, while its top and bottom bars, frame lines and dialogue backing
+  reach the frame edges; the route map keeps its 16:9 composition, centred. The HUD, menus and text keep their 16:9 layout and proportions,
+  centred; fades, cinematic bars, the loading and saving fades and the bottom dialogue and narration bands reach the
+  frame edges, other message bands keep their 16:9 width, and the town map is scaled up evenly to fill the width (at
+  32:9 only as far as its markers stay on screen, with black beyond). The row is disabled for the other shapes, where it
+  changes nothing. Off gives back the Aspect Ratio's own picture exactly. It is available on
+  CUSA10454 1.00, CUSA07001 1.00, 1.02 and 1.03 and CUSA10209 1.00, where its code was checked; elsewhere a saved On
+  is ignored and the log says why.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -264,6 +280,13 @@ conservative memory guard, not a measured limit, and the Render resolution list 
 ratio. The render width is rounded to a multiple of 8, so a window of the same height can differ by a few pixels (5:4). The run log prints
 `DCP: Aspect ratio: 21:9 Ultrawide, render target 2520x1080`. The presenter already sizes its frame from the game's image
 shape.
+
+**True Ultrawide** changes the game's scene pass projections, not the presenter (docs/GRAPHICS.md). The run log prints one
+line, for example `DCP: True Ultrawide requested on, effective on (21:9 Ultrawide, 2520x1080, CUSA10454 1.00 USA): pass
+projection 6 sites, horizontal x1.3125, vertical unchanged; fill hooks installed; world window hooks installed; widget,
+map and fade hooks installed`, or the reason it is
+off: not requested, a shape not wider than 16:9, a build whose sites are not verified, or a site that does not match (the
+game then starts with the plain Aspect Ratio picture).
 
 **Anti-aliasing** is SMAA 1x (tlg_pc's host pass, MIT): a post-process on the finished picture at the game's render
 resolution, before FSR 1 and sharpening. **Texture filtering** forces 2x to 16x anisotropic filtering on the game's

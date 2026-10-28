@@ -51,6 +51,31 @@ typedef struct {
 int dcp_apply_resolution(unsigned char *image, uint64_t image_size, const DcpResolutionSite *sites, size_t count,
                          const DcpResolution *resolution, char *error, size_t error_size);
 
+/* 1 for the shapes True Ultrawide applies to: wider than 16:9. */
+int dcp_true_ultrawide_applies(const DcpAspectRatio *aspect);
+
+/* The factor True Ultrawide widens the scene's horizontal extent by: the render target's width per height over 16:9's,
+ * or 1 when it does not apply to the aspect ratio. The vertical extent is never changed. */
+double dcp_true_ultrawide_scale(const DcpAspectRatio *aspect, const DcpResolution *target);
+
+/* A `vmovss xmm0, [rip+disp32]` in the scene pass setup that loads one horizontal extent of a fixed 16:9 orthographic
+ * canvas (1280 x 720 or 812 x 456). */
+typedef struct {
+    uint32_t offset; /* image offset of the instruction */
+    float value;     /* the constant it loads */
+} DcpOrthoSite;
+
+#define DCP_PASS_ORTHO_SITE_COUNT 6
+/* The same six loads at the same offsets in every build that sets GameBuild::true_ultrawide. */
+extern const DcpOrthoSite dcp_pass_ortho_sites[DCP_PASS_ORTHO_SITE_COUNT];
+
+/* Points site i at float i of the block at `slot_offset` and writes there the site's value times `scale`. The block is
+ * caller memory past the image (`slot_offset >= image_size`) within a 32-bit displacement of every site. Every site is
+ * checked first: its opcode, and a constant inside the image that holds its value. Returns 0 and a message in `error`
+ * when one does not match; nothing is written then. */
+int dcp_apply_true_ultrawide(unsigned char *image, uint64_t image_size, uint64_t slot_offset, const DcpOrthoSite *sites,
+                             size_t count, double scale, char *error, size_t error_size);
+
 #define DCP_SIGNATURE_MAX 64
 
 /* A render size site found by its instruction context: `pattern` is the window of `length` bytes that holds the site at

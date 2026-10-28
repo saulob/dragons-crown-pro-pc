@@ -42,6 +42,7 @@ struct GameBuild {
     bool cheats;                  // the native cheat hooks are validated for this build
     bool xbox_prompts;            // the Xbox prompt patch is validated for this build's archives
     bool japanese_npc_voices;     // the NPC voice routing hook is validated for this build
+    bool true_ultrawide;          // dcp_pass_ortho_sites are verified in this build's executable
     std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
     std::span<const DcpResolutionSite> resolution_sites;
     std::span<const TextLanguage> text_languages; // the first is the default
@@ -71,6 +72,12 @@ std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);
 // True only for the build whose executable has the verified NPC voice routing hook.
 inline bool SupportsJapaneseNpcVoices(const GameBuild* build) {
     return build != nullptr && build->japanese_npc_voices;
+}
+
+// False only for a known build whose pass projection sites are not verified; the unknown build is not restricted here,
+// and the loader refuses to patch it anyway.
+inline bool TrueUltrawideAvailable(const GameBuild* build) {
+    return build == nullptr || build->true_ultrawide;
 }
 
 // The build's language for a saved key; the build's default when the key is not one of its languages.

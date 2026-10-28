@@ -11,6 +11,8 @@
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
 #include "startup_save_hook.h"
+#include "ultrawide_capture.h"
+#include "ultrawide_hooks.h"
 #include "voice_hooks.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
@@ -421,6 +423,35 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
             address - segments[i].address <= segments[i].size - bytes) return 1;
     return 0;
 }
+/* Widens the scene pass projections when every condition holds, then installs the guest hooks; logs one line either
+ * way. A site that does not match leaves the image as it was. */
+static void install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
+                                   size_t slot_offset, uint8_t *stubs, size_t stubs_size, const char *logs_dir) {
+    const double scale=dcp_true_ultrawide_scale(aspect_ratio,&render_target);
+    char detail[720];
+    int effective=0, capture_hooks=0;
+    if (!requested) snprintf(detail,sizeof(detail),"off in the settings");
+    else if (!dcp_true_ultrawide_applies(aspect_ratio)) snprintf(detail,sizeof(detail),"the aspect ratio is not wider than 16:9");
+    else if (!build || !build->true_ultrawide) snprintf(detail,sizeof(detail),"pass projection not verified for this game build");
+    else if (dcp_apply_true_ultrawide(image,image_size,slot_offset,dcp_pass_ortho_sites,DCP_PASS_ORTHO_SITE_COUNT,scale,
+                                      detail,sizeof(detail))) {
+        char hooks[400], capture[160];
+        const size_t hook_bytes=ultrawide_hooks_stub_bytes();
+        ultrawide_hooks_install(image,image_size,entry,stubs,hook_bytes,scale,hooks,sizeof(hooks));
+        /* DEBUG_SAULO: guest side of the F9 frame capture. */
+        capture_hooks=ultrawide_capture_install(image,image_size,entry,stubs+hook_bytes,stubs_size-hook_bytes,capture,
+                                                sizeof(capture));
+        effective=1;
+        snprintf(detail,sizeof(detail),"pass projection %d sites, horizontal x%.4f, vertical unchanged; %s; DEBUG_SAULO %s",
+                 DCP_PASS_ORTHO_SITE_COUNT,scale,hooks,capture);
+    }
+    char line[960];
+    snprintf(line,sizeof(line),"True Ultrawide requested %s, effective %s (%s, %dx%d, %s): %s",requested ? "on" : "off",
+             effective ? "on" : "off",aspect_ratio->name,render_target.width,render_target.height,
+             build ? build->label : "unknown game build",detail);
+    printf("DCP: %s\n",line);
+    dcpgpu_debug_saulo_capture_configure(logs_dir,line,capture_hooks); /* DEBUG_SAULO */
+}
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
     (void)argc; (void)argv;
@@ -558,6 +589,7 @@ int main(int argc, char **argv) {
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
+    const int true_ultrawide_requested=dcp_true_ultrawide(settings_file);
     runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
     runtime_pad_set_settings(settings_file);
@@ -701,11 +733,16 @@ int main(int argc, char **argv) {
             if (!executable) fail("native function is not executable");
         }
     }
+    const int ultrawide_wanted=true_ultrawide_requested && dcp_true_ultrawide_applies(aspect_ratio) &&
+                               known_build && game_build.true_ultrawide;
     const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
     const size_t save_stub_bytes = startup_save_hook_stub_bytes();
     const size_t voice_stub_bytes = voice_hooks_stub_bytes();
-    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes);
-    image = allocate(round_page(size) + hook_bytes); /* the hook stubs follow the image, within a jump of it */
+    const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() + ultrawide_capture_stub_bytes() : 0;
+    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + ultrawide_stub_bytes);
+    const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
+    /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
+    image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
     if (!cpu_only && !dcpgpu_available()) puts("GPU: no video core in this build; running CPU-side only");
@@ -804,12 +841,17 @@ int main(int argc, char **argv) {
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
+    install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
+                           ultrawide_bytes ? round_page(size)+hook_bytes : 0,
+                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,ultrawide_stub_bytes,
+                           log_folder);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     protect(image + round_page(size), hook_bytes, 5);
+    if (ultrawide_bytes) protect(image + round_page(size) + hook_bytes, ultrawide_bytes, 4);
     int executable_entry = 0;
     for (uint64_t i = 0; i < ns; ++i) {
         protect(image + segments[i].address, round_page(segments[i].size), (unsigned)segments[i].flags);

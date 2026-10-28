@@ -1699,6 +1699,169 @@ void TestAspectRatio(const fs::path& base) {
     CHECK(WindowSizeOf(1080, dcp_aspect_ratios[3]) == WindowSize({3840, 1080}));
 }
 
+// True Ultrawide: off unless saved on, only for shapes wider than 16:9, and it widens the six horizontal extent loads of
+// the pass projections by the target's shape over 16:9 while the vertical ones and the game's constants stay.
+void TestTrueUltrawide(const fs::path& base) {
+    const fs::path file = base / "true_ultrawide" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    CHECK(std::string(kTrueUltrawideKey) == "true_ultrawide");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kTrueUltrawideKey && setting.default_value == "0";
+    }
+    CHECK(managed);
+    CHECK(dcp_true_ultrawide(nullptr) == 0 && dcp_true_ultrawide("") == 0);
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 0);
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kTrueUltrawideKey, false));
+        settings.SetBool(kTrueUltrawideKey, true);
+        CHECK(dcp_true_ultrawide(file.string().c_str()) == 0); // pending until Save
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 1);
+    CHECK(WrittenValue(ReadAll(file), kTrueUltrawideKey, "1"));
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kTrueUltrawideKey, false));
+        settings.SetBool(kTrueUltrawideKey, false);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 0);
+    CHECK(WrittenValue(ReadAll(file), kTrueUltrawideKey, "0"));
+    struct Saved {
+        const char* text;
+        int on;
+    };
+    for (const Saved& saved : {Saved{"true", 1}, Saved{"false", 0}, Saved{"on", 1}, Saved{"", 0}, Saved{"2", 0},
+                               Saved{"garbage", 0}}) {
+        WriteAll(file, std::string("true_ultrawide=") + saved.text + "\n");
+        CHECK(dcp_true_ultrawide(file.string().c_str()) == saved.on);
+    }
+    WriteAll(file, "aspect_ratio=21:9\n");
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 0);
+
+    // The factor is the render target's width per height over 16:9's, and 1 for every shape not wider than 16:9.
+    for (int i = 0; i < DCP_ASPECT_COUNT; ++i) {
+        const DcpAspectRatio& aspect = dcp_aspect_ratios[i];
+        const bool wider = std::string(aspect.key) == "21:9" || std::string(aspect.key) == "32:9";
+        CHECK(dcp_true_ultrawide_applies(&aspect) == (wider ? 1 : 0));
+        for (const DcpResolution& resolution : dcp_resolutions) {
+            const DcpResolution target = dcp_render_target(&resolution, &aspect);
+            const double scale = dcp_true_ultrawide_scale(&aspect, &target);
+            CHECK(wider ? scale > 1.3 && scale == target.width * 9.0 / (target.height * 16.0) : scale == 1.0);
+        }
+    }
+    const DcpResolution native21 = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[2]);
+    const DcpResolution native32 = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[3]);
+    CHECK(dcp_true_ultrawide_scale(&dcp_aspect_ratios[2], &native21) == 1.3125);
+    CHECK(dcp_true_ultrawide_scale(&dcp_aspect_ratios[3], &native32) == 2.0);
+
+    // The verified builds share the six sites; the others never get the patch.
+    const DcpOrthoSite expected_sites[DCP_PASS_ORTHO_SITE_COUNT] = {
+        {0x10686, -640.0f}, {0x106bb, -640.0f}, {0x10699, 640.0f}, {0x106d5, 640.0f}, {0x106f7, -406.0f}, {0x10703, 406.0f}};
+    for (int i = 0; i < DCP_PASS_ORTHO_SITE_COUNT; ++i) {
+        CHECK(dcp_pass_ortho_sites[i].offset == expected_sites[i].offset);
+        CHECK(dcp_pass_ortho_sites[i].value == expected_sites[i].value);
+    }
+    CHECK(kUs.true_ultrawide && kJp100.true_ultrawide && kJp102.true_ultrawide && kJp103.true_ultrawide);
+    CHECK(kCk100.true_ultrawide && !kCk.true_ultrawide && !kUs101.true_ultrawide);
+    CHECK(TrueUltrawideAvailable(nullptr) && TrueUltrawideAvailable(&kUs) && !TrueUltrawideAvailable(&kCk));
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(!build.true_ultrawide || !build.resolution_sites.empty());
+        for (const DcpResolutionSite& resolution : build.resolution_sites) {
+            for (const DcpOrthoSite& site : dcp_pass_ortho_sites) {
+                CHECK(site.offset + 8 <= resolution.offset || resolution.offset + resolution.opcode_length + 4u <= site.offset);
+            }
+        }
+    }
+
+    // A pass loop like the game's: twelve rip-relative loads, the X extents at the sites and the Y extents between them.
+    constexpr uint64_t kImage = 0x30000;
+    constexpr uint64_t kSlots = kImage + 0x1000;
+    constexpr uint32_t kConstants = 0x20000;
+    const float constants[8] = {-640.0f, 640.0f, -406.0f, 406.0f, -360.0f, 360.0f, -228.0f, 228.0f};
+    struct Load {
+        uint32_t offset;
+        int constant;
+    };
+    const Load x_loads[DCP_PASS_ORTHO_SITE_COUNT] = {{0x10686, 0}, {0x106bb, 0}, {0x10699, 1},
+                                                     {0x106d5, 1}, {0x106f7, 2}, {0x10703, 3}};
+    const Load y_loads[] = {{0x106a5, 4}, {0x106b1, 5}, {0x106e1, 4}, {0x106ed, 5}, {0x1070f, 6}, {0x1071b, 7}};
+    const auto write_load = [](std::vector<unsigned char>& image, uint32_t offset, uint32_t constant) {
+        const unsigned char vmovss[4] = {0xc5, 0xfa, 0x10, 0x05};
+        const int32_t displacement = int32_t(int64_t(constant) - (int64_t(offset) + 8));
+        std::memcpy(&image[offset], vmovss, 4);
+        std::memcpy(&image[offset + 4], &displacement, 4);
+    };
+    const auto build_image = [&] {
+        std::vector<unsigned char> image(kSlots + 0x1000, 0x90);
+        std::memcpy(&image[kConstants], constants, sizeof(constants));
+        for (const Load& load : x_loads) {
+            write_load(image, load.offset, kConstants + 4u * load.constant);
+        }
+        for (const Load& load : y_loads) {
+            write_load(image, load.offset, kConstants + 4u * load.constant);
+        }
+        return image;
+    };
+    const auto apply = [&](std::vector<unsigned char>& image, double scale, uint64_t slots = kSlots) {
+        char error[200];
+        return dcp_apply_true_ultrawide(image.data(), kImage, slots, dcp_pass_ortho_sites, DCP_PASS_ORTHO_SITE_COUNT,
+                                        scale, error, sizeof(error));
+    };
+    const std::vector<unsigned char> original = build_image();
+    const auto load_target = [](const std::vector<unsigned char>& image, uint32_t offset) {
+        int32_t displacement;
+        std::memcpy(&displacement, &image[offset + 4], 4);
+        return int64_t(offset) + 8 + displacement;
+    };
+    const auto slot_value = [](const std::vector<unsigned char>& image, int i) {
+        float value;
+        std::memcpy(&value, &image[kSlots + 4 * i], 4);
+        return value;
+    };
+    struct Widened {
+        double scale;
+        float values[DCP_PASS_ORTHO_SITE_COUNT];
+    };
+    for (const Widened& widened : {Widened{1.3125, {-840.0f, -840.0f, 840.0f, 840.0f, -532.875f, 532.875f}},
+                                   Widened{2.0, {-1280.0f, -1280.0f, 1280.0f, 1280.0f, -812.0f, 812.0f}},
+                                   Widened{1.0, {-640.0f, -640.0f, 640.0f, 640.0f, -406.0f, 406.0f}}}) {
+        std::vector<unsigned char> image = original;
+        CHECK(apply(image, widened.scale) == 1);
+        for (int i = 0; i < DCP_PASS_ORTHO_SITE_COUNT; ++i) {
+            CHECK(load_target(image, x_loads[i].offset) == int64_t(kSlots) + 4 * i);
+            CHECK(slot_value(image, i) == widened.values[i]);
+        }
+        for (const Load& load : y_loads) {
+            CHECK(load_target(image, load.offset) == kConstants + 4 * load.constant);
+        }
+        CHECK(std::memcmp(&image[kConstants], constants, sizeof(constants)) == 0);
+        std::vector<unsigned char> rest = image;
+        for (const Load& load : x_loads) {
+            std::memcpy(&rest[load.offset + 4], &original[load.offset + 4], 4);
+        }
+        std::memcpy(&rest[kSlots], &original[kSlots], 4 * DCP_PASS_ORTHO_SITE_COUNT);
+        CHECK(rest == original);
+    }
+
+    // One site that does not match refuses the whole patch and leaves the image as it was.
+    const auto refused = [&](const std::function<void(std::vector<unsigned char>&)>& damage, uint64_t slots = kSlots) {
+        std::vector<unsigned char> image = original;
+        damage(image);
+        const std::vector<unsigned char> before = image;
+        return apply(image, 1.3125, slots) == 0 && image == before;
+    };
+    for (const Load& load : x_loads) {
+        CHECK(refused([&](std::vector<unsigned char>& image) { image[load.offset + 1] ^= 1; }));
+        CHECK(refused([&](std::vector<unsigned char>& image) { write_load(image, load.offset, uint32_t(kImage)); }));
+    }
+    CHECK(refused([](std::vector<unsigned char>& image) { image[kConstants + 4 * 3] ^= 1; }));
+    CHECK(refused([](std::vector<unsigned char>&) {}, kImage - 4));
+    CHECK(refused([](std::vector<unsigned char>&) {}, kSlots + (uint64_t(1) << 32)));
+}
+
 // Presentation only fits the finished frame into the window: its own key and default, Letterbox unless Stretch is chosen,
 // and no change to the render target or the aspect ratio.
 void TestPresentation(const fs::path& base) {
@@ -3307,10 +3470,14 @@ void TestBuilds(const fs::path& base) {
     CHECK(build_label("CUSA07001", kJp100.eboot_sha256) == kJp100.label);
     CHECK(build_label("CUSA07001", kJp102.eboot_sha256) == kJp102.label);
     CHECK(build_label("CUSA07001", kJp103.eboot_sha256) == kJp103.label);
+    WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"" + std::string(kUs.eboot_sha256) + "\"\n}");
+    DcpGameBuild us_game{};
+    CHECK(dcp_game_build(report_dir.string().c_str(), &us_game) == 1 && us_game.true_ultrawide == 1);
     WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\",\n  \"app_ver\": \"01.02\"\n}");
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
     CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
+    CHECK(ck_game.true_ultrawide == 0);
 
     {
         Fixture ck(base, "ck-valid", kCk);
@@ -3638,6 +3805,7 @@ int main(int argc, char** argv) {
     TestOverlayProgramsSetting(base);
     TestGameProcess();
     TestAspectRatio(base);
+    TestTrueUltrawide(base);
     TestPresentation(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
