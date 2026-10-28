@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds and runs the focused launcher, cheat, text, cursor, tiling and updater tests: game file validation, the settings file, the
+  Builds and runs the focused Windows memory, launcher, cheat, text, cursor, tiling and updater tests: game file validation, the settings file, the
   Play gate, the window placement, the Display options, the Controller prompts patch, the text dialog, the system font
   set, the cursor visibility rules, the GPU tile layouts and the updater (versions, release JSON, SHA-256, ZIP safety,
   staging, install/rollback, helper replacement and restart quoting). They use synthetic files in a temporary folder: no window,
@@ -18,8 +18,12 @@ $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
 
 Write-Step 'Building the launcher tests'
-& ninja -C $buildDir dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-amd-water-tests dcp-savedata-tests dcp-voice-tests dcp-ultrawide-tests dcp-ultrawide-capture-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-amd-water-tests dcp-savedata-tests dcp-voice-tests dcp-ultrawide-tests dcp-ultrawide-capture-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
+
+Write-Step 'Running the Windows memory tests (sparse backing, commitment, aliases, release)'
+& (Join-Path $buildDir 'bin\dcp-memory-windows-tests.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the launcher tests'
 & (Join-Path $buildDir 'bin\dcp-launcher-tests.exe')
