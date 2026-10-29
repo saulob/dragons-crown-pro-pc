@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-amd-water-tests dcp-update-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-amd-water-tests dcp-update-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -121,6 +121,8 @@ if ((test)); then
     "$build_dir/bin/dcp-window-tests"
     step 'Running the present tests (swapchain images, present mode, flip pacing)'
     "$build_dir/bin/dcp-present-tests"
+    step 'Running the frame pacing tests (Frame rate setting, repeat cadence, limiter)'
+    "$build_dir/bin/dcp-frame-pacing-tests"
     step 'Running the AMD water fix tests (vendor defaults, F3 presses)'
     "$build_dir/bin/dcp-amd-water-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'

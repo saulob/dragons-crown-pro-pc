@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <fstream>
 #include <initializer_list>
@@ -36,6 +37,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kAntiAliasingKey, "0"},
     {kAnisotropyKey, "0"},
     {kTextLanguageKey, "english"},
+    {kFrameRateKey, "60"},
     {kShowFpsTitleKey, "0"},
     {kShowResolutionTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
@@ -109,6 +111,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
             return std::any_of(build.text_languages.begin(), build.text_languages.end(),
                                [&](const TextLanguage& language) { return value == language.key; });
         });
+    }
+    if (key == kFrameRateKey) {
+        return one_of({"30", "60", "90", "120", "144", "165", "240", "0"});
     }
     if (key == kPresentationKey) {
         return std::any_of(std::begin(kPresentationChoices), std::end(kPresentationChoices),
@@ -221,6 +226,16 @@ bool LauncherSettings::WriteFile(const Values& changes) {
     return file.Save();
 }
 
+std::string FrameRateLabel(int fps) {
+    if (fps == 0) {
+        return "Unlimited";
+    }
+    if (fps == 60) {
+        return "60 FPS (Original)";
+    }
+    return std::to_string(fps) + " FPS";
+}
+
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once) {
     if (!game_ready) {
         return true;
@@ -308,6 +323,8 @@ extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char*
     const GameBuild* build = BuildOfImageDir(image_dir);
     const TextLanguage& language = ResolveTextLanguage(build, settings.Get(kTextLanguageKey));
     std::printf("Gameplay: Menu & Subtitles %.*s\n", static_cast<int>(language.name.size()), language.name.data());
+    std::printf("Gameplay: Frame rate %s\n",
+                FrameRateLabel(std::atoi(settings.Get(kFrameRateKey, "60").c_str())).c_str());
     std::printf("Gameplay: Frame rate in title %s\n", settings.GetBool(kShowFpsTitleKey, false) ? "on" : "off");
     std::printf("Gameplay: Render resolution in title %s\n",
                 settings.GetBool(kShowResolutionTitleKey, false) ? "on" : "off");

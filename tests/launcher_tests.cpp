@@ -1699,6 +1699,43 @@ void TestAspectRatio(const fs::path& base) {
     CHECK(WindowSizeOf(1080, dcp_aspect_ratios[3]) == WindowSize({3840, 1080}));
 }
 
+// Frame rate: 60 (Original) unless saved otherwise, one of eight stored values, 0 for Unlimited; the video core reads
+// it from the settings file (gpu/shim/dcp_settings.cpp) and the launcher offers every value for every build.
+void TestFrameRate(const fs::path& base) {
+    const fs::path file = base / "frame_rate" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    CHECK(std::string(kFrameRateKey) == "frame_rate");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kFrameRateKey && setting.default_value == "60";
+    }
+    CHECK(managed);
+    {
+        const LauncherSettings missing(file);
+        CHECK(missing.Get(kFrameRateKey, "60") == "60");
+    }
+    for (const char* valid : {"30", "60", "90", "120", "144", "165", "240", "0"}) {
+        CHECK(IsValidSetting(kFrameRateKey, valid));
+        WriteAll(file, std::string("frame_rate=") + valid + "\n");
+        const LauncherSettings stored(file);
+        CHECK(stored.Get(kFrameRateKey, "60") == valid);
+    }
+    for (const char* invalid : {"", "45", "75", "100", "1000", "-1", "unlimited", "1e2", "60.0"}) {
+        CHECK(!IsValidSetting(kFrameRateKey, invalid));
+        WriteAll(file, std::string("frame_rate=") + invalid + "\n");
+        const LauncherSettings stored(file);
+        CHECK(stored.Get(kFrameRateKey, "60") == "60");
+    }
+    {
+        LauncherSettings settings(file);
+        settings.Set(kFrameRateKey, "144");
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kFrameRateKey, "144"));
+    CHECK(FrameRateLabel(0) == "Unlimited" && FrameRateLabel(60) == "60 FPS (Original)");
+    CHECK(FrameRateLabel(30) == "30 FPS" && FrameRateLabel(240) == "240 FPS");
+}
+
 // True Ultrawide: off unless saved on, only for shapes wider than 16:9, and it widens the six horizontal extent loads of
 // the pass projections by the target's shape over 16:9 while the vertical ones and the game's constants stay.
 void TestTrueUltrawide(const fs::path& base) {
@@ -3826,6 +3863,7 @@ int main(int argc, char** argv) {
     TestGameProcess();
     TestAspectRatio(base);
     TestTrueUltrawide(base);
+    TestFrameRate(base);
     TestPresentation(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);

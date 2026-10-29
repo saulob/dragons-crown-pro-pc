@@ -796,6 +796,13 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     }
 }
 
+void Presenter::RetireFrame(Frame* frame) {
+    std::scoped_lock fl{free_mutex};
+    last_submit_frame = frame;
+    free_queue.push_back(frame);
+    free_cv.notify_one();
+}
+
 Frame* Presenter::GetRenderFrame() {
     // Wait for free presentation frames
     Frame* frame;

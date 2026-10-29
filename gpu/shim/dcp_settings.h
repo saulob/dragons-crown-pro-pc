@@ -33,6 +33,10 @@ struct Values {
     std::atomic<int> requested_width{0}, requested_height{0};
     std::atomic<int> monitor{1};
     std::atomic<bool> show_fps_title{false}, show_resolution_title{false};
+    // Set by the window: the refresh rate of the display it opened on; 0 when unknown.
+    std::atomic<double> display_refresh_hz{0.0};
+    // Presentation pacing (driver.cpp). 0: Unlimited.
+    std::atomic<int> frame_rate{60};
     // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu and the window mode switch.
     std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11};
 };

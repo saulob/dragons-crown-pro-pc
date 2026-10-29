@@ -119,6 +119,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     }
     ApplyDisplayMode(DcpSettings::Get().display_mode);
     SDL_ShowWindow(window);
+    if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window))) {
+        DcpSettings::Get().display_refresh_hz = mode->refresh_rate;
+    }
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
     width = w;

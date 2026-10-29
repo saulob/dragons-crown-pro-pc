@@ -124,6 +124,10 @@ constexpr char kAntiAliasingHelp[] =
 constexpr char kAnisotropyHelp[] =
     "Sharper textures on floors and walls seen at an angle. Game uses the game's own filtering.";
 constexpr char kTextLanguageHelp[] = "Language used by game menus and subtitles.";
+constexpr char kFrameRateHelp[] =
+    "60 FPS is the original game rate. 30 shows every second frame. Faster targets show the last frame again until the "
+    "next one: the game still makes 60 new frames a second, so game speed and motion are unchanged. Unlimited repeats "
+    "as often as the display allows, up to 480 a second.";
 constexpr char kShowFpsTitleHelp[] = "Shows the frame rate in the window title: Dragon's Crown Pro | FPS: 60.00";
 constexpr char kShowResolutionTitleHelp[] =
     "Shows the game's render resolution in the window title: Dragon's Crown Pro | 1920x1080";
@@ -893,6 +897,11 @@ private:
         if (SupportsJapaneseNpcVoices(build_)) {
             ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
         }
+        std::vector<trg::Option> frame_rates;
+        for (const int fps : {30, 60, 90, 120, 144, 165, 240, 0}) {
+            frame_rates.push_back({std::to_string(fps), FrameRateLabel(fps)});
+        }
+        ui.Combo("Frame rate", kFrameRateHelp, kFrameRateKey, "60", frame_rates);
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
         ui.Toggle("Render resolution in title", kShowResolutionTitleHelp, kShowResolutionTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");

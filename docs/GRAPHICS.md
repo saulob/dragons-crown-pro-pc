@@ -11,7 +11,8 @@ the in-game menu nor the environment can undo them (`tests/launcher_tests.cpp` c
 | ATLUS logo and fairies flickering | Draws skipped while their new graphics pipeline compiled asynchronously | `PipelineCache::AsyncCompilation()` is always false: a new pipeline is built before its draw |
 
 Also fixed: the GPU command thread stays at most one frame ahead of the GPU (`Presenter::PrepareFrame`), and the VideoOut
-vblank is a steady 60 Hz with no frame limit, the game's own pacing.
+vblank is a steady 60 Hz with no frame limit, the game's own pacing (the Frame rate setting never changes it, see
+docs/LAUNCHER.md).
 
 The first one was found with window captures and frame-difference measurements on the title screen: disabling the workers
 alone removed the rectangles, while the Vulkan recording thread, the draw pipeline and the present thread did not change
@@ -123,7 +124,7 @@ Vulkan.
 
 The video core came with God of War III's temporal upscaler (FSR 3.1, FSR 4, DLSS and TAA), its camera and object motion
 vectors and their settings. Dragon's Crown Pro never ran them; they were removed, together with every inherited environment
-switch. HDR, MSAA and a frame rate limit are not offered (docs/LAUNCHER.md).
+switch. HDR and MSAA are not offered (docs/LAUNCHER.md).
 
 ## Developer diagnostics
 

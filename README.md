@@ -132,12 +132,13 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 ### Gameplay
 - **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. CUSA10454 1.00 USA only; narrator and player-character choices are unchanged
+- **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
 - **Frame counter**: shows the frame rate and frame time in a corner of the game
 - **Arachnophobia Safe Mode**: redraws the Giant Spider as two soft cream bodies with two orange eyes, without legs or fangs; gameplay does not change
 
-The game runs at its own 60 frames per second.
+The game runs at its own 60 frames per second unless the Frame rate setting asks for more; its logic stays at 60 either way.
 
 ### Trophies
 - The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package, and the **Trophies** launcher page shows your progress, the trophies and their grades.

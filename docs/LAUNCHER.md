@@ -55,7 +55,7 @@ without copying, and only the build that is already active is reported as up to 
 
 The settings file is always `<user>\dcp.ini`; the loader hands its path to the launcher and the video core. The
 correctness defaults (draw preparation workers 0, asynchronous shaders off, vertex descriptor validation, linear image
-readbacks, the 60 Hz vblank, the stick dead zone) are code, and the environment cannot change them (docs/GRAPHICS.md).
+readbacks, the stick dead zone) are code, and the environment cannot change them (docs/GRAPHICS.md).
 `tools\build.ps1 -Run` starts the executable with no folder arguments: it resolves the development folders itself.
 
 The loader writes the one numbered log itself, `logs\dragons_crown_pro_NNN.log` (the next free number, never an
@@ -176,6 +176,7 @@ use the same defaults).
 | `render_resolution` | `native`, `480p`, `720p`, `1440p`, `1800p`, `4K` | `native` | at start |
 | `aspect_ratio` | `16:9`, `16:10`, `21:9`, `32:9`, `4:3`, `5:4` | `16:9` | at start |
 | `true_ultrawide` | 1, 0 (`true`, `false` are read too) | 0 | at start (21:9 and 32:9 only) |
+| `frame_rate` | 30, 60, 90, 120, 144, 165, 240, 0 (Unlimited) | 60 | at start |
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
@@ -294,8 +295,7 @@ the game's own filters. MSAA is not offered: the references only respect the gam
 one title, and none lets the user choose a sample count.
 
 Not offered: HDR (the video core's switch exists, but the game's `param.sfo` does not declare HDR support, so it would do
-nothing) and a frame rate limit (the game is paced by a fixed 60 Hz vblank; a lower limit would slow the game itself).
-There is no Performance page. Asynchronous shader compilation is fixed off:
+nothing). The frame rate is on the Gameplay page. There is no Performance page. Asynchronous shader compilation is fixed off:
 `dcp.ini` and the environment cannot enable it.
 
 ## Gameplay
@@ -310,6 +310,17 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
   town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
   are untouched.
+- **Frame rate** (30 FPS, 60 FPS (Original), 90, 120, 144, 165, 240 FPS, Unlimited; `frame_rate`, 60 FPS (Original) by
+  default; applied at start, every build) sets how often frames reach the window. 60 is the game's own rate. 30 FPS
+  shows every second frame. The game makes one frame per logic tick at 59.94 Hz, builds that frame's draw lists inside
+  the last tick of the frame and holds itself to that rate, so nothing is changed in the game and a faster target does
+  not make it faster: the video core keeps the 60 Hz vblank and, between two of the game's flips, shows the last frame
+  again at the target rate (`RepeatLastFrame`, scheduled by the limiter in `gpu/shim/dcp_frame_pacing.h`). The extra
+  frames repeat the last logic step, so motion is as smooth as at 60 FPS; there is no interpolation. Unlimited repeats
+  as often as the display allows, up to 480 a second. With VSync on, presentations never go past the display's refresh
+  rate, and a display at 60 Hz or less has nothing to repeat. Frame rate in title and the frame counter count every
+  presentation. The log has `Gameplay: Frame rate` and `VideoOut: vblank ... frame rate ... repeat cadence ...
+  VSync ...`.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
 - **Render resolution in title**: `Dragon's Crown Pro | 1920x1080`, the render resolution of the game's presented image (not the
@@ -329,7 +340,7 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   usual start in the launcher's process. Neither setting filters Vulkan layers or blocks any program; a
   `VK_LOADER_LAYERS_DISABLE` set in the environment reaches the game as it is.
 
-No skip-intro or frame rate limit.
+No skip-intro.
 
 ## Cheats
 
