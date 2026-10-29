@@ -129,7 +129,7 @@ if ((test)); then
     "$build_dir/bin/dcp-ultrawide-tests"
     step 'Running the True Ultrawide side area tests'
     "$build_dir/bin/dcp-ultrawide-sides-tests"
-    step 'Running the MOVBE and BMI1 emulation tests'
+    step 'Running the MOVBE, BMI1 and LZCNT tests'
     "$build_dir/bin/dcp-isa-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'
     "$build_dir/bin/dcp-tiling-tests"

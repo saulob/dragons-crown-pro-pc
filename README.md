@@ -41,7 +41,7 @@
 
 - Windows 10 (version 1903 or newer) or Windows 11, 64-bit
 - **Or, experimental:** 64-bit Linux on x86-64, including the Steam Deck, on an X11 or Wayland desktop, with glibc 2.31 or newer and a Vulkan 1.3 loader (`libvulkan.so.1`) and graphics driver (see [Linux and Steam Deck](#linux-and-steam-deck)). The game has been run on Ubuntu 24.04 (WSL2), and community testers report it working on Bazzite (KDE Plasma, Wayland, AMD RADV) and on a Steam Deck LCD; other distributions that are new enough may work
-- A processor with **AVX** and **LZCNT**: Intel Core 4th generation (Haswell), AMD FX or newer. The game's PS4 code runs directly on it; MOVBE and BMI1, which some of these lack, are emulated
+- A processor with **AVX**: Intel Core 2nd generation (Sandy Bridge), AMD FX or newer. The game's PS4 code runs directly on it; LZCNT, MOVBE and BMI1, which some of these lack, are handled in software
 - A graphics card and driver with **Vulkan 1.3**, `VK_EXT_robustness2`, `VK_KHR_push_descriptor` and `VK_EXT_vertex_attribute_divisor` on either platform (tested on an NVIDIA GeForce RTX 4070 and Intel UHD Graphics 730 on Windows)
 - **Your own legally obtained Dragon's Crown Pro package**: a decrypted PS4 `.pkg` file of this exact game version, and about 6 GB of free space for the installed game:
 

@@ -31,8 +31,9 @@ REQUIREMENTS
   been run on Ubuntu 24.04 (WSL2) and, according to community reports, on
   Bazzite and a Steam Deck LCD; other distributions that are new enough may
   work
-- A processor with AVX and LZCNT: Intel Core 4th generation (Haswell), AMD FX
-  or newer. The MOVBE and BMI1 instructions some of these lack are emulated
+- A processor with AVX: Intel Core 2nd generation (Sandy Bridge), AMD FX or
+  newer. The LZCNT, MOVBE and BMI1 instructions some of these lack are handled
+  in software
 - A graphics card and Mesa or proprietary driver with Vulkan 1.3,
   VK_EXT_robustness2, VK_KHR_push_descriptor and
   VK_EXT_vertex_attribute_divisor (AMD RADV on the Steam Deck qualifies)

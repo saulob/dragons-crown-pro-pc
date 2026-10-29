@@ -53,7 +53,7 @@ Write-Step 'Running the True Ultrawide side area tests'
 & (Join-Path $buildDir 'bin\dcp-ultrawide-sides-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Step 'Running the MOVBE and BMI1 emulation tests'
+Write-Step 'Running the MOVBE, BMI1 and LZCNT tests'
 & (Join-Path $buildDir 'bin\dcp-isa-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

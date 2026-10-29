@@ -177,11 +177,11 @@ IsaHostFeatures isa_host_features(void) {
 }
 
 int isa_missing_sets(IsaHostFeatures host, int emulated, char *out, size_t size) {
-    /* LZCNT runs as BSR on hosts without it instead of trapping, so it cannot be emulated. TZCNT likewise runs as
-     * BSF without BMI1, which the game's uses (nonzero inputs or a zero-safe result) do not notice. */
+    /* LZCNT runs as BSR on hosts without it instead of trapping: lzcnt_compat rewrites it in the loaded image. TZCNT
+     * likewise runs as BSF without BMI1, which the game's uses (nonzero inputs or a zero-safe result) do not notice. */
     static const struct { const char *name; int emulated, word; uint32_t bit; } sets[] = {
         {"SSE4.1", 0, 0, bit_SSE4_1}, {"SSE4.2", 0, 0, bit_SSE4_2}, {"POPCNT", 0, 0, bit_POPCNT},
-        {"AVX", 0, 0, bit_AVX},       {"LZCNT", 0, 2, bit_LZCNT},   {"MOVBE", 1, 0, bit_MOVBE},
+        {"AVX", 0, 0, bit_AVX},       {"LZCNT", 1, 2, bit_LZCNT},   {"MOVBE", 1, 0, bit_MOVBE},
         {"BMI1", 1, 1, bit_BMI},
     };
     const uint32_t words[] = {host.leaf1_ecx, host.leaf7_ebx, host.ext1_ecx};

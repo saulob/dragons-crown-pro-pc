@@ -21,6 +21,7 @@
 #include "dcp_resolution.h"
 #include "runtime_log.h"
 #include "isa_emulate.h"
+#include "lzcnt_compat.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error Dragon's Crown Pro PC requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -129,7 +130,7 @@ static int cpu_usable(char *cause, size_t cause_size, char *advice, size_t advic
     char missing[96];
     if (!isa_missing_sets(isa_host_features(),0,missing,sizeof(missing))) return 1;
     snprintf(cause,cause_size,"This processor lacks %s, which the game's PS4 code needs.",missing);
-    snprintf(advice,advice_size,"The game needs an Intel Core 4th generation (Haswell), AMD FX or newer processor.");
+    snprintf(advice,advice_size,"The game needs an Intel Core 2nd generation (Sandy Bridge), AMD FX or newer processor.");
     return 0;
 }
 #ifndef _WIN32
@@ -222,7 +223,7 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
         }
     }
     if (code==EXCEPTION_ILLEGAL_INSTRUCTION && image && (uintptr_t)info->ContextRecord->Rip-(uintptr_t)image<0x20000000) {
-        /* Jaguar's MOVBE and BMI1 trap on hosts without them; cpu_usable refuses the sets that cannot be emulated. */
+        /* Jaguar's MOVBE and BMI1 trap on hosts without them; LZCNT does not, so it is rewritten at load. */
         CONTEXT *c=info->ContextRecord;
         _Static_assert(offsetof(CONTEXT,R15)-offsetof(CONTEXT,Rax)==15*sizeof(DWORD64),"CONTEXT register order");
         uint64_t flags=c->EFlags;
@@ -719,8 +720,10 @@ int main(int argc, char **argv) {
     const size_t voice_stub_bytes = voice_hooks_stub_bytes();
     const size_t system_type_stub_bytes = system_type_hook_stub_bytes();
     const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() : 0;
+    const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
+    const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
-                                         ultrawide_stub_bytes);
+                                         ultrawide_stub_bytes + lzcnt_stub_bytes);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -821,6 +824,19 @@ int main(int argc, char **argv) {
             snprintf(message,sizeof(message),"%s, game build %s",error,game_build.label);
             fail_running(message);
         }
+    }
+    if (lzcnt_rewrite) {
+        const char *rewritten_build="";
+        const LzcntCompatStatus status=lzcnt_compat_install(image,size,entry,
+            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes,
+            lzcnt_stub_bytes,&rewritten_build);
+        if (status!=LZCNT_COMPAT_OK) {
+            char message[330];
+            snprintf(message,sizeof(message),"This processor lacks LZCNT, and this game executable cannot be adapted to it: %s.",
+                     lzcnt_compat_status_text(status));
+            fail_running(message);
+        }
+        printf("LZCNT: rewritten at %d sites (%s)\n",LZCNT_SITE_COUNT,rewritten_build);
     }
     if (known_build && game_build.cheats && !runtime_cheats_online_locked()) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);

@@ -26,8 +26,9 @@ A package still encrypted for a PS4 console cannot be unpacked on a PC.
 REQUIREMENTS
 ------------
 - Windows 10 version 1903 or later, or Windows 11, 64-bit
-- A processor with AVX and LZCNT: Intel Core 4th generation (Haswell), AMD FX
-  or newer. The MOVBE and BMI1 instructions some of these lack are emulated
+- A processor with AVX: Intel Core 2nd generation (Sandy Bridge), AMD FX or
+  newer. The LZCNT, MOVBE and BMI1 instructions some of these lack are handled
+  in software
 - A graphics card and driver with Vulkan 1.3, VK_EXT_robustness2,
   VK_KHR_push_descriptor and VK_EXT_vertex_attribute_divisor
 - Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next

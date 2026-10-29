@@ -157,5 +157,6 @@ The PS4 runtime's own environment variables, for testing and diagnosis:
 | `DCP_AUDIO=none` | No audio device (a silent timer sink); `DCP_AUDIO_DUMP`, `DCP_AUDIO_STATS` dump or count audio |
 | `DCP_FILE_TRACE`, `DCP_TRACE_SEMA` | Every file the game opens; blocking semaphore waits |
 | `DCP_STRICT_HANDLES` | Invalid Windows handle use raises an exception (fault report) |
+| `DCP_EMULATE_LZCNT` | Rewrites the game's LZCNT instructions even on a processor that has LZCNT, to test the path used without it |
 | `DCP_DMEM_MB` | Direct memory reported to the game, raised above the retail 5056 MiB (up to 16384) |
 | `DCP_LAUNCHER_SHOTS` | Used by `tests/launcher_shots.cpp`: renders the launcher pages into PNGs and quits |
