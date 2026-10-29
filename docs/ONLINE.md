@@ -6,8 +6,8 @@ lobby; game traffic goes directly between their PCs over UDP. Nothing in the gam
 play, and with online play off every import keeps its offline behaviour (`src/runtime_services.c`, the bundled
 NpToolkit2 module).
 
-Status: two instances on one PC play together through the local development lobby, and the deployed lobby is
-reachable. Play between different networks over the Internet (NAT traversal) has not been confirmed yet.
+Status: two instances on one PC play together through the online service (stages, loot, a player who disconnects
+becomes a CPU ally). Play between PCs on different Internet connections (NAT traversal) has not been confirmed yet.
 
 ## Playing online
 
@@ -15,17 +15,16 @@ reachable. Play between different networks over the Internet (NAT traversal) has
 2. Choose your **Online name**: what other players see (up to 16 letters, digits, `-` or `_`; `Player` until you change
    it). Changing it later keeps your friend code and your friends.
 3. Share **Your friend code** (`XXXX-XXXX`, **Copy** puts it on the clipboard) with the players you want to meet.
-4. **Connection test** > **Run test**, if you want to check your network first. "Ready for online play" means other
-   players can reach you; otherwise the lines below it say what is missing (the online service, direct connections,
-   the router).
-5. Under **Friends**, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
+4. Under **Friends**, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
    card at the top of the page, and the Online entry in the sidebar shows how many are waiting; **Accept** or
    **Decline** it there. The list updates by itself and shows each friend's Online name and whether they are online:
    Online while their launcher or game is connected, "Online, in a room" while they are in a game room.
-6. Play through the game's own Network menu: host or join a room, or pick a friend's room in Join Friends Room.
+5. **Connection test** > **Run test**, if you want to check your network first. "Ready for online play" means other
+   players can reach you; otherwise the lines below it say what is missing.
+6. Press **Play**.
+7. Play through the game's own Network menu: host or join a room, or pick a friend's room in Join Friends Room.
 
-Nothing else needs setting up: the launcher and the game always use the project's lobby service. With Online play Off
-the game runs offline as before.
+Nothing else needs setting up. With Online play Off the game runs offline as before.
 
 ## Reference and licence
 
@@ -63,7 +62,7 @@ NpToolkit2 entries this port does not name yet, so they stay offline. The lobby 
 | `online_name` | `DCP_ONLINE_NAME` | `Player` | in-game online id (16 of `A-Z a-z 0-9 - _`) |
 | `online_udp_port` | `DCP_UDP_PORT` | 0 | 0: the game's port 3658, or any free one when it is taken |
 | `online_stun` | `DCP_STUN` | `stun.cloudflare.com:3478,stun.l.google.com:19302` | STUN servers; `off` disables |
-| - | `DCP_LOBBY` | `net::kDefaultLobbyUrl` | `ws://` or `wss://` lobby address (development lobby, a test deployment) |
+| - | `DCP_LOBBY` | `net::kDefaultLobbyUrl` | developer override of the production lobby (`ws://` or `wss://`), for diagnostics |
 | - | `DCP_UPNP` | 1 | ask the router to map the UDP port; `0` for diagnostics |
 | - | `DCP_JOIN_CODE` | - | the game's room search returns only the room with this code |
 
@@ -218,28 +217,36 @@ $env:DCP_TEST_LOBBY='ws://127.0.0.1:8791/'; build\cmake\clang64\bin\dcp-online-h
 `dcp-online-hle-tests` calls the Matching2, libSceNet and Rudp entry points as the game does while a second player
 joins through the lobby and connects over UDP.
 
-Two instances on one PC, each with its own user folder (settings, saves, caches, identity), logs and UDP port:
+Two instances on one PC, each with its own user folder (settings, saves, caches, identity), logs and UDP port, both
+on the production service:
 
 ```
-tools\online-lobby.ps1                    # window 1: lobby on ws://127.0.0.1:8790/
-tools\online-instance.ps1 -Name a         # window 2: user\test-client-a, build\logs\test-client-a
-tools\online-instance.ps1 -Name b         # window 3: user\test-client-b, build\logs\test-client-b
+tools\online-instance.ps1 -Name a         # terminal 1: user\test-client-a, build\logs\test-client-a
+tools\online-instance.ps1 -Name b         # terminal 2: user\test-client-b, build\logs\test-client-b
 ```
 
 Online play is each instance's own switch; `-ForceOnline` sets `DCP_ONLINE=1` for the run, and the page then shows
-the switch locked as "On (DCP_ONLINE)". `-Lobby <address>` points both instances at another lobby, for example the deployed one
-(`-Lobby wss://dcp-lobby.saulobenigno.workers.dev`). Each instance shows the Online name of its own Online page (set it
-there to tell them apart); `-OnlineName` overrides it for that run. The instance's Online page notes that DCP_*
-settings are in use. The instance labels (`test-client-a`, ClientA) stay in folder names and script output only.
+the switch locked as "On (DCP_ONLINE)". Each instance shows the Online name of its own Online page (set it there to
+tell them apart); `-OnlineName` overrides it for that run. The instance labels (`test-client-a`) stay in folder names
+and script output only.
 
-The same works by hand: `dragons_crown_pro.exe --user <folder> --logs <folder>` with `DCP_ONLINE=1` and
-`DCP_LOBBY=ws://127.0.0.1:8790/` set.
+This checks the production Worker and its Durable Object, identities, friends, presence, signaling, Matching2, the
+exchange of endpoints, P2P/Rudp and gameplay. It does not check NAT traversal: both instances share one address, so
+they connect through their LAN candidates. That needs two PCs on unrelated Internet connections, both on the
+production service with nothing to set up:
 
-The development lobby keeps accounts, friend codes, friends and pending requests in
-`user\online-test-lobby\lobby.sqlite`; each instance keeps its identity in its own user folder, so friends added once
-stay friends across restarts. Rooms and presence are never kept: rooms of a previous run are removed at start (the
-Worker instead gives seats whose socket vanished the normal 30 s grace). `tools\online-lobby.ps1 -Reset` deletes that
-file only; `-SeedTestFriends` makes instances a and b friends; `-Memory` keeps nothing.
+1. Both Connection tests say "Ready for online play".
+2. Exchange friend codes and become friends.
+3. A hosts a room; B uses Join Friends Room.
+4. Both logs show the P2P link and the Rudp contexts connected (lines below), with an address that is not a LAN one.
+5. Play a whole stage: loot, area transitions, the stage results.
+6. Disconnect one player, start again and join again.
+
+`DCP_LOBBY` replaces the production lobby for a run, for diagnostics: `tools\online-lobby.ps1` runs the local
+development lobby (Node.js 22.13 or later) on `ws://127.0.0.1:8790/`, which the headless tests above use. It keeps
+accounts, friend codes, friends and pending requests in `user\online-test-lobby\lobby.sqlite`; rooms and presence are
+never kept. `-Reset` deletes that file only; `-SeedTestFriends` makes instances a and b friends; `-Memory` keeps
+nothing.
 
 What to look for in each instance's log: `Online: on as ...`, `Matching2: signed in to the lobby`, `Matching2: created
 room N`, `Net: P2P socket ... bound`, `Matching2: reporting UDP port`, `Matching2: member 0x20 established`, `P2P: link N
@@ -248,4 +255,4 @@ room N`, `Net: P2P socket ... bound`, `Matching2: reporting UDP port`, `Matching
 ## Deploying the lobby
 
 See [server/lobby/README.md](../server/lobby/README.md). The production address is `net::kDefaultLobbyUrl`
-(`src/net/online_config.h`), the only place it is written in the code; `DCP_LOBBY` replaces it for a run.
+(`src/net/online_config.h`), the only place it is written in the code.

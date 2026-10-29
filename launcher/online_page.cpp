@@ -118,9 +118,10 @@ void OnlinePage::DrawOnlinePlay(trg::Ui& ui, const OnlinePlaySwitch& online) {
 
 void OnlinePage::DrawTestInstanceNote(trg::Ui& ui, const net::OnlineConfig& config) {
     if (!std::getenv("DCP_ONLINE") && !std::getenv("DCP_LOBBY") && !std::getenv("DCP_ONLINE_NAME")) return;
-    std::string text = "Test instance: DCP_* environment settings are in use (lobby " + config.lobby;
+    std::string text = "Test instance: DCP_* environment settings are in use";
+    if (std::getenv("DCP_LOBBY")) text += ", lobby " + config.lobby;
     if (std::getenv("DCP_ONLINE_NAME")) text += ", name " + net::online_name(config.name);
-    ui.Help((text + ").").c_str());
+    ui.Help((text + ".").c_str());
 }
 
 void OnlinePage::DrawFriendRequests(trg::Ui& ui) {

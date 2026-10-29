@@ -13,7 +13,7 @@ namespace dcp::net {
 // picks a free one.
 inline constexpr uint16_t kGameUdpPort = 3658;
 inline constexpr char kDefaultStunServers[] = "stun.cloudflare.com:3478,stun.l.google.com:19302";
-// The production lobby; only DCP_LOBBY replaces it (test instances, the development lobby).
+// The production lobby; only the developer override DCP_LOBBY replaces it.
 inline constexpr char kDefaultLobbyUrl[] = "wss://dcp-lobby.saulobenigno.workers.dev";
 inline constexpr char kDefaultOnlineName[] = "Player";
 

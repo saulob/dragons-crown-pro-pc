@@ -13,6 +13,9 @@ No dependencies are installed for either the tests or the local server.
 
 ## Local
 
+The local server is for the automated tests and diagnostics; players and the normal two-instance test use the deployed
+lobby.
+
 ```
 node local/server.js                      # ws://127.0.0.1:8790/, data in memory
 node local/server.js --db lobby.sqlite    # keeps accounts, friend codes and friends (rooms are removed at start)
@@ -33,8 +36,7 @@ Nothing in the repository deploys or logs in. To publish a lobby:
 3. Optional, to read bug reports: `wrangler secret put REPORTS_TOKEN` (a long random value).
 4. `wrangler deploy`. The lobby is then at `wss://dcp-lobby.<your subdomain>.workers.dev/`.
 5. Check it: `curl https://dcp-lobby.<your subdomain>.workers.dev/` answers `{"service":"dcp-lobby","proto":1}`, and
-   the Connection test of a test instance started with `tools\online-instance.ps1 -Lobby <address>` says the lobby is
-   reachable.
+   the Connection test of a test instance started with `DCP_LOBBY` set to its address says the lobby is reachable.
 6. To make it the default for players, set `kDefaultLobbyUrl` in `src/net/online_config.h`.
 
 Reports: `curl -H "Authorization: Bearer <token>" https://dcp-lobby.<subdomain>.workers.dev/reports` (newest 100).

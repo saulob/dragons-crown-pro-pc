@@ -1331,10 +1331,23 @@ void TestOnlinePage() {
         }
     }
 
-    // Test instances keep the lobby override, use their own switch and Online name unless told otherwise.
+    for (const char* hidden : {"localhost", "127.0.0.1", "8790", "ws://", "wss://", "\"Server\"", "\"Lobby\""}) {
+        CHECK(page.find(hidden) == std::string::npos);
+    }
+    CHECK(page.find("if (std::getenv(\"DCP_LOBBY\")) text += \", lobby \" + config.lobby;") != std::string::npos);
+
+    // Test instances use the production service with no lobby option or local lobby, and their own switch and Online
+    // name unless told otherwise; only a DCP_LOBBY the caller set replaces the service.
     const std::string instance = ReadAll(fs::path(DCP_SOURCE_DIR) / "tools" / "online-instance.ps1");
-    CHECK(instance.find("[string]$Lobby = 'ws://127.0.0.1:8790/'") != std::string::npos);
-    CHECK(instance.find("$env:DCP_LOBBY = $Lobby") != std::string::npos);
+    for (const char* gone : {"$Lobby", "-Lobby", "8790", "127.0.0.1", "localhost", "online-lobby", "workers.dev",
+                             "$env:DCP_LOBBY =", "Env:DCP_LOBBY"}) {
+        CHECK(instance.find(gone) == std::string::npos);
+    }
+    CHECK(instance.find("Online test instance $($Name.ToUpper())") != std::string::npos);
+    CHECK(instance.find("Online service: $(if ($env:DCP_LOBBY) { \"DCP_LOBBY override $env:DCP_LOBBY\" } else { 'production' })") !=
+          std::string::npos);
+    CHECK(instance.find("tools\\online-instance.ps1 -Name a ") != std::string::npos &&
+          instance.find("tools\\online-instance.ps1 -Name b ") != std::string::npos);
     CHECK(instance.find("if ($ForceOnline) { $env:DCP_ONLINE = '1' } else { Remove-Item Env:DCP_ONLINE ") != std::string::npos);
     CHECK(instance.find("$env:DCP_ONLINE = '1'\n") == std::string::npos);
     CHECK(instance.find("if ($OnlineName) { $env:DCP_ONLINE_NAME = $OnlineName } else { Remove-Item Env:DCP_ONLINE_NAME") !=

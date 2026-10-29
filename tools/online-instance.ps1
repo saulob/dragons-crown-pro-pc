@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Starts one isolated test instance of the game for online testing on a single PC: its own user folder (settings,
-  saves, caches, online identity) and its own log folder, pointed at a lobby.
+  saves, caches, online identity) and its own log folder, on the production online service.
 .DESCRIPTION
   Instance "a" uses user\test-client-a and build\logs\test-client-a, instance "b" the same with "b", and so on. The first
   start copies dcp.ini and the saves from the main user folder (-CopyFrom) so both instances can play right away; later
@@ -9,15 +9,12 @@
   bind gets another UDP port automatically (the game's port 3658 is taken by the first).
   Runs the launcher; Online play is the instance's own switch unless -ForceOnline. Nothing here is used by normal play.
 .EXAMPLE
-  tools\online-lobby.ps1                       # window 1: the development lobby
-  tools\online-instance.ps1 -Name a            # window 2
-  tools\online-instance.ps1 -Name b            # window 3
-  tools\online-instance.ps1 -Name a -Lobby wss://dcp-lobby.saulobenigno.workers.dev   # through the production lobby
+  tools\online-instance.ps1 -Name a            # terminal 1
+  tools\online-instance.ps1 -Name b            # terminal 2
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9-]{1,16}$')][string]$Name,
-    [string]$Lobby = 'ws://127.0.0.1:8790/',
     [string]$OnlineName = '',
     [string]$JoinCode = '',
     [string]$CopyFrom = '',
@@ -48,7 +45,6 @@ New-Item -ItemType Directory -Force $logs | Out-Null
 
 # Online settings for this process only; the instance's dcp.ini is not changed.
 if ($ForceOnline) { $env:DCP_ONLINE = '1' } else { Remove-Item Env:DCP_ONLINE -ErrorAction SilentlyContinue }
-$env:DCP_LOBBY = $Lobby
 # Without -OnlineName the instance uses the Online name of its own launcher page, as friends see it.
 if ($OnlineName) { $env:DCP_ONLINE_NAME = $OnlineName } else { Remove-Item Env:DCP_ONLINE_NAME -ErrorAction SilentlyContinue }
 if ($JoinCode) { $env:DCP_JOIN_CODE = $JoinCode } else { Remove-Item Env:DCP_JOIN_CODE -ErrorAction SilentlyContinue }
@@ -56,7 +52,9 @@ if ($JoinCode) { $env:DCP_JOIN_CODE = $JoinCode } else { Remove-Item Env:DCP_JOI
 if (-not $env:DCP_STORY_SKIP) { $env:DCP_STORY_SKIP = '1' }
 if (-not $env:DCP_TUTORIAL_SKIP) { $env:DCP_TUTORIAL_SKIP = '1' }
 
-Write-Step "Instance $Name (Client$($Name.ToUpper())) via $Lobby$(if ($OnlineName) { " as $OnlineName" })"
+Write-Step "Online test instance $($Name.ToUpper())$(if ($OnlineName) { " as $OnlineName" })"
+# DCP_LOBBY, set by the caller, is the developer override; the script never sets it.
+Write-Host "  Online service: $(if ($env:DCP_LOBBY) { "DCP_LOBBY override $env:DCP_LOBBY" } else { 'production' })"
 Write-Host "  user folder: $user"
 Write-Host "  logs:        $logs"
 Start-Process -FilePath $Executable -ArgumentList @('--user', "`"$user`"", '--logs', "`"$logs`"", '--launcher') -WorkingDirectory (Split-Path -Parent $Executable)
