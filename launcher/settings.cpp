@@ -16,6 +16,7 @@
 #include "game_files.h"
 #include "game_process.h"
 #include "online_settings.h"
+#include "text_languages.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -116,7 +117,7 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == kTextLanguageKey) {
         const std::span<const GameBuild> builds = SupportedBuilds();
-        return std::any_of(builds.begin(), builds.end(), [&](const GameBuild& build) {
+        return value == kRussianKey || std::any_of(builds.begin(), builds.end(), [&](const GameBuild& build) {
             return std::any_of(build.text_languages.begin(), build.text_languages.end(),
                                [&](const TextLanguage& language) { return value == language.key; });
         });
@@ -269,6 +270,16 @@ bool TurnCheatsOff(trg::SettingsStore& settings) {
     return changed;
 }
 
+bool NormalizeTextLanguage(trg::SettingsStore& settings, std::span<const TextLanguage> languages) {
+    const std::string saved = settings.Get(kTextLanguageKey, languages.front().key);
+    const std::string_view effective = ResolveTextLanguage(languages, saved).key;
+    if (saved == effective) {
+        return false;
+    }
+    settings.Set(kTextLanguageKey, std::string(effective));
+    return true;
+}
+
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once) {
     if (!game_ready) {
         return true;
@@ -356,11 +367,20 @@ extern "C" int dcp_detailed_logging(const char* settings_file) {
     return settings.GetBool(kDetailedLoggingKey, true) ? 1 : 0;
 }
 
-extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char* image_dir) {
+extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char* image_dir, const char* app0) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     const GameBuild* build = BuildOfImageDir(image_dir);
-    const TextLanguage& language = ResolveTextLanguage(build, settings.Get(kTextLanguageKey));
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    if (!SameLanguages(languages, TextLanguagesOf(build))) {
+        std::printf("Gameplay: Menu & Subtitles languages in %s: %s\n", build->regional_archive,
+                    LanguageNames(languages).c_str());
+    }
+    const std::string saved = settings.Get(kTextLanguageKey);
+    const TextLanguage& language = ResolveTextLanguage(languages, saved);
+    if (const std::string note = UnavailableLanguageNote(saved, language); !note.empty()) {
+        std::printf("Gameplay: %s\n", note.c_str());
+    }
     std::printf("Gameplay: Menu & Subtitles %.*s\n", static_cast<int>(language.name.size()), language.name.data());
     std::printf("Gameplay: Frame rate %s\n",
                 FrameRateLabel(std::atoi(settings.Get(kFrameRateKey, "60").c_str())).c_str());
@@ -378,9 +398,10 @@ extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char*
                 kSeparateGameProcessAvailable ? (overlays ? "on" : "off") : "unsupported");
 }
 
-extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {
+extern "C" int dcp_text_language(const char* settings_file, const char* image_dir, const char* app0) {
     using namespace dcp;
     const GameBuild* build = BuildOfImageDir(image_dir);
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
-    return ResolveTextLanguage(build, settings.Get(kTextLanguageKey)).ps4_id;
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    return ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).ps4_id;
 }

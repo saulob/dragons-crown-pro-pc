@@ -570,14 +570,14 @@ int main(int argc, char **argv) {
     render_target=dcp_render_target(render_resolution,aspect_ratio);
     const int true_ultrawide_requested=dcp_true_ultrawide(settings_file);
     runtime_dcp_set_neo_mode(render_target.pro_memory);
-    runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
+    runtime_set_language(dcp_text_language(settings_file,paths.image_dir,app0));
     runtime_pad_set_settings(settings_file);
     runtime_cheats_set_slot_human(runtime_pad_slot_human);
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
-    dcp_log_gameplay_settings(settings_file, paths.image_dir);
+    dcp_log_gameplay_settings(settings_file, paths.image_dir, app0);
     printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
     if (known_build && game_build.cheats) {
         runtime_cheats_log_enabled();

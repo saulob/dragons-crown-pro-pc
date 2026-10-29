@@ -309,12 +309,23 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
 ## Gameplay
 
-- **Menu & Subtitles**: the language of the game's menus and subtitle text (`text_language`: `english`, `french`,
-  `german`, `italian`, `spanish`; English by default). The game ships text for these five. The Asia/Hong Kong build
-  (CUSA10209) ships Traditional Chinese and Korean instead (`traditional_chinese`, `korean`; Traditional Chinese by
-  default) and has no Western or Simplified Chinese text. Korean is not yet tested in game. A saved language the active
-  build does not have is replaced by that build's default. An explicit `DCP_LANGUAGE` environment variable (a PS4 language number) overrides it.
-  Voices are chosen inside the game.
+- **Menu & Subtitles**: the language of the game's menus and subtitle text (`text_language`). Each build offers only
+  the languages it can show; the first is the default:
+
+  | Build | Languages |
+  | --- | --- |
+  | CUSA10454 1.00 USA | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
+  | CUSA10454 1.01 USA | the ones its `DRACRO_US.CPK` holds (see below) |
+  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese (`japanese`): the executable does not read the system language |
+  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean (`traditional_chinese`, `korean`) |
+
+  For the USA and Asia/Hong Kong builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
+  `DRACRO_CK.CPK`): a language is offered only when the archive holds its set of message sheets and stage files, and a
+  set whose `SystemMsg` sheet is Russian text is offered as Russian (`russian`), with the system language of that set.
+  When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
+  language the installed game does not have is replaced by its first one, and the log says so
+  (`Gameplay: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
+  environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 USA only; the option is hidden for
   the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
   town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices

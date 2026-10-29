@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "dcp_cheats.h"
+#include "game_profile.h"
 #include "trg/settings.h"
 
 namespace dcp {
@@ -119,6 +120,10 @@ private:
 
 // Online Play keeps every saved cheat Off, both multipliers included. True when a setting changed (pending until Save).
 bool TurnCheatsOff(trg::SettingsStore& settings);
+
+// A saved text_language that is not one of `languages` (not empty) becomes the first of them. True when it changed
+// (pending until Save).
+bool NormalizeTextLanguage(trg::SettingsStore& settings, std::span<const TextLanguage> languages);
 
 // The launcher opens when the game files are not ready, or when the setting is On or Shift is held, unless it was
 // skipped once. A game that is not ready always shows it: it is where the files are installed.

@@ -61,10 +61,10 @@ int dcp_render_resolution(const char *settings_file, const char *image_dir);
  * from: 0 (16:9 Original) when the file or the value is missing or the build has no verified render resolution sites. */
 int dcp_aspect_ratio(const char *settings_file, const char *image_dir);
 
-/* The system language the game is told for the text_language in the settings file, among the languages of the build
- * image_dir was built from: the build's default (English when the build is unknown) when the file or the value is
- * missing or not one of them. */
-int dcp_text_language(const char *settings_file, const char *image_dir);
+/* The system language the game is told for the text_language in the settings file, among the languages the prepared
+ * game folder app0 holds of the build image_dir was built from: the first of them (English when the build is unknown)
+ * when the file or the value is missing or not one of them. */
+int dcp_text_language(const char *settings_file, const char *image_dir, const char *app0);
 
 /* The cheats the settings file turns on, one bit per cheat (dcp_cheats.h); 0 when the file or the keys are missing. */
 unsigned dcp_saved_cheats(const char *settings_file);
@@ -90,7 +90,7 @@ unsigned dcp_skip_offers(const char *settings_file);
 int dcp_detailed_logging(const char *settings_file);
 
 /* Prints the effective Gameplay page settings, including the Japanese NPC Voices state after build gating. */
-void dcp_log_gameplay_settings(const char *settings_file, const char *image_dir);
+void dcp_log_gameplay_settings(const char *settings_file, const char *image_dir, const char *app0);
 
 /* Starts the game process dcp_launcher_run created suspended. Call it once nothing writes to the log any more; 1 when
  * it runs. A process that could not be started is ended. */

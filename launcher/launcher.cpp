@@ -46,6 +46,7 @@
 #include "prompts_patch.h"
 #include "settings.h"
 #include "shift_key.h"
+#include "text_languages.h"
 #include "trophy_page.h"
 #include "update_config.h"
 #include "updater/update_platform.h"
@@ -295,7 +296,8 @@ enum class Outcome { kRunning, kPlay, kQuit };
 class LauncherApp {
 public:
     LauncherApp(const DcpLauncherConfig& config, LauncherSettings& settings, GamePaths paths, GameCheck check)
-        : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state), build_(check.build) {}
+        : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state), build_(check.build),
+          text_languages_(InstalledTextLanguages(paths_.app0, build_)) {}
 
     bool game_process_started() const { return game_process_started_; }
 
@@ -391,6 +393,7 @@ private:
         KeepCheatsOffOnline();
         NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
+        NormalizeTextLanguage(settings_, text_languages_);
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
             if (!SeparateGameProcess(config_, settings_)) {
                 return Outcome::kPlay;
@@ -540,6 +543,8 @@ private:
         const GameCheck check = CheckAndLog(paths_);
         files_ = check.state;
         build_ = check.build;
+        text_languages_ = InstalledTextLanguages(paths_.app0, build_);
+        NormalizeTextLanguage(settings_, text_languages_);
     }
 
     // A build whose executable has no verified render resolution sites runs at its native 16:9 size; a saved custom
@@ -919,17 +924,11 @@ private:
     }
 
     void PageGameplay(trg::Ui& ui) {
-        const std::span<const TextLanguage> available = TextLanguagesOf(build_);
         std::vector<trg::Option> languages;
-        for (const TextLanguage& language : available) {
+        for (const TextLanguage& language : text_languages_) {
             languages.push_back({std::string(language.key), std::string(language.name)});
         }
-        const std::string saved = settings_.Get(kTextLanguageKey, available.front().key);
-        const std::string_view effective = ResolveTextLanguage(build_, saved).key;
-        if (saved != effective) {
-            settings_.Set(kTextLanguageKey, std::string(effective));
-        }
-        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, available.front().key.data(), languages);
+        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, text_languages_.front().key.data(), languages);
         if (SupportsJapaneseNpcVoices(build_)) {
             ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
         }
@@ -1252,6 +1251,7 @@ private:
     GamePaths paths_;
     GameFileState files_;
     const GameBuild* build_ = nullptr;
+    std::vector<TextLanguage> text_languages_;
     LauncherHost host_;
     ImTextureID header_art_{};
     ImTextureID sponsor_icon_{};
