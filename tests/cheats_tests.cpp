@@ -298,6 +298,18 @@ void TestMenuModel() {
     CHECK(!MenuNeedsScrollbar(50.0f, 50.0f));
     CHECK(!MenuNeedsScrollbar(51.0f, 50.0f));
     CHECK(MenuNeedsScrollbar(51.5f, 50.0f));
+
+    // Navigation moves the visible part of the list only as far as the selected row needs.
+    CHECK(MenuScrollToShowRow(100.0f, 120.0f, 80.0f, 200.0f) == 0.0f);  // already visible
+    CHECK(MenuScrollToShowRow(80.0f, 100.0f, 80.0f, 200.0f) == 0.0f);   // first row at the top
+    CHECK(MenuScrollToShowRow(180.0f, 200.0f, 80.0f, 200.0f) == 0.0f);  // last row at the bottom
+    CHECK(MenuScrollToShowRow(60.0f, 90.0f, 80.0f, 200.0f) == -20.0f);  // above: reveal its top
+    CHECK(MenuScrollToShowRow(190.0f, 220.0f, 80.0f, 200.0f) == 20.0f); // below: reveal its bottom
+    for (const float dpi : {1.0f, 1.25f, 1.5f, 2.0f}) {
+        CHECK(MenuScrollToShowRow(100.0f * dpi, 120.0f * dpi, 80.0f * dpi, 200.0f * dpi) == 0.0f);
+        CHECK(MenuScrollToShowRow(60.0f * dpi, 90.0f * dpi, 80.0f * dpi, 200.0f * dpi) == -20.0f * dpi);
+        CHECK(MenuScrollToShowRow(190.0f * dpi, 220.0f * dpi, 80.0f * dpi, 200.0f * dpi) == 20.0f * dpi);
+    }
     for (const float display : {2.0f, 2.5f, 3.0f}) { // smaller than the first oversized menu, larger than the tiny one
         CHECK(MenuScale(display, 3840, 18) < display && MenuScale(display, 3840, 18) > 1.0f);
     }
@@ -312,6 +324,7 @@ void TestMenuModel() {
     CHECK(overlay.find("MenuScale(") != std::string::npos);
     CHECK(overlay.find("MenuBodyHeight(") != std::string::npos);
     CHECK(overlay.find("MenuNeedsScrollbar(") != std::string::npos);
+    CHECK(overlay.find("MenuScrollToShowRow(") != std::string::npos);
     CHECK(overlay.find("needs_scrollbar ? ImGuiWindowFlags_AlwaysVerticalScrollbar : ImGuiWindowFlags_NoScrollbar") !=
           std::string::npos);
     const size_t child = overlay.find("BeginChild(\"##cheat_rows\"");

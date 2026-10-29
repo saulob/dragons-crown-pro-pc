@@ -44,6 +44,18 @@ int main(void) {
         !strstr(text, "raw stdout") || !strstr(text, "raw stderr") ||
         !strstr(text, "direct line")) return 5;
 
+    /* The game process continues the launcher's log once the launcher let go of it. */
+    runtime_log_release();
+    char continued[4200], missing[4200];
+    if (!runtime_log_continue(log, continued, sizeof(continued)) || strcmp(continued, log)) return 7;
+    printf("game line\n");
+    fflush(NULL);
+    runtime_log_flush();
+    if (!read_all(log, text, sizeof(text))) return 8;
+    const char *launcher_line = strstr(text, "stdout line"), *game_line = strstr(text, "game line");
+    if (!launcher_line || !game_line || game_line < launcher_line) return 9;
+    if (runtime_log_continue("C:\\dcp-missing-folder\\none.log", missing, sizeof(missing))) return 10;
+
     runtime_log_set_detailed(0);
     runtime_log_mark_clean_exit();
     runtime_log_finalize();

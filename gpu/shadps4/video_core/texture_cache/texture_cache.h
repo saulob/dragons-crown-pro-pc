@@ -220,7 +220,7 @@ public:
 
     /// Retrieves the image with the specified id.
     Image* TryGetImage(ImageId id, u64 uid) {
-        if (!slot_images.is_allocated(id)) return nullptr;
+        if (!id || !slot_images.is_allocated(id)) return nullptr;
         auto& image = slot_images[id];
         return !uid || image.image_uid == uid ? &image : nullptr;
     }

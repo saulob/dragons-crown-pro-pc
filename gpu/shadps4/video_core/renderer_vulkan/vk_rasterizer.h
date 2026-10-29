@@ -282,6 +282,8 @@ private:
     /// Whether every texture of `stage` takes the memoized path without refreshing, creating or
     /// redirecting anything that records commands or touches the buffer cache.
     bool TexturesBindableOnHelper(const Shader::Info& stage, const PreparedStage* prepared);
+    /// The depth-stencil image a sampled stencil texture redirects to, if any.
+    VideoCore::ImageId LinkedDepth(VideoCore::Image& image);
     static void RunTextureTask(void* rasterizer);
     static void JoinBindHelper(void* rasterizer);
 
@@ -452,6 +454,10 @@ private:
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
     bool needs_barrier{};
+    /// The AMD water fix (DcpAmdWaterFix) as of this draw's BindResources: F3 never splits a draw.
+    bool water_fix{};
+    /// This draw's depth target is attached in a layout that writes depth or stencil.
+    bool depth_target_writes{};
     // dcp: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).
     static inline thread_local const AmdGpu::Regs* stage_regs = nullptr;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 0.7.1 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 0.8.0 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -78,14 +78,21 @@ set_source_files_properties(src/runtime_font.c PROPERTIES
 
 if (WIN32)
     enable_language(RC)
+    # Focused tests of the sparse guest memory backing (tools/test.ps1); not part of the default build.
+    add_executable(dcp-memory-windows-tests EXCLUDE_FROM_ALL tests/memory_windows_tests.c)
+    target_include_directories(dcp-memory-windows-tests PRIVATE src)
+    target_compile_definitions(dcp-memory-windows-tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_compile_options(dcp-memory-windows-tests PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(dcp-memory-windows-tests PRIVATE onecore -pthread)
+    target_link_options(dcp-memory-windows-tests PRIVATE -Wl,--disable-high-entropy-va)
     # Relink when the application icon, the manifest or the version changes.
     set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
-    set(DCP_PLATFORM_SOURCES src/compat_win.c src/runtime_log.c src/dragons_crown_pro.rc)
+    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/runtime_log.c src/dragons_crown_pro.rc)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/startup_save_hook.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/startup_save_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -108,12 +115,15 @@ else()
     target_link_libraries(dragons_crown_pro PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
-# The launcher reads its header art next to the executable.
+# The launcher reads its images next to the executable.
 add_custom_command(TARGET dragons_crown_pro POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/header-art.png"
         "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/header-art.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/sponsor-heart.png"
+        "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/sponsor-heart.png"
     VERBATIM)
 
 if (WIN32)
@@ -123,7 +133,7 @@ if (WIN32)
     target_compile_options(dcp-log-tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
-# Focused tests of the MOVBE emulation used when the host CPU lacks the instruction.
+# Focused tests of the MOVBE and BMI1 emulation used when the host CPU lacks the instructions.
 add_executable(dcp-isa-tests EXCLUDE_FROM_ALL tests/isa_tests.c src/isa_emulate.c)
 target_include_directories(dcp-isa-tests PRIVATE src)
 target_compile_options(dcp-isa-tests PRIVATE -Wall -Wextra -Werror)
@@ -178,10 +188,46 @@ set_target_properties(dcp-window-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_R
 target_include_directories(dcp-window-tests PRIVATE src)
 target_compile_options(dcp-window-tests PRIVATE -Wall -Wextra -Werror)
 
+# Focused tests of the swapchain image count, present mode, Gamescope detection and the Gamescope-only flip pacing;
+# not part of the default build.
+add_executable(dcp-present-tests EXCLUDE_FROM_ALL tests/present_tests.cpp)
+set_target_properties(dcp-present-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-present-tests PRIVATE gpu/shim)
+target_compile_definitions(dcp-present-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-present-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the experimental AMD water fix switch (issue #32); not part of the default build.
+add_executable(dcp-amd-water-tests EXCLUDE_FROM_ALL tests/amd_water_fix_tests.cpp)
+set_target_properties(dcp-amd-water-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-amd-water-tests PRIVATE gpu/shim)
+target_compile_definitions(dcp-amd-water-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-amd-water-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the Frame rate setting's presentation pacing (tools/test.ps1); not part of the default build.
+add_executable(dcp-frame-pacing-tests EXCLUDE_FROM_ALL tests/frame_pacing_tests.cpp)
+set_target_properties(dcp-frame-pacing-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-frame-pacing-tests PRIVATE gpu/shim)
+target_compile_definitions(dcp-frame-pacing-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-frame-pacing-tests PRIVATE -Wall -Wextra -Werror)
+
 # Focused tests of the Japanese NPC voice routing (tools/test.ps1); not part of the default build.
 add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)
 target_include_directories(dcp-voice-tests PRIVATE src)
 target_compile_options(dcp-voice-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+
+# Focused tests of the True Ultrawide hooks (tools/test.ps1); not part of the default build.
+add_executable(dcp-ultrawide-tests EXCLUDE_FROM_ALL tests/ultrawide_tests.c src/guest_hook.c src/ultrawide_hooks.c)
+target_include_directories(dcp-ultrawide-tests PRIVATE src)
+target_compile_options(dcp-ultrawide-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+if(NOT WIN32)
+    target_link_libraries(dcp-ultrawide-tests PRIVATE m)
+endif()
+
+# Focused tests of the True Ultrawide side areas (tools/test.ps1); not part of the default build.
+add_executable(dcp-ultrawide-sides-tests EXCLUDE_FROM_ALL tests/ultrawide_sides_tests.cpp)
+set_target_properties(dcp-ultrawide-sides-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-ultrawide-sides-tests PRIVATE gpu/shim)
+target_compile_options(dcp-ultrawide-sides-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the save-data mounts and the Japanese startup save hook (tools/test.ps1); not part of the default build.
 add_executable(dcp-savedata-tests EXCLUDE_FROM_ALL tests/savedata_tests.c src/guest_hook.c src/startup_save_hook.c)

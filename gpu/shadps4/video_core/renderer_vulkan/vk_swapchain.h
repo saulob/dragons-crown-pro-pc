@@ -4,6 +4,7 @@
 #pragma once
 
 #include <mutex>
+#include <string>
 #include <vector>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -115,11 +116,14 @@ private:
     /// Creates the image acquired and present ready semaphores
     void RefreshSemaphores();
 
+    void LogImages();
+
 private:
     const Instance& instance;
     const Frontend::WindowSDL& window;
     vk::SwapchainKHR swapchain{};
     vk::SurfaceKHR surface{};
+    const bool gamescope; ///< Gamescope session: low-latency image count
     vk::SurfaceFormatKHR surface_format;
     vk::Format view_format;
     vk::PresentModeKHR present_mode;
@@ -133,7 +137,12 @@ private:
     std::vector<vk::Semaphore> present_ready;
     u32 width = 0;
     u32 height = 0;
-    u32 image_count = 0;
+    u32 image_count = 0; ///< what the swapchain returned, not what was requested
+    u32 requested_images = 0;
+    u32 surface_min_images = 0;
+    u32 surface_max_images = 0;
+    bool logged_modes = false;
+    std::string logged_images;
     u32 image_index = 0;
     u32 frame_index = 0;
     bool needs_recreation = true;

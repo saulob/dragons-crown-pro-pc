@@ -37,6 +37,13 @@ int dcpgpu_choice_poll(void);
 void dcpgpu_choice_set_input(uint32_t (*buttons)(void));
 /* 1 while the settings menu is open: the game's pad input should be held neutral. */
 int dcpgpu_overlay_captures_input(void);
+/* DCP_INPUT_LATENCY_TRACE=1: 1 when set; the SDL_GetTicksNS time of the newest host button or key press. */
+int dcpgpu_latency_trace_enabled(void);
+uint64_t dcpgpu_latency_press_ns(void);
+
+/* 1 while the final presenter should black out the ultrawide side extensions for the frame being built: the real
+ * loading/saving fade is drawn, or the fixed-screen transition fallback is active. Set once per guest frame. */
+void dcpgpu_ultrawide_side_mask(int wanted);
 #ifdef __cplusplus
 }
 #endif

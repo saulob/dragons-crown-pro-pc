@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <fstream>
 #include <initializer_list>
@@ -13,6 +14,7 @@
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
 #include "game_files.h"
+#include "game_process.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -31,10 +33,12 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kSharpenStrengthKey, "75"},
     {kRenderResolutionKey, kNativeResolution},
     {kAspectRatioKey, kDefaultAspectRatio},
-    {kGraphicsCardKey, kAutomaticGpu},
+    {kTrueUltrawideKey, "0"},
+    {kGraphicsCardKey, ""},
     {kAntiAliasingKey, "0"},
     {kAnisotropyKey, "0"},
     {kTextLanguageKey, "english"},
+    {kFrameRateKey, "60"},
     {kShowFpsTitleKey, "0"},
     {kShowResolutionTitleKey, "0"},
     {kShowFrameCounterKey, "0"},
@@ -42,6 +46,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kControllerPromptsKey, "playstation"},
     {kArachnophobiaSafeModeKey, "0"},
     {kJapaneseNpcVoicesKey, "0"},
+    {kAllowOverlayProgramsKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
     {cheats::kInfiniteAllyHealthKey, "0"},
     {cheats::kInfiniteManaKey, "0"},
@@ -107,6 +112,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
             return std::any_of(build.text_languages.begin(), build.text_languages.end(),
                                [&](const TextLanguage& language) { return value == language.key; });
         });
+    }
+    if (key == kFrameRateKey) {
+        return one_of({"30", "60", "90", "120", "144", "165", "240", "0"});
     }
     if (key == kPresentationKey) {
         return std::any_of(std::begin(kPresentationChoices), std::end(kPresentationChoices),
@@ -219,6 +227,16 @@ bool LauncherSettings::WriteFile(const Values& changes) {
     return file.Save();
 }
 
+std::string FrameRateLabel(int fps) {
+    if (fps == 0) {
+        return "Unlimited";
+    }
+    if (fps == 60) {
+        return "60 FPS (Original)";
+    }
+    return std::to_string(fps) + " FPS";
+}
+
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once) {
     if (!game_ready) {
         return true;
@@ -282,6 +300,15 @@ extern "C" int dcp_japanese_npc_voices(const char* settings_file) {
     return settings.GetBool(kJapaneseNpcVoicesKey, false) ? 1 : 0;
 }
 
+extern "C" int dcp_true_ultrawide(const char* settings_file) {
+    using namespace dcp;
+    if (!settings_file || !*settings_file) {
+        return 0;
+    }
+    const LauncherSettings settings(PathFromUtf8(settings_file));
+    return settings.GetBool(kTrueUltrawideKey, false) ? 1 : 0;
+}
+
 extern "C" int dcp_detailed_logging(const char* settings_file) {
     using namespace dcp;
     if (!settings_file || !*settings_file) {
@@ -297,6 +324,8 @@ extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char*
     const GameBuild* build = BuildOfImageDir(image_dir);
     const TextLanguage& language = ResolveTextLanguage(build, settings.Get(kTextLanguageKey));
     std::printf("Gameplay: Menu & Subtitles %.*s\n", static_cast<int>(language.name.size()), language.name.data());
+    std::printf("Gameplay: Frame rate %s\n",
+                FrameRateLabel(std::atoi(settings.Get(kFrameRateKey, "60").c_str())).c_str());
     std::printf("Gameplay: Frame rate in title %s\n", settings.GetBool(kShowFpsTitleKey, false) ? "on" : "off");
     std::printf("Gameplay: Render resolution in title %s\n",
                 settings.GetBool(kShowResolutionTitleKey, false) ? "on" : "off");
@@ -306,6 +335,9 @@ extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char*
     const bool supported = SupportsJapaneseNpcVoices(build);
     const bool voices = supported && settings.GetBool(kJapaneseNpcVoicesKey, false);
     std::printf("Gameplay: Japanese NPC Voices %s\n", supported ? (voices ? "on" : "off") : "unsupported");
+    const bool overlays = kSeparateGameProcessAvailable && settings.GetBool(kAllowOverlayProgramsKey, false);
+    std::printf("Gameplay: Allow overlay programs %s\n",
+                kSeparateGameProcessAvailable ? (overlays ? "on" : "off") : "unsupported");
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {

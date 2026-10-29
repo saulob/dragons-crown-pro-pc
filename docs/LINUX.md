@@ -60,7 +60,7 @@ Run the second command from the repository folder. A Docker `ubuntu:20.04` conta
 
 ## Windows parity
 
-Linux offers every Windows feature. Where the platforms differ, this is the Linux-native equivalent:
+Linux offers every Windows feature except **Allow overlay programs**. Where the platforms differ, this is the Linux-native equivalent:
 
 | Windows | Linux |
 | --- | --- |
@@ -70,10 +70,16 @@ Linux offers every Windows feature. Where the platforms differ, this is the Linu
 | Launcher and game window positions are restored | restored on X11; a Wayland compositor decides where windows go, so the position may not be restored there |
 | Data next to `dragons_crown_pro.exe` | next to the AppImage file (the AppImage's own mount is read-only); `$XDG_DATA_HOME/DragonsCrownProPC` when that folder is not writable |
 | `tools\package-release.ps1` | builds the AppImage in WSL2 with `tools/package-release-linux.sh`, or run `tools/package-linux.sh` on Linux |
+| **Allow overlay programs** starts the game as a process of its own so overlay DLLs attach to a clean process | not offered: Linux overlays are Vulkan layers and `LD_PRELOAD` libraries that attach to every process the same way, and no Linux overlay crash has been reported |
 
 Everything else (display mode, F11, window size, monitor and graphics card selection, VSync, render resolutions,
-SMAA, texture filtering, FSR 1 and RCAS, frame rate readouts, the in-game menu, controller and keyboard input, saves,
+the Frame rate option, Experimental True Ultrawide, SMAA, texture filtering, FSR 1 and RCAS, the F3 AMD water fix,
+the processor check and BMI1 emulation, frame rate readouts, the in-game menu, controller and keyboard input, saves,
 shader cache, per-run logs, audio, reinstalling without losing user data) is the same code on both platforms.
+The graphics card list is the Vulkan loader's order on both. Under Gamescope (Steam Deck Gaming Mode) the game also holds
+a guest flip until the presenter has taken the previous frame and asks for the surface's minimum image count, which keeps
+a Steam frame limit from queueing frames. Gamescope paces presentation itself, so VSync Off and Frame rate settings above
+the display's refresh may not show there.
 
 ## AppImage
 

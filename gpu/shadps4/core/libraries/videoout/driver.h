@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <deque>
 #include <functional>
 
@@ -102,6 +103,7 @@ private:
         s64 flip_arg;
         s32 index;
         bool eop;
+        std::chrono::steady_clock::time_point submitted;
 
         operator bool() const noexcept {
             return frame != nullptr;
@@ -111,6 +113,7 @@ private:
     void Flip(const Request& req);
     void DrawBlankFrame(); // Video port out not open
     void DrawLastFrame();  // Used when there is no flip request
+    void RepeatLastFrame(); // Frame rate above 60: the last frame again between two flips
     void SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
     void PresentThread(std::stop_token token);
     /// Runs presenter work (acquire, blit, vkQueuePresent) off the vblank thread, in order:
@@ -118,6 +121,7 @@ private:
     /// vblank events on the vblank thread.
     void SwapThread(std::stop_token token);
     void RunPresenter(std::function<void()> work, bool if_idle = false);
+    bool FlipWaitsForPresenter();
 
     std::mutex swap_mutex;
     std::condition_variable_any swap_cv;
@@ -129,6 +133,7 @@ private:
     VideoOutPort main_port{};
     std::jthread present_thread;
     std::queue<Request> requests;
+    u64 flips_consumed = 0; ///< present thread only
 };
 
 } // namespace Libraries::VideoOut

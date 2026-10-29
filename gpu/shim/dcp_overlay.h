@@ -32,6 +32,9 @@ void SetLoading(bool active, u32 done, u32 total);
 /// Background cache warm-up: a small corner note while the game runs; `total` 0 hides it.
 void SetBackgroundLoading(u32 done, u32 total);
 
+/// A short message at the top of the screen for two seconds (any thread).
+void ShowNotice(const std::string& text);
+
 /// Whether anything is drawn this frame (menu open or frame counter on).
 bool Visible();
 

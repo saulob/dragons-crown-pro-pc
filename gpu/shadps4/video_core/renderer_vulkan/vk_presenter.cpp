@@ -15,6 +15,7 @@
 #include "dcp_overlay.h"
 #include "dcp_settings.h"
 #include "dcp_graphics.h"
+#include "dcp_ultrawide_sides.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/texture_cache/image.h"
@@ -41,6 +42,11 @@
 #ifdef MemoryBarrier
 #undef MemoryBarrier // winnt.h macro (through fmt), clashes with vk::MemoryBarrier
 #endif
+
+namespace {
+// Set by the guest's True Ultrawide hooks (src/ultrawide_hooks.c), once per guest frame.
+std::atomic<bool> g_ultrawide_side_mask{false};
+} // namespace
 
 namespace Vulkan {
 
@@ -560,6 +566,47 @@ void Presenter::PresentLoadingFrame() {
     present_scheduler.Finish();
 }
 
+/// Blacks out the ultrawide side areas of the already-blitted swapchain picture, the real loading or saving fade or
+/// the fixed-screen transition fallback asked for it: nothing after this, only the layout transition to present,
+/// can put colour back into them. `attachment` must already be bound as colour attachment 0, `eColorAttachmentOptimal`.
+void PresentUltrawideSideMask(vk::CommandBuffer cmdbuf, vk::ImageView attachment, s32 width, s32 height,
+                              s32 offset_x, s32 offset_y) {
+    const bool wanted = g_ultrawide_side_mask.load(std::memory_order_relaxed) && width > 0 && height > 0;
+    const auto sides = wanted ? DcpUltrawide::SidesOf({u32(width), u32(height)}) : DcpUltrawide::SideAreas{};
+    if (sides.left.Empty()) {
+        return;
+    }
+    const auto to_rect = [&](const DcpUltrawide::Rect& r) {
+        return vk::ClearRect{
+            .rect = {{offset_x + s32(r.left), offset_y + s32(r.top)}, {r.right - r.left, r.bottom - r.top}},
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+    };
+    const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+    const vk::ClearAttachment clear_colour{
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .colorAttachment = 0,
+        .clearValue = black,
+    };
+    const std::array rects{to_rect(sides.left), to_rect(sides.right)};
+    const vk::RenderingAttachmentInfo attachment_info{
+        .imageView = attachment,
+        .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp = vk::AttachmentLoadOp::eLoad,
+        .storeOp = vk::AttachmentStoreOp::eStore,
+    };
+    const vk::RenderingInfo rendering_info{
+        .renderArea = {{0, 0}, {u32(offset_x) + u32(width), u32(offset_y) + u32(height)}},
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &attachment_info,
+    };
+    cmdbuf.beginRendering(rendering_info);
+    cmdbuf.clearAttachments(std::array{clear_colour}, rects);
+    cmdbuf.endRendering();
+}
+
 void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
     // Free the frame for reuse (a reused frame was taken out of the queue by PrepareLastFrame).
     const auto free_frame = [&] {
@@ -661,17 +708,16 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                        : MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height);
         cmdbuf.blitImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
                          vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
-        // The settings menu and the frame counter over the frame, at display resolution.
+        // The settings menu, the frame counter and the ultrawide side mask over the frame, at display resolution:
+        // all three need the swapchain image as a colour attachment, so every path goes through it now.
         const bool overlay = DcpOverlay::Visible();
         const std::array post_barriers{
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-                .dstAccessMask = overlay ? vk::AccessFlagBits::eColorAttachmentRead |
-                                               vk::AccessFlagBits::eColorAttachmentWrite
-                                         : vk::AccessFlagBits::eNone,
+                .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead |
+                                 vk::AccessFlagBits::eColorAttachmentWrite,
                 .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-                .newLayout = overlay ? vk::ImageLayout::eColorAttachmentOptimal
-                                     : vk::ImageLayout::ePresentSrcKHR,
+                .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = swapchain_image,
@@ -691,23 +737,26 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                                vk::PipelineStageFlagBits::eAllCommands,
                                vk::DependencyFlagBits::eByRegion, {}, {}, post_barriers);
+        PresentUltrawideSideMask(cmdbuf, swapchain.ImageView(), blit.dstOffsets[1].x - blit.dstOffsets[0].x,
+                                 blit.dstOffsets[1].y - blit.dstOffsets[0].y, blit.dstOffsets[0].x,
+                                 blit.dstOffsets[0].y);
         DcpOverlay::LogPresent();
         if (overlay) {
             DcpOverlay::Render(cmdbuf, swapchain.ImageView(), extent);
-            const vk::ImageMemoryBarrier to_present{
-                .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
-                .dstAccessMask = vk::AccessFlagBits::eNone,
-                .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .newLayout = vk::ImageLayout::ePresentSrcKHR,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = swapchain_image,
-                .subresourceRange = color_range,
-            };
-            cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                                   vk::PipelineStageFlagBits::eBottomOfPipe,
-                                   vk::DependencyFlagBits::eByRegion, {}, {}, to_present);
         }
+        const vk::ImageMemoryBarrier to_present{
+            .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+            .dstAccessMask = vk::AccessFlagBits::eNone,
+            .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .newLayout = vk::ImageLayout::ePresentSrcKHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = swapchain_image,
+            .subresourceRange = color_range,
+        };
+        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                               vk::PipelineStageFlagBits::eBottomOfPipe,
+                               vk::DependencyFlagBits::eByRegion, {}, {}, to_present);
     }
     if (EmulatorSettings.IsVkHostMarkersEnabled()) {
         cmdbuf.endDebugUtilsLabelEXT();
@@ -736,6 +785,13 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     if (!is_reusing_frame && is_game_frame) {
         DebugState.IncFlipFrameNum();
     }
+}
+
+void Presenter::RetireFrame(Frame* frame) {
+    std::scoped_lock fl{free_mutex};
+    last_submit_frame = frame;
+    free_queue.push_back(frame);
+    free_cv.notify_one();
 }
 
 Frame* Presenter::GetRenderFrame() {
@@ -797,3 +853,7 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
 }
 
 } // namespace Vulkan
+
+extern "C" void dcpgpu_ultrawide_side_mask(int wanted) {
+    g_ultrawide_side_mask.store(wanted != 0, std::memory_order_relaxed);
+}

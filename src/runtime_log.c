@@ -90,17 +90,14 @@ static DWORD WINAPI echo_log(LPVOID unused) {
     }
 }
 
-int runtime_log_start(const char *dir, const char *file, char *path, size_t size) {
-    void *created;
-    if (!runtime_log_create(dir, file, path, size, &created)) return 0;
-    CloseHandle((HANDLE)created);
+static int redirect_to_log(const char *path, int append) {
     runtime_log_set_session_path(path);
     snprintf(direct_log_path, sizeof(direct_log_path), "%s", path);
     HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE), original = NULL;
     if (console && console != INVALID_HANDLE_VALUE && GetFileType(console) != FILE_TYPE_UNKNOWN)
         DuplicateHandle(GetCurrentProcess(), console, GetCurrentProcess(), &original, 0, FALSE, DUPLICATE_SAME_ACCESS);
     fflush(NULL);
-    FILE *out = freopen(path, "w", stdout);
+    FILE *out = freopen(path, append ? "a" : "w", stdout);
     FILE *err = out ? freopen(path, "a", stderr) : NULL;
     if (!out || !err) return 0;
     const int out_fd = _fileno(stdout), err_fd = _fileno(stderr);
@@ -115,6 +112,11 @@ int runtime_log_start(const char *dir, const char *file, char *path, size_t size
     setvbuf(stderr, NULL, _IONBF, 0);
     if (_fileno(stdin) < 0 && freopen("NUL", "r", stdin)) setvbuf(stdin, NULL, _IONBF, 0);
     HANDLE reader = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    LARGE_INTEGER existing = {0};
+    if (append && reader != INVALID_HANDLE_VALUE && GetFileSizeEx(reader, &existing)) {
+        SetFilePointerEx(reader, existing, NULL, FILE_BEGIN);
+        InterlockedExchange64(&echoed, existing.QuadPart);
+    }
     if (original && reader != INVALID_HANDLE_VALUE) {
         echo_source = reader;
         echo_target = original;
@@ -123,6 +125,19 @@ int runtime_log_start(const char *dir, const char *file, char *path, size_t size
         else echo_source = NULL;
     }
     return 1;
+}
+
+int runtime_log_start(const char *dir, const char *file, char *path, size_t size) {
+    void *created;
+    if (!runtime_log_create(dir, file, path, size, &created)) return 0;
+    CloseHandle((HANDLE)created);
+    return redirect_to_log(path, 0);
+}
+
+int runtime_log_continue(const char *file, char *path, size_t size) {
+    if (!file || GetFileAttributesA(file) == INVALID_FILE_ATTRIBUTES) return 0;
+    if (snprintf(path, size, "%s", file) >= (int)size) return 0;
+    return redirect_to_log(path, 1);
 }
 
 void runtime_log_release(void) {

@@ -41,12 +41,31 @@ inline constexpr std::array<int, 5> Anisotropy = {0, 2, 4, 8, 16};
 inline int ParseAnisotropy(int value) {
     return IndexOf(Anisotropy, value, -1) >= 0 ? value : 0;
 }
-/// Index of the device named `request` among `names` (an unusable device has an empty name); -1 for
-/// Automatic, an empty request or a name that is not there.
+/// The usable device names among `names`, in enumeration order (an unusable device has an empty name).
+inline std::vector<std::string> GpuChoices(const std::vector<std::string>& names) {
+    std::vector<std::string> choices;
+    for (const std::string& name : names) {
+        if (!name.empty()) {
+            choices.push_back(name);
+        }
+    }
+    return choices;
+}
+/// Index of the device named `request` among `names` (an unusable device has an empty name); -1 when the
+/// request is empty or names no device.
 inline int FindGpuByName(const std::vector<std::string>& names, std::string_view request) {
-    if (request.empty() || request == "automatic") return -1;
+    if (request.empty()) return -1;
     for (std::size_t i = 0; i < names.size(); ++i) {
         if (!names[i].empty() && names[i] == request) return int(i);
+    }
+    return -1;
+}
+/// The device named `request`, else the first usable device; -1 only when no device is usable.
+inline int ResolveGpuByName(const std::vector<std::string>& names, std::string_view request) {
+    const int found = FindGpuByName(names, request);
+    if (found >= 0) return found;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        if (!names[i].empty()) return int(i);
     }
     return -1;
 }

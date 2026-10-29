@@ -1,0 +1,164 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index 00b405c..40ec972 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -161,8 +161,17 @@ enum class Result { kNone, kPlay, kQuit };
+ 
+ enum class Status { kReady, kAttention, kBusy };
+ 
++// An optional, explicitly activated link to a sponsorship page. With a url it
++// adds a footer button left of Quit and enables Ui::SponsorCard.
++struct SponsorLink {
++  std::string label;
++  std::string url;
++  ImTextureID icon{};  // optional; drawn before the label
++};
++
+ struct LauncherConfig {
+   Branding branding;
++  SponsorLink sponsor;
+   Theme theme = Theme::Midnight();
+   Fonts fonts;
+   SettingsStore* settings = nullptr;  // required; not owned
+@@ -243,6 +252,8 @@ class Ui {
+   void Paragraph(const char* text);  // dim, wrapped
+   void Help(const char* text);       // small, dim, wrapped
+   void Link(const char* text, const std::string& url);  // small, dim hyperlink
++  // A panel with two paragraphs, the sponsor button and its URL; nothing without a sponsor url.
++  void SponsorCard(const char* message, const char* note);
+   void Spacer(float height = 8.0f);
+   bool Section(const char* title, bool open_by_default = false);  // collapsing header
+ 
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 330babd..04c7491 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -117,6 +117,48 @@ float LinkText(ImDrawList* dl, const char* id, ImVec2 pos, ImFont* font, float s
+   return extent.x;
+ }
+ 
++const ImVec4 kSponsorPink(0.79f, 0.18f, 0.50f, 1.0f);
++const ImVec4 kSponsorPinkHot(0.88f, 0.27f, 0.59f, 1.0f);
++const ImVec4 kSponsorPinkActive(0.68f, 0.14f, 0.43f, 1.0f);
++const ImVec4 kSponsorLinkColor(0.92f, 0.40f, 0.68f, 1.0f);
++
++float SponsorIconSize(float font_size) { return font_size * 1.1f; }
++
++float SponsorButtonWidth(const SponsorLink& sponsor, ImFont* font, float font_size, float scale) {
++  const float text = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, sponsor.label.c_str()).x;
++  if (sponsor.icon == ImTextureID{}) return text + 48 * scale;
++  return text + SponsorIconSize(font_size) + 8 * scale + 28 * scale;
++}
++
++bool SponsorButton(const char* id, const SponsorLink& sponsor, ImVec2 pos, ImVec2 size, ImFont* font,
++                   float font_size, float scale) {
++  ImGui::SetCursorScreenPos(pos);
++  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12 * scale);
++  ImGui::PushStyleColor(ImGuiCol_Button, kSponsorPink);
++  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kSponsorPinkHot);
++  ImGui::PushStyleColor(ImGuiCol_ButtonActive, kSponsorPinkActive);
++  const bool pressed = ImGui::Button(id, size);
++  ImGui::PopStyleColor(3);
++  ImGui::PopStyleVar();
++  if (ImGui::IsItemHovered()) {
++    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
++    ImGui::SetItemTooltip("%s", sponsor.url.c_str());
++  }
++  const ImVec2 min = ImGui::GetItemRectMin();
++  const ImVec2 text = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, sponsor.label.c_str());
++  const bool has_icon = sponsor.icon != ImTextureID{};
++  const float icon = has_icon ? SponsorIconSize(font_size) : 0.0f;
++  const float gap = has_icon ? 8 * scale : 0.0f;
++  const float x = min.x + (size.x - (icon + gap + text.x)) * 0.5f;
++  const float cy = min.y + size.y * 0.5f;
++  ImDrawList* dl = ImGui::GetWindowDrawList();
++  if (has_icon) {
++    dl->AddImage(ImTextureRef(sponsor.icon), ImVec2(x, cy - icon * 0.5f), ImVec2(x + icon, cy + icon * 0.5f));
++  }
++  dl->AddText(font, font_size, ImVec2(x + icon + gap, cy - text.y * 0.5f), IM_COL32_WHITE, sponsor.label.c_str());
++  return pressed;
++}
++
+ }  // namespace
+ 
+ // ------------------------------------------------------------------- theme --
+@@ -580,6 +622,54 @@ void Ui::Link(const char* text, const std::string& url) {
+   ImGui::PopStyleColor();
+ }
+ 
++void Ui::SponsorCard(const char* message, const char* note) {
++  LeaveRows();
++  const SponsorLink& sponsor = launcher_->config_.sponsor;
++  if (sponsor.url.empty()) return;
++  const Theme& t = theme();
++  const float s = scale_;
++  const ImVec2 p = ImGui::GetCursorScreenPos();
++  const float w = ImGui::GetContentRegionAvail().x;
++  const float pad = 18 * s, gap = 24 * s, paragraph_gap = 16 * s, link_gap = 8 * s;
++  const float font_size = ImGui::GetFontSize();
++  ImFont* font = fonts().semibold;
++  const ImVec2 button(SponsorButtonWidth(sponsor, font, font_size, s), 40 * s);
++  const float text_w = std::max(w - button.x - gap - pad * 2, 160 * s);
++  const float message_h = ImGui::CalcTextSize(message, nullptr, false, text_w).y;
++  const float note_h = ImGui::CalcTextSize(note, nullptr, false, text_w).y;
++  const float link_size = fonts().size * 0.84f * s;
++  const float h = std::max(message_h + paragraph_gap + note_h, button.y + link_gap + link_size) + pad * 2;
++  ImDrawList* dl = ImGui::GetWindowDrawList();
++  dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), Col(t.frame, 0.35f), 12 * s);
++  dl->AddRect(p, ImVec2(p.x + w, p.y + h), Col(t.frame_hot, 0.8f), 12 * s, 0, std::max(s, 1.0f));
++
++  ImGui::SetCursorScreenPos(ImVec2(p.x + pad, p.y + pad));
++  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + text_w);
++  ImGui::TextUnformatted(message);
++  ImGui::SetCursorScreenPos(ImVec2(p.x + pad, p.y + pad + message_h + paragraph_gap));
++  ImGui::PushStyleColor(ImGuiCol_Text, t.dim);
++  ImGui::TextUnformatted(note);
++  ImGui::PopStyleColor();
++  ImGui::PopTextWrapPos();
++
++  const float button_x = p.x + w - pad - button.x;
++  if (SponsorButton("##sponsor_card", sponsor, ImVec2(button_x, p.y + pad), button, font, font_size, s)) {
++    OpenUrl(sponsor.url);
++  }
++  std::string shown = sponsor.url;
++  const size_t scheme = shown.find("://");
++  if (scheme != std::string::npos) shown.erase(0, scheme + 3);
++  ImFont* link_font = fonts().regular;
++  const float link_w = link_font->CalcTextSizeA(link_size, FLT_MAX, 0.0f, shown.c_str()).x;
++  ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
++  LinkText(dl, "##sponsor_url", ImVec2(button_x + (button.x - link_w) * 0.5f, p.y + pad + button.y + link_gap),
++           link_font, link_size, Col(kSponsorLinkColor), shown.c_str(), sponsor.url);
++  ImGui::PopItemFlag();
++
++  ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h + 14 * s));
++  ImGui::Dummy(ImVec2(0, 0));
++}
++
+ void Ui::Spacer(float height) {
+   LeaveRows();
+   ImGui::Dummy(ImVec2(0, height * scale_));
+@@ -1018,7 +1108,23 @@ void Launcher::DrawFooter(ImVec2 origin, float w, float h) {
+               Col(show_status ? t.accent : t.dim), show_status ? status_.c_str() : config_.note.c_str());
+ 
+   const float right = origin.x + w;
+-  ImGui::SetCursorScreenPos(ImVec2(right - play_w - bw * 2 - 24 * s_, cy - bh * 0.5f));
++  const float quit_x = right - play_w - bw * 2 - 24 * s_;
++  const SponsorLink& sponsor = config_.sponsor;
++  if (!sponsor.url.empty()) {
++    ImFont* font = config_.fonts.semibold;
++    const float font_size = ImGui::GetFontSize() * 0.94f;
++    const ImVec2 size(SponsorButtonWidth(sponsor, font, font_size, s_), bh * 0.85f);
++    const float x = quit_x - 12 * s_ - size.x;
++    const float text_w =
++        std::max(config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, config_.hints.c_str()).x,
++                 config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, config_.note.c_str()).x);
++    if (x >= origin.x + text_w + 20 * s_) {
++      if (SponsorButton("##sponsor_footer", sponsor, ImVec2(x, cy - size.y * 0.5f), size, font, font_size, s_)) {
++        OpenUrl(sponsor.url);
++      }
++    }
++  }
++  ImGui::SetCursorScreenPos(ImVec2(quit_x, cy - bh * 0.5f));
+   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12 * s_);
+   if (ImGui::Button("Quit", ImVec2(bw, bh))) want_quit_ = true;
+   ImGui::SameLine(0, 12 * s_);

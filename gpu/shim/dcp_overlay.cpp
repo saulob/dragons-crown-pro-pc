@@ -63,11 +63,15 @@ std::atomic<bool> cheat_open{false};
 dcp::cheats::CloseGate cheat_close;
 std::bitset<ImGuiKey_NamedKey_COUNT> cheat_pressed;
 bool cheat_focused = false;
+int cheat_selected_row = -1; // the row the list last scrolled to show
 std::atomic<float> display_scale{1.0f};
 bool r3_down = false, l2_down = false;
 std::atomic<bool> loading{false};
 std::atomic<u32> loading_done{0}, loading_total{0};
 std::atomic<u32> background_done{0}, background_total{0};
+// ShowNotice: text guarded by imgui_mutex, shown until notice_until (steady_clock ticks).
+std::string notice_text;
+std::atomic<std::chrono::steady_clock::rep> notice_until{0};
 bool dirty = false; // settings changed while open: saved on close
 int requested_tab = -1; // switch on the next frame (L1/R1, Q/E, menu opened)
 // The game's text dialog (SetTextEntry), guarded by imgui_mutex.
@@ -509,6 +513,7 @@ void CloseCheatMenu() {
     cheat_close = {};
     cheat_pressed.reset();
     cheat_focused = false;
+    cheat_selected_row = -1;
     ImGuiIO& io = ImGui::GetIO();
     io.ClearInputKeys();
     io.MouseDrawCursor = menu_open;
@@ -582,8 +587,24 @@ void CheatMenu() {
         ImGui::BeginChild("##cheat_rows", ImVec2(0.0f, child_height), ImGuiChildFlags_None, child_flags);
         // The child does not inherit the outer window's font scale.
         ImGui::SetWindowFontScale(scale);
+        int focused_row = -1;
+        ImVec2 focused_min{}, focused_max{};
         for (size_t i = 0; i < dcp::cheats::kMenuRows.size(); ++i) {
             DrawCheatRow(dcp::cheats::kMenuRows[i], i, scale, accent, focus, dim);
+            if (ImGui::IsItemFocused()) {
+                focused_row = int(i);
+                focused_min = ImGui::GetItemRectMin();
+                focused_max = ImGui::GetItemRectMax();
+            }
+        }
+        if (focused_row >= 0 && focused_row != cheat_selected_row) {
+            cheat_selected_row = focused_row;
+            const ImDrawList* rows = ImGui::GetWindowDrawList();
+            const float delta = dcp::cheats::MenuScrollToShowRow(
+                focused_min.y, focused_max.y, rows->GetClipRectMin().y, rows->GetClipRectMax().y);
+            if (delta != 0.0f) {
+                ImGui::SetScrollY(ImGui::GetScrollY() + delta);
+            }
         }
         ImGui::EndChild();
         ImGui::Separator();
@@ -608,6 +629,7 @@ void ToggleCheatMenu() {
     cheat_close = {};
     cheat_pressed.reset();
     cheat_focused = false;
+    cheat_selected_row = -1;
     ImGui::GetIO().MouseDrawCursor = true;
 }
 
@@ -741,6 +763,24 @@ void BackgroundLoading() {
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::TextDisabled("Loading shader cache %u%%", u32(u64(done) * 100 / total));
+    ImGui::End();
+}
+
+bool NoticeShown() {
+    return std::chrono::steady_clock::now().time_since_epoch().count() < notice_until.load();
+}
+
+void Notice() {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                                   viewport->WorkPos.y + 24.0f * base_scale),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.6f);
+    ImGui::Begin("##notice", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::TextUnformatted(notice_text.c_str());
     ImGui::End();
 }
 
@@ -1089,10 +1129,16 @@ void SetLoading(bool active, u32 done, u32 total) {
     loading = active;
 }
 
+void ShowNotice(const std::string& text) {
+    std::scoped_lock lock{imgui_mutex};
+    notice_text = text;
+    notice_until = (std::chrono::steady_clock::now() + std::chrono::seconds(2)).time_since_epoch().count();
+}
+
 bool Visible() {
     const auto& s = DcpSettings::Get();
     return initialized && (loading || background_total || menu_open || cheat_open || text_entry_active ||
-                           choice_active || choice_retiring || s.show_fps);
+                           choice_active || choice_retiring || s.show_fps || NoticeShown());
 }
 
 void SetDisplayScale(float scale) {
@@ -1179,6 +1225,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
     if (background_total && !loading && !menu_open) {
         BackgroundLoading();
+    }
+    if (NoticeShown() && !menu_open) {
+        Notice();
     }
     if (text_entry_active) {
         TextEntryBox();

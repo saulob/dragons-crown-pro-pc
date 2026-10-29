@@ -92,7 +92,7 @@ check_appdir() { # dir [the AppImage file, whose runtime is an ELF too]
         fi
     done < <(find "$dir" -mindepth 1 -print0)
     for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dragons_crown_pro \
-                usr/bin/assets/launcher/header-art.png \
+                usr/bin/assets/launcher/header-art.png usr/bin/assets/launcher/sponsor-heart.png \
                 usr/share/licenses/DragonsCrownProPC/THIRD-PARTY-LICENSES.txt \
                 usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/doc/DragonsCrownProPC/README.txt; do
         [[ -e $dir/$leaf ]] || problem "missing: $leaf"
@@ -144,9 +144,10 @@ objcopy --only-keep-debug "$loader" "$symbols/dragons_crown_pro.debug"
 objcopy --strip-debug --add-gnu-debuglink="$symbols/dragons_crown_pro.debug" "$loader" "$appdir/usr/bin/dragons_crown_pro"
 chmod 755 "$appdir/usr/bin/dragons_crown_pro"
 
-step 'Staging the launcher header art'
+step 'Staging the launcher images'
 install -d "$appdir/usr/bin/assets/launcher"
 install -m644 assets/launcher/header-art.png "$appdir/usr/bin/assets/launcher/header-art.png"
+install -m644 assets/launcher/sponsor-heart.png "$appdir/usr/bin/assets/launcher/sponsor-heart.png"
 
 step 'Staging the libraries it loads'
 declare -A seen=()

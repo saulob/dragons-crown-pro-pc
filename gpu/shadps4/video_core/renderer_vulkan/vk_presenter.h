@@ -100,6 +100,8 @@ public:
     Frame* PrepareBlankFrame(bool present_thread);
 
     void Present(Frame* frame, bool is_reusing_frame = false, bool is_game_frame = true);
+    /// Returns a rendered frame to the free queue without presenting it.
+    void RetireFrame(Frame* frame);
     /// A black frame with the loading screen (DcpOverlay::SetLoading) only.
     void PresentLoadingFrame();
     Frame* PrepareLastFrame();

@@ -38,6 +38,7 @@
 #include "file_browser.h"
 #include "game_files.h"
 #include "game_install.h"
+#include "game_process.h"
 #include "options.h"
 #include "paths.h"
 #include "placement.h"
@@ -557,8 +558,10 @@ void TestLogRedirect(const fs::path& base) {
 // project's DCP_* names, and none of them can bring back an inherited setting that changes the rendering.
 void TestEnvironmentVariables() {
     const fs::path source(DCP_SOURCE_DIR);
-    // Unix/macOS branches of vendored shadPS4 code, and the Linux AppImage's own path and desktop session.
-    const std::vector<std::string> platform = {"HOME", "XDG_DATA_HOME", "VK_DRIVER_FILES", "APPIMAGE", "USER", "DISPLAY"};
+    // Unix/macOS branches of vendored shadPS4 code, the Linux AppImage's own path and desktop session, and the
+    // Gamescope session (gpu/shim/dcp_present.h, never read on Windows).
+    const std::vector<std::string> platform = {"HOME",     "XDG_DATA_HOME", "VK_DRIVER_FILES", "APPIMAGE",
+                                               "USER",     "DISPLAY",       "GAMESCOPE_WAYLAND_DISPLAY"};
     std::vector<std::string> names, inherited;
     int files = 0;
     for (const char* dir : {"src", "launcher", "gpu/shim", "gpu/shadps4"}) {
@@ -937,7 +940,7 @@ void TestDefaultsAgree() {
     CHECK(launcher_default(kSharpenStrengthKey) == std::to_string(game.rcas_strength.load()));
     CHECK(launcher_default(kAntiAliasingKey) == flag(game.smaa));
     CHECK(launcher_default(kAnisotropyKey) == std::to_string(game.anisotropy.load()));
-    CHECK(launcher_default(kGraphicsCardKey) == "automatic" && game.graphics_card.empty());
+    CHECK(launcher_default(kGraphicsCardKey).empty() && game.graphics_card.empty());
     CHECK(launcher_default(kMonitorKey) == std::to_string(game.monitor.load()));
     CHECK(launcher_default(kShowFpsTitleKey) == flag(game.show_fps_title));
     CHECK(launcher_default(kShowResolutionTitleKey) == flag(game.show_resolution_title));
@@ -1167,6 +1170,124 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
     CHECK(!SupportsJapaneseNpcVoices(&kCk100));
     CHECK(!SupportsJapaneseNpcVoices(&kCk));
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
+}
+
+void TestOverlayProgramsSetting(const fs::path& base) {
+    const fs::path file = base / "overlays" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    bool listed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        if (setting.key == kAllowOverlayProgramsKey) {
+            listed = true;
+            CHECK(setting.default_value == "0");
+        }
+    }
+    CHECK(listed);
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kAllowOverlayProgramsKey, false));
+        settings.SetBool(kAllowOverlayProgramsKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kAllowOverlayProgramsKey, "1"));
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kAllowOverlayProgramsKey, false));
+        settings.ResetToDefaults();
+        CHECK(!settings.GetBool(kAllowOverlayProgramsKey, true));
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kAllowOverlayProgramsKey, "0"));
+
+    // Only On, and only where the separate process exists, leaves the launcher's process.
+    CHECK(!SeparateGameProcessWanted(false, true));
+    CHECK(SeparateGameProcessWanted(true, true));
+    CHECK(!SeparateGameProcessWanted(false, false));
+    CHECK(!SeparateGameProcessWanted(true, false));
+#ifdef _WIN32
+    CHECK(kSeparateGameProcessAvailable);
+#else
+    CHECK(!kSeparateGameProcessAvailable);
+#endif
+
+    // Neither mode filters Vulkan layers or closes extension points, so overlays and a player's own
+    // VK_LOADER_LAYERS_DISABLE reach the game untouched.
+    const fs::path source(DCP_SOURCE_DIR);
+    for (const char* dir : {"src", "launcher"}) {
+        for (const auto& entry : fs::recursive_directory_iterator(source / dir)) {
+            const std::string ext = entry.path().extension().string();
+            if (!entry.is_regular_file() || (ext != ".c" && ext != ".cpp" && ext != ".h")) {
+                continue;
+            }
+            const std::string text = ReadAll(entry.path());
+            for (const char* absent : {"VK_LOADER_LAYERS_DISABLE", "ProcessExtensionPointDisablePolicy",
+                                       "EXTENSION_POINT_DISABLE", "PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY"}) {
+                if (text.find(absent) != std::string::npos) {
+                    std::printf("%s in %s\n", absent, entry.path().string().c_str());
+                    CHECK(false);
+                }
+            }
+        }
+    }
+    CHECK(!fs::exists(source / "launcher" / "overlay_protection.cpp"));
+    CHECK(!fs::exists(source / "launcher" / "vulkan_layers.cpp"));
+}
+
+void TestGameProcess() {
+    // The game process keeps the paths and options, never the launcher's own choices, and continues this run's log.
+    const std::vector<std::string> launcher = {"boot.bin", "--launcher", "--user", "D:\\Games\\DCP\\user", "--log",
+                                               "old.log", "--dcp-skip-launcher", "--strict-imports", "--dcp-game"};
+    const std::vector<std::string> game = GameProcessArguments(launcher, "D:\\logs\\dragons_crown_pro_042.log");
+    const std::vector<std::string> expected = {"boot.bin", "--user", "D:\\Games\\DCP\\user", "--strict-imports",
+                                               "--dcp-game", "--log", "D:\\logs\\dragons_crown_pro_042.log"};
+    CHECK(game == expected);
+    CHECK(std::count(game.begin(), game.end(), std::string(kGameProcessArgument)) == 1);
+    CHECK(GameProcessArguments({}, "") == std::vector<std::string>{kGameProcessArgument});
+    CHECK(GameProcessArguments(GameProcessArguments({"--app0", "a b"}, "x.log"), "x.log") ==
+          GameProcessArguments({"--app0", "a b"}, "x.log"));
+
+    std::string error;
+#ifdef _WIN32
+    CHECK(WindowsCommandLine(L"C:\\Games\\Dragon Crown\\dragons_crown_pro.exe",
+                             {"--user", "C:\\My Games\\user\\", "--log", "a\"b", "", "plain"}) ==
+          L"\"C:\\Games\\Dragon Crown\\dragons_crown_pro.exe\" --user \"C:\\My Games\\user\\\\\" --log \"a\\\"b\" \"\" plain");
+    // A failed creation reports why and leaves nothing to start.
+    CHECK(!CreateGameProcess(fs::temp_directory_path() / "dcp-missing" / "dragons_crown_pro.exe", {kGameProcessArgument},
+                             error));
+    CHECK(error.find("error 3") != std::string::npos || error.find("error 2") != std::string::npos);
+    CHECK(dcp_resume_game_process() == 0);
+#else
+    CHECK(!CreateGameProcess("dragons_crown_pro", {kGameProcessArgument}, error) && !error.empty());
+    CHECK(dcp_resume_game_process() == 0);
+#endif
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string loader = ReadAll(source / "src" / "loader.c");
+    const size_t child = loader.find("if (game_child) {");
+    const size_t startup_modules = loader.find("module_diagnostics_report_startup()");
+    const size_t launcher_run = loader.find("dcp_launcher_run(");
+    const size_t started = loader.find("launched==DCP_LAUNCHER_GAME_STARTED");
+    const size_t gpu = loader.find("dcpgpu_init(");
+    // The game process lists what it started with and never runs the launcher, so it cannot start another one.
+    CHECK(loader.find("module_diagnostics_baseline()") < loader.find("runtime_log_start("));
+    CHECK(child != std::string::npos && child < startup_modules && startup_modules < launcher_run);
+    CHECK(loader.find("!cpu_only && !check_imports && !game_child") < launcher_run);
+    CHECK(loader.find("Overlay compatibility: %s game process") != std::string::npos);
+    // This process ends once the game process exists: it never reaches the game's runtime.
+    CHECK(started != std::string::npos && started > launcher_run && started < gpu);
+    CHECK(loader.find("runtime_log_release()", started) < loader.find("dcp_resume_game_process()", started));
+    CHECK(loader.find("exit(0)", started) < gpu);
+    // Linux keeps the game in the launcher's process.
+    CHECK(loader.find("int game_process=0;\n#ifdef _WIN32\n        game_process=1;\n#else") != std::string::npos);
+    // Off returns to the loader exactly as before; only On reaches the game process, and a failure keeps the launcher.
+    const std::string launcher_source = ReadAll(source / "launcher" / "launcher.cpp");
+    const size_t window_off = launcher_source.find("if (!SeparateGameProcess(config_, settings_)) {\n                return Outcome::kPlay;");
+    const size_t direct_off = launcher_source.find("if (!SeparateGameProcess(config, settings)) {\n        return DCP_LAUNCHER_PLAY;");
+    CHECK(window_off != std::string::npos && window_off < launcher_source.find("StartGameProcess(config_, error)"));
+    CHECK(direct_off != std::string::npos && direct_off < launcher_source.find("StartGameProcess(config, error)"));
+    CHECK(launcher_source.find("game_process_started_ = true;") > launcher_source.find("StartGameProcess(config_, error)"));
+    CHECK(launcher_source.find("play_.Cancel();") != std::string::npos);
+    CHECK(launcher_source.find("Could not start the game.") != std::string::npos);
 }
 
 void TestCheatSettings(const fs::path& base) {
@@ -1580,6 +1701,206 @@ void TestAspectRatio(const fs::path& base) {
     CHECK(WindowSizeOf(1080, dcp_aspect_ratios[3]) == WindowSize({3840, 1080}));
 }
 
+// Frame rate: 60 (Original) unless saved otherwise, one of eight stored values, 0 for Unlimited; the video core reads
+// it from the settings file (gpu/shim/dcp_settings.cpp) and the launcher offers every value for every build.
+void TestFrameRate(const fs::path& base) {
+    const fs::path file = base / "frame_rate" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    CHECK(std::string(kFrameRateKey) == "frame_rate");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kFrameRateKey && setting.default_value == "60";
+    }
+    CHECK(managed);
+    {
+        const LauncherSettings missing(file);
+        CHECK(missing.Get(kFrameRateKey, "60") == "60");
+    }
+    for (const char* valid : {"30", "60", "90", "120", "144", "165", "240", "0"}) {
+        CHECK(IsValidSetting(kFrameRateKey, valid));
+        WriteAll(file, std::string("frame_rate=") + valid + "\n");
+        const LauncherSettings stored(file);
+        CHECK(stored.Get(kFrameRateKey, "60") == valid);
+    }
+    for (const char* invalid : {"", "45", "75", "100", "1000", "-1", "unlimited", "1e2", "60.0"}) {
+        CHECK(!IsValidSetting(kFrameRateKey, invalid));
+        WriteAll(file, std::string("frame_rate=") + invalid + "\n");
+        const LauncherSettings stored(file);
+        CHECK(stored.Get(kFrameRateKey, "60") == "60");
+    }
+    {
+        LauncherSettings settings(file);
+        settings.Set(kFrameRateKey, "144");
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kFrameRateKey, "144"));
+    CHECK(FrameRateLabel(0) == "Unlimited" && FrameRateLabel(60) == "60 FPS (Original)");
+    CHECK(FrameRateLabel(30) == "30 FPS" && FrameRateLabel(240) == "240 FPS");
+}
+
+// True Ultrawide: off unless saved on, only for shapes wider than 16:9, and it widens the six horizontal extent loads of
+// the pass projections by the target's shape over 16:9 while the vertical ones and the game's constants stay.
+void TestTrueUltrawide(const fs::path& base) {
+    const fs::path file = base / "true_ultrawide" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    CHECK(std::string(kTrueUltrawideKey) == "true_ultrawide");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kTrueUltrawideKey && setting.default_value == "0";
+    }
+    CHECK(managed);
+    CHECK(dcp_true_ultrawide(nullptr) == 0 && dcp_true_ultrawide("") == 0);
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 0);
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kTrueUltrawideKey, false));
+        settings.SetBool(kTrueUltrawideKey, true);
+        CHECK(dcp_true_ultrawide(file.string().c_str()) == 0); // pending until Save
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 1);
+    CHECK(WrittenValue(ReadAll(file), kTrueUltrawideKey, "1"));
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kTrueUltrawideKey, false));
+        settings.SetBool(kTrueUltrawideKey, false);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 0);
+    CHECK(WrittenValue(ReadAll(file), kTrueUltrawideKey, "0"));
+    struct Saved {
+        const char* text;
+        int on;
+    };
+    for (const Saved& saved : {Saved{"true", 1}, Saved{"false", 0}, Saved{"on", 1}, Saved{"", 0}, Saved{"2", 0},
+                               Saved{"garbage", 0}}) {
+        WriteAll(file, std::string("true_ultrawide=") + saved.text + "\n");
+        CHECK(dcp_true_ultrawide(file.string().c_str()) == saved.on);
+    }
+    WriteAll(file, "aspect_ratio=21:9\n");
+    CHECK(dcp_true_ultrawide(file.string().c_str()) == 0);
+
+    // The factor is the render target's width per height over 16:9's, and 1 for every shape not wider than 16:9.
+    for (int i = 0; i < DCP_ASPECT_COUNT; ++i) {
+        const DcpAspectRatio& aspect = dcp_aspect_ratios[i];
+        const bool wider = std::string(aspect.key) == "21:9" || std::string(aspect.key) == "32:9";
+        CHECK(dcp_true_ultrawide_applies(&aspect) == (wider ? 1 : 0));
+        for (const DcpResolution& resolution : dcp_resolutions) {
+            const DcpResolution target = dcp_render_target(&resolution, &aspect);
+            const double scale = dcp_true_ultrawide_scale(&aspect, &target);
+            CHECK(wider ? scale > 1.3 && scale == target.width * 9.0 / (target.height * 16.0) : scale == 1.0);
+        }
+    }
+    const DcpResolution native21 = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[2]);
+    const DcpResolution native32 = dcp_render_target(&dcp_resolutions[0], &dcp_aspect_ratios[3]);
+    CHECK(dcp_true_ultrawide_scale(&dcp_aspect_ratios[2], &native21) == 1.3125);
+    CHECK(dcp_true_ultrawide_scale(&dcp_aspect_ratios[3], &native32) == 2.0);
+
+    // The verified builds share the six sites; the others never get the patch.
+    const DcpOrthoSite expected_sites[DCP_PASS_ORTHO_SITE_COUNT] = {
+        {0x10686, -640.0f}, {0x106bb, -640.0f}, {0x10699, 640.0f}, {0x106d5, 640.0f}, {0x106f7, -406.0f}, {0x10703, 406.0f}};
+    for (int i = 0; i < DCP_PASS_ORTHO_SITE_COUNT; ++i) {
+        CHECK(dcp_pass_ortho_sites[i].offset == expected_sites[i].offset);
+        CHECK(dcp_pass_ortho_sites[i].value == expected_sites[i].value);
+    }
+    CHECK(kUs.true_ultrawide && kJp100.true_ultrawide && kJp102.true_ultrawide && kJp103.true_ultrawide);
+    CHECK(kCk100.true_ultrawide && !kCk.true_ultrawide && !kUs101.true_ultrawide);
+    CHECK(TrueUltrawideAvailable(nullptr) && TrueUltrawideAvailable(&kUs) && !TrueUltrawideAvailable(&kCk));
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(!build.true_ultrawide || !build.resolution_sites.empty());
+        for (const DcpResolutionSite& resolution : build.resolution_sites) {
+            for (const DcpOrthoSite& site : dcp_pass_ortho_sites) {
+                CHECK(site.offset + 8 <= resolution.offset || resolution.offset + resolution.opcode_length + 4u <= site.offset);
+            }
+        }
+    }
+
+    // A pass loop like the game's: twelve rip-relative loads, the X extents at the sites and the Y extents between them.
+    constexpr uint64_t kImage = 0x30000;
+    constexpr uint64_t kSlots = kImage + 0x1000;
+    constexpr uint32_t kConstants = 0x20000;
+    const float constants[8] = {-640.0f, 640.0f, -406.0f, 406.0f, -360.0f, 360.0f, -228.0f, 228.0f};
+    struct Load {
+        uint32_t offset;
+        int constant;
+    };
+    const Load x_loads[DCP_PASS_ORTHO_SITE_COUNT] = {{0x10686, 0}, {0x106bb, 0}, {0x10699, 1},
+                                                     {0x106d5, 1}, {0x106f7, 2}, {0x10703, 3}};
+    const Load y_loads[] = {{0x106a5, 4}, {0x106b1, 5}, {0x106e1, 4}, {0x106ed, 5}, {0x1070f, 6}, {0x1071b, 7}};
+    const auto write_load = [](std::vector<unsigned char>& image, uint32_t offset, uint32_t constant) {
+        const unsigned char vmovss[4] = {0xc5, 0xfa, 0x10, 0x05};
+        const int32_t displacement = int32_t(int64_t(constant) - (int64_t(offset) + 8));
+        std::memcpy(&image[offset], vmovss, 4);
+        std::memcpy(&image[offset + 4], &displacement, 4);
+    };
+    const auto build_image = [&] {
+        std::vector<unsigned char> image(kSlots + 0x1000, 0x90);
+        std::memcpy(&image[kConstants], constants, sizeof(constants));
+        for (const Load& load : x_loads) {
+            write_load(image, load.offset, kConstants + 4u * load.constant);
+        }
+        for (const Load& load : y_loads) {
+            write_load(image, load.offset, kConstants + 4u * load.constant);
+        }
+        return image;
+    };
+    const auto apply = [&](std::vector<unsigned char>& image, double scale, uint64_t slots = kSlots) {
+        char error[200];
+        return dcp_apply_true_ultrawide(image.data(), kImage, slots, dcp_pass_ortho_sites, DCP_PASS_ORTHO_SITE_COUNT,
+                                        scale, error, sizeof(error));
+    };
+    const std::vector<unsigned char> original = build_image();
+    const auto load_target = [](const std::vector<unsigned char>& image, uint32_t offset) {
+        int32_t displacement;
+        std::memcpy(&displacement, &image[offset + 4], 4);
+        return int64_t(offset) + 8 + displacement;
+    };
+    const auto slot_value = [](const std::vector<unsigned char>& image, int i) {
+        float value;
+        std::memcpy(&value, &image[kSlots + 4 * i], 4);
+        return value;
+    };
+    struct Widened {
+        double scale;
+        float values[DCP_PASS_ORTHO_SITE_COUNT];
+    };
+    for (const Widened& widened : {Widened{1.3125, {-840.0f, -840.0f, 840.0f, 840.0f, -532.875f, 532.875f}},
+                                   Widened{2.0, {-1280.0f, -1280.0f, 1280.0f, 1280.0f, -812.0f, 812.0f}},
+                                   Widened{1.0, {-640.0f, -640.0f, 640.0f, 640.0f, -406.0f, 406.0f}}}) {
+        std::vector<unsigned char> image = original;
+        CHECK(apply(image, widened.scale) == 1);
+        for (int i = 0; i < DCP_PASS_ORTHO_SITE_COUNT; ++i) {
+            CHECK(load_target(image, x_loads[i].offset) == int64_t(kSlots) + 4 * i);
+            CHECK(slot_value(image, i) == widened.values[i]);
+        }
+        for (const Load& load : y_loads) {
+            CHECK(load_target(image, load.offset) == kConstants + 4 * load.constant);
+        }
+        CHECK(std::memcmp(&image[kConstants], constants, sizeof(constants)) == 0);
+        std::vector<unsigned char> rest = image;
+        for (const Load& load : x_loads) {
+            std::memcpy(&rest[load.offset + 4], &original[load.offset + 4], 4);
+        }
+        std::memcpy(&rest[kSlots], &original[kSlots], 4 * DCP_PASS_ORTHO_SITE_COUNT);
+        CHECK(rest == original);
+    }
+
+    // One site that does not match refuses the whole patch and leaves the image as it was.
+    const auto refused = [&](const std::function<void(std::vector<unsigned char>&)>& damage, uint64_t slots = kSlots) {
+        std::vector<unsigned char> image = original;
+        damage(image);
+        const std::vector<unsigned char> before = image;
+        return apply(image, 1.3125, slots) == 0 && image == before;
+    };
+    for (const Load& load : x_loads) {
+        CHECK(refused([&](std::vector<unsigned char>& image) { image[load.offset + 1] ^= 1; }));
+        CHECK(refused([&](std::vector<unsigned char>& image) { write_load(image, load.offset, uint32_t(kImage)); }));
+    }
+    CHECK(refused([](std::vector<unsigned char>& image) { image[kConstants + 4 * 3] ^= 1; }));
+    CHECK(refused([](std::vector<unsigned char>&) {}, kImage - 4));
+    CHECK(refused([](std::vector<unsigned char>&) {}, kSlots + (uint64_t(1) << 32)));
+}
+
 // Presentation only fits the finished frame into the window: its own key and default, Letterbox unless Stretch is chosen,
 // and no change to the render target or the aspect ratio.
 void TestPresentation(const fs::path& base) {
@@ -1728,45 +2049,68 @@ void TestGraphicsCard(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "gpu" / "dcp.ini";
     fs::remove_all(file.parent_path());
-    const std::vector<std::string> names = {"NVIDIA GeForce RTX 4070", "", "Intel(R) UHD Graphics 730"};
-    CHECK(DcpGraphics::FindGpuByName(names, "") == -1);
-    CHECK(DcpGraphics::FindGpuByName(names, "automatic") == -1);
-    CHECK(DcpGraphics::FindGpuByName(names, "NVIDIA GeForce RTX 4070") == 0);
-    CHECK(DcpGraphics::FindGpuByName(names, "Intel(R) UHD Graphics 730") == 2);
-    CHECK(DcpGraphics::FindGpuByName(names, "Intel(R) UHD Graphics 7") == -1); // exact names only
-    CHECK(DcpGraphics::FindGpuByName(names, "AMD Radeon RX 7800 XT") == -1);   // removed card: Automatic
-    CHECK(DcpGraphics::FindGpuByName({"", "Intel(R) UHD Graphics 730"}, "") == -1);
 
+    const std::vector<std::string> devices = {"NVIDIA GeForce RTX 4070", "", "Intel(R) UHD Graphics 730"};
+    const std::vector<std::string> choices = DcpGraphics::GpuChoices(devices);
+    CHECK(choices.size() == 2);
+    CHECK(choices[0] == "NVIDIA GeForce RTX 4070" && choices[1] == "Intel(R) UHD Graphics 730");
+    for (const std::string& choice : choices) {
+        CHECK(choice != "automatic" && choice.find("Automatic") == std::string::npos);
+    }
+    CHECK(DcpGraphics::GpuChoices({}).empty());
+
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "NVIDIA GeForce RTX 4070") == 0);
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "Intel(R) UHD Graphics 730") == 2);
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "Intel(R) UHD Graphics 7") == 0); // exact names only
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "automatic") == 0);                // retired value
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "") == 0);                         // no saved card
+    CHECK(DcpGraphics::ResolveGpuByName(devices, "AMD Radeon RX 7800 XT") == 0);    // removed card
+    CHECK(DcpGraphics::ResolveGpuByName({"", "Intel(R) UHD Graphics 730"}, "") == 1);
+    CHECK(DcpGraphics::ResolveGpuByName({"", ""}, "automatic") == -1);
+
+    // The setting has no hardcoded default: the launcher resolves the first listed card, as the renderer does.
     bool managed = false;
     for (const ManagedSetting& setting : ManagedSettings()) {
-        managed |= setting.key == "graphics_card" && setting.default_value == "automatic";
+        managed |= setting.key == kGraphicsCardKey && setting.default_value.empty();
     }
     CHECK(managed);
-    {
-        LauncherSettings settings(file);
-        CHECK(settings.Get(kGraphicsCardKey, kAutomaticGpu) == "automatic");
-        settings.Set(kGraphicsCardKey, "Intel(R) UHD Graphics 730");
-        CHECK(settings.Save());
-    }
-    CHECK(WrittenValue(ReadAll(file), "graphics_card", "Intel(R) UHD Graphics 730"));
-    CHECK(LauncherSettings(file).Get(kGraphicsCardKey, kAutomaticGpu) == "Intel(R) UHD Graphics 730");
-    {
-        LauncherSettings settings(file);
-        settings.ResetToDefaults();
-        CHECK(settings.Save());
-    }
-    CHECK(WrittenValue(ReadAll(file), "graphics_card", "automatic"));
 
-    const std::string instance = ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_instance.cpp");
-    CHECK(instance.find("FindGpuByName(names, requested)") != std::string::npos);
-    CHECK(instance.find("IsDeviceUsable(physical) ? ") != std::string::npos);
-    CHECK(instance.find("const bool left_is_discrete") != std::string::npos); // the Automatic ranking is intact
-    CHECK(instance.find("IsDeviceUsable(physical));") != std::string::npos); // usable devices rank first
+    const auto resolve_and_save = [&](const std::string& stored) {
+        WriteAll(file, "graphics_card = " + stored + "\n");
+        LauncherSettings settings(file);
+        const int found = DcpGraphics::ResolveGpuByName(choices, settings.Get(kGraphicsCardKey));
+        CHECK(found >= 0);
+        settings.Set(kGraphicsCardKey, choices[found]);
+        CHECK(settings.Save());
+        return ReadAll(file);
+    };
+    const std::string legacy = resolve_and_save("automatic");
+    CHECK(WrittenValue(legacy, kGraphicsCardKey, choices[0]));
+    CHECK(legacy.find("automatic") == std::string::npos);
+    CHECK(WrittenValue(resolve_and_save(""), kGraphicsCardKey, choices[0]));
+    CHECK(WrittenValue(resolve_and_save("NVIDIA GeForce RTX 4070"), kGraphicsCardKey, choices[0]));
+    CHECK(WrittenValue(resolve_and_save("Intel(R) UHD Graphics 730"), kGraphicsCardKey, choices[1]));
+    CHECK(WrittenValue(resolve_and_save("AMD Radeon RX 7800 XT"), kGraphicsCardKey, choices[0]));
+
+    // The launcher offers the real devices alone; the renderer resolves the same stored name.
     const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("\"Automatic\"") == std::string::npos);
+    CHECK(launcher.find("kAutomaticGpu") == std::string::npos);
+    CHECK(launcher.find("Automatic prefers a discrete card") == std::string::npos);
+    CHECK(launcher.find("Automatic: Xbox controllers") != std::string::npos); // unrelated text stays
+    CHECK(launcher.find("DcpGraphics::ResolveGpuByName(gpu_names_") != std::string::npos);
     const size_t monitor = launcher.find("ui.Row(\"Monitor\"");
     const size_t card = launcher.find("ui.Row(\"Graphics card\"");
     const size_t vsync = launcher.find("ui.Toggle(\"VSync\"");
     CHECK(monitor != std::string::npos && monitor < card && card < vsync);
+
+    const std::string instance = ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_instance.cpp");
+    const size_t requested = instance.find("const std::string& requested = DcpSettings::Get().graphics_card;");
+    const size_t resolved = instance.find("DcpGraphics::ResolveGpuByName(names, requested)");
+    CHECK(requested != std::string::npos && resolved != std::string::npos && requested < resolved);
+    CHECK(instance.find("GPU: requested %s is not available") != std::string::npos);
+    CHECK(instance.find("GPU: selection Automatic") == std::string::npos);
+    CHECK(instance.find("IsDeviceUsable(physical)") != std::string::npos);
 }
 
 void TestLauncherWanted() {
@@ -1800,6 +2144,16 @@ void TestPlayGate() {
         PlayGate gate;
         CHECK(gate.Request(false, true, [] { return false; }) == PlayRequest::kSaveFailed);
         CHECK(!gate.starting());
+    }
+    {
+        // A game process that could not be created leaves PLAY usable again.
+        PlayGate gate;
+        int saves = 0;
+        const auto save = [&] { ++saves; return true; };
+        CHECK(gate.Request(false, true, save) == PlayRequest::kStarting);
+        gate.Cancel();
+        CHECK(!gate.starting());
+        CHECK(gate.Request(false, true, save) == PlayRequest::kStarting && saves == 2);
     }
 }
 
@@ -3178,10 +3532,14 @@ void TestBuilds(const fs::path& base) {
     CHECK(build_label("CUSA07001", kJp100.eboot_sha256) == kJp100.label);
     CHECK(build_label("CUSA07001", kJp102.eboot_sha256) == kJp102.label);
     CHECK(build_label("CUSA07001", kJp103.eboot_sha256) == kJp103.label);
+    WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"" + std::string(kUs.eboot_sha256) + "\"\n}");
+    DcpGameBuild us_game{};
+    CHECK(dcp_game_build(report_dir.string().c_str(), &us_game) == 1 && us_game.true_ultrawide == 1);
     WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\",\n  \"app_ver\": \"01.02\"\n}");
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
     CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
+    CHECK(ck_game.true_ultrawide == 0);
 
     {
         Fixture ck(base, "ck-valid", kCk);
@@ -3506,7 +3864,11 @@ int main(int argc, char** argv) {
     TestTextLanguage(base);
     TestCheatSettings(base);
     TestJapaneseNpcVoiceSetting(base);
+    TestOverlayProgramsSetting(base);
+    TestGameProcess();
     TestAspectRatio(base);
+    TestTrueUltrawide(base);
+    TestFrameRate(base);
     TestPresentation(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);

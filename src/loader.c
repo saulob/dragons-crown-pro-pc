@@ -11,6 +11,7 @@
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
 #include "startup_save_hook.h"
+#include "ultrawide_hooks.h"
 #include "voice_hooks.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
@@ -22,6 +23,7 @@
 #endif
 #ifdef _WIN32
 #include <windows.h>
+#include "module_diagnostics.h"
 #else
 #include <sys/mman.h>
 #include <malloc.h>
@@ -111,6 +113,27 @@ __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
 #endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
+static void log_cpu(void) {
+    char name[64], sets[96];
+    const IsaHostFeatures host=isa_host_features();
+    isa_host_name(name,sizeof(name));
+    printf("CPU: %s\n",name);
+    if (isa_missing_sets(host,1,sets,sizeof(sets))) printf("CPU: emulating %s\n",sets);
+    if (isa_missing_sets(host,0,sets,sizeof(sets))) printf("CPU: missing %s, which cannot be emulated\n",sets);
+}
+/* A DcpGraphicsCheck for the processor, which runs the game's PS4 (Jaguar) code directly. */
+static int cpu_usable(char *cause, size_t cause_size, char *advice, size_t advice_size) {
+    char missing[96];
+    if (!isa_missing_sets(isa_host_features(),0,missing,sizeof(missing))) return 1;
+    snprintf(cause,cause_size,"This processor lacks %s, which the game's PS4 code needs.",missing);
+    snprintf(advice,advice_size,"The game needs an Intel Core 4th generation (Haswell), AMD FX or newer processor.");
+    return 0;
+}
+#ifndef _WIN32
+static int system_usable(char *cause, size_t cause_size, char *advice, size_t advice_size) {
+    return cpu_usable(cause,cause_size,advice,advice_size) && dcp_check_vulkan(cause,cause_size,advice,advice_size);
+}
+#endif
 #ifdef _WIN32
 static void describe_address(char *out, size_t size, uintptr_t address) {
     HMODULE module=NULL;
@@ -123,6 +146,14 @@ static void describe_address(char *out, size_t size, uintptr_t address) {
         return;
     }
     snprintf(out,size,"%p",(void *)address);
+}
+static void describe_module_path(uintptr_t address) {
+    HMODULE module=NULL;
+    char path[MAX_PATH];
+    if (image && address-(uintptr_t)image<0x20000000) return;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)address,&module) &&
+        module && module!=GetModuleHandleA(NULL) && GetModuleFileNameA(module,path,sizeof(path)))
+        fprintf(stderr,"  module %s at %p\n",path,(void *)module);
 }
 static int fatal_reported;
 static LONG fatal_exception(EXCEPTION_POINTERS *info) {
@@ -141,6 +172,7 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
                 (void *)record->ExceptionInformation[1],where,GetCurrentThreadId());
     else
         fprintf(stderr,"Fault: exception 0x%08lx at %s (thread %lu)\n",record->ExceptionCode,where,GetCurrentThreadId());
+    describe_module_path((uintptr_t)c->Rip);
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
     if (gpu_enabled) dcpgpu_dump_guest_writes(info);
@@ -187,11 +219,16 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
         }
     }
     if (code==EXCEPTION_ILLEGAL_INSTRUCTION && image && (uintptr_t)info->ContextRecord->Rip-(uintptr_t)image<0x20000000) {
-        /* The game's code uses MOVBE; hosts without it (Sandy/Ivy Bridge, some VMs) trap. */
+        /* Jaguar's MOVBE and BMI1 trap on hosts without them; cpu_usable refuses the sets that cannot be emulated. */
         CONTEXT *c=info->ContextRecord;
         _Static_assert(offsetof(CONTEXT,R15)-offsetof(CONTEXT,Rax)==15*sizeof(DWORD64),"CONTEXT register order");
-        size_t length=isa_emulate_movbe((const uint8_t *)(uintptr_t)c->Rip,c->Rip,&c->Rax);
-        if (length) { c->Rip+=length; return EXCEPTION_CONTINUE_EXECUTION; }
+        uint64_t flags=c->EFlags;
+        size_t length=isa_emulate((const uint8_t *)(uintptr_t)c->Rip,c->Rip,&c->Rax,&flags);
+        if (length) {
+            c->EFlags=(DWORD)flags;
+            c->Rip+=length;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
     }
     if (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_ILLEGAL_INSTRUCTION || code==EXCEPTION_PRIV_INSTRUCTION ||
         code==EXCEPTION_STACK_OVERFLOW || code==EXCEPTION_INT_DIVIDE_BY_ZERO || code==EXCEPTION_DATATYPE_MISALIGNMENT) {
@@ -245,10 +282,11 @@ static void fault(int sig, siginfo_t *info, void *context) {
         ucontext_t *state = context;
         uint64_t gpr[16];
         for (int i = 0; i < 16; ++i) gpr[i] = (uint64_t)state->uc_mcontext.gregs[order[i]];
-        uint64_t at = (uint64_t)state->uc_mcontext.gregs[REG_RIP];
-        size_t length = at - (uintptr_t)image < 0x20000000 ? isa_emulate_movbe((const uint8_t *)(uintptr_t)at, at, gpr) : 0;
+        uint64_t at = (uint64_t)state->uc_mcontext.gregs[REG_RIP], flags = (uint64_t)state->uc_mcontext.gregs[REG_EFL];
+        size_t length = at - (uintptr_t)image < 0x20000000 ? isa_emulate((const uint8_t *)(uintptr_t)at, at, gpr, &flags) : 0;
         if (length) {
             for (int i = 0; i < 16; ++i) state->uc_mcontext.gregs[order[i]] = (greg_t)gpr[i];
+            state->uc_mcontext.gregs[REG_EFL] = (greg_t)flags;
             state->uc_mcontext.gregs[REG_RIP] = (greg_t)(at + length);
             return;
         }
@@ -362,6 +400,28 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
             address - segments[i].address <= segments[i].size - bytes) return 1;
     return 0;
 }
+/* Widens the scene pass projections when every condition holds, then installs the guest hooks; logs one line either
+ * way. A site that does not match leaves the image as it was. */
+static void install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
+                                   size_t slot_offset, uint8_t *stubs) {
+    const double scale=dcp_true_ultrawide_scale(aspect_ratio,&render_target);
+    char detail[720];
+    int effective=0;
+    if (!requested) snprintf(detail,sizeof(detail),"off in the settings");
+    else if (!dcp_true_ultrawide_applies(aspect_ratio)) snprintf(detail,sizeof(detail),"the aspect ratio is not wider than 16:9");
+    else if (!build || !build->true_ultrawide) snprintf(detail,sizeof(detail),"pass projection not verified for this game build");
+    else if (dcp_apply_true_ultrawide(image,image_size,slot_offset,dcp_pass_ortho_sites,DCP_PASS_ORTHO_SITE_COUNT,scale,
+                                      detail,sizeof(detail))) {
+        char hooks[400];
+        ultrawide_hooks_install(image,image_size,entry,stubs,ultrawide_hooks_stub_bytes(),scale,hooks,sizeof(hooks));
+        effective=1;
+        snprintf(detail,sizeof(detail),"pass projection %d sites, horizontal x%.4f, vertical unchanged; %s",
+                 DCP_PASS_ORTHO_SITE_COUNT,scale,hooks);
+    }
+    printf("DCP: True Ultrawide requested %s, effective %s (%s, %dx%d, %s): %s\n",requested ? "on" : "off",
+           effective ? "on" : "off",aspect_ratio->name,render_target.width,render_target.height,
+           build ? build->label : "unknown game build",detail);
+}
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
     (void)argc; (void)argv;
@@ -397,10 +457,11 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     /* The guest TCB needs one of the 64 TEB TLS slots before DLLs (Vulkan drivers) take them. */
     runtime_thread_tcb_offset();
+    module_diagnostics_baseline();
 #endif
     int cpu_only = 0, strict_imports = 0, check_imports = 0;
     unsigned timeout_seconds = 0;
-    int skip_launcher = 0, force_launcher = 0;
+    int skip_launcher = 0, force_launcher = 0, game_child = 0;
     const char *boot=NULL, *content_profile=NULL, *app0=NULL, *user_dir=NULL, *logs_dir=NULL, *log_file=NULL;
     int first_option = 1;
     if (argc > 1 && strncmp(argv[1], "--", 2)) { boot = argv[1]; first_option = 2; }
@@ -415,6 +476,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--log") && i+1<argc) log_file=argv[++i];
         else if (!strcmp(argv[i], "--dcp-skip-launcher")) skip_launcher = 1;
         else if (!strcmp(argv[i], "--launcher")) force_launcher = 1;
+        else if (!strcmp(argv[i], "--dcp-game")) game_child = 1;
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
         else {
             fprintf(stderr, "Unknown option: %s\nUsage: %s [boot.bin] [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--logs dir] [--log file] [--dcp-skip-launcher] [--launcher] [--timeout seconds]\n", argv[i], argv[0]);
@@ -430,7 +492,12 @@ int main(int argc, char **argv) {
     char log_path[4200];
     static char log_folder[4200];
     snprintf(log_folder,sizeof(log_folder),"%s",paths.logs_dir);
-    if (runtime_log_start(paths.logs_dir,log_file,log_path,sizeof(log_path))) {
+    int log_started=0;
+#ifdef _WIN32
+    if (game_child) log_started=runtime_log_continue(log_file,log_path,sizeof(log_path));
+#endif
+    if (!log_started) log_started=runtime_log_start(paths.logs_dir,log_file,log_path,sizeof(log_path));
+    if (log_started) {
         time_t now=time(NULL);
         char stamp[32];
         strftime(stamp,sizeof(stamp),"%Y-%m-%dT%H:%M:%S",localtime(&now));
@@ -445,16 +512,46 @@ int main(int argc, char **argv) {
     AddVectoredExceptionHandler(1, vectored_fault);
     SetUnhandledExceptionFilter(unhandled_fault);
 #endif
-    if (!cpu_only && !check_imports) {
-        DcpGraphicsCheck check_graphics=NULL;
-#ifndef _WIN32
-        check_graphics=dcp_check_vulkan;
+    if (game_child) {
+        puts("Startup: game-only child process");
+#ifdef _WIN32
+        module_diagnostics_report_startup();
 #endif
-        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics};
+    } else log_cpu();
+    if (!cpu_only && !check_imports && !game_child) {
+        DcpGraphicsCheck check_graphics=cpu_usable;
+        int game_process=0;
+#ifdef _WIN32
+        game_process=1;
+#else
+        check_graphics=system_usable;
+#endif
+        DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics,
+                                    game_process,log_started ? log_path : NULL};
         DcpLauncherResult launched=dcp_launcher_run(&launcher);
         runtime_log_set_detailed(dcp_detailed_logging(settings_file));
         if (launched==DCP_LAUNCHER_QUIT) { runtime_log_mark_clean_exit(); exit(0); }
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
+#ifdef _WIN32
+        if (launched==DCP_LAUNCHER_GAME_STARTED) {
+            /* The game process appends to this log: nothing here may write to it once it runs. */
+            puts("Launcher: the game process continues this log");
+            runtime_log_flush();
+            runtime_log_release();
+            if (!dcp_resume_game_process()) {
+                runtime_log_write_direct("Launcher: could not start the game process\n");
+                exit(1);
+            }
+            exit(0);
+        }
+#endif
+    }
+    if (!check_imports) {
+        char cause[160], advice[160], message[330];
+        if (!cpu_usable(cause,sizeof(cause),advice,sizeof(advice))) {
+            snprintf(message,sizeof(message),"%s %s",cause,advice);
+            fail(message);
+        }
     }
     if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
@@ -464,6 +561,7 @@ int main(int argc, char **argv) {
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
+    const int true_ultrawide_requested=dcp_true_ultrawide(settings_file);
     runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
     runtime_pad_set_settings(settings_file);
@@ -472,6 +570,7 @@ int main(int argc, char **argv) {
                          dcp_saved_movement_speed(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
     dcp_log_gameplay_settings(settings_file, paths.image_dir);
+    printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
     if (known_build && game_build.cheats) {
         runtime_cheats_log_enabled();
     } else {
@@ -606,13 +705,25 @@ int main(int argc, char **argv) {
             if (!executable) fail("native function is not executable");
         }
     }
+    const int ultrawide_wanted=true_ultrawide_requested && dcp_true_ultrawide_applies(aspect_ratio) &&
+                               known_build && game_build.true_ultrawide;
     const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
     const size_t save_stub_bytes = startup_save_hook_stub_bytes();
     const size_t voice_stub_bytes = voice_hooks_stub_bytes();
-    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes);
-    image = allocate(round_page(size) + hook_bytes); /* the hook stubs follow the image, within a jump of it */
+    const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() : 0;
+    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + ultrawide_stub_bytes);
+    const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
+    /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
+    image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
+    if (runtime_memory_prepare()) {
+#ifdef _WIN32
+        MessageBoxW(NULL,L"Dragon's Crown Pro could not reserve or commit guest memory. Freeing virtual memory or disk space for the page file may help. Your saved data has not been opened.",
+                    L"Dragon's Crown Pro - memory unavailable",MB_OK|MB_ICONERROR);
+#endif
+        fail("guest memory unavailable before starting GPU or game threads");
+    }
     if (!cpu_only && !dcpgpu_available()) puts("GPU: no video core in this build; running CPU-side only");
     else if (!cpu_only) {
         char title[128]="Dragon's Crown Pro", serial[16]="UNKNOWN", sfo[4096];
@@ -627,6 +738,9 @@ int main(int argc, char **argv) {
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
         if (dcpgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());
+#ifdef _WIN32
+        module_diagnostics_report();
+#endif
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);
@@ -706,12 +820,16 @@ int main(int argc, char **argv) {
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
+    install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
+                           ultrawide_bytes ? round_page(size)+hook_bytes : 0,
+                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     protect(image + round_page(size), hook_bytes, 5);
+    if (ultrawide_bytes) protect(image + round_page(size) + hook_bytes, ultrawide_bytes, 4);
     int executable_entry = 0;
     for (uint64_t i = 0; i < ns; ++i) {
         protect(image + segments[i].address, round_page(segments[i].size), (unsigned)segments[i].flags);

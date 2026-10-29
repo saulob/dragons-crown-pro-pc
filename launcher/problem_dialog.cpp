@@ -9,7 +9,7 @@
 namespace dcp {
 namespace {
 
-constexpr char kTitle[] = "Graphics could not start";
+constexpr char kTitle[] = "The game could not start";
 
 } // namespace
 
@@ -46,7 +46,7 @@ void ProblemDialog::Draw(const trg::Fonts& fonts, const trg::Theme& theme) {
                                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
     if (ImGui::BeginPopupModal(kTitle, nullptr, kFlags)) {
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextUnformatted("Dragon's Crown Pro PC could not start the graphics system.");
+        ImGui::TextUnformatted("Dragon's Crown Pro PC cannot run on this system.");
         ImGui::Spacing();
         ImGui::TextUnformatted(cause_.c_str());
         ImGui::Spacing();

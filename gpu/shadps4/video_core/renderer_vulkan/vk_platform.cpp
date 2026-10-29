@@ -13,6 +13,7 @@
 #define VK_USE_PLATFORM_XLIB_KHR
 #endif
 
+#include <cstdio>
 #include <vector>
 #include <fmt/ranges.h>
 
@@ -254,6 +255,19 @@ std::vector<const char*> GetInstanceLayers(bool enable_validation, bool enable_c
     return layers;
 }
 
+// dcp: the installed layers; whether one is loaded into the game is not known here.
+static void LogAvailableLayers() {
+    const auto [result, layers] = vk::enumerateInstanceLayerProperties();
+    if (result != vk::Result::eSuccess) {
+        std::printf("Vulkan layers: available layers unknown (%s)\n", vk::to_string(result).c_str());
+        return;
+    }
+    std::printf("Vulkan layers: %zu available (installed, not necessarily loaded)\n", layers.size());
+    for (const auto& layer : layers) {
+        std::printf("Vulkan layers: available %s\n", layer.layerName.data());
+    }
+}
+
 vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
                                   bool enable_crash_diagnostic) {
     LOG_INFO(Render_Vulkan, "Creating vulkan instance");
@@ -300,6 +314,14 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     const std::string layers_string = fmt::format("{}", fmt::join(layers, ", "));
     LOG_INFO(Render_Vulkan, "Enabled instance extensions: {}", extensions_string);
     LOG_INFO(Render_Vulkan, "Enabled instance layers: {}", layers_string);
+    // dcp: the game's instance only; the launcher's device list is headless.
+    if (window_type != Frontend::WindowSystemType::Headless) {
+        LogAvailableLayers();
+        std::printf("GPU: Vulkan instance %u.%u.%u, layers requested: %s, extensions: %s\n",
+                    VK_API_VERSION_MAJOR(available_version), VK_API_VERSION_MINOR(available_version),
+                    VK_API_VERSION_PATCH(available_version),
+                    layers.empty() ? "none" : layers_string.c_str(), extensions_string.c_str());
+    }
 
     // Validation settings
     vk::Bool32 enable_core = EmulatorSettings.IsVkValidationCoreEnabled() ? vk::True : vk::False;

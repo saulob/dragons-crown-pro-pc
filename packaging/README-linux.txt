@@ -27,9 +27,12 @@ A package still encrypted for a PS4 console cannot be unpacked on a PC.
 REQUIREMENTS
 ------------
 - 64-bit Linux (x86-64) with glibc 2.31 or later and a Vulkan loader for
-  Vulkan 1.3 (libvulkan.so.1; Ubuntu 20.04's own is too old). So far the
-  game has only been run on Ubuntu 24.04; other distributions that are new
-  enough may work
+  Vulkan 1.3 (libvulkan.so.1; Ubuntu 20.04's own is too old). The game has
+  been run on Ubuntu 24.04 (WSL2) and, according to community reports, on
+  Bazzite and a Steam Deck LCD; other distributions that are new enough may
+  work
+- A processor with AVX and LZCNT: Intel Core 4th generation (Haswell), AMD FX
+  or newer. The MOVBE and BMI1 instructions some of these lack are emulated
 - A graphics card and Mesa or proprietary driver with Vulkan 1.3,
   VK_EXT_robustness2, VK_KHR_push_descriptor and
   VK_EXT_vertex_attribute_divisor (AMD RADV on the Steam Deck qualifies)
@@ -86,9 +89,9 @@ chooser). The launcher opens first; its "Show this launcher" switch (Play
 page) turns it off once everything is set.
 
 This Linux build is EXPERIMENTAL: it is meant to offer everything the Windows
-version does, but it has only been tested automatically under WSL2 (Ubuntu
-24.04, X11 and Wayland, software Vulkan), not on a real Linux PC or Steam Deck.
-If something does not work, please attach the newest log from the "logs" folder
+version does, but the maintainer has no real Linux PC or Steam Deck: it was
+tested automatically under WSL2 (Ubuntu 24.04, X11 and Wayland, software
+Vulkan) and by community testers. If something does not work, please attach the newest log from the "logs" folder
 to an issue, with your distribution, GPU and driver.
 
 
@@ -107,6 +110,9 @@ PLAYING
   supported.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
+- F3 switches the experimental AMD water fix (black areas under characters
+  standing in water): on by default on AMD graphics cards, off elsewhere, not
+  saved. It needs a keyboard; on the Steam Deck bind F3 in Steam Input.
 - To open the launcher again after turning it off, hold Shift while starting
   (X11 sessions), start the AppImage with the option --launcher, or use the
   "Show launcher" action of its desktop entry. On the Steam Deck: Steam > the

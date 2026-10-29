@@ -27,11 +27,15 @@ inline constexpr char kRenderResolutionKey[] = "render_resolution";
 inline constexpr char kNativeResolution[] = "native";
 inline constexpr char kAspectRatioKey[] = "aspect_ratio";
 inline constexpr char kDefaultAspectRatio[] = "16:9";
+// Widens the scene's horizontal view (Hor+) for the aspect ratios wider than 16:9 (dcp_true_ultrawide_scale).
+inline constexpr char kTrueUltrawideKey[] = "true_ultrawide";
 inline constexpr char kGraphicsCardKey[] = "graphics_card";
-inline constexpr char kAutomaticGpu[] = "automatic";
 inline constexpr char kAntiAliasingKey[] = "smaa";
 inline constexpr char kAnisotropyKey[] = "anisotropy";
 inline constexpr char kTextLanguageKey[] = "text_language";
+// Frames per second reaching the screen (30, 60, 90, 120, 144, 165, 240; 0 is Unlimited); the game's logic stays at 59.94 Hz
+// and a rate above 60 shows the last frame again (gpu/shim/dcp_frame_pacing.h).
+inline constexpr char kFrameRateKey[] = "frame_rate";
 inline constexpr char kShowFpsTitleKey[] = "show_fps_title";
 inline constexpr char kShowResolutionTitleKey[] = "show_resolution_title";
 inline constexpr char kShowFrameCounterKey[] = "show_fps";
@@ -43,6 +47,8 @@ inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 // Routes NPC voice cues to the Japanese banks already present in the USA installation.
 inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
+// Windows, on: Play starts the game as a separate process that overlay programs can attach to (game_process.h).
+inline constexpr char kAllowOverlayProgramsKey[] = "allow_overlay_programs";
 inline constexpr char kLauncherXKey[] = "launcher_x";
 inline constexpr char kLauncherYKey[] = "launcher_y";
 inline constexpr char kLauncherWidthKey[] = "launcher_width";
@@ -80,6 +86,8 @@ bool IsLauncherPlacementSetting(std::string_view key);
 
 // False for a value the game would not accept for the key (it uses the default then, and so does the launcher).
 bool IsValidSetting(std::string_view key, std::string_view value);
+
+std::string FrameRateLabel(int fps);
 
 // Pending launcher edits over the saved values. Nothing is written until Save() or SaveNow(); lines of the file
 // the launcher does not manage (the in-game menu's keys, comments) are kept as they are.

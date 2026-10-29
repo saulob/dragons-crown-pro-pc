@@ -20,10 +20,12 @@
 - **Native PC port**: the game's own x86-64 code runs directly on the PC. It is not an emulator. Windows is the primary tested platform, and there is an experimental native Linux / Steam Deck AppImage with the same intended feature set. Linux needs no Proton or Wine.
 - **TRG launcher** that installs the game directly from your own `.pkg` file, with no Python or other tools needed, and remembers its window position
 - **Windowed** and **Borderless Fullscreen**, switched with **F11** while playing, with window size and monitor selection
-- **Graphics card selection**: Automatic, or any Vulkan graphics card the renderer can use
+- **Graphics card selection**: any Vulkan graphics card the renderer can use
 - **VSync** on or off
 - **Render resolution** from 480p to 4K (3840×2160), with the game's native 1080p as the default
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4
+- **Experimental True Ultrawide** (off by default): 21:9 and 32:9 show more of the world at the sides on the supported builds
+- **Frame rate** option: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited; the game's speed stays at 60 and frames above 60 repeat the last frame
 - **Local PS4 trophies**, offline on this PC, shown on the launcher's Trophies page
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
@@ -39,6 +41,7 @@
 
 - Windows 10 (version 1903 or newer) or Windows 11, 64-bit
 - **Or, experimental:** 64-bit Linux on x86-64, including the Steam Deck, on an X11 or Wayland desktop, with glibc 2.31 or newer and a Vulkan 1.3 loader (`libvulkan.so.1`) and graphics driver (see [Linux and Steam Deck](#linux-and-steam-deck)). The game has been run on Ubuntu 24.04 (WSL2), and community testers report it working on Bazzite (KDE Plasma, Wayland, AMD RADV) and on a Steam Deck LCD; other distributions that are new enough may work
+- A processor with **AVX** and **LZCNT**: Intel Core 4th generation (Haswell), AMD FX or newer. The game's PS4 code runs directly on it; MOVBE and BMI1, which some of these lack, are emulated
 - A graphics card and driver with **Vulkan 1.3**, `VK_EXT_robustness2`, `VK_KHR_push_descriptor` and `VK_EXT_vertex_attribute_divisor` on either platform (tested on an NVIDIA GeForce RTX 4070 and Intel UHD Graphics 730 on Windows)
 - **Your own legally obtained Dragon's Crown Pro package**: a decrypted PS4 `.pkg` file of this exact game version, and about 6 GB of free space for the installed game:
 
@@ -58,7 +61,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.7.1-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v0.8.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -86,7 +89,7 @@ These folders are created the first time they are needed and are not part of the
 
 ### Linux and Steam Deck
 
-**Experimental.** This is a native Linux build, not Proton or Wine, and it is intended to provide the same functionality as Windows: the same launcher, installer, display and graphics options, controls and in-game menu. "Experimental" is about testing: the maintainer has no real Linux PC or Steam Deck. Community testers have reported it working on Bazzite (KDE Plasma, Wayland, AMD Radeon RX 9070 XT with RADV, 4K borderless fullscreen) and on a Steam Deck LCD ([issue #5](https://github.com/saulob/dragons-crown-pro-pc/issues/5)). It was also validated automatically under WSL2 with Ubuntu 24.04, in X11 and Wayland environments with a software Vulkan driver: the launcher, installing a package, the game's first screens, saves and the shader cache. Broader testing is still needed on NVIDIA and Intel Vulkan drivers, other distributions and the Steam Deck OLED, gamescope and Gaming Mode, performance, and long sessions. Started without a graphical session (neither `DISPLAY` nor `WAYLAND_DISPLAY` set), the game prints an error and exits instead of crashing. Please report Linux-specific problems with the log (see [Reporting problems](#reporting-problems)).
+**Experimental.** This is a native Linux build, not Proton or Wine, and it is intended to provide the same functionality as Windows: the same launcher, installer, display and graphics options, controls and in-game menu; the only Windows-only option is Allow overlay programs. "Experimental" is about testing: the maintainer has no real Linux PC or Steam Deck. Community testers have reported it working on Bazzite (KDE Plasma, Wayland, AMD Radeon RX 9070 XT with RADV, 4K borderless fullscreen) and on a Steam Deck LCD ([issue #5](https://github.com/saulob/dragons-crown-pro-pc/issues/5)). It was also validated automatically under WSL2 with Ubuntu 24.04, in X11 and Wayland environments with a software Vulkan driver: the launcher, installing a package, the game's first screens, saves and the shader cache. Broader testing is still needed on NVIDIA and Intel Vulkan drivers, other distributions and the Steam Deck OLED, gamescope and Gaming Mode, performance, and long sessions. Started without a graphical session (neither `DISPLAY` nor `WAYLAND_DISPLAY` set), the game prints an error and exits instead of crashing. Please report Linux-specific problems with the log (see [Reporting problems](#reporting-problems)).
 
 1. Download **DragonsCrownProPC-v&lt;version&gt;-x86_64.AppImage** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and make it executable (right-click > **Properties** > **Permissions** > **Is executable**, or `chmod +x`).
 2. Run it. The launcher opens.
@@ -105,7 +108,7 @@ Windows may warn the first time you run the program, because the release is not 
 
 ## The launcher
 
-The launcher opens before the game. Your choices are saved to `user\dcp.ini`, the same file the in-game menu writes. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms; on Linux the folder paths below use `/` instead of a backslash.
+The launcher opens before the game. Your choices are saved to `user\dcp.ini`, the same file the in-game menu writes. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
 
 ### Play
 - **Install game...** from your `.pkg` file, with the Title ID, version and `eboot.bin` checks, and **Reinstall game...**
@@ -114,10 +117,11 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 ### Display
 - **Display mode**: Windowed or Borderless Fullscreen. Press **F11** while playing to switch between them.
 - **Window size** (1280×720 to 3840×2160 in 16:9; the choices follow the Aspect Ratio) and **Monitor**. A window that would not fit the monitor opens smaller, centred and within 80% of its usable area; your saved size is not changed.
-- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders a frame of the ratio's shape at the Render resolution's height. Only 16:9 Original is undistorted: the game's 2D scene is still laid out for its original 1280 × 720 canvas, so 21:9 and 32:9 stretch the gameplay horizontally instead of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not adjusted either. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
+- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders a frame of the ratio's shape at the Render resolution's height. Only 16:9 Original is undistorted: the game's 2D scene is still laid out for its original 1280 × 720 canvas, so 21:9 and 32:9 stretch the gameplay horizontally instead of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not adjusted either. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
+- **True Ultrawide** (experimental, Off by default): with 21:9 or 32:9, the game shows more of the world at the sides instead of stretching it, with the same vertical view and proportions as 16:9. Distant background layers fill the whole width; the playfield and the layers that move with it stop where the stage and the playfield end, showing the background behind them. On the town facility pictures (the guilds, the shop, the inn) the character, titles and text keep their 16:9 size and place and only the room behind them is scaled up evenly to fill the sides, while their top and bottom bars, frame lines and dialogue backing reach the frame edges; the route map keeps its 16:9 composition, centred. The HUD and menus stay in their 16:9 layout; fades, the loading and saving fades and the bottom dialogue and narration bands reach the frame edges, other message bands keep their 16:9 width, and the town map fills the width (at 32:9 as far as its markers stay on screen, black beyond). Available on the USA 1.00, Japanese 1.00, 1.02 and 1.03 and Asia and Hong Kong 1.00 builds.
 - **Presentation**: Letterbox (the default) fits the finished frame into the window with its aspect ratio kept and bars where the shapes differ; Stretch fills the whole window with it. It applies in Windowed and Borderless Fullscreen and does not change the Aspect Ratio or the render resolution.
 - In Windowed and Borderless Fullscreen, mouse movement, clicks and the wheel show the cursor; keyboard or controller input hides it. Mouse-driven menus and dialogs keep it visible.
-- **Graphics card**: Automatic or a specific Vulkan graphics card. A card that is no longer present falls back to Automatic.
+- **Graphics card**: the Vulkan graphics card that renders the game, chosen from the cards the renderer can use. A card that is no longer present falls back to the first available card.
 - **VSync** on or off
 - **Upscaling**: AMD FSR 1 enlarges the picture when the window is bigger than the render resolution
 - **Sharpening** (AMD RCAS) and **Sharpening strength**
@@ -130,12 +134,14 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 ### Gameplay
 - **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. CUSA10454 1.00 USA only; narrator and player-character choices are unchanged
+- **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
 - **Frame counter**: shows the frame rate and frame time in a corner of the game
 - **Arachnophobia Safe Mode**: redraws the Giant Spider as two soft cream bodies with two orange eyes, without legs or fangs; gameplay does not change
+- **Allow overlay programs** (Windows, Off by default): starts the game as a separate process from the launcher, which recording, chat, store and performance overlays can attach to cleanly. Turn it on if the game closes right after Play while such a program is running
 
-The game runs at its own 60 frames per second.
+The game runs at its own 60 frames per second unless the Frame rate setting asks for more; its logic stays at 60 either way.
 
 ### Trophies
 - The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package, and the **Trophies** launcher page shows your progress, the trophies and their grades.
@@ -163,7 +169,7 @@ The game runs at its own 60 frames per second.
 | Options (Start) | Enter |
 | Touchpad left / right (Back) | Tab / Backspace |
 
-- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
+- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F3** switches the experimental AMD water fix for black regions under characters standing in water (On by default on AMD graphics cards, Off elsewhere; it is not saved and a notice shows its state). **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
 - **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged. Online play is not supported.
 
 ### About

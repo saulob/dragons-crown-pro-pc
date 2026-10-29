@@ -92,6 +92,8 @@ void runtime_stack_release(void *stack, size_t size);
 #endif
 /* Windows: reserves the PS4 user address range as a placeholder (no-op elsewhere). */
 void runtime_memory_reserve(void);
+/* Creates the guest memory pool and commits a first page; nonzero when that fails. */
+int runtime_memory_prepare(void);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
 void runtime_savedata_configure(const char *title);

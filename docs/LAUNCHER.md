@@ -7,14 +7,24 @@ Graphics, Gameplay, Cheats, Controls, Trophies and About.
 ## Architecture
 
 `dragons_crown_pro.exe` calls `dcp_launcher_run()` (`launcher/dcp_launcher.h`) early in `main`, after the PS4 address range is
-reserved and before the boot image is read. The only other executable is the Windows update helper, `trg-updater.exe`. On Linux the loader
-passes `dcp_check_vulkan` as the launcher's graphics check: Play runs it (the launcher itself needs no Vulkan) and, if
-it fails, `launcher/problem_dialog.cpp` explains why and the launcher stays open.
+reserved and before the boot image is read. The only other executable is the Windows update helper, `trg-updater.exe`. The loader
+passes a graphics check to the launcher: the processor check on Windows, the processor check and `dcp_check_vulkan` on Linux. Play
+runs it (the launcher itself needs no Vulkan) and, if it fails, `launcher/problem_dialog.cpp` explains why and the launcher stays
+open. The graphics card list comes from a headless Vulkan instance on both platforms (empty on Linux when Vulkan is unusable).
 
 The launcher cannot live in the game's own window: the Vulkan presenter and its Dear ImGui context are created by the
 guest, and a missing game has no guest at all. So it opens a window of its own (SDL3, an SDL renderer, Dear ImGui) and
 closes all of it on Play, before the loader creates the game window. Only one SDL window and one Dear ImGui context
 exist at a time. The Dear ImGui copy is the one compiled into the video core library.
+
+With **Allow overlay programs** on (Windows only), the game does not run in the launcher's process. Play (or a start
+without the launcher) creates a new `dragons_crown_pro.exe` with the same arguments minus `--launcher`,
+`--dcp-skip-launcher` and `--log`, plus the internal `--dcp-game --log <this run's log>` (`launcher/game_process.cpp`).
+It is created suspended; the launcher process writes its last log line, lets go of the log, resumes it and exits. The
+game process never runs the launcher, so it never starts another one; it continues the same log and inherits the
+environment and working folder. Overlay and injection tools then attach to a clean game process instead of one that
+already holds what they put into the launcher. If the game process cannot be created, the launcher stays open with the
+reason. Off, and on Linux, the game continues in the launcher's process as it always has.
 
 | Path | Purpose |
 |---|---|
@@ -46,7 +56,7 @@ without copying, and only the build that is already active is reported as up to 
 
 The settings file is always `<user>\dcp.ini`; the loader hands its path to the launcher and the video core. The
 correctness defaults (draw preparation workers 0, asynchronous shaders off, vertex descriptor validation, linear image
-readbacks, the 60 Hz vblank, the stick dead zone) are code, and the environment cannot change them (docs/GRAPHICS.md).
+readbacks, the stick dead zone) are code, and the environment cannot change them (docs/GRAPHICS.md).
 `tools\build.ps1 -Run` starts the executable with no folder arguments: it resolves the development folders itself.
 
 The loader writes the one numbered log itself, `logs\dragons_crown_pro_NNN.log` (the next free number, never an
@@ -139,9 +149,14 @@ does. Both write byte-identical files from the game's package.
 
 - **Save** writes the pending settings and keeps the launcher open. **Quit** closes without saving.
 - **PLAY** is rejected while the files are not valid. Otherwise it saves the pending settings once, shows "Settings
-  saved. Starting game..." for 0.4 s with the controls disabled, closes the launcher window and lets the loader go on.
-  A failed save keeps the launcher open. No settings are written per frame.
+  saved. Starting game..." for 0.4 s with the controls disabled, closes the launcher window and lets the loader go on
+  (with Allow overlay programs on, Windows: starts the game process, see Architecture). A failed save, or a game
+  process that cannot be created, keeps the launcher open. No settings are written per frame.
 - The window placement is saved about half a second after a move or resize, and when the launcher closes.
+- **Sponsor on GitHub** (with the heart `assets/launcher/sponsor-heart.png`, left of Quit, and a card at the top of About) opens `https://github.com/sponsors/saulob` in the
+  default browser when activated, and nothing else: no request is made to show it, it never takes the Enter default
+  from PLAY, and the footer button is left out when the window is too narrow to fit it beside the hint text. It is
+  patched into TRG Launcher by `gpu/patches/trg-launcher/0003-sponsor-link.patch`.
 
 ## Settings
 
@@ -157,7 +172,7 @@ use the same defaults).
 | `display_mode` | `windowed`, `borderless` | `windowed` | at window creation; live with F11 |
 | `window_width`, `window_height` | pixels | 1920, 1080 | at window creation |
 | `monitor` | 1-based display number | 1 | at window creation |
-| `graphics_card` | `automatic` or an exact Vulkan device name | `automatic` | at start |
+| `graphics_card` | an exact Vulkan device name | the first usable device | at start |
 | `vsync` | 1, 0 | 1 (FIFO) | live |
 | `fsr1` | 1, 0 | 0 | live |
 | `rcas`, `rcas_strength` | 1, 0; 0-100 | 1; 75 | live |
@@ -165,6 +180,8 @@ use the same defaults).
 | `anisotropy` | 0 (game), 2, 4, 8, 16 | 0 | live |
 | `render_resolution` | `native`, `480p`, `720p`, `1440p`, `1800p`, `4K` | `native` | at start |
 | `aspect_ratio` | `16:9`, `16:10`, `21:9`, `32:9`, `4:3`, `5:4` | `16:9` | at start |
+| `true_ultrawide` | 1, 0 (`true`, `false` are read too) | 0 | at start (21:9 and 32:9 only) |
+| `frame_rate` | 30, 60, 90, 120, 144, 165, 240, 0 (Unlimited) | 60 | at start |
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live |
@@ -172,6 +189,7 @@ use the same defaults).
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
+| `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
 | `cheat_movement_speed_2x` (old) | 1, 0 | 0 | read only when `cheat_movement_speed` is missing: 1 means 2x |
@@ -200,18 +218,32 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
   an unknown value is 16:9). It sets the shape of the game's render target. The game's 2D scene is still laid out for its
   original 1280 × 720 canvas, so only 16:9 Original is undistorted: 21:9 and 32:9 stretch the gameplay horizontally instead
-  of showing more of the world (issue #1), and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not
-  adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
+  of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and
+  prerendered videos are not adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
   of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
   The Asia and Hong Kong 1.02 build has no verified render resolution sites of its own, so it renders at its original size in
   16:9 and offers no other shape, whatever was saved.
+- **True Ultrawide** (experimental, Off by default; `true_ultrawide` in `dcp.ini`, a missing or unknown value is Off): with
+  21:9 or 32:9 the game draws more of the world instead of stretching it. The vertical view stays the one of 16:9 and the
+  horizontal view grows by the render target's shape over 16:9 (× 1.3125 for 21:9, × 2 for 32:9), so characters and
+  scenery keep their proportions. Distant background layers fill the whole width; the playfield and the layers that
+  move with it stop where the stage's camera limits and the playfield layer end (never narrower than 16:9), showing
+  the background behind them. On a single-screen town facility picture (the guilds, the shop, the inn) the character,
+  props, titles and text keep their 16:9 size and place and only the room behind them is scaled up evenly to fill the
+  sides, within the picture's own top and bottom, while its top and bottom bars, frame lines and dialogue backing
+  reach the frame edges; the route map keeps its 16:9 composition, centred. The HUD, menus and text keep their 16:9 layout and proportions,
+  centred; fades, cinematic bars, the loading and saving fades and the bottom dialogue and narration bands reach the
+  frame edges, other message bands keep their 16:9 width, and the town map is scaled up evenly to fill the width (at
+  32:9 only as far as its markers stay on screen, with black beyond). The row is disabled for the other shapes, where it
+  changes nothing. Off gives back the Aspect Ratio's own picture exactly. It is available on
+  CUSA10454 1.00, CUSA07001 1.00, 1.02 and 1.03 and CUSA10209 1.00, where its code was checked; elsewhere a saved On
+  is ignored and the log says why.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
-- **Graphics card**: Automatic, then each Vulkan device the renderer can use (the launcher enumerates them without creating
+- **Graphics card**: each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
-  name. Automatic is the renderer's own ranking (usable devices first, then API version, discrete before integrated, then
-  device memory). A name
-  that is not there any more, or not usable, falls back to Automatic. The game's log shows `GPU: selection Automatic` or
-  `GPU: requested <name>`, then `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11.
+  name. The first listed device is the default. A name that is not there any more, or not usable, falls back to the first
+  usable device, and the launcher saves that name when you press Play. The game's log shows `GPU: selected <name>`, then
+  `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11 on Windows and SDL's first working renderer on Linux.
 - **VSync**: On is FIFO (the stable default). Off uses Mailbox, else Immediate.
 - **Presentation**: Letterbox (the default) or Stretch. It controls how the finished frame fits the window or display when
   their shape differs: Letterbox keeps the frame's aspect ratio with bars, Stretch fills the window and may distort the
@@ -254,6 +286,13 @@ ratio. The render width is rounded to a multiple of 8, so a window of the same h
 `DCP: Aspect ratio: 21:9 Ultrawide, render target 2520x1080`. The presenter already sizes its frame from the game's image
 shape.
 
+**True Ultrawide** changes the game's scene pass projections, not the presenter (docs/GRAPHICS.md). The run log prints one
+line, for example `DCP: True Ultrawide requested on, effective on (21:9 Ultrawide, 2520x1080, CUSA10454 1.00 USA): pass
+projection 6 sites, horizontal x1.3125, vertical unchanged; fill hooks installed; world window hooks installed; widget,
+map and fade hooks installed`, or the reason it is
+off: not requested, a shape not wider than 16:9, a build whose sites are not verified, or a site that does not match (the
+game then starts with the plain Aspect Ratio picture).
+
 **Anti-aliasing** is SMAA 1x (tlg_pc's host pass, MIT): a post-process on the finished picture at the game's render
 resolution, before FSR 1 and sharpening. **Texture filtering** forces 2x to 16x anisotropic filtering on the game's
 mipmapped, bilinear samplers of graphics draws (Bloodborne's generic sampler override, without its title hooks); Game keeps
@@ -261,8 +300,7 @@ the game's own filters. MSAA is not offered: the references only respect the gam
 one title, and none lets the user choose a sample count.
 
 Not offered: HDR (the video core's switch exists, but the game's `param.sfo` does not declare HDR support, so it would do
-nothing) and a frame rate limit (the game is paced by a fixed 60 Hz vblank; a lower limit would slow the game itself).
-There is no Performance page. Asynchronous shader compilation is fixed off:
+nothing). The frame rate is on the Gameplay page. There is no Performance page. Asynchronous shader compilation is fixed off:
 `dcp.ini` and the environment cannot enable it.
 
 ## Gameplay
@@ -277,6 +315,17 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
   town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
   are untouched.
+- **Frame rate** (30 FPS, 60 FPS (Original), 90, 120, 144, 165, 240 FPS, Unlimited; `frame_rate`, 60 FPS (Original) by
+  default; applied at start, every build) sets how often frames reach the window. 60 is the game's own rate. 30 FPS
+  shows every second frame. The game makes one frame per logic tick at 59.94 Hz, builds that frame's draw lists inside
+  the last tick of the frame and holds itself to that rate, so nothing is changed in the game and a faster target does
+  not make it faster: the video core keeps the 60 Hz vblank and, between two of the game's flips, shows the last frame
+  again at the target rate (`RepeatLastFrame`, scheduled by the limiter in `gpu/shim/dcp_frame_pacing.h`). The extra
+  frames repeat the last logic step, so motion is as smooth as at 60 FPS; there is no interpolation. Unlimited repeats
+  as often as the display allows, up to 480 a second. With VSync on, presentations never go past the display's refresh
+  rate, and a display at 60 Hz or less has nothing to repeat. Frame rate in title and the frame counter count every
+  presentation. The log has `Gameplay: Frame rate` and `VideoOut: vblank ... frame rate ... repeat cadence ...
+  VSync ...`.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
 - **Render resolution in title**: `Dragon's Crown Pro | 1920x1080`, the render resolution of the game's presented image (not the
@@ -290,8 +339,13 @@ There is no Performance page. Asynchronous shader compilation is fixed off:
   `launcher/game_patches.h`, `launcher/prompts/arachnophobia-spider.dcpx`) applied when toggled, in the background, and
   reapplied after a reinstall. An archive has one undo record, so the prompts and this patch are applied together:
   changing either reverts what the other left and writes both again.
+- **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
+  recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
+  separate process from the launcher (see Architecture), so these tools attach to a clean game process. Off keeps the
+  usual start in the launcher's process. Neither setting filters Vulkan layers or blocks any program; a
+  `VK_LOADER_LAYERS_DISABLE` set in the environment reaches the game as it is.
 
-No skip-intro or frame rate limit.
+No skip-intro.
 
 ## Cheats
 
@@ -379,7 +433,12 @@ window is centred on the primary display.
 ## Logging
 
 The launcher prints `Launcher: ...` lines (shown or skipped and why, game file state and hashes, settings path, settings
-saved, install request, controller prompts installed and switched, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`. The game window logs
+saved, install request, controller prompts installed and switched, closing) into the run log, `build\logs\dragons_crown_pro_NNN.log`.
+`Overlay compatibility: original game process` or `separate game process` says where the game ran. A separate game
+process appends to the same log after `Launcher: the game process continues this log`, starting with its own `[run]`
+lines and `Startup: game-only child process`; a session is still one file. On Windows the log also lists the DLLs
+outside the Windows folder that the game process had at its start (separate process only) and the ones loaded before its
+first frame (`Modules: ...`), and the Vulkan layers that are installed. The game window logs
 `Window: display ... VSync ... frame rate in title ...`.
 
 **Detailed logging** (About, Diagnostics) is on by default and keeps that log after every session. Turned off, a run

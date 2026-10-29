@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <vector>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
 #include <time.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -15,6 +17,10 @@
 #include <sys/resource.h>
 #endif
 #include "common/assert.h"
+#include "dcp_frame_pacing.h"
+#include "dcp_latency_trace.h"
+#include "dcp_present.h"
+#include "dcp_settings.h"
 #include "dcp_toggles.h"
 #include "dcp_overlay.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -44,6 +50,31 @@ extern std::atomic<u32> g_dcp_pending_draws;
 } // namespace Vulkan
 
 namespace Libraries::VideoOut {
+
+static std::atomic<u32> g_trace_flip_waits;
+
+// Swap thread.
+static void TracePresent(std::chrono::steady_clock::time_point submitted) {
+    using Clock = std::chrono::steady_clock;
+    static Clock::time_point window_start = Clock::now();
+    static double sum_ms, max_ms;
+    static u32 flips;
+    const auto now = Clock::now();
+    const double ms = std::chrono::duration<double, std::milli>(now - submitted).count();
+    sum_ms += ms;
+    max_ms = std::max(max_ms, ms);
+    ++flips;
+    const double window = std::chrono::duration<double>(now - window_start).count();
+    if (window < 5.0) {
+        return;
+    }
+    std::printf("Latency trace: present: flip submitted -> presented avg %.1f ms, max %.1f ms, %.1f flips/s; "
+                "%u flips waited for the presenter\n",
+                sum_ms / flips, max_ms, flips / window, g_trace_flip_waits.exchange(0));
+    window_start = now;
+    sum_ms = max_ms = 0;
+    flips = 0;
+}
 
 constexpr static bool Is32BppPixelFormat(PixelFormat format) {
     switch (format) {
@@ -90,6 +121,31 @@ void VideoOutDriver::RunPresenter(std::function<void()> work, bool if_idle) {
         swap_queue.push_back(std::move(work));
     }
     swap_cv.notify_one();
+}
+
+// Gamescope only: its frame limit (30 FPS) runs below the vblank and must delay the guest's flips, as presenting on
+// the vblank thread did; otherwise frames pile up in the swap queue.
+bool VideoOutDriver::FlipWaitsForPresenter() {
+    if (!DcpPresent::GamescopeSession()) {
+        return false;
+    }
+    {
+        std::scoped_lock lock{swap_mutex};
+        if (swap_queue.empty()) {
+            return false;
+        }
+    }
+    std::scoped_lock lock{mutex};
+    if (!requests.empty()) {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            std::printf("VideoOut: a flip waited for the previous present (first time; "
+                        "DCP_INPUT_LATENCY_TRACE=1 counts them)\n");
+        }
+        g_trace_flip_waits.fetch_add(1, std::memory_order_relaxed);
+    }
+    return true;
 }
 
 void VideoOutDriver::SwapThread(std::stop_token token) {
@@ -297,10 +353,19 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
 }
 
 void VideoOutDriver::Flip(const Request& req) {
+    const bool present =
+        DcpFramePacing::PresentsFlip(DcpSettings::Get().frame_rate.load(), flips_consumed++);
     // Update HDR status before presenting, then present the frame on the swap thread.
-    RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
+    RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr, submitted = req.submitted, present] {
+        if (!present) {
+            presenter->RetireFrame(frame);
+            return;
+        }
         presenter->SetHDR(hdr);
         presenter->Present(frame);
+        if (DcpLatencyTrace::enabled) {
+            TracePresent(submitted);
+        }
     });
     Vulkan::FrameCapture::OnFlip(req.index >= 0 ? req.port->buffer_slots[req.index].address_left
                                                 : 0);
@@ -591,6 +656,45 @@ void VideoOutDriver::DrawLastFrame() {
     }, true);
 }
 
+void VideoOutDriver::RepeatLastFrame() {
+    RunPresenter([this] {
+        const auto frame = presenter->PrepareLastFrame();
+        if (frame != nullptr) {
+            presenter->Present(frame, true);
+        }
+    }, true);
+}
+
+namespace {
+constexpr auto kLimiterSpinWindow = std::chrono::microseconds(500);
+
+// A coarse wait can return about a millisecond late, so it stops short and the rest is yielded.
+void WaitUntilSlot(std::chrono::steady_clock::time_point slot) {
+    using Clock = std::chrono::steady_clock;
+    const auto coarse = slot - Clock::now() - kLimiterSpinWindow;
+#ifdef _WIN32
+    thread_local const HANDLE timer =
+        CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (coarse > Clock::duration::zero()) {
+        LARGE_INTEGER due;
+        due.QuadPart = -std::chrono::duration_cast<std::chrono::nanoseconds>(coarse).count() / 100;
+        if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+            WaitForSingleObject(timer, INFINITE);
+        } else {
+            std::this_thread::sleep_for(coarse);
+        }
+    }
+#else
+    if (coarse > Clock::duration::zero()) {
+        std::this_thread::sleep_for(coarse);
+    }
+#endif
+    while (Clock::now() < slot) {
+        std::this_thread::yield();
+    }
+}
+} // namespace
+
 bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
                                 bool is_eop /*= false*/) {
     {
@@ -618,6 +722,7 @@ bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
 }
 
 void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop) {
+    const auto submitted = std::chrono::steady_clock::now();
     Vulkan::Frame* frame;
     if (index == -1) {
         frame = presenter->PrepareBlankFrame(false);
@@ -636,6 +741,7 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
             .flip_arg = flip_arg,
             .index = index,
             .eop = is_eop,
+            .submitted = submitted,
         });
     }
 }
@@ -648,7 +754,20 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     Common::SetCurrentThreadRealtime(vblank_period);
 
     Common::AccurateTimer timer{vblank_period};
-    std::printf("VideoOut: vblank %u Hz\n", EmulatorSettings.GetVblankFrequency());
+    const int target_fps = DcpSettings::Get().frame_rate.load();
+    const double display_hz = DcpSettings::Get().display_refresh_hz;
+    bool vsync = DcpSettings::Get().vsync;
+    DcpFramePacing::FrameLimiter limiter{DcpFramePacing::RepeatCadenceHz(target_fps, vsync, display_hz),
+                                         std::chrono::steady_clock::now()};
+    const std::string cadence_text =
+        limiter.Enabled() ? std::to_string(DcpFramePacing::RepeatCadenceHz(target_fps, vsync, display_hz)) + " FPS"
+                          : "none";
+    std::printf("VideoOut: vblank %u Hz, frame rate %s, repeat cadence %s, VSync %s\n",
+                EmulatorSettings.GetVblankFrequency(), DcpFramePacing::ModeName(target_fps).c_str(),
+                cadence_text.c_str(), vsync ? "on" : "off");
+    if (DcpLatencyTrace::enabled) {
+        std::printf("Latency trace: on (DCP_INPUT_LATENCY_TRACE=1), pad and present lines every 5 s\n");
+    }
 
     const auto receive_request = [this] -> Request {
         std::scoped_lock lk{mutex};
@@ -662,6 +781,13 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
     while (!token.stop_requested()) {
         timer.Start();
+        const auto tick_start = std::chrono::steady_clock::now();
+        if (const bool vsync_now = DcpSettings::Get().vsync; vsync_now != vsync) {
+            vsync = vsync_now;
+            limiter = DcpFramePacing::FrameLimiter{DcpFramePacing::RepeatCadenceHz(target_fps, vsync, display_hz),
+                                                   tick_start};
+        }
+        const auto tick_deadline = tick_start + vblank_period;
 
         if (DebugState.IsGuestThreadsPaused()) {
             DrawLastFrame();
@@ -671,7 +797,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
         // Check if it's time to take a request.
         auto& vblank_status = main_port.vblank_status;
-        if (vblank_status.count % (main_port.flip_rate + 1) == 0) {
+        if (vblank_status.count % (main_port.flip_rate + 1) == 0 && !FlipWaitsForPresenter()) {
             const auto request = receive_request();
             if (!request) {
                 // The save list, the menu and the text entry stay live while the game draws nothing.
@@ -689,6 +815,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                     }
                 }
             } else {
+                limiter.Release(tick_start);
                 Flip(request);
                 FRAME_END;
             }
@@ -716,6 +843,20 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             vblank_status.process_time = Libraries::Kernel::sceKernelGetProcessTime();
             vblank_status.tsc = Libraries::Kernel::sceKernelReadTsc();
             main_port.vblank_cv.notify_all();
+        }
+
+        // Frame rate above 60: the game makes one new frame per vblank, so the slots left before the next one
+        // show the last frame again.
+        while (limiter.Enabled() && main_port.is_open && !token.stop_requested()) {
+            const auto slot = limiter.NextSlot();
+            if (slot >= tick_deadline) {
+                break;
+            }
+            if (std::chrono::steady_clock::now() < slot) {
+                WaitUntilSlot(slot);
+            }
+            limiter.Release(std::chrono::steady_clock::now());
+            RepeatLastFrame();
         }
 
         timer.End();

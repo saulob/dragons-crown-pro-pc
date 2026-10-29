@@ -42,3 +42,7 @@ eboot.bin
 /gpu/third_party/magic_enum/
 /gpu/third_party/miniz/
 /gpu/third_party/xbyak/
+
+# Android build output and the OpenSSL sources it builds, kept local
+/android/app/.cxx/
+/third_party/openssl-android/

@@ -28,9 +28,11 @@
 #include "dcp_png.h"
 #include "dcp_cheats.h"
 #include "dcp_displays.h"
+#include "dcp_graphics.h"
 #include "dcp_resolution.h"
 #include "game_files.h"
 #include "game_install.h"
+#include "game_process.h"
 #include "host.h"
 #include "launcher_quit.h"
 #include "options.h"
@@ -92,8 +94,8 @@ constexpr char kShowLauncherHelp[] =
 constexpr char kWindowSizeHelp[] =
     "The game window's size in pixels in Windowed mode. The picture keeps its shape: other window shapes get black bars.";
 constexpr char kGraphicsCardHelp[] =
-    "The graphics card the game runs on. Automatic prefers a discrete card. A card that is no longer there falls back "
-    "to Automatic.";
+    "Selects which graphics card renders the game. If the selected card is no longer available, the first available "
+    "card is used.";
 constexpr char kMonitorHelp[] = "The display the game opens on.";
 constexpr char kVSyncHelp[] = "On prevents tearing. Off allows it, for the lowest latency and G-Sync/FreeSync.";
 constexpr char kPresentationHelp[] =
@@ -110,6 +112,11 @@ constexpr char kRenderResolutionHelp[] =
     "1440p and above need a powerful graphics card.";
 constexpr char kRestrictedAspectRatioHelp[] =
     "This game build renders at 16:9; the other aspect ratios are not available for it.";
+constexpr char kTrueUltrawideHelp[] =
+    "Experimental. Expands gameplay beyond 16:9. Some scenes may show unintended background elements. Available with "
+    "21:9 and 32:9.";
+constexpr char kUnverifiedTrueUltrawideHelp[] =
+    "This game build's scene projection is not verified; True Ultrawide is not available for it.";
 constexpr char kRestrictedRenderResolutionHelp[] =
     "This game build renders at its original size; the custom render resolutions are not available for it.";
 constexpr char kAntiAliasingHelp[] =
@@ -117,6 +124,10 @@ constexpr char kAntiAliasingHelp[] =
 constexpr char kAnisotropyHelp[] =
     "Sharper textures on floors and walls seen at an angle. Game uses the game's own filtering.";
 constexpr char kTextLanguageHelp[] = "Language used by game menus and subtitles.";
+constexpr char kFrameRateHelp[] =
+    "60 FPS is the original game rate. 30 shows every second frame. Faster targets show the last frame again until the "
+    "next one: the game still makes 60 new frames a second, so game speed and motion are unchanged. Unlimited repeats "
+    "as often as the display allows, up to 480 a second.";
 constexpr char kShowFpsTitleHelp[] = "Shows the frame rate in the window title: Dragon's Crown Pro | FPS: 60.00";
 constexpr char kShowResolutionTitleHelp[] =
     "Shows the game's render resolution in the window title: Dragon's Crown Pro | 1920x1080";
@@ -128,6 +139,9 @@ constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
+constexpr char kAllowOverlayProgramsHelp[] =
+    "For programs that draw over games (recording, chat, store and performance overlays). On, PLAY starts the game as a "
+    "separate program from this launcher, so they can attach to it cleanly. Off starts the game the usual way.";
 
 enum class PatchAction { kPrompts, kSafeMode, kRestore };
 
@@ -170,20 +184,41 @@ __attribute__((format(printf, 1, 2))) void Log(const char* format, ...) {
     std::printf("\n");
 }
 
-ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
+bool LoadLauncherImage(const char* file, DcpPng::Image& image) {
     const char* base = SDL_GetBasePath();
     if (!base) {
-        return ImTextureID{};
+        return false;
     }
-    const std::filesystem::path path = PathFromUtf8(base) / "assets" / "launcher" / "header-art.png";
+    const std::filesystem::path path = PathFromUtf8(base) / "assets" / "launcher" / file;
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        return ImTextureID{};
+        return false;
     }
     const std::vector<unsigned char> encoded((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    DcpPng::Image image;
     if (!DcpPng::DecodeRgba(encoded.data(), encoded.size(), image)) {
-        Log("launcher header art could not be decoded: %s", Utf8(path).c_str());
+        Log("launcher image could not be decoded: %s", Utf8(path).c_str());
+        return false;
+    }
+    return true;
+}
+
+ImTextureID LoadSponsorIcon(LauncherHost& host) {
+    DcpPng::Image image;
+    if (!LoadLauncherImage("sponsor-heart.png", image)) {
+        return ImTextureID{};
+    }
+    // Transparent texels are white too, so linear filtering does not darken the heart's edge.
+    for (size_t i = 0; i + 3 < image.rgba.size(); i += 4) {
+        if (image.rgba[i + 3] == 0) {
+            image.rgba[i] = image.rgba[i + 1] = image.rgba[i + 2] = 255;
+        }
+    }
+    return host.CreateTexture(image.rgba.data(), image.width, image.height);
+}
+
+ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
+    DcpPng::Image image;
+    if (!LoadLauncherImage("header-art.png", image)) {
         return ImTextureID{};
     }
     const ImTextureID texture = host.CreateTexture(image.rgba.data(), image.width, image.height);
@@ -234,12 +269,30 @@ std::filesystem::path SettingsPath(const DcpLauncherConfig& config) {
     return PathFromUtf8(config.user_dir ? config.user_dir : "user") / "dcp.ini";
 }
 
+bool SeparateGameProcess(const DcpLauncherConfig& config, const LauncherSettings& settings) {
+    return config.game_process && SeparateGameProcessWanted(settings.GetBool(kAllowOverlayProgramsKey, false));
+}
+
+// The saved settings are final here: the game process reads them from the same file.
+bool StartGameProcess(const DcpLauncherConfig& config, std::string& error) {
+    Log("starting overlay-compatible game process");
+    const std::vector<std::string> arguments =
+        GameProcessArguments(trg::update::CurrentProcessArguments(), config.log_file ? config.log_file : "");
+    if (!CreateGameProcess(trg::update::CurrentExecutablePath(), arguments, error)) {
+        Log("could not start the game process: %s", error.c_str());
+        return false;
+    }
+    return true;
+}
+
 enum class Outcome { kRunning, kPlay, kQuit };
 
 class LauncherApp {
 public:
     LauncherApp(const DcpLauncherConfig& config, LauncherSettings& settings, GamePaths paths, GameCheck check)
         : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state), build_(check.build) {}
+
+    bool game_process_started() const { return game_process_started_; }
 
     // Runs the launcher window until Play or Quit. False when no window could be opened.
     bool Run(Outcome& outcome) {
@@ -256,7 +309,7 @@ public:
             return false;
         }
         displays_ = ListDisplays();
-        gpu_names_ = ListGpuNames();
+        gpu_names_ = DcpGraphics::GpuChoices(ListGpuNames());
         prompts_installed_ = InstalledPrompts();
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
@@ -264,6 +317,7 @@ public:
         placement_ = PlacementTracker(host_.Restored());
         fonts_ = trg::LoadSystemFonts(18.0f);
         header_art_ = LoadHeaderArt(host_, header_art_aspect_);
+        sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         updater_ = std::make_unique<trg::update::UpdateController>(MakeUpdateConfig(InstallDir()));
@@ -326,9 +380,21 @@ private:
         PollInstall();
         PollPrompts();
         PollUpdate();
+        NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
-            return Outcome::kPlay;
+            if (!SeparateGameProcess(config_, settings_)) {
+                return Outcome::kPlay;
+            }
+            SavePlacement(placement_.Flush());
+            std::string error;
+            if (StartGameProcess(config_, error)) {
+                skip_finish_save_ = true;
+                game_process_started_ = true;
+                return Outcome::kPlay;
+            }
+            play_.Cancel();
+            launcher_->SetStatus("Could not start the game. " + error, 10.0);
         }
         ImGuiIO& io = ImGui::GetIO();
         if (play_.starting()) {
@@ -457,7 +523,7 @@ private:
             return true;
         }
         problem_.Show(cause, advice);
-        Log("graphics unavailable, staying open");
+        Log("this system cannot run the game, staying open");
         return false;
     }
 
@@ -478,6 +544,14 @@ private:
         }
         if (settings_.Get(kAspectRatioKey, kDefaultAspectRatio) != kDefaultAspectRatio) {
             settings_.Set(kAspectRatioKey, kDefaultAspectRatio);
+        }
+    }
+
+    void NormalizeGraphicsCard() {
+        const std::string current = settings_.Get(kGraphicsCardKey);
+        const int found = DcpGraphics::ResolveGpuByName(gpu_names_, current);
+        if (found >= 0 && gpu_names_[found] != current) {
+            settings_.Set(kGraphicsCardKey, gpu_names_[found]);
         }
     }
 
@@ -546,6 +620,7 @@ private:
             {"BY SAULOB", kAuthorUrl},
         };
         c.branding.background = LauncherHeader(header_art_, header_art_aspect_);
+        c.sponsor = {"Sponsor on GitHub", kSponsorUrl, sponsor_icon_};
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
@@ -736,6 +811,11 @@ private:
             const int height = settings_.GetInt(kWindowHeightKey, kDefaultWindowHeight);
             settings_.SetInt(kWindowWidthKey, WindowSizeOf(height, SavedAspectRatio()).width);
         }
+        const bool ultrawide_available = TrueUltrawideAvailable(build_);
+        ImGui::BeginDisabled(!ultrawide_available || !dcp_true_ultrawide_applies(&SavedAspectRatio()));
+        ui.Toggle("True Ultrawide", ultrawide_available ? kTrueUltrawideHelp : kUnverifiedTrueUltrawideHelp,
+                  kTrueUltrawideKey, false, "Off", "On");
+        ImGui::EndDisabled();
         ui.Row("Graphics card", kGraphicsCardHelp);
         GraphicsCardCombo();
         ui.Toggle("VSync", kVSyncHelp, kVSyncKey, true, "Off", "On");
@@ -782,14 +862,12 @@ private:
     }
 
     void GraphicsCardCombo() {
-        const std::string current = settings_.Get(kGraphicsCardKey, kAutomaticGpu);
-        const bool listed = current == kAutomaticGpu ||
-                            std::find(gpu_names_.begin(), gpu_names_.end(), current) != gpu_names_.end();
-        const std::string shown = current == kAutomaticGpu ? "Automatic" : listed ? current : current + " (not available)";
-        if (ImGui::BeginCombo("##graphics_card", shown.c_str())) {
-            if (ImGui::Selectable("Automatic", current == kAutomaticGpu) && current != kAutomaticGpu) {
-                settings_.Set(kGraphicsCardKey, kAutomaticGpu);
-            }
+        if (gpu_names_.empty()) {
+            ImGui::TextUnformatted("No graphics card found");
+            return;
+        }
+        const std::string current = settings_.Get(kGraphicsCardKey);
+        if (ImGui::BeginCombo("##graphics_card", current.c_str())) {
             for (const std::string& name : gpu_names_) {
                 if (ImGui::Selectable(name.c_str(), name == current) && name != current) {
                     settings_.Set(kGraphicsCardKey, name);
@@ -842,11 +920,19 @@ private:
         if (SupportsJapaneseNpcVoices(build_)) {
             ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
         }
+        std::vector<trg::Option> frame_rates;
+        for (const int fps : {30, 60, 90, 120, 144, 165, 240, 0}) {
+            frame_rates.push_back({std::to_string(fps), FrameRateLabel(fps)});
+        }
+        ui.Combo("Frame rate", kFrameRateHelp, kFrameRateKey, "60", frame_rates);
         ui.Toggle("Frame rate in title", kShowFpsTitleHelp, kShowFpsTitleKey, false, "Off", "On");
         ui.Toggle("Render resolution in title", kShowResolutionTitleHelp, kShowResolutionTitleKey, false, "Off", "On");
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
         ui.Row("Arachnophobia Safe Mode", kArachnophobiaHelp);
         ArachnophobiaToggle(ui);
+        if (kSeparateGameProcessAvailable) {
+            ui.Toggle("Allow overlay programs", kAllowOverlayProgramsHelp, kAllowOverlayProgramsKey, false, "Off", "On");
+        }
         ui.EndRows();
     }
 
@@ -1055,6 +1141,10 @@ private:
     }
 
     void PageAbout(trg::Ui& ui) {
+        ui.SponsorCard(
+            "This open source PC port is maintained and developed in my free time. If you enjoy the project and would "
+            "like to support its continued development, you can sponsor my work on GitHub.",
+            "Support is completely optional and helps support ongoing improvements and future projects.");
         ui.Paragraph("Dragon's Crown Pro for PlayStation 4, running natively on this PC. No game files are included; "
                      "the game runs from the user's own copy.");
         ui.Spacer(4);
@@ -1127,6 +1217,7 @@ private:
     const GameBuild* build_ = nullptr;
     LauncherHost host_;
     ImTextureID header_art_{};
+    ImTextureID sponsor_icon_{};
     float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;
@@ -1150,14 +1241,10 @@ private:
     std::shared_ptr<PromptsResult> prompts_outcome_;
     trg::Task prompts_;
     bool skip_finish_save_ = false;
+    bool game_process_started_ = false;
 };
 
-// Play without the launcher on screen: the same check, explained in a window of its own.
-DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
-    char cause[320] = "", advice[320] = "";
-    if (!config.check_graphics || config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
-        return DCP_LAUNCHER_PLAY;
-    }
+DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const char* advice) {
     LauncherHost host;
     HostOptions options;
     options.title = kPortTitle;
@@ -1166,7 +1253,7 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
     options.min_width = 360;
     options.min_height = 220;
     if (!host.Open(options)) {
-        std::fprintf(stderr, "Graphics: %s %s\n", cause, advice);
+        std::fprintf(stderr, "%s: %s %s\n", topic, cause, advice);
         return DCP_LAUNCHER_BLOCKED;
     }
     const trg::Fonts fonts = trg::LoadSystemFonts(18.0f);
@@ -1189,6 +1276,22 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config) {
     return DCP_LAUNCHER_BLOCKED;
 }
 
+// Play without the launcher on screen: the same checks, explained in a window of its own.
+DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherSettings& settings) {
+    char cause[320] = "", advice[320] = "";
+    if (config.check_graphics && !config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
+        return ExplainInWindow("Graphics", cause, advice);
+    }
+    if (!SeparateGameProcess(config, settings)) {
+        return DCP_LAUNCHER_PLAY;
+    }
+    std::string error;
+    if (StartGameProcess(config, error)) {
+        return DCP_LAUNCHER_GAME_STARTED;
+    }
+    return ExplainInWindow("Launcher", "Could not start the game.", error.c_str());
+}
+
 } // namespace
 } // namespace dcp
 
@@ -1202,7 +1305,7 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     const bool shift = ShiftHeldAtStart() || config->force_show != 0;
     if (!LauncherWanted(ready, show_setting, shift, config->skip_once != 0)) {
         Log("skipped (show_launcher %s%s)", show_setting ? "on" : "off", config->skip_once ? ", skip requested" : "");
-        return PlayOrExplain(*config);
+        return PlayOrExplain(*config, settings);
     }
     Log("settings file %s", Utf8(settings.file()).c_str());
     Log("opening: %s%s%s", ready ? "game ready" : "game files not ready", show_setting ? ", show_launcher on" : "",
@@ -1212,7 +1315,10 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     Outcome outcome = Outcome::kRunning;
     if (!app.Run(outcome)) {
         std::fprintf(stderr, "Launcher: could not open its window; %s\n", ready ? "starting the game" : "game files are not ready");
-        return ready ? PlayOrExplain(*config) : DCP_LAUNCHER_QUIT;
+        return ready ? PlayOrExplain(*config, settings) : DCP_LAUNCHER_QUIT;
+    }
+    if (app.game_process_started()) {
+        return DCP_LAUNCHER_GAME_STARTED;
     }
     return outcome == Outcome::kPlay ? DCP_LAUNCHER_PLAY : DCP_LAUNCHER_QUIT;
 }

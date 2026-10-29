@@ -6,12 +6,15 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include "common/assert.h"
+#include "dcp_amd_water_fix.h"
 #include "dcp_displays.h"
 #include "dcp_window_fit.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
 #include "dcp_overlay.h"
 #include "dcp_graphics.h"
+#include "dcp_latency_trace.h"
+#include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
 
@@ -29,6 +32,23 @@ namespace {
     std::fflush(stderr);
     runtime_log_flush();
     std::_Exit(1);
+}
+
+void TracePress(const SDL_Event& event) {
+    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)) {
+        DcpLatencyTrace::press_ns.store(event.common.timestamp, std::memory_order_relaxed);
+    }
+}
+
+void ToggleAmdWaterFix(bool repeat) {
+    auto& fix = DcpAmdWaterFix::State();
+    if (!fix.Press(repeat)) {
+        return;
+    }
+    const char* state = fix.On() ? "ON" : "OFF";
+    std::printf("GPU: AMD water fix %s\n", state);
+    std::fflush(stdout);
+    DcpOverlay::ShowNotice(std::string("AMD Water Fix: ") + state);
 }
 
 } // namespace
@@ -98,6 +118,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     }
     ApplyDisplayMode(DcpSettings::Get().display_mode);
     SDL_ShowWindow(window);
+    if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window))) {
+        DcpSettings::Get().display_refresh_hz = mode->refresh_rate;
+    }
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
     width = w;
@@ -109,6 +132,11 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
                 display ? int(display - displays.data()) + 1 : 0, displays.size(), display_name.c_str(),
                 window_width, window_height, settings.vsync ? "on" : "off", settings.show_fps_title ? "on" : "off",
                 settings.show_resolution_title ? "on" : "off");
+    const SDL_DisplayMode* current = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
+    std::printf("Display: refresh %.2f Hz\n", current ? current->refresh_rate : 0.0f);
+#ifndef _WIN32
+    std::printf("Session: %s\n", DcpPresent::DescribeSession(DcpPresent::GamescopeSession(), std::getenv).c_str());
+#endif
 }
 
 // Borderless is a desktop-sized fullscreen window, without a display mode change. Window thread only (SDL); the
@@ -269,6 +297,9 @@ bool WindowSDL::PollEvents() {
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (DcpLatencyTrace::enabled) {
+            TracePress(event);
+        }
         const bool ui = DcpOverlay::CapturesInput();
         const bool controller_activity = TrackControllerEvent(event);
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
@@ -322,10 +353,14 @@ bool WindowSDL::PollEvents() {
             break;
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
-            const bool host_shortcut = window_shortcut || event.key.scancode == DcpSettings::Get().menu_key ||
+            const bool water_fix_key = event.key.scancode == SDL_SCANCODE_F3;
+            const bool host_shortcut = window_shortcut || water_fix_key ||
+                                       event.key.scancode == DcpSettings::Get().menu_key ||
                                        event.key.scancode == SDL_SCANCODE_INSERT;
             if (window_shortcut && !event.key.repeat) {
                 ToggleBorderless();
+            } else if (water_fix_key) {
+                ToggleAmdWaterFix(event.key.repeat);
             } else if (DcpCursor::IsGameplayKey(event.key.repeat, host_shortcut) && !ui) {
                 cursor.KeyboardActivity();
             }

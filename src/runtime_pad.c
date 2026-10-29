@@ -120,7 +120,9 @@ static void refresh_gamepads(void) {
         const int slot=free_slot();
         slots[slot].gamepad=g;
         ++slots[slot].connected_count;
-        printf("Runtime: gamepad %d connected: %s\n",slot+1,SDL_GetGamepadName(g));
+        const unsigned vendor=SDL_GetGamepadVendor(g), product=SDL_GetGamepadProduct(g);
+        printf("Runtime: gamepad %d connected: %s (%04x:%04x%s)\n",slot+1,SDL_GetGamepadName(g),vendor,product,
+               vendor==0x28de && product==0x11ff ? ", Steam Input virtual gamepad" : "");
         runtime_user_login(slot+1);
     }
     SDL_free(ids);
@@ -450,6 +452,25 @@ static void sample(int slot, PadData *d) {
     }
 }
 
+/* DCP_INPUT_LATENCY_TRACE=1: from the host press the window thread saw to the game's first read of it. */
+static void trace_read(const PadData *d) {
+    static uint32_t last_buttons;
+    static uint64_t window_start, last_press, presses, sum_ns, max_ns, window_reads;
+    if (!dcpgpu_latency_trace_enabled()) return;
+    const uint64_t now=SDL_GetTicksNS(), press=dcpgpu_latency_press_ns();
+    if (!window_start) window_start=now;
+    ++window_reads;
+    if ((d->buttons & ~last_buttons) && press && press!=last_press && press<=now) {
+        last_press=press; ++presses; sum_ns+=now-press;
+        if (now-press>max_ns) max_ns=now-press;
+    }
+    last_buttons=d->buttons;
+    if (now-window_start<5000000000ull) return;
+    printf("Latency trace: pad: %.0f reads/s; host press -> game read avg %.1f ms, max %.1f ms (%llu presses)\n",
+           window_reads/((now-window_start)/1e9),presses ? sum_ns/1e6/presses : 0.0,max_ns/1e6,(unsigned long long)presses);
+    window_start=now; presses=sum_ns=max_ns=window_reads=0;
+}
+
 static ABI int32_t pad_init(void) {
     pthread_mutex_lock(&lock); initialized=1; pthread_mutex_unlock(&lock);
     dcpgpu_choice_set_input(list_buttons);
@@ -484,6 +505,7 @@ static ABI int32_t pad_read_state(int32_t handle, PadData *data) {
     if (!data) return ERR_INVALID_ARG;
     pthread_mutex_lock(&lock);
     sample(slot,data); ++reads;
+    if (slot==0) trace_read(data);
     pthread_mutex_unlock(&lock);
     return 0;
 }
