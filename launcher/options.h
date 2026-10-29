@@ -28,7 +28,7 @@ std::vector<WindowSize> WindowSizesFor(const DcpAspectRatio& aspect);
 enum class PageId { kPlay, kDisplay, kGraphics, kGameplay, kCheats, kControls, kOnline, kTrophies, kAbout };
 
 inline constexpr PageId kPageOrder[] = {PageId::kPlay,   PageId::kDisplay,  PageId::kGraphics, PageId::kGameplay,
-                                        PageId::kCheats, PageId::kControls, PageId::kOnline,   PageId::kTrophies,
+                                        PageId::kOnline, PageId::kCheats,   PageId::kControls, PageId::kTrophies,
                                         PageId::kAbout};
 
 const char* PageName(PageId page);

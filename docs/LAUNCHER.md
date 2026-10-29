@@ -2,7 +2,7 @@
 
 The PC launcher is [TRG Launcher](https://github.com/TekRantGaming/trg-launcher) 1.1.0 (pinned in `gpu/deps.txt`, the
 same revision as geometry-wars-retro-evolved-2-recompiled), in the same loader process as the game. Pages: Play, Display,
-Graphics, Gameplay, Cheats, Controls, Trophies and About.
+Graphics, Gameplay, Online, Cheats, Controls, Trophies and About.
 
 ## Architecture
 
@@ -358,7 +358,7 @@ No skip-intro.
 
 ## Cheats
 
-Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the
+Sidebar order: Play, Display, Graphics, Gameplay, Online, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the
 line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for
 offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**,

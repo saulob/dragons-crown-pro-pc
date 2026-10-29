@@ -18,6 +18,7 @@
 #include "dcp_cheat_menu.h"
 #include "dcp_settings.h"
 #include "dcp_graphics.h"
+#include "dcp_overlay_box.h"
 #include "runtime_cheats.h"
 #include "common/elf_info.h"
 #include "imgui.h"
@@ -109,6 +110,12 @@ void SetOpen(bool value) {
         dirty = false;
         DcpSettings::Save();
     }
+}
+
+// The caller holds imgui_mutex.
+void SetNotice(const std::string& text) {
+    notice_text = text;
+    notice_until = (std::chrono::steady_clock::now() + std::chrono::seconds(2)).time_since_epoch().count();
 }
 
 ImGuiKey KeyFromSdl(SDL_Keycode key) {
@@ -409,23 +416,35 @@ void Menu() {
     }
 }
 
-struct FpsBox {
-    ImVec2 p0, p1, pad;
+struct OverlayPanel {
+    DcpOverlayBox::Box box;
     float size;
 };
 
-FpsBox FpsCounterBox(const char* text) {
-    const auto& s = DcpSettings::Get();
+OverlayPanel PlaceOverlayPanel(const char* text, int corner) {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float size = ImGui::GetFontSize() * s.overlay_scale / 100.0f;
+    const float size = ImGui::GetFontSize() * DcpSettings::Get().overlay_scale / 100.0f;
     const ImVec2 text_size = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.0f, text);
-    const ImVec2 pad(size * 0.6f, size * 0.3f);
-    const ImVec2 box(text_size.x + pad.x * 2, text_size.y + pad.y * 2);
-    const int corner = s.overlay_corner;
-    const bool right = corner == 1 || corner == 3, bottom = corner >= 2;
-    const ImVec2 p0(right ? viewport->WorkPos.x + viewport->WorkSize.x - size - box.x : viewport->WorkPos.x + size,
-                    bottom ? viewport->WorkPos.y + viewport->WorkSize.y - size - box.y : viewport->WorkPos.y + size);
-    return {p0, ImVec2(p0.x + box.x, p0.y + box.y), pad, size};
+    const DcpOverlayBox::Rect work{viewport->WorkPos.x, viewport->WorkPos.y, viewport->WorkPos.x + viewport->WorkSize.x,
+                                   viewport->WorkPos.y + viewport->WorkSize.y};
+    return {DcpOverlayBox::Place(corner, text_size.x, text_size.y, size, work), size};
+}
+
+OverlayPanel FpsCounterBox(const char* text) {
+    return PlaceOverlayPanel(text, DcpSettings::Get().overlay_corner);
+}
+
+void DrawOverlayPanel(const OverlayPanel& panel, const char* text) {
+    constexpr ImU32 panel_color = IM_COL32(7, 10, 22, 190);
+    constexpr ImU32 border_color = IM_COL32(dcp::kAccentRed, dcp::kAccentGreen, dcp::kAccentBlue, 255);
+    constexpr ImU32 text_color = IM_COL32(255, 255, 255, 255);
+    const DcpOverlayBox::Rect& r = panel.box.rect;
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    draw->AddRectFilled(ImVec2(r.x0, r.y0), ImVec2(r.x1, r.y1), panel_color, panel.box.rounding);
+    draw->AddRect(ImVec2(r.x0, r.y0), ImVec2(r.x1, r.y1), border_color, panel.box.rounding, 0,
+                  DcpOverlayBox::kBorderThickness);
+    draw->AddText(ImGui::GetFont(), panel.size, ImVec2(r.x0 + panel.box.pad_x, r.y0 + panel.box.pad_y), text_color,
+                  text);
 }
 
 bool FpsCounterShown() {
@@ -539,7 +558,7 @@ void CheatMenu() {
     const float margin = em * 0.8f;
     float top = margin;
     if (FpsCounterShown() && DcpSettings::Get().overlay_corner == 1) {
-        top = FpsCounterBox(OverlayText().c_str()).p1.y + margin * 0.5f;
+        top = FpsCounterBox(OverlayText().c_str()).box.rect.y1 + margin * 0.5f;
     }
     const ImGuiStyle& style = ImGui::GetStyle();
     const float spacing = style.ItemSpacing.y * scale;
@@ -616,21 +635,24 @@ void CheatMenu() {
     ImGui::PopStyleColor(5);
 }
 
-// F10 opens and closes the cheat menu; it stays away from the settings menu and the game's own dialogs.
-void ToggleCheatMenu() {
-    if (cheat_open) {
-        cheat_close.Request();
-        return;
-    }
-    if (menu_open || text_entry_active || choice_active || loading) {
-        return;
-    }
+void OpenCheatMenu() {
     cheat_open = true;
     cheat_close = {};
     cheat_pressed.reset();
     cheat_focused = false;
     cheat_selected_row = -1;
     ImGui::GetIO().MouseDrawCursor = true;
+}
+
+// F10 opens and closes the cheat menu; it stays away from the settings menu and the game's own dialogs.
+void PressCheatMenuKey(bool repeat) {
+    const bool busy = menu_open || text_entry_active || choice_active || loading;
+    switch (dcp::cheats::MenuKeyPress(repeat, runtime_cheats_online_locked() != 0, cheat_open, busy)) {
+    case dcp::cheats::MenuKeyAction::Open: OpenCheatMenu(); break;
+    case dcp::cheats::MenuKeyAction::Close: cheat_close.Request(); break;
+    case dcp::cheats::MenuKeyAction::OnlineHint: SetNotice(dcp::cheats::kOnlineLockoutText); break;
+    case dcp::cheats::MenuKeyAction::None: break;
+    }
 }
 
 // The game's text dialog: what is typed, and how to finish (keyboard or controller).
@@ -739,15 +761,7 @@ void FpsCounter() {
         return;
     }
     const std::string label = OverlayText();
-    constexpr ImU32 panel_color = IM_COL32(7, 10, 22, 190);
-    constexpr ImU32 border_color = IM_COL32(dcp::kAccentRed, dcp::kAccentGreen, dcp::kAccentBlue, 255);
-    constexpr ImU32 text_color = IM_COL32(255, 255, 255, 255);
-    const FpsBox box = FpsCounterBox(label.c_str());
-    ImDrawList* draw = ImGui::GetForegroundDrawList();
-    draw->AddRectFilled(box.p0, box.p1, panel_color, box.size * 0.5f);
-    draw->AddRect(box.p0, box.p1, border_color, box.size * 0.5f, 0, 1.0f);
-    draw->AddText(ImGui::GetFont(), box.size, ImVec2(box.p0.x + box.pad.x, box.p0.y + box.pad.y), text_color,
-                  label.c_str());
+    DrawOverlayPanel(FpsCounterBox(label.c_str()), label.c_str());
 }
 
 void BackgroundLoading() {
@@ -771,17 +785,8 @@ bool NoticeShown() {
 }
 
 void Notice() {
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-                                   viewport->WorkPos.y + 24.0f * base_scale),
-                            ImGuiCond_Always, ImVec2(0.5f, 0.0f));
-    ImGui::SetNextWindowBgAlpha(0.6f);
-    ImGui::Begin("##notice", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
-                     ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::TextUnformatted(notice_text.c_str());
-    ImGui::End();
+    const int corner = DcpOverlayBox::NoticeCorner(DcpSettings::Get().overlay_corner);
+    DrawOverlayPanel(PlaceOverlayPanel(notice_text.c_str(), corner), notice_text.c_str());
 }
 
 } // namespace
@@ -1007,8 +1012,8 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
         if (event.key.scancode == DcpSettings::Get().menu_key) {
-            if (down && !event.key.repeat) {
-                ToggleCheatMenu();
+            if (down) {
+                PressCheatMenuKey(event.key.repeat);
             }
             return true;
         }
@@ -1131,8 +1136,7 @@ void SetLoading(bool active, u32 done, u32 total) {
 
 void ShowNotice(const std::string& text) {
     std::scoped_lock lock{imgui_mutex};
-    notice_text = text;
-    notice_until = (std::chrono::steady_clock::now() + std::chrono::seconds(2)).time_since_epoch().count();
+    SetNotice(text);
 }
 
 bool Visible() {

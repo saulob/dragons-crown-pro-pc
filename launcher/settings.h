@@ -117,6 +117,9 @@ private:
     Values pending_;
 };
 
+// Online Play keeps every saved cheat Off, both multipliers included. True when a setting changed (pending until Save).
+bool TurnCheatsOff(trg::SettingsStore& settings);
+
 // The launcher opens when the game files are not ready, or when the setting is On or Shift is held, unless it was
 // skipped once. A game that is not ready always shows it: it is where the files are installed.
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once);

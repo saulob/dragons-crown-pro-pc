@@ -389,6 +389,10 @@ extern "C" void runtime_online_configure(const char* settings_file, const char* 
                 s.join_code.empty() ? "" : ", join code ", s.join_code.c_str());
 }
 
+extern "C" int runtime_online_play_enabled(void) {
+    return online::g_settings.config.enabled ? 1 : 0;
+}
+
 extern "C" uintptr_t runtime_online_resolve(const char* name) {
     if (!online::g_settings.enabled || !name) return 0;
     const char* symbol = runtime_symbol(name);

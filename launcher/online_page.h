@@ -37,7 +37,6 @@ private:
     void RunTest(trg::Ui& ui);
     void ClearTest();
     void DrawOnlinePlay(trg::Ui& ui, const OnlinePlaySwitch& online);
-    void DrawTestInstanceNote(trg::Ui& ui, const net::OnlineConfig& config);
     void DrawFriendRequests(trg::Ui& ui);
     void DrawFriendCode(trg::Ui& ui);
     void DrawConnectionTest(trg::Ui& ui);

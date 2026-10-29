@@ -84,6 +84,22 @@ constexpr float MenuScrollToShowRow(float row_top, float row_bottom, float view_
     return 0.0f;
 }
 
+enum class MenuKeyAction { None, Open, Close, OnlineHint };
+
+// A held key repeats; only the first press of it counts. `busy` is another menu or a game dialog on screen.
+constexpr MenuKeyAction MenuKeyPress(bool repeat, bool online_locked, bool open, bool busy) {
+    if (repeat) {
+        return MenuKeyAction::None;
+    }
+    if (open) {
+        return MenuKeyAction::Close;
+    }
+    if (online_locked) {
+        return MenuKeyAction::OnlineHint;
+    }
+    return busy ? MenuKeyAction::None : MenuKeyAction::Open;
+}
+
 // A button that is never reported released (a controller unplugged as the menu closes) cannot block the game forever.
 inline constexpr double kReleaseTimeoutSeconds = 1.0;
 

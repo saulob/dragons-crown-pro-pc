@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -90,10 +89,8 @@ void OnlinePage::ClearTest() {
 }
 
 void OnlinePage::Draw(trg::Ui& ui) {
-    const net::OnlineConfig config = ConfigOf(ui.settings());
     const OnlinePlaySwitch online = ResolveOnlinePlay(ui.settings().GetBool(kOnlineEnabledKey, false));
     const OnlineClient::State& state = client_.state();
-    DrawTestInstanceNote(ui, config);
     for (const OnlineSection section : OnlinePageSections(Supported(), online.on, state.incoming.size())) {
         switch (section) {
         case OnlineSection::kUnavailable: ui.Help(kUnavailableHelp); break;
@@ -113,15 +110,7 @@ void OnlinePage::DrawOnlinePlay(trg::Ui& ui, const OnlinePlaySwitch& online) {
         ui.Toggle("Online play", kOnlineHelp, kOnlineEnabledKey, false);
         return;
     }
-    ui.Info("Online play", online.on ? "On (DCP_ONLINE)" : "Off (DCP_ONLINE)");
-}
-
-void OnlinePage::DrawTestInstanceNote(trg::Ui& ui, const net::OnlineConfig& config) {
-    if (!std::getenv("DCP_ONLINE") && !std::getenv("DCP_LOBBY") && !std::getenv("DCP_ONLINE_NAME")) return;
-    std::string text = "Test instance: DCP_* environment settings are in use";
-    if (std::getenv("DCP_LOBBY")) text += ", lobby " + config.lobby;
-    if (std::getenv("DCP_ONLINE_NAME")) text += ", name " + net::online_name(config.name);
-    ui.Help((text + ".").c_str());
+    ui.Info("Online play", online.on ? "On" : "Off");
 }
 
 void OnlinePage::DrawFriendRequests(trg::Ui& ui) {

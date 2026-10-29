@@ -40,6 +40,8 @@
 #include "placement.h"
 #include "play_gate.h"
 #include "online_page.h"
+#include "online_settings.h"
+#include "online_view.h"
 #include "problem_dialog.h"
 #include "prompts_patch.h"
 #include "settings.h"
@@ -386,6 +388,7 @@ private:
         PollPrompts();
         PollUpdate();
         PollOnline();
+        KeepCheatsOffOnline();
         NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
@@ -951,6 +954,11 @@ private:
     }
 
     void PageCheats(trg::Ui& ui) {
+        if (OnlinePlayOn()) {
+            ui.Help(cheats::kOnlineLockoutText);
+            ui.EndRows();
+            return;
+        }
         std::string help = cheats::kLauncherHelp;
         help.replace(help.find("F10"), 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
         ui.Help(help.c_str());
@@ -1152,6 +1160,14 @@ private:
     void PollOnline() {
         online_page_->SetBuild(files_ == GameFileState::kValid ? build_ : nullptr);
         online_page_->Tick(settings_, ImGui::GetTime());
+    }
+
+    bool OnlinePlayOn() const { return ResolveOnlinePlay(settings_.GetBool(kOnlineEnabledKey, false)).on; }
+
+    void KeepCheatsOffOnline() {
+        if (OnlinePlayOn() && TurnCheatsOff(settings_)) {
+            Log("cheats turned off for Online Play");
+        }
     }
 
     void PageOnline(trg::Ui& ui) { online_page_->Draw(ui); }

@@ -18,6 +18,11 @@ void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int mo
 void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed);
 #endif
 
+/* Online Play on (runtime_online_play_enabled) locks every cheat Off for the whole process: saved values, the menu,
+ * refills and actions. Set before runtime_cheats_start; turning it on also clears what is already set. */
+void runtime_cheats_set_online(int online);
+int runtime_cheats_online_locked(void);
+
 /* The Experience Multiplier this session (1 = Off, 2, 5 or 10): the saved value, or the menu's change of it. */
 int runtime_cheat_experience_multiplier(void);
 

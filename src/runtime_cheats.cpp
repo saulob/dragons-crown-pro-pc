@@ -18,6 +18,7 @@ std::atomic<unsigned> g_saved{0};
 std::atomic<int> g_saved_experience{dcp::cheats::kExperienceMultiplierOff};
 std::atomic<int> g_saved_movement{dcp::cheats::kMovementSpeedOff};
 std::atomic<int> g_available{0};
+std::atomic<bool> g_online{false};
 int (*g_slot_human)(int slot) = nullptr;
 
 bool Valid(int cheat) {
@@ -32,19 +33,38 @@ bool SavedValue(Cheat cheat) {
     return (g_saved.load(std::memory_order_relaxed) & dcp::cheats::Bit(cheat)) != 0;
 }
 
-// The port has no online session. This is where one would switch the cheats off.
 bool OnlineSessionActive() {
-    return false;
+    return g_online.load(std::memory_order_relaxed);
 }
 
-} // namespace
-
-extern "C" void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed) {
+void ClearSession() {
     g_session.Reset();
     g_experience.Reset();
     g_movement.Reset();
     g_refills.Clear();
     g_actions.Clear();
+}
+
+} // namespace
+
+extern "C" void runtime_cheats_set_online(int online) {
+    g_online.store(online != 0, std::memory_order_relaxed);
+    if (online) {
+        runtime_cheats_start(0, dcp::cheats::kExperienceMultiplierOff, dcp::cheats::kMovementSpeedOff);
+    }
+}
+
+extern "C" int runtime_cheats_online_locked(void) {
+    return OnlineSessionActive() ? 1 : 0;
+}
+
+extern "C" void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed) {
+    ClearSession();
+    if (OnlineSessionActive()) {
+        saved_mask = 0;
+        experience_multiplier = dcp::cheats::kExperienceMultiplierOff;
+        movement_speed = dcp::cheats::kMovementSpeedOff;
+    }
     g_saved.store(saved_mask, std::memory_order_relaxed);
     g_saved_experience.store(dcp::cheats::ListedExperienceMultiplier(experience_multiplier), std::memory_order_relaxed);
     g_saved_movement.store(dcp::cheats::ListedMovementSpeed(movement_speed), std::memory_order_relaxed);
@@ -107,7 +127,7 @@ extern "C" int runtime_cheat_enabled(int cheat) {
 }
 
 extern "C" void runtime_cheat_toggle(int cheat) {
-    if (!Valid(cheat)) {
+    if (!Valid(cheat) || OnlineSessionActive()) {
         return;
     }
     const Cheat which = static_cast<Cheat>(cheat);
@@ -124,6 +144,9 @@ extern "C" void runtime_cheat_toggle(int cheat) {
 
 extern "C" unsigned runtime_cheat_refills_pending(void) {
     unsigned mask = 0;
+    if (OnlineSessionActive()) {
+        return mask;
+    }
     for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
         if (g_refills.Pending(info.cheat)) {
             mask |= dcp::cheats::Bit(info.cheat);
@@ -133,6 +156,10 @@ extern "C" unsigned runtime_cheat_refills_pending(void) {
 }
 
 extern "C" void runtime_cheats_log_enabled(void) {
+    if (OnlineSessionActive()) {
+        std::printf("Cheats: disabled for Online Play\n");
+        return;
+    }
     uint32_t mask = 0;
     for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
         if (runtime_cheat_enabled(static_cast<int>(info.cheat))) {
@@ -159,7 +186,10 @@ extern "C" void runtime_cheat_action(int action) {
 }
 
 extern "C" int runtime_cheat_action_pending(int action) {
-    return ValidAction(action) && g_actions.Pending(static_cast<dcp::cheats::Action>(action)) ? 1 : 0;
+    if (!ValidAction(action) || OnlineSessionActive()) {
+        return 0;
+    }
+    return g_actions.Pending(static_cast<dcp::cheats::Action>(action)) ? 1 : 0;
 }
 
 extern "C" int runtime_cheat_take_action(int action) {

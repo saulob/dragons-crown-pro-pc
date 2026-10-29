@@ -34,6 +34,7 @@
 #include "dcp_launcher.h"
 #include "dcp_graphics.h"
 #include "dcp_keys.h"
+#include "dcp_overlay_box.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
@@ -1331,10 +1332,17 @@ void TestOnlinePage() {
         }
     }
 
-    for (const char* hidden : {"localhost", "127.0.0.1", "8790", "ws://", "wss://", "\"Server\"", "\"Lobby\""}) {
+    // The release page shows no test-instance note, environment override, address or service name; a switch locked by
+    // DCP_ONLINE reads plain On or Off.
+    for (const char* hidden : {"localhost", "127.0.0.1", "8790", "ws://", "wss://", "\"Server\"", "\"Lobby\"",
+                               "Test instance", "DCP_", "getenv", "config.lobby", "kDefaultLobbyUrl", "dcp-lobby"}) {
         CHECK(page.find(hidden) == std::string::npos);
     }
-    CHECK(page.find("if (std::getenv(\"DCP_LOBBY\")) text += \", lobby \" + config.lobby;") != std::string::npos);
+    CHECK(page.find("ui.Info(\"Online play\", online.on ? \"On\" : \"Off\");") != std::string::npos);
+    CHECK(page.find("ui.Toggle(\"Online play\", kOnlineHelp, kOnlineEnabledKey, false);") != std::string::npos);
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.h").find("TestInstance") == std::string::npos);
+    CHECK(launcher.find("Test instance") == std::string::npos);
+    CHECK(std::string(net::kDefaultLobbyUrl) == "wss://dcp-lobby.saulobenigno.workers.dev");
 
     // Test instances use the production service with no lobby option or local lobby, and their own switch and Online
     // name unless told otherwise; only a DCP_LOBBY the caller set replaces the service.
@@ -1352,6 +1360,49 @@ void TestOnlinePage() {
     CHECK(instance.find("$env:DCP_ONLINE = '1'\n") == std::string::npos);
     CHECK(instance.find("if ($OnlineName) { $env:DCP_ONLINE_NAME = $OnlineName } else { Remove-Item Env:DCP_ONLINE_NAME") !=
           std::string::npos);
+}
+
+// In-game notices use the frame counter's panel and drawing, in the top corner the frame counter leaves free.
+void TestOverlayPanel() {
+    namespace B = DcpOverlayBox;
+    const float size = 18.0f, text_w = 120.0f, text_h = 18.0f;
+    for (const B::Rect work : {B::Rect{0, 0, 1920, 1080}, B::Rect{0, 0, 1280, 720}, B::Rect{100, 50, 900, 650}}) {
+        for (int corner = 0; corner < 4; ++corner) {
+            // The frame counter's geometry as it was before notices shared it.
+            const float pad_x = size * 0.6f, pad_y = size * 0.3f;
+            const float w = text_w + pad_x * 2, h = text_h + pad_y * 2;
+            const bool right = corner == 1 || corner == 3, bottom = corner >= 2;
+            const float x0 = right ? work.x1 - size - w : work.x0 + size;
+            const float y0 = bottom ? work.y1 - size - h : work.y0 + size;
+            const B::Box fps = B::Place(corner, text_w, text_h, size, work);
+            CHECK(fps.rect.x0 == x0 && fps.rect.y0 == y0 && fps.rect.x1 == x0 + w && fps.rect.y1 == y0 + h);
+            CHECK(fps.pad_x == pad_x && fps.pad_y == pad_y && fps.rounding == size * 0.5f);
+
+            const int notice_corner = B::NoticeCorner(corner);
+            CHECK(notice_corner != corner && notice_corner <= 1);
+            const B::Box notice = B::Place(notice_corner, 420.0f, text_h, size, work);
+            CHECK(!B::Overlap(fps.rect, notice.rect));
+            CHECK(notice.pad_x == fps.pad_x && notice.pad_y == fps.pad_y && notice.rounding == fps.rounding);
+        }
+    }
+    CHECK(B::NoticeCorner(1) == 0 && B::NoticeCorner(0) == 1);
+    CHECK(B::kBorderThickness == 1.0f);
+    CHECK(B::Overlap({0, 0, 10, 10}, {5, 5, 15, 15}) && !B::Overlap({0, 0, 10, 10}, {10, 0, 20, 10}));
+
+    const std::string overlay = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_overlay.cpp");
+    CHECK(overlay.find("DrawOverlayPanel(FpsCounterBox(label.c_str()), label.c_str());") != std::string::npos);
+    CHECK(overlay.find("DcpOverlayBox::NoticeCorner(DcpSettings::Get().overlay_corner)") != std::string::npos);
+    CHECK(overlay.find("DrawOverlayPanel(PlaceOverlayPanel(notice_text.c_str(), corner), notice_text.c_str());") !=
+          std::string::npos);
+    CHECK(overlay.find("##notice") == std::string::npos);
+    size_t panels = 0;
+    for (size_t at = overlay.find("IM_COL32(7, 10, 22, 190)"); at != std::string::npos;
+         at = overlay.find("IM_COL32(7, 10, 22, 190)", at + 1)) {
+        ++panels;
+    }
+    CHECK(panels == 1);
+    CHECK(overlay.find("return PlaceOverlayPanel(text, DcpSettings::Get().overlay_corner);") != std::string::npos);
+    CHECK(overlay.find("if (DcpSettings::Get().show_fps && !menu_open) {\n        FpsCounter();") != std::string::npos);
 }
 
 // The launcher's lobby link through a running development lobby (DCP_TEST_LOBBY): presence while a launcher is open,
@@ -1691,6 +1742,64 @@ void TestCheatSettings(const fs::path& base) {
 
     // The in-game menu never writes them: the video core's settings file code has no cheat key.
     CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp").find("cheat") == std::string::npos);
+}
+
+// Online Play wins over the cheats: turning it on writes every cheat Off, the page shows only the lockout line, and
+// DCP_ONLINE turns it on as the saved switch does. Nothing else in dcp.ini changes.
+void TestOnlineCheatLockout(const fs::path& base) {
+    const fs::path file = base / "online_cheats" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    WriteAll(file, "online_enabled = 1\ncheat_infinite_health = 1\ncheat_infinite_gold = on\ncheat_movement_speed = 4\n"
+                   "cheat_movement_speed_2x = 1\ncheat_experience_multiplier = 100\nstory_skip_offer = 1\n"
+                   "tutorial_skip_offer = 1\nvsync = 0\n");
+    CHECK(dcp_saved_cheats(file.string().c_str()) != 0); // a hand-edited file: the game's lockout ignores this
+    {
+        LauncherSettings settings(file);
+        CHECK(TurnCheatsOff(settings));
+        CHECK(!TurnCheatsOff(settings)); // already Off: no further change
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == cheats::kMovementSpeedOff);
+    CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == cheats::kExperienceMultiplierOff);
+    CHECK(dcp_skip_offers(file.string().c_str()) == 3);
+    CHECK(ReadOnlineConfig(file).enabled);
+    CHECK(WrittenValue(ReadAll(file), "vsync", "0"));
+
+    // Turning Online off again leaves the cheats Off and lets the player turn them back on.
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kOnlineEnabledKey, false);
+        settings.SetBool(cheats::kInfiniteHealthKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_saved_cheats(file.string().c_str()) == cheats::Bit(cheats::Cheat::InfiniteHealth));
+
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_ONLINE", "1");
+    net::OnlineConfig forced = ReadOnlineConfig(file);
+    net::apply_environment(forced);
+    CHECK(forced.enabled && ResolveOnlinePlay(false).on);
+    set_env("DCP_ONLINE", nullptr);
+    CHECK(!ResolveOnlinePlay(false).on);
+
+    CHECK(std::string(cheats::kOnlineLockoutText) == "Cheats are disabled while Online Play is enabled");
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t page = launcher.find("void PageCheats(trg::Ui& ui) {");
+    const size_t locked = launcher.find("if (OnlinePlayOn()) {\n            ui.Help(cheats::kOnlineLockoutText);\n"
+                                        "            ui.EndRows();\n            return;", page);
+    CHECK(page != std::string::npos && locked != std::string::npos);
+    CHECK(locked < launcher.find("ui.Toggle(cheat.label", page));
+    CHECK(launcher.find("ResolveOnlinePlay(settings_.GetBool(kOnlineEnabledKey, false)).on") != std::string::npos);
+    CHECK(launcher.find("if (OnlinePlayOn() && TurnCheatsOff(settings_))") != std::string::npos);
+    CHECK(launcher.find("KeepCheatsOffOnline();") != std::string::npos);
 }
 
 bool WrittenValue(const std::string& text, const std::string& key, const std::string& value) {
@@ -2522,14 +2631,31 @@ void TestOptions() {
         ++count;
     }
     CHECK(count == 9);
-    CHECK(std::string(PageName(kPageOrder[0])) == "Play");
-    CHECK(std::string(PageName(kPageOrder[2])) == "Graphics");
-    CHECK(std::string(PageName(kPageOrder[3])) == "Gameplay");
-    CHECK(std::string(PageName(kPageOrder[4])) == "Cheats"); // directly below Gameplay
-    CHECK(std::string(PageName(kPageOrder[5])) == "Controls");
-    CHECK(std::string(PageName(kPageOrder[6])) == "Online");
-    CHECK(std::string(PageName(kPageOrder[7])) == "Trophies"); // before About
-    CHECK(std::string(PageName(kPageOrder[8])) == "About");
+    // Online sits between Gameplay and Cheats: it changes play and turns the cheats off.
+    const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Online",
+                                 "Cheats", "Controls", "Trophies", "About"};
+    for (size_t i = 0; i < std::size(order); ++i) {
+        CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
+    }
+    int online_entries = 0;
+    for (size_t i = 0; i < std::size(kPageOrder); ++i) {
+        if (kPageOrder[i] == PageId::kOnline) {
+            ++online_entries;
+            CHECK(i > 0 && kPageOrder[i - 1] == PageId::kGameplay);
+            CHECK(i + 1 < std::size(kPageOrder) && kPageOrder[i + 1] == PageId::kCheats);
+        }
+    }
+    CHECK(online_entries == 1);
+
+    // The sidebar lists the pages in this order (its buttons, and so keyboard and controller navigation, follow the
+    // list), starts on the first one, and the friend request badge belongs to the Online page wherever it sits.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("for (const PageId page : kPageOrder) {\n            c.pages.push_back(MakePage(page));") !=
+          std::string::npos);
+    CHECK(launcher.find("start_page") == std::string::npos && kPageOrder[0] == PageId::kPlay);
+    const size_t online_case = launcher.find("case PageId::kOnline:");
+    CHECK(online_case != std::string::npos &&
+          launcher.find("online_page_->PendingRequests()", online_case) < launcher.find("case PageId::kTrophies:", online_case));
 }
 
 // ---- Keyboard bindings ----
@@ -4157,9 +4283,11 @@ int main(int argc, char** argv) {
     TestResolutionProbe();
     TestTextLanguage(base);
     TestCheatSettings(base);
+    TestOnlineCheatLockout(base);
     TestJapaneseNpcVoiceSetting(base);
     TestOnlineSettings(base);
     TestOnlinePage();
+    TestOverlayPanel();
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestOverlayProgramsSetting(base);

@@ -247,6 +247,27 @@ std::string FrameRateLabel(int fps) {
     return std::to_string(fps) + " FPS";
 }
 
+bool TurnCheatsOff(trg::SettingsStore& settings) {
+    bool changed = false;
+    for (const cheats::CheatInfo& cheat : cheats::kCheats) {
+        if (settings.GetBool(cheat.key, cheats::kCheatDefault)) {
+            settings.SetBool(cheat.key, false);
+            changed = true;
+        }
+    }
+    if (settings.GetBool(cheats::kLegacyMovementSpeedKey, false)) {
+        settings.SetBool(cheats::kLegacyMovementSpeedKey, false);
+        changed = true;
+    }
+    for (const char* key : {cheats::kMovementSpeedKey, cheats::kExperienceMultiplierKey}) {
+        if (settings.Get(key, "1") != "1") {
+            settings.Set(key, "1");
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once) {
     if (!game_ready) {
         return true;

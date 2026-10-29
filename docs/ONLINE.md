@@ -226,7 +226,7 @@ tools\online-instance.ps1 -Name b         # terminal 2: user\test-client-b, buil
 ```
 
 Online play is each instance's own switch; `-ForceOnline` sets `DCP_ONLINE=1` for the run, and the page then shows
-the switch locked as "On (DCP_ONLINE)". Each instance shows the Online name of its own Online page (set it there to
+the switch locked as "On". Each instance shows the Online name of its own Online page (set it there to
 tell them apart); `-OnlineName` overrides it for that run. The instance labels (`test-client-a`) stay in folder names
 and script output only.
 

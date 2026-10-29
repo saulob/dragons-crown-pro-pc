@@ -571,6 +571,7 @@ int main(int argc, char **argv) {
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
     runtime_pad_set_settings(settings_file);
     runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
@@ -818,7 +819,7 @@ int main(int argc, char **argv) {
             fail_running(message);
         }
     }
-    if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
+    if (known_build && game_build.cheats && !runtime_cheats_online_locked()) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
     if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
         voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
