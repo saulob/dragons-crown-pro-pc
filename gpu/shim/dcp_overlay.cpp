@@ -19,7 +19,9 @@
 #include "dcp_settings.h"
 #include "dcp_graphics.h"
 #include "dcp_overlay_box.h"
+#include "dcp_ping.h"
 #include "runtime_cheats.h"
+#include "runtime_online_overlay.h"
 #include "common/elf_info.h"
 #include "imgui.h"
 #include "imgui_internal.h" // RegisterUserTexture (save pictures)
@@ -94,6 +96,7 @@ float base_scale = 1.0f;
 // Present rate for the FPS counter.
 std::chrono::steady_clock::time_point last_present{};
 float frame_ms_avg = 0.0f;
+DcpPing::Readout ping_readout; // present thread
 
 void SetOpen(bool value) {
     if (value && cheat_open) {
@@ -421,12 +424,16 @@ struct OverlayPanel {
     float size;
 };
 
-OverlayPanel PlaceOverlayPanel(const char* text, int corner) {
+// `after`: a panel already in this corner; the new one goes next to it.
+OverlayPanel PlaceOverlayPanel(const char* text, int corner, const OverlayPanel* after = nullptr) {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float size = ImGui::GetFontSize() * DcpSettings::Get().overlay_scale / 100.0f;
     const ImVec2 text_size = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.0f, text);
     const DcpOverlayBox::Rect work{viewport->WorkPos.x, viewport->WorkPos.y, viewport->WorkPos.x + viewport->WorkSize.x,
                                    viewport->WorkPos.y + viewport->WorkSize.y};
+    if (after) {
+        return {DcpOverlayBox::StackAfter(after->box, corner, text_size.x, text_size.y, size, work), size};
+    }
     return {DcpOverlayBox::Place(corner, text_size.x, text_size.y, size, work), size};
 }
 
@@ -449,6 +456,10 @@ void DrawOverlayPanel(const OverlayPanel& panel, const char* text) {
 
 bool FpsCounterShown() {
     return DcpSettings::Get().show_fps && frame_ms_avg > 0.0f;
+}
+
+bool PingShown() {
+    return DcpSettings::Get().show_ping && runtime_online_play_enabled() != 0;
 }
 
 ImVec4 Accent() {
@@ -762,6 +773,19 @@ void FpsCounter() {
     }
     const std::string label = OverlayText();
     DrawOverlayPanel(FpsCounterBox(label.c_str()), label.c_str());
+}
+
+void PingCounter() {
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now().time_since_epoch()).count();
+    const std::string label = DcpPing::Text(ping_readout.Shown(now_ms, [] { return runtime_online_peer_ping_ms(); }));
+    const int corner = DcpSettings::Get().overlay_corner;
+    if (!FpsCounterShown()) {
+        DrawOverlayPanel(PlaceOverlayPanel(label.c_str(), corner), label.c_str());
+        return;
+    }
+    const OverlayPanel fps = FpsCounterBox(OverlayText().c_str());
+    DrawOverlayPanel(PlaceOverlayPanel(label.c_str(), corner, &fps), label.c_str());
 }
 
 void BackgroundLoading() {
@@ -1142,7 +1166,7 @@ void ShowNotice(const std::string& text) {
 bool Visible() {
     const auto& s = DcpSettings::Get();
     return initialized && (loading || background_total || menu_open || cheat_open || text_entry_active ||
-                           choice_active || choice_retiring || s.show_fps || NoticeShown());
+                           choice_active || choice_retiring || s.show_fps || PingShown() || NoticeShown());
 }
 
 void SetDisplayScale(float scale) {
@@ -1196,6 +1220,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
         frame_ms_avg = frame_ms_avg == 0.0f ? ms : frame_ms_avg * 0.95f + ms * 0.05f;
     }
     PollChoiceInput();
+    if (!PingShown()) {
+        ping_readout.Reset();
+    }
     if (!Visible()) {
         return;
     }
@@ -1226,6 +1253,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
     if (DcpSettings::Get().show_fps && !menu_open) {
         FpsCounter();
+    }
+    if (PingShown() && !menu_open) {
+        PingCounter();
     }
     if (background_total && !loading && !menu_open) {
         BackgroundLoading();

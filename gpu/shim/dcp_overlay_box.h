@@ -25,6 +25,15 @@ constexpr Box Place(int corner, float text_width, float text_height, float size,
     return {{x0, y0, x0 + width, y0 + height}, pad_x, pad_y, size * 0.5f};
 }
 
+// A second panel in the same corner as `first`, next to it towards the middle of the screen.
+constexpr Box StackAfter(const Box& first, int corner, float text_width, float text_height, float size, Rect work) {
+    Box box = Place(corner, text_width, text_height, size, work);
+    const float height = box.rect.y1 - box.rect.y0, gap = size * 0.4f;
+    box.rect.y0 = corner >= 2 ? first.rect.y0 - gap - height : first.rect.y1 + gap;
+    box.rect.y1 = box.rect.y0 + height;
+    return box;
+}
+
 // A notice takes the top corner the frame counter leaves free.
 constexpr int NoticeCorner(int fps_corner) {
     return fps_corner == 0 ? 1 : 0;

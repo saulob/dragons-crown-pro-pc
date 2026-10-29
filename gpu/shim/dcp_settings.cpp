@@ -51,6 +51,8 @@ int ParseInt(const std::string& value, int fallback) {
 void Set(Values& v, const std::string& key, const std::string& value) {
     if (key == "show_fps") {
         v.show_fps = ParseBool(value, v.show_fps);
+    } else if (key == "show_ping") {
+        v.show_ping = ParseBool(value, v.show_ping);
     } else if (key == "overlay_scale") {
         v.overlay_scale = std::clamp(ParseInt(value, 100), 50, 300);
     } else if (key == "overlay_corner") {

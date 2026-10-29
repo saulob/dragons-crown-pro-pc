@@ -393,6 +393,10 @@ extern "C" int runtime_online_play_enabled(void) {
     return online::g_settings.config.enabled ? 1 : 0;
 }
 
+extern "C" int runtime_online_peer_ping_ms(void) {
+    return online::g_settings.enabled ? online::peer_ping_ms() : -1;
+}
+
 extern "C" uintptr_t runtime_online_resolve(const char* name) {
     if (!online::g_settings.enabled || !name) return 0;
     const char* symbol = runtime_symbol(name);

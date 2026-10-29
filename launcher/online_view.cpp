@@ -18,7 +18,8 @@ std::vector<OnlineSection> OnlinePageSections(bool supported, bool on, size_t fr
         sections.push_back(OnlineSection::kFriendRequests);
     }
     for (const OnlineSection section : {OnlineSection::kOnlineName, OnlineSection::kFriendCode,
-                                        OnlineSection::kConnectionTest, OnlineSection::kFriends}) {
+                                        OnlineSection::kConnectionTest, OnlineSection::kPingDisplay,
+                                        OnlineSection::kFriends}) {
         sections.push_back(section);
     }
     return sections;

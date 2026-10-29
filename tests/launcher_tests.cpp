@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -35,6 +36,7 @@
 #include "dcp_graphics.h"
 #include "dcp_keys.h"
 #include "dcp_overlay_box.h"
+#include "dcp_ping.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
@@ -1267,9 +1269,11 @@ void TestOnlinePage() {
     CHECK(OnlinePageSections(true, false, 0) == std::vector<S>{S::kOnlinePlay});
     CHECK(OnlinePageSections(true, false, 2) == std::vector<S>{S::kOnlinePlay});
     CHECK(OnlinePageSections(true, true, 0) ==
-          (std::vector<S>{S::kOnlinePlay, S::kOnlineName, S::kFriendCode, S::kConnectionTest, S::kFriends}));
-    CHECK(OnlinePageSections(true, true, 1) == (std::vector<S>{S::kOnlinePlay, S::kFriendRequests, S::kOnlineName,
-                                                               S::kFriendCode, S::kConnectionTest, S::kFriends}));
+          (std::vector<S>{S::kOnlinePlay, S::kOnlineName, S::kFriendCode, S::kConnectionTest, S::kPingDisplay,
+                          S::kFriends}));
+    CHECK(OnlinePageSections(true, true, 1) ==
+          (std::vector<S>{S::kOnlinePlay, S::kFriendRequests, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
+                          S::kPingDisplay, S::kFriends}));
     CHECK(OnlinePageSections(false, true, 1) == (std::vector<S>{S::kUnavailable, S::kOnlinePlay}));
 
     const auto set_env = [](const char* name, const char* value) {
@@ -1403,6 +1407,93 @@ void TestOverlayPanel() {
     CHECK(panels == 1);
     CHECK(overlay.find("return PlaceOverlayPanel(text, DcpSettings::Get().overlay_corner);") != std::string::npos);
     CHECK(overlay.find("if (DcpSettings::Get().show_fps && !menu_open) {\n        FpsCounter();") != std::string::npos);
+}
+
+// F2 is the frame counter and F3 the Ping (Online Play only), each on its own; the Ping reads the P2P round trip a few
+// times a second and sits next to the frame counter in its corner. The Online page's Ping display sets its start.
+void TestPingDisplay(const fs::path& base) {
+    using DcpPing::HudKey;
+    for (const bool online : {false, true}) {
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F2, false, online) == HudKey::Fps);
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F2, true, online) == HudKey::None);
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F3, true, online) == HudKey::None);
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F4, false, online) == HudKey::None);
+    }
+    CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F3, false, false) == HudKey::None);
+    CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F3, false, true) == HudKey::Ping);
+
+    CHECK(DcpPing::Text(-1) == "Ping: --" && DcpPing::Text(0) == "Ping: 0 ms" && DcpPing::Text(28) == "Ping: 28 ms");
+    DcpPing::Readout readout;
+    int samples = 0, rtt = -1;
+    const auto sample = [&] {
+        ++samples;
+        return rtt;
+    };
+    CHECK(readout.Shown(1000, sample) == -1 && samples == 1); // no peer yet
+    rtt = 28;
+    CHECK(readout.Shown(1100, sample) == -1 && samples == 1); // held until the next read
+    CHECK(readout.Shown(1300, sample) == 28 && samples == 2);
+    rtt = 41;
+    CHECK(readout.Shown(1599, sample) == 28 && readout.Shown(1600, sample) == 41 && samples == 3);
+    rtt = -1; // the peer left
+    CHECK(readout.Shown(1900, sample) == -1 && samples == 4);
+    rtt = 30;
+    readout.Reset(); // shown again: read at once
+    CHECK(readout.Shown(1901, sample) == 30 && samples == 5);
+    CHECK(DcpPing::Readout::kRefreshMs >= 250 && DcpPing::Readout::kRefreshMs <= 500);
+
+    namespace B = DcpOverlayBox;
+    const float size = 18.0f;
+    for (const B::Rect work : {B::Rect{0, 0, 1920, 1080}, B::Rect{0, 0, 1280, 720}}) {
+        for (int corner = 0; corner < 4; ++corner) {
+            const B::Box fps = B::Place(corner, 150.0f, size, size, work);
+            const B::Box alone = B::Place(corner, 90.0f, size, size, work);
+            const B::Box ping = B::StackAfter(fps, corner, 90.0f, size, size, work);
+            CHECK(!B::Overlap(fps.rect, ping.rect));
+            CHECK(ping.rect.x0 == alone.rect.x0 && ping.rect.x1 == alone.rect.x1); // same corner, same edge
+            CHECK(std::fabs((ping.rect.y1 - ping.rect.y0) - (alone.rect.y1 - alone.rect.y0)) < 0.01f);
+            CHECK(ping.pad_x == fps.pad_x && ping.rounding == fps.rounding);
+            const float gap = corner >= 2 ? fps.rect.y0 - ping.rect.y1 : ping.rect.y0 - fps.rect.y1;
+            CHECK(gap > 0.0f && std::fabs(gap - size * 0.4f) < 0.01f);
+        }
+    }
+
+    // The keys and the panels are independent; Ping needs Online Play and is never saved by the in-game menu.
+    const std::string window = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "window.cpp");
+    CHECK(window.find("} else if (hud == DcpPing::HudKey::Fps) {\n                settings.show_fps = !settings.show_fps;\n"
+                      "            } else if (hud == DcpPing::HudKey::Ping) {\n"
+                      "                settings.show_ping = !settings.show_ping;") != std::string::npos);
+    CHECK(window.find("runtime_online_play_enabled() != 0") != std::string::npos);
+    const std::string overlay = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_overlay.cpp");
+    CHECK(overlay.find("return DcpSettings::Get().show_ping && runtime_online_play_enabled() != 0;") != std::string::npos);
+    CHECK(overlay.find("if (PingShown() && !menu_open) {\n        PingCounter();") != std::string::npos);
+    CHECK(overlay.find("DrawOverlayPanel(PlaceOverlayPanel(label.c_str(), corner, &fps), label.c_str());") !=
+          std::string::npos);
+    const std::string video_settings = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp");
+    const size_t save = video_settings.find("bool Save() {");
+    CHECK(save != std::string::npos && video_settings.find("show_ping", save) == std::string::npos);
+
+    // Off by default, saved by the launcher, read by the video core.
+    const DcpSettings::Values game;
+    CHECK(!game.show_ping);
+    bool listed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) listed |= setting.key == kPingDisplayKey && setting.default_value == "0";
+    CHECK(listed && std::string(kPingDisplayKey) == "show_ping" && !IsOnlineSetting(kPingDisplayKey));
+    const fs::path file = base / "ping" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kPingDisplayKey, false));
+        settings.SetBool(kPingDisplayKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(LauncherSettings(file).GetBool(kPingDisplayKey, false));
+    DcpSettings::Values read;
+    CHECK(DcpSettings::Read(file.string(), read) && read.show_ping && !read.show_fps);
+
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    CHECK(page.find("ui.Toggle(\"Ping display\", kPingHelp, kPingDisplayKey, false, \"Off\", \"On\")") != std::string::npos);
+    CHECK(OnlinePageSections(true, false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
 }
 
 // The launcher's lobby link through a running development lobby (DCP_TEST_LOBBY): presence while a launcher is open,
@@ -4288,6 +4379,7 @@ int main(int argc, char** argv) {
     TestOnlineSettings(base);
     TestOnlinePage();
     TestOverlayPanel();
+    TestPingDisplay(base);
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestOverlayProgramsSetting(base);

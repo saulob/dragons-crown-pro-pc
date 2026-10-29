@@ -5,6 +5,8 @@
 #define DCP_RUNTIME_ONLINE_H
 #include <stdint.h>
 
+#include "runtime_online_overlay.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -12,8 +14,6 @@ extern "C" {
 /* Reads the online settings (dcp.ini in user_dir, DCP_* overrides) before the imports are bound. game_key names the
  * build for the lobby ("CUSA10454-1.00"); build_online is 0 for builds whose imports are not verified for online. */
 void runtime_online_configure(const char *settings_file, const char *user_dir, const char *game_key, int build_online);
-/* 1 when Online Play is on (dcp.ini or DCP_ONLINE), even if this build or identity then keeps the game offline. */
-int runtime_online_play_enabled(void);
 /* The online implementation of an import (NID#library), or 0: offline play, or not an online import. */
 uintptr_t runtime_online_resolve(const char *name);
 
@@ -48,6 +48,7 @@ uintptr_t rudp_export(const std::string& symbol);
 
 // The game's peer-to-peer socket (sceNetBind of the "RUDP_NetId" socket), when one is open.
 std::shared_ptr<net::PeerSocket> peer_socket();
+int peer_ping_ms();
 struct UpnpView {
     bool working = false;
     bool mapped = false;

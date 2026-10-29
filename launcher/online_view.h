@@ -8,7 +8,16 @@
 
 namespace dcp {
 
-enum class OnlineSection { kUnavailable, kOnlinePlay, kFriendRequests, kOnlineName, kFriendCode, kConnectionTest, kFriends };
+enum class OnlineSection {
+    kUnavailable,
+    kOnlinePlay,
+    kFriendRequests,
+    kOnlineName,
+    kFriendCode,
+    kConnectionTest,
+    kPingDisplay,
+    kFriends
+};
 
 // With online play off only its switch is shown; friend requests come right after it.
 std::vector<OnlineSection> OnlinePageSections(bool supported, bool on, size_t friend_requests);

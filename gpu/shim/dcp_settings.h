@@ -15,6 +15,8 @@ struct Values {
     // Frame counter overlay: font size in percent and corner (0 top left, 1 top right, 2 bottom left, 3 bottom right).
     std::atomic<bool> show_fps{false};
     std::atomic<int> overlay_scale{100}, overlay_corner{1};
+    // The Ping panel (Online Play only), below the frame counter. F3 switches it for the session; never saved here.
+    std::atomic<bool> show_ping{false};
     std::atomic<int> menu_tab{0};
     std::atomic<int> display_mode{0};
     std::atomic<bool> vsync{true};

@@ -1,6 +1,7 @@
 // The launcher's Connection test: can this PC reach the lobby, and how will other players reach it?
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@ struct ConnectionFacts {
     enum class Router { kNone, kMapped, kMappedBehindNat };
     bool identity_ok = true;
     bool lobby_ok = false;
+    int64_t lobby_latency_ms = -1; // the sign-in's round trip to the online service, not a player's Ping
     bool stun_off = false;
     bool udp_ok = false;          // a STUN server answered
     bool public_address = false;  // the STUN address is this PC's own

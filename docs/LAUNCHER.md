@@ -186,7 +186,8 @@ use the same defaults).
 | `frame_rate` | 30, 60, 90, 120, 144, 165, 240, 0 (Unlimited) | 60 | at start |
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
-| `show_fps` | 1, 0 | 0 | live |
+| `show_fps` | 1, 0 | 0 | live; F2 changes the session |
+| `show_ping` | 1, 0 | 0 | at game start, Online Play only; F3 changes the session |
 | `detailed_logging` | 1, 0 | 1 | at exit |
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |

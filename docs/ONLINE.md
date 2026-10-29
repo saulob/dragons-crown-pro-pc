@@ -20,11 +20,21 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
    **Decline** it there. The list updates by itself and shows each friend's Online name and whether they are online:
    Online while their launcher or game is connected, "Online, in a room" while they are in a game room.
 5. **Connection test** > **Run test**, if you want to check your network first. "Ready for online play" means other
-   players can reach you; otherwise the lines below it say what is missing.
-6. Press **Play**.
-7. Play through the game's own Network menu: host or join a room, or pick a friend's room in Join Friends Room.
+   players can reach you; otherwise the lines below it say what is missing. "Online service: Connected · N ms" is the
+   time the online service took to answer the test's sign-in, measured once per test; it is not the Ping to players.
+6. **Ping display** On shows the in-game Ping from the start; **F3** shows or hides it while playing.
+7. Press **Play**.
+8. Play through the game's own Network menu: host or join a room, or pick a friend's room in Join Friends Room.
 
-Nothing else needs setting up. With Online play Off the game runs offline as before.
+Nothing else needs setting up. With Online play Off the game runs offline as before, and F3 does nothing.
+
+### Ping
+
+The in-game Ping is the round trip to the other players over the direct P2P link: the smoothed round trip the peer
+transport already measures from its acknowledgements (see Peer transport), read about three times a second. It sends no
+extra packets and makes no request to the online service. With several players it shows the highest round trip among
+the connected ones, the worst connection in the room. "Ping: --" means no player is connected yet, or the last one
+left. The panel uses the frame counter's style and corner, next to it when both are shown.
 
 ## Reference and licence
 

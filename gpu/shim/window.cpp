@@ -6,7 +6,6 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include "common/assert.h"
-#include "dcp_amd_water_fix.h"
 #include "dcp_displays.h"
 #include "dcp_window_fit.h"
 #include "common/logging/log.h"
@@ -14,9 +13,11 @@
 #include "dcp_overlay.h"
 #include "dcp_graphics.h"
 #include "dcp_latency_trace.h"
+#include "dcp_ping.h"
 #include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
+#include "runtime_online_overlay.h"
 
 extern "C" void runtime_log_flush(void);
 
@@ -38,17 +39,6 @@ void TracePress(const SDL_Event& event) {
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)) {
         DcpLatencyTrace::press_ns.store(event.common.timestamp, std::memory_order_relaxed);
     }
-}
-
-void ToggleAmdWaterFix(bool repeat) {
-    auto& fix = DcpAmdWaterFix::State();
-    if (!fix.Press(repeat)) {
-        return;
-    }
-    const char* state = fix.On() ? "ON" : "OFF";
-    std::printf("GPU: AMD water fix %s\n", state);
-    std::fflush(stdout);
-    DcpOverlay::ShowNotice(std::string("AMD Water Fix: ") + state);
 }
 
 } // namespace
@@ -353,14 +343,19 @@ bool WindowSDL::PollEvents() {
             break;
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
-            const bool water_fix_key = event.key.scancode == SDL_SCANCODE_F3;
-            const bool host_shortcut = window_shortcut || water_fix_key ||
+            const bool hud_key = event.key.scancode == DcpPing::kFpsKey || event.key.scancode == DcpPing::kPingKey;
+            const bool host_shortcut = window_shortcut || hud_key ||
                                        event.key.scancode == DcpSettings::Get().menu_key ||
                                        event.key.scancode == SDL_SCANCODE_INSERT;
+            const DcpPing::HudKey hud =
+                DcpPing::HudKeyFor(event.key.scancode, event.key.repeat, runtime_online_play_enabled() != 0);
+            auto& settings = DcpSettings::Get();
             if (window_shortcut && !event.key.repeat) {
                 ToggleBorderless();
-            } else if (water_fix_key) {
-                ToggleAmdWaterFix(event.key.repeat);
+            } else if (hud == DcpPing::HudKey::Fps) {
+                settings.show_fps = !settings.show_fps;
+            } else if (hud == DcpPing::HudKey::Ping) {
+                settings.show_ping = !settings.show_ping;
             } else if (DcpCursor::IsGameplayKey(event.key.repeat, host_shortcut) && !ui) {
                 cursor.KeyboardActivity();
             }

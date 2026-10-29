@@ -367,6 +367,21 @@ std::shared_ptr<net::PeerSocket> peer_socket() {
     return g_peer;
 }
 
+int peer_ping_ms() {
+    static bool had_ping = false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::vector<net::LinkView> links;
+    if (g_peer) {
+        for (const auto& [id, c] : g_contexts) {
+            if (c.link >= 0 && !c.terminated) links.push_back({g_peer->state(c.link), g_peer->stats(c.link)});
+        }
+    }
+    const int ping = net::worst_rtt_ms(links);
+    if (ping >= 0 && !had_ping) std::printf("Ping: %d ms, the P2P round trip to the room's peers\n", ping);
+    had_ping = ping >= 0;
+    return ping;
+}
+
 UpnpView upnp_view() {
     std::lock_guard<std::mutex> lock(g_mutex);
     UpnpView view;

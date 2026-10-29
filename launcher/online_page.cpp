@@ -19,6 +19,7 @@ const char* kNameHelp = "What other players see: up to 16 letters, digits, - or 
 const char* kFriendCodeHelp = "Share this code so another player can add you.";
 const char* kTestHelp = "Checks that you can reach the online service and that other players can reach you. Takes a few "
                         "seconds.";
+const char* kPingHelp = "Shows the round trip to the other players in game. F3 switches it while playing.";
 const char* kUnreachable = "Cannot reach the online service right now. Run the Connection test for details.";
 
 net::OnlineConfig ConfigOf(const trg::SettingsStore& settings) {
@@ -99,6 +100,7 @@ void OnlinePage::Draw(trg::Ui& ui) {
         case OnlineSection::kOnlineName: ui.InputText("Online name", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName); break;
         case OnlineSection::kFriendCode: DrawFriendCode(ui); break;
         case OnlineSection::kConnectionTest: DrawConnectionTest(ui); break;
+        case OnlineSection::kPingDisplay: ui.Toggle("Ping display", kPingHelp, kPingDisplayKey, false, "Off", "On"); break;
         case OnlineSection::kFriends: DrawFriends(ui); break;
         }
     }

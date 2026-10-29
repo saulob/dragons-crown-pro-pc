@@ -26,7 +26,24 @@ struct LinkStats {
     uint64_t messages_in = 0, messages_out = 0, bytes_in = 0, bytes_out = 0;
     uint64_t resends = 0;
     uint32_t rtt_ms = 0;
+    bool rtt_sampled = false;
 };
+
+struct LinkView {
+    LinkState state = LinkState::kClosed;
+    LinkStats stats;
+};
+
+// The in-game Ping: the worst smoothed round trip among connected links that have measured one; -1 when none.
+inline int worst_rtt_ms(const std::vector<LinkView>& links) {
+    int worst = -1;
+    for (const LinkView& link : links) {
+        if (link.state == LinkState::kConnected && link.stats.rtt_sampled && int(link.stats.rtt_ms) > worst) {
+            worst = int(link.stats.rtt_ms);
+        }
+    }
+    return worst;
+}
 
 using RoomKey = std::array<uint8_t, 16>;
 

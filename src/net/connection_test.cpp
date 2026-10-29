@@ -18,7 +18,8 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
     if (!f.identity_ok) {
         line(Mark::kProblem, "Online service", "Your online identity could not be created.");
     } else if (f.lobby_ok) {
-        line(Mark::kOk, "Online service", "Connected.");
+        line(Mark::kOk, "Online service",
+             f.lobby_latency_ms >= 0 ? "Connected \xC2\xB7 " + std::to_string(f.lobby_latency_ms) + " ms" : "Connected.");
     } else {
         line(Mark::kProblem, "Online service", "Cannot reach the online service. Check your internet connection.");
     }
@@ -81,9 +82,10 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
         const uint64_t start = now_ms();
         facts.lobby_ok = session.open(config.lobby, hello_body(identity, name, game, false), &reply, &error);
         if (facts.lobby_ok) {
+            facts.lobby_latency_ms = int64_t(now_ms() - start);
             lobby_ip = reply["ip"].as_string();
             friend_code = reply["friend_code"].as_string();
-            details.push_back("lobby " + config.lobby + " answered in " + std::to_string(now_ms() - start) +
+            details.push_back("lobby " + config.lobby + " answered in " + std::to_string(facts.lobby_latency_ms) +
                               " ms; it sees " + lobby_ip);
         } else {
             details.push_back("lobby " + config.lobby + ": " + error);

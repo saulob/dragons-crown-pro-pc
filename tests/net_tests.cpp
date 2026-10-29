@@ -57,6 +57,11 @@ void SetEnv(const char* name, const char* value) {
 #endif
 }
 
+std::string ReadSource(const char* relative) {
+    std::ifstream in(fs::path(DCP_SOURCE_DIR) / relative, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
 void TestJson() {
     auto parsed = Json::parse(R"({"op":"hello","seq":7,"big":"18446744073709551615","neg":-5,"f":1.5,"ok":true,
         "list":[1,"two",null,{"x":[]}],"esc":"a\"b\\c\n\u00e9\ud83d\ude00"})");
@@ -253,6 +258,70 @@ void TestConnectionSummary() {
     ConnectionFacts no_identity = cone;
     no_identity.identity_ok = false;
     CHECK(!summarize_connection(no_identity).ready);
+
+    // The service latency is the sign-in round trip the test already makes, shown on the service line only.
+    const auto text_of = [](const ConnectionReport& r, const std::string& label) {
+        for (const auto& line : r.lines) {
+            if (line.label == label) return line.text;
+        }
+        return std::string();
+    };
+    CHECK(text_of(summarize_connection(cone), "Online service") == "Connected.");
+    ConnectionFacts timed = cone;
+    timed.lobby_latency_ms = 32;
+    const ConnectionReport timed_report = summarize_connection(timed);
+    CHECK(timed_report.verdict == "Ready for online play");
+    CHECK(text_of(timed_report, "Online service") == "Connected \xC2\xB7 32 ms");
+    CHECK(text_of(timed_report, "Direct connections") == "Available.");
+    for (const auto& line : timed_report.lines) CHECK(line.label.find("Ping") == std::string::npos);
+    timed.lobby_ok = false;
+    CHECK(text_of(summarize_connection(timed), "Online service") ==
+          "Cannot reach the online service. Check your internet connection.");
+
+    const std::string test = ReadSource("src/net/connection_test.cpp");
+    size_t opens = 0;
+    for (size_t at = test.find("session.open("); at != std::string::npos; at = test.find("session.open(", at + 1)) ++opens;
+    CHECK(opens == 1 && test.find("facts.lobby_latency_ms = int64_t(now_ms() - start);") != std::string::npos);
+    const std::string page = ReadSource("launcher/online_page.cpp");
+    size_t runs = 0;
+    for (size_t at = page.find("RunTest("); at != std::string::npos; at = page.find("RunTest(", at + 1)) ++runs;
+    CHECK(runs == 2 && page.find("ui.ButtonRow(\"Connection test\"") < page.find("RunTest(ui);"));
+    const size_t tick = page.find("void OnlinePage::Tick(");
+    CHECK(tick != std::string::npos && page.find("run_connection_test", tick) > page.find("void OnlinePage::RunTest(", tick));
+}
+
+// The in-game Ping is the worst smoothed round trip among connected links that measured one.
+void TestWorstRtt() {
+    const auto view = [](LinkState state, bool sampled, uint32_t rtt) {
+        LinkView v;
+        v.state = state;
+        v.stats.rtt_sampled = sampled;
+        v.stats.rtt_ms = rtt;
+        return v;
+    };
+    CHECK(worst_rtt_ms({}) == -1);
+    CHECK(worst_rtt_ms({view(LinkState::kConnected, false, 0)}) == -1);
+    CHECK(worst_rtt_ms({view(LinkState::kConnected, true, 0)}) == 0); // one PC: under a millisecond
+    CHECK(worst_rtt_ms({view(LinkState::kConnected, true, 22), view(LinkState::kConnected, true, 41),
+                        view(LinkState::kConnected, true, 30)}) == 41);
+    CHECK(worst_rtt_ms({view(LinkState::kConnected, true, 22), view(LinkState::kClosed, true, 90),
+                        view(LinkState::kConnecting, true, 70)}) == 22);
+    CHECK(worst_rtt_ms({view(LinkState::kClosed, true, 90)}) == -1);
+
+    // The game's Ping reads the P2P links of its Rudp peers, never the lobby.
+    const std::string rudp = ReadSource("src/runtime_rudp.cpp");
+    const size_t begin = rudp.find("int peer_ping_ms() {");
+    const size_t end = rudp.find("\n}\n", begin);
+    CHECK(begin != std::string::npos && end != std::string::npos);
+    const std::string body = rudp.substr(begin, end - begin);
+    CHECK(body.find("g_peer->stats(c.link)") != std::string::npos && body.find("net::worst_rtt_ms(links)") != std::string::npos);
+    for (const char* service : {"lobby", "Lobby", "LobbySession", "request(", "connection_test"}) {
+        CHECK(body.find(service) == std::string::npos);
+    }
+    const std::string online = ReadSource("src/runtime_online.cpp");
+    CHECK(online.find("return online::g_settings.enabled ? online::peer_ping_ms() : -1;") != std::string::npos);
+    const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
+    CHECK(overlay.find("runtime_online_peer_ping_ms()") != std::string::npos && overlay.find("lobby") == std::string::npos);
 }
 
 void TestAddresses() {
@@ -381,8 +450,12 @@ void TestPeerLink(int drop_percent) {
     const std::vector<uint8_t> too_big(PeerSocket::kMaxMessage + 1);
     CHECK(!a->send(la, too_big.data(), too_big.size()));
     if (drop_percent) CHECK(a->stats(la).resends > 0);
+    // The acknowledged messages measured the link's round trip; a closed link no longer counts.
+    CHECK(a->stats(la).rtt_sampled && a->stats(la).rtt_ms < 2000);
+    CHECK(worst_rtt_ms({{a->state(la), a->stats(la)}}) == int(a->stats(la).rtt_ms));
     a->close(la);
     CHECK(WaitFor([&] { return b->state(lb) == LinkState::kClosed; }, 3000));
+    CHECK(worst_rtt_ms({{a->state(la), a->stats(la)}, {b->state(lb), b->stats(lb)}}) == -1);
 }
 
 void TestPeerRefusesWrongRoom() {
@@ -507,6 +580,7 @@ int main() {
     TestIdentity(base);
     TestConfig();
     TestConnectionSummary();
+    TestWorstRtt();
     TestAddresses();
     TestStun();
     TestPeerLink(0);

@@ -370,6 +370,7 @@ void PeerSocket::Acked(Link& link, uint32_t ack, uint32_t sack, uint64_t now) {
         }
         link.rto_ms = uint32_t(std::clamp(link.srtt + 4 * link.rttvar, 100.0, 2000.0));
         link.stats.rtt_ms = uint32_t(link.srtt);
+        link.stats.rtt_sampled = true;
     };
     while (!link.unacked.empty() && int32_t(link.unacked.front().seq - ack) < 0) {
         if (!link.unacked.front().acked) sample(link.unacked.front());
