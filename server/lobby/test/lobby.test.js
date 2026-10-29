@@ -155,7 +155,7 @@ test('a full or closed room refuses joins and search hides it', () => {
   assert.ok(joined.room.flags & FLAG_FULL);
 });
 
-test('rooms of another game build are invisible', () => {
+test('rooms under another game key are invisible', () => {
   const env = makeLobby();
   const { room } = hostRoom(env);
   const jp = env.connect('198.51.100.3');

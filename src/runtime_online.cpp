@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "net/addr.h"
+#include "net/online_version.h"
 #include "online_settings.h"
 #include "utf8.h"
 
@@ -359,11 +360,12 @@ const Settings& settings() { return g_settings; }
 
 using namespace dcp;
 
-extern "C" void runtime_online_configure(const char* settings_file, const char* user_dir, const char* game_key, int build_online) {
+extern "C" void runtime_online_configure(const char* settings_file, const char* user_dir, const char* build) {
     online::Settings& s = online::g_settings;
+    s.enabled = false;
     s.config = ReadOnlineConfig(settings_file ? settings_file : "");
     net::apply_environment(s.config);
-    s.game = game_key ? game_key : "";
+    s.game = net::kOnlineGame;
     if (const char* code = std::getenv("DCP_JOIN_CODE"); code && *code) {
         for (const char* p = code; *p && s.join_code.size() < 8; ++p)
             if (std::isalnum(static_cast<unsigned char>(*p))) s.join_code += char(std::toupper(static_cast<unsigned char>(*p)));
@@ -372,8 +374,8 @@ extern "C" void runtime_online_configure(const char* settings_file, const char* 
         std::printf("Online: off\n");
         return;
     }
-    if (!build_online) {
-        std::printf("Online: not available for this game build; playing offline\n");
+    if (!build || !*build) {
+        std::printf("Online: not available for an unknown game build; playing offline\n");
         return;
     }
     s.identity = net::load_identity(PathFromUtf8(user_dir ? user_dir : "user"));
@@ -383,8 +385,9 @@ extern "C" void runtime_online_configure(const char* settings_file, const char* 
     }
     s.name = net::online_name(s.config.name);
     s.enabled = true;
-    std::printf("Online: on as %s (account %llu), build %s, lobby %s, UDP port %s, UPnP %s%s%s\n", s.name.c_str(),
-                (unsigned long long)s.identity.account, s.game.c_str(), s.config.lobby.empty() ? "not set" : s.config.lobby.c_str(),
+    std::printf("Online: on as %s (account %llu), build %s, protocol %d, lobby %s, UDP port %s, UPnP %s%s%s\n",
+                s.name.c_str(), (unsigned long long)s.identity.account, build, net::kOnlineProtocolVersion,
+                s.config.lobby.empty() ? "not set" : s.config.lobby.c_str(),
                 s.config.udp_port ? std::to_string(s.config.udp_port).c_str() : "automatic", s.config.upnp ? "on" : "off",
                 s.join_code.empty() ? "" : ", join code ", s.join_code.c_str());
 }
@@ -426,5 +429,32 @@ extern "C" uintptr_t runtime_online_resolve(const char* name) {
     if (const uintptr_t f = online::rudp_export(s)) return f;
     // Every other NpToolkit2 entry the game imports (constructors, destructors, init, callbacks): success, no effect.
     if (s.rfind(online::kToolkitPrefix, 0) == 0) return reinterpret_cast<uintptr_t>(&online::tk_zero);
+    return 0;
+}
+
+extern "C" int runtime_online_library(const char* name) {
+    const char* library = name ? std::strchr(name, '#') : nullptr;
+    if (!library) return 0;
+    ++library;
+    return !std::strncmp(library, "libSceNp", 8) || !std::strncmp(library, "libSceNet", 9) ||
+           !std::strcmp(library, "libSceRudp");
+}
+
+extern "C" int runtime_online_check_imports(const char (*names)[128], const unsigned char* game_imports, uint64_t count,
+                                            uintptr_t (*resolve)(const char* name, int is_data)) {
+    if (!online::g_settings.enabled) return 1;
+    uint64_t missing = 0;
+    for (uint64_t i = 0; i < count; ++i) {
+        if (!game_imports[i] || !runtime_online_library(names[i])) continue;
+        // A Toolkit2 import left to the bundled module would run it uninitialized: it must be answered here.
+        const bool toolkit = std::strstr(names[i], "#libSceNpToolkit2") != nullptr;
+        if (toolkit ? runtime_online_resolve(names[i]) : resolve(names[i], 0)) continue;
+        const char* symbol = runtime_symbol(names[i]);
+        std::printf("Online: import %s (%s) has no implementation\n", names[i], symbol ? symbol : "unnamed");
+        ++missing;
+    }
+    if (!missing) return 1;
+    std::printf("Online: %llu online imports have no implementation; playing offline\n", (unsigned long long)missing);
+    online::g_settings.enabled = false;
     return 0;
 }

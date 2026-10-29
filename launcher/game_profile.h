@@ -49,8 +49,6 @@ struct GameBuild {
     std::span<const DcpResolutionSite> resolution_sites;
     std::span<const TextLanguage> text_languages; // the first is the default
     bool resolution_by_signature = false;
-    bool online = false;          // the network imports match the ones the online layer implements (docs/ONLINE.md)
-    bool skip_offers = false;     // src/skip_offers.c has verified sites for this build's executable
 };
 
 // The supported builds, US first.
@@ -69,11 +67,6 @@ const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> 
 // The launcher hides and the loader refuses the custom Render resolution and Aspect Ratio for such a build; the unknown
 // build (nullptr) is not restricted here, and the loader refuses to patch it anyway.
 bool RestrictedToNativeResolution(const GameBuild* build);
-
-// False only for a known build without verified Story and Tutorial Skip Offer sites.
-inline bool SkipOffersAvailable(const GameBuild* build) {
-    return build == nullptr || build->skip_offers;
-}
 
 // The build's languages; the Western ones when the build is not known.
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);

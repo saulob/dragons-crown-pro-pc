@@ -223,6 +223,25 @@ else()
     target_link_libraries(dcp-rtc-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
+# Online play on every supported build through the runtime's import resolver: the local boot images' online imports,
+# one lobby game, the cheat lock; rooms between builds only with DCP_TEST_LOBBY. Not part of the default build.
+add_executable(dcp-online-builds-tests EXCLUDE_FROM_ALL tests/online_builds_tests.cpp src/runtime_cheats.cpp
+    ${DCP_RUNTIME_SOURCES}
+    $<$<BOOL:${WIN32}>:src/compat_win.c src/runtime_log.c> $<$<NOT:$<BOOL:${WIN32}>>:src/runtime_log_posix.c>)
+set_target_properties(dcp-online-builds-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-online-builds-tests PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
+target_compile_definitions(dcp-online-builds-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-online-builds-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>
+                       $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>)
+if (WIN32)
+    target_compile_definitions(dcp-online-builds-tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_link_libraries(dcp-online-builds-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt
+                          ws2_32 -pthread)
+else()
+    target_link_libraries(dcp-online-builds-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype
+                          Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
+
 # Focused tests of the GPU tiling parameters and macro-tiled addresses against the game's own tiler (tools/test.ps1);
 # not part of the default build.
 add_executable(dcp-tiling-tests EXCLUDE_FROM_ALL tests/tiling_tests.cpp)

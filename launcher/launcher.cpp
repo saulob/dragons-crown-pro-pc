@@ -726,7 +726,7 @@ private:
     }
 
     void BrowseAndInstall() {
-        if (install_.running() || browser_.active() || prompts_.running()) {
+        if (install_.running() || browser_.active() || prompts_.running() || BuildPinned()) {
             return;
         }
         if (UseBuiltInChooser()) {
@@ -736,8 +736,19 @@ private:
         StartInstall(trg::BrowseForFile("Select your Dragon's Crown Pro package", {{"PS4 packages (*.pkg)", "*.pkg"}}));
     }
 
+    // A test instance keeps its DCP_GAME_BUILD: installing or activating another build would move the active build
+    // of every other instance.
+    bool BuildPinned() const {
+        const char* pinned = std::getenv(kPinnedBuildVariable);
+        if (!pinned || !*pinned) {
+            return false;
+        }
+        Log("game build pinned by %s=%s: package selection is off", kPinnedBuildVariable, pinned);
+        return true;
+    }
+
     void StartInstall(const std::string& picked) {
-        if (picked.empty() || prompts_.running()) {
+        if (picked.empty() || prompts_.running() || BuildPinned()) {
             return;
         }
         install_failure_.clear();
@@ -942,10 +953,8 @@ private:
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
         ui.Row("Arachnophobia Safe Mode", kArachnophobiaHelp);
         ArachnophobiaToggle(ui);
-        if (SkipOffersAvailable(build_)) {
-            ui.Toggle("Story Skip Offer", kStorySkipOfferHelp, kStorySkipOfferKey, false, "Off", "On");
-            ui.Toggle("Tutorial Skip Offer", kTutorialSkipOfferHelp, kTutorialSkipOfferKey, false, "Off", "On");
-        }
+        ui.Toggle("Story Skip Offer", kStorySkipOfferHelp, kStorySkipOfferKey, false, "Off", "On");
+        ui.Toggle("Tutorial Skip Offer", kTutorialSkipOfferHelp, kTutorialSkipOfferKey, false, "Off", "On");
         if (kSeparateGameProcessAvailable) {
             ui.Toggle("Allow overlay programs", kAllowOverlayProgramsHelp, kAllowOverlayProgramsKey, false, "Off", "On");
         }
@@ -1157,7 +1166,6 @@ private:
     std::filesystem::path UserDir() const { return PathFromUtf8(config_.user_dir ? config_.user_dir : "user"); }
 
     void PollOnline() {
-        online_page_->SetBuild(files_ == GameFileState::kValid ? build_ : nullptr);
         online_page_->Tick(settings_, ImGui::GetTime());
     }
 

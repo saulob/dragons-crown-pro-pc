@@ -5,6 +5,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "net/online_version.h"
 #include "online_settings.h"
 
 namespace dcp {
@@ -13,8 +14,6 @@ namespace {
 const char* kOnlineHelp =
     "Lets the game's own Online menu create and join rooms. Players meet in the lobby; the game itself runs directly "
     "between your PCs.";
-const char* kUnavailableHelp =
-    "Online play is not available for this game build. It is verified for the USA 1.00 and Japan 1.02 and 1.03 builds.";
 const char* kNameHelp = "What other players see: up to 16 letters, digits, - or _.";
 const char* kFriendCodeHelp = "Share this code so another player can add you.";
 const char* kTestHelp = "Checks that you can reach the online service and that other players can reach you. Takes a few "
@@ -79,25 +78,21 @@ OnlinePage::~OnlinePage() {
     if (worker_.joinable()) worker_.join();
 }
 
-std::string OnlinePage::Game() const {
-    return build_ ? std::string(build_->title_id) + "-" + build_->version : "CUSA10454-1.00";
-}
-
 void OnlinePage::Tick(const trg::SettingsStore& settings, double now) {
     const net::OnlineConfig config = ConfigOf(settings);
-    const bool on = config.enabled && Supported();
+    const bool on = config.enabled;
     if (on != was_on_) {
         was_on_ = on;
         ClearTest();
     }
-    client_.Update(on, config, Game(), now);
+    client_.Update(on, config, net::kOnlineGame, now);
 }
 
 void OnlinePage::RunTest(trg::Ui& ui) {
     if (testing_.exchange(true)) return;
     if (worker_.joinable()) worker_.join();
     const net::OnlineConfig config = ConfigOf(ui.settings());
-    worker_ = std::thread([this, config, user_dir = user_dir_, game = Game()] {
+    worker_ = std::thread([this, config, user_dir = user_dir_, game = std::string(net::kOnlineGame)] {
         const net::Identity identity = net::load_identity(user_dir);
         net::ConnectionReport report = net::run_connection_test(config, identity, net::online_name(config.name), game);
         for (const std::string& detail : report.details) std::printf("Connection test: %s\n", detail.c_str());
@@ -118,9 +113,8 @@ void OnlinePage::ClearTest() {
 void OnlinePage::Draw(trg::Ui& ui) {
     const OnlinePlaySwitch online = ResolveOnlinePlay(ui.settings().GetBool(kOnlineEnabledKey, false));
     const OnlineClient::State& state = client_.state();
-    for (const OnlineSection section : OnlinePageSections(Supported(), online.on, state.incoming.size())) {
+    for (const OnlineSection section : OnlinePageSections(online.on, state.incoming.size())) {
         switch (section) {
-        case OnlineSection::kUnavailable: ui.Help(kUnavailableHelp); break;
         case OnlineSection::kOnlinePlay: DrawOnlinePlay(ui, online); break;
         case OnlineSection::kFriendRequests: DrawFriendRequests(ui); break;
         case OnlineSection::kOnlineName: ui.InputText("Online name", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName); break;

@@ -10,6 +10,10 @@ namespace dcp::net {
 // whatever their port version; a client that sends none (older builds) counts as 0 and is never compatible.
 inline constexpr int kOnlineProtocolVersion = 1;
 
+// The lobby's game key, the same for every supported game build: the region or version of the game never keeps
+// players apart, only kOnlineProtocolVersion does.
+inline constexpr char kOnlineGame[] = "DragonsCrownPro";
+
 bool online_compatible(int remote_protocol);
 
 // The CMake project VERSION ("0.8.0").

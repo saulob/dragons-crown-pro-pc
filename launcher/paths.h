@@ -21,9 +21,10 @@ struct Paths {
     std::filesystem::path image_dir;
     std::filesystem::path user_dir;
     std::filesystem::path logs_dir;
+    std::string error; // set when DCP_GAME_BUILD names a build that cannot be used; the paths are then not usable
 };
 
-// Explicit paths win. The rest are next to the executable: game\prepared\<build>, game\image\<build>, user and logs; or,
+// Explicit paths win; DCP_GAME_BUILD replaces the active build. The rest are next to the executable: game\prepared\<build>, game\image\<build>, user and logs; or,
 // for an executable in build\cmake\<toolchain>\bin, the repository's game\prepared\<build>, build\image\<build>, user
 // and build\logs. <build> is the active build's folder (ActiveBuildPaths).
 Paths ResolvePaths(const PathRequest& request, const std::filesystem::path& exe_dir);

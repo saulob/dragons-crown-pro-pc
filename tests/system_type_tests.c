@@ -134,27 +134,49 @@ static uint8_t *BootImage(const char *folder, uint64_t *size, uint64_t *entry) {
 }
 
 static void TestRealImages(void) {
-    static const struct {
-        const char *folder;
-        int expected;
-    } kBuilds[] = {
-        {"v1.03", 1}, {"CUSA07001-1.02", 1}, {"CUSA07001-1.03", 1}, {"CUSA07001-1.00", 0}, {"CUSA10209-1.00", 0},
-    };
-    for (size_t i = 0; i < sizeof(kBuilds) / sizeof(*kBuilds); ++i) {
+    static const char *const kFolders[] = {"v1.03", "CUSA07001-1.00", "CUSA07001-1.02", "CUSA07001-1.03",
+                                           "CUSA10209-1.00"};
+    CHECK(SYSTEM_TYPE_RECORD_COUNT == sizeof(kFolders) / sizeof(*kFolders));
+    for (size_t i = 0; i < sizeof(kFolders) / sizeof(*kFolders); ++i) {
         uint64_t size = 0, entry = 0;
-        uint8_t *image = BootImage(kBuilds[i].folder, &size, &entry);
+        uint8_t *image = BootImage(kFolders[i], &size, &entry);
         if (!image) {
-            printf("no boot image for %s: skipped\n", kBuilds[i].folder);
+            printf("no boot image for %s: skipped\n", kFolders[i]);
             continue;
         }
+        /* The build's record, and the card code found without it: the same sites, calls and text setter. */
+        const SystemTypeRecord *record = &system_type_records[i];
+        CHECK(record->image.size == size && record->image.entry == entry);
+        SystemTypeRecord located, found;
+        CHECK(system_type_locate(image, size, entry, &located) == 1 && located.sites[0] == record->sites[0]);
+        CHECK(system_type_locate(image, size, entry + 1, &found) == 2);
+        CHECK(found.set_text == record->set_text);
+        for (int s = 0; s < SYSTEM_TYPE_SITES; ++s)
+            CHECK(found.sites[s] == record->sites[s] && !memcmp(found.calls[s], record->calls[s], 5) &&
+                  !memcmp(image + record->sites[s], record->calls[s], 5));
+        CHECK(!memcmp(image + record->set_text, system_type_set_text_prologue, SYSTEM_TYPE_SET_TEXT_CHECK));
+        /* A second copy of the card code: no single site, nothing found. */
+        uint8_t *twice = calloc(1, StubOffset(size) + system_type_hook_stub_bytes());
+        memcpy(twice, image, size);
+        memcpy(twice + size - 0x1000, image + record->sites[0] - 0x9b, 0xcb);
+        CHECK(system_type_locate(twice, size, entry + 1, &found) == 0);
+        memcpy(twice, image, size);
+        CHECK(system_type_hook_install(twice, size, entry + 1, twice + StubOffset(size), system_type_hook_stub_bytes(),
+                                       TextOf));
+        for (int s = 0; s < SYSTEM_TYPE_SITES; ++s) CHECK(twice[record->sites[s]] == 0xe9);
+        free(twice);
+        /* No other build's record names this image. */
+        for (size_t j = 0; j < SYSTEM_TYPE_RECORD_COUNT; ++j)
+            CHECK(j == i || system_type_records[j].image.size != size || system_type_records[j].image.entry != entry);
         uint8_t *before = malloc(size);
         memcpy(before, image, size);
         const int installed = system_type_hook_install(image, size, entry, image + StubOffset(size),
                                                        system_type_hook_stub_bytes(), TextOf);
-        CHECK(installed == kBuilds[i].expected);
+        CHECK(installed == 1);
+        for (int s = 0; s < SYSTEM_TYPE_SITES; ++s) CHECK(image[record->sites[s]] == 0xe9);
         const size_t differing = Differing(image, before, size);
-        CHECK(kBuilds[i].expected ? differing > 0 && differing <= 5 * SYSTEM_TYPE_SITES : differing == 0);
-        printf("%s: %zu bytes changed\n", kBuilds[i].folder, differing);
+        CHECK(differing > 0 && differing <= 5 * SYSTEM_TYPE_SITES);
+        printf("%s: %zu bytes changed\n", kFolders[i], differing);
         free(image), free(before);
     }
 }

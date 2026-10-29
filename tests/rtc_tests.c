@@ -72,6 +72,23 @@ int main(void) {
         CHECK(r == 0 && value > previous);
         previous = value;
     }
+
+    /* sceRtcSetWin32FileTime(date, filetime by value) is the inverse, to the microsecond. */
+    typedef int32_t (ABI *SetWin32FileTime)(DateTime *date, uint64_t filetime);
+    const char *set_nid = "n5JiAJXsbcs#libSceRtc";
+    SetWin32FileTime set = (SetWin32FileTime)runtime_resolve(set_nid, 0);
+    CHECK(set != NULL && !strcmp(runtime_import_name(set_nid), "sceRtcSetWin32FileTime"));
+    if (!set) return 1;
+    for (size_t i = 0; i < sizeof(ordered) / sizeof(*ordered); ++i) {
+        DateTime back;
+        memset(&back, 0xcc, sizeof(back));
+        CHECK(set(&back, filetime_of(get, ordered[i], &r)) == 0 && !memcmp(&back, &ordered[i], sizeof(back)));
+    }
+    DateTime epoch;
+    CHECK(set(&epoch, 9) == 0 && epoch.year == 1601 && epoch.month == 1 && epoch.day == 1 && epoch.microsecond == 0);
+    CHECK(set(NULL, 0) == RTC_INVALID_POINTER);
+    const uint64_t last = filetime_of(get, (DateTime){9999, 12, 31, 23, 59, 59, 999999}, &r);
+    CHECK(set(&epoch, last) == 0 && epoch.year == 9999 && set(&epoch, last + 10) == RTC_INVALID_VALUE);
     printf("rtc tests: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

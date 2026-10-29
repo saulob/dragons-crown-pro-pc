@@ -121,9 +121,6 @@ constexpr GameBuild kGameBuilds[] = {
         kUsLayers,
         kUsResolutionSites,
         kWesternLanguages,
-        false,
-        true,
-        true,
     },
     {
         "CUSA10454",
@@ -178,9 +175,6 @@ constexpr GameBuild kGameBuilds[] = {
         kJapan102Layers,
         kJapan102ResolutionSites,
         kJapaneseLanguages,
-        false,
-        true,
-        true,
     },
     {
         "CUSA07001",
@@ -199,9 +193,6 @@ constexpr GameBuild kGameBuilds[] = {
         kJapan103Layers,
         kJapan103ResolutionSites,
         kJapaneseLanguages,
-        false,
-        true,
-        true,
     },
     {
         "CUSA10209",

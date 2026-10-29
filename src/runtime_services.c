@@ -713,6 +713,7 @@ static const RuntimeExport exports[]={
     {"sceNpTusDeleteNpTitleCtx",ok_void}, {"sceNpTusCreateRequest",np_request}, {"sceNpTusDeleteRequest",ok_void},
     {"sceNpTusAbortRequest",ok_void}, {"sceNpTusPollAsync",np_poll},
     {"sceNpTusGetDataAAsync",np_signed_out}, {"sceNpTusSetDataAAsync",np_signed_out},
+    {"sceNpTusSetDataA",np_signed_out}, {"sceNpTusGetDataForCrossSave",np_signed_out},
     {"sceNpTusGetMultiSlotDataStatusAAsync",np_signed_out}, {"sceNpTusDeleteMultiSlotDataAAsync",np_signed_out},
     {"sceNpTssGetDataAsync",np_signed_out}, {"sceNpTssGetData",np_signed_out},
     {"sceNpScoreCreateNpTitleCtxA",np_request_ctx}, {"sceNpScorePollAsync",np_poll},

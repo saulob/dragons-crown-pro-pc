@@ -245,7 +245,10 @@ void TestOnlineLockout() {
     const size_t lock = loader.find("runtime_cheats_set_online(runtime_online_play_enabled());");
     CHECK(configure != std::string::npos && lock != std::string::npos && configure < lock);
     CHECK(lock < loader.find("runtime_cheats_start(dcp_saved_cheats("));
-    CHECK(loader.find("game_build.cheats && !runtime_cheats_online_locked()) runtime_cheat_hooks_install(") !=
+    // The log line comes from the lock first on every build, never from the build's cheat support alone.
+    CHECK(lock < loader.find("runtime_cheats_log_state(known_build && game_build.cheats);"));
+    CHECK(loader.find("Cheats: enabled") == std::string::npos);
+    CHECK(loader.find("if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) runtime_cheat_hooks_install(") !=
           std::string::npos);
     const size_t skip = loader.find("skip_offers_install(");
     CHECK(skip != std::string::npos && loader.find("online_locked", skip) == std::string::npos);

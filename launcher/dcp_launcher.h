@@ -43,9 +43,10 @@ typedef struct {
     char image_dir[4096];
     char user_dir[4096];
     char logs_dir[4096];
+    char error[512]; /* why the paths cannot be used, when it is known (DCP_GAME_BUILD) */
 } DcpPaths;
 
-/* 0 when the executable's folder is unknown or a path does not fit. */
+/* 0 when the executable's folder is unknown, a path does not fit or DCP_GAME_BUILD cannot be used. */
 int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
 
 /* The folder holding this run's log: the log_file's parent when one is given, else logs_dir. 0 when
@@ -117,9 +118,7 @@ typedef struct {
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
     const char *title_id;
-    const char *version;         /* the build's profile version, which names it for the online lobby */
-    int online;                  /* the online imports are verified for this build */
-    int skip_offers;             /* the Story and Tutorial Skip Offer sites are verified for this build */
+    const char *version;         /* the build's profile version: with title_id, the build key of the loader's patches */
 } DcpGameBuild;
 
 /* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */

@@ -9,7 +9,6 @@
 namespace dcp {
 
 enum class OnlineSection {
-    kUnavailable,
     kOnlinePlay,
     kFriendRequests,
     kOnlineName,
@@ -20,7 +19,7 @@ enum class OnlineSection {
 };
 
 // With online play off only its switch is shown; friend requests come right after it.
-std::vector<OnlineSection> OnlinePageSections(bool supported, bool on, size_t friend_requests);
+std::vector<OnlineSection> OnlinePageSections(bool on, size_t friend_requests);
 
 // `on` is the effective state: DCP_ONLINE, when set, wins over the saved switch and locks it.
 struct OnlinePlaySwitch {

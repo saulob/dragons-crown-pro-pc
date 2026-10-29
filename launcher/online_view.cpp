@@ -7,10 +7,7 @@
 
 namespace dcp {
 
-std::vector<OnlineSection> OnlinePageSections(bool supported, bool on, size_t friend_requests) {
-    if (!supported) {
-        return {OnlineSection::kUnavailable, OnlineSection::kOnlinePlay};
-    }
+std::vector<OnlineSection> OnlinePageSections(bool on, size_t friend_requests) {
     if (!on) {
         return {OnlineSection::kOnlinePlay};
     }

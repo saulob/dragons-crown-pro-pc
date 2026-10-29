@@ -54,7 +54,7 @@ player is using an incompatible version of Dragon's Crown Pro PC." when the othe
 friends still appear in Friends, online and in a room. A build from before this check sends no protocol and counts as
 0: it never meets a current build, only other builds like it.
 
-The card's System type comes from a small hook (`src/system_type_hook.c`, US 1.00 and Japan 1.02/1.03): every copy of
+The card's System type comes from a small hook (`src/system_type_hook.c`, every supported build): every copy of
 the game marks its own player info as PS4, so the text cannot come from the data the players exchange. At the card's
 two calls that set the PS4 record, the hook sets the text for the Online ID the card shows, from what the online service
 reported for that player (`PC` when it reported nothing).
@@ -80,10 +80,17 @@ calls the game makes.
 | Lobby | `server/lobby/` | one JavaScript lobby for the Cloudflare Worker and for the local development server |
 | Launcher | `launcher/online_page.cpp`, `launcher/online_view.cpp`, `launcher/online_settings.cpp` | Online page: online play, online name, friend code, connection test, friends |
 
-Online play is available for the builds whose network imports match this implementation: CUSA10454 1.00 (USA, folder
-`v1.03`), CUSA07001 1.02 and 1.03 (Japan). `GameBuild::online` marks them. CUSA07001 1.00 and CUSA10209 import three
-NpToolkit2 entries this port does not name yet, so they stay offline. The lobby keeps each build apart (`hello.game` is
-`<title id>-<version>`), so different builds never meet.
+Online play is available for every supported build. Their online imports are the same entry points except that
+CUSA07001 1.00 and CUSA10209 1.00 call `ActivityFeed::getPlayedWith` (answered like the other Toolkit2 calls) where the
+later builds call the TUS library. Before the imports are bound, the game checks that every import of an NP, network
+or Rudp library that the game itself binds has an implementation (NpToolkit2 ones in this online layer, since the
+bundled module is not set up for online play), and stays offline, logging each missing import, otherwise. Title user
+storage is not provided: every TUS call, synchronous or not, answers signed out. Every build sends one lobby game
+key (`net::kOnlineGame`), so players of different regions and versions meet; only the online protocol keeps them apart.
+The System type, Story Skip Offer and Tutorial Skip Offer sites are verified for each local build
+(`tests/system_type_tests.c`, `tests/skip_offers_tests.c`, `tests/online_builds_tests.cpp`); a supported build without
+a known site (CUSA10454 1.01, CUSA10209 1.02) uses the single place its image has the same verified code, and is left
+unchanged when there is none.
 
 ## Settings
 
@@ -257,7 +264,14 @@ on the production service:
 ```
 tools\online-instance.ps1 -Name a         # terminal 1: user\test-client-a, build\logs\test-client-a
 tools\online-instance.ps1 -Name b         # terminal 2: user\test-client-b, build\logs\test-client-b
+tools\online-instance.ps1 -Name a -Build CUSA10454-1.00     # pinned to one prepared build
+tools\online-instance.ps1 -Name b -Build CUSA10209-1.00
 ```
+
+`-Build <title ID>-<version>` pins an instance to one prepared build through `DCP_GAME_BUILD`, set for that instance
+only: its launcher and game use that build's shared folders whatever another instance activates, its package selection
+is off, and the game stops if the loaded image is another build. A build that is not prepared is an error, never the
+active build. Without `-Build` an instance follows the active build, as the normal launcher does.
 
 Online play is each instance's own switch; `-ForceOnline` sets `DCP_ONLINE=1` for the run, and the page then shows
 the switch locked as "On". Each instance shows the Online name of its own Online page (set it there to

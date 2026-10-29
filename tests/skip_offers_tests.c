@@ -74,6 +74,39 @@ static void test_synthetic(void) {
     free(image), free(original), free(changed), free(no_message);
 }
 
+/* A supported build without known sites: the windows are searched for, and used only when each appears once. */
+static void test_signature(void) {
+    unsigned char *image = us_image();
+    uint64_t story = 0, tutorial = 0;
+    CHECK(skip_offers_locate(image, kSize, "CUSA10209-1.02", &story, &tutorial) == 0);
+    CHECK(story == kStoryAt && tutorial == kTutorialAt);
+    CHECK(skip_offers_install(image, kSize, "CUSA10209-1.02", SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) ==
+          (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
+    CHECK(image[kStoryAt + 39] == 0x90 && image[kTutorialAt + 2] == 0x66);
+
+    unsigned char *twice = us_image();
+    memcpy(twice + 0x100000, kStory, sizeof(kStory));
+    memcpy(twice + 0x200000, kTutorial, sizeof(kTutorial));
+    memcpy(twice + 0x200000 + 0x58, kMessage, sizeof(kMessage));
+    CHECK(skip_offers_locate(twice, kSize, "CUSA10454-1.01", &story, &tutorial) == 0 && !story && !tutorial);
+    CHECK(skip_offers_install(twice, kSize, "CUSA10454-1.01", SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) == 0);
+
+    /* Another frame slot or new-character offset is the same code; another jump or message is not. */
+    unsigned char *other = us_image();
+    other[kStoryAt + 3] = 0x4a, other[kStoryAt + 4] = 0xf4, other[kTutorialAt + 11] = 0xb8;
+    CHECK(skip_offers_locate(other, kSize, "CUSA10454-1.01", &story, &tutorial) == 0);
+    CHECK(story == kStoryAt && tutorial == kTutorialAt);
+    other[kStoryAt + 40] = 0x08, other[kTutorialAt + 0x58 + 1] = 0xd9;
+    CHECK(skip_offers_locate(other, kSize, "CUSA10454-1.01", &story, &tutorial) == 0 && !story && !tutorial);
+
+    unsigned char *empty = calloc(1, kSize);
+    CHECK(skip_offers_install(empty, kSize, "CUSA10454-1.01", SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) == 0);
+    size_t changed = 0;
+    for (uint64_t i = 0; i < kSize; ++i) changed += empty[i] != 0;
+    CHECK(changed == 0);
+    free(image), free(twice), free(other), free(empty);
+}
+
 static void test_environment(void) {
     set_env("DCP_STORY_SKIP", NULL), set_env("DCP_TUTORIAL_SKIP", NULL);
     CHECK(skip_offers_wanted(SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) == (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
@@ -129,13 +162,13 @@ static unsigned char *boot_image(const char *folder, uint64_t *size) {
 static void test_real_images(void) {
     static const struct {
         const char *folder, *game;
-        unsigned expected;
+        uint64_t story, tutorial;
     } kBuilds[] = {
-        {"v1.03", "CUSA10454-1.00", SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL},
-        {"CUSA07001-1.02", "CUSA07001-1.02", SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL},
-        {"CUSA07001-1.03", "CUSA07001-1.03", SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL},
-        {"CUSA07001-1.00", "CUSA07001-1.00", 0},
-        {"CUSA10209-1.00", "CUSA10209-1.00", 0},
+        {"v1.03", "CUSA10454-1.00", 0x3aed82, 0x3a8ad9},
+        {"CUSA07001-1.00", "CUSA07001-1.00", 0x3ae162, 0x3a7f1c},
+        {"CUSA07001-1.02", "CUSA07001-1.02", 0x3ae522, 0x3a8309},
+        {"CUSA07001-1.03", "CUSA07001-1.03", 0x3ae572, 0x3a8359},
+        {"CUSA10209-1.00", "CUSA10209-1.00", 0x3ae2d2, 0x3a808c},
     };
     for (size_t i = 0; i < sizeof(kBuilds) / sizeof(*kBuilds); ++i) {
         uint64_t size = 0;
@@ -144,13 +177,26 @@ static void test_real_images(void) {
             printf("no boot image for %s: skipped\n", kBuilds[i].folder);
             continue;
         }
+        /* The build's own sites match, the search finds the same ones, and no other build's sites match here. */
+        uint64_t story = 0, tutorial = 0;
+        CHECK(skip_offers_locate(image, size, kBuilds[i].game, &story, &tutorial) == 1);
+        CHECK(story == kBuilds[i].story && tutorial == kBuilds[i].tutorial);
+        story = tutorial = 0;
+        CHECK(skip_offers_locate(image, size, "unlisted", &story, &tutorial) == 0);
+        CHECK(story == kBuilds[i].story && tutorial == kBuilds[i].tutorial);
+        for (size_t j = 0; j < sizeof(kBuilds) / sizeof(*kBuilds); ++j) {
+            if (j == i) continue;
+            CHECK(skip_offers_locate(image, size, kBuilds[j].game, &story, &tutorial) == 1 && !story && !tutorial);
+        }
         unsigned char *before = malloc(size);
         memcpy(before, image, size);
         const unsigned applied = skip_offers_install(image, size, kBuilds[i].game, SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL);
-        CHECK(applied == kBuilds[i].expected);
+        CHECK(applied == (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
         size_t differing = 0;
         for (uint64_t k = 0; k < size; ++k) differing += image[k] != before[k];
-        CHECK(differing == (kBuilds[i].expected ? 2u + 4u : 0u)); /* jne: 2 bytes; je rel32 -> 6-byte nop: 4 differ */
+        CHECK(differing == 2u + 4u); /* jne: 2 bytes; je rel32 -> 6-byte nop: 4 differ */
+        CHECK(image[kBuilds[i].story + 39] == 0x90 && image[kBuilds[i].story + 40] == 0x90);
+        CHECK(image[kBuilds[i].tutorial + 2] == 0x66 && image[kBuilds[i].tutorial + 7] == 0x00);
         printf("%s: %zu bytes changed\n", kBuilds[i].folder, differing);
         free(image), free(before);
     }
@@ -158,6 +204,7 @@ static void test_real_images(void) {
 
 int main(void) {
     test_synthetic();
+    test_signature();
     test_environment();
     test_real_images();
     printf("%s (%d failures)\n", failures ? "FAILED" : "OK", failures);

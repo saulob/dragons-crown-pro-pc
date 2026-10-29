@@ -1261,8 +1261,19 @@ void TestOnlineSettings(const fs::path& base) {
     CHECK(ReadOnlineConfig(file).enabled && ReadOnlineConfig(file).name == "Saulo");
     CHECK(LauncherSettings(file).GetBool(kVSyncKey, false));
 
-    CHECK(kUs.online && kJp102.online && kJp103.online);
-    CHECK(!kUs101.online && !kJp100.online && !kCk100.online && !kCk.online);
+    // Online play is offered for every supported build: no per-build flag or notice, one lobby game key for all.
+    for (const char* source : {"launcher/game_profile.h", "launcher/game_profile.cpp", "launcher/dcp_launcher.h",
+                               "launcher/game_files.cpp", "launcher/online_page.h", "launcher/online_page.cpp",
+                               "launcher/online_view.h", "launcher/launcher.cpp", "src/loader.c"}) {
+        const std::string text = ReadAll(fs::path(DCP_SOURCE_DIR) / source);
+        for (const char* gate : {"build_->online", "build->online", "game_build.online", "game_build.skip_offers",
+                                 "kUnavailable", "Supported()", "Online play is not available", "verified for the USA"})
+            CHECK(text.find(gate) == std::string::npos);
+    }
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    CHECK(page.find("client_.Update(on, config, net::kOnlineGame, now);") != std::string::npos);
+    CHECK(page.find("game = std::string(net::kOnlineGame)") != std::string::npos);
+    CHECK(SupportedBuilds().size() == 7);
 }
 
 // Each friend's line under the name: presence, then the platform and port version that friend's own client advertised,
@@ -1344,15 +1355,14 @@ void TestFriendStatus(const std::string& page) {
 // The switch shows the effective state. No lobby address, UPnP switch or status card; friends by Online name.
 void TestOnlinePage() {
     using S = OnlineSection;
-    CHECK(OnlinePageSections(true, false, 0) == std::vector<S>{S::kOnlinePlay});
-    CHECK(OnlinePageSections(true, false, 2) == std::vector<S>{S::kOnlinePlay});
-    CHECK(OnlinePageSections(true, true, 0) ==
+    CHECK(OnlinePageSections(false, 0) == std::vector<S>{S::kOnlinePlay});
+    CHECK(OnlinePageSections(false, 2) == std::vector<S>{S::kOnlinePlay});
+    CHECK(OnlinePageSections(true, 0) ==
           (std::vector<S>{S::kOnlinePlay, S::kOnlineName, S::kFriendCode, S::kConnectionTest, S::kPingDisplay,
                           S::kFriends}));
-    CHECK(OnlinePageSections(true, true, 1) ==
+    CHECK(OnlinePageSections(true, 1) ==
           (std::vector<S>{S::kOnlinePlay, S::kFriendRequests, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
                           S::kPingDisplay, S::kFriends}));
-    CHECK(OnlinePageSections(false, true, 1) == (std::vector<S>{S::kUnavailable, S::kOnlinePlay}));
 
     const auto set_env = [](const char* name, const char* value) {
 #ifdef _WIN32
@@ -1574,7 +1584,7 @@ void TestPingDisplay(const fs::path& base) {
 
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
     CHECK(page.find("ui.Toggle(\"Ping display\", kPingHelp, kPingDisplayKey, false, \"Off\", \"On\")") != std::string::npos);
-    CHECK(OnlinePageSections(true, false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+    CHECK(OnlinePageSections(false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
 }
 
 // The launcher's lobby link through a running development lobby (DCP_TEST_LOBBY): presence while a launcher is open,
@@ -1685,9 +1695,115 @@ void TestSkipOfferSettings(const fs::path& base) {
     CHECK(instance.find("if (-not $env:DCP_STORY_SKIP) { $env:DCP_STORY_SKIP = '1' }") != std::string::npos);
     CHECK(instance.find("if (-not $env:DCP_TUTORIAL_SKIP) { $env:DCP_TUTORIAL_SKIP = '1' }") != std::string::npos);
     for (const char* writes : {"Set-Content", "Add-Content", "Out-File"}) CHECK(instance.find(writes) == std::string::npos);
-    CHECK(kUs.skip_offers && kJp102.skip_offers && kJp103.skip_offers);
-    CHECK(!kUs101.skip_offers && !kJp100.skip_offers && !kCk100.skip_offers && !kCk.skip_offers);
-    CHECK(SkipOffersAvailable(nullptr) && SkipOffersAvailable(&kUs) && !SkipOffersAvailable(&kJp100));
+    // Both switches are shown for every build; the loader passes every supported build's key to the skip offers.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("SkipOffersAvailable") == std::string::npos);
+    CHECK(launcher.find("        ui.Toggle(\"Story Skip Offer\", kStorySkipOfferHelp,") != std::string::npos);
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("skip_offers_install(image,size,known_build ? build_key : NULL,") != std::string::npos);
+}
+
+// A test instance pinned with DCP_GAME_BUILD (tools\online-instance.ps1 -Build) uses that build's folders and never
+// the active build; the script's build table is the launcher's.
+void TestPinnedBuild(const fs::path& base) {
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    const std::string script = ReadAll(fs::path(DCP_SOURCE_DIR) / "tools" / "online-instance.ps1");
+    size_t listed = 0;
+    for (const GameBuild& build : SupportedBuilds()) {
+        const std::string row = "'" + BuildKey(build) + "' = @{ Folder = '" + build.folder + "';";
+        const size_t at = script.find(row);
+        CHECK(at != std::string::npos);
+        if (at != std::string::npos) {
+            const size_t end = script.find('\n', at);
+            CHECK(script.substr(at, end - at).find("Label = '" + std::string(build.label) + "' }") != std::string::npos);
+            ++listed;
+        }
+    }
+    size_t rows = 0;
+    for (size_t at = script.find("= @{ Folder = '"); at != std::string::npos; at = script.find("= @{ Folder = '", at + 1)) ++rows;
+    CHECK(listed == SupportedBuilds().size() && rows == listed);
+    CHECK(BuildKey(kUs) == "CUSA10454-1.00" && BuildKey(kCk100) == "CUSA10209-1.00");
+    CHECK(script.find("if ($pinned) { $env:DCP_GAME_BUILD = $pinned.Key } else { Remove-Item Env:DCP_GAME_BUILD") !=
+          std::string::npos);
+    CHECK(script.find("[Environment]::SetEnvironmentVariable($variable, $previous[$variable], 'Process')") != std::string::npos);
+    for (const char* scope : {"'User')", "'Machine')", "setx"}) CHECK(script.find(scope) == std::string::npos);
+
+    // A build tree with the US and Asia/Hong Kong 1.00 builds complete, Japan 1.02 a core preparation only.
+    const fs::path root = base / "pinned";
+    fs::remove_all(root);
+    const fs::path exe_dir = root / "build" / "cmake" / "clang64" / "bin";
+    const GameRoots roots{root / "game" / "prepared", root / "build" / "image"};
+    const auto prepare = [&](const GameBuild& build, const char* scope) {
+        const GamePaths paths = BuildPaths(roots, build);
+        WriteAll(paths.app0 / kPreparedMarker, std::string("{\n  \"version\": \"x\",\n  \"scope\": \"") + scope + "\"\n}\n");
+        WriteAll(paths.image_dir / "boot.bin", "boot");
+    };
+    prepare(kUs, "full");
+    prepare(kCk100, "full");
+    prepare(kJp102, "core");
+    const auto marker_time = [&](const GameBuild& build) {
+        return fs::last_write_time(BuildPaths(roots, build).app0 / kPreparedMarker);
+    };
+    fs::last_write_time(BuildPaths(roots, kUs).app0 / kPreparedMarker, marker_time(kCk100) - std::chrono::hours(1));
+    const auto us_time = marker_time(kUs), ck_time = marker_time(kCk100);
+
+    CHECK(!PinnedBuildOf(roots, "").set);
+    const PinnedBuild us = PinnedBuildOf(roots, "CUSA10454-1.00"), ck = PinnedBuildOf(roots, "CUSA10209-1.00");
+    CHECK(us.set && us.build == &kUs && us.error.empty() && ck.build == &kCk100);
+    const PinnedBuild core = PinnedBuildOf(roots, "CUSA07001-1.02");
+    CHECK(core.set && !core.build && core.error.find("Build CUSA07001-1.02 is not prepared") == 0);
+    const PinnedBuild absent = PinnedBuildOf(roots, "CUSA10454-1.01");
+    CHECK(absent.set && !absent.build && absent.error.find("Build CUSA10454-1.01 is not prepared") == 0);
+    const PinnedBuild unknown = PinnedBuildOf(roots, "CUSA99999-1.00");
+    CHECK(unknown.set && !unknown.build && unknown.error.find("DCP_GAME_BUILD names no supported build") == 0);
+
+    // The active build is the newest marker (Asia/Hong Kong here); each pinned instance keeps its own build.
+    set_env(kPinnedBuildVariable, nullptr);
+    CHECK(ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kCk100).app0);
+    set_env(kPinnedBuildVariable, "CUSA10454-1.00");
+    const Paths a = ResolvePaths({}, exe_dir);
+    CHECK(a.error.empty() && a.app0 == BuildPaths(roots, kUs).app0 && a.image_dir == BuildPaths(roots, kUs).image_dir);
+    CHECK(a.boot == BuildPaths(roots, kUs).image_dir / "boot.bin");
+    set_env(kPinnedBuildVariable, "CUSA10209-1.00");
+    const Paths b = ResolvePaths({}, exe_dir);
+    CHECK(b.error.empty() && b.app0 == BuildPaths(roots, kCk100).app0 && b.app0 != a.app0);
+    // Another instance activating a build (its marker newest) moves neither pin.
+    fs::last_write_time(BuildPaths(roots, kUs).app0 / kPreparedMarker, ck_time + std::chrono::hours(1));
+    CHECK(ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kCk100).app0);
+    set_env(kPinnedBuildVariable, "CUSA10454-1.00");
+    fs::last_write_time(BuildPaths(roots, kCk100).app0 / kPreparedMarker, ck_time + std::chrono::hours(2));
+    CHECK(ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kUs).app0);
+    fs::last_write_time(BuildPaths(roots, kUs).app0 / kPreparedMarker, us_time);
+    fs::last_write_time(BuildPaths(roots, kCk100).app0 / kPreparedMarker, ck_time);
+    // Explicit paths still win; a pin that cannot be used is an error, never the active build.
+    PathRequest explicit_app0;
+    explicit_app0.app0 = Utf8(root / "elsewhere");
+    CHECK(ResolvePaths(explicit_app0, exe_dir).app0 == root / "elsewhere");
+    set_env(kPinnedBuildVariable, "CUSA07001-1.02");
+    CHECK(ResolvePaths({}, exe_dir).error.find("Build CUSA07001-1.02 is not prepared") == 0);
+    set_env(kPinnedBuildVariable, "CUSA99999-1.00");
+    CHECK(!ResolvePaths({}, exe_dir).error.empty());
+    set_env(kPinnedBuildVariable, nullptr);
+    CHECK(ResolvePaths({}, exe_dir).error.empty() && ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kCk100).app0);
+    // Resolving never writes a marker.
+    CHECK(marker_time(kUs) == us_time && marker_time(kCk100) == ck_time);
+
+    // The pinned launcher refuses package selection, which would activate a build for every instance; the game
+    // refuses an image of another build.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("if (picked.empty() || prompts_.running() || BuildPinned()) {") != std::string::npos);
+    CHECK(launcher.find("browser_.active() || prompts_.running() || BuildPinned()) {") != std::string::npos);
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("\"DCP_GAME_BUILD is %s but the game image is %s\"") != std::string::npos);
+    CHECK(loader.find("fail(paths.error[0] ? paths.error : \"cannot locate the game folders\");") != std::string::npos);
+    fs::remove_all(root);
 }
 
 void TestOverlayProgramsSetting(const fs::path& base) {
@@ -4715,6 +4831,7 @@ int main(int argc, char** argv) {
     TestPingDisplay(base);
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
+    TestPinnedBuild(base);
     TestOverlayProgramsSetting(base);
     TestGameProcess();
     TestAspectRatio(base);

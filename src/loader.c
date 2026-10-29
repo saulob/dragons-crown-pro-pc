@@ -489,7 +489,7 @@ int main(int argc, char **argv) {
     }
     static DcpPaths paths;
     const DcpPathRequest request={boot,content_profile,app0,user_dir,logs_dir};
-    if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
+    if (!dcp_resolve_paths(&request,&paths)) fail(paths.error[0] ? paths.error : "cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0; user_dir=paths.user_dir;
     static char settings_file[4200];
     snprintf(settings_file,sizeof(settings_file),"%s/dcp.ini",user_dir);
@@ -557,14 +557,24 @@ int main(int argc, char **argv) {
             fail(message);
         }
     }
-    if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
+    if (!dcp_resolve_paths(&request,&paths)) fail(paths.error[0] ? paths.error : "cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
     printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");
-    char online_game[64]="";
-    if (known_build) snprintf(online_game,sizeof(online_game),"%s-%s",game_build.title_id,game_build.version);
-    runtime_online_configure(settings_file,user_dir,online_game,known_build && game_build.online);
+    char build_key[64]="";
+    if (known_build) snprintf(build_key,sizeof(build_key),"%s-%s",game_build.title_id,game_build.version);
+    const char *pinned_build=getenv("DCP_GAME_BUILD");
+    if (pinned_build && *pinned_build) {
+        if (strcmp(pinned_build,build_key)) {
+            char message[256];
+            snprintf(message,sizeof(message),"DCP_GAME_BUILD is %s but the game image is %s",pinned_build,
+                     known_build ? build_key : "not a supported build");
+            fail(message);
+        }
+        printf("DCP: game build pinned by DCP_GAME_BUILD\n");
+    }
+    runtime_online_configure(settings_file,user_dir,known_build ? build_key : NULL);
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
@@ -579,11 +589,7 @@ int main(int argc, char **argv) {
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
     dcp_log_gameplay_settings(settings_file, paths.image_dir, app0);
     printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
-    if (known_build && game_build.cheats) {
-        runtime_cheats_log_enabled();
-    } else {
-        printf("Cheats: enabled: none\n");
-    }
+    runtime_cheats_log_state(known_build && game_build.cheats);
     if (content_profile) {
         FILE *profile=fopen(content_profile,"rb");
         unsigned char data[28];
@@ -767,6 +773,17 @@ int main(int argc, char **argv) {
         t[8] = 0x48; t[9] = 0xb8; memcpy(t + 10, &handler, 8);
         t[18] = 0xff; t[19] = 0xe0;
     }
+    unsigned char *game_imports=calloc(import_count ? import_count : 1,1);
+    if (!game_imports) fail("allocation failed");
+    for (uint64_t i=0;i<nr;++i) {
+        if (relocs[i].kind!=1) continue;
+        int in_module=0;
+        for (uint64_t m=0;m<module_count;++m)
+            if (relocs[i].target>=modules[m].base && relocs[i].target-modules[m].base<modules[m].size) in_module=1;
+        if (!in_module) game_imports[relocs[i].value]=1;
+    }
+    runtime_online_check_imports((const char (*)[128])names,game_imports,import_count,runtime_resolve);
+    free(game_imports);
     for (uint64_t i = 0; i < nr; ++i) {
         uintptr_t value = relocs[i].kind == 2 ? (uintptr_t)(data_traps + page_size * relocs[i].value + relocs[i].addend)
                         : relocs[i].kind == 1 ? (uintptr_t)(traps + 32 * relocs[i].value)
@@ -838,14 +855,14 @@ int main(int argc, char **argv) {
         }
         printf("LZCNT: rewritten at %d sites (%s)\n",LZCNT_SITE_COUNT,rewritten_build);
     }
-    if (known_build && game_build.cheats && !runtime_cheats_online_locked()) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
+    if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
     if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
         voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
     if (known_build && runtime_online_active())
         system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
                                  system_type_stub_bytes,runtime_online_system_type);
-    skip_offers_install(image,size,known_build && game_build.skip_offers ? online_game : NULL,
+    skip_offers_install(image,size,known_build ? build_key : NULL,
                         skip_offers_wanted(dcp_skip_offers(settings_file)));
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");

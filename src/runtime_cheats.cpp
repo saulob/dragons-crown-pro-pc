@@ -155,10 +155,18 @@ extern "C" unsigned runtime_cheat_refills_pending(void) {
     return mask;
 }
 
-extern "C" void runtime_cheats_log_enabled(void) {
+extern "C" int runtime_cheats_hooks_wanted(int build_has_hooks) {
+    return build_has_hooks && !OnlineSessionActive() ? 1 : 0;
+}
+
+extern "C" int runtime_cheats_log_state(int build_has_hooks) {
     if (OnlineSessionActive()) {
         std::printf("Cheats: disabled for Online Play\n");
-        return;
+        return RUNTIME_CHEATS_ONLINE_LOCKED;
+    }
+    if (!build_has_hooks) {
+        std::printf("Cheats: enabled: none\n");
+        return RUNTIME_CHEATS_UNAVAILABLE;
     }
     uint32_t mask = 0;
     for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
@@ -170,6 +178,7 @@ extern "C" void runtime_cheats_log_enabled(void) {
     std::printf("Cheats: Experience Multiplier %s\n",
                 dcp::cheats::ExperienceMultiplierLabel(runtime_cheat_experience_multiplier()));
     std::printf("Cheats: Movement Speed %s\n", dcp::cheats::MovementSpeedLabel(runtime_cheat_movement_speed()));
+    return RUNTIME_CHEATS_LISTED;
 }
 
 extern "C" int runtime_cheat_take_refill(int cheat) {

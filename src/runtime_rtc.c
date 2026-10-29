@@ -138,6 +138,12 @@ static ABI int32_t rtc_get_win32_filetime(const DateTime *t, uint64_t *filetime)
     if (tick<WIN32_EPOCH_TICKS) return ERR_INVALID_VALUE;
     *filetime=(tick-WIN32_EPOCH_TICKS)*10; return 0;
 }
+static ABI int32_t rtc_set_win32_filetime(DateTime *t, uint64_t filetime) {
+    if (!t) return ERR_INVALID_POINTER;
+    const DateTime last={9999,12,31,23,59,59,999999};
+    if (filetime/10>to_tick(&last)-WIN32_EPOCH_TICKS) return ERR_INVALID_VALUE;
+    from_tick(WIN32_EPOCH_TICKS+filetime/10,t); return 0;
+}
 /* "Wed, 25 Sep 2026 12:00:00 +0300" for the given UTC tick (NULL = now) in local time. */
 static ABI int32_t rtc_rfc2822_local(char *out, const uint64_t *utc_tick) {
     if (!out) return ERR_INVALID_POINTER;
@@ -162,6 +168,6 @@ static const RuntimeExport exports[]={
     {"sceRtcGetDayOfWeek",rtc_day_of_week}, {"sceRtcGetTick",rtc_get_tick}, {"sceRtcSetTick",rtc_set_tick},
     {"sceRtcGetTickResolution",rtc_tick_resolution}, {"sceRtcSetTime_t",rtc_set_time_t},
     {"sceRtcGetTime_t",rtc_get_time_t}, {"sceRtcFormatRFC2822LocalTime",rtc_rfc2822_local},
-    {"sceRtcGetWin32FileTime",rtc_get_win32_filetime},
+    {"sceRtcGetWin32FileTime",rtc_get_win32_filetime}, {"sceRtcSetWin32FileTime",rtc_set_win32_filetime},
 };
 uintptr_t runtime_rtc_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }

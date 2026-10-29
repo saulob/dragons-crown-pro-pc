@@ -11,12 +11,19 @@
 extern "C" {
 #endif
 
-/* Reads the online settings (dcp.ini in user_dir, DCP_* overrides) before the imports are bound. game_key names the
- * build for the lobby ("CUSA10454-1.00"); build_online is 0 for builds whose imports are not verified for online. */
-void runtime_online_configure(const char *settings_file, const char *user_dir, const char *game_key, int build_online);
+/* Reads the online settings (dcp.ini in user_dir, DCP_* overrides) before the imports are bound. build names the
+ * supported game build for the log ("CUSA10454-1.00"); NULL for an unknown build, which stays offline. */
+void runtime_online_configure(const char *settings_file, const char *user_dir, const char *build);
 /* The online implementation of an import (NID#library), or 0: offline play, or not an online import. */
 uintptr_t runtime_online_resolve(const char *name);
-/* 1 when the game goes online: Online Play on, a build that supports it and an identity. */
+/* 1 for an import (NID#library) of an NP, network or Rudp library. */
+int runtime_online_library(const char *name);
+/* Before binding: every online-library import the game itself binds (game_imports[i] set) must resolve through
+ * `resolve`, and every NpToolkit2 one through the online layer, since the bundled module is not initialized for
+ * online play. Otherwise online play stays off and the missing imports are logged; returns 0. */
+int runtime_online_check_imports(const char (*names)[128], const unsigned char *game_imports, uint64_t count,
+                                 uintptr_t (*resolve)(const char *name, int is_data));
+/* 1 when the game goes online: Online Play on, a supported build whose online imports resolve, and an identity. */
 int runtime_online_active(void);
 /* The System type line of the game's player card for an online id ("Windows · v0.8.0"); valid until the next call on
  * the same thread. */
