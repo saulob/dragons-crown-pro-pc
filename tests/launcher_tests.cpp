@@ -45,6 +45,7 @@
 #include "game_install.h"
 #include "game_process.h"
 #include "net/identity.h"
+#include "net/online_version.h"
 #include "online_client.h"
 #include "online_settings.h"
 #include "online_view.h"
@@ -1262,6 +1263,81 @@ void TestOnlineSettings(const fs::path& base) {
     CHECK(!kUs101.online && !kJp100.online && !kCk100.online && !kCk.online);
 }
 
+// Each friend's line under the name: presence, then the platform and port version that friend's own client advertised,
+// kept per account; "Incompatible" only for a room of another online protocol, never a protocol number.
+void TestFriendStatus(const std::string& page) {
+    const int current = net::kOnlineProtocolVersion, other = net::kOnlineProtocolVersion + 6;
+    const std::string v = net::port_version();
+    const auto parsed = net::Json::parse(
+        "[{\"account\": \"11\", \"name\": \"Win\", \"online\": true, \"platform\": \"Windows\", \"version\": \"" + v +
+        "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"12\", \"name\": \"Lin\", \"online\": true, \"platform\": \"Linux\", \"version\": \"" + v +
+        "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"13\", \"name\": \"Deck\", \"online\": true, \"platform\": \"Steam Deck\", \"version\": \"" + v +
+        "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"14\", \"name\": \"Host\", \"online\": true, \"room\": \"4097\", \"platform\": \"Linux\","
+        " \"version\": \"" + v + "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"15\", \"name\": \"Patch\", \"online\": true, \"room\": \"4098\", \"platform\": \"Windows\","
+        " \"version\": \"99.0.1\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"16\", \"name\": \"Newer\", \"online\": true, \"room\": \"4099\", \"platform\": \"Steam Deck\","
+        " \"version\": \"0.9.0\", \"online_protocol\": " + std::to_string(other) + "},"
+        " {\"account\": \"17\", \"name\": \"Old\", \"online\": true},"
+        " {\"account\": \"18\", \"name\": \"OldHost\", \"online\": true, \"room\": \"4100\"},"
+        " {\"account\": \"19\", \"name\": \"Away\", \"online\": false, \"platform\": \"Windows\", \"version\": \"0.8.0\"}]");
+    CHECK(parsed.has_value());
+    const std::vector<OnlinePlayer> f = ReadOnlinePlayers(parsed ? *parsed : net::Json::Array());
+    CHECK(f.size() == 9);
+    if (f.size() != 9) return;
+    const std::string dot = " \xC2\xB7 ";
+    CHECK(FriendStatusOf(f[0]).text == "Online" + dot + "Windows" + dot + "v" + v && !FriendStatusOf(f[0]).incompatible);
+    CHECK(FriendStatusOf(f[1]).text == "Online" + dot + "Linux" + dot + "v" + v);
+    CHECK(FriendStatusOf(f[2]).text == "Online" + dot + "Steam Deck" + dot + "v" + v);
+    CHECK(FriendStatusOf(f[3]).text == "Online, in a room" + dot + "Linux" + dot + "v" + v && !FriendStatusOf(f[3]).incompatible);
+    CHECK(FriendStatusOf(f[4]).text == "Online, in a room" + dot + "Windows" + dot + "v99.0.1" && !FriendStatusOf(f[4]).incompatible);
+    CHECK(FriendStatusOf(f[5]).text == "Online, in a room" + dot + "Steam Deck" + dot + "v0.9.0" && FriendStatusOf(f[5]).incompatible);
+    CHECK(FriendStatusOf(f[6]).text == "Online" && !FriendStatusOf(f[6]).incompatible);
+    CHECK(FriendStatusOf(f[7]).text == "Online, in a room" && FriendStatusOf(f[7]).incompatible);
+    CHECK(FriendStatusOf(f[8]).text == "Offline" && !FriendStatusOf(f[8]).incompatible);
+    for (const OnlinePlayer& player : f) {
+        const std::string text = FriendStatusOf(player).text;
+        for (const char* hidden : {"rotocol", "unknown", "missing", "PlayStation", "Incompatible", "("}) {
+            CHECK(text.find(hidden) == std::string::npos);
+        }
+        CHECK(text.find(std::to_string(other)) == std::string::npos && text.find(player.account) == std::string::npos);
+    }
+
+    // Same Online name, different accounts; then a rename: the metadata follows the account, never the name.
+    const auto twins = net::Json::parse(R"([{"account": "21", "name": "Player", "online": true, "platform": "Windows",
+        "version": "0.8.0"}, {"account": "22", "name": "Player", "online": true, "platform": "Linux", "version": "0.8.1"}])");
+    const auto renamed = net::Json::parse(R"([{"account": "21", "name": "Ana", "online": true, "platform": "Windows",
+        "version": "0.8.0"}, {"account": "22", "name": "Ana2", "online": true, "platform": "Linux", "version": "0.8.1"}])");
+    CHECK(twins.has_value() && renamed.has_value());
+    for (const auto* rows : {&twins, &renamed}) {
+        const std::vector<OnlinePlayer> p = ReadOnlinePlayers(rows->has_value() ? **rows : net::Json::Array());
+        CHECK(p.size() == 2 && p[0].account == "21" && p[0].platform == "Windows" && p[0].version == "0.8.0");
+        CHECK(p.size() == 2 && p[1].account == "22" && p[1].platform == "Linux" && p[1].version == "0.8.1");
+    }
+
+    // Request cards keep their two plain lines; the client asks the lobby nothing new for this.
+    const size_t cards = page.find("void OnlinePage::DrawFriendRequests(");
+    const size_t friends = page.find("void OnlinePage::DrawFriends(");
+    CHECK(cards != std::string::npos && friends != std::string::npos);
+    if (cards != std::string::npos && friends != std::string::npos) {
+        const std::string card = page.substr(cards, friends - cards);
+        CHECK(card.find("FriendStatusOf") == std::string::npos && card.find("platform") == std::string::npos);
+        CHECK(card.find("FriendRequestText(sender)") != std::string::npos);
+    }
+    CHECK(page.find("online_protocol") == std::string::npos);
+    const std::string client = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_client.cpp");
+    size_t sends = 0;
+    for (size_t at = client.find("Send(\""); at != std::string::npos; at = client.find("Send(\"", at + 1)) ++sends;
+    CHECK(sends == 6);
+    for (const char* op : {"friends.list", "friends.requests", "friends.add", "friends.accept", "friends.decline",
+                           "friends.remove"}) {
+        CHECK(client.find(std::string("Send(\"") + op + "\"") != std::string::npos);
+    }
+}
+
 // The Online page: with online play off only its switch; on, friend requests first, then the rest in a fixed order.
 // The switch shows the effective state. No lobby address, UPnP switch or status card; friends by Online name.
 void TestOnlinePage() {
@@ -1312,7 +1388,8 @@ void TestOnlinePage() {
         CHECK(page.find(shown) != std::string::npos);
     }
     CHECK(page.find("ui.InputText(\"Online name\", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName)") != std::string::npos);
-    CHECK(page.find("ui.Row(f.name.c_str(), FriendPresence(f))") != std::string::npos);
+    CHECK(page.find("FriendRow(ui, f);") != std::string::npos);
+    CHECK(page.find("ImGui::TextColored(ui.theme().warn_dot, \"Incompatible\");") != std::string::npos);
     CHECK(page.find("ResolveOnlinePlay(") != std::string::npos);
     // The sidebar badge counts the requests the page shows as cards.
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
@@ -1335,6 +1412,8 @@ void TestOnlinePage() {
                   shown.find("3658") == std::string::npos && shown.find("Client") == std::string::npos);
         }
     }
+
+    TestFriendStatus(page);
 
     // The release page shows no test-instance note, environment override, address or service name; a switch locked by
     // DCP_ONLINE reads plain On or Off.
@@ -1547,6 +1626,8 @@ void TestOnlineClient(const fs::path& base) {
     alice.client.Accept(account_b);
     CHECK(a.incoming.empty() && a.friends.size() == 1 && a.friends[0].name == "Bea");
     CHECK(pump([&] { return first_friend_online(a) && first_friend_online(b) && b.outgoing.empty(); }));
+    CHECK(!a.friends.empty() && a.friends[0].platform == net::host_platform() && a.friends[0].version == net::port_version() &&
+          a.friends[0].online_protocol == net::kOnlineProtocolVersion);
 
     bea_game.on = true;
     CHECK(pump([&] { return bea_game.client.state().link == OnlineClient::Link::kUp; }));

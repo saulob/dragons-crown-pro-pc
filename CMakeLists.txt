@@ -48,9 +48,11 @@ target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
 # Online play (docs/ONLINE.md): lobby link, identity, STUN, UPnP and the direct peer transport. No game code: the
 # launcher, the runtime and tests/net_tests.cpp share it.
 add_library(dcp_net STATIC src/net/addr.cpp src/net/connection_test.cpp src/net/crypto.cpp src/net/identity.cpp
-    src/net/json.cpp src/net/lobby_link.cpp src/net/online_config.cpp src/net/peer_socket.cpp src/net/stun.cpp
-    src/net/upnp.cpp src/net/websocket.cpp $<IF:$<BOOL:${WIN32}>,src/net/websocket_win.cpp,src/net/websocket_posix.cpp>)
+    src/net/json.cpp src/net/lobby_link.cpp src/net/online_config.cpp src/net/online_version.cpp src/net/peer_socket.cpp
+    src/net/stun.cpp src/net/upnp.cpp src/net/websocket.cpp
+    $<IF:$<BOOL:${WIN32}>,src/net/websocket_win.cpp,src/net/websocket_posix.cpp>)
 target_include_directories(dcp_net PUBLIC src)
+target_compile_definitions(dcp_net PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
 set_target_properties(dcp_net PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp_net PRIVATE -Wall -Wextra)
 if (WIN32)
@@ -110,7 +112,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/skip_offers.c src/startup_save_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/skip_offers.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -267,6 +269,13 @@ target_compile_options(dcp-frame-pacing-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)
 target_include_directories(dcp-voice-tests PRIVATE src)
 target_compile_options(dcp-voice-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+
+# Focused tests of the online player cards' System type hook, on synthetic and local boot images (tools/test.ps1); not
+# part of the default build.
+add_executable(dcp-system-type-tests EXCLUDE_FROM_ALL tests/system_type_tests.c src/guest_hook.c src/system_type_hook.c)
+target_include_directories(dcp-system-type-tests PRIVATE src)
+target_compile_definitions(dcp-system-type-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-system-type-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the True Ultrawide hooks (tools/test.ps1); not part of the default build.
 add_executable(dcp-ultrawide-tests EXCLUDE_FROM_ALL tests/ultrawide_tests.c src/guest_hook.c src/ultrawide_hooks.c)

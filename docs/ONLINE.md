@@ -18,7 +18,9 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
 4. Under **Friends**, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
    card at the top of the page, and the Online entry in the sidebar shows how many are waiting; **Accept** or
    **Decline** it there. The list updates by itself and shows each friend's Online name and whether they are online:
-   Online while their launcher or game is connected, "Online, in a room" while they are in a game room.
+   Online while their launcher or game is connected, "Online, in a room" while they are in a game room. Under the
+   name, an online friend also shows the platform and port version their own client reported
+   (`Online · Windows · v0.8.0`), and **Incompatible** when their room uses another online protocol.
 5. **Connection test** > **Run test**, if you want to check your network first. "Ready for online play" means other
    players can reach you; otherwise the lines below it say what is missing. "Online service: Connected · N ms" is the
    time the online service took to answer the test's sign-in, measured once per test; it is not the Ping to players.
@@ -35,6 +37,27 @@ transport already measures from its acknowledgements (see Peer transport), read 
 extra packets and makes no request to the online service. With several players it shows the highest round trip among
 the connected ones, the worst connection in the room. "Ping: --" means no player is connected yet, or the last one
 left. The panel uses the frame counter's style and corner, next to it when both are shown.
+
+### System type and versions
+
+The game's player cards (as in Join Friends Room) show **System type** as the player's PC platform and port
+version, for example `Windows · v0.8.0`, `Linux · v0.8.0` or `Steam Deck · v0.8.0`, instead of PlayStation 4.
+Steam Deck is recognised from the machine's DMI identity (Valve Jupiter or Galileo); any other Linux PC shows Linux. The
+version is the CMake project version, the same one the launcher and the packages show.
+
+Who can play together is decided by an internal online protocol number (`net::kOnlineProtocolVersion`,
+`src/net/online_version.h`), not by the port version: v0.8.1 and v0.8.2 still play together as long as the number did
+not change. It is raised only when a change stops a build from playing with the previous one. Rooms of another
+protocol are left out of searches and of Join Friends Room, and joining one is refused by the online service before
+any connection to the other player is made; the game shows "Online version mismatch" with both versions (or "This
+player is using an incompatible version of Dragon's Crown Pro PC." when the other build is too old to say). Such
+friends still appear in Friends, online and in a room. A build from before this check sends no protocol and counts as
+0: it never meets a current build, only other builds like it.
+
+The card's System type comes from a small hook (`src/system_type_hook.c`, US 1.00 and Japan 1.02/1.03): every copy of
+the game marks its own player info as PS4, so the text cannot come from the data the players exchange. At the card's
+two calls that set the PS4 record, the hook sets the text for the Online ID the card shows, from what the online service
+reported for that player (`PC` when it reported nothing).
 
 ## Reference and licence
 
@@ -115,32 +138,33 @@ lower-case hex.
 
 - Request `{"op": "...", "seq": n, ...}`; answer `{"re": n, "code": "ok" | <error>, ...}`; event `{"ev": "...", ...}`.
 - Errors: `bad_request`, `too_large`, `no_session` (no hello yet), `proto`, `unauthorized`, `not_owner`, `in_room`,
-  `not_found`, `closed`, `full`, `limit`, `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
+  `not_found`, `closed`, `full`, `incompatible`, `limit`, `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
   errors the game tells apart (0x80550d0f / 0x80550d15 / 0x80550d19) and the rest to 0x80550ca1.. (ours).
 
 | op | request | answer |
 |---|---|---|
-| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time` |
+| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform` | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time` |
 | `worlds` | | `worlds: [{world, rooms, members}]` |
 | `udp` | `port`, `lan: [{ip, port}]` (<= 4, LAN/loopback only) | `ip`, `port` |
 | `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]` | `room`, `me` |
-| `room.search` | `world`, `from` (1-based), `count` (<= 20), `flag_mask`, `flag_value`, `filters: [[id, op, value]]` (op 1 = 2 != 3 < 4 <= 5 > 6 >=); or `code` | `total`, `from`, `rooms` |
-| `room.join` | `room` or `code`, `member_bin` | `room`, `me` |
+| `room.search` | `world`, `from` (1-based), `count` (<= 20), `flag_mask`, `flag_value`, `filters: [[id, op, value]]` (op 1 = 2 != 3 < 4 <= 5 > 6 >=); or `code` | `total`, `from`, `rooms`, `incompatible` (rooms of another protocol left out) |
+| `room.join` | `room` or `code`, `member_bin` | `room`, `me`; `incompatible` with the room's `online_protocol` and its owner's `version`, `platform` |
 | `room.leave` / `room.resume` | `room` / `room`, `member` | - / `room`, `me` |
 | `room.set_internal` | `room`, `flag_mask`, `flag_value`, `bin_int` (owner only) | - |
 | `room.set_external` | `room`, `ints`, `bin_ext` (owner only) | - |
 | `room.kick` | `room`, `member` (owner only) | - |
 | `chat` | `text` | - |
 | `presence.set` | `data` (<= 0x80 bytes hex), `status` (<= 0xc0) | - |
-| `friends.list` / `friends.requests` | | `friends: [{account, name, online, game?, room?, code?, data?, status?}]` / `incoming`, `outgoing` |
+| `friends.list` / `friends.requests` | | `friends: [{account, name, online, game?, online_protocol?, version?, platform?, room?, code?, data?, status?}]` / `incoming`, `outgoing` |
 | `friends.add` | `code` (`XXXX-XXXX`, any case) | `account`, `name`, `state` (`pending` / `friends`) |
 | `friends.accept` / `.decline` / `.remove` | `account` | `friend` / - / - |
 | `report.send` | `text` (<= 256), `log` (tail kept, <= 128 K), `version` | `id`, `left` |
 
 Room (`room`): `id`, `world`, `slots`, `flags` (0x20000000 added while full), `owner`, `code` (6 characters, A-Z 2-9
-without I O 0 1), `key` (16 random bytes, hex: the peer handshake secret), `members: [{id, account, name, joined, bin}]`,
-`ints`, `bin_int`, `bin_ext`. Search result rooms carry `count`, `owner_account`, `owner_name`, `ints`, `bin_ext`.
-Search skips full, closed (0x40000000) and hidden (0x10000000) rooms and other builds' rooms.
+without I O 0 1), `key` (16 random bytes, hex: the peer handshake secret), `members: [{id, account, name, joined, bin, version, platform}]`,
+`ints`, `bin_int`, `bin_ext`, `online_protocol` (its creator's). Search result rooms carry `count`, `owner_account`,
+`owner_name`, `ints`, `bin_ext`, `online_protocol` and the owner's `version`, `platform`. Search skips full, closed
+(0x40000000) and hidden (0x10000000) rooms, other builds' rooms and rooms of another online protocol.
 
 Events: `room.member_joined {room, member}`, `room.member_left {room, member, why: leave | kicked | disconnect}`,
 `room.owner {room, from, to}` (before `member_left`; the new owner is the lowest connected member), `room.internal
@@ -205,7 +229,7 @@ any datagram, after 30 tries of one packet, or on CLOSE.
   it. The Connection test uses its own short session with `presence: false`.
 - The game publishes its room info with Toolkit2 `setPresence` (forwarded as `presence.set`); its "Join Friends Room"
   list is Toolkit2 `getFriends`, answered from `friends.list` with one row per friend online in a room of the same
-  build with a presence blob. The game then joins by the room id inside that blob.
+  build and online protocol with a presence blob. The game then joins by the room id inside that blob.
 - Chat is implemented in the lobby (room scoped, bounded, rate limited, not stored) and received lines are written to
   the game log (`Chat:`). The game has no chat UI of its own and the port has none yet.
 - Bug reports: `report.send` is implemented in the lobby (`/reports` behind `REPORTS_TOKEN` on the Worker); the launcher

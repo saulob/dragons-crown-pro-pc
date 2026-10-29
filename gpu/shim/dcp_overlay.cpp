@@ -116,9 +116,9 @@ void SetOpen(bool value) {
 }
 
 // The caller holds imgui_mutex.
-void SetNotice(const std::string& text) {
+void SetNotice(const std::string& text, std::chrono::seconds shown = std::chrono::seconds(2)) {
     notice_text = text;
-    notice_until = (std::chrono::steady_clock::now() + std::chrono::seconds(2)).time_since_epoch().count();
+    notice_until = (std::chrono::steady_clock::now() + shown).time_since_epoch().count();
 }
 
 ImGuiKey KeyFromSdl(SDL_Keycode key) {
@@ -813,6 +813,16 @@ void Notice() {
     DrawOverlayPanel(PlaceOverlayPanel(notice_text.c_str(), corner), notice_text.c_str());
 }
 
+// An online room of an incompatible port version was left out or refused: long enough to read three lines.
+void PollOnlineNotice() {
+    char text[256];
+    if (!runtime_online_take_notice(text, sizeof(text))) {
+        return;
+    }
+    std::scoped_lock lock{imgui_mutex};
+    SetNotice(text, std::chrono::seconds(6));
+}
+
 } // namespace
 
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
@@ -1223,6 +1233,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     if (!PingShown()) {
         ping_readout.Reset();
     }
+    PollOnlineNotice();
     if (!Visible()) {
         return;
     }

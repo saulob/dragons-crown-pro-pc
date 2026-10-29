@@ -47,6 +47,32 @@ bool AcceptButton(trg::Ui& ui, const char* id) {
     return clicked;
 }
 
+// The name, then the status line in the row's help style with "Incompatible" in the attention colour. ui.Row has
+// already moved to the control column, so the line is drawn back in the label column, under the name.
+void FriendRow(trg::Ui& ui, const OnlinePlayer& player) {
+    const FriendStatus status = FriendStatusOf(player);
+    ui.Row(player.name.c_str());
+    const bool in_table = ImGui::GetCurrentTable() != nullptr;
+    if (in_table) {
+        const float below_name = ImGui::GetItemRectMax().y + ImGui::GetStyle().ItemSpacing.y;
+        ImGui::TableSetColumnIndex(0);
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, below_name));
+    }
+    ImGui::PushFont(nullptr, ui.fonts().size * 0.84f);
+    ImGui::TextColored(ui.theme().dim, "%s", status.text.c_str());
+    if (status.incompatible) {
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextColored(ui.theme().dim, " \xC2\xB7 ");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextColored(ui.theme().warn_dot, "Incompatible");
+    }
+    ImGui::PopFont();
+    if (in_table) {
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+    }
+}
+
 } // namespace
 
 OnlinePage::~OnlinePage() {
@@ -209,7 +235,7 @@ void OnlinePage::DrawFriends(trg::Ui& ui) {
         ImGui::PopID();
     }
     for (const OnlinePlayer& f : state.friends) {
-        ui.Row(f.name.c_str(), FriendPresence(f));
+        FriendRow(ui, f);
         ImGui::PushID(("f" + f.account).c_str());
         if (ImGui::Button("Remove")) client_.Remove(f.account);
         ImGui::PopID();

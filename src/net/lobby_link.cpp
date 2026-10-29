@@ -8,6 +8,7 @@
 
 #include "net/addr.h"
 #include "net/identity.h"
+#include "net/online_version.h"
 #include "net/websocket.h"
 
 namespace dcp::net {
@@ -31,6 +32,9 @@ Json hello_body(const Identity& identity, const std::string& name, const std::st
     h.set("secret", identity.secret);
     h.set("name", name);
     h.set("presence", presence);
+    h.set("online_protocol", kOnlineProtocolVersion);
+    h.set("version", port_version());
+    h.set("platform", host_platform());
     return h;
 }
 

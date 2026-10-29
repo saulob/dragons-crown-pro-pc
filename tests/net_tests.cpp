@@ -20,6 +20,7 @@
 #include "net/json.h"
 #include "net/lobby_link.h"
 #include "net/online_config.h"
+#include "net/online_version.h"
 #include "net/peer_socket.h"
 #include "net/stun.h"
 #include "net/websocket.h"
@@ -324,6 +325,53 @@ void TestWorstRtt() {
     CHECK(overlay.find("runtime_online_peer_ping_ms()") != std::string::npos && overlay.find("lobby") == std::string::npos);
 }
 
+// The player card's System type: platform and port version (the CMake project VERSION), never a PlayStation; and the
+// one online protocol every client advertises in its hello.
+void TestOnlineVersion() {
+    CHECK(platform_name(true, "", "") == "Windows" && platform_name(true, "Valve", "Jupiter") == "Windows");
+    CHECK(platform_name(false, "Valve", "Jupiter") == "Steam Deck" && platform_name(false, "Valve", "Galileo") == "Steam Deck");
+    CHECK(platform_name(false, "", "") == "Linux" && platform_name(false, "Valve", "Steam Machine") == "Linux");
+    CHECK(platform_name(false, "LENOVO", "Jupiter") == "Linux" && platform_name(false, "valve", "jupiter") == "Linux");
+#ifdef _WIN32
+    CHECK(host_platform() == "Windows");
+#else
+    CHECK(host_platform() == "Linux" || host_platform() == "Steam Deck");
+#endif
+
+    const std::string cmake = ReadSource("CMakeLists.txt");
+    const size_t at = cmake.find(" VERSION ", cmake.find("project(dragons_crown_pro_pc"));
+    const size_t end = cmake.find_first_of(" )", at + 9);
+    const std::string version = at == std::string::npos ? std::string() : cmake.substr(at + 9, end - at - 9);
+    CHECK(!version.empty() && port_version() == version);
+    CHECK(system_type_text("Windows", port_version()) == "Windows \xC2\xB7 v" + version);
+    CHECK(system_type_text("Linux", "0.8.0") == "Linux \xC2\xB7 v0.8.0");
+    CHECK(system_type_text("Steam Deck", "0.8.0") == "Steam Deck \xC2\xB7 v0.8.0");
+    CHECK(system_type_text("Linux", "") == "Linux");
+    CHECK(system_type_text(host_platform(), port_version()).find("PlayStation") == std::string::npos);
+
+    CHECK(online_compatible(kOnlineProtocolVersion));
+    CHECK(!online_compatible(0) && !online_compatible(kOnlineProtocolVersion + 1) && !online_compatible(-1));
+
+    Identity id;
+    id.account = 42;
+    id.secret = std::string(64, 'a');
+    const Json hello = hello_body(id, "A", "TEST-1.00", true);
+    CHECK(hello["online_protocol"].as_int() == kOnlineProtocolVersion && hello["version"].as_string() == port_version() &&
+          hello["platform"].as_string() == host_platform());
+
+    // The number lives in net/online_version.h only; the lobby compares, it never names one.
+    for (const char* file : {"src/net/online_version.cpp", "src/net/lobby_link.cpp", "src/runtime_matching2.cpp",
+                             "src/runtime_online.cpp", "launcher/online_client.cpp"}) {
+        const std::string source = ReadSource(file);
+        CHECK(source.find("kOnlineProtocolVersion =") == std::string::npos);
+        CHECK(source.find('"' + version + '"') == std::string::npos);
+    }
+    CHECK(ReadSource("src/net/online_version.h").find("inline constexpr int kOnlineProtocolVersion = ") != std::string::npos);
+    const std::string lobby = ReadSource("server/lobby/src/lobby.js");
+    CHECK(lobby.find("(att.online_protocol ?? 0) === room.online_protocol") != std::string::npos);
+    CHECK(lobby.find("online_protocol === 1") == std::string::npos && lobby.find("ONLINE_PROTOCOL") == std::string::npos);
+}
+
 void TestAddresses() {
     CHECK(parse_ip("192.168.1.20") == 0xc0a80114 && parse_ip("1.2.3") == 0 && parse_ip("256.0.0.1") == 0);
     CHECK(ip_text(0x7f000001) == "127.0.0.1" && endpoint_text({0x0a000001, 3658}) == "10.0.0.1:3658");
@@ -581,6 +629,7 @@ int main() {
     TestConfig();
     TestConnectionSummary();
     TestWorstRtt();
+    TestOnlineVersion();
     TestAddresses();
     TestStun();
     TestPeerLink(0);

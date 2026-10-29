@@ -42,8 +42,8 @@ inline constexpr int kLobbyProtocol = 1;
 
 struct Identity;
 
-// The hello request: protocol, game build ("CUSA10454-1.00"), identity and name. `presence` false keeps a launcher
-// session from showing the player online to friends.
+// The hello request: protocol, game build ("CUSA10454-1.00"), identity, name, and the online protocol, port version and
+// platform (net/online_version.h). `presence` false keeps a launcher session from showing the player online to friends.
 Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence);
 
 class LobbyLink {

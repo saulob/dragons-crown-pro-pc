@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "net/lobby_link.h"
+#include "net/online_version.h"
 #include "net/peer_socket.h"
 #include "runtime_online.h"
 
@@ -363,6 +364,12 @@ int main() {
     CHECK(read == int32_t(big.size()) && std::memcmp(buffer.data(), big.data(), big.size()) == 0);
     CHECK(Fn<RudpRead>("sceRudpRead")(rudp_ctx, buffer.data(), buffer.size(), 1, nullptr) == int32_t(0x80770016));
 
+    // Player cards: this PC and every player the lobby reported show a platform and port version, never a PlayStation.
+    const std::string here = net::system_type_text(net::host_platform(), net::port_version());
+    CHECK(online::system_type("HostA") == here);
+    CHECK(online::system_type("GuestB") == here);
+    CHECK(online::system_type("Stranger") == "PC");
+
     // The guest leaves: the host's game hears it (signaling dead, member left); then the host goes offline.
     net::Json leave = net::Json::Object();
     leave.set("room", net::u64_text(room_id));
@@ -373,6 +380,81 @@ int main() {
         return false;
     }));
     CHECK(std::find(g_seen.signals.begin(), g_seen.signals.end(), std::make_pair(uint16_t(0x20), uint16_t(0x5101))) != g_seen.signals.end());
+
+    // Two friends host rooms: OldC sends no online protocol (a build from before it), NewD the same protocol with
+    // another port version on Linux. Only NewD's room reaches the game, by friends or by search; joining OldC's is
+    // refused by the lobby before any endpoint is exchanged.
+    net::LobbySession self;
+    net::Json self_reply;
+    std::string error_text;
+    CHECK(self.open(url, net::hello_body(g_settings.identity, "HostA", "HLE-TEST", false), &self_reply, &error_text));
+    auto host_friend = [&](net::LobbySession& session, const char* dir, const char* name, bool old) -> uint64_t {
+        const net::Identity id = net::load_identity(base / dir);
+        const net::Json current = net::hello_body(id, name, "HLE-TEST", true);
+        net::Json hello = net::Json::Object();
+        for (const auto& [key, value] : current.members())
+            if (!old || (key != "online_protocol" && key != "version" && key != "platform")) hello.set(key, value);
+        if (!old) hello.set("version", "9.9.9"), hello.set("platform", "Linux");
+        std::string code;
+        const bool opened = session.open(url, hello, nullptr, &error_text);
+        if (!opened) std::printf("%s: %s\n", name, error_text.c_str());
+        CHECK(opened);
+        net::Json add = net::Json::Object();
+        add.set("code", self_reply["friend_code"].as_string());
+        CHECK(session.call("friends.add", add, &code) && code == "ok");
+        net::Json accept = net::Json::Object();
+        accept.set("account", net::u64_text(id.account));
+        CHECK(self.call("friends.accept", accept, &code) && code == "ok");
+        net::Json create = net::Json::Object();
+        create.set("world", 1);
+        create.set("slots", 4);
+        auto made = session.call("room.create", create, &code);
+        net::Json presence = net::Json::Object();
+        presence.set("data", net::hex_encode(info.data(), info.size()));
+        CHECK(session.call("presence.set", presence, &code) && code == "ok");
+        return made ? (*made)["room"]["id"].as_u64() : 0;
+    };
+    net::LobbySession old_session, new_session;
+    const uint64_t old_room = host_friend(old_session, "old", "OldC", true);
+    const uint64_t new_room = host_friend(new_session, "new", "NewD", false);
+    CHECK(old_room && new_room);
+    online::take_notice();
+    online::friends_fetch();
+    CHECK(PumpUntil([] { return !online::friends_busy(); }));
+    const std::vector<online::FriendRoom> friend_rooms = online::friends_result(nullptr);
+    CHECK(friend_rooms.size() == 1 && friend_rooms[0].name == "NewD");
+    CHECK(online::take_notice() == "This player is using an incompatible version of Dragon's Crown Pro PC.");
+    CHECK(online::system_type("NewD") == net::system_type_text("Linux", "9.9.9"));
+    online::friends_fetch();
+    CHECK(PumpUntil([] { return !online::friends_busy(); }));
+    CHECK(online::take_notice().empty());
+
+    uint8_t leave_request[16] = {};
+    Wr<uint64_t>(leave_request, 0, room_id);
+    uint32_t left = 0;
+    CHECK(Fn<Request>("sceNpMatching2LeaveRoom")(ctx, leave_request, opt, &left) == 0);
+    CHECK(PumpUntil([&] { return RequestById(left); }));
+    uint8_t search_request[0x30] = {};
+    Wr<uint32_t>(search_request, 4, 1);
+    Wr<uint32_t>(search_request, 0x10, 1);
+    Wr<uint32_t>(search_request, 0x14, 20);
+    uint32_t searched = 0;
+    CHECK(Fn<Request>("sceNpMatching2SearchRoom")(ctx, search_request, opt, &searched) == 0);
+    CHECK(PumpUntil([&] { return RequestById(searched); }));
+    CHECK(RequestById(searched) && RequestById(searched)->count == 1 && RequestById(searched)->room == new_room);
+    const size_t signals_before = g_seen.signals.size(), rooms_before = g_seen.rooms.size();
+    uint8_t join_request[16] = {};
+    Wr<uint64_t>(join_request, 0, old_room);
+    uint32_t refused = 0;
+    CHECK(Fn<Request>("sceNpMatching2JoinRoomA")(ctx, join_request, opt, &refused) == 0);
+    CHECK(PumpUntil([&] { return RequestById(refused); }));
+    CHECK(RequestById(refused) && RequestById(refused)->error == int32_t(0x80550ca2));
+    CHECK(online::take_notice() == "This player is using an incompatible version of Dragon's Crown Pro PC.");
+    PumpUntil([] { return false; }, 300);
+    CHECK(g_seen.signals.size() == signals_before && g_seen.rooms.size() == rooms_before);
+    old_session.close();
+    new_session.close();
+    self.close();
     using Close = int32_t SYSV (*)(int32_t);
     CHECK(Fn<Close>("sceRudpTerminate")(rudp_ctx) == 0);
     CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);

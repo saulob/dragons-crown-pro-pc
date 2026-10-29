@@ -3,6 +3,7 @@
 #include <cstdlib>
 
 #include "net/online_config.h"
+#include "net/online_version.h"
 
 namespace dcp {
 
@@ -37,7 +38,8 @@ std::vector<OnlinePlayer> ReadOnlinePlayers(const net::Json& rows) {
     std::vector<OnlinePlayer> players;
     for (const net::Json& row : rows.items()) {
         OnlinePlayer player{row["account"].as_string(), row["name"].as_string(), row["online"].as_bool(),
-                            row["room"].as_u64() != 0};
+                            row["room"].as_u64() != 0, row["platform"].as_string(), row["version"].as_string(),
+                            int(row["online_protocol"].as_int())};
         if (player.name.empty()) {
             player.name = net::kDefaultOnlineName;
         }
@@ -48,6 +50,21 @@ std::vector<OnlinePlayer> ReadOnlinePlayers(const net::Json& rows) {
 
 const char* FriendPresence(const OnlinePlayer& player) {
     return player.in_room ? "Online, in a room" : player.online ? "Online" : "Offline";
+}
+
+FriendStatus FriendStatusOf(const OnlinePlayer& player) {
+    FriendStatus status{FriendPresence(player)};
+    if (!player.online) {
+        return status;
+    }
+    if (!player.platform.empty()) {
+        status.text += " \xC2\xB7 " + player.platform;
+    }
+    if (!player.version.empty()) {
+        status.text += " \xC2\xB7 v" + player.version;
+    }
+    status.incompatible = player.in_room && !net::online_compatible(player.online_protocol);
+    return status;
 }
 
 std::string FriendRequestText(const OnlinePlayer& sender) {

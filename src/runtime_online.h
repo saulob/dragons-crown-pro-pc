@@ -16,6 +16,11 @@ extern "C" {
 void runtime_online_configure(const char *settings_file, const char *user_dir, const char *game_key, int build_online);
 /* The online implementation of an import (NID#library), or 0: offline play, or not an online import. */
 uintptr_t runtime_online_resolve(const char *name);
+/* 1 when the game goes online: Online Play on, a build that supports it and an identity. */
+int runtime_online_active(void);
+/* The System type line of the game's player card for an online id ("Windows · v0.8.0"); valid until the next call on
+ * the same thread. */
+const char *runtime_online_system_type(const char *online_id);
 
 #ifdef __cplusplus
 }
@@ -67,6 +72,11 @@ void presence_clear();
 void friends_fetch();
 bool friends_busy();
 std::vector<FriendRoom> friends_result(uint64_t *generation);
+
+// The player card's System type for an online id: this PC's, or what the lobby reported for that player.
+std::string system_type(const std::string& online_id);
+// A message for the player (an incompatible room was left out or refused), once; empty when there is none.
+std::string take_notice();
 
 } // namespace dcp::online
 #endif

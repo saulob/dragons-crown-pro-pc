@@ -10,6 +10,8 @@ extern "C" {
 int runtime_online_play_enabled(void);
 /* The worst P2P round trip in ms among the game's connected peers; -1 when offline or no peer has measured one. */
 int runtime_online_peer_ping_ms(void);
+/* Copies the next online notice for the player into text (NUL-terminated) and returns 1; 0 when there is none. */
+int runtime_online_take_notice(char *text, int size);
 
 #ifdef __cplusplus
 }

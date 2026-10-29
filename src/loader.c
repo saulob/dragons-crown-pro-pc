@@ -13,6 +13,7 @@
 #include "runtime_online.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
+#include "system_type_hook.h"
 #include "ultrawide_hooks.h"
 #include "voice_hooks.h"
 #include "dcpgpu.h"
@@ -716,8 +717,10 @@ int main(int argc, char **argv) {
     const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
     const size_t save_stub_bytes = startup_save_hook_stub_bytes();
     const size_t voice_stub_bytes = voice_hooks_stub_bytes();
+    const size_t system_type_stub_bytes = system_type_hook_stub_bytes();
     const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() : 0;
-    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + ultrawide_stub_bytes);
+    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
+                                         ultrawide_stub_bytes);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -823,6 +826,9 @@ int main(int argc, char **argv) {
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
     if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
         voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
+    if (known_build && runtime_online_active())
+        system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
+                                 system_type_stub_bytes,runtime_online_system_type);
     skip_offers_install(image,size,known_build && game_build.skip_offers ? online_game : NULL,
                         skip_offers_wanted(dcp_skip_offers(settings_file)));
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
@@ -830,7 +836,7 @@ int main(int argc, char **argv) {
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
     install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
                            ultrawide_bytes ? round_page(size)+hook_bytes : 0,
-                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes);
+                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif

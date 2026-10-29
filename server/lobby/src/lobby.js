@@ -30,6 +30,8 @@ export const LIMITS = {
   reportChars: 256,
   reportLogChars: 128 * 1024,
   reportVersionChars: 64,
+  versionChars: 16,
+  platformChars: 16,
   reportsPerAccountPerDay: 5,
   reportsPerIpPerDay: 10,
   reportsPerDay: 300,
@@ -53,14 +55,15 @@ const MEMBER_IDS = [0x10, 0x20, 0x30, 0x40];
 const FIRST_ROOM_ID = 4096;
 
 export class LobbyError extends Error {
-  constructor(code, detail = '') {
+  constructor(code, detail = '', body = {}) {
     super(detail || code);
     this.code = code;
+    this.body = body;
   }
 }
 
-const fail = (code, detail) => {
-  throw new LobbyError(code, detail);
+const fail = (code, detail, body) => {
+  throw new LobbyError(code, detail, body);
 };
 
 const SCHEMA = [
@@ -81,6 +84,13 @@ const SCHEMA = [
      held TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (room, member))`,
   `CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, ms INTEGER NOT NULL, account TEXT NOT NULL,
      ip TEXT NOT NULL, version TEXT NOT NULL, text TEXT NOT NULL, log TEXT NOT NULL)`,
+];
+
+// Applied once each, in order; meta 'schema' counts the ones done.
+const MIGRATIONS = [
+  [`ALTER TABLE rooms ADD COLUMN online_protocol INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE members ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE members ADD COLUMN platform TEXT NOT NULL DEFAULT ''`],
 ];
 
 // ---- input validation ----
@@ -134,6 +144,16 @@ function merge(old, changes, cap) {
   return [...byId.entries()].sort((a, b) => a[0] - b[0]);
 }
 
+// The port version and platform a client reported, for players to read.
+function clientOf(v) {
+  return { version: v?.version ?? '', platform: v?.platform ?? '' };
+}
+
+// Only the online protocol decides who plays together; a client that sent none has 0.
+function compatible(att, room) {
+  return (att.online_protocol ?? 0) === room.online_protocol;
+}
+
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 export function ipv4Kind(ip) {
@@ -178,6 +198,10 @@ export class Lobby {
     this.host = host;
     this.local = Boolean(options.local);
     for (const statement of SCHEMA) host.sql.run(statement);
+    for (let done = Number(this.meta('schema') ?? 0); done < MIGRATIONS.length; done++) {
+      for (const statement of MIGRATIONS[done]) host.sql.run(statement);
+      this.setMeta('schema', done + 1);
+    }
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
     this.reconcileSeats();
   }
@@ -282,7 +306,7 @@ export class Lobby {
         this.host.log(`lobby: internal error in request ${seq}: ${error?.stack ?? error}`);
         conn.send(JSON.stringify({ re: seq, code: 'internal' }));
       } else {
-        conn.send(JSON.stringify({ re: seq, code: error.code }));
+        conn.send(JSON.stringify({ re: seq, code: error.code, ...error.body }));
       }
     } finally {
       this.current = null;
@@ -412,7 +436,7 @@ export class Lobby {
   }
 
   memberView(m) {
-    return { id: m.member, account: m.account, name: m.name, joined: m.joined, bin: JSON.parse(m.bin) };
+    return { id: m.member, account: m.account, name: m.name, joined: m.joined, bin: JSON.parse(m.bin), ...clientOf(m) };
   }
 
   fullRoom(room) {
@@ -421,6 +445,7 @@ export class Lobby {
       id: String(room.id), world: room.world, slots: room.slots, flags: this.roomFlags(room, members.length),
       owner: room.owner, code: room.code, key: room.key, members: members.map((m) => this.memberView(m)),
       ints: JSON.parse(room.ints), bin_int: JSON.parse(room.bin_int), bin_ext: JSON.parse(room.bin_ext),
+      online_protocol: room.online_protocol,
     };
   }
 
@@ -430,6 +455,7 @@ export class Lobby {
       id: String(room.id), world: room.world, slots: room.slots, count: members.length,
       flags: this.roomFlags(room, members.length), code: room.code, owner_account: owner?.account ?? '0',
       owner_name: owner?.name ?? '', ints: JSON.parse(room.ints), bin_ext: JSON.parse(room.bin_ext),
+      online_protocol: room.online_protocol, ...clientOf(owner),
     };
   }
 
@@ -500,9 +526,9 @@ export class Lobby {
 
   insertMember(att, roomId, memberId, bin) {
     const udp = att.udp ?? { ip: '', port: 0, lan: [] };
-    this.host.sql.run(`INSERT INTO members (room, member, account, name, joined, bin, conn, ip, port, lan)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, roomId, memberId, att.account, att.name, this.host.now(), JSON.stringify(bin),
-      att.cid, udp.ip, udp.port, JSON.stringify(udp.lan));
+    this.host.sql.run(`INSERT INTO members (room, member, account, name, joined, bin, conn, ip, port, lan, version, platform)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, roomId, memberId, att.account, att.name, this.host.now(), JSON.stringify(bin),
+      att.cid, udp.ip, udp.port, JSON.stringify(udp.lan), att.version ?? '', att.platform ?? '');
     att.room = roomId;
     att.member = memberId;
   }
@@ -538,6 +564,7 @@ export class Lobby {
     view.online = true;
     const inRoom = present.find((s) => s.att.room) ?? present[0];
     view.game = inRoom.att.game;
+    Object.assign(view, { online_protocol: inRoom.att.online_protocol ?? 0 }, clientOf(inRoom.att));
     if (inRoom.att.room && inRoom.att.game === viewerGame) {
       const room = this.roomRow(inRoom.att.room);
       if (room) {
@@ -608,7 +635,11 @@ const HANDLERS = {
     }
     const presence = msg.presence !== false;
     const wasOnline = presence && this.presentSockets(account).length > 0;
-    Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0 });
+    const online = isInt(msg.online_protocol, 1, 0xffff) ? msg.online_protocol : 0;
+    const version = cleanText(msg.version ?? '', LIMITS.versionChars);
+    const platform = cleanText(msg.platform ?? '', LIMITS.platformChars);
+    Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
+      version, platform });
     this.index = null;
     if (presence && !wasOnline) this.notifyFriends(account, { ev: 'friend.online', account, name });
     return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now };
@@ -656,9 +687,10 @@ const HANDLERS = {
     let code;
     do code = this.randomCode(6);
     while (this.host.sql.get('SELECT 1 AS x FROM rooms WHERE code = ?', code));
-    this.host.sql.run(`INSERT INTO rooms (id, game, world, slots, flags, owner, code, key, ints, bin_int, bin_ext, created)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, att.game, msg.world, msg.slots, (flags & ~FLAG_FULL) >>> 0, MEMBER_IDS[0],
-      code, this.randomHex(16), JSON.stringify(ints), JSON.stringify(binInt), JSON.stringify(binExt), this.host.now());
+    this.host.sql.run(`INSERT INTO rooms (id, game, world, slots, flags, owner, code, key, ints, bin_int, bin_ext, created,
+      online_protocol) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, att.game, msg.world, msg.slots,
+      (flags & ~FLAG_FULL) >>> 0, MEMBER_IDS[0], code, this.randomHex(16), JSON.stringify(ints), JSON.stringify(binInt),
+      JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0);
     this.insertMember(att, id, MEMBER_IDS[0], memberBin);
     return { room: this.fullRoom(this.roomRow(id)), me: MEMBER_IDS[0] };
   },
@@ -693,11 +725,14 @@ const HANDLERS = {
       });
     }
     const open = [];
+    let incompatible = 0;
     for (const room of rooms) {
       const members = this.memberRows(room.id);
-      if (members.length < room.slots) open.push(this.briefRoom(room, members));
+      if (members.length >= room.slots) continue;
+      if (compatible(att, room)) open.push(this.briefRoom(room, members));
+      else incompatible++;
     }
-    return { total: open.length, from, rooms: open.slice(from - 1, from - 1 + count) };
+    return { total: open.length, from, rooms: open.slice(from - 1, from - 1 + count), incompatible };
   },
 
   'room.join'(att, msg) {
@@ -710,6 +745,10 @@ const HANDLERS = {
       room = this.roomRow(Number(decimalId(msg.room)));
     }
     if (!room || room.game !== att.game) fail('not_found');
+    if (!compatible(att, room)) {
+      const owner = this.memberRow(room.id, room.owner);
+      fail('incompatible', '', { online_protocol: room.online_protocol, ...clientOf(owner) });
+    }
     const members = this.memberRows(room.id);
     if (members.length >= room.slots) fail('full');
     if (room.flags & FLAG_CLOSED) fail('closed');

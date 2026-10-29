@@ -397,6 +397,24 @@ extern "C" int runtime_online_peer_ping_ms(void) {
     return online::g_settings.enabled ? online::peer_ping_ms() : -1;
 }
 
+extern "C" int runtime_online_active(void) {
+    return online::g_settings.enabled ? 1 : 0;
+}
+
+extern "C" const char* runtime_online_system_type(const char* online_id) {
+    thread_local std::string text;
+    text = online::system_type(online_id ? online_id : "");
+    return text.c_str();
+}
+
+extern "C" int runtime_online_take_notice(char* text, int size) {
+    if (!online::g_settings.enabled || !text || size <= 0) return 0;
+    const std::string notice = online::take_notice();
+    if (notice.empty()) return 0;
+    std::snprintf(text, size_t(size), "%s", notice.c_str());
+    return 1;
+}
+
 extern "C" uintptr_t runtime_online_resolve(const char* name) {
     if (!online::g_settings.enabled || !name) return 0;
     const char* symbol = runtime_symbol(name);

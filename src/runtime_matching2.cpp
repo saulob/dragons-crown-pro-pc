@@ -13,10 +13,13 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
+#include <utility>
 #include <vector>
 
 #include "net/json.h"
 #include "net/lobby_link.h"
+#include "net/online_version.h"
 #include "runtime_online.h"
 
 #define DCP_SYSV __attribute__((sysv_abi))
@@ -90,6 +93,10 @@ struct Member {
     int64_t joined_ms = 0;
 };
 
+struct Client {
+    std::string platform, version;
+};
+
 struct Signal {
     uint64_t account = 0;
     net::Endpoint address;
@@ -142,6 +149,10 @@ struct State {
     bool friends_busy = false;
     uint64_t friends_generation = 0;
     std::vector<FriendRoom> friends;
+    // what the game's player cards show: each player's platform and port version, by online id
+    std::map<std::string, Client> clients;
+    std::set<std::string> refused_friend_rooms;
+    std::string notice;
 };
 
 std::mutex g_mutex;
@@ -150,6 +161,23 @@ State g;
 uint64_t RtcTick(int64_t unix_ms) { return uint64_t(unix_ms) * 1000 + UINT64_C(62135596800000000); }
 
 std::string SafeName(const std::string& name) { return net::online_name(name, "Player"); }
+
+void Remember(const std::string& name, const Json& client) {
+    if (!client["platform"].as_string().empty())
+        g.clients[SafeName(name)] = Client{client["platform"].as_string(), client["version"].as_string()};
+}
+
+bool Compatible(const Json& remote) { return net::online_compatible(int(remote["online_protocol"].as_int())); }
+
+// One support line and one notice for the player per refused room; `who` names the other side in the notice.
+void Refuse(const char* who, const std::string& about, const Json& remote) {
+    const std::string& version = remote["version"].as_string();
+    std::printf("Online: incompatible version local=v%s remote=%s protocol local=%d remote=%lld (%s); not joining\n",
+                net::port_version().c_str(), version.empty() ? "unknown" : ("v" + version).c_str(), net::kOnlineProtocolVersion,
+                (long long)remote["online_protocol"].as_int(), about.c_str());
+    g.notice = version.empty() ? "This player is using an incompatible version of Dragon's Crown Pro PC."
+                               : "Online version mismatch\nYou: v" + net::port_version() + "\n" + who + ": v" + version;
+}
 
 void PutOnlineId(uint8_t* p, const std::string& name) { std::memcpy(p, name.data(), std::min<size_t>(name.size(), 16)); }
 
@@ -299,6 +327,7 @@ uint8_t* JoinResponse(Block& b, const Json& body) {
     for (const Json& j : room["members"].items()) {
         const Member m = MemberOf(j);
         g.members[m.id] = m;
+        Remember(m.name, j);
         uint8_t* p = MemberStruct(b, m);
         (previous ? Wr<uint8_t*>(previous, 0, p) : void(head = p));
         previous = p;
@@ -314,12 +343,19 @@ uint8_t* JoinResponse(Block& b, const Json& body) {
     return response;
 }
 
-// Search results: RoomDataExternal list; the game reads the int attrs 0x4c..0x53 as eight values in order.
+// Search results: RoomDataExternal list; the game reads the int attrs 0x4c..0x53 as eight values in order. Rooms of
+// another online protocol never reach it; the lobby already leaves them out and counts them.
 uint8_t* SearchResponse(Block& b, const Json& body) {
     uint8_t* response = b.alloc(0x20);
     uint8_t *head = nullptr, *previous = nullptr;
     int32_t n = 0;
+    int64_t hidden = body["incompatible"].as_int();
     for (const Json& r : body["rooms"].items()) {
+        if (!Compatible(r)) {
+            ++hidden;
+            continue;
+        }
+        Remember(r["owner_name"].as_string(), r);
         uint8_t* room = b.alloc(0xb0);
         Wr<uint16_t>(room, 8, uint16_t(r["slots"].as_int(4)));
         Wr<uint16_t>(room, 0xa, uint16_t(r["count"].as_int()));
@@ -345,6 +381,9 @@ uint8_t* SearchResponse(Block& b, const Json& body) {
     }
     Wr<int32_t>(response, 8, n);
     Wr<uint8_t*>(response, 0x10, head);
+    if (hidden)
+        std::printf("Online: search left out %lld room(s) of an incompatible version (protocol local=%d)\n", (long long)hidden,
+                    net::kOnlineProtocolVersion);
     return response;
 }
 
@@ -461,8 +500,15 @@ void OnResponse(const net::LobbyMessage& m) {
             row.name = SafeName(f["name"].as_string());
             net::hex_decode(f["data"].as_string(), row.data);
             net::hex_decode(f["status"].as_string(), row.status);
-            if (f["online"].as_bool() && f["room"].as_u64() && !row.data.empty() && f["game"].as_string() == settings().game)
-                g.friends.push_back(std::move(row));
+            if (!f["online"].as_bool()) continue;
+            Remember(row.name, f);
+            if (!f["room"].as_u64() || row.data.empty() || f["game"].as_string() != settings().game) continue;
+            if (!Compatible(f)) {
+                if (g.refused_friend_rooms.insert(net::u64_text(row.account) + "/" + f["room"].as_string()).second)
+                    Refuse("Friend", "friend " + row.name, f);
+                continue;
+            }
+            g.friends.push_back(std::move(row));
         }
         std::printf("Matching2: friends: %zu, in a joinable room: %zu\n", total, g.friends.size());
         g.friends_busy = false;
@@ -491,7 +537,7 @@ void OnResponse(const net::LobbyMessage& m) {
         if (p.kind == Kind::kWorlds) data = WorldsResponse(*block, m.body);
         if (p.kind == Kind::kSearch) {
             data = SearchResponse(*block, m.body);
-            std::printf("Matching2: search found %zu room(s)\n", m.body["rooms"].size());
+            std::printf("Matching2: search found %d room(s)\n", Rd<int32_t>(data, 8));
         }
         if (p.kind == Kind::kCreateJoin) {
             data = JoinResponse(*block, m.body);
@@ -502,6 +548,7 @@ void OnResponse(const net::LobbyMessage& m) {
     } else {
         std::printf("Matching2: request 0x%04x failed: %s\n", p.event, m.code.c_str());
         if (p.event == kEvSetExternal) g.last_external.clear();
+        if (p.kind == Kind::kCreateJoin && m.code == "incompatible") Refuse("Host", "room host", m.body);
     }
     const RequestCallback cb = p.callback;
     void* arg = p.arg;
@@ -546,6 +593,7 @@ void OnEvent(const net::LobbyMessage& m) {
     if (m.event == "room.member_joined") {
         const Member joined = MemberOf(b["member"]);
         g.members[joined.id] = joined;
+        Remember(joined.name, b["member"]);
         std::printf("Matching2: member 0x%x (%s) joined\n", joined.id, joined.name.c_str());
         uint8_t* data = block->alloc(0x20);
         Wr<uint8_t*>(data, 0, MemberStruct(*block, joined));
@@ -1152,6 +1200,19 @@ std::vector<FriendRoom> friends_result(uint64_t* generation) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (generation) *generation = g.friends_generation;
     return g.friends;
+}
+
+std::string system_type(const std::string& online_id) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (online_id == settings().name) return net::system_type_text(net::host_platform(), net::port_version());
+    const auto it = g.clients.find(online_id);
+    if (it == g.clients.end()) return "PC";
+    return net::system_type_text(it->second.platform, it->second.version);
+}
+
+std::string take_notice() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return std::exchange(g.notice, std::string());
 }
 
 } // namespace dcp::online
