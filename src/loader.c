@@ -405,8 +405,8 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
     return 0;
 }
 /* Widens the scene pass projections when every condition holds, then installs the guest hooks; logs one line either
- * way. A site that does not match leaves the image as it was. */
-static void install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
+ * way and returns 1 when it applied. A site that does not match leaves the image as it was. */
+static int install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
                                    size_t slot_offset, uint8_t *stubs) {
     const double scale=dcp_true_ultrawide_scale(aspect_ratio,&render_target);
     char detail[720];
@@ -425,6 +425,7 @@ static void install_true_ultrawide(int requested, const DcpGameBuild *build, uin
     printf("DCP: True Ultrawide requested %s, effective %s (%s, %dx%d, %s): %s\n",requested ? "on" : "off",
            effective ? "on" : "off",aspect_ratio->name,render_target.width,render_target.height,
            build ? build->label : "unknown game build",detail);
+    return effective;
 }
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
@@ -587,7 +588,6 @@ int main(int argc, char **argv) {
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
-    dcp_log_gameplay_settings(settings_file, paths.image_dir, app0);
     printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
     runtime_cheats_log_state(known_build && game_build.cheats);
     if (content_profile) {
@@ -862,14 +862,18 @@ int main(int argc, char **argv) {
     if (known_build && runtime_online_active())
         system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
                                  system_type_stub_bytes,runtime_online_system_type);
-    skip_offers_install(image,size,known_build ? build_key : NULL,
-                        skip_offers_wanted(dcp_skip_offers(settings_file)));
+    const unsigned skip_applied=skip_offers_install(image,size,known_build ? build_key : NULL,
+                                                    skip_offers_wanted(dcp_skip_offers(settings_file)));
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
-    install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
+    const int ultrawide_effective=install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
                            ultrawide_bytes ? round_page(size)+hook_bytes : 0,
                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
+    const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
+                                       render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
+                                       ultrawide_effective,skip_applied};
+    dcp_log_settings_summary(settings_file,paths.image_dir,app0,&run_settings);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif

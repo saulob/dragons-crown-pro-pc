@@ -19,21 +19,21 @@ export function makeLobby({ local = false } = {}) {
         lobby.alarm();
       }
     },
-    connect(ip = '203.0.113.7') {
-      return new Client(lobby, host, ip);
+    connect(ip = '203.0.113.7', country) {
+      return new Client(lobby, host, ip, country);
     },
   };
 }
 
 export class Client {
-  constructor(lobby, host, ip) {
+  constructor(lobby, host, ip, country) {
     this.lobby = lobby;
     this.host = host;
     this.ip = ip;
     this.inbox = [];
     this.closedWith = null;
     this.seq = 0;
-    const first = lobby.admit(ip);
+    const first = lobby.admit(ip, country);
     this.admitted = Boolean(first);
     if (!first) return;
     this.conn = new LocalConn(host, {

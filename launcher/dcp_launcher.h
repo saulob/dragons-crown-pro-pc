@@ -90,8 +90,22 @@ unsigned dcp_skip_offers(const char *settings_file);
 /* 1 when the settings file keeps the logs of normal sessions (detailed_logging; 1 by default). */
 int dcp_detailed_logging(const char *settings_file);
 
-/* Prints the effective Gameplay page settings, including the Japanese NPC Voices state after build gating. */
-void dcp_log_gameplay_settings(const char *settings_file, const char *image_dir, const char *app0);
+/* What the loader decided for this run: the parts of the "Settings:" log lines the settings file alone does not say. */
+typedef struct DcpRunSettings {
+    const char *game_build;        /* label; NULL for an unknown build */
+    int online_play;               /* effective Online Play (DCP_ONLINE applied): cheats are locked */
+    int render_width, render_height;
+    const char *render_resolution; /* dcp_resolutions key */
+    const char *aspect_ratio;      /* dcp_aspect_ratios name */
+    int true_ultrawide_effective;
+    unsigned skip_offers;          /* the skip_offers.h bits applied */
+} DcpRunSettings;
+
+/* Prints the startup state support needs as "Settings:" lines: port version, platform, online protocol, game build,
+ * Online Play and the display, gameplay and skip settings in effect. Never the Online name, Friend Code or account.
+ * `run` may be NULL: the settings file's values then. */
+void dcp_log_settings_summary(const char *settings_file, const char *image_dir, const char *app0,
+                              const DcpRunSettings *run);
 
 /* Starts the game process dcp_launcher_run created suspended. Call it once nothing writes to the log any more; 1 when
  * it runs. A process that could not be started is ended. */

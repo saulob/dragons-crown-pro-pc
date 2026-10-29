@@ -15,6 +15,7 @@
 #include "dcp_resolution.h"
 #include "game_files.h"
 #include "game_process.h"
+#include "net/online_version.h"
 #include "online_settings.h"
 #include "text_languages.h"
 #include "utf8.h"
@@ -367,35 +368,80 @@ extern "C" int dcp_detailed_logging(const char* settings_file) {
     return settings.GetBool(kDetailedLoggingKey, true) ? 1 : 0;
 }
 
-extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char* image_dir, const char* app0) {
+namespace dcp {
+namespace {
+
+const char* OnOff(bool on) { return on ? "on" : "off"; }
+
+} // namespace
+
+std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* build,
+                            std::span<const TextLanguage> languages, const DcpRunSettings* run) {
+    std::string out;
+    const auto line = [&out](const std::string& text) { out += "Settings: " + text + "\n"; };
+    const char* build_label = run ? run->game_build : build ? build->label : nullptr;
+    line("Dragon's Crown Pro PC v" + net::port_version() + ", " + net::host_platform() + ", online protocol " +
+         std::to_string(net::kOnlineProtocolVersion) + ", game build " +
+         (build_label ? build_label : "not a supported build"));
+
+    if (!SameLanguages(languages, TextLanguagesOf(build))) {
+        line(std::string("Menu & Subtitles languages in ") + build->regional_archive + ": " + LanguageNames(languages));
+    }
+    const std::string saved_language = settings.Get(kTextLanguageKey);
+    const TextLanguage& language = ResolveTextLanguage(languages, saved_language);
+    if (const std::string note = UnavailableLanguageNote(saved_language, language); !note.empty()) {
+        line(note);
+    }
+
+    bool online_play = run && run->online_play;
+    if (!run) {
+        net::OnlineConfig online = ReadOnlineConfig(settings.file());
+        net::apply_environment(online);
+        online_play = online.enabled;
+    }
+    line(online_play ? std::string("Online Play on, Ping display ") + OnOff(settings.GetBool(kPingDisplayKey, false)) +
+                           ", cheats locked for Online Play"
+                     : std::string("Online Play off"));
+
+    const std::string mode = settings.Get(kDisplayModeKey, "windowed");
+    line(std::string("Window ") + (mode == "borderless" ? "Borderless Fullscreen" : "Windowed") + ", frame rate " +
+         FrameRateLabel(std::atoi(settings.Get(kFrameRateKey, "60").c_str())) + ", frame counter " +
+         OnOff(settings.GetBool(kShowFrameCounterKey, false)) + ", frame rate in title " +
+         OnOff(settings.GetBool(kShowFpsTitleKey, false)) + ", render resolution in title " +
+         OnOff(settings.GetBool(kShowResolutionTitleKey, false)));
+
+    const bool ultrawide = settings.GetBool(kTrueUltrawideKey, false);
+    if (run) {
+        line("Render resolution " + std::to_string(run->render_width) + "x" + std::to_string(run->render_height) + " (" +
+             run->render_resolution + "), aspect ratio " + run->aspect_ratio + ", True Ultrawide " +
+             OnOff(run->true_ultrawide_effective) + (ultrawide && !run->true_ultrawide_effective ? " (requested on)" : ""));
+    } else {
+        line("Render resolution " + settings.Get(kRenderResolutionKey, kNativeResolution) + ", aspect ratio " +
+             settings.Get(kAspectRatioKey, kDefaultAspectRatio) + ", True Ultrawide requested " + OnOff(ultrawide));
+    }
+
+    const bool voices_supported = SupportsJapaneseNpcVoices(build);
+    line(std::string("Menu & Subtitles ") + std::string(language.name) + ", Japanese NPC Voices " +
+         (voices_supported ? OnOff(settings.GetBool(kJapaneseNpcVoicesKey, false)) : "unsupported") +
+         ", Arachnophobia Safe Mode " + OnOff(settings.GetBool(kArachnophobiaSafeModeKey, false)));
+
+    const bool story = run ? (run->skip_offers & 1u) != 0 : settings.GetBool(kStorySkipOfferKey, false);
+    const bool tutorial = run ? (run->skip_offers & 2u) != 0 : settings.GetBool(kTutorialSkipOfferKey, false);
+    line(std::string("Story Skip Offer ") + OnOff(story) + ", Tutorial Skip Offer " + OnOff(tutorial) +
+         ", overlay programs " +
+         (kSeparateGameProcessAvailable ? OnOff(settings.GetBool(kAllowOverlayProgramsKey, false)) : "unsupported"));
+    return out;
+}
+
+} // namespace dcp
+
+extern "C" void dcp_log_settings_summary(const char* settings_file, const char* image_dir, const char* app0,
+                                         const DcpRunSettings* run) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     const GameBuild* build = BuildOfImageDir(image_dir);
     const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
-    if (!SameLanguages(languages, TextLanguagesOf(build))) {
-        std::printf("Gameplay: Menu & Subtitles languages in %s: %s\n", build->regional_archive,
-                    LanguageNames(languages).c_str());
-    }
-    const std::string saved = settings.Get(kTextLanguageKey);
-    const TextLanguage& language = ResolveTextLanguage(languages, saved);
-    if (const std::string note = UnavailableLanguageNote(saved, language); !note.empty()) {
-        std::printf("Gameplay: %s\n", note.c_str());
-    }
-    std::printf("Gameplay: Menu & Subtitles %.*s\n", static_cast<int>(language.name.size()), language.name.data());
-    std::printf("Gameplay: Frame rate %s\n",
-                FrameRateLabel(std::atoi(settings.Get(kFrameRateKey, "60").c_str())).c_str());
-    std::printf("Gameplay: Frame rate in title %s\n", settings.GetBool(kShowFpsTitleKey, false) ? "on" : "off");
-    std::printf("Gameplay: Render resolution in title %s\n",
-                settings.GetBool(kShowResolutionTitleKey, false) ? "on" : "off");
-    std::printf("Gameplay: Frame counter %s\n", settings.GetBool(kShowFrameCounterKey, false) ? "on" : "off");
-    std::printf("Gameplay: Arachnophobia Safe Mode %s\n",
-                settings.GetBool(kArachnophobiaSafeModeKey, false) ? "on" : "off");
-    const bool supported = SupportsJapaneseNpcVoices(build);
-    const bool voices = supported && settings.GetBool(kJapaneseNpcVoicesKey, false);
-    std::printf("Gameplay: Japanese NPC Voices %s\n", supported ? (voices ? "on" : "off") : "unsupported");
-    const bool overlays = kSeparateGameProcessAvailable && settings.GetBool(kAllowOverlayProgramsKey, false);
-    std::printf("Gameplay: Allow overlay programs %s\n",
-                kSeparateGameProcessAvailable ? (overlays ? "on" : "off") : "unsupported");
+    std::fputs(SettingsSummary(settings, build, languages, run).c_str(), stdout);
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir, const char* app0) {

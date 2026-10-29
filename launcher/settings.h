@@ -12,6 +12,8 @@
 #include "game_profile.h"
 #include "trg/settings.h"
 
+struct DcpRunSettings;
+
 namespace dcp {
 
 inline constexpr char kShowLauncherKey[] = "show_launcher";
@@ -128,5 +130,9 @@ bool NormalizeTextLanguage(trg::SettingsStore& settings, std::span<const TextLan
 // The launcher opens when the game files are not ready, or when the setting is On or Shift is held, unless it was
 // skipped once. A game that is not ready always shows it: it is where the files are installed.
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once);
+
+// The "Settings:" lines of the run log (dcp_log_settings_summary).
+std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* build,
+                            std::span<const TextLanguage> languages, const DcpRunSettings* run);
 
 } // namespace dcp

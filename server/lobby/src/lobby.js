@@ -1,6 +1,7 @@
 // The lobby: accounts, friends, presence, rooms and the endpoint exchange (docs/ONLINE.md). Game traffic never passes
 // through it. State lives in SQL tables and in each socket's attachment, so a hibernated Durable Object resumes as if
 // it had never stopped; the same class runs in the local development server (local/server.js).
+import { Metrics, countryCode, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
 
 export const PROTOCOL = 1;
@@ -44,6 +45,8 @@ const BUCKETS = {
   chat: { burst: 5, perSecond: 1 },
 };
 const ROOM_OPS = new Set(['room.create', 'room.join', 'room.leave', 'room.search', 'room.resume']);
+// Operations after which the live counts can have grown.
+const GROWING_OPS = new Set(['hello', 'room.create', 'room.join', 'room.resume']);
 
 export const FLAG_CLOSED = 0x40000000;
 export const FLAG_FULL = 0x20000000;
@@ -203,6 +206,8 @@ export class Lobby {
       this.setMeta('schema', done + 1);
     }
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
+    this.metrics = new Metrics(host.sql, () => host.now());
+    this.alarmAt = null;
     this.reconcileSeats();
   }
 
@@ -256,14 +261,15 @@ export class Lobby {
   }
 
   // ---- connection lifecycle ----
-  // Refuses a socket over the per-address limit; else returns its first attachment.
-  admit(ip) {
+  // Refuses a socket over the per-address limit; else returns its first attachment. `country` is the edge's, never the
+  // client's.
+  admit(ip, country = '') {
     const group = ipGroup(ip);
     if (!(this.local && isLocalAddress(ip))) {
       const open = this.host.sockets().filter((c) => ipGroup(c.attachment()?.ip) === group).length;
       if (open >= LIMITS.socketsPerIp) return null;
     }
-    return { cid: this.randomHex(8), ip, opened: this.host.now() };
+    return { cid: this.randomHex(8), ip, opened: this.host.now(), country: countryCode(country) };
   }
 
   message(conn, text) {
@@ -299,6 +305,7 @@ export class Lobby {
       conn.setAttachment(att);
       conn.send(JSON.stringify({ re: seq, code: 'ok', ...body }));
       this.runDeferred();
+      if (GROWING_OPS.has(msg.op)) this.observe();
     } catch (error) {
       this.deferred = null;
       conn.setAttachment(att);
@@ -349,18 +356,68 @@ export class Lobby {
 
   alarm() {
     this.index = null;
+    this.alarmAt = null;
     const now = this.host.now();
     for (const m of this.host.sql.all('SELECT room, member FROM members WHERE grace_until IS NOT NULL AND grace_until <= ?', now)) {
       this.removeMember(m.room, m.member, 'disconnect');
     }
     this.runDeferred();
     this.index = null;
+    this.observe();
+  }
+
+  // The next seat grace to end, and while anyone is connected the next usage sample.
+  scheduleAlarm() {
+    const grace = this.host.sql.get('SELECT MIN(grace_until) AS t FROM members WHERE grace_until IS NOT NULL')?.t ?? null;
+    const sample = this.sockets().length ? sampleBucket(this.host.now()) + SAMPLE_MS : null;
+    const at = grace && sample ? Math.min(grace, sample) : grace ?? sample;
+    if (at && at !== this.alarmAt) {
+      this.alarmAt = at;
+      this.host.setAlarm(at);
+    }
+  }
+
+  // ---- metrics ----
+  // What is online now, from the open sockets and the room tables: a player with several connections counts once.
+  liveMetrics() {
+    this.index = null;
+    const players = new Map();
+    for (const { att } of this.sockets()) if (att.presence && !players.has(att.account)) players.set(att.account, att);
+    const tally = (pick) => {
+      const counts = new Map();
+      for (const att of players.values()) counts.set(pick(att), (counts.get(pick(att)) ?? 0) + 1);
+      return counts;
+    };
+    return {
+      online: players.size,
+      in_rooms: this.host.sql.get('SELECT COUNT(DISTINCT account) AS n FROM members WHERE conn IS NOT NULL').n,
+      rooms: this.host.sql.get('SELECT COUNT(*) AS n FROM rooms').n,
+      platform: tally((att) => platformCategory(att.platform)),
+      version: tally((att) => versionCategory(att.version)),
+      country: tally((att) => countryCode(att.country)),
+    };
+  }
+
+  // Metrics never fail a lobby operation.
+  track(fn) {
+    try {
+      fn();
+    } catch (error) {
+      this.host.log(`lobby: metrics error: ${error?.stack ?? error}`);
+    }
+  }
+
+  observe() {
+    this.track(() => this.metrics.observe(this.liveMetrics()));
     this.scheduleAlarm();
   }
 
-  scheduleAlarm() {
-    const next = this.host.sql.get('SELECT MIN(grace_until) AS t FROM members WHERE grace_until IS NOT NULL');
-    if (next?.t) this.host.setAlarm(next.t);
+  metricsSummary() {
+    return this.metrics.summary(this.liveMetrics());
+  }
+
+  metricsHistory(days) {
+    return this.metrics.history(days);
   }
 
   // ---- helpers ----
@@ -611,7 +668,11 @@ export class Lobby {
 const HANDLERS = {
   hello(att, msg) {
     if (att.hello) fail('bad_request', 'already greeted');
-    if (msg.proto !== PROTOCOL) fail('proto');
+    if (msg.proto !== PROTOCOL) {
+      if (!att.protoRejected) this.track(() => this.metrics.reject('lobby_protocol'));
+      att.protoRejected = true;
+      fail('proto');
+    }
     if (typeof msg.game !== 'string' || !/^[A-Za-z0-9._-]{1,32}$/.test(msg.game)) fail('bad_request', 'game');
     const account = decimalId(msg.account);
     if (typeof msg.secret !== 'string' || !/^[0-9a-f]{64}$/.test(msg.secret)) fail('bad_request', 'secret');
@@ -642,6 +703,7 @@ const HANDLERS = {
       version, platform });
     this.index = null;
     if (presence && !wasOnline) this.notifyFriends(account, { ev: 'friend.online', account, name });
+    if (presence) this.track(() => this.metrics.session(att));
     return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now };
   },
 
@@ -692,6 +754,7 @@ const HANDLERS = {
       (flags & ~FLAG_FULL) >>> 0, MEMBER_IDS[0], code, this.randomHex(16), JSON.stringify(ints), JSON.stringify(binInt),
       JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0);
     this.insertMember(att, id, MEMBER_IDS[0], memberBin);
+    this.track(() => this.metrics.count('rooms_created'));
     return { room: this.fullRoom(this.roomRow(id)), me: MEMBER_IDS[0] };
   },
 
@@ -746,6 +809,7 @@ const HANDLERS = {
     }
     if (!room || room.game !== att.game) fail('not_found');
     if (!compatible(att, room)) {
+      this.track(() => this.metrics.reject('online_protocol'));
       const owner = this.memberRow(room.id, room.owner);
       fail('incompatible', '', { online_protocol: room.online_protocol, ...clientOf(owner) });
     }
@@ -760,6 +824,7 @@ const HANDLERS = {
     this.toRoom(room.id, { ev: 'room.member_joined', room: String(room.id), member: joined }, memberId);
     const roomId = room.id;
     this.later(() => this.exchangeEndpoints(roomId, memberId));
+    this.track(() => this.metrics.count('room_joins'));
     return { room: this.fullRoom(this.roomRow(room.id)), me: memberId };
   },
 

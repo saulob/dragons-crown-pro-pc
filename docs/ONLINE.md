@@ -30,6 +30,26 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
 
 Nothing else needs setting up. With Online play Off the game runs offline as before, and F3 does nothing.
 
+### Privacy and usage statistics
+
+The online service stores anonymous aggregate usage statistics: player counts, sessions, rooms created and joined,
+the Dragon's Crown Pro PC version, the platform (Windows, Linux, Steam Deck) and the country. These statistics do not
+store player names, Online names, Friend Codes, account IDs, IP addresses, room codes or friend lists, and there is no
+per-player or per-session record.
+
+- The country is worked out by Cloudflare from your connection and kept only as a count per day (for example "Brazil:
+  12 sessions"). The service never keeps your city, region or address for these statistics, and the game never sends a
+  country.
+- A session is one connection of the launcher or the game to the online service. A reconnect counts again, and the
+  launcher and the game count separately, so sessions are not a number of players. There is no unique-player count.
+- Gameplay traffic still goes directly between the players' PCs (P2P). Gameplay, saves, characters, progress, Ping and
+  FPS are not collected, and the game sends nothing extra for these statistics: they come from the sign-in and room
+  requests it already makes.
+- Only the maintainer can see them, on a private, password-protected page of the online service.
+
+The online service itself still needs your account, Online name, friends and, while you are in a room, your address and
+port to connect you to other players; that is described below and is not part of these statistics.
+
 ### Ping
 
 The in-game Ping is the round trip to the other players over the direct P2P link: the smoothed round trip the peer

@@ -2195,6 +2195,37 @@ void TestTextLanguage(const fs::path& base) {
     CHECK(WrittenValue(ReadAll(file), "text_language", "english"));
 }
 
+void TestSettingsSummary(const fs::path& base) {
+    const fs::path file = base / "summary" / "dcp.ini";
+    fs::create_directories(file.parent_path());
+    std::ofstream(file) << "online_enabled = 1\nonline_name = SecretName\nshow_ping = 1\ndisplay_mode = borderless\n"
+                           "frame_rate = 120\nshow_fps = 1\ntrue_ultrawide = 1\ndcp_japanese_npc_voices = 1\n"
+                           "arachnophobia_safe_mode = 1\nstory_skip_offer = 1\ntutorial_skip_offer = 1\n";
+    const LauncherSettings settings(file);
+    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u};
+    const std::string text = SettingsSummary(settings, &kUs, TextLanguagesOf(&kUs), &run);
+    const auto has = [&](const std::string& part) { return text.find(part) != std::string::npos; };
+    CHECK(has("Settings: Dragon's Crown Pro PC v" + net::port_version() + ", " + net::host_platform() + ", online protocol " +
+              std::to_string(net::kOnlineProtocolVersion) + ", game build " + kUs.label + "\n"));
+    CHECK(has("Settings: Online Play on, Ping display on, cheats locked for Online Play\n"));
+    CHECK(has("Settings: Window Borderless Fullscreen, frame rate 120 FPS, frame counter on,"));
+    CHECK(has("Settings: Render resolution 2560x1080 (native), aspect ratio 21:9 Ultrawide, True Ultrawide off (requested on)\n"));
+    CHECK(has("Settings: Menu & Subtitles English, Japanese NPC Voices on, Arachnophobia Safe Mode on\n"));
+    CHECK(has("Settings: Story Skip Offer on, Tutorial Skip Offer off,"));
+    for (const char* secret : {"SecretName", "friend", "Friend", "account", "secret", "token", "DCP_DASHBOARD_TOKEN", "lobby"}) {
+        CHECK(!has(secret));
+    }
+
+    std::ofstream(file) << "display_mode = windowed\n";
+    const LauncherSettings plain(file);
+    const std::string offline = SettingsSummary(plain, nullptr, TextLanguagesOf(nullptr), nullptr);
+    CHECK(offline.find("game build not a supported build\n") != std::string::npos);
+    CHECK(offline.find("Settings: Window Windowed, frame rate 60 FPS (Original), frame counter off,") != std::string::npos);
+    CHECK(offline.find("True Ultrawide requested off\n") != std::string::npos);
+    CHECK(offline.find("Japanese NPC Voices unsupported") != std::string::npos);
+    if (!std::getenv("DCP_ONLINE")) CHECK(offline.find("Settings: Online Play off\n") != std::string::npos);
+}
+
 void TestRenderResolution(const fs::path& base) {
     const fs::path source(DCP_SOURCE_DIR);
     const fs::path file = base / "render" / "dcp.ini";
@@ -4771,9 +4802,9 @@ int main(int argc, char** argv) {
                     check.detail.c_str(), check.eboot_sha256.c_str());
         return check.state == GameFileState::kValid ? 0 : 1;
     }
-    // dcp-launcher-tests --log-gameplay <dcp.ini> <image dir> [<app0>]: the startup Gameplay summary, read-only.
-    if ((argc == 4 || argc == 5) && std::string(argv[1]) == "--log-gameplay") {
-        dcp_log_gameplay_settings(argv[2], argv[3], argc == 5 ? argv[4] : nullptr);
+    // dcp-launcher-tests --log-settings <dcp.ini> <image dir> [<app0>]: the startup Settings summary, read-only.
+    if ((argc == 4 || argc == 5) && std::string(argv[1]) == "--log-settings") {
+        dcp_log_settings_summary(argv[2], argv[3], argc == 5 ? argv[4] : nullptr, nullptr);
         return 0;
     }
     // dcp-launcher-tests --install <.pkg or game folder> <prepared root> <image root>: the launcher's installer without its
@@ -4820,6 +4851,7 @@ int main(int argc, char** argv) {
     TestLogRetention(base);
     TestWindowTitle();
     TestRenderResolution(base);
+    TestSettingsSummary(base);
     TestResolutionProbe();
     TestTextLanguage(base);
     TestCheatSettings(base);

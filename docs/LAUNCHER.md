@@ -324,7 +324,7 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   set whose `SystemMsg` sheet is Russian text is offered as Russian (`russian`), with the system language of that set.
   When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
   language the installed game does not have is replaced by its first one, and the log says so
-  (`Gameplay: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
+  (`Settings: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 USA only; the option is hidden for
   the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
@@ -339,7 +339,7 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   frames repeat the last logic step, so motion is as smooth as at 60 FPS; there is no interpolation. Unlimited repeats
   as often as the display allows, up to 480 a second. With VSync on, presentations never go past the display's refresh
   rate, and a display at 60 Hz or less has nothing to repeat. Frame rate in title and the frame counter count every
-  presentation. The log has `Gameplay: Frame rate` and `VideoOut: vblank ... frame rate ... repeat cadence ...
+  presentation. The log has the frame rate in its `Settings:` lines and `VideoOut: vblank ... frame rate ... repeat cadence ...
   VSync ...`.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
@@ -461,6 +461,14 @@ lines and `Startup: game-only child process`; a session is still one file. On Wi
 outside the Windows folder that the game process had at its start (separate process only) and the ones loaded before its
 first frame (`Modules: ...`), and the Vulkan layers that are installed. The game window logs
 `Window: display ... VSync ... frame rate in title ...`.
+
+Before the game starts, a short `Settings:` block sums up the run for support: port version, platform, online protocol
+and game build; Online Play (with the Ping display and the cheat lock); window mode, frame rate and frame counter; the
+render resolution, aspect ratio and effective True Ultrawide; the Menu & Subtitles language, Japanese NPC Voices and
+Arachnophobia Safe Mode; and the Story and Tutorial Skip Offers. The values are the ones in effect for this run (after
+build gating and `DCP_ONLINE`). It never shows the Online name, Friend Code or account; the `Online: on as ...` line
+keeps those details. `dcp-launcher-tests --log-settings <dcp.ini> <image dir> [<app0>]` prints the same lines from a
+settings file.
 
 **Detailed logging** (About, Diagnostics) is on by default and keeps that log after every session. Turned off, a run
 still writes its log while it runs, but a normal exit discards it, so normal sessions do not accumulate files. A crash
