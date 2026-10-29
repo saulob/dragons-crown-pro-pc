@@ -39,6 +39,7 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
+#include "online_settings.h"
 #include "options.h"
 #include "paths.h"
 #include "placement.h"
@@ -1172,6 +1173,82 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
 }
 
+// Online play: managed keys with their defaults, the reader the game uses, validation, kept by Reset, and only the
+// builds whose network imports are verified (docs/ONLINE.md) offer it.
+void TestOnlineSettings(const fs::path& base) {
+    const fs::path file = base / "online" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto launcher_default = [](std::string_view key) {
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            if (setting.key == key) {
+                return std::string(setting.default_value);
+            }
+        }
+        return std::string("<missing>");
+    };
+    CHECK(launcher_default(kOnlineEnabledKey) == "0" && launcher_default(kOnlineUpnpKey) == "1");
+    CHECK(launcher_default(kOnlineUdpPortKey) == "0" && launcher_default(kOnlineLobbyKey).empty());
+    CHECK(launcher_default(kOnlineStunKey) == net::kDefaultStunServers);
+    const net::OnlineConfig missing = ReadOnlineConfig(file);
+    CHECK(!missing.enabled && missing.upnp && missing.udp_port == 0 && missing.lobby.empty());
+    CHECK(!ReadOnlineConfig({}).enabled);
+
+    WriteAll(file, "online_enabled = 1\nonline_lobby = wss://lobby.example.org/\nonline_name = Saulo\nonline_upnp = 0\n"
+                   "online_udp_port = 40001\n");
+    const net::OnlineConfig saved = ReadOnlineConfig(file);
+    CHECK(saved.enabled && saved.lobby == "wss://lobby.example.org/" && saved.name == "Saulo" && !saved.upnp &&
+          saved.udp_port == 40001);
+    WriteAll(file, "online_lobby = http://wrong/\nonline_udp_port = 70000\n");
+    const net::OnlineConfig invalid = ReadOnlineConfig(file);
+    CHECK(invalid.lobby.empty() && invalid.udp_port == 0);
+    CHECK(IsValidSetting(kOnlineLobbyKey, "ws://127.0.0.1:8790/") && !IsValidSetting(kOnlineLobbyKey, "lobby"));
+    CHECK(IsValidSetting(kOnlineUdpPortKey, "3658") && !IsValidSetting(kOnlineUdpPortKey, "-1"));
+
+    WriteAll(file, "online_enabled = 1\nonline_name = Saulo\nvsync = 0\n");
+    {
+        LauncherSettings settings(file);
+        settings.ResetToDefaults();
+        CHECK(settings.Save());
+    }
+    CHECK(ReadOnlineConfig(file).enabled && ReadOnlineConfig(file).name == "Saulo");
+    CHECK(LauncherSettings(file).GetBool(kVSyncKey, false));
+
+    CHECK(kUs.online && kJp102.online && kJp103.online);
+    CHECK(!kUs101.online && !kJp100.online && !kCk100.online && !kCk.online);
+}
+
+void TestSkipOfferSettings(const fs::path& base) {
+    const fs::path file = base / "skip_offers" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += (setting.key == kStorySkipOfferKey || setting.key == kTutorialSkipOfferKey) && setting.default_value == "0";
+    }
+    CHECK(managed == 2);
+    CHECK(dcp_skip_offers(nullptr) == 0 && dcp_skip_offers(file.string().c_str()) == 0);
+    WriteAll(file, "vsync = 1\n");
+    CHECK(dcp_skip_offers(file.string().c_str()) == 0);
+    WriteAll(file, "story_skip_offer = 0\ntutorial_skip_offer = 1\n");
+    CHECK(dcp_skip_offers(file.string().c_str()) == 2);
+    WriteAll(file, "story_skip_offer = 1\ntutorial_skip_offer = 0\n");
+    CHECK(dcp_skip_offers(file.string().c_str()) == 1);
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kStorySkipOfferKey, true);
+        settings.SetBool(kTutorialSkipOfferKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_skip_offers(file.string().c_str()) == 3);
+    // Test instances turn both on only when the caller has not set them.
+    const std::string instance = ReadAll(fs::path(DCP_SOURCE_DIR) / "tools" / "online-instance.ps1");
+    CHECK(instance.find("if (-not $env:DCP_STORY_SKIP) { $env:DCP_STORY_SKIP = '1' }") != std::string::npos);
+    CHECK(instance.find("if (-not $env:DCP_TUTORIAL_SKIP) { $env:DCP_TUTORIAL_SKIP = '1' }") != std::string::npos);
+    for (const char* writes : {"Set-Content", "Add-Content", "Out-File"}) CHECK(instance.find(writes) == std::string::npos);
+    CHECK(kUs.skip_offers && kJp102.skip_offers && kJp103.skip_offers);
+    CHECK(!kUs101.skip_offers && !kJp100.skip_offers && !kCk100.skip_offers && !kCk.skip_offers);
+    CHECK(SkipOffersAvailable(nullptr) && SkipOffersAvailable(&kUs) && !SkipOffersAvailable(&kJp100));
+}
+
 void TestOverlayProgramsSetting(const fs::path& base) {
     const fs::path file = base / "overlays" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -2228,14 +2305,15 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 8);
+    CHECK(count == 9);
     CHECK(std::string(PageName(kPageOrder[0])) == "Play");
     CHECK(std::string(PageName(kPageOrder[2])) == "Graphics");
     CHECK(std::string(PageName(kPageOrder[3])) == "Gameplay");
     CHECK(std::string(PageName(kPageOrder[4])) == "Cheats"); // directly below Gameplay
     CHECK(std::string(PageName(kPageOrder[5])) == "Controls");
-    CHECK(std::string(PageName(kPageOrder[6])) == "Trophies"); // after Controls, before About
-    CHECK(std::string(PageName(kPageOrder[7])) == "About");
+    CHECK(std::string(PageName(kPageOrder[6])) == "Online");
+    CHECK(std::string(PageName(kPageOrder[7])) == "Trophies"); // before About
+    CHECK(std::string(PageName(kPageOrder[8])) == "About");
 }
 
 // ---- Keyboard bindings ----
@@ -3864,6 +3942,8 @@ int main(int argc, char** argv) {
     TestTextLanguage(base);
     TestCheatSettings(base);
     TestJapaneseNpcVoiceSetting(base);
+    TestOnlineSettings(base);
+    TestSkipOfferSettings(base);
     TestOverlayProgramsSetting(base);
     TestGameProcess();
     TestAspectRatio(base);

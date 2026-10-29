@@ -47,6 +47,9 @@ inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 // Routes NPC voice cues to the Japanese banks already present in the USA installation.
 inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
+// The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
+inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
+inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";
 // Windows, on: Play starts the game as a separate process that overlay programs can attach to (game_process.h).
 inline constexpr char kAllowOverlayProgramsKey[] = "allow_overlay_programs";
 inline constexpr char kLauncherXKey[] = "launcher_x";

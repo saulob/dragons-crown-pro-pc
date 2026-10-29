@@ -83,6 +83,9 @@ int dcp_japanese_npc_voices(const char *settings_file);
 /* 1 when the settings file asks for True Ultrawide (true_ultrawide; 0 by default, and for a missing or unknown value). */
 int dcp_true_ultrawide(const char *settings_file);
 
+/* The Skip Offers the settings file turns on (skip_offers.h bits; none by default). */
+unsigned dcp_skip_offers(const char *settings_file);
+
 /* 1 when the settings file keeps the logs of normal sessions (detailed_logging; 1 by default). */
 int dcp_detailed_logging(const char *settings_file);
 
@@ -113,6 +116,10 @@ typedef struct {
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
+    const char *title_id;
+    const char *version;         /* the build's profile version, which names it for the online lobby */
+    int online;                  /* the online imports are verified for this build */
+    int skip_offers;             /* the Story and Tutorial Skip Offer sites are verified for this build */
 } DcpGameBuild;
 
 /* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */

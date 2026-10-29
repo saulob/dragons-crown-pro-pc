@@ -10,6 +10,8 @@
 #include "runtime.h"
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
+#include "runtime_online.h"
+#include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "ultrawide_hooks.h"
 #include "voice_hooks.h"
@@ -558,6 +560,9 @@ int main(int argc, char **argv) {
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
     printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");
+    char online_game[64]="";
+    if (known_build) snprintf(online_game,sizeof(online_game),"%s-%s",game_build.title_id,game_build.version);
+    runtime_online_configure(settings_file,user_dir,online_game,known_build && game_build.online);
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
@@ -817,6 +822,8 @@ int main(int argc, char **argv) {
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
     if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
         voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
+    skip_offers_install(image,size,known_build && game_build.skip_offers ? online_game : NULL,
+                        skip_offers_wanted(dcp_skip_offers(settings_file)));
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);

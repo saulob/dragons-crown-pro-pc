@@ -433,5 +433,9 @@ extern "C" int dcp_game_build(const char* image_dir, DcpGameBuild* out) {
     out->resolution_sites = build->resolution_sites.data();
     out->resolution_site_count = build->resolution_sites.size();
     out->resolution_by_signature = build->resolution_by_signature;
+    out->title_id = build->title_id;
+    out->version = build->version;
+    out->online = build->online;
+    out->skip_offers = build->skip_offers;
     return 1;
 }

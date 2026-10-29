@@ -39,6 +39,7 @@
 #include "package_browser.h"
 #include "placement.h"
 #include "play_gate.h"
+#include "online_page.h"
 #include "problem_dialog.h"
 #include "prompts_patch.h"
 #include "settings.h"
@@ -139,6 +140,8 @@ constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
+constexpr char kStorySkipOfferHelp[] = "Offers the game's built-in story skip when creating a new character";
+constexpr char kTutorialSkipOfferHelp[] = "Lets new characters choose whether to begin the tutorial";
 constexpr char kAllowOverlayProgramsHelp[] =
     "For programs that draw over games (recording, chat, store and performance overlays). On, PLAY starts the game as a "
     "separate program from this launcher, so they can attach to it cleanly. Off starts the game the usual way.";
@@ -319,6 +322,7 @@ public:
         header_art_ = LoadHeaderArt(host_, header_art_aspect_);
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
+        online_page_ = std::make_unique<OnlinePage>(UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         updater_ = std::make_unique<trg::update::UpdateController>(MakeUpdateConfig(InstallDir()));
         updater_->StartCheck();
@@ -369,6 +373,7 @@ public:
         }
         launcher_.reset();
         trophy_page_.reset();
+        online_page_.reset();
         host_.Close();
         Log(outcome == Outcome::kPlay ? "closed, starting the game" : "closed");
         return true;
@@ -658,6 +663,9 @@ private:
             return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr};
         case PageId::kControls:
             return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr};
+        case PageId::kOnline:
+            return {name, "Play with others over the Internet: friends and the connection test.",
+                    [this](trg::Ui& ui) { PageOnline(ui); }, nullptr};
         case PageId::kTrophies:
             return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr};
         case PageId::kAbout:
@@ -930,6 +938,10 @@ private:
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
         ui.Row("Arachnophobia Safe Mode", kArachnophobiaHelp);
         ArachnophobiaToggle(ui);
+        if (SkipOffersAvailable(build_)) {
+            ui.Toggle("Story Skip Offer", kStorySkipOfferHelp, kStorySkipOfferKey, false, "Off", "On");
+            ui.Toggle("Tutorial Skip Offer", kTutorialSkipOfferHelp, kTutorialSkipOfferKey, false, "Off", "On");
+        }
         if (kSeparateGameProcessAvailable) {
             ui.Toggle("Allow overlay programs", kAllowOverlayProgramsHelp, kAllowOverlayProgramsKey, false, "Off", "On");
         }
@@ -1135,6 +1147,11 @@ private:
 
     std::filesystem::path UserDir() const { return PathFromUtf8(config_.user_dir ? config_.user_dir : "user"); }
 
+    void PageOnline(trg::Ui& ui) {
+        online_page_->SetBuild(files_ == GameFileState::kValid ? build_ : nullptr);
+        online_page_->Draw(ui);
+    }
+
     void PageTrophies(trg::Ui& ui) {
         trophy_page_->SetGame(files_ == GameFileState::kValid ? paths_.app0 : std::filesystem::path());
         trophy_page_->Draw(ui);
@@ -1225,6 +1242,7 @@ private:
     std::unique_ptr<trg::Launcher> launcher_;
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
+    std::unique_ptr<OnlinePage> online_page_;
     PlayGate play_;
     ProblemDialog problem_;
     PlacementTracker placement_;

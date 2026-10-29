@@ -15,6 +15,7 @@
 #include "dcp_resolution.h"
 #include "game_files.h"
 #include "game_process.h"
+#include "online_settings.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -47,6 +48,14 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kArachnophobiaSafeModeKey, "0"},
     {kJapaneseNpcVoicesKey, "0"},
     {kAllowOverlayProgramsKey, "0"},
+    {kStorySkipOfferKey, "0"},
+    {kTutorialSkipOfferKey, "0"},
+    {kOnlineEnabledKey, "0"},
+    {kOnlineLobbyKey, net::kDefaultLobbyUrl},
+    {kOnlineNameKey, ""},
+    {kOnlineUpnpKey, "1"},
+    {kOnlineUdpPortKey, "0"},
+    {kOnlineStunKey, net::kDefaultStunServers},
     {cheats::kInfiniteHealthKey, "0"},
     {cheats::kInfiniteAllyHealthKey, "0"},
     {cheats::kInfiniteManaKey, "0"},
@@ -139,6 +148,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
         return std::any_of(std::begin(dcp_aspect_ratios), std::end(dcp_aspect_ratios),
                            [&](const DcpAspectRatio& aspect) { return value == aspect.key; });
     }
+    if (IsOnlineSetting(key)) {
+        return IsValidOnlineSetting(key, value);
+    }
     return true;
 }
 
@@ -208,7 +220,7 @@ bool LauncherSettings::SaveNow(const Values& values) {
 
 void LauncherSettings::ResetToDefaults() {
     for (const ManagedSetting& setting : ManagedSettings()) {
-        if (!IsLauncherPlacementSetting(setting.key)) {
+        if (!IsLauncherPlacementSetting(setting.key) && !IsOnlineSetting(setting.key)) {
             pending_[std::string(setting.key)] = std::string(setting.default_value);
         }
     }
@@ -307,6 +319,12 @@ extern "C" int dcp_true_ultrawide(const char* settings_file) {
     }
     const LauncherSettings settings(PathFromUtf8(settings_file));
     return settings.GetBool(kTrueUltrawideKey, false) ? 1 : 0;
+}
+
+extern "C" unsigned dcp_skip_offers(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return (settings.GetBool(kStorySkipOfferKey, false) ? 1u : 0u) | (settings.GetBool(kTutorialSkipOfferKey, false) ? 2u : 0u);
 }
 
 extern "C" int dcp_detailed_logging(const char* settings_file) {

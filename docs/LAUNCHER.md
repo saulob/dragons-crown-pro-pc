@@ -189,6 +189,7 @@ use the same defaults).
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
+| `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start (USA 1.00, Japan 1.02 and 1.03) |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
@@ -339,6 +340,12 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   `launcher/game_patches.h`, `launcher/prompts/arachnophobia-spider.dcpx`) applied when toggled, in the background, and
   reapplied after a reinstall. An archive has one undo record, so the prompts and this patch are applied together:
   changing either reverts what the other left and writes both again.
+- **Story Skip Offer** and **Tutorial Skip Offer**: Off by default (`story_skip_offer`, `tutorial_skip_offer`;
+  `DCP_STORY_SKIP` / `DCP_TUTORIAL_SKIP` override them for a run). The game's own questions, asked for every new
+  character: whether to start from the second half of the story (normally offered only once a class on the file has
+  finished the game) and "Begin the tutorial?" (normally skipped for a file's first character, which starts the tutorial).
+  Existing characters are never asked. On, one branch each is patched in memory after its bytes are checked
+  (`src/skip_offers.c`); Off leaves the code as it is. Hidden for builds without verified sites.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
   recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
   separate process from the launcher (see Architecture), so these tools attach to a clean game process. Off keeps the

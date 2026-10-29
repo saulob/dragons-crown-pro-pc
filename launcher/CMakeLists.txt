@@ -33,13 +33,13 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
-    game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp trophy_content.cpp
+    game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp online_settings.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_keys PRIVATE ZLIB::ZLIB)
+target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_keys dcp_net PRIVATE ZLIB::ZLIB)
 # Hashes and ciphers: CNG on Windows, OpenSSL's libcrypto elsewhere.
 if (WIN32)
     target_sources(dcp_launcher_core PRIVATE crypto_win.cpp)
@@ -70,7 +70,7 @@ add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
     DEPENDS ${DCP_SPIDER_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
     COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
 
-add_library(dcp_launcher STATIC host.cpp launcher.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
+add_library(dcp_launcher STATIC host.cpp launcher.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
     updater/github_release.cpp updater/json.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
     updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
     updater/update_ui.cpp updater/update_zip.cpp updater/version.cpp
