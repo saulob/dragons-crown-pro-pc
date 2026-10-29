@@ -162,8 +162,8 @@ does. Both write byte-identical files from the game's package.
 
 ## Settings
 
-File: `user\dcp.ini` in the `--user` folder, the file the video core reads at start and its in-game menu writes. Lines
-the launcher or the menu do not manage (comments, the other side's keys) are kept when either saves. Booleans are written
+File: `user\dcp.ini` in the `--user` folder, the file the video core reads at start; the game writes only `display_mode` (F11). Lines
+the launcher or F11 do not manage (comments, the other side's keys) are kept when either saves. Booleans are written
 `1`/`0` and read as `1`/`on`/`yes`/`true` or `0`/`off`/`no`/`false`. A key that is missing, or holds a value the game does
 not accept, has the default below, in the launcher and in the game alike (`tests/launcher_tests.cpp` checks that both
 use the same defaults).
@@ -198,8 +198,7 @@ use the same defaults).
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
 | `cheat_movement_speed_2x` (old) | 1, 0 | 0 | read only when `cheat_movement_speed` is missing: 1 means 2x |
 | `cheat_experience_multiplier` | 1 (Off), 2, 5, 10, 100 | 1 | at game start (F10 changes the session only) |
-| `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
-| `menu_tab` | 0 (Image), 1 (Overlay) | 0 | the in-game menu's last tab |
+| `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | at game start (no launcher control) |
 | `launcher_x`, `_y`, `_width`, `_height`, `_maximized`, `_fullscreen` | | | launcher window only |
 
 The game window is created after the launcher closes, in the same process, so every setting applies without a restart.
@@ -211,8 +210,7 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 
 ## Display
 
-- **Display mode**: Windowed or Borderless Fullscreen (SDL desktop fullscreen, no display mode change). The in-game menu
-  offers the same two.
+- **Display mode**: Windowed or Borderless Fullscreen (SDL desktop fullscreen, no display mode change).
 - **Window size**: 1280 × 720, 1600 × 900, 1920 × 1080 (the game's own size), 2560 × 1440, 3840 × 2160, in pixels, listed
   when they fit the selected monitor's usable area with the title bar; the current value is shown. A size that
   does not fit when the game opens is reduced keeping its shape, so that the whole window, title bar included, takes at
@@ -257,12 +255,12 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 - **F11** in the game switches Windowed and Borderless Fullscreen at once and saves the Display mode. In the launcher it
   switches the launcher's own fullscreen, saved in `launcher_fullscreen`, and never changes the Display mode.
 - **Mouse cursor**: mouse movement, clicks and the wheel show the cursor in Windowed and Borderless Fullscreen; keyboard or
-  controller input hides it. It stays visible while the in-game menu or a dialog is open and when the game window loses focus.
+  controller input hides it. It stays visible while the cheat menu or a dialog is open and when the game window loses focus.
 
 Scaling and sharpening, below those on the Display page, are what the presenter already supports: **Upscaling** (AMD
 FSR 1, off by default) enlarges the game's picture (the render resolution) in a bigger window; **Sharpening** (AMD
 RCAS, on) with a
-**strength** (75). They run on the finished frame at present time, the same live settings as the in-game menu.
+**strength** (75). They run on the finished frame at present time.
 
 ## Graphics
 
@@ -389,7 +387,7 @@ Xbox controllers work without setup; the keyboard is always on. The page lists t
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 
-The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys; the in-game menu stays on Insert. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
 
 Each binding is one line in `dcp.ini`: `key_cross = space`, `key_left_stick_up = w`, `hotkey_cheats_menu = f10`, `hotkey_window_mode = f11` (the full list is `src/dcp_keys.c`). The value is a key name, case-insensitive: the shadPS4 names for common keys (`space`, `enter`, `lshift`, `rctrl`, `pgup`, `kp5`, ...) or SDL's own key names (`F10`, `Left Shift`, `Keypad 5`); the launcher writes lowercase. A missing or invalid line is the default, so a config from an older build keeps the old layout. The same key may be bound to several controls and all of them follow it; a port hotkey is not exclusive of a game control either. The bindings are read when the game starts (`dcp_keys.c`, shared by the launcher, `runtime_pad.c` and the video core); the controller mapping and `DCP_PAD_MAP` are unchanged, and `DCP_KEY_MAP` still overrides the buttons it names.
 

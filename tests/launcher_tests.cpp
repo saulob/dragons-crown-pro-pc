@@ -323,9 +323,9 @@ void TestSettings(const fs::path& base) {
         CHECK(settings.Save()); // nothing pending: no file is needed
     }
 
-    // A file the in-game menu wrote: "key=value" lines, keys the launcher does not manage, a comment.
+    // A file another build wrote: "key=value" lines, keys the launcher does not manage, a comment.
     WriteAll(file,
-             "# video core settings (in-game menu: Insert / R3+L2)\n"
+             "# video core settings\n"
              "upscaler=off\n"
              "show_fps=0\n"
              "vsync=1\n"
@@ -786,7 +786,7 @@ void TestPngDecoder() {
 }
 
 // The video core reads dcp.ini as the launcher does, falls back to the defaults on values it does not accept and
-// writes only the keys the in-game menu changes.
+// writes only the display mode (F11).
 void TestVideoCoreSettings(const fs::path& base) {
     const fs::path file = base / "video-core" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -816,7 +816,6 @@ void TestVideoCoreSettings(const fs::path& base) {
              "show_resolution_title = on\n"
              "overlay_scale = 150\n"
              "overlay_corner = 3\n"
-             "menu_tab = 1\n"
              "upscaler = fsr3\n"
              "async_shaders = 1\n"
              "fps_limit = 30\n"
@@ -829,7 +828,7 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(v.graphics_card == "Intel(R) UHD Graphics 730"); // a trailing " # comment" is not part of the value
         CHECK(v.monitor == 2 && v.requested_width == 2560 && v.requested_height == 1440);
         CHECK(v.show_fps && v.show_fps_title && v.show_resolution_title);
-        CHECK(v.overlay_scale == 150 && v.overlay_corner == 3 && v.menu_tab == 1);
+        CHECK(v.overlay_scale == 150 && v.overlay_corner == 3);
     }
 
     // Values the game does not accept fall back to the defaults; the last of duplicate keys wins (as in the launcher).
@@ -844,7 +843,6 @@ void TestVideoCoreSettings(const fs::path& base) {
              "window_width = -5\n"
              "overlay_scale = 9000\n"
              "overlay_corner = 7\n"
-             "menu_tab = 2\n"
              "smaa = 1\n"
              "smaa = 0\n"
              "not a setting line\n"
@@ -854,7 +852,7 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(DcpSettings::Read(file.string(), v));
         CHECK(v.vsync && v.rcas && v.rcas_strength == 75 && v.anisotropy == 0);
         CHECK(v.display_mode == DcpGraphics::Windowed && v.graphics_card.empty() && v.monitor == 1);
-        CHECK(v.requested_width == 0 && v.overlay_scale == 300 && v.overlay_corner == 1 && v.menu_tab == 0);
+        CHECK(v.requested_width == 0 && v.overlay_scale == 300 && v.overlay_corner == 1);
         CHECK(!v.smaa);
     }
 
@@ -872,7 +870,7 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(v.graphics_card == "NVIDIA GeForce RTX 4070");
     }
 
-    // The menu's save and the F11 save rewrite their own keys in place and keep every other line.
+    // The F11 save rewrites the display mode in place and keeps every other line.
     WriteAll(file,
              "# header kept\n"
              "show_launcher = 0\n"
@@ -890,25 +888,9 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(text.find("# header kept\n") == 0);
         CHECK(text.find("render_resolution = 4K") != std::string::npos);
         CHECK(text.find("vsync") == std::string::npos); // F11 writes the display mode alone
-    }
-    live.vsync = false;
-    live.rcas_strength = 30;
-    live.show_fps = true;
-    CHECK(DcpSettings::Save());
-    {
-        const std::string text = ReadAll(file);
-        CHECK(text.find("vsync = 0") != std::string::npos);
-        CHECK(text.find("rcas_strength = 30") != std::string::npos);
-        CHECK(text.find("show_fps = 1") != std::string::npos);
-        CHECK(text.find("launcher_width = 1280") != std::string::npos && text.find("show_launcher = 0") != std::string::npos);
-        for (const char* never : {"smaa", "anisotropy", "graphics_card", "monitor", "window_width", "upscaler",
-                                  "async_shaders", "fps_limit", "frames_queued"}) {
-            CHECK(text.find(never) == std::string::npos);
-        }
+        CHECK(text.find("launcher_width = 1280") != std::string::npos);
         LauncherSettings reread(file);
-        CHECK(reread.Get(kDisplayModeKey) == "borderless" && !reread.GetBool(kVSyncKey, true));
-        CHECK(reread.GetInt(kSharpenStrengthKey, 0) == 30 && reread.GetBool(kShowFrameCounterKey, false));
-        CHECK(reread.GetBool(kShowLauncherKey, true) == false);
+        CHECK(reread.Get(kDisplayModeKey) == "borderless" && reread.GetBool(kShowLauncherKey, true) == false);
     }
 }
 
@@ -1497,7 +1479,46 @@ void TestOverlayPanel() {
     }
     CHECK(panels == 1);
     CHECK(overlay.find("return PlaceOverlayPanel(text, DcpSettings::Get().overlay_corner);") != std::string::npos);
-    CHECK(overlay.find("if (DcpSettings::Get().show_fps && !menu_open) {\n        FpsCounter();") != std::string::npos);
+    CHECK(overlay.find("if (DcpSettings::Get().show_fps) {\n        FpsCounter();") != std::string::npos);
+}
+
+// Insert and R3 + L2 open nothing: the in-game settings menu was removed. F10, F11, F2 and F3 stay.
+void TestNoSettingsMenu() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string overlay =
+        ReadAll(source / "gpu" / "shim" / "dcp_overlay.cpp") + ReadAll(source / "gpu" / "shim" / "dcp_overlay.h");
+    const std::string window = ReadAll(source / "gpu" / "shim" / "window.cpp");
+    const std::string settings = ReadAll(source / "gpu" / "shim" / "dcp_settings.cpp");
+    for (const char* gone : {"SDLK_INSERT", "SDL_SCANCODE_INSERT", "R3+L2", "menu_open", "SetOpen(", "UpdateTextInput",
+                             "Overlay: menu ready", "ImageTab", "OverlayTab", "menu_tab", "DcpSettings::Save()"}) {
+        CHECK(overlay.find(gone) == std::string::npos);
+        CHECK(window.find(gone) == std::string::npos);
+    }
+    // The window reads R3 and L2 for the game; the overlay no longer watches them.
+    CHECK(overlay.find("SDL_GAMEPAD_BUTTON_RIGHT_STICK") == std::string::npos &&
+          overlay.find("SDL_GAMEPAD_AXIS_LEFT_TRIGGER") == std::string::npos);
+    CHECK(settings.find("menu_tab") == std::string::npos && settings.find("bool Save()") == std::string::npos);
+    // Keys and buttons go to the game unless the cheat menu or a game dialog has them.
+    CHECK(overlay.find("        if (!cheats_open) {\n            return false;\n        }\n        io.AddKeyEvent(ImGuiMod_Ctrl") !=
+          std::string::npos);
+    CHECK(overlay.find("return cheat_open || text_entry_active || choice_active;") != std::string::npos);
+    CHECK(overlay.find("if (event.key.scancode == DcpSettings::Get().menu_key) {") != std::string::npos);
+    CHECK(window.find("if (window_shortcut && !event.key.repeat) {\n                ToggleBorderless();") != std::string::npos);
+    CHECK(window.find("hud == DcpPing::HudKey::Fps") != std::string::npos &&
+          window.find("hud == DcpPing::HudKey::Ping") != std::string::npos);
+    CHECK(dcp_key_from_name("insert") == SDL_SCANCODE_INSERT); // still a key the game controls can use
+
+    for (const char* doc : {"README.md", "docs/LAUNCHER.md", "docs/LINUX.md", "docs/GRAPHICS.md", "docs/CHEATS.md",
+                            "packaging/README.txt", "packaging/README-linux.txt"}) {
+        const std::string text = ReadAll(source / doc);
+        CHECK(!text.empty());
+        for (const char* stale : {"R3 + L2", "R3+L2", "Insert", "in-game settings menu", "menu_tab"}) {
+            if (text.find(stale) != std::string::npos) {
+                std::printf("stale settings menu reference in %s: %s\n", doc, stale);
+                CHECK(text.find(stale) == std::string::npos);
+            }
+        }
+    }
 }
 
 // F2 is the frame counter and F3 the Ping (Online Play only), each on its own; the Ping reads the P2P round trip a few
@@ -1549,7 +1570,7 @@ void TestPingDisplay(const fs::path& base) {
         }
     }
 
-    // The keys and the panels are independent; Ping needs Online Play and is never saved by the in-game menu.
+    // The keys and the panels are independent; Ping needs Online Play and is never saved by the game.
     const std::string window = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "window.cpp");
     CHECK(window.find("} else if (hud == DcpPing::HudKey::Fps) {\n                settings.show_fps = !settings.show_fps;\n"
                       "            } else if (hud == DcpPing::HudKey::Ping) {\n"
@@ -1557,12 +1578,11 @@ void TestPingDisplay(const fs::path& base) {
     CHECK(window.find("runtime_online_play_enabled() != 0") != std::string::npos);
     const std::string overlay = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_overlay.cpp");
     CHECK(overlay.find("return DcpSettings::Get().show_ping && runtime_online_play_enabled() != 0;") != std::string::npos);
-    CHECK(overlay.find("if (PingShown() && !menu_open) {\n        PingCounter();") != std::string::npos);
+    CHECK(overlay.find("if (PingShown()) {\n        PingCounter();") != std::string::npos);
     CHECK(overlay.find("DrawOverlayPanel(PlaceOverlayPanel(label.c_str(), corner, &fps), label.c_str());") !=
           std::string::npos);
     const std::string video_settings = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp");
-    const size_t save = video_settings.find("bool Save() {");
-    CHECK(save != std::string::npos && video_settings.find("show_ping", save) == std::string::npos);
+    CHECK(video_settings.find("bool Save()") == std::string::npos); // the game saves the display mode alone
 
     // Off by default, saved by the launcher, read by the video core.
     const DcpSettings::Values game;
@@ -2030,7 +2050,7 @@ void TestCheatSettings(const fs::path& base) {
     CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
     CHECK(dcp_saved_movement_speed(nullptr) == 1);
 
-    // The in-game menu never writes them: the video core's settings file code has no cheat key.
+    // The game never writes them: the video core's settings file code has no cheat key.
     CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp").find("cheat") == std::string::npos);
 }
 
@@ -4860,6 +4880,7 @@ int main(int argc, char** argv) {
     TestOnlineSettings(base);
     TestOnlinePage();
     TestOverlayPanel();
+    TestNoSettingsMenu();
     TestPingDisplay(base);
     TestOnlineClient(base);
     TestSkipOfferSettings(base);

@@ -2,8 +2,8 @@
 
 ## Correctness fixes
 
-Three fixes made Dragon's Crown Pro render correctly. All three are code, not settings: neither `dcp.ini`, the launcher,
-the in-game menu nor the environment can undo them (`tests/launcher_tests.cpp` checks this).
+Three fixes made Dragon's Crown Pro render correctly. All three are code, not settings: neither `dcp.ini`, the launcher
+nor the environment can undo them (`tests/launcher_tests.cpp` checks this).
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -23,8 +23,8 @@ them. The same worker code exists in the other ports of this lineage (docs/REFER
 Every frame, on the GPU command thread: the game's display buffer, at the render resolution, goes through **SMAA 1x**
 (`host_passes/smaa_pass.cpp`, optional), then **FSR 1** when the window is larger than the picture and **RCAS** sharpening
 (`host_passes/fsr_pass.cpp`), then the post-process pass into the presentation frame: the largest size with the picture's
-aspect ratio that fits the window. The present thread blits that frame into the swapchain image and draws the in-game menu
-and the frame counter over it. Presentation Letterbox (the default) fits it with its aspect ratio, bars included
+aspect ratio that fits the window. The present thread blits that frame into the swapchain image and draws the overlay
+(the cheat menu, the game's dialogs, the frame counter) over it. Presentation Letterbox (the default) fits it with its aspect ratio, bars included
 (`FitImage`, `MakeImageBlitFit`); Presentation Stretch fills the whole swapchain (`MakeImageBlitStretch`). The value comes
 from `dcp.ini` at game start and the presenter checks it every frame. FSR 1 does nothing when the window is the picture's size or smaller; RCAS alone runs only when the
 window and the picture have the same size. All of them follow the settings live.
@@ -39,7 +39,7 @@ or saving fade, or the fixed-screen transition fallback below, is active for the
 it, are untouched.
 
 Swapchain recreation (a window resize, F11, a display mode or VSync change) waits for the device under the queue submission
-lock, because the GPU command thread keeps submitting meanwhile. The in-game menu's redraw of the last frame takes that frame
+lock, because the GPU command thread keeps submitting meanwhile. The overlay's redraw of the last frame takes that frame
 out of the free queue while it shows it, so the GPU thread can neither draw into it nor recreate it at a new window size.
 
 ## Render resolution

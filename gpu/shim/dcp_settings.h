@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The video core's view of dcp.ini: read once at start, changed live by the in-game menu (dcp_overlay.h) and F11.
+// The video core's view of dcp.ini: read once at start, changed live by F11 and the HUD keys.
 // Readers load the atomics every frame.
 
 #pragma once
@@ -17,7 +17,6 @@ struct Values {
     std::atomic<int> overlay_scale{100}, overlay_corner{1};
     // The Ping panel (Online Play only), below the frame counter. F3 switches it for the session; never saved here.
     std::atomic<bool> show_ping{false};
-    std::atomic<int> menu_tab{0};
     std::atomic<int> display_mode{0};
     std::atomic<bool> vsync{true};
     std::atomic<int> presentation{0}; ///< DcpGraphics::Presentation: letterbox or stretch
@@ -50,9 +49,7 @@ Values& Get();
 bool Read(const std::string& path, Values& values);
 /// Read() into Get() and the file Save() writes. Once, before the window and the renderer start.
 void Load(const std::string& path);
-/// Writes the settings the in-game menu changes; every other line of the file is kept.
-bool Save();
-/// Writes the display mode alone (F11).
+/// Writes the display mode alone (F11); every other line of the file is kept.
 bool SaveDisplayMode();
 
 /// One "key = value" line as the launcher's settings file reads it; false for comments and other lines.

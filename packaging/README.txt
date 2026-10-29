@@ -72,7 +72,6 @@ from the project's GitHub releases page, choose "More info", then
 PLAYING
 -------
 - F11 switches between Windowed and Borderless Fullscreen.
-- Insert (or R3 + L2 on a controller) opens the in-game settings menu.
 - Xbox controllers work without setup.
 - The keyboard works too; the launcher's Controls page lists the keys.
 - The Controls page also chooses the button prompts the game shows: PlayStation
@@ -83,9 +82,8 @@ PLAYING
   supported.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
-- F3 switches the experimental AMD water fix (black areas under characters
-  standing in water): on by default on AMD graphics cards, off elsewhere, not
-  saved.
+- An experimental AMD water workaround (black areas under characters standing
+  in water) is on with AMD graphics cards and off elsewhere.
 - If the game closes right after PLAY while a recording, chat or performance
   overlay program is running, turn on Gameplay > Allow overlay programs in the
   launcher.

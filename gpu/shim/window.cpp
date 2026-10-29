@@ -276,9 +276,6 @@ bool WindowSDL::PollEvents() {
             UpdateTextTitle();
         }
     }
-    if (!text_active) {
-        DcpOverlay::UpdateTextInput(window);
-    }
     if (const int mode = DcpSettings::Get().display_mode; mode != display_mode) {
         ApplyDisplayMode(mode);
     }
@@ -344,9 +341,8 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
             const bool hud_key = event.key.scancode == DcpPing::kFpsKey || event.key.scancode == DcpPing::kPingKey;
-            const bool host_shortcut = window_shortcut || hud_key ||
-                                       event.key.scancode == DcpSettings::Get().menu_key ||
-                                       event.key.scancode == SDL_SCANCODE_INSERT;
+            const bool host_shortcut =
+                window_shortcut || hud_key || event.key.scancode == DcpSettings::Get().menu_key;
             const DcpPing::HudKey hud =
                 DcpPing::HudKeyFor(event.key.scancode, event.key.repeat, runtime_online_play_enabled() != 0);
             auto& settings = DcpSettings::Get();

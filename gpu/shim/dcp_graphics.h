@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Graphics options as dcp.ini stores them, shared by the in-game menu, the window and the renderer.
+// Graphics options as dcp.ini stores them, shared by the window and the renderer.
 #pragma once
 
 #include <array>

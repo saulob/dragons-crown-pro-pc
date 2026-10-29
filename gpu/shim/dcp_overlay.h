@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The in-game settings menu (Dear ImGui), drawn by the presenter into the swapchain image after the game frame.
-// Insert (keyboard) or R3+L2 (gamepad) opens it; while it is open the game gets no pad/keyboard input.
+// The port's overlay (Dear ImGui): the F10 cheat menu, the game's save list and text dialogs, loading notes, the frame
+// counter, the Ping and notices, drawn by the presenter into the swapchain image after the game frame.
 
 #pragma once
 
@@ -11,7 +11,6 @@
 #include "video_core/renderer_vulkan/vk_common.h"
 
 union SDL_Event;
-struct SDL_Window;
 
 namespace Vulkan {
 class Instance;
@@ -22,10 +21,8 @@ namespace DcpOverlay {
 /// Present thread, once: the ImGui context and its Vulkan backend.
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count);
 
-/// Window thread, for every SDL event: true when the menu consumed it.
+/// Window thread, for every SDL event: true when the overlay consumed it.
 bool HandleEvent(const SDL_Event& event);
-/// Turns SDL text input on while the menu edits a value (window thread, once per poll).
-void UpdateTextInput(SDL_Window* window);
 
 /// Start-up loading screen (pipeline cache warm-up): `total` 0 shows no count.
 void SetLoading(bool active, u32 done, u32 total);
@@ -35,7 +32,7 @@ void SetBackgroundLoading(u32 done, u32 total);
 /// A short message at the top of the screen for two seconds (any thread).
 void ShowNotice(const std::string& text);
 
-/// Whether anything is drawn this frame (menu open or frame counter on).
+/// Whether anything is drawn this frame.
 bool Visible();
 
 /// Counts a presented game frame (the frame rate in the window title).
@@ -48,7 +45,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent);
 /// The window's display content scale (DPI): the cheat menu grows with it.
 void SetDisplayScale(float scale);
 
-/// The menu is open or a text entry is shown: the game's input is held neutral.
+/// The cheat menu or a game dialog is shown: the game's input is held neutral.
 bool CapturesInput();
 
 /// The runtime's buttons (PS4 bits) that move and confirm the save list, polled every frame.

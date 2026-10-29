@@ -18,7 +18,7 @@ $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
 
 Write-Step 'Building the launcher tests'
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-amd-water-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-amd-water-tests dcp-water-diag-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 
 Write-Step 'Running the Windows memory tests (sparse backing, commitment, aliases, release)'
@@ -77,8 +77,12 @@ Write-Step 'Running the frame pacing tests (Frame rate setting, repeat cadence, 
 & (Join-Path $buildDir 'bin\dcp-frame-pacing-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Step 'Running the AMD water fix tests (vendor defaults, F3 presses)'
+Write-Step 'Running the AMD water workaround tests (vendor defaults, no hotkey)'
 & (Join-Path $buildDir 'bin\dcp-amd-water-tests.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Step 'Running the water diagnostics tests (AMD only, deduplication, cap)'
+& (Join-Path $buildDir 'bin\dcp-water-diag-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the save-data tests (mounts, Japanese startup save hook)'

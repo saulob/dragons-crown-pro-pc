@@ -83,7 +83,7 @@ constexpr std::string_view kPlacementKeys[] = {kLauncherXKey,         kLauncherY
                                                 kLauncherHeightKey,    kLauncherMaximizedKey, kLauncherFullscreenKey};
 
 constexpr char kFileHeader[] =
-    "# Dragon's Crown Pro user settings (the launcher and the in-game menu write this file).\n"
+    "# Dragon's Crown Pro user settings (written by the launcher; F11 saves the display mode).\n"
     "# Remove a line to use the default.\n";
 
 } // namespace

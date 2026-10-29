@@ -31,7 +31,6 @@
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
 - **Menu & Subtitles language**: English, French, German, Italian or Spanish; Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time)
-- An in-game settings menu: **Insert** on the keyboard, or **R3 + L2** on the controller
 - Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
 - Local multiplayer with up to four controllers
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
@@ -89,7 +88,7 @@ These folders are created the first time they are needed and are not part of the
 
 ### Linux and Steam Deck
 
-**Experimental.** This is a native Linux build, not Proton or Wine, and it is intended to provide the same functionality as Windows: the same launcher, installer, display and graphics options, controls and in-game menu; the only Windows-only option is Allow overlay programs. "Experimental" is about testing: the maintainer has no real Linux PC or Steam Deck. Community testers have reported it working on Bazzite (KDE Plasma, Wayland, AMD Radeon RX 9070 XT with RADV, 4K borderless fullscreen) and on a Steam Deck LCD ([issue #5](https://github.com/saulob/dragons-crown-pro-pc/issues/5)). It was also validated automatically under WSL2 with Ubuntu 24.04, in X11 and Wayland environments with a software Vulkan driver: the launcher, installing a package, the game's first screens, saves and the shader cache. Broader testing is still needed on NVIDIA and Intel Vulkan drivers, other distributions and the Steam Deck OLED, gamescope and Gaming Mode, performance, and long sessions. Started without a graphical session (neither `DISPLAY` nor `WAYLAND_DISPLAY` set), the game prints an error and exits instead of crashing. Please report Linux-specific problems with the log (see [Reporting problems](#reporting-problems)).
+**Experimental.** This is a native Linux build, not Proton or Wine, and it is intended to provide the same functionality as Windows: the same launcher, installer, display and graphics options and controls; the only Windows-only option is Allow overlay programs. "Experimental" is about testing: the maintainer has no real Linux PC or Steam Deck. Community testers have reported it working on Bazzite (KDE Plasma, Wayland, AMD Radeon RX 9070 XT with RADV, 4K borderless fullscreen) and on a Steam Deck LCD ([issue #5](https://github.com/saulob/dragons-crown-pro-pc/issues/5)). It was also validated automatically under WSL2 with Ubuntu 24.04, in X11 and Wayland environments with a software Vulkan driver: the launcher, installing a package, the game's first screens, saves and the shader cache. Broader testing is still needed on NVIDIA and Intel Vulkan drivers, other distributions and the Steam Deck OLED, gamescope and Gaming Mode, performance, and long sessions. Started without a graphical session (neither `DISPLAY` nor `WAYLAND_DISPLAY` set), the game prints an error and exits instead of crashing. Please report Linux-specific problems with the log (see [Reporting problems](#reporting-problems)).
 
 1. Download **DragonsCrownProPC-v&lt;version&gt;-x86_64.AppImage** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and make it executable (right-click > **Properties** > **Permissions** > **Is executable**, or `chmod +x`).
 2. Run it. The launcher opens.
@@ -108,7 +107,7 @@ Windows may warn the first time you run the program, because the release is not 
 
 ## The launcher
 
-The launcher opens before the game. Your choices are saved to `user\dcp.ini`, the same file the in-game menu writes. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
+The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
 
 ### Play
 - **Install game...** from your `.pkg` file, with the Title ID, version and `eboot.bin` checks, and **Reinstall game...**
@@ -173,7 +172,7 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 | Options (Start) | Enter |
 | Touchpad left / right (Back) | Tab / Backspace |
 
-- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F2** shows or hides the frame counter. **F3** shows or hides the Ping while Online Play is on (see [docs/ONLINE.md](docs/ONLINE.md)). The experimental AMD water fix for black regions under characters standing in water is On on AMD graphics cards and Off elsewhere. **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
+- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F2** shows or hides the frame counter. **F3** shows or hides the Ping while Online Play is on (see [docs/ONLINE.md](docs/ONLINE.md)). An experimental AMD water workaround for black regions under characters standing in water is On on AMD graphics cards and Off elsewhere. The display mode, VSync, FSR 1, sharpening and the frame counter are set in the launcher.
 - **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged. Online play is not supported.
 
 ### About

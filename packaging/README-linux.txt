@@ -99,7 +99,6 @@ to an issue, with your distribution, GPU and driver.
 PLAYING
 -------
 - F11 switches between Windowed and Borderless Fullscreen.
-- Insert (or R3 + L2 on a controller) opens the in-game settings menu.
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
   Steam Deck's own controls.
 - The keyboard works too; the launcher's Controls page lists the keys.
@@ -111,9 +110,8 @@ PLAYING
   supported.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
-- F3 switches the experimental AMD water fix (black areas under characters
-  standing in water): on by default on AMD graphics cards, off elsewhere, not
-  saved. It needs a keyboard; on the Steam Deck bind F3 in Steam Input.
+- An experimental AMD water workaround (black areas under characters standing
+  in water) is on with AMD graphics cards and off elsewhere.
 - To open the launcher again after turning it off, hold Shift while starting
   (X11 sessions), start the AppImage with the option --launcher, or use the
   "Show launcher" action of its desktop entry. On the Steam Deck: Steam > the

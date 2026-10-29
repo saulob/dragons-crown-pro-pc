@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/recursive_lock.h"
+#include "dcp_water_diag.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
@@ -160,6 +161,8 @@ private:
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
+    void CaptureWaterDiagLayouts(const GraphicsPipeline* pipeline);
+    void ReportWaterDiag(const GraphicsPipeline* pipeline);
     /// dcp: a draw continuing the open render pass with the same inputs gets the same render
     /// state (RenderStateMemo); nothing can have broken the pass in between (barriers, copies and
     /// dispatches end it).
@@ -454,10 +457,13 @@ private:
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
     bool needs_barrier{};
-    /// The AMD water fix (DcpAmdWaterFix) as of this draw's BindResources: F3 never splits a draw.
+    /// The AMD water fix (DcpAmdWaterFix) as of this draw's BindResources.
     bool water_fix{};
     /// This draw's depth target is attached in a layout that writes depth or stencil.
     bool depth_target_writes{};
+    DcpWaterDiag::Monitor water_diag;
+    /// Layouts of the sampled targets once the textures were bound (cb, then depth).
+    std::array<u32, AmdGpu::NUM_COLOR_BUFFERS + 1> water_diag_layouts{};
     // dcp: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).
     static inline thread_local const AmdGpu::Regs* stage_regs = nullptr;
