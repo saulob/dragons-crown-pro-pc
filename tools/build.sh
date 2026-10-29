@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-amd-water-tests dcp-update-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-amd-water-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-update-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -125,6 +125,12 @@ if ((test)); then
     "$build_dir/bin/dcp-frame-pacing-tests"
     step 'Running the AMD water fix tests (vendor defaults, F3 presses)'
     "$build_dir/bin/dcp-amd-water-tests"
+    step 'Running the True Ultrawide hook tests'
+    "$build_dir/bin/dcp-ultrawide-tests"
+    step 'Running the True Ultrawide side area tests'
+    "$build_dir/bin/dcp-ultrawide-sides-tests"
+    step 'Running the MOVBE and BMI1 emulation tests'
+    "$build_dir/bin/dcp-isa-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'
     "$build_dir/bin/dcp-tiling-tests"
     step 'Running the updater tests (versions, release JSON, SHA-256, ZIP safety, staging and rollback)'

@@ -88,8 +88,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "show_resolution_title") {
         v.show_resolution_title = ParseBool(value, v.show_resolution_title);
     } else if (key == "frame_rate") {
-        const int fps = ParseInt(value, 60);
-        v.frame_rate = DcpFramePacing::IsFrameRateMode(fps) ? fps : 60;
+        v.frame_rate = DcpFramePacing::ParseFrameRate(value);
     } else if (const int scancode = dcp_key_from_name(value.c_str()); scancode != 0) {
         std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key};
         for (int i = 0; i < DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY; ++i) {

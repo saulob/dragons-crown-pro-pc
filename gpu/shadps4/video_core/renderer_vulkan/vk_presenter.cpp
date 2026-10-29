@@ -15,7 +15,7 @@
 #include "dcp_overlay.h"
 #include "dcp_settings.h"
 #include "dcp_graphics.h"
-#include "dcp_ultrawide_capture.h"
+#include "dcp_ultrawide_sides.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/texture_cache/image.h"
@@ -44,7 +44,7 @@
 #endif
 
 namespace {
-// DEBUG_SAULO: set by the guest's True Ultrawide hooks (src/ultrawide_hooks.c), once per guest frame.
+// Set by the guest's True Ultrawide hooks (src/ultrawide_hooks.c), once per guest frame.
 std::atomic<bool> g_ultrawide_side_mask{false};
 } // namespace
 
@@ -354,7 +354,6 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     auto desc = VideoCore::TextureCache::ImageDesc{attribute, cpu_address};
     const auto image_id = texture_cache.FindImage(desc);
     texture_cache.UpdateImage(image_id);
-    rasterizer->CaptureFlip(texture_cache.GetImage(image_id)); // DEBUG_SAULO
 
     Frame* frame = GetRenderFrame();
 
@@ -572,20 +571,12 @@ void Presenter::PresentLoadingFrame() {
 /// can put colour back into them. `attachment` must already be bound as colour attachment 0, `eColorAttachmentOptimal`.
 void PresentUltrawideSideMask(vk::CommandBuffer cmdbuf, vk::ImageView attachment, s32 width, s32 height,
                               s32 offset_x, s32 offset_y) {
-    static bool active = false;
     const bool wanted = g_ultrawide_side_mask.load(std::memory_order_relaxed) && width > 0 && height > 0;
-    const auto sides = wanted ? UltrawideCapture::SidesOf({u32(width), u32(height)}) : UltrawideCapture::SideAreas{};
-    if (active != !sides.left.Empty()) {
-        active = !sides.left.Empty();
-        if (active) {
-            std::printf("DEBUG_SAULO true ultrawide final present mask: fade active, black sides %u px each\n",
-                       sides.left.right - sides.left.left);
-        }
-    }
-    if (!active) {
+    const auto sides = wanted ? DcpUltrawide::SidesOf({u32(width), u32(height)}) : DcpUltrawide::SideAreas{};
+    if (sides.left.Empty()) {
         return;
     }
-    const auto to_rect = [&](const UltrawideCapture::Rect& r) {
+    const auto to_rect = [&](const DcpUltrawide::Rect& r) {
         return vk::ClearRect{
             .rect = {{offset_x + s32(r.left), offset_y + s32(r.top)}, {r.right - r.left, r.bottom - r.top}},
             .baseArrayLayer = 0,
@@ -863,6 +854,6 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
 
 } // namespace Vulkan
 
-extern "C" void dcpgpu_debug_saulo_ultrawide_mask(int wanted) {
+extern "C" void dcpgpu_ultrawide_side_mask(int wanted) {
     g_ultrawide_side_mask.store(wanted != 0, std::memory_order_relaxed);
 }

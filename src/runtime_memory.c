@@ -273,10 +273,18 @@ static int pool(void) {
 static int pool(void) {
     if (pool_fd>=0) return 0;
     runtime_memory_reserve();
-    pool_fd=memfd_create("dcp-guest-memory", MFD_CLOEXEC);
-    if (pool_fd<0 || ftruncate(pool_fd,(off_t)(POOL_SIZE+FLEX_SPAN))) return -1;
-    void *view=mmap(NULL,POOL_SIZE+FLEX_SPAN,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_NORESERVE,pool_fd,0);
-    if (view==MAP_FAILED) return -1;
+    const uint64_t bytes=POOL_SIZE+FLEX_SPAN;
+    const int fd=memfd_create("dcp-guest-memory", MFD_CLOEXEC);
+    void *view=MAP_FAILED;
+    if (fd<0) fprintf(stderr,"Runtime: cannot create %" PRIu64 " MiB of guest memory (memfd_create: %s)\n",bytes>>20,strerror(errno));
+    else if (ftruncate(fd,(off_t)bytes)) fprintf(stderr,"Runtime: cannot size %" PRIu64 " MiB of guest memory (ftruncate: %s)\n",bytes>>20,strerror(errno));
+    else if ((view=mmap(NULL,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_NORESERVE,fd,0))==MAP_FAILED)
+        fprintf(stderr,"Runtime: cannot map %" PRIu64 " MiB of guest memory (mmap: %s)\n",bytes>>20,strerror(errno));
+    if (view==MAP_FAILED) {
+        if (fd>=0) close(fd);
+        return -1;
+    }
+    pool_fd=fd;
     backing_base=view;
     return 0;
 }

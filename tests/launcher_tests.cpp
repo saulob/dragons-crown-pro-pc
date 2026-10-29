@@ -558,8 +558,10 @@ void TestLogRedirect(const fs::path& base) {
 // project's DCP_* names, and none of them can bring back an inherited setting that changes the rendering.
 void TestEnvironmentVariables() {
     const fs::path source(DCP_SOURCE_DIR);
-    // Unix/macOS branches of vendored shadPS4 code, and the Linux AppImage's own path and desktop session.
-    const std::vector<std::string> platform = {"HOME", "XDG_DATA_HOME", "VK_DRIVER_FILES", "APPIMAGE", "USER", "DISPLAY"};
+    // Unix/macOS branches of vendored shadPS4 code, the Linux AppImage's own path and desktop session, and the
+    // Gamescope session (gpu/shim/dcp_present.h, never read on Windows).
+    const std::vector<std::string> platform = {"HOME",     "XDG_DATA_HOME", "VK_DRIVER_FILES", "APPIMAGE",
+                                               "USER",     "DISPLAY",       "GAMESCOPE_WAYLAND_DISPLAY"};
     std::vector<std::string> names, inherited;
     int files = 0;
     for (const char* dir : {"src", "launcher", "gpu/shim", "gpu/shadps4"}) {
@@ -2103,7 +2105,10 @@ void TestGraphicsCard(const fs::path& base) {
     CHECK(monitor != std::string::npos && monitor < card && card < vsync);
 
     const std::string instance = ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_instance.cpp");
-    CHECK(instance.find("DcpGraphics::ResolveGpuByName(names, DcpSettings::Get().graphics_card)") != std::string::npos);
+    const size_t requested = instance.find("const std::string& requested = DcpSettings::Get().graphics_card;");
+    const size_t resolved = instance.find("DcpGraphics::ResolveGpuByName(names, requested)");
+    CHECK(requested != std::string::npos && resolved != std::string::npos && requested < resolved);
+    CHECK(instance.find("GPU: requested %s is not available") != std::string::npos);
     CHECK(instance.find("GPU: selection Automatic") == std::string::npos);
     CHECK(instance.find("IsDeviceUsable(physical)") != std::string::npos);
 }

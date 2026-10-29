@@ -24,10 +24,6 @@ namespace Core {
 class MemoryManager;
 }
 
-namespace UltrawideCapture {
-struct TargetRef; // DEBUG_SAULO
-}
-
 namespace Vulkan {
 
 class GraphicsPipeline;
@@ -160,21 +156,7 @@ public:
     u32 GetGpuCommandProcessorThreadId();
 #endif
 
-    /// DEBUG_SAULO: ultrawide frame capture (vk_ultrawide_capture.cpp): the PM4 packet being processed, and a
-    /// flip of `display`, the capture's frame boundary.
-    VAddr capture_packet{};
-    void CaptureFlip(VideoCore::Image& display);
-
 private:
-    // DEBUG_SAULO: ultrawide frame capture (vk_ultrawide_capture.cpp).
-    void CaptureBeforeDraw(const GraphicsPipeline* pipeline);
-    void CaptureAfterDraw(const GraphicsPipeline* pipeline, const RenderState& state, const AmdGpu::Regs& regs,
-                          u32 num_indices, u32 num_instances, bool indexed, bool indirect);
-    void CaptureSampled(const VideoCore::Image& image, bool storage);
-    VideoCore::Image* CaptureTarget(const GraphicsPipeline* pipeline, UltrawideCapture::TargetRef& ref);
-    void CapturePassPicture();
-    bool CaptureCopy(VideoCore::Image& image, u32 mip, u32 slice, int kind, vk::Buffer buffer, u64 offset);
-
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
@@ -301,7 +283,7 @@ private:
     /// redirecting anything that records commands or touches the buffer cache.
     bool TexturesBindableOnHelper(const Shader::Info& stage, const PreparedStage* prepared);
     /// The depth-stencil image a sampled stencil texture redirects to, if any.
-    VideoCore::ImageId LinkedDepth(VideoCore::Image& image, bool record = true);
+    VideoCore::ImageId LinkedDepth(VideoCore::Image& image);
     static void RunTextureTask(void* rasterizer);
     static void JoinBindHelper(void* rasterizer);
 

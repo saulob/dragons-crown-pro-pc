@@ -60,6 +60,7 @@ std::string DescribeSession(bool gamescope, GetEnv get_env) {
         "ENABLE_GAMESCOPE_WSI", "DISABLE_GAMESCOPE_WSI", "GAMESCOPE_WSI_MIN_IMAGE_COUNT",
         "GAMESCOPE_WSI_ENSURE_MIN_IMAGE_COUNT", "GAMESCOPE_WSI_FRAME_LIMITER_AWARE", "GAMESCOPE_LIMITER_FILE",
         "MESA_VK_WSI_PRESENT_MODE", "vk_x11_override_min_image_count", "vk_xwayland_wait_ready", "MANGOHUD",
+        "LD_PRELOAD", "VK_INSTANCE_LAYERS", "VK_LOADER_LAYERS_ENABLE", "VK_LOADER_LAYERS_DISABLE", "OBS_VKCAPTURE",
     };
     std::string text = gamescope ? "Gamescope yes (flip pacing on)" : "Gamescope no";
     for (const char* name : names) {

@@ -11,7 +11,6 @@
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
 #include "startup_save_hook.h"
-#include "ultrawide_capture.h"
 #include "ultrawide_hooks.h"
 #include "voice_hooks.h"
 #include "dcpgpu.h"
@@ -174,15 +173,6 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     else
         fprintf(stderr,"Fault: exception 0x%08lx at %s (thread %lu)\n",record->ExceptionCode,where,GetCurrentThreadId());
     describe_module_path((uintptr_t)c->Rip);
-    if (record->ExceptionCode==EXCEPTION_ILLEGAL_INSTRUCTION) {
-        unsigned char bytes[16];
-        SIZE_T got=0;
-        if (ReadProcessMemory(GetCurrentProcess(),(void *)c->Rip,bytes,sizeof(bytes),&got) && got==sizeof(bytes)) {
-            char hex[sizeof(bytes)*3+1];
-            for (size_t i=0;i<sizeof(bytes);++i) snprintf(hex+3*i,4,"%02x ",bytes[i]);
-            fprintf(stderr,"  DEBUG_SAULO instruction bytes: %s\n",hex);
-        }
-    }
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
     if (gpu_enabled) dcpgpu_dump_guest_writes(info);
@@ -208,18 +198,6 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     runtime_log_write_direct(crash);
     TerminateProcess(GetCurrentProcess(),3);
     return EXCEPTION_CONTINUE_SEARCH;
-}
-/* DEBUG_SAULO: the first emulated instruction, then a running count every 2^20. */
-static void debug_saulo_isa_emulated(uintptr_t rip) {
-    static long long count;
-    static ULONGLONG first;
-    const long long n=__atomic_add_fetch(&count,1,__ATOMIC_RELAXED);
-    if (n==1) {
-        first=GetTickCount64();
-        printf("DEBUG_SAULO ISA: first emulated instruction at guest offset 0x%" PRIxPTR "\n",rip-(uintptr_t)image);
-    } else if (!(n&((1<<20)-1)))
-        printf("DEBUG_SAULO ISA: %lld emulated instructions in %.1f s, latest at guest offset 0x%" PRIxPTR "\n",
-               n,(double)(GetTickCount64()-first)/1000.0,rip-(uintptr_t)image);
 }
 static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
@@ -247,7 +225,6 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
         uint64_t flags=c->EFlags;
         size_t length=isa_emulate((const uint8_t *)(uintptr_t)c->Rip,c->Rip,&c->Rax,&flags);
         if (length) {
-            debug_saulo_isa_emulated(c->Rip);
             c->EFlags=(DWORD)flags;
             c->Rip+=length;
             return EXCEPTION_CONTINUE_EXECUTION;
@@ -426,31 +403,24 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
 /* Widens the scene pass projections when every condition holds, then installs the guest hooks; logs one line either
  * way. A site that does not match leaves the image as it was. */
 static void install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
-                                   size_t slot_offset, uint8_t *stubs, size_t stubs_size, const char *logs_dir) {
+                                   size_t slot_offset, uint8_t *stubs) {
     const double scale=dcp_true_ultrawide_scale(aspect_ratio,&render_target);
     char detail[720];
-    int effective=0, capture_hooks=0;
+    int effective=0;
     if (!requested) snprintf(detail,sizeof(detail),"off in the settings");
     else if (!dcp_true_ultrawide_applies(aspect_ratio)) snprintf(detail,sizeof(detail),"the aspect ratio is not wider than 16:9");
     else if (!build || !build->true_ultrawide) snprintf(detail,sizeof(detail),"pass projection not verified for this game build");
     else if (dcp_apply_true_ultrawide(image,image_size,slot_offset,dcp_pass_ortho_sites,DCP_PASS_ORTHO_SITE_COUNT,scale,
                                       detail,sizeof(detail))) {
-        char hooks[400], capture[160];
-        const size_t hook_bytes=ultrawide_hooks_stub_bytes();
-        ultrawide_hooks_install(image,image_size,entry,stubs,hook_bytes,scale,hooks,sizeof(hooks));
-        /* DEBUG_SAULO: guest side of the F9 frame capture. */
-        capture_hooks=ultrawide_capture_install(image,image_size,entry,stubs+hook_bytes,stubs_size-hook_bytes,capture,
-                                                sizeof(capture));
+        char hooks[400];
+        ultrawide_hooks_install(image,image_size,entry,stubs,ultrawide_hooks_stub_bytes(),scale,hooks,sizeof(hooks));
         effective=1;
-        snprintf(detail,sizeof(detail),"pass projection %d sites, horizontal x%.4f, vertical unchanged; %s; DEBUG_SAULO %s",
-                 DCP_PASS_ORTHO_SITE_COUNT,scale,hooks,capture);
+        snprintf(detail,sizeof(detail),"pass projection %d sites, horizontal x%.4f, vertical unchanged; %s",
+                 DCP_PASS_ORTHO_SITE_COUNT,scale,hooks);
     }
-    char line[960];
-    snprintf(line,sizeof(line),"True Ultrawide requested %s, effective %s (%s, %dx%d, %s): %s",requested ? "on" : "off",
-             effective ? "on" : "off",aspect_ratio->name,render_target.width,render_target.height,
-             build ? build->label : "unknown game build",detail);
-    printf("DCP: %s\n",line);
-    dcpgpu_debug_saulo_capture_configure(logs_dir,line,capture_hooks); /* DEBUG_SAULO */
+    printf("DCP: True Ultrawide requested %s, effective %s (%s, %dx%d, %s): %s\n",requested ? "on" : "off",
+           effective ? "on" : "off",aspect_ratio->name,render_target.width,render_target.height,
+           build ? build->label : "unknown game build",detail);
 }
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
@@ -562,6 +532,7 @@ int main(int argc, char **argv) {
         runtime_log_set_detailed(dcp_detailed_logging(settings_file));
         if (launched==DCP_LAUNCHER_QUIT) { runtime_log_mark_clean_exit(); exit(0); }
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
+#ifdef _WIN32
         if (launched==DCP_LAUNCHER_GAME_STARTED) {
             /* The game process appends to this log: nothing here may write to it once it runs. */
             puts("Launcher: the game process continues this log");
@@ -573,6 +544,7 @@ int main(int argc, char **argv) {
             }
             exit(0);
         }
+#endif
     }
     if (!check_imports) {
         char cause[160], advice[160], message[330];
@@ -738,7 +710,7 @@ int main(int argc, char **argv) {
     const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
     const size_t save_stub_bytes = startup_save_hook_stub_bytes();
     const size_t voice_stub_bytes = voice_hooks_stub_bytes();
-    const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() + ultrawide_capture_stub_bytes() : 0;
+    const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() : 0;
     const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + ultrawide_stub_bytes);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
@@ -850,8 +822,7 @@ int main(int argc, char **argv) {
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
     install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
                            ultrawide_bytes ? round_page(size)+hook_bytes : 0,
-                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,ultrawide_stub_bytes,
-                           log_folder);
+                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif

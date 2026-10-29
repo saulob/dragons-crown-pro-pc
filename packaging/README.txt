@@ -26,6 +26,8 @@ A package still encrypted for a PS4 console cannot be unpacked on a PC.
 REQUIREMENTS
 ------------
 - Windows 10 version 1903 or later, or Windows 11, 64-bit
+- A processor with AVX and LZCNT: Intel Core 4th generation (Haswell), AMD FX
+  or newer. The MOVBE and BMI1 instructions some of these lack are emulated
 - A graphics card and driver with Vulkan 1.3, VK_EXT_robustness2,
   VK_KHR_push_descriptor and VK_EXT_vertex_attribute_divisor
 - Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next
@@ -80,6 +82,12 @@ PLAYING
   supported.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
+- F3 switches the experimental AMD water fix (black areas under characters
+  standing in water): on by default on AMD graphics cards, off elsewhere, not
+  saved.
+- If the game closes right after PLAY while a recording, chat or performance
+  overlay program is running, turn on Gameplay > Allow overlay programs in the
+  launcher.
 - To open the launcher again after turning it off, hold Shift while starting.
 
 

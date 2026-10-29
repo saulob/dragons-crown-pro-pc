@@ -1,7 +1,6 @@
 #include "ultrawide_hooks.h"
 
 #include <math.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -9,15 +8,15 @@
 
 /* The video core provides the real one; recording it here instead keeps the guest-hook unit tests free of it while
  * still letting them see what was sent. */
-static int debug_saulo_mask_wanted;
+static int side_mask_wanted;
 
-__attribute__((weak)) void dcpgpu_debug_saulo_ultrawide_mask(int wanted) {
-    debug_saulo_mask_wanted = wanted;
+__attribute__((weak)) void dcpgpu_ultrawide_side_mask(int wanted) {
+    side_mask_wanted = wanted;
 }
 
-/* DEBUG_SAULO: the last value sent to the final presenter's side mask, for the test build only. */
-int ultrawide_debug_saulo_mask_wanted(void) {
-    return debug_saulo_mask_wanted;
+/* The last value sent to the final presenter's side mask, for the test build. */
+int ultrawide_side_mask_wanted(void) {
+    return side_mask_wanted;
 }
 
 enum { PASSES_PER_VIEW = 0x2b, VERTEX_STRIDE = 0x20, MAX_FILL_VERTICES = 4 };
@@ -313,21 +312,11 @@ static uint64_t pointer_at(uint64_t address) {
     return value;
 }
 
-/* DEBUG_SAULO: the first widened fill of each pass, for the manual test. */
-static atomic_ullong debug_saulo_fill_passes;
-
-static void debug_saulo_fill(uint32_t layer) {
-    const unsigned long long bit = 1ull << (layer % PASSES_PER_VIEW);
-    if (!(atomic_fetch_or(&debug_saulo_fill_passes, bit) & bit))
-        printf("DEBUG_SAULO true ultrawide fill: pass 0x%x\n", layer % PASSES_PER_VIEW);
-}
-
 /* At a quad builder's call to the submit: rdi = layer, rdx = the built vertices, ecx = their count, r8 = a model
  * matrix, r9 = a texture. Only untextured canvas-space quads are fills. */
 void GUEST_HOOK_ABI ultrawide_fill_hook(GuestRegs *regs) {
     if (regs->r8 || regs->r9 || !ultrawide_is_screen_pass((uint32_t)regs->rdi)) return;
-    if (ultrawide_widen_fill((uint8_t *)(uintptr_t)regs->rdx, (uint32_t)regs->rcx, VERTEX_STRIDE, widening))
-        debug_saulo_fill((uint32_t)regs->rdi);
+    ultrawide_widen_fill((uint8_t *)(uintptr_t)regs->rdx, (uint32_t)regs->rcx, VERTEX_STRIDE, widening);
 }
 
 /* What the frame commit needs from the task walk that built the frame; the walk and the commit run on the game's
@@ -342,7 +331,6 @@ static struct {
     float playfield_left, playfield_right; /* world x */
     int route_map, town_map;
     uint64_t backdrop_models[PASSES_PER_VIEW]; /* by pass id: the model of its first backdrop */
-    float backdrop_y[PASSES_PER_VIEW][2];      /* DEBUG_SAULO: its clip y bottom and top */
     uint64_t backdrop_sets[PASSES_PER_VIEW];   /* by pass id: the set a backdrop of the next pass was moved into */
     float backdrop_reach[PASSES_PER_VIEW];     /* its |clip y| reach before the cover */
     uint64_t frame_sets[PASSES_PER_VIEW];      /* by pass id: the set the screen frame of the pass before went to */
@@ -407,68 +395,20 @@ void GUEST_HOOK_ABI ultrawide_camera_hook(GuestRegs *regs) {
     read_layers(stage);
 }
 
-static int clipped_passes(void) {
-    int count = 0;
-    for (uint32_t id = 1; id < PASSES_PER_VIEW; ++id) {
-        const UltrawideWorldFrame world = {committed.playfield, committed.parallax, committed.parallax_known,
-                                           committed.map_share, committed.route_map, committed.illustration};
-        const UltrawideSpan span = ultrawide_world_pass_span(id, &world, widening);
-        count += ultrawide_is_world_pass(id) && (span.left > 0.0f || span.right < 1.0f);
-    }
-    return count;
-}
-
-/* DEBUG_SAULO: one line whenever the frame's world policy changes, for the manual test. */
-static void debug_saulo_world(const UltrawideSpan *playfield, uint64_t passes) {
-    static int last = -1;
-    const int clipped = clipped_passes();
-    const int mode = committed.route_map ? 0 : committed.illustration ? 1 : clipped ? 2 : 3;
-    if (mode == last) return;
-    last = mode;
-    static const char *const names[] = {"route map 16:9", "fixed screen 16:9, backdrop behind", "background full",
-                                        "full"};
-    float viewport[4];
-    load(viewport, (const void *)(uintptr_t)(passes + PASS_SIZE + PASS_VIEWPORT), sizeof(viewport));
-    const float width = viewport[2] - viewport[0];
-    printf("DEBUG_SAULO true ultrawide world: %s, camera %#llx, limits %d..%d", names[mode],
-           (unsigned long long)frame.camera, frame.left, frame.right);
-    if (mode == 2)
-        printf(", playfield and foreground clipped to x %.0f..%.0f (%d passes)%s",
-               viewport[0] + width * committed.playfield.left, viewport[0] + width * committed.playfield.right, clipped,
-               playfield ? "" : ", no playfield layer");
-    if (mode >= 2 && committed.parallax_known) {
-        printf(", parallax");
-        for (uint32_t id = 1; id < PASSES_PER_VIEW; ++id)
-            if (committed.parallax_known >> id & 1) printf(" 0x%02x:%.2f", id, committed.parallax[id]);
-    }
-    printf("\n");
-}
-
 enum { FIXED_GAMEPLAY, FIXED_FALLBACK, FIXED_STABLE };
 
-static unsigned debug_saulo_transition_lines; /* DEBUG_SAULO */
+static unsigned transition_changes;
 
-unsigned ultrawide_debug_saulo_transition_lines(void) {
-    return debug_saulo_transition_lines;
+/* How many times the fixed-screen transition state changed, for the test build. */
+unsigned ultrawide_transition_changes(void) {
+    return transition_changes;
 }
 
-/* DEBUG_SAULO: once whenever the fixed-screen transition state changes, for the manual test. */
-static void debug_saulo_fixed_transition(int state) {
+static void note_fixed_transition(int state) {
     static int last = FIXED_GAMEPLAY;
-    static const char *const messages[] = {"gameplay resumed", "centred 16:9 fallback entered",
-                                            "stable ultrawide resumed"};
     if (state == last) return;
     last = state;
-    ++debug_saulo_transition_lines;
-    printf("DEBUG_SAULO true ultrawide fixed transition: %s\n", messages[state]);
-}
-
-/* DEBUG_SAULO: once when the final presenter's side mask turns on, for the manual test. */
-static void debug_saulo_side_mask(int fade_active) {
-    static int last;
-    if (fade_active == last) return;
-    last = fade_active;
-    if (fade_active) printf("DEBUG_SAULO true ultrawide final side mask: fade active\n");
+    ++transition_changes;
 }
 
 static int fixed_transition_active;
@@ -504,19 +444,13 @@ static void settle_frame(uint64_t passes) {
     memcpy(committed.backdrop_reach, frame.backdrop_reach, sizeof(committed.backdrop_reach));
     memcpy(committed.frame_sets, frame.frame_sets, sizeof(committed.frame_sets));
     committed.used_passes = frame.used_passes;
-    debug_saulo_world(frame.playfield ? &playfield : NULL, passes);
-    if (committed.route_map) {
-        static int debug_saulo_route; /* DEBUG_SAULO */
-        if (!debug_saulo_route++) printf("DEBUG_SAULO true ultrawide route map: clipped to the centred 16:9\n");
-    }
     int any_backdrop = 0;
     for (uint32_t id = 0; id < PASSES_PER_VIEW; ++id) any_backdrop |= frame.backdrop_sets[id] != 0;
     fixed_transition_active = committed.illustration && !any_backdrop;
-    debug_saulo_fixed_transition(!committed.illustration ? FIXED_GAMEPLAY
-                                 : any_backdrop            ? FIXED_STABLE
-                                                            : FIXED_FALLBACK);
-    debug_saulo_side_mask(frame.fade_active);
-    dcpgpu_debug_saulo_ultrawide_mask(frame.fade_active || fixed_transition_active);
+    note_fixed_transition(!committed.illustration ? FIXED_GAMEPLAY
+                          : any_backdrop            ? FIXED_STABLE
+                                                     : FIXED_FALLBACK);
+    dcpgpu_ultrawide_side_mask(frame.fade_active || fixed_transition_active);
     memset(&frame, 0, sizeof(frame));
 }
 
@@ -693,11 +627,6 @@ static int is_matte(const uint8_t *command, const ScreenMap *map) {
     return bands > 0;
 }
 
-/* DEBUG_SAULO: once per model data a band rule changed, for the manual test. */
-static void debug_saulo_band(const char *what, uint32_t moved) {
-    if (moved) printf("DEBUG_SAULO true ultrawide horizontal band: %s extended (%u pieces)\n", what, moved);
-}
-
 static int backdrop_fills(void) {
     if (!committed.illustration) return 0;
     for (uint32_t id = 0; id < PASSES_PER_VIEW; ++id)
@@ -711,7 +640,7 @@ static void extend_facility_frame(const uint8_t *command) {
     float matrix[16];
     load(matrix, command + COMMAND_MATRIX, sizeof(matrix));
     const ScreenMap map = canvas_map(matrix);
-    debug_saulo_band("town facility bars and lines", extend_bands(command, &map));
+    extend_bands(command, &map);
 }
 
 /* A widget part is full-width when its polygons, canvas units at the model's rest, reach both 16:9 edges; the open
@@ -726,20 +655,11 @@ static void widen_widget(uint8_t *command, uint64_t model) {
     const float reach = fmaxf(fabsf(bounds[1]), fabsf(bounds[3]));
     const int widens = ultrawide_widget_widens(type, reach);
     const float factor = ultrawide_widget_stretch(widening, world_window);
-    /* DEBUG_SAULO: each widget type's first full-width part and what happened to it, for the manual test. */
-    static uint64_t debug_saulo_seen[2];
-    if (!(debug_saulo_seen[widens] & 1ull << (type & 63))) {
-        debug_saulo_seen[widens] |= 1ull << (type & 63);
-        int16_t clip;
-        load(&clip, (const void *)(uintptr_t)(model + MODEL_CLIP), sizeof(clip));
-        printf("DEBUG_SAULO true ultrawide widget: type 0x%x clip %d reach y %.0f %s x%.4f\n", type, clip, reach,
-               widens ? "stretched" : "kept at its 16:9 width", widens ? factor : 1.0f);
-    }
     if (!widens) return;
     if (backdrop_fills()) {
         /* Behind a fixed screen's full backdrop the backing and its border reach the edges; its ornament stays. */
         const ScreenMap rest = canvas_map(kIdentity);
-        debug_saulo_band("dialogue backing", extend_bands(command, &rest));
+        extend_bands(command, &rest);
         return;
     }
     if (factor <= 1.0f) return;
@@ -756,8 +676,6 @@ static void zoom_map(uint8_t *command) {
     load(matrix, command + COMMAND_MATRIX, sizeof(matrix));
     ultrawide_zoom_part(matrix, factor);
     memcpy(command + COMMAND_MATRIX, matrix, sizeof(matrix));
-    static int debug_saulo_map; /* DEBUG_SAULO */
-    if (!debug_saulo_map++) printf("DEBUG_SAULO true ultrawide map: x%.4f\n", factor);
 }
 
 static int is_fade(uint64_t model) {
@@ -774,7 +692,7 @@ static void extend_fade(uint8_t *command) {
     load(matrix, command + COMMAND_MATRIX, sizeof(matrix));
     if (fabsf(matrix[0]) < 0.01f) return;
     const ScreenMap map = canvas_map(matrix);
-    debug_saulo_band("fade backing", extend_bands(command, &map));
+    extend_bands(command, &map);
 }
 
 /* The highest priority bucket of a set that holds commands: -1 when none, -2 when the buckets do not read as a list. */
@@ -788,23 +706,11 @@ static int last_filled_bucket(uint64_t set) {
     return -1;
 }
 
-static unsigned debug_saulo_backdrop_lines; /* DEBUG_SAULO */
+static unsigned backdrop_changes;
 
-unsigned ultrawide_debug_saulo_backdrop_lines(void) {
-    return debug_saulo_backdrop_lines;
-}
-
-/* DEBUG_SAULO: once per backdrop whose screen has a black matte, for the manual test. */
-static void debug_saulo_matte(uint32_t id) {
-    static uint64_t printed[PASSES_PER_VIEW];
-    const uint64_t backdrop = frame.backdrop_models[id];
-    if (!backdrop || printed[id] == backdrop) return;
-    printed[id] = backdrop;
-    printf("DEBUG_SAULO true ultrawide fixed matte: backdrop y %.2f..%.2f in pass 0x%02x; black bars %s\n",
-           frame.backdrop_y[id][0], frame.backdrop_y[id][1], id,
-           frame.matte_passes >> id & 1 ? "extended across full canvas width, drawn with the parts after them from "
-                                          "the next pass's set"
-                                        : "kept at 16:9, the next pass's set is not free");
+/* How many times a pass's backdrop model changed, for the test build. */
+unsigned ultrawide_backdrop_changes(void) {
+    return backdrop_changes;
 }
 
 static uint64_t set_of(uint64_t pass) {
@@ -833,12 +739,11 @@ static void move_matte(GuestRegs *regs, const uint8_t *command, const ScreenMap 
         frame.matte_passes |= 1ull << id;
         extend_bands(command, map);
     }
-    debug_saulo_matte(id);
 }
 
 /* A full-view part of another model after the pass's backdrop is the screen's frame (the title plate's ornaments and
  * long lines): in the frame set it is unzoomed and its lines reach the frame edges. */
-static void move_screen_frame(GuestRegs *regs, const uint8_t *command, uint64_t model, uint32_t id) {
+static void move_screen_frame(GuestRegs *regs, const uint8_t *command, uint32_t id) {
     const uint64_t pass = regs->rax, target = frame_set(pass, id);
     if (!target) return;
     regs->rdi = target;
@@ -846,14 +751,7 @@ static void move_screen_frame(GuestRegs *regs, const uint8_t *command, uint64_t 
     load(matrix, command + COMMAND_MATRIX, sizeof(matrix));
     load(vp, (const void *)(uintptr_t)(pass + PASS_VIEW_PROJECTION), sizeof(vp));
     const ScreenMap map = world_map(matrix, vp);
-    debug_saulo_band("fixed screen frame lines", extend_bands(command, &map));
-    static uint64_t debug_saulo_frame[PASSES_PER_VIEW]; /* DEBUG_SAULO */
-    if (debug_saulo_frame[id] != model) {
-        debug_saulo_frame[id] = model;
-        printf("DEBUG_SAULO true ultrawide fixed screen frame: model %#llx, pass 0x%02x part drawn unzoomed at the "
-               "whole width in pass 0x%02x\n",
-               (unsigned long long)model, id, id + 1);
-    }
+    extend_bands(command, &map);
 }
 
 /* On an illustration screen, the first part of a pass that covers the whole 16:9 view is its backdrop, and so are the
@@ -889,7 +787,7 @@ static void move_backdrop(GuestRegs *regs, const uint8_t *command, uint64_t mode
         return;
     }
     if (frame.backdrop_models[id] && frame.backdrop_models[id] != model) {
-        move_screen_frame(regs, command, model, id);
+        move_screen_frame(regs, command, id);
         return;
     }
     const uint64_t target = set_of(pass - PASS_SIZE);
@@ -902,15 +800,10 @@ static void move_backdrop(GuestRegs *regs, const uint8_t *command, uint64_t mode
     frame.backdrop_models[id] = model;
     /* Only the backdrop's own rows: the frame above and below it stays the black it was at 16:9. */
     frame.backdrop_reach[id - 1] = fminf(-bottom, top);
-    frame.backdrop_y[id][0] = bottom;
-    frame.backdrop_y[id][1] = top;
-    static uint64_t debug_saulo_backdrop[PASSES_PER_VIEW]; /* DEBUG_SAULO */
-    if (debug_saulo_backdrop[id] != model) {
-        debug_saulo_backdrop[id] = model;
-        ++debug_saulo_backdrop_lines;
-        printf("DEBUG_SAULO true ultrawide fixed backdrop: model %#llx, pass 0x%02x part over x %.2f..%.2f "
-               "y %.2f..%.2f, drawn at cover x%.4f in pass 0x%02x bucket %u; foreground and UI unchanged\n",
-               (unsigned long long)model, id, left, right, bottom, top, widening, id - 1, (uint32_t)regs->rdx);
+    static uint64_t last_backdrop[PASSES_PER_VIEW];
+    if (last_backdrop[id] != model) {
+        last_backdrop[id] = model;
+        ++backdrop_changes;
     }
 }
 
@@ -971,8 +864,6 @@ void GUEST_HOOK_ABI ultrawide_fade_hook(GuestRegs *regs) {
         }
     memmove(&fades[1], &fades[0], sizeof(fades) - sizeof(fades[0]));
     fades[0] = fade;
-    static int debug_saulo_fade_seen; /* DEBUG_SAULO */
-    if (!debug_saulo_fade_seen++) printf("DEBUG_SAULO true ultrawide fade: drawn\n");
 }
 
 static void branch_hook(GuestHook *hook, const char *name, uint8_t opcode, uint32_t site, uint32_t target,

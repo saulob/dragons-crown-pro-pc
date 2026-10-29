@@ -141,8 +141,12 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
                                 ? std::string(physical.getProperties().deviceName.data())
                                 : std::string());
         }
-        const int found = DcpGraphics::ResolveGpuByName(names, DcpSettings::Get().graphics_card);
+        const std::string& requested = DcpSettings::Get().graphics_card;
+        const int found = DcpGraphics::ResolveGpuByName(names, requested);
         if (found >= 0) {
+            if (!requested.empty() && names[found] != requested) {
+                std::printf("GPU: requested %s is not available\n", requested.c_str());
+            }
             std::printf("GPU: selected %s\n", names[found].c_str());
             physical_device_index = found;
         }

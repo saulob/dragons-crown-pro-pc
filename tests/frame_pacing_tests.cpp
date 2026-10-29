@@ -190,6 +190,15 @@ void TestRepeatsFillTheTicks() {
     CHECK(twice.repeats >= 58 && twice.repeats <= 61); // one repeat per new frame, 8.33 ms after it
 }
 
+void TestParseFrameRate() {
+    for (const int mode : Pacing::kFrameRateModes) {
+        CHECK(Pacing::ParseFrameRate(std::to_string(mode)) == mode);
+    }
+    for (const char* invalid : {"", "abc", "45", "-1", "090", "+90", "90.0", "90fps", "0x5a", "0.5", "00", " 90", "1000"}) {
+        CHECK(Pacing::ParseFrameRate(invalid) == 60);
+    }
+}
+
 void TestModeName() {
     CHECK(Pacing::ModeName(0) == "Unlimited" && Pacing::ModeName(144) == "144");
 }
@@ -216,7 +225,7 @@ void TestWiring() {
 
     const std::string settings = ReadSource("gpu/shim/dcp_settings.cpp");
     CHECK(Contains(settings, "key == \"frame_rate\""));
-    CHECK(Contains(settings, "IsFrameRateMode(fps) ? fps : 60"));
+    CHECK(Contains(settings, "ParseFrameRate(value)"));
 
     const std::string presenter = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp");
     CHECK(InOrder(presenter, "void Presenter::RetireFrame(Frame* frame) {", "free_queue.push_back(frame);"));
@@ -232,6 +241,7 @@ int main() {
     TestVsyncBoundsTheCadence();
     TestLimiterSlots();
     TestRepeatsFillTheTicks();
+    TestParseFrameRate();
     TestModeName();
     TestGamePacingIsUntouched();
     TestWiring();

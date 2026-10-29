@@ -1095,7 +1095,7 @@ static void TestBackdrop(void) {
         memcpy(matte_original, mattes.model.positions, sizeof(matte_original));
         memcpy(colours, mattes.colours, sizeof(colours));
         memcpy(polygons, mattes.model.polygons, sizeof(polygons));
-        const unsigned printed = ultrawide_debug_saulo_backdrop_lines();
+        const unsigned printed = ultrawide_backdrop_changes();
         for (int frame_index = 0; frame_index < 3; ++frame_index) {
             GuestRegs regs = queue_model_part(&call, base, passes, 0x01, 1, backdrops[screen], backdrop_model, NULL);
             CHECK(regs.rdi == set0);
@@ -1119,7 +1119,7 @@ static void TestBackdrop(void) {
             run_camera(camera, 0.0f, 1280.0f, -640, 640);
             commit_frame(passes);
         }
-        CHECK(ultrawide_debug_saulo_backdrop_lines() == printed + 1);
+        CHECK(ultrawide_backdrop_changes() == printed + 1);
         const float edge = 406.5f * 1.3125f;
         // Top (odd) and bottom (even) bars: the whole frame width at 21:9; y, height, colour and alpha as they were.
         for (int i = 0; i < FAKE_POLYGONS; ++i)
@@ -1267,43 +1267,43 @@ static void TestFixedScreenTransition(void) {
     // Gameplay: a wide stage, nothing fixed about the screen, no mask.
     run_camera(camera, 0.0f, 812.0f, -3291, 3324);
     commit_frame(passes);
-    CHECK(!ultrawide_fixed_transition_active() && !ultrawide_debug_saulo_mask_wanted());
-    unsigned lines = ultrawide_debug_saulo_transition_lines(), backdrops = ultrawide_debug_saulo_backdrop_lines();
+    CHECK(!ultrawide_fixed_transition_active() && !ultrawide_side_mask_wanted());
+    unsigned lines = ultrawide_transition_changes(), backdrops = ultrawide_backdrop_changes();
 
     // Entering the guild with no backdrop part queued yet: the fallback, on this very frame, both world passes
     // tried (0x01, where the backdrop belongs, and 0x05, an unrelated one) at the same centred 16:9, masked.
     run_camera(camera, 0.0f, 1280.0f, -640, 640);
     commit_frame(passes);
-    CHECK(ultrawide_fixed_transition_active() && ultrawide_debug_saulo_mask_wanted());
-    CHECK(ultrawide_debug_saulo_transition_lines() == lines + 1);
-    CHECK(ultrawide_debug_saulo_backdrop_lines() == backdrops); // no cover relocation while held
+    CHECK(ultrawide_fixed_transition_active() && ultrawide_side_mask_wanted());
+    CHECK(ultrawide_transition_changes() == lines + 1);
+    CHECK(ultrawide_backdrop_changes() == backdrops); // no cover relocation while held
     set_viewport(passes, 0x01, v);
     CHECK(v[0] == 300.0f && v[2] == 2220.0f);
     set_viewport(passes, 0x05, v);
     CHECK(v[0] == 300.0f && v[2] == 2220.0f); // one mapping for every world pass
-    lines = ultrawide_debug_saulo_transition_lines();
+    lines = ultrawide_transition_changes();
 
     // The backdrop appears: stable, cover relocation resumes, the mask lifts.
     queue_model_part(&call, base, passes, 0x01, 1, knight, 0x8a00, NULL);
     run_camera(camera, 0.0f, 1280.0f, -640, 640);
     commit_frame(passes);
-    CHECK(!ultrawide_fixed_transition_active() && !ultrawide_debug_saulo_mask_wanted());
-    CHECK(ultrawide_debug_saulo_transition_lines() == lines + 1);
-    CHECK(ultrawide_debug_saulo_backdrop_lines() == backdrops + 1);
-    lines = ultrawide_debug_saulo_transition_lines();
+    CHECK(!ultrawide_fixed_transition_active() && !ultrawide_side_mask_wanted());
+    CHECK(ultrawide_transition_changes() == lines + 1);
+    CHECK(ultrawide_backdrop_changes() == backdrops + 1);
+    lines = ultrawide_transition_changes();
 
     // Leaving: the backdrop stops being queued while still illustration: the fallback again, same frame.
     run_camera(camera, 0.0f, 1280.0f, -640, 640);
     commit_frame(passes);
-    CHECK(ultrawide_fixed_transition_active() && ultrawide_debug_saulo_mask_wanted());
-    CHECK(ultrawide_debug_saulo_transition_lines() == lines + 1);
-    lines = ultrawide_debug_saulo_transition_lines();
+    CHECK(ultrawide_fixed_transition_active() && ultrawide_side_mask_wanted());
+    CHECK(ultrawide_transition_changes() == lines + 1);
+    lines = ultrawide_transition_changes();
 
     // Gameplay resumes.
     run_camera(camera, 0.0f, 812.0f, -3291, 3324);
     commit_frame(passes);
-    CHECK(!ultrawide_fixed_transition_active() && !ultrawide_debug_saulo_mask_wanted());
-    CHECK(ultrawide_debug_saulo_transition_lines() == lines + 1);
+    CHECK(!ultrawide_fixed_transition_active() && !ultrawide_side_mask_wanted());
+    CHECK(ultrawide_transition_changes() == lines + 1);
     free(passes);
     free(memory);
 }
@@ -1327,18 +1327,18 @@ static void TestFadeSideMask(void) {
 
     run_camera(camera, 0.0f, 812.0f, -3291, 3324); // plain gameplay: no fixed-screen transition either
     commit_frame(passes);
-    CHECK(!ultrawide_debug_saulo_mask_wanted());
+    CHECK(!ultrawide_side_mask_wanted());
 
     memset(&regs, 0, sizeof(regs));
     regs.rdi = fade_model;
     ultrawide_fade_hook(&regs);
     run_camera(camera, 0.0f, 812.0f, -3291, 3324);
     commit_frame(passes);
-    CHECK(!ultrawide_fixed_transition_active() && ultrawide_debug_saulo_mask_wanted());
+    CHECK(!ultrawide_fixed_transition_active() && ultrawide_side_mask_wanted());
 
     run_camera(camera, 0.0f, 812.0f, -3291, 3324); // the fade stops drawing: the mask follows, next frame
     commit_frame(passes);
-    CHECK(!ultrawide_debug_saulo_mask_wanted());
+    CHECK(!ultrawide_side_mask_wanted());
     free(passes);
     free(memory);
 }

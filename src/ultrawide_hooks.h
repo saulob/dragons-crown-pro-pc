@@ -140,14 +140,13 @@ void GUEST_HOOK_ABI ultrawide_commit_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI ultrawide_part_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI ultrawide_fade_hook(GuestRegs *regs);
 
-/* DEBUG_SAULO: how many fixed backdrop lines were printed. */
-unsigned ultrawide_debug_saulo_backdrop_lines(void);
-/* DEBUG_SAULO: how many fixed-screen transition state changes (fallback entered, stable resumed, gameplay resumed)
- * were printed. */
-unsigned ultrawide_debug_saulo_transition_lines(void);
-/* DEBUG_SAULO: the last value sent towards the final presenter's side mask (fade active or the fallback active),
- * for the test build only. */
-int ultrawide_debug_saulo_mask_wanted(void);
+/* For the test build: how many times a pass's fixed backdrop model changed. */
+unsigned ultrawide_backdrop_changes(void);
+/* For the test build: how many fixed-screen transition state changes (fallback entered, stable resumed, gameplay
+ * resumed) happened. */
+unsigned ultrawide_transition_changes(void);
+/* For the test build: the last value sent towards the final presenter's side mask (fade active or the fallback active). */
+int ultrawide_side_mask_wanted(void);
 
 void ultrawide_record_hooks(const UltrawideRecord *record, GuestHook hooks[ULTRAWIDE_HOOK_COUNT]);
 

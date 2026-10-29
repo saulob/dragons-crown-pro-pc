@@ -17,7 +17,6 @@
 #include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
-#include "video_core/renderer_vulkan/vk_ultrawide_capture.h"
 
 extern "C" void runtime_log_flush(void);
 
@@ -47,7 +46,7 @@ void ToggleAmdWaterFix(bool repeat) {
         return;
     }
     const char* state = fix.On() ? "ON" : "OFF";
-    std::printf("DEBUG_SAULO AMD water fix: %s (%s)\n", state, DcpAmdWaterFix::Hazards().Summary().c_str());
+    std::printf("GPU: AMD water fix %s\n", state);
     std::fflush(stdout);
     DcpOverlay::ShowNotice(std::string("AMD Water Fix: ") + state);
 }
@@ -133,11 +132,10 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
                 display ? int(display - displays.data()) + 1 : 0, displays.size(), display_name.c_str(),
                 window_width, window_height, settings.vsync ? "on" : "off", settings.show_fps_title ? "on" : "off",
                 settings.show_resolution_title ? "on" : "off");
-#ifndef _WIN32
     const SDL_DisplayMode* current = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
-    std::printf("Session: %s; display refresh %.2f Hz\n",
-                DcpPresent::DescribeSession(DcpPresent::GamescopeSession(), std::getenv).c_str(),
-                current ? current->refresh_rate : 0.0f);
+    std::printf("Display: refresh %.2f Hz\n", current ? current->refresh_rate : 0.0f);
+#ifndef _WIN32
+    std::printf("Session: %s\n", DcpPresent::DescribeSession(DcpPresent::GamescopeSession(), std::getenv).c_str());
 #endif
 }
 
@@ -356,16 +354,13 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
             const bool water_fix_key = event.key.scancode == SDL_SCANCODE_F3;
-            const bool capture_key = event.key.scancode == SDL_SCANCODE_F9; // DEBUG_SAULO
-            const bool host_shortcut = window_shortcut || water_fix_key || capture_key ||
+            const bool host_shortcut = window_shortcut || water_fix_key ||
                                        event.key.scancode == DcpSettings::Get().menu_key ||
                                        event.key.scancode == SDL_SCANCODE_INSERT;
             if (window_shortcut && !event.key.repeat) {
                 ToggleBorderless();
             } else if (water_fix_key) {
                 ToggleAmdWaterFix(event.key.repeat);
-            } else if (capture_key) {
-                UltrawideCapture::Press(event.key.repeat); // DEBUG_SAULO
             } else if (DcpCursor::IsGameplayKey(event.key.repeat, host_shortcut) && !ui) {
                 cursor.KeyboardActivity();
             }

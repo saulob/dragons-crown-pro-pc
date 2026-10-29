@@ -14,6 +14,7 @@
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
 #include "game_files.h"
+#include "game_process.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -334,8 +335,9 @@ extern "C" void dcp_log_gameplay_settings(const char* settings_file, const char*
     const bool supported = SupportsJapaneseNpcVoices(build);
     const bool voices = supported && settings.GetBool(kJapaneseNpcVoicesKey, false);
     std::printf("Gameplay: Japanese NPC Voices %s\n", supported ? (voices ? "on" : "off") : "unsupported");
+    const bool overlays = kSeparateGameProcessAvailable && settings.GetBool(kAllowOverlayProgramsKey, false);
     std::printf("Gameplay: Allow overlay programs %s\n",
-                settings.GetBool(kAllowOverlayProgramsKey, false) ? "on" : "off");
+                kSeparateGameProcessAvailable ? (overlays ? "on" : "off") : "unsupported");
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir) {

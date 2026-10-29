@@ -228,16 +228,16 @@ AccurateTimer::AccurateTimer(std::chrono::nanoseconds target_interval)
     : target_interval(target_interval) {}
 
 void AccurateTimer::Start() {
-    const auto begin_sleep = std::chrono::high_resolution_clock::now();
+    const auto begin_sleep = std::chrono::steady_clock::now();
     if (total_wait.count() > 0) {
         AccurateSleep(total_wait, nullptr, false);
     }
-    start_time = std::chrono::high_resolution_clock::now();
+    start_time = std::chrono::steady_clock::now();
     total_wait -= std::chrono::duration_cast<std::chrono::nanoseconds>(start_time - begin_sleep);
 }
 
 void AccurateTimer::End() {
-    auto now = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::steady_clock::now();
     total_wait +=
         target_interval - std::chrono::duration_cast<std::chrono::nanoseconds>(now - start_time);
 }

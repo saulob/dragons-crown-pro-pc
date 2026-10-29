@@ -32,6 +32,16 @@ constexpr bool IsUnlimited(int setting) {
     return setting == 0;
 }
 
+// The setting a dcp.ini value stands for; anything but a stored value exactly is the original 60, as in the launcher.
+inline int ParseFrameRate(const std::string& value) {
+    for (const int mode : kFrameRateModes) {
+        if (value == std::to_string(mode)) {
+            return mode;
+        }
+    }
+    return kGameHz;
+}
+
 // The rate the setting asks for; 0 = uncapped.
 constexpr int RenderFps(int setting) {
     if (IsUnlimited(setting)) {

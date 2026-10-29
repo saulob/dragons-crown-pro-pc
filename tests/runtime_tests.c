@@ -139,6 +139,29 @@ static void test_direct_aliasing(void) {
     }
 }
 
+int runtime_memory_write_backing(uintptr_t address, const void *data, uint64_t size);
+
+/* A flexible mapping split by a partial unmap keeps its backing pages: the right part still maps the pages it did. */
+static void test_flexible_split(void) {
+    MapFlexible map = (MapFlexible)runtime_memory_resolve("sceKernelMapNamedFlexibleMemory");
+    Unmap unmap = (Unmap)runtime_memory_resolve("sceKernelMunmap");
+    void *base = NULL;
+    CHECK(map(&base, 3 * GUEST_PAGE, PROT_CPU_RW, 0, "split") == 0 && base);
+    unsigned char *at = base;
+    if (!at) return;
+    at[0] = 0xa0;
+    at[2 * GUEST_PAGE] = 0xc2;
+    CHECK(unmap(at + GUEST_PAGE, GUEST_PAGE) == 0);
+    const unsigned char patch = 0x5a;
+    CHECK(runtime_memory_write_backing((uintptr_t)at + 2 * GUEST_PAGE + 5, &patch, 1));
+    CHECK(at[2 * GUEST_PAGE + 5] == patch && at[5] == 0); /* the write reached the right page, not the left one */
+    CHECK(unmap(at + 2 * GUEST_PAGE, GUEST_PAGE) == 0);
+    CHECK(at[0] == 0xa0);                                 /* releasing the right page leaves the left one alone */
+    void *again = at + 2 * GUEST_PAGE;
+    CHECK(map(&again, GUEST_PAGE, PROT_CPU_RW, GUEST_MAP_FIXED, "again") == 0 && *(unsigned char *)again == 0);
+    CHECK(at[0] == 0xa0 && unmap(at, GUEST_PAGE) == 0 && unmap(again, GUEST_PAGE) == 0);
+}
+
 /* ---- fibers ---- */
 typedef int32_t (ABI *FiberInitialize)(void *fiber, const char *name, void (ABI *entry)(uint64_t, uint64_t), uint64_t arg,
                                        void *context, uint64_t size, const void *option, uint32_t version);
@@ -378,6 +401,7 @@ int main(void) {
     test_reservation();
     test_mapping();
     test_direct_aliasing();
+    test_flexible_split();
     test_fibers();
     test_thread_stacks();
     printf("%d checks, %d failed\n", checks, failures);

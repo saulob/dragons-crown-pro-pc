@@ -6,7 +6,6 @@
 #include "dcp_amd_water_fix.h"
 #include "dcp_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
-#include "video_core/renderer_vulkan/vk_ultrawide_capture.h"
 #include "common/debug.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
@@ -50,39 +49,12 @@ bool DepthTargetWritesStencil(const AmdGpu::Regs& regs, const VideoCore::ImageVi
     return has_stencil && regs.depth_control.stencil_enable && !view.is_storage;
 }
 
-// DEBUG_SAULO: AMD water fix (issue #32) session log lines.
-void LogWaterFix(const std::string& line) {
-    std::printf("DEBUG_SAULO AMD water fix: %s\n", line.c_str());
-    std::fflush(stdout);
-}
-
-std::string DescribeImage(const VideoCore::Image& image) {
-    const auto& info = image.info;
-    return fmt::format("image {} {:#x}+{:#x} {} {}x{} mips {} layers {}", image.image_uid,
-                       info.guest_address, info.guest_size, vk::to_string(info.pixel_format),
-                       info.size.width, info.size.height, info.resources.levels,
-                       info.resources.layers);
-}
-
-std::string DescribeRange(const VideoCore::SubresourceRange& range) {
-    return fmt::format("mip {}+{} layer {}+{}", range.base.level, range.extent.levels,
-                       range.base.layer, range.extent.layers);
-}
-
 void InitAmdWaterFix(const Instance& instance) {
-    const auto extensions = instance.GetAvailableExtensions();
-    const auto has = [&](std::string_view name) {
-        return std::ranges::find(extensions, name) != extensions.end();
-    };
     const u32 vendor = instance.GetVendorID();
     DcpAmdWaterFix::State().Init(vendor);
-    LogWaterFix(fmt::format(
-        "vendor={:#06x} device={} layout={} dynamic_state={} feedback_loop={} default={} F3=enabled",
-        vendor, instance.GetModelName(),
-        has(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME) ? "yes" : "no",
-        has(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_EXTENSION_NAME) ? "yes" : "no",
-        instance.IsAttachmentFeedbackLoopLayoutSupported() ? "feedback_layout" : "general",
-        DcpAmdWaterFix::State().On() ? "ON" : "OFF"));
+    std::printf("GPU: AMD water fix %s (vendor %#06x, %s, F3 switches it)\n",
+                DcpAmdWaterFix::State().On() ? "on" : "off", vendor,
+                instance.IsAttachmentFeedbackLoopLayoutSupported() ? "feedback loop layout" : "General layout");
 }
 } // namespace
 
@@ -394,8 +366,7 @@ bool Rasterizer::DrawPipeWanted() {
 }
 
 bool Rasterizer::UseDrawPipe() const {
-    return draw_pipe && !host_markers_enabled && !DcpToggle::Disabled(DcpToggle::DrawPipeline) &&
-           !UltrawideCapture::Active(); // DEBUG_SAULO
+    return draw_pipe && !host_markers_enabled && !DcpToggle::Disabled(DcpToggle::DrawPipeline);
 }
 
 bool Rasterizer::OnStageA() const {
@@ -1004,9 +975,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
-    if (UltrawideCapture::Active()) [[unlikely]] {
-        CaptureBeforeDraw(pipeline); // DEBUG_SAULO
-    }
     scheduler.BeginRendering(state);
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
@@ -1047,9 +1015,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                           u32(regs.depth_control.depth_write_enable));
             FrameCapture::Note(note);
         }
-    }
-    if (UltrawideCapture::Active()) [[unlikely]] {
-        CaptureAfterDraw(pipeline, state, Regs(), num_indices, num_instances, is_indexed, false); // DEBUG_SAULO
     }
     DebugState.IncDrawCall();
 
@@ -1133,9 +1098,6 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
-    if (UltrawideCapture::Active()) [[unlikely]] {
-        CaptureBeforeDraw(pipeline); // DEBUG_SAULO
-    }
     scheduler.BeginRendering(state);
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
@@ -1166,9 +1128,6 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
             }
         }
     });
-    if (UltrawideCapture::Active()) [[unlikely]] {
-        CaptureAfterDraw(pipeline, state, Regs(), 0, 0, is_indexed, true); // DEBUG_SAULO
-    }
     DebugState.IncDrawCall();
 
     ResetBindings(false);
@@ -1390,7 +1349,7 @@ bool Rasterizer::TexturesBindableOnHelper(const Shader::Info& stage,
         }
         VideoCore::ImageId image_id = entry.found_id;
         auto* image = &texture_cache.GetImage(image_id);
-        if (const auto depth_image_id = LinkedDepth(*image, false)) {
+        if (const auto depth_image_id = LinkedDepth(*image)) {
             image_id = depth_image_id;
             image = &texture_cache.GetImage(image_id);
         }
@@ -1402,22 +1361,14 @@ bool Rasterizer::TexturesBindableOnHelper(const Shader::Info& stage,
     return true;
 }
 
-VideoCore::ImageId Rasterizer::LinkedDepth(VideoCore::Image& image, bool record) {
+VideoCore::ImageId Rasterizer::LinkedDepth(VideoCore::Image& image) {
     const auto depth_id = texture_cache.GetAssociatedDepth(image);
     const bool stencil_format = image.info.pixel_format == vk::Format::eUndefined ||
                                 LiverpoolToVK::IsFormatStencilCompatible(image.info.pixel_format);
     if (!depth_id || stencil_format) {
         return depth_id;
     }
-    const bool follow = DcpAmdWaterFix::FollowsStencilLink(water_fix, stencil_format);
-    if (record &&
-        DcpAmdWaterFix::Hazards().Record(DcpAmdWaterFix::Hazard::StencilColor, image.image_uid)) {
-        LogWaterFix(fmt::format("stencil_color sampled {} is linked as the stencil of depth {}; {}",
-                                DescribeImage(image), DescribeImage(texture_cache.GetImage(depth_id)),
-                                follow ? "redirected to the depth image (fix off)"
-                                       : "sampled from its own image"));
-    }
-    return follow ? depth_id : VideoCore::ImageId{};
+    return DcpAmdWaterFix::FollowsStencilLink(water_fix, stencil_format) ? depth_id : VideoCore::ImageId{};
 }
 
 void Rasterizer::RunTextureTask(void* context) {
@@ -2272,8 +2223,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             // target in feedback loop. Depth images are excluded because they can't be bound as
             // storage and feedback loop doesn't make sense for them
             if ((binding.force_general || binding.is_target) && !image.info.props.is_depth) {
-                const bool feedback_layout = instance.IsAttachmentFeedbackLoopLayoutSupported();
-                if (feedback_layout && image.binding.is_target) {
+                if (instance.IsAttachmentFeedbackLoopLayoutSupported() && image.binding.is_target) {
                     barrier |= runtime.Transit(
                         &image, vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT,
                         vk::PipelineStageFlagBits2::eAllGraphics, vk::AccessFlagBits2::eShaderRead);
@@ -2281,18 +2231,6 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                     barrier |= runtime.Transit(
                         &image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eAllCommands,
                         vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite);
-                }
-                // DEBUG_SAULO: telemetry only (issue #32).
-                if (binding.is_target && DcpAmdWaterFix::Hazards().Record(
-                                             DcpAmdWaterFix::Hazard::ColorFeedback, image.image_uid)) {
-                    const auto target =
-                        std::ranges::find(cb_descs, image_id, &RenderTargetInfo::first);
-                    LogWaterFix(fmt::format(
-                        "color_feedback {} sampled {} while attached {} ({} layout); unchanged",
-                        DescribeImage(image), DescribeRange(desc.view_info.range),
-                        target != cb_descs.end() ? DescribeRange(target->second.view_info.range)
-                                                 : "?",
-                        feedback_layout ? "feedback loop" : "General"));
                 }
             } else if (image.info.props.is_depth && binding.is_target &&
                        DcpAmdWaterFix::SharesDepthLayout(water_fix, true, depth_target_writes)) {
@@ -2318,9 +2256,6 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             image.usage.texture |= !is_storage;
             if (FrameCapture::Active()) {
                 FrameCapture::Sampled(image.info, is_storage);
-            }
-            if (UltrawideCapture::Active() && stage.sw_stage != Shader::SwStage::Compute) {
-                CaptureSampled(image, is_storage); // DEBUG_SAULO
             }
 
             image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
@@ -2436,8 +2371,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
                                      u32 first_image_idx, bool& barrier, TextureSet*& slot) {
     const u32 count = static_cast<u32>(stage.images.size());
     if (!prepared || count == 0 || count > TextureSet::MaxImages ||
-        DcpToggle::Disabled(DcpToggle::TextureSetMemo) || FrameCapture::Active() ||
-        UltrawideCapture::Active()) {
+        DcpToggle::Disabled(DcpToggle::TextureSetMemo) || FrameCapture::Active()) {
         return false;
     }
     for (const auto& image : stage.images) {
@@ -2717,21 +2651,9 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
                                     ? vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal
                                 : has_stencil ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
                                               : vk::ImageLayout::eDepthReadOnlyOptimal;
-        const bool sampled = image.binding.is_bound;
         const bool shared_layout =
-            !reduced && DcpAmdWaterFix::SharesDepthLayout(water_fix, sampled, depth_target_writes);
-        // DEBUG_SAULO: issue #32.
-        if (!reduced && sampled && depth_target_writes &&
-            DcpAmdWaterFix::Hazards().Record(DcpAmdWaterFix::Hazard::DepthSampled,
-                                             image.image_uid)) {
-            LogWaterFix(fmt::format(
-                "depth_sampled {} attached {} with depth_write={} stencil_write={} while "
-                "sampled; descriptor {}, attachment {}; {}",
-                DescribeImage(image), DescribeRange(desc.view_info.range),
-                bool(desc.view_info.is_storage), stencil_write,
-                vk::to_string(image.backing->state.layout), vk::to_string(new_layout),
-                shared_layout ? "both General" : "unchanged (fix off)"));
-        }
+            !reduced && DcpAmdWaterFix::SharesDepthLayout(water_fix, image.binding.is_bound,
+                                                          depth_target_writes);
         if (shared_layout) {
             needs_barrier |= runtime.Transit(&image, vk::ImageLayout::eGeneral,
                                              vk::PipelineStageFlagBits2::eEarlyFragmentTests |

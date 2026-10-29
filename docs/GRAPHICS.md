@@ -34,8 +34,8 @@ blitting the finished frame into it and before the layout transition to present:
 picture reaches the screen, so nothing later (the overlay draws over, never under, and the present itself copies
 nothing new) can put a stale picture back into them. It runs whenever `src/ultrawide_hooks.c` says the real loading
 or saving fade, or the fixed-screen transition fallback below, is active for the frame being built
-(`dcpgpu_debug_saulo_ultrawide_mask`, a frame-scoped flag read in `PresentUltrawideSideMask`); the areas are
-`gpu/shim/dcp_ultrawide_capture.h`'s `SidesOf`, empty at 16:9 or narrower. The centre, and the crest or scene behind
+(`dcpgpu_ultrawide_side_mask`, a frame-scoped flag read in `PresentUltrawideSideMask`); the areas are
+`gpu/shim/dcp_ultrawide_sides.h`'s `SidesOf`, empty at 16:9 or narrower. The centre, and the crest or scene behind
 it, are untouched.
 
 Swapchain recreation (a window resize, F11, a display mode or VSync change) waits for the device under the queue submission
@@ -138,6 +138,7 @@ Off unless set to `1` (or a value), never written to `dcp.ini`, and none changes
 | `DCP_GPU_LOG` | Video core log level: `trace`, `debug`, `info`, `warning` (default), `error` |
 | `DCP_FRAME_STATS` | Frame rate, pacing and stall causes every 5 seconds |
 | `DCP_GPU_PROFILE` | GPU time per render pass and dispatch every 5 seconds |
+| `DCP_INPUT_LATENCY_TRACE=1` | Input and presentation delays, one log line each every 5 seconds |
 | `DCP_PERF_DIAG`, `DCP_RECORDER_TRACE`, `DCP_DCB_STATS`, `DCP_WARN_META_TEXTURE` | Wait, recorder, command buffer and metadata diagnostics |
 | `DCP_CAPTURE_TRIGGER=<file>`, `DCP_CAPTURE_DIR` | Creating the file records the passes of the next frame (default folder `user\captures`) |
 | `DCP_WRITE_LOG=1` or `2` | The GPU's last writes to guest memory, printed with a fault report |

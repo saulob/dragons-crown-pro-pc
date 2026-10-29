@@ -3,12 +3,8 @@
 // GPUs, off elsewhere; F3 switches it on any GPU for the running process only (tests/amd_water_fix_tests.cpp).
 #pragma once
 
-#include <array>
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
-#include <mutex>
-#include <string>
 
 namespace DcpAmdWaterFix {
 
@@ -59,59 +55,6 @@ inline bool FollowsStencilLink(bool fix_on, bool stencil_format) {
 /// then share the General layout instead of disagreeing.
 inline bool SharesDepthLayout(bool fix_on, bool sampled, bool attachment_writes) {
     return fix_on && sampled && attachment_writes;
-}
-
-enum class Hazard : std::size_t { StencilColor, StencilLink, DepthSampled, ColorFeedback, Count };
-
-inline constexpr std::array<const char*, std::size_t(Hazard::Count)> kHazardNames = {
-    "stencil_color", "stencil_link", "depth_sampled", "color_feedback"};
-
-/// DEBUG_SAULO: how often each hazard was reached, and which of the first few distinct resources to describe in the
-/// session log.
-class HazardLog {
-public:
-    static constexpr std::size_t kDescribed = 4;
-
-    /// Counts one occurrence; true when `key` is among the first kDescribed distinct keys of its kind.
-    bool Record(Hazard kind, std::uint64_t key) {
-        const std::size_t k = std::size_t(kind);
-        counts_[k].fetch_add(1, std::memory_order_relaxed);
-        std::scoped_lock lock{mutex_};
-        auto& seen = keys_[k];
-        for (std::size_t i = 0; i < described_[k]; ++i) {
-            if (seen[i] == key) {
-                return false;
-            }
-        }
-        if (described_[k] == kDescribed) {
-            return false;
-        }
-        seen[described_[k]++] = key;
-        return true;
-    }
-
-    std::uint64_t Count(Hazard kind) const {
-        return counts_[std::size_t(kind)].load(std::memory_order_relaxed);
-    }
-
-    std::string Summary() const {
-        std::string text;
-        for (std::size_t k = 0; k < kHazardNames.size(); ++k) {
-            text += (k ? " " : "") + std::string(kHazardNames[k]) + "=" + std::to_string(Count(Hazard(k)));
-        }
-        return text;
-    }
-
-private:
-    std::array<std::atomic<std::uint64_t>, std::size_t(Hazard::Count)> counts_{};
-    std::mutex mutex_;
-    std::array<std::array<std::uint64_t, kDescribed>, std::size_t(Hazard::Count)> keys_{};
-    std::array<std::size_t, std::size_t(Hazard::Count)> described_{};
-};
-
-inline HazardLog& Hazards() {
-    static HazardLog log;
-    return log;
 }
 
 } // namespace DcpAmdWaterFix

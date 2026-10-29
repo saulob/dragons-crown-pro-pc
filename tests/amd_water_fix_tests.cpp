@@ -100,21 +100,6 @@ void TestDepthLayout() {
     CHECK(!SharesDepthLayout(false, true, true));
 }
 
-void TestHazardLog() {
-    HazardLog log;
-    CHECK(log.Record(Hazard::DepthSampled, 7));
-    CHECK(!log.Record(Hazard::DepthSampled, 7));
-    CHECK(log.Record(Hazard::StencilColor, 7)); // kinds are separate
-    for (std::uint64_t key = 100; key < 100 + HazardLog::kDescribed - 1; ++key) {
-        CHECK(log.Record(Hazard::DepthSampled, key));
-    }
-    CHECK(!log.Record(Hazard::DepthSampled, 999)); // described limit reached
-    CHECK(log.Count(Hazard::DepthSampled) == HazardLog::kDescribed + 2);
-    CHECK(log.Count(Hazard::ColorFeedback) == 0);
-    CHECK(log.Summary() == "stencil_color=1 stencil_link=0 depth_sampled=" +
-                               std::to_string(HazardLog::kDescribed + 2) + " color_feedback=0");
-}
-
 } // namespace
 
 int main() {
@@ -124,7 +109,6 @@ int main() {
     TestNoEnvironmentSwitch();
     TestStencilLink();
     TestDepthLayout();
-    TestHazardLog();
     if (g_failures) {
         std::printf("%d failure(s)\n", g_failures);
         return 1;
