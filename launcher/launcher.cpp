@@ -184,20 +184,41 @@ __attribute__((format(printf, 1, 2))) void Log(const char* format, ...) {
     std::printf("\n");
 }
 
-ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
+bool LoadLauncherImage(const char* file, DcpPng::Image& image) {
     const char* base = SDL_GetBasePath();
     if (!base) {
-        return ImTextureID{};
+        return false;
     }
-    const std::filesystem::path path = PathFromUtf8(base) / "assets" / "launcher" / "header-art.png";
+    const std::filesystem::path path = PathFromUtf8(base) / "assets" / "launcher" / file;
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        return ImTextureID{};
+        return false;
     }
     const std::vector<unsigned char> encoded((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    DcpPng::Image image;
     if (!DcpPng::DecodeRgba(encoded.data(), encoded.size(), image)) {
-        Log("launcher header art could not be decoded: %s", Utf8(path).c_str());
+        Log("launcher image could not be decoded: %s", Utf8(path).c_str());
+        return false;
+    }
+    return true;
+}
+
+ImTextureID LoadSponsorIcon(LauncherHost& host) {
+    DcpPng::Image image;
+    if (!LoadLauncherImage("sponsor-heart.png", image)) {
+        return ImTextureID{};
+    }
+    // Transparent texels are white too, so linear filtering does not darken the heart's edge.
+    for (size_t i = 0; i + 3 < image.rgba.size(); i += 4) {
+        if (image.rgba[i + 3] == 0) {
+            image.rgba[i] = image.rgba[i + 1] = image.rgba[i + 2] = 255;
+        }
+    }
+    return host.CreateTexture(image.rgba.data(), image.width, image.height);
+}
+
+ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
+    DcpPng::Image image;
+    if (!LoadLauncherImage("header-art.png", image)) {
         return ImTextureID{};
     }
     const ImTextureID texture = host.CreateTexture(image.rgba.data(), image.width, image.height);
@@ -296,6 +317,7 @@ public:
         placement_ = PlacementTracker(host_.Restored());
         fonts_ = trg::LoadSystemFonts(18.0f);
         header_art_ = LoadHeaderArt(host_, header_art_aspect_);
+        sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         updater_ = std::make_unique<trg::update::UpdateController>(MakeUpdateConfig(InstallDir()));
@@ -598,6 +620,7 @@ private:
             {"BY SAULOB", kAuthorUrl},
         };
         c.branding.background = LauncherHeader(header_art_, header_art_aspect_);
+        c.sponsor = {"Sponsor on GitHub", kSponsorUrl, sponsor_icon_};
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
@@ -1118,6 +1141,10 @@ private:
     }
 
     void PageAbout(trg::Ui& ui) {
+        ui.SponsorCard(
+            "This open source PC port is maintained and developed in my free time. If you enjoy the project and would "
+            "like to support its continued development, you can sponsor my work on GitHub.",
+            "Support is completely optional and helps support ongoing improvements and future projects.");
         ui.Paragraph("Dragon's Crown Pro for PlayStation 4, running natively on this PC. No game files are included; "
                      "the game runs from the user's own copy.");
         ui.Spacer(4);
@@ -1190,6 +1217,7 @@ private:
     const GameBuild* build_ = nullptr;
     LauncherHost host_;
     ImTextureID header_art_{};
+    ImTextureID sponsor_icon_{};
     float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;

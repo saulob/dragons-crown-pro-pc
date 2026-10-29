@@ -13,6 +13,7 @@ namespace dcp {
 inline constexpr char kGameTitle[] = "Dragon's Crown Pro";
 inline constexpr char kPortRepository[] = "github.com/saulob/dragons-crown-pro-pc";
 inline constexpr char kAuthorUrl[] = "https://github.com/saulob";
+inline constexpr char kSponsorUrl[] = "https://github.com/sponsors/saulob";
 
 // A package of a build, by its param.sfo APP_VER and VERSION. An update (CATEGORY gp) is applied over the packages
 // before it.

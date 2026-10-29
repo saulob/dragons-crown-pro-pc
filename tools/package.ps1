@@ -65,7 +65,7 @@ $DllPackages = @('sdl3', 'freetype', 'libpng', 'zydis', 'xxhash', 'libc++', 'lib
 $SystemProvided = @('vulkan-1.dll')
 
 $RootFiles = @('dragons_crown_pro.exe', 'trg-updater.exe', 'README.txt', 'LICENSE.txt')
-$AssetFiles = @('assets\launcher\header-art.png')
+$AssetFiles = @('assets\launcher\header-art.png', 'assets\launcher\sponsor-heart.png')
 $ForbiddenNames = @('game', 'user', 'logs', 'cache', 'build', 'prepared', 'extracted', 'image', 'sce_sys', 'sce_module',
     'eboot.bin', 'param.sfo', 'dcp.ini', 'boot.bin', 'content.bin', 'image.json', 'imports.json', 'symbols')
 $ForbiddenPatterns = @('*.pkg', '*.pdb', '*.debug', '*.log', '*.dmp', '*.ini', '*.bin', '*.self', '*.sprx', '*.prx',
@@ -302,12 +302,14 @@ Write-Text (Join-Path $licenses 'MSYS2-PACKAGES.txt') (($manifest -join "`n") + 
 $readme = (Get-Content -LiteralPath (Join-Path $root 'packaging\README.txt') -Raw).Replace('@VERSION@', $version)
 Write-Text (Join-Path $stage 'README.txt') $readme
 
-Write-Step 'Staging the launcher header art'
+Write-Step 'Staging the launcher images'
 $asset_dir = Join-Path $stage 'assets\launcher'
 New-Item -ItemType Directory -Force $asset_dir | Out-Null
-$header_art = Join-Path $root 'assets\launcher\header-art.png'
-if (-not (Test-Path -LiteralPath $header_art -PathType Leaf)) { Stop-Tool "Missing launcher header art: $header_art" }
-Copy-Item -LiteralPath $header_art $asset_dir
+foreach ($image in @('header-art.png', 'sponsor-heart.png')) {
+    $source = Join-Path $root "assets\launcher\$image"
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { Stop-Tool "Missing launcher image: $source" }
+    Copy-Item -LiteralPath $source $asset_dir
+}
 
 Write-Step 'Checking the release folder'
 $problems = @(Test-ReleaseFolder $stage)

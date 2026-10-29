@@ -115,12 +115,15 @@ else()
     target_link_libraries(dragons_crown_pro PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
-# The launcher reads its header art next to the executable.
+# The launcher reads its images next to the executable.
 add_custom_command(TARGET dragons_crown_pro POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/header-art.png"
         "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/header-art.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/sponsor-heart.png"
+        "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/sponsor-heart.png"
     VERBATIM)
 
 if (WIN32)

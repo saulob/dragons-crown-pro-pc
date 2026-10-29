@@ -152,6 +152,10 @@ does. Both write byte-identical files from the game's package.
   (with Allow overlay programs on, Windows: starts the game process, see Architecture). A failed save, or a game
   process that cannot be created, keeps the launcher open. No settings are written per frame.
 - The window placement is saved about half a second after a move or resize, and when the launcher closes.
+- **Sponsor on GitHub** (with the heart `assets/launcher/sponsor-heart.png`, left of Quit, and a card at the top of About) opens `https://github.com/sponsors/saulob` in the
+  default browser when activated, and nothing else: no request is made to show it, it never takes the Enter default
+  from PLAY, and the footer button is left out when the window is too narrow to fit it beside the hint text. It is
+  patched into TRG Launcher by `gpu/patches/trg-launcher/0003-sponsor-link.patch`.
 
 ## Settings
 
