@@ -6,8 +6,26 @@ lobby; game traffic goes directly between their PCs over UDP. Nothing in the gam
 play, and with online play off every import keeps its offline behaviour (`src/runtime_services.c`, the bundled
 NpToolkit2 module).
 
-Status: the pieces below are implemented and covered by headless tests. Play between real game instances has not been
-confirmed yet; the manual test is at the end.
+Status: two instances on one PC play together through the local development lobby, and the deployed lobby is
+reachable. Play between different networks over the Internet (NAT traversal) has not been confirmed yet.
+
+## Playing online
+
+1. In the launcher's **Online** page, turn **Online play** On. The rest of the page appears only then.
+2. Choose your **Online name**: what other players see (up to 16 letters, digits, `-` or `_`; `Player` until you change
+   it). Changing it later keeps your friend code and your friends.
+3. Share **Your friend code** (`XXXX-XXXX`, **Copy** puts it on the clipboard) with the players you want to meet.
+4. **Connection test** > **Run test**, if you want to check your network first. "Ready for online play" means other
+   players can reach you; otherwise the lines below it say what is missing (the online service, direct connections,
+   the router).
+5. Under **Friends**, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
+   card at the top of the page, and the Online entry in the sidebar shows how many are waiting; **Accept** or
+   **Decline** it there. The list updates by itself and shows each friend's Online name and whether they are online:
+   Online while their launcher or game is connected, "Online, in a room" while they are in a game room.
+6. Play through the game's own Network menu: host or join a room, or pick a friend's room in Join Friends Room.
+
+Nothing else needs setting up: the launcher and the game always use the project's lobby service. With Online play Off
+the game runs offline as before.
 
 ## Reference and licence
 
@@ -28,7 +46,7 @@ calls the game makes.
 | P2P socket and Rudp | `src/runtime_rudp.cpp` | `sceNetSocket` type 6 ("RUDP_NetId"), `sceNetBind`, Rudp contexts, polls, reads and writes over `net::PeerSocket` |
 | Network library | `src/net/` | JSON, identity, WebSocket client (WinHTTP; sockets and OpenSSL on Linux), lobby link, STUN, UPnP, peer transport, connection test |
 | Lobby | `server/lobby/` | one JavaScript lobby for the Cloudflare Worker and for the local development server |
-| Launcher | `launcher/online_page.cpp`, `launcher/online_settings.cpp` | Online page: settings, friend code, friends, connection test |
+| Launcher | `launcher/online_page.cpp`, `launcher/online_view.cpp`, `launcher/online_settings.cpp` | Online page: online play, online name, friend code, connection test, friends |
 
 Online play is available for the builds whose network imports match this implementation: CUSA10454 1.00 (USA, folder
 `v1.03`), CUSA07001 1.02 and 1.03 (Japan). `GameBuild::online` marks them. CUSA07001 1.00 and CUSA10209 import three
@@ -42,12 +60,15 @@ NpToolkit2 entries this port does not name yet, so they stay offline. The lobby 
 | Key | Variable | Default | Meaning |
 |---|---|---|---|
 | `online_enabled` | `DCP_ONLINE` | 0 | online play on |
-| `online_lobby` | `DCP_LOBBY` | none | `ws://` or `wss://` lobby address |
-| `online_name` | `DCP_ONLINE_NAME` | system user name | in-game online id (16 of `A-Z a-z 0-9 - _`) |
-| `online_upnp` | `DCP_UPNP` | 1 | ask the router to map the UDP port |
+| `online_name` | `DCP_ONLINE_NAME` | `Player` | in-game online id (16 of `A-Z a-z 0-9 - _`) |
 | `online_udp_port` | `DCP_UDP_PORT` | 0 | 0: the game's port 3658, or any free one when it is taken |
 | `online_stun` | `DCP_STUN` | `stun.cloudflare.com:3478,stun.l.google.com:19302` | STUN servers; `off` disables |
+| - | `DCP_LOBBY` | `net::kDefaultLobbyUrl` | `ws://` or `wss://` lobby address (development lobby, a test deployment) |
+| - | `DCP_UPNP` | 1 | ask the router to map the UDP port; `0` for diagnostics |
 | - | `DCP_JOIN_CODE` | - | the game's room search returns only the room with this code |
+
+The lobby address and UPnP are not settings of the Online page or of `dcp.ini`: players always use the production
+lobby, and UPnP is tried automatically next to STUN and hole punching; a router without UPnP does not stop online play.
 
 The online identity is `<user folder>/online_identity.ini`: a random 63-bit account id and a 32-byte secret, made on
 first use, never overwritten. The lobby stores only the secret's SHA-256 and refuses a known account with another
@@ -166,8 +187,13 @@ any datagram, after 30 tries of one packet, or on CLOSE.
 
 ## Friends, presence, chat, reports
 
-- Friend codes are 8 characters per account. The launcher's Online page adds, accepts, declines and removes friends
-  through short sessions (`presence: false`).
+- Friend codes are 8 characters per account. Friendships are keyed by account, never by name.
+- Presence is per account: online while any of its greeted `presence: true` sockets is open (the launcher's, the
+  game's, a reconnected one), offline when the last one closes, never stored. A seat held for its grace period does not
+  count. While online play is on, the launcher keeps one such link (`launcher/online_client.cpp`) for its whole
+  window, not only the Online page; it re-reads the friends and requests on every `friend.*` event and every 30 s
+  (declines and renames send no event), and is started again 1.5 s after the Online name stops changing. Off closes
+  it. The Connection test uses its own short session with `presence: false`.
 - The game publishes its room info with Toolkit2 `setPresence` (forwarded as `presence.set`); its "Join Friends Room"
   list is Toolkit2 `getFriends`, answered from `friends.list` with one row per friend online in a room of the same
   build with a presence blob. The game then joins by the room id inside that blob.
@@ -176,9 +202,11 @@ any datagram, after 30 tries of one packet, or on CLOSE.
 - Bug reports: `report.send` is implemented in the lobby (`/reports` behind `REPORTS_TOKEN` on the Worker); the launcher
   has no report page yet.
 
-## Testing
+## Developer and testing notes
 
-Headless (no game, no window):
+Nothing in this section is needed for normal play.
+
+Headless tests (no game, no window):
 
 ```
 cd server\lobby; node --test "test/*.test.js"            # protocol, rooms, friends, grace, limits, real WebSockets
@@ -198,6 +226,12 @@ tools\online-instance.ps1 -Name a         # window 2: user\test-client-a, build\
 tools\online-instance.ps1 -Name b         # window 3: user\test-client-b, build\logs\test-client-b
 ```
 
+Online play is each instance's own switch; `-ForceOnline` sets `DCP_ONLINE=1` for the run, and the page then shows
+the switch locked as "On (DCP_ONLINE)". `-Lobby <address>` points both instances at another lobby, for example the deployed one
+(`-Lobby wss://dcp-lobby.saulobenigno.workers.dev`). Each instance shows the Online name of its own Online page (set it
+there to tell them apart); `-OnlineName` overrides it for that run. The instance's Online page notes that DCP_*
+settings are in use. The instance labels (`test-client-a`, ClientA) stay in folder names and script output only.
+
 The same works by hand: `dragons_crown_pro.exe --user <folder> --logs <folder>` with `DCP_ONLINE=1` and
 `DCP_LOBBY=ws://127.0.0.1:8790/` set.
 
@@ -205,7 +239,7 @@ The development lobby keeps accounts, friend codes, friends and pending requests
 `user\online-test-lobby\lobby.sqlite`; each instance keeps its identity in its own user folder, so friends added once
 stay friends across restarts. Rooms and presence are never kept: rooms of a previous run are removed at start (the
 Worker instead gives seats whose socket vanished the normal 30 s grace). `tools\online-lobby.ps1 -Reset` deletes that
-file only; `-SeedTestFriends` makes ClientA and ClientB friends; `-Memory` keeps nothing.
+file only; `-SeedTestFriends` makes instances a and b friends; `-Memory` keeps nothing.
 
 What to look for in each instance's log: `Online: on as ...`, `Matching2: signed in to the lobby`, `Matching2: created
 room N`, `Net: P2P socket ... bound`, `Matching2: reporting UDP port`, `Matching2: member 0x20 established`, `P2P: link N
@@ -213,5 +247,5 @@ room N`, `Net: P2P socket ... bound`, `Matching2: reporting UDP port`, `Matching
 
 ## Deploying the lobby
 
-See [server/lobby/README.md](../server/lobby/README.md). Until a lobby is deployed, `net::kDefaultLobbyUrl` is empty and
-players enter an address on the Online page.
+See [server/lobby/README.md](../server/lobby/README.md). The production address is `net::kDefaultLobbyUrl`
+(`src/net/online_config.h`), the only place it is written in the code; `DCP_LOBBY` replaces it for a run.

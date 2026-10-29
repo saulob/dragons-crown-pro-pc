@@ -381,7 +381,7 @@ extern "C" void runtime_online_configure(const char* settings_file, const char* 
         std::printf("Online: no online identity (%s); playing offline\n", s.identity.error.c_str());
         return;
     }
-    s.name = net::online_name(s.config.name.empty() ? net::system_user_name() : s.config.name);
+    s.name = net::online_name(s.config.name);
     s.enabled = true;
     std::printf("Online: on as %s (account %llu), build %s, lobby %s, UDP port %s, UPnP %s%s%s\n", s.name.c_str(),
                 (unsigned long long)s.identity.account, s.game.c_str(), s.config.lobby.empty() ? "not set" : s.config.lobby.c_str(),

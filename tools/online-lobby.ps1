@@ -9,7 +9,7 @@
 .PARAMETER Reset
   Deletes the local test lobby's database (accounts, friend codes, friends) and stops. Nothing else is touched.
 .PARAMETER SeedTestFriends
-  Makes the test instances ClientA and ClientB (user\test-client-a, user\test-client-b) friends before starting.
+  Makes test instances a and b (user\test-client-a, user\test-client-b) friends before starting.
 #>
 [CmdletBinding()]
 param(

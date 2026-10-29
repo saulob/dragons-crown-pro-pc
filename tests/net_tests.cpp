@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "net/addr.h"
+#include "net/connection_test.h"
 #include "net/crypto.h"
 #include "net/identity.h"
 #include "net/json.h"
@@ -158,6 +159,7 @@ void TestConfig() {
     OnlineConfig untouched;
     apply_environment(untouched);
     CHECK(!untouched.enabled && untouched.lobby == kDefaultLobbyUrl && untouched.upnp && untouched.udp_port == 0);
+    CHECK(std::string(kDefaultLobbyUrl) == "wss://dcp-lobby.saulobenigno.workers.dev" && untouched.name == "Player");
 
     WsUrl url;
     CHECK(parse_ws_url("wss://lobby.example.workers.dev/", url, nullptr) && url.tls && url.port == 443 && url.path == "/");
@@ -166,6 +168,91 @@ void TestConfig() {
     CHECK(!parse_ws_url("http://x/", url, &error) && !error.empty());
     CHECK(!parse_ws_url("ws://host:99999/", url, nullptr) && !parse_ws_url("ws:///", url, nullptr));
     CHECK(!parse_ws_url("ws://bad host/", url, nullptr));
+    CHECK(parse_ws_url(kDefaultLobbyUrl, url, nullptr) && url.tls && url.port == 443 &&
+          url.host == "dcp-lobby.saulobenigno.workers.dev");
+}
+
+// The Connection test's verdict: UPnP is one way among others; a usable network shows only what makes it usable, and
+// router or NAT details stay in the log unless they are why it is not.
+void TestConnectionSummary() {
+    using Mark = ConnectionReport::Mark;
+    using Router = ConnectionFacts::Router;
+    const auto labels = [](const ConnectionReport& r) {
+        std::vector<std::string> out;
+        for (const auto& line : r.lines) out.push_back(line.label);
+        return out;
+    };
+    const auto mark_of = [](const ConnectionReport& r, const std::string& label) {
+        for (const auto& line : r.lines) {
+            if (line.label == label) return line.mark;
+        }
+        return Mark::kNote;
+    };
+    const auto logged = [](const ConnectionReport& r, const std::string& text) {
+        for (const std::string& detail : r.details) {
+            if (detail.find(text) != std::string::npos) return true;
+        }
+        return false;
+    };
+    ConnectionFacts cone;
+    cone.lobby_ok = cone.udp_ok = cone.second_answer = cone.same_mapping = true;
+    for (const Router router : {Router::kNone, Router::kMapped, Router::kMappedBehindNat}) {
+        ConnectionFacts facts = cone;
+        facts.router = router;
+        const ConnectionReport ready = summarize_connection(facts);
+        CHECK(ready.ready && ready.verdict == "Ready for online play");
+        CHECK(labels(ready) == (std::vector<std::string>{"Online service", "Direct connections"}));
+        CHECK(mark_of(ready, "Online service") == Mark::kOk && mark_of(ready, "Direct connections") == Mark::kOk);
+        for (const auto& line : ready.lines) {
+            for (const char* hidden : {"stun", "STUN", "UPnP", "NAT", "router", "Router", "ws://", "wss://", "Cloudflare",
+                                       "Worker"}) {
+                CHECK(line.text.find(hidden) == std::string::npos && line.label.find(hidden) == std::string::npos);
+            }
+        }
+    }
+    ConnectionFacts double_nat = cone;
+    double_nat.router = Router::kMappedBehindNat;
+    CHECK(logged(summarize_connection(double_nat), "double NAT or carrier-grade NAT"));
+    CHECK(logged(summarize_connection(cone), "no UPnP mapping"));
+
+    ConnectionFacts one_server = cone;
+    one_server.second_answer = one_server.same_mapping = false;
+    CHECK(summarize_connection(one_server).ready && logged(summarize_connection(one_server), "only one STUN server"));
+    ConnectionFacts public_pc = cone;
+    public_pc.same_mapping = false;
+    public_pc.public_address = true;
+    CHECK(summarize_connection(public_pc).ready);
+
+    ConnectionFacts symmetric = cone;
+    symmetric.same_mapping = false;
+    const ConnectionReport limited = summarize_connection(symmetric);
+    CHECK(!limited.ready && limited.verdict == "Limited: some players may not be able to connect to you");
+    CHECK(mark_of(limited, "Direct connections") == Mark::kProblem && mark_of(limited, "Router configuration") == Mark::kProblem);
+    CHECK(logged(limited, "symmetric NAT"));
+    symmetric.router = Router::kMapped;
+    const ConnectionReport mapped = summarize_connection(symmetric);
+    CHECK(mapped.ready && labels(mapped) == (std::vector<std::string>{"Online service", "Direct connections"}));
+    symmetric.router = Router::kMappedBehindNat;
+    const ConnectionReport behind = summarize_connection(symmetric);
+    CHECK(!behind.ready);
+    for (const auto& line : behind.lines) {
+        if (line.label == "Router configuration") CHECK(line.text.find("Another router is in front") != std::string::npos);
+    }
+
+    ConnectionFacts blocked = cone;
+    blocked.udp_ok = blocked.second_answer = blocked.same_mapping = false;
+    const ConnectionReport no_udp = summarize_connection(blocked);
+    CHECK(!no_udp.ready && no_udp.verdict == "Limited: direct connections may be blocked by your network");
+    CHECK(mark_of(no_udp, "Direct connections") == Mark::kProblem);
+
+    ConnectionFacts offline = cone;
+    offline.lobby_ok = false;
+    const ConnectionReport unreachable = summarize_connection(offline);
+    CHECK(!unreachable.ready && unreachable.verdict == "Not ready: cannot reach the online service");
+    CHECK(mark_of(unreachable, "Online service") == Mark::kProblem);
+    ConnectionFacts no_identity = cone;
+    no_identity.identity_ok = false;
+    CHECK(!summarize_connection(no_identity).ready);
 }
 
 void TestAddresses() {
@@ -419,6 +506,7 @@ int main() {
     TestCrypto();
     TestIdentity(base);
     TestConfig();
+    TestConnectionSummary();
     TestAddresses();
     TestStun();
     TestPeerLink(0);

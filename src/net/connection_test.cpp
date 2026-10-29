@@ -7,110 +7,141 @@
 
 namespace dcp::net {
 
+ConnectionReport summarize_connection(const ConnectionFacts& f) {
+    using Mark = ConnectionReport::Mark;
+    using Router = ConnectionFacts::Router;
+    ConnectionReport r;
+    auto line = [&r](Mark mark, std::string label, std::string text) {
+        r.lines.push_back({mark, std::move(label), std::move(text)});
+    };
+
+    if (!f.identity_ok) {
+        line(Mark::kProblem, "Online service", "Your online identity could not be created.");
+    } else if (f.lobby_ok) {
+        line(Mark::kOk, "Online service", "Connected.");
+    } else {
+        line(Mark::kProblem, "Online service", "Cannot reach the online service. Check your internet connection.");
+    }
+
+    const bool direct = f.udp_ok && (f.public_address || !f.second_answer || f.same_mapping);
+    const bool router_opened = f.router == Router::kMapped;
+    if (f.stun_off) {
+        line(Mark::kNote, "Direct connections", "Not checked.");
+    } else if (!f.udp_ok) {
+        line(Mark::kProblem, "Direct connections", "May be blocked by your network or firewall.");
+    } else if (direct) {
+        line(Mark::kOk, "Direct connections", f.second_answer || f.public_address ? "Available." : "Probably available.");
+    } else if (router_opened) {
+        line(Mark::kOk, "Direct connections", "Available through your router.");
+    } else {
+        line(Mark::kProblem, "Direct connections", "Your router may stop some players from connecting to you.");
+        line(Mark::kProblem, "Router configuration",
+             f.router == Router::kMappedBehindNat
+                 ? "Another router is in front of yours (often your provider's), so it cannot be opened automatically."
+                 : "Automatic setup is not available on your router.");
+    }
+
+    if (f.udp_ok && f.second_answer && !f.same_mapping && !f.public_address) {
+        r.details.push_back("NAT: another public port per destination (symmetric NAT)");
+    } else if (f.udp_ok && !f.second_answer) {
+        r.details.push_back("NAT: type unknown, only one STUN server answered");
+    }
+    r.details.push_back(f.router == Router::kMapped ? "router: UPnP mapping made"
+                        : f.router == Router::kMappedBehindNat
+                            ? "router: UPnP mapping made, but the router's own address is not public (double NAT or "
+                              "carrier-grade NAT)"
+                            : "router: no UPnP mapping");
+
+    r.ready = f.identity_ok && f.lobby_ok && (direct || router_opened);
+    if (!f.identity_ok || !f.lobby_ok) {
+        r.verdict = "Not ready: cannot reach the online service";
+    } else if (r.ready) {
+        r.verdict = "Ready for online play";
+    } else if (!f.udp_ok && !f.stun_off) {
+        r.verdict = "Limited: direct connections may be blocked by your network";
+    } else {
+        r.verdict = "Limited: some players may not be able to connect to you";
+    }
+    return r;
+}
+
 ConnectionReport run_connection_test(const OnlineConfig& config, const Identity& identity, const std::string& name,
                                      const std::string& game) {
-    ConnectionReport r;
-    auto line = [&r](bool ok, std::string label, std::string text) { r.lines.push_back({ok, std::move(label), std::move(text)}); };
+    ConnectionFacts facts;
+    std::vector<std::string> details;
+    std::string friend_code, lobby_ip;
 
-    bool lobby_ok = false;
-    std::string your_ip;
-    if (config.lobby.empty()) {
-        line(false, "Lobby", "No lobby server is set.");
-    } else if (!identity.ok()) {
-        line(false, "Lobby", "No online identity: " + identity.error);
+    facts.identity_ok = identity.ok();
+    if (!facts.identity_ok) {
+        details.push_back("no online identity: " + identity.error);
     } else {
         LobbySession session;
         Json reply;
         std::string error;
         const uint64_t start = now_ms();
-        if (session.open(config.lobby, hello_body(identity, name, game, false), &reply, &error)) {
-            lobby_ok = true;
-            your_ip = reply["ip"].as_string();
-            r.friend_code = reply["friend_code"].as_string();
-            line(true, "Lobby", "Connected in " + std::to_string(now_ms() - start) + " ms; it sees this PC as " + your_ip + ".");
+        facts.lobby_ok = session.open(config.lobby, hello_body(identity, name, game, false), &reply, &error);
+        if (facts.lobby_ok) {
+            lobby_ip = reply["ip"].as_string();
+            friend_code = reply["friend_code"].as_string();
+            details.push_back("lobby " + config.lobby + " answered in " + std::to_string(now_ms() - start) +
+                              " ms; it sees " + lobby_ip);
         } else {
-            line(false, "Lobby", "Cannot connect: " + error + ".");
+            details.push_back("lobby " + config.lobby + ": " + error);
         }
     }
 
     const auto servers = stun_servers(config.stun);
-    bool udp_ok = false, punchable = false, public_address = false;
-    Endpoint first, second;
+    facts.stun_off = servers.empty();
     if (!sockets_ready()) {
-        line(false, "UDP", "Sockets are unavailable.");
-    } else if (servers.empty()) {
-        line(true, "UDP", "STUN is turned off; the lobby's view of this address is used.");
-    } else {
+        details.push_back("sockets are unavailable");
+    } else if (!servers.empty()) {
         const socket_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         const sockaddr_in any = to_sockaddr({0, 0});
         if (s != kNoSocket && bind(s, reinterpret_cast<const sockaddr*>(&any), sizeof(any)) == 0) {
-            sockaddr_in bound{};
-            socklen_t length = sizeof(bound);
-            getsockname(s, reinterpret_cast<sockaddr*>(&bound), &length);
-            std::vector<std::string> answered;
+            Endpoint first, second;
             for (const auto& [host, port] : servers) {
                 const uint32_t ip = resolve_ipv4(host);
                 Endpoint mapped;
-                if (!ip || !stun::query(s, {ip, port}, 2500, mapped)) continue;
+                if (!ip || !stun::query(s, {ip, port}, 2500, mapped)) {
+                    details.push_back("STUN " + host + ": no answer");
+                    continue;
+                }
                 (first.valid() ? second : first) = mapped;
-                answered.push_back(host);
+                details.push_back("STUN " + host + ": " + endpoint_text(mapped));
                 if (second.valid()) break;
             }
-            const uint32_t local = default_route_ip();
-            udp_ok = first.valid();
-            if (!udp_ok) {
-                line(false, "UDP", "No STUN server answered: UDP may be blocked by a firewall.");
-            } else {
-                public_address = first.ip == local;
-                punchable = !second.valid() || second == first;
-                line(true, "Public address", endpoint_text(first) + " (via " + answered.front() + ").");
-                if (public_address) {
-                    line(true, "NAT", "None: this PC has a public address.");
-                } else if (!second.valid()) {
-                    line(true, "NAT", "Behind a router; only one STUN server answered, so the mapping type is unknown.");
-                } else if (punchable) {
-                    line(true, "NAT", "Behind a router that keeps one public port per socket: direct connections work.");
-                } else {
-                    line(false, "NAT", "Behind a router that changes the public port per destination (symmetric NAT): "
-                                       "players behind a similar router may not reach you. UPnP can help.");
-                }
-                if (!your_ip.empty() && parse_ip(your_ip) && parse_ip(your_ip) != first.ip && classify(parse_ip(your_ip)) == AddressKind::kPublic) {
-                    line(false, "Address", "The lobby and STUN see different addresses; your network may use several.");
-                }
+            facts.udp_ok = first.valid();
+            facts.public_address = facts.udp_ok && first.ip == default_route_ip();
+            facts.second_answer = second.valid();
+            facts.same_mapping = second.valid() && second == first;
+            const uint32_t seen = parse_ip(lobby_ip);
+            if (facts.udp_ok && seen && seen != first.ip && classify(seen) == AddressKind::kPublic) {
+                details.push_back("the lobby and STUN see different addresses");
             }
         } else {
-            line(false, "UDP", "Cannot open a UDP socket.");
+            details.push_back("cannot open a UDP socket");
         }
         close_socket(s);
     }
 
-    bool upnp_public = false;
     if (config.upnp) {
         const upnp::Status u = upnp::probe(kGameUdpPort);
         if (u.state == upnp::State::kMapped) {
-            const AddressKind wan = classify(u.external.ip);
-            upnp_public = wan == AddressKind::kPublic;
-            line(true, "UPnP", u.detail + (upnp_public ? "; router address " + ip_text(u.external.ip) + "."
-                                           : "; but the router's own address " + ip_text(u.external.ip) +
-                                                 " is not public (a second NAT, often the provider's)."));
+            facts.router = classify(u.external.ip) == AddressKind::kPublic ? ConnectionFacts::Router::kMapped
+                                                                            : ConnectionFacts::Router::kMappedBehindNat;
+            details.push_back("UPnP: " + u.detail + "; router address " + ip_text(u.external.ip));
         } else {
-            line(false, "UPnP", "Not available: " + u.detail + ". Not required when the NAT check above passes.");
+            details.push_back("UPnP: not available: " + u.detail);
         }
     } else {
-        line(true, "UPnP", "Turned off.");
+        details.push_back("UPnP: turned off by DCP_UPNP");
     }
 
-    r.ready = lobby_ok && (punchable || public_address || upnp_public || (udp_ok && !second.valid()));
-    if (!lobby_ok) {
-        r.verdict = "Not ready: the lobby cannot be reached.";
-    } else if (r.ready) {
-        r.verdict = "Ready for online play.";
-    } else if (!udp_ok && !servers.empty()) {
-        r.verdict = "Limited: UDP seems blocked; direct connections to other players will likely fail.";
-    } else {
-        r.verdict = "Limited: some players may not be able to connect to you.";
-    }
-    return r;
+    ConnectionReport report = summarize_connection(facts);
+    report.friend_code = std::move(friend_code);
+    details.insert(details.end(), report.details.begin(), report.details.end());
+    report.details = std::move(details);
+    return report;
 }
 
 } // namespace dcp::net

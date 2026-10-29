@@ -157,6 +157,8 @@ does. Both write byte-identical files from the game's package.
   default browser when activated, and nothing else: no request is made to show it, it never takes the Enter default
   from PLAY, and the footer button is left out when the window is too narrow to fit it beside the hint text. It is
   patched into TRG Launcher by `gpu/patches/trg-launcher/0003-sponsor-link.patch`.
+- The sidebar's Online entry shows the number of friend requests waiting (`trg::Page::badge`, patched in by
+  `gpu/patches/trg-launcher/0004-sidebar-badge.patch`).
 
 ## Settings
 

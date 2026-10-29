@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -22,6 +23,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -39,7 +41,10 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
+#include "net/identity.h"
+#include "online_client.h"
 #include "online_settings.h"
+#include "online_view.h"
 #include "options.h"
 #include "paths.h"
 #include "placement.h"
@@ -1174,7 +1179,7 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
 }
 
 // Online play: managed keys with their defaults, the reader the game uses, validation, kept by Reset, and only the
-// builds whose network imports are verified (docs/ONLINE.md) offer it.
+// builds whose network imports are verified (docs/ONLINE.md) offer it. The lobby and UPnP are not settings.
 void TestOnlineSettings(const fs::path& base) {
     const fs::path file = base / "online" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -1186,23 +1191,60 @@ void TestOnlineSettings(const fs::path& base) {
         }
         return std::string("<missing>");
     };
-    CHECK(launcher_default(kOnlineEnabledKey) == "0" && launcher_default(kOnlineUpnpKey) == "1");
-    CHECK(launcher_default(kOnlineUdpPortKey) == "0" && launcher_default(kOnlineLobbyKey).empty());
-    CHECK(launcher_default(kOnlineStunKey) == net::kDefaultStunServers);
+    CHECK(launcher_default(kOnlineEnabledKey) == "0" && launcher_default(kOnlineNameKey) == "Player");
+    CHECK(launcher_default(kOnlineUdpPortKey) == "0" && launcher_default(kOnlineStunKey) == net::kDefaultStunServers);
+    CHECK(launcher_default("online_lobby") == "<missing>" && launcher_default("online_upnp") == "<missing>");
+    CHECK(!IsOnlineSetting("online_lobby") && !IsOnlineSetting("online_upnp"));
+    CHECK(std::string(net::kDefaultLobbyUrl) == "wss://dcp-lobby.saulobenigno.workers.dev");
     const net::OnlineConfig missing = ReadOnlineConfig(file);
-    CHECK(!missing.enabled && missing.upnp && missing.udp_port == 0 && missing.lobby.empty());
-    CHECK(!ReadOnlineConfig({}).enabled);
+    CHECK(!missing.enabled && missing.upnp && missing.udp_port == 0 && missing.name == "Player");
+    CHECK(missing.lobby == net::kDefaultLobbyUrl);
+    CHECK(!ReadOnlineConfig({}).enabled && ReadOnlineConfig({}).lobby == net::kDefaultLobbyUrl);
 
+    // Values a development dcp.ini may still carry change nothing: only DCP_LOBBY and DCP_UPNP do.
     WriteAll(file, "online_enabled = 1\nonline_lobby = wss://lobby.example.org/\nonline_name = Saulo\nonline_upnp = 0\n"
                    "online_udp_port = 40001\n");
     const net::OnlineConfig saved = ReadOnlineConfig(file);
-    CHECK(saved.enabled && saved.lobby == "wss://lobby.example.org/" && saved.name == "Saulo" && !saved.upnp &&
-          saved.udp_port == 40001);
-    WriteAll(file, "online_lobby = http://wrong/\nonline_udp_port = 70000\n");
+    CHECK(saved.enabled && saved.name == "Saulo" && saved.udp_port == 40001);
+    CHECK(saved.lobby == net::kDefaultLobbyUrl && saved.upnp);
+    WriteAll(file, "online_udp_port = 70000\nonline_name = \n");
     const net::OnlineConfig invalid = ReadOnlineConfig(file);
-    CHECK(invalid.lobby.empty() && invalid.udp_port == 0);
-    CHECK(IsValidSetting(kOnlineLobbyKey, "ws://127.0.0.1:8790/") && !IsValidSetting(kOnlineLobbyKey, "lobby"));
+    CHECK(invalid.udp_port == 0 && invalid.name == "Player");
     CHECK(IsValidSetting(kOnlineUdpPortKey, "3658") && !IsValidSetting(kOnlineUdpPortKey, "-1"));
+    CHECK(IsValidSetting(kOnlineNameKey, std::string(64, 'a')) && !IsValidSetting(kOnlineNameKey, std::string(65, 'a')));
+
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_LOBBY", "ws://127.0.0.1:8790/");
+    set_env("DCP_UPNP", "0");
+    net::OnlineConfig local = ReadOnlineConfig(file);
+    net::apply_environment(local);
+    CHECK(local.lobby == "ws://127.0.0.1:8790/" && !local.upnp);
+    set_env("DCP_LOBBY", nullptr);
+    set_env("DCP_UPNP", nullptr);
+    net::OnlineConfig production = ReadOnlineConfig(file);
+    net::apply_environment(production);
+    CHECK(production.lobby == net::kDefaultLobbyUrl && production.upnp);
+
+    // The Online name is only a display name: renaming keeps the identity, which the lobby keys the friend code and
+    // the friendships by, and dcp.ini never holds the identity.
+    const net::Identity identity = net::load_identity(file.parent_path());
+    {
+        LauncherSettings settings(file);
+        settings.Set(kOnlineNameKey, "Renamed");
+        CHECK(settings.Save());
+    }
+    CHECK(ReadOnlineConfig(file).name == "Renamed" && LauncherSettings(file).Get(kOnlineNameKey) == "Renamed");
+    const net::Identity renamed = net::load_identity(file.parent_path());
+    CHECK(identity.ok() && renamed.account == identity.account && renamed.secret == identity.secret);
+    CHECK(ReadAll(file).find(identity.secret) == std::string::npos &&
+          ReadAll(file).find(std::to_string(identity.account)) == std::string::npos);
 
     WriteAll(file, "online_enabled = 1\nonline_name = Saulo\nvsync = 0\n");
     {
@@ -1215,6 +1257,167 @@ void TestOnlineSettings(const fs::path& base) {
 
     CHECK(kUs.online && kJp102.online && kJp103.online);
     CHECK(!kUs101.online && !kJp100.online && !kCk100.online && !kCk.online);
+}
+
+// The Online page: with online play off only its switch; on, friend requests first, then the rest in a fixed order.
+// The switch shows the effective state. No lobby address, UPnP switch or status card; friends by Online name.
+void TestOnlinePage() {
+    using S = OnlineSection;
+    CHECK(OnlinePageSections(true, false, 0) == std::vector<S>{S::kOnlinePlay});
+    CHECK(OnlinePageSections(true, false, 2) == std::vector<S>{S::kOnlinePlay});
+    CHECK(OnlinePageSections(true, true, 0) ==
+          (std::vector<S>{S::kOnlinePlay, S::kOnlineName, S::kFriendCode, S::kConnectionTest, S::kFriends}));
+    CHECK(OnlinePageSections(true, true, 1) == (std::vector<S>{S::kOnlinePlay, S::kFriendRequests, S::kOnlineName,
+                                                               S::kFriendCode, S::kConnectionTest, S::kFriends}));
+    CHECK(OnlinePageSections(false, true, 1) == (std::vector<S>{S::kUnavailable, S::kOnlinePlay}));
+
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_ONLINE", nullptr);
+    CHECK(!ResolveOnlinePlay(false).on && !ResolveOnlinePlay(false).locked);
+    CHECK(ResolveOnlinePlay(true).on && !ResolveOnlinePlay(true).locked);
+    set_env("DCP_ONLINE", "1");
+    CHECK(ResolveOnlinePlay(false).on && ResolveOnlinePlay(false).locked);
+    set_env("DCP_ONLINE", "0");
+    CHECK(!ResolveOnlinePlay(true).on && ResolveOnlinePlay(true).locked);
+    for (const char* value : {"1", "0", "on", "off"}) {
+        set_env("DCP_ONLINE", value);
+        net::OnlineConfig config;
+        config.enabled = false;
+        net::apply_environment(config);
+        CHECK(ResolveOnlinePlay(false).on == config.enabled);
+    }
+    set_env("DCP_ONLINE", nullptr);
+
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    CHECK(!page.empty() && page.find("StatusCard") == std::string::npos);
+    for (const char* hidden : {"Lobby server", "UPnP", "online_lobby", "online_upnp", "workers.dev", "Cloudflare",
+                               "WebSocket", "\"Refresh\"", "\"Friend code\""}) {
+        CHECK(page.find(hidden) == std::string::npos);
+    }
+    for (const char* shown : {"\"Online play\"", "\"Online name\"", "\"Your friend code\"", "\"Connection test\"",
+                              "\"Run test\"", "\"Friends\"", "\"Add a friend\"", "\"Send request\"", "\"XXXX-XXXX\"",
+                              "\"New friend request\"", "Accept\"", "\"Decline\""}) {
+        CHECK(page.find(shown) != std::string::npos);
+    }
+    CHECK(page.find("ui.InputText(\"Online name\", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName)") != std::string::npos);
+    CHECK(page.find("ui.Row(f.name.c_str(), FriendPresence(f))") != std::string::npos);
+    CHECK(page.find("ResolveOnlinePlay(") != std::string::npos);
+    // The sidebar badge counts the requests the page shows as cards.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("online_page_->PendingRequests()") != std::string::npos);
+    CHECK(launcher.find("online_page_->Tick(settings_") != std::string::npos);
+    const std::string badge = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "patches" / "trg-launcher" / "0004-sidebar-badge.patch");
+    CHECK(badge.find("std::function<int()> badge;") != std::string::npos);
+
+    const auto rows = net::Json::parse(R"([{"account": "123456789012", "name": "Saulo", "online": true, "room": "77",
+                                            "ip": "203.0.113.9", "port": 3658}, {"account": "5", "name": "", "online": false}])");
+    CHECK(rows.has_value());
+    const std::vector<OnlinePlayer> players = ReadOnlinePlayers(*rows);
+    CHECK(players.size() == 2 && players[0].name == "Saulo" && players[0].online && players[0].in_room);
+    CHECK(players[1].name == "Player" && !players[1].online && !players[1].in_room);
+    CHECK(std::string(FriendPresence(players[0])) == "Online, in a room" && std::string(FriendPresence(players[1])) == "Offline");
+    CHECK(FriendRequestText(players[0]) == "Saulo wants to be your friend");
+    for (const OnlinePlayer& player : players) {
+        for (const std::string& shown : {player.name + FriendPresence(player), FriendRequestText(player)}) {
+            CHECK(shown.find(player.account) == std::string::npos && shown.find("203.0.113") == std::string::npos &&
+                  shown.find("3658") == std::string::npos && shown.find("Client") == std::string::npos);
+        }
+    }
+
+    // Test instances keep the lobby override, use their own switch and Online name unless told otherwise.
+    const std::string instance = ReadAll(fs::path(DCP_SOURCE_DIR) / "tools" / "online-instance.ps1");
+    CHECK(instance.find("[string]$Lobby = 'ws://127.0.0.1:8790/'") != std::string::npos);
+    CHECK(instance.find("$env:DCP_LOBBY = $Lobby") != std::string::npos);
+    CHECK(instance.find("if ($ForceOnline) { $env:DCP_ONLINE = '1' } else { Remove-Item Env:DCP_ONLINE ") != std::string::npos);
+    CHECK(instance.find("$env:DCP_ONLINE = '1'\n") == std::string::npos);
+    CHECK(instance.find("if ($OnlineName) { $env:DCP_ONLINE_NAME = $OnlineName } else { Remove-Item Env:DCP_ONLINE_NAME") !=
+          std::string::npos);
+}
+
+// The launcher's lobby link through a running development lobby (DCP_TEST_LOBBY): presence while a launcher is open,
+// requests and answers from events without any refresh, several sessions of one account, a rename, and Off.
+void TestOnlineClient(const fs::path& base) {
+    const char* lobby = std::getenv("DCP_TEST_LOBBY");
+    if (!lobby || !*lobby) {
+        std::printf("online client tests skipped (set DCP_TEST_LOBBY to a running development lobby)\n");
+        return;
+    }
+    const fs::path dir = base / "online-client";
+    fs::remove_all(dir);
+    const auto clock = [] {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
+    struct Seat {
+        OnlineClient client;
+        net::OnlineConfig config;
+        bool on = true;
+        Seat(const fs::path& user, const char* lobby, const char* name) : client(user) {
+            config.enabled = true;
+            config.lobby = lobby;
+            config.name = name;
+        }
+    };
+    Seat alice(dir / "a", lobby, "Alice"), bea(dir / "b", lobby, "Bea"), bea_game(dir / "b", lobby, "Bea"),
+        cleo(dir / "c", lobby, "Cleo");
+    bea_game.on = cleo.on = false;
+    const auto pump = [&](const std::function<bool()>& done, double seconds = 6.0) {
+        const double end = clock() + seconds;
+        for (;;) {
+            for (Seat* seat : {&alice, &bea, &bea_game, &cleo}) seat->client.Update(seat->on, seat->config, "CUSA10454-1.00", clock());
+            if (done()) return true;
+            if (clock() >= end) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    };
+    const auto& a = alice.client.state();
+    const auto& b = bea.client.state();
+    const auto first_friend_online = [&](const OnlineClient::State& s) { return !s.friends.empty() && s.friends[0].online; };
+
+    CHECK(pump([&] { return a.link == OnlineClient::Link::kUp && b.link == OnlineClient::Link::kUp; }));
+    CHECK(!a.friend_code.empty() && !b.friend_code.empty() && a.friend_code != b.friend_code);
+    const std::string code_b = b.friend_code;
+
+    bea.client.AddFriend(a.friend_code);
+    CHECK(pump([&] { return a.incoming.size() == 1 && b.outgoing.size() == 1; }));
+    CHECK(a.incoming.size() == 1 && a.incoming[0].name == "Bea" && b.notice == "Request sent to Alice.");
+    const std::string account_b = a.incoming.empty() ? "" : a.incoming[0].account;
+
+    alice.client.Accept(account_b);
+    CHECK(a.incoming.empty() && a.friends.size() == 1 && a.friends[0].name == "Bea");
+    CHECK(pump([&] { return first_friend_online(a) && first_friend_online(b) && b.outgoing.empty(); }));
+
+    bea_game.on = true;
+    CHECK(pump([&] { return bea_game.client.state().link == OnlineClient::Link::kUp; }));
+    bea.on = false;
+    CHECK(!pump([&] { return !first_friend_online(a); }, 1.5));
+    bea_game.on = false;
+    CHECK(pump([&] { return !a.friends.empty() && !a.friends[0].online; }));
+
+    bea.on = true;
+    CHECK(pump([&] { return first_friend_online(a); }));
+    bea.config.name = "Beatrix";
+    CHECK(pump([&] { return !a.friends.empty() && a.friends[0].name == "Beatrix" && a.friends[0].online; }, 10.0));
+    CHECK(b.friend_code == code_b && a.friends.size() == 1 && a.friends[0].account == account_b);
+
+    cleo.on = true;
+    CHECK(pump([&] { return cleo.client.state().link == OnlineClient::Link::kUp; }));
+    cleo.client.AddFriend(a.friend_code);
+    CHECK(pump([&] { return a.incoming.size() == 1; }));
+    alice.client.Decline(a.incoming.empty() ? "" : a.incoming[0].account);
+    CHECK(a.incoming.empty());
+    CHECK(!pump([&] { return !a.incoming.empty(); }, 1.0));
+
+    alice.on = false;
+    pump([] { return true; });
+    CHECK(a.link == OnlineClient::Link::kOff && a.friend_code.empty() && a.friends.empty() && a.incoming.empty());
+    CHECK(pump([&] { return !b.friends.empty() && !b.friends[0].online; }));
 }
 
 void TestSkipOfferSettings(const fs::path& base) {
@@ -3943,6 +4146,8 @@ int main(int argc, char** argv) {
     TestCheatSettings(base);
     TestJapaneseNpcVoiceSetting(base);
     TestOnlineSettings(base);
+    TestOnlinePage();
+    TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestOverlayProgramsSetting(base);
     TestGameProcess();

@@ -1,19 +1,11 @@
 #include "net/identity.h"
 
-#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <system_error>
 
 #include "net/crypto.h"
 #include "net/json.h"
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
 
 namespace dcp::net {
 namespace fs = std::filesystem;
@@ -100,22 +92,6 @@ std::string online_name(const std::string& wanted, const std::string& fallback) 
     }
     while (!out.empty() && out.back() == '_') out.pop_back();
     return out.empty() ? fallback : out;
-}
-
-std::string system_user_name() {
-#ifdef _WIN32
-    wchar_t name[257];
-    DWORD size = 257;
-    if (GetEnvironmentVariableW(L"USERNAME", name, size) > 0) {
-        char utf8[1024];
-        const int n = WideCharToMultiByte(CP_UTF8, 0, name, -1, utf8, sizeof(utf8), nullptr, nullptr);
-        if (n > 0) return utf8;
-    }
-    return {};
-#else
-    const char* user = std::getenv("USER");
-    return user ? user : "";
-#endif
 }
 
 } // namespace dcp::net

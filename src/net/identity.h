@@ -26,7 +26,4 @@ Identity load_identity(const std::filesystem::path& user_dir, bool create = true
 // become '_'. `fallback` is used when nothing is left.
 std::string online_name(const std::string& wanted, const std::string& fallback = "Player");
 
-// The operating system's user name, for a first online name.
-std::string system_user_name();
-
 } // namespace dcp::net

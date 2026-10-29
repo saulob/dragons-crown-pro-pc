@@ -3,14 +3,12 @@
 #include <cstdlib>
 #include <string>
 
-#include "net/websocket.h"
 #include "settings.h"
 
 namespace dcp {
 
 bool IsOnlineSetting(std::string_view key) {
-    for (const std::string_view online : {kOnlineEnabledKey, kOnlineLobbyKey, kOnlineNameKey, kOnlineUpnpKey,
-                                          kOnlineUdpPortKey, kOnlineStunKey}) {
+    for (const std::string_view online : {kOnlineEnabledKey, kOnlineNameKey, kOnlineUdpPortKey, kOnlineStunKey}) {
         if (key == online) {
             return true;
         }
@@ -19,10 +17,6 @@ bool IsOnlineSetting(std::string_view key) {
 }
 
 bool IsValidOnlineSetting(std::string_view key, std::string_view value) {
-    if (key == kOnlineLobbyKey) {
-        net::WsUrl url;
-        return net::parse_ws_url(std::string(value), url, nullptr);
-    }
     if (key == kOnlineUdpPortKey) {
         if (value.empty() || value.size() > 5 || value.find_first_not_of("0123456789") != std::string_view::npos) {
             return false;
@@ -42,9 +36,7 @@ net::OnlineConfig ReadOnlineConfig(const std::filesystem::path& settings_file) {
     }
     const LauncherSettings settings(settings_file);
     config.enabled = settings.GetBool(kOnlineEnabledKey, false);
-    config.lobby = settings.Get(kOnlineLobbyKey, net::kDefaultLobbyUrl);
-    config.name = settings.Get(kOnlineNameKey);
-    config.upnp = settings.GetBool(kOnlineUpnpKey, true);
+    config.name = settings.Get(kOnlineNameKey, net::kDefaultOnlineName);
     config.udp_port = static_cast<uint16_t>(std::atoi(settings.Get(kOnlineUdpPortKey, "0").c_str()));
     config.stun = settings.Get(kOnlineStunKey, net::kDefaultStunServers);
     return config;

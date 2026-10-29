@@ -385,6 +385,7 @@ private:
         PollInstall();
         PollPrompts();
         PollUpdate();
+        PollOnline();
         NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
@@ -650,27 +651,28 @@ private:
         switch (page) {
         case PageId::kPlay:
             return {name, "Check the game files and start playing.", [this](trg::Ui& ui) { PagePlay(ui); },
-                    [this] { return files_ != GameFileState::kValid; }};
+                    [this] { return files_ != GameFileState::kValid; }, nullptr};
         case PageId::kDisplay:
             return {name, "Window, monitor, scaling and presentation.", [this](trg::Ui& ui) { PageDisplay(ui); },
-                    nullptr};
+                    nullptr, nullptr};
         case PageId::kGraphics:
             return {name, "Resolution, anti-aliasing and texture filtering.", [this](trg::Ui& ui) { PageGraphics(ui); },
-                    nullptr};
+                    nullptr, nullptr};
         case PageId::kGameplay:
-            return {name, "Frame rate readouts.", [this](trg::Ui& ui) { PageGameplay(ui); }, nullptr};
+            return {name, "Frame rate readouts.", [this](trg::Ui& ui) { PageGameplay(ui); }, nullptr, nullptr};
         case PageId::kCheats:
-            return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr};
+            return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr, nullptr};
         case PageId::kControls:
-            return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr};
+            return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr, nullptr};
         case PageId::kOnline:
             return {name, "Play with others over the Internet: friends and the connection test.",
-                    [this](trg::Ui& ui) { PageOnline(ui); }, nullptr};
+                    [this](trg::Ui& ui) { PageOnline(ui); }, nullptr,
+                    [this] { return online_page_ ? static_cast<int>(online_page_->PendingRequests()) : 0; }};
         case PageId::kTrophies:
-            return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr};
+            return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr, nullptr};
         case PageId::kAbout:
             return {name, "This port, and where your files and settings live.", [this](trg::Ui& ui) { PageAbout(ui); },
-                    nullptr};
+                    nullptr, nullptr};
         }
         return {};
     }
@@ -1147,10 +1149,12 @@ private:
 
     std::filesystem::path UserDir() const { return PathFromUtf8(config_.user_dir ? config_.user_dir : "user"); }
 
-    void PageOnline(trg::Ui& ui) {
+    void PollOnline() {
         online_page_->SetBuild(files_ == GameFileState::kValid ? build_ : nullptr);
-        online_page_->Draw(ui);
+        online_page_->Tick(settings_, ImGui::GetTime());
     }
+
+    void PageOnline(trg::Ui& ui) { online_page_->Draw(ui); }
 
     void PageTrophies(trg::Ui& ui) {
         trophy_page_->SetGame(files_ == GameFileState::kValid ? paths_.app0 : std::filesystem::path());

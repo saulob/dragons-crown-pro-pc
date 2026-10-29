@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { FLAG_CLOSED, FLAG_FULL, LIMITS, cleanText, ipv4Kind, normalizeFriendCode } from '../src/lobby.js';
@@ -356,6 +357,72 @@ test('friends: request, accept, presence, room, remove', () => {
   assert.equal(b.call('friends.remove', { account: a.account }).code, 'ok');
   assert.equal(b.call('friends.list').friends.length, 0);
   assert.equal(b.call('friends.remove', { account: a.account }).code, 'ok');
+});
+
+test('friends: a new name keeps the friend code and the friendship; rows carry no address', () => {
+  const env = makeLobby();
+  const a = greeted(env, '203.0.113.1', { name: 'ClientA', presence: false });
+  const b = env.connect('198.51.100.1');
+  const codeB = b.hello({ name: 'Bob', presence: false }).friend_code;
+  a.call('friends.add', { code: codeB });
+  b.call('friends.accept', { account: a.account });
+  a.drop();
+
+  const renamed = env.connect('203.0.113.1');
+  renamed.account = a.account;
+  renamed.secret = a.secret;
+  const again = renamed.hello({ name: 'Saulo', presence: false });
+  assert.equal(again.account, a.account);
+  assert.equal(b.call('friends.add', { code: again.friend_code }).state, 'friends');
+  const [row] = b.call('friends.list').friends;
+  assert.deepEqual([row.account, row.name], [a.account, 'Saulo']);
+  for (const hidden of ['ip', 'port', 'lan', 'secret']) assert.equal(row[hidden], undefined);
+  assert.deepEqual(renamed.call('friends.list').friends.map((f) => f.name), ['Bob']);
+});
+
+test('presence: any present socket of the account; it ends with the last one, a held seat keeps no ghost', () => {
+  const env = makeLobby();
+  const a = greeted(env, '203.0.113.1', { name: 'Alice' });
+  const launcher = env.connect('198.51.100.1');
+  const codeB = launcher.hello({ name: 'Bob' }).friend_code;
+  a.call('friends.add', { code: codeB });
+  launcher.call('friends.accept', { account: a.account });
+  const row = () => a.call('friends.list').friends[0];
+  assert.equal(row().online, true);
+  a.events('friend.online');
+
+  const game = env.connect('198.51.100.1');
+  game.account = launcher.account;
+  game.secret = launcher.secret;
+  assert.equal(game.hello({ name: 'Bob' }).code, 'ok');
+  assert.equal(a.events('friend.online').length, 0);
+  launcher.drop();
+  assert.equal(a.events('friend.offline').length, 0);
+  assert.equal(row().online, true);
+
+  const { room } = game.call('room.create', ROOM);
+  assert.deepEqual([row().online, row().room], [true, room.id]);
+  game.drop();
+  assert.deepEqual(a.events('friend.offline').map((e) => e.account), [launcher.account]);
+  assert.deepEqual([row().online, row().room], [false, undefined]);
+  env.advance(LIMITS.graceMs + 1);
+  assert.deepEqual([row().online, row().room], [false, undefined]);
+  assert.equal(a.events('friend.online').length, 0);
+
+  const test = env.connect('198.51.100.1');
+  test.account = launcher.account;
+  test.secret = launcher.secret;
+  test.hello({ name: 'Bob', presence: false });
+  assert.equal(row().online, false);
+  assert.equal(a.events('friend.online').length, 0);
+});
+
+test('the Worker and the development server drive the same lobby code', () => {
+  const source = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
+  for (const host of [source('../src/worker.js'), source('../local/server.js')]) {
+    assert.match(host, /import \{[^}]*\bLobby\b[^}]*\} from '\.\.\/src\/lobby\.js'|import \{[^}]*\bLobby\b[^}]*\} from '\.\/lobby\.js'/);
+    for (const call of ['.admit(', '.message(', '.closed(', '.alarm()']) assert.ok(host.includes(call), call);
+  }
 });
 
 test('friends: a crossed request makes friends at once; decline withdraws', () => {

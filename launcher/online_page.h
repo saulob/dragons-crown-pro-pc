@@ -2,68 +2,55 @@
 
 #include <atomic>
 #include <filesystem>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include "game_profile.h"
 #include "net/connection_test.h"
-#include "net/identity.h"
-#include "net/lobby_link.h"
+#include "online_client.h"
 #include "trg/launcher.h"
+#include "trg/settings.h"
 
 namespace dcp {
 
-// The launcher's Online page: online settings, the friend code and friends, and the Connection test. Every lobby
-// exchange is a short session on a worker thread (hello without presence, so the player is not shown online).
+// The launcher's Online page: online play, friend requests, the online name, the friend code, the Connection test and
+// friends. Its lobby link (OnlineClient) runs on every launcher frame, not only while the page is shown.
 class OnlinePage {
 public:
-    explicit OnlinePage(std::filesystem::path user_dir) : user_dir_(std::move(user_dir)) {}
+    explicit OnlinePage(std::filesystem::path user_dir) : user_dir_(user_dir), client_(std::move(user_dir)) {}
     ~OnlinePage();
 
     void SetBuild(const GameBuild* build) { build_ = build; }
+    void Tick(const trg::SettingsStore& settings, double now);
+    size_t PendingRequests() const { return client_.state().incoming.size(); }
     void Draw(trg::Ui& ui);
 
 private:
-    struct Friend {
-        std::string account, name;
-        bool online = false;
-        bool in_room = false;
-    };
-    struct Request {
-        std::string account, name;
-    };
-    struct Snapshot {
-        bool fetched = false;
-        std::string error;
-        std::string friend_code;
-        std::vector<Friend> friends;
-        std::vector<Request> incoming, outgoing;
-        std::string notice;
-        bool tested = false;
+    struct TestResult {
+        bool done = false;
         net::ConnectionReport report;
     };
 
-    using Job = std::function<void(const net::OnlineConfig&, const net::Identity&, const std::string& name,
-                                   const std::string& game, net::LobbySession&, Snapshot&)>;
-
     std::string Game() const;
-    // One job at a time on the worker; with `needs_lobby` it runs inside a greeted session and the friends are re-read.
-    void Start(trg::Ui& ui, Job job, bool needs_lobby = true);
-    void Refresh(trg::Ui& ui);
-    void Action(trg::Ui& ui, std::string op, std::string account, std::string code = {});
-    void DrawFriends(trg::Ui& ui, const Snapshot& view);
+    bool Supported() const { return !build_ || build_->online; }
+    void RunTest(trg::Ui& ui);
+    void ClearTest();
+    void DrawOnlinePlay(trg::Ui& ui, const OnlinePlaySwitch& online);
+    void DrawTestInstanceNote(trg::Ui& ui, const net::OnlineConfig& config);
+    void DrawFriendRequests(trg::Ui& ui);
+    void DrawFriendCode(trg::Ui& ui);
+    void DrawConnectionTest(trg::Ui& ui);
+    void DrawFriends(trg::Ui& ui);
 
     std::filesystem::path user_dir_;
     const GameBuild* build_ = nullptr;
+    OnlineClient client_;
+    bool was_on_ = false;
     std::mutex mutex_;
     std::thread worker_;
-    std::atomic<bool> busy_{false};
-    Snapshot snapshot_;
-    int last_frame_ = -10;
-    double next_refresh_ = 0;
+    std::atomic<bool> testing_{false};
+    TestResult test_;
     char add_code_[16] = {};
 };
 

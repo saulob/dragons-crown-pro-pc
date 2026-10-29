@@ -33,7 +33,8 @@ Nothing in the repository deploys or logs in. To publish a lobby:
 3. Optional, to read bug reports: `wrangler secret put REPORTS_TOKEN` (a long random value).
 4. `wrangler deploy`. The lobby is then at `wss://dcp-lobby.<your subdomain>.workers.dev/`.
 5. Check it: `curl https://dcp-lobby.<your subdomain>.workers.dev/` answers `{"service":"dcp-lobby","proto":1}`, and
-   the launcher's Connection test with that address says the lobby is reachable.
+   the Connection test of a test instance started with `tools\online-instance.ps1 -Lobby <address>` says the lobby is
+   reachable.
 6. To make it the default for players, set `kDefaultLobbyUrl` in `src/net/online_config.h`.
 
 Reports: `curl -H "Authorization: Bearer <token>" https://dcp-lobby.<subdomain>.workers.dev/reports` (newest 100).
