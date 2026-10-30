@@ -2,7 +2,7 @@
 
 The PC launcher is [TRG Launcher](https://github.com/TekRantGaming/trg-launcher) 1.1.0 (pinned in `gpu/deps.txt`, the
 same revision as geometry-wars-retro-evolved-2-recompiled), in the same loader process as the game. Pages: Play, Display,
-Graphics, Gameplay, Cheats, Controls, Trophies and About.
+Graphics, Gameplay, Online, Cheats, Controls, Trophies and About.
 
 ## Architecture
 
@@ -157,11 +157,13 @@ does. Both write byte-identical files from the game's package.
   default browser when activated, and nothing else: no request is made to show it, it never takes the Enter default
   from PLAY, and the footer button is left out when the window is too narrow to fit it beside the hint text. It is
   patched into TRG Launcher by `gpu/patches/trg-launcher/0003-sponsor-link.patch`.
+- The sidebar's Online entry shows the number of friend requests waiting (`trg::Page::badge`, patched in by
+  `gpu/patches/trg-launcher/0004-sidebar-badge.patch`).
 
 ## Settings
 
-File: `user\dcp.ini` in the `--user` folder, the file the video core reads at start and its in-game menu writes. Lines
-the launcher or the menu do not manage (comments, the other side's keys) are kept when either saves. Booleans are written
+File: `user\dcp.ini` in the `--user` folder, the file the video core reads at start; the game writes only `display_mode` (F11). Lines
+the launcher or F11 do not manage (comments, the other side's keys) are kept when either saves. Booleans are written
 `1`/`0` and read as `1`/`on`/`yes`/`true` or `0`/`off`/`no`/`false`. A key that is missing, or holds a value the game does
 not accept, has the default below, in the launcher and in the game alike (`tests/launcher_tests.cpp` checks that both
 use the same defaults).
@@ -184,18 +186,19 @@ use the same defaults).
 | `frame_rate` | 30, 60, 90, 120, 144, 165, 240, 0 (Unlimited) | 60 | at start |
 | `show_fps_title` | 1, 0 | 0 | live |
 | `show_resolution_title` | 1, 0 | 0 | at start |
-| `show_fps` | 1, 0 | 0 | live |
+| `show_fps` | 1, 0 | 0 | live; F2 changes the session |
+| `show_ping` | 1, 0 | 0 | at game start, Online Play only; F3 changes the session |
 | `detailed_logging` | 1, 0 | 1 | at exit |
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
+| `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
 | `cheat_movement_speed_2x` (old) | 1, 0 | 0 | read only when `cheat_movement_speed` is missing: 1 means 2x |
 | `cheat_experience_multiplier` | 1 (Off), 2, 5, 10, 100 | 1 | at game start (F10 changes the session only) |
-| `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | live (in-game menu only) |
-| `menu_tab` | 0 (Image), 1 (Overlay) | 0 | the in-game menu's last tab |
+| `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | at game start (no launcher control) |
 | `launcher_x`, `_y`, `_width`, `_height`, `_maximized`, `_fullscreen` | | | launcher window only |
 
 The game window is created after the launcher closes, in the same process, so every setting applies without a restart.
@@ -207,8 +210,7 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 
 ## Display
 
-- **Display mode**: Windowed or Borderless Fullscreen (SDL desktop fullscreen, no display mode change). The in-game menu
-  offers the same two.
+- **Display mode**: Windowed or Borderless Fullscreen (SDL desktop fullscreen, no display mode change).
 - **Window size**: 1280 × 720, 1600 × 900, 1920 × 1080 (the game's own size), 2560 × 1440, 3840 × 2160, in pixels, listed
   when they fit the selected monitor's usable area with the title bar; the current value is shown. A size that
   does not fit when the game opens is reduced keeping its shape, so that the whole window, title bar included, takes at
@@ -253,12 +255,12 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 - **F11** in the game switches Windowed and Borderless Fullscreen at once and saves the Display mode. In the launcher it
   switches the launcher's own fullscreen, saved in `launcher_fullscreen`, and never changes the Display mode.
 - **Mouse cursor**: mouse movement, clicks and the wheel show the cursor in Windowed and Borderless Fullscreen; keyboard or
-  controller input hides it. It stays visible while the in-game menu or a dialog is open and when the game window loses focus.
+  controller input hides it. It stays visible while the cheat menu or a dialog is open and when the game window loses focus.
 
 Scaling and sharpening, below those on the Display page, are what the presenter already supports: **Upscaling** (AMD
 FSR 1, off by default) enlarges the game's picture (the render resolution) in a bigger window; **Sharpening** (AMD
 RCAS, on) with a
-**strength** (75). They run on the finished frame at present time, the same live settings as the in-game menu.
+**strength** (75). They run on the finished frame at present time.
 
 ## Graphics
 
@@ -305,12 +307,23 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
 ## Gameplay
 
-- **Menu & Subtitles**: the language of the game's menus and subtitle text (`text_language`: `english`, `french`,
-  `german`, `italian`, `spanish`; English by default). The game ships text for these five. The Asia/Hong Kong build
-  (CUSA10209) ships Traditional Chinese and Korean instead (`traditional_chinese`, `korean`; Traditional Chinese by
-  default) and has no Western or Simplified Chinese text. Korean is not yet tested in game. A saved language the active
-  build does not have is replaced by that build's default. An explicit `DCP_LANGUAGE` environment variable (a PS4 language number) overrides it.
-  Voices are chosen inside the game.
+- **Menu & Subtitles**: the language of the game's menus and subtitle text (`text_language`). Each build offers only
+  the languages it can show; the first is the default:
+
+  | Build | Languages |
+  | --- | --- |
+  | CUSA10454 1.00 USA | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
+  | CUSA10454 1.01 USA | the ones its `DRACRO_US.CPK` holds (see below) |
+  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese (`japanese`): the executable does not read the system language |
+  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean (`traditional_chinese`, `korean`) |
+
+  For the USA and Asia/Hong Kong builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
+  `DRACRO_CK.CPK`): a language is offered only when the archive holds its set of message sheets and stage files, and a
+  set whose `SystemMsg` sheet is Russian text is offered as Russian (`russian`), with the system language of that set.
+  When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
+  language the installed game does not have is replaced by its first one, and the log says so
+  (`Settings: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
+  environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 USA only; the option is hidden for
   the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
   town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
@@ -324,7 +337,7 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   frames repeat the last logic step, so motion is as smooth as at 60 FPS; there is no interpolation. Unlimited repeats
   as often as the display allows, up to 480 a second. With VSync on, presentations never go past the display's refresh
   rate, and a display at 60 Hz or less has nothing to repeat. Frame rate in title and the frame counter count every
-  presentation. The log has `Gameplay: Frame rate` and `VideoOut: vblank ... frame rate ... repeat cadence ...
+  presentation. The log has the frame rate in its `Settings:` lines and `VideoOut: vblank ... frame rate ... repeat cadence ...
   VSync ...`.
 - **Frame rate in title**: `Dragon's Crown Pro | FPS: 60.00`, measured from the presented game frames, refreshed about once
   a second on the window thread.
@@ -339,6 +352,12 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   `launcher/game_patches.h`, `launcher/prompts/arachnophobia-spider.dcpx`) applied when toggled, in the background, and
   reapplied after a reinstall. An archive has one undo record, so the prompts and this patch are applied together:
   changing either reverts what the other left and writes both again.
+- **Story Skip Offer** and **Tutorial Skip Offer**: Off by default (`story_skip_offer`, `tutorial_skip_offer`;
+  `DCP_STORY_SKIP` / `DCP_TUTORIAL_SKIP` override them for a run). The game's own questions, asked for every new
+  character: whether to start from the second half of the story (normally offered only once a class on the file has
+  finished the game) and "Begin the tutorial?" (normally skipped for a file's first character, which starts the tutorial).
+  Existing characters are never asked. On, one branch each is patched in memory after its bytes are checked
+  (`src/skip_offers.c`); Off leaves the code as it is. Shown for every build.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
   recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
   separate process from the launcher (see Architecture), so these tools attach to a clean game process. Off keeps the
@@ -349,7 +368,7 @@ No skip-intro.
 
 ## Cheats
 
-Sidebar order: Play, Display, Graphics, Gameplay, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the
+Sidebar order: Play, Display, Graphics, Gameplay, Online, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the
 line "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for
 offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**,
@@ -368,7 +387,7 @@ Xbox controllers work without setup; the keyboard is always on. The page lists t
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 
-The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys; the in-game menu stays on Insert. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
 
 Each binding is one line in `dcp.ini`: `key_cross = space`, `key_left_stick_up = w`, `hotkey_cheats_menu = f10`, `hotkey_window_mode = f11` (the full list is `src/dcp_keys.c`). The value is a key name, case-insensitive: the shadPS4 names for common keys (`space`, `enter`, `lshift`, `rctrl`, `pgup`, `kp5`, ...) or SDL's own key names (`F10`, `Left Shift`, `Keypad 5`); the launcher writes lowercase. A missing or invalid line is the default, so a config from an older build keeps the old layout. The same key may be bound to several controls and all of them follow it; a port hotkey is not exclusive of a game control either. The bindings are read when the game starts (`dcp_keys.c`, shared by the launcher, `runtime_pad.c` and the video core); the controller mapping and `DCP_PAD_MAP` are unchanged, and `DCP_KEY_MAP` still overrides the buttons it names.
 
@@ -440,6 +459,14 @@ lines and `Startup: game-only child process`; a session is still one file. On Wi
 outside the Windows folder that the game process had at its start (separate process only) and the ones loaded before its
 first frame (`Modules: ...`), and the Vulkan layers that are installed. The game window logs
 `Window: display ... VSync ... frame rate in title ...`.
+
+Before the game starts, a short `Settings:` block sums up the run for support: port version, platform, online protocol
+and game build; Online Play (with the Ping display and the cheat lock); window mode, frame rate and frame counter; the
+render resolution, aspect ratio and effective True Ultrawide; the Menu & Subtitles language, Japanese NPC Voices and
+Arachnophobia Safe Mode; and the Story and Tutorial Skip Offers. The values are the ones in effect for this run (after
+build gating and `DCP_ONLINE`). It never shows the Online name, Friend Code or account; the `Online: on as ...` line
+keeps those details. `dcp-launcher-tests --log-settings <dcp.ini> <image dir> [<app0>]` prints the same lines from a
+settings file.
 
 **Detailed logging** (About, Diagnostics) is on by default and keeps that log after every session. Turned off, a run
 still writes its log while it runs, but a normal exit discards it, so normal sessions do not accumulate files. A crash

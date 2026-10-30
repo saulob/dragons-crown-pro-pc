@@ -39,10 +39,14 @@
 #include "package_browser.h"
 #include "placement.h"
 #include "play_gate.h"
+#include "online_page.h"
+#include "online_settings.h"
+#include "online_view.h"
 #include "problem_dialog.h"
 #include "prompts_patch.h"
 #include "settings.h"
 #include "shift_key.h"
+#include "text_languages.h"
 #include "trophy_page.h"
 #include "update_config.h"
 #include "updater/update_platform.h"
@@ -139,6 +143,8 @@ constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
+constexpr char kStorySkipOfferHelp[] = "Offers the game's built-in story skip when creating a new character";
+constexpr char kTutorialSkipOfferHelp[] = "Lets new characters choose whether to begin the tutorial";
 constexpr char kAllowOverlayProgramsHelp[] =
     "For programs that draw over games (recording, chat, store and performance overlays). On, PLAY starts the game as a "
     "separate program from this launcher, so they can attach to it cleanly. Off starts the game the usual way.";
@@ -290,7 +296,8 @@ enum class Outcome { kRunning, kPlay, kQuit };
 class LauncherApp {
 public:
     LauncherApp(const DcpLauncherConfig& config, LauncherSettings& settings, GamePaths paths, GameCheck check)
-        : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state), build_(check.build) {}
+        : config_(config), settings_(settings), paths_(std::move(paths)), files_(check.state), build_(check.build),
+          text_languages_(InstalledTextLanguages(paths_.app0, build_)) {}
 
     bool game_process_started() const { return game_process_started_; }
 
@@ -319,6 +326,7 @@ public:
         header_art_ = LoadHeaderArt(host_, header_art_aspect_);
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
+        online_page_ = std::make_unique<OnlinePage>(UserDir());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         updater_ = std::make_unique<trg::update::UpdateController>(MakeUpdateConfig(InstallDir()));
         updater_->StartCheck();
@@ -369,6 +377,7 @@ public:
         }
         launcher_.reset();
         trophy_page_.reset();
+        online_page_.reset();
         host_.Close();
         Log(outcome == Outcome::kPlay ? "closed, starting the game" : "closed");
         return true;
@@ -380,8 +389,11 @@ private:
         PollInstall();
         PollPrompts();
         PollUpdate();
+        PollOnline();
+        KeepCheatsOffOnline();
         NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
+        NormalizeTextLanguage(settings_, text_languages_);
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
             if (!SeparateGameProcess(config_, settings_)) {
                 return Outcome::kPlay;
@@ -531,6 +543,8 @@ private:
         const GameCheck check = CheckAndLog(paths_);
         files_ = check.state;
         build_ = check.build;
+        text_languages_ = InstalledTextLanguages(paths_.app0, build_);
+        NormalizeTextLanguage(settings_, text_languages_);
     }
 
     // A build whose executable has no verified render resolution sites runs at its native 16:9 size; a saved custom
@@ -645,24 +659,28 @@ private:
         switch (page) {
         case PageId::kPlay:
             return {name, "Check the game files and start playing.", [this](trg::Ui& ui) { PagePlay(ui); },
-                    [this] { return files_ != GameFileState::kValid; }};
+                    [this] { return files_ != GameFileState::kValid; }, nullptr};
         case PageId::kDisplay:
             return {name, "Window, monitor, scaling and presentation.", [this](trg::Ui& ui) { PageDisplay(ui); },
-                    nullptr};
+                    nullptr, nullptr};
         case PageId::kGraphics:
             return {name, "Resolution, anti-aliasing and texture filtering.", [this](trg::Ui& ui) { PageGraphics(ui); },
-                    nullptr};
+                    nullptr, nullptr};
         case PageId::kGameplay:
-            return {name, "Frame rate readouts.", [this](trg::Ui& ui) { PageGameplay(ui); }, nullptr};
+            return {name, "Frame rate readouts.", [this](trg::Ui& ui) { PageGameplay(ui); }, nullptr, nullptr};
         case PageId::kCheats:
-            return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr};
+            return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr, nullptr};
         case PageId::kControls:
-            return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr};
+            return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr, nullptr};
+        case PageId::kOnline:
+            return {name, "Play with others over the Internet: friends and the connection test.",
+                    [this](trg::Ui& ui) { PageOnline(ui); }, nullptr,
+                    [this] { return online_page_ ? static_cast<int>(online_page_->PendingRequests()) : 0; }};
         case PageId::kTrophies:
-            return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr};
+            return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr, nullptr};
         case PageId::kAbout:
             return {name, "This port, and where your files and settings live.", [this](trg::Ui& ui) { PageAbout(ui); },
-                    nullptr};
+                    nullptr, nullptr};
         }
         return {};
     }
@@ -708,7 +726,7 @@ private:
     }
 
     void BrowseAndInstall() {
-        if (install_.running() || browser_.active() || prompts_.running()) {
+        if (install_.running() || browser_.active() || prompts_.running() || BuildPinned()) {
             return;
         }
         if (UseBuiltInChooser()) {
@@ -718,8 +736,19 @@ private:
         StartInstall(trg::BrowseForFile("Select your Dragon's Crown Pro package", {{"PS4 packages (*.pkg)", "*.pkg"}}));
     }
 
+    // A test instance keeps its DCP_GAME_BUILD: installing or activating another build would move the active build
+    // of every other instance.
+    bool BuildPinned() const {
+        const char* pinned = std::getenv(kPinnedBuildVariable);
+        if (!pinned || !*pinned) {
+            return false;
+        }
+        Log("game build pinned by %s=%s: package selection is off", kPinnedBuildVariable, pinned);
+        return true;
+    }
+
     void StartInstall(const std::string& picked) {
-        if (picked.empty() || prompts_.running()) {
+        if (picked.empty() || prompts_.running() || BuildPinned()) {
             return;
         }
         install_failure_.clear();
@@ -906,17 +935,11 @@ private:
     }
 
     void PageGameplay(trg::Ui& ui) {
-        const std::span<const TextLanguage> available = TextLanguagesOf(build_);
         std::vector<trg::Option> languages;
-        for (const TextLanguage& language : available) {
+        for (const TextLanguage& language : text_languages_) {
             languages.push_back({std::string(language.key), std::string(language.name)});
         }
-        const std::string saved = settings_.Get(kTextLanguageKey, available.front().key);
-        const std::string_view effective = ResolveTextLanguage(build_, saved).key;
-        if (saved != effective) {
-            settings_.Set(kTextLanguageKey, std::string(effective));
-        }
-        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, available.front().key.data(), languages);
+        ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, text_languages_.front().key.data(), languages);
         if (SupportsJapaneseNpcVoices(build_)) {
             ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
         }
@@ -930,6 +953,8 @@ private:
         ui.Toggle("Frame counter", kFrameCounterHelp, kShowFrameCounterKey, false, "Hidden", "Shown");
         ui.Row("Arachnophobia Safe Mode", kArachnophobiaHelp);
         ArachnophobiaToggle(ui);
+        ui.Toggle("Story Skip Offer", kStorySkipOfferHelp, kStorySkipOfferKey, false, "Off", "On");
+        ui.Toggle("Tutorial Skip Offer", kTutorialSkipOfferHelp, kTutorialSkipOfferKey, false, "Off", "On");
         if (kSeparateGameProcessAvailable) {
             ui.Toggle("Allow overlay programs", kAllowOverlayProgramsHelp, kAllowOverlayProgramsKey, false, "Off", "On");
         }
@@ -937,6 +962,11 @@ private:
     }
 
     void PageCheats(trg::Ui& ui) {
+        if (OnlinePlayOn()) {
+            ui.Help(cheats::kOnlineLockoutText);
+            ui.EndRows();
+            return;
+        }
         std::string help = cheats::kLauncherHelp;
         help.replace(help.find("F10"), 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
         ui.Help(help.c_str());
@@ -1135,6 +1165,20 @@ private:
 
     std::filesystem::path UserDir() const { return PathFromUtf8(config_.user_dir ? config_.user_dir : "user"); }
 
+    void PollOnline() {
+        online_page_->Tick(settings_, ImGui::GetTime());
+    }
+
+    bool OnlinePlayOn() const { return ResolveOnlinePlay(settings_.GetBool(kOnlineEnabledKey, false)).on; }
+
+    void KeepCheatsOffOnline() {
+        if (OnlinePlayOn() && TurnCheatsOff(settings_)) {
+            Log("cheats turned off for Online Play");
+        }
+    }
+
+    void PageOnline(trg::Ui& ui) { online_page_->Draw(ui); }
+
     void PageTrophies(trg::Ui& ui) {
         trophy_page_->SetGame(files_ == GameFileState::kValid ? paths_.app0 : std::filesystem::path());
         trophy_page_->Draw(ui);
@@ -1215,6 +1259,7 @@ private:
     GamePaths paths_;
     GameFileState files_;
     const GameBuild* build_ = nullptr;
+    std::vector<TextLanguage> text_languages_;
     LauncherHost host_;
     ImTextureID header_art_{};
     ImTextureID sponsor_icon_{};
@@ -1225,6 +1270,7 @@ private:
     std::unique_ptr<trg::Launcher> launcher_;
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
+    std::unique_ptr<OnlinePage> online_page_;
     PlayGate play_;
     ProblemDialog problem_;
     PlacementTracker placement_;

@@ -1,4 +1,4 @@
-// The launcher's view of user\dcp.ini, the file the video core reads at start and its in-game menu writes.
+// The launcher's view of user\dcp.ini, the file the video core reads at start.
 // The video core reads it the same way (gpu/shim/dcp_settings.cpp); booleans are written as 1/0.
 #pragma once
 
@@ -9,7 +9,10 @@
 #include <string_view>
 
 #include "dcp_cheats.h"
+#include "game_profile.h"
 #include "trg/settings.h"
+
+struct DcpRunSettings;
 
 namespace dcp {
 
@@ -47,6 +50,9 @@ inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 // Routes NPC voice cues to the Japanese banks already present in the USA installation.
 inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
+// The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
+inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
+inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";
 // Windows, on: Play starts the game as a separate process that overlay programs can attach to (game_process.h).
 inline constexpr char kAllowOverlayProgramsKey[] = "allow_overlay_programs";
 inline constexpr char kLauncherXKey[] = "launcher_x";
@@ -90,7 +96,7 @@ bool IsValidSetting(std::string_view key, std::string_view value);
 std::string FrameRateLabel(int fps);
 
 // Pending launcher edits over the saved values. Nothing is written until Save() or SaveNow(); lines of the file
-// the launcher does not manage (the in-game menu's keys, comments) are kept as they are.
+// the launcher does not manage (other keys, comments) are kept as they are.
 class LauncherSettings final : public trg::SettingsStore {
 public:
     explicit LauncherSettings(std::filesystem::path file);
@@ -114,8 +120,19 @@ private:
     Values pending_;
 };
 
+// Online Play keeps every saved cheat Off, both multipliers included. True when a setting changed (pending until Save).
+bool TurnCheatsOff(trg::SettingsStore& settings);
+
+// A saved text_language that is not one of `languages` (not empty) becomes the first of them. True when it changed
+// (pending until Save).
+bool NormalizeTextLanguage(trg::SettingsStore& settings, std::span<const TextLanguage> languages);
+
 // The launcher opens when the game files are not ready, or when the setting is On or Shift is held, unless it was
 // skipped once. A game that is not ready always shows it: it is where the files are installed.
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once);
+
+// The "Settings:" lines of the run log (dcp_log_settings_summary).
+std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* build,
+                            std::span<const TextLanguage> languages, const DcpRunSettings* run);
 
 } // namespace dcp

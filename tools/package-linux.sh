@@ -215,7 +215,7 @@ done
 # The licence texts of the distribution packages the bundled libraries come from, or of the sources
 # packaging/linux/ci-deps.sh built them from (it installs those texts in /usr/local/share/licenses/<component>).
 declare -A source_built=([libSDL3]=SDL3 [libfmt]=fmt [libZydis]=zydis [libZycore]=zydis [libxxhash]=xxhash
-                         [libcrypto]=openssl)
+                         [libcrypto]=openssl [libssl]=openssl)
 manifest=$licenses/SYSTEM-PACKAGES.txt
 {
     echo "Libraries bundled in the AppImage, with the Ubuntu packages or sources they come from and their licence texts."

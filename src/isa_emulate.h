@@ -12,8 +12,9 @@ size_t isa_emulate(const uint8_t *code, uint64_t rip, uint64_t gpr[16], uint64_t
 /* CPUID leaf 1 ECX, leaf 7 EBX and leaf 0x80000001 ECX. */
 typedef struct { uint32_t leaf1_ecx, leaf7_ebx, ext1_ecx; } IsaHostFeatures;
 IsaHostFeatures isa_host_features(void);
-/* The Jaguar instruction sets the host lacks, comma separated in out: the ones isa_emulate covers when emulated is
- * nonzero, otherwise the ones the game cannot run without. Returns how many. */
+/* The Jaguar instruction sets the host lacks, comma separated in out: the ones the loader works around (isa_emulate,
+ * or lzcnt_compat for LZCNT) when emulated is nonzero, otherwise the ones the game cannot run without. Returns how
+ * many. */
 int isa_missing_sets(IsaHostFeatures host, int emulated, char *out, size_t size);
 /* The CPUID brand string. */
 void isa_host_name(char *out, size_t size);

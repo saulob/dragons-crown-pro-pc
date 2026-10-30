@@ -28,6 +28,7 @@ struct TextLanguage {
     std::string_view key;
     std::string_view name;
     int ps4_id;
+    std::string_view suffix; // of its files in the regional archive (msgsheet/SystemMsg_FR.fms); empty when not there
 };
 
 struct GameBuild {
@@ -81,6 +82,8 @@ inline bool TrueUltrawideAvailable(const GameBuild* build) {
     return build == nullptr || build->true_ultrawide;
 }
 
+// The language of a saved key among `languages` (not empty); the first when the key is not one of them.
+const TextLanguage& ResolveTextLanguage(std::span<const TextLanguage> languages, std::string_view key);
 // The build's language for a saved key; the build's default when the key is not one of its languages.
 const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view key);
 

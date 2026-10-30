@@ -16,6 +16,7 @@
 #include "dcp_settings.h"
 #include "dcp_graphics.h"
 #include "dcp_ultrawide_sides.h"
+#include "dcp_water_diag.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/texture_cache/image.h"
@@ -708,8 +709,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                        : MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height);
         cmdbuf.blitImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
                          vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
-        // The settings menu, the frame counter and the ultrawide side mask over the frame, at display resolution:
-        // all three need the swapchain image as a colour attachment, so every path goes through it now.
+        // The overlay and the ultrawide side mask over the frame, at display resolution: both need the swapchain
+        // image as a colour attachment, so every path goes through it now.
         const bool overlay = DcpOverlay::Visible();
         const std::array post_barriers{
             vk::ImageMemoryBarrier{
@@ -784,6 +785,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     free_frame();
     if (!is_reusing_frame && is_game_frame) {
         DebugState.IncFlipFrameNum();
+        DcpWaterDiag::CountFrame();
     }
 }
 

@@ -1,0 +1,90 @@
+// Online play (docs/ONLINE.md): the console services the game's own multiplayer code calls, over the lobby and the
+// direct peer link. Everything here is used only when online play is on for a build that supports it; otherwise the
+// imports keep their offline behaviour (runtime_services.c) and the bundled NpToolkit2 module.
+#ifndef DCP_RUNTIME_ONLINE_H
+#define DCP_RUNTIME_ONLINE_H
+#include <stdint.h>
+
+#include "runtime_online_overlay.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Reads the online settings (dcp.ini in user_dir, DCP_* overrides) before the imports are bound. build names the
+ * supported game build for the log ("CUSA10454-1.00"); NULL for an unknown build, which stays offline. */
+void runtime_online_configure(const char *settings_file, const char *user_dir, const char *build);
+/* The online implementation of an import (NID#library), or 0: offline play, or not an online import. */
+uintptr_t runtime_online_resolve(const char *name);
+/* 1 for an import (NID#library) of an NP, network or Rudp library. */
+int runtime_online_library(const char *name);
+/* Before binding: every online-library import the game itself binds (game_imports[i] set) must resolve through
+ * `resolve`, and every NpToolkit2 one through the online layer, since the bundled module is not initialized for
+ * online play. Otherwise online play stays off and the missing imports are logged; returns 0. */
+int runtime_online_check_imports(const char (*names)[128], const unsigned char *game_imports, uint64_t count,
+                                 uintptr_t (*resolve)(const char *name, int is_data));
+/* 1 when the game goes online: Online Play on, a supported build whose online imports resolve, and an identity. */
+int runtime_online_active(void);
+/* The System type line of the game's player card for an online id ("Windows · v0.8.0"); valid until the next call on
+ * the same thread. */
+const char *runtime_online_system_type(const char *online_id);
+
+#ifdef __cplusplus
+}
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "net/identity.h"
+#include "net/online_config.h"
+#include "net/peer_socket.h"
+
+namespace dcp::online {
+
+struct Settings {
+    bool enabled = false;
+    net::OnlineConfig config;
+    net::Identity identity;
+    std::string name; // the in-game online id
+    std::string game;
+    std::string join_code; // DCP_JOIN_CODE: the game's room search finds only this room
+};
+
+const Settings& settings();
+
+// Per-frame work: lobby messages, endpoint exchange and every Matching2 callback (sceNpCheckCallback).
+void pump();
+uintptr_t matching2_export(const std::string& symbol);
+uintptr_t rudp_export(const std::string& symbol);
+
+// The game's peer-to-peer socket (sceNetBind of the "RUDP_NetId" socket), when one is open.
+std::shared_ptr<net::PeerSocket> peer_socket();
+int peer_ping_ms();
+struct UpnpView {
+    bool working = false;
+    bool mapped = false;
+    net::Endpoint external;
+};
+UpnpView upnp_view();
+
+// Toolkit2 presence and friends over the game's lobby connection.
+struct FriendRoom {
+    uint64_t account = 0;
+    std::string name;
+    std::vector<uint8_t> data, status;
+};
+void presence_publish(const uint8_t *data, size_t size, const uint8_t *status, size_t status_size);
+void presence_clear();
+void friends_fetch();
+bool friends_busy();
+std::vector<FriendRoom> friends_result(uint64_t *generation);
+
+// The player card's System type for an online id: this PC's, or what the lobby reported for that player.
+std::string system_type(const std::string& online_id);
+// A message for the player (an incompatible room was left out or refused), once; empty when there is none.
+std::string take_notice();
+
+} // namespace dcp::online
+#endif
+#endif

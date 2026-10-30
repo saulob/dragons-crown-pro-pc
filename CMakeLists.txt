@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 0.8.0 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 0.9.0 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -45,6 +45,23 @@ target_include_directories(dcp_keys PUBLIC src)
 target_link_libraries(dcp_keys PUBLIC SDL3::SDL3)
 target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
 
+# Online play (docs/ONLINE.md): lobby link, identity, STUN, UPnP and the direct peer transport. No game code: the
+# launcher, the runtime and tests/net_tests.cpp share it.
+add_library(dcp_net STATIC src/net/addr.cpp src/net/connection_test.cpp src/net/crypto.cpp src/net/identity.cpp
+    src/net/json.cpp src/net/lobby_link.cpp src/net/online_config.cpp src/net/online_version.cpp src/net/peer_socket.cpp
+    src/net/stun.cpp src/net/upnp.cpp src/net/websocket.cpp
+    $<IF:$<BOOL:${WIN32}>,src/net/websocket_win.cpp,src/net/websocket_posix.cpp>)
+target_include_directories(dcp_net PUBLIC src)
+target_compile_definitions(dcp_net PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
+set_target_properties(dcp_net PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp_net PRIVATE -Wall -Wextra)
+if (WIN32)
+    target_link_libraries(dcp_net PUBLIC winhttp ws2_32 bcrypt)
+else()
+    find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+    target_link_libraries(dcp_net PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+endif()
+
 add_subdirectory(gpu)
 add_subdirectory(launcher)
 
@@ -59,9 +76,12 @@ set(DCP_RUNTIME_SOURCES
     src/runtime_font.c
     src/runtime_kernel.c
     src/runtime_memory.c
+    src/runtime_matching2.cpp
     src/runtime_mutex.c
+    src/runtime_online.cpp
     src/runtime_pad.c
     src/runtime_rtc.c
+    src/runtime_rudp.cpp
     src/runtime_rwlock.c
     src/runtime_savedata.c
     src/runtime_session_log.c
@@ -92,7 +112,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/startup_save_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -133,9 +153,32 @@ if (WIN32)
     target_compile_options(dcp-log-tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
-# Focused tests of the MOVBE and BMI1 emulation used when the host CPU lacks the instructions.
-add_executable(dcp-isa-tests EXCLUDE_FROM_ALL tests/isa_tests.c src/isa_emulate.c)
+# Focused tests of the online layer: JSON, identity, STUN, the lobby link against a local lobby and the peer transport
+# over loopback (tools/test.ps1); not part of the default build.
+add_executable(dcp-net-tests EXCLUDE_FROM_ALL tests/net_tests.cpp)
+target_link_libraries(dcp-net-tests PRIVATE dcp_net)
+set_target_properties(dcp-net-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_definitions(dcp-net-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
+# The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
+# DCP_TEST_LOBBY names one. Not part of the default build.
+add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp)
+target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
+set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-online-hle-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Story and Tutorial Skip Offers, on synthetic images and the local boot images (tools/test.ps1);
+# not part of the default build.
+add_executable(dcp-skip-offers-tests EXCLUDE_FROM_ALL tests/skip_offers_tests.c src/skip_offers.c)
+target_include_directories(dcp-skip-offers-tests PRIVATE src)
+target_compile_definitions(dcp-skip-offers-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-skip-offers-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the MOVBE and BMI1 emulation and the LZCNT rewrite used when the host CPU lacks the instructions,
+# on synthetic images and the local boot images.
+add_executable(dcp-isa-tests EXCLUDE_FROM_ALL tests/isa_tests.c src/isa_emulate.c src/lzcnt_compat.c)
 target_include_directories(dcp-isa-tests PRIVATE src)
+target_compile_definitions(dcp-isa-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-isa-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
@@ -164,6 +207,39 @@ if (WIN32)
     target_link_libraries(dcp-text-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt ws2_32 -pthread)
 else()
     target_link_libraries(dcp-text-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
+
+# Focused tests of libSceRtc through the import resolver (tools/test.ps1, tools/build.sh --test); not part of the default
+# build.
+add_executable(dcp-rtc-tests EXCLUDE_FROM_ALL tests/rtc_tests.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES}
+    $<$<BOOL:${WIN32}>:src/compat_win.c src/runtime_log.c> $<$<NOT:$<BOOL:${WIN32}>>:src/runtime_log_posix.c>)
+set_target_properties(dcp-rtc-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-rtc-tests PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
+target_compile_options(dcp-rtc-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+if (WIN32)
+    target_compile_definitions(dcp-rtc-tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_link_libraries(dcp-rtc-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt ws2_32 -pthread)
+else()
+    target_link_libraries(dcp-rtc-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
+
+# Online play on every supported build through the runtime's import resolver: the local boot images' online imports,
+# one lobby game, the cheat lock; rooms between builds only with DCP_TEST_LOBBY. Not part of the default build.
+add_executable(dcp-online-builds-tests EXCLUDE_FROM_ALL tests/online_builds_tests.cpp src/runtime_cheats.cpp
+    ${DCP_RUNTIME_SOURCES}
+    $<$<BOOL:${WIN32}>:src/compat_win.c src/runtime_log.c> $<$<NOT:$<BOOL:${WIN32}>>:src/runtime_log_posix.c>)
+set_target_properties(dcp-online-builds-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-online-builds-tests PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
+target_compile_definitions(dcp-online-builds-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-online-builds-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>
+                       $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>)
+if (WIN32)
+    target_compile_definitions(dcp-online-builds-tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000007)
+    target_link_libraries(dcp-online-builds-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype onecore bcrypt
+                          ws2_32 -pthread)
+else()
+    target_link_libraries(dcp-online-builds-tests PRIVATE dcp_launcher dcpgpu SDL3::SDL3 Freetype::Freetype
+                          Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
 # Focused tests of the GPU tiling parameters and macro-tiled addresses against the game's own tiler (tools/test.ps1);
@@ -196,12 +272,18 @@ target_include_directories(dcp-present-tests PRIVATE gpu/shim)
 target_compile_definitions(dcp-present-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-present-tests PRIVATE -Wall -Wextra -Werror)
 
-# Focused tests of the experimental AMD water fix switch (issue #32); not part of the default build.
+# Focused tests of the experimental AMD water workaround switch (issue #32); not part of the default build.
 add_executable(dcp-amd-water-tests EXCLUDE_FROM_ALL tests/amd_water_fix_tests.cpp)
 set_target_properties(dcp-amd-water-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-amd-water-tests PRIVATE gpu/shim)
 target_compile_definitions(dcp-amd-water-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-amd-water-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the issue #32 water diagnostics (classification, deduplication, the cap); not part of the default build.
+add_executable(dcp-water-diag-tests EXCLUDE_FROM_ALL tests/water_diag_tests.cpp)
+set_target_properties(dcp-water-diag-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-water-diag-tests PRIVATE gpu/shim)
+target_compile_options(dcp-water-diag-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the Frame rate setting's presentation pacing (tools/test.ps1); not part of the default build.
 add_executable(dcp-frame-pacing-tests EXCLUDE_FROM_ALL tests/frame_pacing_tests.cpp)
@@ -214,6 +296,13 @@ target_compile_options(dcp-frame-pacing-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)
 target_include_directories(dcp-voice-tests PRIVATE src)
 target_compile_options(dcp-voice-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
+
+# Focused tests of the online player cards' System type hook, on synthetic and local boot images (tools/test.ps1); not
+# part of the default build.
+add_executable(dcp-system-type-tests EXCLUDE_FROM_ALL tests/system_type_tests.c src/guest_hook.c src/system_type_hook.c)
+target_include_directories(dcp-system-type-tests PRIVATE src)
+target_compile_definitions(dcp-system-type-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-system-type-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the True Ultrawide hooks (tools/test.ps1); not part of the default build.
 add_executable(dcp-ultrawide-tests EXCLUDE_FROM_ALL tests/ultrawide_tests.c src/guest_hook.c src/ultrawide_hooks.c)

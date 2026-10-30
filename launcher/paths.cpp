@@ -12,6 +12,7 @@
 #include <unistd.h>
 #endif
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -58,8 +59,10 @@ bool Copy(char (&out)[4096], const fs::path& path) {
 
 Paths ResolvePaths(const PathRequest& request, const fs::path& exe_dir) {
     const Defaults defaults = DefaultsFor(exe_dir);
-    const GamePaths active = ActiveBuildPaths(defaults.roots);
+    const PinnedBuild pin = PinnedBuildFromEnvironment(defaults.roots);
+    const GamePaths active = pin.build ? BuildPaths(defaults.roots, *pin.build) : ActiveBuildPaths(defaults.roots);
     Paths paths;
+    paths.error = pin.error;
     if (request.boot.empty()) {
         paths.image_dir = active.image_dir;
         paths.boot = paths.image_dir / "boot.bin";
@@ -162,6 +165,10 @@ extern "C" int dcp_resolve_paths(const DcpPathRequest* request, DcpPaths* out) {
     const dcp::PathRequest asked{text(request->boot), text(request->content_profile), text(request->app0),
                                  text(request->user_dir), text(request->logs_dir)};
     const dcp::Paths paths = dcp::ResolvePaths(asked, exe_dir);
+    std::snprintf(out->error, sizeof(out->error), "%s", paths.error.c_str());
+    if (!paths.error.empty()) {
+        return 0;
+    }
     return dcp::Copy(out->boot, paths.boot) && dcp::Copy(out->content_profile, paths.content_profile) &&
            dcp::Copy(out->app0, paths.app0) && dcp::Copy(out->image_dir, paths.image_dir) &&
            dcp::Copy(out->user_dir, paths.user_dir) && dcp::Copy(out->logs_dir, paths.logs_dir);

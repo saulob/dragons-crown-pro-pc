@@ -1,0 +1,37 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index 40ec972..db8c6c2 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -119,6 +119,7 @@ struct Page {
+   std::string blurb;  // one line under the title
+   std::function<void(Ui&)> draw;
+   std::function<bool()> needs_attention;  // shows a dot in the sidebar (e.g. game not installed)
++  std::function<int()> badge;             // a count in the sidebar instead of the dot; 0 hides it
+ };
+ 
+ struct Option {
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 04c7491..41e2cc8 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -1051,9 +1051,19 @@ void Launcher::DrawSidebar(ImVec2 size) {
+       dl->AddRectFilled(pos, ImVec2(pos.x + item.x, pos.y + item.y), Col(selected ? t.accent : t.frame), 8 * s_);
+     dl->AddText(ImVec2(pos.x + 16 * s_, pos.y + (item_h - ImGui::GetFontSize()) * 0.5f),
+                 Col(selected ? t.on_accent : t.text), page.name.c_str());
+-    if (page.needs_attention && page.needs_attention())
++    const int badge = page.badge ? page.badge() : 0;
++    if (badge > 0) {
++      const std::string count = badge > 99 ? "99+" : std::to_string(badge);
++      const ImVec2 text = ImGui::CalcTextSize(count.c_str());
++      const float pill_h = text.y + 4 * s_, pill_w = std::max(pill_h, text.x + 12 * s_);
++      const ImVec2 min(pos.x + item.x - 12 * s_ - pill_w, pos.y + (item_h - pill_h) * 0.5f);
++      dl->AddRectFilled(min, ImVec2(min.x + pill_w, min.y + pill_h), Col(selected ? t.on_accent : t.accent), pill_h * 0.5f);
++      dl->AddText(ImVec2(min.x + (pill_w - text.x) * 0.5f, min.y + 2 * s_), Col(selected ? t.accent : t.on_accent),
++                  count.c_str());
++    } else if (page.needs_attention && page.needs_attention()) {
+       dl->AddCircleFilled(ImVec2(pos.x + item.x - 18 * s_, pos.y + item_h * 0.5f), 4.5f * s_,
+                           Col(selected ? t.on_accent : t.warn_dot));
++    }
+     ImGui::PopID();
+     ImGui::Dummy(ImVec2(0, 2 * s_));
+   }

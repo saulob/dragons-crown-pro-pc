@@ -139,7 +139,7 @@ licence xxhash "$work/xxhash/LICENSE"
 clone "$work/robin-map" https://github.com/Tessil/robin-map.git v1.2.1 d37a41003bfbc7e12e34601f93c18ca2ff6d7c07
 cmake_install "$work/robin-map" "$work/robin-map/build"
 
-step "OpenSSL $OPENSSL_VERSION (libcrypto)"
+step "OpenSSL $OPENSSL_VERSION (libcrypto, libssl)"
 fetch "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" \
     "$OPENSSL_SHA256" "$work/openssl.tar.gz"
 tar -xzf "$work/openssl.tar.gz" -C "$work"

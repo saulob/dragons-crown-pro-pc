@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include "game_profile.h"
 
@@ -42,6 +43,20 @@ const GameBuild* LastPreparedBuild(const GameRoots& roots, std::span<const GameB
 // The folders of the installed build: the complete game that was prepared last, else the first build's.
 GamePaths ActiveBuildPaths(const GameRoots& roots, std::span<const GameBuild> builds = SupportedBuilds());
 GameRoots RootsOf(const GamePaths& paths);
+
+// "CUSA10209-1.00": the title ID and profile version, as tools\online-instance.ps1 -Build takes it.
+std::string BuildKey(const GameBuild& build);
+
+// A test instance's own build (DCP_GAME_BUILD, set by tools\online-instance.ps1 -Build), used instead of the active
+// build so instances never follow each other's selection. `set` without `build` carries the reason it cannot be used.
+inline constexpr char kPinnedBuildVariable[] = "DCP_GAME_BUILD";
+struct PinnedBuild {
+    bool set = false;
+    const GameBuild* build = nullptr;
+    std::string error;
+};
+PinnedBuild PinnedBuildOf(const GameRoots& roots, std::string_view key, std::span<const GameBuild> builds = SupportedBuilds());
+PinnedBuild PinnedBuildFromEnvironment(const GameRoots& roots);
 
 // Reads the build from param.sfo, then the preparation marker, the boot image report and eboot.bin (about 21 MB). The
 // game data archives are only checked for presence: the marker records that their extraction finished.

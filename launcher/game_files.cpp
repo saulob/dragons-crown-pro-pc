@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -270,6 +271,36 @@ GameRoots RootsOf(const GamePaths& paths) {
     return {paths.app0.parent_path(), paths.image_dir.parent_path()};
 }
 
+std::string BuildKey(const GameBuild& build) {
+    return std::string(build.title_id) + "-" + build.version;
+}
+
+PinnedBuild PinnedBuildOf(const GameRoots& roots, std::string_view key, std::span<const GameBuild> builds) {
+    PinnedBuild pin;
+    if (key.empty()) {
+        return pin;
+    }
+    pin.set = true;
+    const auto named = std::find_if(builds.begin(), builds.end(), [&](const GameBuild& b) { return BuildKey(b) == key; });
+    if (named == builds.end()) {
+        pin.error = std::string(kPinnedBuildVariable) + " names no supported build: " + std::string(key);
+        return pin;
+    }
+    const GamePaths paths = BuildPaths(roots, *named);
+    std::error_code ec;
+    if (PreparationScope(paths.app0) != "full" || !std::filesystem::is_regular_file(paths.image_dir / "boot.bin", ec)) {
+        pin.error = "Build " + std::string(key) + " is not prepared (" + Utf8(paths.app0) + ")";
+        return pin;
+    }
+    pin.build = &*named;
+    return pin;
+}
+
+PinnedBuild PinnedBuildFromEnvironment(const GameRoots& roots) {
+    const char* key = std::getenv(kPinnedBuildVariable);
+    return PinnedBuildOf(roots, key ? key : "");
+}
+
 GameCheck CheckSfoIdentity(const std::string& sfo, std::span<const GameBuild> builds) {
     if (const GameBuild* build = BuildOfSfo(sfo, builds)) {
         return Result(GameFileState::kValid, {}, {}, build);
@@ -433,5 +464,7 @@ extern "C" int dcp_game_build(const char* image_dir, DcpGameBuild* out) {
     out->resolution_sites = build->resolution_sites.data();
     out->resolution_site_count = build->resolution_sites.size();
     out->resolution_by_signature = build->resolution_by_signature;
+    out->title_id = build->title_id;
+    out->version = build->version;
     return 1;
 }

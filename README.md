@@ -2,7 +2,7 @@
 
 # Dragon's Crown Pro - PC Port
 
-### Dragon's Crown Pro, Vanillaware's PS4 side-scrolling beat 'em up, running natively on Windows, and experimentally on Linux and Steam Deck, with the TRG launcher and modern graphics and display options
+### Dragon's Crown Pro, Vanillaware's PS4 side-scrolling beat 'em up, running natively on Windows, and experimentally on Linux and Steam Deck, with Online Co-op, the TRG launcher and modern graphics and display options
 
 [![Latest release](https://img.shields.io/github/v/release/saulob/dragons-crown-pro-pc?style=for-the-badge&label=release&color=e0bb32&labelColor=07101f&include_prereleases&cacheSeconds=300)](https://github.com/saulob/dragons-crown-pro-pc/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/saulob/dragons-crown-pro-pc/total?style=for-the-badge&color=e0bb32&labelColor=07101f&cacheSeconds=300)](https://github.com/saulob/dragons-crown-pro-pc/releases)
@@ -16,6 +16,7 @@
 
 ## Features
 
+- **Online Co-op** (new in v0.9.0): play the game's own online multiplayer with friends over the Internet, with Friend Codes, friend requests and Join a Friend's room. See [Online Co-op](#online-co-op)
 - **Regions**: the US (`CUSA10454` 1.00 and 1.01), Japanese (`CUSA07001` 1.00, 1.02 and 1.03) and Asia / Hong Kong (`CUSA10209` 1.00 and 1.02) PS4 releases
 - **Native PC port**: the game's own x86-64 code runs directly on the PC. It is not an emulator. Windows is the primary tested platform, and there is an experimental native Linux / Steam Deck AppImage with the same intended feature set. Linux needs no Proton or Wine.
 - **TRG launcher** that installs the game directly from your own `.pkg` file, with no Python or other tools needed, and remembers its window position
@@ -29,19 +30,73 @@
 - **Local PS4 trophies**, offline on this PC, shown on the launcher's Trophies page
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
-- **Menu & Subtitles language**: English, French, German, Italian or Spanish; Traditional Chinese or Korean on the Asia/Hong Kong build
-- Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time)
-- An in-game settings menu: **Insert** on the keyboard, or **R3 + L2** on the controller
+- **Menu & Subtitles language**: English, French, German, Italian or Spanish; Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build
+- **Story Skip Offer** and **Tutorial Skip Offer**: the game's own offers to skip the tutorial and start a new character in the second half of the story
+- Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time, **F2**)
 - Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
 - Local multiplayer with up to four controllers
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
 - **Update check**: the launcher looks for a newer release of the port at start and installs it only when you choose to; the game files and the `user` folder are kept
 
+## Online Co-op
+
+**New in v0.9.0:** Dragon's Crown Pro now includes Online Co-op. Add your friends with a Friend Code, then meet them in the game and play stages together over the Internet, as on the PS4. No PlayStation Network account is needed.
+
+- The port's online service (running on Cloudflare) handles your online identity, Friends and friend requests, who is online, and finding and joining rooms.
+- The gameplay itself goes **directly between the players' PCs** (peer-to-peer). It does not pass through the online service.
+- Players on different supported game builds and regions can play together, as long as their port versions use the same online protocol. A friend whose version cannot join yours is shown as **Incompatible**.
+
+> **Online play is unlocked by the game, not at the first start.** Dragon's Crown does not offer online multiplayer to a new character right away. It becomes available only after the opening tutorial and story section. If the online options are missing early in a new save, that is the game's normal progression, not a problem with the port.
+>
+> To reach Online Co-op faster, turn on **Story Skip Offer** and **Tutorial Skip Offer** on the launcher's **Gameplay** page before creating a new character. The game then lets that character skip the tutorial and start from the second half of the story. Existing characters are not affected.
+
+### Playing online
+
+1. In the launcher, open the **Online** page and turn **Online play** On.
+2. Choose your **Online name**, the name other players see.
+3. Share **Your friend code** with the friends you want to play with (**Copy** puts it on the clipboard). Get theirs too.
+4. Under **Friends**, enter your friend's code and click **Send request**. Your friend sees a **New friend request** card on their Online page and clicks **Accept**. You now appear in each other's **Friends** list, with whether you are online.
+5. Optional: click **Run test** under **Connection test**. **Ready for online play** means other players can reach you.
+6. Press **PLAY**.
+7. Complete the opening tutorial and story section, or skip them with the offers above, until the game's online options are available.
+8. Use the game's normal online flow when setting out from the Stables, as on the PS4. One player hosts.
+9. The other player picks the host's room in **Join Friends Room**. **Join Random Room** finds only hosts who are already inside a stage.
+
+Both players need **Online play** On. With it Off, the game runs offline exactly as before.
+
+**Testing notes**
+- Real-world testing has so far focused on two-player sessions. Dragon's Crown supports up to four players in a room, but four-player online on the PC port has not been fully validated yet.
+- Online play on Linux and Steam Deck is experimental: it uses the same code as Windows, but it has not yet been tested on real Linux or Steam Deck hardware (see [Linux and Steam Deck](#linux-and-steam-deck)).
+
+### Ping and frame counter
+
+- **F2** shows or hides the frame counter (frames per second and frame time).
+- **F3** shows or hides the **Ping** while Online play is on. **Ping display** on the Online page shows it from the start.
+- The Ping is the round trip to the other players over the direct connection, the one gameplay uses. With several players it shows the slowest connection. It is not the time the online service takes to answer. `Ping: --` means no other player is connected yet.
+
+### Cheats and Online play
+
+Cheats are **automatically disabled while Online play is on**. This is intentional, so online sessions are played without them. Turning Online play on switches every saved cheat Off; the Cheats page and the **F10** menu show "Cheats are disabled while Online Play is enabled". Turn Online play off to use cheats again, and turn the cheats you want back on.
+
+### Online troubleshooting
+
+- **The online options are missing in the game**: see the note above. They appear only after the opening tutorial and story section.
+- **"Cannot reach the online service"**: check the Internet connection and that a firewall is not blocking the program.
+- **Friends cannot join, or the connection test says "Limited"**: the game connects players directly. To get through home routers, the port uses STUN, UDP hole punching and, where the router allows it, UPnP port mapping (UDP port 3658 by default). Allowing the program through your firewall, or turning on UPnP in your router, can help. When both players are behind strict NATs (some mobile, campus or provider networks), they may not be able to connect, because there is no relay server yet.
+- **A friend shows Incompatible**: one of you needs another port version. Update both to the latest release.
+- For a problem report, attach the log as described in [Reporting problems](#reporting-problems). The log includes the Connection test details.
+
+Technical details are in [docs/ONLINE.md](docs/ONLINE.md).
+
+### Privacy
+
+The online service stores anonymous aggregate usage statistics, such as player counts, sessions, the port version, the platform and the country. These statistics do not store player names, Friend Codes, account IDs or IP addresses. Gameplay stays direct between the players (P2P); gameplay activity, saves, Ping and FPS are not collected. To find friends and connect you, the service also keeps your account, Online name and friends, and while you are in a room it uses your address and port. See [docs/ONLINE.md](docs/ONLINE.md#privacy-and-usage-statistics).
+
 ## What you need
 
 - Windows 10 (version 1903 or newer) or Windows 11, 64-bit
 - **Or, experimental:** 64-bit Linux on x86-64, including the Steam Deck, on an X11 or Wayland desktop, with glibc 2.31 or newer and a Vulkan 1.3 loader (`libvulkan.so.1`) and graphics driver (see [Linux and Steam Deck](#linux-and-steam-deck)). The game has been run on Ubuntu 24.04 (WSL2), and community testers report it working on Bazzite (KDE Plasma, Wayland, AMD RADV) and on a Steam Deck LCD; other distributions that are new enough may work
-- A processor with **AVX** and **LZCNT**: Intel Core 4th generation (Haswell), AMD FX or newer. The game's PS4 code runs directly on it; MOVBE and BMI1, which some of these lack, are emulated
+- A processor with **AVX**: Intel Core 2nd generation (Sandy Bridge), AMD FX or newer. The game's PS4 code runs directly on it; LZCNT, MOVBE and BMI1, which some of these lack, are handled in software. On a processor without LZCNT, the USA 1.01 and Asia and Hong Kong 1.02 builds do not start yet; the other builds do
 - A graphics card and driver with **Vulkan 1.3**, `VK_EXT_robustness2`, `VK_KHR_push_descriptor` and `VK_EXT_vertex_attribute_divisor` on either platform (tested on an NVIDIA GeForce RTX 4070 and Intel UHD Graphics 730 on Windows)
 - **Your own legally obtained Dragon's Crown Pro package**: a decrypted PS4 `.pkg` file of this exact game version, and about 6 GB of free space for the installed game:
 
@@ -61,7 +116,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.8.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v0.9.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -89,7 +144,7 @@ These folders are created the first time they are needed and are not part of the
 
 ### Linux and Steam Deck
 
-**Experimental.** This is a native Linux build, not Proton or Wine, and it is intended to provide the same functionality as Windows: the same launcher, installer, display and graphics options, controls and in-game menu; the only Windows-only option is Allow overlay programs. "Experimental" is about testing: the maintainer has no real Linux PC or Steam Deck. Community testers have reported it working on Bazzite (KDE Plasma, Wayland, AMD Radeon RX 9070 XT with RADV, 4K borderless fullscreen) and on a Steam Deck LCD ([issue #5](https://github.com/saulob/dragons-crown-pro-pc/issues/5)). It was also validated automatically under WSL2 with Ubuntu 24.04, in X11 and Wayland environments with a software Vulkan driver: the launcher, installing a package, the game's first screens, saves and the shader cache. Broader testing is still needed on NVIDIA and Intel Vulkan drivers, other distributions and the Steam Deck OLED, gamescope and Gaming Mode, performance, and long sessions. Started without a graphical session (neither `DISPLAY` nor `WAYLAND_DISPLAY` set), the game prints an error and exits instead of crashing. Please report Linux-specific problems with the log (see [Reporting problems](#reporting-problems)).
+**Experimental.** This is a native Linux build, not Proton or Wine, and it is intended to provide the same functionality as Windows: the same launcher, installer, display and graphics options and controls; the only Windows-only option is Allow overlay programs. "Experimental" is about testing: the maintainer has no real Linux PC or Steam Deck. Community testers have reported it working on Bazzite (KDE Plasma, Wayland, AMD Radeon RX 9070 XT with RADV, 4K borderless fullscreen) and on a Steam Deck LCD ([issue #5](https://github.com/saulob/dragons-crown-pro-pc/issues/5)). It was also validated automatically under WSL2 with Ubuntu 24.04, in X11 and Wayland environments with a software Vulkan driver: the launcher, installing a package, the game's first screens, saves and the shader cache. Broader testing is still needed on NVIDIA and Intel Vulkan drivers, other distributions and the Steam Deck OLED, gamescope and Gaming Mode, performance, and long sessions. Started without a graphical session (neither `DISPLAY` nor `WAYLAND_DISPLAY` set), the game prints an error and exits instead of crashing. Please report Linux-specific problems with the log (see [Reporting problems](#reporting-problems)).
 
 1. Download **DragonsCrownProPC-v&lt;version&gt;-x86_64.AppImage** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and make it executable (right-click > **Properties** > **Permissions** > **Is executable**, or `chmod +x`).
 2. Run it. The launcher opens.
@@ -102,13 +157,15 @@ To bring the launcher back after turning **Show this launcher** off, hold **Shif
 
 **Steam Deck:** install the game once from Desktop Mode, then add the AppImage with **Games > Add a Non-Steam Game to My Library** and start it from Gaming Mode. Nothing needs Proton. Requirements, differences from Windows and known limits are in [docs/LINUX.md](docs/LINUX.md).
 
+**Online Co-op on Linux and Steam Deck:** the Linux build has the same Online page, Friends, rooms, direct connections, Ping and cheat lock as Windows, from the same code, and Linux and Windows players can play together. Other players see your platform as Linux or Steam Deck. This is checked by automated tests and builds only: online play on a real Linux PC or Steam Deck has not been tested by the maintainer yet, so reports are very welcome. On a Steam Deck, set up the Online page (Online name, Friend Codes) in Desktop Mode, where a keyboard is at hand.
+
 ### Windows SmartScreen
 
 Windows may warn the first time you run the program, because the release is not digitally signed. If you downloaded it from this repository's releases page, choose **More info**, then **Run anyway**.
 
 ## The launcher
 
-The launcher opens before the game. Your choices are saved to `user\dcp.ini`, the same file the in-game menu writes. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
+The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
 
 ### Play
 - **Install game...** from your `.pkg` file, with the Title ID, version and `eboot.bin` checks, and **Reinstall game...**
@@ -132,24 +189,24 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`, th
 - **Texture filtering**: Game, 2x, 4x, 8x or 16x
 
 ### Gameplay
-- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
+- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Japanese builds (CUSA07001) show Japanese only, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. CUSA10454 1.00 USA only; narrator and player-character choices are unchanged
 - **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
 - **Frame counter**: shows the frame rate and frame time in a corner of the game
 - **Arachnophobia Safe Mode**: redraws the Giant Spider as two soft cream bodies with two orange eyes, without legs or fangs; gameplay does not change
+- **Story Skip Offer** (Off by default): when you create a new character, the game offers to start it from the second half of the story, which it normally offers only after a class on the save has finished the game. Recommended if you mainly want Online Co-op
+- **Tutorial Skip Offer** (Off by default): the first character of a save is also asked whether to begin the tutorial, instead of starting it automatically. Existing characters are not affected by either offer
 - **Allow overlay programs** (Windows, Off by default): starts the game as a separate process from the launcher, which recording, chat, store and performance overlays can attach to cleanly. Turn it on if the game closes right after Play while such a program is running
 
 The game runs at its own 60 frames per second unless the Frame rate setting asks for more; its logic stays at 60 either way.
 
-### Trophies
-- The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package, and the **Trophies** launcher page shows your progress, the trophies and their grades.
-- The trophy list is encrypted in the package. The port does not include, generate or download the Trophy Key it needs: enter your own on the Trophies page, or import it from a shadPS4 `keys.json` or `config.toml`. It is stored only in `user\keys.json`, and the launcher never shows it again. Without it the game still records your unlocks, and the page shows them once a key works.
-- There is no in-game "Trophy unlocked" notification yet. See [docs/TROPHIES.md](docs/TROPHIES.md).
+### Online
+- **Online play** (Off by default), **Online name**, **Your friend code**, **Friends** with friend requests, **Connection test** and **Ping display**. See [Online Co-op](#online-co-op) for how to play and [docs/ONLINE.md](docs/ONLINE.md) for the details.
 
 ### Cheats
-- **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Skill Uses** and **Infinite Gold** (Player 1, except the ally cheats; gold is shared by the save), all Off by default. **Movement Speed** (Off, 2x or 4x) and **Experience Multiplier** (Off, 2x, 5x, 10x or 100x) are settings of their own. Press **F10** while playing to open the Cheats menu; it also has the one-shot **Fill Health**, **Fill Ally Health**, **Set Low Health**, **Set Ally Low Health**, **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**. What you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play; nothing turns them off automatically in an online session. See [docs/CHEATS.md](docs/CHEATS.md).
+- **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Skill Uses** and **Infinite Gold** (Player 1, except the ally cheats; gold is shared by the save), all Off by default. **Movement Speed** (Off, 2x or 4x) and **Experience Multiplier** (Off, 2x, 5x, 10x or 100x) are settings of their own. Press **F10** while playing to open the Cheats menu; it also has the one-shot **Fill Health**, **Fill Ally Health**, **Set Low Health**, **Set Ally Low Health**, **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**. What you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play: while Online Play is on (the setting or `DCP_ONLINE`), every cheat is Off and F10 only shows "Cheats are disabled while Online Play is enabled" See [docs/CHEATS.md](docs/CHEATS.md).
 
 ### Controls
 - Xbox controllers work without setup
@@ -169,8 +226,13 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 | Options (Start) | Enter |
 | Touchpad left / right (Back) | Tab / Backspace |
 
-- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F3** switches the experimental AMD water fix for black regions under characters standing in water (On by default on AMD graphics cards, Off elsewhere; it is not saved and a notice shows its state). **Insert** (or **R3 + L2**) opens the in-game menu, with the display mode, VSync, FSR 1, sharpening and the frame counter.
-- **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged. Online play is not supported.
+- **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F2** shows or hides the frame counter. **F3** shows or hides the Ping while Online Play is on (see [docs/ONLINE.md](docs/ONLINE.md)). An experimental AMD water workaround for black regions under characters standing in water is On on AMD graphics cards and Off elsewhere. The display mode, VSync, FSR 1, sharpening and the frame counter are set in the launcher.
+- **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged.
+
+### Trophies
+- The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package, and the **Trophies** launcher page shows your progress, the trophies and their grades.
+- The trophy list is encrypted in the package. The port does not include, generate or download the Trophy Key it needs: enter your own on the Trophies page, or import it from a shadPS4 `keys.json` or `config.toml`. It is stored only in `user\keys.json`, and the launcher never shows it again. Without it the game still records your unlocks, and the page shows them once a key works.
+- There is no in-game "Trophy unlocked" notification yet. See [docs/TROPHIES.md](docs/TROPHIES.md).
 
 ### About
 - The port version, game version, renderer and library versions
@@ -216,7 +278,7 @@ bash tools/package-linux.sh       # dist/DragonsCrownProPC-v<version>-x86_64.App
 
 `tools/build.sh --run` starts the loader that was built. Python is not needed. The AppImage is built on Ubuntu 20.04, whose glibc (2.31) is the oldest one it runs on, and `tools/package-linux.sh` checks every ELF file in it against that; `.github/workflows/linux-appimage.yml` does the same in GitHub Actions (started by hand, publishes nothing).
 
-The technical notes are in [docs](docs): [launcher and settings](docs/LAUNCHER.md), [Linux port](docs/LINUX.md), [graphics](docs/GRAPHICS.md), [first boot](docs/FIRST_BOOT.md), [bootstrap](docs/BOOTSTRAP.md) and [references](docs/REFERENCES.md).
+The technical notes are in [docs](docs): [launcher and settings](docs/LAUNCHER.md), [online play](docs/ONLINE.md), [Linux port](docs/LINUX.md), [graphics](docs/GRAPHICS.md), [first boot](docs/FIRST_BOOT.md), [bootstrap](docs/BOOTSTRAP.md) and [references](docs/REFERENCES.md).
 
 ## Sponsoring
 

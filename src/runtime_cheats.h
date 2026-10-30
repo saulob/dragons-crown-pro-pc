@@ -18,6 +18,11 @@ void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int mo
 void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed);
 #endif
 
+/* Online Play on (runtime_online_play_enabled) locks every cheat Off for the whole process: saved values, the menu,
+ * refills and actions. Set before runtime_cheats_start; turning it on also clears what is already set. */
+void runtime_cheats_set_online(int online);
+int runtime_cheats_online_locked(void);
+
 /* The Experience Multiplier this session (1 = Off, 2, 5 or 10): the saved value, or the menu's change of it. */
 int runtime_cheat_experience_multiplier(void);
 
@@ -54,8 +59,15 @@ void runtime_cheat_clear_actions(void);
 /* The in-game menu's toggle. Only this session changes; nothing is written to the settings file. */
 void runtime_cheat_toggle(int cheat);
 
-/* Prints the enabled cheats and the Experience Multiplier, once the saved settings are in effect. */
-void runtime_cheats_log_enabled(void);
+/* What the log says about the cheats, once the saved settings are in effect; build_has_hooks is the build's native
+ * cheat support. Online Play wins on every build. */
+#define RUNTIME_CHEATS_ONLINE_LOCKED 0 /* "Cheats: disabled for Online Play" */
+#define RUNTIME_CHEATS_UNAVAILABLE 1   /* "Cheats: enabled: none": the build has no cheat hooks */
+#define RUNTIME_CHEATS_LISTED 2        /* the enabled cheats, Experience Multiplier and Movement Speed */
+int runtime_cheats_log_state(int build_has_hooks);
+
+/* 1 when the native cheat hooks go in: the build has them and Online Play is off. */
+int runtime_cheats_hooks_wanted(int build_has_hooks);
 
 /* The native hooks the cheats need: the room for their stubs, and the installation on the loaded image (before its
  * relocations are made executable). 0 when the image is not the supported v1.03: the game then runs without cheats. */

@@ -26,8 +26,10 @@ A package still encrypted for a PS4 console cannot be unpacked on a PC.
 REQUIREMENTS
 ------------
 - Windows 10 version 1903 or later, or Windows 11, 64-bit
-- A processor with AVX and LZCNT: Intel Core 4th generation (Haswell), AMD FX
-  or newer. The MOVBE and BMI1 instructions some of these lack are emulated
+- A processor with AVX: Intel Core 2nd generation (Sandy Bridge), AMD FX or
+  newer. The LZCNT, MOVBE and BMI1 instructions some of these lack are handled
+  in software (without LZCNT, the USA 1.01 and Asia/Hong Kong 1.02 builds do
+  not start yet)
 - A graphics card and driver with Vulkan 1.3, VK_EXT_robustness2,
   VK_KHR_push_descriptor and VK_EXT_vertex_attribute_divisor
 - Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next
@@ -71,20 +73,24 @@ from the project's GitHub releases page, choose "More info", then
 PLAYING
 -------
 - F11 switches between Windowed and Borderless Fullscreen.
-- Insert (or R3 + L2 on a controller) opens the in-game settings menu.
 - Xbox controllers work without setup.
 - The keyboard works too; the launcher's Controls page lists the keys.
 - The Controls page also chooses the button prompts the game shows: PlayStation
   (original) or Xbox. It can be switched back at any time.
 - Local multiplayer: up to four players, one controller each; the keyboard is always
   Player 1's. A controller connected later takes the lowest free player slot, and a
-  player stays logged in when their controller is unplugged. Online play is not
-  supported.
+  player stays logged in when their controller is unplugged.
+- Online Co-op (new in v0.9.0): turn on Online Play on the launcher's Online
+  page (Off by default) to meet friends through a small online service; the
+  game traffic goes directly between the players' PCs. Cheats are off while it
+  is on. F3 shows the Ping during Online Play, F2 the frame counter.
+- The game itself unlocks online play only after the opening tutorial and story
+  section. To get there faster, turn on Gameplay > Story Skip Offer and
+  Tutorial Skip Offer before creating a new character.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
-- F3 switches the experimental AMD water fix (black areas under characters
-  standing in water): on by default on AMD graphics cards, off elsewhere, not
-  saved.
+- An experimental AMD water workaround (black areas under characters standing
+  in water) is on with AMD graphics cards and off elsewhere.
 - If the game closes right after PLAY while a recording, chat or performance
   overlay program is running, turn on Gameplay > Allow overlay programs in the
   launcher.

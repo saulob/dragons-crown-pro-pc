@@ -1,5 +1,5 @@
-// Focused tests of the experimental AMD water fix switch (issue #32): vendor defaults, F3 presses on every GPU, the
-// stencil/depth decisions and the absence of an environment switch.
+// Focused tests of the experimental AMD water fix (issue #32): vendor defaults, the stencil/depth decisions, and the
+// absence of an environment switch or a hotkey (F3 is the in-game Ping).
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -32,38 +32,15 @@ void TestVendorDefaults() {
     CHECK(!DefaultOn(kNvidia) && !DefaultOn(kIntel) && !DefaultOn(kOther));
 }
 
-void TestPresses(std::uint32_t vendor) {
-    const bool start = DefaultOn(vendor);
-    Switch fix;
-    fix.Init(vendor);
-    CHECK(fix.On() == start);
-    CHECK(fix.Press(false) && fix.On() == !start);
-    CHECK(!fix.Press(true) && fix.On() == !start); // holding F3 repeats the key: no flip
-    CHECK(!fix.Press(true) && fix.On() == !start);
-    CHECK(fix.Press(false) && fix.On() == start);
-    CHECK(fix.Press(false) && fix.On() == !start);
-    fix.Init(vendor); // a new process starts from the default again
-    CHECK(fix.On() == start);
-}
-
-void TestAllVendors() {
+// Every process starts from its vendor's default; nothing switches the fix while the game runs.
+void TestProcessDefault() {
     for (const std::uint32_t vendor : {std::uint32_t(0x1002), kNvidia, kIntel, kOther}) {
-        TestPresses(vendor);
+        Switch fix;
+        fix.Init(vendor);
+        CHECK(fix.On() == DefaultOn(vendor));
+        fix.Init(vendor);
+        CHECK(fix.On() == DefaultOn(vendor));
     }
-}
-
-// F3 on a non-AMD GPU reaches the same decisions as AMD's default.
-void TestNonAmdTurnedOn() {
-    Switch amd, nvidia;
-    amd.Init(0x1002);
-    nvidia.Init(kNvidia);
-    CHECK(nvidia.Press(false) && nvidia.On() == amd.On());
-    for (const bool flag : {false, true}) {
-        CHECK(FollowsStencilLink(nvidia.On(), flag) == FollowsStencilLink(amd.On(), flag));
-        CHECK(SharesDepthLayout(nvidia.On(), true, flag) == SharesDepthLayout(amd.On(), true, flag));
-    }
-    CHECK(!FollowsStencilLink(nvidia.On(), false));
-    CHECK(SharesDepthLayout(nvidia.On(), true, true));
 }
 
 std::string ReadSource(const char* path) {
@@ -86,6 +63,14 @@ void TestNoEnvironmentSwitch() {
     CHECK(header.find("getenv") == std::string::npos && header.find("Flag(") == std::string::npos);
 }
 
+void TestNoHotkey() {
+    const std::string header = ReadSource("gpu/shim/dcp_amd_water_fix.h");
+    CHECK(header.find("Press(") == std::string::npos && header.find("F3") == std::string::npos);
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    CHECK(window.find("AmdWaterFix") == std::string::npos && window.find("SDL_SCANCODE_F3") == std::string::npos);
+    CHECK(window.find("DcpPing::HudKeyFor(") != std::string::npos);
+}
+
 void TestStencilLink() {
     CHECK(FollowsStencilLink(true, true));
     CHECK(!FollowsStencilLink(true, false));
@@ -104,9 +89,9 @@ void TestDepthLayout() {
 
 int main() {
     TestVendorDefaults();
-    TestAllVendors();
-    TestNonAmdTurnedOn();
+    TestProcessDefault();
     TestNoEnvironmentSwitch();
+    TestNoHotkey();
     TestStencilLink();
     TestDepthLayout();
     if (g_failures) {

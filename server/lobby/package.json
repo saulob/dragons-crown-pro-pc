@@ -1,0 +1,17 @@
+{
+  "name": "dcp-lobby",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dragon's Crown Pro PC port: online lobby (players meet here; game traffic is peer-to-peer)",
+  "license": "GPL-2.0-only",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "local": "node local/server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy"
+  }
+}

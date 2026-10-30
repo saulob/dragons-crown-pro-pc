@@ -29,6 +29,7 @@
 #include "cheat_hooks.h"
 #include "dcp_cheat_menu.h"
 #include "dcp_cheats.h"
+#include "dcp_keys.h"
 #include "guest_hook.h"
 #include "runtime_cheats.h"
 
@@ -152,6 +153,109 @@ void TestSessionOverride() {
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
     CHECK(overlay.find("runtime_cheat_toggle") != std::string::npos);
     CHECK(ReadSource("gpu/shim/dcp_settings.cpp").find("cheat") == std::string::npos); // the menu cannot save them
+}
+
+size_t Count(const std::string& text, const std::string& what) {
+    size_t count = 0;
+    for (size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) {
+        ++count;
+    }
+    return count;
+}
+
+// Online Play locks every cheat Off for the process: saved values, the menu key, toggles, refills and actions.
+void TestOnlineLockout() {
+    const int health = int(Cheat::InfiniteHealth), mana = int(Cheat::InfiniteMana);
+    const unsigned all = (1u << kCheatCount) - 1;
+
+    // Online Off: the menu opens and the cheats work as before.
+    runtime_cheats_set_online(0);
+    CHECK(runtime_cheats_online_locked() == 0);
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth) | Bit(Cheat::InfiniteMana), 5, 4);
+    CHECK(runtime_cheat_enabled(health) == 1 && runtime_cheat_refills_pending() != 0);
+    CHECK(runtime_cheat_experience_multiplier() == 5 && runtime_cheat_movement_speed() == 4);
+    runtime_cheat_toggle(int(Cheat::InfiniteGold));
+    CHECK(runtime_cheat_enabled(int(Cheat::InfiniteGold)) == 1);
+    runtime_cheat_action(int(Action::AddGold));
+    CHECK(runtime_cheat_action_pending(int(Action::AddGold)) == 1);
+    CHECK(MenuKeyPress(false, false, false, false) == MenuKeyAction::Open);
+    CHECK(MenuKeyPress(false, false, true, false) == MenuKeyAction::Close);
+    CHECK(MenuKeyPress(false, false, false, true) == MenuKeyAction::None);
+
+    // Online On clears what the session already had, and nothing can turn a cheat on again.
+    runtime_cheats_set_online(1);
+    CHECK(runtime_cheats_online_locked() == 1);
+    for (const CheatInfo& info : kCheats) {
+        CHECK(runtime_cheat_enabled(int(info.cheat)) == 0);
+    }
+    CHECK(runtime_cheat_refills_pending() == 0 && runtime_cheat_take_refill(mana) == 0);
+    CHECK(runtime_cheat_action_pending(int(Action::AddGold)) == 0 && runtime_cheat_take_action(int(Action::AddGold)) == 0);
+    runtime_cheat_toggle(health);
+    runtime_cheat_action(int(Action::AddSkillPoints));
+    CHECK(runtime_cheat_enabled(health) == 0 && runtime_cheat_action_pending(int(Action::AddSkillPoints)) == 0);
+    CHECK(runtime_cheat_experience_cycle() == kExperienceMultiplierOff && runtime_cheat_movement_cycle() == kMovementSpeedOff);
+    CHECK(runtime_cheat_experience_multiplier() == kExperienceMultiplierOff);
+    CHECK(runtime_cheat_movement_speed() == kMovementSpeedOff);
+
+    // Saved values (a hand-edited dcp.ini) are ignored at the start.
+    runtime_cheats_start(all, 100, 4);
+    for (const CheatInfo& info : kCheats) {
+        CHECK(runtime_cheat_enabled(int(info.cheat)) == 0);
+    }
+    CHECK(runtime_cheat_refills_pending() == 0);
+    CHECK(runtime_cheat_experience_multiplier() == kExperienceMultiplierOff);
+    CHECK(runtime_cheat_movement_speed() == kMovementSpeedOff);
+
+    // F10 shows the hint instead of the menu, once per press: a held key repeats and does nothing.
+    CHECK(MenuKeyPress(false, true, false, false) == MenuKeyAction::OnlineHint);
+    CHECK(MenuKeyPress(false, true, false, true) == MenuKeyAction::OnlineHint);
+    CHECK(MenuKeyPress(true, true, false, false) == MenuKeyAction::None);
+    CHECK(MenuKeyPress(true, false, false, false) == MenuKeyAction::None);
+    CHECK(MenuKeyPress(true, false, true, false) == MenuKeyAction::None);
+    int hints = 0;
+    for (const bool repeat : {false, true, true, true, false, true}) {
+        hints += MenuKeyPress(repeat, true, false, false) == MenuKeyAction::OnlineHint;
+    }
+    CHECK(hints == 2);
+
+    // Online Off again: the next start follows the saved values and the menu opens.
+    runtime_cheats_set_online(0);
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
+    CHECK(runtime_cheat_enabled(health) == 1);
+    CHECK(MenuKeyPress(false, runtime_cheats_online_locked() != 0, false, false) == MenuKeyAction::Open);
+    runtime_cheats_start(0, 1);
+
+    // The Cheats menu key is the only cheat hotkey; the overlay opens the menu through MenuKeyPress alone and shows
+    // the hint on its existing notice.
+    CHECK(DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY == 2 && DCP_KEY_HOTKEY_WINDOW_MODE == DCP_KEY_HOTKEY_CHEATS + 1);
+    CHECK(std::string(kOnlineLockoutText) == "Cheats are disabled while Online Play is enabled");
+    const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
+    CHECK(Count(overlay, "cheat_open = true;") == 1 && Count(overlay, "OpenCheatMenu()") == 2);
+    CHECK(Count(overlay, "PressCheatMenuKey(") == 2 && Count(overlay, "runtime_cheat_toggle(") == 1);
+    CHECK(overlay.find("MenuKeyPress(repeat, runtime_cheats_online_locked() != 0, cheat_open, busy)") != std::string::npos);
+    CHECK(overlay.find("case dcp::cheats::MenuKeyAction::Open: OpenCheatMenu(); break;") != std::string::npos);
+    CHECK(overlay.find("SetNotice(dcp::cheats::kOnlineLockoutText)") != std::string::npos);
+    CHECK(overlay.find("if (down) {\n                PressCheatMenuKey(event.key.repeat);") != std::string::npos);
+    CHECK(Count(overlay, "std::chrono::seconds(2)") == 1); // one notice mechanism
+
+    // The game sets the lock from the effective Online Play setting (dcp.ini with DCP_ONLINE applied) before the
+    // saved cheats are read, and then installs no cheat hooks. The skip offers are not part of it.
+    const std::string loader = ReadSource("src/loader.c");
+    const size_t configure = loader.find("runtime_online_configure(");
+    const size_t lock = loader.find("runtime_cheats_set_online(runtime_online_play_enabled());");
+    CHECK(configure != std::string::npos && lock != std::string::npos && configure < lock);
+    CHECK(lock < loader.find("runtime_cheats_start(dcp_saved_cheats("));
+    // The log line comes from the lock first on every build, never from the build's cheat support alone.
+    CHECK(lock < loader.find("runtime_cheats_log_state(known_build && game_build.cheats);"));
+    CHECK(loader.find("Cheats: enabled") == std::string::npos);
+    CHECK(loader.find("if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) runtime_cheat_hooks_install(") !=
+          std::string::npos);
+    const size_t skip = loader.find("skip_offers_install(");
+    CHECK(skip != std::string::npos && loader.find("online_locked", skip) == std::string::npos);
+    const std::string online = ReadSource("src/runtime_online.cpp");
+    const size_t environment = online.find("net::apply_environment(s.config);");
+    CHECK(environment != std::string::npos && environment < online.find("return online::g_settings.config.enabled ? 1 : 0;"));
+    CHECK(ReadSource("src/runtime_cheats.cpp").find("Cheats: disabled for Online Play\\n") != std::string::npos);
 }
 
 void TestRefillTransitions() {
@@ -2885,6 +2989,7 @@ int main(int argc, char** argv) {
     TestCheatList();
     TestSessionOverride();
     TestRefillTransitions();
+    TestOnlineLockout();
     TestMenuModel();
     TestRules();
     TestHookHandlers();

@@ -43,9 +43,10 @@ typedef struct {
     char image_dir[4096];
     char user_dir[4096];
     char logs_dir[4096];
+    char error[512]; /* why the paths cannot be used, when it is known (DCP_GAME_BUILD) */
 } DcpPaths;
 
-/* 0 when the executable's folder is unknown or a path does not fit. */
+/* 0 when the executable's folder is unknown, a path does not fit or DCP_GAME_BUILD cannot be used. */
 int dcp_resolve_paths(const DcpPathRequest *request, DcpPaths *paths);
 
 /* The folder holding this run's log: the log_file's parent when one is given, else logs_dir. 0 when
@@ -61,10 +62,10 @@ int dcp_render_resolution(const char *settings_file, const char *image_dir);
  * from: 0 (16:9 Original) when the file or the value is missing or the build has no verified render resolution sites. */
 int dcp_aspect_ratio(const char *settings_file, const char *image_dir);
 
-/* The system language the game is told for the text_language in the settings file, among the languages of the build
- * image_dir was built from: the build's default (English when the build is unknown) when the file or the value is
- * missing or not one of them. */
-int dcp_text_language(const char *settings_file, const char *image_dir);
+/* The system language the game is told for the text_language in the settings file, among the languages the prepared
+ * game folder app0 holds of the build image_dir was built from: the first of them (English when the build is unknown)
+ * when the file or the value is missing or not one of them. */
+int dcp_text_language(const char *settings_file, const char *image_dir, const char *app0);
 
 /* The cheats the settings file turns on, one bit per cheat (dcp_cheats.h); 0 when the file or the keys are missing. */
 unsigned dcp_saved_cheats(const char *settings_file);
@@ -83,11 +84,28 @@ int dcp_japanese_npc_voices(const char *settings_file);
 /* 1 when the settings file asks for True Ultrawide (true_ultrawide; 0 by default, and for a missing or unknown value). */
 int dcp_true_ultrawide(const char *settings_file);
 
+/* The Skip Offers the settings file turns on (skip_offers.h bits; none by default). */
+unsigned dcp_skip_offers(const char *settings_file);
+
 /* 1 when the settings file keeps the logs of normal sessions (detailed_logging; 1 by default). */
 int dcp_detailed_logging(const char *settings_file);
 
-/* Prints the effective Gameplay page settings, including the Japanese NPC Voices state after build gating. */
-void dcp_log_gameplay_settings(const char *settings_file, const char *image_dir);
+/* What the loader decided for this run: the parts of the "Settings:" log lines the settings file alone does not say. */
+typedef struct DcpRunSettings {
+    const char *game_build;        /* label; NULL for an unknown build */
+    int online_play;               /* effective Online Play (DCP_ONLINE applied): cheats are locked */
+    int render_width, render_height;
+    const char *render_resolution; /* dcp_resolutions key */
+    const char *aspect_ratio;      /* dcp_aspect_ratios name */
+    int true_ultrawide_effective;
+    unsigned skip_offers;          /* the skip_offers.h bits applied */
+} DcpRunSettings;
+
+/* Prints the startup state support needs as "Settings:" lines: port version, platform, online protocol, game build,
+ * Online Play and the display, gameplay and skip settings in effect. Never the Online name, Friend Code or account.
+ * `run` may be NULL: the settings file's values then. */
+void dcp_log_settings_summary(const char *settings_file, const char *image_dir, const char *app0,
+                              const DcpRunSettings *run);
 
 /* Starts the game process dcp_launcher_run created suspended. Call it once nothing writes to the log any more; 1 when
  * it runs. A process that could not be started is ended. */
@@ -113,6 +131,8 @@ typedef struct {
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
+    const char *title_id;
+    const char *version;         /* the build's profile version: with title_id, the build key of the loader's patches */
 } DcpGameBuild;
 
 /* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */

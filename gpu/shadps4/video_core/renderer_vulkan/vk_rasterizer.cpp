@@ -52,7 +52,7 @@ bool DepthTargetWritesStencil(const AmdGpu::Regs& regs, const VideoCore::ImageVi
 void InitAmdWaterFix(const Instance& instance) {
     const u32 vendor = instance.GetVendorID();
     DcpAmdWaterFix::State().Init(vendor);
-    std::printf("GPU: AMD water fix %s (vendor %#06x, %s, F3 switches it)\n",
+    std::printf("GPU: experimental AMD water workaround %s (vendor %#06x, %s)\n",
                 DcpAmdWaterFix::State().On() ? "on" : "off", vendor,
                 instance.IsAttachmentFeedbackLoopLayoutSupported() ? "feedback loop layout" : "General layout");
 }
@@ -77,6 +77,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 
     GpuProfiler::Init(instance, scheduler);
     InitAmdWaterFix(instance);
+    water_diag.Init(instance.GetVendorID());
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
@@ -950,7 +951,13 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (!bound) {
         return;
     }
+    if (water_diag.Active()) {
+        CaptureWaterDiagLayouts(pipeline);
+    }
     const auto state = BeginRendering(pipeline);
+    if (water_diag.Active()) {
+        ReportWaterDiag(pipeline);
+    }
 
     if (!inputs_resolved) {
         ResolveVertexBuffers(pipeline, draw_prepared);
@@ -1068,7 +1075,13 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     if (!BindResources(pipeline)) {
         return;
     }
+    if (water_diag.Active()) {
+        CaptureWaterDiagLayouts(pipeline);
+    }
     const auto state = BeginRendering(pipeline);
+    if (water_diag.Active()) {
+        ReportWaterDiag(pipeline);
+    }
 
     BindVertexBuffers(pipeline);
     if (is_indexed) {
@@ -2512,6 +2525,85 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         }
     }
     return state;
+}
+
+void Rasterizer::CaptureWaterDiagLayouts(const GraphicsPipeline* pipeline) {
+    const u32 num_color = std::bit_width(pipeline->GetGraphicsKey().mrt_mask);
+    for (u32 slot = 0; slot < water_diag_layouts.size(); ++slot) {
+        const bool color = slot < AmdGpu::NUM_COLOR_BUFFERS;
+        const VideoCore::ImageId id = !color ? db_desc.first
+                                      : slot < num_color ? cb_descs[slot].first
+                                                         : VideoCore::ImageId{};
+        const auto* image = id ? &texture_cache.GetImage(id) : nullptr;
+        water_diag_layouts[slot] =
+            image && image->binding.is_bound ? u32(image->backing->state.layout) : 0u;
+    }
+}
+
+void Rasterizer::ReportWaterDiag(const GraphicsPipeline* pipeline) {
+    const u32 frame = DcpWaterDiag::Frame();
+    const u32 draw = water_diag.NextDraw(frame);
+    const auto describe = [&](VideoCore::ImageId id, DcpWaterDiag::Image& out) {
+        const auto& image = texture_cache.GetImage(id);
+        out.id = id.index;
+        out.begin = image.info.guest_address;
+        out.end = image.info.guest_address + image.info.guest_size;
+        out.format = u32(image.info.pixel_format);
+        out.width = image.info.size.width;
+        out.height = image.info.size.height;
+        out.layout = u32(image.backing->state.layout);
+        out.aliased = True(image.flags & VideoCore::ImageFlagBits::Aliased);
+        return image.binding;
+    };
+    std::array<DcpWaterDiag::Target, AmdGpu::NUM_COLOR_BUFFERS + 1> targets{};
+    u32 num_targets = 0;
+    const auto add_target = [&](const RenderTargetInfo& info, u32 slot, u32 layout_slot) {
+        if (!info.first) {
+            return;
+        }
+        auto& target = targets[num_targets++];
+        target.sampled = describe(info.first, target).is_bound;
+        target.slot = u8(slot);
+        target.mip = u8(info.second.view_info.range.base.level);
+        target.sample_layout = water_diag_layouts[layout_slot];
+    };
+    const u32 num_color = std::bit_width(pipeline->GetGraphicsKey().mrt_mask);
+    for (u32 cb = 0; cb < num_color; ++cb) {
+        add_target(cb_descs[cb], cb, cb);
+    }
+    add_target(db_desc, DcpWaterDiag::kDepthSlot, AmdGpu::NUM_COLOR_BUFFERS);
+    if (num_targets == 0) {
+        return;
+    }
+    boost::container::static_vector<DcpWaterDiag::Image, Shader::NUM_IMAGES> sampled;
+    for (const auto id : bound_images) {
+        const auto& image = texture_cache.GetImage(id);
+        if (!image.binding.is_bound || image.binding.is_target || sampled.size() == sampled.capacity()) {
+            continue;
+        }
+        const u64 begin = image.info.guest_address;
+        const u64 end = begin + image.info.guest_size;
+        if (std::any_of(targets.begin(), targets.begin() + num_targets,
+                        [&](const auto& target) { return begin < target.end && target.begin < end; })) {
+            describe(id, sampled.emplace_back());
+        }
+    }
+    const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    const DcpWaterDiag::Draw info{pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
+                                  ps ? ps->pgm_hash : 0,
+                                  instance.IsAttachmentFeedbackLoopLayoutSupported(),
+                                  water_fix,
+                                  depth_target_writes,
+                                  push_data.scene_size != 0};
+    const auto event = DcpWaterDiag::Classify(
+        info, std::span<const DcpWaterDiag::Target>(targets.data(), num_targets),
+        std::span<const DcpWaterDiag::Image>(sampled.data(), sampled.size()));
+    if (event) {
+        water_diag.Report(*event, frame, draw, [](const char* line) {
+            std::printf("%s\n", line);
+            std::fflush(stdout);
+        });
+    }
 }
 
 RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {

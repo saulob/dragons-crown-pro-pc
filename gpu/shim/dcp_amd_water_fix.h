@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Experimental AMD workaround for black regions under characters standing in water (issue #32): on by default on AMD
-// GPUs, off elsewhere; F3 switches it on any GPU for the running process only (tests/amd_water_fix_tests.cpp).
+// Experimental AMD workaround (not a proven fix) for black regions under characters standing in water (issue #32): on
+// by default on AMD GPUs, off elsewhere (tests/amd_water_fix_tests.cpp).
 #pragma once
 
 #include <atomic>
@@ -26,14 +26,6 @@ public:
     }
     bool On() const {
         return on_.load(std::memory_order_relaxed);
-    }
-    /// One F3 press flips the fix; key repeats change nothing (false).
-    bool Press(bool repeat) {
-        if (repeat) {
-            return false;
-        }
-        on_.store(!On(), std::memory_order_relaxed);
-        return true;
     }
 
 private:

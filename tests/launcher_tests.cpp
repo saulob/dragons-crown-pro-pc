@@ -13,15 +13,19 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -32,6 +36,8 @@
 #include "dcp_launcher.h"
 #include "dcp_graphics.h"
 #include "dcp_keys.h"
+#include "dcp_overlay_box.h"
+#include "dcp_ping.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
@@ -39,12 +45,18 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
+#include "net/identity.h"
+#include "net/online_version.h"
+#include "online_client.h"
+#include "online_settings.h"
+#include "online_view.h"
 #include "options.h"
 #include "paths.h"
 #include "placement.h"
 #include "play_gate.h"
 #include "runtime_log.h"
 #include "settings.h"
+#include "text_languages.h"
 #include "utf8.h"
 
 namespace fs = std::filesystem;
@@ -311,9 +323,9 @@ void TestSettings(const fs::path& base) {
         CHECK(settings.Save()); // nothing pending: no file is needed
     }
 
-    // A file the in-game menu wrote: "key=value" lines, keys the launcher does not manage, a comment.
+    // A file another build wrote: "key=value" lines, keys the launcher does not manage, a comment.
     WriteAll(file,
-             "# video core settings (in-game menu: Insert / R3+L2)\n"
+             "# video core settings\n"
              "upscaler=off\n"
              "show_fps=0\n"
              "vsync=1\n"
@@ -774,7 +786,7 @@ void TestPngDecoder() {
 }
 
 // The video core reads dcp.ini as the launcher does, falls back to the defaults on values it does not accept and
-// writes only the keys the in-game menu changes.
+// writes only the display mode (F11).
 void TestVideoCoreSettings(const fs::path& base) {
     const fs::path file = base / "video-core" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -804,7 +816,6 @@ void TestVideoCoreSettings(const fs::path& base) {
              "show_resolution_title = on\n"
              "overlay_scale = 150\n"
              "overlay_corner = 3\n"
-             "menu_tab = 1\n"
              "upscaler = fsr3\n"
              "async_shaders = 1\n"
              "fps_limit = 30\n"
@@ -817,7 +828,7 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(v.graphics_card == "Intel(R) UHD Graphics 730"); // a trailing " # comment" is not part of the value
         CHECK(v.monitor == 2 && v.requested_width == 2560 && v.requested_height == 1440);
         CHECK(v.show_fps && v.show_fps_title && v.show_resolution_title);
-        CHECK(v.overlay_scale == 150 && v.overlay_corner == 3 && v.menu_tab == 1);
+        CHECK(v.overlay_scale == 150 && v.overlay_corner == 3);
     }
 
     // Values the game does not accept fall back to the defaults; the last of duplicate keys wins (as in the launcher).
@@ -832,7 +843,6 @@ void TestVideoCoreSettings(const fs::path& base) {
              "window_width = -5\n"
              "overlay_scale = 9000\n"
              "overlay_corner = 7\n"
-             "menu_tab = 2\n"
              "smaa = 1\n"
              "smaa = 0\n"
              "not a setting line\n"
@@ -842,7 +852,7 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(DcpSettings::Read(file.string(), v));
         CHECK(v.vsync && v.rcas && v.rcas_strength == 75 && v.anisotropy == 0);
         CHECK(v.display_mode == DcpGraphics::Windowed && v.graphics_card.empty() && v.monitor == 1);
-        CHECK(v.requested_width == 0 && v.overlay_scale == 300 && v.overlay_corner == 1 && v.menu_tab == 0);
+        CHECK(v.requested_width == 0 && v.overlay_scale == 300 && v.overlay_corner == 1);
         CHECK(!v.smaa);
     }
 
@@ -860,7 +870,7 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(v.graphics_card == "NVIDIA GeForce RTX 4070");
     }
 
-    // The menu's save and the F11 save rewrite their own keys in place and keep every other line.
+    // The F11 save rewrites the display mode in place and keeps every other line.
     WriteAll(file,
              "# header kept\n"
              "show_launcher = 0\n"
@@ -878,25 +888,9 @@ void TestVideoCoreSettings(const fs::path& base) {
         CHECK(text.find("# header kept\n") == 0);
         CHECK(text.find("render_resolution = 4K") != std::string::npos);
         CHECK(text.find("vsync") == std::string::npos); // F11 writes the display mode alone
-    }
-    live.vsync = false;
-    live.rcas_strength = 30;
-    live.show_fps = true;
-    CHECK(DcpSettings::Save());
-    {
-        const std::string text = ReadAll(file);
-        CHECK(text.find("vsync = 0") != std::string::npos);
-        CHECK(text.find("rcas_strength = 30") != std::string::npos);
-        CHECK(text.find("show_fps = 1") != std::string::npos);
-        CHECK(text.find("launcher_width = 1280") != std::string::npos && text.find("show_launcher = 0") != std::string::npos);
-        for (const char* never : {"smaa", "anisotropy", "graphics_card", "monitor", "window_width", "upscaler",
-                                  "async_shaders", "fps_limit", "frames_queued"}) {
-            CHECK(text.find(never) == std::string::npos);
-        }
+        CHECK(text.find("launcher_width = 1280") != std::string::npos);
         LauncherSettings reread(file);
-        CHECK(reread.Get(kDisplayModeKey) == "borderless" && !reread.GetBool(kVSyncKey, true));
-        CHECK(reread.GetInt(kSharpenStrengthKey, 0) == 30 && reread.GetBool(kShowFrameCounterKey, false));
-        CHECK(reread.GetBool(kShowLauncherKey, true) == false);
+        CHECK(reread.Get(kDisplayModeKey) == "borderless" && reread.GetBool(kShowLauncherKey, true) == false);
     }
 }
 
@@ -1172,6 +1166,666 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
 }
 
+// Online play: managed keys with their defaults, the reader the game uses, validation, kept by Reset, and only the
+// builds whose network imports are verified (docs/ONLINE.md) offer it. The lobby and UPnP are not settings.
+void TestOnlineSettings(const fs::path& base) {
+    const fs::path file = base / "online" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto launcher_default = [](std::string_view key) {
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            if (setting.key == key) {
+                return std::string(setting.default_value);
+            }
+        }
+        return std::string("<missing>");
+    };
+    CHECK(launcher_default(kOnlineEnabledKey) == "0" && launcher_default(kOnlineNameKey) == "Player");
+    CHECK(launcher_default(kOnlineUdpPortKey) == "0" && launcher_default(kOnlineStunKey) == net::kDefaultStunServers);
+    CHECK(launcher_default("online_lobby") == "<missing>" && launcher_default("online_upnp") == "<missing>");
+    CHECK(!IsOnlineSetting("online_lobby") && !IsOnlineSetting("online_upnp"));
+    CHECK(std::string(net::kDefaultLobbyUrl) == "wss://dcp-lobby.saulobenigno.workers.dev");
+    const net::OnlineConfig missing = ReadOnlineConfig(file);
+    CHECK(!missing.enabled && missing.upnp && missing.udp_port == 0 && missing.name == "Player");
+    CHECK(missing.lobby == net::kDefaultLobbyUrl);
+    CHECK(!ReadOnlineConfig({}).enabled && ReadOnlineConfig({}).lobby == net::kDefaultLobbyUrl);
+
+    // Values a development dcp.ini may still carry change nothing: only DCP_LOBBY and DCP_UPNP do.
+    WriteAll(file, "online_enabled = 1\nonline_lobby = wss://lobby.example.org/\nonline_name = Saulo\nonline_upnp = 0\n"
+                   "online_udp_port = 40001\n");
+    const net::OnlineConfig saved = ReadOnlineConfig(file);
+    CHECK(saved.enabled && saved.name == "Saulo" && saved.udp_port == 40001);
+    CHECK(saved.lobby == net::kDefaultLobbyUrl && saved.upnp);
+    WriteAll(file, "online_udp_port = 70000\nonline_name = \n");
+    const net::OnlineConfig invalid = ReadOnlineConfig(file);
+    CHECK(invalid.udp_port == 0 && invalid.name == "Player");
+    CHECK(IsValidSetting(kOnlineUdpPortKey, "3658") && !IsValidSetting(kOnlineUdpPortKey, "-1"));
+    CHECK(IsValidSetting(kOnlineNameKey, std::string(64, 'a')) && !IsValidSetting(kOnlineNameKey, std::string(65, 'a')));
+
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_LOBBY", "ws://127.0.0.1:8790/");
+    set_env("DCP_UPNP", "0");
+    net::OnlineConfig local = ReadOnlineConfig(file);
+    net::apply_environment(local);
+    CHECK(local.lobby == "ws://127.0.0.1:8790/" && !local.upnp);
+    set_env("DCP_LOBBY", nullptr);
+    set_env("DCP_UPNP", nullptr);
+    net::OnlineConfig production = ReadOnlineConfig(file);
+    net::apply_environment(production);
+    CHECK(production.lobby == net::kDefaultLobbyUrl && production.upnp);
+
+    // The Online name is only a display name: renaming keeps the identity, which the lobby keys the friend code and
+    // the friendships by, and dcp.ini never holds the identity.
+    const net::Identity identity = net::load_identity(file.parent_path());
+    {
+        LauncherSettings settings(file);
+        settings.Set(kOnlineNameKey, "Renamed");
+        CHECK(settings.Save());
+    }
+    CHECK(ReadOnlineConfig(file).name == "Renamed" && LauncherSettings(file).Get(kOnlineNameKey) == "Renamed");
+    const net::Identity renamed = net::load_identity(file.parent_path());
+    CHECK(identity.ok() && renamed.account == identity.account && renamed.secret == identity.secret);
+    CHECK(ReadAll(file).find(identity.secret) == std::string::npos &&
+          ReadAll(file).find(std::to_string(identity.account)) == std::string::npos);
+
+    WriteAll(file, "online_enabled = 1\nonline_name = Saulo\nvsync = 0\n");
+    {
+        LauncherSettings settings(file);
+        settings.ResetToDefaults();
+        CHECK(settings.Save());
+    }
+    CHECK(ReadOnlineConfig(file).enabled && ReadOnlineConfig(file).name == "Saulo");
+    CHECK(LauncherSettings(file).GetBool(kVSyncKey, false));
+
+    // Online play is offered for every supported build: no per-build flag or notice, one lobby game key for all.
+    for (const char* source : {"launcher/game_profile.h", "launcher/game_profile.cpp", "launcher/dcp_launcher.h",
+                               "launcher/game_files.cpp", "launcher/online_page.h", "launcher/online_page.cpp",
+                               "launcher/online_view.h", "launcher/launcher.cpp", "src/loader.c"}) {
+        const std::string text = ReadAll(fs::path(DCP_SOURCE_DIR) / source);
+        for (const char* gate : {"build_->online", "build->online", "game_build.online", "game_build.skip_offers",
+                                 "kUnavailable", "Supported()", "Online play is not available", "verified for the USA"})
+            CHECK(text.find(gate) == std::string::npos);
+    }
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    CHECK(page.find("client_.Update(on, config, net::kOnlineGame, now);") != std::string::npos);
+    CHECK(page.find("game = std::string(net::kOnlineGame)") != std::string::npos);
+    CHECK(SupportedBuilds().size() == 7);
+}
+
+// Each friend's line under the name: presence, then the platform and port version that friend's own client advertised,
+// kept per account; "Incompatible" only for a room of another online protocol, never a protocol number.
+void TestFriendStatus(const std::string& page) {
+    const int current = net::kOnlineProtocolVersion, other = net::kOnlineProtocolVersion + 6;
+    const std::string v = net::port_version();
+    const auto parsed = net::Json::parse(
+        "[{\"account\": \"11\", \"name\": \"Win\", \"online\": true, \"platform\": \"Windows\", \"version\": \"" + v +
+        "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"12\", \"name\": \"Lin\", \"online\": true, \"platform\": \"Linux\", \"version\": \"" + v +
+        "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"13\", \"name\": \"Deck\", \"online\": true, \"platform\": \"Steam Deck\", \"version\": \"" + v +
+        "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"14\", \"name\": \"Host\", \"online\": true, \"room\": \"4097\", \"platform\": \"Linux\","
+        " \"version\": \"" + v + "\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"15\", \"name\": \"Patch\", \"online\": true, \"room\": \"4098\", \"platform\": \"Windows\","
+        " \"version\": \"99.0.1\", \"online_protocol\": " + std::to_string(current) + "},"
+        " {\"account\": \"16\", \"name\": \"Newer\", \"online\": true, \"room\": \"4099\", \"platform\": \"Steam Deck\","
+        " \"version\": \"0.9.0\", \"online_protocol\": " + std::to_string(other) + "},"
+        " {\"account\": \"17\", \"name\": \"Old\", \"online\": true},"
+        " {\"account\": \"18\", \"name\": \"OldHost\", \"online\": true, \"room\": \"4100\"},"
+        " {\"account\": \"19\", \"name\": \"Away\", \"online\": false, \"platform\": \"Windows\", \"version\": \"0.8.0\"}]");
+    CHECK(parsed.has_value());
+    const std::vector<OnlinePlayer> f = ReadOnlinePlayers(parsed ? *parsed : net::Json::Array());
+    CHECK(f.size() == 9);
+    if (f.size() != 9) return;
+    const std::string dot = " \xC2\xB7 ";
+    CHECK(FriendStatusOf(f[0]).text == "Online" + dot + "Windows" + dot + "v" + v && !FriendStatusOf(f[0]).incompatible);
+    CHECK(FriendStatusOf(f[1]).text == "Online" + dot + "Linux" + dot + "v" + v);
+    CHECK(FriendStatusOf(f[2]).text == "Online" + dot + "Steam Deck" + dot + "v" + v);
+    CHECK(FriendStatusOf(f[3]).text == "Online, in a room" + dot + "Linux" + dot + "v" + v && !FriendStatusOf(f[3]).incompatible);
+    CHECK(FriendStatusOf(f[4]).text == "Online, in a room" + dot + "Windows" + dot + "v99.0.1" && !FriendStatusOf(f[4]).incompatible);
+    CHECK(FriendStatusOf(f[5]).text == "Online, in a room" + dot + "Steam Deck" + dot + "v0.9.0" && FriendStatusOf(f[5]).incompatible);
+    CHECK(FriendStatusOf(f[6]).text == "Online" && !FriendStatusOf(f[6]).incompatible);
+    CHECK(FriendStatusOf(f[7]).text == "Online, in a room" && FriendStatusOf(f[7]).incompatible);
+    CHECK(FriendStatusOf(f[8]).text == "Offline" && !FriendStatusOf(f[8]).incompatible);
+    for (const OnlinePlayer& player : f) {
+        const std::string text = FriendStatusOf(player).text;
+        for (const char* hidden : {"rotocol", "unknown", "missing", "PlayStation", "Incompatible", "("}) {
+            CHECK(text.find(hidden) == std::string::npos);
+        }
+        CHECK(text.find(std::to_string(other)) == std::string::npos && text.find(player.account) == std::string::npos);
+    }
+
+    // Same Online name, different accounts; then a rename: the metadata follows the account, never the name.
+    const auto twins = net::Json::parse(R"([{"account": "21", "name": "Player", "online": true, "platform": "Windows",
+        "version": "0.8.0"}, {"account": "22", "name": "Player", "online": true, "platform": "Linux", "version": "0.8.1"}])");
+    const auto renamed = net::Json::parse(R"([{"account": "21", "name": "Ana", "online": true, "platform": "Windows",
+        "version": "0.8.0"}, {"account": "22", "name": "Ana2", "online": true, "platform": "Linux", "version": "0.8.1"}])");
+    CHECK(twins.has_value() && renamed.has_value());
+    for (const auto* rows : {&twins, &renamed}) {
+        const std::vector<OnlinePlayer> p = ReadOnlinePlayers(rows->has_value() ? **rows : net::Json::Array());
+        CHECK(p.size() == 2 && p[0].account == "21" && p[0].platform == "Windows" && p[0].version == "0.8.0");
+        CHECK(p.size() == 2 && p[1].account == "22" && p[1].platform == "Linux" && p[1].version == "0.8.1");
+    }
+
+    // Request cards keep their two plain lines; the client asks the lobby nothing new for this.
+    const size_t cards = page.find("void OnlinePage::DrawFriendRequests(");
+    const size_t friends = page.find("void OnlinePage::DrawFriends(");
+    CHECK(cards != std::string::npos && friends != std::string::npos);
+    if (cards != std::string::npos && friends != std::string::npos) {
+        const std::string card = page.substr(cards, friends - cards);
+        CHECK(card.find("FriendStatusOf") == std::string::npos && card.find("platform") == std::string::npos);
+        CHECK(card.find("FriendRequestText(sender)") != std::string::npos);
+    }
+    CHECK(page.find("online_protocol") == std::string::npos);
+    const std::string client = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_client.cpp");
+    size_t sends = 0;
+    for (size_t at = client.find("Send(\""); at != std::string::npos; at = client.find("Send(\"", at + 1)) ++sends;
+    CHECK(sends == 6);
+    for (const char* op : {"friends.list", "friends.requests", "friends.add", "friends.accept", "friends.decline",
+                           "friends.remove"}) {
+        CHECK(client.find(std::string("Send(\"") + op + "\"") != std::string::npos);
+    }
+}
+
+// The Online page: with online play off only its switch; on, friend requests first, then the rest in a fixed order.
+// The switch shows the effective state. No lobby address, UPnP switch or status card; friends by Online name.
+void TestOnlinePage() {
+    using S = OnlineSection;
+    CHECK(OnlinePageSections(false, 0) == std::vector<S>{S::kOnlinePlay});
+    CHECK(OnlinePageSections(false, 2) == std::vector<S>{S::kOnlinePlay});
+    CHECK(OnlinePageSections(true, 0) ==
+          (std::vector<S>{S::kOnlinePlay, S::kOnlineName, S::kFriendCode, S::kConnectionTest, S::kPingDisplay,
+                          S::kFriends}));
+    CHECK(OnlinePageSections(true, 1) ==
+          (std::vector<S>{S::kOnlinePlay, S::kFriendRequests, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
+                          S::kPingDisplay, S::kFriends}));
+
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_ONLINE", nullptr);
+    CHECK(!ResolveOnlinePlay(false).on && !ResolveOnlinePlay(false).locked);
+    CHECK(ResolveOnlinePlay(true).on && !ResolveOnlinePlay(true).locked);
+    set_env("DCP_ONLINE", "1");
+    CHECK(ResolveOnlinePlay(false).on && ResolveOnlinePlay(false).locked);
+    set_env("DCP_ONLINE", "0");
+    CHECK(!ResolveOnlinePlay(true).on && ResolveOnlinePlay(true).locked);
+    for (const char* value : {"1", "0", "on", "off"}) {
+        set_env("DCP_ONLINE", value);
+        net::OnlineConfig config;
+        config.enabled = false;
+        net::apply_environment(config);
+        CHECK(ResolveOnlinePlay(false).on == config.enabled);
+    }
+    set_env("DCP_ONLINE", nullptr);
+
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    CHECK(!page.empty() && page.find("StatusCard") == std::string::npos);
+    for (const char* hidden : {"Lobby server", "UPnP", "online_lobby", "online_upnp", "workers.dev", "Cloudflare",
+                               "WebSocket", "\"Refresh\"", "\"Friend code\""}) {
+        CHECK(page.find(hidden) == std::string::npos);
+    }
+    for (const char* shown : {"\"Online play\"", "\"Online name\"", "\"Your friend code\"", "\"Connection test\"",
+                              "\"Run test\"", "\"Friends\"", "\"Add a friend\"", "\"Send request\"", "\"XXXX-XXXX\"",
+                              "\"New friend request\"", "Accept\"", "\"Decline\""}) {
+        CHECK(page.find(shown) != std::string::npos);
+    }
+    CHECK(page.find("ui.InputText(\"Online name\", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName)") != std::string::npos);
+    CHECK(page.find("FriendRow(ui, f);") != std::string::npos);
+    CHECK(page.find("ImGui::TextColored(ui.theme().warn_dot, \"Incompatible\");") != std::string::npos);
+    CHECK(page.find("ResolveOnlinePlay(") != std::string::npos);
+    // The sidebar badge counts the requests the page shows as cards.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("online_page_->PendingRequests()") != std::string::npos);
+    CHECK(launcher.find("online_page_->Tick(settings_") != std::string::npos);
+    const std::string badge = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "patches" / "trg-launcher" / "0004-sidebar-badge.patch");
+    CHECK(badge.find("std::function<int()> badge;") != std::string::npos);
+
+    const auto rows = net::Json::parse(R"([{"account": "123456789012", "name": "Saulo", "online": true, "room": "77",
+                                            "ip": "203.0.113.9", "port": 3658}, {"account": "5", "name": "", "online": false}])");
+    CHECK(rows.has_value());
+    const std::vector<OnlinePlayer> players = ReadOnlinePlayers(*rows);
+    CHECK(players.size() == 2 && players[0].name == "Saulo" && players[0].online && players[0].in_room);
+    CHECK(players[1].name == "Player" && !players[1].online && !players[1].in_room);
+    CHECK(std::string(FriendPresence(players[0])) == "Online, in a room" && std::string(FriendPresence(players[1])) == "Offline");
+    CHECK(FriendRequestText(players[0]) == "Saulo wants to be your friend");
+    for (const OnlinePlayer& player : players) {
+        for (const std::string& shown : {player.name + FriendPresence(player), FriendRequestText(player)}) {
+            CHECK(shown.find(player.account) == std::string::npos && shown.find("203.0.113") == std::string::npos &&
+                  shown.find("3658") == std::string::npos && shown.find("Client") == std::string::npos);
+        }
+    }
+
+    TestFriendStatus(page);
+
+    // The release page shows no test-instance note, environment override, address or service name; a switch locked by
+    // DCP_ONLINE reads plain On or Off.
+    for (const char* hidden : {"localhost", "127.0.0.1", "8790", "ws://", "wss://", "\"Server\"", "\"Lobby\"",
+                               "Test instance", "DCP_", "getenv", "config.lobby", "kDefaultLobbyUrl", "dcp-lobby"}) {
+        CHECK(page.find(hidden) == std::string::npos);
+    }
+    CHECK(page.find("ui.Info(\"Online play\", online.on ? \"On\" : \"Off\");") != std::string::npos);
+    CHECK(page.find("ui.Toggle(\"Online play\", kOnlineHelp, kOnlineEnabledKey, false);") != std::string::npos);
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.h").find("TestInstance") == std::string::npos);
+    CHECK(launcher.find("Test instance") == std::string::npos);
+    CHECK(std::string(net::kDefaultLobbyUrl) == "wss://dcp-lobby.saulobenigno.workers.dev");
+
+    // Test instances use the production service with no lobby option or local lobby, and their own switch and Online
+    // name unless told otherwise; only a DCP_LOBBY the caller set replaces the service.
+    const std::string instance = ReadAll(fs::path(DCP_SOURCE_DIR) / "tools" / "online-instance.ps1");
+    for (const char* gone : {"$Lobby", "-Lobby", "8790", "127.0.0.1", "localhost", "online-lobby", "workers.dev",
+                             "$env:DCP_LOBBY =", "Env:DCP_LOBBY"}) {
+        CHECK(instance.find(gone) == std::string::npos);
+    }
+    CHECK(instance.find("Online test instance $($Name.ToUpper())") != std::string::npos);
+    CHECK(instance.find("Online service: $(if ($env:DCP_LOBBY) { \"DCP_LOBBY override $env:DCP_LOBBY\" } else { 'production' })") !=
+          std::string::npos);
+    CHECK(instance.find("tools\\online-instance.ps1 -Name a ") != std::string::npos &&
+          instance.find("tools\\online-instance.ps1 -Name b ") != std::string::npos);
+    CHECK(instance.find("if ($ForceOnline) { $env:DCP_ONLINE = '1' } else { Remove-Item Env:DCP_ONLINE ") != std::string::npos);
+    CHECK(instance.find("$env:DCP_ONLINE = '1'\n") == std::string::npos);
+    CHECK(instance.find("if ($OnlineName) { $env:DCP_ONLINE_NAME = $OnlineName } else { Remove-Item Env:DCP_ONLINE_NAME") !=
+          std::string::npos);
+}
+
+// In-game notices use the frame counter's panel and drawing, in the top corner the frame counter leaves free.
+void TestOverlayPanel() {
+    namespace B = DcpOverlayBox;
+    const float size = 18.0f, text_w = 120.0f, text_h = 18.0f;
+    for (const B::Rect work : {B::Rect{0, 0, 1920, 1080}, B::Rect{0, 0, 1280, 720}, B::Rect{100, 50, 900, 650}}) {
+        for (int corner = 0; corner < 4; ++corner) {
+            // The frame counter's geometry as it was before notices shared it.
+            const float pad_x = size * 0.6f, pad_y = size * 0.3f;
+            const float w = text_w + pad_x * 2, h = text_h + pad_y * 2;
+            const bool right = corner == 1 || corner == 3, bottom = corner >= 2;
+            const float x0 = right ? work.x1 - size - w : work.x0 + size;
+            const float y0 = bottom ? work.y1 - size - h : work.y0 + size;
+            const B::Box fps = B::Place(corner, text_w, text_h, size, work);
+            CHECK(fps.rect.x0 == x0 && fps.rect.y0 == y0 && fps.rect.x1 == x0 + w && fps.rect.y1 == y0 + h);
+            CHECK(fps.pad_x == pad_x && fps.pad_y == pad_y && fps.rounding == size * 0.5f);
+
+            const int notice_corner = B::NoticeCorner(corner);
+            CHECK(notice_corner != corner && notice_corner <= 1);
+            const B::Box notice = B::Place(notice_corner, 420.0f, text_h, size, work);
+            CHECK(!B::Overlap(fps.rect, notice.rect));
+            CHECK(notice.pad_x == fps.pad_x && notice.pad_y == fps.pad_y && notice.rounding == fps.rounding);
+        }
+    }
+    CHECK(B::NoticeCorner(1) == 0 && B::NoticeCorner(0) == 1);
+    CHECK(B::kBorderThickness == 1.0f);
+    CHECK(B::Overlap({0, 0, 10, 10}, {5, 5, 15, 15}) && !B::Overlap({0, 0, 10, 10}, {10, 0, 20, 10}));
+
+    const std::string overlay = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_overlay.cpp");
+    CHECK(overlay.find("DrawOverlayPanel(FpsCounterBox(label.c_str()), label.c_str());") != std::string::npos);
+    CHECK(overlay.find("DcpOverlayBox::NoticeCorner(DcpSettings::Get().overlay_corner)") != std::string::npos);
+    CHECK(overlay.find("DrawOverlayPanel(PlaceOverlayPanel(notice_text.c_str(), corner), notice_text.c_str());") !=
+          std::string::npos);
+    CHECK(overlay.find("##notice") == std::string::npos);
+    size_t panels = 0;
+    for (size_t at = overlay.find("IM_COL32(7, 10, 22, 190)"); at != std::string::npos;
+         at = overlay.find("IM_COL32(7, 10, 22, 190)", at + 1)) {
+        ++panels;
+    }
+    CHECK(panels == 1);
+    CHECK(overlay.find("return PlaceOverlayPanel(text, DcpSettings::Get().overlay_corner);") != std::string::npos);
+    CHECK(overlay.find("if (DcpSettings::Get().show_fps) {\n        FpsCounter();") != std::string::npos);
+}
+
+// Insert and R3 + L2 open nothing: the in-game settings menu was removed. F10, F11, F2 and F3 stay.
+void TestNoSettingsMenu() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string overlay =
+        ReadAll(source / "gpu" / "shim" / "dcp_overlay.cpp") + ReadAll(source / "gpu" / "shim" / "dcp_overlay.h");
+    const std::string window = ReadAll(source / "gpu" / "shim" / "window.cpp");
+    const std::string settings = ReadAll(source / "gpu" / "shim" / "dcp_settings.cpp");
+    for (const char* gone : {"SDLK_INSERT", "SDL_SCANCODE_INSERT", "R3+L2", "menu_open", "SetOpen(", "UpdateTextInput",
+                             "Overlay: menu ready", "ImageTab", "OverlayTab", "menu_tab", "DcpSettings::Save()"}) {
+        CHECK(overlay.find(gone) == std::string::npos);
+        CHECK(window.find(gone) == std::string::npos);
+    }
+    // The window reads R3 and L2 for the game; the overlay no longer watches them.
+    CHECK(overlay.find("SDL_GAMEPAD_BUTTON_RIGHT_STICK") == std::string::npos &&
+          overlay.find("SDL_GAMEPAD_AXIS_LEFT_TRIGGER") == std::string::npos);
+    CHECK(settings.find("menu_tab") == std::string::npos && settings.find("bool Save()") == std::string::npos);
+    // Keys and buttons go to the game unless the cheat menu or a game dialog has them.
+    CHECK(overlay.find("        if (!cheats_open) {\n            return false;\n        }\n        io.AddKeyEvent(ImGuiMod_Ctrl") !=
+          std::string::npos);
+    CHECK(overlay.find("return cheat_open || text_entry_active || choice_active;") != std::string::npos);
+    CHECK(overlay.find("if (event.key.scancode == DcpSettings::Get().menu_key) {") != std::string::npos);
+    CHECK(window.find("if (window_shortcut && !event.key.repeat) {\n                ToggleBorderless();") != std::string::npos);
+    CHECK(window.find("hud == DcpPing::HudKey::Fps") != std::string::npos &&
+          window.find("hud == DcpPing::HudKey::Ping") != std::string::npos);
+    CHECK(dcp_key_from_name("insert") == SDL_SCANCODE_INSERT); // still a key the game controls can use
+
+    for (const char* doc : {"README.md", "docs/LAUNCHER.md", "docs/LINUX.md", "docs/GRAPHICS.md", "docs/CHEATS.md",
+                            "packaging/README.txt", "packaging/README-linux.txt"}) {
+        const std::string text = ReadAll(source / doc);
+        CHECK(!text.empty());
+        for (const char* stale : {"R3 + L2", "R3+L2", "Insert", "in-game settings menu", "menu_tab"}) {
+            if (text.find(stale) != std::string::npos) {
+                std::printf("stale settings menu reference in %s: %s\n", doc, stale);
+                CHECK(text.find(stale) == std::string::npos);
+            }
+        }
+    }
+}
+
+// F2 is the frame counter and F3 the Ping (Online Play only), each on its own; the Ping reads the P2P round trip a few
+// times a second and sits next to the frame counter in its corner. The Online page's Ping display sets its start.
+void TestPingDisplay(const fs::path& base) {
+    using DcpPing::HudKey;
+    for (const bool online : {false, true}) {
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F2, false, online) == HudKey::Fps);
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F2, true, online) == HudKey::None);
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F3, true, online) == HudKey::None);
+        CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F4, false, online) == HudKey::None);
+    }
+    CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F3, false, false) == HudKey::None);
+    CHECK(DcpPing::HudKeyFor(SDL_SCANCODE_F3, false, true) == HudKey::Ping);
+
+    CHECK(DcpPing::Text(-1) == "Ping: --" && DcpPing::Text(0) == "Ping: 0 ms" && DcpPing::Text(28) == "Ping: 28 ms");
+    DcpPing::Readout readout;
+    int samples = 0, rtt = -1;
+    const auto sample = [&] {
+        ++samples;
+        return rtt;
+    };
+    CHECK(readout.Shown(1000, sample) == -1 && samples == 1); // no peer yet
+    rtt = 28;
+    CHECK(readout.Shown(1100, sample) == -1 && samples == 1); // held until the next read
+    CHECK(readout.Shown(1300, sample) == 28 && samples == 2);
+    rtt = 41;
+    CHECK(readout.Shown(1599, sample) == 28 && readout.Shown(1600, sample) == 41 && samples == 3);
+    rtt = -1; // the peer left
+    CHECK(readout.Shown(1900, sample) == -1 && samples == 4);
+    rtt = 30;
+    readout.Reset(); // shown again: read at once
+    CHECK(readout.Shown(1901, sample) == 30 && samples == 5);
+    CHECK(DcpPing::Readout::kRefreshMs >= 250 && DcpPing::Readout::kRefreshMs <= 500);
+
+    namespace B = DcpOverlayBox;
+    const float size = 18.0f;
+    for (const B::Rect work : {B::Rect{0, 0, 1920, 1080}, B::Rect{0, 0, 1280, 720}}) {
+        for (int corner = 0; corner < 4; ++corner) {
+            const B::Box fps = B::Place(corner, 150.0f, size, size, work);
+            const B::Box alone = B::Place(corner, 90.0f, size, size, work);
+            const B::Box ping = B::StackAfter(fps, corner, 90.0f, size, size, work);
+            CHECK(!B::Overlap(fps.rect, ping.rect));
+            CHECK(ping.rect.x0 == alone.rect.x0 && ping.rect.x1 == alone.rect.x1); // same corner, same edge
+            CHECK(std::fabs((ping.rect.y1 - ping.rect.y0) - (alone.rect.y1 - alone.rect.y0)) < 0.01f);
+            CHECK(ping.pad_x == fps.pad_x && ping.rounding == fps.rounding);
+            const float gap = corner >= 2 ? fps.rect.y0 - ping.rect.y1 : ping.rect.y0 - fps.rect.y1;
+            CHECK(gap > 0.0f && std::fabs(gap - size * 0.4f) < 0.01f);
+        }
+    }
+
+    // The keys and the panels are independent; Ping needs Online Play and is never saved by the game.
+    const std::string window = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "window.cpp");
+    CHECK(window.find("} else if (hud == DcpPing::HudKey::Fps) {\n                settings.show_fps = !settings.show_fps;\n"
+                      "            } else if (hud == DcpPing::HudKey::Ping) {\n"
+                      "                settings.show_ping = !settings.show_ping;") != std::string::npos);
+    CHECK(window.find("runtime_online_play_enabled() != 0") != std::string::npos);
+    const std::string overlay = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_overlay.cpp");
+    CHECK(overlay.find("return DcpSettings::Get().show_ping && runtime_online_play_enabled() != 0;") != std::string::npos);
+    CHECK(overlay.find("if (PingShown()) {\n        PingCounter();") != std::string::npos);
+    CHECK(overlay.find("DrawOverlayPanel(PlaceOverlayPanel(label.c_str(), corner, &fps), label.c_str());") !=
+          std::string::npos);
+    const std::string video_settings = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp");
+    CHECK(video_settings.find("bool Save()") == std::string::npos); // the game saves the display mode alone
+
+    // Off by default, saved by the launcher, read by the video core.
+    const DcpSettings::Values game;
+    CHECK(!game.show_ping);
+    bool listed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) listed |= setting.key == kPingDisplayKey && setting.default_value == "0";
+    CHECK(listed && std::string(kPingDisplayKey) == "show_ping" && !IsOnlineSetting(kPingDisplayKey));
+    const fs::path file = base / "ping" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kPingDisplayKey, false));
+        settings.SetBool(kPingDisplayKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(LauncherSettings(file).GetBool(kPingDisplayKey, false));
+    DcpSettings::Values read;
+    CHECK(DcpSettings::Read(file.string(), read) && read.show_ping && !read.show_fps);
+
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    CHECK(page.find("ui.Toggle(\"Ping display\", kPingHelp, kPingDisplayKey, false, \"Off\", \"On\")") != std::string::npos);
+    CHECK(OnlinePageSections(false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+}
+
+// The launcher's lobby link through a running development lobby (DCP_TEST_LOBBY): presence while a launcher is open,
+// requests and answers from events without any refresh, several sessions of one account, a rename, and Off.
+void TestOnlineClient(const fs::path& base) {
+    const char* lobby = std::getenv("DCP_TEST_LOBBY");
+    if (!lobby || !*lobby) {
+        std::printf("online client tests skipped (set DCP_TEST_LOBBY to a running development lobby)\n");
+        return;
+    }
+    const fs::path dir = base / "online-client";
+    fs::remove_all(dir);
+    const auto clock = [] {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
+    struct Seat {
+        OnlineClient client;
+        net::OnlineConfig config;
+        bool on = true;
+        Seat(const fs::path& user, const char* lobby, const char* name) : client(user) {
+            config.enabled = true;
+            config.lobby = lobby;
+            config.name = name;
+        }
+    };
+    Seat alice(dir / "a", lobby, "Alice"), bea(dir / "b", lobby, "Bea"), bea_game(dir / "b", lobby, "Bea"),
+        cleo(dir / "c", lobby, "Cleo");
+    bea_game.on = cleo.on = false;
+    const auto pump = [&](const std::function<bool()>& done, double seconds = 6.0) {
+        const double end = clock() + seconds;
+        for (;;) {
+            for (Seat* seat : {&alice, &bea, &bea_game, &cleo}) seat->client.Update(seat->on, seat->config, "CUSA10454-1.00", clock());
+            if (done()) return true;
+            if (clock() >= end) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    };
+    const auto& a = alice.client.state();
+    const auto& b = bea.client.state();
+    const auto first_friend_online = [&](const OnlineClient::State& s) { return !s.friends.empty() && s.friends[0].online; };
+
+    CHECK(pump([&] { return a.link == OnlineClient::Link::kUp && b.link == OnlineClient::Link::kUp; }));
+    CHECK(!a.friend_code.empty() && !b.friend_code.empty() && a.friend_code != b.friend_code);
+    const std::string code_b = b.friend_code;
+
+    bea.client.AddFriend(a.friend_code);
+    CHECK(pump([&] { return a.incoming.size() == 1 && b.outgoing.size() == 1; }));
+    CHECK(a.incoming.size() == 1 && a.incoming[0].name == "Bea" && b.notice == "Request sent to Alice.");
+    const std::string account_b = a.incoming.empty() ? "" : a.incoming[0].account;
+
+    alice.client.Accept(account_b);
+    CHECK(a.incoming.empty() && a.friends.size() == 1 && a.friends[0].name == "Bea");
+    CHECK(pump([&] { return first_friend_online(a) && first_friend_online(b) && b.outgoing.empty(); }));
+    CHECK(!a.friends.empty() && a.friends[0].platform == net::host_platform() && a.friends[0].version == net::port_version() &&
+          a.friends[0].online_protocol == net::kOnlineProtocolVersion);
+
+    bea_game.on = true;
+    CHECK(pump([&] { return bea_game.client.state().link == OnlineClient::Link::kUp; }));
+    bea.on = false;
+    CHECK(!pump([&] { return !first_friend_online(a); }, 1.5));
+    bea_game.on = false;
+    CHECK(pump([&] { return !a.friends.empty() && !a.friends[0].online; }));
+
+    bea.on = true;
+    CHECK(pump([&] { return first_friend_online(a); }));
+    bea.config.name = "Beatrix";
+    CHECK(pump([&] { return !a.friends.empty() && a.friends[0].name == "Beatrix" && a.friends[0].online; }, 10.0));
+    CHECK(b.friend_code == code_b && a.friends.size() == 1 && a.friends[0].account == account_b);
+
+    cleo.on = true;
+    CHECK(pump([&] { return cleo.client.state().link == OnlineClient::Link::kUp; }));
+    cleo.client.AddFriend(a.friend_code);
+    CHECK(pump([&] { return a.incoming.size() == 1; }));
+    alice.client.Decline(a.incoming.empty() ? "" : a.incoming[0].account);
+    CHECK(a.incoming.empty());
+    CHECK(!pump([&] { return !a.incoming.empty(); }, 1.0));
+
+    alice.on = false;
+    pump([] { return true; });
+    CHECK(a.link == OnlineClient::Link::kOff && a.friend_code.empty() && a.friends.empty() && a.incoming.empty());
+    CHECK(pump([&] { return !b.friends.empty() && !b.friends[0].online; }));
+}
+
+void TestSkipOfferSettings(const fs::path& base) {
+    const fs::path file = base / "skip_offers" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += (setting.key == kStorySkipOfferKey || setting.key == kTutorialSkipOfferKey) && setting.default_value == "0";
+    }
+    CHECK(managed == 2);
+    CHECK(dcp_skip_offers(nullptr) == 0 && dcp_skip_offers(file.string().c_str()) == 0);
+    WriteAll(file, "vsync = 1\n");
+    CHECK(dcp_skip_offers(file.string().c_str()) == 0);
+    WriteAll(file, "story_skip_offer = 0\ntutorial_skip_offer = 1\n");
+    CHECK(dcp_skip_offers(file.string().c_str()) == 2);
+    WriteAll(file, "story_skip_offer = 1\ntutorial_skip_offer = 0\n");
+    CHECK(dcp_skip_offers(file.string().c_str()) == 1);
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kStorySkipOfferKey, true);
+        settings.SetBool(kTutorialSkipOfferKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_skip_offers(file.string().c_str()) == 3);
+    // Test instances turn both on only when the caller has not set them.
+    const std::string instance = ReadAll(fs::path(DCP_SOURCE_DIR) / "tools" / "online-instance.ps1");
+    CHECK(instance.find("if (-not $env:DCP_STORY_SKIP) { $env:DCP_STORY_SKIP = '1' }") != std::string::npos);
+    CHECK(instance.find("if (-not $env:DCP_TUTORIAL_SKIP) { $env:DCP_TUTORIAL_SKIP = '1' }") != std::string::npos);
+    for (const char* writes : {"Set-Content", "Add-Content", "Out-File"}) CHECK(instance.find(writes) == std::string::npos);
+    // Both switches are shown for every build; the loader passes every supported build's key to the skip offers.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("SkipOffersAvailable") == std::string::npos);
+    CHECK(launcher.find("        ui.Toggle(\"Story Skip Offer\", kStorySkipOfferHelp,") != std::string::npos);
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("skip_offers_install(image,size,known_build ? build_key : NULL,") != std::string::npos);
+}
+
+// A test instance pinned with DCP_GAME_BUILD (tools\online-instance.ps1 -Build) uses that build's folders and never
+// the active build; the script's build table is the launcher's.
+void TestPinnedBuild(const fs::path& base) {
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    const std::string script = ReadAll(fs::path(DCP_SOURCE_DIR) / "tools" / "online-instance.ps1");
+    size_t listed = 0;
+    for (const GameBuild& build : SupportedBuilds()) {
+        const std::string row = "'" + BuildKey(build) + "' = @{ Folder = '" + build.folder + "';";
+        const size_t at = script.find(row);
+        CHECK(at != std::string::npos);
+        if (at != std::string::npos) {
+            const size_t end = script.find('\n', at);
+            CHECK(script.substr(at, end - at).find("Label = '" + std::string(build.label) + "' }") != std::string::npos);
+            ++listed;
+        }
+    }
+    size_t rows = 0;
+    for (size_t at = script.find("= @{ Folder = '"); at != std::string::npos; at = script.find("= @{ Folder = '", at + 1)) ++rows;
+    CHECK(listed == SupportedBuilds().size() && rows == listed);
+    CHECK(BuildKey(kUs) == "CUSA10454-1.00" && BuildKey(kCk100) == "CUSA10209-1.00");
+    CHECK(script.find("if ($pinned) { $env:DCP_GAME_BUILD = $pinned.Key } else { Remove-Item Env:DCP_GAME_BUILD") !=
+          std::string::npos);
+    CHECK(script.find("[Environment]::SetEnvironmentVariable($variable, $previous[$variable], 'Process')") != std::string::npos);
+    for (const char* scope : {"'User')", "'Machine')", "setx"}) CHECK(script.find(scope) == std::string::npos);
+
+    // A build tree with the US and Asia/Hong Kong 1.00 builds complete, Japan 1.02 a core preparation only.
+    const fs::path root = base / "pinned";
+    fs::remove_all(root);
+    const fs::path exe_dir = root / "build" / "cmake" / "clang64" / "bin";
+    const GameRoots roots{root / "game" / "prepared", root / "build" / "image"};
+    const auto prepare = [&](const GameBuild& build, const char* scope) {
+        const GamePaths paths = BuildPaths(roots, build);
+        WriteAll(paths.app0 / kPreparedMarker, std::string("{\n  \"version\": \"x\",\n  \"scope\": \"") + scope + "\"\n}\n");
+        WriteAll(paths.image_dir / "boot.bin", "boot");
+    };
+    prepare(kUs, "full");
+    prepare(kCk100, "full");
+    prepare(kJp102, "core");
+    const auto marker_time = [&](const GameBuild& build) {
+        return fs::last_write_time(BuildPaths(roots, build).app0 / kPreparedMarker);
+    };
+    fs::last_write_time(BuildPaths(roots, kUs).app0 / kPreparedMarker, marker_time(kCk100) - std::chrono::hours(1));
+    const auto us_time = marker_time(kUs), ck_time = marker_time(kCk100);
+
+    CHECK(!PinnedBuildOf(roots, "").set);
+    const PinnedBuild us = PinnedBuildOf(roots, "CUSA10454-1.00"), ck = PinnedBuildOf(roots, "CUSA10209-1.00");
+    CHECK(us.set && us.build == &kUs && us.error.empty() && ck.build == &kCk100);
+    const PinnedBuild core = PinnedBuildOf(roots, "CUSA07001-1.02");
+    CHECK(core.set && !core.build && core.error.find("Build CUSA07001-1.02 is not prepared") == 0);
+    const PinnedBuild absent = PinnedBuildOf(roots, "CUSA10454-1.01");
+    CHECK(absent.set && !absent.build && absent.error.find("Build CUSA10454-1.01 is not prepared") == 0);
+    const PinnedBuild unknown = PinnedBuildOf(roots, "CUSA99999-1.00");
+    CHECK(unknown.set && !unknown.build && unknown.error.find("DCP_GAME_BUILD names no supported build") == 0);
+
+    // The active build is the newest marker (Asia/Hong Kong here); each pinned instance keeps its own build.
+    set_env(kPinnedBuildVariable, nullptr);
+    CHECK(ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kCk100).app0);
+    set_env(kPinnedBuildVariable, "CUSA10454-1.00");
+    const Paths a = ResolvePaths({}, exe_dir);
+    CHECK(a.error.empty() && a.app0 == BuildPaths(roots, kUs).app0 && a.image_dir == BuildPaths(roots, kUs).image_dir);
+    CHECK(a.boot == BuildPaths(roots, kUs).image_dir / "boot.bin");
+    set_env(kPinnedBuildVariable, "CUSA10209-1.00");
+    const Paths b = ResolvePaths({}, exe_dir);
+    CHECK(b.error.empty() && b.app0 == BuildPaths(roots, kCk100).app0 && b.app0 != a.app0);
+    // Another instance activating a build (its marker newest) moves neither pin.
+    fs::last_write_time(BuildPaths(roots, kUs).app0 / kPreparedMarker, ck_time + std::chrono::hours(1));
+    CHECK(ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kCk100).app0);
+    set_env(kPinnedBuildVariable, "CUSA10454-1.00");
+    fs::last_write_time(BuildPaths(roots, kCk100).app0 / kPreparedMarker, ck_time + std::chrono::hours(2));
+    CHECK(ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kUs).app0);
+    fs::last_write_time(BuildPaths(roots, kUs).app0 / kPreparedMarker, us_time);
+    fs::last_write_time(BuildPaths(roots, kCk100).app0 / kPreparedMarker, ck_time);
+    // Explicit paths still win; a pin that cannot be used is an error, never the active build.
+    PathRequest explicit_app0;
+    explicit_app0.app0 = Utf8(root / "elsewhere");
+    CHECK(ResolvePaths(explicit_app0, exe_dir).app0 == root / "elsewhere");
+    set_env(kPinnedBuildVariable, "CUSA07001-1.02");
+    CHECK(ResolvePaths({}, exe_dir).error.find("Build CUSA07001-1.02 is not prepared") == 0);
+    set_env(kPinnedBuildVariable, "CUSA99999-1.00");
+    CHECK(!ResolvePaths({}, exe_dir).error.empty());
+    set_env(kPinnedBuildVariable, nullptr);
+    CHECK(ResolvePaths({}, exe_dir).error.empty() && ResolvePaths({}, exe_dir).app0 == BuildPaths(roots, kCk100).app0);
+    // Resolving never writes a marker.
+    CHECK(marker_time(kUs) == us_time && marker_time(kCk100) == ck_time);
+
+    // The pinned launcher refuses package selection, which would activate a build for every instance; the game
+    // refuses an image of another build.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("if (picked.empty() || prompts_.running() || BuildPinned()) {") != std::string::npos);
+    CHECK(launcher.find("browser_.active() || prompts_.running() || BuildPinned()) {") != std::string::npos);
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("\"DCP_GAME_BUILD is %s but the game image is %s\"") != std::string::npos);
+    CHECK(loader.find("fail(paths.error[0] ? paths.error : \"cannot locate the game folders\");") != std::string::npos);
+    fs::remove_all(root);
+}
+
 void TestOverlayProgramsSetting(const fs::path& base) {
     const fs::path file = base / "overlays" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -1396,8 +2050,66 @@ void TestCheatSettings(const fs::path& base) {
     CHECK(dcp_saved_movement_speed(file.string().c_str()) == 1);
     CHECK(dcp_saved_movement_speed(nullptr) == 1);
 
-    // The in-game menu never writes them: the video core's settings file code has no cheat key.
+    // The game never writes them: the video core's settings file code has no cheat key.
     CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "dcp_settings.cpp").find("cheat") == std::string::npos);
+}
+
+// Online Play wins over the cheats: turning it on writes every cheat Off, the page shows only the lockout line, and
+// DCP_ONLINE turns it on as the saved switch does. Nothing else in dcp.ini changes.
+void TestOnlineCheatLockout(const fs::path& base) {
+    const fs::path file = base / "online_cheats" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    WriteAll(file, "online_enabled = 1\ncheat_infinite_health = 1\ncheat_infinite_gold = on\ncheat_movement_speed = 4\n"
+                   "cheat_movement_speed_2x = 1\ncheat_experience_multiplier = 100\nstory_skip_offer = 1\n"
+                   "tutorial_skip_offer = 1\nvsync = 0\n");
+    CHECK(dcp_saved_cheats(file.string().c_str()) != 0); // a hand-edited file: the game's lockout ignores this
+    {
+        LauncherSettings settings(file);
+        CHECK(TurnCheatsOff(settings));
+        CHECK(!TurnCheatsOff(settings)); // already Off: no further change
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
+    CHECK(dcp_saved_movement_speed(file.string().c_str()) == cheats::kMovementSpeedOff);
+    CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == cheats::kExperienceMultiplierOff);
+    CHECK(dcp_skip_offers(file.string().c_str()) == 3);
+    CHECK(ReadOnlineConfig(file).enabled);
+    CHECK(WrittenValue(ReadAll(file), "vsync", "0"));
+
+    // Turning Online off again leaves the cheats Off and lets the player turn them back on.
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kOnlineEnabledKey, false);
+        settings.SetBool(cheats::kInfiniteHealthKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(dcp_saved_cheats(file.string().c_str()) == cheats::Bit(cheats::Cheat::InfiniteHealth));
+
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_ONLINE", "1");
+    net::OnlineConfig forced = ReadOnlineConfig(file);
+    net::apply_environment(forced);
+    CHECK(forced.enabled && ResolveOnlinePlay(false).on);
+    set_env("DCP_ONLINE", nullptr);
+    CHECK(!ResolveOnlinePlay(false).on);
+
+    CHECK(std::string(cheats::kOnlineLockoutText) == "Cheats are disabled while Online Play is enabled");
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t page = launcher.find("void PageCheats(trg::Ui& ui) {");
+    const size_t locked = launcher.find("if (OnlinePlayOn()) {\n            ui.Help(cheats::kOnlineLockoutText);\n"
+                                        "            ui.EndRows();\n            return;", page);
+    CHECK(page != std::string::npos && locked != std::string::npos);
+    CHECK(locked < launcher.find("ui.Toggle(cheat.label", page));
+    CHECK(launcher.find("ResolveOnlinePlay(settings_.GetBool(kOnlineEnabledKey, false)).on") != std::string::npos);
+    CHECK(launcher.find("if (OnlinePlayOn() && TurnCheatsOff(settings_))") != std::string::npos);
+    CHECK(launcher.find("KeepCheatsOffOnline();") != std::string::npos);
 }
 
 bool WrittenValue(const std::string& text, const std::string& key, const std::string& value) {
@@ -1415,14 +2127,15 @@ void TestTextLanguage(const fs::path& base) {
     const std::string us = us_dir.string();
     const std::string asia = asia_dir.string();
 
-    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1); // no file: English
-    CHECK(dcp_text_language(nullptr, nullptr) == 1);
-    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10); // no file: Traditional Chinese
+    CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1); // no file: English
+    CHECK(dcp_text_language(nullptr, nullptr, nullptr) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10); // no file: Traditional Chinese
 
     struct Expected { const char* key; const char* name; int id; };
     const Expected western[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
                                 {"italian", "Italian", 5}, {"spanish", "Spanish", 3}};
     const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
+    const Expected japanese[] = {{"japanese", "Japanese", 0}};
     const auto check_list = [&](const GameBuild* build, std::span<const Expected> expected) {
         const std::span<const TextLanguage> languages = TextLanguagesOf(build);
         CHECK(languages.size() == expected.size());
@@ -1433,8 +2146,10 @@ void TestTextLanguage(const fs::path& base) {
     };
     check_list(nullptr, western);
     for (const GameBuild& build : SupportedBuilds()) {
-        check_list(&build, std::string_view(build.title_id) == "CUSA10209" ? std::span<const Expected>(asian)
-                                                                          : std::span<const Expected>(western));
+        const std::string_view title = build.title_id;
+        check_list(&build, title == "CUSA10209"   ? std::span<const Expected>(asian)
+                           : title == "CUSA07001" ? std::span<const Expected>(japanese)
+                                                  : std::span<const Expected>(western));
     }
 
     for (const char* image : {us.c_str(), static_cast<const char*>(nullptr)}) {
@@ -1443,31 +2158,32 @@ void TestTextLanguage(const fs::path& base) {
             settings.Set(kTextLanguageKey, language.key);
             CHECK(settings.Save());
             CHECK(WrittenValue(ReadAll(file), "text_language", language.key));
-            CHECK(dcp_text_language(ini.c_str(), image) == language.id);
+            CHECK(dcp_text_language(ini.c_str(), image, nullptr) == language.id);
         }
     }
     for (const Expected& language : asian) {
         LauncherSettings settings(file);
         settings.Set(kTextLanguageKey, language.key);
         CHECK(settings.Save());
-        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == language.id);
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == language.id);
     }
 
     // A saved language the active build does not have gives that build's default, and the file keeps it.
     WriteAll(file, "text_language=korean\n");
-    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
-    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 9);
+    CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 9);
     for (const Expected& language : western) {
         WriteAll(file, std::string("text_language=") + language.key + "\n");
-        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
-        CHECK(dcp_text_language(ini.c_str(), us.c_str()) == language.id);
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10);
+        CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == language.id);
     }
     CHECK(ResolveTextLanguage(&kCk, "english").key == "traditional_chinese");
     CHECK(ResolveTextLanguage(&kCk, "korean").key == "korean");
     CHECK(ResolveTextLanguage(&kUs, "korean").key == "english");
     CHECK(ResolveTextLanguage(&kUs, "traditional_chinese").key == "english");
-    CHECK(ResolveTextLanguage(&kJp100, "korean").key == "english");
-    for (const char* absent : {"chinese", "simplified_chinese", "japanese"}) {
+    CHECK(ResolveTextLanguage(&kJp100, "korean").key == "japanese");
+    CHECK(ResolveTextLanguage(&kUs, "japanese").key == "english");
+    for (const char* absent : {"chinese", "simplified_chinese", "Japanese"}) {
         CHECK(!IsValidSetting(kTextLanguageKey, absent));
         CHECK(ResolveTextLanguage(&kCk, absent).ps4_id == 10);
     }
@@ -1484,19 +2200,50 @@ void TestTextLanguage(const fs::path& base) {
 
     for (const char* unlisted : {"English", "japanese", "fr", "2", ""}) {
         WriteAll(file, std::string("text_language=") + unlisted + "\n");
-        CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
-        CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
+        CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1);
+        CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10);
     }
     WriteAll(file, "show_fps=1\n"); // an existing file without the key
-    CHECK(dcp_text_language(ini.c_str(), us.c_str()) == 1);
-    CHECK(dcp_text_language(ini.c_str(), asia.c_str()) == 10);
+    CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1);
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10);
     CHECK(IsValidSetting(kTextLanguageKey, "german") && IsValidSetting(kTextLanguageKey, "korean") &&
-          IsValidSetting(kTextLanguageKey, "traditional_chinese") && !IsValidSetting(kTextLanguageKey, "japanese"));
+          IsValidSetting(kTextLanguageKey, "traditional_chinese") && IsValidSetting(kTextLanguageKey, "japanese"));
 
     LauncherSettings settings(file);
     settings.ResetToDefaults();
     CHECK(settings.Save());
     CHECK(WrittenValue(ReadAll(file), "text_language", "english"));
+}
+
+void TestSettingsSummary(const fs::path& base) {
+    const fs::path file = base / "summary" / "dcp.ini";
+    fs::create_directories(file.parent_path());
+    std::ofstream(file) << "online_enabled = 1\nonline_name = SecretName\nshow_ping = 1\ndisplay_mode = borderless\n"
+                           "frame_rate = 120\nshow_fps = 1\ntrue_ultrawide = 1\ndcp_japanese_npc_voices = 1\n"
+                           "arachnophobia_safe_mode = 1\nstory_skip_offer = 1\ntutorial_skip_offer = 1\n";
+    const LauncherSettings settings(file);
+    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u};
+    const std::string text = SettingsSummary(settings, &kUs, TextLanguagesOf(&kUs), &run);
+    const auto has = [&](const std::string& part) { return text.find(part) != std::string::npos; };
+    CHECK(has("Settings: Dragon's Crown Pro PC v" + net::port_version() + ", " + net::host_platform() + ", online protocol " +
+              std::to_string(net::kOnlineProtocolVersion) + ", game build " + kUs.label + "\n"));
+    CHECK(has("Settings: Online Play on, Ping display on, cheats locked for Online Play\n"));
+    CHECK(has("Settings: Window Borderless Fullscreen, frame rate 120 FPS, frame counter on,"));
+    CHECK(has("Settings: Render resolution 2560x1080 (native), aspect ratio 21:9 Ultrawide, True Ultrawide off (requested on)\n"));
+    CHECK(has("Settings: Menu & Subtitles English, Japanese NPC Voices on, Arachnophobia Safe Mode on\n"));
+    CHECK(has("Settings: Story Skip Offer on, Tutorial Skip Offer off,"));
+    for (const char* secret : {"SecretName", "friend", "Friend", "account", "secret", "token", "DCP_DASHBOARD_TOKEN", "lobby"}) {
+        CHECK(!has(secret));
+    }
+
+    std::ofstream(file) << "display_mode = windowed\n";
+    const LauncherSettings plain(file);
+    const std::string offline = SettingsSummary(plain, nullptr, TextLanguagesOf(nullptr), nullptr);
+    CHECK(offline.find("game build not a supported build\n") != std::string::npos);
+    CHECK(offline.find("Settings: Window Windowed, frame rate 60 FPS (Original), frame counter off,") != std::string::npos);
+    CHECK(offline.find("True Ultrawide requested off\n") != std::string::npos);
+    CHECK(offline.find("Japanese NPC Voices unsupported") != std::string::npos);
+    if (!std::getenv("DCP_ONLINE")) CHECK(offline.find("Settings: Online Play off\n") != std::string::npos);
 }
 
 void TestRenderResolution(const fs::path& base) {
@@ -2228,14 +2975,32 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 8);
-    CHECK(std::string(PageName(kPageOrder[0])) == "Play");
-    CHECK(std::string(PageName(kPageOrder[2])) == "Graphics");
-    CHECK(std::string(PageName(kPageOrder[3])) == "Gameplay");
-    CHECK(std::string(PageName(kPageOrder[4])) == "Cheats"); // directly below Gameplay
-    CHECK(std::string(PageName(kPageOrder[5])) == "Controls");
-    CHECK(std::string(PageName(kPageOrder[6])) == "Trophies"); // after Controls, before About
-    CHECK(std::string(PageName(kPageOrder[7])) == "About");
+    CHECK(count == 9);
+    // Online sits between Gameplay and Cheats: it changes play and turns the cheats off.
+    const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Online",
+                                 "Cheats", "Controls", "Trophies", "About"};
+    for (size_t i = 0; i < std::size(order); ++i) {
+        CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
+    }
+    int online_entries = 0;
+    for (size_t i = 0; i < std::size(kPageOrder); ++i) {
+        if (kPageOrder[i] == PageId::kOnline) {
+            ++online_entries;
+            CHECK(i > 0 && kPageOrder[i - 1] == PageId::kGameplay);
+            CHECK(i + 1 < std::size(kPageOrder) && kPageOrder[i + 1] == PageId::kCheats);
+        }
+    }
+    CHECK(online_entries == 1);
+
+    // The sidebar lists the pages in this order (its buttons, and so keyboard and controller navigation, follow the
+    // list), starts on the first one, and the friend request badge belongs to the Online page wherever it sits.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("for (const PageId page : kPageOrder) {\n            c.pages.push_back(MakePage(page));") !=
+          std::string::npos);
+    CHECK(launcher.find("start_page") == std::string::npos && kPageOrder[0] == PageId::kPlay);
+    const size_t online_case = launcher.find("case PageId::kOnline:");
+    CHECK(online_case != std::string::npos &&
+          launcher.find("online_page_->PendingRequests()", online_case) < launcher.find("case PageId::kTrophies:", online_case));
 }
 
 // ---- Keyboard bindings ----
@@ -2833,6 +3598,252 @@ void TestControllerPrompts(const fs::path& base) {
 }
 
 } // namespace
+
+namespace language_test {
+
+using cpk_test::Entry;
+
+std::string Sheet(const std::string& text) {
+    return "FMSB" + std::string(0x1c, '\0') + text + std::string(300, '\0');
+}
+
+// One language slot: its message sheets and stage files, as DRACRO_US.CPK names them.
+std::vector<Entry> Slot(const std::string& suffix, const std::string& system_msg) {
+    return {{"msgsheet/SystemMsg_" + suffix + ".fms", system_msg, true},
+            {"msgsheet/ItemList_" + suffix + ".fms", "items " + suffix, false},
+            {"stage/Menu_" + suffix + ".ftx", "menu " + suffix, false},
+            {"stage/Menu_" + suffix + ".mbs", "menu layout " + suffix, false}};
+}
+
+std::string LanguageArchive(std::initializer_list<std::vector<Entry>> slots) {
+    std::vector<Entry> entries{{"other/US_manual_001.ftx", "manual", false}, {"stage/Interface.ftx", "plain", false}};
+    for (const std::vector<Entry>& one : slots) {
+        entries.insert(entries.end(), one.begin(), one.end());
+    }
+    return cpk_test::BuildCpk(entries, true);
+}
+
+const std::string kEnglishSheet = Sheet("New Game Continue Options Quit @#(34) ##(TOUCH)");
+const std::string kRussianSheet = Sheet("Новая игра Продолжить Выход Настройки Сохранить ##(TOUCH) @#(34)");
+
+} // namespace language_test
+
+// Menu & Subtitles languages read from the installed regional archive: complete language file sets, Russian text in a
+// slot, and the build's own list when the archive cannot tell.
+void TestInstalledTextLanguages(const fs::path& base) {
+    using namespace cpk_test;
+    using namespace language_test;
+    const std::string& english = kEnglishSheet;
+    const std::string& russian = kRussianSheet;
+    const std::string ukrainian = Sheet("Нова гра Продовжити Вихід Налаштування Зберегти їжа є ґанок ##(TOUCH)");
+    const std::string bulgarian = Sheet("Нова игра Продължи Изход Настройки Запази ##(TOUCH)");
+    CHECK(IsRussianText(Span(russian)) && !IsRussianText(Span(english)) && !IsRussianText(Span(ukrainian)));
+    CHECK(!IsRussianText(Span(bulgarian)) && !IsRussianText({}));
+
+    std::vector<Entry> us = Slot("US", english);
+    us.push_back({"msgsheet/StaffRollMsg_PS4_US.fms", "staff", false}); // the US slot's own extra sheet
+    const std::vector<Entry> fr = Slot("FR", english), de = Slot("DE", english), it = Slot("IT", english);
+    const std::vector<Entry> es = Slot("ES", english), uk = Slot("UK", english);
+    const fs::path app0 = base / "languages_app0";
+    fs::remove_all(app0);
+    fs::create_directories(app0);
+    const fs::path regional = app0 / "DRACRO_US.CPK";
+    const auto keys = [&](const GameBuild* build) {
+        std::string joined;
+        for (const TextLanguage& language : InstalledTextLanguages(app0, build)) {
+            joined += (joined.empty() ? "" : " ") + std::string(language.key) + "=" + std::to_string(language.ps4_id);
+        }
+        return joined;
+    };
+    const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
+
+    // Every Western slot (the official 1.00 archive's layout): all five, in the build's order, on 1.00 and 1.01 alike.
+    WriteAll(regional, LanguageArchive({us, fr, de, it, es, uk}));
+    CHECK(keys(&kUs) == western && keys(&kUs101) == western);
+    CHECK(SameLanguages(InstalledTextLanguages(app0, &kUs), TextLanguagesOf(&kUs)));
+
+    // The reported 1.01 archive: Russian text in the US slot and no other slot. Russian is the only language and keeps
+    // the US slot's system language; no other value can reach the game whatever the saved key.
+    WriteAll(regional, LanguageArchive({Slot("US", russian), uk}));
+    const std::vector<TextLanguage> only_russian = InstalledTextLanguages(app0, &kUs101);
+    CHECK(keys(&kUs101) == "russian=1" && only_russian[0].name == "Russian" && only_russian[0].suffix == "US");
+    CHECK(LanguageNames(only_russian) == "Russian" && !SameLanguages(only_russian, TextLanguagesOf(&kUs101)));
+    for (const char* absent : {"english", "french", "german", "italian", "spanish"}) {
+        CHECK(ResolveTextLanguage(only_russian, absent).key == "russian");
+    }
+    CHECK(UnavailableLanguageNote("french", ResolveTextLanguage(only_russian, "french")) ==
+          "saved language French unavailable for this build, using Russian");
+    CHECK(UnavailableLanguageNote("english", only_russian[0]) ==
+          "saved language English unavailable for this build, using Russian");
+    CHECK(UnavailableLanguageNote("russian", only_russian[0]).empty());
+    CHECK(UnavailableLanguageNote("", only_russian[0]).empty());
+    CHECK(UnavailableLanguageNote("klingon", TextLanguagesOf(&kUs)[0]) ==
+          "saved language klingon unavailable for this build, using English");
+
+    const fs::path ini = base / "languages_dcp.ini";
+    const fs::path image = base / "languages_image";
+    WriteAll(image / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
+                                       kUs101.eboot_sha256 + "\",\n  \"app_ver\": \"01.01\"\n}");
+    CHECK(BuildOfImageDir(image.string().c_str()) == &kUs101);
+    for (const char* saved :
+         {"english", "french", "german", "italian", "spanish", "russian", "korean", "traditional_chinese", "japanese", ""}) {
+        WriteAll(ini, std::string("text_language=") + saved + "\n");
+        CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
+    }
+    fs::remove(ini);
+    CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
+    // Without the folder the build's own list stands, as before.
+    WriteAll(ini, "text_language=french\n");
+    CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), nullptr) == 2);
+    CHECK(IsValidSetting(kTextLanguageKey, "russian") && !IsValidSetting(kTextLanguageKey, "Russian"));
+    {
+        LauncherSettings settings(ini);
+        settings.Set(kTextLanguageKey, "russian");
+        CHECK(settings.Save());
+        CHECK(WrittenValue(ReadAll(ini), "text_language", "russian"));
+        CHECK(LauncherSettings(ini).Get(kTextLanguageKey) == "russian");
+    }
+    // A saved Russian does not follow the player to a build without it: the Western archive and the Asia list give
+    // their own defaults.
+    CHECK(ResolveTextLanguage(TextLanguagesOf(&kCk), "russian").key == "traditional_chinese");
+    WriteAll(regional, LanguageArchive({us, fr, de, it, es}));
+    CHECK(ResolveTextLanguage(InstalledTextLanguages(app0, &kUs), "russian").key == "english");
+    CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
+
+    // Russian beside complete Western slots: Russian in the US slot's place, the others kept.
+    WriteAll(regional, LanguageArchive({Slot("US", russian), fr, de, it, es}));
+    CHECK(keys(&kUs101) == "russian=1 french=2 german=4 italian=5 spanish=3");
+    WriteAll(ini, "text_language=german\n");
+    CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 4);
+
+    // A slot missing a file most slots have is not offered; a slot with nothing at all is not either.
+    std::vector<Entry> french_without_menu = Slot("FR", english);
+    french_without_menu.erase(french_without_menu.begin() + 2);
+    WriteAll(regional, LanguageArchive({us, french_without_menu, de, it}));
+    CHECK(keys(&kUs101) == "english=1 german=4 italian=5");
+    WriteAll(ini, "text_language=french\n");
+    CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
+
+    // Two Russian slots give one Russian; Cyrillic that is not Russian keeps the slot's own name.
+    WriteAll(regional, LanguageArchive({Slot("US", russian), Slot("FR", russian)}));
+    CHECK(keys(&kUs101) == "russian=1");
+    WriteAll(regional, LanguageArchive({Slot("US", ukrainian)}));
+    CHECK(keys(&kUs101) == "english=1");
+
+    // The archive cannot tell: unreadable, holding no language slot, or missing. The build's own list stands.
+    WriteAll(regional, "not an archive");
+    CHECK(keys(&kUs101) == western);
+    WriteAll(regional, BuildCpk({{"stage/Interface.ftx", "plain", false}}, false));
+    CHECK(keys(&kUs101) == western);
+    fs::remove(regional);
+    CHECK(keys(&kUs) == western && keys(nullptr) == western);
+    CHECK(InstalledTextLanguages({}, &kUs101).size() == 5);
+
+    // Asia/Hong Kong: Traditional Chinese and Korean from DRACRO_CK.CPK, unchanged.
+    WriteAll(app0 / "DRACRO_CK.CPK", LanguageArchive({Slot("CT", Sheet("繁體中文")), Slot("KR", Sheet("한국어"))}));
+    CHECK(keys(&kCk100) == "traditional_chinese=10 korean=9" && keys(&kCk) == "traditional_chinese=10 korean=9");
+    WriteAll(app0 / "DRACRO_CK.CPK", LanguageArchive({Slot("CT", Sheet("繁體中文"))}));
+    CHECK(keys(&kCk) == "traditional_chinese=10");
+
+    // Japan: Japanese only, whatever the patch archive holds, even a Western slot the executable cannot select.
+    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
+        CHECK(keys(japan) == "japanese=0");
+    }
+    WriteAll(app0 / "DRACRO_PATCH_JP.CPK", BuildCpk({{"stage/patch.bin", "patch", false}}, false));
+    CHECK(keys(&kJp102) == "japanese=0" && keys(&kJp103) == "japanese=0");
+    WriteAll(app0 / "DRACRO_PATCH_JP.CPK", LanguageArchive({us, fr}));
+    CHECK(keys(&kJp102) == "japanese=0" && keys(&kJp103) == "japanese=0");
+
+    // Every archive language names its own slot; Japanese has none.
+    for (const GameBuild& build : SupportedBuilds()) {
+        std::set<std::string_view> suffixes;
+        for (const TextLanguage& language : build.text_languages) {
+            CHECK(language.key == "japanese" ? language.suffix.empty()
+                                             : language.suffix.size() == 2 && suffixes.insert(language.suffix).second);
+        }
+    }
+    fs::remove_all(app0);
+    fs::remove_all(image);
+    fs::remove(ini);
+}
+
+// The Japanese builds offer Japanese only, and moving between installed builds replaces a saved language the new
+// build has not got with its first one: in the launcher's file and in what the game is told.
+void TestTextLanguageSwitching(const fs::path& base) {
+    using namespace language_test;
+    const fs::path root = base / "language_switch";
+    fs::remove_all(root);
+    const fs::path ini = root / "dcp.ini";
+    const auto app0_of = [&](const GameBuild& build) { return root / "prepared" / build.folder; };
+    const auto image_of = [&](const GameBuild& build) {
+        const fs::path dir = root / "image" / build.folder;
+        WriteAll(dir / "image.json", std::string("{\n  \"title_id\": \"") + build.title_id + "\",\n  \"eboot_sha256\": \"" +
+                                         build.eboot_sha256 + "\",\n  \"app_ver\": \"" + FinishedLayer(build).app_ver +
+                                         "\"\n}");
+        return dir.string();
+    };
+    const std::vector<Entry> us = Slot("US", kEnglishSheet);
+    WriteAll(app0_of(kUs) / "DRACRO_US.CPK", LanguageArchive({us, Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
+                                                              Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet)}));
+    WriteAll(app0_of(kUs101) / "DRACRO_US.CPK", LanguageArchive({Slot("US", kRussianSheet)}));
+    WriteAll(app0_of(kCk) / "DRACRO_CK.CPK", LanguageArchive({Slot("CT", Sheet("CT")), Slot("KR", Sheet("KR"))}));
+    WriteAll(app0_of(kJp102) / "DRACRO_PATCH_JP.CPK", cpk_test::BuildCpk({{"stage/bg32a.ftx", "patch", false}}, false));
+    WriteAll(app0_of(kJp103) / "DRACRO_PATCH_JP.CPK", LanguageArchive({us}));
+    fs::create_directories(app0_of(kJp100));
+    const auto told = [&](const GameBuild& build, const std::string& saved) {
+        WriteAll(ini, "text_language=" + saved + "\n");
+        return dcp_text_language(ini.string().c_str(), image_of(build).c_str(), app0_of(build).string().c_str());
+    };
+
+    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
+        const std::vector<TextLanguage> languages = InstalledTextLanguages(app0_of(*japan), japan);
+        CHECK(languages.size() == 1 && languages[0].key == "japanese" && languages[0].name == "Japanese");
+        CHECK(languages[0].ps4_id == 0 && SameLanguages(languages, TextLanguagesOf(japan)));
+        for (const char* saved : {"japanese", "english", "french", "korean", "traditional_chinese", "russian", "", "x"}) {
+            CHECK(told(*japan, saved) == 0);
+        }
+        CHECK(UnavailableLanguageNote("english", languages[0]) ==
+              "saved language English unavailable for this build, using Japanese");
+        CHECK(UnavailableLanguageNote("korean", languages[0]) ==
+              "saved language Korean unavailable for this build, using Japanese");
+        CHECK(UnavailableLanguageNote("russian", languages[0]) ==
+              "saved language Russian unavailable for this build, using Japanese");
+    }
+    // Japanese reaches no other build: US and Russian 1.01 send it to their US slot, Asia to Traditional Chinese.
+    CHECK(told(kUs, "japanese") == 1 && told(kUs101, "japanese") == 1 && told(kCk, "japanese") == 10);
+
+    const auto switch_to = [&](const GameBuild& build) {
+        LauncherSettings settings(ini);
+        NormalizeTextLanguage(settings, InstalledTextLanguages(app0_of(build), &build));
+        CHECK(settings.Save());
+        return LauncherSettings(ini).Get(kTextLanguageKey);
+    };
+    WriteAll(ini, "text_language=japanese\n");
+    CHECK(switch_to(kUs) == "english");             // Japan -> USA
+    CHECK(switch_to(kJp100) == "japanese");         // USA -> Japan
+    CHECK(switch_to(kCk) == "traditional_chinese"); // Japan -> Asia
+    WriteAll(ini, "text_language=korean\n");
+    CHECK(switch_to(kJp102) == "japanese");         // Asia -> Japan
+    WriteAll(ini, "text_language=korean\n");
+    CHECK(switch_to(kUs) == "english");             // Asia -> USA
+    CHECK(switch_to(kUs101) == "russian");          // USA -> Russian 1.01
+    CHECK(switch_to(kJp103) == "japanese");         // Russian 1.01 -> Japan
+    WriteAll(ini, "text_language=russian\n");
+    CHECK(switch_to(kUs) == "english");             // Russian 1.01 -> USA
+    for (const char* kept : {"english", "french", "german", "italian", "spanish"}) {
+        WriteAll(ini, std::string("text_language=") + kept + "\n");
+        LauncherSettings settings(ini);
+        CHECK(!NormalizeTextLanguage(settings, InstalledTextLanguages(app0_of(kUs), &kUs)));
+        CHECK(settings.Get(kTextLanguageKey) == kept);
+    }
+    WriteAll(ini, "show_fps=1\n");
+    {
+        LauncherSettings settings(ini);
+        CHECK(!NormalizeTextLanguage(settings, InstalledTextLanguages(app0_of(kJp100), &kJp100)));
+        CHECK(!settings.Has(kTextLanguageKey));
+    }
+    fs::remove_all(root);
+}
 
 void TestFileBrowser(const fs::path& base) {
     const fs::path root = base / "browser";
@@ -3811,9 +4822,9 @@ int main(int argc, char** argv) {
                     check.detail.c_str(), check.eboot_sha256.c_str());
         return check.state == GameFileState::kValid ? 0 : 1;
     }
-    // dcp-launcher-tests --log-gameplay <dcp.ini> <image dir>: the startup Gameplay summary, read-only.
-    if (argc == 4 && std::string(argv[1]) == "--log-gameplay") {
-        dcp_log_gameplay_settings(argv[2], argv[3]);
+    // dcp-launcher-tests --log-settings <dcp.ini> <image dir> [<app0>]: the startup Settings summary, read-only.
+    if ((argc == 4 || argc == 5) && std::string(argv[1]) == "--log-settings") {
+        dcp_log_settings_summary(argv[2], argv[3], argc == 5 ? argv[4] : nullptr, nullptr);
         return 0;
     }
     // dcp-launcher-tests --install <.pkg or game folder> <prepared root> <image root>: the launcher's installer without its
@@ -3860,10 +4871,20 @@ int main(int argc, char** argv) {
     TestLogRetention(base);
     TestWindowTitle();
     TestRenderResolution(base);
+    TestSettingsSummary(base);
     TestResolutionProbe();
     TestTextLanguage(base);
     TestCheatSettings(base);
+    TestOnlineCheatLockout(base);
     TestJapaneseNpcVoiceSetting(base);
+    TestOnlineSettings(base);
+    TestOnlinePage();
+    TestOverlayPanel();
+    TestNoSettingsMenu();
+    TestPingDisplay(base);
+    TestOnlineClient(base);
+    TestSkipOfferSettings(base);
+    TestPinnedBuild(base);
     TestOverlayProgramsSetting(base);
     TestGameProcess();
     TestAspectRatio(base);
@@ -3879,6 +4900,8 @@ int main(int argc, char** argv) {
     TestKeyBindings(base);
     TestFileBrowser(base);
     TestControllerPrompts(base);
+    TestInstalledTextLanguages(base);
+    TestTextLanguageSwitching(base);
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);

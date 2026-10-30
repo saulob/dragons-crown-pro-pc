@@ -1,6 +1,7 @@
 /* Narrow, explicit PS4 libc contracts. No automatic success stubs. */
 #define _CRT_RAND_S
 #include "runtime.h"
+#include "runtime_online.h"
 #include "dcpgpu.h"
 #include "runtime_log.h"
 #include <stdio.h>
@@ -236,6 +237,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (memory) return memory;
     uintptr_t kernel = runtime_kernel_resolve(name);
     if (kernel) return kernel;
+    uintptr_t online = runtime_online_resolve(name);
+    if (online) return online;
     uintptr_t services = runtime_services_resolve(name);
     if (services) return services;
     uintptr_t rtc = runtime_rtc_resolve(name);

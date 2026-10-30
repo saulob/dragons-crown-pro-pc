@@ -20,10 +20,10 @@ namespace DcpSettings {
 namespace {
 
 std::filesystem::path file_path;
-std::mutex file_mutex; // the menu (present thread) and F11 (window thread) both write
+std::mutex file_mutex; // Load and F11 (window thread)
 
 constexpr const char* FileHeader[] = {
-    "# Dragon's Crown Pro user settings (the launcher and the in-game menu write this file).",
+    "# Dragon's Crown Pro user settings (written by the launcher; F11 saves the display mode).",
     "# Remove a line to use the default.",
 };
 
@@ -51,14 +51,13 @@ int ParseInt(const std::string& value, int fallback) {
 void Set(Values& v, const std::string& key, const std::string& value) {
     if (key == "show_fps") {
         v.show_fps = ParseBool(value, v.show_fps);
+    } else if (key == "show_ping") {
+        v.show_ping = ParseBool(value, v.show_ping);
     } else if (key == "overlay_scale") {
         v.overlay_scale = std::clamp(ParseInt(value, 100), 50, 300);
     } else if (key == "overlay_corner") {
         const int corner = ParseInt(value, 1);
         v.overlay_corner = corner >= 0 && corner <= 3 ? corner : 1;
-    } else if (key == "menu_tab") {
-        const int tab = ParseInt(value, 0);
-        v.menu_tab = tab >= 0 && tab <= 1 ? tab : 0;
     } else if (key == "display_mode") {
         v.display_mode = DcpGraphics::ParseDisplayMode(value);
     } else if (key == "vsync") {
@@ -140,7 +139,7 @@ bool WriteEntries(const Entries& entries) {
             if (!lines.empty() && !Trim(lines.back()).empty()) {
                 lines.emplace_back();
             }
-            lines.emplace_back("# Set from the in-game menu");
+            lines.emplace_back("# Set in the game");
             header = true;
         }
         lines.push_back(entries[i].first + " = " + entries[i].second);
@@ -240,22 +239,6 @@ void Load(const std::string& path) {
     if (v.anisotropy) {
         std::printf("GPU: texture filtering %dx\n", v.anisotropy.load());
     }
-}
-
-bool Save() {
-    const auto& v = Get();
-    const auto flag = [](bool value) { return std::string(value ? "1" : "0"); };
-    return WriteEntries({
-        {"display_mode", DisplayModeKey()},
-        {"vsync", flag(v.vsync)},
-        {"fsr1", flag(v.fsr1)},
-        {"rcas", flag(v.rcas)},
-        {"rcas_strength", std::to_string(v.rcas_strength.load())},
-        {"show_fps", flag(v.show_fps)},
-        {"overlay_scale", std::to_string(v.overlay_scale.load())},
-        {"overlay_corner", std::to_string(v.overlay_corner.load())},
-        {"menu_tab", std::to_string(v.menu_tab.load())},
-    });
 }
 
 bool SaveDisplayMode() {

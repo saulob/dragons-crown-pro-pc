@@ -10,7 +10,10 @@
 #include "runtime.h"
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
+#include "runtime_online.h"
+#include "skip_offers.h"
 #include "startup_save_hook.h"
+#include "system_type_hook.h"
 #include "ultrawide_hooks.h"
 #include "voice_hooks.h"
 #include "dcpgpu.h"
@@ -18,6 +21,7 @@
 #include "dcp_resolution.h"
 #include "runtime_log.h"
 #include "isa_emulate.h"
+#include "lzcnt_compat.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error Dragon's Crown Pro PC requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -126,7 +130,7 @@ static int cpu_usable(char *cause, size_t cause_size, char *advice, size_t advic
     char missing[96];
     if (!isa_missing_sets(isa_host_features(),0,missing,sizeof(missing))) return 1;
     snprintf(cause,cause_size,"This processor lacks %s, which the game's PS4 code needs.",missing);
-    snprintf(advice,advice_size,"The game needs an Intel Core 4th generation (Haswell), AMD FX or newer processor.");
+    snprintf(advice,advice_size,"The game needs an Intel Core 2nd generation (Sandy Bridge), AMD FX or newer processor.");
     return 0;
 }
 #ifndef _WIN32
@@ -219,7 +223,7 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
         }
     }
     if (code==EXCEPTION_ILLEGAL_INSTRUCTION && image && (uintptr_t)info->ContextRecord->Rip-(uintptr_t)image<0x20000000) {
-        /* Jaguar's MOVBE and BMI1 trap on hosts without them; cpu_usable refuses the sets that cannot be emulated. */
+        /* Jaguar's MOVBE and BMI1 trap on hosts without them; LZCNT does not, so it is rewritten at load. */
         CONTEXT *c=info->ContextRecord;
         _Static_assert(offsetof(CONTEXT,R15)-offsetof(CONTEXT,Rax)==15*sizeof(DWORD64),"CONTEXT register order");
         uint64_t flags=c->EFlags;
@@ -401,8 +405,8 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
     return 0;
 }
 /* Widens the scene pass projections when every condition holds, then installs the guest hooks; logs one line either
- * way. A site that does not match leaves the image as it was. */
-static void install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
+ * way and returns 1 when it applied. A site that does not match leaves the image as it was. */
+static int install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
                                    size_t slot_offset, uint8_t *stubs) {
     const double scale=dcp_true_ultrawide_scale(aspect_ratio,&render_target);
     char detail[720];
@@ -421,6 +425,7 @@ static void install_true_ultrawide(int requested, const DcpGameBuild *build, uin
     printf("DCP: True Ultrawide requested %s, effective %s (%s, %dx%d, %s): %s\n",requested ? "on" : "off",
            effective ? "on" : "off",aspect_ratio->name,render_target.width,render_target.height,
            build ? build->label : "unknown game build",detail);
+    return effective;
 }
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
@@ -485,7 +490,7 @@ int main(int argc, char **argv) {
     }
     static DcpPaths paths;
     const DcpPathRequest request={boot,content_profile,app0,user_dir,logs_dir};
-    if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
+    if (!dcp_resolve_paths(&request,&paths)) fail(paths.error[0] ? paths.error : "cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0; user_dir=paths.user_dir;
     static char settings_file[4200];
     snprintf(settings_file,sizeof(settings_file),"%s/dcp.ini",user_dir);
@@ -553,29 +558,38 @@ int main(int argc, char **argv) {
             fail(message);
         }
     }
-    if (!dcp_resolve_paths(&request,&paths)) fail("cannot locate the game folders");
+    if (!dcp_resolve_paths(&request,&paths)) fail(paths.error[0] ? paths.error : "cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
     printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");
+    char build_key[64]="";
+    if (known_build) snprintf(build_key,sizeof(build_key),"%s-%s",game_build.title_id,game_build.version);
+    const char *pinned_build=getenv("DCP_GAME_BUILD");
+    if (pinned_build && *pinned_build) {
+        if (strcmp(pinned_build,build_key)) {
+            char message[256];
+            snprintf(message,sizeof(message),"DCP_GAME_BUILD is %s but the game image is %s",pinned_build,
+                     known_build ? build_key : "not a supported build");
+            fail(message);
+        }
+        printf("DCP: game build pinned by DCP_GAME_BUILD\n");
+    }
+    runtime_online_configure(settings_file,user_dir,known_build ? build_key : NULL);
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
     const int true_ultrawide_requested=dcp_true_ultrawide(settings_file);
     runtime_dcp_set_neo_mode(render_target.pro_memory);
-    runtime_set_language(dcp_text_language(settings_file,paths.image_dir));
+    runtime_set_language(dcp_text_language(settings_file,paths.image_dir,app0));
     runtime_pad_set_settings(settings_file);
     runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
-    dcp_log_gameplay_settings(settings_file, paths.image_dir);
     printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
-    if (known_build && game_build.cheats) {
-        runtime_cheats_log_enabled();
-    } else {
-        printf("Cheats: enabled: none\n");
-    }
+    runtime_cheats_log_state(known_build && game_build.cheats);
     if (content_profile) {
         FILE *profile=fopen(content_profile,"rb");
         unsigned char data[28];
@@ -710,8 +724,12 @@ int main(int argc, char **argv) {
     const size_t cheat_stub_bytes = runtime_cheat_hooks_stub_bytes();
     const size_t save_stub_bytes = startup_save_hook_stub_bytes();
     const size_t voice_stub_bytes = voice_hooks_stub_bytes();
+    const size_t system_type_stub_bytes = system_type_hook_stub_bytes();
     const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() : 0;
-    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + ultrawide_stub_bytes);
+    const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
+    const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
+    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
+                                         ultrawide_stub_bytes + lzcnt_stub_bytes);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -755,6 +773,17 @@ int main(int argc, char **argv) {
         t[8] = 0x48; t[9] = 0xb8; memcpy(t + 10, &handler, 8);
         t[18] = 0xff; t[19] = 0xe0;
     }
+    unsigned char *game_imports=calloc(import_count ? import_count : 1,1);
+    if (!game_imports) fail("allocation failed");
+    for (uint64_t i=0;i<nr;++i) {
+        if (relocs[i].kind!=1) continue;
+        int in_module=0;
+        for (uint64_t m=0;m<module_count;++m)
+            if (relocs[i].target>=modules[m].base && relocs[i].target-modules[m].base<modules[m].size) in_module=1;
+        if (!in_module) game_imports[relocs[i].value]=1;
+    }
+    runtime_online_check_imports((const char (*)[128])names,game_imports,import_count,runtime_resolve);
+    free(game_imports);
     for (uint64_t i = 0; i < nr; ++i) {
         uintptr_t value = relocs[i].kind == 2 ? (uintptr_t)(data_traps + page_size * relocs[i].value + relocs[i].addend)
                         : relocs[i].kind == 1 ? (uintptr_t)(traps + 32 * relocs[i].value)
@@ -813,16 +842,38 @@ int main(int argc, char **argv) {
             fail_running(message);
         }
     }
-    if (known_build && game_build.cheats) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
+    if (lzcnt_rewrite) {
+        const char *rewritten_build="";
+        const LzcntCompatStatus status=lzcnt_compat_install(image,size,entry,
+            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes,
+            lzcnt_stub_bytes,&rewritten_build);
+        if (status!=LZCNT_COMPAT_OK) {
+            char message[330];
+            snprintf(message,sizeof(message),"This processor lacks LZCNT, and this game executable cannot be adapted to it: %s.",
+                     lzcnt_compat_status_text(status));
+            fail_running(message);
+        }
+        printf("LZCNT: rewritten at %d sites (%s)\n",LZCNT_SITE_COUNT,rewritten_build);
+    }
+    if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
     if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
         voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
+    if (known_build && runtime_online_active())
+        system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
+                                 system_type_stub_bytes,runtime_online_system_type);
+    const unsigned skip_applied=skip_offers_install(image,size,known_build ? build_key : NULL,
+                                                    skip_offers_wanted(dcp_skip_offers(settings_file)));
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
-    install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
+    const int ultrawide_effective=install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
                            ultrawide_bytes ? round_page(size)+hook_bytes : 0,
-                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes);
+                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
+    const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
+                                       render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
+                                       ultrawide_effective,skip_applied};
+    dcp_log_settings_summary(settings_file,paths.image_dir,app0,&run_settings);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif
