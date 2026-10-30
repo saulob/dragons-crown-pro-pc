@@ -20,13 +20,16 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
    **Decline** it there. The list updates by itself and shows each friend's Online name and whether they are online:
    Online while their launcher or game is connected, "Online, in a room" while they are in a game room. Under the
    name, an online friend also shows the platform and port version their own client reported
-   (`Online · Windows · v0.8.0`), and **Incompatible** when their room uses another online protocol.
+   (`Online · Windows · v0.9.0`), and **Incompatible** when their room uses another online protocol.
 5. **Connection test** > **Run test**, if you want to check your network first. "Ready for online play" means other
    players can reach you; otherwise the lines below it say what is missing. "Online service: Connected · N ms" is the
    time the online service took to answer the test's sign-in, measured once per test; it is not the Ping to players.
 6. **Ping display** On shows the in-game Ping from the start; **F3** shows or hides it while playing.
 7. Press **Play**.
 8. Play through the game's own Network menu: host or join a room, or pick a friend's room in Join Friends Room.
+
+The game offers online play only after a character has passed the opening tutorial and story section, as on the PS4.
+The Gameplay page's Story Skip Offer and Tutorial Skip Offer let a new character skip there.
 
 Nothing else needs setting up. With Online play Off the game runs offline as before, and F3 does nothing.
 
@@ -61,7 +64,7 @@ left. The panel uses the frame counter's style and corner, next to it when both 
 ### System type and versions
 
 The game's player cards (as in Join Friends Room) show **System type** as the player's PC platform and port
-version, for example `Windows · v0.8.0`, `Linux · v0.8.0` or `Steam Deck · v0.8.0`, instead of PlayStation 4.
+version, for example `Windows · v0.9.0`, `Linux · v0.9.0` or `Steam Deck · v0.9.0`, instead of PlayStation 4.
 Steam Deck is recognised from the machine's DMI identity (Valve Jupiter or Galileo); any other Linux PC shows Linux. The
 version is the CMake project version, the same one the launcher and the packages show.
 
@@ -191,7 +194,7 @@ Room (`room`): `id`, `world`, `slots`, `flags` (0x20000000 added while full), `o
 without I O 0 1), `key` (16 random bytes, hex: the peer handshake secret), `members: [{id, account, name, joined, bin, version, platform}]`,
 `ints`, `bin_int`, `bin_ext`, `online_protocol` (its creator's). Search result rooms carry `count`, `owner_account`,
 `owner_name`, `ints`, `bin_ext`, `online_protocol` and the owner's `version`, `platform`. Search skips full, closed
-(0x40000000) and hidden (0x10000000) rooms, other builds' rooms and rooms of another online protocol.
+(0x40000000) and hidden (0x10000000) rooms, rooms of another game key and rooms of another online protocol.
 
 Events: `room.member_joined {room, member}`, `room.member_left {room, member, why: leave | kicked | disconnect}`,
 `room.owner {room, from, to}` (before `member_left`; the new owner is the lowest connected member), `room.internal
@@ -256,7 +259,7 @@ any datagram, after 30 tries of one packet, or on CLOSE.
   it. The Connection test uses its own short session with `presence: false`.
 - The game publishes its room info with Toolkit2 `setPresence` (forwarded as `presence.set`); its "Join Friends Room"
   list is Toolkit2 `getFriends`, answered from `friends.list` with one row per friend online in a room of the same
-  build and online protocol with a presence blob. The game then joins by the room id inside that blob.
+  game key and online protocol with a presence blob. The game then joins by the room id inside that blob.
 - Chat is implemented in the lobby (room scoped, bounded, rate limited, not stored) and received lines are written to
   the game log (`Chat:`). The game has no chat UI of its own and the port has none yet.
 - Bug reports: `report.send` is implemented in the lobby (`/reports` behind `REPORTS_TOKEN` on the Worker); the launcher

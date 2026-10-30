@@ -47,7 +47,7 @@ Values& Get();
 /// Reads the file into `values`; a missing file, key or invalid value keeps what `values` holds. False when the
 /// file cannot be read.
 bool Read(const std::string& path, Values& values);
-/// Read() into Get() and the file Save() writes. Once, before the window and the renderer start.
+/// Read() into Get() and the file SaveDisplayMode() updates. Once, before the window and the renderer start.
 void Load(const std::string& path);
 /// Writes the display mode alone (F11); every other line of the file is kept.
 bool SaveDisplayMode();

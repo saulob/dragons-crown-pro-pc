@@ -33,7 +33,8 @@ REQUIREMENTS
   work
 - A processor with AVX: Intel Core 2nd generation (Sandy Bridge), AMD FX or
   newer. The LZCNT, MOVBE and BMI1 instructions some of these lack are handled
-  in software
+  in software (without LZCNT, the USA 1.01 and Asia/Hong Kong 1.02 builds do
+  not start yet)
 - A graphics card and Mesa or proprietary driver with Vulkan 1.3,
   VK_EXT_robustness2, VK_KHR_push_descriptor and
   VK_EXT_vertex_attribute_divisor (AMD RADV on the Steam Deck qualifies)
@@ -107,10 +108,14 @@ PLAYING
 - Local multiplayer: up to four players, one controller each; the keyboard is always
   Player 1's. A controller connected later takes the lowest free player slot, and a
   player stays logged in when their controller is unplugged.
-- Online Play (Off by default, on the launcher's Online page) meets friends
-  through a small online service; the game traffic goes directly between the
-  players' PCs. Cheats are off while it is on. F3 shows the Ping during Online
-  Play, F2 the frame counter.
+- Online Co-op (new in v0.9.0): turn on Online Play on the launcher's Online
+  page (Off by default) to meet friends through a small online service; the
+  game traffic goes directly between the players' PCs. Cheats are off while it
+  is on. F3 shows the Ping during Online Play, F2 the frame counter.
+  Online play on Linux and Steam Deck has not yet been tested on real hardware.
+- The game itself unlocks online play only after the opening tutorial and story
+  section. To get there faster, turn on Gameplay > Story Skip Offer and
+  Tutorial Skip Offer before creating a new character.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
 - An experimental AMD water workaround (black areas under characters standing

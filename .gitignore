@@ -43,6 +43,11 @@ eboot.bin
 /gpu/third_party/miniz/
 /gpu/third_party/xbyak/
 
+# Wrangler's local state (account metadata, dev storage) and local dev secrets
+/server/lobby/.wrangler/
+/server/lobby/.dev.vars*
+/server/lobby/node_modules/
+
 # Android build output and the OpenSSL sources it builds, kept local
 /android/app/.cxx/
 /third_party/openssl-android/

@@ -688,6 +688,9 @@ void OnLink(const net::LobbyMessage& m) {
         std::printf("Matching2: lobby unavailable (%s)\n", m.code.c_str());
         for (auto& [seq, p] : g.pending) Complete(p, kErrLobbyDown);
         g.pending.clear();
+        g.friends_busy = false;
+        g.friends.clear();
+        ++g.friends_generation;
         RoomGone(kRoomDestroyed);
         if (g.start_wanted) PushContextEvent(was_up ? kCtxStartOver : kCtxStarted, m.code == "unauthorized" ? kErrIdentity : kErrLobbyDown);
     }

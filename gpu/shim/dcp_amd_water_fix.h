@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Experimental AMD workaround (not a proven fix) for black regions under characters standing in water (issue #32): on by default on AMD
-// GPUs, off elsewhere (tests/amd_water_fix_tests.cpp).
+// Experimental AMD workaround (not a proven fix) for black regions under characters standing in water (issue #32): on
+// by default on AMD GPUs, off elsewhere (tests/amd_water_fix_tests.cpp).
 #pragma once
 
 #include <atomic>

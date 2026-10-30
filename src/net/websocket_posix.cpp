@@ -85,9 +85,13 @@ public:
             if (closed_) return false;
             int n;
             if (ssl_) {
-                n = SSL_write(ssl_, p, int(size));
+                int e = SSL_ERROR_NONE;
+                {
+                    std::lock_guard<std::mutex> lock(ssl_mutex_);
+                    n = SSL_write(ssl_, p, int(size));
+                    if (n <= 0) e = SSL_get_error(ssl_, n);
+                }
                 if (n <= 0) {
-                    const int e = SSL_get_error(ssl_, n);
                     if (e != SSL_ERROR_WANT_READ && e != SSL_ERROR_WANT_WRITE) return false;
                     if (!Wait(e == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT, 10000)) return false;
                     continue;
@@ -110,9 +114,13 @@ public:
         for (;;) {
             if (closed_) return false;
             if (ssl_) {
-                const int n = SSL_read(ssl_, out, int(size));
+                int n, e;
+                {
+                    std::lock_guard<std::mutex> lock(ssl_mutex_);
+                    n = SSL_read(ssl_, out, int(size));
+                    e = n > 0 ? SSL_ERROR_NONE : SSL_get_error(ssl_, n);
+                }
                 if (n > 0) return got = size_t(n), true;
-                const int e = SSL_get_error(ssl_, n);
                 if (e != SSL_ERROR_WANT_READ && e != SSL_ERROR_WANT_WRITE) return false;
                 if (!Wait(e == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT, timeout_ms)) return false;
             } else {
@@ -213,6 +221,8 @@ private:
     SSL* ssl_;
     std::atomic<bool> closed_{false};
     std::mutex send_mutex_;
+    // The reader thread and senders share one SSL object, which OpenSSL does not allow concurrently; held per call only.
+    std::mutex ssl_mutex_;
     std::vector<uint8_t> pending_;
 
     friend std::unique_ptr<WebSocket> WebSocket::connect(const std::string&, int, std::string*);

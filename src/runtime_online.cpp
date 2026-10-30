@@ -214,7 +214,7 @@ std::vector<uint8_t> g_friend_rows, g_friend_presences;
 
 // Friend::getFriends rows (0x2e0 bytes): account @0, online id @8, online flag u32 @0x2c8 (1), presence type @0x2cc,
 // presence list @0x2d0 and count @0x2d8. Presence entry (0x1e0 bytes): type @4, status @0x98 (0xc0 bytes), game data
-// @0x158 (0x80 bytes, the host's room info), data size u64 @0x1d8. Only friends hosting a room of this build appear.
+// @0x158 (0x80 bytes, the host's room info), data size u64 @0x1d8. Only friends hosting a compatible room appear.
 void BuildFriends() {
     uint64_t generation = 0;
     const std::vector<FriendRoom> friends = friends_result(&generation);
