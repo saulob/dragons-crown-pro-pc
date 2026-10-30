@@ -88,6 +88,14 @@ Cheats are **automatically disabled while Online play is on**. This is intention
 
 Technical details are in [docs/ONLINE.md](docs/ONLINE.md).
 
+### Acknowledgements
+
+Online Co-op was implemented for this project with valuable technical research and lobby design references from [OpenCrown-PC](https://github.com/Nezara/OpenCrown-PC) by Nezara.
+
+OpenCrown's research helped document Dragon's Crown Pro's online interfaces, while its published lobby design also influenced parts of this project's reconnect behavior, room handling and service limits.
+
+This project's implementation was written separately and does not include copied OpenCrown source code, but its published research and design work were important references during development.
+
 ### Privacy
 
 The online service stores anonymous aggregate usage statistics, such as player counts, sessions, the port version, the platform and the country. These statistics do not store player names, Friend Codes, account IDs or IP addresses. Gameplay stays direct between the players (P2P); gameplay activity, saves, Ping and FPS are not collected. To find friends and connect you, the service also keeps your account, Online name and friends, and while you are in a room it uses your address and port. See [docs/ONLINE.md](docs/ONLINE.md#privacy-and-usage-statistics).
