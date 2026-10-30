@@ -82,15 +82,23 @@ the game marks its own player info as PS4, so the text cannot come from the data
 two calls that set the PS4 record, the hook sets the text for the Online ID the card shows, from what the online service
 reported for that player (`PC` when it reported nothing).
 
-## Reference and licence
+## Reference and acknowledgement
 
-[OpenCrown-PC](https://github.com/Nezara/OpenCrown-PC) (another PC port of this game) documents how the game drives its
-online code: the Matching2 request and event structures, the memberId-to-slot rule, the Rudp contract and the room
-attributes. That repository has no licence (checked at commit `49844a54`: no LICENSE or COPYING file, no SPDX
-headers, no licence field in package metadata; only third-party notices). No code was copied from it. This
-implementation, its lobby protocol, wire format and server are written for this project, using OpenCrown's notes as a
-description of the game's behaviour. Struct offsets are facts of the game's ABI and were cross-checked against the
-calls the game makes.
+[OpenCrown-PC](https://github.com/Nezara/OpenCrown-PC) by Nezara was an important technical reference during
+development of Online Co-op.
+
+Its research documents how Dragon's Crown Pro interacts with Matching2, RUDP, room attributes, member IDs and other
+online interfaces. Struct offsets and similar ABI details were cross-checked against the calls the game makes.
+
+OpenCrown's own lobby protocol documentation (`notes/map/lobby_protocol.md`) also influenced parts of this project's
+lobby design, including reconnect and seat-grace behavior, event buffering, service limits, rate limits and related
+operational choices.
+
+This project's client, lobby protocol, server implementation, P2P transport and supporting code were written
+separately for Dragon's Crown Pro PC, and no OpenCrown source code was copied.
+
+Thanks to Nezara for publishing the research and implementation details that helped make the game's online behavior
+easier to understand and reproduce.
 
 ## Pieces
 
