@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -17,6 +18,10 @@ struct WsUrl {
 
 // False with the reason for anything but ws://host[:port][/path] or wss://...
 bool parse_ws_url(const std::string& url, WsUrl& out, std::string* error);
+
+// The first of the Linux distributions' CA bundles that exists, or empty. The AppImage's OpenSSL only knows its build
+// prefix (/usr/local/ssl), which players' systems do not have.
+std::string system_ca_bundle(const std::function<bool(const std::string&)>& exists);
 
 class WebSocket {
 public:

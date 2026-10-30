@@ -53,6 +53,7 @@ Run the second command from the repository folder. A Docker `ubuntu:20.04` conta
 | Threads and fibers | Stacks come from `runtime_stack_acquire` (below 1 TiB, guard page at the bottom). Released stacks are never unmapped: they are kept by size with their pages returned to the kernel, so the address range does not grow. A joined thread's stack is released after `pthread_join`; a detached thread's host thread stays joinable and is joined, then released, when the next thread is created. Fibers (`runtime_fiber.c`) switch with a small assembly routine and may continue on another thread. |
 | File names | The PS4 file system ignores case, Linux does not: `runtime_file.c` matches a missing path component against the folder's entries without case (the game opens `DRACRO.cpk`, the package has `DRACRO.CPK`). |
 | Hashes and ciphers | `launcher/crypto_openssl.cpp` (libcrypto) instead of CNG; the interface is `launcher/crypto.h`. Results are identical: the boot image built on Linux is byte-identical to the Windows one. |
+| Online lobby connection | `src/net/websocket_posix.cpp` (sockets and the bundled OpenSSL) instead of WinHTTP. Certificates come from the distribution's CA bundle (`/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt` and others), since the bundled OpenSSL's own folder does not exist on players' systems. Everything above the connection (lobby, Friends, rooms, STUN, UPnP, P2P and RUDP) is the same code. |
 | Logs | `runtime_log_posix.c`: stdout and stderr go to `logs/dragons_crown_pro_NNN.log` and are echoed to the console through a pipe. |
 | Data folders | Next to the AppImage file (`$APPIMAGE`), else next to the executable; `DCP_PORTABLE_DIR` overrides; a read-only AppImage folder falls back to `$XDG_DATA_HOME/DragonsCrownProPC` (`launcher/paths.cpp`). |
 | Launcher | The same TRG launcher and installer. File chooser: `zenity` or `kdialog` when installed, otherwise the launcher's own chooser (`launcher/package_browser.cpp`: mouse, keyboard and controller; it lists the program's folder, Downloads, Home and mounted drives such as the SD card). `DCP_FILE_CHOOSER=builtin` or `native` forces one. Open folder: `xdg-open`. Shift at start is read from the X11 server (`launcher/shift_key.cpp`); `--launcher` does the same in any session. |
@@ -74,7 +75,9 @@ Linux offers every Windows feature except **Allow overlay programs**. Where the 
 
 Everything else (display mode, F11, window size, monitor and graphics card selection, VSync, render resolutions,
 the Frame rate option, Experimental True Ultrawide, SMAA, texture filtering, FSR 1 and RCAS, the experimental AMD water workaround,
-the processor check and BMI1 emulation, frame rate readouts, the in-game overlays, controller and keyboard input, saves,
+the processor check, BMI1 emulation and the LZCNT rewrite, Online Play (Friends, rooms, the connection test, the cheat
+lock, the System type on player cards), the Story and Tutorial Skip Offers, the Menu & Subtitles languages, F2 frame
+rate and F3 Ping readouts, the in-game overlays, controller and keyboard input, saves,
 shader cache, per-run logs, audio, reinstalling without losing user data) is the same code on both platforms.
 The graphics card list is the Vulkan loader's order on both. Under Gamescope (Steam Deck Gaming Mode) the game also holds
 a guest flip until the presenter has taken the previous frame and asks for the surface's minimum image count, which keeps

@@ -106,8 +106,11 @@ PLAYING
   (original) or Xbox. It can be switched back at any time.
 - Local multiplayer: up to four players, one controller each; the keyboard is always
   Player 1's. A controller connected later takes the lowest free player slot, and a
-  player stays logged in when their controller is unplugged. Online play is not
-  supported.
+  player stays logged in when their controller is unplugged.
+- Online Play (Off by default, on the launcher's Online page) meets friends
+  through a small online service; the game traffic goes directly between the
+  players' PCs. Cheats are off while it is on. F3 shows the Ping during Online
+  Play, F2 the frame counter.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
 - An experimental AMD water workaround (black areas under characters standing

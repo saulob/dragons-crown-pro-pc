@@ -37,4 +37,17 @@ bool parse_ws_url(const std::string& url, WsUrl& out, std::string* error) {
     return true;
 }
 
+std::string system_ca_bundle(const std::function<bool(const std::string&)>& exists) {
+    static constexpr const char* kBundles[] = {
+        "/etc/ssl/certs/ca-certificates.crt",                // Debian, Ubuntu, Arch, SteamOS
+        "/etc/pki/tls/certs/ca-bundle.crt",                  // Fedora, Bazzite
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // RHEL
+        "/etc/ssl/ca-bundle.pem",                            // openSUSE
+        "/etc/ssl/cert.pem",                                 // Alpine
+    };
+    for (const char* bundle : kBundles)
+        if (exists(bundle)) return bundle;
+    return {};
+}
+
 } // namespace dcp::net

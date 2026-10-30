@@ -1,4 +1,5 @@
-// WebSocket client on BSD sockets, with OpenSSL for wss:// (system certificate store, host name checked).
+// WebSocket client on BSD sockets, with OpenSSL for wss:// (OpenSSL's defaults plus the distribution's CA bundle, host
+// name checked).
 #include "net/websocket.h"
 
 #include <algorithm>
@@ -231,6 +232,9 @@ std::unique_ptr<WebSocket> WebSocket::connect(const std::string& url, int timeou
         if (context) {
             SSL_CTX_set_min_proto_version(context, TLS1_2_VERSION);
             SSL_CTX_set_default_verify_paths(context);
+            const std::string bundle =
+                system_ca_bundle([](const std::string& path) { return access(path.c_str(), R_OK) == 0; });
+            if (!bundle.empty()) SSL_CTX_load_verify_locations(context, bundle.c_str(), nullptr);
             SSL_CTX_set_verify(context, SSL_VERIFY_PEER, nullptr);
             ssl = SSL_new(context);
         }

@@ -1,6 +1,7 @@
 // Focused tests of the online layer (src/net): JSON, hashes, identity, settings, STUN, lobby URLs and the peer
 // transport over loopback (including a lossy relay). With DCP_TEST_LOBBY=ws://127.0.0.1:<port>/ set to a running
 // development lobby (server/lobby/local/server.js) the lobby link and two-player room flow are exercised too.
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include <iterator>
 #include <random>
 #include <thread>
+#include <vector>
 
 #include "net/addr.h"
 #include "net/connection_test.h"
@@ -614,6 +616,82 @@ void TestLobby(const fs::path& base) {
     guest.stop();
 }
 
+// The AppImage's OpenSSL knows only its build prefix: the lobby's certificate is checked against the distribution's
+// bundle, Debian's layout first.
+void TestSystemCaBundle() {
+    const auto only = [](std::vector<std::string> present) {
+        return [present](const std::string& path) {
+            return std::find(present.begin(), present.end(), path) != present.end();
+        };
+    };
+    CHECK(system_ca_bundle(only({})).empty());
+    CHECK(system_ca_bundle(only({"/etc/pki/tls/certs/ca-bundle.crt"})) == "/etc/pki/tls/certs/ca-bundle.crt");
+    CHECK(system_ca_bundle(only({"/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/certs/ca-certificates.crt"})) ==
+          "/etc/ssl/certs/ca-certificates.crt");
+    CHECK(system_ca_bundle(only({"/etc/ssl/ca-bundle.pem"})) == "/etc/ssl/ca-bundle.pem");
+    CHECK(system_ca_bundle(only({"/usr/local/ssl/cert.pem"})).empty());
+    const std::string posix = ReadSource("src/net/websocket_posix.cpp");
+    const size_t defaults = posix.find("SSL_CTX_set_default_verify_paths(context);");
+    const size_t bundle = posix.find("SSL_CTX_load_verify_locations(context, bundle.c_str(), nullptr);");
+    CHECK(defaults != std::string::npos && bundle != std::string::npos && defaults < bundle &&
+          posix.find("SSL_VERIFY_PEER") != std::string::npos && posix.find("SSL_set1_host") != std::string::npos);
+}
+
+// Linux runs the same online, build and patch code as Windows: no host guard in it, the same sources in the game on
+// both, and tools/build.sh --test runs every focused test tools/test.ps1 runs that is not about a Windows API.
+void TestLinuxParity() {
+    for (const char* file :
+         {"src/runtime_online.cpp", "src/runtime_matching2.cpp", "src/runtime_rudp.cpp", "src/runtime_cheats.cpp",
+          "src/skip_offers.c", "src/system_type_hook.c", "src/lzcnt_compat.c", "src/isa_emulate.c",
+          "src/net/lobby_link.cpp", "src/net/connection_test.cpp", "src/net/online_config.cpp", "src/net/identity.cpp",
+          "src/net/websocket.cpp", "launcher/online_client.cpp", "launcher/online_page.cpp", "launcher/online_view.cpp",
+          "launcher/online_settings.cpp", "launcher/text_languages.cpp", "launcher/game_profile.cpp",
+          "launcher/settings.cpp", "gpu/shim/dcp_ping.h", "gpu/shim/dcp_amd_water_fix.h", "gpu/shim/dcp_water_diag.h"}) {
+        const std::string source = ReadSource(file);
+        const bool guarded = source.find("_WIN32") != std::string::npos || source.find("__linux__") != std::string::npos;
+        if (source.empty() || guarded) std::printf("not shared by Linux and Windows: %s\n", file);
+        CHECK(!source.empty() && !guarded);
+    }
+
+    const std::string cmake = ReadSource("CMakeLists.txt");
+    const size_t main_at = cmake.find("set(DCP_MAIN_SOURCES ");
+    const std::string main_sources = cmake.substr(main_at, cmake.find(')', main_at) - main_at);
+    for (const char* file : {"src/skip_offers.c", "src/system_type_hook.c", "src/lzcnt_compat.c", "src/isa_emulate.c",
+                             "src/runtime_cheats.cpp", "${DCP_RUNTIME_SOURCES}"})
+        CHECK(main_at != std::string::npos && main_sources.find(file) != std::string::npos);
+    const size_t runtime_at = cmake.find("set(DCP_RUNTIME_SOURCES");
+    const std::string runtime_sources = cmake.substr(runtime_at, cmake.find(')', runtime_at) - runtime_at);
+    for (const char* file : {"src/runtime_online.cpp", "src/runtime_matching2.cpp", "src/runtime_rudp.cpp"})
+        CHECK(runtime_at != std::string::npos && runtime_sources.find(file) != std::string::npos);
+    CHECK(cmake.find("$<IF:$<BOOL:${WIN32}>,src/net/websocket_win.cpp,src/net/websocket_posix.cpp>") != std::string::npos);
+
+    const std::string windows = ReadSource("tools/test.ps1");
+    const std::string build_sh = ReadSource("tools/build.sh");
+    const size_t ninja = windows.find("& ninja -C $buildDir ");
+    CHECK(ninja != std::string::npos);
+    const std::string line = windows.substr(ninja, windows.find('\n', ninja) - ninja);
+    size_t targets = 0;
+    for (size_t at = line.find(" dcp-"); at != std::string::npos; at = line.find(" dcp-", at + 1)) {
+        const std::string target = line.substr(at + 1, line.find_first_of(" \r", at + 1) - at - 1);
+        ++targets;
+        if (target == "dcp-memory-windows-tests" || target == "dcp-update-helper-tests" || target == "dcp-log-tests")
+            continue;
+        const bool runs = build_sh.find("\"$build_dir/bin/" + target + "\"") != std::string::npos;
+        if (!runs) std::printf("tools/build.sh --test does not run %s\n", target.c_str());
+        CHECK(runs);
+    }
+    CHECK(targets > 20);
+
+    for (const char* doc : {"README.md", "packaging/README.txt", "packaging/README-linux.txt"}) {
+        const std::string text = ReadSource(doc);
+        CHECK(!text.empty() && text.find("Online play is not supported") == std::string::npos);
+    }
+    for (const char* doc : {"packaging/README.txt", "packaging/README-linux.txt"}) {
+        const std::string text = ReadSource(doc);
+        CHECK(text.find("Online Play") != std::string::npos && text.find("F3 shows the Ping") != std::string::npos);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -630,6 +708,8 @@ int main() {
     TestConnectionSummary();
     TestWorstRtt();
     TestOnlineVersion();
+    TestSystemCaBundle();
+    TestLinuxParity();
     TestAddresses();
     TestStun();
     TestPeerLink(0);
