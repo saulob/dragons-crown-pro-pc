@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "game_profile.h"
 
@@ -76,6 +77,13 @@ GameCheck CheckPackageIdentity(const std::string& sfo, std::span<const GameBuild
 std::string SfoString(const std::string& sfo, const char* key);
 // The supported build a boot image folder (UTF-8 path) was built from, or nullptr when it is not one.
 const GameBuild* BuildOfImageDir(const char* image_dir);
+
+// Every parameter of param.sfo with a printable value (integers in hex, other binary values by length).
+struct SfoField {
+    std::string key;
+    std::string value;
+};
+std::vector<SfoField> SfoFields(const std::string& sfo);
 
 // An integer value of param.sfo: `absent` when the key is missing, nothing when it is not an integer.
 std::optional<uint32_t> SfoInteger(const std::string& sfo, const char* key, uint32_t absent);

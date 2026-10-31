@@ -32,7 +32,7 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # Game files (check, PKG unpacking, install, boot image), the trophies (src/trophies), the settings file, the Display options and the Controller prompts patch:
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
-add_library(dcp_launcher_core STATIC boot_image.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
+add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
     game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp online_client.cpp online_settings.cpp online_view.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
@@ -125,6 +125,14 @@ target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core PNG::PNG)
 target_include_directories(dcp-launcher-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 set_target_properties(dcp-launcher-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-launcher-tests PRIVATE -Wall -Wextra)
+
+# Unsupported-build diagnostics: SELF parsing, signature scan, relations, classification and report, on synthetic images
+# (plus the local game fixtures under game\prepared when present).
+add_executable(dcp-build-diagnostics-tests EXCLUDE_FROM_ALL ../tests/build_diagnostics_tests.cpp)
+target_compile_definitions(dcp-build-diagnostics-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(dcp-build-diagnostics-tests PRIVATE dcp_launcher_core)
+set_target_properties(dcp-build-diagnostics-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-build-diagnostics-tests PRIVATE -Wall -Wextra)
 
 # Focused updater tests: versions, release JSON, SHA-256, ZIP safety, staging, jobs and rollback; no network.
 add_executable(dcp-update-tests EXCLUDE_FROM_ALL ../tests/update_tests.cpp

@@ -18,7 +18,7 @@ $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
 
 Write-Step 'Building the launcher tests'
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-build-diagnostics-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 
 Write-Step 'Running the Windows memory tests (sparse backing, commitment, aliases, release)'
@@ -27,6 +27,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the launcher tests'
 & (Join-Path $buildDir 'bin\dcp-launcher-tests.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Step 'Running the unsupported-build diagnostics tests'
+& (Join-Path $buildDir 'bin\dcp-build-diagnostics-tests.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Step 'Running the trophy tests'

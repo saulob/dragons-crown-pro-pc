@@ -427,6 +427,73 @@ struct Package::Impl {
 Package::Package() : impl_(std::make_unique<Impl>()) {}
 Package::~Package() = default;
 
+std::vector<PackageFile> Package::Files() const {
+    std::vector<PackageFile> files;
+    for (const Item& item : impl_->items) {
+        if (item.type == kPfsFile && item.inode < impl_->inodes.size()) {
+            files.push_back({item.path, uint64_t(std::max<int64_t>(impl_->inodes[item.inode].size, 0))});
+        }
+    }
+    return files;
+}
+
+PackageResult Package::ReadFile(const std::string& path, uint64_t max_bytes, std::vector<uint8_t>& out) {
+    Impl& p = *impl_;
+    out.clear();
+    const auto item = std::find_if(p.items.begin(), p.items.end(),
+                                   [&](const Item& candidate) { return candidate.type == kPfsFile && candidate.path == path; });
+    if (item == p.items.end() || item->inode >= p.inodes.size()) {
+        return Fail(PackageResult::kIncomplete, path + " is not in the package");
+    }
+    const Inode& node = p.inodes[item->inode];
+    if (node.size < 0 || uint64_t(node.size) > max_bytes) {
+        return Fail(PackageResult::kIncomplete, path + " is too large to read");
+    }
+    out.reserve(size_t(node.size));
+    Bytes chunk;
+    uint64_t remaining = uint64_t(node.size);
+    for (uint64_t block = 0; remaining > 0; block += kChunkBlocks) {
+        if (!p.ReadBlocks(node.loc + block, std::min<uint64_t>(kChunkBlocks, node.blocks - block), chunk)) {
+            out.clear();
+            return Fail(PackageResult::kReadFailed, "cannot read " + path);
+        }
+        const uint64_t length = std::min<uint64_t>(remaining, chunk.size());
+        out.insert(out.end(), chunk.begin(), chunk.begin() + std::ptrdiff_t(length));
+        remaining -= length;
+    }
+    return {};
+}
+
+PackageResult Package::ReadFileRange(const std::string& path, uint64_t offset, size_t length, std::vector<uint8_t>& out) {
+    Impl& p = *impl_;
+    out.clear();
+    const auto item = std::find_if(p.items.begin(), p.items.end(),
+                                   [&](const Item& candidate) { return candidate.type == kPfsFile && candidate.path == path; });
+    if (item == p.items.end() || item->inode >= p.inodes.size()) {
+        return Fail(PackageResult::kIncomplete, path + " is not in the package");
+    }
+    const Inode& node = p.inodes[item->inode];
+    if (node.size < 0 || offset > uint64_t(node.size) || length > uint64_t(node.size) - offset) {
+        return Fail(PackageResult::kIncomplete, "range outside " + path);
+    }
+    out.reserve(length);
+    Bytes chunk;
+    uint64_t at = offset;
+    while (out.size() < length) {
+        const uint64_t block = at / kBlockSize;
+        const uint64_t count = std::min<uint64_t>(kChunkBlocks, node.blocks - block);
+        if (!p.ReadBlocks(node.loc + block, count, chunk)) {
+            out.clear();
+            return Fail(PackageResult::kReadFailed, "cannot read " + path);
+        }
+        const uint64_t skip = at - block * kBlockSize;
+        const uint64_t take = std::min<uint64_t>(length - out.size(), chunk.size() - skip);
+        out.insert(out.end(), chunk.begin() + std::ptrdiff_t(skip), chunk.begin() + std::ptrdiff_t(skip + take));
+        at += take;
+    }
+    return {};
+}
+
 const std::string& Package::content_id() const {
     return impl_->content_id;
 }

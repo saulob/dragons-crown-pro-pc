@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <istream>
 #include <functional>
 #include <optional>
 #include <span>
@@ -56,6 +57,8 @@ class CpkArchive {
 public:
     // False when the file is not a CPK the reader understands; `error` says why.
     bool Open(const std::filesystem::path& file, std::string* error = nullptr);
+    // The same from any seekable stream; the archive then has no file, so entries cannot be read.
+    bool OpenStream(std::istream& in, std::string* error = nullptr);
     const std::vector<CpkEntry>& entries() const { return entries_; }
     const CpkEntry* Find(std::string_view path) const; // case-insensitive, nothing when absent
     // The entry's data, decompressed when it is stored CRILAYLA-compressed; empty with `error` set on failure.

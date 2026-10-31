@@ -257,6 +257,8 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 
 If the game does not start or crashes, please open an [issue](https://github.com/saulob/dragons-crown-pro-pc/issues). Attach the newest `dragons_crown_pro_*.log` file from the `logs` folder next to the program, and say what you were doing when the problem happened.
 
+If the launcher says your Dragon's Crown Pro version is not supported yet, it has already written technical diagnostic information about that version to the latest log. Attach that log when you open the issue.
+
 For a Linux or Steam Deck problem, please also give your Linux distribution, your GPU and its driver (for example Mesa and RADV, or NVIDIA), and on a Steam Deck whether you were in Desktop Mode or Gaming Mode.
 
 ## Building it yourself

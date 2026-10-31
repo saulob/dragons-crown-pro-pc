@@ -21,6 +21,7 @@
 #endif
 
 #include "boot_image.h"
+#include "build_diagnostics.h"
 #include "cpk_patch.h"
 #include "pkg_extract.h"
 #include "utf8.h"
@@ -210,6 +211,29 @@ InstallStatus FromCheck(const GameCheck& check) {
                    : InstallStatus::kWrongVersion;
     }
     return InstallStatus::kIncomplete;
+}
+
+// A Dragon's Crown Pro the port does not support is reported with its diagnostics; anything else keeps its failure.
+InstallResult UnsupportedOrFailure(const GameCheck& check, const GameSource& source, const std::string& sfo) {
+    if (check.state == GameFileState::kDifferentVersion) {
+        UnsupportedReport report = DiagnoseUnsupportedBuild(source, sfo);
+        if (report.dragons_crown) {
+            InstallResult result = Failure(InstallStatus::kUnsupportedBuild, check.detail);
+            result.diagnostics = std::move(report.lines);
+            return result;
+        }
+    }
+    return Failure(FromCheck(check), check.detail);
+}
+
+InstallResult UnsupportedOrFailure(const GameCheck& check, const fs::path& folder) {
+    if (check.state != GameFileState::kDifferentVersion) {
+        return Failure(FromCheck(check), check.detail);
+    }
+    const std::unique_ptr<GameSource> source = OpenFolderSource(folder);
+    std::vector<uint8_t> sfo;
+    source->Read("sce_sys/param.sfo", 1u << 20, sfo);
+    return UnsupportedOrFailure(check, *source, std::string(sfo.begin(), sfo.end()));
 }
 
 // The folders the installer writes: the prepared game and the boot image, each with a staging and a backup folder.
@@ -520,7 +544,7 @@ InstallResult InstallBasePackage(const fs::path& source, Package& package, const
     phase("Checking the game files...");
     const GameCheck unpacked = CheckGameTree(layout.app0_stage, builds);
     if (unpacked.state != GameFileState::kValid || unpacked.build != &build) {
-        return Failure(FromCheck(unpacked), unpacked.detail);
+        return UnsupportedOrFailure(unpacked, layout.app0_stage);
     }
     if (InstallResult activated = BuildAndActivate(layout, app0_guard, image_guard, hooks, builds, build, total);
         !activated.ok()) {
@@ -583,7 +607,7 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
     phase("Checking the game files...");
     const GameCheck merged = CheckGameTree(layout.app0_stage, builds);
     if (merged.state != GameFileState::kValid || merged.build != &build) {
-        return Failure(FromCheck(merged), merged.detail);
+        return UnsupportedOrFailure(merged, layout.app0_stage);
     }
     if (InstallResult activated = BuildAndActivate(layout, app0_guard, image_guard, hooks, builds, build, total);
         !activated.ok()) {
@@ -639,6 +663,9 @@ InstallResult InstallFromPackage(const fs::path& package_file, const GameRoots& 
     }
     const GameCheck identity = CheckPackageIdentity(package.sfo(), builds);
     if (identity.state != GameFileState::kValid) {
+        if (identity.state == GameFileState::kDifferentVersion && package.LoadFiles().ok()) {
+            return UnsupportedOrFailure(identity, *OpenPackageSource(package), package.sfo());
+        }
         return Failure(FromCheck(identity), identity.detail);
     }
     const GameBuild& build = *identity.build;
@@ -671,7 +698,7 @@ InstallResult InstallFromFolder(const fs::path& source_dir, const GameRoots& roo
     }
     const GameCheck check = CheckGameTree(source, builds);
     if (check.state != GameFileState::kValid) {
-        return Failure(FromCheck(check), check.detail);
+        return UnsupportedOrFailure(check, source);
     }
     const GameBuild& build = *check.build;
     if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build, hooks.replace_active)) {
@@ -788,6 +815,10 @@ InstallMessage DescribeInstall(InstallStatus status) {
         return {"Game activated", "The selected build is now the active game."};
     case InstallStatus::kUpToDate:
         return {"Already up to date", "This version is already the active game."};
+    case InstallStatus::kUnsupportedBuild:
+        return {"Dragon's Crown Pro version not supported yet",
+                "Diagnostic information was written to the latest log. Please share the latest log when reporting this "
+                "version on GitHub."};
     }
     return {"Could not install the game", "An unexpected error occurred."};
 }

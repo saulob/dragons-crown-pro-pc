@@ -823,6 +823,9 @@ private:
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             return;
         }
+        for (const std::string& line : outcome->diagnostics) {
+            std::printf("%s\n", line.c_str());
+        }
         Log("game install failed: %s (%s)", message.title.c_str(), outcome->detail.c_str());
         install_failure_ = message.title;
         install_failure_text_ = message.text;
