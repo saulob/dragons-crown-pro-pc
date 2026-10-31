@@ -646,10 +646,15 @@ private:
             if (prompts_.running()) {
                 return trg::PlayCheck{false, "Wait for the game file changes to finish.", 0};
             }
-            if (files_ == GameFileState::kValid) {
-                return trg::PlayCheck{};
+            if (files_ != GameFileState::kValid) {
+                return trg::PlayCheck{false, "The game files are not ready: see the Play page.", 0};
             }
-            return trg::PlayCheck{false, "The game files are not ready: see the Play page.", 0};
+            if (online_page_ && online_page_->PlayNeedsTest(settings_)) {
+                if (play_attempts_.Pressed(ImGui::GetFrameCount())) online_page_->PointToConnectionTest();
+                const auto online = std::find(std::begin(kPageOrder), std::end(kPageOrder), PageId::kOnline);
+                return trg::PlayCheck{false, kConnectionTestRequired, static_cast<int>(online - std::begin(kPageOrder))};
+            }
+            return trg::PlayCheck{};
         };
         return c;
     }
@@ -697,6 +702,13 @@ private:
             ImGui::TextUnformatted(install_failure_.c_str());
             ImGui::PopStyleColor();
             ui.Help(install_failure_text_.c_str());
+            ui.Spacer(4);
+        }
+        if (ready && online_page_->PlayNeedsTest(settings_)) {
+            ui.Spacer(4);
+            ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().warn_dot);
+            ImGui::TextWrapped("%s", kConnectionTestRequired);
+            ImGui::PopStyleColor();
             ui.Spacer(4);
         }
         const std::string files_help = GameFilesHelp();
@@ -1271,6 +1283,7 @@ private:
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
     std::unique_ptr<OnlinePage> online_page_;
+    PlayAttemptDetector play_attempts_;
     PlayGate play_;
     ProblemDialog problem_;
     PlacementTracker placement_;

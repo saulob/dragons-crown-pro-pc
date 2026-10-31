@@ -1,5 +1,6 @@
 #include "online_view.h"
 
+#include <cmath>
 #include <cstdlib>
 
 #include "net/online_config.h"
@@ -29,6 +30,23 @@ OnlinePlaySwitch ResolveOnlinePlay(bool saved) {
         return {saved, false};
     }
     return {net::parse_bool(forced, saved), true};
+}
+
+const char* ConnectionTestRunningNote(bool windows) {
+    return windows ? "If Windows asks whether to allow network access, choose Allow access so other players can connect "
+                     "to you."
+                   : nullptr;
+}
+
+ConnectionTestLook ConnectionTestLookOf(bool required) {
+    return required ? ConnectionTestLook{true, true, "Connection test required"} : ConnectionTestLook{};
+}
+
+float ConnectionTestEmphasis(double seconds_since_blocked) {
+    if (seconds_since_blocked < 0.0 || seconds_since_blocked >= kConnectionTestEmphasisSeconds) return 0.0f;
+    const double progress = seconds_since_blocked / kConnectionTestEmphasisSeconds;
+    const double pulse = 0.5 * (1.0 - std::cos(2.0 * 3.14159265358979 * 3.0 * progress));
+    return static_cast<float>(pulse * (1.0 - 0.5 * progress));
 }
 
 std::vector<OnlinePlayer> ReadOnlinePlayers(const net::Json& rows) {

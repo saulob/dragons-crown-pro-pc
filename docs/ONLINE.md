@@ -21,7 +21,14 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
    Online while their launcher or game is connected, "Online, in a room" while they are in a game room. Under the
    name, an online friend also shows the platform and port version their own client reported
    (`Online · Windows · v0.9.0`), and **Incompatible** when their room uses another online protocol.
-5. **Connection test** > **Run test**, if you want to check your network first. "Ready for online play" means other
+5. **Connection test** > **Run test**. PLAY waits for one finished test while Online play is On, whatever its result;
+   until then the section is outlined in gold with **Connection test required** and a gold Run test button, and pressing
+   PLAY opens the Online page at it;
+   it is saved (`online_connection_test_port`), so later starts do not ask again. Turning Online play Off, or another
+   UDP port (`online_udp_port`, `DCP_UDP_PORT`), asks for a new one. The test binds the game's UDP port (3658, or the
+   configured one) and uses that one socket for STUN and the UPnP probe; when the port cannot be opened it says so
+   instead of using another. On Windows this gives Windows Firewall the chance to ask for network access before the
+   game starts. "Ready for online play" means other
    players can reach you; otherwise the lines below it say what is missing. "Online service: Connected · N ms" is the
    time the online service took to answer the test's sign-in, measured once per test; it is not the Ping to players.
 6. **Ping display** On shows the in-game Ping from the start; **F3** shows or hides it while playing.
@@ -133,6 +140,7 @@ unchanged when there is none.
 | `online_name` | `DCP_ONLINE_NAME` | `Player` | in-game online id (16 of `A-Z a-z 0-9 - _`) |
 | `online_udp_port` | `DCP_UDP_PORT` | 0 | 0: the game's port 3658, or any free one when it is taken |
 | `online_stun` | `DCP_STUN` | `stun.cloudflare.com:3478,stun.l.google.com:19302` | STUN servers; `off` disables |
+| `online_connection_test_port` | - | 0 | the UDP port of the last finished Connection test; 0 after Online play is turned off |
 | - | `DCP_LOBBY` | `net::kDefaultLobbyUrl` | developer override of the production lobby (`ws://` or `wss://`), for diagnostics |
 | - | `DCP_UPNP` | 1 | ask the router to map the UDP port; `0` for diagnostics |
 | - | `DCP_JOIN_CODE` | - | the game's room search returns only the room with this code |

@@ -6,6 +6,27 @@
 #include "net/upnp.h"
 
 namespace dcp::net {
+namespace {
+
+socket_t OpenTestSocket(uint16_t port, int& error) {
+    const socket_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == kNoSocket) {
+        error = last_socket_error();
+        return kNoSocket;
+    }
+    use_exclusive_port(s); // as the game's PeerSocket binds
+    const sockaddr_in local = to_sockaddr({0, port});
+    if (bind(s, reinterpret_cast<const sockaddr*>(&local), sizeof(local)) != 0) {
+        error = last_socket_error();
+        close_socket(s);
+        return kNoSocket;
+    }
+    return s;
+}
+
+} // namespace
+
+uint16_t connection_test_port(const OnlineConfig& config) { return config.udp_port ? config.udp_port : kGameUdpPort; }
 
 ConnectionReport summarize_connection(const ConnectionFacts& f) {
     using Mark = ConnectionReport::Mark;
@@ -26,16 +47,24 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
 
     const bool direct = f.udp_ok && (f.public_address || !f.second_answer || f.same_mapping);
     const bool router_opened = f.router == Router::kMapped;
-    if (f.stun_off) {
+    const std::string port = std::to_string(f.udp_port);
+    const std::string on_port = f.udp_port ? " on UDP port " + port + "." : ".";
+    if (!f.port_open) {
+        line(Mark::kProblem, "Direct connections",
+             "Cannot open UDP port " + port +
+                 ". Another program may already be using it, or network security may be blocking it.");
+    } else if (f.stun_off) {
         line(Mark::kNote, "Direct connections", "Not checked.");
     } else if (!f.udp_ok) {
-        line(Mark::kProblem, "Direct connections", "May be blocked by your network or firewall.");
+        line(Mark::kProblem, "Direct connections", "May be blocked by your network or firewall" + on_port);
     } else if (direct) {
-        line(Mark::kOk, "Direct connections", f.second_answer || f.public_address ? "Available." : "Probably available.");
+        const char* text = f.second_answer || f.public_address ? "Available" : "Probably available";
+        line(Mark::kOk, "Direct connections", text + on_port);
     } else if (router_opened) {
-        line(Mark::kOk, "Direct connections", "Available through your router.");
+        line(Mark::kOk, "Direct connections", "Available through your router" + on_port);
     } else {
-        line(Mark::kProblem, "Direct connections", "Your router may stop some players from connecting to you.");
+        line(Mark::kProblem, "Direct connections",
+             "Your router may stop some players from connecting to you" + on_port);
         line(Mark::kProblem, "Router configuration",
              f.router == Router::kMappedBehindNat
                  ? "Another router is in front of yours (often your provider's), so it cannot be opened automatically."
@@ -53,11 +82,13 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
                               "carrier-grade NAT)"
                             : "router: no UPnP mapping");
 
-    r.ready = f.identity_ok && f.lobby_ok && (direct || router_opened);
+    r.ready = f.identity_ok && f.lobby_ok && f.port_open && (direct || router_opened);
     if (!f.identity_ok || !f.lobby_ok) {
         r.verdict = "Not ready: cannot reach the online service";
     } else if (r.ready) {
         r.verdict = "Ready for online play";
+    } else if (!f.port_open) {
+        r.verdict = "Limited: the multiplayer UDP port could not be opened";
     } else if (!f.udp_ok && !f.stun_off) {
         r.verdict = "Limited: direct connections may be blocked by your network";
     } else {
@@ -67,7 +98,7 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
 }
 
 ConnectionReport run_connection_test(const OnlineConfig& config, const Identity& identity, const std::string& name,
-                                     const std::string& game) {
+                                     const std::string& game, uint16_t udp_port) {
     ConnectionFacts facts;
     std::vector<std::string> details;
     std::string friend_code, lobby_ip;
@@ -94,40 +125,49 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
 
     const auto servers = stun_servers(config.stun);
     facts.stun_off = servers.empty();
+    facts.udp_port = udp_port;
+    socket_t s = kNoSocket;
     if (!sockets_ready()) {
         details.push_back("sockets are unavailable");
-    } else if (!servers.empty()) {
-        const socket_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        const sockaddr_in any = to_sockaddr({0, 0});
-        if (s != kNoSocket && bind(s, reinterpret_cast<const sockaddr*>(&any), sizeof(any)) == 0) {
-            Endpoint first, second;
-            for (const auto& [host, port] : servers) {
-                const uint32_t ip = resolve_ipv4(host);
-                Endpoint mapped;
-                if (!ip || !stun::query(s, {ip, port}, 2500, mapped)) {
-                    details.push_back("STUN " + host + ": no answer");
-                    continue;
-                }
-                (first.valid() ? second : first) = mapped;
-                details.push_back("STUN " + host + ": " + endpoint_text(mapped));
-                if (second.valid()) break;
-            }
-            facts.udp_ok = first.valid();
-            facts.public_address = facts.udp_ok && first.ip == default_route_ip();
-            facts.second_answer = second.valid();
-            facts.same_mapping = second.valid() && second == first;
-            const uint32_t seen = parse_ip(lobby_ip);
-            if (facts.udp_ok && seen && seen != first.ip && classify(seen) == AddressKind::kPublic) {
-                details.push_back("the lobby and STUN see different addresses");
-            }
-        } else {
-            details.push_back("cannot open a UDP socket");
+    } else if (udp_port || !servers.empty()) {
+        int error = 0;
+        s = OpenTestSocket(udp_port, error);
+        if (s == kNoSocket) {
+            const std::string what = udp_port ? "UDP port " + std::to_string(udp_port) : "a UDP socket";
+            details.push_back("cannot open " + what + " (error " + std::to_string(error) + ")");
+        } else if (udp_port) {
+            details.push_back("UDP port " + std::to_string(udp_port) + " opened");
         }
-        close_socket(s);
+    }
+    facts.port_open = !udp_port || s != kNoSocket;
+
+    if (s != kNoSocket && !servers.empty()) {
+        Endpoint first, second;
+        for (const auto& [host, port] : servers) {
+            const uint32_t ip = resolve_ipv4(host);
+            Endpoint mapped;
+            if (!ip || !stun::query(s, {ip, port}, 2500, mapped)) {
+                details.push_back("STUN " + host + ": no answer");
+                continue;
+            }
+            (first.valid() ? second : first) = mapped;
+            details.push_back("STUN " + host + ": " + endpoint_text(mapped));
+            if (second.valid()) break;
+        }
+        facts.udp_ok = first.valid();
+        facts.public_address = facts.udp_ok && first.ip == default_route_ip();
+        facts.second_answer = second.valid();
+        facts.same_mapping = second.valid() && second == first;
+        const uint32_t seen = parse_ip(lobby_ip);
+        if (facts.udp_ok && seen && seen != first.ip && classify(seen) == AddressKind::kPublic) {
+            details.push_back("the lobby and STUN see different addresses");
+        }
     }
 
-    if (config.upnp) {
-        const upnp::Status u = upnp::probe(kGameUdpPort);
+    if (!facts.port_open) {
+        details.push_back("UPnP: not tried, the UDP port is not open");
+    } else if (config.upnp) {
+        const upnp::Status u = upnp::probe(udp_port ? udp_port : kGameUdpPort);
         if (u.state == upnp::State::kMapped) {
             facts.router = classify(u.external.ip) == AddressKind::kPublic ? ConnectionFacts::Router::kMapped
                                                                             : ConnectionFacts::Router::kMappedBehindNat;
@@ -138,6 +178,7 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
     } else {
         details.push_back("UPnP: turned off by DCP_UPNP");
     }
+    if (s != kNoSocket) close_socket(s);
 
     ConnectionReport report = summarize_connection(facts);
     report.friend_code = std::move(friend_code);

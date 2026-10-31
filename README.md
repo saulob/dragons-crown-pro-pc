@@ -56,7 +56,7 @@
 2. Choose your **Online name**, the name other players see.
 3. Share **Your friend code** with the friends you want to play with (**Copy** puts it on the clipboard). Get theirs too.
 4. Under **Friends**, enter your friend's code and click **Send request**. Your friend sees a **New friend request** card on their Online page and clicks **Accept**. You now appear in each other's **Friends** list, with whether you are online.
-5. Optional: click **Run test** under **Connection test**. **Ready for online play** means other players can reach you.
+5. Click **Run test** under **Connection test**. It is needed once before **PLAY** while Online play is On: it checks the online service and the UDP port the game uses for multiplayer, and on Windows it gives Windows Firewall the chance to ask for network access before the game starts (choose **Allow access** if it does). PLAY becomes available when the test finishes, whatever the result. **Ready for online play** means other players can reach you. Turning Online play Off resets this requirement.
 6. Press **PLAY**.
 7. Complete the opening tutorial and story section, or skip them with the offers above, until the game's online options are available.
 8. Use the game's normal online flow when setting out from the Stables, as on the PS4. One player hosts.

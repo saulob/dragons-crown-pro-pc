@@ -281,6 +281,31 @@ void TestConnectionSummary() {
     CHECK(text_of(summarize_connection(timed), "Online service") ==
           "Cannot reach the online service. Check your internet connection.");
 
+    // The launcher's test names the port it opened, and one it could not open is the reason, not a free one instead.
+    ConnectionFacts on_port = cone;
+    on_port.udp_port = 3658;
+    const ConnectionReport port_report = summarize_connection(on_port);
+    CHECK(port_report.ready && text_of(port_report, "Direct connections") == "Available on UDP port 3658.");
+    on_port.udp_ok = on_port.second_answer = on_port.same_mapping = false;
+    CHECK(text_of(summarize_connection(on_port), "Direct connections") ==
+          "May be blocked by your network or firewall on UDP port 3658.");
+    ConnectionFacts taken = cone;
+    taken.udp_port = 3658;
+    taken.port_open = false;
+    taken.udp_ok = taken.second_answer = taken.same_mapping = false;
+    taken.router = Router::kMapped;
+    const ConnectionReport taken_report = summarize_connection(taken);
+    CHECK(!taken_report.ready && taken_report.verdict == "Limited: the multiplayer UDP port could not be opened");
+    CHECK(mark_of(taken_report, "Direct connections") == Mark::kProblem &&
+          text_of(taken_report, "Direct connections") ==
+              "Cannot open UDP port 3658. Another program may already be using it, or network security may be blocking it.");
+    CHECK(labels(taken_report) == (std::vector<std::string>{"Online service", "Direct connections"}));
+
+    OnlineConfig config;
+    CHECK(connection_test_port(config) == kGameUdpPort && kGameUdpPort == 3658);
+    config.udp_port = 40001;
+    CHECK(connection_test_port(config) == 40001);
+
     const std::string test = ReadSource("src/net/connection_test.cpp");
     size_t opens = 0;
     for (size_t at = test.find("session.open("); at != std::string::npos; at = test.find("session.open(", at + 1)) ++opens;
@@ -401,6 +426,121 @@ void TestStun() {
     CHECK(!stun::parse_response(response, 24, id, mapped));
     uint8_t garbage[32] = {'D', 'N', 1, 3};
     CHECK(!stun::looks_like_stun(garbage, sizeof(garbage)));
+}
+
+// A loopback STUN server: answers each Binding request with the sender's own address and remembers its port.
+class FakeStun {
+public:
+    FakeStun() {
+        s_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        const sockaddr_in local = to_sockaddr({parse_ip("127.0.0.1"), 0});
+        bind(s_, reinterpret_cast<const sockaddr*>(&local), sizeof(local));
+        sockaddr_in bound{};
+        socklen_t length = sizeof(bound);
+        getsockname(s_, reinterpret_cast<sockaddr*>(&bound), &length);
+        port_ = ntohs(bound.sin_port);
+        set_nonblocking(s_);
+        thread_ = std::thread([this] { Run(); });
+    }
+    ~FakeStun() {
+        stop_ = true;
+        thread_.join();
+        close_socket(s_);
+    }
+    uint16_t port() const { return port_; }
+    uint16_t last_source() const { return source_; }
+
+private:
+    void Run() {
+        uint8_t buffer[1500];
+        while (!stop_) {
+            sockaddr_in from{};
+            socklen_t length = sizeof(from);
+            const int n = int(recvfrom(s_, reinterpret_cast<char*>(buffer), sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&from), &length));
+            if (n < int(stun::kRequestSize)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            const uint16_t port = ntohs(from.sin_port);
+            const uint32_t ip = ntohl(from.sin_addr.s_addr);
+            source_ = port;
+            uint8_t response[32] = {0x01, 0x01, 0x00, 0x0c, 0x21, 0x12, 0xa4, 0x42};
+            std::memcpy(response + 8, buffer + 8, 12);
+            const uint16_t xport = port ^ 0x2112;
+            const uint32_t xip = ip ^ 0x2112a442u;
+            const uint8_t attr[] = {0x00, 0x20, 0x00, 0x08, 0x00, 0x01, uint8_t(xport >> 8), uint8_t(xport),
+                                    uint8_t(xip >> 24), uint8_t(xip >> 16), uint8_t(xip >> 8), uint8_t(xip)};
+            std::memcpy(response + 20, attr, sizeof(attr));
+            sendto(s_, reinterpret_cast<const char*>(response), int(sizeof(response)), 0,
+                   reinterpret_cast<const sockaddr*>(&from), sizeof(from));
+        }
+    }
+    socket_t s_;
+    uint16_t port_ = 0;
+    std::atomic<uint16_t> source_{0};
+    std::atomic<bool> stop_{false};
+    std::thread thread_;
+};
+
+uint16_t FreeUdpPort() {
+    const socket_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    const sockaddr_in any = to_sockaddr({0, 0});
+    bind(s, reinterpret_cast<const sockaddr*>(&any), sizeof(any));
+    sockaddr_in bound{};
+    socklen_t length = sizeof(bound);
+    getsockname(s, reinterpret_cast<sockaddr*>(&bound), &length);
+    close_socket(s);
+    return ntohs(bound.sin_port);
+}
+
+// The launcher's Connection test binds the requested port, asks STUN from that same socket and releases it; a taken
+// port is reported, never replaced. No lobby (no identity) and no UPnP: nothing leaves this PC.
+void TestConnectionTestSocket() {
+    const auto has = [](const ConnectionReport& r, const std::string& text) {
+        for (const std::string& detail : r.details) {
+            if (detail.find(text) != std::string::npos) return true;
+        }
+        for (const auto& line : r.lines) {
+            if (line.text.find(text) != std::string::npos) return true;
+        }
+        return false;
+    };
+    FakeStun stun;
+    OnlineConfig config;
+    config.upnp = false;
+    config.stun = "127.0.0.1:" + std::to_string(stun.port());
+    const uint16_t port = FreeUdpPort();
+    const std::string port_text = std::to_string(port);
+
+    const ConnectionReport report = run_connection_test(config, Identity{}, "Player", "game", port);
+    CHECK(stun.last_source() == port);
+    CHECK(has(report, "UDP port " + port_text + " opened"));
+    CHECK(has(report, "STUN 127.0.0.1: 127.0.0.1:" + port_text));
+    CHECK(has(report, "available on UDP port " + port_text + "."));
+    const socket_t again = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    const sockaddr_in same = to_sockaddr({0, port});
+    CHECK(bind(again, reinterpret_cast<const sockaddr*>(&same), sizeof(same)) == 0); // released before returning
+
+    const ConnectionReport taken = run_connection_test(config, Identity{}, "Player", "game", port);
+    close_socket(again);
+    CHECK(has(taken, "cannot open UDP port " + port_text));
+    CHECK(has(taken, "Cannot open UDP port " + port_text + ". Another program may already be using it"));
+    CHECK(has(taken, "UPnP: not tried") && !has(taken, "STUN 127.0.0.1"));
+    CHECK(!taken.ready && !taken.verdict.empty());
+
+    // The in-game test (port 0) keeps any free port: the game's own socket holds the game's.
+    const ConnectionReport in_game = run_connection_test(config, Identity{}, "Player", "game");
+    CHECK(stun.last_source() != 0 && stun.last_source() != port);
+    CHECK(has(in_game, "available.") && !has(in_game, "on UDP port"));
+
+    const std::string source = ReadSource("src/net/connection_test.cpp");
+    size_t sockets = 0;
+    for (size_t at = source.find("socket(AF_INET"); at != std::string::npos; at = source.find("socket(AF_INET", at + 1)) ++sockets;
+    CHECK(sockets == 1 && source.find("stun::query(s, ") != std::string::npos);
+    CHECK(source.find("upnp::probe(udp_port ? udp_port : kGameUdpPort)") != std::string::npos);
+    for (const char* firewall : {"netsh", "advfirewall", "INetFwPolicy", "New-NetFirewallRule", "runas"}) {
+        CHECK(source.find(firewall) == std::string::npos);
+    }
 }
 
 // A UDP relay between two ports that drops a share of the datagrams both ways.
@@ -712,6 +852,7 @@ int main() {
     TestLinuxParity();
     TestAddresses();
     TestStun();
+    TestConnectionTestSocket();
     TestPeerLink(0);
     TestPeerLink(15);
     TestPeerRefusesWrongRoom();

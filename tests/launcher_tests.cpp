@@ -45,6 +45,7 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
+#include "net/connection_test.h"
 #include "net/identity.h"
 #include "net/online_version.h"
 #include "online_client.h"
@@ -1606,6 +1607,186 @@ void TestPingDisplay(const fs::path& base) {
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
     CHECK(page.find("ui.Toggle(\"Ping display\", kPingHelp, kPingDisplayKey, false, \"Off\", \"On\")") != std::string::npos);
     CHECK(OnlinePageSections(false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+}
+
+// PLAY with Online play on waits for one finished Connection test on the game's UDP port, whatever its result: saved at
+// once, kept across launcher starts and "Reset all settings", forgotten when Online play is turned off, and asked again
+// for another port. The name, the Ping display and friends do not count.
+void TestConnectionTestGate(const fs::path& base) {
+    const fs::path file = base / "connection-test" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_UDP_PORT", nullptr);
+    set_env("DCP_ONLINE", nullptr);
+    const auto port_of = [](const trg::SettingsStore& settings) {
+        net::OnlineConfig config = OnlineConfigOf(settings);
+        net::apply_environment(config);
+        return net::connection_test_port(config);
+    };
+    const auto needed = [&](const trg::SettingsStore& settings, bool testing = false) {
+        return ConnectionTestNeeded(settings, settings.GetBool(kOnlineEnabledKey, false), testing, port_of(settings));
+    };
+
+    {
+        LauncherSettings settings(file);
+        CHECK(port_of(settings) == 3658);
+        CHECK(!needed(settings) && !needed(settings, true));
+        settings.SetBool(kOnlineEnabledKey, true);
+        CHECK(needed(settings) && needed(settings, true));
+        CHECK(settings.Save());
+        CHECK(RecordConnectionTest(settings, port_of(settings)));
+        CHECK(!needed(settings) && needed(settings, true));
+    }
+    CHECK(WrittenValue(ReadAll(file), kConnectionTestPortKey, "3658"));
+
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kOnlineEnabledKey, false) && !needed(settings));
+        settings.Set(kOnlineNameKey, "Renamed");
+        settings.SetBool(kPingDisplayKey, true);
+        ForgetConnectionTestWhenOff(settings, true);
+        CHECK(!needed(settings));
+        settings.ResetToDefaults();
+        CHECK(!needed(settings));
+
+        set_env("DCP_UDP_PORT", "40002");
+        CHECK(port_of(settings) == 40002 && needed(settings));
+        set_env("DCP_UDP_PORT", nullptr);
+        settings.Set(kOnlineUdpPortKey, "40001");
+        CHECK(port_of(settings) == 40001 && needed(settings));
+        settings.Set(kOnlineUdpPortKey, "0");
+        CHECK(!needed(settings));
+
+        settings.SetBool(kOnlineEnabledKey, false);
+        ForgetConnectionTestWhenOff(settings, false);
+        CHECK(!needed(settings) && settings.Get(kConnectionTestPortKey) == "0");
+        settings.SetBool(kOnlineEnabledKey, true);
+        CHECK(needed(settings));
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kConnectionTestPortKey, "0"));
+    CHECK(needed(LauncherSettings(file)));
+
+    // A saved test next to a saved Off (Online play turned on, tested, closed without Save) does not count.
+    WriteAll(file, "online_enabled = 0\nonline_connection_test_port = 3658\n");
+    {
+        LauncherSettings settings(file);
+        ForgetConnectionTestWhenOff(settings, false);
+        settings.SetBool(kOnlineEnabledKey, true);
+        CHECK(needed(settings));
+    }
+    CHECK(!IsValidSetting(kConnectionTestPortKey, "70000") && IsValidSetting(kConnectionTestPortKey, "3658"));
+    CHECK(IsOnlineSetting(kConnectionTestPortKey));
+
+    // A finished test counts whatever its verdict, a run that never produced a report does not, and PLAY says why.
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    const size_t record = page.find("void OnlinePage::RecordFinishedTest(");
+    const size_t record_end = page.find("\n}\n", record);
+    CHECK(record != std::string::npos && record_end != std::string::npos);
+    const std::string record_body = page.substr(record, record_end - record);
+    CHECK(record_body.find("report") == std::string::npos && record_body.find("RecordConnectionTest(settings, port)") != std::string::npos);
+    CHECK(page.find("test_ = {true, std::move(report), port};") != std::string::npos);
+    CHECK(page.find("run_connection_test(config, identity, net::online_name(config.name), game, port)") != std::string::npos);
+    const size_t caught = page.find("} catch (const std::exception& e) {");
+    CHECK(caught != std::string::npos && page.find("return;", caught) < page.find("test_ = {true", caught));
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("online_page_->PlayNeedsTest(settings_)") != std::string::npos);
+    CHECK(launcher.find("trg::PlayCheck{false, kConnectionTestRequired,") != std::string::npos);
+    CHECK(std::string(kConnectionTestRequired).find("Connection test") != std::string::npos);
+
+    // The firewall note is Windows only, and only under the running test.
+    const char* windows = ConnectionTestRunningNote(true);
+    CHECK(windows && std::string(windows).find("Allow access") != std::string::npos);
+    CHECK(ConnectionTestRunningNote(false) == nullptr);
+    CHECK(page.find("ConnectionTestRunningNote(OnWindows())") != std::string::npos &&
+          page.find("bool OnWindows() { return net::host_platform() == \"Windows\"; }") != std::string::npos);
+    CHECK(net::platform_name(true, "", "") == "Windows" && net::platform_name(false, "Valve", "Jupiter") != "Windows");
+    CHECK(page.find("Allow access") == std::string::npos && launcher.find("Allow access") == std::string::npos);
+}
+
+// While PLAY waits for the Connection test its whole section is a gold panel with Run test as the primary button; a
+// blocked PLAY sends the player there. Presentation only: the gate itself is TestConnectionTestGate's.
+void TestConnectionTestPanel(const fs::path& base) {
+    const fs::path file = base / "connection-test-panel" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto needed = [](const trg::SettingsStore& settings, bool testing = false) {
+        net::OnlineConfig config = OnlineConfigOf(settings);
+        net::apply_environment(config);
+        return ConnectionTestNeeded(settings, config.enabled, testing, net::connection_test_port(config));
+    };
+
+    LauncherSettings settings(file);
+    settings.SetBool(kOnlineEnabledKey, true);
+    const ConnectionTestLook pending = ConnectionTestLookOf(needed(settings));
+    CHECK(pending.panel && pending.primary_button);
+    CHECK(pending.required_text && std::string(pending.required_text) == "Connection test required");
+
+    // A run that stopped without a report, or one still running, keeps the panel; a finished one removes it.
+    CHECK(ConnectionTestLookOf(needed(settings, true)).panel);
+    CHECK(settings.Save());
+    CHECK(RecordConnectionTest(settings, 3658));
+    const ConnectionTestLook done = ConnectionTestLookOf(needed(settings));
+    CHECK(!done.panel && !done.primary_button && done.required_text == nullptr);
+    CHECK(ConnectionTestLookOf(needed(settings, true)).panel);
+
+    // Online play off: no Connection test section, no panel.
+    ForgetConnectionTestWhenOff(settings, false);
+    settings.SetBool(kOnlineEnabledKey, false);
+    CHECK(!ConnectionTestLookOf(needed(settings)).panel);
+    for (const OnlineSection section : OnlinePageSections(false, 0)) CHECK(section != OnlineSection::kConnectionTest);
+
+    // PLAY's second question in a frame is the press; the emphasis is a short soft pulse.
+    PlayAttemptDetector detector;
+    CHECK(!detector.Pressed(10) && detector.Pressed(10) && !detector.Pressed(11) && !detector.Pressed(12) && detector.Pressed(12));
+    CHECK(ConnectionTestEmphasis(-1.0) == 0.0f && ConnectionTestEmphasis(kConnectionTestEmphasisSeconds) == 0.0f);
+    float peak = 0.0f;
+    for (double t = 0.0; t < kConnectionTestEmphasisSeconds; t += 0.01) {
+        const float e = ConnectionTestEmphasis(t);
+        CHECK(e >= 0.0f && e <= 1.0f);
+        peak = std::max(peak, e);
+    }
+    CHECK(peak > 0.7f && kConnectionTestEmphasisSeconds >= 2.0 && kConnectionTestEmphasisSeconds <= 3.0);
+
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t row = page.find("bool OnlinePage::DrawRequiredTestRow(");
+    const size_t section = page.find("void OnlinePage::DrawConnectionTest(");
+    const size_t friends = page.find("void OnlinePage::DrawFriends(");
+    CHECK(row != std::string::npos && section > row && friends > section);
+    if (row == std::string::npos || section <= row || friends <= section) return;
+    const std::string required_row = page.substr(row, section - row);
+    const std::string draw = page.substr(section, friends - section);
+
+    // Blocked PLAY: back to the Online page as before, and the next frame scrolls to the section and focuses Run test.
+    const size_t blocked = launcher.find("online_page_->PlayNeedsTest(settings_)) {");
+    CHECK(blocked != std::string::npos);
+    const std::string gate = launcher.substr(blocked, launcher.find("return trg::PlayCheck{};", blocked) - blocked);
+    CHECK(gate.find("play_attempts_.Pressed(ImGui::GetFrameCount())") != std::string::npos);
+    CHECK(gate.find("PointToConnectionTest()") != std::string::npos);
+    CHECK(gate.find("trg::PlayCheck{false, kConnectionTestRequired,") != std::string::npos);
+    CHECK(draw.find("ImGui::SetScrollHereY(") != std::string::npos && draw.find("pointed_at_ = ImGui::GetTime()") != std::string::npos);
+    const size_t focus = required_row.find("ImGui::SetKeyboardFocusHere()");
+    const size_t primary = required_row.find("ui.AccentButton(button)");
+    CHECK(focus != std::string::npos && primary != std::string::npos && focus < primary);
+    CHECK(draw.find("ImGuiChildFlags_NavFlattened") != std::string::npos);
+
+    // The panel reuses the friend request card's drawing, in the accent colour and never the warning red.
+    CHECK(page.find("BeginCard(ImVec4(t.panel.x, t.panel.y, t.panel.z, 0.96f), ImVec4(t.accent.x, t.accent.y, t.accent.z, 0.55f), 1.0f);") != std::string::npos);
+    CHECK(page.find("ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f * s);") != std::string::npos);
+    CHECK(page.find("ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * s, 10.0f * s));") != std::string::npos);
+    CHECK(draw.find("BeginCard(background, border,") != std::string::npos);
+    CHECK(draw.substr(0, draw.find("TestResult result;")).find("warn_dot") == std::string::npos &&
+          required_row.find("warn_dot") == std::string::npos);
+    CHECK(required_row.find("ui.theme().accent") != std::string::npos);
+    CHECK(draw.find("ui.ButtonRow(\"Connection test\", kTestHelp, button)") != std::string::npos);
+    CHECK(launcher.find("kConnectionTestRequired") != std::string::npos);
 }
 
 // The launcher's lobby link through a running development lobby (DCP_TEST_LOBBY): presence while a launcher is open,
@@ -4880,6 +5061,8 @@ int main(int argc, char** argv) {
     TestJapaneseNpcVoiceSetting(base);
     TestOnlineSettings(base);
     TestOnlinePage();
+    TestConnectionTestGate(base);
+    TestConnectionTestPanel(base);
     TestOverlayPanel();
     TestNoSettingsMenu();
     TestPingDisplay(base);
