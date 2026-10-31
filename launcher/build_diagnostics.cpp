@@ -17,6 +17,7 @@
 #include "build_scan.h"
 #include "cpk_patch.h"
 #include "crypto.h"
+#include "feature_sites.h"
 #include "game_files.h"
 #include "game_patches.h"
 #include "utf8.h"
@@ -52,10 +53,10 @@ constexpr FeatureScope kScopes[] = {
     {"System type", "every supported build with verified sites"},
     {"Skip offers", "every supported build"},
     {"Startup save", "the CUSA07001 builds"},
-    {"Japanese NPC voices", "CUSA10454 1.00"},
-    {"Cheats", "CUSA10454 1.00"},
     {"LZCNT compatibility", "every supported build"},
 };
+
+constexpr size_t kValidatorCount = 3;
 
 class FolderSource final : public GameSource {
 public:
@@ -108,7 +109,7 @@ public:
         return true;
     }
 
-    fs::path LocalPath(const std::string& path) const override { return root_ / PathFromUtf8(path); }
+    fs::path LocalPath(const std::string& path) const { return root_ / PathFromUtf8(path); }
 
 private:
     fs::path root_;
@@ -139,7 +140,6 @@ public:
         return package_.ReadFileRange(path, offset, length, out).ok();
     }
 
-    fs::path LocalPath(const std::string&) const override { return {}; }
 
 private:
     Package& package_;
@@ -259,11 +259,12 @@ struct Classification {
     bool title_names = false, content_names = false, known_title = false;
     bool named_archive = false, modules = false;
     bool strong_archive = false;
+    bool update_executable = false;
     std::vector<ArchiveEvidence> archives;
     std::vector<std::string> evidence;
 
     bool Metadata() const { return title_names || content_names || known_title; }
-    bool Structure() const { return named_archive; }
+    bool Structure() const { return named_archive || update_executable; }
     bool Identified() const { return strong_archive || (Metadata() && Structure()); }
 };
 
@@ -379,8 +380,8 @@ void DescribeIdentity(Lines& out, const std::string& sfo, const Classification& 
     for (const GameBuild& build : SupportedBuilds()) {
         if (SfoString(sfo, "TITLE_ID") == build.title_id) {
             const PackageLayer& layer = FinishedLayer(build);
-            out.Add("  supported build of this TITLE_ID: %s (APP_VER %s, VERSION %s)", build.label, layer.app_ver,
-                    layer.sfo_version);
+            out.Add("  supported build of this TITLE_ID: %s (APP_VER %s, VERSION %s, eboot SHA-256 %s)", build.label,
+                    layer.app_ver, layer.sfo_version, build.eboot_sha256);
         }
     }
     std::string others;
@@ -471,9 +472,11 @@ struct CpkSummary {
     std::string spider;
 };
 
-bool SummarizeCpk(const fs::path& file, CpkSummary& summary, std::string& error) {
+bool SummarizeCpk(const GameSource& source, const SourceEntry& file, CpkSummary& summary, std::string& error) {
+    RangeBuffer buffer(source, file.path, file.size);
+    std::istream stream(&buffer);
     CpkArchive archive;
-    if (!archive.Open(file, &error)) {
+    if (!archive.OpenStream(stream, &error)) {
         return false;
     }
     summary.entries = archive.entries().size();
@@ -516,12 +519,9 @@ void DescribeFiles(Lines& out, const GameSource& source, const std::vector<Sourc
             line += ", SHA-256 " + Sha256Of(data);
         }
         if (HasPrefixCpk(name)) {
-            const fs::path local = source.LocalPath(name);
             CpkSummary summary;
             std::string error;
-            if (local.empty()) {
-                line += ", archive contents not read from a package";
-            } else if (SummarizeCpk(local, summary, error)) {
+            if (SummarizeCpk(source, {name, found->second}, summary, error)) {
                 line += ", CPK with " + std::to_string(summary.entries) + " entries, " +
                         std::to_string(summary.interface_entries) + " interface entries";
                 if (!summary.spider.empty()) {
@@ -621,7 +621,22 @@ void DescribePartial(Lines& out, const scan::MappedImage& image, const scan::Sit
     }
 }
 
+std::string ProfileScope(bool GameBuild::*flag) {
+    size_t enabled = 0;
+    for (const GameBuild& build : SupportedBuilds()) {
+        enabled += build.*flag ? 1 : 0;
+    }
+    return " (enabled today in: " + std::to_string(enabled) + " of " + std::to_string(SupportedBuilds().size()) +
+           " supported builds)";
+}
+
 std::string ScopeText(const std::string& feature) {
+    if (feature == "Cheats") {
+        return ProfileScope(&GameBuild::cheats);
+    }
+    if (feature == "Japanese NPC voices") {
+        return ProfileScope(&GameBuild::japanese_npc_voices);
+    }
     for (const FeatureScope& item : kScopes) {
         if (feature == item.feature) {
             return std::string(" (enabled today in: ") + item.enabled_in + ")";
@@ -761,6 +776,77 @@ void DescribeProfiles(Lines& out, const scan::ScanResult& result) {
     }
 }
 
+void DescribeLimits(Lines& out, const std::string& sfo, const std::vector<SourceEntry>& files) {
+    std::set<std::string> present;
+    for (const SourceEntry& file : files) {
+        present.insert(file.path);
+    }
+    std::vector<std::string> absent;
+    for (const char* name : kSharedGameFiles) {
+        if (std::string_view(name) != "sce_sys/param.sfo" && !present.contains(name)) {
+            absent.push_back(name);
+        }
+    }
+    if (absent.empty()) {
+        return;
+    }
+    const bool update = SfoString(sfo, "CATEGORY") == "gp";
+    out.Add("Package limits:");
+    for (const std::string& name : absent) {
+        out.Add("  %s is not in this package", name.c_str());
+    }
+    out.Add(update ? "  this is an update (CATEGORY gp): its missing files belong to the base build, so sites that live in them "
+                     "cannot be evaluated here and are listed as missing"
+                   : "  the package is incomplete: sites that live in the missing files are listed as missing");
+}
+
+// The loader's own locators run on the scanned image; accepted means the feature would resolve on this executable.
+size_t DescribeValidators(Lines& out, const scan::MappedImage& image) {
+    out.Add("Runtime validators (the loader's locators, run on this image; accepted means the feature would resolve):");
+    if (image.bytes.empty()) {
+        out.Add("  not run: the executable did not map");
+        return 0;
+    }
+    std::vector<DcpExecRange> ranges;
+    for (const scan::Range& range : image.executable) {
+        ranges.push_back({range.begin, range.end});
+    }
+    const DcpImageView view{image.bytes.data(), image.bytes.size(), ranges.data(), ranges.size()};
+    size_t accepted = 0;
+    const auto verdict = [&](const char* feature, bool ok, const DcpLocateReport& report, const std::string& detail) {
+        accepted += ok ? 1 : 0;
+        out.Add("  %s: %s, %zu of %zu checks%s%s", feature, ok ? "accepted" : "REJECTED", report.found, report.expected,
+                ok ? detail.c_str() : ": ", ok ? "" : report.failure);
+    };
+
+    DcpLocateReport report{};
+    DcpCheatSites cheats{};
+    const bool cheats_ok = dcp_locate_cheat_sites(&view, &cheats, &report) != 0;
+    verdict("Cheats", cheats_ok, report,
+            ", " + std::to_string(DCP_CHEAT_HOOKS) + " hooks, " + std::to_string(DCP_CHEAT_FUNCTIONS) + " functions");
+    if (cheats_ok) {
+        std::string layout;
+        for (int field = 0; field < DCP_LAYOUT_COUNT; ++field) {
+            layout += (layout.empty() ? "" : ", ") + std::string(dcp_layout_field_name(static_cast<DcpLayoutField>(field))) +
+                      " " + Hex(cheats.layout[field]);
+        }
+        out.Add("    layout: %s", layout.c_str());
+    }
+
+    report = {};
+    DcpVoiceSites voices{};
+    const bool voices_ok = dcp_locate_voice_sites(&view, &voices, &report) != 0;
+    verdict("Japanese NPC voices", voices_ok, report,
+            ", cue " + Hex(voices.npc_cue) + ", resource acquire " + Hex(voices.resource_acquire));
+
+    report = {};
+    DcpUltrawideSites ultrawide{};
+    const bool ultrawide_ok = dcp_locate_ultrawide_sites(&view, &ultrawide, &report) != 0;
+    verdict("True ultrawide", ultrawide_ok, report,
+            ", submit " + Hex(ultrawide.submit) + ", view build " + Hex(ultrawide.view_build));
+    return accepted;
+}
+
 bool IsRootArchive(const std::string& path) {
     return path.find('/') == std::string::npos && Lower(path).ends_with(".cpk");
 }
@@ -820,7 +906,11 @@ Classification Classify(const GameSource& source, const std::string& sfo, const 
     cls.modules = present.contains("sce_discmap.plt") &&
                   std::all_of(std::begin(kBundledModules), std::end(kBundledModules),
                               [&](const char* name) { return present.contains(std::string("sce_module/") + name); });
+    cls.update_executable = SfoString(sfo, "CATEGORY") == "gp" && present.contains("eboot.bin");
     cls.evidence.push_back(cls.named_archive ? "a DRACRO*.CPK archive is present" : "no DRACRO*.CPK archive");
+    if (cls.update_executable && !cls.named_archive) {
+        cls.evidence.push_back("an update package (CATEGORY gp) carries eboot.bin");
+    }
     if (cls.modules) {
         cls.evidence.push_back("the bundled modules and sce_discmap.plt are present");
     }
@@ -863,6 +953,11 @@ std::string KnownUnsupportedBuild(const std::string& eboot_sha256) {
     return {};
 }
 
+bool ExecutableDiffers(const GameSource& source, const GameBuild& build) {
+    Bytes eboot;
+    return source.Read("eboot.bin", kMaxExecutable, eboot) && Sha256Of(eboot) != build.eboot_sha256;
+}
+
 UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::string& sfo) {
     UnsupportedReport report;
     const std::vector<SourceEntry> files = source.Files();
@@ -875,7 +970,10 @@ UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::
     Executables exe;
     LoadExecutables(source, exe);
     if (!exe.eboot_info.valid) {
-        cls.evidence.push_back("eboot.bin is not a readable PS4 executable (" + exe.eboot_info.error + ")");
+        report.rejection = exe.eboot.empty() ? "eboot.bin is not in the source or is unreadable"
+                                             : "eboot.bin is not a readable PS4 executable (" + exe.eboot_info.error + "), " +
+                                                   std::to_string(exe.eboot.size()) + " bytes, SHA-256 " + Sha256Of(exe.eboot);
+        cls.evidence.push_back(report.rejection);
         report.evidence = std::move(cls.evidence);
         return report;
     }
@@ -887,6 +985,7 @@ UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::
     DescribeIdentity(out, sfo, cls, source);
     DescribeExecutable(out, exe);
     DescribeModules(out, exe);
+    DescribeLimits(out, sfo, files);
     DescribeFiles(out, source, files);
 
     out.Add("Build-specific feature mapping (read-only scan; a located site is not a verified one):");
@@ -895,6 +994,7 @@ UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::
     DescribeSites(out, exe.image, result, totals, order);
     DescribeRelations(out, result, totals);
     DescribeProfiles(out, result);
+    const size_t validators = DescribeValidators(out, exe.image);
 
     size_t mapped_features = 0, ambiguous = 0, missing = 0;
     std::vector<std::string> unresolved;
@@ -918,11 +1018,12 @@ UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::
                                    !SfoString(sfo, "APP_VER").empty() && !SfoString(sfo, "VERSION").empty();
     const bool executable_complete = exe.eboot_info.mappable && modules_mapped;
     const bool all_complete = identity_complete && executable_complete && mapped_features == order.size() && missing == 0 &&
-                              ambiguous == 0;
+                              ambiguous == 0 && validators == kValidatorCount;
     out.Add("Overall diagnostic result:");
     out.Add("  Identity: %s", identity_complete ? "complete" : "incomplete");
     out.Add("  Executable mapping: %s", executable_complete ? "complete" : "incomplete");
     out.Add("  Build-specific features: %zu/%zu mapped", mapped_features, order.size());
+    out.Add("  Runtime validators: %zu/%zu accepted", validators, kValidatorCount);
     out.Add("  Ambiguous sites: %zu", ambiguous);
     out.Add("  Missing sites: %zu", missing);
     if (!unresolved.empty()) {

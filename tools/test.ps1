@@ -32,7 +32,7 @@ function Test-Step([string]$Title, [string]$Exe = '', [string]$Script = '', [swi
 $tests = @(
     (Test-Step 'Windows memory tests (sparse backing, commitment, aliases, release)' 'dcp-memory-windows-tests'),
     (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings)' 'dcp-launcher-tests' -Parity),
-    (Test-Step 'unsupported-build diagnostics tests' 'dcp-build-diagnostics-tests' -Parity),
+    (Test-Step 'unsupported-build diagnostics tests (direct package analysis, one-shot report, loader validators, edge cases)' 'dcp-build-diagnostics-tests' -Parity),
     (Test-Step 'build feature parity tests (contract, update parity, mappings, unknown builds)' 'dcp-build-parity-tests' -Parity -Capture),
     (Test-Step 'feature locator tests (Cheats, Japanese NPC Voices, True Ultrawide: real images, synthetic images, known builds only)' 'dcp-feature-sites-tests' -Parity),
     (Test-Step 'trophy tests' 'dcp-trophy-tests'),

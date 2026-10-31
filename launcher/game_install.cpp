@@ -226,6 +226,9 @@ InstallResult UnsupportedOrFailure(const GameCheck& check, const GameSource& sou
             result.diagnostics = std::move(report.lines);
             return result;
         }
+        if (!report.rejection.empty()) {
+            return Failure(FromCheck(check), check.detail + "; " + report.rejection);
+        }
     }
     return Failure(FromCheck(check), check.detail);
 }
@@ -604,8 +607,26 @@ std::optional<InstallResult> ReuseInstalledBuild(const GameRoots& roots, std::sp
     return result;
 }
 
+// A package that names a supported build but carries another executable is diagnosed in place, before anything is
+// unpacked; nothing is returned when the installation should go on.
+std::optional<InstallResult> RejectForeignExecutable(Package& package, const GameCheck& identity) {
+    const std::unique_ptr<GameSource> source = OpenPackageSource(package);
+    if (!ExecutableDiffers(*source, *identity.build)) {
+        return std::nullopt;
+    }
+    GameCheck check;
+    check.state = GameFileState::kDifferentVersion;
+    check.detail = "eboot.bin is not the supported build";
+    check.build = identity.build;
+    InstallResult result = UnsupportedOrFailure(check, *source, package.sfo());
+    if (result.status != InstallStatus::kUnsupportedBuild) {
+        return std::nullopt;
+    }
+    return result;
+}
+
 // A package that finishes its build by itself: the base package of a build without updates.
-InstallResult InstallBasePackage(const fs::path& source, Package& package, const Layout& layout,
+InstallResult InstallBasePackage(const fs::path& source, Package& package, const PackageResult& loaded, const Layout& layout,
                                  const InstallHooks& hooks, std::span<const GameBuild> builds, const GameBuild& build) {
     const auto phase = [&](const char* text) {
         if (hooks.phase) {
@@ -615,7 +636,7 @@ InstallResult InstallBasePackage(const fs::path& source, Package& package, const
     if (!IsReplaceable(layout.app0, kPreparedMarker) || !IsReplaceable(layout.image, "boot.bin")) {
         return Failure(InstallStatus::kForeignFolder, Utf8(layout.app0) + " or " + Utf8(layout.image));
     }
-    if (const PackageResult loaded = package.LoadFiles(); !loaded.ok()) {
+    if (!loaded.ok()) {
         return Failure(FromPackage(loaded.code), loaded.detail);
     }
     const uint64_t total = package.total_bytes();
@@ -649,8 +670,9 @@ InstallResult InstallBasePackage(const fs::path& source, Package& package, const
 }
 
 // An update laid over the installed base build of its title, staged and checked like any other installation.
-InstallResult InstallUpdatePackage(const fs::path& source, Package& package, const Layout& layout, const GameRoots& roots,
-                                   const InstallHooks& hooks, std::span<const GameBuild> builds, const GameBuild& build) {
+InstallResult InstallUpdatePackage(const fs::path& source, Package& package, const PackageResult& loaded, const Layout& layout,
+                                   const GameRoots& roots, const InstallHooks& hooks, std::span<const GameBuild> builds,
+                                   const GameBuild& build) {
     const auto phase = [&](const char* text) {
         if (hooks.phase) {
             hooks.phase(text);
@@ -668,7 +690,7 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
     if (!IsReplaceable(layout.app0, kPreparedMarker) || !IsReplaceable(layout.image, "boot.bin")) {
         return Failure(InstallStatus::kForeignFolder, Utf8(layout.app0) + " or " + Utf8(layout.image));
     }
-    if (const PackageResult loaded = package.LoadFiles(); !loaded.ok()) {
+    if (!loaded.ok()) {
         return Failure(FromPackage(loaded.code), loaded.detail);
     }
     const uint64_t total = package.total_bytes();
@@ -781,11 +803,17 @@ InstallResult InstallFromPackage(const fs::path& package_file, const GameRoots& 
     if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build, hooks.replace_active)) {
         return *reused;
     }
+    const PackageResult loaded = package.LoadFiles();
+    if (loaded.ok()) {
+        if (std::optional<InstallResult> foreign = RejectForeignExecutable(package, identity)) {
+            return *foreign;
+        }
+    }
     const Layout layout(BuildPaths(roots, build));
     if (identity.layer > 0) {
-        return InstallUpdatePackage(source, package, layout, roots, hooks, builds, build);
+        return InstallUpdatePackage(source, package, loaded, layout, roots, hooks, builds, build);
     }
-    return InstallBasePackage(source, package, layout, hooks, builds, build);
+    return InstallBasePackage(source, package, loaded, layout, hooks, builds, build);
 }
 
 InstallResult InstallFromFolder(const fs::path& source_dir, const GameRoots& roots, const InstallHooks& hooks,
