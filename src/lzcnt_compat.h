@@ -59,6 +59,11 @@ LzcntCompatStatus lzcnt_compat_apply(uint8_t *image, uint64_t size, const uint32
 LzcntCompatStatus lzcnt_compat_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size,
                                        const char **build);
 
+/* For a supported build without a table: the sites of an image whose LZCNT bytes are exactly those of the builds with
+ * one, in the same order and shapes. LZCNT_COMPAT_UNKNOWN_IMAGE, with `offsets` unspecified, when it has any other or
+ * one fewer. Reads the image only. */
+LzcntCompatStatus lzcnt_compat_locate(const uint8_t *image, uint64_t size, uint32_t offsets[LZCNT_SITE_COUNT]);
+
 #ifdef __cplusplus
 }
 #endif

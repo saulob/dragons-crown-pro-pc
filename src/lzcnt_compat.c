@@ -293,3 +293,36 @@ LzcntCompatStatus lzcnt_compat_install(uint8_t *image, uint64_t size, uint64_t e
     }
     return LZCNT_COMPAT_UNKNOWN_IMAGE;
 }
+
+/* F3 [REX] 0F BD anywhere in the image, data included: each build with a table has exactly its sites' 62. */
+#define LZCNT_IMAGE_INSTRUCTIONS 62
+
+static int lzcnt_bytes_at(const uint8_t *image, uint64_t size, uint64_t at) {
+    if (image[at] != 0xf3) return 0;
+    const uint64_t opcode = at + 1 < size && (image[at + 1] & 0xf0) == 0x40 ? at + 2 : at + 1;
+    return opcode + 1 < size && image[opcode] == 0x0f && image[opcode + 1] == 0xbd;
+}
+
+LzcntCompatStatus lzcnt_compat_locate(const uint8_t *image, uint64_t size, uint32_t offsets[LZCNT_SITE_COUNT]) {
+    uint64_t found[LZCNT_IMAGE_INSTRUCTIONS];
+    size_t count = 0;
+    for (uint64_t at = 0; at + 3 < size; ++at) {
+        if (!lzcnt_bytes_at(image, size, at)) continue;
+        if (count == LZCNT_IMAGE_INSTRUCTIONS) return LZCNT_COMPAT_UNKNOWN_IMAGE;
+        found[count++] = at;
+    }
+    if (count != LZCNT_IMAGE_INSTRUCTIONS) return LZCNT_COMPAT_UNKNOWN_IMAGE;
+    size_t next = 0;
+    for (size_t i = 0; i < LZCNT_SITE_COUNT; ++i) {
+        const LzcntShape *shape = &lzcnt_shapes[i];
+        const uint64_t lead = shape->bytes[0] == 0x66;
+        if (next == count || found[next] < lead) return LZCNT_COMPAT_UNKNOWN_IMAGE;
+        const uint64_t site = found[next++] - lead;
+        if (site > UINT32_MAX || site + shape->length > size || memcmp(image + site, shape->bytes, shape->length))
+            return LZCNT_COMPAT_UNKNOWN_IMAGE;
+        if (shape->second && (next == count || found[next++] != site + shape->second + (shape->bytes[shape->second] == 0x66)))
+            return LZCNT_COMPAT_UNKNOWN_IMAGE;
+        offsets[i] = (uint32_t)site;
+    }
+    return next == count ? LZCNT_COMPAT_OK : LZCNT_COMPAT_UNKNOWN_IMAGE;
+}

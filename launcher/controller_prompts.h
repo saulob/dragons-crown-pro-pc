@@ -31,6 +31,15 @@ std::optional<PromptStyle> ParsePromptStyle(std::string_view key);
 // choice holds either way.
 std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0, const GameBuild& build);
 
+// True when every entry the patch changes is in the build's prompt archives and each copy is the file the patch was made
+// for, or already its result, so the patch applies whole; `detail` names the first entry that does not.
+bool PromptPatchFits(const std::filesystem::path& app0, const GameBuild& build, const BlockPatch& patch,
+                     std::string* detail = nullptr);
+
+// Whether Xbox prompts can be offered for the installed game: the patch is validated for the build and, for an update,
+// whose archives may differ from the base package's, they still hold the files it was made for.
+bool XboxPromptsAvailable(const std::filesystem::path& app0, const GameBuild& build, std::span<const uint8_t> xbox_patch);
+
 // What the installed archives show: Xbox once every archive present holds `xbox_patch`, PlayStation otherwise. A
 // half-patched install, or one patched by an earlier patch, reads as PlayStation; choosing Xbox applies the patch again.
 PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build,

@@ -463,7 +463,7 @@ std::map<std::string, std::string> Snapshot(const fs::path& root) {
             std::ifstream in(entry.path(), std::ios::binary);
             const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
             state[key] = std::to_string(content.size()) + ":" + Sha256Hex(entry.path()) + ":" +
-                         std::to_string(fs::last_write_time(entry.path()).time_since_epoch().count());
+                         std::to_string(static_cast<long long>(fs::last_write_time(entry.path()).time_since_epoch().count()));
         }
     }
     return state;
@@ -1121,10 +1121,10 @@ void TestKnownBuilds() {
         CHECK(profile != nullptr);
         size_t resolution_expected = 0, resolution_recovered = 0;
         if (profile) {
-            DcpResolutionSite sites[DCP_CUSA10209_102_SIGNATURE_COUNT];
-            DcpResolutionSignatureResult found[DCP_CUSA10209_102_SIGNATURE_COUNT] = {};
-            const int all = dcp_find_resolution_sites(image.bytes.data(), image.bytes.size(), dcp_cusa10209_102_signatures,
-                                                      DCP_CUSA10209_102_SIGNATURE_COUNT, sites, found);
+            DcpResolutionSite sites[DCP_RENDER_SIZE_SIGNATURE_COUNT];
+            DcpResolutionSignatureResult found[DCP_RENDER_SIZE_SIGNATURE_COUNT] = {};
+            const int all = dcp_find_resolution_sites(image.bytes.data(), image.bytes.size(), dcp_render_size_signatures,
+                                                      DCP_RENDER_SIZE_SIGNATURE_COUNT, sites, found);
             CHECK(all == 1);
             std::set<uint32_t> recovered_offsets;
             for (const DcpResolutionSite& site : sites) {

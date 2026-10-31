@@ -42,6 +42,7 @@
 #include "play_gate.h"
 #include "online_page.h"
 #include "online_settings.h"
+#include "npc_voice_resources.h"
 #include "online_view.h"
 #include "problem_dialog.h"
 #include "prompts_patch.h"
@@ -320,6 +321,9 @@ public:
         displays_ = ListDisplays();
         gpu_names_ = DcpGraphics::GpuChoices(ListGpuNames());
         prompts_installed_ = InstalledPrompts();
+        xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
+        npc_voices_available_ = build_ && SupportsJapaneseNpcVoices(build_) &&
+                                (!BaseBuildOf(*build_) || NpcVoiceResourcesPresent(paths_.app0));
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
@@ -821,6 +825,9 @@ private:
             }
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
+            xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
+            npc_voices_available_ = build_ && SupportsJapaneseNpcVoices(build_) &&
+                                    (!BaseBuildOf(*build_) || NpcVoiceResourcesPresent(paths_.app0));
             safe_mode_installed_ = InstalledSafeMode(paths_.app0);
             ApplySavedPatches();
             return;
@@ -962,7 +969,7 @@ private:
             languages.push_back({std::string(language.key), std::string(language.name)});
         }
         ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, text_languages_.front().key.data(), languages);
-        if (SupportsJapaneseNpcVoices(build_)) {
+        if (npc_voices_available_) {
             ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
         }
         std::vector<trg::Option> frame_rates;
@@ -1021,7 +1028,7 @@ private:
         ui.Info("Controller", "Automatic: Xbox controllers work without setup.");
         ui.Row("Controller prompts", kControllerPromptsHelp);
         ControllerPromptsCombo(ui);
-        if (build_ && !build_->xbox_prompts) {
+        if (build_ && !xbox_available_) {
             ui.Help("Xbox prompts are not available for this game build.");
         }
         ui.Info("Keyboard", "Always on, together with the controller.");
@@ -1062,7 +1069,7 @@ private:
             return;
         }
         const bool ready = files_ == GameFileState::kValid && !install_.running();
-        const bool xbox_allowed = !build_ || build_->xbox_prompts;
+        const bool xbox_allowed = !build_ || xbox_available_;
         ImGui::BeginDisabled(!ready || !xbox_allowed);
         const char* shown = ready ? PromptStyleLabel(prompts_installed_) : "Install the game first";
         if (ImGui::BeginCombo("##controller_prompts", shown)) {
@@ -1090,7 +1097,7 @@ private:
         if (files_ != GameFileState::kValid) {
             return;
         }
-        const PromptStyle style = build_ && build_->xbox_prompts ? SavedPromptStyle() : PromptStyle::kPlayStation;
+        const PromptStyle style = xbox_available_ ? SavedPromptStyle() : PromptStyle::kPlayStation;
         const bool safe_mode = settings_.GetBool(kArachnophobiaSafeModeKey, false);
         if (style != prompts_installed_ || safe_mode != safe_mode_installed_ ||
             (style == PromptStyle::kPlayStation && PromptPatchInstalled())) {
@@ -1156,6 +1163,9 @@ private:
             return;
         }
         prompts_installed_ = InstalledPrompts();
+        xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
+        npc_voices_available_ = build_ && SupportsJapaneseNpcVoices(build_) &&
+                                (!BaseBuildOf(*build_) || NpcVoiceResourcesPresent(paths_.app0));
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         if (outcome->ok) {
             Log("game patches: prompts %s, arachnophobia safe mode %s (%s)", PromptStyleKey(prompts_installed_),
@@ -1305,6 +1315,8 @@ private:
     std::string install_failure_;
     std::string install_failure_text_;
     PromptStyle prompts_installed_ = PromptStyle::kPlayStation;
+    bool xbox_available_ = false;
+    bool npc_voices_available_ = false;
     bool safe_mode_installed_ = false;
     PatchAction patch_action_ = PatchAction::kPrompts;
     std::shared_ptr<PromptsResult> prompts_outcome_;

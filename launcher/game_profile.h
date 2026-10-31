@@ -42,7 +42,7 @@ struct GameBuild {
     const char* label;            // the name the log, the launcher and the loader show
     const char* region;
     bool cheats;                  // the native cheat hooks are validated for this build
-    bool xbox_prompts;            // the Xbox prompt patch is validated for this build's archives
+    bool xbox_prompts;            // the Xbox prompt patch is made for this build's archives; an update's are checked too
     bool japanese_npc_voices;     // the NPC voice routing hook is validated for this build
     bool true_ultrawide;          // dcp_pass_ortho_sites are verified in this build's executable
     std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
@@ -50,6 +50,7 @@ struct GameBuild {
     std::span<const TextLanguage> text_languages; // the first is the default
     bool resolution_by_signature = false;
     bool keep_base_languages = false; // an update's regional archive is laid over the base's, which keeps its language slots
+    bool features_by_signature = false; // cheats, NPC voices and True Ultrawide are found by structural locators, not tables
 };
 
 // The supported builds, US first.

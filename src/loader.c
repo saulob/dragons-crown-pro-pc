@@ -21,6 +21,7 @@
 #include "startup_phase.h"
 #include "fault_origin.h"
 #include "dcp_resolution.h"
+#include "feature_sites.h"
 #include "runtime_log.h"
 #include "isa_emulate.h"
 #include "lzcnt_compat.h"
@@ -420,14 +421,30 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
 }
 /* Widens the scene pass projections when every condition holds, then installs the guest hooks; logs one line either
  * way and returns 1 when it applied. A site that does not match leaves the image as it was. */
-static int install_true_ultrawide(int requested, const DcpGameBuild *build, uint64_t image_size, uint64_t entry,
-                                   size_t slot_offset, uint8_t *stubs) {
+static int install_true_ultrawide(int requested, const DcpGameBuild *build, const DcpFeatureSites *located, uint64_t image_size,
+                                   uint64_t entry, size_t slot_offset, uint8_t *stubs) {
     const double scale=dcp_true_ultrawide_scale(aspect_ratio,&render_target);
     char detail[720];
     int effective=0;
     if (!requested) snprintf(detail,sizeof(detail),"off in the settings");
     else if (!dcp_true_ultrawide_applies(aspect_ratio)) snprintf(detail,sizeof(detail),"the aspect ratio is not wider than 16:9");
     else if (!build || !build->true_ultrawide) snprintf(detail,sizeof(detail),"pass projection not verified for this game build");
+    else if (build->features_by_signature) {
+        DcpOrthoSite loads[DCP_ORTHO_LOADS];
+        for (int i=0;i<DCP_ORTHO_LOADS;++i) { loads[i].offset=located->ultrawide_sites.ortho_loads[i]; loads[i].value=dcp_pass_ortho_sites[i].value; }
+        char hooks[400], loads_error[300];
+        if (!located->ultrawide) snprintf(detail,sizeof(detail),"%s",located->ultrawide_failure);
+        else if (!ultrawide_hooks_install_located(image,image_size,entry,&located->ultrawide_sites,stubs,
+                                                  ultrawide_hooks_stub_bytes(),scale,hooks,sizeof(hooks)))
+            snprintf(detail,sizeof(detail),"hooks not installed (%s)",hooks);
+        else if (!dcp_apply_true_ultrawide(image,image_size,slot_offset,loads,DCP_ORTHO_LOADS,scale,loads_error,sizeof(loads_error)))
+            snprintf(detail,sizeof(detail),"projection loads not applied (%s)",loads_error);
+        else {
+            effective=1;
+            snprintf(detail,sizeof(detail),"%d/%d sites found by signature, horizontal x%.4f, vertical unchanged",
+                     DCP_ULTRAWIDE_SITE_COUNT,DCP_ULTRAWIDE_SITE_COUNT,scale);
+        }
+    }
     else if (dcp_apply_true_ultrawide(image,image_size,slot_offset,dcp_pass_ortho_sites,DCP_PASS_ORTHO_SITE_COUNT,scale,
                                       detail,sizeof(detail))) {
         char hooks[400];
@@ -817,6 +834,17 @@ int main(int argc, char **argv) {
         memcpy(image + relocs[i].target, &value, 8);
     }
     dcp_startup_phase("imports resolved");
+    /* A supported build without tables has its sites found now, in the image as the game shipped it, before any patch. */
+    DcpFeatureSites located;
+    {
+        DcpExecRange ranges[64];
+        size_t range_count=0;
+        for (uint64_t i=0;i<ns && range_count<64;++i)
+            if (segments[i].flags&1) { ranges[range_count].begin=segments[i].address; ranges[range_count].end=segments[i].address+segments[i].size; ++range_count; }
+        const DcpImageView view={image,size,ranges,range_count};
+        dcp_resolve_features(known_build ? &game_build : NULL,&view,runtime_cheats_hooks_wanted(1),
+                             voice_hooks_enabled() && dcp_npc_voice_resources(app0),ultrawide_wanted,&located);
+    }
     if (check_imports) {
         /* Lists every import the game would stop at, without running it (needs the GPU
          * library: without --cpu-only its symbols are registered above). */
@@ -840,11 +868,11 @@ int main(int argc, char **argv) {
         if (!known_build) fail_running("render resolution and aspect ratio need a supported game build");
         const DcpResolutionSite *sites=game_build.resolution_sites;
         size_t site_count=game_build.resolution_site_count;
-        DcpResolutionSite found_sites[DCP_CUSA10209_102_SIGNATURE_COUNT];
+        DcpResolutionSite found_sites[DCP_RENDER_SIZE_SIGNATURE_COUNT];
         if (site_count==0 && game_build.resolution_by_signature) {
-            DcpResolutionSignatureResult results[DCP_CUSA10209_102_SIGNATURE_COUNT];
-            site_count=DCP_CUSA10209_102_SIGNATURE_COUNT;
-            if (!dcp_find_resolution_sites(image,size,dcp_cusa10209_102_signatures,site_count,found_sites,results)) {
+            DcpResolutionSignatureResult results[DCP_RENDER_SIZE_SIGNATURE_COUNT];
+            site_count=DCP_RENDER_SIZE_SIGNATURE_COUNT;
+            if (!dcp_find_resolution_sites(image,size,dcp_render_size_signatures,site_count,found_sites,results)) {
                 char message[400];
                 snprintf(message,sizeof(message),"render resolution sites do not match game build %s",game_build.label);
                 fail_running(message);
@@ -862,9 +890,17 @@ int main(int argc, char **argv) {
     }
     if (lzcnt_rewrite) {
         const char *rewritten_build="";
-        const LzcntCompatStatus status=lzcnt_compat_install(image,size,entry,
-            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes,
-            lzcnt_stub_bytes,&rewritten_build);
+        uint8_t *lzcnt_stubs=image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes;
+        LzcntCompatStatus status=lzcnt_compat_install(image,size,entry,lzcnt_stubs,lzcnt_stub_bytes,&rewritten_build);
+        char located_build[160];
+        if (status==LZCNT_COMPAT_UNKNOWN_IMAGE && known_build) {
+            uint32_t offsets[LZCNT_SITE_COUNT];
+            status=lzcnt_compat_locate(image,size,offsets);
+            if (status==LZCNT_COMPAT_OK)
+                status=lzcnt_compat_apply(image,size,offsets,lzcnt_shapes,LZCNT_SITE_COUNT,lzcnt_stubs,lzcnt_stub_bytes);
+            snprintf(located_build,sizeof(located_build),"%s, sites found by signature",game_build.label);
+            rewritten_build=located_build;
+        }
         if (status!=LZCNT_COMPAT_OK) {
             char message[330];
             snprintf(message,sizeof(message),"This processor lacks LZCNT, and this game executable cannot be adapted to it: %s.",
@@ -873,10 +909,19 @@ int main(int argc, char **argv) {
         }
         printf("LZCNT: rewritten at %d sites (%s)\n",LZCNT_SITE_COUNT,rewritten_build);
     }
-    if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
+    if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) {
+        if (!game_build.features_by_signature) runtime_cheat_hooks_install(image,size,entry,image+round_page(size),hook_bytes);
+        else if (located.cheats) runtime_cheat_hooks_install_located(image,size,entry,&located.cheat_sites,image+round_page(size),hook_bytes);
+        else printf("Cheats: unavailable, %s\n",located.cheat_failure);
+    }
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
-    if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled())
-        voice_hooks_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,voice_stub_bytes);
+    if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled() &&
+        (!game_build.features_by_signature || dcp_npc_voice_resources(app0))) {
+        uint8_t *voice_stubs=image+round_page(size)+cheat_stub_bytes+save_stub_bytes;
+        if (!game_build.features_by_signature) voice_hooks_install(image,size,entry,voice_stubs,voice_stub_bytes);
+        else if (located.voices) voice_hooks_install_located(image,size,entry,&located.voice_sites,voice_stubs,voice_stub_bytes);
+        else printf("Japanese NPC Voices: unavailable, %s\n",located.voice_failure);
+    }
     if (known_build && runtime_online_active())
         system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
                                  system_type_stub_bytes,runtime_online_system_type);
@@ -885,7 +930,7 @@ int main(int argc, char **argv) {
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
-    const int ultrawide_effective=install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,size,entry,
+    const int ultrawide_effective=install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,&located,size,entry,
                            ultrawide_bytes ? round_page(size)+hook_bytes : 0,
                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),

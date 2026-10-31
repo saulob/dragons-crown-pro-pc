@@ -104,7 +104,7 @@ The online service stores anonymous aggregate usage statistics, such as player c
 
 - Windows 10 (version 1903 or newer) or Windows 11, 64-bit
 - **Or, experimental:** 64-bit Linux on x86-64, including the Steam Deck, on an X11 or Wayland desktop, with glibc 2.31 or newer and a Vulkan 1.3 loader (`libvulkan.so.1`) and graphics driver (see [Linux and Steam Deck](#linux-and-steam-deck)). The game has been run on Ubuntu 24.04 (WSL2), and community testers report it working on Bazzite (KDE Plasma, Wayland, AMD RADV) and on a Steam Deck LCD; other distributions that are new enough may work
-- A processor with **AVX**: Intel Core 2nd generation (Sandy Bridge), AMD FX or newer. The game's PS4 code runs directly on it; LZCNT, MOVBE and BMI1, which some of these lack, are handled in software. On a processor without LZCNT, the USA 1.01 and Asia and Hong Kong 1.02 builds do not start yet; the other builds do
+- A processor with **AVX**: Intel Core 2nd generation (Sandy Bridge), AMD FX or newer. The game's PS4 code runs directly on it; LZCNT, MOVBE and BMI1, which some of these lack, are handled in software. On a processor without LZCNT, the USA 1.01 and Asia and Hong Kong 1.02 builds start only when their LZCNT instructions are exactly the ones of the other builds, which the game checks at start
 - A graphics card and driver with **Vulkan 1.3**, `VK_EXT_robustness2`, `VK_KHR_push_descriptor` and `VK_EXT_vertex_attribute_divisor` on either platform (tested on an NVIDIA GeForce RTX 4070 and Intel UHD Graphics 730 on Windows)
 - **Your own legally obtained Dragon's Crown Pro package**: a decrypted PS4 `.pkg` file of this exact game version, and about 6 GB of free space for the installed game:
 
@@ -198,7 +198,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 
 ### Gameplay
 - **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Japanese builds (CUSA07001) show Japanese only, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
-- **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. CUSA10454 1.00 USA only; narrator and player-character choices are unchanged
+- **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. CUSA10454 1.00 and 1.01 USA only; narrator and player-character choices are unchanged
 - **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
@@ -273,7 +273,7 @@ git clone https://github.com/saulob/dragons-crown-pro-pc.git
 4. `.\tools\package.ps1` makes the release folder, ZIP and `.zip.sha256` file in `dist\` from the same build: the program without debug information (the symbols stay in `dist\`), the DLLs it needs and the licences. It is local only and never uploads, tags or publishes anything. The release version is the project `VERSION` in `CMakeLists.txt`.
 5. `.\tools\package-release.ps1` prepares the whole release in `dist\`: that Windows ZIP, and the Linux AppImage built in WSL2 (`tools/package-release-linux.sh`, which runs `tools/package-linux.sh`), each with its `.sha256` file. It needs the Ubuntu 20.04 WSL2 distribution `DcpFocalBuild`, prepared once as [docs/LINUX.md](docs/LINUX.md#building) describes, installs nothing, fails if either platform fails, and never uploads anything.
 
-`.\tools\test.ps1` runs the focused tests. Python is not needed to build, test or play. Only the optional development scripts in `scripts\` use it, such as the Python cross-checks of the package extractor and the boot image builder (`.\tools\setup.ps1 -InstallPython`).
+`.\tools\test.ps1` runs the focused tests. It is also the supported-build parity gate: `dcp-build-parity-tests` holds one contract row per supported build (capabilities, mappings, base and update parity with its listed exceptions), reads any local `build\image` and `game\prepared` folders without changing them, and the script ends with a per-build `PASS real` / `PASS synthetic` summary and a non-zero exit code when anything fails. Adding a supported build means adding its contract row. Python is not needed to build, test or play. Only the optional development scripts in `scripts\` use it, such as the Python cross-checks of the package extractor and the boot image builder (`.\tools\setup.ps1 -InstallPython`).
 
 ### Linux
 

@@ -255,6 +255,35 @@ else()
                           Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
+# Feature parity between each supported base build and its updates: the capability matrix, unknown builds, launcher and
+# loader agreement, and patch ranges and signature searches on the local boot images (tools/test.ps1); not part of the
+# default build.
+add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
+    src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c
+    src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c)
+set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-build-parity-tests PRIVATE src launcher)
+target_compile_definitions(dcp-build-parity-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-build-parity-tests PRIVATE -Wall -Wextra)
+target_link_libraries(dcp-build-parity-tests PRIVATE dcp_launcher_core)
+if(NOT WIN32)
+    target_link_libraries(dcp-build-parity-tests PRIVATE m)
+endif()
+
+# The structural locators for Cheats, Japanese NPC Voices and True Ultrawide: the local boot images against the static
+# tables, synthetic images with every refusal case, and the known-build-only rule (tools/test.ps1); not part of the
+# default build.
+add_executable(dcp-feature-sites-tests EXCLUDE_FROM_ALL tests/feature_sites_tests.cpp src/cheat_hooks.cpp
+    src/runtime_cheats.cpp src/guest_hook.c src/ultrawide_hooks.c src/voice_hooks.c)
+set_target_properties(dcp-feature-sites-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-feature-sites-tests PRIVATE src launcher)
+target_compile_definitions(dcp-feature-sites-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-feature-sites-tests PRIVATE -Wall -Wextra)
+target_link_libraries(dcp-feature-sites-tests PRIVATE dcp_launcher_core)
+if(NOT WIN32)
+    target_link_libraries(dcp-feature-sites-tests PRIVATE m)
+endif()
+
 # Focused tests of the GPU tiling parameters and macro-tiled addresses against the game's own tiler (tools/test.ps1);
 # not part of the default build.
 add_executable(dcp-tiling-tests EXCLUDE_FROM_ALL tests/tiling_tests.cpp)

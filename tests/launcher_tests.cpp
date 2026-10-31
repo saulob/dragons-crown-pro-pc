@@ -48,6 +48,7 @@
 #include "game_install.h"
 #include "game_process.h"
 #include "net/connection_test.h"
+#include "npc_voice_resources.h"
 #include "net/identity.h"
 #include "net/online_version.h"
 #include "online_client.h"
@@ -1159,8 +1160,8 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
     WriteAll(file, "dcp_japanese_npc_voices = garbage\n");
     CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
 
-    // A saved On is inert on every build without the verified hook.
-    CHECK(!SupportsJapaneseNpcVoices(&kUs101));
+    // A saved On is inert on every build without the hook, found by table or by signature.
+    CHECK(SupportsJapaneseNpcVoices(&kUs101));
     CHECK(!SupportsJapaneseNpcVoices(&kJp100));
     CHECK(!SupportsJapaneseNpcVoices(&kJp102));
     CHECK(!SupportsJapaneseNpcVoices(&kJp103));
@@ -2747,10 +2748,10 @@ void TestTrueUltrawide(const fs::path& base) {
         CHECK(dcp_pass_ortho_sites[i].value == expected_sites[i].value);
     }
     CHECK(kUs.true_ultrawide && kJp100.true_ultrawide && kJp102.true_ultrawide && kJp103.true_ultrawide);
-    CHECK(kCk100.true_ultrawide && !kCk.true_ultrawide && !kUs101.true_ultrawide);
-    CHECK(TrueUltrawideAvailable(nullptr) && TrueUltrawideAvailable(&kUs) && !TrueUltrawideAvailable(&kCk));
+    CHECK(kCk100.true_ultrawide && kCk.true_ultrawide && kUs101.true_ultrawide);
+    CHECK(TrueUltrawideAvailable(nullptr) && TrueUltrawideAvailable(&kUs) && TrueUltrawideAvailable(&kCk));
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(!build.true_ultrawide || !build.resolution_sites.empty());
+        CHECK(!build.true_ultrawide || !build.resolution_sites.empty() || build.features_by_signature);
         for (const DcpResolutionSite& resolution : build.resolution_sites) {
             for (const DcpOrthoSite& site : dcp_pass_ortho_sites) {
                 CHECK(site.offset + 8 <= resolution.offset || resolution.offset + resolution.opcode_length + 4u <= site.offset);
@@ -3783,6 +3784,62 @@ void TestControllerPrompts(const fs::path& base) {
         CHECK(SetPromptStyle(stale, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(stale / "DRACRO_US.CPK") == archive_bytes);
     }
 
+    // An update's archives are offered Xbox only while they hold every file the patch was made for; the base build keeps
+    // its partial behaviour. Patching the update never writes the base's archives it is linked to.
+    {
+        const fs::path base_game = base / "prompts_update_base", update_game = base / "prompts_update";
+        fs::remove_all(base_game);
+        fs::remove_all(update_game);
+        WriteAll(base_game / "DRACRO_US.CPK", original_us);
+        WriteAll(base_game / "DRACRO.CPK", original);
+        fs::create_directories(update_game);
+        std::error_code ec;
+        fs::create_hard_link(base_game / "DRACRO.CPK", update_game / "DRACRO.CPK", ec);
+        if (ec) {
+            fs::copy_file(base_game / "DRACRO.CPK", update_game / "DRACRO.CPK");
+        }
+        WriteAll(update_game / "DRACRO_US.CPK", original_us);
+        const BlockPatch parsed_patch = *ParseBlockPatch(Span(patch_bytes));
+        std::string why;
+        CHECK(BaseBuildOf(kUs101) == &kUs && PromptPatchFits(update_game, kUs101, parsed_patch, &why));
+        CHECK(XboxPromptsAvailable(update_game, kUs101, Span(patch_bytes)) && XboxPromptsAvailable(base_game, kUs, Span(patch_bytes)));
+        CHECK(SetPromptStyle(update_game, kUs101, PromptStyle::kXbox, Span(patch_bytes)).ok);
+        CHECK(InstalledPromptStyle(update_game, kUs101, Span(patch_bytes)) == PromptStyle::kXbox);
+        CHECK(XboxPromptsAvailable(update_game, kUs101, Span(patch_bytes)));
+        CHECK(ReadAll(base_game / "DRACRO.CPK") == original && ReadAll(base_game / "DRACRO_US.CPK") == original_us);
+        CHECK(fs::hard_link_count(update_game / "DRACRO.CPK") == 1 && fs::hard_link_count(base_game / "DRACRO.CPK") == 1);
+        CHECK(SetPromptStyle(update_game, kUs101, PromptStyle::kPlayStation, {}).ok);
+        CHECK(ReadAll(update_game / "DRACRO_US.CPK") == original_us && ReadAll(update_game / "DRACRO.CPK") == original);
+
+        // The update replaced one of the patch's files: nothing is offered or written, on any archive.
+        WriteAll(update_game / "DRACRO_US.CPK", BuildCpk({{"msgsheet/x.fms", fms, true}, {"stage/Interface.ftx", foreign, false},
+                                                          {"stage/Interface_US.ftx", iface_us, true}}, true));
+        const std::string foreign_us = ReadAll(update_game / "DRACRO_US.CPK");
+        CHECK(!PromptPatchFits(update_game, kUs101, parsed_patch, &why));
+        CHECK(why == "stage/Interface.ftx in DRACRO_US.CPK is not the file the patch was made for");
+        CHECK(!XboxPromptsAvailable(update_game, kUs101, Span(patch_bytes)));
+        const PromptsResult refused = SetPromptStyle(update_game, kUs101, PromptStyle::kXbox, Span(patch_bytes));
+        CHECK(!refused.ok && refused.detail == "Xbox prompts are not available for CUSA10454 1.01 USA");
+        CHECK(!SetGamePatches(update_game, kUs101, PromptStyle::kXbox, false, Span(patch_bytes), {}).ok);
+        CHECK(ReadAll(update_game / "DRACRO_US.CPK") == foreign_us && ReadAll(update_game / "DRACRO.CPK") == original);
+        CHECK(!fs::exists(UndoPath(update_game / "DRACRO_US.CPK")) && !fs::exists(UndoPath(update_game / "DRACRO.CPK")));
+
+        // A file the patch changes is missing from every archive.
+        WriteAll(update_game / "DRACRO_US.CPK", BuildCpk({{"msgsheet/x.fms", fms, true}, {"stage/Interface.ftx", iface, false}}, true));
+        CHECK(!PromptPatchFits(update_game, kUs101, parsed_patch, &why) && why == "stage/Interface_US.ftx is in none of the archives");
+
+        // An entry an earlier patch rewrote fits: the revert puts the original back before the patch is applied.
+        WriteAll(update_game / "DRACRO_US.CPK", original_us);
+        std::string older_us = iface_us;
+        older_us.replace(0x100, 16, 16, 'O');
+        CHECK(ApplyBlockPatch(update_game / "DRACRO_US.CPK", *ParseBlockPatch(Span(MakePatch({{"stage/Interface_US.ftx", {iface_us, older_us}}})))).ok);
+        CHECK(PromptPatchFits(update_game, kUs101, parsed_patch, &why));
+        CHECK(SetGamePatches(update_game, kUs101, PromptStyle::kXbox, false, Span(patch_bytes), {}).ok);
+        CHECK(InstalledPromptStyle(update_game, kUs101, Span(patch_bytes)) == PromptStyle::kXbox);
+        CHECK(SetGamePatches(update_game, kUs101, PromptStyle::kPlayStation, false, {}, {}).ok);
+        CHECK(ReadAll(update_game / "DRACRO_US.CPK") == original_us && ReadAll(base_game / "DRACRO.CPK") == original);
+    }
+
     // CRILAYLA: a corrupt block is an error, not a crash.
     {
         std::string block = CrilaylaLiterals(iface);
@@ -4060,6 +4117,94 @@ void TestTextLanguageSwitching(const fs::path& base) {
 
 // An update's regional archive is laid over the base's: its entries outside the language slots win, and the base keeps
 // every language slot.
+size_t CpkCount(const fs::path& file) {
+    CpkArchive archive;
+    return archive.Open(file) ? archive.entries().size() : 0;
+}
+
+// Japanese NPC Voices on an update: the launcher offers them only when the finished game folder holds the sound table and
+// the Japanese voice banks, an update that replaces other entries of DRACRO.CPK keeps them, and the voices do not touch
+// the Menu & Subtitles language.
+void TestNpcVoiceResources(const fs::path& base) {
+    using namespace cpk_test;
+    using namespace language_test;
+    const fs::path root = base / "npc_voices";
+    fs::remove_all(root);
+    CHECK(NpcVoiceResourceNames().size() == 10);
+
+    std::vector<Entry> voices;
+    for (const std::string_view name : NpcVoiceResourceNames()) {
+        voices.push_back({std::string(name), "voice " + std::string(name), false});
+    }
+    std::vector<Entry> game = voices;
+    game.push_back({"stage/Menu.ftx", "menu base", false});
+    game.push_back({"snd/narration_gm20000.acb", "narration", false});
+    const auto sorted = [](std::vector<Entry> entries) {
+        std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+            std::string x = a.path, y = b.path;
+            for (char& c : x) c = char(std::tolower(static_cast<unsigned char>(c)));
+            for (char& c : y) c = char(std::tolower(static_cast<unsigned char>(c)));
+            const size_t sx = x.rfind('/'), sy = y.rfind('/');
+            return std::make_pair(x.substr(0, sx), x.substr(sx + 1)) < std::make_pair(y.substr(0, sy), y.substr(sy + 1));
+        });
+        return entries;
+    };
+    const std::string base_archive = BuildCpk(sorted(game), true);
+    const fs::path base_app0 = root / "base";
+    WriteAll(base_app0 / "DRACRO.CPK", base_archive);
+    CHECK(NpcVoiceResourcesPresent(base_app0) && dcp_npc_voice_resources(base_app0.string().c_str()) == 1);
+    CHECK(dcp_npc_voice_resources(nullptr) == 0 && !NpcVoiceResourcesPresent(root / "nowhere"));
+
+    // The game's own archive (read only), when a prepared US folder is there.
+    if (const fs::path real = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / "v1.03"; fs::exists(real / "DRACRO.CPK")) {
+        CHECK(NpcVoiceResourcesPresent(real));
+    }
+
+    // One bank missing, or the sound table, refuses; so does an archive that is not one.
+    for (const std::string_view missing : NpcVoiceResourceNames()) {
+        std::vector<Entry> without;
+        for (const Entry& entry : game) {
+            if (entry.path != missing) without.push_back(entry);
+        }
+        const fs::path app0 = root / ("without " + std::string(missing).substr(4));
+        WriteAll(app0 / "DRACRO.CPK", BuildCpk(sorted(without), true));
+        CHECK(!NpcVoiceResourcesPresent(app0));
+    }
+    WriteAll(root / "broken" / "DRACRO.CPK", "not an archive");
+    CHECK(!NpcVoiceResourcesPresent(root / "broken"));
+
+    // An update with a partial DRACRO.CPK is laid over the base's: the voices stay, and the update's own entries win.
+    const fs::path update = root / "update", staged = root / "staged";
+    WriteAll(update / "DRACRO.CPK", BuildCpk(sorted({{"stage/Menu.ftx", "menu update", false}, {"stage/New.ftx", "new", false}}), true));
+    WriteAll(update / "eboot.bin", "eboot 1.01");
+    CHECK(StageUpdate(base_app0, update, staged, &kUs101).ok());
+    CHECK(NpcVoiceResourcesPresent(staged));
+    CpkArchive composed;
+    CHECK(composed.Open(staged / "DRACRO.CPK"));
+    const CpkEntry* menu = composed.Find("stage/Menu.ftx");
+    CHECK(menu && Bytes(composed.Read(*menu)) == "menu update" && composed.Find("stage/New.ftx") != nullptr);
+    CHECK(ReadAll(base_app0 / "DRACRO.CPK") == base_archive && fs::hard_link_count(staged / "DRACRO.CPK") == 1);
+
+    // An update that replaces other sound entries leaves the banks it does not name.
+    const fs::path stripped = root / "stripped_update", stripped_staged = root / "stripped_staged";
+    std::vector<Entry> replacement = {{"stage/Menu.ftx", "menu update", false}};
+    for (const Entry& entry : game) {
+        if (std::string_view(entry.path).starts_with("snd/") && !std::string_view(entry.path).starts_with("snd/se_enemy")) replacement.push_back(entry);
+    }
+    WriteAll(stripped / "DRACRO.CPK", BuildCpk(sorted(replacement), true));
+    WriteAll(stripped / "eboot.bin", "eboot 1.01");
+    CHECK(StageUpdate(base_app0, stripped, stripped_staged, &kUs101).ok());
+    CHECK(NpcVoiceResourcesPresent(stripped_staged));
+
+    // The voices are not a language: the Menu & Subtitles list comes from the regional archive alone.
+    WriteAll(staged / "DRACRO_US.CPK", LanguageArchive({Slot("US", kEnglishSheet), Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
+                                                       Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet), Slot("UK", kEnglishSheet)}));
+    const std::vector<TextLanguage> with_voices = InstalledTextLanguages(staged, &kUs101);
+    fs::remove(staged / "DRACRO.CPK");
+    CHECK(!NpcVoiceResourcesPresent(staged));
+    CHECK(SameLanguages(with_voices, InstalledTextLanguages(staged, &kUs101)) && with_voices.size() == 5);
+}
+
 void TestKeepBaseLanguages(const fs::path& base) {
     using namespace cpk_test;
     using namespace language_test;
@@ -4222,10 +4367,73 @@ void TestKeepBaseLanguages(const fs::path& base) {
     CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash && fs::hard_link_count(base_app0 / "DRACRO_US.CPK") == 1);
     CHECK(ReadAll(base_app0 / "DRACRO_US.CPK") == base_bytes);
 
-    // Another build's update still replaces the archive as a whole.
-    const fs::path whole = root / "install_whole";
+    // Another build's partial update is laid over the base's archive with every entry of its own, language slots too,
+    // and the base's other entries stay; a complete one replaces the archive as a whole.
+    const fs::path partial_staged = root / "install_partial";
     write_update(update_bytes);
-    CHECK(StageUpdate(base_app0, update_dir, whole).ok() && ReadAll(whole / "DRACRO_US.CPK") == update_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, partial_staged).ok() && !fs::exists(update_dir / "DRACRO_US.CPK"));
+    CpkArchive partial_archive;
+    CHECK(partial_archive.Open(partial_staged / "DRACRO_US.CPK"));
+    CHECK(partial_archive.entries().size() == base_archive.entries().size() + 2);
+    CHECK(data_of(partial_archive, "msgsheet/SystemMsg_US.fms") == kRussianSheet);
+    CHECK(data_of(partial_archive, "stage/Interface.ftx") == "interface update");
+    CHECK(data_of(partial_archive, "msgsheet/SystemMsg_DE.fms") == kEnglishSheet);
+    CHECK(data_of(partial_archive, "stage/Menu.ftx") == "menu base" && data_of(partial_archive, "stage/NewThing.ftx") == "new thing");
+    CHECK(fs::hard_link_count(partial_staged / "DRACRO_US.CPK") == 1 && Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash);
+    std::vector<Entry> every;
+    for (const CpkEntry& entry : base_archive.entries()) {
+        every.push_back({entry.path, "complete " + data_of(base_archive, entry.path), false});
+    }
+    const std::string complete_bytes = BuildCpk(sorted({every}), true);
+    const fs::path whole = root / "install_whole";
+    write_update(complete_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, whole).ok() && ReadAll(whole / "DRACRO_US.CPK") == complete_bytes);
+    CHECK(ReadAll(base_app0 / "DRACRO_US.CPK") == base_bytes);
+    // An archive the base does not have is placed as it is; one the reader cannot open over a readable base fails the
+    // step and writes nothing.
+    const fs::path placed = root / "install_placed";
+    write_update(update_bytes);
+    WriteAll(update_dir / "DRACRO_PATCH_JP.CPK", update_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, placed).ok() && ReadAll(placed / "DRACRO_PATCH_JP.CPK") == update_bytes);
+    WriteAll(base_app0 / "OTHER.CPK", base_bytes);
+    for (const std::string& broken : {std::string("not an archive"), update_bytes.substr(0, 0x3000 + 10)}) {
+        const fs::path refused = root / "install_refused";
+        fs::remove_all(refused);
+        write_update(update_bytes);
+        WriteAll(update_dir / "OTHER.CPK", broken);
+        const InstallResult result = StageUpdate(base_app0, update_dir, refused);
+        CHECK(!result.ok() && result.status == InstallStatus::kReadFailed);
+        CHECK(ReadAll(base_app0 / "OTHER.CPK") == base_bytes);
+    }
+    fs::remove(base_app0 / "OTHER.CPK");
+
+    // Asia and Hong Kong 1.02: no special rule, so a partial regional archive is the base's with the update laid over it
+    // and the final language set is the base's.
+    {
+        const std::string traditional = Sheet("New Game Continue Options Quit ##(TOUCH) @#(34)");
+        const std::vector<Entry> ct = Slot("CT", traditional), kr = Slot("KR", traditional);
+        const std::string ck_base = BuildCpk(sorted({shared, ct, kr}), true);
+        const fs::path ck_root = root / "hk", ck_base_app0 = ck_root / "base", ck_update = ck_root / "update";
+        fs::remove_all(ck_root);
+        WriteAll(ck_base_app0 / "DRACRO_CK.CPK", ck_base);
+        WriteAll(ck_base_app0 / "eboot.bin", "eboot 1.00");
+        const std::string ck_hash = Sha256Hex(ck_base_app0 / "DRACRO_CK.CPK");
+        WriteAll(ck_update / "DRACRO_CK.CPK", BuildCpk(sorted({{{"stage/Interface.ftx", "interface hk update", false}}, {{"stage/NewThing.ftx", "new hk", false}}}), true));
+        WriteAll(ck_update / "eboot.bin", "eboot 1.02");
+        const std::string hk_keys = "traditional_chinese=10 korean=9";
+        CHECK(keys(ck_base_app0, kCk100) == hk_keys);
+        const fs::path ck_staged = ck_root / "staged";
+        CHECK(StageUpdate(ck_base_app0, ck_update, ck_staged).ok());
+        CpkArchive ck_archive;
+        CHECK(ck_archive.Open(ck_staged / "DRACRO_CK.CPK") && ck_archive.entries().size() == CpkCount(ck_base_app0 / "DRACRO_CK.CPK") + 1);
+        CHECK(data_of(ck_archive, "stage/Interface.ftx") == "interface hk update" && data_of(ck_archive, "stage/NewThing.ftx") == "new hk");
+        CHECK(data_of(ck_archive, "stage/Menu_CT.ftx") == "menu CT" && data_of(ck_archive, "stage/Menu_KR.ftx") == "menu KR");
+        CHECK(data_of(ck_archive, "stage/Menu.ftx") == "menu base" && data_of(ck_archive, "other/DraCro.otb") == "tool");
+        CHECK(keys(ck_staged, kCk) == hk_keys && SameLanguages(InstalledTextLanguages(ck_staged, &kCk), TextLanguagesOf(&kCk)));
+        CHECK(Sha256Hex(ck_base_app0 / "DRACRO_CK.CPK") == ck_hash && fs::hard_link_count(ck_base_app0 / "DRACRO_CK.CPK") == 1);
+        CHECK(fs::hard_link_count(ck_staged / "DRACRO_CK.CPK") == 1 && !fs::exists(ck_update / "DRACRO_CK.CPK"));
+        CHECK(!fs::exists(ck_staged / "DRACRO_CK.CPK.compose"));
+    }
 
     // An update with language slots only leaves the base's archive in the staged game as it is.
     const fs::path slots_only = root / "install_slots";
@@ -4598,7 +4806,7 @@ void TestUsBuild() {
     CHECK(std::string(kUs.eboot_sha256) == "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a");
     CHECK(kUs.cheats && kUs.xbox_prompts && kUs.resolution_sites.size() == 23 && BaseBuildOf(kUs) == nullptr);
     CHECK(kUs.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs));
-    CHECK(!kUs101.japanese_npc_voices && !SupportsJapaneseNpcVoices(&kUs101));
+    CHECK(kUs101.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs101));
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
 
     CHECK(std::string(kUs101.label) == "CUSA10454 1.01 USA" && std::string(kUs101.version) == "1.01");
@@ -4608,14 +4816,17 @@ void TestUsBuild() {
           std::string(FinishedLayer(kUs101).sfo_version) == "01.03");
     CHECK(std::string(kUs101.eboot_sha256) == "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0");
     CHECK(std::string(kUs101.eboot_sha256) != kUs.eboot_sha256);
-    CHECK(!kUs101.cheats && !kUs101.xbox_prompts && !kUs101.japanese_npc_voices && kUs101.resolution_sites.empty());
+    CHECK(kUs101.cheats && kUs101.xbox_prompts && kUs101.japanese_npc_voices && kUs101.resolution_sites.empty());
+    CHECK(kUs101.features_by_signature && !kUs.features_by_signature);
+    CHECK(kUs101.resolution_by_signature && !RestrictedToNativeResolution(&kUs101));
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(build.japanese_npc_voices == (&build == &kUs));
-        CHECK(SupportsJapaneseNpcVoices(&build) == (&build == &kUs));
+        CHECK(build.japanese_npc_voices == (&build == &kUs || &build == &kUs101));
+        CHECK(SupportsJapaneseNpcVoices(&build) == build.japanese_npc_voices);
     }
     CHECK(BaseBuildOf(kUs101) == &kUs && BaseBuildOf(kUs) == nullptr);
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK((build.cheats || build.xbox_prompts) == (&build == &kUs));
+        CHECK(build.cheats == (&build == &kUs || &build == &kUs101));
+        CHECK(build.xbox_prompts == (std::string_view(build.title_id) == kUs.title_id));
     }
 
     CHECK(CheckSfoIdentity(SfoFor(kUs, "01.00", "01.03")).build == &kUs);
@@ -4757,12 +4968,13 @@ void TestActivation(const fs::path& base) {
     }
     CHECK(LastPreparedBuild(GameRoots{root / "none", root / "none-image"}, builds) == nullptr);
 
-    // Makes builds[active] the newest prepared build; the others are older.
+    // Makes builds[active] the newest prepared build; the others are older. An activation stamps the current time, which
+    // must be newer than the marker it replaces whatever the file system's timestamp granularity.
     const auto make_active = [&](size_t active) {
         const auto now = fs::file_time_type::clock::now();
         for (size_t i = 0; i < builds.size(); ++i) {
             fs::last_write_time(BuildPaths(roots, builds[i]).app0 / kPreparedMarker,
-                                i == active ? now : now - std::chrono::hours(1));
+                                now - (i == active ? std::chrono::minutes(10) : std::chrono::hours(1)));
         }
     };
     const auto active = [&] { return CheckGameFiles(ActiveBuildPaths(roots, builds), builds); };
@@ -4997,7 +5209,7 @@ void TestBuilds(const fs::path& base) {
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
     CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
-    CHECK(ck_game.true_ultrawide == 0);
+    CHECK(ck_game.true_ultrawide == 1 && ck_game.features_by_signature == 1);
 
     {
         Fixture ck(base, "ck-valid", kCk);
@@ -5097,8 +5309,8 @@ void TestCusa10209Graphics(const fs::path& base) {
     CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);
 }
 
-// CUSA10454 1.01 has no verified render resolution sites, so only the native render resolution and 16:9 are effective;
-// CUSA10454 1.00 keeps the whole list.
+// CUSA10454 1.01 has no table of its own: it keeps the whole list and finds its sites by signature in its own image, so it
+// never receives the 1.00 table.
 void TestUs101Graphics(const fs::path& base) {
     const fs::path root = base / "cusa10454-graphics";
     fs::remove_all(root);
@@ -5110,14 +5322,15 @@ void TestUs101Graphics(const fs::path& base) {
                                         kUs101.eboot_sha256 + "\",\n  \"app_ver\": \"01.01\"\n}");
     CHECK(BuildOfImageDir(dir100.string().c_str()) == &kUs);
     CHECK(BuildOfImageDir(dir101.string().c_str()) == &kUs101);
-    CHECK(RestrictedToNativeResolution(&kUs101) && !RestrictedToNativeResolution(&kUs));
+    CHECK(!RestrictedToNativeResolution(&kUs101) && !RestrictedToNativeResolution(&kUs));
+    CHECK(kUs101.resolution_by_signature && !kUs.resolution_by_signature);
     CHECK(kUs101.resolution_sites.empty() && kUs.resolution_sites.size() == 23);
     CHECK(kUs101.resolution_sites.data() != kUs.resolution_sites.data());
 
     WriteAll(file, "render_resolution=4K\naspect_ratio=21:9\n");
-    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) == 0); // 1.01 falls back to native
-    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) == 0);      // and to 16:9
-    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0); // 1.00 keeps them
+    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) != 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) != 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0);
     CHECK(dcp_aspect_ratio(file.string().c_str(), dir100.string().c_str()) != 0);
 
     // 1.01 can never receive the 1.00 table: its own table is empty, and applying it writes nothing.
@@ -5177,8 +5390,8 @@ void Plant(std::vector<unsigned char>& image, size_t at, std::initializer_list<u
 
 void TestResolutionProbe() {
     CHECK(DCP_RESOLUTION_COUNT == 6);
-    CHECK(DCP_CUSA10209_102_SIGNATURE_COUNT == 23);
-    for (const DcpResolutionSignature& signature : dcp_cusa10209_102_signatures) {
+    CHECK(DCP_RENDER_SIZE_SIGNATURE_COUNT == 23);
+    for (const DcpResolutionSignature& signature : dcp_render_size_signatures) {
         CHECK(signature.length <= DCP_SIGNATURE_MAX);
         CHECK(signature.lead + signature.opcode_length + 4 <= signature.length);
         CHECK(signature.opcode_length == 1 || signature.opcode_length == 2);
@@ -5194,7 +5407,9 @@ void TestResolutionProbe() {
             CHECK(build.resolution_by_signature && build.resolution_sites.empty());
             CHECK(!RestrictedToNativeResolution(&build));
         } else if (!build.resolution_sites.empty()) {
-            CHECK(build.resolution_sites.size() == 23);
+            CHECK(build.resolution_sites.size() == 23 && !build.resolution_by_signature);
+        } else {
+            CHECK(&build == &kUs101 && build.resolution_by_signature);
         }
     }
 
@@ -5352,6 +5567,7 @@ int main(int argc, char** argv) {
     TestInstalledTextLanguages(base);
     TestTextLanguageSwitching(base);
     TestKeepBaseLanguages(base);
+    TestNpcVoiceResources(base);
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);

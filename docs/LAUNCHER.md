@@ -112,6 +112,37 @@ update changes, so 1.03 does not need 1.02.
 different `eboot.bin` files. An update needs the 1.00 folder to be installed; the launcher says so
 otherwise.
 
+**Update archives.** A finished update is its base plus the update. An archive (`.CPK`) that the update holds and that
+lacks some entries of the base's archive at the same path is composed, not swapped: the staged game gets a copy of the
+base's archive with every entry of the update's laid over it (the USA 1.01 regional archive keeps the base's language
+sets, as above). A complete archive, or one the reader cannot open, replaces the base's as a whole. The base folder is
+only read, and a failed step leaves the active build as it was.
+
+**Features by build.** Each update offers everything its base offers:
+
+| Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 |
+| --- | --- | --- | --- | --- | --- |
+| Menu & Subtitles | 5 Western | 5 Western | Japanese | Chinese, Korean | Chinese, Korean |
+| Render resolution, Aspect Ratio | yes | yes (sites found by signature) | yes | yes | yes (sites found by signature) |
+| True Ultrawide | yes | yes (found by signature) | yes | yes | yes (found by signature) |
+| Story and Tutorial Skip Offers | yes | yes (found by signature) | yes | yes | yes (found by signature) |
+| Online Play, System type | yes | yes (found by signature) | yes | yes | yes (found by signature) |
+| Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) |
+| Cheats | yes | yes (found by signature) | no | no | no |
+| Japanese NPC Voices | yes | yes (found by signature) | not applicable | no | no |
+| Xbox prompts | yes | yes, when its archives hold the patch's files | no | no | no |
+| Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes |
+
+"Found by signature" means the build has no table of its own: the loader finds each site in the build's own image from
+the byte patterns that give exactly the tables of the five builds checked locally, uses them only when every pattern
+matches the expected number of times, and otherwise leaves the feature off (Render resolution: the game does not start
+with a custom size). Cheats, Japanese NPC Voices and True Ultrawide need all of their sites (25 hooks and 15 functions,
+2 sites, 22 sites) to resolve with the verified bytes and their relations, and, for the cheats, every struct displacement
+the handlers use to be read back from the game's own instructions; one that does not resolve turns the whole feature
+off and the log names it (`Cheats: unavailable, ...`). A successful start logs one line per feature, for example
+`Cheats: 25/25 hooks, 15/15 functions, layout verified by signature`. The patterns are used only for the supported
+builds whose profile asks for them, never for an executable the launcher does not know.
+
 States: missing, valid, different version, read error. The identity lives in `launcher/game_profile.h` and mirrors
 `scripts/game_profiles.py`; a test fails if they drift.
 
@@ -244,8 +275,8 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and
   prerendered videos are not adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
   of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
-  The Asia and Hong Kong 1.02 build has no verified render resolution sites of its own, so it renders at its original size in
-  16:9 and offers no other shape, whatever was saved.
+  Every supported build offers every shape (see Render resolution for how the USA 1.01 and Asia and Hong Kong 1.02 sites
+  are found).
 - **True Ultrawide** (experimental, Off by default; `true_ultrawide` in `dcp.ini`, a missing or unknown value is Off): with
   21:9 or 32:9 the game draws more of the world instead of stretching it. The vertical view stays the one of 16:9 and the
   horizontal view grows by the render target's shape over 16:9 (× 1.3125 for 21:9, × 2 for 32:9), so characters and
@@ -259,8 +290,8 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   frame edges, other message bands keep their 16:9 width, and the town map is scaled up evenly to fill the width (at
   32:9 only as far as its markers stay on screen, with black beyond). The row is disabled for the other shapes, where it
   changes nothing. Off gives back the Aspect Ratio's own picture exactly. It is available on
-  CUSA10454 1.00, CUSA07001 1.00, 1.02 and 1.03 and CUSA10209 1.00, where its code was checked; elsewhere a saved On
-  is ignored and the log says why.
+  every supported build; on CUSA10454 1.01 and CUSA10209 1.02 its sites are found by signature, and if any of them does
+  not resolve the feature stays off and the log says which.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Graphics card**: each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
@@ -290,9 +321,10 @@ RCAS, on) with a
 
 The game chooses its display render targets with `mov reg, imm32` of 1920 / 3840 and 1080 / 2160, picked by
 `sceKernelIsNeoMode`. Each supported build with verified sites has its own 23 of them (`launcher/game_profile.cpp`); the
-USA 1.01 and Asia and Hong Kong 1.02 builds have none yet, so they render only at their native size and their Render
-resolution and Aspect Ratio rows offer Native 16:9 alone (a saved custom value falls back to Native 16:9 for them, and the
-loader refuses to patch a build with no sites). Unless the render target is
+USA 1.01 and Asia and Hong Kong 1.02 builds have no table and find their 23 in their own image by the instruction context
+of each site (`dcp_render_size_signatures`, `launcher/resolution_probe.c`), which gives exactly the table of every build
+that has one. All 23 must be found once, with the original instruction and without overlap, or the game does not start
+with a custom size. The loader refuses to patch a build the launcher does not know. Unless the render target is
 the unchanged Native 16:9 one, the loader rewrites them (`launcher/resolution.c`) to the chosen width and height after
 checking that each still holds the original instruction; if one does not, the game does not start. Native 16:9 leaves the
 code untouched. `sceKernelIsNeoMode` answers "PS4 Pro" for a target larger than 1920 × 1080 in either dimension or in
@@ -345,8 +377,9 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
-- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 USA only; the option is hidden for
-  the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
+- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 and 1.01 USA only; on 1.01 the option
+  appears only while the installed `DRACRO.CPK` holds the sound table and the Japanese banks (`launcher/npc_voice_resources.h`),
+  and it never changes the Menu & Subtitles language. It is hidden for the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
   town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
   are untouched.
 - **Frame rate** (30 FPS, 60 FPS (Original), 90, 120, 144, 165, 240 FPS, Unlimited; `frame_rate`, 60 FPS (Original) by
@@ -397,8 +430,8 @@ rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Ma
 Points**, **Infinite Skill Uses**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
 below them the **Movement Speed** combo
 (Off, 2x, 4x) and the **Experience Multiplier** combo (Off, 2x, 5x, 10x, 100x).
-Cheats work on the CUSA10454 1.00 (US) build only; on the USA 1.01, Japanese and Asia and Hong Kong builds the page and
-the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
+Cheats work on the CUSA10454 1.00 and 1.01 (US) builds; on the Japanese and Asia and Hong Kong builds, whose base
+packages never had them, the page and the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
 them back to Off. The saved values are the start of every game session; the F10 menu changes the running session only
 and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
@@ -423,8 +456,11 @@ The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, 
 atlas (`Interface_arranged000`) in `stage/Interface.ftx` and in each language's `stage/Interface_XX.ftx` (DE, ES, FR, IT,
 UK and US, the same bytes in all of them), and the port has no way to swap textures at run time, so the choice is made
 in the installed game files: Xbox applies a block patch to `DRACRO_US.CPK` and `DRACRO.CPK`
-(`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. The Japanese and Asia and Hong Kong
-builds have no validated Xbox patch: they always show the PlayStation prompts and their archives are not touched.
+(`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. USA 1.01 offers Xbox only while its
+finished archives hold every file the patch was made for (or its patched result): each is read and its CRC checked when
+the launcher starts or the build changes, and an update that changed one of them shows PlayStation only, with nothing
+written. The Japanese and Asia and Hong Kong builds have no validated Xbox patch: they always show the PlayStation
+prompts and their archives are not touched.
 The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the
 4 × 4 blocks that differ between the game's atlas and the repainted one, about 2 MB, with the CRC32 of each pack
 before and after, and the repainted glyphs sit in the same rectangles as the game's, so the sprite definitions

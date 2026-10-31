@@ -82,6 +82,65 @@ std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& a
     return out;
 }
 
+bool PromptPatchFits(const std::filesystem::path& app0, const GameBuild& build, const BlockPatch& patch,
+                     std::string* detail) {
+    const auto refuse = [&](std::string why) {
+        if (detail) {
+            *detail = std::move(why);
+        }
+        return false;
+    };
+    struct Opened {
+        CpkArchive archive;
+        std::vector<std::string> earlier; // entries an earlier patch rewrote; reverting puts their original back first
+    };
+    std::vector<Opened> archives;
+    for (const std::filesystem::path& file : PromptArchives(app0, build)) {
+        Opened& opened = archives.emplace_back();
+        if (!opened.archive.Open(file)) {
+            return refuse(Utf8(file.filename()) + " cannot be read");
+        }
+        opened.earlier = PatchedEntries(file);
+    }
+    if (archives.empty()) {
+        return refuse("no prompt archives");
+    }
+    for (const BlockPatchTarget& target : patch.targets) {
+        bool found = false;
+        for (const Opened& opened : archives) {
+            const CpkEntry* entry = opened.archive.Find(target.name);
+            if (!entry) {
+                continue;
+            }
+            found = true;
+            const std::vector<uint8_t> data = opened.archive.Read(*entry);
+            const uint32_t crc = Crc32(data);
+            if (data.size() == target.size && (crc == target.crc_before || crc == target.crc_after)) {
+                continue;
+            }
+            if (std::find(opened.earlier.begin(), opened.earlier.end(), entry->path) == opened.earlier.end()) {
+                return refuse(target.name + " in " + Utf8(opened.archive.file().filename()) +
+                              " is not the file the patch was made for");
+            }
+        }
+        if (!found) {
+            return refuse(target.name + " is in none of the archives");
+        }
+    }
+    return true;
+}
+
+bool XboxPromptsAvailable(const std::filesystem::path& app0, const GameBuild& build, std::span<const uint8_t> xbox_patch) {
+    if (!build.xbox_prompts) {
+        return false;
+    }
+    if (!BaseBuildOf(build)) {
+        return true;
+    }
+    const std::optional<BlockPatch> patch = ParseBlockPatch(xbox_patch);
+    return patch && PromptPatchFits(app0, build, *patch);
+}
+
 PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build,
                                  std::span<const uint8_t> xbox_patch) {
     const std::vector<std::filesystem::path> archives = PromptArchives(app0, build);
@@ -101,11 +160,11 @@ PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBu
 PromptsResult SetPromptStyle(const std::filesystem::path& app0, const GameBuild& build, PromptStyle style,
                              std::span<const uint8_t> xbox_patch, const PatchHooks& hooks) {
     PromptsResult result;
+    if (style == PromptStyle::kXbox && !XboxPromptsAvailable(app0, build, xbox_patch)) {
+        result.detail = std::string("Xbox prompts are not available for ") + build.label;
+        return result;
+    }
     if (!build.xbox_prompts) {
-        if (style == PromptStyle::kXbox) {
-            result.detail = std::string("Xbox prompts are not validated for ") + build.label;
-            return result;
-        }
         result.ok = true;
         result.detail = "the game's own prompts";
         return result;

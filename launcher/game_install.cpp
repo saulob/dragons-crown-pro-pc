@@ -10,6 +10,8 @@
 #include <windows.h>
 #endif
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <optional>
@@ -493,6 +495,59 @@ InstallResult KeepBaseLanguages(const GameBuild& build, const fs::path& update, 
     return {};
 }
 
+bool IsArchive(const fs::path& file) {
+    std::string extension = Utf8(file.extension());
+    for (char& c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return extension == ".cpk";
+}
+
+// An update's archive that lacks entries of the base's archive at the same path holds only what the update changes: the
+// staged game gets the base's archive with all of the update's entries laid over it, and the update's archive is
+// consumed. A complete archive replaces the base's as a whole; one the reader cannot open fails the step.
+InstallResult ComposePartialArchives(const fs::path& update, const fs::path& staged) {
+    std::error_code ec;
+    std::vector<fs::path> archives;
+    for (fs::recursive_directory_iterator it(update, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec) && IsArchive(it->path())) {
+            archives.push_back(it->path());
+        }
+    }
+    if (ec) {
+        return Failure(InstallStatus::kReadFailed, "cannot list " + Utf8(update) + ": " + ec.message());
+    }
+    for (const fs::path& update_archive : archives) {
+        const fs::path staged_archive = staged / update_archive.lexically_relative(update);
+        CpkArchive base, changes;
+        if (!fs::is_regular_file(staged_archive, ec) || !base.Open(staged_archive)) {
+            continue;
+        }
+        if (std::string error; !changes.Open(update_archive, &error)) {
+            return Failure(InstallStatus::kReadFailed, "the update's " + Utf8(update_archive.filename()) + ": " + error);
+        }
+        if (std::all_of(base.entries().begin(), base.entries().end(),
+                        [&](const CpkEntry& entry) { return changes.Find(entry.path) != nullptr; })) {
+            continue;
+        }
+        const fs::path composed = WithSuffix(staged_archive, ".compose");
+        const OverlayResult overlaid =
+            OverlayArchive(staged_archive, update_archive, [](std::string_view) { return false; }, composed);
+        if (!overlaid.ok) {
+            return Failure(overlaid.update_unreadable ? InstallStatus::kReadFailed : InstallStatus::kWriteFailed,
+                           overlaid.detail);
+        }
+        if (overlaid.wrote) {
+            fs::remove(staged_archive, ec);
+            fs::rename(composed, staged_archive, ec);
+            if (ec) {
+                fs::remove(composed, ec);
+                return Failure(InstallStatus::kWriteFailed, "cannot place " + Utf8(staged_archive));
+            }
+        }
+        fs::remove(update_archive, ec);
+    }
+    return {};
+}
+
 InstallStatus FromPackage(PackageResult::Code code) {
     switch (code) {
     case PackageResult::kOk: return InstallStatus::kInstalled;
@@ -680,6 +735,9 @@ InstallResult StageUpdate(const fs::path& base_app0, const fs::path& update_dir,
         if (InstallResult kept = KeepBaseLanguages(*build, update_dir, staged_app0); !kept.ok()) {
             return kept;
         }
+    }
+    if (InstallResult composed = ComposePartialArchives(update_dir, staged_app0); !composed.ok()) {
+        return composed;
     }
     return OverlayUpdate(update_dir, staged_app0);
 }

@@ -572,6 +572,9 @@ static void site_tables(void) {
             CHECK(0 && "synthetic image");
             continue;
         }
+        uint32_t located[LZCNT_SITE_COUNT];
+        CHECK(lzcnt_compat_locate(image.bytes, build->image.size, located) == LZCNT_COMPAT_OK);
+        CHECK(memcmp(located, build->offsets, sizeof(located)) == 0);
         uint8_t *before = malloc(build->image.size);
         memcpy(before, image.bytes, build->image.size);
         const char *name = NULL;
@@ -634,6 +637,26 @@ static void patch_rejections(void) {
     CHECK(lzcnt_compat_apply(image.bytes, build->image.size, other->offsets, lzcnt_shapes, LZCNT_SITE_COUNT,
                              image.stubs, stubs) == LZCNT_COMPAT_BAD_SITE);
     CHECK(UNTOUCHED());
+
+    /* The search accepts the sites alone: an extra LZCNT, a missing one or a changed byte refuses the image. */
+    uint32_t located[LZCNT_SITE_COUNT];
+    static const uint8_t extra[] = {0xf3, 0x48, 0x0f, 0xbd, 0xc0};
+    const uint64_t free_at = build->offsets[0] - 64;
+    memcpy(image.bytes + free_at, extra, sizeof(extra));
+    CHECK(lzcnt_compat_locate(image.bytes, build->image.size, located) == LZCNT_COMPAT_UNKNOWN_IMAGE);
+    memset(image.bytes + free_at, 0, sizeof(extra));
+    const uint64_t last = build->offsets[LZCNT_SITE_COUNT - 1];
+    image.bytes[last] = 0x90;
+    CHECK(lzcnt_compat_locate(image.bytes, build->image.size, located) == LZCNT_COMPAT_UNKNOWN_IMAGE);
+    image.bytes[last] = lzcnt_shapes[LZCNT_SITE_COUNT - 1].bytes[0];
+    for (size_t i = 0; i < LZCNT_SITE_COUNT; i += 7) {
+        const uint64_t tail = build->offsets[i] + lzcnt_shapes[i].length - 1;
+        image.bytes[tail] ^= 0x01;
+        CHECK(lzcnt_compat_locate(image.bytes, build->image.size, located) == LZCNT_COMPAT_UNKNOWN_IMAGE);
+        image.bytes[tail] ^= 0x01;
+    }
+    CHECK(UNTOUCHED());
+    CHECK(lzcnt_compat_locate(image.bytes, build->image.size, located) == LZCNT_COMPAT_OK);
     free(before);
     free(image.bytes);
 #undef UNTOUCHED
@@ -706,6 +729,9 @@ static void real_images(void) {
         }
         CHECK(size == build->image.size);
         CHECK(count_lzcnt_bytes(image, size) == 62);
+        uint32_t located[LZCNT_SITE_COUNT];
+        CHECK(lzcnt_compat_locate(image, size, located) == LZCNT_COMPAT_OK);
+        CHECK(memcmp(located, build->offsets, sizeof(located)) == 0);
         uint8_t *before = malloc(size);
         memcpy(before, image, size);
 

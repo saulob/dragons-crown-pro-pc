@@ -248,8 +248,9 @@ void TestOnlineLockout() {
     // The log line comes from the lock first on every build, never from the build's cheat support alone.
     CHECK(lock < loader.find("runtime_cheats_log_state(known_build && game_build.cheats);"));
     CHECK(loader.find("Cheats: enabled") == std::string::npos);
-    CHECK(loader.find("if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) runtime_cheat_hooks_install(") !=
-          std::string::npos);
+    CHECK(loader.find("if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) {") != std::string::npos);
+    CHECK(loader.find("runtime_cheat_hooks_install(image,size,entry,") != std::string::npos);
+    CHECK(loader.find("runtime_cheat_hooks_install_located(") != std::string::npos);
     const size_t skip = loader.find("skip_offers_install(");
     CHECK(skip != std::string::npos && loader.find("online_locked", skip) == std::string::npos);
     const std::string online = ReadSource("src/runtime_online.cpp");

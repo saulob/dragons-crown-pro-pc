@@ -113,24 +113,31 @@ bool ParsePattern(std::string_view text, Pattern& pattern) {
         }
         i += 2;
     }
-    const auto solid = std::find(pattern.wildcard.begin(), pattern.wildcard.end(), uint8_t{0});
-    if (solid == pattern.wildcard.end()) {
-        return false;
+    constexpr uint8_t kCommon[] = {0x00, 0x48, 0x89, 0x8b, 0x55, 0xe8, 0x90, 0xff, 0x41, 0x4c, 0x83, 0x0f, 0x01, 0xc5};
+    const auto rank = [&](uint8_t byte) { return std::find(std::begin(kCommon), std::end(kCommon), byte) == std::end(kCommon); };
+    bool found = false;
+    for (size_t i = 0; i < pattern.bytes.size(); ++i) {
+        if (pattern.wildcard[i]) {
+            continue;
+        }
+        if (!found || (rank(pattern.bytes[i]) && !rank(pattern.bytes[pattern.anchor_index]))) {
+            pattern.anchor_index = i;
+            found = true;
+        }
     }
-    pattern.anchor_index = static_cast<size_t>(solid - pattern.wildcard.begin());
-    return true;
+    return found;
 }
 
-std::vector<uint64_t> Search(const MappedImage& image, const Pattern& pattern, size_t limit, size_t& total) {
+std::vector<uint64_t> Search(const uint8_t* base, uint64_t size, std::span<const Range> executable, const Pattern& pattern,
+                             size_t limit, size_t& total) {
     std::vector<uint64_t> found;
     total = 0;
     const size_t length = pattern.bytes.size();
     const uint8_t key = pattern.bytes[pattern.anchor_index];
-    for (const Range& range : image.executable) {
-        if (range.end > image.bytes.size() || range.end < range.begin || range.end - range.begin < length) {
+    for (const Range& range : executable) {
+        if (range.end > size || range.end < range.begin || range.end - range.begin < length) {
             continue;
         }
-        const uint8_t* base = image.bytes.data();
         const uint64_t last = range.end - length; // the last start
         uint64_t at = range.begin + pattern.anchor_index;
         const uint64_t scan_end = last + pattern.anchor_index + 1;
@@ -316,15 +323,15 @@ LzcntResult ScanLzcnt(const MappedImage& image) {
 
 ResolutionSiteResult ScanResolution(const MappedImage& image) {
     ResolutionSiteResult result;
-    result.expected = DCP_CUSA10209_102_SIGNATURE_COUNT;
+    result.expected = DCP_RENDER_SIZE_SIGNATURE_COUNT;
     if (image.bytes.empty()) {
         result.missing = result.expected;
         return result;
     }
-    DcpResolutionSite sites[DCP_CUSA10209_102_SIGNATURE_COUNT];
-    DcpResolutionSignatureResult found[DCP_CUSA10209_102_SIGNATURE_COUNT] = {};
-    const int all = dcp_find_resolution_sites(image.bytes.data(), image.bytes.size(), dcp_cusa10209_102_signatures,
-                                              DCP_CUSA10209_102_SIGNATURE_COUNT, sites, found);
+    DcpResolutionSite sites[DCP_RENDER_SIZE_SIGNATURE_COUNT];
+    DcpResolutionSignatureResult found[DCP_RENDER_SIZE_SIGNATURE_COUNT] = {};
+    const int all = dcp_find_resolution_sites(image.bytes.data(), image.bytes.size(), dcp_render_size_signatures,
+                                              DCP_RENDER_SIZE_SIGNATURE_COUNT, sites, found);
     for (const DcpResolutionSignatureResult& item : found) {
         if (item.matches >= 2) {
             ++result.ambiguous;
@@ -486,12 +493,17 @@ bool FileOffsetOf(const ExecutableInfo& info, uint64_t rva, uint64_t& file_offse
 }
 
 std::vector<uint64_t> FindPattern(const MappedImage& image, std::string_view pattern, size_t limit, size_t& total) {
+    return FindPattern(image.bytes.data(), image.bytes.size(), image.executable, pattern, limit, total);
+}
+
+std::vector<uint64_t> FindPattern(const uint8_t* bytes, uint64_t size, std::span<const Range> executable,
+                                  std::string_view pattern, size_t limit, size_t& total) {
     Pattern parsed;
     total = 0;
     if (!ParsePattern(pattern, parsed)) {
         return {};
     }
-    return Search(image, parsed, limit, total);
+    return Search(bytes, size, executable, parsed, limit, total);
 }
 
 uint64_t SolidFingerprint(const MappedImage& image, std::string_view pattern, uint64_t start) {

@@ -4,7 +4,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <vector>
 
+#include "feature_sites.h"
 #include "guest_hook.h"
 
 namespace dcp::cheats {
@@ -53,5 +56,18 @@ struct GuestFunctions {
 void SetGuestFunctions(const GuestFunctions& functions);
 
 std::span<const GuestHook> Hooks();
+
+// The hook table at the sites a locator found; the originals of the call and jump hooks are the image's own.
+std::vector<GuestHook> HooksAt(const uint32_t (&offsets)[DCP_CHEAT_HOOKS], const uint8_t* image, uint64_t size);
+
+// The image offsets of the game functions in the order of DcpCheatFunction, for the one supported static image.
+struct FunctionOffsets {
+    uint64_t at[DCP_CHEAT_FUNCTIONS];
+};
+FunctionOffsets StaticFunctionOffsets();
+
+// Whether the displacements a build's own instructions encode are the ones the handlers use; `mismatch` names the first
+// field that differs.
+bool LayoutMatches(const uint32_t (&layout)[DCP_LAYOUT_COUNT], std::string* mismatch = nullptr);
 
 } // namespace dcp::cheats

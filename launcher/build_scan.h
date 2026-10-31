@@ -154,6 +154,9 @@ ScanResult ScanImage(const MappedImage& image);
 // Matches of one hex pattern ("??" wildcards) inside the executable ranges, as the offsets of the pattern's start.
 // Empty for a pattern that does not parse. `total` gets the number of matches, `limit` caps the offsets kept.
 std::vector<uint64_t> FindPattern(const MappedImage& image, std::string_view pattern, size_t limit, size_t& total);
+// The same over bytes owned by someone else, with no copy.
+std::vector<uint64_t> FindPattern(const uint8_t* bytes, uint64_t size, std::span<const Range> executable,
+                                  std::string_view pattern, size_t limit, size_t& total);
 
 // FNV-1a over the pattern's solid bytes as they are at `start`; the fingerprint a later reader can recompute.
 uint64_t SolidFingerprint(const MappedImage& image, std::string_view pattern, uint64_t start);
