@@ -26,12 +26,12 @@ const char* PromptStyleKey(PromptStyle style);
 const char* PromptStyleLabel(PromptStyle style);
 std::optional<PromptStyle> ParsePromptStyle(std::string_view key);
 
-// The archives the patch touches, among those present in the prepared game folder. Only a build whose Xbox patch is
-// validated has any: the regional archive holds the button atlas the game reads, DRACRO.CPK is patched too so the
-// choice holds either way.
+// The archives the patch touches: the build's regional archive and DRACRO.CPK, when present and holding a button atlas
+// (stage/Interface*.ftx). Only a build whose Xbox patch is validated has any.
 std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0, const GameBuild& build);
 
-// True when every entry the patch changes is in the build's prompt archives and each copy is the file the patch was made
+// True when the patch covers every button atlas of the build's prompt archives, each target the build has is there (a
+// language's copy only when the regional archive holds button atlases), and each copy is the file the patch was made
 // for, or already its result, so the patch applies whole; `detail` names the first entry that does not.
 bool PromptPatchFits(const std::filesystem::path& app0, const GameBuild& build, const BlockPatch& patch,
                      std::string* detail = nullptr);

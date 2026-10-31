@@ -9,7 +9,8 @@
   Every test runs even after one fails; the exit code is non-zero when any of them failed. The tests that decide the
   supported-build parity contract (the profile and capability matrix, update archives and languages, render size, True
   Ultrawide, LZCNT, System type, Skip Offers, startup save and cheat mappings, Online Play structure, unknown builds) are
-  marked in the summary: if one fails, no build is reported as passing.
+  marked in the summary: if one fails, no build is reported as passing. Every supported build must offer every GLOBAL
+  feature of CUSA10454 1.00; the global feature summary counts the builds that do.
 
   Local boot images (build\image) and prepared folders (game\prepared) are read only. A build without one is proven by
   synthetic images and reported as "PASS synthetic" (no real executable was inspected); "PASS real" means its
@@ -98,6 +99,19 @@ if ($rows.Count -eq 0) {
     if (-not $failed.Contains('dcp-build-parity-tests')) { $failed.Add('dcp-build-parity-tests') }
 }
 foreach ($row in $rows) {
+    $status = $row[2]
+    $good = $status -like 'PASS*' -and $parityFailed.Count -eq 0
+    if ($status -like 'PASS*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }
+    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if ($good) { 'Green' } else { 'Red' })
+}
+Write-Host ''
+Write-Host 'Global feature parity:' -ForegroundColor Cyan
+$features = @($parityOutput | Where-Object { $_ -like 'PARITY-FEATURE|*' } | ForEach-Object { ,$_.Split('|') })
+if ($features.Count -eq 0) {
+    Write-Host '  no result from dcp-build-parity-tests' -ForegroundColor Red
+    if (-not $failed.Contains('dcp-build-parity-tests')) { $failed.Add('dcp-build-parity-tests') }
+}
+foreach ($row in $features) {
     $status = $row[2]
     $good = $status -like 'PASS*' -and $parityFailed.Count -eq 0
     if ($status -like 'PASS*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }

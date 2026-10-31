@@ -1,4 +1,5 @@
-// The native hooks behind the cheats, on the loaded v1.03 image. The handlers are exposed for the tests.
+// The native hooks behind the cheats: tables for CUSA10454 1.00, located sites for the other builds. The handlers are
+// exposed for the tests.
 #pragma once
 
 #include <cstddef>

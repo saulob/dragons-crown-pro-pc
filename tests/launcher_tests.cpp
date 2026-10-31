@@ -1160,13 +1160,14 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
     WriteAll(file, "dcp_japanese_npc_voices = garbage\n");
     CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
 
-    // A saved On is inert on every build without the hook, found by table or by signature.
+    // The Japanese builds already speak Japanese; every other build has the toggle, by table or by signature.
     CHECK(SupportsJapaneseNpcVoices(&kUs101));
-    CHECK(!SupportsJapaneseNpcVoices(&kJp100));
-    CHECK(!SupportsJapaneseNpcVoices(&kJp102));
-    CHECK(!SupportsJapaneseNpcVoices(&kJp103));
-    CHECK(!SupportsJapaneseNpcVoices(&kCk100));
-    CHECK(!SupportsJapaneseNpcVoices(&kCk));
+    CHECK(SupportsJapaneseNpcVoices(&kCk100));
+    CHECK(SupportsJapaneseNpcVoices(&kCk));
+    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
+        CHECK(!SupportsJapaneseNpcVoices(japan) && NativeJapaneseNpcVoices(japan));
+    }
+    CHECK(!NativeJapaneseNpcVoices(&kUs) && !NativeJapaneseNpcVoices(&kCk100) && !NativeJapaneseNpcVoices(nullptr));
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
 }
 
@@ -4600,8 +4601,10 @@ void TestLayers(const fs::path& base) {
     CHECK(std::string(kJp100.eboot_sha256) == "e838e5c551f4ea2d13a13246dcd5474a888c56aa8abf5110f1219c0ceb0ae05f");
     CHECK(std::string(kJp102.eboot_sha256) == "e512685aef4fa1e50eafec8c9699b611992356cbae84e9b0147febceb49843fe");
     CHECK(std::string(kJp103.eboot_sha256) == "dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64");
-    CHECK(!kJp100.cheats && !kJp100.xbox_prompts && !kJp102.cheats && !kJp102.xbox_prompts && !kJp103.cheats &&
-          !kJp103.xbox_prompts);
+    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
+        CHECK(japan->cheats && japan->xbox_prompts && japan->true_ultrawide && japan->features_by_signature);
+        CHECK(!japan->japanese_npc_voices && CheatsAvailable(japan));
+    }
     CheckSites(kJp100);
     CheckSites(kJp102);
     CheckSites(kJp103);
@@ -4789,12 +4792,40 @@ void TestLayers(const fs::path& base) {
         CHECK(merged.State() == GameFileState::kDifferentVersion);
     }
     {
-        const fs::path prompts = root / "jp-prompts";
-        WriteAll(prompts / "DRACRO_PATCH_JP.CPK", "jp archive");
-        WriteAll(prompts / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(prompts, kJp103).empty() && InstalledPromptStyle(prompts, kJp103, {}) == PromptStyle::kPlayStation);
-        CHECK(!SetPromptStyle(prompts, kJp103, PromptStyle::kXbox, {}).ok);
-        CHECK(ReadAll(prompts / "DRACRO_PATCH_JP.CPK") == "jp archive" && ReadAll(prompts / "DRACRO.CPK") == "shared archive");
+        // The Japanese button atlas is DRACRO.CPK's alone: the update's archive is left as it is, and the base's copy
+        // behind the hard link is never written.
+        using namespace cpk_test;
+        const fs::path base_game = root / "jp-prompts-base", prompts = root / "jp-prompts";
+        std::string atlas(8192, '\0');
+        for (size_t i = 0; i < atlas.size(); ++i) atlas[i] = char((i * 5 + i / 16) & 255);
+        std::string xbox = atlas;
+        xbox.replace(0x200, 16, 16, 'X');
+        const std::string patch = MakePatch({{"stage/Interface.ftx", {atlas, xbox}}, {"stage/Interface_US.ftx", {atlas, xbox}}});
+        const std::string shared = BuildCpk({{"stage/Interface.ftx", atlas, true}, {"msgsheet/SystemMsg.fms", "FMSB", false}}, false);
+        const std::string update = BuildCpk({{"msgsheet/Other.fms", "FMSB", false}}, false);
+        WriteAll(base_game / "DRACRO.CPK", shared);
+        fs::create_directories(prompts);
+        std::error_code ec;
+        fs::create_hard_link(base_game / "DRACRO.CPK", prompts / "DRACRO.CPK", ec);
+        if (ec) {
+            fs::copy_file(base_game / "DRACRO.CPK", prompts / "DRACRO.CPK");
+        }
+        WriteAll(prompts / "DRACRO_PATCH_JP.CPK", update);
+        CHECK(PromptArchives(prompts, kJp103) == std::vector<fs::path>{prompts / "DRACRO.CPK"});
+        CHECK(PromptArchives(base_game, kJp100) == std::vector<fs::path>{base_game / "DRACRO.CPK"});
+        CHECK(XboxPromptsAvailable(prompts, kJp103, Span(patch)) && XboxPromptsAvailable(base_game, kJp100, Span(patch)));
+        CHECK(SetPromptStyle(prompts, kJp103, PromptStyle::kXbox, Span(patch)).ok);
+        CHECK(InstalledPromptStyle(prompts, kJp103, Span(patch)) == PromptStyle::kXbox);
+        CHECK(ReadAll(base_game / "DRACRO.CPK") == shared && ReadAll(prompts / "DRACRO_PATCH_JP.CPK") == update);
+        CpkArchive patched;
+        CHECK(patched.Open(prompts / "DRACRO.CPK") && Bytes(patched.Read(*patched.Find("stage/Interface.ftx"))) == xbox);
+        CHECK(SetPromptStyle(prompts, kJp103, PromptStyle::kPlayStation, {}).ok && ReadAll(prompts / "DRACRO.CPK") == shared);
+
+        WriteAll(prompts / "DRACRO_PATCH_JP.CPK", BuildCpk({{"stage/Interface_JP.ftx", atlas, false}}, false));
+        std::string why;
+        CHECK(!PromptPatchFits(prompts, kJp103, *ParseBlockPatch(Span(patch)), &why));
+        CHECK(why == "stage/Interface_JP.ftx in DRACRO_PATCH_JP.CPK is not covered by the patch");
+        CHECK(!XboxPromptsAvailable(prompts, kJp103, Span(patch)));
     }
 }
 
@@ -4820,14 +4851,15 @@ void TestUsBuild() {
     CHECK(kUs101.features_by_signature && !kUs.features_by_signature);
     CHECK(kUs101.resolution_by_signature && !RestrictedToNativeResolution(&kUs101));
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(build.japanese_npc_voices == (&build == &kUs || &build == &kUs101));
+        CHECK(build.japanese_npc_voices == !NativeJapaneseNpcVoices(&build));
         CHECK(SupportsJapaneseNpcVoices(&build) == build.japanese_npc_voices);
     }
     CHECK(BaseBuildOf(kUs101) == &kUs && BaseBuildOf(kUs) == nullptr);
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(build.cheats == (&build == &kUs || &build == &kUs101));
-        CHECK(build.xbox_prompts == (std::string_view(build.title_id) == kUs.title_id));
+        CHECK(build.cheats && CheatsAvailable(&build) && build.xbox_prompts);
+        CHECK(build.features_by_signature == (&build != &kUs));
     }
+    CHECK(CheatsAvailable(nullptr));
 
     CHECK(CheckSfoIdentity(SfoFor(kUs, "01.00", "01.03")).build == &kUs);
     CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gd")).build == &kUs);
@@ -5129,7 +5161,9 @@ void TestSafeMode(const fs::path& base) {
     CHECK(!InstalledSafeMode(app0) && ReadAll(app0 / "DRACRO.CPK") == original);
 
     CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, true, {}, Span(safe)).ok && InstalledSafeMode(app0));
-    CHECK(!SetGamePatches(app0, kJp103, PromptStyle::kXbox, true, Span(xbox), Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(SetGamePatches(app0, kJp103, PromptStyle::kXbox, true, Span(xbox), Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(read("DRACRO.CPK", "stage/Interface.ftx") == want && read("DRACRO.CPK", kSpiderEntry) == want_spider);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us);
     CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, false, {}, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
 }
 
@@ -5141,7 +5175,7 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(FinishedLayer(kCk).app_ver) == "01.02" && std::string(FinishedLayer(kCk).sfo_version) == "01.00" && std::string(kCk.version) == "1.02");
     CHECK(std::string(kCk.eboot_sha256) == "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5");
     CHECK(std::string(kCk.regional_archive) == "DRACRO_CK.CPK" && std::string(kUs.regional_archive) == "DRACRO_US.CPK");
-    CHECK(!kCk.cheats && !kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
+    CHECK(kCk.cheats && kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
     // 1.00 and 1.02 are different executables: 1.00 has verified render resolution sites, 1.02 finds them by signature.
     CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.empty());
     CHECK(kCk100.resolution_sites.size() == 23);
@@ -5155,7 +5189,7 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(FinishedLayer(kCk100).app_ver) == "01.00" && std::string(FinishedLayer(kCk100).sfo_version) == "01.02");
     CHECK(std::string(kCk100.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
     CHECK(std::string(kCk100.eboot_sha256) != kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
-    CHECK(!kCk100.cheats && !kCk100.xbox_prompts);
+    CHECK(kCk100.cheats && kCk100.xbox_prompts && kCk100.japanese_npc_voices && kCk100.features_by_signature);
     CHECK(std::string(kCk100.folder) != kCk.folder);
     CHECK(kCk100.layers.size() == 1 && BaseBuildOf(kCk) == &kCk100 && BaseBuildOf(kCk100) == nullptr);
     CHECK(kCk.layers.size() == 2 && kCk.layers[1].update);
@@ -5208,7 +5242,7 @@ void TestBuilds(const fs::path& base) {
     WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\",\n  \"app_ver\": \"01.02\"\n}");
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
-    CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
+    CHECK(ck_game.cheats == 1 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
     CHECK(ck_game.true_ultrawide == 1 && ck_game.features_by_signature == 1);
 
     {
@@ -5259,14 +5293,26 @@ void TestBuilds(const fs::path& base) {
     }
 
     {
+        // DRACRO_CK.CPK holds message sheets and no button atlas: only DRACRO.CPK takes the patch.
+        using namespace cpk_test;
         const fs::path app0 = base / "ck-prompts";
         fs::remove_all(app0);
-        WriteAll(app0 / "DRACRO_CK.CPK", "ck archive");
-        WriteAll(app0 / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(app0, kCk).empty() && InstalledPromptStyle(app0, kCk, {}) == PromptStyle::kPlayStation);
-        CHECK(!SetPromptStyle(app0, kCk, PromptStyle::kXbox, {}).ok);
+        std::string atlas(8192, '\0');
+        for (size_t i = 0; i < atlas.size(); ++i) atlas[i] = char((i * 3 + i / 32) & 255);
+        std::string xbox = atlas;
+        xbox.replace(0x400, 16, 16, 'X');
+        const std::string patch = MakePatch({{"stage/Interface.ftx", {atlas, xbox}}, {"stage/Interface_US.ftx", {atlas, xbox}}});
+        const std::string regional = BuildCpk({{"msgsheet/SystemMsg_CT.fms", "FMSB", false}, {"msgsheet/SystemMsg_KR.fms", "FMSB", true}}, true);
+        const std::string shared = BuildCpk({{"stage/Interface.ftx", atlas, true}}, false);
+        WriteAll(app0 / "DRACRO_CK.CPK", regional);
+        WriteAll(app0 / "DRACRO.CPK", shared);
+        CHECK(PromptArchives(app0, kCk) == std::vector<fs::path>{app0 / "DRACRO.CPK"});
+        std::string why;
+        CHECK(PromptPatchFits(app0, kCk, *ParseBlockPatch(Span(patch)), &why) && XboxPromptsAvailable(app0, kCk, Span(patch)));
+        CHECK(SetPromptStyle(app0, kCk, PromptStyle::kXbox, Span(patch)).ok);
+        CHECK(InstalledPromptStyle(app0, kCk, Span(patch)) == PromptStyle::kXbox && ReadAll(app0 / "DRACRO_CK.CPK") == regional);
         CHECK(SetPromptStyle(app0, kCk, PromptStyle::kPlayStation, {}).ok);
-        CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == "ck archive" && ReadAll(app0 / "DRACRO.CPK") == "shared archive");
+        CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == regional && ReadAll(app0 / "DRACRO.CPK") == shared);
     }
 
     // CUSA10209 1.02 has no verified render resolution sites, so it can never receive the 1.00 table: its table is empty

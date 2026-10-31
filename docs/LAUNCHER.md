@@ -118,22 +118,23 @@ base's archive with every entry of the update's laid over it (the USA 1.01 regio
 sets, as above). A complete archive, or one the reader cannot open, replaces the base's as a whole. The base folder is
 only read, and a failed step leaves the active build as it was.
 
-**Features by build.** Each update offers everything its base offers:
+**Features by build.** Every build offers every feature of USA 1.00; Japanese NPC Voices is not applicable to the
+Japanese builds, whose NPCs already speak Japanese:
 
 | Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 |
 | --- | --- | --- | --- | --- | --- |
 | Menu & Subtitles | 5 Western | 5 Western | Japanese | Chinese, Korean | Chinese, Korean |
 | Render resolution, Aspect Ratio | yes | yes (sites found by signature) | yes | yes | yes (sites found by signature) |
-| True Ultrawide | yes | yes (found by signature) | yes | yes | yes (found by signature) |
+| True Ultrawide | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
 | Story and Tutorial Skip Offers | yes | yes (found by signature) | yes | yes | yes (found by signature) |
 | Online Play, System type | yes | yes (found by signature) | yes | yes | yes (found by signature) |
 | Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) |
-| Cheats | yes | yes (found by signature) | no | no | no |
-| Japanese NPC Voices | yes | yes (found by signature) | not applicable | no | no |
-| Xbox prompts | yes | yes, when its archives hold the patch's files | no | no | no |
+| Cheats | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Japanese NPC Voices | yes | yes (found by signature) | not applicable | yes (found by signature) | yes (found by signature) |
+| Xbox prompts | yes | yes, when its archives hold the patch's files | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK`, when it holds the patch's file |
 | Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes |
 
-"Found by signature" means the build has no table of its own: the loader finds each site in the build's own image from
+"Found by signature" means the loader does not use a table: it finds each site in the build's own image from
 the byte patterns that give exactly the tables of the five builds checked locally, uses them only when every pattern
 matches the expected number of times, and otherwise leaves the feature off (Render resolution: the game does not start
 with a custom size). Cheats, Japanese NPC Voices and True Ultrawide need all of their sites (25 hooks and 15 functions,
@@ -377,9 +378,10 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
-- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). CUSA10454 1.00 and 1.01 USA only; on 1.01 the option
-  appears only while the installed `DRACRO.CPK` holds the sound table and the Japanese banks (`launcher/npc_voice_resources.h`),
-  and it never changes the Menu & Subtitles language. It is hidden for the other builds. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
+- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). USA and Asia and Hong Kong builds; on the builds
+  whose hooks are found by signature the option appears only while the installed `DRACRO.CPK` holds the sound table and
+  the Japanese banks (`launcher/npc_voice_resources.h`), and it never changes the Menu & Subtitles language. It is hidden
+  for the Japanese builds, which already use the Japanese NPC voices. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
   town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
   are untouched.
 - **Frame rate** (30 FPS, 60 FPS (Original), 90, 120, 144, 165, 240 FPS, Unlimited; `frame_rate`, 60 FPS (Original) by
@@ -430,8 +432,8 @@ rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Ma
 Points**, **Infinite Skill Uses**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
 below them the **Movement Speed** combo
 (Off, 2x, 4x) and the **Experience Multiplier** combo (Off, 2x, 5x, 10x, 100x).
-Cheats work on the CUSA10454 1.00 and 1.01 (US) builds; on the Japanese and Asia and Hong Kong builds, whose base
-packages never had them, the page and the menu show them as unavailable. All are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
+Cheats work on every supported build: the tables of CUSA10454 1.00, or the sites found by signature on the others. All
+are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
 them back to Off. The saved values are the start of every game session; the F10 menu changes the running session only
 and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
 
@@ -455,12 +457,14 @@ The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
 atlas (`Interface_arranged000`) in `stage/Interface.ftx` and in each language's `stage/Interface_XX.ftx` (DE, ES, FR, IT,
 UK and US, the same bytes in all of them), and the port has no way to swap textures at run time, so the choice is made
-in the installed game files: Xbox applies a block patch to `DRACRO_US.CPK` and `DRACRO.CPK`
+in the installed game files: Xbox applies a block patch to the archives that hold a button atlas, `DRACRO_US.CPK` and
+`DRACRO.CPK` for the USA builds and `DRACRO.CPK` alone for the Japanese and Asia and Hong Kong builds
 (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. USA 1.01 offers Xbox only while its
 finished archives hold every file the patch was made for (or its patched result): each is read and its CRC checked when
 the launcher starts or the build changes, and an update that changed one of them shows PlayStation only, with nothing
-written. The Japanese and Asia and Hong Kong builds have no validated Xbox patch: they always show the PlayStation
-prompts and their archives are not touched.
+written. The Japanese and Asia and Hong Kong 1.02 updates are checked the same way, and an archive holding a button atlas
+the patch does not cover is refused. Their `stage/Interface.ftx` is the same file as the USA one; the translated
+touchpad wording of the Western message sheets has no counterpart in their own sheets.
 The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the
 4 × 4 blocks that differ between the game's atlas and the repainted one, about 2 MB, with the CRC32 of each pack
 before and after, and the repainted glyphs sit in the same rectangles as the game's, so the sprite definitions

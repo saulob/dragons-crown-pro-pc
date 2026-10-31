@@ -320,14 +320,14 @@ void TestCheatLockout(const fs::path& base) {
         CHECK(cheats::MenuKeyPress(false, false, false, false) == cheats::MenuKeyAction::Open);
     }
 
-    // Asia/Hong Kong 1.00 has no cheat hooks; the log used to be chosen by that alone, so it said "enabled: none"
-    // while Online Play had locked the cheats.
+    // The log used to be chosen by the build's hooks alone, so a build without them said "enabled: none" while Online
+    // Play had locked the cheats. Asia/Hong Kong 1.00 has the hooks now; the lock wins either way.
     const GameBuild& asia = SupportedBuilds()[5];
-    CHECK(Key(asia) == "CUSA10209-1.00" && !asia.cheats);
+    CHECK(Key(asia) == "CUSA10209-1.00" && asia.cheats);
     Configure(base, "CUSA10209-1.00", true);
     StartCheats(asia);
-    const int by_build_only = asia.cheats ? RUNTIME_CHEATS_LISTED : RUNTIME_CHEATS_UNAVAILABLE;
-    CHECK(runtime_cheats_online_locked() == 1 && by_build_only != RUNTIME_CHEATS_ONLINE_LOCKED);
+    CHECK(runtime_cheats_online_locked() == 1 && runtime_cheats_hooks_wanted(asia.cheats) == 0);
+    CHECK(runtime_cheats_log_state(0) == RUNTIME_CHEATS_ONLINE_LOCKED);
     CHECK(runtime_cheats_log_state(asia.cheats) == RUNTIME_CHEATS_ONLINE_LOCKED);
     Configure(base, "CUSA10209-1.00", false);
     runtime_cheats_set_online(0);

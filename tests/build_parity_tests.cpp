@@ -1,11 +1,12 @@
 // The supported-build parity gate (tools/test.ps1), without the game or any window.
 //
-// Every supported build has one row of the contract below. The test fails when a build has no row, when the launcher's
-// capability gates and the runtime mappings disagree, when an update loses anything its base offers, when a mapping is
-// partial, ambiguous or overlapping, or when an unknown executable could reach a supported build's mapping. Local boot images and prepared folders under
-// build/image and game/prepared are read only; a build without one is proven by synthetic images and reported as such.
+// Every supported build must offer every GLOBAL feature of CUSA10454 1.00, and the launcher, the runtime and the contract
+// below must agree on it. The test also fails when a build has no row, when an update loses anything its base offers,
+// when a mapping is partial, ambiguous or overlapping, or when an unknown executable could reach a supported build's
+// mapping. Local boot images and prepared folders under build/image and game/prepared are read only; a build without
+// one is proven by synthetic images and reported as such.
 //
-// Stdout ends with PARITY-BUILD lines that tools/test.ps1 turns into its summary.
+// Stdout ends with PARITY-BUILD and PARITY-FEATURE lines that tools/test.ps1 turns into its summary.
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <string>
@@ -20,9 +22,13 @@
 #include <vector>
 
 #include "cheat_hooks.h"
+#include "controller_prompts.h"
+#include "cpk_patch.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "feature_sites.h"
 #include "game_files.h"
+#include "game_patches.h"
 #include "game_profile.h"
 #include "lzcnt_compat.h"
 #include "npc_voice_resources.h"
@@ -55,10 +61,6 @@ std::map<std::string, int> g_scope_failures;
     } while (0)
 
 enum class Mapping { kNone, kTable, kSignature };
-
-const char* MappingName(Mapping mapping) {
-    return mapping == Mapping::kTable ? "table" : mapping == Mapping::kSignature ? "signature" : "none";
-}
 
 std::string Key(const GameBuild& build) {
     return std::string(build.title_id) + "-" + build.version;
@@ -95,7 +97,7 @@ bool IsUs100(const GameBuild& build) {
     return id && id->size == cheats::kSupportedImage.size && id->entry == cheats::kSupportedImage.entry;
 }
 
-// What the launcher offers and the loader can install, derived from the profile and the runtime tables.
+// What the profile and the runtime tables provide, feature by feature.
 struct Capabilities {
     bool cheats = false, xbox_prompts = false, npc_voices = false, true_ultrawide = false, custom_resolution = false;
     Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, system_type = Mapping::kNone,
@@ -124,28 +126,52 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     return caps;
 }
 
-struct Contract {
-    const char* label;
-    bool cheats, xbox_prompts, npc_voices, true_ultrawide, custom_resolution;
-    Mapping resolution, skip_offers, system_type, lzcnt, startup_save;
-    const char* languages;
+// The PC-port features CUSA10454 1.00 defines. GLOBAL: every supported build must offer it. Japanese NPC Voices is
+// REGION-SPECIFIC: a toggle where the game speaks English to NPCs, NOT APPLICABLE where it already speaks Japanese.
+enum Feature : size_t {
+    kCheats,
+    kOnlinePlay,
+    kTrueUltrawide,
+    kRenderResolution,
+    kAspectRatio,
+    kStorySkip,
+    kTutorialSkip,
+    kLzcnt,
+    kArachnophobia,
+    kController,
+    kKeyboard,
+    kGraphics,
+    kSaveLoad,
+    kXboxPrompts,
+    kJapaneseNpcVoices,
+    kFeatureCount
 };
 
-constexpr Mapping T = Mapping::kTable, S = Mapping::kSignature, N = Mapping::kNone;
-const char* const kWestern = "english french german italian spanish";
+const char* const kFeatureNames[kFeatureCount] = {
+    "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
+    "Story Skip", "Tutorial Skip", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
+    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices"};
 
-// One row per supported build. Features every build offers regardless of its executable (frame rate options, frame rate
-// and render resolution in the title, Story and Tutorial Skip Offers, Arachnophobia Safe Mode, graphics filters,
-// presentation and window modes, keyboard and controller mapping, Online Play) have no column: the rows' mappings make
-// them available, and TestLauncherGates fails if the launcher starts gating one by build.
+// One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
+struct Contract {
+    const char* label;
+    bool native_japanese_voices; // Japanese NPC Voices NOT APPLICABLE: the build already speaks Japanese
+    Mapping startup_save;        // the Japanese builds' startup save step, part of their save handling
+    const char* languages;       // the regional base's languages; an update keeps all of them
+};
+
+constexpr Mapping T = Mapping::kTable, N = Mapping::kNone;
+const char* const kWestern = "english french german italian spanish";
+const char* const kAsia = "traditional_chinese korean";
+
 const Contract kContracts[] = {
-    {"CUSA10454 1.00 USA", true, true, true, true, true, T, T, T, T, N, kWestern},
-    {"CUSA10454 1.01 USA", true, true, true, true, true, S, S, S, S, N, kWestern},
-    {"CUSA07001 1.00 Japan", false, false, false, true, true, T, T, T, T, T, "japanese"},
-    {"CUSA07001 1.02 Japan", false, false, false, true, true, T, T, T, T, T, "japanese"},
-    {"CUSA07001 1.03 Japan", false, false, false, true, true, T, T, T, T, T, "japanese"},
-    {"CUSA10209 1.00 Asia/Hong Kong", false, false, false, true, true, T, T, T, T, N, "traditional_chinese korean"},
-    {"CUSA10209 1.02 Asia/Hong Kong", false, false, false, true, true, S, S, S, S, N, "traditional_chinese korean"},
+    {"CUSA10454 1.00 USA", false, N, kWestern},
+    {"CUSA10454 1.01 USA", false, N, kWestern},
+    {"CUSA07001 1.00 Japan", true, T, "japanese"},
+    {"CUSA07001 1.02 Japan", true, T, "japanese"},
+    {"CUSA07001 1.03 Japan", true, T, "japanese"},
+    {"CUSA10209 1.00 Asia/Hong Kong", false, N, kAsia},
+    {"CUSA10209 1.02 Asia/Hong Kong", false, N, kAsia},
 };
 
 // Each update's chain: the base it must match, then the siblings that must match each other.
@@ -178,6 +204,118 @@ const Contract* FindContract(std::string_view label) {
     return nullptr;
 }
 
+// What the loader reads for a build, filled as dcp_game_build fills it.
+DcpGameBuild LoaderView(const GameBuild& build) {
+    DcpGameBuild game{};
+    game.label = build.label;
+    game.cheats = build.cheats;
+    game.japanese_npc_voices = build.japanese_npc_voices;
+    game.true_ultrawide = build.true_ultrawide;
+    game.resolution_sites = build.resolution_sites.data();
+    game.resolution_site_count = build.resolution_sites.size();
+    game.resolution_by_signature = build.resolution_by_signature;
+    game.features_by_signature = build.features_by_signature;
+    game.title_id = build.title_id;
+    game.version = build.version;
+    return game;
+}
+
+// The loader's own view, from an image.json naming the build.
+bool LoaderBuild(const GameBuild& build, DcpGameBuild& game) {
+    const fs::path dir = fs::temp_directory_path() / "dcp_build_parity_gate";
+    fs::create_directories(dir);
+    std::ofstream(dir / "image.json") << "{\n  \"title_id\": \"" << build.title_id << "\",\n  \"eboot_sha256\": \""
+                                      << build.eboot_sha256 << "\",\n  \"app_ver\": \"" << FinishedLayer(build).app_ver
+                                      << "\"\n}";
+    game = {};
+    const bool found = dcp_game_build(dir.string().c_str(), &game) == 1;
+    fs::remove_all(dir);
+    return found;
+}
+
+bool SameView(const DcpGameBuild& a, const DcpGameBuild& b) {
+    return std::string_view(a.label) == b.label && a.cheats == b.cheats && a.japanese_npc_voices == b.japanese_npc_voices &&
+           a.true_ultrawide == b.true_ultrawide && a.resolution_sites == b.resolution_sites &&
+           a.resolution_site_count == b.resolution_site_count && a.resolution_by_signature == b.resolution_by_signature &&
+           a.features_by_signature == b.features_by_signature && std::string_view(a.title_id) == b.title_id &&
+           std::string_view(a.version) == b.version;
+}
+
+// What the launcher shows for the build, through the helpers launcher.cpp gates with. A feature without a helper has no
+// build gate in the launcher, which TestGateConsistency enforces.
+bool LauncherOffers(const GameBuild& build, Feature feature) {
+    switch (feature) {
+    case kCheats:
+        return CheatsAvailable(&build);
+    case kTrueUltrawide:
+        return TrueUltrawideAvailable(&build);
+    case kRenderResolution:
+    case kAspectRatio:
+        return !RestrictedToNativeResolution(&build);
+    case kXboxPrompts:
+        return build.xbox_prompts;
+    case kJapaneseNpcVoices:
+        return SupportsJapaneseNpcVoices(&build);
+    default:
+        return true;
+    }
+}
+
+// Whether the loader has a way to install the feature for the build: a table for this exact image or a locator its
+// profile asks for. The real images prove the locators in CheckFixtures, synthetic images in dcp-feature-sites-tests.
+bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const Contract& row, Feature feature) {
+    const bool known = game.title_id && *game.title_id && game.version && *game.version;
+    switch (feature) {
+    case kCheats:
+        return known && runtime_cheats_hooks_wanted(game.cheats) && (IsUs100(build) || game.features_by_signature);
+    case kOnlinePlay:
+        return known && CapabilitiesOf(build).system_type != Mapping::kNone;
+    case kTrueUltrawide:
+        return known && game.true_ultrawide && (Listed(ultrawide_records, build) || game.features_by_signature);
+    case kRenderResolution:
+    case kAspectRatio:
+        return known && (game.resolution_site_count == DCP_RENDER_SIZE_SIGNATURE_COUNT || game.resolution_by_signature) &&
+               !(game.resolution_site_count && game.resolution_by_signature);
+    case kStorySkip:
+    case kTutorialSkip:
+        return known && CapabilitiesOf(build).skip_offers != Mapping::kNone;
+    case kLzcnt:
+        return known && CapabilitiesOf(build).lzcnt != Mapping::kNone;
+    case kArachnophobia:
+        return std::any_of(std::begin(kSharedGameFiles), std::end(kSharedGameFiles),
+                           [](const char* file) { return std::string_view(file) == "DRACRO.CPK"; });
+    case kSaveLoad:
+        return known && CapabilitiesOf(build).startup_save == row.startup_save;
+    case kXboxPrompts:
+        return build.xbox_prompts;
+    case kJapaneseNpcVoices:
+        return known && game.japanese_npc_voices && (IsUs100(build) || game.features_by_signature);
+    default:
+        return known;
+    }
+}
+
+// A GLOBAL feature passes only when the launcher offers it and the runtime implements it; Japanese NPC Voices passes as
+// NOT APPLICABLE only on a build the contract says already speaks Japanese, which then offers no toggle.
+bool FeaturePasses(const GameBuild& build, const DcpGameBuild& game, const Contract& row, Feature feature,
+                   std::string* why) {
+    const bool offered = LauncherOffers(build, feature);
+    const bool implemented = RuntimeImplements(build, game, row, feature);
+    const bool native = feature == kJapaneseNpcVoices && row.native_japanese_voices;
+    const bool pass = native ? !offered && !implemented && NativeJapaneseNpcVoices(&build) : offered && implemented;
+    if (!pass && why) {
+        *why = std::string(native ? "expected native, " : "expected on, ") + "launcher " + (offered ? "on" : "off") +
+               ", runtime " + (implemented ? "on" : "off");
+    }
+    return pass;
+}
+
+struct FeatureTally {
+    size_t passed = 0, native = 0;
+    std::string failures;
+};
+FeatureTally g_tally[kFeatureCount];
+
 void TestContract() {
     g_scope = "contract";
     CHECK(SupportedBuilds().size() == std::size(kContracts));
@@ -188,35 +326,89 @@ void TestContract() {
             std::printf("  %s has no parity contract row\n", build.label);
             continue;
         }
-        const Capabilities caps = CapabilitiesOf(build);
-        const bool same = caps.cheats == row->cheats && caps.xbox_prompts == row->xbox_prompts &&
-                          caps.npc_voices == row->npc_voices && caps.true_ultrawide == row->true_ultrawide &&
-                          caps.custom_resolution == row->custom_resolution && caps.resolution == row->resolution &&
-                          caps.skip_offers == row->skip_offers && caps.system_type == row->system_type &&
-                          caps.lzcnt == row->lzcnt && caps.startup_save == row->startup_save &&
-                          caps.languages == row->languages;
         g_scope = build.label;
-        CHECK(same);
-        if (!same) {
-            std::printf("  %s: cheats %d xbox %d voices %d ultrawide %d custom size %d (%s) skip %s system type %s lzcnt %s "
-                        "save %s languages %s\n",
-                        build.label, caps.cheats, caps.xbox_prompts, caps.npc_voices, caps.true_ultrawide,
-                        caps.custom_resolution, MappingName(caps.resolution), MappingName(caps.skip_offers),
-                        MappingName(caps.system_type), MappingName(caps.lzcnt), MappingName(caps.startup_save),
-                        caps.languages.c_str());
-        }
-        // Every build offers the executable-independent features through these mappings.
-        CHECK(caps.skip_offers != Mapping::kNone && caps.system_type != Mapping::kNone && caps.lzcnt != Mapping::kNone);
-        CHECK(caps.custom_resolution && caps.resolution != Mapping::kNone);
+        const Capabilities caps = CapabilitiesOf(build);
+        CHECK(caps.startup_save == row->startup_save);
+        CHECK(caps.languages == row->languages);
+        CHECK(NativeJapaneseNpcVoices(&build) == row->native_japanese_voices);
+        g_scope = "contract";
     }
-    g_scope = "contract";
     for (const Contract& row : kContracts) {
         CHECK(FindBuild(row.label) != nullptr);
     }
 }
 
-// An update offers everything its base offers; there is no list of exceptions. Items that do not apply to a region are
-// not parity gaps and are not listed (a Japanese build has no English NPC voices to replace).
+// Every build against the reference feature set: launcher, runtime and contract must agree for each feature.
+void TestGlobalFeatures() {
+    runtime_cheats_set_online(0);
+    for (const GameBuild& build : SupportedBuilds()) {
+        g_scope = build.label;
+        const Contract* row = FindContract(build.label);
+        DcpGameBuild game{};
+        CHECK(row && LoaderBuild(build, game) && SameView(game, LoaderView(build)));
+        if (!row || !game.label) {
+            continue;
+        }
+        for (size_t f = 0; f < kFeatureCount; ++f) {
+            std::string why;
+            const bool pass = FeaturePasses(build, game, *row, Feature(f), &why);
+            CHECK(pass);
+            if (pass) {
+                ++g_tally[f].passed;
+                g_tally[f].native += f == kJapaneseNpcVoices && row->native_japanese_voices;
+            } else {
+                std::printf("  %s: %s %s\n", build.label, kFeatureNames[f], why.c_str());
+                g_tally[f].failures += std::string(g_tally[f].failures.empty() ? "" : ", ") + build.label;
+            }
+        }
+    }
+}
+
+// The case an earlier contract let through: "CUSA10209 1.00 Asia/Hong Kong PASS real" while the launcher said "Cheats
+// are not available for CUSA10209 1.00 Asia/Hong Kong". A supported build with any GLOBAL feature switched off fails.
+void TestDisabledFeatureCannotPass() {
+    g_scope = "contract";
+    for (const GameBuild& build : SupportedBuilds()) {
+        const Contract* row = FindContract(build.label);
+        if (!row) {
+            continue;
+        }
+        const auto refuses = [&](GameBuild copy, Feature feature) {
+            return !FeaturePasses(copy, LoaderView(copy), *row, feature, nullptr);
+        };
+        GameBuild copy = build;
+        copy.cheats = false;
+        CHECK(refuses(copy, kCheats));
+        copy = build;
+        copy.true_ultrawide = false;
+        CHECK(refuses(copy, kTrueUltrawide));
+        copy = build;
+        copy.xbox_prompts = false;
+        CHECK(refuses(copy, kXboxPrompts));
+        copy = build;
+        copy.resolution_sites = {};
+        copy.resolution_by_signature = false;
+        CHECK(refuses(copy, kRenderResolution) && refuses(copy, kAspectRatio));
+        copy = build;
+        copy.features_by_signature = false;
+        CHECK(IsUs100(build) || refuses(copy, kCheats));
+        copy = build;
+        copy.japanese_npc_voices = !build.japanese_npc_voices;
+        CHECK(refuses(copy, kJapaneseNpcVoices));
+        CHECK(CheatsAvailable(&build));
+    }
+    const GameBuild* hk = FindBuild("CUSA10209 1.00 Asia/Hong Kong");
+    CHECK(hk && hk->cheats && CheatsAvailable(hk));
+
+    const std::string launcher = ReadText("launcher/launcher.cpp");
+    const std::string message = "Cheats are not available for ";
+    const size_t at = launcher.find(message);
+    CHECK(at != std::string::npos && launcher.find(message, at + 1) == std::string::npos);
+    const size_t gate = launcher.rfind("const bool blocked = !CheatsAvailable(build_);", at);
+    CHECK(gate != std::string::npos && at - gate < 200 && launcher.find("if (blocked)", gate) < at);
+}
+
+// An update offers everything its base offers, and the same languages.
 void TestUpdateParity() {
     g_scope = "contract";
     for (const Chain& chain : kChains) {
@@ -245,14 +437,9 @@ void TestUpdateParity() {
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
         CHECK(u.languages == b.languages);
-        // What an update has beyond the table-based mappings comes from the locators its own profile asks for.
-        const bool by_locator = update->features_by_signature;
-        CHECK(by_locator == (std::string_view(update->title_id) != "CUSA07001"));
-        if (by_locator) {
-            CHECK(!ImageOf(*update) && !Listed(ultrawide_records, *update));
-            CHECK(update->cheats == base->cheats && update->japanese_npc_voices == base->japanese_npc_voices &&
-                  update->true_ultrawide == base->true_ultrawide);
-        }
+        CHECK(update->features_by_signature && base->features_by_signature == !IsUs100(*base));
+        CHECK(update->cheats == base->cheats && update->japanese_npc_voices == base->japanese_npc_voices &&
+              update->true_ultrawide == base->true_ultrawide);
     }
     g_scope = "contract";
     // 1.02 and 1.03 are independent builds with the same contract.
@@ -274,14 +461,14 @@ void TestGateConsistency() {
         const Capabilities caps = CapabilitiesOf(build);
         const GuestImageId* image = ImageOf(build);
         CHECK(caps.custom_resolution == (caps.resolution != Mapping::kNone));
-        // A feature has a table-based mapping (US 1.00's cheats and voices, the ultrawide records) or its profile's locators.
+        // US 1.00 has the static cheat and voice tables; every other build finds its sites by signature.
+        CHECK(build.features_by_signature == !IsUs100(build));
         CHECK(caps.true_ultrawide == (Listed(ultrawide_records, build) || build.features_by_signature));
         CHECK(!Listed(ultrawide_records, build) || caps.true_ultrawide);
-        CHECK(caps.cheats == (IsUs100(build) || (build.features_by_signature && std::string_view(build.title_id) == "CUSA10454")));
-        CHECK(caps.npc_voices == caps.cheats);
-        CHECK(!build.features_by_signature || !ImageOf(build));
+        CHECK(caps.cheats && (IsUs100(build) || build.features_by_signature));
+        CHECK(caps.npc_voices == !NativeJapaneseNpcVoices(&build));
         CHECK(caps.startup_save == (std::string_view(build.title_id) == "CUSA07001" ? Mapping::kTable : Mapping::kNone));
-        CHECK(caps.xbox_prompts == (std::string_view(build.title_id) == "CUSA10454" && build.regional_archive != nullptr));
+        CHECK(caps.xbox_prompts);
         CHECK(!build.keep_base_languages || BaseBuildOf(build) != nullptr);
         CHECK(!Key(build).empty());
         for (const SystemTypeRecord& record : system_type_records) {
@@ -310,15 +497,14 @@ void TestGateConsistency() {
     // the contract does not know.
     const std::string launcher = ReadText("launcher/launcher.cpp");
     const char* const allowed[] = {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
-                                   "SupportsJapaneseNpcVoices(build_)",    "build_->cheats",
+                                   "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
                                    "xbox_available_",                      "XboxPromptsAvailable",
                                    "build_->xbox_prompts",                 "InstalledTextLanguages(paths_.app0, build_)",
                                    "InstalledPromptStyle(paths_.app0, *build_", "PromptArchives(paths_.app0, *build_",
                                    "build_->label",                        "BuildMetadataText(*build_)",
                                    "InstalledGameName(files_, build_)",    "build_ = check.build",
                                    "const GameBuild* build_",              "|| !build_)",
-                                   "build_(check.build)",                  "build = *build_",
-                                   "BaseBuildOf(*build_)"};
+                                   "build_(check.build)",                  "build = *build_"};
     std::map<std::string, int> seen;
     size_t line_start = 0, unknown = 0;
     const std::regex word("\\bbuild_\\b");
@@ -342,7 +528,8 @@ void TestGateConsistency() {
     }
     CHECK(unknown == 0);
     for (const char* required : {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
-                                 "SupportsJapaneseNpcVoices(build_)", "build_->cheats", "xbox_available_"}) {
+                                 "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
+                                 "xbox_available_"}) {
         CHECK(seen[required] > 0);
     }
 }
@@ -647,8 +834,9 @@ struct Patched {
     std::string what;
 };
 
-// Every range the loader may write in this build's image when every feature is on.
-std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& image) {
+// Every range the loader may write in this build's image when every feature is on; `located` holds the sites the
+// loader's locators found when the build's profile asks for them.
+std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& image, const DcpFeatureSites& located) {
     std::vector<Patched> out;
     const auto add = [&](uint64_t at, uint64_t length, std::string what) { out.push_back({at, at + length, std::move(what)}); };
     const uint64_t size = image.bytes.size();
@@ -671,12 +859,32 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
         if (std::string_view(record.build) != build.label) continue;
         for (size_t i = 0; i < LZCNT_SITE_COUNT; ++i) add(record.offsets[i], lzcnt_shapes[i].length, "lzcnt");
     }
-    for (const UltrawideRecord& record : ultrawide_records) {
-        if (std::string_view(record.build) != build.label) continue;
+    const auto add_ultrawide = [&](const UltrawideRecord& record, const uint32_t* loads) {
         GuestHook hooks[ULTRAWIDE_HOOK_COUNT];
         ultrawide_record_hooks(&record, hooks);
         for (const GuestHook& hook : hooks) add(hook.offset, hook.length, std::string("ultrawide ") + hook.name);
-        for (const DcpOrthoSite& site : dcp_pass_ortho_sites) add(site.offset, 8, "pass ortho load");
+        for (size_t i = 0; i < DCP_ORTHO_LOADS; ++i) add(loads[i], 8, "pass ortho load");
+    };
+    if (build.features_by_signature) {
+        if (located.ultrawide) {
+            add_ultrawide(ultrawide_record_from_sites(&located.ultrawide_sites, size, image.entry), located.ultrawide_sites.ortho_loads);
+        }
+        if (build.japanese_npc_voices && located.voices) {
+            add(located.voice_sites.npc_cue, VOICE_NPC_SITE_LENGTH, "npc voice cue");
+            add(located.voice_sites.resource_acquire, VOICE_RES_ACQUIRE_SITE_LENGTH, "npc voice acquire");
+        }
+        if (build.cheats && located.cheats) {
+            for (const GuestHook& hook : cheats::HooksAt(located.cheat_sites.hooks, image.bytes.data(), size)) {
+                add(hook.offset, hook.length, std::string("cheat ") + hook.name);
+            }
+        }
+        return out;
+    }
+    for (const UltrawideRecord& record : ultrawide_records) {
+        if (std::string_view(record.build) != build.label) continue;
+        uint32_t loads[DCP_ORTHO_LOADS];
+        for (size_t i = 0; i < DCP_ORTHO_LOADS; ++i) loads[i] = uint32_t(dcp_pass_ortho_sites[i].offset);
+        add_ultrawide(record, loads);
     }
     if (build.japanese_npc_voices) {
         add(VOICE_NPC_SITE_OFFSET, VOICE_NPC_SITE_LENGTH, "npc voice cue");
@@ -688,13 +896,18 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     return out;
 }
 
+std::span<const uint8_t> AsBytes(const std::string& text) {
+    return {reinterpret_cast<const uint8_t*>(text.data()), text.size()};
+}
+
 const char* SystemTypeText(const char*) {
     return "text";
 }
 
-// Installs every feature the build has on a private copy of its image, in the loader's order. Each fingerprint must hold
-// and no installed patch may meet another's bytes; a feature the build does not have must refuse.
-void InstallEverything(const GameBuild& build, const BootImage& image) {
+// Installs every feature the build has on a private copy of its image, in the loader's order and through the loader's
+// path (tables for CUSA10454 1.00, the located sites otherwise). Each fingerprint must hold and no installed patch may
+// meet another's bytes; a feature the build does not have must refuse.
+void InstallEverything(const GameBuild& build, const BootImage& image, const DcpFeatureSites& located) {
     const Capabilities caps = CapabilitiesOf(build);
     const uint64_t size = image.bytes.size(), entry = image.entry;
     const size_t page = 0x1000, base = (size_t(size) + page - 1) / page * page;
@@ -722,7 +935,12 @@ void InstallEverything(const GameBuild& build, const BootImage& image) {
     CHECK(name && std::string_view(name) == build.label && CountLzcnt(image_bytes, size) == 0);
 
     const std::span<const GuestHook> cheat_hooks = cheats::Hooks();
-    if (caps.cheats) {
+    if (build.features_by_signature) {
+        CHECK(caps.cheats && located.cheats);
+        CHECK(runtime_cheat_hooks_install_located(image_bytes, size, entry, &located.cheat_sites, cheat_area, cheat_stubs) == 1);
+        CHECK(runtime_cheats_available() == 1);
+        runtime_cheats_set_available(0);
+    } else if (caps.cheats) {
         size_t installed = 0;
         for (size_t i = 0; i < cheat_hooks.size(); ++i) {
             size_t bad = 0;
@@ -737,7 +955,13 @@ void InstallEverything(const GameBuild& build, const BootImage& image) {
 
     CHECK((startup_save_hook_install(image_bytes, size, entry, save_area, startup_save_hook_stub_bytes()) != 0) ==
           (caps.startup_save != Mapping::kNone));
-    CHECK((voice_hooks_install(image_bytes, size, entry, voice_area, voice_hooks_stub_bytes()) != 0) == caps.npc_voices);
+    if (build.features_by_signature) {
+        CHECK(located.voices == caps.npc_voices);
+        CHECK(!caps.npc_voices || voice_hooks_install_located(image_bytes, size, entry, &located.voice_sites, voice_area,
+                                                             voice_hooks_stub_bytes()) == 1);
+    } else {
+        CHECK((voice_hooks_install(image_bytes, size, entry, voice_area, voice_hooks_stub_bytes()) != 0) == caps.npc_voices);
+    }
     CHECK(system_type_hook_install(image_bytes, size, entry, system_area, system_type_hook_stub_bytes(), SystemTypeText) == 1);
     CHECK(skip_offers_install(image_bytes, size, Key(build).c_str(), SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) ==
           (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
@@ -756,15 +980,25 @@ void InstallEverything(const GameBuild& build, const BootImage& image) {
     CHECK(dcp_apply_resolution(image_bytes, size, sites, site_count, &target, error, sizeof(error)) == 1);
 
     char detail[720] = {};
-    const int ultrawide = ultrawide_hooks_install(image_bytes, size, entry, ultrawide_area, ultrawide_hooks_stub_bytes(), 1.3125,
-                                                  detail, sizeof(detail));
-    if (caps.true_ultrawide) {
-        CHECK(ultrawide == 1 && std::string_view(detail).find("off (") == std::string_view::npos);
-        CHECK(dcp_apply_true_ultrawide(image_bytes, size, base + room, dcp_pass_ortho_sites, DCP_PASS_ORTHO_SITE_COUNT, 1.3125,
-                                       error, sizeof(error)) == 1);
+    if (build.features_by_signature) {
+        CHECK(caps.true_ultrawide && located.ultrawide);
+        CHECK(ultrawide_hooks_install_located(image_bytes, size, entry, &located.ultrawide_sites, ultrawide_area,
+                                              ultrawide_hooks_stub_bytes(), 1.3125, detail, sizeof(detail)) == 1);
+        DcpOrthoSite loads[DCP_ORTHO_LOADS];
+        for (size_t i = 0; i < DCP_ORTHO_LOADS; ++i) {
+            loads[i].offset = located.ultrawide_sites.ortho_loads[i];
+            loads[i].value = dcp_pass_ortho_sites[i].value;
+        }
+        CHECK(dcp_apply_true_ultrawide(image_bytes, size, base + room, loads, DCP_ORTHO_LOADS, 1.3125, error, sizeof(error)) == 1);
     } else {
-        CHECK(ultrawide == 0);
+        const int ultrawide = ultrawide_hooks_install(image_bytes, size, entry, ultrawide_area, ultrawide_hooks_stub_bytes(),
+                                                      1.3125, detail, sizeof(detail));
+        CHECK(ultrawide == (caps.true_ultrawide ? 1 : 0));
+        CHECK(!caps.true_ultrawide ||
+              dcp_apply_true_ultrawide(image_bytes, size, base + room, dcp_pass_ortho_sites, DCP_PASS_ORTHO_SITE_COUNT, 1.3125,
+                                       error, sizeof(error)) == 1);
     }
+    CHECK(std::string_view(detail).find("off (") == std::string_view::npos);
 
     // Near misses: the same bytes with another entry or size are no supported image to any mapping.
     std::vector<uint8_t> near(memory.begin(), memory.begin() + std::ptrdiff_t(base + room + page));
@@ -796,7 +1030,33 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         const uint8_t* bytes = image.bytes.data();
         const uint64_t size = image.bytes.size();
 
-        std::vector<Patched> ranges = PatchedRanges(build, image);
+        // The loader's own entry, with the loader's view of the build, before any patch.
+        DcpGameBuild game{};
+        CHECK(LoaderBuild(build, game));
+        const DcpExecRange executable{0, size};
+        const DcpImageView view{bytes, size, &executable, 1};
+        DcpFeatureSites located{};
+        const int resolved = dcp_resolve_features(&game, &view, 1, 1, 1, &located);
+        if (build.features_by_signature) {
+            if (!located.cheats || !located.ultrawide || located.voices != build.japanese_npc_voices) {
+                std::printf("  %s: cheats %s | voices %s | ultrawide %s\n", build.label, located.cheat_failure,
+                            located.voice_failure, located.ultrawide_failure);
+            }
+            CHECK(resolved == 1 && located.cheats && located.ultrawide && located.voices == build.japanese_npc_voices);
+            std::string mismatch;
+            CHECK(cheats::LayoutMatches(located.cheat_sites.layout, &mismatch));
+            std::vector<DcpExecRange> hooks;
+            for (const GuestHook& hook : cheats::HooksAt(located.cheat_sites.hooks, bytes, size)) {
+                hooks.push_back({hook.offset, hook.offset + hook.length});
+            }
+            CHECK(hooks.size() == DCP_CHEAT_HOOKS && !dcp_ranges_overlap(hooks.data(), hooks.size()));
+            std::set<uint32_t> functions(std::begin(located.cheat_sites.functions), std::end(located.cheat_sites.functions));
+            CHECK(functions.size() == DCP_CHEAT_FUNCTIONS && !functions.count(0));
+        } else {
+            CHECK(resolved == 0 && !located.cheats && !located.voices && !located.ultrawide);
+        }
+
+        std::vector<Patched> ranges = PatchedRanges(build, image, located);
         std::sort(ranges.begin(), ranges.end(), [](const Patched& a, const Patched& b) { return a.begin < b.begin; });
         size_t overlaps = 0, outside = 0;
         for (size_t i = 0; i < ranges.size(); ++i) {
@@ -840,8 +1100,12 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         for (const DcpResolutionSite& site : sites) recovered.insert(site.offset);
         CHECK(expected == recovered);
 
-        InstallEverything(build, image);
+        InstallEverything(build, image, located);
         report.note = std::to_string(ranges.size()) + " patched ranges, no overlap";
+        if (build.features_by_signature) {
+            report.note += "; cheats " + std::to_string(DCP_CHEAT_HOOKS) + " hooks, " + std::to_string(DCP_CHEAT_FUNCTIONS) +
+                           " functions, " + std::to_string(DCP_LAYOUT_COUNT) + " layout fields located";
+        }
     }
 
     const fs::path image_dir = root / "build" / "image" / build.folder;
@@ -863,6 +1127,28 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(SameLanguages(installed, TextLanguagesOf(&build)));
         CHECK(build.regional_archive == nullptr || fs::is_regular_file(prepared / build.regional_archive));
         CHECK(!build.japanese_npc_voices || NpcVoiceResourcesPresent(prepared));
+        CHECK(JapaneseNpcVoicesOffered(prepared, &build) == build.japanese_npc_voices);
+
+        const std::string xbox = ReadText("launcher/prompts/xbox-prompts.dcpx");
+        const std::optional<BlockPatch> prompts = ParseBlockPatch(AsBytes(xbox));
+        std::string why;
+        const bool fits = prompts && PromptPatchFits(prepared, build, *prompts, &why);
+        if (!fits) {
+            std::printf("  %s: Xbox prompts: %s\n", build.label, why.c_str());
+        }
+        CHECK(fits && XboxPromptsAvailable(prepared, build, AsBytes(xbox)));
+        CHECK(!PromptArchives(prepared, build).empty());
+
+        const std::optional<BlockPatch> spider = ParseBlockPatch(AsBytes(ReadText("launcher/prompts/arachnophobia-spider.dcpx")));
+        CpkArchive shared;
+        const CpkEntry* atlas = shared.Open(prepared / "DRACRO.CPK") ? shared.Find(kSpiderEntry) : nullptr;
+        CHECK(spider && spider->targets.size() == 1 && spider->targets[0].name == kSpiderEntry && atlas);
+        if (spider && atlas) {
+            const std::vector<uint8_t> data = shared.Read(*atlas);
+            const uint32_t crc = Crc32(data);
+            const BlockPatchTarget& target = spider->targets[0];
+            CHECK(data.size() == target.size && (crc == target.crc_before || crc == target.crc_after));
+        }
     }
     return report;
 }
@@ -871,6 +1157,8 @@ FixtureReport CheckFixtures(const GameBuild& build) {
 
 int main() {
     TestContract();
+    TestGlobalFeatures();
+    TestDisabledFeatureCannotPass();
     TestUpdateParity();
     TestGateConsistency();
     TestResolutionStrategy();
@@ -896,6 +1184,18 @@ int main() {
         if (report.executable && !report.note.empty()) detail += ": " + report.note;
         detail += report.prepared ? "; prepared folder" : "; no prepared folder";
         std::printf("PARITY-BUILD|%s|%s|%s\n", build.label, status, detail.c_str());
+    }
+    const size_t builds = SupportedBuilds().size();
+    for (size_t f = 0; f < kFeatureCount; ++f) {
+        const FeatureTally& tally = g_tally[f];
+        std::string status = (tally.passed == builds && shared_failures == 0 ? "PASS " : "FAIL ") +
+                             std::to_string(tally.passed) + "/" + std::to_string(builds);
+        if (tally.native) {
+            status += " (" + std::to_string(tally.passed - tally.native) + " toggle, " + std::to_string(tally.native) +
+                      " native)";
+        }
+        if (!tally.failures.empty()) status += " (" + tally.failures + ")";
+        std::printf("PARITY-FEATURE|%s|%s\n", kFeatureNames[f], status.c_str());
     }
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

@@ -322,8 +322,7 @@ public:
         gpu_names_ = DcpGraphics::GpuChoices(ListGpuNames());
         prompts_installed_ = InstalledPrompts();
         xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
-        npc_voices_available_ = build_ && SupportsJapaneseNpcVoices(build_) &&
-                                (!BaseBuildOf(*build_) || NpcVoiceResourcesPresent(paths_.app0));
+        npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
@@ -826,8 +825,7 @@ private:
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
             xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
-            npc_voices_available_ = build_ && SupportsJapaneseNpcVoices(build_) &&
-                                    (!BaseBuildOf(*build_) || NpcVoiceResourcesPresent(paths_.app0));
+            npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
             safe_mode_installed_ = InstalledSafeMode(paths_.app0);
             ApplySavedPatches();
             return;
@@ -1000,7 +998,7 @@ private:
         help.replace(help.find("F10"), 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
         ui.Help(help.c_str());
         ui.Spacer(12);
-        const bool blocked = build_ && !build_->cheats;
+        const bool blocked = !CheatsAvailable(build_);
         if (blocked) {
             ui.Help((std::string("Cheats are not available for ") + build_->label + ".").c_str());
             ui.Spacer(8);
@@ -1164,8 +1162,7 @@ private:
         }
         prompts_installed_ = InstalledPrompts();
         xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
-        npc_voices_available_ = build_ && SupportsJapaneseNpcVoices(build_) &&
-                                (!BaseBuildOf(*build_) || NpcVoiceResourcesPresent(paths_.app0));
+        npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         if (outcome->ok) {
             Log("game patches: prompts %s, arachnophobia safe mode %s (%s)", PromptStyleKey(prompts_installed_),

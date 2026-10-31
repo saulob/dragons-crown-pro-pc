@@ -1,5 +1,5 @@
-/* Japanese NPC voices on CUSA10454 1.00: the cue mapper's US-only path returns the Japanese cue ID for the NPC voice
- * families, and an extra reference on each of their banks, taken through the game's own resource acquire, keeps a
+/* Japanese NPC voices: the cue mapper's path for a non-Japanese system language returns the Japanese cue ID for the
+ * NPC voice families, and an extra reference on each of their banks, taken through the game's own resource acquire, keeps a
  * bank already loaded for either language from being evicted once the cue mapper starts asking for the other one.
  * The banks are the user's own; no game file is changed. */
 #ifndef DCP_VOICE_HOOKS_H

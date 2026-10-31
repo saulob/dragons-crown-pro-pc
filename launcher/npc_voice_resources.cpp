@@ -30,6 +30,10 @@ bool NpcVoiceResourcesPresent(const std::filesystem::path& app0) {
                        [&](std::string_view name) { return archive.Find(name) != nullptr; });
 }
 
+bool JapaneseNpcVoicesOffered(const std::filesystem::path& app0, const GameBuild* build) {
+    return SupportsJapaneseNpcVoices(build) && (!build->features_by_signature || NpcVoiceResourcesPresent(app0));
+}
+
 } // namespace dcp
 
 extern "C" int dcp_npc_voice_resources(const char* app0) {

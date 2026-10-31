@@ -14,6 +14,26 @@ bool IsPromptEntry(std::string_view name) {
     return name.starts_with("stage/Interface") || name.starts_with("msgsheet/SystemMsg");
 }
 
+bool IsButtonAtlas(std::string_view name) {
+    return name.starts_with("stage/Interface") && name.ends_with(".ftx");
+}
+
+// stage/Interface_US.ftx and msgsheet/SystemMsg_DE.fms are a language's copy; stage/Interface.ftx is the shared one.
+bool IsLanguagePack(std::string_view name) {
+    const size_t file = name.rfind('/') + 1;
+    return IsPromptEntry(name) && name.find('_', file) != std::string_view::npos;
+}
+
+// An archive the game reads button atlases from. One that cannot be read is kept, so the fit check names it.
+bool IsPromptArchive(const std::filesystem::path& archive) {
+    CpkArchive cpk;
+    if (!cpk.Open(archive)) {
+        return true;
+    }
+    return std::any_of(cpk.entries().begin(), cpk.entries().end(),
+                       [](const CpkEntry& entry) { return IsButtonAtlas(entry.path); });
+}
+
 bool HoldsPromptTargets(const std::filesystem::path& archive, const BlockPatch& patch) {
     CpkArchive cpk;
     if (!cpk.Open(archive)) {
@@ -69,13 +89,16 @@ std::optional<PromptStyle> ParsePromptStyle(std::string_view key) {
 
 std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0, const GameBuild& build) {
     std::vector<std::filesystem::path> out;
-    if (!build.xbox_prompts || !build.regional_archive) {
+    if (!build.xbox_prompts) {
         return out;
     }
     std::error_code ec;
     for (const char* name : {build.regional_archive, kSharedArchive}) {
+        if (!name) {
+            continue;
+        }
         const std::filesystem::path archive = app0 / name;
-        if (std::filesystem::is_regular_file(archive, ec)) {
+        if (std::filesystem::is_regular_file(archive, ec) && IsPromptArchive(archive)) {
             out.push_back(archive);
         }
     }
@@ -105,6 +128,20 @@ bool PromptPatchFits(const std::filesystem::path& app0, const GameBuild& build, 
     if (archives.empty()) {
         return refuse("no prompt archives");
     }
+    const auto is_target = [&](std::string_view name) {
+        return std::any_of(patch.targets.begin(), patch.targets.end(),
+                           [&](const BlockPatchTarget& target) { return target.name == name; });
+    };
+    bool language_packs = false;
+    for (const Opened& opened : archives) {
+        language_packs = language_packs || opened.archive.file().filename() != kSharedArchive;
+        for (const CpkEntry& entry : opened.archive.entries()) {
+            if (IsButtonAtlas(entry.path) && !is_target(entry.path)) {
+                return refuse(entry.path + " in " + Utf8(opened.archive.file().filename()) +
+                              " is not covered by the patch");
+            }
+        }
+    }
     for (const BlockPatchTarget& target : patch.targets) {
         bool found = false;
         for (const Opened& opened : archives) {
@@ -123,7 +160,7 @@ bool PromptPatchFits(const std::filesystem::path& app0, const GameBuild& build, 
                               " is not the file the patch was made for");
             }
         }
-        if (!found) {
+        if (!found && (language_packs || !IsLanguagePack(target.name))) {
             return refuse(target.name + " is in none of the archives");
         }
     }

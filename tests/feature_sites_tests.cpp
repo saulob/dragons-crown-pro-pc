@@ -97,15 +97,8 @@ bool SameRecord(const UltrawideRecord& a, const UltrawideRecord& b) {
            a.camera_view_call == b.camera_view_call && a.view_build == b.view_build;
 }
 
-const GameBuild* FindBuild(std::string_view label) {
-    for (const GameBuild& build : SupportedBuilds()) {
-        if (label == build.label) return &build;
-    }
-    return nullptr;
-}
-
 // Installs with the static tables and with the locator's sites on two copies of a real image placed alike: the patched
-// image bytes must be identical.
+// image bytes must be identical. The cheat and NPC voice hooks install at the located sites on every build's image.
 void CompareInstalls(const GameBuild& build, const Image& image, const Located& located) {
     const uint64_t size = image.bytes.size();
     const size_t base = (size + 0xfff) / 0x1000 * 0x1000, room = 0x20000;
@@ -119,13 +112,19 @@ void CompareInstalls(const GameBuild& build, const Image& image, const Located& 
     CHECK(static_ok == 1 && located_ok == 1 && std::string_view(detail_a).find("off (") == std::string_view::npos);
     CHECK(std::memcmp(a.data(), b.data(), size) == 0);
 
+    std::vector<uint8_t> located_cheats(base + room, 0);
+    std::memcpy(located_cheats.data(), image.bytes.data(), size);
+    CHECK(runtime_cheat_hooks_install_located(located_cheats.data(), size, image.entry, &located.sites.cheat_sites,
+                                              located_cheats.data() + base, room) == 1);
+    std::vector<uint8_t> located_voices(base + room, 0);
+    std::memcpy(located_voices.data(), image.bytes.data(), size);
+    CHECK(voice_hooks_install_located(located_voices.data(), size, image.entry, &located.sites.voice_sites,
+                                      located_voices.data() + base, room) == 1);
     if (std::string_view(build.label) == "CUSA10454 1.00 USA") {
-        std::vector<uint8_t> c(base + room, 0), d(base + room, 0);
+        std::vector<uint8_t> c(base + room, 0);
         std::memcpy(c.data(), image.bytes.data(), size);
-        std::memcpy(d.data(), image.bytes.data(), size);
         CHECK(runtime_cheat_hooks_install(c.data(), size, image.entry, c.data() + base, room) == 1);
-        CHECK(runtime_cheat_hooks_install_located(d.data(), size, image.entry, &located.sites.cheat_sites, d.data() + base, room) == 1);
-        CHECK(std::memcmp(c.data(), d.data(), size) == 0);
+        CHECK(std::memcmp(c.data(), located_cheats.data(), size) == 0);
         std::vector<uint8_t> e(base + room, 0), f(base + room, 0);
         std::memcpy(e.data(), image.bytes.data(), size);
         std::memcpy(f.data(), image.bytes.data(), size);
@@ -618,14 +617,14 @@ void TestKnownBuildsOnly() {
         CHECK(!out.cheats && !out.voices && out.ultrawide == (build.true_ultrawide ? 1 : 0));
     }
 
-    // The two profiles that use the locators are exactly the update builds without tables.
-    const GameBuild* us101 = FindBuild("CUSA10454 1.01 USA");
-    const GameBuild* hk102 = FindBuild("CUSA10209 1.02 Asia/Hong Kong");
-    CHECK(us101 && hk102 && us101->features_by_signature && hk102->features_by_signature);
-    CHECK(us101->cheats && us101->japanese_npc_voices && us101->true_ultrawide && hk102->true_ultrawide && !hk102->cheats);
-    size_t locator_profiles = 0;
-    for (const GameBuild& build : SupportedBuilds()) locator_profiles += build.features_by_signature ? 1 : 0;
-    CHECK(locator_profiles == 2);
+    // Every build but CUSA10454 1.00, whose tables are the reference, uses the locators, with cheats and True Ultrawide;
+    // the Japanese builds have no NPC voice toggle because they already speak Japanese.
+    for (const GameBuild& build : SupportedBuilds()) {
+        const bool reference = std::string_view(build.label) == "CUSA10454 1.00 USA";
+        CHECK(build.features_by_signature == !reference);
+        CHECK(build.cheats && build.true_ultrawide);
+        CHECK(build.japanese_npc_voices == !NativeJapaneseNpcVoices(&build));
+    }
 
     // Without the files the voices need, a profile asking for them resolves nothing for them.
     const std::string loader = [] {
