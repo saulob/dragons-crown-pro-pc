@@ -6,6 +6,7 @@ Usage: python scripts/text_languages.py <game folder (app0)>
 import argparse
 import re
 import sys
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'prompts'))
@@ -44,7 +45,9 @@ def report(archive):
         if missing:
             line += f', missing {len(missing)} (first: {missing[0]})'
         try:
-            line += '; SystemMsg: ' + letters(cpk.read(cpk.find(f'msgsheet/SystemMsg_{suffix}.fms')))
+            sheet = cpk.read(cpk.find(f'msgsheet/SystemMsg_{suffix}.fms'))
+            line += (f'; SystemMsg crc {zlib.crc32(sheet):08x}, {len(sheet)} bytes, '
+                     f'{sum(b >= 0x80 for b in sheet)} non-ASCII: ' + letters(sheet))
         except KeyError:
             line += '; no SystemMsg sheet'
         print(line)

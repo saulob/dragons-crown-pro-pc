@@ -13,6 +13,7 @@
 #include <chrono>
 #include <fstream>
 #include <optional>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #include "build_diagnostics.h"
 #include "cpk_patch.h"
 #include "pkg_extract.h"
+#include "text_languages.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -458,6 +460,39 @@ InstallResult OverlayUpdate(const fs::path& update, const fs::path& staged) {
     return {};
 }
 
+// The build's regional archive of the staged game becomes the base's with the update's entries outside the language
+// slots; the update's own archive is then consumed. The staged archive may be a link into the installed base, which is
+// only read: the result is a file of its own.
+InstallResult KeepBaseLanguages(const GameBuild& build, const fs::path& update, const fs::path& staged) {
+    std::error_code ec;
+    const fs::path update_archive = update / build.regional_archive, staged_archive = staged / build.regional_archive;
+    if (!fs::exists(update_archive, ec)) {
+        return {};
+    }
+    CpkArchive base;
+    std::string error;
+    if (!base.Open(staged_archive, &error)) {
+        return Failure(InstallStatus::kIncomplete, std::string(build.regional_archive) + ": " + error);
+    }
+    const std::set<std::string> slots = LanguageSlotSuffixes(base, &build);
+    const fs::path composed = WithSuffix(staged_archive, ".compose");
+    const OverlayResult overlaid = OverlayArchive(staged_archive, update_archive,
+                                                  [&](std::string_view path) { return InLanguageSlot(path, slots); }, composed);
+    if (!overlaid.ok) {
+        return Failure(overlaid.update_unreadable ? InstallStatus::kReadFailed : InstallStatus::kWriteFailed, overlaid.detail);
+    }
+    if (overlaid.wrote) {
+        fs::remove(staged_archive, ec);
+        fs::rename(composed, staged_archive, ec);
+        if (ec) {
+            fs::remove(composed, ec);
+            return Failure(InstallStatus::kWriteFailed, "cannot place " + Utf8(staged_archive));
+        }
+    }
+    fs::remove(update_archive, ec);
+    return {};
+}
+
 InstallStatus FromPackage(PackageResult::Code code) {
     switch (code) {
     case PackageResult::kOk: return InstallStatus::kInstalled;
@@ -595,12 +630,21 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
         fs::remove_all(update_dir, ec);
         return Failure(FromPackage(extracted.code), extracted.detail);
     }
+    std::vector<std::string> language_report;
+    const auto report_languages = [&](const char* name, const fs::path& app0) {
+        if (const std::string text = DescribeLanguageResources(app0, &build); !text.empty()) {
+            language_report.push_back(name + (": " + text));
+        }
+    };
+    report_languages("base", base.app0);
+    report_languages("update", update_dir);
     phase("Copying the game files...");
-    InstallResult staged = StageUpdate(base.app0, update_dir, layout.app0_stage);
+    InstallResult staged = StageUpdate(base.app0, update_dir, layout.app0_stage, &build);
     fs::remove_all(update_dir, ec);
     if (!staged.ok()) {
         return staged;
     }
+    report_languages("finished", layout.app0_stage);
     if (!WriteMarker(layout.app0_stage, source, 0, package.file_count(), build, "full")) {
         return Failure(InstallStatus::kWriteFailed, "cannot write the preparation marker");
     }
@@ -618,17 +662,24 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
     result.bytes = total;
     result.files = package.file_count();
     result.build = &build;
+    result.language_report = std::move(language_report);
     return result;
 }
 
 } // namespace
 
-InstallResult StageUpdate(const fs::path& base_app0, const fs::path& update_dir, const fs::path& staged_app0) {
+InstallResult StageUpdate(const fs::path& base_app0, const fs::path& update_dir, const fs::path& staged_app0,
+                          const GameBuild* build) {
     if (InstallResult linked = LinkTree(base_app0, staged_app0); !linked.ok()) {
         return linked;
     }
     if (InstallResult reverted = RevertStagedPatches(staged_app0); !reverted.ok()) {
         return reverted;
+    }
+    if (build && build->keep_base_languages && build->regional_archive) {
+        if (InstallResult kept = KeepBaseLanguages(*build, update_dir, staged_app0); !kept.ok()) {
+            return kept;
+        }
     }
     return OverlayUpdate(update_dir, staged_app0);
 }

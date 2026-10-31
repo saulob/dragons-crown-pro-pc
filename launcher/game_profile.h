@@ -49,6 +49,7 @@ struct GameBuild {
     std::span<const DcpResolutionSite> resolution_sites;
     std::span<const TextLanguage> text_languages; // the first is the default
     bool resolution_by_signature = false;
+    bool keep_base_languages = false; // an update's regional archive is laid over the base's, which keeps its language slots
 };
 
 // The supported builds, US first.

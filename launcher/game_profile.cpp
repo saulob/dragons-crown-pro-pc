@@ -139,6 +139,8 @@ constexpr GameBuild kGameBuilds[] = {
         kUs101Layers,
         {},
         kWesternLanguages,
+        false,
+        true,
     },
     {
         "CUSA07001",

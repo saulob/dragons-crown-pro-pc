@@ -97,7 +97,9 @@ Steps 2 to 4 are `CheckGameTree`, which the installer also runs on the folder th
 **USA builds.** The 1.00 package (CATEGORY `gd`, APP_VER 01.00) is a complete game, installed into `v1.03` (its legacy
 folder name). The 1.01 patch (CATEGORY `gp`, APP_VER 01.01) is an update laid over a hard-linked copy of the 1.00 folder,
 into `CUSA10454-1.01`. The two builds have different `eboot.bin` files. An update needs the 1.00 folder to be installed;
-the launcher says so otherwise.
+the launcher says so otherwise. The 1.01 install keeps the base game's English, French, German, Italian and Spanish
+menu and subtitle resources: its `DRACRO_US.CPK` is the 1.00 archive with the update's entries outside the language
+sets laid over it, so the 1.00 folder is never changed.
 
 **Japanese builds.** The base package (`drcpro.pkg`, CATEGORY `gd`, APP_VER 01.00) is a complete game: it is installed
 into `CUSA07001-1.00`. The 1.02 and 1.03 updates (CATEGORY `gp`) are each laid over
@@ -332,7 +334,7 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   | Build | Languages |
   | --- | --- |
   | CUSA10454 1.00 USA | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
-  | CUSA10454 1.01 USA | the ones its `DRACRO_US.CPK` holds (see below) |
+  | CUSA10454 1.01 USA | English, French, German, Italian, Spanish, as 1.00 |
   | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese (`japanese`): the executable does not read the system language |
   | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean (`traditional_chinese`, `korean`) |
 

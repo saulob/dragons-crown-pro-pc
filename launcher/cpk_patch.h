@@ -129,6 +129,23 @@ PatchResult ApplyBlockPatch(const std::filesystem::path& cpk, const BlockPatch& 
 // Puts the archive back as it was, from the undo record, and removes the record.
 PatchResult RevertBlockPatch(const std::filesystem::path& cpk);
 
+struct OverlayResult {
+    bool ok = false;
+    bool wrote = false;            // false with ok when the update changes nothing: `output` was not created
+    bool update_unreadable = false;
+    std::string detail;            // for the log
+    size_t replaced = 0, added = 0, kept = 0; // update entries laid over a base entry, added, and left out by the filter
+    uint64_t appended = 0;
+};
+
+// Writes to `output` the archive `base` with the entries of the archive `update` laid over it: an entry of the same path
+// replaces the base's, a new path is added, and an entry `keep_base` names is left out. The base file is only read.
+// The entries' stored bytes are appended to a copy of the base and its table of contents rewritten; a table that outgrows
+// its place moves to the end of the file.
+OverlayResult OverlayArchive(const std::filesystem::path& base, const std::filesystem::path& update,
+                             const std::function<bool(std::string_view path)>& keep_base,
+                             const std::filesystem::path& output);
+
 uint32_t Crc32(std::span<const uint8_t> bytes);
 
 } // namespace dcp

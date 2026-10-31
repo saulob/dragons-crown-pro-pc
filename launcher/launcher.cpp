@@ -810,6 +810,9 @@ private:
             } else {
                 Log("game installed: %zu files (%zu linked), %llu bytes", outcome->files, outcome->linked,
                     static_cast<unsigned long long>(outcome->bytes));
+                for (const std::string& line : outcome->language_report) {
+                    Log("language resources, %s", line.c_str());
+                }
             }
             paths_ = ActiveBuildPaths(RootsOf(paths_));
             Recheck();

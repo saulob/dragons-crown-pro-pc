@@ -5,6 +5,8 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <map>
+#include <set>
 #include <system_error>
 #include <utility>
 
@@ -834,6 +836,305 @@ PatchResult RevertBlockPatch(const std::filesystem::path& cpk) {
     result.ok = true;
     result.patched = undo.entries.size();
     result.detail = name + ": reverted";
+    return result;
+}
+
+namespace {
+
+constexpr uint8_t kTocMagic[8] = {'T', 'O', 'C', ' ', 0xFF, 0, 0, 0};
+
+struct NewRow {
+    std::string path;
+    uint32_t size = 0, extract_size = 0;
+    uint64_t offset = 0; // from the archive's FileOffset base
+};
+
+using RowKey = std::pair<std::string, std::string>;
+
+std::string Lower(std::string text) {
+    for (char& c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return text;
+}
+
+// The order the game's tables keep: directory, then name, each without regard to case.
+RowKey KeyOf(std::string_view path) {
+    const size_t slash = path.rfind('/');
+    if (slash == std::string_view::npos) return {{}, Lower(std::string(path))};
+    return {Lower(std::string(path.substr(0, slash))), Lower(std::string(path.substr(slash + 1)))};
+}
+
+// Puts `added` into the table's rows, in sorted place when the table is sorted, with their names added to the string
+// pool. Rows are numbered by position when the table's IDs are.
+bool InsertRows(UtfTable& toc, const std::vector<NewRow>& added, std::string* error) {
+    const auto fail = [&](const char* why) {
+        if (error) *error = why;
+        return false;
+    };
+    const std::vector<uint8_t>& packet = toc.packet;
+    const size_t rows_off = ReadBe32(packet.data() + 8) + 8, row_len = ReadBe16(packet.data() + 26);
+    const size_t row_count = ReadBe32(packet.data() + 28), rows_end = rows_off + row_len * row_count;
+    if (rows_end > toc.strings_off || toc.strings_off > toc.data_off || toc.data_off > packet.size()) {
+        return fail("unsupported table layout");
+    }
+    struct Field {
+        size_t offset;
+        int type;
+    };
+    std::map<std::string, Field> layout;
+    size_t at = 0;
+    for (const auto& [name, flags] : toc.columns) {
+        if ((flags & kStorageMask) != kStoragePerRow) continue;
+        const int type = flags & kTypeMask;
+        const size_t size = type == kTypeString ? 4 : type == kTypeData ? 8 : type <= 8 ? size_t(kTypeSizes[type]) : 0;
+        if (!size) return fail("unsupported column type");
+        layout[name] = {at, type};
+        at += size;
+    }
+    for (const char* needed : {"DirName", "FileName", "FileSize", "ExtractSize", "FileOffset"}) {
+        if (!layout.count(needed)) return fail("the table has no file columns");
+    }
+    if (at != row_len) return fail("unsupported table layout");
+
+    std::string pool(packet.begin() + std::ptrdiff_t(toc.strings_off), packet.begin() + std::ptrdiff_t(toc.data_off));
+    const size_t pool_size = pool.size();
+    const auto intern = [&](const std::string& text) {
+        for (size_t start = 0, end; (end = pool.find('\0', start)) != std::string::npos; start = end + 1) {
+            if (end - start == text.size() && pool.compare(start, end - start, text) == 0) return uint32_t(start);
+        }
+        const uint32_t offset = uint32_t(pool.size());
+        pool += text;
+        pool += '\0';
+        return offset;
+    };
+
+    struct Row {
+        RowKey key;
+        std::vector<uint8_t> bytes;
+    };
+    std::vector<Row> rows;
+    bool sequential = layout.count("ID") != 0;
+    uint64_t next_id = 0;
+    for (size_t r = 0; r < row_count; ++r) {
+        const std::string dir = toc.String(r, "DirName"), name = toc.String(r, "FileName");
+        const auto first = packet.begin() + std::ptrdiff_t(rows_off + r * row_len);
+        rows.push_back({KeyOf(dir.empty() ? name : dir + "/" + name), std::vector<uint8_t>(first, first + std::ptrdiff_t(row_len))});
+        const uint64_t id = toc.Number(r, "ID").value_or(r);
+        sequential = sequential && id == r;
+        next_id = std::max(next_id, id + 1);
+    }
+    const bool sorted = std::is_sorted(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.key < b.key; });
+
+    for (const NewRow& row : added) {
+        Row made{KeyOf(row.path), rows.empty() ? std::vector<uint8_t>(row_len) : rows.front().bytes};
+        const size_t slash = row.path.rfind('/');
+        const std::string dir = slash == std::string::npos ? std::string() : row.path.substr(0, slash);
+        const auto put = [&](const char* column, uint64_t value) {
+            const Field& field = layout.at(column);
+            WriteNumber(made.bytes.data() + field.offset, field.type == kTypeString ? 4 : field.type, value);
+        };
+        put("DirName", intern(dir));
+        put("FileName", intern(slash == std::string::npos ? row.path : row.path.substr(slash + 1)));
+        put("FileSize", row.size);
+        put("ExtractSize", row.extract_size);
+        put("FileOffset", row.offset);
+        if (layout.count("ID")) put("ID", next_id++);
+        const auto place = sorted ? std::upper_bound(rows.begin(), rows.end(), made,
+                                                     [](const Row& a, const Row& b) { return a.key < b.key; })
+                                  : rows.end();
+        rows.insert(place, std::move(made));
+    }
+    if (sequential) {
+        for (size_t r = 0; r < rows.size(); ++r) {
+            const Field& id = layout.at("ID");
+            WriteNumber(rows[r].bytes.data() + id.offset, id.type, r);
+        }
+    }
+
+    std::vector<uint8_t> out(packet.begin(), packet.begin() + std::ptrdiff_t(rows_off));
+    for (const Row& row : rows) out.insert(out.end(), row.bytes.begin(), row.bytes.end());
+    out.insert(out.end(), packet.begin() + std::ptrdiff_t(rows_end), packet.begin() + std::ptrdiff_t(toc.strings_off));
+    const size_t strings_at = out.size();
+    out.insert(out.end(), pool.begin(), pool.end());
+    while (pool_size % 8 == 0 && (out.size() - strings_at) % 8 != 0) out.push_back(0);
+    const size_t data_at = out.size();
+    out.insert(out.end(), packet.begin() + std::ptrdiff_t(toc.data_off), packet.end());
+    const uint32_t size_field = ReadBe32(packet.data() + 4) + uint32_t(out.size() - packet.size());
+    WriteNumber(out.data() + 4, 4, size_field);
+    WriteNumber(out.data() + 12, 4, strings_at - 8);
+    WriteNumber(out.data() + 16, 4, data_at - 8);
+    WriteNumber(out.data() + 28, 4, rows.size());
+    toc.packet = std::move(out);
+    return true;
+}
+
+bool SameBytes(const std::filesystem::path& a, uint64_t offset_a, const std::filesystem::path& b, uint64_t offset_b,
+               uint64_t size) {
+    std::ifstream first(a, std::ios::binary), second(b, std::ios::binary);
+    std::vector<uint8_t> left, right;
+    for (uint64_t done = 0; done < size; done += left.size()) {
+        const size_t chunk = size_t(std::min<uint64_t>(size - done, 4u << 20));
+        if (!ReadFileRange(first, offset_a + done, chunk, left) || !ReadFileRange(second, offset_b + done, chunk, right) ||
+            left != right) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+OverlayResult OverlayArchive(const std::filesystem::path& base, const std::filesystem::path& update,
+                             const std::function<bool(std::string_view path)>& keep_base,
+                             const std::filesystem::path& output) {
+    namespace fs = std::filesystem;
+    OverlayResult result;
+    const auto fail = [&](std::string why, bool unreadable = false) {
+        std::error_code ignored;
+        fs::remove(output, ignored);
+        result.ok = false;
+        result.update_unreadable = unreadable;
+        result.detail = std::move(why);
+        return result;
+    };
+    const std::string base_name = Utf8(base.filename()), update_name = "the update's " + Utf8(update.filename());
+    CpkArchive base_archive, update_archive;
+    UtfTable header, toc;
+    std::string error;
+    if (!PatchWriter::Load(base_archive, base, header, toc, &error)) return fail(base_name + ": " + error);
+    if (!update_archive.Open(update, &error)) return fail(update_name + ": " + error, true);
+
+    struct Planned {
+        const CpkEntry* update;
+        const CpkEntry* base; // nullptr for a new path
+        uint64_t offset = 0;
+    };
+    std::vector<Planned> plan;
+    std::set<std::string> seen;
+    std::error_code ec;
+    const uint64_t update_length = fs::file_size(update, ec);
+    if (ec) return fail(update_name + ": cannot read the size", true);
+    for (const CpkEntry& entry : update_archive.entries()) {
+        if (keep_base(entry.path)) {
+            ++result.kept;
+            continue;
+        }
+        if (entry.offset > update_length || entry.size > update_length - entry.offset || !seen.insert(Lower(entry.path)).second) {
+            return fail(update_name + ": the entry " + entry.path + " is damaged", true);
+        }
+        plan.push_back({&entry, base_archive.Find(entry.path)});
+    }
+    if (plan.empty()) {
+        result.ok = true;
+        result.detail = base_name + ": the update changes nothing outside the kept entries";
+        return result;
+    }
+
+    fs::create_directories(output.parent_path(), ec);
+    fs::copy_file(base, output, fs::copy_options::overwrite_existing, ec);
+    if (ec) return fail(base_name + ": cannot copy it (" + ec.message() + ")");
+    const uint64_t base_length = fs::file_size(output, ec);
+    if (ec) return fail(base_name + ": cannot read the copy");
+    std::fstream out(output, std::ios::binary | std::ios::in | std::ios::out);
+    std::ifstream source(update, std::ios::binary);
+    if (!out || !source) return fail(base_name + ": cannot open the copy for writing");
+
+    const uint64_t align = base_archive.align(), toc_base = base_archive.toc_base();
+    const auto aligned = [&](uint64_t position) { return (position + align - 1) / align * align; };
+    const auto pad_to = [&](uint64_t from, uint64_t to) {
+        const std::vector<char> zeros(size_t(to - from), 0);
+        out.seekp(std::streamoff(from));
+        out.write(zeros.data(), std::streamsize(zeros.size()));
+    };
+    uint64_t pos = base_length;
+    std::vector<char> buffer(4u << 20);
+    for (Planned& item : plan) {
+        const uint64_t at = aligned(pos);
+        pad_to(pos, at);
+        out.seekp(std::streamoff(at));
+        source.clear();
+        source.seekg(std::streamoff(item.update->offset));
+        for (uint64_t left = item.update->size; left;) {
+            const size_t chunk = size_t(std::min<uint64_t>(left, buffer.size()));
+            source.read(buffer.data(), std::streamsize(chunk));
+            if (source.gcount() != std::streamsize(chunk)) return fail(update_name + ": " + item.update->path + " is truncated", true);
+            out.write(buffer.data(), std::streamsize(chunk));
+            left -= chunk;
+        }
+        if (!out.good()) return fail(base_name + ": write failed (disk full?)");
+        item.offset = at;
+        pos = at + item.update->size;
+        result.appended += item.update->size;
+    }
+
+    std::vector<NewRow> added;
+    for (const Planned& item : plan) {
+        const CpkEntry& entry = *item.update;
+        if (item.base) {
+            if (!toc.SetNumber(item.base->row, "FileSize", entry.size) ||
+                !toc.SetNumber(item.base->row, "ExtractSize", entry.extract_size) ||
+                !toc.SetNumber(item.base->row, "FileOffset", item.offset - toc_base)) {
+                return fail(base_name + ": the table of contents cannot be rewritten");
+            }
+            ++result.replaced;
+        } else {
+            added.push_back({entry.path, entry.size, entry.extract_size, item.offset - toc_base});
+            ++result.added;
+        }
+    }
+    if (!added.empty() && !InsertRows(toc, added, &error)) return fail(base_name + ": " + error);
+
+    const std::vector<uint8_t> packet = toc.Stored();
+    const uint64_t section_length = 16 + packet.size(), toc_at = base_archive.toc_offset();
+    const uint64_t content_at = header.Number(0, "ContentOffset").value_or(0);
+    uint64_t write_at = toc_at;
+    if (!added.empty() && !(content_at > toc_at && toc_at + section_length <= content_at)) {
+        write_at = aligned(pos);
+        pad_to(pos, write_at);
+        if (!header.SetNumber(0, "TocOffset", write_at)) return fail(base_name + ": the table of contents cannot be moved");
+    }
+    header.SetNumber(0, "Files", base_archive.entries().size() + added.size());
+    header.SetNumber(0, "TocSize", section_length);
+    if (header.Number(0, "EnableTocCrc").value_or(0) || header.Number(0, "EnableFileCrc").value_or(0)) {
+        header.SetNumber(0, "EnableTocCrc", 0);
+        header.SetNumber(0, "EnableFileCrc", 0);
+    }
+    std::vector<uint8_t> toc_section(kTocMagic, kTocMagic + 8);
+    WriteLe64(toc_section, packet.size());
+    toc_section.insert(toc_section.end(), packet.begin(), packet.end());
+    const std::vector<uint8_t> header_packet = header.Stored();
+    out.seekp(std::streamoff(write_at));
+    out.write(reinterpret_cast<const char*>(toc_section.data()), std::streamsize(toc_section.size()));
+    out.seekp(16);
+    out.write(reinterpret_cast<const char*>(header_packet.data()), std::streamsize(header_packet.size()));
+    out.flush();
+    if (!out.good()) return fail(base_name + ": write failed");
+    out.close();
+
+    CpkArchive merged;
+    if (!merged.Open(output, &error)) return fail(base_name + ": the result cannot be read back: " + error);
+    if (merged.entries().size() != base_archive.entries().size() + added.size()) {
+        return fail(base_name + ": the result has the wrong number of entries");
+    }
+    std::set<std::string> replaced;
+    for (const Planned& item : plan) {
+        const CpkEntry* entry = merged.Find(item.update->path);
+        if (!entry || entry->size != item.update->size || entry->extract_size != item.update->extract_size ||
+            !SameBytes(output, entry->offset, update, item.update->offset, item.update->size)) {
+            return fail(base_name + ": the result does not hold " + item.update->path);
+        }
+        if (item.base) replaced.insert(Lower(item.base->path));
+    }
+    for (const CpkEntry& entry : base_archive.entries()) {
+        const CpkEntry* kept = merged.Find(entry.path);
+        if (!kept || (!replaced.count(Lower(entry.path)) &&
+                      (kept->offset != entry.offset || kept->size != entry.size || kept->extract_size != entry.extract_size))) {
+            return fail(base_name + ": the result lost " + entry.path);
+        }
+    }
+    result.ok = true;
+    result.wrote = true;
+    result.detail = base_name + ": " + std::to_string(result.replaced) + " replaced, " + std::to_string(result.added) +
+                    " added, " + std::to_string(result.kept) + " left to the base";
     return result;
 }
 

@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -3911,6 +3912,23 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(ini, "text_language=german\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 4);
 
+    // The install log describes the slots with counts and checksums, never with text.
+    const auto contains = [](const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; };
+    const std::string described = DescribeLanguageResources(app0, &kUs101);
+    CHECK(described.starts_with("DRACRO_US.CPK: 22 entries") && contains(described, "; US 4 files, SystemMsg crc "));
+    CHECK(contains(described, "; FR 4 files, SystemMsg crc ") && contains(described, "; DE 4 files, SystemMsg crc "));
+    CHECK(contains(described, ", Russian; FR ") && described.ends_with("; offered Russian, French, German, Italian, Spanish"));
+    CHECK(!contains(described, "Новая") && DescribeLanguageResources(app0, &kUs101) == described);
+    WriteAll(regional, LanguageArchive({us}));
+    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English") &&
+          DescribeLanguageResources(app0, &kUs101).find("Russian,") == std::string::npos);
+    WriteAll(regional, "not an archive");
+    CHECK(DescribeLanguageResources(app0, &kUs101) == "DRACRO_US.CPK unreadable");
+    fs::remove(regional);
+    CHECK(DescribeLanguageResources(app0, &kUs101) == "DRACRO_US.CPK absent");
+    CHECK(DescribeLanguageResources(app0, &kJp103).empty() && DescribeLanguageResources(app0, nullptr).empty());
+    WriteAll(regional, LanguageArchive({Slot("US", russian), fr, de, it, es}));
+
     // A slot missing a file most slots have is not offered; a slot with nothing at all is not either.
     std::vector<Entry> french_without_menu = Slot("FR", english);
     french_without_menu.erase(french_without_menu.begin() + 2);
@@ -4036,6 +4054,240 @@ void TestTextLanguageSwitching(const fs::path& base) {
         LauncherSettings settings(ini);
         CHECK(!NormalizeTextLanguage(settings, InstalledTextLanguages(app0_of(kJp100), &kJp100)));
         CHECK(!settings.Has(kTextLanguageKey));
+    }
+    fs::remove_all(root);
+}
+
+// An update's regional archive is laid over the base's: its entries outside the language slots win, and the base keeps
+// every language slot.
+void TestKeepBaseLanguages(const fs::path& base) {
+    using namespace cpk_test;
+    using namespace language_test;
+    const fs::path root = base / "keep_languages";
+    fs::remove_all(root);
+    const auto order_key = [](const std::string& path) {
+        const size_t slash = path.rfind('/');
+        std::string dir = path.substr(0, slash), name = path.substr(slash + 1);
+        for (std::string* text : {&dir, &name}) {
+            for (char& c : *text) c = char(std::tolower(static_cast<unsigned char>(c)));
+        }
+        return std::make_pair(dir, name);
+    };
+    const auto sorted = [&](std::initializer_list<std::vector<Entry>> parts) {
+        std::vector<Entry> entries;
+        for (const std::vector<Entry>& part : parts) entries.insert(entries.end(), part.begin(), part.end());
+        std::sort(entries.begin(), entries.end(), [&](const Entry& a, const Entry& b) { return order_key(a.path) < order_key(b.path); });
+        return entries;
+    };
+    const auto data_of = [](const CpkArchive& archive, const std::string& path) {
+        const CpkEntry* entry = archive.Find(path);
+        return entry ? Bytes(archive.Read(*entry)) : std::string("<missing>");
+    };
+    const auto keys = [](const fs::path& app0, const GameBuild& build) {
+        std::string joined;
+        for (const TextLanguage& language : InstalledTextLanguages(app0, &build)) {
+            joined += (joined.empty() ? "" : " ") + std::string(language.key) + "=" + std::to_string(language.ps4_id);
+        }
+        return joined;
+    };
+    const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
+
+    std::vector<Entry> us = Slot("US", kEnglishSheet);
+    us.push_back({"msgsheet/StaffRollMsg_PS4_US.fms", "staff", false});
+    const std::vector<Entry> shared = {{"other/DraCro.otb", "tool", false},
+                                       {"other/US_manual_001.ftx", "manual english", false},
+                                       {"other/FR_manual_001.ftx", "manual french", false},
+                                       {"msgsheet/AbilityList_EU.fms", "eu", false},
+                                       {"stage/Interface.ftx", "interface base", false},
+                                       {"stage/Menu.ftx", "menu base", false}};
+    const std::string base_bytes = BuildCpk(sorted({shared, us, Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
+                                                    Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet), Slot("UK", kEnglishSheet)}),
+                                            true);
+    std::vector<Entry> russian_us = Slot("US", kRussianSheet), changed_fr = Slot("FR", Sheet("update french"));
+    for (std::vector<Entry>* slot : {&russian_us, &changed_fr}) {
+        for (Entry& entry : *slot) {
+            entry.data = entry.path.find("SystemMsg") == std::string::npos ? "update " + entry.data : entry.data;
+        }
+    }
+    const std::vector<Entry> update_only = {{"other/US_manual_001.ftx", "manual russian", false},
+                                            {"stage/Interface.ftx", "interface update", false},
+                                            {"stage/NewThing.ftx", "new thing", false},
+                                            {"other/Aaa.bin", "first", false}};
+    const std::string update_bytes = BuildCpk(sorted({update_only, russian_us, changed_fr}), true);
+
+    const fs::path base_app0 = root / "base", update_app0 = root / "update", merged_app0 = root / "merged";
+    WriteAll(base_app0 / "DRACRO_US.CPK", base_bytes);
+    WriteAll(update_app0 / "DRACRO_US.CPK", update_bytes);
+    const std::string base_hash = Sha256Hex(base_app0 / "DRACRO_US.CPK");
+
+    // The base alone and the update alone: the update's archive is what collapsed the list.
+    CHECK(keys(base_app0, kUs) == western && keys(base_app0, kUs101) == western);
+    CHECK(keys(update_app0, kUs101) == "russian=1 french=2");
+
+    CpkArchive base_archive;
+    CHECK(base_archive.Open(base_app0 / "DRACRO_US.CPK"));
+    const std::set<std::string> slots = LanguageSlotSuffixes(base_archive, &kUs101);
+    CHECK((slots == std::set<std::string>{"DE", "ES", "FR", "IT", "UK", "US"}));
+    for (const char* language_file : {"stage/Menu_FR.ftx", "other/DE_manual_001.ftx", "msgsheet/StaffRollMsg_PS4_US.fms"}) {
+        CHECK(InLanguageSlot(language_file, slots));
+    }
+    for (const char* shared_file : {"stage/Interface.ftx", "other/DraCro.otb", "msgsheet/AbilityList_EU.fms", "stage/R_bg32b_00.bsb"}) {
+        CHECK(!InLanguageSlot(shared_file, slots));
+    }
+    const auto keep = [&](std::string_view path) { return InLanguageSlot(path, slots); };
+
+    // The composed archive: the base's language slots whatever the update holds there, the update's other entries.
+    const OverlayResult overlaid = OverlayArchive(base_app0 / "DRACRO_US.CPK", update_app0 / "DRACRO_US.CPK", keep,
+                                                  merged_app0 / "DRACRO_US.CPK");
+    CHECK(overlaid.ok && overlaid.wrote && overlaid.replaced == 1 && overlaid.added == 2 && overlaid.kept == 9);
+    CpkArchive merged;
+    CHECK(merged.Open(merged_app0 / "DRACRO_US.CPK"));
+    CHECK(merged.entries().size() == base_archive.entries().size() + 2);
+    for (const CpkEntry& entry : base_archive.entries()) {
+        if (InLanguageSlot(entry.path, slots)) {
+            CHECK(data_of(merged, entry.path) == data_of(base_archive, entry.path));
+        }
+    }
+    CHECK(data_of(merged, "msgsheet/SystemMsg_US.fms") == kEnglishSheet);  // not the update's Russian
+    CHECK(data_of(merged, "msgsheet/SystemMsg_FR.fms") == kEnglishSheet);  // nor its French
+    CHECK(data_of(merged, "other/US_manual_001.ftx") == "manual english");
+    CHECK(data_of(merged, "stage/Menu_US.ftx") == "menu US" && data_of(merged, "stage/Menu_FR.ftx") == "menu FR");
+    CHECK(data_of(merged, "stage/Interface.ftx") == "interface update");    // update wins outside the slots
+    CHECK(data_of(merged, "stage/NewThing.ftx") == "new thing" && data_of(merged, "other/Aaa.bin") == "first");
+    CHECK(data_of(merged, "stage/Menu.ftx") == "menu base" && data_of(merged, "other/DraCro.otb") == "tool");
+    for (size_t i = 0; i < merged.entries().size(); ++i) {
+        CHECK(merged.entries()[i].id == i);
+        CHECK(i == 0 || order_key(merged.entries()[i - 1].path) < order_key(merged.entries()[i].path));
+    }
+    CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == western);
+    CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash);
+
+    // A partial update with only a Russian US slot and one replaced file.
+    const std::string partial = BuildCpk(sorted({russian_us, {{"stage/Interface.ftx", "interface partial", false}}}), true);
+    WriteAll(update_app0 / "partial" / "DRACRO_US.CPK", partial);
+    const OverlayResult one_slot = OverlayArchive(base_app0 / "DRACRO_US.CPK", update_app0 / "partial" / "DRACRO_US.CPK", keep,
+                                                  root / "one_slot" / "DRACRO_US.CPK");
+    CHECK(one_slot.ok && one_slot.replaced == 1 && one_slot.added == 0 && one_slot.kept == 4);
+    CHECK(keys(root / "one_slot", kUs101) == western);
+    CpkArchive one_slot_archive;
+    CHECK(one_slot_archive.Open(root / "one_slot" / "DRACRO_US.CPK") && one_slot_archive.entries().size() == base_archive.entries().size());
+    CHECK(data_of(one_slot_archive, "stage/Interface.ftx") == "interface partial");
+
+    // An update that holds only language slots changes nothing and writes nothing.
+    WriteAll(update_app0 / "slots" / "DRACRO_US.CPK", BuildCpk(sorted({russian_us, changed_fr}), true));
+    const OverlayResult only_slots = OverlayArchive(base_app0 / "DRACRO_US.CPK", update_app0 / "slots" / "DRACRO_US.CPK", keep,
+                                                    root / "only_slots" / "DRACRO_US.CPK");
+    CHECK(only_slots.ok && !only_slots.wrote && !fs::exists(root / "only_slots" / "DRACRO_US.CPK"));
+
+    // New entries that outgrow the table's place (the fixture's table has 10 KB, a filler-heavy base leaves little of it)
+    // move the table to the end, and the archive still reads.
+    std::vector<Entry> filler, many;
+    for (int i = 0; i < 100; ++i) {
+        filler.push_back({"other/filler_" + std::to_string(1000 + i) + ".bin", "filler", false});
+    }
+    for (int i = 0; i < 120; ++i) {
+        many.push_back({"stage/extra_" + std::to_string(1000 + i) + ".ftx", "extra " + std::to_string(i), false});
+    }
+    const std::string big_bytes = BuildCpk(sorted({shared, us, Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
+                                                   Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet), Slot("UK", kEnglishSheet), filler}),
+                                           true);
+    WriteAll(root / "big" / "DRACRO_US.CPK", big_bytes);
+    WriteAll(update_app0 / "many" / "DRACRO_US.CPK", BuildCpk(sorted({many, russian_us}), true));
+    const OverlayResult grown = OverlayArchive(root / "big" / "DRACRO_US.CPK", update_app0 / "many" / "DRACRO_US.CPK", keep,
+                                               root / "grown" / "DRACRO_US.CPK");
+    CHECK(grown.ok && grown.added == 120 && grown.kept == 4);
+    CpkArchive big_archive, grown_archive;
+    CHECK(big_archive.Open(root / "big" / "DRACRO_US.CPK") && big_archive.toc_offset() == 0x800);
+    CHECK(grown_archive.Open(root / "grown" / "DRACRO_US.CPK") && grown_archive.toc_offset() > big_bytes.size());
+    CHECK(grown_archive.entries().size() == big_archive.entries().size() + 120);
+    CHECK(data_of(grown_archive, "stage/extra_1000.ftx") == "extra 0" && data_of(grown_archive, "stage/extra_1119.ftx") == "extra 119");
+    CHECK(data_of(grown_archive, "msgsheet/SystemMsg_US.fms") == kEnglishSheet && data_of(grown_archive, "stage/Interface.ftx") == "interface base");
+    CHECK(data_of(grown_archive, "other/filler_1050.bin") == "filler");
+    CHECK(keys(root / "grown", kUs101) == western);
+
+    // The install step: the staged game gets the composed archive, the installed base is only read.
+    const fs::path update_dir = root / "install_update", staged = root / "install_staged";
+    const auto write_update = [&](const std::string& archive) {
+        WriteAll(update_dir / "DRACRO_US.CPK", archive);
+        WriteAll(update_dir / "eboot.bin", "eboot 1.01");
+    };
+    WriteAll(base_app0 / "eboot.bin", "eboot 1.00");
+    write_update(update_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, staged, &kUs101).ok());
+    CHECK(keys(staged, kUs101) == western && ReadAll(staged / "eboot.bin") == "eboot 1.01");
+    CHECK(!fs::exists(update_dir / "DRACRO_US.CPK") && !fs::exists(staged / "DRACRO_US.CPK.compose"));
+    CpkArchive staged_archive;
+    CHECK(staged_archive.Open(staged / "DRACRO_US.CPK") && data_of(staged_archive, "stage/Interface.ftx") == "interface update");
+    CHECK(data_of(staged_archive, "msgsheet/SystemMsg_US.fms") == kEnglishSheet);
+    CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash && fs::hard_link_count(base_app0 / "DRACRO_US.CPK") == 1);
+    CHECK(ReadAll(base_app0 / "DRACRO_US.CPK") == base_bytes);
+
+    // Another build's update still replaces the archive as a whole.
+    const fs::path whole = root / "install_whole";
+    write_update(update_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, whole).ok() && ReadAll(whole / "DRACRO_US.CPK") == update_bytes);
+
+    // An update with language slots only leaves the base's archive in the staged game as it is.
+    const fs::path slots_only = root / "install_slots";
+    write_update(BuildCpk(sorted({russian_us, changed_fr}), true));
+    CHECK(StageUpdate(base_app0, update_dir, slots_only, &kUs101).ok() && ReadAll(slots_only / "DRACRO_US.CPK") == base_bytes);
+
+    // A damaged update archive fails the install step and leaves the base alone.
+    for (const std::string& broken : {std::string("not an archive"), update_bytes.substr(0, 0x3000 + 10)}) {
+        const fs::path failed = root / "install_failed";
+        fs::remove_all(failed);
+        write_update(broken);
+        const InstallResult result = StageUpdate(base_app0, update_dir, failed, &kUs101);
+        CHECK(!result.ok() && result.status == InstallStatus::kReadFailed && !result.detail.empty());
+        CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash && !fs::exists(failed / "DRACRO_US.CPK.compose"));
+    }
+
+    // A saved language survives the update.
+    const fs::path ini = root / "dcp.ini";
+    for (const char* kept : {"french", "spanish", "english", "german", "italian"}) {
+        WriteAll(ini, std::string("text_language=") + kept + "\n");
+        LauncherSettings settings(ini);
+        CHECK(!NormalizeTextLanguage(settings, InstalledTextLanguages(staged, &kUs101)));
+        CHECK(settings.Get(kTextLanguageKey) == kept);
+    }
+
+    // The game's own archive, when a folder holding it is named: read only, the language slots are recognised, and an
+    // update composed over it keeps them.
+    if (const char* real = std::getenv("DCP_TEST_REAL_ARCHIVE")) {
+        const fs::path real_app0 = PathFromUtf8(real), real_cpk = real_app0 / "DRACRO_US.CPK";
+        const std::string real_hash = Sha256Hex(real_cpk);
+        CpkArchive real_archive;
+        CHECK(real_archive.Open(real_cpk));
+        const std::set<std::string> real_slots = LanguageSlotSuffixes(real_archive, &kUs101);
+        CHECK((real_slots == std::set<std::string>{"DE", "ES", "FR", "IT", "UK", "US"}));
+        CHECK(keys(real_app0, kUs) == western && keys(real_app0, kUs101) == western);
+        const auto real_keep = [&](std::string_view path) { return InLanguageSlot(path, real_slots); };
+        std::vector<Entry> real_update = {{"stage/Interface.ftx", "interface update", false},
+                                          {"stage/Menu_US.ftx", "menu us update", false},
+                                          {"other/US_manual_001.ftx", "manual update", false},
+                                          {"stage/zz_new.ftx", "new", false},
+                                          {"other/AAA.bin", "new first", false}};
+        for (const bool grow : {false, true}) {
+            for (int i = 0; grow && i < 60; ++i) {
+                char name[48];
+                std::snprintf(name, sizeof(name), "stage/extra_%02d.ftx", i);
+                real_update.push_back({name, "extra", false});
+            }
+            const fs::path out_app0 = root / (grow ? "real_grown" : "real_merged");
+            WriteAll(root / "real_update" / "DRACRO_US.CPK", BuildCpk(sorted({real_update}), true));
+            const OverlayResult real_result =
+                OverlayArchive(real_cpk, root / "real_update" / "DRACRO_US.CPK", real_keep, out_app0 / "DRACRO_US.CPK");
+            CHECK(real_result.ok && real_result.wrote && real_result.replaced == 1 && real_result.kept == 2 &&
+                  real_result.added == (grow ? 62u : 2u));
+            CpkArchive out_archive;
+            CHECK(out_archive.Open(out_app0 / "DRACRO_US.CPK") &&
+                  out_archive.entries().size() == real_archive.entries().size() + real_result.added);
+            CHECK(data_of(out_archive, "stage/Interface.ftx") == "interface update" && data_of(out_archive, "stage/zz_new.ftx") == "new");
+            CHECK(data_of(out_archive, "stage/Menu_US.ftx") == data_of(real_archive, "stage/Menu_US.ftx"));
+            CHECK(keys(out_app0, kUs101) == western);
+            fs::remove_all(out_app0);
+        }
+        CHECK(Sha256Hex(real_cpk) == real_hash);
     }
     fs::remove_all(root);
 }
@@ -5099,6 +5351,7 @@ int main(int argc, char** argv) {
     TestControllerPrompts(base);
     TestInstalledTextLanguages(base);
     TestTextLanguageSwitching(base);
+    TestKeepBaseLanguages(base);
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);
