@@ -265,6 +265,9 @@ any datagram, after 30 tries of one packet, or on CLOSE.
   window, not only the Online page; it re-reads the friends and requests on every `friend.*` event and every 30 s
   (declines and renames send no event), and is started again 1.5 s after the Online name stops changing. Off closes
   it. The Connection test uses its own short session with `presence: false`.
+- The in-game Options menu's Online page (docs/LAUNCHER.md) only reads the game's own lobby link, never starts or
+  serves it: its friend code is the one the hello answer carried and its friends are the last `friends.list` answer the
+  game itself asked for. Only its Run test sends anything (the Connection test, on its own short session).
 - The game publishes its room info with Toolkit2 `setPresence` (forwarded as `presence.set`); its "Join Friends Room"
   list is Toolkit2 `getFriends`, answered from `friends.list` with one row per friend online in a room of the same
   game key and online protocol with a presence blob. The game then joins by the room id inside that blob.

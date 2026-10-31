@@ -99,6 +99,7 @@ to an issue, with your distribution, GPU and driver.
 
 PLAYING
 -------
+- F1 (or L3 + R3 on a controller) opens the Options menu.
 - F11 switches between Windowed and Borderless Fullscreen.
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
   Steam Deck's own controls.

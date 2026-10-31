@@ -5,6 +5,7 @@
 #include <cstddef>
 
 #include "dcp_cheats.h"
+#include "dcp_menu_input.h"
 
 namespace dcp::cheats {
 
@@ -100,35 +101,31 @@ constexpr MenuKeyAction MenuKeyPress(bool repeat, bool online_locked, bool open,
     return busy ? MenuKeyAction::None : MenuKeyAction::Open;
 }
 
-// A button that is never reported released (a controller unplugged as the menu closes) cannot block the game forever.
-inline constexpr double kReleaseTimeoutSeconds = 1.0;
-
-// Whether the menu may release the game's input: nothing it received is still held, or the wait ran out.
-inline bool InputReleased(bool anything_held, double waited_seconds, double timeout_seconds) {
-    return !anything_held || waited_seconds >= timeout_seconds;
+// Left and right on a row of the Options menu's Cheats page: a toggle goes Off or On, a multiplier moves to its next
+// value on the right only, and an action runs on a press alone.
+constexpr bool StepActivates(RowKind kind, int direction, bool on) {
+    switch (kind) {
+    case RowKind::Toggle: return direction != 0 && (direction > 0) != on;
+    case RowKind::MovementSpeed:
+    case RowKind::Experience: return direction > 0;
+    case RowKind::Action: return false;
+    }
+    return false;
 }
 
-// Closing the menu (B, Escape, F10) starts a wait, and the game gets its input back only after what was pressed in
-// the menu is released, so the closing press never also reaches the game.
-class CloseGate {
-public:
-    void Request() { requested_ = true; }
-    bool requested() const { return requested_; }
+// The rows act only when the build has the cheat hooks and Online Play has not locked them. The Options menu's Cheats
+// page asks the same question as the F10 menu.
+constexpr bool RowsUsable(bool available, bool online_locked) {
+    return available && !online_locked;
+}
 
-    // Once per frame. True when the menu may go and the game may read its input again.
-    bool Step(bool anything_held, double now) {
-        if (!requested_) {
-            return false;
-        }
-        if (since_ < 0.0) {
-            since_ = now;
-        }
-        return InputReleased(anything_held, now - since_, kReleaseTimeoutSeconds);
-    }
+// The status of a row that cannot act. Online Play shows none: the page says why once.
+constexpr const char* UnusableRowState(bool online_locked) {
+    return online_locked ? nullptr : "Unavailable";
+}
 
-private:
-    bool requested_ = false;
-    double since_ = -1.0;
-};
+using menu::CloseGate;
+using menu::InputReleased;
+using menu::kReleaseTimeoutSeconds;
 
 } // namespace dcp::cheats

@@ -1482,7 +1482,8 @@ void TestOverlayPanel() {
     CHECK(overlay.find("if (DcpSettings::Get().show_fps) {\n        FpsCounter();") != std::string::npos);
 }
 
-// Insert and R3 + L2 open nothing: the in-game settings menu was removed. F10, F11, F2 and F3 stay.
+// Insert and R3 + L2 open nothing: that settings menu stays removed. The Options menu (F1, L3 + R3; see
+// tests/options_menu_tests.cpp) is a separate design. F10, F11, F2 and F3 stay.
 void TestNoSettingsMenu() {
     const fs::path source(DCP_SOURCE_DIR);
     const std::string overlay =
@@ -1498,10 +1499,10 @@ void TestNoSettingsMenu() {
     CHECK(overlay.find("SDL_GAMEPAD_BUTTON_RIGHT_STICK") == std::string::npos &&
           overlay.find("SDL_GAMEPAD_AXIS_LEFT_TRIGGER") == std::string::npos);
     CHECK(settings.find("menu_tab") == std::string::npos && settings.find("bool Save()") == std::string::npos);
-    // Keys and buttons go to the game unless the cheat menu or a game dialog has them.
-    CHECK(overlay.find("        if (!cheats_open) {\n            return false;\n        }\n        io.AddKeyEvent(ImGuiMod_Ctrl") !=
+    // Keys and buttons go to the game unless a menu or a game dialog has them.
+    CHECK(overlay.find("        if (!MenuOpen()) {\n            return false;\n        }\n        io.AddKeyEvent(ImGuiMod_Ctrl") !=
           std::string::npos);
-    CHECK(overlay.find("return cheat_open || text_entry_active || choice_active;") != std::string::npos);
+    CHECK(overlay.find("return cheat_open || options_open || text_entry_active || choice_active;") != std::string::npos);
     CHECK(overlay.find("if (event.key.scancode == DcpSettings::Get().menu_key) {") != std::string::npos);
     CHECK(window.find("if (window_shortcut && !event.key.repeat) {\n                ToggleBorderless();") != std::string::npos);
     CHECK(window.find("hud == DcpPing::HudKey::Fps") != std::string::npos &&

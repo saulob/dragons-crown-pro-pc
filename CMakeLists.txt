@@ -162,7 +162,9 @@ target_compile_definitions(dcp-net-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_
 target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
 # The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
 # DCP_TEST_LOBBY names one. Not part of the default build.
-add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp)
+add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp
+    launcher/online_view.cpp)
+target_include_directories(dcp-online-hle-tests PRIVATE launcher)
 target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
 set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-online-hle-tests PRIVATE -Wall -Wextra)
@@ -291,6 +293,17 @@ set_target_properties(dcp-frame-pacing-tests PROPERTIES CXX_STANDARD 20 CXX_STAN
 target_include_directories(dcp-frame-pacing-tests PRIVATE gpu/shim)
 target_compile_definitions(dcp-frame-pacing-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-frame-pacing-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the Options menu (F1, L3 + R3): the chord, the close gate, which settings apply live or after a
+# restart, what is saved to dcp.ini and the Online Play lock on its Cheats page (tools/test.ps1); not part of the
+# default build.
+add_executable(dcp-options-menu-tests EXCLUDE_FROM_ALL tests/options_menu_tests.cpp gpu/shim/dcp_settings.cpp
+    src/runtime_cheats.cpp launcher/game_profile.cpp launcher/online_view.cpp)
+set_target_properties(dcp-options-menu-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-options-menu-tests PRIVATE gpu/shim src launcher)
+target_link_libraries(dcp-options-menu-tests PRIVATE dcp_keys dcp_net)
+target_compile_definitions(dcp-options-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-options-menu-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the Japanese NPC voice routing (tools/test.ps1); not part of the default build.
 add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)

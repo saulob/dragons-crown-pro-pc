@@ -72,6 +72,7 @@ from the project's GitHub releases page, choose "More info", then
 
 PLAYING
 -------
+- F1 (or L3 + R3 on a controller) opens the Options menu.
 - F11 switches between Windowed and Borderless Fullscreen.
 - Xbox controllers work without setup.
 - The keyboard works too; the launcher's Controls page lists the keys.

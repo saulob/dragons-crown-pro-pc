@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The video core's view of dcp.ini: read once at start, changed live by F11 and the HUD keys.
+// The video core's view of dcp.ini: read once at start, changed live by F11, the HUD keys and the Options menu.
 // Readers load the atomics every frame.
 
 #pragma once
 
 #include <atomic>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <SDL3/SDL_scancode.h>
 
@@ -34,6 +36,8 @@ struct Values {
     std::atomic<int> requested_width{0}, requested_height{0};
     std::atomic<int> monitor{1};
     std::atomic<bool> show_fps_title{false}, show_resolution_title{false};
+    // The Skip Offers as the file had them at start; the loader applies them once, so the Options menu never changes these.
+    std::atomic<bool> story_skip_offer{false}, tutorial_skip_offer{false};
     // Set by the window: the refresh rate of the display it opened on; 0 when unknown.
     std::atomic<double> display_refresh_hz{0.0};
     // Presentation pacing (driver.cpp). 0: Unlimited.
@@ -51,6 +55,10 @@ bool Read(const std::string& path, Values& values);
 void Load(const std::string& path);
 /// Writes the display mode alone (F11); every other line of the file is kept.
 bool SaveDisplayMode();
+
+using Entries = std::vector<std::pair<std::string, std::string>>;
+/// Writes the given keys as the Options menu changes them; every other line of the file is kept.
+bool SaveEntries(const Entries& entries);
 
 /// One "key = value" line as the launcher's settings file reads it; false for comments and other lines.
 bool ParseLine(const std::string& line, std::string& key, std::string& value);

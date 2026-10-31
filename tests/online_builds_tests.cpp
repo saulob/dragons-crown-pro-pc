@@ -19,6 +19,7 @@
 #include "net/json.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
+#include "online_settings.h"
 #include "runtime_cheats.h"
 #include "runtime_online.h"
 
@@ -346,6 +347,32 @@ void TestOneLobbyGame(const fs::path& base) {
     CHECK(!net::online_compatible(net::kOnlineProtocolVersion + 1) && !net::online_compatible(0));
 }
 
+// The in-game Online page reads the name and identity the launcher uses, the same way for every build; with Online Play
+// off it starts no lobby link and offers the name alone.
+void TestOnlinePageSource(const fs::path& base) {
+    const fs::path file = base / "dcp.ini";
+    for (const GameBuild& build : SupportedBuilds()) {
+        std::ofstream(file, std::ios::binary) << "online_enabled = 1\nonline_name =  Moon Walker!! \n";
+        runtime_online_configure(file.string().c_str(), base.string().c_str(), Key(build).c_str());
+        const net::Identity identity = net::load_identity(base, false);
+        CHECK(online::settings().name == net::online_name(ReadOnlineConfig(file).name));
+        CHECK(online::settings().name == "Moon_Walker");
+        CHECK(identity.ok() && online::settings().identity.account == identity.account);
+        RuntimeOnlinePage observed;
+        runtime_online_page_update(&observed);
+        runtime_online_page_update(&observed);
+        CHECK(observed.active == 1 && observed.link == RUNTIME_ONLINE_LINK_OFF && std::string(observed.name) == "Moon_Walker");
+        CHECK(observed.friend_code[0] == '\0' && observed.friend_count == 0 && !observed.friends_known);
+
+        std::ofstream(file, std::ios::binary) << "online_enabled = 0\nonline_name = Moon\n";
+        runtime_online_configure(file.string().c_str(), base.string().c_str(), Key(build).c_str());
+        RuntimeOnlinePage page;
+        runtime_online_page_update(&page);
+        CHECK(page.active == 0 && page.link == RUNTIME_ONLINE_LINK_OFF && std::string(page.name) == "Moon");
+        CHECK(page.friend_count == 0 && page.friend_code[0] == '\0' && page.test == RUNTIME_ONLINE_TEST_IDLE);
+    }
+}
+
 const GameBuild* BuildNamed(const char* key) {
     for (const GameBuild& build : SupportedBuilds())
         if (Key(build) == key) return &build;
@@ -420,6 +447,7 @@ int main() {
     std::map<std::string, uintptr_t> reference;
     for (const GameBuild& build : SupportedBuilds()) TestBuild(base, build, reference);
     TestOneLobbyGame(base);
+    TestOnlinePageSource(base);
     TestCheatLockout(base);
     TestCrossBuildRooms(base);
     fs::remove_all(base);

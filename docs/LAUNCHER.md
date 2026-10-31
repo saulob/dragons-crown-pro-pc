@@ -160,9 +160,28 @@ does. Both write byte-identical files from the game's package.
 - The sidebar's Online entry shows the number of friend requests waiting (`trg::Page::badge`, patched in by
   `gpu/patches/trg-launcher/0004-sidebar-badge.patch`).
 
+## The Options menu
+
+**F1**, or **L3 + R3** together on a controller, opens it over the game; **F1**, Escape, **B** or **L3 + R3** again close it (`gpu/shim/dcp_options_menu.cpp`, model in `dcp_options_menu.h`, shared input rules in `src/dcp_menu_input.h`). It is the launcher's settings, changed while playing, written to the same `dcp.ini` the moment they change; lines it does not own are kept. It does not open over the F10 Cheats menu, a game dialog or the start-up loading screen, and F10 does not open over it.
+
+| Page | Setting | When it applies |
+|---|---|---|
+| Display | Display mode (also F11), VSync | at once |
+| Graphics | Presentation, Upscaling (FSR 1), Sharpening, Sharpening strength, Anti-aliasing | at once |
+| Graphics | Texture filtering | saved now, applies at the next start |
+| Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
+| Gameplay | Frame rate, Story Skip Offer, Tutorial Skip Offer | saved now, applies at the next start |
+| Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
+| Controls | the hotkeys (read only) | |
+| Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
+
+Window size, Monitor, Aspect Ratio, Render resolution, True Ultrawide, Graphics card, language, voices, Arachnophobia Safe Mode, keyboard bindings and controller prompts stay in the launcher, and the pages say so. A setting that applies at the next start shows "(restart)" and the footer reminds you; there is no restart button, so close and start the game again. Keyboard: Up / Down rows, Left / Right values, Enter changes, Q / E or Tab pages, Escape closes. Controller: D-pad or left stick moves, A changes, LB / RB pages, B closes. The mouse works too. While it is open the game reads neutral input; closing it waits until what was pressed in it is released (one second at most), and `runtime_pad.c` hides L3 and R3 together from the game and any button still held afterwards, so the opening and closing presses never reach the game.
+
+With Online Play on the Online page takes the place of the Cheats page, which does not exist then: the cheats stay locked in `runtime_cheats` as for F10. The Online page shows a copy of what the game's own lobby connection knows (`page_link` in `src/runtime_matching2.cpp`, taken for the overlay by `runtime_online_page_update`): the Online name as the game uses it, the account's friend code, the friends with the launcher's status words (Offline, Online, Online, in a room, Incompatible) and the Connection test, the same `net::run_connection_test` as the launcher's, run on a worker thread when you select **Run test**. The page only reads: it never turns Online Play on or off, connects, reconnects or refreshes anything, so what it shows is what the game's own Online runtime already has (the friend list appears once the game has loaded it). Only **Run test** touches the network. Online Play itself, the Online name and friend management (adding, removing, accepting and declining) stay in the launcher. On a build without the cheat hooks, with Online Play off, the Cheats page is there and its rows read "Unavailable".
+
 ## Settings
 
-File: `user\dcp.ini` in the `--user` folder, the file the video core reads at start; the game writes only `display_mode` (F11). Lines
+File: `user\dcp.ini` in the `--user` folder, the file the video core reads at start; the game writes only `display_mode` (F11) and the keys the Options menu changes. Lines
 the launcher or F11 do not manage (comments, the other side's keys) are kept when either saves. Booleans are written
 `1`/`0` and read as `1`/`on`/`yes`/`true` or `0`/`off`/`no`/`false`. A key that is missing, or holds a value the game does
 not accept, has the default below, in the launcher and in the game alike (`tests/launcher_tests.cpp` checks that both

@@ -149,6 +149,10 @@ struct State {
     bool friends_busy = false;
     uint64_t friends_generation = 0;
     std::vector<FriendRoom> friends;
+    // what the Online page shows: the account's friend code and the friend list as the lobby sent it
+    std::string friend_code;
+    std::vector<OnlinePlayer> friend_list;
+    bool friend_list_known = false;
     // what the game's player cards show: each player's platform and port version, by online id
     std::map<std::string, Client> clients;
     std::set<std::string> refused_friend_rooms;
@@ -492,6 +496,10 @@ void OnResponse(const net::LobbyMessage& m) {
         return;
     case Kind::kFriends: {
         g.friends.clear();
+        if (!error) {
+            g.friend_list = ReadOnlinePlayers(m.body["friends"]);
+            g.friend_list_known = true;
+        }
         size_t total = 0;
         for (const Json& f : m.body["friends"].items()) {
             ++total;
@@ -658,6 +666,7 @@ void OnLink(const net::LobbyMessage& m) {
     using K = net::LobbyMessage::Kind;
     if (m.kind == K::kUp) {
         g.up = true;
+        g.friend_code = m.body["friend_code"].as_string();
         g.your_ip = net::parse_ip(m.body["ip"].as_string());
         g.lobby_on_lan = !g.your_ip || net::is_lan(g.your_ip);
         std::printf("Matching2: signed in to the lobby as %s; it sees %s\n", settings().name.c_str(), m.body["ip"].as_string().c_str());
@@ -667,6 +676,7 @@ void OnLink(const net::LobbyMessage& m) {
         g.udp_inflight = false;
         std::printf("Matching2: lobby connection lost; the game is not told while it reconnects\n");
     } else if (m.kind == K::kBack) {
+        g.friend_code = m.body["friend_code"].as_string();
         g.your_ip = net::parse_ip(m.body["ip"].as_string());
         if (g.room) {
             Json body = Json::Object();
@@ -690,6 +700,8 @@ void OnLink(const net::LobbyMessage& m) {
         g.pending.clear();
         g.friends_busy = false;
         g.friends.clear();
+        g.friend_list.clear();
+        g.friend_list_known = false;
         ++g.friends_generation;
         RoomGone(kRoomDestroyed);
         if (g.start_wanted) PushContextEvent(was_up ? kCtxStartOver : kCtxStarted, m.code == "unauthorized" ? kErrIdentity : kErrLobbyDown);
@@ -1192,6 +1204,20 @@ void friends_fetch() {
     g.friends_busy = true;
     const uint32_t seq = g.link->request("friends.list", Json::Object());
     g.pending[seq] = Pending{Kind::kFriends, 0, nullptr, nullptr, 0};
+}
+
+PageLink page_link() {
+    PageLink out;
+    if (!settings().enabled) return out;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    out.link = !g.link          ? RUNTIME_ONLINE_LINK_OFF
+               : g.down         ? RUNTIME_ONLINE_LINK_UNREACHABLE
+               : g.up && !g.lost ? RUNTIME_ONLINE_LINK_UP
+                                : RUNTIME_ONLINE_LINK_CONNECTING;
+    out.friend_code = g.friend_code;
+    out.friends_known = g.friend_list_known;
+    out.friends = g.friend_list;
+    return out;
 }
 
 bool friends_busy() {

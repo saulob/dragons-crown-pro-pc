@@ -1142,7 +1142,7 @@ void TestAddGold() {
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
     const size_t action_branch = overlay.find("runtime_cheat_action(int(row.action))");
     CHECK(action_branch != std::string::npos);
-    CHECK(overlay.substr(action_branch, 160).find("cheat_close") == std::string::npos); // the menu stays open
+    CHECK(overlay.substr(action_branch, 160).find("menu_close") == std::string::npos); // the menu stays open
     CHECK(overlay.find("runtime_cheat_clear_actions()") != std::string::npos);
     const std::string launcher = ReadSource("launcher/settings.cpp") + ReadSource("launcher/launcher.cpp");
     CHECK(launcher.find("add_gold") == std::string::npos && launcher.find("kActions") == std::string::npos);
