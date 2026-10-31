@@ -62,6 +62,11 @@ else()
     target_link_libraries(dcp_net PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 endif()
 
+# The stage the process is in, for the crash report: used by the launcher, the loader and the window thread.
+add_library(dcp_startup_phase STATIC src/startup_phase.c)
+target_include_directories(dcp_startup_phase PUBLIC src)
+target_compile_options(dcp_startup_phase PRIVATE -Wall -Wextra -Werror)
+
 add_subdirectory(gpu)
 add_subdirectory(launcher)
 
@@ -108,7 +113,7 @@ if (WIN32)
     # Relink when the application icon, the manifest or the version changes.
     set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
-    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/runtime_log.c src/dragons_crown_pro.rc)
+    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/module_history.c src/call_site.c src/runtime_log.c src/dragons_crown_pro.rc)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
@@ -182,6 +187,12 @@ add_executable(dcp-isa-tests EXCLUDE_FROM_ALL tests/isa_tests.c src/isa_emulate.
 target_include_directories(dcp-isa-tests PRIVATE src)
 target_compile_definitions(dcp-isa-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-isa-tests PRIVATE -Wall -Wextra -Werror)
+
+# The pure parts of the crash report: module history, call site decoding, fault ownership and the startup phase
+# (tools/test.ps1); not part of the default build.
+add_executable(dcp-module-history-tests EXCLUDE_FROM_ALL tests/module_history_tests.c src/module_history.c src/call_site.c src/startup_phase.c)
+target_include_directories(dcp-module-history-tests PRIVATE src)
+target_compile_options(dcp-module-history-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
 # (tools/test.ps1); not part of the default build.

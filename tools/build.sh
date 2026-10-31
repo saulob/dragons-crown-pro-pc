@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -135,6 +135,8 @@ if ((test)); then
     "$build_dir/bin/dcp-ultrawide-tests"
     step 'Running the True Ultrawide side area tests'
     "$build_dir/bin/dcp-ultrawide-sides-tests"
+    step 'Running the module history tests (crash report)'
+    "$build_dir/bin/dcp-module-history-tests"
     step 'Running the MOVBE, BMI1 and LZCNT tests'
     "$build_dir/bin/dcp-isa-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'

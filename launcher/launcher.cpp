@@ -1,4 +1,5 @@
 #include "dcp_launcher.h"
+#include "startup_phase.h"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -312,6 +313,7 @@ public:
         // DCP_LAUNCHER_SHOTS=<folder> (tests/launcher_shots.cpp): every page into the folder, hidden, then quit.
         const char* shots = std::getenv("DCP_LAUNCHER_SHOTS");
         options.hidden = shots != nullptr;
+        dcp_startup_phase("launcher opening");
         if (!host_.Open(options)) {
             return false;
         }
@@ -338,6 +340,7 @@ public:
         host_.EndFrame(LauncherTheme().bg);
         host_.Show();
         Log("shown");
+        dcp_startup_phase("launcher running");
 
         while (outcome == Outcome::kRunning) {
             if (!host_.PumpEvents()) {
@@ -365,6 +368,7 @@ public:
             }
             host_.EndFrame(LauncherTheme().bg, shot.empty() ? nullptr : shot.c_str());
         }
+        dcp_startup_phase("launcher loop ended");
         if (!skip_finish_save_) {
             SavePlacement(placement_.Flush());
         }

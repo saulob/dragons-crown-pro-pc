@@ -18,6 +18,8 @@
 #include "voice_hooks.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
+#include "startup_phase.h"
+#include "fault_origin.h"
 #include "dcp_resolution.h"
 #include "runtime_log.h"
 #include "isa_emulate.h"
@@ -139,36 +141,32 @@ static int system_usable(char *cause, size_t cause_size, char *advice, size_t ad
 }
 #endif
 #ifdef _WIN32
-static void describe_address(char *out, size_t size, uintptr_t address) {
-    HMODULE module=NULL;
-    char name[MAX_PATH]="?";
-    if (image && address-(uintptr_t)image<0x20000000) { snprintf(out,size,"guest offset 0x%" PRIxPTR,address-(uintptr_t)image); return; }
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)address,&module) && module) {
-        GetModuleFileNameA(module,name,sizeof(name));
-        const char *base=strrchr(name,'\\');
-        snprintf(out,size,"%s+0x%" PRIxPTR,base ? base+1 : name,address-(uintptr_t)module);
-        return;
-    }
-    snprintf(out,size,"%p",(void *)address);
+static int annotate_address(char *out, size_t size, uintptr_t address) {
+    if (image && address-(uintptr_t)image<0x20000000) { snprintf(out,size,"guest offset 0x%" PRIxPTR,address-(uintptr_t)image); return 1; }
+    return module_diagnostics_describe(out,size,address);
 }
-static void describe_module_path(uintptr_t address) {
-    HMODULE module=NULL;
-    char path[MAX_PATH];
-    if (image && address-(uintptr_t)image<0x20000000) return;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)address,&module) &&
-        module && module!=GetModuleHandleA(NULL) && GetModuleFileNameA(module,path,sizeof(path)))
-        fprintf(stderr,"  module %s at %p\n",path,(void *)module);
+static void describe_address(char *out, size_t size, uintptr_t address) {
+    if (!annotate_address(out,size,address)) snprintf(out,size,"%p",(void *)address);
 }
 static int fatal_reported;
+static DWORD fatal_thread;
+static char fatal_line[768];
 static LONG fatal_exception(EXCEPTION_POINTERS *info) {
-    if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) { Sleep(INFINITE); }
+    if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) {
+        /* A fault inside the report itself ends the process instead of waiting for itself. */
+        if (__atomic_load_n(&fatal_thread,__ATOMIC_ACQUIRE)==GetCurrentThreadId()) {
+            if (fatal_line[0]) runtime_log_write_direct(fatal_line);
+            TerminateProcess(GetCurrentProcess(),3);
+        }
+        Sleep(INFINITE);
+    }
+    __atomic_store_n(&fatal_thread,GetCurrentThreadId(),__ATOMIC_RELEASE);
     runtime_log_mark_crash();
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
     const CONTEXT *c=info->ContextRecord;
     char where[MAX_PATH+64];
     describe_address(where,sizeof(where),(uintptr_t)c->Rip);
-    char crash[768];
-    snprintf(crash,sizeof(crash),"FATAL exception 0x%08lx at %p (%s) thread %lu\n",
+    snprintf(fatal_line,sizeof(fatal_line),"FATAL exception 0x%08lx at %p (%s) thread %lu\n",
              record->ExceptionCode,(void *)c->Rip,where,GetCurrentThreadId());
     if (record->ExceptionCode==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2)
         fprintf(stderr,"Fault: %s access to %p at %s (thread %lu)\n",
@@ -176,7 +174,10 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
                 (void *)record->ExceptionInformation[1],where,GetCurrentThreadId());
     else
         fprintf(stderr,"Fault: exception 0x%08lx at %s (thread %lu)\n",record->ExceptionCode,where,GetCurrentThreadId());
-    describe_module_path((uintptr_t)c->Rip);
+    module_diagnostics_report_crash((uintptr_t)c->Rip,
+        record->ExceptionCode==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2 ? (uintptr_t)record->ExceptionInformation[1] : (uintptr_t)c->Rip,
+        (uintptr_t)image,0x20000000);
+    module_diagnostics_report_backtrace(c,(uintptr_t)image,0x20000000);
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
     if (gpu_enabled) dcpgpu_dump_guest_writes(info);
@@ -185,8 +186,8 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     SIZE_T read=0;
     if (ReadProcessMemory(GetCurrentProcess(),(void *)c->Rsp,words,sizeof(words),&read) && read==sizeof(words))
         for (int i=0;i<8;++i) {
-            describe_address(where,sizeof(where),words[i]);
-            fprintf(stderr,"  [rsp+%02x] %016llx %s\n",i*8,(unsigned long long)words[i],where);
+            if (annotate_address(where,sizeof(where),words[i])) fprintf(stderr,"  [rsp+%02x] %016llx %s\n",i*8,(unsigned long long)words[i],where);
+            else fprintf(stderr,"  [rsp+%02x] %016llx\n",i*8,(unsigned long long)words[i]);
         }
     /* rbp chain (guest and host code keep frame pointers). */
     uintptr_t rbp=(uintptr_t)c->Rbp;
@@ -199,9 +200,22 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
         rbp=frame[0];
     }
     runtime_log_flush();
-    runtime_log_write_direct(crash);
+    runtime_log_write_direct(fatal_line);
     TerminateProcess(GetCurrentProcess(),3);
     return EXCEPTION_CONTINUE_SEARCH;
+}
+static FaultAddress classify_fault_address(uintptr_t address, HMODULE self) {
+    HMODULE module=NULL;
+    if (image && address-(uintptr_t)image<0x20000000) return FAULT_ADDRESS_GUEST;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)address,&module) || !module)
+        return FAULT_ADDRESS_UNLISTED;
+    return module==self ? FAULT_ADDRESS_SELF : FAULT_ADDRESS_OTHER_MODULE;
+}
+static FaultAddress classify_caller(const CONTEXT *c, HMODULE self) {
+    uintptr_t caller=0;
+    SIZE_T got=0;
+    if (!ReadProcessMemory(GetCurrentProcess(),(void *)c->Rsp,&caller,sizeof(caller),&got) || got!=sizeof(caller)) return FAULT_ADDRESS_UNLISTED;
+    return classify_fault_address(caller,self);
 }
 static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
@@ -238,12 +252,10 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
         code==EXCEPTION_STACK_OVERFLOW || code==EXCEPTION_INT_DIVIDE_BY_ZERO || code==EXCEPTION_DATATYPE_MISALIGNMENT) {
         /* Faults in guest code, the loader or the runtime end the process with a report; drivers
          * and system libraries may handle their own exceptions. */
-        uintptr_t rip=(uintptr_t)info->ContextRecord->Rip;
-        HMODULE self=GetModuleHandleA(NULL), module=NULL;
-        int ours=(image && rip-(uintptr_t)image<0x20000000) ||
-                 (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)rip,&module) && module==self) ||
-                 !module;
-        if (ours) return fatal_exception(info);
+        HMODULE self=GetModuleHandleA(NULL);
+        const FaultAddress at=classify_fault_address((uintptr_t)info->ContextRecord->Rip,self);
+        if (fault_is_ours(at,at==FAULT_ADDRESS_UNLISTED ? classify_caller(info->ContextRecord,self) : at))
+            return fatal_exception(info);
     }
     /* DCP_STRICT_HANDLES=1: a closed or invalid handle used anywhere is reported (diagnostics). */
     if (code==0xC0000008 /* STATUS_INVALID_HANDLE */) return fatal_exception(info);
@@ -301,6 +313,8 @@ static void fault(int sig, siginfo_t *info, void *context) {
     uintptr_t rip = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
     char line[512];
     Dl_info where;
+    snprintf(line, sizeof(line), "Crash: startup phase: %s\n", dcp_startup_phase_current());
+    { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
     if (rip - (uintptr_t)image < 0x10000000)
         snprintf(line, sizeof(line), "Guest fault (signal %d) at guest offset 0x%lx, address %p\n",
                  sig, (unsigned long)(rip - (uintptr_t)image), info->si_addr);
@@ -533,7 +547,9 @@ int main(int argc, char **argv) {
 #endif
         DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics,
                                     game_process,log_started ? log_path : NULL};
+        dcp_startup_phase("launcher handoff");
         DcpLauncherResult launched=dcp_launcher_run(&launcher);
+        dcp_startup_phase("launcher returned");
         runtime_log_set_detailed(dcp_detailed_logging(settings_file));
         if (launched==DCP_LAUNCHER_QUIT) { runtime_log_mark_clean_exit(); exit(0); }
         if (launched==DCP_LAUNCHER_BLOCKED) exit(1);
@@ -643,6 +659,7 @@ int main(int argc, char **argv) {
     import_count = read64(f);
     uint64_t capabilities = read64(f);
     if (capabilities & ~UINT64_C(1)) fail("unknown runtime capabilities");
+    dcp_startup_phase("runtime initialization");
     runtime_start(strict_imports ? 0 : capabilities);
     if (!size || size > 512*1024*1024 || entry >= size || !ns || ns > 64 || nr > 1000000 || import_count > 100000)
         fail("boot file limits exceeded");
@@ -799,6 +816,7 @@ int main(int argc, char **argv) {
         }
         memcpy(image + relocs[i].target, &value, 8);
     }
+    dcp_startup_phase("imports resolved");
     if (check_imports) {
         /* Lists every import the game would stop at, without running it (needs the GPU
          * library: without --cpu-only its symbols are registered above). */
@@ -873,6 +891,7 @@ int main(int argc, char **argv) {
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
                                        ultrawide_effective,skip_applied};
+    dcp_startup_phase("patches installed");
     dcp_log_settings_summary(settings_file,paths.image_dir,app0,&run_settings);
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
@@ -889,6 +908,7 @@ int main(int argc, char **argv) {
     }
     if (!executable_entry) fail("entry is not executable");
     printf("Mapped %" PRIu64 " bytes, %" PRIu64 " segments; applied %" PRIu64 " relocations\n", size, ns, nr);
+    dcp_startup_phase("guest image mapped");
     if (native_libc) {
         for (uint64_t m=0;m<module_count;++m) {
             int init_executable=0;
@@ -902,6 +922,7 @@ int main(int argc, char **argv) {
         runtime_thread_attach_main();
         runtime_set_procparam(image+procparam);
         /* Dependencies start in link order (libc first), as the PS4 dynamic linker does. */
+        dcp_startup_phase("linked modules initialization");
         for (uint64_t m=0;m<module_count;++m) {
             printf("Starting linked module %" PRIu64 " at image offset 0x%" PRIx64 "; native bindings=%" PRIu64 "\n",m,modules[m].init,nb);
             typedef int (ABI *ModuleInit)(uint64_t,void *,void *);
@@ -910,6 +931,7 @@ int main(int argc, char **argv) {
             if (result) fail("module initializer failed");
         }
     }
+    dcp_startup_phase("guest entry");
     printf("Entering original x86-64 code at guest offset 0x%" PRIx64 "\n", entry);
     entered_game=1;
     struct { uint64_t argc; const char *argv[2]; } params = {1, {"/app0/eboot.bin", NULL}};

@@ -3,6 +3,7 @@
  * use FreeBSD numbering; host errno values never reach the guest directly. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "startup_phase.h"
 #include "runtime_log.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -158,6 +159,7 @@ static ABI int32_t get_pagesize(void) { return PAGE; }
 static ABI int32_t get_pid(void) { return 1000; }
 static ABI int32_t yield(void) { sched_yield(); return 0; }
 static ABI __attribute__((noreturn)) void hard_exit(int status) {
+    dcp_startup_phase("guest exit requested");
     printf("Runtime: guest requested _exit(%d)\n",status);
     runtime_report();
     fflush(stdout);

@@ -34,6 +34,7 @@
 #include "cpk_patch.h"
 #include "dcp_cheats.h"
 #include "dcp_launcher.h"
+#include "startup_phase.h"
 #include "dcp_graphics.h"
 #include "dcp_keys.h"
 #include "dcp_overlay_box.h"
@@ -2113,6 +2114,18 @@ void TestGameProcess() {
     CHECK(started != std::string::npos && started > launcher_run && started < gpu);
     CHECK(loader.find("runtime_log_release()", started) < loader.find("dcp_resume_game_process()", started));
     CHECK(loader.find("exit(0)", started) < gpu);
+    dcp_startup_phase("test phase");
+    CHECK(std::string(dcp_startup_phase_current()) == "test phase");
+    size_t phase_at = 0;
+    for (const char* phase : {"launcher handoff", "launcher returned", "runtime initialization", "imports resolved", "patches installed",
+                              "guest image mapped", "linked modules initialization", "guest entry"}) {
+        const size_t found = loader.find(std::string("dcp_startup_phase(\"") + phase + "\")");
+        CHECK(found != std::string::npos && found > phase_at);
+        phase_at = found;
+    }
+    CHECK(launcher_run > loader.find("dcp_startup_phase(\"launcher handoff\")"));
+    // Startup logs stay quiet: the phase is only stored for the crash report.
+    CHECK(ReadAll(source / "launcher" / "startup_phase.cpp").find("printf") == std::string::npos);
     // Linux keeps the game in the launcher's process.
     CHECK(loader.find("int game_process=0;\n#ifdef _WIN32\n        game_process=1;\n#else") != std::string::npos);
     // Off returns to the loader exactly as before; only On reaches the game process, and a failure keeps the launcher.

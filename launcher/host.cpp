@@ -8,6 +8,7 @@
 #include "backends/imgui_impl_sdl3.h"
 #include "backends/imgui_impl_sdlrenderer3.h"
 #include "dcp_displays.h"
+#include "startup_phase.h"
 
 namespace dcp {
 namespace {
@@ -141,6 +142,7 @@ ImTextureID LauncherHost::CreateTexture(const uint8_t* rgba, int width, int heig
 }
 
 void LauncherHost::Close() {
+    dcp_startup_phase("launcher host closing");
     for (SDL_Texture* texture : textures_) {
         SDL_DestroyTexture(texture);
     }
@@ -151,19 +153,23 @@ void LauncherHost::Close() {
         ImGui::DestroyContext(imgui_);
         imgui_ = nullptr;
     }
+    dcp_startup_phase("launcher destroying renderer");
     if (renderer_) {
         SDL_DestroyRenderer(renderer_);
         renderer_ = nullptr;
     }
+    dcp_startup_phase("launcher destroying window");
     if (window_) {
         SDL_DestroyWindow(window_);
         window_ = nullptr;
     }
+    dcp_startup_phase("launcher SDL shutdown");
     if (video_ || gamepad_) {
         // Nothing else uses SDL yet: the game window thread starts it again from scratch.
         SDL_Quit();
         video_ = gamepad_ = false;
     }
+    dcp_startup_phase("launcher host closed");
 }
 
 bool LauncherHost::PumpEvents() {
