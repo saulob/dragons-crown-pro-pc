@@ -56,7 +56,7 @@ per-player or per-session record.
   country.
 - A session is one connection of the launcher or the game to the online service. A reconnect counts again, and the
   launcher and the game count separately, so sessions are not a number of players. There is no unique-player count.
-- Gameplay traffic still goes directly between the players' PCs (P2P). Gameplay, saves, characters, progress, Ping and
+- Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Gameplay, saves, characters, progress, Ping and
   FPS are not collected, and the game sends nothing extra for these statistics: they come from the sign-in and room
   requests it already makes.
 - Only the maintainer can see them, on a private, password-protected page of the online service.

@@ -244,7 +244,7 @@ use the same defaults).
 | `detailed_logging` | 1, 0 | 1 | at exit |
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
-| `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (CUSA10454 1.00 only) |
+| `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (the USA and Asia and Hong Kong builds; the Japanese builds always use them) |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
@@ -273,7 +273,7 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
   an unknown value is 16:9). It sets the shape of the game's render target. The game's 2D scene is still laid out for its
   original 1280 × 720 canvas, so only 16:9 Original is undistorted: 21:9 and 32:9 stretch the gameplay horizontally instead
-  of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and
+  of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. In those narrower shapes the port skips the one draw that painted black rectangles in water (issue #32); 16:9 and wider are untouched. The HUD, menus and
   prerendered videos are not adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
   of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
   Every supported build offers every shape (see Render resolution for how the USA 1.01 and Asia and Hong Kong 1.02 sites

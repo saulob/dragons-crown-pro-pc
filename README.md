@@ -43,7 +43,7 @@
 **New in v0.9.0:** Dragon's Crown Pro now includes Online Co-op. Add your friends with a Friend Code, then meet them in the game and play stages together over the Internet, as on the PS4. No PlayStation Network account is needed.
 
 - The port's online service (running on Cloudflare) handles your online identity, Friends and friend requests, who is online, and finding and joining rooms.
-- The gameplay itself goes **directly between the players' PCs** (peer-to-peer). It does not pass through the online service.
+- The gameplay itself goes **directly between the players' PCs** (peer-to-peer). Only when two players cannot connect directly does the online service relay that one connection, automatically and only if it offers relay; players who connect directly never use it.
 - Players on different supported game builds and regions can play together, as long as their port versions use the same online protocol. A friend whose version cannot join yours is shown as **Incompatible**.
 
 > **Online play is unlocked by the game, not at the first start.** Dragon's Crown does not offer online multiplayer to a new character right away. It becomes available only after the opening tutorial and story section. If the online options are missing early in a new save, that is the game's normal progression, not a problem with the port.
@@ -98,7 +98,7 @@ This project's implementation was written separately and does not include copied
 
 ### Privacy
 
-The online service stores anonymous aggregate usage statistics, such as player counts, sessions, the port version, the platform and the country. These statistics do not store player names, Friend Codes, account IDs or IP addresses. Gameplay stays direct between the players (P2P); gameplay activity, saves, Ping and FPS are not collected. To find friends and connect you, the service also keeps your account, Online name and friends, and while you are in a room it uses your address and port. See [docs/ONLINE.md](docs/ONLINE.md#privacy-and-usage-statistics).
+The online service stores anonymous aggregate usage statistics, such as player counts, sessions, the port version, the platform and the country. These statistics do not store player names, Friend Codes, account IDs or IP addresses. Gameplay stays direct between the players (P2P), except for a pair that cannot connect directly, whose traffic the service forwards without storing or reading it; gameplay activity, saves, Ping and FPS are not collected. To find friends and connect you, the service also keeps your account, Online name and friends, and while you are in a room it uses your address and port. See [docs/ONLINE.md](docs/ONLINE.md#privacy-and-usage-statistics).
 
 ## What you need
 
@@ -124,7 +124,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.9.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v0.9.1-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -182,7 +182,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 ### Display
 - **Display mode**: Windowed or Borderless Fullscreen. Press **F11** while playing to switch between them.
 - **Window size** (1280×720 to 3840×2160 in 16:9; the choices follow the Aspect Ratio) and **Monitor**. A window that would not fit the monitor opens smaller, centred and within 80% of its usable area; your saved size is not changed.
-- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders a frame of the ratio's shape at the Render resolution's height. Only 16:9 Original is undistorted: the game's 2D scene is still laid out for its original 1280 × 720 canvas, so 21:9 and 32:9 stretch the gameplay horizontally instead of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. The HUD, menus and prerendered videos are not adjusted either. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
+- **Aspect Ratio**: native options 16:9 Original (the default), 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3 and 5:4. The game renders a frame of the ratio's shape at the Render resolution's height. Only 16:9 Original is undistorted: the game's 2D scene is still laid out for its original 1280 × 720 canvas, so 21:9 and 32:9 stretch the gameplay horizontally instead of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. In those narrower shapes the port skips the one draw that painted black rectangles in water (issue #32); 16:9 and wider are untouched. The HUD, menus and prerendered videos are not adjusted either. Targets above 3840×2160 pixels (for example 32:9 at 4K) are reduced in height to fit.
 - **True Ultrawide** (experimental, Off by default): with 21:9 or 32:9, the game shows more of the world at the sides instead of stretching it, with the same vertical view and proportions as 16:9. Distant background layers fill the whole width; the playfield and the layers that move with it stop where the stage and the playfield end, showing the background behind them. On the town facility pictures (the guilds, the shop, the inn) the character, titles and text keep their 16:9 size and place and only the room behind them is scaled up evenly to fill the sides, while their top and bottom bars, frame lines and dialogue backing reach the frame edges; the route map keeps its 16:9 composition, centred. The HUD and menus stay in their 16:9 layout; fades, the loading and saving fades and the bottom dialogue and narration bands reach the frame edges, other message bands keep their 16:9 width, and the town map fills the width (at 32:9 as far as its markers stay on screen, black beyond). Available on every supported build.
 - **Presentation**: Letterbox (the default) fits the finished frame into the window with its aspect ratio kept and bars where the shapes differ; Stretch fills the whole window with it. It applies in Windowed and Borderless Fullscreen and does not change the Aspect Ratio or the render resolution.
 - In Windowed and Borderless Fullscreen, mouse movement, clicks and the wheel show the cursor; keyboard or controller input hides it. Mouse-driven menus and dialogs keep it visible.
