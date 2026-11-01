@@ -1,6 +1,8 @@
-// The lobby: accounts, friends, presence, rooms and the endpoint exchange (docs/ONLINE.md). Game traffic never passes
-// through it. State lives in SQL tables and in each socket's attachment, so a hibernated Durable Object resumes as if
-// it had never stopped; the same class runs in the local development server (local/server.js).
+// The lobby: accounts, friends, presence, rooms and the endpoint exchange (docs/ONLINE.md). Game traffic passes through
+// it only as relay frames (relay.js). State lives in SQL tables and in each socket's attachment, so a hibernated
+// Durable Object resumes as if it had never stopped; the same class runs in the local development server
+// (local/server.js).
+import { CAPABILITIES, Relay } from './relay.js';
 import { Metrics, countryCode, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
 
@@ -208,6 +210,7 @@ export class Lobby {
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
     this.metrics = new Metrics(host.sql, () => host.now());
     this.alarmAt = null;
+    this.relays = new Relay(this);
     this.reconcileSeats();
   }
 
@@ -321,6 +324,11 @@ export class Lobby {
     }
   }
 
+  // One binary message: a relay frame, forwarded to a member of the sender's own room (relay.js).
+  relay(conn, bytes) {
+    this.relays.frame(conn, bytes);
+  }
+
   // Work queued while handling a message runs after its answer went out (events follow the response).
   runDeferred() {
     while (this.deferred?.length) {
@@ -335,6 +343,7 @@ export class Lobby {
     const att = conn.attachment();
     if (!att?.hello) return;
     this.index = null;
+    this.relays.forgetConnection(att.cid);
     if (att.room) {
       const member = this.memberRow(att.room, att.member);
       if (member && member.conn === att.cid) {
@@ -554,9 +563,11 @@ export class Lobby {
     const member = room && this.memberRow(roomId, memberId);
     if (!member) return;
     this.host.sql.run('DELETE FROM members WHERE room = ? AND member = ?', roomId, memberId);
+    this.relays.forgetMember(roomId, memberId);
     const rest = this.memberRows(roomId);
     if (!rest.length) {
       this.host.sql.run('DELETE FROM rooms WHERE id = ?', roomId);
+      this.relays.forgetRoom(roomId);
       return;
     }
     const id = String(roomId);
@@ -700,11 +711,12 @@ const HANDLERS = {
     const version = cleanText(msg.version ?? '', LIMITS.versionChars);
     const platform = cleanText(msg.platform ?? '', LIMITS.platformChars);
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
-      version, platform });
+      version, platform, relay: msg.relay === true });
+    if (att.relay) this.relays.negotiated(att);
     this.index = null;
     if (presence && !wasOnline) this.notifyFriends(account, { ev: 'friend.online', account, name });
     if (presence) this.track(() => this.metrics.session(att));
-    return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now };
+    return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now, capabilities: CAPABILITIES };
   },
 
   worlds(att) {
@@ -845,7 +857,9 @@ const HANDLERS = {
     const member = this.memberRow(roomId, msg.member);
     if (!member || member.account !== att.account) fail('not_found');
     const old = this.socketByCid(member.conn);
+    this.relays.forgetMember(roomId, msg.member);
     if (old && old.att.cid !== att.cid) {
+      this.relays.forgetConnection(old.att.cid);
       old.att.room = 0;
       old.conn.setAttachment(old.att);
       try {

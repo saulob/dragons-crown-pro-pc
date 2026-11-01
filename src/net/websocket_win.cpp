@@ -45,14 +45,16 @@ public:
     }
 
     bool send_text(const std::string& text) override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!socket_ || closed_) return false;
-        return WinHttpWebSocketSend(socket_, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
-                                    const_cast<char*>(text.data()), DWORD(text.size())) == NO_ERROR;
+        return Send(WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, text.data(), text.size());
     }
 
-    bool receive(std::string& text) override {
+    bool send_binary(const uint8_t* data, size_t size) override {
+        return Send(WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, data, size);
+    }
+
+    bool receive(std::string& text, bool& binary) override {
         text.clear();
+        binary = false;
         std::vector<char> buffer(16 * 1024);
         for (;;) {
             DWORD read = 0;
@@ -65,6 +67,9 @@ public:
             }
             if (WinHttpWebSocketReceive(socket, buffer.data(), DWORD(buffer.size()), &read, &type) != NO_ERROR) return false;
             if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) return false;
+            if (type == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE || type == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE) {
+                binary = true;
+            }
             text.append(buffer.data(), read);
             if (text.size() > 4 * 1024 * 1024) return false;
             if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE || type == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE) {
@@ -90,6 +95,12 @@ public:
     }
 
 private:
+    bool Send(WINHTTP_WEB_SOCKET_BUFFER_TYPE type, const void* data, size_t size) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!socket_ || closed_) return false;
+        return WinHttpWebSocketSend(socket_, type, const_cast<void*>(data), DWORD(size)) == NO_ERROR;
+    }
+
     std::mutex mutex_;
     HINTERNET session_;
     HINTERNET connection_;

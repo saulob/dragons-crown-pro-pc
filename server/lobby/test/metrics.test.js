@@ -422,11 +422,11 @@ test('the Durable Object serves metrics only to the Worker, never to a WebSocket
   assert.ok(!/console\.log\([^)]*(token|Authorization)/i.test(worker));
 });
 
-test('game clients send no telemetry: same sign-in fields, no new requests, P2P untouched', () => {
+test('game clients send no telemetry: same sign-in fields plus the relay capability, no new requests, P2P untouched', () => {
   const lobbyLink = readFileSync(join(REPO, 'src/net/lobby_link.cpp'), 'utf8');
   const hello = lobbyLink.slice(lobbyLink.indexOf('Json hello_body('), lobbyLink.indexOf('LobbyLink::LobbyLink('));
   assert.deepEqual([...hello.matchAll(/h\.set\("([a-z_]+)"/g)].map((m) => m[1]),
-    ['proto', 'game', 'account', 'secret', 'name', 'presence', 'online_protocol', 'version', 'platform']);
+    ['proto', 'game', 'account', 'secret', 'name', 'presence', 'online_protocol', 'version', 'platform', 'relay']);
   const files = [
     ...readdirSync(join(REPO, 'src/net')).map((f) => join('src/net', f)),
     ...readdirSync(join(REPO, 'src')).filter((f) => /^runtime_(online|matching2|rudp)/.test(f)).map((f) => join('src', f)),

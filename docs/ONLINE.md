@@ -2,8 +2,8 @@
 
 Dragon's Crown Pro's own multiplayer code runs unchanged: the port answers the console services it calls
 (NpManager, NetCtl, NpMatching2, NpToolkit2, the P2P socket of libSceNet and libSceRudp). Players meet through a small
-lobby; game traffic goes directly between their PCs over UDP. Nothing in the game executable is patched for online
-play, and with online play off every import keeps its offline behaviour (`src/runtime_services.c`, the bundled
+lobby; game traffic goes directly between their PCs over UDP, and through the lobby only for a pair of players that
+cannot reach each other directly (see Relay). Nothing in the game executable is patched for online play, and with online play off every import keeps its offline behaviour (`src/runtime_services.c`, the bundled
 NpToolkit2 module).
 
 Status: two instances on one PC play together through the online service (stages, loot, a player who disconnects
@@ -29,8 +29,12 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
    configured one) and uses that one socket for STUN and the UPnP probe; when the port cannot be opened it says so
    instead of using another. On Windows this gives Windows Firewall the chance to ask for network access before the
    game starts. "Ready for online play" means other
-   players can reach you; otherwise the lines below it say what is missing. "Online service: Connected · N ms" is the
-   time the online service took to answer the test's sign-in, measured once per test; it is not the Ping to players.
+   players can probably reach you, directly or through the relay; otherwise the lines below it say what is missing.
+   "Online service: Connected · N ms" is the time the online service took to answer the test's sign-in, measured once
+   per test; it is not the Ping to players. "Direct connections" says a UDP endpoint is available; whether a given player
+   can really reach it is only known when joining a match. "Relay: Available" appears when the online service said in
+   its sign-in answer that it relays (`capabilities.relay_supported`) and the UDP port opened; the test sends no relay
+   frame, so it does not prove a path to any player.
 6. **Ping display** On shows the in-game Ping from the start; **F3** shows or hides it while playing.
 7. Press **Play**.
 8. Play through the game's own Network menu: host or join a room, or pick a friend's room in Join Friends Room.
@@ -189,7 +193,7 @@ lower-case hex.
 
 | op | request | answer |
 |---|---|---|
-| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform` | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time` |
+| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload}` (absent from an older lobby) |
 | `worlds` | | `worlds: [{world, rooms, members}]` |
 | `udp` | `port`, `lan: [{ip, port}]` (<= 4, LAN/loopback only) | `ip`, `port` |
 | `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]` | `room`, `me` |
@@ -262,7 +266,45 @@ any datagram, after 30 tries of one packet, or on CLOSE.
   at the same time.
 - UPnP: SSDP discovery, WANIPConnection/WANPPPConnection `AddPortMapping` (UDP, lease 1 h renewed at half life, the next
   four ports on conflict, permanent lease if the router wants one), removed when the socket closes. LAN routers only.
-- Not handled: two symmetric NATs (no relay); IPv6-only networks.
+- Two symmetric NATs cannot be punched; such a pair uses the relay (below). IPv6-only networks are not handled.
+
+## Relay
+
+Direct UDP is always tried first and is unchanged. The lobby's relay is a second path for one pair of players at a
+time, used only when the direct one does not answer. There is no setting for it; it needs no router configuration. It
+works the same on Windows and Linux and for every supported game build, because it lives below the game's Matching2 and
+Rudp entry points, in `net::PeerSocket`.
+
+- A client says `relay: true` in `hello` and uses the relay only when the answer carries
+  `capabilities.relay_supported` with `relay_max_payload` of at least 1200. A client or lobby without the capability
+  behaves exactly as before: direct only, with the same 15 s timeout.
+- Per peer, not per room: a link tries the peer's direct candidates alone for 2.5 s (`Options::relay_after_ms`). If it
+  is still not authenticated, the relay is offered beside them: the same authenticated HELLOs also go through the lobby.
+  Direct is not cancelled; the first HELLO or HELLO_ACK that authenticates fixes the path of that link
+  (`LinkPath`: `kConnectingDirect`, `kRelayOffered`, `kDirect`, `kRelay`, `kFailed`). A link that came up on the relay
+  stays on it for the session; one that came up directly never uses it. In a room of three, A-B can be direct while A-C
+  and B-C are relayed. The 15 s connection timeout is unchanged.
+- The relay carries the existing `DN` datagrams byte for byte, so the HMAC, fragmentation, ACKs, retransmission and
+  Rudp above it are unchanged. A relayed peer's address, as the link layer sees it, is `127.82.76.89` with the peer's
+  room member as the port.
+- Frame (a binary WebSocket message on the existing lobby connection): `"DR"`, version 1, type 1, room token u32, member
+  u16, sequence u32, payload length u16, payload; big-endian, 16 bytes of header, payload 1 to 1200 bytes (a `DN`
+  datagram is at most 1175). The sender puts the destination member; the lobby replaces it with the sender's member
+  before forwarding. The token is the first four bytes of the room's key, which only its members know.
+- The lobby forwards a frame only when the sender completed `hello` with `relay: true`, belongs to a room and still
+  owns that seat, the token is the room's, and the destination is another live member of the same room that also asked
+  for the relay and has the same online protocol. It never looks at the payload. Routes are cached in memory, rebuilt
+  from the tables on a miss, and dropped when a member leaves, is kicked, disconnects or resumes its seat on a new
+  socket, and when the room ends.
+- Limits (`server/lobby/src/relay.js`, to be tuned after real measurements): per connection 400 frames/s and 128 KB/s
+  (bursts 800 and 256 KB); per room twice that; a destination socket with more than 256 KB buffered gets nothing. Excess
+  frames are dropped (the link's own retransmission covers them); 256 of them close the relay for that connection with a
+  `relay.closed` event. Drops are logged for the first few of each reason, then one in a thousand.
+- The client queues at most 512 frames for the socket (`kMaxQueuedBinary`); when full, or with no greeted socket, a
+  frame is dropped and counted. A relayed frame is delivered to the link layer directly on receipt, so nothing queues
+  on the way in.
+- Relay frames pass through the lobby's Durable Object, so unlike signalling their volume grows with the traffic of
+  relayed pairs. The relay exists only in the updated lobby: it has to be deployed before the relay can be used.
 
 ## Friends, presence, chat, reports
 
@@ -292,10 +334,18 @@ Headless tests (no game, no window):
 
 ```
 cd server\lobby; node --test "test/*.test.js"            # protocol, rooms, friends, grace, limits, real WebSockets
-tools\test.ps1                                             # includes dcp-net-tests (transport over loopback, 15 % loss)
+tools\test.ps1                                             # dcp-net-tests (transport, relay fallback, failure paths), the Worker tests,
+                                                           # the Linux net tests through WSL (-SkipLinux skips them), seven-build parity
 tools\online-lobby.ps1 -Port 8791                          # in another window, then:
 $env:DCP_TEST_LOBBY='ws://127.0.0.1:8791/'; build\cmake\clang64\bin\dcp-online-hle-tests.exe
 ```
+
+`tools\test.ps1` starts a development lobby on a free loopback port for the net and build tests and prints a relay summary:
+direct networking, relay transport, automatic fallback, Worker relay, protocol compatibility, failure paths, the
+Connection test, Windows and Linux parity, and the seven builds. For the builds it separates structural parity (the same
+code path and tables, no build-specific relay code; always checked) from runtime validation (needs the local boot images
+in `build\image`; reported as DATA UNAVAILABLE or PARTIAL when they are missing). Nothing there starts the game, and the
+production lobby is never contacted.
 
 `dcp-online-hle-tests` calls the Matching2, libSceNet and Rudp entry points as the game does while a second player
 joins through the lobby and connects over UDP.

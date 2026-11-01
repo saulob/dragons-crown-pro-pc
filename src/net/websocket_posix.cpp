@@ -172,8 +172,11 @@ public:
 
     bool send_text(const std::string& text) override { return !closed_ && Frame(1, text.data(), text.size()); }
 
-    bool receive(std::string& text) override {
+    bool send_binary(const uint8_t* data, size_t size) override { return !closed_ && Frame(2, data, size); }
+
+    bool receive(std::string& text, bool& binary) override {
         text.clear();
+        binary = false;
         for (;;) {
             uint8_t head[2];
             if (!ReadExact(head, 2)) return false;
@@ -200,6 +203,7 @@ public:
             }
             if (opcode == 10) continue;
             if (opcode != 0 && opcode != 1 && opcode != 2) return false;
+            if (opcode == 2) binary = true;
             text += payload;
             if (head[0] & 0x80) return true;
         }

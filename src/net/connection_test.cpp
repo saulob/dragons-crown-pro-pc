@@ -2,6 +2,7 @@
 
 #include "net/addr.h"
 #include "net/lobby_link.h"
+#include "net/relay_frame.h"
 #include "net/stun.h"
 #include "net/upnp.h"
 
@@ -49,6 +50,8 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
     const bool router_opened = f.router == Router::kMapped;
     const std::string port = std::to_string(f.udp_port);
     const std::string on_port = f.udp_port ? " on UDP port " + port + "." : ".";
+    const std::string where = f.udp_port ? " on UDP port " + port : "";
+    const std::string verified_in_match = ". Direct peer connectivity will be verified when joining a match";
     if (!f.port_open) {
         line(Mark::kProblem, "Direct connections",
              "Cannot open UDP port " + port +
@@ -58,10 +61,10 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
     } else if (!f.udp_ok) {
         line(Mark::kProblem, "Direct connections", "May be blocked by your network or firewall" + on_port);
     } else if (direct) {
-        const char* text = f.second_answer || f.public_address ? "Available" : "Probably available";
-        line(Mark::kOk, "Direct connections", text + on_port);
+        const char* text = f.second_answer || f.public_address ? "UDP endpoint available" : "UDP endpoint probably available";
+        line(Mark::kOk, "Direct connections", text + where + verified_in_match);
     } else if (router_opened) {
-        line(Mark::kOk, "Direct connections", "Available through your router" + on_port);
+        line(Mark::kOk, "Direct connections", "UDP endpoint available through your router" + where + verified_in_match);
     } else {
         line(Mark::kProblem, "Direct connections",
              "Your router may stop some players from connecting to you" + on_port);
@@ -71,6 +74,17 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
                  : "Automatic setup is not available on your router.");
     }
 
+    const bool relay = f.identity_ok && f.lobby_ok && f.relay_ok && f.port_open;
+    if (relay) {
+        for (ConnectionReport::Line& entry : r.lines) {
+            if (entry.mark == Mark::kProblem && (entry.label == "Direct connections" || entry.label == "Router configuration")) {
+                entry.mark = Mark::kNote;
+            }
+        }
+        line(Mark::kOk, "Relay", "Available. A match that cannot connect directly connects through the online service");
+    }
+    r.details.push_back(relay ? "relay: advertised by the online service" : f.relay_ok ? "relay: needs the UDP port"
+                                                                                       : "relay: not offered by the online service");
     if (f.udp_ok && f.second_answer && !f.same_mapping && !f.public_address) {
         r.details.push_back("NAT: another public port per destination (symmetric NAT)");
     } else if (f.udp_ok && !f.second_answer) {
@@ -82,7 +96,7 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
                               "carrier-grade NAT)"
                             : "router: no UPnP mapping");
 
-    r.ready = f.identity_ok && f.lobby_ok && f.port_open && (direct || router_opened);
+    r.ready = f.identity_ok && f.lobby_ok && f.port_open && (direct || router_opened || relay);
     if (!f.identity_ok || !f.lobby_ok) {
         r.verdict = "Not ready: cannot reach the online service";
     } else if (r.ready) {
@@ -113,6 +127,8 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
         const uint64_t start = now_ms();
         facts.lobby_ok = session.open(config.lobby, hello_body(identity, name, game, false), &reply, &error);
         if (facts.lobby_ok) {
+            const RelayCapability capability = relay_capability(reply);
+            facts.relay_ok = capability.usable();
             facts.lobby_latency_ms = int64_t(now_ms() - start);
             lobby_ip = reply["ip"].as_string();
             friend_code = reply["friend_code"].as_string();

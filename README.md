@@ -82,7 +82,7 @@ Cheats are **automatically disabled while Online play is on**. This is intention
 
 - **The online options are missing in the game**: see the note above. They appear only after the opening tutorial and story section.
 - **"Cannot reach the online service"**: check the Internet connection and that a firewall is not blocking the program.
-- **Friends cannot join, or the connection test says "Limited"**: the game connects players directly. To get through home routers, the port uses STUN, UDP hole punching and, where the router allows it, UPnP port mapping (UDP port 3658 by default). Allowing the program through your firewall, or turning on UPnP in your router, can help. When both players are behind strict NATs (some mobile, campus or provider networks), they may not be able to connect, because there is no relay server yet.
+- **Friends cannot join, or the connection test says "Limited"**: the game connects players directly. To get through home routers, the port uses STUN, UDP hole punching and, where the router allows it, UPnP port mapping (UDP port 3658 by default). Allowing the program through your firewall, or turning on UPnP in your router, can help. When both players are behind strict NATs (some mobile, campus or provider networks), the connection goes through the online service's relay instead, once the online service has been updated to offer it. Relay is automatic; the Connection test shows "Relay: Available" when the online service offers it.
 - **A friend shows Incompatible**: one of you needs another port version. Update both to the latest release.
 - For a problem report, attach the log as described in [Reporting problems](#reporting-problems). The log includes the Connection test details.
 

@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -16,11 +17,25 @@
 #include <vector>
 
 #include "net/addr.h"
+#include "net/relay_frame.h"
 
 namespace dcp::net {
 
 enum class LinkState { kConnecting, kConnected, kClosed };
 enum class StunState { kIdle, kRunning, kDone, kFailed };
+// Where a link stands: direct candidates only, relay offered beside them, or the path that answered.
+enum class LinkPath { kConnectingDirect, kRelayOffered, kDirect, kRelay, kFailed };
+
+// A peer reached through the lobby's relay has this address (loopback, never a candidate the lobby hands out) and its
+// room member as the port, so the link layer treats it like any other endpoint.
+inline constexpr uint32_t kRelayAddress = 0x7F524C59;
+inline Endpoint relay_endpoint(uint16_t member) { return {kRelayAddress, member}; }
+inline bool is_relay_endpoint(const Endpoint& e) { return e.ip == kRelayAddress; }
+
+struct RelayStats {
+    uint64_t frames_out = 0, bytes_out = 0, frames_in = 0, bytes_in = 0;
+    uint64_t send_failures = 0, rejected = 0;
+};
 
 struct LinkStats {
     uint64_t messages_in = 0, messages_out = 0, bytes_in = 0, bytes_out = 0;
@@ -57,7 +72,11 @@ public:
         std::vector<std::pair<std::string, uint16_t>> stun_servers;
         int connect_timeout_ms = 15000;
         int idle_timeout_ms = 10000;
+        int relay_after_ms = 2500; // direct-only head start; the direct candidates keep being tried after it
     };
+
+    // Hands one encoded relay frame to the lobby's connection; false when it cannot take it now.
+    using RelaySend = std::function<bool(std::vector<uint8_t>&&)>;
 
     static std::unique_ptr<PeerSocket> open(const Options& options, std::string* error);
     ~PeerSocket();
@@ -69,7 +88,8 @@ public:
     // The room's secret from the lobby and this player's account: handshakes prove both.
     void set_room(const RoomKey& key, uint64_t self_account);
     // A peer the lobby introduced, with its endpoints in the order to try; again with new endpoints when it moves.
-    void set_peer(uint64_t account, std::vector<Endpoint> candidates);
+    // `relay_member` is its room member, which the relay needs to reach it (0: not relayable).
+    void set_peer(uint64_t account, std::vector<Endpoint> candidates, uint16_t relay_member = 0);
     void forget_peer(uint64_t account);
     // The peer one of whose endpoints is `e`; 0 when none.
     uint64_t peer_at(const Endpoint& e) const;
@@ -85,6 +105,16 @@ public:
     bool readable(int link) const;
     void close(int link);
     LinkStats stats(int link) const;
+    LinkPath path(int link) const;
+
+    // The relay is a second path for peers given a relay member, offered once a link has tried direct alone for
+    // `relay_after_ms`. Nothing changes for a socket that never enables it.
+    void enable_relay(uint32_t token, RelaySend send);
+    void disable_relay();
+    bool relay_enabled() const;
+    // One binary message from the lobby; false when it is not a frame of this room from a known peer.
+    bool deliver_relay(const uint8_t* data, size_t size);
+    RelayStats relay_stats() const;
 
     StunState stun(Endpoint* mapped) const;
     // Opens our NAT towards an endpoint before the handshake (throwaway datagrams).
@@ -108,6 +138,7 @@ private:
         LinkState state = LinkState::kConnecting;
         bool wanted = false; // the game asked for it (connect()); a peer's handshake alone does not count
         uint64_t started_ms = 0, last_rx_ms = 0, last_tx_ms = 0, next_hello_ms = 0, addr_rx_ms = 0;
+        bool relay_offered = false;
         std::string closed_why;
         // sending
         std::deque<std::vector<uint8_t>> outbox;
@@ -138,6 +169,8 @@ private:
     void SendHello(Link& link, const Endpoint& to, bool reply);
     void SendAck(Link& link);
     void SendRaw(const Endpoint& to, const void* data, size_t size);
+    void SendRelay(uint16_t member, const void* data, size_t size);
+    bool RelayReachable(const Link& link, uint64_t now) const;
     void Close(Link& link, const std::string& why, bool tell_peer);
     void StunStep(uint64_t now);
     Link* Find(int id);
@@ -155,6 +188,11 @@ private:
     RoomKey room_key_{};
     uint64_t self_ = 0;
     std::map<uint64_t, std::vector<Endpoint>> peers_;
+    std::map<uint64_t, uint16_t> relay_members_;
+    uint32_t relay_token_ = 0;
+    RelaySend relay_send_;
+    uint32_t relay_seq_ = 0;
+    RelayStats relay_stats_;
     std::map<int, Link> links_;
     int next_link_ = 1;
     // STUN

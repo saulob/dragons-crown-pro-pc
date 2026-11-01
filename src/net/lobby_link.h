@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "net/json.h"
+#include "net/relay_frame.h"
 #include "net/websocket.h"
 
 namespace dcp::net {
@@ -44,7 +45,20 @@ struct Identity;
 
 // The hello request: protocol, game key (net::kOnlineGame), identity, name, and the online protocol, port version and
 // platform (net/online_version.h). `presence` false (the connection test) keeps the session from showing the player online.
-Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence);
+Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence,
+                bool relay = false);
+
+// What the lobby's hello answer says about its relay; an older lobby says nothing.
+struct RelayCapability {
+    bool supported = false;
+    int max_payload = 0;
+    // The lobby relays, and carries a whole PeerSocket datagram.
+    bool usable() const { return supported && max_payload >= 0 && size_t(max_payload) >= kRelayMaxPayload; }
+};
+RelayCapability relay_capability(const Json& hello_reply);
+
+// Relay frames waiting for the socket; a link this far behind is not carrying a game any more.
+inline constexpr size_t kMaxQueuedBinary = 512;
 
 class LobbyLink {
 public:
@@ -70,6 +84,14 @@ public:
     uint32_t request(const std::string& op, Json body, bool urgent = false);
     void release_held();
     bool poll(LobbyMessage& out);
+
+    // Binary messages bypass the JSON requests. Queues one for the greeted socket; false when there is none or the
+    // queue is full (the frame is dropped; the relay's own reliability resends).
+    bool send_binary(std::vector<uint8_t>&& frame);
+    // Called on the socket's reader thread for each binary message received; set it before start().
+    using BinarySink = std::function<void(const uint8_t*, size_t)>;
+    void set_binary_sink(BinarySink sink);
+    uint64_t binary_dropped() const;
     bool up() const;
     const std::string& url() const { return options_.url; }
 
@@ -95,6 +117,9 @@ private:
     std::deque<Outgoing> outgoing_;
     std::vector<uint32_t> in_flight_;
     std::deque<LobbyMessage> inbox_;
+    std::deque<std::vector<uint8_t>> binary_out_;
+    BinarySink binary_sink_;
+    uint64_t binary_dropped_ = 0;
     uint32_t next_seq_ = 1;
     uint32_t hello_seq_ = 0;
     bool greeted_ = false;

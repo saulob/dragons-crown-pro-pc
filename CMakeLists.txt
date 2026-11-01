@@ -49,7 +49,7 @@ target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
 # launcher, the runtime and tests/net_tests.cpp share it.
 add_library(dcp_net STATIC src/net/addr.cpp src/net/connection_test.cpp src/net/crypto.cpp src/net/identity.cpp
     src/net/json.cpp src/net/lobby_link.cpp src/net/online_config.cpp src/net/online_version.cpp src/net/peer_socket.cpp
-    src/net/stun.cpp src/net/upnp.cpp src/net/websocket.cpp
+    src/net/relay_frame.cpp src/net/stun.cpp src/net/upnp.cpp src/net/websocket.cpp
     $<IF:$<BOOL:${WIN32}>,src/net/websocket_win.cpp,src/net/websocket_posix.cpp>)
 target_include_directories(dcp_net PUBLIC src)
 target_compile_definitions(dcp_net PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")

@@ -14,6 +14,7 @@ struct ConnectionFacts {
     enum class Router { kNone, kMapped, kMappedBehindNat };
     bool identity_ok = true;
     bool lobby_ok = false;
+    bool relay_ok = false;        // the online service says it relays a match that cannot connect directly
     int64_t lobby_latency_ms = -1; // the sign-in's round trip to the online service, not a player's Ping
     uint16_t udp_port = 0;        // the port the test opened; 0: any free one
     bool port_open = true;

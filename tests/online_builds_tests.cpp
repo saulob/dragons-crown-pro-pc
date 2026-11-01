@@ -8,7 +8,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -160,11 +162,13 @@ void TestSetDataA(uintptr_t function) {
     CHECK(set(5, 0x1234, 4, 0, 0, nullptr, nullptr, 0, nullptr, nullptr, nullptr) == kNpSignedOut);
 }
 
-void TestBuild(const fs::path& base, const GameBuild& build, std::map<std::string, uintptr_t>& reference) {
+std::map<std::string, std::string> g_runtime_status;
+
+bool TestBuildImports(const fs::path& base, const GameBuild& build, std::map<std::string, uintptr_t>& reference) {
     BootImports boot;
     if (!ReadBootImports(fs::path(DCP_SOURCE_DIR) / "build" / "image" / build.folder / "boot.bin", boot)) {
         std::printf("%s: no boot image (build/image/%s): skipped\n", build.label, build.folder);
-        return;
+        return false;
     }
     const std::string key = Key(build);
     Configure(base, key.c_str(), true);
@@ -251,6 +255,13 @@ void TestBuild(const fs::path& base, const GameBuild& build, std::map<std::strin
     Configure(base, key.c_str(), false);
     CHECK(runtime_online_active() == 0 && runtime_online_play_enabled() == 0);
     CHECK(boot.Check(ResolveWithoutSetDataA));
+    return true;
+}
+
+void TestBuild(const fs::path& base, const GameBuild& build, std::map<std::string, uintptr_t>& reference) {
+    const int failures_before = g_failures;
+    const bool inspected = TestBuildImports(base, build, reference);
+    g_runtime_status[Key(build)] = !inspected ? "DATA UNAVAILABLE" : g_failures == failures_before ? "PASS" : "FAIL";
 }
 
 // What the loader does with the cheats once Online Play is read (src/loader.c): the lock from the effective setting,
@@ -347,6 +358,48 @@ void TestOneLobbyGame(const fs::path& base) {
     CHECK(!net::online_compatible(net::kOnlineProtocolVersion + 1) && !net::online_compatible(0));
 }
 
+// The relay is one code path below the game's Matching2 and Rudp entry points: it adds no import any build must bind,
+// no build-specific code, and all seven builds go through the same relay-capable hello and PeerSocket.
+std::set<std::string> g_static_parity;
+
+void TestRelayIsBuildIndependent(const fs::path& base) {
+    const int failures_before = g_failures;
+    std::set<std::string> keys;
+    for (const GameBuild& build : SupportedBuilds()) keys.insert(Key(build));
+    CHECK(keys == (std::set<std::string>{"CUSA10454-1.00", "CUSA10454-1.01", "CUSA07001-1.00", "CUSA07001-1.02",
+                                         "CUSA07001-1.03", "CUSA10209-1.00", "CUSA10209-1.02"}));
+    const auto read = [](const char* relative) {
+        std::ifstream in(fs::path(DCP_SOURCE_DIR) / relative, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    for (const char* file : {"src/net/relay_frame.cpp", "src/net/peer_socket.cpp", "src/net/lobby_link.cpp",
+                             "src/runtime_matching2.cpp", "src/runtime_rudp.cpp"}) {
+        const std::string text = read(file);
+        CHECK(!text.empty() && text.find("CUSA") == std::string::npos && text.find("title_id") == std::string::npos);
+    }
+    const std::string matching2 = read("src/runtime_matching2.cpp");
+    const std::string rudp = read("src/runtime_rudp.cpp");
+    for (const std::string* text : {&matching2, &rudp}) {
+        for (size_t at = text->find("M2(\""); at != std::string::npos; at = text->find("M2(\"", at + 1)) {
+            CHECK(text->substr(at, text->find('\n', at) - at).find("elay") == std::string::npos);
+        }
+    }
+    CHECK(matching2.find("hello_body(s.identity, s.name, s.game, true, true)") != std::string::npos);
+    bool active = true;
+    for (const GameBuild& build : SupportedBuilds()) {
+        Configure(base, Key(build).c_str(), true);
+        CHECK(runtime_online_active() == 1);
+        active = active && runtime_online_active() == 1;
+        const net::Json hello = net::hello_body(online::settings().identity, online::settings().name, online::settings().game, true, true);
+        CHECK(hello["relay"].as_bool() && hello["game"].as_string() == net::kOnlineGame);
+        CHECK(hello["online_protocol"].as_int() == net::kOnlineProtocolVersion);
+    }
+    CHECK(!net::hello_body(online::settings().identity, "x", net::kOnlineGame, false)["relay"].as_bool());
+    CHECK(net::kOnlineProtocolVersion == 1 && net::kLobbyProtocol == 1);
+    CHECK(read("src/net/peer_socket.cpp").find("constexpr uint8_t kVersion = 1;") != std::string::npos);
+    if (active && g_failures == failures_before) g_static_parity = keys;
+}
+
 // The in-game Online page reads the name and identity the launcher uses, the same way for every build; with Online Play
 // off it starts no lobby link and offers the name alone.
 void TestOnlinePageSource(const fs::path& base) {
@@ -408,6 +461,7 @@ void TestCrossBuildRooms(const fs::path& base) {
             net::Json reply;
             std::string error, code;
             CHECK(host.open(url, hello, &reply, &error));
+            CHECK(net::relay_capability(reply).supported);
             net::Json room = net::Json::Object();
             room.set("world", 1);
             room.set("slots", 4);
@@ -447,10 +501,20 @@ int main() {
     std::map<std::string, uintptr_t> reference;
     for (const GameBuild& build : SupportedBuilds()) TestBuild(base, build, reference);
     TestOneLobbyGame(base);
+    TestRelayIsBuildIndependent(base);
     TestOnlinePageSource(base);
     TestCheatLockout(base);
     TestCrossBuildRooms(base);
     fs::remove_all(base);
+    for (const GameBuild& build : SupportedBuilds()) {
+        const std::string key = Key(build);
+        const bool structural = g_static_parity.count(key) != 0;
+        const std::string& runtime = g_runtime_status[key];
+        std::printf("ONLINE-BUILD|%s|%s|structural=%s|runtime=%s\n", key.c_str(), build.label, structural ? "PASS" : "FAIL",
+                    runtime.empty() ? "DATA UNAVAILABLE" : runtime.c_str());
+        std::printf("%s: %s\n", build.label, structural ? "STATIC PARITY PASS" : "STATIC PARITY FAIL");
+        if (runtime != "PASS") std::printf("%s: RUNTIME DATA %s\n", build.label, runtime == "FAIL" ? "FAILED" : "UNAVAILABLE");
+    }
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

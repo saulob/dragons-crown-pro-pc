@@ -1,4 +1,4 @@
-// A small RFC 6455 server for the development lobby: text and control frames, client masking required, fragmented
+// A small RFC 6455 server for the development lobby: text, binary and control frames, client masking required, fragmented
 // messages reassembled up to `maxMessage` bytes.
 import { createHash } from 'node:crypto';
 
@@ -25,7 +25,7 @@ function frame(opcode, payload) {
 }
 
 // Completes the handshake on an HTTP upgrade; false when the request is not a WebSocket upgrade.
-export function upgrade(req, socket, { onText, onClose, maxMessage = 256 * 1024 }) {
+export function upgrade(req, socket, { onText, onBinary = () => {}, onClose, maxMessage = 256 * 1024 }) {
   const key = req.headers['sec-websocket-key'];
   if (String(req.headers.upgrade).toLowerCase() !== 'websocket' || !key || req.headers['sec-websocket-version'] !== '13') {
     return null;
@@ -36,10 +36,17 @@ export function upgrade(req, socket, { onText, onClose, maxMessage = 256 * 1024 
   let buffer = Buffer.alloc(0);
   let pieces = [];
   let pieceBytes = 0;
+  let binary = false;
   let closed = false;
   const transport = {
     send(text) {
       if (!closed) socket.write(frame(1, Buffer.from(text, 'utf8')));
+    },
+    sendBinary(bytes) {
+      if (!closed) socket.write(frame(2, Buffer.from(bytes)));
+    },
+    get bufferedAmount() {
+      return socket.writableLength;
     },
     close(code = 1000, reason = '') {
       if (closed) return;
@@ -92,14 +99,16 @@ export function upgrade(req, socket, { onText, onClose, maxMessage = 256 * 1024 
         continue;
       }
       if (opcode === 10) continue;
-      if (opcode === 1 || opcode === 0) {
+      if (opcode === 1 || opcode === 2 || opcode === 0) {
+        if (opcode !== 0) binary = opcode === 2;
         pieces.push(payload);
         pieceBytes += payload.length;
         if (fin) {
-          const text = Buffer.concat(pieces).toString('utf8');
+          const message = Buffer.concat(pieces);
           pieces = [];
           pieceBytes = 0;
-          onText(text);
+          if (binary) onBinary(message);
+          else onText(message.toString('utf8'));
         }
         continue;
       }

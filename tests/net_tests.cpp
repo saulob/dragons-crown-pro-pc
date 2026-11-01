@@ -3,6 +3,10 @@
 // development lobby (server/lobby/local/server.js) the lobby link and two-player room flow are exercised too.
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <map>
+#include <mutex>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -24,6 +28,7 @@
 #include "net/online_config.h"
 #include "net/online_version.h"
 #include "net/peer_socket.h"
+#include "net/relay_frame.h"
 #include "net/stun.h"
 #include "net/websocket.h"
 
@@ -58,6 +63,13 @@ void SetEnv(const char* name, const char* value) {
     if (value) setenv(name, value, 1);
     else unsetenv(name);
 #endif
+}
+
+void Group(const char* name, const std::function<void()>& run) {
+    const int before = g_failures;
+    run();
+    std::printf("GROUP|%s|%s\n", name, g_failures == before ? "PASS" : "FAIL");
+    std::fflush(stdout);
 }
 
 std::string ReadSource(const char* relative) {
@@ -275,7 +287,8 @@ void TestConnectionSummary() {
     const ConnectionReport timed_report = summarize_connection(timed);
     CHECK(timed_report.verdict == "Ready for online play");
     CHECK(text_of(timed_report, "Online service") == "Connected \xC2\xB7 32 ms");
-    CHECK(text_of(timed_report, "Direct connections") == "Available.");
+    CHECK(text_of(timed_report, "Direct connections") ==
+          "UDP endpoint available. Direct peer connectivity will be verified when joining a match");
     for (const auto& line : timed_report.lines) CHECK(line.label.find("Ping") == std::string::npos);
     timed.lobby_ok = false;
     CHECK(text_of(summarize_connection(timed), "Online service") ==
@@ -285,7 +298,35 @@ void TestConnectionSummary() {
     ConnectionFacts on_port = cone;
     on_port.udp_port = 3658;
     const ConnectionReport port_report = summarize_connection(on_port);
-    CHECK(port_report.ready && text_of(port_report, "Direct connections") == "Available on UDP port 3658.");
+    CHECK(port_report.ready &&
+          text_of(port_report, "Direct connections") ==
+              "UDP endpoint available on UDP port 3658. Direct peer connectivity will be verified when joining a match");
+    CHECK(labels(port_report) == (std::vector<std::string>{"Online service", "Direct connections"}));
+    CHECK(logged(port_report, "relay: not offered by the online service"));
+
+    // The relay line says the service offers its relay and the UDP port opened; it proves no peer path.
+    ConnectionFacts relayed = on_port;
+    relayed.udp_ok = relayed.second_answer = relayed.same_mapping = false;
+    relayed.relay_ok = true;
+    const ConnectionReport relay_report = summarize_connection(relayed);
+    CHECK(relay_report.ready && relay_report.verdict == "Ready for online play");
+    CHECK(mark_of(relay_report, "Direct connections") == Mark::kNote && mark_of(relay_report, "Relay") == Mark::kOk);
+    CHECK(text_of(relay_report, "Relay") ==
+          "Available. A match that cannot connect directly connects through the online service");
+    CHECK(logged(relay_report, "relay: advertised by the online service"));
+    ConnectionFacts relay_and_direct = cone;
+    relay_and_direct.udp_port = 3658;
+    relay_and_direct.relay_ok = true;
+    const ConnectionReport both = summarize_connection(relay_and_direct);
+    CHECK(labels(both) == (std::vector<std::string>{"Online service", "Direct connections", "Relay"}));
+    CHECK(mark_of(both, "Direct connections") == Mark::kOk);
+    ConnectionFacts relay_port_taken = relayed;
+    relay_port_taken.port_open = false;
+    const ConnectionReport no_port = summarize_connection(relay_port_taken);
+    CHECK(!no_port.ready && text_of(no_port, "Relay").empty() && logged(no_port, "relay: needs the UDP port"));
+    ConnectionFacts relay_service_down = relayed;
+    relay_service_down.lobby_ok = false;
+    CHECK(!summarize_connection(relay_service_down).ready && text_of(summarize_connection(relay_service_down), "Relay").empty());
     on_port.udp_ok = on_port.second_answer = on_port.same_mapping = false;
     CHECK(text_of(summarize_connection(on_port), "Direct connections") ==
           "May be blocked by your network or firewall on UDP port 3658.");
@@ -310,6 +351,9 @@ void TestConnectionSummary() {
     size_t opens = 0;
     for (size_t at = test.find("session.open("); at != std::string::npos; at = test.find("session.open(", at + 1)) ++opens;
     CHECK(opens == 1 && test.find("facts.lobby_latency_ms = int64_t(now_ms() - start);") != std::string::npos);
+    CHECK(test.find("send_binary") == std::string::npos && test.find("enable_relay") == std::string::npos &&
+          test.find("deliver_relay") == std::string::npos);
+    CHECK(test.find("facts.relay_ok = capability.usable();") != std::string::npos);
     const std::string page = ReadSource("launcher/online_page.cpp");
     size_t runs = 0;
     for (size_t at = page.find("RunTest("); at != std::string::npos; at = page.find("RunTest(", at + 1)) ++runs;
@@ -779,11 +823,743 @@ void TestSystemCaBundle() {
 
 // Linux runs the same online, build and patch code as Windows: no host guard in it, the same sources in the game on
 // both, and tools/build.sh --test runs every focused test tools/test.ps1 runs that is not about a Windows API.
+// The relay's frame: a PeerSocket datagram wrapped for the lobby's WebSocket.
+void TestRelayFrame() {
+    const std::vector<uint8_t> datagram = Pattern(1175, 9);
+    const std::vector<uint8_t> bytes = encode_relay_frame(0xdeadbeef, 0x20, 0x01020304, datagram.data(), datagram.size());
+    CHECK(bytes.size() == kRelayHeaderBytes + datagram.size() && bytes[0] == 'D' && bytes[1] == 'R');
+    RelayFrameError error = RelayFrameError::kBadType;
+    const auto frame = decode_relay_frame(bytes.data(), bytes.size(), &error);
+    CHECK(frame && error == RelayFrameError::kNone);
+    if (frame) CHECK(frame->token == 0xdeadbeef && frame->member == 0x20 && frame->seq == 0x01020304 && frame->payload == datagram);
+    CHECK(kRelayMaxPayload >= 12 + 13 + 1150);
+    for (const size_t size : {size_t(1), size_t(12), size_t(20), size_t(48), size_t(1175)}) {
+        std::vector<uint8_t> dn = Pattern(size, uint8_t(size));
+        if (size >= 4) dn[0] = 'D', dn[1] = 'N', dn[2] = 1, dn[3] = 3;
+        const auto wrapped = encode_relay_frame(7, 0x10, 99, dn.data(), dn.size());
+        const auto unwrapped = decode_relay_frame(wrapped.data(), wrapped.size());
+        CHECK(unwrapped && unwrapped->payload == dn && unwrapped->member == 0x10 && unwrapped->seq == 99);
+    }
+
+    const auto fails = [&](std::vector<uint8_t> data, RelayFrameError expected) {
+        RelayFrameError why = RelayFrameError::kNone;
+        return !decode_relay_frame(data.data(), data.size(), &why) && why == expected;
+    };
+    std::vector<uint8_t> broken = bytes;
+    broken[0] = 'S';
+    CHECK(fails(broken, RelayFrameError::kBadMagic));
+    broken = bytes;
+    broken[2] = 2;
+    CHECK(fails(broken, RelayFrameError::kBadVersion));
+    broken = bytes;
+    broken[3] = 2;
+    CHECK(fails(broken, RelayFrameError::kBadType));
+    CHECK(fails({bytes.begin(), bytes.begin() + 3}, RelayFrameError::kTruncated));
+    CHECK(fails({bytes.begin(), bytes.begin() + 10}, RelayFrameError::kTruncated));
+    CHECK(fails({bytes.begin(), bytes.end() - 1}, RelayFrameError::kBadLength));
+    broken = bytes;
+    broken.push_back(0);
+    CHECK(fails(broken, RelayFrameError::kBadLength));
+    std::vector<uint8_t> big(kRelayMaxPayload + 1, 1);
+    CHECK(encode_relay_frame(1, 1, 1, big.data(), big.size()).empty() && encode_relay_frame(1, 1, 1, big.data(), 0).empty());
+    big.resize(kRelayMaxPayload);
+    CHECK(!encode_relay_frame(1, 1, 1, big.data(), big.size()).empty());
+    broken = bytes;
+    broken[14] = uint8_t((kRelayMaxPayload + 1) >> 8);
+    broken[15] = uint8_t(kRelayMaxPayload + 1);
+    CHECK(fails(broken, RelayFrameError::kOversized));
+    broken = encode_relay_frame(1, 1, 1, big.data(), 1);
+    broken[14] = broken[15] = 0;
+    CHECK(fails(broken, RelayFrameError::kBadLength));
+
+    RoomKey key{};
+    key[0] = 0x12, key[1] = 0x34, key[2] = 0x56, key[3] = 0x78, key[4] = 0xff;
+    CHECK(relay_token(key) == 0x12345678);
+    CHECK(relay_capability(*Json::parse(R"({"capabilities":{"relay_supported":true,"relay_max_payload":1200}})")).supported);
+    CHECK(relay_capability(*Json::parse(R"({"capabilities":{"relay_supported":true,"relay_max_payload":1200}})")).max_payload == 1200);
+    CHECK(!relay_capability(*Json::parse(R"({"account":"1"})")).supported);
+    CHECK(!relay_capability(*Json::parse(R"({"capabilities":{"relay_supported":false,"relay_max_payload":9}})")).supported);
+}
+
+// Stands in for the lobby: forwards each relay frame to the member it names with the sender as source, off the
+// sender's thread as the real link does. Faults: frames dropped at random, all of them swallowed, sends refused.
+class RelayBroker {
+public:
+    explicit RelayBroker(uint32_t token) : token_(token), thread_([this] { Run(); }) {}
+    ~RelayBroker() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_ = true;
+        }
+        wake_.notify_all();
+        thread_.join();
+    }
+
+    void Add(uint16_t member, PeerSocket* socket) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        sockets_[member] = socket;
+    }
+    void SetDropPercent(int percent) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        drop_percent_ = percent;
+    }
+    void SetSwallowAll(bool swallow) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        swallow_ = swallow;
+    }
+    void SetRefuse(bool refuse) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        refuse_ = refuse;
+    }
+    PeerSocket::RelaySend From(uint16_t source) {
+        return [this, source](std::vector<uint8_t>&& frame) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (refuse_ || pending_.size() >= 512) return false;
+            pending_.emplace_back(source, std::move(frame));
+            wake_.notify_all();
+            return true;
+        };
+    }
+    uint64_t Count(uint16_t from, uint16_t to) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return counts_[{from, to}];
+    }
+    uint64_t Total() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        uint64_t total = 0;
+        for (const auto& [pair, n] : counts_) total += n;
+        return total;
+    }
+    std::vector<std::vector<uint8_t>> Payloads() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return payloads_;
+    }
+
+private:
+    void Run() {
+        std::mt19937 random(4242);
+        for (;;) {
+            std::pair<uint16_t, std::vector<uint8_t>> item;
+            PeerSocket* target = nullptr;
+            std::vector<uint8_t> out;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                wake_.wait(lock, [this] { return stop_ || !pending_.empty(); });
+                if (stop_) return;
+                item = std::move(pending_.front());
+                pending_.pop_front();
+                if (swallow_ || int(random() % 100) < drop_percent_) continue;
+                const auto frame = decode_relay_frame(item.second.data(), item.second.size());
+                const auto it = frame ? sockets_.find(frame->member) : sockets_.end();
+                if (!frame || frame->token != token_ || it == sockets_.end()) continue;
+                ++counts_[{item.first, frame->member}];
+                payloads_.push_back(frame->payload);
+                target = it->second;
+                out = encode_relay_frame(frame->token, item.first, frame->seq, frame->payload.data(), frame->payload.size());
+            }
+            target->deliver_relay(out.data(), out.size());
+        }
+    }
+
+    const uint32_t token_;
+    std::mutex mutex_;
+    std::condition_variable wake_;
+    std::deque<std::pair<uint16_t, std::vector<uint8_t>>> pending_;
+    std::map<uint16_t, PeerSocket*> sockets_;
+    std::map<std::pair<uint16_t, uint16_t>, uint64_t> counts_;
+    std::vector<std::vector<uint8_t>> payloads_;
+    int drop_percent_ = 0;
+    bool swallow_ = false;
+    bool refuse_ = false;
+    bool stop_ = false;
+    std::thread thread_;
+};
+
+// A UDP port that listens and never answers: a direct candidate that is reachable but silent.
+class SilentPeer {
+public:
+    SilentPeer() {
+        s_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        set_nonblocking(s_);
+        const sockaddr_in local = to_sockaddr({parse_ip("127.0.0.1"), 0});
+        bind(s_, reinterpret_cast<const sockaddr*>(&local), sizeof(local));
+        sockaddr_in bound{};
+        socklen_t length = sizeof(bound);
+        getsockname(s_, reinterpret_cast<sockaddr*>(&bound), &length);
+        port_ = ntohs(bound.sin_port);
+        thread_ = std::thread([this] { Run(); });
+    }
+    ~SilentPeer() {
+        stop_ = true;
+        thread_.join();
+        close_socket(s_);
+    }
+    uint16_t port() const { return port_; }
+    uint64_t received() const { return received_; }
+
+private:
+    void Run() {
+        uint8_t buffer[2048];
+        while (!stop_) {
+            const int n = int(recvfrom(s_, reinterpret_cast<char*>(buffer), sizeof(buffer), 0, nullptr, nullptr));
+            if (n > 0) ++received_;
+            else std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+    socket_t s_;
+    uint16_t port_ = 0;
+    std::atomic<uint64_t> received_{0};
+    std::atomic<bool> stop_{false};
+    std::thread thread_;
+};
+
+constexpr uint16_t kMemberA = 0x10, kMemberB = 0x20, kMemberC = 0x30;
+constexpr uint32_t kRoomToken = 0x5a5a1234;
+
+RoomKey TestRoomKey() {
+    RoomKey key{};
+    key[0] = 0x5a, key[1] = 0x5a, key[2] = 0x12, key[3] = 0x34;
+    key[9] = 77;
+    return key;
+}
+
+struct Peer {
+    std::unique_ptr<PeerSocket> socket;
+    uint64_t account = 0;
+    uint16_t member = 0;
+
+    // A closing socket still sends its CLOSE through the relay; the broker must not be reached after it is gone.
+    ~Peer() {
+        if (socket) socket->disable_relay();
+    }
+};
+
+Peer OpenPeer(uint64_t account, uint16_t member, int connect_timeout_ms = 8000) {
+    PeerSocket::Options options;
+    options.connect_timeout_ms = connect_timeout_ms;
+    std::string error;
+    std::unique_ptr<PeerSocket> socket = PeerSocket::open(options, &error);
+    if (socket) socket->set_room(TestRoomKey(), account);
+    return Peer{std::move(socket), account, member};
+}
+
+void Introduce(Peer& at, const Peer& other, bool reachable_directly, bool relayable = true) {
+    const uint32_t loopback = parse_ip("127.0.0.1");
+    at.socket->set_peer(other.account, {{loopback, reachable_directly ? other.socket->port() : uint16_t(1)}},
+                        relayable ? other.member : uint16_t(0));
+}
+
+void EnableRelay(Peer& at, RelayBroker& broker) {
+    broker.Add(at.member, at.socket.get());
+    at.socket->enable_relay(kRoomToken, broker.From(at.member));
+}
+
+bool Exchange(Peer& from, int link_from, Peer& to, int link_to, size_t size, uint8_t seed) {
+    const std::vector<uint8_t> message = Pattern(size, seed);
+    if (!from.socket->send(link_from, message.data(), message.size())) return false;
+    std::vector<uint8_t> got;
+    return WaitFor([&] { return to.socket->receive(link_to, got); }, 15000) && got == message;
+}
+
+// Direct works, so the relay carries nothing and the path is direct.
+void TestRelayLeavesDirectAlone() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RelayBroker broker(kRoomToken);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    Introduce(a, b, true);
+    Introduce(b, a, true);
+    const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kConnected && b.socket->state(lb) == LinkState::kConnected; }, 4000));
+    CHECK(a.socket->path(la) == LinkPath::kDirect && b.socket->path(lb) == LinkPath::kDirect);
+    CHECK(Exchange(a, la, b, lb, 20000, 3) && Exchange(b, lb, a, la, 500, 4));
+    std::this_thread::sleep_for(std::chrono::milliseconds(2800));
+    CHECK(a.socket->path(la) == LinkPath::kDirect && broker.Total() == 0);
+    CHECK(a.socket->relay_stats().frames_out == 0 && a.socket->relay_stats().frames_in == 0);
+    CHECK(b.socket->relay_stats().frames_out == 0 && b.socket->relay_stats().frames_in == 0);
+}
+
+// No direct answer: after the head start the relay is offered beside direct, and the first authenticated path wins.
+void TestRelayTakesOverWhenDirectIsSilent() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RelayBroker broker(kRoomToken);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    Introduce(a, b, false);
+    Introduce(b, a, false);
+    const uint64_t started = now_ms();
+    const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1800));
+    CHECK(a.socket->state(la) == LinkState::kConnecting && a.socket->path(la) == LinkPath::kConnectingDirect);
+    CHECK(broker.Total() == 0);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kConnected && b.socket->state(lb) == LinkState::kConnected; }, 6000));
+    const uint64_t elapsed = now_ms() - started;
+    CHECK(elapsed >= 2400 && elapsed < 7000);
+    CHECK(a.socket->path(la) == LinkPath::kRelay && b.socket->path(lb) == LinkPath::kRelay);
+    CHECK(is_relay_endpoint(a.socket->remote(la)) && a.socket->remote(la).port == kMemberB);
+    CHECK(Exchange(a, la, b, lb, 40000, 5) && Exchange(b, lb, a, la, 3000, 6) && Exchange(a, la, b, lb, 0, 7));
+    for (const auto& datagram : broker.Payloads()) {
+        CHECK(datagram.size() >= 12 && datagram[0] == 'D' && datagram[1] == 'N' && datagram[2] == 1);
+        CHECK(datagram.size() <= kRelayMaxPayload);
+    }
+    CHECK(broker.Count(kMemberA, kMemberB) > 0 && broker.Count(kMemberB, kMemberA) > 0);
+    CHECK(a.socket->relay_stats().frames_out == broker.Count(kMemberA, kMemberB));
+    CHECK(a.socket->relay_stats().send_failures == 0 && a.socket->relay_stats().rejected == 0);
+}
+
+// The service offers no relay (or the peer is not relayable): direct alone, until the usual timeout.
+void TestNoRelayKeepsTheDirectTimeout() {
+    for (const bool relayable_peer : {false, true}) {
+        Peer a = OpenPeer(1001, kMemberA, 3000), b = OpenPeer(2002, kMemberB, 3000);
+        CHECK(a.socket && b.socket);
+        if (!a.socket || !b.socket) return;
+        RelayBroker broker(kRoomToken);
+        if (relayable_peer) {
+            broker.Add(a.member, a.socket.get());
+            broker.Add(b.member, b.socket.get());
+        }
+        Introduce(a, b, false, relayable_peer);
+        Introduce(b, a, false, relayable_peer);
+        CHECK(!a.socket->relay_enabled());
+        const uint64_t started = now_ms();
+        const int la = a.socket->connect(b.account);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2800));
+        CHECK(a.socket->path(la) == LinkPath::kConnectingDirect);
+        CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kClosed; }, 3000));
+        CHECK(now_ms() - started >= 2900 && a.socket->path(la) == LinkPath::kFailed);
+        CHECK(broker.Total() == 0 && a.socket->relay_stats().frames_out == 0);
+    }
+    Peer c = OpenPeer(1001, kMemberA, 3000), d = OpenPeer(2002, kMemberB, 3000);
+    RelayBroker broker(kRoomToken);
+    EnableRelay(c, broker);
+    Introduce(c, d, false, false);
+    const int link = c.socket->connect(d.account);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2800));
+    CHECK(c.socket->path(link) == LinkPath::kConnectingDirect && broker.Total() == 0);
+}
+
+// A three-player room: A-B reach each other directly, A-C and B-C only through the relay, each link on its own path.
+void TestMixedRoomPicksAPathPerPeer() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB), c = OpenPeer(3003, kMemberC);
+    CHECK(a.socket && b.socket && c.socket);
+    if (!a.socket || !b.socket || !c.socket) return;
+    RelayBroker broker(kRoomToken);
+    for (Peer* peer : {&a, &b, &c}) EnableRelay(*peer, broker);
+    Introduce(a, b, true);
+    Introduce(b, a, true);
+    Introduce(a, c, false);
+    Introduce(c, a, false);
+    Introduce(b, c, false);
+    Introduce(c, b, false);
+    const int ab = a.socket->connect(b.account), ba = b.socket->connect(a.account);
+    const int ac = a.socket->connect(c.account), ca = c.socket->connect(a.account);
+    const int bc = b.socket->connect(c.account), cb = c.socket->connect(b.account);
+    const auto connected = [](Peer& p, int link) { return p.socket->state(link) == LinkState::kConnected; };
+    CHECK(WaitFor([&] { return connected(a, ab) && connected(b, ba) && connected(a, ac) && connected(c, ca) &&
+                               connected(b, bc) && connected(c, cb); }, 8000));
+    CHECK(a.socket->path(ab) == LinkPath::kDirect && b.socket->path(ba) == LinkPath::kDirect);
+    CHECK(a.socket->path(ac) == LinkPath::kRelay && c.socket->path(ca) == LinkPath::kRelay);
+    CHECK(b.socket->path(bc) == LinkPath::kRelay && c.socket->path(cb) == LinkPath::kRelay);
+    CHECK(Exchange(a, ab, b, ba, 5000, 1) && Exchange(a, ac, c, ca, 5000, 2) && Exchange(b, bc, c, cb, 5000, 3) &&
+          Exchange(c, ca, a, ac, 700, 4) && Exchange(c, cb, b, bc, 700, 5) && Exchange(b, ba, a, ab, 700, 6));
+    CHECK(broker.Count(kMemberA, kMemberB) == 0 && broker.Count(kMemberB, kMemberA) == 0);
+    CHECK(broker.Count(kMemberA, kMemberC) > 0 && broker.Count(kMemberC, kMemberA) > 0);
+    CHECK(broker.Count(kMemberB, kMemberC) > 0 && broker.Count(kMemberC, kMemberB) > 0);
+    CHECK(a.socket->peer_at(relay_endpoint(kMemberB)) == b.account && a.socket->peer_at(relay_endpoint(kMemberC)) == c.account);
+    CHECK(a.socket->peer_at(relay_endpoint(0x40)) == 0);
+}
+
+// Relay frames that are not this room's, not from a known peer, or not a PeerSocket datagram never reach a link.
+void TestRelayRefusesForeignFrames() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    const std::vector<uint8_t> datagram = Pattern(48, 1);
+    const auto frame = [&](uint32_t token, uint16_t member) {
+        return encode_relay_frame(token, member, 1, datagram.data(), datagram.size());
+    };
+    std::vector<uint8_t> f = frame(kRoomToken, kMemberB);
+    CHECK(!a.socket->deliver_relay(f.data(), f.size()));
+    RelayBroker broker(kRoomToken);
+    EnableRelay(a, broker);
+    Introduce(a, b, false);
+    f = frame(kRoomToken + 1, kMemberB);
+    CHECK(!a.socket->deliver_relay(f.data(), f.size()));
+    f = frame(kRoomToken, kMemberC);
+    CHECK(!a.socket->deliver_relay(f.data(), f.size()));
+    f = frame(kRoomToken, kMemberB);
+    f.pop_back();
+    CHECK(!a.socket->deliver_relay(f.data(), f.size()));
+    std::vector<uint8_t> stun(20, 0);
+    stun[0] = 0x01, stun[1] = 0x01, stun[4] = 0x21, stun[5] = 0x12, stun[6] = 0xa4, stun[7] = 0x42;
+    f = encode_relay_frame(kRoomToken, kMemberB, 1, stun.data(), stun.size());
+    CHECK(!a.socket->deliver_relay(f.data(), f.size()));
+    CHECK(a.socket->relay_stats().rejected == 5);
+    f = frame(kRoomToken, kMemberB);
+    CHECK(a.socket->deliver_relay(f.data(), f.size()));
+    CHECK(a.socket->relay_stats().frames_in == 1);
+    a.socket->disable_relay();
+    CHECK(!a.socket->relay_enabled() && !a.socket->deliver_relay(f.data(), f.size()));
+}
+
+// Real PeerSocket datagrams, carried and unwrapped, are what the sender wrote: handshakes, data, acknowledgements and
+// retransmissions, with a lossy relay forcing resends.
+void TestRelayKeepsDatagramsIntact() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RelayBroker broker(kRoomToken);
+    broker.SetDropPercent(20);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    Introduce(a, b, false);
+    Introduce(b, a, false);
+    const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kConnected && b.socket->state(lb) == LinkState::kConnected; }, 12000));
+    CHECK(a.socket->path(la) == LinkPath::kRelay);
+    for (const size_t size : {size_t(1), size_t(1149), size_t(1150), size_t(1151), size_t(2300), size_t(100000)}) {
+        CHECK(Exchange(a, la, b, lb, size, uint8_t(size)) && Exchange(b, lb, a, la, size, uint8_t(size + 1)));
+    }
+    CHECK(a.socket->stats(la).resends + b.socket->stats(lb).resends > 0);
+    size_t largest_data = 0;
+    std::map<uint8_t, size_t> types;
+    for (const auto& datagram : broker.Payloads()) {
+        CHECK(datagram.size() >= 12 && datagram[0] == 'D' && datagram[1] == 'N' && datagram[2] == 1);
+        const uint8_t type = datagram[3];
+        ++types[type];
+        if (type == 1 || type == 2) CHECK(datagram.size() == 48);
+        if (type == 4) CHECK(datagram.size() == 20);
+        if (type == 3) largest_data = std::max(largest_data, datagram.size());
+        CHECK(type >= 1 && type <= 8);
+    }
+    CHECK(largest_data == 12 + 13 + 1150);
+    CHECK(types[1] > 0 && types[2] > 0 && types[3] > 0 && types[4] > 0);
+    CHECK(a.socket->relay_stats().frames_out >= broker.Count(kMemberA, kMemberB));
+}
+
+// Another room's key never authenticates over the relay either.
+void TestRelayDoesNotBypassTheRoomKey() {
+    Peer a = OpenPeer(1001, kMemberA, 5000), b = OpenPeer(2002, kMemberB, 5000);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RoomKey other{};
+    other[5] = 9;
+    b.socket->set_room(other, b.account);
+    RelayBroker broker(kRoomToken);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    Introduce(a, b, false);
+    Introduce(b, a, false);
+    const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kClosed; }, 7000));
+    CHECK(b.socket->state(lb) != LinkState::kConnected && a.socket->relay_stats().frames_out > 0 && broker.Total() > 0);
+}
+
+// Timing: direct hellos start at once and keep going; the relay stays silent until the window, then joins them.
+void TestRelayWindowAndDirectCadence() {
+    int hellos_without_relay = 0, hellos_with_relay = 0;
+    for (const bool with_relay : {false, true}) {
+        SilentPeer silent;
+        Peer a = OpenPeer(1001, kMemberA, 6000);
+        Peer b = OpenPeer(2002, kMemberB, 6000);
+        CHECK(a.socket && b.socket);
+        if (!a.socket || !b.socket) return;
+        RelayBroker broker(kRoomToken);
+        broker.SetSwallowAll(true);
+        if (with_relay) EnableRelay(a, broker);
+        const uint32_t loopback = parse_ip("127.0.0.1");
+        a.socket->set_peer(b.account, {{loopback, silent.port()}}, b.member);
+        const uint64_t started = now_ms();
+        const int la = a.socket->connect(b.account);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        CHECK(silent.received() >= 1);
+        uint64_t relay_at = 0;
+        while (now_ms() - started < 2200) {
+            if (with_relay && !relay_at && a.socket->relay_stats().frames_out > 0) relay_at = now_ms() - started;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        const int direct_in_window = int(silent.received());
+        (with_relay ? hellos_with_relay : hellos_without_relay) = direct_in_window;
+        CHECK(direct_in_window >= 15 && direct_in_window <= 30);
+        CHECK(relay_at == 0 && a.socket->path(la) == LinkPath::kConnectingDirect);
+        if (!with_relay) continue;
+        while (!relay_at && now_ms() - started < 4000) {
+            if (a.socket->relay_stats().frames_out > 0) relay_at = now_ms() - started;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        CHECK(relay_at >= 2400 && relay_at <= 3400);
+        CHECK(a.socket->path(la) == LinkPath::kRelayOffered);
+        const uint64_t before = silent.received();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        CHECK(silent.received() >= before + 4);
+    }
+    CHECK(std::abs(hellos_with_relay - hellos_without_relay) <= 4);
+}
+
+// A direct path that only becomes reachable after the relay was offered still wins: nothing is cancelled.
+void TestDirectStillWinsAfterTheRelayWindow() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RelayBroker broker(kRoomToken);
+    broker.SetSwallowAll(true);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    Introduce(a, b, false);
+    Introduce(b, a, false);
+    const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+    std::this_thread::sleep_for(std::chrono::milliseconds(3300));
+    CHECK(a.socket->path(la) == LinkPath::kRelayOffered && a.socket->state(la) == LinkState::kConnecting);
+    CHECK(a.socket->relay_stats().frames_out > 0);
+    Introduce(a, b, true);
+    Introduce(b, a, true);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kConnected && b.socket->state(lb) == LinkState::kConnected; }, 4000));
+    CHECK(a.socket->path(la) == LinkPath::kDirect && b.socket->path(lb) == LinkPath::kDirect);
+    CHECK(Exchange(a, la, b, lb, 3000, 1) && broker.Total() == 0);
+}
+
+// The shipped timeouts: 15 s to connect, 10 s idle, 2.5 s before the relay. Nothing about them depends on the relay.
+void TestTimeoutsAreUnchanged() {
+    const PeerSocket::Options defaults;
+    CHECK(defaults.connect_timeout_ms == 15000 && defaults.idle_timeout_ms == 10000 && defaults.relay_after_ms == 2500);
+    PeerSocket::Options options;
+    std::string error;
+    auto a = PeerSocket::open(options, &error);
+    CHECK(a != nullptr);
+    if (!a) return;
+    a->set_room(TestRoomKey(), 1001);
+    RelayBroker broker(kRoomToken);
+    broker.SetSwallowAll(true);
+    broker.Add(kMemberA, a.get());
+    a->enable_relay(kRoomToken, broker.From(kMemberA));
+    a->set_peer(2002, {{parse_ip("127.0.0.1"), 1}}, kMemberB);
+    const uint64_t started = now_ms();
+    const int link = a->connect(2002);
+    CHECK(WaitFor([&] { return a->state(link) == LinkState::kClosed; }, 18000));
+    const uint64_t elapsed = now_ms() - started;
+    CHECK(elapsed >= 14500 && elapsed <= 17500);
+    CHECK(a->path(link) == LinkPath::kFailed && a->relay_stats().frames_out > 0);
+    a->disable_relay();
+}
+
+// The relay cannot take frames (binary transport unavailable or refusing): direct alone, original timeout, no stuck link.
+void TestRelayRefusalFailsLikeDirectOnly() {
+    Peer a = OpenPeer(1001, kMemberA, 3500), b = OpenPeer(2002, kMemberB, 3500);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RelayBroker broker(kRoomToken);
+    broker.SetRefuse(true);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    Introduce(a, b, false);
+    Introduce(b, a, false);
+    const uint64_t started = now_ms();
+    const int la = a.socket->connect(b.account);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kClosed; }, 6000));
+    CHECK(now_ms() - started >= 3300 && a.socket->path(la) == LinkPath::kFailed);
+    CHECK(a.socket->relay_stats().send_failures > 0 && a.socket->relay_stats().frames_out == 0 && broker.Total() == 0);
+    a.socket->close(la);
+    CHECK(a.socket->state(la) == LinkState::kClosed && a.socket->connect(b.account) > 0);
+}
+
+// A relayed link whose relay goes away (lobby gone, frames swallowed, token changed, sends refused) closes by the idle
+// rule instead of hanging, and the game-facing state becomes closed.
+void TestRelayLossAfterConnectionEndsTheLink() {
+    enum Fault { kSwallow, kDisable, kStaleToken, kRefuse };
+    for (const Fault fault : {kSwallow, kDisable, kStaleToken, kRefuse}) {
+        PeerSocket::Options options;
+        options.idle_timeout_ms = 2500;
+        options.connect_timeout_ms = 8000;
+        std::string error;
+        Peer a{PeerSocket::open(options, &error), 1001, kMemberA}, b{PeerSocket::open(options, &error), 2002, kMemberB};
+        CHECK(a.socket && b.socket);
+        if (!a.socket || !b.socket) return;
+        a.socket->set_room(TestRoomKey(), a.account);
+        b.socket->set_room(TestRoomKey(), b.account);
+        RelayBroker broker(kRoomToken);
+        EnableRelay(a, broker);
+        EnableRelay(b, broker);
+        Introduce(a, b, false);
+        Introduce(b, a, false);
+        const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+        CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kConnected && b.socket->state(lb) == LinkState::kConnected; }, 8000));
+        CHECK(a.socket->path(la) == LinkPath::kRelay && Exchange(a, la, b, lb, 500, 1));
+        switch (fault) {
+        case kSwallow: broker.SetSwallowAll(true); break;
+        case kDisable:
+            a.socket->disable_relay();
+            b.socket->disable_relay();
+            break;
+        case kStaleToken:
+            a.socket->enable_relay(kRoomToken + 1, broker.From(kMemberA));
+            b.socket->enable_relay(kRoomToken + 1, broker.From(kMemberB));
+            break;
+        case kRefuse: broker.SetRefuse(true); break;
+        }
+        CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kClosed && b.socket->state(lb) == LinkState::kClosed; }, 8000));
+        CHECK(a.socket->path(la) == LinkPath::kFailed);
+        CHECK(!a.socket->send(la, "x", 1));
+    }
+}
+
+// The capability matrix between clients and lobbies: relay fields are additive and a missing one is direct-only.
+void TestRelayCompatibilityMatrix() {
+    const auto reply = [](const char* text) { return *Json::parse(text); };
+    const Json updated = reply(R"({"account":"1","capabilities":{"relay_supported":true,"relay_max_payload":1200}})");
+    const Json older = reply(R"({"account":"1","name":"x","friend_code":"AAAA-BBBB","ip":"1.2.3.4","time":1})");
+    const Json small = reply(R"({"capabilities":{"relay_supported":true,"relay_max_payload":800}})");
+    const Json odd = reply(R"({"capabilities":{"relay_supported":"yes","relay_max_payload":-5}})");
+    const Json odd_payload = reply(R"({"capabilities":{"relay_supported":true,"relay_max_payload":-1}})");
+    CHECK(relay_capability(updated).usable());
+    CHECK(!relay_capability(older).usable() && !relay_capability(older).supported);
+    CHECK(!relay_capability(small).usable() && relay_capability(small).supported);
+    CHECK(!relay_capability(odd).usable() && !relay_capability(odd_payload).usable());
+    CHECK(!relay_capability(reply("{}")).usable() && !relay_capability(reply(R"({"capabilities":null})")).usable());
+
+    Identity identity;
+    identity.account = 5;
+    identity.secret = std::string(64, 'a');
+    const auto keys = [](const Json& j) {
+        std::vector<std::string> out;
+        for (const auto& [key, value] : j.members()) out.push_back(key);
+        return out;
+    };
+    const std::vector<std::string> old_keys{"proto", "game", "account", "secret", "name", "presence", "online_protocol", "version", "platform"};
+    CHECK(keys(hello_body(identity, "n", "g", true)) == old_keys);
+    std::vector<std::string> new_keys = old_keys;
+    new_keys.push_back("relay");
+    CHECK(keys(hello_body(identity, "n", "g", true, true)) == new_keys);
+    CHECK(kOnlineProtocolVersion == 1 && kLobbyProtocol == 1);
+    CHECK(online_compatible(kOnlineProtocolVersion) && !online_compatible(0));
+}
+
+// Requires a development lobby (DCP_TEST_LOBBY): relay frames over real WebSockets between two room members.
+void TestLobbyRelay(const fs::path& base) {
+    const char* url = std::getenv("DCP_TEST_LOBBY");
+    if (!url || !*url) return;
+    const Identity host_id = load_identity(base / "relay-a"), guest_id = load_identity(base / "relay-b");
+    std::mutex mutex;
+    std::vector<std::vector<uint8_t>> received;
+    LobbyLink::Options options;
+    options.url = url;
+    options.hello = [&] { return hello_body(host_id, "RelayA", "TEST-1.00", true, true); };
+    LobbyLink host(options);
+    options.hello = [&] { return hello_body(guest_id, "RelayB", "TEST-1.00", true, true); };
+    LobbyLink guest(options);
+    guest.set_binary_sink([&](const uint8_t* data, size_t size) {
+        std::lock_guard<std::mutex> lock(mutex);
+        received.emplace_back(data, data + size);
+    });
+    CHECK(!host.send_binary({1, 2, 3}) && host.binary_dropped() == 1);
+    host.start();
+    guest.start();
+    auto next = [](LobbyLink& link, const std::function<bool(const LobbyMessage&)>& match, LobbyMessage& out) {
+        return WaitFor([&] {
+            LobbyMessage m;
+            while (link.poll(m)) {
+                if (match(m)) {
+                    out = std::move(m);
+                    return true;
+                }
+            }
+            return false;
+        }, 5000);
+    };
+    LobbyMessage m;
+    CHECK(next(host, [](const LobbyMessage& x) { return x.kind == LobbyMessage::Kind::kUp; }, m));
+    CHECK(relay_capability(m.body).supported && relay_capability(m.body).max_payload == int(kRelayMaxPayload));
+    CHECK(next(guest, [](const LobbyMessage& x) { return x.kind == LobbyMessage::Kind::kUp; }, m));
+    Json room = Json::Object();
+    room.set("world", 1);
+    room.set("slots", 4);
+    room.set("flags", int64_t(0x86000000u));
+    const uint32_t create = host.request("room.create", room);
+    CHECK(next(host, [&](const LobbyMessage& x) { return x.kind == LobbyMessage::Kind::kResponse && x.seq == create; }, m));
+    const std::string room_id = m.body["room"]["id"].as_string();
+    const uint16_t host_member = uint16_t(m.body["me"].as_int());
+    std::vector<uint8_t> key_bytes;
+    CHECK(hex_decode(m.body["room"]["key"].as_string(), key_bytes) && key_bytes.size() == 16);
+    RoomKey key{};
+    std::copy(key_bytes.begin(), key_bytes.end(), key.begin());
+    Json join = Json::Object();
+    join.set("room", room_id);
+    const uint32_t joined = guest.request("room.join", join);
+    CHECK(next(guest, [&](const LobbyMessage& x) { return x.kind == LobbyMessage::Kind::kResponse && x.seq == joined; }, m));
+    const uint16_t guest_member = uint16_t(m.body["me"].as_int());
+
+    const std::vector<uint8_t> datagram = Pattern(1175, 4);
+    CHECK(host.send_binary(encode_relay_frame(relay_token(key), guest_member, 5, datagram.data(), datagram.size())));
+    CHECK(WaitFor([&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        return !received.empty();
+    }, 5000));
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        const auto frame = decode_relay_frame(received[0].data(), received[0].size());
+        CHECK(frame && frame->member == host_member && frame->seq == 5 && frame->token == relay_token(key));
+        if (frame) CHECK(frame->payload == datagram);
+    }
+
+    // Text requests keep their answers while binary frames flow in both directions.
+    size_t answers = 0;
+    const size_t frames_before = [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        return received.size();
+    }();
+    const std::vector<uint8_t> small = Pattern(200, 2);
+    for (int i = 0; i < 300; ++i) {
+        CHECK(host.send_binary(encode_relay_frame(relay_token(key), guest_member, 100 + i, small.data(), small.size())));
+        if (i % 50 == 0) host.request("worlds", Json::Object());
+    }
+    CHECK(WaitFor([&] {
+        LobbyMessage reply;
+        while (host.poll(reply)) answers += reply.kind == LobbyMessage::Kind::kResponse && reply.code == "ok" ? 1 : 0;
+        std::lock_guard<std::mutex> lock(mutex);
+        return received.size() >= frames_before + 300 && answers >= 6;
+    }, 10000));
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        CHECK(received.size() == frames_before + 300);
+        for (size_t i = frames_before; i < received.size(); ++i) {
+            const auto frame = decode_relay_frame(received[i].data(), received[i].size());
+            CHECK(frame && frame->seq == 100 + i - frames_before && frame->payload == small);
+        }
+    }
+
+    // A wrong token is dropped by the lobby and the connection stays up.
+    const size_t before = [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        return received.size();
+    }();
+    CHECK(host.send_binary(encode_relay_frame(relay_token(key) ^ 1, guest_member, 6, datagram.data(), datagram.size())));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        CHECK(received.size() == before);
+    }
+    CHECK(host.up());
+
+    // Far more than the queue holds in one burst: the excess is dropped and counted, never buffered without bound.
+    const std::vector<uint8_t> burst = encode_relay_frame(relay_token(key), guest_member, 7, datagram.data(), datagram.size());
+    size_t accepted = 0;
+    for (int i = 0; i < 5000; ++i) accepted += host.send_binary(std::vector<uint8_t>(burst)) ? 1 : 0;
+    CHECK(accepted + host.binary_dropped() - 1 == 5000 && host.binary_dropped() > 1);
+    CHECK(host.up());
+    guest.stop();
+    CHECK(!guest.send_binary({1}) && guest.binary_dropped() >= 1);
+    host.stop();
+    CHECK(!host.send_binary({1}));
+}
+
 void TestLinuxParity() {
     for (const char* file :
          {"src/runtime_online.cpp", "src/runtime_matching2.cpp", "src/runtime_rudp.cpp", "src/runtime_cheats.cpp",
           "src/skip_offers.c", "src/system_type_hook.c", "src/lzcnt_compat.c", "src/isa_emulate.c",
-          "src/net/lobby_link.cpp", "src/net/connection_test.cpp", "src/net/online_config.cpp", "src/net/identity.cpp",
+          "src/net/lobby_link.cpp", "src/net/relay_frame.cpp", "src/net/connection_test.cpp", "src/net/online_config.cpp", "src/net/identity.cpp",
           "src/net/websocket.cpp", "launcher/online_client.cpp", "launcher/online_page.cpp", "launcher/online_view.cpp",
           "launcher/online_settings.cpp", "launcher/text_languages.cpp", "launcher/game_profile.cpp",
           "launcher/settings.cpp", "gpu/shim/dcp_ping.h", "gpu/shim/dcp_amd_water_fix.h", "gpu/shim/dcp_water_diag.h"}) {
@@ -793,7 +1569,26 @@ void TestLinuxParity() {
         CHECK(!source.empty() && !guarded);
     }
 
+    for (const char* file : {"src/net/relay_frame.h", "src/net/relay_frame.cpp", "src/net/lobby_link.h", "src/net/lobby_link.cpp",
+                             "src/net/websocket.h", "src/net/connection_test.h"}) {
+        const std::string source = ReadSource(file);
+        for (const char* windows_only : {"windows.h", "winsock", "winhttp", "HINTERNET", "WSA", "SOCKET ", "_WIN32", "DWORD", "HANDLE"}) {
+            if (source.find(windows_only) != std::string::npos) std::printf("%s names %s\n", file, windows_only);
+            CHECK(source.find(windows_only) == std::string::npos);
+        }
+    }
+    const std::string peer = ReadSource("src/net/peer_socket.cpp");
+    const size_t relay_from = peer.find("void PeerSocket::enable_relay"), relay_to = peer.find("void PeerSocket::SendHello");
+    CHECK(relay_from != std::string::npos && relay_to > relay_from);
+    for (const char* windows_only : {"windows.h", "winsock", "WSA", "_WIN32", "DWORD", "HANDLE", "closesocket"})
+        CHECK(peer.substr(relay_from, relay_to - relay_from).find(windows_only) == std::string::npos);
+    CHECK(ReadSource("src/net/websocket_posix.cpp").find("bool send_binary(") != std::string::npos);
+    CHECK(ReadSource("src/net/websocket_win.cpp").find("WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE") != std::string::npos);
+    CHECK(ReadSource("src/net/websocket_posix.cpp").find("binary = true") != std::string::npos &&
+          ReadSource("src/net/websocket_win.cpp").find("binary = true") != std::string::npos);
+
     const std::string cmake = ReadSource("CMakeLists.txt");
+    CHECK(cmake.find("src/net/relay_frame.cpp") != std::string::npos);
     const size_t main_at = cmake.find("set(DCP_MAIN_SOURCES ");
     const std::string main_sources = cmake.substr(main_at, cmake.find(')', main_at) - main_at);
     for (const char* file : {"src/skip_offers.c", "src/system_type_hook.c", "src/lzcnt_compat.c", "src/isa_emulate.c",
@@ -841,23 +1636,60 @@ int main() {
     }
     const fs::path base = fs::temp_directory_path() / "dcp-net-tests";
     fs::create_directories(base);
-    TestJson();
-    TestCrypto();
-    TestIdentity(base);
-    TestConfig();
-    TestConnectionSummary();
-    TestWorstRtt();
-    TestOnlineVersion();
-    TestSystemCaBundle();
-    TestLinuxParity();
-    TestAddresses();
-    TestStun();
-    TestConnectionTestSocket();
-    TestPeerLink(0);
-    TestPeerLink(15);
-    TestPeerRefusesWrongRoom();
-    TestSecondInstancePort();
-    TestLobby(base);
+    const char* lobby = std::getenv("DCP_TEST_LOBBY");
+    const bool lobby_set = lobby && *lobby;
+    Group("foundations", [&] {
+        TestJson();
+        TestCrypto();
+        TestIdentity(base);
+        TestConfig();
+        TestOnlineVersion();
+        TestAddresses();
+        TestStun();
+        TestSecondInstancePort();
+    });
+    Group("connection-test", [&] {
+        TestConnectionSummary();
+        TestConnectionTestSocket();
+        TestWorstRtt();
+    });
+    Group("direct", [&] {
+        TestPeerLink(0);
+        TestPeerLink(15);
+        TestPeerRefusesWrongRoom();
+        TestRelayLeavesDirectAlone();
+        TestDirectStillWinsAfterTheRelayWindow();
+        TestTimeoutsAreUnchanged();
+    });
+    Group("relay-codec", [&] {
+        TestRelayFrame();
+        TestRelayRefusesForeignFrames();
+    });
+    Group("relay-fallback", [&] {
+        TestRelayWindowAndDirectCadence();
+        TestRelayTakesOverWhenDirectIsSilent();
+        TestMixedRoomPicksAPathPerPeer();
+        TestRelayKeepsDatagramsIntact();
+    });
+    Group("failure-paths", [&] {
+        TestNoRelayKeepsTheDirectTimeout();
+        TestRelayRefusalFailsLikeDirectOnly();
+        TestRelayLossAfterConnectionEndsTheLink();
+        TestRelayDoesNotBypassTheRoomKey();
+    });
+    Group("protocol", [&] { TestRelayCompatibilityMatrix(); });
+    Group("linux-parity", [&] {
+        TestSystemCaBundle();
+        TestLinuxParity();
+    });
+    if (lobby_set) {
+        Group("lobby-binary", [&] {
+            TestLobby(base);
+            TestLobbyRelay(base);
+        });
+    } else {
+        std::printf("GROUP|lobby-binary|SKIPPED|DCP_TEST_LOBBY is not set\n");
+    }
     std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
     return g_failures ? 1 : 0;
 }
