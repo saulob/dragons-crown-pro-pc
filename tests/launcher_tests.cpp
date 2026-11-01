@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -34,6 +35,7 @@
 #include "cpk_patch.h"
 #include "dcp_cheats.h"
 #include "dcp_launcher.h"
+#include "startup_phase.h"
 #include "dcp_graphics.h"
 #include "dcp_keys.h"
 #include "dcp_overlay_box.h"
@@ -45,6 +47,8 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
+#include "net/connection_test.h"
+#include "npc_voice_resources.h"
 #include "net/identity.h"
 #include "net/online_version.h"
 #include "online_client.h"
@@ -1156,13 +1160,14 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
     WriteAll(file, "dcp_japanese_npc_voices = garbage\n");
     CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
 
-    // A saved On is inert on every build without the verified hook.
-    CHECK(!SupportsJapaneseNpcVoices(&kUs101));
-    CHECK(!SupportsJapaneseNpcVoices(&kJp100));
-    CHECK(!SupportsJapaneseNpcVoices(&kJp102));
-    CHECK(!SupportsJapaneseNpcVoices(&kJp103));
-    CHECK(!SupportsJapaneseNpcVoices(&kCk100));
-    CHECK(!SupportsJapaneseNpcVoices(&kCk));
+    // The Japanese builds already speak Japanese; every other build has the toggle, by table or by signature.
+    CHECK(SupportsJapaneseNpcVoices(&kUs101));
+    CHECK(SupportsJapaneseNpcVoices(&kCk100));
+    CHECK(SupportsJapaneseNpcVoices(&kCk));
+    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
+        CHECK(!SupportsJapaneseNpcVoices(japan) && NativeJapaneseNpcVoices(japan));
+    }
+    CHECK(!NativeJapaneseNpcVoices(&kUs) && !NativeJapaneseNpcVoices(&kCk100) && !NativeJapaneseNpcVoices(nullptr));
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
 }
 
@@ -1482,7 +1487,8 @@ void TestOverlayPanel() {
     CHECK(overlay.find("if (DcpSettings::Get().show_fps) {\n        FpsCounter();") != std::string::npos);
 }
 
-// Insert and R3 + L2 open nothing: the in-game settings menu was removed. F10, F11, F2 and F3 stay.
+// Insert and R3 + L2 open nothing: that settings menu stays removed. The Options menu (F1, L3 + R3; see
+// tests/options_menu_tests.cpp) is a separate design. F10, F11, F2 and F3 stay.
 void TestNoSettingsMenu() {
     const fs::path source(DCP_SOURCE_DIR);
     const std::string overlay =
@@ -1498,10 +1504,10 @@ void TestNoSettingsMenu() {
     CHECK(overlay.find("SDL_GAMEPAD_BUTTON_RIGHT_STICK") == std::string::npos &&
           overlay.find("SDL_GAMEPAD_AXIS_LEFT_TRIGGER") == std::string::npos);
     CHECK(settings.find("menu_tab") == std::string::npos && settings.find("bool Save()") == std::string::npos);
-    // Keys and buttons go to the game unless the cheat menu or a game dialog has them.
-    CHECK(overlay.find("        if (!cheats_open) {\n            return false;\n        }\n        io.AddKeyEvent(ImGuiMod_Ctrl") !=
+    // Keys and buttons go to the game unless a menu or a game dialog has them.
+    CHECK(overlay.find("        if (!MenuOpen()) {\n            return false;\n        }\n        io.AddKeyEvent(ImGuiMod_Ctrl") !=
           std::string::npos);
-    CHECK(overlay.find("return cheat_open || text_entry_active || choice_active;") != std::string::npos);
+    CHECK(overlay.find("return cheat_open || options_open || text_entry_active || choice_active;") != std::string::npos);
     CHECK(overlay.find("if (event.key.scancode == DcpSettings::Get().menu_key) {") != std::string::npos);
     CHECK(window.find("if (window_shortcut && !event.key.repeat) {\n                ToggleBorderless();") != std::string::npos);
     CHECK(window.find("hud == DcpPing::HudKey::Fps") != std::string::npos &&
@@ -1605,6 +1611,186 @@ void TestPingDisplay(const fs::path& base) {
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
     CHECK(page.find("ui.Toggle(\"Ping display\", kPingHelp, kPingDisplayKey, false, \"Off\", \"On\")") != std::string::npos);
     CHECK(OnlinePageSections(false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+}
+
+// PLAY with Online play on waits for one finished Connection test on the game's UDP port, whatever its result: saved at
+// once, kept across launcher starts and "Reset all settings", forgotten when Online play is turned off, and asked again
+// for another port. The name, the Ping display and friends do not count.
+void TestConnectionTestGate(const fs::path& base) {
+    const fs::path file = base / "connection-test" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    set_env("DCP_UDP_PORT", nullptr);
+    set_env("DCP_ONLINE", nullptr);
+    const auto port_of = [](const trg::SettingsStore& settings) {
+        net::OnlineConfig config = OnlineConfigOf(settings);
+        net::apply_environment(config);
+        return net::connection_test_port(config);
+    };
+    const auto needed = [&](const trg::SettingsStore& settings, bool testing = false) {
+        return ConnectionTestNeeded(settings, settings.GetBool(kOnlineEnabledKey, false), testing, port_of(settings));
+    };
+
+    {
+        LauncherSettings settings(file);
+        CHECK(port_of(settings) == 3658);
+        CHECK(!needed(settings) && !needed(settings, true));
+        settings.SetBool(kOnlineEnabledKey, true);
+        CHECK(needed(settings) && needed(settings, true));
+        CHECK(settings.Save());
+        CHECK(RecordConnectionTest(settings, port_of(settings)));
+        CHECK(!needed(settings) && needed(settings, true));
+    }
+    CHECK(WrittenValue(ReadAll(file), kConnectionTestPortKey, "3658"));
+
+    {
+        LauncherSettings settings(file);
+        CHECK(settings.GetBool(kOnlineEnabledKey, false) && !needed(settings));
+        settings.Set(kOnlineNameKey, "Renamed");
+        settings.SetBool(kPingDisplayKey, true);
+        ForgetConnectionTestWhenOff(settings, true);
+        CHECK(!needed(settings));
+        settings.ResetToDefaults();
+        CHECK(!needed(settings));
+
+        set_env("DCP_UDP_PORT", "40002");
+        CHECK(port_of(settings) == 40002 && needed(settings));
+        set_env("DCP_UDP_PORT", nullptr);
+        settings.Set(kOnlineUdpPortKey, "40001");
+        CHECK(port_of(settings) == 40001 && needed(settings));
+        settings.Set(kOnlineUdpPortKey, "0");
+        CHECK(!needed(settings));
+
+        settings.SetBool(kOnlineEnabledKey, false);
+        ForgetConnectionTestWhenOff(settings, false);
+        CHECK(!needed(settings) && settings.Get(kConnectionTestPortKey) == "0");
+        settings.SetBool(kOnlineEnabledKey, true);
+        CHECK(needed(settings));
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kConnectionTestPortKey, "0"));
+    CHECK(needed(LauncherSettings(file)));
+
+    // A saved test next to a saved Off (Online play turned on, tested, closed without Save) does not count.
+    WriteAll(file, "online_enabled = 0\nonline_connection_test_port = 3658\n");
+    {
+        LauncherSettings settings(file);
+        ForgetConnectionTestWhenOff(settings, false);
+        settings.SetBool(kOnlineEnabledKey, true);
+        CHECK(needed(settings));
+    }
+    CHECK(!IsValidSetting(kConnectionTestPortKey, "70000") && IsValidSetting(kConnectionTestPortKey, "3658"));
+    CHECK(IsOnlineSetting(kConnectionTestPortKey));
+
+    // A finished test counts whatever its verdict, a run that never produced a report does not, and PLAY says why.
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    const size_t record = page.find("void OnlinePage::RecordFinishedTest(");
+    const size_t record_end = page.find("\n}\n", record);
+    CHECK(record != std::string::npos && record_end != std::string::npos);
+    const std::string record_body = page.substr(record, record_end - record);
+    CHECK(record_body.find("report") == std::string::npos && record_body.find("RecordConnectionTest(settings, port)") != std::string::npos);
+    CHECK(page.find("test_ = {true, std::move(report), port};") != std::string::npos);
+    CHECK(page.find("run_connection_test(config, identity, net::online_name(config.name), game, port)") != std::string::npos);
+    const size_t caught = page.find("} catch (const std::exception& e) {");
+    CHECK(caught != std::string::npos && page.find("return;", caught) < page.find("test_ = {true", caught));
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("online_page_->PlayNeedsTest(settings_)") != std::string::npos);
+    CHECK(launcher.find("trg::PlayCheck{false, kConnectionTestRequired,") != std::string::npos);
+    CHECK(std::string(kConnectionTestRequired).find("Connection test") != std::string::npos);
+
+    // The firewall note is Windows only, and only under the running test.
+    const char* windows = ConnectionTestRunningNote(true);
+    CHECK(windows && std::string(windows).find("Allow access") != std::string::npos);
+    CHECK(ConnectionTestRunningNote(false) == nullptr);
+    CHECK(page.find("ConnectionTestRunningNote(OnWindows())") != std::string::npos &&
+          page.find("bool OnWindows() { return net::host_platform() == \"Windows\"; }") != std::string::npos);
+    CHECK(net::platform_name(true, "", "") == "Windows" && net::platform_name(false, "Valve", "Jupiter") != "Windows");
+    CHECK(page.find("Allow access") == std::string::npos && launcher.find("Allow access") == std::string::npos);
+}
+
+// While PLAY waits for the Connection test its whole section is a gold panel with Run test as the primary button; a
+// blocked PLAY sends the player there. Presentation only: the gate itself is TestConnectionTestGate's.
+void TestConnectionTestPanel(const fs::path& base) {
+    const fs::path file = base / "connection-test-panel" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    const auto needed = [](const trg::SettingsStore& settings, bool testing = false) {
+        net::OnlineConfig config = OnlineConfigOf(settings);
+        net::apply_environment(config);
+        return ConnectionTestNeeded(settings, config.enabled, testing, net::connection_test_port(config));
+    };
+
+    LauncherSettings settings(file);
+    settings.SetBool(kOnlineEnabledKey, true);
+    const ConnectionTestLook pending = ConnectionTestLookOf(needed(settings));
+    CHECK(pending.panel && pending.primary_button);
+    CHECK(pending.required_text && std::string(pending.required_text) == "Connection test required");
+
+    // A run that stopped without a report, or one still running, keeps the panel; a finished one removes it.
+    CHECK(ConnectionTestLookOf(needed(settings, true)).panel);
+    CHECK(settings.Save());
+    CHECK(RecordConnectionTest(settings, 3658));
+    const ConnectionTestLook done = ConnectionTestLookOf(needed(settings));
+    CHECK(!done.panel && !done.primary_button && done.required_text == nullptr);
+    CHECK(ConnectionTestLookOf(needed(settings, true)).panel);
+
+    // Online play off: no Connection test section, no panel.
+    ForgetConnectionTestWhenOff(settings, false);
+    settings.SetBool(kOnlineEnabledKey, false);
+    CHECK(!ConnectionTestLookOf(needed(settings)).panel);
+    for (const OnlineSection section : OnlinePageSections(false, 0)) CHECK(section != OnlineSection::kConnectionTest);
+
+    // PLAY's second question in a frame is the press; the emphasis is a short soft pulse.
+    PlayAttemptDetector detector;
+    CHECK(!detector.Pressed(10) && detector.Pressed(10) && !detector.Pressed(11) && !detector.Pressed(12) && detector.Pressed(12));
+    CHECK(ConnectionTestEmphasis(-1.0) == 0.0f && ConnectionTestEmphasis(kConnectionTestEmphasisSeconds) == 0.0f);
+    float peak = 0.0f;
+    for (double t = 0.0; t < kConnectionTestEmphasisSeconds; t += 0.01) {
+        const float e = ConnectionTestEmphasis(t);
+        CHECK(e >= 0.0f && e <= 1.0f);
+        peak = std::max(peak, e);
+    }
+    CHECK(peak > 0.7f && kConnectionTestEmphasisSeconds >= 2.0 && kConnectionTestEmphasisSeconds <= 3.0);
+
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t row = page.find("bool OnlinePage::DrawRequiredTestRow(");
+    const size_t section = page.find("void OnlinePage::DrawConnectionTest(");
+    const size_t friends = page.find("void OnlinePage::DrawFriends(");
+    CHECK(row != std::string::npos && section > row && friends > section);
+    if (row == std::string::npos || section <= row || friends <= section) return;
+    const std::string required_row = page.substr(row, section - row);
+    const std::string draw = page.substr(section, friends - section);
+
+    // Blocked PLAY: back to the Online page as before, and the next frame scrolls to the section and focuses Run test.
+    const size_t blocked = launcher.find("online_page_->PlayNeedsTest(settings_)) {");
+    CHECK(blocked != std::string::npos);
+    const std::string gate = launcher.substr(blocked, launcher.find("return trg::PlayCheck{};", blocked) - blocked);
+    CHECK(gate.find("play_attempts_.Pressed(ImGui::GetFrameCount())") != std::string::npos);
+    CHECK(gate.find("PointToConnectionTest()") != std::string::npos);
+    CHECK(gate.find("trg::PlayCheck{false, kConnectionTestRequired,") != std::string::npos);
+    CHECK(draw.find("ImGui::SetScrollHereY(") != std::string::npos && draw.find("pointed_at_ = ImGui::GetTime()") != std::string::npos);
+    const size_t focus = required_row.find("ImGui::SetKeyboardFocusHere()");
+    const size_t primary = required_row.find("ui.AccentButton(button)");
+    CHECK(focus != std::string::npos && primary != std::string::npos && focus < primary);
+    CHECK(draw.find("ImGuiChildFlags_NavFlattened") != std::string::npos);
+
+    // The panel reuses the friend request card's drawing, in the accent colour and never the warning red.
+    CHECK(page.find("BeginCard(ImVec4(t.panel.x, t.panel.y, t.panel.z, 0.96f), ImVec4(t.accent.x, t.accent.y, t.accent.z, 0.55f), 1.0f);") != std::string::npos);
+    CHECK(page.find("ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f * s);") != std::string::npos);
+    CHECK(page.find("ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * s, 10.0f * s));") != std::string::npos);
+    CHECK(draw.find("BeginCard(background, border,") != std::string::npos);
+    CHECK(draw.substr(0, draw.find("TestResult result;")).find("warn_dot") == std::string::npos &&
+          required_row.find("warn_dot") == std::string::npos);
+    CHECK(required_row.find("ui.theme().accent") != std::string::npos);
+    CHECK(draw.find("ui.ButtonRow(\"Connection test\", kTestHelp, button)") != std::string::npos);
+    CHECK(launcher.find("kConnectionTestRequired") != std::string::npos);
 }
 
 // The launcher's lobby link through a running development lobby (DCP_TEST_LOBBY): presence while a launcher is open,
@@ -1931,6 +2117,18 @@ void TestGameProcess() {
     CHECK(started != std::string::npos && started > launcher_run && started < gpu);
     CHECK(loader.find("runtime_log_release()", started) < loader.find("dcp_resume_game_process()", started));
     CHECK(loader.find("exit(0)", started) < gpu);
+    dcp_startup_phase("test phase");
+    CHECK(std::string(dcp_startup_phase_current()) == "test phase");
+    size_t phase_at = 0;
+    for (const char* phase : {"launcher handoff", "launcher returned", "runtime initialization", "imports resolved", "patches installed",
+                              "guest image mapped", "linked modules initialization", "guest entry"}) {
+        const size_t found = loader.find(std::string("dcp_startup_phase(\"") + phase + "\")");
+        CHECK(found != std::string::npos && found > phase_at);
+        phase_at = found;
+    }
+    CHECK(launcher_run > loader.find("dcp_startup_phase(\"launcher handoff\")"));
+    // Startup logs stay quiet: the phase is only stored for the crash report.
+    CHECK(ReadAll(source / "launcher" / "startup_phase.cpp").find("printf") == std::string::npos);
     // Linux keeps the game in the launcher's process.
     CHECK(loader.find("int game_process=0;\n#ifdef _WIN32\n        game_process=1;\n#else") != std::string::npos);
     // Off returns to the loader exactly as before; only On reaches the game process, and a failure keeps the launcher.
@@ -2551,10 +2749,10 @@ void TestTrueUltrawide(const fs::path& base) {
         CHECK(dcp_pass_ortho_sites[i].value == expected_sites[i].value);
     }
     CHECK(kUs.true_ultrawide && kJp100.true_ultrawide && kJp102.true_ultrawide && kJp103.true_ultrawide);
-    CHECK(kCk100.true_ultrawide && !kCk.true_ultrawide && !kUs101.true_ultrawide);
-    CHECK(TrueUltrawideAvailable(nullptr) && TrueUltrawideAvailable(&kUs) && !TrueUltrawideAvailable(&kCk));
+    CHECK(kCk100.true_ultrawide && kCk.true_ultrawide && kUs101.true_ultrawide);
+    CHECK(TrueUltrawideAvailable(nullptr) && TrueUltrawideAvailable(&kUs) && TrueUltrawideAvailable(&kCk));
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(!build.true_ultrawide || !build.resolution_sites.empty());
+        CHECK(!build.true_ultrawide || !build.resolution_sites.empty() || build.features_by_signature);
         for (const DcpResolutionSite& resolution : build.resolution_sites) {
             for (const DcpOrthoSite& site : dcp_pass_ortho_sites) {
                 CHECK(site.offset + 8 <= resolution.offset || resolution.offset + resolution.opcode_length + 4u <= site.offset);
@@ -3587,6 +3785,62 @@ void TestControllerPrompts(const fs::path& base) {
         CHECK(SetPromptStyle(stale, kUs, PromptStyle::kPlayStation, {}).ok && ReadAll(stale / "DRACRO_US.CPK") == archive_bytes);
     }
 
+    // An update's archives are offered Xbox only while they hold every file the patch was made for; the base build keeps
+    // its partial behaviour. Patching the update never writes the base's archives it is linked to.
+    {
+        const fs::path base_game = base / "prompts_update_base", update_game = base / "prompts_update";
+        fs::remove_all(base_game);
+        fs::remove_all(update_game);
+        WriteAll(base_game / "DRACRO_US.CPK", original_us);
+        WriteAll(base_game / "DRACRO.CPK", original);
+        fs::create_directories(update_game);
+        std::error_code ec;
+        fs::create_hard_link(base_game / "DRACRO.CPK", update_game / "DRACRO.CPK", ec);
+        if (ec) {
+            fs::copy_file(base_game / "DRACRO.CPK", update_game / "DRACRO.CPK");
+        }
+        WriteAll(update_game / "DRACRO_US.CPK", original_us);
+        const BlockPatch parsed_patch = *ParseBlockPatch(Span(patch_bytes));
+        std::string why;
+        CHECK(BaseBuildOf(kUs101) == &kUs && PromptPatchFits(update_game, kUs101, parsed_patch, &why));
+        CHECK(XboxPromptsAvailable(update_game, kUs101, Span(patch_bytes)) && XboxPromptsAvailable(base_game, kUs, Span(patch_bytes)));
+        CHECK(SetPromptStyle(update_game, kUs101, PromptStyle::kXbox, Span(patch_bytes)).ok);
+        CHECK(InstalledPromptStyle(update_game, kUs101, Span(patch_bytes)) == PromptStyle::kXbox);
+        CHECK(XboxPromptsAvailable(update_game, kUs101, Span(patch_bytes)));
+        CHECK(ReadAll(base_game / "DRACRO.CPK") == original && ReadAll(base_game / "DRACRO_US.CPK") == original_us);
+        CHECK(fs::hard_link_count(update_game / "DRACRO.CPK") == 1 && fs::hard_link_count(base_game / "DRACRO.CPK") == 1);
+        CHECK(SetPromptStyle(update_game, kUs101, PromptStyle::kPlayStation, {}).ok);
+        CHECK(ReadAll(update_game / "DRACRO_US.CPK") == original_us && ReadAll(update_game / "DRACRO.CPK") == original);
+
+        // The update replaced one of the patch's files: nothing is offered or written, on any archive.
+        WriteAll(update_game / "DRACRO_US.CPK", BuildCpk({{"msgsheet/x.fms", fms, true}, {"stage/Interface.ftx", foreign, false},
+                                                          {"stage/Interface_US.ftx", iface_us, true}}, true));
+        const std::string foreign_us = ReadAll(update_game / "DRACRO_US.CPK");
+        CHECK(!PromptPatchFits(update_game, kUs101, parsed_patch, &why));
+        CHECK(why == "stage/Interface.ftx in DRACRO_US.CPK is not the file the patch was made for");
+        CHECK(!XboxPromptsAvailable(update_game, kUs101, Span(patch_bytes)));
+        const PromptsResult refused = SetPromptStyle(update_game, kUs101, PromptStyle::kXbox, Span(patch_bytes));
+        CHECK(!refused.ok && refused.detail == "Xbox prompts are not available for CUSA10454 1.01 USA");
+        CHECK(!SetGamePatches(update_game, kUs101, PromptStyle::kXbox, false, Span(patch_bytes), {}).ok);
+        CHECK(ReadAll(update_game / "DRACRO_US.CPK") == foreign_us && ReadAll(update_game / "DRACRO.CPK") == original);
+        CHECK(!fs::exists(UndoPath(update_game / "DRACRO_US.CPK")) && !fs::exists(UndoPath(update_game / "DRACRO.CPK")));
+
+        // A file the patch changes is missing from every archive.
+        WriteAll(update_game / "DRACRO_US.CPK", BuildCpk({{"msgsheet/x.fms", fms, true}, {"stage/Interface.ftx", iface, false}}, true));
+        CHECK(!PromptPatchFits(update_game, kUs101, parsed_patch, &why) && why == "stage/Interface_US.ftx is in none of the archives");
+
+        // An entry an earlier patch rewrote fits: the revert puts the original back before the patch is applied.
+        WriteAll(update_game / "DRACRO_US.CPK", original_us);
+        std::string older_us = iface_us;
+        older_us.replace(0x100, 16, 16, 'O');
+        CHECK(ApplyBlockPatch(update_game / "DRACRO_US.CPK", *ParseBlockPatch(Span(MakePatch({{"stage/Interface_US.ftx", {iface_us, older_us}}})))).ok);
+        CHECK(PromptPatchFits(update_game, kUs101, parsed_patch, &why));
+        CHECK(SetGamePatches(update_game, kUs101, PromptStyle::kXbox, false, Span(patch_bytes), {}).ok);
+        CHECK(InstalledPromptStyle(update_game, kUs101, Span(patch_bytes)) == PromptStyle::kXbox);
+        CHECK(SetGamePatches(update_game, kUs101, PromptStyle::kPlayStation, false, {}, {}).ok);
+        CHECK(ReadAll(update_game / "DRACRO_US.CPK") == original_us && ReadAll(base_game / "DRACRO.CPK") == original);
+    }
+
     // CRILAYLA: a corrupt block is an error, not a crash.
     {
         std::string block = CrilaylaLiterals(iface);
@@ -3715,6 +3969,23 @@ void TestInstalledTextLanguages(const fs::path& base) {
     CHECK(keys(&kUs101) == "russian=1 french=2 german=4 italian=5 spanish=3");
     WriteAll(ini, "text_language=german\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 4);
+
+    // The install log describes the slots with counts and checksums, never with text.
+    const auto contains = [](const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; };
+    const std::string described = DescribeLanguageResources(app0, &kUs101);
+    CHECK(described.starts_with("DRACRO_US.CPK: 22 entries") && contains(described, "; US 4 files, SystemMsg crc "));
+    CHECK(contains(described, "; FR 4 files, SystemMsg crc ") && contains(described, "; DE 4 files, SystemMsg crc "));
+    CHECK(contains(described, ", Russian; FR ") && described.ends_with("; offered Russian, French, German, Italian, Spanish"));
+    CHECK(!contains(described, "Новая") && DescribeLanguageResources(app0, &kUs101) == described);
+    WriteAll(regional, LanguageArchive({us}));
+    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English") &&
+          DescribeLanguageResources(app0, &kUs101).find("Russian,") == std::string::npos);
+    WriteAll(regional, "not an archive");
+    CHECK(DescribeLanguageResources(app0, &kUs101) == "DRACRO_US.CPK unreadable");
+    fs::remove(regional);
+    CHECK(DescribeLanguageResources(app0, &kUs101) == "DRACRO_US.CPK absent");
+    CHECK(DescribeLanguageResources(app0, &kJp103).empty() && DescribeLanguageResources(app0, nullptr).empty());
+    WriteAll(regional, LanguageArchive({Slot("US", russian), fr, de, it, es}));
 
     // A slot missing a file most slots have is not offered; a slot with nothing at all is not either.
     std::vector<Entry> french_without_menu = Slot("FR", english);
@@ -3845,6 +4116,391 @@ void TestTextLanguageSwitching(const fs::path& base) {
     fs::remove_all(root);
 }
 
+// An update's regional archive is laid over the base's: its entries outside the language slots win, and the base keeps
+// every language slot.
+size_t CpkCount(const fs::path& file) {
+    CpkArchive archive;
+    return archive.Open(file) ? archive.entries().size() : 0;
+}
+
+// Japanese NPC Voices on an update: the launcher offers them only when the finished game folder holds the sound table and
+// the Japanese voice banks, an update that replaces other entries of DRACRO.CPK keeps them, and the voices do not touch
+// the Menu & Subtitles language.
+void TestNpcVoiceResources(const fs::path& base) {
+    using namespace cpk_test;
+    using namespace language_test;
+    const fs::path root = base / "npc_voices";
+    fs::remove_all(root);
+    CHECK(NpcVoiceResourceNames().size() == 10);
+
+    std::vector<Entry> voices;
+    for (const std::string_view name : NpcVoiceResourceNames()) {
+        voices.push_back({std::string(name), "voice " + std::string(name), false});
+    }
+    std::vector<Entry> game = voices;
+    game.push_back({"stage/Menu.ftx", "menu base", false});
+    game.push_back({"snd/narration_gm20000.acb", "narration", false});
+    const auto sorted = [](std::vector<Entry> entries) {
+        std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+            std::string x = a.path, y = b.path;
+            for (char& c : x) c = char(std::tolower(static_cast<unsigned char>(c)));
+            for (char& c : y) c = char(std::tolower(static_cast<unsigned char>(c)));
+            const size_t sx = x.rfind('/'), sy = y.rfind('/');
+            return std::make_pair(x.substr(0, sx), x.substr(sx + 1)) < std::make_pair(y.substr(0, sy), y.substr(sy + 1));
+        });
+        return entries;
+    };
+    const std::string base_archive = BuildCpk(sorted(game), true);
+    const fs::path base_app0 = root / "base";
+    WriteAll(base_app0 / "DRACRO.CPK", base_archive);
+    CHECK(NpcVoiceResourcesPresent(base_app0) && dcp_npc_voice_resources(base_app0.string().c_str()) == 1);
+    CHECK(dcp_npc_voice_resources(nullptr) == 0 && !NpcVoiceResourcesPresent(root / "nowhere"));
+
+    // The game's own archive (read only), when a prepared US folder is there.
+    if (const fs::path real = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / "v1.03"; fs::exists(real / "DRACRO.CPK")) {
+        CHECK(NpcVoiceResourcesPresent(real));
+    }
+
+    // One bank missing, or the sound table, refuses; so does an archive that is not one.
+    for (const std::string_view missing : NpcVoiceResourceNames()) {
+        std::vector<Entry> without;
+        for (const Entry& entry : game) {
+            if (entry.path != missing) without.push_back(entry);
+        }
+        const fs::path app0 = root / ("without " + std::string(missing).substr(4));
+        WriteAll(app0 / "DRACRO.CPK", BuildCpk(sorted(without), true));
+        CHECK(!NpcVoiceResourcesPresent(app0));
+    }
+    WriteAll(root / "broken" / "DRACRO.CPK", "not an archive");
+    CHECK(!NpcVoiceResourcesPresent(root / "broken"));
+
+    // An update with a partial DRACRO.CPK is laid over the base's: the voices stay, and the update's own entries win.
+    const fs::path update = root / "update", staged = root / "staged";
+    WriteAll(update / "DRACRO.CPK", BuildCpk(sorted({{"stage/Menu.ftx", "menu update", false}, {"stage/New.ftx", "new", false}}), true));
+    WriteAll(update / "eboot.bin", "eboot 1.01");
+    CHECK(StageUpdate(base_app0, update, staged, &kUs101).ok());
+    CHECK(NpcVoiceResourcesPresent(staged));
+    CpkArchive composed;
+    CHECK(composed.Open(staged / "DRACRO.CPK"));
+    const CpkEntry* menu = composed.Find("stage/Menu.ftx");
+    CHECK(menu && Bytes(composed.Read(*menu)) == "menu update" && composed.Find("stage/New.ftx") != nullptr);
+    CHECK(ReadAll(base_app0 / "DRACRO.CPK") == base_archive && fs::hard_link_count(staged / "DRACRO.CPK") == 1);
+
+    // An update that replaces other sound entries leaves the banks it does not name.
+    const fs::path stripped = root / "stripped_update", stripped_staged = root / "stripped_staged";
+    std::vector<Entry> replacement = {{"stage/Menu.ftx", "menu update", false}};
+    for (const Entry& entry : game) {
+        if (std::string_view(entry.path).starts_with("snd/") && !std::string_view(entry.path).starts_with("snd/se_enemy")) replacement.push_back(entry);
+    }
+    WriteAll(stripped / "DRACRO.CPK", BuildCpk(sorted(replacement), true));
+    WriteAll(stripped / "eboot.bin", "eboot 1.01");
+    CHECK(StageUpdate(base_app0, stripped, stripped_staged, &kUs101).ok());
+    CHECK(NpcVoiceResourcesPresent(stripped_staged));
+
+    // The voices are not a language: the Menu & Subtitles list comes from the regional archive alone.
+    WriteAll(staged / "DRACRO_US.CPK", LanguageArchive({Slot("US", kEnglishSheet), Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
+                                                       Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet), Slot("UK", kEnglishSheet)}));
+    const std::vector<TextLanguage> with_voices = InstalledTextLanguages(staged, &kUs101);
+    fs::remove(staged / "DRACRO.CPK");
+    CHECK(!NpcVoiceResourcesPresent(staged));
+    CHECK(SameLanguages(with_voices, InstalledTextLanguages(staged, &kUs101)) && with_voices.size() == 5);
+}
+
+void TestKeepBaseLanguages(const fs::path& base) {
+    using namespace cpk_test;
+    using namespace language_test;
+    const fs::path root = base / "keep_languages";
+    fs::remove_all(root);
+    const auto order_key = [](const std::string& path) {
+        const size_t slash = path.rfind('/');
+        std::string dir = path.substr(0, slash), name = path.substr(slash + 1);
+        for (std::string* text : {&dir, &name}) {
+            for (char& c : *text) c = char(std::tolower(static_cast<unsigned char>(c)));
+        }
+        return std::make_pair(dir, name);
+    };
+    const auto sorted = [&](std::initializer_list<std::vector<Entry>> parts) {
+        std::vector<Entry> entries;
+        for (const std::vector<Entry>& part : parts) entries.insert(entries.end(), part.begin(), part.end());
+        std::sort(entries.begin(), entries.end(), [&](const Entry& a, const Entry& b) { return order_key(a.path) < order_key(b.path); });
+        return entries;
+    };
+    const auto data_of = [](const CpkArchive& archive, const std::string& path) {
+        const CpkEntry* entry = archive.Find(path);
+        return entry ? Bytes(archive.Read(*entry)) : std::string("<missing>");
+    };
+    const auto keys = [](const fs::path& app0, const GameBuild& build) {
+        std::string joined;
+        for (const TextLanguage& language : InstalledTextLanguages(app0, &build)) {
+            joined += (joined.empty() ? "" : " ") + std::string(language.key) + "=" + std::to_string(language.ps4_id);
+        }
+        return joined;
+    };
+    const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
+
+    std::vector<Entry> us = Slot("US", kEnglishSheet);
+    us.push_back({"msgsheet/StaffRollMsg_PS4_US.fms", "staff", false});
+    const std::vector<Entry> shared = {{"other/DraCro.otb", "tool", false},
+                                       {"other/US_manual_001.ftx", "manual english", false},
+                                       {"other/FR_manual_001.ftx", "manual french", false},
+                                       {"msgsheet/AbilityList_EU.fms", "eu", false},
+                                       {"stage/Interface.ftx", "interface base", false},
+                                       {"stage/Menu.ftx", "menu base", false}};
+    const std::string base_bytes = BuildCpk(sorted({shared, us, Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
+                                                    Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet), Slot("UK", kEnglishSheet)}),
+                                            true);
+    std::vector<Entry> russian_us = Slot("US", kRussianSheet), changed_fr = Slot("FR", Sheet("update french"));
+    for (std::vector<Entry>* slot : {&russian_us, &changed_fr}) {
+        for (Entry& entry : *slot) {
+            entry.data = entry.path.find("SystemMsg") == std::string::npos ? "update " + entry.data : entry.data;
+        }
+    }
+    const std::vector<Entry> update_only = {{"other/US_manual_001.ftx", "manual russian", false},
+                                            {"stage/Interface.ftx", "interface update", false},
+                                            {"stage/NewThing.ftx", "new thing", false},
+                                            {"other/Aaa.bin", "first", false}};
+    const std::string update_bytes = BuildCpk(sorted({update_only, russian_us, changed_fr}), true);
+
+    const fs::path base_app0 = root / "base", update_app0 = root / "update", merged_app0 = root / "merged";
+    WriteAll(base_app0 / "DRACRO_US.CPK", base_bytes);
+    WriteAll(update_app0 / "DRACRO_US.CPK", update_bytes);
+    const std::string base_hash = Sha256Hex(base_app0 / "DRACRO_US.CPK");
+
+    // The base alone and the update alone: the update's archive is what collapsed the list.
+    CHECK(keys(base_app0, kUs) == western && keys(base_app0, kUs101) == western);
+    CHECK(keys(update_app0, kUs101) == "russian=1 french=2");
+
+    CpkArchive base_archive;
+    CHECK(base_archive.Open(base_app0 / "DRACRO_US.CPK"));
+    const std::set<std::string> slots = LanguageSlotSuffixes(base_archive, &kUs101);
+    CHECK((slots == std::set<std::string>{"DE", "ES", "FR", "IT", "UK", "US"}));
+    for (const char* language_file : {"stage/Menu_FR.ftx", "other/DE_manual_001.ftx", "msgsheet/StaffRollMsg_PS4_US.fms"}) {
+        CHECK(InLanguageSlot(language_file, slots));
+    }
+    for (const char* shared_file : {"stage/Interface.ftx", "other/DraCro.otb", "msgsheet/AbilityList_EU.fms", "stage/R_bg32b_00.bsb"}) {
+        CHECK(!InLanguageSlot(shared_file, slots));
+    }
+    const auto keep = [&](std::string_view path) { return InLanguageSlot(path, slots); };
+
+    // The composed archive: the base's language slots whatever the update holds there, the update's other entries.
+    const OverlayResult overlaid = OverlayArchive(base_app0 / "DRACRO_US.CPK", update_app0 / "DRACRO_US.CPK", keep,
+                                                  merged_app0 / "DRACRO_US.CPK");
+    CHECK(overlaid.ok && overlaid.wrote && overlaid.replaced == 1 && overlaid.added == 2 && overlaid.kept == 9);
+    CpkArchive merged;
+    CHECK(merged.Open(merged_app0 / "DRACRO_US.CPK"));
+    CHECK(merged.entries().size() == base_archive.entries().size() + 2);
+    for (const CpkEntry& entry : base_archive.entries()) {
+        if (InLanguageSlot(entry.path, slots)) {
+            CHECK(data_of(merged, entry.path) == data_of(base_archive, entry.path));
+        }
+    }
+    CHECK(data_of(merged, "msgsheet/SystemMsg_US.fms") == kEnglishSheet);  // not the update's Russian
+    CHECK(data_of(merged, "msgsheet/SystemMsg_FR.fms") == kEnglishSheet);  // nor its French
+    CHECK(data_of(merged, "other/US_manual_001.ftx") == "manual english");
+    CHECK(data_of(merged, "stage/Menu_US.ftx") == "menu US" && data_of(merged, "stage/Menu_FR.ftx") == "menu FR");
+    CHECK(data_of(merged, "stage/Interface.ftx") == "interface update");    // update wins outside the slots
+    CHECK(data_of(merged, "stage/NewThing.ftx") == "new thing" && data_of(merged, "other/Aaa.bin") == "first");
+    CHECK(data_of(merged, "stage/Menu.ftx") == "menu base" && data_of(merged, "other/DraCro.otb") == "tool");
+    for (size_t i = 0; i < merged.entries().size(); ++i) {
+        CHECK(merged.entries()[i].id == i);
+        CHECK(i == 0 || order_key(merged.entries()[i - 1].path) < order_key(merged.entries()[i].path));
+    }
+    CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == western);
+    CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash);
+
+    // A partial update with only a Russian US slot and one replaced file.
+    const std::string partial = BuildCpk(sorted({russian_us, {{"stage/Interface.ftx", "interface partial", false}}}), true);
+    WriteAll(update_app0 / "partial" / "DRACRO_US.CPK", partial);
+    const OverlayResult one_slot = OverlayArchive(base_app0 / "DRACRO_US.CPK", update_app0 / "partial" / "DRACRO_US.CPK", keep,
+                                                  root / "one_slot" / "DRACRO_US.CPK");
+    CHECK(one_slot.ok && one_slot.replaced == 1 && one_slot.added == 0 && one_slot.kept == 4);
+    CHECK(keys(root / "one_slot", kUs101) == western);
+    CpkArchive one_slot_archive;
+    CHECK(one_slot_archive.Open(root / "one_slot" / "DRACRO_US.CPK") && one_slot_archive.entries().size() == base_archive.entries().size());
+    CHECK(data_of(one_slot_archive, "stage/Interface.ftx") == "interface partial");
+
+    // An update that holds only language slots changes nothing and writes nothing.
+    WriteAll(update_app0 / "slots" / "DRACRO_US.CPK", BuildCpk(sorted({russian_us, changed_fr}), true));
+    const OverlayResult only_slots = OverlayArchive(base_app0 / "DRACRO_US.CPK", update_app0 / "slots" / "DRACRO_US.CPK", keep,
+                                                    root / "only_slots" / "DRACRO_US.CPK");
+    CHECK(only_slots.ok && !only_slots.wrote && !fs::exists(root / "only_slots" / "DRACRO_US.CPK"));
+
+    // New entries that outgrow the table's place (the fixture's table has 10 KB, a filler-heavy base leaves little of it)
+    // move the table to the end, and the archive still reads.
+    std::vector<Entry> filler, many;
+    for (int i = 0; i < 100; ++i) {
+        filler.push_back({"other/filler_" + std::to_string(1000 + i) + ".bin", "filler", false});
+    }
+    for (int i = 0; i < 120; ++i) {
+        many.push_back({"stage/extra_" + std::to_string(1000 + i) + ".ftx", "extra " + std::to_string(i), false});
+    }
+    const std::string big_bytes = BuildCpk(sorted({shared, us, Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
+                                                   Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet), Slot("UK", kEnglishSheet), filler}),
+                                           true);
+    WriteAll(root / "big" / "DRACRO_US.CPK", big_bytes);
+    WriteAll(update_app0 / "many" / "DRACRO_US.CPK", BuildCpk(sorted({many, russian_us}), true));
+    const OverlayResult grown = OverlayArchive(root / "big" / "DRACRO_US.CPK", update_app0 / "many" / "DRACRO_US.CPK", keep,
+                                               root / "grown" / "DRACRO_US.CPK");
+    CHECK(grown.ok && grown.added == 120 && grown.kept == 4);
+    CpkArchive big_archive, grown_archive;
+    CHECK(big_archive.Open(root / "big" / "DRACRO_US.CPK") && big_archive.toc_offset() == 0x800);
+    CHECK(grown_archive.Open(root / "grown" / "DRACRO_US.CPK") && grown_archive.toc_offset() > big_bytes.size());
+    CHECK(grown_archive.entries().size() == big_archive.entries().size() + 120);
+    CHECK(data_of(grown_archive, "stage/extra_1000.ftx") == "extra 0" && data_of(grown_archive, "stage/extra_1119.ftx") == "extra 119");
+    CHECK(data_of(grown_archive, "msgsheet/SystemMsg_US.fms") == kEnglishSheet && data_of(grown_archive, "stage/Interface.ftx") == "interface base");
+    CHECK(data_of(grown_archive, "other/filler_1050.bin") == "filler");
+    CHECK(keys(root / "grown", kUs101) == western);
+
+    // The install step: the staged game gets the composed archive, the installed base is only read.
+    const fs::path update_dir = root / "install_update", staged = root / "install_staged";
+    const auto write_update = [&](const std::string& archive) {
+        WriteAll(update_dir / "DRACRO_US.CPK", archive);
+        WriteAll(update_dir / "eboot.bin", "eboot 1.01");
+    };
+    WriteAll(base_app0 / "eboot.bin", "eboot 1.00");
+    write_update(update_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, staged, &kUs101).ok());
+    CHECK(keys(staged, kUs101) == western && ReadAll(staged / "eboot.bin") == "eboot 1.01");
+    CHECK(!fs::exists(update_dir / "DRACRO_US.CPK") && !fs::exists(staged / "DRACRO_US.CPK.compose"));
+    CpkArchive staged_archive;
+    CHECK(staged_archive.Open(staged / "DRACRO_US.CPK") && data_of(staged_archive, "stage/Interface.ftx") == "interface update");
+    CHECK(data_of(staged_archive, "msgsheet/SystemMsg_US.fms") == kEnglishSheet);
+    CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash && fs::hard_link_count(base_app0 / "DRACRO_US.CPK") == 1);
+    CHECK(ReadAll(base_app0 / "DRACRO_US.CPK") == base_bytes);
+
+    // Another build's partial update is laid over the base's archive with every entry of its own, language slots too,
+    // and the base's other entries stay; a complete one replaces the archive as a whole.
+    const fs::path partial_staged = root / "install_partial";
+    write_update(update_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, partial_staged).ok() && !fs::exists(update_dir / "DRACRO_US.CPK"));
+    CpkArchive partial_archive;
+    CHECK(partial_archive.Open(partial_staged / "DRACRO_US.CPK"));
+    CHECK(partial_archive.entries().size() == base_archive.entries().size() + 2);
+    CHECK(data_of(partial_archive, "msgsheet/SystemMsg_US.fms") == kRussianSheet);
+    CHECK(data_of(partial_archive, "stage/Interface.ftx") == "interface update");
+    CHECK(data_of(partial_archive, "msgsheet/SystemMsg_DE.fms") == kEnglishSheet);
+    CHECK(data_of(partial_archive, "stage/Menu.ftx") == "menu base" && data_of(partial_archive, "stage/NewThing.ftx") == "new thing");
+    CHECK(fs::hard_link_count(partial_staged / "DRACRO_US.CPK") == 1 && Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash);
+    std::vector<Entry> every;
+    for (const CpkEntry& entry : base_archive.entries()) {
+        every.push_back({entry.path, "complete " + data_of(base_archive, entry.path), false});
+    }
+    const std::string complete_bytes = BuildCpk(sorted({every}), true);
+    const fs::path whole = root / "install_whole";
+    write_update(complete_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, whole).ok() && ReadAll(whole / "DRACRO_US.CPK") == complete_bytes);
+    CHECK(ReadAll(base_app0 / "DRACRO_US.CPK") == base_bytes);
+    // An archive the base does not have is placed as it is; one the reader cannot open over a readable base fails the
+    // step and writes nothing.
+    const fs::path placed = root / "install_placed";
+    write_update(update_bytes);
+    WriteAll(update_dir / "DRACRO_PATCH_JP.CPK", update_bytes);
+    CHECK(StageUpdate(base_app0, update_dir, placed).ok() && ReadAll(placed / "DRACRO_PATCH_JP.CPK") == update_bytes);
+    WriteAll(base_app0 / "OTHER.CPK", base_bytes);
+    for (const std::string& broken : {std::string("not an archive"), update_bytes.substr(0, 0x3000 + 10)}) {
+        const fs::path refused = root / "install_refused";
+        fs::remove_all(refused);
+        write_update(update_bytes);
+        WriteAll(update_dir / "OTHER.CPK", broken);
+        const InstallResult result = StageUpdate(base_app0, update_dir, refused);
+        CHECK(!result.ok() && result.status == InstallStatus::kReadFailed);
+        CHECK(ReadAll(base_app0 / "OTHER.CPK") == base_bytes);
+    }
+    fs::remove(base_app0 / "OTHER.CPK");
+
+    // Asia and Hong Kong 1.02: no special rule, so a partial regional archive is the base's with the update laid over it
+    // and the final language set is the base's.
+    {
+        const std::string traditional = Sheet("New Game Continue Options Quit ##(TOUCH) @#(34)");
+        const std::vector<Entry> ct = Slot("CT", traditional), kr = Slot("KR", traditional);
+        const std::string ck_base = BuildCpk(sorted({shared, ct, kr}), true);
+        const fs::path ck_root = root / "hk", ck_base_app0 = ck_root / "base", ck_update = ck_root / "update";
+        fs::remove_all(ck_root);
+        WriteAll(ck_base_app0 / "DRACRO_CK.CPK", ck_base);
+        WriteAll(ck_base_app0 / "eboot.bin", "eboot 1.00");
+        const std::string ck_hash = Sha256Hex(ck_base_app0 / "DRACRO_CK.CPK");
+        WriteAll(ck_update / "DRACRO_CK.CPK", BuildCpk(sorted({{{"stage/Interface.ftx", "interface hk update", false}}, {{"stage/NewThing.ftx", "new hk", false}}}), true));
+        WriteAll(ck_update / "eboot.bin", "eboot 1.02");
+        const std::string hk_keys = "traditional_chinese=10 korean=9";
+        CHECK(keys(ck_base_app0, kCk100) == hk_keys);
+        const fs::path ck_staged = ck_root / "staged";
+        CHECK(StageUpdate(ck_base_app0, ck_update, ck_staged).ok());
+        CpkArchive ck_archive;
+        CHECK(ck_archive.Open(ck_staged / "DRACRO_CK.CPK") && ck_archive.entries().size() == CpkCount(ck_base_app0 / "DRACRO_CK.CPK") + 1);
+        CHECK(data_of(ck_archive, "stage/Interface.ftx") == "interface hk update" && data_of(ck_archive, "stage/NewThing.ftx") == "new hk");
+        CHECK(data_of(ck_archive, "stage/Menu_CT.ftx") == "menu CT" && data_of(ck_archive, "stage/Menu_KR.ftx") == "menu KR");
+        CHECK(data_of(ck_archive, "stage/Menu.ftx") == "menu base" && data_of(ck_archive, "other/DraCro.otb") == "tool");
+        CHECK(keys(ck_staged, kCk) == hk_keys && SameLanguages(InstalledTextLanguages(ck_staged, &kCk), TextLanguagesOf(&kCk)));
+        CHECK(Sha256Hex(ck_base_app0 / "DRACRO_CK.CPK") == ck_hash && fs::hard_link_count(ck_base_app0 / "DRACRO_CK.CPK") == 1);
+        CHECK(fs::hard_link_count(ck_staged / "DRACRO_CK.CPK") == 1 && !fs::exists(ck_update / "DRACRO_CK.CPK"));
+        CHECK(!fs::exists(ck_staged / "DRACRO_CK.CPK.compose"));
+    }
+
+    // An update with language slots only leaves the base's archive in the staged game as it is.
+    const fs::path slots_only = root / "install_slots";
+    write_update(BuildCpk(sorted({russian_us, changed_fr}), true));
+    CHECK(StageUpdate(base_app0, update_dir, slots_only, &kUs101).ok() && ReadAll(slots_only / "DRACRO_US.CPK") == base_bytes);
+
+    // A damaged update archive fails the install step and leaves the base alone.
+    for (const std::string& broken : {std::string("not an archive"), update_bytes.substr(0, 0x3000 + 10)}) {
+        const fs::path failed = root / "install_failed";
+        fs::remove_all(failed);
+        write_update(broken);
+        const InstallResult result = StageUpdate(base_app0, update_dir, failed, &kUs101);
+        CHECK(!result.ok() && result.status == InstallStatus::kReadFailed && !result.detail.empty());
+        CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash && !fs::exists(failed / "DRACRO_US.CPK.compose"));
+    }
+
+    // A saved language survives the update.
+    const fs::path ini = root / "dcp.ini";
+    for (const char* kept : {"french", "spanish", "english", "german", "italian"}) {
+        WriteAll(ini, std::string("text_language=") + kept + "\n");
+        LauncherSettings settings(ini);
+        CHECK(!NormalizeTextLanguage(settings, InstalledTextLanguages(staged, &kUs101)));
+        CHECK(settings.Get(kTextLanguageKey) == kept);
+    }
+
+    // The game's own archive, when a folder holding it is named: read only, the language slots are recognised, and an
+    // update composed over it keeps them.
+    if (const char* real = std::getenv("DCP_TEST_REAL_ARCHIVE")) {
+        const fs::path real_app0 = PathFromUtf8(real), real_cpk = real_app0 / "DRACRO_US.CPK";
+        const std::string real_hash = Sha256Hex(real_cpk);
+        CpkArchive real_archive;
+        CHECK(real_archive.Open(real_cpk));
+        const std::set<std::string> real_slots = LanguageSlotSuffixes(real_archive, &kUs101);
+        CHECK((real_slots == std::set<std::string>{"DE", "ES", "FR", "IT", "UK", "US"}));
+        CHECK(keys(real_app0, kUs) == western && keys(real_app0, kUs101) == western);
+        const auto real_keep = [&](std::string_view path) { return InLanguageSlot(path, real_slots); };
+        std::vector<Entry> real_update = {{"stage/Interface.ftx", "interface update", false},
+                                          {"stage/Menu_US.ftx", "menu us update", false},
+                                          {"other/US_manual_001.ftx", "manual update", false},
+                                          {"stage/zz_new.ftx", "new", false},
+                                          {"other/AAA.bin", "new first", false}};
+        for (const bool grow : {false, true}) {
+            for (int i = 0; grow && i < 60; ++i) {
+                char name[48];
+                std::snprintf(name, sizeof(name), "stage/extra_%02d.ftx", i);
+                real_update.push_back({name, "extra", false});
+            }
+            const fs::path out_app0 = root / (grow ? "real_grown" : "real_merged");
+            WriteAll(root / "real_update" / "DRACRO_US.CPK", BuildCpk(sorted({real_update}), true));
+            const OverlayResult real_result =
+                OverlayArchive(real_cpk, root / "real_update" / "DRACRO_US.CPK", real_keep, out_app0 / "DRACRO_US.CPK");
+            CHECK(real_result.ok && real_result.wrote && real_result.replaced == 1 && real_result.kept == 2 &&
+                  real_result.added == (grow ? 62u : 2u));
+            CpkArchive out_archive;
+            CHECK(out_archive.Open(out_app0 / "DRACRO_US.CPK") &&
+                  out_archive.entries().size() == real_archive.entries().size() + real_result.added);
+            CHECK(data_of(out_archive, "stage/Interface.ftx") == "interface update" && data_of(out_archive, "stage/zz_new.ftx") == "new");
+            CHECK(data_of(out_archive, "stage/Menu_US.ftx") == data_of(real_archive, "stage/Menu_US.ftx"));
+            CHECK(keys(out_app0, kUs101) == western);
+            fs::remove_all(out_app0);
+        }
+        CHECK(Sha256Hex(real_cpk) == real_hash);
+    }
+    fs::remove_all(root);
+}
+
 void TestFileBrowser(const fs::path& base) {
     const fs::path root = base / "browser";
     fs::create_directories(root / "Zeta");
@@ -3945,8 +4601,10 @@ void TestLayers(const fs::path& base) {
     CHECK(std::string(kJp100.eboot_sha256) == "e838e5c551f4ea2d13a13246dcd5474a888c56aa8abf5110f1219c0ceb0ae05f");
     CHECK(std::string(kJp102.eboot_sha256) == "e512685aef4fa1e50eafec8c9699b611992356cbae84e9b0147febceb49843fe");
     CHECK(std::string(kJp103.eboot_sha256) == "dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64");
-    CHECK(!kJp100.cheats && !kJp100.xbox_prompts && !kJp102.cheats && !kJp102.xbox_prompts && !kJp103.cheats &&
-          !kJp103.xbox_prompts);
+    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
+        CHECK(japan->cheats && japan->xbox_prompts && japan->true_ultrawide && japan->features_by_signature);
+        CHECK(!japan->japanese_npc_voices && CheatsAvailable(japan));
+    }
     CheckSites(kJp100);
     CheckSites(kJp102);
     CheckSites(kJp103);
@@ -4134,12 +4792,40 @@ void TestLayers(const fs::path& base) {
         CHECK(merged.State() == GameFileState::kDifferentVersion);
     }
     {
-        const fs::path prompts = root / "jp-prompts";
-        WriteAll(prompts / "DRACRO_PATCH_JP.CPK", "jp archive");
-        WriteAll(prompts / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(prompts, kJp103).empty() && InstalledPromptStyle(prompts, kJp103, {}) == PromptStyle::kPlayStation);
-        CHECK(!SetPromptStyle(prompts, kJp103, PromptStyle::kXbox, {}).ok);
-        CHECK(ReadAll(prompts / "DRACRO_PATCH_JP.CPK") == "jp archive" && ReadAll(prompts / "DRACRO.CPK") == "shared archive");
+        // The Japanese button atlas is DRACRO.CPK's alone: the update's archive is left as it is, and the base's copy
+        // behind the hard link is never written.
+        using namespace cpk_test;
+        const fs::path base_game = root / "jp-prompts-base", prompts = root / "jp-prompts";
+        std::string atlas(8192, '\0');
+        for (size_t i = 0; i < atlas.size(); ++i) atlas[i] = char((i * 5 + i / 16) & 255);
+        std::string xbox = atlas;
+        xbox.replace(0x200, 16, 16, 'X');
+        const std::string patch = MakePatch({{"stage/Interface.ftx", {atlas, xbox}}, {"stage/Interface_US.ftx", {atlas, xbox}}});
+        const std::string shared = BuildCpk({{"stage/Interface.ftx", atlas, true}, {"msgsheet/SystemMsg.fms", "FMSB", false}}, false);
+        const std::string update = BuildCpk({{"msgsheet/Other.fms", "FMSB", false}}, false);
+        WriteAll(base_game / "DRACRO.CPK", shared);
+        fs::create_directories(prompts);
+        std::error_code ec;
+        fs::create_hard_link(base_game / "DRACRO.CPK", prompts / "DRACRO.CPK", ec);
+        if (ec) {
+            fs::copy_file(base_game / "DRACRO.CPK", prompts / "DRACRO.CPK");
+        }
+        WriteAll(prompts / "DRACRO_PATCH_JP.CPK", update);
+        CHECK(PromptArchives(prompts, kJp103) == std::vector<fs::path>{prompts / "DRACRO.CPK"});
+        CHECK(PromptArchives(base_game, kJp100) == std::vector<fs::path>{base_game / "DRACRO.CPK"});
+        CHECK(XboxPromptsAvailable(prompts, kJp103, Span(patch)) && XboxPromptsAvailable(base_game, kJp100, Span(patch)));
+        CHECK(SetPromptStyle(prompts, kJp103, PromptStyle::kXbox, Span(patch)).ok);
+        CHECK(InstalledPromptStyle(prompts, kJp103, Span(patch)) == PromptStyle::kXbox);
+        CHECK(ReadAll(base_game / "DRACRO.CPK") == shared && ReadAll(prompts / "DRACRO_PATCH_JP.CPK") == update);
+        CpkArchive patched;
+        CHECK(patched.Open(prompts / "DRACRO.CPK") && Bytes(patched.Read(*patched.Find("stage/Interface.ftx"))) == xbox);
+        CHECK(SetPromptStyle(prompts, kJp103, PromptStyle::kPlayStation, {}).ok && ReadAll(prompts / "DRACRO.CPK") == shared);
+
+        WriteAll(prompts / "DRACRO_PATCH_JP.CPK", BuildCpk({{"stage/Interface_JP.ftx", atlas, false}}, false));
+        std::string why;
+        CHECK(!PromptPatchFits(prompts, kJp103, *ParseBlockPatch(Span(patch)), &why));
+        CHECK(why == "stage/Interface_JP.ftx in DRACRO_PATCH_JP.CPK is not covered by the patch");
+        CHECK(!XboxPromptsAvailable(prompts, kJp103, Span(patch)));
     }
 }
 
@@ -4151,7 +4837,7 @@ void TestUsBuild() {
     CHECK(std::string(kUs.eboot_sha256) == "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a");
     CHECK(kUs.cheats && kUs.xbox_prompts && kUs.resolution_sites.size() == 23 && BaseBuildOf(kUs) == nullptr);
     CHECK(kUs.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs));
-    CHECK(!kUs101.japanese_npc_voices && !SupportsJapaneseNpcVoices(&kUs101));
+    CHECK(kUs101.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs101));
     CHECK(!SupportsJapaneseNpcVoices(nullptr));
 
     CHECK(std::string(kUs101.label) == "CUSA10454 1.01 USA" && std::string(kUs101.version) == "1.01");
@@ -4161,15 +4847,19 @@ void TestUsBuild() {
           std::string(FinishedLayer(kUs101).sfo_version) == "01.03");
     CHECK(std::string(kUs101.eboot_sha256) == "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0");
     CHECK(std::string(kUs101.eboot_sha256) != kUs.eboot_sha256);
-    CHECK(!kUs101.cheats && !kUs101.xbox_prompts && !kUs101.japanese_npc_voices && kUs101.resolution_sites.empty());
+    CHECK(kUs101.cheats && kUs101.xbox_prompts && kUs101.japanese_npc_voices && kUs101.resolution_sites.empty());
+    CHECK(kUs101.features_by_signature && !kUs.features_by_signature);
+    CHECK(kUs101.resolution_by_signature && !RestrictedToNativeResolution(&kUs101));
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(build.japanese_npc_voices == (&build == &kUs));
-        CHECK(SupportsJapaneseNpcVoices(&build) == (&build == &kUs));
+        CHECK(build.japanese_npc_voices == !NativeJapaneseNpcVoices(&build));
+        CHECK(SupportsJapaneseNpcVoices(&build) == build.japanese_npc_voices);
     }
     CHECK(BaseBuildOf(kUs101) == &kUs && BaseBuildOf(kUs) == nullptr);
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK((build.cheats || build.xbox_prompts) == (&build == &kUs));
+        CHECK(build.cheats && CheatsAvailable(&build) && build.xbox_prompts);
+        CHECK(build.features_by_signature == (&build != &kUs));
     }
+    CHECK(CheatsAvailable(nullptr));
 
     CHECK(CheckSfoIdentity(SfoFor(kUs, "01.00", "01.03")).build == &kUs);
     CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gd")).build == &kUs);
@@ -4310,12 +5000,13 @@ void TestActivation(const fs::path& base) {
     }
     CHECK(LastPreparedBuild(GameRoots{root / "none", root / "none-image"}, builds) == nullptr);
 
-    // Makes builds[active] the newest prepared build; the others are older.
+    // Makes builds[active] the newest prepared build; the others are older. An activation stamps the current time, which
+    // must be newer than the marker it replaces whatever the file system's timestamp granularity.
     const auto make_active = [&](size_t active) {
         const auto now = fs::file_time_type::clock::now();
         for (size_t i = 0; i < builds.size(); ++i) {
             fs::last_write_time(BuildPaths(roots, builds[i]).app0 / kPreparedMarker,
-                                i == active ? now : now - std::chrono::hours(1));
+                                now - (i == active ? std::chrono::minutes(10) : std::chrono::hours(1)));
         }
     };
     const auto active = [&] { return CheckGameFiles(ActiveBuildPaths(roots, builds), builds); };
@@ -4470,7 +5161,9 @@ void TestSafeMode(const fs::path& base) {
     CHECK(!InstalledSafeMode(app0) && ReadAll(app0 / "DRACRO.CPK") == original);
 
     CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, true, {}, Span(safe)).ok && InstalledSafeMode(app0));
-    CHECK(!SetGamePatches(app0, kJp103, PromptStyle::kXbox, true, Span(xbox), Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(SetGamePatches(app0, kJp103, PromptStyle::kXbox, true, Span(xbox), Span(safe)).ok && InstalledSafeMode(app0));
+    CHECK(read("DRACRO.CPK", "stage/Interface.ftx") == want && read("DRACRO.CPK", kSpiderEntry) == want_spider);
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == original_us);
     CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, false, {}, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
 }
 
@@ -4482,7 +5175,7 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(FinishedLayer(kCk).app_ver) == "01.02" && std::string(FinishedLayer(kCk).sfo_version) == "01.00" && std::string(kCk.version) == "1.02");
     CHECK(std::string(kCk.eboot_sha256) == "927a3d0f73284b52e87e6f22dc4ecbea6350450182a94c1dc20d76907b086ac5");
     CHECK(std::string(kCk.regional_archive) == "DRACRO_CK.CPK" && std::string(kUs.regional_archive) == "DRACRO_US.CPK");
-    CHECK(!kCk.cheats && !kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
+    CHECK(kCk.cheats && kCk.xbox_prompts && kUs.cheats && kUs.xbox_prompts);
     // 1.00 and 1.02 are different executables: 1.00 has verified render resolution sites, 1.02 finds them by signature.
     CHECK(kUs.resolution_sites.size() == 23 && kCk.resolution_sites.empty());
     CHECK(kCk100.resolution_sites.size() == 23);
@@ -4496,7 +5189,7 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(FinishedLayer(kCk100).app_ver) == "01.00" && std::string(FinishedLayer(kCk100).sfo_version) == "01.02");
     CHECK(std::string(kCk100.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
     CHECK(std::string(kCk100.eboot_sha256) != kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
-    CHECK(!kCk100.cheats && !kCk100.xbox_prompts);
+    CHECK(kCk100.cheats && kCk100.xbox_prompts && kCk100.japanese_npc_voices && kCk100.features_by_signature);
     CHECK(std::string(kCk100.folder) != kCk.folder);
     CHECK(kCk100.layers.size() == 1 && BaseBuildOf(kCk) == &kCk100 && BaseBuildOf(kCk100) == nullptr);
     CHECK(kCk.layers.size() == 2 && kCk.layers[1].update);
@@ -4549,8 +5242,8 @@ void TestBuilds(const fs::path& base) {
     WriteAll(report_dir / "image.json", "{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"" + std::string(kCk.eboot_sha256) + "\",\n  \"app_ver\": \"01.02\"\n}");
     DcpGameBuild ck_game{};
     CHECK(dcp_game_build(report_dir.string().c_str(), &ck_game) == 1);
-    CHECK(ck_game.cheats == 0 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
-    CHECK(ck_game.true_ultrawide == 0);
+    CHECK(ck_game.cheats == 1 && ck_game.resolution_site_count == 0 && ck_game.resolution_sites == nullptr);
+    CHECK(ck_game.true_ultrawide == 1 && ck_game.features_by_signature == 1);
 
     {
         Fixture ck(base, "ck-valid", kCk);
@@ -4600,14 +5293,26 @@ void TestBuilds(const fs::path& base) {
     }
 
     {
+        // DRACRO_CK.CPK holds message sheets and no button atlas: only DRACRO.CPK takes the patch.
+        using namespace cpk_test;
         const fs::path app0 = base / "ck-prompts";
         fs::remove_all(app0);
-        WriteAll(app0 / "DRACRO_CK.CPK", "ck archive");
-        WriteAll(app0 / "DRACRO.CPK", "shared archive");
-        CHECK(PromptArchives(app0, kCk).empty() && InstalledPromptStyle(app0, kCk, {}) == PromptStyle::kPlayStation);
-        CHECK(!SetPromptStyle(app0, kCk, PromptStyle::kXbox, {}).ok);
+        std::string atlas(8192, '\0');
+        for (size_t i = 0; i < atlas.size(); ++i) atlas[i] = char((i * 3 + i / 32) & 255);
+        std::string xbox = atlas;
+        xbox.replace(0x400, 16, 16, 'X');
+        const std::string patch = MakePatch({{"stage/Interface.ftx", {atlas, xbox}}, {"stage/Interface_US.ftx", {atlas, xbox}}});
+        const std::string regional = BuildCpk({{"msgsheet/SystemMsg_CT.fms", "FMSB", false}, {"msgsheet/SystemMsg_KR.fms", "FMSB", true}}, true);
+        const std::string shared = BuildCpk({{"stage/Interface.ftx", atlas, true}}, false);
+        WriteAll(app0 / "DRACRO_CK.CPK", regional);
+        WriteAll(app0 / "DRACRO.CPK", shared);
+        CHECK(PromptArchives(app0, kCk) == std::vector<fs::path>{app0 / "DRACRO.CPK"});
+        std::string why;
+        CHECK(PromptPatchFits(app0, kCk, *ParseBlockPatch(Span(patch)), &why) && XboxPromptsAvailable(app0, kCk, Span(patch)));
+        CHECK(SetPromptStyle(app0, kCk, PromptStyle::kXbox, Span(patch)).ok);
+        CHECK(InstalledPromptStyle(app0, kCk, Span(patch)) == PromptStyle::kXbox && ReadAll(app0 / "DRACRO_CK.CPK") == regional);
         CHECK(SetPromptStyle(app0, kCk, PromptStyle::kPlayStation, {}).ok);
-        CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == "ck archive" && ReadAll(app0 / "DRACRO.CPK") == "shared archive");
+        CHECK(ReadAll(app0 / "DRACRO_CK.CPK") == regional && ReadAll(app0 / "DRACRO.CPK") == shared);
     }
 
     // CUSA10209 1.02 has no verified render resolution sites, so it can never receive the 1.00 table: its table is empty
@@ -4650,8 +5355,8 @@ void TestCusa10209Graphics(const fs::path& base) {
     CHECK(dcp_aspect_ratio(file.string().c_str(), dir102.string().c_str()) == 0);
 }
 
-// CUSA10454 1.01 has no verified render resolution sites, so only the native render resolution and 16:9 are effective;
-// CUSA10454 1.00 keeps the whole list.
+// CUSA10454 1.01 has no table of its own: it keeps the whole list and finds its sites by signature in its own image, so it
+// never receives the 1.00 table.
 void TestUs101Graphics(const fs::path& base) {
     const fs::path root = base / "cusa10454-graphics";
     fs::remove_all(root);
@@ -4663,14 +5368,15 @@ void TestUs101Graphics(const fs::path& base) {
                                         kUs101.eboot_sha256 + "\",\n  \"app_ver\": \"01.01\"\n}");
     CHECK(BuildOfImageDir(dir100.string().c_str()) == &kUs);
     CHECK(BuildOfImageDir(dir101.string().c_str()) == &kUs101);
-    CHECK(RestrictedToNativeResolution(&kUs101) && !RestrictedToNativeResolution(&kUs));
+    CHECK(!RestrictedToNativeResolution(&kUs101) && !RestrictedToNativeResolution(&kUs));
+    CHECK(kUs101.resolution_by_signature && !kUs.resolution_by_signature);
     CHECK(kUs101.resolution_sites.empty() && kUs.resolution_sites.size() == 23);
     CHECK(kUs101.resolution_sites.data() != kUs.resolution_sites.data());
 
     WriteAll(file, "render_resolution=4K\naspect_ratio=21:9\n");
-    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) == 0); // 1.01 falls back to native
-    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) == 0);      // and to 16:9
-    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0); // 1.00 keeps them
+    CHECK(dcp_render_resolution(file.string().c_str(), dir101.string().c_str()) != 0);
+    CHECK(dcp_aspect_ratio(file.string().c_str(), dir101.string().c_str()) != 0);
+    CHECK(dcp_render_resolution(file.string().c_str(), dir100.string().c_str()) != 0);
     CHECK(dcp_aspect_ratio(file.string().c_str(), dir100.string().c_str()) != 0);
 
     // 1.01 can never receive the 1.00 table: its own table is empty, and applying it writes nothing.
@@ -4730,8 +5436,8 @@ void Plant(std::vector<unsigned char>& image, size_t at, std::initializer_list<u
 
 void TestResolutionProbe() {
     CHECK(DCP_RESOLUTION_COUNT == 6);
-    CHECK(DCP_CUSA10209_102_SIGNATURE_COUNT == 23);
-    for (const DcpResolutionSignature& signature : dcp_cusa10209_102_signatures) {
+    CHECK(DCP_RENDER_SIZE_SIGNATURE_COUNT == 23);
+    for (const DcpResolutionSignature& signature : dcp_render_size_signatures) {
         CHECK(signature.length <= DCP_SIGNATURE_MAX);
         CHECK(signature.lead + signature.opcode_length + 4 <= signature.length);
         CHECK(signature.opcode_length == 1 || signature.opcode_length == 2);
@@ -4747,7 +5453,9 @@ void TestResolutionProbe() {
             CHECK(build.resolution_by_signature && build.resolution_sites.empty());
             CHECK(!RestrictedToNativeResolution(&build));
         } else if (!build.resolution_sites.empty()) {
-            CHECK(build.resolution_sites.size() == 23);
+            CHECK(build.resolution_sites.size() == 23 && !build.resolution_by_signature);
+        } else {
+            CHECK(&build == &kUs101 && build.resolution_by_signature);
         }
     }
 
@@ -4879,6 +5587,8 @@ int main(int argc, char** argv) {
     TestJapaneseNpcVoiceSetting(base);
     TestOnlineSettings(base);
     TestOnlinePage();
+    TestConnectionTestGate(base);
+    TestConnectionTestPanel(base);
     TestOverlayPanel();
     TestNoSettingsMenu();
     TestPingDisplay(base);
@@ -4902,6 +5612,8 @@ int main(int argc, char** argv) {
     TestControllerPrompts(base);
     TestInstalledTextLanguages(base);
     TestTextLanguageSwitching(base);
+    TestKeepBaseLanguages(base);
+    TestNpcVoiceResources(base);
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);

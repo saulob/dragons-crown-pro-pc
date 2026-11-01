@@ -40,8 +40,8 @@ PromptsResult SetGamePatches(const std::filesystem::path& app0, const GameBuild&
                              const PatchHooks& hooks) {
     PromptsResult result;
     const bool xbox = style == PromptStyle::kXbox;
-    if (xbox && !build.xbox_prompts) {
-        result.detail = std::string("Xbox prompts are not validated for ") + build.label;
+    if (xbox && !XboxPromptsAvailable(app0, build, xbox_patch)) {
+        result.detail = std::string("Xbox prompts are not available for ") + build.label;
         return result;
     }
     std::optional<BlockPatch> xbox_targets, spider_targets;

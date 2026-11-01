@@ -75,6 +75,14 @@ export class LocalConn {
     this.transport.send(text);
   }
 
+  sendBinary(bytes) {
+    this.transport.sendBinary(bytes);
+  }
+
+  get bufferedAmount() {
+    return this.transport.bufferedAmount ?? 0;
+  }
+
   close(code, reason) {
     this.transport.close(code, reason);
   }

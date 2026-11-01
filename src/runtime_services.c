@@ -6,6 +6,7 @@
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "startup_phase.h"
 #include "dcpgpu.h"
 #include "runtime_log.h"
 #include "trophies/trophy_runtime.h"
@@ -144,6 +145,7 @@ static ABI __attribute__((noreturn)) void load_exec(const char *path, char *cons
     (void)argv;
     char host[4096]="";
     if (path) runtime_file_translate(path,host,sizeof(host));
+    dcp_startup_phase("guest exit requested");
     printf("LoadExec: %s -> %s\n",path ? path : "(null)",host[0] ? host : "(no host file)");
     fflush(NULL);
     runtime_log_mark_clean_exit();

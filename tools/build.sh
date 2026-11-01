@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-amd-water-tests dcp-water-diag-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-rtc-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -103,6 +103,12 @@ loader=$build_dir/bin/dragons_crown_pro
 if ((test)); then
     step 'Running the launcher tests'
     "$build_dir/bin/dcp-launcher-tests"
+    step 'Running the unsupported-build diagnostics tests'
+    "$build_dir/bin/dcp-build-diagnostics-tests"
+    step 'Running the build feature parity tests (contract, update parity, mappings, unknown builds)'
+    "$build_dir/bin/dcp-build-parity-tests"
+    step 'Running the feature locator tests (Cheats, Japanese NPC Voices, True Ultrawide)'
+    "$build_dir/bin/dcp-feature-sites-tests"
     step 'Running the trophy tests'
     "$build_dir/bin/dcp-trophy-tests"
     step 'Running the cheat tests'
@@ -125,14 +131,20 @@ if ((test)); then
     "$build_dir/bin/dcp-present-tests"
     step 'Running the frame pacing tests (Frame rate setting, repeat cadence, limiter)'
     "$build_dir/bin/dcp-frame-pacing-tests"
+    step 'Running the Options menu tests (chord, close gate, live and restart settings, dcp.ini, Online Play lock)'
+    "$build_dir/bin/dcp-options-menu-tests"
     step 'Running the AMD water workaround tests (vendor defaults, no hotkey)'
     "$build_dir/bin/dcp-amd-water-tests"
     step 'Running the water diagnostics tests (AMD only, deduplication, cap)'
     "$build_dir/bin/dcp-water-diag-tests"
+    step 'Running the narrow water reader tests'
+    "$build_dir/bin/dcp-narrow-water-reader-tests"
     step 'Running the True Ultrawide hook tests'
     "$build_dir/bin/dcp-ultrawide-tests"
     step 'Running the True Ultrawide side area tests'
     "$build_dir/bin/dcp-ultrawide-sides-tests"
+    step 'Running the module history tests (crash report)'
+    "$build_dir/bin/dcp-module-history-tests"
     step 'Running the MOVBE, BMI1 and LZCNT tests'
     "$build_dir/bin/dcp-isa-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 0.9.0 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 0.9.1 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -49,7 +49,7 @@ target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
 # launcher, the runtime and tests/net_tests.cpp share it.
 add_library(dcp_net STATIC src/net/addr.cpp src/net/connection_test.cpp src/net/crypto.cpp src/net/identity.cpp
     src/net/json.cpp src/net/lobby_link.cpp src/net/online_config.cpp src/net/online_version.cpp src/net/peer_socket.cpp
-    src/net/stun.cpp src/net/upnp.cpp src/net/websocket.cpp
+    src/net/relay_frame.cpp src/net/stun.cpp src/net/upnp.cpp src/net/websocket.cpp
     $<IF:$<BOOL:${WIN32}>,src/net/websocket_win.cpp,src/net/websocket_posix.cpp>)
 target_include_directories(dcp_net PUBLIC src)
 target_compile_definitions(dcp_net PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
@@ -61,6 +61,11 @@ else()
     find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
     target_link_libraries(dcp_net PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 endif()
+
+# The stage the process is in, for the crash report: used by the launcher, the loader and the window thread.
+add_library(dcp_startup_phase STATIC src/startup_phase.c)
+target_include_directories(dcp_startup_phase PUBLIC src)
+target_compile_options(dcp_startup_phase PRIVATE -Wall -Wextra -Werror)
 
 add_subdirectory(gpu)
 add_subdirectory(launcher)
@@ -108,7 +113,7 @@ if (WIN32)
     # Relink when the application icon, the manifest or the version changes.
     set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
-    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/runtime_log.c src/dragons_crown_pro.rc)
+    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/module_history.c src/call_site.c src/runtime_log.c src/dragons_crown_pro.rc)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
@@ -162,7 +167,9 @@ target_compile_definitions(dcp-net-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_
 target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
 # The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
 # DCP_TEST_LOBBY names one. Not part of the default build.
-add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp)
+add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp
+    launcher/online_view.cpp)
+target_include_directories(dcp-online-hle-tests PRIVATE launcher)
 target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
 set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-online-hle-tests PRIVATE -Wall -Wextra)
@@ -180,6 +187,12 @@ add_executable(dcp-isa-tests EXCLUDE_FROM_ALL tests/isa_tests.c src/isa_emulate.
 target_include_directories(dcp-isa-tests PRIVATE src)
 target_compile_definitions(dcp-isa-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-isa-tests PRIVATE -Wall -Wextra -Werror)
+
+# The pure parts of the crash report: module history, call site decoding, fault ownership and the startup phase
+# (tools/test.ps1); not part of the default build.
+add_executable(dcp-module-history-tests EXCLUDE_FROM_ALL tests/module_history_tests.c src/module_history.c src/call_site.c src/startup_phase.c)
+target_include_directories(dcp-module-history-tests PRIVATE src)
+target_compile_options(dcp-module-history-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
 # (tools/test.ps1); not part of the default build.
@@ -242,6 +255,35 @@ else()
                           Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
+# Feature parity between each supported base build and its updates: the capability matrix, unknown builds, launcher and
+# loader agreement, and patch ranges and signature searches on the local boot images (tools/test.ps1); not part of the
+# default build.
+add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
+    src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c
+    src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c)
+set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-build-parity-tests PRIVATE src launcher)
+target_compile_definitions(dcp-build-parity-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-build-parity-tests PRIVATE -Wall -Wextra)
+target_link_libraries(dcp-build-parity-tests PRIVATE dcp_launcher_core)
+if(NOT WIN32)
+    target_link_libraries(dcp-build-parity-tests PRIVATE m)
+endif()
+
+# The structural locators for Cheats, Japanese NPC Voices and True Ultrawide: the local boot images against the static
+# tables, synthetic images with every refusal case, and the known-build-only rule (tools/test.ps1); not part of the
+# default build.
+add_executable(dcp-feature-sites-tests EXCLUDE_FROM_ALL tests/feature_sites_tests.cpp src/cheat_hooks.cpp
+    src/runtime_cheats.cpp src/guest_hook.c src/ultrawide_hooks.c src/voice_hooks.c)
+set_target_properties(dcp-feature-sites-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-feature-sites-tests PRIVATE src launcher)
+target_compile_definitions(dcp-feature-sites-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-feature-sites-tests PRIVATE -Wall -Wextra)
+target_link_libraries(dcp-feature-sites-tests PRIVATE dcp_launcher_core)
+if(NOT WIN32)
+    target_link_libraries(dcp-feature-sites-tests PRIVATE m)
+endif()
+
 # Focused tests of the GPU tiling parameters and macro-tiled addresses against the game's own tiler (tools/test.ps1);
 # not part of the default build.
 add_executable(dcp-tiling-tests EXCLUDE_FROM_ALL tests/tiling_tests.cpp)
@@ -250,6 +292,13 @@ target_include_directories(dcp-tiling-tests PRIVATE gpu/shim gpu/shadps4 tests s
     gpu/third_party/gcn/include gpu/third_party/half/include gpu/third_party/xbyak)
 target_compile_options(dcp-tiling-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-tiling-tests PRIVATE dcpgpu)
+
+# Focused tests of the narrower-than-16:9 water reader skip (tools/test.ps1); not part of the default build.
+add_executable(dcp-narrow-water-reader-tests EXCLUDE_FROM_ALL tests/narrow_water_reader_tests.cpp)
+set_target_properties(dcp-narrow-water-reader-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-narrow-water-reader-tests PRIVATE gpu/shim)
+target_compile_definitions(dcp-narrow-water-reader-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-narrow-water-reader-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the game window's cursor visibility (tools/test.ps1); not part of the default build.
 add_executable(dcp-cursor-tests EXCLUDE_FROM_ALL tests/cursor_tests.cpp)
@@ -291,6 +340,17 @@ set_target_properties(dcp-frame-pacing-tests PROPERTIES CXX_STANDARD 20 CXX_STAN
 target_include_directories(dcp-frame-pacing-tests PRIVATE gpu/shim)
 target_compile_definitions(dcp-frame-pacing-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-frame-pacing-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the Options menu (F1, L3 + R3): the chord, the close gate, which settings apply live or after a
+# restart, what is saved to dcp.ini and the Online Play lock on its Cheats page (tools/test.ps1); not part of the
+# default build.
+add_executable(dcp-options-menu-tests EXCLUDE_FROM_ALL tests/options_menu_tests.cpp gpu/shim/dcp_settings.cpp
+    src/runtime_cheats.cpp launcher/game_profile.cpp launcher/online_view.cpp)
+set_target_properties(dcp-options-menu-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-options-menu-tests PRIVATE gpu/shim src launcher)
+target_link_libraries(dcp-options-menu-tests PRIVATE dcp_keys dcp_net)
+target_compile_definitions(dcp-options-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-options-menu-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the Japanese NPC voice routing (tools/test.ps1); not part of the default build.
 add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)

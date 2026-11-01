@@ -925,6 +925,40 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
     DrawRecord(pipeline, used_prepared, is_indexed, index_offset);
 }
 
+bool Rasterizer::SkipsNarrowWaterReader(const GraphicsPipeline* pipeline) {
+    const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    if (!ps || ps->pgm_hash != DcpNarrowWaterReader::kPixelShader || push_data.scene_size != 0 ||
+        !(pipeline->GetGraphicsKey().mrt_mask & 1) || !cb_descs[0].first) {
+        return false;
+    }
+    const auto& regs = Regs();
+    const auto& target = texture_cache.GetImage(cb_descs[0].first).info;
+    const bool offset = !regs.window_scissor.window_offset_disable;
+    const s32 ox = offset ? regs.window_offset.window_x_offset : 0;
+    const s32 oy = offset ? regs.window_offset.window_y_offset : 0;
+    const s32 x0 = std::max({s32(regs.screen_scissor.top_left_x), s32(regs.window_scissor.top_left_x) + ox,
+                             s32(regs.generic_scissor.top_left_x) + ox});
+    const s32 y0 = std::max({s32(regs.screen_scissor.top_left_y), s32(regs.window_scissor.top_left_y) + oy,
+                             s32(regs.generic_scissor.top_left_y) + oy});
+    const s32 x1 = std::min({s32(regs.screen_scissor.bottom_right_x), s32(regs.window_scissor.bottom_right_x) + ox,
+                             s32(regs.generic_scissor.bottom_right_x) + ox});
+    const s32 y1 = std::min({s32(regs.screen_scissor.bottom_right_y), s32(regs.window_scissor.bottom_right_y) + oy,
+                             s32(regs.generic_scissor.bottom_right_y) + oy});
+    DcpNarrowWaterReader::Draw draw;
+    draw.ps = ps->pgm_hash;
+    draw.vs = pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash;
+    draw.format = u32(target.pixel_format);
+    draw.width = int(target.size.width);
+    draw.height = int(target.size.height);
+    draw.partial = x1 > x0 && y1 > y0 && (x1 - x0 < draw.width || y1 - y0 < draw.height);
+    draw.depth = bool(db_desc.first);
+    for (const auto id : bound_images) {
+        const auto& image = texture_cache.GetImage(id);
+        draw.sampled += image.binding.is_bound && !image.binding.is_target ? 1 : 0;
+    }
+    return DcpNarrowWaterReader::ShouldSkip(draw);
+}
+
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
                             bool is_indexed, u32 index_offset) {
     if (DrawPipe::OnStageB()) {
@@ -994,7 +1028,11 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const u32 num_instances = regs.num_instances.NumInstances();
     const u32 first_vertex = vertex_offset;
     const u32 first_instance = instance_offset;
+    const bool skip_water_reader = SkipsNarrowWaterReader(pipeline);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        if (skip_water_reader) {
+            return;
+        }
         const auto draw = [&] {
             if (is_indexed) {
                 cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex),

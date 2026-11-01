@@ -24,7 +24,7 @@ std::string Envelope(const std::string& op, uint32_t seq, Json body) {
 
 } // namespace
 
-Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence) {
+Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence, bool relay) {
     Json h = Json::Object();
     h.set("proto", kLobbyProtocol);
     h.set("game", game);
@@ -35,7 +35,16 @@ Json hello_body(const Identity& identity, const std::string& name, const std::st
     h.set("online_protocol", kOnlineProtocolVersion);
     h.set("version", port_version());
     h.set("platform", host_platform());
+    if (relay) h.set("relay", true);
     return h;
+}
+
+RelayCapability relay_capability(const Json& hello_reply) {
+    const Json& capabilities = hello_reply["capabilities"];
+    RelayCapability out;
+    out.supported = capabilities["relay_supported"].as_bool();
+    out.max_payload = out.supported ? int(capabilities["relay_max_payload"].as_int()) : 0;
+    return out;
 }
 
 LobbyLink::LobbyLink(Options options) : options_(std::move(options)) {}
@@ -87,6 +96,27 @@ bool LobbyLink::poll(LobbyMessage& out) {
     return true;
 }
 
+bool LobbyLink::send_binary(std::vector<uint8_t>&& frame) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (stopping_ || !greeted_ || !socket_ || binary_out_.size() >= kMaxQueuedBinary) {
+        ++binary_dropped_;
+        return false;
+    }
+    binary_out_.push_back(std::move(frame));
+    wake_.notify_all();
+    return true;
+}
+
+void LobbyLink::set_binary_sink(BinarySink sink) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    binary_sink_ = std::move(sink);
+}
+
+uint64_t LobbyLink::binary_dropped() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return binary_dropped_;
+}
+
 bool LobbyLink::up() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return greeted_;
@@ -124,6 +154,7 @@ LobbyLink::SessionEnd LobbyLink::Session(bool reconnecting) {
         socket_ = socket;
         greeted_ = false;
         holding_ = reconnecting;
+        binary_out_.clear();
         hello_seq_ = next_seq_++;
         last_rx_ms_ = now_ms();
     }
@@ -134,10 +165,17 @@ LobbyLink::SessionEnd LobbyLink::Session(bool reconnecting) {
     std::atomic<bool> reading{true};
     std::thread reader([&] {
         std::string text;
-        while (socket->receive(text)) {
+        bool binary = false;
+        while (socket->receive(text, binary)) {
+            BinarySink sink;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 last_rx_ms_ = now_ms();
+                if (binary) sink = binary_sink_;
+            }
+            if (binary) {
+                if (sink) sink(reinterpret_cast<const uint8_t*>(text.data()), text.size());
+                continue;
             }
             if (text == "pong") continue;
             std::optional<Json> message = Json::parse(text);
@@ -192,6 +230,14 @@ LobbyLink::SessionEnd LobbyLink::Session(bool reconnecting) {
             lock.lock();
             if (!sent) break;
         }
+        while (greeted_ && !binary_out_.empty()) {
+            std::vector<uint8_t> frame = std::move(binary_out_.front());
+            binary_out_.pop_front();
+            lock.unlock();
+            const bool sent = socket->send_binary(frame.data(), frame.size());
+            lock.lock();
+            if (!sent) break;
+        }
         const uint64_t now = now_ms();
         if (now - last_ping >= uint64_t(options_.keepalive_ms)) {
             last_ping = now;
@@ -206,6 +252,7 @@ LobbyLink::SessionEnd LobbyLink::Session(bool reconnecting) {
         wake_.wait_for(lock, std::chrono::milliseconds(250));
     }
     greeted_ = false;
+    binary_out_.clear();
     socket_.reset();
     lock.unlock();
     socket->close();
@@ -285,7 +332,9 @@ std::optional<Json> LobbySession::call(const std::string& op, Json body, std::st
     WebSocket* socket = socket_.get();
     auto answer = std::async(std::launch::async, [socket, seq]() -> std::optional<Json> {
         std::string text;
-        while (socket->receive(text)) {
+        bool binary = false;
+        while (socket->receive(text, binary)) {
+            if (binary) continue;
             std::optional<Json> m = Json::parse(text);
             if (m && m->is_object() && m->has("re") && (*m)["re"].as_int() == seq) return m;
         }

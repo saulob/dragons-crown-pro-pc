@@ -50,6 +50,8 @@ void runtime_memory_set_gpu_hooks(RuntimeGpuRange map, RuntimeGpuRange unmap, Ru
 void runtime_log_flush(void);
 void runtime_log_mark_clean_exit(void);
 void runtime_log_finalize(void);
+// startup_phase.c
+void dcp_startup_phase(const char* phase);
 }
 
 Frontend::WindowSDL* g_window = nullptr;
@@ -207,10 +209,12 @@ extern "C" int dcpgpu_init(const DcpGpuConfig* config) {
         while (window->PollEvents()) {
             SDL_Delay(2);
         }
+        dcp_startup_phase("runtime window closed");
         LOG_INFO(Frontend, "Window closed by user");
         runtime_log_mark_clean_exit();
         runtime_log_finalize();
         runtime_log_flush();
+        dcp_startup_phase("process exit");
         std::_Exit(0);
     });
     g_window_thread.detach();

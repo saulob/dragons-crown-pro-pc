@@ -1,7 +1,8 @@
 # Lobby server
 
-Players meet here: accounts, friends, presence, rooms and the exchange of UDP endpoints. Game traffic never goes
-through the lobby. The protocol is in [docs/ONLINE.md](../../docs/ONLINE.md).
+Players meet here: accounts, friends, presence, rooms and the exchange of UDP endpoints. Game traffic goes directly
+between players; only a pair that cannot reach each other uses the lobby's relay (`src/relay.js`, binary WebSocket
+messages, no new binding or storage). The protocol is in [docs/ONLINE.md](../../docs/ONLINE.md).
 
 `src/lobby.js` is the whole lobby. It runs in two hosts:
 

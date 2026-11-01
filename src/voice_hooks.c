@@ -12,7 +12,7 @@ static const GuestImageId kImage = {0x11f8060, 0x54c690};
 static int enabled;
 static const uint8_t *image_base;
 
-#define RESOURCE_ACQUIRE_OFFSET 0x57cbb0
+static uint32_t resource_acquire_offset = VOICE_RES_ACQUIRE_SITE_OFFSET;
 
 static const char *const kPinNames[VOICE_PIN_BANKS] = {
     "snd/se_gimmick10000_v.acb", "snd/se_gimmick10200_v.acb", "snd/se_gimmick10400_v.acb",
@@ -127,7 +127,7 @@ void GUEST_HOOK_ABI voice_res_acquire_hook(GuestRegs *regs) {
     const int index = voice_pin_target_index(name, NULL);
     if (index < 0) return;
     const ResourceAcquire acquire =
-        image_base ? (ResourceAcquire)(uintptr_t)(image_base + RESOURCE_ACQUIRE_OFFSET) : NULL;
+        image_base ? (ResourceAcquire)(uintptr_t)(image_base + resource_acquire_offset) : NULL;
     voice_pin_bank(index, (void *)(uintptr_t)regs->rdi, acquire);
 }
 
@@ -135,27 +135,45 @@ size_t voice_hooks_stub_bytes(void) {
     return VOICE_HOOK_COUNT * guest_hook_stub_size();
 }
 
-int voice_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size) {
-    if (size != kImage.size || entry != kImage.entry) {
-        printf("Japanese NPC Voices: hook not installed: not the CUSA10454 1.00 image\n");
-        return 0;
-    }
+static int install_at(uint8_t *image, uint64_t size, uint64_t entry, const GuestImageId *id, uint32_t cue_offset,
+                      uint32_t acquire_offset, uint8_t *stubs, size_t stubs_size) {
     GuestHook hooks[VOICE_HOOK_COUNT] = {
-        {"japanese npc voices", VOICE_NPC_SITE_OFFSET, VOICE_NPC_SITE_LENGTH, {0}, voice_npc_hook},
-        {"japanese npc voices bank pin", VOICE_RES_ACQUIRE_SITE_OFFSET, VOICE_RES_ACQUIRE_SITE_LENGTH, {0},
-         voice_res_acquire_hook},
+        {"japanese npc voices", cue_offset, VOICE_NPC_SITE_LENGTH, {0}, voice_npc_hook},
+        {"japanese npc voices bank pin", acquire_offset, VOICE_RES_ACQUIRE_SITE_LENGTH, {0}, voice_res_acquire_hook},
     };
     memcpy(hooks[0].original, voice_npc_site, sizeof(voice_npc_site));
     memcpy(hooks[1].original, voice_res_acquire_site, sizeof(voice_res_acquire_site));
     size_t bad = 0;
     const GuestHookStatus status =
-        guest_hooks_install(image, size, entry, &kImage, hooks, VOICE_HOOK_COUNT, stubs, stubs_size, &bad);
+        guest_hooks_install(image, size, entry, id, hooks, VOICE_HOOK_COUNT, stubs, stubs_size, &bad);
     if (status != GUEST_HOOK_OK) {
         printf("Japanese NPC Voices: hooks not installed: %s (hook %zu: %s)\n", guest_hook_status_text(status), bad,
                hooks[bad].name);
         return 0;
     }
     image_base = image;
+    resource_acquire_offset = acquire_offset;
+    return 1;
+}
+
+int voice_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size) {
+    if (size != kImage.size || entry != kImage.entry) {
+        printf("Japanese NPC Voices: hook not installed: not the CUSA10454 1.00 image\n");
+        return 0;
+    }
+    if (!install_at(image, size, entry, &kImage, VOICE_NPC_SITE_OFFSET, VOICE_RES_ACQUIRE_SITE_OFFSET, stubs, stubs_size)) {
+        return 0;
+    }
     printf("Japanese NPC Voices: hooks installed at 0x68bc9, 0x57cbb0\n");
+    return 1;
+}
+
+int voice_hooks_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpVoiceSites *sites, uint8_t *stubs,
+                                size_t stubs_size) {
+    const GuestImageId id = {size, entry};
+    if (!sites || !install_at(image, size, entry, &id, sites->npc_cue, sites->resource_acquire, stubs, stubs_size)) {
+        return 0;
+    }
+    printf("Japanese NPC Voices: hooks found by signature\n");
     return 1;
 }

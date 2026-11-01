@@ -26,10 +26,19 @@ const char* PromptStyleKey(PromptStyle style);
 const char* PromptStyleLabel(PromptStyle style);
 std::optional<PromptStyle> ParsePromptStyle(std::string_view key);
 
-// The archives the patch touches, among those present in the prepared game folder. Only a build whose Xbox patch is
-// validated has any: the regional archive holds the button atlas the game reads, DRACRO.CPK is patched too so the
-// choice holds either way.
+// The archives the patch touches: the build's regional archive and DRACRO.CPK, when present and holding a button atlas
+// (stage/Interface*.ftx). Only a build whose Xbox patch is validated has any.
 std::vector<std::filesystem::path> PromptArchives(const std::filesystem::path& app0, const GameBuild& build);
+
+// True when the patch covers every button atlas of the build's prompt archives, each target the build has is there (a
+// language's copy only when the regional archive holds button atlases), and each copy is the file the patch was made
+// for, or already its result, so the patch applies whole; `detail` names the first entry that does not.
+bool PromptPatchFits(const std::filesystem::path& app0, const GameBuild& build, const BlockPatch& patch,
+                     std::string* detail = nullptr);
+
+// Whether Xbox prompts can be offered for the installed game: the patch is validated for the build and, for an update,
+// whose archives may differ from the base package's, they still hold the files it was made for.
+bool XboxPromptsAvailable(const std::filesystem::path& app0, const GameBuild& build, std::span<const uint8_t> xbox_patch);
 
 // What the installed archives show: Xbox once every archive present holds `xbox_patch`, PlayStation otherwise. A
 // half-patched install, or one patched by an earlier patch, reads as PlayStation; choosing Xbox applies the patch again.

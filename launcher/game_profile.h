@@ -42,13 +42,15 @@ struct GameBuild {
     const char* label;            // the name the log, the launcher and the loader show
     const char* region;
     bool cheats;                  // the native cheat hooks are validated for this build
-    bool xbox_prompts;            // the Xbox prompt patch is validated for this build's archives
+    bool xbox_prompts;            // the Xbox prompt patch fits this build's button atlases; an update's are checked too
     bool japanese_npc_voices;     // the NPC voice routing hook is validated for this build
     bool true_ultrawide;          // dcp_pass_ortho_sites are verified in this build's executable
     std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
     std::span<const DcpResolutionSite> resolution_sites;
     std::span<const TextLanguage> text_languages; // the first is the default
     bool resolution_by_signature = false;
+    bool keep_base_languages = false; // an update's regional archive is laid over the base's, which keeps its language slots
+    bool features_by_signature = false; // cheats, NPC voices and True Ultrawide are found by structural locators, not tables
 };
 
 // The supported builds, US first.
@@ -71,9 +73,28 @@ bool RestrictedToNativeResolution(const GameBuild* build);
 // The build's languages; the Western ones when the build is not known.
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);
 
-// True only for the build whose executable has the verified NPC voice routing hook.
+// True when the build offers the Japanese NPC Voices toggle.
 inline bool SupportsJapaneseNpcVoices(const GameBuild* build) {
     return build != nullptr && build->japanese_npc_voices;
+}
+
+// The cue mapper picks the Japanese NPC voices for system language 0, the only language a Japanese build runs with.
+inline bool NativeJapaneseNpcVoices(const GameBuild* build) {
+    if (build == nullptr) {
+        return false;
+    }
+    for (const TextLanguage& language : build->text_languages) {
+        if (language.ps4_id != 0) {
+            return false;
+        }
+    }
+    return !build->text_languages.empty();
+}
+
+// False only for a known build without the cheat hooks; the unknown build is not restricted here, and the loader
+// installs no hook in it anyway.
+inline bool CheatsAvailable(const GameBuild* build) {
+    return build == nullptr || build->cheats;
 }
 
 // False only for a known build whose pass projection sites are not verified; the unknown build is not restricted here,

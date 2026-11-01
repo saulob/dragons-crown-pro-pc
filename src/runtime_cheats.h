@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "feature_sites.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -73,6 +75,10 @@ int runtime_cheats_hooks_wanted(int build_has_hooks);
  * relocations are made executable). 0 when the image is not the supported v1.03: the game then runs without cheats. */
 size_t runtime_cheat_hooks_stub_bytes(void);
 int runtime_cheat_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size);
+/* The same for a supported build whose sites a locator found (feature_sites.h): every hook and function must install and
+ * the layout must match the handlers, or nothing is installed. */
+int runtime_cheat_hooks_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpCheatSites *sites,
+                                        uint8_t *stubs, size_t stubs_size);
 
 /* 1 when the cheat hooks are installed on the loaded image; the in-game menu offers cheats only then. */
 int runtime_cheats_available(void);

@@ -248,8 +248,9 @@ void TestOnlineLockout() {
     // The log line comes from the lock first on every build, never from the build's cheat support alone.
     CHECK(lock < loader.find("runtime_cheats_log_state(known_build && game_build.cheats);"));
     CHECK(loader.find("Cheats: enabled") == std::string::npos);
-    CHECK(loader.find("if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) runtime_cheat_hooks_install(") !=
-          std::string::npos);
+    CHECK(loader.find("if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) {") != std::string::npos);
+    CHECK(loader.find("runtime_cheat_hooks_install(image,size,entry,") != std::string::npos);
+    CHECK(loader.find("runtime_cheat_hooks_install_located(") != std::string::npos);
     const size_t skip = loader.find("skip_offers_install(");
     CHECK(skip != std::string::npos && loader.find("online_locked", skip) == std::string::npos);
     const std::string online = ReadSource("src/runtime_online.cpp");
@@ -1142,7 +1143,7 @@ void TestAddGold() {
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
     const size_t action_branch = overlay.find("runtime_cheat_action(int(row.action))");
     CHECK(action_branch != std::string::npos);
-    CHECK(overlay.substr(action_branch, 160).find("cheat_close") == std::string::npos); // the menu stays open
+    CHECK(overlay.substr(action_branch, 160).find("menu_close") == std::string::npos); // the menu stays open
     CHECK(overlay.find("runtime_cheat_clear_actions()") != std::string::npos);
     const std::string launcher = ReadSource("launcher/settings.cpp") + ReadSource("launcher/launcher.cpp");
     CHECK(launcher.find("add_gold") == std::string::npos && launcher.find("kActions") == std::string::npos);

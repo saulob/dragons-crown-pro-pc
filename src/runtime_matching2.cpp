@@ -20,6 +20,7 @@
 #include "net/json.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
+#include "net/relay_frame.h"
 #include "runtime_online.h"
 
 #define DCP_SYSV __attribute__((sysv_abi))
@@ -140,6 +141,7 @@ struct State {
     std::map<uint16_t, Signal> signals;
     // our endpoint as reported to the lobby
     std::shared_ptr<net::PeerSocket> socket;
+    bool relay_capable = false;
     uint64_t bound_ms = 0;
     uint16_t reported_port = 0;
     bool udp_inflight = false, udp_acked = false;
@@ -149,6 +151,10 @@ struct State {
     bool friends_busy = false;
     uint64_t friends_generation = 0;
     std::vector<FriendRoom> friends;
+    // what the Online page shows: the account's friend code and the friend list as the lobby sent it
+    std::string friend_code;
+    std::vector<OnlinePlayer> friend_list;
+    bool friend_list_known = false;
     // what the game's player cards show: each player's platform and port version, by online id
     std::map<std::string, Client> clients;
     std::set<std::string> refused_friend_rooms;
@@ -284,16 +290,53 @@ std::vector<net::Endpoint> Candidates(const Signal& s) {
     return list;
 }
 
+// The relay's two ends live on other threads (the socket's, the lobby link's) and must not take g_mutex.
+std::mutex g_relay_mutex;
+net::LobbyLink* g_relay_link = nullptr;
+std::shared_ptr<net::PeerSocket> g_relay_socket;
+
+bool SendRelayFrame(std::vector<uint8_t>&& frame) {
+    std::lock_guard<std::mutex> lock(g_relay_mutex);
+    return g_relay_link && g_relay_link->send_binary(std::move(frame));
+}
+
+void ReceiveRelayFrame(const uint8_t* data, size_t size) {
+    std::shared_ptr<net::PeerSocket> socket;
+    {
+        std::lock_guard<std::mutex> lock(g_relay_mutex);
+        socket = g_relay_socket;
+    }
+    if (socket) socket->deliver_relay(data, size);
+}
+
+void SetRelayEnds(net::LobbyLink* link, const std::shared_ptr<net::PeerSocket>& socket) {
+    std::lock_guard<std::mutex> lock(g_relay_mutex);
+    g_relay_link = link;
+    g_relay_socket = socket;
+}
+
+void ConfigureRelay() {
+    if (!g.socket) return;
+    if (g.relay_capable && g.room && g.link) {
+        g.socket->enable_relay(net::relay_token(g.key), SendRelayFrame);
+    } else {
+        g.socket->disable_relay();
+    }
+}
+
 void ApplyPeers() {
     if (!g.socket || !g.room) return;
     g.socket->set_room(g.key, settings().identity.account);
     for (const auto& [member, s] : g.signals)
-        if (member != g.me && s.account) g.socket->set_peer(s.account, Candidates(s));
+        if (member != g.me && s.account) g.socket->set_peer(s.account, Candidates(s), member);
+    ConfigureRelay();
 }
 
 void ClearRoom() {
-    if (g.socket)
+    if (g.socket) {
         for (const auto& [member, s] : g.signals) g.socket->forget_peer(s.account);
+        g.socket->disable_relay();
+    }
     g.room = 0;
     g.me = g.owner = 0;
     g.members.clear();
@@ -468,7 +511,7 @@ void RoomGone(uint16_t event) {
 
 Json HelloBody() {
     const Settings& s = settings();
-    return net::hello_body(s.identity, s.name, s.game, true);
+    return net::hello_body(s.identity, s.name, s.game, true, true);
 }
 
 // ---- lobby messages ----
@@ -492,6 +535,10 @@ void OnResponse(const net::LobbyMessage& m) {
         return;
     case Kind::kFriends: {
         g.friends.clear();
+        if (!error) {
+            g.friend_list = ReadOnlinePlayers(m.body["friends"]);
+            g.friend_list_known = true;
+        }
         size_t total = 0;
         for (const Json& f : m.body["friends"].items()) {
             ++total;
@@ -576,7 +623,7 @@ void OnPeer(const Json& b) {
     }
     std::printf("Matching2: member 0x%x is at %s (%zu LAN candidate(s))\n", member, net::endpoint_text(address).c_str(), lan.size());
     if (g.socket && s.account) {
-        g.socket->set_peer(s.account, Candidates(s));
+        g.socket->set_peer(s.account, Candidates(s), member);
         for (const net::Endpoint& e : Candidates(s)) g.socket->punch(e);
     }
 }
@@ -635,6 +682,9 @@ void OnEvent(const net::LobbyMessage& m) {
     } else if (m.event == "room.kicked" || m.event == "room.gone") {
         std::printf("Matching2: %s\n", m.event == "room.kicked" ? "kicked from the room" : "the room was closed");
         RoomGone(m.event == "room.kicked" ? kRoomKicked : kRoomDestroyed);
+    } else if (m.event == "relay.closed") {
+        std::printf("Matching2: the lobby stopped relaying for this connection (%s)\n", b["reason"].as_string().c_str());
+        if (g.socket) g.socket->disable_relay();
     } else if (m.event == "peer") {
         OnPeer(b);
     } else if (m.event == "peer.gone") {
@@ -654,10 +704,19 @@ void OnEvent(const net::LobbyMessage& m) {
     }
 }
 
+void NoteRelayCapability(const Json& hello_reply) {
+    const net::RelayCapability capability = net::relay_capability(hello_reply);
+    g.relay_capable = capability.usable();
+    std::printf("Matching2: lobby relay %s\n", g.relay_capable ? "available as a fallback" : "not offered");
+    ConfigureRelay();
+}
+
 void OnLink(const net::LobbyMessage& m) {
     using K = net::LobbyMessage::Kind;
     if (m.kind == K::kUp) {
+        NoteRelayCapability(m.body);
         g.up = true;
+        g.friend_code = m.body["friend_code"].as_string();
         g.your_ip = net::parse_ip(m.body["ip"].as_string());
         g.lobby_on_lan = !g.your_ip || net::is_lan(g.your_ip);
         std::printf("Matching2: signed in to the lobby as %s; it sees %s\n", settings().name.c_str(), m.body["ip"].as_string().c_str());
@@ -667,6 +726,8 @@ void OnLink(const net::LobbyMessage& m) {
         g.udp_inflight = false;
         std::printf("Matching2: lobby connection lost; the game is not told while it reconnects\n");
     } else if (m.kind == K::kBack) {
+        NoteRelayCapability(m.body);
+        g.friend_code = m.body["friend_code"].as_string();
         g.your_ip = net::parse_ip(m.body["ip"].as_string());
         if (g.room) {
             Json body = Json::Object();
@@ -682,6 +743,8 @@ void OnLink(const net::LobbyMessage& m) {
         }
     } else if (m.kind == K::kDown) {
         const bool was_up = g.up;
+        g.relay_capable = false;
+        ConfigureRelay();
         g.up = false;
         g.down = true;
         g.lost = false;
@@ -690,6 +753,8 @@ void OnLink(const net::LobbyMessage& m) {
         g.pending.clear();
         g.friends_busy = false;
         g.friends.clear();
+        g.friend_list.clear();
+        g.friend_list_known = false;
         ++g.friends_generation;
         RoomGone(kRoomDestroyed);
         if (g.start_wanted) PushContextEvent(was_up ? kCtxStartOver : kCtxStarted, m.code == "unauthorized" ? kErrIdentity : kErrLobbyDown);
@@ -701,6 +766,7 @@ void ReportEndpoint(uint64_t now) {
     std::shared_ptr<net::PeerSocket> socket = peer_socket();
     if (socket != g.socket) {
         g.socket = socket;
+        SetRelayEnds(g.link.get(), socket);
         g.bound_ms = now;
         g.reported_port = 0;
         g.udp_acked = false;
@@ -818,12 +884,16 @@ DCP_SYSV int32_t m2_context_start(uint16_t context, uint64_t timeout) {
         PushContextEvent(kCtxStarted, kErrLobbyDown);
         return 0;
     }
+    SetRelayEnds(nullptr, g.socket);
     g.link.reset();
     g.down = g.up = g.lost = false;
+    g.relay_capable = false;
     net::LobbyLink::Options options;
     options.url = s.config.lobby;
     options.hello = HelloBody;
     g.link = std::make_unique<net::LobbyLink>(std::move(options));
+    g.link->set_binary_sink(ReceiveRelayFrame);
+    SetRelayEnds(g.link.get(), g.socket);
     g.link->start();
     std::printf("Matching2: going online through %s\n", s.config.lobby.c_str());
     return 0;
@@ -1192,6 +1262,20 @@ void friends_fetch() {
     g.friends_busy = true;
     const uint32_t seq = g.link->request("friends.list", Json::Object());
     g.pending[seq] = Pending{Kind::kFriends, 0, nullptr, nullptr, 0};
+}
+
+PageLink page_link() {
+    PageLink out;
+    if (!settings().enabled) return out;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    out.link = !g.link          ? RUNTIME_ONLINE_LINK_OFF
+               : g.down         ? RUNTIME_ONLINE_LINK_UNREACHABLE
+               : g.up && !g.lost ? RUNTIME_ONLINE_LINK_UP
+                                : RUNTIME_ONLINE_LINK_CONNECTING;
+    out.friend_code = g.friend_code;
+    out.friends_known = g.friend_list_known;
+    out.friends = g.friend_list;
+    return out;
 }
 
 bool friends_busy() {

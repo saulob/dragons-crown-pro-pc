@@ -97,8 +97,9 @@ typedef struct {
     int valid;    /* one match, and the site's bytes hold */
 } DcpResolutionSignatureResult;
 
-#define DCP_CUSA10209_102_SIGNATURE_COUNT 23
-extern const DcpResolutionSignature dcp_cusa10209_102_signatures[DCP_CUSA10209_102_SIGNATURE_COUNT];
+#define DCP_RENDER_SIZE_SIGNATURE_COUNT 23
+/* The 23 render size sites of every build with a table, for the builds that set GameBuild::resolution_by_signature. */
+extern const DcpResolutionSignature dcp_render_size_signatures[DCP_RENDER_SIZE_SIGNATURE_COUNT];
 
 /* Finds every signature's site and checks its bytes. Returns 1 and fills `sites` only when all of them are found once,
  * valid and not overlapping; otherwise 0 and `sites` is left alone. Reads the image only. */

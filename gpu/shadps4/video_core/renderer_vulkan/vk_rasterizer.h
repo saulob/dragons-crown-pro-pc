@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/recursive_lock.h"
+#include "dcp_narrow_water_reader.h"
 #include "dcp_water_diag.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -163,6 +164,7 @@ private:
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
     void CaptureWaterDiagLayouts(const GraphicsPipeline* pipeline);
     void ReportWaterDiag(const GraphicsPipeline* pipeline);
+    bool SkipsNarrowWaterReader(const GraphicsPipeline* pipeline);
     /// dcp: a draw continuing the open render pass with the same inputs gets the same render
     /// state (RenderStateMemo); nothing can have broken the pass in between (barriers, copies and
     /// dispatches end it).

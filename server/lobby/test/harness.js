@@ -4,9 +4,9 @@ import { LocalConn, LocalHost, sqliteStore } from '../local/host.js';
 
 let accounts = 0;
 
-export function makeLobby({ local = false } = {}) {
+export function makeLobby({ local = false, log = (text) => { throw new Error(text); } } = {}) {
   const clock = { now: 1_700_000_000_000 };
-  const host = new LocalHost(sqliteStore(), { now: () => clock.now, log: (text) => { throw new Error(text); } });
+  const host = new LocalHost(sqliteStore(), { now: () => clock.now, log });
   const lobby = new Lobby(host, { local });
   return {
     lobby,
@@ -27,10 +27,13 @@ export function makeLobby({ local = false } = {}) {
 
 export class Client {
   constructor(lobby, host, ip, country) {
+    const client = this;
     this.lobby = lobby;
     this.host = host;
     this.ip = ip;
     this.inbox = [];
+    this.binary = [];
+    this.bufferedAmount = 0;
     this.closedWith = null;
     this.seq = 0;
     const first = lobby.admit(ip, country);
@@ -38,6 +41,10 @@ export class Client {
     if (!first) return;
     this.conn = new LocalConn(host, {
       send: (text) => this.inbox.push(JSON.parse(text)),
+      sendBinary: (bytes) => this.binary.push(bytes),
+      get bufferedAmount() {
+        return client.bufferedAmount;
+      },
       close: (code, reason) => {
         this.closedWith = { code, reason };
       },
@@ -56,6 +63,10 @@ export class Client {
     const response = replies.find((m) => 're' in m);
     this.inbox.push(...replies.filter((m) => m !== response));
     return response;
+  }
+
+  relay(bytes) {
+    this.lobby.relay(this.conn, bytes);
   }
 
   call(op, body = {}) {

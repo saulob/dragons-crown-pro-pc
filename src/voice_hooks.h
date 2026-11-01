@@ -1,5 +1,5 @@
-/* Japanese NPC voices on CUSA10454 1.00: the cue mapper's US-only path returns the Japanese cue ID for the NPC voice
- * families, and an extra reference on each of their banks, taken through the game's own resource acquire, keeps a
+/* Japanese NPC voices: the cue mapper's path for a non-Japanese system language returns the Japanese cue ID for the
+ * NPC voice families, and an extra reference on each of their banks, taken through the game's own resource acquire, keeps a
  * bank already loaded for either language from being evicted once the cue mapper starts asking for the other one.
  * The banks are the user's own; no game file is changed. */
 #ifndef DCP_VOICE_HOOKS_H
@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "feature_sites.h"
 #include "guest_hook.h"
 
 #ifdef __cplusplus
@@ -42,6 +43,10 @@ size_t voice_hooks_stub_bytes(void);
 
 /* 1 when the image is CUSA10454 1.00 and the site bytes match; 0 otherwise, the image untouched. */
 int voice_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size);
+
+/* The same for a supported build whose two sites a locator found (feature_sites.h). */
+int voice_hooks_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpVoiceSites *sites, uint8_t *stubs,
+                                size_t stubs_size);
 
 #ifdef __cplusplus
 }

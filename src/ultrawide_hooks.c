@@ -27,8 +27,6 @@ static const uint64_t kScreenPasses = 0x1e700000000ull;
 static const uint64_t kWorldPasses = 0x418ffffffffull;
 static const float kScreenHalfWidth = 640.0f, kScreenHalfHeight = 360.0f;
 
-/* Same offset in every verified build: the camera task's per-frame update calls its view build. */
-enum { CAMERA_VIEW_CALL = 0x118e9, VIEW_BUILD = 0x110b0 };
 /* The frame commit's `mov -0x2c(%rbp),%eax; mov %al,0xb20(%rbx,%r13,1)`, right after it copied a pass into its set. */
 static const uint8_t kCommitBytes[] = {0x8b, 0x45, 0xd4, 0x42, 0x88, 0x84, 0x2b, 0x20, 0x0b, 0x00, 0x00};
 
@@ -83,15 +81,15 @@ static const float kMapMarkerReach = 270.0f;
 
 const UltrawideRecord ultrawide_records[ULTRAWIDE_RECORD_COUNT] = {
     {"CUSA10454 1.00 USA", {0x11f8060, 0x54c690}, 0x5811c0, {0x581ac3, 0x581bb6, 0x581869}, 0x5a209d, 0x597830,
-     0x57530c, 0x579ac0, 0x4ec2ec, 0x541b89, 0x3a5055, 0x549a80, {0x44293b, 0x4430fb}},
+     0x57530c, 0x579ac0, 0x4ec2ec, 0x541b89, 0x3a5055, 0x549a80, {0x44293b, 0x4430fb}, 0x118e9, 0x110b0},
     {"CUSA07001 1.00 Japan", {0x11e8060, 0x54a800}, 0x57f260, {0x57fb63, 0x57fc56, 0x57f909}, 0x5a012d, 0x5958d0,
-     0x5733ac, 0x577b60, 0x4ea14c, 0x53fbe9, 0x3a4445, 0x547c20, {0x441b6b, 0x44232b}},
+     0x5733ac, 0x577b60, 0x4ea14c, 0x53fbe9, 0x3a4445, 0x547c20, {0x441b6b, 0x44232b}, 0x118e9, 0x110b0},
     {"CUSA07001 1.02 Japan", {0x11e8060, 0x54a660}, 0x57f190, {0x57fa93, 0x57fb86, 0x57f839}, 0x5a007d, 0x595800,
-     0x5732dc, 0x577a90, 0x4ea6cc, 0x53fb69, 0x3a4885, 0x547a60, {0x441f4b, 0x44270b}},
+     0x5732dc, 0x577a90, 0x4ea6cc, 0x53fb69, 0x3a4885, 0x547a60, {0x441f4b, 0x44270b}, 0x118e9, 0x110b0},
     {"CUSA07001 1.03 Japan", {0x11e8060, 0x54a720}, 0x57f250, {0x57fb53, 0x57fc46, 0x57f8f9}, 0x5a012d, 0x5958c0,
-     0x57339c, 0x577b50, 0x4ea78c, 0x53fc29, 0x3a48d5, 0x547b20, {0x44200b, 0x4427cb}},
+     0x57339c, 0x577b50, 0x4ea78c, 0x53fc29, 0x3a48d5, 0x547b20, {0x44200b, 0x4427cb}, 0x118e9, 0x110b0},
     {"CUSA10209 1.00 Asia/Hong Kong", {0x1238060, 0x54a790}, 0x57f2c0, {0x57fbc3, 0x57fcb6, 0x57f969}, 0x5a018d,
-     0x595930, 0x57340c, 0x577bc0, 0x4ea15c, 0x53fb79, 0x3a45b5, 0x547bb0, {0x441cdb, 0x44249b}},
+     0x595930, 0x57340c, 0x577bc0, 0x4ea15c, 0x53fb79, 0x3a45b5, 0x547bb0, {0x441cdb, 0x44249b}, 0x118e9, 0x110b0},
 };
 
 static float widening = 1.0f;
@@ -884,7 +882,7 @@ void ultrawide_record_hooks(const UltrawideRecord *record, GuestHook hooks[ULTRA
     GuestHook *hook = hooks;
     for (uint32_t i = 0; i < ULTRAWIDE_FILL_SITES; ++i)
         branch_hook(hook++, fills[i], 0xe8, record->fill_calls[i], record->submit, ultrawide_fill_hook);
-    branch_hook(hook++, "camera view", 0xe8, CAMERA_VIEW_CALL, VIEW_BUILD, ultrawide_camera_hook);
+    branch_hook(hook++, "camera view", 0xe8, record->camera_view_call, record->view_build, ultrawide_camera_hook);
     hook->name = "frame commit";
     hook->offset = record->frame_commit;
     hook->length = sizeof(kCommitBytes);
@@ -947,47 +945,104 @@ static const char *group_precondition(int group, const uint8_t *image, uint64_t 
     return NULL;
 }
 
-int ultrawide_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size,
-                            double scale, char *detail, size_t detail_size) {
+static int install_record(const UltrawideRecord *record, uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs,
+                          size_t stubs_size, double scale, char *detail, size_t detail_size) {
     static const char *const group_names[] = {"fill", "world window", "widget, map and fade"};
     static const size_t group_sizes[] = {ULTRAWIDE_FILL_HOOKS, ULTRAWIDE_WORLD_HOOKS, ULTRAWIDE_PART_HOOKS};
+    GuestHook hooks[ULTRAWIDE_HOOK_COUNT];
+    ultrawide_record_hooks(record, hooks);
+    ultrawide_hooks_configure((float)scale);
+    image_base = (uint64_t)(uintptr_t)image;
+    installed = record;
+    size_t first = 0, used = 0, written = 0;
+    int any = 0;
+    detail[0] = 0;
+    for (int group = 0; group < 3; ++group) {
+        const size_t count = group_sizes[group], room = count * guest_hook_stub_size();
+        const char *precondition = group_precondition(group, image, size, record);
+        size_t bad = 0;
+        const GuestHookStatus status =
+            precondition ? GUEST_HOOK_MISMATCH
+            : used + room > stubs_size
+                ? GUEST_HOOK_NO_ROOM
+                : guest_hooks_install(image, size, entry, &record->image, hooks + first, count, stubs + used,
+                                      room, &bad);
+        if (status == GUEST_HOOK_OK) {
+            used += room;
+            any = 1;
+            written += (size_t)snprintf(detail + written, detail_size - written, "%s%s hooks installed",
+                                        written ? "; " : "", group_names[group]);
+        } else {
+            written += (size_t)snprintf(detail + written, detail_size - written, "%s%s hooks off (%s: %s)",
+                                        written ? "; " : "", group_names[group],
+                                        precondition ? precondition : hooks[first + bad].name,
+                                        guest_hook_status_text(status));
+        }
+        if (written >= detail_size) written = detail_size - 1;
+        first += count;
+    }
+    return any;
+}
+
+int ultrawide_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size,
+                            double scale, char *detail, size_t detail_size) {
     for (size_t i = 0; i < ULTRAWIDE_RECORD_COUNT; ++i) {
         const UltrawideRecord *record = &ultrawide_records[i];
         if (size != record->image.size || entry != record->image.entry) continue;
-        GuestHook hooks[ULTRAWIDE_HOOK_COUNT];
-        ultrawide_record_hooks(record, hooks);
-        ultrawide_hooks_configure((float)scale);
-        image_base = (uint64_t)(uintptr_t)image;
-        installed = record;
-        size_t first = 0, used = 0, written = 0;
-        int any = 0;
-        detail[0] = 0;
-        for (int group = 0; group < 3; ++group) {
-            const size_t count = group_sizes[group], room = count * guest_hook_stub_size();
-            const char *precondition = group_precondition(group, image, size, record);
-            size_t bad = 0;
-            const GuestHookStatus status =
-                precondition ? GUEST_HOOK_MISMATCH
-                : used + room > stubs_size
-                    ? GUEST_HOOK_NO_ROOM
-                    : guest_hooks_install(image, size, entry, &record->image, hooks + first, count, stubs + used,
-                                          room, &bad);
-            if (status == GUEST_HOOK_OK) {
-                used += room;
-                any = 1;
-                written += (size_t)snprintf(detail + written, detail_size - written, "%s%s hooks installed",
-                                            written ? "; " : "", group_names[group]);
-            } else {
-                written += (size_t)snprintf(detail + written, detail_size - written, "%s%s hooks off (%s: %s)",
-                                            written ? "; " : "", group_names[group],
-                                            precondition ? precondition : hooks[first + bad].name,
-                                            guest_hook_status_text(status));
-            }
-            if (written >= detail_size) written = detail_size - 1;
-            first += count;
-        }
-        return any;
+        return install_record(record, image, size, entry, stubs, stubs_size, scale, detail, detail_size);
     }
     snprintf(detail, detail_size, "no hook record for this image");
     return 0;
+}
+
+UltrawideRecord ultrawide_record_from_sites(const DcpUltrawideSites *sites, uint64_t size, uint64_t entry) {
+    UltrawideRecord record;
+    memset(&record, 0, sizeof(record));
+    record.build = "found by signature";
+    record.image.size = size;
+    record.image.entry = entry;
+    record.submit = sites->submit;
+    memcpy(record.fill_calls, sites->fill_calls, sizeof(record.fill_calls));
+    record.frame_commit = sites->frame_commit;
+    record.queue = sites->queue;
+    record.part_queue_call = sites->part_queue_call;
+    record.model_draw = sites->model_draw;
+    record.widget_draw_call = sites->widget_draw_call;
+    record.map_draw_call = sites->map_draw_call;
+    record.facility_draw_call = sites->facility_draw_call;
+    record.worldmap_draw = sites->worldmap_draw;
+    memcpy(record.fade_jumps, sites->fade_jumps, sizeof(record.fade_jumps));
+    record.camera_view_call = sites->camera_view_call;
+    record.view_build = sites->view_build;
+    return record;
+}
+
+int ultrawide_hooks_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpUltrawideSites *sites,
+                                    uint8_t *stubs, size_t stubs_size, double scale, char *detail, size_t detail_size) {
+    static UltrawideRecord located;
+    if (!sites) {
+        snprintf(detail, detail_size, "no sites");
+        return 0;
+    }
+    located = ultrawide_record_from_sites(sites, size, entry);
+    GuestHook hooks[ULTRAWIDE_HOOK_COUNT];
+    ultrawide_record_hooks(&located, hooks);
+    for (int group = 0; group < 3; ++group) {
+        const char *precondition = group_precondition(group, image, size, &located);
+        if (precondition) {
+            snprintf(detail, detail_size, "%s does not match", precondition);
+            return 0;
+        }
+    }
+    size_t bad = 0;
+    const GuestHookStatus status = guest_hooks_verify(image, size, entry, &located.image, hooks, ULTRAWIDE_HOOK_COUNT, &bad);
+    if (status != GUEST_HOOK_OK) {
+        snprintf(detail, detail_size, "%s: %s", hooks[bad].name, guest_hook_status_text(status));
+        return 0;
+    }
+    if (stubs_size < ULTRAWIDE_HOOK_COUNT * guest_hook_stub_size()) {
+        snprintf(detail, detail_size, "no room for the hook stubs");
+        return 0;
+    }
+    return install_record(&located, image, size, entry, stubs, stubs_size, scale, detail, detail_size);
 }

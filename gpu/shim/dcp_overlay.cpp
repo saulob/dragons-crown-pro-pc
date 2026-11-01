@@ -16,6 +16,9 @@
 #include <SDL3/SDL.h>
 #include "dcp_accent.h"
 #include "dcp_cheat_menu.h"
+#include "dcp_menu_input.h"
+#include "dcp_options_menu.h"
+#include "dcp_options_ui.h"
 #include "dcp_settings.h"
 #include "dcp_overlay_box.h"
 #include "dcp_ping.h"
@@ -58,10 +61,12 @@ namespace {
 
 std::mutex imgui_mutex; // the ImGui context: window thread (input) and present thread
 bool initialized = false;
-// The cheat menu (F10): open, or closing and still holding the game's input until what it received is released.
+// The cheat menu (F10) and the Options menu (F1): open, or closing and still holding the game's input until what the
+// menu received is released. Only one of them is ever open.
 std::atomic<bool> cheat_open{false};
-dcp::cheats::CloseGate cheat_close;
-std::bitset<ImGuiKey_NamedKey_COUNT> cheat_pressed;
+std::atomic<bool> options_open{false};
+dcp::menu::CloseGate menu_close;
+std::bitset<ImGuiKey_NamedKey_COUNT> menu_pressed;
 bool cheat_focused = false;
 int cheat_selected_row = -1; // the row the list last scrolled to show
 std::atomic<float> display_scale{1.0f};
@@ -112,6 +117,8 @@ ImGuiKey KeyFromSdl(SDL_Keycode key) {
     case SDLK_DELETE: return ImGuiKey_Delete;
     case SDLK_BACKSPACE: return ImGuiKey_Backspace;
     case SDLK_SPACE: return ImGuiKey_Space;
+    case SDLK_Q: return ImGuiKey_Q;
+    case SDLK_E: return ImGuiKey_E;
     case SDLK_RETURN: return ImGuiKey_Enter;
     case SDLK_KP_ENTER: return ImGuiKey_KeypadEnter;
     case SDLK_ESCAPE: return ImGuiKey_Escape;
@@ -200,22 +207,75 @@ bool PingShown() {
     return DcpSettings::Get().show_ping && runtime_online_play_enabled() != 0;
 }
 
+bool MenuOpen() {
+    return cheat_open || options_open;
+}
+
 ImVec4 Accent() {
     return ImVec4(dcp::kAccentRed / 255.0f, dcp::kAccentGreen / 255.0f, dcp::kAccentBlue / 255.0f, 1.0f);
 }
 
 // The keys and buttons that went down while the menu was open, until they come up again.
-void TrackCheatKeys() {
+void TrackMenuKeys() {
     for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
         if (key >= ImGuiKey_MouseLeft && key <= ImGuiKey_MouseWheelY) {
             continue;
         }
         const size_t index = size_t(key - ImGuiKey_NamedKey_BEGIN);
         if (ImGui::IsKeyPressed(ImGuiKey(key), false)) {
-            cheat_pressed.set(index);
+            menu_pressed.set(index);
         } else if (!ImGui::IsKeyDown(ImGuiKey(key))) {
-            cheat_pressed.reset(index);
+            menu_pressed.reset(index);
         }
+    }
+}
+
+struct CheatRowText {
+    const char* state;
+    bool lit;
+};
+
+bool CheatRowsUsable() {
+    return dcp::cheats::RowsUsable(runtime_cheats_available() != 0, runtime_cheats_online_locked() != 0);
+}
+
+CheatRowText CheatRowState(const dcp::cheats::MenuRow& row) {
+    const bool action = row.kind == dcp::cheats::RowKind::Action;
+    const bool movement = row.kind == dcp::cheats::RowKind::MovementSpeed;
+    const bool experience = row.kind == dcp::cheats::RowKind::Experience;
+    const bool choice = movement || experience;
+    const int off = movement ? dcp::cheats::kMovementSpeedOff : dcp::cheats::kExperienceMultiplierOff;
+    const int multiplier = movement   ? runtime_cheat_movement_speed()
+                          : experience ? runtime_cheat_experience_multiplier()
+                                       : off;
+    const char* choice_label = movement   ? dcp::cheats::MovementSpeedLabel(multiplier)
+                               : experience ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
+                                            : nullptr;
+    const bool usable = CheatRowsUsable();
+    const bool on = row.kind == dcp::cheats::RowKind::Toggle && runtime_cheat_enabled(int(row.cheat)) != 0;
+    const char* state = !usable ? dcp::cheats::UnusableRowState(runtime_cheats_online_locked() != 0)
+                        : action ? row.verb
+                        : choice ? choice_label
+                        : (on ? "On" : "Off");
+    return {state, usable && (action || on || (choice && multiplier != off))};
+}
+
+void ActivateCheatRow(const dcp::cheats::MenuRow& row) {
+    if (!CheatRowsUsable()) {
+        return;
+    }
+    const bool movement = row.kind == dcp::cheats::RowKind::MovementSpeed;
+    if (row.kind == dcp::cheats::RowKind::Action) {
+        runtime_cheat_action(int(row.action));
+        std::printf("Cheats: %s requested\n", row.label);
+    } else if (movement || row.kind == dcp::cheats::RowKind::Experience) {
+        const int next = movement ? runtime_cheat_movement_cycle() : runtime_cheat_experience_cycle();
+        const char* label = movement ? dcp::cheats::MovementSpeedLabel(next)
+                                     : dcp::cheats::ExperienceMultiplierLabel(next);
+        std::printf("Cheats: %s %s (this session)\n", row.label, label);
+    } else {
+        runtime_cheat_toggle(int(row.cheat));
+        std::printf("Cheats: %s %s (this session)\n", row.label, runtime_cheat_enabled(int(row.cheat)) ? "On" : "Off");
     }
 }
 
@@ -235,51 +295,61 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     }
     const float pad = ImGui::GetFontSize() * 0.4f;
     const float y = min.y + (height - ImGui::GetFontSize()) * 0.5f;
-    const bool action = row.kind == dcp::cheats::RowKind::Action;
-    const bool movement = row.kind == dcp::cheats::RowKind::MovementSpeed;
-    const bool experience = row.kind == dcp::cheats::RowKind::Experience;
-    const bool choice = movement || experience;
-    const int off = movement ? dcp::cheats::kMovementSpeedOff : dcp::cheats::kExperienceMultiplierOff;
-    const int multiplier = movement   ? runtime_cheat_movement_speed()
-                          : experience ? runtime_cheat_experience_multiplier()
-                                       : off;
-    const char* choice_label = movement   ? dcp::cheats::MovementSpeedLabel(multiplier)
-                               : experience ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
-                                            : nullptr;
-    const bool available = runtime_cheats_available() != 0;
-    const bool on = row.kind == dcp::cheats::RowKind::Toggle && runtime_cheat_enabled(int(row.cheat)) != 0;
-    const char* state = !available ? "Unavailable"
-                        : action ? row.verb
-                        : choice ? choice_label
-                        : (on ? "On" : "Off");
-    const bool lit = available && (action || on || (choice && multiplier != off));
+    const CheatRowText text = CheatRowState(row);
     draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
-    if (state != nullptr) {
-        draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(state).x, y), ImGui::GetColorU32(lit ? accent : dim), state);
+    if (text.state != nullptr) {
+        draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(text.state).x, y),
+                      ImGui::GetColorU32(text.lit ? accent : dim), text.state);
     }
     ImGui::PopID();
-    if (!pressed || !available) {
-        return;
+    if (pressed) {
+        ActivateCheatRow(row);
     }
-    if (action) {
-        runtime_cheat_action(int(row.action));
-        std::printf("Cheats: %s requested\n", row.label);
-    } else if (choice) {
-        const int next = movement ? runtime_cheat_movement_cycle() : runtime_cheat_experience_cycle();
-        const char* label = movement ? dcp::cheats::MovementSpeedLabel(next)
-                                     : dcp::cheats::ExperienceMultiplierLabel(next);
-        std::printf("Cheats: %s %s (this session)\n", row.label, label);
-    } else {
-        runtime_cheat_toggle(int(row.cheat));
-        std::printf("Cheats: %s %s (this session)\n", row.label, runtime_cheat_enabled(int(row.cheat)) ? "On" : "Off");
+}
+
+const char* CheatRowHelp(const dcp::cheats::MenuRow& row) {
+    switch (row.kind) {
+    case dcp::cheats::RowKind::Toggle:
+        for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
+            if (info.cheat == row.cheat) {
+                return info.description;
+            }
+        }
+        return "";
+    case dcp::cheats::RowKind::Action: return "Runs once each time it is pressed. Nothing is saved.";
+    case dcp::cheats::RowKind::MovementSpeed: return dcp::cheats::kMovementSpeedHelp;
+    case dcp::cheats::RowKind::Experience: return dcp::cheats::kExperienceMultiplierHelp;
     }
+    return "";
+}
+
+DcpOptionsUi::CheatRowView OptionsCheatView(size_t index) {
+    const dcp::cheats::MenuRow& row = dcp::cheats::kMenuRows[index];
+    const CheatRowText text = CheatRowState(row);
+    return {row.label, CheatRowHelp(row), text.state, text.lit};
+}
+
+void OptionsCheatActivate(size_t index, int direction) {
+    const dcp::cheats::MenuRow& row = dcp::cheats::kMenuRows[index];
+    const bool on = row.kind == dcp::cheats::RowKind::Toggle && runtime_cheat_enabled(int(row.cheat)) != 0;
+    if (direction == 0 || dcp::cheats::StepActivates(row.kind, direction, on)) {
+        ActivateCheatRow(row);
+    }
+}
+
+const char* OptionsCheatNote() {
+    return runtime_cheats_available() ? nullptr : "Cheats are not available for this game build.";
+}
+
+bool OptionsOnlinePlay() {
+    return runtime_online_play_enabled() != 0;
 }
 
 void CloseCheatMenu() {
     runtime_cheat_clear_actions();
     cheat_open = false;
-    cheat_close = {};
-    cheat_pressed.reset();
+    menu_close = {};
+    menu_pressed.reset();
     cheat_focused = false;
     cheat_selected_row = -1;
     ImGuiIO& io = ImGui::GetIO();
@@ -289,12 +359,12 @@ void CloseCheatMenu() {
 
 void CheatMenu() {
     ImGuiIO& io = ImGui::GetIO();
-    TrackCheatKeys();
-    if (!cheat_close.requested() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
-        cheat_close.Request();
+    TrackMenuKeys();
+    if (!menu_close.requested() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
+        menu_close.Request();
     }
-    if (cheat_close.requested()) {
-        if (cheat_close.Step(cheat_pressed.any(), ImGui::GetTime())) {
+    if (menu_close.requested()) {
+        if (menu_close.Step(menu_pressed.any(), ImGui::GetTime())) {
             CloseCheatMenu();
         }
         return;
@@ -386,21 +456,59 @@ void CheatMenu() {
 
 void OpenCheatMenu() {
     cheat_open = true;
-    cheat_close = {};
-    cheat_pressed.reset();
+    menu_close = {};
+    menu_pressed.reset();
     cheat_focused = false;
     cheat_selected_row = -1;
     ImGui::GetIO().MouseDrawCursor = true;
 }
 
-// F10 opens and closes the cheat menu; it stays away from the game's own dialogs.
+// F10 opens and closes the cheat menu; it stays away from the game's own dialogs and the Options menu.
 void PressCheatMenuKey(bool repeat) {
-    const bool busy = text_entry_active || choice_active || loading;
+    const bool busy = text_entry_active || choice_active || loading || options_open;
     switch (dcp::cheats::MenuKeyPress(repeat, runtime_cheats_online_locked() != 0, cheat_open, busy)) {
     case dcp::cheats::MenuKeyAction::Open: OpenCheatMenu(); break;
-    case dcp::cheats::MenuKeyAction::Close: cheat_close.Request(); break;
+    case dcp::cheats::MenuKeyAction::Close: menu_close.Request(); break;
     case dcp::cheats::MenuKeyAction::OnlineHint: SetNotice(dcp::cheats::kOnlineLockoutText); break;
     case dcp::cheats::MenuKeyAction::None: break;
+    }
+}
+
+const DcpOptionsUi::CheatRows options_cheats{dcp::cheats::kMenuRows.size(), OptionsCheatView, OptionsCheatActivate,
+                                             OptionsCheatNote, OptionsOnlinePlay};
+
+void OptionsMenu() {
+    TrackMenuKeys();
+    if (menu_close.requested()) {
+        if (menu_close.Step(menu_pressed.any(), ImGui::GetTime())) {
+            runtime_cheat_clear_actions();
+            options_open = false;
+            menu_close = {};
+            menu_pressed.reset();
+            ImGuiIO& io = ImGui::GetIO();
+            io.ClearInputKeys();
+            io.MouseDrawCursor = false;
+        }
+        return;
+    }
+    if (DcpOptionsUi::Frame(options_cheats) == DcpOptionsUi::Result::Close) {
+        menu_close.Request();
+    }
+}
+
+// F1 and the L3 + R3 chord open and close the Options menu; it stays away from the cheat menu and the game's own dialogs.
+void PressOptionsMenuKey(bool repeat) {
+    const bool busy = cheat_open || text_entry_active || choice_active || loading;
+    switch (dcp::menu::TogglePress(repeat, options_open, busy)) {
+    case dcp::menu::ToggleAction::Open:
+        options_open = true;
+        menu_close = {};
+        menu_pressed.reset();
+        DcpOptionsUi::Reset();
+        ImGui::GetIO().MouseDrawCursor = true;
+        break;
+    case dcp::menu::ToggleAction::Close: menu_close.Request(); break;
+    case dcp::menu::ToggleAction::None: break;
     }
 }
 
@@ -760,7 +868,6 @@ bool HandleEvent(const SDL_Event& event) {
         return HandleChoiceEvent(event);
     }
     ImGuiIO& io = ImGui::GetIO();
-    const bool cheats_open = cheat_open;
     switch (event.type) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
@@ -771,13 +878,19 @@ bool HandleEvent(const SDL_Event& event) {
             }
             return true;
         }
-        if (cheats_open && event.key.key == SDLK_ESCAPE && down) {
-            if (!event.key.repeat) {
-                cheat_close.Request();
+        if (event.key.scancode == DcpOptions::kKey) {
+            if (down) {
+                PressOptionsMenuKey(event.key.repeat);
             }
             return true;
         }
-        if (!cheats_open) {
+        if (MenuOpen() && event.key.key == SDLK_ESCAPE && down) {
+            if (!event.key.repeat) {
+                menu_close.Request();
+            }
+            return true;
+        }
+        if (!MenuOpen()) {
             return false;
         }
         io.AddKeyEvent(ImGuiMod_Ctrl, (event.key.mod & SDL_KMOD_CTRL) != 0);
@@ -791,7 +904,10 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP: {
         const bool down = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-        if (!cheats_open) {
+        if (DcpOptionsUi::TrackChord(event.gbutton.which, event.gbutton.button, down)) {
+            PressOptionsMenuKey(false);
+        }
+        if (!MenuOpen()) {
             return false;
         }
         if (const ImGuiKey key = KeyFromGamepad(event.gbutton.button); key != ImGuiKey_None) {
@@ -799,8 +915,11 @@ bool HandleEvent(const SDL_Event& event) {
         }
         return true;
     }
+    case SDL_EVENT_GAMEPAD_REMOVED:
+        DcpOptionsUi::ForgetPad(event.gdevice.which);
+        return false;
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
-        if (cheats_open && (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)) {
+        if (MenuOpen() && (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)) {
             constexpr float kStickDeadZone = 0.25f;
             const float amount = event.gaxis.value / 32767.0f;
             const bool vertical = event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
@@ -813,9 +932,9 @@ bool HandleEvent(const SDL_Event& event) {
         return false;
     }
     case SDL_EVENT_TEXT_INPUT:
-        return cheats_open;
+        return MenuOpen();
     case SDL_EVENT_MOUSE_MOTION: {
-        if (!cheats_open) {
+        if (!MenuOpen()) {
             return false;
         }
         const float density = PixelDensity(event.motion.windowID);
@@ -824,7 +943,7 @@ bool HandleEvent(const SDL_Event& event) {
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
-        if (!cheats_open) {
+        if (!MenuOpen()) {
             return false;
         }
         const int button = event.button.button == SDL_BUTTON_LEFT    ? 0
@@ -837,7 +956,7 @@ bool HandleEvent(const SDL_Event& event) {
         return true;
     }
     case SDL_EVENT_MOUSE_WHEEL:
-        if (!cheats_open) {
+        if (!MenuOpen()) {
             return false;
         }
         io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
@@ -865,7 +984,7 @@ void ShowNotice(const std::string& text) {
 
 bool Visible() {
     const auto& s = DcpSettings::Get();
-    return initialized && (loading || background_total || cheat_open || text_entry_active || choice_active ||
+    return initialized && (loading || background_total || cheat_open || options_open || text_entry_active || choice_active ||
                            choice_retiring || s.show_fps || PingShown() || NoticeShown());
 }
 
@@ -874,7 +993,7 @@ void SetDisplayScale(float scale) {
 }
 
 bool CapturesInput() {
-    return cheat_open || text_entry_active || choice_active;
+    return cheat_open || options_open || text_entry_active || choice_active;
 }
 
 void BeginChoice(const std::string& title, const std::vector<std::string>& items,
@@ -948,6 +1067,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
     if (cheat_open) {
         CheatMenu();
+    }
+    if (options_open) {
+        OptionsMenu();
     }
     if (DcpSettings::Get().show_fps) {
         FpsCounter();

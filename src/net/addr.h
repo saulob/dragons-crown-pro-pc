@@ -55,6 +55,9 @@ void close_socket(socket_t s);
 bool set_nonblocking(socket_t s);
 int last_socket_error();
 bool would_block(int error);
+// Before bind: a port another socket holds fails instead of being shared (SO_EXCLUSIVEADDRUSE on Windows; elsewhere
+// that is already the default).
+void use_exclusive_port(socket_t s);
 
 sockaddr_in to_sockaddr(const Endpoint& e);
 Endpoint from_sockaddr(const sockaddr_in& a);

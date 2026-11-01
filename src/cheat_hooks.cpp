@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <chrono>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "dcp_cheats.h"
 #include "runtime_cheats.h"
@@ -626,6 +628,72 @@ std::span<const GuestHook> Hooks() {
     return hooks;
 }
 
+std::vector<GuestHook> HooksAt(const uint32_t (&offsets)[DCP_CHEAT_HOOKS], const uint8_t* image, uint64_t size) {
+    const std::span<const GuestHook> base = Hooks();
+    std::vector<GuestHook> hooks(base.begin(), base.end());
+    for (size_t i = 0; i < hooks.size(); ++i) {
+        hooks[i].offset = offsets[i];
+        const bool branch = hooks[i].length == 5 && (hooks[i].original[0] == 0xe8 || hooks[i].original[0] == 0xe9);
+        if (branch && uint64_t(offsets[i]) + 5 <= size) {
+            std::memcpy(hooks[i].original, image + offsets[i], 5);
+        }
+    }
+    return hooks;
+}
+
+bool LayoutMatches(const uint32_t (&layout)[DCP_LAYOUT_COUNT], std::string* mismatch) {
+    static_assert(kRecordClassOffset == kRecordLevelOffset + 1, "the record's class is the byte after its level");
+    struct Expected {
+        DcpLayoutField field;
+        uint32_t value;
+    };
+    const Expected expected[] = {
+        {DCP_LAYOUT_DAMAGE_UNIT_FRAME, static_cast<uint32_t>(0u - static_cast<uint32_t>(kDamageUnitFrameOffset))},
+        {DCP_LAYOUT_CONTEXT_VIRTUAL, static_cast<uint32_t>(kUnitContextVirtual)},
+        {DCP_LAYOUT_UNIT_OWNER, kUnitOwnerOffset},
+        {DCP_LAYOUT_UNIT_PLAYER_SLOT, kUnitPlayerSlotOffset},
+        {DCP_LAYOUT_UNIT_CLASS, kUnitClassOffset},
+        {DCP_LAYOUT_UNIT_LEVEL, kUnitLevelOffset},
+        {DCP_LAYOUT_UNIT_HP, kUnitHpOffset},
+        {DCP_LAYOUT_UNIT_STAT, kUnitStatOffset},
+        {DCP_LAYOUT_UNIT_XP, kUnitXpOffset},
+        {DCP_LAYOUT_UNIT_XP_PROGRESS, kUnitXpProgressOffset},
+        {DCP_LAYOUT_UNIT_EQUIPMENT, kUnitEquipmentOffset},
+        {DCP_LAYOUT_OWNER_CATEGORY, kOwnerCategoryOffset},
+        {DCP_LAYOUT_OWNER_UNIT, kOwnerUnitOffset},
+        {DCP_LAYOUT_OWNER_CLASS, kOwnerClassOffset},
+        {DCP_LAYOUT_ARROW_COUNT, kArrowCountOffset},
+        {DCP_LAYOUT_EQUIPMENT_OWNER, kEquipmentOwnerOffset},
+        {DCP_LAYOUT_EQUIPMENT_BAG, kEquipmentBagOffset},
+        {DCP_LAYOUT_ITEM_FLAGS, kItemFlagsOffset},
+        {DCP_LAYOUT_ITEM_DURABILITY, kItemDurabilityOffset},
+        {DCP_LAYOUT_ITEM_MAX_DURABILITY, kItemMaxDurabilityOffset},
+        {DCP_LAYOUT_ITEM_USES, kItemUsesOffset},
+        {DCP_LAYOUT_GOLD, kGoldOffset},
+        {DCP_LAYOUT_GAME_SAVE_BASE, static_cast<uint32_t>(kGameSaveBaseOffset)},
+        {DCP_LAYOUT_SAVE_RECORD_OFFSET, static_cast<uint32_t>(kSaveRecordOffset)},
+        {DCP_LAYOUT_SAVE_RECORD_SIZE, static_cast<uint32_t>(kSaveRecordSize)},
+        {DCP_LAYOUT_GAME_GOLD_CONTEXT, static_cast<uint32_t>(kGameGoldContextOffset)},
+        {DCP_LAYOUT_SKILL_POINTS, kSkillPointsOffset},
+        {DCP_LAYOUT_SKILL_POINTS_MIRROR, kSkillPointsMirrorOffset},
+        {DCP_LAYOUT_RECORD_LEVEL, kRecordLevelOffset},
+        {DCP_LAYOUT_RECORD_XP_POOL, kRecordXpPoolOffset},
+        {DCP_LAYOUT_RECORD_XP_PROGRESS, kRecordXpProgressOffset},
+        {DCP_LAYOUT_LEVEL_XP, kLevelXpOffset},
+        {DCP_LAYOUT_ABSOLUTE_MAX_LEVEL, static_cast<uint32_t>(kAbsoluteMaxLevel)},
+    };
+    static_assert(sizeof(expected) / sizeof(expected[0]) == DCP_LAYOUT_COUNT);
+    for (const Expected& item : expected) {
+        if (layout[item.field] != item.value) {
+            if (mismatch) {
+                *mismatch = dcp_layout_field_name(item.field);
+            }
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace dcp::cheats
 
 namespace {
@@ -708,6 +776,91 @@ extern "C" size_t runtime_cheat_hooks_stub_bytes(void) {
     return dcp::cheats::Hooks().size() * guest_hook_stub_size();
 }
 
+namespace {
+
+using dcp::cheats::FunctionOffsets;
+
+FunctionOffsets StaticOffsets() {
+    FunctionOffsets f{};
+    f.at[DCP_CHEAT_FN_IS_DEAD] = kIsDeadOffset;
+    f.at[DCP_CHEAT_FN_REFILL] = kRefillOffset;
+    f.at[DCP_CHEAT_FN_GET_GOLD] = kGetGoldOffset;
+    f.at[DCP_CHEAT_FN_ADD_GOLD] = kAddGoldOffset;
+    f.at[DCP_CHEAT_FN_RECORD_MODE] = kRecordModeOffset;
+    f.at[DCP_CHEAT_FN_RECORD_STAGE] = kRecordStageOffset;
+    f.at[DCP_CHEAT_FN_MAX_LEVEL] = kMaxLevelOffset;
+    f.at[DCP_CHEAT_FN_LEVEL_ENTRY] = kLevelEntryOffset;
+    f.at[DCP_CHEAT_FN_LEVEL_PATTERN] = kLevelPatternOffset;
+    f.at[DCP_CHEAT_FN_SET_LEVEL] = kSetLevelOffset;
+    f.at[DCP_CHEAT_FN_WRITE_STATS] = kWriteStatsOffset;
+    f.at[DCP_CHEAT_FN_EQUIPMENT_COUNT] = kEquipmentCountOffset;
+    f.at[DCP_CHEAT_FN_EQUIPMENT_ITEM] = kEquipmentItemOffset;
+    f.at[DCP_CHEAT_FN_IS_GEAR] = kIsGearOffset;
+    f.at[DCP_CHEAT_FN_SET_DURABILITY] = kSetDurabilityOffset;
+    return f;
+}
+
+// The game functions the actions call. The static image's are checked by prologue; a located set was matched by the
+// locator's signatures already.
+void BindFunctions(uint8_t* image, const FunctionOffsets& f, bool check_prologues) {
+    dcp::cheats::GuestFunctions functions;
+    functions.save_record = GameSaveRecord;
+    const auto at = [&](DcpCheatFunction function) { return image + f.at[function]; };
+    const auto fits = [&](bool matches) { return !check_prologues || matches; };
+    if (fits(PrologueMatches(image, kRecordModeOffset, kRecordModePrologue) &&
+             PrologueMatches(image, kRecordStageOffset, kRecordStagePrologue) &&
+             PrologueMatches(image, kMaxLevelOffset, kMaxLevelPrologue) &&
+             PrologueMatches(image, kLevelEntryOffset, kLevelEntryPrologue) &&
+             PrologueMatches(image, kLevelPatternOffset, kLevelPatternPrologue) &&
+             PrologueMatches(image, kSetLevelOffset, kSetLevelPrologue) &&
+             PrologueMatches(image, kWriteStatsOffset, kWriteStatsPrologue))) {
+        functions.record_mode = reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(uint64_t)>(at(DCP_CHEAT_FN_RECORD_MODE));
+        functions.record_stage = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(at(DCP_CHEAT_FN_RECORD_STAGE));
+        functions.max_level =
+            reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(int32_t, int32_t, int32_t)>(at(DCP_CHEAT_FN_MAX_LEVEL));
+        functions.level_entry = reinterpret_cast<uint64_t(GUEST_HOOK_ABI*)(int32_t, int32_t)>(at(DCP_CHEAT_FN_LEVEL_ENTRY));
+        functions.level_pattern = reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(uint64_t)>(at(DCP_CHEAT_FN_LEVEL_PATTERN));
+        functions.set_level = reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, uint32_t)>(at(DCP_CHEAT_FN_SET_LEVEL));
+        functions.write_stats = reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, int32_t, int32_t, int32_t, int32_t)>(
+            at(DCP_CHEAT_FN_WRITE_STATS));
+    } else {
+        std::printf("Cheats: Level Up (+1 Level) not available, the game's level functions differ\n");
+    }
+    if (fits(PrologueMatches(image, kIsDeadOffset, kIsDeadPrologue) && PrologueMatches(image, kRefillOffset, kRefillPrologue))) {
+        functions.is_dead = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(at(DCP_CHEAT_FN_IS_DEAD));
+        functions.refill = reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, uint32_t, uint32_t, uint32_t)>(at(DCP_CHEAT_FN_REFILL));
+    } else {
+        std::printf("Cheats: the Health and Mana refill is not available, the game's fill functions differ\n");
+    }
+    if (fits(PrologueMatches(image, kGetGoldOffset, kGetGoldPrologue) && PrologueMatches(image, kAddGoldOffset, kAddGoldPrologue))) {
+        functions.gold_context = GameGoldContext;
+        functions.get_gold = reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(uint64_t)>(at(DCP_CHEAT_FN_GET_GOLD));
+        functions.add_gold = reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, int32_t)>(at(DCP_CHEAT_FN_ADD_GOLD));
+    } else {
+        std::printf("Cheats: Add 1,000 Gold not available, the game's gold functions differ\n");
+    }
+    if (fits(PrologueMatches(image, kEquipmentCountOffset, kEquipmentCountPrologue) &&
+             PrologueMatches(image, kEquipmentItemOffset, kEquipmentItemPrologue) &&
+             PrologueMatches(image, kIsGearOffset, kIsGearPrologue) &&
+             PrologueMatches(image, kSetDurabilityOffset, kSetDurabilityPrologue))) {
+        functions.equipment_count = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(at(DCP_CHEAT_FN_EQUIPMENT_COUNT));
+        functions.equipment_item = reinterpret_cast<uint64_t(GUEST_HOOK_ABI*)(uint64_t, int32_t)>(at(DCP_CHEAT_FN_EQUIPMENT_ITEM));
+        functions.is_gear = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(at(DCP_CHEAT_FN_IS_GEAR));
+        functions.set_durability =
+            reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, int32_t, int32_t)>(at(DCP_CHEAT_FN_SET_DURABILITY));
+    } else {
+        std::printf("Cheats: Infinite Durability refill not available, the game's item functions differ\n");
+    }
+    dcp::cheats::SetGuestFunctions(functions);
+    runtime_cheats_set_available(1);
+}
+
+} // namespace
+
+dcp::cheats::FunctionOffsets dcp::cheats::StaticFunctionOffsets() {
+    return StaticOffsets();
+}
+
 extern "C" int runtime_cheat_hooks_install(uint8_t* image, uint64_t size, uint64_t entry, uint8_t* stubs,
                                            size_t stubs_size) {
     const std::span<const GuestHook> hooks = dcp::cheats::Hooks();
@@ -736,56 +889,33 @@ extern "C" int runtime_cheat_hooks_install(uint8_t* image, uint64_t size, uint64
         std::printf("Cheats: unavailable\n");
         return 0;
     }
-    dcp::cheats::GuestFunctions functions;
-    functions.save_record = GameSaveRecord;
-    if (PrologueMatches(image, kRecordModeOffset, kRecordModePrologue) &&
-        PrologueMatches(image, kRecordStageOffset, kRecordStagePrologue) &&
-        PrologueMatches(image, kMaxLevelOffset, kMaxLevelPrologue) &&
-        PrologueMatches(image, kLevelEntryOffset, kLevelEntryPrologue) &&
-        PrologueMatches(image, kLevelPatternOffset, kLevelPatternPrologue) &&
-        PrologueMatches(image, kSetLevelOffset, kSetLevelPrologue) &&
-        PrologueMatches(image, kWriteStatsOffset, kWriteStatsPrologue)) {
-        functions.record_mode = reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(uint64_t)>(image + kRecordModeOffset);
-        functions.record_stage = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(image + kRecordStageOffset);
-        functions.max_level =
-            reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(int32_t, int32_t, int32_t)>(image + kMaxLevelOffset);
-        functions.level_entry =
-            reinterpret_cast<uint64_t(GUEST_HOOK_ABI*)(int32_t, int32_t)>(image + kLevelEntryOffset);
-        functions.level_pattern = reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(uint64_t)>(image + kLevelPatternOffset);
-        functions.set_level = reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, uint32_t)>(image + kSetLevelOffset);
-        functions.write_stats = reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, int32_t, int32_t, int32_t, int32_t)>(
-            image + kWriteStatsOffset);
-    } else {
-        std::printf("Cheats: Level Up (+1 Level) not available, the game's level functions differ\n");
-    }
-    if (PrologueMatches(image, kIsDeadOffset, kIsDeadPrologue) && PrologueMatches(image, kRefillOffset, kRefillPrologue)) {
-        functions.is_dead = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(image + kIsDeadOffset);
-        functions.refill =
-            reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, uint32_t, uint32_t, uint32_t)>(image + kRefillOffset);
-    } else {
-        std::printf("Cheats: the Health and Mana refill is not available, the game's fill functions differ\n");
-    }
-    if (PrologueMatches(image, kGetGoldOffset, kGetGoldPrologue) && PrologueMatches(image, kAddGoldOffset, kAddGoldPrologue)) {
-        functions.gold_context = GameGoldContext;
-        functions.get_gold = reinterpret_cast<int32_t(GUEST_HOOK_ABI*)(uint64_t)>(image + kGetGoldOffset);
-        functions.add_gold = reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, int32_t)>(image + kAddGoldOffset);
-    } else {
-        std::printf("Cheats: Add 1,000 Gold not available, the game's gold functions differ\n");
-    }
-    if (PrologueMatches(image, kEquipmentCountOffset, kEquipmentCountPrologue) &&
-        PrologueMatches(image, kEquipmentItemOffset, kEquipmentItemPrologue) &&
-        PrologueMatches(image, kIsGearOffset, kIsGearPrologue) &&
-        PrologueMatches(image, kSetDurabilityOffset, kSetDurabilityPrologue)) {
-        functions.equipment_count = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(image + kEquipmentCountOffset);
-        functions.equipment_item = reinterpret_cast<uint64_t(GUEST_HOOK_ABI*)(uint64_t, int32_t)>(image + kEquipmentItemOffset);
-        functions.is_gear = reinterpret_cast<uint8_t(GUEST_HOOK_ABI*)(uint64_t)>(image + kIsGearOffset);
-        functions.set_durability =
-            reinterpret_cast<void(GUEST_HOOK_ABI*)(uint64_t, int32_t, int32_t)>(image + kSetDurabilityOffset);
-    } else {
-        std::printf("Cheats: Infinite Durability refill not available, the game's item functions differ\n");
-    }
-    dcp::cheats::SetGuestFunctions(functions);
-    runtime_cheats_set_available(1);
+    BindFunctions(image, StaticOffsets(), true);
     std::printf("Cheats: %zu of %zu native hooks installed\n", installed, hooks.size());
+    return 1;
+}
+
+extern "C" int runtime_cheat_hooks_install_located(uint8_t* image, uint64_t size, uint64_t entry, const DcpCheatSites* sites,
+                                                   uint8_t* stubs, size_t stubs_size) {
+    std::string mismatch;
+    if (!sites || !dcp::cheats::LayoutMatches(sites->layout, &mismatch)) {
+        std::printf("Cheats: unavailable, the game's %s displacement differs from the handlers'\n",
+                    mismatch.empty() ? "layout" : mismatch.c_str());
+        return 0;
+    }
+    const std::vector<GuestHook> hooks = dcp::cheats::HooksAt(sites->hooks, image, size);
+    const GuestImageId id{size, entry};
+    size_t bad = 0;
+    const GuestHookStatus status =
+        guest_hooks_install(image, size, entry, &id, hooks.data(), hooks.size(), stubs, stubs_size, &bad);
+    if (status != GUEST_HOOK_OK) {
+        std::printf("Cheats: unavailable, hook '%s': %s\n", bad < hooks.size() ? hooks[bad].name : "?",
+                    guest_hook_status_text(status));
+        return 0;
+    }
+    FunctionOffsets functions{};
+    for (size_t i = 0; i < DCP_CHEAT_FUNCTIONS; ++i) functions.at[i] = sites->functions[i];
+    BindFunctions(image, functions, false);
+    std::printf("Cheats: %zu/%zu hooks, %d/%d functions, layout verified by signature\n", hooks.size(), hooks.size(),
+                DCP_CHEAT_FUNCTIONS, DCP_CHEAT_FUNCTIONS);
     return 1;
 }

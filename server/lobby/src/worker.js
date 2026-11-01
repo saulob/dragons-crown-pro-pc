@@ -26,6 +26,14 @@ class WorkerConn {
     this.ws.send(text);
   }
 
+  sendBinary(bytes) {
+    this.ws.send(bytes);
+  }
+
+  get bufferedAmount() {
+    return this.ws.bufferedAmount;
+  }
+
   close(code, reason) {
     this.ws.close(code, reason);
   }
@@ -71,6 +79,10 @@ export class LobbyObject extends DurableObject {
   }
 
   webSocketMessage(ws, message) {
+    if (message instanceof ArrayBuffer) {
+      this.lobby.relay(new WorkerConn(ws), new Uint8Array(message));
+      return;
+    }
     if (typeof message !== 'string' || message.length > LIMITS.reportFrameBytes) {
       ws.close(1009, 'text frames up to the size limit only');
       return;

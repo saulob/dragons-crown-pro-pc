@@ -98,6 +98,15 @@ bool would_block(int error) {
 #endif
 }
 
+void use_exclusive_port(socket_t s) {
+#ifdef _WIN32
+    BOOL exclusive = TRUE;
+    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+#else
+    (void)s;
+#endif
+}
+
 sockaddr_in to_sockaddr(const Endpoint& e) {
     sockaddr_in a{};
     a.sin_family = AF_INET;

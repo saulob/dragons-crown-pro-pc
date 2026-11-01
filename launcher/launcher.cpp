@@ -1,4 +1,5 @@
 #include "dcp_launcher.h"
+#include "startup_phase.h"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -41,6 +42,7 @@
 #include "play_gate.h"
 #include "online_page.h"
 #include "online_settings.h"
+#include "npc_voice_resources.h"
 #include "online_view.h"
 #include "problem_dialog.h"
 #include "prompts_patch.h"
@@ -312,12 +314,15 @@ public:
         // DCP_LAUNCHER_SHOTS=<folder> (tests/launcher_shots.cpp): every page into the folder, hidden, then quit.
         const char* shots = std::getenv("DCP_LAUNCHER_SHOTS");
         options.hidden = shots != nullptr;
+        dcp_startup_phase("launcher opening");
         if (!host_.Open(options)) {
             return false;
         }
         displays_ = ListDisplays();
         gpu_names_ = DcpGraphics::GpuChoices(ListGpuNames());
         prompts_installed_ = InstalledPrompts();
+        xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
+        npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
@@ -338,6 +343,7 @@ public:
         host_.EndFrame(LauncherTheme().bg);
         host_.Show();
         Log("shown");
+        dcp_startup_phase("launcher running");
 
         while (outcome == Outcome::kRunning) {
             if (!host_.PumpEvents()) {
@@ -365,6 +371,7 @@ public:
             }
             host_.EndFrame(LauncherTheme().bg, shot.empty() ? nullptr : shot.c_str());
         }
+        dcp_startup_phase("launcher loop ended");
         if (!skip_finish_save_) {
             SavePlacement(placement_.Flush());
         }
@@ -646,10 +653,15 @@ private:
             if (prompts_.running()) {
                 return trg::PlayCheck{false, "Wait for the game file changes to finish.", 0};
             }
-            if (files_ == GameFileState::kValid) {
-                return trg::PlayCheck{};
+            if (files_ != GameFileState::kValid) {
+                return trg::PlayCheck{false, "The game files are not ready: see the Play page.", 0};
             }
-            return trg::PlayCheck{false, "The game files are not ready: see the Play page.", 0};
+            if (online_page_ && online_page_->PlayNeedsTest(settings_)) {
+                if (play_attempts_.Pressed(ImGui::GetFrameCount())) online_page_->PointToConnectionTest();
+                const auto online = std::find(std::begin(kPageOrder), std::end(kPageOrder), PageId::kOnline);
+                return trg::PlayCheck{false, kConnectionTestRequired, static_cast<int>(online - std::begin(kPageOrder))};
+            }
+            return trg::PlayCheck{};
         };
         return c;
     }
@@ -697,6 +709,13 @@ private:
             ImGui::TextUnformatted(install_failure_.c_str());
             ImGui::PopStyleColor();
             ui.Help(install_failure_text_.c_str());
+            ui.Spacer(4);
+        }
+        if (ready && online_page_->PlayNeedsTest(settings_)) {
+            ui.Spacer(4);
+            ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().warn_dot);
+            ImGui::TextWrapped("%s", kConnectionTestRequired);
+            ImGui::PopStyleColor();
             ui.Spacer(4);
         }
         const std::string files_help = GameFilesHelp();
@@ -794,6 +813,9 @@ private:
             } else {
                 Log("game installed: %zu files (%zu linked), %llu bytes", outcome->files, outcome->linked,
                     static_cast<unsigned long long>(outcome->bytes));
+                for (const std::string& line : outcome->language_report) {
+                    Log("language resources, %s", line.c_str());
+                }
             }
             paths_ = ActiveBuildPaths(RootsOf(paths_));
             Recheck();
@@ -802,6 +824,8 @@ private:
             }
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
+            xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
+            npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
             safe_mode_installed_ = InstalledSafeMode(paths_.app0);
             ApplySavedPatches();
             return;
@@ -810,6 +834,9 @@ private:
             Log("game install cancelled");
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             return;
+        }
+        for (const std::string& line : outcome->diagnostics) {
+            std::printf("%s\n", line.c_str());
         }
         Log("game install failed: %s (%s)", message.title.c_str(), outcome->detail.c_str());
         install_failure_ = message.title;
@@ -940,7 +967,7 @@ private:
             languages.push_back({std::string(language.key), std::string(language.name)});
         }
         ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, text_languages_.front().key.data(), languages);
-        if (SupportsJapaneseNpcVoices(build_)) {
+        if (npc_voices_available_) {
             ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
         }
         std::vector<trg::Option> frame_rates;
@@ -971,7 +998,7 @@ private:
         help.replace(help.find("F10"), 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
         ui.Help(help.c_str());
         ui.Spacer(12);
-        const bool blocked = build_ && !build_->cheats;
+        const bool blocked = !CheatsAvailable(build_);
         if (blocked) {
             ui.Help((std::string("Cheats are not available for ") + build_->label + ".").c_str());
             ui.Spacer(8);
@@ -999,7 +1026,7 @@ private:
         ui.Info("Controller", "Automatic: Xbox controllers work without setup.");
         ui.Row("Controller prompts", kControllerPromptsHelp);
         ControllerPromptsCombo(ui);
-        if (build_ && !build_->xbox_prompts) {
+        if (build_ && !xbox_available_) {
             ui.Help("Xbox prompts are not available for this game build.");
         }
         ui.Info("Keyboard", "Always on, together with the controller.");
@@ -1040,7 +1067,7 @@ private:
             return;
         }
         const bool ready = files_ == GameFileState::kValid && !install_.running();
-        const bool xbox_allowed = !build_ || build_->xbox_prompts;
+        const bool xbox_allowed = !build_ || xbox_available_;
         ImGui::BeginDisabled(!ready || !xbox_allowed);
         const char* shown = ready ? PromptStyleLabel(prompts_installed_) : "Install the game first";
         if (ImGui::BeginCombo("##controller_prompts", shown)) {
@@ -1068,7 +1095,7 @@ private:
         if (files_ != GameFileState::kValid) {
             return;
         }
-        const PromptStyle style = build_ && build_->xbox_prompts ? SavedPromptStyle() : PromptStyle::kPlayStation;
+        const PromptStyle style = xbox_available_ ? SavedPromptStyle() : PromptStyle::kPlayStation;
         const bool safe_mode = settings_.GetBool(kArachnophobiaSafeModeKey, false);
         if (style != prompts_installed_ || safe_mode != safe_mode_installed_ ||
             (style == PromptStyle::kPlayStation && PromptPatchInstalled())) {
@@ -1134,6 +1161,8 @@ private:
             return;
         }
         prompts_installed_ = InstalledPrompts();
+        xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
+        npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         if (outcome->ok) {
             Log("game patches: prompts %s, arachnophobia safe mode %s (%s)", PromptStyleKey(prompts_installed_),
@@ -1271,6 +1300,7 @@ private:
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
     std::unique_ptr<OnlinePage> online_page_;
+    PlayAttemptDetector play_attempts_;
     PlayGate play_;
     ProblemDialog problem_;
     PlacementTracker placement_;
@@ -1282,6 +1312,8 @@ private:
     std::string install_failure_;
     std::string install_failure_text_;
     PromptStyle prompts_installed_ = PromptStyle::kPlayStation;
+    bool xbox_available_ = false;
+    bool npc_voices_available_ = false;
     bool safe_mode_installed_ = false;
     PatchAction patch_action_ = PatchAction::kPrompts;
     std::shared_ptr<PromptsResult> prompts_outcome_;

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 
 #include "net/crypto.h"
 #include "net/stun.h"
@@ -143,8 +144,13 @@ void PeerSocket::set_room(const RoomKey& key, uint64_t self_account) {
     self_ = self_account;
 }
 
-void PeerSocket::set_peer(uint64_t account, std::vector<Endpoint> candidates) {
+void PeerSocket::set_peer(uint64_t account, std::vector<Endpoint> candidates, uint16_t relay_member) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (relay_member) {
+        relay_members_[account] = relay_member;
+    } else {
+        relay_members_.erase(account);
+    }
     candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [](const Endpoint& e) { return !e.valid(); }),
                      candidates.end());
     auto& known = peers_[account];
@@ -155,10 +161,16 @@ void PeerSocket::set_peer(uint64_t account, std::vector<Endpoint> candidates) {
 void PeerSocket::forget_peer(uint64_t account) {
     std::lock_guard<std::mutex> lock(mutex_);
     peers_.erase(account);
+    relay_members_.erase(account);
 }
 
 uint64_t PeerSocket::peer_at(const Endpoint& e) const {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (is_relay_endpoint(e)) {
+        for (const auto& [account, member] : relay_members_)
+            if (member == e.port) return account;
+        return 0;
+    }
     for (const auto& [account, list] : peers_)
         if (std::find(list.begin(), list.end(), e) != list.end()) return account;
     return 0;
@@ -281,7 +293,73 @@ void PeerSocket::punch(const Endpoint& to) {
     for (int i = 0; i < 3; ++i) SendRaw(to, packet, sizeof(packet));
 }
 
+void PeerSocket::enable_relay(uint32_t token, RelaySend send) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    relay_token_ = token;
+    relay_send_ = std::move(send);
+}
+
+void PeerSocket::disable_relay() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    relay_send_ = nullptr;
+}
+
+bool PeerSocket::relay_enabled() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return bool(relay_send_);
+}
+
+RelayStats PeerSocket::relay_stats() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return relay_stats_;
+}
+
+LinkPath PeerSocket::path(int id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const Link* link = Find(id);
+    if (!link || link->state == LinkState::kClosed) return LinkPath::kFailed;
+    if (link->state == LinkState::kConnected) return is_relay_endpoint(link->addr) ? LinkPath::kRelay : LinkPath::kDirect;
+    return link->relay_offered ? LinkPath::kRelayOffered : LinkPath::kConnectingDirect;
+}
+
+bool PeerSocket::deliver_relay(const uint8_t* data, size_t size) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const std::optional<RelayFrame> frame = decode_relay_frame(data, size);
+    uint16_t known = 0;
+    if (frame && relay_send_ && frame->token == relay_token_) {
+        for (const auto& [account, member] : relay_members_)
+            if (member == frame->member) known = member;
+    }
+    if (!known || stun::looks_like_stun(frame->payload.data(), frame->payload.size())) {
+        ++relay_stats_.rejected;
+        return false;
+    }
+    ++relay_stats_.frames_in;
+    relay_stats_.bytes_in += frame->payload.size();
+    Receive(frame->payload.data(), frame->payload.size(), relay_endpoint(known), now_ms());
+    return true;
+}
+
+bool PeerSocket::RelayReachable(const Link& link, uint64_t now) const {
+    return relay_send_ && relay_members_.count(link.account) &&
+           now - link.started_ms >= uint64_t(options_.relay_after_ms);
+}
+
+void PeerSocket::SendRelay(uint16_t member, const void* data, size_t size) {
+    std::vector<uint8_t> frame;
+    if (relay_send_) {
+        frame = encode_relay_frame(relay_token_, member, ++relay_seq_, static_cast<const uint8_t*>(data), size);
+    }
+    if (frame.empty() || !relay_send_(std::move(frame))) {
+        ++relay_stats_.send_failures;
+        return;
+    }
+    ++relay_stats_.frames_out;
+    relay_stats_.bytes_out += size;
+}
+
 void PeerSocket::SendRaw(const Endpoint& to, const void* data, size_t size) {
+    if (is_relay_endpoint(to)) return SendRelay(to.port, data, size);
     const sockaddr_in a = to_sockaddr(to);
     sendto(socket_, static_cast<const char*>(data), int(size), 0, reinterpret_cast<const sockaddr*>(&a), sizeof(a));
 }
@@ -353,7 +431,8 @@ void PeerSocket::Handshake(const uint8_t* data, size_t size, const Endpoint& fro
         link->addr = from;
         link->addr_rx_ms = now;
         std::printf("P2P: link %d to peer %llu connected via %s after %llu ms\n", link->id, (unsigned long long)sender,
-                    endpoint_text(from).c_str(), (unsigned long long)(now - link->started_ms));
+                    is_relay_endpoint(from) ? "the relay" : endpoint_text(from).c_str(),
+                    (unsigned long long)(now - link->started_ms));
     }
     if (!reply) SendHello(*link, from, true);
 }
@@ -445,7 +524,7 @@ void PeerSocket::Receive(const uint8_t* data, size_t size, const Endpoint& from,
     link->last_rx_ms = now;
     if (from == link->addr) {
         link->addr_rx_ms = now;
-    } else if (now - link->addr_rx_ms > 3000) {
+    } else if (!is_relay_endpoint(from) && !is_relay_endpoint(link->addr) && now - link->addr_rx_ms > 3000) {
         std::printf("P2P: link %d: peer moved to %s\n", link->id, endpoint_text(from).c_str());
         link->addr = from;
         link->addr_rx_ms = now;
@@ -541,6 +620,14 @@ void PeerSocket::Timers(uint64_t now) {
                 const auto peer = peers_.find(link.account);
                 if (peer != peers_.end())
                     for (const Endpoint& e : peer->second) SendHello(link, e, false);
+                if (RelayReachable(link, now)) {
+                    if (!link.relay_offered) {
+                        link.relay_offered = true;
+                        std::printf("P2P: link %d to peer %llu: no direct answer after %d ms; relay offered beside direct\n",
+                                    link.id, (unsigned long long)link.account, options_.relay_after_ms);
+                    }
+                    SendHello(link, relay_endpoint(relay_members_[link.account]), false);
+                }
                 link.next_hello_ms = now + (now - link.started_ms < 3000 ? 100 : 250);
             }
         } else if (link.state == LinkState::kConnected) {

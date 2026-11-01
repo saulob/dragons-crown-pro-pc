@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "feature_sites.h"
 #include "guest_hook.h"
 
 #ifdef __cplusplus
@@ -40,6 +41,8 @@ typedef struct {
     uint32_t facility_draw_call;               /* the town facility frame's call of the model draw */
     uint32_t worldmap_draw;                    /* the route map widget's draw */
     uint32_t fade_jumps[ULTRAWIDE_FADES];      /* the loading and saving fades' tail jump to the model draw */
+    uint32_t camera_view_call;                 /* the camera task's call of its view build */
+    uint32_t view_build;                       /* the view build */
 } UltrawideRecord;
 
 #define ULTRAWIDE_RECORD_COUNT 5
@@ -156,6 +159,14 @@ size_t ultrawide_hooks_stub_bytes(void);
  * projections. 1 when any group installed; `detail` says which. A group that fails leaves its sites untouched. */
 int ultrawide_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size,
                             double scale, char *detail, size_t detail_size);
+
+/* The same for a supported build whose sites a locator found (feature_sites.h). Every group must install: when one
+ * cannot, nothing is written and `detail` says which. */
+int ultrawide_hooks_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpUltrawideSites *sites,
+                                    uint8_t *stubs, size_t stubs_size, double scale, char *detail, size_t detail_size);
+
+/* The record a locator's sites make for an image of `size` and `entry`. */
+UltrawideRecord ultrawide_record_from_sites(const DcpUltrawideSites *sites, uint64_t size, uint64_t entry);
 
 #ifdef __cplusplus
 }

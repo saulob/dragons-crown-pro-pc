@@ -10,9 +10,12 @@
 #include <windows.h>
 #endif
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <optional>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -21,8 +24,10 @@
 #endif
 
 #include "boot_image.h"
+#include "build_diagnostics.h"
 #include "cpk_patch.h"
 #include "pkg_extract.h"
+#include "text_languages.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -210,6 +215,32 @@ InstallStatus FromCheck(const GameCheck& check) {
                    : InstallStatus::kWrongVersion;
     }
     return InstallStatus::kIncomplete;
+}
+
+// A Dragon's Crown Pro the port does not support is reported with its diagnostics; anything else keeps its failure.
+InstallResult UnsupportedOrFailure(const GameCheck& check, const GameSource& source, const std::string& sfo) {
+    if (check.state == GameFileState::kDifferentVersion) {
+        UnsupportedReport report = DiagnoseUnsupportedBuild(source, sfo);
+        if (report.dragons_crown) {
+            InstallResult result = Failure(InstallStatus::kUnsupportedBuild, check.detail);
+            result.diagnostics = std::move(report.lines);
+            return result;
+        }
+        if (!report.rejection.empty()) {
+            return Failure(FromCheck(check), check.detail + "; " + report.rejection);
+        }
+    }
+    return Failure(FromCheck(check), check.detail);
+}
+
+InstallResult UnsupportedOrFailure(const GameCheck& check, const fs::path& folder) {
+    if (check.state != GameFileState::kDifferentVersion) {
+        return Failure(FromCheck(check), check.detail);
+    }
+    const std::unique_ptr<GameSource> source = OpenFolderSource(folder);
+    std::vector<uint8_t> sfo;
+    source->Read("sce_sys/param.sfo", 1u << 20, sfo);
+    return UnsupportedOrFailure(check, *source, std::string(sfo.begin(), sfo.end()));
 }
 
 // The folders the installer writes: the prepared game and the boot image, each with a staging and a backup folder.
@@ -434,6 +465,92 @@ InstallResult OverlayUpdate(const fs::path& update, const fs::path& staged) {
     return {};
 }
 
+// The build's regional archive of the staged game becomes the base's with the update's entries outside the language
+// slots; the update's own archive is then consumed. The staged archive may be a link into the installed base, which is
+// only read: the result is a file of its own.
+InstallResult KeepBaseLanguages(const GameBuild& build, const fs::path& update, const fs::path& staged) {
+    std::error_code ec;
+    const fs::path update_archive = update / build.regional_archive, staged_archive = staged / build.regional_archive;
+    if (!fs::exists(update_archive, ec)) {
+        return {};
+    }
+    CpkArchive base;
+    std::string error;
+    if (!base.Open(staged_archive, &error)) {
+        return Failure(InstallStatus::kIncomplete, std::string(build.regional_archive) + ": " + error);
+    }
+    const std::set<std::string> slots = LanguageSlotSuffixes(base, &build);
+    const fs::path composed = WithSuffix(staged_archive, ".compose");
+    const OverlayResult overlaid = OverlayArchive(staged_archive, update_archive,
+                                                  [&](std::string_view path) { return InLanguageSlot(path, slots); }, composed);
+    if (!overlaid.ok) {
+        return Failure(overlaid.update_unreadable ? InstallStatus::kReadFailed : InstallStatus::kWriteFailed, overlaid.detail);
+    }
+    if (overlaid.wrote) {
+        fs::remove(staged_archive, ec);
+        fs::rename(composed, staged_archive, ec);
+        if (ec) {
+            fs::remove(composed, ec);
+            return Failure(InstallStatus::kWriteFailed, "cannot place " + Utf8(staged_archive));
+        }
+    }
+    fs::remove(update_archive, ec);
+    return {};
+}
+
+bool IsArchive(const fs::path& file) {
+    std::string extension = Utf8(file.extension());
+    for (char& c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return extension == ".cpk";
+}
+
+// An update's archive that lacks entries of the base's archive at the same path holds only what the update changes: the
+// staged game gets the base's archive with all of the update's entries laid over it, and the update's archive is
+// consumed. A complete archive replaces the base's as a whole; one the reader cannot open fails the step.
+InstallResult ComposePartialArchives(const fs::path& update, const fs::path& staged) {
+    std::error_code ec;
+    std::vector<fs::path> archives;
+    for (fs::recursive_directory_iterator it(update, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec) && IsArchive(it->path())) {
+            archives.push_back(it->path());
+        }
+    }
+    if (ec) {
+        return Failure(InstallStatus::kReadFailed, "cannot list " + Utf8(update) + ": " + ec.message());
+    }
+    for (const fs::path& update_archive : archives) {
+        const fs::path staged_archive = staged / update_archive.lexically_relative(update);
+        CpkArchive base, changes;
+        if (!fs::is_regular_file(staged_archive, ec) || !base.Open(staged_archive)) {
+            continue;
+        }
+        if (std::string error; !changes.Open(update_archive, &error)) {
+            return Failure(InstallStatus::kReadFailed, "the update's " + Utf8(update_archive.filename()) + ": " + error);
+        }
+        if (std::all_of(base.entries().begin(), base.entries().end(),
+                        [&](const CpkEntry& entry) { return changes.Find(entry.path) != nullptr; })) {
+            continue;
+        }
+        const fs::path composed = WithSuffix(staged_archive, ".compose");
+        const OverlayResult overlaid =
+            OverlayArchive(staged_archive, update_archive, [](std::string_view) { return false; }, composed);
+        if (!overlaid.ok) {
+            return Failure(overlaid.update_unreadable ? InstallStatus::kReadFailed : InstallStatus::kWriteFailed,
+                           overlaid.detail);
+        }
+        if (overlaid.wrote) {
+            fs::remove(staged_archive, ec);
+            fs::rename(composed, staged_archive, ec);
+            if (ec) {
+                fs::remove(composed, ec);
+                return Failure(InstallStatus::kWriteFailed, "cannot place " + Utf8(staged_archive));
+            }
+        }
+        fs::remove(update_archive, ec);
+    }
+    return {};
+}
+
 InstallStatus FromPackage(PackageResult::Code code) {
     switch (code) {
     case PackageResult::kOk: return InstallStatus::kInstalled;
@@ -490,8 +607,26 @@ std::optional<InstallResult> ReuseInstalledBuild(const GameRoots& roots, std::sp
     return result;
 }
 
+// A package that names a supported build but carries another executable is diagnosed in place, before anything is
+// unpacked; nothing is returned when the installation should go on.
+std::optional<InstallResult> RejectForeignExecutable(Package& package, const GameCheck& identity) {
+    const std::unique_ptr<GameSource> source = OpenPackageSource(package);
+    if (!ExecutableDiffers(*source, *identity.build)) {
+        return std::nullopt;
+    }
+    GameCheck check;
+    check.state = GameFileState::kDifferentVersion;
+    check.detail = "eboot.bin is not the supported build";
+    check.build = identity.build;
+    InstallResult result = UnsupportedOrFailure(check, *source, package.sfo());
+    if (result.status != InstallStatus::kUnsupportedBuild) {
+        return std::nullopt;
+    }
+    return result;
+}
+
 // A package that finishes its build by itself: the base package of a build without updates.
-InstallResult InstallBasePackage(const fs::path& source, Package& package, const Layout& layout,
+InstallResult InstallBasePackage(const fs::path& source, Package& package, const PackageResult& loaded, const Layout& layout,
                                  const InstallHooks& hooks, std::span<const GameBuild> builds, const GameBuild& build) {
     const auto phase = [&](const char* text) {
         if (hooks.phase) {
@@ -501,7 +636,7 @@ InstallResult InstallBasePackage(const fs::path& source, Package& package, const
     if (!IsReplaceable(layout.app0, kPreparedMarker) || !IsReplaceable(layout.image, "boot.bin")) {
         return Failure(InstallStatus::kForeignFolder, Utf8(layout.app0) + " or " + Utf8(layout.image));
     }
-    if (const PackageResult loaded = package.LoadFiles(); !loaded.ok()) {
+    if (!loaded.ok()) {
         return Failure(FromPackage(loaded.code), loaded.detail);
     }
     const uint64_t total = package.total_bytes();
@@ -520,7 +655,7 @@ InstallResult InstallBasePackage(const fs::path& source, Package& package, const
     phase("Checking the game files...");
     const GameCheck unpacked = CheckGameTree(layout.app0_stage, builds);
     if (unpacked.state != GameFileState::kValid || unpacked.build != &build) {
-        return Failure(FromCheck(unpacked), unpacked.detail);
+        return UnsupportedOrFailure(unpacked, layout.app0_stage);
     }
     if (InstallResult activated = BuildAndActivate(layout, app0_guard, image_guard, hooks, builds, build, total);
         !activated.ok()) {
@@ -535,8 +670,9 @@ InstallResult InstallBasePackage(const fs::path& source, Package& package, const
 }
 
 // An update laid over the installed base build of its title, staged and checked like any other installation.
-InstallResult InstallUpdatePackage(const fs::path& source, Package& package, const Layout& layout, const GameRoots& roots,
-                                   const InstallHooks& hooks, std::span<const GameBuild> builds, const GameBuild& build) {
+InstallResult InstallUpdatePackage(const fs::path& source, Package& package, const PackageResult& loaded, const Layout& layout,
+                                   const GameRoots& roots, const InstallHooks& hooks, std::span<const GameBuild> builds,
+                                   const GameBuild& build) {
     const auto phase = [&](const char* text) {
         if (hooks.phase) {
             hooks.phase(text);
@@ -554,7 +690,7 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
     if (!IsReplaceable(layout.app0, kPreparedMarker) || !IsReplaceable(layout.image, "boot.bin")) {
         return Failure(InstallStatus::kForeignFolder, Utf8(layout.app0) + " or " + Utf8(layout.image));
     }
-    if (const PackageResult loaded = package.LoadFiles(); !loaded.ok()) {
+    if (!loaded.ok()) {
         return Failure(FromPackage(loaded.code), loaded.detail);
     }
     const uint64_t total = package.total_bytes();
@@ -571,19 +707,28 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
         fs::remove_all(update_dir, ec);
         return Failure(FromPackage(extracted.code), extracted.detail);
     }
+    std::vector<std::string> language_report;
+    const auto report_languages = [&](const char* name, const fs::path& app0) {
+        if (const std::string text = DescribeLanguageResources(app0, &build); !text.empty()) {
+            language_report.push_back(name + (": " + text));
+        }
+    };
+    report_languages("base", base.app0);
+    report_languages("update", update_dir);
     phase("Copying the game files...");
-    InstallResult staged = StageUpdate(base.app0, update_dir, layout.app0_stage);
+    InstallResult staged = StageUpdate(base.app0, update_dir, layout.app0_stage, &build);
     fs::remove_all(update_dir, ec);
     if (!staged.ok()) {
         return staged;
     }
+    report_languages("finished", layout.app0_stage);
     if (!WriteMarker(layout.app0_stage, source, 0, package.file_count(), build, "full")) {
         return Failure(InstallStatus::kWriteFailed, "cannot write the preparation marker");
     }
     phase("Checking the game files...");
     const GameCheck merged = CheckGameTree(layout.app0_stage, builds);
     if (merged.state != GameFileState::kValid || merged.build != &build) {
-        return Failure(FromCheck(merged), merged.detail);
+        return UnsupportedOrFailure(merged, layout.app0_stage);
     }
     if (InstallResult activated = BuildAndActivate(layout, app0_guard, image_guard, hooks, builds, build, total);
         !activated.ok()) {
@@ -594,17 +739,27 @@ InstallResult InstallUpdatePackage(const fs::path& source, Package& package, con
     result.bytes = total;
     result.files = package.file_count();
     result.build = &build;
+    result.language_report = std::move(language_report);
     return result;
 }
 
 } // namespace
 
-InstallResult StageUpdate(const fs::path& base_app0, const fs::path& update_dir, const fs::path& staged_app0) {
+InstallResult StageUpdate(const fs::path& base_app0, const fs::path& update_dir, const fs::path& staged_app0,
+                          const GameBuild* build) {
     if (InstallResult linked = LinkTree(base_app0, staged_app0); !linked.ok()) {
         return linked;
     }
     if (InstallResult reverted = RevertStagedPatches(staged_app0); !reverted.ok()) {
         return reverted;
+    }
+    if (build && build->keep_base_languages && build->regional_archive) {
+        if (InstallResult kept = KeepBaseLanguages(*build, update_dir, staged_app0); !kept.ok()) {
+            return kept;
+        }
+    }
+    if (InstallResult composed = ComposePartialArchives(update_dir, staged_app0); !composed.ok()) {
+        return composed;
     }
     return OverlayUpdate(update_dir, staged_app0);
 }
@@ -639,17 +794,26 @@ InstallResult InstallFromPackage(const fs::path& package_file, const GameRoots& 
     }
     const GameCheck identity = CheckPackageIdentity(package.sfo(), builds);
     if (identity.state != GameFileState::kValid) {
+        if (identity.state == GameFileState::kDifferentVersion && package.LoadFiles().ok()) {
+            return UnsupportedOrFailure(identity, *OpenPackageSource(package), package.sfo());
+        }
         return Failure(FromCheck(identity), identity.detail);
     }
     const GameBuild& build = *identity.build;
     if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build, hooks.replace_active)) {
         return *reused;
     }
+    const PackageResult loaded = package.LoadFiles();
+    if (loaded.ok()) {
+        if (std::optional<InstallResult> foreign = RejectForeignExecutable(package, identity)) {
+            return *foreign;
+        }
+    }
     const Layout layout(BuildPaths(roots, build));
     if (identity.layer > 0) {
-        return InstallUpdatePackage(source, package, layout, roots, hooks, builds, build);
+        return InstallUpdatePackage(source, package, loaded, layout, roots, hooks, builds, build);
     }
-    return InstallBasePackage(source, package, layout, hooks, builds, build);
+    return InstallBasePackage(source, package, loaded, layout, hooks, builds, build);
 }
 
 InstallResult InstallFromFolder(const fs::path& source_dir, const GameRoots& roots, const InstallHooks& hooks,
@@ -671,7 +835,7 @@ InstallResult InstallFromFolder(const fs::path& source_dir, const GameRoots& roo
     }
     const GameCheck check = CheckGameTree(source, builds);
     if (check.state != GameFileState::kValid) {
-        return Failure(FromCheck(check), check.detail);
+        return UnsupportedOrFailure(check, source);
     }
     const GameBuild& build = *check.build;
     if (std::optional<InstallResult> reused = ReuseInstalledBuild(roots, builds, build, hooks.replace_active)) {
@@ -788,6 +952,10 @@ InstallMessage DescribeInstall(InstallStatus status) {
         return {"Game activated", "The selected build is now the active game."};
     case InstallStatus::kUpToDate:
         return {"Already up to date", "This version is already the active game."};
+    case InstallStatus::kUnsupportedBuild:
+        return {"Dragon's Crown Pro version not supported yet",
+                "Diagnostic information was written to the latest log. Please share the latest log when reporting this "
+                "version on GitHub."};
     }
     return {"Could not install the game", "An unexpected error occurred."};
 }

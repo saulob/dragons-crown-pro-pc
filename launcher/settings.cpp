@@ -56,6 +56,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kOnlineNameKey, net::kDefaultOnlineName},
     {kOnlineUdpPortKey, "0"},
     {kOnlineStunKey, net::kDefaultStunServers},
+    {kConnectionTestPortKey, "0"},
     {kPingDisplayKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
     {cheats::kInfiniteAllyHealthKey, "0"},

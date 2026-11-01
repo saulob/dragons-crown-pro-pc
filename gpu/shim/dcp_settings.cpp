@@ -86,6 +86,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.show_fps_title = ParseBool(value, v.show_fps_title);
     } else if (key == "show_resolution_title") {
         v.show_resolution_title = ParseBool(value, v.show_resolution_title);
+    } else if (key == "story_skip_offer") {
+        v.story_skip_offer = ParseBool(value, v.story_skip_offer);
+    } else if (key == "tutorial_skip_offer") {
+        v.tutorial_skip_offer = ParseBool(value, v.tutorial_skip_offer);
     } else if (key == "frame_rate") {
         v.frame_rate = DcpFramePacing::ParseFrameRate(value);
     } else if (const int scancode = dcp_key_from_name(value.c_str()); scancode != 0) {
@@ -97,8 +101,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         }
     }
 }
-
-using Entries = std::vector<std::pair<std::string, std::string>>;
 
 // Every line holding one of `entries` is rewritten in place and missing ones are appended; all other lines stay.
 bool WriteEntries(const Entries& entries) {
@@ -243,6 +245,10 @@ void Load(const std::string& path) {
 
 bool SaveDisplayMode() {
     return WriteEntries({{"display_mode", DisplayModeKey()}});
+}
+
+bool SaveEntries(const Entries& entries) {
+    return WriteEntries(entries);
 }
 
 } // namespace DcpSettings

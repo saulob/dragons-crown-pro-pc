@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -11,6 +12,8 @@
 #include "game_profile.h"
 
 namespace dcp {
+
+class CpkArchive;
 
 inline constexpr std::string_view kRussianKey = "russian";
 inline constexpr std::string_view kRussianName = "Russian";
@@ -23,6 +26,17 @@ bool IsRussianText(std::span<const uint8_t> sheet);
 // system language. The build's own list when its languages are not archive slots, the archive cannot be read or it
 // holds no complete language.
 std::vector<TextLanguage> InstalledTextLanguages(const std::filesystem::path& app0, const GameBuild* build);
+
+// The suffixes of the archive's language slots: the build's languages and every other suffix whose set of files is at
+// least half the size of the largest set (the UK slot, not the single EU file).
+std::set<std::string> LanguageSlotSuffixes(const CpkArchive& archive, const GameBuild* build);
+// True for a file of one of the slots, named by suffix (stage/Menu_FR.ftx) or prefix (other/DE_manual_001.ftx).
+bool InLanguageSlot(std::string_view path, const std::set<std::string>& slots);
+
+// One log line on the language slots of the build's regional archive in `app0`: entry count, files per slot and, per
+// slot, the SystemMsg sheet's checksum, size and non-ASCII byte count. Never text. Empty when the build's languages are
+// not archive slots.
+std::string DescribeLanguageResources(const std::filesystem::path& app0, const GameBuild* build);
 
 bool SameLanguages(std::span<const TextLanguage> a, std::span<const TextLanguage> b);
 // "English, French": the names for the log.

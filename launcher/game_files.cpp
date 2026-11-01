@@ -69,6 +69,17 @@ std::optional<SfoEntry> FindSfoEntry(const std::string& sfo, const char* key) {
     return std::nullopt;
 }
 
+std::string Printable(const std::string& text) {
+    std::string out;
+    for (const char c : text) {
+        if (c == '\0') {
+            break;
+        }
+        out += static_cast<unsigned char>(c) < 0x20 ? '?' : c;
+    }
+    return out;
+}
+
 bool IsRegularNonEmpty(const std::filesystem::path& path) {
     std::error_code ec;
     return std::filesystem::is_regular_file(path, ec) && std::filesystem::file_size(path, ec) > 0 && !ec;
@@ -198,6 +209,42 @@ std::string JsonString(const std::string& text, const std::string& key) {
     }
     const size_t end = text.find('"', at + 1);
     return end == std::string::npos ? std::string{} : text.substr(at + 1, end - at - 1);
+}
+
+std::vector<SfoField> SfoFields(const std::string& sfo) {
+    std::vector<SfoField> fields;
+    const auto* data = reinterpret_cast<const unsigned char*>(sfo.data());
+    const size_t size = sfo.size();
+    if (size < 20 || std::memcmp(data, "\0PSF", 4) != 0) {
+        return fields;
+    }
+    const uint32_t keys = Le32(data + 8), values = Le32(data + 12), count = Le32(data + 16);
+    for (uint32_t i = 0; i < count && i < 256 && 20 + static_cast<size_t>(i) * 16 + 16 <= size; ++i) {
+        const unsigned char* entry = data + 20 + static_cast<size_t>(i) * 16;
+        const uint16_t key_offset = Le16(entry), format = Le16(entry + 2);
+        const uint32_t length = Le32(entry + 4), offset = Le32(entry + 12);
+        if (static_cast<size_t>(keys) + key_offset >= size || static_cast<size_t>(values) + offset + length > size) {
+            continue;
+        }
+        const char* name = sfo.c_str() + keys + key_offset;
+        SfoField field;
+        field.key.assign(name, strnlen(name, size - keys - key_offset));
+        const std::string raw = sfo.substr(values + offset, length);
+        if (format == 0x0204 || format == 0x0004) {
+            field.value = format == 0x0204 ? Printable(raw) : std::to_string(raw.size()) + " bytes";
+        } else if (format == 0x0404 && raw.size() == 4) {
+            char text[16];
+            std::snprintf(text, sizeof(text), "0x%08x", Le32(reinterpret_cast<const unsigned char*>(raw.data())));
+            field.value = text;
+        } else {
+            field.value = "format " + std::to_string(format);
+        }
+        if (field.value.size() > 80) {
+            field.value.resize(80);
+        }
+        fields.push_back(std::move(field));
+    }
+    return fields;
 }
 
 std::string Sha256Hex(const std::filesystem::path& file) {
@@ -464,6 +511,7 @@ extern "C" int dcp_game_build(const char* image_dir, DcpGameBuild* out) {
     out->resolution_sites = build->resolution_sites.data();
     out->resolution_site_count = build->resolution_sites.size();
     out->resolution_by_signature = build->resolution_by_signature;
+    out->features_by_signature = build->features_by_signature;
     out->title_id = build->title_id;
     out->version = build->version;
     return 1;

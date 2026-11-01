@@ -99,6 +99,7 @@ to an issue, with your distribution, GPU and driver.
 
 PLAYING
 -------
+- F1 (or L3 + R3 on a controller) opens the Options menu.
 - F11 switches between Windowed and Borderless Fullscreen.
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
   Steam Deck's own controls.
@@ -110,7 +111,8 @@ PLAYING
   player stays logged in when their controller is unplugged.
 - Online Co-op (new in v0.9.0): turn on Online Play on the launcher's Online
   page (Off by default) to meet friends through a small online service; the
-  game traffic goes directly between the players' PCs. Cheats are off while it
+  game traffic goes directly between the players' PCs, or through the online
+  service for a pair that cannot connect directly. Cheats are off while it
   is on. F3 shows the Ping during Online Play, F2 the frame counter.
   Online play on Linux and Steam Deck has not yet been tested on real hardware.
 - The game itself unlocks online play only after the opening tutorial and story

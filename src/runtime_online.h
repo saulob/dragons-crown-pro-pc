@@ -39,6 +39,7 @@ const char *runtime_online_system_type(const char *online_id);
 #include "net/identity.h"
 #include "net/online_config.h"
 #include "net/peer_socket.h"
+#include "online_view.h"
 
 namespace dcp::online {
 
@@ -79,6 +80,18 @@ void presence_clear();
 void friends_fetch();
 bool friends_busy();
 std::vector<FriendRoom> friends_result(uint64_t *generation);
+
+// What the Online page reads of the game's own lobby connection (the Matching2 link): its state, the account's friend
+// code and the full friend list as the lobby last sent it.
+struct PageLink {
+    int link = RUNTIME_ONLINE_LINK_OFF;
+    std::string friend_code;
+    bool friends_known = false;
+    std::vector<OnlinePlayer> friends;
+};
+// A copy of that state, taken under the port lock for the moment. Read only: the link, the requests and the lists are
+// the game's own to start, serve and refresh.
+PageLink page_link();
 
 // The player card's System type for an online id: this PC's, or what the lobby reported for that player.
 std::string system_type(const std::string& online_id);

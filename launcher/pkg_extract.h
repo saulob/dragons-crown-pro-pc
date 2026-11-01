@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace dcp {
 
@@ -18,6 +19,11 @@ struct PackageResult {
     Code code = kOk;
     std::string detail; // for the log, not the UI
     bool ok() const { return code == kOk; }
+};
+
+struct PackageFile {
+    std::string path;
+    uint64_t size = 0;
 };
 
 class Package {
@@ -35,6 +41,14 @@ public:
     // cancel.
     PackageResult Extract(const std::filesystem::path& out,
                           const std::function<bool(uint64_t done, uint64_t total)>& progress);
+
+    // The files of the inner file system, after LoadFiles.
+    std::vector<PackageFile> Files() const;
+    // One file's bytes, read without writing anything; kIncomplete when it is absent or larger than `max_bytes`.
+    PackageResult ReadFile(const std::string& path, uint64_t max_bytes, std::vector<uint8_t>& out);
+
+    // `length` bytes of one file from `offset`, read without writing anything.
+    PackageResult ReadFileRange(const std::string& path, uint64_t offset, size_t length, std::vector<uint8_t>& out);
 
     const std::string& content_id() const;
     const std::string& sfo() const;

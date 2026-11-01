@@ -28,6 +28,38 @@ struct OnlinePlaySwitch {
 };
 OnlinePlaySwitch ResolveOnlinePlay(bool saved);
 
+inline constexpr char kConnectionTestRequired[] = "Run the Connection test on the Online page before playing online.";
+// Under the running Connection test on Windows, whose firewall may ask about the multiplayer port's first use; none
+// elsewhere.
+const char* ConnectionTestRunningNote(bool windows);
+
+// How the Connection test section is drawn: while PLAY waits for the test it is a gold panel with the Run test button as
+// the primary action; otherwise the plain row.
+struct ConnectionTestLook {
+    bool panel = false;
+    bool primary_button = false;
+    const char* required_text = nullptr;
+};
+ConnectionTestLook ConnectionTestLookOf(bool required);
+
+// The panel's border and tint, 0 to 1, for the seconds since a blocked PLAY pointed at it: a few soft pulses that fade
+// out; 0 before and after.
+inline constexpr double kConnectionTestEmphasisSeconds = 2.5;
+float ConnectionTestEmphasis(double seconds_since_blocked);
+
+// The launcher asks whether PLAY may start every frame to grey its button, and once more when PLAY is pressed.
+class PlayAttemptDetector {
+public:
+    bool Pressed(int frame) {
+        const bool again = frame == last_frame_;
+        last_frame_ = frame;
+        return again;
+    }
+
+private:
+    int last_frame_ = -1;
+};
+
 struct OnlinePlayer {
     std::string account; // names the player in lobby requests; never shown
     std::string name;

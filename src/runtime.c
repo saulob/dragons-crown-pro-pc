@@ -1,6 +1,7 @@
 /* Narrow, explicit PS4 libc contracts. No automatic success stubs. */
 #define _CRT_RAND_S
 #include "runtime.h"
+#include "startup_phase.h"
 #include "runtime_online.h"
 #include "dcpgpu.h"
 #include "runtime_log.h"
@@ -176,6 +177,7 @@ static ABI int guest_memcmp(const void *a, const void *b, size_t size) {
 }
 static ABI size_t guest_strlen(const char *text) { return strlen(text); }
 static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
+    dcp_startup_phase("guest exit requested");
     printf("Runtime: guest requested exit(%d)\n", status);
     runtime_finalize(NULL);
     runtime_report();

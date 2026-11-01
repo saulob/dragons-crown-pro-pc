@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 
+#include "feature_sites.h"
+
 #include "dcp_resolution.h"
 
 #ifdef __cplusplus
@@ -131,12 +133,22 @@ typedef struct {
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
+    int features_by_signature;   /* the cheat, NPC voice and True Ultrawide sites are found by signature, not by table */
     const char *title_id;
     const char *version;         /* the build's profile version: with title_id, the build key of the loader's patches */
 } DcpGameBuild;
 
 /* The supported game build a boot image folder was built from (its image.json); 0 when it is not one. */
 int dcp_game_build(const char *image_dir, DcpGameBuild *build);
+
+/* The only way the loader reaches the structural locators (feature_sites.h): resolves the wanted features for a supported
+ * build whose profile sets features_by_signature. For any other build, or none, nothing resolves, whatever the image
+ * holds, and every failure says so. Returns 1 when something was asked for and resolved. */
+int dcp_resolve_features(const DcpGameBuild *build, const DcpImageView *image, int cheats, int voices, int ultrawide,
+                         DcpFeatureSites *out);
+
+/* 1 when the game folder holds the files Japanese NPC Voices needs (npc_voice_resources.h). */
+int dcp_npc_voice_resources(const char *app0);
 
 typedef enum {
     DCP_LAUNCHER_PLAY = 0,

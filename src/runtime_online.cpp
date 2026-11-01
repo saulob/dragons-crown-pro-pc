@@ -10,11 +10,13 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "net/addr.h"
 #include "net/online_version.h"
 #include "online_settings.h"
+#include "runtime_online_page.h"
 #include "utf8.h"
 
 #define DCP_SYSV __attribute__((sysv_abi))
@@ -457,4 +459,56 @@ extern "C" int runtime_online_check_imports(const char (*names)[128], const unsi
     std::printf("Online: %llu online imports have no implementation; playing offline\n", (unsigned long long)missing);
     online::g_settings.enabled = false;
     return 0;
+}
+
+namespace {
+
+struct ConnectionTest {
+    std::mutex mutex;
+    std::atomic<bool> running{false};
+    bool done = false;
+    net::ConnectionReport report;
+};
+
+// Never destroyed: a test still running when the process exits must not find its state gone.
+ConnectionTest& TestState() {
+    static ConnectionTest& state = *new ConnectionTest;
+    return state;
+}
+
+} // namespace
+
+extern "C" void runtime_online_page_run_test(void) {
+    const online::Settings& s = online::settings();
+    ConnectionTest& test = TestState();
+    if (!s.enabled || test.running.exchange(true)) return;
+    std::thread([&test, config = s.config, identity = s.identity, name = s.name, game = s.game] {
+        net::ConnectionReport report = net::run_connection_test(config, identity, name, game);
+        for (const std::string& detail : report.details) std::printf("Connection test: %s\n", detail.c_str());
+        std::printf("Connection test: %s\n", report.verdict.c_str());
+        {
+            std::lock_guard<std::mutex> lock(test.mutex);
+            test.done = true;
+            test.report = std::move(report);
+        }
+        test.running = false;
+    }).detach();
+}
+
+extern "C" void runtime_online_page_update(RuntimeOnlinePage* page) {
+    if (!page) return;
+    std::memset(page, 0, sizeof(*page));
+    const online::Settings& s = online::settings();
+    page->active = s.enabled ? 1 : 0;
+    online::CopyText(page->name, s.enabled ? s.name : net::online_name(s.config.name));
+    if (!s.enabled) return;
+    const online::PageLink link = online::page_link();
+    page->link = link.link;
+    online::CopyText(page->friend_code, link.friend_code);
+    page->friends_known = link.friends_known ? 1 : 0;
+    online::FillFriends(*page, link.friends);
+    ConnectionTest& test = TestState();
+    std::lock_guard<std::mutex> lock(test.mutex);
+    page->test = test.running ? RUNTIME_ONLINE_TEST_RUNNING : test.done ? RUNTIME_ONLINE_TEST_DONE : RUNTIME_ONLINE_TEST_IDLE;
+    if (test.done && !test.running) online::FillReport(*page, test.report);
 }
