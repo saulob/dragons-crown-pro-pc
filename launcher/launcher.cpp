@@ -18,14 +18,15 @@
 
 #include <imgui.h>
 
-#include "trg/headers.h"
-#include "trg/launcher.h"
+#include "ui/include/trg/headers.h"
+#include "ui/include/trg/launcher.h"
 #include "trg/platform.h"
 
 #include "controller_prompts.h"
 #include "game_patches.h"
 #include "dcp_accent.h"
 #include "dcp_png.h"
+#include "ui_assets.h"
 #include "dcp_cheats.h"
 #include "dcp_displays.h"
 #include "dcp_graphics.h"
@@ -158,10 +159,23 @@ std::vector<std::string> ListGpuNames() {
 }
 
 trg::Theme LauncherTheme() {
+    // Keep the redesigned pages and navigation, but use the visual language of
+    // the original Dragon's Crown launcher: charcoal surfaces, restrained
+    // contrast, and the game's warm gold as the only primary accent.
     trg::Theme theme = trg::Theme::Midnight().WithAccent(kAccent);
-    // Warnings stay red-orange so they are never mistaken for the gold accent.
-    theme.warn = ImVec4(0.47f, 0.18f, 0.10f, 1.0f);
-    theme.warn_dot = ImVec4(1.0f, 0.45f, 0.30f, 1.0f);
+    theme.bg = ImVec4(0.071f, 0.071f, 0.082f, 1.0f);       // #121215
+    theme.panel = ImVec4(0.102f, 0.102f, 0.125f, 0.92f);   // cards
+    theme.frame = ImVec4(0.145f, 0.145f, 0.170f, 1.0f);    // controls
+    theme.frame_hot = ImVec4(0.190f, 0.190f, 0.220f, 1.0f);
+    theme.frame_active = ImVec4(0.230f, 0.230f, 0.270f, 1.0f);
+    theme.popup = ImVec4(0.102f, 0.102f, 0.125f, 0.99f);
+    theme.text = ImVec4(0.878f, 0.878f, 0.902f, 1.0f);     // #e0e0e6
+    theme.dim = ImVec4(0.533f, 0.533f, 0.580f, 1.0f);      // #888894
+    theme.good = ImVec4(0.118f, 0.420f, 0.239f, 1.0f);
+    theme.good_dot = ImVec4(0.400f, 0.800f, 0.550f, 1.0f);
+    // Warnings stay orange-red so they are never confused with the gold accent.
+    theme.warn = ImVec4(0.470f, 0.180f, 0.100f, 1.0f);
+    theme.warn_dot = ImVec4(0.953f, 0.612f, 0.071f, 1.0f);
     return theme;
 }
 
@@ -169,7 +183,7 @@ constexpr float kHeaderArtAspect = 1600.0f / 180.0f;
 
 trg::HeaderPainter LauncherHeader(ImTextureID art, float art_aspect) {
     const trg::HeaderPainter gradient = trg::headers::Gradient(
-        IM_COL32(12, 18, 26, 255), IM_COL32(62, 42, 12, 255), IM_COL32(8, 34, 44, 255), IM_COL32(8, 10, 16, 255));
+        IM_COL32(18, 18, 21, 255), IM_COL32(75, 57, 22, 255), IM_COL32(38, 31, 20, 255), IM_COL32(12, 12, 14, 255));
     return [gradient, art, art_aspect](const trg::HeaderContext& c) {
         gradient(c);
         if (art == ImTextureID{}) {
@@ -322,7 +336,7 @@ public:
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
         placement_ = PlacementTracker(host_.Restored());
-        fonts_ = trg::LoadSystemFonts(18.0f);
+        fonts_ = dcp::LoadLauncherFonts();
         header_art_ = LoadHeaderArt(host_, header_art_aspect_);
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
@@ -628,13 +642,9 @@ private:
         c.fonts = fonts_;
         c.branding.title = "DRAGON'S CROWN PRO";
         c.branding.subtitle_color = kAccent;
-        c.branding.subtitle_segments = {
-            {"PC PORT   \xC2\xB7   ", ""},
-            {"v" DCP_PORT_VERSION "   \xC2\xB7   ", ""},
-            {"BY SAULOB", kAuthorUrl},
-        };
+        // Keep the developer credit on one line in the narrow sidebar.
+        c.branding.subtitle = "PC PORT   \xC2\xB7   v" DCP_PORT_VERSION "   \xC2\xB7   SAULOB";
         c.branding.background = LauncherHeader(header_art_, header_art_aspect_);
-        c.sponsor = {"Sponsor on GitHub", kSponsorUrl, sponsor_icon_};
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
@@ -659,28 +669,28 @@ private:
         switch (page) {
         case PageId::kPlay:
             return {name, "Check the game files and start playing.", [this](trg::Ui& ui) { PagePlay(ui); },
-                    [this] { return files_ != GameFileState::kValid; }, nullptr};
+                    [this] { return files_ != GameFileState::kValid; }};
         case PageId::kDisplay:
             return {name, "Window, monitor, scaling and presentation.", [this](trg::Ui& ui) { PageDisplay(ui); },
-                    nullptr, nullptr};
+                    nullptr};
         case PageId::kGraphics:
             return {name, "Resolution, anti-aliasing and texture filtering.", [this](trg::Ui& ui) { PageGraphics(ui); },
-                    nullptr, nullptr};
+                    nullptr};
         case PageId::kGameplay:
-            return {name, "Frame rate readouts.", [this](trg::Ui& ui) { PageGameplay(ui); }, nullptr, nullptr};
+            return {name, "Frame rate readouts.", [this](trg::Ui& ui) { PageGameplay(ui); }, nullptr};
         case PageId::kCheats:
-            return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr, nullptr};
+            return {name, cheats::kLauncherPageSubtitle, [this](trg::Ui& ui) { PageCheats(ui); }, nullptr};
         case PageId::kControls:
-            return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr, nullptr};
+            return {name, "Controller and keyboard.", [this](trg::Ui& ui) { PageControls(ui); }, nullptr};
         case PageId::kOnline:
             return {name, "Play with others over the Internet: friends and the connection test.",
-                    [this](trg::Ui& ui) { PageOnline(ui); }, nullptr,
-                    [this] { return online_page_ ? static_cast<int>(online_page_->PendingRequests()) : 0; }};
+                    [this](trg::Ui& ui) { PageOnline(ui); },
+                    [this] { return online_page_ && online_page_->PendingRequests() != 0; }};
         case PageId::kTrophies:
-            return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr, nullptr};
+            return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr};
         case PageId::kAbout:
             return {name, "This port, and where your files and settings live.", [this](trg::Ui& ui) { PageAbout(ui); },
-                    nullptr, nullptr};
+                    nullptr};
         }
         return {};
     }
@@ -699,8 +709,20 @@ private:
             ui.Help(install_failure_text_.c_str());
             ui.Spacer(4);
         }
+
+        ui.Card("Support this project", "Optional support helps fund ongoing improvements and future work.");
+        ui.Row("Sponsor", "Support the Dragon's Crown Pro PC port on GitHub.");
+        if (ui.AccentButton("Sponsor on GitHub")) {
+            trg::OpenUrl(kSponsorUrl);
+        }
+        ui.EndRows();
+        ui.EndCard();
+
+        ui.Card("Game files", "Supported Dragon's Crown Pro package builds");
         const std::string files_help = GameFilesHelp();
-        ui.Row("Game files", files_help.c_str());
+        // Keep the larger explanation under the package label, with the
+        // install button in the right column like the reference layout.
+        ui.RowLarge("Game package", files_help.c_str());
         if (!ui.TaskProgress(install_)) {
             const bool clicked = ready ? ImGui::Button("Reinstall game...", ImVec2(-FLT_MIN, 0))
                                        : ui.AccentButton("Install game...");
@@ -708,8 +730,21 @@ private:
                 BrowseAndInstall();
             }
         }
+        std::vector<std::string> supported;
+        const std::span<const GameBuild> builds = SupportedBuilds();
+        int highlighted = -1;
+        supported.reserve(builds.size());
+        for (size_t i = 0; i < builds.size(); ++i) {
+            supported.emplace_back(builds[i].label);
+            if (build_ == &builds[i]) highlighted = static_cast<int>(i);
+        }
+        ui.Chips(supported, highlighted);
+        ui.EndCard();
+
+        ui.Card("Launch behavior");
         ui.Toggle("Show this launcher", kShowLauncherHelp, kShowLauncherKey, true, "Off", "On");
         ui.EndRows();
+        ui.EndCard();
     }
 
     // The desktop's chooser (Windows' own, zenity or kdialog) unless there is none or DCP_FILE_CHOOSER=builtin.
@@ -1008,16 +1043,18 @@ private:
             ResetKeys(settings_);
             ui.SetStatus("Keys reset to defaults.");
         }
-        if (ui.Section("Keyboard controls", true)) {
-            ui.Help("Click a key, then press the new one. Esc cancels. A key can be used for more than one control.");
-            for (int action = 0; action < DCP_KEY_FIRST_HOTKEY; ++action) {
-                KeyRow(ui, static_cast<DcpKeyAction>(action));
-            }
+        // Keep this block permanently visible. A collapsible keyboard section
+        // changes the vertical layout and breaks the established controls page.
+        ui.Heading("Keyboard controls");
+        ui.Help("Click a key, then press the new one. Esc cancels. A key can be used for more than one control.");
+        for (int action = 0; action < DCP_KEY_FIRST_HOTKEY; ++action) {
+            KeyRow(ui, static_cast<DcpKeyAction>(action));
         }
-        if (ui.Section("Port hotkeys", true)) {
-            for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {
-                KeyRow(ui, static_cast<DcpKeyAction>(action));
-            }
+        // Port hotkeys are fixed as well; collapsing this block changes the
+        // controls layout and makes the two key-binding groups inconsistent.
+        ui.Heading("Port hotkeys");
+        for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {
+            KeyRow(ui, static_cast<DcpKeyAction>(action));
         }
     }
 
@@ -1185,10 +1222,10 @@ private:
     }
 
     void PageAbout(trg::Ui& ui) {
-        ui.SponsorCard(
-            "This open source PC port is maintained and developed in my free time. If you enjoy the project and would "
-            "like to support its continued development, you can sponsor my work on GitHub.",
-            "Support is completely optional and helps support ongoing improvements and future projects.");
+        ui.Heading("About this port");
+        ui.Paragraph(
+            "This open source PC port is maintained and developed in my free time. Support is optional and helps fund "
+            "ongoing improvements and future projects.");
         ui.Paragraph("Dragon's Crown Pro for PlayStation 4, running natively on this PC. No game files are included; "
                      "the game runs from the user's own copy.");
         ui.Spacer(4);
@@ -1229,7 +1266,7 @@ private:
                       SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
                       SDL_VERSIONNUM_MICRO(SDL_GetVersion()), IMGUI_VERSION, DCP_TRG_LAUNCHER_VERSION);
         ui.Info("Libraries", libraries);
-        ui.Link(kPortRepository, kPortUrl);
+        ui.Info("Repository", kPortRepository);
     }
 
     void OpenLogsFolder() {

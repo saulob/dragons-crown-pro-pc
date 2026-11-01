@@ -5,9 +5,11 @@ if (NOT EXISTS ${TRG_DIR}/include/trg/launcher.h)
     message(FATAL_ERROR "TRG Launcher is missing: run tools\\build.ps1, which fetches it (gpu\\deps.txt).")
 endif()
 set(IMGUI_DIR ${PROJECT_SOURCE_DIR}/gpu/third_party/imgui)
+set(DCP_UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ui)
 
 # TRG's settings file, platform helpers and HTTPS downloads do not need Dear ImGui.
 add_library(trg_core STATIC ${TRG_DIR}/src/settings.cpp ${TRG_DIR}/src/platform.cpp ${TRG_DIR}/src/download.cpp)
+# The upstream sources keep their current settings/platform/download API.
 target_include_directories(trg_core PUBLIC ${TRG_DIR}/include)
 target_compile_definitions(trg_core PRIVATE _CRT_SECURE_NO_WARNINGS)
 if (WIN32)
@@ -17,8 +19,10 @@ else()
 endif()
 
 # The launcher draws with the Dear ImGui compiled into the video core library.
-add_library(trg_launcher STATIC ${TRG_DIR}/src/launcher.cpp ${TRG_DIR}/src/headers.cpp)
-target_include_directories(trg_launcher PUBLIC ${IMGUI_DIR})
+# Use the v0.7 local renderer: it owns the sidebar, breadcrumb, cards, rows,
+# footer and page layout shown in the reference release.
+add_library(trg_launcher STATIC ${DCP_UI_DIR}/src/launcher.cpp ${DCP_UI_DIR}/src/headers.cpp)
+target_include_directories(trg_launcher BEFORE PUBLIC ${DCP_UI_DIR}/include ${IMGUI_DIR})
 target_compile_definitions(trg_launcher PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(trg_launcher PUBLIC trg_core dcpgpu)
 
@@ -70,14 +74,36 @@ add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
     DEPENDS ${DCP_SPIDER_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
     COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
 
+# The v0.7 launcher embeds its Inter/Cinzel/JetBrains Mono fonts.
+set(DCP_UI_ASSETS
+    ${DCP_UI_DIR}/fonts/Inter-Regular.ttf|kFontInterRegular
+    ${DCP_UI_DIR}/fonts/Inter-SemiBold.ttf|kFontInterSemiBold
+    ${DCP_UI_DIR}/fonts/Inter-Bold.ttf|kFontInterBold
+    ${DCP_UI_DIR}/fonts/Cinzel-Bold.ttf|kFontCinzelBold
+    ${DCP_UI_DIR}/fonts/JetBrainsMono-Regular.ttf|kFontJetBrainsMono
+    ${PROJECT_SOURCE_DIR}/packaging/icons/app-icon-128.png|kLauncherIcon)
+set(DCP_UI_ASSET_SOURCES)
+foreach (asset ${DCP_UI_ASSETS})
+    string(REPLACE "|" ";" parts "${asset}")
+    list(GET parts 0 asset_file)
+    list(GET parts 1 asset_symbol)
+    set(asset_source ${CMAKE_BINARY_DIR}/generated/${asset_symbol}.cpp)
+    add_custom_command(OUTPUT ${asset_source}
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${asset_file} -DOUTPUT=${asset_source} -DSYMBOL=${asset_symbol}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+        DEPENDS ${asset_file} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
+        COMMENT "Embedding ${asset_symbol}")
+    list(APPEND DCP_UI_ASSET_SOURCES ${asset_source})
+endforeach ()
+
 add_library(dcp_launcher STATIC host.cpp launcher.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
     updater/github_release.cpp updater/json.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
     updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
     updater/update_ui.cpp updater/update_zip.cpp updater/version.cpp
-    ${DCP_PROMPTS_PATCH_SOURCE} ${DCP_SPIDER_PATCH_SOURCE})
+    ${DCP_PROMPTS_PATCH_SOURCE} ${DCP_SPIDER_PATCH_SOURCE} ${DCP_UI_ASSET_SOURCES})
 set_source_files_properties(updater/third_party/miniz/miniz.c PROPERTIES COMPILE_OPTIONS "-w")
 target_compile_definitions(dcp_launcher PRIVATE DCP_PORT_VERSION="${PROJECT_VERSION}")
-target_include_directories(dcp_launcher PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
+target_include_directories(dcp_launcher BEFORE PRIVATE ${DCP_UI_DIR}/include ${PROJECT_SOURCE_DIR}/gpu/shim ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(dcp_launcher PUBLIC dcp_launcher_core trg_launcher dcp_imgui_sdl ${CMAKE_DL_LIBS})
 
 # Windows helper that replaces the launcher after it exits; not part of the Linux package.
