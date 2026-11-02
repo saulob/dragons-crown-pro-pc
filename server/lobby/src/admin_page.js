@@ -37,37 +37,63 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       <button id="signout" type="button" class="quiet">Sign out</button>
     </div>
     <div class="cards">
-      <div class="card"><span class="label">Online now</span><span id="c-online" class="value">–</span></div>
-      <div class="card"><span class="label">In rooms</span><span id="c-in-rooms" class="value">–</span></div>
-      <div class="card"><span class="label">Open rooms</span><span id="c-rooms" class="value">–</span></div>
-      <div class="card"><span class="label">Peak today</span><span id="c-peak" class="value">–</span></div>
-      <div class="card"><span class="label">Sessions today</span><span id="c-sessions" class="value">–</span></div>
+      <div class="card" tabindex="0" data-help="Players connected to the online service right now, counted once per connected account"><span class="label">Online now</span><span id="c-online" class="value">–</span></div>
+      <div class="card" tabindex="0" data-help="Players currently occupying a seat in an online room"><span class="label">In rooms</span><span id="c-in-rooms" class="value">–</span></div>
+      <div class="card" tabindex="0" data-help="Multiplayer rooms currently open"><span class="label">Open rooms</span><span id="c-rooms" class="value">–</span></div>
+      <div class="card" tabindex="0" data-help="Highest number of players online at the same time today"><span class="label">Peak today</span><span id="c-peak" class="value">–</span></div>
+      <div class="card" tabindex="0" data-help="Online sessions started today, with reconnects inside the existing 10-minute deduplication window not counted again"><span class="label">Sessions today</span><span id="c-sessions" class="value">–</span></div>
+      <div class="card" tabindex="0" data-help="Multiplayer rooms created today"><span class="label">Rooms today</span><span id="c-rooms-today" class="value">–</span></div>
+      <div class="card" tabindex="0" data-help="Successful room joins today, not unique players, and the same player can contribute more than one join"><span class="label">Joins today</span><span id="c-joins-today" class="value">–</span></div>
     </div>
-    <p id="today-line" class="muted"></p>
+    <h2 class="section">Period comparison</h2>
+    <div class="panel">
+      <p id="compare-note" class="muted"></p>
+      <div class="scroll"><table id="compare"></table></div>
+    </div>
+    <h2 class="section">Multiplayer activity</h2>
+    <div class="panel">
+      <p id="activity-note" class="muted"></p>
+      <div class="cards" id="activity"></div>
+      <div class="grid">
+        <div id="d-occupancy"></div>
+        <div id="d-lifetime"></div>
+      </div>
+    </div>
+    <h2 class="section">Historical activity</h2>
     <div class="panel">
       <h2>Usage over time</h2>
       <p class="muted">Highest value in each 15-minute interval; kept for 90 days.</p>
       <div id="usage" class="chart"></div>
     </div>
-    <div class="panel">
-      <h2>Sessions by day</h2>
-      <div id="sessions" class="chart"></div>
-    </div>
-    <div class="grid">
-      <div class="panel"><h2>Platform</h2><div id="d-platform"></div></div>
-      <div class="panel"><h2>Port version</h2><div id="d-version"></div></div>
-      <div class="panel"><h2>Country</h2><div id="d-country"></div></div>
+    <div>
+      <div class="panel"><h2>Sessions by day</h2><div id="h-sessions" class="chart"></div></div>
+      <div class="panel"><h2>Rooms created by day</h2><div id="h-rooms" class="chart"></div></div>
+      <div class="panel"><h2>Successful joins by day</h2><div id="h-joins" class="chart"></div></div>
+      <div class="panel"><h2>Peak online by day</h2><div id="h-peak-online" class="chart"></div></div>
+      <div class="panel"><h2>Peak in rooms by day</h2><div id="h-peak-rooms" class="chart"></div></div>
     </div>
     <div class="panel">
       <h2>Daily totals</h2>
       <div class="scroll"><table id="daily"></table></div>
     </div>
+    <h2 class="section">Connection health</h2>
+    <div class="panel">
+      <p class="muted">Operational counts for the selected range. They describe the service, not players.</p>
+      <div class="cards" id="health"></div>
+    </div>
     <details class="panel">
-      <summary>Diagnostics: incompatibility rejects</summary>
+      <summary>Incompatibility rejects by reason</summary>
       <div id="rejects"></div>
     </details>
+    <h2 class="section">Platforms and countries</h2>
+    <div class="grid">
+      <div class="panel"><h2>Platform</h2><div id="d-platform"></div></div>
+      <div class="panel"><h2>Port version</h2><div id="d-version"></div></div>
+      <div class="panel"><h2>Country</h2><div id="d-country"></div></div>
+    </div>
+    <h2 class="section">Abuse protection</h2>
     <details class="panel">
-      <summary>Diagnostics: abuse protection</summary>
+      <summary>Protection counters</summary>
       <div id="abuse"></div>
     </details>
     <div class="panel notes">
@@ -78,6 +104,14 @@ export const ADMIN_HTML = String.raw`<!doctype html>
         <li>Platform, version and country by day count sessions started. "Now" counts players online, one per account,
           from the connections open at this moment.</li>
         <li>Country comes from Cloudflare and is stored only as a daily count. Unknown: Cloudflare did not say.</li>
+        <li>A room is counted when its last seat is gone. Its party size is the most seats it held at once; a room with a
+          party of 1 never had a guest. Lifetime runs from creation to that moment and includes the 30-second seat grace.
+          Rooms open when the Worker was updated are not counted.</li>
+        <li>Joins are successful room joins. They are not unique players: a player entering several rooms counts once per room.</li>
+        <li>Relay rooms are rooms in which the relay forwarded at least one frame. The lobby cannot see peer-to-peer
+          traffic, so the share of rooms that connected directly is not measured.</li>
+        <li>Period comparison sets the selected range (including today so far) against the same number of days before it.
+          No percentage is shown when the earlier period has nothing to compare with.</li>
         <li>Nothing here stores names, Friend Codes, accounts, addresses, rooms or gameplay.</li>
       </ul>
     </div>
@@ -148,6 +182,9 @@ body {
 .top { padding-top: 24px; }
 h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 15px; margin: 0 0 8px; }
+h2.section { font-size: 17px; margin: 24px 0 10px; }
+.up { color: var(--series-3); }
+.down { color: var(--error); }
 .muted { color: var(--text-muted); margin: 0 0 12px; font-size: 13px; }
 .panel {
   background: var(--surface-1);
@@ -191,6 +228,8 @@ button.quiet { background: transparent; color: var(--text-secondary); border-col
   display: flex;
   flex-direction: column;
 }
+.card[data-help] { cursor: help; }
+.card[data-help]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card .label { color: var(--text-secondary); font-size: 13px; }
 .card .value { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
@@ -205,6 +244,7 @@ button.quiet { background: transparent; color: var(--text-secondary); border-col
 .chart .s3 { stroke: var(--series-3); }
 .chart .bar { fill: var(--series-1); }
 .chart .bar:hover { opacity: 0.8; }
+.chart .value-label { fill: var(--text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; }
 .chart .cursor { stroke: var(--text-muted); stroke-width: 1; }
 .chart .hit { fill: transparent; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 8px; color: var(--text-secondary); font-size: 13px; }
@@ -316,6 +356,17 @@ export const ADMIN_JS = String.raw`(function () {
   }
   function hideTip() { tip.hidden = true; }
 
+  Array.prototype.forEach.call(document.querySelectorAll('.card[data-help]'), function (card) {
+    var help = card.getAttribute('data-help');
+    card.addEventListener('mousemove', function (event) { showTip(event, [help]); });
+    card.addEventListener('mouseleave', hideTip);
+    card.addEventListener('focus', function () {
+      var box = card.getBoundingClientRect();
+      showTip({ clientX: box.left, clientY: box.bottom - 14 }, [help]);
+    });
+    card.addEventListener('blur', hideTip);
+  });
+
   function niceMax(v) {
     if (v <= 4) return 4;
     var p = Math.pow(10, Math.floor(Math.log10(v)));
@@ -398,17 +449,18 @@ export const ADMIN_JS = String.raw`(function () {
     node.appendChild(root);
   }
 
-  function sessionsChart(node, daily) {
+  function barChart(node, daily, key, metric) {
     clear(node);
-    var W = 900, H = 220, pad = { top: 10, right: 12, bottom: 26, left: 44 };
-    var max = niceMax(Math.max.apply(null, daily.map(function (d) { return d.sessions; })));
+    var W = 900, H = 200, pad = { top: 22, right: 12, bottom: 26, left: 44 };
+    var labelled = daily.length <= 30;
+    var max = niceMax(Math.max.apply(null, daily.map(function (d) { return d[key]; })));
     var root = frame(W, H, max, pad);
     var plotW = W - pad.left - pad.right;
     var plotH = H - pad.top - pad.bottom;
     var slot = plotW / daily.length;
     var gap = Math.min(2, slot * 0.2);
     daily.forEach(function (d, i) {
-      var h = plotH * d.sessions / max;
+      var h = plotH * d[key] / max;
       var x = pad.left + slot * i + gap / 2;
       var w = Math.max(1, slot - gap);
       if (h > 0) {
@@ -417,9 +469,14 @@ export const ADMIN_JS = String.raw`(function () {
         var path = 'M' + x + ' ' + (pad.top + plotH) + 'V' + (y + r) + 'Q' + x + ' ' + y + ' ' + (x + r) + ' ' + y +
           'H' + (x + w - r) + 'Q' + (x + w) + ' ' + y + ' ' + (x + w) + ' ' + (y + r) + 'V' + (pad.top + plotH) + 'Z';
         root.appendChild(svg('path', { d: path, 'class': 'bar' }));
+        if (labelled) {
+          var value = svg('text', { x: x + w / 2, y: y - 5, 'text-anchor': 'middle', 'class': 'value-label' });
+          value.textContent = fmt(d[key]);
+          root.appendChild(value);
+        }
       }
       var hit = svg('rect', { x: pad.left + slot * i, y: pad.top, width: slot, height: plotH, 'class': 'hit' });
-      hit.addEventListener('mousemove', function (event) { showTip(event, [dayText(d.day), 'Sessions: ' + fmt(d.sessions)]); });
+      hit.addEventListener('mousemove', function (event) { showTip(event, [dayText(d.day), metric + ': ' + fmt(d[key])]); });
       hit.addEventListener('mouseleave', hideTip);
       root.appendChild(hit);
     });
@@ -436,16 +493,20 @@ export const ADMIN_JS = String.raw`(function () {
   function rows(node, title, items, name) {
     var box = el('div', 'dist');
     box.appendChild(el('h3', '', title));
-    if (!items.length) box.appendChild(el('p', 'empty', 'None'));
     var total = items.reduce(function (a, b) { return a + b.count; }, 0);
-    var top = items.length ? items[0].count : 1;
+    if (!(total > 0)) {
+      box.appendChild(el('p', 'empty', 'No data yet'));
+      node.appendChild(box);
+      return;
+    }
+    var top = Math.max.apply(null, items.map(function (i) { return i.count; }));
     items.slice(0, 12).forEach(function (item) {
       var row = el('div', 'row');
       var label = name ? name(item.value) : item.value;
       row.appendChild(el('span', 'name', label)).title = label;
       var track = el('span', 'track');
       var fill = el('span', 'fill');
-      fill.style.width = Math.max(2, 100 * item.count / top) + '%';
+      fill.style.width = (item.count > 0 ? Math.max(2, 100 * item.count / top) : 0) + '%';
       track.appendChild(fill);
       row.appendChild(track);
       row.appendChild(el('span', 'count', fmt(item.count) + ' · ' + Math.round(100 * item.count / total) + '%'));
@@ -462,11 +523,112 @@ export const ADMIN_JS = String.raw`(function () {
     rows(node, 'Sessions · last ' + days + ' days', range, name);
   }
 
+  function table(node, head, body) {
+    clear(node);
+    var thead = el('thead');
+    var tr = el('tr');
+    head.forEach(function (h) { tr.appendChild(el('th', '', h)); });
+    thead.appendChild(tr);
+    node.appendChild(thead);
+    var tbody = el('tbody');
+    body.forEach(function (cells) {
+      var row = el('tr');
+      cells.forEach(function (c) { row.appendChild(typeof c === 'string' ? el('td', '', c) : c); });
+      tbody.appendChild(row);
+    });
+    node.appendChild(tbody);
+  }
+
+  function changeCell(c) {
+    var td = el('td');
+    if (c.change === null) { td.textContent = c.current > 0 ? 'new' : '-'; return td; }
+    var diff = c.current - c.previous;
+    td.className = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
+    td.textContent = (diff > 0 ? '+' : '') + fmt(diff) + ' (' + (c.change > 0 ? '+' : '') + c.change + '%)';
+    return td;
+  }
+
+  var COMPARE = [['sessions', 'Sessions'], ['rooms_created', 'Rooms created'], ['room_joins', 'Successful joins'],
+    ['rooms_with_guest', 'Rooms with a guest'], ['peak_online', 'Peak online'], ['peak_in_rooms', 'Peak in rooms']];
+
+  function shiftDay(day, offset) {
+    var date = new Date(day + 'T12:00:00Z');
+    date.setUTCDate(date.getUTCDate() + offset);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function comparison(history) {
+    $('compare-note').textContent = history.first + ' to ' + history.last + ' compared with ' + shiftDay(history.first, -history.days) +
+      ' to ' + shiftDay(history.first, -1) + '.';
+    table($('compare'), ['Metric', 'This period', 'Previous period', 'Change'], COMPARE.map(function (m) {
+      var c = history.comparison[m[0]];
+      return [m[1], fmt(c.current), fmt(c.previous), changeCell(c)];
+    }));
+  }
+
+  function card(label, value) {
+    var node = el('div', 'card');
+    node.appendChild(el('span', 'label', label));
+    node.appendChild(el('span', 'value', value));
+    return node;
+  }
+
+  function share(part, whole) { return whole > 0 ? Math.round(100 * part / whole) + '%' : '–'; }
+  function sum(items, names) {
+    return items.reduce(function (a, i) { return names.indexOf(i.value) >= 0 ? a + i.count : a; }, 0);
+  }
+
+  var OCCUPANCY = { '1': '1 player', '2': '2 players', '3': '3 players', '4': '4 players' };
+  var LIFETIME = { under_1m: 'Under 1 minute', '1_5m': '1 to 5 minutes', '5_15m': '5 to 15 minutes', '15_60m': '15 to 60 minutes',
+    over_1h: 'Over 1 hour' };
+
+  function ordered(items, order) {
+    return Object.keys(order).map(function (k) {
+      var found = items.filter(function (i) { return i.value === k; })[0];
+      return { value: k, count: found ? found.count : 0 };
+    });
+  }
+
+  function activity(history) {
+    var t = history.totals;
+    var node = $('activity');
+    clear(node);
+    var without = t.rooms_closed - t.rooms_with_guest;
+    var average = t.rooms_closed > 0 ? (t.party_total / t.rooms_closed).toFixed(2) : '–';
+    node.appendChild(card('Rooms created', fmt(t.rooms_created)));
+    node.appendChild(card('Successful joins', fmt(t.room_joins)));
+    node.appendChild(card('Rooms with a guest', fmt(t.rooms_with_guest) + ' · ' + share(t.rooms_with_guest, t.rooms_closed)));
+    node.appendChild(card('Rooms without a guest', fmt(without) + ' · ' + share(without, t.rooms_closed)));
+    node.appendChild(card('Average largest party', average));
+    var joins = ' Joins are successful room joins, not players: a player entering several rooms counts each time.';
+    $('activity-note').textContent = t.rooms_closed > 0
+      ? 'Last ' + history.days + ' days. Guest shares and the average count rooms that ended (' + fmt(t.rooms_closed) + ').' + joins
+      : 'Room lifecycle statistics begin as rooms end.' + joins;
+    var occ = $('d-occupancy');
+    var life = $('d-lifetime');
+    clear(occ);
+    clear(life);
+    rows(occ, 'Largest party reached', ordered(history.dimensions.occupancy, OCCUPANCY), function (v) { return OCCUPANCY[v]; });
+    rows(life, 'Room lifetime', ordered(history.dimensions.lifetime, LIFETIME), function (v) { return LIFETIME[v]; });
+  }
+
+  function health(history) {
+    var t = history.totals;
+    var abuseCounts = history.dimensions.abuse;
+    var node = $('health');
+    clear(node);
+    node.appendChild(card('Reconnects not counted as sessions', fmt(sum(abuseCounts, ['hello_reconnect_deduped']))));
+    node.appendChild(card('Incompatibility rejects', fmt(t.incompatible_rejects)));
+    node.appendChild(card('Rooms that used the relay', fmt(t.rooms_relayed) + ' · ' + share(t.rooms_relayed, t.rooms_closed)));
+    node.appendChild(card('Room operations refused', fmt(sum(abuseCounts, ['room_create_limited', 'room_join_limited']))));
+  }
+
   function dailyTable(daily) {
     var table = $('daily');
     clear(table);
     var cols = [['day', 'Day'], ['sessions', 'Sessions'], ['peak_online', 'Peak online'], ['peak_in_rooms', 'Peak in rooms'],
-      ['peak_rooms', 'Peak rooms'], ['rooms_created', 'Rooms created'], ['room_joins', 'Joins'], ['incompatible_rejects', 'Rejects']];
+      ['peak_rooms', 'Peak rooms'], ['rooms_created', 'Rooms created'], ['room_joins', 'Joins'], ['rooms_with_guest', 'With guest'],
+      ['rooms_relayed', 'Relay rooms'], ['incompatible_rejects', 'Rejects']];
     var head = el('tr');
     cols.forEach(function (c) { head.appendChild(el('th', '', c[1])); });
     var thead = el('thead');
@@ -514,12 +676,17 @@ export const ADMIN_JS = String.raw`(function () {
     $('c-rooms').textContent = fmt(summary.live.rooms);
     $('c-peak').textContent = fmt(summary.today.peak_online);
     $('c-sessions').textContent = fmt(summary.today.sessions);
-    var t = summary.today;
-    $('today-line').textContent = 'Today (' + summary.day + '): ' + fmt(t.rooms_created) + ' rooms created, ' + fmt(t.room_joins) +
-      ' joins, peak ' + fmt(t.peak_in_rooms) + ' in rooms and ' + fmt(t.peak_rooms) + ' open rooms, ' + fmt(t.incompatible_rejects) +
-      ' incompatibility rejects.';
+    $('c-rooms-today').textContent = fmt(summary.today.rooms_created);
+    $('c-joins-today').textContent = fmt(summary.today.room_joins);
+    comparison(history);
+    activity(history);
+    health(history);
     usageChart($('usage'), history);
-    sessionsChart($('sessions'), history.daily);
+    barChart($('h-sessions'), history.daily, 'sessions', 'Sessions');
+    barChart($('h-rooms'), history.daily, 'rooms_created', 'Rooms created');
+    barChart($('h-joins'), history.daily, 'room_joins', 'Successful joins');
+    barChart($('h-peak-online'), history.daily, 'peak_online', 'Peak online');
+    barChart($('h-peak-rooms'), history.daily, 'peak_in_rooms', 'Peak in rooms');
     distribution('d-platform', summary.live.platform, history.dimensions.platform, history.days);
     distribution('d-version', summary.live.version, history.dimensions.version, history.days,
       function (v) { return /^[0-9]/.test(v) ? 'v' + v : v; });

@@ -88,8 +88,8 @@ is collected and clients send nothing for it (docs/ONLINE.md, Privacy and usage 
 
 | Table | Row | Columns |
 |---|---|---|
-| `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms` |
-| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events |
+| `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms`, `rooms_closed`, `rooms_with_guest`, `rooms_relayed`, `party_total` |
+| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms |
 | `metrics_samples` | one per 15 minutes (UTC ms) | the highest `online`, `in_rooms` and `rooms` in the interval; 90 days kept |
 
 - Days are America/Sao_Paulo calendar days (`YYYY-MM-DD`); samples are UTC timestamps.
@@ -105,13 +105,26 @@ is collected and clients send nothing for it (docs/ONLINE.md, Privacy and usage 
   and at each 15-minute alarm while someone is connected, never per message. Old samples go 500 at a time.
 - **Rejects** count only explicit protocol refusals: `hello` with another lobby protocol (once per connection) and
   `room.join` of a room with another online protocol. Rooms only left out of a search are not counted.
+- **Room lifecycle** is counted once per room, when its last seat is gone (the last player left, or the 30 s seat grace
+  ended). `rooms_closed` counts those rooms; `rooms_with_guest` the ones whose largest party was 2 or more (the rest
+  never had a guest); `party_total` is the sum of largest parties, so the average largest party is
+  `party_total / rooms_closed`. `occupancy` is the largest party (seats taken at once, 1 to 4) and `lifetime` the time
+  from creation to that moment, in five fixed buckets. The room table carries two counters for this, `peak_members`
+  and `relayed`, which disappear with the room; nothing in the metrics names a room. Rooms already open when this was
+  deployed (`peak_members` 0) are not counted. Failed or malformed requests never reach these counters.
+- **Relay rooms** (`rooms_relayed`) are ended rooms in which the relay forwarded at least one frame; the room is marked
+  with one write, never per packet. Peer-to-peer traffic is invisible to the lobby, so direct success is not measured.
+- **History** (`/admin/api/history`) also returns `totals` for the range, `previous` for the same number of days
+  before it, and `comparison` (current, previous and percent change; `null` when the previous value is 0) for sessions,
+  rooms created, joins, rooms with a guest and the peaks.
 - **Country** is Cloudflare's `request.cf.country`, set by the Worker in `X-DCP-Edge-Country` (replacing any value the
   client sent) and kept in the socket's attachment while it is open. Missing, `XX` or `T1` is `Unknown`. The local
   server counts every client as `Unknown`. Platforms other than Windows, Linux and Steam Deck are `Other`; versions that are not
   a dotted number such as `0.8.0` are `Other`, and after 64 values in a day new ones are `Other` too.
 
 The tables are created with `CREATE TABLE IF NOT EXISTS` when the Durable Object starts, after the existing schema and
-migrations; no existing table is changed or emptied, and no Wrangler migration is needed. They are plain tables, so
+migrations; the four room columns are added to `metrics_daily` (and `peak_members`, `relayed` to `rooms` by migration
+3) only when missing, with default 0, so no existing row is changed or emptied, and no Wrangler migration is needed. They are plain tables, so
 Cloudflare's Durable Object data browser shows them too.
 
 **Dashboard**: `https://dcp-lobby.<subdomain>.workers.dev/admin` (the production lobby: `/admin` on

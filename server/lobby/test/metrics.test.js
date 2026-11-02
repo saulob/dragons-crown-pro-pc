@@ -7,7 +7,8 @@ import { COUNTRY_HEADER, handleAdmin, internalMetricsRoute, tokenMatches, withEd
 import { PROTECTION } from '../src/abuse.js';
 import { ADMIN_CSS, ADMIN_HTML, ADMIN_JS } from '../src/admin_page.js';
 import { Lobby } from '../src/lobby.js';
-import { SAMPLE_MS, countryCode, metricsDay, sampleBucket } from '../src/metrics.js';
+import { SAMPLE_MS, countryCode, metricsDay, percentChange, sampleBucket } from '../src/metrics.js';
+import { encodeRelayFrame, roomToken } from '../src/relay.js';
 import { LocalHost, sqliteStore } from '../local/host.js';
 import { ROOM, makeLobby } from './harness.js';
 
@@ -310,6 +311,195 @@ test('schema creation is idempotent and keeps existing lobby data', () => {
   new Lobby(host);
   assert.equal(sql.get('SELECT name FROM accounts WHERE account = ?', '42').name, 'Kept');
   assert.equal(sql.get(`SELECT sessions FROM metrics_daily WHERE day = '2026-10-01'`).sessions, 7);
+});
+
+// ---- room lifecycle ----
+test('a room that never had a guest is counted once, when its last seat is gone', () => {
+  const env = makeLobby();
+  const host = online(env);
+  const { room } = host.call('room.create', ROOM);
+  assert.equal(today(env).rooms_closed, 0);
+  env.advance(30_000);
+  assert.equal(host.call('room.leave', { room: room.id }).code, 'ok');
+  const t = today(env);
+  assert.deepEqual([t.rooms_created, t.rooms_closed, t.rooms_with_guest, t.rooms_relayed, t.party_total], [1, 1, 0, 0, 1]);
+  assert.deepEqual(dimension(env, 'occupancy'), { 1: 1 });
+  assert.deepEqual(dimension(env, 'lifetime'), { under_1m: 1 });
+  assert.equal(host.call('room.leave', { room: room.id }).code, 'ok');
+  assert.equal(today(env).rooms_closed, 1);
+});
+
+test('the largest party is kept after guests leave, and lifetime is bucketed', () => {
+  const env = makeLobby();
+  const host = online(env);
+  const { room } = host.call('room.create', { ...ROOM, slots: 4 });
+  const guests = ['198.51.100.1', '198.51.100.2'].map((ip) => {
+    const guest = online(env, WINDOWS, ip);
+    assert.equal(guest.call('room.join', { room: room.id }).code, 'ok');
+    return guest;
+  });
+  env.advance(6 * 60_000);
+  for (const guest of guests) assert.equal(guest.call('room.leave', { room: room.id }).code, 'ok');
+  assert.equal(today(env).rooms_closed, 0);
+  assert.equal(host.call('room.leave', { room: room.id }).code, 'ok');
+  const t = today(env);
+  assert.deepEqual([t.rooms_closed, t.rooms_with_guest, t.party_total], [1, 1, 3]);
+  assert.deepEqual(dimension(env, 'occupancy'), { 3: 1 });
+  assert.deepEqual(dimension(env, 'lifetime'), { '5_15m': 1 });
+});
+
+test('a room abandoned by a lost connection is counted when the seat grace ends', () => {
+  const env = makeLobby();
+  const host = online(env);
+  host.call('room.create', ROOM);
+  host.drop();
+  assert.equal(today(env).rooms_closed, 0);
+  env.advance(31_000);
+  assert.deepEqual([today(env).rooms_closed, dimension(env, 'lifetime')], [1, { under_1m: 1 }]);
+});
+
+test('failed and malformed operations do not move the room lifecycle counters', () => {
+  const env = makeLobby();
+  const host = online(env);
+  const { room } = host.call('room.create', { ...ROOM, slots: 1 });
+  const other = online(env, WINDOWS, '198.51.100.9');
+  assert.equal(other.call('room.join', { room: room.id }).code, 'full');
+  assert.equal(other.call('room.join', { room: 'x' }).code, 'bad_request');
+  assert.equal(other.call('room.create', { world: 'x', slots: 9 }).code, 'bad_request');
+  assert.equal(other.call('room.leave', { room: room.id }).code, 'ok');
+  const t = today(env);
+  assert.deepEqual([t.rooms_created, t.room_joins, t.rooms_closed, t.rooms_with_guest, t.party_total], [1, 0, 0, 0, 0]);
+  assert.deepEqual([dimension(env, 'occupancy'), dimension(env, 'lifetime')], [{}, {}]);
+});
+
+test('a room from before the lifecycle columns is not counted', () => {
+  const env = makeLobby();
+  const host = online(env);
+  const { room } = host.call('room.create', ROOM);
+  env.host.sql.run('UPDATE rooms SET peak_members = 0');
+  const guest = online(env, WINDOWS, '198.51.100.3');
+  assert.equal(guest.call('room.join', { room: room.id }).code, 'ok');
+  guest.call('room.leave', { room: room.id });
+  host.call('room.leave', { room: room.id });
+  assert.deepEqual([today(env).rooms_closed, today(env).party_total, dimension(env, 'occupancy')], [0, 0, {}]);
+});
+
+test('lifecycle dimensions stay within a fixed set however many rooms there are', () => {
+  const env = makeLobby();
+  const host = online(env);
+  for (let i = 0; i < 8; i++) {
+    const { room } = host.call('room.create', { ...ROOM, slots: 4 });
+    const guests = [];
+    for (let g = 0; g < i % 4; g++) {
+      const guest = online(env, WINDOWS, `198.51.100.${10 + g}`);
+      assert.equal(guest.call('room.join', { room: room.id }).code, 'ok');
+      guests.push(guest);
+    }
+    env.advance(i * 20 * 60_000);
+    for (const guest of guests) guest.call('room.leave', { room: room.id });
+    assert.equal(host.call('room.leave', { room: room.id }).code, 'ok');
+    env.advance(PROTECTION.roomCreateAccount.burst * 30_000);
+  }
+  const { occupancy, lifetime } = env.lobby.metricsHistory(30).dimensions;
+  assert.deepEqual(occupancy.map((r) => r.value).sort(), ['1', '2', '3', '4']);
+  assert.ok(lifetime.map((r) => r.value).every((k) => ['under_1m', '1_5m', '5_15m', '15_60m', 'over_1h'].includes(k)));
+});
+
+test('the relay marks a room once, in the room only; direct rooms are not marked', () => {
+  const env = makeLobby({ log: () => {} });
+  const [a, b] = [1, 2].map((i) => {
+    const c = env.connect(`203.0.113.${i}`, 'BR');
+    assert.equal(c.hello({ ...WINDOWS, relay: true }).code, 'ok');
+    return c;
+  });
+  const created = a.call('room.create', ROOM);
+  const joined = b.call('room.join', { room: created.room.id });
+  const token = roomToken(created.room.key);
+  const writes = [];
+  const run = env.host.sql.run;
+  env.host.sql.run = (query, ...args) => {
+    if (/SET relayed/.test(query)) writes.push(query);
+    return run(query, ...args);
+  };
+  for (let seq = 1; seq <= 20; seq++) a.relay(encodeRelayFrame(token, joined.me, seq, new Uint8Array([1, 2, 3])));
+  b.relay(encodeRelayFrame(token, created.me, 1, new Uint8Array([1])));
+  assert.equal(b.binary.length, 20);
+  assert.equal(writes.length, 1);
+  const direct = online(env, WINDOWS, '192.0.2.1');
+  const other = direct.call('room.create', ROOM);
+  direct.call('room.leave', { room: other.room.id });
+  b.call('room.leave', { room: created.room.id });
+  a.call('room.leave', { room: created.room.id });
+  const t = today(env);
+  assert.deepEqual([t.rooms_closed, t.rooms_relayed], [2, 1]);
+  assert.ok(!JSON.stringify(metricsRows(env)).includes(created.room.key));
+});
+
+test('a refused relay frame does not mark the room', () => {
+  const env = makeLobby({ log: () => {} });
+  const a = env.connect('203.0.113.1', 'BR');
+  assert.equal(a.hello({ ...WINDOWS, relay: true }).code, 'ok');
+  const created = a.call('room.create', ROOM);
+  a.relay(encodeRelayFrame(roomToken(created.room.key), created.me, 1, new Uint8Array([1])));
+  a.relay(new Uint8Array([1, 2, 3]));
+  a.call('room.leave', { room: created.room.id });
+  assert.equal(today(env).rooms_relayed, 0);
+});
+
+test('percent change is null without a previous value and never infinite', () => {
+  assert.equal(percentChange(5, 0), null);
+  assert.equal(percentChange(0, 0), null);
+  assert.equal(percentChange(0, 10), -100);
+  assert.equal(percentChange(15, 10), 50);
+  assert.equal(percentChange(1, 3), -66.7);
+});
+
+test('history compares the range with the same number of days before it', () => {
+  const env = makeLobby();
+  const sql = env.host.sql;
+  const at = (back) => metricsDay(env.clock.now - back * 24 * 3600 * 1000);
+  const put = (back, sessions, rooms, peak) => sql.run(
+    'INSERT INTO metrics_daily (day, sessions, rooms_created, peak_online) VALUES (?, ?, ?, ?)', at(back), sessions, rooms, peak);
+  put(0, 10, 4, 6);
+  put(1, 5, 2, 9);
+  put(2, 10, 0, 3);
+  put(4, 99, 99, 99);
+  const { totals, previous, comparison } = env.lobby.metricsHistory(2);
+  assert.deepEqual([totals.sessions, totals.rooms_created, totals.peak_online], [15, 6, 9]);
+  assert.deepEqual([previous.sessions, previous.rooms_created, previous.peak_online], [10, 0, 3]);
+  assert.deepEqual(comparison.sessions, { current: 15, previous: 10, change: 50 });
+  assert.deepEqual(comparison.rooms_created, { current: 6, previous: 0, change: null });
+  assert.deepEqual(comparison.peak_online, { current: 9, previous: 3, change: 200 });
+  const empty = makeLobby().lobby.metricsHistory(7);
+  assert.deepEqual(empty.comparison.sessions, { current: 0, previous: 0, change: null });
+  assert.equal(empty.totals.rooms_closed, 0);
+});
+
+test('a metrics database from before the lifecycle columns keeps its rows and gains zeroed columns', () => {
+  const sql = sqliteStore();
+  sql.run(`CREATE TABLE metrics_daily (day TEXT PRIMARY KEY, sessions INTEGER NOT NULL DEFAULT 0,
+     rooms_created INTEGER NOT NULL DEFAULT 0, room_joins INTEGER NOT NULL DEFAULT 0,
+     incompatible_rejects INTEGER NOT NULL DEFAULT 0, peak_online INTEGER NOT NULL DEFAULT 0,
+     peak_in_rooms INTEGER NOT NULL DEFAULT 0, peak_rooms INTEGER NOT NULL DEFAULT 0)`);
+  sql.run(`INSERT INTO metrics_daily (day, sessions, rooms_created, room_joins, peak_online) VALUES ('2026-10-01', 7, 3, 2, 5)`);
+  sql.run(`CREATE TABLE metrics_daily_dimensions (day TEXT NOT NULL, dimension TEXT NOT NULL, value TEXT NOT NULL,
+     count INTEGER NOT NULL, PRIMARY KEY (day, dimension, value))`);
+  sql.run(`INSERT INTO metrics_daily_dimensions VALUES ('2026-10-01', 'platform', 'Windows', 7)`);
+  const host = new LocalHost(sql, { now: () => 1_700_000_000_000, log: (text) => { throw new Error(text); } });
+  new Lobby(host);
+  new Lobby(host);
+  assert.deepEqual(sql.get(`SELECT sessions, rooms_created, room_joins, peak_online, rooms_closed, rooms_with_guest,
+    rooms_relayed, party_total FROM metrics_daily WHERE day = '2026-10-01'`),
+  { sessions: 7, rooms_created: 3, room_joins: 2, peak_online: 5, rooms_closed: 0, rooms_with_guest: 0, rooms_relayed: 0,
+    party_total: 0 });
+  assert.equal(sql.get(`SELECT count FROM metrics_daily_dimensions WHERE dimension = 'platform'`).count, 7);
+});
+
+test('the dashboard page reads only the two existing endpoints and shows the new sections', () => {
+  assert.deepEqual([...ADMIN_JS.matchAll(/api\('([^']+)/g)].map((m) => m[1]).sort(), ['/admin/api/history?days=', '/admin/api/summary']);
+  assert.equal([...ADMIN_JS.matchAll(/fetch\(/g)].length, 1);
+  for (const heading of ['Period comparison', 'Multiplayer activity', 'Historical activity', 'Connection health',
+    'Abuse protection', 'Platforms and countries']) assert.ok(ADMIN_HTML.includes(heading), heading);
 });
 
 // ---- the dashboard ----

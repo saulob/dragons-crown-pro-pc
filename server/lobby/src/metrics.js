@@ -5,7 +5,9 @@ export const METRICS_TIME_ZONE = 'America/Sao_Paulo';
 export const SAMPLE_MS = 15 * 60 * 1000;
 export const SAMPLE_DAYS = 90;
 export const HISTORY_MAX_DAYS = 365;
-export const DIMENSIONS = ['platform', 'version', 'country', 'reject', 'abuse'];
+export const DIMENSIONS = ['platform', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime'];
+export const LIFETIMES = [['under_1m', 60e3], ['1_5m', 5 * 60e3], ['5_15m', 15 * 60e3], ['15_60m', 60 * 60e3], ['over_1h', Infinity]];
+export const MAX_PARTY = 4;
 export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited', 'ws_upgrade_ip_cap', 'hello_accepted',
   'hello_reconnect_deduped', 'hello_limited', 'room_create_accepted', 'room_create_limited', 'room_join_limited',
   'relay_abuse_closed']);
@@ -16,6 +18,12 @@ const DAY_MS = 24 * 3600 * 1000;
 const VALUES_PER_DIMENSION_PER_DAY = 64;
 const CLEANUP_ROWS = 500;
 const COUNTERS = new Set(['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects']);
+
+const ROOM_COLUMNS = ['rooms_closed', 'rooms_with_guest', 'rooms_relayed', 'party_total'];
+const DAY_COLUMNS = ['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects', 'peak_online', 'peak_in_rooms',
+  'peak_rooms', ...ROOM_COLUMNS];
+const SUMMED = ['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects', ...ROOM_COLUMNS];
+const PEAKS = ['peak_online', 'peak_in_rooms', 'peak_rooms'];
 
 export const METRICS_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS metrics_daily (day TEXT PRIMARY KEY, sessions INTEGER NOT NULL DEFAULT 0,
@@ -63,6 +71,10 @@ export class Metrics {
     this.sql = sql;
     this.now = now;
     for (const statement of METRICS_SCHEMA) sql.run(statement);
+    const have = new Set(sql.all('PRAGMA table_info(metrics_daily)').map((c) => c.name));
+    for (const column of ROOM_COLUMNS) {
+      if (!have.has(column)) sql.run(`ALTER TABLE metrics_daily ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
+    }
     this.peaks = null;
     this.sample = null;
     this.pending = new Map();
@@ -104,6 +116,20 @@ export class Metrics {
     }
     this.sql.run(`INSERT INTO metrics_daily_dimensions (day, dimension, value, count) VALUES (?, ?, ?, 1)
       ON CONFLICT(day, dimension, value) DO UPDATE SET count = count + 1`, day, dimension, value);
+  }
+
+  // A room whose last seat is gone: `peak` seats at most were taken (0: unknown, not counted), `relayed` when the relay
+  // carried a frame of it.
+  roomClosed({ peak, lifetimeMs, relayed }) {
+    if (!Number.isInteger(peak) || peak < 1) return;
+    const day = metricsDay(this.now());
+    const party = Math.min(peak, MAX_PARTY);
+    this.sql.run(`INSERT INTO metrics_daily (day, rooms_closed, rooms_with_guest, rooms_relayed, party_total)
+      VALUES (?, 1, ?, ?, ?) ON CONFLICT(day) DO UPDATE SET rooms_closed = rooms_closed + 1,
+      rooms_with_guest = rooms_with_guest + excluded.rooms_with_guest, rooms_relayed = rooms_relayed + excluded.rooms_relayed,
+      party_total = party_total + excluded.party_total`, day, party > 1 ? 1 : 0, relayed ? 1 : 0, party);
+    this.addDimension(day, 'occupancy', String(party));
+    this.addDimension(day, 'lifetime', LIFETIMES.find(([, limit]) => (Number(lifetimeMs) || 0) < limit)[0]);
   }
 
   // One connection that became an online session; `client` is its platform, version and country as reported.
@@ -162,8 +188,7 @@ export class Metrics {
   summary(live) {
     const now = this.now();
     const day = metricsDay(now);
-    const today = this.sql.get(`SELECT sessions, rooms_created, room_joins, incompatible_rejects, peak_online,
-      peak_in_rooms, peak_rooms FROM metrics_daily WHERE day = ?`, day) ?? emptyDay();
+    const today = this.sql.get(`SELECT ${DAY_COLUMNS.join(', ')} FROM metrics_daily WHERE day = ?`, day) ?? emptyDay();
     return {
       generated: now,
       time_zone: METRICS_TIME_ZONE,
@@ -180,8 +205,8 @@ export class Metrics {
     const now = this.now();
     const last = metricsDay(now);
     const first = daysBefore(last, days - 1);
-    const rows = new Map(this.sql.all(`SELECT day, sessions, rooms_created, room_joins, incompatible_rejects, peak_online,
-      peak_in_rooms, peak_rooms FROM metrics_daily WHERE day >= ? AND day <= ? ORDER BY day`, first, last)
+    const rows = new Map(this.sql.all(`SELECT day, ${DAY_COLUMNS.join(', ')} FROM metrics_daily WHERE day >= ? AND day <= ?
+      ORDER BY day`, first, last)
       .map((r) => [r.day, r]));
     const daily = [];
     for (let i = days - 1; i >= 0; i--) {
@@ -196,13 +221,29 @@ export class Metrics {
     const since = Math.max(now - days * DAY_MS, now - SAMPLE_DAYS * DAY_MS);
     const samples = this.sql.all('SELECT bucket, online, in_rooms, rooms FROM metrics_samples WHERE bucket >= ? ORDER BY bucket',
       sampleBucket(since));
+    const totals = this.totals(first, last);
+    const previous = this.totals(daysBefore(first, days), daysBefore(first, 1));
     return { generated: now, time_zone: METRICS_TIME_ZONE, days, first, last, sample_ms: SAMPLE_MS, daily, dimensions,
-      samples };
+      samples, totals, previous, comparison: compare(totals, previous) };
+  }
+
+  totals(from, to) {
+    const select = [...SUMMED.map((c) => `COALESCE(SUM(${c}), 0) AS ${c}`), ...PEAKS.map((c) => `COALESCE(MAX(${c}), 0) AS ${c}`)];
+    return this.sql.get(`SELECT ${select.join(', ')} FROM metrics_daily WHERE day >= ? AND day <= ?`, from, to);
   }
 }
 
-const emptyDay = () => ({ sessions: 0, rooms_created: 0, room_joins: 0, incompatible_rejects: 0, peak_online: 0,
-  peak_in_rooms: 0, peak_rooms: 0 });
+const emptyDay = () => Object.fromEntries(DAY_COLUMNS.map((c) => [c, 0]));
+
+// Relative change in percent; null when there was nothing before to compare with.
+export const percentChange = (current, previous) => (previous > 0 ? Math.round(1000 * (current - previous) / previous) / 10 : null);
+
+export const COMPARED = ['sessions', 'rooms_created', 'room_joins', 'rooms_with_guest', 'peak_online', 'peak_in_rooms'];
+
+export function compare(current, previous) {
+  return Object.fromEntries(COMPARED.map((c) => [c, { current: current[c], previous: previous[c],
+    change: percentChange(current[c], previous[c]) }]));
+}
 
 const grew = (seen, live) => live.online > seen.online || live.in_rooms > seen.in_rooms || live.rooms > seen.rooms;
 

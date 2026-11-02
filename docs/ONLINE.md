@@ -47,6 +47,7 @@ Nothing else needs setting up. With Online play Off the game runs offline as bef
 ### Privacy and usage statistics
 
 The online service stores anonymous aggregate usage statistics: player counts, sessions, rooms created and joined,
+how many players each room reached and how long it lasted, how many rooms needed the relay,
 the Dragon's Crown Pro PC version, the platform (Windows, Linux, Steam Deck) and the country. These statistics do not
 store player names, Online names, Friend Codes, account IDs, IP addresses, room codes or friend lists, and there is no
 per-player or per-session record.

@@ -99,6 +99,8 @@ const MIGRATIONS = [
     `ALTER TABLE members ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE members ADD COLUMN platform TEXT NOT NULL DEFAULT ''`],
   [`ALTER TABLE accounts ADD COLUMN session INTEGER NOT NULL DEFAULT 0`],
+  [`ALTER TABLE rooms ADD COLUMN peak_members INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE rooms ADD COLUMN relayed INTEGER NOT NULL DEFAULT 0`],
 ];
 
 // ---- input validation ----
@@ -445,6 +447,10 @@ export class Lobby {
     if (this.guards.rejects.take(`${reason}|${key}`, this.host.now())) this.track(() => this.metrics.reject(reason));
   }
 
+  markRelayed(roomId) {
+    this.track(() => this.host.sql.run('UPDATE rooms SET relayed = 1 WHERE id = ? AND relayed = 0', roomId));
+  }
+
   exempt(att) {
     return this.local && isLocalAddress(att.ip);
   }
@@ -599,6 +605,8 @@ export class Lobby {
     this.relays.forgetMember(roomId, memberId);
     const rest = this.memberRows(roomId);
     if (!rest.length) {
+      this.track(() => this.metrics.roomClosed({ peak: room.peak_members, lifetimeMs: this.host.now() - room.created,
+        relayed: room.relayed === 1 }));
       this.host.sql.run('DELETE FROM rooms WHERE id = ?', roomId);
       this.relays.forgetRoom(roomId);
       return;
@@ -841,7 +849,7 @@ const HANDLERS = {
     do code = this.randomCode(6);
     while (this.host.sql.get('SELECT 1 AS x FROM rooms WHERE code = ?', code));
     this.host.sql.run(`INSERT INTO rooms (id, game, world, slots, flags, owner, code, key, ints, bin_int, bin_ext, created,
-      online_protocol) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, att.game, msg.world, msg.slots,
+      online_protocol, peak_members) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`, id, att.game, msg.world, msg.slots,
       (flags & ~FLAG_FULL) >>> 0, MEMBER_IDS[0], code, this.randomHex(16), JSON.stringify(ints), JSON.stringify(binInt),
       JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0);
     this.insertMember(att, id, MEMBER_IDS[0], memberBin);
@@ -914,6 +922,8 @@ const HANDLERS = {
     const memberBin = binAttrs(msg.member_bin);
     this.limitRoomJoin(att);
     this.insertMember(att, room.id, memberId, memberBin);
+    this.host.sql.run('UPDATE rooms SET peak_members = MAX(peak_members, ?) WHERE id = ? AND peak_members > 0', members.length + 1,
+      room.id);
     const joined = this.memberView(this.memberRow(room.id, memberId));
     this.toRoom(room.id, { ev: 'room.member_joined', room: String(room.id), member: joined }, memberId);
     const roomId = room.id;

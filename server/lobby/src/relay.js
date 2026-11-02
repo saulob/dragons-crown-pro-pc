@@ -109,6 +109,10 @@ export class Relay {
     new DataView(out.buffer).setUint16(8, att.member);
     try {
       route.peer.sendBinary(out);
+      if (!room.marked) {
+        room.marked = true;
+        this.lobby.markRelayed(route.room);
+      }
     } catch {
       this.forgetConnection(route.peerCid);
       this.drop('destination_unavailable');
@@ -127,7 +131,7 @@ export class Relay {
   room(id) {
     let state = this.rooms.get(id);
     if (!state) {
-      state = { budget: {} };
+      state = { budget: {}, marked: false };
       this.rooms.set(id, state);
     }
     return state;
