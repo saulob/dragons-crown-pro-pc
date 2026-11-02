@@ -119,7 +119,7 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == kTextLanguageKey) {
         const std::span<const GameBuild> builds = SupportedBuilds();
-        return value == kRussianKey || std::any_of(builds.begin(), builds.end(), [&](const GameBuild& build) {
+        return std::any_of(builds.begin(), builds.end(), [&](const GameBuild& build) {
             return std::any_of(build.text_languages.begin(), build.text_languages.end(),
                                [&](const TextLanguage& language) { return value == language.key; });
         });

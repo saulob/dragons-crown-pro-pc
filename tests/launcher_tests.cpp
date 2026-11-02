@@ -3919,17 +3919,14 @@ const std::string kRussianSheet = Sheet("Новая игра Продолжит�
 
 } // namespace language_test
 
-// Menu & Subtitles languages read from the installed regional archive: complete language file sets, Russian text in a
-// slot, and the build's own list when the archive cannot tell.
+// Menu & Subtitles languages read from the installed regional archive: complete language file sets, never a language
+// the build does not list, and the build's own list when the archive cannot tell.
 void TestInstalledTextLanguages(const fs::path& base) {
     using namespace cpk_test;
     using namespace language_test;
     const std::string& english = kEnglishSheet;
     const std::string& russian = kRussianSheet;
     const std::string ukrainian = Sheet("Нова гра Продовжити Вихід Налаштування Зберегти їжа є ґанок ##(TOUCH)");
-    const std::string bulgarian = Sheet("Нова игра Продължи Изход Настройки Запази ##(TOUCH)");
-    CHECK(IsRussianText(Span(russian)) && !IsRussianText(Span(english)) && !IsRussianText(Span(ukrainian)));
-    CHECK(!IsRussianText(Span(bulgarian)) && !IsRussianText({}));
 
     std::vector<Entry> us = Slot("US", english);
     us.push_back({"msgsheet/StaffRollMsg_PS4_US.fms", "staff", false}); // the US slot's own extra sheet
@@ -3953,21 +3950,16 @@ void TestInstalledTextLanguages(const fs::path& base) {
     CHECK(keys(&kUs) == western && keys(&kUs101) == western);
     CHECK(SameLanguages(InstalledTextLanguages(app0, &kUs), TextLanguagesOf(&kUs)));
 
-    // The reported 1.01 archive: Russian text in the US slot and no other slot. Russian is the only language and keeps
-    // the US slot's system language; no other value can reach the game whatever the saved key.
+    // The reported 1.01 archive, Russian text in the US slot and no other slot, offers English and never Russian: the
+    // US slot keeps its system language and no sixth language appears.
     WriteAll(regional, LanguageArchive({Slot("US", russian), uk}));
-    const std::vector<TextLanguage> only_russian = InstalledTextLanguages(app0, &kUs101);
-    CHECK(keys(&kUs101) == "russian=1" && only_russian[0].name == "Russian" && only_russian[0].suffix == "US");
-    CHECK(LanguageNames(only_russian) == "Russian" && !SameLanguages(only_russian, TextLanguagesOf(&kUs101)));
-    for (const char* absent : {"english", "french", "german", "italian", "spanish"}) {
-        CHECK(ResolveTextLanguage(only_russian, absent).key == "russian");
+    const std::vector<TextLanguage> russian_slot = InstalledTextLanguages(app0, &kUs101);
+    CHECK(keys(&kUs101) == "english=1" && russian_slot[0].name == "English" && russian_slot[0].suffix == "US");
+    for (const char* saved : {"english", "french", "german", "italian", "spanish", "russian"}) {
+        CHECK(ResolveTextLanguage(russian_slot, saved).key == "english");
     }
-    CHECK(UnavailableLanguageNote("french", ResolveTextLanguage(only_russian, "french")) ==
-          "saved language French unavailable for this build, using Russian");
-    CHECK(UnavailableLanguageNote("english", only_russian[0]) ==
-          "saved language English unavailable for this build, using Russian");
-    CHECK(UnavailableLanguageNote("russian", only_russian[0]).empty());
-    CHECK(UnavailableLanguageNote("", only_russian[0]).empty());
+    CHECK(UnavailableLanguageNote("russian", russian_slot[0]) == "saved language russian unavailable for this build, using English");
+    CHECK(UnavailableLanguageNote("english", russian_slot[0]).empty() && UnavailableLanguageNote("", russian_slot[0]).empty());
     CHECK(UnavailableLanguageNote("klingon", TextLanguagesOf(&kUs)[0]) ==
           "saved language klingon unavailable for this build, using English");
 
@@ -3986,24 +3978,17 @@ void TestInstalledTextLanguages(const fs::path& base) {
     // Without the folder the build's own list stands, as before.
     WriteAll(ini, "text_language=french\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), nullptr) == 2);
-    CHECK(IsValidSetting(kTextLanguageKey, "russian") && !IsValidSetting(kTextLanguageKey, "Russian"));
-    {
-        LauncherSettings settings(ini);
-        settings.Set(kTextLanguageKey, "russian");
-        CHECK(settings.Save());
-        CHECK(WrittenValue(ReadAll(ini), "text_language", "russian"));
-        CHECK(LauncherSettings(ini).Get(kTextLanguageKey) == "russian");
-    }
-    // A saved Russian does not follow the player to a build without it: the Western archive and the Asia list give
-    // their own defaults.
+    CHECK(!IsValidSetting(kTextLanguageKey, "russian") && !IsValidSetting(kTextLanguageKey, "Russian"));
+    CHECK(IsValidSetting(kTextLanguageKey, "english") && IsValidSetting(kTextLanguageKey, "traditional_chinese"));
+    // A saved Russian from an older launcher gives each build its own default.
     CHECK(ResolveTextLanguage(TextLanguagesOf(&kCk), "russian").key == "traditional_chinese");
     WriteAll(regional, LanguageArchive({us, fr, de, it, es}));
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0, &kUs), "russian").key == "english");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
 
-    // Russian beside complete Western slots: Russian in the US slot's place, the others kept.
+    // Russian text in the US slot beside complete Western slots: still the five Western languages.
     WriteAll(regional, LanguageArchive({Slot("US", russian), fr, de, it, es}));
-    CHECK(keys(&kUs101) == "russian=1 french=2 german=4 italian=5 spanish=3");
+    CHECK(keys(&kUs101) == western);
     WriteAll(ini, "text_language=german\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 4);
 
@@ -4012,11 +3997,10 @@ void TestInstalledTextLanguages(const fs::path& base) {
     const std::string described = DescribeLanguageResources(app0, &kUs101);
     CHECK(described.starts_with("DRACRO_US.CPK: 22 entries") && contains(described, "; US 4 files, SystemMsg crc "));
     CHECK(contains(described, "; FR 4 files, SystemMsg crc ") && contains(described, "; DE 4 files, SystemMsg crc "));
-    CHECK(contains(described, ", Russian; FR ") && described.ends_with("; offered Russian, French, German, Italian, Spanish"));
+    CHECK(described.ends_with("; offered English, French, German, Italian, Spanish") && !contains(described, "Russian"));
     CHECK(!contains(described, "Новая") && DescribeLanguageResources(app0, &kUs101) == described);
     WriteAll(regional, LanguageArchive({us}));
-    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English") &&
-          DescribeLanguageResources(app0, &kUs101).find("Russian,") == std::string::npos);
+    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English"));
     WriteAll(regional, "not an archive");
     CHECK(DescribeLanguageResources(app0, &kUs101) == "DRACRO_US.CPK unreadable");
     fs::remove(regional);
@@ -4032,9 +4016,9 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(ini, "text_language=french\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
 
-    // Two Russian slots give one Russian; Cyrillic that is not Russian keeps the slot's own name.
+    // Cyrillic text in a slot never renames or adds a language.
     WriteAll(regional, LanguageArchive({Slot("US", russian), Slot("FR", russian)}));
-    CHECK(keys(&kUs101) == "russian=1");
+    CHECK(keys(&kUs101) == "english=1 french=2");
     WriteAll(regional, LanguageArchive({Slot("US", ukrainian)}));
     CHECK(keys(&kUs101) == "english=1");
 
@@ -4115,9 +4099,9 @@ void TestTextLanguageSwitching(const fs::path& base) {
         CHECK(UnavailableLanguageNote("korean", languages[0]) ==
               "saved language Korean unavailable for this build, using Japanese");
         CHECK(UnavailableLanguageNote("russian", languages[0]) ==
-              "saved language Russian unavailable for this build, using Japanese");
+              "saved language russian unavailable for this build, using Japanese");
     }
-    // Japanese reaches no other build: US and Russian 1.01 send it to their US slot, Asia to Traditional Chinese.
+    // Japanese reaches no other build: US and 1.01 send it to their US slot, Asia to Traditional Chinese.
     CHECK(told(kUs, "japanese") == 1 && told(kUs101, "japanese") == 1 && told(kCk, "japanese") == 10);
 
     const auto switch_to = [&](const GameBuild& build) {
@@ -4134,10 +4118,12 @@ void TestTextLanguageSwitching(const fs::path& base) {
     CHECK(switch_to(kJp102) == "japanese");         // Asia -> Japan
     WriteAll(ini, "text_language=korean\n");
     CHECK(switch_to(kUs) == "english");             // Asia -> USA
-    CHECK(switch_to(kUs101) == "russian");          // USA -> Russian 1.01
-    CHECK(switch_to(kJp103) == "japanese");         // Russian 1.01 -> Japan
+    CHECK(switch_to(kUs101) == "english");          // USA -> 1.01
+    CHECK(switch_to(kJp103) == "japanese");         // 1.01 -> Japan
     WriteAll(ini, "text_language=russian\n");
-    CHECK(switch_to(kUs) == "english");             // Russian 1.01 -> USA
+    CHECK(switch_to(kUs) == "english");             // a stale Russian -> USA
+    WriteAll(ini, "text_language=russian\n");
+    CHECK(switch_to(kUs101) == "english");          // a stale Russian -> 1.01
     for (const char* kept : {"english", "french", "german", "italian", "spanish"}) {
         WriteAll(ini, std::string("text_language=") + kept + "\n");
         LauncherSettings settings(ini);
@@ -4305,7 +4291,7 @@ void TestKeepBaseLanguages(const fs::path& base) {
 
     // The base alone and the update alone: the update's archive is what collapsed the list.
     CHECK(keys(base_app0, kUs) == western && keys(base_app0, kUs101) == western);
-    CHECK(keys(update_app0, kUs101) == "russian=1 french=2");
+    CHECK(keys(update_app0, kUs101) == "english=1 french=2");
 
     CpkArchive base_archive;
     CHECK(base_archive.Open(base_app0 / "DRACRO_US.CPK"));
@@ -4343,6 +4329,14 @@ void TestKeepBaseLanguages(const fs::path& base) {
         CHECK(i == 0 || order_key(merged.entries()[i - 1].path) < order_key(merged.entries()[i].path));
     }
     CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == western);
+    for (const GameBuild* us_build : {&kUs, &kUs101}) {
+        const std::vector<TextLanguage> offered = InstalledTextLanguages(merged_app0, us_build);
+        CHECK(LanguageNames(offered) == "English, French, German, Italian, Spanish");
+        CHECK(offered[0].key == "english" && offered[0].ps4_id == 1 && offered[0].suffix == "US");
+        CHECK(std::none_of(offered.begin(), offered.end(), [](const TextLanguage& language) {
+            return language.suffix == "UK" || language.key == "russian" || language.name == "Russian";
+        }));
+    }
     CHECK(Sha256Hex(base_app0 / "DRACRO_US.CPK") == base_hash);
 
     // A partial update with only a Russian US slot and one replaced file.

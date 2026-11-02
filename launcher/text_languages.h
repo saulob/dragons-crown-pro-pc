@@ -15,16 +15,9 @@ namespace dcp {
 
 class CpkArchive;
 
-inline constexpr std::string_view kRussianKey = "russian";
-inline constexpr std::string_view kRussianName = "Russian";
-
-// True when most letters of a UTF-8 message sheet are Cyrillic, from the Russian alphabet and including its yery.
-bool IsRussianText(std::span<const uint8_t> sheet);
-
 // The build's languages whose files the regional archive in `app0` holds completely (every file at least half of the
-// build's languages there have), a language whose SystemMsg sheet is Russian text offered as Russian with the same
-// system language. The build's own list when its languages are not archive slots, the archive cannot be read or it
-// holds no complete language.
+// build's languages there have). The build's own list when its languages are not archive slots, the archive cannot be
+// read or it holds no complete language.
 std::vector<TextLanguage> InstalledTextLanguages(const std::filesystem::path& app0, const GameBuild* build);
 
 // The suffixes of the archive's language slots: the build's languages and every other suffix whose set of files is at

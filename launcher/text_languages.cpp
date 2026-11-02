@@ -68,14 +68,7 @@ bool IsSlotted(std::span<const TextLanguage> languages) {
     return std::none_of(languages.begin(), languages.end(), [](const TextLanguage& l) { return l.suffix.empty(); });
 }
 
-bool InRussianAlphabet(char32_t c) {
-    return (c >= 0x410 && c <= 0x44f) || c == 0x401 || c == 0x451;
-}
-
 std::string_view SavedLanguageName(std::string_view key) {
-    if (key == kRussianKey) {
-        return kRussianName;
-    }
     for (const GameBuild& build : SupportedBuilds()) {
         for (const TextLanguage& language : build.text_languages) {
             if (language.key == key) {
@@ -87,22 +80,6 @@ std::string_view SavedLanguageName(std::string_view key) {
 }
 
 } // namespace
-
-bool IsRussianText(std::span<const uint8_t> sheet) {
-    size_t latin = 0, cyrillic = 0, other_cyrillic = 0, yery = 0;
-    for (size_t i = 0; i < sheet.size(); ++i) {
-        const uint8_t b = sheet[i];
-        if (b < 0x80) {
-            latin += (b | 0x20) >= 'a' && (b | 0x20) <= 'z';
-        } else if (b >= 0xd0 && b <= 0xd3 && i + 1 < sheet.size() && (sheet[i + 1] & 0xc0) == 0x80) {
-            const char32_t c = (char32_t(b & 0x1f) << 6) | (sheet[++i] & 0x3f);
-            ++cyrillic;
-            other_cyrillic += !InRussianAlphabet(c);
-            yery += c == 0x42b || c == 0x44b;
-        }
-    }
-    return cyrillic > latin && yery > 0 && other_cyrillic * 100 < cyrillic;
-}
 
 std::vector<TextLanguage> InstalledTextLanguages(const std::filesystem::path& app0, const GameBuild* build) {
     const std::span<const TextLanguage> listed = TextLanguagesOf(build);
@@ -134,17 +111,7 @@ std::vector<TextLanguage> InstalledTextLanguages(const std::filesystem::path& ap
         if (files[i].empty() || !std::includes(files[i].begin(), files[i].end(), required.begin(), required.end())) {
             continue;
         }
-        TextLanguage language = listed[i];
-        const CpkEntry* sheet = archive.Find("msgsheet/SystemMsg_" + std::string(language.suffix) + ".fms");
-        if (sheet && IsRussianText(archive.Read(*sheet))) {
-            if (std::any_of(installed.begin(), installed.end(),
-                            [](const TextLanguage& other) { return other.key == kRussianKey; })) {
-                continue;
-            }
-            language.key = kRussianKey;
-            language.name = kRussianName;
-        }
-        installed.push_back(language);
+        installed.push_back(listed[i]);
     }
     return installed.empty() ? fallback : installed;
 }
@@ -204,7 +171,7 @@ std::string DescribeLanguageResources(const std::filesystem::path& app0, const G
         std::snprintf(crc, sizeof(crc), "%08x", Crc32(bytes));
         const size_t high = size_t(std::count_if(bytes.begin(), bytes.end(), [](uint8_t b) { return b >= 0x80; }));
         text += std::string(", SystemMsg crc ") + crc + ", " + std::to_string(bytes.size()) + " bytes, " +
-                std::to_string(high) + " non-ASCII" + (IsRussianText(bytes) ? ", Russian" : "");
+                std::to_string(high) + " non-ASCII";
     }
     return text + "; offered " + LanguageNames(InstalledTextLanguages(app0, build));
 }
