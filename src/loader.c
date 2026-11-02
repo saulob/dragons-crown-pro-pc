@@ -14,6 +14,7 @@
 #include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "system_type_hook.h"
+#include "party_hook.h"
 #include "ultrawide_hooks.h"
 #include "voice_hooks.h"
 #include "dcpgpu.h"
@@ -759,11 +760,12 @@ int main(int argc, char **argv) {
     const size_t save_stub_bytes = startup_save_hook_stub_bytes();
     const size_t voice_stub_bytes = voice_hooks_stub_bytes();
     const size_t system_type_stub_bytes = system_type_hook_stub_bytes();
+    const size_t party_stub_bytes = party_hook_stub_bytes();
     const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() : 0;
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
-                                         ultrawide_stub_bytes + lzcnt_stub_bytes);
+                                         ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -836,6 +838,9 @@ int main(int argc, char **argv) {
     dcp_startup_phase("imports resolved");
     /* A supported build without tables has its sites found now, in the image as the game shipped it, before any patch. */
     DcpFeatureSites located;
+    DcpPartySites party_sites;
+    int party_located=0;
+    char party_failure[192]="";
     {
         DcpExecRange ranges[64];
         size_t range_count=0;
@@ -844,6 +849,9 @@ int main(int argc, char **argv) {
         const DcpImageView view={image,size,ranges,range_count};
         dcp_resolve_features(known_build ? &game_build : NULL,&view,runtime_cheats_hooks_wanted(1),
                              voice_hooks_enabled() && dcp_npc_voice_resources(app0),ultrawide_wanted,&located);
+        if (known_build && runtime_online_active()) {
+            party_located=dcp_resolve_party(&game_build,&view,&party_sites,party_failure,sizeof(party_failure));
+        }
     }
     if (check_imports) {
         /* Lists every import the game would stop at, without running it (needs the GPU
@@ -925,6 +933,13 @@ int main(int argc, char **argv) {
     if (known_build && runtime_online_active())
         system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
                                  system_type_stub_bytes,runtime_online_system_type);
+    if (known_build && runtime_online_active() && !runtime_cheats_hooks_wanted(1)) {
+        if (party_located)
+            party_hook_install_located(image,size,entry,&party_sites,
+                                       image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes,
+                                       party_stub_bytes);
+        else printf("Party: not reported, %s\n",party_failure);
+    }
     const unsigned skip_applied=skip_offers_install(image,size,known_build ? build_key : NULL,
                                                     skip_offers_wanted(dcp_skip_offers(settings_file)));
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,

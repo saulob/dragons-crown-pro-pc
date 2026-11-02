@@ -67,6 +67,12 @@ Every protection below is invisible to a client that behaves, and none changes t
   are not limited beyond the existing per-socket buckets. These limits live in the object's memory.
 - **Refusals** counted for the dashboard (`lobby_protocol`, `online_protocol`) are written once per reason and
   account or address per 10 minutes.
+- **Party snapshots** (`party.report`, see Usage statistics): over the lobby's one WebSocket like every other request,
+  so they pass the same edge, sign-in and per-socket limits first. They then have budgets of their own, separate from
+  `room.create` and `room.join`: the whole lobby (burst 30, then one per 30 s), one account (burst 3, then one per 2
+  minutes) and one address group (burst 12, then one per 30 s). A refusal spends none of the three and is counted as
+  `party_report_limited`; a repeat of the last snapshot of the same connection and room is answered without
+  counting and without spending a token. At most 227 rows can exist per day (see below) however many are sent.
 - **Relay**: a sender that keeps producing frames no well-behaved client sends (malformed, wrong token, no room,
   stale seat, unknown member, relay not negotiated, no sign-in) is allowed 200 of them and then 5 per second; past that
   its connection is closed with 1008. A destination that is offline or still resuming is not a fault.
@@ -75,7 +81,8 @@ Every protection below is invisible to a client that behaves, and none changes t
 - **Diagnostics** are counted in memory and written together at the next 15-minute alarm as `abuse` rows of
   `metrics_daily_dimensions` (no address, no account): `ws_upgrade_accepted`, `ws_upgrade_limited` (reported by the
   Worker on the next upgrade it forwards), `ws_upgrade_ip_cap`, `hello_accepted`, `hello_reconnect_deduped`,
-  `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`. They
+  `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`,
+  `party_report_limited`. They
   are in `/admin/api/history` under `dimensions.abuse` and on the dashboard. Counts of the last interval are lost if
   the object is evicted first. Rooms, members, accounts, friends, requests and reports
 are SQLite tables in the Durable Object; per-connection state (presence blob, rate buckets) lives in each socket's
@@ -83,13 +90,14 @@ attachment and disappears with the socket.
 
 ## Usage statistics and the dashboard
 
-`src/metrics.js` keeps anonymous aggregate service statistics in three tables of the same Durable Object; nothing else
-is collected and clients send nothing for it (docs/ONLINE.md, Privacy and usage statistics).
+`src/metrics.js` keeps anonymous aggregate service statistics in three tables of the same Durable Object. Everything
+comes from the sign-in and room requests clients already make, except the optional party snapshot described below;
+nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
 
 | Table | Row | Columns |
 |---|---|---|
 | `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms`, `rooms_closed`, `rooms_with_guest`, `rooms_relayed`, `party_total` |
-| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms |
+| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
 | `metrics_samples` | one per 15 minutes (UTC ms) | the highest `online`, `in_rooms` and `rooms` in the interval; 90 days kept |
 
 - Days are America/Sao_Paulo calendar days (`YYYY-MM-DD`); samples are UTC timestamps.
@@ -121,6 +129,39 @@ is collected and clients send nothing for it (docs/ONLINE.md, Privacy and usage 
   client sent) and kept in the socket's attachment while it is open. Missing, `XX` or `T1` is `Unknown`. The local
   server counts every client as `Unknown`. Platforms other than Windows, Linux and Steam Deck are `Other`; versions that are not
   a dotted number such as `0.8.0` are `Other`, and after 64 values in a day new ones are `Other` too.
+
+**Party snapshots.** `party.report` is an optional request: a client that never sends it signs in, creates and joins
+rooms, uses P2P and the relay and appears in every other figure exactly as before, and the sign-in answer, the lobby
+protocol and the online protocol are unchanged (an object from before this operation answers it `bad_request`, which a
+client treats as "not collected"). It carries only numbers:
+
+```
+{"op": "party.report", "seq": 7, "classes": [0, 2, 3], "host": 0}
+```
+
+- `classes`: 1 to 4 class indexes of the game (0 Fighter, 1 Amazon, 2 Elf, 3 Dwarf, 4 Sorceress, 5 Wizard), in any
+  order; a class may repeat. `host` (optional): the class index of the room's owner, which must be one of `classes`.
+  Anything else is `bad_request`: a missing or non-array `classes`, another size, an index outside 0 to 5 or not an
+  integer, a `host` that is not in the party, any other field, and any repeated key. The server never reads a name,
+  a string or a count from the request.
+- Only the room's owner may send it, on a connection with `presence: true` that is in a room, and no more classes than
+  the room has slots (`not_found`, `not_owner`, `bad_request`). The Connection test never qualifies. The owner, not
+  every member, reports, so a party is counted once.
+- It is answered `{"counted": true}`, or `{"counted": false}` for an exact repeat from the same connection in the same
+  room. That repeat check lives in the connection's attachment (gone with the socket), so a reconnect can count a party a
+  second time: a small duplicate is accepted in preference to keeping any identity.
+- Accepted snapshots are added to today's rows of `metrics_daily_dimensions`, in at most eight upserts, with values the
+  server builds from the class indexes: `character` (each class in the party, so a repeated class counts twice),
+  `host_character`, `party_size` (`1` to `4`), `party_composition` (the classes in the game's index order joined with `+`,
+  such as `Fighter+Elf+Elf`; 209 possible values) and `party_duplicate` (`yes` or `no`). The dimensions hold 6, 6, 4, 209
+  and 2 values, 227 rows per day at most, and a value outside those sets cannot be written. Guest classes are not stored
+  separately: they are `character` minus `host_character`. Seat order is not kept. The 64-value cap of the other
+  dimensions does not apply to them.
+- Nothing about the sender or the room is stored with the counts, and no event log exists. `/admin/api/history` returns
+  the dimensions and `party_first_day`, the first day any snapshot was counted (`null` before the first one), so the
+  dashboard can tell "nothing reported yet" from "nothing in this range". Rooms from before the first snapshot have no
+  character figures at all.
+- A failure to write the counts never fails the request.
 
 The tables are created with `CREATE TABLE IF NOT EXISTS` when the Durable Object starts, after the existing schema and
 migrations; the four room columns are added to `metrics_daily` (and `peak_members`, `relayed` to `rooms` by migration

@@ -95,6 +95,13 @@ typedef struct {
     uint32_t layout[DCP_LAYOUT_COUNT];       /* the displacement each DcpLayoutField reads in this build */
 } DcpCheatSites;
 
+/* What the online party snapshot reads: the entry of the player unit's per-tick update and the four displacements of
+ * the unit and its owner it observes. Found without the rest of the cheat set. */
+typedef struct {
+    uint32_t tick;
+    uint32_t unit_owner, unit_slot, unit_class, owner_category;
+} DcpPartySites;
+
 typedef struct {
     uint32_t npc_cue;          /* the cue mapper's `mov eax, 0x1971b` */
     uint32_t resource_acquire; /* the resource manager's acquire */
@@ -132,6 +139,7 @@ typedef struct {
 int dcp_ranges_overlap(const DcpExecRange *ranges, size_t count);
 
 int dcp_locate_cheat_sites(const DcpImageView *image, DcpCheatSites *out, DcpLocateReport *report);
+int dcp_locate_party_sites(const DcpImageView *image, DcpPartySites *out, DcpLocateReport *report);
 int dcp_locate_voice_sites(const DcpImageView *image, DcpVoiceSites *out, DcpLocateReport *report);
 int dcp_locate_ultrawide_sites(const DcpImageView *image, DcpUltrawideSites *out, DcpLocateReport *report);
 

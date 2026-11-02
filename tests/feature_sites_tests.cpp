@@ -18,10 +18,12 @@
 
 #include "build_scan.h"
 #include "cheat_hooks.h"
+#include "dcp_cheats.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
 #include "feature_sites.h"
 #include "game_profile.h"
+#include "party_hook.h"
 #include "runtime_cheats.h"
 #include "ultrawide_hooks.h"
 #include "voice_hooks.h"
@@ -134,6 +136,59 @@ void CompareInstalls(const GameBuild& build, const Image& image, const Located& 
     }
 }
 
+DcpGameBuild ProfileOf(const GameBuild& build);
+
+size_t PlayerTickIndex() {
+    const std::span<const GuestHook> hooks = cheats::Hooks();
+    for (size_t i = 0; i < hooks.size(); ++i) {
+        if (std::string_view(hooks[i].name) == "player tick") return i;
+    }
+    return SIZE_MAX;
+}
+
+bool LocateParty(const std::vector<uint8_t>& bytes, DcpPartySites& out, DcpLocateReport& report) {
+    const DcpExecRange range{0, bytes.size()};
+    const DcpImageView view{bytes.data(), bytes.size(), &range, 1};
+    out = {};
+    return dcp_locate_party_sites(&view, &out, &report) != 0;
+}
+
+bool LayoutIsHandlers(const DcpPartySites& party) {
+    return party.unit_owner == cheats::kUnitOwnerOffset && party.unit_slot == cheats::kUnitPlayerSlotOffset &&
+           party.unit_class == cheats::kUnitClassOffset && party.owner_category == cheats::kOwnerCategoryOffset;
+}
+
+// The online party observer needs the player-tick site and four displacements of every supported build, found on its
+// own: the same site the cheats hook, equal to the cheat set's wherever that resolves, and installing to one jump.
+void CheckPartyOnRealImage(const GameBuild& build, const Image& image, const Located& located) {
+    DcpPartySites party;
+    DcpLocateReport report{};
+    CHECK(LocateParty(image.bytes, party, report));
+    const size_t tick = PlayerTickIndex();
+    CHECK(tick != SIZE_MAX && party.tick == located.sites.cheat_sites.hooks[tick]);
+    CHECK(LayoutIsHandlers(party));
+    if (std::string_view(build.label) == "CUSA10454 1.00 USA") CHECK(party.tick == cheats::Hooks()[tick].offset);
+
+    const uint64_t size = image.bytes.size();
+    const size_t base = (size + 0xfff) / 0x1000 * 0x1000, room = party_hook_stub_bytes();
+    std::vector<uint8_t> memory(base + room, 0);
+    std::memcpy(memory.data(), image.bytes.data(), size);
+    CHECK(party_hook_install_located(memory.data(), size, image.entry, &party, memory.data() + base, room) == 1);
+    size_t changed_outside_site = 0;
+    for (uint64_t i = 0; i < size; ++i) {
+        changed_outside_site += (i < party.tick || i >= party.tick + 6) && memory[i] != image.bytes[i];
+    }
+    CHECK(changed_outside_site == 0 && memory[party.tick] == 0xe9);
+
+    const DcpGameBuild profile = ProfileOf(build);
+    const DcpExecRange range{0, size};
+    const DcpImageView view{image.bytes.data(), size, &range, 1};
+    DcpPartySites resolved{};
+    char failure[192];
+    CHECK(dcp_resolve_party(&profile, &view, &resolved, failure, sizeof(failure)) == 1 && resolved.tick == party.tick);
+    std::printf("%s: party observer site 0x%x\n", build.label, party.tick);
+}
+
 void TestRealImages() {
     size_t found = 0;
     for (const GameBuild& build : SupportedBuilds()) {
@@ -170,6 +225,7 @@ void TestRealImages() {
             CHECK(located.sites.voice_sites.npc_cue == VOICE_NPC_SITE_OFFSET);
             CHECK(located.sites.voice_sites.resource_acquire == VOICE_RES_ACQUIRE_SITE_OFFSET);
         }
+        CheckPartyOnRealImage(build, image, located);
         std::string mismatch;
         CHECK(cheats::LayoutMatches(located.sites.cheat_sites.layout, &mismatch));
         std::printf("%s: locators equal the tables (%zu/%zu cheat sites, %zu/%zu ultrawide sites)\n", build.label,
@@ -584,6 +640,80 @@ DcpGameBuild ProfileOf(const GameBuild& build) {
     return game;
 }
 
+void TestParty() {
+    const std::vector<uint8_t> base = BuildSynthetic(3, false), other = BuildSynthetic(9, false);
+    DcpPartySites party, second;
+    DcpLocateReport report{};
+    const Located all = LocateAll(base);
+    const size_t tick = PlayerTickIndex();
+    CHECK(all.cheats && tick != SIZE_MAX);
+    CHECK(LocateParty(base, party, report) && party.tick == all.sites.cheat_sites.hooks[tick] && LayoutIsHandlers(party));
+    CHECK(LocateParty(other, second, report) && second.tick != party.tick && LayoutIsHandlers(second));
+    CHECK(party.tick != cheats::Hooks()[tick].offset);
+
+    const scan::SiteSpec* spec = nullptr;
+    for (const scan::SiteSpec& candidate : scan::Sites()) {
+        if (std::string_view(candidate.name) == "hook: player tick") spec = &candidate;
+    }
+    CHECK(spec != nullptr);
+    const auto zero_all = [&](std::vector<uint8_t>& bytes, std::string_view pattern) {
+        const size_t length = Parse(pattern).bytes.size();
+        for (const uint64_t hit : Find(bytes, pattern)) std::memset(&bytes[hit], 0, length);
+    };
+
+    // Without the player-tick site, or with two, nothing is reported.
+    std::vector<uint8_t> broken = base;
+    zero_all(broken, spec->pattern);
+    CHECK(!LocateParty(broken, party, report) && report.failure[0] != 0);
+    std::vector<uint8_t> doubled = base;
+    Plant(doubled, spec->pattern, 0x1f0000);
+    CHECK(!LocateParty(doubled, party, report) && std::string_view(report.failure).find("2 matches") != std::string_view::npos);
+
+    // Without any one of the probes that read the four displacements, or with one off, nothing is reported ...
+    const char* const needed[] = {"48 83 bb ?? ?? ?? ?? 00 0f 84", "4c 8b bd ?? ?? ?? ?? 8b 40 ??", "48 8b bd ?? ?? ?? ?? 48 8b 07 48 63 9f"};
+    for (const char* prefix : needed) {
+        bool found = false;
+        for (size_t i = 0; i < dcp_layout_probe_count(); ++i) {
+            size_t n;
+            const std::string_view pattern = dcp_layout_probe_pattern(i, &n);
+            if (!pattern.starts_with(prefix)) continue;
+            found = true;
+            std::vector<uint8_t> gone = base, off = base;
+            zero_all(gone, pattern);
+            CHECK(!LocateParty(gone, party, report));
+            const std::vector<uint64_t> hits = Find(off, pattern);
+            CHECK(!hits.empty());
+            for (const uint64_t hit : hits) off[hit] ^= 0xff;
+            CHECK(!LocateParty(off, party, report));
+        }
+        CHECK(found);
+    }
+
+    // ... while a cheat site the observer does not read (the arrows) can be gone: the cheats refuse, the observer stays.
+    const scan::SiteSpec* arrows = nullptr;
+    for (const scan::SiteSpec& candidate : scan::Sites()) {
+        if (std::string_view(candidate.name) == "hook: arrows") arrows = &candidate;
+    }
+    CHECK(arrows != nullptr);
+    std::vector<uint8_t> no_arrows = base;
+    zero_all(no_arrows, arrows->pattern);
+    CHECK(!LocateAll(no_arrows).cheats && LocateParty(no_arrows, party, report) && party.tick == all.sites.cheat_sites.hooks[tick]);
+
+    // The observer is placed for a supported build only, tables or signatures alike.
+    const DcpExecRange range{0, base.size()};
+    const DcpImageView view{base.data(), base.size(), &range, 1};
+    char failure[192];
+    CHECK(dcp_resolve_party(nullptr, &view, &party, failure, sizeof(failure)) == 0 &&
+          std::string_view(failure).find("not a supported game build") != std::string_view::npos);
+    for (const GameBuild& build : SupportedBuilds()) {
+        const DcpGameBuild profile = ProfileOf(build);
+        CHECK(dcp_resolve_party(&profile, &view, &party, failure, sizeof(failure)) == 1);
+        CHECK(dcp_resolve_party(&profile, nullptr, &party, failure, sizeof(failure)) == 0);
+        CHECK(dcp_resolve_party(&profile, &view, nullptr, failure, sizeof(failure)) == 0);
+    }
+    CHECK(SupportedBuilds().size() == 7);
+}
+
 void TestKnownBuildsOnly() {
     const std::vector<uint8_t> everything = BuildSynthetic(5, true);
     const DcpExecRange range{0, everything.size()};
@@ -647,6 +777,7 @@ int main() {
     TestRealImages();
     TestSyntheticLocators();
     TestLayout();
+    TestParty();
     TestKnownBuildsOnly();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

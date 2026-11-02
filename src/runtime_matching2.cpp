@@ -13,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -20,6 +21,7 @@
 #include "net/json.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
+#include "dcp_party.h"
 #include "net/relay_frame.h"
 #include "runtime_online.h"
 
@@ -159,6 +161,7 @@ struct State {
     std::map<std::string, Client> clients;
     std::set<std::string> refused_friend_rooms;
     std::string notice;
+    party::Reporter party;
 };
 
 std::mutex g_mutex;
@@ -761,6 +764,35 @@ void OnLink(const net::LobbyMessage& m) {
     }
 }
 
+// The room owner tells the lobby which classes the party plays once it has been the same for a few seconds; the
+// lobby counts it without knowing who played. Best effort: a refusal or a lost link only means no report.
+void ReportParty(uint64_t now) {
+    if (!party::CanReport(settings().enabled, LinkUsable() && g.up && !g.lost, g.room, g.me, g.owner)) {
+        g.party.Idle();
+        return;
+    }
+    const int64_t at = int64_t(now);
+    if (!g.party.Due(at)) return;
+    std::vector<uint16_t> ids;
+    for (const auto& member : g.members) ids.push_back(member.first);
+    const std::optional<party::Snapshot> send = g.party.Poll(g.room, party::BuildSnapshot(ids, party::SharedUnits(), at), at);
+    if (!send) return;
+    Json classes = Json::Array();
+    for (uint8_t i = 0; i < send->size; ++i) classes.push(int64_t(send->classes[i]));
+    Json body = Json::Object();
+    body.set("classes", std::move(classes));
+    const uint32_t seq = g.link->request("party.report", std::move(body));
+    g.pending[seq] = Pending{Kind::kInternal, 0, nullptr, nullptr, 0};
+    g.party.Sent(g.room, *send, at);
+    std::printf("DEBUG_SAULO party: reported %u classes, me slot %d, owner slot %d, units:", unsigned(send->size),
+                party::MemberSlot(g.me), party::MemberSlot(g.owner));
+    for (int slot = 0; slot < party::kSlots; ++slot) {
+        const std::optional<uint8_t> unit = party::SharedUnits().ClassAt(slot, at);
+        std::printf(" %d=%d", slot, unit ? int(*unit) : -1);
+    }
+    std::printf("\n");
+}
+
 // Our endpoint goes to the lobby once the game's socket is bound and STUN / UPnP had their chance.
 void ReportEndpoint(uint64_t now) {
     std::shared_ptr<net::PeerSocket> socket = peer_socket();
@@ -1224,6 +1256,7 @@ void pump() {
         ReportEndpoint(now);
         Introduce(now);
         FlushPresence();
+        ReportParty(now);
         calls.swap(g.calls);
     }
     for (auto& call : calls) call();

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <map>
 #include <span>
 #include <string>
@@ -187,34 +188,60 @@ public:
         return true;
     }
 
+    bool ReadProbe(const Probe& probe, uint32_t layout[DCP_LAYOUT_COUNT], std::array<bool, DCP_LAYOUT_COUNT>& known) {
+        ++report_.expected;
+        size_t total = 0;
+        const std::vector<uint64_t> starts = Find(probe.pattern, total);
+        if (total != probe.expected) {
+            char why[48];
+            std::snprintf(why, sizeof(why), total == 0 ? "missing" : "%zu matches, expected %u", total,
+                          unsigned(probe.expected));
+            return Fail("layout", probe.name, why);
+        }
+        for (const uint64_t start : starts) {
+            for (const ProbeField& field : probe.fields) {
+                uint32_t value = 0;
+                std::memcpy(&value, image_.bytes + start + field.position, field.width);
+                if (known[field.field] && layout[field.field] != value) {
+                    return Fail("layout", dcp_layout_field_name(field.field), "conflicting displacements");
+                }
+                layout[field.field] = value;
+                known[field.field] = true;
+            }
+        }
+        ++report_.found;
+        return true;
+    }
+
     bool Layout(uint32_t layout[DCP_LAYOUT_COUNT]) {
         std::array<bool, DCP_LAYOUT_COUNT> known{};
         for (const Probe& probe : kProbes) {
-            ++report_.expected;
-            size_t total = 0;
-            const std::vector<uint64_t> starts = Find(probe.pattern, total);
-            if (total != probe.expected) {
-                char why[48];
-                std::snprintf(why, sizeof(why), total == 0 ? "missing" : "%zu matches, expected %u", total,
-                              unsigned(probe.expected));
-                return Fail("layout", probe.name, why);
+            if (!ReadProbe(probe, layout, known)) {
+                return false;
             }
-            for (const uint64_t start : starts) {
-                for (const ProbeField& field : probe.fields) {
-                    uint32_t value = 0;
-                    std::memcpy(&value, image_.bytes + start + field.position, field.width);
-                    if (known[field.field] && layout[field.field] != value) {
-                        return Fail("layout", dcp_layout_field_name(field.field), "conflicting displacements");
-                    }
-                    layout[field.field] = value;
-                    known[field.field] = true;
-                }
-            }
-            ++report_.found;
         }
         for (size_t i = 0; i < known.size(); ++i) {
             if (!known[i]) {
                 return Fail("layout", dcp_layout_field_name(DcpLayoutField(i)), "no instruction found");
+            }
+        }
+        return true;
+    }
+
+    // Only the probes that read `fields`; each of them must be found and agree, and every field must come out.
+    bool LayoutOf(std::initializer_list<DcpLayoutField> fields, uint32_t layout[DCP_LAYOUT_COUNT]) {
+        std::array<bool, DCP_LAYOUT_COUNT> known{};
+        for (const Probe& probe : kProbes) {
+            const bool wanted = std::any_of(probe.fields.begin(), probe.fields.end(), [&](const ProbeField& pf) {
+                return std::find(fields.begin(), fields.end(), pf.field) != fields.end();
+            });
+            if (wanted && !ReadProbe(probe, layout, known)) {
+                return false;
+            }
+        }
+        for (const DcpLayoutField field : fields) {
+            if (!known[field]) {
+                return Fail("layout", dcp_layout_field_name(field), "no instruction found");
             }
         }
         return true;
@@ -362,6 +389,35 @@ int dcp_locate_cheat_sites(const DcpImageView* image, DcpCheatSites* out, DcpLoc
         return 0;
     }
     *out = sites;
+    return 1;
+}
+
+int dcp_resolve_party(const DcpGameBuild* build, const DcpImageView* image, DcpPartySites* out, char* failure,
+                      size_t failure_size) {
+    DcpLocateReport report{};
+    std::snprintf(report.failure, sizeof(report.failure), "not a supported game build");
+    const int resolved = build && image && out && dcp_locate_party_sites(image, out, &report);
+    if (failure && failure_size) {
+        std::snprintf(failure, failure_size, "%s", report.failure);
+    }
+    return resolved;
+}
+
+int dcp_locate_party_sites(const DcpImageView* image, DcpPartySites* out, DcpLocateReport* report) {
+    if (!ValidView(image, report) || !out) {
+        return 0;
+    }
+    Locator locator(*image, *report);
+    const SiteSpec* tick = SpecNamed("Cheats", "hook: player tick");
+    std::vector<uint64_t> found;
+    uint32_t layout[DCP_LAYOUT_COUNT] = {};
+    if (!tick || !locator.Site(*tick, found) ||
+        !locator.LayoutOf({DCP_LAYOUT_UNIT_OWNER, DCP_LAYOUT_UNIT_PLAYER_SLOT, DCP_LAYOUT_UNIT_CLASS, DCP_LAYOUT_OWNER_CATEGORY},
+                          layout)) {
+        return 0;
+    }
+    *out = {uint32_t(found.front()), layout[DCP_LAYOUT_UNIT_OWNER], layout[DCP_LAYOUT_UNIT_PLAYER_SLOT],
+            layout[DCP_LAYOUT_UNIT_CLASS], layout[DCP_LAYOUT_OWNER_CATEGORY]};
     return 1;
 }
 

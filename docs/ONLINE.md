@@ -50,7 +50,7 @@ The online service stores anonymous aggregate usage statistics: player counts, s
 how many players each room reached and how long it lasted, how many rooms needed the relay,
 the Dragon's Crown Pro PC version, the platform (Windows, Linux, Steam Deck) and the country. These statistics do not
 store player names, Online names, Friend Codes, account IDs, IP addresses, room codes or friend lists, and there is no
-per-player or per-session record.
+per-player or per-session record. The same holds for the party statistics below.
 
 - The country is worked out by Cloudflare from your connection and kept only as a count per day (for example "Brazil:
   12 sessions"). The service never keeps your city, region or address for these statistics, and the game never sends a
@@ -58,13 +58,55 @@ per-player or per-session record.
 - A session is a sign-in of the launcher or the game to the online service that has no counted sign-in of the same
   account in the previous 10 minutes, so a quick reconnect is not counted again and sessions are not a number of players.
   There is no unique-player count.
-- Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Gameplay, saves, characters, progress, Ping and
-  FPS are not collected, and the game sends nothing extra for these statistics: they come from the sign-in and room
-  requests it already makes.
+- Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Saves, character names, levels, equipment, gold,
+  progress, quests, Ping and FPS are not collected. Apart from the optional party snapshot below, the game sends nothing
+  extra for these statistics: they come from the sign-in and room requests it already makes.
 - Only the maintainer can see them, on a private, password-protected page of the online service.
 
 The online service itself still needs your account, Online name, friends and, while you are in a room, your address and
 port to connect you to other players; that is described below and is not part of these statistics.
+
+### Party statistics
+
+The lobby can count which character classes appear in online parties. This is optional on both sides: a game build
+sends nothing unless it implements it, a lobby that does not know the request answers `bad_request`, and a build that
+never sends it signs in, hosts, joins, uses P2P and the relay and counts in every other statistic exactly as before.
+Builds up to 0.9.1 do not send it and keep working unchanged; the lobby accepts it before any build does, so the
+service can be updated first. Releases up to 0.9.1 never send it; the first build that does is the one that adds the
+observer described below.
+
+- When it is sent: only while Online Play is on and the game is signed in to the lobby, by the owner of a room that
+  holds two or more players (a room of one is every online player's idle state, so it is not a party), once every
+  player of the room has a live unit and the party has been the same for 3 seconds. The same party is not sent again in
+  that room; a changed party is sent once it is stable, at most once a minute. Offline play, Online Play off, a missing
+  link or an unrecognised game executable send nothing, and a refused or lost report changes nothing in the game.
+- Where the classes come from: an observer at the entry of the game's per-tick update of player units, installed only
+  while the game is online and found by signature in every supported build (`dcp_resolve_party`, the same site the
+  Cheats hook, which stay off online). It reads each human player unit's slot and class and writes nothing. The slot of a
+  room member is the game's own `(member id >> 4) - 1`; a report is made only when every member of the room has a unit
+  in its slot, so computer-controlled allies are not part of it and a layout that does not fit sends nothing.
+- The host's class is not sent: the report carries class numbers only.
+
+- What is counted: one snapshot of the party, sent by the room's host on the lobby connection the game already has
+  (no other connection, address or request exists for it): the class of each party member (Fighter, Amazon, Elf,
+  Dwarf, Sorceress or Wizard; a class may repeat) and, when known, the host's class. The client sends class numbers
+  only, never text, and the lobby derives everything it keeps from them.
+- What is kept: daily counts of how often each class appeared, of host classes, of party sizes (1 to 4), of the
+  party composition (the classes of a party in a fixed order, such as `Fighter+Elf`) and of parties with a repeated
+  class. At most 227 different counts exist per day, whatever is sent. No player name, Online name, character name,
+  Friend Code, account, address, room, session, installation or machine identifier, level, equipment, progress or
+  free text is stored with them, and there is no per-player, per-account or per-room history or event log.
+- How it is limited: the request passes the same sign-in and limits as every lobby request, then has its own budget per
+  lobby, per account and per address, separate from creating and joining rooms; an identical repeat from the same
+  connection is not counted twice. A client that reconnects can be counted twice for one party, which is accepted
+  rather than keeping an identifier to prevent it.
+- The transport is the authenticated lobby connection, so the service sees the connection's account and address while
+  it handles the request, as it does for every request; the statistics it retains are aggregate counts without them.
+  Only the maintainer can see the counts, on the private dashboard ("Characters & parties").
+- Statistics begin when builds that report parties are used. Earlier rooms have no character figures, and the dashboard
+  shows "No data yet" for a range without a report rather than zero use.
+- Offline play and Online play off send nothing. If the lobby is unreachable or refuses the request, play continues:
+  the snapshot is only a best-effort report.
 
 ### Ping
 
@@ -211,6 +253,7 @@ lower-case hex.
 | `friends.add` | `code` (`XXXX-XXXX`, any case) | `account`, `name`, `state` (`pending` / `friends`) |
 | `friends.accept` / `.decline` / `.remove` | `account` | `friend` / - / - |
 | `report.send` | `text` (<= 256), `log` (tail kept, <= 128 K), `version` | `id`, `left` |
+| `party.report` | `classes` (1-4 class numbers 0-5: Fighter, Amazon, Elf, Dwarf, Sorceress, Wizard), `host` (optional, one of `classes`); room owner only, optional (see Party statistics) | `counted` |
 
 Room (`room`): `id`, `world`, `slots`, `flags` (0x20000000 added while full), `owner`, `code` (6 characters, A-Z 2-9
 without I O 0 1), `key` (16 random bytes, hex: the peer handshake secret), `members: [{id, account, name, joined, bin, version, platform}]`,
@@ -236,7 +279,8 @@ Rules the lobby enforces:
   burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; 16 sockets and 20 new
   accounts per day per address (IPv6 per /64; loopback exempt on the development server); 30 new connections per 60 s per
   address at the Worker (HTTP 429); per account, sign-ins 12 burst then 1 per 15 s, `room.create` 6 burst then 1 per
-  20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; reports 5 per account, 10 per
+  20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; party
+  reports 3 burst then 1 per 2 minutes per account, 12 then 1 per 30 s per address and 30 then 1 per 30 s for the lobby; reports 5 per account, 10 per
   address, 300 in all per day, newest 1000 kept, addresses kept only as salted hashes.
 
 ## Peer transport

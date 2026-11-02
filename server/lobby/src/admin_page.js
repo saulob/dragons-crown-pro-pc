@@ -59,6 +59,18 @@ export const ADMIN_HTML = String.raw`<!doctype html>
         <div id="d-lifetime"></div>
       </div>
     </div>
+    <h2 class="section">Characters &amp; parties</h2>
+    <div class="panel">
+      <p class="muted">Anonymous aggregate party snapshots from compatible clients: the classes in an online party, never who played them. Game versions that do not report parties are not counted here, so a range without data means nothing was reported, not that nobody played.</p>
+      <p id="party-note" class="muted"></p>
+      <div class="cards" id="party-cards"></div>
+      <div class="grid">
+        <div id="d-character"></div>
+        <div id="d-host"></div>
+        <div id="d-party-size"></div>
+      </div>
+      <div id="d-composition"></div>
+    </div>
     <h2 class="section">Historical activity</h2>
     <div class="panel">
       <h2>Usage over time</h2>
@@ -299,7 +311,7 @@ export const ADMIN_JS = String.raw`(function () {
     ws_upgrade_ip_cap: 'WebSocket upgrades refused: too many sockets from one address', hello_accepted: 'Sign-ins accepted',
     hello_reconnect_deduped: 'Reconnects not counted as new sessions', hello_limited: 'Sign-ins refused: too many',
     room_create_accepted: 'Rooms created', room_create_limited: 'Room creations refused', room_join_limited: 'Room joins refused',
-    relay_abuse_closed: 'Relay connections closed for abuse'
+    relay_abuse_closed: 'Relay connections closed for abuse', party_report_limited: 'Party snapshots refused: too many'
   };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol' };
 
@@ -612,6 +624,42 @@ export const ADMIN_JS = String.raw`(function () {
     rows(life, 'Room lifetime', ordered(history.dimensions.lifetime, LIFETIME), function (v) { return LIFETIME[v]; });
   }
 
+  var CHARACTERS = { Fighter: 'Fighter', Amazon: 'Amazon', Dwarf: 'Dwarf', Elf: 'Elf', Wizard: 'Wizard', Sorceress: 'Sorceress' };
+  var PARTY_SIZE = { '1': '1 player', '2': '2 players', '3': '3 players', '4': '4 players' };
+
+  function total(items) { return items.reduce(function (a, i) { return a + i.count; }, 0); }
+
+  function parties(history) {
+    var d = history.dimensions;
+    var sizes = d.party_size || [];
+    var reports = total(sizes);
+    var since = history.party_first_day || null;
+    var note = $('party-note');
+    var cards = $('party-cards');
+    clear(cards);
+    if (reports > 0) {
+      var seats = sizes.reduce(function (a, i) { return a + Number(i.value) * i.count; }, 0);
+      var repeated = sum(d.party_duplicate || [], ['yes']);
+      cards.appendChild(card('Parties reported', fmt(reports)));
+      cards.appendChild(card('Average party size', (seats / reports).toFixed(2)));
+      cards.appendChild(card('With repeated classes', fmt(repeated) + ' · ' + share(repeated, reports)));
+      note.textContent = 'Last ' + history.days + ' days.' + (since ? ' Reporting began on ' + since + '; earlier rooms are not part of these counts.' : '');
+    } else if (since) {
+      note.textContent = 'No data yet in the last ' + history.days + ' days. The first party snapshot was reported on ' + since + '.';
+    } else {
+      note.textContent = 'No data yet. No game version has reported party snapshots to this service.';
+    }
+    var characters = $('d-character');
+    var hosts = $('d-host');
+    var size = $('d-party-size');
+    var compositions = $('d-composition');
+    [characters, hosts, size, compositions].forEach(clear);
+    rows(characters, 'Characters in parties', ordered(d.character || [], CHARACTERS));
+    rows(hosts, 'Host character', ordered(d.host_character || [], CHARACTERS));
+    rows(size, 'Party size', ordered(sizes, PARTY_SIZE), function (v) { return PARTY_SIZE[v]; });
+    rows(compositions, 'Most common compositions · top 12', d.party_composition || [], function (v) { return v.split('+').join(' + '); });
+  }
+
   function health(history) {
     var t = history.totals;
     var abuseCounts = history.dimensions.abuse;
@@ -680,6 +728,7 @@ export const ADMIN_JS = String.raw`(function () {
     $('c-joins-today').textContent = fmt(summary.today.room_joins);
     comparison(history);
     activity(history);
+    parties(history);
     health(history);
     usageChart($('usage'), history);
     barChart($('h-sessions'), history.daily, 'sessions', 'Sessions');

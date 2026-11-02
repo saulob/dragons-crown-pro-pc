@@ -5,6 +5,7 @@
 import { PROTECTION, RateLimiter } from './abuse.js';
 import { ipGroup } from './edge.js';
 import { CAPABILITIES, Relay } from './relay.js';
+import { parsePartyReport } from './party.js';
 import { Metrics, countryCode, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
 
@@ -218,6 +219,9 @@ export class Lobby {
       roomCreateAccount: new RateLimiter(PROTECTION.roomCreateAccount),
       roomCreateAddress: new RateLimiter(PROTECTION.roomCreateAddress),
       roomJoinAccount: new RateLimiter(PROTECTION.roomJoinAccount),
+      partyReportAll: new RateLimiter(PROTECTION.partyReportAll),
+      partyReportAccount: new RateLimiter(PROTECTION.partyReportAccount),
+      partyReportAddress: new RateLimiter(PROTECTION.partyReportAddress),
       rejects: new RateLimiter({ burst: 1, perSecond: 1000 / PROTECTION.rejectWindowMs }),
     };
     this.relays = new Relay(this);
@@ -323,7 +327,7 @@ export class Lobby {
       if (!Object.hasOwn(HANDLERS, msg.op)) fail('bad_request', 'unknown op');
       if (msg.op !== 'hello' && !att.hello) fail('no_session');
       this.index = null;
-      const body = HANDLERS[msg.op].call(this, att, msg, conn) ?? {};
+      const body = HANDLERS[msg.op].call(this, att, msg, conn, text) ?? {};
       conn.setAttachment(att);
       conn.send(JSON.stringify({ re: seq, code: 'ok', ...body }));
       this.runDeferred();
@@ -747,6 +751,23 @@ export class Lobby {
     fail('limit', 'joining rooms too fast');
   }
 
+  // Party snapshots have their own budget, one lobby-wide and one per account and per address; a refusal spends none of
+  // them, and none is shared with room.create or room.join.
+  limitPartyReport(att) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { partyReportAll, partyReportAccount, partyReportAddress } = this.guards;
+    if (!partyReportAll.allows('all', now) || !partyReportAccount.allows(att.account, now) ||
+        !partyReportAddress.allows(address, now)) {
+      this.diagnose('party_report_limited');
+      fail('limit', 'too many party reports');
+    }
+    partyReportAll.take('all', now);
+    partyReportAccount.take(att.account, now);
+    partyReportAddress.take(address, now);
+  }
+
   requireFriendRoom(a, b) {
     if (this.friendCount(a) >= LIMITS.friends || this.friendCount(b) >= LIMITS.friends) fail('limit', 'friend list full');
   }
@@ -1112,6 +1133,25 @@ const HANDLERS = {
       att.account, att.account, other);
     if (were) this.notifyAccount(other, { ev: 'friend.removed', account: att.account });
     return {};
+  },
+
+  // Anonymous party statistics (party.js): optional, sent by the room's owner on its own game connection, so a party is
+  // counted once. Only class indexes are read; the sender's identity and room are used to check the request and are
+  // not kept with the counts. An identical repeat on the same connection is not counted again.
+  'party.report'(att, msg, conn, text) {
+    const party = parsePartyReport(msg, text);
+    if (!party) fail('bad_request', 'party');
+    if (att.presence === false || !att.room) fail('not_found', 'not in a room');
+    const room = this.roomRow(att.room);
+    if (!room) fail('not_found');
+    this.requireOwner(att, room);
+    if (party.classes.length > room.slots) fail('bad_request', 'party');
+    const signature = `${room.id}:${party.classes.join('')}:${party.host ?? '-'}`;
+    if (att.party === signature) return { counted: false };
+    this.limitPartyReport(att);
+    this.track(() => this.metrics.partyReport(party));
+    att.party = signature;
+    return { counted: true };
   },
 
   // Bug reports for the deployment's maintainer; the address is kept only as a salted hash for the limits.

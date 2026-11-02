@@ -615,7 +615,7 @@ test('the Durable Object serves metrics only to the Worker, never to a WebSocket
   assert.ok(!/console\.log\([^)]*(token|Authorization)/i.test(worker));
 });
 
-test('game clients send no telemetry: same sign-in fields plus the relay capability, no new requests, P2P untouched', () => {
+test('game clients send the same sign-in fields and no analytics beyond the optional party.report, P2P untouched', () => {
   const lobbyLink = readFileSync(join(REPO, 'src/net/lobby_link.cpp'), 'utf8');
   const hello = lobbyLink.slice(lobbyLink.indexOf('Json hello_body('), lobbyLink.indexOf('LobbyLink::LobbyLink('));
   assert.deepEqual([...hello.matchAll(/h\.set\("([a-z_]+)"/g)].map((m) => m[1]),
@@ -633,4 +633,16 @@ test('game clients send no telemetry: same sign-in fields plus the relay capabil
   const env = makeLobby();
   const c = online(env);
   for (const op of ['metrics', 'metrics.report', 'telemetry', 'stats']) assert.equal(c.call(op).code, 'bad_request');
+});
+
+test('the client party report is the exact frame the lobby accepts: op, seq and class numbers only', () => {
+  const matching = readFileSync(join(REPO, 'src/runtime_matching2.cpp'), 'utf8');
+  const report = matching.slice(matching.indexOf('void ReportParty('), matching.indexOf('// Our endpoint goes to the lobby'));
+  assert.equal([...report.matchAll(/\.set\("([a-z_]+)"/g)].map((m) => m[1]).join(), 'classes');
+  assert.equal([...matching.matchAll(/request\("party\.report"/g)].length, 1);
+  const env = makeLobby();
+  const c = online(env);
+  assert.equal(c.call('room.create', ROOM).code, 'ok');
+  assert.equal(c.raw('{"op":"party.report","seq":9,"classes":[0,2]}').code, 'ok');
+  assert.equal(c.call('party.report', { classes: [0, 2], host: 0 }).code, 'ok');
 });

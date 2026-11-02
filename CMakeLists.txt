@@ -117,7 +117,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -274,7 +274,7 @@ endif()
 # tables, synthetic images with every refusal case, and the known-build-only rule (tools/test.ps1); not part of the
 # default build.
 add_executable(dcp-feature-sites-tests EXCLUDE_FROM_ALL tests/feature_sites_tests.cpp src/cheat_hooks.cpp
-    src/runtime_cheats.cpp src/guest_hook.c src/ultrawide_hooks.c src/voice_hooks.c)
+    src/runtime_cheats.cpp src/guest_hook.c src/party_hook.cpp src/ultrawide_hooks.c src/voice_hooks.c)
 set_target_properties(dcp-feature-sites-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-feature-sites-tests PRIVATE src launcher)
 target_compile_definitions(dcp-feature-sites-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -363,6 +363,14 @@ add_executable(dcp-system-type-tests EXCLUDE_FROM_ALL tests/system_type_tests.c 
 target_include_directories(dcp-system-type-tests PRIVATE src)
 target_compile_definitions(dcp-system-type-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-system-type-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the online party snapshot: the observer, the snapshot and its report rules, the hook on a synthetic
+# image, and the client's sources (tools/test.ps1); not part of the default build.
+add_executable(dcp-party-tests EXCLUDE_FROM_ALL tests/party_tests.cpp src/guest_hook.c src/party_hook.cpp)
+set_target_properties(dcp-party-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-party-tests PRIVATE src)
+target_compile_definitions(dcp-party-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-party-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the True Ultrawide hooks (tools/test.ps1); not part of the default build.
 add_executable(dcp-ultrawide-tests EXCLUDE_FROM_ALL tests/ultrawide_tests.c src/guest_hook.c src/ultrawide_hooks.c)

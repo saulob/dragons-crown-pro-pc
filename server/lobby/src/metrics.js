@@ -1,16 +1,18 @@
 // Aggregate service metrics for the private dashboard (README.md, Telemetry): daily counters, daily counts of sessions
 // per platform, version and country, and 15-minute usage samples. No row names a player, an account, an address or a
 // room, and nothing here keeps per-session state: live numbers come from the lobby's sockets and tables.
+import { MAX_PARTY, PARTY_DIMENSIONS, partyCounts } from './party.js';
+
+export { MAX_PARTY };
 export const METRICS_TIME_ZONE = 'America/Sao_Paulo';
 export const SAMPLE_MS = 15 * 60 * 1000;
 export const SAMPLE_DAYS = 90;
 export const HISTORY_MAX_DAYS = 365;
-export const DIMENSIONS = ['platform', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime'];
+export const DIMENSIONS = ['platform', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime', ...PARTY_DIMENSIONS];
 export const LIFETIMES = [['under_1m', 60e3], ['1_5m', 5 * 60e3], ['5_15m', 15 * 60e3], ['15_60m', 60 * 60e3], ['over_1h', Infinity]];
-export const MAX_PARTY = 4;
 export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited', 'ws_upgrade_ip_cap', 'hello_accepted',
   'hello_reconnect_deduped', 'hello_limited', 'room_create_accepted', 'room_create_limited', 'room_join_limited',
-  'relay_abuse_closed']);
+  'relay_abuse_closed', 'party_report_limited']);
 export const PLATFORMS = ['Windows', 'Linux', 'Steam Deck'];
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -141,6 +143,16 @@ export class Metrics {
     this.addDimension(day, 'country', countryCode(client.country));
   }
 
+  // One accepted party snapshot (party.js): bounded counts in the party dimensions, whose values the server derives from
+  // class indexes, never from client text. Callers have applied the lobby's limits; nothing about the sender is kept.
+  partyReport(party) {
+    const day = metricsDay(this.now());
+    for (const [dimension, value, amount] of partyCounts(party)) {
+      this.sql.run(`INSERT INTO metrics_daily_dimensions (day, dimension, value, count) VALUES (?, ?, ?, ?)
+        ON CONFLICT(day, dimension, value) DO UPDATE SET count = count + excluded.count`, day, dimension, value, amount);
+    }
+  }
+
   reject(reason) {
     const day = metricsDay(this.now());
     this.count('incompatible_rejects', day);
@@ -221,10 +233,11 @@ export class Metrics {
     const since = Math.max(now - days * DAY_MS, now - SAMPLE_DAYS * DAY_MS);
     const samples = this.sql.all('SELECT bucket, online, in_rooms, rooms FROM metrics_samples WHERE bucket >= ? ORDER BY bucket',
       sampleBucket(since));
+    const partyFirst = this.sql.get(`SELECT MIN(day) AS day FROM metrics_daily_dimensions WHERE dimension = 'party_size'`).day;
     const totals = this.totals(first, last);
     const previous = this.totals(daysBefore(first, days), daysBefore(first, 1));
     return { generated: now, time_zone: METRICS_TIME_ZONE, days, first, last, sample_ms: SAMPLE_MS, daily, dimensions,
-      samples, totals, previous, comparison: compare(totals, previous) };
+      party_first_day: partyFirst ?? null, samples, totals, previous, comparison: compare(totals, previous) };
   }
 
   totals(from, to) {

@@ -147,6 +147,11 @@ int dcp_game_build(const char *image_dir, DcpGameBuild *build);
 int dcp_resolve_features(const DcpGameBuild *build, const DcpImageView *image, int cheats, int voices, int ultrawide,
                          DcpFeatureSites *out);
 
+/* The same gate for the online party snapshot, which every supported build uses, tables or not: the player-tick site and
+ * the four displacements it observes. `failure` says why nothing resolved. Returns 1 when resolved. */
+int dcp_resolve_party(const DcpGameBuild *build, const DcpImageView *image, DcpPartySites *out, char *failure,
+                      size_t failure_size);
+
 /* 1 when the game folder holds the files Japanese NPC Voices needs (npc_voice_resources.h). */
 int dcp_npc_voice_resources(const char *app0);
 

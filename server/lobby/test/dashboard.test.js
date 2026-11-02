@@ -248,3 +248,123 @@ test('daily chart tooltips show the metric name and value, never a DOM object', 
   }
   assert.ok(!/\[object/.test(everyText(page)) && !ADMIN_JS.includes('[object'));
 });
+
+function putDimensions(env, n, dimension, values) {
+  for (const [value, count] of Object.entries(values)) {
+    env.host.sql.run('INSERT INTO metrics_daily_dimensions VALUES (?, ?, ?, ?)', dayAgo(env, n), dimension, value, count);
+  }
+}
+
+const rowsOf = (page, id) => page.get(id).find((n) => n.hasClass('row')).map((r) => ({
+  name: r.find((n) => n.hasClass('name'))[0].textContent,
+  count: r.find((n) => n.hasClass('count'))[0].textContent,
+  width: r.find((n) => n.hasClass('fill'))[0].style.width,
+}));
+
+function seedParties(env) {
+  putDimensions(env, 0, 'character', { Fighter: 30, Elf: 20, Wizard: 10, Sorceress: 40 });
+  putDimensions(env, 1, 'character', { Fighter: 10 });
+  putDimensions(env, 0, 'host_character', { Fighter: 3, Elf: 1 });
+  putDimensions(env, 0, 'party_size', { 1: 5, 2: 10, 4: 5 });
+  putDimensions(env, 0, 'party_composition', { 'Fighter+Elf': 6, 'Fighter+Fighter+Elf': 3, 'Amazon+Sorceress': 11 });
+  putDimensions(env, 0, 'party_duplicate', { yes: 5, no: 15 });
+}
+
+test('with no party reports the section says No data yet: no NaN, Infinity, percentages, bars or cards', async () => {
+  const env = makeLobby();
+  const page = await dashboard(env, 30);
+  assert.ok(ADMIN_HTML.includes('Characters &amp; parties'));
+  assert.ok(page.get('party-note').textContent.startsWith('No data yet.'));
+  assert.equal(page.get('party-cards').children.length, 0);
+  for (const id of ['d-character', 'd-host', 'd-party-size', 'd-composition']) {
+    const box = page.get(id);
+    assert.ok(box.textContent.includes('No data yet'), id);
+    assert.ok(!box.textContent.includes('%'), id);
+    assert.equal(box.find((n) => n.hasClass('fill')).length, 0, id);
+    assert.equal(box.find((n) => n.hasClass('row')).length, 0, id);
+  }
+  assert.ok(!/NaN|Infinity|undefined|\[object/.test(everyText(page)));
+});
+
+test('the section explains that these are anonymous aggregate snapshots from compatible clients', () => {
+  assert.match(ADMIN_HTML, /Anonymous aggregate party snapshots from compatible clients/);
+  assert.match(ADMIN_HTML, /not that nobody played/);
+});
+
+test('class popularity shows every class with its count and share of appearances', async () => {
+  const env = makeLobby();
+  seedParties(env);
+  const page = await dashboard(env, 30);
+  const rows = rowsOf(page, 'd-character');
+  assert.deepEqual(rows.map((r) => r.name), ['Fighter', 'Amazon', 'Dwarf', 'Elf', 'Wizard', 'Sorceress']);
+  assert.deepEqual(rows.map((r) => r.count), ['40 · 36%', '0 · 0%', '0 · 0%', '20 · 18%', '10 · 9%', '40 · 36%']);
+  assert.deepEqual(rows.map((r) => parseFloat(r.width)), [100, 0, 0, 50, 25, 100]);
+  assert.ok(!/NaN|Infinity|undefined/.test(everyText(page)));
+});
+
+test('host classes, party sizes and the repeated-class figure render from their own counts', async () => {
+  const env = makeLobby();
+  seedParties(env);
+  const page = await dashboard(env, 30);
+  assert.deepEqual(rowsOf(page, 'd-host').map((r) => r.count), ['3 · 75%', '0 · 0%', '0 · 0%', '1 · 25%', '0 · 0%', '0 · 0%']);
+  assert.deepEqual(rowsOf(page, 'd-party-size').map((r) => [r.name, r.count]),
+    [['1 player', '5 · 25%'], ['2 players', '10 · 50%'], ['3 players', '0 · 0%'], ['4 players', '5 · 25%']]);
+  const cards = page.get('party-cards').find((n) => n.hasClass('card')).map((c) => c.textContent);
+  assert.deepEqual(cards, ['Parties reported20', 'Average party size2.25', 'With repeated classes5 · 25%']);
+  assert.ok(page.get('party-note').textContent.startsWith('Last 30 days.'));
+});
+
+test('compositions are listed most common first, with the share of reported parties', async () => {
+  const env = makeLobby();
+  seedParties(env);
+  const page = await dashboard(env, 30);
+  assert.deepEqual(rowsOf(page, 'd-composition').map((r) => [r.name, r.count]),
+    [['Amazon + Sorceress', '11 · 55%'], ['Fighter + Elf', '6 · 30%'], ['Fighter + Fighter + Elf', '3 · 15%']]);
+});
+
+test('only the top twelve compositions are listed and the rest are counted, never drawn', async () => {
+  const env = makeLobby();
+  putDimensions(env, 0, 'party_size', { 2: 21 });
+  const values = {};
+  const names = ['Fighter', 'Amazon', 'Dwarf', 'Elf', 'Sorceress', 'Wizard'];
+  let n = 0;
+  for (let i = 0; i < 6 && n < 15; i++) for (let j = i; j < 6 && n < 15; j++, n++) values[`${names[i]}+${names[j]}`] = 15 - n;
+  putDimensions(env, 0, 'party_composition', values);
+  const page = await dashboard(env, 30);
+  const rows = rowsOf(page, 'd-composition');
+  assert.equal(rows.length, 12);
+  assert.ok(page.get('d-composition').textContent.includes('3 more not shown'));
+  assert.ok(!/NaN|Infinity/.test(page.get('d-composition').textContent));
+});
+
+test('a range without reports names the first day anything was reported instead of showing zero use', async () => {
+  const env = makeLobby();
+  putDimensions(env, 40, 'party_size', { 2: 4 });
+  putDimensions(env, 40, 'character', { Fighter: 4, Elf: 4 });
+  const page = await dashboard(env, 7);
+  const note = page.get('party-note').textContent;
+  assert.ok(note.includes('No data yet in the last 7 days'));
+  assert.ok(note.includes(dayAgo(env, 40)));
+  assert.equal(page.get('party-cards').children.length, 0);
+  assert.ok(page.get('d-character').textContent.includes('No data yet'));
+  assert.ok(!/NaN|Infinity|undefined/.test(everyText(page)));
+});
+
+test('missing host figures leave that block empty without breaking the others', async () => {
+  const env = makeLobby();
+  putDimensions(env, 0, 'party_size', { 3: 2 });
+  putDimensions(env, 0, 'character', { Wizard: 6 });
+  putDimensions(env, 0, 'party_composition', { 'Wizard+Wizard+Wizard': 2 });
+  putDimensions(env, 0, 'party_duplicate', { yes: 2 });
+  const page = await dashboard(env, 30);
+  assert.ok(page.get('d-host').textContent.includes('No data yet'));
+  assert.deepEqual(rowsOf(page, 'd-character').find((r) => r.name === 'Wizard').count, '6 · 100%');
+  const cards = page.get('party-cards').find((n) => n.hasClass('card')).map((c) => c.textContent);
+  assert.deepEqual(cards, ['Parties reported2', 'Average party size3.00', 'With repeated classes2 · 100%']);
+});
+
+test('the dashboard still reads only the two existing endpoints, with no extra request for parties', () => {
+  assert.deepEqual([...ADMIN_JS.matchAll(/api\('([^']+)/g)].map((m) => m[1]).sort(), ['/admin/api/history?days=', '/admin/api/summary']);
+  assert.equal([...ADMIN_JS.matchAll(/fetch\(/g)].length, 1);
+  assert.ok(!/innerHTML|eval\(|new Function/.test(ADMIN_JS));
+});
