@@ -5,7 +5,10 @@ export const METRICS_TIME_ZONE = 'America/Sao_Paulo';
 export const SAMPLE_MS = 15 * 60 * 1000;
 export const SAMPLE_DAYS = 90;
 export const HISTORY_MAX_DAYS = 365;
-export const DIMENSIONS = ['platform', 'version', 'country', 'reject'];
+export const DIMENSIONS = ['platform', 'version', 'country', 'reject', 'abuse'];
+export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited', 'ws_upgrade_ip_cap', 'hello_accepted',
+  'hello_reconnect_deduped', 'hello_limited', 'room_create_accepted', 'room_create_limited', 'room_join_limited',
+  'relay_abuse_closed']);
 export const PLATFORMS = ['Windows', 'Linux', 'Steam Deck'];
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -62,6 +65,27 @@ export class Metrics {
     for (const statement of METRICS_SCHEMA) sql.run(statement);
     this.peaks = null;
     this.sample = null;
+    this.pending = new Map();
+  }
+
+  // Abuse diagnostics are counted in memory and written together by flushDiagnostics; true when this is the first
+  // pending one.
+  diagnose(name, amount = 1) {
+    if (!DIAGNOSTICS.has(name)) throw new Error(`unknown diagnostic ${name}`);
+    const first = this.pending.size === 0;
+    this.pending.set(name, (this.pending.get(name) ?? 0) + amount);
+    return first;
+  }
+
+  flushDiagnostics() {
+    if (!this.pending.size) return;
+    const day = metricsDay(this.now());
+    const counts = [...this.pending];
+    this.pending.clear();
+    for (const [name, count] of counts) {
+      this.sql.run(`INSERT INTO metrics_daily_dimensions (day, dimension, value, count) VALUES (?, 'abuse', ?, ?)
+        ON CONFLICT(day, dimension, value) DO UPDATE SET count = count + excluded.count`, day, name, count);
+    }
   }
 
   count(column, day = metricsDay(this.now())) {

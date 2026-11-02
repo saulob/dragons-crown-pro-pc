@@ -2,7 +2,8 @@
 // API: "ping" is answered by the runtime without waking the object, and every socket's state is its attachment.
 import { DurableObject } from 'cloudflare:workers';
 
-import { COUNTRY_HEADER, handleAdmin, internalMetricsRoute, isAdminPath, withEdgeCountry } from './admin.js';
+import { COUNTRY_HEADER, handleAdmin, internalMetricsRoute, isAdminPath, limitedCount } from './admin.js';
+import { handleUpgrade } from './edge.js';
 import { Lobby, LIMITS, PROTOCOL, listReports } from './lobby.js';
 
 class WorkerConn {
@@ -44,18 +45,21 @@ export class LobbyObject extends DurableObject {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     const sql = ctx.storage.sql;
-    this.lobby = new Lobby({
-      sql: {
-        all: (query, ...args) => sql.exec(query, ...args).toArray(),
-        get: (query, ...args) => sql.exec(query, ...args).toArray()[0],
-        run: (query, ...args) => {
-          sql.exec(query, ...args);
+    // Every wake builds the lobby again; knowing the stored alarm keeps it from being written again each time.
+    ctx.blockConcurrencyWhile(async () => {
+      this.lobby = new Lobby({
+        sql: {
+          all: (query, ...args) => sql.exec(query, ...args).toArray(),
+          get: (query, ...args) => sql.exec(query, ...args).toArray()[0],
+          run: (query, ...args) => {
+            sql.exec(query, ...args);
+          },
         },
-      },
-      sockets: () => ctx.getWebSockets().map((ws) => new WorkerConn(ws)),
-      now: () => Date.now(),
-      setAlarm: (ms) => ctx.storage.setAlarm(ms),
-      log: (text) => console.log(text),
+        sockets: () => ctx.getWebSockets().map((ws) => new WorkerConn(ws)),
+        now: () => Date.now(),
+        setAlarm: (ms) => ctx.storage.setAlarm(ms),
+        log: (text) => console.log(text),
+      }, { alarmAt: await ctx.storage.getAlarm() });
     });
   }
 
@@ -70,6 +74,7 @@ export class LobbyObject extends DurableObject {
     if (metrics) return new Response('Bad request', { status: 400 });
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('Not found', { status: 404 });
     const ip = request.headers.get('CF-Connecting-IP') ?? '';
+    this.lobby.edgeLimited(limitedCount(request.headers));
     const first = this.lobby.admit(ip, request.headers.get(COUNTRY_HEADER));
     if (!first) return new Response('Too many connections from this address', { status: 429 });
     const [client, server] = Object.values(new WebSocketPair());
@@ -129,7 +134,7 @@ export default {
       }
       return stub.fetch(request);
     }
-    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') return stub.fetch(withEdgeCountry(request));
+    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') return handleUpgrade(request, env, stub);
     return Response.json({ service: 'dcp-lobby', proto: PROTOCOL }, { headers: { 'X-Content-Type-Options': 'nosniff' } });
   },
 };

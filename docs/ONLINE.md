@@ -54,8 +54,9 @@ per-player or per-session record.
 - The country is worked out by Cloudflare from your connection and kept only as a count per day (for example "Brazil:
   12 sessions"). The service never keeps your city, region or address for these statistics, and the game never sends a
   country.
-- A session is one connection of the launcher or the game to the online service. A reconnect counts again, and the
-  launcher and the game count separately, so sessions are not a number of players. There is no unique-player count.
+- A session is a sign-in of the launcher or the game to the online service that has no counted sign-in of the same
+  account in the previous 10 minutes, so a quick reconnect is not counted again and sessions are not a number of players.
+  There is no unique-player count.
 - Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Gameplay, saves, characters, progress, Ping and
   FPS are not collected, and the game sends nothing extra for these statistics: they come from the sign-in and room
   requests it already makes.
@@ -232,7 +233,9 @@ Rules the lobby enforces:
 - Limits: frames 32 KB (160 KB for `report.send`); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
   32 int attrs; 16 filters; 200 friends; 50 pending requests each way (expire after 14 days); chat 120 characters, 5
   burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; 16 sockets and 20 new
-  accounts per day per address (IPv6 per /64; loopback exempt on the development server); reports 5 per account, 10 per
+  accounts per day per address (IPv6 per /64; loopback exempt on the development server); 30 new connections per 60 s per
+  address at the Worker (HTTP 429); per account, sign-ins 12 burst then 1 per 15 s, `room.create` 6 burst then 1 per
+  20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; reports 5 per account, 10 per
   address, 300 in all per day, newest 1000 kept, addresses kept only as salted hashes.
 
 ## Peer transport
@@ -299,7 +302,9 @@ Rudp entry points, in `net::PeerSocket`.
 - Limits (`server/lobby/src/relay.js`, to be tuned after real measurements): per connection 400 frames/s and 128 KB/s
   (bursts 800 and 256 KB); per room twice that; a destination socket with more than 256 KB buffered gets nothing. Excess
   frames are dropped (the link's own retransmission covers them); 256 of them close the relay for that connection with a
-  `relay.closed` event. Drops are logged for the first few of each reason, then one in a thousand.
+  `relay.closed` event. A sender of frames that are never valid (malformed, wrong token, not in a room, stale seat,
+  unknown member, no relay negotiated) is allowed 200 and then 5 per second before its connection is closed (1008);
+  frames to a member that is offline or resuming are only dropped. Drops are logged for the first few of each reason, then one in a thousand.
 - The client queues at most 512 frames for the socket (`kMaxQueuedBinary`); when full, or with no greeted socket, a
   frame is dropped and counted. A relayed frame is delivered to the link layer directly on receipt, so nothing queues
   on the way in.

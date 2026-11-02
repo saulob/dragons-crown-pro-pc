@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { COUNTRY_HEADER, handleAdmin, internalMetricsRoute, tokenMatches, withEdgeCountry } from '../src/admin.js';
+import { PROTECTION } from '../src/abuse.js';
 import { ADMIN_CSS, ADMIN_HTML, ADMIN_JS } from '../src/admin_page.js';
 import { Lobby } from '../src/lobby.js';
 import { SAMPLE_MS, countryCode, metricsDay, sampleBucket } from '../src/metrics.js';
@@ -38,10 +39,11 @@ test('a presence connection counts one session, however often it publishes prese
   assert.equal(today(env).sessions, 1);
 });
 
-test('a reconnect is another session; the Connection test and refused sign-ins are none', () => {
+test('a reconnect after the dedupe window is another session; the Connection test and refused sign-ins are none', () => {
   const env = makeLobby();
   const a = online(env);
   a.drop();
+  env.advance(PROTECTION.sessionWindowMs);
   const again = env.connect();
   Object.assign(again, { account: a.account, secret: a.secret });
   assert.equal(again.hello(WINDOWS).code, 'ok');
@@ -180,6 +182,7 @@ test('daily dimensions count sessions started, not players', () => {
   const env = makeLobby();
   const a = online(env, WINDOWS, '203.0.113.1', 'JP');
   for (let i = 0; i < 2; i++) {
+    env.advance(PROTECTION.sessionWindowMs);
     const again = env.connect('203.0.113.1', 'JP');
     Object.assign(again, { account: a.account, secret: a.secret });
     assert.equal(again.hello(WINDOWS).code, 'ok');
@@ -418,7 +421,7 @@ test('the Durable Object serves metrics only to the Worker, never to a WebSocket
   assert.equal(route('/metrics/summary', { Upgrade: 'websocket' }), null);
   assert.equal(route('/'), null);
   const worker = readFileSync(join(REPO, 'server/lobby/src/worker.js'), 'utf8');
-  assert.ok(worker.indexOf('isAdminPath(url.pathname)') < worker.indexOf("=== 'websocket') return stub.fetch(withEdgeCountry(request))"));
+  assert.ok(worker.indexOf('isAdminPath(url.pathname)') < worker.indexOf("=== 'websocket') return handleUpgrade(request, env, stub)"));
   assert.ok(!/console\.log\([^)]*(token|Authorization)/i.test(worker));
 });
 

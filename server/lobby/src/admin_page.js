@@ -66,11 +66,15 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       <summary>Diagnostics: incompatibility rejects</summary>
       <div id="rejects"></div>
     </details>
+    <details class="panel">
+      <summary>Diagnostics: abuse protection</summary>
+      <div id="abuse"></div>
+    </details>
     <div class="panel notes">
       <h2>How to read this</h2>
       <ul>
         <li>A session is one connection of a launcher or game that went online. The launcher and the game each count,
-          and a reconnect counts again. Sessions are not players: there is no unique-player count.</li>
+          and a reconnect within ten minutes of a counted session does not count again. Sessions are not players: there is no unique-player count.</li>
         <li>Platform, version and country by day count sessions started. "Now" counts players online, one per account,
           from the connections open at this moment.</li>
         <li>Country comes from Cloudflare and is stored only as a daily count. Unknown: Cloudflare did not say.</li>
@@ -250,6 +254,13 @@ export const ADMIN_JS = String.raw`(function () {
   try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) { regionNames = null; }
   var timeLabel = new Intl.DateTimeFormat('en-GB', { timeZone: ZONE, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   var dayLabel = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+  var ABUSE = {
+    ws_upgrade_accepted: 'WebSocket upgrades accepted', ws_upgrade_limited: 'WebSocket upgrades refused at the edge',
+    ws_upgrade_ip_cap: 'WebSocket upgrades refused: too many sockets from one address', hello_accepted: 'Sign-ins accepted',
+    hello_reconnect_deduped: 'Reconnects not counted as new sessions', hello_limited: 'Sign-ins refused: too many',
+    room_create_accepted: 'Rooms created', room_create_limited: 'Room creations refused', room_join_limited: 'Room joins refused',
+    relay_abuse_closed: 'Relay connections closed for abuse'
+  };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol' };
 
   function storedToken() {
@@ -479,6 +490,24 @@ export const ADMIN_JS = String.raw`(function () {
     rows(node, 'By reason', history.dimensions.reject, function (v) { return REJECTS[v] || v; });
   }
 
+  function abuse(history) {
+    var node = $('abuse');
+    clear(node);
+    var items = history.dimensions.abuse;
+    node.appendChild(el('p', 'muted', 'Counts over the last ' + history.days + ' days, written about every 15 minutes.'));
+    if (!items.length) node.appendChild(el('p', 'empty', 'None'));
+    var table = el('table');
+    var body = el('tbody');
+    items.forEach(function (item) {
+      var tr = el('tr');
+      tr.appendChild(el('td', '', ABUSE[item.value] || item.value));
+      tr.appendChild(el('td', '', fmt(item.count)));
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    node.appendChild(table);
+  }
+
   function render(summary, history) {
     $('c-online').textContent = fmt(summary.live.online);
     $('c-in-rooms').textContent = fmt(summary.live.in_rooms);
@@ -497,6 +526,7 @@ export const ADMIN_JS = String.raw`(function () {
     distribution('d-country', summary.live.country, history.dimensions.country, history.days, countryText);
     dailyTable(history.daily);
     rejects(history);
+    abuse(history);
     $('status').textContent = 'Updated ' + timeLabel.format(summary.generated) + ' (Sao Paulo)';
   }
 

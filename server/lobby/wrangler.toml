@@ -9,3 +9,8 @@ class_name = "LobbyObject"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["LobbyObject"]
+
+[[ratelimits]]
+name = "WS_UPGRADE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }

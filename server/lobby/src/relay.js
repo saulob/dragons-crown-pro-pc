@@ -11,10 +11,16 @@ export const RELAY = {
   connection: { packets: { burst: 800, perSecond: 400 }, bytes: { burst: 256 * 1024, perSecond: 128 * 1024 } },
   room: { packets: { burst: 1600, perSecond: 800 }, bytes: { burst: 512 * 1024, perSecond: 256 * 1024 } },
   overrunsToClose: 256,
+  invalid: { burst: 200, perSecond: 5 },
   bufferedBytes: 256 * 1024,
   loggedDrops: 5,
   loggedDropEvery: 1000,
 };
+
+// Frames a well-behaved sender never produces. A destination that is offline or still resuming is not one: its peers keep
+// sending for a while.
+const SENDER_FAULTS = new Set(['unknown_connection', 'not_negotiated', 'not_binary', 'truncated', 'bad_magic', 'bad_version',
+  'bad_type', 'oversized', 'bad_length', 'relay_closed', 'no_room', 'stale_membership', 'self', 'no_destination', 'bad_token']);
 
 export const CAPABILITIES = { relay_supported: true, relay_max_payload: RELAY.maxPayload };
 
@@ -82,17 +88,19 @@ export class Relay {
 
   frame(conn, bytes) {
     const att = conn.attachment();
-    if (!att?.hello) return this.drop('unknown_connection');
-    if (!att.relay) return this.drop('not_negotiated');
-    const parsed = parseRelayFrame(bytes);
-    if (parsed.error) return this.drop(parsed.error);
+    if (!att) return this.drop('unknown_connection');
     const state = this.connection(att.cid);
-    if (state.closed) return this.drop('relay_closed');
+    if (state.abusive) return;
+    if (!att.hello) return this.fault(conn, state, 'unknown_connection');
+    if (!att.relay) return this.fault(conn, state, 'not_negotiated');
+    const parsed = parseRelayFrame(bytes);
+    if (parsed.error) return this.fault(conn, state, parsed.error);
+    if (state.closed) return this.fault(conn, state, 'relay_closed');
     const now = this.lobby.host.now();
     if (!takeBudget(state.budget, RELAY.connection, now, bytes.length)) return this.overrun(conn, state, 'rate_limit');
     const route = this.routeFor(att, parsed.member);
-    if (typeof route === 'string') return this.drop(route);
-    if (parsed.token !== route.token) return this.drop('bad_token');
+    if (typeof route === 'string') return this.fault(conn, state, route);
+    if (parsed.token !== route.token) return this.fault(conn, state, 'bad_token');
     const room = this.room(route.room);
     if (!takeBudget(room.budget, RELAY.room, now, bytes.length)) return this.overrun(conn, state, 'room_rate_limit');
     const buffered = route.peer.bufferedAmount;
@@ -110,7 +118,7 @@ export class Relay {
   connection(cid) {
     let state = this.connections.get(cid);
     if (!state) {
-      state = { budget: {}, overruns: 0, closed: false };
+      state = { budget: {}, overruns: 0, closed: false, invalid: null, abusive: false };
       this.connections.set(cid, state);
     }
     return state;
@@ -160,7 +168,24 @@ export class Relay {
     if (++state.overruns < RELAY.overrunsToClose) return;
     state.closed = true;
     this.log(`closed for cid=${conn.attachment()?.cid} reason=${reason}`);
+    this.lobby.diagnose('relay_abuse_closed');
     this.lobby.send(conn, { ev: 'relay.closed', reason });
+  }
+
+  // Drops the frame; a sender that keeps producing faulty ones loses its connection.
+  fault(conn, state, reason) {
+    this.drop(reason);
+    if (!SENDER_FAULTS.has(reason)) return;
+    state.invalid = take(state.invalid, RELAY.invalid, this.lobby.host.now(), 1);
+    if (state.invalid) return;
+    state.abusive = true;
+    this.log(`sender closed cid=${conn.attachment()?.cid} reason=${reason}`);
+    this.lobby.diagnose('relay_abuse_closed');
+    try {
+      conn.close(1008, 'relay abuse');
+    } catch {
+      // Already closing.
+    }
   }
 
   // The first few drops of each reason are logged, then one in a thousand.

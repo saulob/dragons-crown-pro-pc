@@ -33,7 +33,8 @@ node --test "test/*.test.js"              # protocol tests
 Nothing in the repository deploys or logs in. To publish a lobby:
 
 1. Install the Wrangler CLI (`npm install -g wrangler`) and run `wrangler login` with your Cloudflare account.
-2. In this folder, check `wrangler.toml` (name `dcp-lobby`, the `LOBBY` Durable Object with a SQLite migration).
+2. In this folder, check `wrangler.toml` (name `dcp-lobby`, the `LOBBY` Durable Object with a SQLite migration, the
+   `WS_UPGRADE_LIMITER` rate limit; its `namespace_id` must be unique in the account).
 3. Optional, to read bug reports: `wrangler secret put REPORTS_TOKEN` (a long random value).
 4. Optional, for the metrics dashboard: `wrangler secret put DCP_DASHBOARD_TOKEN` (a long random value, at least 16
    characters; without it the dashboard's API answers 503).
@@ -45,7 +46,38 @@ Nothing in the repository deploys or logs in. To publish a lobby:
 
 Reports: `curl -H "Authorization: Bearer <token>" https://dcp-lobby.<subdomain>.workers.dev/reports` (newest 100).
 
-The Worker uses `CF-Connecting-IP` as each player's address. Rooms, members, accounts, friends, requests and reports
+The Worker uses `CF-Connecting-IP` as each player's address.
+
+## Abuse and quota protection
+
+Every protection below is invisible to a client that behaves, and none changes the protocol or needs a client update.
+
+- **Edge** (`src/edge.js`): a WebSocket upgrade is counted against `WS_UPGRADE_LIMITER` (30 per address group per 60 s, IPv6
+  per /64) before the Durable Object is reached. Over the limit the Worker answers 429 with `Retry-After`; the object is
+  not invoked and nothing is written. The service answer at `/`, `/admin` and `/reports` are not upgrades and are not
+  counted. The binding is per Cloudflare location and eventually consistent, so the limit is approximate. Without the
+  binding (development) or when it fails, upgrades pass.
+- **Sign-in** (`src/abuse.js`): after the secret matched, one account may sign in 12 times in a burst and then once per
+  15 s. A wrong secret never counts, so nobody can lock another account out. The existing account row is rewritten only
+  when the name changed or its `seen` is 15 minutes old; `accounts.session` (added by a migration) holds the last
+  counted session, so a reconnect within 10 minutes is neither a new session nor a write, even after the object was
+  evicted.
+- **Rooms**: `room.create` is limited per account (burst 6, then one per 20 s) and per address group (burst 20, then one
+  per 6 s); `room.join` per account (burst 20, then one per 5 s, failed joins are free). `room.search` and `room.leave`
+  are not limited beyond the existing per-socket buckets. These limits live in the object's memory.
+- **Refusals** counted for the dashboard (`lobby_protocol`, `online_protocol`) are written once per reason and
+  account or address per 10 minutes.
+- **Relay**: a sender that keeps producing frames no well-behaved client sends (malformed, wrong token, no room,
+  stale seat, unknown member, relay not negotiated, no sign-in) is allowed 200 of them and then 5 per second; past that
+  its connection is closed with 1008. A destination that is offline or still resuming is not a fault.
+- **Writes**: unchanged `udp`, `room.set_internal` and `room.set_external` updates write nothing, and a woken object
+  reads its stored alarm instead of setting it again.
+- **Diagnostics** are counted in memory and written together at the next 15-minute alarm as `abuse` rows of
+  `metrics_daily_dimensions` (no address, no account): `ws_upgrade_accepted`, `ws_upgrade_limited` (reported by the
+  Worker on the next upgrade it forwards), `ws_upgrade_ip_cap`, `hello_accepted`, `hello_reconnect_deduped`,
+  `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`. They
+  are in `/admin/api/history` under `dimensions.abuse` and on the dashboard. Counts of the last interval are lost if
+  the object is evicted first. Rooms, members, accounts, friends, requests and reports
 are SQLite tables in the Durable Object; per-connection state (presence blob, rate buckets) lives in each socket's
 attachment and disappears with the socket.
 
@@ -57,13 +89,13 @@ is collected and clients send nothing for it (docs/ONLINE.md, Privacy and usage 
 | Table | Row | Columns |
 |---|---|---|
 | `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms` |
-| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason |
+| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events |
 | `metrics_samples` | one per 15 minutes (UTC ms) | the highest `online`, `in_rooms` and `rooms` in the interval; 90 days kept |
 
 - Days are America/Sao_Paulo calendar days (`YYYY-MM-DD`); samples are UTC timestamps.
-- A **session** is a connection whose `hello` with `presence: true` succeeded, counted once per connection. The
-  launcher's Friends link and the game's link are separate sessions and a reconnect is a new one; the Connection test
-  (`presence: false`) and refused sign-ins are none. Sessions are not players: there is no unique-player, DAU or MAU
+- A **session** is a `hello` with `presence: true` that succeeded for an account with no counted session in the last
+  10 minutes. A reconnect (or the launcher and the game opening in turn) inside that window is the same session; the
+  Connection test (`presence: false`) and refused sign-ins are none. Sessions are not players: there is no unique-player, DAU or MAU
   count, and the daily platform, version and country counts are sessions started, not players.
 - **Live** numbers are never stored: they come from the open sockets and the `rooms`/`members` tables when asked.
   Online now and the live breakdowns count accounts with an open presence connection (one per account), in rooms
