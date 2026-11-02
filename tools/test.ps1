@@ -48,6 +48,10 @@ function Get-Node {
     return $node.Source
 }
 
+function Format-ExitCode([long]$Code) {
+    'exit code {0}, 0x{1:X8}' -f $Code, [uint32]($Code -band 0xFFFFFFFFL)
+}
+
 function Skipped([string]$Reason) { [pscustomobject]@{ Code = 0; Skip = $Reason; Lines = @() } }
 
 # Loopback only: the repository's development lobby, in memory, on a free port. Ready means its HTTP health answer came back.
@@ -225,7 +229,7 @@ try {
             $failed.Add($name)
             if ($test.Parity) { $parityFailed.Add($name) }
             $exitCodes[$name] = $code
-            Write-Host ("FAILED: $name (exit code $code, 0x{0:X8})" -f [uint32]($code -band 0xFFFFFFFF)) -ForegroundColor Red
+            Write-Host "FAILED: $name ($(Format-ExitCode $code))" -ForegroundColor Red
         }
     }
 } finally {

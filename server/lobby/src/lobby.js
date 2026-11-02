@@ -2,6 +2,8 @@
 // it only as relay frames (relay.js). State lives in SQL tables and in each socket's attachment, so a hibernated
 // Durable Object resumes as if it had never stopped; the same class runs in the local development server
 // (local/server.js).
+import { PROTECTION, RateLimiter } from './abuse.js';
+import { ipGroup } from './edge.js';
 import { CAPABILITIES, Relay } from './relay.js';
 import { Metrics, countryCode, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
@@ -96,6 +98,7 @@ const MIGRATIONS = [
   [`ALTER TABLE rooms ADD COLUMN online_protocol INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE members ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE members ADD COLUMN platform TEXT NOT NULL DEFAULT ''`],
+  [`ALTER TABLE accounts ADD COLUMN session INTEGER NOT NULL DEFAULT 0`],
 ];
 
 // ---- input validation ----
@@ -174,8 +177,6 @@ export function ipv4Kind(ip) {
   return 'public';
 }
 
-// Per-address limits group IPv6 clients by their /64.
-const ipGroup = (ip) => (typeof ip === 'string' && ip.includes(':') ? ip.split(':').slice(0, 4).join(':') : String(ip));
 const isLocalAddress = (ip) => ip === '::1' || ipv4Kind(ip) === 'loopback';
 
 export function formatFriendCode(code) {
@@ -209,7 +210,14 @@ export class Lobby {
     }
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
     this.metrics = new Metrics(host.sql, () => host.now());
-    this.alarmAt = null;
+    this.alarmAt = options.alarmAt ?? null;
+    this.guards = {
+      hello: new RateLimiter(PROTECTION.hello),
+      roomCreateAccount: new RateLimiter(PROTECTION.roomCreateAccount),
+      roomCreateAddress: new RateLimiter(PROTECTION.roomCreateAddress),
+      roomJoinAccount: new RateLimiter(PROTECTION.roomJoinAccount),
+      rejects: new RateLimiter({ burst: 1, perSecond: 1000 / PROTECTION.rejectWindowMs }),
+    };
     this.relays = new Relay(this);
     this.reconcileSeats();
   }
@@ -242,13 +250,13 @@ export class Lobby {
     };
   }
 
-  registerAccount(account, hash, name) {
+  registerAccount(account, hash, name, session = 0) {
     let code;
     do code = this.randomCode(8);
     while (this.host.sql.get('SELECT 1 AS x FROM accounts WHERE code = ?', code));
     const now = this.host.now();
-    this.host.sql.run('INSERT INTO accounts (account, secret_hash, code, name, created, seen) VALUES (?, ?, ?, ?, ?, ?)',
-      account, hash, code, name, now, now);
+    this.host.sql.run(`INSERT INTO accounts (account, secret_hash, code, name, created, seen, session)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, account, hash, code, name, now, now, session ? now : 0);
     return this.accountRow(account);
   }
 
@@ -270,9 +278,18 @@ export class Lobby {
     const group = ipGroup(ip);
     if (!(this.local && isLocalAddress(ip))) {
       const open = this.host.sockets().filter((c) => ipGroup(c.attachment()?.ip) === group).length;
-      if (open >= LIMITS.socketsPerIp) return null;
+      if (open >= LIMITS.socketsPerIp) {
+        this.diagnose('ws_upgrade_ip_cap');
+        return null;
+      }
     }
+    this.diagnose('ws_upgrade_accepted');
     return { cid: this.randomHex(8), ip, opened: this.host.now(), country: countryCode(country) };
+  }
+
+  // Upgrades the Worker refused before they reached this object.
+  edgeLimited(count) {
+    if (count > 0) this.diagnose('ws_upgrade_limited', count);
   }
 
   message(conn, text) {
@@ -341,9 +358,9 @@ export class Lobby {
   // A socket closed: a seat is held for the grace period; presence ends with the account's last present socket.
   closed(conn) {
     const att = conn.attachment();
+    if (att) this.relays.forgetConnection(att.cid);
     if (!att?.hello) return;
     this.index = null;
-    this.relays.forgetConnection(att.cid);
     if (att.room) {
       const member = this.memberRow(att.room, att.member);
       if (member && member.conn === att.cid) {
@@ -372,13 +389,14 @@ export class Lobby {
     }
     this.runDeferred();
     this.index = null;
+    this.track(() => this.metrics.flushDiagnostics());
     this.observe();
   }
 
   // The next seat grace to end, and while anyone is connected the next usage sample.
   scheduleAlarm() {
     const grace = this.host.sql.get('SELECT MIN(grace_until) AS t FROM members WHERE grace_until IS NOT NULL')?.t ?? null;
-    const sample = this.sockets().length ? sampleBucket(this.host.now()) + SAMPLE_MS : null;
+    const sample = this.sockets().length || this.metrics.pending.size ? sampleBucket(this.host.now()) + SAMPLE_MS : null;
     const at = grace && sample ? Math.min(grace, sample) : grace ?? sample;
     if (at && at !== this.alarmAt) {
       this.alarmAt = at;
@@ -414,6 +432,21 @@ export class Lobby {
     } catch (error) {
       this.host.log(`lobby: metrics error: ${error?.stack ?? error}`);
     }
+  }
+
+  diagnose(name, amount = 1) {
+    if (!this.metrics.diagnose(name, amount)) return;
+    this.scheduleAlarm();
+    this.index = null;
+  }
+
+  // One rejection per reason and key per window: a reconnect loop must not write on every turn.
+  countReject(reason, key) {
+    if (this.guards.rejects.take(`${reason}|${key}`, this.host.now())) this.track(() => this.metrics.reject(reason));
+  }
+
+  exempt(att) {
+    return this.local && isLocalAddress(att.ip);
   }
 
   observe() {
@@ -671,6 +704,41 @@ export class Lobby {
     this.host.sql.run('DELETE FROM friend_requests WHERE (sender = ? AND target = ?) OR (sender = ? AND target = ?)', a, b, b, a);
   }
 
+  // Counted after the secret matched, so nobody can lock out another account by guessing at it.
+  limitHello(att, account, now) {
+    if (this.exempt(att) || this.guards.hello.take(account, now)) return;
+    this.diagnose('hello_limited');
+    fail('limit', 'too many sign-ins');
+  }
+
+  // A reconnect rewrites the account only when something changed or the last write is old.
+  touchAccount(row, name, now, newSession) {
+    if (newSession) {
+      this.host.sql.run('UPDATE accounts SET name = ?, seen = ?, session = ? WHERE account = ?', name, now, now, row.account);
+    } else if (row.name !== name || now - row.seen >= PROTECTION.seenRefreshMs) {
+      this.host.sql.run('UPDATE accounts SET name = ?, seen = ? WHERE account = ?', name, now, row.account);
+    }
+  }
+
+  limitRoomCreate(att) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { roomCreateAccount, roomCreateAddress } = this.guards;
+    if (!roomCreateAccount.allows(att.account, now) || !roomCreateAddress.allows(address, now)) {
+      this.diagnose('room_create_limited');
+      fail('limit', 'creating rooms too fast');
+    }
+    roomCreateAccount.take(att.account, now);
+    roomCreateAddress.take(address, now);
+  }
+
+  limitRoomJoin(att) {
+    if (this.exempt(att) || this.guards.roomJoinAccount.take(att.account, this.host.now())) return;
+    this.diagnose('room_join_limited');
+    fail('limit', 'joining rooms too fast');
+  }
+
   requireFriendRoom(a, b) {
     if (this.friendCount(a) >= LIMITS.friends || this.friendCount(b) >= LIMITS.friends) fail('limit', 'friend list full');
   }
@@ -680,7 +748,7 @@ const HANDLERS = {
   hello(att, msg) {
     if (att.hello) fail('bad_request', 'already greeted');
     if (msg.proto !== PROTOCOL) {
-      if (!att.protoRejected) this.track(() => this.metrics.reject('lobby_protocol'));
+      if (!att.protoRejected) this.countReject('lobby_protocol', ipGroup(att.ip));
       att.protoRejected = true;
       fail('proto');
     }
@@ -690,7 +758,11 @@ const HANDLERS = {
     const name = cleanText(msg.name ?? '', LIMITS.nameChars) || 'Player';
     const hash = sha256Hex(msg.secret);
     const now = this.host.now();
+    const presence = msg.presence !== false;
     let row = this.accountRow(account);
+    if (row && row.secret_hash !== hash) fail('unauthorized');
+    this.limitHello(att, account, now);
+    let newSession = presence;
     if (!row) {
       const ipKey = this.ipKey(att.ip);
       if (!(this.local && isLocalAddress(att.ip))) {
@@ -698,14 +770,12 @@ const HANDLERS = {
         const recent = this.host.sql.get('SELECT COUNT(*) AS n FROM registrations WHERE ip = ?', ipKey).n;
         if (recent >= LIMITS.registrationsPerIpPerDay) fail('limit', 'too many new accounts');
       }
-      row = this.registerAccount(account, hash, name);
+      row = this.registerAccount(account, hash, name, presence);
       this.host.sql.run('INSERT INTO registrations (ip, ms) VALUES (?, ?)', ipKey, now);
-    } else if (row.secret_hash !== hash) {
-      fail('unauthorized');
     } else {
-      this.host.sql.run('UPDATE accounts SET name = ?, seen = ? WHERE account = ?', name, now, account);
+      newSession = presence && now - row.session >= PROTECTION.sessionWindowMs;
+      this.touchAccount(row, name, now, newSession);
     }
-    const presence = msg.presence !== false;
     const wasOnline = presence && this.presentSockets(account).length > 0;
     const online = isInt(msg.online_protocol, 1, 0xffff) ? msg.online_protocol : 0;
     const version = cleanText(msg.version ?? '', LIMITS.versionChars);
@@ -715,7 +785,9 @@ const HANDLERS = {
     if (att.relay) this.relays.negotiated(att);
     this.index = null;
     if (presence && !wasOnline) this.notifyFriends(account, { ev: 'friend.online', account, name });
-    if (presence) this.track(() => this.metrics.session(att));
+    if (newSession) this.track(() => this.metrics.session(att));
+    else if (presence) this.diagnose('hello_reconnect_deduped');
+    this.diagnose('hello_accepted');
     return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now, capabilities: CAPABILITIES };
   },
 
@@ -738,11 +810,17 @@ const HANDLERS = {
     // Peers are only ever sent toward the address this socket comes from: a client cannot point them elsewhere.
     att.udp = { ip: att.ip, port: msg.port, lan };
     if (att.room) {
-      this.host.sql.run('UPDATE members SET ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip, msg.port,
-        JSON.stringify(lan), att.room, att.member);
       const rows = this.memberRows(att.room);
       const me = rows.find((m) => m.member === att.member);
-      if (me) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
+      if (me) {
+        const lanText = JSON.stringify(lan);
+        if (me.ip !== att.ip || me.port !== msg.port || me.lan !== lanText) {
+          this.host.sql.run('UPDATE members SET ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip, msg.port,
+            lanText, att.room, att.member);
+          Object.assign(me, { ip: att.ip, port: msg.port, lan: lanText });
+        }
+        for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
+      }
     }
     return { ip: att.ip, port: msg.port };
   },
@@ -755,6 +833,7 @@ const HANDLERS = {
     const binInt = merge([], binAttrs(msg.bin_int), LIMITS.binAttrsPerArray);
     const binExt = merge([], binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const memberBin = binAttrs(msg.member_bin);
+    this.limitRoomCreate(att);
     const last = Number(this.meta('room_id') ?? FIRST_ROOM_ID - 1);
     const id = last + 1;
     this.setMeta('room_id', id);
@@ -767,6 +846,7 @@ const HANDLERS = {
       JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0);
     this.insertMember(att, id, MEMBER_IDS[0], memberBin);
     this.track(() => this.metrics.count('rooms_created'));
+    this.diagnose('room_create_accepted');
     return { room: this.fullRoom(this.roomRow(id)), me: MEMBER_IDS[0] };
   },
 
@@ -821,7 +901,7 @@ const HANDLERS = {
     }
     if (!room || room.game !== att.game) fail('not_found');
     if (!compatible(att, room)) {
-      this.track(() => this.metrics.reject('online_protocol'));
+      this.countReject('online_protocol', att.account);
       const owner = this.memberRow(room.id, room.owner);
       fail('incompatible', '', { online_protocol: room.online_protocol, ...clientOf(owner) });
     }
@@ -831,7 +911,9 @@ const HANDLERS = {
     const taken = new Set(members.map((m) => m.member));
     const memberId = MEMBER_IDS.slice(0, room.slots).find((id) => !taken.has(id));
     if (!memberId) fail('full');
-    this.insertMember(att, room.id, memberId, binAttrs(msg.member_bin));
+    const memberBin = binAttrs(msg.member_bin);
+    this.limitRoomJoin(att);
+    this.insertMember(att, room.id, memberId, memberBin);
     const joined = this.memberView(this.memberRow(room.id, memberId));
     this.toRoom(room.id, { ev: 'room.member_joined', room: String(room.id), member: joined }, memberId);
     const roomId = room.id;
@@ -890,7 +972,10 @@ const HANDLERS = {
     const changed = binAttrs(msg.bin_int);
     const binInt = merge(JSON.parse(room.bin_int), changed, LIMITS.binAttrsPerArray);
     const flags = (((room.flags & ~mask) | (value & mask)) & ~FLAG_FULL) >>> 0;
-    this.host.sql.run('UPDATE rooms SET flags = ?, bin_int = ? WHERE id = ?', flags, JSON.stringify(binInt), room.id);
+    const binIntText = JSON.stringify(binInt);
+    if (flags !== room.flags || binIntText !== room.bin_int) {
+      this.host.sql.run('UPDATE rooms SET flags = ?, bin_int = ? WHERE id = ?', flags, binIntText, room.id);
+    }
     const count = this.memberRows(room.id).length;
     this.toRoom(room.id, { ev: 'room.internal', room: String(room.id), flags: this.roomFlags({ ...room, flags }, count),
       bin_int: changed }, att.member);
@@ -902,7 +987,11 @@ const HANDLERS = {
     this.requireOwner(att, room);
     const ints = merge(JSON.parse(room.ints), intAttrs(msg.ints), LIMITS.intAttrsPerRoom);
     const binExt = merge(JSON.parse(room.bin_ext), binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
-    this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ? WHERE id = ?', JSON.stringify(ints), JSON.stringify(binExt), room.id);
+    const intsText = JSON.stringify(ints);
+    const binExtText = JSON.stringify(binExt);
+    if (intsText !== room.ints || binExtText !== room.bin_ext) {
+      this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ? WHERE id = ?', intsText, binExtText, room.id);
+    }
     return {};
   },
 

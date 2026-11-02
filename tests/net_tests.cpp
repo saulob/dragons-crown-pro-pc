@@ -888,6 +888,10 @@ public:
     explicit RelayBroker(uint32_t token) : token_(token), thread_([this] { Run(); }) {}
     ~RelayBroker() {
         {
+            std::lock_guard<std::mutex> lock(gate_->mutex);
+            gate_->broker = nullptr;
+        }
+        {
             std::lock_guard<std::mutex> lock(mutex_);
             stop_ = true;
         }
@@ -911,13 +915,11 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         refuse_ = refuse;
     }
+    // Sockets outlive the broker in these tests and may still call this while they close.
     PeerSocket::RelaySend From(uint16_t source) {
-        return [this, source](std::vector<uint8_t>&& frame) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (refuse_ || pending_.size() >= 512) return false;
-            pending_.emplace_back(source, std::move(frame));
-            wake_.notify_all();
-            return true;
+        return [gate = gate_, source](std::vector<uint8_t>&& frame) {
+            std::lock_guard<std::mutex> lock(gate->mutex);
+            return gate->broker && gate->broker->Enqueue(source, std::move(frame));
         };
     }
     uint64_t Count(uint16_t from, uint16_t to) {
@@ -936,6 +938,20 @@ public:
     }
 
 private:
+    struct Gate {
+        explicit Gate(RelayBroker* owner) : broker(owner) {}
+        std::mutex mutex;
+        RelayBroker* broker;
+    };
+
+    bool Enqueue(uint16_t source, std::vector<uint8_t>&& frame) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (refuse_ || pending_.size() >= 512) return false;
+        pending_.emplace_back(source, std::move(frame));
+        wake_.notify_all();
+        return true;
+    }
+
     void Run() {
         std::mt19937 random(4242);
         for (;;) {
@@ -962,6 +978,7 @@ private:
     }
 
     const uint32_t token_;
+    std::shared_ptr<Gate> gate_ = std::make_shared<Gate>(this);
     std::mutex mutex_;
     std::condition_variable wake_;
     std::deque<std::pair<uint16_t, std::vector<uint8_t>>> pending_;
