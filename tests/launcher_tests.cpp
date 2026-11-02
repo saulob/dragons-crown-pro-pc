@@ -2142,6 +2142,43 @@ void TestGameProcess() {
     CHECK(launcher_source.find("Could not start the game.") != std::string::npos);
 }
 
+void TestLauncherRenderer() {
+    const std::string host = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "host.cpp");
+    const size_t function = host.find("SDL_Renderer* CreateLauncherRenderer(SDL_Window* window) {");
+    const size_t windows = host.find("#ifdef _WIN32", function);
+    const size_t other = host.find("#else", windows);
+    const size_t end = host.find("#endif", other);
+    CHECK(function != std::string::npos && windows != std::string::npos && other != std::string::npos && end != std::string::npos);
+
+    // Windows asks for the software renderer directly: creating Direct3D 11 first would keep issue #45's teardown race.
+    const std::string on_windows = host.substr(windows, other - windows);
+    CHECK(on_windows.find("return SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);") != std::string::npos);
+    CHECK(on_windows.find("nullptr") == std::string::npos);
+    CHECK(on_windows.find("direct3d") == std::string::npos);
+
+    // Other platforms keep the accelerated renderer with the software fallback.
+    const std::string elsewhere = host.substr(other, end - other);
+    const size_t accelerated = elsewhere.find("SDL_CreateRenderer(window, nullptr)");
+    CHECK(accelerated != std::string::npos && accelerated < elsewhere.find("SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER)"));
+
+    CHECK(host.find("SDL_CreateRenderer(", end) == std::string::npos);
+    CHECK(host.find("renderer_ = CreateLauncherRenderer(window_);") != std::string::npos);
+    CHECK(host.find("SDL_GetRendererName(renderer_)") != std::string::npos);
+    CHECK(host.find("direct3d11") == std::string::npos && host.find("SDL_HINT_RENDER_DRIVER") == std::string::npos);
+
+    // Teardown order stays textures, ImGui, renderer, window, SDL.
+    const size_t textures = host.find("SDL_DestroyTexture(texture);", host.find("void LauncherHost::Close()"));
+    const size_t imgui = host.find("ImGui::DestroyContext(imgui_);", textures);
+    const size_t renderer = host.find("SDL_DestroyRenderer(renderer_);", imgui);
+    const size_t window = host.find("SDL_DestroyWindow(window_);", renderer);
+    const size_t quit = host.find("SDL_Quit();", window);
+    CHECK(textures != std::string::npos && imgui != std::string::npos && renderer != std::string::npos &&
+          window != std::string::npos && quit != std::string::npos);
+
+    // The game's renderer is Vulkan, so the launcher's choice never reaches the GPU shim.
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / "window.cpp").find("SDL_SOFTWARE_RENDERER") == std::string::npos);
+}
+
 void TestCheatSettings(const fs::path& base) {
     const fs::path file = base / "cheats" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -5597,6 +5634,7 @@ int main(int argc, char** argv) {
     TestPinnedBuild(base);
     TestOverlayProgramsSetting(base);
     TestGameProcess();
+    TestLauncherRenderer();
     TestAspectRatio(base);
     TestTrueUltrawide(base);
     TestFrameRate(base);

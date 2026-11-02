@@ -298,7 +298,7 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
   name. The first listed device is the default. A name that is not there any more, or not usable, falls back to the first
   usable device, and the launcher saves that name when you press Play. The game's log shows `GPU: selected <name>`, then
-  `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11 on Windows and SDL's first working renderer on Linux.
+  `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses SDL's software renderer on Windows (no Direct3D device) and SDL's first working renderer on Linux.
 - **VSync**: On is FIFO (the stable default). Off uses Mailbox, else Immediate.
 - **Presentation**: Letterbox (the default) or Stretch. It controls how the finished frame fits the window or display when
   their shape differs: Letterbox keeps the frame's aspect ratio with bars, Stretch fills the window and may distort the
