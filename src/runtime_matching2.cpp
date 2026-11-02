@@ -293,6 +293,10 @@ std::vector<net::Endpoint> Candidates(const Signal& s) {
     return list;
 }
 
+net::Endpoint GameEndpoint(uint16_t member, const Signal& s) {
+    return s.account ? net::signaling_endpoint(s.address, member) : s.address;
+}
+
 // The relay's two ends live on other threads (the socket's, the lobby link's) and must not take g_mutex.
 std::mutex g_relay_mutex;
 net::LobbyLink* g_relay_link = nullptr;
@@ -784,13 +788,7 @@ void ReportParty(uint64_t now) {
     const uint32_t seq = g.link->request("party.report", std::move(body));
     g.pending[seq] = Pending{Kind::kInternal, 0, nullptr, nullptr, 0};
     g.party.Sent(g.room, *send, at);
-    std::printf("DEBUG_SAULO party: reported %u classes, me slot %d, owner slot %d, units:", unsigned(send->size),
-                party::MemberSlot(g.me), party::MemberSlot(g.owner));
-    for (int slot = 0; slot < party::kSlots; ++slot) {
-        const std::optional<uint8_t> unit = party::SharedUnits().ClassAt(slot, at);
-        std::printf(" %d=%d", slot, unit ? int(*unit) : -1);
-    }
-    std::printf("\n");
+    std::printf("Matching2: party report sent (%u classes)\n", unsigned(send->size));
 }
 
 // Our endpoint goes to the lobby once the game's socket is bound and STUN / UPnP had their chance.
@@ -847,10 +845,12 @@ void Introduce(uint64_t now) {
     if (!g.room || !g.signal_cb || !g.socket) return;
     const bool ready = g.udp_acked || now - g.bound_ms > kEstablishWaitMs;
     for (auto& [member, s] : g.signals) {
-        if (s.delivered || member == g.me || !g.members.count(member) || !s.address.valid()) continue;
+        const net::Endpoint at = GameEndpoint(member, s);
+        if (s.delivered || member == g.me || !g.members.count(member) || !at.valid()) continue;
         if (!ready || now - s.changed_ms < kSettleMs) continue;
         s.delivered = true;
-        std::printf("Matching2: member 0x%x established at %s\n", member, net::endpoint_text(s.address).c_str());
+        std::printf("Matching2: member 0x%x established at %s%s\n", member, net::endpoint_text(at).c_str(),
+                    net::is_relay_endpoint(at) ? " (relay only: no direct endpoint)" : "");
         const SignalingCallback cb = g.signal_cb;
         void* arg = g.signal_arg;
         const uint64_t room = g.room;
@@ -1165,10 +1165,11 @@ DCP_SYSV int32_t m2_connection_status(uint16_t context, uint64_t room, uint16_t 
     (void)context, (void)room;
     std::lock_guard<std::mutex> lock(g_mutex);
     auto it = g.signals.find(member);
-    const bool known = it != g.signals.end() && it->second.address.valid();
+    const net::Endpoint at = it != g.signals.end() ? GameEndpoint(member, it->second) : net::Endpoint{};
+    const bool known = at.valid();
     if (status) *status = known ? 2 : 0;
-    if (address) *address = known ? __builtin_bswap32(it->second.address.ip) : 0;
-    if (port) *port = known ? uint16_t(it->second.address.port >> 8 | it->second.address.port << 8) : 0;
+    if (address) *address = known ? __builtin_bswap32(at.ip) : 0;
+    if (port) *port = known ? uint16_t(at.port >> 8 | at.port << 8) : 0;
     return known ? 0 : kErrInvalid;
 }
 

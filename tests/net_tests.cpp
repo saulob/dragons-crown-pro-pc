@@ -1190,6 +1190,149 @@ void TestMixedRoomPicksAPathPerPeer() {
     CHECK(a.socket->peer_at(relay_endpoint(0x40)) == 0);
 }
 
+void IntroduceRelayOnly(Peer& at, const Peer& other) { at.socket->set_peer(other.account, {}, other.member); }
+
+// Issue #49: the lobby gave no usable endpoint for the peer. The game's Rudp address is the relay's for that member,
+// the link starts with nothing direct to try, and the relay is offered at once instead of after the head start.
+void TestRelayOnlyPeerConnectsAtOnce() {
+    const Endpoint unusable{0, 3658};
+    const Endpoint public_endpoint{parse_ip("203.0.113.9"), 3658};
+    CHECK(signaling_endpoint(public_endpoint, kMemberB) == public_endpoint);
+    CHECK(signaling_endpoint(unusable, kMemberB) == relay_endpoint(kMemberB) && relay_endpoint(kMemberB).valid());
+    CHECK(!signaling_endpoint(unusable, 0).valid());
+
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RelayBroker broker(kRoomToken);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    IntroduceRelayOnly(a, b);
+    IntroduceRelayOnly(b, a);
+    CHECK(a.socket->peer_at(signaling_endpoint(unusable, kMemberB)) == b.account);
+    const uint64_t started = now_ms();
+    const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+    CHECK(la > 0 && lb > 0);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kConnected && b.socket->state(lb) == LinkState::kConnected; }, 2000));
+    CHECK(now_ms() - started < 2000);
+    CHECK(a.socket->path(la) == LinkPath::kRelay && b.socket->path(lb) == LinkPath::kRelay);
+    CHECK(Exchange(a, la, b, lb, 20000, 1) && Exchange(b, lb, a, la, 700, 2));
+    CHECK(a.socket->relay_stats().send_failures == 0 && a.socket->relay_stats().rejected == 0);
+}
+
+// A peer with a real direct candidate keeps its head start next to a relay-only peer in the same room.
+void TestDirectHeadStartSurvivesRelayOnlyNeighbour() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB), c = OpenPeer(3003, kMemberC);
+    CHECK(a.socket && b.socket && c.socket);
+    if (!a.socket || !b.socket || !c.socket) return;
+    RelayBroker broker(kRoomToken);
+    for (Peer* peer : {&a, &b, &c}) EnableRelay(*peer, broker);
+    IntroduceRelayOnly(a, b);
+    IntroduceRelayOnly(b, a);
+    Introduce(a, c, false);
+    Introduce(c, a, false);
+    const int ab = a.socket->connect(b.account), ba = b.socket->connect(a.account);
+    const int ac = a.socket->connect(c.account);
+    CHECK(WaitFor([&] { return a.socket->state(ab) == LinkState::kConnected && b.socket->state(ba) == LinkState::kConnected; }, 2000));
+    CHECK(broker.Count(kMemberA, kMemberC) == 0 && a.socket->path(ac) == LinkPath::kConnectingDirect);
+    CHECK(WaitFor([&] { return broker.Count(kMemberA, kMemberC) > 0; }, 3500));
+    CHECK(a.socket->path(ac) != LinkPath::kConnectingDirect);
+}
+
+// A relay-only link that is already offered still takes a direct path when one shows up and answers first.
+void TestRelayOnlyLinkTakesDirectWhenItAppears() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
+    CHECK(a.socket && b.socket);
+    if (!a.socket || !b.socket) return;
+    RelayBroker broker(kRoomToken);
+    broker.SetSwallowAll(true);
+    EnableRelay(a, broker);
+    EnableRelay(b, broker);
+    IntroduceRelayOnly(a, b);
+    IntroduceRelayOnly(b, a);
+    const int la = a.socket->connect(b.account), lb = b.socket->connect(a.account);
+    CHECK(WaitFor([&] { return a.socket->path(la) == LinkPath::kRelayOffered; }, 1000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    CHECK(a.socket->state(la) == LinkState::kConnecting);
+    Introduce(a, b, true);
+    Introduce(b, a, true);
+    CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kConnected && b.socket->state(lb) == LinkState::kConnected; }, 4000));
+    CHECK(a.socket->path(la) == LinkPath::kDirect && b.socket->path(lb) == LinkPath::kDirect);
+    CHECK(Exchange(a, la, b, lb, 3000, 3) && broker.Total() == 0);
+}
+
+// Three relay-only peers resolve to their own accounts and links; the members never cross.
+void TestRelayOnlyPeersStaySeparate() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB), c = OpenPeer(3003, kMemberC);
+    CHECK(a.socket && b.socket && c.socket);
+    if (!a.socket || !b.socket || !c.socket) return;
+    RelayBroker broker(kRoomToken);
+    for (Peer* peer : {&a, &b, &c}) EnableRelay(*peer, broker);
+    IntroduceRelayOnly(a, b);
+    IntroduceRelayOnly(a, c);
+    IntroduceRelayOnly(b, a);
+    IntroduceRelayOnly(b, c);
+    IntroduceRelayOnly(c, a);
+    IntroduceRelayOnly(c, b);
+    const Endpoint unusable{0, 3658};
+    CHECK(a.socket->peer_at(signaling_endpoint(unusable, kMemberB)) == b.account);
+    CHECK(a.socket->peer_at(signaling_endpoint(unusable, kMemberC)) == c.account);
+    CHECK(a.socket->peer_at(unusable) == 0);
+    const int ab = a.socket->connect(b.account), ba = b.socket->connect(a.account);
+    const int ac = a.socket->connect(c.account), ca = c.socket->connect(a.account);
+    const int bc = b.socket->connect(c.account), cb = c.socket->connect(b.account);
+    CHECK(ab != ac);
+    const auto connected = [](Peer& p, int link) { return p.socket->state(link) == LinkState::kConnected; };
+    CHECK(WaitFor([&] { return connected(a, ab) && connected(b, ba) && connected(a, ac) && connected(c, ca) &&
+                               connected(b, bc) && connected(c, cb); }, 3000));
+    CHECK(Exchange(a, ab, b, ba, 3000, 1) && Exchange(a, ac, c, ca, 3000, 2) && Exchange(b, bc, c, cb, 3000, 3));
+    CHECK(Exchange(c, ca, a, ac, 600, 4) && Exchange(c, cb, b, bc, 600, 5) && Exchange(b, ba, a, ab, 600, 6));
+    CHECK(a.socket->remote(ab) == relay_endpoint(kMemberB) && a.socket->remote(ac) == relay_endpoint(kMemberC));
+}
+
+// A member nobody introduced, member 0 and a seat taken over by another account never resolve to a wrong peer.
+void TestRelayEndpointNeverMapsToAnotherPeer() {
+    Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB), c = OpenPeer(3003, kMemberC);
+    CHECK(a.socket && b.socket && c.socket);
+    if (!a.socket || !b.socket || !c.socket) return;
+    IntroduceRelayOnly(a, b);
+    CHECK(a.socket->peer_at(relay_endpoint(kMemberB)) == b.account);
+    CHECK(a.socket->peer_at(relay_endpoint(kMemberC)) == 0 && a.socket->peer_at(relay_endpoint(0)) == 0);
+    CHECK(a.socket->peer_at(relay_endpoint(0x40)) == 0 && a.socket->peer_at({0, 3658}) == 0);
+    CHECK(a.socket->connect(c.account) == -1);
+    a.socket->set_peer(c.account, {}, kMemberB);
+    CHECK(a.socket->peer_at(relay_endpoint(kMemberB)) == c.account);
+    a.socket->forget_peer(c.account);
+    CHECK(a.socket->peer_at(relay_endpoint(kMemberB)) == 0);
+}
+
+// No direct candidate and no relay (or a relay that carries nothing): the link ends at the connect timeout.
+void TestRelayOnlyPeerFailsAtTheTimeout() {
+    for (const bool relay_enabled : {false, true}) {
+        Peer a = OpenPeer(1001, kMemberA, 2500), b = OpenPeer(2002, kMemberB, 2500);
+        CHECK(a.socket && b.socket);
+        if (!a.socket || !b.socket) return;
+        RelayBroker broker(kRoomToken);
+        broker.SetSwallowAll(true);
+        broker.Add(kMemberA, a.socket.get());
+        broker.Add(kMemberB, b.socket.get());
+        if (relay_enabled) a.socket->enable_relay(kRoomToken, broker.From(kMemberA));
+        IntroduceRelayOnly(a, b);
+        const uint64_t started = now_ms();
+        const int la = a.socket->connect(b.account);
+        CHECK(la > 0);
+        if (relay_enabled) {
+            CHECK(WaitFor([&] { return a.socket->path(la) == LinkPath::kRelayOffered; }, 1000));
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            CHECK(a.socket->path(la) == LinkPath::kConnectingDirect && a.socket->relay_stats().frames_out == 0);
+        }
+        CHECK(WaitFor([&] { return a.socket->state(la) == LinkState::kClosed; }, 4000));
+        CHECK(now_ms() - started >= 2400 && a.socket->path(la) == LinkPath::kFailed);
+        a.socket->disable_relay();
+    }
+}
+
 // Relay frames that are not this room's, not from a known peer, or not a PeerSocket datagram never reach a link.
 void TestRelayRefusesForeignFrames() {
     Peer a = OpenPeer(1001, kMemberA), b = OpenPeer(2002, kMemberB);
@@ -1686,10 +1829,16 @@ int main() {
         TestRelayWindowAndDirectCadence();
         TestRelayTakesOverWhenDirectIsSilent();
         TestMixedRoomPicksAPathPerPeer();
+        TestRelayOnlyPeerConnectsAtOnce();
+        TestDirectHeadStartSurvivesRelayOnlyNeighbour();
+        TestRelayOnlyLinkTakesDirectWhenItAppears();
+        TestRelayOnlyPeersStaySeparate();
+        TestRelayEndpointNeverMapsToAnotherPeer();
         TestRelayKeepsDatagramsIntact();
     });
     Group("failure-paths", [&] {
         TestNoRelayKeepsTheDirectTimeout();
+        TestRelayOnlyPeerFailsAtTheTimeout();
         TestRelayRefusalFailsLikeDirectOnly();
         TestRelayLossAfterConnectionEndsTheLink();
         TestRelayDoesNotBypassTheRoomKey();

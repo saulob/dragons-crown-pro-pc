@@ -332,6 +332,11 @@ Rudp entry points, in `net::PeerSocket`.
   (`LinkPath`: `kConnectingDirect`, `kRelayOffered`, `kDirect`, `kRelay`, `kFailed`). A link that came up on the relay
   stays on it for the session; one that came up directly never uses it. In a room of three, A-B can be direct while A-C
   and B-C are relayed. The 15 s connection timeout is unchanged.
+- A peer with no usable direct candidate (the lobby gave no IPv4 endpoint for it, for example because it connects over
+  IPv6, and no LAN candidate) does not wait for the head start: its link is created at once and the relay is offered
+  immediately, since there is nothing direct to try. The game is given `127.82.76.89` with that member as the port as
+  the peer's address, which resolves only to that room member's account; an unknown member resolves to nobody. If the
+  lobby offers no relay, the link ends at the usual 15 s timeout.
 - The relay carries the existing `DN` datagrams byte for byte, so the HMAC, fragmentation, ACKs, retransmission and
   Rudp above it are unchanged. A relayed peer's address, as the link layer sees it, is `127.82.76.89` with the peer's
   room member as the port.

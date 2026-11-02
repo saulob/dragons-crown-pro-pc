@@ -41,7 +41,7 @@ foreach ($file in 'src/net/relay_frame.h', 'src/net/relay_frame.cpp', 'src/net/l
     Check ((Text $file) -notmatch '#\s*include\s*<(windows|winsock2|winhttp)\.h>|_WIN32|HINTERNET') "$file uses a Windows-only API"
 }
 
-$optionPattern = 'force[_ ]?relay|DCP_RELAY|relay[_ ]?only|RELAY_FORCE'
+$optionPattern = 'force[_ ]?relay|relay_?force|relay_?only|DCP_RELAY|getenv\s*\([^)]*relay|process\.env\.\w*relay|--(force-)?relay'
 $scanned = @(git ls-files -- 'src' 'launcher' 'gpu/shim' 'tools' 'server/lobby/src' 'server/lobby/local') |
     Where-Object { $_ -notmatch 'tools/test\.ps1' }
 foreach ($file in $scanned) {

@@ -31,6 +31,10 @@ enum class LinkPath { kConnectingDirect, kRelayOffered, kDirect, kRelay, kFailed
 inline constexpr uint32_t kRelayAddress = 0x7F524C59;
 inline Endpoint relay_endpoint(uint16_t member) { return {kRelayAddress, member}; }
 inline bool is_relay_endpoint(const Endpoint& e) { return e.ip == kRelayAddress; }
+// What the game is told about a room member: its public endpoint, or the relay's for that member when it has none.
+inline Endpoint signaling_endpoint(const Endpoint& address, uint16_t member) {
+    return address.valid() ? address : relay_endpoint(member);
+}
 
 struct RelayStats {
     uint64_t frames_out = 0, bytes_out = 0, frames_in = 0, bytes_in = 0;
@@ -108,7 +112,8 @@ public:
     LinkPath path(int link) const;
 
     // The relay is a second path for peers given a relay member, offered once a link has tried direct alone for
-    // `relay_after_ms`. Nothing changes for a socket that never enables it.
+    // `relay_after_ms`, or at once when the peer has no direct candidate. Nothing changes for a socket that never
+    // enables it.
     void enable_relay(uint32_t token, RelaySend send);
     void disable_relay();
     bool relay_enabled() const;
@@ -170,6 +175,7 @@ private:
     void SendAck(Link& link);
     void SendRaw(const Endpoint& to, const void* data, size_t size);
     void SendRelay(uint16_t member, const void* data, size_t size);
+    bool HasDirect(uint64_t account) const;
     bool RelayReachable(const Link& link, uint64_t now) const;
     void Close(Link& link, const std::string& why, bool tell_peer);
     void StunStep(uint64_t now);

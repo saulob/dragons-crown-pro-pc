@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <optional>
 
 #include "net/crypto.h"
@@ -147,6 +148,8 @@ void PeerSocket::set_room(const RoomKey& key, uint64_t self_account) {
 void PeerSocket::set_peer(uint64_t account, std::vector<Endpoint> candidates, uint16_t relay_member) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (relay_member) {
+        for (auto it = relay_members_.begin(); it != relay_members_.end();)
+            it = it->second == relay_member && it->first != account ? relay_members_.erase(it) : std::next(it);
         relay_members_[account] = relay_member;
     } else {
         relay_members_.erase(account);
@@ -216,8 +219,13 @@ int PeerSocket::connect(uint64_t account) {
     Link* link = ByAccount(account);
     if (!link) {
         link = &NewLink(account, now_ms());
-        std::printf("P2P: link %d to peer %llu: trying %s\n", link->id, (unsigned long long)account,
-                    Candidates(peers_[account]).c_str());
+        if (HasDirect(account)) {
+            std::printf("P2P: link %d to peer %llu: trying %s\n", link->id, (unsigned long long)account,
+                        Candidates(peers_[account]).c_str());
+        } else {
+            std::printf("P2P: link %d to peer %llu: no direct candidate; relay %s\n", link->id, (unsigned long long)account,
+                        relay_send_ && relay_members_.count(account) ? "enabled" : "unavailable");
+        }
     }
     link->wanted = true;
     return link->id;
@@ -340,9 +348,14 @@ bool PeerSocket::deliver_relay(const uint8_t* data, size_t size) {
     return true;
 }
 
+bool PeerSocket::HasDirect(uint64_t account) const {
+    const auto peer = peers_.find(account);
+    return peer != peers_.end() && !peer->second.empty();
+}
+
 bool PeerSocket::RelayReachable(const Link& link, uint64_t now) const {
     return relay_send_ && relay_members_.count(link.account) &&
-           now - link.started_ms >= uint64_t(options_.relay_after_ms);
+           (!HasDirect(link.account) || now - link.started_ms >= uint64_t(options_.relay_after_ms));
 }
 
 void PeerSocket::SendRelay(uint16_t member, const void* data, size_t size) {
@@ -623,8 +636,13 @@ void PeerSocket::Timers(uint64_t now) {
                 if (RelayReachable(link, now)) {
                     if (!link.relay_offered) {
                         link.relay_offered = true;
-                        std::printf("P2P: link %d to peer %llu: no direct answer after %d ms; relay offered beside direct\n",
-                                    link.id, (unsigned long long)link.account, options_.relay_after_ms);
+                        if (HasDirect(link.account)) {
+                            std::printf("P2P: link %d to peer %llu: no direct answer after %d ms; relay offered beside direct\n",
+                                        link.id, (unsigned long long)link.account, options_.relay_after_ms);
+                        } else {
+                            std::printf("P2P: link %d to peer %llu: no direct candidate; relay offered at once\n", link.id,
+                                        (unsigned long long)link.account);
+                        }
                     }
                     SendHello(link, relay_endpoint(relay_members_[link.account]), false);
                 }
