@@ -32,13 +32,16 @@ static const uint8_t kSheetFillBytes[SHEET_FILL_LENGTH] = {0x48, 0x8b, 0x87, 0xf
 static const uint8_t kTickBytes[TICK_LENGTH] = {0x83, 0xc0, 0x02, 0x41, 0xb4, 0x01};
 
 /* Layout part per menu position and animation phase (entries 3..37 of the table; the first three are the title's own).
- * The PS4 variants lay out five rows; the base variants, two part indexes lower, lay out six and have no store panel. */
+ * The PS4 variants lay out five rows; the base variants, two part indexes lower, lay out six and have no store panel.
+ * The title also selects its entrance, confirm and return parts by immediate index: the same shift applies. */
 #define PART_TABLE_FIRST 3
 #define PART_TABLE_LAST 37
 #define PART_TABLE_VARIANT_DELTA 2
 static const int32_t kPartTable[PART_TABLE_LAST + 1 - PART_TABLE_FIRST] = {
     15, 43, 71, 99, 136, 168, 18, 46, 74, 102, 139, 171, 24, 30, 36, 27, 33, 39, 52, 58, 64, 55, 61, 67, 80, 86, 92, 83, 89, 95,
     21, 49, 77, 105, 142};
+
+static const uint8_t kTransitionParts[DCP_TRANSITION_PART_COUNT] = {11, 18, 21, 46, 49, 74, 77, 102, 105, 139, 142};
 
 static uint64_t default_clock_ms(void);
 static ExitGameHandler handler;
@@ -294,6 +297,16 @@ static int32_t *part_table_of(uint8_t *image, uint64_t size, uint32_t load) {
     return entries;
 }
 
+static int transition_parts_match(const uint8_t *image, uint64_t size, const DcpExitGameSites *sites) {
+    for (int i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
+        const uint32_t at = sites->transition_parts[i];
+        if (at + 4ull > size || image[at] != kTransitionParts[i] || image[at + 1] || image[at + 2] || image[at + 3]) return 0;
+        for (int j = 0; j < i; ++j)
+            if (sites->transition_parts[j] == at) return 0;
+    }
+    return 1;
+}
+
 int exit_game_hook_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpExitGameSites *sites,
                                    uint8_t *stubs, size_t stubs_size) {
     if (!sites || !image) {
@@ -320,6 +333,10 @@ int exit_game_hook_install_located(uint8_t *image, uint64_t size, uint64_t entry
         printf("Exit Game: not installed, the layout part table differs\n");
         return 0;
     }
+    if (!transition_parts_match(image, size, sites)) {
+        printf("Exit Game: not installed, the title's transition parts differ\n");
+        return 0;
+    }
     GuestHook hooks[EXIT_GAME_HOOK_COUNT] = {
         {"exit game sheet", sites->sheet_fill, SHEET_FILL_LENGTH, {0}, exit_game_sheet_hook},
         {"exit game row", sites->row_widget, 5, {0}, exit_game_row_hook},
@@ -337,13 +354,15 @@ int exit_game_hook_install_located(uint8_t *image, uint64_t size, uint64_t entry
         return 0;
     }
     for (int i = PART_TABLE_FIRST; i <= PART_TABLE_LAST; ++i) part_table[i] -= PART_TABLE_VARIANT_DELTA;
+    for (int i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) image[sites->transition_parts[i]] -= PART_TABLE_VARIANT_DELTA;
     image[sites->help_limits[0]] = HELP_LIMIT_NEW;
     image[sites->help_limits[1]] = HELP_LIMIT_NEW;
     exit_game_set_row_functions((ExitGameNewFn)(uintptr_t)(image + new_target), (ExitGameCtorFn)(uintptr_t)(image + ctor_target),
                                 (ExitGameAddFn)(uintptr_t)(image + add_target));
     printf("Exit Game: sites installed (sheet 0x%x, row 0x%x, tick 0x%x)\n", sites->sheet_fill, sites->row_widget,
            sites->menu_tick);
-    printf("Exit Game: layout table patched %d entries (table 0x%llx)\n", PART_TABLE_LAST + 1 - PART_TABLE_FIRST,
-           (unsigned long long)((const uint8_t *)part_table - image));
+    printf("Exit Game: layout table patched %d entries (table 0x%llx), %d transition parts\n",
+           PART_TABLE_LAST + 1 - PART_TABLE_FIRST, (unsigned long long)((const uint8_t *)part_table - image),
+           DCP_TRANSITION_PART_COUNT);
     return 1;
 }

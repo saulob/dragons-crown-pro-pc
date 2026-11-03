@@ -409,6 +409,9 @@ int dcp_locate_exit_game_sites(const DcpImageView* image, DcpExitGameSites* out,
     }
     Locator locator(*image, *report);
     std::vector<uint64_t> fill, widget, limits, loads, tick;
+    static const char* const kTransitionNames[DCP_TRANSITION_PART_COUNT] = {
+        "part TITLE_1", "part START_1", "part START_2", "part UPLOAD_1", "part UPLOAD_2", "part DOWNLOAD_1",
+        "part DOWNLOAD_2", "part OPTION_1", "part OPTION_2", "part GALLERY_1", "part GALLERY_2"};
     const auto find = [&](const char* name, std::vector<uint64_t>& found) {
         const SiteSpec* spec = SpecNamed("Exit Game", name);
         return spec ? locator.Site(*spec, found) : locator.Fail("site", name, "not defined");
@@ -417,16 +420,24 @@ int dcp_locate_exit_game_sites(const DcpImageView* image, DcpExitGameSites* out,
         !find("part table", loads) || loads.size() != 2 || !find("menu tick", tick)) {
         return 0;
     }
-    const DcpExitGameSites sites{uint32_t(fill.front()), uint32_t(widget.front()),
-                                 {uint32_t(limits[0]), uint32_t(limits[1])}, {uint32_t(loads[0]), uint32_t(loads[1])},
-                                 uint32_t(tick.front())};
-    const DcpExecRange ranges[] = {{sites.sheet_fill, sites.sheet_fill + 10u},
-                                   {sites.row_widget, sites.row_widget + 5u},
-                                   {sites.help_limits[0], sites.help_limits[0] + 1u},
-                                   {sites.help_limits[1], sites.help_limits[1] + 1u},
-                                   {sites.part_table_loads[0], sites.part_table_loads[0] + 7u},
-                                   {sites.part_table_loads[1], sites.part_table_loads[1] + 7u},
-                                   {sites.menu_tick, sites.menu_tick + 6u}};
+    DcpExitGameSites sites{uint32_t(fill.front()), uint32_t(widget.front()),
+                           {uint32_t(limits[0]), uint32_t(limits[1])}, {uint32_t(loads[0]), uint32_t(loads[1])},
+                           uint32_t(tick.front()), {}};
+    DcpExecRange ranges[7 + DCP_TRANSITION_PART_COUNT] = {{sites.sheet_fill, sites.sheet_fill + 10u},
+                                                           {sites.row_widget, sites.row_widget + 5u},
+                                                           {sites.help_limits[0], sites.help_limits[0] + 1u},
+                                                           {sites.help_limits[1], sites.help_limits[1] + 1u},
+                                                           {sites.part_table_loads[0], sites.part_table_loads[0] + 7u},
+                                                           {sites.part_table_loads[1], sites.part_table_loads[1] + 7u},
+                                                           {sites.menu_tick, sites.menu_tick + 6u}};
+    for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
+        std::vector<uint64_t> part;
+        if (!find(kTransitionNames[i], part)) {
+            return 0;
+        }
+        sites.transition_parts[i] = uint32_t(part.front());
+        ranges[7 + i] = {sites.transition_parts[i], sites.transition_parts[i] + 1u};
+    }
     if (dcp_ranges_overlap(ranges, std::size(ranges))) {
         return locator.Fail("patch", "ranges", "two patches overlap");
     }

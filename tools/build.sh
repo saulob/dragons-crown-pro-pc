@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-rtc-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-trace-tests dcp-rtc-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -163,6 +163,7 @@ if ((test)); then
     "$build_dir/bin/dcp-menu-buttons-tests"
     step 'Running the Exit Game tests'
     "$build_dir/bin/dcp-exit-game-tests"
+    "$build_dir/bin/dcp-title-trace-tests"
     step 'Running the online tests (JSON, identity, STUN, peer transport over loopback)'
     "$build_dir/bin/dcp-net-tests"
     step "Running the online build tests (every supported build's online imports, one lobby game, cheat lock)"

@@ -74,6 +74,7 @@ set(DCP_RUNTIME_SOURCES
     src/exit_game_hook.c
     src/exit_game_text.c
     src/guest_hook.c
+    src/title_trace.c
     src/runtime.c
     src/runtime_audio.c
     src/runtime_content.c
@@ -411,6 +412,13 @@ add_executable(dcp-exit-game-tests EXCLUDE_FROM_ALL tests/exit_game_tests.c src/
 target_include_directories(dcp-exit-game-tests PRIVATE src)
 target_compile_definitions(dcp-exit-game-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-exit-game-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
+
+# Focused tests of the title part trace (DEBUG_SAULO) on synthetic data and the local boot images (tools/test.ps1); not
+# part of the default build.
+add_executable(dcp-title-trace-tests EXCLUDE_FROM_ALL tests/title_trace_tests.c src/guest_hook.c src/title_trace.c)
+target_include_directories(dcp-title-trace-tests PRIVATE src)
+target_compile_definitions(dcp-title-trace-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-title-trace-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
 
 # Focused tests of the save-data mounts and the Japanese startup save hook (tools/test.ps1); not part of the default build.
 add_executable(dcp-savedata-tests EXCLUDE_FROM_ALL tests/savedata_tests.c src/guest_hook.c src/startup_save_hook.c)

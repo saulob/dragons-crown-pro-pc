@@ -1012,6 +1012,7 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
             add(exit_game.part_table_loads[0], 7, "exit game part table load");
             add(exit_game.part_table_loads[1], 7, "exit game part table load");
             add(exit_game.menu_tick, 6, "exit game menu tick");
+            for (const uint32_t part : exit_game.transition_parts) add(part, 1, "exit game transition part");
         }
     }
     const auto add_ultrawide = [&](const UltrawideRecord& record, const uint32_t* loads) {

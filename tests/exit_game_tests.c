@@ -378,7 +378,11 @@ static void test_sheet_hook(void) {
     free(sheet);
 }
 
-enum { IMAGE_BYTES = 0x2000, STUB_ROOM = 0x1000, FILL_AT = 0x100, WIDGET_CALL_AT = 0x900, LIMIT_A = 0x602, LIMIT_B = 0x702, LOAD_A = 0xa00, LOAD_B = 0xa40, TICK_AT = 0xc00, TABLE_AT = 0x1800 };
+enum { IMAGE_BYTES = 0x2000, STUB_ROOM = 0x1000, FILL_AT = 0x100, WIDGET_CALL_AT = 0x900, LIMIT_A = 0x602, LIMIT_B = 0x702, LOAD_A = 0xa00, LOAD_B = 0xa40, TICK_AT = 0xc00, TABLE_AT = 0x1800, TRANSITION_AT = 0x1b00 };
+
+/* TITLE_1, START_1, START_2, UPLOAD_1, UPLOAD_2, DOWNLOAD_1, DOWNLOAD_2, OPTION_1, OPTION_2, GALLERY_1, GALLERY_2 */
+static const uint8_t kPs4TransitionParts[DCP_TRANSITION_PART_COUNT] = {11, 18, 21, 46, 49, 74, 77, 102, 105, 139, 142};
+static const uint8_t kSixRowTransitionParts[DCP_TRANSITION_PART_COUNT] = {9, 16, 19, 44, 47, 72, 75, 100, 103, 137, 140};
 
 static void put_call(uint8_t *image, uint32_t at, uint32_t target) {
     image[at] = 0xe8;
@@ -412,6 +416,12 @@ static uint8_t *new_image(DcpExitGameSites *sites) {
     }
     static const uint8_t tick[6] = {0x83, 0xc0, 0x02, 0x41, 0xb4, 0x01};
     memcpy(image + TICK_AT, tick, sizeof(tick));
+    for (int i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
+        const uint32_t at = TRANSITION_AT + (uint32_t)i * 0x20;
+        image[at] = 0xbe;
+        image[at + 1] = kPs4TransitionParts[i];
+        sites->transition_parts[i] = at + 1;
+    }
     sites->menu_tick = TICK_AT;
     sites->part_table_loads[0] = LOAD_A;
     sites->part_table_loads[1] = LOAD_B;
@@ -441,11 +451,17 @@ static void test_install(void) {
         CHECK(table[0] == 5 && table[1] == 8 && table[2] == 11);
         CHECK(table[3] == 13 && table[4] == 41 && table[7] == 134 && table[8] == 166 && table[14] == 169 && table[37] == 140);
     }
+    for (int i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
+        /* every fixed entrance, confirm and return part moves with its row family; nothing around the index changes */
+        const uint32_t at = sites.transition_parts[i];
+        CHECK(image[at] == kSixRowTransitionParts[i] && image[at - 1] == 0xbe && !image[at + 1] && !image[at + 2] && !image[at + 3]);
+        CHECK(kSixRowTransitionParts[i] + 2 == kPs4TransitionParts[i]);
+    }
     CHECK(exit_game_hook_stub_bytes() >= EXIT_GAME_HOOK_COUNT);
     free(image);
 
     /* each site that does not match leaves the whole image as it was */
-    for (int fault = 0; fault < 13; ++fault) {
+    for (int fault = 0; fault < 17; ++fault) {
         DcpExitGameSites faulty;
         image = new_image(&faulty);
         uint8_t *before = malloc(IMAGE_BYTES + STUB_ROOM);
@@ -463,6 +479,10 @@ static void test_install(void) {
         case 8: faulty.help_limits[1] = faulty.help_limits[0]; break;
         case 9: image[TABLE_AT + 4 * 8] = 169; break;
         case 12: image[TICK_AT] = 0x90; break;
+        case 13: image[faulty.transition_parts[4]] = 47; break;
+        case 14: image[faulty.transition_parts[2] + 1] = 1; break;
+        case 15: faulty.transition_parts[7] = faulty.transition_parts[6]; break;
+        case 16: faulty.transition_parts[10] = IMAGE_BYTES - 2; break;
         case 10: image[LOAD_B + 1] = 0x8b; break;
         case 11: put_u32(image + LOAD_B + 3, TABLE_AT + 4 - (LOAD_B + 7)); break;
         }

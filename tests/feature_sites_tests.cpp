@@ -749,6 +749,18 @@ void TestExitGame() {
     Plant(image, specs[3]->pattern, at[4]);
     Plant(image, specs[3]->pattern, at[5]);
     Plant(image, specs[4]->pattern, at[6]);
+    const char* const part_names[DCP_TRANSITION_PART_COUNT] = {
+        "part TITLE_1", "part START_1", "part START_2", "part UPLOAD_1", "part UPLOAD_2", "part DOWNLOAD_1",
+        "part DOWNLOAD_2", "part OPTION_1", "part OPTION_2", "part GALLERY_1", "part GALLERY_2"};
+    const uint8_t part_indexes[DCP_TRANSITION_PART_COUNT] = {11, 18, 21, 46, 49, 74, 77, 102, 105, 139, 142};
+    uint64_t part_at[DCP_TRANSITION_PART_COUNT];
+    for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
+        const scan::SiteSpec* part = ExitGameSpec(part_names[i]);
+        CHECK(part != nullptr && part->expected == 1 && part->anchor == 8);
+        if (!part) return;
+        part_at[i] = 0x90000 + i * 0x100;
+        Plant(image, part->pattern, part_at[i]);
+    }
     DcpExitGameSites sites;
     DcpLocateReport report{};
     CHECK(LocateExitGame(image, sites, report));
@@ -756,6 +768,16 @@ void TestExitGame() {
     CHECK(sites.help_limits[0] == at[2] + specs[2]->anchor && sites.help_limits[1] == at[3] + specs[2]->anchor);
     CHECK(sites.part_table_loads[0] == at[4] + specs[3]->anchor && sites.part_table_loads[1] == at[5] + specs[3]->anchor);
     CHECK(sites.menu_tick == at[6] + specs[4]->anchor);
+    for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i)
+        CHECK(sites.transition_parts[i] == part_at[i] + 8 && image[sites.transition_parts[i]] == part_indexes[i]);
+    for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
+        std::vector<uint8_t> gone = image, twice = image;
+        std::memset(&gone[part_at[i]], 0x90, Parse(ExitGameSpec(part_names[i])->pattern).bytes.size());
+        CHECK(!LocateExitGame(gone, sites, report) && std::string_view(report.failure).find(part_names[i]) != std::string_view::npos);
+        Plant(twice, ExitGameSpec(part_names[i])->pattern, 0xa0000);
+        CHECK(!LocateExitGame(twice, sites, report) && std::string_view(report.failure).find("matches") != std::string_view::npos);
+    }
+    CHECK(LocateExitGame(image, sites, report));
 
     for (size_t i = 0; i < 5; ++i) {
         std::vector<uint8_t> missing = image;
