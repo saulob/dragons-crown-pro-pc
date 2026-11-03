@@ -1032,6 +1032,10 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     uint64_t intro = 0;
     skip_intro_locate(image.bytes.data(), size, Key(build).c_str(), &intro);
     if (intro) add(intro, 7, "skip intro poll");
+    uint64_t notice = 0;
+    if (skip_intro_locate_notice(image.bytes.data(), size, Key(build).c_str(), &notice) == SKIP_INTRO_NOTICE_FOUND) {
+        add(notice, SKIP_INTRO_BYPASS_BYTES, "skip intro regional notice");
+    }
     uint64_t gallery = 0;
     gallery_unlock_locate(image.bytes.data(), size, Key(build).c_str(), &gallery);
     if (gallery) add(gallery, 5, "gallery list getter call");
@@ -1188,8 +1192,11 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     CHECK(skip_offers_install(image_bytes, size, Key(build).c_str(), SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) ==
           (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
     CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 0, intro_area, skip_intro_stub_bytes()) == 0);
+    uint64_t notice_site = 0;
+    CHECK(skip_intro_locate_notice(image.bytes.data(), size, Key(build).c_str(), &notice_site) != SKIP_INTRO_NOTICE_UNMATCHED);
     CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 1, intro_area, skip_intro_stub_bytes()) == 1);
     CHECK(skip_intro_claim() == 1 && skip_intro_claim() == 0);
+    CHECK(notice_site == 0 || std::memcmp(image_bytes + notice_site, image.bytes.data() + notice_site, SKIP_INTRO_BYPASS_BYTES) != 0);
     CHECK(gallery_unlock_install(image_bytes, size, entry, Key(build).c_str(), 0, gallery_area, gallery_unlock_stub_bytes()) == 0);
     CHECK(gallery_unlock_install(image_bytes, size, entry, Key(build).c_str(), 1, gallery_area, gallery_unlock_stub_bytes()) == 1);
     {
@@ -1366,6 +1373,13 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         uint64_t intro = 0, found_intro = 0;
         CHECK(skip_intro_locate(bytes, size, Key(build).c_str(), &intro) == 1 && intro);
         CHECK(skip_intro_locate(bytes, size, "unlisted", &found_intro) == 0 && found_intro == intro);
+
+        // Only the Japanese builds open with the legal notice; the others have no construction of it to find.
+        const bool japan = build.title_id == std::string_view("CUSA07001");
+        const SkipIntroNotice expected_notice = japan ? SKIP_INTRO_NOTICE_FOUND : SKIP_INTRO_NOTICE_ABSENT;
+        uint64_t notice = 0, found_notice = 0;
+        CHECK(skip_intro_locate_notice(bytes, size, Key(build).c_str(), &notice) == expected_notice && (notice != 0) == japan);
+        CHECK(skip_intro_locate_notice(bytes, size, "unlisted", &found_notice) == expected_notice && found_notice == notice);
 
         MenuButtonSites buttons, found_buttons;
         CHECK(menu_buttons_locate(bytes, size, Key(build).c_str(), &buttons) == 1 && buttons.reader);

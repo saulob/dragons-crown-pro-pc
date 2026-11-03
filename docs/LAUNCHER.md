@@ -415,10 +415,13 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   changing either reverts what the other left and writes both again.
 - **Skip Intro**: Off by default (`skip_intro`; `DCP_SKIP_INTRO` overrides it for a run). The opening scene asks every
   frame whether any player pressed a button and, when one did, fades out and ends itself. With the setting on, the first
-  answer is "pressed" once, so the game takes that skip by itself. Saves, the tutorial and the story are untouched, and it
-  is separate from the two skip offers. It does not depend on the text language. The log shows
-  `Skip intro: on, native skip armed` when installed and `Skip intro: startup sequence skipped` only when the press was
-  used. Changing it in the F1 Options menu needs a restart.
+  answer is "pressed" once, so the game takes that skip by itself. The Japanese builds also open with a legal notice
+  about unauthorized distribution; with the setting on they take the step the other builds take there, so the notice is
+  never built and the game goes on with its normal loading. Saves, the tutorial and the story are untouched, and it is
+  separate from the two skip offers. It does not depend on the text language. The log shows
+  `Skip intro: on, native skip armed` when installed (plus `Skip intro: regional notice bypass installed` on builds that
+  have the notice) and `Skip intro: startup sequence skipped` only when the press was used. Changing it in the F1
+  Options menu needs a restart.
 - **Japanese Menu Buttons** (Controls page, under Controller prompts): Off by default (`japanese_menu_buttons`;
   `DCP_JAPANESE_MENU_BUTTONS` overrides it for a run). The setting picks the menu layout the same way in every build and
   with every text language. Off: Cross confirms and Circle cancels (A and B with Xbox prompts). On: Circle confirms and

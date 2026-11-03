@@ -92,15 +92,43 @@ static unsigned char *memmem_bytes(unsigned char *image, uint64_t size, const ch
 
 static const struct {
     const char *folder, *game;
-    uint64_t window, entry;
+    uint64_t window, entry, notice;
 } kRealBuilds[] = {
-    {"v1.03", "CUSA10454-1.00", 0x502076, 0x54c690},
-    {"CUSA07001-1.00", "CUSA07001-1.00", 0x4ffdc6, 0x54a800},
-    {"CUSA07001-1.02", "CUSA07001-1.02", 0x500356, 0x54a660},
-    {"CUSA07001-1.03", "CUSA07001-1.03", 0x500416, 0x54a720},
-    {"CUSA10209-1.00", "CUSA10209-1.00", 0x4ffdd6, 0x54a790},
+    {"v1.03", "CUSA10454-1.00", 0x502076, 0x54c690, 0},
+    {"CUSA07001-1.00", "CUSA07001-1.00", 0x4ffdc6, 0x54a800, 0x174b0},
+    {"CUSA07001-1.02", "CUSA07001-1.02", 0x500356, 0x54a660, 0x174d0},
+    {"CUSA07001-1.03", "CUSA07001-1.03", 0x500416, 0x54a720, 0x174d0},
+    {"CUSA10209-1.00", "CUSA10209-1.00", 0x4ffdd6, 0x54a790, 0},
 };
 enum { kRealCount = sizeof(kRealBuilds) / sizeof(*kRealBuilds) };
+
+/* Offsets in the notice step (from its first-frame test): the 27 displacements the code does not read back, the
+ * construction the bypass replaces, and the object it keeps. */
+static const unsigned kNoticeFields[] = {0xf,   0x17,  0x24,  0x31,  0x3c,  0x50,  0x5c,  0xac,  0xc0,
+                                         0xcc,  0xdd,  0xec,  0xf6,  0x101, 0x10c, 0x114, 0x11c, 0x127,
+                                         0x138, 0x153, 0x169, 0x177, 0x188, 0x198, 0x1aa, 0x1c6, 0x1d2};
+enum {
+    kNoticeLength = 470,
+    kNoticeBegins = 0x1b,
+    kMarker = 0x40,
+    kMarkerLength = 15,
+    kObject = 0xf0,
+    kStackGuard = 0x109,
+    kStepJump = 0x1d1,
+    kBypassLength = SKIP_INTRO_BYPASS_BYTES
+};
+
+static int in_notice_field(unsigned offset) {
+    for (size_t i = 0; i < sizeof(kNoticeFields) / sizeof(*kNoticeFields); ++i)
+        if (offset >= kNoticeFields[i] && offset < kNoticeFields[i] + 4) return 1;
+    return 0;
+}
+
+static int32_t rel32_at(const unsigned char *at) {
+    int32_t value;
+    memcpy(&value, at, sizeof(value));
+    return value;
+}
 
 static unsigned char *with_stub_room(const unsigned char *loaded, uint64_t size, size_t room) {
     unsigned char *image = calloc(1, size + room);
@@ -108,14 +136,49 @@ static unsigned char *with_stub_room(const unsigned char *loaded, uint64_t size,
     return image;
 }
 
-/* The patch of one image: only the hooked bytes and the stub change, and the stub returns after them. */
+/* The bypass reaches what the notice step's own object creation and its own completion reach, and nothing else. */
+static void check_bypass(const unsigned char *image, const unsigned char *before, uint64_t size, uint64_t window) {
+    const unsigned char *cave = image + window + kNoticeBegins, *step = before + window;
+    const int64_t at = (int64_t)(window + kNoticeBegins), w = (int64_t)window;
+    CHECK(!memcmp(cave, step + kObject, 5) && !memcmp(cave + 10, step + kObject + 10, 6));
+    CHECK(cave[5] == 0xe8 && at + 10 + rel32_at(cave + 6) == w + kObject + 10 + rel32_at(step + kObject + 6));
+    CHECK(cave[16] == 0xe8 && at + 21 + rel32_at(cave + 17) == w + kObject + 0x15 + rel32_at(step + kObject + 0x11));
+    CHECK(!memcmp(cave + 21, step + kStackGuard, 3) &&
+          at + 28 + rel32_at(cave + 24) == w + kStackGuard + 7 + rel32_at(step + kStackGuard + 3));
+    CHECK(cave[28] == 0xe9);
+    const int64_t advance = at + kBypassLength + rel32_at(cave + 29);
+
+    /* The fade-finished branch that ends the notice natively lands on the same code. */
+    static const unsigned char kDone[] = {0x49, 0x8b, 0x85, 0xd8, 0x00, 0x00, 0x00, 0xc5, 0xf8, 0x57, 0xc0,
+                                          0xc5, 0xf8, 0x2e, 0x80, 0x18, 0x01, 0x00, 0x00, 0x0f, 0x83};
+    int found = 0;
+    int64_t native = -1;
+    for (uint64_t k = 0; k + sizeof(kDone) + 4 <= size; ++k) {
+        if (memcmp(before + k, kDone, sizeof(kDone))) continue;
+        ++found;
+        native = (int64_t)k + sizeof(kDone) + 4 + rel32_at(before + k + sizeof(kDone));
+    }
+    CHECK(found == 1 && advance == native);
+    CHECK(!memcmp(before + advance, "\x49\x8b\x45\x00\x41\x8a\x4d\x5c", 8));
+}
+
+/* The patch of one image: only the hooked bytes, the notice's construction and the stub change, and the stub returns
+ * after the hooked bytes. */
 static void check_install(unsigned char *image, const unsigned char *before, uint64_t size, const char *game,
-                          uint64_t entry, uint64_t hook) {
+                          uint64_t entry, uint64_t hook, uint64_t notice) {
     const size_t stub_bytes = skip_intro_stub_bytes();
     CHECK(skip_intro_install(image, size, entry, game, 1, image + size, stub_bytes) == 1);
+    const uint64_t cave = notice ? notice + kNoticeBegins : 0;
     size_t outside = 0;
-    for (uint64_t k = 0; k < size; ++k) outside += image[k] != before[k] && (k < hook || k >= hook + kHookLength);
+    for (uint64_t k = 0; k < size; ++k) {
+        const int hooked = k >= hook && k < hook + kHookLength, bypassed = cave && k >= cave && k < cave + kBypassLength;
+        outside += image[k] != before[k] && !hooked && !bypassed;
+    }
     CHECK(outside == 0 && image[hook] == 0xe9);
+    if (notice) {
+        check_bypass(image, before, size, notice);
+        CHECK(memcmp(image + cave, before + cave, kBypassLength) != 0);
+    }
     int32_t rel;
     memcpy(&rel, image + hook + 1, sizeof(rel));
     const long long stub = (long long)hook + 5 + rel;
@@ -125,6 +188,70 @@ static void check_install(unsigned char *image, const unsigned char *before, uin
     for (long long p = stub; p + 8 <= (long long)(size + stub_bytes); ++p) returns_after += !memcmp(image + p, &resume, 8);
     CHECK(returns_after == 2);
     CHECK(skip_intro_claim() == 1 && skip_intro_claim() == 0);
+}
+
+enum { kAdvanceLength = 0x23, kTailLength = 10 };
+
+/* Appends a second notice step: a copy of the step, of the advance code its jump reaches, and of the tail after it. The
+ * query call is re-aimed at the original target, the step's jump at the copied tail. */
+static unsigned char *with_second_notice(const unsigned char *loaded, uint64_t size, uint64_t window, size_t room,
+                                         uint64_t *new_size) {
+    const size_t copy = kNoticeLength + kAdvanceLength + kTailLength;
+    unsigned char *twice = calloc(1, size + room + copy);
+    memcpy(twice, loaded, size);
+    unsigned char *step = twice + size;
+    memcpy(step, loaded + window, kNoticeLength);
+    const int64_t query = (int64_t)window + 0xe + 5 + rel32_at(loaded + window + 0xf);
+    const int64_t tail = (int64_t)window + kStepJump + 5 + rel32_at(loaded + window + kStepJump + 1);
+    memcpy(step + kNoticeLength, loaded + tail - kAdvanceLength, kAdvanceLength + kTailLength);
+    const int32_t to_query = (int32_t)(query - ((int64_t)size + 0xe + 5));
+    const int32_t to_tail = (int32_t)(kNoticeLength + kAdvanceLength - (kStepJump + 5));
+    memcpy(step + 0xf, &to_query, sizeof(to_query));
+    memcpy(step + kStepJump + 1, &to_tail, sizeof(to_tail));
+    *new_size = size + copy;
+    return twice;
+}
+
+/* The regional notice of one real image: where each build lists it, what the search finds, and what it refuses. */
+static void test_notice_of_build(unsigned char *image, uint64_t size, int index) {
+    const uint64_t window = kRealBuilds[index].notice;
+    uint64_t site = 1;
+    const SkipIntroNotice expected = window ? SKIP_INTRO_NOTICE_FOUND : SKIP_INTRO_NOTICE_ABSENT;
+    CHECK(skip_intro_locate_notice(image, size, kRealBuilds[index].game, &site) == expected);
+    CHECK(site == (window ? window + kNoticeBegins : 0));
+    CHECK(skip_intro_locate_notice(image, size, "CUSA00000-9.99", &site) == expected);
+    CHECK(site == (window ? window + kNoticeBegins : 0));
+
+    /* A listed build's table is exact: another listed name is refused on this image unless it lists the same place. */
+    for (int j = 0; j < kRealCount; ++j) {
+        if (j == index) continue;
+        const SkipIntroNotice other = skip_intro_locate_notice(image, size, kRealBuilds[j].game, &site);
+        CHECK(other == (kRealBuilds[j].notice == window ? expected : SKIP_INTRO_NOTICE_UNMATCHED));
+    }
+    if (!window) return;
+
+    /* Every byte of the step is verified except the displacements the code does not read back. The search, which has
+     * no table, takes a damaged construction marker for another piece of code and refuses a damaged rest. */
+    for (unsigned b = 0; b < kNoticeLength; ++b) {
+        image[window + b] ^= 1;
+        const SkipIntroNotice listed = skip_intro_locate_notice(image, size, kRealBuilds[index].game, &site);
+        if (!in_notice_field(b)) CHECK(listed == SKIP_INTRO_NOTICE_UNMATCHED && site == 0);
+        const SkipIntroNotice searched = skip_intro_locate_notice(image, size, "CUSA00000-9.99", &site);
+        const int marker = b >= kMarker && b < kMarker + kMarkerLength;
+        if (!in_notice_field(b)) CHECK(searched == (marker ? SKIP_INTRO_NOTICE_ABSENT : SKIP_INTRO_NOTICE_UNMATCHED) && site == 0);
+        image[window + b] ^= 1;
+    }
+    CHECK(skip_intro_locate_notice(image, size, "CUSA00000-9.99", &site) == SKIP_INTRO_NOTICE_FOUND);
+}
+
+static void test_second_notice(const unsigned char *loaded, uint64_t size, int index) {
+    const size_t room = skip_intro_stub_bytes();
+    uint64_t new_size = 0, site = 1;
+    unsigned char *twice = with_second_notice(loaded, size, kRealBuilds[index].notice, room, &new_size);
+    CHECK(skip_intro_locate_notice(twice, new_size, "CUSA00000-9.99", &site) == SKIP_INTRO_NOTICE_UNMATCHED && site == 0);
+    CHECK(skip_intro_install(twice, new_size, kRealBuilds[index].entry, "CUSA00000-9.99", 1, twice + new_size, room) == 0);
+    CHECK(skip_intro_claim() == 0);
+    free(twice);
 }
 
 static void test_real_images(void) {
@@ -165,12 +292,23 @@ static void test_real_images(void) {
         }
         CHECK(!memcmp(image, before, size));
 
+        test_notice_of_build(image, size, i);
+        CHECK(!memcmp(image, before, size));
+        if (kRealBuilds[i].notice) test_second_notice(loaded[i], size, i);
+
         CHECK(skip_intro_install(image, size, kRealBuilds[i].entry, NULL, 1, image + size, stub_bytes) == 0);
         CHECK(skip_intro_install(image, size, kRealBuilds[i].entry, kRealBuilds[i].game, 0, image + size, stub_bytes) == 0);
         CHECK(skip_intro_install(image, size, kRealBuilds[i].entry, kRealBuilds[i].game, 1, image + size, stub_bytes - 1) == 0);
         CHECK(!memcmp(image, before, size + stub_bytes) && skip_intro_claim() == 0);
-        check_install(image, before, size, kRealBuilds[i].game, kRealBuilds[i].entry, hook);
-        printf("%s: opening poll hook at 0x%llx\n", kRealBuilds[i].folder, (unsigned long long)hook);
+        check_install(image, before, size, kRealBuilds[i].game, kRealBuilds[i].entry, hook, kRealBuilds[i].notice);
+        printf("%s: opening poll hook at 0x%llx, %s\n", kRealBuilds[i].folder, (unsigned long long)hook,
+               kRealBuilds[i].notice ? "regional notice bypassed" : "no regional notice");
+
+        /* A name nothing lists is searched for both sites and gets the same patch. */
+        unsigned char *searched = with_stub_room(loaded[i], size, stub_bytes), *searched_before = with_stub_room(loaded[i], size, stub_bytes);
+        check_install(searched, searched_before, size, "CUSA00000-9.99", kRealBuilds[i].entry, hook, kRealBuilds[i].notice);
+        CHECK(!memcmp(searched, image, size));
+        free(searched), free(searched_before);
         free(image), free(before);
     }
 
@@ -186,7 +324,8 @@ static void test_real_images(void) {
         unsigned char *image = with_stub_room(loaded[base], size, stub_bytes), *before = with_stub_room(loaded[base], size, stub_bytes);
         uint64_t site = 0;
         CHECK(skip_intro_locate(image, size, kSynthetic[k].game, &site) == 0 && site == hook);
-        check_install(image, before, size, kSynthetic[k].game, kRealBuilds[base].entry, hook);
+        CHECK(skip_intro_locate_notice(image, size, kSynthetic[k].game, &site) == SKIP_INTRO_NOTICE_ABSENT && site == 0);
+        check_install(image, before, size, kSynthetic[k].game, kRealBuilds[base].entry, hook, 0);
         free(image), free(before);
 
         /* Zero matches and two matches fail closed. */
