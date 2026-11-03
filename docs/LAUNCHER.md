@@ -206,7 +206,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Presentation, Upscaling (FSR 1), Sharpening, Sharpening strength, Anti-aliasing | at once |
 | Graphics | Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
-| Gameplay | Skip Intro, Frame rate, Story Skip Offer, Tutorial Skip Offer | saved now, applies at the next start |
+| Gameplay | Skip Intro, Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
@@ -250,6 +250,7 @@ use the same defaults).
 | `skip_intro` | 1, 0 | 0 | at game start |
 | `japanese_menu_buttons` | 1, 0 | 0 | at game start |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
+| `unlock_gallery` | 1, 0 | 0 | at game start |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
@@ -436,6 +437,19 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   finished the game) and "Begin the tutorial?" (normally skipped for a file's first character, which starts the tutorial).
   Existing characters are never asked. On, one branch each is patched in memory after its bytes are checked
   (`src/skip_offers.c`); Off leaves the code as it is. Shown for every build.
+- **Unlock Gallery** (Gameplay page, after the skip offers): Off by default (`unlock_gallery`; `DCP_UNLOCK_GALLERY`
+  overrides it for a run). The title menu's Gallery lists 57 Treasure Art pictures and asks the save, through one getter,
+  which of them are found (a 59 byte array: 0 not found, 1 new, 2 seen). On, only the call that builds the Gallery list
+  is answered with a temporary copy of that array in which every picture is shown; the save itself, the code that
+  records a found picture, the trophy count, the title screen's own reads and every other reader keep the real array.
+  Pictures the save holds as new stay new, and opening one marks it seen as usual; a picture that is only shown is never
+  marked, so turning the option Off, or restarting without it, gives back exactly what the save holds. It changes
+  nothing about trophies, characters, quests or Online Play, so it is allowed online. Every site is checked byte for
+  byte first and nothing is written on a mismatch (the log says why). The log shows
+  `Unlock Gallery: on, 57 legitimate entries exposed (<build>)` when installed and `Unlock Gallery: off` otherwise.
+  Changing it in the F1 Options menu needs a restart. The launcher hides the row for a build whose profile does not
+  list the Gallery list builder; all seven supported builds do. The builder is found by its code, so a build whose code
+  differs gets the log line `Unlock Gallery: requested but unavailable ...` and the Gallery stays as the save has it.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
   recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
   separate process from the launcher (see Architecture), so these tools attach to a clean game process. Off keeps the

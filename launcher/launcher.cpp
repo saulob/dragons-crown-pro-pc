@@ -151,6 +151,7 @@ constexpr char kJapaneseMenuButtonsHelp[] =
     "controls do not change. Applies at the next game start.";
 constexpr char kStorySkipOfferHelp[] = "Offers the game's built-in story skip when creating a new character";
 constexpr char kTutorialSkipOfferHelp[] = "Lets new characters choose whether to begin the tutorial";
+constexpr char kUnlockGalleryHelp[] = "Unlocks all Gallery content while enabled without changing save progress";
 constexpr char kAllowOverlayProgramsHelp[] =
     "For programs that draw over games (recording, chat, store and performance overlays). On, PLAY starts the game as a "
     "separate program from this launcher, so they can attach to it cleanly. Off starts the game the usual way.";
@@ -987,6 +988,9 @@ private:
         ArachnophobiaToggle(ui);
         ui.Toggle("Story Skip Offer", kStorySkipOfferHelp, kStorySkipOfferKey, false, "Off", "On");
         ui.Toggle("Tutorial Skip Offer", kTutorialSkipOfferHelp, kTutorialSkipOfferKey, false, "Off", "On");
+        if (UnlockGalleryAvailable(build_)) {
+            ui.Toggle("Unlock Gallery", kUnlockGalleryHelp, kUnlockGalleryKey, false, "Off", "On");
+        }
         if (kSeparateGameProcessAvailable) {
             ui.Toggle("Allow overlay programs", kAllowOverlayProgramsHelp, kAllowOverlayProgramsKey, false, "Off", "On");
         }

@@ -73,6 +73,7 @@ add_subdirectory(launcher)
 set(DCP_RUNTIME_SOURCES
     src/exit_game_hook.c
     src/exit_game_text.c
+    src/gallery_unlock.c
     src/guest_hook.c
     src/title_trace.c
     src/runtime.c
@@ -188,6 +189,10 @@ add_executable(dcp-skip-intro-tests EXCLUDE_FROM_ALL tests/skip_intro_tests.c sr
 target_include_directories(dcp-skip-intro-tests PRIVATE src)
 target_compile_definitions(dcp-skip-intro-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-skip-intro-tests PRIVATE -Wall -Wextra -Werror)
+add_executable(dcp-gallery-unlock-tests EXCLUDE_FROM_ALL tests/gallery_unlock_tests.c src/gallery_unlock.c src/guest_hook.c)
+target_include_directories(dcp-gallery-unlock-tests PRIVATE src)
+target_compile_definitions(dcp-gallery-unlock-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-gallery-unlock-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-menu-buttons-tests EXCLUDE_FROM_ALL tests/menu_buttons_tests.c src/menu_buttons.c)
 target_include_directories(dcp-menu-buttons-tests PRIVATE src)
 target_compile_definitions(dcp-menu-buttons-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -272,7 +277,7 @@ endif()
 # default build.
 add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
     src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c
-    src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/system_type_hook.c src/ultrawide_hooks.c
+    src/gallery_unlock.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/system_type_hook.c src/ultrawide_hooks.c
     src/voice_hooks.c)
 set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-build-parity-tests PRIVATE src launcher)

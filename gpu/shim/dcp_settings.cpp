@@ -90,6 +90,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.skip_intro = ParseBool(value, v.skip_intro);
     } else if (key == "japanese_menu_buttons") {
         v.japanese_menu_buttons = ParseBool(value, v.japanese_menu_buttons);
+    } else if (key == "unlock_gallery") {
+        v.unlock_gallery = ParseBool(value, v.unlock_gallery);
     } else if (key == "story_skip_offer") {
         v.story_skip_offer = ParseBool(value, v.story_skip_offer);
     } else if (key == "tutorial_skip_offer") {

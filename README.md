@@ -32,6 +32,7 @@
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
 - **Menu & Subtitles language**: English, French, German, Italian or Spanish; Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build
 - **Story Skip Offer** and **Tutorial Skip Offer**: the game's own offers to skip the tutorial and start a new character in the second half of the story
+- **Unlock Gallery**: an option to see every Gallery picture without changing your save
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time, **F2**)
 - Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
 - Local multiplayer with up to four controllers
@@ -207,6 +208,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 - **Arachnophobia Safe Mode**: redraws the Giant Spider as two soft cream bodies with two orange eyes, without legs or fangs; gameplay does not change
 - **Story Skip Offer** (Off by default): when you create a new character, the game offers to start it from the second half of the story, which it normally offers only after a class on the save has finished the game. Recommended if you mainly want Online Co-op
 - **Tutorial Skip Offer** (Off by default): the first character of a save is also asked whether to begin the tutorial, instead of starting it automatically. Existing characters are not affected by either offer
+- **Unlock Gallery** (Off by default): shows all 57 pictures of the title menu's Gallery while it is on, without changing your save. Pictures you have not really found are only shown; turn it Off and the Gallery goes back to exactly what your save holds. Trophies and progress are not affected. Applies at the next game start
 - **Allow overlay programs** (Windows, Off by default): starts the game as a separate process from the launcher, which recording, chat, store and performance overlays can attach to cleanly. Turn it on if the game closes right after Play while such a program is running
 
 The game runs at its own 60 frames per second unless the Frame rate setting asks for more; its logic stays at 60 either way.

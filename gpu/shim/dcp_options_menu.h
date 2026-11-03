@@ -131,6 +131,7 @@ enum class Id {
     FrameCounter,
     StorySkipOffer,
     TutorialSkipOffer,
+    UnlockGallery,
 };
 
 struct Setting {
@@ -178,6 +179,8 @@ inline constexpr Setting kSettings[] = {
      "Offers the game's built-in story skip when creating a new character.", Apply::Restart, kOffOn},
     {Id::TutorialSkipOffer, Page::Gameplay, "tutorial_skip_offer", "Tutorial Skip Offer",
      "Lets new characters choose whether to begin the tutorial.", Apply::Restart, kOffOn},
+    {Id::UnlockGallery, Page::Gameplay, "unlock_gallery", "Unlock Gallery",
+     "Unlocks all Gallery content while enabled without changing save progress.", Apply::Restart, kOffOn},
 };
 
 constexpr const Setting& SettingOf(Id id) {
@@ -226,6 +229,7 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::FrameCounter: return flag(v.show_fps);
     case Id::StorySkipOffer: return flag(v.story_skip_offer);
     case Id::TutorialSkipOffer: return flag(v.tutorial_skip_offer);
+    case Id::UnlockGallery: return flag(v.unlock_gallery);
     }
     return {};
 }
@@ -249,7 +253,8 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::JapaneseMenuButtons:
     case Id::FrameRate:
     case Id::StorySkipOffer:
-    case Id::TutorialSkipOffer: break;
+    case Id::TutorialSkipOffer:
+    case Id::UnlockGallery: break;
     }
 }
 

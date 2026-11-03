@@ -92,6 +92,9 @@ int dcp_skip_intro(const char *settings_file);
 /* 1 when the settings file asks for Circle to confirm in the menus (japanese_menu_buttons; 0 by default). */
 int dcp_japanese_menu_buttons(const char *settings_file);
 
+/* 1 when the settings file shows every Gallery picture (unlock_gallery; 0 by default). */
+int dcp_unlock_gallery(const char *settings_file);
+
 /* The Skip Offers the settings file turns on (skip_offers.h bits; none by default). */
 unsigned dcp_skip_offers(const char *settings_file);
 
@@ -109,6 +112,7 @@ typedef struct DcpRunSettings {
     unsigned skip_offers;          /* the skip_offers.h bits applied */
     int skip_intro;                /* the startup logo skip was applied */
     int japanese_menu_buttons;     /* the Circle-confirms layout is in effect */
+    int unlock_gallery;            /* the Gallery shows every picture */
 } DcpRunSettings;
 
 /* Prints the startup state support needs as "Settings:" lines: port version, platform, online protocol, game build,
@@ -143,6 +147,7 @@ typedef struct {
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
     int features_by_signature;   /* the cheat, NPC voice and True Ultrawide sites are found by signature, not by table */
     int exit_game;               /* the title menu's Exit Game row is installed from signature-located sites */
+    int unlock_gallery;          /* the Gallery list builder is validated for this build */
     const char *title_id;
     const char *version;         /* the build's profile version: with title_id, the build key of the loader's patches */
 } DcpGameBuild;

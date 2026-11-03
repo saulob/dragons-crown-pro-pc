@@ -52,6 +52,7 @@ struct GameBuild {
     bool keep_base_languages = false; // an update's regional archive is laid over the base's, which keeps its language slots
     bool features_by_signature = false; // cheats, NPC voices and True Ultrawide are found by structural locators, not tables
     bool exit_game = true;            // the title menu's Exit Game row is installed from structural locators
+    bool unlock_gallery = true;       // the Gallery list builder is found by signature (src/gallery_unlock.h)
 };
 
 // The supported builds, US first.
@@ -96,6 +97,12 @@ inline bool NativeJapaneseNpcVoices(const GameBuild* build) {
 // installs no hook in it anyway.
 inline bool CheatsAvailable(const GameBuild* build) {
     return build == nullptr || build->cheats;
+}
+
+// False only for a known build without a validated Gallery list builder; the unknown build is not restricted here, and
+// the loader installs no hook in it anyway.
+inline bool UnlockGalleryAvailable(const GameBuild* build) {
+    return build == nullptr || build->unlock_gallery;
 }
 
 // False only for a known build whose pass projection sites are not verified; the unknown build is not restricted here,

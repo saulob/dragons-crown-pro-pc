@@ -57,6 +57,8 @@ inline constexpr char kJapaneseMenuButtonsKey[] = "japanese_menu_buttons";
 // The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
 inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
 inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";
+// Shows every Gallery picture while on, without changing the save (src/gallery_unlock.h).
+inline constexpr char kUnlockGalleryKey[] = "unlock_gallery";
 // Windows, on: Play starts the game as a separate process that overlay programs can attach to (game_process.h).
 inline constexpr char kAllowOverlayProgramsKey[] = "allow_overlay_programs";
 inline constexpr char kLauncherXKey[] = "launcher_x";

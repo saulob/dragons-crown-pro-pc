@@ -1907,6 +1907,85 @@ void TestSkipIntroSettings(const fs::path& base) {
     CHECK(loader.find("skip_intro_wanted(dcp_skip_intro(settings_file))") != std::string::npos);
 }
 
+// The one gallery option: Off by default, in the Gameplay page after the skip offers, offered only where the Gallery
+// list builder is validated, and no other gallery switch anywhere in the product.
+void TestUnlockGallerySettings(const fs::path& base) {
+    const fs::path file = base / "unlock_gallery" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kUnlockGalleryKey && setting.default_value == "0";
+    }
+    CHECK(managed == 1 && std::string(kUnlockGalleryKey) == "unlock_gallery");
+    CHECK(dcp_unlock_gallery(nullptr) == 0 && dcp_unlock_gallery(file.string().c_str()) == 0);
+    WriteAll(file, "vsync = 1\nskip_intro = 1\n");
+    CHECK(dcp_unlock_gallery(file.string().c_str()) == 0);
+    WriteAll(file, "unlock_gallery = 1\n");
+    CHECK(dcp_unlock_gallery(file.string().c_str()) == 1);
+    WriteAll(file, "unlock_gallery = banana\n");
+    CHECK(dcp_unlock_gallery(file.string().c_str()) == 0);
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kUnlockGalleryKey, true);
+        CHECK(settings.Save());
+        CHECK(dcp_unlock_gallery(file.string().c_str()) == 1);
+        CHECK(!settings.GetBool(kSkipIntroKey, false) && !settings.GetBool(kStorySkipOfferKey, false));
+        settings.ResetToDefaults();
+        CHECK(!settings.GetBool(kUnlockGalleryKey, true));
+    }
+
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(build.unlock_gallery && UnlockGalleryAvailable(&build));
+    }
+    GameBuild without = SupportedBuilds()[0];
+    without.unlock_gallery = false;
+    CHECK(!UnlockGalleryAvailable(&without) && UnlockGalleryAvailable(nullptr));
+    CHECK(SupportedBuilds().size() == 7);
+
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const std::string gated = "if (UnlockGalleryAvailable(build_)) {\n            ui.Toggle(\"Unlock Gallery\", kUnlockGalleryHelp, "
+                              "kUnlockGalleryKey, false, \"Off\", \"On\");";
+    const size_t row = launcher.find(gated);
+    CHECK(row != std::string::npos && launcher.find("ui.Toggle(\"Unlock Gallery\"") == launcher.rfind("ui.Toggle(\"Unlock Gallery\""));
+    const size_t page = launcher.find("void PageGameplay(trg::Ui& ui) {");
+    CHECK(page != std::string::npos && row > launcher.find("ui.Toggle(\"Tutorial Skip Offer\"", page) &&
+          row < launcher.find("ui.Toggle(\"Allow overlay programs\"", page));
+    CHECK(launcher.find("kUnlockGalleryHelp[] = \"Unlocks all Gallery content while enabled without changing save progress\";") !=
+          std::string::npos);
+
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("gallery_unlock_wanted(dcp_unlock_gallery(settings_file))") != std::string::npos);
+    CHECK(loader.find("gallery_unlock_install(image,size,entry,known_build && game_build.unlock_gallery ? build_key : NULL,") !=
+          std::string::npos);
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "game_files.cpp").find("out->unlock_gallery = build->unlock_gallery;") !=
+          std::string::npos);
+
+    // There is one gallery option: no second spelling of it in the product, its documentation or its tools.
+    const fs::path source(DCP_SOURCE_DIR);
+    int scanned = 0;
+    for (const char* dir : {"src", "launcher", "gpu/shim", "docs", "tools", "scripts"}) {
+        for (const auto& entry : fs::recursive_directory_iterator(source / dir)) {
+            const std::string ext = entry.path().extension().string();
+            if (!entry.is_regular_file() || (ext != ".c" && ext != ".cpp" && ext != ".h" && ext != ".md" && ext != ".py" &&
+                                             ext != ".ps1" && ext != ".sh" && ext != ".txt")) {
+                continue;
+            }
+            std::string text = ReadAll(entry.path());
+            for (char& c : text) c = (char)std::tolower((unsigned char)c);
+            ++scanned;
+            for (const char* name : {"full gallery", "full_gallery", "gallery_full", "unlock_all_gallery", "unlock full gallery",
+                                     "complete gallery", "gallery 100", "gallery unlock all", "gallery_unlock_all"}) {
+                if (text.find(name) != std::string::npos) std::printf("second gallery option in %s\n", entry.path().string().c_str());
+                CHECK(text.find(name) == std::string::npos);
+            }
+        }
+    }
+    CHECK(scanned > 100);
+    std::string readme = ReadAll(source / "README.md");
+    for (char& c : readme) c = (char)std::tolower((unsigned char)c);
+    CHECK(readme.find("full gallery") == std::string::npos && readme.find("full_gallery") == std::string::npos);
+}
+
 void TestJapaneseMenuButtonsSettings(const fs::path& base) {
     const fs::path file = base / "menu_buttons" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -2534,7 +2613,7 @@ void TestSettingsSummary(const fs::path& base) {
                            "frame_rate = 120\nshow_fps = 1\ntrue_ultrawide = 1\ndcp_japanese_npc_voices = 1\n"
                            "arachnophobia_safe_mode = 1\nstory_skip_offer = 1\ntutorial_skip_offer = 1\n";
     const LauncherSettings settings(file);
-    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u, 0, 0};
+    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u, 0, 0, 1};
     const std::string text = SettingsSummary(settings, &kUs, TextLanguagesOf(&kUs), &run);
     const auto has = [&](const std::string& part) { return text.find(part) != std::string::npos; };
     CHECK(has("Settings: Dragon's Crown Pro PC v" + net::port_version() + ", " + net::host_platform() + ", online protocol " +
@@ -2543,7 +2622,7 @@ void TestSettingsSummary(const fs::path& base) {
     CHECK(has("Settings: Window Borderless Fullscreen, frame rate 120 FPS, frame counter on,"));
     CHECK(has("Settings: Render resolution 2560x1080 (native), aspect ratio 21:9 Ultrawide, True Ultrawide off (requested on)\n"));
     CHECK(has("Settings: Menu & Subtitles English, Japanese NPC Voices on, Arachnophobia Safe Mode on\n"));
-    CHECK(has("Settings: Skip Intro off, Japanese Menu Buttons off, Story Skip Offer on, Tutorial Skip Offer off,"));
+    CHECK(has("Settings: Skip Intro off, Japanese Menu Buttons off, Story Skip Offer on, Tutorial Skip Offer off, Unlock Gallery on,"));
     for (const char* secret : {"SecretName", "friend", "Friend", "account", "secret", "token", "DCP_DASHBOARD_TOKEN", "lobby"}) {
         CHECK(!has(secret));
     }
@@ -5704,6 +5783,7 @@ int main(int argc, char** argv) {
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestSkipIntroSettings(base);
+    TestUnlockGallerySettings(base);
     TestJapaneseMenuButtonsSettings(base);
     TestPinnedBuild(base);
     TestOverlayProgramsSetting(base);

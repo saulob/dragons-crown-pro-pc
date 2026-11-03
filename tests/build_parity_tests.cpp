@@ -28,6 +28,7 @@
 #include "dcp_resolution.h"
 #include "exit_game_hook.h"
 #include "exit_game_text.h"
+#include "gallery_unlock.h"
 #include "feature_sites.h"
 #include "game_files.h"
 #include "game_patches.h"
@@ -102,6 +103,12 @@ bool HasIntroTable(const GameBuild& build) {
     return skip_intro_locate(none, 0, Key(build).c_str(), &site) == 1;
 }
 
+bool HasGalleryTable(const GameBuild& build) {
+    uint64_t site = 0;
+    const unsigned char none[1] = {0};
+    return gallery_unlock_locate(none, 0, Key(build).c_str(), &site) == 1;
+}
+
 bool HasButtonsTable(const GameBuild& build) {
     MenuButtonSites sites;
     const unsigned char none[1] = {0};
@@ -116,7 +123,7 @@ bool IsUs100(const GameBuild& build) {
 // What the profile and the runtime tables provide, feature by feature.
 struct Capabilities {
     bool cheats = false, xbox_prompts = false, npc_voices = false, true_ultrawide = false, custom_resolution = false;
-    Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, menu_buttons = Mapping::kNone, system_type = Mapping::kNone,
+    Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, menu_buttons = Mapping::kNone, unlock_gallery = Mapping::kNone, system_type = Mapping::kNone,
             lzcnt = Mapping::kNone, startup_save = Mapping::kNone;
     std::string languages;
 };
@@ -135,6 +142,7 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     caps.skip_offers = table_or_search(HasSkipTable(build));
     caps.skip_intro = table_or_search(HasIntroTable(build));
     caps.menu_buttons = table_or_search(HasButtonsTable(build));
+    caps.unlock_gallery = table_or_search(HasGalleryTable(build));
     caps.system_type = table_or_search(Listed(system_type_records, build));
     caps.lzcnt = table_or_search(Listed(lzcnt_builds, build));
     caps.startup_save = Listed(startup_save_records, build) ? Mapping::kTable : Mapping::kNone;
@@ -165,13 +173,14 @@ enum Feature : size_t {
     kXboxPrompts,
     kJapaneseNpcVoices,
     kExitGame,
+    kUnlockGallery,
     kFeatureCount
 };
 
 const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
     "Story Skip", "Tutorial Skip", "Skip Intro", "Japanese Menu Buttons", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
-    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game"};
+    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game", "Unlock Gallery"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
 struct Contract {
@@ -237,6 +246,7 @@ DcpGameBuild LoaderView(const GameBuild& build) {
     game.resolution_by_signature = build.resolution_by_signature;
     game.features_by_signature = build.features_by_signature;
     game.exit_game = build.exit_game;
+    game.unlock_gallery = build.unlock_gallery;
     game.title_id = build.title_id;
     game.version = build.version;
     return game;
@@ -260,6 +270,7 @@ bool SameView(const DcpGameBuild& a, const DcpGameBuild& b) {
            a.true_ultrawide == b.true_ultrawide && a.resolution_sites == b.resolution_sites &&
            a.resolution_site_count == b.resolution_site_count && a.resolution_by_signature == b.resolution_by_signature &&
            a.features_by_signature == b.features_by_signature && a.exit_game == b.exit_game &&
+           a.unlock_gallery == b.unlock_gallery &&
            std::string_view(a.title_id) == b.title_id &&
            std::string_view(a.version) == b.version;
 }
@@ -279,6 +290,8 @@ bool LauncherOffers(const GameBuild& build, Feature feature) {
         return build.xbox_prompts;
     case kJapaneseNpcVoices:
         return SupportsJapaneseNpcVoices(&build);
+    case kUnlockGallery:
+        return UnlockGalleryAvailable(&build);
     default:
         return true;
     }
@@ -319,6 +332,8 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
         return known && game.japanese_npc_voices && (IsUs100(build) || game.features_by_signature);
     case kExitGame:
         return known && game.exit_game;
+    case kUnlockGallery:
+        return known && game.unlock_gallery && CapabilitiesOf(build).unlock_gallery != Mapping::kNone;
     default:
         return known;
     }
@@ -386,6 +401,30 @@ void TestSkipIntroLanguages() {
             uint64_t site = 0;
             const unsigned char none[1] = {0};
             CHECK(skip_intro_locate(none, 0, Key(build).c_str(), &site) == (caps.skip_intro == Mapping::kTable));
+        }
+    }
+    fs::remove_all(dir);
+}
+
+// Unlock Gallery reads the save's art array in the executable: no selectable language of any build changes the setting,
+// the mapping or what the loader is given.
+void TestUnlockGalleryLanguages() {
+    const fs::path dir = fs::temp_directory_path() / "dcp_build_parity_gallery";
+    fs::create_directories(dir);
+    const std::string source = ReadText("src/gallery_unlock.c");
+    CHECK(source.find("anguage") == std::string::npos && source.find("text_language") == std::string::npos);
+    for (const GameBuild& build : SupportedBuilds()) {
+        g_scope = build.label;
+        const Capabilities caps = CapabilitiesOf(build);
+        CHECK(caps.unlock_gallery != Mapping::kNone && !TextLanguagesOf(&build).empty());
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
+            const fs::path ini = dir / "dcp.ini";
+            std::ofstream(ini, std::ios::trunc) << "text_language = " << language.key << "\nunlock_gallery = 1\n";
+            CHECK(dcp_unlock_gallery(ini.string().c_str()) == 1);
+            CHECK(CapabilitiesOf(build).unlock_gallery == caps.unlock_gallery);
+            uint64_t site = 0;
+            const unsigned char none[1] = {0};
+            CHECK(gallery_unlock_locate(none, 0, Key(build).c_str(), &site) == (caps.unlock_gallery == Mapping::kTable));
         }
     }
     fs::remove_all(dir);
@@ -501,6 +540,9 @@ void TestDisabledFeatureCannotPass() {
         copy = build;
         copy.exit_game = false;
         CHECK(refuses(copy, kExitGame));
+        copy = build;
+        copy.unlock_gallery = false;
+        CHECK(refuses(copy, kUnlockGallery));
         CHECK(CheatsAvailable(&build));
     }
     const GameBuild* hk = FindBuild("CUSA10209 1.00 Asia/Hong Kong");
@@ -541,6 +583,7 @@ void TestUpdateParity() {
         lost("skip offers", b.skip_offers != Mapping::kNone, u.skip_offers != Mapping::kNone);
         lost("skip intro", b.skip_intro != Mapping::kNone, u.skip_intro != Mapping::kNone);
         lost("japanese menu buttons", b.menu_buttons != Mapping::kNone, u.menu_buttons != Mapping::kNone);
+        lost("unlock gallery", b.unlock_gallery != Mapping::kNone, u.unlock_gallery != Mapping::kNone);
         lost("system type", b.system_type != Mapping::kNone, u.system_type != Mapping::kNone);
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
@@ -606,6 +649,7 @@ void TestGateConsistency() {
     const std::string launcher = ReadText("launcher/launcher.cpp");
     const char* const allowed[] = {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
                                    "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
+                                   "UnlockGalleryAvailable(build_)",
                                    "xbox_available_",                      "XboxPromptsAvailable",
                                    "build_->xbox_prompts",                 "InstalledTextLanguages(paths_.app0, build_)",
                                    "InstalledPromptStyle(paths_.app0, *build_", "PromptArchives(paths_.app0, *build_",
@@ -637,7 +681,7 @@ void TestGateConsistency() {
     CHECK(unknown == 0);
     for (const char* required : {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
                                  "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
-                                 "xbox_available_"}) {
+                                 "UnlockGalleryAvailable(build_)", "xbox_available_"}) {
         CHECK(seen[required] > 0);
     }
 }
@@ -834,6 +878,13 @@ void TestUnknownBuilds() {
     CHECK(skip_intro_install(image.data(), size, entry, nullptr, 1, stubs.data(), stubs.size()) == 0);
     {
         const std::vector<uint8_t> untouched = image;
+        CHECK(gallery_unlock_install(image.data(), size, entry, nullptr, 1, stubs.data(), stubs.size()) == 0 &&
+              gallery_unlock_install(image.data(), size, entry, "CUSA00000-1.00", 1, stubs.data(), stubs.size()) == 0 &&
+              gallery_unlock_install(image.data(), size, entry, "CUSA00000-1.00", 0, stubs.data(), stubs.size()) == 0 &&
+              image == untouched);
+    }
+    {
+        const std::vector<uint8_t> untouched = image;
         CHECK(menu_buttons_install(image.data(), size, nullptr, 1) == 0 && menu_buttons_install(image.data(), size, nullptr, 0) == 0 &&
               image == untouched);
         CHECK(menu_buttons_install(image.data(), size, "CUSA00000-1.00", 1) == 0 &&
@@ -888,6 +939,7 @@ void TestUnknownBuilds() {
                              "if (known_build && runtime_online_active())",
                              "skip_offers_install(image,size,known_build ? build_key : NULL,",
                              "skip_intro_install(image,size,entry,known_build ? build_key : NULL,",
+                             "gallery_unlock_install(image,size,entry,known_build && game_build.unlock_gallery ? build_key : NULL,",
                              "menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons);",
                              "exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied);",
                              "if (known_build) startup_save_hook_install(",
@@ -980,6 +1032,9 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     uint64_t intro = 0;
     skip_intro_locate(image.bytes.data(), size, Key(build).c_str(), &intro);
     if (intro) add(intro, 7, "skip intro poll");
+    uint64_t gallery = 0;
+    gallery_unlock_locate(image.bytes.data(), size, Key(build).c_str(), &gallery);
+    if (gallery) add(gallery, 5, "gallery list getter call");
     MenuButtonSites buttons;
     menu_buttons_locate(image.bytes.data(), size, Key(build).c_str(), &buttons);
     for (int i = 0; i < buttons.write_count; ++i) add(buttons.writes[i], 1, "menu buttons flag");
@@ -1070,7 +1125,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     const size_t cheat_stubs = cheats::Hooks().size() * guest_hook_stub_size();
     const size_t room = cheat_stubs + startup_save_hook_stub_bytes() + voice_hooks_stub_bytes() +
                         system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes() +
-                        exit_game_hook_stub_bytes() + skip_intro_stub_bytes();
+                        exit_game_hook_stub_bytes() + skip_intro_stub_bytes() + gallery_unlock_stub_bytes();
     std::vector<uint8_t> memory(base + room + page, 0);
     std::memcpy(memory.data(), image.bytes.data(), size);
     uint8_t* area = memory.data() + base;
@@ -1087,6 +1142,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     uint8_t* ultrawide_area = take(ultrawide_hooks_stub_bytes());
     uint8_t* exit_game_area = take(exit_game_hook_stub_bytes());
     uint8_t* intro_area = take(skip_intro_stub_bytes());
+    uint8_t* gallery_area = take(gallery_unlock_stub_bytes());
     uint8_t* image_bytes = memory.data();
 
     const char* name = nullptr;
@@ -1127,6 +1183,8 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 0, intro_area, skip_intro_stub_bytes()) == 0);
     CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 1, intro_area, skip_intro_stub_bytes()) == 1);
     CHECK(skip_intro_claim() == 1 && skip_intro_claim() == 0);
+    CHECK(gallery_unlock_install(image_bytes, size, entry, Key(build).c_str(), 0, gallery_area, gallery_unlock_stub_bytes()) == 0);
+    CHECK(gallery_unlock_install(image_bytes, size, entry, Key(build).c_str(), 1, gallery_area, gallery_unlock_stub_bytes()) == 1);
     {
         MenuButtonSites buttons;
         CHECK(menu_buttons_locate(image_bytes, size, Key(build).c_str(), &buttons) == 1 && buttons.reader);
@@ -1364,6 +1422,7 @@ int main() {
     TestContract();
     TestGlobalFeatures();
     TestSkipIntroLanguages();
+    TestUnlockGalleryLanguages();
     TestMenuButtonsLanguages();
     TestExitGameLanguages();
     TestDisabledFeatureCannotPass();

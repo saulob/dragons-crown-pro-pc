@@ -176,12 +176,14 @@ void TestSettingsTable() {
     for (const Setting& setting : kSettings) {
         restart += setting.apply == Apply::Restart;
     }
-    Check(restart == 6 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
+    Check(restart == 7 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
               SettingOf(Id::FrameRate).apply == Apply::Restart && SettingOf(Id::SkipIntro).apply == Apply::Restart &&
               SettingOf(Id::JapaneseMenuButtons).apply == Apply::Restart &&
               SettingOf(Id::StorySkipOffer).apply == Apply::Restart &&
-              SettingOf(Id::TutorialSkipOffer).apply == Apply::Restart,
-          "texture filtering, the frame rate, Skip Intro, the menu buttons and the skip offers are the settings read once");
+              SettingOf(Id::TutorialSkipOffer).apply == Apply::Restart &&
+              SettingOf(Id::UnlockGallery).apply == Apply::Restart,
+          "texture filtering, the frame rate, Skip Intro, the menu buttons, the skip offers and Unlock Gallery are the "
+          "settings read once");
     for (const Id live : {Id::DisplayMode, Id::VSync, Id::Presentation, Id::Upscaling, Id::Sharpening,
                           Id::SharpeningStrength, Id::AntiAliasing, Id::FrameRateInTitle, Id::ResolutionInTitle,
                           Id::FrameCounter}) {
@@ -375,6 +377,55 @@ void TestSkipIntro(const fs::path& folder) {
     Check(Contains(Source("gpu/shim/dcp_settings.cpp"), "key == \"skip_intro\"") &&
               !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "skip_intro"),
           "Skip Intro has one reader and one table row");
+}
+
+void TestUnlockGallery(const fs::path& folder) {
+    using namespace DcpOptions;
+    int rows = 0;
+    size_t gallery = 0, tutorial = 0, position = 0;
+    for (const Setting& setting : kSettings) {
+        if (setting.page != Page::Gameplay) continue;
+        rows += std::string(setting.label) == "Unlock Gallery";
+        gallery = setting.id == Id::UnlockGallery ? position : gallery;
+        tutorial = setting.id == Id::TutorialSkipOffer ? position : tutorial;
+        ++position;
+    }
+    Check(rows == 1 && gallery == tutorial + 1, "Unlock Gallery is in the Gameplay page exactly once, after the skip offers");
+
+    const Setting& setting = SettingOf(Id::UnlockGallery);
+    Check(std::string(setting.key) == "unlock_gallery" &&
+              Contains(Source("launcher/settings.h"), "kUnlockGalleryKey[] = \"unlock_gallery\";"),
+          "the key is the launcher's");
+    Check(std::string(setting.help) ==
+              "Unlocks all Gallery content while enabled without changing save progress.",
+          "the help text says it does not change the save");
+    Check(setting.apply == Apply::Restart && setting.choices.size() == 2, "Unlock Gallery is a restart-required Off/On");
+    Check(Current(DcpSettings::Values{}, Id::UnlockGallery) == "0", "Unlock Gallery is Off by default");
+    Check(Contains(Source("launcher/settings.cpp"), "{kUnlockGalleryKey, \"0\"}"), "the launcher's default is Off");
+
+    const fs::path file = folder / "gallery.ini";
+    WriteFile(file, "# keep\nfuture_setting = 1\n");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    live.unlock_gallery = false;
+    Options options(live);
+    const Outcome outcome = options.Choose(Id::UnlockGallery, "1");
+    Check(outcome.changed && outcome.saved && options.Pending(Id::UnlockGallery) && options.RestartPending(),
+          "Unlock Gallery waits for the restart");
+    Check(!live.unlock_gallery && options.Shown(Id::UnlockGallery) == "1", "and the running game keeps its value");
+
+    const std::string text = ReadAll(file);
+    Check(Contains(text, "unlock_gallery = 1\n") && Contains(text, "# keep\n") && Contains(text, "future_setting = 1\n"),
+          "it is saved under the launcher's key and the rest of the file is kept");
+    DcpSettings::Values restarted;
+    Check(DcpSettings::Read(file.string(), restarted) && restarted.unlock_gallery, "a restart reads what the menu saved");
+
+    DcpSettings::Values untouched;
+    ApplyLive(untouched, Id::UnlockGallery, "1");
+    Check(!untouched.unlock_gallery, "nothing applies Unlock Gallery live");
+    Check(Contains(Source("gpu/shim/dcp_settings.cpp"), "key == \"unlock_gallery\"") &&
+              !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "unlock_gallery"),
+          "Unlock Gallery has one reader and one table row");
 }
 
 void TestJapaneseMenuButtons(const fs::path& folder) {
@@ -861,6 +912,7 @@ int main() {
     TestPersistence(folder);
     TestSkipOffers(folder);
     TestSkipIntro(folder);
+    TestUnlockGallery(folder);
     TestJapaneseMenuButtons(folder);
     TestEveryChoiceRoundTrips(folder);
     TestStepAndCycle(folder);

@@ -36,9 +36,10 @@ struct Values {
     std::atomic<int> requested_width{0}, requested_height{0};
     std::atomic<int> monitor{1};
     std::atomic<bool> show_fps_title{false}, show_resolution_title{false};
-    // Skip Intro, Japanese Menu Buttons and the Skip Offers as the file had them at start; the loader applies them
-    // once, so the Options menu never changes these.
-    std::atomic<bool> skip_intro{false}, japanese_menu_buttons{false}, story_skip_offer{false}, tutorial_skip_offer{false};
+    // Skip Intro, Japanese Menu Buttons, Unlock Gallery and the Skip Offers as the file had them at start; the loader
+    // applies them once, so the Options menu never changes these.
+    std::atomic<bool> skip_intro{false}, japanese_menu_buttons{false}, unlock_gallery{false}, story_skip_offer{false},
+        tutorial_skip_offer{false};
     // Set by the window: the refresh rate of the display it opened on; 0 when unknown.
     std::atomic<double> display_refresh_hz{0.0};
     // Presentation pacing (driver.cpp). 0: Unlimited.
