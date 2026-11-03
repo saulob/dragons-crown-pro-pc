@@ -36,6 +36,7 @@
 - Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
 - Local multiplayer with up to four controllers
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
+- **Exit Game** on the title menu, below Gallery: the game's own sixth menu row, in the game's language, closing the game through the same clean shutdown as closing the window (Alt+F4 still works).
 - **Update check**: the launcher looks for a newer release of the port at start and installs it only when you choose to; the game files and the `user` folder are kept
 
 ## Online Co-op

@@ -7,6 +7,7 @@
 #include "runtime.h"
 #include "dcpgpu.h"
 #include "dcp_keys.h"
+#include "exit_game_hook.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -444,12 +445,26 @@ static void sample_player1_scripts(PadData *d) {
     for (int i=0;i<4;++i) if (injected.stick[i]>=0) *axes[i]=(uint8_t)injected.stick[i];
 }
 
+/* Player 1's accept for the port-owned Exit Game row: controller South or Enter. */
+static int exit_game_accept_down(void) {
+    SDL_Gamepad *g=slots[0].gamepad;
+    if (g && SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_SOUTH)) return 1;
+    const bool *k=SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
+    return k && (k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER]);
+}
+
 static void sample(int slot, PadData *d) {
     PadSlot *s=&slots[slot];
     sample_host(slot,d);
     /* After the menu or the text dialog closes, buttons still held (the Cross that accepted a
      * name) stay hidden until released: the game would take them as a new press. */
     if (dcpgpu_overlay_captures_input()) { s->hold_after_capture=1; return; }
+    if (slot==0 && exit_game_filter_accept(exit_game_accept_down())) {
+        memset(d->touches,0,sizeof(d->touches));
+        d->buttons=0; d->l2=d->r2=0; d->touch_count=0;
+        s->hold_after_capture=1;
+        return;
+    }
     if (slot==0) sample_player1_scripts(d);
     if (s->hold_after_capture) {
         if (d->buttons) d->buttons=0;

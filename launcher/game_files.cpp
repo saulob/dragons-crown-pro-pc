@@ -512,6 +512,7 @@ extern "C" int dcp_game_build(const char* image_dir, DcpGameBuild* out) {
     out->resolution_site_count = build->resolution_sites.size();
     out->resolution_by_signature = build->resolution_by_signature;
     out->features_by_signature = build->features_by_signature;
+    out->exit_game = build->exit_game;
     out->title_id = build->title_id;
     out->version = build->version;
     return 1;

@@ -117,7 +117,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -260,7 +260,8 @@ endif()
 # default build.
 add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
     src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c
-    src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c)
+    src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/system_type_hook.c src/ultrawide_hooks.c
+    src/voice_hooks.c)
 set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-build-parity-tests PRIVATE src launcher)
 target_compile_definitions(dcp-build-parity-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -385,6 +386,12 @@ add_executable(dcp-ultrawide-sides-tests EXCLUDE_FROM_ALL tests/ultrawide_sides_
 set_target_properties(dcp-ultrawide-sides-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-ultrawide-sides-tests PRIVATE gpu/shim)
 target_compile_options(dcp-ultrawide-sides-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the title menu's Exit Game row: text, hooks and install checks on synthetic images (tools/test.ps1); not
+# part of the default build.
+add_executable(dcp-exit-game-tests EXCLUDE_FROM_ALL tests/exit_game_tests.c src/guest_hook.c src/exit_game_hook.c src/exit_game_text.c)
+target_include_directories(dcp-exit-game-tests PRIVATE src)
+target_compile_options(dcp-exit-game-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
 
 # Focused tests of the save-data mounts and the Japanese startup save hook (tools/test.ps1); not part of the default build.
 add_executable(dcp-savedata-tests EXCLUDE_FROM_ALL tests/savedata_tests.c src/guest_hook.c src/startup_save_hook.c)

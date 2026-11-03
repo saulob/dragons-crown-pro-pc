@@ -348,6 +348,34 @@ constexpr SiteSpec kSiteTable[] = {
         "18 41 89 f6 41 89 d7 48 89 fb 45 85 f6 0f 88 ?? "
         "?? ?? ?? 48 8b 83 08 05 00 00",
         0, 1, {0x225fe0, 0x225570, 0x2258b0, 0x225900, 0x225700}},
+    {"Exit Game", "sheet fill", SiteKind::kHook,
+        "48 8b 87 f8 00 00 00 8a 48 18 80 f9 03 74 09 80 "
+        "f9 01 74 3f 84 c9 75 7a 8b 48 14 48 85 c9 74 72",
+        0, 1, {0x58e330, 0x58c3d0, 0x58c300, 0x58c3c0, 0x58c430}},
+    {"Exit Game", "row widget", SiteKind::kCall,
+        "bf c0 05 00 00 e8 ?? ?? ?? ?? 49 89 c6 4c 89 ee "
+        "4c 89 f7 e8 ?? ?? ?? ?? 4c 89 e7 4c 89 f6 41 c7 "
+        "86 50 03 00 00 00 05 00 00 41 c7 86 54 03 00 00 "
+        "32 00 00 00 4d 89 be 20 03 00 00 e8 ?? ?? ?? ?? "
+        "be 7e 01 00 00 31 d2 4c 89 e7 e8 ?? ?? ?? ?? be "
+        "7f 01 00 00 31 d2 4c 89 e7 e8 ?? ?? ?? ?? be 80 "
+        "01 00 00 31 d2 4c 89 e7 e8 ?? ?? ?? ?? be 81 01 "
+        "00 00 31 d2 4c 89 e7 e8 ?? ?? ?? ?? be 82 01 00 "
+        "00 31 d2 4c 89 e7 e8 ?? ?? ?? ?? be 84 01 00 00 "
+        "31 d2 4c 89 e7 e8 ?? ?? ?? ?? 48 8b 7d b0 be 05 "
+        "00 00 00 e8",
+        163, 1, {0x53c22a, 0x53a24a, 0x53a1aa, 0x53a26a, 0x53a25a}},
+    {"Exit Game", "part table", SiteKind::kLoad,
+        "83 fa 25 77 0b 48 8d 15 ?? ?? ?? ?? 8b 74 8a 0c "
+        "ff d0",
+        5, 2, {0x53cfd7, 0x53afc7, 0x53af37, 0x53aff7, 0x53afd7}},
+    {"Exit Game", "menu tick", SiteKind::kHook,
+        "ff 90 78 01 00 00 83 c0 02 41 b4 01 83 f8 06 0f "
+        "87 ?? ?? ?? ?? 48 8d 0d ?? ?? ?? ??",
+        6, 1, {0x53d064, 0x53b054, 0x53afc4, 0x53b084, 0x53b064}},
+    {"Exit Game", "help limit", SiteKind::kWindow,
+        "8d 88 85 01 00 00 83 f8 05 0f 42 f1",
+        8, 2, {0x53d348, 0x53b338, 0x53b2a8, 0x53b368, 0x53b348}},
 };
 
 constexpr RelationSpec kRelationTable[] = {

@@ -134,6 +134,7 @@ typedef struct {
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
     int features_by_signature;   /* the cheat, NPC voice and True Ultrawide sites are found by signature, not by table */
+    int exit_game;               /* the title menu's Exit Game row is installed from signature-located sites */
     const char *title_id;
     const char *version;         /* the build's profile version: with title_id, the build key of the loader's patches */
 } DcpGameBuild;
@@ -151,6 +152,11 @@ int dcp_resolve_features(const DcpGameBuild *build, const DcpImageView *image, i
  * the four displacements it observes. `failure` says why nothing resolved. Returns 1 when resolved. */
 int dcp_resolve_party(const DcpGameBuild *build, const DcpImageView *image, DcpPartySites *out, char *failure,
                       size_t failure_size);
+
+/* The same gate for the title menu's Exit Game row: every supported build with exit_game set, tables or not. `failure`
+ * says why nothing resolved. Returns 1 when resolved. */
+int dcp_resolve_exit_game(const DcpGameBuild *build, const DcpImageView *image, DcpExitGameSites *out, char *failure,
+                          size_t failure_size);
 
 /* 1 when the game folder holds the files Japanese NPC Voices needs (npc_voice_resources.h). */
 int dcp_npc_voice_resources(const char *app0);

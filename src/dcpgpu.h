@@ -27,6 +27,9 @@ int dcpgpu_handle_fault(void *context, void *address);
 void dcpgpu_dump_guest_writes(void *context);
 /* Number of symbols registered by the video core (diagnostics). */
 unsigned dcpgpu_symbol_count(void);
+/* Queues the shutdown a closed window performs (clean-exit mark, log finalize, process exit). Callable from any thread;
+ * 1 for the first request, 0 with no window or once already requested. */
+int dcpgpu_request_close(void);
 /* Keyboard text entry and list selection drawn by the video core; begin returns 0 without a window.
  * text poll: 0 typing, 1 confirmed, 2 cancelled. choice poll: -1 open, -2 cancelled, else the index. */
 int dcpgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);

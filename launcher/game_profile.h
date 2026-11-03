@@ -51,6 +51,7 @@ struct GameBuild {
     bool resolution_by_signature = false;
     bool keep_base_languages = false; // an update's regional archive is laid over the base's, which keeps its language slots
     bool features_by_signature = false; // cheats, NPC voices and True Ultrawide are found by structural locators, not tables
+    bool exit_game = true;            // the title menu's Exit Game row is installed from structural locators
 };
 
 // The supported builds, US first.

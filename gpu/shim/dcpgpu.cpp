@@ -318,6 +318,12 @@ extern "C" uint64_t dcpgpu_latency_press_ns(void) {
     return DcpLatencyTrace::press_ns.load(std::memory_order_relaxed);
 }
 
+extern "C" int dcpgpu_request_close(void) {
+    if (!g_window || !g_window->RequestClose()) return 0;
+    std::printf("Exit Game: host exit scheduled\n");
+    return 1;
+}
+
 extern "C" int dcpgpu_text_input_begin(const char* initial, const char* prompt) {
     if (!g_window) return 0;
     g_window->BeginTextInput(initial ? initial : "", prompt ? prompt : "Text");

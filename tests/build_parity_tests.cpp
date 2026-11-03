@@ -26,6 +26,8 @@
 #include "cpk_patch.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "exit_game_hook.h"
+#include "exit_game_text.h"
 #include "feature_sites.h"
 #include "game_files.h"
 #include "game_patches.h"
@@ -144,13 +146,14 @@ enum Feature : size_t {
     kSaveLoad,
     kXboxPrompts,
     kJapaneseNpcVoices,
+    kExitGame,
     kFeatureCount
 };
 
 const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
     "Story Skip", "Tutorial Skip", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
-    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices"};
+    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
 struct Contract {
@@ -215,6 +218,7 @@ DcpGameBuild LoaderView(const GameBuild& build) {
     game.resolution_site_count = build.resolution_sites.size();
     game.resolution_by_signature = build.resolution_by_signature;
     game.features_by_signature = build.features_by_signature;
+    game.exit_game = build.exit_game;
     game.title_id = build.title_id;
     game.version = build.version;
     return game;
@@ -237,7 +241,8 @@ bool SameView(const DcpGameBuild& a, const DcpGameBuild& b) {
     return std::string_view(a.label) == b.label && a.cheats == b.cheats && a.japanese_npc_voices == b.japanese_npc_voices &&
            a.true_ultrawide == b.true_ultrawide && a.resolution_sites == b.resolution_sites &&
            a.resolution_site_count == b.resolution_site_count && a.resolution_by_signature == b.resolution_by_signature &&
-           a.features_by_signature == b.features_by_signature && std::string_view(a.title_id) == b.title_id &&
+           a.features_by_signature == b.features_by_signature && a.exit_game == b.exit_game &&
+           std::string_view(a.title_id) == b.title_id &&
            std::string_view(a.version) == b.version;
 }
 
@@ -290,6 +295,8 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
         return build.xbox_prompts;
     case kJapaneseNpcVoices:
         return known && game.japanese_npc_voices && (IsUs100(build) || game.features_by_signature);
+    case kExitGame:
+        return known && game.exit_game;
     default:
         return known;
     }
@@ -364,6 +371,30 @@ void TestGlobalFeatures() {
     }
 }
 
+// Every selectable language of every build has Exit Game text, the table holds no language no build can select, and a
+// build that offers Exit Game has the languages its contract row lists.
+void TestExitGameLanguages() {
+    std::set<std::string> used;
+    for (const GameBuild& build : SupportedBuilds()) {
+        g_scope = build.label;
+        const Contract* row = FindContract(build.label);
+        CHECK(build.exit_game && row);
+        std::string joined;
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
+            const ExitGameLanguage* text = nullptr;
+            for (const ExitGameLanguage& candidate : exit_game_languages) {
+                if (language.key == candidate.key) text = &candidate;
+            }
+            CHECK(text && text->row && *text->row && text->help && *text->help);
+            used.insert(std::string(language.key));
+            joined += (joined.empty() ? "" : " ") + std::string(language.key);
+        }
+        CHECK(row && joined == row->languages);
+    }
+    g_scope = "contract";
+    CHECK(used.size() == EXIT_GAME_LANGUAGE_COUNT);
+}
+
 // The case an earlier contract let through: "CUSA10209 1.00 Asia/Hong Kong PASS real" while the launcher said "Cheats
 // are not available for CUSA10209 1.00 Asia/Hong Kong". A supported build with any GLOBAL feature switched off fails.
 void TestDisabledFeatureCannotPass() {
@@ -395,6 +426,9 @@ void TestDisabledFeatureCannotPass() {
         copy = build;
         copy.japanese_npc_voices = !build.japanese_npc_voices;
         CHECK(refuses(copy, kJapaneseNpcVoices));
+        copy = build;
+        copy.exit_game = false;
+        CHECK(refuses(copy, kExitGame));
         CHECK(CheatsAvailable(&build));
     }
     const GameBuild* hk = FindBuild("CUSA10209 1.00 Asia/Hong Kong");
@@ -733,6 +767,14 @@ void TestUnknownBuilds() {
     SystemTypeRecord located;
     CHECK(!system_type_locate(image.data(), size, entry, &located));
     CHECK(guest_hooks_verify(image.data(), size, entry, &cheats::kSupportedImage, nullptr, 0, nullptr) == GUEST_HOOK_WRONG_IMAGE);
+    const DcpExecRange whole{0, size};
+    const DcpImageView unknown_view{image.data(), size, &whole, 1};
+    DcpExitGameSites no_sites{};
+    DcpLocateReport no_report{};
+    char no_failure[200];
+    CHECK(!dcp_locate_exit_game_sites(&unknown_view, &no_sites, &no_report) && no_report.failure[0]);
+    CHECK(!dcp_resolve_exit_game(nullptr, &unknown_view, &no_sites, no_failure, sizeof(no_failure)));
+    CHECK(!exit_game_hook_install_located(image.data(), size, entry, &no_sites, stubs.data(), stubs.size()));
     CHECK(image == before);
 
     // An image.json that names a supported hash with another version, title or hash is no supported build.
@@ -767,7 +809,10 @@ void TestUnknownBuilds() {
                              "if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled() &&",
                              "dcp_resolve_features(known_build ? &game_build : NULL,",
                              "runtime_cheats_hooks_wanted(known_build && game_build.cheats)",
-                             "known_build && game_build.true_ultrawide"}) {
+                             "known_build && game_build.true_ultrawide",
+                             "dcp_resolve_exit_game(&game_build,&view,&exit_game_sites,",
+                             "if (known_build && game_build.exit_game) {",
+                             "exit_game_set_handler(dcpgpu_request_close);"}) {
         const bool present = loader.find(gate) != std::string::npos;
         if (!present) {
             std::printf("  loader gate missing: %s\n", gate);
@@ -859,6 +904,21 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
         if (std::string_view(record.build) != build.label) continue;
         for (size_t i = 0; i < LZCNT_SITE_COUNT; ++i) add(record.offsets[i], lzcnt_shapes[i].length, "lzcnt");
     }
+    {
+        const DcpExecRange executable{0, size};
+        const DcpImageView view{image.bytes.data(), size, &executable, 1};
+        DcpExitGameSites exit_game{};
+        DcpLocateReport report{};
+        if (dcp_locate_exit_game_sites(&view, &exit_game, &report)) {
+            add(exit_game.sheet_fill, 10, "exit game sheet");
+            add(exit_game.row_widget, 5, "exit game row");
+            add(exit_game.help_limits[0], 1, "exit game help limit");
+            add(exit_game.help_limits[1], 1, "exit game help limit");
+            add(exit_game.part_table_loads[0], 7, "exit game part table load");
+            add(exit_game.part_table_loads[1], 7, "exit game part table load");
+            add(exit_game.menu_tick, 6, "exit game menu tick");
+        }
+    }
     const auto add_ultrawide = [&](const UltrawideRecord& record, const uint32_t* loads) {
         GuestHook hooks[ULTRAWIDE_HOOK_COUNT];
         ultrawide_record_hooks(&record, hooks);
@@ -913,7 +973,8 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     const size_t page = 0x1000, base = (size_t(size) + page - 1) / page * page;
     const size_t cheat_stubs = cheats::Hooks().size() * guest_hook_stub_size();
     const size_t room = cheat_stubs + startup_save_hook_stub_bytes() + voice_hooks_stub_bytes() +
-                        system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes();
+                        system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes() +
+                        exit_game_hook_stub_bytes();
     std::vector<uint8_t> memory(base + room + page, 0);
     std::memcpy(memory.data(), image.bytes.data(), size);
     uint8_t* area = memory.data() + base;
@@ -928,6 +989,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     uint8_t* voice_area = take(voice_hooks_stub_bytes());
     uint8_t* system_area = take(system_type_hook_stub_bytes());
     uint8_t* ultrawide_area = take(ultrawide_hooks_stub_bytes());
+    uint8_t* exit_game_area = take(exit_game_hook_stub_bytes());
     uint8_t* image_bytes = memory.data();
 
     const char* name = nullptr;
@@ -965,6 +1027,20 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     CHECK(system_type_hook_install(image_bytes, size, entry, system_area, system_type_hook_stub_bytes(), SystemTypeText) == 1);
     CHECK(skip_offers_install(image_bytes, size, Key(build).c_str(), SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) ==
           (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
+
+    {
+        const DcpExecRange executable{0, size};
+        const DcpImageView original{image.bytes.data(), size, &executable, 1};
+        DcpExitGameSites sites{};
+        char failure[200];
+        const DcpGameBuild game = LoaderView(build);
+        CHECK(dcp_resolve_exit_game(&game, &original, &sites, failure, sizeof(failure)) == 1);
+        CHECK(exit_game_hook_install_located(image_bytes, size, entry, &sites, exit_game_area, exit_game_hook_stub_bytes()) == 1);
+        CHECK(image_bytes[sites.help_limits[0]] == EXIT_GAME_MENU_ITEMS && image_bytes[sites.help_limits[1]] == EXIT_GAME_MENU_ITEMS);
+        DcpGameBuild off = game;
+        off.exit_game = 0;
+        CHECK(dcp_resolve_exit_game(&off, &original, &sites, failure, sizeof(failure)) == 0);
+    }
 
     const DcpResolution target = dcp_render_target(&dcp_resolutions[5], &dcp_aspect_ratios[0]);
     char error[320];
@@ -1055,6 +1131,13 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         } else {
             CHECK(resolved == 0 && !located.cheats && !located.voices && !located.ultrawide);
         }
+
+        DcpExitGameSites exit_game{};
+        char exit_failure[200];
+        if (!dcp_resolve_exit_game(&game, &view, &exit_game, exit_failure, sizeof(exit_failure))) {
+            std::printf("  %s: Exit Game: %s\n", build.label, exit_failure);
+        }
+        CHECK(dcp_resolve_exit_game(&game, &view, &exit_game, exit_failure, sizeof(exit_failure)) == 1);
 
         std::vector<Patched> ranges = PatchedRanges(build, image, located);
         std::sort(ranges.begin(), ranges.end(), [](const Patched& a, const Patched& b) { return a.begin < b.begin; });
@@ -1158,6 +1241,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
 int main() {
     TestContract();
     TestGlobalFeatures();
+    TestExitGameLanguages();
     TestDisabledFeatureCannotPass();
     TestUpdateParity();
     TestGateConsistency();

@@ -392,6 +392,48 @@ int dcp_locate_cheat_sites(const DcpImageView* image, DcpCheatSites* out, DcpLoc
     return 1;
 }
 
+int dcp_resolve_exit_game(const DcpGameBuild* build, const DcpImageView* image, DcpExitGameSites* out, char* failure,
+                          size_t failure_size) {
+    DcpLocateReport report{};
+    std::snprintf(report.failure, sizeof(report.failure), "not a supported game build");
+    const int resolved = build && build->exit_game && image && out && dcp_locate_exit_game_sites(image, out, &report);
+    if (failure && failure_size) {
+        std::snprintf(failure, failure_size, "%s", report.failure);
+    }
+    return resolved;
+}
+
+int dcp_locate_exit_game_sites(const DcpImageView* image, DcpExitGameSites* out, DcpLocateReport* report) {
+    if (!ValidView(image, report) || !out) {
+        return 0;
+    }
+    Locator locator(*image, *report);
+    std::vector<uint64_t> fill, widget, limits, loads, tick;
+    const auto find = [&](const char* name, std::vector<uint64_t>& found) {
+        const SiteSpec* spec = SpecNamed("Exit Game", name);
+        return spec ? locator.Site(*spec, found) : locator.Fail("site", name, "not defined");
+    };
+    if (!find("sheet fill", fill) || !find("row widget", widget) || !find("help limit", limits) || limits.size() != 2 ||
+        !find("part table", loads) || loads.size() != 2 || !find("menu tick", tick)) {
+        return 0;
+    }
+    const DcpExitGameSites sites{uint32_t(fill.front()), uint32_t(widget.front()),
+                                 {uint32_t(limits[0]), uint32_t(limits[1])}, {uint32_t(loads[0]), uint32_t(loads[1])},
+                                 uint32_t(tick.front())};
+    const DcpExecRange ranges[] = {{sites.sheet_fill, sites.sheet_fill + 10u},
+                                   {sites.row_widget, sites.row_widget + 5u},
+                                   {sites.help_limits[0], sites.help_limits[0] + 1u},
+                                   {sites.help_limits[1], sites.help_limits[1] + 1u},
+                                   {sites.part_table_loads[0], sites.part_table_loads[0] + 7u},
+                                   {sites.part_table_loads[1], sites.part_table_loads[1] + 7u},
+                                   {sites.menu_tick, sites.menu_tick + 6u}};
+    if (dcp_ranges_overlap(ranges, std::size(ranges))) {
+        return locator.Fail("patch", "ranges", "two patches overlap");
+    }
+    *out = sites;
+    return 1;
+}
+
 int dcp_resolve_party(const DcpGameBuild* build, const DcpImageView* image, DcpPartySites* out, char* failure,
                       size_t failure_size) {
     DcpLocateReport report{};

@@ -107,6 +107,17 @@ typedef struct {
     uint32_t resource_acquire; /* the resource manager's acquire */
 } DcpVoiceSites;
 
+/* The title menu's Exit Game row: the sheet loader's fill, the call that sizes the main menu's item list (a sixth row
+ * widget is added just before it), the two help-text limits, the two loads of the table that maps a menu position to
+ * its layout part, and the title's per-frame read of the menu result. */
+typedef struct {
+    uint32_t sheet_fill;
+    uint32_t row_widget;
+    uint32_t help_limits[2];
+    uint32_t part_table_loads[2];
+    uint32_t menu_tick;
+} DcpExitGameSites;
+
 #define DCP_ORTHO_LOADS 6
 #define DCP_ULTRAWIDE_SITE_COUNT 22
 typedef struct {
@@ -140,6 +151,7 @@ int dcp_ranges_overlap(const DcpExecRange *ranges, size_t count);
 
 int dcp_locate_cheat_sites(const DcpImageView *image, DcpCheatSites *out, DcpLocateReport *report);
 int dcp_locate_party_sites(const DcpImageView *image, DcpPartySites *out, DcpLocateReport *report);
+int dcp_locate_exit_game_sites(const DcpImageView *image, DcpExitGameSites *out, DcpLocateReport *report);
 int dcp_locate_voice_sites(const DcpImageView *image, DcpVoiceSites *out, DcpLocateReport *report);
 int dcp_locate_ultrawide_sites(const DcpImageView *image, DcpUltrawideSites *out, DcpLocateReport *report);
 

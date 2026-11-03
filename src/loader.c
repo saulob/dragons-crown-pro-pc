@@ -13,6 +13,7 @@
 #include "runtime_online.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
+#include "exit_game_hook.h"
 #include "system_type_hook.h"
 #include "party_hook.h"
 #include "ultrawide_hooks.h"
@@ -762,10 +763,11 @@ int main(int argc, char **argv) {
     const size_t system_type_stub_bytes = system_type_hook_stub_bytes();
     const size_t party_stub_bytes = party_hook_stub_bytes();
     const size_t ultrawide_stub_bytes = ultrawide_wanted ? ultrawide_hooks_stub_bytes() : 0;
+    const size_t exit_game_stub_bytes = known_build && game_build.exit_game ? exit_game_hook_stub_bytes() : 0;
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
-                                         ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes);
+                                         ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -841,6 +843,9 @@ int main(int argc, char **argv) {
     DcpPartySites party_sites;
     int party_located=0;
     char party_failure[192]="";
+    DcpExitGameSites exit_game_sites;
+    int exit_game_located=0;
+    char exit_game_failure[192]="";
     {
         DcpExecRange ranges[64];
         size_t range_count=0;
@@ -852,6 +857,8 @@ int main(int argc, char **argv) {
         if (known_build && runtime_online_active()) {
             party_located=dcp_resolve_party(&game_build,&view,&party_sites,party_failure,sizeof(party_failure));
         }
+        if (known_build)
+            exit_game_located=dcp_resolve_exit_game(&game_build,&view,&exit_game_sites,exit_game_failure,sizeof(exit_game_failure));
     }
     if (check_imports) {
         /* Lists every import the game would stop at, without running it (needs the GPU
@@ -942,6 +949,14 @@ int main(int argc, char **argv) {
     }
     const unsigned skip_applied=skip_offers_install(image,size,known_build ? build_key : NULL,
                                                     skip_offers_wanted(dcp_skip_offers(settings_file)));
+    if (known_build && game_build.exit_game) {
+        if (exit_game_located) {
+            exit_game_set_handler(dcpgpu_request_close);
+            exit_game_hook_install_located(image,size,entry,&exit_game_sites,
+                                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes,
+                                           exit_game_stub_bytes);
+        } else printf("Exit Game: unavailable, %s\n",exit_game_failure);
+    }
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
