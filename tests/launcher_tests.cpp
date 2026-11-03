@@ -1907,6 +1907,50 @@ void TestSkipIntroSettings(const fs::path& base) {
     CHECK(loader.find("skip_intro_wanted(dcp_skip_intro(settings_file))") != std::string::npos);
 }
 
+void TestJapaneseMenuButtonsSettings(const fs::path& base) {
+    const fs::path file = base / "menu_buttons" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kJapaneseMenuButtonsKey && setting.default_value == "0";
+    }
+    CHECK(managed == 1 && std::string(kJapaneseMenuButtonsKey) == "japanese_menu_buttons");
+    CHECK(dcp_japanese_menu_buttons(nullptr) == 0 && dcp_japanese_menu_buttons(file.string().c_str()) == 0);
+    WriteAll(file, "vsync = 1\ntext_language = ja\n");
+    CHECK(dcp_japanese_menu_buttons(file.string().c_str()) == 0);
+    WriteAll(file, "japanese_menu_buttons = 1\n");
+    CHECK(dcp_japanese_menu_buttons(file.string().c_str()) == 1);
+    WriteAll(file, "japanese_menu_buttons = banana\n");
+    CHECK(dcp_japanese_menu_buttons(file.string().c_str()) == 0);
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kJapaneseMenuButtonsKey, true);
+        CHECK(settings.Save());
+        CHECK(dcp_japanese_menu_buttons(file.string().c_str()) == 1);
+        CHECK(!settings.GetBool(kSkipIntroKey, false));
+        settings.ResetToDefaults();
+        CHECK(!settings.GetBool(kJapaneseMenuButtonsKey, true));
+    }
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const std::string toggle =
+        "ui.Toggle(\"Japanese Menu Buttons\", JapaneseMenuButtonsHelp().c_str(), kJapaneseMenuButtonsKey, false, \"Off\", \"On\");";
+    const size_t row = launcher.find(toggle);
+    CHECK(row != std::string::npos && launcher.find(toggle, row + 1) == std::string::npos);
+    const size_t controls = launcher.find("void PageControls(trg::Ui& ui) {");
+    CHECK(controls != std::string::npos && row > launcher.find("ControllerPromptsCombo(ui);", controls) &&
+          row < launcher.find("ui.Info(\"Keyboard\"", controls));
+    CHECK(launcher.find("ui.Toggle(\"Skip Intro\"") < controls && row > controls);
+    const size_t help = launcher.find("std::string JapaneseMenuButtonsHelp() const {");
+    CHECK(help != std::string::npos && launcher.find("prompts_installed_ == PromptStyle::kXbox", help) < help + 200);
+    CHECK(launcher.find("\"Off: %s confirms and %s cancels in menus.") != std::string::npos);
+    CHECK(launcher.find("xbox ? \"A\" : \"Cross\"", help) != std::string::npos &&
+          launcher.find("xbox ? \"B\" : \"Circle\"", help) != std::string::npos);
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("menu_buttons_wanted(dcp_japanese_menu_buttons(settings_file))") != std::string::npos);
+    CHECK(loader.find("menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons)") != std::string::npos);
+    CHECK(loader.find("exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied)") != std::string::npos);
+}
+
 void TestSkipOfferSettings(const fs::path& base) {
     const fs::path file = base / "skip_offers" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -2490,7 +2534,7 @@ void TestSettingsSummary(const fs::path& base) {
                            "frame_rate = 120\nshow_fps = 1\ntrue_ultrawide = 1\ndcp_japanese_npc_voices = 1\n"
                            "arachnophobia_safe_mode = 1\nstory_skip_offer = 1\ntutorial_skip_offer = 1\n";
     const LauncherSettings settings(file);
-    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u, 0};
+    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u, 0, 0};
     const std::string text = SettingsSummary(settings, &kUs, TextLanguagesOf(&kUs), &run);
     const auto has = [&](const std::string& part) { return text.find(part) != std::string::npos; };
     CHECK(has("Settings: Dragon's Crown Pro PC v" + net::port_version() + ", " + net::host_platform() + ", online protocol " +
@@ -2499,7 +2543,7 @@ void TestSettingsSummary(const fs::path& base) {
     CHECK(has("Settings: Window Borderless Fullscreen, frame rate 120 FPS, frame counter on,"));
     CHECK(has("Settings: Render resolution 2560x1080 (native), aspect ratio 21:9 Ultrawide, True Ultrawide off (requested on)\n"));
     CHECK(has("Settings: Menu & Subtitles English, Japanese NPC Voices on, Arachnophobia Safe Mode on\n"));
-    CHECK(has("Settings: Skip Intro off, Story Skip Offer on, Tutorial Skip Offer off,"));
+    CHECK(has("Settings: Skip Intro off, Japanese Menu Buttons off, Story Skip Offer on, Tutorial Skip Offer off,"));
     for (const char* secret : {"SecretName", "friend", "Friend", "account", "secret", "token", "DCP_DASHBOARD_TOKEN", "lobby"}) {
         CHECK(!has(secret));
     }
@@ -5660,6 +5704,7 @@ int main(int argc, char** argv) {
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestSkipIntroSettings(base);
+    TestJapaneseMenuButtonsSettings(base);
     TestPinnedBuild(base);
     TestOverlayProgramsSetting(base);
     TestGameProcess();

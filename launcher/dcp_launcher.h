@@ -89,6 +89,9 @@ int dcp_true_ultrawide(const char *settings_file);
 /* 1 when the settings file skips the startup logo (skip_intro; 0 by default). */
 int dcp_skip_intro(const char *settings_file);
 
+/* 1 when the settings file asks for Circle to confirm in the menus (japanese_menu_buttons; 0 by default). */
+int dcp_japanese_menu_buttons(const char *settings_file);
+
 /* The Skip Offers the settings file turns on (skip_offers.h bits; none by default). */
 unsigned dcp_skip_offers(const char *settings_file);
 
@@ -105,6 +108,7 @@ typedef struct DcpRunSettings {
     int true_ultrawide_effective;
     unsigned skip_offers;          /* the skip_offers.h bits applied */
     int skip_intro;                /* the startup logo skip was applied */
+    int japanese_menu_buttons;     /* the Circle-confirms layout is in effect */
 } DcpRunSettings;
 
 /* Prints the startup state support needs as "Settings:" lines: port version, platform, online protocol, game build,

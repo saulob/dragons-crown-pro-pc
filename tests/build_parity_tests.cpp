@@ -36,6 +36,7 @@
 #include "npc_voice_resources.h"
 #include "net/online_version.h"
 #include "runtime_cheats.h"
+#include "menu_buttons.h"
 #include "skip_intro.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -101,6 +102,12 @@ bool HasIntroTable(const GameBuild& build) {
     return skip_intro_locate(none, 0, Key(build).c_str(), &site) == 1;
 }
 
+bool HasButtonsTable(const GameBuild& build) {
+    MenuButtonSites sites;
+    const unsigned char none[1] = {0};
+    return menu_buttons_locate(none, 0, Key(build).c_str(), &sites) == 1;
+}
+
 bool IsUs100(const GameBuild& build) {
     const GuestImageId* id = ImageOf(build);
     return id && id->size == cheats::kSupportedImage.size && id->entry == cheats::kSupportedImage.entry;
@@ -109,7 +116,7 @@ bool IsUs100(const GameBuild& build) {
 // What the profile and the runtime tables provide, feature by feature.
 struct Capabilities {
     bool cheats = false, xbox_prompts = false, npc_voices = false, true_ultrawide = false, custom_resolution = false;
-    Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, system_type = Mapping::kNone,
+    Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, menu_buttons = Mapping::kNone, system_type = Mapping::kNone,
             lzcnt = Mapping::kNone, startup_save = Mapping::kNone;
     std::string languages;
 };
@@ -127,6 +134,7 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     const auto table_or_search = [&](bool listed) { return listed ? Mapping::kTable : Mapping::kSignature; };
     caps.skip_offers = table_or_search(HasSkipTable(build));
     caps.skip_intro = table_or_search(HasIntroTable(build));
+    caps.menu_buttons = table_or_search(HasButtonsTable(build));
     caps.system_type = table_or_search(Listed(system_type_records, build));
     caps.lzcnt = table_or_search(Listed(lzcnt_builds, build));
     caps.startup_save = Listed(startup_save_records, build) ? Mapping::kTable : Mapping::kNone;
@@ -147,6 +155,7 @@ enum Feature : size_t {
     kStorySkip,
     kTutorialSkip,
     kSkipIntro,
+    kMenuButtons,
     kLzcnt,
     kArachnophobia,
     kController,
@@ -161,7 +170,7 @@ enum Feature : size_t {
 
 const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
-    "Story Skip", "Tutorial Skip", "Skip Intro", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
+    "Story Skip", "Tutorial Skip", "Skip Intro", "Japanese Menu Buttons", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
     "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
@@ -295,6 +304,8 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
         return known && CapabilitiesOf(build).skip_offers != Mapping::kNone;
     case kSkipIntro:
         return known && CapabilitiesOf(build).skip_intro != Mapping::kNone;
+    case kMenuButtons:
+        return known && CapabilitiesOf(build).menu_buttons != Mapping::kNone;
     case kLzcnt:
         return known && CapabilitiesOf(build).lzcnt != Mapping::kNone;
     case kArachnophobia:
@@ -375,6 +386,32 @@ void TestSkipIntroLanguages() {
             uint64_t site = 0;
             const unsigned char none[1] = {0};
             CHECK(skip_intro_locate(none, 0, Key(build).c_str(), &site) == (caps.skip_intro == Mapping::kTable));
+        }
+    }
+    fs::remove_all(dir);
+}
+
+// Japanese Menu Buttons is a flag in the executable: no selectable language of any build changes the setting, the
+// mapping or what the loader is given.
+void TestMenuButtonsLanguages() {
+    const fs::path dir = fs::temp_directory_path() / "dcp_build_parity_buttons";
+    fs::create_directories(dir);
+    const std::string source = ReadText("src/menu_buttons.c");
+    CHECK(source.find("anguage") == std::string::npos && source.find("text_language") == std::string::npos);
+    for (const GameBuild& build : SupportedBuilds()) {
+        g_scope = build.label;
+        const Capabilities caps = CapabilitiesOf(build);
+        CHECK(caps.menu_buttons != Mapping::kNone && !TextLanguagesOf(&build).empty());
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
+            const fs::path ini = dir / "dcp.ini";
+            std::ofstream(ini, std::ios::trunc) << "text_language = " << language.key << "\njapanese_menu_buttons = 1\n";
+            CHECK(dcp_japanese_menu_buttons(ini.string().c_str()) == 1);
+            CHECK(CapabilitiesOf(build).menu_buttons == caps.menu_buttons);
+            MenuButtonSites sites;
+            const unsigned char none[1] = {0};
+            CHECK(menu_buttons_locate(none, 0, Key(build).c_str(), &sites) == (caps.menu_buttons == Mapping::kTable));
+            std::ofstream(ini, std::ios::trunc) << "text_language = " << language.key << "\n";
+            CHECK(dcp_japanese_menu_buttons(ini.string().c_str()) == 0);
         }
     }
     fs::remove_all(dir);
@@ -503,6 +540,7 @@ void TestUpdateParity() {
         lost("render resolution and aspect ratio", b.custom_resolution, u.custom_resolution);
         lost("skip offers", b.skip_offers != Mapping::kNone, u.skip_offers != Mapping::kNone);
         lost("skip intro", b.skip_intro != Mapping::kNone, u.skip_intro != Mapping::kNone);
+        lost("japanese menu buttons", b.menu_buttons != Mapping::kNone, u.menu_buttons != Mapping::kNone);
         lost("system type", b.system_type != Mapping::kNone, u.system_type != Mapping::kNone);
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
@@ -794,6 +832,13 @@ void TestUnknownBuilds() {
     std::vector<uint8_t> stubs(1 << 16);
     CHECK(skip_offers_install(image.data(), size, nullptr, SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) == 0);
     CHECK(skip_intro_install(image.data(), size, entry, nullptr, 1, stubs.data(), stubs.size()) == 0);
+    {
+        const std::vector<uint8_t> untouched = image;
+        CHECK(menu_buttons_install(image.data(), size, nullptr, 1) == 0 && menu_buttons_install(image.data(), size, nullptr, 0) == 0 &&
+              image == untouched);
+        CHECK(menu_buttons_install(image.data(), size, "CUSA00000-1.00", 1) == 0 &&
+              menu_buttons_install(image.data(), size, "CUSA00000-1.00", 0) == 0 && image == untouched);
+    }
     CHECK(!startup_save_hook_install(image.data(), size, entry, stubs.data(), stubs.size()));
     CHECK(!voice_hooks_install(image.data(), size, entry, stubs.data(), stubs.size()));
     char detail[200];
@@ -843,6 +888,8 @@ void TestUnknownBuilds() {
                              "if (known_build && runtime_online_active())",
                              "skip_offers_install(image,size,known_build ? build_key : NULL,",
                              "skip_intro_install(image,size,entry,known_build ? build_key : NULL,",
+                             "menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons);",
+                             "exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied);",
                              "if (known_build) startup_save_hook_install(",
                              "if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled() &&",
                              "dcp_resolve_features(known_build ? &game_build : NULL,",
@@ -933,6 +980,13 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     uint64_t intro = 0;
     skip_intro_locate(image.bytes.data(), size, Key(build).c_str(), &intro);
     if (intro) add(intro, 7, "skip intro poll");
+    MenuButtonSites buttons;
+    menu_buttons_locate(image.bytes.data(), size, Key(build).c_str(), &buttons);
+    for (int i = 0; i < buttons.write_count; ++i) add(buttons.writes[i], 1, "menu buttons flag");
+    if (buttons.western_sites) {
+        for (uint64_t at : buttons.compares) add(at, 1, "menu buttons compare");
+        add(buttons.load, 6, "menu buttons load");
+    }
     for (const SystemTypeRecord& record : system_type_records) {
         if (std::string_view(record.build) == build.label) {
             for (uint32_t site : record.sites) add(site, 5, "system type");
@@ -1072,6 +1126,18 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 0, intro_area, skip_intro_stub_bytes()) == 0);
     CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 1, intro_area, skip_intro_stub_bytes()) == 1);
     CHECK(skip_intro_claim() == 1 && skip_intro_claim() == 0);
+    {
+        MenuButtonSites buttons;
+        CHECK(menu_buttons_locate(image_bytes, size, Key(build).c_str(), &buttons) == 1 && buttons.reader);
+        CHECK(buttons.western_sites);
+        CHECK(menu_buttons_install(image_bytes, size, Key(build).c_str(), 0) == 1);
+        for (int i = 0; i < buttons.write_count; ++i) CHECK(image_bytes[buttons.writes[i]] == 1);
+        for (int i = 0; i < MENU_BUTTONS_COMPARES; ++i) CHECK(image_bytes[buttons.compares[i]] == (buttons.write_count ? 0 : 0xff));
+        std::vector<uint8_t> japanese(image.bytes);
+        CHECK(menu_buttons_install(japanese.data(), size, Key(build).c_str(), 1) == 1);
+        for (int i = 0; i < buttons.write_count; ++i) CHECK(japanese[buttons.writes[i]] == 0);
+        for (int i = 0; i < MENU_BUTTONS_COMPARES; ++i) CHECK(japanese[buttons.compares[i]] == 0);
+    }
 
     {
         const DcpExecRange executable{0, size};
@@ -1210,6 +1276,12 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(skip_intro_locate(bytes, size, Key(build).c_str(), &intro) == 1 && intro);
         CHECK(skip_intro_locate(bytes, size, "unlisted", &found_intro) == 0 && found_intro == intro);
 
+        MenuButtonSites buttons, found_buttons;
+        CHECK(menu_buttons_locate(bytes, size, Key(build).c_str(), &buttons) == 1 && buttons.reader);
+        CHECK(menu_buttons_locate(bytes, size, "unlisted", &found_buttons) == 0 && found_buttons.reader == buttons.reader &&
+              found_buttons.write_count == buttons.write_count);
+        CHECK(buttons.write_count == (build.title_id == std::string_view("CUSA10454") ? 2 : 0));
+
         SystemTypeRecord table{}, searched{};
         CHECK(system_type_locate(bytes, size, image.entry, &table) == 1 && std::string_view(table.build) == build.label);
         CHECK(system_type_locate(bytes, size, image.entry + 1, &searched) == 2);
@@ -1291,6 +1363,7 @@ int main() {
     TestContract();
     TestGlobalFeatures();
     TestSkipIntroLanguages();
+    TestMenuButtonsLanguages();
     TestExitGameLanguages();
     TestDisabledFeatureCannotPass();
     TestUpdateParity();

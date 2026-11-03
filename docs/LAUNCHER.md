@@ -208,7 +208,7 @@ does. Both write byte-identical files from the game's package.
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
 | Gameplay | Skip Intro, Frame rate, Story Skip Offer, Tutorial Skip Offer | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
-| Controls | the hotkeys (read only) | |
+| Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
 
 Window size, Monitor, Aspect Ratio, Render resolution, True Ultrawide, Graphics card, language, voices, Arachnophobia Safe Mode, keyboard bindings and controller prompts stay in the launcher, and the pages say so. A setting that applies at the next start shows "(restart)" and the footer reminds you; there is no restart button, so close and start the game again. Keyboard: Up / Down rows, Left / Right values, Enter changes, Q / E or Tab pages, Escape closes. Controller: D-pad or left stick moves, A changes, LB / RB pages, B closes. The mouse works too. While it is open the game reads neutral input; closing it waits until what was pressed in it is released (one second at most), and `runtime_pad.c` hides L3 and R3 together from the game and any button still held afterwards, so the opening and closing presses never reach the game.
@@ -248,6 +248,7 @@ use the same defaults).
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (the USA and Asia and Hong Kong builds; the Japanese builds always use them) |
 | `skip_intro` | 1, 0 | 0 | at game start |
+| `japanese_menu_buttons` | 1, 0 | 0 | at game start |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
@@ -417,6 +418,18 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   is separate from the two skip offers. It does not depend on the text language. The log shows
   `Skip intro: on, native skip armed` when installed and `Skip intro: startup sequence skipped` only when the press was
   used. Changing it in the F1 Options menu needs a restart.
+- **Japanese Menu Buttons** (Controls page, under Controller prompts): Off by default (`japanese_menu_buttons`;
+  `DCP_JAPANESE_MENU_BUTTONS` overrides it for a run). The setting picks the menu layout the same way in every build and
+  with every text language. Off: Cross confirms and Circle cancels (A and B with Xbox prompts). On: Circle confirms and
+  Cross cancels (B and A). The game has one "Cross confirms" setting that its key setup and some button pictures read.
+  The USA builds start with it set, so On zeroes the two places that set it; the Japanese and the Asia and Hong Kong
+  builds start with it clear, so Off makes their five readers see it set. Every site is checked byte for byte first and
+  nothing is written on a mismatch (the log says why). The row's description names A and B instead of Cross and Circle
+  when the Xbox controller prompts are installed, and follows the Controller prompts choice as soon as it is applied;
+  the prompt style never changes the setting itself. The Exit Game row accepts with the same button (South when Off,
+  East when On, and Enter). Combat, movement and the pad mapping are untouched. The log shows
+  `Japanese menu buttons: on|off, ...`. Changing it in the F1 Options menu (Controls page) needs a restart. Prompts
+  written into the game's text files are not rewritten, so some of them may keep showing the other button order.
 - **Story Skip Offer** and **Tutorial Skip Offer**: Off by default (`story_skip_offer`, `tutorial_skip_offer`;
   `DCP_STORY_SKIP` / `DCP_TUTORIAL_SKIP` override them for a run). The game's own questions, asked for every new
   character: whether to start from the second half of the story (normally offered only once a class on the file has

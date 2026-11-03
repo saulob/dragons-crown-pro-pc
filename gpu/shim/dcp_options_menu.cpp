@@ -86,6 +86,11 @@ std::vector<Info> Hotkeys() {
 std::vector<RowRef> RowsOf(Page page, const CheatRows& cheats) {
     std::vector<RowRef> rows;
     if (page == Page::Controls) {
+        for (const DcpOptions::Setting& setting : DcpOptions::kSettings) {
+            if (setting.page == page) {
+                rows.push_back({Kind::Setting, size_t(setting.id)});
+            }
+        }
         const size_t hotkeys = Hotkeys().size();
         for (size_t i = 0; i < hotkeys; ++i) {
             rows.push_back({Kind::Info, i});

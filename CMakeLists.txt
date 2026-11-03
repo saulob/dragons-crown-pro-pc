@@ -120,7 +120,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -187,6 +187,10 @@ add_executable(dcp-skip-intro-tests EXCLUDE_FROM_ALL tests/skip_intro_tests.c sr
 target_include_directories(dcp-skip-intro-tests PRIVATE src)
 target_compile_definitions(dcp-skip-intro-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-skip-intro-tests PRIVATE -Wall -Wextra -Werror)
+add_executable(dcp-menu-buttons-tests EXCLUDE_FROM_ALL tests/menu_buttons_tests.c src/menu_buttons.c)
+target_include_directories(dcp-menu-buttons-tests PRIVATE src)
+target_compile_definitions(dcp-menu-buttons-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-menu-buttons-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the MOVBE and BMI1 emulation and the LZCNT rewrite used when the host CPU lacks the instructions,
 # on synthetic images and the local boot images.
@@ -266,7 +270,7 @@ endif()
 # loader agreement, and patch ranges and signature searches on the local boot images (tools/test.ps1); not part of the
 # default build.
 add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
-    src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c
+    src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c
     src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/system_type_hook.c src/ultrawide_hooks.c
     src/voice_hooks.c)
 set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -405,6 +409,7 @@ target_compile_options(dcp-ultrawide-sides-tests PRIVATE -Wall -Wextra -Werror)
 # part of the default build.
 add_executable(dcp-exit-game-tests EXCLUDE_FROM_ALL tests/exit_game_tests.c src/guest_hook.c src/exit_game_hook.c src/exit_game_text.c)
 target_include_directories(dcp-exit-game-tests PRIVATE src)
+target_compile_definitions(dcp-exit-game-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-exit-game-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
 
 # Focused tests of the save-data mounts and the Japanese startup save hook (tools/test.ps1); not part of the default build.

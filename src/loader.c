@@ -12,6 +12,7 @@
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
 #include "runtime_online.h"
+#include "menu_buttons.h"
 #include "skip_intro.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -955,6 +956,9 @@ int main(int argc, char **argv) {
     const int skip_intro_applied=skip_intro_install(image,size,entry,known_build ? build_key : NULL,skip_intro_requested,
                                                     image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes,
                                                     skip_intro_stub_area);
+    const int japanese_menu_buttons=menu_buttons_wanted(dcp_japanese_menu_buttons(settings_file));
+    const int menu_buttons_applied=menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons);
+    exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied);
     const unsigned skip_applied=skip_offers_install(image,size,known_build ? build_key : NULL,
                                                     skip_offers_wanted(dcp_skip_offers(settings_file)));
     if (known_build && game_build.exit_game) {
@@ -973,7 +977,7 @@ int main(int argc, char **argv) {
                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
-                                       ultrawide_effective,skip_applied,skip_intro_applied};
+                                       ultrawide_effective,skip_applied,skip_intro_applied,japanese_menu_buttons && menu_buttons_applied};
     dcp_startup_phase("patches installed");
     dcp_log_settings_summary(settings_file,paths.image_dir,app0,&run_settings);
 #ifdef _WIN32

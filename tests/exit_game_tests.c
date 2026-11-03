@@ -342,6 +342,20 @@ static void test_accept(void) {
     exit_game_reset();
 }
 
+static void test_accept_button(void) {
+    CHECK(exit_game_accept_east() == 0);
+    exit_game_set_accept_east(1);
+    CHECK(exit_game_accept_east() == 1);
+    exit_game_set_accept_east(0);
+    CHECK(exit_game_accept_east() == 0);
+    FILE *f = fopen(DCP_SOURCE_DIR "/src/runtime_pad.c", "rb");
+    char text[1 << 16] = {0};
+    CHECK(f && fread(text, 1, sizeof(text) - 1, f) > 0);
+    if (f) fclose(f);
+    CHECK(strstr(text, "exit_game_accept_east() ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH"));
+    CHECK(strstr(text, "k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER]"));
+}
+
 static void test_sheet_hook(void) {
     uint8_t *sheet = malloc(SHEET_BYTES);
     CHECK(sheet != NULL);
@@ -471,6 +485,7 @@ int main(void) {
     test_row_hook();
     test_selection();
     test_accept();
+    test_accept_button();
     test_sheet_hook();
     test_install();
     if (failures) {

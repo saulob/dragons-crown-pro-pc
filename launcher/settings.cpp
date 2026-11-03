@@ -51,6 +51,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kJapaneseNpcVoicesKey, "0"},
     {kAllowOverlayProgramsKey, "0"},
     {kSkipIntroKey, "0"},
+    {kJapaneseMenuButtonsKey, "0"},
     {kStorySkipOfferKey, "0"},
     {kTutorialSkipOfferKey, "0"},
     {kOnlineEnabledKey, "0"},
@@ -361,6 +362,12 @@ extern "C" int dcp_skip_intro(const char* settings_file) {
     return settings.GetBool(kSkipIntroKey, false) ? 1 : 0;
 }
 
+extern "C" int dcp_japanese_menu_buttons(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return settings.GetBool(kJapaneseMenuButtonsKey, false) ? 1 : 0;
+}
+
 extern "C" unsigned dcp_skip_offers(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
@@ -436,7 +443,8 @@ std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* b
     const bool story = run ? (run->skip_offers & 1u) != 0 : settings.GetBool(kStorySkipOfferKey, false);
     const bool tutorial = run ? (run->skip_offers & 2u) != 0 : settings.GetBool(kTutorialSkipOfferKey, false);
     const bool intro = run ? run->skip_intro != 0 : settings.GetBool(kSkipIntroKey, false);
-    line(std::string("Skip Intro ") + OnOff(intro) + ", Story Skip Offer " + OnOff(story) + ", Tutorial Skip Offer " +
+    const bool buttons = run ? run->japanese_menu_buttons != 0 : settings.GetBool(kJapaneseMenuButtonsKey, false);
+    line(std::string("Skip Intro ") + OnOff(intro) + ", Japanese Menu Buttons " + OnOff(buttons) + ", Story Skip Offer " + OnOff(story) + ", Tutorial Skip Offer " +
          OnOff(tutorial) +
          ", overlay programs " +
          (kSeparateGameProcessAvailable ? OnOff(settings.GetBool(kAllowOverlayProgramsKey, false)) : "unsupported"));

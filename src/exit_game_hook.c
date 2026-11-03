@@ -224,6 +224,16 @@ int exit_game_invoke_handler(void) {
 
 /* The host's accept press (controller South or Enter) while the sixth row is selected: it requests the exit and stays
  * hidden from the guest until released. Returns 1 while the press must be hidden. */
+static int accept_east;
+
+void exit_game_set_accept_east(int east) {
+    accept_east = east != 0;
+}
+
+int exit_game_accept_east(void) {
+    return accept_east;
+}
+
 int exit_game_filter_accept(int accept_down) {
     static int previous_down, hidden;
     const int pressed = accept_down && !previous_down;

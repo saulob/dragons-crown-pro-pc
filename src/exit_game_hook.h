@@ -53,6 +53,10 @@ int exit_game_requested(void);
 /* Host input: `accept_down` is the port's accept (South, Enter). Returns 1 while the guest must not see the press. */
 int exit_game_filter_accept(int accept_down);
 
+/* Which controller button accepts: East (Circle, B) when set, else South (Cross, A). */
+void exit_game_set_accept_east(int east);
+int exit_game_accept_east(void);
+
 void GUEST_HOOK_ABI exit_game_sheet_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI exit_game_row_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI exit_game_tick_hook(GuestRegs *regs);

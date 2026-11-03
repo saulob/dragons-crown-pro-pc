@@ -146,6 +146,9 @@ constexpr char kControllerPromptsHelp[] =
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
 constexpr char kSkipIntroHelp[] = "Skip the startup logo and go straight to the title screen";
+constexpr char kJapaneseMenuButtonsHelp[] =
+    "Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat "
+    "controls do not change. Applies at the next game start.";
 constexpr char kStorySkipOfferHelp[] = "Offers the game's built-in story skip when creating a new character";
 constexpr char kTutorialSkipOfferHelp[] = "Lets new characters choose whether to begin the tutorial";
 constexpr char kAllowOverlayProgramsHelp[] =
@@ -1031,6 +1034,7 @@ private:
         if (build_ && !xbox_available_) {
             ui.Help("Xbox prompts are not available for this game build.");
         }
+        ui.Toggle("Japanese Menu Buttons", JapaneseMenuButtonsHelp().c_str(), kJapaneseMenuButtonsKey, false, "Off", "On");
         ui.Info("Keyboard", "Always on, together with the controller.");
         if (ui.ConfirmRow("Keyboard defaults", "Puts the keyboard controls and the port hotkeys back to their defaults.",
                           "Reset to defaults", "Put every key back to its default?", "Reset")) {
@@ -1048,6 +1052,15 @@ private:
                 KeyRow(ui, static_cast<DcpKeyAction>(action));
             }
         }
+    }
+
+    std::string JapaneseMenuButtonsHelp() const {
+        const bool xbox = prompts_installed_ == PromptStyle::kXbox;
+        const char* confirm = xbox ? "A" : "Cross";
+        const char* cancel = xbox ? "B" : "Circle";
+        char text[320];
+        std::snprintf(text, sizeof(text), kJapaneseMenuButtonsHelp, confirm, cancel, cancel, confirm);
+        return text;
     }
 
     void KeyRow(trg::Ui& ui, DcpKeyAction action) {

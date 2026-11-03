@@ -449,10 +449,10 @@ static void sample_player1_scripts(PadData *d) {
     for (int i=0;i<4;++i) if (injected.stick[i]>=0) *axes[i]=(uint8_t)injected.stick[i];
 }
 
-/* Player 1's accept for the port-owned Exit Game row: controller South or Enter. */
+/* Player 1's accept for the port-owned Exit Game row: the game's confirm button or Enter. */
 static int exit_game_accept_down(void) {
     SDL_Gamepad *g=slots[0].gamepad;
-    if (g && SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_SOUTH)) return 1;
+    if (g && SDL_GetGamepadButton(g,exit_game_accept_east() ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH)) return 1;
     const bool *k=SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
     return k && (k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER]);
 }

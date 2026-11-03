@@ -52,6 +52,8 @@ inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
 // Skips the startup logo; the title screen follows (src/skip_intro.h).
 inline constexpr char kSkipIntroKey[] = "skip_intro";
+// Circle confirms and Cross cancels in the menus (src/menu_buttons.h).
+inline constexpr char kJapaneseMenuButtonsKey[] = "japanese_menu_buttons";
 // The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
 inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
 inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";

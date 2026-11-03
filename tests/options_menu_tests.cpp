@@ -176,11 +176,12 @@ void TestSettingsTable() {
     for (const Setting& setting : kSettings) {
         restart += setting.apply == Apply::Restart;
     }
-    Check(restart == 5 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
+    Check(restart == 6 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
               SettingOf(Id::FrameRate).apply == Apply::Restart && SettingOf(Id::SkipIntro).apply == Apply::Restart &&
+              SettingOf(Id::JapaneseMenuButtons).apply == Apply::Restart &&
               SettingOf(Id::StorySkipOffer).apply == Apply::Restart &&
               SettingOf(Id::TutorialSkipOffer).apply == Apply::Restart,
-          "texture filtering, the frame rate, Skip Intro and the skip offers are the settings read once");
+          "texture filtering, the frame rate, Skip Intro, the menu buttons and the skip offers are the settings read once");
     for (const Id live : {Id::DisplayMode, Id::VSync, Id::Presentation, Id::Upscaling, Id::Sharpening,
                           Id::SharpeningStrength, Id::AntiAliasing, Id::FrameRateInTitle, Id::ResolutionInTitle,
                           Id::FrameCounter}) {
@@ -374,6 +375,51 @@ void TestSkipIntro(const fs::path& folder) {
     Check(Contains(Source("gpu/shim/dcp_settings.cpp"), "key == \"skip_intro\"") &&
               !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "skip_intro"),
           "Skip Intro has one reader and one table row");
+}
+
+void TestJapaneseMenuButtons(const fs::path& folder) {
+    using namespace DcpOptions;
+    int rows = 0;
+    for (const Setting& setting : kSettings) {
+        rows += std::string(setting.label) == "Japanese Menu Buttons";
+    }
+    Check(rows == 1 && SettingOf(Id::JapaneseMenuButtons).page == Page::Controls,
+          "Japanese Menu Buttons is in the Controls page exactly once, and not in Gameplay");
+    Check(Contains(Source("gpu/shim/dcp_options_menu.cpp"), "if (page == Page::Controls) {\n        for (const DcpOptions::Setting& setting"),
+          "the Controls page lists its settings before the hotkeys");
+
+    const Setting& setting = SettingOf(Id::JapaneseMenuButtons);
+    Check(std::string(setting.key) == "japanese_menu_buttons" &&
+              Contains(Source("launcher/settings.h"), "kJapaneseMenuButtonsKey[] = \"japanese_menu_buttons\";"),
+          "the key is the launcher's");
+    Check(setting.apply == Apply::Restart && setting.choices.size() == 2, "it is a restart-required Off/On");
+    Check(Current(DcpSettings::Values{}, Id::JapaneseMenuButtons) == "0", "it is Off by default");
+    Check(Contains(Source("launcher/settings.cpp"), "{kJapaneseMenuButtonsKey, \"0\"}"), "the launcher's default is Off");
+
+    const fs::path file = folder / "buttons.ini";
+    WriteFile(file, "# keep\nfuture_setting = 1\n");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    live.japanese_menu_buttons = false;
+    Options options(live);
+    const Outcome outcome = options.Choose(Id::JapaneseMenuButtons, "1");
+    Check(outcome.changed && outcome.saved && options.Pending(Id::JapaneseMenuButtons) && options.RestartPending(),
+          "it waits for the restart");
+    Check(!live.japanese_menu_buttons && options.Shown(Id::JapaneseMenuButtons) == "1", "and the running game keeps its value");
+
+    const std::string text = ReadAll(file);
+    Check(Contains(text, "japanese_menu_buttons = 1\n") && Contains(text, "# keep\n") && Contains(text, "future_setting = 1\n"),
+          "it is saved under the launcher's key and the rest of the file is kept");
+    DcpSettings::Values restarted;
+    Check(DcpSettings::Read(file.string(), restarted) && restarted.japanese_menu_buttons && !restarted.skip_intro,
+          "a restart reads what the menu saved and nothing else");
+
+    DcpSettings::Values untouched;
+    ApplyLive(untouched, Id::JapaneseMenuButtons, "1");
+    Check(!untouched.japanese_menu_buttons, "nothing applies it live");
+    Check(Contains(Source("gpu/shim/dcp_settings.cpp"), "key == \"japanese_menu_buttons\"") &&
+              !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "japanese_menu_buttons"),
+          "it has one reader and one table row");
 }
 
 void TestEveryChoiceRoundTrips(const fs::path& folder) {
@@ -815,6 +861,7 @@ int main() {
     TestPersistence(folder);
     TestSkipOffers(folder);
     TestSkipIntro(folder);
+    TestJapaneseMenuButtons(folder);
     TestEveryChoiceRoundTrips(folder);
     TestStepAndCycle(folder);
     TestOnlinePlayLocksCheats();
