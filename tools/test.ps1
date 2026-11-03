@@ -166,6 +166,7 @@ $tests = @(
     (Test-Step 'Linux network tests (WSL: POSIX WebSocket, the same net tests; skipped without WSL)' -Block { Invoke-LinuxNetTests }),
     (Test-Step 'relay source hygiene (no debug logs, no force option, no build or Windows dependency, protocols unchanged)' -Script 'tests\relay_hygiene_tests.ps1'),
     (Test-Step 'online test instance script tests (-Build, with -WhatIf only)' -Script 'tests\online_instance_tests.ps1'),
+    (Test-Step 'build.ps1 waits for every loader run (a Windows-subsystem program needs the pipe)' -Script 'tests\build_script_tests.ps1'),
     (Test-Step 'online HLE tests (Matching2, libSceNet and Rudp entry points against the loopback lobby)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby),
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )

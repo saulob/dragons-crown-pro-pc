@@ -83,7 +83,8 @@ if (-not (Test-Path -LiteralPath $marker)) {
 }
 elseif (-not (Test-ImageCurrent)) {
     Write-Step 'Updating the boot image'
-    & $loader --prepare-image $view $image
+    # The call operator waits for a Windows-subsystem program only when its output is piped.
+    & $loader --prepare-image $view $image | Out-Host
     if ($LASTEXITCODE -ne 0) { Stop-Tool 'Boot image build failed' }
 }
 Write-Host ''
