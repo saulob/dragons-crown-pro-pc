@@ -1874,6 +1874,39 @@ void TestOnlineClient(const fs::path& base) {
     CHECK(pump([&] { return !b.friends.empty() && !b.friends[0].online; }));
 }
 
+void TestSkipIntroSettings(const fs::path& base) {
+    const fs::path file = base / "skip_intro" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kSkipIntroKey && setting.default_value == "0";
+    }
+    CHECK(managed == 1);
+    CHECK(dcp_skip_intro(nullptr) == 0 && dcp_skip_intro(file.string().c_str()) == 0);
+    WriteAll(file, "vsync = 1\n");
+    CHECK(dcp_skip_intro(file.string().c_str()) == 0);
+    WriteAll(file, "skip_intro = 1\n");
+    CHECK(dcp_skip_intro(file.string().c_str()) == 1);
+    WriteAll(file, "skip_intro = banana\n");
+    CHECK(dcp_skip_intro(file.string().c_str()) == 0);
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kSkipIntroKey, true);
+        CHECK(settings.Save());
+        CHECK(dcp_skip_intro(file.string().c_str()) == 1);
+        settings.ResetToDefaults();
+        CHECK(!settings.GetBool(kSkipIntroKey, true));
+    }
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const std::string toggle = "ui.Toggle(\"Skip Intro\", kSkipIntroHelp, kSkipIntroKey, false, \"Off\", \"On\");";
+    const size_t row = launcher.find(toggle);
+    CHECK(row != std::string::npos && launcher.find(toggle, row + 1) == std::string::npos);
+    CHECK(row < launcher.find("ui.Combo(\"Frame rate\"") && row > launcher.find("ui.Toggle(\"Japanese NPC Voices\""));
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("skip_intro_install(image,size,entry,known_build ? build_key : NULL,skip_intro_requested,") != std::string::npos);
+    CHECK(loader.find("skip_intro_wanted(dcp_skip_intro(settings_file))") != std::string::npos);
+}
+
 void TestSkipOfferSettings(const fs::path& base) {
     const fs::path file = base / "skip_offers" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -2457,7 +2490,7 @@ void TestSettingsSummary(const fs::path& base) {
                            "frame_rate = 120\nshow_fps = 1\ntrue_ultrawide = 1\ndcp_japanese_npc_voices = 1\n"
                            "arachnophobia_safe_mode = 1\nstory_skip_offer = 1\ntutorial_skip_offer = 1\n";
     const LauncherSettings settings(file);
-    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u};
+    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u, 0};
     const std::string text = SettingsSummary(settings, &kUs, TextLanguagesOf(&kUs), &run);
     const auto has = [&](const std::string& part) { return text.find(part) != std::string::npos; };
     CHECK(has("Settings: Dragon's Crown Pro PC v" + net::port_version() + ", " + net::host_platform() + ", online protocol " +
@@ -2466,7 +2499,7 @@ void TestSettingsSummary(const fs::path& base) {
     CHECK(has("Settings: Window Borderless Fullscreen, frame rate 120 FPS, frame counter on,"));
     CHECK(has("Settings: Render resolution 2560x1080 (native), aspect ratio 21:9 Ultrawide, True Ultrawide off (requested on)\n"));
     CHECK(has("Settings: Menu & Subtitles English, Japanese NPC Voices on, Arachnophobia Safe Mode on\n"));
-    CHECK(has("Settings: Story Skip Offer on, Tutorial Skip Offer off,"));
+    CHECK(has("Settings: Skip Intro off, Story Skip Offer on, Tutorial Skip Offer off,"));
     for (const char* secret : {"SecretName", "friend", "Friend", "account", "secret", "token", "DCP_DASHBOARD_TOKEN", "lobby"}) {
         CHECK(!has(secret));
     }
@@ -5625,6 +5658,7 @@ int main(int argc, char** argv) {
     TestPingDisplay(base);
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
+    TestSkipIntroSettings(base);
     TestPinnedBuild(base);
     TestOverlayProgramsSetting(base);
     TestGameProcess();

@@ -145,6 +145,7 @@ constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
+constexpr char kSkipIntroHelp[] = "Skip the startup logo and go straight to the title screen";
 constexpr char kStorySkipOfferHelp[] = "Offers the game's built-in story skip when creating a new character";
 constexpr char kTutorialSkipOfferHelp[] = "Lets new characters choose whether to begin the tutorial";
 constexpr char kAllowOverlayProgramsHelp[] =
@@ -970,6 +971,7 @@ private:
         if (npc_voices_available_) {
             ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
         }
+        ui.Toggle("Skip Intro", kSkipIntroHelp, kSkipIntroKey, false, "Off", "On");
         std::vector<trg::Option> frame_rates;
         for (const int fps : {30, 60, 90, 120, 144, 165, 240, 0}) {
             frame_rates.push_back({std::to_string(fps), FrameRateLabel(fps)});

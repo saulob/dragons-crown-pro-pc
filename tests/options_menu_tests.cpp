@@ -176,10 +176,11 @@ void TestSettingsTable() {
     for (const Setting& setting : kSettings) {
         restart += setting.apply == Apply::Restart;
     }
-    Check(restart == 4 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
-              SettingOf(Id::FrameRate).apply == Apply::Restart && SettingOf(Id::StorySkipOffer).apply == Apply::Restart &&
+    Check(restart == 5 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
+              SettingOf(Id::FrameRate).apply == Apply::Restart && SettingOf(Id::SkipIntro).apply == Apply::Restart &&
+              SettingOf(Id::StorySkipOffer).apply == Apply::Restart &&
               SettingOf(Id::TutorialSkipOffer).apply == Apply::Restart,
-          "texture filtering, the frame rate and the skip offers are the settings read once");
+          "texture filtering, the frame rate, Skip Intro and the skip offers are the settings read once");
     for (const Id live : {Id::DisplayMode, Id::VSync, Id::Presentation, Id::Upscaling, Id::Sharpening,
                           Id::SharpeningStrength, Id::AntiAliasing, Id::FrameRateInTitle, Id::ResolutionInTitle,
                           Id::FrameCounter}) {
@@ -328,6 +329,51 @@ void TestSkipOffers(const fs::path& folder) {
     Check(Contains(Source("gpu/shim/dcp_settings.cpp"), "key == \"story_skip_offer\"") &&
               !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "story_skip_offer"),
           "the skip offers have one reader and one table row");
+}
+
+void TestSkipIntro(const fs::path& folder) {
+    using namespace DcpOptions;
+    int rows = 0;
+    size_t intro = 0, frame_rate = 0, position = 0;
+    for (const Setting& setting : kSettings) {
+        if (setting.page != Page::Gameplay) continue;
+        rows += std::string(setting.label) == "Skip Intro";
+        intro = std::string(setting.label) == "Skip Intro" ? position : intro;
+        frame_rate = setting.id == Id::FrameRate ? position : frame_rate;
+        ++position;
+    }
+    Check(rows == 1 && intro < frame_rate, "Skip Intro is in the Gameplay page exactly once, before the frame rate");
+
+    const Setting& setting = SettingOf(Id::SkipIntro);
+    Check(std::string(setting.key) == "skip_intro" && Contains(Source("launcher/settings.h"), "kSkipIntroKey[] = \"skip_intro\";"),
+          "the key is the launcher's");
+    Check(setting.apply == Apply::Restart && setting.choices.size() == 2, "Skip Intro is a restart-required Off/On");
+    Check(Current(DcpSettings::Values{}, Id::SkipIntro) == "0", "Skip Intro is Off by default");
+    Check(Contains(Source("launcher/settings.cpp"), "{kSkipIntroKey, \"0\"}"), "the launcher's default is Off");
+
+    const fs::path file = folder / "intro.ini";
+    WriteFile(file, "# keep\nfuture_setting = 1\n");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    live.skip_intro = false;
+    Options options(live);
+    const Outcome outcome = options.Choose(Id::SkipIntro, "1");
+    Check(outcome.changed && outcome.saved && options.Pending(Id::SkipIntro) && options.RestartPending(),
+          "Skip Intro waits for the restart");
+    Check(!live.skip_intro && options.Shown(Id::SkipIntro) == "1", "and the running game keeps its value");
+
+    const std::string text = ReadAll(file);
+    Check(Contains(text, "skip_intro = 1\n") && Contains(text, "# keep\n") && Contains(text, "future_setting = 1\n"),
+          "it is saved under the launcher's key and the rest of the file is kept");
+    DcpSettings::Values restarted;
+    Check(DcpSettings::Read(file.string(), restarted) && restarted.skip_intro, "a restart reads what the menu saved");
+
+    DcpSettings::Values untouched;
+    ApplyLive(untouched, Id::SkipIntro, "1");
+    Check(!untouched.skip_intro, "nothing applies Skip Intro live");
+    Check(Contains(Source("gpu/shim/dcp_settings.cpp"), "key == \"skip_intro\"") &&
+              !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "skip_intro"),
+          "Skip Intro has one reader and one table row");
 }
 
 void TestEveryChoiceRoundTrips(const fs::path& folder) {
@@ -768,6 +814,7 @@ int main() {
     const fs::path folder = MakeTemporaryFolder();
     TestPersistence(folder);
     TestSkipOffers(folder);
+    TestSkipIntro(folder);
     TestEveryChoiceRoundTrips(folder);
     TestStepAndCycle(folder);
     TestOnlinePlayLocksCheats();

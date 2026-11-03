@@ -50,6 +50,8 @@ inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 // Routes NPC voice cues to the Japanese banks already present in the USA installation.
 inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
+// Skips the startup logo; the title screen follows (src/skip_intro.h).
+inline constexpr char kSkipIntroKey[] = "skip_intro";
 // The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
 inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
 inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";

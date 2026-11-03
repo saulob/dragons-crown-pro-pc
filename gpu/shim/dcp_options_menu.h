@@ -123,6 +123,7 @@ enum class Id {
     SharpeningStrength,
     AntiAliasing,
     TextureFiltering,
+    SkipIntro,
     FrameRate,
     FrameRateInTitle,
     ResolutionInTitle,
@@ -158,6 +159,8 @@ inline constexpr Setting kSettings[] = {
      "SMAA smooths jagged edges on the finished picture, at a small cost in speed.", Apply::Live, kAntiAliasing},
     {Id::TextureFiltering, Page::Graphics, "anisotropy", "Texture filtering",
      "Sharper textures seen at an angle. Game uses the game's own filtering.", Apply::Restart, kAnisotropy},
+    {Id::SkipIntro, Page::Gameplay, "skip_intro", "Skip Intro",
+     "Skips the startup logo and starts at the title screen.", Apply::Restart, kOffOn},
     {Id::FrameRate, Page::Gameplay, "frame_rate", "Frame rate",
      "60 FPS is the original game rate. Faster targets show the last frame again; game speed does not change.",
      Apply::Restart, kFrameRates},
@@ -212,6 +215,7 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::SharpeningStrength: return std::to_string(v.rcas_strength.load());
     case Id::AntiAliasing: return flag(v.smaa);
     case Id::TextureFiltering: return std::to_string(v.anisotropy.load());
+    case Id::SkipIntro: return flag(v.skip_intro);
     case Id::FrameRate: return std::to_string(v.frame_rate.load());
     case Id::FrameRateInTitle: return flag(v.show_fps_title);
     case Id::ResolutionInTitle: return flag(v.show_resolution_title);
@@ -237,6 +241,7 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::ResolutionInTitle: v.show_resolution_title = on; break;
     case Id::FrameCounter: v.show_fps = on; break;
     case Id::TextureFiltering:
+    case Id::SkipIntro:
     case Id::FrameRate:
     case Id::StorySkipOffer:
     case Id::TutorialSkipOffer: break;

@@ -86,6 +86,9 @@ int dcp_japanese_npc_voices(const char *settings_file);
 /* 1 when the settings file asks for True Ultrawide (true_ultrawide; 0 by default, and for a missing or unknown value). */
 int dcp_true_ultrawide(const char *settings_file);
 
+/* 1 when the settings file skips the startup logo (skip_intro; 0 by default). */
+int dcp_skip_intro(const char *settings_file);
+
 /* The Skip Offers the settings file turns on (skip_offers.h bits; none by default). */
 unsigned dcp_skip_offers(const char *settings_file);
 
@@ -101,6 +104,7 @@ typedef struct DcpRunSettings {
     const char *aspect_ratio;      /* dcp_aspect_ratios name */
     int true_ultrawide_effective;
     unsigned skip_offers;          /* the skip_offers.h bits applied */
+    int skip_intro;                /* the startup logo skip was applied */
 } DcpRunSettings;
 
 /* Prints the startup state support needs as "Settings:" lines: port version, platform, online protocol, game build,

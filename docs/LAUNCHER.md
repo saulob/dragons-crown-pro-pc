@@ -206,7 +206,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Presentation, Upscaling (FSR 1), Sharpening, Sharpening strength, Anti-aliasing | at once |
 | Graphics | Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
-| Gameplay | Frame rate, Story Skip Offer, Tutorial Skip Offer | saved now, applies at the next start |
+| Gameplay | Skip Intro, Frame rate, Story Skip Offer, Tutorial Skip Offer | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | the hotkeys (read only) | |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
@@ -247,6 +247,7 @@ use the same defaults).
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (the USA and Asia and Hong Kong builds; the Japanese builds always use them) |
+| `skip_intro` | 1, 0 | 0 | at game start |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
@@ -410,6 +411,12 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   `launcher/game_patches.h`, `launcher/prompts/arachnophobia-spider.dcpx`) applied when toggled, in the background, and
   reapplied after a reinstall. An archive has one undo record, so the prompts and this patch are applied together:
   changing either reverts what the other left and writes both again.
+- **Skip Intro**: Off by default (`skip_intro`; `DCP_SKIP_INTRO` overrides it for a run). The opening scene asks every
+  frame whether any player pressed a button and, when one did, fades out and ends itself. With the setting on, the first
+  answer is "pressed" once, so the game takes that skip by itself. Saves, the tutorial and the story are untouched, and it
+  is separate from the two skip offers. It does not depend on the text language. The log shows
+  `Skip intro: on, native skip armed` when installed and `Skip intro: startup sequence skipped` only when the press was
+  used. Changing it in the F1 Options menu needs a restart.
 - **Story Skip Offer** and **Tutorial Skip Offer**: Off by default (`story_skip_offer`, `tutorial_skip_offer`;
   `DCP_STORY_SKIP` / `DCP_TUTORIAL_SKIP` override them for a run). The game's own questions, asked for every new
   character: whether to start from the second half of the story (normally offered only once a class on the file has

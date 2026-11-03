@@ -36,6 +36,7 @@
 #include "npc_voice_resources.h"
 #include "net/online_version.h"
 #include "runtime_cheats.h"
+#include "skip_intro.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "system_type_hook.h"
@@ -94,6 +95,12 @@ bool HasSkipTable(const GameBuild& build) {
     return skip_offers_locate(none, 0, Key(build).c_str(), &story, &tutorial) == 1;
 }
 
+bool HasIntroTable(const GameBuild& build) {
+    uint64_t site = 0;
+    const unsigned char none[1] = {0};
+    return skip_intro_locate(none, 0, Key(build).c_str(), &site) == 1;
+}
+
 bool IsUs100(const GameBuild& build) {
     const GuestImageId* id = ImageOf(build);
     return id && id->size == cheats::kSupportedImage.size && id->entry == cheats::kSupportedImage.entry;
@@ -102,7 +109,7 @@ bool IsUs100(const GameBuild& build) {
 // What the profile and the runtime tables provide, feature by feature.
 struct Capabilities {
     bool cheats = false, xbox_prompts = false, npc_voices = false, true_ultrawide = false, custom_resolution = false;
-    Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, system_type = Mapping::kNone,
+    Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, system_type = Mapping::kNone,
             lzcnt = Mapping::kNone, startup_save = Mapping::kNone;
     std::string languages;
 };
@@ -119,6 +126,7 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
                                                       : Mapping::kNone;
     const auto table_or_search = [&](bool listed) { return listed ? Mapping::kTable : Mapping::kSignature; };
     caps.skip_offers = table_or_search(HasSkipTable(build));
+    caps.skip_intro = table_or_search(HasIntroTable(build));
     caps.system_type = table_or_search(Listed(system_type_records, build));
     caps.lzcnt = table_or_search(Listed(lzcnt_builds, build));
     caps.startup_save = Listed(startup_save_records, build) ? Mapping::kTable : Mapping::kNone;
@@ -138,6 +146,7 @@ enum Feature : size_t {
     kAspectRatio,
     kStorySkip,
     kTutorialSkip,
+    kSkipIntro,
     kLzcnt,
     kArachnophobia,
     kController,
@@ -152,7 +161,7 @@ enum Feature : size_t {
 
 const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
-    "Story Skip", "Tutorial Skip", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
+    "Story Skip", "Tutorial Skip", "Skip Intro", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
     "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
@@ -284,6 +293,8 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
     case kStorySkip:
     case kTutorialSkip:
         return known && CapabilitiesOf(build).skip_offers != Mapping::kNone;
+    case kSkipIntro:
+        return known && CapabilitiesOf(build).skip_intro != Mapping::kNone;
     case kLzcnt:
         return known && CapabilitiesOf(build).lzcnt != Mapping::kNone;
     case kArachnophobia:
@@ -343,6 +354,30 @@ void TestContract() {
     for (const Contract& row : kContracts) {
         CHECK(FindBuild(row.label) != nullptr);
     }
+}
+
+// Skip Intro is control flow in the executable: no selectable language of any build changes the setting, the mapping or
+// what the loader is given.
+void TestSkipIntroLanguages() {
+    const fs::path dir = fs::temp_directory_path() / "dcp_build_parity_intro";
+    fs::create_directories(dir);
+    const std::string source = ReadText("src/skip_intro.c");
+    CHECK(source.find("anguage") == std::string::npos && source.find("text_language") == std::string::npos);
+    for (const GameBuild& build : SupportedBuilds()) {
+        g_scope = build.label;
+        const Capabilities caps = CapabilitiesOf(build);
+        CHECK(caps.skip_intro != Mapping::kNone && !TextLanguagesOf(&build).empty());
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
+            const fs::path ini = dir / "dcp.ini";
+            std::ofstream(ini, std::ios::trunc) << "text_language = " << language.key << "\nskip_intro = 1\n";
+            CHECK(dcp_skip_intro(ini.string().c_str()) == 1);
+            CHECK(CapabilitiesOf(build).skip_intro == caps.skip_intro);
+            uint64_t site = 0;
+            const unsigned char none[1] = {0};
+            CHECK(skip_intro_locate(none, 0, Key(build).c_str(), &site) == (caps.skip_intro == Mapping::kTable));
+        }
+    }
+    fs::remove_all(dir);
 }
 
 // Every build against the reference feature set: launcher, runtime and contract must agree for each feature.
@@ -467,6 +502,7 @@ void TestUpdateParity() {
         lost("true ultrawide", b.true_ultrawide, u.true_ultrawide);
         lost("render resolution and aspect ratio", b.custom_resolution, u.custom_resolution);
         lost("skip offers", b.skip_offers != Mapping::kNone, u.skip_offers != Mapping::kNone);
+        lost("skip intro", b.skip_intro != Mapping::kNone, u.skip_intro != Mapping::kNone);
         lost("system type", b.system_type != Mapping::kNone, u.system_type != Mapping::kNone);
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
@@ -757,6 +793,7 @@ void TestUnknownBuilds() {
     const uint64_t size = image.size(), entry = 0x1000;
     std::vector<uint8_t> stubs(1 << 16);
     CHECK(skip_offers_install(image.data(), size, nullptr, SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) == 0);
+    CHECK(skip_intro_install(image.data(), size, entry, nullptr, 1, stubs.data(), stubs.size()) == 0);
     CHECK(!startup_save_hook_install(image.data(), size, entry, stubs.data(), stubs.size()));
     CHECK(!voice_hooks_install(image.data(), size, entry, stubs.data(), stubs.size()));
     char detail[200];
@@ -805,6 +842,7 @@ void TestUnknownBuilds() {
                              "status==LZCNT_COMPAT_UNKNOWN_IMAGE && known_build",
                              "if (known_build && runtime_online_active())",
                              "skip_offers_install(image,size,known_build ? build_key : NULL,",
+                             "skip_intro_install(image,size,entry,known_build ? build_key : NULL,",
                              "if (known_build) startup_save_hook_install(",
                              "if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled() &&",
                              "dcp_resolve_features(known_build ? &game_build : NULL,",
@@ -892,6 +930,9 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     skip_offers_locate(image.bytes.data(), size, Key(build).c_str(), &story, &tutorial);
     if (story) add(story, 47, "story skip window");
     if (tutorial) add(tutorial, 12, "tutorial skip window");
+    uint64_t intro = 0;
+    skip_intro_locate(image.bytes.data(), size, Key(build).c_str(), &intro);
+    if (intro) add(intro, 7, "skip intro poll");
     for (const SystemTypeRecord& record : system_type_records) {
         if (std::string_view(record.build) == build.label) {
             for (uint32_t site : record.sites) add(site, 5, "system type");
@@ -974,7 +1015,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     const size_t cheat_stubs = cheats::Hooks().size() * guest_hook_stub_size();
     const size_t room = cheat_stubs + startup_save_hook_stub_bytes() + voice_hooks_stub_bytes() +
                         system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes() +
-                        exit_game_hook_stub_bytes();
+                        exit_game_hook_stub_bytes() + skip_intro_stub_bytes();
     std::vector<uint8_t> memory(base + room + page, 0);
     std::memcpy(memory.data(), image.bytes.data(), size);
     uint8_t* area = memory.data() + base;
@@ -990,6 +1031,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     uint8_t* system_area = take(system_type_hook_stub_bytes());
     uint8_t* ultrawide_area = take(ultrawide_hooks_stub_bytes());
     uint8_t* exit_game_area = take(exit_game_hook_stub_bytes());
+    uint8_t* intro_area = take(skip_intro_stub_bytes());
     uint8_t* image_bytes = memory.data();
 
     const char* name = nullptr;
@@ -1027,6 +1069,9 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     CHECK(system_type_hook_install(image_bytes, size, entry, system_area, system_type_hook_stub_bytes(), SystemTypeText) == 1);
     CHECK(skip_offers_install(image_bytes, size, Key(build).c_str(), SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) ==
           (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
+    CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 0, intro_area, skip_intro_stub_bytes()) == 0);
+    CHECK(skip_intro_install(image_bytes, size, entry, Key(build).c_str(), 1, intro_area, skip_intro_stub_bytes()) == 1);
+    CHECK(skip_intro_claim() == 1 && skip_intro_claim() == 0);
 
     {
         const DcpExecRange executable{0, size};
@@ -1161,6 +1206,10 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(skip_offers_locate(bytes, size, "unlisted", &found_story, &found_tutorial) == 0);
         CHECK(found_story == story && found_tutorial == tutorial);
 
+        uint64_t intro = 0, found_intro = 0;
+        CHECK(skip_intro_locate(bytes, size, Key(build).c_str(), &intro) == 1 && intro);
+        CHECK(skip_intro_locate(bytes, size, "unlisted", &found_intro) == 0 && found_intro == intro);
+
         SystemTypeRecord table{}, searched{};
         CHECK(system_type_locate(bytes, size, image.entry, &table) == 1 && std::string_view(table.build) == build.label);
         CHECK(system_type_locate(bytes, size, image.entry + 1, &searched) == 2);
@@ -1241,6 +1290,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
 int main() {
     TestContract();
     TestGlobalFeatures();
+    TestSkipIntroLanguages();
     TestExitGameLanguages();
     TestDisabledFeatureCannotPass();
     TestUpdateParity();
