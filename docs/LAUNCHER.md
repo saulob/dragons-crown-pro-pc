@@ -448,7 +448,7 @@ and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS
 
 ## Controls
 
-Xbox controllers work without setup; the keyboard is always on. The page lists the layout implemented in
+Xbox controllers work without setup; the keyboard is always on. Under Wine/Proton (`wine_get_version` exported by `ntdll.dll`) the game process sets `SDL_JOYSTICK_HIDAPI=0` before SDL's gamepad subsystem starts (`src/dcp_sdl_compat.h`, called from `loader.c` ahead of the build lookup; issue #42, Bazzite Gaming Mode), for every supported build and language; an explicit `SDL_JOYSTICK_HIDAPI` is kept, and native Windows and Linux are unchanged. Whether Steam Input must also be off there is untested. The page lists the layout implemented in
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 

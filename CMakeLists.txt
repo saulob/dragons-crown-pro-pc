@@ -71,6 +71,9 @@ add_subdirectory(gpu)
 add_subdirectory(launcher)
 
 set(DCP_RUNTIME_SOURCES
+    src/exit_game_hook.c
+    src/exit_game_text.c
+    src/guest_hook.c
     src/runtime.c
     src/runtime_audio.c
     src/runtime_content.c
@@ -117,7 +120,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -304,6 +307,13 @@ set_target_properties(dcp-narrow-water-reader-tests PROPERTIES CXX_STANDARD 20 C
 target_include_directories(dcp-narrow-water-reader-tests PRIVATE gpu/shim)
 target_compile_definitions(dcp-narrow-water-reader-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-narrow-water-reader-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the Proton/Wine SDL HIDAPI default (issue #42); not part of the default build.
+add_executable(dcp-sdl-compat-tests EXCLUDE_FROM_ALL tests/sdl_compat_tests.cpp)
+set_target_properties(dcp-sdl-compat-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-sdl-compat-tests PRIVATE src)
+target_compile_definitions(dcp-sdl-compat-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-sdl-compat-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the game window's cursor visibility (tools/test.ps1); not part of the default build.
 add_executable(dcp-cursor-tests EXCLUDE_FROM_ALL tests/cursor_tests.cpp)

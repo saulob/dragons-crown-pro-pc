@@ -4017,6 +4017,7 @@ void TestInstalledTextLanguages(const fs::path& base) {
     CHECK(ResolveTextLanguage(TextLanguagesOf(&kCk), "russian").key == "traditional_chinese");
     WriteAll(regional, LanguageArchive({us, fr, de, it, es}));
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0, &kUs), "russian").key == "english");
+    WriteAll(ini, "text_language=russian\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
 
     // Russian text in the US slot beside complete Western slots: still the five Western languages.
@@ -4154,9 +4155,9 @@ void TestTextLanguageSwitching(const fs::path& base) {
     CHECK(switch_to(kUs101) == "english");          // USA -> 1.01
     CHECK(switch_to(kJp103) == "japanese");         // 1.01 -> Japan
     WriteAll(ini, "text_language=russian\n");
-    CHECK(switch_to(kUs) == "english");             // a stale Russian -> USA
+    CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs), &kUs), switch_to(kUs)).key == "english"); // a stale Russian -> USA
     WriteAll(ini, "text_language=russian\n");
-    CHECK(switch_to(kUs101) == "english");          // a stale Russian -> 1.01
+    CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs101), &kUs101), switch_to(kUs101)).key == "english"); // -> 1.01
     for (const char* kept : {"english", "french", "german", "italian", "spanish"}) {
         WriteAll(ini, std::string("text_language=") + kept + "\n");
         LauncherSettings settings(ini);

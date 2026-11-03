@@ -102,7 +102,9 @@ PLAYING
 - F1 (or L3 + R3 on a controller) opens the Options menu.
 - F11 switches between Windowed and Borderless Fullscreen.
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
-  Steam Deck's own controls.
+  Steam Deck's own controls. The Windows build run through Proton (Bazzite Gaming
+  Mode) turns SDL's HIDAPI drivers off by itself; an SDL_JOYSTICK_HIDAPI value you
+  set is kept.
 - The keyboard works too; the launcher's Controls page lists the keys.
 - The Controls page also chooses the button prompts the game shows: PlayStation
   (original) or Xbox. It can be switched back at any time.

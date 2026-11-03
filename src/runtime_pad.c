@@ -7,6 +7,7 @@
 #include "runtime.h"
 #include "dcpgpu.h"
 #include "dcp_keys.h"
+#include "dcp_sdl_compat.h"
 #include "exit_game_hook.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,7 +101,10 @@ static int free_slot(void) {
 /* Gives new gamepads, in SDL's order, the lowest slots without one; called under lock. A disconnected
  * gamepad frees its slot, but the player stays logged in, as on the PS4. */
 static void refresh_gamepads(void) {
-    if (!sdl_ready) sdl_ready = SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+    if (!sdl_ready) {
+        if (!SDL_WasInit(SDL_INIT_GAMEPAD)) dcp_prepare_sdl_gamepad();
+        sdl_ready = SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+    }
     if (sdl_ready<0) return;
     for (int i=0;i<MAX_PADS;++i) {
         if (!slots[i].gamepad || SDL_GamepadConnected(slots[i].gamepad)) continue;

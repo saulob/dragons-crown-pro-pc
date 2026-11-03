@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <inttypes.h>
+#include "dcp_sdl_compat.h"
 #include "runtime.h"
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
@@ -596,6 +597,7 @@ int main(int argc, char **argv) {
     }
     if (!dcp_resolve_paths(&request,&paths)) fail(paths.error[0] ? paths.error : "cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
+    dcp_prepare_sdl_gamepad();
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);
     printf("DCP: game build %s\n",known_build ? game_build.label : "not a supported build");

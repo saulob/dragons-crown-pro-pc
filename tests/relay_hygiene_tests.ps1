@@ -60,10 +60,20 @@ foreach ($entry in $protocols) {
     Check ($now.Success -and $before.Success -and $now.Groups[1].Value -eq $before.Groups[1].Value) "$($entry.File): protocol constant differs from HEAD (a bump must be intentional)"
 }
 
-$changed = @(git diff --name-only HEAD) + @(git ls-files --others --exclude-standard)
-foreach ($file in $changed) {
-    Check ($file -notmatch '^(gpu/|android/)') "$file is a renderer or unrelated change"
-    Check ($file -notmatch '(?i)water|swapchain|present|tiling|ultrawide|cheat') "$file touches an unrelated feature"
+$unrelatedPath = '^(gpu/|android/)|(?i)water|swapchain|present|tiling|ultrawide|cheat'
+function LeaksRelay([string]$addedText) { return $addedText -match '(?i)relay' }
+function AddedText([string]$file, [bool]$tracked) {
+    if (-not $tracked) { return Text $file }
+    return ((git diff -U0 HEAD -- $file | Where-Object { $_ -match '^\+(?!\+\+)' }) -join "`n")
+}
+
+Check (LeaksRelay '+    const bool force_relay = true;') 'the unrelated-file relay check no longer detects relay additions'
+Check (-not (LeaksRelay '+    dcp_prepare_sdl_gamepad();')) 'the unrelated-file relay check flags unrelated additions'
+
+$trackedChanges = @(git diff --name-only HEAD)
+$changed = $trackedChanges + @(git ls-files --others --exclude-standard)
+foreach ($file in $changed | Where-Object { $_ -match $unrelatedPath -and $relayFiles -notcontains $_ }) {
+    Check (-not (LeaksRelay (AddedText $file ($trackedChanges -contains $file)))) "$file adds relay code to an unrelated area"
 }
 
 $whitespace = git diff --check HEAD 2>&1

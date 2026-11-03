@@ -10,6 +10,7 @@
 #include "dcp_window_fit.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
+#include "dcp_sdl_compat.h"
 #include "dcp_overlay.h"
 #include "dcp_graphics.h"
 #include "dcp_latency_trace.h"
@@ -45,6 +46,7 @@ void TracePress(const SDL_Event& event) {
 
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
+    dcp_prepare_sdl_gamepad();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         ExitNoWindow("Cannot initialize SDL video", SDL_GetError());
     }

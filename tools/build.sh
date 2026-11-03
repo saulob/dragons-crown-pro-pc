@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-rtc-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-exit-game-tests dcp-rtc-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -129,6 +129,8 @@ if ((test)); then
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the window fit tests'
     "$build_dir/bin/dcp-window-tests"
+    step 'Running the SDL compat tests (Proton/Wine HIDAPI default)'
+    "$build_dir/bin/dcp-sdl-compat-tests"
     step 'Running the present tests (swapchain images, present mode, flip pacing)'
     "$build_dir/bin/dcp-present-tests"
     step 'Running the frame pacing tests (Frame rate setting, repeat cadence, limiter)'
@@ -158,6 +160,8 @@ if ((test)); then
     step 'Running the Skip Offer tests (synthetic and local boot images)'
     "$build_dir/bin/dcp-skip-offers-tests"
     "$build_dir/bin/dcp-skip-intro-tests"
+    step 'Running the Exit Game tests'
+    "$build_dir/bin/dcp-exit-game-tests"
     step 'Running the online tests (JSON, identity, STUN, peer transport over loopback)'
     "$build_dir/bin/dcp-net-tests"
     step "Running the online build tests (every supported build's online imports, one lobby game, cheat lock)"
