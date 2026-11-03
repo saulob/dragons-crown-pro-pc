@@ -18,7 +18,6 @@
 #include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "exit_game_hook.h"
-#include "title_trace.h"
 #include "system_type_hook.h"
 #include "party_hook.h"
 #include "ultrawide_hooks.h"
@@ -774,11 +773,10 @@ int main(int argc, char **argv) {
     const size_t skip_intro_stub_area = known_build && skip_intro_requested ? skip_intro_stub_bytes() : 0;
     const int gallery_unlock_requested=gallery_unlock_wanted(dcp_unlock_gallery(settings_file));
     const size_t gallery_unlock_stub_area = known_build && game_build.unlock_gallery && gallery_unlock_requested ? gallery_unlock_stub_bytes() : 0;
-    const size_t title_trace_stub_area = known_build ? title_trace_stub_bytes() : 0; /* DEBUG_SAULO */
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
-                                         ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area + title_trace_stub_area +
+                                         ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
                                          gallery_unlock_stub_area);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
@@ -962,13 +960,9 @@ int main(int argc, char **argv) {
     const int skip_intro_applied=skip_intro_install(image,size,entry,known_build ? build_key : NULL,skip_intro_requested,
                                                     image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes,
                                                     skip_intro_stub_area);
-    if (known_build) /* DEBUG_SAULO */
-        title_trace_install(image,size,entry,
-                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area,
-                            title_trace_stub_area);
     const int gallery_unlock_applied=gallery_unlock_install(image,size,entry,known_build && game_build.unlock_gallery ? build_key : NULL,
                                                             gallery_unlock_requested,
-                                                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+title_trace_stub_area,
+                                                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area,
                                                             gallery_unlock_stub_area);
     const int japanese_menu_buttons=menu_buttons_wanted(dcp_japanese_menu_buttons(settings_file));
     const int menu_buttons_applied=menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons);

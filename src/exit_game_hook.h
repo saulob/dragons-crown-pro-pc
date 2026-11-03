@@ -1,7 +1,9 @@
-/* Exit Game on the title menu. The title builds its main menu with six items (the sixth is PlayStation Store) and then
- * cuts the list to five. Here the list keeps its sixth item and gets a sixth row widget built by the game's own
- * constructors, and the help text limit follows. The row shows SystemMsg record 388 rewritten by exit_game_text.h.
- * The game only draws the row: while it is selected the port owns the command. The title's tick publishes the selection,
+/* The title menu: Start Game, Options, Gallery, Exit Game. The title builds its main menu with six items (Start Game,
+ * Upload Save Data, Download Save Data, Options, Gallery, PlayStation Store) and five row widgets, then cuts the list to
+ * five. The PlayStation Network save transfer does not exist on a PC, so here the items are reordered, the list is cut to
+ * four, one row widget is not built, and the menu result, the idle layout part and the help text of a row follow its new
+ * position (title_layout.h lays out the art). The fourth row shows SystemMsg record 388 rewritten by exit_game_text.h.
+ * The game only draws that row: while it is selected the port owns the command. The title's tick publishes the selection,
  * the host's accept press (controller South or Enter) requests the exit through the registered handler and never
  * reaches the guest. Every hook checks its bytes first; an image that differs is left untouched. */
 #ifndef DCP_EXIT_GAME_HOOK_H
@@ -17,32 +19,26 @@
 extern "C" {
 #endif
 
-#define EXIT_GAME_HOOK_COUNT 3
-#define EXIT_GAME_ROW_INDEX 5
-#define EXIT_GAME_MENU_ITEMS 6
+#define EXIT_GAME_HOOK_COUNT 6
+#define EXIT_GAME_ROW_INDEX 3
+#define EXIT_GAME_MENU_ITEMS 4
 
-/* The menu items' count and the help text limit hold the number of rows before Exit Game. */
-#define EXIT_GAME_OLD_ROW_COUNT 5
+/* The items the title adds before it cuts the list, and the row widgets it builds. */
+#define EXIT_GAME_LIST_ITEMS 6
+#define EXIT_GAME_MENU_WIDGETS 4
 
-/* Distances from the call that sizes the item list back to the calls that build the last of the five row widgets. */
-#define EXIT_GAME_NEW_CALL_BACK 158
-#define EXIT_GAME_CTOR_CALL_BACK 144
-#define EXIT_GAME_ADD_CALL_BACK 104
+/* Distance from the call that cuts the item list back to the start of the fifth row widget's construction. */
+#define EXIT_GAME_WIDGET_BLOCK_BACK 163
 
 /* The host's exit: schedules the process exit on the window thread; nonzero for the first request. */
 typedef int (*ExitGameHandler)(void);
 typedef uint64_t (*ExitGameClock)(void); /* milliseconds */
 
-typedef void *(GUEST_HOOK_ABI *ExitGameNewFn)(uint64_t size);
-typedef void (GUEST_HOOK_ABI *ExitGameCtorFn)(void *widget, void *argument);
-typedef uint64_t (GUEST_HOOK_ABI *ExitGameAddFn)(void *menu, void *widget);
-
 void exit_game_set_handler(ExitGameHandler handler);
 void exit_game_set_clock(ExitGameClock clock);
-void exit_game_set_row_functions(ExitGameNewFn new_fn, ExitGameCtorFn ctor, ExitGameAddFn add);
 void exit_game_reset(void);
 
-/* Whether the sixth row was reported selected within the last few frames. */
+/* Whether the Exit Game row was reported selected within the last few frames. */
 void exit_game_set_selected(int selected);
 int exit_game_selected(void);
 
@@ -60,6 +56,8 @@ int exit_game_accept_east(void);
 void GUEST_HOOK_ABI exit_game_sheet_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI exit_game_row_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI exit_game_tick_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI exit_game_help_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI exit_game_layout_hook(GuestRegs *regs);
 
 size_t exit_game_hook_stub_bytes(void);
 

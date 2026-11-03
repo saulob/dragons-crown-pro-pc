@@ -376,6 +376,14 @@ constexpr SiteSpec kSiteTable[] = {
     {"Exit Game", "help limit", SiteKind::kWindow,
         "8d 88 85 01 00 00 83 f8 05 0f 42 f1",
         8, 2, {0x53d348, 0x53b338, 0x53b2a8, 0x53b368, 0x53b348}},
+    {"Exit Game", "part setter", SiteKind::kHook,
+        "55 48 89 e5 41 57 41 56 41 55 41 54 53 48 83 ec "
+        "28 49 89 fe 49 8b 86 c0 00 00 00 48 85 c0 0f 84 "
+        "?? ?? ?? ?? 4c 8b a0 58 01 00 00 49 8b 86 c8 00 "
+        "00 00 4c 89 e2 48 85 c0 74 07 48 8b 90 58 01 00 "
+        "00 4d 85 e4 0f 84 ?? ?? ?? ?? 41 0f b7 44 24 64 "
+        "39 f0 0f 8e ?? ?? ?? ?? 85 f6 0f 88 ?? ?? ?? ??",
+        0, 1, {0x578000, 0x5760a0, 0x575fd0, 0x576090, 0x576100}},
     {"Exit Game", "part TITLE_1", SiteKind::kWindow,
         "?? 8d ?? d0 03 00 00 be 0b 00 00 00 c5 f8 57 c0 ff 50 40",
         8, 1, {0x53cf20, 0x53af10, 0x53ae80, 0x53af40, 0x53af20}},
@@ -385,18 +393,6 @@ constexpr SiteSpec kSiteTable[] = {
     {"Exit Game", "part START_2", SiteKind::kWindow,
         "?? 8d ?? d0 03 00 00 be 15 00 00 00 c5 f8 57 c0 ff 50 40",
         8, 1, {0x53d7c2, 0x53b7b2, 0x53b722, 0x53b7e2, 0x53b7c2}},
-    {"Exit Game", "part UPLOAD_1", SiteKind::kWindow,
-        "?? 8d ?? d0 03 00 00 be 2e 00 00 00 c5 f8 57 c0 ff 50 40",
-        8, 1, {0x53dd30, 0x53bd0d, 0x53bc7d, 0x53bd3d, 0x53bd30}},
-    {"Exit Game", "part UPLOAD_2", SiteKind::kWindow,
-        "?? 8d ?? d0 03 00 00 be 31 00 00 00 c5 f8 57 c0 ff 50 40",
-        8, 1, {0x53e01a, 0x53bffc, 0x53bf6c, 0x53c02c, 0x53c01a}},
-    {"Exit Game", "part DOWNLOAD_1", SiteKind::kWindow,
-        "?? 8d ?? d0 03 00 00 be 4a 00 00 00 c5 f8 57 c0 ff 50 40",
-        8, 1, {0x53ea30, 0x53ca92, 0x53ca10, 0x53cad0, 0x53ca22}},
-    {"Exit Game", "part DOWNLOAD_2", SiteKind::kWindow,
-        "?? 8d ?? d0 03 00 00 be 4d 00 00 00 c5 f8 57 c0 ff 50 40",
-        8, 1, {0x53ef70, 0x53cfd2, 0x53cf50, 0x53d010, 0x53cf62}},
     {"Exit Game", "part OPTION_1", SiteKind::kWindow,
         "?? 8d ?? d0 03 00 00 be 66 00 00 00 c5 f8 57 c0 ff 50 40",
         8, 1, {0x53fb4d, 0x53dbad, 0x53db2d, 0x53dbed, 0x53db3d}},

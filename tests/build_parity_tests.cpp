@@ -1062,11 +1062,18 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
         if (dcp_locate_exit_game_sites(&view, &exit_game, &report)) {
             add(exit_game.sheet_fill, 10, "exit game sheet");
             add(exit_game.row_widget, 5, "exit game row");
+            add(exit_game.row_widget - EXIT_GAME_WIDGET_BLOCK_BACK, 5, "exit game widget block");
+            add(exit_game.row_widget - 4, 1, "exit game list length");
+            for (int item = 0; item < EXIT_GAME_LIST_ITEMS; ++item)
+                add(exit_game.row_widget - EXIT_GAME_WIDGET_BLOCK_BACK + 64 + 15 * item + 1, 1, "exit game item");
+            add(exit_game.help_limits[0] - 8, 6, "exit game help hook");
+            add(exit_game.help_limits[1] - 8, 6, "exit game help hook");
             add(exit_game.help_limits[0], 1, "exit game help limit");
             add(exit_game.help_limits[1], 1, "exit game help limit");
             add(exit_game.part_table_loads[0], 7, "exit game part table load");
             add(exit_game.part_table_loads[1], 7, "exit game part table load");
             add(exit_game.menu_tick, 6, "exit game menu tick");
+            add(exit_game.part_setter, 8, "exit game part setter");
             for (const uint32_t part : exit_game.transition_parts) add(part, 1, "exit game transition part");
         }
     }
@@ -1206,7 +1213,32 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
         const DcpGameBuild game = LoaderView(build);
         CHECK(dcp_resolve_exit_game(&game, &original, &sites, failure, sizeof(failure)) == 1);
         CHECK(exit_game_hook_install_located(image_bytes, size, entry, &sites, exit_game_area, exit_game_hook_stub_bytes()) == 1);
-        CHECK(image_bytes[sites.help_limits[0]] == EXIT_GAME_MENU_ITEMS && image_bytes[sites.help_limits[1]] == EXIT_GAME_MENU_ITEMS);
+        CHECK(image_bytes[sites.help_limits[0]] == 6 && image_bytes[sites.help_limits[1]] == 6);
+        {
+            // four rows: the fifth widget is jumped over, the items follow the row order, the list is cut to four
+            const uint8_t* block = image_bytes + sites.row_widget - EXIT_GAME_WIDGET_BLOCK_BACK;
+            const uint8_t row_items[EXIT_GAME_LIST_ITEMS] = {0x7e, 0x81, 0x82, 0x84, 0x7f, 0x80};
+            CHECK(block[0] == 0xe9 && block[1] == 59 && !block[2] && !block[3] && !block[4]);
+            for (int item = 0; item < EXIT_GAME_LIST_ITEMS; ++item) CHECK(block[64 + 15 * item + 1] == row_items[item]);
+            CHECK(image_bytes[sites.row_widget - 4] == EXIT_GAME_MENU_ITEMS);
+            int32_t displacement, table_at;
+            std::memcpy(&displacement, image_bytes + sites.menu_tick + 18, sizeof(displacement));
+            table_at = int32_t(sites.menu_tick) + 22 + displacement;
+            int32_t jump[7];
+            std::memcpy(jump, image_bytes + table_at, sizeof(jump));
+            for (int row = 0; row < 3; ++row) {
+                // the result of row r runs the state-machine case of its action: Start 2, Options 5, Gallery 6
+                const int32_t target = table_at + jump[2 + row];
+                CHECK(image_bytes[target + 9] == (row == 0 ? 2 : row == 1 ? 5 : 6));
+            }
+            CHECK(jump[5] == jump[1] && jump[6] == jump[1]);
+            int32_t part_load;
+            std::memcpy(&part_load, image_bytes + sites.part_table_loads[0] + 3, sizeof(part_load));
+            const int32_t part_table = int32_t(sites.part_table_loads[0]) + 7 + part_load;
+            int32_t parts[9];
+            std::memcpy(parts, image_bytes + part_table, sizeof(parts));
+            CHECK(parts[3] == 13 && parts[4] == 97 && parts[5] == 134 && parts[6] == 166);
+        }
         DcpGameBuild off = game;
         off.exit_game = 0;
         CHECK(dcp_resolve_exit_game(&off, &original, &sites, failure, sizeof(failure)) == 0);

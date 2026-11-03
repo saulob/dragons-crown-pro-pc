@@ -1,4 +1,4 @@
-/* Exit Game title text. The title menu adds the PlayStation Store record (388) as its sixth row and shows the help record
+/* Exit Game title text. The title menu adds the PlayStation Store record (388) as its last item and shows the help record
  * 394 for it; the loaded sheet is rewritten in memory before the game builds its string table, so the active language
  * picks the text as for every other row. The sheet keeps its size: the bytes the new strings free are given to the
  * neighbouring records (387, 395) as trailing spaces, so no record moves. */

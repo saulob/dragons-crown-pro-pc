@@ -107,18 +107,20 @@ typedef struct {
     uint32_t resource_acquire; /* the resource manager's acquire */
 } DcpVoiceSites;
 
-#define DCP_TRANSITION_PART_COUNT 11
+#define DCP_TRANSITION_PART_COUNT 7
 
-/* The title menu's Exit Game row: the sheet loader's fill, the call that sizes the main menu's item list (a sixth row
- * widget is added just before it), the two help-text limits, the two loads of the table that maps a menu position to
- * its layout part, the title's per-frame read of the menu result, and the immediate part index of each entrance,
- * confirm and return part the title selects directly (the index byte of its `mov esi, imm32`). */
+/* The title's four-row menu with Exit Game: the sheet loader's fill, the call that sizes the main menu's item list
+ * (the row widget construction and the item additions precede it), the two help-text limits, the two loads of the
+ * table that maps a menu position to its layout part, the title's per-frame read of the menu result, the layout part
+ * setter, and the immediate part index of each entrance, confirm and return part the title selects directly (the
+ * index byte of its `mov esi, imm32`). */
 typedef struct {
     uint32_t sheet_fill;
     uint32_t row_widget;
     uint32_t help_limits[2];
     uint32_t part_table_loads[2];
     uint32_t menu_tick;
+    uint32_t part_setter;
     uint32_t transition_parts[DCP_TRANSITION_PART_COUNT];
 } DcpExitGameSites;
 

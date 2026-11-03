@@ -458,6 +458,26 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
 No skip-intro.
 
+## Title menu
+
+The title menu has four rows, in this order: Start Game, Options, Gallery and Exit Game. The game's fifth and sixth rows
+(Upload Save Data and Download Save Data, the PlayStation Network save transfer) are not shown, because that service does
+not exist in the PC port; their code stays in the game and is simply never reached. Exit Game is the game's own spare
+PlayStation Store row with SystemMsg text in the selected game language (`src/exit_game_text.c`); the game only draws it,
+and the port closes the game when the Accept button (South, or East with the Japanese menu buttons, and Enter) is pressed
+while it is selected.
+
+The menu is made of the game's own pieces (`src/exit_game_hook.c`, `src/title_layout.c`): the title adds six items and
+builds five row widgets, then cuts the list to five. The port builds one row widget fewer, adds the items in the order
+Start Game, Options, Gallery, Exit Game, Upload, Download and cuts the list to four; the menu result, the idle layout part
+and the help text of each row then follow the position of its action. The art is the game's `title.mbs`: it lays out six
+rows, so the loaded layout's parts are rewritten (once, from the part setter, after checking every byte they replace)
+to four row plates, with the selected-row strip and highlight of Options, Gallery and Exit Game moved up to their rows.
+`scripts/title_layout_patch.py title.mbs ...` regenerates and checks that patch for any language's layout. Every site is
+checked byte for byte first; nothing is written to the game's code on a mismatch, and a title layout that is not exactly
+the known one is left as it is (the log says `Exit Game: title layout differs ...`). The log shows
+`DEBUG_SAULO title menu: 4 rows installed` and `DEBUG_SAULO title menu: items 4 widgets 4` (temporary).
+
 ## Cheats
 
 Sidebar order: Play, Display, Graphics, Gameplay, Online, Cheats, Controls, Trophies, About. Subtitle "Optional gameplay modifiers", with the

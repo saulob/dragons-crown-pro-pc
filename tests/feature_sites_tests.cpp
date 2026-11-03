@@ -728,19 +728,19 @@ bool LocateExitGame(const std::vector<uint8_t>& bytes, DcpExitGameSites& out, Dc
     return dcp_locate_exit_game_sites(&view, &out, &report) != 0;
 }
 
-// The title menu's Exit Game sites on a synthetic image: each found where its pattern is planted, none missing, doubled or
+// The title's four-row menu and Exit Game sites on a synthetic image: each found where its pattern is planted, none missing, doubled or
 // half there, and the same sites for a build that has no real image here (CUSA10454 1.01, CUSA10209 1.02).
 void TestExitGame() {
-    const char* const names[] = {"sheet fill", "row widget", "help limit", "part table", "menu tick"};
-    const scan::SiteSpec* specs[5];
-    for (size_t i = 0; i < 5; ++i) {
+    const char* const names[] = {"sheet fill", "row widget", "help limit", "part table", "menu tick", "part setter"};
+    const scan::SiteSpec* specs[6];
+    for (size_t i = 0; i < 6; ++i) {
         specs[i] = ExitGameSpec(names[i]);
         CHECK(specs[i] != nullptr);
         if (!specs[i]) return;
     }
     CHECK(specs[0]->expected == 1 && specs[1]->expected == 1 && specs[2]->expected == 2 && specs[3]->expected == 2 &&
-          specs[4]->expected == 1);
-    const uint64_t at[7] = {0x10000, 0x20000, 0x30000, 0x40000, 0x50000, 0x60000, 0x70000};
+          specs[4]->expected == 1 && specs[5]->expected == 1);
+    const uint64_t at[8] = {0x10000, 0x20000, 0x30000, 0x40000, 0x50000, 0x60000, 0x70000, 0x78000};
     std::vector<uint8_t> image(0x100000, 0x90);
     Plant(image, specs[0]->pattern, at[0]);
     Plant(image, specs[1]->pattern, at[1]);
@@ -749,10 +749,12 @@ void TestExitGame() {
     Plant(image, specs[3]->pattern, at[4]);
     Plant(image, specs[3]->pattern, at[5]);
     Plant(image, specs[4]->pattern, at[6]);
+    Plant(image, specs[5]->pattern, at[7]);
     const char* const part_names[DCP_TRANSITION_PART_COUNT] = {
-        "part TITLE_1", "part START_1", "part START_2", "part UPLOAD_1", "part UPLOAD_2", "part DOWNLOAD_1",
-        "part DOWNLOAD_2", "part OPTION_1", "part OPTION_2", "part GALLERY_1", "part GALLERY_2"};
-    const uint8_t part_indexes[DCP_TRANSITION_PART_COUNT] = {11, 18, 21, 46, 49, 74, 77, 102, 105, 139, 142};
+        "part TITLE_1", "part START_1", "part START_2", "part OPTION_1", "part OPTION_2", "part GALLERY_1", "part GALLERY_2"};
+    const uint8_t part_indexes[DCP_TRANSITION_PART_COUNT] = {11, 18, 21, 102, 105, 139, 142};
+    for (const char* const upload_download : {"part UPLOAD_1", "part UPLOAD_2", "part DOWNLOAD_1", "part DOWNLOAD_2"})
+        CHECK(ExitGameSpec(upload_download) == nullptr);
     uint64_t part_at[DCP_TRANSITION_PART_COUNT];
     for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
         const scan::SiteSpec* part = ExitGameSpec(part_names[i]);
@@ -767,7 +769,7 @@ void TestExitGame() {
     CHECK(sites.sheet_fill == at[0] + specs[0]->anchor && sites.row_widget == at[1] + specs[1]->anchor);
     CHECK(sites.help_limits[0] == at[2] + specs[2]->anchor && sites.help_limits[1] == at[3] + specs[2]->anchor);
     CHECK(sites.part_table_loads[0] == at[4] + specs[3]->anchor && sites.part_table_loads[1] == at[5] + specs[3]->anchor);
-    CHECK(sites.menu_tick == at[6] + specs[4]->anchor);
+    CHECK(sites.menu_tick == at[6] + specs[4]->anchor && sites.part_setter == at[7] + specs[5]->anchor);
     for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i)
         CHECK(sites.transition_parts[i] == part_at[i] + 8 && image[sites.transition_parts[i]] == part_indexes[i]);
     for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) {
@@ -779,10 +781,10 @@ void TestExitGame() {
     }
     CHECK(LocateExitGame(image, sites, report));
 
-    for (size_t i = 0; i < 5; ++i) {
+    for (size_t i = 0; i < 6; ++i) {
         std::vector<uint8_t> missing = image;
         const size_t length = Parse(specs[i]->pattern).bytes.size();
-        const size_t first_copy[5] = {0, 1, 2, 4, 6}, second_copy[5] = {0, 0, 3, 5, 0};
+        const size_t first_copy[6] = {0, 1, 2, 4, 6, 7}, second_copy[6] = {0, 0, 3, 5, 0, 0};
         std::memset(&missing[at[first_copy[i]]], 0x90, length);
         if (second_copy[i]) std::memset(&missing[at[second_copy[i]]], 0x90, length);
         CHECK(!LocateExitGame(missing, sites, report) && std::string_view(report.failure).find(names[i]) != std::string_view::npos);
