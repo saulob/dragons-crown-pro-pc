@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <iterator>
+#include <string>
 #include <utility>
 
 #include <imgui.h>
+
+#include "localization/ui_text.h"
 
 namespace dcp {
 namespace {
@@ -24,8 +27,9 @@ void ProblemDialog::Draw(const trg::Fonts& fonts, const trg::Theme& theme) {
     if (!open_) {
         return;
     }
+    const std::string title = std::string(Tr(kTitle)) + "##problem";
     if (!opened_) {
-        ImGui::OpenPopup(kTitle);
+        ImGui::OpenPopup(title.c_str());
         opened_ = true;
     }
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -44,13 +48,13 @@ void ProblemDialog::Draw(const trg::Fonts& fonts, const trg::Theme& theme) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(fonts.size, fonts.size));
     constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
-    if (ImGui::BeginPopupModal(kTitle, nullptr, kFlags)) {
+    if (ImGui::BeginPopupModal(title.c_str(), nullptr, kFlags)) {
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextUnformatted("Dragon's Crown Pro PC cannot run on this system.");
+        ImGui::TextUnformatted(Tr("Dragon's Crown Pro PC cannot run on this system."));
         ImGui::Spacing();
-        ImGui::TextUnformatted(cause_.c_str());
+        ImGui::TextUnformatted(Tr(cause_.c_str()));
         ImGui::Spacing();
-        ImGui::TextUnformatted(advice_.c_str());
+        ImGui::TextUnformatted(Tr(advice_.c_str()));
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0.0f, fonts.size * 0.5f));
         const bool key = ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
@@ -58,7 +62,7 @@ void ProblemDialog::Draw(const trg::Fonts& fonts, const trg::Theme& theme) {
                          ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
         ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowWidth() - fonts.size * 6.0f) * 0.5f));
         ImGui::PushStyleColor(ImGuiCol_Text, theme.on_accent);
-        const bool clicked = ImGui::Button("OK", ImVec2(fonts.size * 6.0f, 0.0f));
+        const bool clicked = ImGui::Button(Tr("OK"), ImVec2(fonts.size * 6.0f, 0.0f));
         ImGui::PopStyleColor();
         if (clicked || key) {
             ImGui::CloseCurrentPopup();

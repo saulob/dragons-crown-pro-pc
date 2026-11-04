@@ -32,14 +32,14 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # Game files (check, PKG unpacking, install, boot image), the trophies (src/trophies), the settings file, the Display options and the Controller prompts patch:
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
-add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
-    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp
+    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
+target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_ui_text dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
 # Hashes and ciphers: CNG on Windows, OpenSSL's libcrypto elsewhere.
 if (WIN32)
     target_sources(dcp_launcher_core PRIVATE crypto_win.cpp)
@@ -52,6 +52,33 @@ else()
     set(DCP_LOG_SOURCE ${PROJECT_SOURCE_DIR}/src/runtime_log_posix.c)
 endif()
 set(DCP_LOG_SOURCES ${DCP_LOG_SOURCE} ${PROJECT_SOURCE_DIR}/src/runtime_session_log.c)
+
+# The Brazilian Portuguese translation (localization/pt-BR/sheets/*.json) as a table of byte arrays, game_translation.h.
+file(GLOB DCP_PTBR_SHEETS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/sheets/*.json)
+list(SORT DCP_PTBR_SHEETS)
+# Rewritten only when the list changes, so adding or removing a sheet regenerates the source.
+set(DCP_PTBR_LIST ${CMAKE_BINARY_DIR}/generated/ptbr_sheets.txt)
+file(CONFIGURE OUTPUT ${DCP_PTBR_LIST} CONTENT "${DCP_PTBR_SHEETS}")
+set(DCP_PTBR_SOURCE ${CMAKE_BINARY_DIR}/generated/ptbr_translation_data.cpp)
+add_custom_command(OUTPUT ${DCP_PTBR_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_PTBR_LIST} -DOUTPUT=${DCP_PTBR_SOURCE} -DSYMBOL=kPtBrTranslation
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_PTBR_LIST} ${DCP_PTBR_SHEETS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the pt-BR translation")
+target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_SOURCE})
+
+# The PT-BR visual patches (localization/pt-BR/visual/*.dcpx.z) as a table of byte arrays, game_translation.h.
+file(GLOB DCP_PTBR_VISUAL_PATCHES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/visual/*.dcpx.z)
+list(SORT DCP_PTBR_VISUAL_PATCHES)
+set(DCP_PTBR_VISUAL_LIST ${CMAKE_BINARY_DIR}/generated/ptbr_visual_patches.txt)
+file(CONFIGURE OUTPUT ${DCP_PTBR_VISUAL_LIST} CONTENT "${DCP_PTBR_VISUAL_PATCHES}")
+set(DCP_PTBR_VISUAL_SOURCE ${CMAKE_BINARY_DIR}/generated/ptbr_visual_data.cpp)
+add_custom_command(OUTPUT ${DCP_PTBR_VISUAL_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_PTBR_VISUAL_LIST} -DOUTPUT=${DCP_PTBR_VISUAL_SOURCE}
+            -DSYMBOL=kPtBrVisualPatches -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_PTBR_VISUAL_LIST} ${DCP_PTBR_VISUAL_PATCHES} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the pt-BR visual patches")
+target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_VISUAL_SOURCE})
 
 # The Controller prompts patch (prompts/xbox-prompts.dcpx) as a byte array, prompts_patch.h.
 set(DCP_PROMPTS_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/prompts/xbox-prompts.dcpx)

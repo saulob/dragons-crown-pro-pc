@@ -1,0 +1,179 @@
+category	source	pt_br	status	notes
+difficulty	##(MDLV0)	Normal	approved
+difficulty	##(MDLV1)	Difícil	approved
+difficulty	##(MDLV2)	Difícil	approved
+difficulty	##(MDLV3)	Infernal	approved
+difficulty	##(MDLV4)	Infernal	approved
+difficulty	##(MDLVFINAL)	Supremo	approved
+place	##(P_INN)	Taverna Refúgio do Dragão	approved	the game also calls it the tavern
+place	##(P_TEMPLE)	Templo de Canaan	approved
+place	##(P_SHOP)	Loja de Itens Mágicos de Morgan	approved
+place	##(P_TOWER)	Torre de Lucain	approved
+place	##(P_TOWER_BEFORE)	Torre Antiga	approved
+place	##(P_GUILD)	Guilda dos Aventureiros	approved
+place	##(P_CASTLE)	Castelo	approved
+place	##(P_STABLE)	Estábulos	approved
+place	##(P_ENTRANCE)	Portão	approved
+place	##(P_ARENA)	Coliseu	approved
+place	##(P_STREET)	Rua da Cidade	approved
+place	##(P_JAIL)	Prisão	approved
+place	##(P_INN_FINAL)	Taverna do Herói Insano	approved
+region	##(R_GC)	Enseada do Navio Fantasma	approved
+region	##(R_UC)	Fortaleza Subterrânea de Bilbaron	approved
+region	##(R_CC)	Castelo dos Mortos: Catacumbas	approved
+region	##(R_MR)	Ruínas do Templo Antigo	approved
+region	##(R_MD)	Labirinto Subterrâneo de Wallace	approved
+region	##(R_FR)	Santuário Esquecido	approved
+region	##(R_AL)	Capital Antiga	approved
+region	##(R_MT)	Torre do Mago	approved
+region	##(R_LW)	Floresta Perdida	approved
+region	##(R_RD)	Labirinto do Caos	approved
+region	##(R_LZ)	Terras Ilusórias	approved
+region	##(R_RD2)	Torre das Miragens	approved
+class	Fighter	Guerreiro	approved	Lutador is the literal choice; Guerreiro is the usual PT-BR class name
+class	Amazon	Amazona	approved
+class	Elf	Elfa	approved	the class is a woman
+class	Dwarf	Anão	approved
+class	Sorceress	Feiticeira	approved
+class	Wizard	Mago	approved
+character	##(NAME_THIEF)	Rannie, o Ladino	approved
+character	##(NAME_LECAIN)	Lucain	approved
+ui	##(UPLOAD)	@c(2)Enviar@/c	approved
+ui	##(DOWNLOAD)	@c(1)Baixar@/c	approved
+ui	##(HDD)	HD	approved
+ui	##(START_MENU)	Menu Principal	approved
+ui	##(TOWN_MENU)	Mapa da Cidade	approved
+ui	##(NET_MENU)	Menu de Rede	approved
+ui	##(CUSTOMSET)	Bolsa	approved
+ui	##(ABILITY)	Habilidade	approved
+ui	##(TREASUREART)	Arte do Tesouro	approved
+ui	##(ITEMBOX)	Arsenal	approved
+ui	##(ITEM_EQUIP)	Equipamento	approved
+ui	##(LEARN_ABILITY)	Aprender Habilidade	approved
+ui	##(C_QUEST)	Missão	approved
+ui	##(GALLERY)	Galeria	approved
+ui	##(PARTY_EDIT)	Selecionar jogador	approved
+ui	##(INN_EXIT)	Sair da taverna	approved
+ui	##(TOUCH)	@#(40)[Toque na tela]	approved
+ui	##(CLICK)	@#(40)[Clique]	approved
+online	##(JOIN)	Entrar	approved	joining another player's game
+game_term	##(LP)	Ponto de Vida	approved	LP counts the party's remaining lives, not HP
+skill	##(MEGACLASH)	Golpe Poderoso	approved
+skill	##(SKILL_RESETITEM)	Elixir da Amnésia	approved
+stat	##(YODAMAGE_UP_RATE)	Dano causado +	approved
+stat	##(HIDAMAGE_DOWN_RATE)	Dano recebido -	approved
+stat	##(SKILL_DOWN_VALUE)	Derrubada +	approved
+stat	##(SKILL_RANGE_SHOCK_WAVE)	Alcance da onda de choque	approved
+stat	##(SKILL_RANGE_EFFECT)	Alcance do efeito	approved
+stat	##(SKILL_RANGE_ATTACK)	Alcance do ataque	approved
+stat	##(SKILL_POWER)	Poder	approved
+stat	##(SKILL_ATK)	Ataque	approved
+stat	##(SKILL_DEF)	Defesa	approved
+stat	##(SKILL_KNOCKBACKP)	Resistência a recuo	approved
+stat	HP	HP	approved
+stat	MP	MP	approved
+stat	LV	LV	review	NV is the translated alternative
+stat	EXP	EXP	approved
+stat	NEXT	PRÓX	review
+stat	STR	FOR	review
+stat	INT	INT	review
+stat	DEX	DES	review
+stat	LUC	SOR	review
+stat	CON	CON	review
+stat	MGR	RM	review	magic resistance
+status_effect	Poison	Veneno	review
+status_effect	Burn	Queimadura	review
+status_effect	Freeze	Congelamento	review
+status_effect	Petrification	Petrificação	review
+status_effect	Stun	Atordoamento	review
+status_effect	Curse	Maldição	review
+status_effect	Frog	Sapo	review
+status_effect	Sleep	Sono	review
+status_effect	Charm	Encanto	review
+status_effect	Blind	Cegueira	review
+status_effect	Berserk	Fúria	review
+game_term	Spoils	Espólios	review
+game_term	Appraise	Avaliar	review
+game_term	Unappraised	Não avaliado	review
+game_term	Bones	Ossos	review
+game_term	Resurrect	Ressuscitar	review
+game_term	Bury	Enterrar	review
+game_term	Rune	Runa	review
+game_term	Rune stone	Pedra rúnica	review
+game_term	Treasure chest	Baú do tesouro	review
+game_term	Score	Pontuação	review
+game_term	Gold	Ouro	review
+game_term	Floor	Andar	review
+game_term	Boss	Chefe	review
+game_term	Ally	Aliado	review
+game_term	Party	Grupo	review
+game_term	Round	Fase	review
+game_term	Adventure	Aventura	review
+game_term	Food	Comida	review
+game_term	Skill Points	Pontos de Habilidade	review
+game_term	Rank	Rank	review	kept as the common gaming term
+game_term	Tavern	Taverna	approved
+game_term	Difficulty	Dificuldade	review
+equipment	Weapon	Arma	review
+equipment	Shield	Escudo	review
+equipment	Armor	Armadura	review
+equipment	Accessory	Acessório	review
+equipment	Earrings	Brincos	review
+equipment	Rod	Bastão	review
+equipment	Staff	Cajado	review
+online	Host	Anfitrião	review
+online	Guest	Convidado	review
+online	Player	Jogador	approved
+online	Network	Rede	approved
+online	Connection	Conexão	review
+online	Online	Online	approved
+online	Offline	Offline	approved
+online	Lobby	Lobby	review
+ui	Options	Opções	review
+ui	Save	Salvar	review
+ui	Load	Carregar	review
+ui	Yes	Sim	review
+ui	No	Não	review
+ui	Cancel	Cancelar	review
+ui	Back	Voltar	review
+ui	Subtitles	Legendas	review
+ui	Sound effects	Efeitos sonoros	review
+ui	BGM	Música	review
+ui	Controls	Controles	review
+proper_noun	Lucain	Lucain	approved
+proper_noun	Rannie	Rannie	approved
+proper_noun	Morgan	Morgan	approved
+proper_noun	Tiki	Tiki	approved
+proper_noun	Althena	Althena	approved
+proper_noun	Hydeland	Hydeland	approved
+proper_noun	Wallace	Wallace	approved
+proper_noun	Bilbaron	Bilbaron	approved
+proper_noun	Canaan	Canaan	approved
+proper_noun	Henritta	Henritta	approved
+proper_noun	Elliot	Elliot	approved
+proper_noun	Meriad	Meriad	approved
+proper_noun	Leon	Leon	approved
+proper_noun	Samson	Samson	approved
+proper_noun	Lillith	Lillith	approved
+proper_noun	Olivia	Olivia	approved
+proper_noun	Dragon's Crown	Dragon's Crown	approved
+proper_noun	Vanillaware	Vanillaware	approved
+proper_noun	##(PS4)	PlayStation$4	approved
+proper_noun	##(PS3)	PlayStation$3	approved
+proper_noun	##(PSV)	PlayStation$Vita	approved
+proper_noun	##(PSN)	PlayStation@#(52)Network	approved
+proper_noun	##(PSSTORE)	PlayStation$Store	approved
+monster	Harpy	Harpia	review
+monster	Gorgon	Górgona	review
+monster	Medusa	Medusa	approved
+monster	Minotaur	Minotauro	review
+monster	Cyclops	Ciclope	review
+monster	Chimera	Quimera	review
+monster	Kraken	Kraken	approved
+monster	Wyvern	Wyvern	review	Serpe is the dictionary word but rarely used in games
+monster	Golem	Golem	approved
+monster	Lich	Lich	review
+monster	Owlbear	Urso-coruja	review
+monster	Hellhound	Cão infernal	review
+monster	Wraith	Espectro	review
+monster	Dragon	Dragão	review

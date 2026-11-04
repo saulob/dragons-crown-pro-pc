@@ -17,6 +17,8 @@ const ExitGameLanguage exit_game_languages[EXIT_GAME_LANGUAGE_COUNT] = {
      "Quitter le jeu", "Quittez le jeu."},
     {"italian", "Italian", "Installazione dei dati", "Installa il gioco sul ##(HDD) per ridurre i tempi di caricamento.",
      "Esci dal gioco", "Esci dal gioco."},
+    {"brazilian_portuguese", "Portuguese (Brazil)", "Instalação de Dados",
+     "Instale o jogo no ##(HDD) para diminuir os tempos de carregamento.", "Sair do Jogo", "Saia do jogo."},
     {"japanese", "Japanese", "Data Install", "##(HDD)にデータをインストールして読み込みを高速化します", "Exit Game", "ゲームを終了します"},
     {"traditional_chinese", "Traditional Chinese", "安裝遊戲資料", "將遊戲資料安裝至##(HDD)中以加速載入速度。", "結束遊戲", "結束遊戲。"},
     {"korean", "Korean", "Data Install", "##(HDD)에 데이터를 설치하여 로딩 시간을 빠르게 합니다", "Exit Game", "게임을 종료합니다"},

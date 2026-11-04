@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "dcp_png.h"
+#include "localization/ui_text.h"
 #include "trg/platform.h"
 #include "host.h"
 #include "utf8.h"
@@ -53,9 +54,9 @@ std::string UnlockDate(int64_t unix_seconds) {
 
 const char* NoListReason(trophies::PackStatus status) {
     if (status == trophies::PackStatus::kNoPack) {
-        return "This game folder has no trophy pack. Install the game again.";
+        return Tr("This game folder has no trophy pack. Install the game again.");
     }
-    return "The game's trophy pack could not be read. Install the game again.";
+    return Tr("The game's trophy pack could not be read. Install the game again.");
 }
 
 } // namespace
@@ -157,7 +158,7 @@ void TrophyPage::DrawKeySetup(trg::Ui& ui, const char* title, const char* detail
         modal_ = Modal::kEnter;
         open_modal_ = true;
     }
-    if (ImGui::Button("Import from shadPS4...", ImVec2(240 * ui.scale(), 0))) {
+    if (ImGui::Button(Tr("Import from shadPS4..."), ImVec2(240 * ui.scale(), 0))) {
         ImportKey();
     }
     ui.Spacer(8);
@@ -166,20 +167,20 @@ void TrophyPage::DrawKeySetup(trg::Ui& ui, const char* title, const char* detail
 void TrophyPage::DrawKeyRow(trg::Ui& ui) {
     const float scale = ui.scale();
     ImGui::PushFont(ui.fonts().semibold, 0.0f);
-    ImGui::TextUnformatted("Trophy Key");
+    ImGui::TextUnformatted(Tr("Trophy Key"));
     ImGui::PopFont();
     ImGui::SameLine(0, 16 * scale);
     ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().dim);
-    ImGui::TextUnformatted("Configured");
+    ImGui::TextUnformatted(Tr("Configured"));
     ImGui::PopStyleColor();
     ImGui::SameLine(0, 24 * scale);
-    if (ImGui::Button("Change...")) {
+    if (ImGui::Button(Tr("Change..."))) {
         entry_error_.clear();
         modal_ = Modal::kEnter;
         open_modal_ = true;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Remove")) {
+    if (ImGui::Button(Tr("Remove"))) {
         modal_ = Modal::kRemove;
         open_modal_ = true;
     }
@@ -199,8 +200,8 @@ void TrophyPage::ImportKey() {
         return;
     }
 #endif
-    const std::string chosen = trg::BrowseForFile("Select a shadPS4 keys.json or config.toml",
-                                                  {{"shadPS4 key files", "*.json;*.toml"}});
+    const std::string chosen = trg::BrowseForFile(Tr("Select a shadPS4 keys.json or config.toml"),
+                                                  {{Tr("shadPS4 key files"), "*.json;*.toml"}});
     if (chosen.empty()) {
         return;
     }
@@ -260,10 +261,10 @@ void TrophyPage::DrawModals(trg::Ui& ui) {
     const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
     ImGui::PushFont(ui.fonts().semibold, 0.0f);
     switch (shown) {
-    case Modal::kEnter: ImGui::TextUnformatted("Enter Trophy Key"); break;
-    case Modal::kReplace: ImGui::TextUnformatted("A Trophy Key is already configured. Replace it?"); break;
-    case Modal::kRemove: ImGui::TextUnformatted("Remove the Trophy Key? Your trophies are kept."); break;
-    case Modal::kNotice: ImGui::TextUnformatted(notice_.c_str()); break;
+    case Modal::kEnter: ImGui::TextUnformatted(Tr("Enter Trophy Key")); break;
+    case Modal::kReplace: ImGui::TextUnformatted(Tr("A Trophy Key is already configured. Replace it?")); break;
+    case Modal::kRemove: ImGui::TextUnformatted(Tr("Remove the Trophy Key? Your trophies are kept.")); break;
+    case Modal::kNotice: ImGui::TextUnformatted(Tr(notice_.c_str())); break;
     case Modal::kNone: break;
     }
     ImGui::PopFont();
@@ -271,10 +272,10 @@ void TrophyPage::DrawModals(trg::Ui& ui) {
     if (shown == Modal::kEnter) {
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputText("##key", entry_, sizeof(entry_), show_key_ ? 0 : ImGuiInputTextFlags_Password);
-        ImGui::Checkbox("Show key", &show_key_);
+        ImGui::Checkbox(Tr("Show key"), &show_key_);
         if (!entry_error_.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().warn_dot);
-            ImGui::TextUnformatted(entry_error_.c_str());
+            ImGui::TextUnformatted(Tr(entry_error_.c_str()));
             ImGui::PopStyleColor();
         }
         ImGui::Dummy(ImVec2(0, 6 * scale));
@@ -285,11 +286,11 @@ void TrophyPage::DrawModals(trg::Ui& ui) {
                 close();
                 OfferKey(value, trophies::KeySource::kEntered);
             } else {
-                entry_error_ = "Enter exactly 32 hexadecimal characters (0-9, A-F).";
+                entry_error_ = Tr("Enter exactly 32 hexadecimal characters (0-9, A-F).");
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", button) || escape) {
+        if (ImGui::Button(Tr("Cancel"), button) || escape) {
             entry_error_.clear();
             close();
         }
@@ -303,7 +304,7 @@ void TrophyPage::DrawModals(trg::Ui& ui) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", button) || escape) {
+        if (ImGui::Button(Tr("Cancel"), button) || escape) {
             close();
         }
     } else if (shown == Modal::kRemove) {
@@ -316,7 +317,7 @@ void TrophyPage::DrawModals(trg::Ui& ui) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", button) || escape) {
+        if (ImGui::Button(Tr("Cancel"), button) || escape) {
             close();
         }
     } else if (ui.AccentButton("OK", button) || escape) {
@@ -329,7 +330,7 @@ void TrophyPage::DrawSummary(trg::Ui& ui) {
     const trophies::TrophyView& view = content_->view;
     const float scale = ui.scale();
     ImGui::PushFont(ui.fonts().semibold, 0.0f);
-    ImGui::Text("%d / %d unlocked     %d%%", view.unlocked, view.total, view.percent);
+    ImGui::Text(Tr("%d / %d unlocked     %d%%"), view.unlocked, view.total, view.percent);
     ImGui::PopFont();
     ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ui.theme().accent);
     ImGui::PushStyleColor(ImGuiCol_FrameBg, ui.theme().frame);
@@ -349,8 +350,8 @@ void TrophyPage::DrawSummary(trg::Ui& ui) {
         if (!grades.empty()) {
             grades += "     ";
         }
-        grades += std::string(trophies::GradeName(grade)) + " " + std::to_string(view.unlocked_by_grade[index]) + "/" +
-                  std::to_string(view.total_by_grade[index]);
+        grades += std::string(Tr(trophies::GradeName(grade))) + " " +
+                  std::to_string(view.unlocked_by_grade[index]) + "/" + std::to_string(view.total_by_grade[index]);
     }
     ui.Help(grades.c_str());
     ui.Spacer(6);
@@ -364,7 +365,7 @@ void TrophyPage::DrawSavedUnlocks(trg::Ui& ui) {
     const float s = ui.scale();
     ui.Spacer(4);
     ImGui::PushFont(ui.fonts().semibold, 0.0f);
-    ImGui::TextUnformatted("Saved trophies");
+    ImGui::TextUnformatted(Tr("Saved trophies"));
     ImGui::PopFont();
     ui.Paragraph("Names, icons and grades appear once the trophy list can be read.");
     const float width = ImGui::GetContentRegionAvail().x;
@@ -375,11 +376,11 @@ void TrophyPage::DrawSavedUnlocks(trg::Ui& ui) {
         ImDrawList* draw = ImGui::GetWindowDrawList();
         draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height), trg::Col(theme.frame), 8 * s);
         char label[48];
-        std::snprintf(label, sizeof(label), "Trophy %d", saved.id);
+        std::snprintf(label, sizeof(label), "%s %d", Tr("Trophy"), saved.id);
         draw->AddText(ui.fonts().semibold, ImGui::GetFontSize(), ImVec2(origin.x + 16 * s, origin.y + 12 * s),
                       trg::Col(theme.dim), label);
         if (saved.unix_time > 0) {
-            const std::string date = "UNLOCKED  " + UnlockDate(saved.unix_time);
+            const std::string date = std::string(Tr("UNLOCKED")) + "  " + UnlockDate(saved.unix_time);
             const ImVec2 size = ui.fonts().semibold->CalcTextSizeA(ImGui::GetFontSize() * 0.8f, FLT_MAX, 0, date.c_str());
             draw->AddText(ui.fonts().semibold, ImGui::GetFontSize() * 0.8f,
                           ImVec2(origin.x + width - size.x - 16 * s, origin.y + 14 * s), trg::Col(theme.dim), date.c_str());
@@ -420,16 +421,18 @@ void TrophyPage::DrawRow(trg::Ui& ui, const trophies::TrophyRow& row, float widt
     const float text_x = icon_max.x + 14 * s;
     const float right = end.x - 14 * s;
     draw->PushClipRect(origin, end, true);
-    const char* grade = trophies::GradeName(row.grade);
+    const char* grade = Tr(trophies::GradeName(row.grade));
     const ImVec2 grade_size = fonts.semibold->CalcTextSizeA(base * 0.9f, FLT_MAX, 0, grade);
     draw->AddText(fonts.semibold, base * 0.9f, ImVec2(right - grade_size.x, origin.y + 12 * s), GradeColor(row.grade), grade);
     draw->AddText(fonts.semibold, base, ImVec2(text_x, origin.y + 10 * s),
-                  trg::Col(row.unlocked ? theme.text : theme.dim), row.name.c_str(), nullptr,
+                  trg::Col(row.unlocked ? theme.text : theme.dim), Tr(row.name.c_str()), nullptr,
                   right - grade_size.x - 12 * s - text_x);
-    draw->AddText(fonts.regular, base * 0.84f, ImVec2(text_x, origin.y + 34 * s), trg::Col(theme.dim), row.detail.c_str(),
-                  nullptr, right - text_x);
+    draw->AddText(fonts.regular, base * 0.84f, ImVec2(text_x, origin.y + 34 * s), trg::Col(theme.dim),
+                  Tr(row.detail.c_str()), nullptr, right - text_x);
     if (row.unlocked) {
-        const std::string date = row.unlock_time > 0 ? "UNLOCKED  " + UnlockDate(row.unlock_time) : "UNLOCKED";
+        const std::string date = row.unlock_time > 0
+                                     ? std::string(Tr("UNLOCKED")) + "  " + UnlockDate(row.unlock_time)
+                                     : std::string(Tr("UNLOCKED"));
         draw->AddText(fonts.semibold, base * 0.72f, ImVec2(text_x, end.y - 22 * s), trg::Col(theme.accent), date.c_str());
     }
     draw->PopClipRect();

@@ -5,6 +5,7 @@
 #include <system_error>
 #include <utility>
 
+#include "localization/ui_text.h"
 #include "utf8.h"
 
 namespace fs = std::filesystem;
@@ -38,8 +39,9 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
     if (!active_) {
         return std::nullopt;
     }
+    const char* title = Tr(kTitle);
     if (!popup_open_) {
-        ImGui::OpenPopup(kTitle);
+        ImGui::OpenPopup(title);
         popup_open_ = true;
     }
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -64,7 +66,7 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
     }
     const int pushed = static_cast<int>(std::size(colors));
     std::optional<fs::path> picked;
-    if (!ImGui::BeginPopupModal(kTitle, &keep, kFlags)) {
+    if (!ImGui::BeginPopupModal(title, &keep, kFlags)) {
         active_ = false;
         ImGui::PopStyleColor(pushed);
         ImGui::PopFont();
@@ -73,12 +75,12 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
 
     const fs::path parent = folder_.parent_path();
     ImGui::BeginDisabled(parent.empty() || parent == folder_);
-    if (ImGui::Button("Up")) {
+    if (ImGui::Button(Tr("Up"))) {
         Go(parent);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Checkbox("Show all files", &show_all_)) {
+    if (ImGui::Checkbox(Tr("Show all files"), &show_all_)) {
         Go(folder_);
     }
     ImGui::SameLine();
@@ -90,7 +92,7 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
     if (ImGui::BeginChild("places", ImVec2(places_width, -footer), ImGuiChildFlags_Borders)) {
         for (size_t i = 0; i < places_.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
-            if (ImGui::Selectable(places_[i].label.c_str(), places_[i].path == folder_)) {
+            if (ImGui::Selectable(Tr(places_[i].label.c_str()), places_[i].path == folder_)) {
                 enter = places_[i].path;
             }
             ImGui::PopID();
@@ -100,12 +102,12 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
     ImGui::SameLine();
     if (ImGui::BeginChild("files", ImVec2(0, -footer), ImGuiChildFlags_Borders)) {
         if (!listing_.readable) {
-            ImGui::TextDisabled("This folder cannot be read.");
+            ImGui::TextDisabled("%s", Tr("This folder cannot be read."));
         } else if (listing_.entries.empty()) {
-            ImGui::TextDisabled(show_all_ ? "This folder is empty." : "No .pkg files or folders here.");
+            ImGui::TextDisabled("%s", Tr(show_all_ ? "This folder is empty." : "No .pkg files or folders here."));
         }
         const float right_edge = ImGui::GetContentRegionAvail().x;
-        if (!parent.empty() && parent != folder_ && ImGui::Selectable("../  (parent folder)")) {
+        if (!parent.empty() && parent != folder_ && ImGui::Selectable(Tr("../  (parent folder)"))) {
             enter = parent;
         }
         for (size_t i = 0; i < listing_.entries.size(); ++i) {
@@ -133,11 +135,12 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
     }
     ImGui::EndChild();
 
-    if (ImGui::Button("Cancel")) {
+    if (ImGui::Button(Tr("Cancel"))) {
         keep = false;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel.");
+    ImGui::TextDisabled("%s",
+                        Tr("Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel."));
 
     if (!enter.empty()) {
         Go(enter);

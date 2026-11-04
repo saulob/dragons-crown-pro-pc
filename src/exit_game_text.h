@@ -25,7 +25,7 @@ typedef struct {
     const char *row, *help;                        /* the new records 388 and 394 */
 } ExitGameLanguage;
 
-#define EXIT_GAME_LANGUAGE_COUNT 8
+#define EXIT_GAME_LANGUAGE_COUNT 9
 extern const ExitGameLanguage exit_game_languages[EXIT_GAME_LANGUAGE_COUNT];
 
 typedef enum {

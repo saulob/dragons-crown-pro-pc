@@ -44,11 +44,15 @@
 #include "dcp_settings.h"
 #include "dcp_title.h"
 #include "file_browser.h"
+#include "fms_sheet.h"
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
 #include "net/connection_test.h"
 #include "npc_voice_resources.h"
+#include "game_translation.h"
+#include "localization/ui_text.h"
+#include <zlib.h>
 #include "net/identity.h"
 #include "net/online_version.h"
 #include "online_client.h"
@@ -61,6 +65,7 @@
 #include "runtime_log.h"
 #include "settings.h"
 #include "text_languages.h"
+#include "trg/platform.h"
 #include "utf8.h"
 
 namespace fs = std::filesystem;
@@ -79,6 +84,23 @@ void Check(bool condition, const char* what, int line) {
     }
 }
 #define CHECK(condition) Check((condition), #condition, __LINE__)
+
+bool ValidUtf8Text(const std::string& text) {
+    for (size_t i = 0; i < text.size();) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        const size_t extra = c < 0x80 ? 0 : (c & 0xe0) == 0xc0 ? 1 : (c & 0xf0) == 0xe0 ? 2 : (c & 0xf8) == 0xf0 ? 3 : 4;
+        if (extra == 4 || i + extra >= text.size()) {
+            return false;
+        }
+        for (size_t j = 1; j <= extra; ++j) {
+            if ((static_cast<unsigned char>(text[i + j]) & 0xc0) != 0x80) {
+                return false;
+            }
+        }
+        i += extra + 1;
+    }
+    return true;
+}
 
 std::string ReadAll(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
@@ -1325,7 +1347,7 @@ void TestFriendStatus(const std::string& page) {
     if (cards != std::string::npos && friends != std::string::npos) {
         const std::string card = page.substr(cards, friends - cards);
         CHECK(card.find("FriendStatusOf") == std::string::npos && card.find("platform") == std::string::npos);
-        CHECK(card.find("FriendRequestText(sender)") != std::string::npos);
+        CHECK(card.find("sender.name + Tr(\" wants to be your friend\")") != std::string::npos);
     }
     CHECK(page.find("online_protocol") == std::string::npos);
     const std::string client = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_client.cpp");
@@ -1388,7 +1410,7 @@ void TestOnlinePage() {
     }
     CHECK(page.find("ui.InputText(\"Online name\", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName)") != std::string::npos);
     CHECK(page.find("FriendRow(ui, f);") != std::string::npos);
-    CHECK(page.find("ImGui::TextColored(ui.theme().warn_dot, \"Incompatible\");") != std::string::npos);
+    CHECK(page.find("ImGui::TextColored(ui.theme().warn_dot, \"%s\", Tr(\"Incompatible\"));") != std::string::npos);
     CHECK(page.find("ResolveOnlinePlay(") != std::string::npos);
     // The sidebar badge counts the requests the page shows as cards.
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
@@ -2525,6 +2547,10 @@ void TestTextLanguage(const fs::path& base) {
     struct Expected { const char* key; const char* name; int id; };
     const Expected western[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
                                 {"italian", "Italian", 5}, {"spanish", "Spanish", 3}};
+    // USA 1.00 adds Brazilian Portuguese, the port's translation played in the English slot.
+    const Expected us_languages[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
+                                     {"italian", "Italian", 5}, {"brazilian_portuguese", "Portuguese (Brazil)", 1},
+                                     {"spanish", "Spanish", 3}};
     const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
     const Expected japanese[] = {{"japanese", "Japanese", 0}};
     const auto check_list = [&](const GameBuild* build, std::span<const Expected> expected) {
@@ -2540,7 +2566,14 @@ void TestTextLanguage(const fs::path& base) {
         const std::string_view title = build.title_id;
         check_list(&build, title == "CUSA10209"   ? std::span<const Expected>(asian)
                            : title == "CUSA07001" ? std::span<const Expected>(japanese)
+                           : &build == &kUs       ? std::span<const Expected>(us_languages)
                                                   : std::span<const Expected>(western));
+    }
+    CHECK(TextLanguagesOf(&kUs)[4].translation == "pt-BR" && TextLanguagesOf(&kUs)[4].suffix == "US");
+    for (const GameBuild& build : SupportedBuilds()) {
+        for (const TextLanguage& language : build.text_languages) {
+            CHECK(language.translation.empty() == (language.key != "brazilian_portuguese"));
+        }
     }
 
     for (const char* image : {us.c_str(), static_cast<const char*>(nullptr)}) {
@@ -2552,6 +2585,12 @@ void TestTextLanguage(const fs::path& base) {
             CHECK(dcp_text_language(ini.c_str(), image, nullptr) == language.id);
         }
     }
+    WriteAll(file, "text_language=brazilian_portuguese\n");
+    CHECK(IsValidSetting(kTextLanguageKey, "brazilian_portuguese"));
+    CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1); // the English slot
+    CHECK(dcp_text_language(ini.c_str(), nullptr, nullptr) == 1);    // an unknown build: English
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10);
+    CHECK(ResolveTextLanguage(&kUs101, "brazilian_portuguese").key == "english");
     for (const Expected& language : asian) {
         LauncherSettings settings(file);
         settings.Set(kTextLanguageKey, language.key);
@@ -4100,10 +4139,12 @@ void TestInstalledTextLanguages(const fs::path& base) {
         return joined;
     };
     const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
+    const std::string us_languages = "english=1 french=2 german=4 italian=5 brazilian_portuguese=1 spanish=3";
 
-    // Every Western slot (the official 1.00 archive's layout): all five, in the build's order, on 1.00 and 1.01 alike.
+    // Every Western slot (the official 1.00 archive's layout): all five, in the build's order, on 1.00 and 1.01 alike;
+    // 1.00 adds Brazilian Portuguese over the English slot.
     WriteAll(regional, LanguageArchive({us, fr, de, it, es, uk}));
-    CHECK(keys(&kUs) == western && keys(&kUs101) == western);
+    CHECK(keys(&kUs) == us_languages && keys(&kUs101) == western);
     CHECK(SameLanguages(InstalledTextLanguages(app0, &kUs), TextLanguagesOf(&kUs)));
 
     // The reported 1.01 archive, Russian text in the US slot and no other slot, offers English and never Russian: the
@@ -4143,9 +4184,11 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(ini, "text_language=russian\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
 
-    // Russian text in the US slot beside complete Western slots: still the five Western languages.
+    // Russian text in the US slot beside complete Western slots: still the Western languages, and 1.00 still offers its
+    // translation (TranslateArchive keeps any record whose text differs).
     WriteAll(regional, LanguageArchive({Slot("US", russian), fr, de, it, es}));
     CHECK(keys(&kUs101) == western);
+    CHECK(keys(&kUs) == us_languages);
     WriteAll(ini, "text_language=german\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 4);
 
@@ -4185,7 +4228,7 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(regional, BuildCpk({{"stage/Interface.ftx", "plain", false}}, false));
     CHECK(keys(&kUs101) == western);
     fs::remove(regional);
-    CHECK(keys(&kUs) == western && keys(nullptr) == western);
+    CHECK(keys(&kUs) == us_languages && keys(&kUs101) == western && keys(nullptr) == western);
     CHECK(InstalledTextLanguages({}, &kUs101).size() == 5);
 
     // Asia/Hong Kong: Traditional Chinese and Korean from DRACRO_CK.CPK, unchanged.
@@ -4203,12 +4246,13 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(app0 / "DRACRO_PATCH_JP.CPK", LanguageArchive({us, fr}));
     CHECK(keys(&kJp102) == "japanese=0" && keys(&kJp103) == "japanese=0");
 
-    // Every archive language names its own slot; Japanese has none.
+    // Every archive language names its own slot; Japanese has none and a translation the slot of a language before it.
     for (const GameBuild& build : SupportedBuilds()) {
         std::set<std::string_view> suffixes;
         for (const TextLanguage& language : build.text_languages) {
-            CHECK(language.key == "japanese" ? language.suffix.empty()
-                                             : language.suffix.size() == 2 && suffixes.insert(language.suffix).second);
+            CHECK(language.key == "japanese"      ? language.suffix.empty()
+                  : !language.translation.empty() ? suffixes.count(language.suffix) == 1
+                                                  : language.suffix.size() == 2 && suffixes.insert(language.suffix).second);
         }
     }
     fs::remove_all(app0);
@@ -4281,7 +4325,12 @@ void TestTextLanguageSwitching(const fs::path& base) {
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs), &kUs), switch_to(kUs)).key == "english"); // a stale Russian -> USA
     WriteAll(ini, "text_language=russian\n");
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs101), &kUs101), switch_to(kUs101)).key == "english"); // -> 1.01
-    for (const char* kept : {"english", "french", "german", "italian", "spanish"}) {
+    CHECK(told(kUs, "brazilian_portuguese") == 1);
+    WriteAll(ini, "text_language=brazilian_portuguese\n");
+    CHECK(switch_to(kUs101) == "english");          // USA -> 1.01: the translation is 1.00's
+    WriteAll(ini, "text_language=brazilian_portuguese\n");
+    CHECK(switch_to(kCk) == "traditional_chinese"); // USA -> Asia
+    for (const char* kept : {"english", "french", "german", "italian", "brazilian_portuguese", "spanish"}) {
         WriteAll(ini, std::string("text_language=") + kept + "\n");
         LauncherSettings settings(ini);
         CHECK(!NormalizeTextLanguage(settings, InstalledTextLanguages(app0_of(kUs), &kUs)));
@@ -4417,6 +4466,7 @@ void TestKeepBaseLanguages(const fs::path& base) {
         return joined;
     };
     const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
+    const std::string us_languages = "english=1 french=2 german=4 italian=5 brazilian_portuguese=1 spanish=3";
 
     std::vector<Entry> us = Slot("US", kEnglishSheet);
     us.push_back({"msgsheet/StaffRollMsg_PS4_US.fms", "staff", false});
@@ -4447,7 +4497,7 @@ void TestKeepBaseLanguages(const fs::path& base) {
     const std::string base_hash = Sha256Hex(base_app0 / "DRACRO_US.CPK");
 
     // The base alone and the update alone: the update's archive is what collapsed the list.
-    CHECK(keys(base_app0, kUs) == western && keys(base_app0, kUs101) == western);
+    CHECK(keys(base_app0, kUs) == us_languages && keys(base_app0, kUs101) == western);
     CHECK(keys(update_app0, kUs101) == "english=1 french=2");
 
     CpkArchive base_archive;
@@ -4485,10 +4535,11 @@ void TestKeepBaseLanguages(const fs::path& base) {
         CHECK(merged.entries()[i].id == i);
         CHECK(i == 0 || order_key(merged.entries()[i - 1].path) < order_key(merged.entries()[i].path));
     }
-    CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == western);
+    CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == us_languages);
     for (const GameBuild* us_build : {&kUs, &kUs101}) {
         const std::vector<TextLanguage> offered = InstalledTextLanguages(merged_app0, us_build);
-        CHECK(LanguageNames(offered) == "English, French, German, Italian, Spanish");
+        CHECK(LanguageNames(offered) == (us_build == &kUs ? "English, French, German, Italian, Portuguese (Brazil), Spanish"
+                                                          : "English, French, German, Italian, Spanish"));
         CHECK(offered[0].key == "english" && offered[0].ps4_id == 1 && offered[0].suffix == "US");
         CHECK(std::none_of(offered.begin(), offered.end(), [](const TextLanguage& language) {
             return language.suffix == "UK" || language.key == "russian" || language.name == "Russian";
@@ -4687,6 +4738,253 @@ void TestKeepBaseLanguages(const fs::path& base) {
         CHECK(Sha256Hex(real_cpk) == real_hash);
     }
     fs::remove_all(root);
+}
+
+// The port's translations: message sheets rebuilt byte for byte, their control sequences, and an archive overlay that
+// shows a translated record only when the installed English is the record it was written from.
+void TestGameTranslation(const fs::path& base) {
+    using namespace cpk_test;
+    using namespace language_test;
+    const auto sheet_of = [](std::initializer_list<std::string> records) {
+        std::string out("FMSB\0\0\0\0", 8);
+        Le32(out, 0x20);
+        out += std::string(8, '\0');
+        Le32(out, uint32_t(records.size()));
+        out += '\x03';
+        out += std::string(7 + records.size() * 8, '\0');
+        for (const std::string& record : records) out += record + '\0';
+        out.resize((out.size() + 15) / 16 * 16, '\0');
+        const uint32_t size = uint32_t(out.size() - 0x20);
+        for (int i = 0; i < 4; ++i) out[size_t(4 + i)] = char(size >> (8 * i));
+        return out + "FEOC" + std::string(12, '\0');
+    };
+    const std::string english = sheet_of({"Start Game", "Floor %d", "Options", "@c(10)##(P_INN)@/c", std::string(0x100, 'x')});
+    const std::optional<FmsSheet> sheet = ParseFms(Span(english));
+    CHECK(sheet && sheet->records.size() == 5 && sheet->records[1] == "Floor %d");
+    CHECK(sheet && Bytes(BuildFms(*sheet)) == english);
+    std::string damaged = english;
+    damaged[0x20] = 1; // the pointer table is zeros on disk
+    CHECK(!ParseFms(Span(damaged)) && !ParseFms(Span(english.substr(0, english.size() - 16))) && !ParseFms({}));
+
+    CHECK((ControlTokens("@#(34)Go ##(TAG) %d%% %3d @c(1,2,3)x@/c @@ @C 100$ %.2f %08lx 5%@/c") ==
+           std::vector<std::string>{"@#(34)", "##(TAG)", "%d", "%%", "%3d", "@c(1,2,3)", "@/c", "@@", "@C", "$", "%.2f",
+                                    "%08lx", "%", "@/c"}));
+    CHECK(SameControlTokens("%s won %d", "%s ganhou %d") && !SameControlTokens("%s won %d", "%d: %s"));
+    CHECK(SameControlTokens("@c(10)Inn@/c @#(1)", "@#(1) @c(10)Taverna@/c") && !SameControlTokens("@#(1) go", "vá"));
+    CHECK(SameControlTokens("About 50% of eggs", "Cerca de 50% dos ovos") && !SameControlTokens("About 50% of", "%d ovos"));
+    CHECK(!SameControlTokens("Chance %d%", "Chance %d") && SameControlTokens("Chance %d%", "Chance de %d%"));
+
+    const fs::path app0 = base / "translation_app0";
+    fs::remove_all(app0);
+    WriteAll(app0 / "DRACRO_US.CPK", LanguageArchive({Slot("US", english), Slot("FR", english)}));
+    const std::string before = ReadAll(app0 / "DRACRO_US.CPK");
+    const auto digest = [&](const std::string& text) {
+        WriteAll(base / "translation_record.txt", text);
+        return Sha256Hex(base / "translation_record.txt");
+    };
+    const std::string json = "{\"sheet\": \"SystemMsg\", \"entries\": [\n"
+        "{\"index\": 0, \"source_sha256\": \"" + digest("Start Game") + "\", \"pt_br\": \"Iniciar jogo\"},\n"
+        "{\"index\": 1, \"source_sha256\": \"" + digest("Floor %d") + "\", \"pt_br\": \"Andar\"},\n"
+        "{\"index\": [2], \"source_sha256\": \"" + digest("Option") + "\", \"pt_br\": \"Opções\"},\n"
+        "{\"index\": 3, \"source_sha256\": \"" + digest("@c(10)##(P_INN)@/c") + "\", \"pt_br\": \"@c(10)##(P_INN)@/c\"},\n"
+        "{\"index\": 9, \"source_sha256\": \"" + digest("Start Game") + "\", \"pt_br\": \"x\"}]}";
+    const auto file_of = [](const char* name, const std::string& text) {
+        return TranslationFile{name, reinterpret_cast<const uint8_t*>(text.data()), text.size()};
+    };
+    const TranslationFile files[] = {file_of("SystemMsg.json", json)};
+    const ArchiveTranslation result = TranslateArchive(app0 / "DRACRO_US.CPK", "US", files);
+    CHECK(result.error.empty() && result.overlay && result.translated == 2 && result.sheets == 1 && result.refused == 3);
+    CHECK((result.problems == std::vector<std::string>{"SystemMsg 1: control sequences differ from the English",
+                                                         "SystemMsg 2: the English record changed",
+                                                         "SystemMsg 9: no such record"}));
+    std::string seen = before;
+    if (result.overlay) {
+        seen.resize(result.overlay->length, '\0');
+        for (const auto& [offset, data] : result.overlay->patches) {
+            std::copy(data.begin(), data.end(), seen.begin() + std::ptrdiff_t(offset));
+        }
+    }
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == before);
+    WriteAll(base / "translation_seen.cpk", seen);
+    CpkArchive original, shown;
+    CHECK(original.Open(app0 / "DRACRO_US.CPK") && shown.Open(base / "translation_seen.cpk"));
+    for (const CpkEntry& entry : original.entries()) {
+        const CpkEntry* same = shown.Find(entry.path);
+        if (entry.path != "msgsheet/SystemMsg_US.fms") {
+            CHECK(same && shown.Read(*same) == original.Read(entry));
+            continue;
+        }
+        const std::optional<FmsSheet> translated = same ? ParseFms(shown.Read(*same)) : std::nullopt;
+        CHECK(translated && (translated->records ==
+                             std::vector<std::string>{"Iniciar jogo", "Floor %d", "Options", "@c(10)##(P_INN)@/c", std::string(0x100, 'x')}));
+    }
+
+    CHECK(!TranslateArchive(app0 / "DRACRO_US.CPK", "US", {}).overlay);
+    const std::string broken = "{\"sheet\": 3}";
+    const std::string items = "{\"sheet\": \"ItemList\", \"entries\": []}";
+    const std::string tutorial = "{\"sheet\": \"Tutorial\", \"entries\": []}";
+    const TranslationFile unusable[] = {file_of("Broken.json", broken), file_of("ItemList.json", items),
+                                        file_of("Tutorial.json", tutorial)};
+    const ArchiveTranslation none = TranslateArchive(app0 / "DRACRO_US.CPK", "US", unusable);
+    CHECK(!none.overlay && none.error.empty() && none.refused == 3 && none.translated == 0);
+    CHECK((none.problems == std::vector<std::string>{"Broken.json: not a translation file",
+                                                       "msgsheet/ItemList_US.fms: not a message sheet the port can rebuild",
+                                                       "msgsheet/Tutorial_US.fms: not in the archive"}));
+    const ArchiveTranslation missing = TranslateArchive(app0 / "MISSING.CPK", "US", files);
+    CHECK(!missing.overlay && missing.error.rfind("MISSING.CPK: ", 0) == 0);
+
+    // The loader's call: only Brazilian Portuguese on USA 1.00 is a translation; English and Spanish say nothing.
+    const fs::path ini = base / "translation_dcp.ini";
+    const fs::path image = base / "translation_image";
+    WriteAll(image / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
+                                       kUs.eboot_sha256 + "\"\n}");
+    const auto translation = [&](const std::string& saved, const fs::path* image_dir, std::string& message) {
+        WriteAll(ini, "text_language=" + saved + "\n");
+        uint64_t length = 0;
+        DcpFilePatch* patches = nullptr;
+        size_t count = 0;
+        char text[1024];
+        const std::string image_text = image_dir ? image_dir->string() : std::string();
+        const char* archive = dcp_text_translation(ini.string().c_str(), image_dir ? image_text.c_str() : nullptr,
+                                                   app0.string().c_str(), &length, &patches, &count, text, sizeof(text));
+        message = text;
+        localization::SetActiveLanguage("english");
+        return archive;
+    };
+    std::string message;
+    CHECK(!translation("english", &image, message) && message.empty());
+    CHECK(!translation("spanish", &image, message) && message.empty());
+    CHECK(!translation("brazilian_portuguese", nullptr, message) && message.empty());
+    const char* archive = translation("brazilian_portuguese", &image, message);
+    if (PtBrTranslationFiles().empty()) {
+        CHECK(!archive && message == "Portuguese (Brazil): no record translated yet, showing English");
+    } else {
+        CHECK(message.rfind("Portuguese (Brazil)", 0) == 0);
+    }
+    const fs::path installed = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / "v1.03";
+    if (fs::exists(installed / "DRACRO_US.CPK")) {
+        WriteAll(ini, "text_language=brazilian_portuguese\n");
+        const std::string image_text = image.string();
+        const auto prepare = [&](DcpFilePatch*& patches, size_t& count) {
+            uint64_t length = 0;
+            char text[1024];
+            return dcp_text_translation(ini.string().c_str(), image_text.c_str(), installed.string().c_str(), &length,
+                                        &patches, &count, text, sizeof(text));
+        };
+        DcpFilePatch* patches = nullptr;
+        size_t count = 0;
+        const bool first_ready = prepare(patches, count) != nullptr && count != 0;
+        CHECK(first_ready);
+        if (first_ready) {
+            const uint8_t* data = static_cast<const uint8_t*>(patches[0].data);
+            const std::vector<uint8_t> snapshot(data, data + std::min<uint64_t>(patches[0].size, 64));
+            DcpFilePatch* again = nullptr;
+            size_t again_count = 0;
+            CHECK(prepare(again, again_count) != nullptr && again_count == count);
+            CHECK(std::equal(snapshot.begin(), snapshot.end(), data));
+        }
+        localization::SetActiveLanguage("english");
+    }
+    fs::remove_all(app0);
+    fs::remove_all(image);
+    fs::remove(ini);
+}
+
+void TestInGameUiText() {
+    const auto& rows = localization::PortugueseBrazilUiText().rows;
+    const auto has = [&](const char* english) {
+        return std::any_of(rows.begin(), rows.end(), [&](const localization::UiTextRow& r) { return r.english == english; });
+    };
+    for (const char* english : {"OPTIONS", "CHEATS", "F10 Close", "Not saved to the launcher", "Unavailable", "Infinite Health",
+                                "Fill Health", "Add 1,000 Gold", "Level Up (+1 Level)", "Movement Speed", "Experience Multiplier",
+                                "Display mode", "VSync", "Windowed", "Cheats are disabled while Online Play is enabled",
+                                "Cheats are not available for this game build.", "Applies after a restart.", "Cross", "Circle",
+                                "Skip the startup logo and go straight to the title screen",
+                                "Unlocks all Gallery content while enabled without changing save progress"}) {
+        CHECK(has(english));
+    }
+    const auto conversions = [](const std::string& text) {
+        std::string out;
+        for (size_t i = 0; i < text.size(); ++i) {
+            if (text[i] != '%') continue;
+            if (i + 1 < text.size() && text[i + 1] == '%') { ++i; continue; }
+            size_t end = i + 1;
+            while (end < text.size() && !std::isalpha(static_cast<unsigned char>(text[end]))) ++end;
+            out += text.substr(i, end - i + 1);
+            i = end;
+        }
+        return out;
+    };
+    for (const localization::UiTextRow& row : rows) {
+        CHECK(conversions(row.english) == conversions(row.text));
+        CHECK(std::count(row.english.begin(), row.english.end(), '\n') == std::count(row.text.begin(), row.text.end(), '\n'));
+    }
+    for (const char* english : {"Online version mismatch", "You", "Friend", "Host", "Incompatible", "Online, in a room",
+                                "more friends are listed in the launcher."}) {
+        CHECK(has(english));
+    }
+    for (const char* source : {"gpu/shim/dcp_overlay.cpp", "gpu/shim/dcp_options_menu.cpp"}) {
+        CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / source).find("dcp::Tr(") != std::string::npos);
+    }
+}
+
+// A visual patch is applied only to the exact source it was made from; any other bytes keep the original.
+void TestVisualPatchFallback(const fs::path& base) {
+    using namespace cpk_test;
+    const std::string entry_name = "stage/Interface_US.ftx";
+    std::string source(256, 'a'), target = source;
+    target.replace(32, 16, std::string(16, 'b'));
+    const auto crc = [](const std::string& text) {
+        return uint32_t(crc32(0, reinterpret_cast<const Bytef*>(text.data()), uInt(text.size())));
+    };
+    const auto le32 = [](std::string& out, uint32_t value) {
+        for (int i = 0; i < 4; ++i) out += char(value >> (8 * i));
+    };
+    const auto patch_for = [&](uint32_t before, uint32_t after) {
+        std::string raw("DCPX1", 5);
+        raw += std::string(3, '\0');
+        le32(raw, 1);
+        raw += char(entry_name.size());
+        raw += char(0);
+        raw += entry_name;
+        le32(raw, uint32_t(source.size()));
+        le32(raw, before);
+        le32(raw, after);
+        le32(raw, 1);
+        le32(raw, 32);
+        raw += target.substr(32, 16);
+        std::string packed;
+        le32(packed, uint32_t(raw.size()));
+        uLongf size = compressBound(uLong(raw.size()));
+        std::string deflated(size, '\0');
+        compress2(reinterpret_cast<Bytef*>(deflated.data()), &size, reinterpret_cast<const Bytef*>(raw.data()), uLong(raw.size()), 9);
+        return packed + deflated.substr(0, size);
+    };
+    const auto run = [&](const std::string& archive_bytes, const std::string& patch) {
+        const fs::path file = base / "visual_fallback.cpk";
+        WriteAll(file, archive_bytes);
+        const TranslationFile files[] = {{"patch.dcpx.z", reinterpret_cast<const uint8_t*>(patch.data()), patch.size()}};
+        return TranslateArchive(file, "US", {}, files);
+    };
+    const std::string good = patch_for(crc(source), crc(target));
+    const ArchiveTranslation applied = run(BuildCpk({{entry_name, source, false}}, true), good);
+    CHECK(applied.overlay && applied.visuals == 1);
+    std::string seen;
+    if (applied.overlay) {
+        for (const auto& [offset, data] : applied.overlay->patches) {
+            if (data.size() == target.size()) seen.assign(data.begin(), data.end());
+        }
+    }
+    CHECK(seen == target);
+    const ArchiveTranslation other_source = run(BuildCpk({{entry_name, std::string(256, 'z'), false}}, true), good);
+    CHECK(other_source.visuals == 0 && other_source.visual_skipped >= 1);
+    const ArchiveTranslation wrong_result = run(BuildCpk({{entry_name, source, false}}, true), patch_for(crc(source), crc(source)));
+    CHECK(wrong_result.visuals == 0 && wrong_result.visual_skipped >= 1);
+    const ArchiveTranslation missing = run(BuildCpk({{"stage/Other.ftx", source, false}}, true), good);
+    CHECK(missing.visuals == 0 && missing.visual_skipped >= 1);
+    const std::string garbage = "not a patch";
+    CHECK(run(BuildCpk({{entry_name, source, false}}, true), garbage).visual_skipped >= 1);
+    fs::remove(base / "visual_fallback.cpk");
 }
 
 void TestFileBrowser(const fs::path& base) {
@@ -5061,7 +5359,7 @@ void TestUsBuild() {
     CHECK(CheckSfoIdentity(SfoFor(kUs, "01.02", "01.03")).state == GameFileState::kDifferentVersion);
     CHECK(SupportedBuildsText().find("CUSA10454 1.00 USA, ") == 0);
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
-    CHECK(launcher.find("The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages.") != std::string::npos);
+    CHECK(launcher.find("Tr(\". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their \"") != std::string::npos);
 }
 
 // Prepared CUSA10454 folders made before the build was named 1.00 carry the marker version 1.03.
@@ -5710,6 +6008,132 @@ void TestResolutionProbe() {
     CHECK(image == untouched);
 }
 
+void TestLauncherLocalization() {
+    using namespace localization;
+    for (const char* file : {"launcher/localization/ui_text.h", "launcher/localization/ui_text.cpp",
+                             "launcher/localization/pt_br_ui_text.cpp"}) {
+        const std::string bytes = ReadAll(fs::path(DCP_SOURCE_DIR) / file);
+        CHECK(!bytes.empty());
+        CHECK(ValidUtf8Text(bytes));
+        CHECK(bytes.find("\xEF\xBF\xBD") == std::string::npos);
+    }
+    const UiTextTable& table = PortugueseBrazilUiText();
+    CHECK(table.errors.empty());
+    std::set<std::string> english;
+    for (const UiTextRow& row : table.rows) {
+        CHECK(!row.english.empty());
+        CHECK(!row.text.empty());
+        CHECK(ValidUtf8Text(row.english));
+        CHECK(ValidUtf8Text(row.text));
+        CHECK(english.insert(row.english).second);
+    }
+
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(PortugueseBrazilSelected());
+    CHECK(std::string(Tr("Play")) == "Jogar");
+    CHECK(std::string(Tr("Save")) == "Salvar");
+    CHECK(std::string(Tr("Quit")) == "Sair");
+    CHECK(std::string(Tr("Display")) == "Tela");
+    CHECK(std::string(Tr("Graphics")) == "Gráficos");
+    CHECK(std::string(Tr("Gameplay")) == "Jogabilidade");
+    CHECK(std::string(Tr("Controls")) == "Controles");
+    CHECK(std::string(Tr("About")) == "Sobre");
+    CHECK(std::string(Tr("Sponsor on GitHub")) == "Patrocinar no GitHub");
+    CHECK(std::string(Tr("UPDATE NOW")) == "ATUALIZAR AGORA");
+    CHECK(std::string(Tr("Connection test")) == "Teste de Conexão");
+    CHECK(std::string(Tr("Copy")) == "Copiar");
+    CHECK(std::string(Tr("Decline")) == "Recusar");
+    for (const UiTextRow& row : table.rows) {
+        CHECK(std::string(Tr(row.english.c_str())) == row.text);
+    }
+
+    SetActiveLanguage("english");
+    CHECK(!PortugueseBrazilSelected());
+    CHECK(std::string(Tr("Play")) == "Play");
+    CHECK(std::string(Tr("Menu & Subtitles")) == "Menu & Subtitles");
+    for (const char* key : {"spanish", "french", "german", "italian"}) {
+        SetActiveLanguage(key);
+        CHECK(std::string(Tr("Play")) == "Play");
+        CHECK(std::string(Tr("Save")) == "Save");
+    }
+
+    const std::string unknown = "Not a launcher string 12345";
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(Tr(unknown)) == unknown);
+    CHECK(std::string(Tr(unknown.c_str())) == unknown);
+
+    SetActiveLanguage("english");
+    CHECK(std::string(Tr("Play")) == "Play");
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(Tr("Play")) == "Jogar");
+    SetActiveLanguage("english");
+}
+
+void TestFileDialogLabel() {
+    using namespace localization;
+    trg::SetTranslator(+[](const char* text) { return Tr(text); });
+    CHECK(std::string(trg::Translate("All files")) == "All files");
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(trg::Translate("All files")) == "Todos os arquivos");
+    SetActiveLanguage("english");
+    trg::SetTranslator(nullptr);
+    CHECK(std::string(trg::Translate("All files")) == "All files");
+    const std::string patch = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "patches" / "trg-launcher" / "0005-ui-translator.patch");
+    CHECK(patch.find("Widen(Translate(\"All files\"))") != std::string::npos);
+    CHECK(patch.find("ShellQuote(std::string(Translate(\"All files\")) + \" | *\")") != std::string::npos);
+}
+
+void TestTextWithValues() {
+    using namespace localization;
+    CHECK(TrValue("Request sent to Alice.") == "Request sent to Alice.");
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(TrValue("Request sent to Alice.") == "Solicitação enviada para Alice.");
+    CHECK(TrValue("Alice is now your friend.") == "Alice agora é seu amigo.");
+    CHECK(TrValue("Request sent to %n%s.") == "Solicitação enviada para %n%s.");
+    CHECK(TrValue("The online service refused the request (busy).") == "O serviço online recusou a solicitação (busy).");
+    CHECK(TrValue("No player has that friend code.") == "Nenhum jogador tem esse código de amigo.");
+    CHECK(TrValue("Windows could not start it (error 5).") == "O Windows não conseguiu iniciá-lo (erro 5).");
+    CHECK(TrValue("Connected \xC2\xB7 32 ms") == "Conectado \xC2\xB7 32 ms");
+    CHECK(TrValue("Cannot write the update file a.bin.") == "Não foi possível gravar o arquivo de atualização a.bin.");
+    CHECK(TrValue("Cannot write a.bin.") == "Não foi possível gravar a.bin.");
+    CHECK(TrValue("Not a launcher string 12345") == "Not a launcher string 12345");
+
+    using Router = net::ConnectionFacts::Router;
+    const auto translated = [](net::ConnectionFacts facts) {
+        for (const uint16_t port : {uint16_t(0), uint16_t(3658)}) {
+            facts.udp_port = port;
+            for (const net::ConnectionReport::Line& line : net::summarize_connection(facts).lines) {
+                CHECK(std::string(Tr(line.label)) != line.label || line.label == "Relay");
+                CHECK(TrValue(line.text) != line.text);
+            }
+        }
+    };
+    for (const int64_t latency : {int64_t(-1), int64_t(32)}) {
+        net::ConnectionFacts facts;
+        facts.lobby_ok = true;
+        facts.lobby_latency_ms = latency;
+        translated(facts);
+        facts.udp_ok = facts.second_answer = facts.same_mapping = true;
+        translated(facts);
+        facts.second_answer = false;
+        translated(facts);
+        facts.second_answer = true;
+        facts.same_mapping = false;
+        translated(facts);
+        facts.router = Router::kMapped;
+        translated(facts);
+        facts.router = Router::kMappedBehindNat;
+        translated(facts);
+        facts.relay_ok = true;
+        translated(facts);
+        facts.stun_off = true;
+        translated(facts);
+        facts.port_open = false;
+        translated(facts);
+    }
+    SetActiveLanguage("english");
+}
+
 int main(int argc, char** argv) {
     // dcp-launcher-tests --check-game <app0> <image dir>: the readiness check on real folders, read-only.
     if (argc == 4 && std::string(argv[1]) == "--check-game") {
@@ -5806,6 +6230,9 @@ int main(int argc, char** argv) {
     TestTextLanguageSwitching(base);
     TestKeepBaseLanguages(base);
     TestNpcVoiceResources(base);
+    TestGameTranslation(base);
+    TestInGameUiText();
+    TestVisualPatchFallback(base);
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);
@@ -5815,6 +6242,9 @@ int main(int argc, char** argv) {
     TestUsBuild();
     TestLegacyMarker(base);
     TestInstalledGameName(base);
+    TestLauncherLocalization();
+    TestFileDialogLabel();
+    TestTextWithValues();
     TestActivation(base);
 
     std::error_code ec;

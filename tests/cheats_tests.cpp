@@ -234,7 +234,7 @@ void TestOnlineLockout() {
     CHECK(Count(overlay, "PressCheatMenuKey(") == 2 && Count(overlay, "runtime_cheat_toggle(") == 1);
     CHECK(overlay.find("MenuKeyPress(repeat, runtime_cheats_online_locked() != 0, cheat_open, busy)") != std::string::npos);
     CHECK(overlay.find("case dcp::cheats::MenuKeyAction::Open: OpenCheatMenu(); break;") != std::string::npos);
-    CHECK(overlay.find("SetNotice(dcp::cheats::kOnlineLockoutText)") != std::string::npos);
+    CHECK(overlay.find("SetNotice(dcp::Tr(dcp::cheats::kOnlineLockoutText))") != std::string::npos);
     CHECK(overlay.find("if (down) {\n                PressCheatMenuKey(event.key.repeat);") != std::string::npos);
     CHECK(Count(overlay, "std::chrono::seconds(2)") == 1); // one notice mechanism
 

@@ -26,6 +26,7 @@
 #include "boot_image.h"
 #include "build_diagnostics.h"
 #include "cpk_patch.h"
+#include "localization/ui_text.h"
 #include "pkg_extract.h"
 #include "text_languages.h"
 #include "utf8.h"
@@ -913,51 +914,56 @@ InstallResult InstallFromFolder(const fs::path& source_dir, const GameRoots& roo
 InstallMessage DescribeInstall(InstallStatus status) {
     switch (status) {
     case InstallStatus::kInstalled:
-        return {"Game installed", "Dragon's Crown Pro is ready to play."};
+        return {Tr("Game installed"), Tr("Dragon's Crown Pro is ready to play.")};
     case InstallStatus::kCancelled:
-        return {"Installation cancelled", "The installed game was not changed."};
+        return {Tr("Installation cancelled"), Tr("The installed game was not changed.")};
     case InstallStatus::kNotPackage:
-        return {"Not a PS4 package", "Select the Dragon's Crown Pro .pkg file."};
+        return {Tr("Not a PS4 package"), Tr("Select the Dragon's Crown Pro .pkg file.")};
     case InstallStatus::kUnsupportedPackage:
-        return {"This package cannot be unpacked",
-                "It is encrypted for a PS4 console. Select a decrypted (fake) PKG of the game."};
+        return {Tr("This package cannot be unpacked"),
+                Tr("It is encrypted for a PS4 console. Select a decrypted (fake) PKG of the game.")};
     case InstallStatus::kNotGameFolder:
-        return {"Not a game folder", "Select the folder that contains eboot.bin, sce_module and sce_sys."};
+        return {Tr("Not a game folder"),
+                Tr("Select the folder that contains eboot.bin, sce_module and sce_sys.")};
     case InstallStatus::kWrongGame:
-        return {"Wrong game", "This is not Dragon's Crown Pro."};
+        return {Tr("Wrong game"), Tr("This is not Dragon's Crown Pro.")};
     case InstallStatus::kWrongVersion:
-        return {"Different version of Dragon's Crown Pro", "This port supports " + SupportedBuildsText() + "."};
+        return {Tr("Different version of Dragon's Crown Pro"),
+                Tr("This port supports ") + SupportedBuildsText() + "."};
     case InstallStatus::kIncomplete:
-        return {"Game files missing",
-                "The package is incomplete or some of the game's files are missing. Copy or download it again."};
+        return {Tr("Game files missing"),
+                Tr("The package is incomplete or some of the game's files are missing. Copy or download it again.")};
     case InstallStatus::kReadFailed:
-        return {"Could not read the game files",
-                "The package could not be read or is damaged. Check the file, then try again."};
+        return {Tr("Could not read the game files"),
+                Tr("The package could not be read or is damaged. Check the file, then try again.")};
     case InstallStatus::kOverlapping:
-        return {"Choose another file", "Select your game package, not a file inside the port's own game folder."};
+        return {Tr("Choose another file"),
+                Tr("Select your game package, not a file inside the port's own game folder.")};
     case InstallStatus::kForeignFolder:
-        return {"Could not install the game",
-                "The port's game folder holds other files. Move them out and try again."};
+        return {Tr("Could not install the game"),
+                Tr("The port's game folder holds other files. Move them out and try again.")};
     case InstallStatus::kNoSpace:
-        return {"Not enough free space", "The game needs about 6 GB. Free up disk space and try again."};
+        return {Tr("Not enough free space"),
+                Tr("The game needs about 6 GB. Free up disk space and try again.")};
     case InstallStatus::kWriteFailed:
-        return {"Could not install the game", "The game files could not be written next to the port."};
+        return {Tr("Could not install the game"), Tr("The game files could not be written next to the port.")};
     case InstallStatus::kPrepareFailed:
-        return {"Could not prepare the game", "The game's code could not be prepared. The log has the details."};
+        return {Tr("Could not prepare the game"),
+                Tr("The game's code could not be prepared. The log has the details.")};
     case InstallStatus::kUpdateNeedsBase:
-        return {"Base game required",
-                "This package is an update. Install the 1.00 base package of the same game first (CUSA10454 1.00 "
-                "USA, CUSA07001 1.00 Japan or CUSA10209 1.00 Asia/Hong Kong), then install the update."};
+        return {Tr("Base game required"),
+                Tr("This package is an update. Install the 1.00 base package of the same game first (CUSA10454 1.00 "
+                   "USA, CUSA07001 1.00 Japan or CUSA10209 1.00 Asia/Hong Kong), then install the update.")};
     case InstallStatus::kActivated:
-        return {"Game activated", "The selected build is now the active game."};
+        return {Tr("Game activated"), Tr("The selected build is now the active game.")};
     case InstallStatus::kUpToDate:
-        return {"Already up to date", "This version is already the active game."};
+        return {Tr("Already up to date"), Tr("This version is already the active game.")};
     case InstallStatus::kUnsupportedBuild:
-        return {"Dragon's Crown Pro version not supported yet",
-                "Diagnostic information was written to the latest log. Please share the latest log when reporting this "
-                "version on GitHub."};
+        return {Tr("Dragon's Crown Pro version not supported yet"),
+                Tr("Diagnostic information was written to the latest log. Please share the latest log when reporting "
+                   "this version on GitHub.")};
     }
-    return {"Could not install the game", "An unexpected error occurred."};
+    return {Tr("Could not install the game"), Tr("An unexpected error occurred.")};
 }
 
 } // namespace dcp

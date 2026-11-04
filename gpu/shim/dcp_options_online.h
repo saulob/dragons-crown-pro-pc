@@ -3,10 +3,12 @@
 // friend code and running the Connection test.
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
 #include "dcp_options_menu.h"
+#include "localization/ui_text.h"
 #include "runtime_online_overlay.h"
 
 namespace DcpOptions {
@@ -40,6 +42,21 @@ inline std::string TestHelp(const RuntimeOnlinePage& page) {
         help += std::string("\n") + mark + " " + line.label + ": " + line.text;
     }
     return help;
+}
+
+// The "\n<mark> <label>: <text>" lines TestHelp adds, in the active language.
+inline std::string TranslateTestLines(const std::string& lines) {
+    std::string out;
+    for (size_t start = 0; start < lines.size();) {
+        const size_t end = std::min(lines.find('\n', start + 1), lines.size());
+        const std::string line = lines.substr(start, end - start);
+        const size_t label = line.find(' ') + 1, colon = line.find(": ");
+        out += label && colon != std::string::npos
+                   ? line.substr(0, label) + dcp::Tr(line.substr(label, colon - label)) + ": " + dcp::TrValue(line.substr(colon + 2))
+                   : line;
+        start = end;
+    }
+    return out;
 }
 
 inline std::vector<OnlineRow> OnlineRowsOf(const RuntimeOnlinePage& page) {

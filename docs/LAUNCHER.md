@@ -371,10 +371,15 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   | Build | Languages |
   | --- | --- |
-  | CUSA10454 1.00 USA | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
-  | CUSA10454 1.01 USA | English, French, German, Italian, Spanish, as 1.00 |
+  | CUSA10454 1.00 USA | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
+  | CUSA10454 1.01 USA | English, French, German, Italian, Spanish: as 1.00 without Portuguese (Brazil) |
   | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese (`japanese`): the executable does not read the system language |
   | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean (`traditional_chinese`, `korean`) |
+
+  Portuguese (Brazil) is the port's own translation of the English slot, for CUSA10454 1.00 USA only (not 1.01, the
+  Japanese builds or the Asia/Hong Kong build). It covers the game text, the launcher, the F1 options, the F10 overlay,
+  the online screens and runtime visual replacements; the installed archive is never written. Still English: the
+  DefaultBone dialogue, trophy text, some baked visual labels and the credits. See `localization/pt-BR/README.md`.
 
   For the USA and Asia/Hong Kong builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian

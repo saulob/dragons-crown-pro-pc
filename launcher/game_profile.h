@@ -23,12 +23,15 @@ struct PackageLayer {
     bool update;
 };
 
+inline constexpr std::string_view kPortugueseBrazilKey = "brazilian_portuguese";
+
 // A system language the game can be told for its menus and subtitles; a build lists the ones its executable maps.
 struct TextLanguage {
     std::string_view key;
     std::string_view name;
     int ps4_id;
     std::string_view suffix; // of its files in the regional archive (msgsheet/SystemMsg_FR.fms); empty when not there
+    std::string_view translation = {}; // the port's translation laid over the suffix's sheets (localization/<translation>)
 };
 
 struct GameBuild {

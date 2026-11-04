@@ -67,6 +67,11 @@ add_library(dcp_startup_phase STATIC src/startup_phase.c)
 target_include_directories(dcp_startup_phase PUBLIC src)
 target_compile_options(dcp_startup_phase PRIVATE -Wall -Wextra -Werror)
 
+# The port's own text in Portuguese (Brazil), shared by the launcher and the in-game menus.
+add_library(dcp_ui_text STATIC launcher/localization/ui_text.cpp launcher/localization/pt_br_ui_text.cpp)
+target_include_directories(dcp_ui_text PUBLIC launcher src)
+set_target_properties(dcp_ui_text PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+
 add_subdirectory(gpu)
 add_subdirectory(launcher)
 
@@ -373,7 +378,7 @@ add_executable(dcp-options-menu-tests EXCLUDE_FROM_ALL tests/options_menu_tests.
     src/runtime_cheats.cpp launcher/game_profile.cpp launcher/online_view.cpp)
 set_target_properties(dcp-options-menu-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-options-menu-tests PRIVATE gpu/shim src launcher)
-target_link_libraries(dcp-options-menu-tests PRIVATE dcp_keys dcp_net)
+target_link_libraries(dcp-options-menu-tests PRIVATE dcp_keys dcp_net dcp_ui_text)
 target_compile_definitions(dcp-options-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-options-menu-tests PRIVATE -Wall -Wextra)
 
@@ -433,6 +438,17 @@ if (WIN32)
     target_link_libraries(dcp-savedata-tests PRIVATE -pthread)
 else()
     target_link_libraries(dcp-savedata-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
+
+# Focused test of the borrowed overlay data in the guest file layer (tools/test.ps1); not part of the default build.
+add_executable(dcp-runtime-overlay-tests EXCLUDE_FROM_ALL tests/runtime_file_overlay_tests.c src/runtime_file.c
+    $<$<BOOL:${WIN32}>:src/compat_win.c>)
+target_include_directories(dcp-runtime-overlay-tests PRIVATE src)
+target_compile_definitions(dcp-runtime-overlay-tests PRIVATE DCP_OVERLAY_TEST_ROOT="${CMAKE_BINARY_DIR}/runtime-overlay-tests")
+if (WIN32)
+    target_link_libraries(dcp-runtime-overlay-tests PRIVATE bcrypt -pthread)
+else()
+    target_link_libraries(dcp-runtime-overlay-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 endif()
 
 if (NOT WIN32)

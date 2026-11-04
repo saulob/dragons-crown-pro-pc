@@ -30,7 +30,7 @@
 - **Local PS4 trophies**, offline on this PC, shown on the launcher's Trophies page
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
-- **Menu & Subtitles language**: English, French, German, Italian or Spanish; Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build
+- **Menu & Subtitles language**: English, French, German, Italian, Spanish or Brazilian Portuguese (CUSA10454 1.00 USA only); Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build
 - **Story Skip Offer** and **Tutorial Skip Offer**: the game's own offers to skip the tutorial and start a new character in the second half of the story
 - **Unlock Gallery**: an option to see every Gallery picture without changing your save
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time, **F2**)
@@ -199,7 +199,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 - **Texture filtering**: Game, 2x, 4x, 8x or 16x
 
 ### Gameplay
-- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Japanese builds (CUSA07001) show Japanese only, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
+- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian, Spanish or Portuguese (Brazil); Portuguese (Brazil) is offered only for CUSA10454 1.00 USA, not for 1.01, the Japanese builds or the Asia/Hong Kong build, and it also translates the launcher, the F1 options, the F10 overlay and the online screens. The Japanese builds (CUSA07001) show Japanese only, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. USA and Asia and Hong Kong builds (the Japanese builds already use them); narrator and player-character choices are unchanged
 - **Skip Intro** (Off by default): skips the startup logo and goes straight to the title screen. Applies at the next game start
 - **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)
@@ -309,6 +309,7 @@ Dragon's Crown Pro PC is maintained and developed in my free time. If you enjoy 
 - [shadPS4](https://github.com/shadps4-emu/shadPS4) for the Vulkan renderer, shader recompiler and GPU command processing the video core is built on, and for the PS4 package extractor the installer is adapted from, as it was before upstream commit `be22674f` removed it (GPL-2.0-or-later)
 - [gow3_pc](https://github.com/FelipePrado0/gow3_pc) and its lineage, uncharted-ndc-native, MediEvil PC and the HayatoG ports, for the loader, runtime and video core this port grew from (see [docs/REFERENCES.md](docs/REFERENCES.md))
 - [OpenCrown-PC](https://github.com/Nezara/OpenCrown-PC) by Nezara for published Dragon's Crown Pro reverse-engineering research used as a technical reference, including parts of the online/lobby research and the original CUSA10454 1.00 story/tutorial skip patch-site research. Dragon's Crown Pro PC's implementations were written separately for this project
+- Brazilian Portuguese translation, images and manual based on the work of [Marcelo - Uma Ficha](https://www.youtube.com/@umaficha1), used with permission
 - [bloodborne_pc_windows](https://github.com/Phroster/bloodborne_pc_windows) for the anisotropic filtering approach
 - [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al., and AMD FidelityFX Super Resolution 1
 - [TRG Launcher](https://github.com/TekRantGaming/trg-launcher), the launcher interface, pinned at v1.1.0, licensed under the MIT License

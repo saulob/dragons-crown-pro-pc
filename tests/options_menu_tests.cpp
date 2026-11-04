@@ -2,6 +2,7 @@
 // pages and choices, which settings apply live or after a restart, what is saved to dcp.ini, and that Online Play
 // keeps the Cheats page locked. Logic and temporary files only: no window, no game files.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -19,6 +20,7 @@
 #include "dcp_menu_input.h"
 #include "dcp_options_menu.h"
 #include "dcp_options_online.h"
+#include "localization/ui_text.h"
 #include "runtime_cheats.h"
 #include "runtime_online_page.h"
 
@@ -881,6 +883,34 @@ void TestEveryBuild() {
 }
 
 // No file of the Options menu's path names a build, so none can leave a supported build out.
+void TestEveryRowIsTranslated() {
+    std::vector<std::string> english;
+    for (const dcp::localization::UiTextRow& row : dcp::localization::PortugueseBrazilUiText().rows) {
+        english.push_back(row.english);
+    }
+    const auto translated = [&](const char* text) { return std::find(english.begin(), english.end(), text) != english.end(); };
+    for (const DcpOptions::Setting& setting : DcpOptions::kSettings) {
+        Check(translated(setting.label) && translated(setting.help), "every Options row has Portuguese (Brazil) text");
+    }
+    for (const DcpOptions::Page page : {DcpOptions::Page::Display, DcpOptions::Page::Graphics, DcpOptions::Page::Gameplay,
+                                        DcpOptions::Page::Online, DcpOptions::Page::Controls}) {
+        Check(translated(DcpOptions::PageName(page)) && translated(DcpOptions::PageNote(page)),
+              "every Options page has Portuguese (Brazil) text");
+    }
+}
+
+void TestConnectionLinesAreTranslated() {
+    const std::string lines = "\nOK Online service: Connected \xC2\xB7 32 ms"
+                              "\n!! Direct connections: May be blocked by your network or firewall on UDP port 3658.";
+    Check(DcpOptions::TranslateTestLines(lines) == lines, "English keeps the Connection test lines");
+    dcp::localization::SetActiveLanguage(dcp::kPortugueseBrazilKey);
+    Check(DcpOptions::TranslateTestLines(lines) ==
+              "\nOK Serviço online: Conectado \xC2\xB7 32 ms"
+              "\n!! Conexões diretas: Pode estar bloqueado pela sua rede ou firewall na porta UDP 3658.",
+          "the Connection test lines keep their marks and values in Portuguese (Brazil)");
+    dcp::localization::SetActiveLanguage("english");
+}
+
 void TestNoBuildIdentity() {
     const char* const files[] = {"gpu/shim/dcp_options_menu.h", "gpu/shim/dcp_options_menu.cpp",
                                  "gpu/shim/dcp_options_ui.h",   "gpu/shim/dcp_options_online.h",
@@ -908,6 +938,8 @@ int main() {
     TestCloseGate();
     TestStepping();
     TestSettingsTable();
+    TestEveryRowIsTranslated();
+    TestConnectionLinesAreTranslated();
     const fs::path folder = MakeTemporaryFolder();
     TestPersistence(folder);
     TestSkipOffers(folder);

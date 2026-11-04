@@ -6,6 +6,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "localization/ui_text.h"
 #include "net/online_version.h"
 #include "online_settings.h"
 #include "settings.h"
@@ -80,12 +81,17 @@ void FriendRow(trg::Ui& ui, const OnlinePlayer& player) {
         ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, below_name));
     }
     ImGui::PushFont(nullptr, ui.fonts().size * 0.84f);
-    ImGui::TextColored(ui.theme().dim, "%s", status.text.c_str());
+    std::string status_text = status.text;
+    const std::string presence = FriendPresence(player);
+    if (status_text.rfind(presence, 0) == 0) {
+        status_text.replace(0, presence.size(), Tr(presence));
+    }
+    ImGui::TextColored(ui.theme().dim, "%s", status_text.c_str());
     if (status.incompatible) {
         ImGui::SameLine(0.0f, 0.0f);
         ImGui::TextColored(ui.theme().dim, " \xC2\xB7 ");
         ImGui::SameLine(0.0f, 0.0f);
-        ImGui::TextColored(ui.theme().warn_dot, "Incompatible");
+        ImGui::TextColored(ui.theme().warn_dot, "%s", Tr("Incompatible"));
     }
     ImGui::PopFont();
     if (in_table) {
@@ -194,15 +200,15 @@ void OnlinePage::DrawFriendRequests(trg::Ui& ui) {
         ImGui::PushID(("request" + sender.account).c_str());
         BeginCard(ImVec4(t.panel.x, t.panel.y, t.panel.z, 0.96f), ImVec4(t.accent.x, t.accent.y, t.accent.z, 0.55f), 1.0f);
         ImGui::PushFont(ui.fonts().semibold, 0.0f);
-        ImGui::TextUnformatted("New friend request");
+        ImGui::TextUnformatted(Tr("New friend request"));
         ImGui::PopFont();
         ImGui::PushStyleColor(ImGuiCol_Text, t.dim);
-        ImGui::TextUnformatted(FriendRequestText(sender).c_str());
+        ImGui::TextUnformatted((sender.name + Tr(" wants to be your friend")).c_str());
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0, 2.0f * s));
-        if (AcceptButton(ui, "     Accept")) client_.Accept(sender.account);
+        if (AcceptButton(ui, Tr("     Accept"))) client_.Accept(sender.account);
         ImGui::SameLine();
-        if (ImGui::Button("Decline")) client_.Decline(sender.account);
+        if (ImGui::Button(Tr("Decline"))) client_.Decline(sender.account);
         EndCard();
         ImGui::PopID();
         ui.Spacer(4);
@@ -213,12 +219,13 @@ void OnlinePage::DrawFriendCode(trg::Ui& ui) {
     const OnlineClient::State& state = client_.state();
     ui.Row("Your friend code", kFriendCodeHelp);
     if (state.friend_code.empty()) {
-        ImGui::TextDisabled("%s", state.link == OnlineClient::Link::kUnreachable ? "Not available right now" : "Connecting...");
+        ImGui::TextDisabled("%s", Tr(state.link == OnlineClient::Link::kUnreachable ? "Not available right now"
+                                                                                    : "Connecting..."));
         return;
     }
     ImGui::TextUnformatted(state.friend_code.c_str());
     ImGui::SameLine();
-    if (ImGui::SmallButton("Copy")) {
+    if (ImGui::SmallButton(Tr("Copy"))) {
         ImGui::SetClipboardText(state.friend_code.c_str());
         ui.SetStatus("Friend code copied.");
     }
@@ -233,7 +240,7 @@ bool OnlinePage::DrawRequiredTestRow(trg::Ui& ui, const ConnectionTestLook& look
         ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, below_help));
     }
     ImGui::PushFont(ui.fonts().semibold, 0.0f);
-    ImGui::TextColored(ui.theme().accent, "%s", look.required_text);
+    ImGui::TextColored(ui.theme().accent, "%s", Tr(look.required_text));
     ImGui::PopFont();
     if (in_table) {
         ImGui::TableSetColumnIndex(1);
@@ -249,7 +256,7 @@ bool OnlinePage::DrawRequiredTestRow(trg::Ui& ui, const ConnectionTestLook& look
 void OnlinePage::DrawConnectionTest(trg::Ui& ui) {
     const bool testing = testing_;
     const ConnectionTestLook look = ConnectionTestLookOf(PlayNeedsTest(ui.settings()));
-    const char* button = testing ? "Testing..." : "Run test";
+    const char* button = Tr(testing ? "Testing..." : "Run test");
     const bool point = look.panel && pointed_;
     pointed_ = false;
     bool run = false;
@@ -271,7 +278,7 @@ void OnlinePage::DrawConnectionTest(trg::Ui& ui) {
         run = DrawRequiredTestRow(ui, look, button, point);
         ui.EndRows();
         if (testing) {
-            if (const char* note = ConnectionTestRunningNote(OnWindows())) ui.Help(note);
+            if (const char* note = ConnectionTestRunningNote(OnWindows())) ui.Help(Tr(note));
         }
         EndCard();
         ImGui::PopID();
@@ -287,7 +294,7 @@ void OnlinePage::DrawConnectionTest(trg::Ui& ui) {
     }
     if (!result.done || testing) return;
     ui.EndRows();
-    ui.Heading(result.report.verdict.c_str());
+    ui.Heading(Tr(result.report.verdict.c_str()));
     for (const auto& line : result.report.lines) {
         using Mark = net::ConnectionReport::Mark;
         const ImVec4 color = line.mark == Mark::kOk ? ui.theme().good_dot : line.mark == Mark::kNote ? ui.theme().dim
@@ -296,7 +303,7 @@ void OnlinePage::DrawConnectionTest(trg::Ui& ui) {
         ImGui::TextUnformatted(line.mark == Mark::kOk ? "OK" : line.mark == Mark::kNote ? "--" : "!!");
         ImGui::PopStyleColor();
         ImGui::SameLine();
-        ImGui::TextWrapped("%s: %s", line.label.c_str(), line.text.c_str());
+        ImGui::TextWrapped("%s: %s", Tr(line.label.c_str()), TrValue(line.text).c_str());
     }
     ui.Spacer();
 }
@@ -307,26 +314,26 @@ void OnlinePage::DrawFriends(trg::Ui& ui) {
     if (state.link == OnlineClient::Link::kUnreachable) {
         ui.Help(kUnreachable);
     } else if (!state.notice.empty()) {
-        ui.Help(state.notice.c_str());
+        ui.Help(TrValue(state.notice).c_str());
     }
     ui.Row("Add a friend", "Their friend code, for example ABCD-EFGH.");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
     ImGui::InputTextWithHint("##add_code", "XXXX-XXXX", add_code_, sizeof(add_code_), ImGuiInputTextFlags_CharsUppercase);
     ImGui::SameLine();
-    if (ImGui::Button("Send request") && add_code_[0]) {
+    if (ImGui::Button(Tr("Send request")) && add_code_[0]) {
         client_.AddFriend(add_code_);
         add_code_[0] = 0;
     }
     for (const OnlinePlayer& r : state.outgoing) {
         ui.Row(r.name.c_str(), "Your request is waiting for an answer.");
         ImGui::PushID(("out" + r.account).c_str());
-        if (ImGui::Button("Cancel request")) client_.Decline(r.account);
+        if (ImGui::Button(Tr("Cancel request"))) client_.Decline(r.account);
         ImGui::PopID();
     }
     for (const OnlinePlayer& f : state.friends) {
         FriendRow(ui, f);
         ImGui::PushID(("f" + f.account).c_str());
-        if (ImGui::Button("Remove")) client_.Remove(f.account);
+        if (ImGui::Button(Tr("Remove"))) client_.Remove(f.account);
         ImGui::PopID();
     }
     if (state.fetched && state.friends.empty() && state.incoming.empty() && state.outgoing.empty()) {

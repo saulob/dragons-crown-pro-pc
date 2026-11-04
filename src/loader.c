@@ -464,6 +464,24 @@ static int install_true_ultrawide(int requested, const DcpGameBuild *build, cons
            build ? build->label : "unknown game build",detail);
     return effective;
 }
+/* A port-side Menu & Subtitles language: its translated message sheets served over the regional archive's slot. */
+static void install_text_translation(const char *settings_file, const char *image_dir, const char *app0) {
+    char message[1024]="";
+    uint64_t length=0;
+    DcpFilePatch *patches=NULL;
+    size_t count=0;
+    const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message));
+    if (archive) {
+        char guest[256];
+        snprintf(guest,sizeof(guest),"/app0/%s",archive);
+        RuntimeFilePatch *table=calloc(count ? count : 1,sizeof(*table));
+        for (size_t i=0;table && i<count;++i) table[i]=(RuntimeFilePatch){patches[i].offset,patches[i].size,patches[i].data};
+        if (!table || runtime_file_overlay(guest,length,table,count))
+            snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid), showing English",archive);
+        free(table);
+    }
+    if (*message) printf("Menu & Subtitles: %s\n",message);
+}
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
     (void)argc; (void)argv;
@@ -645,6 +663,7 @@ int main(int argc, char **argv) {
     }
     if (app0) {
         runtime_file_configure(app0, user_dir ? user_dir : "user");
+        install_text_translation(settings_file,paths.image_dir,app0);
         char sfo[4096], id[16]="";
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0);
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))

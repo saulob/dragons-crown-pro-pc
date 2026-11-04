@@ -5,6 +5,7 @@
  * Paths containing ".." components are rejected rather than normalized. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,10 +48,16 @@ typedef struct {
 _Static_assert(sizeof(GuestStat)==120,"FreeBSD stat layout");
 
 typedef struct { char *names; size_t count, *offsets; unsigned char *types; } Listing;
-typedef struct { int used, host; Listing *dir; size_t position; char path[512]; } File;
+/* A game file the guest reads with byte ranges replaced and possibly past its end; the host file is never written. */
+typedef struct { uint64_t offset, size; const unsigned char *data; } OverlayPatch;
+typedef struct { char guest[512]; uint64_t length; OverlayPatch *patches; size_t count; } Overlay;
+typedef struct { int used, host; Listing *dir; size_t position; char path[512]; const Overlay *overlay; } File;
 typedef struct { char guest[64]; char host[512]; } Mount;
+#define MAX_OVERLAYS 4
 static File files[MAX_FILES];
 static Mount mounts[MAX_MOUNTS];
+static Overlay overlays[MAX_OVERLAYS];
+static size_t overlay_count;
 static size_t mount_count, opens, reads, writes, missing;
 static uint64_t bytes_read;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
@@ -118,12 +125,42 @@ static void match_case(char *path,size_t root) {
     }
 }
 #endif
+static void absolute_guest_path(const char *guest,char *out,size_t size) {
+    if (guest[0]!='/') snprintf(out,size,"/app0/%s",guest);
+    else snprintf(out,size,"%s",guest);
+}
+static int same_path_ignoring_case(const char *a,const char *b) {
+    for (;*a && *b;++a,++b) if (tolower((unsigned char)*a)!=tolower((unsigned char)*b)) return 0;
+    return *a==*b;
+}
+static const Overlay *overlay_of(const char *guest) {
+    if (!guest || !*guest || !overlay_count) return NULL;
+    char path[1024];
+    absolute_guest_path(guest,path,sizeof(path));
+    for (size_t i=0;i<overlay_count;++i) if (same_path_ignoring_case(overlays[i].guest,path)) return &overlays[i];
+    return NULL;
+}
+/* Registered before the guest starts: opens and reads take no lock for the table. The patches' data is borrowed, not
+ * copied, and must stay valid for the life of the process. */
+int runtime_file_overlay(const char *guest,uint64_t length,const RuntimeFilePatch *patches,size_t count) {
+    if (!guest || overlay_count==MAX_OVERLAYS || overlay_of(guest) || strlen(guest)+6>=sizeof(overlays[0].guest)) return -1;
+    for (size_t i=0;i<count;++i)
+        if (patches[i].offset>length || patches[i].size>length-patches[i].offset) return -1;
+    Overlay o={.length=length,.patches=calloc(count ? count : 1,sizeof(OverlayPatch))};
+    if (!o.patches) return -1;
+    for (;o.count<count;++o.count) {
+        const RuntimeFilePatch *p=&patches[o.count];
+        o.patches[o.count]=(OverlayPatch){p->offset,p->size,p->data};
+    }
+    absolute_guest_path(guest,o.guest,sizeof(o.guest));
+    overlays[overlay_count++]=o;
+    return 0;
+}
 /* Resolve a guest path to a host path; returns 0 or a host errno. */
 static int translate(const char *guest,char *out,size_t size) {
     if (!guest || !*guest) return ENOENT;
     char buffer[1024];
-    if (guest[0]!='/') snprintf(buffer,sizeof(buffer),"/app0/%s",guest);
-    else snprintf(buffer,sizeof(buffer),"%s",guest);
+    absolute_guest_path(guest,buffer,sizeof(buffer));
     for (const char *p=buffer;(p=strstr(p,".."));p+=2)
         if ((p==buffer || p[-1]=='/') && (p[2]==0 || p[2]=='/')) return EACCES;
     pthread_mutex_lock(&lock);
@@ -277,7 +314,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     int fd=-1;
     for (int i=3;i<MAX_FILES;++i) if (!files[i].used) { fd=i; break; }
     if (fd<0) { pthread_mutex_unlock(&lock); if (host>=0) close(host); free_listing(dir); return -EMFILE; }
-    files[fd]=(File){.used=1,.host=host,.dir=dir};
+    files[fd]=(File){.used=1,.host=host,.dir=dir,.overlay=dir ? NULL : overlay_of(guest)};
     snprintf(files[fd].path,sizeof(files[fd].path),"%s",guest);
     ++opens;
     pthread_mutex_unlock(&lock);
@@ -318,10 +355,43 @@ static void touch_for_write(void *buffer,uint64_t size) {
         *b=*b;
     }
 }
+/* The host bytes, zeros past the host file's end, then the overlay's patches on top. */
+static int64_t overlay_pread(const File *f,void *buffer,uint64_t size,int64_t offset) {
+    const Overlay *o=f->overlay;
+    if (offset<0) return -EINVAL;
+    if ((uint64_t)offset>=o->length) return 0;
+    if (size>o->length-(uint64_t)offset) size=o->length-(uint64_t)offset;
+    HostStat s;
+    if (host_fstat(f->host,&s)) return -errno;
+    uint64_t host_end=(uint64_t)s.st_size, filled=0;
+    while (filled<size && (uint64_t)offset+filled<host_end) {
+        ssize_t n=pread(f->host,(unsigned char *)buffer+filled,size-filled,offset+(int64_t)filled);
+        if (n<0) return -errno;
+        if (!n) break;
+        filled+=(uint64_t)n;
+    }
+    memset((unsigned char *)buffer+filled,0,size-filled);
+    for (size_t i=0;i<o->count;++i) {
+        const OverlayPatch *p=&o->patches[i];
+        uint64_t lo=p->offset>(uint64_t)offset ? p->offset : (uint64_t)offset;
+        uint64_t hi=p->offset+p->size<(uint64_t)offset+size ? p->offset+p->size : (uint64_t)offset+size;
+        if (lo<hi) memcpy((unsigned char *)buffer+(lo-(uint64_t)offset),p->data+(lo-p->offset),hi-lo);
+    }
+    return (int64_t)size;
+}
 static int64_t do_read(int fd,void *buffer,uint64_t size) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     touch_for_write(buffer,size);
+    const File *f=get(fd);
+    if (f && f->overlay) {
+        int64_t at=host_lseek(h,0,SEEK_CUR);
+        if (at<0) return -errno;
+        int64_t n=overlay_pread(f,buffer,size,at);
+        if (n>0 && host_lseek(h,at+n,SEEK_SET)<0) return -errno;
+        if (n>0) { __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED); }
+        return n;
+    }
     ssize_t n=host_read(h,buffer,size);
     if (n<0) return -errno;
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
@@ -331,6 +401,12 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     touch_for_write(buffer,size);
+    const File *f=get(fd);
+    if (f && f->overlay) {
+        int64_t n=overlay_pread(f,buffer,size,offset);
+        if (n>0) { __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED); }
+        return n;
+    }
     ssize_t n=pread(h,buffer,size,offset);
     if (n<0) return -errno;
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
@@ -359,6 +435,7 @@ static int64_t do_lseek(int fd,int64_t offset,int whence) {
         if (whence==0 && offset>=0) { f->position=(size_t)offset; return offset; }
         return -EINVAL;
     }
+    if (f->overlay && whence==2) { offset+=(int64_t)f->overlay->length; whence=0; }
     int64_t r=host_lseek(f->host,offset,whence);
     return r<0 ? -errno : r;
 }
@@ -378,7 +455,10 @@ static int64_t do_fstat(int fd,GuestStat *out) {
 #endif
     if (!out) return -EFAULT;
     if (host_fstat(h,&s)) return -errno;
-    convert_stat(&s,out); return 0;
+    convert_stat(&s,out);
+    const File *f=get(fd);
+    if (f && f->overlay) { out->size=(int64_t)f->overlay->length; out->blocks=(out->size+511)/512; }
+    return 0;
 }
 static int64_t do_stat(const char *guest,GuestStat *out) {
     char path[1024]; HostStat s;
@@ -386,7 +466,10 @@ static int64_t do_stat(const char *guest,GuestStat *out) {
     if (e) return -e;
     if (!out) return -EFAULT;
     if (host_stat(path,&s)) return -errno;
-    convert_stat(&s,out); return 0;
+    convert_stat(&s,out);
+    const Overlay *o=overlay_of(guest);
+    if (o && !S_ISDIR(s.st_mode)) { out->size=(int64_t)o->length; out->blocks=(out->size+511)/512; }
+    return 0;
 }
 static int64_t do_getdents(int fd,char *buffer,uint64_t size,int64_t *basep) {
     pthread_mutex_lock(&lock);

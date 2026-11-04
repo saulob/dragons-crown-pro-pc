@@ -125,7 +125,7 @@ struct Capabilities {
     bool cheats = false, xbox_prompts = false, npc_voices = false, true_ultrawide = false, custom_resolution = false;
     Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, menu_buttons = Mapping::kNone, unlock_gallery = Mapping::kNone, system_type = Mapping::kNone,
             lzcnt = Mapping::kNone, startup_save = Mapping::kNone;
-    std::string languages;
+    std::string languages, translations;
 };
 
 Capabilities CapabilitiesOf(const GameBuild& build) {
@@ -147,7 +147,8 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     caps.lzcnt = table_or_search(Listed(lzcnt_builds, build));
     caps.startup_save = Listed(startup_save_records, build) ? Mapping::kTable : Mapping::kNone;
     for (const TextLanguage& language : TextLanguagesOf(&build)) {
-        caps.languages += (caps.languages.empty() ? "" : " ") + std::string(language.key);
+        std::string& list = language.translation.empty() ? caps.languages : caps.translations;
+        list += (list.empty() ? "" : " ") + std::string(language.key);
     }
     return caps;
 }
@@ -374,6 +375,7 @@ void TestContract() {
         const Capabilities caps = CapabilitiesOf(build);
         CHECK(caps.startup_save == row->startup_save);
         CHECK(caps.languages == row->languages);
+        CHECK(caps.translations == (IsUs100(build) ? "brazilian_portuguese" : ""));
         CHECK(NativeJapaneseNpcVoices(&build) == row->native_japanese_voices);
         g_scope = "contract";
     }
@@ -498,7 +500,7 @@ void TestExitGameLanguages() {
             }
             CHECK(text && text->row && *text->row && text->help && *text->help);
             used.insert(std::string(language.key));
-            joined += (joined.empty() ? "" : " ") + std::string(language.key);
+            if (language.translation.empty()) joined += (joined.empty() ? "" : " ") + std::string(language.key);
         }
         CHECK(row && joined == row->languages);
     }
@@ -588,6 +590,7 @@ void TestUpdateParity() {
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
         CHECK(u.languages == b.languages);
+        CHECK(u.translations.empty());
         CHECK(update->features_by_signature && base->features_by_signature == !IsUs100(*base));
         CHECK(update->cheats == base->cheats && update->japanese_npc_voices == base->japanese_npc_voices &&
               update->true_ultrawide == base->true_ultrawide);

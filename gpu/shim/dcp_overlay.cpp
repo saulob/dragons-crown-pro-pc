@@ -18,6 +18,7 @@
 #include "dcp_cheat_menu.h"
 #include "dcp_menu_input.h"
 #include "dcp_options_menu.h"
+#include "localization/ui_text.h"
 #include "dcp_options_ui.h"
 #include "dcp_settings.h"
 #include "dcp_overlay_box.h"
@@ -257,7 +258,7 @@ CheatRowText CheatRowState(const dcp::cheats::MenuRow& row) {
                         : action ? row.verb
                         : choice ? choice_label
                         : (on ? "On" : "Off");
-    return {state, usable && (action || on || (choice && multiplier != off))};
+    return {state ? dcp::Tr(state) : nullptr, usable && (action || on || (choice && multiplier != off))};
 }
 
 void ActivateCheatRow(const dcp::cheats::MenuRow& row) {
@@ -296,7 +297,7 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     const float pad = ImGui::GetFontSize() * 0.4f;
     const float y = min.y + (height - ImGui::GetFontSize()) * 0.5f;
     const CheatRowText text = CheatRowState(row);
-    draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
+    draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), dcp::Tr(row.label));
     if (text.state != nullptr) {
         draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(text.state).x, y),
                       ImGui::GetColorU32(text.lit ? accent : dim), text.state);
@@ -312,13 +313,13 @@ const char* CheatRowHelp(const dcp::cheats::MenuRow& row) {
     case dcp::cheats::RowKind::Toggle:
         for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
             if (info.cheat == row.cheat) {
-                return info.description;
+                return dcp::Tr(info.description);
             }
         }
         return "";
-    case dcp::cheats::RowKind::Action: return "Runs once each time it is pressed. Nothing is saved.";
-    case dcp::cheats::RowKind::MovementSpeed: return dcp::cheats::kMovementSpeedHelp;
-    case dcp::cheats::RowKind::Experience: return dcp::cheats::kExperienceMultiplierHelp;
+    case dcp::cheats::RowKind::Action: return dcp::Tr("Runs once each time it is pressed. Nothing is saved.");
+    case dcp::cheats::RowKind::MovementSpeed: return dcp::Tr(dcp::cheats::kMovementSpeedHelp);
+    case dcp::cheats::RowKind::Experience: return dcp::Tr(dcp::cheats::kExperienceMultiplierHelp);
     }
     return "";
 }
@@ -326,7 +327,7 @@ const char* CheatRowHelp(const dcp::cheats::MenuRow& row) {
 DcpOptionsUi::CheatRowView OptionsCheatView(size_t index) {
     const dcp::cheats::MenuRow& row = dcp::cheats::kMenuRows[index];
     const CheatRowText text = CheatRowState(row);
-    return {row.label, CheatRowHelp(row), text.state, text.lit};
+    return {dcp::Tr(row.label), CheatRowHelp(row), text.state, text.lit};
 }
 
 void OptionsCheatActivate(size_t index, int direction) {
@@ -338,7 +339,7 @@ void OptionsCheatActivate(size_t index, int direction) {
 }
 
 const char* OptionsCheatNote() {
-    return runtime_cheats_available() ? nullptr : "Cheats are not available for this game build.";
+    return runtime_cheats_available() ? nullptr : dcp::Tr("Cheats are not available for this game build.");
 }
 
 bool OptionsOnlinePlay() {
@@ -411,7 +412,7 @@ void CheatMenu() {
                                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
     if (ImGui::Begin("##dcp_cheat_menu", nullptr, flags)) {
         ImGui::SetWindowFontScale(scale);
-        ImGui::TextColored(accent, "%s", dcp::cheats::kMenuTitle);
+        ImGui::TextColored(accent, "%s", dcp::Tr(dcp::cheats::kMenuTitle));
         ImGui::Separator();
         const float body_available = available_height - window_padding * 2.0f - header_height - footer_height;
         const float child_height = std::max(std::min(body_height, body_available), 1.0f);
@@ -446,8 +447,8 @@ void CheatMenu() {
         }
         ImGui::EndChild();
         ImGui::Separator();
-        ImGui::TextColored(dim, "%s", dcp::cheats::kMenuCloseHint);
-        ImGui::TextColored(dim, "%s", dcp::cheats::kMenuNote);
+        ImGui::TextColored(dim, "%s", dcp::Tr(dcp::cheats::kMenuCloseHint));
+        ImGui::TextColored(dim, "%s", dcp::Tr(dcp::cheats::kMenuNote));
     }
     ImGui::End();
     ImGui::PopStyleVar(4);
@@ -469,7 +470,7 @@ void PressCheatMenuKey(bool repeat) {
     switch (dcp::cheats::MenuKeyPress(repeat, runtime_cheats_online_locked() != 0, cheat_open, busy)) {
     case dcp::cheats::MenuKeyAction::Open: OpenCheatMenu(); break;
     case dcp::cheats::MenuKeyAction::Close: menu_close.Request(); break;
-    case dcp::cheats::MenuKeyAction::OnlineHint: SetNotice(dcp::cheats::kOnlineLockoutText); break;
+    case dcp::cheats::MenuKeyAction::OnlineHint: SetNotice(dcp::Tr(dcp::cheats::kOnlineLockoutText)); break;
     case dcp::cheats::MenuKeyAction::None: break;
     }
 }
@@ -531,8 +532,8 @@ void TextEntryBox() {
     ImGui::Text("%s_", text_entry_text.c_str());
     ImGui::SetWindowFontScale(1.0f);
     ImGui::Separator();
-    ImGui::TextDisabled("Keyboard: type, Backspace to erase, Enter = OK, Esc = cancel");
-    ImGui::TextDisabled("Controller: Cross (A) = OK, Circle (B) = cancel");
+    ImGui::TextDisabled("%s", dcp::Tr("Keyboard: type, Backspace to erase, Enter = OK, Esc = cancel"));
+    ImGui::TextDisabled("%s", dcp::Tr("Controller: Cross (A) = OK, Circle (B) = cancel"));
     ImGui::End();
 }
 
@@ -585,7 +586,7 @@ void ChoiceBox() {
         }
     }
     ImGui::Separator();
-    ImGui::TextDisabled("Up/Down or D-pad: choose   Enter or Cross (A): OK   Esc or Circle (B): cancel");
+    ImGui::TextDisabled("%s", dcp::Tr("Up/Down or D-pad: choose   Enter or Cross (A): OK   Esc or Circle (B): cancel"));
     ImGui::End();
 }
 
@@ -601,7 +602,7 @@ void LoadingScreen() {
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
     const u32 done = loading_done, total = loading_total;
     ImGui::SetWindowFontScale(1.6f);
-    ImGui::TextUnformatted(total ? "Loading shader cache..." : "Preparing graphics...");
+    ImGui::TextUnformatted(dcp::Tr(total ? "Loading shader cache..." : "Preparing graphics..."));
     ImGui::SetWindowFontScale(1.0f);
     if (total) {
         char count[64];
@@ -609,7 +610,7 @@ void LoadingScreen() {
                       u32(u64(done) * 100 / total));
         ImGui::ProgressBar(float(done) / float(total), ImVec2(-1.0f, 0.0f), count);
     }
-    ImGui::TextDisabled("The first start after an update takes longer.");
+    ImGui::TextDisabled("%s", dcp::Tr("The first start after an update takes longer."));
     ImGui::End();
 }
 
@@ -646,7 +647,7 @@ void BackgroundLoading() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::TextDisabled("Loading shader cache %u%%", u32(u64(done) * 100 / total));
+    ImGui::TextDisabled("%s %u%%", dcp::Tr("Loading shader cache"), u32(u64(done) * 100 / total));
     ImGui::End();
 }
 
@@ -660,13 +661,30 @@ void Notice() {
 }
 
 // An online room of an incompatible port version was left out or refused: long enough to read three lines.
+// "Label: value" lines keep their value; the label and the plain lines are translated.
+std::string TranslateNotice(const std::string& text) {
+    std::string out;
+    size_t start = 0;
+    while (true) {
+        const size_t end = text.find('\n', start);
+        const std::string line = text.substr(start, end == std::string::npos ? end : end - start);
+        const size_t colon = line.find(": v");
+        out += colon == std::string::npos ? dcp::Tr(line) : dcp::Tr(line.substr(0, colon)) + line.substr(colon);
+        if (end == std::string::npos) {
+            return out;
+        }
+        out += '\n';
+        start = end + 1;
+    }
+}
+
 void PollOnlineNotice() {
     char text[256];
     if (!runtime_online_take_notice(text, sizeof(text))) {
         return;
     }
     std::scoped_lock lock{imgui_mutex};
-    SetNotice(text, std::chrono::seconds(6));
+    SetNotice(TranslateNotice(text), std::chrono::seconds(6));
 }
 
 } // namespace

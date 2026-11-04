@@ -2,6 +2,8 @@
 
 #include <string_view>
 
+#include "localization/ui_text.h"
+
 namespace dcp {
 namespace {
 
@@ -98,6 +100,12 @@ constexpr TextLanguage kWesternLanguages[] = {
     {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
     {"italian", "Italian", 5, "IT"}, {"spanish", "Spanish", 3, "ES"},
 };
+// Brazilian Portuguese is the port's translation of the English slot (game_translation.h), made for 1.00's sheets.
+constexpr TextLanguage kUsLanguages[] = {
+    {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
+    {"italian", "Italian", 5, "IT"}, {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
+    {"spanish", "Spanish", 3, "ES"},
+};
 constexpr TextLanguage kAsiaLanguages[] = {{"traditional_chinese", "Traditional Chinese", 10, "CT"},
                                            {"korean", "Korean", 9, "KR"}};
 // The Japanese executables never read the system language: their only text is DRACRO.CPK's unsuffixed sheets.
@@ -120,7 +128,7 @@ constexpr GameBuild kGameBuilds[] = {
         true,
         kUsLayers,
         kUsResolutionSites,
-        kWesternLanguages,
+        kUsLanguages,
     },
     {
         "CUSA10454",
@@ -318,7 +326,7 @@ std::string SupportedBuildsText() {
     std::string text;
     for (size_t i = 0; i < builds.size(); ++i) {
         if (i > 0) {
-            text += i + 1 == builds.size() ? " and " : ", ";
+            text += i + 1 == builds.size() ? Tr(" and ") : ", ";
         }
         text += builds[i].label;
     }
