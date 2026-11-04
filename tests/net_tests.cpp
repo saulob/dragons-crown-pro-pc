@@ -30,6 +30,7 @@
 #include "net/peer_socket.h"
 #include "net/relay_frame.h"
 #include "net/stun.h"
+#include "fake_stun.h"
 #include "net/websocket.h"
 
 namespace fs = std::filesystem;
@@ -451,6 +452,119 @@ void TestAddresses() {
     CHECK(is_lan(parse_ip("169.254.0.1")) && !is_lan(parse_ip("8.8.8.8")));
 }
 
+void TestAddressText() {
+    struct Case {
+        const char* text;
+        AddressKind kind;
+        bool lan;
+    };
+    const Case cases[] = {
+        {"127.0.0.1", AddressKind::kLoopback, true},
+        {"10.1.2.3", AddressKind::kPrivate, true},
+        {"172.16.0.1", AddressKind::kPrivate, true},
+        {"192.168.1.20", AddressKind::kPrivate, true},
+        {"169.254.0.1", AddressKind::kLinkLocal, true},
+        {"203.0.113.9", AddressKind::kPublic, false},
+        {"100.64.0.13", AddressKind::kCarrierNat, false},
+        {"::1", AddressKind::kLoopback, true},
+        {"fe80::1", AddressKind::kLinkLocal, true},
+        {"febf::1", AddressKind::kLinkLocal, true},
+        {"fe80::1%eth0", AddressKind::kLinkLocal, true},
+        {"fc00::1", AddressKind::kUniqueLocal, true},
+        {"fd12:3456::1", AddressKind::kUniqueLocal, true},
+        {"2001:db8:3f01:600:f582:ba04:1749:7051", AddressKind::kPublic, false},
+        {"2606:4700::1", AddressKind::kPublic, false},
+        {"::ffff:192.168.1.20", AddressKind::kPrivate, true},
+        {"::ffff:203.0.113.9", AddressKind::kPublic, false},
+        {"ff02::1", AddressKind::kReserved, false},
+        {"fec0::1", AddressKind::kReserved, false},
+        {"::", AddressKind::kInvalid, false},
+        {"0.0.0.0", AddressKind::kInvalid, false},
+        {"", AddressKind::kInvalid, false},
+        {"not an address", AddressKind::kInvalid, false},
+        {"2001:db8::1::2", AddressKind::kInvalid, false},
+    };
+    for (const Case& c : cases) {
+        CHECK(classify_text(c.text) == c.kind);
+        CHECK(is_lan(classify_text(c.text)) == c.lan);
+    }
+    for (const char* ip : {"127.0.0.1", "10.1.2.3", "169.254.0.1", "203.0.113.9"}) {
+        CHECK(is_lan(parse_ip(ip)) == is_lan(classify_text(ip)));
+    }
+}
+
+void TestEndpointChoice() {
+    CHECK(PeerSocket::Options{}.bind_ip == 0 && OnlineConfig{}.bind_ip == 0);
+    CHECK(ReadSource("src/net/online_config.cpp").find("bind_ip") == std::string::npos);
+    const uint16_t local = 3658;
+    const Endpoint none;
+    const Endpoint stun_public{parse_ip("198.51.100.25"), 41000};
+    const Endpoint upnp_public{parse_ip("198.51.100.25"), 42000};
+    const auto lobby_lan = [](const char* ip) { return is_lan(classify_text(ip)); };
+    const auto ipv4 = [&](const Endpoint& mapped, StunState stun, const Endpoint& upnp = {}) {
+        return choose_endpoint(parse_ip("203.0.113.9"), lobby_lan("203.0.113.9"), local, stun, mapped, upnp);
+    };
+    const auto ipv6 = [&](const Endpoint& mapped, StunState stun, const Endpoint& upnp = {}) {
+        const char* seen = "2001:db8:3f01:600:f582:ba04:1749:7051";
+        return choose_endpoint(parse_ip(seen), lobby_lan(seen), local, stun, mapped, upnp);
+    };
+
+    // IPv4 users keep the address the lobby sees, whatever STUN says.
+    const uint32_t seen = parse_ip("203.0.113.9");
+    CHECK((ipv4(stun_public, StunState::kDone) == EndpointChoice{EndpointSource::kStun, 41000, seen}));
+    CHECK((ipv4(none, StunState::kFailed) == EndpointChoice{EndpointSource::kLobby, local, seen}));
+    const Endpoint upnp_seen{seen, 42000};
+    CHECK((ipv4(stun_public, StunState::kDone, upnp_seen) == EndpointChoice{EndpointSource::kUpnp, 42000, seen}));
+    CHECK((ipv4(stun_public, StunState::kDone, upnp_public) == EndpointChoice{EndpointSource::kStun, 41000, seen}));
+
+    for (const char* lan : {"192.168.1.20", "10.1.2.3", "169.254.0.1", "127.0.0.1"}) {
+        CHECK(lobby_lan(lan));
+        const EndpointChoice c = choose_endpoint(parse_ip(lan), true, local, StunState::kDone, stun_public, upnp_public);
+        CHECK((c == EndpointChoice{EndpointSource::kLan, local, parse_ip(lan)}));
+    }
+    for (const char* lan : {"fd12:3456::1", "fe80::1", "::1"}) {
+        CHECK(lobby_lan(lan));
+        const EndpointChoice c = choose_endpoint(parse_ip(lan), true, local, StunState::kDone, stun_public, none);
+        CHECK((c == EndpointChoice{EndpointSource::kLan, local, 0}));
+    }
+
+    const EndpointChoice stun_v4 = ipv6(stun_public, StunState::kDone);
+    CHECK((stun_v4 == EndpointChoice{EndpointSource::kStun, 41000, stun_public.ip}));
+    CHECK((ipv6(stun_public, StunState::kDone, upnp_public) == EndpointChoice{EndpointSource::kUpnp, 42000, stun_public.ip}));
+    CHECK((ipv6(none, StunState::kFailed, upnp_public) == EndpointChoice{EndpointSource::kUpnp, 42000, upnp_public.ip}));
+    const Endpoint upnp_elsewhere{parse_ip("192.0.2.77"), 42000};
+    CHECK((ipv6(stun_public, StunState::kDone, upnp_elsewhere) == EndpointChoice{EndpointSource::kStun, 41000, stun_public.ip}));
+
+    const EndpointChoice relay{EndpointSource::kRelayFallback, local, 0};
+    CHECK(ipv6(none, StunState::kFailed) == relay);
+    CHECK(ipv6(none, StunState::kRunning) == relay);
+    CHECK(ipv6({parse_ip("192.168.1.20"), 41000}, StunState::kDone) == relay);
+    CHECK(ipv6({parse_ip("100.64.0.13"), 41000}, StunState::kDone) == relay);
+    CHECK(ipv6(none, StunState::kFailed, {parse_ip("192.168.0.2"), 42000}) == relay);
+    CHECK(choose_endpoint(0, lobby_lan(""), local, StunState::kDone, stun_public, none).source == EndpointSource::kStun);
+    CHECK(choose_endpoint(0, lobby_lan(""), local, StunState::kFailed, none, none) == relay);
+
+    // A STUN result that arrives after the fallback report changes what must be reported, though not the port.
+    const Endpoint same_port{stun_public.ip, local};
+    CHECK(ipv6(same_port, StunState::kDone).port == relay.port && ipv6(same_port, StunState::kDone).ip != relay.ip);
+
+    // The relay-only path of issue #49 is taken only when no public IPv4 was found.
+    const uint16_t member = 0x20;
+    CHECK(signaling_endpoint({stun_v4.ip, stun_v4.port}, member) == stun_public);
+    CHECK(signaling_endpoint({relay.ip, relay.port}, member) == relay_endpoint(member));
+
+    CHECK(endpoint_choice_text(stun_v4, true) == "reporting public STUN endpoint 198.51.100.25:41000");
+    CHECK(endpoint_choice_text({EndpointSource::kUpnp, 42000, stun_public.ip}, true) == "reporting public UPnP endpoint 198.51.100.25:42000");
+    CHECK(endpoint_choice_text({EndpointSource::kLobby, local, seen}, true) == "reporting lobby-observed endpoint 203.0.113.9:3658");
+    CHECK(endpoint_choice_text({EndpointSource::kLan, local, parse_ip("192.168.1.20")}, true) == "reporting LAN endpoint 192.168.1.20:3658");
+    CHECK(endpoint_choice_text({EndpointSource::kLan, local, 0}, true) == "reporting LAN endpoint on port 3658");
+    CHECK(endpoint_choice_text(relay, true) == "public endpoint unavailable, relay fallback");
+    CHECK(endpoint_choice_text(relay, false) == "public endpoint unavailable, relay not offered");
+
+    CHECK(lobby_endpoint_text("", "2001:db8::1") == "2001:db8::1" && lobby_endpoint_text("", "203.0.113.9") == "203.0.113.9");
+    CHECK(lobby_endpoint_text("198.51.100.25", "2001:db8::1") == "observed 2001:db8::1, public 198.51.100.25");
+}
+
 void TestStun() {
     stun::TransactionId id{};
     for (size_t i = 0; i < id.size(); ++i) id[i] = uint8_t(i + 1);
@@ -471,60 +585,6 @@ void TestStun() {
     uint8_t garbage[32] = {'D', 'N', 1, 3};
     CHECK(!stun::looks_like_stun(garbage, sizeof(garbage)));
 }
-
-// A loopback STUN server: answers each Binding request with the sender's own address and remembers its port.
-class FakeStun {
-public:
-    FakeStun() {
-        s_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        const sockaddr_in local = to_sockaddr({parse_ip("127.0.0.1"), 0});
-        bind(s_, reinterpret_cast<const sockaddr*>(&local), sizeof(local));
-        sockaddr_in bound{};
-        socklen_t length = sizeof(bound);
-        getsockname(s_, reinterpret_cast<sockaddr*>(&bound), &length);
-        port_ = ntohs(bound.sin_port);
-        set_nonblocking(s_);
-        thread_ = std::thread([this] { Run(); });
-    }
-    ~FakeStun() {
-        stop_ = true;
-        thread_.join();
-        close_socket(s_);
-    }
-    uint16_t port() const { return port_; }
-    uint16_t last_source() const { return source_; }
-
-private:
-    void Run() {
-        uint8_t buffer[1500];
-        while (!stop_) {
-            sockaddr_in from{};
-            socklen_t length = sizeof(from);
-            const int n = int(recvfrom(s_, reinterpret_cast<char*>(buffer), sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&from), &length));
-            if (n < int(stun::kRequestSize)) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                continue;
-            }
-            const uint16_t port = ntohs(from.sin_port);
-            const uint32_t ip = ntohl(from.sin_addr.s_addr);
-            source_ = port;
-            uint8_t response[32] = {0x01, 0x01, 0x00, 0x0c, 0x21, 0x12, 0xa4, 0x42};
-            std::memcpy(response + 8, buffer + 8, 12);
-            const uint16_t xport = port ^ 0x2112;
-            const uint32_t xip = ip ^ 0x2112a442u;
-            const uint8_t attr[] = {0x00, 0x20, 0x00, 0x08, 0x00, 0x01, uint8_t(xport >> 8), uint8_t(xport),
-                                    uint8_t(xip >> 24), uint8_t(xip >> 16), uint8_t(xip >> 8), uint8_t(xip)};
-            std::memcpy(response + 20, attr, sizeof(attr));
-            sendto(s_, reinterpret_cast<const char*>(response), int(sizeof(response)), 0,
-                   reinterpret_cast<const sockaddr*>(&from), sizeof(from));
-        }
-    }
-    socket_t s_;
-    uint16_t port_ = 0;
-    std::atomic<uint16_t> source_{0};
-    std::atomic<bool> stop_{false};
-    std::thread thread_;
-};
 
 uint16_t FreeUdpPort() {
     const socket_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -1808,6 +1868,8 @@ int main() {
         TestStun();
         TestSecondInstancePort();
     });
+    Group("address-classification", TestAddressText);
+    Group("endpoint-selection", TestEndpointChoice);
     Group("connection-test", [&] {
         TestConnectionSummary();
         TestConnectionTestSocket();

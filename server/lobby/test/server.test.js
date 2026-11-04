@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { after, before, test } from 'node:test';
 
@@ -90,6 +91,29 @@ test('two clients meet over WebSockets: hello, room, endpoints, keepalive, resum
   assert.equal(a.messages.filter((m) => m.ev === 'room.member_left').length, 0);
   a.ws.close();
   b2.ws.close();
+});
+
+test('a claimed observed address only exists on a development server started for it', async () => {
+  const claimed = '2001:db8:1::10';
+  const seenAt = async (port) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/?observed=${claimed}`);
+    const reply = new Promise((resolve) => ws.addEventListener('message', (e) => resolve(JSON.parse(e.data)), { once: true }));
+    await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+    ws.send(JSON.stringify({ op: 'hello', seq: 1, proto: 1, game: 'G', account: '4242', secret: 'ab'.repeat(32), name: 'Probe' }));
+    const { ip } = await reply;
+    const closed = new Promise((resolve) => ws.addEventListener('close', resolve, { once: true }));
+    ws.close();
+    await closed;
+    return ip;
+  };
+  assert.equal(await seenAt(server.port), '127.0.0.1');
+  const testing = await startLobbyServer({ port: 0, testObservedAddress: true });
+  assert.equal(await seenAt(testing.port), claimed);
+  while (testing.host.conns.size) await new Promise((resolve) => setTimeout(resolve, 5));
+  await testing.close();
+  for (const file of ['src/worker.js', 'src/lobby.js', 'src/edge.js']) {
+    assert.ok(!readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').includes('observed='), file);
+  }
 });
 
 test('the development server refuses unmasked frames and non-upgrade requests', async () => {

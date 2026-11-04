@@ -27,10 +27,29 @@ AddressKind classify(uint32_t ip) {
     return AddressKind::kPublic;
 }
 
-bool is_lan(uint32_t ip) {
-    const AddressKind k = classify(ip);
-    return k == AddressKind::kLoopback || k == AddressKind::kPrivate || k == AddressKind::kLinkLocal;
+AddressKind classify_text(const std::string& text) {
+    if (const uint32_t ip = parse_ip(text)) return classify(ip);
+    in6_addr address;
+    if (inet_pton(AF_INET6, text.substr(0, text.find('%')).c_str(), &address) != 1) return AddressKind::kInvalid;
+    uint8_t b[16];
+    std::memcpy(b, &address, sizeof(b));
+    const auto zero_until = [&](int end) { return std::all_of(b, b + end, [](uint8_t x) { return x == 0; }); };
+    if (zero_until(10) && b[10] == 0xff && b[11] == 0xff) {
+        return classify(uint32_t(b[12]) << 24 | uint32_t(b[13]) << 16 | uint32_t(b[14]) << 8 | b[15]);
+    }
+    if (zero_until(15)) return b[15] == 1 ? AddressKind::kLoopback : b[15] == 0 ? AddressKind::kInvalid : AddressKind::kReserved;
+    if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return AddressKind::kLinkLocal;
+    if ((b[0] & 0xfe) == 0xfc) return AddressKind::kUniqueLocal;
+    if ((b[0] & 0xe0) == 0x20) return AddressKind::kPublic;
+    return AddressKind::kReserved;
 }
+
+bool is_lan(AddressKind k) {
+    return k == AddressKind::kLoopback || k == AddressKind::kPrivate || k == AddressKind::kUniqueLocal ||
+           k == AddressKind::kLinkLocal;
+}
+
+bool is_lan(uint32_t ip) { return is_lan(classify(ip)); }
 
 std::string ip_text(uint32_t ip) {
     char buf[16];

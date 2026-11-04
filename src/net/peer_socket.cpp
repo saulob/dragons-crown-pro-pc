@@ -70,6 +70,36 @@ std::string Candidates(const std::vector<Endpoint>& list) {
 
 } // namespace
 
+EndpointChoice choose_endpoint(uint32_t lobby_ip, bool lobby_on_lan, uint16_t local_port, StunState stun, const Endpoint& mapped,
+                               const Endpoint& upnp) {
+    if (lobby_on_lan) return {EndpointSource::kLan, local_port, lobby_ip};
+    const bool stun_done = stun == StunState::kDone;
+    uint32_t ip = lobby_ip;
+    if (!ip && stun_done && classify(mapped.ip) == AddressKind::kPublic) ip = mapped.ip;
+    if (!ip && classify(upnp.ip) == AddressKind::kPublic) ip = upnp.ip;
+    if (!ip) return {EndpointSource::kRelayFallback, local_port, 0};
+    if (upnp.valid() && upnp.ip == ip) return {EndpointSource::kUpnp, upnp.port, ip};
+    if (stun_done) return {EndpointSource::kStun, mapped.port, ip};
+    return {EndpointSource::kLobby, local_port, ip};
+}
+
+std::string endpoint_choice_text(const EndpointChoice& choice, bool relay_available) {
+    const std::string at = endpoint_text({choice.ip, choice.port});
+    switch (choice.source) {
+    case EndpointSource::kLan:
+        return choice.ip ? "reporting LAN endpoint " + at : "reporting LAN endpoint on port " + std::to_string(choice.port);
+    case EndpointSource::kUpnp: return "reporting public UPnP endpoint " + at;
+    case EndpointSource::kStun: return "reporting public STUN endpoint " + at;
+    case EndpointSource::kLobby: return "reporting lobby-observed endpoint " + at;
+    case EndpointSource::kRelayFallback: break;
+    }
+    return relay_available ? "public endpoint unavailable, relay fallback" : "public endpoint unavailable, relay not offered";
+}
+
+std::string lobby_endpoint_text(const std::string& public_ip, const std::string& observed_ip) {
+    return public_ip.empty() ? observed_ip : "observed " + observed_ip + ", public " + public_ip;
+}
+
 std::unique_ptr<PeerSocket> PeerSocket::open(const Options& options, std::string* error) {
     if (!sockets_ready()) {
         if (error) *error = "sockets are unavailable";
@@ -91,9 +121,9 @@ std::unique_ptr<PeerSocket> PeerSocket::open(const Options& options, std::string
     const int buffer = 1 << 20;
     setsockopt(s, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&buffer), sizeof(buffer));
     setsockopt(s, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&buffer), sizeof(buffer));
-    sockaddr_in local = to_sockaddr({0, options.port});
+    sockaddr_in local = to_sockaddr({options.bind_ip, options.port});
     if (bind(s, reinterpret_cast<const sockaddr*>(&local), sizeof(local)) != 0) {
-        local = to_sockaddr({0, 0});
+        local = to_sockaddr({options.bind_ip, 0});
         if (options.port) std::printf("P2P: UDP port %u is in use; the system picks another\n", options.port);
         if (bind(s, reinterpret_cast<const sockaddr*>(&local), sizeof(local)) != 0) {
             if (error) *error = "cannot bind a UDP port (error " + std::to_string(last_socket_error()) + ")";

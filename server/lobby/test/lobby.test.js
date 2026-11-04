@@ -215,6 +215,132 @@ test('endpoint exchange: public address from the socket, LAN candidates only beh
   assert.equal(host.call('udp', { port: 1, lan: new Array(9).fill({ ip: '10.0.0.1', port: 1 }) }).code, 'bad_request');
 });
 
+const OBSERVED_A = '2001:db8:1::10';
+const OBSERVED_B = '2001:db8:2::20';
+const ADVERTISED = '203.0.113.10';
+const memberRow = (env, room, member) => env.host.sql.get('SELECT ip, public_ip, port FROM members WHERE room = ? AND member = ?',
+  Number(room.id), member);
+
+test('advertised endpoint: peers dial the public IPv4, the observed address stays separate', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, OBSERVED_A);
+  const reported = host.call('udp', { port: 41000, public_ip: ADVERTISED });
+  assert.deepEqual([reported.ip, reported.public_ip, reported.port], [OBSERVED_A, ADVERTISED, 41000]);
+  assert.deepEqual(memberRow(env, room, 0x10), { ip: OBSERVED_A, public_ip: ADVERTISED, port: 41000 });
+  assert.equal(host.conn.attachment().ip, OBSERVED_A);
+
+  const remote = greeted(env, '198.51.100.20');
+  remote.call('udp', { port: 50000 });
+  assert.equal(remote.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(remote.events('peer').map((e) => [e.ip, e.port]), [[ADVERTISED, 41000]]);
+  assert.deepEqual(host.events('peer').map((e) => [e.ip, e.port]), [['198.51.100.20', 50000]]);
+});
+
+test('advertised endpoint: anything but a public IPv4 is ignored', () => {
+  const env = makeLobby();
+  const client = greeted(env, OBSERVED_A);
+  for (const public_ip of [undefined, null, '', 7, {}, ['203.0.113.10'], 'example.com', '203.0.113', '203.0.113.256', '203.0.113.10:1',
+    OBSERVED_A, '::ffff:203.0.113.10', '0.0.0.0', '127.0.0.1', '10.0.0.1', '172.16.0.1', '192.168.1.10', '169.254.1.1', '100.64.0.13',
+    '224.0.0.1', '239.255.255.250', '240.0.0.1', '255.255.255.255']) {
+    const reported = client.call('udp', { port: 41000, public_ip });
+    assert.deepEqual([reported.code, reported.ip, reported.public_ip], ['ok', OBSERVED_A, undefined], String(public_ip));
+  }
+});
+
+test('advertised endpoint: an IPv4 client cannot claim another address', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, '198.51.100.20');
+  const reported = host.call('udp', { port: 50000, public_ip: ADVERTISED });
+  assert.deepEqual([reported.ip, reported.public_ip], ['198.51.100.20', undefined]);
+  assert.deepEqual(memberRow(env, room, 0x10), { ip: '198.51.100.20', public_ip: '', port: 50000 });
+});
+
+test('LAN candidates: the same advertised IPv4 on two observed addresses reveals nothing', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, OBSERVED_A);
+  host.call('udp', { port: 41000, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.10', port: 3658 }] });
+  const other = greeted(env, OBSERVED_B);
+  other.call('udp', { port: 41001, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.11', port: 3659 }] });
+  assert.equal(other.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(other.events('peer').map((e) => [e.ip, e.port, e.lan]), [[ADVERTISED, 41000, undefined]]);
+  assert.deepEqual(host.events('peer').map((e) => [e.ip, e.port, e.lan]), [[ADVERTISED, 41001, undefined]]);
+});
+
+test('LAN candidates: claiming a member\'s real address reveals nothing, in a room or later', () => {
+  const env = makeLobby();
+  const { host: victim, room } = hostRoom(env, ADVERTISED);
+  victim.call('udp', { port: 3658, lan: [{ ip: '192.168.1.10', port: 3658 }] });
+  const attacker = greeted(env, OBSERVED_A);
+  attacker.call('udp', { port: 41000, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.66', port: 3658 }] });
+  assert.equal(attacker.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(attacker.events('peer').map((e) => e.lan), [undefined]);
+  assert.deepEqual(victim.events('peer').map((e) => e.lan), [undefined]);
+  attacker.call('udp', { port: 41002, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.66', port: 3658 }] });
+  victim.call('udp', { port: 3659, lan: [{ ip: '192.168.1.10', port: 3659 }] });
+  assert.deepEqual(attacker.events('peer').map((e) => e.lan), [undefined]);
+  assert.deepEqual(victim.events('peer').map((e) => e.lan), [undefined]);
+});
+
+test('LAN candidates: the same observed address still shares them, on IPv4 and IPv6', () => {
+  for (const [observed, advertised] of [['198.51.100.20', undefined], [OBSERVED_A, ADVERTISED]]) {
+    const env = makeLobby();
+    const { host, room } = hostRoom(env, observed);
+    host.call('udp', { port: 41000, public_ip: advertised, lan: [{ ip: '192.168.1.10', port: 3658 }] });
+    const sameAddress = greeted(env, observed);
+    sameAddress.call('udp', { port: 41001, public_ip: advertised, lan: [{ ip: '192.168.1.11', port: 3659 }] });
+    assert.equal(sameAddress.call('room.join', { room: room.id }).code, 'ok');
+    assert.deepEqual(sameAddress.events('peer').map((e) => e.lan), [[{ ip: '192.168.1.10', port: 3658 }]]);
+    assert.deepEqual(host.events('peer').map((e) => e.lan), [[{ ip: '192.168.1.11', port: 3659 }]]);
+  }
+});
+
+test('old clients: port only works as before, and an IPv6 one gives peers nothing to dial', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, '198.51.100.20');
+  const v4 = host.call('udp', { port: 50000 });
+  assert.deepEqual([v4.ip, v4.port, v4.public_ip], ['198.51.100.20', 50000, undefined]);
+  const v6 = greeted(env, OBSERVED_A);
+  assert.equal(v6.call('udp', { port: 41000 }).ip, OBSERVED_A);
+  assert.equal(v6.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(v6.events('peer').map((e) => [e.ip, e.port]), [['198.51.100.20', 50000]]);
+  const [seen] = host.events('peer');
+  assert.deepEqual([seen.ip, seen.port], [OBSERVED_A, 41000]);
+  assert.equal(ipv4Kind(seen.ip), 'invalid');
+});
+
+test('advertised endpoint: a late STUN result reaches peers, and losing it goes back to the observed address', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, OBSERVED_A);
+  const remote = greeted(env, '198.51.100.20');
+  remote.call('udp', { port: 50000 });
+  host.call('udp', { port: 3658 });
+  assert.equal(remote.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(remote.events('peer').map((e) => e.ip), [OBSERVED_A]);
+  assert.equal(host.call('udp', { port: 3658, public_ip: ADVERTISED }).public_ip, ADVERTISED);
+  assert.deepEqual(remote.events('peer').map((e) => [e.ip, e.port]), [[ADVERTISED, 3658]]);
+  assert.equal(host.call('udp', { port: 3658 }).public_ip, undefined);
+  assert.deepEqual(remote.events('peer').map((e) => [e.ip, e.port]), [[OBSERVED_A, 3658]]);
+  assert.deepEqual(memberRow(env, room, 0x10), { ip: OBSERVED_A, public_ip: '', port: 3658 });
+});
+
+test('advertised endpoint: a resumed seat starts clean and the LAN rule still uses the observed address', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, OBSERVED_A);
+  const guest = greeted(env, OBSERVED_B);
+  guest.call('udp', { port: 41001, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.11', port: 3659 }] });
+  assert.equal(guest.call('room.join', { room: room.id }).code, 'ok');
+  host.call('udp', { port: 41000, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.10', port: 3658 }] });
+  guest.drop();
+  const back = env.connect(OBSERVED_B);
+  Object.assign(back, { account: guest.account, secret: guest.secret });
+  assert.equal(back.hello().code, 'ok');
+  assert.equal(back.call('room.resume', { room: room.id, member: 0x20 }).code, 'ok');
+  assert.deepEqual(memberRow(env, room, 0x20), { ip: '', public_ip: '', port: 0 });
+  back.call('udp', { port: 41003, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.11', port: 3659 }] });
+  assert.deepEqual(memberRow(env, room, 0x20), { ip: OBSERVED_B, public_ip: ADVERTISED, port: 41003 });
+  assert.deepEqual(host.events('peer').filter((e) => e.port === 41003).map((e) => [e.ip, e.lan]), [[ADVERTISED, undefined]]);
+});
+
 test('room data: owner only, internal updates reach the others', () => {
   const env = makeLobby();
   const { host, room } = hostRoom(env);

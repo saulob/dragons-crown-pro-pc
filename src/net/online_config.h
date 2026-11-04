@@ -24,6 +24,7 @@ struct OnlineConfig {
     bool upnp = true;
     uint16_t udp_port = 0;       // 0: the game's port, or any free one
     std::string stun = kDefaultStunServers; // "" or "off": no STUN
+    uint32_t bind_ip = 0; // never configurable: a test binds loopback so it needs no firewall rule
 };
 
 // DCP_ONLINE, DCP_LOBBY, DCP_ONLINE_NAME, DCP_UPNP, DCP_UDP_PORT and DCP_STUN, when set, replace the saved values.

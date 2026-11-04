@@ -40,10 +40,13 @@ struct Endpoint {
     bool operator==(const Endpoint&) const = default;
 };
 
-enum class AddressKind { kInvalid, kLoopback, kPrivate, kLinkLocal, kCarrierNat, kReserved, kPublic };
+enum class AddressKind { kInvalid, kLoopback, kPrivate, kUniqueLocal, kLinkLocal, kCarrierNat, kReserved, kPublic };
 
 AddressKind classify(uint32_t ip);
-bool is_lan(uint32_t ip); // loopback, RFC 1918 or link-local
+// IPv4 or IPv6 text, as the lobby reports it; kInvalid when it is neither.
+AddressKind classify_text(const std::string& text);
+bool is_lan(AddressKind kind); // loopback, RFC 1918, IPv6 unique-local or link-local
+bool is_lan(uint32_t ip);
 std::string ip_text(uint32_t ip);
 std::string endpoint_text(const Endpoint& e);
 // 0 when it is not a dotted IPv4 address.

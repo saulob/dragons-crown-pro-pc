@@ -36,6 +36,22 @@ inline Endpoint signaling_endpoint(const Endpoint& address, uint16_t member) {
     return address.valid() ? address : relay_endpoint(member);
 }
 
+enum class EndpointSource { kLan, kUpnp, kStun, kLobby, kRelayFallback };
+// What goes to the lobby: `ip` is the IPv4 address peers will reach, 0 when there is none (peers then use the relay).
+struct EndpointChoice {
+    EndpointSource source = EndpointSource::kLobby;
+    uint16_t port = 0;
+    uint32_t ip = 0;
+
+    bool operator==(const EndpointChoice&) const = default;
+};
+// `lobby_ip` is 0 when the lobby does not see an IPv4 address, `upnp` is invalid without a mapping.
+EndpointChoice choose_endpoint(uint32_t lobby_ip, bool lobby_on_lan, uint16_t local_port, StunState stun, const Endpoint& mapped,
+                               const Endpoint& upnp);
+std::string endpoint_choice_text(const EndpointChoice& choice, bool relay_available);
+// What peers dial, with the lobby's own view beside it when the two differ.
+std::string lobby_endpoint_text(const std::string& public_ip, const std::string& observed_ip);
+
 struct RelayStats {
     uint64_t frames_out = 0, bytes_out = 0, frames_in = 0, bytes_in = 0;
     uint64_t send_failures = 0, rejected = 0;
@@ -73,6 +89,7 @@ public:
 
     struct Options {
         uint16_t port = 0; // 0 or busy: the system picks one
+        uint32_t bind_ip = 0; // 0: every interface
         std::vector<std::pair<std::string, uint16_t>> stun_servers;
         int connect_timeout_ms = 15000;
         int idle_timeout_ms = 10000;

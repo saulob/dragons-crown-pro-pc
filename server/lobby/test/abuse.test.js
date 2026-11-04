@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { LIMITED_HEADER, COUNTRY_HEADER, limitedCount } from '../src/admin.js';
 import { PROTECTION, RateLimiter } from '../src/abuse.js';
 import { handleUpgrade, ipGroup, upgradeAllowed } from '../src/edge.js';
-import { Lobby } from '../src/lobby.js';
+import { LIMITS, Lobby } from '../src/lobby.js';
 import { SAMPLE_MS, metricsDay } from '../src/metrics.js';
 import { RELAY, encodeRelayFrame, roomToken } from '../src/relay.js';
 import { ROOM, makeLobby as makeHarness } from './harness.js';
@@ -300,9 +300,10 @@ test('a database from before the session column gains it and keeps its accounts'
   env.host.sql.run('ALTER TABLE accounts DROP COLUMN session');
   env.host.sql.run('ALTER TABLE rooms DROP COLUMN peak_members');
   env.host.sql.run('ALTER TABLE rooms DROP COLUMN relayed');
+  env.host.sql.run('ALTER TABLE members DROP COLUMN public_ip');
   env.host.sql.run(`UPDATE meta SET v = '1' WHERE k = 'schema'`);
   env.lobby = new Lobby(env.host);
-  assert.equal(env.lobby.meta('schema'), '3');
+  assert.equal(env.lobby.meta('schema'), '4');
   assert.equal(env.lobby.accountRow(owner.account).session, 0);
   const next = env.connect();
   Object.assign(next, { account: owner.account, secret: owner.secret });
@@ -550,4 +551,97 @@ test('abuse diagnostics hold counter names only', () => {
   const text = JSON.stringify(rows);
   assert.ok(rows.length > 0);
   assert.ok(!text.includes(client.account) && !text.includes('203.0.113'));
+});
+
+const OBSERVED = '2001:db8:1::10';
+const ADVERTISED = '198.51.100.25';
+
+test('an advertised IPv4 is never a rate-limit identity: every limit keys on the observed address', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, OBSERVED);
+  assert.equal(client.call('udp', { port: 41000, public_ip: ADVERTISED }).public_ip, ADVERTISED);
+  assert.equal(client.call('room.create', ROOM).code, 'ok');
+  const { guards } = env.lobby;
+  assert.ok(guards.roomCreateAddress.buckets.has(ipGroup(OBSERVED)) && !guards.roomCreateAddress.buckets.has(ADVERTISED));
+  assert.ok(guards.publicEndpoint.buckets.has(ipGroup(OBSERVED)) && !guards.publicEndpoint.buckets.has(ADVERTISED));
+  const registered = (ip) => env.host.sql.get('SELECT COUNT(*) AS n FROM registrations WHERE ip = ?', env.lobby.ipKey(ip)).n;
+  assert.deepEqual([registered(OBSERVED), registered(ADVERTISED)], [1, 0]);
+
+  const fromAdvertised = [];
+  for (let i = 0; i < LIMITS.socketsPerIp; i += 1) fromAdvertised.push(env.connect(ADVERTISED));
+  assert.ok(fromAdvertised.every((c) => c.admitted));
+  const sameGroup = [];
+  for (let i = 1; i < LIMITS.socketsPerIp; i += 1) sameGroup.push(env.connect(`2001:db8:1::${i + 0x20}`));
+  assert.ok(sameGroup.every((c) => c.admitted));
+  assert.equal(env.connect(`2001:db8:1::ff`).admitted, false);
+});
+
+test('advertised endpoints spend a budget of the observed /64; peers are not told past it', () => {
+  const env = makeLobby();
+  const diagnosed = [];
+  const diagnose = env.lobby.diagnose.bind(env.lobby);
+  env.lobby.diagnose = (name, amount) => {
+    diagnosed.push(name);
+    return diagnose(name, amount);
+  };
+  const client = signedIn(env, CLIENT, OBSERVED);
+  const room = client.call('room.create', ROOM).room;
+  const peer = signedIn(env, CLIENT, '203.0.113.20');
+  assert.equal(peer.call('room.join', { room: room.id }).code, 'ok');
+  peer.events('peer');
+  const { burst } = PROTECTION.publicEndpoint;
+  for (let i = 0; i < burst; i += 1) {
+    assert.equal(client.call('udp', { port: 41000 + i, public_ip: ADVERTISED }).public_ip, ADVERTISED);
+  }
+  assert.equal(peer.events('peer').filter((e) => e.ip === ADVERTISED).length, burst);
+  const sibling = signedIn(env, CLIENT, '2001:db8:1::77');
+  assert.equal(sibling.call('udp', { port: 42000, public_ip: ADVERTISED }).public_ip, undefined);
+  const past = client.call('udp', { port: 43000, public_ip: '198.51.100.99' });
+  assert.deepEqual([past.code, past.ip, past.public_ip], ['ok', OBSERVED, undefined]);
+  assert.ok(peer.events('peer').every((e) => e.ip === OBSERVED));
+  assert.ok(diagnosed.includes('public_endpoint_limited'));
+
+  assert.equal(signedIn(env, CLIENT, '2001:db8:2::10').call('udp', { port: 42000, public_ip: ADVERTISED }).public_ip, ADVERTISED);
+  env.advance(1000 / PROTECTION.publicEndpoint.perSecond);
+  assert.equal(client.call('udp', { port: 43000, public_ip: '198.51.100.99' }).public_ip, '198.51.100.99');
+});
+
+test('repeating an advertised endpoint costs nothing and does not make peers punch again', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, OBSERVED);
+  const room = client.call('room.create', ROOM).room;
+  const peer = signedIn(env, CLIENT, '203.0.113.20');
+  assert.equal(peer.call('room.join', { room: room.id }).code, 'ok');
+  peer.events('peer');
+  const report = { port: 41000, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.10', port: 3658 }] };
+  client.call('udp', report);
+  assert.equal(peer.events('peer').length, 1);
+  const writes = countWrites(env);
+  for (let i = 0; i < PROTECTION.publicEndpoint.burst * 3; i += 1) {
+    assert.equal(client.call('udp', report).public_ip, ADVERTISED);
+    env.advance(100);
+  }
+  assert.deepEqual([writes.length, peer.events('peer').length], [0, 0]);
+  client.call('udp', { ...report, lan: [{ ip: '192.168.1.11', port: 3658 }] });
+  assert.equal(peer.events('peer').length, 1);
+});
+
+test('flipping the LAN list under an advertised endpoint spends the same budget', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, OBSERVED);
+  const report = (i) => client.call('udp', { port: 41000, public_ip: ADVERTISED, lan: [{ ip: '192.168.1.10', port: 3658 + i }] });
+  for (let i = 0; i < PROTECTION.publicEndpoint.burst; i += 1) assert.equal(report(i).public_ip, ADVERTISED);
+  assert.equal(report(PROTECTION.publicEndpoint.burst).public_ip, undefined);
+});
+
+test('clients that advertise nothing keep every report and spend no endpoint budget', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, '203.0.113.5');
+  const room = client.call('room.create', ROOM).room;
+  const peer = signedIn(env, CLIENT, '203.0.113.20');
+  assert.equal(peer.call('room.join', { room: room.id }).code, 'ok');
+  peer.events('peer');
+  for (let i = 0; i < 3; i += 1) assert.equal(client.call('udp', { port: 50000 }).code, 'ok');
+  assert.equal(peer.events('peer').length, 3);
+  assert.equal(env.lobby.guards.publicEndpoint.buckets.size, 0);
 });

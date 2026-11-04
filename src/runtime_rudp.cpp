@@ -134,6 +134,7 @@ DCP_SYSV int32_t net_bind(int32_t s, const uint8_t* address, uint32_t size) {
     net::PeerSocket::Options options;
     options.port = cfg.config.udp_port ? cfg.config.udp_port : port;
     options.stun_servers = net::stun_servers(cfg.config.stun);
+    options.bind_ip = cfg.config.bind_ip;
     std::string error;
     g_peer = net::PeerSocket::open(options, &error);
     if (!g_peer) {

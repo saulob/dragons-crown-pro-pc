@@ -311,7 +311,8 @@ export const ADMIN_JS = String.raw`(function () {
     ws_upgrade_ip_cap: 'WebSocket upgrades refused: too many sockets from one address', hello_accepted: 'Sign-ins accepted',
     hello_reconnect_deduped: 'Reconnects not counted as new sessions', hello_limited: 'Sign-ins refused: too many',
     room_create_accepted: 'Rooms created', room_create_limited: 'Room creations refused', room_join_limited: 'Room joins refused',
-    relay_abuse_closed: 'Relay connections closed for abuse', party_report_limited: 'Party snapshots refused: too many'
+    relay_abuse_closed: 'Relay connections closed for abuse', party_report_limited: 'Party snapshots refused: too many',
+    public_endpoint_limited: 'Public IPv4 claims ignored: too many'
   };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol' };
 

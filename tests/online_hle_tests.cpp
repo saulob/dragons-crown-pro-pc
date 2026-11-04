@@ -9,9 +9,11 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <thread>
 #include <vector>
 
+#include "fake_stun.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
 #include "net/peer_socket.h"
@@ -138,13 +140,160 @@ const Seen::Request* RequestById(uint32_t id) {
     return nullptr;
 }
 
+const uint32_t kLoopback = net::parse_ip("127.0.0.1");
+
+void UseHost(const std::string& lobby, const fs::path& base) {
+    g_settings.enabled = true;
+    g_settings.config.lobby = lobby;
+    g_settings.config.upnp = false;
+    g_settings.config.stun = "off";
+    g_settings.config.bind_ip = kLoopback;
+    g_settings.identity = net::load_identity(base / "host");
+    g_settings.name = "HostA";
+    g_settings.game = "HLE-TEST";
+}
+
 } // namespace
 
 namespace dcp::online {
 const Settings& settings() { return g_settings; }
 } // namespace dcp::online
 
-int main() {
+namespace {
+
+using Init = int32_t SYSV (*)(const void*);
+using CreateContext = int32_t SYSV (*)(const void*, uint16_t*);
+using RegisterCtx = int32_t SYSV (*)(void*, void*);
+using Start = int32_t SYSV (*)(uint16_t, uint64_t);
+using Stop = int32_t SYSV (*)(uint16_t);
+using Request = int32_t SYSV (*)(uint16_t, const void*, const void*, uint32_t*);
+using Socket = int32_t SYSV (*)(const char*, int32_t, int32_t, int32_t);
+using Bind = int32_t SYSV (*)(int32_t, const uint8_t*, uint32_t);
+using Close = int32_t SYSV (*)(int32_t);
+
+int32_t BindP2pSocket() {
+    const int32_t sock = Fn<Socket>("sceNetSocket")("RUDP_NetId", 2, 6, 0);
+    uint8_t local[16] = {0x10, 2};
+    Wr<uint16_t>(local, 8, uint16_t(0x2912));
+    CHECK(sock > 0 && Fn<Bind>("sceNetBind")(sock, local, 16) == 0);
+    return sock;
+}
+
+std::string StunList(uint16_t port) {
+    const std::string server = "127.0.0.1:" + std::to_string(port);
+    return server + "," + server + "," + server;
+}
+
+// The path a public lobby takes, which a loopback lobby never reaches: the lobby treats this client as coming from
+// `observed` and a stand-in answers STUN with a public address. Peers are told that address but nothing dials it: every
+// socket here is bound to loopback.
+int RunEndpointScenario(const std::string& lobby_root, const std::string& observed) {
+    const std::string lobby = lobby_root + "?observed=" + observed;
+    const fs::path base = fs::temp_directory_path() / "dcp-online-endpoint-tests";
+    fs::remove_all(base);
+    UseHost(lobby, base);
+
+    net::LobbySession probe;
+    net::Json seen;
+    std::string error;
+    const bool opened = probe.open(lobby, net::hello_body(g_settings.identity, "HostA", "HLE-TEST", false), &seen, &error);
+    probe.close();
+    if (!opened || seen["ip"].as_string() != observed) {
+        std::printf("GROUP|endpoint-path|SKIPPED|the lobby was not started with --test-observed-address\n");
+        return 0;
+    }
+
+    uint16_t ctx = 0;
+    CHECK(Fn<Init>("sceNpMatching2Initialize")(nullptr) == 0);
+    CHECK(Fn<CreateContext>("sceNpMatching2CreateContextA")(nullptr, &ctx) == 0);
+    Fn<RegisterCtx>("sceNpMatching2RegisterContextCallback")(reinterpret_cast<void*>(&OnContext), nullptr);
+    CHECK(Fn<Start>("sceNpMatching2ContextStart")(ctx, 0) == 0);
+    CHECK(PumpUntil([] { return !g_seen.context.empty(); }));
+    void* opt[2] = {reinterpret_cast<void*>(&OnRequest), nullptr};
+    uint8_t create[0xc0] = {};
+    Wr<uint16_t>(create, 0, 4);
+    Wr<uint32_t>(create, 8, 0x86000000u);
+    Wr<uint32_t>(create, 0xc, 1);
+    uint32_t created = 0;
+    CHECK(Fn<Request>("sceNpMatching2CreateJoinRoomA")(ctx, create, opt, &created) == 0);
+    CHECK(PumpUntil([&] { return RequestById(created); }));
+    const Seen::Request* room = RequestById(created);
+    CHECK(room && room->error == 0);
+    if (!room || room->error) return 1;
+    const uint64_t room_id = room->room;
+
+    const net::Identity guest_id = net::load_identity(base / "guest");
+    net::LobbyLink::Options link_options;
+    link_options.url = lobby_root;
+    link_options.hello = [&] { return net::hello_body(guest_id, "GuestB", "HLE-TEST", true); };
+    net::LobbyLink guest(link_options);
+    guest.start();
+    std::vector<net::LobbyMessage> inbox;
+    auto next = [&](const std::function<bool(const net::LobbyMessage&)>& match) -> std::optional<net::LobbyMessage> {
+        std::optional<net::LobbyMessage> found;
+        PumpUntil([&] {
+            net::LobbyMessage m;
+            while (guest.poll(m)) inbox.push_back(std::move(m));
+            const auto hit = std::find_if(inbox.begin(), inbox.end(), match);
+            if (hit == inbox.end()) return false;
+            found = std::move(*hit);
+            inbox.erase(hit);
+            return true;
+        }, 12000);
+        return found;
+    };
+    CHECK(next([](const net::LobbyMessage& m) { return m.kind == net::LobbyMessage::Kind::kUp; }));
+    net::Json udp = net::Json::Object();
+    udp.set("port", int64_t(40000));
+    guest.request("udp", udp);
+    auto join_guest = [&] {
+        net::Json join = net::Json::Object();
+        join.set("room", net::u64_text(room_id));
+        const uint32_t seq = guest.request("room.join", join);
+        auto joined = next([&](const net::LobbyMessage& m) { return m.kind == net::LobbyMessage::Kind::kResponse && m.seq == seq; });
+        CHECK(joined && joined->code == "ok");
+    };
+    auto expect_peer = [&](const std::string& ip, uint16_t port) {
+        auto peer = next([](const net::LobbyMessage& m) { return m.kind == net::LobbyMessage::Kind::kEvent && m.event == "peer"; });
+        CHECK(peer && peer->body["member"].as_int() == 0x10 && peer->body["ip"].as_string() == ip && peer->body["port"].as_int() == port);
+        CHECK(peer && peer->body["lan"].items().empty());
+    };
+
+    const bool ipv6 = observed.find(':') != std::string::npos;
+    const std::string public_ip = ipv6 ? "198.51.100.25" : observed;
+    if (ipv6) {
+        net::FakeStun late({net::parse_ip(public_ip), 41000}, 6000);
+        g_settings.config.stun = StunList(late.port());
+        const auto bound = std::chrono::steady_clock::now();
+        const int32_t sock = BindP2pSocket();
+        join_guest();
+        CHECK(online::peer_socket() != nullptr);
+        expect_peer(observed, online::peer_socket() ? online::peer_socket()->port() : 0);
+        CHECK(std::chrono::steady_clock::now() - bound >= std::chrono::milliseconds(4500));
+        CHECK(net::signaling_endpoint({net::parse_ip(observed), 3658}, 0x10) == net::relay_endpoint(0x10));
+        expect_peer(public_ip, 41000);
+        CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);
+    }
+    net::FakeStun quick({net::parse_ip(public_ip), 41001});
+    g_settings.config.stun = StunList(quick.port());
+    const auto bound = std::chrono::steady_clock::now();
+    const int32_t sock = BindP2pSocket();
+    if (!ipv6) join_guest();
+    expect_peer(public_ip, 41001);
+    CHECK(std::chrono::steady_clock::now() - bound < std::chrono::milliseconds(4000));
+
+    CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);
+    CHECK(Fn<Stop>("sceNpMatching2ContextStop")(ctx) == 0);
+    PumpUntil([] { return false; }, 100);
+    guest.stop();
+    std::printf("GROUP|endpoint-path|%s\n", g_failures ? "FAIL" : "PASS");
+    std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+    return g_failures ? 1 : 0;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
     const char* url = std::getenv("DCP_TEST_LOBBY");
     if (!url || !*url) {
         std::printf("skipped: set DCP_TEST_LOBBY to a running development lobby\n");
@@ -152,20 +301,9 @@ int main() {
     }
     const fs::path base = fs::temp_directory_path() / "dcp-online-hle-tests";
     fs::remove_all(base);
-    g_settings.enabled = true;
-    g_settings.config.lobby = url;
-    g_settings.config.upnp = false;
-    g_settings.config.stun = "off";
-    g_settings.identity = net::load_identity(base / "host");
-    g_settings.name = "HostA";
-    g_settings.game = "HLE-TEST";
+    if (argc == 3 && std::strcmp(argv[1], "--endpoint-scenario") == 0) return RunEndpointScenario(url, argv[2]);
+    UseHost(url, base);
 
-    using Init = int32_t SYSV (*)(const void*);
-    using CreateContext = int32_t SYSV (*)(const void*, uint16_t*);
-    using RegisterCtx = int32_t SYSV (*)(void*, void*);
-    using Start = int32_t SYSV (*)(uint16_t, uint64_t);
-    using Stop = int32_t SYSV (*)(uint16_t);
-    using Request = int32_t SYSV (*)(uint16_t, const void*, const void*, uint32_t*);
     using Register = int32_t SYSV (*)(uint16_t, void*, void*);
     using Status = int32_t SYSV (*)(uint16_t, uint64_t, uint16_t, int32_t*, uint32_t*, uint16_t*);
 
@@ -221,8 +359,6 @@ int main() {
     Fn<Register>("sceNpMatching2RegisterSignalingCallback")(ctx, reinterpret_cast<void*>(&OnSignal), nullptr);
 
     // RudpMgr_OpenSocket: "RUDP_NetId", AF_INET, type 6, bound to the game's port (0 here: any).
-    using Socket = int32_t SYSV (*)(const char*, int32_t, int32_t, int32_t);
-    using Bind = int32_t SYSV (*)(int32_t, const uint8_t*, uint32_t);
     const int32_t sock = Fn<Socket>("sceNetSocket")("RUDP_NetId", 2, 6, 0);
     CHECK(sock > 0);
     uint8_t local[16] = {0x10, 2};
@@ -232,6 +368,7 @@ int main() {
 
     // The second player: the lobby protocol and its own peer socket.
     net::PeerSocket::Options options;
+    options.bind_ip = kLoopback;
     std::string error;
     auto guest_socket = net::PeerSocket::open(options, &error);
     CHECK(guest_socket != nullptr);
@@ -455,7 +592,6 @@ int main() {
     old_session.close();
     new_session.close();
     self.close();
-    using Close = int32_t SYSV (*)(int32_t);
     CHECK(Fn<Close>("sceRudpTerminate")(rudp_ctx) == 0);
     CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);
     CHECK(Fn<Stop>("sceNpMatching2ContextStop")(ctx) == 0);

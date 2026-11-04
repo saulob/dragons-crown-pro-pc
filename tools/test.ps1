@@ -24,6 +24,11 @@
   through node --test, and with WSL the same net tests run on Linux (POSIX WebSocket). Whatever is skipped is named, with
   the reason. Structural build parity (same code path, no build-specific relay code) is reported apart from runtime
   validation, which needs the local boot images; no game is ever started.
+
+  Public endpoint: dcp-online-hle-tests also runs the game's endpoint report against that lobby acting as a public one, which
+  observes a chosen global IPv6 or public IPv4 address, with a loopback stand-in for STUN. Its sockets are bound to
+  loopback, so it needs no firewall rule and nothing is sent to the addresses it reports. A required Worker test that is
+  missing fails the run like one that fails.
 #>
 [CmdletBinding()]
 param([switch]$SkipLinux)
@@ -35,9 +40,11 @@ $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
 
 function Test-Step([string]$Title, [string]$Exe = '', [string]$Script = '', [switch]$Parity, [switch]$Capture,
-                   [switch]$Quiet, [switch]$Lobby, [scriptblock]$Block = $null) {
+                   [switch]$Quiet, [switch]$Lobby, [scriptblock]$Block = $null, [string]$Key = '', [string[]]$Arguments = @(),
+                   [string[]]$Requires = @(), [string[]]$Forbids = @()) {
     [pscustomobject]@{ Title = $Title; Exe = $Exe; Script = $Script; Parity = [bool]$Parity; Capture = [bool]$Capture
-                       Quiet = [bool]$Quiet; Lobby = [bool]$Lobby; Block = $Block }
+                       Quiet = [bool]$Quiet; Lobby = [bool]$Lobby; Block = $Block; Key = $Key; Arguments = $Arguments
+                       Requires = $Requires; Forbids = $Forbids }
 }
 
 function Get-Node {
@@ -66,7 +73,7 @@ function Start-DevLobby {
     $files = @("$stem.out", "$stem.err")
     $server = Join-Path $script:RepoRoot 'server\lobby\local\server.js'
     $process = Start-Process -FilePath $node -WindowStyle Hidden -PassThru -RedirectStandardOutput $files[0] -RedirectStandardError $files[1] `
-        -ArgumentList @('--no-warnings', "`"$server`"", '--host', '127.0.0.1', '--port', $port, '--db', ':memory:')
+        -ArgumentList @('--no-warnings', "`"$server`"", '--host', '127.0.0.1', '--port', $port, '--db', ':memory:', '--test-observed-address')
     $url = "ws://127.0.0.1:$port/"
     $lobby = [pscustomobject]@{ Url = ''; Process = $process; Skip = ''; Error = ''; Files = $files }
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -96,6 +103,16 @@ function Invoke-WorkerTests {
         $code = $LASTEXITCODE
     } finally { Pop-Location }
     [pscustomobject]@{ Code = $code; Skip = ''; Lines = $lines }
+}
+
+# A log line the player's report depends on, missing or present where it must not be.
+function Get-LogProblems($Test, [string[]]$Lines) {
+    foreach ($text in $Test.Requires) {
+        if (-not ($Lines | Where-Object { $_.Contains($text) })) { "missing log line: $text" }
+    }
+    foreach ($text in $Test.Forbids) {
+        if ($Lines | Where-Object { $_.Contains($text) }) { "forbidden log line: $text" }
+    }
 }
 
 function Find-LinuxDistro {
@@ -168,6 +185,15 @@ $tests = @(
     (Test-Step 'online test instance script tests (-Build, with -WhatIf only)' -Script 'tests\online_instance_tests.ps1'),
     (Test-Step 'build.ps1 waits for every loader run (a Windows-subsystem program needs the pipe)' -Script 'tests\build_script_tests.ps1'),
     (Test-Step 'online HLE tests (Matching2, libSceNet and Rudp entry points against the loopback lobby)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby),
+    (Test-Step 'online endpoint path, lobby sees global IPv6 (fallback report, late and early STUN, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby `
+        -Key 'endpoint path IPv6' -Arguments @('--endpoint-scenario', '2001:db8:1::10') `
+        -Requires @('it sees 2001:db8:1::10', 'public endpoint unavailable, relay fallback', 'reporting public STUN endpoint 198.51.100.25:41000',
+                    'lobby has observed 2001:db8:1::10, public 198.51.100.25:41000', 'lobby has observed 2001:db8:1::10, public 198.51.100.25:41001') `
+        -Forbids @('reporting LAN endpoint', 'LAN lobby')),
+    (Test-Step 'online endpoint path, lobby sees public IPv4 (no claim, STUN port, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby `
+        -Key 'endpoint path IPv4' -Arguments @('--endpoint-scenario', '203.0.113.9') `
+        -Requires @('reporting public STUN endpoint 203.0.113.9:41001', 'lobby has 203.0.113.9:41001') `
+        -Forbids @('reporting LAN endpoint', 'LAN lobby', 'lobby has observed')),
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
@@ -206,7 +232,7 @@ try {
     }
     foreach ($test in $tests) {
         Write-Step "Running the $($test.Title)"
-        $name = if ($test.Exe) { $test.Exe } elseif ($test.Script) { $test.Script } else { $test.Title }
+        $name = if ($test.Key) { $test.Key } elseif ($test.Exe) { $test.Exe } elseif ($test.Script) { $test.Script } else { $test.Title }
         $code = 0
         if ($test.Block) {
             $result = & $test.Block
@@ -224,10 +250,14 @@ try {
         } else {
             $exe = Join-Path $buildDir "bin\$($test.Exe).exe"
             if ($test.Capture) {
-                $lines = @(& $exe 2>&1 | ForEach-Object { "$_" })
+                $arguments = $test.Arguments
+                $lines = @(& $exe @arguments 2>&1 | ForEach-Object { "$_" })
                 $code = $LASTEXITCODE
-                $captured[$test.Exe] = $lines
+                $captured[$name] = $lines
+                $problems = @(if ($env:DCP_TEST_LOBBY) { Get-LogProblems $test $lines })
+                if ($problems -and -not $code) { $code = 1 }
                 if ($test.Quiet) { Show-Output $lines ($code -ne 0) } else { $lines | ForEach-Object { Write-Host $_ } }
+                $problems | ForEach-Object { Write-Host $_ -ForegroundColor Red }
             } else {
                 & $exe
                 $code = $LASTEXITCODE
@@ -305,7 +335,7 @@ function Read-Groups([string[]]$Lines) {
     return $table
 }
 $net = Read-Groups $captured['dcp-net-tests']
-$netGroups = 'foundations', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'protocol', 'linux-parity', 'lobby-binary'
+$netGroups = 'foundations', 'address-classification', 'endpoint-selection', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'protocol', 'linux-parity', 'lobby-binary'
 if ($captured.ContainsKey('dcp-net-tests')) {
     foreach ($group in $netGroups | Where-Object { -not $net.ContainsKey($_) }) { $net[$group] = 'FAIL' }
 }
@@ -315,6 +345,22 @@ function Block-State([string]$Name) {
     if (-not $Name) { return 'NOT RUN' }
     if ($skipped.ContainsKey($Name)) { return 'SKIPPED' }
     if ($failed.Contains($Name)) { return 'FAIL' }
+    return 'PASS'
+}
+# Passing is not enough for these: a required Worker test that was renamed or removed must not go unnoticed.
+function Worker-Coverage([string]$Pattern, [int]$Expected) {
+    if ($workerState -ne 'PASS' -and $workerState -ne 'FAIL') { return $workerState }
+    $results = @($captured[$workerName] | Where-Object { $_ -match "^(not )?ok \d+ - ($Pattern)" })
+    if ($results | Where-Object { $_ -like 'not ok*' }) { return 'FAIL' }
+    if ($results.Count -lt $Expected) { return "NOT RUN ($($results.Count) of $Expected required tests found)" }
+    return "PASS ($($results.Count) tests)"
+}
+function Endpoint-Path([string]$Key, [string]$Skipped) {
+    $paths = Read-Groups $captured[$Key]
+    if (-not $captured.ContainsKey($Key)) { return 'NOT RUN' }
+    if ($failed.Contains($Key)) { return 'FAIL' }
+    if ($lobbySkip) { return "SKIPPED ($lobbySkip)" }
+    if ($paths['endpoint-path'] -ne 'PASS') { return "NOT RUN ($Skipped)" }
     return 'PASS'
 }
 $workerName = Block-Name 'Worker tests'
@@ -352,6 +398,12 @@ $summary = [ordered]@{
     'Protocol compatibility' = $protocolSummary
     'Failure paths' = Group-Status $net @('failure-paths')
     'Connection test' = Group-Status $net @('connection-test')
+    'Address classification' = Group-Status $net @('address-classification')
+    'Endpoint selection' = Group-Status $net @('endpoint-selection')
+    'Endpoint path, global IPv6' = Endpoint-Path 'endpoint path IPv6' 'the lobby did not take the observed address'
+    'Endpoint path, public IPv4' = Endpoint-Path 'endpoint path IPv4' 'the lobby did not take the observed address'
+    'Worker address security' = Worker-Coverage '(advertised endpoint: |LAN candidates: |old clients: |an advertised IPv4 is never|a claimed observed address)' 11
+    'Public endpoint budget' = Worker-Coverage '(advertised endpoints spend|repeating an advertised|flipping the LAN list|clients that advertise nothing|repeating an unchanged room or endpoint)' 5
     'Windows parity' = $windows
     'Online HLE' = $hle
     'Linux parity' = $linuxSummary

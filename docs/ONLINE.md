@@ -239,7 +239,7 @@ lower-case hex.
 |---|---|---|
 | `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload}` (absent from an older lobby) |
 | `worlds` | | `worlds: [{world, rooms, members}]` |
-| `udp` | `port`, `lan: [{ip, port}]` (<= 4, LAN/loopback only) | `ip`, `port` |
+| `udp` | `port`, `lan: [{ip, port}]` (<= 4, LAN/loopback only), `public_ip` (optional, public IPv4 of a client connected over IPv6) | `ip` (as the lobby sees it), `port`, `public_ip` (when accepted) |
 | `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]` | `room`, `me` |
 | `room.search` | `world`, `from` (1-based), `count` (<= 20), `flag_mask`, `flag_value`, `filters: [[id, op, value]]` (op 1 = 2 != 3 < 4 <= 5 > 6 >=); or `code` | `total`, `from`, `rooms`, `incompatible` (rooms of another protocol left out) |
 | `room.join` | `room` or `code`, `member_bin` | `room`, `me`; `incompatible` with the room's `online_protocol` and its owner's `version`, `platform` |
@@ -268,8 +268,15 @@ Events: `room.member_joined {room, member}`, `room.member_left {room, member, wh
 `friend.request`, `friend.added`, `friend.removed`, `friend.online`, `friend.offline`.
 
 Rules the lobby enforces:
-- A peer endpoint's address is always the address of that player's own connection; only the port comes from the
-  client. LAN candidates reach only members connecting from the same address. A client cannot point others elsewhere.
+- A member has two addresses. The observed one is that of its own connection: it never comes from the client, and it
+  alone decides who shares LAN candidates and every per-address limit. The advertised one, `public_ip`, is optional and
+  unverified, and is only ever a direct candidate for peers. It is honoured from a connection on IPv6, which peers cannot
+  reach, for a public IPv4 found by STUN or UPnP; anything else is ignored, so a client on IPv4 cannot point others
+  elsewhere. A `peer` event carries `public_ip` as `ip` when there is one, else the observed address.
+- LAN candidates reach only members with the same observed address, whatever they advertise. Two members on different
+  IPv6 addresses of one household do not get them: they use the public IPv4 or the relay.
+- Each new advertised endpoint costs a token of the observed address (8, then one per 30 s, IPv6 per /64); past that it
+  is ignored and the peers use the relay. Repeating an unchanged advertised endpoint sends peers nothing.
 - Seat grace: when a greeted socket in a room closes, its seat is kept 30 s and room events for it are held (<= 32;
   more ends the seat at once). `room.resume` on a new socket of the same account retakes it and receives the held
   events after the answer. Afterwards it is a disconnect (owner migration, `peer.gone`, `member_left`). Chat is never
@@ -306,15 +313,19 @@ any datagram, after 30 tries of one packet, or on CLOSE.
 ## NAT traversal
 
 - STUN (RFC 5389 Binding) from the game's own socket: the mapped port is what peers will hit.
-- The endpoint reported to the lobby: the local port with a LAN or local lobby; else the UPnP mapping when the
-  router's WAN address is the address the lobby sees; else the STUN port; else the local port.
+- The endpoint reported to the lobby: the local port when the lobby sees a loopback, private, IPv6 unique-local or
+  link-local address; else the UPnP mapping when the router's WAN address is the public IPv4 address; else the STUN port;
+  else the local port. A global IPv6 lobby address is not a LAN: the client waits for STUN and UPnP like any other, and
+  reports the public IPv4 they found in `public_ip`. With neither, it reports the local port and peers fall back to the
+  relay.
 - LAN candidates (the loopback address and the PC's private addresses, local port) are sent too; peers behind the same
   public address try them first, so two PCs on one router, and two instances on one PC, connect without hairpinning.
 - Punching: on every `peer` event a few PUNCH datagrams go to the peer's candidates, and both ends then send HELLOs
   at the same time.
 - UPnP: SSDP discovery, WANIPConnection/WANPPPConnection `AddPortMapping` (UDP, lease 1 h renewed at half life, the next
   four ports on conflict, permanent lease if the router wants one), removed when the socket closes. LAN routers only.
-- Two symmetric NATs cannot be punched; such a pair uses the relay (below). IPv6-only networks are not handled.
+- Two symmetric NATs cannot be punched; such a pair uses the relay (below). Peer traffic is IPv4; a client with no public
+  IPv4 uses the relay.
 
 ## Relay
 
@@ -332,9 +343,9 @@ Rudp entry points, in `net::PeerSocket`.
   (`LinkPath`: `kConnectingDirect`, `kRelayOffered`, `kDirect`, `kRelay`, `kFailed`). A link that came up on the relay
   stays on it for the session; one that came up directly never uses it. In a room of three, A-B can be direct while A-C
   and B-C are relayed. The 15 s connection timeout is unchanged.
-- A peer with no usable direct candidate (the lobby gave no IPv4 endpoint for it, for example because it connects over
-  IPv6, and no LAN candidate) does not wait for the head start: its link is created at once and the relay is offered
-  immediately, since there is nothing direct to try. The game is given `127.82.76.89` with that member as the port as
+- A peer with no usable direct candidate (the lobby has no IPv4 endpoint for it, because it connects over IPv6 and found
+  no public IPv4, and no LAN candidate) does not wait for the head start: its link is created at once and the relay is
+  offered immediately, since there is nothing direct to try. The game is given `127.82.76.89` with that member as the port as
   the peer's address, which resolves only to that room member's account; an unknown member resolves to nobody. If the
   lobby offers no relay, the link ends at the usual 15 s timeout.
 - The relay carries the existing `DN` datagrams byte for byte, so the HMAC, fragmentation, ACKs, retransmission and
@@ -397,13 +408,19 @@ $env:DCP_TEST_LOBBY='ws://127.0.0.1:8791/'; build\cmake\clang64\bin\dcp-online-h
 
 `tools\test.ps1` starts a development lobby on a free loopback port for the net and build tests and prints a relay summary:
 direct networking, relay transport, automatic fallback, Worker relay, protocol compatibility, failure paths, the
-Connection test, Windows and Linux parity, and the seven builds. For the builds it separates structural parity (the same
+Connection test, address classification, endpoint selection, the endpoint path, Worker address security, the public
+endpoint budget, Windows and Linux parity, and the seven builds. For the builds it separates structural parity (the same
 code path and tables, no build-specific relay code; always checked) from runtime validation (needs the local boot images
 in `build\image`; reported as DATA UNAVAILABLE or PARTIAL when they are missing). Nothing there starts the game, and the
 production lobby is never contacted.
 
 `dcp-online-hle-tests` calls the Matching2, libSceNet and Rudp entry points as the game does while a second player
-joins through the lobby and connects over UDP.
+joins through the lobby and connects over UDP. With `--endpoint-scenario <address>` it runs the path a public lobby takes:
+the lobby treats it as coming from that address and a loopback stand-in answers STUN, and the test checks what a peer is
+told. `tools\test.ps1` runs it for a global IPv6 and a public IPv4 address and also checks the log lines. It needs a
+development lobby started with `--test-observed-address` (`/?observed=<address>` from loopback; the Worker has no such
+input) and reports SKIPPED otherwise. Every socket in these tests is bound to loopback: they need no firewall rule and
+never send anything to the public addresses they report.
 
 Two instances on one PC, each with its own user folder (settings, saves, caches, identity), logs and UDP port, both
 on the production service:
@@ -444,7 +461,7 @@ never kept. `-Reset` deletes that file only; `-SeedTestFriends` makes instances 
 nothing.
 
 What to look for in each instance's log: `Online: on as ...`, `Matching2: signed in to the lobby`, `Matching2: created
-room N`, `Net: P2P socket ... bound`, `Matching2: reporting UDP port`, `Matching2: member 0x20 established`, `P2P: link N
+room N`, `Net: P2P socket ... bound`, `Matching2: reporting ... endpoint`, `Matching2: member 0x20 established`, `P2P: link N
 ... connected via`, `Rudp: context N connected`, and at the end the `P2P: link ... closed` line with message counts.
 
 ## Deploying the lobby

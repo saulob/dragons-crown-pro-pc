@@ -130,7 +130,7 @@ struct State {
     void* default_arg = nullptr;
     std::unique_ptr<net::LobbyLink> link;
     bool up = false, lost = false, down = false;
-    uint32_t your_ip = 0;
+    uint32_t your_ip = 0, public_ip = 0;
     bool lobby_on_lan = false;
     uint32_t next_request = 1;
     std::map<uint32_t, Pending> pending;
@@ -146,6 +146,7 @@ struct State {
     bool relay_capable = false;
     uint64_t bound_ms = 0;
     uint16_t reported_port = 0;
+    uint32_t reported_ip = 0;
     bool udp_inflight = false, udp_acked = false;
     std::string last_external;
     // presence and friends
@@ -286,7 +287,7 @@ net::RoomKey KeyOf(const std::string& hex) {
 
 std::vector<net::Endpoint> Candidates(const Signal& s) {
     std::vector<net::Endpoint> list;
-    const bool same_address = s.address.ip && s.address.ip == g.your_ip;
+    const bool same_address = s.address.ip && s.address.ip == g.public_ip;
     if (same_address) list = s.lan;
     if (s.address.valid()) list.push_back(s.address);
     if (!same_address) list.insert(list.end(), s.lan.begin(), s.lan.end());
@@ -533,7 +534,8 @@ void OnResponse(const net::LobbyMessage& m) {
     case Kind::kUdp:
         g.udp_inflight = false;
         g.udp_acked = !error;
-        std::printf("Matching2: endpoint %s (lobby has %s:%lld)\n", error ? "refused" : "reported", m.body["ip"].as_string().c_str(),
+        std::printf("Matching2: endpoint %s (lobby has %s:%lld)\n", error ? "refused" : "reported",
+                    net::lobby_endpoint_text(m.body["public_ip"].as_string(), m.body["ip"].as_string()).c_str(),
                     (long long)m.body["port"].as_int());
         if (error) g.reported_port = 0;
         return;
@@ -718,14 +720,18 @@ void NoteRelayCapability(const Json& hello_reply) {
     ConfigureRelay();
 }
 
+void NoteLobbyAddress(const std::string& ip) {
+    g.your_ip = g.public_ip = net::parse_ip(ip);
+    g.lobby_on_lan = net::is_lan(net::classify_text(ip));
+}
+
 void OnLink(const net::LobbyMessage& m) {
     using K = net::LobbyMessage::Kind;
     if (m.kind == K::kUp) {
         NoteRelayCapability(m.body);
         g.up = true;
         g.friend_code = m.body["friend_code"].as_string();
-        g.your_ip = net::parse_ip(m.body["ip"].as_string());
-        g.lobby_on_lan = !g.your_ip || net::is_lan(g.your_ip);
+        NoteLobbyAddress(m.body["ip"].as_string());
         std::printf("Matching2: signed in to the lobby as %s; it sees %s\n", settings().name.c_str(), m.body["ip"].as_string().c_str());
         if (g.start_wanted) PushContextEvent(kCtxStarted, 0);
     } else if (m.kind == K::kLost) {
@@ -735,7 +741,7 @@ void OnLink(const net::LobbyMessage& m) {
     } else if (m.kind == K::kBack) {
         NoteRelayCapability(m.body);
         g.friend_code = m.body["friend_code"].as_string();
-        g.your_ip = net::parse_ip(m.body["ip"].as_string());
+        NoteLobbyAddress(m.body["ip"].as_string());
         if (g.room) {
             Json body = Json::Object();
             body.set("room", net::u64_text(g.room));
@@ -809,18 +815,13 @@ void ReportEndpoint(uint64_t now) {
     const UpnpView upnp = upnp_view();
     const bool pending = stun == net::StunState::kRunning || upnp.working;
     if (!g.lobby_on_lan && pending && now - g.bound_ms < kEndpointWaitMs) return;
-    uint16_t port = socket->port();
-    const char* how = "local port";
-    if (g.lobby_on_lan) {
-        how = "LAN lobby";
-    } else if (upnp.mapped && upnp.external.ip == g.your_ip) {
-        port = upnp.external.port, how = "UPnP";
-    } else if (stun == net::StunState::kDone) {
-        port = mapped.port, how = "STUN";
-    }
-    if (port == g.reported_port) return;
+    const net::EndpointChoice choice = net::choose_endpoint(g.your_ip, g.lobby_on_lan, socket->port(), stun, mapped,
+                                                            upnp.mapped ? upnp.external : net::Endpoint{});
+    g.public_ip = choice.ip;
+    if (choice.port == g.reported_port && choice.ip == g.reported_ip) return;
     Json body = Json::Object();
-    body.set("port", int64_t(port));
+    body.set("port", int64_t(choice.port));
+    if (choice.ip != g.your_ip) body.set("public_ip", net::ip_text(choice.ip));
     Json lan = Json::Array();
     std::vector<uint32_t> addresses = net::local_ipv4_addresses();
     addresses.insert(addresses.begin(), net::parse_ip("127.0.0.1"));
@@ -832,8 +833,9 @@ void ReportEndpoint(uint64_t now) {
         lan.push(std::move(c));
     }
     body.set("lan", std::move(lan));
-    std::printf("Matching2: reporting UDP port %u (%s; local %u)\n", port, how, socket->port());
-    g.reported_port = port;
+    std::printf("Matching2: %s (local %u)\n", net::endpoint_choice_text(choice, g.relay_capable).c_str(), socket->port());
+    g.reported_port = choice.port;
+    g.reported_ip = choice.ip;
     g.udp_inflight = true;
     const uint32_t seq = g.link->request("udp", std::move(body));
     g.pending[seq] = Pending{Kind::kUdp, 0, nullptr, nullptr, 0};

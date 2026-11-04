@@ -102,6 +102,7 @@ const MIGRATIONS = [
   [`ALTER TABLE accounts ADD COLUMN session INTEGER NOT NULL DEFAULT 0`],
   [`ALTER TABLE rooms ADD COLUMN peak_members INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE rooms ADD COLUMN relayed INTEGER NOT NULL DEFAULT 0`],
+  [`ALTER TABLE members ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''`],
 ];
 
 // ---- input validation ----
@@ -181,6 +182,7 @@ export function ipv4Kind(ip) {
 }
 
 const isLocalAddress = (ip) => ip === '::1' || ipv4Kind(ip) === 'loopback';
+const memberEndpoint = (att) => ({ ip: '', public_ip: '', port: 0, lan: [], ...att.udp });
 
 export function formatFriendCode(code) {
   return `${code.slice(0, 4)}-${code.slice(4)}`;
@@ -219,6 +221,7 @@ export class Lobby {
       roomCreateAccount: new RateLimiter(PROTECTION.roomCreateAccount),
       roomCreateAddress: new RateLimiter(PROTECTION.roomCreateAddress),
       roomJoinAccount: new RateLimiter(PROTECTION.roomJoinAccount),
+      publicEndpoint: new RateLimiter(PROTECTION.publicEndpoint),
       partyReportAll: new RateLimiter(PROTECTION.partyReportAll),
       partyReportAccount: new RateLimiter(PROTECTION.partyReportAccount),
       partyReportAddress: new RateLimiter(PROTECTION.partyReportAddress),
@@ -588,9 +591,11 @@ export class Lobby {
     }
   }
 
-  // The endpoint of `about` as `to` may use it: LAN candidates only reach a member behind the same public address.
+  // The endpoint of `about` as `to` may use it. `ip` is the observed address, which alone decides who gets LAN candidates;
+  // `public_ip` is unverified, so it is only ever something to dial.
   peerEvent(roomId, about, to) {
-    const event = { ev: 'peer', room: String(roomId), member: about.member, account: about.account, ip: about.ip, port: about.port };
+    const event = { ev: 'peer', room: String(roomId), member: about.member, account: about.account,
+      ip: about.public_ip || about.ip, port: about.port };
     if (about.ip && about.ip === to.ip) event.lan = JSON.parse(about.lan);
     return event;
   }
@@ -638,10 +643,10 @@ export class Lobby {
   }
 
   insertMember(att, roomId, memberId, bin) {
-    const udp = att.udp ?? { ip: '', port: 0, lan: [] };
-    this.host.sql.run(`INSERT INTO members (room, member, account, name, joined, bin, conn, ip, port, lan, version, platform)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, roomId, memberId, att.account, att.name, this.host.now(), JSON.stringify(bin),
-      att.cid, udp.ip, udp.port, JSON.stringify(udp.lan), att.version ?? '', att.platform ?? '');
+    const udp = memberEndpoint(att);
+    this.host.sql.run(`INSERT INTO members (room, member, account, name, joined, bin, conn, ip, public_ip, port, lan, version,
+      platform) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, roomId, memberId, att.account, att.name, this.host.now(),
+      JSON.stringify(bin), att.cid, udp.ip, udp.public_ip, udp.port, JSON.stringify(udp.lan), att.version ?? '', att.platform ?? '');
     att.room = roomId;
     att.member = memberId;
   }
@@ -751,6 +756,19 @@ export class Lobby {
     fail('limit', 'joining rooms too fast');
   }
 
+  // Peers send UDP toward a client's advertised IPv4 and nothing can verify it, so each new endpoint spends budget of the
+  // observed address. Past that budget the client has no public IPv4 and its peers use the relay.
+  advertisedIp(att, msg, lan) {
+    if (!att.ip.includes(':') || ipv4Kind(msg.public_ip) !== 'public') return '';
+    const last = att.udp;
+    if (last?.public_ip === msg.public_ip && last.port === msg.port && JSON.stringify(last.lan) === JSON.stringify(lan)) {
+      return msg.public_ip;
+    }
+    if (this.exempt(att) || this.guards.publicEndpoint.take(ipGroup(att.ip), this.host.now())) return msg.public_ip;
+    this.diagnose('public_endpoint_limited');
+    return '';
+  }
+
   // Party snapshots have their own budget, one lobby-wide and one per account and per address; a refusal spends none of
   // them, and none is shared with room.create or room.join.
   limitPartyReport(att) {
@@ -836,22 +854,23 @@ const HANDLERS = {
       if (!isObject(c) || !isInt(c.port, 1, 0xffff)) fail('bad_request', 'lan');
       if (['private', 'loopback', 'link'].includes(ipv4Kind(c.ip))) lan.push({ ip: c.ip, port: c.port });
     }
-    // Peers are only ever sent toward the address this socket comes from: a client cannot point them elsewhere.
-    att.udp = { ip: att.ip, port: msg.port, lan };
+    const publicIp = this.advertisedIp(att, msg, lan);
+    att.udp = { ip: att.ip, public_ip: publicIp, port: msg.port, lan };
     if (att.room) {
       const rows = this.memberRows(att.room);
       const me = rows.find((m) => m.member === att.member);
       if (me) {
         const lanText = JSON.stringify(lan);
-        if (me.ip !== att.ip || me.port !== msg.port || me.lan !== lanText) {
-          this.host.sql.run('UPDATE members SET ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip, msg.port,
-            lanText, att.room, att.member);
-          Object.assign(me, { ip: att.ip, port: msg.port, lan: lanText });
+        const changed = me.ip !== att.ip || me.public_ip !== publicIp || me.port !== msg.port || me.lan !== lanText;
+        if (changed) {
+          this.host.sql.run('UPDATE members SET ip = ?, public_ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip,
+            publicIp, msg.port, lanText, att.room, att.member);
+          Object.assign(me, { ip: att.ip, public_ip: publicIp, port: msg.port, lan: lanText });
         }
-        for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
+        if (changed || !publicIp) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
       }
     }
-    return { ip: att.ip, port: msg.port };
+    return { ip: att.ip, port: msg.port, ...(publicIp && { public_ip: publicIp }) };
   },
 
   'room.create'(att, msg) {
@@ -983,9 +1002,10 @@ const HANDLERS = {
     } else if (member.grace_until === null && member.conn !== null) {
       fail('not_found');
     }
-    const udp = att.udp ?? { ip: '', port: 0, lan: [] };
-    this.host.sql.run(`UPDATE members SET conn = ?, grace_until = NULL, held = '[]', name = ?, ip = ?, port = ?, lan = ?
-      WHERE room = ? AND member = ?`, att.cid, att.name, udp.ip, udp.port, JSON.stringify(udp.lan), roomId, msg.member);
+    const udp = memberEndpoint(att);
+    this.host.sql.run(`UPDATE members SET conn = ?, grace_until = NULL, held = '[]', name = ?, ip = ?, public_ip = ?, port = ?,
+      lan = ? WHERE room = ? AND member = ?`, att.cid, att.name, udp.ip, udp.public_ip, udp.port, JSON.stringify(udp.lan), roomId,
+      msg.member);
     att.room = roomId;
     att.member = msg.member;
     const held = JSON.parse(member.held);
