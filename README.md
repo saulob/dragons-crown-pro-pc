@@ -100,7 +100,7 @@ This project's implementation was written separately and does not include copied
 
 ### Privacy
 
-The online service stores anonymous aggregate usage statistics, such as player counts, sessions, the port version, the platform and the country. These statistics do not store player names, Friend Codes, account IDs or IP addresses. Gameplay stays direct between the players (P2P), except for a pair that cannot connect directly, whose traffic the service forwards without storing or reading it; gameplay activity, saves, Ping and FPS are not collected, apart from an optional, anonymous count of which character classes appear in online parties (classes and party size only, no names or identifiers). To find friends and connect you, the service also keeps your account, Online name and friends, and while you are in a room it uses your address and port. See [docs/ONLINE.md](docs/ONLINE.md#privacy-and-usage-statistics).
+The online service stores anonymous aggregate usage statistics, such as player counts, sessions, the port version, the platform and the country. These statistics do not store player names, Friend Codes, account IDs or IP addresses. Gameplay stays direct between the players (P2P), except for a pair that cannot connect directly, whose traffic the service forwards without storing or reading it; gameplay activity, saves, Ping and FPS are not collected, apart from an anonymous count of which character classes appear in online parties (classes and party size only, no names or identifiers). To find friends and connect you, the service also keeps your account, Online name and friends, and while you are in a room it uses your address and port. See [docs/ONLINE.md](docs/ONLINE.md#privacy-and-usage-statistics).
 
 ## What you need
 
@@ -126,7 +126,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v0.9.1-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v0.9.2-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -201,6 +201,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 ### Gameplay
 - **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish; the Japanese builds (CUSA07001) show Japanese only, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. USA and Asia and Hong Kong builds (the Japanese builds already use them); narrator and player-character choices are unchanged
+- **Skip Intro** (Off by default): skips the startup logo and goes straight to the title screen. Applies at the next game start
 - **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)
 - **Frame rate in title**: shows the frame rate in the window title, for example `Dragon's Crown Pro | FPS: 60.00`
 - **Render resolution in title**: shows the game's render resolution in the window title, for example `Dragon's Crown Pro | 1920x1080`
@@ -237,6 +238,7 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 | Options (Start) | Enter |
 | Touchpad left / right (Back) | Tab / Backspace |
 
+- **Japanese Menu Buttons** (Controls page, Off by default): Off, Cross (A) confirms and Circle (B) cancels in the menus on every game build, including the Japanese and Asia/Hong Kong builds; On swaps them, as in the Japanese release. Combat controls do not change. Applies at the next game start
 - **F1** (or **L3 + R3** on a controller) opens the Options menu: the Display, Graphics and Gameplay settings that can change while playing, a Controls page that lists the hotkeys, and the Cheats page of the F10 menu. Changes are saved to the same `dcp.ini` as the launcher; Texture filtering and Frame rate are saved and apply at the next start. See [docs/LAUNCHER.md](docs/LAUNCHER.md). **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F2** shows or hides the frame counter. **F3** shows or hides the Ping while Online Play is on (see [docs/ONLINE.md](docs/ONLINE.md)). An experimental AMD water workaround for black regions under characters standing in water is On on AMD graphics cards and Off elsewhere. The display mode, VSync, FSR 1, sharpening and the frame counter are set in the launcher.
 - **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged.
 

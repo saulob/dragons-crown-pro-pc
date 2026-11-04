@@ -123,23 +123,11 @@ size_t gallery_unlock_stub_bytes(void) {
     return guest_hook_stub_size();
 }
 
-/* DEBUG_SAULO: one line whenever the number of really unlocked pictures changes. */
-static void debug_saulo_report(const unsigned char *flags) {
-    static int last = -1;
-    int real = 0;
-    for (int entry = 0; entry < GALLERY_UNLOCK_ENTRIES; ++entry) real += flags[gallery_unlock_entry_key(entry)] != 0;
-    if (real == last) return;
-    last = real;
-    printf("DEBUG_SAULO gallery: entries=%d unlocked_real=%d visible=%d\n", GALLERY_UNLOCK_ENTRIES, real,
-           GALLERY_UNLOCK_ENTRIES);
-}
-
 void GUEST_HOOK_ABI gallery_unlock_view(GuestRegs *regs) {
     static _Thread_local unsigned char view[GALLERY_UNLOCK_FLAG_BYTES];
     const unsigned char *save = (const unsigned char *)(uintptr_t)regs->rdi;
     if (!save) return;
     const unsigned char *flags = save + GALLERY_UNLOCK_SAVE_OFFSET;
-    debug_saulo_report(flags);
     gallery_unlock_fill_view(view, flags);
     regs->rax = (uint64_t)(uintptr_t)view;
     regs->skip = 1;

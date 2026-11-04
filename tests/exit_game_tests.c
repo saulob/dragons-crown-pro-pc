@@ -342,7 +342,8 @@ static void test_accept_button(void) {
     char text[1 << 16] = {0};
     CHECK(f && fread(text, 1, sizeof(text) - 1, f) > 0);
     if (f) fclose(f);
-    CHECK(strstr(text, "exit_game_accept_east() ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH"));
+    /* The merged pad state, so a keyboard binding or a remapped pad button confirms here as on every other row. */
+    CHECK(strstr(text, "d->buttons & (exit_game_accept_east() ? BTN_CIRCLE : BTN_CROSS)"));
     CHECK(strstr(text, "k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER]"));
 }
 

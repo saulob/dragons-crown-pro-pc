@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 0.9.1 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 0.9.2 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -418,8 +418,7 @@ target_include_directories(dcp-exit-game-tests PRIVATE src)
 target_compile_definitions(dcp-exit-game-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-exit-game-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
 
-# Focused tests of the four-row title layout patch on synthetic layouts and, when the game files are present, the real
-# title layouts (tools/test.ps1); not part of the default build.
+# Focused tests of the four-row title layout patch on synthetic layouts (tools/test.ps1); not part of the default build.
 add_executable(dcp-title-layout-tests EXCLUDE_FROM_ALL tests/title_layout_tests.c src/title_layout.c)
 target_include_directories(dcp-title-layout-tests PRIVATE src)
 target_compile_definitions(dcp-title-layout-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

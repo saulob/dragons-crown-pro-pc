@@ -34,7 +34,7 @@ std::string DescribeLanguageResources(const std::filesystem::path& app0, const G
 bool SameLanguages(std::span<const TextLanguage> a, std::span<const TextLanguage> b);
 // "English, French": the names for the log.
 std::string LanguageNames(std::span<const TextLanguage> languages);
-// "saved language French unavailable for this build, using Russian"; empty when the saved key is empty or `used`.
+// "saved language French unavailable for this build, using Japanese"; empty when the saved key is empty or `used`.
 std::string UnavailableLanguageNote(std::string_view saved, const TextLanguage& used);
 
 } // namespace dcp

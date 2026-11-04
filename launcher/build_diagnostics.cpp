@@ -30,7 +30,6 @@ using Bytes = std::vector<uint8_t>;
 
 constexpr uint64_t kMaxExecutable = 128ull << 20;
 constexpr uint64_t kMaxModule = 64ull << 20;
-constexpr uint64_t kMaxSfo = 1ull << 20;
 constexpr uint64_t kHashLimit = 32ull << 20;
 constexpr size_t kMaxSourceFiles = 5000;
 constexpr size_t kMaxListedFiles = 60;

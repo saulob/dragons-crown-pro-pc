@@ -4,8 +4,8 @@
  * four, one row widget is not built, and the menu result, the idle layout part and the help text of a row follow its new
  * position (title_layout.h lays out the art). The fourth row shows SystemMsg record 388 rewritten by exit_game_text.h.
  * The game only draws that row: while it is selected the port owns the command. The title's tick publishes the selection,
- * the host's accept press (controller South or Enter) requests the exit through the registered handler and never
- * reaches the guest. Every hook checks its bytes first; an image that differs is left untouched. */
+ * the host's accept press (the game's confirm button or Enter) requests the exit through the registered handler and
+ * never reaches the guest. Every hook checks its bytes first; an image that differs is left untouched. */
 #ifndef DCP_EXIT_GAME_HOOK_H
 #define DCP_EXIT_GAME_HOOK_H
 
@@ -46,10 +46,10 @@ int exit_game_selected(void);
 int exit_game_invoke_handler(void);
 int exit_game_requested(void);
 
-/* Host input: `accept_down` is the port's accept (South, Enter). Returns 1 while the guest must not see the press. */
+/* Host input: `accept_down` is the port's accept. Returns 1 while the guest must not see the press. */
 int exit_game_filter_accept(int accept_down);
 
-/* Which controller button accepts: East (Circle, B) when set, else South (Cross, A). */
+/* Which button accepts: Circle when set, else Cross. */
 void exit_game_set_accept_east(int east);
 int exit_game_accept_east(void);
 

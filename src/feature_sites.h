@@ -1,5 +1,6 @@
 /* Structural locators for the executable-dependent features of every supported build but CUSA10454 1.00, whose tables
- * are the reference: Cheats, Japanese NPC Voices and True Ultrawide. A feature resolves only when every one of its sites is found the expected
+ * are the reference: Cheats, Japanese NPC Voices and True Ultrawide. The Exit Game and party sites are located on every
+ * supported build. A feature resolves only when every one of its sites is found the expected
  * number of times with the verified bytes, the sites keep their relations and none overlaps another; otherwise nothing
  * is returned and `failure` names the first site that did not resolve. Reads the image only. The loader calls these for
  * a supported build whose profile asks for them, never for an unknown executable. */

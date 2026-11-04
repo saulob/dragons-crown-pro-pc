@@ -72,7 +72,6 @@ static int requested;
 static int text_logged;
 static int row_logged;
 static int layout_logged;
-static int menu_logged; /* DEBUG_SAULO */
 static uint64_t title_menu;
 
 void exit_game_set_handler(ExitGameHandler value) {
@@ -82,7 +81,6 @@ void exit_game_set_handler(ExitGameHandler value) {
 void exit_game_reset(void) {
     row_logged = 0;
     layout_logged = 0;
-    menu_logged = 0;
     title_menu = 0;
     handler = NULL;
     now_ms = default_clock_ms;
@@ -173,7 +171,7 @@ int exit_game_invoke_handler(void) {
     return 1;
 }
 
-/* The host's accept press (controller South or Enter) while the Exit Game row is selected: it requests the exit and
+/* The host's accept press (the game's confirm button or Enter) while the Exit Game row is selected: it requests the exit and
  * stays hidden from the guest until released. Returns 1 while the press must be hidden. */
 static int accept_east;
 
@@ -209,10 +207,7 @@ void GUEST_HOOK_ABI exit_game_tick_hook(GuestRegs *regs) {
         menu_counts(scene + TITLE_MENU_OFFSET, &items, &widgets);
         memcpy(&cursor, scene + TITLE_CURSOR_OFFSET, sizeof(cursor));
         selected = cursor == EXIT_GAME_ROW_INDEX && items == EXIT_GAME_MENU_ITEMS && widgets == EXIT_GAME_MENU_WIDGETS;
-        if (!menu_logged++) /* DEBUG_SAULO */
-            printf("DEBUG_SAULO title menu: items %llu widgets %llu\n", (unsigned long long)items, (unsigned long long)widgets);
     }
-    if (selected && !exit_game_selected()) printf("DEBUG_SAULO Exit Game selected\n");
     exit_game_set_selected(selected);
 }
 
@@ -385,6 +380,5 @@ int exit_game_hook_install_located(uint8_t *image, uint64_t size, uint64_t entry
     image[sites->help_limits[1]] = HELP_LIMIT_NEW;
     printf("Exit Game: sites installed (sheet 0x%x, row 0x%x, tick 0x%x, layout 0x%x)\n", sites->sheet_fill, sites->row_widget,
            sites->menu_tick, sites->part_setter);
-    printf("DEBUG_SAULO title menu: 4 rows installed\n");
     return 1;
 }
