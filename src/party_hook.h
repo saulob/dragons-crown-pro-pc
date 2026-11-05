@@ -14,6 +14,10 @@ extern "C" {
 
 size_t party_hook_stub_bytes(void);
 
+/* Records a player unit's slot, class and level (dcp_party.h) without the hook: for the cheats' tick, which patches the
+ * same entry offline. */
+void party_hook_observe_unit(uint64_t unit);
+
 /* 1 when the located site and the game's displacements are the handler's and the hook is in; 0 otherwise, the image
  * untouched. */
 int party_hook_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpPartySites *sites, uint8_t *stubs,

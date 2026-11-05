@@ -13,7 +13,9 @@
 #include <thread>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #else
 #include <sys/socket.h>
@@ -104,7 +106,9 @@ bool Exchange(Handle h, uint32_t op, const std::string& json) {
     uint32_t reply[2];
     if (!Read(h, reply, sizeof(reply)) || reply[1] > (1u << 20)) return false;
     std::string body(reply[1], '\0');
-    return Read(h, body.data(), reply[1]) && reply[0] == 1; // 2 is Discord closing the connection
+    if (!Read(h, body.data(), reply[1])) return false;
+    if (body.find("\"evt\":\"ERROR\"") != std::string::npos) std::printf("Discord: %s\n", body.c_str());
+    return reply[0] == 1; // 2 is Discord closing the connection
 }
 
 const char* const kClasses[] = {"Fighter", "Amazon", "Elf", "Dwarf", "Sorceress", "Wizard"};

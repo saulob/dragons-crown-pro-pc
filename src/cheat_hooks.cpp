@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "dcp_cheats.h"
-#include "dcp_party.h"
 #include "runtime_cheats.h"
 
 namespace dcp::cheats {
@@ -533,7 +532,7 @@ void HoldArrows(uint64_t unit) {
 
 // At the entry of the player unit's per-tick update (rdi = the unit). Only players' units have this method.
 void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
-    dcp::party::Observe(HostMemory{}, regs->rdi, dcp::party::NowMs(), dcp::party::SharedUnits()); // Discord presence
+    runtime_cheat_observe_player(regs->rdi);
     const unsigned refills = runtime_cheat_refills_pending();
     const bool add_skill_points = runtime_cheat_action_pending(static_cast<int>(Action::AddSkillPoints)) != 0;
     const bool add_gold = runtime_cheat_action_pending(static_cast<int>(Action::AddGold)) != 0;

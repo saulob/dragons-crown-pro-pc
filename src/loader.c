@@ -626,6 +626,7 @@ int main(int argc, char **argv) {
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir,app0));
     runtime_pad_set_settings(settings_file);
     runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    runtime_cheats_set_player_observer(party_hook_observe_unit);
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file));

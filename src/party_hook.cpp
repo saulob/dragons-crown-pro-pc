@@ -20,6 +20,10 @@ struct HostMemory {
     uint8_t U8(uint64_t address) const { return Load<uint8_t>(address); }
 };
 
+void Record(uint64_t unit) {
+    dcp::party::Observe(HostMemory{}, unit, dcp::party::NowMs(), dcp::party::SharedUnits());
+}
+
 void GUEST_HOOK_ABI PartyTickHook(GuestRegs* regs) {
     dcp::party::Observe(HostMemory{}, regs->rdi, dcp::party::NowMs(), dcp::party::SharedUnits());
 }
@@ -49,6 +53,10 @@ bool LayoutMatches(const DcpPartySites& sites, const char** field) {
 
 extern "C" size_t party_hook_stub_bytes(void) {
     return guest_hook_stub_size();
+}
+
+extern "C" void party_hook_observe_unit(uint64_t unit) {
+    Record(unit);
 }
 
 extern "C" int party_hook_install_located(uint8_t* image, uint64_t size, uint64_t entry, const DcpPartySites* sites,
