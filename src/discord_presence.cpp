@@ -130,8 +130,8 @@ struct Place {
     const char* key;
     const char* name;
 };
-// Names are the game's own English text (msgsheet/*_US.fms). Checked in play, except the two marked *.
-// ponytail: Prison and Lost Zone are not matched to their in-game area yet. DCP_DISCORD_TRACE=1 logs every archive read,
+// Names are the game's own English text (msgsheet/*_US.fms). Checked in play, except the one marked *.
+// ponytail: Prison is not matched to its in-game area yet. DCP_DISCORD_TRACE=1 logs every archive read,
 // to find what loads where.
 const Place kPlaces[] = {
     {"stage/title", "menu", "Title screen"},
@@ -158,7 +158,7 @@ const Place kPlaces[] = {
     {"round/ForgottenRealms", "sanctuary", "Forgotten Sanctuary"},
     {"round/GhostshipCove", "ghostshipcove", "Ghost Ship Cove"},
     {"round/LostWoods", "lostwoods", "Lost Woods"},
-    {"round/LostZone", "lostzone", "Lost Zone"}, // *
+    {"round/LostZone", "lostzone", "Lost Zone"},
     {"round/MageTower", "magetower", "Mage's Tower"},
     {"round/MoldyDungeon", "moldydungeon", "Moldy Dungeon"},
     {"round/MysticRuins", "templeruins", "Ancient Temple Ruins"},
