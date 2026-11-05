@@ -1,4 +1,4 @@
-// The game window (SDL3) the Vulkan swapchain presents to.
+// The game window (SDL3) the renderer presents to.
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -44,7 +44,8 @@ void TracePress(const SDL_Event& event) {
 
 } // namespace
 
-WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
+WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, bool opengl)
+    : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     dcp_prepare_sdl_gamepad();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -69,7 +70,17 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, window_height);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true);
-    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
+    if (opengl) {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
+    }
+    SDL_SetBooleanProperty(props, opengl ? SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN
+                                         : SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN,
+                           true);
     base_title = title;
     title_shown = title;
     window = SDL_CreateWindowWithProperties(props);

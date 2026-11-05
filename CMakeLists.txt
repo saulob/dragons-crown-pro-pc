@@ -316,6 +316,22 @@ target_include_directories(dcp-tiling-tests PRIVATE gpu/shim gpu/shadps4 tests s
 target_compile_options(dcp-tiling-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-tiling-tests PRIVATE dcpgpu)
 
+# Focused tests of the Renderer setting and the OpenGL requirements (tools/test.ps1); not part of the default build.
+add_executable(dcp-renderer-selection-tests EXCLUDE_FROM_ALL tests/renderer_selection_tests.cpp)
+set_target_properties(dcp-renderer-selection-tests PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-renderer-selection-tests PRIVATE gpu/shim gpu/shadps4)
+target_compile_definitions(dcp-renderer-selection-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-renderer-selection-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the OpenGL detiler against the game's tiler and of the emitted GLSL through glslangValidator
+# (tools/test.ps1); no OpenGL context. Not part of the default build.
+add_executable(dcp-opengl-backend-tests EXCLUDE_FROM_ALL tests/opengl_backend_tests.cpp)
+set_target_properties(dcp-opengl-backend-tests PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-opengl-backend-tests PRIVATE gpu/shim gpu/shadps4 tests src ${CMAKE_BINARY_DIR}/gpu/include
+    gpu/third_party/gcn/include gpu/third_party/half/include gpu/third_party/xbyak)
+target_compile_definitions(dcp-opengl-backend-tests PRIVATE DCP_GLSLANG="${GLSLANG_COMPILER}")
+target_link_libraries(dcp-opengl-backend-tests PRIVATE dcpgpu)
+
 # Focused tests of the narrower-than-16:9 water reader skip (tools/test.ps1); not part of the default build.
 add_executable(dcp-narrow-water-reader-tests EXCLUDE_FROM_ALL tests/narrow_water_reader_tests.cpp)
 set_target_properties(dcp-narrow-water-reader-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)

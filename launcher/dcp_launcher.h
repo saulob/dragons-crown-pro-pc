@@ -145,6 +145,9 @@ int dcp_gpu_names(char (*names)[256], int max);
  * until it succeeds, so a driver installed meanwhile is found. */
 int dcp_check_vulkan(char *cause, size_t cause_size, char *advice, size_t advice_size);
 
+/* dcp_check_vulkan as far as the renderer saved in settings_file needs Vulkan: OpenGL does not, and Auto can do without. */
+int dcp_check_renderer(const char *settings_file, char *cause, size_t cause_size, char *advice, size_t advice_size);
+
 /* Builds boot.bin, content.bin and image.json in `out` from the prepared game folder `app0` (UTF-8 paths). 0 on
  * success; otherwise 1 and the reason in `error`. */
 int dcp_build_boot_image(const char *app0, const char *out, char *error, size_t error_size);

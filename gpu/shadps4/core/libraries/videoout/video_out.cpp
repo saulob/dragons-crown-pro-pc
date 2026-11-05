@@ -11,9 +11,9 @@
 #include "core/libraries/videoout/video_out.h"
 #include "core/libraries/videoout/videoout_error.h"
 #include "core/platform.h"
-#include "video_core/renderer_vulkan/vk_presenter.h"
+#include "video_core/renderer_backend.h"
 
-extern std::unique_ptr<Vulkan::Presenter> presenter;
+extern std::unique_ptr<VideoCore::PresenterBackend> presenter;
 
 namespace Libraries::VideoOut {
 
@@ -401,7 +401,7 @@ s32 PS4_SYSV_ABI sceVideoOutAdjustColor(s32 handle, const SceVideoOutColorSettin
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
-    presenter->GetPPSettingsRef().gamma = settings->gamma;
+    presenter->SetGamma(settings->gamma);
     return ORBIS_OK;
 }
 

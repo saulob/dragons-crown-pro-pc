@@ -24,7 +24,8 @@ struct WindowSystemInfo {
 
 class WindowSDL {
 public:
-    WindowSDL(s32 width, s32 height, const char* title);
+    /// The window is created for one renderer: Vulkan and OpenGL windows are different SDL windows.
+    WindowSDL(s32 width, s32 height, const char* title, bool opengl);
     ~WindowSDL();
     s32 GetWidth() const { return width.load(std::memory_order_relaxed); }
     s32 GetHeight() const { return height.load(std::memory_order_relaxed); }

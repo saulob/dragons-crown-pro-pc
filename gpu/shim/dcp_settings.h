@@ -27,6 +27,7 @@ struct Values {
     std::atomic<int> rcas_strength{75};
     std::atomic<bool> smaa{false};
     std::string graphics_card; ///< exact Vulkan device name; empty: the first usable device. Set by Load() only
+    std::atomic<int> renderer{0}; ///< DcpRenderer::Choice; read once at start
     std::atomic<int> anisotropy{0}; ///< 0: the game's own; 2, 4, 8 or 16 times
     // Set by the presenter: sharpening ran on the last frame, the game's image and the window it is shown in.
     std::atomic<bool> rcas_applied{false};

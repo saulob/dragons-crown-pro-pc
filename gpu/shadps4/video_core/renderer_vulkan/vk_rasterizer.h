@@ -9,6 +9,7 @@
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
+#include "video_core/renderer_backend.h"
 #include "video_core/renderer_vulkan/vk_bind_helper.h"
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
@@ -31,7 +32,7 @@ namespace Vulkan {
 class GraphicsPipeline;
 class Runtime;
 
-class Rasterizer {
+class Rasterizer final : public VideoCore::RasterizerBackend {
 public:
     explicit Rasterizer(const Instance& instance, Scheduler& scheduler, Runtime& runtime,
                         AmdGpu::Liverpool* liverpool);
@@ -49,40 +50,34 @@ public:
         return texture_cache;
     }
 
-    void Draw(bool is_indexed, u32 index_offset = 0, const PreparedDraw* prepared = nullptr);
+    void Draw(bool is_indexed, u32 index_offset = 0, const PreparedDraw* prepared = nullptr) override;
 
     /// dcp: draw preparation workers (vk_draw_prep.h), fed and consumed by Liverpool.
-    DrawPreparation& GetDrawPreparation() {
-        return *draw_prep;
+    DrawPreparation* DrawPreparationOrNull() override {
+        return draw_prep.get();
     }
     void DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 size, u32 max_count,
-                      VAddr count_address, u16 vertex_sgpr_offset, u16 instance_sgpr_offset);
+                      VAddr count_address, u16 vertex_sgpr_offset,
+                      u16 instance_sgpr_offset) override;
 
-    void DispatchDirect();
-    void DispatchIndirect(VAddr address, u32 offset, u32 size);
+    void DispatchDirect() override;
+    void DispatchIndirect(VAddr address, u32 offset, u32 size) override;
 
-    void ScopeMarker(fmt::string_view fmt, fmt::format_args args, auto&& func) {
-        if (host_markers_enabled) {
-            ScopeMarkerBegin(fmt::vformat(fmt, args));
-            func();
-            ScopeMarkerEnd();
-        } else {
-            func();
-        }
+    bool HostMarkersEnabled() const override {
+        return host_markers_enabled;
     }
-
-    void ScopeMarkerBegin(const std::string_view& str, bool from_guest = false);
-    void ScopeMarkerEnd(bool from_guest = false);
+    void ScopeMarkerBegin(const std::string_view& str, bool from_guest = false) override;
+    void ScopeMarkerEnd(bool from_guest = false) override;
     void ScopedMarkerInsert(const std::string_view& str, bool from_guest = false);
     void ScopedMarkerInsertColor(const std::string_view& str, const u32 color,
-                                 bool from_guest = false);
+                                 bool from_guest = false) override;
 
-    void FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds);
-    void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds);
-    u32 ReadDataFromGds(u32 gsd_offset);
-    bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
+    void FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) override;
+    void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) override;
+    u32 ReadDataFromGds(u32 gsd_offset) override;
+    bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false) override;
     /// GPU thread, before a write the guest can observe (see Scheduler::WaitHostCopies).
-    void WaitHostCopies() {
+    void WaitHostCopies() override {
         DrainDrawPipe();
         scheduler.WaitHostCopies();
     }
@@ -91,37 +86,36 @@ public:
     /// draw handed to it (vk_draw_pipe.h); no-op on other threads.
     /// `line`/`function`: the caller, for the statistics of where stage A waits.
     void DrainDrawPipe(u32 reason = DrawPipe::ReasonRasterizer, u32 line = __builtin_LINE(),
-                       const char* function = __builtin_FUNCTION());
+                       const char* function = __builtin_FUNCTION()) override;
     /// Runs `task(rasterizer, copy of data)` in order with the draws: on the draw recording
     /// thread while the draw pipeline is in use (PipelinedTasks), else here after a drain.
-    using OrderedTask = void (*)(Rasterizer& rasterizer, const u8* data);
     /// Returns true when the task was handed to the recording thread (not run yet).
     bool RunInOrder(OrderedTask task, const void* data, u32 size,
-                    u64 toggle = DcpToggle::PipelinedTasks);
+                    u64 toggle = DcpToggle::PipelinedTasks) override;
     /// Stage A: the draw pipe position after the last handed-over packet, and whether the
     /// recording thread has run everything before a position.
-    [[nodiscard]] u64 DrawPipeHead() const {
+    [[nodiscard]] u64 DrawPipeHead() const override {
         return draw_pipe ? draw_pipe->Head() : 0;
     }
-    [[nodiscard]] bool DrawPipeReached(u64 position) const {
+    [[nodiscard]] bool DrawPipeReached(u64 position) const override {
         return !draw_pipe || draw_pipe->Reached(position);
     }
     /// Stage A: no draws waiting for the recording thread.
-    [[nodiscard]] bool DrawPipeIdle() const {
+    [[nodiscard]] bool DrawPipeIdle() const override {
         return !draw_pipe || draw_pipe->Idle();
     }
     /// Stage A, end of a submission: its prepared draws stay alive until the recording thread
     /// has recorded them (instead of a drain).
-    void RetireSubmission();
+    void RetireSubmission() override;
     /// Stage A: guest memory the recording thread will write for work handed to it (storage
     /// buffers, DMA, WriteData, fences); constants overlapping it are bound there, not copied here.
-    void NotePendingGpuWrite(VAddr address, u64 size);
+    void NotePendingGpuWrite(VAddr address, u64 size) override;
     /// Before a guest-visible write: fences deferred earlier are written first.
-    void WaitDeferredSignals() {
+    void WaitDeferredSignals() override {
         scheduler.WaitDeferredSignals();
     }
     /// Runs `signal` after the guest memory copies issued so far, without waiting here.
-    void SignalAfterHostCopies(std::function<void()> signal) {
+    void SignalAfterHostCopies(std::function<void()> signal) override {
         scheduler.SignalAfterHostCopies(std::move(signal));
     }
     /// The GPU command thread or the draw recording thread (fault handling runs inline there).
@@ -130,15 +124,15 @@ public:
     /// A guest write hit a protected page.
     bool OnWriteFault(VAddr addr, bool assume_locks);
     bool ReadMemory(VAddr addr, u64 size, bool assume_locks = false);
-    void ProcessDownloadImages();
+    void ProcessDownloadImages() override;
     bool IsMapped(VAddr addr, u64 size);
-    void MapMemory(VAddr addr, u64 size);
-    void RegisterMemory(VAddr addr, u64 size);
-    void UnmapMemory(VAddr addr, u64 size);
+    void MapMemory(VAddr addr, u64 size) override;
+    void RegisterMemory(VAddr addr, u64 size) override;
+    void UnmapMemory(VAddr addr, u64 size) override;
 
-    u64 Flush();
-    void Finish();
-    void OnSubmit();
+    u64 Flush() override;
+    void Finish() override;
+    void OnSubmit() override;
 
     PipelineCache& GetPipelineCache() {
         return pipeline_cache;

@@ -38,6 +38,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kAspectRatioKey, kDefaultAspectRatio},
     {kTrueUltrawideKey, "0"},
     {kGraphicsCardKey, ""},
+    {kRendererKey, kDefaultRenderer},
     {kAntiAliasingKey, "0"},
     {kAnisotropyKey, "0"},
     {kTextLanguageKey, "english"},
@@ -133,6 +134,10 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (key == kPresentationKey) {
         return std::any_of(std::begin(kPresentationChoices), std::end(kPresentationChoices),
                            [&](const PresentationChoice& choice) { return value == choice.key; });
+    }
+    if (key == kRendererKey) {
+        return std::any_of(std::begin(kRendererChoices), std::end(kRendererChoices),
+                           [&](const RendererChoice& choice) { return value == choice.key; });
     }
     if (key == kControllerPromptsKey) {
         return one_of({"playstation", "xbox"});

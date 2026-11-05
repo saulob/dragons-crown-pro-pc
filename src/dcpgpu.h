@@ -18,7 +18,7 @@ typedef struct {
 int dcpgpu_available(void);
 /* Registers kernel event queues (needed with or without graphics). */
 void dcpgpu_register_kernel(void);
-/* Creates window, Vulkan device, presenter and GPU command processor; 0 on success. */
+/* Creates window, renderer and GPU command processor; 0 on success. */
 int dcpgpu_init(const DcpGpuConfig *config);
 /* Function for an imported NID ("NID#lib"), or 0 when the video core does not provide it. */
 uintptr_t dcpgpu_resolve(const char *scoped_nid);

@@ -42,6 +42,44 @@ Swapchain recreation (a window resize, F11, a display mode or VSync change) wait
 lock, because the GPU command thread keeps submitting meanwhile. The overlay's redraw of the last frame takes that frame
 out of the free queue while it shows it, so the GPU thread can neither draw into it nor recreate it at a new window size.
 
+## OpenGL renderer (experimental)
+
+Vulkan is the renderer of the game: the default, and the reference for every behaviour on this page. The launcher's
+**Renderer** setting (`renderer` in `dcp.ini`: `vulkan`, `auto` or `opengl`, see docs/LAUNCHER.md) selects it at start.
+`dcpgpu_init` (`gpu/shim/dcpgpu.cpp`) resolves the setting through `gpu/shim/dcp_renderer.h`, and the factory in
+`video_core/renderer_factory.cpp` creates the presenter behind `video_core/renderer_backend.h`, the only boundary the GPU
+front end (Liverpool, VideoOut, guest memory) sees. A window is created for one renderer, so Auto decides before there is a
+window: it asks `dcp_check_vulkan` what Vulkan can do and uses OpenGL when that fails. A Vulkan device that passes the
+check and still fails to start is not caught. Vulkan and OpenGL chosen by name never fall back.
+
+`video_core/renderer_opengl` targets OpenGL 3.3 core, which every shader in the game's cache fits:
+
+| Part | How |
+|---|---|
+| Thread | One context, current on the GPU command thread. EGL allows a surface on one thread only, so the present thread posts its work there (`Presenter::Present`) and a vsync wait holds up that thread |
+| Shaders | The same recompiler, then `shader_recompiler/backend/glsl`: GLSL 3.30 from the IR. It refuses what 3.30 cannot express, with the reason in the log, and the draw is skipped |
+| Guest buffers | No storage buffers in 3.3: one streaming ring, read by the shaders as a `usamplerBuffer` of dwords and by vertex and index fetch directly |
+| Images | `ImageInfo` from the T#, CB and DB as in Vulkan; `vk::Format` is the shared name, mapped in `gl_format.cpp`. Unmapped formats are logged and draw black |
+| Detiling | On the CPU (`gl_detile.cpp`, a port of `tiling.comp`): 3.3 has no compute |
+| Coherency | No page tracking: a texture is hashed the first time each frame uses it; a target hashes three windows, so a guest write over it brings guest memory back. Fills and copies from the command stream reach the image at once |
+| Rect and quad lists | A generated geometry shader completes them, with the fourth vertex of `emit_spirv_quad_rect.cpp` |
+| Coordinates | Render targets keep Vulkan's window coordinates: row 0 of an image is OpenGL's y = 0, so only the final picture is flipped. A negative viewport height becomes a flip in the vertex stage, and clip Z [0, w] is converted to [-w, w] |
+
+The game's compute work does not run. A dispatch that clears metadata becomes a clear, shader `0x8d304694` (a dword fill)
+writes guest memory directly, and anything else is logged once and skipped.
+
+Not implemented: render target array slices and texture views of later slices, sRGB reinterpretation of an image (logged),
+one image bound twice in a draw with different swizzles or mip ranges (they are texture state in 3.3), MSAA (targets
+render single sampled), storage images and buffer writes from shaders, depth bounds, indirect
+draws and dispatches, depth-stencil copy passes, geometry and tessellation stages, mip level queries, texture gather, sample
+shading, scaled MIN/MAX blending that needs a second pass, reads of render targets through guest memory, and per-target
+blending below OpenGL 4.0. SMAA, FSR 1, RCAS, the AMD water workaround and the reduced scene targets are Vulkan only; the
+OpenGL picture is scaled with a linear filter. Render resolution, True Ultrawide and the frame rate settings act on the
+game itself and apply to both renderers. The overlay uses the ImGui OpenGL 3 backend.
+
+Each `OpenGL:` log line names what was refused, once: `OpenGL: first guest draw submitted` and `OpenGL: first guest frame
+presented` mark the first real work, and `Renderer: selected <setting>, active <backend>` opens the session.
+
 ## Render resolution
 
 `launcher/resolution.c` rewrites the build's 23 display-target sizes (`mov reg, imm32` of 1920 / 3840 and 1080 / 2160;

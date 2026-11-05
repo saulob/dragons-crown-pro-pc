@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -157,6 +157,10 @@ if ((test)); then
     "$build_dir/bin/dcp-isa-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'
     "$build_dir/bin/dcp-tiling-tests"
+    step 'Running the renderer selection tests'
+    "$build_dir/bin/dcp-renderer-selection-tests"
+    step 'Running the OpenGL backend tests (detiler, emitted GLSL through glslang, no context)'
+    "$build_dir/bin/dcp-opengl-backend-tests"
     step 'Running the updater tests (versions, release JSON, SHA-256, ZIP safety, staging and rollback)'
     "$build_dir/bin/dcp-update-tests"
     step 'Running the RTC tests (Win32 file time)'

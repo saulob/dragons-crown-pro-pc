@@ -136,6 +136,9 @@ This game build renders at 16:9; the other aspect ratios are not available for i
 True Ultrawide	True Ultrawide
 Experimental. Expands gameplay beyond 16:9. Some scenes may show unintended background elements. Available with 21:9 and 32:9.	Experimental. Expande a jogabilidade além de 16:9. Algumas cenas podem mostrar elementos de fundo indesejados. Disponível com 21:9 e 32:9.
 This game build's scene projection is not verified; True Ultrawide is not available for it.	A projeção de cena desta versão do jogo não foi verificada; o True Ultrawide não está disponível para ela.
+Renderer	Renderizador
+Vulkan is the supported renderer. OpenGL is experimental and renders only part of the game's features. Auto uses Vulkan, and OpenGL when this system cannot run Vulkan. It takes effect the next time the game starts.	Vulkan é o renderizador suportado. OpenGL é experimental e renderiza apenas parte dos recursos do jogo. Auto usa Vulkan, e OpenGL quando este sistema não consegue executar Vulkan. A alteração vale na próxima vez que o jogo iniciar.
+OpenGL (experimental)	OpenGL (experimental)
 Graphics card	Placa de vídeo
 Selects which graphics card renders the game. If the selected card is no longer available, the first available card is used.	Escolhe qual placa de vídeo renderiza o jogo. Se a placa selecionada não estiver mais disponível, a primeira disponível será usada.
 VSync	VSync

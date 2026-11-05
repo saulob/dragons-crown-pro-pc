@@ -255,7 +255,7 @@ void SignalEop(const PM4CmdEventWriteEop& eop) {
 
 // dcp: end-of-pipe/-shader events run in order with the draws (Rasterizer::RunInOrder: on
 // the draw recording thread when the draw pipeline is in use).
-void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
+void RunEventWriteEop(VideoCore::RasterizerBackend& rasterizer, const u8* data) {
     const auto eop = *reinterpret_cast<const PM4CmdEventWriteEop*>(data);
     rasterizer.ProcessDownloadImages();
     // Guest memory copies on the copy threads precede the fence the guest sees.
@@ -271,7 +271,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     }
 }
 
-void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
+void RunDmaData(VideoCore::RasterizerBackend& rasterizer, const u8* data) {
     const auto* dma_data = reinterpret_cast<const PM4DmaData*>(data);
     ASSERT(dma_data->command.das == 0);
     if (dma_data->src_sel == DmaDataSrc::Data && dma_data->dst_sel == DmaDataDst::Gds) {
@@ -305,12 +305,12 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     }
 }
 
-void SignalFlip(Vulkan::Rasterizer& rasterizer, const u8*) {
+void SignalFlip(VideoCore::RasterizerBackend& rasterizer, const u8*) {
     rasterizer.WaitDeferredSignals();
     Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxFlip);
 }
 
-void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
+void RunWriteData(VideoCore::RasterizerBackend& rasterizer, const u8* data) {
     const auto* header = reinterpret_cast<const PM4Header*>(data);
     const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(data);
     // Copies deferred to the recording thread, and fences deferred to it (RecorderFences),
@@ -323,7 +323,7 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                 (header->type3.count.Value() - 2) * sizeof(u32));
 }
 
-void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
+void RunEventWriteEos(VideoCore::RasterizerBackend& rasterizer, const u8* data) {
     const auto& event_eos = *reinterpret_cast<const PM4CmdEventWriteEos*>(data);
     // Copies deferred to the recording thread precede writes the guest sees.
     rasterizer.WaitHostCopies();
@@ -699,7 +699,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     FIBER_ENTER(dcb_task_name);
     // Top-level buffers enqueued for the draw preparation workers (nested IBs are not).
     Vulkan::DrawPreparation* draw_prep =
-        seq != NoSeq && rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
+        seq != NoSeq && rasterizer ? rasterizer->DrawPreparationOrNull() : nullptr;
     if (draw_prep) {
         draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum);
     }
@@ -1670,7 +1670,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
 
     // The copy for the draw preparation workers is made before taking the queue lock, which
     // the GPU thread needs to pick up work.
-    auto* draw_prep = rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
+    auto* draw_prep = rasterizer ? rasterizer->DrawPreparationOrNull() : nullptr;
     auto prep_submission = draw_prep ? draw_prep->Build(dcb) : nullptr;
     {
         // Numbering, enqueueing and queueing under one lock keep the three orders identical.

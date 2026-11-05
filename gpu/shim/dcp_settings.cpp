@@ -3,6 +3,7 @@
 #include "dcp_frame_pacing.h"
 #include "dcp_graphics.h"
 #include "dcp_keys.h"
+#include "dcp_renderer.h"
 
 #include <algorithm>
 #include <climits>
@@ -74,6 +75,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.smaa = ParseBool(value, v.smaa);
     } else if (key == "graphics_card") {
         v.graphics_card = value == "automatic" ? std::string() : value;
+    } else if (key == "renderer") {
+        v.renderer = DcpRenderer::ParseChoice(value);
     } else if (key == "anisotropy") {
         v.anisotropy = DcpGraphics::ParseAnisotropy(ParseInt(value, 0));
     } else if (key == "window_width") {

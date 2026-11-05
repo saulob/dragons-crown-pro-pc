@@ -8,6 +8,7 @@
 #include <deque>
 
 #include "core/libraries/videoout/buffer.h"
+#include "video_core/renderer_backend.h"
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 #include "video_core/renderer_vulkan/host_passes/smaa_pass.h"
@@ -27,7 +28,7 @@ struct Liverpool;
 
 namespace Vulkan {
 
-struct Frame {
+struct Frame : VideoCore::PresentFrame {
     u32 width;
     u32 height;
     VmaAllocation allocation;
@@ -49,10 +50,10 @@ enum SchedulerType {
 
 class Rasterizer;
 
-class Presenter {
+class Presenter final : public VideoCore::PresenterBackend {
 public:
     Presenter(Frontend::WindowSDL& window, AmdGpu::Liverpool* liverpool);
-    ~Presenter();
+    ~Presenter() override;
 
     HostPasses::PostProcessingPass::Settings& GetPPSettingsRef() {
         return pp_settings;
@@ -70,16 +71,25 @@ public:
         return *rasterizer.get();
     }
 
-    bool IsHDRSupported() const {
+    bool IsHDRSupported() const override {
         return swapchain.HasHDR();
     }
 
-    void SetHDR(bool enable) {
+    void SetHDR(bool enable) override {
         if (!IsHDRSupported()) {
             return;
         }
         swapchain.SetHDR(enable);
         pp_settings.hdr = enable ? 1 : 0;
+    }
+
+    void SetGamma(float gamma) override {
+        pp_settings.gamma = gamma;
+    }
+
+    void RegisterDisplayBuffer(const Libraries::VideoOut::BufferAttributeGroup& attribute,
+                               VAddr cpu_address) override {
+        RegisterVideoOutSurface(attribute, cpu_address);
     }
 
     VideoCore::Image& RegisterVideoOutSurface(
@@ -95,16 +105,24 @@ public:
     bool IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const;
 
     Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
-                        VAddr cpu_address);
+                        VAddr cpu_address) override;
 
-    Frame* PrepareBlankFrame(bool present_thread);
+    Frame* PrepareBlankFrame(bool present_thread) override;
 
+    void Present(VideoCore::PresentFrame* frame, bool is_reusing_frame,
+                 bool is_game_frame) override {
+        Present(static_cast<Frame*>(frame), is_reusing_frame, is_game_frame);
+    }
     void Present(Frame* frame, bool is_reusing_frame = false, bool is_game_frame = true);
+    void RetireFrame(VideoCore::PresentFrame* frame) override {
+        RetireFrame(static_cast<Frame*>(frame));
+    }
     /// Returns a rendered frame to the free queue without presenting it.
     void RetireFrame(Frame* frame);
     /// A black frame with the loading screen (DcpOverlay::SetLoading) only.
     void PresentLoadingFrame();
-    Frame* PrepareLastFrame();
+    Frame* PrepareLastFrame() override;
+    void ReportCompilerStats() override;
 
 private:
     Frame* GetRenderFrame();

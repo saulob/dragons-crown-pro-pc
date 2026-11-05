@@ -23,8 +23,8 @@
 #include "video_core/amdgpu/cb_db_extent.h"
 #include "video_core/amdgpu/regs.h"
 
-namespace Vulkan {
-class Rasterizer;
+namespace VideoCore {
+class RasterizerBackend;
 }
 
 namespace Libraries::VideoOut {
@@ -122,7 +122,7 @@ public:
         vo_port = port;
     }
 
-    void BindRasterizer(Vulkan::Rasterizer* rasterizer_) {
+    void BindRasterizer(VideoCore::RasterizerBackend* rasterizer_) {
         rasterizer = rasterizer_;
     }
 
@@ -258,7 +258,7 @@ private:
         static std::array<u8, 48_KB> constants_heap;
     } cblock{};
 
-    Vulkan::Rasterizer* rasterizer{};
+    VideoCore::RasterizerBackend* rasterizer{};
     Libraries::VideoOut::VideoOutPort* vo_port{};
     const bool guest_markers_enabled;
     std::jthread process_thread{};

@@ -26,6 +26,9 @@ struct SideAreas {
     Rect left, right;
 };
 
+/// The guest's True Ultrawide hooks want the sides of this frame blacked out.
+bool SideMaskWanted();
+
 inline SideAreas SidesOf(Size target) {
     const uint32_t centre = uint32_t(std::lround(target.height * 16.0 / 9.0));
     if (target.width <= centre + 1) {

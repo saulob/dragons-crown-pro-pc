@@ -27,6 +27,7 @@
 #include "runtime_online_overlay.h"
 #include "imgui.h"
 #include "imgui_internal.h" // RegisterUserTexture (save pictures)
+#include "imgui_impl_opengl3.h"
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -689,11 +690,8 @@ void PollOnlineNotice() {
 
 } // namespace
 
-void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
-    std::scoped_lock lock{imgui_mutex};
-    if (initialized) {
-        return;
-    }
+// imgui_mutex held.
+void CreateImGuiContext() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -714,6 +712,14 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     font_config.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(dcp_font_ttf),
                                    int(dcp_font_ttf_end - dcp_font_ttf), 18.0f, &font_config);
+}
+
+void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
+    std::scoped_lock lock{imgui_mutex};
+    if (initialized) {
+        return;
+    }
+    CreateImGuiContext();
 
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(
@@ -744,6 +750,20 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     };
     if (!ImGui_ImplVulkan_Init(&info)) {
         std::printf("Overlay: ImGui Vulkan backend init failed\n");
+        ImGui::DestroyContext();
+        return;
+    }
+    initialized = true;
+}
+
+void InitOpenGL() {
+    std::scoped_lock lock{imgui_mutex};
+    if (initialized) {
+        return;
+    }
+    CreateImGuiContext();
+    if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
+        std::printf("Overlay: ImGui OpenGL backend init failed\n");
         ImGui::DestroyContext();
         return;
     }
@@ -1048,11 +1068,17 @@ void LogPresent() {
     presented_frames.fetch_add(1, std::memory_order_relaxed);
 }
 
-void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
+namespace {
+
+float last_interval_ms = 0.0f;
+
+// Everything that runs every presented frame; false when nothing is on screen.
+bool BeginPresent() {
     // Present interval for the FPS readout (measured also while nothing is drawn).
     const auto now = std::chrono::steady_clock::now();
     const float ms = std::chrono::duration<float, std::milli>(now - last_present).count();
     last_present = now;
+    last_interval_ms = ms;
     if (ms > 0.0f && ms < 1000.0f) {
         frame_ms_avg = frame_ms_avg == 0.0f ? ms : frame_ms_avg * 0.95f + ms * 0.05f;
     }
@@ -1061,15 +1087,17 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
         ping_readout.Reset();
     }
     PollOnlineNotice();
-    if (!Visible()) {
-        return;
-    }
-    std::scoped_lock lock{imgui_mutex};
+    return Visible();
+}
+
+// imgui_mutex held. `new_frame` is the renderer backend's.
+void BuildFrame(u32 width, u32 height, void (*new_frame)()) {
+    const float ms = last_interval_ms;
     ImGuiIO& io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(float(extent.width), float(extent.height));
+    io.DisplaySize = ImVec2(float(width), float(height));
     io.DeltaTime = ms > 0.0f && ms < 1000.0f ? ms / 1000.0f : 1.0f / 60.0f;
     // UI scale follows the display height (1080p = 1).
-    const float scale = std::max(float(extent.height) / 1080.0f, 0.75f);
+    const float scale = std::max(float(height) / 1080.0f, 0.75f);
     if (std::abs(scale - base_scale) > 0.01f) {
         ImGuiStyle& style = ImGui::GetStyle();
         style.ScaleAllSizes(scale / base_scale);
@@ -1078,7 +1106,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
 
     UpdateChoiceTextures();
-    ImGui_ImplVulkan_NewFrame();
+    new_frame();
     ImGui::NewFrame();
     if (loading) {
         LoadingScreen();
@@ -1108,6 +1136,16 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
         ChoiceBox();
     }
     ImGui::Render();
+}
+
+} // namespace
+
+void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
+    if (!BeginPresent()) {
+        return;
+    }
+    std::scoped_lock lock{imgui_mutex};
+    BuildFrame(extent.width, extent.height, ImGui_ImplVulkan_NewFrame);
 
     const vk::RenderingAttachmentInfo attachment{
         .imageView = view,
@@ -1127,6 +1165,15 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmdbuf);
     }
     cmdbuf.endRendering();
+}
+
+void RenderOpenGL(u32 width, u32 height) {
+    if (!BeginPresent()) {
+        return;
+    }
+    std::scoped_lock lock{imgui_mutex};
+    BuildFrame(width, height, ImGui_ImplOpenGL3_NewFrame);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 } // namespace DcpOverlay

@@ -143,8 +143,9 @@ static int cpu_usable(char *cause, size_t cause_size, char *advice, size_t advic
     return 0;
 }
 #ifndef _WIN32
+static const char *renderer_settings_file;
 static int system_usable(char *cause, size_t cause_size, char *advice, size_t advice_size) {
-    return cpu_usable(cause,cause_size,advice,advice_size) && dcp_check_vulkan(cause,cause_size,advice,advice_size);
+    return cpu_usable(cause,cause_size,advice,advice_size) && dcp_check_renderer(renderer_settings_file,cause,cause_size,advice,advice_size);
 }
 #endif
 #ifdef _WIN32
@@ -584,6 +585,7 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
         game_process=1;
 #else
+        renderer_settings_file=settings_file;
         check_graphics=system_usable;
 #endif
         DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics,
@@ -822,7 +824,7 @@ int main(int argc, char **argv) {
         DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
         if (dcpgpu_init(&gpu)) fail("GPU initialization failed");
-        printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());
+        printf("GPU: window and presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());
 #ifdef _WIN32
         module_diagnostics_report();
 #endif

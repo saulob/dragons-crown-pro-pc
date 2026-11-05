@@ -94,7 +94,8 @@ add_library(dcpgpu STATIC ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES}
     shadps4/core/libraries/kernel/equeue.cpp
     third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
-    third_party/imgui/backends/imgui_impl_vulkan.cpp)
+    third_party/imgui/backends/imgui_impl_vulkan.cpp
+    third_party/imgui/backends/imgui_impl_opengl3.cpp)
 add_dependencies(dcpgpu host_shaders)
 target_include_directories(dcpgpu PRIVATE shim shadps4 ../src ${SHADER_INCLUDE} third_party/gcn/include
     third_party/half/include third_party/imgui third_party/imgui/backends third_party/xbyak)

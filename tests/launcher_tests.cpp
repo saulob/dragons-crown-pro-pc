@@ -3106,6 +3106,31 @@ void TestTrueUltrawide(const fs::path& base) {
 
 // Presentation only fits the finished frame into the window: its own key and default, Letterbox unless Stretch is chosen,
 // and no change to the render target or the aspect ratio.
+void TestRenderer(const fs::path& base) {
+    CHECK(std::string(kRendererKey) == "renderer" && std::string(kDefaultRenderer) == "vulkan");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kRendererKey && setting.default_value == "vulkan";
+    }
+    CHECK(managed);
+    for (const char* value : {"auto", "vulkan", "opengl"}) {
+        CHECK(IsValidSetting(kRendererKey, value));
+    }
+    for (const char* invalid : {"", "OpenGL", "direct3d"}) {
+        CHECK(!IsValidSetting(kRendererKey, invalid));
+    }
+    const fs::path file = base / "renderer" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    fs::create_directories(file.parent_path());
+    CHECK(LauncherSettings(file).Get(kRendererKey, kDefaultRenderer) == "vulkan");
+    {
+        LauncherSettings settings(file);
+        settings.Set(kRendererKey, "opengl");
+        CHECK(settings.Save());
+    }
+    CHECK(LauncherSettings(file).Get(kRendererKey, kDefaultRenderer) == "opengl");
+}
+
 void TestPresentation(const fs::path& base) {
     const fs::path file = base / "presentation" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -7149,6 +7174,7 @@ int main(int argc, char** argv) {
     TestTrueUltrawide(base);
     TestFrameRate(base);
     TestPresentation(base);
+    TestRenderer(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
     TestLauncherWanted();
