@@ -617,7 +617,7 @@ int main(int argc, char **argv) {
         printf("DCP: game build pinned by DCP_GAME_BUILD\n");
     }
     runtime_online_configure(settings_file,user_dir,known_build ? build_key : NULL);
-    discord_presence_start(settings_file);
+    discord_presence_start(settings_file,app0);
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);

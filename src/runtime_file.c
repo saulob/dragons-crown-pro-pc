@@ -318,6 +318,13 @@ static void touch_for_write(void *buffer,uint64_t size) {
         *b=*b;
     }
 }
+/* Told of every successful read: the guest path, where in the file and how much. Set once, before the game runs. */
+static void (*read_observer)(const char *guest,uint64_t offset,uint64_t size);
+void runtime_file_set_read_observer(void (*observe)(const char *guest,uint64_t offset,uint64_t size)) { read_observer=observe; }
+static void observe_read(int fd,int64_t offset,ssize_t n) {
+    const File *f=fd>=3 ? get(fd) : NULL;
+    if (f && offset>=0 && n>0) read_observer(f->path,(uint64_t)offset,(uint64_t)n);
+}
 static int64_t do_read(int fd,void *buffer,uint64_t size) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
@@ -325,6 +332,7 @@ static int64_t do_read(int fd,void *buffer,uint64_t size) {
     ssize_t n=host_read(h,buffer,size);
     if (n<0) return -errno;
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
+    if (read_observer) observe_read(fd,host_lseek(h,0,SEEK_CUR)-n,n);
     return n;
 }
 static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
@@ -334,6 +342,7 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     ssize_t n=pread(h,buffer,size,offset);
     if (n<0) return -errno;
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
+    if (read_observer) observe_read(fd,offset,n);
     return n;
 }
 static int64_t do_write(int fd,const void *buffer,uint64_t size) {

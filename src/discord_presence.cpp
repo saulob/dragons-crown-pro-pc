@@ -3,7 +3,13 @@
 // quietly; closing the game closes the connection, and Discord then clears the presence itself.
 #include "discord_presence.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cstring>
+#include <filesystem>
+#include <vector>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -24,10 +30,14 @@
 #endif
 
 #include "../gpu/shim/dcp_settings.h"
+#include "cpk_patch.h"
 #include "dcp_party.h"
 #include "runtime_online.h"
 
-extern "C" int runtime_pad_slot_human(int slot); // runtime.h has no C++ linkage block
+extern "C" { // runtime.h has no C++ linkage block
+int runtime_pad_slot_human(int slot);
+void runtime_file_set_read_observer(void (*observe)(const char* guest, uint64_t offset, uint64_t size));
+}
 
 #ifndef DCP_DISCORD_CLIENT_ID
 #define DCP_DISCORD_CLIENT_ID ""
@@ -113,16 +123,115 @@ bool Exchange(Handle h, uint32_t op, const std::string& json) {
 
 const char* const kClasses[] = {"Fighter", "Amazon", "Elf", "Dwarf", "Sorceress", "Wizard"};
 
+// Where the player is, from which file the game reads out of its CPK archives: each area has its own map file
+// (round/*.brb) and each town building its own scene (stage/T_*). `key` is the Discord art asset.
+struct Place {
+    const char* prefix; // of the entry path in the archive
+    const char* key;
+    const char* name;
+};
+// Names are the game's own English text (msgsheet/*_US.fms). ponytail: the four marked * are not matched to their
+// in-game building or area yet; confirm in play (the log prints every place) and rename.
+const Place kPlaces[] = {
+    {"stage/title", "menu", "Title screen"},
+    {"stage/T_ChrSelect", "inn", "Dragon's Haven Inn"},
+    {"stage/T_FightersGuild", "guild", "Adventurers Guild"},
+    {"stage/T_Shop", "magicshop", "Morgan's Magic Item Shop"}, // *
+    {"stage/T_MagesGuild", "magesguild", "Mages Guild"},        // *
+    {"stage/T_MagesTower", "lucain", "Lucain's Tower"},
+    {"stage/T_Temple", "temple", "Canaan Temple"},
+    {"stage/T_Castle", "castle", "Castle"},
+    {"stage/T_Prison", "prison", "Prison"}, // *
+    {"round/Town00", "town", "Town"},
+    {"round/Camp_", "camp", "Camp"},
+    {"stage/camp_", "camp", "Camp"},
+    {"round/Tutorial", "tutorial", "Tutorial"},
+    {"round/Arena", "arena", "Colosseum"},
+    {"round/RandomDungeon", "labyrinth", "Labyrinth of Chaos"},
+    {"round/AncientLabyrinth", "ancientlabyrinth", "Ancient Labyrinth"},
+    {"round/Catacomb", "castleofthedead", "Castle of the Dead"},
+    {"round/ForgottenRealms", "sanctuary", "Forgotten Sanctuary"},
+    {"round/GhostshipCove", "ghostshipcove", "Ghost Ship Cove"},
+    {"round/LostWoods", "lostwoods", "Lost Woods"},
+    {"round/LostZone", "lostzone", "Lost Zone"}, // *
+    {"round/MageTower", "magetower", "Mage's Tower"},
+    {"round/MoldyDungeon", "moldydungeon", "Moldy Dungeon"},
+    {"round/MysticRuins", "templeruins", "Ancient Temple Ruins"},
+    {"round/UnderCitadel", "oldcapital", "Old Capital"},
+};
+
+struct Area {
+    std::string archive; // file name, upper case
+    uint64_t begin, end;
+    int place;
+    std::string path;
+};
+std::vector<Area> g_areas; // sorted by begin; filled before the read observer is set, then read only
+std::atomic<int> g_place{-1};
+
+// A new place is logged, so the mapping can be checked against play.
+void Enter(const Area& a) {
+    if (g_place.exchange(a.place, std::memory_order_relaxed) != a.place)
+        std::printf("Discord: place %s (%s)\n", kPlaces[a.place].name, a.path.c_str());
+}
+
+std::string Upper(std::string text) {
+    for (char& c : text) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return text;
+}
+
+bool SameName(const std::string& upper, const char* name) {
+    size_t i = 0;
+    for (; name[i] && i < upper.size(); ++i)
+        if (std::toupper(static_cast<unsigned char>(name[i])) != upper[i]) return false;
+    return i == upper.size() && !name[i];
+}
+
+void LoadAreas(const std::filesystem::path& app0) {
+    std::error_code ec;
+    for (const auto& item : std::filesystem::directory_iterator(app0, ec)) {
+        if (Upper(item.path().extension().string()) != ".CPK") continue;
+        dcp::CpkArchive archive;
+        if (!archive.Open(item.path())) continue;
+        const std::string name = Upper(item.path().filename().string());
+        for (const dcp::CpkEntry& entry : archive.entries()) {
+            for (int p = 0; p < int(std::size(kPlaces)); ++p) {
+                if (entry.path.rfind(kPlaces[p].prefix, 0) == 0) {
+                    g_areas.push_back({name, entry.offset, entry.offset + entry.size, p, entry.path});
+                    break;
+                }
+            }
+        }
+    }
+    std::sort(g_areas.begin(), g_areas.end(), [](const Area& a, const Area& b) { return a.begin < b.begin; });
+}
+
+// Runs on the game's file threads for every read: a binary search, no allocation.
+void ObserveRead(const char* guest, uint64_t offset, uint64_t size) {
+    const char* slash = std::strrchr(guest, '/');
+    const char* base = slash ? slash + 1 : guest;
+    auto it = std::upper_bound(g_areas.begin(), g_areas.end(), offset,
+                               [](uint64_t at, const Area& a) { return at < a.begin; });
+    // The area the read starts in, or one starting inside a longer read.
+    if (it != g_areas.begin()) {
+        const Area& a = *std::prev(it);
+        if (offset < a.end && SameName(a.archive, base)) return Enter(a);
+    }
+    for (; it != g_areas.end() && it->begin < offset + size; ++it)
+        if (SameName(it->archive, base)) return Enter(*it);
+}
+
 // This PC's player and the party size. Class and level come from the player-unit tick (dcp_party.h), so they are
 // known only while a character is on screen; offline, AI allies (party slots without a controller) are not counted.
 struct Status {
     bool online = false;
-    int cls = -1, level = 0, players = 1;
+    int cls = -1, level = 0, players = 1, place = -1;
 };
 
 Status Current() {
     Status s;
     s.online = runtime_online_active() != 0;
+    s.place = g_place.load(std::memory_order_relaxed);
     const dcp::online::RoomView room = s.online ? dcp::online::room_view() : dcp::online::RoomView{};
     const int64_t now = dcp::party::NowMs();
     const dcp::party::UnitTable& units = dcp::party::SharedUnits();
@@ -139,24 +248,26 @@ Status Current() {
     return s;
 }
 
-// The SET_ACTIVITY arguments.
+// The SET_ACTIVITY arguments. Large image: the class being played (the game's icon in menus). Small image: the place.
 std::string Activity(const Status& s, long long start) {
-    const std::string details =
-        s.cls >= 0 ? std::string(kClasses[s.cls]) + " · Lv " + std::to_string(s.level) : "In menus";
-    const std::string state = s.online ? (s.players > 1 ? "Online co-op" : "Online, waiting for players")
-                                       : (s.players > 1 ? "Couch co-op" : "Solo");
-    // The small image is the class: upload class art named fighter, amazon, elf, dwarf, sorceress, wizard.
-    std::string small;
+    std::string large = "icon", large_text = "Dragon's Crown Pro", details = "In menus";
     if (s.cls >= 0) {
-        std::string key = kClasses[s.cls];
-        for (char& c : key) c = static_cast<char>(c | 0x20);
-        small = ",\"small_image\":\"" + key + "\",\"small_text\":\"" + kClasses[s.cls] + "\"";
+        large = kClasses[s.cls];
+        for (char& c : large) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        details = large_text = std::string(kClasses[s.cls]) + " · Lv " + std::to_string(s.level);
     }
-    return "{\"pid\":" +
-           std::to_string(Pid()) + ",\"activity\":{\"details\":\"" + details + "\",\"state\":\"" + state +
-           "\",\"timestamps\":{\"start\":" + std::to_string(start) + "},\"party\":{\"id\":\"dcp\",\"size\":[" +
-           std::to_string(s.players) + ",4]},\"assets\":{\"large_image\":\"icon\",\"large_text\":\"Dragon's Crown Pro\"" +
-           small + "}}}";
+    const std::string mode = s.online ? (s.players > 1 ? "Online co-op" : "Online, waiting for players")
+                                      : (s.players > 1 ? "Couch co-op" : "Solo");
+    std::string state = mode, small;
+    if (s.place >= 0) {
+        const Place& p = kPlaces[s.place];
+        state = std::string(p.name) + " · " + mode;
+        small = ",\"small_image\":\"" + std::string(p.key) + "\",\"small_text\":\"" + p.name + "\"";
+    }
+    return "{\"pid\":" + std::to_string(Pid()) + ",\"activity\":{\"details\":\"" + details + "\",\"state\":\"" +
+           state + "\",\"timestamps\":{\"start\":" + std::to_string(start) + "},\"party\":{\"id\":\"dcp\",\"size\":[" +
+           std::to_string(s.players) + ",4]},\"assets\":{\"large_image\":\"" + large + "\",\"large_text\":\"" +
+           large_text + "\"" + small + "}}}";
 }
 
 void Run(std::string client_id) {
@@ -190,7 +301,7 @@ void Run(std::string client_id) {
 
 } // namespace
 
-extern "C" void discord_presence_start(const char* settings_file) {
+extern "C" void discord_presence_start(const char* settings_file, const char* app0) {
     bool enabled = true;
     std::string client_id = DCP_DISCORD_CLIENT_ID;
     std::ifstream file(settings_file ? settings_file : "");
@@ -204,5 +315,8 @@ extern "C" void discord_presence_start(const char* settings_file) {
         std::printf("Discord: presence off\n");
         return;
     }
+    if (app0) LoadAreas(app0);
+    std::printf("Discord: %zu area files tracked\n", g_areas.size());
+    if (!g_areas.empty()) runtime_file_set_read_observer(ObserveRead);
     std::thread(Run, client_id).detach();
 }

@@ -7,7 +7,8 @@
 extern "C" {
 #endif
 
-void discord_presence_start(const char *settings_file);
+/* app0: the game folder holding the CPK archives, for where the player is; NULL leaves the place out. */
+void discord_presence_start(const char *settings_file, const char *app0);
 
 #ifdef __cplusplus
 }
