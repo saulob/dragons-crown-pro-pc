@@ -604,6 +604,93 @@ The updated AppImage could not be verified.	Não foi possível verificar o AppIm
 The downloaded AppImage or the installed AppImage is missing.	O AppImage baixado ou o instalado não foi encontrado.
 Hidden Trophy	Troféu oculto
 Unlock this trophy to see what it is.	Desbloqueie este troféu para ver o que é.
-All files	Todos os arquivos)PTBR";
+All files	Todos os arquivos
+Bug Report	Relatar bug
+Report a problem and send it with one game log.	Relate um problema e envie-o com um log do jogo.
+No personal user data is intentionally included.	Nenhum dado pessoal do usuário é incluído intencionalmente.
+Before anything is sent, the launcher takes addresses, user and computer names, private folders, passwords, online secrets and other players' details out of the selected log. Automatic filtering cannot promise to catch everything, so open the preview if you want to check what goes out.	Antes de qualquer envio, o launcher remove do log selecionado endereços, nomes de usuário e de computador, pastas particulares, senhas, segredos online e dados de outros jogadores. A filtragem automática não garante pegar tudo, por isso abra a visualização se quiser conferir o que será enviado.
+1. Report the problem	1. Relate o problema
+2. Choose one game log	2. Escolha um log do jogo
+3. Preview what will be sent	3. Visualize o que será enviado
+4. Send	4. Envie
+What were you doing, what went wrong, and does it happen every time?	O que você estava fazendo, o que deu errado e isso acontece sempre?
+No game log is available yet, so a report cannot be sent. Start the game once and try again. With Detailed logging off on the About page, only sessions that crashed keep a log.	Ainda não há nenhum log do jogo, então não é possível enviar um relatório. Inicie o jogo uma vez e tente de novo. Com o Registro detalhado desligado na página Sobre, só as sessões que travaram mantêm um log.
+The newest logs of the game, most recent first. Only the one you choose is sent.	Os logs mais recentes do jogo, do mais novo para o mais antigo. Só o log escolhido é enviado.
+Send this log	Enviar este log
+Selected log	Log selecionado
+Last written	Última gravação
+Size	Tamanho
+View selected log	Ver log selecionado
+Preview	Visualizar envio
+Shows exactly what will be sent, after the privacy filter.	Mostra exatamente o que será enviado, depois do filtro de privacidade.
+Please describe the problem, minimum 10 characters	Descreva o problema, mínimo de 10 caracteres
+There is no game log to send.	Não há nenhum log do jogo para enviar.
+Current launcher session	Sessão atual do launcher
+Current session · Launcher + gameplay	Sessão atual · Launcher + jogo
+My reports	Meus relatórios
+Only reports sent from this PC are listed here.	Somente relatórios enviados por este PC aparecem aqui.
+No reports sent from this PC	Nenhum relatório enviado por este PC
+New	Novo
+Investigating	Investigando
+Fixed	Corrigido
+Cannot reproduce	Não foi possível reproduzir
+Duplicate	Duplicado
+Not a bug	Não é um bug
+Closed	Fechado
+Fixed in version	Corrigido na versão
+Message from developer	Mensagem do desenvolvedor
+Updated	Atualizado
+Refresh	Atualizar
+Checking...	Verificando...
+Could not check for updates. The last known status is shown.	Não foi possível verificar. O último status conhecido é mostrado.
+View details	Ver detalhes
+Hide details	Ocultar detalhes
+Report ID	ID do relatório
+Submitted	Enviado em
+Status	Status
+Status updated	Status atualizado em
+What was sent	O que foi enviado
+Hide report	Ocultar relatório
+Loading...	Carregando...
+This report is no longer available online.	Este relatório não está mais disponível online.
+Remove from this PC	Remover deste PC
+Removes it from this list only. The report stays with the developer.	Remove apenas desta lista. O relatório continua com o desenvolvedor.
+Remove this report from this PC?	Remover este relatório deste PC?
+A report has an update	Um relatório foi atualizado
+Its status changed since you last looked.	O status mudou desde a última vez que você olhou.
+Show	Mostrar
+The report was sent, but it could not be added to My reports on this PC.	O relatório foi enviado, mas não pôde ser adicionado a Meus relatórios neste PC.
+Last gameplay	Última partida
+Gameplay session	Sessão de jogo
+Launcher only	Somente launcher
+Open preview	Abrir visualização
+Close preview	Fechar visualização
+That log could not be read. Choose another one and try again.	Não foi possível ler esse log. Escolha outro e tente de novo.
+Send report	Enviar relatório
+Sends the selected log after the privacy filter is applied.	Envia o log selecionado depois da aplicação do filtro de privacidade.
+Sending...	Enviando...
+Sending your report...	Enviando seu relatório...
+This takes a few seconds.	Isso leva alguns segundos.
+Report ID:	ID do relatório:
+Report sent successfully	Relatório enviado com sucesso
+Copy report ID	Copiar ID do relatório
+Report ID copied.	ID do relatório copiado.
+Daily report limit reached	Limite diário de relatórios atingido
+Too many reports were sent recently	Muitos relatórios foram enviados recentemente
+Please try again later	Tente novamente mais tarde
+Cannot reach the online service	Não foi possível acessar o serviço online
+Check your connection and press Send report again; your text is kept.	Verifique sua conexão e pressione Enviar relatório de novo; seu texto foi mantido.
+The report was not accepted	O relatório não foi aceito
+Change the description or choose another log, then send it again.	Altere a descrição ou escolha outro log e envie de novo.
+The online service could not take the report	O serviço online não conseguiu receber o relatório
+This is not your fault. Try again in a few minutes; your text is kept.	Isso não é culpa sua. Tente de novo em alguns minutos; seu texto foi mantido.
+Description	Descrição
+Launcher version	Versão do launcher
+Game build	Build do jogo
+Game version	Versão do jogo
+CUSA	CUSA
+Operating system	Sistema operacional
+Log shortened to its end	Log reduzido ao trecho final
+Log after privacy filtering	Log depois do filtro de privacidade)PTBR";
 
 } // namespace dcp::localization

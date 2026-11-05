@@ -26,7 +26,7 @@ constexpr PageIconAsset kAssets[] = {
     {PageId::kGraphics, "graphics.svg", 0.84f}, {PageId::kGameplay, "gameplay.svg", 0.92f},
     {PageId::kOnline, "online.svg", 0.90f},     {PageId::kCheats, "cheats.svg", 0.92f},
     {PageId::kControls, "controls.svg", 0.94f}, {PageId::kTrophies, "trophies.svg", 0.86f},
-    {PageId::kAbout, "about.svg", 0.88f},
+    {PageId::kBugReport, "bug-report.svg", 0.90f}, {PageId::kAbout, "about.svg", 0.88f},
 };
 
 struct Bounds {

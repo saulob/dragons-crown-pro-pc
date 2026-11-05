@@ -92,7 +92,8 @@ async function dashboard(env, days) {
   const fetch = async (path) => ({
     ok: true,
     status: 200,
-    json: async () => (path.startsWith('/admin/api/summary') ? env.lobby.metricsSummary()
+    json: async () => (path.startsWith('/admin/api/incidents') ? env.lobby.incidentList()
+      : path.startsWith('/admin/api/summary') ? env.lobby.metricsSummary()
       : env.lobby.metricsHistory(Number(new URL(path, 'https://x').searchParams.get('days')))),
   });
   const storage = { getItem: () => 'token', setItem() {}, removeItem() {} };
@@ -363,8 +364,8 @@ test('missing host figures leave that block empty without breaking the others', 
   assert.deepEqual(cards, ['Parties reported2', 'Average party size3.00', 'With repeated classes2 · 100%']);
 });
 
-test('the dashboard still reads only the two existing endpoints, with no extra request for parties', () => {
-  assert.deepEqual([...ADMIN_JS.matchAll(/api\('([^']+)/g)].map((m) => m[1]).sort(), ['/admin/api/history?days=', '/admin/api/summary']);
+test('the dashboard reads only its metrics and report endpoints, with no extra request for parties', () => {
+  assert.deepEqual([...ADMIN_JS.matchAll(/api\('([^']+)/g)].map((m) => m[1]).sort(), ['/admin/api/history?days=', '/admin/api/incidents', '/admin/api/incidents/', '/admin/api/summary']);
   assert.equal([...ADMIN_JS.matchAll(/fetch\(/g)].length, 1);
   assert.ok(!/innerHTML|eval\(|new Function/.test(ADMIN_JS));
 });

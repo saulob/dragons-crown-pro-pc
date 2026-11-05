@@ -39,6 +39,7 @@
 #include "game_process.h"
 #include "header_art.h"
 #include "host.h"
+#include "incident_page.h"
 #include "launcher_quit.h"
 #include "localization/ui_text.h"
 #include "options.h"
@@ -351,6 +352,12 @@ public:
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         online_page_ = std::make_unique<OnlinePage>(UserDir());
+        incident_page_ = std::make_unique<IncidentPage>(IncidentPlaces());
+        {
+            net::OnlineConfig online = ReadOnlineConfig(settings_.file());
+            net::apply_environment(online);
+            incident_page_->CheckReports(online);
+        }
         trg::SetTranslator(&TranslateLauncherText);
         localization::SetActiveLanguage(settings_.Get(kTextLanguageKey, text_languages_.front().key));
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
@@ -741,6 +748,9 @@ private:
                     [this] { return online_page_ ? static_cast<int>(online_page_->PendingRequests()) : 0; }};
         case PageId::kTrophies:
             return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr, nullptr};
+        case PageId::kBugReport:
+            return {name, "Report a problem and send it with one game log.", [this](trg::Ui& ui) { PageBugReport(ui); },
+                    [this] { return incident_page_->HasReportUpdates(); }, nullptr};
         case PageId::kAbout:
             return {name, "This port, and where your files and settings live.", [this](trg::Ui& ui) { PageAbout(ui); },
                     nullptr, nullptr};
@@ -1284,6 +1294,21 @@ private:
         trophy_page_->Draw(ui);
     }
 
+    IncidentPage::Places IncidentPlaces() const {
+        const std::filesystem::path logs = PathFromUtf8(config_.logs_dir ? config_.logs_dir : "logs");
+        const std::filesystem::path running = config_.log_file ? PathFromUtf8(config_.log_file) : std::filesystem::path();
+        return {logs, running, UserDir(), {InstallDir(), UserDir().parent_path(), logs.parent_path()}};
+    }
+
+    ReportFacts CurrentReportFacts() const {
+        static const std::string operating_system = OperatingSystemText();
+        const bool known = build_ && files_ == GameFileState::kValid;
+        return {DCP_PORT_VERSION, known ? build_->label : "Not installed", known ? build_->version : "",
+                known ? build_->title_id : "", operating_system};
+    }
+
+    void PageBugReport(trg::Ui& ui) { incident_page_->Draw(ui, CurrentReportFacts()); }
+
     void PageAbout(trg::Ui& ui) {
         ui.SponsorCard(
             "This open source PC port is maintained and developed in my free time. If you enjoy the project and would "
@@ -1375,6 +1400,7 @@ private:
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
     std::unique_ptr<OnlinePage> online_page_;
+    std::unique_ptr<IncidentPage> incident_page_;
     PlayAttemptDetector play_attempts_;
     PlayGate play_;
     ProblemDialog problem_;

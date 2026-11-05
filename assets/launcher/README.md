@@ -35,6 +35,6 @@ The launcher draws it before the button label, as a square slightly taller than 
 
 # Page icons
 
-`icons/` holds the sidebar's nine SVGs, the source of truth, with one file per page and no rendered copies. They are
+`icons/` holds the sidebar's ten SVGs, the source of truth, with one file per page and no rendered copies. They are
 compiled into the launcher (`launcher/page_icons.cpp`), so they ship in no package as loose files. `icons/SOURCES.md`
 records where each one came from and its license.

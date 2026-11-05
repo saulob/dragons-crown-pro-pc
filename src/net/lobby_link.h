@@ -132,8 +132,11 @@ private:
 class LobbySession {
 public:
     ~LobbySession();
-    // False with the reason; `hello_reply` receives the hello answer.
-    bool open(const std::string& url, const Json& hello, Json* hello_reply, std::string* error, int timeout_ms = 8000);
+    // Opens the socket and sends no hello, for operations that take no account.
+    bool connect(const std::string& url, std::string* error, int timeout_ms = 8000);
+    // False with the reason; `hello_reply` receives the hello answer and `refusal` the lobby's code when it answered.
+    bool open(const std::string& url, const Json& hello, Json* hello_reply, std::string* error, int timeout_ms = 8000,
+              std::string* refusal = nullptr);
     // The answer, or nullopt with `code` set ("timeout" or the lobby's error code).
     std::optional<Json> call(const std::string& op, Json body, std::string* code);
     void close();

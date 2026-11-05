@@ -12,6 +12,12 @@ export const PROTECTION = {
   partyReportAll: { burst: 30, perSecond: 1 / 30 },
   partyReportAccount: { burst: 3, perSecond: 1 / 120 },
   partyReportAddress: { burst: 12, perSecond: 1 / 30 },
+  incidentAll: { burst: 40, perSecond: 1 / 3 },
+  incidentAccount: { burst: 8, perSecond: 1 / 60 },
+  incidentAddress: { burst: 16, perSecond: 1 / 30 },
+  incidentLookupAll: { burst: 200, perSecond: 2 },
+  incidentStatusAddress: { burst: 20, perSecond: 1 / 15 },
+  incidentReadAddress: { burst: 10, perSecond: 1 / 30 },
   trackedKeys: 4096,
 };
 

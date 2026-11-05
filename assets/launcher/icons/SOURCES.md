@@ -3,19 +3,24 @@
 The canonical navigation icon set for the launchers. Filenames are semantic, so the folder can be copied to another
 project as it is.
 
-**Copy `SOURCES.md` with the icons.** `display.svg` requires attribution, and that attribution has to go wherever the
-icon goes.
+**Copy `SOURCES.md` with the icons.** `display.svg` and `bug-report.svg` require attribution, and that attribution has to
+go wherever the icon goes.
 
 ## Attribution required
 
 | File | Title | Author | Collection | Source | License |
 |---|---|---|---|---|---|
 | `display.svg` | Display Television Tv Screen Gadget | nickylimyeanfen | Inc Device Icons | https://www.svgrepo.com/svg/381247/display-television-tv-screen-gadget | CC Attribution License |
+| `bug-report.svg` | Bug File | Vectopus | Atlas Variety Line Icons | https://www.svgrepo.com/svg/456346/bug-file | MIT License |
 
 `display.svg` is not CC0 and not public domain. License: https://creativecommons.org/licenses/by/
 
 Adapted for the launcher: renamed from `display-television-tv-screen-gadget-svgrepo-com.svg` and drawn scaled, in the
 sidebar's colours. The file's contents are unchanged.
+
+`bug-report.svg` is under the MIT License; its notice is in `packaging/licenses/THIRD-PARTY-LICENSES.txt`. Adapted for the
+launcher: renamed from `bug-file-svgrepo-com.svg` and drawn scaled, in the sidebar's colours. The file's contents are
+unchanged.
 
 ## CC0
 

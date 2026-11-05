@@ -10,7 +10,8 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { Lobby, PROTOCOL, LIMITS } from '../src/lobby.js';
+import { INCIDENT } from '../src/incidents.js';
+import { Lobby, PROTOCOL } from '../src/lobby.js';
 import { LocalConn, LocalHost, sqliteStore } from './host.js';
 import { upgrade } from './ws.js';
 
@@ -20,7 +21,11 @@ function describe(text) {
     const msg = JSON.parse(text);
     if (msg && typeof msg === 'object') {
       if ('secret' in msg) msg.secret = '<hidden>';
-      if (typeof msg.log === 'string') msg.log = `<${msg.log.length} chars>`;
+      if ('receipt' in msg) msg.receipt = '<hidden>';
+      if (Array.isArray(msg.reports)) msg.reports = `<${msg.reports.length} reports>`;
+      if (msg.report) msg.report = '<hidden>';
+      if (typeof msg.log_text === 'string') msg.log_text = `<${msg.log_text.length} chars>`;
+      if (typeof msg.description === 'string') msg.description = `<${msg.description.length} chars>`;
       return JSON.stringify(msg).slice(0, 300);
     }
   } catch {
@@ -73,7 +78,7 @@ export function startLobbyServer({ host: address = '127.0.0.1', port = 8790, db 
     }
     let conn = null;
     const transport = upgrade(req, socket, {
-      maxMessage: LIMITS.reportFrameBytes,
+      maxMessage: INCIDENT.frameChars,
       onText(text) {
         if (text === 'ping') return transport.send('pong');
         if (verbose) log(`<- ${first.cid} ${describe(text)}`);
@@ -95,7 +100,7 @@ export function startLobbyServer({ host: address = '127.0.0.1', port = 8790, db 
     }
     const send = transport.send;
     transport.send = (text) => {
-      if (verbose) log(`-> ${first.cid} ${text.slice(0, 300)}`);
+      if (verbose) log(`-> ${first.cid} ${describe(text)}`);
       send(text);
     };
     conn = new LocalConn(host, transport);

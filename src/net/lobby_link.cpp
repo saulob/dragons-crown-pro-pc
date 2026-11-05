@@ -301,10 +301,15 @@ void LobbyLink::Run() {
 
 LobbySession::~LobbySession() { close(); }
 
-bool LobbySession::open(const std::string& url, const Json& hello, Json* hello_reply, std::string* error, int timeout_ms) {
+bool LobbySession::connect(const std::string& url, std::string* error, int timeout_ms) {
     close();
     socket_ = WebSocket::connect(url, timeout_ms, error);
-    if (!socket_) return false;
+    return socket_ != nullptr;
+}
+
+bool LobbySession::open(const std::string& url, const Json& hello, Json* hello_reply, std::string* error, int timeout_ms,
+                        std::string* refusal) {
+    if (!connect(url, error, timeout_ms)) return false;
     std::string code;
     std::optional<Json> reply = call("hello", hello, &code);
     if (!reply) {
@@ -312,6 +317,7 @@ bool LobbySession::open(const std::string& url, const Json& hello, Json* hello_r
                           : code == "proto" ? "the lobby speaks another protocol version"
                           : code == "limit" ? "the lobby refused a new account from this address today"
                                             : "the lobby did not accept the sign-in (" + code + ")";
+        if (refusal && code != "timeout" && code != kLinkLost && code != kUnreachable) *refusal = code;
         close();
         return false;
     }

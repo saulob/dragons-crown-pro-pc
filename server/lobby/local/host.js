@@ -23,6 +23,17 @@ export function sqliteStore(file = ':memory:') {
     run: (query, ...args) => {
       prepare(query).run(...args);
     },
+    transaction: (work) => {
+      db.exec('BEGIN');
+      try {
+        const result = work();
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
     close: () => db.close(),
   };
 }

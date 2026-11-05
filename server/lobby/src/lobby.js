@@ -4,6 +4,7 @@
 // (local/server.js).
 import { PROTECTION, RateLimiter } from './abuse.js';
 import { ipGroup } from './edge.js';
+import { INCIDENT, INCIDENT_LIMITED, IncidentDesk, readClaim, readClaims, readIncident } from './incidents.js';
 import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
 import { Metrics, countryCode, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
@@ -13,7 +14,6 @@ export const PROTOCOL = 1;
 
 export const LIMITS = {
   frameBytes: 32 * 1024,
-  reportFrameBytes: 160 * 1024,
   nameChars: 16,
   gameChars: 32,
   binAttrBytes: 0x100,
@@ -33,15 +33,8 @@ export const LIMITS = {
   socketsPerIp: 16,
   heldEvents: 32,
   graceMs: 30000,
-  reportChars: 256,
-  reportLogChars: 128 * 1024,
-  reportVersionChars: 64,
   versionChars: 16,
   platformChars: 16,
-  reportsPerAccountPerDay: 5,
-  reportsPerIpPerDay: 10,
-  reportsPerDay: 300,
-  reportsKept: 1000,
 };
 
 const BUCKETS = {
@@ -50,6 +43,8 @@ const BUCKETS = {
   chat: { burst: 5, perSecond: 1 },
 };
 const ROOM_OPS = new Set(['room.create', 'room.join', 'room.leave', 'room.search', 'room.resume']);
+// A receipt is the whole proof for these, so looking up a report never involves an account.
+const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read']);
 // Operations after which the live counts can have grown.
 const GROWING_OPS = new Set(['hello', 'room.create', 'room.join', 'room.resume']);
 
@@ -90,8 +85,6 @@ const SCHEMA = [
      name TEXT NOT NULL, joined INTEGER NOT NULL, bin TEXT NOT NULL, conn TEXT, ip TEXT NOT NULL DEFAULT '',
      port INTEGER NOT NULL DEFAULT 0, lan TEXT NOT NULL DEFAULT '[]', grace_until INTEGER,
      held TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (room, member))`,
-  `CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, ms INTEGER NOT NULL, account TEXT NOT NULL,
-     ip TEXT NOT NULL, version TEXT NOT NULL, text TEXT NOT NULL, log TEXT NOT NULL)`,
 ];
 
 // Applied once each, in order; meta 'schema' counts the ones done.
@@ -203,7 +196,7 @@ function takeToken(bucket, spec, now) {
 }
 
 export class Lobby {
-  // host: { sql: { all(q, ...a), get(q, ...a), run(q, ...a) }, sockets(): Conn[], now(): ms, setAlarm(ms), log(text) }
+  // host: { sql: { all(q, ...a), get(q, ...a), run(q, ...a), transaction(work) }, sockets(): Conn[], now(): ms, setAlarm(ms), log(text) }
   // Conn: { send(text), close(code, reason), attachment(), setAttachment(object) }
   constructor(host, options = {}) {
     this.host = host;
@@ -215,6 +208,7 @@ export class Lobby {
     }
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
     this.metrics = new Metrics(host.sql, () => host.now());
+    this.incidents = new IncidentDesk(host.sql, this.meta('salt'));
     this.alarmAt = options.alarmAt ?? null;
     this.guards = {
       hello: new RateLimiter(PROTECTION.hello),
@@ -225,6 +219,12 @@ export class Lobby {
       partyReportAll: new RateLimiter(PROTECTION.partyReportAll),
       partyReportAccount: new RateLimiter(PROTECTION.partyReportAccount),
       partyReportAddress: new RateLimiter(PROTECTION.partyReportAddress),
+      incidentAll: new RateLimiter(PROTECTION.incidentAll),
+      incidentAccount: new RateLimiter(PROTECTION.incidentAccount),
+      incidentAddress: new RateLimiter(PROTECTION.incidentAddress),
+      incidentLookupAll: new RateLimiter(PROTECTION.incidentLookupAll),
+      incidentStatusAddress: new RateLimiter(PROTECTION.incidentStatusAddress),
+      incidentReadAddress: new RateLimiter(PROTECTION.incidentReadAddress),
       rejects: new RateLimiter({ burst: 1, perSecond: 1000 / PROTECTION.rejectWindowMs }),
     };
     this.relays = new Relay(this);
@@ -308,7 +308,7 @@ export class Lobby {
     this.current = att;
     try {
       if (typeof text !== 'string') fail('bad_request', 'text frames only');
-      if (text.length > LIMITS.reportFrameBytes) fail('too_large');
+      if (text.length > INCIDENT.frameChars) fail('too_large');
       let msg;
       try {
         msg = JSON.parse(text);
@@ -317,7 +317,7 @@ export class Lobby {
       }
       if (!isObject(msg) || typeof msg.op !== 'string' || !isInt(msg.seq, 0, 0x7fffffff)) fail('bad_request', 'envelope');
       seq = msg.seq;
-      if (text.length > LIMITS.frameBytes && msg.op !== 'report.send') fail('too_large');
+      if (text.length > LIMITS.frameBytes && msg.op !== 'incident.file') fail('too_large');
       const now = this.host.now();
       const any = takeToken(att.ra, BUCKETS.any, now);
       if (!any) fail('limit', 'slow down');
@@ -328,7 +328,7 @@ export class Lobby {
         att.rr = room;
       }
       if (!Object.hasOwn(HANDLERS, msg.op)) fail('bad_request', 'unknown op');
-      if (msg.op !== 'hello' && !att.hello) fail('no_session');
+      if (!NO_SESSION_OPS.has(msg.op) && !att.hello) fail('no_session');
       this.index = null;
       const body = HANDLERS[msg.op].call(this, att, msg, conn, text) ?? {};
       conn.setAttachment(att);
@@ -786,6 +786,54 @@ export class Lobby {
     partyReportAddress.take(address, now);
   }
 
+  // In memory, so a flood of refused attempts costs no SQL; the quota is counted in SQL because it has to outlive the
+  // object's hibernation.
+  limitIncidentAttempt(att) {
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { incidentAll, incidentAccount, incidentAddress } = this.guards;
+    if (!incidentAll.allows('all', now) || !incidentAccount.allows(att.account, now) || !incidentAddress.allows(address, now)) {
+      this.diagnose('incident_limited');
+      fail('limit', 'too many report attempts');
+    }
+    incidentAll.take('all', now);
+    incidentAccount.take(att.account, now);
+    incidentAddress.take(address, now);
+  }
+
+  // Its own budget: a lookup is no report, and no report's quota pays for it.
+  limitIncidentLookup(att, guard) {
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    if (!this.guards.incidentLookupAll.allows('all', now) || !this.guards[guard].allows(address, now)) fail('limit', 'too many lookups');
+    this.guards.incidentLookupAll.take('all', now);
+    this.guards[guard].take(address, now);
+  }
+
+  newTicket() {
+    let ticket;
+    do ticket = `DCP-${this.randomCode(6)}`;
+    while (this.incidents.taken(ticket));
+    return ticket;
+  }
+
+  incidentList() {
+    return this.incidents.list();
+  }
+
+  incident(ticket) {
+    return this.incidents.get(ticket);
+  }
+
+  incidentForAdmin(ticket) {
+    const found = this.incident(ticket);
+    return found ? { ...found, ...this.incidents.status(ticket) } : null;
+  }
+
+  setIncidentStatus(ticket, change) {
+    return this.incidents.setStatus(ticket, change, this.host.now());
+  }
+
   requireFriendRoom(a, b) {
     if (this.friendCount(a) >= LIMITS.friends || this.friendCount(b) >= LIMITS.friends) fail('limit', 'friend list full');
   }
@@ -1174,32 +1222,43 @@ const HANDLERS = {
     return { counted: true };
   },
 
-  // Bug reports for the deployment's maintainer; the address is kept only as a salted hash for the limits.
-  'report.send'(att, msg) {
-    const text = cleanText(msg.text, LIMITS.reportChars);
-    if (!text) fail('bad_request', 'empty');
-    if (typeof msg.log !== 'string') fail('bad_request', 'log');
-    const log = msg.log.slice(-LIMITS.reportLogChars);
-    const version = cleanText(msg.version ?? '', LIMITS.reportVersionChars);
+  // A report from the launcher's Bug Report page; only the /admin dashboard reads it back (incidents.js).
+  'incident.file'(att, msg) {
+    this.limitIncidentAttempt(att);
+    const { incident, code, detail } = readIncident(msg);
+    if (!incident) fail(code, detail);
     const now = this.host.now();
-    const since = now - DAY_MS;
-    const ip = this.ipKey(att.ip);
-    const mine = this.host.sql.get('SELECT COUNT(*) AS n FROM reports WHERE account = ? AND ms >= ?', att.account, since).n;
-    const fromIp = this.host.sql.get('SELECT COUNT(*) AS n FROM reports WHERE ip = ? AND ms >= ?', ip, since).n;
-    const all = this.host.sql.get('SELECT COUNT(*) AS n FROM reports WHERE ms >= ?', since).n;
-    if (mine >= LIMITS.reportsPerAccountPerDay || fromIp >= LIMITS.reportsPerIpPerDay || all >= LIMITS.reportsPerDay) {
-      fail('limit', 'report limit');
+    const address = ipGroup(att.ip);
+    const { refusal, ticket, receipt } = this.host.sql.transaction(() => {
+      const limited = this.incidents.refusal(att.account, address, now);
+      if (limited) return { refusal: limited };
+      const filed = { ticket: this.newTicket(), receipt: this.randomHex(32) };
+      this.incidents.file(incident, filed.ticket, att.account, address, now);
+      this.incidents.track(filed.ticket, filed.receipt, now);
+      return filed;
+    });
+    if (refusal) {
+      this.diagnose(INCIDENT_LIMITED[refusal]);
+      fail(refusal, 'report limit');
     }
-    this.host.sql.run('INSERT INTO reports (ms, account, ip, version, text, log) VALUES (?, ?, ?, ?, ?, ?)', now, att.account,
-      ip, version, text, log);
-    const id = this.host.sql.get('SELECT MAX(id) AS id FROM reports').id;
-    this.host.sql.run('DELETE FROM reports WHERE id <= ?', id - LIMITS.reportsKept);
-    this.host.sql.run(`UPDATE reports SET ip = '' WHERE ms < ?`, since);
-    return { id, left: LIMITS.reportsPerAccountPerDay - mine - 1 };
+    this.diagnose('incident_filed');
+    return { ticket, receipt, submitted_at: now };
+  },
+
+  // The launcher's My reports: what became of the reports it holds receipts for.
+  'incident.status'(att, msg) {
+    this.limitIncidentLookup(att, 'incidentStatusAddress');
+    const claims = readClaims(msg);
+    if (!claims) fail('bad_request', 'reports');
+    return { reports: this.incidents.statuses(claims) };
+  },
+
+  'incident.read'(att, msg) {
+    this.limitIncidentLookup(att, 'incidentReadAddress');
+    const claim = readClaim(msg);
+    if (!claim) fail('bad_request', 'receipt');
+    const report = this.incidents.report(claim);
+    if (!report) fail('not_found');
+    return { report };
   },
 };
-
-// Reports for a deployment's maintainer (worker.js serves them behind REPORTS_TOKEN).
-export function listReports(sql, limit = 100) {
-  return sql.all('SELECT id, ms, account, version, text, log FROM reports ORDER BY id DESC LIMIT ?', limit);
-}

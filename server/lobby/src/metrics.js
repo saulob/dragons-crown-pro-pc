@@ -12,7 +12,8 @@ export const DIMENSIONS = ['platform', 'version', 'country', 'reject', 'abuse', 
 export const LIFETIMES = [['under_1m', 60e3], ['1_5m', 5 * 60e3], ['5_15m', 15 * 60e3], ['15_60m', 60 * 60e3], ['over_1h', Infinity]];
 export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited', 'ws_upgrade_ip_cap', 'hello_accepted',
   'hello_reconnect_deduped', 'hello_limited', 'room_create_accepted', 'room_create_limited', 'room_join_limited',
-  'relay_abuse_closed', 'party_report_limited', 'public_endpoint_limited']);
+  'relay_abuse_closed', 'party_report_limited', 'public_endpoint_limited', 'incident_filed', 'incident_limited',
+  'incident_hourly_limited', 'incident_daily_limited']);
 export const PLATFORMS = ['Windows', 'Linux', 'Steam Deck'];
 
 const DAY_MS = 24 * 3600 * 1000;

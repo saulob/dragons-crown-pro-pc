@@ -213,7 +213,7 @@ License: CC0 (public domain dedication).
 Launcher page icons
 ========================================================================
 
-The nine sidebar icons, compiled into dragons_crown_pro.exe from assets/launcher/icons of the source. Each one is
+The ten sidebar icons, compiled into dragons_crown_pro.exe from assets/launcher/icons of the source. Each one is
 drawn in the sidebar's colours; assets/launcher/icons/SOURCES.md records the source and every change made.
 
 display.svg, attribution required:
@@ -232,3 +232,28 @@ CC0 (public domain dedication), all from SVG Repo (www.svgrepo.com):
   controls.svg   Keyboard      https://www.svgrepo.com/svg/524665/keyboard
   trophies.svg   Achievements  https://www.svgrepo.com/svg/304482/achievements
   about.svg      About         https://www.svgrepo.com/svg/486929/about
+
+bug-report.svg, MIT License:
+  "Bug File" by Vectopus, collection Atlas Variety Line Icons.
+  Source: SVG Repo (www.svgrepo.com), https://www.svgrepo.com/svg/456346/bug-file
+  Adapted: renamed from bug-file-svgrepo-com.svg and drawn scaled, in the sidebar's colours.
+
+Copyright (c) Vectopus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

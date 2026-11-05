@@ -33,7 +33,7 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp
-    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
@@ -110,7 +110,7 @@ add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
     DEPENDS ${DCP_SPIDER_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
     COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
 
-add_library(dcp_launcher STATIC host.cpp launcher.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
+add_library(dcp_launcher STATIC host.cpp incident_page.cpp launcher.cpp my_reports.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
     updater/github_release.cpp updater/json.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
     updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
     updater/update_ui.cpp updater/update_zip.cpp updater/version.cpp
@@ -187,6 +187,13 @@ if (WIN32)
 endif()
 set_target_properties(dcp-update-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-update-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Bug Report page's logic, on synthetic logs in temporary folders: no window, no network.
+add_executable(dcp-incident-tests EXCLUDE_FROM_ALL ../tests/incident_tests.cpp)
+target_compile_definitions(dcp-incident-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(dcp-incident-tests PRIVATE dcp_launcher_core)
+set_target_properties(dcp-incident-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-incident-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the local trophies (tools/test.ps1); not part of the default build.
 add_executable(dcp-trophy-tests EXCLUDE_FROM_ALL ../tests/trophy_tests.cpp ${DCP_LOG_SOURCES} ../gpu/shim/dcp_png.cpp)

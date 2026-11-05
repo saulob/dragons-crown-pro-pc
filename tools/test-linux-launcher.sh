@@ -8,7 +8,7 @@ cd "$root" || exit 2
 
 flags=(-std=c++20 -fsyntax-only -Wall -Wextra -Ilauncher -Isrc -Igpu/shim -Ithird_party/trg-launcher/include)
 failed=0
-for unit in launcher/header_art.cpp launcher/page_icons.cpp; do
+for unit in launcher/header_art.cpp launcher/page_icons.cpp launcher/incident_report.cpp launcher/log_scrubber.cpp launcher/report_history.cpp; do
     output="$(g++ "${flags[@]}" "$unit" 2>&1)" || failed=1
     [[ $output == *"warning:"* ]] && failed=1
     [[ -n $output ]] && printf '%s\n' "$output"

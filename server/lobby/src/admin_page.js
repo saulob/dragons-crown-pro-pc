@@ -7,13 +7,13 @@ export const ADMIN_HTML = String.raw`<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
-<title>DCP Online Metrics</title>
+<title>DCP Online Admin</title>
 <link rel="stylesheet" href="/admin/app.css">
 </head>
 <body>
 <header class="top">
-  <h1>Dragon's Crown Pro PC · Online Metrics</h1>
-  <p class="muted">Anonymous aggregate statistics of the online service. Days are America/Sao_Paulo.</p>
+  <h1>Dragon's Crown Pro PC · Online Admin</h1>
+  <p class="muted">Dashboard: anonymous aggregate statistics of the online service, days in America/Sao_Paulo. Bugs: reports players sent from the launcher.</p>
 </header>
 <main>
   <form id="login" class="panel login" autocomplete="off">
@@ -24,6 +24,12 @@ export const ADMIN_HTML = String.raw`<!doctype html>
     <p id="login-error" class="error" role="alert"></p>
   </form>
   <section id="dash" hidden>
+    <nav class="tabs" role="tablist" aria-label="Admin sections">
+      <button id="tab-dashboard" type="button" role="tab" aria-selected="true" aria-controls="view-dashboard">Dashboard</button>
+      <button id="tab-bugs" type="button" role="tab" aria-selected="false" aria-controls="view-bugs">Bugs</button>
+      <button id="signout" type="button" class="quiet">Sign out</button>
+    </nav>
+    <div id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
     <div class="toolbar">
       <label for="range">Range</label>
       <select id="range">
@@ -34,7 +40,6 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       </select>
       <button id="refresh" type="button">Refresh</button>
       <span id="status" class="muted" role="status"></span>
-      <button id="signout" type="button" class="quiet">Sign out</button>
     </div>
     <div class="cards">
       <div class="card" tabindex="0" data-help="Players connected to the online service right now, counted once per connected account"><span class="label">Online now</span><span id="c-online" class="value">–</span></div>
@@ -124,8 +129,77 @@ export const ADMIN_HTML = String.raw`<!doctype html>
           traffic, so the share of rooms that connected directly is not measured.</li>
         <li>Period comparison sets the selected range (including today so far) against the same number of days before it.
           No percentage is shown when the earlier period has nothing to compare with.</li>
-        <li>Nothing here stores names, Friend Codes, accounts, addresses, rooms or gameplay.</li>
+        <li>The statistics store no names, Friend Codes, accounts, addresses, rooms or gameplay. Bug Reports hold what a
+          player chose to send, and a report is removed once the newest 500 no longer include it.</li>
       </ul>
+    </div>
+    </div>
+    <div id="view-bugs" role="tabpanel" aria-labelledby="tab-bugs" hidden>
+      <div class="panel">
+        <p class="muted">Reports players sent from the launcher, newest first. The log of a report is stored as the player previewed it and is shown and downloaded exactly as stored. No account or address is kept with a report, and the newest 500 are kept.</p>
+        <div class="toolbar">
+          <label for="bug-version">Launcher version</label>
+          <select id="bug-version"></select>
+          <label for="bug-build">Game build</label>
+          <select id="bug-build"></select>
+          <label for="bug-day">Date</label>
+          <input id="bug-day" type="date">
+          <label for="bug-status-filter">Status</label>
+          <select id="bug-status-filter">
+            <option value="">All statuses</option>
+            <option value="new">New</option>
+            <option value="investigating">Investigating</option>
+            <option value="fixed">Fixed</option>
+            <option value="cannot_reproduce">Cannot reproduce</option>
+            <option value="duplicate">Duplicate</option>
+            <option value="not_a_bug">Not a bug</option>
+            <option value="closed">Closed</option>
+          </select>
+          <button id="bug-refresh" type="button">Refresh</button>
+          <span id="bug-count" class="muted" role="status"></span>
+        </div>
+        <div class="scroll bug-list"><table id="bug-list"></table></div>
+      </div>
+      <div id="bug-detail" class="panel bug-detail" hidden>
+        <div class="toolbar bug-header">
+          <h2 id="bug-title"></h2>
+          <button id="bug-download" type="button">Download log</button>
+          <button id="bug-copy" type="button" class="quiet">Copy log</button>
+          <span id="bug-note" class="muted" role="status"></span>
+          <button id="bug-close" type="button" class="quiet bug-close">Close report</button>
+        </div>
+        <p id="bug-text" class="bug-text"></p>
+        <dl id="bug-facts" class="bug-facts"></dl>
+        <h3>Report status</h3>
+        <div class="bug-status-form">
+          <label for="bug-status">Status</label>
+          <select id="bug-status">
+            <option value="new">New</option>
+            <option value="investigating">Investigating</option>
+            <option value="fixed">Fixed</option>
+            <option value="cannot_reproduce">Cannot reproduce</option>
+            <option value="duplicate">Duplicate</option>
+            <option value="not_a_bug">Not a bug</option>
+            <option value="closed">Closed</option>
+          </select>
+          <p id="bug-status-meaning" class="muted"></p>
+          <div id="bug-fixed-field" class="bug-status-field" hidden>
+            <label for="bug-fixed">Fixed in version</label>
+            <input id="bug-fixed" type="text" maxlength="32" autocomplete="off" placeholder="0.9.3">
+          </div>
+          <div class="bug-status-field">
+            <label for="bug-message">Message to player</label>
+            <textarea id="bug-message" rows="3" maxlength="500"></textarea>
+          </div>
+          <div class="toolbar">
+            <button id="bug-status-save" type="button">Save status</button>
+            <span id="bug-status-note" class="muted" role="status"></span>
+          </div>
+        </div>
+        <h3 id="bug-log-name"></h3>
+        <p class="muted bug-snapshot">This is the sanitized log snapshot captured when the report was sent. Previous report IDs may appear if they were already present in the selected log.</p>
+        <pre id="bug-log" class="bug-log" tabindex="0"></pre>
+      </div>
     </div>
   </section>
 </main>
@@ -208,7 +282,7 @@ h2.section { font-size: 17px; margin: 24px 0 10px; }
 }
 .login { max-width: 420px; display: grid; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; color: var(--text-secondary); }
-input[type="password"], select {
+input[type="password"], input[type="date"], select {
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -217,7 +291,7 @@ input[type="password"], select {
   color: var(--text-primary);
   width: 100%;
 }
-select { width: auto; }
+select, input[type="date"] { width: auto; }
 button {
   font: inherit;
   padding: 8px 14px;
@@ -277,6 +351,33 @@ th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--gri
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
 details summary { cursor: pointer; font-weight: 600; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 16px; border-bottom: 1px solid var(--border); }
+.tabs button[role="tab"] { background: transparent; color: var(--text-secondary); border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 14px; }
+.tabs button[role="tab"][aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--accent); font-weight: 600; }
+.tabs .quiet { margin-left: auto; }
+.bug-detail h2 { margin: 0; }
+.bug-list { max-height: 340px; overflow-y: auto; }
+#bug-list th, #bug-list td { text-align: left; }
+#bug-list td.bug-summary { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+#bug-list tr.selected td { background: var(--grid); }
+button.ticket { padding: 0; background: transparent; border: 0; color: var(--accent); text-decoration: underline; font-variant-numeric: tabular-nums; }
+.bug-detail { margin-top: 16px; }
+.bug-header { margin-bottom: 20px; }
+.bug-close { margin-left: auto; }
+.bug-detail h3 { font-size: 14px; margin: 0 0 4px; }
+.bug-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 24px; }
+.bug-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 24px; font-size: 13px; }
+.bug-snapshot { margin-bottom: 8px; }
+.bug-status-form { margin: 0 0 24px; }
+.bug-status-form > .muted { margin: 4px 0 12px; }
+.bug-status-form .toolbar { margin: 12px 0 0; }
+.bug-status-field { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
+.bug-status-field[hidden] { display: none; }
+.bug-status-field input { max-width: 200px; }
+.bug-status-field textarea { max-width: 640px; font: inherit; }
+.bug-facts dt { color: var(--text-secondary); }
+.bug-facts dd { margin: 0; overflow-wrap: anywhere; }
+.bug-log { max-height: 480px; overflow: auto; margin: 0; padding: 10px; background: var(--surface-0); border: 1px solid var(--border); border-radius: 6px; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre; }
 .notes ul { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 13px; }
 .notes li { margin: 4px 0; }
 .tip {
@@ -312,7 +413,9 @@ export const ADMIN_JS = String.raw`(function () {
     hello_reconnect_deduped: 'Reconnects not counted as new sessions', hello_limited: 'Sign-ins refused: too many',
     room_create_accepted: 'Rooms created', room_create_limited: 'Room creations refused', room_join_limited: 'Room joins refused',
     relay_abuse_closed: 'Relay connections closed for abuse', party_report_limited: 'Party snapshots refused: too many',
-    public_endpoint_limited: 'Public IPv4 claims ignored: too many'
+    public_endpoint_limited: 'Public IPv4 claims ignored: too many', incident_filed: 'Bug reports accepted',
+    incident_limited: 'Bug reports refused: too many', incident_hourly_limited: 'Bug reports refused: hourly limit',
+    incident_daily_limited: 'Bug reports refused: daily limit'
   };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol' };
 
@@ -344,13 +447,16 @@ export const ADMIN_JS = String.raw`(function () {
 
   function AuthError() {}
 
-  function api(path) {
-    return fetch(path, { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' })
+  function request(path, body) {
+    return fetch(path, { method: body ? 'POST' : 'GET', body: body, headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' })
       .then(function (r) {
         if (r.status === 401) throw new AuthError();
         if (!r.ok) throw new Error('The service answered ' + r.status + '.');
-        return r.json();
+        return r;
       });
+  }
+  function api(path) {
+    return request(path).then(function (r) { return r.json(); });
   }
 
   var tip = $('tip');
@@ -536,7 +642,7 @@ export const ADMIN_JS = String.raw`(function () {
     rows(node, 'Sessions · last ' + days + ' days', range, name);
   }
 
-  function table(node, head, body) {
+  function table(node, head, body, rowClass) {
     clear(node);
     var thead = el('thead');
     var tr = el('tr');
@@ -544,8 +650,8 @@ export const ADMIN_JS = String.raw`(function () {
     thead.appendChild(tr);
     node.appendChild(thead);
     var tbody = el('tbody');
-    body.forEach(function (cells) {
-      var row = el('tr');
+    body.forEach(function (cells, i) {
+      var row = el('tr', rowClass ? rowClass(i) : '');
       cells.forEach(function (c) { row.appendChild(typeof c === 'string' ? el('td', '', c) : c); });
       tbody.appendChild(row);
     });
@@ -719,6 +825,211 @@ export const ADMIN_JS = String.raw`(function () {
     node.appendChild(table);
   }
 
+  var bugReports = [];
+  var bugTicket = '';
+  var bugLoadingTicket = '';
+  var bugLogText = '';
+  var view = 'dashboard';
+  var stampLabel = new Intl.DateTimeFormat('en-GB', { timeZone: ZONE, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  var bugDayLabel = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+  var BUG_STATUSES = {
+    new: ['New', 'The report has not been reviewed yet.'],
+    investigating: ['Investigating', 'The report is being investigated.'],
+    fixed: ['Fixed', 'The problem has been corrected.'],
+    cannot_reproduce: ['Cannot reproduce', 'The problem could not be reproduced with the available information.'],
+    duplicate: ['Duplicate', 'The same problem is already tracked by another report.'],
+    not_a_bug: ['Not a bug', 'The reported behavior is expected or is not a Dragon\u2019s Crown Pro bug.'],
+    closed: ['Closed', 'The report was intentionally finished without a specific fix or another more precise status. It does not mean Fixed.']
+  };
+
+  function bugOptions(id, key) {
+    var select = $(id);
+    var chosen = select.value;
+    var seen = {};
+    bugReports.forEach(function (r) { seen[r[key]] = true; });
+    clear(select);
+    var all = el('option', '', 'All');
+    all.value = '';
+    select.appendChild(all);
+    Object.keys(seen).sort().forEach(function (value) {
+      var option = el('option', '', value);
+      option.value = value;
+      select.appendChild(option);
+    });
+    select.value = seen[chosen] ? chosen : '';
+  }
+
+  function bugShown() {
+    var version = $('bug-version').value;
+    var build = $('bug-build').value;
+    var day = $('bug-day').value;
+    var status = $('bug-status-filter').value;
+    return bugReports.filter(function (r) {
+      return (!version || r.launcher_version === version) && (!build || r.game_build === build) &&
+        (!day || bugDayLabel.format(r.ms) === day) && (!status || r.status === status);
+    });
+  }
+
+  function bugFact(list, name, value) {
+    list.appendChild(el('dt', '', name));
+    list.appendChild(el('dd', '', value || '–'));
+  }
+
+  function showBugStatusMeaning() {
+    var status = $('bug-status').value;
+    $('bug-status-meaning').textContent = BUG_STATUSES[status][1];
+    $('bug-fixed-field').hidden = status !== 'fixed';
+  }
+
+  function bugStatusForm(r) {
+    $('bug-status').value = r.status;
+    $('bug-fixed').value = r.fixed_version;
+    $('bug-message').value = r.player_message;
+    $('bug-status-note').textContent = '';
+    showBugStatusMeaning();
+  }
+
+  function bugDetail(r) {
+    bugTicket = r.ticket;
+    bugLoadingTicket = '';
+    bugLogText = r.log_text;
+    $('bug-title').textContent = r.ticket;
+    $('bug-text').textContent = r.description;
+    var facts = $('bug-facts');
+    clear(facts);
+    bugFact(facts, 'Report ID', r.ticket);
+    bugFact(facts, 'Submitted', stampLabel.format(r.ms) + ' (Sao Paulo)');
+    bugFact(facts, 'Launcher version', r.launcher_version);
+    bugFact(facts, 'Game build', r.game_build);
+    bugFact(facts, 'Game version', r.game_version);
+    bugFact(facts, 'CUSA', r.cusa);
+    bugFact(facts, 'Operating system', r.operating_system);
+    bugFact(facts, 'Original log file', r.log_file);
+    bugFact(facts, 'Log clipped', r.log_clipped === 'yes' ? 'Yes, only its end was sent' : 'No');
+    $('bug-log-name').textContent = 'Sanitized log';
+    $('bug-log').textContent = bugLogText;
+    $('bug-note').textContent = '';
+    bugStatusForm(r);
+    $('bug-detail').hidden = false;
+    renderBugList();
+  }
+
+  function openBugReport(ticket) {
+    bugLoadingTicket = ticket;
+    return api('/admin/api/incidents/' + encodeURIComponent(ticket)).then(function (report) {
+      if (report.ticket === bugLoadingTicket) bugDetail(report);
+    }).catch(function (error) {
+      if (error instanceof AuthError) { signOut('The token was not accepted.'); return; }
+      if (ticket !== bugLoadingTicket) return;
+      bugLoadingTicket = '';
+      $('bug-count').textContent = 'Could not open ' + ticket + '.';
+    });
+  }
+
+  function forgetBugReport() {
+    bugTicket = '';
+    bugLoadingTicket = '';
+    bugLogText = '';
+    $('bug-detail').hidden = true;
+  }
+
+  function closeBugReport() {
+    forgetBugReport();
+    renderBugList();
+  }
+
+  function toggleBugReport(ticket) {
+    if (ticket === bugTicket) closeBugReport();
+    else openBugReport(ticket);
+  }
+
+  function downloadBugLog() {
+    var ticket = bugTicket;
+    if (!ticket) return Promise.resolve();
+    return request('/admin/api/incidents/' + encodeURIComponent(ticket) + '/log').then(function (r) {
+      var named = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '');
+      return r.blob().then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var link = el('a');
+        link.href = url;
+        link.download = named ? named[1] : ticket + '.log';
+        link.click();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      });
+    }).catch(function (error) {
+      if (error instanceof AuthError) { signOut('The token was not accepted.'); return; }
+      $('bug-note').textContent = 'Could not download the log.';
+    });
+  }
+
+  function copyBugLog() {
+    if (!bugLogText) return Promise.resolve();
+    var say = function (text) { $('bug-note').textContent = text; };
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { say('Copying is not available in this browser.'); return Promise.resolve(); }
+    return navigator.clipboard.writeText(bugLogText).then(function () { say('Log copied.'); }, function () { say('Could not copy the log.'); });
+  }
+
+  function saveBugStatus() {
+    var ticket = bugTicket;
+    if (!ticket) return Promise.resolve();
+    var status = $('bug-status').value;
+    var change = { status: status, fixed_version: status === 'fixed' ? $('bug-fixed').value.trim() : '', player_message: $('bug-message').value };
+    return request('/admin/api/incidents/' + encodeURIComponent(ticket) + '/status', JSON.stringify(change)).then(function (r) {
+      return r.json();
+    }).then(function (saved) {
+      bugReports.forEach(function (r) {
+        if (r.ticket === ticket) { r.status = saved.status; r.status_updated_at = saved.status_updated_at; }
+      });
+      renderBugList();
+      if (ticket !== bugTicket) return;
+      bugStatusForm(saved);
+      $('bug-status-note').textContent = 'Saved.';
+    }).catch(function (error) {
+      if (error instanceof AuthError) { signOut('The token was not accepted.'); return; }
+      if (ticket === bugTicket) $('bug-status-note').textContent = 'Could not save the status. Check the version and the message.';
+    });
+  }
+
+  function bugTicketCell(r) {
+    var td = el('td');
+    var button = el('button', 'ticket', r.ticket);
+    button.type = 'button';
+    button.addEventListener('click', function () { toggleBugReport(r.ticket); });
+    td.appendChild(button);
+    return td;
+  }
+
+  function renderBugList() {
+    var shown = bugShown();
+    table($('bug-list'), ['Report ID', 'Submitted', 'Launcher', 'Game build', 'CUSA', 'Operating system', 'Description', 'Status'], shown.map(function (r) {
+      return [bugTicketCell(r), stampLabel.format(r.ms), r.launcher_version, r.game_build || '–', r.cusa || '–', r.operating_system,
+        el('td', 'bug-summary', r.preview), BUG_STATUSES[r.status][0]];
+    }), function (i) { return shown[i].ticket === bugTicket ? 'selected' : ''; });
+    $('bug-count').textContent = !bugReports.length ? 'No reports yet.'
+      : shown.length === bugReports.length ? fmt(shown.length) + ' reports' : fmt(shown.length) + ' of ' + fmt(bugReports.length) + ' reports';
+  }
+
+  function loadBugReports() {
+    $('bug-count').textContent = 'Loading…';
+    return api('/admin/api/incidents').then(function (r) {
+      bugReports = r.incidents;
+      bugOptions('bug-version', 'launcher_version');
+      bugOptions('bug-build', 'game_build');
+      renderBugList();
+    }).catch(function (error) {
+      if (error instanceof AuthError) { signOut('The token was not accepted.'); return; }
+      $('bug-count').textContent = error && error.message ? error.message : 'Could not load the reports.';
+    });
+  }
+
+  function showView(name) {
+    view = name;
+    $('view-dashboard').hidden = name !== 'dashboard';
+    $('view-bugs').hidden = name !== 'bugs';
+    $('tab-dashboard').setAttribute('aria-selected', String(name === 'dashboard'));
+    $('tab-bugs').setAttribute('aria-selected', String(name === 'bugs'));
+  }
+
   function render(summary, history) {
     $('c-online').textContent = fmt(summary.live.online);
     $('c-in-rooms').textContent = fmt(summary.live.in_rooms);
@@ -763,7 +1074,7 @@ export const ADMIN_JS = String.raw`(function () {
     $('dash').hidden = false;
     load();
     if (timer) clearInterval(timer);
-    timer = setInterval(function () { if (!document.hidden) load(); }, 60000);
+    timer = setInterval(function () { if (!document.hidden && view === 'dashboard') load(); }, 60000);
   }
 
   function signOut(message) {
@@ -771,6 +1082,9 @@ export const ADMIN_JS = String.raw`(function () {
     storeToken('');
     if (timer) clearInterval(timer);
     timer = null;
+    bugReports = [];
+    forgetBugReport();
+    showView('dashboard');
     $('dash').hidden = true;
     $('login').hidden = false;
     $('token').value = '';
@@ -787,8 +1101,17 @@ export const ADMIN_JS = String.raw`(function () {
     $('login-error').textContent = '';
     showDashboard();
   });
+  $('tab-dashboard').addEventListener('click', function () { showView('dashboard'); load(); });
+  $('tab-bugs').addEventListener('click', function () { showView('bugs'); loadBugReports(); });
+  $('bug-refresh').addEventListener('click', loadBugReports);
+  $('bug-download').addEventListener('click', downloadBugLog);
+  $('bug-copy').addEventListener('click', copyBugLog);
+  $('bug-close').addEventListener('click', closeBugReport);
+  $('bug-status').addEventListener('change', showBugStatusMeaning);
+  $('bug-status-save').addEventListener('click', saveBugStatus);
   $('refresh').addEventListener('click', load);
   $('range').addEventListener('change', load);
+  ['bug-version', 'bug-build', 'bug-day', 'bug-status-filter'].forEach(function (id) { $(id).addEventListener('change', renderBugList); });
   $('signout').addEventListener('click', function () { signOut(''); });
 
   token = storedToken();

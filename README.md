@@ -102,6 +102,8 @@ This project's implementation was written separately and does not include copied
 
 The online service stores anonymous aggregate usage statistics, such as player counts, sessions, the port version, the platform and the country. These statistics do not store player names, Friend Codes, account IDs or IP addresses. Gameplay stays direct between the players (P2P), except for a pair that cannot connect directly, whose traffic the service forwards without storing or reading it; gameplay activity, saves, Ping and FPS are not collected, apart from an anonymous count of which character classes appear in online parties (classes and party size only, no names or identifiers). To find friends and connect you, the service also keeps your account, Online name and friends, and while you are in a room it uses your address and port. See [docs/ONLINE.md](docs/ONLINE.md#privacy-and-usage-statistics).
 
+The launcher's Bug Report page sends a report only when you press Send report: your description, the version, game build and operating system, and one game log you choose, filtered first. Open preview shows exactly what goes out. No personal user data is intentionally included, and automatic filtering cannot promise to catch everything, so check the preview if you want to be sure. Your account and address are used for the report limits and are not stored with the report. My reports on the same page shows what became of the reports sent from this PC; that list exists only on this PC. See [docs/ONLINE.md](docs/ONLINE.md#bug-reports).
+
 ## What you need
 
 - Windows 10 (version 1903 or newer) or Windows 11, 64-bit

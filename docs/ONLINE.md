@@ -44,6 +44,72 @@ The Gameplay page's Story Skip Offer and Tutorial Skip Offer let a new character
 
 Nothing else needs setting up. With Online play Off the game runs offline as before, and F3 does nothing.
 
+### Bug reports
+
+The launcher's Bug Report page sends a report only when the player presses Send report, and an optional preview shows exactly
+what goes out. A report holds the player's description, the launcher version, the game build, game version and CUSA, the
+operating system, the selected log's file name and that log after the privacy filter (`launcher/log_scrubber.cpp`), at
+most its last 64 KiB. No personal user data is intentionally included, and the filter cannot promise to catch everything
+a log might hold, which is why the page offers the preview.
+
+The filter replaces IPv4 and IPv6 addresses (not loopback), the Windows or Linux account name, the computer name, the
+profile folder, the folder the port runs from, other folders outside the system's (the file name stays), network paths,
+the online secret, the account id, other players' account ids, room codes, Friend Codes and values labelled as passwords,
+tokens or keys, and it drops chat lines. Ordinary diagnostics stay, including hashes of game files and driver versions.
+The Online name the player chose is not removed, because a log shows it only for that player's own session.
+
+To send, the launcher signs in with this PC's online account, as the Connection test does, without showing the player
+online; a PC that never went online gets its random online identity then. The service uses the account and the
+connection's address only to count the report limits: the quota table keeps salted hashes of them for 24 hours, and the
+stored report holds neither.
+
+An account may file 2 accepted reports per rolling hour and 10 per rolling 24 hours; a report leaves each window that long
+after it was accepted, and only accepted reports count. The Worker alone decides: the launcher keeps no counter, shows no
+numbers and leaves Send report available. A refused report is not stored, and the page keeps the description, the selected
+log and any open preview. `incident_hourly_limit` shows "Too many reports were sent recently", `incident_daily_limit` shows
+"Daily report limit reached"; with both reached the hourly one is answered. The service has further protections of its own,
+which answer the plain `limit` code and show the same message as the hourly limit.
+
+The Worker stores the report as received, with the log text itself in its Durable Object database, or refuses it; it filters
+and rewrites nothing, so the preview, the request, the stored report, the admin view and the downloaded log are the same text.
+Reports are readable only in the private `/admin` (`DCP_DASHBOARD_TOKEN`), tab Bugs, where each log can be viewed, copied or
+downloaded as a `.log` file through the same token. The service keeps the newest 500; removing the local log does not remove
+a sent report.
+
+### Report status and My reports
+
+A report's life: the player sends it and it starts as **New**; the developer sets a status in `/admin` → Bugs, with an optional
+fixed version and a short message; the launcher checks later and My reports shows what changed.
+
+| Status | Machine value | Meaning |
+| --- | --- | --- |
+| New | `new` | Not reviewed yet |
+| Investigating | `investigating` | Being investigated |
+| Fixed | `fixed` | The problem has been corrected; the only status that says so, and the only one with a fixed version |
+| Cannot reproduce | `cannot_reproduce` | Could not be reproduced with the available information |
+| Duplicate | `duplicate` | The same problem is already tracked by another report |
+| Not a bug | `not_a_bug` | The behavior is expected, or not a Dragon's Crown Pro bug |
+| Closed | `closed` | Intentionally finished without a specific fix or a more precise status. It does not mean Fixed |
+
+Who owns a report is known only to the PC that sent it. An accepted report answers with a **receipt**: 256 random bits, a
+capability for that one report, derived from nothing. The launcher keeps it in `user/bug_reports.json`, never in `dcp.ini` and
+never in a log. The Worker stores only a salted SHA-256 of it. There is no account or address in the status table, no query by
+account or address, and no list of one player's reports; the temporary quota hashes above stay a separate matter.
+
+`incident.status` and `incident.read` take no `hello`, so a lookup never involves the account and Online Play can stay off. They
+accept only a ticket with its receipt: a report ID alone reads nothing. A wrong receipt, an unknown ticket and a report from
+before receipts all answer alike: left out of the list, or `not_found`. Lookups have their own limits, write nothing and
+cost no report quota. Seen and unseen are local: the service never learns whether a player read a status.
+
+My reports belongs to one installation. It is not an account feature: another PC, or a removed file, sees none of these reports.
+Reports from before receipts have none and cannot be claimed, so they stay out of My reports; they still have a status in
+`/admin`. The local list keeps the newest 50 reports, and **Remove from this PC** deletes only the local entry and its receipt.
+
+Logs and statuses have separate limits. `incidents` keeps the newest 500 reports with their logs; `incident_tracking` keeps the
+newest 5000 statuses, a row of at most about 2 KB, so at most about 11 MB. A status therefore outlives its log: once the log is
+gone, **What was sent** says the report is no longer available, and the status still updates. Past both limits the launcher keeps
+showing the last status it knew.
+
 ### Privacy and usage statistics
 
 The online service stores anonymous aggregate usage statistics: player counts, sessions, rooms created and joined,
@@ -232,7 +298,7 @@ lower-case hex.
 
 - Request `{"op": "...", "seq": n, ...}`; answer `{"re": n, "code": "ok" | <error>, ...}`; event `{"ev": "...", ...}`.
 - Errors: `bad_request`, `too_large`, `no_session` (no hello yet), `proto`, `unauthorized`, `not_owner`, `in_room`,
-  `not_found`, `closed`, `full`, `incompatible`, `limit`, `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
+  `not_found`, `closed`, `full`, `incompatible`, `limit`, `incident_hourly_limit`, `incident_daily_limit`, `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
   errors the game tells apart (0x80550d0f / 0x80550d15 / 0x80550d19) and the rest to 0x80550ca1.. (ours).
 
 | op | request | answer |
@@ -252,7 +318,9 @@ lower-case hex.
 | `friends.list` / `friends.requests` | | `friends: [{account, name, online, game?, online_protocol?, version?, platform?, room?, code?, data?, status?}]` / `incoming`, `outgoing` |
 | `friends.add` | `code` (`XXXX-XXXX`, any case) | `account`, `name`, `state` (`pending` / `friends`) |
 | `friends.accept` / `.decline` / `.remove` | `account` | `friend` / - / - |
-| `report.send` | `text` (<= 256), `log` (tail kept, <= 128 K), `version` | `id`, `left` |
+| `incident.file` | `description` (<= 500 characters), `launcher_version`, `game_build`, `game_version`, `cusa`, `operating_system`, `log_file`, `log_clipped` (`yes`/`no`), `log_text` (<= 64 KiB of UTF-8); see Bug reports | `ticket` (`DCP-XXXXXX`), `receipt` (64 hex digits), `submitted_at` |
+| `incident.status` | `reports: [{ticket, receipt}]` (<= 50); no `hello` needed | `reports: [{ticket, status, status_updated_at, fixed_version?, player_message?}]`, only the reports the receipts prove |
+| `incident.read` | `ticket`, `receipt`; no `hello` needed | `report` (the stored fields, `ticket`, `submitted_at`), or `not_found` |
 | `party.report` | `classes` (1-4 class numbers 0-5: Fighter, Amazon, Elf, Dwarf, Sorceress, Wizard), `host` (optional, one of `classes`); room owner only, optional (see Party statistics) | `counted` |
 
 Room (`room`): `id`, `world`, `slots`, `flags` (0x20000000 added while full), `owner`, `code` (6 characters, A-Z 2-9
@@ -281,14 +349,15 @@ Rules the lobby enforces:
   more ends the seat at once). `room.resume` on a new socket of the same account retakes it and receives the held
   events after the answer. Afterwards it is a disconnect (owner migration, `peer.gone`, `member_left`). Chat is never
   held or stored.
-- Limits: frames 32 KB (160 KB for `report.send`); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
+- Limits: frames 32 KB (160 KB for `incident.file`); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
   32 int attrs; 16 filters; 200 friends; 50 pending requests each way (expire after 14 days); chat 120 characters, 5
   burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; 16 sockets and 20 new
   accounts per day per address (IPv6 per /64; loopback exempt on the development server); 30 new connections per 60 s per
   address at the Worker (HTTP 429); per account, sign-ins 12 burst then 1 per 15 s, `room.create` 6 burst then 1 per
   20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; party
-  reports 3 burst then 1 per 2 minutes per account, 12 then 1 per 30 s per address and 30 then 1 per 30 s for the lobby; reports 5 per account, 10 per
-  address, 300 in all per day, newest 1000 kept, addresses kept only as salted hashes.
+  reports 3 burst then 1 per 2 minutes per account, 12 then 1 per 30 s per address and 30 then 1 per 30 s for the lobby; bug reports
+  2 per account per rolling hour and 10 per rolling 24 hours, newest 500 kept; their attempt, address and service protections are
+  in `server/lobby/src/abuse.js` and `incidents.js`.
 
 ## Peer transport
 
@@ -389,8 +458,8 @@ Rudp entry points, in `net::PeerSocket`.
   game key and online protocol with a presence blob. The game then joins by the room id inside that blob.
 - Chat is implemented in the lobby (room scoped, bounded, rate limited, not stored) and received lines are written to
   the game log (`Chat:`). The game has no chat UI of its own and the port has none yet.
-- Bug reports: `report.send` is implemented in the lobby (`/reports` behind `REPORTS_TOKEN` on the Worker); the launcher
-  has no report page yet.
+- Bug reports: the launcher's Bug Report page files them with `incident.file` on a short session of its own, so Online
+  Play does not have to be on; see Bug reports.
 
 ## Developer and testing notes
 

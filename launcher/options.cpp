@@ -38,6 +38,7 @@ const char* PageName(PageId page) {
     case PageId::kControls: return "Controls";
     case PageId::kOnline: return "Online";
     case PageId::kTrophies: return "Trophies";
+    case PageId::kBugReport: return "Bug Report";
     case PageId::kAbout: return "About";
     }
     return "";

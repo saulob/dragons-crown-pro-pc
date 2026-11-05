@@ -47,3 +47,11 @@ export function sha256(bytes) {
 export const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
 export const sha256Hex = (text) => toHex(sha256(new TextEncoder().encode(text)));
+
+// Compares two hex digests without stopping at the first difference.
+export function digestsMatch(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}

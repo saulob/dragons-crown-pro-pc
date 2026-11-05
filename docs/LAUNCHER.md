@@ -561,6 +561,45 @@ A hidden trophy that is still locked shows "Hidden Trophy" and no description. W
 "Install a supported game to view its trophies."; when the list is encrypted and no valid Trophy Key is configured it shows Enter Trophy Key and Import from shadPS4... buttons, and with a key a "Trophy Key: Configured" row with Change... and Remove. The list scrolls inside the page.
 The page reads the same files the game writes. See [TROPHIES.md](TROPHIES.md).
 
+## Bug Report
+
+Subtitle "Report a problem and send it with one game log.". The page sits before About, keeps its content clear of the page
+scrollbar, and has four steps:
+
+1. **Report the problem**: 10 to 500 characters, with a live count; spaces around the text do not count toward the minimum.
+   The text stays while the launcher is open, also after a failed send.
+2. **Choose one game log**: this launcher's own log first, then the newest logs in the logs folder by modification time, five
+   at most, each with its date and size, and one radio choice. Left out are other files and sessions that closed in the launcher
+   without starting the game, so opening the launcher does not push a real log off the list. A session that ended without
+   closing the launcher stays: that is a launcher crash. **View selected log**, in the empty cell of the selected log's details, opens it.
+   The launcher's own log is labelled **Current launcher session**. The newest other log in which the game's own code ran
+   (`Runtime: guest thread`) is labelled **Last gameplay**. The launcher closes when the game starts, so a running log holds no
+   gameplay today; if one did it would read **Current session · Launcher + gameplay** and no other log would be Last gameplay.
+   Every other log that reached the game's code reads **Gameplay session**, and every other launcher-only log reads
+   **Launcher only**; a session that started the game without reaching its code has no label. Every label is
+   drawn in the theme's accent colour.
+   The newest log that started the game is selected by default (`DefaultGameLog`), so a game that failed before its code ran is
+   chosen over an older session that played. Without one, the newest log other than the launcher's own; failing that, its own.
+3. **Preview** (optional): **Open preview** builds the report (`BuildIncidentPackage`, `launcher/incident_report.cpp`) and shows
+   it in full; **Close preview** hides it. The last 256 KiB of the log are filtered (`launcher/log_scrubber.cpp`), then its last
+   64 KiB are kept, from a whole line on. Changing the description or the log closes the preview, and opening it again rebuilds it.
+4. **Send report**: sends the open preview, or builds the same report through the same path when none is open. A description that
+   is too short does not send: the field takes the focus, flashes, and "Please describe the problem, minimum 10 characters" appears beside the
+   count. The page scrolls down to the sending message and again to the result, which stays on the page: the Report ID, or a rate limit, connection, refused or service message; after a failure
+   the text stays and Send report tries again.
+
+5. **My reports** lists the reports this PC sent, newest first, from `user/bug_reports.json` (`launcher/report_history.cpp`, saved
+   through a new file moved into place; a damaged file is set aside as `.damaged`). Each row shows the report ID, a preview, the
+   status (with the fixed version on a Fixed report) and the date. **View details** expands that report in place, as one framed
+   item that holds its summary, its facts (status, fixed version, the developer's message), **What was sent**, which reads the stored
+   report back, and **Remove from this PC**, which deletes only the local entry. Only one report is open at a time, and **Hide details**
+   closes it. **Refresh** sits at the top right of the section.
+   The statuses are checked at startup, when the page opens and on **Refresh**, off the UI thread and silently when offline. A
+   change marks the report **Updated** and puts a dot on the sidebar entry, until the report is opened. If the list cannot be saved
+   the report still counts as sent: the Report ID shows normally with a short note.
+
+The request and the privacy rules are in [ONLINE.md](ONLINE.md#bug-reports). Online Play does not have to be on.
+
 ## Launcher input
 
 Mouse, keyboard (arrows, Enter = Play, Alt+F4 = Quit, Ctrl+S = Save) and controller (D-pad or left stick, A, B, Start =
@@ -631,7 +670,7 @@ pixel by pixel. Its "Launcher UI" summary has one row per group:
 | Row | Where | Checks |
 |---|---|---|
 | Core tests | `dcp-launcher-tests`, relinked on every run | every launcher test; the exit code and the check count |
-| SVG icons | `TestPageIcons` | the nine expected icons, one `PageId` each, the embedded copy equal to the file, nothing read from the source tree at run time |
+| SVG icons | `TestPageIcons` | the ten expected icons, one `PageId` each, the embedded copy equal to the file, nothing read from the source tree at run time |
 | Icon and NanoSVG licenses | `TestIconLicenses` | `SOURCES.md` and `THIRD-PARTY-LICENSES.txt`: the Display attribution, eight CC0 rows, vendored NanoSVG with its license in both packages |
 | Header art | `TestHeaderArt` | assets and package inclusion; one size-matched texture rebuilt only on a size change; strips, never one quad, at the supported scales; right anchoring and no overlap with the branding |
 | DPI/layout | `TestChromeLayout`, `TestLauncherDpiLayout`, `TestFooterAndCards` | sidebar fit, control column, scrollbar gutter, separator endpoint, footer, About card and friend code at 100, 150 and 225 percent |

@@ -90,7 +90,7 @@ foreach ($file in Get-GitLines @('ls-files', '--cached', '--others', '--exclude-
 }
 $expectedAssets = @('assets/launcher/README.md', 'assets/launcher/header-art.png', 'assets/launcher/header-art.svg',
     'assets/launcher/sponsor-heart.png', 'assets/launcher/sponsor-heart.svg', 'assets/launcher/icons/SOURCES.md') +
-    @('play', 'display', 'graphics', 'gameplay', 'online', 'cheats', 'controls', 'trophies', 'about' | ForEach-Object { "assets/launcher/icons/$_.svg" })
+    @('play', 'display', 'graphics', 'gameplay', 'online', 'cheats', 'controls', 'trophies', 'bug-report', 'about' | ForEach-Object { "assets/launcher/icons/$_.svg" })
 $assets = @(Get-GitLines @('ls-files', '--cached', '--others', '--exclude-standard', '--', 'assets/launcher') | Sort-Object -Unique |
     Where-Object { Test-Path -LiteralPath (Join-Path $root $_) })
 foreach ($file in $assets | Where-Object { $expectedAssets -notcontains $_ }) { Fail $hygiene "unexpected launcher asset: $file" }
@@ -177,6 +177,8 @@ if (-not $trgLine) {
 $warnings = 'launcher-warnings'
 $windows = 'launcher-parity-windows'
 $units = @('launcher/page_icons.cpp', 'launcher/header_art.cpp', 'launcher/launcher.cpp', 'launcher/online_page.cpp', 'launcher/trophy_page.cpp',
+           'launcher/incident_page.cpp', 'launcher/incident_report.cpp', 'launcher/log_scrubber.cpp', 'launcher/my_reports.cpp',
+           'launcher/report_history.cpp',
            'launcher/host.cpp', 'launcher/updater/update_ui.cpp', 'tests/launcher_tests.cpp')
 $compile = @()
 if (-not $BuildDir -or -not (Test-Path -LiteralPath (Join-Path $BuildDir 'build.ninja'))) {

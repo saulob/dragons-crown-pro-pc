@@ -160,6 +160,7 @@ $tests = @(
     (Test-Step 'build feature parity tests (contract, update parity, mappings, unknown builds)' 'dcp-build-parity-tests' -Parity -Capture),
     (Test-Step 'feature locator tests (Cheats, Japanese NPC Voices, True Ultrawide: real images, synthetic images, known builds only)' 'dcp-feature-sites-tests' -Parity),
     (Test-Step 'trophy tests' 'dcp-trophy-tests'),
+    (Test-Step 'bug report tests (log choice, privacy filter, preview equals request)' 'dcp-incident-tests' -Parity),
     (Test-Step 'cheat tests' 'dcp-cheats-tests' -Parity),
     (Test-Step 'Japanese NPC voice tests' 'dcp-voice-tests' -Parity),
     (Test-Step 'online System type hook tests' 'dcp-system-type-tests' -Parity),
@@ -215,7 +216,7 @@ Sync-GpuDependencies
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
     if ($test.Exe -and -not (Test-Path -LiteralPath (Join-Path $buildDir "bin\$($test.Exe).exe"))) { Stop-Tool "$($test.Exe) is not built: add it to the ninja line above." }

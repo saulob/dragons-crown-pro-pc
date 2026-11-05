@@ -3431,10 +3431,10 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 9);
+    CHECK(count == 10);
     // Online sits between Gameplay and Cheats: it changes play and turns the cheats off.
     const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Online",
-                                 "Cheats", "Controls", "Trophies", "About"};
+                                 "Cheats", "Controls", "Trophies", "Bug Report", "About"};
     for (size_t i = 0; i < std::size(order); ++i) {
         CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
     }
@@ -3484,7 +3484,9 @@ void TestChromeLayout() {
     CHECK(kRowBorder[0] < kRowBorder[1] && kRowBorder[1] < kRowBorder[2]);
     CHECK(SidebarLabelX() == kSidebarIconInset + kSidebarIcon + kSidebarIconGap);
     constexpr float kMinimumHeight = 560.0f;
-    CHECK(SidebarHeight(9) <= kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight);
+    const int pages = int(std::size(dcp::kPageOrder));
+    const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
+    CHECK(SidebarHeight(pages, SidebarRowFor(pages, shortest_body)) <= shortest_body);
 
     for (const float scale : {1.0f, 1.5f, 2.25f}) {
         const float row = kSidebarRow * scale, center = std::floor(row * 0.5f);
@@ -3711,7 +3713,14 @@ void TestSidebarProportions() {
     // The longest labels at the sidebar's size, measured: English and Portuguese in Segoe UI Semibold, then DejaVu Sans Bold.
     constexpr float kLongestLabels[] = {57.9f, 73.7f, 81.8f, 101.9f};
     constexpr float kMinimumHeight = 560.0f;
-    CHECK(SidebarHeight(9) <= kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight);
+    const int pages = int(std::size(dcp::kPageOrder));
+    const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
+    const float compact_row = SidebarRowFor(pages, shortest_body);
+    CHECK(SidebarHeight(pages, compact_row) <= shortest_body);
+    // Short windows shrink the rows, never below the icon and label, and tall ones keep the full row.
+    CHECK(compact_row >= kSidebarRowMin && compact_row < kSidebarRow && kSidebarRowMin > kSidebarIcon && kSidebarRowMin > kTextSidebar);
+    CHECK(SidebarRowFor(pages, SidebarHeight(pages)) == kSidebarRow && SidebarRowFor(pages, 900.0f) == kSidebarRow);
+    CHECK(SidebarRowFor(pages, 100.0f) == kSidebarRowMin);
     for (const float scale : {1.0f, 1.5f, 2.25f}) {
         const float narrow = SidebarWidth(900.0f * scale, scale), wide = SidebarWidth(3840.0f * scale, scale);
         CHECK(narrow == 168.0f * scale && wide == 176.0f * scale);
@@ -3728,6 +3737,7 @@ void TestSidebarProportions() {
         CHECK(after <= before && before - after > 0.0f);
     }
     const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("layout::SidebarRowFor(int(config_.pages.size()), size.y / s_) * s_;") != std::string::npos);
     CHECK(trg.find("const float sidebar_w = layout::SidebarWidth(w, s_);") != std::string::npos);
     CHECK(trg.find("DrawContent(ImVec2(w - sidebar_w - margin * 3, body_h));") != std::string::npos);
 }
@@ -3780,7 +3790,7 @@ void TestRowSeparators() {
     const size_t grid = trg.find("void Ui::InfoGrid(");
     CHECK(grid != std::string::npos && trg.find("BeginRowLines();", grid) < trg.find("ImGui::BeginTable(id, 4", grid));
     CHECK(trg.find("ImDrawListFlags_AntiAliasedLines") == std::string::npos);
-    for (const char* page : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp"}) {
+    for (const char* page : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp", "incident_page.cpp"}) {
         CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / page).find("BordersInnerH") == std::string::npos);
     }
 }
@@ -3831,7 +3841,8 @@ void TestLauncherDpiLayout() {
     for (const float scale : kDisplayScales) {
         for (const LogicalWindow& window : kLauncherWindows) {
             const ChromeGeometry g = ChromeAt(window, scale);
-            CHECK(SidebarHeight(9) * scale <= g.body_h + kTolerance);
+            const int pages = int(std::size(dcp::kPageOrder));
+            CHECK(SidebarHeight(pages, SidebarRowFor(pages, g.body_h / scale)) * scale <= g.body_h + kTolerance);
             CHECK(g.sidebar_w >= 168.0f * scale && g.sidebar_w <= 176.0f * scale);
             CHECK(g.content_w > 0.0f && std::abs(g.sidebar_w + kMargin * scale * 3.0f + g.content_w - window.width * scale) < kTolerance);
 
@@ -4125,8 +4136,8 @@ void TestPageIcons() {
     const fs::path icons = source / "assets" / "launcher" / "icons";
 
     // The sidebar's pages and their icons, one to one.
-    const std::set<std::string> expected = {"play.svg",   "display.svg", "graphics.svg", "gameplay.svg", "online.svg",
-                                            "cheats.svg", "controls.svg", "trophies.svg", "about.svg"};
+    const std::set<std::string> expected = {"play.svg",   "display.svg",  "graphics.svg", "gameplay.svg",   "online.svg",
+                                            "cheats.svg", "controls.svg", "trophies.svg", "bug-report.svg", "about.svg"};
     std::set<std::string> mapped_files;
     std::set<int> mapped_pages, ordered_pages;
     for (const PageIconAsset& asset : PageIconAssets()) {
@@ -4136,7 +4147,7 @@ void TestPageIcons() {
     for (const PageId page : kPageOrder) {
         ordered_pages.insert(static_cast<int>(page));
     }
-    CHECK(expected.size() == 9 && PageIconAssets().size() == expected.size());
+    CHECK(expected.size() == 10 && PageIconAssets().size() == expected.size());
     CHECK(mapped_files == expected && mapped_pages.size() == expected.size());
     CHECK(ordered_pages.size() == std::size(kPageOrder) && mapped_pages == ordered_pages);
     for (const std::string& name : expected) {
@@ -4184,6 +4195,7 @@ void TestPageIcons() {
         CHECK(name.find("svgrepo-com") == std::string::npos);
         svg_files += entry.path().extension() == ".svg";
     }
+    CHECK(!fs::exists(icons / "bug-file-svgrepo-com.svg"));
     CHECK(svg_files == PageIconAssets().size());
 
     // A bad resource gives no image instead of a crash.
@@ -4239,6 +4251,10 @@ void TestIconLicenses() {
             CHECK(line.find("| CC Attribution License |") != std::string::npos && line.find("CC0") == std::string::npos);
             CHECK(line.find("nickylimyeanfen") != std::string::npos && line.find("Inc Device Icons") != std::string::npos);
             CHECK(line.find("https://www.svgrepo.com/svg/381247/display-television-tv-screen-gadget") != std::string::npos);
+        } else if (asset.page == PageId::kBugReport) {
+            CHECK(line.find("| Bug File | Vectopus | Atlas Variety Line Icons |") != std::string::npos);
+            CHECK(line.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
+            CHECK(line.find("| MIT License |") != std::string::npos);
         } else if (line.find("| CC0 |") != std::string::npos) {
             ++cc0_rows;
             const size_t url = line.find("https://www.svgrepo.com/svg/");
@@ -4250,6 +4266,10 @@ void TestIconLicenses() {
     CHECK(licenses.find("CC0 (public domain dedication), all from SVG Repo") != std::string::npos);
     CHECK(licenses.find("\"Display Television Tv Screen Gadget\" by nickylimyeanfen, collection Inc Device Icons.") != std::string::npos);
     CHECK(licenses.find("License: CC Attribution License, https://creativecommons.org/licenses/by/") != std::string::npos);
+    CHECK(licenses.find("\"Bug File\" by Vectopus, collection Atlas Variety Line Icons.") != std::string::npos);
+    CHECK(licenses.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
+    CHECK(licenses.find("bug-report.svg, MIT License:") != std::string::npos);
+    CHECK(licenses.find("Copyright (c) Vectopus\n\nPermission is hereby granted") != std::string::npos);
     for (const std::string& attribution : {licenses, sources}) {
         CHECK(attribution.find("https://creativecommons.org/licenses/by/") != std::string::npos);
         CHECK(attribution.find("Adapted") != std::string::npos);
