@@ -369,7 +369,7 @@ void TrophyPage::DrawSavedUnlocks(trg::Ui& ui) {
     ImGui::PopFont();
     ui.Paragraph("Names, icons and grades appear once the trophy list can be read.");
     const float width = ImGui::GetContentRegionAvail().x;
-    const float height = 44 * s;
+    const float height = 38 * s;
     for (const SavedUnlock& saved : content_->saved_unlocks) {
         ImGui::PushID(saved.id);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -377,15 +377,15 @@ void TrophyPage::DrawSavedUnlocks(trg::Ui& ui) {
         draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height), trg::Col(theme.frame), 8 * s);
         char label[48];
         std::snprintf(label, sizeof(label), "%s %d", Tr("Trophy"), saved.id);
-        draw->AddText(ui.fonts().semibold, ImGui::GetFontSize(), ImVec2(origin.x + 16 * s, origin.y + 12 * s),
+        draw->AddText(ui.fonts().semibold, ImGui::GetFontSize(), ImVec2(origin.x + 14 * s, origin.y + 11 * s),
                       trg::Col(theme.dim), label);
         if (saved.unix_time > 0) {
             const std::string date = std::string(Tr("UNLOCKED")) + "  " + UnlockDate(saved.unix_time);
             const ImVec2 size = ui.fonts().semibold->CalcTextSizeA(ImGui::GetFontSize() * 0.8f, FLT_MAX, 0, date.c_str());
             draw->AddText(ui.fonts().semibold, ImGui::GetFontSize() * 0.8f,
-                          ImVec2(origin.x + width - size.x - 16 * s, origin.y + 14 * s), trg::Col(theme.dim), date.c_str());
+                          ImVec2(origin.x + width - size.x - 14 * s, origin.y + 13 * s), trg::Col(theme.dim), date.c_str());
         }
-        ImGui::Dummy(ImVec2(width, height + 6 * s));
+        ImGui::Dummy(ImVec2(width, height));
         ImGui::PopID();
     }
 }
@@ -395,7 +395,8 @@ void TrophyPage::DrawRow(trg::Ui& ui, const trophies::TrophyRow& row, float widt
     const trg::Fonts& fonts = ui.fonts();
     const float s = ui.scale();
     const float base = ImGui::GetFontSize();
-    const float height = 82 * s, icon_size = 58 * s, gap = 8 * s;
+    const float help = trg::layout::kTextHelp * s;
+    const float height = 66 * s, icon_size = 50 * s;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 end(origin.x + width, origin.y + height);
     ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -405,7 +406,6 @@ void TrophyPage::DrawRow(trg::Ui& ui, const trophies::TrophyRow& row, float widt
                             ImDrawFlags_RoundCornersLeft);
     }
     ImGui::Selectable("##trophy", false, 0, ImVec2(width, height));
-    ImGui::Dummy(ImVec2(0, gap));
 
     const ImVec2 icon_min(origin.x + 14 * s, origin.y + (height - icon_size) * 0.5f);
     const ImVec2 icon_max(icon_min.x + icon_size, icon_min.y + icon_size);
@@ -422,18 +422,18 @@ void TrophyPage::DrawRow(trg::Ui& ui, const trophies::TrophyRow& row, float widt
     const float right = end.x - 14 * s;
     draw->PushClipRect(origin, end, true);
     const char* grade = Tr(trophies::GradeName(row.grade));
-    const ImVec2 grade_size = fonts.semibold->CalcTextSizeA(base * 0.9f, FLT_MAX, 0, grade);
-    draw->AddText(fonts.semibold, base * 0.9f, ImVec2(right - grade_size.x, origin.y + 12 * s), GradeColor(row.grade), grade);
-    draw->AddText(fonts.semibold, base, ImVec2(text_x, origin.y + 10 * s),
+    const ImVec2 grade_size = fonts.semibold->CalcTextSizeA(help, FLT_MAX, 0, grade);
+    draw->AddText(fonts.semibold, help, ImVec2(right - grade_size.x, origin.y + 9 * s), GradeColor(row.grade), grade);
+    draw->AddText(fonts.semibold, base, ImVec2(text_x, origin.y + 8 * s),
                   trg::Col(row.unlocked ? theme.text : theme.dim), Tr(row.name.c_str()), nullptr,
                   right - grade_size.x - 12 * s - text_x);
-    draw->AddText(fonts.regular, base * 0.84f, ImVec2(text_x, origin.y + 34 * s), trg::Col(theme.dim),
+    draw->AddText(fonts.regular, help, ImVec2(text_x, origin.y + 26 * s), trg::Col(theme.dim),
                   Tr(row.detail.c_str()), nullptr, right - text_x);
     if (row.unlocked) {
         const std::string date = row.unlock_time > 0
                                      ? std::string(Tr("UNLOCKED")) + "  " + UnlockDate(row.unlock_time)
                                      : std::string(Tr("UNLOCKED"));
-        draw->AddText(fonts.semibold, base * 0.72f, ImVec2(text_x, end.y - 22 * s), trg::Col(theme.accent), date.c_str());
+        draw->AddText(fonts.semibold, 12 * s, ImVec2(text_x, end.y - 19 * s), trg::Col(theme.accent), date.c_str());
     }
     draw->PopClipRect();
 }

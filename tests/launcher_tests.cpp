@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -28,6 +29,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "controller_prompts.h"
@@ -51,6 +53,7 @@
 #include "net/connection_test.h"
 #include "npc_voice_resources.h"
 #include "game_translation.h"
+#include "header_art.h"
 #include "localization/ui_text.h"
 #include <zlib.h>
 #include "net/identity.h"
@@ -59,12 +62,15 @@
 #include "online_settings.h"
 #include "online_view.h"
 #include "options.h"
+#include "page_icons.h"
 #include "paths.h"
 #include "placement.h"
 #include "play_gate.h"
 #include "runtime_log.h"
 #include "settings.h"
 #include "text_languages.h"
+#include "trg/layout.h"
+#include "trg/page_navigation.h"
 #include "trg/platform.h"
 #include "utf8.h"
 
@@ -84,6 +90,26 @@ void Check(bool condition, const char* what, int line) {
     }
 }
 #define CHECK(condition) Check((condition), #condition, __LINE__)
+
+// tools/test.ps1 reads these: a group with no line, or a failed one, fails the launcher gate.
+std::vector<std::pair<std::string, int>> g_groups;
+
+void InGroup(const char* name, void (*test)()) {
+    const int before = g_failures;
+    try {
+        test();
+    } catch (const std::exception& error) {
+        ++g_failures;
+        std::printf("FAIL group %s: exception: %s\n", name, error.what());
+    }
+    for (auto& group : g_groups) {
+        if (group.first == name) {
+            group.second += g_failures - before;
+            return;
+        }
+    }
+    g_groups.emplace_back(name, g_failures - before);
+}
 
 bool ValidUtf8Text(const std::string& text) {
     for (size_t i = 0; i < text.size();) {
@@ -3431,6 +3457,892 @@ void TestOptions() {
     const size_t online_case = launcher.find("case PageId::kOnline:");
     CHECK(online_case != std::string::npos &&
           launcher.find("online_page_->PendingRequests()", online_case) < launcher.find("case PageId::kTrophies:", online_case));
+
+    // The update banner sits on the same header as the launcher.
+    const fs::path source(DCP_SOURCE_DIR);
+    CHECK(ReadAll(source / "launcher" / "updater" / "update_ui.cpp").find("trg::layout::HeaderHeight(") != std::string::npos);
+    const std::string compact = ReadAll(source / "gpu" / "patches" / "trg-launcher" / "0006-compact-layout.patch");
+    CHECK(compact.find("inline float HeaderHeight(") != std::string::npos);
+    CHECK(compact.find("ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize") != std::string::npos);
+}
+
+// ---- Launcher sidebar and footer layout ----
+
+void TestChromeLayout() {
+    using namespace trg::layout;
+    const auto same = [](std::string_view a, std::string_view b) { return a == b; };
+
+    CHECK(kTextPage > kTextSection && kTextSection > kTextLabel && kTextLabel > kTextBody && kTextBody > kTextHelp);
+    CHECK(kTextSidebar == 17.0f && kTextFooter == 15.0f);
+    CHECK(kTextPage == 30.0f && kTextSection == 19.0f && kTextLabel == 17.0f && kTextBody == 16.0f && kTextHelp == 15.0f);
+    // Midnight panel < row line < panel line < secondary text, each a cool blue-gray.
+    constexpr float kPanelFill[3] = {0.055f, 0.082f, 0.165f}, kSecondaryText[3] = {0.580f, 0.659f, 0.800f};
+    for (int c = 0; c < 3; ++c) {
+        CHECK(kPanelFill[c] < kRowBorder[c] && kRowBorder[c] < kPanelBorder[c] && kPanelBorder[c] < kSecondaryText[c]);
+    }
+    CHECK(kPanelBorder[0] < kPanelBorder[1] && kPanelBorder[1] < kPanelBorder[2]);
+    CHECK(kRowBorder[0] < kRowBorder[1] && kRowBorder[1] < kRowBorder[2]);
+    CHECK(SidebarLabelX() == kSidebarIconInset + kSidebarIcon + kSidebarIconGap);
+    constexpr float kMinimumHeight = 560.0f;
+    CHECK(SidebarHeight(9) <= kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight);
+
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float row = kSidebarRow * scale, center = std::floor(row * 0.5f);
+        CHECK(LineThickness(scale) >= 1.0f && LineThickness(scale) <= std::ceil(scale));
+        CHECK(PassiveLineThickness(scale) >= 1.0f && PassiveLineThickness(scale) <= scale);
+        CHECK(PanelBorderWidth(scale) == LineThickness(scale) + 1.0f && PanelBorderWidth(scale) <= 3.0f);
+        CHECK(LineThickness(scale) == std::floor(LineThickness(scale)));
+        const float icon = kSidebarIcon * scale, text = kTextSidebar * scale;
+        const float icon_top = CenteredTop(center, icon * 0.5f), text_top = CenteredTop(center, text * 0.55f);
+        CHECK(icon_top >= 0.0f && icon_top + icon <= row);
+        CHECK(text_top >= 0.0f && text_top + text <= row);
+        CHECK(std::abs(icon_top + icon * 0.5f - center) <= 0.5f && std::abs(text_top + text * 0.55f - center) <= 0.5f);
+        CHECK((kSidebarIconInset + kSidebarIcon) * scale < SidebarLabelX() * scale);
+
+        const float footer = kFooterHeight * scale, keycap = kKeycapHeight * scale;
+        CHECK(kTextFooter * scale < keycap && keycap <= kFooterButtonHeight * scale && keycap < footer);
+        CHECK((kFooterHelpLine + kTextFooter) * scale <= footer && kFooterSeparator * scale <= footer);
+        const float footer_center = footer * 0.5f;
+        CHECK(std::abs(CenteredTop(footer_center, kTextFooter * scale * 0.55f) + kTextFooter * scale * 0.55f - footer_center) <= 0.5f);
+    }
+
+    const std::vector<KeyHint> english = ParseKeyHints("Enter  Play     Alt+F4  Quit     Ctrl+S  Save");
+    CHECK(english.size() == 3);
+    if (english.size() == 3) {
+        CHECK(same(english[0].key, "Enter") && same(english[0].action, "Play"));
+        CHECK(same(english[1].key, "Alt+F4") && same(english[1].action, "Quit"));
+        CHECK(same(english[2].key, "Ctrl+S") && same(english[2].action, "Save"));
+    }
+    const std::vector<KeyHint> portuguese = ParseKeyHints("Enter  Jogar     Alt+F4  Sair     Ctrl+S  Salvar");
+    CHECK(portuguese.size() == 3 && same(portuguese[2].action, "Salvar"));
+    CHECK(ParseKeyHints("Enter  Play        Esc  Quit        Ctrl+S  Save").size() == 3);
+    const std::vector<KeyHint> plain = ParseKeyHints("No shortcuts here");
+    CHECK(plain.size() == 1 && plain[0].key.empty() && same(plain[0].action, "No shortcuts here"));
+    CHECK(ParseKeyHints("").empty() && ParseKeyHints("   ").empty());
+
+    const std::vector<std::string_view> note = SplitSentences("Play applies the changes. Save keeps them without starting.");
+    CHECK(note.size() == 2 && same(note[0], "Play applies the changes.") && same(note[1], "Save keeps them without starting."));
+    CHECK(SplitSentences("One line").size() == 1 && SplitSentences("").empty());
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    const std::string ui_text = ReadAll(source / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    CHECK(launcher.find("\"Enter  Play     Alt+F4  Quit     Ctrl+S  Save\"") != std::string::npos);
+    CHECK(ui_text.find("Enter  Jogar     Alt+F4  Sair     Ctrl+S  Salvar") != std::string::npos);
+
+    // Every sidebar row and every footer line goes through the same centring, from the active font's own metrics.
+    const std::string trg = ReadAll(source / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("ImGui::PushFont(config_.fonts.semibold, layout::kTextSidebar);") != std::string::npos);
+    CHECK(trg.find("CapCenter(config_.fonts.semibold, ImGui::GetFontSize())") != std::string::npos);
+    CHECK(trg.find("layout::CenteredTop(center_y, cap_center)") != std::string::npos);
+    CHECK(trg.find("layout::CenteredTop(center_y, icon_size * 0.5f)") != std::string::npos);
+    CHECK(trg.find("pos.x + layout::SidebarLabelX() * s_") != std::string::npos);
+    CHECK(trg.find("layout::ParseKeyHints(T(config_.hints.c_str()))") != std::string::npos);
+    CHECK(trg.find("layout::SplitSentences(T(config_.note.c_str()))") != std::string::npos);
+    CHECK(trg.find("c[ImGuiCol_TableBorderLight] = t.border_row;") != std::string::npos);
+    CHECK(trg.find("Col(config_.theme.border_panel)") != std::string::npos);
+    CHECK(trg.find("Col(t.frame_hot, 0.8f)") == std::string::npos);
+    CHECK(trg.find("layout::PassiveLineThickness(s_)") != std::string::npos);
+    CHECK(trg.find("dl->AddRectFilled(min, ImVec2(min.x + block, min.y + block), Col(kSponsorPink)") != std::string::npos);
+    CHECK(trg.find("dl->AddImage(ImTextureRef(sponsor.icon), heart_min") != std::string::npos);
+    CHECK(kSupportIconHeart < kSupportIconBlock && kSupportIconBlock <= kControlHeight + kItemGap);
+    const std::string online = ReadAll(source / "launcher" / "online_page.cpp");
+    CHECK(online.find("ui.RowEmphasized(\"Your friend code\", kFriendCodeHelp);") != std::string::npos);
+    CHECK(trg.find("RowLabel(label, help, layout::kTextSection, &theme().accent);") != std::string::npos);
+    const std::string nanosvg = ReadAll(source / "launcher" / "third_party" / "nanosvg" / "nanosvg.h");
+    CHECK(nanosvg.find("size == (size_t)-1l") != std::string::npos && nanosvg.find("size == -1l") == std::string::npos);
+    CHECK(trg.find("Col(t.border_row), layout::PassiveLineThickness(s_)") != std::string::npos);
+    CHECK(trg.find("dl->AddRectFilled(outer, outer_end, Col(t.border_panel), 12 * s);") != std::string::npos);
+    CHECK(trg.find("dl->AddRect(p, ") == std::string::npos);
+    CHECK(trg.find("AddRectFilled(outer, outer_end, Col(config_.theme.border_panel)") != std::string::npos);
+    CHECK(trg.find("ImGuiTableFlags_BordersInnerH") == std::string::npos);
+    const size_t sidebar_end = trg.find("OutlinePanel(size);"), content_end = trg.find("OutlinePanel(size);", sidebar_end + 1);
+    CHECK(sidebar_end < trg.find("BeginChild(\"##sidebar\"") && content_end < trg.find("BeginChild(\"##content\""));
+    for (const char* page : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp"}) {
+        const std::string text = ReadAll(source / "launcher" / page);
+        CHECK(text.find("TableBorder") == std::string::npos && text.find("ImGuiCol_Separator") == std::string::npos);
+    }
+}
+
+void TestHeaderArt() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string png = ReadAll(source / "assets" / "launcher" / "header-art.png");
+    CHECK(png.size() > 24);
+    const auto be32 = [&png](size_t at) {
+        return (uint32_t(uint8_t(png[at])) << 24) | (uint32_t(uint8_t(png[at + 1])) << 16) | (uint32_t(uint8_t(png[at + 2])) << 8) |
+               uint32_t(uint8_t(png[at + 3]));
+    };
+    CHECK(be32(16) == 3840 && be32(20) == 432);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("LoadLauncherImage(\"header-art.png\", header_art_image_)") != std::string::npos);
+    CHECK(launcher.find("SplitHeaderArt(rect)") != std::string::npos);
+    CHECK(ReadAll(source / "CMakeLists.txt").find("/assets/launcher/header-art.png") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package.ps1").find("'header-art.png'") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package-linux.sh").find("install -m644 assets/launcher/header-art.png") != std::string::npos);
+
+    CHECK(kHeaderArtScale >= 1.15f && kHeaderArtScale <= 1.25f);
+    CHECK(kHeaderArtAlphaGain >= 1.15f && kHeaderArtAlphaGain <= 2.2f);
+    CHECK(launcher.find("if (width != header_art_width_ || height != header_art_height_) {") != std::string::npos);
+    CHECK(launcher.find("height, width, height, kHeaderArtAlphaGain)") != std::string::npos);
+    CHECK(launcher.find("c.max.y + trg::layout::kBodyGap * c.scale") != std::string::npos);
+    using namespace trg::layout;
+    struct Case {
+        float width, height, scale;
+    };
+    bool single_quad_overflows = false;
+    for (const Case& window : {Case{1280, 720, 1.0f}, Case{1689, 840, 1.5f}, Case{1920, 1080, 1.5f}, Case{2880, 1620, 2.25f},
+                               Case{3840, 2160, 3.0f}, Case{900, 560, 1.0f}, Case{1350, 840, 1.5f}, Case{2025, 1260, 2.25f}}) {
+        const float header = HeaderHeight(window.height, window.scale);
+        const float art_bottom = header + kBodyGap * window.scale;
+        const HeaderArtRect art = PlaceHeaderArt(0.0f, window.width, art_bottom, window.height, window.scale, kHeaderArtAspect);
+        const float art_w = art.max_x - art.min_x, art_h = art.max_y - art.min_y;
+        CHECK(art.max_x == window.width && art.min_y <= 0.0f && art.max_y >= art_bottom && art_h >= art_bottom);
+        CHECK(-art.min_y <= art_h * kHeaderArtTopCrop);
+        const float previous = std::ceil(std::max(header, std::clamp(window.height * 0.2f, 120.0f * window.scale, 190.0f * window.scale)));
+        const float previous_ink = window.width - std::round(previous * kHeaderArtAspect) * (1.0f - kHeaderArtInkStart);
+        CHECK(std::abs(art_w / art_h - kHeaderArtAspect) < 0.01f);
+        CHECK(art_w == std::floor(art_w) && art_h == std::floor(art_h));
+
+        const float ink = art.min_x + art_w * kHeaderArtInkStart;
+        const float title = std::clamp(header * 0.34f, 30.0f * window.scale, 44.0f * window.scale);
+        CHECK(ink > (24.0f * window.scale + title * 9.5f) && ink < window.width * 0.75f);
+        CHECK(ink <= previous_ink && art_h >= previous);
+
+        CHECK(header >= 88.0f * window.scale && header <= 140.0f * window.scale && art_bottom - header == kBodyGap * window.scale);
+
+        float next = art.min_x;
+        const std::vector<HeaderArtStrip> strips = SplitHeaderArt(art);
+        CHECK(strips.size() > 1 && strips.size() == size_t(std::ceil(art_w / float(kHeaderArtStripWidth))));
+        for (const HeaderArtStrip& strip : strips) {
+            CHECK(strip.min_x == next && strip.max_x > strip.min_x && strip.max_u <= 1.0f);
+            CHECK(strip.max_x - strip.min_x <= float(kHeaderArtStripWidth) && strip.max_x <= window.width);
+            next = strip.max_x;
+            // SDL_SW_BlitTriangle: texture x times the fixed point (2x) triangle area must fit an int.
+            const int64_t area = int64_t((strip.max_x - strip.min_x) * 2.0f) * int64_t(art_bottom * 2.0f);
+            CHECK(int64_t(art_w) * area <= INT32_MAX && int64_t(art_h) * area <= INT32_MAX);
+        }
+        CHECK(next == art.max_x);
+        const int64_t whole = int64_t(art_w * 2.0f) * int64_t(art_bottom * 2.0f);
+        single_quad_overflows = single_quad_overflows || int64_t(art_w) * whole > INT32_MAX;
+    }
+    CHECK(single_quad_overflows);  // the strips are what keeps the largest windows drawable
+    CHECK(kHeaderArtStripWidth >= 32 && kHeaderArtStripWidth <= 256);
+
+    // One size-matched texture, rebuilt only when its size changes, drawn in clipped strips and never as one quad.
+    const size_t painter = launcher.find("trg::HeaderPainter LauncherHeader(");
+    const size_t painter_end = launcher.find("void Log(const char* format", painter);
+    CHECK(painter != std::string::npos && painter_end != std::string::npos);
+    const std::string art_painter = launcher.substr(painter, painter_end - painter);
+    const size_t strip_loop = art_painter.find("for (const HeaderArtStrip& strip : SplitHeaderArt(rect))");
+    CHECK(strip_loop != std::string::npos && art_painter.find("AddImage(") > strip_loop);
+    CHECK(art_painter.find("AddImage(") == art_painter.rfind("AddImage("));
+    CHECK(art_painter.find("PushClipRect(c.min, ImVec2(c.max.x, bottom), false)") < strip_loop);
+    CHECK(art_painter.find("PopClipRect()") > strip_loop);
+    CHECK(art_painter.find("art(static_cast<int>((rect.max_x - rect.min_x) * framebuffer + 0.5f),") != std::string::npos);
+    CHECK(art_painter.find("PlaceHeaderArt(c.min.y, c.max.x, bottom, height, c.scale, art_aspect)") != std::string::npos);
+    CHECK(art_painter.find("_WIN32") == std::string::npos && art_painter.find("__linux__") == std::string::npos);
+    const size_t texture_at = launcher.find("ImTextureID HeaderArtTexture(int width, int height) {");
+    const size_t rebuild = launcher.find("if (width != header_art_width_ || height != header_art_height_) {", texture_at);
+    CHECK(texture_at != std::string::npos && rebuild != std::string::npos);
+    CHECK(launcher.find("host_.DestroyTexture(header_art_);", rebuild) < launcher.find("return header_art_;", rebuild));
+    CHECK(launcher.find("host_.DestroyTexture(header_art_);", texture_at) > rebuild);
+    CHECK(ReadAll(source / "assets" / "launcher" / "header-art.svg").find("<svg") != std::string::npos);
+
+    // A flat image stays flat, a half covered one averages, and transparent texels add no colour.
+    std::vector<uint8_t> image(16 * 8 * 4);
+    for (size_t i = 0; i < image.size(); i += 4) {
+        const bool stroke = (i / 4) % 2 == 0;
+        image[i] = stroke ? 200 : 0;
+        image[i + 1] = stroke ? 100 : 0;
+        image[i + 2] = stroke ? 50 : 0;
+        image[i + 3] = stroke ? 255 : 0;
+    }
+    const std::vector<uint8_t> half = ScaleArtRgba(image.data(), 16, 8, 8, 4);
+    CHECK(half.size() == 8 * 4 * 4);
+    if (!half.empty()) {
+        CHECK(half[0] == 200 && half[1] == 100 && half[2] == 50 && half[3] >= 127 && half[3] <= 128);
+    }
+    CHECK(ScaleArtRgba(nullptr, 16, 8, 8, 4).empty() && ScaleArtRgba(image.data(), 16, 8, 0, 4).empty());
+    const std::vector<uint8_t> brighter = ScaleArtRgba(image.data(), 16, 8, 8, 4, 1.5f);
+    CHECK(brighter.size() == half.size() && brighter[0] == 200 && brighter[3] >= 190 && brighter[3] <= 192);
+    CHECK(ScaleArtRgba(image.data(), 16, 8, 16, 8, 3.0f)[3] == 255);
+}
+
+// ---- Launcher page width ----
+
+// A frame of a page: the scrollbar is only known once a frame has measured the page.
+struct PageWidth {
+    float content;
+    float control_x;
+};
+
+PageWidth PageWidthAt(float body_width, float scrollbar_size, float scale) {
+    using namespace trg::layout;
+    const float content = StableContentWidth(body_width, scrollbar_size);
+    return {content, content - ControlColumnWidth(content, scale)};
+}
+
+void TestStablePageWidth() {
+    using namespace trg::layout;
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float scrollbar = 10.0f * scale;
+        const float body = 879.0f * scale;
+        const PageWidth first = PageWidthAt(body, scrollbar, scale);   // no scrollbar yet
+        const PageWidth second = PageWidthAt(body, scrollbar, scale);  // scrollbar visible
+        CHECK(first.content == second.content && first.control_x == second.control_x);
+        CHECK(first.content == body - scrollbar);
+
+        const PageWidth resized = PageWidthAt(body - 100.0f, scrollbar, scale);
+        CHECK(resized.content == first.content - 100.0f);
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const size_t reserve = trg.find("ImGui::SetNextWindowContentSize(ImVec2(layout::StableContentWidth(body_w, ImGui::GetStyle().ScrollbarSize), 0.0f));");
+    CHECK(reserve != std::string::npos && reserve < trg.find("ImGui::BeginChild(\"##page_body\""));
+    CHECK(trg.find("AlwaysVerticalScrollbar") == std::string::npos);
+    CHECK(trg.find("ImGui::PushID(current_page);") < reserve);
+}
+
+void TestSidebarProportions() {
+    using namespace trg::layout;
+    CHECK(kSidebarRow == 42.0f && kSidebarIcon == 21.0f && kTextSidebar == 17.0f);
+    CHECK(SidebarLabelX() == 44.0f);
+
+    // The longest labels at the sidebar's size, measured: English and Portuguese in Segoe UI Semibold, then DejaVu Sans Bold.
+    constexpr float kLongestLabels[] = {57.9f, 73.7f, 81.8f, 101.9f};
+    constexpr float kMinimumHeight = 560.0f;
+    CHECK(SidebarHeight(9) <= kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight);
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float narrow = SidebarWidth(900.0f * scale, scale), wide = SidebarWidth(3840.0f * scale, scale);
+        CHECK(narrow == 168.0f * scale && wide == 176.0f * scale);
+        const float row = narrow - kSidebarPadding * scale * 2.0f;
+        CHECK(row > 0.0f && kSidebarPadding * scale * 2.0f + row <= narrow);
+        for (const float label : kLongestLabels) {
+            CHECK((SidebarLabelX() + label) * scale < row);
+        }
+        CHECK(kTextSidebar * scale <= kSidebarRow * scale);
+
+        // Never wider than the proportional sidebar, and wider windows give the width to the page.
+        const float before = std::clamp(1279.0f * scale * 0.15f, 168.0f * scale, 200.0f * scale);
+        const float after = SidebarWidth(1279.0f * scale, scale);
+        CHECK(after <= before && before - after > 0.0f);
+    }
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("const float sidebar_w = layout::SidebarWidth(w, s_);") != std::string::npos);
+    CHECK(trg.find("DrawContent(ImVec2(w - sidebar_w - margin * 3, body_h));") != std::string::npos);
+}
+
+void TestRowRhythm() {
+    using namespace trg::layout;
+    CHECK(kRowPadding == 8.0f && kLabelGap == 3.0f && kInfoGridPadding == 5.0f && kControlHeight == 34.0f);
+    CHECK(kItemGap + kSectionGap + kItemGap == 22.0f);
+    const float previous_row = kControlHeight + 5.0f * 2.0f;
+    for (const float help_lines : {1.0f, 2.0f, 4.0f}) {
+        const float content = std::max(kControlHeight, kTextLabel + kLabelGap + kTextHelp * help_lines);
+        const float row = content + kRowPadding * 2.0f;
+        CHECK(row >= content);
+        // The control sits in the middle of the row, whatever the text makes its height.
+        CHECK((content - kControlHeight) * 0.5f + kControlHeight * 0.5f == content * 0.5f);
+        if (help_lines == 1.0f) {
+            const float growth = row / previous_row - 1.0f;
+            CHECK(growth >= 0.14f && growth <= 0.2f);
+        }
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("st.CellPadding = ImVec2(0, layout::kRowPadding * s);") != std::string::npos);
+    CHECK(trg.find("ImGuiStyleVar_CellPadding, ImVec2(0, layout::kInfoGridPadding * scale_)") != std::string::npos);
+    const size_t heading = trg.find("void Ui::Heading("), section = trg.find("bool Ui::Section(");
+    CHECK(trg.find("layout::kSectionGap * scale_", heading) < trg.find("ImGui::TextUnformatted(T(text));", heading));
+    CHECK(trg.find("layout::kSectionGap * scale_", section) < trg.find("ImGui::CollapsingHeader", section));
+    CHECK(trg.find("const float spare = label_h - ImGui::GetFrameHeight();") != std::string::npos);
+}
+
+void TestRowSeparators() {
+    using namespace trg::layout;
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float row_left = 238.0f * scale, body = 1010.0f * scale, scrollbar = 10.0f * scale;
+        const float content = StableContentWidth(body, scrollbar);
+        const float separator_right = row_left + content;
+        const float control_x = separator_right - ControlColumnWidth(content, scale);
+        CHECK(separator_right > control_x && control_x > row_left);
+        CHECK(separator_right == row_left + body - scrollbar);
+    }
+
+    // Filled after the table, from the width the rows use, on every shared row and the info grid.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("row_right_ = row_left_ + ImGui::GetContentRegionAvail().x;") != std::string::npos);
+    CHECK(trg.find("dl->AddRectFilled(ImVec2(row_left_, top), ImVec2(row_right_, top + 1.0f), color);") != std::string::npos);
+    const size_t begin_lines = trg.find("    BeginRowLines();\n"), begin_lines_crlf = trg.find("    BeginRowLines();\r\n");
+    CHECK(begin_lines != std::string::npos || begin_lines_crlf != std::string::npos);
+    const size_t end_rows = trg.find("void Ui::EndRows()");
+    CHECK(end_rows != std::string::npos && trg.find("ImGui::EndTable();", end_rows) < trg.find("DrawRowLines();", end_rows));
+    const size_t grid = trg.find("void Ui::InfoGrid(");
+    CHECK(grid != std::string::npos && trg.find("BeginRowLines();", grid) < trg.find("ImGui::BeginTable(id, 4", grid));
+    CHECK(trg.find("ImDrawListFlags_AntiAliasedLines") == std::string::npos);
+    for (const char* page : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp"}) {
+        CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / page).find("BordersInnerH") == std::string::npos);
+    }
+}
+
+// ---- Launcher geometry at the supported display scales ----
+
+struct LogicalWindow {
+    float width, height;
+};
+
+constexpr LogicalWindow kLauncherWindows[] = {{900, 560}, {1126, 560}, {1280, 720}, {1920, 1080}, {3840, 2160}};
+constexpr float kDisplayScales[] = {1.0f, 1.5f, 2.25f};
+constexpr float kTolerance = 0.01f;
+
+// Launcher::Frame's layout of a window, in physical pixels.
+struct ChromeGeometry {
+    float header, body_h, sidebar_w, content_w, page_w, scrollbar, stable, control, label, footer_w;
+};
+
+ChromeGeometry ChromeAt(const LogicalWindow& window, float scale) {
+    using namespace trg::layout;
+    ChromeGeometry g{};
+    const float w = window.width * scale, h = window.height * scale, margin = kMargin * scale;
+    g.header = HeaderHeight(h, scale);
+    g.body_h = std::max(100.0f * scale, h - g.header - kBodyGap * scale - kFooterHeight * scale);
+    g.sidebar_w = SidebarWidth(w, scale);
+    g.content_w = w - g.sidebar_w - margin * 3.0f;
+    g.page_w = g.content_w - kContentPadding * scale * 2.0f;
+    g.scrollbar = 10.0f * scale;
+    g.stable = StableContentWidth(g.page_w, g.scrollbar);
+    g.control = ControlColumnWidth(g.stable, scale);
+    g.label = g.stable - g.control;
+    g.footer_w = w - margin * 2.0f;
+    return g;
+}
+
+std::string Between(const std::string& text, const std::string& from, const std::string& to) {
+    const size_t begin = text.find(from);
+    if (begin == std::string::npos) {
+        return {};
+    }
+    const size_t end = text.find(to, begin + from.size());
+    return text.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+}
+
+void TestLauncherDpiLayout() {
+    using namespace trg::layout;
+    for (const float scale : kDisplayScales) {
+        for (const LogicalWindow& window : kLauncherWindows) {
+            const ChromeGeometry g = ChromeAt(window, scale);
+            CHECK(SidebarHeight(9) * scale <= g.body_h + kTolerance);
+            CHECK(g.sidebar_w >= 168.0f * scale && g.sidebar_w <= 176.0f * scale);
+            CHECK(g.content_w > 0.0f && std::abs(g.sidebar_w + kMargin * scale * 3.0f + g.content_w - window.width * scale) < kTolerance);
+
+            CHECK(g.stable > 0.0f && g.stable <= g.page_w);
+            CHECK(g.control > 0.0f && g.control < g.stable && g.label >= 200.0f * scale);
+            CHECK(g.scrollbar > 0.0f && g.scrollbar < g.page_w * 0.05f);
+
+            // Separators run from the row's left edge to the gutter reserved for the scrollbar, inside the right padding.
+            const float row_left = kContentPadding * scale, separator_right = row_left + g.stable;
+            CHECK(separator_right > row_left + g.label && separator_right <= row_left + g.page_w - g.scrollbar + kTolerance);
+            CHECK(separator_right < g.content_w - kContentPadding * scale);
+
+            const float cluster = (kPlayWidth + kFooterButtonWidth * 2.0f + kFooterGap * 2.0f) * scale;
+            CHECK(cluster <= g.footer_w && g.footer_w - cluster >= 300.0f * scale);
+        }
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("HorizontalScrollbar") == std::string::npos);
+    CHECK(trg.find("st.ScrollbarSize = 10 * s;") != std::string::npos);
+    const std::string sidebar = Between(trg, "void Launcher::DrawSidebar(", "void Launcher::DrawContent(");
+    CHECK(sidebar.find("ImGuiWindowFlags_NoScrollbar") != std::string::npos);
+    CHECK(sidebar.find("const ImVec2 item(size.x - pad * 2, item_h);") != std::string::npos);
+    CHECK(sidebar.find("ImGui::SetCursorPosX(pad);") != std::string::npos);
+
+    // The pages with the densest rows stay on the shared row system, whose control column is fixed.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    for (const char* page : {"PagePlay", "PageDisplay", "PageGameplay", "PageAbout"}) {
+        CHECK(launcher.find(std::string("void ") + page + "(trg::Ui& ui) {") != std::string::npos);
+    }
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp").find("void OnlinePage::Draw(trg::Ui& ui) {") != std::string::npos);
+}
+
+void TestSidebarLabels() {
+    using namespace trg::layout;
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string portuguese = ReadAll(source / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    std::string longest_portuguese;
+    size_t longest_english = 0;
+    for (const PageId page : kPageOrder) {
+        const std::string english = PageName(page);
+        const size_t row = portuguese.find("\n" + english + "\t");
+        CHECK(row != std::string::npos);
+        const size_t begin = row + english.size() + 2;
+        const std::string label = portuguese.substr(begin, portuguese.find('\n', begin) - begin);
+        CHECK(!label.empty() && label.size() <= 12 && english.size() <= 12);
+        longest_english = std::max(longest_english, english.size());
+        if (label.size() > longest_portuguese.size()) {
+            longest_portuguese = label;
+        }
+    }
+    // The measured label widths in TestSidebarProportions end at this label.
+    CHECK(longest_portuguese == "Jogabilidade" && longest_english <= longest_portuguese.size());
+
+    for (const float scale : kDisplayScales) {
+        const float row = SidebarWidth(900.0f * scale, scale) - kSidebarPadding * scale * 2.0f;
+        CHECK(SidebarLabelX() * scale < row && kSidebarIcon * scale <= kSidebarRow * scale);
+        for (const LogicalWindow& window : kLauncherWindows) {
+            const ChromeGeometry g = ChromeAt(window, scale);
+            CHECK(SidebarLabelX() * scale < g.sidebar_w - kSidebarPadding * scale * 2.0f);
+            // The sidebar's cap hands every pixel it does not use to the page.
+            const float proportional = std::clamp(window.width * scale * 0.15f, 168.0f * scale, 200.0f * scale);
+            CHECK(g.sidebar_w <= proportional + kTolerance);
+        }
+    }
+    CHECK(SidebarWidth(3840.0f * 2.25f, 2.25f) < std::clamp(3840.0f * 2.25f * 0.15f, 168.0f * 2.25f, 200.0f * 2.25f));
+}
+
+void TestFooterAndCards() {
+    using namespace trg::layout;
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string trg = ReadAll(source / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const std::string footer = Between(trg, "void Launcher::DrawFooter(", "void Launcher::DrawPlayButton(");
+    CHECK(!footer.empty());
+    CHECK(footer.find("const float quit_x = right - play_w - bw * 2 - gap * 2;") != std::string::npos);
+    CHECK(footer.find("ImGui::Button(T(\"Quit\"), ImVec2(bw, bh))") != std::string::npos);
+    CHECK(footer.find("ImGui::Button(T(\"Save\"), ImVec2(bw, bh))") != std::string::npos);
+    CHECK(footer.find("DrawPlayButton(ImVec2(play_w, play_h), check.ok);") != std::string::npos);
+    CHECK(footer.find("SponsorButton(\"##sponsor_footer\"") != std::string::npos);
+    CHECK(footer.find("if (x >= help_x + note_w + gap) {") != std::string::npos);
+    CHECK(footer.find("DrawKeyHints(dl, hints, fonts, t,") != std::string::npos);
+
+    struct Shortcut {
+        const char* key;
+        const char* action;
+    };
+    const auto shortcuts = [](const char* text, const std::array<Shortcut, 3>& expected) {
+        const std::vector<KeyHint> hints = ParseKeyHints(text);
+        CHECK(hints.size() == expected.size());
+        for (size_t i = 0; i < hints.size() && i < expected.size(); ++i) {
+            CHECK(hints[i].key == expected[i].key && hints[i].action == expected[i].action);
+        }
+    };
+    shortcuts("Enter  Play     Alt+F4  Quit     Ctrl+S  Save", {Shortcut{"Enter", "Play"}, {"Alt+F4", "Quit"}, {"Ctrl+S", "Save"}});
+    shortcuts("Enter  Jogar     Alt+F4  Sair     Ctrl+S  Salvar", {Shortcut{"Enter", "Jogar"}, {"Alt+F4", "Sair"}, {"Ctrl+S", "Salvar"}});
+
+    for (const float scale : kDisplayScales) {
+        const float footer_h = kFooterHeight * scale;
+        const float glow = 7.0f * scale;  // the Play button's pulse reaches this far past its edge
+        CHECK(kPlayHeight * scale + glow * 2.0f <= footer_h && kFooterButtonHeight * scale <= footer_h);
+        CHECK(kKeycapHeight * scale < footer_h && kSupportIconBlock * scale < footer_h);
+        const float width = ChromeAt(kLauncherWindows[0], scale).footer_w;
+        CHECK((kPlayWidth + kFooterButtonWidth * 2.0f + kFooterGap * 2.0f) * scale < width);
+    }
+
+    // The About page's support card and the footer's Sponsor button share one link.
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(std::string(kSponsorUrl) == "https://github.com/sponsors/saulob");
+    CHECK(launcher.find("c.sponsor = {\"Sponsor on GitHub\", kSponsorUrl, sponsor_icon_};") != std::string::npos);
+    const std::string about = Between(launcher, "void PageAbout(trg::Ui& ui) {", "ui.Paragraph(");
+    CHECK(about.find("ui.SponsorCard(") != std::string::npos);
+    const std::string card = Between(trg, "void Ui::SponsorCard(", "\nvoid Ui::");
+    CHECK(card.find("kSponsorPink") != std::string::npos && card.find("AddImage(ImTextureRef(sponsor.icon)") != std::string::npos);
+    CHECK(card.find("if (sponsor.url.empty()) return;") != std::string::npos);
+    for (const LogicalWindow& window : kLauncherWindows) {
+        for (const float scale : kDisplayScales) {
+            const ChromeGeometry g = ChromeAt(window, scale);
+            CHECK((kSupportIconBlock + kSupportIconGap) * scale < g.stable * 0.25f);
+        }
+    }
+
+    // The friend code row: the code, its Copy button, and nothing of the Connection test or the relay.
+    const std::string online = ReadAll(source / "launcher" / "online_page.cpp");
+    const std::string code = Between(online, "void OnlinePage::DrawFriendCode(", "bool OnlinePage::DrawRequiredTestRow(");
+    CHECK(code.find("ui.RowEmphasized(\"Your friend code\", kFriendCodeHelp);") != std::string::npos);
+    CHECK(code.find("ImGui::Button(Tr(\"Copy\"), ImVec2(-FLT_MIN, 0))") != std::string::npos);
+    CHECK(code.find("ImGui::SetClipboardText(state.friend_code.c_str());") != std::string::npos);
+    CHECK(code.find("ImGui::SameLine();") < code.find("ImGui::Button(Tr(\"Copy\")"));
+    CHECK(code.find("Connection") == std::string::npos && code.find("DrawConnectionTest") == std::string::npos);
+    CHECK(code.find("relay") == std::string::npos && code.find("Relay") == std::string::npos);
+    const size_t friend_case = online.find("case OnlineSection::kFriendCode: DrawFriendCode(ui); break;");
+    const size_t test_case = online.find("case OnlineSection::kConnectionTest: DrawConnectionTest(ui); break;");
+    CHECK(friend_case != std::string::npos && test_case != std::string::npos && friend_case != test_case);
+
+    const std::string portuguese = ReadAll(source / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    for (const char* text : {"\nYour friend code\t", "\nCopy\t", "\nConnection test\t", "\nRun test\t", "\nAbout\t"}) {
+        CHECK(portuguese.find(text) != std::string::npos);
+    }
+}
+
+// ---- Launcher scrollbar gutter ----
+
+// What a page lays out from, in the frame before its scrollbar shows and in the one after.
+struct PageGeometry {
+    float content, control_x, wrap, separator_right;
+};
+
+PageGeometry PageGeometryAt(float body_width, float scrollbar, float scale, float row_left) {
+    using namespace trg::layout;
+    const float content = StableContentWidth(body_width, scrollbar);
+    const float control = ControlColumnWidth(content, scale);
+    return {content, content - control, content - control - 16.0f * scale, row_left + content};
+}
+
+void TestScrollbarSettling() {
+    using namespace trg::layout;
+    struct Page {
+        const char* name;
+        LogicalWindow window;
+    };
+    for (const float scale : kDisplayScales) {
+        for (const Page& page : {Page{"Gameplay", {1280, 720}}, Page{"Display", {1920, 1080}}, Page{"Display", {900, 560}},
+                                 Page{"Online", {1126, 560}}}) {
+            const ChromeGeometry g = ChromeAt(page.window, scale);
+            const float row_left = kContentPadding * scale;
+            const PageGeometry first = PageGeometryAt(g.page_w, g.scrollbar, scale, row_left);
+            const PageGeometry second = PageGeometryAt(g.page_w, g.scrollbar, scale, row_left);
+            CHECK(first.content == second.content && first.control_x == second.control_x);
+            CHECK(first.wrap == second.wrap && first.separator_right == second.separator_right);
+            CHECK(first.wrap > 0.0f && first.content == g.stable && first.control_x == g.label);
+        }
+
+        // A resize moves the page by the resize and by nothing else, whether or not a scrollbar is showing.
+        const ChromeGeometry small = ChromeAt(kLauncherWindows[0], scale), large = ChromeAt(kLauncherWindows[3], scale);
+        const PageGeometry before = PageGeometryAt(small.page_w, small.scrollbar, scale, 0.0f);
+        const PageGeometry after = PageGeometryAt(large.page_w, large.scrollbar, scale, 0.0f);
+        CHECK(after.content - before.content == large.page_w - small.page_w);
+        CHECK(after.content > before.content && after.control_x >= before.control_x);
+        CHECK(after.separator_right - before.separator_right == after.content - before.content);
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("ScrollbarSizes") == std::string::npos && trg.find("ScrollbarY") == std::string::npos);
+    CHECK(trg.find("GetScrollMaxY") == std::string::npos && trg.find("scrollbar_visible") == std::string::npos);
+}
+
+// ---- Launcher separators and row spacing ----
+
+void TestSeparatorPages() {
+    using namespace trg::layout;
+    struct Page {
+        const char* name;
+        LogicalWindow window;
+    };
+    for (const float scale : kDisplayScales) {
+        for (const Page& page : {Page{"Display", {1280, 720}}, Page{"Gameplay", {1920, 1080}}, Page{"Graphics", {900, 560}},
+                                 Page{"Online", {1126, 560}}}) {
+            const ChromeGeometry g = ChromeAt(page.window, scale);
+            const float row_left = kContentPadding * scale, right = row_left + g.stable;
+            const float control_x = right - g.control, text_end = row_left + g.label - 16.0f * scale;
+            CHECK(row_left < text_end && text_end < control_x && control_x < right);
+            CHECK(right - row_left == g.stable && right + g.scrollbar == row_left + g.page_w);
+        }
+    }
+
+    // The lines come from the width the rows use, not from a cell, so a clipped column cannot shorten them.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const std::string row = Between(trg, "void Ui::BeginRow() {", "void Ui::RowLabel(");
+    CHECK(row.find("BeginRowLines();") < row.find("ImGui::BeginTable(id, 2"));
+    const std::string lines = Between(trg, "void Ui::DrawRowLines() {", "\nint Ui::Segmented(");
+    CHECK(lines.find("row_left_") != std::string::npos && lines.find("row_right_") != std::string::npos);
+    CHECK(lines.find("TableGetColumn") == std::string::npos && lines.find("GetColumnWidth") == std::string::npos);
+    CHECK(lines.find("Col(theme().border_row)") != std::string::npos);
+
+    // Border colours come from the theme's two roles; no page picks its own.
+    const fs::path launcher_dir = fs::path(DCP_SOURCE_DIR) / "launcher";
+    for (const char* file : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp"}) {
+        const std::string text = ReadAll(launcher_dir / file);
+        CHECK(text.find("border_row") == std::string::npos && text.find("border_panel") == std::string::npos);
+        CHECK(text.find("kRowBorder") == std::string::npos && text.find("kPanelBorder") == std::string::npos);
+    }
+    for (const char* file : {"launcher.cpp", "trophy_page.cpp"}) {
+        CHECK(ReadAll(launcher_dir / file).find("ImGuiCol_Border") == std::string::npos);
+    }
+    const std::string theme = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "include" / "trg" / "launcher.h");
+    CHECK(theme.find("ImVec4 border_row = ") != std::string::npos && theme.find("ImVec4 border_panel = ") != std::string::npos);
+}
+
+void TestRowKinds() {
+    using namespace trg::layout;
+    // A row is as tall as its text or its control, whichever is taller, plus the padding above and below.
+    const auto height = [](float help_lines, float control) {
+        const float text = help_lines > 0.0f ? kTextLabel + kLabelGap + kTextHelp * help_lines : kTextLabel;
+        return std::max(control, text) + kRowPadding * 2.0f;
+    };
+    const float short_row = height(0.0f, kControlHeight), one_line = height(1.0f, kControlHeight);
+    const float wrapped = height(3.0f, kControlHeight), long_wrapped = height(5.0f, kControlHeight);
+    CHECK(short_row == kControlHeight + kRowPadding * 2.0f && one_line >= short_row);
+    CHECK(wrapped > one_line && long_wrapped - wrapped == kTextHelp * 2.0f);
+    for (const float help_lines : {0.0f, 1.0f, 3.0f, 5.0f}) {
+        const float row = height(help_lines, kControlHeight);
+        const float content = row - kRowPadding * 2.0f, spare = content - kControlHeight;
+        CHECK(spare >= 0.0f && spare * 0.5f + kControlHeight + spare * 0.5f == content);
+    }
+
+    // Combo, segmented, slider and the other controls all start from the shared row, which centres them.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    for (const char* control : {"bool Ui::Combo(", "bool Ui::Choice(", "bool Ui::SliderInt(", "bool Ui::SliderFloat(", "bool Ui::Toggle("}) {
+        const std::string body = Between(trg, control, "\nbool Ui::");
+        CHECK(!body.empty() && body.find("Row(label, help);") != std::string::npos);
+    }
+    CHECK(Between(trg, "bool Ui::Choice(", "\nbool Ui::").find("Segmented(key, labels, sel)") != std::string::npos);
+    CHECK(Between(trg, "void Ui::RowControl() {", "\nvoid Ui::EndRows()").find("spare * 0.5f") != std::string::npos);
+    CHECK(Between(trg, "void Ui::RowLabel(", "\nvoid Ui::Row(").find("PushTextWrapPos") != std::string::npos);
+}
+
+// ---- Launcher shared source ----
+
+void TestSharedLauncherSource() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string windows_only = "windows.h|winhttp|_WIN32|HINTERNET|<io.h>|<direct.h>|WINAPI";
+    std::vector<fs::path> shared = {source / "launcher" / "header_art.h", source / "launcher" / "header_art.cpp",
+                                    source / "launcher" / "page_icons.h", source / "launcher" / "page_icons.cpp",
+                                    source / "third_party" / "trg-launcher" / "include" / "trg" / "layout.h",
+                                    source / "third_party" / "trg-launcher" / "include" / "trg" / "page_navigation.h"};
+    for (const fs::path& file : shared) {
+        const std::string text = ReadAll(file);
+        CHECK(!text.empty());
+        for (size_t begin = 0; begin < windows_only.size();) {
+            const size_t end = windows_only.find('|', begin);
+            const std::string needle = windows_only.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+            CHECK(text.find(needle) == std::string::npos);
+            begin = end == std::string::npos ? windows_only.size() : end + 1;
+        }
+    }
+    // The same launcher code draws on both platforms; only the renderer SDL picks differs.
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    const std::string painter = Between(launcher, "trg::HeaderPainter LauncherHeader(", "void Log(const char* format");
+    CHECK(!painter.empty() && painter.find("#if") == std::string::npos);
+    const std::string build = ReadAll(source / "launcher" / "CMakeLists.txt");
+    CHECK(build.find("header_art.cpp") != std::string::npos && build.find("page_icons.cpp") != std::string::npos);
+    CHECK(build.find("if (WIN32)") != std::string::npos && build.find("OpenSSL::Crypto") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package-linux.sh").find("install -m644 assets/launcher/header-art.png") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package-linux.sh").find("usr/bin/assets/launcher/header-art.png") != std::string::npos);
+}
+
+// ---- Launcher page icons ----
+
+void TestPageIcons() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const fs::path icons = source / "assets" / "launcher" / "icons";
+
+    // The sidebar's pages and their icons, one to one.
+    const std::set<std::string> expected = {"play.svg",   "display.svg", "graphics.svg", "gameplay.svg", "online.svg",
+                                            "cheats.svg", "controls.svg", "trophies.svg", "about.svg"};
+    std::set<std::string> mapped_files;
+    std::set<int> mapped_pages, ordered_pages;
+    for (const PageIconAsset& asset : PageIconAssets()) {
+        mapped_files.insert(asset.file);
+        mapped_pages.insert(static_cast<int>(asset.page));
+    }
+    for (const PageId page : kPageOrder) {
+        ordered_pages.insert(static_cast<int>(page));
+    }
+    CHECK(expected.size() == 9 && PageIconAssets().size() == expected.size());
+    CHECK(mapped_files == expected && mapped_pages.size() == expected.size());
+    CHECK(ordered_pages.size() == std::size(kPageOrder) && mapped_pages == ordered_pages);
+    for (const std::string& name : expected) {
+        CHECK(fs::is_regular_file(icons / name));
+    }
+
+    CHECK(PageIconAssets().size() == std::size(kPageOrder));
+    for (const PageId page : kPageOrder) {
+        const PageIconAsset* asset = FindPageIcon(page);
+        CHECK(asset != nullptr);
+        if (!asset) {
+            continue;
+        }
+        const std::string svg = ReadAll(icons / asset->file);
+        CHECK(svg.find("viewBox=\"") != std::string::npos && svg.find("<svg") != std::string::npos);
+        CHECK(svg.find("filter") == std::string::npos && svg.find("fill=\"white\"") == std::string::npos);
+
+        // The compiled copy is the file on disk, so a stale embed cannot pass.
+        const std::vector<uint8_t> embedded = RenderPageIcon(page, 24);
+        CHECK(!embedded.empty() && embedded == RasterizeIcon(reinterpret_cast<const uint8_t*>(svg.data()), svg.size(),
+                                                              asset->optical_scale, 24));
+
+        CHECK(asset->optical_scale > 0.5f && asset->optical_scale < 1.0f);
+        for (const int pixels : {20, 30, 45}) {
+            const std::vector<uint8_t> image = RasterizeIcon(reinterpret_cast<const uint8_t*>(svg.data()), svg.size(),
+                                                             asset->optical_scale, pixels);
+            CHECK(image.size() == size_t(pixels) * size_t(pixels) * 4);
+            size_t covered = 0;
+            bool edge = false, tinted = true;
+            for (size_t i = 0; i + 3 < image.size(); i += 4) {
+                const size_t x = (i / 4) % size_t(pixels), y = (i / 4) / size_t(pixels);
+                const bool ink = image[i + 3] > 128;
+                covered += ink;
+                edge = edge || (ink && (x == 0 || y == 0 || x + 1 == size_t(pixels) || y + 1 == size_t(pixels)));
+                tinted = tinted && image[i] == 255 && image[i + 1] == 255 && image[i + 2] == 255;
+            }
+            CHECK(covered > image.size() / 4 / 20);
+            CHECK(!edge && tinted);
+        }
+    }
+
+    size_t svg_files = 0;
+    for (const fs::directory_entry& entry : fs::directory_iterator(icons)) {
+        const std::string name = entry.path().filename().string();
+        CHECK(name.find("svgrepo-com") == std::string::npos);
+        svg_files += entry.path().extension() == ".svg";
+    }
+    CHECK(svg_files == PageIconAssets().size());
+
+    // A bad resource gives no image instead of a crash.
+    const std::string broken = "<svg viewBox=\"0 0 24 24\"><path d=\"M";
+    CHECK(RasterizeIcon(reinterpret_cast<const uint8_t*>(broken.data()), broken.size(), 0.9f, 20).empty());
+    const std::string text = "not an svg";
+    CHECK(RasterizeIcon(reinterpret_cast<const uint8_t*>(text.data()), text.size(), 0.9f, 20).empty());
+    CHECK(RasterizeIcon(nullptr, 0, 0.9f, 20).empty());
+    CHECK(RenderPageIcon(static_cast<PageId>(99), 20).empty());
+
+    // One production path, keyed by page identity and compiled in, so packages carry no loose icons.
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("c.pages.back().icon = [this, page](int pixels) { return PageIconTexture(page, pixels); };") != std::string::npos);
+    CHECK(launcher.find("trg::PageIcon") == std::string::npos);
+    const std::string compact = ReadAll(source / "gpu" / "patches" / "trg-launcher" / "0006-compact-layout.patch");
+    CHECK(compact.find("DrawPageIcon") == std::string::npos && compact.find("PageIcon::") == std::string::npos);
+    CHECK(compact.find("std::function<ImTextureID(int pixels)> icon = nullptr;") != std::string::npos);
+    const std::string build = ReadAll(source / "launcher" / "CMakeLists.txt");
+    CHECK(build.find("assets/launcher/icons/*.svg") != std::string::npos && build.find("-DSYMBOL=kPageIconFiles") != std::string::npos);
+    const std::string windows = ReadAll(source / "tools" / "package.ps1");
+    const std::string linux_package = ReadAll(source / "tools" / "package-linux.sh");
+    CHECK(windows.find("launcher\\icons") == std::string::npos && linux_package.find("launcher/icons") == std::string::npos);
+
+    // Nothing reads the source tree at run time: the icons are compiled in, only the artwork PNGs are loose files.
+    const std::string loader = ReadAll(source / "launcher" / "page_icons.cpp");
+    CHECK(loader.find("DCP_SOURCE_DIR") == std::string::npos && loader.find("ifstream") == std::string::npos);
+    CHECK(loader.find("fopen") == std::string::npos && loader.find("SDL_GetBasePath") == std::string::npos);
+    CHECK(loader.find("assets/launcher") == std::string::npos && loader.find("assets\\launcher") == std::string::npos);
+    for (const char* file : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp", "host.cpp"}) {
+        const std::string text = ReadAll(source / "launcher" / file);
+        CHECK(text.find("DCP_SOURCE_DIR") == std::string::npos && text.find("icons/") == std::string::npos);
+        CHECK(text.find(".svg\"") == std::string::npos && text.find("nsvgParseFromFile") == std::string::npos);
+    }
+}
+
+// ---- Launcher icon and third-party licenses ----
+
+void TestIconLicenses() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const fs::path icons = source / "assets" / "launcher" / "icons";
+    const std::string sources = ReadAll(icons / "SOURCES.md");
+    const std::string licenses = ReadAll(source / "packaging" / "licenses" / "THIRD-PARTY-LICENSES.txt");
+    CHECK(!sources.empty() && !licenses.empty());
+
+    int cc0_rows = 0;
+    for (const PageIconAsset& asset : PageIconAssets()) {
+        const size_t row = sources.find(std::string("| `") + asset.file + "` | ");
+        CHECK(row != std::string::npos);
+        const std::string line = sources.substr(row, sources.find('\n', row) - row);
+        CHECK(line.find("https://www.svgrepo.com/svg/") != std::string::npos);
+        CHECK(licenses.find(asset.file) != std::string::npos);
+        if (asset.page == PageId::kDisplay) {
+            CHECK(line.find("| CC Attribution License |") != std::string::npos && line.find("CC0") == std::string::npos);
+            CHECK(line.find("nickylimyeanfen") != std::string::npos && line.find("Inc Device Icons") != std::string::npos);
+            CHECK(line.find("https://www.svgrepo.com/svg/381247/display-television-tv-screen-gadget") != std::string::npos);
+        } else if (line.find("| CC0 |") != std::string::npos) {
+            ++cc0_rows;
+            const size_t url = line.find("https://www.svgrepo.com/svg/");
+            const std::string address = line.substr(url, line.find(' ', url) - url);
+            CHECK(licenses.find(address) != std::string::npos);
+        }
+    }
+    CHECK(cc0_rows == 8);
+    CHECK(licenses.find("CC0 (public domain dedication), all from SVG Repo") != std::string::npos);
+    CHECK(licenses.find("\"Display Television Tv Screen Gadget\" by nickylimyeanfen, collection Inc Device Icons.") != std::string::npos);
+    CHECK(licenses.find("License: CC Attribution License, https://creativecommons.org/licenses/by/") != std::string::npos);
+    for (const std::string& attribution : {licenses, sources}) {
+        CHECK(attribution.find("https://creativecommons.org/licenses/by/") != std::string::npos);
+        CHECK(attribution.find("Adapted") != std::string::npos);
+    }
+
+    // NanoSVG stays vendored with its license, and the package carries that license.
+    const fs::path nanosvg = source / "launcher" / "third_party" / "nanosvg";
+    for (const char* file : {"nanosvg.h", "nanosvgrast.h", "LICENSE.txt"}) {
+        CHECK(fs::is_regular_file(nanosvg / file) && fs::file_size(nanosvg / file) > 500);
+    }
+    const std::string nanosvg_license = ReadAll(nanosvg / "LICENSE.txt");
+    CHECK(nanosvg_license.find("Mikko Mononen") != std::string::npos && nanosvg_license.find("as-is") != std::string::npos);
+    CHECK(licenses.find("nanosvg ") != std::string::npos && licenses.find("Mikko Mononen") != std::string::npos);
+    CHECK(licenses.find("https://github.com/memononen/nanosvg") != std::string::npos && licenses.find("licenses\\nanosvg") != std::string::npos);
+    const std::string header = ReadAll(nanosvg / "nanosvg.h");
+    CHECK(header.find("size == (size_t)-1l") != std::string::npos && header.find("size == -1l") == std::string::npos);
+
+    const std::string windows = ReadAll(source / "tools" / "package.ps1");
+    const std::string linux_package = ReadAll(source / "tools" / "package-linux.sh");
+    CHECK(windows.find("launcher\\third_party\\nanosvg\\LICENSE.txt") != std::string::npos);
+    CHECK(windows.find("packaging\\licenses\\THIRD-PARTY-LICENSES.txt") != std::string::npos);
+    CHECK(linux_package.find("[nanosvg]=launcher/third_party/nanosvg/LICENSE.txt") != std::string::npos);
+    CHECK(linux_package.find("packaging/licenses/THIRD-PARTY-LICENSES.txt") != std::string::npos);
+}
+
+// ---- Launcher page navigation ----
+
+struct PageFrame {
+    int sidebar;
+    int content;
+};
+
+// One launcher frame: the commit comes first, the click arrives between the sidebar and the content.
+PageFrame DrawPageFrame(trg::PageNavigation& navigation, int clicked) {
+    navigation.Commit();
+    const int sidebar = navigation.current();
+    if (clicked >= 0) {
+        navigation.Request(clicked);
+    }
+    return {sidebar, navigation.current()};
+}
+
+void TestPageNavigation() {
+    enum { kPlay, kDisplay, kGraphics, kGameplay, kOnline };
+    trg::PageNavigation navigation;
+
+    const PageFrame clicked = DrawPageFrame(navigation, kDisplay);
+    CHECK(clicked.sidebar == kPlay && clicked.content == kPlay);
+    const PageFrame next = DrawPageFrame(navigation, -1);
+    CHECK(next.sidebar == kDisplay && next.content == kDisplay);
+
+    int shown = kDisplay;
+    for (const int page : {kGraphics, kGameplay, kOnline, kPlay, kDisplay}) {
+        const PageFrame frame = DrawPageFrame(navigation, page);
+        CHECK(frame.sidebar == shown && frame.content == shown);
+        shown = page;
+    }
+
+    trg::PageNavigation requests(kGameplay);
+    CHECK(requests.current() == kGameplay && !requests.Commit());
+    requests.Request(kPlay);
+    requests.Request(kOnline);
+    CHECK(requests.current() == kGameplay);
+    CHECK(requests.Commit() && requests.current() == kOnline && !requests.Commit());
+    requests.Request(kOnline);
+    CHECK(requests.Commit());
+
+    // Requests arriving at any point of any frame never leave the sidebar and the content on different pages.
+    trg::PageNavigation rapid;
+    uint32_t seed = 12345;
+    int mixed = 0, changes = 0, last = rapid.current();
+    for (int frame = 0; frame < 2000; ++frame) {
+        seed = seed * 1664525u + 1013904223u;
+        const int click = (seed >> 24) % 4 == 0 ? int((seed >> 8) % 9) : -1;
+        const PageFrame drawn = DrawPageFrame(rapid, click);
+        mixed += drawn.sidebar != drawn.content;
+        changes += drawn.sidebar != last;
+        last = drawn.sidebar;
+    }
+    CHECK(mixed == 0 && changes > 100);
+
+    // The launcher commits once, before anything is drawn, and each page keeps its own scroll window. Row tables need
+    // explicit weights: an automatic one collapses the label column on the table's first frame.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const size_t commit = trg.find("navigation_.Commit()");
+    CHECK(commit != std::string::npos && trg.find("navigation_.Commit()", commit + 1) == std::string::npos);
+    CHECK(commit < trg.find("DrawHeader(vp->Pos") && commit < trg.find("DrawSidebar(ImVec2(sidebar_w"));
+    CHECK(trg.find("navigation_.Request(index);") != std::string::npos && trg.find("page_ = ") == std::string::npos);
+    const size_t page_id = trg.find("ImGui::PushID(current_page);");
+    CHECK(page_id != std::string::npos && page_id < trg.find("ImGui::BeginChild(\"##page_body\""));
+    CHECK(trg.find("ImGui::BeginChild(\"##page_body\"") == trg.rfind("ImGui::BeginChild(\"##page_body\""));
+    CHECK(trg.find("TableSetupColumn(\"label\", ImGuiTableColumnFlags_WidthStretch, 1.0f)") != std::string::npos);
+    CHECK(trg.find("TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, std::max(width, 1.0f))") != std::string::npos);
 }
 
 // ---- Keyboard bindings ----
@@ -6223,6 +7135,22 @@ int main(int argc, char** argv) {
     TestPlayGate();
     TestPlacement();
     TestOptions();
+    InGroup("navigation", TestPageNavigation);
+    InGroup("icons", TestPageIcons);
+    InGroup("licenses", TestIconLicenses);
+    InGroup("scrollbar", TestStablePageWidth);
+    InGroup("scrollbar", TestScrollbarSettling);
+    InGroup("separators", TestRowSeparators);
+    InGroup("separators", TestSeparatorPages);
+    InGroup("separators", TestRowRhythm);
+    InGroup("separators", TestRowKinds);
+    InGroup("sidebar", TestSidebarProportions);
+    InGroup("sidebar", TestSidebarLabels);
+    InGroup("layout", TestChromeLayout);
+    InGroup("layout", TestLauncherDpiLayout);
+    InGroup("layout", TestFooterAndCards);
+    InGroup("header-art", TestHeaderArt);
+    InGroup("parity", TestSharedLauncherSource);
     TestKeyBindings(base);
     TestFileBrowser(base);
     TestControllerPrompts(base);
@@ -6253,6 +7181,9 @@ int main(int argc, char** argv) {
     fs::remove_all(redirected, ec);
     TestLogRedirect(redirected);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
+    for (const auto& [name, failures] : g_groups) {
+        std::printf("GROUP|launcher-%s|%s\n", name.c_str(), failures == 0 ? "PASS" : "FAIL");
+    }
     runtime_log_flush();
     return g_failures ? 1 : 0;
 }

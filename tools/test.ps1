@@ -26,6 +26,15 @@
   the reason. Structural build parity (same code path, no build-specific relay code) is reported apart from runtime
   validation, which needs the local boot images; no game is ever started.
 
+  Launcher UI: dcp-launcher-tests is relinked on every run, so an executable from an older tree can never be the one that
+  runs, and it reports each launcher group (SVG icons, icon and NanoSVG licenses, header art, DPI layout, scrollbar gutter,
+  separators and row spacing, sidebar in English and Portuguese, page navigation, shared source) as GROUP|launcher-*|PASS or
+  FAIL. tests\launcher_gate_tests.ps1 adds the static groups: source hygiene (with git diff --check), the TRG patch chain
+  applied to a scratch clone of the pinned revision and compared with the checkout the tests read, a syntax-only compile of
+  the launcher sources with the build's own warning flags (zero warnings), and the portable sources compiled with g++ in
+  WSL. A group that prints nothing is a FAIL; only a missing WSL reports SKIPPED. The checks are geometric and structural: no
+  window, no screenshots, no pixel comparison. How the launcher looks stays a manual check.
+
   Public endpoint: dcp-online-hle-tests also runs the game's endpoint report against that lobby acting as a public one, which
   observes a chosen global IPv6 or public IPv4 address, with a loopback stand-in for STUN. Its sockets are bound to
   loopback, so it needs no firewall rule and nothing is sent to the addresses it reports. A required Worker test that is
@@ -144,7 +153,9 @@ function Show-Output([string[]]$Lines, [bool]$Failed) {
 
 $tests = @(
     (Test-Step 'Windows memory tests (sparse backing, commitment, aliases, release)' 'dcp-memory-windows-tests'),
-    (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings)' 'dcp-launcher-tests' -Parity),
+    (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings, and the launcher UI groups: icons, licenses, header art, DPI layout, scrollbar gutter, separators, sidebar, navigation)' 'dcp-launcher-tests' -Parity -Capture),
+    (Test-Step 'launcher static gate (source hygiene, TRG patch chain, compiler warnings, Windows and Linux syntax-only compiles)' -Script 'tests\launcher_gate_tests.ps1' -Capture `
+        -Arguments (@('-BuildDir', $buildDir) + @(if ($SkipLinux) { '-SkipLinux' }))),
     (Test-Step 'unsupported-build diagnostics tests (direct package analysis, one-shot report, loader validators, edge cases)' 'dcp-build-diagnostics-tests' -Parity),
     (Test-Step 'build feature parity tests (contract, update parity, mappings, unknown builds)' 'dcp-build-parity-tests' -Parity -Capture),
     (Test-Step 'feature locator tests (Cheats, Japanese NPC Voices, True Ultrawide: real images, synthetic images, known builds only)' 'dcp-feature-sites-tests' -Parity),
@@ -202,6 +213,8 @@ $tests = @(
 Sync-GpuDependencies
 
 Write-Step 'Building the focused tests'
+# The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
+Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
 & ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
@@ -249,8 +262,17 @@ try {
             $code = $result.Code
             Show-Output $result.Lines ($code -ne 0)
         } elseif ($test.Script) {
-            & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $script:RepoRoot $test.Script)
-            $code = $LASTEXITCODE
+            $scriptPath = Join-Path $script:RepoRoot $test.Script
+            $scriptArguments = $test.Arguments
+            if ($test.Capture) {
+                $lines = @(& powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath @scriptArguments 2>&1 | ForEach-Object { "$_" })
+                $code = $LASTEXITCODE
+                $captured[$name] = $lines
+                $lines | ForEach-Object { Write-Host $_ }
+            } else {
+                & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath @scriptArguments
+                $code = $LASTEXITCODE
+            }
         } else {
             $exe = Join-Path $buildDir "bin\$($test.Exe).exe"
             if ($test.Capture) {
@@ -421,6 +443,63 @@ foreach ($entry in $summary.GetEnumerator()) {
     $color = if ($entry.Value -like 'FAIL*' -or $entry.Value -like 'NOT RUN*') { 'Red' } elseif ($good) { 'Green' } else { 'Yellow' }
     Write-Host ('  {0,-28} {1}' -f ($entry.Key + ':'), $entry.Value) -ForegroundColor $color
     if ($entry.Value -like 'FAIL*' -or $entry.Value -like 'NOT RUN*') { if (-not $failed.Contains("summary: $($entry.Key)")) { $failed.Add("summary: $($entry.Key)") } }
+}
+$launcherCore = 'dcp-launcher-tests'
+$launcherGate = 'tests\launcher_gate_tests.ps1'
+$launcherState = @{}
+$launcherReason = @{}
+foreach ($line in @($captured[$launcherCore]) + @($captured[$launcherGate])) {
+    $parts = "$line".Split('|')
+    if ($parts.Count -ge 3 -and $parts[0] -eq 'GROUP') {
+        $launcherState[$parts[1]] = $parts[2]
+        if ($parts.Count -ge 4) { $launcherReason[$parts[1]] = $parts[3] }
+    }
+}
+$launcherGateGroups = 'launcher-patches', 'launcher-warnings', 'launcher-hygiene', 'launcher-parity-windows', 'launcher-parity-linux'
+# A group that printed nothing is a failure, never "not run": the executable crashed or lost the group.
+function Get-LauncherRow([string[]]$Groups) {
+    $states = @()
+    $reasons = @()
+    foreach ($group in $Groups) {
+        $owner = if ($launcherGateGroups -contains $group) { $launcherGate } else { $launcherCore }
+        if (-not $launcherState.ContainsKey($group)) {
+            $states += 'FAIL'
+            $code = if ($exitCodes.ContainsKey($owner)) { ", $(Format-ExitCode $exitCodes[$owner])" } else { '' }
+            $reasons += "$group reported nothing from $owner$code"
+        } else {
+            $states += $launcherState[$group]
+            if ($launcherState[$group] -eq 'SKIPPED') { $reasons += "$group skipped: $($launcherReason[$group])" }
+        }
+    }
+    if ($states -contains 'FAIL') { return $(if ($reasons.Count) { "FAIL ($($reasons -join '; '))" } else { 'FAIL' }) }
+    if ($states -contains 'SKIPPED') { return "PASS (part skipped: $($reasons -join '; '))" }
+    return 'PASS'
+}
+$coreChecks = @($captured[$launcherCore] | Where-Object { $_ -match '^\d+ checks, \d+ failed$' }) | Select-Object -First 1
+$coreRow = if ($failed.Contains($launcherCore)) { "FAIL ($(Format-ExitCode $exitCodes[$launcherCore]))" }
+           elseif (-not $coreChecks) { 'FAIL (the launcher test executable printed no result)' }
+           else { "PASS ($coreChecks)" }
+$launcherSummary = [ordered]@{
+    'Core tests' = $coreRow
+    'SVG icons' = Get-LauncherRow @('launcher-icons')
+    'Icon and NanoSVG licenses' = Get-LauncherRow @('launcher-licenses')
+    'Header art' = Get-LauncherRow @('launcher-header-art')
+    'DPI/layout' = Get-LauncherRow @('launcher-layout')
+    'Scrollbar stability' = Get-LauncherRow @('launcher-scrollbar')
+    'Separators/row spacing' = Get-LauncherRow @('launcher-separators')
+    'Sidebar EN/PT-BR' = Get-LauncherRow @('launcher-sidebar')
+    'Navigation coherence' = Get-LauncherRow @('launcher-navigation')
+    'TRG patch chain' = Get-LauncherRow @('launcher-patches')
+    'Compiler warnings' = Get-LauncherRow @('launcher-warnings')
+    'Windows/Linux parity' = Get-LauncherRow @('launcher-parity', 'launcher-parity-windows', 'launcher-parity-linux')
+    'Source hygiene' = Get-LauncherRow @('launcher-hygiene')
+}
+Write-Host ''
+Write-Host 'Launcher UI (structural and geometric invariants; the look itself is checked by hand):' -ForegroundColor Cyan
+foreach ($entry in $launcherSummary.GetEnumerator()) {
+    $color = if ($entry.Value -like 'FAIL*') { 'Red' } elseif ($entry.Value -eq 'PASS' -or $entry.Value -like 'PASS (*checks*') { 'Green' } else { 'Yellow' }
+    Write-Host ('  {0,-28} {1}' -f ($entry.Key + ':'), $entry.Value) -ForegroundColor $color
+    if ($entry.Value -like 'FAIL*' -and -not $failed.Contains("launcher: $($entry.Key)")) { $failed.Add("launcher: $($entry.Key)") }
 }
 Write-Host ''
 if ($failed.Count -gt 0) {

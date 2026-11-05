@@ -1,0 +1,164 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index e392509..e9bcdb1 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -32,6 +32,7 @@
+ 
+ #include <imgui.h>
+ 
++#include "trg/page_navigation.h"
+ #include "trg/settings.h"
+ 
+ #if !defined(IMGUI_VERSION_NUM) || IMGUI_VERSION_NUM < 19200
+@@ -361,9 +362,10 @@ class Launcher {
+ 
+   bool Save();  // settings + on_save, with a status line
+   void SetStatus(std::string text, double seconds = 4.0);
++  // Applied when the next frame starts, so that a frame never mixes two pages.
+   void GoToPage(int index);
+   int FindPage(std::string_view name) const;
+-  int page() const { return page_; }
++  int page() const { return navigation_.current(); }
+   void RequestPlay() { want_play_ = true; }
+   // Shows a pop-up over the launcher (the same one before_play uses).
+   void ShowPrompt(PlayPrompt prompt);
+@@ -391,7 +393,7 @@ class Launcher {
+   LauncherConfig config_;
+   Ui ui_;
+   float s_ = 1.0f;
+-  int page_ = 0;
++  PageNavigation navigation_;
+   bool want_play_ = false, want_quit_ = false;
+   std::string status_;
+   double status_until_ = 0.0;
+diff --git a/include/trg/page_navigation.h b/include/trg/page_navigation.h
+new file mode 100644
+index 0000000..4d7e11e
+--- /dev/null
++++ b/include/trg/page_navigation.h
+@@ -0,0 +1,28 @@
++#pragma once
++
++namespace trg {
++
++// The page a frame draws. Requests made while a frame is being drawn wait for
++// Commit() at the start of the next one, so every part of a frame sees one page.
++class PageNavigation {
++ public:
++  PageNavigation() = default;
++  explicit PageNavigation(int page) : current_(page) {}
++
++  int current() const { return current_; }
++  void Request(int page) { pending_ = page; }
++
++  // True when a request was waiting, even for the current page.
++  bool Commit() {
++    if (pending_ < 0) return false;
++    current_ = pending_;
++    pending_ = -1;
++    return true;
++  }
++
++ private:
++  int current_ = 0;
++  int pending_ = -1;
++};
++
++}  // namespace trg
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 44f9c10..5abde3e 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -361,7 +361,8 @@ void Ui::BeginRow() {
+     const float control_w = layout::ControlColumnWidth(ImGui::GetContentRegionAvail().x, scale_);
+     in_rows_ = ImGui::BeginTable(id, 2, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp);
+     if (in_rows_) {
+-      ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch);
++      // Without an explicit weight this column collapses on the table's first frame.
++      ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+       ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize, control_w);
+     }
+   }
+@@ -569,6 +570,17 @@ void Ui::InfoGrid(const std::vector<std::pair<std::string, std::string>>& items)
+   char id[32];
+   std::snprintf(id, sizeof id, "##rows%d", rows_id_++);
+   if (!ImGui::BeginTable(id, 4, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) return;
++  // Weighted by text so the columns are right on the first frame; automatic weights need a frame of content.
++  float text_w[4] = {};
++  for (size_t i = 0; i < items.size(); ++i) {
++    const size_t column = (i % 2) * 2;
++    ImGui::PushFont(fonts().semibold, layout::kTextLabel);
++    text_w[column] = std::max(text_w[column], ImGui::CalcTextSize(T(items[i].first.c_str())).x);
++    ImGui::PopFont();
++    text_w[column + 1] = std::max(text_w[column + 1], ImGui::CalcTextSize(T(items[i].second.c_str())).x);
++  }
++  for (const float width : text_w)
++    ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, std::max(width, 1.0f));
+   for (const auto& [label, value] : items) {
+     ImGui::TableNextColumn();
+     ImGui::PushFont(fonts().semibold, layout::kTextLabel);
+@@ -898,7 +910,7 @@ void Ui::AchievementGrid(const std::vector<AchievementCard>& cards, int max_colu
+ Launcher::Launcher(LauncherConfig config) : config_(std::move(config)) {
+   ui_.launcher_ = this;
+   if (config_.fonts.size <= 0.0f) config_.fonts.size = layout::kTextBody;
+-  page_ = std::clamp(config_.start_page, 0, std::max(0, int(config_.pages.size()) - 1));
++  navigation_ = PageNavigation(std::clamp(config_.start_page, 0, std::max(0, int(config_.pages.size()) - 1)));
+   if (config_.settings)
+     for (const std::string& key : config_.restart_keys) restart_baseline_.push_back(config_.settings->Get(key));
+   // Testing aid: TRG_LAUNCHER_AUTOPLAY=<frames> (or 1 for the default 120)
+@@ -1016,8 +1028,7 @@ int Launcher::FindPage(std::string_view name) const {
+ 
+ void Launcher::GoToPage(int index) {
+   if (index < 0 || index >= int(config_.pages.size())) return;
+-  page_ = index;
+-  ui_.capturing_.clear();
++  navigation_.Request(index);
+ }
+ 
+ void Launcher::SetStatus(std::string text, double seconds) {
+@@ -1038,6 +1049,7 @@ bool Launcher::Save() {
+ 
+ Result Launcher::Frame() {
+   IM_ASSERT(config_.settings && "LauncherConfig::settings is required");
++  if (navigation_.Commit()) ui_.capturing_.clear();
+   Fonts& fonts = config_.fonts;
+   if (!fonts.regular) fonts.regular = ImGui::GetFont();
+   if (!fonts.bold) fonts.bold = fonts.semibold ? fonts.semibold : fonts.regular;
+@@ -1190,7 +1202,7 @@ void Launcher::DrawSidebar(ImVec2 size) {
+   ImGui::PushFont(config_.fonts.semibold, 0.0f);
+   for (int i = 0; i < int(config_.pages.size()); ++i) {
+     const Page& page = config_.pages[size_t(i)];
+-    const bool selected = page_ == i;
++    const bool selected = navigation_.current() == i;
+     ImGui::SetCursorPosX(pad);
+     ImGui::PushID(i);
+     const ImVec2 pos = ImGui::GetCursorScreenPos();
+@@ -1231,7 +1243,8 @@ void Launcher::DrawContent(ImVec2 size) {
+     ImGui::EndChild();
+     return;
+   }
+-  const Page& page = config_.pages[size_t(page_)];
++  const int current_page = navigation_.current();
++  const Page& page = config_.pages[size_t(current_page)];
+   const float pad = layout::kContentPadding * s_;
+   const float title_y = layout::kContentTop * s_;
+   ImGui::SetCursorPos(ImVec2(pad, title_y));
+@@ -1259,15 +1272,16 @@ void Launcher::DrawContent(ImVec2 size) {
+ 
+   ImGui::SetCursorPos(ImVec2(pad, body_y));
+   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
++  // One child per page: scroll position and scrollbar state are window state.
++  ImGui::PushID(current_page);
+   ImGui::BeginChild("##page_body", ImVec2(size.x - pad * 2, size.y - body_y - layout::kContentBottom * s_),
+                     ImGuiChildFlags_None);
+-  ImGui::PushID(page_);
+   ui_.BeginPage();
+   if (page.draw) page.draw(ui_);
+   ui_.EndPage();
+-  ImGui::PopID();
+   ImGui::Dummy(ImVec2(0, layout::kItemGap * s_));
+   ImGui::EndChild();
++  ImGui::PopID();
+   ImGui::PopStyleColor();
+   ImGui::EndChild();
+ }

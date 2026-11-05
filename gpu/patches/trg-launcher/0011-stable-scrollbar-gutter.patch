@@ -1,0 +1,30 @@
+diff --git a/include/trg/layout.h b/include/trg/layout.h
+index 871b207..d035387 100644
+--- a/include/trg/layout.h
++++ b/include/trg/layout.h
+@@ -84,6 +84,9 @@ inline float PassiveLineThickness(float scale) { return std::max(1.0f, std::floo
+ // The panel drawn over a border softens one pixel of it.
+ inline float PanelBorderWidth(float scale) { return LineThickness(scale) + 1.0f; }
+ 
++// A page's width with room for its scrollbar, so that the bar appearing moves nothing.
++inline float StableContentWidth(float body_width, float scrollbar_size) { return body_width - scrollbar_size; }
++
+ inline constexpr float SidebarLabelX() { return kSidebarIconInset + kSidebarIcon + kSidebarIconGap; }
+ 
+ // Where to place a line so that the point `visual_center` below its top lands on `center`.
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index fe5a27f..03c1d12 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -1274,8 +1274,9 @@ void Launcher::DrawContent(ImVec2 size) {
+   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+   // One child per page: scroll position and scrollbar state are window state.
+   ImGui::PushID(current_page);
+-  ImGui::BeginChild("##page_body", ImVec2(size.x - pad * 2, size.y - body_y - layout::kContentBottom * s_),
+-                    ImGuiChildFlags_None);
++  const float body_w = size.x - pad * 2;
++  ImGui::SetNextWindowContentSize(ImVec2(layout::StableContentWidth(body_w, ImGui::GetStyle().ScrollbarSize), 0.0f));
++  ImGui::BeginChild("##page_body", ImVec2(body_w, size.y - body_y - layout::kContentBottom * s_), ImGuiChildFlags_None);
+   ui_.BeginPage();
+   if (page.draw) page.draw(ui_);
+   ui_.EndPage();

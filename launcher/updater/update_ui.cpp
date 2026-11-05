@@ -58,15 +58,15 @@ UpdateUiAction DrawUpdateBanner(const UpdateSnapshot& snapshot, const trg::Theme
     return UpdateUiAction::kNone;
   }
 
-  const float base_size = fonts.size > 0.0f ? fonts.size : 18.0f;
+  const float base_size = fonts.size > 0.0f ? fonts.size : trg::layout::kTextBody;
   ImFont* base = fonts.regular ? fonts.regular : ImGui::GetFont();
   ImGui::PushFont(base, base_size);
   const float s = std::max(0.75f, ImGui::GetFontSize() / base_size);
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
-  const float header = std::clamp(viewport->Size.y * 0.2f, 120.0f * s, 190.0f * s);
+  const float header = trg::layout::HeaderHeight(viewport->Size.y, s);
   const float width = std::min(std::max(viewport->Size.x * 0.42f, 260.0f * s), 400.0f * s);
   const float padding = 14.0f * s;
-  const ImVec2 position(viewport->Pos.x + viewport->Size.x - width - 22.0f * s,
+  const ImVec2 position(viewport->Pos.x + viewport->Size.x - width - trg::layout::kMargin * s,
                         viewport->Pos.y + std::max(8.0f * s, (header - 104.0f * s) * 0.5f));
 
   ImGui::SetNextWindowPos(position, ImGuiCond_Always);

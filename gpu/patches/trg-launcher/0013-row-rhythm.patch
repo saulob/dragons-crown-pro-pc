@@ -1,0 +1,60 @@
+diff --git a/include/trg/layout.h b/include/trg/layout.h
+index d035387..5d4a2dc 100644
+--- a/include/trg/layout.h
++++ b/include/trg/layout.h
+@@ -27,8 +27,10 @@ inline constexpr float kPanelBorder[3] = {58.0f / 255.0f, 74.0f / 255.0f, 102.0f
+ 
+ inline constexpr float kControlHeight = 34.0f;
+ inline constexpr float kItemGap = 6.0f;
+-inline constexpr float kRowPadding = 5.0f;  // above and below a row's content
+-inline constexpr float kLabelGap = 1.0f;    // between a row's label and help text
++inline constexpr float kRowPadding = 8.0f;  // above and below a row's content
++inline constexpr float kLabelGap = 3.0f;    // between a row's label and help text
++inline constexpr float kInfoGridPadding = 5.0f;
++inline constexpr float kSectionGap = 10.0f;  // added above a section title, on top of the item spacing
+ 
+ inline constexpr float kMargin = 14.0f;
+ inline constexpr float kBodyGap = 6.0f;  // between the header and the panels
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 0ba0d85..1a873b0 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -564,7 +564,11 @@ void Ui::InfoGrid(const std::vector<std::pair<std::string, std::string>>& items)
+   char id[32];
+   std::snprintf(id, sizeof id, "##rows%d", rows_id_++);
+   BeginRowLines();
+-  if (!ImGui::BeginTable(id, 4, ImGuiTableFlags_SizingStretchProp)) return;
++  ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0, layout::kInfoGridPadding * scale_));
++  if (!ImGui::BeginTable(id, 4, ImGuiTableFlags_SizingStretchProp)) {
++    ImGui::PopStyleVar();
++    return;
++  }
+   // Weighted by text so the columns are right on the first frame; automatic weights need a frame of content.
+   float text_w[4] = {};
+   for (size_t i = 0; i < items.size(); ++i) {
+@@ -591,6 +595,7 @@ void Ui::InfoGrid(const std::vector<std::pair<std::string, std::string>>& items)
+     ImGui::PopStyleColor();
+   }
+   ImGui::EndTable();
++  ImGui::PopStyleVar();
+   DrawRowLines();
+ }
+ 
+@@ -746,7 +751,7 @@ bool Ui::TaskProgress(Task& task) {
+ 
+ void Ui::Heading(const char* text) {
+   LeaveRows();
+-  ImGui::Dummy(ImVec2(0, layout::kItemGap * scale_));
++  ImGui::Dummy(ImVec2(0, layout::kSectionGap * scale_));
+   ImGui::PushFont(fonts().semibold, layout::kTextSection);
+   ImGui::TextUnformatted(T(text));
+   ImGui::PopFont();
+@@ -852,7 +857,7 @@ void Ui::Spacer(float height) {
+ 
+ bool Ui::Section(const char* title, bool open_by_default) {
+   LeaveRows();
+-  ImGui::Dummy(ImVec2(0, layout::kItemGap * scale_));
++  ImGui::Dummy(ImVec2(0, layout::kSectionGap * scale_));
+   ImGui::PushFont(fonts().semibold, layout::kTextSection);
+   const bool open = ImGui::CollapsingHeader(T(title), open_by_default ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+   ImGui::PopFont();

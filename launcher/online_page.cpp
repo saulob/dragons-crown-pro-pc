@@ -31,7 +31,7 @@ ImVec4 Mix(const ImVec4& a, const ImVec4& b, float t) {
 }
 
 void BeginCard(const ImVec4& background, const ImVec4& border, float border_width, ImGuiChildFlags flags = 0) {
-    const float s = ImGui::GetFontSize() / 18.0f;
+    const float s = ImGui::GetFontSize() / trg::layout::kTextBody;
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f * s);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, border_width * s);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * s, 10.0f * s));
@@ -69,18 +69,11 @@ bool AcceptButton(trg::Ui& ui, const char* id) {
     return clicked;
 }
 
-// The name, then the status line in the row's help style with "Incompatible" in the attention colour. ui.Row has
-// already moved to the control column, so the line is drawn back in the label column, under the name.
+// The name, then the status line in the row's help style with "Incompatible" in the attention colour.
 void FriendRow(trg::Ui& ui, const OnlinePlayer& player) {
     const FriendStatus status = FriendStatusOf(player);
-    ui.Row(player.name.c_str());
-    const bool in_table = ImGui::GetCurrentTable() != nullptr;
-    if (in_table) {
-        const float below_name = ImGui::GetItemRectMax().y + ImGui::GetStyle().ItemSpacing.y;
-        ImGui::TableSetColumnIndex(0);
-        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, below_name));
-    }
-    ImGui::PushFont(nullptr, ui.fonts().size * 0.84f);
+    ui.RowLeft(player.name.c_str());
+    ImGui::PushFont(nullptr, trg::layout::kTextHelp);
     std::string status_text = status.text;
     const std::string presence = FriendPresence(player);
     if (status_text.rfind(presence, 0) == 0) {
@@ -94,10 +87,7 @@ void FriendRow(trg::Ui& ui, const OnlinePlayer& player) {
         ImGui::TextColored(ui.theme().warn_dot, "%s", Tr("Incompatible"));
     }
     ImGui::PopFont();
-    if (in_table) {
-        ImGui::TableSetColumnIndex(1);
-        ImGui::SetNextItemWidth(-FLT_MIN);
-    }
+    ui.RowControl();
 }
 
 } // namespace
@@ -194,7 +184,7 @@ void OnlinePage::DrawOnlinePlay(trg::Ui& ui, const OnlinePlaySwitch& online) {
 void OnlinePage::DrawFriendRequests(trg::Ui& ui) {
     const std::vector<OnlinePlayer> incoming = client_.state().incoming;
     const trg::Theme& t = ui.theme();
-    const float s = ImGui::GetFontSize() / 18.0f;
+    const float s = ui.scale();
     ui.Spacer(4);
     for (const OnlinePlayer& sender : incoming) {
         ImGui::PushID(("request" + sender.account).c_str());
@@ -217,35 +207,29 @@ void OnlinePage::DrawFriendRequests(trg::Ui& ui) {
 
 void OnlinePage::DrawFriendCode(trg::Ui& ui) {
     const OnlineClient::State& state = client_.state();
-    ui.Row("Your friend code", kFriendCodeHelp);
+    ui.RowEmphasized("Your friend code", kFriendCodeHelp);
+    ImGui::AlignTextToFramePadding();
     if (state.friend_code.empty()) {
         ImGui::TextDisabled("%s", Tr(state.link == OnlineClient::Link::kUnreachable ? "Not available right now"
                                                                                     : "Connecting..."));
         return;
     }
+    ImGui::PushFont(ui.fonts().semibold, trg::layout::kTextLabel);
     ImGui::TextUnformatted(state.friend_code.c_str());
+    ImGui::PopFont();
     ImGui::SameLine();
-    if (ImGui::SmallButton(Tr("Copy"))) {
+    if (ImGui::Button(Tr("Copy"), ImVec2(-FLT_MIN, 0))) {
         ImGui::SetClipboardText(state.friend_code.c_str());
         ui.SetStatus("Friend code copied.");
     }
 }
 
 bool OnlinePage::DrawRequiredTestRow(trg::Ui& ui, const ConnectionTestLook& look, const char* button, bool focus) {
-    ui.Row("Connection test", kTestHelp);
-    const bool in_table = ImGui::GetCurrentTable() != nullptr;
-    if (in_table) {
-        const float below_help = ImGui::GetItemRectMax().y + ImGui::GetStyle().ItemSpacing.y;
-        ImGui::TableSetColumnIndex(0);
-        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, below_help));
-    }
+    ui.RowLeft("Connection test", kTestHelp);
     ImGui::PushFont(ui.fonts().semibold, 0.0f);
     ImGui::TextColored(ui.theme().accent, "%s", Tr(look.required_text));
     ImGui::PopFont();
-    if (in_table) {
-        ImGui::TableSetColumnIndex(1);
-        ImGui::SetNextItemWidth(-FLT_MIN);
-    }
+    ui.RowControl();
     ImGui::PushID("Connection test");
     if (focus) ImGui::SetKeyboardFocusHere();
     const bool clicked = look.primary_button ? ui.AccentButton(button) : ImGui::Button(button, ImVec2(-FLT_MIN, 0));
@@ -317,23 +301,25 @@ void OnlinePage::DrawFriends(trg::Ui& ui) {
         ui.Help(TrValue(state.notice).c_str());
     }
     ui.Row("Add a friend", "Their friend code, for example ABCD-EFGH.");
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
+    const char* send = Tr("Send request");
+    const float send_width = ImGui::CalcTextSize(send).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - send_width - ImGui::GetStyle().ItemSpacing.x);
     ImGui::InputTextWithHint("##add_code", "XXXX-XXXX", add_code_, sizeof(add_code_), ImGuiInputTextFlags_CharsUppercase);
     ImGui::SameLine();
-    if (ImGui::Button(Tr("Send request")) && add_code_[0]) {
+    if (ImGui::Button(send) && add_code_[0]) {
         client_.AddFriend(add_code_);
         add_code_[0] = 0;
     }
     for (const OnlinePlayer& r : state.outgoing) {
         ui.Row(r.name.c_str(), "Your request is waiting for an answer.");
         ImGui::PushID(("out" + r.account).c_str());
-        if (ImGui::Button(Tr("Cancel request"))) client_.Decline(r.account);
+        if (ImGui::Button(Tr("Cancel request"), ImVec2(-FLT_MIN, 0))) client_.Decline(r.account);
         ImGui::PopID();
     }
     for (const OnlinePlayer& f : state.friends) {
         FriendRow(ui, f);
         ImGui::PushID(("f" + f.account).c_str());
-        if (ImGui::Button(Tr("Remove"))) client_.Remove(f.account);
+        if (ImGui::Button(Tr("Remove"), ImVec2(-FLT_MIN, 0))) client_.Remove(f.account);
         ImGui::PopID();
     }
     if (state.fetched && state.friends.empty() && state.incoming.empty() && state.outgoing.empty()) {

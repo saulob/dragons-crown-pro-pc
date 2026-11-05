@@ -1,0 +1,102 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index b13a13e..6734d7a 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -289,6 +289,9 @@ class Ui {
+   void BeginPage();
+   void EndPage();
+   void BeginRow();
++  void BeginRowLines();
++  void AddRowLine();
++  void DrawRowLines();
+   void RowLabel(const char* label, const char* help, float label_size = layout::kTextLabel,
+                 const ImVec4* label_color = nullptr);
+   void LeaveRows() {
+@@ -300,6 +303,8 @@ class Ui {
+   bool in_rows_ = false;
+   int rows_id_ = 0;
+   float row_top_ = 0.0f;
++  float row_left_ = 0.0f, row_right_ = 0.0f;
++  std::vector<float> row_lines_;
+   std::string capturing_;  // id of the key binding waiting for a key
+   int capture_frame_ = 0;
+ };
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 03c1d12..0ba0d85 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -323,7 +323,8 @@ void Ui::BeginRow() {
+     char id[32];
+     std::snprintf(id, sizeof id, "##rows%d", rows_id_++);
+     const float control_w = layout::ControlColumnWidth(ImGui::GetContentRegionAvail().x, scale_);
+-    in_rows_ = ImGui::BeginTable(id, 2, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp);
++    BeginRowLines();
++    in_rows_ = ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp);
+     if (in_rows_) {
+       // Without an explicit weight this column collapses on the table's first frame.
+       ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+@@ -333,6 +334,7 @@ void Ui::BeginRow() {
+   if (in_rows_) {
+     ImGui::TableNextRow();
+     ImGui::TableSetColumnIndex(0);
++    if (ImGui::TableGetRowIndex() > 0) AddRowLine();
+   }
+   row_top_ = ImGui::GetCursorPosY();
+ }
+@@ -392,6 +394,26 @@ void Ui::EndRows() {
+   if (!in_rows_) return;
+   ImGui::EndTable();
+   in_rows_ = false;
++  DrawRowLines();
++}
++
++void Ui::BeginRowLines() {
++  row_lines_.clear();
++  row_left_ = ImGui::GetCursorScreenPos().x;
++  row_right_ = row_left_ + ImGui::GetContentRegionAvail().x;
++}
++
++void Ui::AddRowLine() { row_lines_.push_back(ImGui::GetCursorScreenPos().y - ImGui::GetStyle().CellPadding.y); }
++
++// Filled after the table: SDL's software renderer breaks long thin strokes, and a cell would clip the line to its column.
++void Ui::DrawRowLines() {
++  row_lines_.push_back(ImGui::GetItemRectMax().y);
++  ImDrawList* dl = ImGui::GetWindowDrawList();
++  const ImU32 color = Col(theme().border_row);
++  for (const float y : row_lines_) {
++    const float top = std::floor(y);
++    dl->AddRectFilled(ImVec2(row_left_, top), ImVec2(row_right_, top + 1.0f), color);
++  }
+ }
+ 
+ int Ui::Segmented(const char* id, const std::vector<std::string>& labels, int selected) {
+@@ -541,7 +563,8 @@ void Ui::InfoGrid(const std::vector<std::pair<std::string, std::string>>& items)
+   LeaveRows();
+   char id[32];
+   std::snprintf(id, sizeof id, "##rows%d", rows_id_++);
+-  if (!ImGui::BeginTable(id, 4, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) return;
++  BeginRowLines();
++  if (!ImGui::BeginTable(id, 4, ImGuiTableFlags_SizingStretchProp)) return;
+   // Weighted by text so the columns are right on the first frame; automatic weights need a frame of content.
+   float text_w[4] = {};
+   for (size_t i = 0; i < items.size(); ++i) {
+@@ -553,8 +576,10 @@ void Ui::InfoGrid(const std::vector<std::pair<std::string, std::string>>& items)
+   }
+   for (const float width : text_w)
+     ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, std::max(width, 1.0f));
+-  for (const auto& [label, value] : items) {
++  for (size_t i = 0; i < items.size(); ++i) {
++    const auto& [label, value] = items[i];
+     ImGui::TableNextColumn();
++    if (i >= 2 && i % 2 == 0) AddRowLine();
+     ImGui::PushFont(fonts().semibold, layout::kTextLabel);
+     ImGui::TextUnformatted(T(label.c_str()));
+     ImGui::PopFont();
+@@ -566,6 +591,7 @@ void Ui::InfoGrid(const std::vector<std::pair<std::string, std::string>>& items)
+     ImGui::PopStyleColor();
+   }
+   ImGui::EndTable();
++  DrawRowLines();
+ }
+ 
+ bool Ui::ButtonRow(const char* label, const char* help, const char* button, bool accent) {

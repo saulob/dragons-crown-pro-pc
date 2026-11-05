@@ -54,6 +54,7 @@ public:
 
     // A picture for ImGui to draw (RGBA8, width * height * 4 bytes). The host owns it until Close; 0 when it could not be made.
     ImTextureID CreateTexture(const uint8_t* rgba, int width, int height);
+    void DestroyTexture(ImTextureID texture);
 
     // The saved placement the window was opened with, when it lay on a display.
     const std::optional<WindowPlacement>& Restored() const { return restored_; }

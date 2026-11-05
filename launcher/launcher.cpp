@@ -9,12 +9,15 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <imgui.h>
@@ -34,11 +37,13 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
+#include "header_art.h"
 #include "host.h"
 #include "launcher_quit.h"
 #include "localization/ui_text.h"
 #include "options.h"
 #include "package_browser.h"
+#include "page_icons.h"
 #include "placement.h"
 #include "play_gate.h"
 #include "online_page.h"
@@ -176,19 +181,34 @@ trg::Theme LauncherTheme() {
     return theme;
 }
 
-constexpr float kHeaderArtAspect = 1600.0f / 180.0f;
-
-trg::HeaderPainter LauncherHeader(ImTextureID art, float art_aspect) {
+trg::HeaderPainter LauncherHeader(std::function<ImTextureID(int, int)> art, float art_aspect) {
     const trg::HeaderPainter gradient = trg::headers::Gradient(
         IM_COL32(12, 18, 26, 255), IM_COL32(62, 42, 12, 255), IM_COL32(8, 34, 44, 255), IM_COL32(8, 10, 16, 255));
-    return [gradient, art, art_aspect](const trg::HeaderContext& c) {
+    return [gradient, art = std::move(art), art_aspect](const trg::HeaderContext& c) {
         gradient(c);
-        if (art == ImTextureID{}) {
+        const auto fade = [&c](float share) {
+            const ImU32 clear = trg::Col(c.theme.bg, 0.0f), solid = trg::Col(c.theme.bg);
+            c.draw->AddRectFilledMultiColor(ImVec2(c.min.x, c.max.y - (c.max.y - c.min.y) * share), c.max, clear, clear, solid, solid);
+        };
+        fade(kHeaderFade);
+        const float height = ImGui::GetMainViewport()->Size.y;
+        // Down to the panels, which are drawn later and cover the rest.
+        const float bottom = c.max.y + trg::layout::kBodyGap * c.scale;
+        const HeaderArtRect rect = PlaceHeaderArt(c.min.y, c.max.x, bottom, height, c.scale, art_aspect);
+        const float framebuffer = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
+        const ImTextureID texture = art(static_cast<int>((rect.max_x - rect.min_x) * framebuffer + 0.5f),
+                                        static_cast<int>((rect.max_y - rect.min_y) * framebuffer + 0.5f));
+        if (texture == ImTextureID{}) {
             return;
         }
-        const float height = c.max.y - c.min.y;
-        const float width = height * art_aspect;
-        c.draw->AddImage(ImTextureRef(art), ImVec2(c.max.x - width, c.min.y), c.max);
+        const float art_height = rect.max_y - rect.min_y;
+        const float top_v = (c.min.y - rect.min_y) / art_height, bottom_v = (bottom - rect.min_y) / art_height;
+        c.draw->PushClipRect(c.min, ImVec2(c.max.x, bottom), false);
+        for (const HeaderArtStrip& strip : SplitHeaderArt(rect)) {
+            c.draw->AddImage(ImTextureRef(texture), ImVec2(strip.min_x, c.min.y), ImVec2(strip.max_x, bottom),
+                             ImVec2(strip.min_u, top_v), ImVec2(strip.max_u, bottom_v));
+        }
+        c.draw->PopClipRect();
     };
 }
 
@@ -231,18 +251,6 @@ ImTextureID LoadSponsorIcon(LauncherHost& host) {
         }
     }
     return host.CreateTexture(image.rgba.data(), image.width, image.height);
-}
-
-ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
-    DcpPng::Image image;
-    if (!LoadLauncherImage("header-art.png", image)) {
-        return ImTextureID{};
-    }
-    const ImTextureID texture = host.CreateTexture(image.rgba.data(), image.width, image.height);
-    if (texture != ImTextureID{}) {
-        aspect = float(image.width) / float(image.height);
-    }
-    return texture;
 }
 
 const char* StatusTitle(GameFileState state) {
@@ -336,8 +344,10 @@ public:
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
         placement_ = PlacementTracker(host_.Restored());
-        fonts_ = trg::LoadSystemFonts(18.0f);
-        header_art_ = LoadHeaderArt(host_, header_art_aspect_);
+        fonts_ = trg::LoadSystemFonts(trg::layout::kTextBody);
+        if (LoadLauncherImage("header-art.png", header_art_image_)) {
+            header_art_aspect_ = float(header_art_image_.width) / float(header_art_image_.height);
+        }
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         online_page_ = std::make_unique<OnlinePage>(UserDir());
@@ -628,7 +638,7 @@ private:
 
     void DrawStartingMessage() {
         const char* text = Tr("Settings saved. Starting game...");
-        ImGui::PushFont(fonts_.semibold, fonts_.size * 1.25f);
+        ImGui::PushFont(fonts_.semibold, fonts_.size * 1.5f);
         const float size = ImGui::GetFontSize();
         const ImVec2 text_size = ImGui::CalcTextSize(text);
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -646,17 +656,20 @@ private:
         c.hints = "Enter  Play     Alt+F4  Quit     Ctrl+S  Save";
         c.fonts = fonts_;
         c.branding.title = "DRAGON'S CROWN PRO";
+        c.branding.fade_into_page = false;
         c.branding.subtitle_color = kAccent;
         c.branding.subtitle_segments = {
             {"PC PORT   \xC2\xB7   ", ""},
             {"v" DCP_PORT_VERSION "   \xC2\xB7   ", ""},
             {"BY SAULOB", kAuthorUrl},
         };
-        c.branding.background = LauncherHeader(header_art_, header_art_aspect_);
+        c.branding.background = LauncherHeader([this](int width, int height) { return HeaderArtTexture(width, height); },
+                                               header_art_aspect_);
         c.sponsor = {"Sponsor on GitHub", kSponsorUrl, sponsor_icon_};
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
+            c.pages.back().icon = [this, page](int pixels) { return PageIconTexture(page, pixels); };
         }
         c.can_play = [this] {
             if (install_.running()) {
@@ -676,6 +689,32 @@ private:
             return trg::PlayCheck{};
         };
         return c;
+    }
+
+    ImTextureID HeaderArtTexture(int width, int height) {
+        if (width != header_art_width_ || height != header_art_height_) {
+            header_art_width_ = width;
+            header_art_height_ = height;
+            host_.DestroyTexture(header_art_);
+            const std::vector<uint8_t> rgba = ScaleArtRgba(header_art_image_.rgba.data(), header_art_image_.width,
+                                                           header_art_image_.height, width, height, kHeaderArtAlphaGain);
+            header_art_ = rgba.empty() ? ImTextureID{} : host_.CreateTexture(rgba.data(), width, height);
+        }
+        return header_art_;
+    }
+
+    ImTextureID PageIconTexture(PageId page, int pixels) {
+        const auto [icon, is_new] = page_icons_.try_emplace({page, pixels});
+        if (is_new) {
+            const std::vector<uint8_t> rgba = RenderPageIcon(page, pixels);
+            if (!rgba.empty()) {
+                icon->second = host_.CreateTexture(rgba.data(), pixels, pixels);
+            }
+            if (icon->second == ImTextureID{}) {
+                Log("sidebar icon unavailable: page %d at %d px", static_cast<int>(page), pixels);
+            }
+        }
+        return icon->second;
     }
 
     trg::Page MakePage(PageId page) {
@@ -730,8 +769,7 @@ private:
             ImGui::PopStyleColor();
             ui.Spacer(4);
         }
-        const std::string files_help = GameFilesHelp();
-        ui.Row("Game files", files_help.c_str());
+        ui.Row("Game files");
         if (!ui.TaskProgress(install_)) {
             const bool clicked = ready ? ImGui::Button(Tr("Reinstall game..."), ImVec2(-FLT_MIN, 0))
                                        : ui.AccentButton("Install game...");
@@ -739,6 +777,8 @@ private:
                 BrowseAndInstall();
             }
         }
+        ui.EndRows();
+        ui.Help(GameFilesHelp().c_str());
         ui.Toggle("Show this launcher", kShowLauncherHelp, kShowLauncherKey, true, "Off", "On");
         ui.EndRows();
     }
@@ -1016,11 +1056,11 @@ private:
             help.replace(at, 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
         }
         ui.Help(help.c_str());
-        ui.Spacer(12);
+        ui.Spacer(6);
         const bool blocked = !CheatsAvailable(build_);
         if (blocked) {
             ui.Help((std::string(Tr("Cheats are not available for ")) + build_->label + ".").c_str());
-            ui.Spacer(8);
+            ui.Spacer(4);
         }
         ImGui::BeginDisabled(blocked);
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
@@ -1275,15 +1315,15 @@ private:
         if (ui.ButtonRow("Logs folder", "Open the folder containing session and crash logs", "Open logs folder")) {
             OpenLogsFolder();
         }
-        ui.Info("Port version", DCP_PORT_VERSION);
-        const std::string game = InstalledGameName(files_, build_);
-        ui.Info("Game", Tr(game.c_str()));
-        ui.Info("Renderer", "Vulkan");
 #ifdef _WIN32
-        ui.Info("Platform", "Windows x64");
+        const char* platform = "Windows x64";
 #else
-        ui.Info("Platform", "Linux x86-64 (experimental)");
+        const char* platform = "Linux x86-64 (experimental)";
 #endif
+        ui.InfoGrid({{"Port version", DCP_PORT_VERSION},
+                     {"Game", InstalledGameName(files_, build_)},
+                     {"Renderer", "Vulkan"},
+                     {"Platform", platform}});
         char libraries[96];
         std::snprintf(libraries, sizeof(libraries), "SDL %d.%d.%d  \xC2\xB7  Dear ImGui %s  \xC2\xB7  TRG Launcher %s",
                       SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
@@ -1321,8 +1361,12 @@ private:
     const GameBuild* build_ = nullptr;
     std::vector<TextLanguage> text_languages_;
     LauncherHost host_;
+    DcpPng::Image header_art_image_;
     ImTextureID header_art_{};
+    int header_art_width_ = 0;
+    int header_art_height_ = 0;
     ImTextureID sponsor_icon_{};
+    std::map<std::pair<PageId, int>, ImTextureID> page_icons_;
     float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;

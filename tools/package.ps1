@@ -53,6 +53,7 @@ $BuiltInLicenses = [ordered]@{
     'imgui'         = 'gpu\third_party\imgui\LICENSE.txt'
     'magic_enum'    = 'gpu\third_party\magic_enum\LICENSE'
     'miniz'         = 'gpu\third_party\miniz\LICENSE'
+    'nanosvg'       = 'launcher\third_party\nanosvg\LICENSE.txt'
     'xbyak'         = 'gpu\third_party\xbyak\COPYRIGHT'
 }
 # MSYS2 packages compiled in as headers or static libraries.

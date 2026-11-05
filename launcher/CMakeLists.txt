@@ -33,7 +33,7 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp
-    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
@@ -79,6 +79,19 @@ add_custom_command(OUTPUT ${DCP_PTBR_VISUAL_SOURCE}
     DEPENDS ${DCP_PTBR_VISUAL_LIST} ${DCP_PTBR_VISUAL_PATCHES} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
     COMMENT "Embedding the pt-BR visual patches")
 target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_VISUAL_SOURCE})
+
+# The sidebar's page icons (assets/launcher/icons/*.svg) as a table of byte arrays, page_icons.cpp.
+file(GLOB DCP_PAGE_ICONS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/assets/launcher/icons/*.svg)
+list(SORT DCP_PAGE_ICONS)
+set(DCP_PAGE_ICON_LIST ${CMAKE_BINARY_DIR}/generated/page_icons.txt)
+file(CONFIGURE OUTPUT ${DCP_PAGE_ICON_LIST} CONTENT "${DCP_PAGE_ICONS}")
+set(DCP_PAGE_ICON_SOURCE ${CMAKE_BINARY_DIR}/generated/page_icon_data.cpp)
+add_custom_command(OUTPUT ${DCP_PAGE_ICON_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_PAGE_ICON_LIST} -DOUTPUT=${DCP_PAGE_ICON_SOURCE} -DSYMBOL=kPageIconFiles
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_PAGE_ICON_LIST} ${DCP_PAGE_ICONS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the page icons")
+target_sources(dcp_launcher_core PRIVATE ${DCP_PAGE_ICON_SOURCE})
 
 # The Controller prompts patch (prompts/xbox-prompts.dcpx) as a byte array, prompts_patch.h.
 set(DCP_PROMPTS_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/prompts/xbox-prompts.dcpx)

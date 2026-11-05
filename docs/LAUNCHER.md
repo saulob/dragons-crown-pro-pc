@@ -573,6 +573,26 @@ scaled by the display's content scale and capped to 90% of the usable area, so a
 4K display. Window sizes are real pixels. A saved launcher position that no display shows any more is ignored and the
 window is centred on the primary display.
 
+Sizes are logical pixels, kept together in `trg::layout` (`gpu/patches/trg-launcher/0006-compact-layout.patch`): text sizes,
+the 34 control height, row spacing, and the header, sidebar and footer. Geometry is multiplied by `Ui::scale()` and text
+is scaled by `PushFont`, so there is no second scaling path. A row's control sits in a fixed right-hand column
+(`ControlColumnWidth`), and `Ui::RowLeft` and `Ui::RowControl` split a row that needs extra lines under its help text.
+The update banner takes its place from the same header height.
+
+Sidebar icons are the SVGs of `assets/launcher/icons`, compiled in by `launcher/embed_files.cmake`. `launcher/page_icons.cpp`
+maps each `PageId` to its file and optical scale and rasterizes with nanosvg at the exact pixel size; the launcher caches one
+texture per page and size, and the sidebar tints it. A page whose icon fails keeps its row, with one line in the log.
+
+Sidebar labels and footer text are centred on their capitals, measured from the active font, so Segoe UI and DejaVu sit
+the same way. The footer's shortcuts come from `LauncherConfig::hints`, two spaces inside a shortcut and more between
+shortcuts, and its helper text from `note`, one sentence per line. The metrics are in `trg/layout.h`
+(`gpu/patches/trg-launcher/0008-sidebar-footer-alignment.patch`), with `Theme::border_row` and `Theme::border_panel` for
+passive lines (`0009-visual-polish.patch`); interactive controls keep their stronger colours.
+
+A frame draws one page: `GoToPage` only records the request and `Launcher::Frame` applies it before anything is drawn
+(`gpu/patches/trg-launcher/0007-coherent-page-frames.patch`). Each page has its own scroll window, so it keeps its scroll
+position.
+
 ## Logging
 
 The launcher prints `Launcher: ...` lines (shown or skipped and why, game file state and hashes, settings path, settings
@@ -602,6 +622,32 @@ these logs, creating it first when it does not exist yet.
 `ninja dcp-launcher-shots` builds a harness that renders every page into PNGs with a hidden window and quits: `dcp-launcher-shots.exe <app0> <image dir> <out dir>`. It never shows a window, starts the game or
 touches `user\` (settings go to a temporary folder). `dcp-launcher-tests.exe --check-game <app0> <image dir>` prints the
 game file state of real folders without writing anything.
+
+## Launcher UI gate
+
+`tools\test.ps1` protects the launcher's structure and geometry, not its look. No window opens and nothing is compared
+pixel by pixel. Its "Launcher UI" summary has one row per group:
+
+| Row | Where | Checks |
+|---|---|---|
+| Core tests | `dcp-launcher-tests`, relinked on every run | every launcher test; the exit code and the check count |
+| SVG icons | `TestPageIcons` | the nine expected icons, one `PageId` each, the embedded copy equal to the file, nothing read from the source tree at run time |
+| Icon and NanoSVG licenses | `TestIconLicenses` | `SOURCES.md` and `THIRD-PARTY-LICENSES.txt`: the Display attribution, eight CC0 rows, vendored NanoSVG with its license in both packages |
+| Header art | `TestHeaderArt` | assets and package inclusion; one size-matched texture rebuilt only on a size change; strips, never one quad, at the supported scales; right anchoring and no overlap with the branding |
+| DPI/layout | `TestChromeLayout`, `TestLauncherDpiLayout`, `TestFooterAndCards` | sidebar fit, control column, scrollbar gutter, separator endpoint, footer, About card and friend code at 100, 150 and 225 percent |
+| Scrollbar stability | `TestStablePageWidth`, `TestScrollbarSettling` | width, control column, wrap width and separator end identical before and after the scrollbar shows, and after a resize |
+| Separators/row spacing | `TestRowSeparators`, `TestSeparatorPages`, `TestRowRhythm`, `TestRowKinds` | full-width lines independent of the column clip, theme-only border colours, short, wrapped and control rows |
+| Sidebar EN/PT-BR | `TestSidebarProportions`, `TestSidebarLabels` | labels (longest: Jogabilidade), clamp, nine rows without a scrollbar, width handed to the page |
+| Navigation coherence | `TestPageNavigation` | one commit per frame, no mixed frames under rapid requests, one scroll window per page |
+| TRG patch chain | `tests\launcher_gate_tests.ps1` | the series applies to the pinned revision in a scratch clone, and equals the checkout the tests read |
+| Compiler warnings | `tests\launcher_gate_tests.ps1` | the launcher sources and `launcher_tests.cpp`, syntax-only with the build's own `-Wall -Wextra`: zero warnings |
+| Windows/Linux parity | `TestSharedLauncherSource`, the same script, `tools/test-linux-launcher.sh` | shared sources free of Windows-only code; the portable ones compile with g++ in WSL (skipped only without WSL) |
+| Source hygiene | `tests\launcher_gate_tests.ps1` | no temporary debug markers, local paths, CR line endings, scratch files, stray assets, test images, removed icon code or UI diagnostics; `git diff --check` |
+
+A group that prints nothing, or an executable that exits early, is a FAIL with its exit code.
+
+Saulo checks by eye what the gate cannot: the header artwork, sidebar proportions, fonts, row spacing, separator
+appearance, the About heart, the footer and the overall balance. The gate complements that check and does not replace it.
 
 ## Manual test
 
