@@ -129,7 +129,7 @@ else()
     add_executable(dragons_crown_pro ${DCP_MAIN_SOURCES})
 endif()
 # Discord Rich Presence (docs/DISCORD.md): the Discord application id builds may carry; dcp.ini can override it.
-set(DCP_DISCORD_CLIENT_ID "" CACHE STRING "Discord application id for Rich Presence (empty: off unless dcp.ini sets one)")
+set(DCP_DISCORD_CLIENT_ID "1567781103111245874" CACHE STRING "Discord application id for Rich Presence (empty: off unless dcp.ini sets one)")
 set_source_files_properties(src/discord_presence.cpp PROPERTIES COMPILE_DEFINITIONS "DCP_DISCORD_CLIENT_ID=\"${DCP_DISCORD_CLIENT_ID}\"")
 set_target_properties(dragons_crown_pro PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dragons_crown_pro PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)

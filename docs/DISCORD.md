@@ -17,17 +17,13 @@ nothing happens; starting Discord later picks the presence up within a few secon
 
 ## Setup
 
-Discord needs an application id, which names the game in your profile.
-
-1. Create an application named `Dragon's Crown Pro` at <https://discord.com/developers/applications>.
-2. Optional: under **Rich Presence → Art Assets**, upload a 512×512 image with the key `icon`, and one per class with
-   the keys `fighter`, `amazon`, `elf`, `dwarf`, `sorceress` and `wizard`.
-3. Copy the **Application ID** into `user\dcp.ini`:
+Nothing to do: builds carry the port's Discord application id (`DCP_DISCORD_CLIENT_ID` in `CMakeLists.txt`), so the
+presence works as soon as Discord is running. To turn it off, add to `user\dcp.ini`:
 
 ```ini
-discord_client_id = 123456789012345678
+discord_presence = off
 ```
 
-A release can carry an id instead: configure with `-DDCP_DISCORD_CLIENT_ID=<id>`. `dcp.ini` still overrides it.
-
-To turn it off: `discord_presence = off`.
+To show it under your own Discord application instead, create one at <https://discord.com/developers/applications>,
+upload art assets with the keys `icon`, `fighter`, `amazon`, `elf`, `dwarf`, `sorceress` and `wizard` (512×512), and set
+`discord_client_id = <Application ID>` in `user\dcp.ini`.
