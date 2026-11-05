@@ -130,19 +130,24 @@ struct Place {
     const char* key;
     const char* name;
 };
-// Names are the game's own English text (msgsheet/*_US.fms). ponytail: the four marked * are not matched to their
-// in-game building or area yet; confirm in play (the log prints every place) and rename.
+// Names are the game's own English text (msgsheet/*_US.fms). Checked in play, except the two marked *.
+// ponytail: Prison and Lost Zone are not matched to their in-game area yet. DCP_DISCORD_TRACE=1 logs every archive read,
+// to find what loads where.
 const Place kPlaces[] = {
     {"stage/title", "menu", "Title screen"},
     {"stage/T_ChrSelect", "inn", "Dragon's Haven Inn"},
     {"stage/T_FightersGuild", "guild", "Adventurers Guild"},
-    {"stage/T_Shop", "magicshop", "Morgan's Magic Item Shop"}, // *
-    {"stage/T_MagesGuild", "magesguild", "Mages Guild"},        // *
+    {"stage/T_Shop", "magicshop", "Morgan's Magic Item Shop"},      // both load on one visit to Morgan's
+    {"stage/T_MagesGuild", "magicshop", "Morgan's Magic Item Shop"},
     {"stage/T_MagesTower", "lucain", "Lucain's Tower"},
     {"stage/T_Temple", "temple", "Canaan Temple"},
     {"stage/T_Castle", "castle", "Castle"},
     {"stage/T_Prison", "prison", "Prison"}, // *
     {"round/Town00", "town", "Town"},
+    // The town's street scenes, loaded again on every walk between them; the street one also on leaving a building.
+    {"stage/bg25a", "town", "Town"},
+    {"stage/bg01a", "gate", "Town Gate"},
+    {"stage/bg41a", "stables", "Stables"},
     {"round/Camp_", "camp", "Camp"},
     {"stage/camp_", "camp", "Camp"},
     {"round/Tutorial", "tutorial", "Tutorial"},
@@ -169,8 +174,14 @@ struct Area {
 std::vector<Area> g_areas; // sorted by begin; filled before the read observer is set, then read only
 std::atomic<int> g_place{-1};
 
-// A new place is logged, so the mapping can be checked against play.
+// A new place is logged, so the mapping can be checked against play. With DCP_DISCORD_TRACE=1 the other archive
+// entries are tracked too (place -1) and each one read is logged, to find what a part of the game loads.
 void Enter(const Area& a) {
+    if (a.place < 0) {
+        static std::atomic<const Area*> last{nullptr};
+        if (last.exchange(&a, std::memory_order_relaxed) != &a) std::printf("Discord: read %s\n", a.path.c_str());
+        return;
+    }
     if (g_place.exchange(a.place, std::memory_order_relaxed) != a.place)
         std::printf("Discord: place %s (%s)\n", kPlaces[a.place].name, a.path.c_str());
 }
@@ -188,6 +199,8 @@ bool SameName(const std::string& upper, const char* name) {
 }
 
 void LoadAreas(const std::filesystem::path& app0) {
+    const char* t = std::getenv("DCP_DISCORD_TRACE");
+    const bool trace = t && *t == '1';
     std::error_code ec;
     for (const auto& item : std::filesystem::directory_iterator(app0, ec)) {
         if (Upper(item.path().extension().string()) != ".CPK") continue;
@@ -195,12 +208,11 @@ void LoadAreas(const std::filesystem::path& app0) {
         if (!archive.Open(item.path())) continue;
         const std::string name = Upper(item.path().filename().string());
         for (const dcp::CpkEntry& entry : archive.entries()) {
-            for (int p = 0; p < int(std::size(kPlaces)); ++p) {
-                if (entry.path.rfind(kPlaces[p].prefix, 0) == 0) {
-                    g_areas.push_back({name, entry.offset, entry.offset + entry.size, p, entry.path});
-                    break;
-                }
-            }
+            int place = -1;
+            for (int p = 0; p < int(std::size(kPlaces)) && place < 0; ++p)
+                if (entry.path.rfind(kPlaces[p].prefix, 0) == 0) place = p;
+            if (place >= 0 || (trace && entry.path.rfind("snd/", 0) != 0)) // streamed sound would flood the trace
+                g_areas.push_back({name, entry.offset, entry.offset + entry.size, place, entry.path});
         }
     }
     std::sort(g_areas.begin(), g_areas.end(), [](const Area& a, const Area& b) { return a.begin < b.begin; });
