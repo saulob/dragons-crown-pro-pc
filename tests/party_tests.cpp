@@ -117,6 +117,11 @@ void TestObserver() {
     Observe(memory, 0x2000, 100, table);
     CHECK(table.ClassAt(0, 100) == 3 && table.ClassAt(2, 100) == 5);
     CHECK(!table.ClassAt(1, 100) && !table.ClassAt(3, 100));
+    CHECK(table.LevelAt(0, 100) == 1 && !table.LevelAt(1, 100));
+    table.Seen(1, 4, 100, 98);
+    CHECK(table.ClassAt(1, 100) == 4 && table.LevelAt(1, 100) == 99);
+    table.Seen(1, 4, 100, 255);
+    CHECK(table.LevelAt(1, 100) == 256 && !table.LevelAt(1, 101 + kFreshMs));
 
     // Not a human player, an unknown class, a slot outside the party, no owner, no unit: nothing is recorded.
     UnitTable ignored;

@@ -92,6 +92,12 @@ struct PageLink {
 // A copy of that state, taken under the port lock for the moment. Read only: the link, the requests and the lists are
 // the game's own to start, serve and refresh.
 PageLink page_link();
+// This PC's player in an online room: its party slot and how many players the room has. Outside a room: {0, 0}.
+struct RoomView {
+    int slot = 0;
+    int members = 0;
+};
+RoomView room_view();
 
 // The player card's System type for an online id: this PC's, or what the lobby reported for that player.
 std::string system_type(const std::string& online_id);
