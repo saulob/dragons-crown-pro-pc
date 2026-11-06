@@ -10,6 +10,7 @@
 #include "dcp_accent.h"
 #include "dcp_options_menu.h"
 #include "dcp_options_online.h"
+#include "localization/ui_text.h"
 #include "dcp_ping.h"
 #include "imgui.h"
 
@@ -76,18 +77,22 @@ std::string KeyName(int scancode) {
 
 std::vector<Info> Hotkeys() {
     const auto& settings = DcpSettings::Get();
-    return {{"Options menu", KeyName(DcpOptions::kKey) + "  /  L3 + R3"},
-            {"Cheats menu", KeyName(settings.menu_key)},
-            {"Display mode", KeyName(settings.window_mode_key)},
-            {"Frame counter", KeyName(DcpPing::kFpsKey)},
-            {"Ping (Online Play)", KeyName(DcpPing::kPingKey)}};
+    return {{dcp::Tr("Options menu"), KeyName(DcpOptions::kKey) + "  /  L3 + R3"},
+            {dcp::Tr("Cheats menu"), KeyName(settings.menu_key)},
+            {dcp::Tr("Display mode"), KeyName(settings.window_mode_key)},
+            {dcp::Tr("Frame counter"), KeyName(DcpPing::kFpsKey)},
+            {dcp::Tr("Ping (Online Play)"), KeyName(DcpPing::kPingKey)}};
+}
+
+bool Offered(const DcpOptions::Setting& setting) {
+    return DcpOptions::Available(setting, DcpSettings::Get());
 }
 
 std::vector<RowRef> RowsOf(Page page, const CheatRows& cheats) {
     std::vector<RowRef> rows;
     if (page == Page::Controls) {
         for (const DcpOptions::Setting& setting : DcpOptions::kSettings) {
-            if (setting.page == page) {
+            if (setting.page == page && Offered(setting)) {
                 rows.push_back({Kind::Setting, size_t(setting.id)});
             }
         }
@@ -105,7 +110,7 @@ std::vector<RowRef> RowsOf(Page page, const CheatRows& cheats) {
         }
     } else {
         for (const DcpOptions::Setting& setting : DcpOptions::kSettings) {
-            if (setting.page == page) {
+            if (setting.page == page && Offered(setting)) {
                 rows.push_back({Kind::Setting, size_t(setting.id)});
             }
         }
@@ -113,12 +118,53 @@ std::vector<RowRef> RowsOf(Page page, const CheatRows& cheats) {
     return rows;
 }
 
+std::string TranslateOnlineValue(const std::string& value) {
+    const std::string tail = "  \xC2\xB7  Incompatible";
+    if (value.size() > tail.size() && value.compare(value.size() - tail.size(), tail.size(), tail) == 0) {
+        return dcp::Tr(value.substr(0, value.size() - tail.size())) + "  \xC2\xB7  " + dcp::Tr("Incompatible");
+    }
+    return dcp::Tr(value);
+}
+
+std::string TranslateFriendCount(const std::string& line) {
+    const std::string tail = " more friends are listed in the launcher.";
+    const size_t at = line.find(tail);
+    if (at == std::string::npos || at == 0) {
+        return dcp::Tr(line);
+    }
+    return line.substr(0, at) + " " + dcp::Tr("more friends are listed in the launcher.");
+}
+
+std::string TranslateLines(const std::string& text) {
+    std::string out;
+    size_t start = 0;
+    while (true) {
+        const size_t end = text.find('\n', start);
+        out += TranslateFriendCount(text.substr(start, end == std::string::npos ? end : end - start));
+        if (end == std::string::npos) {
+            return out;
+        }
+        out += '\n';
+        start = end + 1;
+    }
+}
+
+std::string TranslateOnlineHelp(const std::string& text) {
+    for (const std::string tail : {" Press A or Enter to run it.", " Press A or Enter to copy it."}) {
+        const size_t at = text.find(tail);
+        if (at != std::string::npos) {
+            return dcp::Tr(text.substr(0, at)) + " " + dcp::Tr(tail.substr(1)) + DcpOptions::TranslateTestLines(text.substr(at + tail.size()));
+        }
+    }
+    return dcp::Tr(text);
+}
+
 std::string Label(const RowRef& row, const CheatRows& cheats) {
     switch (row.kind) {
-    case Kind::Setting: return DcpOptions::kSettings[row.index].label;
-    case Kind::Cheat: return cheats.view(row.index).label;
+    case Kind::Setting: return dcp::Tr(DcpOptions::kSettings[row.index].label);
+    case Kind::Cheat: return dcp::Tr(cheats.view(row.index).label);
     case Kind::Info: return Hotkeys()[row.index].label;
-    case Kind::Online: return online_rows[row.index].label;
+    case Kind::Online: return dcp::Tr(online_rows[row.index].label);
     }
     return {};
 }
@@ -127,12 +173,13 @@ std::string Help(const RowRef& row, const CheatRows& cheats) {
     switch (row.kind) {
     case Kind::Setting: {
         const DcpOptions::Setting& setting = DcpOptions::kSettings[row.index];
-        return setting.apply == DcpOptions::Apply::Restart ? std::string(setting.help) + " Applies after a restart."
-                                                           : std::string(setting.help);
+        return setting.apply == DcpOptions::Apply::Restart
+                   ? std::string(dcp::Tr(setting.help)) + " " + dcp::Tr("Applies after a restart.")
+                   : std::string(dcp::Tr(setting.help));
     }
     case Kind::Cheat: return cheats.view(row.index).help;
     case Kind::Info: return {};
-    case Kind::Online: return online_rows[row.index].help;
+    case Kind::Online: return TranslateOnlineHelp(online_rows[row.index].help);
     }
     return {};
 }
@@ -143,7 +190,7 @@ std::string NoteOf(Page page, const CheatRows& cheats) {
             return unusable;
         }
     }
-    return page == Page::Online ? DcpOptions::OnlineNote(online_page) : std::string(DcpOptions::PageNote(page));
+    return TranslateLines(page == Page::Online ? DcpOptions::OnlineNote(online_page) : std::string(DcpOptions::PageNote(page)));
 }
 
 float RowHeight(float em) {
@@ -232,7 +279,7 @@ void DrawTabs(const DcpOptions::PageList& pages, int page_index, const ImVec4& a
     for (size_t i = 0; i < pages.count; ++i) {
         ImGui::SameLine(0.0f, em * 0.9f);
         const bool selected = int(i) == page_index;
-        const char* name = DcpOptions::PageName(pages.pages[i]);
+        const char* name = dcp::Tr(DcpOptions::PageName(pages.pages[i]));
         ImGui::PushStyleColor(ImGuiCol_Text, selected ? accent : kDim);
         ImGui::PushID(int(i));
         if (ImGui::Selectable(name, false, ImGuiSelectableFlags_None, ImGui::CalcTextSize(name)) && !selected) {
@@ -285,26 +332,26 @@ void DrawRows(const std::vector<RowRef>& rows, int visible, const CheatRows& che
             const DcpOptions::Setting& setting = DcpOptions::kSettings[row.index];
             const std::string shown = Model().Shown(DcpOptions::Id(row.index));
             const int index = DcpOptions::ChoiceIndex(setting, shown);
-            value = index >= 0 ? std::string(kArrowLeft) + "  " + std::string(setting.choices[size_t(index)].label) +
+            value = index >= 0 ? std::string(kArrowLeft) + "  " + std::string(dcp::Tr(std::string(setting.choices[size_t(index)].label))) +
                                      "  " + kArrowRight
                                : shown;
             steppable = true;
             if (setting.apply == DcpOptions::Apply::Restart) {
                 const float label_w = ImGui::CalcTextSize(label.c_str()).x;
-                draw->AddText(ImVec2(min.x + pad + label_w + em * 0.5f, y), ImGui::GetColorU32(kDim), "(restart)");
+                draw->AddText(ImVec2(min.x + pad + label_w + em * 0.5f, y), ImGui::GetColorU32(kDim), dcp::Tr("(restart)"));
             }
             break;
         }
         case Kind::Cheat: {
             const CheatRowView view = cheats.view(row.index);
-            value = view.state ? view.state : "";
+            value = view.state ? dcp::Tr(view.state) : "";
             lit = view.lit;
             break;
         }
         case Kind::Info: value = Hotkeys()[row.index].value; break;
         case Kind::Online: {
             const DcpOptions::OnlineRow& online = online_rows[row.index];
-            value = online.value;
+            value = TranslateOnlineValue(online.value);
             lit = online.lit;
             warn = online.warn;
             break;
@@ -357,14 +404,15 @@ void DrawWrapped(const std::string& text, float capacity) {
 void DrawFooter(const ImVec4& accent, float line) {
     const float start_y = ImGui::GetCursorPosY();
     if (Model().RestartPending()) {
-        ImGui::TextColored(accent, "%s", DcpOptions::kRestartNote);
+        ImGui::TextColored(accent, "%s", dcp::Tr(DcpOptions::kRestartNote));
     }
     if (!state.status.empty()) {
-        ImGui::TextColored(accent, "%s", state.status.c_str());
+        ImGui::TextColored(accent, "%s", dcp::Tr(state.status).c_str());
     }
     ReserveSpace(line * kFooterOptionalLines, ImGui::GetCursorPosY() - start_y);
-    const std::string hints = std::string("D-pad / Arrows  Select     ") + kArrowLeft + " " + kArrowRight +
-                              " / A  Change     [LB] [RB] / Q E  Page     B / Esc  Back";
+    const std::string hints = std::string(dcp::Tr("D-pad / Arrows  Select")) + "     " + kArrowLeft + " " +
+                              kArrowRight + " / A  " + dcp::Tr("Change") + "     [LB] [RB] / Q E  " +
+                              dcp::Tr("Page") + "     B / Esc  " + dcp::Tr("Back");
     ImGui::TextColored(kDim, "%s", hints.c_str());
 }
 
@@ -428,7 +476,7 @@ void Draw(const CheatRows& cheats, const DcpOptions::PageList& pages, int page_i
                                        ImGuiWindowFlags_NoNav;
     if (ImGui::Begin("##dcp_options_menu", nullptr, flags)) {
         ImGui::PushFont(nullptr, em * 1.2f / scales);
-        ImGui::TextColored(accent, "%s", DcpOptions::kTitle);
+        ImGui::TextColored(accent, "%s", dcp::Tr(DcpOptions::kTitle));
         ImGui::PopFont();
         DrawTabs(pages, page_index, accent, em);
         ImGui::Separator();

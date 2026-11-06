@@ -89,6 +89,22 @@ PROFILES = {
         'modules': ('libc.prx', 'libSceFios2.prx', 'libSceNpToolkit2.prx'),
         'core_patterns': ('eboot.bin', 'sce_module/*', 'sce_sys/*', '*.plt'),
     },
+    'CUSA10487': {
+        'name': "Dragon's Crown Pro",
+        'region': 'Europe',
+        'content_id': 'EP2475-CUSA10487_00-DRAGONSCROWNPRO1',
+        'versions': {
+            '1.03': {
+                'layers': ({'app_ver': '01.00', 'sfo_version': '01.03', 'update': False},),
+                'eboot_sha256': '25c58f473337bc1da768d86e4cd12fe8a15e4af48e0826ac9a857fd9e3c09845',
+                'folder': 'CUSA10487-1.03', 'regional_archive': 'DRACRO_EU.CPK', 'extra_files': (),
+            },
+        },
+        'entry': 'eboot.bin',
+        'extra_executables': (),
+        'modules': ('libc.prx', 'libSceFios2.prx', 'libSceNpToolkit2.prx'),
+        'core_patterns': ('eboot.bin', 'sce_module/*', 'sce_sys/*', '*.plt'),
+    },
 }
 
 

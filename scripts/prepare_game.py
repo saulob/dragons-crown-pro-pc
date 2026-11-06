@@ -5,7 +5,7 @@
   game/prepared/<folder>           the /app0 tree the loader uses: the build's layers laid over each other (hard links)
 
 A build is its base package and then its updates (scripts/game_profiles.py). <folder> is the build's folder: v1.03 or
-CUSA10454-1.01 for CUSA10454, CUSA07001-1.00, CUSA07001-1.02 or CUSA07001-1.03 for CUSA07001, CUSA10209-1.00 or CUSA10209-1.02 for CUSA10209. A package that
+CUSA10454-1.01 for CUSA10454, CUSA07001-1.00, CUSA07001-1.02 or CUSA07001-1.03 for CUSA07001, CUSA10209-1.00 or CUSA10209-1.02 for CUSA10209, CUSA10487-1.03 for CUSA10487. A package that
 several builds share (the base) is extracted once.
 
 Usage: python scripts/prepare_game.py [--title CUSA07001] [--version 1.02] [--scope core|full] [--game-root DIR]
@@ -104,8 +104,8 @@ def extract(pkg_path, target, only, label):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--game-root', type=Path, default=ROOT / 'game')
-    parser.add_argument('--title', help='title to prepare: CUSA10454, CUSA07001 or CUSA10209')
-    parser.add_argument('--version', help='profile version to prepare (CUSA10454: 1.00 or 1.01; CUSA07001: 1.00, 1.02 or 1.03; CUSA10209: 1.00 or 1.02)')
+    parser.add_argument('--title', help='title to prepare: CUSA10454, CUSA07001, CUSA10209 or CUSA10487')
+    parser.add_argument('--version', help='profile version to prepare (CUSA10454: 1.00 or 1.01; CUSA07001: 1.00, 1.02 or 1.03; CUSA10209: 1.00 or 1.02; CUSA10487: 1.03)')
     parser.add_argument('--scope', choices=('core', 'full'), default='core',
                         help='core: executables, modules and metadata only; full: all game data')
     args = parser.parse_args()

@@ -241,8 +241,9 @@ test('no per-session or per-player analytics table exists', () => {
   online(env);
   const tables = env.host.sql.all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
     .map((r) => r.name).sort();
-  assert.deepEqual(tables, ['accounts', 'friend_requests', 'friends', 'members', 'meta', 'metrics_daily',
-    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'reports', 'rooms']);
+  assert.deepEqual(tables, ['accounts', 'friend_requests', 'friends', 'incident_quota', 'incident_tracking', 'incidents', 'members', 'meta',
+    'metrics_daily',
+    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'rooms']);
   const forbidden = /account|name|ip|port|code|friend|room_id|session_id|user|device|machine|hash|city|lat|lon|postal/;
   for (const table of tables.filter((t) => t.startsWith('metrics_'))) {
     for (const { name } of env.host.sql.all(`PRAGMA table_info(${table})`)) {
@@ -495,8 +496,8 @@ test('a metrics database from before the lifecycle columns keeps its rows and ga
   assert.equal(sql.get(`SELECT count FROM metrics_daily_dimensions WHERE dimension = 'platform'`).count, 7);
 });
 
-test('the dashboard page reads only the two existing endpoints and shows the new sections', () => {
-  assert.deepEqual([...ADMIN_JS.matchAll(/api\('([^']+)/g)].map((m) => m[1]).sort(), ['/admin/api/history?days=', '/admin/api/summary']);
+test('the dashboard page reads only its metrics and report endpoints and shows the new sections', () => {
+  assert.deepEqual([...ADMIN_JS.matchAll(/api\('([^']+)/g)].map((m) => m[1]).sort(), ['/admin/api/history?days=', '/admin/api/incidents', '/admin/api/incidents/', '/admin/api/summary']);
   assert.equal([...ADMIN_JS.matchAll(/fetch\(/g)].length, 1);
   for (const heading of ['Period comparison', 'Multiplayer activity', 'Historical activity', 'Connection health',
     'Abuse protection', 'Platforms and countries']) assert.ok(ADMIN_HTML.includes(heading), heading);
@@ -595,9 +596,12 @@ test('the dashboard and API are no-store, same-origin and script-free beyond the
     assert.ok(!(await response.text()).includes(TOKEN));
   }
   assert.ok(!/<script>|<style>| style=| on[a-z]+=/i.test(ADMIN_HTML));
-  for (const text of [ADMIN_HTML, ADMIN_CSS, ADMIN_JS]) {
+  // The log download is a blob made in the page from an authenticated response: the only use of a URL there is allowed.
+  const withoutBlobUrls = ADMIN_JS.replace(/\b(create|revoke)ObjectURL\(/g, '');
+  for (const text of [ADMIN_HTML, ADMIN_CSS, withoutBlobUrls]) {
     assert.ok(!/(src|href)=["']?https?:|@import|url\(|googleapis|gtag|analytics/i.test(text));
   }
+  assert.ok(!/ObjectURL\([^)]*https?:/.test(ADMIN_JS));
   assert.ok(!/\beval\(|new Function|localStorage|document\.cookie|innerHTML|[?&]token=/.test(ADMIN_JS));
   assert.match(ADMIN_JS, /'Authorization': |Authorization: 'Bearer ' \+ token/);
   assert.doesNotThrow(() => new Function(ADMIN_JS)); // parses; never run
@@ -619,7 +623,8 @@ test('game clients send the same sign-in fields and no analytics beyond the opti
   const lobbyLink = readFileSync(join(REPO, 'src/net/lobby_link.cpp'), 'utf8');
   const hello = lobbyLink.slice(lobbyLink.indexOf('Json hello_body('), lobbyLink.indexOf('LobbyLink::LobbyLink('));
   assert.deepEqual([...hello.matchAll(/h\.set\("([a-z_]+)"/g)].map((m) => m[1]),
-    ['proto', 'game', 'account', 'secret', 'name', 'presence', 'online_protocol', 'version', 'platform', 'relay']);
+    ['proto', 'game', 'account', 'secret', 'name', 'presence', 'online_protocol', 'version', 'platform', 'relay',
+      'lobby']);
   const files = [
     ...readdirSync(join(REPO, 'src/net')).map((f) => join('src/net', f)),
     ...readdirSync(join(REPO, 'src')).filter((f) => /^runtime_(online|matching2|rudp)/.test(f)).map((f) => join('src', f)),

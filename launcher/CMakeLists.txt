@@ -32,14 +32,16 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # Game files (check, PKG unpacking, install, boot image), the trophies (src/trophies), the settings file, the Display options and the Controller prompts patch:
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
-add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp game_files.cpp
-    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp
+    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
-    ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp)
+    ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp
+    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c
+    ${PROJECT_SOURCE_DIR}/src/guest_hook.c)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
+target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_ui_text dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
 # Hashes and ciphers: CNG on Windows, OpenSSL's libcrypto elsewhere.
 if (WIN32)
     target_sources(dcp_launcher_core PRIVATE crypto_win.cpp)
@@ -52,6 +54,46 @@ else()
     set(DCP_LOG_SOURCE ${PROJECT_SOURCE_DIR}/src/runtime_log_posix.c)
 endif()
 set(DCP_LOG_SOURCES ${DCP_LOG_SOURCE} ${PROJECT_SOURCE_DIR}/src/runtime_session_log.c)
+
+# The Brazilian Portuguese translation (localization/pt-BR/sheets/*.json) as a table of byte arrays, game_translation.h.
+file(GLOB DCP_PTBR_SHEETS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/sheets/*.json)
+list(SORT DCP_PTBR_SHEETS)
+# Rewritten only when the list changes, so adding or removing a sheet regenerates the source.
+set(DCP_PTBR_LIST ${CMAKE_BINARY_DIR}/generated/ptbr_sheets.txt)
+file(CONFIGURE OUTPUT ${DCP_PTBR_LIST} CONTENT "${DCP_PTBR_SHEETS}")
+set(DCP_PTBR_SOURCE ${CMAKE_BINARY_DIR}/generated/ptbr_translation_data.cpp)
+add_custom_command(OUTPUT ${DCP_PTBR_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_PTBR_LIST} -DOUTPUT=${DCP_PTBR_SOURCE} -DSYMBOL=kPtBrTranslation
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_PTBR_LIST} ${DCP_PTBR_SHEETS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the pt-BR translation")
+target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_SOURCE})
+
+# The PT-BR visual patches (localization/pt-BR/visual/*.dcpx.z) as a table of byte arrays, game_translation.h.
+file(GLOB DCP_PTBR_VISUAL_PATCHES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/visual/*.dcpx.z)
+list(SORT DCP_PTBR_VISUAL_PATCHES)
+set(DCP_PTBR_VISUAL_LIST ${CMAKE_BINARY_DIR}/generated/ptbr_visual_patches.txt)
+file(CONFIGURE OUTPUT ${DCP_PTBR_VISUAL_LIST} CONTENT "${DCP_PTBR_VISUAL_PATCHES}")
+set(DCP_PTBR_VISUAL_SOURCE ${CMAKE_BINARY_DIR}/generated/ptbr_visual_data.cpp)
+add_custom_command(OUTPUT ${DCP_PTBR_VISUAL_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_PTBR_VISUAL_LIST} -DOUTPUT=${DCP_PTBR_VISUAL_SOURCE}
+            -DSYMBOL=kPtBrVisualPatches -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_PTBR_VISUAL_LIST} ${DCP_PTBR_VISUAL_PATCHES} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the pt-BR visual patches")
+target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_VISUAL_SOURCE})
+
+# The sidebar's page icons (assets/launcher/icons/*.svg) as a table of byte arrays, page_icons.cpp.
+file(GLOB DCP_PAGE_ICONS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/assets/launcher/icons/*.svg)
+list(SORT DCP_PAGE_ICONS)
+set(DCP_PAGE_ICON_LIST ${CMAKE_BINARY_DIR}/generated/page_icons.txt)
+file(CONFIGURE OUTPUT ${DCP_PAGE_ICON_LIST} CONTENT "${DCP_PAGE_ICONS}")
+set(DCP_PAGE_ICON_SOURCE ${CMAKE_BINARY_DIR}/generated/page_icon_data.cpp)
+add_custom_command(OUTPUT ${DCP_PAGE_ICON_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_PAGE_ICON_LIST} -DOUTPUT=${DCP_PAGE_ICON_SOURCE} -DSYMBOL=kPageIconFiles
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_PAGE_ICON_LIST} ${DCP_PAGE_ICONS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the page icons")
+target_sources(dcp_launcher_core PRIVATE ${DCP_PAGE_ICON_SOURCE})
 
 # The Controller prompts patch (prompts/xbox-prompts.dcpx) as a byte array, prompts_patch.h.
 set(DCP_PROMPTS_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/prompts/xbox-prompts.dcpx)
@@ -70,7 +112,7 @@ add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
     DEPENDS ${DCP_SPIDER_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
     COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
 
-add_library(dcp_launcher STATIC host.cpp launcher.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
+add_library(dcp_launcher STATIC host.cpp incident_page.cpp launcher.cpp my_reports.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
     updater/github_release.cpp updater/json.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
     updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
     updater/update_ui.cpp updater/update_zip.cpp updater/version.cpp
@@ -147,6 +189,13 @@ if (WIN32)
 endif()
 set_target_properties(dcp-update-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-update-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Bug Report page's logic, on synthetic logs in temporary folders: no window, no network.
+add_executable(dcp-incident-tests EXCLUDE_FROM_ALL ../tests/incident_tests.cpp)
+target_compile_definitions(dcp-incident-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(dcp-incident-tests PRIVATE dcp_launcher_core)
+set_target_properties(dcp-incident-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-incident-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the local trophies (tools/test.ps1); not part of the default build.
 add_executable(dcp-trophy-tests EXCLUDE_FROM_ALL ../tests/trophy_tests.cpp ${DCP_LOG_SOURCES} ../gpu/shim/dcp_png.cpp)

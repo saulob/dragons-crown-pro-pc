@@ -12,10 +12,20 @@ messages, no new binding or storage). The protocol is in [docs/ONLINE.md](../../
 
 No dependencies are installed for either the tests or the local server.
 
-## Local
+## Production
 
-The local server is for the automated tests and diagnostics; players and the normal two-instance test use the deployed
-lobby.
+Players, the launcher and the admin all use the deployed Worker, whose address is `net::kDefaultLobbyUrl`
+(`src/net/online_config.h`). A bug report travels the same way as the rest of the online service:
+
+Player → launcher's Bug Report page → production Worker (`incident.file` on the lobby WebSocket) → Durable Object storage
+(`incidents` table, log included) → `/admin` with the dashboard token → **Bugs** tab → view, copy or download the stored log.
+
+`/admin` has two tabs: **Dashboard** (the metrics) and **Bugs** (the reports). Both use `DCP_DASHBOARD_TOKEN`, so the
+Worker needs no new secret, binding or migration for bug reports: its tables are created when the object starts.
+
+## Developer and testing only
+
+The local server is for the automated tests and diagnostics; it is not part of any normal workflow.
 
 ```
 node local/server.js                      # ws://127.0.0.1:8790/, data in memory
@@ -35,16 +45,18 @@ Nothing in the repository deploys or logs in. To publish a lobby:
 1. Install the Wrangler CLI (`npm install -g wrangler`) and run `wrangler login` with your Cloudflare account.
 2. In this folder, check `wrangler.toml` (name `dcp-lobby`, the `LOBBY` Durable Object with a SQLite migration, the
    `WS_UPGRADE_LIMITER` rate limit; its `namespace_id` must be unique in the account).
-3. Optional, to read bug reports: `wrangler secret put REPORTS_TOKEN` (a long random value).
-4. Optional, for the metrics dashboard: `wrangler secret put DCP_DASHBOARD_TOKEN` (a long random value, at least 16
-   characters; without it the dashboard's API answers 503).
-5. `wrangler deploy --dry-run` bundles the Worker without uploading it; `wrangler deploy` publishes it. The lobby is
+3. Optional, for `/admin` (Dashboard and Bugs): `wrangler secret put DCP_DASHBOARD_TOKEN` (a long random value, at least
+   16 characters; without it the admin API answers 503). A Worker that already has the token needs nothing more.
+4. `wrangler deploy --dry-run` bundles the Worker without uploading it; `wrangler deploy` publishes it. The lobby is
    then at `wss://dcp-lobby.<your subdomain>.workers.dev/`.
-6. Check it: `curl https://dcp-lobby.<your subdomain>.workers.dev/` answers `{"service":"dcp-lobby","proto":1}`, and
+5. Check it: `curl https://dcp-lobby.<your subdomain>.workers.dev/` answers `{"service":"dcp-lobby","proto":1}`, and
    the Connection test of a test instance started with `DCP_LOBBY` set to its address says the lobby is reachable.
-7. To make it the default for players, set `kDefaultLobbyUrl` in `src/net/online_config.h`.
+6. To make it the default for players, set `kDefaultLobbyUrl` in `src/net/online_config.h`.
 
-Reports: `curl -H "Authorization: Bearer <token>" https://dcp-lobby.<subdomain>.workers.dev/reports` (newest 100).
+Updating the deployed Worker is `wrangler deploy` in this folder (`npm run deploy` is the same command); run
+`wrangler deploy --dry-run` first to bundle it without uploading. Reports are read in `/admin`, tab Bugs, or with the same
+token from `/admin/api/incidents`, `/admin/api/incidents/<ticket>` and `/admin/api/incidents/<ticket>/log`. An older
+deployment may still hold an empty `reports` table from before the Bug Report page; nothing reads, writes or deletes it.
 
 The Worker uses `CF-Connecting-IP` as each player's address.
 
@@ -54,7 +66,7 @@ Every protection below is invisible to a client that behaves, and none changes t
 
 - **Edge** (`src/edge.js`): a WebSocket upgrade is counted against `WS_UPGRADE_LIMITER` (30 per address group per 60 s, IPv6
   per /64) before the Durable Object is reached. Over the limit the Worker answers 429 with `Retry-After`; the object is
-  not invoked and nothing is written. The service answer at `/`, `/admin` and `/reports` are not upgrades and are not
+  not invoked and nothing is written. The service answer at `/` and `/admin` are not upgrades and are not
   counted. The binding is per Cloudflare location and eventually consistent, so the limit is approximate. Without the
   binding (development) or when it fails, upgrades pass.
 - **Sign-in** (`src/abuse.js`): after the secret matched, one account may sign in 12 times in a burst and then once per
@@ -73,20 +85,72 @@ Every protection below is invisible to a client that behaves, and none changes t
   minutes) and one address group (burst 12, then one per 30 s). A refusal spends none of the three and is counted as
   `party_report_limited`; a repeat of the last snapshot of the same connection and room is answered without
   counting and without spending a token. At most 227 rows can exist per day (see below) however many are sent.
+- **Public Lobby** (`lobby.publish`, `lobby.list`, `friends.add` by handle): nothing is written, presence lives in the
+  socket attachment. Publishing is limited per account (burst 6, then one per 10 s), reading per account (burst 6, then
+  one per 5 s) and per address group (burst 60, then 3 per second; a refusal spends neither), and a request by handle per
+  account (burst 10, then one per 15 s) on top of the usual friend limits. Answers hold at most 100 rows and an unchanged
+  list is not sent again. Refusals are counted as `public_lobby_limited`. See `docs/ONLINE.md`.
 - **Relay**: a sender that keeps producing frames no well-behaved client sends (malformed, wrong token, no room,
   stale seat, unknown member, relay not negotiated, no sign-in) is allowed 200 of them and then 5 per second; past that
   its connection is closed with 1008. A destination that is offline or still resuming is not a fault.
-- **Writes**: unchanged `udp`, `room.set_internal` and `room.set_external` updates write nothing, and a woken object
-  reads its stored alarm instead of setting it again.
+- **Writes**: unchanged `udp`, `room.set_internal` and `room.set_external` updates write nothing and send no event, and a
+  woken object reads its stored alarm instead of setting it again. A request that would change a row spends a budget of
+  its socket (kept in the attachment, so hibernation does not refill it), its account and its address group (IPv6 per
+  /64): room data and endpoints in a room 40 burst then 1/s, 160 then 4/s per address; friend changes 20 burst then 1 per
+  3 s, 60 then 1/s per address. A refusal answers `limit` with `retry_ms`, spends nothing, writes nothing and is counted
+  in memory as `write_limited`. `room.resume` spends none of it.
+- **Refusals**: more than 30 `limit`, oversized or malformed requests on one socket, refilled 1 per 2 s, close it with
+  1008, counted as `lobby_abuse_closed`. Its seat gets the usual grace.
 - **Diagnostics** are counted in memory and written together at the next 15-minute alarm as `abuse` rows of
   `metrics_daily_dimensions` (no address, no account): `ws_upgrade_accepted`, `ws_upgrade_limited` (reported by the
   Worker on the next upgrade it forwards), `ws_upgrade_ip_cap`, `hello_accepted`, `hello_reconnect_deduped`,
   `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`,
-  `party_report_limited`. They
+  `party_report_limited`, `public_lobby_limited`, `write_limited`, `lobby_abuse_closed`, and for reports `incident_filed`, `incident_limited`,
+  `incident_hourly_limited`, `incident_daily_limited`. They
   are in `/admin/api/history` under `dimensions.abuse` and on the dashboard. Counts of the last interval are lost if
   the object is evicted first. Rooms, members, accounts, friends, requests and reports
 are SQLite tables in the Durable Object; per-connection state (presence blob, rate buckets) lives in each socket's
 attachment and disappears with the socket.
+
+## Bug reports
+
+`src/incidents.js` holds the launcher's reports in two tables of the same Durable Object. `incidents` has one row per report
+with only the fields the player previewed; `incident_quota` has salted hashes of the account and address per report, deleted
+after 24 hours. A request is refused on an unknown field, a malformed one, or a size the Worker measured itself: 500 characters
+of description and 64 KiB of log in UTF-8. Refused attempts spend only the in-memory limits in `src/abuse.js`; the quota is
+counted in SQL because it must survive the object's hibernation. The largest log `incident.file` can carry, with JSON
+escaping, fits its 160 KiB frame.
+
+An account may file 2 accepted reports per rolling hour (`incident_hourly_limit`) and 10 per rolling 24 hours
+(`incident_daily_limit`), counted from the timestamps in `incident_quota`; the hourly code is answered when both are reached.
+The check, the report and its quota row are one transaction, so a failed write stores neither row and costs no quota.
+The per-address and service-wide ceilings in `INCIDENT` are infrastructure protection, not a player quota: they answer `limit`,
+and the per-address one stays above the account limit so one player cannot lock out others on a shared address. The counters
+`incident_hourly_limited`, `incident_daily_limited` and `incident_limited` tell the refusals apart in `metrics_daily_dimensions`.
+
+A report is stored as received or refused: the Worker removes and rewrites nothing, so the stored log is the one the player
+previewed. The log itself is in the `incidents` row (`log_text`), not a path or a link, so a report stays viewable and
+downloadable after the player deletes the local file. The newest 500 reports are kept: filing a report deletes any older
+one beyond that in the same step, and nothing else is deleted. At most 500 x about 66 KiB is about 32 MiB, against a
+SQLite-backed Durable Object's 10 GB of storage (Cloudflare's FAQ states 1 GB on the Free plan) and 2 MB per row.
+
+In `/admin`, Bugs lists reports newest first (report ID, date, launcher version, game build, CUSA, operating system,
+description preview) with filters for launcher version, game build and date. A report's detail shows the description, the
+metadata, the original log file name, whether only the end of the log was sent, and the stored log. **Close report**, or the
+selected report ID, closes it. The report ID comes from the stored report, never from the log: a log is the snapshot taken
+when the report was built, so it can hold earlier report IDs but never its own. **Download log** saves
+that stored text as `<ticket>-<log file>.log` (`text/plain; charset=utf-8`, `Content-Disposition: attachment`; the name is
+built from the validated ticket and log file name only). **Copy log** copies the same text. Both go through the token; there
+is no public or permanent link.
+
+**Report status** is set in the detail: a status, a fixed version (Fixed only; leaving Fixed clears it) and an optional message of
+500 characters, stored and shown as plain text. **Save status** posts to `/admin/api/incidents/<ticket>/status`; nothing is
+saved until then, and a save that changes nothing keeps `status_updated_at`. The list has a Status column and filter.
+
+`incident_tracking` holds what a report's owner may read: the ticket, a salted SHA-256 of the receipt, the submission time, the
+status, its time, the fixed version and the message. It has no account and no address, and the newest 5000 rows are kept,
+apart from the 500 logs, so a status outlives its log. A report from before this table has no row and counts as New; saving
+its status adds a row with an empty hash, which no receipt matches. See [docs/ONLINE.md](../../docs/ONLINE.md#report-status-and-my-reports).
 
 ## Usage statistics and the dashboard
 

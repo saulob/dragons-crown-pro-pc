@@ -1,0 +1,345 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index 9f2c4f7..511cc51 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -32,6 +32,7 @@
+ 
+ #include <imgui.h>
+ 
++#include "trg/layout.h"
+ #include "trg/page_navigation.h"
+ #include "trg/settings.h"
+ 
+@@ -45,56 +46,6 @@ class Launcher;
+ class Task;
+ class Ui;
+ 
+-// ----------------------------------------------------------------- layout ---
+-// Logical pixels: geometry is multiplied by Ui::scale(), and PushFont applies
+-// the display scale to text sizes itself.
+-namespace layout {
+-inline constexpr float kTextBody = 15.0f;  // buttons, combos, sidebar, Fonts::size
+-inline constexpr float kTextLabel = 16.0f;
+-inline constexpr float kTextHelp = 14.0f;
+-inline constexpr float kTextSection = 18.0f;
+-inline constexpr float kTextPage = 28.0f;
+-
+-inline constexpr float kControlHeight = 34.0f;
+-inline constexpr float kItemGap = 6.0f;
+-inline constexpr float kRowPadding = 5.0f;  // above and below a row's content
+-inline constexpr float kLabelGap = 1.0f;    // between a row's label and help text
+-
+-inline constexpr float kMargin = 14.0f;
+-inline constexpr float kBodyGap = 6.0f;  // between the header and the panels
+-inline constexpr float kContentPadding = 18.0f;
+-inline constexpr float kContentTop = 12.0f;
+-inline constexpr float kContentBottom = 6.0f;
+-
+-inline constexpr float kSidebarPadding = 8.0f;
+-inline constexpr float kSidebarRow = 40.0f;
+-inline constexpr float kSidebarIcon = 20.0f;
+-inline constexpr float kSidebarGap = 2.0f;
+-
+-inline constexpr float kFooterHeight = 60.0f;
+-inline constexpr float kFooterButtonHeight = 36.0f;
+-inline constexpr float kFooterButtonWidth = 108.0f;
+-inline constexpr float kFooterGap = 10.0f;
+-inline constexpr float kPlayWidth = 190.0f;
+-inline constexpr float kPlayHeight = 42.0f;
+-
+-inline float HeaderHeight(float viewport_height, float scale) {
+-  return std::clamp(viewport_height * 0.145f, 88.0f * scale, 140.0f * scale);
+-}
+-
+-inline float SidebarWidth(float viewport_width, float scale) {
+-  return std::clamp(viewport_width * 0.15f, 168.0f * scale, 200.0f * scale);
+-}
+-
+-inline float SidebarHeight(int pages) {
+-  return kSidebarPadding * 2.0f + float(pages) * (kSidebarRow + kSidebarGap);
+-}
+-
+-inline float ControlColumnWidth(float row_width, float scale) {
+-  return std::clamp(row_width * 0.34f, 280.0f * scale, 360.0f * scale);
+-}
+-}  // namespace layout
+-
+ // ------------------------------------------------------------------ theme ---
+ struct Theme {
+   ImVec4 bg;            // window background, behind everything
+diff --git a/include/trg/layout.h b/include/trg/layout.h
+new file mode 100644
+index 0000000..30e3d9b
+--- /dev/null
++++ b/include/trg/layout.h
+@@ -0,0 +1,117 @@
++// The launcher's metrics, with no dependency on Dear ImGui.
++#pragma once
++
++#include <algorithm>
++#include <cmath>
++#include <cstddef>
++#include <string_view>
++#include <vector>
++
++namespace trg {
++
++// ----------------------------------------------------------------- layout ---
++// Logical pixels: geometry is multiplied by Ui::scale(), and PushFont applies
++// the display scale to text sizes itself.
++namespace layout {
++inline constexpr float kTextBody = 15.0f;  // buttons, combos, sidebar, Fonts::size
++inline constexpr float kTextLabel = 16.0f;
++inline constexpr float kTextHelp = 14.0f;
++inline constexpr float kTextSection = 18.0f;
++inline constexpr float kTextPage = 28.0f;
++
++inline constexpr float kControlHeight = 34.0f;
++inline constexpr float kItemGap = 6.0f;
++inline constexpr float kRowPadding = 5.0f;  // above and below a row's content
++inline constexpr float kLabelGap = 1.0f;    // between a row's label and help text
++
++inline constexpr float kMargin = 14.0f;
++inline constexpr float kBodyGap = 6.0f;  // between the header and the panels
++inline constexpr float kContentPadding = 18.0f;
++inline constexpr float kContentTop = 12.0f;
++inline constexpr float kContentBottom = 6.0f;
++
++inline constexpr float kSidebarPadding = 8.0f;
++inline constexpr float kSidebarRow = 40.0f;
++inline constexpr float kSidebarIcon = 20.0f;
++inline constexpr float kSidebarIconInset = 11.0f;  // from the row's left edge
++inline constexpr float kSidebarIconGap = 11.0f;    // between the icon box and the label
++inline constexpr float kSidebarGap = 2.0f;
++
++inline constexpr float kFooterHeight = 60.0f;
++inline constexpr float kFooterButtonHeight = 36.0f;
++inline constexpr float kFooterButtonWidth = 108.0f;
++inline constexpr float kFooterGap = 10.0f;
++inline constexpr float kPlayWidth = 190.0f;
++inline constexpr float kPlayHeight = 42.0f;
++inline constexpr float kKeycapHeight = 26.0f;
++inline constexpr float kKeycapPadding = 8.0f;
++inline constexpr float kKeycapRounding = 6.0f;
++inline constexpr float kKeycapGap = 6.0f;     // between a keycap and its action
++inline constexpr float kKeyHintGap = 12.0f;   // between two shortcuts
++inline constexpr float kFooterSeparator = 28.0f;
++inline constexpr float kFooterSeparatorGap = 10.0f;
++inline constexpr float kFooterHelpLine = 18.0f;  // between the helper lines' centres
++
++inline float HeaderHeight(float viewport_height, float scale) {
++  return std::clamp(viewport_height * 0.145f, 88.0f * scale, 140.0f * scale);
++}
++
++inline float SidebarWidth(float viewport_width, float scale) {
++  return std::clamp(viewport_width * 0.15f, 168.0f * scale, 200.0f * scale);
++}
++
++inline float SidebarHeight(int pages) {
++  return kSidebarPadding * 2.0f + float(pages) * (kSidebarRow + kSidebarGap);
++}
++
++inline float ControlColumnWidth(float row_width, float scale) {
++  return std::clamp(row_width * 0.34f, 280.0f * scale, 360.0f * scale);
++}
++
++inline constexpr float SidebarLabelX() { return kSidebarIconInset + kSidebarIcon + kSidebarIconGap; }
++
++// Where to place a line so that the point `visual_center` below its top lands on `center`.
++inline float CenteredTop(float center, float visual_center) { return std::floor(center - visual_center + 0.5f); }
++
++struct KeyHint {
++  std::string_view key;  // empty when the text has no key
++  std::string_view action;
++};
++
++// "Enter  Play     Esc  Quit": two spaces inside a shortcut, more between shortcuts.
++inline std::vector<KeyHint> ParseKeyHints(std::string_view text) {
++  std::vector<KeyHint> hints;
++  while (!text.empty()) {
++    const size_t begin = text.find_first_not_of(' ');
++    if (begin == std::string_view::npos) break;
++    text.remove_prefix(begin);
++    const size_t end = text.find("   ");
++    std::string_view item = text.substr(0, end);
++    text.remove_prefix(item.size());
++    const size_t gap = item.find("  ");
++    if (gap == std::string_view::npos) {
++      hints.push_back({{}, item});
++    } else {
++      hints.push_back({item.substr(0, gap), item.substr(item.find_first_not_of(' ', gap))});
++    }
++  }
++  return hints;
++}
++
++// The footer's helper text, one sentence per line.
++inline std::vector<std::string_view> SplitSentences(std::string_view text) {
++  std::vector<std::string_view> lines;
++  while (!text.empty()) {
++    const size_t end = text.find(". ");
++    if (end == std::string_view::npos) {
++      lines.push_back(text);
++      break;
++    }
++    lines.push_back(text.substr(0, end + 1));
++    text.remove_prefix(end + 2);
++  }
++  return lines;
++}
++}  // namespace layout
++
++}  // namespace trg
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 4def72f..31bf288 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -132,6 +132,44 @@ float SponsorButtonWidth(const SponsorLink& sponsor, ImFont* font, float font_si
+   return text + SponsorIconSize(font_size) + 8 * scale + 28 * scale;
+ }
+ 
++// From the top of a line to the middle of its capitals, which is where the eye puts the text's centre.
++float CapCenter(ImFont* font, float size) {
++  const ImFontGlyph* glyph = font->GetFontBaked(size)->FindGlyph('H');
++  return glyph ? (glyph->Y0 + glyph->Y1) * 0.5f : size * 0.5f;
++}
++
++// Draws the shortcuts as keycaps and labels centred on `at.y`, or only measures them without `dl`.
++float DrawKeyHints(ImDrawList* dl, const std::vector<layout::KeyHint>& hints, const Fonts& fonts, const Theme& t,
++                   ImVec2 at, float s) {
++  const float size = layout::kTextBody * s;
++  const float cap_h = layout::kKeycapHeight * s, padding = layout::kKeycapPadding * s;
++  const float cap_top = std::floor(at.y - cap_h * 0.5f);
++  const float key_top = layout::CenteredTop(at.y, CapCenter(fonts.semibold, size));
++  const float action_top = layout::CenteredTop(at.y, CapCenter(fonts.regular, size));
++  float x = at.x;
++  for (const layout::KeyHint& hint : hints) {
++    const char* key_end = hint.key.data() + hint.key.size();
++    const char* action_end = hint.action.data() + hint.action.size();
++    if (!hint.key.empty()) {
++      const float text_w = fonts.semibold->CalcTextSizeA(size, FLT_MAX, 0.0f, hint.key.data(), key_end).x;
++      const float cap_w = std::floor(text_w + padding * 2);
++      if (dl) {
++        const ImVec2 min(std::floor(x), cap_top), max(min.x + cap_w, cap_top + cap_h);
++        const float rounding = layout::kKeycapRounding * s;
++        dl->AddRectFilled(min, max, Col(t.frame, 0.7f), rounding);
++        dl->AddRect(min, max, Col(t.frame_hot), rounding, 0, std::max(s, 1.0f));
++        dl->AddText(fonts.semibold, size, ImVec2(min.x + (cap_w - text_w) * 0.5f, key_top), Col(t.text),
++                    hint.key.data(), key_end);
++      }
++      x += cap_w + layout::kKeycapGap * s;
++    }
++    if (dl) dl->AddText(fonts.regular, size, ImVec2(x, action_top), Col(t.text, 0.85f), hint.action.data(), action_end);
++    x += fonts.regular->CalcTextSizeA(size, FLT_MAX, 0.0f, hint.action.data(), action_end).x;
++    x += layout::kKeyHintGap * s;
++  }
++  return hints.empty() ? 0.0f : x - at.x - layout::kKeyHintGap * s;
++}
++
+ bool SponsorButton(const char* id, const SponsorLink& sponsor, ImVec2 pos, ImVec2 size, ImFont* font,
+                    float font_size, float scale) {
+   ImGui::SetCursorScreenPos(pos);
+@@ -1128,7 +1166,8 @@ void Launcher::DrawSidebar(ImVec2 size) {
+   const int icon_pixels = int(layout::kSidebarIcon * s_ * framebuffer + 0.5f);
+   const float icon_size = float(icon_pixels) / framebuffer;
+   ImGui::SetCursorPos(ImVec2(pad, pad));
+-  ImGui::PushFont(config_.fonts.semibold, 0.0f);
++  ImGui::PushFont(config_.fonts.semibold, layout::kTextLabel);
++  const float cap_center = CapCenter(config_.fonts.semibold, ImGui::GetFontSize());
+   for (int i = 0; i < int(config_.pages.size()); ++i) {
+     const Page& page = config_.pages[size_t(i)];
+     const bool selected = navigation_.current() == i;
+@@ -1138,18 +1177,19 @@ void Launcher::DrawSidebar(ImVec2 size) {
+     const ImVec2 item(size.x - pad * 2, item_h);
+     if (ImGui::InvisibleButton("##page", item)) GoToPage(i);
+     const bool hot = ImGui::IsItemHovered();
++    const float center_y = std::floor(pos.y + item_h * 0.5f);
+     ImDrawList* dl = ImGui::GetWindowDrawList();
+     if (selected || hot)
+       dl->AddRectFilled(pos, ImVec2(pos.x + item.x, pos.y + item.y), Col(selected ? t.accent : t.frame), 8 * s_);
+     const ImTextureID icon = page.icon ? page.icon(icon_pixels) : ImTextureID{};
+     if (icon != ImTextureID{}) {
+       // On the pixel grid, so the image stays one texel per pixel.
+-      const ImVec2 min(std::floor((pos.x + 21 * s_ - icon_size * 0.5f) * framebuffer) / framebuffer,
+-                       std::floor((pos.y + (item_h - icon_size) * 0.5f) * framebuffer) / framebuffer);
++      const ImVec2 min(std::floor((pos.x + layout::kSidebarIconInset * s_) * framebuffer) / framebuffer,
++                       layout::CenteredTop(center_y, icon_size * 0.5f));
+       dl->AddImage(ImTextureRef(icon), min, ImVec2(min.x + icon_size, min.y + icon_size), ImVec2(0, 0), ImVec2(1, 1),
+                    Col(selected ? t.on_accent : hot ? t.text : t.dim));
+     }
+-    dl->AddText(ImVec2(pos.x + 40 * s_, pos.y + (item_h - ImGui::GetFontSize()) * 0.5f),
++    dl->AddText(ImVec2(pos.x + layout::SidebarLabelX() * s_, layout::CenteredTop(center_y, cap_center)),
+                 Col(selected ? t.on_accent : t.text), T(page.name.c_str()));
+     const int badge = page.badge ? page.badge() : 0;
+     if (badge > 0) {
+@@ -1228,30 +1268,60 @@ void Launcher::DrawFooter(ImVec2 origin, float w, float h) {
+   const float gap = layout::kFooterGap * s_;
+   const float cy = origin.y + h * 0.5f;
+   ImDrawList* dl = ImGui::GetWindowDrawList();
+-  const float small = layout::kTextHelp * s_;
+-  const char* hints = T(config_.hints.c_str());
+-  const char* note = T(config_.note.c_str());
+-  dl->AddText(config_.fonts.regular, small, ImVec2(origin.x, cy - 16 * s_), Col(t.dim), hints);
+-  const bool show_status = !status_.empty() && ImGui::GetTime() < status_until_;
+-  dl->AddText(show_status ? config_.fonts.semibold : config_.fonts.regular, small, ImVec2(origin.x, cy + 1 * s_),
+-              Col(show_status ? t.accent : t.dim), show_status ? status_.c_str() : note);
++  const Fonts& fonts = config_.fonts;
++  const float help_size = layout::kTextBody * s_;
++  const std::vector<layout::KeyHint> hints = layout::ParseKeyHints(T(config_.hints.c_str()));
++  const std::vector<std::string_view> note = layout::SplitSentences(T(config_.note.c_str()));
++  const float hints_w = DrawKeyHints(nullptr, hints, fonts, t, ImVec2(origin.x, cy), s_);
++  const float separator_gap = layout::kFooterSeparatorGap * s_;
++  const float help_x = std::floor(origin.x + hints_w + separator_gap * 2);
++  float note_w = 0.0f;
++  for (const std::string_view line : note)
++    note_w = std::max(note_w, fonts.regular->CalcTextSizeA(help_size, FLT_MAX, 0.0f, line.data(), line.data() + line.size()).x);
+ 
+   const float right = origin.x + w;
+   const float quit_x = right - play_w - bw * 2 - gap * 2;
++  float left_end = quit_x;
+   const SponsorLink& sponsor = config_.sponsor;
+   if (!sponsor.url.empty()) {
+     ImFont* font = config_.fonts.semibold;
+     const float font_size = ImGui::GetFontSize();
+     const ImVec2 size(SponsorButtonWidth(sponsor, font, font_size, s_), bh);
+     const float x = quit_x - gap - size.x;
+-    const float text_w = std::max(config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, hints).x,
+-                                  config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, note).x);
+-    if (x >= origin.x + text_w + 20 * s_) {
++    if (x >= help_x + note_w + gap) {
++      left_end = x;
+       if (SponsorButton("##sponsor_footer", sponsor, ImVec2(x, cy - size.y * 0.5f), size, font, font_size, s_)) {
+         OpenUrl(sponsor.url);
+       }
+     }
+   }
++
++  // A long status takes the whole left side, so it never runs under the buttons.
++  const bool show_status = !status_.empty() && ImGui::GetTime() < status_until_;
++  const float status_w = show_status ? fonts.semibold->CalcTextSizeA(help_size, FLT_MAX, 0.0f, status_.c_str()).x : 0.0f;
++  const bool status_only = show_status && help_x + status_w + gap > left_end;
++  if (!status_only) {
++    DrawKeyHints(dl, hints, fonts, t, ImVec2(origin.x, cy), s_);
++    if (!hints.empty()) {
++      const float x = std::floor(origin.x + hints_w + separator_gap), half = layout::kFooterSeparator * s_ * 0.5f;
++      dl->AddLine(ImVec2(x, cy - half), ImVec2(x, cy + half), Col(t.frame_hot), std::max(s_, 1.0f));
++    }
++  }
++  if (show_status) {
++    dl->AddText(fonts.semibold, help_size,
++                ImVec2(status_only ? origin.x : help_x, layout::CenteredTop(cy, CapCenter(fonts.semibold, help_size))),
++                Col(t.accent), status_.c_str());
++  } else {
++    const float cap_center = CapCenter(fonts.regular, help_size);
++    const float step = layout::kFooterHelpLine * s_;
++    float line_y = cy - step * 0.5f * float(note.size() - 1);
++    for (const std::string_view line : note) {
++      dl->AddText(fonts.regular, help_size, ImVec2(help_x, layout::CenteredTop(line_y, cap_center)), Col(t.dim),
++                  line.data(), line.data() + line.size());
++      line_y += step;
++    }
++  }
++
+   ImGui::SetCursorScreenPos(ImVec2(quit_x, cy - bh * 0.5f));
+   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12 * s_);
+   if (ImGui::Button(T("Quit"), ImVec2(bw, bh))) want_quit_ = true;

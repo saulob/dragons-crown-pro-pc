@@ -41,6 +41,11 @@ int runtime_cheat_movement_cycle(void);
 void runtime_cheats_set_slot_human(int (*is_human)(int slot));
 int runtime_cheat_slot_human(int slot);
 
+/* Called with each player unit on its per-tick update while the cheat hooks are in (offline); observe only. The loader
+ * sets this (Discord presence reads class and level through it). */
+void runtime_cheats_set_player_observer(void (*observe)(uint64_t unit));
+void runtime_cheat_observe_player(uint64_t unit);
+
 /* 1 when the cheat (a dcp::cheats::Cheat value) is on: the saved value, or the menu's override of it this session. */
 int runtime_cheat_enabled(int cheat);
 

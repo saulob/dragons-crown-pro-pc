@@ -287,6 +287,7 @@ static void TestInstall(int enabled) {
         {0x11e8060, 0x54a660}, // CUSA07001 1.02
         {0x11e8060, 0x54a720}, // CUSA07001 1.03
         {0x1238060, 0x54a790}, // CUSA10209 1.00
+        {0x11f8060, 0x54c6a0}, // CUSA10487 1.03
         {0x11f8060, 0x54c691}, // another CUSA10454 executable
     };
     for (size_t i = 0; i < sizeof(rejected) / sizeof(rejected[0]); ++i) {

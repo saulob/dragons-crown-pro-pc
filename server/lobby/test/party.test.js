@@ -282,7 +282,7 @@ test('the per-socket message budget still applies to the new operation', () => {
   const env = makeLobby();
   const a = hosting(env);
   const codes = new Set();
-  for (let i = 0; i < 100; i++) codes.add(report(a, { classes: [0] }).code);
+  for (let i = 0; i < 100; i++) codes.add(report(a, { classes: [0] })?.code);
   assert.ok(codes.has('ok'));
   assert.ok(codes.has('limit'));
 });
@@ -386,8 +386,9 @@ test('analytics hold no player, account, address, room or save information after
   }
   const tables = env.host.sql.all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
     .map((r) => r.name).sort();
-  assert.deepEqual(tables, ['accounts', 'friend_requests', 'friends', 'members', 'meta', 'metrics_daily',
-    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'reports', 'rooms']);
+  assert.deepEqual(tables, ['accounts', 'friend_requests', 'friends', 'incident_quota', 'incident_tracking', 'incidents', 'members', 'meta',
+    'metrics_daily',
+    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'rooms']);
   assert.deepEqual(env.host.sql.all('PRAGMA table_info(metrics_daily_dimensions)').map((c) => c.name),
     ['day', 'dimension', 'value', 'count']);
 });

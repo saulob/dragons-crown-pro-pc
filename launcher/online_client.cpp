@@ -19,6 +19,20 @@ std::string Describe(const std::string& code) {
     return "The online service refused the request (" + code + ").";
 }
 
+std::string DescribeLobbyAdd(const std::string& code) {
+    return code == "not_found" ? "That player is no longer in the Lobby." : Describe(code);
+}
+
+std::string ShownName(const net::Json& body) {
+    const std::string& shown = body["display_name"].as_string();
+    return shown.empty() ? body["name"].as_string() : shown;
+}
+
+bool SameAccounts(const std::vector<OnlinePlayer>& a, const std::vector<OnlinePlayer>& b) {
+    return std::equal(a.begin(), a.end(), b.begin(), b.end(),
+                      [](const OnlinePlayer& x, const OnlinePlayer& y) { return x.account == y.account; });
+}
+
 void Erase(std::vector<OnlinePlayer>& players, const std::string& account) {
     players.erase(std::remove_if(players.begin(), players.end(),
                                  [&](const OnlinePlayer& p) { return p.account == account; }),
@@ -59,6 +73,7 @@ void OnlineClient::Update(bool on, const net::OnlineConfig& config, const std::s
     if (state_.link == Link::kUp && now >= next_fetch_) {
         Fetch(now);
     }
+    SyncLobby(config.lobby_visible, now);
 }
 
 void OnlineClient::Start(const net::OnlineConfig& config, const std::string& game, const std::string& name, double now) {
@@ -85,6 +100,9 @@ void OnlineClient::Stop() {
     if (link_) std::thread([link = std::shared_ptr<net::LobbyLink>(std::move(link_))] { link->stop(); }).detach();
     pending_.clear();
     fetching_ = fetch_again_ = false;
+    lobby_told_ = lobby_listed_ = false;
+    lobby_refresh_.Reset();
+    lobby_rev_.clear();
 }
 
 void OnlineClient::Fetch(double now) {
@@ -98,9 +116,38 @@ void OnlineClient::Fetch(double now) {
     Send("friends.requests", net::Json::Object(), Purpose::kRequests);
 }
 
+void OnlineClient::ForgetLobby() {
+    state_.lobby.clear();
+    state_.lobby_total = 0;
+    state_.lobby_fetched = false;
+    state_.lobby_problem.clear();
+    lobby_rev_.clear();
+}
+
+void OnlineClient::SyncLobby(bool visible, double now) {
+    if (!visible) ForgetLobby();
+    if (state_.link != Link::kUp) return;
+    if (visible != lobby_told_ && now >= lobby_retry_at_) {
+        lobby_told_ = visible;
+        if (!visible) lobby_listed_ = false;
+        net::Json body = net::Json::Object();
+        body.set("visible", visible);
+        Send("lobby.publish", std::move(body), Purpose::kLobbyPublish);
+    }
+    const bool watched = now - lobby_watched_at_ < kLobbyWatchSeconds;
+    if (!visible || !lobby_listed_ || !watched || !lobby_refresh_.Due(now)) return;
+    lobby_refresh_.Start(now);
+    net::Json body = net::Json::Object();
+    if (!lobby_rev_.empty()) body.set("rev", lobby_rev_);
+    Send("lobby.list", std::move(body), Purpose::kLobbyList);
+}
+
 void OnlineClient::Send(const std::string& op, net::Json body, Purpose purpose) {
     if (!link_) {
-        if (purpose == Purpose::kAdd || purpose == Purpose::kChange) state_.notice = Describe(net::kUnreachable);
+        if (purpose == Purpose::kAdd || purpose == Purpose::kChange || purpose == Purpose::kLobbyAdd ||
+            purpose == Purpose::kLobbyChange) {
+            state_.notice = Describe(net::kUnreachable);
+        }
         return;
     }
     pending_[link_->request(op, std::move(body))] = purpose;
@@ -115,6 +162,9 @@ void OnlineClient::Handle(const net::LobbyMessage& message, double now) {
         state_.link = Link::kUp;
         state_.friend_code = message.body["friend_code"].as_string();
         fetching_ = false;
+        lobby_told_ = lobby_listed_ = false;
+        lobby_refresh_.Reset();
+        lobby_retry_at_ = 0;
         Fetch(now);
         break;
     case Kind::kLost:
@@ -129,6 +179,9 @@ void OnlineClient::Handle(const net::LobbyMessage& message, double now) {
         break;
     case Kind::kEvent:
         if (message.event.rfind("friend.", 0) == 0) Fetch(now);
+        if (message.event == "friend.request" || message.event == "friend.added" || message.event == "friend.removed") {
+            lobby_refresh_.Soon(now);
+        }
         break;
     case Kind::kResponse:
         if (const auto it = pending_.find(message.seq); it != pending_.end()) {
@@ -151,8 +204,12 @@ void OnlineClient::Answer(Purpose purpose, const net::LobbyMessage& message, dou
         break;
     case Purpose::kRequests:
         if (ok) {
-            state_.incoming = ReadOnlinePlayers(message.body["incoming"]);
-            state_.outgoing = ReadOnlinePlayers(message.body["outgoing"]);
+            std::vector<OnlinePlayer> incoming = ReadOnlinePlayers(message.body["incoming"]);
+            std::vector<OnlinePlayer> outgoing = ReadOnlinePlayers(message.body["outgoing"]);
+            // A decline by the other player sends no event.
+            if (!SameAccounts(incoming, state_.incoming) || !SameAccounts(outgoing, state_.outgoing)) lobby_refresh_.Soon(now);
+            state_.incoming = std::move(incoming);
+            state_.outgoing = std::move(outgoing);
         }
         fetching_ = false;
         if (fetch_again_) {
@@ -161,7 +218,7 @@ void OnlineClient::Answer(Purpose purpose, const net::LobbyMessage& message, dou
         }
         break;
     case Purpose::kAdd: {
-        const std::string name = message.body["name"].as_string();
+        const std::string name = ShownName(message.body);
         state_.notice = !ok ? Describe(message.code)
                       : message.body["state"].as_string() == "friends" ? name + " is now your friend."
                                                                       : "Request sent to " + name + ".";
@@ -170,8 +227,69 @@ void OnlineClient::Answer(Purpose purpose, const net::LobbyMessage& message, dou
     }
     case Purpose::kChange:
         if (!ok) state_.notice = Describe(message.code);
+        lobby_refresh_.Soon(now);
         Fetch(now);
         break;
+    case Purpose::kLobbyPublish:
+    case Purpose::kLobbyList:
+    case Purpose::kLobbyAdd:
+    case Purpose::kLobbyChange:
+        LobbyAnswer(purpose, message, now);
+        break;
+    }
+}
+
+void OnlineClient::LobbyAnswer(Purpose purpose, const net::LobbyMessage& message, double now) {
+    const bool ok = message.code == "ok";
+    switch (purpose) {
+    case Purpose::kLobbyPublish:
+        if (ok) {
+            lobby_listed_ = lobby_told_;
+            lobby_refresh_.Soon(now);
+            state_.lobby_problem.clear();
+        } else if (message.code != net::kLinkLost) {
+            lobby_told_ = !lobby_told_;
+            lobby_retry_at_ = now + kRetrySeconds;
+            state_.lobby_problem = "The Lobby is not available right now.";
+        }
+        break;
+    case Purpose::kLobbyList:
+        if (ok) {
+            lobby_refresh_.Finish();
+            if (!message.body["unchanged"].as_bool()) {
+                state_.lobby = ReadLobbyPlayers(message.body["players"]);
+                lobby_rev_ = message.body["rev"].as_string();
+            }
+            state_.lobby_total = size_t(message.body["total"].as_int());
+            state_.lobby_fetched = true;
+            state_.lobby_updated_at = now;
+            state_.lobby_problem.clear();
+            break;
+        }
+        lobby_refresh_.Fail(now);
+        if (message.code == "not_visible") {
+            lobby_told_ = lobby_listed_ = false;
+        } else if (message.code != net::kLinkLost) {
+            state_.lobby_problem = "Could not refresh the Lobby.";
+        }
+        break;
+    case Purpose::kLobbyAdd: {
+        const std::string name = ShownName(message.body);
+        state_.notice = !ok ? DescribeLobbyAdd(message.code)
+                      : message.body["state"].as_string() == "friends" ? name + " is now your friend."
+                                                                      : "Request sent to " + name + ".";
+        lobby_rev_.clear();
+        lobby_refresh_.Soon(now);
+        Fetch(now);
+        break;
+    }
+    case Purpose::kLobbyChange:
+        if (!ok) state_.notice = DescribeLobbyAdd(message.code);
+        lobby_rev_.clear();
+        lobby_refresh_.Soon(now);
+        Fetch(now);
+        break;
+    default: break;
     }
 }
 
@@ -180,6 +298,35 @@ void OnlineClient::AddFriend(const std::string& code) {
     net::Json body = net::Json::Object();
     body.set("code", code);
     Send("friends.add", std::move(body), Purpose::kAdd);
+}
+
+void OnlineClient::RequestFromLobby(const std::string& player) {
+    state_.notice.clear();
+    for (LobbyPlayer& row : state_.lobby) {
+        if (row.player != player) continue;
+        row.relation = row.relation == LobbyRelation::kIncoming ? LobbyRelation::kFriend : LobbyRelation::kPending;
+    }
+    SortLobbyPlayers(state_.lobby);
+    lobby_rev_.clear();
+    net::Json body = net::Json::Object();
+    body.set("player", player);
+    Send("friends.add", std::move(body), Purpose::kLobbyAdd);
+}
+
+void OnlineClient::DeclineFromLobby(const std::string& player) {
+    state_.notice.clear();
+    for (LobbyPlayer& row : state_.lobby) {
+        if (row.player == player) row.relation = LobbyRelation::kNone;
+    }
+    SortLobbyPlayers(state_.lobby);
+    lobby_rev_.clear();
+    net::Json body = net::Json::Object();
+    body.set("player", player);
+    Send("friends.decline", std::move(body), Purpose::kLobbyChange);
+}
+
+void OnlineClient::RefreshLobby(double now) {
+    if (state_.link == Link::kUp && lobby_listed_) lobby_refresh_.Manual(now);
 }
 
 void OnlineClient::Accept(const std::string& account) {

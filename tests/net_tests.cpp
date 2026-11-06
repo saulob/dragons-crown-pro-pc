@@ -430,6 +430,10 @@ void TestOnlineVersion() {
     const Json hello = hello_body(id, "A", "TEST-1.00", true);
     CHECK(hello["online_protocol"].as_int() == kOnlineProtocolVersion && hello["version"].as_string() == port_version() &&
           hello["platform"].as_string() == host_platform());
+    // Only a player who chose it asks to be listed; the game passes the saved choice on every socket.
+    CHECK(!hello.has("lobby") && !hello_body(id, "A", "TEST-1.00", true, true).has("lobby"));
+    CHECK(hello_body(id, "A", "TEST-1.00", true, true, true)["lobby"].as_bool());
+    CHECK(ReadSource("src/runtime_matching2.cpp").find("s.game, true, true, s.config.lobby_visible)") != std::string::npos);
 
     // The number lives in net/online_version.h only; the lobby compares, it never names one.
     for (const char* file : {"src/net/online_version.cpp", "src/net/lobby_link.cpp", "src/runtime_matching2.cpp",

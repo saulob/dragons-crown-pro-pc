@@ -69,6 +69,10 @@ export class Client {
     this.lobby.relay(this.conn, bytes);
   }
 
+  ping() {
+    this.conn.notePing();
+  }
+
   call(op, body = {}) {
     return this.raw(JSON.stringify({ op, seq: ++this.seq, ...body }));
   }

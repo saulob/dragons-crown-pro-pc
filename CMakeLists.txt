@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 0.9.2 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 1.0.0 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -67,6 +67,11 @@ add_library(dcp_startup_phase STATIC src/startup_phase.c)
 target_include_directories(dcp_startup_phase PUBLIC src)
 target_compile_options(dcp_startup_phase PRIVATE -Wall -Wextra -Werror)
 
+# The port's own text in Portuguese (Brazil), shared by the launcher and the in-game menus.
+add_library(dcp_ui_text STATIC launcher/localization/ui_text.cpp launcher/localization/pt_br_ui_text.cpp)
+target_include_directories(dcp_ui_text PUBLIC launcher src)
+set_target_properties(dcp_ui_text PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+
 add_subdirectory(gpu)
 add_subdirectory(launcher)
 
@@ -122,12 +127,16 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
     add_executable(dragons_crown_pro ${DCP_MAIN_SOURCES})
 endif()
+# Discord Rich Presence (docs/DISCORD.md): dcp.ini can override the application id. Not a cache variable: a configured
+# build folder would keep the id it cached first.
+set(DCP_DISCORD_CLIENT_ID "1568342665970458705")
+set_source_files_properties(src/discord_presence.cpp PROPERTIES COMPILE_DEFINITIONS "DCP_DISCORD_CLIENT_ID=\"${DCP_DISCORD_CLIENT_ID}\"")
 set_target_properties(dragons_crown_pro PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dragons_crown_pro PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(dragons_crown_pro PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
@@ -311,6 +320,31 @@ target_include_directories(dcp-tiling-tests PRIVATE gpu/shim gpu/shadps4 tests s
 target_compile_options(dcp-tiling-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-tiling-tests PRIVATE dcpgpu)
 
+# Focused tests of the Renderer setting and the OpenGL requirements (tools/test.ps1); not part of the default build.
+add_executable(dcp-renderer-selection-tests EXCLUDE_FROM_ALL tests/renderer_selection_tests.cpp)
+set_target_properties(dcp-renderer-selection-tests PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-renderer-selection-tests PRIVATE gpu/shim gpu/shadps4)
+target_compile_definitions(dcp-renderer-selection-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-renderer-selection-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the OpenGL detiler against the game's tiler and of the emitted GLSL through glslangValidator
+# (tools/test.ps1); no OpenGL context. Not part of the default build.
+add_executable(dcp-opengl-backend-tests EXCLUDE_FROM_ALL tests/opengl_backend_tests.cpp)
+set_target_properties(dcp-opengl-backend-tests PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-opengl-backend-tests PRIVATE gpu/shim gpu/shadps4 tests src ${CMAKE_BINARY_DIR}/gpu/include
+    gpu/third_party/gcn/include gpu/third_party/half/include gpu/third_party/xbyak)
+target_compile_definitions(dcp-opengl-backend-tests PRIVATE DCP_GLSLANG="${GLSLANG_COMPILER}")
+target_link_libraries(dcp-opengl-backend-tests PRIVATE dcpgpu $<$<BOOL:${WIN32}>:onecore>)
+
+# Focused tests of the OpenGL write watch against real page faults, and of the state tracker and stream ring against
+# recording entry points (tools/test.ps1); no OpenGL context. Not part of the default build.
+add_executable(dcp-opengl-perf-tests EXCLUDE_FROM_ALL tests/opengl_perf_tests.cpp)
+set_target_properties(dcp-opengl-perf-tests PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-opengl-perf-tests PRIVATE gpu/shim gpu/shadps4)
+target_compile_definitions(dcp-opengl-perf-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-opengl-perf-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-opengl-perf-tests PRIVATE SDL3::SDL3 Threads::Threads)
+
 # Focused tests of the narrower-than-16:9 water reader skip (tools/test.ps1); not part of the default build.
 add_executable(dcp-narrow-water-reader-tests EXCLUDE_FROM_ALL tests/narrow_water_reader_tests.cpp)
 set_target_properties(dcp-narrow-water-reader-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -373,7 +407,7 @@ add_executable(dcp-options-menu-tests EXCLUDE_FROM_ALL tests/options_menu_tests.
     src/runtime_cheats.cpp launcher/game_profile.cpp launcher/online_view.cpp)
 set_target_properties(dcp-options-menu-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-options-menu-tests PRIVATE gpu/shim src launcher)
-target_link_libraries(dcp-options-menu-tests PRIVATE dcp_keys dcp_net)
+target_link_libraries(dcp-options-menu-tests PRIVATE dcp_keys dcp_net dcp_ui_text)
 target_compile_definitions(dcp-options-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-options-menu-tests PRIVATE -Wall -Wextra)
 
@@ -391,6 +425,12 @@ target_compile_options(dcp-system-type-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the online party snapshot: the observer, the snapshot and its report rules, the hook on a synthetic
 # image, and the client's sources (tools/test.ps1); not part of the default build.
+add_executable(dcp-discord-tests EXCLUDE_FROM_ALL tests/discord_tests.cpp)
+set_target_properties(dcp-discord-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-discord-tests PRIVATE src)
+target_compile_definitions(dcp-discord-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-discord-tests PRIVATE -Wall -Wextra)
+
 add_executable(dcp-party-tests EXCLUDE_FROM_ALL tests/party_tests.cpp src/guest_hook.c src/party_hook.cpp)
 set_target_properties(dcp-party-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-party-tests PRIVATE src)
@@ -433,6 +473,17 @@ if (WIN32)
     target_link_libraries(dcp-savedata-tests PRIVATE -pthread)
 else()
     target_link_libraries(dcp-savedata-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
+
+# Focused test of the borrowed overlay data in the guest file layer (tools/test.ps1); not part of the default build.
+add_executable(dcp-runtime-overlay-tests EXCLUDE_FROM_ALL tests/runtime_file_overlay_tests.c src/runtime_file.c
+    $<$<BOOL:${WIN32}>:src/compat_win.c>)
+target_include_directories(dcp-runtime-overlay-tests PRIVATE src)
+target_compile_definitions(dcp-runtime-overlay-tests PRIVATE DCP_OVERLAY_TEST_ROOT="${CMAKE_BINARY_DIR}/runtime-overlay-tests")
+if (WIN32)
+    target_link_libraries(dcp-runtime-overlay-tests PRIVATE bcrypt -pthread)
+else()
+    target_link_libraries(dcp-runtime-overlay-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 endif()
 
 if (NOT WIN32)

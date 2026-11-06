@@ -316,26 +316,20 @@ std::vector<uint8_t> CrilaylaDecompress(std::span<const uint8_t> data, std::stri
     std::memcpy(out.data(), data.data() + 16 + header_off, 0x100); // the file's first 0x100 bytes, stored raw
     const uint8_t* src = data.data() + 16;
     int64_t in_pos = int64_t(header_off) - 1;
-    uint32_t bit_buf = 0;
+    uint64_t bit_buf = 0;
     int bits_left = 0;
     bool underflow = false;
     const auto get_bits = [&](int n) -> uint32_t {
-        uint32_t value = 0;
-        while (n > 0) {
-            if (bits_left == 0) {
-                if (in_pos < 0) {
-                    underflow = true;
-                    return 0;
-                }
-                bit_buf = src[in_pos--];
-                bits_left = 8;
-            }
-            const int take = bits_left < n ? bits_left : n;
-            value = (value << take) | ((bit_buf >> (bits_left - take)) & ((1u << take) - 1));
-            bits_left -= take;
-            n -= take;
+        while (bits_left < n && bits_left <= 56 && in_pos >= 0) {
+            bit_buf = (bit_buf << 8) | src[in_pos--];
+            bits_left += 8;
         }
-        return value;
+        if (bits_left < n) {
+            underflow = true;
+            return 0;
+        }
+        bits_left -= n;
+        return uint32_t((bit_buf >> bits_left) & ((uint64_t(1) << n) - 1));
     };
     int64_t out_pos = int64_t(out.size()) - 1;
     uint64_t written = 0;
@@ -449,6 +443,44 @@ struct PatchWriter {
         std::vector<uint8_t> out = t.packet;
         if (t.encrypted) CryptUtf(out);
         return out;
+    }
+
+    static void Repoint(CpkArchive& a, const CpkEntry& entry, uint64_t pos, size_t size) {
+        Set(a.toc_, entry.row, "FileOffset", pos - a.toc_base());
+        Set(a.toc_, entry.row, "FileSize", size);
+        Set(a.toc_, entry.row, "ExtractSize", size);
+    }
+
+    // Clears the CRC flags so a checked TOC is still accepted.
+    static void AcceptRewrittenToc(CpkArchive& a) {
+        if (a.enable_toc_crc()) {
+            Set(a.header_, 0, "EnableTocCrc", 0);
+            Set(a.header_, 0, "EnableFileCrc", 0);
+        }
+    }
+
+    static std::optional<ArchiveOverlay> Overlay(const CpkArchive& archive, uint64_t length,
+                                                 std::span<const std::pair<std::string, std::vector<uint8_t>>> entries,
+                                                 std::string* error) {
+        CpkArchive a = archive;
+        ArchiveOverlay overlay;
+        uint64_t pos = length;
+        for (const auto& [path, data] : entries) {
+            const CpkEntry* entry = a.Find(path);
+            if (!entry) {
+                if (error) *error = "no " + path + " in the archive";
+                return std::nullopt;
+            }
+            pos = (pos + a.align() - 1) / a.align() * a.align();
+            Repoint(a, *entry, pos, data.size());
+            overlay.patches.emplace_back(pos, data);
+            pos += data.size();
+        }
+        AcceptRewrittenToc(a);
+        overlay.patches.emplace_back(a.toc_.file_pos, Stored(a.toc_));
+        overlay.patches.emplace_back(a.header_.file_pos, Stored(a.header_));
+        overlay.length = pos;
+        return overlay;
     }
 };
 
@@ -742,17 +774,11 @@ PatchResult PatchWriter::Apply(const std::filesystem::path& cpk, const BlockPatc
                 }
             }
             if (!out.good()) return fail_undone(name + ": write failed (disk full?)");
-            PatchWriter::Set(archive.toc_, entry->row, "FileOffset", pos - archive.toc_base());
-            PatchWriter::Set(archive.toc_, entry->row, "FileSize", data.size());
-            PatchWriter::Set(archive.toc_, entry->row, "ExtractSize", data.size());
+            PatchWriter::Repoint(archive, *entry, pos, data.size());
             result.appended += data.size();
             pos += data.size();
         }
-        // Repoint the table of contents, and clear the CRC flags so a checked TOC is still accepted.
-        if (archive.enable_toc_crc()) {
-            PatchWriter::Set(archive.header_, 0, "EnableTocCrc", 0);
-            PatchWriter::Set(archive.header_, 0, "EnableFileCrc", 0);
-        }
+        PatchWriter::AcceptRewrittenToc(archive);
         const std::vector<uint8_t> toc = PatchWriter::Stored(archive.toc_);
         const std::vector<uint8_t> header = PatchWriter::Stored(archive.header_);
         out.seekp(std::streamoff(archive.toc_.file_pos));
@@ -785,6 +811,12 @@ PatchResult PatchWriter::Apply(const std::filesystem::path& cpk, const BlockPatc
 
 PatchResult ApplyBlockPatch(const std::filesystem::path& cpk, const BlockPatch& patch, const PatchHooks& hooks) {
     return PatchWriter::Apply(cpk, patch, hooks);
+}
+
+std::optional<ArchiveOverlay> OverlayEntries(const CpkArchive& archive, uint64_t length,
+                                             std::span<const std::pair<std::string, std::vector<uint8_t>>> entries,
+                                             std::string* error) {
+    return PatchWriter::Overlay(archive, length, entries, error);
 }
 
 PatchResult RevertBlockPatch(const std::filesystem::path& cpk) {

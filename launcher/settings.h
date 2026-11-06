@@ -33,6 +33,8 @@ inline constexpr char kDefaultAspectRatio[] = "16:9";
 // Widens the scene's horizontal view (Hor+) for the aspect ratios wider than 16:9 (dcp_true_ultrawide_scale).
 inline constexpr char kTrueUltrawideKey[] = "true_ultrawide";
 inline constexpr char kGraphicsCardKey[] = "graphics_card";
+// Which renderer runs the game (gpu/shim/dcp_renderer.h, the same keys); read when the game starts.
+inline constexpr char kRendererKey[] = "renderer";
 inline constexpr char kAntiAliasingKey[] = "smaa";
 inline constexpr char kAnisotropyKey[] = "anisotropy";
 inline constexpr char kTextLanguageKey[] = "text_language";
@@ -82,6 +84,21 @@ inline constexpr PresentationChoice kPresentationChoices[] = {
     {"stretch", "Stretch"},
 };
 inline constexpr char kDefaultPresentation[] = "letterbox";
+
+struct RendererChoice {
+    std::string_view key;
+    std::string_view name;
+};
+
+inline constexpr RendererChoice kRendererChoices[] = {
+    {"auto", "Auto"},
+    {"vulkan", "Vulkan"},
+    {"opengl", "OpenGL (experimental)"},
+#ifdef _WIN32
+    {"d3d11", "Direct3D 11 (experimental)"},
+#endif
+};
+inline constexpr char kDefaultRenderer[] = "vulkan";
 
 using Values = std::map<std::string, std::string, std::less<>>;
 

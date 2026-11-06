@@ -22,6 +22,8 @@ inline constexpr char kOnlineStunKey[] = "online_stun";
 inline constexpr char kConnectionTestPortKey[] = "online_connection_test_port";
 // Whether the in-game Ping panel starts shown (gpu/shim/dcp_ping.h); a display preference, reset like the others.
 inline constexpr char kPingDisplayKey[] = "show_ping";
+// Opt-in to the public Lobby; Reset turns it off with the display preferences.
+inline constexpr char kLobbyVisibleKey[] = "show_in_lobby";
 
 // Kept by "Reset all settings": the player's name is not a display preference.
 bool IsOnlineSetting(std::string_view key);

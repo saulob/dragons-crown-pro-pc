@@ -6,9 +6,13 @@
 
 #include <imgui.h>
 
+#include "localization/ui_text.h"
 #include "trg/platform.h"
 
 namespace trg::update {
+using dcp::Tr;
+using dcp::TrValue;
+
 namespace {
 
 bool Visible(const UpdateSnapshot& snapshot) {
@@ -54,15 +58,15 @@ UpdateUiAction DrawUpdateBanner(const UpdateSnapshot& snapshot, const trg::Theme
     return UpdateUiAction::kNone;
   }
 
-  const float base_size = fonts.size > 0.0f ? fonts.size : 18.0f;
+  const float base_size = fonts.size > 0.0f ? fonts.size : trg::layout::kTextBody;
   ImFont* base = fonts.regular ? fonts.regular : ImGui::GetFont();
   ImGui::PushFont(base, base_size);
   const float s = std::max(0.75f, ImGui::GetFontSize() / base_size);
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
-  const float header = std::clamp(viewport->Size.y * 0.2f, 120.0f * s, 190.0f * s);
+  const float header = trg::layout::HeaderHeight(viewport->Size.y, s);
   const float width = std::min(std::max(viewport->Size.x * 0.42f, 260.0f * s), 400.0f * s);
   const float padding = 14.0f * s;
-  const ImVec2 position(viewport->Pos.x + viewport->Size.x - width - 22.0f * s,
+  const ImVec2 position(viewport->Pos.x + viewport->Size.x - width - trg::layout::kMargin * s,
                         viewport->Pos.y + std::max(8.0f * s, (header - 104.0f * s) * 0.5f));
 
   ImGui::SetNextWindowPos(position, ImGuiCond_Always);
@@ -94,22 +98,22 @@ UpdateUiAction DrawUpdateBanner(const UpdateSnapshot& snapshot, const trg::Theme
 
   switch (snapshot.state) {
     case UpdateState::kChecking:
-      title = "Checking for updates";
+      title = Tr("Checking for updates");
       break;
     case UpdateState::kAvailable:
-      title = "Update available";
+      title = Tr("Update available");
       break;
     case UpdateState::kDownloading:
-      title = "Downloading update";
+      title = Tr("Downloading update");
       break;
     case UpdateState::kVerifying:
-      title = "Verifying update";
+      title = Tr("Verifying update");
       break;
     case UpdateState::kReadyToRestart:
-      title = "Update ready";
+      title = Tr("Update ready");
       break;
     case UpdateState::kFailed:
-      title = snapshot.retry_check ? "Update check failed" : "Update failed";
+      title = Tr(snapshot.retry_check ? "Update check failed" : "Update failed");
       break;
     default:
       break;
@@ -120,10 +124,11 @@ UpdateUiAction DrawUpdateBanner(const UpdateSnapshot& snapshot, const trg::Theme
     ImGui::TextUnformatted(title.c_str());
     ImGui::PopFont();
     ImGui::PushFont(regular, 11.5f);
-    const float link_width = ImGui::CalcTextSize("Release notes").x;
+    const char* notes = Tr("Release notes");
+    const float link_width = ImGui::CalcTextSize(notes).x;
     ImGui::SameLine();
     ImGui::SetCursorPosX(std::max(padding, width - padding - link_width));
-    if (ImGui::TextLink("Release notes")) {
+    if (ImGui::TextLink(notes)) {
       trg::OpenUrl(snapshot.release_url);
     }
     ImGui::PopFont();
@@ -132,46 +137,46 @@ UpdateUiAction DrawUpdateBanner(const UpdateSnapshot& snapshot, const trg::Theme
   }
 
   if (snapshot.state == UpdateState::kChecking) {
-    WrappedText("Contacting GitHub...", body_size, regular, theme.dim, wrap_width);
+    WrappedText(Tr("Contacting GitHub..."), body_size, regular, theme.dim, wrap_width);
   } else if (snapshot.state == UpdateState::kAvailable) {
-    detail = "Version " + snapshot.latest_version + " is available";
+    detail = Tr("Version ") + snapshot.latest_version + Tr(" is available");
     WrappedText(detail, body_size, regular, theme.dim, wrap_width);
-    detail = "You are using " + snapshot.current_version;
+    detail = Tr("You are using ") + snapshot.current_version;
     WrappedText(detail, body_size, regular, theme.dim, wrap_width);
     ImGui::Dummy(ImVec2(0.0f, 4.0f * s));
     if (snapshot.install_supported) {
-      if (AccentButton("UPDATE NOW", theme, ImVec2(-FLT_MIN, button_height))) {
+      if (AccentButton(Tr("UPDATE NOW"), theme, ImVec2(-FLT_MIN, button_height))) {
         action = UpdateUiAction::kDownload;
       }
     } else {
-      WrappedText(snapshot.install_unsupported_reason.empty() ? "Automatic installation is not available."
-                                                              : snapshot.install_unsupported_reason,
+      WrappedText(Tr(snapshot.install_unsupported_reason.empty() ? "Automatic installation is not available."
+                                                                 : snapshot.install_unsupported_reason),
                   body_size, regular, theme.dim, wrap_width);
     }
   } else if (snapshot.state == UpdateState::kDownloading) {
     detail = snapshot.progress >= 0.0f
-                 ? "Downloading update " + std::to_string(int(std::clamp(snapshot.progress, 0.0f, 1.0f) * 100.0f + 0.5f)) +
-                       "%"
-                 : "Downloading update";
+                 ? Tr("Downloading update ") +
+                       std::to_string(int(std::clamp(snapshot.progress, 0.0f, 1.0f) * 100.0f + 0.5f)) + "%"
+                 : Tr("Downloading update");
     WrappedText(detail, body_size, regular, theme.dim, wrap_width);
     ImGui::PushStyleColor(ImGuiCol_PlotHistogram, theme.accent);
     ImGui::ProgressBar(std::clamp(snapshot.progress, 0.0f, 1.0f), ImVec2(-FLT_MIN, 6.0f * s), "");
     ImGui::PopStyleColor();
   } else if (snapshot.state == UpdateState::kVerifying) {
-    WrappedText("Checking the download and preparing the files.", body_size, regular, theme.dim, wrap_width);
+    WrappedText(Tr("Checking the download and preparing the files."), body_size, regular, theme.dim, wrap_width);
   } else if (snapshot.state == UpdateState::kReadyToRestart) {
-    detail = "Version " + snapshot.latest_version + " is ready. The launcher will restart.";
+    detail = Tr("Version ") + snapshot.latest_version + Tr(" is ready. The launcher will restart.");
     WrappedText(detail, body_size, regular, theme.dim, wrap_width);
     ImGui::Dummy(ImVec2(0.0f, 4.0f * s));
-    if (AccentButton("RESTART TO UPDATE", theme, ImVec2(-FLT_MIN, button_height))) {
+    if (AccentButton(Tr("RESTART TO UPDATE"), theme, ImVec2(-FLT_MIN, button_height))) {
       action = UpdateUiAction::kRestart;
     }
   } else if (snapshot.state == UpdateState::kFailed) {
-    WrappedText(snapshot.retry_check ? "Check your connection and try again." : snapshot.error, body_size, regular,
-                theme.dim, wrap_width);
+    WrappedText(TrValue(snapshot.retry_check ? "Check your connection and try again." : snapshot.error), body_size,
+                regular, theme.dim, wrap_width);
     if (snapshot.retry_available) {
       ImGui::Dummy(ImVec2(0.0f, 4.0f * s));
-      if (AccentButton("RETRY", theme, ImVec2(-FLT_MIN, button_height))) {
+      if (AccentButton(Tr("RETRY"), theme, ImVec2(-FLT_MIN, button_height))) {
         action = UpdateUiAction::kRetry;
       }
     }

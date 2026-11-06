@@ -2,7 +2,7 @@
 
 ## Result
 
-On this machine (RTX 4070, Vulkan 1.4, Xbox controller) `tools\build.ps1 -Run` runs Dragon's Crown Pro through the native
+On this machine (RTX 4070, Vulkan 1.4, Xbox controller) the development build runs Dragon's Crown Pro through the native
 loader and the shadPS4-derived video core at a steady 60 FPS. Observed, with one scripted Cross press:
 
 1. `Create save data? / This game handles autosave.` (game-drawn prompt; press Cross / Xbox A)
@@ -44,5 +44,5 @@ see the first-run prompt again.
 ## Commands
 
 ```powershell
-tools\build.ps1 -Run   # prepares the game on the first run; log: build\logs\dragons_crown_pro_NNN.log; Cross = A on an Xbox pad, Enter or the key map otherwise
+tools\build.ps1   # then start the game yourself; it prepares the game on the first run; log: build\logs\dragons_crown_pro_NNN.log; Cross = A on an Xbox pad, Enter or the key map otherwise
 ```

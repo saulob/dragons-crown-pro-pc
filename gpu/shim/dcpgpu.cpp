@@ -15,6 +15,7 @@
 #include "dcp_copy_pool.h"
 #include "dcp_latency_trace.h"
 #include "dcp_overlay.h"
+#include "dcp_renderer.h"
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_toggles.h"
@@ -46,6 +47,8 @@ uint64_t runtime_process_time_counter(void);
 uint64_t runtime_tsc_frequency(void);
 int32_t* runtime_errno(void);
 void runtime_memory_set_gpu_hooks(RuntimeGpuRange map, RuntimeGpuRange unmap, RuntimeGpuRange invalidate);
+// dcp_gpu_list.cpp
+int dcp_check_vulkan(char* cause, size_t cause_size, char* advice, size_t advice_size);
 // runtime_log.c
 void runtime_log_flush(void);
 void runtime_log_mark_clean_exit(void);
@@ -90,7 +93,7 @@ public:
     }
 };
 
-void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
+void MemoryManager::SetRasterizer(VideoCore::RasterizerBackend* rasterizer_) {
     rasterizer = rasterizer_;
     // Existing guest mappings are replayed by the runtime when hooks are installed.
     runtime_memory_set_gpu_hooks(
@@ -189,8 +192,31 @@ extern "C" int dcpgpu_available(void) {
     return 1;
 }
 
+// Each renderer needs its own kind of window, so Auto asks whether Vulkan can run before there is one.
+static void SelectRenderer() {
+    const auto choice = DcpRenderer::Choice(DcpSettings::Get().renderer.load());
+    char cause[320] = "", advice[320] = "";
+    const bool vulkan_usable = choice != DcpRenderer::Auto ||
+                               dcp_check_vulkan(cause, sizeof(cause), advice, sizeof(advice));
+    const auto resolution = DcpRenderer::Resolve(choice, vulkan_usable, cause);
+    DcpRenderer::SetActive(resolution.backend);
+    std::printf("Renderer: selected %s, active %s\n",
+                std::string(DcpRenderer::ChoiceKeys[choice]).c_str(),
+                DcpRenderer::BackendName(resolution.backend));
+    if (!resolution.fallback_reason.empty()) {
+        std::printf("Renderer: Auto fell back to OpenGL: %s\n", resolution.fallback_reason.c_str());
+    }
+}
+
+static_assert(DCP_GPU_FEATURE_RENDER_RESOLUTION == DcpSettings::RenderResolution &&
+              DCP_GPU_FEATURE_TRUE_ULTRAWIDE == DcpSettings::TrueUltrawide &&
+              DCP_GPU_FEATURE_JAPANESE_NPC_VOICES == DcpSettings::JapaneseNpcVoices &&
+              DCP_GPU_FEATURE_UNLOCK_GALLERY == DcpSettings::UnlockGallery);
+
 extern "C" int dcpgpu_init(const DcpGpuConfig* config) {
     DcpSettings::Load(config->settings_file);
+    DcpSettings::Get().features = config->features;
+    SelectRenderer();
     const std::string user_dir = config->user_dir;
     Common::FS::SetUserDir(std::filesystem::path(std::u8string(user_dir.begin(), user_dir.end())));
     g_sdk_version = config->sdk_version;
@@ -199,7 +225,8 @@ extern "C" int dcpgpu_init(const DcpGpuConfig* config) {
     const s32 width = config->width, height = config->height;
     g_window_thread = std::thread([title, width, height] {
         Common::SetCurrentThreadName("dcp:window");
-        auto* window = new Frontend::WindowSDL(width, height, title.c_str());
+        auto* window = new Frontend::WindowSDL(width, height, title.c_str(),
+                                               Frontend::GraphicsApiFor(DcpRenderer::Active()));
         {
             std::scoped_lock lock{g_window_mutex};
             g_window = window;

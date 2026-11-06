@@ -44,9 +44,10 @@ inline constexpr int kLobbyProtocol = 1;
 struct Identity;
 
 // The hello request: protocol, game key (net::kOnlineGame), identity, name, and the online protocol, port version and
-// platform (net/online_version.h). `presence` false (the connection test) keeps the session from showing the player online.
+// platform (net/online_version.h). `presence` false (the connection test) keeps the session from showing the player online;
+// `lobby_visible` lists the session in the public Lobby from its first moment, so a reconnect stays listed.
 Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence,
-                bool relay = false);
+                bool relay = false, bool lobby_visible = false);
 
 // What the lobby's hello answer says about its relay; an older lobby says nothing.
 struct RelayCapability {
@@ -132,8 +133,11 @@ private:
 class LobbySession {
 public:
     ~LobbySession();
-    // False with the reason; `hello_reply` receives the hello answer.
-    bool open(const std::string& url, const Json& hello, Json* hello_reply, std::string* error, int timeout_ms = 8000);
+    // Opens the socket and sends no hello, for operations that take no account.
+    bool connect(const std::string& url, std::string* error, int timeout_ms = 8000);
+    // False with the reason; `hello_reply` receives the hello answer and `refusal` the lobby's code when it answered.
+    bool open(const std::string& url, const Json& hello, Json* hello_reply, std::string* error, int timeout_ms = 8000,
+              std::string* refusal = nullptr);
     // The answer, or nullopt with `code` set ("timeout" or the lobby's error code).
     std::optional<Json> call(const std::string& op, Json body, std::string* code);
     void close();

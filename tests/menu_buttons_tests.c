@@ -146,6 +146,8 @@ static void test_locate_synthetic(void) {
     CHECK(menu_buttons_locate(western, kSize, "CUSA10454-1.01", &sites) == 0);
     CHECK(sites.reader == kReader && sites.write_count == 2 && sites.western_sites);
     CHECK(sites.writes[0] == kImmediateA && sites.writes[1] == kImmediateB);
+    CHECK(menu_buttons_locate(western, kSize, "CUSA10487-1.03", &sites) == 0);
+    CHECK(sites.reader == kReader && sites.write_count == 2 && sites.western_sites);
     CHECK(sites.compares[0] == kReader + 12 && sites.compares[1] == kPrompt0 + kPromptCompare &&
           sites.compares[2] == kPrompt1 + kPromptCompare && sites.compares[3] == kPrompt2 + kPromptCompare);
     CHECK(sites.load == kLoad + kLoadSite);

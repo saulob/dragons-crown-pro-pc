@@ -3,6 +3,7 @@
 #define DCP_LAUNCHER_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "feature_sites.h"
 
@@ -69,6 +70,17 @@ int dcp_aspect_ratio(const char *settings_file, const char *image_dir);
  * when the file or the value is missing or not one of them. */
 int dcp_text_language(const char *settings_file, const char *image_dir, const char *app0);
 
+typedef struct {
+    uint64_t offset, size;
+    const unsigned char *data;
+} DcpFilePatch;
+/* For a saved text_language that is the port's translation of an archive slot (dcp_text_language tells the game that
+ * slot): the regional archive's file name, its length and the byte ranges that make app0's copy read translated (valid
+ * until the next call). NULL for every other language. `message` says how much is translated or why it is not, empty
+ * when the language is not a translation. */
+const char *dcp_text_translation(const char *settings_file, const char *image_dir, const char *app0, uint64_t *length,
+                                 DcpFilePatch **patches, size_t *count, char *message, size_t message_size);
+
 /* The cheats the settings file turns on, one bit per cheat (dcp_cheats.h); 0 when the file or the keys are missing. */
 unsigned dcp_saved_cheats(const char *settings_file);
 
@@ -132,6 +144,9 @@ int dcp_gpu_names(char (*names)[256], int max);
 /* A DcpGraphicsCheck: 1 when Vulkan can run the renderer. Otherwise logs why and returns 0. It asks again on every call
  * until it succeeds, so a driver installed meanwhile is found. */
 int dcp_check_vulkan(char *cause, size_t cause_size, char *advice, size_t advice_size);
+
+/* dcp_check_vulkan as far as the renderer saved in settings_file needs Vulkan: OpenGL does not, and Auto can do without. */
+int dcp_check_renderer(const char *settings_file, char *cause, size_t cause_size, char *advice, size_t advice_size);
 
 /* Builds boot.bin, content.bin and image.json in `out` from the prepared game folder `app0` (UTF-8 paths). 0 on
  * success; otherwise 1 and the reason in `error`. */

@@ -71,11 +71,22 @@ void runtime_file_report(void);
 void runtime_file_configure(const char *app0, const char *user);
 int runtime_file_mount(const char *guest, const char *host);
 void runtime_file_unmount(const char *guest);
+typedef struct {
+    uint64_t offset, size;
+    const void *data;
+} RuntimeFilePatch;
+/* The guest sees `guest` as `length` bytes: the host file, zeros past its end, and the patches on top. The patches'
+ * data is borrowed and must outlive the process. Before the guest starts only; -1 with nothing registered when the
+ * table is full, the path already has one or a patch falls outside `length`. */
+int runtime_file_overlay(const char *guest, uint64_t length, const RuntimeFilePatch *patches, size_t count);
 int runtime_file_translate(const char *guest, char *out, size_t size);
 int64_t runtime_file_open(const char *path, int flags, int mode);
 int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
 int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
+/* Called after every successful read with the guest path, the file offset and the size (Discord presence). It runs on
+ * the reading thread and must not block. */
+void runtime_file_set_read_observer(void (*observe)(const char *guest, uint64_t offset, uint64_t size));
 int64_t runtime_file_write(int fd, const void *buffer, uint64_t size);
 int64_t runtime_file_lseek(int fd, int64_t offset, int whence);
 int64_t runtime_file_stat(const char *path, void *guest_stat);

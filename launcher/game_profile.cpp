@@ -2,6 +2,8 @@
 
 #include <string_view>
 
+#include "localization/ui_text.h"
+
 namespace dcp {
 namespace {
 
@@ -91,12 +93,19 @@ constexpr PackageLayer kJapan102Layers[] = {{"01.00", "01.00", false}, {"01.02",
 constexpr PackageLayer kJapan103Layers[] = {{"01.00", "01.00", false}, {"01.03", "01.00", true}};
 constexpr PackageLayer kAsia100Layers[] = {{"01.00", "01.02", false}};
 constexpr PackageLayer kAsia102Layers[] = {{"01.00", "01.02", false}, {"01.02", "01.00", true}};
+constexpr PackageLayer kEuropeLayers[] = {{"01.00", "01.03", false}};
 
 constexpr const char* kDiscmapPatchFiles[] = {"sce_discmap_patch.plt"};
 
 constexpr TextLanguage kWesternLanguages[] = {
     {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
     {"italian", "Italian", 5, "IT"}, {"spanish", "Spanish", 3, "ES"},
+};
+// Brazilian Portuguese is the port's translation of the English slot (game_translation.h), made for 1.00's sheets.
+constexpr TextLanguage kUsLanguages[] = {
+    {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
+    {"italian", "Italian", 5, "IT"}, {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
+    {"spanish", "Spanish", 3, "ES"},
 };
 constexpr TextLanguage kAsiaLanguages[] = {{"traditional_chinese", "Traditional Chinese", 10, "CT"},
                                            {"korean", "Korean", 9, "KR"}};
@@ -120,7 +129,7 @@ constexpr GameBuild kGameBuilds[] = {
         true,
         kUsLayers,
         kUsResolutionSites,
-        kWesternLanguages,
+        kUsLanguages,
     },
     {
         "CUSA10454",
@@ -248,6 +257,30 @@ constexpr GameBuild kGameBuilds[] = {
         false,
         true,
     },
+    {
+        "CUSA10487",
+        "EP2475-CUSA10487_00-DRAGONSCROWNPRO1",
+        "1.03",
+        "CUSA10487-1.03",
+        "25c58f473337bc1da768d86e4cd12fe8a15e4af48e0826ac9a857fd9e3c09845",
+        "DRACRO_EU.CPK",
+        {},
+        "CUSA10487 1.03 Europe",
+        "Europe",
+        true,
+        true,
+        true,
+        true,
+        kEuropeLayers,
+        {},
+        kWesternLanguages,
+        true,
+        false,
+        true,
+        true,
+        true,
+        true,
+    },
 };
 
 bool SameLayer(const PackageLayer& a, const PackageLayer& b) {
@@ -318,7 +351,7 @@ std::string SupportedBuildsText() {
     std::string text;
     for (size_t i = 0; i < builds.size(); ++i) {
         if (i > 0) {
-            text += i + 1 == builds.size() ? " and " : ", ";
+            text += i + 1 == builds.size() ? Tr(" and ") : ", ";
         }
         text += builds[i].label;
     }

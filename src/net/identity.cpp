@@ -11,6 +11,12 @@ namespace dcp::net {
 namespace fs = std::filesystem;
 namespace {
 
+// path::string() throws on Windows for a name outside the system code page.
+std::string PathText(const fs::path& path) {
+    const std::u8string text = path.u8string();
+    return {text.begin(), text.end()};
+}
+
 bool IsHex(const std::string& s) {
     for (const char c : s)
         if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
@@ -22,7 +28,7 @@ Identity Read(const fs::path& file) {
     id.file = file;
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        id.error = "cannot read " + file.string();
+        id.error = "cannot read " + PathText(file);
         return id;
     }
     std::string line;
@@ -37,7 +43,7 @@ Identity Read(const fs::path& file) {
     if (!id.ok()) {
         id.account = 0;
         id.secret.clear();
-        id.error = file.string() + " is damaged; delete it to make a new online identity";
+        id.error = PathText(file) + " is damaged; delete it to make a new online identity";
     }
     return id;
 }
@@ -66,7 +72,7 @@ Identity load_identity(const fs::path& user_dir, bool create) {
             << "secret=" << hex_encode(secret, sizeof(secret)) << "\n";
         if (!out) {
             Identity id;
-            id.error = "cannot write " + temp.string();
+            id.error = "cannot write " + PathText(temp);
             return id;
         }
     }

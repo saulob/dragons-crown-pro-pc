@@ -9,12 +9,15 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <imgui.h>
@@ -34,10 +37,14 @@
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
+#include "header_art.h"
 #include "host.h"
+#include "incident_page.h"
 #include "launcher_quit.h"
+#include "localization/ui_text.h"
 #include "options.h"
 #include "package_browser.h"
+#include "page_icons.h"
 #include "placement.h"
 #include "play_gate.h"
 #include "online_page.h"
@@ -66,6 +73,8 @@ ImGuiKey ImGui_ImplSDL3_KeyEventToImGuiKey(SDL_Keycode keycode, SDL_Scancode sca
 namespace dcp {
 namespace {
 
+const char* TranslateLauncherText(const char* english) { return Tr(english); }
+
 const ImVec4 kAccent = ImVec4(kAccentRed / 255.0f, kAccentGreen / 255.0f, kAccentBlue / 255.0f, 1.0f);
 constexpr double kPlayFeedbackSeconds = 0.4;
 constexpr char kPortTitle[] = "Dragon's Crown Pro PC";
@@ -86,10 +95,11 @@ int ScancodeOf(ImGuiKey key) {
     return 0;
 }
 std::string GameFilesHelp() {
-    return "Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported: " + SupportedBuildsText() +
-           ". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages. The game is unpacked into the "
-           "game folder next to the program (about 6 GB). No game files are included. Reinstalling keeps your saves and "
-           "settings.";
+    return Tr("Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported: ") +
+           SupportedBuildsText() +
+           Tr(". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their "
+              "respective 1.00 base packages. The game is unpacked into the game folder next to the program (about 6 "
+              "GB). No game files are included. Reinstalling keeps your saves and settings.");
 }
 #ifdef _WIN32
 constexpr char kShowLauncherHelp[] = "Off starts the game directly. Hold Shift while starting to bring it back.";
@@ -102,6 +112,16 @@ constexpr char kWindowSizeHelp[] =
 constexpr char kGraphicsCardHelp[] =
     "Selects which graphics card renders the game. If the selected card is no longer available, the first available "
     "card is used.";
+#ifdef _WIN32
+constexpr char kRendererHelp[] =
+    "Vulkan is the supported renderer. OpenGL and Direct3D 11 are experimental and render only part of the game's "
+    "features. Direct3D 11 is intended mainly for Windows systems where Vulkan or OpenGL has problems. Auto uses Vulkan, "
+    "and OpenGL when this system cannot run Vulkan. It takes effect the next time the game starts.";
+#else
+constexpr char kRendererHelp[] =
+    "Vulkan is the supported renderer. OpenGL is experimental and renders only part of the game's features. Auto uses "
+    "Vulkan, and OpenGL when this system cannot run Vulkan. It takes effect the next time the game starts.";
+#endif
 constexpr char kMonitorHelp[] = "The display the game opens on.";
 constexpr char kVSyncHelp[] = "On prevents tearing. Off allows it, for the lowest latency and G-Sync/FreeSync.";
 constexpr char kPresentationHelp[] =
@@ -172,19 +192,34 @@ trg::Theme LauncherTheme() {
     return theme;
 }
 
-constexpr float kHeaderArtAspect = 1600.0f / 180.0f;
-
-trg::HeaderPainter LauncherHeader(ImTextureID art, float art_aspect) {
+trg::HeaderPainter LauncherHeader(std::function<ImTextureID(int, int)> art, float art_aspect) {
     const trg::HeaderPainter gradient = trg::headers::Gradient(
         IM_COL32(12, 18, 26, 255), IM_COL32(62, 42, 12, 255), IM_COL32(8, 34, 44, 255), IM_COL32(8, 10, 16, 255));
-    return [gradient, art, art_aspect](const trg::HeaderContext& c) {
+    return [gradient, art = std::move(art), art_aspect](const trg::HeaderContext& c) {
         gradient(c);
-        if (art == ImTextureID{}) {
+        const auto fade = [&c](float share) {
+            const ImU32 clear = trg::Col(c.theme.bg, 0.0f), solid = trg::Col(c.theme.bg);
+            c.draw->AddRectFilledMultiColor(ImVec2(c.min.x, c.max.y - (c.max.y - c.min.y) * share), c.max, clear, clear, solid, solid);
+        };
+        fade(kHeaderFade);
+        const float height = ImGui::GetMainViewport()->Size.y;
+        // Down to the panels, which are drawn later and cover the rest.
+        const float bottom = c.max.y + trg::layout::kBodyGap * c.scale;
+        const HeaderArtRect rect = PlaceHeaderArt(c.min.y, c.max.x, bottom, height, c.scale, art_aspect);
+        const float framebuffer = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
+        const ImTextureID texture = art(static_cast<int>((rect.max_x - rect.min_x) * framebuffer + 0.5f),
+                                        static_cast<int>((rect.max_y - rect.min_y) * framebuffer + 0.5f));
+        if (texture == ImTextureID{}) {
             return;
         }
-        const float height = c.max.y - c.min.y;
-        const float width = height * art_aspect;
-        c.draw->AddImage(ImTextureRef(art), ImVec2(c.max.x - width, c.min.y), c.max);
+        const float art_height = rect.max_y - rect.min_y;
+        const float top_v = (c.min.y - rect.min_y) / art_height, bottom_v = (bottom - rect.min_y) / art_height;
+        c.draw->PushClipRect(c.min, ImVec2(c.max.x, bottom), false);
+        for (const HeaderArtStrip& strip : SplitHeaderArt(rect)) {
+            c.draw->AddImage(ImTextureRef(texture), ImVec2(strip.min_x, c.min.y), ImVec2(strip.max_x, bottom),
+                             ImVec2(strip.min_u, top_v), ImVec2(strip.max_u, bottom_v));
+        }
+        c.draw->PopClipRect();
     };
 }
 
@@ -229,24 +264,12 @@ ImTextureID LoadSponsorIcon(LauncherHost& host) {
     return host.CreateTexture(image.rgba.data(), image.width, image.height);
 }
 
-ImTextureID LoadHeaderArt(LauncherHost& host, float& aspect) {
-    DcpPng::Image image;
-    if (!LoadLauncherImage("header-art.png", image)) {
-        return ImTextureID{};
-    }
-    const ImTextureID texture = host.CreateTexture(image.rgba.data(), image.width, image.height);
-    if (texture != ImTextureID{}) {
-        aspect = float(image.width) / float(image.height);
-    }
-    return texture;
-}
-
 const char* StatusTitle(GameFileState state) {
     switch (state) {
-    case GameFileState::kValid: return "Ready to play";
-    case GameFileState::kMissing: return "Game files needed";
-    case GameFileState::kDifferentVersion: return "Different version of Dragon's Crown Pro";
-    case GameFileState::kReadError: return "Could not read the game files";
+    case GameFileState::kValid: return Tr("Ready to play");
+    case GameFileState::kMissing: return Tr("Game files needed");
+    case GameFileState::kDifferentVersion: return Tr("Different version of Dragon's Crown Pro");
+    case GameFileState::kReadError: return Tr("Could not read the game files");
     }
     return "";
 }
@@ -254,9 +277,9 @@ const char* StatusTitle(GameFileState state) {
 std::string StatusDetail(GameFileState state) {
     switch (state) {
     case GameFileState::kValid: return "";
-    case GameFileState::kMissing: return "Install the game from your own .pkg file.";
-    case GameFileState::kDifferentVersion: return "Install a supported build from your own .pkg file.";
-    case GameFileState::kReadError: return "Check that the game folder can be read, then install again.";
+    case GameFileState::kMissing: return Tr("Install the game from your own .pkg file.");
+    case GameFileState::kDifferentVersion: return Tr("Install a supported build from your own .pkg file.");
+    case GameFileState::kReadError: return Tr("Check that the game folder can be read, then install again.");
     }
     return "";
 }
@@ -332,11 +355,21 @@ public:
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
         placement_ = PlacementTracker(host_.Restored());
-        fonts_ = trg::LoadSystemFonts(18.0f);
-        header_art_ = LoadHeaderArt(host_, header_art_aspect_);
+        fonts_ = trg::LoadSystemFonts(trg::layout::kTextBody);
+        if (LoadLauncherImage("header-art.png", header_art_image_)) {
+            header_art_aspect_ = float(header_art_image_.width) / float(header_art_image_.height);
+        }
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         online_page_ = std::make_unique<OnlinePage>(UserDir());
+        incident_page_ = std::make_unique<IncidentPage>(IncidentPlaces());
+        {
+            net::OnlineConfig online = ReadOnlineConfig(settings_.file());
+            net::apply_environment(online);
+            incident_page_->CheckReports(online);
+        }
+        trg::SetTranslator(&TranslateLauncherText);
+        localization::SetActiveLanguage(settings_.Get(kTextLanguageKey, text_languages_.front().key));
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         updater_ = std::make_unique<trg::update::UpdateController>(MakeUpdateConfig(InstallDir()));
         updater_->StartCheck();
@@ -406,6 +439,7 @@ private:
         NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
         NormalizeTextLanguage(settings_, text_languages_);
+        localization::SetActiveLanguage(settings_.Get(kTextLanguageKey, text_languages_.front().key));
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
             if (!SeparateGameProcess(config_, settings_)) {
                 return Outcome::kPlay;
@@ -418,7 +452,7 @@ private:
                 return Outcome::kPlay;
             }
             play_.Cancel();
-            launcher_->SetStatus("Could not start the game. " + error, 10.0);
+            launcher_->SetStatus(Tr("Could not start the game. ") + TrValue(error), 10.0);
         }
         ImGuiIO& io = ImGui::GetIO();
         if (play_.starting()) {
@@ -527,7 +561,7 @@ private:
             Log("settings saved, starting the game");
             break;
         case PlayRequest::kFilesNotReady:
-            launcher_->SetStatus(std::string(StatusTitle(files_)) + ". Install the game files first.", 6.0);
+            launcher_->SetStatus(std::string(StatusTitle(files_)) + Tr(". Install the game files first."), 6.0);
             break;
         case PlayRequest::kBusy:
             launcher_->SetStatus("Wait for the game file changes to finish.", 6.0);
@@ -620,14 +654,14 @@ private:
     }
 
     void DrawStartingMessage() {
-        constexpr const char* kText = "Settings saved. Starting game...";
-        ImGui::PushFont(fonts_.semibold, fonts_.size * 1.25f);
+        const char* text = Tr("Settings saved. Starting game...");
+        ImGui::PushFont(fonts_.semibold, fonts_.size * 1.5f);
         const float size = ImGui::GetFontSize();
-        const ImVec2 text_size = ImGui::CalcTextSize(kText);
+        const ImVec2 text_size = ImGui::CalcTextSize(text);
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         const ImVec2 pos(viewport->Pos.x + (viewport->Size.x - text_size.x) * 0.5f,
                          viewport->Pos.y + (viewport->Size.y - text_size.y) * 0.5f);
-        ImGui::GetForegroundDrawList()->AddText(ImGui::GetFont(), size, pos, ImGui::GetColorU32(kAccent), kText);
+        ImGui::GetForegroundDrawList()->AddText(ImGui::GetFont(), size, pos, ImGui::GetColorU32(kAccent), text);
         ImGui::PopFont();
     }
 
@@ -639,17 +673,20 @@ private:
         c.hints = "Enter  Play     Alt+F4  Quit     Ctrl+S  Save";
         c.fonts = fonts_;
         c.branding.title = "DRAGON'S CROWN PRO";
+        c.branding.fade_into_page = false;
         c.branding.subtitle_color = kAccent;
         c.branding.subtitle_segments = {
             {"PC PORT   \xC2\xB7   ", ""},
             {"v" DCP_PORT_VERSION "   \xC2\xB7   ", ""},
             {"BY SAULOB", kAuthorUrl},
         };
-        c.branding.background = LauncherHeader(header_art_, header_art_aspect_);
+        c.branding.background = LauncherHeader([this](int width, int height) { return HeaderArtTexture(width, height); },
+                                               header_art_aspect_);
         c.sponsor = {"Sponsor on GitHub", kSponsorUrl, sponsor_icon_};
         c.note = "Play applies the changes. Save keeps them without starting.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
+            c.pages.back().icon = [this, page](int pixels) { return PageIconTexture(page, pixels); };
         }
         c.can_play = [this] {
             if (install_.running()) {
@@ -669,6 +706,32 @@ private:
             return trg::PlayCheck{};
         };
         return c;
+    }
+
+    ImTextureID HeaderArtTexture(int width, int height) {
+        if (width != header_art_width_ || height != header_art_height_) {
+            header_art_width_ = width;
+            header_art_height_ = height;
+            host_.DestroyTexture(header_art_);
+            const std::vector<uint8_t> rgba = ScaleArtRgba(header_art_image_.rgba.data(), header_art_image_.width,
+                                                           header_art_image_.height, width, height, kHeaderArtAlphaGain);
+            header_art_ = rgba.empty() ? ImTextureID{} : host_.CreateTexture(rgba.data(), width, height);
+        }
+        return header_art_;
+    }
+
+    ImTextureID PageIconTexture(PageId page, int pixels) {
+        const auto [icon, is_new] = page_icons_.try_emplace({page, pixels});
+        if (is_new) {
+            const std::vector<uint8_t> rgba = RenderPageIcon(page, pixels);
+            if (!rgba.empty()) {
+                icon->second = host_.CreateTexture(rgba.data(), pixels, pixels);
+            }
+            if (icon->second == ImTextureID{}) {
+                Log("sidebar icon unavailable: page %d at %d px", static_cast<int>(page), pixels);
+            }
+        }
+        return icon->second;
     }
 
     trg::Page MakePage(PageId page) {
@@ -695,6 +758,9 @@ private:
                     [this] { return online_page_ ? static_cast<int>(online_page_->PendingRequests()) : 0; }};
         case PageId::kTrophies:
             return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr, nullptr};
+        case PageId::kBugReport:
+            return {name, "Report a problem and send it with one game log.", [this](trg::Ui& ui) { PageBugReport(ui); },
+                    [this] { return incident_page_->HasReportUpdates(); }, nullptr};
         case PageId::kAbout:
             return {name, "This port, and where your files and settings live.", [this](trg::Ui& ui) { PageAbout(ui); },
                     nullptr, nullptr};
@@ -711,7 +777,7 @@ private:
         if (!install_failure_.empty()) {
             ui.Spacer(4);
             ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().warn_dot);
-            ImGui::TextUnformatted(install_failure_.c_str());
+            ImGui::TextUnformatted(Tr(install_failure_.c_str()));
             ImGui::PopStyleColor();
             ui.Help(install_failure_text_.c_str());
             ui.Spacer(4);
@@ -719,19 +785,20 @@ private:
         if (ready && online_page_->PlayNeedsTest(settings_)) {
             ui.Spacer(4);
             ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().warn_dot);
-            ImGui::TextWrapped("%s", kConnectionTestRequired);
+            ImGui::TextWrapped("%s", Tr(kConnectionTestRequired));
             ImGui::PopStyleColor();
             ui.Spacer(4);
         }
-        const std::string files_help = GameFilesHelp();
-        ui.Row("Game files", files_help.c_str());
+        ui.Row("Game files");
         if (!ui.TaskProgress(install_)) {
-            const bool clicked = ready ? ImGui::Button("Reinstall game...", ImVec2(-FLT_MIN, 0))
+            const bool clicked = ready ? ImGui::Button(Tr("Reinstall game..."), ImVec2(-FLT_MIN, 0))
                                        : ui.AccentButton("Install game...");
             if (clicked) {
                 BrowseAndInstall();
             }
         }
+        ui.EndRows();
+        ui.Help(GameFilesHelp().c_str());
         ui.Toggle("Show this launcher", kShowLauncherHelp, kShowLauncherKey, true, "Off", "On");
         ui.EndRows();
     }
@@ -757,7 +824,8 @@ private:
             browser_.Open(paths_.app0.parent_path().parent_path().parent_path());
             return;
         }
-        StartInstall(trg::BrowseForFile("Select your Dragon's Crown Pro package", {{"PS4 packages (*.pkg)", "*.pkg"}}));
+        StartInstall(trg::BrowseForFile(Tr("Select your Dragon's Crown Pro package"),
+                                        {{Tr("PS4 packages (*.pkg)"), "*.pkg"}}));
     }
 
     // A test instance keeps its DCP_GAME_BUILD: installing or activating another build would move the active build
@@ -822,6 +890,9 @@ private:
                     Log("language resources, %s", line.c_str());
                 }
             }
+            for (const std::string& line : outcome->site_report) {
+                std::printf("%s\n", line.c_str());
+            }
             paths_ = ActiveBuildPaths(RootsOf(paths_));
             Recheck();
             if (trophy_page_) {
@@ -846,7 +917,7 @@ private:
         Log("game install failed: %s (%s)", message.title.c_str(), outcome->detail.c_str());
         install_failure_ = message.title;
         install_failure_text_ = message.text;
-        launcher_->SetStatus(std::string("Install failed: ") + install_failure_, 8.0);
+        launcher_->SetStatus(Tr("Install failed: ") + install_failure_, 8.0);
     }
 
     const Display* SelectedDisplay() const { return DisplayForSetting(displays_, settings_.GetInt(kMonitorKey, 1)); }
@@ -877,6 +948,11 @@ private:
         ui.Toggle("True Ultrawide", ultrawide_available ? kTrueUltrawideHelp : kUnverifiedTrueUltrawideHelp,
                   kTrueUltrawideKey, false, "Off", "On");
         ImGui::EndDisabled();
+        std::vector<trg::Option> renderers;
+        for (const RendererChoice& choice : kRendererChoices) {
+            renderers.push_back({std::string(choice.key), std::string(choice.name)});
+        }
+        ui.Combo("Renderer", kRendererHelp, kRendererKey, kDefaultRenderer, renderers);
         ui.Row("Graphics card", kGraphicsCardHelp);
         GraphicsCardCombo();
         ui.Toggle("VSync", kVSyncHelp, kVSyncKey, true, "Off", "On");
@@ -924,7 +1000,7 @@ private:
 
     void GraphicsCardCombo() {
         if (gpu_names_.empty()) {
-            ImGui::TextUnformatted("No graphics card found");
+            ImGui::TextUnformatted(Tr("No graphics card found"));
             return;
         }
         const std::string current = settings_.Get(kGraphicsCardKey);
@@ -1003,14 +1079,16 @@ private:
             ui.EndRows();
             return;
         }
-        std::string help = cheats::kLauncherHelp;
-        help.replace(help.find("F10"), 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
+        std::string help = Tr(cheats::kLauncherHelp);
+        if (const size_t at = help.find("F10"); at != std::string::npos) {
+            help.replace(at, 3, KeyDisplayName(SavedKey(settings_, DCP_KEY_HOTKEY_CHEATS)));
+        }
         ui.Help(help.c_str());
-        ui.Spacer(12);
+        ui.Spacer(6);
         const bool blocked = !CheatsAvailable(build_);
         if (blocked) {
-            ui.Help((std::string("Cheats are not available for ") + build_->label + ".").c_str());
-            ui.Spacer(8);
+            ui.Help((std::string(Tr("Cheats are not available for ")) + build_->label + ".").c_str());
+            ui.Spacer(4);
         }
         ImGui::BeginDisabled(blocked);
         for (const cheats::CheatInfo& cheat : cheats::kCheats) {
@@ -1060,16 +1138,16 @@ private:
 
     std::string JapaneseMenuButtonsHelp() const {
         const bool xbox = prompts_installed_ == PromptStyle::kXbox;
-        const char* confirm = xbox ? "A" : "Cross";
-        const char* cancel = xbox ? "B" : "Circle";
+        const char* confirm = Tr(xbox ? "A" : "Cross");
+        const char* cancel = Tr(xbox ? "B" : "Circle");
         char text[320];
-        std::snprintf(text, sizeof(text), kJapaneseMenuButtonsHelp, confirm, cancel, cancel, confirm);
+        std::snprintf(text, sizeof(text), Tr(kJapaneseMenuButtonsHelp), confirm, cancel, cancel, confirm);
         return text;
     }
 
     void KeyRow(trg::Ui& ui, DcpKeyAction action) {
-        const std::optional<ImGuiKey> key =
-            ui.KeyBindRow(dcp_key_actions[action].label, nullptr, KeyDisplayName(SavedKey(settings_, action)));
+        const std::optional<ImGuiKey> key = ui.KeyBindRow(Tr(dcp_key_actions[action].label), nullptr,
+                                                          KeyDisplayName(SavedKey(settings_, action)));
         if (!key) {
             return;
         }
@@ -1088,11 +1166,11 @@ private:
         const bool ready = files_ == GameFileState::kValid && !install_.running();
         const bool xbox_allowed = !build_ || xbox_available_;
         ImGui::BeginDisabled(!ready || !xbox_allowed);
-        const char* shown = ready ? PromptStyleLabel(prompts_installed_) : "Install the game first";
-        if (ImGui::BeginCombo("##controller_prompts", shown)) {
+        const char* shown = ready ? PromptStyleLabel(prompts_installed_) : Tr("Install the game first");
+        if (ImGui::BeginCombo("##controller_prompts", Tr(shown))) {
             for (const PromptStyle style : {PromptStyle::kPlayStation, PromptStyle::kXbox}) {
                 const bool selected = style == prompts_installed_;
-                if (ImGui::Selectable(PromptStyleLabel(style), selected) && !selected) {
+                if (ImGui::Selectable(Tr(PromptStyleLabel(style)), selected) && !selected) {
                     StartPatches(style, safe_mode_installed_, PatchAction::kPrompts);
                 }
                 if (selected) {
@@ -1196,10 +1274,12 @@ private:
             if (!settings_.SaveNow(saved)) {
                 Log("could not save the game patch settings");
             }
-            launcher_->SetStatus(patch_action_ == PatchAction::kSafeMode
-                                     ? std::string("Arachnophobia Safe Mode: ") + (safe_mode_installed_ ? "On." : "Off.")
-                                     : std::string("Controller prompts: ") + PromptStyleLabel(prompts_installed_) + ".",
-                                 6.0);
+            launcher_->SetStatus(
+                patch_action_ == PatchAction::kSafeMode
+                    ? std::string(Tr("Arachnophobia Safe Mode: ")) +
+                          Tr(safe_mode_installed_ ? "On." : "Off.")
+                    : std::string(Tr("Controller prompts: ")) + Tr(PromptStyleLabel(prompts_installed_)) + ".",
+                6.0);
             return;
         }
         if (outcome->cancelled) {
@@ -1232,6 +1312,21 @@ private:
         trophy_page_->Draw(ui);
     }
 
+    IncidentPage::Places IncidentPlaces() const {
+        const std::filesystem::path logs = PathFromUtf8(config_.logs_dir ? config_.logs_dir : "logs");
+        const std::filesystem::path running = config_.log_file ? PathFromUtf8(config_.log_file) : std::filesystem::path();
+        return {logs, running, UserDir(), {InstallDir(), UserDir().parent_path(), logs.parent_path()}};
+    }
+
+    ReportFacts CurrentReportFacts() const {
+        static const std::string operating_system = OperatingSystemText();
+        const bool known = build_ && files_ == GameFileState::kValid;
+        return {DCP_PORT_VERSION, known ? build_->label : "Not installed", known ? build_->version : "",
+                known ? build_->title_id : "", operating_system};
+    }
+
+    void PageBugReport(trg::Ui& ui) { incident_page_->Draw(ui, CurrentReportFacts()); }
+
     void PageAbout(trg::Ui& ui) {
         ui.SponsorCard(
             "This open source PC port is maintained and developed in my free time. If you enjoy the project and would "
@@ -1263,15 +1358,15 @@ private:
         if (ui.ButtonRow("Logs folder", "Open the folder containing session and crash logs", "Open logs folder")) {
             OpenLogsFolder();
         }
-        ui.Info("Port version", DCP_PORT_VERSION);
-        const std::string game = InstalledGameName(files_, build_);
-        ui.Info("Game", game.c_str());
-        ui.Info("Renderer", "Vulkan");
 #ifdef _WIN32
-        ui.Info("Platform", "Windows x64");
+        const char* platform = "Windows x64";
 #else
-        ui.Info("Platform", "Linux x86-64 (experimental)");
+        const char* platform = "Linux x86-64 (experimental)";
 #endif
+        ui.InfoGrid({{"Port version", DCP_PORT_VERSION},
+                     {"Game", InstalledGameName(files_, build_)},
+                     {"Renderer", "Vulkan"},
+                     {"Platform", platform}});
         char libraries[96];
         std::snprintf(libraries, sizeof(libraries), "SDL %d.%d.%d  \xC2\xB7  Dear ImGui %s  \xC2\xB7  TRG Launcher %s",
                       SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
@@ -1309,8 +1404,12 @@ private:
     const GameBuild* build_ = nullptr;
     std::vector<TextLanguage> text_languages_;
     LauncherHost host_;
+    DcpPng::Image header_art_image_;
     ImTextureID header_art_{};
+    int header_art_width_ = 0;
+    int header_art_height_ = 0;
     ImTextureID sponsor_icon_{};
+    std::map<std::pair<PageId, int>, ImTextureID> page_icons_;
     float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;
@@ -1319,6 +1418,7 @@ private:
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
     std::unique_ptr<OnlinePage> online_page_;
+    std::unique_ptr<IncidentPage> incident_page_;
     PlayAttemptDetector play_attempts_;
     PlayGate play_;
     ProblemDialog problem_;
@@ -1375,6 +1475,7 @@ DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const ch
 
 // Play without the launcher on screen: the same checks, explained in a window of its own.
 DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherSettings& settings) {
+    localization::SetActiveLanguage(settings.Get(kTextLanguageKey, "english"));
     char cause[320] = "", advice[320] = "";
     if (config.check_graphics && !config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
         return ExplainInWindow("Graphics", cause, advice);
@@ -1386,7 +1487,7 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherS
     if (StartGameProcess(config, error)) {
         return DCP_LAUNCHER_GAME_STARTED;
     }
-    return ExplainInWindow("Launcher", "Could not start the game.", error.c_str());
+    return ExplainInWindow("Launcher", "Could not start the game.", TrValue(error).c_str());
 }
 
 } // namespace

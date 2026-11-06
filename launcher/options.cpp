@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL_keyboard.h>
 
+#include "localization/ui_text.h"
+
 namespace dcp {
 namespace {
 
@@ -36,6 +38,7 @@ const char* PageName(PageId page) {
     case PageId::kControls: return "Controls";
     case PageId::kOnline: return "Online";
     case PageId::kTrophies: return "Trophies";
+    case PageId::kBugReport: return "Bug Report";
     case PageId::kAbout: return "About";
     }
     return "";
@@ -51,13 +54,14 @@ bool WindowSizeFits(WindowSize size, const Display& display) {
 }
 
 std::string ResolutionLabel(const DcpResolution& resolution) {
-    return std::string(resolution.name) + " \xE2\x80\x94 " + Dimensions(resolution.width, resolution.height);
+    return std::string(Tr(resolution.name)) + " \xE2\x80\x94 " + Dimensions(resolution.width, resolution.height);
 }
 
 std::string WindowSizeLabel(WindowSize size) {
     std::string label = Dimensions(size.width, size.height);
     if (size == kGamePictureSize) {
-        label += "   (the game's own size)";
+        label += "   ";
+        label += Tr("(the game's own size)");
     }
     return label;
 }
@@ -65,10 +69,10 @@ std::string WindowSizeLabel(WindowSize size) {
 std::string MonitorLabel(int monitor, const std::vector<Display>& displays) {
     const std::string number = std::to_string(monitor);
     if (monitor < 1 || monitor > static_cast<int>(displays.size())) {
-        return "Display " + number + " (not connected)";
+        return Tr("Display ") + number + Tr(" (not connected)");
     }
     const Display& display = displays[static_cast<size_t>(monitor - 1)];
-    std::string label = "Display " + number + (display.primary ? " (primary)" : "") + "   " +
+    std::string label = Tr("Display ") + number + (display.primary ? Tr(" (primary)") : "") + "   " +
                         Dimensions(display.bounds.w, display.bounds.h);
     if (!display.name.empty() && display.name != "Generic PnP Monitor") {
         label += "   " + display.name;

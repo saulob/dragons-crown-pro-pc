@@ -51,10 +51,12 @@ inline int64_t NowMs() {
 // read by the reporter.
 class UnitTable {
 public:
-    void Seen(int32_t slot, uint32_t class_index, int64_t now_ms) {
+    // A cell is [now_ms:48][level:8][class + 1:8]; level is the game's own, 0-based.
+    void Seen(int32_t slot, uint32_t class_index, int64_t now_ms, uint8_t level = 0) {
         if (ValidSlot(slot) && ValidClass(class_index)) {
-            cells_[static_cast<size_t>(slot)].store((static_cast<uint64_t>(now_ms) << 8) | (class_index + 1),
-                                                    std::memory_order_relaxed);
+            cells_[static_cast<size_t>(slot)].store(
+                (static_cast<uint64_t>(now_ms) << 16) | (uint64_t{level} << 8) | (class_index + 1),
+                std::memory_order_relaxed);
         }
     }
 
@@ -62,11 +64,14 @@ public:
         if (!ValidSlot(slot)) {
             return std::nullopt;
         }
-        const uint64_t cell = cells_[static_cast<size_t>(slot)].load(std::memory_order_relaxed);
-        if (cell == 0 || now_ms - static_cast<int64_t>(cell >> 8) > kFreshMs) {
-            return std::nullopt;
-        }
-        return static_cast<uint8_t>((cell & 0xff) - 1);
+        const std::optional<uint64_t> cell = Fresh(slot, now_ms);
+        return cell ? std::optional<uint8_t>(static_cast<uint8_t>((*cell & 0xff) - 1)) : std::nullopt;
+    }
+
+    // The level as the game shows it (1-based).
+    std::optional<int> LevelAt(int slot, int64_t now_ms) const {
+        const std::optional<uint64_t> cell = Fresh(slot, now_ms);
+        return cell ? std::optional<int>(static_cast<int>((*cell >> 8) & 0xff) + 1) : std::nullopt;
     }
 
     void Clear() {
@@ -76,6 +81,17 @@ public:
     }
 
 private:
+    std::optional<uint64_t> Fresh(int slot, int64_t now_ms) const {
+        if (!ValidSlot(slot)) {
+            return std::nullopt;
+        }
+        const uint64_t cell = cells_[static_cast<size_t>(slot)].load(std::memory_order_relaxed);
+        if (cell == 0 || now_ms - static_cast<int64_t>(cell >> 16) > kFreshMs) {
+            return std::nullopt;
+        }
+        return cell;
+    }
+
     std::array<std::atomic<uint64_t>, kSlots> cells_{};
 };
 
@@ -85,6 +101,7 @@ inline UnitTable& SharedUnits() {
 }
 
 // `memory` reads the game's memory: U64(address), U32(address) and U8(address). Player units of the human category only.
+// Fed by the party hook online and by the cheats' player tick offline (they patch the same entry).
 template <typename Memory>
 void Observe(const Memory& memory, uint64_t unit, int64_t now_ms, UnitTable& table) {
     if (unit == 0) {
@@ -95,7 +112,7 @@ void Observe(const Memory& memory, uint64_t unit, int64_t now_ms, UnitTable& tab
         return;
     }
     table.Seen(static_cast<int32_t>(memory.U32(unit + cheats::kUnitPlayerSlotOffset)),
-               memory.U8(unit + cheats::kUnitClassOffset), now_ms);
+               memory.U8(unit + cheats::kUnitClassOffset), now_ms, memory.U8(unit + cheats::kUnitLevelOffset));
 }
 
 struct Snapshot {

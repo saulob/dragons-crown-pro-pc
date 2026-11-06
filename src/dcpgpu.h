@@ -13,12 +13,17 @@ typedef struct {
     uint32_t sdk_version;       /* from the eboot's procparam */
     uint32_t psf_attributes;    /* param.sfo ATTRIBUTE */
     int32_t width, height;      /* initial window size */
+    uint32_t features;          /* DCP_GPU_FEATURE_*: what the game build supports (the Options menu shows only those) */
 } DcpGpuConfig;
+#define DCP_GPU_FEATURE_RENDER_RESOLUTION (1u << 0)
+#define DCP_GPU_FEATURE_TRUE_ULTRAWIDE (1u << 1)
+#define DCP_GPU_FEATURE_JAPANESE_NPC_VOICES (1u << 2)
+#define DCP_GPU_FEATURE_UNLOCK_GALLERY (1u << 3)
 /* 1 when a video core is linked in, 0 for the stub. */
 int dcpgpu_available(void);
 /* Registers kernel event queues (needed with or without graphics). */
 void dcpgpu_register_kernel(void);
-/* Creates window, Vulkan device, presenter and GPU command processor; 0 on success. */
+/* Creates window, renderer and GPU command processor; 0 on success. */
 int dcpgpu_init(const DcpGpuConfig *config);
 /* Function for an imported NID ("NID#lib"), or 0 when the video core does not provide it. */
 uintptr_t dcpgpu_resolve(const char *scoped_nid);

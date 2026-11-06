@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <system_error>
 
+#include "localization/ui_text.h"
+
 #include "utf8.h"
 
 namespace dcp {
@@ -79,7 +81,7 @@ PromptsResult SetGamePatches(const std::filesystem::path& app0, const GameBuild&
                                 [&](const BlockPatchTarget& target) { return target.name == name; });
         });
         if (hooks.phase) {
-            hooks.phase(((wanted.targets.empty() ? "Restoring " : "Patching ") + Utf8(archive.filename()) + "...").c_str());
+            hooks.phase((Tr(wanted.targets.empty() ? "Restoring " : "Patching ") + Utf8(archive.filename()) + "...").c_str());
         }
         const auto note = [&](const PatchResult& step) {
             result.detail += (result.detail.empty() ? "" : "; ") + step.detail;

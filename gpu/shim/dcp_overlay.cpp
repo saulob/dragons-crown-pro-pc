@@ -18,6 +18,7 @@
 #include "dcp_cheat_menu.h"
 #include "dcp_menu_input.h"
 #include "dcp_options_menu.h"
+#include "localization/ui_text.h"
 #include "dcp_options_ui.h"
 #include "dcp_settings.h"
 #include "dcp_overlay_box.h"
@@ -26,6 +27,11 @@
 #include "runtime_online_overlay.h"
 #include "imgui.h"
 #include "imgui_internal.h" // RegisterUserTexture (save pictures)
+#include "imgui_impl_opengl3.h"
+#ifdef _WIN32
+#include "dcp_renderer.h"
+#include "imgui_impl_gles3.h"
+#endif
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -257,7 +263,7 @@ CheatRowText CheatRowState(const dcp::cheats::MenuRow& row) {
                         : action ? row.verb
                         : choice ? choice_label
                         : (on ? "On" : "Off");
-    return {state, usable && (action || on || (choice && multiplier != off))};
+    return {state ? dcp::Tr(state) : nullptr, usable && (action || on || (choice && multiplier != off))};
 }
 
 void ActivateCheatRow(const dcp::cheats::MenuRow& row) {
@@ -296,7 +302,7 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
     const float pad = ImGui::GetFontSize() * 0.4f;
     const float y = min.y + (height - ImGui::GetFontSize()) * 0.5f;
     const CheatRowText text = CheatRowState(row);
-    draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), row.label);
+    draw->AddText(ImVec2(min.x + pad, y), ImGui::GetColorU32(ImGuiCol_Text), dcp::Tr(row.label));
     if (text.state != nullptr) {
         draw->AddText(ImVec2(max.x - pad - ImGui::CalcTextSize(text.state).x, y),
                       ImGui::GetColorU32(text.lit ? accent : dim), text.state);
@@ -312,13 +318,13 @@ const char* CheatRowHelp(const dcp::cheats::MenuRow& row) {
     case dcp::cheats::RowKind::Toggle:
         for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
             if (info.cheat == row.cheat) {
-                return info.description;
+                return dcp::Tr(info.description);
             }
         }
         return "";
-    case dcp::cheats::RowKind::Action: return "Runs once each time it is pressed. Nothing is saved.";
-    case dcp::cheats::RowKind::MovementSpeed: return dcp::cheats::kMovementSpeedHelp;
-    case dcp::cheats::RowKind::Experience: return dcp::cheats::kExperienceMultiplierHelp;
+    case dcp::cheats::RowKind::Action: return dcp::Tr("Runs once each time it is pressed. Nothing is saved.");
+    case dcp::cheats::RowKind::MovementSpeed: return dcp::Tr(dcp::cheats::kMovementSpeedHelp);
+    case dcp::cheats::RowKind::Experience: return dcp::Tr(dcp::cheats::kExperienceMultiplierHelp);
     }
     return "";
 }
@@ -326,7 +332,7 @@ const char* CheatRowHelp(const dcp::cheats::MenuRow& row) {
 DcpOptionsUi::CheatRowView OptionsCheatView(size_t index) {
     const dcp::cheats::MenuRow& row = dcp::cheats::kMenuRows[index];
     const CheatRowText text = CheatRowState(row);
-    return {row.label, CheatRowHelp(row), text.state, text.lit};
+    return {dcp::Tr(row.label), CheatRowHelp(row), text.state, text.lit};
 }
 
 void OptionsCheatActivate(size_t index, int direction) {
@@ -338,7 +344,7 @@ void OptionsCheatActivate(size_t index, int direction) {
 }
 
 const char* OptionsCheatNote() {
-    return runtime_cheats_available() ? nullptr : "Cheats are not available for this game build.";
+    return runtime_cheats_available() ? nullptr : dcp::Tr("Cheats are not available for this game build.");
 }
 
 bool OptionsOnlinePlay() {
@@ -411,7 +417,7 @@ void CheatMenu() {
                                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
     if (ImGui::Begin("##dcp_cheat_menu", nullptr, flags)) {
         ImGui::SetWindowFontScale(scale);
-        ImGui::TextColored(accent, "%s", dcp::cheats::kMenuTitle);
+        ImGui::TextColored(accent, "%s", dcp::Tr(dcp::cheats::kMenuTitle));
         ImGui::Separator();
         const float body_available = available_height - window_padding * 2.0f - header_height - footer_height;
         const float child_height = std::max(std::min(body_height, body_available), 1.0f);
@@ -446,8 +452,8 @@ void CheatMenu() {
         }
         ImGui::EndChild();
         ImGui::Separator();
-        ImGui::TextColored(dim, "%s", dcp::cheats::kMenuCloseHint);
-        ImGui::TextColored(dim, "%s", dcp::cheats::kMenuNote);
+        ImGui::TextColored(dim, "%s", dcp::Tr(dcp::cheats::kMenuCloseHint));
+        ImGui::TextColored(dim, "%s", dcp::Tr(dcp::cheats::kMenuNote));
     }
     ImGui::End();
     ImGui::PopStyleVar(4);
@@ -469,7 +475,7 @@ void PressCheatMenuKey(bool repeat) {
     switch (dcp::cheats::MenuKeyPress(repeat, runtime_cheats_online_locked() != 0, cheat_open, busy)) {
     case dcp::cheats::MenuKeyAction::Open: OpenCheatMenu(); break;
     case dcp::cheats::MenuKeyAction::Close: menu_close.Request(); break;
-    case dcp::cheats::MenuKeyAction::OnlineHint: SetNotice(dcp::cheats::kOnlineLockoutText); break;
+    case dcp::cheats::MenuKeyAction::OnlineHint: SetNotice(dcp::Tr(dcp::cheats::kOnlineLockoutText)); break;
     case dcp::cheats::MenuKeyAction::None: break;
     }
 }
@@ -531,8 +537,8 @@ void TextEntryBox() {
     ImGui::Text("%s_", text_entry_text.c_str());
     ImGui::SetWindowFontScale(1.0f);
     ImGui::Separator();
-    ImGui::TextDisabled("Keyboard: type, Backspace to erase, Enter = OK, Esc = cancel");
-    ImGui::TextDisabled("Controller: Cross (A) = OK, Circle (B) = cancel");
+    ImGui::TextDisabled("%s", dcp::Tr("Keyboard: type, Backspace to erase, Enter = OK, Esc = cancel"));
+    ImGui::TextDisabled("%s", dcp::Tr("Controller: Cross (A) = OK, Circle (B) = cancel"));
     ImGui::End();
 }
 
@@ -585,7 +591,7 @@ void ChoiceBox() {
         }
     }
     ImGui::Separator();
-    ImGui::TextDisabled("Up/Down or D-pad: choose   Enter or Cross (A): OK   Esc or Circle (B): cancel");
+    ImGui::TextDisabled("%s", dcp::Tr("Up/Down or D-pad: choose   Enter or Cross (A): OK   Esc or Circle (B): cancel"));
     ImGui::End();
 }
 
@@ -601,7 +607,7 @@ void LoadingScreen() {
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
     const u32 done = loading_done, total = loading_total;
     ImGui::SetWindowFontScale(1.6f);
-    ImGui::TextUnformatted(total ? "Loading shader cache..." : "Preparing graphics...");
+    ImGui::TextUnformatted(dcp::Tr(total ? "Loading shader cache..." : "Preparing graphics..."));
     ImGui::SetWindowFontScale(1.0f);
     if (total) {
         char count[64];
@@ -609,7 +615,7 @@ void LoadingScreen() {
                       u32(u64(done) * 100 / total));
         ImGui::ProgressBar(float(done) / float(total), ImVec2(-1.0f, 0.0f), count);
     }
-    ImGui::TextDisabled("The first start after an update takes longer.");
+    ImGui::TextDisabled("%s", dcp::Tr("The first start after an update takes longer."));
     ImGui::End();
 }
 
@@ -646,7 +652,7 @@ void BackgroundLoading() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::TextDisabled("Loading shader cache %u%%", u32(u64(done) * 100 / total));
+    ImGui::TextDisabled("%s %u%%", dcp::Tr("Loading shader cache"), u32(u64(done) * 100 / total));
     ImGui::End();
 }
 
@@ -660,22 +666,36 @@ void Notice() {
 }
 
 // An online room of an incompatible port version was left out or refused: long enough to read three lines.
+// "Label: value" lines keep their value; the label and the plain lines are translated.
+std::string TranslateNotice(const std::string& text) {
+    std::string out;
+    size_t start = 0;
+    while (true) {
+        const size_t end = text.find('\n', start);
+        const std::string line = text.substr(start, end == std::string::npos ? end : end - start);
+        const size_t colon = line.find(": v");
+        out += colon == std::string::npos ? dcp::Tr(line) : dcp::Tr(line.substr(0, colon)) + line.substr(colon);
+        if (end == std::string::npos) {
+            return out;
+        }
+        out += '\n';
+        start = end + 1;
+    }
+}
+
 void PollOnlineNotice() {
     char text[256];
     if (!runtime_online_take_notice(text, sizeof(text))) {
         return;
     }
     std::scoped_lock lock{imgui_mutex};
-    SetNotice(text, std::chrono::seconds(6));
+    SetNotice(TranslateNotice(text), std::chrono::seconds(6));
 }
 
 } // namespace
 
-void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
-    std::scoped_lock lock{imgui_mutex};
-    if (initialized) {
-        return;
-    }
+// imgui_mutex held.
+void CreateImGuiContext() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -696,6 +716,14 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     font_config.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(dcp_font_ttf),
                                    int(dcp_font_ttf_end - dcp_font_ttf), 18.0f, &font_config);
+}
+
+void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
+    std::scoped_lock lock{imgui_mutex};
+    if (initialized) {
+        return;
+    }
+    CreateImGuiContext();
 
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(
@@ -726,6 +754,27 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     };
     if (!ImGui_ImplVulkan_Init(&info)) {
         std::printf("Overlay: ImGui Vulkan backend init failed\n");
+        ImGui::DestroyContext();
+        return;
+    }
+    initialized = true;
+}
+
+void InitOpenGL() {
+    std::scoped_lock lock{imgui_mutex};
+    if (initialized) {
+        return;
+    }
+    CreateImGuiContext();
+#ifdef _WIN32
+    const bool started = DcpRenderer::Active() == DcpRenderer::Backend::Direct3D11
+                             ? InitImGuiGles3()
+                             : ImGui_ImplOpenGL3_Init("#version 330 core");
+#else
+    const bool started = ImGui_ImplOpenGL3_Init("#version 330 core");
+#endif
+    if (!started) {
+        std::printf("Overlay: ImGui OpenGL backend init failed\n");
         ImGui::DestroyContext();
         return;
     }
@@ -1030,11 +1079,17 @@ void LogPresent() {
     presented_frames.fetch_add(1, std::memory_order_relaxed);
 }
 
-void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
+namespace {
+
+float last_interval_ms = 0.0f;
+
+// Everything that runs every presented frame; false when nothing is on screen.
+bool BeginPresent() {
     // Present interval for the FPS readout (measured also while nothing is drawn).
     const auto now = std::chrono::steady_clock::now();
     const float ms = std::chrono::duration<float, std::milli>(now - last_present).count();
     last_present = now;
+    last_interval_ms = ms;
     if (ms > 0.0f && ms < 1000.0f) {
         frame_ms_avg = frame_ms_avg == 0.0f ? ms : frame_ms_avg * 0.95f + ms * 0.05f;
     }
@@ -1043,15 +1098,17 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
         ping_readout.Reset();
     }
     PollOnlineNotice();
-    if (!Visible()) {
-        return;
-    }
-    std::scoped_lock lock{imgui_mutex};
+    return Visible();
+}
+
+// imgui_mutex held. `new_frame` is the renderer backend's.
+void BuildFrame(u32 width, u32 height, void (*new_frame)()) {
+    const float ms = last_interval_ms;
     ImGuiIO& io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(float(extent.width), float(extent.height));
+    io.DisplaySize = ImVec2(float(width), float(height));
     io.DeltaTime = ms > 0.0f && ms < 1000.0f ? ms / 1000.0f : 1.0f / 60.0f;
     // UI scale follows the display height (1080p = 1).
-    const float scale = std::max(float(extent.height) / 1080.0f, 0.75f);
+    const float scale = std::max(float(height) / 1080.0f, 0.75f);
     if (std::abs(scale - base_scale) > 0.01f) {
         ImGuiStyle& style = ImGui::GetStyle();
         style.ScaleAllSizes(scale / base_scale);
@@ -1060,7 +1117,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
 
     UpdateChoiceTextures();
-    ImGui_ImplVulkan_NewFrame();
+    new_frame();
     ImGui::NewFrame();
     if (loading) {
         LoadingScreen();
@@ -1090,6 +1147,16 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
         ChoiceBox();
     }
     ImGui::Render();
+}
+
+} // namespace
+
+void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
+    if (!BeginPresent()) {
+        return;
+    }
+    std::scoped_lock lock{imgui_mutex};
+    BuildFrame(extent.width, extent.height, ImGui_ImplVulkan_NewFrame);
 
     const vk::RenderingAttachmentInfo attachment{
         .imageView = view,
@@ -1109,6 +1176,22 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmdbuf);
     }
     cmdbuf.endRendering();
+}
+
+void RenderOpenGL(u32 width, u32 height) {
+    if (!BeginPresent()) {
+        return;
+    }
+    std::scoped_lock lock{imgui_mutex};
+#ifdef _WIN32
+    if (DcpRenderer::Active() == DcpRenderer::Backend::Direct3D11) {
+        BuildFrame(width, height, ImGuiGles3NewFrame);
+        ImGuiGles3RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
+#endif
+    BuildFrame(width, height, ImGui_ImplOpenGL3_NewFrame);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 } // namespace DcpOverlay

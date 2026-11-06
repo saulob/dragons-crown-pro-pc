@@ -95,7 +95,7 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-runtime-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -111,6 +111,8 @@ if ((test)); then
     "$build_dir/bin/dcp-feature-sites-tests"
     step 'Running the trophy tests'
     "$build_dir/bin/dcp-trophy-tests"
+    step 'Running the bug report tests'
+    "$build_dir/bin/dcp-incident-tests"
     step 'Running the cheat tests'
     "$build_dir/bin/dcp-cheats-tests"
     step 'Running the Japanese NPC voice tests'
@@ -119,12 +121,16 @@ if ((test)); then
     "$build_dir/bin/dcp-system-type-tests"
     step 'Running the online party snapshot tests'
     "$build_dir/bin/dcp-party-tests"
+    step 'Running the Discord Rich Presence tests'
+    "$build_dir/bin/dcp-discord-tests"
     step 'Running the runtime tests (memory, fibers)'
     "$build_dir/bin/dcp-runtime-tests"
     step 'Running the text tests (text dialog, system font set)'
     "$build_dir/bin/dcp-text-tests"
     step 'Running the save-data tests (mounts, Japanese startup save hook)'
     "$build_dir/bin/dcp-savedata-tests"
+    step 'Running the runtime file overlay tests (borrowed patch data, read observer)'
+    "$build_dir/bin/dcp-runtime-overlay-tests"
     step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the window fit tests'
@@ -153,6 +159,12 @@ if ((test)); then
     "$build_dir/bin/dcp-isa-tests"
     step 'Running the tiling tests (GPU tile layouts and addresses)'
     "$build_dir/bin/dcp-tiling-tests"
+    step 'Running the renderer selection tests'
+    "$build_dir/bin/dcp-renderer-selection-tests"
+    step 'Running the OpenGL backend tests (detiler, emitted GLSL through glslang, no context)'
+    "$build_dir/bin/dcp-opengl-backend-tests"
+    step 'Running the OpenGL fast path tests (write watch with real faults, state tracker, stream ring, no context)'
+    "$build_dir/bin/dcp-opengl-perf-tests"
     step 'Running the updater tests (versions, release JSON, SHA-256, ZIP safety, staging and rollback)'
     "$build_dir/bin/dcp-update-tests"
     step 'Running the RTC tests (Win32 file time)'

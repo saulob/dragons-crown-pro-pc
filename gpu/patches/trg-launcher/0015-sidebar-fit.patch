@@ -1,0 +1,42 @@
+diff --git a/include/trg/layout.h b/include/trg/layout.h
+index e72c148..3c61359 100644
+--- a/include/trg/layout.h
++++ b/include/trg/layout.h
+@@ -40,6 +40,7 @@ inline constexpr float kContentBottom = 6.0f;
+ 
+ inline constexpr float kSidebarPadding = 6.0f;
+ inline constexpr float kSidebarRow = 42.0f;
++inline constexpr float kSidebarRowMin = 32.0f;
+ inline constexpr float kSidebarIcon = 21.0f;
+ inline constexpr float kSidebarIconInset = 12.0f;  // from the row's left edge
+ inline constexpr float kSidebarIconGap = 11.0f;    // between the icon box and the label
+@@ -72,8 +73,14 @@ inline float SidebarWidth(float viewport_width, float scale) {
+   return std::clamp(viewport_width * 0.15f, 168.0f * scale, 176.0f * scale);
+ }
+ 
+-inline float SidebarHeight(int pages) {
+-  return kSidebarPadding * 2.0f + float(pages) * kSidebarRow + float(pages - 1) * kSidebarGap;
++inline float SidebarHeight(int pages, float row = kSidebarRow) {
++  return kSidebarPadding * 2.0f + float(pages) * row + float(pages - 1) * kSidebarGap;
++}
++
++// The full row while every page fits, less in a window too short for that.
++inline float SidebarRowFor(int pages, float body_height) {
++  const float rows = body_height - SidebarHeight(pages, 0.0f);
++  return std::clamp(std::floor(rows / float(pages)), kSidebarRowMin, kSidebarRow);
+ }
+ 
+ inline float ControlColumnWidth(float row_width, float scale) {
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 1a873b0..c72eb35 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -1216,7 +1216,7 @@ void Launcher::DrawSidebar(ImVec2 size) {
+   OutlinePanel(size);
+   ImGui::BeginChild("##sidebar", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+   const float pad = layout::kSidebarPadding * s_;
+-  const float item_h = layout::kSidebarRow * s_;
++  const float item_h = layout::SidebarRowFor(int(config_.pages.size()), size.y / s_) * s_;
+   const float framebuffer = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
+   const int icon_pixels = int(layout::kSidebarIcon * s_ * framebuffer + 0.5f);
+   const float icon_size = float(icon_pixels) / framebuffer;

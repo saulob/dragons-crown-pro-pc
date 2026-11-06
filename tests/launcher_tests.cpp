@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -28,6 +29,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "controller_prompts.h"
@@ -44,23 +46,32 @@
 #include "dcp_settings.h"
 #include "dcp_title.h"
 #include "file_browser.h"
+#include "fms_sheet.h"
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
 #include "net/connection_test.h"
 #include "npc_voice_resources.h"
+#include "game_translation.h"
+#include "header_art.h"
+#include "localization/ui_text.h"
+#include <zlib.h>
 #include "net/identity.h"
 #include "net/online_version.h"
 #include "online_client.h"
 #include "online_settings.h"
 #include "online_view.h"
 #include "options.h"
+#include "page_icons.h"
 #include "paths.h"
 #include "placement.h"
 #include "play_gate.h"
 #include "runtime_log.h"
 #include "settings.h"
 #include "text_languages.h"
+#include "trg/layout.h"
+#include "trg/page_navigation.h"
+#include "trg/platform.h"
 #include "utf8.h"
 
 namespace fs = std::filesystem;
@@ -79,6 +90,43 @@ void Check(bool condition, const char* what, int line) {
     }
 }
 #define CHECK(condition) Check((condition), #condition, __LINE__)
+
+// tools/test.ps1 reads these: a group with no line, or a failed one, fails the launcher gate.
+std::vector<std::pair<std::string, int>> g_groups;
+
+void InGroup(const char* name, void (*test)()) {
+    const int before = g_failures;
+    try {
+        test();
+    } catch (const std::exception& error) {
+        ++g_failures;
+        std::printf("FAIL group %s: exception: %s\n", name, error.what());
+    }
+    for (auto& group : g_groups) {
+        if (group.first == name) {
+            group.second += g_failures - before;
+            return;
+        }
+    }
+    g_groups.emplace_back(name, g_failures - before);
+}
+
+bool ValidUtf8Text(const std::string& text) {
+    for (size_t i = 0; i < text.size();) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        const size_t extra = c < 0x80 ? 0 : (c & 0xe0) == 0xc0 ? 1 : (c & 0xf0) == 0xe0 ? 2 : (c & 0xf8) == 0xf0 ? 3 : 4;
+        if (extra == 4 || i + extra >= text.size()) {
+            return false;
+        }
+        for (size_t j = 1; j <= extra; ++j) {
+            if ((static_cast<unsigned char>(text[i + j]) & 0xc0) != 0x80) {
+                return false;
+            }
+        }
+        i += extra + 1;
+    }
+    return true;
+}
 
 std::string ReadAll(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
@@ -126,6 +174,7 @@ const GameBuild& kJp102 = SupportedBuilds()[3];
 const GameBuild& kJp103 = SupportedBuilds()[4];
 const GameBuild& kCk100 = SupportedBuilds()[5];
 const GameBuild& kCk = SupportedBuilds()[6];
+const GameBuild& kEu = SupportedBuilds()[7];
 
 constexpr char kEboot[] = "synthetic eboot bytes";
 
@@ -307,7 +356,7 @@ void TestFingerprintMatchesProfile() {
         }
     }
     CHECK(SupportedBuildsText() ==
-          "CUSA10454 1.00 USA, CUSA10454 1.01 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong and CUSA10209 1.02 Asia/Hong Kong");
+          "CUSA10454 1.00 USA, CUSA10454 1.01 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong, CUSA10209 1.02 Asia/Hong Kong and CUSA10487 1.03 Europe");
     CHECK(std::string(kUs.folder) != kCk.folder);
     std::string modules = "'modules': (";
     for (const char* module : kBundledModules) {
@@ -946,7 +995,7 @@ void TestDefaultsAgree() {
     // 0 is "the loader's size", 1920 x 1080 (src/loader.c), the launcher's default.
     CHECK(game.requested_width == 0 && launcher_default(kWindowWidthKey) == "1920");
     CHECK(game.requested_height == 0 && launcher_default(kWindowHeightKey) == "1080");
-    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c").find(",1920,1080};") != std::string::npos);
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c").find(",attributes,1920,1080,features};") != std::string::npos);
 
     // The launcher shows the default for values the game would not accept.
     CHECK(!IsValidSetting(kDisplayModeKey, "fullscreen") && IsValidSetting(kDisplayModeKey, "borderless"));
@@ -1187,6 +1236,7 @@ void TestOnlineSettings(const fs::path& base) {
     CHECK(launcher_default(kOnlineEnabledKey) == "0" && launcher_default(kOnlineNameKey) == "Player");
     CHECK(launcher_default(kOnlineUdpPortKey) == "0" && launcher_default(kOnlineStunKey) == net::kDefaultStunServers);
     CHECK(launcher_default("online_lobby") == "<missing>" && launcher_default("online_upnp") == "<missing>");
+    CHECK(launcher_default(kLobbyVisibleKey) == "0" && !IsOnlineSetting(kLobbyVisibleKey) && !net::OnlineConfig{}.lobby_visible);
     CHECK(!IsOnlineSetting("online_lobby") && !IsOnlineSetting("online_upnp"));
     CHECK(std::string(net::kDefaultLobbyUrl) == "wss://dcp-lobby.saulobenigno.workers.dev");
     const net::OnlineConfig missing = ReadOnlineConfig(file);
@@ -1260,7 +1310,7 @@ void TestOnlineSettings(const fs::path& base) {
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
     CHECK(page.find("client_.Update(on, config, net::kOnlineGame, now);") != std::string::npos);
     CHECK(page.find("game = std::string(net::kOnlineGame)") != std::string::npos);
-    CHECK(SupportedBuilds().size() == 7);
+    CHECK(SupportedBuilds().size() == 8);
 }
 
 // Each friend's line under the name: presence, then the platform and port version that friend's own client advertised,
@@ -1325,31 +1375,143 @@ void TestFriendStatus(const std::string& page) {
     if (cards != std::string::npos && friends != std::string::npos) {
         const std::string card = page.substr(cards, friends - cards);
         CHECK(card.find("FriendStatusOf") == std::string::npos && card.find("platform") == std::string::npos);
-        CHECK(card.find("FriendRequestText(sender)") != std::string::npos);
+        CHECK(card.find("sender.name + Tr(\" wants to be your friend\")") != std::string::npos);
     }
     CHECK(page.find("online_protocol") == std::string::npos);
     const std::string client = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_client.cpp");
     size_t sends = 0;
     for (size_t at = client.find("Send(\""); at != std::string::npos; at = client.find("Send(\"", at + 1)) ++sends;
-    CHECK(sends == 6);
+    CHECK(sends == 10);
     for (const char* op : {"friends.list", "friends.requests", "friends.add", "friends.accept", "friends.decline",
-                           "friends.remove"}) {
+                           "friends.remove", "lobby.publish", "lobby.list"}) {
         CHECK(client.find(std::string("Send(\"") + op + "\"") != std::string::npos);
     }
 }
 
-// The Online page: with online play off only its switch; on, friend requests first, then the rest in a fixed order.
-// The switch shows the effective state. No lobby address, UPnP switch or status card; friends by Online name.
+// The rows of the public Lobby: a handle, a name and the relation, whose action follows from it. The handle is never
+// drawn, and a row missing either is dropped.
+void TestLobbyRows(const std::string& page) {
+    const auto parsed = net::Json::parse(
+        R"([{"player": "a1", "name": "Stranger", "state": "none"}, {"player": "a2", "name": "Waiting", "state": "pending"},
+            {"player": "a3", "name": "Pal", "state": "friend"}, {"player": "a4", "name": "Asking", "state": "incoming"},
+            {"player": "a5", "name": "Later", "state": "something new"}, {"player": "", "name": "NoHandle", "state": "none"},
+            {"player": "a7", "name": "", "state": "none"}, {"player": "a8"}])");
+    CHECK(parsed.has_value());
+    const std::vector<LobbyPlayer> rows = ReadLobbyPlayers(parsed ? *parsed : net::Json::Array());
+    CHECK(rows.size() == 5);
+    if (rows.size() != 5) return;
+    using R = LobbyRelation;
+    CHECK(rows[0].relation == R::kIncoming && rows[1].relation == R::kPending && rows[2].relation == R::kFriend);
+    CHECK(rows[3].relation == R::kNone && rows[3].name == "Later" && rows[4].relation == R::kNone && rows[4].player == "a1" &&
+          rows[4].name == "Stranger");
+    // The name is the one the lobby shows; a client that said no version still gets a row.
+    CHECK(rows[0].version.empty() && LobbyVersionLabel(rows[0]) == "Version unknown");
+    const auto versioned = net::Json::parse(R"([{"player": "b1", "name": "Player-7A3C", "version": "0.9.2", "state": "none"}])");
+    const std::vector<LobbyPlayer> known = ReadLobbyPlayers(versioned ? *versioned : net::Json::Array());
+    CHECK(known.size() == 1 && known[0].name == "Player-7A3C" && LobbyVersionLabel(known[0]) == "v0.9.2");
+
+    // Friends use the alias where the lobby sent one and the name otherwise; the game's own matching reads "name" directly.
+    const auto aliased = net::Json::parse(R"([{"account": "1", "name": "Player", "display_name": "Player-42DF"},
+                                              {"account": "2", "name": "Ana"}])");
+    const std::vector<OnlinePlayer> friends = ReadOnlinePlayers(aliased ? *aliased : net::Json::Array());
+    CHECK(friends.size() == 2 && friends[0].name == "Player-42DF" && friends[1].name == "Ana");
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "runtime_matching2.cpp").find("row.name = SafeName(f[\"name\"].as_string());") !=
+          std::string::npos);
+
+    // Requests first, then pending, friends and everyone else; by name without regard to case within each.
+    const auto mixed = net::Json::parse(
+        R"([{"player": "c1", "name": "zed", "state": "none"}, {"player": "c2", "name": "Bob", "state": "friend"},
+            {"player": "c3", "name": "ana", "state": "none"}, {"player": "c4", "name": "Yan", "state": "pending"},
+            {"player": "c5", "name": "Xia", "state": "incoming"}, {"player": "c6", "name": "Abe", "state": "incoming"},
+            {"player": "c7", "name": "Bea", "state": "none"}, {"player": "c8", "name": "Al", "state": "friend"}])");
+    std::string order;
+    for (const LobbyPlayer& p : ReadLobbyPlayers(mixed ? *mixed : net::Json::Array())) order += p.name + " ";
+    CHECK(order == "Abe Xia Yan Al Bob ana Bea zed ");
+
+    // Five minutes by itself; the button and friend events do not wait for that, and only one read runs at a time.
+    CHECK(LobbyRefresh::kAutoSeconds == 300.0);
+    LobbyRefresh refresh;
+    CHECK(refresh.Due(100.0));
+    refresh.Start(100.0);
+    CHECK(refresh.active() && !refresh.Due(100.0) && !refresh.Manual(120.0));
+    refresh.Finish();
+    CHECK(!refresh.Due(399.0) && refresh.Due(400.0));
+    CHECK(!refresh.Manual(100.0 + LobbyRefresh::kManualGapSeconds - 0.1) && !refresh.Due(104.0));
+    CHECK(refresh.Manual(100.0 + LobbyRefresh::kManualGapSeconds) && refresh.Due(105.0));
+    refresh.Start(105.0);
+    refresh.Soon(105.5);
+    CHECK(!refresh.Due(105.6));
+    refresh.Finish();
+    CHECK(refresh.Due(105.6));
+    refresh.Start(200.0);
+    refresh.Fail(201.0);
+    CHECK(!refresh.Due(230.0) && refresh.Due(231.0));
+    refresh.Start(300.0);
+    refresh.Reset();
+    CHECK(refresh.Due(300.0) && !refresh.active());
+
+    CHECK(LobbyUpdatedText(0) == "Updated just now" && LobbyUpdatedText(2) == "Updated 2 min ago");
+
+    const LobbyAction send = LobbyActionOf(R::kNone), pending = LobbyActionOf(R::kPending), pal = LobbyActionOf(R::kFriend),
+                      accept = LobbyActionOf(R::kIncoming);
+    CHECK(std::string(send.text) == "Send friend request" && send.enabled && !send.primary);
+    CHECK(std::string(pending.text) == "Pending" && !pending.enabled);
+    CHECK(std::string(pal.text) == "Friend" && !pal.enabled);
+    CHECK(std::string(accept.text) == "Accept" && accept.enabled && accept.primary && accept.decline);
+    CHECK(!send.decline && !pending.decline && !pal.decline);
+
+    const size_t draw = page.find("void OnlinePage::DrawLobbyPlayer(");
+    const size_t end = page.find("void OnlinePage::DrawLobbyHeader(");
+    CHECK(draw != std::string::npos && end > draw);
+    if (draw == std::string::npos || end <= draw) return;
+    const std::string row = page.substr(draw, end - draw);
+    CHECK(row.find("ui.RowLeft(player.name.c_str());") != std::string::npos && row.find("ImGui::BeginDisabled();") != std::string::npos);
+    CHECK(row.find("client_.RequestFromLobby(player.player);") != std::string::npos);
+    CHECK(row.find("client_.DeclineFromLobby(player.player);") != std::string::npos);
+    CHECK(row.find("Tr(\"Decline\")") != std::string::npos && row.find("LobbyVersionLabel(player)") != std::string::npos);
+    CHECK(row.find("player.player.c_str()") == row.rfind("player.player.c_str()") && row.find("account") == std::string::npos);
+    const std::string client = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_client.cpp");
+    const size_t request = client.find("void OnlineClient::RequestFromLobby(");
+    CHECK(request != std::string::npos && client.find("Send(\"friends.add\"", request) != std::string::npos);
+    CHECK(client.find("Send(\"friends.decline\"", request) != std::string::npos);
+    // A failed read leaves the rows as they were: only a good answer replaces them, and nothing empties them while listed.
+    const size_t list = client.find("case Purpose::kLobbyList:\n        if (ok) {");
+    const size_t failed = client.find("lobby_refresh_.Fail(now);", list);
+    CHECK(list != std::string::npos && failed != std::string::npos);
+    CHECK(client.find("state_.lobby = ReadLobbyPlayers", list) < failed && client.find("state_.lobby.clear()", failed) == std::string::npos);
+    CHECK(client.find("if (!visible) ForgetLobby();") != std::string::npos);
+    for (const char* never : {"\"room.", "room.create", "room.join", "chat"}) CHECK(client.find(never) == std::string::npos);
+    CHECK(page.find("kLobbyVisibleKey, false, \"Off\", \"On\");") != std::string::npos);
+    CHECK(page.find("client_.WatchLobby(") != std::string::npos);
+}
+
+// The Online page: with online play off only its switch; on, the tabs under it and the sections of the selected tab.
+// Settings comes first and is what a blocked PLAY opens. The switch shows the effective state. No lobby address, UPnP
+// switch or status card; friends by Online name.
 void TestOnlinePage() {
     using S = OnlineSection;
-    CHECK(OnlinePageSections(false, 0) == std::vector<S>{S::kOnlinePlay});
-    CHECK(OnlinePageSections(false, 2) == std::vector<S>{S::kOnlinePlay});
-    CHECK(OnlinePageSections(true, 0) ==
-          (std::vector<S>{S::kOnlinePlay, S::kOnlineName, S::kFriendCode, S::kConnectionTest, S::kPingDisplay,
-                          S::kFriends}));
-    CHECK(OnlinePageSections(true, 1) ==
-          (std::vector<S>{S::kOnlinePlay, S::kFriendRequests, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
-                          S::kPingDisplay, S::kFriends}));
+    using T = OnlineTab;
+    for (const T tab : kOnlineTabs) {
+        CHECK(OnlinePageSections(false, tab, 0, false) == std::vector<S>{S::kOnlinePlay});
+        CHECK(OnlinePageSections(false, tab, 2, true) == std::vector<S>{S::kOnlinePlay});
+        const std::vector<S> on = OnlinePageSections(true, tab, 2, true);
+        CHECK(on.size() >= 3 && on[0] == S::kOnlinePlay && on[1] == S::kTabs);
+    }
+    const std::vector<S> settings_tab{S::kOnlinePlay, S::kTabs, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
+                                      S::kPingDisplay};
+    CHECK(OnlinePageSections(true, T::kSettings, 0, false) == settings_tab);
+    CHECK(OnlinePageSections(true, T::kSettings, 3, true) == settings_tab);
+    CHECK(OnlinePageSections(true, T::kFriends, 0, false) == (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kFriends}));
+    CHECK(OnlinePageSections(true, T::kFriends, 1, false) ==
+          (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kFriendRequests, S::kFriends}));
+    CHECK(OnlinePageSections(true, T::kLobby, 1, false) == (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kLobbyVisibility}));
+    CHECK(OnlinePageSections(true, T::kLobby, 1, true) ==
+          (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kLobbyVisibility, S::kLobbyPlayers}));
+    CHECK(std::size(kOnlineTabs) == 3 && std::string(OnlineTabLabel(kOnlineTabs[0])) == "Settings" &&
+          std::string(OnlineTabLabel(kOnlineTabs[1])) == "Friends" && std::string(OnlineTabLabel(kOnlineTabs[2])) == "Lobby");
+    const std::string page_header = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.h");
+    CHECK(page_header.find("OnlineTab tab_ = OnlineTab::kSettings;") != std::string::npos);
+    CHECK(page_header.find("tab_ = OnlineTab::kSettings;\n        pointed_ = true;") != std::string::npos);
 
     const auto set_env = [](const char* name, const char* value) {
 #ifdef _WIN32
@@ -1382,13 +1544,14 @@ void TestOnlinePage() {
         CHECK(page.find(hidden) == std::string::npos);
     }
     for (const char* shown : {"\"Online play\"", "\"Online name\"", "\"Your friend code\"", "\"Connection test\"",
-                              "\"Run test\"", "\"Friends\"", "\"Add a friend\"", "\"Send request\"", "\"XXXX-XXXX\"",
-                              "\"New friend request\"", "Accept\"", "\"Decline\""}) {
+                              "\"Run test\"", "\"Add a friend\"", "\"Send request\"", "\"XXXX-XXXX\"",
+                              "\"New friend request\"", "Accept\"", "\"Decline\"", "\"Show me in Lobby\"",
+                              "\"Players in Lobby\""}) {
         CHECK(page.find(shown) != std::string::npos);
     }
     CHECK(page.find("ui.InputText(\"Online name\", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName)") != std::string::npos);
     CHECK(page.find("FriendRow(ui, f);") != std::string::npos);
-    CHECK(page.find("ImGui::TextColored(ui.theme().warn_dot, \"Incompatible\");") != std::string::npos);
+    CHECK(page.find("ImGui::TextColored(ui.theme().warn_dot, \"%s\", Tr(\"Incompatible\"));") != std::string::npos);
     CHECK(page.find("ResolveOnlinePlay(") != std::string::npos);
     // The sidebar badge counts the requests the page shows as cards.
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
@@ -1413,6 +1576,7 @@ void TestOnlinePage() {
     }
 
     TestFriendStatus(page);
+    TestLobbyRows(page);
 
     // The release page shows no test-instance note, environment override, address or service name; a switch locked by
     // DCP_ONLINE reads plain On or Off.
@@ -1610,7 +1774,20 @@ void TestPingDisplay(const fs::path& base) {
 
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
     CHECK(page.find("ui.Toggle(\"Ping display\", kPingHelp, kPingDisplayKey, false, \"Off\", \"On\")") != std::string::npos);
-    CHECK(OnlinePageSections(false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+    CHECK(OnlinePageSections(false, OnlineTab::kSettings, 0, false) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+
+    // Show me in Lobby: off for a player without the setting, live for the launcher's link at once, saved like any other,
+    // and Reset takes it back off.
+    {
+        LauncherSettings settings(file);
+        CHECK(!OnlineConfigOf(settings).lobby_visible && !ReadOnlineConfig(file).lobby_visible);
+        settings.SetBool(kLobbyVisibleKey, true);
+        CHECK(OnlineConfigOf(settings).lobby_visible && !ReadOnlineConfig(file).lobby_visible);
+        CHECK(settings.Save());
+        CHECK(ReadOnlineConfig(file).lobby_visible);
+        settings.ResetToDefaults();
+        CHECK(!OnlineConfigOf(settings).lobby_visible);
+    }
 }
 
 // PLAY with Online play on waits for one finished Connection test on the game's UDP port, whatever its result: saved at
@@ -1744,7 +1921,9 @@ void TestConnectionTestPanel(const fs::path& base) {
     ForgetConnectionTestWhenOff(settings, false);
     settings.SetBool(kOnlineEnabledKey, false);
     CHECK(!ConnectionTestLookOf(needed(settings)).panel);
-    for (const OnlineSection section : OnlinePageSections(false, 0)) CHECK(section != OnlineSection::kConnectionTest);
+    for (const OnlineSection section : OnlinePageSections(false, OnlineTab::kSettings, 0, false)) {
+        CHECK(section != OnlineSection::kConnectionTest);
+    }
 
     // PLAY's second question in a frame is the press; the emphasis is a short soft pulse.
     PlayAttemptDetector detector;
@@ -1822,7 +2001,10 @@ void TestOnlineClient(const fs::path& base) {
     const auto pump = [&](const std::function<bool()>& done, double seconds = 6.0) {
         const double end = clock() + seconds;
         for (;;) {
-            for (Seat* seat : {&alice, &bea, &bea_game, &cleo}) seat->client.Update(seat->on, seat->config, "CUSA10454-1.00", clock());
+            for (Seat* seat : {&alice, &bea, &bea_game, &cleo}) {
+                seat->client.WatchLobby(clock());
+                seat->client.Update(seat->on, seat->config, "CUSA10454-1.00", clock());
+            }
             if (done()) return true;
             if (clock() >= end) return false;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -1867,6 +2049,34 @@ void TestOnlineClient(const fs::path& base) {
     alice.client.Decline(a.incoming.empty() ? "" : a.incoming[0].account);
     CHECK(a.incoming.empty());
     CHECK(!pump([&] { return !a.incoming.empty(); }, 1.0));
+
+    // The public Lobby: Bea never asked, so she is not listed; a row goes Pending at once and Friend after the accept, from
+    // the friend events; and leaving takes the player off the list.
+    const OnlineClient::State& c = cleo.client.state();
+    const auto lists = [](const OnlineClient::State& s, const char* name, LobbyRelation relation) {
+        return std::any_of(s.lobby.begin(), s.lobby.end(),
+                           [&](const LobbyPlayer& p) { return p.name == name && p.relation == relation; });
+    };
+    alice.config.lobby_visible = cleo.config.lobby_visible = true;
+    CHECK(pump([&] { return lists(a, "Cleo", LobbyRelation::kNone) && lists(c, "Alice", LobbyRelation::kNone); }));
+    CHECK(a.lobby.size() == 1 && c.lobby.size() == 1 && b.lobby.empty() && !b.lobby_fetched);
+    cleo.client.RequestFromLobby(c.lobby.empty() ? "" : c.lobby[0].player);
+    CHECK(lists(c, "Alice", LobbyRelation::kPending));
+    CHECK(pump([&] { return a.incoming.size() == 1 && lists(a, "Cleo", LobbyRelation::kIncoming); }));
+    alice.client.DeclineFromLobby(a.lobby.empty() ? "" : a.lobby[0].player);
+    CHECK(lists(a, "Cleo", LobbyRelation::kNone));
+    CHECK(pump([&] { return a.incoming.empty() && lists(c, "Alice", LobbyRelation::kNone); }, 35.0));
+    cleo.client.RequestFromLobby(c.lobby.empty() ? "" : c.lobby[0].player);
+    CHECK(pump([&] { return a.incoming.size() == 1 && lists(a, "Cleo", LobbyRelation::kIncoming); }));
+    alice.client.RequestFromLobby(a.lobby.empty() ? "" : a.lobby[0].player);
+    CHECK(lists(a, "Cleo", LobbyRelation::kFriend));
+    CHECK(pump([&] { return lists(c, "Alice", LobbyRelation::kFriend) && a.incoming.empty() && a.friends.size() == 2; }));
+    cleo.config.lobby_visible = false;
+    CHECK(pump([&] {
+        alice.client.RefreshLobby(clock());
+        return a.lobby_fetched && a.lobby.empty();
+    }, LobbyRefresh::kManualGapSeconds + 5.0));
+    CHECK(c.lobby.empty() && !c.lobby_fetched);
 
     alice.on = false;
     pump([] { return true; });
@@ -1940,7 +2150,7 @@ void TestUnlockGallerySettings(const fs::path& base) {
     GameBuild without = SupportedBuilds()[0];
     without.unlock_gallery = false;
     CHECK(!UnlockGalleryAvailable(&without) && UnlockGalleryAvailable(nullptr));
-    CHECK(SupportedBuilds().size() == 7);
+    CHECK(SupportedBuilds().size() == 8);
 
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
     const std::string gated = "if (UnlockGalleryAvailable(build_)) {\n            ui.Toggle(\"Unlock Gallery\", kUnlockGalleryHelp, "
@@ -2525,6 +2735,10 @@ void TestTextLanguage(const fs::path& base) {
     struct Expected { const char* key; const char* name; int id; };
     const Expected western[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
                                 {"italian", "Italian", 5}, {"spanish", "Spanish", 3}};
+    // USA 1.00 adds Brazilian Portuguese, the port's translation played in the English slot.
+    const Expected us_languages[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
+                                     {"italian", "Italian", 5}, {"brazilian_portuguese", "Portuguese (Brazil)", 1},
+                                     {"spanish", "Spanish", 3}};
     const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
     const Expected japanese[] = {{"japanese", "Japanese", 0}};
     const auto check_list = [&](const GameBuild* build, std::span<const Expected> expected) {
@@ -2540,7 +2754,14 @@ void TestTextLanguage(const fs::path& base) {
         const std::string_view title = build.title_id;
         check_list(&build, title == "CUSA10209"   ? std::span<const Expected>(asian)
                            : title == "CUSA07001" ? std::span<const Expected>(japanese)
+                           : &build == &kUs       ? std::span<const Expected>(us_languages)
                                                   : std::span<const Expected>(western));
+    }
+    CHECK(TextLanguagesOf(&kUs)[4].translation == "pt-BR" && TextLanguagesOf(&kUs)[4].suffix == "US");
+    for (const GameBuild& build : SupportedBuilds()) {
+        for (const TextLanguage& language : build.text_languages) {
+            CHECK(language.translation.empty() == (language.key != "brazilian_portuguese"));
+        }
     }
 
     for (const char* image : {us.c_str(), static_cast<const char*>(nullptr)}) {
@@ -2552,6 +2773,12 @@ void TestTextLanguage(const fs::path& base) {
             CHECK(dcp_text_language(ini.c_str(), image, nullptr) == language.id);
         }
     }
+    WriteAll(file, "text_language=brazilian_portuguese\n");
+    CHECK(IsValidSetting(kTextLanguageKey, "brazilian_portuguese"));
+    CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1); // the English slot
+    CHECK(dcp_text_language(ini.c_str(), nullptr, nullptr) == 1);    // an unknown build: English
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10);
+    CHECK(ResolveTextLanguage(&kUs101, "brazilian_portuguese").key == "english");
     for (const Expected& language : asian) {
         LauncherSettings settings(file);
         settings.Set(kTextLanguageKey, language.key);
@@ -3041,6 +3268,36 @@ void TestTrueUltrawide(const fs::path& base) {
 
 // Presentation only fits the finished frame into the window: its own key and default, Letterbox unless Stretch is chosen,
 // and no change to the render target or the aspect ratio.
+void TestRenderer(const fs::path& base) {
+    CHECK(std::string(kRendererKey) == "renderer" && std::string(kDefaultRenderer) == "vulkan");
+    bool managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed |= setting.key == kRendererKey && setting.default_value == "vulkan";
+    }
+    CHECK(managed);
+    for (const char* value : {"auto", "vulkan", "opengl"}) {
+        CHECK(IsValidSetting(kRendererKey, value));
+    }
+    for (const char* invalid : {"", "OpenGL", "direct3d", "D3D11"}) {
+        CHECK(!IsValidSetting(kRendererKey, invalid));
+    }
+#ifdef _WIN32
+    CHECK(IsValidSetting(kRendererKey, "d3d11"));
+#else
+    CHECK(!IsValidSetting(kRendererKey, "d3d11"));
+#endif
+    const fs::path file = base / "renderer" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    fs::create_directories(file.parent_path());
+    CHECK(LauncherSettings(file).Get(kRendererKey, kDefaultRenderer) == "vulkan");
+    {
+        LauncherSettings settings(file);
+        settings.Set(kRendererKey, "opengl");
+        CHECK(settings.Save());
+    }
+    CHECK(LauncherSettings(file).Get(kRendererKey, kDefaultRenderer) == "opengl");
+}
+
 void TestPresentation(const fs::path& base) {
     const fs::path file = base / "presentation" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -3366,10 +3623,10 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 9);
+    CHECK(count == 10);
     // Online sits between Gameplay and Cheats: it changes play and turns the cheats off.
     const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Online",
-                                 "Cheats", "Controls", "Trophies", "About"};
+                                 "Cheats", "Controls", "Trophies", "Bug Report", "About"};
     for (size_t i = 0; i < std::size(order); ++i) {
         CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
     }
@@ -3392,6 +3649,923 @@ void TestOptions() {
     const size_t online_case = launcher.find("case PageId::kOnline:");
     CHECK(online_case != std::string::npos &&
           launcher.find("online_page_->PendingRequests()", online_case) < launcher.find("case PageId::kTrophies:", online_case));
+
+    // The update banner sits on the same header as the launcher.
+    const fs::path source(DCP_SOURCE_DIR);
+    CHECK(ReadAll(source / "launcher" / "updater" / "update_ui.cpp").find("trg::layout::HeaderHeight(") != std::string::npos);
+    const std::string compact = ReadAll(source / "gpu" / "patches" / "trg-launcher" / "0006-compact-layout.patch");
+    CHECK(compact.find("inline float HeaderHeight(") != std::string::npos);
+    CHECK(compact.find("ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize") != std::string::npos);
+}
+
+// ---- Launcher sidebar and footer layout ----
+
+void TestChromeLayout() {
+    using namespace trg::layout;
+    const auto same = [](std::string_view a, std::string_view b) { return a == b; };
+
+    CHECK(kTextPage > kTextSection && kTextSection > kTextLabel && kTextLabel > kTextBody && kTextBody > kTextHelp);
+    CHECK(kTextSidebar == 17.0f && kTextFooter == 15.0f);
+    CHECK(kTextPage == 30.0f && kTextSection == 19.0f && kTextLabel == 17.0f && kTextBody == 16.0f && kTextHelp == 15.0f);
+    // Midnight panel < row line < panel line < secondary text, each a cool blue-gray.
+    constexpr float kPanelFill[3] = {0.055f, 0.082f, 0.165f}, kSecondaryText[3] = {0.580f, 0.659f, 0.800f};
+    for (int c = 0; c < 3; ++c) {
+        CHECK(kPanelFill[c] < kRowBorder[c] && kRowBorder[c] < kPanelBorder[c] && kPanelBorder[c] < kSecondaryText[c]);
+    }
+    CHECK(kPanelBorder[0] < kPanelBorder[1] && kPanelBorder[1] < kPanelBorder[2]);
+    CHECK(kRowBorder[0] < kRowBorder[1] && kRowBorder[1] < kRowBorder[2]);
+    CHECK(SidebarLabelX() == kSidebarIconInset + kSidebarIcon + kSidebarIconGap);
+    constexpr float kMinimumHeight = 560.0f;
+    const int pages = int(std::size(dcp::kPageOrder));
+    const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
+    CHECK(SidebarHeight(pages, SidebarRowFor(pages, shortest_body)) <= shortest_body);
+
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float row = kSidebarRow * scale, center = std::floor(row * 0.5f);
+        CHECK(LineThickness(scale) >= 1.0f && LineThickness(scale) <= std::ceil(scale));
+        CHECK(PassiveLineThickness(scale) >= 1.0f && PassiveLineThickness(scale) <= scale);
+        CHECK(PanelBorderWidth(scale) == LineThickness(scale) + 1.0f && PanelBorderWidth(scale) <= 3.0f);
+        CHECK(LineThickness(scale) == std::floor(LineThickness(scale)));
+        const float icon = kSidebarIcon * scale, text = kTextSidebar * scale;
+        const float icon_top = CenteredTop(center, icon * 0.5f), text_top = CenteredTop(center, text * 0.55f);
+        CHECK(icon_top >= 0.0f && icon_top + icon <= row);
+        CHECK(text_top >= 0.0f && text_top + text <= row);
+        CHECK(std::abs(icon_top + icon * 0.5f - center) <= 0.5f && std::abs(text_top + text * 0.55f - center) <= 0.5f);
+        CHECK((kSidebarIconInset + kSidebarIcon) * scale < SidebarLabelX() * scale);
+
+        const float footer = kFooterHeight * scale, keycap = kKeycapHeight * scale;
+        CHECK(kTextFooter * scale < keycap && keycap <= kFooterButtonHeight * scale && keycap < footer);
+        CHECK((kFooterHelpLine + kTextFooter) * scale <= footer && kFooterSeparator * scale <= footer);
+        const float footer_center = footer * 0.5f;
+        CHECK(std::abs(CenteredTop(footer_center, kTextFooter * scale * 0.55f) + kTextFooter * scale * 0.55f - footer_center) <= 0.5f);
+    }
+
+    const std::vector<KeyHint> english = ParseKeyHints("Enter  Play     Alt+F4  Quit     Ctrl+S  Save");
+    CHECK(english.size() == 3);
+    if (english.size() == 3) {
+        CHECK(same(english[0].key, "Enter") && same(english[0].action, "Play"));
+        CHECK(same(english[1].key, "Alt+F4") && same(english[1].action, "Quit"));
+        CHECK(same(english[2].key, "Ctrl+S") && same(english[2].action, "Save"));
+    }
+    const std::vector<KeyHint> portuguese = ParseKeyHints("Enter  Jogar     Alt+F4  Sair     Ctrl+S  Salvar");
+    CHECK(portuguese.size() == 3 && same(portuguese[2].action, "Salvar"));
+    CHECK(ParseKeyHints("Enter  Play        Esc  Quit        Ctrl+S  Save").size() == 3);
+    const std::vector<KeyHint> plain = ParseKeyHints("No shortcuts here");
+    CHECK(plain.size() == 1 && plain[0].key.empty() && same(plain[0].action, "No shortcuts here"));
+    CHECK(ParseKeyHints("").empty() && ParseKeyHints("   ").empty());
+
+    const std::vector<std::string_view> note = SplitSentences("Play applies the changes. Save keeps them without starting.");
+    CHECK(note.size() == 2 && same(note[0], "Play applies the changes.") && same(note[1], "Save keeps them without starting."));
+    CHECK(SplitSentences("One line").size() == 1 && SplitSentences("").empty());
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    const std::string ui_text = ReadAll(source / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    CHECK(launcher.find("\"Enter  Play     Alt+F4  Quit     Ctrl+S  Save\"") != std::string::npos);
+    CHECK(ui_text.find("Enter  Jogar     Alt+F4  Sair     Ctrl+S  Salvar") != std::string::npos);
+
+    // Every sidebar row and every footer line goes through the same centring, from the active font's own metrics.
+    const std::string trg = ReadAll(source / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("ImGui::PushFont(config_.fonts.semibold, layout::kTextSidebar);") != std::string::npos);
+    CHECK(trg.find("CapCenter(config_.fonts.semibold, ImGui::GetFontSize())") != std::string::npos);
+    CHECK(trg.find("layout::CenteredTop(center_y, cap_center)") != std::string::npos);
+    CHECK(trg.find("layout::CenteredTop(center_y, icon_size * 0.5f)") != std::string::npos);
+    CHECK(trg.find("pos.x + layout::SidebarLabelX() * s_") != std::string::npos);
+    CHECK(trg.find("layout::ParseKeyHints(T(config_.hints.c_str()))") != std::string::npos);
+    CHECK(trg.find("layout::SplitSentences(T(config_.note.c_str()))") != std::string::npos);
+    CHECK(trg.find("c[ImGuiCol_TableBorderLight] = t.border_row;") != std::string::npos);
+    CHECK(trg.find("Col(config_.theme.border_panel)") != std::string::npos);
+    CHECK(trg.find("Col(t.frame_hot, 0.8f)") == std::string::npos);
+    CHECK(trg.find("layout::PassiveLineThickness(s_)") != std::string::npos);
+    CHECK(trg.find("dl->AddRectFilled(min, ImVec2(min.x + block, min.y + block), Col(kSponsorPink)") != std::string::npos);
+    CHECK(trg.find("dl->AddImage(ImTextureRef(sponsor.icon), heart_min") != std::string::npos);
+    CHECK(kSupportIconHeart < kSupportIconBlock && kSupportIconBlock <= kControlHeight + kItemGap);
+    const std::string online = ReadAll(source / "launcher" / "online_page.cpp");
+    CHECK(online.find("ui.RowEmphasized(\"Your friend code\", kFriendCodeHelp);") != std::string::npos);
+    CHECK(trg.find("RowLabel(label, help, layout::kTextSection, &theme().accent);") != std::string::npos);
+    const std::string nanosvg = ReadAll(source / "launcher" / "third_party" / "nanosvg" / "nanosvg.h");
+    CHECK(nanosvg.find("size == (size_t)-1l") != std::string::npos && nanosvg.find("size == -1l") == std::string::npos);
+    CHECK(trg.find("Col(t.border_row), layout::PassiveLineThickness(s_)") != std::string::npos);
+    CHECK(trg.find("dl->AddRectFilled(outer, outer_end, Col(t.border_panel), 12 * s);") != std::string::npos);
+    CHECK(trg.find("dl->AddRect(p, ") == std::string::npos);
+    CHECK(trg.find("AddRectFilled(outer, outer_end, Col(config_.theme.border_panel)") != std::string::npos);
+    CHECK(trg.find("ImGuiTableFlags_BordersInnerH") == std::string::npos);
+    const size_t sidebar_end = trg.find("OutlinePanel(size);"), content_end = trg.find("OutlinePanel(size);", sidebar_end + 1);
+    CHECK(sidebar_end < trg.find("BeginChild(\"##sidebar\"") && content_end < trg.find("BeginChild(\"##content\""));
+    for (const char* page : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp"}) {
+        const std::string text = ReadAll(source / "launcher" / page);
+        CHECK(text.find("TableBorder") == std::string::npos && text.find("ImGuiCol_Separator") == std::string::npos);
+    }
+}
+
+void TestHeaderArt() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string png = ReadAll(source / "assets" / "launcher" / "header-art.png");
+    CHECK(png.size() > 24);
+    const auto be32 = [&png](size_t at) {
+        return (uint32_t(uint8_t(png[at])) << 24) | (uint32_t(uint8_t(png[at + 1])) << 16) | (uint32_t(uint8_t(png[at + 2])) << 8) |
+               uint32_t(uint8_t(png[at + 3]));
+    };
+    CHECK(be32(16) == 3840 && be32(20) == 432);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("LoadLauncherImage(\"header-art.png\", header_art_image_)") != std::string::npos);
+    CHECK(launcher.find("SplitHeaderArt(rect)") != std::string::npos);
+    CHECK(ReadAll(source / "CMakeLists.txt").find("/assets/launcher/header-art.png") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package.ps1").find("'header-art.png'") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package-linux.sh").find("install -m644 assets/launcher/header-art.png") != std::string::npos);
+
+    CHECK(kHeaderArtScale >= 1.15f && kHeaderArtScale <= 1.25f);
+    CHECK(kHeaderArtAlphaGain >= 1.15f && kHeaderArtAlphaGain <= 2.2f);
+    CHECK(launcher.find("if (width != header_art_width_ || height != header_art_height_) {") != std::string::npos);
+    CHECK(launcher.find("height, width, height, kHeaderArtAlphaGain)") != std::string::npos);
+    CHECK(launcher.find("c.max.y + trg::layout::kBodyGap * c.scale") != std::string::npos);
+    using namespace trg::layout;
+    struct Case {
+        float width, height, scale;
+    };
+    bool single_quad_overflows = false;
+    for (const Case& window : {Case{1280, 720, 1.0f}, Case{1689, 840, 1.5f}, Case{1920, 1080, 1.5f}, Case{2880, 1620, 2.25f},
+                               Case{3840, 2160, 3.0f}, Case{900, 560, 1.0f}, Case{1350, 840, 1.5f}, Case{2025, 1260, 2.25f}}) {
+        const float header = HeaderHeight(window.height, window.scale);
+        const float art_bottom = header + kBodyGap * window.scale;
+        const HeaderArtRect art = PlaceHeaderArt(0.0f, window.width, art_bottom, window.height, window.scale, kHeaderArtAspect);
+        const float art_w = art.max_x - art.min_x, art_h = art.max_y - art.min_y;
+        CHECK(art.max_x == window.width && art.min_y <= 0.0f && art.max_y >= art_bottom && art_h >= art_bottom);
+        CHECK(-art.min_y <= art_h * kHeaderArtTopCrop);
+        const float previous = std::ceil(std::max(header, std::clamp(window.height * 0.2f, 120.0f * window.scale, 190.0f * window.scale)));
+        const float previous_ink = window.width - std::round(previous * kHeaderArtAspect) * (1.0f - kHeaderArtInkStart);
+        CHECK(std::abs(art_w / art_h - kHeaderArtAspect) < 0.01f);
+        CHECK(art_w == std::floor(art_w) && art_h == std::floor(art_h));
+
+        const float ink = art.min_x + art_w * kHeaderArtInkStart;
+        const float title = std::clamp(header * 0.34f, 30.0f * window.scale, 44.0f * window.scale);
+        CHECK(ink > (24.0f * window.scale + title * 9.5f) && ink < window.width * 0.75f);
+        CHECK(ink <= previous_ink && art_h >= previous);
+
+        CHECK(header >= 88.0f * window.scale && header <= 140.0f * window.scale && art_bottom - header == kBodyGap * window.scale);
+
+        float next = art.min_x;
+        const std::vector<HeaderArtStrip> strips = SplitHeaderArt(art);
+        CHECK(strips.size() > 1 && strips.size() == size_t(std::ceil(art_w / float(kHeaderArtStripWidth))));
+        for (const HeaderArtStrip& strip : strips) {
+            CHECK(strip.min_x == next && strip.max_x > strip.min_x && strip.max_u <= 1.0f);
+            CHECK(strip.max_x - strip.min_x <= float(kHeaderArtStripWidth) && strip.max_x <= window.width);
+            next = strip.max_x;
+            // SDL_SW_BlitTriangle: texture x times the fixed point (2x) triangle area must fit an int.
+            const int64_t area = int64_t((strip.max_x - strip.min_x) * 2.0f) * int64_t(art_bottom * 2.0f);
+            CHECK(int64_t(art_w) * area <= INT32_MAX && int64_t(art_h) * area <= INT32_MAX);
+        }
+        CHECK(next == art.max_x);
+        const int64_t whole = int64_t(art_w * 2.0f) * int64_t(art_bottom * 2.0f);
+        single_quad_overflows = single_quad_overflows || int64_t(art_w) * whole > INT32_MAX;
+    }
+    CHECK(single_quad_overflows);  // the strips are what keeps the largest windows drawable
+    CHECK(kHeaderArtStripWidth >= 32 && kHeaderArtStripWidth <= 256);
+
+    // One size-matched texture, rebuilt only when its size changes, drawn in clipped strips and never as one quad.
+    const size_t painter = launcher.find("trg::HeaderPainter LauncherHeader(");
+    const size_t painter_end = launcher.find("void Log(const char* format", painter);
+    CHECK(painter != std::string::npos && painter_end != std::string::npos);
+    const std::string art_painter = launcher.substr(painter, painter_end - painter);
+    const size_t strip_loop = art_painter.find("for (const HeaderArtStrip& strip : SplitHeaderArt(rect))");
+    CHECK(strip_loop != std::string::npos && art_painter.find("AddImage(") > strip_loop);
+    CHECK(art_painter.find("AddImage(") == art_painter.rfind("AddImage("));
+    CHECK(art_painter.find("PushClipRect(c.min, ImVec2(c.max.x, bottom), false)") < strip_loop);
+    CHECK(art_painter.find("PopClipRect()") > strip_loop);
+    CHECK(art_painter.find("art(static_cast<int>((rect.max_x - rect.min_x) * framebuffer + 0.5f),") != std::string::npos);
+    CHECK(art_painter.find("PlaceHeaderArt(c.min.y, c.max.x, bottom, height, c.scale, art_aspect)") != std::string::npos);
+    CHECK(art_painter.find("_WIN32") == std::string::npos && art_painter.find("__linux__") == std::string::npos);
+    const size_t texture_at = launcher.find("ImTextureID HeaderArtTexture(int width, int height) {");
+    const size_t rebuild = launcher.find("if (width != header_art_width_ || height != header_art_height_) {", texture_at);
+    CHECK(texture_at != std::string::npos && rebuild != std::string::npos);
+    CHECK(launcher.find("host_.DestroyTexture(header_art_);", rebuild) < launcher.find("return header_art_;", rebuild));
+    CHECK(launcher.find("host_.DestroyTexture(header_art_);", texture_at) > rebuild);
+    CHECK(ReadAll(source / "assets" / "launcher" / "header-art.svg").find("<svg") != std::string::npos);
+
+    // A flat image stays flat, a half covered one averages, and transparent texels add no colour.
+    std::vector<uint8_t> image(16 * 8 * 4);
+    for (size_t i = 0; i < image.size(); i += 4) {
+        const bool stroke = (i / 4) % 2 == 0;
+        image[i] = stroke ? 200 : 0;
+        image[i + 1] = stroke ? 100 : 0;
+        image[i + 2] = stroke ? 50 : 0;
+        image[i + 3] = stroke ? 255 : 0;
+    }
+    const std::vector<uint8_t> half = ScaleArtRgba(image.data(), 16, 8, 8, 4);
+    CHECK(half.size() == 8 * 4 * 4);
+    if (!half.empty()) {
+        CHECK(half[0] == 200 && half[1] == 100 && half[2] == 50 && half[3] >= 127 && half[3] <= 128);
+    }
+    CHECK(ScaleArtRgba(nullptr, 16, 8, 8, 4).empty() && ScaleArtRgba(image.data(), 16, 8, 0, 4).empty());
+    const std::vector<uint8_t> brighter = ScaleArtRgba(image.data(), 16, 8, 8, 4, 1.5f);
+    CHECK(brighter.size() == half.size() && brighter[0] == 200 && brighter[3] >= 190 && brighter[3] <= 192);
+    CHECK(ScaleArtRgba(image.data(), 16, 8, 16, 8, 3.0f)[3] == 255);
+}
+
+// ---- Launcher page width ----
+
+// A frame of a page: the scrollbar is only known once a frame has measured the page.
+struct PageWidth {
+    float content;
+    float control_x;
+};
+
+PageWidth PageWidthAt(float body_width, float scrollbar_size, float scale) {
+    using namespace trg::layout;
+    const float content = StableContentWidth(body_width, scrollbar_size);
+    return {content, content - ControlColumnWidth(content, scale)};
+}
+
+void TestStablePageWidth() {
+    using namespace trg::layout;
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float scrollbar = 10.0f * scale;
+        const float body = 879.0f * scale;
+        const PageWidth first = PageWidthAt(body, scrollbar, scale);   // no scrollbar yet
+        const PageWidth second = PageWidthAt(body, scrollbar, scale);  // scrollbar visible
+        CHECK(first.content == second.content && first.control_x == second.control_x);
+        CHECK(first.content == body - scrollbar);
+
+        const PageWidth resized = PageWidthAt(body - 100.0f, scrollbar, scale);
+        CHECK(resized.content == first.content - 100.0f);
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const size_t reserve = trg.find("ImGui::SetNextWindowContentSize(ImVec2(layout::StableContentWidth(body_w, ImGui::GetStyle().ScrollbarSize), 0.0f));");
+    CHECK(reserve != std::string::npos && reserve < trg.find("ImGui::BeginChild(\"##page_body\""));
+    CHECK(trg.find("AlwaysVerticalScrollbar") == std::string::npos);
+    CHECK(trg.find("ImGui::PushID(current_page);") < reserve);
+}
+
+void TestSidebarProportions() {
+    using namespace trg::layout;
+    CHECK(kSidebarRow == 42.0f && kSidebarIcon == 21.0f && kTextSidebar == 17.0f);
+    CHECK(SidebarLabelX() == 44.0f);
+
+    // The longest labels at the sidebar's size, measured: English and Portuguese in Segoe UI Semibold, then DejaVu Sans Bold.
+    constexpr float kLongestLabels[] = {57.9f, 73.7f, 81.8f, 101.9f};
+    constexpr float kMinimumHeight = 560.0f;
+    const int pages = int(std::size(dcp::kPageOrder));
+    const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
+    const float compact_row = SidebarRowFor(pages, shortest_body);
+    CHECK(SidebarHeight(pages, compact_row) <= shortest_body);
+    // Short windows shrink the rows, never below the icon and label, and tall ones keep the full row.
+    CHECK(compact_row >= kSidebarRowMin && compact_row < kSidebarRow && kSidebarRowMin > kSidebarIcon && kSidebarRowMin > kTextSidebar);
+    CHECK(SidebarRowFor(pages, SidebarHeight(pages)) == kSidebarRow && SidebarRowFor(pages, 900.0f) == kSidebarRow);
+    CHECK(SidebarRowFor(pages, 100.0f) == kSidebarRowMin);
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float narrow = SidebarWidth(900.0f * scale, scale), wide = SidebarWidth(3840.0f * scale, scale);
+        CHECK(narrow == 168.0f * scale && wide == 176.0f * scale);
+        const float row = narrow - kSidebarPadding * scale * 2.0f;
+        CHECK(row > 0.0f && kSidebarPadding * scale * 2.0f + row <= narrow);
+        for (const float label : kLongestLabels) {
+            CHECK((SidebarLabelX() + label) * scale < row);
+        }
+        CHECK(kTextSidebar * scale <= kSidebarRow * scale);
+
+        // Never wider than the proportional sidebar, and wider windows give the width to the page.
+        const float before = std::clamp(1279.0f * scale * 0.15f, 168.0f * scale, 200.0f * scale);
+        const float after = SidebarWidth(1279.0f * scale, scale);
+        CHECK(after <= before && before - after > 0.0f);
+    }
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("layout::SidebarRowFor(int(config_.pages.size()), size.y / s_) * s_;") != std::string::npos);
+    CHECK(trg.find("const float sidebar_w = layout::SidebarWidth(w, s_);") != std::string::npos);
+    CHECK(trg.find("DrawContent(ImVec2(w - sidebar_w - margin * 3, body_h));") != std::string::npos);
+}
+
+void TestRowRhythm() {
+    using namespace trg::layout;
+    CHECK(kRowPadding == 8.0f && kLabelGap == 3.0f && kInfoGridPadding == 5.0f && kControlHeight == 34.0f);
+    CHECK(kItemGap + kSectionGap + kItemGap == 22.0f);
+    const float previous_row = kControlHeight + 5.0f * 2.0f;
+    for (const float help_lines : {1.0f, 2.0f, 4.0f}) {
+        const float content = std::max(kControlHeight, kTextLabel + kLabelGap + kTextHelp * help_lines);
+        const float row = content + kRowPadding * 2.0f;
+        CHECK(row >= content);
+        // The control sits in the middle of the row, whatever the text makes its height.
+        CHECK((content - kControlHeight) * 0.5f + kControlHeight * 0.5f == content * 0.5f);
+        if (help_lines == 1.0f) {
+            const float growth = row / previous_row - 1.0f;
+            CHECK(growth >= 0.14f && growth <= 0.2f);
+        }
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("st.CellPadding = ImVec2(0, layout::kRowPadding * s);") != std::string::npos);
+    CHECK(trg.find("ImGuiStyleVar_CellPadding, ImVec2(0, layout::kInfoGridPadding * scale_)") != std::string::npos);
+    const size_t heading = trg.find("void Ui::Heading("), section = trg.find("bool Ui::Section(");
+    CHECK(trg.find("layout::kSectionGap * scale_", heading) < trg.find("ImGui::TextUnformatted(T(text));", heading));
+    CHECK(trg.find("layout::kSectionGap * scale_", section) < trg.find("ImGui::CollapsingHeader", section));
+    CHECK(trg.find("const float spare = label_h - ImGui::GetFrameHeight();") != std::string::npos);
+}
+
+void TestRowSeparators() {
+    using namespace trg::layout;
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const float row_left = 238.0f * scale, body = 1010.0f * scale, scrollbar = 10.0f * scale;
+        const float content = StableContentWidth(body, scrollbar);
+        const float separator_right = row_left + content;
+        const float control_x = separator_right - ControlColumnWidth(content, scale);
+        CHECK(separator_right > control_x && control_x > row_left);
+        CHECK(separator_right == row_left + body - scrollbar);
+    }
+
+    // Filled after the table, from the width the rows use, on every shared row and the info grid.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("row_right_ = row_left_ + ImGui::GetContentRegionAvail().x;") != std::string::npos);
+    CHECK(trg.find("dl->AddRectFilled(ImVec2(row_left_, top), ImVec2(row_right_, top + 1.0f), color);") != std::string::npos);
+    const size_t begin_lines = trg.find("    BeginRowLines();\n"), begin_lines_crlf = trg.find("    BeginRowLines();\r\n");
+    CHECK(begin_lines != std::string::npos || begin_lines_crlf != std::string::npos);
+    const size_t end_rows = trg.find("void Ui::EndRows()");
+    CHECK(end_rows != std::string::npos && trg.find("ImGui::EndTable();", end_rows) < trg.find("DrawRowLines();", end_rows));
+    const size_t grid = trg.find("void Ui::InfoGrid(");
+    CHECK(grid != std::string::npos && trg.find("BeginRowLines();", grid) < trg.find("ImGui::BeginTable(id, 4", grid));
+    CHECK(trg.find("ImDrawListFlags_AntiAliasedLines") == std::string::npos);
+    for (const char* page : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp", "incident_page.cpp"}) {
+        CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / page).find("BordersInnerH") == std::string::npos);
+    }
+}
+
+// ---- Launcher geometry at the supported display scales ----
+
+struct LogicalWindow {
+    float width, height;
+};
+
+constexpr LogicalWindow kLauncherWindows[] = {{900, 560}, {1126, 560}, {1280, 720}, {1920, 1080}, {3840, 2160}};
+constexpr float kDisplayScales[] = {1.0f, 1.5f, 2.25f};
+constexpr float kTolerance = 0.01f;
+
+// Launcher::Frame's layout of a window, in physical pixels.
+struct ChromeGeometry {
+    float header, body_h, sidebar_w, content_w, page_w, scrollbar, stable, control, label, footer_w;
+};
+
+ChromeGeometry ChromeAt(const LogicalWindow& window, float scale) {
+    using namespace trg::layout;
+    ChromeGeometry g{};
+    const float w = window.width * scale, h = window.height * scale, margin = kMargin * scale;
+    g.header = HeaderHeight(h, scale);
+    g.body_h = std::max(100.0f * scale, h - g.header - kBodyGap * scale - kFooterHeight * scale);
+    g.sidebar_w = SidebarWidth(w, scale);
+    g.content_w = w - g.sidebar_w - margin * 3.0f;
+    g.page_w = g.content_w - kContentPadding * scale * 2.0f;
+    g.scrollbar = 10.0f * scale;
+    g.stable = StableContentWidth(g.page_w, g.scrollbar);
+    g.control = ControlColumnWidth(g.stable, scale);
+    g.label = g.stable - g.control;
+    g.footer_w = w - margin * 2.0f;
+    return g;
+}
+
+std::string Between(const std::string& text, const std::string& from, const std::string& to) {
+    const size_t begin = text.find(from);
+    if (begin == std::string::npos) {
+        return {};
+    }
+    const size_t end = text.find(to, begin + from.size());
+    return text.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+}
+
+void TestLauncherDpiLayout() {
+    using namespace trg::layout;
+    for (const float scale : kDisplayScales) {
+        for (const LogicalWindow& window : kLauncherWindows) {
+            const ChromeGeometry g = ChromeAt(window, scale);
+            const int pages = int(std::size(dcp::kPageOrder));
+            CHECK(SidebarHeight(pages, SidebarRowFor(pages, g.body_h / scale)) * scale <= g.body_h + kTolerance);
+            CHECK(g.sidebar_w >= 168.0f * scale && g.sidebar_w <= 176.0f * scale);
+            CHECK(g.content_w > 0.0f && std::abs(g.sidebar_w + kMargin * scale * 3.0f + g.content_w - window.width * scale) < kTolerance);
+
+            CHECK(g.stable > 0.0f && g.stable <= g.page_w);
+            CHECK(g.control > 0.0f && g.control < g.stable && g.label >= 200.0f * scale);
+            CHECK(g.scrollbar > 0.0f && g.scrollbar < g.page_w * 0.05f);
+
+            // Separators run from the row's left edge to the gutter reserved for the scrollbar, inside the right padding.
+            const float row_left = kContentPadding * scale, separator_right = row_left + g.stable;
+            CHECK(separator_right > row_left + g.label && separator_right <= row_left + g.page_w - g.scrollbar + kTolerance);
+            CHECK(separator_right < g.content_w - kContentPadding * scale);
+
+            const float cluster = (kPlayWidth + kFooterButtonWidth * 2.0f + kFooterGap * 2.0f) * scale;
+            CHECK(cluster <= g.footer_w && g.footer_w - cluster >= 300.0f * scale);
+        }
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("HorizontalScrollbar") == std::string::npos);
+    CHECK(trg.find("st.ScrollbarSize = 10 * s;") != std::string::npos);
+    const std::string sidebar = Between(trg, "void Launcher::DrawSidebar(", "void Launcher::DrawContent(");
+    CHECK(sidebar.find("ImGuiWindowFlags_NoScrollbar") != std::string::npos);
+    CHECK(sidebar.find("const ImVec2 item(size.x - pad * 2, item_h);") != std::string::npos);
+    CHECK(sidebar.find("ImGui::SetCursorPosX(pad);") != std::string::npos);
+
+    // The pages with the densest rows stay on the shared row system, whose control column is fixed.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    for (const char* page : {"PagePlay", "PageDisplay", "PageGameplay", "PageAbout"}) {
+        CHECK(launcher.find(std::string("void ") + page + "(trg::Ui& ui) {") != std::string::npos);
+    }
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp").find("void OnlinePage::Draw(trg::Ui& ui) {") != std::string::npos);
+}
+
+void TestSidebarLabels() {
+    using namespace trg::layout;
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string portuguese = ReadAll(source / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    std::string longest_portuguese;
+    size_t longest_english = 0;
+    for (const PageId page : kPageOrder) {
+        const std::string english = PageName(page);
+        const size_t row = portuguese.find("\n" + english + "\t");
+        CHECK(row != std::string::npos);
+        const size_t begin = row + english.size() + 2;
+        const std::string label = portuguese.substr(begin, portuguese.find('\n', begin) - begin);
+        CHECK(!label.empty() && label.size() <= 12 && english.size() <= 12);
+        longest_english = std::max(longest_english, english.size());
+        if (label.size() > longest_portuguese.size()) {
+            longest_portuguese = label;
+        }
+    }
+    // The measured label widths in TestSidebarProportions end at this label.
+    CHECK(longest_portuguese == "Jogabilidade" && longest_english <= longest_portuguese.size());
+
+    for (const float scale : kDisplayScales) {
+        const float row = SidebarWidth(900.0f * scale, scale) - kSidebarPadding * scale * 2.0f;
+        CHECK(SidebarLabelX() * scale < row && kSidebarIcon * scale <= kSidebarRow * scale);
+        for (const LogicalWindow& window : kLauncherWindows) {
+            const ChromeGeometry g = ChromeAt(window, scale);
+            CHECK(SidebarLabelX() * scale < g.sidebar_w - kSidebarPadding * scale * 2.0f);
+            // The sidebar's cap hands every pixel it does not use to the page.
+            const float proportional = std::clamp(window.width * scale * 0.15f, 168.0f * scale, 200.0f * scale);
+            CHECK(g.sidebar_w <= proportional + kTolerance);
+        }
+    }
+    CHECK(SidebarWidth(3840.0f * 2.25f, 2.25f) < std::clamp(3840.0f * 2.25f * 0.15f, 168.0f * 2.25f, 200.0f * 2.25f));
+}
+
+void TestFooterAndCards() {
+    using namespace trg::layout;
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string trg = ReadAll(source / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const std::string footer = Between(trg, "void Launcher::DrawFooter(", "void Launcher::DrawPlayButton(");
+    CHECK(!footer.empty());
+    CHECK(footer.find("const float quit_x = right - play_w - bw * 2 - gap * 2;") != std::string::npos);
+    CHECK(footer.find("ImGui::Button(T(\"Quit\"), ImVec2(bw, bh))") != std::string::npos);
+    CHECK(footer.find("ImGui::Button(T(\"Save\"), ImVec2(bw, bh))") != std::string::npos);
+    CHECK(footer.find("DrawPlayButton(ImVec2(play_w, play_h), check.ok);") != std::string::npos);
+    CHECK(footer.find("SponsorButton(\"##sponsor_footer\"") != std::string::npos);
+    CHECK(footer.find("if (x >= help_x + note_w + gap) {") != std::string::npos);
+    CHECK(footer.find("DrawKeyHints(dl, hints, fonts, t,") != std::string::npos);
+
+    struct Shortcut {
+        const char* key;
+        const char* action;
+    };
+    const auto shortcuts = [](const char* text, const std::array<Shortcut, 3>& expected) {
+        const std::vector<KeyHint> hints = ParseKeyHints(text);
+        CHECK(hints.size() == expected.size());
+        for (size_t i = 0; i < hints.size() && i < expected.size(); ++i) {
+            CHECK(hints[i].key == expected[i].key && hints[i].action == expected[i].action);
+        }
+    };
+    shortcuts("Enter  Play     Alt+F4  Quit     Ctrl+S  Save", {Shortcut{"Enter", "Play"}, {"Alt+F4", "Quit"}, {"Ctrl+S", "Save"}});
+    shortcuts("Enter  Jogar     Alt+F4  Sair     Ctrl+S  Salvar", {Shortcut{"Enter", "Jogar"}, {"Alt+F4", "Sair"}, {"Ctrl+S", "Salvar"}});
+
+    for (const float scale : kDisplayScales) {
+        const float footer_h = kFooterHeight * scale;
+        const float glow = 7.0f * scale;  // the Play button's pulse reaches this far past its edge
+        CHECK(kPlayHeight * scale + glow * 2.0f <= footer_h && kFooterButtonHeight * scale <= footer_h);
+        CHECK(kKeycapHeight * scale < footer_h && kSupportIconBlock * scale < footer_h);
+        const float width = ChromeAt(kLauncherWindows[0], scale).footer_w;
+        CHECK((kPlayWidth + kFooterButtonWidth * 2.0f + kFooterGap * 2.0f) * scale < width);
+    }
+
+    // The About page's support card and the footer's Sponsor button share one link.
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(std::string(kSponsorUrl) == "https://github.com/sponsors/saulob");
+    CHECK(launcher.find("c.sponsor = {\"Sponsor on GitHub\", kSponsorUrl, sponsor_icon_};") != std::string::npos);
+    const std::string about = Between(launcher, "void PageAbout(trg::Ui& ui) {", "ui.Paragraph(");
+    CHECK(about.find("ui.SponsorCard(") != std::string::npos);
+    const std::string card = Between(trg, "void Ui::SponsorCard(", "\nvoid Ui::");
+    CHECK(card.find("kSponsorPink") != std::string::npos && card.find("AddImage(ImTextureRef(sponsor.icon)") != std::string::npos);
+    CHECK(card.find("if (sponsor.url.empty()) return;") != std::string::npos);
+    for (const LogicalWindow& window : kLauncherWindows) {
+        for (const float scale : kDisplayScales) {
+            const ChromeGeometry g = ChromeAt(window, scale);
+            CHECK((kSupportIconBlock + kSupportIconGap) * scale < g.stable * 0.25f);
+        }
+    }
+
+    // The friend code row: the code, its Copy button, and nothing of the Connection test or the relay.
+    const std::string online = ReadAll(source / "launcher" / "online_page.cpp");
+    const std::string code = Between(online, "void OnlinePage::DrawFriendCode(", "bool OnlinePage::DrawRequiredTestRow(");
+    CHECK(code.find("ui.RowEmphasized(\"Your friend code\", kFriendCodeHelp);") != std::string::npos);
+    CHECK(code.find("ImGui::Button(Tr(\"Copy\"), ImVec2(-FLT_MIN, 0))") != std::string::npos);
+    CHECK(code.find("ImGui::SetClipboardText(state.friend_code.c_str());") != std::string::npos);
+    CHECK(code.find("ImGui::SameLine();") < code.find("ImGui::Button(Tr(\"Copy\")"));
+    CHECK(code.find("Connection") == std::string::npos && code.find("DrawConnectionTest") == std::string::npos);
+    CHECK(code.find("relay") == std::string::npos && code.find("Relay") == std::string::npos);
+    const size_t friend_case = online.find("case OnlineSection::kFriendCode: DrawFriendCode(ui); break;");
+    const size_t test_case = online.find("case OnlineSection::kConnectionTest: DrawConnectionTest(ui); break;");
+    CHECK(friend_case != std::string::npos && test_case != std::string::npos && friend_case != test_case);
+
+    const std::string portuguese = ReadAll(source / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    for (const char* text : {"\nYour friend code\t", "\nCopy\t", "\nConnection test\t", "\nRun test\t", "\nAbout\t"}) {
+        CHECK(portuguese.find(text) != std::string::npos);
+    }
+}
+
+// ---- Launcher scrollbar gutter ----
+
+// What a page lays out from, in the frame before its scrollbar shows and in the one after.
+struct PageGeometry {
+    float content, control_x, wrap, separator_right;
+};
+
+PageGeometry PageGeometryAt(float body_width, float scrollbar, float scale, float row_left) {
+    using namespace trg::layout;
+    const float content = StableContentWidth(body_width, scrollbar);
+    const float control = ControlColumnWidth(content, scale);
+    return {content, content - control, content - control - 16.0f * scale, row_left + content};
+}
+
+void TestScrollbarSettling() {
+    using namespace trg::layout;
+    struct Page {
+        const char* name;
+        LogicalWindow window;
+    };
+    for (const float scale : kDisplayScales) {
+        for (const Page& page : {Page{"Gameplay", {1280, 720}}, Page{"Display", {1920, 1080}}, Page{"Display", {900, 560}},
+                                 Page{"Online", {1126, 560}}}) {
+            const ChromeGeometry g = ChromeAt(page.window, scale);
+            const float row_left = kContentPadding * scale;
+            const PageGeometry first = PageGeometryAt(g.page_w, g.scrollbar, scale, row_left);
+            const PageGeometry second = PageGeometryAt(g.page_w, g.scrollbar, scale, row_left);
+            CHECK(first.content == second.content && first.control_x == second.control_x);
+            CHECK(first.wrap == second.wrap && first.separator_right == second.separator_right);
+            CHECK(first.wrap > 0.0f && first.content == g.stable && first.control_x == g.label);
+        }
+
+        // A resize moves the page by the resize and by nothing else, whether or not a scrollbar is showing.
+        const ChromeGeometry small = ChromeAt(kLauncherWindows[0], scale), large = ChromeAt(kLauncherWindows[3], scale);
+        const PageGeometry before = PageGeometryAt(small.page_w, small.scrollbar, scale, 0.0f);
+        const PageGeometry after = PageGeometryAt(large.page_w, large.scrollbar, scale, 0.0f);
+        CHECK(after.content - before.content == large.page_w - small.page_w);
+        CHECK(after.content > before.content && after.control_x >= before.control_x);
+        CHECK(after.separator_right - before.separator_right == after.content - before.content);
+    }
+
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    CHECK(trg.find("ScrollbarSizes") == std::string::npos && trg.find("ScrollbarY") == std::string::npos);
+    CHECK(trg.find("GetScrollMaxY") == std::string::npos && trg.find("scrollbar_visible") == std::string::npos);
+}
+
+// ---- Launcher separators and row spacing ----
+
+void TestSeparatorPages() {
+    using namespace trg::layout;
+    struct Page {
+        const char* name;
+        LogicalWindow window;
+    };
+    for (const float scale : kDisplayScales) {
+        for (const Page& page : {Page{"Display", {1280, 720}}, Page{"Gameplay", {1920, 1080}}, Page{"Graphics", {900, 560}},
+                                 Page{"Online", {1126, 560}}}) {
+            const ChromeGeometry g = ChromeAt(page.window, scale);
+            const float row_left = kContentPadding * scale, right = row_left + g.stable;
+            const float control_x = right - g.control, text_end = row_left + g.label - 16.0f * scale;
+            CHECK(row_left < text_end && text_end < control_x && control_x < right);
+            CHECK(right - row_left == g.stable && right + g.scrollbar == row_left + g.page_w);
+        }
+    }
+
+    // The lines come from the width the rows use, not from a cell, so a clipped column cannot shorten them.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const std::string row = Between(trg, "void Ui::BeginRow() {", "void Ui::RowLabel(");
+    CHECK(row.find("BeginRowLines();") < row.find("ImGui::BeginTable(id, 2"));
+    const std::string lines = Between(trg, "void Ui::DrawRowLines() {", "\nint Ui::Segmented(");
+    CHECK(lines.find("row_left_") != std::string::npos && lines.find("row_right_") != std::string::npos);
+    CHECK(lines.find("TableGetColumn") == std::string::npos && lines.find("GetColumnWidth") == std::string::npos);
+    CHECK(lines.find("Col(theme().border_row)") != std::string::npos);
+
+    // Border colours come from the theme's two roles; no page picks its own.
+    const fs::path launcher_dir = fs::path(DCP_SOURCE_DIR) / "launcher";
+    for (const char* file : {"launcher.cpp", "trophy_page.cpp"}) {
+        const std::string text = ReadAll(launcher_dir / file);
+        CHECK(text.find("border_row") == std::string::npos && text.find("border_panel") == std::string::npos);
+        CHECK(text.find("kRowBorder") == std::string::npos && text.find("kPanelBorder") == std::string::npos);
+    }
+    // The Online page draws two lines the rows do not: under its tabs and around the lobby list, in those same roles.
+    const std::string online = ReadAll(launcher_dir / "online_page.cpp");
+    const auto occurrences = [](const std::string& text, std::string_view word) {
+        size_t count = 0;
+        for (size_t at = text.find(word); at != std::string::npos; at = text.find(word, at + 1)) ++count;
+        return count;
+    };
+    CHECK(online.find("kRowBorder") == std::string::npos && online.find("kPanelBorder") == std::string::npos);
+    CHECK(occurrences(online, "border_row") == 1 && occurrences(online, "border_panel") == 1);
+    CHECK(Between(online, "void OnlinePage::DrawTabs(", "void OnlinePage::DrawFriendRequests(").find("t.border_row") != std::string::npos);
+    CHECK(Between(online, "void OnlinePage::DrawLobbyList(", "void OnlinePage::DrawLobbyPlayers(").find("t.border_panel") != std::string::npos);
+    for (const char* file : {"launcher.cpp", "trophy_page.cpp"}) {
+        CHECK(ReadAll(launcher_dir / file).find("ImGuiCol_Border") == std::string::npos);
+    }
+    const std::string theme = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "include" / "trg" / "launcher.h");
+    CHECK(theme.find("ImVec4 border_row = ") != std::string::npos && theme.find("ImVec4 border_panel = ") != std::string::npos);
+}
+
+void TestRowKinds() {
+    using namespace trg::layout;
+    // A row is as tall as its text or its control, whichever is taller, plus the padding above and below.
+    const auto height = [](float help_lines, float control) {
+        const float text = help_lines > 0.0f ? kTextLabel + kLabelGap + kTextHelp * help_lines : kTextLabel;
+        return std::max(control, text) + kRowPadding * 2.0f;
+    };
+    const float short_row = height(0.0f, kControlHeight), one_line = height(1.0f, kControlHeight);
+    const float wrapped = height(3.0f, kControlHeight), long_wrapped = height(5.0f, kControlHeight);
+    CHECK(short_row == kControlHeight + kRowPadding * 2.0f && one_line >= short_row);
+    CHECK(wrapped > one_line && long_wrapped - wrapped == kTextHelp * 2.0f);
+    for (const float help_lines : {0.0f, 1.0f, 3.0f, 5.0f}) {
+        const float row = height(help_lines, kControlHeight);
+        const float content = row - kRowPadding * 2.0f, spare = content - kControlHeight;
+        CHECK(spare >= 0.0f && spare * 0.5f + kControlHeight + spare * 0.5f == content);
+    }
+
+    // Combo, segmented, slider and the other controls all start from the shared row, which centres them.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    for (const char* control : {"bool Ui::Combo(", "bool Ui::Choice(", "bool Ui::SliderInt(", "bool Ui::SliderFloat(", "bool Ui::Toggle("}) {
+        const std::string body = Between(trg, control, "\nbool Ui::");
+        CHECK(!body.empty() && body.find("Row(label, help);") != std::string::npos);
+    }
+    CHECK(Between(trg, "bool Ui::Choice(", "\nbool Ui::").find("Segmented(key, labels, sel)") != std::string::npos);
+    CHECK(Between(trg, "void Ui::RowControl() {", "\nvoid Ui::EndRows()").find("spare * 0.5f") != std::string::npos);
+    CHECK(Between(trg, "void Ui::RowLabel(", "\nvoid Ui::Row(").find("PushTextWrapPos") != std::string::npos);
+}
+
+// ---- Launcher shared source ----
+
+void TestSharedLauncherSource() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string windows_only = "windows.h|winhttp|_WIN32|HINTERNET|<io.h>|<direct.h>|WINAPI";
+    std::vector<fs::path> shared = {source / "launcher" / "header_art.h", source / "launcher" / "header_art.cpp",
+                                    source / "launcher" / "page_icons.h", source / "launcher" / "page_icons.cpp",
+                                    source / "third_party" / "trg-launcher" / "include" / "trg" / "layout.h",
+                                    source / "third_party" / "trg-launcher" / "include" / "trg" / "page_navigation.h"};
+    for (const fs::path& file : shared) {
+        const std::string text = ReadAll(file);
+        CHECK(!text.empty());
+        for (size_t begin = 0; begin < windows_only.size();) {
+            const size_t end = windows_only.find('|', begin);
+            const std::string needle = windows_only.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+            CHECK(text.find(needle) == std::string::npos);
+            begin = end == std::string::npos ? windows_only.size() : end + 1;
+        }
+    }
+    // The same launcher code draws on both platforms; only the renderer SDL picks differs.
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    const std::string painter = Between(launcher, "trg::HeaderPainter LauncherHeader(", "void Log(const char* format");
+    CHECK(!painter.empty() && painter.find("#if") == std::string::npos);
+    const std::string build = ReadAll(source / "launcher" / "CMakeLists.txt");
+    CHECK(build.find("header_art.cpp") != std::string::npos && build.find("page_icons.cpp") != std::string::npos);
+    CHECK(build.find("if (WIN32)") != std::string::npos && build.find("OpenSSL::Crypto") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package-linux.sh").find("install -m644 assets/launcher/header-art.png") != std::string::npos);
+    CHECK(ReadAll(source / "tools" / "package-linux.sh").find("usr/bin/assets/launcher/header-art.png") != std::string::npos);
+}
+
+// ---- Launcher page icons ----
+
+void TestPageIcons() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const fs::path icons = source / "assets" / "launcher" / "icons";
+
+    // The sidebar's pages and their icons, one to one.
+    const std::set<std::string> expected = {"play.svg",   "display.svg",  "graphics.svg", "gameplay.svg",   "online.svg",
+                                            "cheats.svg", "controls.svg", "trophies.svg", "bug-report.svg", "about.svg"};
+    std::set<std::string> mapped_files;
+    std::set<int> mapped_pages, ordered_pages;
+    for (const PageIconAsset& asset : PageIconAssets()) {
+        mapped_files.insert(asset.file);
+        mapped_pages.insert(static_cast<int>(asset.page));
+    }
+    for (const PageId page : kPageOrder) {
+        ordered_pages.insert(static_cast<int>(page));
+    }
+    CHECK(expected.size() == 10 && PageIconAssets().size() == expected.size());
+    CHECK(mapped_files == expected && mapped_pages.size() == expected.size());
+    CHECK(ordered_pages.size() == std::size(kPageOrder) && mapped_pages == ordered_pages);
+    for (const std::string& name : expected) {
+        CHECK(fs::is_regular_file(icons / name));
+    }
+
+    CHECK(PageIconAssets().size() == std::size(kPageOrder));
+    for (const PageId page : kPageOrder) {
+        const PageIconAsset* asset = FindPageIcon(page);
+        CHECK(asset != nullptr);
+        if (!asset) {
+            continue;
+        }
+        const std::string svg = ReadAll(icons / asset->file);
+        CHECK(svg.find("viewBox=\"") != std::string::npos && svg.find("<svg") != std::string::npos);
+        CHECK(svg.find("filter") == std::string::npos && svg.find("fill=\"white\"") == std::string::npos);
+
+        // The compiled copy is the file on disk, so a stale embed cannot pass.
+        const std::vector<uint8_t> embedded = RenderPageIcon(page, 24);
+        CHECK(!embedded.empty() && embedded == RasterizeIcon(reinterpret_cast<const uint8_t*>(svg.data()), svg.size(),
+                                                              asset->optical_scale, 24));
+
+        CHECK(asset->optical_scale > 0.5f && asset->optical_scale < 1.0f);
+        for (const int pixels : {20, 30, 45}) {
+            const std::vector<uint8_t> image = RasterizeIcon(reinterpret_cast<const uint8_t*>(svg.data()), svg.size(),
+                                                             asset->optical_scale, pixels);
+            CHECK(image.size() == size_t(pixels) * size_t(pixels) * 4);
+            size_t covered = 0;
+            bool edge = false, tinted = true;
+            for (size_t i = 0; i + 3 < image.size(); i += 4) {
+                const size_t x = (i / 4) % size_t(pixels), y = (i / 4) / size_t(pixels);
+                const bool ink = image[i + 3] > 128;
+                covered += ink;
+                edge = edge || (ink && (x == 0 || y == 0 || x + 1 == size_t(pixels) || y + 1 == size_t(pixels)));
+                tinted = tinted && image[i] == 255 && image[i + 1] == 255 && image[i + 2] == 255;
+            }
+            CHECK(covered > image.size() / 4 / 20);
+            CHECK(!edge && tinted);
+        }
+    }
+
+    size_t svg_files = 0;
+    for (const fs::directory_entry& entry : fs::directory_iterator(icons)) {
+        const std::string name = entry.path().filename().string();
+        CHECK(name.find("svgrepo-com") == std::string::npos);
+        svg_files += entry.path().extension() == ".svg";
+    }
+    CHECK(!fs::exists(icons / "bug-file-svgrepo-com.svg"));
+    CHECK(svg_files == PageIconAssets().size());
+
+    // A bad resource gives no image instead of a crash.
+    const std::string broken = "<svg viewBox=\"0 0 24 24\"><path d=\"M";
+    CHECK(RasterizeIcon(reinterpret_cast<const uint8_t*>(broken.data()), broken.size(), 0.9f, 20).empty());
+    const std::string text = "not an svg";
+    CHECK(RasterizeIcon(reinterpret_cast<const uint8_t*>(text.data()), text.size(), 0.9f, 20).empty());
+    CHECK(RasterizeIcon(nullptr, 0, 0.9f, 20).empty());
+    CHECK(RenderPageIcon(static_cast<PageId>(99), 20).empty());
+
+    // One production path, keyed by page identity and compiled in, so packages carry no loose icons.
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("c.pages.back().icon = [this, page](int pixels) { return PageIconTexture(page, pixels); };") != std::string::npos);
+    CHECK(launcher.find("trg::PageIcon") == std::string::npos);
+    const std::string compact = ReadAll(source / "gpu" / "patches" / "trg-launcher" / "0006-compact-layout.patch");
+    CHECK(compact.find("DrawPageIcon") == std::string::npos && compact.find("PageIcon::") == std::string::npos);
+    CHECK(compact.find("std::function<ImTextureID(int pixels)> icon = nullptr;") != std::string::npos);
+    const std::string build = ReadAll(source / "launcher" / "CMakeLists.txt");
+    CHECK(build.find("assets/launcher/icons/*.svg") != std::string::npos && build.find("-DSYMBOL=kPageIconFiles") != std::string::npos);
+    const std::string windows = ReadAll(source / "tools" / "package.ps1");
+    const std::string linux_package = ReadAll(source / "tools" / "package-linux.sh");
+    CHECK(windows.find("launcher\\icons") == std::string::npos && linux_package.find("launcher/icons") == std::string::npos);
+
+    // Nothing reads the source tree at run time: the icons are compiled in, only the artwork PNGs are loose files.
+    const std::string loader = ReadAll(source / "launcher" / "page_icons.cpp");
+    CHECK(loader.find("DCP_SOURCE_DIR") == std::string::npos && loader.find("ifstream") == std::string::npos);
+    CHECK(loader.find("fopen") == std::string::npos && loader.find("SDL_GetBasePath") == std::string::npos);
+    CHECK(loader.find("assets/launcher") == std::string::npos && loader.find("assets\\launcher") == std::string::npos);
+    for (const char* file : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp", "host.cpp"}) {
+        const std::string text = ReadAll(source / "launcher" / file);
+        CHECK(text.find("DCP_SOURCE_DIR") == std::string::npos && text.find("icons/") == std::string::npos);
+        CHECK(text.find(".svg\"") == std::string::npos && text.find("nsvgParseFromFile") == std::string::npos);
+    }
+}
+
+// ---- Launcher icon and third-party licenses ----
+
+void TestIconLicenses() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const fs::path icons = source / "assets" / "launcher" / "icons";
+    const std::string sources = ReadAll(icons / "SOURCES.md");
+    const std::string licenses = ReadAll(source / "packaging" / "licenses" / "THIRD-PARTY-LICENSES.txt");
+    CHECK(!sources.empty() && !licenses.empty());
+
+    int cc0_rows = 0;
+    for (const PageIconAsset& asset : PageIconAssets()) {
+        const size_t row = sources.find(std::string("| `") + asset.file + "` | ");
+        CHECK(row != std::string::npos);
+        const std::string line = sources.substr(row, sources.find('\n', row) - row);
+        CHECK(line.find("https://www.svgrepo.com/svg/") != std::string::npos);
+        CHECK(licenses.find(asset.file) != std::string::npos);
+        if (asset.page == PageId::kDisplay) {
+            CHECK(line.find("| CC Attribution License |") != std::string::npos && line.find("CC0") == std::string::npos);
+            CHECK(line.find("nickylimyeanfen") != std::string::npos && line.find("Inc Device Icons") != std::string::npos);
+            CHECK(line.find("https://www.svgrepo.com/svg/381247/display-television-tv-screen-gadget") != std::string::npos);
+        } else if (asset.page == PageId::kBugReport) {
+            CHECK(line.find("| Bug File | Vectopus | Atlas Variety Line Icons |") != std::string::npos);
+            CHECK(line.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
+            CHECK(line.find("| MIT License |") != std::string::npos);
+        } else if (line.find("| CC0 |") != std::string::npos) {
+            ++cc0_rows;
+            const size_t url = line.find("https://www.svgrepo.com/svg/");
+            const std::string address = line.substr(url, line.find(' ', url) - url);
+            CHECK(licenses.find(address) != std::string::npos);
+        }
+    }
+    CHECK(cc0_rows == 8);
+    CHECK(licenses.find("CC0 (public domain dedication), all from SVG Repo") != std::string::npos);
+    CHECK(licenses.find("\"Display Television Tv Screen Gadget\" by nickylimyeanfen, collection Inc Device Icons.") != std::string::npos);
+    CHECK(licenses.find("License: CC Attribution License, https://creativecommons.org/licenses/by/") != std::string::npos);
+    CHECK(licenses.find("\"Bug File\" by Vectopus, collection Atlas Variety Line Icons.") != std::string::npos);
+    CHECK(licenses.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
+    CHECK(licenses.find("bug-report.svg, MIT License:") != std::string::npos);
+    CHECK(licenses.find("Copyright (c) Vectopus\n\nPermission is hereby granted") != std::string::npos);
+    for (const std::string& attribution : {licenses, sources}) {
+        CHECK(attribution.find("https://creativecommons.org/licenses/by/") != std::string::npos);
+        CHECK(attribution.find("Adapted") != std::string::npos);
+    }
+
+    // NanoSVG stays vendored with its license, and the package carries that license.
+    const fs::path nanosvg = source / "launcher" / "third_party" / "nanosvg";
+    for (const char* file : {"nanosvg.h", "nanosvgrast.h", "LICENSE.txt"}) {
+        CHECK(fs::is_regular_file(nanosvg / file) && fs::file_size(nanosvg / file) > 500);
+    }
+    const std::string nanosvg_license = ReadAll(nanosvg / "LICENSE.txt");
+    CHECK(nanosvg_license.find("Mikko Mononen") != std::string::npos && nanosvg_license.find("as-is") != std::string::npos);
+    CHECK(licenses.find("nanosvg ") != std::string::npos && licenses.find("Mikko Mononen") != std::string::npos);
+    CHECK(licenses.find("https://github.com/memononen/nanosvg") != std::string::npos && licenses.find("licenses\\nanosvg") != std::string::npos);
+    const std::string header = ReadAll(nanosvg / "nanosvg.h");
+    CHECK(header.find("size == (size_t)-1l") != std::string::npos && header.find("size == -1l") == std::string::npos);
+
+    const std::string windows = ReadAll(source / "tools" / "package.ps1");
+    const std::string linux_package = ReadAll(source / "tools" / "package-linux.sh");
+    CHECK(windows.find("launcher\\third_party\\nanosvg\\LICENSE.txt") != std::string::npos);
+    CHECK(windows.find("packaging\\licenses\\THIRD-PARTY-LICENSES.txt") != std::string::npos);
+    CHECK(linux_package.find("[nanosvg]=launcher/third_party/nanosvg/LICENSE.txt") != std::string::npos);
+    CHECK(linux_package.find("packaging/licenses/THIRD-PARTY-LICENSES.txt") != std::string::npos);
+}
+
+// ---- Launcher page navigation ----
+
+struct PageFrame {
+    int sidebar;
+    int content;
+};
+
+// One launcher frame: the commit comes first, the click arrives between the sidebar and the content.
+PageFrame DrawPageFrame(trg::PageNavigation& navigation, int clicked) {
+    navigation.Commit();
+    const int sidebar = navigation.current();
+    if (clicked >= 0) {
+        navigation.Request(clicked);
+    }
+    return {sidebar, navigation.current()};
+}
+
+void TestPageNavigation() {
+    enum { kPlay, kDisplay, kGraphics, kGameplay, kOnline };
+    trg::PageNavigation navigation;
+
+    const PageFrame clicked = DrawPageFrame(navigation, kDisplay);
+    CHECK(clicked.sidebar == kPlay && clicked.content == kPlay);
+    const PageFrame next = DrawPageFrame(navigation, -1);
+    CHECK(next.sidebar == kDisplay && next.content == kDisplay);
+
+    int shown = kDisplay;
+    for (const int page : {kGraphics, kGameplay, kOnline, kPlay, kDisplay}) {
+        const PageFrame frame = DrawPageFrame(navigation, page);
+        CHECK(frame.sidebar == shown && frame.content == shown);
+        shown = page;
+    }
+
+    trg::PageNavigation requests(kGameplay);
+    CHECK(requests.current() == kGameplay && !requests.Commit());
+    requests.Request(kPlay);
+    requests.Request(kOnline);
+    CHECK(requests.current() == kGameplay);
+    CHECK(requests.Commit() && requests.current() == kOnline && !requests.Commit());
+    requests.Request(kOnline);
+    CHECK(requests.Commit());
+
+    // Requests arriving at any point of any frame never leave the sidebar and the content on different pages.
+    trg::PageNavigation rapid;
+    uint32_t seed = 12345;
+    int mixed = 0, changes = 0, last = rapid.current();
+    for (int frame = 0; frame < 2000; ++frame) {
+        seed = seed * 1664525u + 1013904223u;
+        const int click = (seed >> 24) % 4 == 0 ? int((seed >> 8) % 9) : -1;
+        const PageFrame drawn = DrawPageFrame(rapid, click);
+        mixed += drawn.sidebar != drawn.content;
+        changes += drawn.sidebar != last;
+        last = drawn.sidebar;
+    }
+    CHECK(mixed == 0 && changes > 100);
+
+    // The launcher commits once, before anything is drawn, and each page keeps its own scroll window. Row tables need
+    // explicit weights: an automatic one collapses the label column on the table's first frame.
+    const std::string trg = ReadAll(fs::path(DCP_SOURCE_DIR) / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const size_t commit = trg.find("navigation_.Commit()");
+    CHECK(commit != std::string::npos && trg.find("navigation_.Commit()", commit + 1) == std::string::npos);
+    CHECK(commit < trg.find("DrawHeader(vp->Pos") && commit < trg.find("DrawSidebar(ImVec2(sidebar_w"));
+    CHECK(trg.find("navigation_.Request(index);") != std::string::npos && trg.find("page_ = ") == std::string::npos);
+    const size_t page_id = trg.find("ImGui::PushID(current_page);");
+    CHECK(page_id != std::string::npos && page_id < trg.find("ImGui::BeginChild(\"##page_body\""));
+    CHECK(trg.find("ImGui::BeginChild(\"##page_body\"") == trg.rfind("ImGui::BeginChild(\"##page_body\""));
+    CHECK(trg.find("TableSetupColumn(\"label\", ImGuiTableColumnFlags_WidthStretch, 1.0f)") != std::string::npos);
+    CHECK(trg.find("TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, std::max(width, 1.0f))") != std::string::npos);
 }
 
 // ---- Keyboard bindings ----
@@ -4100,10 +5274,12 @@ void TestInstalledTextLanguages(const fs::path& base) {
         return joined;
     };
     const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
+    const std::string us_languages = "english=1 french=2 german=4 italian=5 brazilian_portuguese=1 spanish=3";
 
-    // Every Western slot (the official 1.00 archive's layout): all five, in the build's order, on 1.00 and 1.01 alike.
+    // Every Western slot (the official 1.00 archive's layout): all five, in the build's order, on 1.00 and 1.01 alike;
+    // 1.00 adds Brazilian Portuguese over the English slot.
     WriteAll(regional, LanguageArchive({us, fr, de, it, es, uk}));
-    CHECK(keys(&kUs) == western && keys(&kUs101) == western);
+    CHECK(keys(&kUs) == us_languages && keys(&kUs101) == western);
     CHECK(SameLanguages(InstalledTextLanguages(app0, &kUs), TextLanguagesOf(&kUs)));
 
     // The reported 1.01 archive, Russian text in the US slot and no other slot, offers English and never Russian: the
@@ -4143,9 +5319,11 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(ini, "text_language=russian\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 1);
 
-    // Russian text in the US slot beside complete Western slots: still the five Western languages.
+    // Russian text in the US slot beside complete Western slots: still the Western languages, and 1.00 still offers its
+    // translation (TranslateArchive keeps any record whose text differs).
     WriteAll(regional, LanguageArchive({Slot("US", russian), fr, de, it, es}));
     CHECK(keys(&kUs101) == western);
+    CHECK(keys(&kUs) == us_languages);
     WriteAll(ini, "text_language=german\n");
     CHECK(dcp_text_language(ini.string().c_str(), image.string().c_str(), app0.string().c_str()) == 4);
 
@@ -4185,7 +5363,7 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(regional, BuildCpk({{"stage/Interface.ftx", "plain", false}}, false));
     CHECK(keys(&kUs101) == western);
     fs::remove(regional);
-    CHECK(keys(&kUs) == western && keys(nullptr) == western);
+    CHECK(keys(&kUs) == us_languages && keys(&kUs101) == western && keys(nullptr) == western);
     CHECK(InstalledTextLanguages({}, &kUs101).size() == 5);
 
     // Asia/Hong Kong: Traditional Chinese and Korean from DRACRO_CK.CPK, unchanged.
@@ -4203,12 +5381,13 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(app0 / "DRACRO_PATCH_JP.CPK", LanguageArchive({us, fr}));
     CHECK(keys(&kJp102) == "japanese=0" && keys(&kJp103) == "japanese=0");
 
-    // Every archive language names its own slot; Japanese has none.
+    // Every archive language names its own slot; Japanese has none and a translation the slot of a language before it.
     for (const GameBuild& build : SupportedBuilds()) {
         std::set<std::string_view> suffixes;
         for (const TextLanguage& language : build.text_languages) {
-            CHECK(language.key == "japanese" ? language.suffix.empty()
-                                             : language.suffix.size() == 2 && suffixes.insert(language.suffix).second);
+            CHECK(language.key == "japanese"      ? language.suffix.empty()
+                  : !language.translation.empty() ? suffixes.count(language.suffix) == 1
+                                                  : language.suffix.size() == 2 && suffixes.insert(language.suffix).second);
         }
     }
     fs::remove_all(app0);
@@ -4281,7 +5460,12 @@ void TestTextLanguageSwitching(const fs::path& base) {
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs), &kUs), switch_to(kUs)).key == "english"); // a stale Russian -> USA
     WriteAll(ini, "text_language=russian\n");
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs101), &kUs101), switch_to(kUs101)).key == "english"); // -> 1.01
-    for (const char* kept : {"english", "french", "german", "italian", "spanish"}) {
+    CHECK(told(kUs, "brazilian_portuguese") == 1);
+    WriteAll(ini, "text_language=brazilian_portuguese\n");
+    CHECK(switch_to(kUs101) == "english");          // USA -> 1.01: the translation is 1.00's
+    WriteAll(ini, "text_language=brazilian_portuguese\n");
+    CHECK(switch_to(kCk) == "traditional_chinese"); // USA -> Asia
+    for (const char* kept : {"english", "french", "german", "italian", "brazilian_portuguese", "spanish"}) {
         WriteAll(ini, std::string("text_language=") + kept + "\n");
         LauncherSettings settings(ini);
         CHECK(!NormalizeTextLanguage(settings, InstalledTextLanguages(app0_of(kUs), &kUs)));
@@ -4417,6 +5601,7 @@ void TestKeepBaseLanguages(const fs::path& base) {
         return joined;
     };
     const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
+    const std::string us_languages = "english=1 french=2 german=4 italian=5 brazilian_portuguese=1 spanish=3";
 
     std::vector<Entry> us = Slot("US", kEnglishSheet);
     us.push_back({"msgsheet/StaffRollMsg_PS4_US.fms", "staff", false});
@@ -4447,7 +5632,7 @@ void TestKeepBaseLanguages(const fs::path& base) {
     const std::string base_hash = Sha256Hex(base_app0 / "DRACRO_US.CPK");
 
     // The base alone and the update alone: the update's archive is what collapsed the list.
-    CHECK(keys(base_app0, kUs) == western && keys(base_app0, kUs101) == western);
+    CHECK(keys(base_app0, kUs) == us_languages && keys(base_app0, kUs101) == western);
     CHECK(keys(update_app0, kUs101) == "english=1 french=2");
 
     CpkArchive base_archive;
@@ -4485,10 +5670,11 @@ void TestKeepBaseLanguages(const fs::path& base) {
         CHECK(merged.entries()[i].id == i);
         CHECK(i == 0 || order_key(merged.entries()[i - 1].path) < order_key(merged.entries()[i].path));
     }
-    CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == western);
+    CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == us_languages);
     for (const GameBuild* us_build : {&kUs, &kUs101}) {
         const std::vector<TextLanguage> offered = InstalledTextLanguages(merged_app0, us_build);
-        CHECK(LanguageNames(offered) == "English, French, German, Italian, Spanish");
+        CHECK(LanguageNames(offered) == (us_build == &kUs ? "English, French, German, Italian, Portuguese (Brazil), Spanish"
+                                                          : "English, French, German, Italian, Spanish"));
         CHECK(offered[0].key == "english" && offered[0].ps4_id == 1 && offered[0].suffix == "US");
         CHECK(std::none_of(offered.begin(), offered.end(), [](const TextLanguage& language) {
             return language.suffix == "UK" || language.key == "russian" || language.name == "Russian";
@@ -4687,6 +5873,253 @@ void TestKeepBaseLanguages(const fs::path& base) {
         CHECK(Sha256Hex(real_cpk) == real_hash);
     }
     fs::remove_all(root);
+}
+
+// The port's translations: message sheets rebuilt byte for byte, their control sequences, and an archive overlay that
+// shows a translated record only when the installed English is the record it was written from.
+void TestGameTranslation(const fs::path& base) {
+    using namespace cpk_test;
+    using namespace language_test;
+    const auto sheet_of = [](std::initializer_list<std::string> records) {
+        std::string out("FMSB\0\0\0\0", 8);
+        Le32(out, 0x20);
+        out += std::string(8, '\0');
+        Le32(out, uint32_t(records.size()));
+        out += '\x03';
+        out += std::string(7 + records.size() * 8, '\0');
+        for (const std::string& record : records) out += record + '\0';
+        out.resize((out.size() + 15) / 16 * 16, '\0');
+        const uint32_t size = uint32_t(out.size() - 0x20);
+        for (int i = 0; i < 4; ++i) out[size_t(4 + i)] = char(size >> (8 * i));
+        return out + "FEOC" + std::string(12, '\0');
+    };
+    const std::string english = sheet_of({"Start Game", "Floor %d", "Options", "@c(10)##(P_INN)@/c", std::string(0x100, 'x')});
+    const std::optional<FmsSheet> sheet = ParseFms(Span(english));
+    CHECK(sheet && sheet->records.size() == 5 && sheet->records[1] == "Floor %d");
+    CHECK(sheet && Bytes(BuildFms(*sheet)) == english);
+    std::string damaged = english;
+    damaged[0x20] = 1; // the pointer table is zeros on disk
+    CHECK(!ParseFms(Span(damaged)) && !ParseFms(Span(english.substr(0, english.size() - 16))) && !ParseFms({}));
+
+    CHECK((ControlTokens("@#(34)Go ##(TAG) %d%% %3d @c(1,2,3)x@/c @@ @C 100$ %.2f %08lx 5%@/c") ==
+           std::vector<std::string>{"@#(34)", "##(TAG)", "%d", "%%", "%3d", "@c(1,2,3)", "@/c", "@@", "@C", "$", "%.2f",
+                                    "%08lx", "%", "@/c"}));
+    CHECK(SameControlTokens("%s won %d", "%s ganhou %d") && !SameControlTokens("%s won %d", "%d: %s"));
+    CHECK(SameControlTokens("@c(10)Inn@/c @#(1)", "@#(1) @c(10)Taverna@/c") && !SameControlTokens("@#(1) go", "vá"));
+    CHECK(SameControlTokens("About 50% of eggs", "Cerca de 50% dos ovos") && !SameControlTokens("About 50% of", "%d ovos"));
+    CHECK(!SameControlTokens("Chance %d%", "Chance %d") && SameControlTokens("Chance %d%", "Chance de %d%"));
+
+    const fs::path app0 = base / "translation_app0";
+    fs::remove_all(app0);
+    WriteAll(app0 / "DRACRO_US.CPK", LanguageArchive({Slot("US", english), Slot("FR", english)}));
+    const std::string before = ReadAll(app0 / "DRACRO_US.CPK");
+    const auto digest = [&](const std::string& text) {
+        WriteAll(base / "translation_record.txt", text);
+        return Sha256Hex(base / "translation_record.txt");
+    };
+    const std::string json = "{\"sheet\": \"SystemMsg\", \"entries\": [\n"
+        "{\"index\": 0, \"source_sha256\": \"" + digest("Start Game") + "\", \"pt_br\": \"Iniciar jogo\"},\n"
+        "{\"index\": 1, \"source_sha256\": \"" + digest("Floor %d") + "\", \"pt_br\": \"Andar\"},\n"
+        "{\"index\": [2], \"source_sha256\": \"" + digest("Option") + "\", \"pt_br\": \"Opções\"},\n"
+        "{\"index\": 3, \"source_sha256\": \"" + digest("@c(10)##(P_INN)@/c") + "\", \"pt_br\": \"@c(10)##(P_INN)@/c\"},\n"
+        "{\"index\": 9, \"source_sha256\": \"" + digest("Start Game") + "\", \"pt_br\": \"x\"}]}";
+    const auto file_of = [](const char* name, const std::string& text) {
+        return TranslationFile{name, reinterpret_cast<const uint8_t*>(text.data()), text.size()};
+    };
+    const TranslationFile files[] = {file_of("SystemMsg.json", json)};
+    const ArchiveTranslation result = TranslateArchive(app0 / "DRACRO_US.CPK", "US", files);
+    CHECK(result.error.empty() && result.overlay && result.translated == 2 && result.sheets == 1 && result.refused == 3);
+    CHECK((result.problems == std::vector<std::string>{"SystemMsg 1: control sequences differ from the English",
+                                                         "SystemMsg 2: the English record changed",
+                                                         "SystemMsg 9: no such record"}));
+    std::string seen = before;
+    if (result.overlay) {
+        seen.resize(result.overlay->length, '\0');
+        for (const auto& [offset, data] : result.overlay->patches) {
+            std::copy(data.begin(), data.end(), seen.begin() + std::ptrdiff_t(offset));
+        }
+    }
+    CHECK(ReadAll(app0 / "DRACRO_US.CPK") == before);
+    WriteAll(base / "translation_seen.cpk", seen);
+    CpkArchive original, shown;
+    CHECK(original.Open(app0 / "DRACRO_US.CPK") && shown.Open(base / "translation_seen.cpk"));
+    for (const CpkEntry& entry : original.entries()) {
+        const CpkEntry* same = shown.Find(entry.path);
+        if (entry.path != "msgsheet/SystemMsg_US.fms") {
+            CHECK(same && shown.Read(*same) == original.Read(entry));
+            continue;
+        }
+        const std::optional<FmsSheet> translated = same ? ParseFms(shown.Read(*same)) : std::nullopt;
+        CHECK(translated && (translated->records ==
+                             std::vector<std::string>{"Iniciar jogo", "Floor %d", "Options", "@c(10)##(P_INN)@/c", std::string(0x100, 'x')}));
+    }
+
+    CHECK(!TranslateArchive(app0 / "DRACRO_US.CPK", "US", {}).overlay);
+    const std::string broken = "{\"sheet\": 3}";
+    const std::string items = "{\"sheet\": \"ItemList\", \"entries\": []}";
+    const std::string tutorial = "{\"sheet\": \"Tutorial\", \"entries\": []}";
+    const TranslationFile unusable[] = {file_of("Broken.json", broken), file_of("ItemList.json", items),
+                                        file_of("Tutorial.json", tutorial)};
+    const ArchiveTranslation none = TranslateArchive(app0 / "DRACRO_US.CPK", "US", unusable);
+    CHECK(!none.overlay && none.error.empty() && none.refused == 3 && none.translated == 0);
+    CHECK((none.problems == std::vector<std::string>{"Broken.json: not a translation file",
+                                                       "msgsheet/ItemList_US.fms: not a message sheet the port can rebuild",
+                                                       "msgsheet/Tutorial_US.fms: not in the archive"}));
+    const ArchiveTranslation missing = TranslateArchive(app0 / "MISSING.CPK", "US", files);
+    CHECK(!missing.overlay && missing.error.rfind("MISSING.CPK: ", 0) == 0);
+
+    // The loader's call: only Brazilian Portuguese on USA 1.00 is a translation; English and Spanish say nothing.
+    const fs::path ini = base / "translation_dcp.ini";
+    const fs::path image = base / "translation_image";
+    WriteAll(image / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
+                                       kUs.eboot_sha256 + "\"\n}");
+    const auto translation = [&](const std::string& saved, const fs::path* image_dir, std::string& message) {
+        WriteAll(ini, "text_language=" + saved + "\n");
+        uint64_t length = 0;
+        DcpFilePatch* patches = nullptr;
+        size_t count = 0;
+        char text[1024];
+        const std::string image_text = image_dir ? image_dir->string() : std::string();
+        const char* archive = dcp_text_translation(ini.string().c_str(), image_dir ? image_text.c_str() : nullptr,
+                                                   app0.string().c_str(), &length, &patches, &count, text, sizeof(text));
+        message = text;
+        localization::SetActiveLanguage("english");
+        return archive;
+    };
+    std::string message;
+    CHECK(!translation("english", &image, message) && message.empty());
+    CHECK(!translation("spanish", &image, message) && message.empty());
+    CHECK(!translation("brazilian_portuguese", nullptr, message) && message.empty());
+    const char* archive = translation("brazilian_portuguese", &image, message);
+    if (PtBrTranslationFiles().empty()) {
+        CHECK(!archive && message == "Portuguese (Brazil): no record translated yet, showing English");
+    } else {
+        CHECK(message.rfind("Portuguese (Brazil)", 0) == 0);
+    }
+    const fs::path installed = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / "v1.03";
+    if (fs::exists(installed / "DRACRO_US.CPK")) {
+        WriteAll(ini, "text_language=brazilian_portuguese\n");
+        const std::string image_text = image.string();
+        const auto prepare = [&](DcpFilePatch*& patches, size_t& count) {
+            uint64_t length = 0;
+            char text[1024];
+            return dcp_text_translation(ini.string().c_str(), image_text.c_str(), installed.string().c_str(), &length,
+                                        &patches, &count, text, sizeof(text));
+        };
+        DcpFilePatch* patches = nullptr;
+        size_t count = 0;
+        const bool first_ready = prepare(patches, count) != nullptr && count != 0;
+        CHECK(first_ready);
+        if (first_ready) {
+            const uint8_t* data = static_cast<const uint8_t*>(patches[0].data);
+            const std::vector<uint8_t> snapshot(data, data + std::min<uint64_t>(patches[0].size, 64));
+            DcpFilePatch* again = nullptr;
+            size_t again_count = 0;
+            CHECK(prepare(again, again_count) != nullptr && again_count == count);
+            CHECK(std::equal(snapshot.begin(), snapshot.end(), data));
+        }
+        localization::SetActiveLanguage("english");
+    }
+    fs::remove_all(app0);
+    fs::remove_all(image);
+    fs::remove(ini);
+}
+
+void TestInGameUiText() {
+    const auto& rows = localization::PortugueseBrazilUiText().rows;
+    const auto has = [&](const char* english) {
+        return std::any_of(rows.begin(), rows.end(), [&](const localization::UiTextRow& r) { return r.english == english; });
+    };
+    for (const char* english : {"OPTIONS", "CHEATS", "F10 Close", "Not saved to the launcher", "Unavailable", "Infinite Health",
+                                "Fill Health", "Add 1,000 Gold", "Level Up (+1 Level)", "Movement Speed", "Experience Multiplier",
+                                "Display mode", "VSync", "Windowed", "Cheats are disabled while Online Play is enabled",
+                                "Cheats are not available for this game build.", "Applies after a restart.", "Cross", "Circle",
+                                "Skip the startup logo and go straight to the title screen",
+                                "Unlocks all Gallery content while enabled without changing save progress"}) {
+        CHECK(has(english));
+    }
+    const auto conversions = [](const std::string& text) {
+        std::string out;
+        for (size_t i = 0; i < text.size(); ++i) {
+            if (text[i] != '%') continue;
+            if (i + 1 < text.size() && text[i + 1] == '%') { ++i; continue; }
+            size_t end = i + 1;
+            while (end < text.size() && !std::isalpha(static_cast<unsigned char>(text[end]))) ++end;
+            out += text.substr(i, end - i + 1);
+            i = end;
+        }
+        return out;
+    };
+    for (const localization::UiTextRow& row : rows) {
+        CHECK(conversions(row.english) == conversions(row.text));
+        CHECK(std::count(row.english.begin(), row.english.end(), '\n') == std::count(row.text.begin(), row.text.end(), '\n'));
+    }
+    for (const char* english : {"Online version mismatch", "You", "Friend", "Host", "Incompatible", "Online, in a room",
+                                "more friends are listed in the launcher."}) {
+        CHECK(has(english));
+    }
+    for (const char* source : {"gpu/shim/dcp_overlay.cpp", "gpu/shim/dcp_options_menu.cpp"}) {
+        CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / source).find("dcp::Tr(") != std::string::npos);
+    }
+}
+
+// A visual patch is applied only to the exact source it was made from; any other bytes keep the original.
+void TestVisualPatchFallback(const fs::path& base) {
+    using namespace cpk_test;
+    const std::string entry_name = "stage/Interface_US.ftx";
+    std::string source(256, 'a'), target = source;
+    target.replace(32, 16, std::string(16, 'b'));
+    const auto crc = [](const std::string& text) {
+        return uint32_t(crc32(0, reinterpret_cast<const Bytef*>(text.data()), uInt(text.size())));
+    };
+    const auto le32 = [](std::string& out, uint32_t value) {
+        for (int i = 0; i < 4; ++i) out += char(value >> (8 * i));
+    };
+    const auto patch_for = [&](uint32_t before, uint32_t after) {
+        std::string raw("DCPX1", 5);
+        raw += std::string(3, '\0');
+        le32(raw, 1);
+        raw += char(entry_name.size());
+        raw += char(0);
+        raw += entry_name;
+        le32(raw, uint32_t(source.size()));
+        le32(raw, before);
+        le32(raw, after);
+        le32(raw, 1);
+        le32(raw, 32);
+        raw += target.substr(32, 16);
+        std::string packed;
+        le32(packed, uint32_t(raw.size()));
+        uLongf size = compressBound(uLong(raw.size()));
+        std::string deflated(size, '\0');
+        compress2(reinterpret_cast<Bytef*>(deflated.data()), &size, reinterpret_cast<const Bytef*>(raw.data()), uLong(raw.size()), 9);
+        return packed + deflated.substr(0, size);
+    };
+    const auto run = [&](const std::string& archive_bytes, const std::string& patch) {
+        const fs::path file = base / "visual_fallback.cpk";
+        WriteAll(file, archive_bytes);
+        const TranslationFile files[] = {{"patch.dcpx.z", reinterpret_cast<const uint8_t*>(patch.data()), patch.size()}};
+        return TranslateArchive(file, "US", {}, files);
+    };
+    const std::string good = patch_for(crc(source), crc(target));
+    const ArchiveTranslation applied = run(BuildCpk({{entry_name, source, false}}, true), good);
+    CHECK(applied.overlay && applied.visuals == 1);
+    std::string seen;
+    if (applied.overlay) {
+        for (const auto& [offset, data] : applied.overlay->patches) {
+            if (data.size() == target.size()) seen.assign(data.begin(), data.end());
+        }
+    }
+    CHECK(seen == target);
+    const ArchiveTranslation other_source = run(BuildCpk({{entry_name, std::string(256, 'z'), false}}, true), good);
+    CHECK(other_source.visuals == 0 && other_source.visual_skipped >= 1);
+    const ArchiveTranslation wrong_result = run(BuildCpk({{entry_name, source, false}}, true), patch_for(crc(source), crc(source)));
+    CHECK(wrong_result.visuals == 0 && wrong_result.visual_skipped >= 1);
+    const ArchiveTranslation missing = run(BuildCpk({{"stage/Other.ftx", source, false}}, true), good);
+    CHECK(missing.visuals == 0 && missing.visual_skipped >= 1);
+    const std::string garbage = "not a patch";
+    CHECK(run(BuildCpk({{entry_name, source, false}}, true), garbage).visual_skipped >= 1);
+    fs::remove(base / "visual_fallback.cpk");
 }
 
 void TestFileBrowser(const fs::path& base) {
@@ -5061,7 +6494,75 @@ void TestUsBuild() {
     CHECK(CheckSfoIdentity(SfoFor(kUs, "01.02", "01.03")).state == GameFileState::kDifferentVersion);
     CHECK(SupportedBuildsText().find("CUSA10454 1.00 USA, ") == 0);
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
-    CHECK(launcher.find("The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages.") != std::string::npos);
+    CHECK(launcher.find("Tr(\". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their \"") != std::string::npos);
+}
+
+// CUSA10487 is one complete package: APP_VER 01.00, VERSION 01.03, no update and no patch file.
+void TestEuropeBuild(const fs::path& base) {
+    CHECK(std::string(kEu.title_id) == "CUSA10487" && std::string(kEu.content_id) == "EP2475-CUSA10487_00-DRAGONSCROWNPRO1");
+    CHECK(std::string(kEu.version) == "1.03" && std::string(kEu.folder) == "CUSA10487-1.03");
+    CHECK(BuildKey(kEu) == "CUSA10487-1.03" && std::string(kEu.label) == "CUSA10487 1.03 Europe");
+    CHECK(std::string(kEu.region) == "Europe" && std::string(kEu.regional_archive) == "DRACRO_EU.CPK");
+    CHECK(std::string(kEu.eboot_sha256) == "25c58f473337bc1da768d86e4cd12fe8a15e4af48e0826ac9a857fd9e3c09845");
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "README.md").find("`eboot.bin` 22283899 bytes, SHA-256 `" + std::string(kEu.eboot_sha256)) !=
+          std::string::npos);
+    CHECK(kEu.extra_files.empty() && kEu.layers.size() == 1 && BaseBuildOf(kEu) == nullptr);
+    CHECK(std::string(kEu.layers[0].app_ver) == "01.00" && std::string(kEu.layers[0].sfo_version) == "01.03" && !kEu.layers[0].update);
+    CHECK(BuildMetadataText(kEu) == "APP_VER 1.00 \xC2\xB7 VERSION 1.03");
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(&build == &kEu || (std::string(build.folder) != kEu.folder && std::string(build.eboot_sha256) != kEu.eboot_sha256));
+    }
+
+    const GameCheck package = CheckPackageIdentity(PackageSfo(kEu, "01.00", "01.03", "gd"));
+    CHECK(package.state == GameFileState::kValid && package.build == &kEu && package.layer == 0);
+    CHECK(CheckSfoIdentity(SfoFor(kEu)).build == &kEu);
+    CHECK(CheckPackageIdentity(PackageSfo(kEu, "01.00", "01.03", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kEu, "01.00", "01.00", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kEu, "01.03", "01.03", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kEu, "01.03", "01.03")).state == GameFileState::kDifferentVersion);
+    // The USA package has the same APP_VER and VERSION; the title decides.
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gd")).build == &kUs);
+
+    const fs::path image = base / "eu-image";
+    fs::create_directories(image);
+    const auto report = [&](const std::string& sha) {
+        WriteAll(image / "image.json", "{\n  \"title_id\": \"CUSA10487\",\n  \"eboot_sha256\": \"" + sha +
+                                           "\",\n  \"app_ver\": \"01.00\"\n}");
+        return BuildOfImageDir(image.string().c_str());
+    };
+    CHECK(report(kEu.eboot_sha256) == &kEu);
+    CHECK(report("7362f2e73396a188e18b64fb7aa7cd762f87e70ee0e71a13d727d95b0ab20796") == nullptr);
+    fs::remove_all(image);
+
+    using namespace cpk_test;
+    const fs::path app0 = base / "eu-languages";
+    fs::remove_all(app0);
+    std::vector<Entry> sheets;
+    for (const char* suffix : {"DE", "ES", "FR", "IT", "UK", "US"}) {
+        sheets.push_back({std::string("msgsheet/SystemMsg_") + suffix + ".fms", "FMSB", false});
+        sheets.push_back({std::string("msgsheet/ItemList_") + suffix + ".fms", "FMSB", false});
+    }
+    WriteAll(app0 / "DRACRO_EU.CPK", BuildCpk(sheets, true));
+    CHECK(LanguageNames(InstalledTextLanguages(app0, &kEu)) == "English, French, German, Italian, Spanish");
+    CHECK(ResolveTextLanguage(&kEu, {}).key == "english" && ResolveTextLanguage(&kEu, "french").suffix == "FR");
+    CHECK(ResolveTextLanguage(&kEu, kPortugueseBrazilKey).key == "english");
+
+    // No copy of this archive was ever read: Xbox prompts are offered only while its atlases are the patch's.
+    const fs::path prompts = base / "eu-prompts";
+    fs::remove_all(prompts);
+    std::string atlas(8192, '\0');
+    for (size_t i = 0; i < atlas.size(); ++i) atlas[i] = char((i * 3 + i / 32) & 255);
+    std::string xbox = atlas, other = atlas;
+    xbox.replace(0x400, 16, 16, 'X');
+    other.replace(0x400, 16, 16, 'O');
+    const std::string patch = MakePatch({{"stage/Interface.ftx", {atlas, xbox}}, {"stage/Interface_UK.ftx", {atlas, xbox}}});
+    WriteAll(prompts / "DRACRO.CPK", BuildCpk({{"stage/Interface.ftx", atlas, true}}, false));
+    WriteAll(prompts / "DRACRO_EU.CPK", BuildCpk({{"stage/Interface_UK.ftx", atlas, true}}, true));
+    CHECK(XboxPromptsAvailable(prompts, kEu, Span(patch)));
+    WriteAll(prompts / "DRACRO_EU.CPK", BuildCpk({{"stage/Interface_UK.ftx", other, true}}, true));
+    CHECK(!XboxPromptsAvailable(prompts, kEu, Span(patch)));
+    fs::remove_all(prompts);
+    fs::remove_all(app0);
 }
 
 // Prepared CUSA10454 folders made before the build was named 1.00 carry the marker version 1.03.
@@ -5356,7 +6857,7 @@ void TestSafeMode(const fs::path& base) {
 }
 
 void TestBuilds(const fs::path& base) {
-    CHECK(SupportedBuilds().size() == 7);
+    CHECK(SupportedBuilds().size() == 8);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
     CHECK(std::string(kUs.folder) == "v1.03" && std::string(kCk.folder) == "CUSA10209-1.02");
     CHECK(std::string(kCk.content_id) == "HP0177-CUSA10209_00-DRAGONSCROWN0001");
@@ -5643,7 +7144,7 @@ void TestResolutionProbe() {
         } else if (!build.resolution_sites.empty()) {
             CHECK(build.resolution_sites.size() == 23 && !build.resolution_by_signature);
         } else {
-            CHECK(&build == &kUs101 && build.resolution_by_signature);
+            CHECK((&build == &kUs101 || &build == &kEu) && build.resolution_by_signature);
         }
     }
 
@@ -5708,6 +7209,132 @@ void TestResolutionProbe() {
     CHECK(dcp_find_resolution_sites(tiny.data(), tiny.size(), &a, 1, one, one_result) == 0);
     CHECK(one_result[0].matches == 0);
     CHECK(image == untouched);
+}
+
+void TestLauncherLocalization() {
+    using namespace localization;
+    for (const char* file : {"launcher/localization/ui_text.h", "launcher/localization/ui_text.cpp",
+                             "launcher/localization/pt_br_ui_text.cpp"}) {
+        const std::string bytes = ReadAll(fs::path(DCP_SOURCE_DIR) / file);
+        CHECK(!bytes.empty());
+        CHECK(ValidUtf8Text(bytes));
+        CHECK(bytes.find("\xEF\xBF\xBD") == std::string::npos);
+    }
+    const UiTextTable& table = PortugueseBrazilUiText();
+    CHECK(table.errors.empty());
+    std::set<std::string> english;
+    for (const UiTextRow& row : table.rows) {
+        CHECK(!row.english.empty());
+        CHECK(!row.text.empty());
+        CHECK(ValidUtf8Text(row.english));
+        CHECK(ValidUtf8Text(row.text));
+        CHECK(english.insert(row.english).second);
+    }
+
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(PortugueseBrazilSelected());
+    CHECK(std::string(Tr("Play")) == "Jogar");
+    CHECK(std::string(Tr("Save")) == "Salvar");
+    CHECK(std::string(Tr("Quit")) == "Sair");
+    CHECK(std::string(Tr("Display")) == "Tela");
+    CHECK(std::string(Tr("Graphics")) == "Gráficos");
+    CHECK(std::string(Tr("Gameplay")) == "Jogabilidade");
+    CHECK(std::string(Tr("Controls")) == "Controles");
+    CHECK(std::string(Tr("About")) == "Sobre");
+    CHECK(std::string(Tr("Sponsor on GitHub")) == "Patrocinar no GitHub");
+    CHECK(std::string(Tr("UPDATE NOW")) == "ATUALIZAR AGORA");
+    CHECK(std::string(Tr("Connection test")) == "Teste de Conexão");
+    CHECK(std::string(Tr("Copy")) == "Copiar");
+    CHECK(std::string(Tr("Decline")) == "Recusar");
+    for (const UiTextRow& row : table.rows) {
+        CHECK(std::string(Tr(row.english.c_str())) == row.text);
+    }
+
+    SetActiveLanguage("english");
+    CHECK(!PortugueseBrazilSelected());
+    CHECK(std::string(Tr("Play")) == "Play");
+    CHECK(std::string(Tr("Menu & Subtitles")) == "Menu & Subtitles");
+    for (const char* key : {"spanish", "french", "german", "italian"}) {
+        SetActiveLanguage(key);
+        CHECK(std::string(Tr("Play")) == "Play");
+        CHECK(std::string(Tr("Save")) == "Save");
+    }
+
+    const std::string unknown = "Not a launcher string 12345";
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(Tr(unknown)) == unknown);
+    CHECK(std::string(Tr(unknown.c_str())) == unknown);
+
+    SetActiveLanguage("english");
+    CHECK(std::string(Tr("Play")) == "Play");
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(Tr("Play")) == "Jogar");
+    SetActiveLanguage("english");
+}
+
+void TestFileDialogLabel() {
+    using namespace localization;
+    trg::SetTranslator(+[](const char* text) { return Tr(text); });
+    CHECK(std::string(trg::Translate("All files")) == "All files");
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(trg::Translate("All files")) == "Todos os arquivos");
+    SetActiveLanguage("english");
+    trg::SetTranslator(nullptr);
+    CHECK(std::string(trg::Translate("All files")) == "All files");
+    const std::string patch = ReadAll(fs::path(DCP_SOURCE_DIR) / "gpu" / "patches" / "trg-launcher" / "0005-ui-translator.patch");
+    CHECK(patch.find("Widen(Translate(\"All files\"))") != std::string::npos);
+    CHECK(patch.find("ShellQuote(std::string(Translate(\"All files\")) + \" | *\")") != std::string::npos);
+}
+
+void TestTextWithValues() {
+    using namespace localization;
+    CHECK(TrValue("Request sent to Alice.") == "Request sent to Alice.");
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(TrValue("Request sent to Alice.") == "Solicitação enviada para Alice.");
+    CHECK(TrValue("Alice is now your friend.") == "Alice agora é seu amigo.");
+    CHECK(TrValue("Request sent to %n%s.") == "Solicitação enviada para %n%s.");
+    CHECK(TrValue("The online service refused the request (busy).") == "O serviço online recusou a solicitação (busy).");
+    CHECK(TrValue("No player has that friend code.") == "Nenhum jogador tem esse código de amigo.");
+    CHECK(TrValue("Windows could not start it (error 5).") == "O Windows não conseguiu iniciá-lo (erro 5).");
+    CHECK(TrValue("Connected \xC2\xB7 32 ms") == "Conectado \xC2\xB7 32 ms");
+    CHECK(TrValue("Cannot write the update file a.bin.") == "Não foi possível gravar o arquivo de atualização a.bin.");
+    CHECK(TrValue("Cannot write a.bin.") == "Não foi possível gravar a.bin.");
+    CHECK(TrValue("Not a launcher string 12345") == "Not a launcher string 12345");
+
+    using Router = net::ConnectionFacts::Router;
+    const auto translated = [](net::ConnectionFacts facts) {
+        for (const uint16_t port : {uint16_t(0), uint16_t(3658)}) {
+            facts.udp_port = port;
+            for (const net::ConnectionReport::Line& line : net::summarize_connection(facts).lines) {
+                CHECK(std::string(Tr(line.label)) != line.label || line.label == "Relay");
+                CHECK(TrValue(line.text) != line.text);
+            }
+        }
+    };
+    for (const int64_t latency : {int64_t(-1), int64_t(32)}) {
+        net::ConnectionFacts facts;
+        facts.lobby_ok = true;
+        facts.lobby_latency_ms = latency;
+        translated(facts);
+        facts.udp_ok = facts.second_answer = facts.same_mapping = true;
+        translated(facts);
+        facts.second_answer = false;
+        translated(facts);
+        facts.second_answer = true;
+        facts.same_mapping = false;
+        translated(facts);
+        facts.router = Router::kMapped;
+        translated(facts);
+        facts.router = Router::kMappedBehindNat;
+        translated(facts);
+        facts.relay_ok = true;
+        translated(facts);
+        facts.stun_off = true;
+        translated(facts);
+        facts.port_open = false;
+        translated(facts);
+    }
+    SetActiveLanguage("english");
 }
 
 int main(int argc, char** argv) {
@@ -5793,12 +7420,29 @@ int main(int argc, char** argv) {
     TestTrueUltrawide(base);
     TestFrameRate(base);
     TestPresentation(base);
+    TestRenderer(base);
     TestGraphicsQuality(base);
     TestGraphicsCard(base);
     TestLauncherWanted();
     TestPlayGate();
     TestPlacement();
     TestOptions();
+    InGroup("navigation", TestPageNavigation);
+    InGroup("icons", TestPageIcons);
+    InGroup("licenses", TestIconLicenses);
+    InGroup("scrollbar", TestStablePageWidth);
+    InGroup("scrollbar", TestScrollbarSettling);
+    InGroup("separators", TestRowSeparators);
+    InGroup("separators", TestSeparatorPages);
+    InGroup("separators", TestRowRhythm);
+    InGroup("separators", TestRowKinds);
+    InGroup("sidebar", TestSidebarProportions);
+    InGroup("sidebar", TestSidebarLabels);
+    InGroup("layout", TestChromeLayout);
+    InGroup("layout", TestLauncherDpiLayout);
+    InGroup("layout", TestFooterAndCards);
+    InGroup("header-art", TestHeaderArt);
+    InGroup("parity", TestSharedLauncherSource);
     TestKeyBindings(base);
     TestFileBrowser(base);
     TestControllerPrompts(base);
@@ -5806,6 +7450,9 @@ int main(int argc, char** argv) {
     TestTextLanguageSwitching(base);
     TestKeepBaseLanguages(base);
     TestNpcVoiceResources(base);
+    TestGameTranslation(base);
+    TestInGameUiText();
+    TestVisualPatchFallback(base);
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);
@@ -5813,8 +7460,12 @@ int main(int argc, char** argv) {
     TestBuildMetadata();
     TestLayers(base);
     TestUsBuild();
+    TestEuropeBuild(base);
     TestLegacyMarker(base);
     TestInstalledGameName(base);
+    TestLauncherLocalization();
+    TestFileDialogLabel();
+    TestTextWithValues();
     TestActivation(base);
 
     std::error_code ec;
@@ -5823,6 +7474,9 @@ int main(int argc, char** argv) {
     fs::remove_all(redirected, ec);
     TestLogRedirect(redirected);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
+    for (const auto& [name, failures] : g_groups) {
+        std::printf("GROUP|launcher-%s|%s\n", name.c_str(), failures == 0 ? "PASS" : "FAIL");
+    }
     runtime_log_flush();
     return g_failures ? 1 : 0;
 }

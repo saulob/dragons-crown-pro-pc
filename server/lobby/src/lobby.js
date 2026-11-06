@@ -4,6 +4,7 @@
 // (local/server.js).
 import { PROTECTION, RateLimiter } from './abuse.js';
 import { ipGroup } from './edge.js';
+import { INCIDENT, INCIDENT_LIMITED, IncidentDesk, readClaim, readClaims, readIncident } from './incidents.js';
 import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
 import { Metrics, countryCode, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
@@ -13,7 +14,6 @@ export const PROTOCOL = 1;
 
 export const LIMITS = {
   frameBytes: 32 * 1024,
-  reportFrameBytes: 160 * 1024,
   nameChars: 16,
   gameChars: 32,
   binAttrBytes: 0x100,
@@ -33,15 +33,11 @@ export const LIMITS = {
   socketsPerIp: 16,
   heldEvents: 32,
   graceMs: 30000,
-  reportChars: 256,
-  reportLogChars: 128 * 1024,
-  reportVersionChars: 64,
   versionChars: 16,
   platformChars: 16,
-  reportsPerAccountPerDay: 5,
-  reportsPerIpPerDay: 10,
-  reportsPerDay: 300,
-  reportsKept: 1000,
+  lobbyPlayers: 100,
+  // Three missed keepalives (LobbyLink::Options::keepalive_ms) and a margin.
+  lobbyStaleMs: 75000,
 };
 
 const BUCKETS = {
@@ -49,7 +45,15 @@ const BUCKETS = {
   room: { burst: 30, perSecond: 1 },
   chat: { burst: 5, perSecond: 1 },
 };
+// Each kind is shared by a socket (kept in its attachment, so hibernation does not refill it), an account (a reconnect
+// does not refill it) and an address group (every account behind it).
+const WRITE_BUDGETS = {
+  state: { socket: 'wstate', account: 'stateWriteAccount', address: 'stateWriteAddress' },
+  friend: { socket: 'wfriend', account: 'friendWriteAccount', address: 'friendWriteAddress' },
+};
 const ROOM_OPS = new Set(['room.create', 'room.join', 'room.leave', 'room.search', 'room.resume']);
+// A receipt is the whole proof for these, so looking up a report never involves an account.
+const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read']);
 // Operations after which the live counts can have grown.
 const GROWING_OPS = new Set(['hello', 'room.create', 'room.join', 'room.resume']);
 
@@ -61,6 +65,13 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const DAY_MS = 24 * 3600 * 1000;
 const MEMBER_IDS = [0x10, 0x20, 0x30, 0x40];
 const FIRST_ROOM_ID = 4096;
+// What net::online_name produces: the public list shows no text a real launcher could not have sent.
+const LOBBY_NAME = /^[A-Za-z0-9_-]{1,16}$/;
+const LOBBY_PLAYER = /^[0-9a-f]{32}$/;
+const LOBBY_REV = /^[0-9a-f]{16}$/;
+const LOBBY_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,15}$/;
+const LOBBY_RANK = { incoming: 0, pending: 1, friend: 2, none: 3 };
+const DEFAULT_NAME = 'Player';
 
 export class LobbyError extends Error {
   constructor(code, detail = '', body = {}) {
@@ -90,8 +101,6 @@ const SCHEMA = [
      name TEXT NOT NULL, joined INTEGER NOT NULL, bin TEXT NOT NULL, conn TEXT, ip TEXT NOT NULL DEFAULT '',
      port INTEGER NOT NULL DEFAULT 0, lan TEXT NOT NULL DEFAULT '[]', grace_until INTEGER,
      held TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (room, member))`,
-  `CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, ms INTEGER NOT NULL, account TEXT NOT NULL,
-     ip TEXT NOT NULL, version TEXT NOT NULL, text TEXT NOT NULL, log TEXT NOT NULL)`,
 ];
 
 // Applied once each, in order; meta 'schema' counts the ones done.
@@ -203,8 +212,8 @@ function takeToken(bucket, spec, now) {
 }
 
 export class Lobby {
-  // host: { sql: { all(q, ...a), get(q, ...a), run(q, ...a) }, sockets(): Conn[], now(): ms, setAlarm(ms), log(text) }
-  // Conn: { send(text), close(code, reason), attachment(), setAttachment(object) }
+  // host: { sql: { all(q, ...a), get(q, ...a), run(q, ...a), transaction(work) }, sockets(): Conn[], now(): ms, setAlarm(ms), log(text) }
+  // Conn: { send(text), close(code, reason), attachment(), setAttachment(object), keepaliveAt(): ms }
   constructor(host, options = {}) {
     this.host = host;
     this.local = Boolean(options.local);
@@ -214,7 +223,9 @@ export class Lobby {
       this.setMeta('schema', done + 1);
     }
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
+    this.salt = this.meta('salt');
     this.metrics = new Metrics(host.sql, () => host.now());
+    this.incidents = new IncidentDesk(host.sql, this.meta('salt'));
     this.alarmAt = options.alarmAt ?? null;
     this.guards = {
       hello: new RateLimiter(PROTECTION.hello),
@@ -225,6 +236,20 @@ export class Lobby {
       partyReportAll: new RateLimiter(PROTECTION.partyReportAll),
       partyReportAccount: new RateLimiter(PROTECTION.partyReportAccount),
       partyReportAddress: new RateLimiter(PROTECTION.partyReportAddress),
+      incidentAll: new RateLimiter(PROTECTION.incidentAll),
+      incidentAccount: new RateLimiter(PROTECTION.incidentAccount),
+      incidentAddress: new RateLimiter(PROTECTION.incidentAddress),
+      incidentLookupAll: new RateLimiter(PROTECTION.incidentLookupAll),
+      incidentStatusAddress: new RateLimiter(PROTECTION.incidentStatusAddress),
+      incidentReadAddress: new RateLimiter(PROTECTION.incidentReadAddress),
+      lobbyPublishAccount: new RateLimiter(PROTECTION.lobbyPublishAccount),
+      lobbyListAccount: new RateLimiter(PROTECTION.lobbyListAccount),
+      lobbyListAddress: new RateLimiter(PROTECTION.lobbyListAddress),
+      lobbyRequestAccount: new RateLimiter(PROTECTION.lobbyRequestAccount),
+      stateWriteAccount: new RateLimiter(PROTECTION.stateWriteAccount),
+      stateWriteAddress: new RateLimiter(PROTECTION.stateWriteAddress),
+      friendWriteAccount: new RateLimiter(PROTECTION.friendWriteAccount),
+      friendWriteAddress: new RateLimiter(PROTECTION.friendWriteAddress),
       rejects: new RateLimiter({ burst: 1, perSecond: 1000 / PROTECTION.rejectWindowMs }),
     };
     this.relays = new Relay(this);
@@ -303,12 +328,12 @@ export class Lobby {
 
   message(conn, text) {
     const att = conn.attachment();
-    if (!att) return;
+    if (!att || att.abusive) return;
     let seq = null;
     this.current = att;
     try {
       if (typeof text !== 'string') fail('bad_request', 'text frames only');
-      if (text.length > LIMITS.reportFrameBytes) fail('too_large');
+      if (text.length > INCIDENT.frameChars) fail('too_large');
       let msg;
       try {
         msg = JSON.parse(text);
@@ -317,18 +342,19 @@ export class Lobby {
       }
       if (!isObject(msg) || typeof msg.op !== 'string' || !isInt(msg.seq, 0, 0x7fffffff)) fail('bad_request', 'envelope');
       seq = msg.seq;
-      if (text.length > LIMITS.frameBytes && msg.op !== 'report.send') fail('too_large');
+      if (text.length > LIMITS.frameBytes && msg.op !== 'incident.file') fail('too_large');
       const now = this.host.now();
       const any = takeToken(att.ra, BUCKETS.any, now);
       if (!any) fail('limit', 'slow down');
       att.ra = any;
+      if (att.lobby) att.lobby.seen = now;
       if (ROOM_OPS.has(msg.op)) {
         const room = takeToken(att.rr, BUCKETS.room, now);
         if (!room) fail('limit', 'slow down');
         att.rr = room;
       }
       if (!Object.hasOwn(HANDLERS, msg.op)) fail('bad_request', 'unknown op');
-      if (msg.op !== 'hello' && !att.hello) fail('no_session');
+      if (!NO_SESSION_OPS.has(msg.op) && !att.hello) fail('no_session');
       this.index = null;
       const body = HANDLERS[msg.op].call(this, att, msg, conn, text) ?? {};
       conn.setAttachment(att);
@@ -337,6 +363,7 @@ export class Lobby {
       if (GROWING_OPS.has(msg.op)) this.observe();
     } catch (error) {
       this.deferred = null;
+      const abusive = error instanceof LobbyError && this.strike(att, error, seq);
       conn.setAttachment(att);
       if (!(error instanceof LobbyError)) {
         this.host.log(`lobby: internal error in request ${seq}: ${error?.stack ?? error}`);
@@ -344,6 +371,7 @@ export class Lobby {
       } else {
         conn.send(JSON.stringify({ re: seq, code: error.code, ...error.body }));
       }
+      if (abusive) this.closeAbusive(conn);
     } finally {
       this.current = null;
       this.index = null;
@@ -353,6 +381,28 @@ export class Lobby {
   // One binary message: a relay frame, forwarded to a member of the sender's own room (relay.js).
   relay(conn, bytes) {
     this.relays.frame(conn, bytes);
+  }
+
+  // A refused or malformed request costs its sender nothing, so a socket that keeps producing them loses its connection.
+  // True when this one was the last it gets.
+  strike(att, error, seq) {
+    if (error.code !== 'limit' && error.code !== 'too_large' && seq !== null) return false;
+    const left = takeToken(att.strikes, PROTECTION.refusedRequests, this.host.now());
+    if (left) {
+      att.strikes = left;
+      return false;
+    }
+    att.abusive = true;
+    return true;
+  }
+
+  closeAbusive(conn) {
+    this.diagnose('lobby_abuse_closed');
+    try {
+      conn.close(1008, 'too many refused requests');
+    } catch {
+      // Already closing.
+    }
   }
 
   // Work queued while handling a message runs after its answer went out (events follow the response).
@@ -654,9 +704,11 @@ export class Lobby {
   exchangeEndpoints(roomId, joinerId) {
     const rows = this.memberRows(roomId);
     const joiner = rows.find((m) => m.member === joinerId);
+    // A seat can be taken before its first report, and its socket always knows the observed address the LAN rule needs.
+    const receiver = { ...joiner, ip: this.socketByCid(joiner.conn)?.att.ip ?? joiner.ip };
     for (const other of rows) {
       if (other.member === joinerId) continue;
-      this.sendPeer(roomId, other, joiner);
+      this.sendPeer(roomId, other, receiver);
       this.sendPeer(roomId, joiner, other);
     }
   }
@@ -676,7 +728,7 @@ export class Lobby {
 
   friendView(account, viewerGame) {
     const row = this.accountRow(account);
-    const view = { account, name: row?.name ?? '', online: false };
+    const view = { account, name: row?.name ?? '', online: false, ...this.shownAs(account, row?.name) };
     const present = this.presentSockets(account);
     if (!present.length) return view;
     view.online = true;
@@ -756,10 +808,34 @@ export class Lobby {
     fail('limit', 'joining rooms too fast');
   }
 
+  // Spent only by a request about to change a stored row, once it is valid: the game repeats most of its updates, and those
+  // write nothing. A refusal spends nothing and writes nothing.
+  limitWrite(att, kind) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const budget = WRITE_BUDGETS[kind];
+    const spec = PROTECTION[budget.account];
+    const account = this.guards[budget.account];
+    const address = this.guards[budget.address];
+    const group = ipGroup(att.ip);
+    const socket = takeToken(att[budget.socket], spec, now);
+    if (!socket || !account.allows(att.account, now) || !address.allows(group, now)) {
+      this.diagnose('write_limited');
+      fail('limit', 'writing too fast', { retry_ms: Math.ceil(1000 / spec.perSecond) });
+    }
+    att[budget.socket] = socket;
+    account.take(att.account, now);
+    address.take(group, now);
+  }
+
+  claimedIp(att, msg) {
+    return att.ip.includes(':') && ipv4Kind(msg.public_ip) === 'public' ? msg.public_ip : '';
+  }
+
   // Peers send UDP toward a client's advertised IPv4 and nothing can verify it, so each new endpoint spends budget of the
   // observed address. Past that budget the client has no public IPv4 and its peers use the relay.
   advertisedIp(att, msg, lan) {
-    if (!att.ip.includes(':') || ipv4Kind(msg.public_ip) !== 'public') return '';
+    if (!this.claimedIp(att, msg)) return '';
     const last = att.udp;
     if (last?.public_ip === msg.public_ip && last.port === msg.port && JSON.stringify(last.lan) === JSON.stringify(lan)) {
       return msg.public_ip;
@@ -786,8 +862,142 @@ export class Lobby {
     partyReportAddress.take(address, now);
   }
 
+  // In memory, so a flood of refused attempts costs no SQL; the quota is counted in SQL because it has to outlive the
+  // object's hibernation.
+  limitIncidentAttempt(att) {
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { incidentAll, incidentAccount, incidentAddress } = this.guards;
+    if (!incidentAll.allows('all', now) || !incidentAccount.allows(att.account, now) || !incidentAddress.allows(address, now)) {
+      this.diagnose('incident_limited');
+      fail('limit', 'too many report attempts');
+    }
+    incidentAll.take('all', now);
+    incidentAccount.take(att.account, now);
+    incidentAddress.take(address, now);
+  }
+
+  // Its own budget: a lookup is no report, and no report's quota pays for it.
+  limitIncidentLookup(att, guard) {
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    if (!this.guards.incidentLookupAll.allows('all', now) || !this.guards[guard].allows(address, now)) fail('limit', 'too many lookups');
+    this.guards.incidentLookupAll.take('all', now);
+    this.guards[guard].take(address, now);
+  }
+
+  newTicket() {
+    let ticket;
+    do ticket = `DCP-${this.randomCode(6)}`;
+    while (this.incidents.taken(ticket));
+    return ticket;
+  }
+
+  incidentList() {
+    return this.incidents.list();
+  }
+
+  incident(ticket) {
+    return this.incidents.get(ticket);
+  }
+
+  incidentForAdmin(ticket) {
+    const found = this.incident(ticket);
+    return found ? { ...found, ...this.incidents.status(ticket) } : null;
+  }
+
+  setIncidentStatus(ticket, change) {
+    return this.incidents.setStatus(ticket, change, this.host.now());
+  }
+
   requireFriendRoom(a, b) {
     if (this.friendCount(a) >= LIMITS.friends || this.friendCount(b) >= LIMITS.friends) fail('limit', 'friend list full');
+  }
+
+  // Players who kept the default name stay apart. Salted, so an alias cannot be checked against an account.
+  displayName(account, name) {
+    if (name !== DEFAULT_NAME) return name;
+    return `${DEFAULT_NAME}-${sha256Hex(`${this.salt}|alias|${account}`).slice(0, 4).toUpperCase()}`;
+  }
+
+  // Beside `name`, never in place of it: the game matches room members to friends by the real name.
+  shownAs(account, name) {
+    const shown = this.displayName(account, name);
+    return shown === name ? {} : { display_name: shown };
+  }
+
+  // ---- public lobby ----
+  // Presence is the socket's own attachment, so publishing writes no SQL and it ends with the socket. `player` is random
+  // for each publish: it names a row of this list and nothing else.
+  showInLobby(att, now) {
+    att.lobby = { player: this.randomHex(16), since: now, seen: now };
+  }
+
+  hideFromLobby(account) {
+    for (const { conn, att } of this.sockets()) {
+      if (att.account !== account || !att.lobby) continue;
+      delete att.lobby;
+      conn.setAttachment(att);
+    }
+  }
+
+  // Everyone listed now, newest first, one row per account. Keepalives never reach this object, so the host says when
+  // the last one passed.
+  lobbyEntries() {
+    const oldest = this.host.now() - LIMITS.lobbyStaleMs;
+    const listed = this.sockets().filter(({ conn, att }) => att.lobby && Math.max(att.lobby.seen, conn.keepaliveAt()) >= oldest);
+    listed.sort((a, b) => b.att.lobby.since - a.att.lobby.since || a.att.lobby.player.localeCompare(b.att.lobby.player));
+    const entries = new Map();
+    for (const s of listed) if (!entries.has(s.att.account)) entries.set(s.att.account, s);
+    return [...entries.values()];
+  }
+
+  // Selects instead of expireRequests(): reading the list writes nothing.
+  lobbyRelations(account) {
+    const since = this.host.now() - LIMITS.requestDays * DAY_MS;
+    const accounts = (query, key) => new Set(this.host.sql.all(query, account, since).map((r) => r[key]));
+    const friends = new Set(this.friendsOf(account));
+    const incoming = accounts('SELECT sender FROM friend_requests WHERE target = ? AND ms >= ?', 'sender');
+    const outgoing = accounts('SELECT target FROM friend_requests WHERE sender = ? AND ms >= ?', 'target');
+    return (other) => {
+      if (friends.has(other)) return 'friend';
+      if (incoming.has(other)) return 'incoming';
+      return outgoing.has(other) ? 'pending' : 'none';
+    };
+  }
+
+  lobbyRefused(what) {
+    this.diagnose('public_lobby_limited');
+    fail('limit', what);
+  }
+
+  limitLobbyPublish(att) {
+    if (this.exempt(att) || this.guards.lobbyPublishAccount.take(att.account, this.host.now())) return;
+    this.lobbyRefused('publishing too fast');
+  }
+
+  limitLobbyList(att) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { lobbyListAccount, lobbyListAddress } = this.guards;
+    if (!lobbyListAccount.allows(att.account, now) || !lobbyListAddress.allows(address, now)) this.lobbyRefused('listing too fast');
+    lobbyListAccount.take(att.account, now);
+    lobbyListAddress.take(address, now);
+  }
+
+  // Only someone listed themselves can reach a listed player, and only for as long as that player stays listed.
+  lobbyTarget(att, player) {
+    if (typeof player !== 'string' || !LOBBY_PLAYER.test(player)) fail('bad_request', 'player');
+    if (!att.lobby) fail('not_visible');
+    if (!this.exempt(att) && !this.guards.lobbyRequestAccount.take(att.account, this.host.now())) this.lobbyRefused('asking too fast');
+    const entry = this.lobbyEntries().find((e) => e.att.lobby.player === player);
+    if (!entry) fail('not_found');
+    return this.accountRow(entry.att.account);
+  }
+
+  accountByCode(text) {
+    return this.host.sql.get('SELECT * FROM accounts WHERE code = ?', normalizeFriendCode(text)) ?? fail('not_found');
   }
 }
 
@@ -830,6 +1040,7 @@ const HANDLERS = {
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
       version, platform, relay: msg.relay === true });
     if (att.relay) this.relays.negotiated(att);
+    if (msg.lobby === true && presence && LOBBY_NAME.test(name)) this.showInLobby(att, now);
     this.index = null;
     if (presence && !wasOnline) this.notifyFriends(account, { ev: 'friend.online', account, name });
     if (newSession) this.track(() => this.metrics.session(att));
@@ -854,21 +1065,21 @@ const HANDLERS = {
       if (!isObject(c) || !isInt(c.port, 1, 0xffff)) fail('bad_request', 'lan');
       if (['private', 'loopback', 'link'].includes(ipv4Kind(c.ip))) lan.push({ ip: c.ip, port: c.port });
     }
+    const rows = att.room ? this.memberRows(att.room) : [];
+    const me = rows.find((m) => m.member === att.member);
+    const lanText = JSON.stringify(lan);
+    const differs = (ip) => me.ip !== att.ip || me.public_ip !== ip || me.port !== msg.port || me.lan !== lanText;
+    if (me && differs(this.claimedIp(att, msg))) this.limitWrite(att, 'state');
     const publicIp = this.advertisedIp(att, msg, lan);
     att.udp = { ip: att.ip, public_ip: publicIp, port: msg.port, lan };
-    if (att.room) {
-      const rows = this.memberRows(att.room);
-      const me = rows.find((m) => m.member === att.member);
-      if (me) {
-        const lanText = JSON.stringify(lan);
-        const changed = me.ip !== att.ip || me.public_ip !== publicIp || me.port !== msg.port || me.lan !== lanText;
-        if (changed) {
-          this.host.sql.run('UPDATE members SET ip = ?, public_ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip,
-            publicIp, msg.port, lanText, att.room, att.member);
-          Object.assign(me, { ip: att.ip, public_ip: publicIp, port: msg.port, lan: lanText });
-        }
-        if (changed || !publicIp) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
+    if (me) {
+      const changed = differs(publicIp);
+      if (changed) {
+        this.host.sql.run('UPDATE members SET ip = ?, public_ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip,
+          publicIp, msg.port, lanText, att.room, att.member);
+        Object.assign(me, { ip: att.ip, public_ip: publicIp, port: msg.port, lan: lanText });
       }
+      if (changed || !publicIp) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
     }
     return { ip: att.ip, port: msg.port, ...(publicIp && { public_ip: publicIp }) };
   },
@@ -981,16 +1192,20 @@ const HANDLERS = {
     return {};
   },
 
-  // Retakes a seat held after a lost connection (LIMITS.graceMs); the events held for it follow the answer.
+  // Retakes a seat held after a lost connection (LIMITS.graceMs). The events held for it follow the answer, then the
+  // endpoints: peer events are not held, so a member who joined meanwhile is known only from here.
   'room.resume'(att, msg, conn) {
     if (att.room) fail('in_room');
     const roomId = Number(decimalId(msg.room));
     if (!isInt(msg.member, 1, 0xffff)) fail('bad_request', 'member');
     const member = this.memberRow(roomId, msg.member);
     if (!member || member.account !== att.account) fail('not_found');
-    const old = this.socketByCid(member.conn);
+    if (member.grace_until !== null && member.grace_until <= this.host.now()) fail('not_found');
+    const found = this.socketByCid(member.conn);
+    const old = found && found.att.cid !== att.cid ? found : null;
+    if (!old && member.grace_until === null && member.conn !== null) fail('not_found');
     this.relays.forgetMember(roomId, msg.member);
-    if (old && old.att.cid !== att.cid) {
+    if (old) {
       this.relays.forgetConnection(old.att.cid);
       old.att.room = 0;
       old.conn.setAttachment(old.att);
@@ -999,8 +1214,6 @@ const HANDLERS = {
       } catch {
         // Already closing.
       }
-    } else if (member.grace_until === null && member.conn !== null) {
-      fail('not_found');
     }
     const udp = memberEndpoint(att);
     this.host.sql.run(`UPDATE members SET conn = ?, grace_until = NULL, held = '[]', name = ?, ip = ?, public_ip = ?, port = ?,
@@ -1011,6 +1224,7 @@ const HANDLERS = {
     const held = JSON.parse(member.held);
     this.later(() => {
       for (const event of held) this.send(conn, event);
+      this.exchangeEndpoints(roomId, msg.member);
     });
     return { room: this.fullRoom(this.roomRow(roomId)), me: msg.member };
   },
@@ -1024,9 +1238,9 @@ const HANDLERS = {
     const binInt = merge(JSON.parse(room.bin_int), changed, LIMITS.binAttrsPerArray);
     const flags = (((room.flags & ~mask) | (value & mask)) & ~FLAG_FULL) >>> 0;
     const binIntText = JSON.stringify(binInt);
-    if (flags !== room.flags || binIntText !== room.bin_int) {
-      this.host.sql.run('UPDATE rooms SET flags = ?, bin_int = ? WHERE id = ?', flags, binIntText, room.id);
-    }
+    if (flags === room.flags && binIntText === room.bin_int) return {};
+    this.limitWrite(att, 'state');
+    this.host.sql.run('UPDATE rooms SET flags = ?, bin_int = ? WHERE id = ?', flags, binIntText, room.id);
     const count = this.memberRows(room.id).length;
     this.toRoom(room.id, { ev: 'room.internal', room: String(room.id), flags: this.roomFlags({ ...room, flags }, count),
       bin_int: changed }, att.member);
@@ -1040,9 +1254,9 @@ const HANDLERS = {
     const binExt = merge(JSON.parse(room.bin_ext), binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const intsText = JSON.stringify(ints);
     const binExtText = JSON.stringify(binExt);
-    if (intsText !== room.ints || binExtText !== room.bin_ext) {
-      this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ? WHERE id = ?', intsText, binExtText, room.id);
-    }
+    if (intsText === room.ints && binExtText === room.bin_ext) return {};
+    this.limitWrite(att, 'state');
+    this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ? WHERE id = ?', intsText, binExtText, room.id);
     return {};
   },
 
@@ -1091,7 +1305,10 @@ const HANDLERS = {
 
   'friends.requests'(att) {
     this.expireRequests();
-    const named = (rows, key) => rows.map((r) => ({ account: r[key], name: this.accountRow(r[key])?.name ?? '', ms: r.ms }));
+    const named = (rows, key) => rows.map((r) => {
+      const name = this.accountRow(r[key])?.name ?? '';
+      return { account: r[key], name, ...this.shownAs(r[key], name), ms: r.ms };
+    });
     return {
       incoming: named(this.host.sql.all('SELECT sender, ms FROM friend_requests WHERE target = ? ORDER BY ms', att.account), 'sender'),
       outgoing: named(this.host.sql.all('SELECT target, ms FROM friend_requests WHERE sender = ? ORDER BY ms', att.account), 'target'),
@@ -1099,15 +1316,14 @@ const HANDLERS = {
   },
 
   'friends.add'(att, msg) {
-    const code = normalizeFriendCode(msg.code);
-    const target = this.host.sql.get('SELECT * FROM accounts WHERE code = ?', code);
-    if (!target) fail('not_found');
+    const target = msg.player !== undefined ? this.lobbyTarget(att, msg.player) : this.accountByCode(msg.code);
     if (target.account === att.account) fail('bad_request', 'own code');
-    const result = { account: target.account, name: target.name };
+    const result = { account: target.account, name: target.name, ...this.shownAs(target.account, target.name) };
     if (this.areFriends(att.account, target.account)) return { ...result, state: 'friends' };
     this.expireRequests();
     if (this.host.sql.get('SELECT 1 AS x FROM friend_requests WHERE sender = ? AND target = ?', target.account, att.account)) {
       this.requireFriendRoom(att.account, target.account);
+      this.limitWrite(att, 'friend');
       this.makeFriends(att.account, target.account);
       this.notifyAccount(target.account, { ev: 'friend.added', friend: this.friendView(att.account, att.game) });
       return { ...result, state: 'friends' };
@@ -1119,6 +1335,7 @@ const HANDLERS = {
     const incoming = this.host.sql.get('SELECT COUNT(*) AS n FROM friend_requests WHERE target = ?', target.account).n;
     if (outgoing >= LIMITS.pendingOut || incoming >= LIMITS.pendingIn) fail('limit', 'too many pending requests');
     this.requireFriendRoom(att.account, target.account);
+    this.limitWrite(att, 'friend');
     this.host.sql.run('INSERT INTO friend_requests (sender, target, ms) VALUES (?, ?, ?)', att.account, target.account, this.host.now());
     this.notifyAccount(target.account, { ev: 'friend.request', account: att.account, name: att.name });
     return { ...result, state: 'pending' };
@@ -1129,16 +1346,18 @@ const HANDLERS = {
     this.expireRequests();
     if (!this.host.sql.get('SELECT 1 AS x FROM friend_requests WHERE sender = ? AND target = ?', sender, att.account)) fail('not_found');
     this.requireFriendRoom(att.account, sender);
+    this.limitWrite(att, 'friend');
     this.makeFriends(att.account, sender);
     this.notifyAccount(sender, { ev: 'friend.added', friend: this.friendView(att.account, att.game) });
     return { friend: this.friendView(sender, att.game) };
   },
 
   'friends.decline'(att, msg) {
-    const other = decimalId(msg.account);
+    const other = msg.player !== undefined ? this.lobbyTarget(att, msg.player).account : decimalId(msg.account);
     const before = this.host.sql.get(`SELECT COUNT(*) AS n FROM friend_requests WHERE (sender = ? AND target = ?)
       OR (sender = ? AND target = ?)`, other, att.account, att.account, other).n;
     if (!before) fail('not_found');
+    this.limitWrite(att, 'friend');
     this.host.sql.run('DELETE FROM friend_requests WHERE (sender = ? AND target = ?) OR (sender = ? AND target = ?)', other,
       att.account, att.account, other);
     return {};
@@ -1147,12 +1366,47 @@ const HANDLERS = {
   'friends.remove'(att, msg) {
     const other = decimalId(msg.account);
     const were = this.areFriends(att.account, other);
+    const pending = this.host.sql.get(`SELECT 1 AS x FROM friend_requests WHERE (sender = ? AND target = ?)
+      OR (sender = ? AND target = ?)`, other, att.account, att.account, other);
+    if (!were && !pending) return {};
+    this.limitWrite(att, 'friend');
     this.host.sql.run('DELETE FROM friends WHERE (account = ? AND friend = ?) OR (account = ? AND friend = ?)', att.account,
       other, other, att.account);
     this.host.sql.run('DELETE FROM friend_requests WHERE (sender = ? AND target = ?) OR (sender = ? AND target = ?)', other,
       att.account, att.account, other);
     if (were) this.notifyAccount(other, { ev: 'friend.removed', account: att.account });
     return {};
+  },
+
+  // Opt-in only. The name and the account are the session's: nothing in the request can set them.
+  'lobby.publish'(att, msg) {
+    if (typeof msg.visible !== 'boolean') fail('bad_request', 'visible');
+    if (!msg.visible) {
+      this.hideFromLobby(att.account);
+      return { visible: false };
+    }
+    if (att.lobby) return { visible: true };
+    if (!att.presence) fail('not_found', 'no presence');
+    if (!LOBBY_NAME.test(att.name)) fail('bad_request', 'name');
+    this.limitLobbyPublish(att);
+    this.showInLobby(att, this.host.now());
+    return { visible: true };
+  },
+
+  // Only those listed may read the list. `rev` is what the client holds: an unchanged list is not sent again.
+  'lobby.list'(att, msg) {
+    if (msg.rev !== undefined && (typeof msg.rev !== 'string' || !LOBBY_REV.test(msg.rev))) fail('bad_request', 'rev');
+    if (!att.lobby) fail('not_visible');
+    this.limitLobbyList(att);
+    const others = this.lobbyEntries().filter((e) => e.att.account !== att.account);
+    const relation = this.lobbyRelations(att.account);
+    // Ranked before the cap, so a request waiting for an answer is never the row left out.
+    const ranked = others.map((e) => ({ e, state: relation(e.att.account) }));
+    ranked.sort((a, b) => LOBBY_RANK[a.state] - LOBBY_RANK[b.state]);
+    const players = ranked.slice(0, LIMITS.lobbyPlayers).map(({ e, state }) => ({ player: e.att.lobby.player,
+      name: this.displayName(e.att.account, e.att.name), version: LOBBY_VERSION.test(e.att.version) ? e.att.version : '', state }));
+    const rev = sha256Hex(JSON.stringify(players)).slice(0, 16);
+    return rev === msg.rev ? { rev, total: others.length, unchanged: true } : { rev, total: others.length, players };
   },
 
   // Anonymous party statistics (party.js): optional, sent by the room's owner on its own game connection, so a party is
@@ -1174,32 +1428,43 @@ const HANDLERS = {
     return { counted: true };
   },
 
-  // Bug reports for the deployment's maintainer; the address is kept only as a salted hash for the limits.
-  'report.send'(att, msg) {
-    const text = cleanText(msg.text, LIMITS.reportChars);
-    if (!text) fail('bad_request', 'empty');
-    if (typeof msg.log !== 'string') fail('bad_request', 'log');
-    const log = msg.log.slice(-LIMITS.reportLogChars);
-    const version = cleanText(msg.version ?? '', LIMITS.reportVersionChars);
+  // A report from the launcher's Bug Report page; only the /admin dashboard reads it back (incidents.js).
+  'incident.file'(att, msg) {
+    this.limitIncidentAttempt(att);
+    const { incident, code, detail } = readIncident(msg);
+    if (!incident) fail(code, detail);
     const now = this.host.now();
-    const since = now - DAY_MS;
-    const ip = this.ipKey(att.ip);
-    const mine = this.host.sql.get('SELECT COUNT(*) AS n FROM reports WHERE account = ? AND ms >= ?', att.account, since).n;
-    const fromIp = this.host.sql.get('SELECT COUNT(*) AS n FROM reports WHERE ip = ? AND ms >= ?', ip, since).n;
-    const all = this.host.sql.get('SELECT COUNT(*) AS n FROM reports WHERE ms >= ?', since).n;
-    if (mine >= LIMITS.reportsPerAccountPerDay || fromIp >= LIMITS.reportsPerIpPerDay || all >= LIMITS.reportsPerDay) {
-      fail('limit', 'report limit');
+    const address = ipGroup(att.ip);
+    const { refusal, ticket, receipt } = this.host.sql.transaction(() => {
+      const limited = this.incidents.refusal(att.account, address, now);
+      if (limited) return { refusal: limited };
+      const filed = { ticket: this.newTicket(), receipt: this.randomHex(32) };
+      this.incidents.file(incident, filed.ticket, att.account, address, now);
+      this.incidents.track(filed.ticket, filed.receipt, now);
+      return filed;
+    });
+    if (refusal) {
+      this.diagnose(INCIDENT_LIMITED[refusal]);
+      fail(refusal, 'report limit');
     }
-    this.host.sql.run('INSERT INTO reports (ms, account, ip, version, text, log) VALUES (?, ?, ?, ?, ?, ?)', now, att.account,
-      ip, version, text, log);
-    const id = this.host.sql.get('SELECT MAX(id) AS id FROM reports').id;
-    this.host.sql.run('DELETE FROM reports WHERE id <= ?', id - LIMITS.reportsKept);
-    this.host.sql.run(`UPDATE reports SET ip = '' WHERE ms < ?`, since);
-    return { id, left: LIMITS.reportsPerAccountPerDay - mine - 1 };
+    this.diagnose('incident_filed');
+    return { ticket, receipt, submitted_at: now };
+  },
+
+  // The launcher's My reports: what became of the reports it holds receipts for.
+  'incident.status'(att, msg) {
+    this.limitIncidentLookup(att, 'incidentStatusAddress');
+    const claims = readClaims(msg);
+    if (!claims) fail('bad_request', 'reports');
+    return { reports: this.incidents.statuses(claims) };
+  },
+
+  'incident.read'(att, msg) {
+    this.limitIncidentLookup(att, 'incidentReadAddress');
+    const claim = readClaim(msg);
+    if (!claim) fail('bad_request', 'receipt');
+    const report = this.incidents.report(claim);
+    if (!report) fail('not_found');
+    return { report };
   },
 };
-
-// Reports for a deployment's maintainer (worker.js serves them behind REPORTS_TOKEN).
-export function listReports(sql, limit = 100) {
-  return sql.all('SELECT id, ms, account, version, text, log FROM reports ORDER BY id DESC LIMIT ?', limit);
-}

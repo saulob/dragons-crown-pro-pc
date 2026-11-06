@@ -1,4 +1,4 @@
-// The game window (SDL3) the Vulkan swapchain presents to.
+// The game window (SDL3) the renderer presents to.
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +19,9 @@
 #include "dcp_settings.h"
 #include "dcp_title.h"
 #include "runtime_online_overlay.h"
+#ifdef _WIN32
+#include "video_core/renderer_opengl/gl_angle.h"
+#endif
 
 extern "C" void runtime_log_flush(void);
 
@@ -44,7 +47,8 @@ void TracePress(const SDL_Event& event) {
 
 } // namespace
 
-WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
+WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api)
+    : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     dcp_prepare_sdl_gamepad();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -69,12 +73,32 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, window_height);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true);
-    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
+#ifdef _WIN32
+    if (api == GraphicsApi::Angle) {
+        OpenGL::RequestAngleDirect3D11();
+    }
+#endif
+    if (api == GraphicsApi::OpenGL) {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
+    }
+    SDL_SetBooleanProperty(props, api == GraphicsApi::Vulkan ? SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN
+                                                             : SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN,
+                           true);
     base_title = title;
     title_shown = title;
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     if (!window) {
+#ifdef _WIN32
+        if (api == GraphicsApi::Angle) {
+            OpenGL::ExitAngleUnavailable(SDL_GetError());
+        }
+#endif
         ExitNoWindow("Cannot create the game window", SDL_GetError());
     }
 

@@ -22,10 +22,10 @@
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/amdgpu/pm4_cmds.h"
-#include "video_core/renderer_vulkan/vk_presenter.h"
+#include "video_core/renderer_backend.h"
 
 extern Frontend::WindowSDL* g_window;
-std::unique_ptr<Vulkan::Presenter> presenter;
+std::unique_ptr<VideoCore::PresenterBackend> presenter;
 std::unique_ptr<AmdGpu::Liverpool> liverpool;
 
 namespace Libraries::GnmDriver {
@@ -2920,7 +2920,7 @@ int PS4_SYSV_ABI Func_F916890425496553() {
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     LOG_INFO(Lib_GnmDriver, "Initializing presenter");
     liverpool = std::make_unique<AmdGpu::Liverpool>();
-    presenter = std::make_unique<Vulkan::Presenter>(*g_window, liverpool.get());
+    presenter = VideoCore::CreatePresenter(*g_window, liverpool.get());
 
     const s32 result = sceKernelGetCompiledSdkVersion(&sdk_version);
     if (result != ORBIS_OK) {

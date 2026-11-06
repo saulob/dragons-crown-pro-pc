@@ -316,36 +316,23 @@ uint64_t Place(uint32_t seed, size_t index, uint64_t cursor) {
     return cursor + ((seed * 2654435761u + uint32_t(index) * 40503u) % 0x40) * 16;
 }
 
-// Every site and probe pattern, longest first so a window of a longer one is found inside it as in a real image, each at
-// a deterministic place that differs from the real executables'. The probes' displacement bytes get the values the
-// handlers expect, the calls the sites' relations need get their targets, and the projection loads their constants.
-std::vector<uint8_t> BuildSynthetic(uint32_t seed, bool decoys, bool layout_values = true) {
-    std::vector<uint8_t> bytes(kImageSize, 0);
-    std::vector<Plan> plans = Plans();
-    std::stable_sort(plans.begin(), plans.end(), [](const Plan& a, const Plan& b) { return a.pattern.size() > b.pattern.size(); });
-    uint64_t cursor = 0x1000;
-    size_t index = 0;
-    for (const Plan& plan : plans) {
-        while (Count(bytes, plan.pattern) < plan.expected) {
-            Plant(bytes, plan.pattern, Place(seed, index++, cursor));
-            cursor += 0x700;
-            if (cursor + 0x1000 > 0x1c0000) std::abort();
-        }
-    }
-    if (layout_values) {
-        for (size_t probe = 0; probe < dcp_layout_probe_count(); ++probe) {
-            size_t expected = 0;
-            const char* pattern = dcp_layout_probe_pattern(probe, &expected);
-            for (const uint64_t start : Find(bytes, pattern)) {
-                DcpLayoutField field;
-                size_t position, width;
-                for (size_t i = 0; dcp_layout_probe_field(probe, i, &field, &position, &width); ++i) {
-                    const uint32_t value = ExpectedLayout(field);
-                    std::memcpy(&bytes[start + position], &value, width);
-                }
+void WriteLayoutValues(std::vector<uint8_t>& bytes) {
+    for (size_t probe = 0; probe < dcp_layout_probe_count(); ++probe) {
+        size_t expected = 0;
+        const char* pattern = dcp_layout_probe_pattern(probe, &expected);
+        for (const uint64_t start : Find(bytes, pattern)) {
+            DcpLayoutField field;
+            size_t position, width;
+            for (size_t i = 0; dcp_layout_probe_field(probe, i, &field, &position, &width); ++i) {
+                const uint32_t value = ExpectedLayout(field);
+                std::memcpy(&bytes[start + position], &value, width);
             }
         }
     }
+}
+
+// Gives the True Ultrawide sites their relations and the projection loads their constants.
+void WireUltrawide(std::vector<uint8_t>& bytes, uint64_t constants) {
     const auto site_of = [&](const char* name) {
         std::vector<uint64_t> sites;
         for (const scan::SiteSpec& spec : scan::Sites()) {
@@ -367,11 +354,31 @@ std::vector<uint8_t> BuildSynthetic(uint32_t seed, bool decoys, bool layout_valu
     for (size_t i = 0; i < DCP_ORTHO_LOADS; ++i) {
         const std::string name = "pass ortho load " + std::to_string(i + 1);
         const uint64_t site = site_of(name.c_str()).front();
-        const uint64_t constant = kConstants + i * 16;
+        const uint64_t constant = constants + i * 16;
         const int32_t displacement = int32_t(int64_t(constant) - int64_t(site) - 8);
         std::memcpy(&bytes[site + 4], &displacement, 4);
         std::memcpy(&bytes[constant], &dcp_pass_ortho_sites[i].value, 4);
     }
+}
+
+// Every site and probe pattern, longest first so a window of a longer one is found inside it as in a real image, each at
+// a deterministic place that differs from the real executables'. The probes' displacement bytes get the values the
+// handlers expect, the calls the sites' relations need get their targets, and the projection loads their constants.
+std::vector<uint8_t> BuildSynthetic(uint32_t seed, bool decoys, bool layout_values = true) {
+    std::vector<uint8_t> bytes(kImageSize, 0);
+    std::vector<Plan> plans = Plans();
+    std::stable_sort(plans.begin(), plans.end(), [](const Plan& a, const Plan& b) { return a.pattern.size() > b.pattern.size(); });
+    uint64_t cursor = 0x1000;
+    size_t index = 0;
+    for (const Plan& plan : plans) {
+        while (Count(bytes, plan.pattern) < plan.expected) {
+            Plant(bytes, plan.pattern, Place(seed, index++, cursor));
+            cursor += 0x700;
+            if (cursor + 0x1000 > 0x1c0000) std::abort();
+        }
+    }
+    if (layout_values) WriteLayoutValues(bytes);
+    WireUltrawide(bytes, kConstants);
     if (decoys) {
         // Look-alikes: a copy with one solid byte off and the first half of one. A decoy that another, more permissive
         // pattern matches is dropped, as it would be a second occurrence of that one.
@@ -711,7 +718,7 @@ void TestParty() {
         CHECK(dcp_resolve_party(&profile, nullptr, &party, failure, sizeof(failure)) == 0);
         CHECK(dcp_resolve_party(&profile, &view, nullptr, failure, sizeof(failure)) == 0);
     }
-    CHECK(SupportedBuilds().size() == 7);
+    CHECK(SupportedBuilds().size() == 8);
 }
 
 const scan::SiteSpec* ExitGameSpec(std::string_view name) {
@@ -729,7 +736,7 @@ bool LocateExitGame(const std::vector<uint8_t>& bytes, DcpExitGameSites& out, Dc
 }
 
 // The title's four-row menu and Exit Game sites on a synthetic image: each found where its pattern is planted, none missing, doubled or
-// half there, and the same sites for a build that has no real image here (CUSA10454 1.01, CUSA10209 1.02).
+// half there, and the same sites for a build that has no real image here (CUSA10454 1.01, CUSA10209 1.02, CUSA10487 1.03).
 void TestExitGame() {
     const char* const names[] = {"sheet fill", "row widget", "help limit", "part table", "menu tick", "part setter"};
     const scan::SiteSpec* specs[6];
@@ -808,6 +815,219 @@ void TestExitGame() {
     }
 }
 
+struct MappedSite {
+    const char* feature;
+    const char* name;
+    std::vector<uint64_t> at;
+};
+
+// The sites the launcher's read-only scan reported for the CUSA10487 1.03 executable.
+const std::vector<MappedSite> kEuropeSites = {
+    {"True ultrawide", "submit", {0x5811d0}},
+    {"True ultrawide", "fill call 1", {0x581ad3}},
+    {"True ultrawide", "fill call 2", {0x581bc6}},
+    {"True ultrawide", "fill call 3", {0x581879}},
+    {"True ultrawide", "frame commit", {0x5a20ad}},
+    {"True ultrawide", "queue", {0x597840}},
+    {"True ultrawide", "part queue call", {0x57531c}},
+    {"True ultrawide", "model draw", {0x579ad0}},
+    {"True ultrawide", "widget draw call", {0x4ec2fc, 0x4ed69f, 0x4edc27}},
+    {"True ultrawide", "map draw call", {0x541b99}},
+    {"True ultrawide", "facility draw call", {0x3a5065}},
+    {"True ultrawide", "worldmap draw", {0x549a90}},
+    {"True ultrawide", "fade jumps", {0x44294b, 0x44310b}},
+    {"True ultrawide", "camera view call", {0x118e9}},
+    {"True ultrawide", "view build", {0x110b0}},
+    {"True ultrawide", "pass ortho load 1", {0x10686}},
+    {"True ultrawide", "pass ortho load 2", {0x106bb}},
+    {"True ultrawide", "pass ortho load 3", {0x10699}},
+    {"True ultrawide", "pass ortho load 4", {0x106d5}},
+    {"True ultrawide", "pass ortho load 5", {0x106f7}},
+    {"True ultrawide", "pass ortho load 6", {0x10703}},
+    {"System type", "card site 1", {0x4d31f3}},
+    {"System type", "card site 2", {0x4d320c}},
+    {"System type", "set text", {0x58f0f0}},
+    {"Skip offers", "story window", {0x3aed92}},
+    {"Skip offers", "tutorial window", {0x3a8ae9}},
+    {"Startup save", "step tail", {0x4ddbb0}},
+    {"Startup save", "block owner", {0x81a20}},
+    {"Startup save", "accept", {0x8bb50}},
+    {"Japanese NPC voices", "NPC cue site", {0x68bc9}},
+    {"Japanese NPC voices", "resource acquire", {0x57cbc0}},
+    {"Cheats", "hook: damage", {0xd8713}},
+    {"Cheats", "hook: use mana", {0xd6d80}},
+    {"Cheats", "hook: mana drain", {0x345390}},
+    {"Cheats", "hook: arrows", {0x1b0700}},
+    {"Cheats", "hook: skill points", {0x537e9a}},
+    {"Cheats", "hook: player tick", {0x2ea430}},
+    {"Cheats", "hook: durability", {0xfe193}},
+    {"Cheats", "hook: lives", {0x2ec7db}},
+    {"Cheats", "hook: walk speed", {0x2ecd1a}},
+    {"Cheats", "hook: gold shop", {0x52e0c3}},
+    {"Cheats", "hook: gold continue", {0x43d572}},
+    {"Cheats", "hook: gold stable", {0x3bc6a3}},
+    {"Cheats", "hook: gold beggar", {0x3bff32}},
+    {"Cheats", "hook: gold base", {0x3c2430}},
+    {"Cheats", "hook: gold inn", {0x3c3b92}},
+    {"Cheats", "hook: gold inn 2", {0x3c40ea}},
+    {"Cheats", "hook: gold list", {0x4953dd}},
+    {"Cheats", "hook: gold list 2", {0x49563d}},
+    {"Cheats", "hook: gold equip", {0x4cc48a}},
+    {"Cheats", "hook: experience", {0x27511}},
+    {"Cheats", "hook: skill use", {0x1af0ec}},
+    {"Cheats", "hook: skill use mirror", {0x1af13a}},
+    {"Cheats", "hook: skill item wear", {0x225fa0}},
+    {"Cheats", "hook: skill item wear mirror", {0x225fc1}},
+    {"Cheats", "hook: skill budget", {0x8ab24}},
+    {"Cheats", "function: IsDead", {0x281bb0}},
+    {"Cheats", "function: Refill", {0xe3bf0}},
+    {"Cheats", "function: GetGold", {0x43d470}},
+    {"Cheats", "function: AddGold", {0x43d4a0}},
+    {"Cheats", "function: RecordMode", {0x83ae0}},
+    {"Cheats", "function: RecordStage", {0x86ee0}},
+    {"Cheats", "function: MaxLevel", {0x4f950}},
+    {"Cheats", "function: LevelEntry", {0x2f9db0}},
+    {"Cheats", "function: LevelPattern", {0x81fe0}},
+    {"Cheats", "function: SetLevel", {0x81fb0}},
+    {"Cheats", "function: WriteStats", {0x82000}},
+    {"Cheats", "function: EquipmentCount", {0x224b50}},
+    {"Cheats", "function: EquipmentItem", {0x2251c0}},
+    {"Cheats", "function: IsGear", {0x21d20}},
+    {"Cheats", "function: SetDurability", {0x225ff0}},
+    {"Exit Game", "sheet fill", {0x58e340}},
+    {"Exit Game", "row widget", {0x53c23a}},
+    {"Exit Game", "part table", {0x53cfe7, 0x53d05b}},
+    {"Exit Game", "menu tick", {0x53d074}},
+    {"Exit Game", "help limit", {0x53d358, 0x53d39a}},
+    {"Exit Game", "part setter", {0x578010}},
+    {"Exit Game", "part TITLE_1", {0x53cf30}},
+    {"Exit Game", "part START_1", {0x53d4cf}},
+    {"Exit Game", "part START_2", {0x53d7d2}},
+    {"Exit Game", "part OPTION_1", {0x53fb5d}},
+    {"Exit Game", "part OPTION_2", {0x53fccf}},
+    {"Exit Game", "part GALLERY_1", {0x53feac}},
+    {"Exit Game", "part GALLERY_2", {0x53ff2a}},
+};
+
+const scan::SiteSpec* SpecOf(std::string_view feature, std::string_view name) {
+    for (const scan::SiteSpec& spec : scan::Sites()) {
+        if (feature == spec.feature && name == spec.name) return &spec;
+    }
+    return nullptr;
+}
+
+// No game bytes: each signature is planted where the scan reported it, so the sites' own layout is what the locators see.
+std::vector<uint8_t> BuildEuropeMap() {
+    constexpr uint64_t kSize = 0xed0000, kProbes = 0xd00000, kConstantsAt = 0xe00000;
+    std::vector<uint8_t> bytes(kSize, 0);
+    for (const MappedSite& site : kEuropeSites) {
+        const scan::SiteSpec* spec = SpecOf(site.feature, site.name);
+        CHECK(spec != nullptr);
+        if (!spec) continue;
+        for (const uint64_t at : site.at) Plant(bytes, spec->pattern, at - spec->anchor);
+    }
+    uint64_t cursor = kProbes;
+    for (size_t probe = 0; probe < dcp_layout_probe_count(); ++probe) {
+        size_t expected = 0;
+        const char* pattern = dcp_layout_probe_pattern(probe, &expected);
+        while (Count(bytes, pattern) < expected) {
+            Plant(bytes, pattern, cursor);
+            cursor += 0x100;
+        }
+    }
+    WriteLayoutValues(bytes);
+    WireUltrawide(bytes, kConstantsAt);
+    return bytes;
+}
+
+uint64_t EuropeSite(std::string_view feature, std::string_view name, size_t index = 0) {
+    for (const MappedSite& site : kEuropeSites) {
+        if (feature == site.feature && name == site.name) return site.at[index];
+    }
+    return 0;
+}
+
+// The loader's own entry points, given the CUSA10487 1.03 profile, resolve exactly the mapped sites.
+void TestEuropeanSites() {
+    const auto europe = std::find_if(SupportedBuilds().begin(), SupportedBuilds().end(), [](const GameBuild& build) {
+        return std::string_view(build.title_id) == "CUSA10487";
+    });
+    CHECK(europe != SupportedBuilds().end());
+    if (europe == SupportedBuilds().end()) return;
+    const std::vector<uint8_t> bytes = BuildEuropeMap();
+    const DcpExecRange range{0, bytes.size()};
+    const DcpImageView view{bytes.data(), bytes.size(), &range, 1};
+    const DcpGameBuild profile = ProfileOf(*europe);
+
+    DcpFeatureSites located{};
+    CHECK(dcp_resolve_features(&profile, &view, 1, 1, 1, &located) == 1);
+    if (!located.cheats || !located.voices || !located.ultrawide) {
+        std::printf("  CUSA10487: %s | %s | %s\n", located.cheat_failure, located.voice_failure, located.ultrawide_failure);
+    }
+    CHECK(located.cheats && located.voices && located.ultrawide);
+
+    size_t hook = 0, function = 0;
+    for (const scan::SiteSpec& spec : scan::Sites()) {
+        if (std::string_view(spec.feature) != "Cheats") continue;
+        const uint64_t expected = EuropeSite("Cheats", spec.name);
+        if (spec.kind == scan::SiteKind::kHook) {
+            CHECK(located.cheat_sites.hooks[hook++] == expected);
+        } else {
+            CHECK(located.cheat_sites.functions[function++] == expected);
+        }
+    }
+    CHECK(hook == DCP_CHEAT_HOOKS && function == DCP_CHEAT_FUNCTIONS);
+    std::string mismatch;
+    CHECK(cheats::LayoutMatches(located.cheat_sites.layout, &mismatch));
+
+    CHECK(located.voice_sites.npc_cue == 0x68bc9 && located.voice_sites.resource_acquire == 0x57cbc0);
+
+    const auto ultrawide = [](const char* name, size_t index = 0) { return EuropeSite("True ultrawide", name, index); };
+    const DcpUltrawideSites& u = located.ultrawide_sites;
+    CHECK(u.submit == ultrawide("submit") && u.frame_commit == ultrawide("frame commit") && u.queue == ultrawide("queue"));
+    CHECK(u.fill_calls[0] == ultrawide("fill call 1") && u.fill_calls[1] == ultrawide("fill call 2") &&
+          u.fill_calls[2] == ultrawide("fill call 3"));
+    CHECK(u.part_queue_call == ultrawide("part queue call") && u.model_draw == ultrawide("model draw"));
+    CHECK(u.widget_draw_call == ultrawide("widget draw call") && u.map_draw_call == ultrawide("map draw call"));
+    CHECK(u.facility_draw_call == ultrawide("facility draw call") && u.worldmap_draw == ultrawide("worldmap draw"));
+    CHECK(u.fade_jumps[0] == ultrawide("fade jumps") && u.fade_jumps[1] == ultrawide("fade jumps", 1));
+    CHECK(u.camera_view_call == ultrawide("camera view call") && u.view_build == ultrawide("view build"));
+    for (size_t i = 0; i < DCP_ORTHO_LOADS; ++i) {
+        CHECK(u.ortho_loads[i] == ultrawide(("pass ortho load " + std::to_string(i + 1)).c_str()));
+    }
+
+    DcpExitGameSites exit_game{};
+    char failure[192];
+    CHECK(dcp_resolve_exit_game(&profile, &view, &exit_game, failure, sizeof(failure)) == 1);
+    const auto exit_site = [](const char* name, size_t index = 0) { return EuropeSite("Exit Game", name, index); };
+    CHECK(exit_game.sheet_fill == exit_site("sheet fill") && exit_game.row_widget == exit_site("row widget"));
+    CHECK(exit_game.help_limits[0] == exit_site("help limit") && exit_game.help_limits[1] == exit_site("help limit", 1));
+    CHECK(exit_game.part_table_loads[0] == exit_site("part table") && exit_game.part_table_loads[1] == exit_site("part table", 1));
+    CHECK(exit_game.menu_tick == exit_site("menu tick") && exit_game.part_setter == exit_site("part setter"));
+    const char* const parts[DCP_TRANSITION_PART_COUNT] = {"part TITLE_1", "part START_1", "part START_2", "part OPTION_1",
+                                                          "part OPTION_2", "part GALLERY_1", "part GALLERY_2"};
+    for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) CHECK(exit_game.transition_parts[i] == exit_site(parts[i]));
+
+    DcpPartySites party{};
+    CHECK(dcp_resolve_party(&profile, &view, &party, failure, sizeof(failure)) == 1 && party.tick == 0x2ea430);
+
+    scan::MappedImage image;
+    image.bytes = bytes;
+    image.executable = {{0, bytes.size()}};
+    const scan::ScanResult scanned = scan::ScanImage(image);
+    size_t compared = 0;
+    for (const scan::SiteResult& result : scanned.sites) {
+        for (const MappedSite& site : kEuropeSites) {
+            if (std::string_view(site.feature) != result.spec->feature || std::string_view(site.name) != result.spec->name) continue;
+            ++compared;
+            CHECK(result.status == scan::SiteStatus::kUnique || result.status == scan::SiteStatus::kGroup);
+            CHECK(result.matches == site.at);
+        }
+    }
+    CHECK(compared == kEuropeSites.size());
+    CHECK(scan::kLzcntInstructions == 62 && scan::kLzcntDigest == 0xe53eadb9792a3e8eull);
+}
+
 void TestKnownBuildsOnly() {
     const std::vector<uint8_t> everything = BuildSynthetic(5, true);
     const DcpExecRange range{0, everything.size()};
@@ -873,6 +1093,7 @@ int main() {
     TestLayout();
     TestParty();
     TestExitGame();
+    TestEuropeanSites();
     TestKnownBuildsOnly();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

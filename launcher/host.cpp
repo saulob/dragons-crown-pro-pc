@@ -151,6 +151,15 @@ ImTextureID LauncherHost::CreateTexture(const uint8_t* rgba, int width, int heig
     return static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture));
 }
 
+void LauncherHost::DestroyTexture(ImTextureID texture) {
+    SDL_Texture* sdl_texture = reinterpret_cast<SDL_Texture*>(static_cast<uintptr_t>(texture));
+    const auto found = std::find(textures_.begin(), textures_.end(), sdl_texture);
+    if (found != textures_.end()) {
+        SDL_DestroyTexture(sdl_texture);
+        textures_.erase(found);
+    }
+}
+
 void LauncherHost::Close() {
     dcp_startup_phase("launcher host closing");
     for (SDL_Texture* texture : textures_) {

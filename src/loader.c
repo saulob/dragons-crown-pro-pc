@@ -31,6 +31,7 @@
 #include "runtime_log.h"
 #include "isa_emulate.h"
 #include "lzcnt_compat.h"
+#include "discord_presence.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error Dragon's Crown Pro PC requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -143,8 +144,9 @@ static int cpu_usable(char *cause, size_t cause_size, char *advice, size_t advic
     return 0;
 }
 #ifndef _WIN32
+static const char *renderer_settings_file;
 static int system_usable(char *cause, size_t cause_size, char *advice, size_t advice_size) {
-    return cpu_usable(cause,cause_size,advice,advice_size) && dcp_check_vulkan(cause,cause_size,advice,advice_size);
+    return cpu_usable(cause,cause_size,advice,advice_size) && dcp_check_renderer(renderer_settings_file,cause,cause_size,advice,advice_size);
 }
 #endif
 #ifdef _WIN32
@@ -464,6 +466,24 @@ static int install_true_ultrawide(int requested, const DcpGameBuild *build, cons
            build ? build->label : "unknown game build",detail);
     return effective;
 }
+/* A port-side Menu & Subtitles language: its translated message sheets served over the regional archive's slot. */
+static void install_text_translation(const char *settings_file, const char *image_dir, const char *app0) {
+    char message[1024]="";
+    uint64_t length=0;
+    DcpFilePatch *patches=NULL;
+    size_t count=0;
+    const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message));
+    if (archive) {
+        char guest[256];
+        snprintf(guest,sizeof(guest),"/app0/%s",archive);
+        RuntimeFilePatch *table=calloc(count ? count : 1,sizeof(*table));
+        for (size_t i=0;table && i<count;++i) table[i]=(RuntimeFilePatch){patches[i].offset,patches[i].size,patches[i].data};
+        if (!table || runtime_file_overlay(guest,length,table,count))
+            snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid), showing English",archive);
+        free(table);
+    }
+    if (*message) printf("Menu & Subtitles: %s\n",message);
+}
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
     (void)argc; (void)argv;
@@ -566,6 +586,7 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
         game_process=1;
 #else
+        renderer_settings_file=settings_file;
         check_graphics=system_usable;
 #endif
         DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics,
@@ -616,6 +637,7 @@ int main(int argc, char **argv) {
         printf("DCP: game build pinned by DCP_GAME_BUILD\n");
     }
     runtime_online_configure(settings_file,user_dir,known_build ? build_key : NULL);
+    const int discord_presence=!check_imports && !cpu_only && discord_presence_start(settings_file,app0);
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
@@ -624,6 +646,7 @@ int main(int argc, char **argv) {
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir,app0));
     runtime_pad_set_settings(settings_file);
     runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file));
@@ -645,6 +668,7 @@ int main(int argc, char **argv) {
     }
     if (app0) {
         runtime_file_configure(app0, user_dir ? user_dir : "user");
+        install_text_translation(settings_file,paths.image_dir,app0);
         char sfo[4096], id[16]="";
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0);
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))
@@ -800,10 +824,18 @@ int main(int argc, char **argv) {
         sfo_value(sfo,"ATTRIBUTE",NULL,0,&attributes);
         uint64_t sdk=0;
         if (procparam) memcpy(&sdk,image+procparam+16,8); /* procparam: size, magic, count, sdk_version */
-        DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080};
+        uint32_t features=0;
+        if (known_build) {
+            if (game_build.resolution_site_count || game_build.resolution_by_signature) features|=DCP_GPU_FEATURE_RENDER_RESOLUTION;
+            if (game_build.true_ultrawide) features|=DCP_GPU_FEATURE_TRUE_ULTRAWIDE;
+            if (game_build.japanese_npc_voices && (!game_build.features_by_signature || dcp_npc_voice_resources(app0)))
+                features|=DCP_GPU_FEATURE_JAPANESE_NPC_VOICES;
+            if (game_build.unlock_gallery) features|=DCP_GPU_FEATURE_UNLOCK_GALLERY;
+        }
+        DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080,features};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
         if (dcpgpu_init(&gpu)) fail("GPU initialization failed");
-        printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());
+        printf("GPU: window and presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());
 #ifdef _WIN32
         module_diagnostics_report();
 #endif

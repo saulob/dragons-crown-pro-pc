@@ -629,22 +629,6 @@ test('registrations and sockets per address are limited; loopback is exempt in l
   for (let i = 0; i < LIMITS.socketsPerIp + 4; i++) assert.ok(local.connect('127.0.0.1').admitted);
 });
 
-test('bug reports: stored, trimmed, limited per account', () => {
-  const env = makeLobby();
-  const c = greeted(env);
-  assert.equal(c.call('report.send', { text: '', log: '' }).code, 'bad_request');
-  const first = c.call('report.send', { text: 'It crashed', log: 'line\n'.repeat(10), version: '0.9.0' });
-  assert.equal(first.code, 'ok');
-  assert.equal(first.left, LIMITS.reportsPerAccountPerDay - 1);
-  for (let i = 1; i < LIMITS.reportsPerAccountPerDay; i++) assert.equal(c.call('report.send', { text: 'again', log: '' }).code, 'ok');
-  env.advance(60000);
-  assert.equal(c.call('report.send', { text: 'too many', log: '' }).code, 'limit');
-  const big = greeted(env, '198.51.100.40');
-  assert.equal(big.call('report.send', { text: 'big', log: 'y'.repeat(LIMITS.reportLogChars + 500) }).code, 'ok');
-  const stored = env.host.sql.get('SELECT log FROM reports ORDER BY id DESC LIMIT 1');
-  assert.equal(stored.log.length, LIMITS.reportLogChars);
-});
-
 test('helpers: address kinds, text cleaning, friend codes', () => {
   assert.equal(ipv4Kind('127.0.0.1'), 'loopback');
   assert.equal(ipv4Kind('192.168.0.1'), 'private');

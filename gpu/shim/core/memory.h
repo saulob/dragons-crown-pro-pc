@@ -5,12 +5,12 @@
 #include "common/singleton.h"
 #include "core/address_space.h"
 
-namespace Vulkan { class Rasterizer; }
+namespace VideoCore { class RasterizerBackend; }
 
 namespace Core {
 class MemoryManager {
 public:
-    void SetRasterizer(Vulkan::Rasterizer* rasterizer_);
+    void SetRasterizer(VideoCore::RasterizerBackend* rasterizer_);
     AddressSpace& GetAddressSpace() { return impl; }
     bool IsValidGpuMapping(VAddr virtual_addr, u64 size) {
         // The PS4's GPU can only handle 40 bit addresses.
@@ -21,11 +21,11 @@ public:
     bool TryWriteBacking(void* address, const void* data, u64 size);
     /// CPU wrote guest memory outside page tracking (e.g. decoded video frames).
     void InvalidateMemory(VAddr address, u64 size);
-    Vulkan::Rasterizer* GetRasterizer() const { return rasterizer; }
+    VideoCore::RasterizerBackend* GetRasterizer() const { return rasterizer; }
 
 private:
     AddressSpace impl;
-    Vulkan::Rasterizer* rasterizer{};
+    VideoCore::RasterizerBackend* rasterizer{};
 };
 using Memory = Common::Singleton<MemoryManager>;
 } // namespace Core

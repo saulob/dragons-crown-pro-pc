@@ -20,6 +20,8 @@ namespace DcpOverlay {
 
 /// Present thread, once: the ImGui context and its Vulkan backend.
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count);
+/// The same with OpenGL: on the thread that owns the context.
+void InitOpenGL();
 
 /// Window thread, for every SDL event: true when the overlay consumed it.
 bool HandleEvent(const SDL_Event& event);
@@ -41,6 +43,8 @@ u64 PresentedFrames();
 
 /// Present thread: draws into `view` (layout ColorAttachmentOptimal).
 void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent);
+/// The same over the bound OpenGL framebuffer.
+void RenderOpenGL(u32 width, u32 height);
 
 /// The window's display content scale (DPI): the cheat menu grows with it.
 void SetDisplayScale(float scale);

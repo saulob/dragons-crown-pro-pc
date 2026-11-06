@@ -23,6 +23,17 @@ export function sqliteStore(file = ':memory:') {
     run: (query, ...args) => {
       prepare(query).run(...args);
     },
+    transaction: (work) => {
+      db.exec('BEGIN');
+      try {
+        const result = work();
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
     close: () => db.close(),
   };
 }
@@ -61,6 +72,7 @@ export class LocalConn {
     this.host = host;
     this.transport = transport;
     this.stored = null;
+    this.pinged = 0;
   }
 
   attachment() {
@@ -81,6 +93,14 @@ export class LocalConn {
 
   get bufferedAmount() {
     return this.transport.bufferedAmount ?? 0;
+  }
+
+  notePing() {
+    this.pinged = this.host.now();
+  }
+
+  keepaliveAt() {
+    return this.pinged;
   }
 
   close(code, reason) {

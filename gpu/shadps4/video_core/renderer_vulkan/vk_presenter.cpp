@@ -49,7 +49,15 @@ namespace {
 std::atomic<bool> g_ultrawide_side_mask{false};
 } // namespace
 
+bool DcpUltrawide::SideMaskWanted() {
+    return g_ultrawide_side_mask.load(std::memory_order_relaxed);
+}
+
 namespace Vulkan {
+
+void Presenter::ReportCompilerStats() {
+    rasterizer->GetPipelineCache().ReportCompilerStats();
+}
 
 bool CanBlitToSwapchain(const vk::PhysicalDevice physical_device, vk::Format format) {
     const vk::FormatProperties props{physical_device.getFormatProperties(format)};

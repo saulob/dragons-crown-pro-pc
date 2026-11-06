@@ -128,7 +128,8 @@ void TestLauncherSeparate() {
 void TestEveryBuildAndLanguageSharesThePath() {
     const std::string profile = ReadSource("launcher/game_profile.cpp");
     for (const char* build : {"CUSA10454 1.00 USA", "CUSA10454 1.01 USA", "CUSA07001 1.00 Japan", "CUSA07001 1.02 Japan",
-                              "CUSA07001 1.03 Japan", "CUSA10209 1.00 Asia/Hong Kong", "CUSA10209 1.02 Asia/Hong Kong"}) {
+                              "CUSA07001 1.03 Japan", "CUSA10209 1.00 Asia/Hong Kong", "CUSA10209 1.02 Asia/Hong Kong",
+                              "CUSA10487 1.03 Europe"}) {
         CHECK(Pos(profile, build) != std::string::npos);
     }
     for (const char* language : {"\"english\"", "\"french\"", "\"german\"", "\"italian\"", "\"spanish\"", "\"japanese\"",
@@ -137,7 +138,7 @@ void TestEveryBuildAndLanguageSharesThePath() {
     }
     for (const char* file : {"src/runtime_pad.c", "launcher/host.cpp"}) {
         const std::string text = ReadSource(file);
-        for (const char* key : {"CUSA10454", "CUSA07001", "CUSA10209", "DCP_LANGUAGE", "text_language", "dcp_game_build"}) {
+        for (const char* key : {"CUSA10454", "CUSA07001", "CUSA10209", "CUSA10487", "DCP_LANGUAGE", "text_language", "dcp_game_build"}) {
             CHECK(text.find(key) == std::string::npos);
         }
     }

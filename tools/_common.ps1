@@ -92,6 +92,177 @@ function Resolve-Toolchain([string]$Requested) {
     Stop-Tool 'MSYS2 CLANG64 toolchain or libraries missing. Run tools\setup.ps1 for what to install.'
 }
 
+# Provided by the graphics driver.
+$script:SystemProvidedDlls = @('vulkan-1.dll')
+
+function Get-Imports([string]$Path, [string]$Objdump) {
+    $out = & $Objdump -p $Path
+    if ($LASTEXITCODE -ne 0) { Stop-Tool "llvm-objdump failed on $Path" }
+    foreach ($line in $out) { if ($line -match 'DLL Name:\s*(\S+)') { $Matches[1] } }
+}
+
+# The DLLs that $Exe loads from $Dir, directly or through each other; Windows' own DLLs are not in $Dir.
+function Get-DllClosure([string]$Exe, [string]$Dir, [string]$Objdump) {
+    $found = [ordered]@{}
+    $queue = New-Object System.Collections.Generic.Queue[string]
+    $queue.Enqueue($Exe)
+    while ($queue.Count -gt 0) {
+        foreach ($name in Get-Imports $queue.Dequeue() $Objdump) {
+            $key = $name.ToLowerInvariant()
+            if ($script:SystemProvidedDlls -contains $key -or $found.Contains($key)) { continue }
+            $file = Join-Path $Dir $name
+            if (Test-Path -LiteralPath $file -PathType Leaf) {
+                $found[$key] = (Get-Item -LiteralPath $file).FullName
+                $queue.Enqueue($found[$key])
+            }
+        }
+    }
+    return $found
+}
+
+function Test-Sha256([string]$Path, [string]$Expected) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ieq $Expected
+}
+
+function Read-AnglePin([string]$Descriptor = (Join-Path $script:RepoRoot 'gpu\angle-runtime.txt')) {
+    $pin = @{ Files = @(); Needs = @() }
+    foreach ($line in Get-Content -LiteralPath $Descriptor) {
+        if ($line -match '^\s*(#|$)') { continue }
+        $fields = -split $line
+        if ($fields[0] -eq 'file') { $pin.Files += @{ Member = $fields[1]; Name = ($fields[1] -split '/')[-1]; Sha256 = $fields[2] } }
+        elseif ($fields[0] -eq 'needs') { $pin.Needs += $fields[1] }
+        else { $pin[$fields[0]] = $fields[1] }
+    }
+    foreach ($key in 'revision', 'version', 'package', 'url', 'sha256') {
+        if (-not $pin[$key]) { throw "$Descriptor has no $key" }
+    }
+    if ($pin.Files.Count -eq 0) { throw "$Descriptor lists no files" }
+    return $pin
+}
+
+function Get-AngleDlls($Pin) { @($Pin.Files | Where-Object { $_.Name -like '*.dll' }) }
+
+function Test-AngleRuntimeCurrent($Pin, [string]$Runtime) {
+    foreach ($file in $Pin.Files) {
+        if (-not (Test-Sha256 (Join-Path $Runtime $file.Name) $file.Sha256)) { return $false }
+    }
+    return $true
+}
+
+function Get-AngleArchive($Pin, [string]$Dir) {
+    $archive = Join-Path $Dir $Pin.package
+    if (Test-Sha256 $archive $Pin.sha256) { return $archive }
+    if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+    Write-Step "Fetching ANGLE $($Pin.version)"
+    $part = "$archive.part"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $client = New-Object System.Net.WebClient
+    try { $client.DownloadFile($Pin.url, $part) }
+    catch { throw "ANGLE could not be downloaded from $($Pin.url): $($_.Exception.Message)" }
+    finally { $client.Dispose() }
+    if (-not (Test-Sha256 $part $Pin.sha256)) {
+        $actual = (Get-FileHash -LiteralPath $part -Algorithm SHA256).Hash.ToLowerInvariant()
+        Remove-Item -LiteralPath $part -Force
+        throw "$($Pin.package) does not match its pinned SHA-256: expected $($Pin.sha256), got $actual"
+    }
+    Move-Item -LiteralPath $part $archive
+    return $archive
+}
+
+function Expand-AngleArchive($Pin, [string]$Archive, [string]$Dir, [string]$Runtime, [string]$CMake) {
+    $temporary = Join-Path $Dir 'extract'
+    foreach ($folder in $temporary, $Runtime) {
+        if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
+    }
+    New-Item -ItemType Directory -Force -Path $temporary | Out-Null
+    Push-Location $temporary
+    try {
+        & $CMake -E tar xf $Archive @($Pin.Files | ForEach-Object { $_.Member })
+        if ($LASTEXITCODE -ne 0) { throw "cmake could not extract $($Pin.package)" }
+    }
+    finally { Pop-Location }
+    New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
+    foreach ($file in $Pin.Files) {
+        $extracted = Join-Path $temporary $file.Member.Replace('/', '\')
+        if (-not (Test-Sha256 $extracted $file.Sha256)) {
+            Remove-Item -LiteralPath $Runtime -Recurse -Force
+            throw "$($file.Member) in $($Pin.package) does not match its pinned SHA-256"
+        }
+        Move-Item -LiteralPath $extracted (Join-Path $Runtime $file.Name)
+    }
+    Remove-Item -LiteralPath $temporary -Recurse -Force
+}
+
+# Files that already match their pinned hashes are the whole answer: no network, so an offline rebuild works.
+function Update-AngleRuntime([string]$Descriptor = (Join-Path $script:RepoRoot 'gpu\angle-runtime.txt'),
+                             [string]$CacheRoot = (Join-Path $script:RepoRoot 'cache\deps'), [string]$CMake = 'cmake') {
+    $pin = Read-AnglePin $Descriptor
+    $dir = Join-Path $CacheRoot "angle\$($pin.version)"
+    $runtime = Join-Path $dir 'runtime'
+    if (Test-AngleRuntimeCurrent $pin $runtime) { return $runtime }
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Expand-AngleArchive $pin (Get-AngleArchive $pin $dir) $dir $runtime $CMake | Out-Null
+    return $runtime
+}
+
+function Sync-AngleRuntime([string]$ToolBin) {
+    try { return Update-AngleRuntime -CMake (Join-Path $ToolBin 'cmake.exe') }
+    catch { Stop-Tool $_.Exception.Message }
+}
+
+function Copy-IfChanged([string]$Source, [string]$TargetDir) {
+    $target = Join-Path $TargetDir (Split-Path $Source -Leaf)
+    if ((Test-Path -LiteralPath $target) -and
+        (Get-FileHash -LiteralPath $target).Hash -eq (Get-FileHash -LiteralPath $Source).Hash) { return }
+    Copy-Item -LiteralPath $Source $target -Force
+}
+
+# What is wrong with ANGLE in $Dir: every import must be a pinned file beside it or part of Windows, so that nothing
+# depends on what PATH happens to hold.
+function Get-AngleRuntimeProblems([string]$Dir, $Pin, [scriptblock]$Imports) {
+    $problems = @()
+    $queue = New-Object System.Collections.Generic.Queue[string]
+    foreach ($file in Get-AngleDlls $Pin) {
+        $path = Join-Path $Dir $file.Name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $problems += "missing DLL: $($file.Name)"; continue }
+        if (-not (Test-Sha256 $path $file.Sha256)) { $problems += "stale ANGLE file: $($file.Name) differs from gpu\angle-runtime.txt" }
+        $queue.Enqueue($path)
+    }
+    foreach ($name in $Pin.Needs) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Dir $name) -PathType Leaf)) { $problems += "missing DLL: $name" }
+    }
+    $seen = @{}
+    while ($queue.Count -gt 0) {
+        $path = $queue.Dequeue()
+        foreach ($name in & $Imports $path) {
+            $key = $name.ToLowerInvariant()
+            if ($seen.ContainsKey($key) -or $key -eq (Split-Path $path -Leaf).ToLowerInvariant()) { continue }
+            $seen[$key] = $true
+            $beside = Join-Path $Dir $name
+            if (Test-Path -LiteralPath $beside -PathType Leaf) { $queue.Enqueue($beside); continue }
+            if ($key -match '^(api-ms-win-|ext-ms-)' -or (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32\$name"))) { continue }
+            $problems += "missing DLL: $name, needed by $(Split-Path $path -Leaf)"
+        }
+    }
+    return $problems
+}
+
+# A development run needs nothing on PATH either: everything the game loads sits beside it, as in a release.
+function Install-GameRuntime([string]$Exe, [string]$Runtime, [string]$ToolBin) {
+    $objdump = Join-Path $ToolBin 'llvm-objdump.exe'
+    $bin = Split-Path $Exe -Parent
+    $pin = Read-AnglePin
+    foreach ($dll in (Get-DllClosure $Exe $ToolBin $objdump).Values) { Copy-IfChanged $dll $bin }
+    foreach ($file in Get-AngleDlls $pin) {
+        $dll = Join-Path $Runtime $file.Name
+        Copy-IfChanged $dll $bin
+        foreach ($needed in (Get-DllClosure $dll $ToolBin $objdump).Values) { Copy-IfChanged $needed $bin }
+    }
+    $problems = @(Get-AngleRuntimeProblems $bin $pin { param($path) Get-Imports $path $objdump })
+    if ($problems.Count -gt 0) { Stop-Tool ($problems -join '; ') }
+}
+
 # Content fingerprint of a dependency's patch set: empty when it has none.
 function Get-PatchFingerprint($files) {
     if (-not $files -or $files.Count -eq 0) { return '' }

@@ -1,0 +1,17 @@
+# ANGLE for the Direct3D 11 renderer: fetched, verified and staged by tools\build.ps1 (Sync-AngleRuntime in tools\_common.ps1).
+# A package from MSYS2's own server, read without pacman. Changing the revision means changing every hash here.
+revision  890b5d8fa2988e3719e0d80421bf3e927db9cd5c
+version   2.1.r25748.890b5d8f-3
+package   mingw-w64-clang-x86_64-angleproject-2.1.r25748.890b5d8f-3-any.pkg.tar.zst
+url       https://repo.msys2.org/mingw/clang64/mingw-w64-clang-x86_64-angleproject-2.1.r25748.890b5d8f-3-any.pkg.tar.zst
+sha256    71c0daec0503735a15b441bd45cb55296715fd03b89e1ad3a7dc460eabbad56a
+
+# member of the package                        sha256
+file clang64/bin/libEGL.dll                    f8fb45125931b5d5f5b7fec5c9c9dc08cf43120b0197cdd04a22341bf27ad2f6
+file clang64/bin/libGLESv2.dll                 ba7d72a365a9f83d270a2a2c5dd5c902f5f1a81a769f7f160d7d949378257cfe
+file clang64/share/licenses/angleproject/LICENSE  bf4da21bd20bcfb5b60b7ecc67fa864a79be049e21d6178076887f178dd6c71a
+
+# Not Windows DLLs, so they ship beside these two. They come from the compiler toolchain: one process loads one copy of
+# each, and the game itself is built against that copy.
+needs libc++.dll
+needs zlib1.dll

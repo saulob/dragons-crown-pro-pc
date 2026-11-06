@@ -21,12 +21,12 @@ function Check([bool]$Condition, [string]$What) {
 # Every build key of the script, and the ones prepared in the synthetic tree (a core-scope folder is not complete).
 $folders = [ordered]@{
     'CUSA10454-1.00' = 'v1.03'; 'CUSA07001-1.00' = 'CUSA07001-1.00'; 'CUSA07001-1.02' = 'CUSA07001-1.02'
-    'CUSA07001-1.03' = 'CUSA07001-1.03'; 'CUSA10209-1.00' = 'CUSA10209-1.00'
+    'CUSA07001-1.03' = 'CUSA07001-1.03'; 'CUSA10209-1.00' = 'CUSA10209-1.00'; 'CUSA10487-1.03' = 'CUSA10487-1.03'
 }
 $labels = @{
     'CUSA10454-1.00' = 'CUSA10454 1.00 USA'; 'CUSA07001-1.00' = 'CUSA07001 1.00 Japan'
     'CUSA07001-1.02' = 'CUSA07001 1.02 Japan'; 'CUSA07001-1.03' = 'CUSA07001 1.03 Japan'
-    'CUSA10209-1.00' = 'CUSA10209 1.00 Asia/Hong Kong'
+    'CUSA10209-1.00' = 'CUSA10209 1.00 Asia/Hong Kong'; 'CUSA10487-1.03' = 'CUSA10487 1.03 Europe'
 }
 $tree = Join-Path ([IO.Path]::GetTempPath()) "dcp-online-instance-tests-$PID"
 if (Test-Path -LiteralPath $tree) { Remove-Item -LiteralPath $tree -Recurse -Force }

@@ -1,0 +1,151 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index 511cc51..a4c03be 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -59,6 +59,8 @@ struct Theme {
+   ImVec4 on_accent;     // text drawn on the accent
+   ImVec4 text;
+   ImVec4 dim;           // help text, hints
++  ImVec4 border_row = ImVec4(layout::kRowBorder[0], layout::kRowBorder[1], layout::kRowBorder[2], 1.0f);
++  ImVec4 border_panel = ImVec4(layout::kPanelBorder[0], layout::kPanelBorder[1], layout::kPanelBorder[2], 1.0f);
+   ImVec4 good;          // "Ready to play" card
+   ImVec4 warn;          // "Game files needed" card
+   ImVec4 good_dot;
+@@ -336,6 +338,7 @@ class Launcher {
+   void DrawHeader(ImVec2 origin, float w, float h);
+   void DrawSidebar(ImVec2 size);
+   void DrawContent(ImVec2 size);
++  void OutlinePanel();
+   void DrawFooter(ImVec2 origin, float w, float h);
+   void DrawPlayButton(ImVec2 size, bool can_play);
+   void HandleHotkeys();
+diff --git a/include/trg/layout.h b/include/trg/layout.h
+index 30e3d9b..7325e8a 100644
+--- a/include/trg/layout.h
++++ b/include/trg/layout.h
+@@ -13,11 +13,17 @@ namespace trg {
+ // Logical pixels: geometry is multiplied by Ui::scale(), and PushFont applies
+ // the display scale to text sizes itself.
+ namespace layout {
+-inline constexpr float kTextBody = 15.0f;  // buttons, combos, sidebar, Fonts::size
+-inline constexpr float kTextLabel = 16.0f;
+-inline constexpr float kTextHelp = 14.0f;
+-inline constexpr float kTextSection = 18.0f;
+-inline constexpr float kTextPage = 28.0f;
++inline constexpr float kTextBody = 16.0f;  // buttons, combos, Fonts::size
++inline constexpr float kTextLabel = 17.0f;
++inline constexpr float kTextHelp = 15.0f;
++inline constexpr float kTextSection = 19.0f;
++inline constexpr float kTextPage = 30.0f;
++inline constexpr float kTextSidebar = 16.0f;
++inline constexpr float kTextFooter = 15.0f;
++
++// Opaque, so that a line keeps its contrast on the page, on a panel and on a card.
++inline constexpr float kRowBorder[3] = {46.0f / 255.0f, 59.0f / 255.0f, 84.0f / 255.0f};
++inline constexpr float kPanelBorder[3] = {58.0f / 255.0f, 74.0f / 255.0f, 102.0f / 255.0f};
+ 
+ inline constexpr float kControlHeight = 34.0f;
+ inline constexpr float kItemGap = 6.0f;
+@@ -68,6 +74,10 @@ inline float ControlColumnWidth(float row_width, float scale) {
+   return std::clamp(row_width * 0.34f, 280.0f * scale, 360.0f * scale);
+ }
+ 
++// A whole number of pixels, so that lines stay crisp at any display scale.
++inline float LineThickness(float scale) { return std::max(1.0f, std::floor(scale + 0.5f)); }
++inline float PassiveLineThickness(float scale) { return std::max(1.0f, std::floor(scale)); }
++
+ inline constexpr float SidebarLabelX() { return kSidebarIconInset + kSidebarIcon + kSidebarIconGap; }
+ 
+ // Where to place a line so that the point `visual_center` below its top lands on `center`.
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index 31bf288..bd7a6d2 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -65,9 +65,9 @@ void ApplyTheme(const Theme& t, float s, float font_size) {
+   c[ImGuiCol_ScrollbarGrab] = t.frame_hot;
+   c[ImGuiCol_ScrollbarGrabHovered] = t.frame_active;
+   c[ImGuiCol_ScrollbarGrabActive] = t.frame_active;
+-  c[ImGuiCol_Separator] = ImVec4(1, 1, 1, 0.07f);
+-  c[ImGuiCol_TableBorderLight] = ImVec4(1, 1, 1, 0.06f);
+-  c[ImGuiCol_TableBorderStrong] = ImVec4(1, 1, 1, 0.08f);
++  c[ImGuiCol_Separator] = t.border_row;
++  c[ImGuiCol_TableBorderLight] = t.border_row;
++  c[ImGuiCol_TableBorderStrong] = t.border_panel;
+   c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
+   c[ImGuiCol_TableRowBgAlt] = ImVec4(0, 0, 0, 0);
+   c[ImGuiCol_NavCursor] = t.accent;
+@@ -141,7 +141,7 @@ float CapCenter(ImFont* font, float size) {
+ // Draws the shortcuts as keycaps and labels centred on `at.y`, or only measures them without `dl`.
+ float DrawKeyHints(ImDrawList* dl, const std::vector<layout::KeyHint>& hints, const Fonts& fonts, const Theme& t,
+                    ImVec2 at, float s) {
+-  const float size = layout::kTextBody * s;
++  const float size = layout::kTextFooter * s;
+   const float cap_h = layout::kKeycapHeight * s, padding = layout::kKeycapPadding * s;
+   const float cap_top = std::floor(at.y - cap_h * 0.5f);
+   const float key_top = layout::CenteredTop(at.y, CapCenter(fonts.semibold, size));
+@@ -157,7 +157,7 @@ float DrawKeyHints(ImDrawList* dl, const std::vector<layout::KeyHint>& hints, co
+         const ImVec2 min(std::floor(x), cap_top), max(min.x + cap_w, cap_top + cap_h);
+         const float rounding = layout::kKeycapRounding * s;
+         dl->AddRectFilled(min, max, Col(t.frame, 0.7f), rounding);
+-        dl->AddRect(min, max, Col(t.frame_hot), rounding, 0, std::max(s, 1.0f));
++        dl->AddRect(min, max, Col(t.frame_hot), rounding, 0, layout::LineThickness(s));
+         dl->AddText(fonts.semibold, size, ImVec2(min.x + (cap_w - text_w) * 0.5f, key_top), Col(t.text),
+                     hint.key.data(), key_end);
+       }
+@@ -767,7 +767,7 @@ void Ui::SponsorCard(const char* message, const char* note) {
+   const float h = std::max(message_h + paragraph_gap + note_h, button.y + link_gap + link_size) + pad * 2;
+   ImDrawList* dl = ImGui::GetWindowDrawList();
+   dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), Col(t.frame, 0.35f), 12 * s);
+-  dl->AddRect(p, ImVec2(p.x + w, p.y + h), Col(t.frame_hot, 0.8f), 12 * s, 0, std::max(s, 1.0f));
++  dl->AddRect(p, ImVec2(p.x + w, p.y + h), Col(t.border_panel), 12 * s, 0, layout::PassiveLineThickness(s));
+ 
+   ImGui::SetCursorScreenPos(ImVec2(p.x + pad, p.y + pad));
+   ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + text_w);
+@@ -1166,7 +1166,7 @@ void Launcher::DrawSidebar(ImVec2 size) {
+   const int icon_pixels = int(layout::kSidebarIcon * s_ * framebuffer + 0.5f);
+   const float icon_size = float(icon_pixels) / framebuffer;
+   ImGui::SetCursorPos(ImVec2(pad, pad));
+-  ImGui::PushFont(config_.fonts.semibold, layout::kTextLabel);
++  ImGui::PushFont(config_.fonts.semibold, layout::kTextSidebar);
+   const float cap_center = CapCenter(config_.fonts.semibold, ImGui::GetFontSize());
+   for (int i = 0; i < int(config_.pages.size()); ++i) {
+     const Page& page = config_.pages[size_t(i)];
+@@ -1210,6 +1210,7 @@ void Launcher::DrawSidebar(ImVec2 size) {
+   ImGui::Dummy(ImVec2(0, 0));
+   ImGui::PopFont();
+   ImGui::EndChild();
++  OutlinePanel();
+ }
+ 
+ void Launcher::DrawContent(ImVec2 size) {
+@@ -1259,6 +1260,12 @@ void Launcher::DrawContent(ImVec2 size) {
+   ImGui::PopID();
+   ImGui::PopStyleColor();
+   ImGui::EndChild();
++  OutlinePanel();
++}
++
++void Launcher::OutlinePanel() {
++  ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), Col(config_.theme.border_panel),
++                                      ImGui::GetStyle().ChildRounding, 0, layout::PassiveLineThickness(s_));
+ }
+ 
+ void Launcher::DrawFooter(ImVec2 origin, float w, float h) {
+@@ -1269,7 +1276,7 @@ void Launcher::DrawFooter(ImVec2 origin, float w, float h) {
+   const float cy = origin.y + h * 0.5f;
+   ImDrawList* dl = ImGui::GetWindowDrawList();
+   const Fonts& fonts = config_.fonts;
+-  const float help_size = layout::kTextBody * s_;
++  const float help_size = layout::kTextFooter * s_;
+   const std::vector<layout::KeyHint> hints = layout::ParseKeyHints(T(config_.hints.c_str()));
+   const std::vector<std::string_view> note = layout::SplitSentences(T(config_.note.c_str()));
+   const float hints_w = DrawKeyHints(nullptr, hints, fonts, t, ImVec2(origin.x, cy), s_);
+@@ -1304,7 +1311,7 @@ void Launcher::DrawFooter(ImVec2 origin, float w, float h) {
+     DrawKeyHints(dl, hints, fonts, t, ImVec2(origin.x, cy), s_);
+     if (!hints.empty()) {
+       const float x = std::floor(origin.x + hints_w + separator_gap), half = layout::kFooterSeparator * s_ * 0.5f;
+-      dl->AddLine(ImVec2(x, cy - half), ImVec2(x, cy + half), Col(t.frame_hot), std::max(s_, 1.0f));
++      dl->AddLine(ImVec2(x, cy - half), ImVec2(x, cy + half), Col(t.border_row), layout::PassiveLineThickness(s_));
+     }
+   }
+   if (show_status) {

@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace dcp {
@@ -145,6 +146,17 @@ struct OverlayResult {
 OverlayResult OverlayArchive(const std::filesystem::path& base, const std::filesystem::path& update,
                              const std::function<bool(std::string_view path)>& keep_base,
                              const std::filesystem::path& output);
+
+// What a reader of the archive sees when entries are replaced the way ApplyBlockPatch does it, without writing the file:
+// the new data appended past `length` (the archive's size) and the rewritten table of contents and header, by position.
+struct ArchiveOverlay {
+    uint64_t length = 0;
+    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> patches;
+};
+// Nothing when the archive lacks one of the entries; `error` names it.
+std::optional<ArchiveOverlay> OverlayEntries(const CpkArchive& archive, uint64_t length,
+                                             std::span<const std::pair<std::string, std::vector<uint8_t>>> entries,
+                                             std::string* error = nullptr);
 
 uint32_t Crc32(std::span<const uint8_t> bytes);
 

@@ -159,6 +159,24 @@ static unsigned char *boot_image(const char *folder, uint64_t *size) {
     return image;
 }
 
+/* CUSA10487 1.03: no table entry, so the search finds the windows at the sites its scan reported; the USA table is not
+ * reused. */
+static void test_europe(void) {
+    enum { kEuropeStory = 0x3aed92, kEuropeTutorial = 0x3a8ae9 };
+    unsigned char *image = calloc(1, kSize);
+    memcpy(image + kEuropeStory, kStory, sizeof(kStory));
+    memcpy(image + kEuropeTutorial, kTutorial, sizeof(kTutorial));
+    memcpy(image + kEuropeTutorial + 0x58, kMessage, sizeof(kMessage));
+    uint64_t story = 0, tutorial = 0;
+    CHECK(skip_offers_locate(image, kSize, "CUSA10454-1.00", &story, &tutorial) == 1 && !story && !tutorial);
+    CHECK(skip_offers_locate(image, kSize, "CUSA10487-1.03", &story, &tutorial) == 0);
+    CHECK(story == kEuropeStory && tutorial == kEuropeTutorial);
+    CHECK(skip_offers_install(image, kSize, "CUSA10487-1.03", SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) ==
+          (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
+    CHECK(image[kEuropeStory + 39] == 0x90 && image[kEuropeTutorial + 2] == 0x66);
+    free(image);
+}
+
 static void test_real_images(void) {
     static const struct {
         const char *folder, *game;
@@ -205,6 +223,7 @@ static void test_real_images(void) {
 int main(void) {
     test_synthetic();
     test_signature();
+    test_europe();
     test_environment();
     test_real_images();
     printf("%s (%d failures)\n", failures ? "FAILED" : "OK", failures);

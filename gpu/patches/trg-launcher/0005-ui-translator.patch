@@ -1,0 +1,462 @@
+diff --git a/include/trg/platform.h b/include/trg/platform.h
+--- a/include/trg/platform.h
++++ b/include/trg/platform.h
+@@ -13,6 +13,12 @@
+ 
+ namespace trg {
+ 
++// Maps the English text the launcher draws to the text of the user's language. The result must outlive the frame.
++// With no translator set, text is drawn as given.
++using Translator = const char* (*)(const char*);
++void SetTranslator(Translator translator);
++const char* Translate(const char* text);
++
+ // ---------------------------------------------------------------- files ---
+ FILE* OpenFile(const std::string& utf8_path, const char* mode);  // fopen with UTF-8 paths on Windows
+ long long FileSize(const std::string& utf8_path);                 // -1 when it cannot be opened
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -13,6 +13,8 @@
+ namespace trg {
+ namespace {
+ 
++const char* T(const char* text) { return Translate(text); }
++
+ ImVec4 Mix(const ImVec4& a, const ImVec4& b, float t) {
+   return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
+ }
+@@ -125,7 +127,7 @@
+ float SponsorIconSize(float font_size) { return font_size * 1.1f; }
+ 
+ float SponsorButtonWidth(const SponsorLink& sponsor, ImFont* font, float font_size, float scale) {
+-  const float text = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, sponsor.label.c_str()).x;
++  const float text = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, T(sponsor.label.c_str())).x;
+   if (sponsor.icon == ImTextureID{}) return text + 48 * scale;
+   return text + SponsorIconSize(font_size) + 8 * scale + 28 * scale;
+ }
+@@ -145,7 +147,8 @@
+     ImGui::SetItemTooltip("%s", sponsor.url.c_str());
+   }
+   const ImVec2 min = ImGui::GetItemRectMin();
+-  const ImVec2 text = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, sponsor.label.c_str());
++  const char* label = T(sponsor.label.c_str());
++  const ImVec2 text = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, label);
+   const bool has_icon = sponsor.icon != ImTextureID{};
+   const float icon = has_icon ? SponsorIconSize(font_size) : 0.0f;
+   const float gap = has_icon ? 8 * scale : 0.0f;
+@@ -155,7 +158,7 @@
+   if (has_icon) {
+     dl->AddImage(ImTextureRef(sponsor.icon), ImVec2(x, cy - icon * 0.5f), ImVec2(x + icon, cy + icon * 0.5f));
+   }
+-  dl->AddText(font, font_size, ImVec2(x + icon + gap, cy - text.y * 0.5f), IM_COL32_WHITE, sponsor.label.c_str());
++  dl->AddText(font, font_size, ImVec2(x + icon + gap, cy - text.y * 0.5f), IM_COL32_WHITE, label);
+   return pressed;
+ }
+ 
+@@ -293,14 +296,14 @@
+   }
+   if (label && *label) {
+     ImGui::PushFont(fonts().semibold, 0.0f);
+-    ImGui::TextUnformatted(label);
++    ImGui::TextUnformatted(T(label));
+     ImGui::PopFont();
+   }
+   if (help && *help) {
+     ImGui::PushStyleColor(ImGuiCol_Text, theme().dim);
+     ImGui::PushFont(nullptr, fonts().size * 0.84f);
+     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 24 * scale_);
+-    ImGui::TextUnformatted(help);
++    ImGui::TextUnformatted(T(help));
+     ImGui::PopTextWrapPos();
+     ImGui::PopFont();
+     ImGui::PopStyleColor();
+@@ -327,7 +330,7 @@
+     const bool sel = int(i) == selected;
+     if (sel) PushAccent(theme());
+     ImGui::PushID(int(i));
+-    if (ImGui::Button(labels[i].c_str(), ImVec2(bw, 0)) && !sel) clicked = int(i);
++    if (ImGui::Button(T(labels[i].c_str()), ImVec2(bw, 0)) && !sel) clicked = int(i);
+     ImGui::PopID();
+     if (sel) ImGui::PopStyleColor(4);
+   }
+@@ -337,7 +340,7 @@
+ 
+ bool Ui::AccentButton(const char* label, ImVec2 size) {
+   PushAccent(theme());
+-  const bool r = ImGui::Button(label, size);
++  const bool r = ImGui::Button(T(label), size);
+   ImGui::PopStyleColor(4);
+   return r;
+ }
+@@ -370,10 +373,10 @@
+   bool changed = false;
+   ImGui::PushID(key);
+   ImGui::SetNextItemWidth(-FLT_MIN);
+-  if (ImGui::BeginCombo("##combo", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
++  if (ImGui::BeginCombo("##combo", T(preview.c_str()), ImGuiComboFlags_HeightLarge)) {
+     for (const Option& o : options) {
+       const bool on = o.value == cur;
+-      if (ImGui::Selectable(o.label.c_str(), on) && !on) {
++      if (ImGui::Selectable(T(o.label.c_str()), on) && !on) {
+         settings().Set(key, o.value);
+         changed = true;
+       }
+@@ -432,7 +435,7 @@
+   std::snprintf(buf, sizeof buf, "%s", settings().Get(key).c_str());
+   ImGui::PushID(key);
+   ImGui::SetNextItemWidth(-FLT_MIN);
+-  const bool changed = ImGui::InputTextWithHint("##text", hint, buf, sizeof buf);
++  const bool changed = ImGui::InputTextWithHint("##text", T(hint), buf, sizeof buf);
+   if (changed) settings().Set(key, buf);
+   ImGui::PopID();
+   return changed;
+@@ -442,7 +445,7 @@
+   Row(label, nullptr);
+   ImGui::PushStyleColor(ImGuiCol_Text, theme().dim);
+   ImGui::PushTextWrapPos(0.0f);
+-  ImGui::TextUnformatted(text);
++  ImGui::TextUnformatted(T(text));
+   ImGui::PopTextWrapPos();
+   ImGui::PopStyleColor();
+ }
+@@ -450,7 +453,7 @@
+ bool Ui::ButtonRow(const char* label, const char* help, const char* button, bool accent) {
+   Row(label, help);
+   ImGui::PushID(label);
+-  const bool r = accent ? AccentButton(button) : ImGui::Button(button, ImVec2(-FLT_MIN, 0));
++  const bool r = accent ? AccentButton(button) : ImGui::Button(T(button), ImVec2(-FLT_MIN, 0));
+   ImGui::PopID();
+   return r;
+ }
+@@ -459,7 +462,7 @@
+                     const char* confirm, const char* cancel) {
+   Row(label, help);
+   ImGui::PushID(label);
+-  if (ImGui::Button(button, ImVec2(-FLT_MIN, 0))) ImGui::OpenPopup("##confirm");
++  if (ImGui::Button(T(button), ImVec2(-FLT_MIN, 0))) ImGui::OpenPopup("##confirm");
+   bool confirmed = false;
+   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24 * scale_, 20 * scale_));
+   const bool open = ImGui::BeginPopupModal("##confirm", nullptr,
+@@ -468,7 +471,7 @@
+   ImGui::PopStyleVar();
+   if (open) {
+     ImGui::PushFont(fonts().semibold, 0.0f);
+-    ImGui::TextUnformatted(question);
++    ImGui::TextUnformatted(T(question));
+     ImGui::PopFont();
+     ImGui::Dummy(ImVec2(320 * scale_, 6 * scale_));
+     if (AccentButton(confirm, ImVec2(150 * scale_, 0))) {
+@@ -476,7 +479,7 @@
+       ImGui::CloseCurrentPopup();
+     }
+     ImGui::SameLine();
+-    if (ImGui::Button(cancel, ImVec2(150 * scale_, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
++    if (ImGui::Button(T(cancel), ImVec2(150 * scale_, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+       ImGui::CloseCurrentPopup();
+     ImGui::EndPopup();
+   }
+@@ -520,7 +523,7 @@
+         }
+       }
+     }
+-  } else if (ImGui::Button(shown.empty() ? "(none)" : shown.c_str(), ImVec2(width, 0))) {
++  } else if (ImGui::Button(T(shown.empty() ? "(none)" : shown.c_str()), ImVec2(width, 0))) {
+     capturing_ = id;
+     capture_frame_ = ImGui::GetFrameCount();
+   }
+@@ -552,14 +555,14 @@
+   ImGui::SetCursorScreenPos(ImVec2(p.x + 64 * scale_, p.y + 14 * scale_));
+   ImGui::BeginGroup();
+   ImGui::PushFont(fonts().semibold, 0.0f);
+-  ImGui::TextUnformatted(title);
++  ImGui::TextUnformatted(T(title));
+   ImGui::PopFont();
+   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.92f, 0.96f, 1));
+   if (progress >= 0.0f) {
+     ImGui::ProgressBar(progress, ImVec2(w - 100 * scale_, 6 * scale_), "");
+   } else if (detail && *detail) {
+     ImGui::PushTextWrapPos(p.x + w - 16 * scale_ - ImGui::GetWindowPos().x);
+-    ImGui::TextUnformatted(detail);
++    ImGui::TextUnformatted(T(detail));
+     ImGui::PopTextWrapPos();
+   }
+   ImGui::PopStyleColor();
+@@ -571,17 +574,18 @@
+ bool Ui::TaskProgress(Task& task) {
+   if (!task.running()) return false;
+   const float f = task.fraction();
++  const char* task_label = T(task.label().c_str());
+   char label[160];
+   if (f >= 0.0f)
+-    std::snprintf(label, sizeof label, "%s %.0f%%", task.label().c_str(), double(f) * 100.0);
++    std::snprintf(label, sizeof label, "%s %.0f%%", task_label, double(f) * 100.0);
+   else
+-    std::snprintf(label, sizeof label, "%s", task.label().c_str());
++    std::snprintf(label, sizeof label, "%s", task_label);
+   const float cancel_w = 120 * scale_;
+   ImGui::ProgressBar(f >= 0.0f ? f : -1.0f * float(ImGui::GetTime()),
+                      ImVec2(ImGui::GetContentRegionAvail().x - cancel_w - ImGui::GetStyle().ItemSpacing.x, 0), label);
+   ImGui::SameLine();
+   ImGui::BeginDisabled(task.cancelled());
+-  if (ImGui::Button("Cancel##task", ImVec2(-FLT_MIN, 0))) task.Cancel();
++  if (ImGui::Button((std::string(T("Cancel")) + "##task").c_str(), ImVec2(-FLT_MIN, 0))) task.Cancel();
+   ImGui::EndDisabled();
+   return true;
+ }
+@@ -590,7 +594,7 @@
+   LeaveRows();
+   ImGui::Dummy(ImVec2(0, 4 * scale_));
+   ImGui::PushFont(fonts().semibold, fonts().size * 1.1f);
+-  ImGui::TextUnformatted(text);
++  ImGui::TextUnformatted(T(text));
+   ImGui::PopFont();
+ }
+ 
+@@ -598,7 +602,7 @@
+   LeaveRows();
+   ImGui::PushStyleColor(ImGuiCol_Text, theme().dim);
+   ImGui::PushTextWrapPos(0.0f);
+-  ImGui::TextUnformatted(text);
++  ImGui::TextUnformatted(T(text));
+   ImGui::PopTextWrapPos();
+   ImGui::PopStyleColor();
+ }
+@@ -607,7 +611,7 @@
+   ImGui::PushStyleColor(ImGuiCol_Text, theme().dim);
+   ImGui::PushFont(nullptr, fonts().size * 0.84f);
+   ImGui::PushTextWrapPos(0.0f);
+-  ImGui::TextUnformatted(text);
++  ImGui::TextUnformatted(T(text));
+   ImGui::PopTextWrapPos();
+   ImGui::PopFont();
+   ImGui::PopStyleColor();
+@@ -624,6 +628,8 @@
+ 
+ void Ui::SponsorCard(const char* message, const char* note) {
+   LeaveRows();
++  message = T(message);
++  note = T(note);
+   const SponsorLink& sponsor = launcher_->config_.sponsor;
+   if (sponsor.url.empty()) return;
+   const Theme& t = theme();
+@@ -679,7 +685,7 @@
+   LeaveRows();
+   ImGui::Dummy(ImVec2(0, 4 * scale_));
+   ImGui::PushFont(fonts().semibold, 0.0f);
+-  const bool open = ImGui::CollapsingHeader(title, open_by_default ? ImGuiTreeNodeFlags_DefaultOpen : 0);
++  const bool open = ImGui::CollapsingHeader(T(title), open_by_default ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+   ImGui::PopFont();
+   return open;
+ }
+@@ -688,9 +694,9 @@
+   LeaveRows();
+   ImGui::PushFont(fonts().semibold, 0.0f);
+   if (total_points > 0)
+-    ImGui::Text("%d / %d unlocked     %d / %d G", unlocked, total, points, total_points);
++    ImGui::Text(T("%d / %d unlocked     %d / %d G"), unlocked, total, points, total_points);
+   else
+-    ImGui::Text("%d / %d unlocked", unlocked, total);
++    ImGui::Text(T("%d / %d unlocked"), unlocked, total);
+   ImGui::PopFont();
+   ImGui::Dummy(ImVec2(0, 4 * scale_));
+ }
+@@ -716,7 +722,7 @@
+     tx = i0.x + icon + 14 * s;
+   }
+   const float right = p.x + card_w - 14 * s;
+-  dl->AddText(f.semibold, base, ImVec2(tx, p.y + 12 * s), Col(a.unlocked ? t.text : t.dim), a.title.c_str());
++  dl->AddText(f.semibold, base, ImVec2(tx, p.y + 12 * s), Col(a.unlocked ? t.text : t.dim), T(a.title.c_str()));
+   if (a.points > 0) {
+     const std::string g = std::to_string(a.points) + " G";
+     const ImVec2 gs = f.semibold->CalcTextSizeA(base * 0.9f, FLT_MAX, 0, g.c_str());
+@@ -724,9 +730,9 @@
+                 g.c_str());
+   }
+   const std::string& desc = a.unlocked || a.locked_description.empty() ? a.description : a.locked_description;
+-  dl->AddText(f.regular, base * 0.84f, ImVec2(tx, p.y + 38 * s), Col(t.dim), desc.c_str(), nullptr, right - tx);
++  dl->AddText(f.regular, base * 0.84f, ImVec2(tx, p.y + 38 * s), Col(t.dim), T(desc.c_str()), nullptr, right - tx);
+   if (a.unlocked)
+-    dl->AddText(f.semibold, base * 0.72f, ImVec2(tx, p.y + card_h - 22 * s), Col(t.accent), "UNLOCKED");
++    dl->AddText(f.semibold, base * 0.72f, ImVec2(tx, p.y + card_h - 22 * s), Col(t.accent), T("UNLOCKED"));
+ }
+ 
+ void Ui::AchievementGrid(const std::vector<AchievementCard>& cards, int max_columns) {
+@@ -800,17 +806,17 @@
+   }
+   const PlayPrompt& p = *prompt_;
+   ImGui::PushFont(config_.fonts.bold, ImGui::GetFontSize() * 1.2f);
+-  ImGui::TextUnformatted(p.title.c_str());
++  ImGui::TextUnformatted(T(p.title.c_str()));
+   ImGui::PopFont();
+   ImGui::Dummy(ImVec2(0, 6 * s_));
+   ImGui::PushTextWrapPos(0.0f);
+   for (const std::string& para : p.paragraphs) {
+-    ImGui::TextUnformatted(para.c_str());
++    ImGui::TextUnformatted(T(para.c_str()));
+     ImGui::Dummy(ImVec2(0, 6 * s_));
+   }
+   if (!p.footnote.empty()) {
+     ImGui::PushStyleColor(ImGuiCol_Text, t.dim);
+-    ImGui::TextUnformatted(p.footnote.c_str());
++    ImGui::TextUnformatted(T(p.footnote.c_str()));
+     ImGui::PopStyleColor();
+   }
+   ImGui::PopTextWrapPos();
+@@ -826,14 +832,15 @@
+     const float bw = (avail - gap * float(play_buttons.size() - 1)) / float(play_buttons.size());
+     const PromptButton& b = *play_buttons[i];
+     ImGui::PushID(int(i));
+-    if (b.accent ? ui_.AccentButton(b.label.c_str(), ImVec2(bw, 0)) : ImGui::Button(b.label.c_str(), ImVec2(bw, 0)))
++    if (b.accent ? ui_.AccentButton(b.label.c_str(), ImVec2(bw, 0))
++                 : ImGui::Button(T(b.label.c_str()), ImVec2(bw, 0)))
+       chosen = &b;
+     ImGui::PopID();
+   }
+   for (size_t i = 0; i < other.size(); ++i) {
+     ImGui::PushID(int(100 + i));
+     if (other[i]->accent ? ui_.AccentButton(other[i]->label.c_str(), ImVec2(-FLT_MIN, 0))
+-                         : ImGui::Button(other[i]->label.c_str(), ImVec2(-FLT_MIN, 0)))
++                         : ImGui::Button(T(other[i]->label.c_str()), ImVec2(-FLT_MIN, 0)))
+       chosen = other[i];
+     ImGui::PopID();
+   }
+@@ -870,7 +877,7 @@
+ }
+ 
+ void Launcher::SetStatus(std::string text, double seconds) {
+-  status_ = std::move(text);
++  status_ = T(text.c_str());
+   status_until_ = ImGui::GetTime() + seconds;
+ }
+ 
+@@ -1019,13 +1026,13 @@
+       const SubtitleSegment& segment = b.subtitle_segments[i];
+       ImGui::PushID(int(i));
+       sx += LinkText(dl, "##segment", ImVec2(sx, subtitle_y), config_.fonts.semibold, subtitle_size, subtitle_color,
+-                     segment.text.c_str(), segment.url);
++                     T(segment.text.c_str()), segment.url);
+       ImGui::PopID();
+     }
+     ImGui::PopID();
+   } else if (!b.subtitle.empty()) {
+     dl->AddText(config_.fonts.semibold, subtitle_size, ImVec2(subtitle_x, subtitle_y), subtitle_color,
+-                b.subtitle.c_str());
++                T(b.subtitle.c_str()));
+   }
+   dl->PopClipRect();
+ }
+@@ -1050,7 +1057,7 @@
+     if (selected || hot)
+       dl->AddRectFilled(pos, ImVec2(pos.x + item.x, pos.y + item.y), Col(selected ? t.accent : t.frame), 8 * s_);
+     dl->AddText(ImVec2(pos.x + 16 * s_, pos.y + (item_h - ImGui::GetFontSize()) * 0.5f),
+-                Col(selected ? t.on_accent : t.text), page.name.c_str());
++                Col(selected ? t.on_accent : t.text), T(page.name.c_str()));
+     const int badge = page.badge ? page.badge() : 0;
+     if (badge > 0) {
+       const std::string count = badge > 99 ? "99+" : std::to_string(badge);
+@@ -1082,11 +1089,11 @@
+   ImGui::SetCursorPos(ImVec2(pad, pad * 0.8f));
+   ImGui::BeginGroup();
+   ImGui::PushFont(config_.fonts.semibold, config_.fonts.size * 1.45f);
+-  ImGui::TextUnformatted(page.name.c_str());
++  ImGui::TextUnformatted(T(page.name.c_str()));
+   ImGui::PopFont();
+   if (!page.blurb.empty()) {
+     ImGui::PushStyleColor(ImGuiCol_Text, config_.theme.dim);
+-    ImGui::TextUnformatted(page.blurb.c_str());
++    ImGui::TextUnformatted(T(page.blurb.c_str()));
+     ImGui::PopStyleColor();
+   }
+   ImGui::EndGroup();
+@@ -1112,10 +1119,12 @@
+   const float cy = origin.y + h * 0.5f;
+   ImDrawList* dl = ImGui::GetWindowDrawList();
+   const float small = config_.fonts.size * 0.84f * s_;
+-  dl->AddText(config_.fonts.regular, small, ImVec2(origin.x, cy - 20 * s_), Col(t.dim), config_.hints.c_str());
++  const char* hints = T(config_.hints.c_str());
++  const char* note = T(config_.note.c_str());
++  dl->AddText(config_.fonts.regular, small, ImVec2(origin.x, cy - 20 * s_), Col(t.dim), hints);
+   const bool show_status = !status_.empty() && ImGui::GetTime() < status_until_;
+   dl->AddText(show_status ? config_.fonts.semibold : config_.fonts.regular, small, ImVec2(origin.x, cy + 2 * s_),
+-              Col(show_status ? t.accent : t.dim), show_status ? status_.c_str() : config_.note.c_str());
++              Col(show_status ? t.accent : t.dim), show_status ? status_.c_str() : note);
+ 
+   const float right = origin.x + w;
+   const float quit_x = right - play_w - bw * 2 - 24 * s_;
+@@ -1125,9 +1134,8 @@
+     const float font_size = ImGui::GetFontSize() * 0.94f;
+     const ImVec2 size(SponsorButtonWidth(sponsor, font, font_size, s_), bh * 0.85f);
+     const float x = quit_x - 12 * s_ - size.x;
+-    const float text_w =
+-        std::max(config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, config_.hints.c_str()).x,
+-                 config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, config_.note.c_str()).x);
++    const float text_w = std::max(config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, hints).x,
++                                  config_.fonts.regular->CalcTextSizeA(small, FLT_MAX, 0.0f, note).x);
+     if (x >= origin.x + text_w + 20 * s_) {
+       if (SponsorButton("##sponsor_footer", sponsor, ImVec2(x, cy - size.y * 0.5f), size, font, font_size, s_)) {
+         OpenUrl(sponsor.url);
+@@ -1136,9 +1144,9 @@
+   }
+   ImGui::SetCursorScreenPos(ImVec2(quit_x, cy - bh * 0.5f));
+   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12 * s_);
+-  if (ImGui::Button("Quit", ImVec2(bw, bh))) want_quit_ = true;
++  if (ImGui::Button(T("Quit"), ImVec2(bw, bh))) want_quit_ = true;
+   ImGui::SameLine(0, 12 * s_);
+-  if (ImGui::Button("Save", ImVec2(bw, bh))) Save();
++  if (ImGui::Button(T("Save"), ImVec2(bw, bh))) Save();
+   ImGui::SameLine(0, 12 * s_);
+   ImGui::PopStyleVar();
+   const PlayCheck check = config_.can_play ? config_.can_play() : PlayCheck{};
+@@ -1164,12 +1172,13 @@
+   dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y),
+                     can_play ? Col(hot ? t.accent_hot : t.accent) : Col(hot ? t.frame_hot : t.frame), r);
+   const float fs = 22 * s_;
+-  const ImVec2 ts = config_.fonts.bold->CalcTextSizeA(fs, FLT_MAX, 0, "PLAY");
++  const char* play = T("PLAY");
++  const ImVec2 ts = config_.fonts.bold->CalcTextSizeA(fs, FLT_MAX, 0, play);
+   const float tri = fs * 0.5f;
+   const float total = ts.x + 12 * s_ + tri;
+   const float tx = p.x + (size.x - total) * 0.5f, ty = p.y + (size.y - ts.y) * 0.5f;
+   const ImU32 ink = can_play ? Col(t.on_accent) : Col(t.dim);
+-  dl->AddText(config_.fonts.bold, fs, ImVec2(tx, ty), ink, "PLAY");
++  dl->AddText(config_.fonts.bold, fs, ImVec2(tx, ty), ink, play);
+   const float ax = tx + ts.x + 12 * s_, ay = p.y + size.y * 0.5f;
+   dl->AddTriangleFilled(ImVec2(ax, ay - tri * 0.6f), ImVec2(ax, ay + tri * 0.6f), ImVec2(ax + tri, ay), ink);
+   if (clicked) want_play_ = true;
+diff --git a/src/platform.cpp b/src/platform.cpp
+--- a/src/platform.cpp
++++ b/src/platform.cpp
+@@ -104,6 +104,14 @@
+   return out;
+ }
+ 
++namespace {
++Translator g_translator = nullptr;
++}  // namespace
++
++void SetTranslator(Translator translator) { g_translator = translator; }
++
++const char* Translate(const char* text) { return g_translator && text ? g_translator(text) : text; }
++
+ // ------------------------------------------------------------------ dialogs --
+ std::string BrowseForFile(const std::string& title, const std::vector<FileFilter>& filters) {
+ #if defined(_WIN32)
+@@ -119,7 +127,7 @@
+     filter += Widen(f.patterns);
+     filter.push_back(L'\0');
+   }
+-  filter += L"All files";
++  filter += Widen(Translate("All files"));
+   filter.push_back(L'\0');
+   filter += L"*.*";
+   filter.push_back(L'\0');
+@@ -150,7 +158,7 @@
+     zenity += " --file-filter=" + ShellQuote(f.name + " | " + pats);
+     kpatterns += (kpatterns.empty() ? "" : " ") + pats;
+   }
+-  zenity += " --file-filter=" + ShellQuote("All files | *") + " 2>/dev/null";
++  zenity += " --file-filter=" + ShellQuote(std::string(Translate("All files")) + " | *") + " 2>/dev/null";
+   bool ran = false;
+   std::string s = RunDialog(zenity, ran);
+   if (ran) return s;

@@ -2,13 +2,15 @@
 // API: "ping" is answered by the runtime without waking the object, and every socket's state is its attachment.
 import { DurableObject } from 'cloudflare:workers';
 
-import { COUNTRY_HEADER, handleAdmin, internalMetricsRoute, isAdminPath, limitedCount } from './admin.js';
+import { COUNTRY_HEADER, handleAdmin, internalIncidentRoute, internalMetricsRoute, isAdminPath, limitedCount } from './admin.js';
 import { handleUpgrade } from './edge.js';
-import { Lobby, LIMITS, PROTOCOL, listReports } from './lobby.js';
+import { INCIDENT } from './incidents.js';
+import { Lobby, PROTOCOL } from './lobby.js';
 
 class WorkerConn {
-  constructor(ws) {
+  constructor(ws, ctx) {
     this.ws = ws;
+    this.ctx = ctx;
   }
 
   attachment() {
@@ -35,6 +37,11 @@ class WorkerConn {
     return this.ws.bufferedAmount;
   }
 
+  // The runtime answers "ping" by itself and only remembers when.
+  keepaliveAt() {
+    return this.ctx.getWebSocketAutoResponseTimestamp(this.ws)?.getTime() ?? 0;
+  }
+
   close(code, reason) {
     this.ws.close(code, reason);
   }
@@ -54,8 +61,9 @@ export class LobbyObject extends DurableObject {
           run: (query, ...args) => {
             sql.exec(query, ...args);
           },
+          transaction: (work) => ctx.storage.transactionSync(work),
         },
-        sockets: () => ctx.getWebSockets().map((ws) => new WorkerConn(ws)),
+        sockets: () => ctx.getWebSockets().map((ws) => new WorkerConn(ws, ctx)),
         now: () => Date.now(),
         setAlarm: (ms) => ctx.storage.setAlarm(ms),
         log: (text) => console.log(text),
@@ -64,9 +72,15 @@ export class LobbyObject extends DurableObject {
   }
 
   async fetch(request) {
-    const url = new URL(request.url);
-    if (url.pathname === '/reports') {
-      return Response.json(listReports(this.lobby.host.sql, 100), { headers: { 'X-Content-Type-Options': 'nosniff' } });
+    const incident = internalIncidentRoute(request);
+    if (incident?.kind === 'list') return Response.json(this.lobby.incidentList());
+    if (incident?.kind === 'one') {
+      const found = this.lobby.incidentForAdmin(incident.ticket);
+      return found ? Response.json(found) : new Response('Not found', { status: 404 });
+    }
+    if (incident?.kind === 'status') {
+      const saved = this.lobby.setIncidentStatus(incident.ticket, await request.json());
+      return saved ? Response.json(saved) : new Response('Not found', { status: 404 });
     }
     const metrics = internalMetricsRoute(request);
     if (metrics?.kind === 'summary') return Response.json(this.lobby.metricsSummary());
@@ -85,18 +99,18 @@ export class LobbyObject extends DurableObject {
 
   webSocketMessage(ws, message) {
     if (message instanceof ArrayBuffer) {
-      this.lobby.relay(new WorkerConn(ws), new Uint8Array(message));
+      this.lobby.relay(new WorkerConn(ws, this.ctx), new Uint8Array(message));
       return;
     }
-    if (typeof message !== 'string' || message.length > LIMITS.reportFrameBytes) {
+    if (typeof message !== 'string' || message.length > INCIDENT.frameChars) {
       ws.close(1009, 'text frames up to the size limit only');
       return;
     }
-    this.lobby.message(new WorkerConn(ws), message);
+    this.lobby.message(new WorkerConn(ws, this.ctx), message);
   }
 
   webSocketClose(ws, code) {
-    this.lobby.closed(new WorkerConn(ws));
+    this.lobby.closed(new WorkerConn(ws, this.ctx));
     try {
       ws.close(code === 1005 ? 1000 : code, 'closed');
     } catch {
@@ -105,7 +119,7 @@ export class LobbyObject extends DurableObject {
   }
 
   webSocketError(ws) {
-    this.lobby.closed(new WorkerConn(ws));
+    this.lobby.closed(new WorkerConn(ws, this.ctx));
   }
 
   alarm() {
@@ -122,17 +136,18 @@ export default {
         if (!r.ok) throw new Error(`lobby answered ${r.status}`);
         return r.json();
       });
+      const report = (path, init) => stub.fetch(`https://lobby.internal${path}`, init).then((r) => {
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error(`lobby answered ${r.status}`);
+        return r.json();
+      });
       return handleAdmin(request, env, {
         summary: () => internal('/metrics/summary'),
         history: (days) => internal(`/metrics/history?days=${days}`),
+        incidents: () => internal('/incidents'),
+        incident: (ticket) => report(`/incidents/${ticket}`),
+        setIncidentStatus: (ticket, change) => report(`/incidents/${ticket}/status`, { method: 'POST', body: JSON.stringify(change) }),
       }, (text) => console.log(text));
-    }
-    if (url.pathname === '/reports') {
-      const token = env.REPORTS_TOKEN;
-      if (!token || request.headers.get('Authorization') !== `Bearer ${token}`) {
-        return new Response('Not found', { status: 404 });
-      }
-      return stub.fetch(request);
     }
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') return handleUpgrade(request, env, stub);
     return Response.json({ service: 'dcp-lobby', proto: PROTOCOL }, { headers: { 'X-Content-Type-Options': 'nosniff' } });

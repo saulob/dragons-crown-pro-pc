@@ -16,8 +16,9 @@ From the repository root on Windows, with Edge installed:
   "file:///$((Resolve-Path assets/launcher/header-art.svg).Path -replace '\\','/')"
 ```
 
-The launcher draws the PNG over its header gradient, anchored to the header's top-right corner at the
-full header height; the SVG's empty left side is what keeps the title readable.
+The launcher draws the PNG over its header gradient, anchored to the header's right edge, and the header clips its
+top and bottom (`launcher/header_art.h`, which also sets its scale and brightness); the SVG's empty left side is what keeps the title readable. Do not draw it
+as one quad: SDL's software renderer, which the launcher uses on Windows, drops triangles that big.
 
 # Sponsor heart
 
@@ -31,3 +32,9 @@ rsvg-convert -w 64 -h 64 -f png -o assets/launcher/sponsor-heart.png assets/laun
 ```
 
 The launcher draws it before the button label, as a square slightly taller than the label's text.
+
+# Page icons
+
+`icons/` holds the sidebar's ten SVGs, the source of truth, with one file per page and no rendered copies. They are
+compiled into the launcher (`launcher/page_icons.cpp`), so they ship in no package as loose files. `icons/SOURCES.md`
+records where each one came from and its license.

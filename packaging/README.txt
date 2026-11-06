@@ -17,9 +17,11 @@ Crown Pro PS4 package (.pkg). This port runs these releases:
   US:                 Title ID CUSA10454, versions 1.00 (the base package) and 1.01 (the base package, then the update)
   Japan:              Title ID CUSA07001, versions 1.00 (the base package), 1.02 and 1.03 (the base package, then the update)
   Asia, Hong Kong:    Title ID CUSA10209, versions 1.00 (the base package) and 1.02 (the base package, then the update)
+  Europe:             Title ID CUSA10487, version 1.03 (one complete package, APP_VER 01.00, VERSION 01.03)
 
-Any other version is refused with "Different version of Dragon's Crown Pro". The USA 1.01 update and the Japanese and
-Asia, Hong Kong releases are not yet fully tested; their cheats and Xbox controller prompts are not available.
+Any other version is refused with "Different version of Dragon's Crown Pro". The USA 1.01 update and the Japanese,
+Asia, Hong Kong and European releases are not yet fully tested. The European build comes from one reporter's package
+and has not been played yet; a copy dumped or re-wrapped differently is refused until it is reported.
 A package still encrypted for a PS4 console cannot be unpacked on a PC.
 
 
@@ -28,8 +30,8 @@ REQUIREMENTS
 - Windows 10 version 1903 or later, or Windows 11, 64-bit
 - A processor with AVX: Intel Core 2nd generation (Sandy Bridge), AMD FX or
   newer. The LZCNT, MOVBE and BMI1 instructions some of these lack are handled
-  in software (without LZCNT, the USA 1.01 and Asia/Hong Kong 1.02 builds do
-  not start yet)
+  in software (without LZCNT, the USA 1.01 and Asia/Hong Kong 1.02 builds
+  start only when the check of their LZCNT instructions at start passes)
 - A graphics card and driver with Vulkan 1.3, VK_EXT_robustness2,
   VK_KHR_push_descriptor and VK_EXT_vertex_attribute_divisor
 - Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next
@@ -81,14 +83,23 @@ PLAYING
 - Local multiplayer: up to four players, one controller each; the keyboard is always
   Player 1's. A controller connected later takes the lowest free player slot, and a
   player stays logged in when their controller is unplugged.
-- Online Co-op (new in v0.9.0): turn on Online Play on the launcher's Online
-  page (Off by default) to meet friends through a small online service; the
+- Online Co-op: turn on Online Play on the launcher's Online page (Off by
+  default) to meet friends and, if you choose, other players in the Lobby
+  through a small online service; the
   game traffic goes directly between the players' PCs, or through the online
   service for a pair that cannot connect directly. Cheats are off while it
   is on. F3 shows the Ping during Online Play, F2 the frame counter.
 - The game itself unlocks online play only after the opening tutorial and story
   section. To get there faster, turn on Gameplay > Story Skip Offer and
   Tutorial Skip Offer before creating a new character.
+- Discord Rich Presence shows your class, level, current place and party in
+  your Discord status while the Discord desktop app runs. Discord shows it to
+  whoever can see your status. To turn it off, add discord_presence = off to
+  user/dcp.ini.
+- Brazilian Portuguese covers game text, menus, subtitles, the launcher and the
+  F1 options on the CUSA10454 1.00 USA build. It is based on the work of
+  Marcelo - Uma Ficha (https://www.youtube.com/@umaficha1), used with
+  permission. Character speech bubbles, credits and trophies stay in English.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
 - An experimental AMD water workaround (black areas under characters standing
@@ -112,7 +123,8 @@ download. When updating the port, keep "user" (and "game", to skip
 reinstalling). Versions before 0.7.0 were started with dcp-loader.exe;
 delete that file and use dragons_crown_pro.exe instead.
 
-If the game does not start or crashes, please attach the newest
+If the game does not start or crashes, please send a report from the launcher's
+Bug Report page (Open preview shows exactly what goes out), or attach the newest
 dragons_crown_pro_*.log file from the "logs" folder to a report at
 https://github.com/saulob/dragons-crown-pro-pc/issues
 

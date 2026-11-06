@@ -519,7 +519,7 @@ void RoomGone(uint16_t event) {
 
 Json HelloBody() {
     const Settings& s = settings();
-    return net::hello_body(s.identity, s.name, s.game, true, true);
+    return net::hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible);
 }
 
 // ---- lobby messages ----
@@ -650,7 +650,7 @@ void OnEvent(const net::LobbyMessage& m) {
         const Member joined = MemberOf(b["member"]);
         g.members[joined.id] = joined;
         Remember(joined.name, b["member"]);
-        std::printf("Matching2: member 0x%x (%s) joined\n", joined.id, joined.name.c_str());
+        std::printf("Matching2: member 0x%x joined\n", joined.id);
         uint8_t* data = block->alloc(0x20);
         Wr<uint8_t*>(data, 0, MemberStruct(*block, joined));
         PushRoomEvent(kRoomMemberJoined, block, data);
@@ -1298,6 +1298,12 @@ void friends_fetch() {
     g.friends_busy = true;
     const uint32_t seq = g.link->request("friends.list", Json::Object());
     g.pending[seq] = Pending{Kind::kFriends, 0, nullptr, nullptr, 0};
+}
+
+RoomView room_view() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g.room) return {};
+    return {party::MemberSlot(g.me), int(g.members.size())};
 }
 
 PageLink page_link() {

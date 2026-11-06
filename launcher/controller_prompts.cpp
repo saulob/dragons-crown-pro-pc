@@ -171,7 +171,7 @@ bool XboxPromptsAvailable(const std::filesystem::path& app0, const GameBuild& bu
     if (!build.xbox_prompts) {
         return false;
     }
-    if (!BaseBuildOf(build)) {
+    if (!BaseBuildOf(build) && !build.check_prompt_fit) {
         return true;
     }
     const std::optional<BlockPatch> patch = ParseBlockPatch(xbox_patch);

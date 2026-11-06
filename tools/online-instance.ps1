@@ -40,6 +40,7 @@ $GameBuilds = [ordered]@{
     'CUSA07001-1.03' = @{ Folder = 'CUSA07001-1.03'; Label = 'CUSA07001 1.03 Japan' }
     'CUSA10209-1.00' = @{ Folder = 'CUSA10209-1.00'; Label = 'CUSA10209 1.00 Asia/Hong Kong' }
     'CUSA10209-1.02' = @{ Folder = 'CUSA10209-1.02'; Label = 'CUSA10209 1.02 Asia/Hong Kong' }
+    'CUSA10487-1.03' = @{ Folder = 'CUSA10487-1.03'; Label = 'CUSA10487 1.03 Europe' }
 }
 
 # The executable's game folders, as launcher/paths.cpp finds them: the repository's for a build-tree executable.
@@ -118,7 +119,7 @@ try {
     Write-Host "  logs:        $logs"
     # -WhatIf resolves and prints all of the above and starts nothing (tests/online_instance_tests.ps1).
     if ($PSCmdlet.ShouldProcess($Executable, "Start test instance $Name")) {
-        # The development build loads SDL3, FreeType, libpng, libc++ and the other DLLs from the toolchain, as tools\build.ps1 -Run does.
+        # For a build older than the DLLs staged beside the executable.
         $tc = Resolve-Toolchain 'auto'
         $env:PATH = "$($tc.Bin);$env:PATH"
         Start-Process -FilePath $Executable -ArgumentList @('--user', "`"$user`"", '--logs', "`"$logs`"", '--launcher') -WorkingDirectory (Split-Path -Parent $Executable)

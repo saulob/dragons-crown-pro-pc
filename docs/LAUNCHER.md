@@ -49,15 +49,15 @@ and `--logs` win, and everything else is found next to the executable (`launcher
 | User data, `dcp.ini` | `user` | `<repository>\user` |
 | Logs | `logs` | `<repository>\build\logs` |
 
-`<build>` is `v1.03` or `CUSA10454-1.01` for CUSA10454 (USA), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
-`CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
+`<build>` is `v1.03` or `CUSA10454-1.01` for CUSA10454 (USA), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan),
+`CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong) and `CUSA10487-1.03` for CUSA10487 (Europe). Each build has its own folders. With several installed, the one
 selected last is active. Selecting a package makes its exact build active: a complete prepared folder of it is activated
 without copying, and only the build that is already active is reported as up to date.
 
 The settings file is always `<user>\dcp.ini`; the loader hands its path to the launcher and the video core. The
 correctness defaults (draw preparation workers 0, asynchronous shaders off, vertex descriptor validation, linear image
 readbacks, the stick dead zone) are code, and the environment cannot change them (docs/GRAPHICS.md).
-`tools\build.ps1 -Run` starts the executable with no folder arguments: it resolves the development folders itself.
+Started with no folder arguments, the development executable resolves the development folders itself.
 
 The loader writes the one numbered log itself, `logs\dragons_crown_pro_NNN.log` (the next free number, never an
 existing file) in the folder above, and echoes it to the standard output the process started with, when it has one
@@ -72,8 +72,7 @@ existing file) in the folder above, and echoes it to the standard output the pro
 | Valid | Off | the game starts directly |
 | Any | any, with Shift held or `--launcher` | the launcher opens |
 
-On Linux Shift is read from the X11 server; in a Wayland session start with `--launcher` instead (see [Linux port](LINUX.md)). `--dcp-skip-launcher` skips it once for valid game files (automated runs: `tools\build.ps1 -Run -TimeoutSeconds N` adds
-it). `--check-imports` and `--cpu-only` never open it. The launcher is the only recovery path, so it cannot be hidden
+On Linux Shift is read from the X11 server; in a Wayland session start with `--launcher` instead (see [Linux port](LINUX.md)). `--dcp-skip-launcher` skips it once for valid game files. `--check-imports` and `--cpu-only` never open it. The launcher is the only recovery path, so it cannot be hidden
 while the game files are not valid. If its window cannot be opened, the game starts when the files are valid.
 
 ## Game files
@@ -85,7 +84,7 @@ while the game files are not valid. If its window cannot be opened, the game sta
    regional archive, or `none`.
 2. `game\prepared\<build>\.dcp_view.json`: the build's version and scope `full` (written last by the installer, or by
    `prepare_game.py`).
-3. The shared files, the build's regional archive (`DRACRO_US.CPK`, `DRACRO_PATCH_JP.CPK` or `DRACRO_CK.CPK`, none for
+3. The shared files, the build's regional archive (`DRACRO_US.CPK`, `DRACRO_PATCH_JP.CPK`, `DRACRO_CK.CPK` or `DRACRO_EU.CPK`, none for
    Japanese 1.00) and its update files (`sce_discmap_patch.plt` for Japanese 1.02 and 1.03) are present and not empty.
    The archives are not hashed: the marker records that their extraction finished (and the Controller prompts setting
    appends to them, see Controls).
@@ -114,6 +113,13 @@ update changes, so 1.03 does not need 1.02.
 different `eboot.bin` files. An update needs the 1.00 folder to be installed; the launcher says so
 otherwise.
 
+**European build.** `EP2475-CUSA10487_00-DRAGONSCROWNPRO1` (CATEGORY `gd`, APP_VER 01.00, VERSION 01.03) is one complete
+package, installed into `CUSA10487-1.03`, with `DRACRO_EU.CPK` as its regional archive. It has no update and needs no
+`sce_discmap_patch.plt`. The build is named by its VERSION, which is how it is known; its APP_VER and VERSION are the same
+as USA 1.00's, and the title tells them apart. The hash covers the whole `eboot.bin` file as the package holds it, signed
+wrapper included, so a copy of the same game re-wrapped by a dump or packaging tool has another hash and is diagnosed as an
+unknown executable.
+
 **Update archives.** A finished update is its base plus the update. An archive (`.CPK`) that the update holds and that
 lacks some entries of the base's archive at the same path is composed, not swapped: the staged game gets a copy of the
 base's archive with every entry of the update's laid over it (the USA 1.01 regional archive keeps the base's language
@@ -123,18 +129,23 @@ only read, and a failed step leaves the active build as it was.
 **Features by build.** Every build offers every feature of USA 1.00; Japanese NPC Voices is not applicable to the
 Japanese builds, whose NPCs already speak Japanese:
 
-| Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 |
-| --- | --- | --- | --- | --- | --- |
-| Menu & Subtitles | 5 Western | 5 Western | Japanese | Chinese, Korean | Chinese, Korean |
-| Render resolution, Aspect Ratio | yes | yes (sites found by signature) | yes | yes | yes (sites found by signature) |
-| True Ultrawide | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
-| Story and Tutorial Skip Offers | yes | yes (found by signature) | yes | yes | yes (found by signature) |
-| Online Play, System type | yes | yes (found by signature) | yes | yes | yes (found by signature) |
-| Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) |
-| Cheats | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
-| Japanese NPC Voices | yes | yes (found by signature) | not applicable | yes (found by signature) | yes (found by signature) |
-| Xbox prompts | yes | yes, when its archives hold the patch's files | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK`, when it holds the patch's file |
-| Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes |
+| Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 | Europe 1.03 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Menu & Subtitles | 5 Western | 5 Western | Japanese | Chinese, Korean | Chinese, Korean | 5 Western |
+| Render resolution, Aspect Ratio | yes | yes (sites found by signature) | yes | yes | yes (sites found by signature) | yes (sites found by signature) |
+| True Ultrawide | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Story and Tutorial Skip Offers | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
+| Online Play, System type | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
+| Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
+| Cheats | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Japanese NPC Voices | yes | yes (found by signature) | not applicable | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Xbox prompts | yes | yes, when its archives hold the patch's files | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK`, when it holds the patch's file | yes, when its archives hold the patch's files |
+| Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes | yes |
+
+"yes" here says the build offers the feature and the loader can try it, not that it was seen working. USA 1.01, Asia and
+Hong Kong 1.02 and Europe 1.03 have no local executable: `tools\test.ps1` reports what stands behind each feature on each
+build and prints DATA UNAVAILABLE where nothing does. Installing or selecting one of these builds writes a read-only
+`Dragon's Crown Pro build site report` to the log, with what the scan and the loader's searches find in its real executable.
 
 "Found by signature" means the loader does not use a table: it finds each site in the build's own image from
 the byte patterns that give exactly the tables of the five builds checked locally, uses them only when every pattern
@@ -203,15 +214,16 @@ does. Both write byte-identical files from the game's package.
 | Page | Setting | When it applies |
 |---|---|---|
 | Display | Display mode (also F11), VSync | at once |
+| Display | Aspect Ratio (also saves the window width that goes with it), True Ultrawide | saved now, applies at the next start; shown only for builds that support them |
 | Graphics | Presentation, Upscaling (FSR 1), Sharpening, Sharpening strength, Anti-aliasing | at once |
-| Graphics | Texture filtering | saved now, applies at the next start |
+| Graphics | Renderer, Render resolution (builds that support it), Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
-| Gameplay | Skip Intro, Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
+| Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
 
-Window size, Monitor, Aspect Ratio, Render resolution, True Ultrawide, Graphics card, language, voices, Arachnophobia Safe Mode, keyboard bindings and controller prompts stay in the launcher, and the pages say so. A setting that applies at the next start shows "(restart)" and the footer reminds you; there is no restart button, so close and start the game again. Keyboard: Up / Down rows, Left / Right values, Enter changes, Q / E or Tab pages, Escape closes. Controller: D-pad or left stick moves, A changes, LB / RB pages, B closes. The mouse works too. While it is open the game reads neutral input; closing it waits until what was pressed in it is released (one second at most), and `runtime_pad.c` hides L3 and R3 together from the game and any button still held afterwards, so the opening and closing presses never reach the game.
+Window size, Monitor, Graphics card, language, Arachnophobia Safe Mode, controller prompts, keyboard bindings, Allow overlay programs, detailed logging and the Online settings stay in the launcher: they size the window, enumerate devices, rewrite installed archives or change how the game process starts, and the pages say so. A setting that applies at the next start shows "(restart)" and the footer reminds you; the Renderer is chosen when the video core starts and cannot be switched in a running game, and the game has no restart of its own, so close it and start it again. Keyboard: Up / Down rows, Left / Right values, Enter changes, Q / E or Tab pages, Escape closes. Controller: D-pad or left stick moves, A changes, LB / RB pages, B closes. The mouse works too. While it is open the game reads neutral input; closing it waits until what was pressed in it is released (one second at most), and `runtime_pad.c` hides L3 and R3 together from the game and any button still held afterwards, so the opening and closing presses never reach the game.
 
 With Online Play on the Online page takes the place of the Cheats page, which does not exist then: the cheats stay locked in `runtime_cheats` as for F10. The Online page shows a copy of what the game's own lobby connection knows (`page_link` in `src/runtime_matching2.cpp`, taken for the overlay by `runtime_online_page_update`): the Online name as the game uses it, the account's friend code, the friends with the launcher's status words (Offline, Online, Online, in a room, Incompatible) and the Connection test, the same `net::run_connection_test` as the launcher's but on any free UDP port, since the game holds its own, run on a worker thread when you select **Run test**. The page only reads: it never turns Online Play on or off, connects, reconnects or refreshes anything, so what it shows is what the game's own Online runtime already has (the friend list appears once the game has loaded it). Only **Run test** touches the network. Online Play itself, the Online name and friend management (adding, removing, accepting and declining) stay in the launcher. On a build without the cheat hooks, with Online Play off, the Cheats page is there and its rows read "Unavailable".
 
@@ -281,8 +293,8 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. In those narrower shapes the port skips the one draw that painted black rectangles in water (issue #32); 16:9 and wider are untouched. The HUD, menus and
   prerendered videos are not adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
   of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
-  Every supported build offers every shape (see Render resolution for how the USA 1.01 and Asia and Hong Kong 1.02 sites
-  are found).
+  Every supported build offers every shape (see Render resolution for how the USA 1.01, Asia and Hong Kong 1.02 and
+  Europe 1.03 sites are found).
 - **True Ultrawide** (experimental, Off by default; `true_ultrawide` in `dcp.ini`, a missing or unknown value is Off): with
   21:9 or 32:9 the game draws more of the world instead of stretching it. The vertical view stays the one of 16:9 and the
   horizontal view grows by the render target's shape over 16:9 (× 1.3125 for 21:9, × 2 for 32:9), so characters and
@@ -296,9 +308,15 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   frame edges, other message bands keep their 16:9 width, and the town map is scaled up evenly to fill the width (at
   32:9 only as far as its markers stay on screen, with black beyond). The row is disabled for the other shapes, where it
   changes nothing. Off gives back the Aspect Ratio's own picture exactly. It is available on
-  every supported build; on CUSA10454 1.01 and CUSA10209 1.02 its sites are found by signature, and if any of them does
+  every supported build; on CUSA10454 1.01, CUSA10209 1.02 and CUSA10487 1.03 its sites are found by signature, and if any of them does
   not resolve the feature stays off and the log says which.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
+- **Renderer**: Vulkan (the default), Auto, OpenGL (experimental) or, on Windows, Direct3D 11 (experimental). Auto uses
+  Vulkan and falls back to OpenGL when this system cannot run Vulkan; a renderer chosen by name starts or fails as itself.
+  Saved as `renderer=vulkan`, `auto`, `opengl` or `d3d11` in `dcp.ini`; a missing or unknown value is Vulkan, and so is
+  `d3d11` on Linux. It takes effect the next time the game starts, and the log shows
+  `Renderer: selected <setting>, active <backend>`. See docs/GRAPHICS.md for what OpenGL does not render yet, and
+  docs/d3d11-renderer.md for Direct3D 11.
 - **Graphics card**: each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
   name. The first listed device is the default. A name that is not there any more, or not usable, falls back to the first
@@ -327,7 +345,7 @@ RCAS, on) with a
 
 The game chooses its display render targets with `mov reg, imm32` of 1920 / 3840 and 1080 / 2160, picked by
 `sceKernelIsNeoMode`. Each supported build with verified sites has its own 23 of them (`launcher/game_profile.cpp`); the
-USA 1.01 and Asia and Hong Kong 1.02 builds have no table and find their 23 in their own image by the instruction context
+USA 1.01, Asia and Hong Kong 1.02 and Europe 1.03 builds have no table and find their 23 in their own image by the instruction context
 of each site (`dcp_render_size_signatures`, `launcher/resolution_probe.c`), which gives exactly the table of every build
 that has one. All 23 must be found once, with the original instruction and without overlap, or the game does not start
 with a custom size. The loader refuses to patch a build the launcher does not know. Unless the render target is
@@ -371,19 +389,26 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   | Build | Languages |
   | --- | --- |
-  | CUSA10454 1.00 USA | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
-  | CUSA10454 1.01 USA | English, French, German, Italian, Spanish, as 1.00 |
+  | CUSA10454 1.00 USA | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
+  | CUSA10454 1.01 USA | English, French, German, Italian, Spanish: as 1.00 without Portuguese (Brazil) |
   | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese (`japanese`): the executable does not read the system language |
   | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean (`traditional_chinese`, `korean`) |
+  | CUSA10487 1.03 Europe | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
 
-  For the USA and Asia/Hong Kong builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
-  `DRACRO_CK.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
+  Portuguese (Brazil) is the port's own translation of the English slot, for CUSA10454 1.00 USA only (not 1.01 or the
+  Japanese, Asia/Hong Kong or European builds). It covers the game text, the launcher, the F1 options, the F10 overlay,
+  the online screens and runtime visual replacements; the installed archive is never written. Still English: the
+  DefaultBone dialogue, trophy text, some baked visual labels and the credits. See `localization/pt-BR/README.md`.
+
+  For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
+  `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
   is never offered: the 1.01 update's archive has no Russian slot, only Russian text in its US slot, which the install
-  does not take over (see USA builds). When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
+  does not take over (see USA builds). `DRACRO_EU.CPK` has a UK slot beside the US one, as `DRACRO_US.CPK` does; it is
+  not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
-- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). USA and Asia and Hong Kong builds; on the builds
+- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). USA, Asia and Hong Kong and European builds; on the builds
   whose hooks are found by signature the option appears only while the installed `DRACRO.CPK` holds the sound table and
   the Japanese banks (`launcher/npc_voice_resources.h`), and it never changes the Menu & Subtitles language. It is hidden
   for the Japanese builds, which already use the Japanese NPC voices. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
@@ -426,7 +451,8 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   `DCP_JAPANESE_MENU_BUTTONS` overrides it for a run). The setting picks the menu layout the same way in every build and
   with every text language. Off: Cross confirms and Circle cancels (A and B with Xbox prompts). On: Circle confirms and
   Cross cancels (B and A). The game has one "Cross confirms" setting that its key setup and some button pictures read.
-  The USA builds start with it set, so On zeroes the two places that set it; the Japanese and the Asia and Hong Kong
+  The USA builds start with it set, so On zeroes the two places that set it (the European build's are found by
+  signature, not yet proven on its executable); the Japanese and the Asia and Hong Kong
   builds start with it clear, so Off makes their five readers see it set. Every site is checked byte for byte first and
   nothing is written on a mismatch (the log says why). The row's description names A and B instead of Cross and Circle
   when the Xbox controller prompts are installed, and follows the Controller prompts choice as soon as it is applied;
@@ -451,7 +477,7 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   byte first and nothing is written on a mismatch (the log says why). The log shows
   `Unlock Gallery: on, 57 legitimate entries exposed (<build>)` when installed and `Unlock Gallery: off` otherwise.
   Changing it in the F1 Options menu needs a restart. The launcher hides the row for a build whose profile does not
-  list the Gallery list builder; all seven supported builds do. The builder is found by its code, so a build whose code
+  list the Gallery list builder; all eight supported builds do. The builder is found by its code, so a build whose code
   differs gets the log line `Unlock Gallery: requested but unavailable ...` and the Gallery stays as the save has it.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
   recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
@@ -520,7 +546,8 @@ in the installed game files: Xbox applies a block patch to the archives that hol
 (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. USA 1.01 offers Xbox only while its
 finished archives hold every file the patch was made for (or its patched result): each is read and its CRC checked when
 the launcher starts or the build changes, and an update that changed one of them shows PlayStation only, with nothing
-written. The Japanese and Asia and Hong Kong 1.02 updates are checked the same way, and an archive holding a button atlas
+written. The Japanese and Asia and Hong Kong 1.02 updates and the European build, whose atlases were never read here, are checked
+the same way, and an archive holding a button atlas
 the patch does not cover is refused. Their `stage/Interface.ftx` is the same file as the USA one; the translated
 touchpad wording of the Western message sheets has no counterpart in their own sheets.
 The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the
@@ -556,6 +583,45 @@ A hidden trophy that is still locked shows "Hidden Trophy" and no description. W
 "Install a supported game to view its trophies."; when the list is encrypted and no valid Trophy Key is configured it shows Enter Trophy Key and Import from shadPS4... buttons, and with a key a "Trophy Key: Configured" row with Change... and Remove. The list scrolls inside the page.
 The page reads the same files the game writes. See [TROPHIES.md](TROPHIES.md).
 
+## Bug Report
+
+Subtitle "Report a problem and send it with one game log.". The page sits before About, keeps its content clear of the page
+scrollbar, and has four steps:
+
+1. **Report the problem**: 10 to 500 characters, with a live count; spaces around the text do not count toward the minimum.
+   The text stays while the launcher is open, also after a failed send.
+2. **Choose one game log**: this launcher's own log first, then the newest logs in the logs folder by modification time, five
+   at most, each with its date and size, and one radio choice. Left out are other files and sessions that closed in the launcher
+   without starting the game, so opening the launcher does not push a real log off the list. A session that ended without
+   closing the launcher stays: that is a launcher crash. **View selected log**, in the empty cell of the selected log's details, opens it.
+   The launcher's own log is labelled **Current launcher session**. The newest other log in which the game's own code ran
+   (`Runtime: guest thread`) is labelled **Last gameplay**. The launcher closes when the game starts, so a running log holds no
+   gameplay today; if one did it would read **Current session · Launcher + gameplay** and no other log would be Last gameplay.
+   Every other log that reached the game's code reads **Gameplay session**, and every other launcher-only log reads
+   **Launcher only**; a session that started the game without reaching its code has no label. Every label is
+   drawn in the theme's accent colour.
+   The newest log that started the game is selected by default (`DefaultGameLog`), so a game that failed before its code ran is
+   chosen over an older session that played. Without one, the newest log other than the launcher's own; failing that, its own.
+3. **Preview** (optional): **Open preview** builds the report (`BuildIncidentPackage`, `launcher/incident_report.cpp`) and shows
+   it in full; **Close preview** hides it. The last 256 KiB of the log are filtered (`launcher/log_scrubber.cpp`), then its last
+   64 KiB are kept, from a whole line on. Changing the description or the log closes the preview, and opening it again rebuilds it.
+4. **Send report**: sends the open preview, or builds the same report through the same path when none is open. A description that
+   is too short does not send: the field takes the focus, flashes, and "Please describe the problem, minimum 10 characters" appears beside the
+   count. The page scrolls down to the sending message and again to the result, which stays on the page: the Report ID, or a rate limit, connection, refused or service message; after a failure
+   the text stays and Send report tries again.
+
+5. **My reports** lists the reports this PC sent, newest first, from `user/bug_reports.json` (`launcher/report_history.cpp`, saved
+   through a new file moved into place; a damaged file is set aside as `.damaged`). Each row shows the report ID, a preview, the
+   status (with the fixed version on a Fixed report) and the date. **View details** expands that report in place, as one framed
+   item that holds its summary, its facts (status, fixed version, the developer's message), **What was sent**, which reads the stored
+   report back, and **Remove from this PC**, which deletes only the local entry. Only one report is open at a time, and **Hide details**
+   closes it. **Refresh** sits at the top right of the section.
+   The statuses are checked at startup, when the page opens and on **Refresh**, off the UI thread and silently when offline. A
+   change marks the report **Updated** and puts a dot on the sidebar entry, until the report is opened. If the list cannot be saved
+   the report still counts as sent: the Report ID shows normally with a short note.
+
+The request and the privacy rules are in [ONLINE.md](ONLINE.md#bug-reports). Online Play does not have to be on.
+
 ## Launcher input
 
 Mouse, keyboard (arrows, Enter = Play, Alt+F4 = Quit, Ctrl+S = Save) and controller (D-pad or left stick, A, B, Start =
@@ -567,6 +633,26 @@ SDL3 runs the process per-monitor-v2 DPI aware (also declared in the manifest). 
 scaled by the display's content scale and capped to 90% of the usable area, so at 225% it is 2880 × 1620 pixels on a
 4K display. Window sizes are real pixels. A saved launcher position that no display shows any more is ignored and the
 window is centred on the primary display.
+
+Sizes are logical pixels, kept together in `trg::layout` (`gpu/patches/trg-launcher/0006-compact-layout.patch`): text sizes,
+the 34 control height, row spacing, and the header, sidebar and footer. Geometry is multiplied by `Ui::scale()` and text
+is scaled by `PushFont`, so there is no second scaling path. A row's control sits in a fixed right-hand column
+(`ControlColumnWidth`), and `Ui::RowLeft` and `Ui::RowControl` split a row that needs extra lines under its help text.
+The update banner takes its place from the same header height.
+
+Sidebar icons are the SVGs of `assets/launcher/icons`, compiled in by `launcher/embed_files.cmake`. `launcher/page_icons.cpp`
+maps each `PageId` to its file and optical scale and rasterizes with nanosvg at the exact pixel size; the launcher caches one
+texture per page and size, and the sidebar tints it. A page whose icon fails keeps its row, with one line in the log.
+
+Sidebar labels and footer text are centred on their capitals, measured from the active font, so Segoe UI and DejaVu sit
+the same way. The footer's shortcuts come from `LauncherConfig::hints`, two spaces inside a shortcut and more between
+shortcuts, and its helper text from `note`, one sentence per line. The metrics are in `trg/layout.h`
+(`gpu/patches/trg-launcher/0008-sidebar-footer-alignment.patch`), with `Theme::border_row` and `Theme::border_panel` for
+passive lines (`0009-visual-polish.patch`); interactive controls keep their stronger colours.
+
+A frame draws one page: `GoToPage` only records the request and `Launcher::Frame` applies it before anything is drawn
+(`gpu/patches/trg-launcher/0007-coherent-page-frames.patch`). Each page has its own scroll window, so it keeps its scroll
+position.
 
 ## Logging
 
@@ -598,9 +684,35 @@ these logs, creating it first when it does not exist yet.
 touches `user\` (settings go to a temporary folder). `dcp-launcher-tests.exe --check-game <app0> <image dir>` prints the
 game file state of real folders without writing anything.
 
+## Launcher UI gate
+
+`tools\test.ps1` protects the launcher's structure and geometry, not its look. No window opens and nothing is compared
+pixel by pixel. Its "Launcher UI" summary has one row per group:
+
+| Row | Where | Checks |
+|---|---|---|
+| Core tests | `dcp-launcher-tests`, relinked on every run | every launcher test; the exit code and the check count |
+| SVG icons | `TestPageIcons` | the ten expected icons, one `PageId` each, the embedded copy equal to the file, nothing read from the source tree at run time |
+| Icon and NanoSVG licenses | `TestIconLicenses` | `SOURCES.md` and `THIRD-PARTY-LICENSES.txt`: the Display attribution, eight CC0 rows, vendored NanoSVG with its license in both packages |
+| Header art | `TestHeaderArt` | assets and package inclusion; one size-matched texture rebuilt only on a size change; strips, never one quad, at the supported scales; right anchoring and no overlap with the branding |
+| DPI/layout | `TestChromeLayout`, `TestLauncherDpiLayout`, `TestFooterAndCards` | sidebar fit, control column, scrollbar gutter, separator endpoint, footer, About card and friend code at 100, 150 and 225 percent |
+| Scrollbar stability | `TestStablePageWidth`, `TestScrollbarSettling` | width, control column, wrap width and separator end identical before and after the scrollbar shows, and after a resize |
+| Separators/row spacing | `TestRowSeparators`, `TestSeparatorPages`, `TestRowRhythm`, `TestRowKinds` | full-width lines independent of the column clip, theme-only border colours, short, wrapped and control rows |
+| Sidebar EN/PT-BR | `TestSidebarProportions`, `TestSidebarLabels` | labels (longest: Jogabilidade), clamp, nine rows without a scrollbar, width handed to the page |
+| Navigation coherence | `TestPageNavigation` | one commit per frame, no mixed frames under rapid requests, one scroll window per page |
+| TRG patch chain | `tests\launcher_gate_tests.ps1` | the series applies to the pinned revision in a scratch clone, and equals the checkout the tests read |
+| Compiler warnings | `tests\launcher_gate_tests.ps1` | the launcher sources and `launcher_tests.cpp`, syntax-only with the build's own `-Wall -Wextra`: zero warnings |
+| Windows/Linux parity | `TestSharedLauncherSource`, the same script, `tools/test-linux-launcher.sh` | shared sources free of Windows-only code; the portable ones compile with g++ in WSL (skipped only without WSL) |
+| Source hygiene | `tests\launcher_gate_tests.ps1` | no temporary debug markers, local paths, CR line endings, scratch files, stray assets, test images, removed icon code or UI diagnostics; `git diff --check` |
+
+A group that prints nothing, or an executable that exits early, is a FAIL with its exit code.
+
+Saulo checks by eye what the gate cannot: the header artwork, sidebar proportions, fonts, row spacing, separator
+appearance, the About heart, the footer and the overall balance. The gate complements that check and does not replace it.
+
 ## Manual test
 
-1. `tools\build.ps1 -Run`: the launcher opens on Play with "Ready to play", the gold accent and the controller icon.
+1. Build with `tools\build.ps1` and start the game yourself: the launcher opens on Play with "Ready to play", the gold accent and the controller icon.
 2. Change Display mode and Window size, press Save, quit, start again: the values are kept.
 3. Press PLAY: "Settings saved. Starting game...", then the game window opens on the chosen monitor at the chosen size.
 4. In the game press F11 twice: Windowed, Borderless Fullscreen, back; the picture keeps its size.

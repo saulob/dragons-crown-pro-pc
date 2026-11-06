@@ -55,7 +55,7 @@ static const char *record_at(const uint8_t *sheet, int index) {
 }
 
 static void test_language_table(void) {
-    CHECK(EXIT_GAME_LANGUAGE_COUNT == 8);
+    CHECK(EXIT_GAME_LANGUAGE_COUNT == 9);
     for (int i = 0; i < EXIT_GAME_LANGUAGE_COUNT; ++i) {
         const ExitGameLanguage *l = &exit_game_languages[i];
         CHECK(l->language && l->install_original && l->help_original && l->row && l->help);

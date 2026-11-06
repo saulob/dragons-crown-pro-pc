@@ -15,7 +15,7 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
 2. Choose your **Online name**: what other players see (up to 16 letters, digits, `-` or `_`; `Player` until you change
    it). Changing it later keeps your friend code and your friends.
 3. Share **Your friend code** (`XXXX-XXXX`, **Copy** puts it on the clipboard) with the players you want to meet.
-4. Under **Friends**, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
+4. On the **Friends** tab, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
    card at the top of the page, and the Online entry in the sidebar shows how many are waiting; **Accept** or
    **Decline** it there. The list updates by itself and shows each friend's Online name and whether they are online:
    Online while their launcher or game is connected, "Online, in a room" while they are in a game room. Under the
@@ -43,6 +43,72 @@ The game offers online play only after a character has passed the opening tutori
 The Gameplay page's Story Skip Offer and Tutorial Skip Offer let a new character skip there.
 
 Nothing else needs setting up. With Online play Off the game runs offline as before, and F3 does nothing.
+
+### Bug reports
+
+The launcher's Bug Report page sends a report only when the player presses Send report, and an optional preview shows exactly
+what goes out. A report holds the player's description, the launcher version, the game build, game version and CUSA, the
+operating system, the selected log's file name and that log after the privacy filter (`launcher/log_scrubber.cpp`), at
+most its last 64 KiB. No personal user data is intentionally included, and the filter cannot promise to catch everything
+a log might hold, which is why the page offers the preview.
+
+The filter replaces IPv4 and IPv6 addresses (not loopback), the Windows or Linux account name, the computer name, the
+profile folder, the folder the port runs from, other folders outside the system's (the file name stays), network paths,
+the online secret, the account id, other players' account ids, room codes, Friend Codes and values labelled as passwords,
+tokens or keys, and it drops chat lines. Ordinary diagnostics stay, including hashes of game files and driver versions.
+The Online name the player chose is not removed, because a log shows it only for that player's own session.
+
+To send, the launcher signs in with this PC's online account, as the Connection test does, without showing the player
+online; a PC that never went online gets its random online identity then. The service uses the account and the
+connection's address only to count the report limits: the quota table keeps salted hashes of them for 24 hours, and the
+stored report holds neither.
+
+An account may file 2 accepted reports per rolling hour and 10 per rolling 24 hours; a report leaves each window that long
+after it was accepted, and only accepted reports count. The Worker alone decides: the launcher keeps no counter, shows no
+numbers and leaves Send report available. A refused report is not stored, and the page keeps the description, the selected
+log and any open preview. `incident_hourly_limit` shows "Too many reports were sent recently", `incident_daily_limit` shows
+"Daily report limit reached"; with both reached the hourly one is answered. The service has further protections of its own,
+which answer the plain `limit` code and show the same message as the hourly limit.
+
+The Worker stores the report as received, with the log text itself in its Durable Object database, or refuses it; it filters
+and rewrites nothing, so the preview, the request, the stored report, the admin view and the downloaded log are the same text.
+Reports are readable only in the private `/admin` (`DCP_DASHBOARD_TOKEN`), tab Bugs, where each log can be viewed, copied or
+downloaded as a `.log` file through the same token. The service keeps the newest 500; removing the local log does not remove
+a sent report.
+
+### Report status and My reports
+
+A report's life: the player sends it and it starts as **New**; the developer sets a status in `/admin` → Bugs, with an optional
+fixed version and a short message; the launcher checks later and My reports shows what changed.
+
+| Status | Machine value | Meaning |
+| --- | --- | --- |
+| New | `new` | Not reviewed yet |
+| Investigating | `investigating` | Being investigated |
+| Fixed | `fixed` | The problem has been corrected; the only status that says so, and the only one with a fixed version |
+| Cannot reproduce | `cannot_reproduce` | Could not be reproduced with the available information |
+| Duplicate | `duplicate` | The same problem is already tracked by another report |
+| Not a bug | `not_a_bug` | The behavior is expected, or not a Dragon's Crown Pro bug |
+| Closed | `closed` | Intentionally finished without a specific fix or a more precise status. It does not mean Fixed |
+
+Who owns a report is known only to the PC that sent it. An accepted report answers with a **receipt**: 256 random bits, a
+capability for that one report, derived from nothing. The launcher keeps it in `user/bug_reports.json`, never in `dcp.ini` and
+never in a log. The Worker stores only a salted SHA-256 of it. There is no account or address in the status table, no query by
+account or address, and no list of one player's reports; the temporary quota hashes above stay a separate matter.
+
+`incident.status` and `incident.read` take no `hello`, so a lookup never involves the account and Online Play can stay off. They
+accept only a ticket with its receipt: a report ID alone reads nothing. A wrong receipt, an unknown ticket and a report from
+before receipts all answer alike: left out of the list, or `not_found`. Lookups have their own limits, write nothing and
+cost no report quota. Seen and unseen are local: the service never learns whether a player read a status.
+
+My reports belongs to one installation. It is not an account feature: another PC, or a removed file, sees none of these reports.
+Reports from before receipts have none and cannot be claimed, so they stay out of My reports; they still have a status in
+`/admin`. The local list keeps the newest 50 reports, and **Remove from this PC** deletes only the local entry and its receipt.
+
+Logs and statuses have separate limits. `incidents` keeps the newest 500 reports with their logs; `incident_tracking` keeps the
+newest 5000 statuses, a row of at most about 2 KB, so at most about 11 MB. A status therefore outlives its log: once the log is
+gone, **What was sent** says the report is no longer available, and the status still updates. Past both limits the launcher keeps
+showing the last status it knew.
 
 ### Privacy and usage statistics
 
@@ -164,7 +230,7 @@ easier to understand and reproduce.
 | P2P socket and Rudp | `src/runtime_rudp.cpp` | `sceNetSocket` type 6 ("RUDP_NetId"), `sceNetBind`, Rudp contexts, polls, reads and writes over `net::PeerSocket` |
 | Network library | `src/net/` | JSON, identity, WebSocket client (WinHTTP; sockets and OpenSSL on Linux), lobby link, STUN, UPnP, peer transport, connection test |
 | Lobby | `server/lobby/` | one JavaScript lobby for the Cloudflare Worker and for the local development server |
-| Launcher | `launcher/online_page.cpp`, `launcher/online_view.cpp`, `launcher/online_settings.cpp` | Online page: online play, online name, friend code, connection test, friends |
+| Launcher | `launcher/online_page.cpp`, `launcher/online_view.cpp`, `launcher/online_settings.cpp` | Online page: online play, then the Settings (online name, friend code, connection test, ping), Friends and Lobby tabs |
 
 Online play is available for every supported build. Their online imports are the same entry points except that
 CUSA07001 1.00 and CUSA10209 1.00 call `ActivityFeed::getPlayedWith` (answered like the other Toolkit2 calls) where the
@@ -175,7 +241,7 @@ storage is not provided: every TUS call, synchronous or not, answers signed out.
 key (`net::kOnlineGame`), so players of different regions and versions meet; only the online protocol keeps them apart.
 The System type, Story Skip Offer and Tutorial Skip Offer sites are verified for each local build
 (`tests/system_type_tests.c`, `tests/skip_offers_tests.c`, `tests/online_builds_tests.cpp`); a supported build without
-a known site (CUSA10454 1.01, CUSA10209 1.02) uses the single place its image has the same verified code, and is left
+a known site (CUSA10454 1.01, CUSA10209 1.02, CUSA10487 1.03) uses the single place its image has the same verified code, and is left
 unchanged when there is none.
 
 ## Settings
@@ -189,6 +255,7 @@ unchanged when there is none.
 | `online_udp_port` | `DCP_UDP_PORT` | 0 | 0: the game's port 3658, or any free one when it is taken |
 | `online_stun` | `DCP_STUN` | `stun.cloudflare.com:3478,stun.l.google.com:19302` | STUN servers; `off` disables |
 | `online_connection_test_port` | - | 0 | the UDP port of the last finished Connection test; 0 after Online play is turned off |
+| `show_in_lobby` | - | 0 | list the Online name in the public Lobby; Reset turns it off |
 | - | `DCP_LOBBY` | `net::kDefaultLobbyUrl` | developer override of the production lobby (`ws://` or `wss://`), for diagnostics |
 | - | `DCP_UPNP` | 1 | ask the router to map the UDP port; `0` for diagnostics |
 | - | `DCP_JOIN_CODE` | - | the game's room search returns only the room with this code |
@@ -232,7 +299,7 @@ lower-case hex.
 
 - Request `{"op": "...", "seq": n, ...}`; answer `{"re": n, "code": "ok" | <error>, ...}`; event `{"ev": "...", ...}`.
 - Errors: `bad_request`, `too_large`, `no_session` (no hello yet), `proto`, `unauthorized`, `not_owner`, `in_room`,
-  `not_found`, `closed`, `full`, `incompatible`, `limit`, `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
+  `not_found`, `closed`, `full`, `incompatible`, `limit`, `incident_hourly_limit`, `incident_daily_limit`, `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
   errors the game tells apart (0x80550d0f / 0x80550d15 / 0x80550d19) and the rest to 0x80550ca1.. (ours).
 
 | op | request | answer |
@@ -250,9 +317,13 @@ lower-case hex.
 | `chat` | `text` | - |
 | `presence.set` | `data` (<= 0x80 bytes hex), `status` (<= 0xc0) | - |
 | `friends.list` / `friends.requests` | | `friends: [{account, name, online, game?, online_protocol?, version?, platform?, room?, code?, data?, status?}]` / `incoming`, `outgoing` |
-| `friends.add` | `code` (`XXXX-XXXX`, any case) | `account`, `name`, `state` (`pending` / `friends`) |
+| `friends.add` | `code` (`XXXX-XXXX`, any case), or `player` (a `lobby.list` handle) | `account`, `name`, optional `display_name`, `state` (`pending` / `friends`) |
+| `lobby.publish` | `visible` (bool) | `visible` |
+| `lobby.list` | optional `rev` (the one last received) | `rev`, `total`, and `players` (`player`, `name`, `version`, `state`), or `unchanged: true` |
 | `friends.accept` / `.decline` / `.remove` | `account` | `friend` / - / - |
-| `report.send` | `text` (<= 256), `log` (tail kept, <= 128 K), `version` | `id`, `left` |
+| `incident.file` | `description` (<= 500 characters), `launcher_version`, `game_build`, `game_version`, `cusa`, `operating_system`, `log_file`, `log_clipped` (`yes`/`no`), `log_text` (<= 64 KiB of UTF-8); see Bug reports | `ticket` (`DCP-XXXXXX`), `receipt` (64 hex digits), `submitted_at` |
+| `incident.status` | `reports: [{ticket, receipt}]` (<= 50); no `hello` needed | `reports: [{ticket, status, status_updated_at, fixed_version?, player_message?}]`, only the reports the receipts prove |
+| `incident.read` | `ticket`, `receipt`; no `hello` needed | `report` (the stored fields, `ticket`, `submitted_at`), or `not_found` |
 | `party.report` | `classes` (1-4 class numbers 0-5: Fighter, Amazon, Elf, Dwarf, Sorceress, Wizard), `host` (optional, one of `classes`); room owner only, optional (see Party statistics) | `counted` |
 
 Room (`room`): `id`, `world`, `slots`, `flags` (0x20000000 added while full), `owner`, `code` (6 characters, A-Z 2-9
@@ -279,16 +350,21 @@ Rules the lobby enforces:
   is ignored and the peers use the relay. Repeating an unchanged advertised endpoint sends peers nothing.
 - Seat grace: when a greeted socket in a room closes, its seat is kept 30 s and room events for it are held (<= 32;
   more ends the seat at once). `room.resume` on a new socket of the same account retakes it and receives the held
-  events after the answer. Afterwards it is a disconnect (owner migration, `peer.gone`, `member_left`). Chat is never
-  held or stored.
-- Limits: frames 32 KB (160 KB for `report.send`); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
+  events after the answer, then the current endpoint of every other member, including one who joined meanwhile. The
+  seat starts without an endpoint until the client reports one. Afterwards it is a disconnect (owner migration,
+  `peer.gone`, `member_left`). Chat is never held or stored.
+- Limits: frames 32 KB (160 KB for `incident.file`); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
   32 int attrs; 16 filters; 200 friends; 50 pending requests each way (expire after 14 days); chat 120 characters, 5
-  burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; 16 sockets and 20 new
+  burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; requests that change a stored
+  row, per socket and account: room data and endpoints in a room 40 burst then 1/s (160 then 4/s per address), friend
+  changes 20 burst then 1 per 3 s (60 then 1/s per address), answered `limit` with `retry_ms`; unchanged updates are free;
+  more than 30 refused or malformed requests, refilled 1 per 2 s, close the socket with 1008; 16 sockets and 20 new
   accounts per day per address (IPv6 per /64; loopback exempt on the development server); 30 new connections per 60 s per
   address at the Worker (HTTP 429); per account, sign-ins 12 burst then 1 per 15 s, `room.create` 6 burst then 1 per
   20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; party
-  reports 3 burst then 1 per 2 minutes per account, 12 then 1 per 30 s per address and 30 then 1 per 30 s for the lobby; reports 5 per account, 10 per
-  address, 300 in all per day, newest 1000 kept, addresses kept only as salted hashes.
+  reports 3 burst then 1 per 2 minutes per account, 12 then 1 per 30 s per address and 30 then 1 per 30 s for the lobby; bug reports
+  2 per account per rolling hour and 10 per rolling 24 hours, newest 500 kept; their attempt, address and service protections are
+  in `server/lobby/src/abuse.js` and `incidents.js`.
 
 ## Peer transport
 
@@ -370,7 +446,7 @@ Rudp entry points, in `net::PeerSocket`.
   frame is dropped and counted. A relayed frame is delivered to the link layer directly on receipt, so nothing queues
   on the way in.
 - Relay frames pass through the lobby's Durable Object, so unlike signalling their volume grows with the traffic of
-  relayed pairs. The relay exists only in the updated lobby: it has to be deployed before the relay can be used.
+  relayed pairs. The relay is part of the production lobby; an older lobby does not offer it.
 
 ## Friends, presence, chat, reports
 
@@ -389,8 +465,41 @@ Rudp entry points, in `net::PeerSocket`.
   game key and online protocol with a presence blob. The game then joins by the room id inside that blob.
 - Chat is implemented in the lobby (room scoped, bounded, rate limited, not stored) and received lines are written to
   the game log (`Chat:`). The game has no chat UI of its own and the port has none yet.
-- Bug reports: `report.send` is implemented in the lobby (`/reports` behind `REPORTS_TOKEN` on the Worker); the launcher
-  has no report page yet.
+- Bug reports: the launcher's Bug Report page files them with `incident.file` on a short session of its own, so Online
+  Play does not have to be on; see Bug reports.
+
+## Public Lobby
+
+**Show me in Lobby** on the Online page's Lobby tab is off until the player turns it on (`show_in_lobby` in `dcp.ini`;
+Reset turns it off). It lists the player's Online name so others can send a friend request. It is not matchmaking, a room
+browser or chat: a request made here is the normal `friends.add`, and nothing invites, creates or joins a room.
+
+- **Presence** is the socket's attachment, not a table row, so publishing costs no SQL write. The launcher sends
+  `lobby.publish` after each hello while the option is on. The launcher closes its link when the game starts, so the game
+  asks with `lobby: true` in its own hello, read from the saved setting; a player in game stays listed and finds requests
+  in the launcher next time. A reconnect is a new hello, so the game stays listed and the launcher publishes again.
+- **Leaving**: `visible: false` removes every socket of the account at once, and a closed socket is gone at once. For a
+  client that vanished, a row ends `lobbyStaleMs` (75 s) after the last sign of life: any request, or the 20 s keepalive,
+  which the runtime answers without waking the object and which the Worker reads with
+  `getWebSocketAutoResponseTimestamp`. Nothing is swept: stale rows are left out when the list is read.
+- **What a row holds**: a random handle made for each publish, the shown name, the client's version (empty unless it is a
+  plain version), and `state`, worked out for the reader (`none`, `pending`, `friend` or `incoming`). No account, friend
+  code, address or platform. Sending a request
+  gives the sender the target's account afterwards, as a friend code request always has: `friends.requests` needs it to
+  cancel. An account is not a credential.
+- **Who can read**: only a socket that is listed itself may call `lobby.list` or use a handle, and a handle only works
+  while its player is listed; otherwise the code is `not_visible` or `not_found`. The player is never in their own list.
+- **Identity**: the name and account are the session's. Nothing in these requests can set them, and a session name outside
+  the `net::online_name` rules (`A-Z a-z 0-9 _ -`, 16 at most) is never listed.
+- **Default name**: a player still called `Player` is shown as `Player-7A3C`: four characters of a hash of the account
+  under the lobby's private salt, stable for that account and unrelated to its friend code. Friend rows and answers carry
+  it as `display_name`, because the game matches room members by the real `name`, which never changes.
+- **Limits**: 100 rows, requests first, then newest, with `total` counting all of them. An unchanged list is answered with
+  `rev` alone. The lobby sends no list events: while the tab is on screen the launcher reads every 5 minutes, at once for
+  **Refresh lobby** (one read at a time, 5 s apart) and after a friend event or a change in the requests. See
+  `server/lobby/README.md` for the rate limits.
+- **Older clients** never send these requests and see no change. Against an older lobby the launcher shows that the Lobby
+  is not available and keeps working. The production lobby provides it.
 
 ## Developer and testing notes
 
@@ -401,7 +510,7 @@ Headless tests (no game, no window):
 ```
 cd server\lobby; node --test "test/*.test.js"            # protocol, rooms, friends, grace, limits, real WebSockets
 tools\test.ps1                                             # dcp-net-tests (transport, relay fallback, failure paths), the Worker tests,
-                                                           # the Linux net tests through WSL (-SkipLinux skips them), seven-build parity
+                                                           # the Linux net tests through WSL (-SkipLinux skips them), eight-build parity
 tools\online-lobby.ps1 -Port 8791                          # in another window, then:
 $env:DCP_TEST_LOBBY='ws://127.0.0.1:8791/'; build\cmake\clang64\bin\dcp-online-hle-tests.exe
 ```
@@ -409,7 +518,7 @@ $env:DCP_TEST_LOBBY='ws://127.0.0.1:8791/'; build\cmake\clang64\bin\dcp-online-h
 `tools\test.ps1` starts a development lobby on a free loopback port for the net and build tests and prints a relay summary:
 direct networking, relay transport, automatic fallback, Worker relay, protocol compatibility, failure paths, the
 Connection test, address classification, endpoint selection, the endpoint path, Worker address security, the public
-endpoint budget, Windows and Linux parity, and the seven builds. For the builds it separates structural parity (the same
+endpoint budget, Windows and Linux parity, and the eight builds. For the builds it separates structural parity (the same
 code path and tables, no build-specific relay code; always checked) from runtime validation (needs the local boot images
 in `build\image`; reported as DATA UNAVAILABLE or PARTIAL when they are missing). Nothing there starts the game, and the
 production lobby is never contacted.

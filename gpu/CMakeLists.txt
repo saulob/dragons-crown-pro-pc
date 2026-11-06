@@ -94,16 +94,20 @@ add_library(dcpgpu STATIC ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES}
     shadps4/core/libraries/kernel/equeue.cpp
     third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
-    third_party/imgui/backends/imgui_impl_vulkan.cpp)
+    third_party/imgui/backends/imgui_impl_vulkan.cpp
+    third_party/imgui/backends/imgui_impl_opengl3.cpp)
 add_dependencies(dcpgpu host_shaders)
 target_include_directories(dcpgpu PRIVATE shim shadps4 ../src ${SHADER_INCLUDE} third_party/gcn/include
     third_party/half/include third_party/imgui third_party/imgui/backends third_party/xbyak)
 target_compile_definitions(dcpgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG IMGUI_IMPL_VULKAN_NO_PROTOTYPES
     DCP_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
+# The real <GLES3/gl3.h> is not a build dependency: this folder gives imgui's ES3 backend the same names.
+set_source_files_properties(shim/imgui_impl_gles3.cpp PROPERTIES
+    INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/shim/gles3_shim)
 set_source_files_properties(shim/dcp_overlay.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
 target_compile_options(dcpgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
-target_link_libraries(dcpgpu PRIVATE $<LINK_ONLY:dcp_startup_phase>)
+target_link_libraries(dcpgpu PRIVATE $<LINK_ONLY:dcp_startup_phase> dcp_ui_text)
 target_link_libraries(dcpgpu PUBLIC Vulkan::Headers Vulkan::Vulkan fmt::fmt Boost::headers magic_enum tsl::robin_map
     VulkanMemoryAllocator PkgConfig::XXHASH SDL3::SDL3 PNG::PNG miniz Zydis::Zydis sirit dcp_keys)
 if (WIN32)
