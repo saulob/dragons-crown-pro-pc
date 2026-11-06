@@ -15,7 +15,7 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
 2. Choose your **Online name**: what other players see (up to 16 letters, digits, `-` or `_`; `Player` until you change
    it). Changing it later keeps your friend code and your friends.
 3. Share **Your friend code** (`XXXX-XXXX`, **Copy** puts it on the clipboard) with the players you want to meet.
-4. Under **Friends**, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
+4. On the **Friends** tab, enter a friend's code and **Send request**. A request to you appears as a **New friend request**
    card at the top of the page, and the Online entry in the sidebar shows how many are waiting; **Accept** or
    **Decline** it there. The list updates by itself and shows each friend's Online name and whether they are online:
    Online while their launcher or game is connected, "Online, in a room" while they are in a game room. Under the
@@ -230,7 +230,7 @@ easier to understand and reproduce.
 | P2P socket and Rudp | `src/runtime_rudp.cpp` | `sceNetSocket` type 6 ("RUDP_NetId"), `sceNetBind`, Rudp contexts, polls, reads and writes over `net::PeerSocket` |
 | Network library | `src/net/` | JSON, identity, WebSocket client (WinHTTP; sockets and OpenSSL on Linux), lobby link, STUN, UPnP, peer transport, connection test |
 | Lobby | `server/lobby/` | one JavaScript lobby for the Cloudflare Worker and for the local development server |
-| Launcher | `launcher/online_page.cpp`, `launcher/online_view.cpp`, `launcher/online_settings.cpp` | Online page: online play, online name, friend code, connection test, friends |
+| Launcher | `launcher/online_page.cpp`, `launcher/online_view.cpp`, `launcher/online_settings.cpp` | Online page: online play, then the Settings (online name, friend code, connection test, ping), Friends and Lobby tabs |
 
 Online play is available for every supported build. Their online imports are the same entry points except that
 CUSA07001 1.00 and CUSA10209 1.00 call `ActivityFeed::getPlayedWith` (answered like the other Toolkit2 calls) where the
@@ -255,6 +255,7 @@ unchanged when there is none.
 | `online_udp_port` | `DCP_UDP_PORT` | 0 | 0: the game's port 3658, or any free one when it is taken |
 | `online_stun` | `DCP_STUN` | `stun.cloudflare.com:3478,stun.l.google.com:19302` | STUN servers; `off` disables |
 | `online_connection_test_port` | - | 0 | the UDP port of the last finished Connection test; 0 after Online play is turned off |
+| `show_in_lobby` | - | 0 | list the Online name in the public Lobby; Reset turns it off |
 | - | `DCP_LOBBY` | `net::kDefaultLobbyUrl` | developer override of the production lobby (`ws://` or `wss://`), for diagnostics |
 | - | `DCP_UPNP` | 1 | ask the router to map the UDP port; `0` for diagnostics |
 | - | `DCP_JOIN_CODE` | - | the game's room search returns only the room with this code |
@@ -316,7 +317,9 @@ lower-case hex.
 | `chat` | `text` | - |
 | `presence.set` | `data` (<= 0x80 bytes hex), `status` (<= 0xc0) | - |
 | `friends.list` / `friends.requests` | | `friends: [{account, name, online, game?, online_protocol?, version?, platform?, room?, code?, data?, status?}]` / `incoming`, `outgoing` |
-| `friends.add` | `code` (`XXXX-XXXX`, any case) | `account`, `name`, `state` (`pending` / `friends`) |
+| `friends.add` | `code` (`XXXX-XXXX`, any case), or `player` (a `lobby.list` handle) | `account`, `name`, optional `display_name`, `state` (`pending` / `friends`) |
+| `lobby.publish` | `visible` (bool) | `visible` |
+| `lobby.list` | optional `rev` (the one last received) | `rev`, `total`, and `players` (`player`, `name`, `version`, `state`), or `unchanged: true` |
 | `friends.accept` / `.decline` / `.remove` | `account` | `friend` / - / - |
 | `incident.file` | `description` (<= 500 characters), `launcher_version`, `game_build`, `game_version`, `cusa`, `operating_system`, `log_file`, `log_clipped` (`yes`/`no`), `log_text` (<= 64 KiB of UTF-8); see Bug reports | `ticket` (`DCP-XXXXXX`), `receipt` (64 hex digits), `submitted_at` |
 | `incident.status` | `reports: [{ticket, receipt}]` (<= 50); no `hello` needed | `reports: [{ticket, status, status_updated_at, fixed_version?, player_message?}]`, only the reports the receipts prove |
@@ -460,6 +463,39 @@ Rudp entry points, in `net::PeerSocket`.
   the game log (`Chat:`). The game has no chat UI of its own and the port has none yet.
 - Bug reports: the launcher's Bug Report page files them with `incident.file` on a short session of its own, so Online
   Play does not have to be on; see Bug reports.
+
+## Public Lobby
+
+**Show me in Lobby** on the Online page's Lobby tab is off until the player turns it on (`show_in_lobby` in `dcp.ini`;
+Reset turns it off). It lists the player's Online name so others can send a friend request. It is not matchmaking, a room
+browser or chat: a request made here is the normal `friends.add`, and nothing invites, creates or joins a room.
+
+- **Presence** is the socket's attachment, not a table row, so publishing costs no SQL write. The launcher sends
+  `lobby.publish` after each hello while the option is on. The launcher closes its link when the game starts, so the game
+  asks with `lobby: true` in its own hello, read from the saved setting; a player in game stays listed and finds requests
+  in the launcher next time. A reconnect is a new hello, so the game stays listed and the launcher publishes again.
+- **Leaving**: `visible: false` removes every socket of the account at once, and a closed socket is gone at once. For a
+  client that vanished, a row ends `lobbyStaleMs` (75 s) after the last sign of life: any request, or the 20 s keepalive,
+  which the runtime answers without waking the object and which the Worker reads with
+  `getWebSocketAutoResponseTimestamp`. Nothing is swept: stale rows are left out when the list is read.
+- **What a row holds**: a random handle made for each publish, the shown name, the client's version (empty unless it is a
+  plain version), and `state`, worked out for the reader (`none`, `pending`, `friend` or `incoming`). No account, friend
+  code, address or platform. Sending a request
+  gives the sender the target's account afterwards, as a friend code request always has: `friends.requests` needs it to
+  cancel. An account is not a credential.
+- **Who can read**: only a socket that is listed itself may call `lobby.list` or use a handle, and a handle only works
+  while its player is listed; otherwise the code is `not_visible` or `not_found`. The player is never in their own list.
+- **Identity**: the name and account are the session's. Nothing in these requests can set them, and a session name outside
+  the `net::online_name` rules (`A-Z a-z 0-9 _ -`, 16 at most) is never listed.
+- **Default name**: a player still called `Player` is shown as `Player-7A3C`: four characters of a hash of the account
+  under the lobby's private salt, stable for that account and unrelated to its friend code. Friend rows and answers carry
+  it as `display_name`, because the game matches room members by the real `name`, which never changes.
+- **Limits**: 100 rows, requests first, then newest, with `total` counting all of them. An unchanged list is answered with
+  `rev` alone. The lobby sends no list events: while the tab is on screen the launcher reads every 5 minutes, at once for
+  **Refresh lobby** (one read at a time, 5 s apart) and after a friend event or a change in the requests. See
+  `server/lobby/README.md` for the rate limits.
+- **Older clients** never send these requests and see no change. Against an older lobby the launcher shows that the Lobby
+  is not available and keeps working; the Worker has to be deployed before the feature can be used.
 
 ## Developer and testing notes
 

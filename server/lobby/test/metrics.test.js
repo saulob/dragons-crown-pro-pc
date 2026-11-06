@@ -623,7 +623,8 @@ test('game clients send the same sign-in fields and no analytics beyond the opti
   const lobbyLink = readFileSync(join(REPO, 'src/net/lobby_link.cpp'), 'utf8');
   const hello = lobbyLink.slice(lobbyLink.indexOf('Json hello_body('), lobbyLink.indexOf('LobbyLink::LobbyLink('));
   assert.deepEqual([...hello.matchAll(/h\.set\("([a-z_]+)"/g)].map((m) => m[1]),
-    ['proto', 'game', 'account', 'secret', 'name', 'presence', 'online_protocol', 'version', 'platform', 'relay']);
+    ['proto', 'game', 'account', 'secret', 'name', 'presence', 'online_protocol', 'version', 'platform', 'relay',
+      'lobby']);
   const files = [
     ...readdirSync(join(REPO, 'src/net')).map((f) => join('src/net', f)),
     ...readdirSync(join(REPO, 'src')).filter((f) => /^runtime_(online|matching2|rudp)/.test(f)).map((f) => join('src', f)),

@@ -35,6 +35,9 @@ export const LIMITS = {
   graceMs: 30000,
   versionChars: 16,
   platformChars: 16,
+  lobbyPlayers: 100,
+  // Three missed keepalives (LobbyLink::Options::keepalive_ms) and a margin.
+  lobbyStaleMs: 75000,
 };
 
 const BUCKETS = {
@@ -56,6 +59,13 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const DAY_MS = 24 * 3600 * 1000;
 const MEMBER_IDS = [0x10, 0x20, 0x30, 0x40];
 const FIRST_ROOM_ID = 4096;
+// What net::online_name produces: the public list shows no text a real launcher could not have sent.
+const LOBBY_NAME = /^[A-Za-z0-9_-]{1,16}$/;
+const LOBBY_PLAYER = /^[0-9a-f]{32}$/;
+const LOBBY_REV = /^[0-9a-f]{16}$/;
+const LOBBY_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,15}$/;
+const LOBBY_RANK = { incoming: 0, pending: 1, friend: 2, none: 3 };
+const DEFAULT_NAME = 'Player';
 
 export class LobbyError extends Error {
   constructor(code, detail = '', body = {}) {
@@ -197,7 +207,7 @@ function takeToken(bucket, spec, now) {
 
 export class Lobby {
   // host: { sql: { all(q, ...a), get(q, ...a), run(q, ...a), transaction(work) }, sockets(): Conn[], now(): ms, setAlarm(ms), log(text) }
-  // Conn: { send(text), close(code, reason), attachment(), setAttachment(object) }
+  // Conn: { send(text), close(code, reason), attachment(), setAttachment(object), keepaliveAt(): ms }
   constructor(host, options = {}) {
     this.host = host;
     this.local = Boolean(options.local);
@@ -207,6 +217,7 @@ export class Lobby {
       this.setMeta('schema', done + 1);
     }
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
+    this.salt = this.meta('salt');
     this.metrics = new Metrics(host.sql, () => host.now());
     this.incidents = new IncidentDesk(host.sql, this.meta('salt'));
     this.alarmAt = options.alarmAt ?? null;
@@ -225,6 +236,10 @@ export class Lobby {
       incidentLookupAll: new RateLimiter(PROTECTION.incidentLookupAll),
       incidentStatusAddress: new RateLimiter(PROTECTION.incidentStatusAddress),
       incidentReadAddress: new RateLimiter(PROTECTION.incidentReadAddress),
+      lobbyPublishAccount: new RateLimiter(PROTECTION.lobbyPublishAccount),
+      lobbyListAccount: new RateLimiter(PROTECTION.lobbyListAccount),
+      lobbyListAddress: new RateLimiter(PROTECTION.lobbyListAddress),
+      lobbyRequestAccount: new RateLimiter(PROTECTION.lobbyRequestAccount),
       rejects: new RateLimiter({ burst: 1, perSecond: 1000 / PROTECTION.rejectWindowMs }),
     };
     this.relays = new Relay(this);
@@ -322,6 +337,7 @@ export class Lobby {
       const any = takeToken(att.ra, BUCKETS.any, now);
       if (!any) fail('limit', 'slow down');
       att.ra = any;
+      if (att.lobby) att.lobby.seen = now;
       if (ROOM_OPS.has(msg.op)) {
         const room = takeToken(att.rr, BUCKETS.room, now);
         if (!room) fail('limit', 'slow down');
@@ -676,7 +692,7 @@ export class Lobby {
 
   friendView(account, viewerGame) {
     const row = this.accountRow(account);
-    const view = { account, name: row?.name ?? '', online: false };
+    const view = { account, name: row?.name ?? '', online: false, ...this.shownAs(account, row?.name) };
     const present = this.presentSockets(account);
     if (!present.length) return view;
     view.online = true;
@@ -837,6 +853,92 @@ export class Lobby {
   requireFriendRoom(a, b) {
     if (this.friendCount(a) >= LIMITS.friends || this.friendCount(b) >= LIMITS.friends) fail('limit', 'friend list full');
   }
+
+  // Players who kept the default name stay apart. Salted, so an alias cannot be checked against an account.
+  displayName(account, name) {
+    if (name !== DEFAULT_NAME) return name;
+    return `${DEFAULT_NAME}-${sha256Hex(`${this.salt}|alias|${account}`).slice(0, 4).toUpperCase()}`;
+  }
+
+  // Beside `name`, never in place of it: the game matches room members to friends by the real name.
+  shownAs(account, name) {
+    const shown = this.displayName(account, name);
+    return shown === name ? {} : { display_name: shown };
+  }
+
+  // ---- public lobby ----
+  // Presence is the socket's own attachment, so publishing writes no SQL and it ends with the socket. `player` is random
+  // for each publish: it names a row of this list and nothing else.
+  showInLobby(att, now) {
+    att.lobby = { player: this.randomHex(16), since: now, seen: now };
+  }
+
+  hideFromLobby(account) {
+    for (const { conn, att } of this.sockets()) {
+      if (att.account !== account || !att.lobby) continue;
+      delete att.lobby;
+      conn.setAttachment(att);
+    }
+  }
+
+  // Everyone listed now, newest first, one row per account. Keepalives never reach this object, so the host says when
+  // the last one passed.
+  lobbyEntries() {
+    const oldest = this.host.now() - LIMITS.lobbyStaleMs;
+    const listed = this.sockets().filter(({ conn, att }) => att.lobby && Math.max(att.lobby.seen, conn.keepaliveAt()) >= oldest);
+    listed.sort((a, b) => b.att.lobby.since - a.att.lobby.since || a.att.lobby.player.localeCompare(b.att.lobby.player));
+    const entries = new Map();
+    for (const s of listed) if (!entries.has(s.att.account)) entries.set(s.att.account, s);
+    return [...entries.values()];
+  }
+
+  // Selects instead of expireRequests(): reading the list writes nothing.
+  lobbyRelations(account) {
+    const since = this.host.now() - LIMITS.requestDays * DAY_MS;
+    const accounts = (query, key) => new Set(this.host.sql.all(query, account, since).map((r) => r[key]));
+    const friends = new Set(this.friendsOf(account));
+    const incoming = accounts('SELECT sender FROM friend_requests WHERE target = ? AND ms >= ?', 'sender');
+    const outgoing = accounts('SELECT target FROM friend_requests WHERE sender = ? AND ms >= ?', 'target');
+    return (other) => {
+      if (friends.has(other)) return 'friend';
+      if (incoming.has(other)) return 'incoming';
+      return outgoing.has(other) ? 'pending' : 'none';
+    };
+  }
+
+  lobbyRefused(what) {
+    this.diagnose('public_lobby_limited');
+    fail('limit', what);
+  }
+
+  limitLobbyPublish(att) {
+    if (this.exempt(att) || this.guards.lobbyPublishAccount.take(att.account, this.host.now())) return;
+    this.lobbyRefused('publishing too fast');
+  }
+
+  limitLobbyList(att) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { lobbyListAccount, lobbyListAddress } = this.guards;
+    if (!lobbyListAccount.allows(att.account, now) || !lobbyListAddress.allows(address, now)) this.lobbyRefused('listing too fast');
+    lobbyListAccount.take(att.account, now);
+    lobbyListAddress.take(address, now);
+  }
+
+  // Only someone listed themselves can reach a listed player, and only for as long as that player stays listed.
+  lobbyTarget(att, player) {
+    if (typeof player !== 'string' || !LOBBY_PLAYER.test(player)) fail('bad_request', 'player');
+    if (!att.lobby) fail('not_visible');
+    if (!this.exempt(att) && !this.guards.lobbyRequestAccount.take(att.account, this.host.now())) this.lobbyRefused('asking too fast');
+    const entry = this.lobbyEntries().find((e) => e.att.lobby.player === player);
+    if (!entry) fail('not_found');
+    return this.accountRow(entry.att.account);
+  }
+
+  accountByCode(text) {
+    return this.host.sql.get('SELECT * FROM accounts WHERE code = ?', normalizeFriendCode(text)) ?? fail('not_found');
+  }
 }
 
 const HANDLERS = {
@@ -878,6 +980,7 @@ const HANDLERS = {
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
       version, platform, relay: msg.relay === true });
     if (att.relay) this.relays.negotiated(att);
+    if (msg.lobby === true && presence && LOBBY_NAME.test(name)) this.showInLobby(att, now);
     this.index = null;
     if (presence && !wasOnline) this.notifyFriends(account, { ev: 'friend.online', account, name });
     if (newSession) this.track(() => this.metrics.session(att));
@@ -1139,7 +1242,10 @@ const HANDLERS = {
 
   'friends.requests'(att) {
     this.expireRequests();
-    const named = (rows, key) => rows.map((r) => ({ account: r[key], name: this.accountRow(r[key])?.name ?? '', ms: r.ms }));
+    const named = (rows, key) => rows.map((r) => {
+      const name = this.accountRow(r[key])?.name ?? '';
+      return { account: r[key], name, ...this.shownAs(r[key], name), ms: r.ms };
+    });
     return {
       incoming: named(this.host.sql.all('SELECT sender, ms FROM friend_requests WHERE target = ? ORDER BY ms', att.account), 'sender'),
       outgoing: named(this.host.sql.all('SELECT target, ms FROM friend_requests WHERE sender = ? ORDER BY ms', att.account), 'target'),
@@ -1147,11 +1253,9 @@ const HANDLERS = {
   },
 
   'friends.add'(att, msg) {
-    const code = normalizeFriendCode(msg.code);
-    const target = this.host.sql.get('SELECT * FROM accounts WHERE code = ?', code);
-    if (!target) fail('not_found');
+    const target = msg.player !== undefined ? this.lobbyTarget(att, msg.player) : this.accountByCode(msg.code);
     if (target.account === att.account) fail('bad_request', 'own code');
-    const result = { account: target.account, name: target.name };
+    const result = { account: target.account, name: target.name, ...this.shownAs(target.account, target.name) };
     if (this.areFriends(att.account, target.account)) return { ...result, state: 'friends' };
     this.expireRequests();
     if (this.host.sql.get('SELECT 1 AS x FROM friend_requests WHERE sender = ? AND target = ?', target.account, att.account)) {
@@ -1183,7 +1287,7 @@ const HANDLERS = {
   },
 
   'friends.decline'(att, msg) {
-    const other = decimalId(msg.account);
+    const other = msg.player !== undefined ? this.lobbyTarget(att, msg.player).account : decimalId(msg.account);
     const before = this.host.sql.get(`SELECT COUNT(*) AS n FROM friend_requests WHERE (sender = ? AND target = ?)
       OR (sender = ? AND target = ?)`, other, att.account, att.account, other).n;
     if (!before) fail('not_found');
@@ -1201,6 +1305,37 @@ const HANDLERS = {
       att.account, att.account, other);
     if (were) this.notifyAccount(other, { ev: 'friend.removed', account: att.account });
     return {};
+  },
+
+  // Opt-in only. The name and the account are the session's: nothing in the request can set them.
+  'lobby.publish'(att, msg) {
+    if (typeof msg.visible !== 'boolean') fail('bad_request', 'visible');
+    if (!msg.visible) {
+      this.hideFromLobby(att.account);
+      return { visible: false };
+    }
+    if (att.lobby) return { visible: true };
+    if (!att.presence) fail('not_found', 'no presence');
+    if (!LOBBY_NAME.test(att.name)) fail('bad_request', 'name');
+    this.limitLobbyPublish(att);
+    this.showInLobby(att, this.host.now());
+    return { visible: true };
+  },
+
+  // Only those listed may read the list. `rev` is what the client holds: an unchanged list is not sent again.
+  'lobby.list'(att, msg) {
+    if (msg.rev !== undefined && (typeof msg.rev !== 'string' || !LOBBY_REV.test(msg.rev))) fail('bad_request', 'rev');
+    if (!att.lobby) fail('not_visible');
+    this.limitLobbyList(att);
+    const others = this.lobbyEntries().filter((e) => e.att.account !== att.account);
+    const relation = this.lobbyRelations(att.account);
+    // Ranked before the cap, so a request waiting for an answer is never the row left out.
+    const ranked = others.map((e) => ({ e, state: relation(e.att.account) }));
+    ranked.sort((a, b) => LOBBY_RANK[a.state] - LOBBY_RANK[b.state]);
+    const players = ranked.slice(0, LIMITS.lobbyPlayers).map(({ e, state }) => ({ player: e.att.lobby.player,
+      name: this.displayName(e.att.account, e.att.name), version: LOBBY_VERSION.test(e.att.version) ? e.att.version : '', state }));
+    const rev = sha256Hex(JSON.stringify(players)).slice(0, 16);
+    return rev === msg.rev ? { rev, total: others.length, unchanged: true } : { rev, total: others.length, players };
   },
 
   // Anonymous party statistics (party.js): optional, sent by the room's owner on its own game connection, so a party is

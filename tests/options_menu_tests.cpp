@@ -516,7 +516,8 @@ void TestLauncherParity() {
         "online_udp_port",
         "online_stun",
         "online_connection_test_port",
-        "show_ping"};
+        "show_ping",
+        "show_in_lobby"};
     const auto has = [](const std::vector<std::string>& list, const std::string& key) {
         return std::find(list.begin(), list.end(), key) != list.end();
     };

@@ -519,7 +519,7 @@ void RoomGone(uint16_t event) {
 
 Json HelloBody() {
     const Settings& s = settings();
-    return net::hello_body(s.identity, s.name, s.game, true, true);
+    return net::hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible);
 }
 
 // ---- lobby messages ----

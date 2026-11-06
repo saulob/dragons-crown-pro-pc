@@ -43,6 +43,7 @@ net::OnlineConfig OnlineConfigOf(const trg::SettingsStore& settings) {
     config.name = settings.Get(kOnlineNameKey, net::kDefaultOnlineName);
     config.udp_port = static_cast<uint16_t>(std::atoi(settings.Get(kOnlineUdpPortKey, "0").c_str()));
     config.stun = settings.Get(kOnlineStunKey, net::kDefaultStunServers);
+    config.lobby_visible = settings.GetBool(kLobbyVisibleKey, false);
     return config;
 }
 

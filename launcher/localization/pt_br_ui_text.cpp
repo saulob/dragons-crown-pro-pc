@@ -402,6 +402,25 @@ Send request	Enviar pedido
 Your request is waiting for an answer.	Seu pedido está aguardando resposta.
 Cancel request	Cancelar pedido
 Remove	Remover
+Settings	Configurações
+Lobby	Lobby
+Show me in Lobby	Mostrar meu nome no Lobby
+Enable this option to let other Dragon's Crown Pro players see your Online name and send you a friend request.	Ative esta opção para que outros jogadores de Dragon's Crown Pro vejam seu nome online e possam enviar um pedido de amizade.
+Other Dragon's Crown Pro players can see your Online name and send you a friend request.	Outros jogadores de Dragon's Crown Pro podem ver seu nome online e enviar um pedido de amizade.
+Players in Lobby	Jogadores no Lobby
+Send friend request	Enviar pedido de amizade
+Pending	Pendente
+Accept	Aceitar
+No players are currently visible in the Lobby.	Nenhum jogador está visível no Lobby no momento.
+%s more players are not shown.	Mais %s jogadores não estão sendo exibidos.
+The Lobby is not available right now.	O Lobby não está disponível no momento.
+Refresh lobby	Atualizar lobby
+Refreshing...	Atualizando...
+Updated just now	Atualizado agora
+Updated %s min ago	Atualizado há %s min
+Version unknown	Versão desconhecida
+Could not refresh the Lobby.	Não foi possível atualizar o Lobby.
+That player is no longer in the Lobby.	Esse jogador não está mais no Lobby.
 No friends yet. A friend in a room appears in the game's Join Friends Room list.	Nenhum amigo ainda. Um amigo em uma sala aparece na lista Entrar na sala de amigos do jogo.
 Online, in a room	Online, em uma sala
 Offline	Offline

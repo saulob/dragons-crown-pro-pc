@@ -72,6 +72,7 @@ export class LocalConn {
     this.host = host;
     this.transport = transport;
     this.stored = null;
+    this.pinged = 0;
   }
 
   attachment() {
@@ -92,6 +93,14 @@ export class LocalConn {
 
   get bufferedAmount() {
     return this.transport.bufferedAmount ?? 0;
+  }
+
+  notePing() {
+    this.pinged = this.host.now();
+  }
+
+  keepaliveAt() {
+    return this.pinged;
   }
 
   close(code, reason) {

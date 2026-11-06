@@ -1235,6 +1235,7 @@ void TestOnlineSettings(const fs::path& base) {
     CHECK(launcher_default(kOnlineEnabledKey) == "0" && launcher_default(kOnlineNameKey) == "Player");
     CHECK(launcher_default(kOnlineUdpPortKey) == "0" && launcher_default(kOnlineStunKey) == net::kDefaultStunServers);
     CHECK(launcher_default("online_lobby") == "<missing>" && launcher_default("online_upnp") == "<missing>");
+    CHECK(launcher_default(kLobbyVisibleKey) == "0" && !IsOnlineSetting(kLobbyVisibleKey) && !net::OnlineConfig{}.lobby_visible);
     CHECK(!IsOnlineSetting("online_lobby") && !IsOnlineSetting("online_upnp"));
     CHECK(std::string(net::kDefaultLobbyUrl) == "wss://dcp-lobby.saulobenigno.workers.dev");
     const net::OnlineConfig missing = ReadOnlineConfig(file);
@@ -1379,25 +1380,137 @@ void TestFriendStatus(const std::string& page) {
     const std::string client = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_client.cpp");
     size_t sends = 0;
     for (size_t at = client.find("Send(\""); at != std::string::npos; at = client.find("Send(\"", at + 1)) ++sends;
-    CHECK(sends == 6);
+    CHECK(sends == 10);
     for (const char* op : {"friends.list", "friends.requests", "friends.add", "friends.accept", "friends.decline",
-                           "friends.remove"}) {
+                           "friends.remove", "lobby.publish", "lobby.list"}) {
         CHECK(client.find(std::string("Send(\"") + op + "\"") != std::string::npos);
     }
 }
 
-// The Online page: with online play off only its switch; on, friend requests first, then the rest in a fixed order.
-// The switch shows the effective state. No lobby address, UPnP switch or status card; friends by Online name.
+// The rows of the public Lobby: a handle, a name and the relation, whose action follows from it. The handle is never
+// drawn, and a row missing either is dropped.
+void TestLobbyRows(const std::string& page) {
+    const auto parsed = net::Json::parse(
+        R"([{"player": "a1", "name": "Stranger", "state": "none"}, {"player": "a2", "name": "Waiting", "state": "pending"},
+            {"player": "a3", "name": "Pal", "state": "friend"}, {"player": "a4", "name": "Asking", "state": "incoming"},
+            {"player": "a5", "name": "Later", "state": "something new"}, {"player": "", "name": "NoHandle", "state": "none"},
+            {"player": "a7", "name": "", "state": "none"}, {"player": "a8"}])");
+    CHECK(parsed.has_value());
+    const std::vector<LobbyPlayer> rows = ReadLobbyPlayers(parsed ? *parsed : net::Json::Array());
+    CHECK(rows.size() == 5);
+    if (rows.size() != 5) return;
+    using R = LobbyRelation;
+    CHECK(rows[0].relation == R::kIncoming && rows[1].relation == R::kPending && rows[2].relation == R::kFriend);
+    CHECK(rows[3].relation == R::kNone && rows[3].name == "Later" && rows[4].relation == R::kNone && rows[4].player == "a1" &&
+          rows[4].name == "Stranger");
+    // The name is the one the lobby shows; a client that said no version still gets a row.
+    CHECK(rows[0].version.empty() && LobbyVersionLabel(rows[0]) == "Version unknown");
+    const auto versioned = net::Json::parse(R"([{"player": "b1", "name": "Player-7A3C", "version": "0.9.2", "state": "none"}])");
+    const std::vector<LobbyPlayer> known = ReadLobbyPlayers(versioned ? *versioned : net::Json::Array());
+    CHECK(known.size() == 1 && known[0].name == "Player-7A3C" && LobbyVersionLabel(known[0]) == "v0.9.2");
+
+    // Friends use the alias where the lobby sent one and the name otherwise; the game's own matching reads "name" directly.
+    const auto aliased = net::Json::parse(R"([{"account": "1", "name": "Player", "display_name": "Player-42DF"},
+                                              {"account": "2", "name": "Ana"}])");
+    const std::vector<OnlinePlayer> friends = ReadOnlinePlayers(aliased ? *aliased : net::Json::Array());
+    CHECK(friends.size() == 2 && friends[0].name == "Player-42DF" && friends[1].name == "Ana");
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "runtime_matching2.cpp").find("row.name = SafeName(f[\"name\"].as_string());") !=
+          std::string::npos);
+
+    // Requests first, then pending, friends and everyone else; by name without regard to case within each.
+    const auto mixed = net::Json::parse(
+        R"([{"player": "c1", "name": "zed", "state": "none"}, {"player": "c2", "name": "Bob", "state": "friend"},
+            {"player": "c3", "name": "ana", "state": "none"}, {"player": "c4", "name": "Yan", "state": "pending"},
+            {"player": "c5", "name": "Xia", "state": "incoming"}, {"player": "c6", "name": "Abe", "state": "incoming"},
+            {"player": "c7", "name": "Bea", "state": "none"}, {"player": "c8", "name": "Al", "state": "friend"}])");
+    std::string order;
+    for (const LobbyPlayer& p : ReadLobbyPlayers(mixed ? *mixed : net::Json::Array())) order += p.name + " ";
+    CHECK(order == "Abe Xia Yan Al Bob ana Bea zed ");
+
+    // Five minutes by itself; the button and friend events do not wait for that, and only one read runs at a time.
+    CHECK(LobbyRefresh::kAutoSeconds == 300.0);
+    LobbyRefresh refresh;
+    CHECK(refresh.Due(100.0));
+    refresh.Start(100.0);
+    CHECK(refresh.active() && !refresh.Due(100.0) && !refresh.Manual(120.0));
+    refresh.Finish();
+    CHECK(!refresh.Due(399.0) && refresh.Due(400.0));
+    CHECK(!refresh.Manual(100.0 + LobbyRefresh::kManualGapSeconds - 0.1) && !refresh.Due(104.0));
+    CHECK(refresh.Manual(100.0 + LobbyRefresh::kManualGapSeconds) && refresh.Due(105.0));
+    refresh.Start(105.0);
+    refresh.Soon(105.5);
+    CHECK(!refresh.Due(105.6));
+    refresh.Finish();
+    CHECK(refresh.Due(105.6));
+    refresh.Start(200.0);
+    refresh.Fail(201.0);
+    CHECK(!refresh.Due(230.0) && refresh.Due(231.0));
+    refresh.Start(300.0);
+    refresh.Reset();
+    CHECK(refresh.Due(300.0) && !refresh.active());
+
+    CHECK(LobbyUpdatedText(0) == "Updated just now" && LobbyUpdatedText(2) == "Updated 2 min ago");
+
+    const LobbyAction send = LobbyActionOf(R::kNone), pending = LobbyActionOf(R::kPending), pal = LobbyActionOf(R::kFriend),
+                      accept = LobbyActionOf(R::kIncoming);
+    CHECK(std::string(send.text) == "Send friend request" && send.enabled && !send.primary);
+    CHECK(std::string(pending.text) == "Pending" && !pending.enabled);
+    CHECK(std::string(pal.text) == "Friend" && !pal.enabled);
+    CHECK(std::string(accept.text) == "Accept" && accept.enabled && accept.primary && accept.decline);
+    CHECK(!send.decline && !pending.decline && !pal.decline);
+
+    const size_t draw = page.find("void OnlinePage::DrawLobbyPlayer(");
+    const size_t end = page.find("void OnlinePage::DrawLobbyHeader(");
+    CHECK(draw != std::string::npos && end > draw);
+    if (draw == std::string::npos || end <= draw) return;
+    const std::string row = page.substr(draw, end - draw);
+    CHECK(row.find("ui.RowLeft(player.name.c_str());") != std::string::npos && row.find("ImGui::BeginDisabled();") != std::string::npos);
+    CHECK(row.find("client_.RequestFromLobby(player.player);") != std::string::npos);
+    CHECK(row.find("client_.DeclineFromLobby(player.player);") != std::string::npos);
+    CHECK(row.find("Tr(\"Decline\")") != std::string::npos && row.find("LobbyVersionLabel(player)") != std::string::npos);
+    CHECK(row.find("player.player.c_str()") == row.rfind("player.player.c_str()") && row.find("account") == std::string::npos);
+    const std::string client = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_client.cpp");
+    const size_t request = client.find("void OnlineClient::RequestFromLobby(");
+    CHECK(request != std::string::npos && client.find("Send(\"friends.add\"", request) != std::string::npos);
+    CHECK(client.find("Send(\"friends.decline\"", request) != std::string::npos);
+    // A failed read leaves the rows as they were: only a good answer replaces them, and nothing empties them while listed.
+    const size_t list = client.find("case Purpose::kLobbyList:\n        if (ok) {");
+    const size_t failed = client.find("lobby_refresh_.Fail(now);", list);
+    CHECK(list != std::string::npos && failed != std::string::npos);
+    CHECK(client.find("state_.lobby = ReadLobbyPlayers", list) < failed && client.find("state_.lobby.clear()", failed) == std::string::npos);
+    CHECK(client.find("if (!visible) ForgetLobby();") != std::string::npos);
+    for (const char* never : {"\"room.", "room.create", "room.join", "chat"}) CHECK(client.find(never) == std::string::npos);
+    CHECK(page.find("kLobbyVisibleKey, false, \"Off\", \"On\");") != std::string::npos);
+    CHECK(page.find("client_.WatchLobby(") != std::string::npos);
+}
+
+// The Online page: with online play off only its switch; on, the tabs under it and the sections of the selected tab.
+// Settings comes first and is what a blocked PLAY opens. The switch shows the effective state. No lobby address, UPnP
+// switch or status card; friends by Online name.
 void TestOnlinePage() {
     using S = OnlineSection;
-    CHECK(OnlinePageSections(false, 0) == std::vector<S>{S::kOnlinePlay});
-    CHECK(OnlinePageSections(false, 2) == std::vector<S>{S::kOnlinePlay});
-    CHECK(OnlinePageSections(true, 0) ==
-          (std::vector<S>{S::kOnlinePlay, S::kOnlineName, S::kFriendCode, S::kConnectionTest, S::kPingDisplay,
-                          S::kFriends}));
-    CHECK(OnlinePageSections(true, 1) ==
-          (std::vector<S>{S::kOnlinePlay, S::kFriendRequests, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
-                          S::kPingDisplay, S::kFriends}));
+    using T = OnlineTab;
+    for (const T tab : kOnlineTabs) {
+        CHECK(OnlinePageSections(false, tab, 0, false) == std::vector<S>{S::kOnlinePlay});
+        CHECK(OnlinePageSections(false, tab, 2, true) == std::vector<S>{S::kOnlinePlay});
+        const std::vector<S> on = OnlinePageSections(true, tab, 2, true);
+        CHECK(on.size() >= 3 && on[0] == S::kOnlinePlay && on[1] == S::kTabs);
+    }
+    const std::vector<S> settings_tab{S::kOnlinePlay, S::kTabs, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
+                                      S::kPingDisplay};
+    CHECK(OnlinePageSections(true, T::kSettings, 0, false) == settings_tab);
+    CHECK(OnlinePageSections(true, T::kSettings, 3, true) == settings_tab);
+    CHECK(OnlinePageSections(true, T::kFriends, 0, false) == (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kFriends}));
+    CHECK(OnlinePageSections(true, T::kFriends, 1, false) ==
+          (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kFriendRequests, S::kFriends}));
+    CHECK(OnlinePageSections(true, T::kLobby, 1, false) == (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kLobbyVisibility}));
+    CHECK(OnlinePageSections(true, T::kLobby, 1, true) ==
+          (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kLobbyVisibility, S::kLobbyPlayers}));
+    CHECK(std::size(kOnlineTabs) == 3 && std::string(OnlineTabLabel(kOnlineTabs[0])) == "Settings" &&
+          std::string(OnlineTabLabel(kOnlineTabs[1])) == "Friends" && std::string(OnlineTabLabel(kOnlineTabs[2])) == "Lobby");
+    const std::string page_header = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.h");
+    CHECK(page_header.find("OnlineTab tab_ = OnlineTab::kSettings;") != std::string::npos);
+    CHECK(page_header.find("tab_ = OnlineTab::kSettings;\n        pointed_ = true;") != std::string::npos);
 
     const auto set_env = [](const char* name, const char* value) {
 #ifdef _WIN32
@@ -1430,8 +1543,9 @@ void TestOnlinePage() {
         CHECK(page.find(hidden) == std::string::npos);
     }
     for (const char* shown : {"\"Online play\"", "\"Online name\"", "\"Your friend code\"", "\"Connection test\"",
-                              "\"Run test\"", "\"Friends\"", "\"Add a friend\"", "\"Send request\"", "\"XXXX-XXXX\"",
-                              "\"New friend request\"", "Accept\"", "\"Decline\""}) {
+                              "\"Run test\"", "\"Add a friend\"", "\"Send request\"", "\"XXXX-XXXX\"",
+                              "\"New friend request\"", "Accept\"", "\"Decline\"", "\"Show me in Lobby\"",
+                              "\"Players in Lobby\""}) {
         CHECK(page.find(shown) != std::string::npos);
     }
     CHECK(page.find("ui.InputText(\"Online name\", kNameHelp, kOnlineNameKey, net::kDefaultOnlineName)") != std::string::npos);
@@ -1461,6 +1575,7 @@ void TestOnlinePage() {
     }
 
     TestFriendStatus(page);
+    TestLobbyRows(page);
 
     // The release page shows no test-instance note, environment override, address or service name; a switch locked by
     // DCP_ONLINE reads plain On or Off.
@@ -1658,7 +1773,20 @@ void TestPingDisplay(const fs::path& base) {
 
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
     CHECK(page.find("ui.Toggle(\"Ping display\", kPingHelp, kPingDisplayKey, false, \"Off\", \"On\")") != std::string::npos);
-    CHECK(OnlinePageSections(false, 0) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+    CHECK(OnlinePageSections(false, OnlineTab::kSettings, 0, false) == std::vector<OnlineSection>{OnlineSection::kOnlinePlay});
+
+    // Show me in Lobby: off for a player without the setting, live for the launcher's link at once, saved like any other,
+    // and Reset takes it back off.
+    {
+        LauncherSettings settings(file);
+        CHECK(!OnlineConfigOf(settings).lobby_visible && !ReadOnlineConfig(file).lobby_visible);
+        settings.SetBool(kLobbyVisibleKey, true);
+        CHECK(OnlineConfigOf(settings).lobby_visible && !ReadOnlineConfig(file).lobby_visible);
+        CHECK(settings.Save());
+        CHECK(ReadOnlineConfig(file).lobby_visible);
+        settings.ResetToDefaults();
+        CHECK(!OnlineConfigOf(settings).lobby_visible);
+    }
 }
 
 // PLAY with Online play on waits for one finished Connection test on the game's UDP port, whatever its result: saved at
@@ -1792,7 +1920,9 @@ void TestConnectionTestPanel(const fs::path& base) {
     ForgetConnectionTestWhenOff(settings, false);
     settings.SetBool(kOnlineEnabledKey, false);
     CHECK(!ConnectionTestLookOf(needed(settings)).panel);
-    for (const OnlineSection section : OnlinePageSections(false, 0)) CHECK(section != OnlineSection::kConnectionTest);
+    for (const OnlineSection section : OnlinePageSections(false, OnlineTab::kSettings, 0, false)) {
+        CHECK(section != OnlineSection::kConnectionTest);
+    }
 
     // PLAY's second question in a frame is the press; the emphasis is a short soft pulse.
     PlayAttemptDetector detector;
@@ -1870,7 +2000,10 @@ void TestOnlineClient(const fs::path& base) {
     const auto pump = [&](const std::function<bool()>& done, double seconds = 6.0) {
         const double end = clock() + seconds;
         for (;;) {
-            for (Seat* seat : {&alice, &bea, &bea_game, &cleo}) seat->client.Update(seat->on, seat->config, "CUSA10454-1.00", clock());
+            for (Seat* seat : {&alice, &bea, &bea_game, &cleo}) {
+                seat->client.WatchLobby(clock());
+                seat->client.Update(seat->on, seat->config, "CUSA10454-1.00", clock());
+            }
             if (done()) return true;
             if (clock() >= end) return false;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -1915,6 +2048,34 @@ void TestOnlineClient(const fs::path& base) {
     alice.client.Decline(a.incoming.empty() ? "" : a.incoming[0].account);
     CHECK(a.incoming.empty());
     CHECK(!pump([&] { return !a.incoming.empty(); }, 1.0));
+
+    // The public Lobby: Bea never asked, so she is not listed; a row goes Pending at once and Friend after the accept, from
+    // the friend events; and leaving takes the player off the list.
+    const OnlineClient::State& c = cleo.client.state();
+    const auto lists = [](const OnlineClient::State& s, const char* name, LobbyRelation relation) {
+        return std::any_of(s.lobby.begin(), s.lobby.end(),
+                           [&](const LobbyPlayer& p) { return p.name == name && p.relation == relation; });
+    };
+    alice.config.lobby_visible = cleo.config.lobby_visible = true;
+    CHECK(pump([&] { return lists(a, "Cleo", LobbyRelation::kNone) && lists(c, "Alice", LobbyRelation::kNone); }));
+    CHECK(a.lobby.size() == 1 && c.lobby.size() == 1 && b.lobby.empty() && !b.lobby_fetched);
+    cleo.client.RequestFromLobby(c.lobby.empty() ? "" : c.lobby[0].player);
+    CHECK(lists(c, "Alice", LobbyRelation::kPending));
+    CHECK(pump([&] { return a.incoming.size() == 1 && lists(a, "Cleo", LobbyRelation::kIncoming); }));
+    alice.client.DeclineFromLobby(a.lobby.empty() ? "" : a.lobby[0].player);
+    CHECK(lists(a, "Cleo", LobbyRelation::kNone));
+    CHECK(pump([&] { return a.incoming.empty() && lists(c, "Alice", LobbyRelation::kNone); }, 35.0));
+    cleo.client.RequestFromLobby(c.lobby.empty() ? "" : c.lobby[0].player);
+    CHECK(pump([&] { return a.incoming.size() == 1 && lists(a, "Cleo", LobbyRelation::kIncoming); }));
+    alice.client.RequestFromLobby(a.lobby.empty() ? "" : a.lobby[0].player);
+    CHECK(lists(a, "Cleo", LobbyRelation::kFriend));
+    CHECK(pump([&] { return lists(c, "Alice", LobbyRelation::kFriend) && a.incoming.empty() && a.friends.size() == 2; }));
+    cleo.config.lobby_visible = false;
+    CHECK(pump([&] {
+        alice.client.RefreshLobby(clock());
+        return a.lobby_fetched && a.lobby.empty();
+    }, LobbyRefresh::kManualGapSeconds + 5.0));
+    CHECK(c.lobby.empty() && !c.lobby_fetched);
 
     alice.on = false;
     pump([] { return true; });

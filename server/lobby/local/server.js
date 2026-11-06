@@ -80,7 +80,10 @@ export function startLobbyServer({ host: address = '127.0.0.1', port = 8790, db 
     const transport = upgrade(req, socket, {
       maxMessage: INCIDENT.frameChars,
       onText(text) {
-        if (text === 'ping') return transport.send('pong');
+        if (text === 'ping') {
+          conn.notePing();
+          return transport.send('pong');
+        }
         if (verbose) log(`<- ${first.cid} ${describe(text)}`);
         lobby.message(conn, text);
       },

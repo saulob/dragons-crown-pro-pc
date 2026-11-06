@@ -8,8 +8,9 @@ import { INCIDENT } from './incidents.js';
 import { Lobby, PROTOCOL } from './lobby.js';
 
 class WorkerConn {
-  constructor(ws) {
+  constructor(ws, ctx) {
     this.ws = ws;
+    this.ctx = ctx;
   }
 
   attachment() {
@@ -36,6 +37,11 @@ class WorkerConn {
     return this.ws.bufferedAmount;
   }
 
+  // The runtime answers "ping" by itself and only remembers when.
+  keepaliveAt() {
+    return this.ctx.getWebSocketAutoResponseTimestamp(this.ws)?.getTime() ?? 0;
+  }
+
   close(code, reason) {
     this.ws.close(code, reason);
   }
@@ -57,7 +63,7 @@ export class LobbyObject extends DurableObject {
           },
           transaction: (work) => ctx.storage.transactionSync(work),
         },
-        sockets: () => ctx.getWebSockets().map((ws) => new WorkerConn(ws)),
+        sockets: () => ctx.getWebSockets().map((ws) => new WorkerConn(ws, ctx)),
         now: () => Date.now(),
         setAlarm: (ms) => ctx.storage.setAlarm(ms),
         log: (text) => console.log(text),
@@ -93,18 +99,18 @@ export class LobbyObject extends DurableObject {
 
   webSocketMessage(ws, message) {
     if (message instanceof ArrayBuffer) {
-      this.lobby.relay(new WorkerConn(ws), new Uint8Array(message));
+      this.lobby.relay(new WorkerConn(ws, this.ctx), new Uint8Array(message));
       return;
     }
     if (typeof message !== 'string' || message.length > INCIDENT.frameChars) {
       ws.close(1009, 'text frames up to the size limit only');
       return;
     }
-    this.lobby.message(new WorkerConn(ws), message);
+    this.lobby.message(new WorkerConn(ws, this.ctx), message);
   }
 
   webSocketClose(ws, code) {
-    this.lobby.closed(new WorkerConn(ws));
+    this.lobby.closed(new WorkerConn(ws, this.ctx));
     try {
       ws.close(code === 1005 ? 1000 : code, 'closed');
     } catch {
@@ -113,7 +119,7 @@ export class LobbyObject extends DurableObject {
   }
 
   webSocketError(ws) {
-    this.lobby.closed(new WorkerConn(ws));
+    this.lobby.closed(new WorkerConn(ws, this.ctx));
   }
 
   alarm() {

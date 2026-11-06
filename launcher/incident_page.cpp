@@ -12,6 +12,7 @@
 #include "localization/ui_text.h"
 #include "net/online_version.h"
 #include "online_settings.h"
+#include "page_margin.h"
 #include "trg/platform.h"
 #include "utf8.h"
 
@@ -52,13 +53,6 @@ void LogRoleLine(trg::Ui& ui, LogRole role) {
     ImGui::PushFont(nullptr, trg::layout::kTextHelp);
     AccentText(ui, text);
     ImGui::PopFont();
-}
-
-// ImGui rebuilds these rectangles every frame, so nothing has to be restored.
-void KeepClearOfScrollbar(float margin) {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    window->WorkRect.Max.x -= margin;
-    window->ContentRegionRect.Max.x -= margin;
 }
 
 ImVec4 AlertedColor(const ImVec4& color, const ImVec4& alert, double seconds) {

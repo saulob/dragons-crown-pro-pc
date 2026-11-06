@@ -85,6 +85,11 @@ Every protection below is invisible to a client that behaves, and none changes t
   minutes) and one address group (burst 12, then one per 30 s). A refusal spends none of the three and is counted as
   `party_report_limited`; a repeat of the last snapshot of the same connection and room is answered without
   counting and without spending a token. At most 227 rows can exist per day (see below) however many are sent.
+- **Public Lobby** (`lobby.publish`, `lobby.list`, `friends.add` by handle): nothing is written, presence lives in the
+  socket attachment. Publishing is limited per account (burst 6, then one per 10 s), reading per account (burst 6, then
+  one per 5 s) and per address group (burst 60, then 3 per second; a refusal spends neither), and a request by handle per
+  account (burst 10, then one per 15 s) on top of the usual friend limits. Answers hold at most 100 rows and an unchanged
+  list is not sent again. Refusals are counted as `public_lobby_limited`. See `docs/ONLINE.md`.
 - **Relay**: a sender that keeps producing frames no well-behaved client sends (malformed, wrong token, no room,
   stale seat, unknown member, relay not negotiated, no sign-in) is allowed 200 of them and then 5 per second; past that
   its connection is closed with 1008. A destination that is offline or still resuming is not a fault.
@@ -94,8 +99,8 @@ Every protection below is invisible to a client that behaves, and none changes t
   `metrics_daily_dimensions` (no address, no account): `ws_upgrade_accepted`, `ws_upgrade_limited` (reported by the
   Worker on the next upgrade it forwards), `ws_upgrade_ip_cap`, `hello_accepted`, `hello_reconnect_deduped`,
   `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`,
-  `party_report_limited`, and for reports `incident_filed`, `incident_limited`, `incident_hourly_limited`,
-  `incident_daily_limited`. They
+  `party_report_limited`, `public_lobby_limited`, and for reports `incident_filed`, `incident_limited`,
+  `incident_hourly_limited`, `incident_daily_limited`. They
   are in `/admin/api/history` under `dimensions.abuse` and on the dashboard. Counts of the last interval are lost if
   the object is evicted first. Rooms, members, accounts, friends, requests and reports
 are SQLite tables in the Durable Object; per-connection state (presence blob, rate buckets) lives in each socket's

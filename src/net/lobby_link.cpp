@@ -24,7 +24,8 @@ std::string Envelope(const std::string& op, uint32_t seq, Json body) {
 
 } // namespace
 
-Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence, bool relay) {
+Json hello_body(const Identity& identity, const std::string& name, const std::string& game, bool presence, bool relay,
+                bool lobby_visible) {
     Json h = Json::Object();
     h.set("proto", kLobbyProtocol);
     h.set("game", game);
@@ -36,6 +37,7 @@ Json hello_body(const Identity& identity, const std::string& name, const std::st
     h.set("version", port_version());
     h.set("platform", host_platform());
     if (relay) h.set("relay", true);
+    if (lobby_visible) h.set("lobby", true);
     return h;
 }
 

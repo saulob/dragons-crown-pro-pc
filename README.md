@@ -57,7 +57,7 @@
 1. In the launcher, open the **Online** page and turn **Online play** On.
 2. Choose your **Online name**, the name other players see.
 3. Share **Your friend code** with the friends you want to play with (**Copy** puts it on the clipboard). Get theirs too.
-4. Under **Friends**, enter your friend's code and click **Send request**. Your friend sees a **New friend request** card on their Online page and clicks **Accept**. You now appear in each other's **Friends** list, with whether you are online.
+4. On the **Friends** tab, enter your friend's code and click **Send request**. Your friend sees a **New friend request** card on their **Friends** tab and clicks **Accept**. You now appear in each other's **Friends** list, with whether you are online. To meet new players, turn on **Show me in Lobby** on the **Lobby** tab: it is Off until you choose it, shows your Online name to other players with it on, and lets you send each other friend requests. It is not chat or matchmaking.
 5. Click **Run test** under **Connection test**. It is needed once before **PLAY** while Online play is On: it checks the online service and the UDP port the game uses for multiplayer, and on Windows it gives Windows Firewall the chance to ask for network access before the game starts (choose **Allow access** if it does). PLAY becomes available when the test finishes, whatever the result. **Ready for online play** means other players can reach you. Turning Online play Off resets this requirement.
 6. Press **PLAY**.
 7. Complete the opening tutorial and story section, or skip them with the offers above, until the game's online options are available.
@@ -217,7 +217,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 The game runs at its own 60 frames per second unless the Frame rate setting asks for more; its logic stays at 60 either way.
 
 ### Online
-- **Online play** (Off by default), **Online name**, **Your friend code**, **Friends** with friend requests, **Connection test** and **Ping display**. See [Online Co-op](#online-co-op) for how to play and [docs/ONLINE.md](docs/ONLINE.md) for the details.
+- **Online play** (Off by default), then three tabs: **Settings** (**Online name**, **Your friend code**, **Connection test**, **Ping display**), **Friends** with friend requests, and **Lobby** (**Show me in Lobby**, Off by default). See [Online Co-op](#online-co-op) for how to play and [docs/ONLINE.md](docs/ONLINE.md) for the details.
 
 ### Cheats
 - **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**, **Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill Points**, **Infinite Skill Uses** and **Infinite Gold** (Player 1, except the ally cheats; gold is shared by the save), all Off by default. **Movement Speed** (Off, 2x or 4x) and **Experience Multiplier** (Off, 2x, 5x, 10x or 100x) are settings of their own. Press **F10** while playing to open the Cheats menu; it also has the one-shot **Fill Health**, **Fill Ally Health**, **Set Low Health**, **Set Ally Low Health**, **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**. What you change there applies only to the current session, and the next start uses the values saved here. They are meant for offline and local play: while Online Play is on (the setting or `DCP_ONLINE`), every cheat is Off and F10 only shows "Cheats are disabled while Online Play is enabled" See [docs/CHEATS.md](docs/CHEATS.md).
