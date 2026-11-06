@@ -821,7 +821,15 @@ int main(int argc, char **argv) {
         sfo_value(sfo,"ATTRIBUTE",NULL,0,&attributes);
         uint64_t sdk=0;
         if (procparam) memcpy(&sdk,image+procparam+16,8); /* procparam: size, magic, count, sdk_version */
-        DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080};
+        uint32_t features=0;
+        if (known_build) {
+            if (game_build.resolution_site_count || game_build.resolution_by_signature) features|=DCP_GPU_FEATURE_RENDER_RESOLUTION;
+            if (game_build.true_ultrawide) features|=DCP_GPU_FEATURE_TRUE_ULTRAWIDE;
+            if (game_build.japanese_npc_voices && (!game_build.features_by_signature || dcp_npc_voice_resources(app0)))
+                features|=DCP_GPU_FEATURE_JAPANESE_NPC_VOICES;
+            if (game_build.unlock_gallery) features|=DCP_GPU_FEATURE_UNLOCK_GALLERY;
+        }
+        DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080,features};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
         if (dcpgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,dcpgpu_symbol_count());

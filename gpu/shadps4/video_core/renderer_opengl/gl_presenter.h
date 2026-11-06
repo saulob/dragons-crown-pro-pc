@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 // The OpenGL context and the window's swap path. One context lives on the GPU command thread:
 // EGL allows a surface to be current on only one thread, so the present thread hands its work over.

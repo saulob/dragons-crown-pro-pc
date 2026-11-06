@@ -543,18 +543,20 @@ Borderless Fullscreen fills the monitor. F11 also switches it.	Tela cheia sem bo
 Enlarges the picture to a bigger window with AMD FidelityFX Super Resolution 1.	Amplia a imagem para uma janela maior com AMD FidelityFX Super Resolution 1.
 How the picture fits a window or display with a different aspect ratio.	Como a imagem se ajusta a uma janela ou tela com proporção diferente.
 Keyboard bindings, port hotkeys and controller prompts are launcher-only.	Teclas, atalhos do port e ícones do controle só podem ser alterados no launcher.
-Language, voices and Arachnophobia Safe Mode are launcher-only.	Idioma, vozes e Modo seguro para aracnofobia só podem ser alterados no launcher.
+Language and Arachnophobia Safe Mode are launcher-only.	Idioma e Modo seguro para aracnofobia só podem ser alterados no launcher.
 Lets new characters choose whether to begin the tutorial.	Permite que novos personagens escolham se querem começar o tutorial.
 Offers the game's built-in story skip when creating a new character.	Oferece o recurso de pular história do próprio jogo ao criar um novo personagem.
 Online name, friends and friend requests are managed in the launcher.	Nome online, amigos e pedidos de amizade são gerenciados no launcher.
-Render resolution and True Ultrawide are launcher-only: change them before pressing Play.	Resolução de render e True Ultrawide só podem ser alterados no launcher: altere-os antes de pressionar Jogar.
+Renderer, render resolution and texture filtering apply after a restart.	Renderizador, resolução de render e filtragem de texturas valem após reiniciar.
+Vulkan is the supported renderer. OpenGL is experimental. Auto uses OpenGL only when Vulkan cannot run.	Vulkan é o renderizador suportado. OpenGL é experimental. Auto usa OpenGL apenas quando o Vulkan não consegue executar.
+The shape the game renders in. The saved window width follows it.	O formato em que o jogo renderiza. A largura da janela salva o acompanha.
 SMAA smooths jagged edges on the finished picture, at a small cost in speed.	SMAA suaviza as bordas serrilhadas da imagem final, com um pequeno custo de desempenho.
 Sharpens the final picture (AMD RCAS), alone or together with FSR 1 in a bigger window.	Aumenta a nitidez da imagem final (AMD RCAS), sozinho ou junto com o FSR 1 em uma janela maior.
 Sharper textures seen at an angle. Game uses the game's own filtering.	Texturas mais nítidas vistas em ângulo. Jogo usa a filtragem do próprio jogo.
 Shows the frame rate and frame time in a corner of the game. F2 also switches it for this session.	Mostra a taxa de quadros e o tempo de quadro em um canto do jogo. F2 também alterna nesta sessão.
 Shows the frame rate in the window title.	Mostra a taxa de quadros no título da janela.
 Shows the game's render resolution in the window title.	Mostra a resolução de render do jogo no título da janela.
-Window size, Monitor, Aspect Ratio and Graphics card are launcher-only: change them before pressing Play.	Tamanho da janela, Monitor, Proporção e Placa de vídeo só podem ser alterados no launcher: altere-os antes de pressionar Jogar.
+Window size, Monitor and Graphics card are launcher-only: change them before pressing Play.	Tamanho da janela, Monitor e Placa de vídeo só podem ser alterados no launcher: altere-os antes de pressionar Jogar.
 Game files missing	Arquivos do jogo ausentes
 Windows could not start it (error %s).	O Windows não conseguiu iniciá-lo (erro %s).
 No player has that friend code.	Nenhum jogador tem esse código de amigo.

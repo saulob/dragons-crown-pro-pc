@@ -77,6 +77,14 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.graphics_card = value == "automatic" ? std::string() : value;
     } else if (key == "renderer") {
         v.renderer = DcpRenderer::ParseChoice(value);
+    } else if (key == "render_resolution") {
+        v.render_resolution = DcpGraphics::ParseRenderResolution(value);
+    } else if (key == "aspect_ratio") {
+        v.aspect_ratio = DcpGraphics::ParseAspectRatio(value).key;
+    } else if (key == "true_ultrawide") {
+        v.true_ultrawide = ParseBool(value, v.true_ultrawide);
+    } else if (key == "dcp_japanese_npc_voices") {
+        v.japanese_npc_voices = ParseBool(value, v.japanese_npc_voices);
     } else if (key == "anisotropy") {
         v.anisotropy = DcpGraphics::ParseAnisotropy(ParseInt(value, 0));
     } else if (key == "window_width") {

@@ -44,8 +44,12 @@ out of the free queue while it shows it, so the GPU thread can neither draw into
 
 ## OpenGL renderer (experimental)
 
+Where this backend came from, and what it does not use, is in [opengl-renderer.md](opengl-renderer.md).
+
 Vulkan is the renderer of the game: the default, and the reference for every behaviour on this page. The launcher's
-**Renderer** setting (`renderer` in `dcp.ini`: `vulkan`, `auto` or `opengl`, see docs/LAUNCHER.md) selects it at start.
+**Renderer** setting (`renderer` in `dcp.ini`: `vulkan`, `auto` or `opengl`, see docs/LAUNCHER.md) selects it at start; the
+Options menu (F1) saves the same setting and it applies the next time the game starts, since a running game cannot change its
+renderer.
 `dcpgpu_init` (`gpu/shim/dcpgpu.cpp`) resolves the setting through `gpu/shim/dcp_renderer.h`, and the factory in
 `video_core/renderer_factory.cpp` creates the presenter behind `video_core/renderer_backend.h`, the only boundary the GPU
 front end (Liverpool, VideoOut, guest memory) sees. A window is created for one renderer, so Auto decides before there is a

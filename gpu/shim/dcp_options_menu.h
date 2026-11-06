@@ -16,6 +16,7 @@
 
 #include "dcp_graphics.h"
 #include "dcp_menu_input.h"
+#include "dcp_renderer.h"
 #include "dcp_settings.h"
 
 namespace DcpOptions {
@@ -74,11 +75,11 @@ constexpr const char* PageName(Page page) {
 constexpr const char* PageNote(Page page) {
     switch (page) {
     case Page::Display:
-        return "Window size, Monitor, Aspect Ratio and Graphics card are launcher-only: change them before pressing Play.";
+        return "Window size, Monitor and Graphics card are launcher-only: change them before pressing Play.";
     case Page::Graphics:
-        return "Render resolution and True Ultrawide are launcher-only: change them before pressing Play.";
+        return "Renderer, render resolution and texture filtering apply after a restart.";
     case Page::Gameplay:
-        return "Language, voices and Arachnophobia Safe Mode are launcher-only.";
+        return "Language and Arachnophobia Safe Mode are launcher-only.";
     case Page::Online:
         return "Online name, friends and friend requests are managed in the launcher.";
     case Page::Controls:
@@ -88,6 +89,8 @@ constexpr const char* PageNote(Page page) {
     }
     return "";
 }
+
+inline constexpr int kDefaultWindowHeight = 1080;
 
 inline constexpr char kRestartNote[] = "Some changes apply after a restart.";
 
@@ -101,6 +104,15 @@ struct Choice {
 
 inline constexpr Choice kOffOn[] = {{"0", "Off"}, {"1", "On"}};
 inline constexpr Choice kHiddenShown[] = {{"0", "Hidden"}, {"1", "Shown"}};
+inline constexpr Choice kRenderers[] = {{"auto", "Auto"}, {"vulkan", "Vulkan"}, {"opengl", "OpenGL (experimental)"}};
+inline constexpr Choice kRenderResolutions[] = {{"native", "Native (1080p)"}, {"480p", "480p"},   {"720p", "720p"},
+                                                {"1440p", "1440p"},           {"1800p", "1800p"}, {"4K", "4K"}};
+inline constexpr Choice kAspectRatios[] = {{"16:9", "16:9 Original"},
+                                           {"16:10", "16:10"},
+                                           {"21:9", "21:9 Ultrawide"},
+                                           {"32:9", "32:9 Super Ultrawide"},
+                                           {"4:3", "4:3"},
+                                           {"5:4", "5:4"}};
 inline constexpr Choice kUpscaling[] = {{"0", "Off"}, {"1", "FSR 1"}};
 inline constexpr Choice kAntiAliasing[] = {{"0", "Off"}, {"1", "SMAA"}};
 inline constexpr Choice kDisplayModes[] = {{"windowed", "Windowed"}, {"borderless", "Borderless Fullscreen"}};
@@ -117,6 +129,10 @@ inline constexpr Choice kStrengths[] = {
 enum class Id {
     DisplayMode,
     VSync,
+    AspectRatio,
+    TrueUltrawide,
+    Renderer,
+    RenderResolution,
     Presentation,
     Upscaling,
     Sharpening,
@@ -124,6 +140,7 @@ enum class Id {
     AntiAliasing,
     TextureFiltering,
     SkipIntro,
+    JapaneseNpcVoices,
     JapaneseMenuButtons,
     FrameRate,
     FrameRateInTitle,
@@ -142,6 +159,7 @@ struct Setting {
     const char* help;
     Apply apply;
     std::span<const Choice> choices;
+    unsigned feature = 0; ///< DcpSettings::Feature the game build must support; 0: every build
 };
 
 inline constexpr Setting kSettings[] = {
@@ -149,6 +167,20 @@ inline constexpr Setting kSettings[] = {
      "Borderless Fullscreen fills the monitor. F11 also switches it.", Apply::Live, kDisplayModes},
     {Id::VSync, Page::Display, "vsync", "VSync",
      "On prevents tearing. Off allows it, for the lowest latency and G-Sync/FreeSync.", Apply::Live, kOffOn},
+    {Id::AspectRatio, Page::Display, "aspect_ratio", "Aspect Ratio",
+     "The shape the game renders in. The saved window width follows it.", Apply::Restart,
+     kAspectRatios, DcpSettings::RenderResolution},
+    {Id::TrueUltrawide, Page::Display, "true_ultrawide", "True Ultrawide",
+     "Experimental. Expands gameplay beyond 16:9. Some scenes may show unintended background elements. Available with "
+     "21:9 and 32:9.",
+     Apply::Restart, kOffOn, DcpSettings::TrueUltrawide},
+    {Id::Renderer, Page::Graphics, "renderer", "Renderer",
+     "Vulkan is the supported renderer. OpenGL is experimental. Auto uses OpenGL only when Vulkan cannot run.",
+     Apply::Restart, kRenderers},
+    {Id::RenderResolution, Page::Graphics, "render_resolution", "Render resolution",
+     "The resolution the game renders at. It is separate from the window size: the picture is scaled to the window. "
+     "1440p and above need a powerful graphics card.",
+     Apply::Restart, kRenderResolutions, DcpSettings::RenderResolution},
     {Id::Presentation, Page::Graphics, "presentation", "Presentation",
      "How the picture fits a window or display with a different aspect ratio.", Apply::Live, kPresentations},
     {Id::Upscaling, Page::Graphics, "fsr1", "Upscaling",
@@ -163,6 +195,8 @@ inline constexpr Setting kSettings[] = {
      "Sharper textures seen at an angle. Game uses the game's own filtering.", Apply::Restart, kAnisotropy},
     {Id::SkipIntro, Page::Gameplay, "skip_intro", "Skip Intro",
      "Skips the startup logo and starts at the title screen.", Apply::Restart, kOffOn},
+    {Id::JapaneseNpcVoices, Page::Gameplay, "dcp_japanese_npc_voices", "Japanese NPC Voices",
+     "Use Japanese voices for NPC dialogue", Apply::Restart, kOffOn, DcpSettings::JapaneseNpcVoices},
     {Id::JapaneseMenuButtons, Page::Controls, "japanese_menu_buttons", "Japanese Menu Buttons",
      "Swaps Confirm and Cancel in the menus, as in the Japanese release. Combat controls do not change.", Apply::Restart, kOffOn},
     {Id::FrameRate, Page::Gameplay, "frame_rate", "Frame rate",
@@ -180,7 +214,8 @@ inline constexpr Setting kSettings[] = {
     {Id::TutorialSkipOffer, Page::Gameplay, "tutorial_skip_offer", "Tutorial Skip Offer",
      "Lets new characters choose whether to begin the tutorial.", Apply::Restart, kOffOn},
     {Id::UnlockGallery, Page::Gameplay, "unlock_gallery", "Unlock Gallery",
-     "Unlocks all Gallery content while enabled without changing save progress.", Apply::Restart, kOffOn},
+     "Unlocks all Gallery content while enabled without changing save progress.", Apply::Restart, kOffOn,
+     DcpSettings::UnlockGallery},
 };
 
 constexpr const Setting& SettingOf(Id id) {
@@ -213,6 +248,11 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
         return std::string(DcpGraphics::DisplayModeKeys[size_t(std::clamp(v.display_mode.load(), 0,
                                                                           int(DcpGraphics::DisplayModeCount) - 1))]);
     case Id::VSync: return flag(v.vsync);
+    case Id::AspectRatio: return std::string(DcpGraphics::ParseAspectRatio(v.aspect_ratio).key);
+    case Id::TrueUltrawide: return flag(v.true_ultrawide);
+    case Id::Renderer:
+        return std::string(DcpRenderer::ChoiceKeys[size_t(std::clamp(v.renderer.load(), 0, int(DcpRenderer::ChoiceCount) - 1))]);
+    case Id::RenderResolution: return std::string(DcpGraphics::ParseRenderResolution(v.render_resolution));
     case Id::Presentation:
         return std::string(DcpGraphics::PresentationKeys[size_t(std::clamp(v.presentation.load(), 0,
                                                                            int(DcpGraphics::PresentationCount) - 1))]);
@@ -222,6 +262,7 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::AntiAliasing: return flag(v.smaa);
     case Id::TextureFiltering: return std::to_string(v.anisotropy.load());
     case Id::SkipIntro: return flag(v.skip_intro);
+    case Id::JapaneseNpcVoices: return flag(v.japanese_npc_voices);
     case Id::JapaneseMenuButtons: return flag(v.japanese_menu_buttons);
     case Id::FrameRate: return std::to_string(v.frame_rate.load());
     case Id::FrameRateInTitle: return flag(v.show_fps_title);
@@ -232,6 +273,11 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::UnlockGallery: return flag(v.unlock_gallery);
     }
     return {};
+}
+
+// Whether the running game build supports the setting; the menu shows no row for one it does not.
+inline bool Available(const Setting& setting, const DcpSettings::Values& v) {
+    return setting.feature == 0 || (v.features.load() & setting.feature) != 0;
 }
 
 // What the video core and the window read each frame. Only called for Live settings.
@@ -248,8 +294,13 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::FrameRateInTitle: v.show_fps_title = on; break;
     case Id::ResolutionInTitle: v.show_resolution_title = on; break;
     case Id::FrameCounter: v.show_fps = on; break;
+    case Id::AspectRatio:
+    case Id::TrueUltrawide:
+    case Id::Renderer:
+    case Id::RenderResolution:
     case Id::TextureFiltering:
     case Id::SkipIntro:
+    case Id::JapaneseNpcVoices:
     case Id::JapaneseMenuButtons:
     case Id::FrameRate:
     case Id::StorySkipOffer:
@@ -295,7 +346,7 @@ public:
         } else {
             pending_[size_t(id)] = value == Current(values_, id) ? std::string() : std::string(value);
         }
-        return {true, DcpSettings::SaveEntries({{setting.key, std::string(value)}})};
+        return {true, DcpSettings::SaveEntries(EntriesFor(setting, value))};
     }
 
     Outcome Step(Id id, int step) {
@@ -311,6 +362,17 @@ public:
     }
 
 private:
+    // An aspect ratio also saves the window width that keeps the window the same height, as the launcher does.
+    DcpSettings::Entries EntriesFor(const Setting& setting, std::string_view value) const {
+        DcpSettings::Entries entries{{setting.key, std::string(value)}};
+        if (setting.id == Id::AspectRatio) {
+            const int height = values_.requested_height > 0 ? values_.requested_height.load() : kDefaultWindowHeight;
+            entries.emplace_back("window_width",
+                                 std::to_string(DcpGraphics::WindowWidthFor(height, DcpGraphics::ParseAspectRatio(value))));
+        }
+        return entries;
+    }
+
     DcpSettings::Values& values_;
     std::array<std::string, std::size(kSettings)> pending_;
 };

@@ -127,13 +127,13 @@
 
 namespace gl {
 
-#define DCP_GL_DECLARE_CORE(prototype, name) extern decltype(&::prototype) name;
-#define DCP_GL_DECLARE(type, name) extern type name;
-DCP_GL_CORE_FUNCTIONS(DCP_GL_DECLARE_CORE)
-DCP_GL_EXTENSION_FUNCTIONS(DCP_GL_DECLARE)
-DCP_GL_OPTIONAL_FUNCTIONS(DCP_GL_DECLARE)
-#undef DCP_GL_DECLARE_CORE
-#undef DCP_GL_DECLARE
+#define DCP_GL_DECLARATION_CORE(prototype, name) extern decltype(&::prototype) name;
+#define DCP_GL_DECLARATION(type, name) extern type name;
+DCP_GL_CORE_FUNCTIONS(DCP_GL_DECLARATION_CORE)
+DCP_GL_EXTENSION_FUNCTIONS(DCP_GL_DECLARATION)
+DCP_GL_OPTIONAL_FUNCTIONS(DCP_GL_DECLARATION)
+#undef DCP_GL_DECLARATION_CORE
+#undef DCP_GL_DECLARATION
 
 /// With a context current. False and the entry point's name when a required one is missing.
 bool Load(std::string& missing);

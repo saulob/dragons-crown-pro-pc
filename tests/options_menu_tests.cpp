@@ -168,8 +168,8 @@ void TestSettingsTable() {
         Check(!key.starts_with("cheat"), "the Options menu saves no cheat");
         Check(!setting.choices.empty() && setting.label[0] && setting.help[0], "every setting is labelled and has choices");
     }
-    for (const char* launcher_only : {"window_width", "window_height", "monitor", "aspect_ratio", "render_resolution",
-                                      "true_ultrawide", "graphics_card", "text_language", "controller_prompts"}) {
+    for (const char* launcher_only : {"window_width", "window_height", "monitor", "graphics_card", "text_language",
+                                      "controller_prompts", "arachnophobia_safe_mode", "allow_overlay_programs"}) {
         Check(keys.find(std::string("|") + launcher_only + "|") == std::string::npos,
               "launcher-only settings are not offered");
     }
@@ -178,14 +178,17 @@ void TestSettingsTable() {
     for (const Setting& setting : kSettings) {
         restart += setting.apply == Apply::Restart;
     }
-    Check(restart == 7 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
+    Check(restart == 12 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
+              SettingOf(Id::Renderer).apply == Apply::Restart && SettingOf(Id::RenderResolution).apply == Apply::Restart &&
+              SettingOf(Id::AspectRatio).apply == Apply::Restart && SettingOf(Id::TrueUltrawide).apply == Apply::Restart &&
+              SettingOf(Id::JapaneseNpcVoices).apply == Apply::Restart &&
               SettingOf(Id::FrameRate).apply == Apply::Restart && SettingOf(Id::SkipIntro).apply == Apply::Restart &&
               SettingOf(Id::JapaneseMenuButtons).apply == Apply::Restart &&
               SettingOf(Id::StorySkipOffer).apply == Apply::Restart &&
               SettingOf(Id::TutorialSkipOffer).apply == Apply::Restart &&
               SettingOf(Id::UnlockGallery).apply == Apply::Restart,
-          "texture filtering, the frame rate, Skip Intro, the menu buttons, the skip offers and Unlock Gallery are the "
-          "settings read once");
+          "the renderer, the render shape, texture filtering, the frame rate, Japanese NPC Voices, Skip Intro, the menu "
+          "buttons, the skip offers and Unlock Gallery are the settings read once");
     for (const Id live : {Id::DisplayMode, Id::VSync, Id::Presentation, Id::Upscaling, Id::Sharpening,
                           Id::SharpeningStrength, Id::AntiAliasing, Id::FrameRateInTitle, Id::ResolutionInTitle,
                           Id::FrameCounter}) {
@@ -473,6 +476,225 @@ void TestJapaneseMenuButtons(const fs::path& folder) {
     Check(Contains(Source("gpu/shim/dcp_settings.cpp"), "key == \"japanese_menu_buttons\"") &&
               !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "japanese_menu_buttons"),
           "it has one reader and one table row");
+}
+
+// Every key the launcher stores is an Options row or is named here as launcher-only.
+void TestLauncherParity() {
+    using namespace DcpOptions;
+    const std::string launcher = Source("launcher/settings.h") + Source("launcher/online_settings.h");
+    std::vector<std::string> launcher_keys;
+    std::istringstream lines(launcher);
+    for (std::string line; std::getline(lines, line);) {
+        const size_t at = line.find("Key[] = \"");
+        if (line.find("inline constexpr char k") == std::string::npos || at == std::string::npos) {
+            continue;
+        }
+        const size_t begin = at + 9;
+        launcher_keys.push_back(line.substr(begin, line.find('"', begin) - begin));
+    }
+    Check(launcher_keys.size() > 30, "the launcher's keys are read from its header");
+
+    const std::vector<std::string> launcher_only = {
+        "show_launcher",
+        "window_width",
+        "window_height",
+        "monitor",
+        "graphics_card",
+        "text_language",
+        "detailed_logging",
+        "controller_prompts",
+        "arachnophobia_safe_mode",
+        "allow_overlay_programs",
+        "launcher_x",
+        "launcher_y",
+        "launcher_width",
+        "launcher_height",
+        "launcher_maximized",
+        "launcher_fullscreen",
+        "online_enabled",
+        "online_name",
+        "online_udp_port",
+        "online_stun",
+        "online_connection_test_port",
+        "show_ping"};
+    const auto has = [](const std::vector<std::string>& list, const std::string& key) {
+        return std::find(list.begin(), list.end(), key) != list.end();
+    };
+    std::vector<std::string> row_keys;
+    for (const Setting& setting : kSettings) {
+        row_keys.push_back(setting.key);
+    }
+    for (const std::string& key : launcher_keys) {
+        Check(has(row_keys, key) != has(launcher_only, key), ("the launcher key " + key + " is a row or launcher-only").c_str());
+    }
+    for (const std::string& key : row_keys) {
+        Check(has(launcher_keys, key), ("the row key " + key + " is the launcher's").c_str());
+    }
+    for (const std::string& key : launcher_only) {
+        Check(has(launcher_keys, key), ("the launcher-only key " + key + " is still the launcher's").c_str());
+    }
+}
+
+void TestRendererRow(const fs::path& folder) {
+    using namespace DcpOptions;
+    const Setting& setting = SettingOf(Id::Renderer);
+    Check(std::string(setting.key) == "renderer" && setting.page == Page::Graphics && setting.apply == Apply::Restart &&
+              setting.feature == 0,
+          "Renderer is a restart-required Graphics row on every build");
+    Check(setting.choices.size() == 3 && setting.choices[0].value == "auto" && setting.choices[1].value == "vulkan" &&
+              setting.choices[2].value == "opengl",
+          "Renderer offers Auto, Vulkan and OpenGL");
+    const std::string launcher = Source("launcher/settings.h");
+    for (const Choice& choice : setting.choices) {
+        Check(DcpRenderer::ChoiceKeys[size_t(DcpRenderer::ParseChoice(choice.value))] == choice.value,
+              "every renderer choice is a value the video core parses");
+        Check(Contains(launcher, "{\"" + std::string(choice.value) + "\","), "every renderer choice is the launcher's");
+    }
+
+    const fs::path file = folder / "renderer.ini";
+    WriteFile(file, "# keep\nrenderer = vulkan\nfuture_setting = 1\n");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    Options options(live);
+    Check(options.Shown(Id::Renderer) == "vulkan", "the menu shows the renderer the file names");
+
+    const Outcome outcome = options.Choose(Id::Renderer, "opengl");
+    Check(outcome.changed && outcome.saved && options.Pending(Id::Renderer) && options.RestartPending(),
+          "choosing a renderer saves it and waits for the restart");
+    Check(live.renderer == DcpRenderer::Vulkan && options.Shown(Id::Renderer) == "opengl",
+          "the running renderer is left alone");
+    const std::string text = ReadAll(file);
+    Check(Contains(text, "renderer = opengl\n") && Contains(text, "# keep\n") && Contains(text, "future_setting = 1\n"),
+          "it is saved under the launcher's key and the rest of the file is kept");
+    DcpSettings::Values restarted;
+    Check(DcpSettings::Read(file.string(), restarted) && restarted.renderer == DcpRenderer::OpenGL,
+          "a restart reads what the menu saved");
+
+    DcpSettings::Values untouched;
+    ApplyLive(untouched, Id::Renderer, "opengl");
+    Check(untouched.renderer == DcpRenderer::Vulkan, "nothing switches the renderer live");
+    options.Choose(Id::Renderer, "vulkan");
+    Check(!options.Pending(Id::Renderer) && !options.RestartPending(), "choosing the running renderer clears the wait");
+    const std::string menu = Source("gpu/shim/dcp_options_menu.cpp");
+    Check(!Contains(menu, "renderer") && !Contains(menu, "Renderer"), "the menu code has no renderer switch of its own");
+}
+
+void TestRenderShapeRows(const fs::path& folder) {
+    using namespace DcpOptions;
+    const std::string resolution_source = Source("launcher/resolution.c");
+    Check(SettingOf(Id::RenderResolution).choices.size() == DcpGraphics::RenderResolutionKeys.size(),
+          "Render resolution offers the launcher's resolutions");
+    size_t index = 0;
+    for (const Choice& choice : SettingOf(Id::RenderResolution).choices) {
+        Check(choice.value == DcpGraphics::RenderResolutionKeys[index++] &&
+                  Contains(resolution_source, "{\"" + std::string(choice.value) + "\", \"" + std::string(choice.label) + "\","),
+              "every render resolution choice is one the launcher lists, with its name");
+    }
+    Check(SettingOf(Id::AspectRatio).choices.size() == DcpGraphics::AspectRatios.size(),
+          "Aspect Ratio offers the launcher's shapes");
+    index = 0;
+    for (const Choice& choice : SettingOf(Id::AspectRatio).choices) {
+        const DcpGraphics::AspectRatio& aspect = DcpGraphics::AspectRatios[index++];
+        Check(choice.value == aspect.key &&
+                  Contains(resolution_source, "{\"" + std::string(choice.value) + "\", \"" + std::string(choice.label) + "\", " +
+                                                  std::to_string(aspect.width) + ", " + std::to_string(aspect.height) + "}"),
+              "every aspect ratio choice is a shape the launcher lists, with its name and size");
+    }
+    Check(Contains(Source("launcher/options.cpp"),
+                   "(static_cast<long>(height) * aspect.width * 2 + aspect.height) / (2 * aspect.height)"),
+          "the window width an aspect ratio saves is the launcher's formula");
+    Check(DcpGraphics::WindowWidthFor(1080, DcpGraphics::ParseAspectRatio("16:9")) == 1920 &&
+              DcpGraphics::WindowWidthFor(1080, DcpGraphics::ParseAspectRatio("21:9")) == 2520 &&
+              DcpGraphics::WindowWidthFor(1080, DcpGraphics::ParseAspectRatio("32:9")) == 3840 &&
+              DcpGraphics::WindowWidthFor(1080, DcpGraphics::ParseAspectRatio("16:10")) == 1728 &&
+              DcpGraphics::WindowWidthFor(1080, DcpGraphics::ParseAspectRatio("4:3")) == 1440 &&
+              DcpGraphics::WindowWidthFor(1080, DcpGraphics::ParseAspectRatio("5:4")) == 1350,
+          "window widths follow the aspect ratio");
+    Check(DcpGraphics::WiderThanOriginal(DcpGraphics::ParseAspectRatio("21:9")) &&
+              DcpGraphics::WiderThanOriginal(DcpGraphics::ParseAspectRatio("32:9")) &&
+              !DcpGraphics::WiderThanOriginal(DcpGraphics::ParseAspectRatio("16:9")) &&
+              !DcpGraphics::WiderThanOriginal(DcpGraphics::ParseAspectRatio("16:10")) &&
+              !DcpGraphics::WiderThanOriginal(DcpGraphics::ParseAspectRatio("4:3")),
+          "True Ultrawide applies to the shapes wider than 16:9");
+    Check(DcpGraphics::ParseRenderResolution("8K") == "native" && DcpGraphics::ParseAspectRatio("2:1").key == "16:9",
+          "an unknown resolution or shape is the original one");
+
+    const fs::path file = folder / "shape.ini";
+    WriteFile(file, "# keep\nwindow_height = 1080\nwindow_width = 1920\nfuture_setting = 1\n");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    Options options(live);
+    Check(options.Shown(Id::AspectRatio) == "16:9" && options.Shown(Id::RenderResolution) == "native" &&
+              options.Shown(Id::TrueUltrawide) == "0" && options.Shown(Id::JapaneseNpcVoices) == "0",
+          "the new rows start at the launcher's defaults");
+
+    const Outcome outcome = options.Choose(Id::AspectRatio, "21:9");
+    Check(outcome.changed && outcome.saved && options.Pending(Id::AspectRatio) && live.aspect_ratio == "16:9",
+          "an aspect ratio waits for the restart");
+    options.Choose(Id::RenderResolution, "1440p");
+    options.Choose(Id::TrueUltrawide, "1");
+    options.Choose(Id::JapaneseNpcVoices, "1");
+    std::string text = ReadAll(file);
+    Check(Contains(text, "aspect_ratio = 21:9\n") && Contains(text, "window_width = 2520\n") &&
+              Contains(text, "render_resolution = 1440p\n") && Contains(text, "true_ultrawide = 1\n") &&
+              Contains(text, "dcp_japanese_npc_voices = 1\n") && Contains(text, "# keep\n") &&
+              Contains(text, "window_height = 1080\n") && Contains(text, "future_setting = 1\n"),
+          "the choices are saved under the launcher's keys with the window width that follows the shape");
+    DcpSettings::Values restarted;
+    Check(DcpSettings::Read(file.string(), restarted) && restarted.aspect_ratio == "21:9" &&
+              restarted.render_resolution == "1440p" && restarted.true_ultrawide && restarted.japanese_npc_voices &&
+              restarted.requested_width == 2520,
+          "a restart reads what the menu saved");
+    Check(live.render_resolution == "native" && !live.true_ultrawide && !live.japanese_npc_voices,
+          "the running session keeps its values");
+
+    options.Choose(Id::AspectRatio, "16:9");
+    text = ReadAll(file);
+    Check(!options.Pending(Id::AspectRatio) && Contains(text, "aspect_ratio = 16:9\n") && Contains(text, "window_width = 1920\n"),
+          "going back to the running shape clears the wait and restores the width");
+
+    DcpSettings::Values untouched;
+    for (const Id id : {Id::AspectRatio, Id::RenderResolution, Id::TrueUltrawide, Id::JapaneseNpcVoices}) {
+        ApplyLive(untouched, id, id == Id::AspectRatio ? "21:9" : id == Id::RenderResolution ? "4K" : "1");
+    }
+    Check(untouched.aspect_ratio == "16:9" && untouched.render_resolution == "native" && !untouched.true_ultrawide &&
+              !untouched.japanese_npc_voices,
+          "nothing applies them live");
+}
+
+void TestBuildFeatureRows() {
+    using namespace DcpOptions;
+    DcpSettings::Values none;
+    none.features = 0;
+    DcpSettings::Values all;
+    const Id gated[] = {Id::AspectRatio, Id::RenderResolution, Id::TrueUltrawide, Id::JapaneseNpcVoices, Id::UnlockGallery};
+    for (const Setting& setting : kSettings) {
+        const bool is_gated = std::find(std::begin(gated), std::end(gated), setting.id) != std::end(gated);
+        Check(Available(setting, all), "a build with every feature offers every row");
+        Check(Available(setting, none) == !is_gated, "a build with no feature offers only the rows every build has");
+    }
+    DcpSettings::Values resolution_only;
+    resolution_only.features = DcpSettings::RenderResolution;
+    Check(Available(SettingOf(Id::RenderResolution), resolution_only) && Available(SettingOf(Id::AspectRatio), resolution_only) &&
+              !Available(SettingOf(Id::TrueUltrawide), resolution_only) &&
+              !Available(SettingOf(Id::JapaneseNpcVoices), resolution_only),
+          "each feature opens its own rows");
+
+    const std::string loader = Source("src/loader.c");
+    for (const char* feature : {"DCP_GPU_FEATURE_RENDER_RESOLUTION", "DCP_GPU_FEATURE_TRUE_ULTRAWIDE",
+                                "DCP_GPU_FEATURE_JAPANESE_NPC_VOICES", "DCP_GPU_FEATURE_UNLOCK_GALLERY"}) {
+        Check(Contains(loader, feature) && Contains(Source("src/dcpgpu.h"), feature), "the loader reports every feature");
+    }
+    Check(Contains(loader, "game_build.japanese_npc_voices && (!game_build.features_by_signature || dcp_npc_voice_resources(app0))"),
+          "the voices row follows the launcher's rule for offering them");
+    Check(Contains(Source("gpu/shim/dcpgpu.cpp"), "DcpSettings::Get().features = config->features;"),
+          "the video core keeps what the loader reported");
+    const std::string menu = Source("gpu/shim/dcp_options_menu.cpp");
+    size_t offered = 0;
+    for (size_t at = menu.find("&& Offered(setting)"); at != std::string::npos; at = menu.find("&& Offered(setting)", at + 1)) {
+        ++offered;
+    }
+    Check(offered == 2, "both row lists leave out what the build does not support");
 }
 
 void TestEveryChoiceRoundTrips(const fs::path& folder) {
@@ -946,6 +1168,10 @@ int main() {
     TestSkipIntro(folder);
     TestUnlockGallery(folder);
     TestJapaneseMenuButtons(folder);
+    TestLauncherParity();
+    TestRendererRow(folder);
+    TestRenderShapeRows(folder);
+    TestBuildFeatureRows();
     TestEveryChoiceRoundTrips(folder);
     TestStepAndCycle(folder);
     TestOnlinePlayLocksCheats();

@@ -208,8 +208,14 @@ static void SelectRenderer() {
     }
 }
 
+static_assert(DCP_GPU_FEATURE_RENDER_RESOLUTION == DcpSettings::RenderResolution &&
+              DCP_GPU_FEATURE_TRUE_ULTRAWIDE == DcpSettings::TrueUltrawide &&
+              DCP_GPU_FEATURE_JAPANESE_NPC_VOICES == DcpSettings::JapaneseNpcVoices &&
+              DCP_GPU_FEATURE_UNLOCK_GALLERY == DcpSettings::UnlockGallery);
+
 extern "C" int dcpgpu_init(const DcpGpuConfig* config) {
     DcpSettings::Load(config->settings_file);
+    DcpSettings::Get().features = config->features;
     SelectRenderer();
     const std::string user_dir = config->user_dir;
     Common::FS::SetUserDir(std::filesystem::path(std::u8string(user_dir.begin(), user_dir.end())));

@@ -13,6 +13,14 @@
 
 namespace DcpSettings {
 
+enum Feature : unsigned {
+    RenderResolution = 1u << 0,
+    TrueUltrawide = 1u << 1,
+    JapaneseNpcVoices = 1u << 2,
+    UnlockGallery = 1u << 3,
+    AllFeatures = (1u << 4) - 1,
+};
+
 struct Values {
     // Frame counter overlay: font size in percent and corner (0 top left, 1 top right, 2 bottom left, 3 bottom right).
     std::atomic<bool> show_fps{false};
@@ -41,6 +49,12 @@ struct Values {
     // applies them once, so the Options menu never changes these.
     std::atomic<bool> skip_intro{false}, japanese_menu_buttons{false}, unlock_gallery{false}, story_skip_offer{false},
         tutorial_skip_offer{false};
+    // Read once at start: render_resolution and aspect_ratio as dcp.ini names them (Load() only), True Ultrawide and
+    // Japanese NPC Voices.
+    std::string render_resolution{"native"}, aspect_ratio{"16:9"};
+    std::atomic<bool> true_ultrawide{false}, japanese_npc_voices{false};
+    // What the running game build supports (Feature bits), set by the loader.
+    std::atomic<unsigned> features{AllFeatures};
     // Set by the window: the refresh rate of the display it opened on; 0 when unknown.
     std::atomic<double> display_refresh_hz{0.0};
     // Presentation pacing (driver.cpp). 0: Unlimited.

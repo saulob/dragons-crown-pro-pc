@@ -84,11 +84,15 @@ std::vector<Info> Hotkeys() {
             {dcp::Tr("Ping (Online Play)"), KeyName(DcpPing::kPingKey)}};
 }
 
+bool Offered(const DcpOptions::Setting& setting) {
+    return DcpOptions::Available(setting, DcpSettings::Get());
+}
+
 std::vector<RowRef> RowsOf(Page page, const CheatRows& cheats) {
     std::vector<RowRef> rows;
     if (page == Page::Controls) {
         for (const DcpOptions::Setting& setting : DcpOptions::kSettings) {
-            if (setting.page == page) {
+            if (setting.page == page && Offered(setting)) {
                 rows.push_back({Kind::Setting, size_t(setting.id)});
             }
         }
@@ -106,7 +110,7 @@ std::vector<RowRef> RowsOf(Page page, const CheatRows& cheats) {
         }
     } else {
         for (const DcpOptions::Setting& setting : DcpOptions::kSettings) {
-            if (setting.page == page) {
+            if (setting.page == page && Offered(setting)) {
                 rows.push_back({Kind::Setting, size_t(setting.id)});
             }
         }
