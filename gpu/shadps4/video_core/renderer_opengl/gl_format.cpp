@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <bit>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <type_traits>
 #include <unordered_map>
 
+#include "video_core/renderer_opengl/gl_capabilities.h"
 #include "video_core/renderer_opengl/gl_format.h"
 
 namespace OpenGL {
+namespace {
 
-const TextureFormat* FindTextureFormat(vk::Format format) {
+using TextureTable = std::unordered_map<vk::Format, TextureFormat>;
+
+const TextureTable& DesktopTextures() {
     using F = vk::Format;
     static constexpr auto color = [](GLenum internal, GLenum layout, GLenum type) {
         return TextureFormat{internal, layout, type, false};
@@ -15,7 +25,7 @@ const TextureFormat* FindTextureFormat(vk::Format format) {
         return TextureFormat{internal, GL_RGBA, GL_UNSIGNED_BYTE, true};
     };
     static const auto table = [] {
-        std::unordered_map<vk::Format, TextureFormat> t;
+        TextureTable t;
         t[F::eR8Unorm] = color(GL_R8, GL_RED, GL_UNSIGNED_BYTE);
         t[F::eR8Snorm] = color(GL_R8_SNORM, GL_RED, GL_BYTE);
         t[F::eR8Uint] = color(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE);
@@ -92,8 +102,230 @@ const TextureFormat* FindTextureFormat(vk::Format format) {
             color(GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL, GL_FLOAT_32_UNSIGNED_INT_24_8_REV);
         return t;
     }();
+    return table;
+}
+
+const TextureTable& GlesTextures() {
+    using F = vk::Format;
+    using C = TexelConversion;
+    static const auto table = [] {
+        TextureTable t = DesktopTextures();
+        const auto convert = [&t](F format, GLenum layout, GLenum type, C conversion) {
+            t[format].format = layout;
+            t[format].type = type;
+            t[format].conversion = conversion;
+        };
+        convert(F::eB8G8R8A8Unorm, GL_RGBA, GL_UNSIGNED_BYTE, C::SwapRedBlue8888);
+        convert(F::eB8G8R8A8Srgb, GL_RGBA, GL_UNSIGNED_BYTE, C::SwapRedBlue8888);
+        convert(F::eA2R10G10B10UnormPack32, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, C::SwapRedBlue2101010);
+        convert(F::eB5G6R5UnormPack16, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, C::B5G6R5);
+        convert(F::eB4G4R4A4UnormPack16, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4, C::B4G4R4A4);
+        convert(F::eA1R5G5B5UnormPack16, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, C::A1R5G5B5);
+        for (const F format : {F::eBc1RgbaSrgbBlock, F::eBc2SrgbBlock, F::eBc3SrgbBlock}) {
+            t[format].need = FormatNeed::S3tcSrgb;
+        }
+        for (const F format : {F::eBc4UnormBlock, F::eBc4SnormBlock, F::eBc5UnormBlock, F::eBc5SnormBlock}) {
+            t[format].need = FormatNeed::Rgtc;
+        }
+        for (const F format :
+             {F::eBc6HUfloatBlock, F::eBc6HSfloatBlock, F::eBc7UnormBlock, F::eBc7SrgbBlock}) {
+            t[format].need = FormatNeed::Bptc;
+        }
+        for (const F format :
+             {F::eR16Unorm, F::eR16Snorm, F::eR16G16Unorm, F::eR16G16Snorm, F::eR16G16B16A16Unorm,
+              F::eR16G16B16A16Snorm}) {
+            t[format].need = FormatNeed::Norm16;
+        }
+        return t;
+    }();
+    return table;
+}
+
+u32 ComponentBytes(GLenum type) {
+    switch (type) {
+    case GL_BYTE:
+    case GL_UNSIGNED_BYTE:
+        return 1;
+    case GL_SHORT:
+    case GL_UNSIGNED_SHORT:
+    case GL_HALF_FLOAT:
+        return 2;
+    default:
+        return 4;
+    }
+}
+
+float HalfToFloat(u16 half) {
+    const u32 sign = u32(half & 0x8000u) << 16;
+    const u32 exponent = (half >> 10) & 0x1Fu;
+    const u32 mantissa = half & 0x3FFu;
+    if (exponent == 0) {
+        return std::copysign(std::ldexp(float(mantissa), -24), sign != 0 ? -1.0f : 1.0f);
+    }
+    return std::bit_cast<float>(sign | (exponent == 31 ? 0x7F800000u : (exponent + 112) << 23) |
+                                (mantissa << 13));
+}
+
+float SignedNormalized(s32 value, u32 bits) {
+    return std::max(float(value) / float((1u << (bits - 1)) - 1), -1.0f);
+}
+
+u32 FloatBits(float value) {
+    return std::bit_cast<u32>(value);
+}
+
+template <typename Component>
+Component ReadComponent(const u8* data) {
+    Component value;
+    std::memcpy(&value, data, sizeof(value));
+    return value;
+}
+
+template <typename Component>
+u32 DecodeComponent(const VertexFormat& format, const u8* data) {
+    const Component value = ReadComponent<Component>(data);
+    if (format.integer) {
+        return u32(s64(value));
+    }
+    if (!format.normalized) {
+        return FloatBits(float(value));
+    }
+    constexpr u32 bits = sizeof(Component) * 8;
+    if constexpr (std::is_signed_v<Component>) {
+        return FloatBits(SignedNormalized(s32(value), bits));
+    } else {
+        return FloatBits(float(value) / float(std::numeric_limits<Component>::max()));
+    }
+}
+
+VertexElement DefaultVertexElement(const VertexFormat& format) {
+    return {0, 0, 0, format.integer ? 1u : FloatBits(1.0f)};
+}
+
+VertexElement DecodePacked1010102(const VertexFormat& format, const u8* data) {
+    const u32 packed = ReadComponent<u32>(data);
+    const bool is_signed = format.type == GL_INT_2_10_10_10_REV;
+    VertexElement out{};
+    for (u32 component = 0; component < 4; ++component) {
+        const u32 shift = component * 10;
+        const u32 bits = component == 3 ? 2 : 10;
+        const u32 raw = (packed >> shift) & ((1u << bits) - 1);
+        const s32 extended = s32(raw << (32 - bits)) >> (32 - bits);
+        out[component] = is_signed ? FloatBits(SignedNormalized(extended, bits))
+                                   : FloatBits(float(raw) / float((1u << bits) - 1));
+    }
+    return out;
+}
+
+template <typename Texel, typename Rearrange>
+void RearrangeTexels(u8* texels, size_t bytes, Rearrange rearrange) {
+    for (size_t offset = 0; offset + sizeof(Texel) <= bytes; offset += sizeof(Texel)) {
+        Texel texel;
+        std::memcpy(&texel, texels + offset, sizeof(Texel));
+        texel = Texel(rearrange(texel));
+        std::memcpy(texels + offset, &texel, sizeof(Texel));
+    }
+}
+
+} // namespace
+
+const TextureFormat* FindTextureFormat(vk::Format format, bool gles) {
+    const auto& table = gles ? GlesTextures() : DesktopTextures();
     const auto it = table.find(format);
     return it == table.end() ? nullptr : &it->second;
+}
+
+bool StoresBlueFirst(const TextureFormat& format) {
+    return format.format == GL_BGRA || format.conversion == TexelConversion::SwapRedBlue8888 ||
+           format.conversion == TexelConversion::SwapRedBlue2101010;
+}
+
+bool FormatAvailable(const TextureFormat& format, const Capabilities& capabilities) {
+    switch (format.need) {
+    case FormatNeed::S3tcSrgb:
+        return capabilities.s3tc_srgb;
+    case FormatNeed::Rgtc:
+        return capabilities.rgtc;
+    case FormatNeed::Bptc:
+        return capabilities.bptc;
+    case FormatNeed::Norm16:
+        return capabilities.norm16;
+    default:
+        return true;
+    }
+}
+
+void ConvertTexels(TexelConversion conversion, u8* texels, size_t bytes) {
+    switch (conversion) {
+    case TexelConversion::SwapRedBlue8888:
+        RearrangeTexels<u32>(texels, bytes, [](u32 p) {
+            return (p & 0xFF00FF00u) | ((p & 0xFFu) << 16) | ((p >> 16) & 0xFFu);
+        });
+        break;
+    case TexelConversion::SwapRedBlue2101010:
+        RearrangeTexels<u32>(texels, bytes, [](u32 p) {
+            return (p & 0xC00FFC00u) | ((p & 0x3FFu) << 20) | ((p >> 20) & 0x3FFu);
+        });
+        break;
+    case TexelConversion::B5G6R5:
+        RearrangeTexels<u16>(texels, bytes, [](u16 p) {
+            return (p & 0x07E0u) | ((p & 0x1Fu) << 11) | (p >> 11);
+        });
+        break;
+    case TexelConversion::B4G4R4A4:
+        RearrangeTexels<u16>(texels, bytes, [](u16 p) {
+            return (p & 0x0F0Fu) | ((p & 0xF0u) << 8) | ((p >> 8) & 0xF0u);
+        });
+        break;
+    case TexelConversion::A1R5G5B5:
+        RearrangeTexels<u16>(texels, bytes, [](u16 p) { return ((p & 0x7FFFu) << 1) | (p >> 15); });
+        break;
+    default:
+        break;
+    }
+}
+
+u32 VertexFormatBytes(const VertexFormat& format) {
+    const bool packed = format.type == GL_INT_2_10_10_10_REV || format.type == GL_UNSIGNED_INT_2_10_10_10_REV;
+    return packed ? 4 : u32(format.size) * ComponentBytes(format.type);
+}
+
+VertexElement ReadVertexElement(const VertexFormat& format, const u8* data, u64 size, u32 stride,
+                                u64 element) {
+    const u64 bytes = VertexFormatBytes(format);
+    if (!data || element > (size / std::max<u32>(stride, 1)) || element * stride + bytes > size) {
+        return DefaultVertexElement(format);
+    }
+    const u8* source = data + element * stride;
+    if (format.type == GL_INT_2_10_10_10_REV || format.type == GL_UNSIGNED_INT_2_10_10_10_REV) {
+        return DecodePacked1010102(format, source);
+    }
+    VertexElement out = DefaultVertexElement(format);
+    const u32 step = ComponentBytes(format.type);
+    for (s32 component = 0; component < format.size; ++component) {
+        const u8* at = source + u32(component) * step;
+        switch (format.type) {
+        case GL_BYTE:
+            out[component] = DecodeComponent<s8>(format, at);
+            break;
+        case GL_UNSIGNED_BYTE:
+            out[component] = DecodeComponent<u8>(format, at);
+            break;
+        case GL_SHORT:
+            out[component] = DecodeComponent<s16>(format, at);
+            break;
+        case GL_UNSIGNED_SHORT:
+            out[component] = DecodeComponent<u16>(format, at);
+            break;
+        case GL_HALF_FLOAT:
+            out[component] = FloatBits(HalfToFloat(ReadComponent<u16>(at)));
+            break;
+        default:
+            out[component] = ReadComponent<u32>(at);
+            break;
+        }
+    }
+    return out;
 }
 
 const VertexFormat* FindVertexFormat(vk::Format format) {

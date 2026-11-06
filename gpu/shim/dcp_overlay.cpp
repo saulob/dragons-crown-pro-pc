@@ -28,6 +28,10 @@
 #include "imgui.h"
 #include "imgui_internal.h" // RegisterUserTexture (save pictures)
 #include "imgui_impl_opengl3.h"
+#ifdef _WIN32
+#include "dcp_renderer.h"
+#include "imgui_impl_gles3.h"
+#endif
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -762,7 +766,14 @@ void InitOpenGL() {
         return;
     }
     CreateImGuiContext();
-    if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
+#ifdef _WIN32
+    const bool started = DcpRenderer::Active() == DcpRenderer::Backend::Direct3D11
+                             ? InitImGuiGles3()
+                             : ImGui_ImplOpenGL3_Init("#version 330 core");
+#else
+    const bool started = ImGui_ImplOpenGL3_Init("#version 330 core");
+#endif
+    if (!started) {
         std::printf("Overlay: ImGui OpenGL backend init failed\n");
         ImGui::DestroyContext();
         return;
@@ -1172,6 +1183,13 @@ void RenderOpenGL(u32 width, u32 height) {
         return;
     }
     std::scoped_lock lock{imgui_mutex};
+#ifdef _WIN32
+    if (DcpRenderer::Active() == DcpRenderer::Backend::Direct3D11) {
+        BuildFrame(width, height, ImGuiGles3NewFrame);
+        ImGuiGles3RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
+#endif
     BuildFrame(width, height, ImGui_ImplOpenGL3_NewFrame);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

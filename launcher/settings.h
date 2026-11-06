@@ -94,6 +94,9 @@ inline constexpr RendererChoice kRendererChoices[] = {
     {"auto", "Auto"},
     {"vulkan", "Vulkan"},
     {"opengl", "OpenGL (experimental)"},
+#ifdef _WIN32
+    {"d3d11", "Direct3D 11 (experimental)"},
+#endif
 };
 inline constexpr char kDefaultRenderer[] = "vulkan";
 

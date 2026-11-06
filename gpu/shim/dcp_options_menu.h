@@ -104,7 +104,22 @@ struct Choice {
 
 inline constexpr Choice kOffOn[] = {{"0", "Off"}, {"1", "On"}};
 inline constexpr Choice kHiddenShown[] = {{"0", "Hidden"}, {"1", "Shown"}};
-inline constexpr Choice kRenderers[] = {{"auto", "Auto"}, {"vulkan", "Vulkan"}, {"opengl", "OpenGL (experimental)"}};
+inline constexpr Choice kRenderers[] = {
+    {"auto", "Auto"},
+    {"vulkan", "Vulkan"},
+    {"opengl", "OpenGL (experimental)"},
+#ifdef _WIN32
+    {"d3d11", "Direct3D 11 (experimental)"},
+#endif
+};
+#ifdef _WIN32
+inline constexpr char kRendererHelp[] =
+    "Vulkan is the supported renderer. OpenGL and Direct3D 11 are experimental. Direct3D 11 is intended mainly for "
+    "Windows systems where Vulkan or OpenGL has problems. Auto uses OpenGL only when Vulkan cannot run.";
+#else
+inline constexpr char kRendererHelp[] =
+    "Vulkan is the supported renderer. OpenGL is experimental. Auto uses OpenGL only when Vulkan cannot run.";
+#endif
 inline constexpr Choice kRenderResolutions[] = {{"native", "Native (1080p)"}, {"480p", "480p"},   {"720p", "720p"},
                                                 {"1440p", "1440p"},           {"1800p", "1800p"}, {"4K", "4K"}};
 inline constexpr Choice kAspectRatios[] = {{"16:9", "16:9 Original"},
@@ -175,7 +190,7 @@ inline constexpr Setting kSettings[] = {
      "21:9 and 32:9.",
      Apply::Restart, kOffOn, DcpSettings::TrueUltrawide},
     {Id::Renderer, Page::Graphics, "renderer", "Renderer",
-     "Vulkan is the supported renderer. OpenGL is experimental. Auto uses OpenGL only when Vulkan cannot run.",
+     kRendererHelp,
      Apply::Restart, kRenderers},
     {Id::RenderResolution, Page::Graphics, "render_resolution", "Render resolution",
      "The resolution the game renders at. It is separate from the window size: the picture is scaled to the window. "

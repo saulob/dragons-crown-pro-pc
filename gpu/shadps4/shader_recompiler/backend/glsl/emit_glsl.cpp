@@ -164,9 +164,13 @@ const char* QualifierName(Qualifier qualifier) {
 
 class Emitter {
 public:
-    Emitter(const Profile& profile_, const RuntimeInfo& runtime_info_, const IR::Program& program_)
+    Emitter(const Profile& profile_, const RuntimeInfo& runtime_info_, const IR::Program& program_,
+            Target target_)
         : profile{profile_}, runtime_info{runtime_info_}, program{program_}, info{program_.info},
-          prefix{info.sw_stage == SwStage::Vertex ? "vs_" : "fs_"} {}
+          prefix{info.sw_stage == SwStage::Vertex ? "vs_" : "fs_"}, target{target_},
+          position{Gles() ? "dcp_pos" : "gl_Position"} {
+        stage.target = target;
+    }
 
     Stage Run() {
         if (info.sw_stage != SwStage::Vertex && info.sw_stage != SwStage::Fragment) {
@@ -189,6 +193,10 @@ public:
     }
 
 private:
+    bool Gles() const {
+        return target == Target::Gles300;
+    }
+
     void Fail(std::string what) {
         if (stage.error.empty()) {
             stage.error = std::move(what);
@@ -435,6 +443,11 @@ private:
                 existing.shadow == shadow) {
                 return existing.name;
             }
+        }
+        const auto view_type = ViewType(handle);
+        if (Gles() && (view_type == AmdGpu::ImageType::Color1D ||
+                       view_type == AmdGpu::ImageType::Color1DArray)) {
+            Fail("1D images");
         }
         std::string name = fmt::format("{}t{}s{}{}", prefix, image,
                                        sampler == NoSampler ? 99u : sampler, shadow ? "d" : "");
@@ -686,12 +699,12 @@ private:
         const IR::Attribute attr = inst.Arg(0).Attribute();
         switch (attr) {
         case IR::Attribute::VertexId:
-            Assign(inst, "uint(gl_VertexID)");
+            Assign(inst, Gles() ? "dcp_vid" : "uint(gl_VertexID)");
             return;
         case IR::Attribute::InstanceId:
             // InstanceIndex includes the base instance; gl_InstanceID does not.
             uses_base_instance = true;
-            Assign(inst, "uint(gl_InstanceID)+vs_base_instance");
+            Assign(inst, Gles() ? "dcp_iid+vs_base_instance" : "uint(gl_InstanceID)+vs_base_instance");
             return;
         case IR::Attribute::BaseVertex:
             uses_base_vertex = true;
@@ -732,11 +745,11 @@ private:
         }
         switch (attr) {
         case IR::Attribute::Position0:
-            Line(fmt::format("gl_Position[{}]={};", element, value));
+            Line(fmt::format("{}[{}]={};", position, element, value));
             return;
         case IR::Attribute::ClipDistance:
             clip_distances = std::max(clip_distances, element + 1);
-            Line(fmt::format("gl_ClipDistance[{}]={};", element, value));
+            Line(fmt::format("{}[{}]={};", Gles() ? "dcp_clip" : "gl_ClipDistance", element, value));
             return;
         case IR::Attribute::PointSize:
             Line(fmt::format("gl_PointSize={};", value));
@@ -760,16 +773,16 @@ private:
             // Window coordinates over the fixed 16K viewport, as ConvertPositionToClipSpace.
             const float half_width = float(std::min<u32>(profile.max_viewport_width / 2, 8192));
             const float half_height = float(std::min<u32>(profile.max_viewport_height / 2, 8192));
-            Line(fmt::format("gl_Position.x=(gl_Position.x*vs_transform.z+vs_transform.x)/{}-1.0;",
+            Line(fmt::format("{0}.x=({0}.x*vs_transform.z+vs_transform.x)/{1}-1.0;", position,
                              FloatLiteral(half_width)));
-            Line(fmt::format("gl_Position.y=(gl_Position.y*vs_transform.w+vs_transform.y)/{}-1.0;",
+            Line(fmt::format("{0}.y=({0}.y*vs_transform.w+vs_transform.y)/{1}-1.0;", position,
                              FloatLiteral(half_height)));
         }
         // emulate_depth_negative_one_to_one here means the guest's clip Z is [0,w], OpenGL's [-w,w].
         if (vs.emulate_depth_negative_one_to_one) {
-            Line("gl_Position.z=2.0*gl_Position.z-gl_Position.w;");
+            Line(fmt::format("{0}.z=2.0*{0}.z-{0}.w;", position));
         }
-        Line("gl_Position.y*=vs_flip_y;");
+        Line(fmt::format("{}.y*=vs_flip_y;", position));
         uses_transform = true;
     }
 
@@ -1465,16 +1478,24 @@ private:
 
     void BuildDeclarations() {
         std::string out;
+        stage.uses_ring = uses_buffers;
         if (uses_user_data) {
             out += fmt::format("uniform uvec4 {}ud[4];\n", prefix);
         }
         if (uses_buffers) {
-            out += "uniform usamplerBuffer dcp_ring;\n";
+            out += Gles() ? "uniform highp usampler2D dcp_ring;\n" : "uniform usamplerBuffer dcp_ring;\n";
             out += fmt::format("uniform uvec2 {}buffers[{}];\n", prefix,
                                std::max<size_t>(info.buffers.size(), 1));
-            out += fmt::format("uint {0}load(int s,uint i){{return i<{0}buffers[s].y?"
-                               "texelFetch(dcp_ring,int({0}buffers[s].x+i)).r:0u;}}\n",
-                               prefix);
+            if (Gles()) {
+                out += fmt::format("uint {0}load(int s,uint i){{uint t={0}buffers[s].x+i;"
+                                   "return i<{0}buffers[s].y?texelFetch(dcp_ring,"
+                                   "ivec2(int(t&{1:#x}u),int(t>>{2}u)),0).r:0u;}}\n",
+                                   prefix, (1u << RingRowBits) - 1, RingRowBits);
+            } else {
+                out += fmt::format("uint {0}load(int s,uint i){{return i<{0}buffers[s].y?"
+                                   "texelFetch(dcp_ring,int({0}buffers[s].x+i)).r:0u;}}\n",
+                                   prefix);
+            }
         }
         if (info.sw_stage == SwStage::Vertex) {
             if (uses_transform) {
@@ -1490,10 +1511,14 @@ private:
                 PrepareVertexInputs();
             }
             for (const auto& [semantic, number_class] : vs_attributes) {
-                out += fmt::format("layout(location={}) in {} attr{};\n", semantic,
-                                   VectorType(number_class), semantic);
+                if (Gles()) {
+                    stage.vertex_inputs.push_back({semantic, number_class});
+                } else {
+                    out += fmt::format("layout(location={}) in {} attr{};\n", semantic,
+                                       VectorType(number_class), semantic);
+                }
             }
-            if (clip_distances != 0) {
+            if (clip_distances != 0 && !Gles()) {
                 out += fmt::format("out float gl_ClipDistance[{}];\n", clip_distances);
             }
         }
@@ -1505,6 +1530,7 @@ private:
         }
         const bool dual_source = info.sw_stage == SwStage::Fragment &&
                                  runtime_info.hw.fs.dual_source_blending;
+        stage.dual_source = dual_source;
         for (u32 i = 0; i < mrt_outputs.size(); ++i) {
             if (!mrt_outputs[i]) {
                 continue;
@@ -1520,7 +1546,7 @@ private:
     }
 
     void BuildMain() {
-        std::string out = "void main(){\n";
+        std::string out = Gles() ? "void dcp_guest(){\n" : "void main(){\n";
         std::map<std::string, std::string> locals;
         for (IR::Block* block : program.blocks) {
             for (const IR::Inst& inst : block->Instructions()) {
@@ -1562,6 +1588,8 @@ private:
     const IR::Program& program;
     const Info& info;
     std::string prefix;
+    Target target;
+    std::string position;
     Stage stage;
     std::string body;
     std::vector<const char*> helpers; ///< in dependency order
@@ -1644,14 +1672,203 @@ std::string GeometrySource(const Stage& vertex, const Stage* fragment,
     return out;
 }
 
+// A sampler has no default precision in GLSL ES, so every kind the emitter can name is listed.
+std::string GlesHeader(bool noperspective, bool clip_distances, bool dual_source) {
+    std::string out = "#version 300 es\n";
+    if (noperspective) {
+        out += "#extension GL_NV_shader_noperspective_interpolation : require\n";
+    }
+    if (clip_distances) {
+        out += "#extension GL_EXT_clip_cull_distance : require\n";
+    }
+    if (dual_source) {
+        out += "#extension GL_EXT_blend_func_extended : require\n";
+    }
+    out += "precision highp float;\nprecision highp int;\n";
+    for (const char* sampler :
+         {"sampler2D", "sampler3D", "sampler2DArray", "sampler2DShadow", "sampler2DArrayShadow",
+          "isampler2D", "isampler3D", "isampler2DArray", "usampler2D", "usampler3D",
+          "usampler2DArray"}) {
+        out += fmt::format("precision highp {};\n", sampler);
+    }
+    return out;
+}
+
+bool AnyNoperspective(const Stage* fragment) {
+    return fragment && std::ranges::any_of(fragment->inputs, [](const VaryingInput& input) {
+               return input.interpolation.primary == Qualifier::NoPerspective ||
+                      input.interpolation.auxiliary == Qualifier::NoPerspective;
+           });
+}
+
+const char* RectInputType(AmdGpu::NumberClass number_class) {
+    switch (number_class) {
+    case AmdGpu::NumberClass::Uint:
+        return "";
+    case AmdGpu::NumberClass::Sint:
+        return "ivec4";
+    default:
+        return "uintBitsToFloat";
+    }
+}
+
+// With tables, one GL instance is one rectangle of one guest instance and inputs come from the ring.
+std::string RectTableReaders(const Stage& vertex, std::string& inputs) {
+    std::string out;
+    for (u32 slot = 0; slot < vertex.vertex_inputs.size(); ++slot) {
+        const auto& input = vertex.vertex_inputs[slot];
+        inputs += fmt::format("attr{}={}(dcp_rect_input({},p,g));", input.semantic,
+                              RectInputType(input.number_class), slot);
+    }
+    if (!vertex.uses_ring) {
+        out += "uniform highp usampler2D dcp_ring;\n";
+    }
+    out += fmt::format("uint dcp_word(uint t){{return texelFetch(dcp_ring,"
+                       "ivec2(int(t&{:#x}u),int(t>>{}u)),0).r;}}\n",
+                       (1u << RingRowBits) - 1, RingRowBits);
+    out += "uniform uvec2 vs_rect_draw;\n";
+    if (!vertex.vertex_inputs.empty()) {
+        out += fmt::format("uniform uvec4 vs_rect_inputs[{}];\n", vertex.vertex_inputs.size());
+        out += "uvec4 dcp_rect_input(int s,uint p,uint g){uvec4 d=vs_rect_inputs[s];"
+               "uint e=d.y==0u?p:min(g/d.y,d.z);uint t=d.x+e*4u;"
+               "return uvec4(dcp_word(t),dcp_word(t+1u),dcp_word(t+2u),dcp_word(t+3u));}\n";
+    }
+    return out;
+}
+
+// The guest's code is a function here: GLSL ES has no geometry stage to complete a rectangle, so
+// the vertex stage runs it for all three vertices and then writes the corner it was asked for.
+std::string GlesRectMain(const Stage& vertex, bool tables) {
+    const u32 clips = vertex.clip_distances;
+    std::string keep, select, out;
+    for (u32 clip = 0; clip < clips; ++clip) {
+        out += fmt::format("float dcp_rc{}[3];\n", clip);
+        keep += fmt::format("dcp_rc{0}[k]=dcp_clip[{0}];", clip);
+        select += fmt::format("gl_ClipDistance[{0}]=w.x*dcp_rc{0}[0]+w.y*dcp_rc{0}[1]+"
+                              "w.z*dcp_rc{0}[2];",
+                              clip);
+    }
+    for (u32 i = 0; i < 32; ++i) {
+        if (vertex.output_mask & (1u << i)) {
+            out += fmt::format("vec4 dcp_r{}[3];\n", i);
+            keep += fmt::format("dcp_r{0}[k]=dcp_p{0};", i);
+            select += fmt::format("dcp_p{0}=w.x*dcp_r{0}[0]+w.y*dcp_r{0}[1]+w.z*dcp_r{0}[2];", i);
+        }
+    }
+    std::string inputs;
+    if (tables) {
+        out += RectTableReaders(vertex, inputs);
+    } else {
+        for (const auto& input : vertex.vertex_inputs) {
+            inputs += fmt::format("attr{0}=k==0u?attr{0}_0:(k==1u?attr{0}_1:attr{0}_2);", input.semantic);
+        }
+    }
+    out += "vec4 dcp_rp[3];\n";
+    if (tables) {
+        out += fmt::format("void dcp_run(uint k){{uint r=uint(gl_InstanceID)%vs_rect_draw.y;"
+                           "uint g=uint(gl_InstanceID)/vs_rect_draw.y;uint p=r*3u+k;"
+                           "dcp_vid=dcp_word(vs_rect_draw.x+p);dcp_iid=g;{}dcp_guest();dcp_rp[k]=dcp_pos;{}}}\n",
+                           inputs, keep);
+    } else {
+        out += fmt::format("void dcp_run(uint k){{dcp_vid=vs_vertex_id_base+uint(gl_InstanceID)*3u+k;"
+                           "dcp_iid=0u;{}dcp_guest();dcp_rp[k]=dcp_pos;{}}}\n",
+                           inputs, keep);
+    }
+    out += "void main(){\n"
+           "dcp_run(0u);dcp_run(1u);dcp_run(2u);\n"
+           "bvec2 eq[3];\n"
+           "for(int i=0;i<3;++i){eq[i]=equal(dcp_rp[i].xy,dcp_rp[(i+1)%3].xy);}\n"
+           "vec3 b;bool edge[3];\n"
+           "for(int i=0;i<3;++i){\n"
+           "edge[i]=(eq[i].x&&eq[(i+2)%3].y)||(eq[i].y&&eq[(i+2)%3].x);\n"
+           "b[i]=edge[i]?-1.0:1.0;}\n"
+           "int first=edge[1]?1:(edge[2]?2:0);\n"
+           "vec3 w=b;\n"
+           "if(gl_VertexID<3){w=vec3(0.0);w[(first+gl_VertexID)%3]=1.0;}\n"
+           "gl_Position=w.x*dcp_rp[0]+w.y*dcp_rp[1]+w.z*dcp_rp[2];\n";
+    out += select;
+    out += "\n}\n";
+    return out;
+}
+
+std::string GlesPlainMain(const Stage& vertex) {
+    std::string copy_clip;
+    for (u32 clip = 0; clip < vertex.clip_distances; ++clip) {
+        copy_clip += fmt::format("gl_ClipDistance[{0}]=dcp_clip[{0}];", clip);
+    }
+    return fmt::format("void main(){{dcp_vid=uint(gl_VertexID)+vs_vertex_id_base;"
+                       "dcp_iid=uint(gl_InstanceID);dcp_guest();gl_Position=dcp_pos;{}}}\n",
+                       copy_clip);
+}
+
+Sources LinkGles(const Stage& vertex, const Stage* fragment, PrimitiveExpansion expansion) {
+    const bool noperspective = AnyNoperspective(fragment);
+    const bool rect = expansion == PrimitiveExpansion::RectList;
+    const bool rect_tables = expansion == PrimitiveExpansion::IndexedRectList;
+    Sources sources;
+    sources.vertex = GlesHeader(noperspective, vertex.clip_distances != 0, false);
+    for (u32 i = 0; i < 32; ++i) {
+        if (vertex.output_mask & (1u << i)) {
+            const auto* input = FindInput(fragment, i);
+            const auto qualifiers = input ? Qualifiers(input->interpolation) : std::string{};
+            sources.vertex += fmt::format("{}out vec4 dcp_p{};\n", qualifiers, i);
+        }
+    }
+    sources.vertex += "vec4 dcp_pos;\nuint dcp_vid;\nuint dcp_iid;\nuniform uint vs_vertex_id_base;\n";
+    if (vertex.clip_distances != 0) {
+        sources.vertex += fmt::format("out highp float gl_ClipDistance[{0}];\nfloat dcp_clip[{0}];\n",
+                                      vertex.clip_distances);
+    }
+    u32 slot = 0;
+    for (const auto& input : vertex.vertex_inputs) {
+        const char* type = VectorType(input.number_class);
+        if (rect || rect_tables) {
+            sources.vertex += fmt::format("{} attr{};\n", type, input.semantic);
+        }
+        for (u32 corner = 0; rect && corner < RectVertexCount; ++corner) {
+            sources.vertex += fmt::format("layout(location={}) in {} attr{}_{};\n",
+                                          slot * RectVertexCount + corner, type, input.semantic, corner);
+        }
+        if (!rect && !rect_tables) {
+            sources.vertex +=
+                fmt::format("layout(location={}) in {} attr{};\n", input.semantic, type, input.semantic);
+        }
+        ++slot;
+    }
+    sources.vertex += vertex.declarations;
+    sources.vertex += vertex.main;
+    sources.vertex += rect || rect_tables ? GlesRectMain(vertex, rect_tables) : GlesPlainMain(vertex);
+
+    if (!fragment) {
+        sources.fragment = GlesHeader(false, false, false) + "void main(){}\n";
+        return sources;
+    }
+    sources.fragment = GlesHeader(noperspective, false, fragment->dual_source);
+    for (const auto& input : fragment->inputs) {
+        if (vertex.output_mask & (1u << input.location)) {
+            sources.fragment += fmt::format("{}in vec4 dcp_p{};\n", Qualifiers(input.interpolation),
+                                            input.location);
+        } else {
+            sources.fragment += fmt::format("const vec4 dcp_p{}=vec4(0.0);\n", input.location);
+        }
+    }
+    sources.fragment += fragment->declarations;
+    sources.fragment += fragment->main;
+    sources.fragment += "void main(){dcp_guest();}\n";
+    return sources;
+}
+
 } // namespace
 
-Stage EmitGLSL(const Profile& profile, const RuntimeInfo& runtime_info,
-               const IR::Program& program) {
-    return Emitter{profile, runtime_info, program}.Run();
+Stage EmitGLSL(const Profile& profile, const RuntimeInfo& runtime_info, const IR::Program& program,
+               Target target) {
+    return Emitter{profile, runtime_info, program, target}.Run();
 }
 
 Sources LinkStages(const Stage& vertex, const Stage* fragment, PrimitiveExpansion expansion) {
+    if (vertex.target == Target::Gles300) {
+        return LinkGles(vertex, fragment, expansion);
+    }
     constexpr const char* Version = "#version 330 core\n";
     const bool geometry = expansion != PrimitiveExpansion::None;
     Sources sources;

@@ -139,6 +139,8 @@ This game build's scene projection is not verified; True Ultrawide is not availa
 Renderer	Renderizador
 Vulkan is the supported renderer. OpenGL is experimental and renders only part of the game's features. Auto uses Vulkan, and OpenGL when this system cannot run Vulkan. It takes effect the next time the game starts.	Vulkan é o renderizador suportado. OpenGL é experimental e renderiza apenas parte dos recursos do jogo. Auto usa Vulkan, e OpenGL quando este sistema não consegue executar Vulkan. A alteração vale na próxima vez que o jogo iniciar.
 OpenGL (experimental)	OpenGL (experimental)
+Vulkan is the supported renderer. OpenGL and Direct3D 11 are experimental and render only part of the game's features. Direct3D 11 is intended mainly for Windows systems where Vulkan or OpenGL has problems. Auto uses Vulkan, and OpenGL when this system cannot run Vulkan. It takes effect the next time the game starts.	Vulkan é o renderizador suportado. OpenGL e Direct3D 11 são experimentais e renderizam apenas parte dos recursos do jogo. Direct3D 11 é destinado principalmente a sistemas Windows em que Vulkan ou OpenGL têm problemas. Auto usa Vulkan, e OpenGL quando este sistema não consegue executar Vulkan. A alteração vale na próxima vez que o jogo iniciar.
+Direct3D 11 (experimental)	Direct3D 11 (experimental)
 Graphics card	Placa de vídeo
 Selects which graphics card renders the game. If the selected card is no longer available, the first available card is used.	Escolhe qual placa de vídeo renderiza o jogo. Se a placa selecionada não estiver mais disponível, a primeira disponível será usada.
 VSync	VSync
@@ -549,6 +551,7 @@ Offers the game's built-in story skip when creating a new character.	Oferece o r
 Online name, friends and friend requests are managed in the launcher.	Nome online, amigos e pedidos de amizade são gerenciados no launcher.
 Renderer, render resolution and texture filtering apply after a restart.	Renderizador, resolução de render e filtragem de texturas valem após reiniciar.
 Vulkan is the supported renderer. OpenGL is experimental. Auto uses OpenGL only when Vulkan cannot run.	Vulkan é o renderizador suportado. OpenGL é experimental. Auto usa OpenGL apenas quando o Vulkan não consegue executar.
+Vulkan is the supported renderer. OpenGL and Direct3D 11 are experimental. Direct3D 11 is intended mainly for Windows systems where Vulkan or OpenGL has problems. Auto uses OpenGL only when Vulkan cannot run.	Vulkan é o renderizador suportado. OpenGL e Direct3D 11 são experimentais. Direct3D 11 é destinado principalmente a sistemas Windows em que Vulkan ou OpenGL têm problemas. Auto usa OpenGL apenas quando o Vulkan não consegue executar.
 The shape the game renders in. The saved window width follows it.	O formato em que o jogo renderiza. A largura da janela salva o acompanha.
 SMAA smooths jagged edges on the finished picture, at a small cost in speed.	SMAA suaviza as bordas serrilhadas da imagem final, com um pequeno custo de desempenho.
 Sharpens the final picture (AMD RCAS), alone or together with FSR 1 in a bigger window.	Aumenta a nitidez da imagem final (AMD RCAS), sozinho ou junto com o FSR 1 em uma janela maior.

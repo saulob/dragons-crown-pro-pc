@@ -48,19 +48,24 @@ struct GraphicsProgram {
     GLint flip_y = -1;
     GLint base_vertex = -1;
     GLint base_instance = -1;
+    GLint vertex_id_base = -1;
+    GLint rect_draw = -1;
+    GLint rect_inputs = -1;
     std::optional<std::array<float, 4>> sent_transform;
     std::optional<float> sent_flip_y;
     std::optional<u32> sent_base_vertex;
     std::optional<u32> sent_base_instance;
+    std::optional<u32> sent_vertex_id_base;
 };
 
 class ShaderCache {
 public:
-    ShaderCache(GlState& state, u32 max_viewport_width, u32 max_viewport_height);
+    ShaderCache(GlState& state, u32 max_viewport_width, u32 max_viewport_height,
+                Shader::Backend::GLSL::Target target);
     ~ShaderCache();
 
     /// Null when the draw needs something this backend cannot do yet (logged once per cause).
-    GraphicsProgram* GetGraphics(const AmdGpu::Regs& regs);
+    GraphicsProgram* GetGraphics(const AmdGpu::Regs& regs, bool rect_tables);
     /// Compute shaders are not run, but their resources identify known fill and clear passes.
     Shader::Info* GetCompute(const AmdGpu::ComputeProgram& program);
 
@@ -77,6 +82,7 @@ private:
     void ReportOnce(u64 key, const std::string& what);
 
     GlState& state;
+    Shader::Backend::GLSL::Target target;
     Shader::Profile profile{};
     Shader::Pools pools;
     Programs programs;
@@ -86,6 +92,9 @@ private:
     std::unordered_set<u64> reported;
 };
 
-Shader::Backend::GLSL::PrimitiveExpansion ExpansionOf(AmdGpu::PrimitiveType type);
+/// `target` decides whether a list needs a program of its own: GLSL ES quads are plain triangles.
+Shader::Backend::GLSL::PrimitiveExpansion ExpansionOf(AmdGpu::PrimitiveType type,
+                                                      Shader::Backend::GLSL::Target target,
+                                                      bool rect_tables = false);
 
 } // namespace OpenGL

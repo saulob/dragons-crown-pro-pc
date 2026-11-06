@@ -3116,9 +3116,14 @@ void TestRenderer(const fs::path& base) {
     for (const char* value : {"auto", "vulkan", "opengl"}) {
         CHECK(IsValidSetting(kRendererKey, value));
     }
-    for (const char* invalid : {"", "OpenGL", "direct3d"}) {
+    for (const char* invalid : {"", "OpenGL", "direct3d", "D3D11"}) {
         CHECK(!IsValidSetting(kRendererKey, invalid));
     }
+#ifdef _WIN32
+    CHECK(IsValidSetting(kRendererKey, "d3d11"));
+#else
+    CHECK(!IsValidSetting(kRendererKey, "d3d11"));
+#endif
     const fs::path file = base / "renderer" / "dcp.ini";
     fs::remove_all(file.parent_path());
     fs::create_directories(file.parent_path());

@@ -192,7 +192,7 @@ extern "C" int dcpgpu_available(void) {
     return 1;
 }
 
-// Vulkan and OpenGL need different windows, so Auto asks whether Vulkan can run before there is one.
+// Each renderer needs its own kind of window, so Auto asks whether Vulkan can run before there is one.
 static void SelectRenderer() {
     const auto choice = DcpRenderer::Choice(DcpSettings::Get().renderer.load());
     char cause[320] = "", advice[320] = "";
@@ -226,7 +226,7 @@ extern "C" int dcpgpu_init(const DcpGpuConfig* config) {
     g_window_thread = std::thread([title, width, height] {
         Common::SetCurrentThreadName("dcp:window");
         auto* window = new Frontend::WindowSDL(width, height, title.c_str(),
-                                               DcpRenderer::Active() == DcpRenderer::Backend::OpenGL);
+                                               Frontend::GraphicsApiFor(DcpRenderer::Active()));
         {
             std::scoped_lock lock{g_window_mutex};
             g_window = window;

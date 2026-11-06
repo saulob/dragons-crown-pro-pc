@@ -52,6 +52,7 @@ public:
 
 private:
     void InitializeOnGpuThread();
+    void CheckSwap(bool swapped);
     void CreatePasses();
     void Show(const Frame& frame, bool is_game_frame);
     void ApplySwapInterval();
@@ -75,6 +76,8 @@ private:
     GLint prepare_decode = -1;
     int swap_interval = -1;
     bool first_flip_logged = false;
+    bool gles = false;
+    bool swap_failure_logged = false;
 };
 
 } // namespace OpenGL

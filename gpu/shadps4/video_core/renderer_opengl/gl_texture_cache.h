@@ -28,6 +28,7 @@ struct ImageResource;
 namespace OpenGL {
 
 class GlState;
+struct Capabilities;
 
 /// Per-object sampling state: a texture has one, whatever view of it a draw asks for.
 struct SampledView {
@@ -56,7 +57,7 @@ GLenum ImageTarget(AmdGpu::ImageType type);
 
 class TextureCache {
 public:
-    TextureCache(GlState& state, GuestWriteWatch& watch);
+    TextureCache(GlState& state, GuestWriteWatch& watch, const Capabilities& capabilities);
     ~TextureCache();
 
     /// Null for a format the backend does not map (logged once).
@@ -110,11 +111,14 @@ private:
 
     GlState& state;
     GuestWriteWatch& watch;
+    const Capabilities& capabilities;
+    bool gles;
     std::unordered_map<VAddr, std::vector<std::unique_ptr<Image>>> images;
     std::vector<ResolvedImage> resolved;
     u64 resolve_generation{1};
     std::vector<u8> scratch;
     std::vector<u8> tight;
+    std::vector<u8> converted;
     std::unordered_map<VAddr, bool> meta;
     std::unordered_set<u32> reported_formats;
     std::function<void(GLuint)> on_destroy;

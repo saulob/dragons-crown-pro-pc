@@ -9,23 +9,36 @@
 
 namespace DcpRenderer {
 
-enum Choice : int { Vulkan = 0, Auto = 1, OpenGL = 2, ChoiceCount };
-inline constexpr std::array<std::string_view, ChoiceCount> ChoiceKeys = {"vulkan", "auto", "opengl"};
+#ifdef _WIN32
+inline constexpr bool Direct3D11Available = true;
+#else
+inline constexpr bool Direct3D11Available = false;
+#endif
 
-/// An unknown value keeps the renderer that has always run the game.
-inline Choice ParseChoice(std::string_view text) {
+enum Choice : int { Vulkan = 0, Auto = 1, OpenGL = 2, Direct3D11 = 3, ChoiceCount };
+inline constexpr std::array<std::string_view, ChoiceCount> ChoiceKeys = {"vulkan", "auto", "opengl", "d3d11"};
+
+/// An unknown value keeps the renderer that has always run the game; so does Direct3D 11 where it does not exist.
+inline Choice ParseChoice(std::string_view text, bool direct3d11_available = Direct3D11Available) {
     for (std::size_t i = 0; i < ChoiceKeys.size(); ++i) {
         if (ChoiceKeys[i] == text) {
-            return Choice(i);
+            return Choice(i) == Direct3D11 && !direct3d11_available ? Vulkan : Choice(i);
         }
     }
     return Vulkan;
 }
 
-enum class Backend { Vulkan, OpenGL };
+enum class Backend { Vulkan, OpenGL, Direct3D11 };
 
 inline const char* BackendName(Backend backend) {
-    return backend == Backend::OpenGL ? "OpenGL" : "Vulkan";
+    switch (backend) {
+    case Backend::OpenGL:
+        return "OpenGL";
+    case Backend::Direct3D11:
+        return "Direct3D 11 via ANGLE";
+    default:
+        return "Vulkan";
+    }
 }
 
 struct Resolution {
@@ -37,6 +50,9 @@ struct Resolution {
 inline Resolution Resolve(Choice choice, bool vulkan_usable, std::string_view vulkan_problem) {
     if (choice == OpenGL) {
         return {Backend::OpenGL, {}};
+    }
+    if (choice == Direct3D11) {
+        return {Backend::Direct3D11, {}};
     }
     if (choice == Auto && !vulkan_usable) {
         return {Backend::OpenGL, std::string{vulkan_problem}};

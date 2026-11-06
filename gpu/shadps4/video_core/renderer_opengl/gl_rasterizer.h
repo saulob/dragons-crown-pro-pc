@@ -12,6 +12,7 @@
 #include "video_core/amdgpu/regs.h"
 #include "video_core/renderer_backend.h"
 #include "video_core/renderer_opengl/gl_api.h"
+#include "video_core/renderer_opengl/gl_capabilities.h"
 #include "video_core/renderer_opengl/gl_guest_watch.h"
 #include "video_core/renderer_opengl/gl_shader_cache.h"
 #include "video_core/renderer_opengl/gl_state.h"
@@ -27,8 +28,6 @@ class MemoryManager;
 }
 
 namespace OpenGL {
-
-struct Capabilities;
 
 class Rasterizer final : public VideoCore::RasterizerBackend {
 public:
@@ -97,6 +96,12 @@ public:
     void OnFlip();
 
 private:
+    /// As far as the guest's index buffer is mapped.
+    struct GuestIndices {
+        VAddr address;
+        u32 count;
+        u32 size;
+    };
     struct AttachedTargets {
         std::array<Image*, AmdGpu::NUM_COLOR_BUFFERS> color{};
         Image* depth{};
@@ -108,6 +113,8 @@ private:
     void Report(const std::string& what);
     /// For string literals: cheap enough for the draw path.
     void Report(const char* literal);
+    /// Once per `cause`, with the details of the first occurrence.
+    void ReportFirst(const char* cause, const std::string& details);
     template <typename Sent, typename Value>
     bool UniformChanged(Sent& sent, const Value& value);
     bool BindTargets(const GraphicsProgram& program, AttachedTargets& targets);
@@ -117,8 +124,21 @@ private:
                    const Shader::Backend::GLSL::Stage& glsl);
     void BindTexture(const Shader::Info& info, const Shader::Backend::GLSL::CombinedSampler& combined,
                      GLuint unit);
-    GLuint SamplerFor(AmdGpu::Sampler sharp, bool shadow, bool is_depth);
-    bool BindVertexInputs(const GraphicsProgram& program, u32 first_instance);
+    GLuint SamplerFor(AmdGpu::Sampler sharp, bool shadow, bool is_depth, bool nearest_only);
+    bool BindVertexInputs(const GraphicsProgram& program, u32 first_instance, u32 first_vertex,
+                          bool rect_list);
+    void SetEnabledAttributes(u32 wanted);
+    bool PrepareIndexedRectangles(const GraphicsProgram& program, u32 index_offset, u32 first_vertex,
+                                  u32 first_instance, GLsizei& strip_instances);
+    void LogFirstRect(const GraphicsProgram& program, bool is_indexed, u32 index_offset, u32 host_vertices,
+                      u32 first_vertex); // DEBUG_SAULO: temporary
+    void LogDepthState(const char* draw); // DEBUG_SAULO: temporary
+    bool WriteRectInputs(const GraphicsProgram& program, u32 first_instance, u32 guest_instances);
+    bool VerticesReachable(u64 highest_vertex);
+    GuestIndices GuestIndexRange(u32 index_offset);
+    void BeginStreams();
+    void CommitStreams();
+    void ForgetStreamCopies();
     void ApplyViewportScissor(GraphicsProgram& program);
     void ApplyDepthStencil();
     void ApplyRasterState();
@@ -127,6 +147,8 @@ private:
 
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
+    Capabilities capabilities;
+    bool gles;
     bool separate_blend;
     bool anisotropy;
     float max_anisotropy{1.0f};
@@ -135,6 +157,8 @@ private:
     GlState state;
     GuestWriteWatch* watch;
     StreamRing ring;
+    std::unique_ptr<StreamRing> gles_shader_ring;
+    StreamRing& shader_ring; ///< `ring` itself on desktop OpenGL
     TextureCache texture_cache;
     ShaderCache shaders;
     GLuint vertex_array{};
@@ -150,19 +174,28 @@ private:
         u64 raw0;
         u64 raw1;
         bool shadow;
+        bool nearest_only;
         bool operator==(const SamplerKey&) const = default;
     };
     struct SamplerKeyHash {
         size_t operator()(const SamplerKey& key) const {
-            return size_t(key.raw0 ^ (key.raw1 * 31) ^ u64(key.shadow));
+            return size_t(key.raw0 ^ (key.raw1 * 31) ^ u64(key.shadow) ^ (u64(key.nearest_only) << 1));
         }
     };
     std::unordered_map<SamplerKey, GLuint, SamplerKeyHash> samplers;
     std::vector<u8> gds;
+    std::vector<u32> expanded_indices;
+    std::vector<std::array<u32, 4>> rect_input_table;
+    u64 vertex_reach{}; ///< the last vertex every attribute of this draw can name inside the ring
+    bool indexed_rect_tables; // DEBUG_SAULO: off until the black screen they cause on D3D11 is understood
+    bool indexed_rect_logged{}; // DEBUG_SAULO: temporary
+    bool plain_rect_logged{}; // DEBUG_SAULO: temporary
+    bool depth_state_logged{}; // DEBUG_SAULO: temporary
     std::unordered_set<std::string> reported;
     std::unordered_set<const char*> reported_literals;
     u64 draws{};
     u64 draws_reaching_gl{};
+    u32 reported_frame_errors{}; // DEBUG_SAULO: temporary
 };
 
 } // namespace OpenGL

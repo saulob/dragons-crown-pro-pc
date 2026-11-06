@@ -5,6 +5,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
 #include <xxhash.h>
@@ -16,7 +17,7 @@
 #include "dcp_toggles.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "video_core/amdgpu/liverpool.h"
-#include "video_core/renderer_opengl/gl_capabilities.h"
+#include "video_core/renderer_opengl/gl_primitives.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_blend_rewrite.h"
@@ -34,6 +35,9 @@ constexpr u32 ConstantAttributeDivisor = 0x7FFFFFFF;
 constexpr u64 BufferFillShader = 0x8d304694;
 /// The SRT walker's handler comes after this one (priority 1).
 constexpr u32 WatchFaultPriority = 0;
+
+constexpr u32 RectInputElementBytes = sizeof(VertexElement);
+constexpr u32 RectConstantDivisor = 0xFFFFFFFF;
 
 GuestWriteWatch* fault_watch;
 
@@ -90,6 +94,46 @@ GLenum PrimitiveMode(AmdGpu::PrimitiveType type) {
     }
 }
 
+// Rectangles draw as a strip of their own and quads as triangles; adjacency needs a geometry stage.
+GLenum GlesPrimitiveMode(AmdGpu::PrimitiveType type) {
+    switch (type) {
+    case AmdGpu::PrimitiveType::RectList:
+        return GL_TRIANGLE_STRIP;
+    case AmdGpu::PrimitiveType::QuadList:
+        return GL_TRIANGLES;
+    case AmdGpu::PrimitiveType::AdjLineList:
+    case AmdGpu::PrimitiveType::AdjLineStrip:
+    case AmdGpu::PrimitiveType::AdjTriangleList:
+    case AmdGpu::PrimitiveType::AdjTriangleStrip:
+        return 0;
+    default:
+        return PrimitiveMode(type);
+    }
+}
+
+bool IsConstantColorFactor(GLenum factor) {
+    return factor == GL_CONSTANT_COLOR || factor == GL_ONE_MINUS_CONSTANT_COLOR;
+}
+
+bool IsConstantAlphaFactor(GLenum factor) {
+    return factor == GL_CONSTANT_ALPHA || factor == GL_ONE_MINUS_CONSTANT_ALPHA;
+}
+
+GLenum ConstantAlphaAsColor(GLenum factor) {
+    return factor == GL_CONSTANT_ALPHA         ? GLenum(GL_CONSTANT_COLOR)
+           : factor == GL_ONE_MINUS_CONSTANT_ALPHA ? GLenum(GL_ONE_MINUS_CONSTANT_COLOR)
+                                                   : factor;
+}
+
+template <typename Visit>
+void VisitGuestIndices(VAddr address, u32 count, u32 index_size, Visit visit) {
+    if (index_size == sizeof(u16)) {
+        visit(std::span{reinterpret_cast<const u16*>(address), count});
+    } else {
+        visit(std::span{reinterpret_cast<const u32*>(address), count});
+    }
+}
+
 void ClearColorAttachment(GlState& state, const AmdGpu::ColorBuffer& buffer, u32 index) {
     state.ColorMask(index, 0xF);
     const auto clear = Vulkan::LiverpoolToVK::ColorBufferClearValue(buffer);
@@ -120,9 +164,10 @@ std::pair<u32, u32> DrawOffsets(const AmdGpu::Regs& regs, const Shader::Info& vs
 
 } // namespace
 
-Rasterizer::Rasterizer(AmdGpu::Liverpool* liverpool_, const Capabilities& capabilities)
-    : liverpool{liverpool_}, memory{Core::Memory::Instance()},
-      separate_blend{capabilities.draw_buffers_blend}, anisotropy{capabilities.anisotropy},
+Rasterizer::Rasterizer(AmdGpu::Liverpool* liverpool_, const Capabilities& capabilities_)
+    : liverpool{liverpool_}, memory{Core::Memory::Instance()}, capabilities{capabilities_},
+      gles{capabilities_.gles}, separate_blend{capabilities_.draw_buffers_blend},
+      anisotropy{capabilities_.anisotropy},
       max_viewport_width{[] {
           GLint dims[2]{};
           gl::GetIntegerv(GL_MAX_VIEWPORT_DIMS, dims);
@@ -133,18 +178,30 @@ Rasterizer::Rasterizer(AmdGpu::Liverpool* liverpool_, const Capabilities& capabi
           gl::GetIntegerv(GL_MAX_VIEWPORT_DIMS, dims);
           return u32(std::min(dims[1], 16384));
       }()},
+      state{capabilities_.gles, capabilities_.depth_clamp},
       // Never freed: guest threads can fault on armed pages until the process ends.
       watch{new GuestWriteWatch(ProtectGuest)},
-      ring{state, capabilities.buffer_storage && Perf::Optimizations().ring},
-      texture_cache{state, *watch}, shaders{state, max_viewport_width, max_viewport_height},
-      gds(GdsBytes) {
+      ring{state, capabilities_.gles                                       ? RingStorage::ClientMemory
+                  : capabilities_.buffer_storage && Perf::Optimizations().ring ? RingStorage::Persistent
+                                                                               : RingStorage::Mapped},
+      gles_shader_ring{capabilities_.gles
+                           ? std::make_unique<StreamRing>(state, RingStorage::ShaderTexture)
+                           : nullptr},
+      shader_ring{gles_shader_ring ? *gles_shader_ring : ring},
+      texture_cache{state, *watch, capabilities},
+      shaders{state, max_viewport_width, max_viewport_height,
+              capabilities_.gles ? Shader::Backend::GLSL::Target::Gles300
+                                 : Shader::Backend::GLSL::Target::Desktop330},
+      gds(GdsBytes), indexed_rect_tables{capabilities_.gles && std::getenv("DCP_GL_INDEXED_RECTS")} {
     fault_watch = watch;
     watch->SetGpuThread();
     Core::Signals::Instance()->RegisterAccessViolationHandler(OnGuestFault, WatchFaultPriority);
     // DEBUG_SAULO: temporary, the watch's life cycle.
     std::printf("DEBUG_SAULO: OpenGL watch created %p, fault handler registered at priority %u\n",
                 static_cast<void*>(watch), WatchFaultPriority);
-    std::printf("OpenGL: stream ring %s\n", ring.Persistent() ? "persistent" : "mapped per draw");
+    std::printf("OpenGL: stream ring %s\n", gles            ? "client memory, shader data in a texture"
+                                            : ring.Persistent() ? "persistent"
+                                                                : "mapped per draw");
     // DEBUG_SAULO: temporary, the A/B state of this run.
     const auto& switches = Perf::Optimizations();
     std::printf("DEBUG_SAULO: OpenGL perf switches watch=%d ring=%d state=%d lookup=%d\n",
@@ -152,7 +209,10 @@ Rasterizer::Rasterizer(AmdGpu::Liverpool* liverpool_, const Capabilities& capabi
     if (anisotropy) {
         gl::GetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &max_anisotropy);
     }
-    gl::GenVertexArrays(1, &vertex_array);
+    // Client memory is only allowed in the default vertex array.
+    if (!gles) {
+        gl::GenVertexArrays(1, &vertex_array);
+    }
     gl::GenFramebuffers(2, resolve_framebuffers);
     gl::GenTextures(1, &black_texture);
     state.BindForEdit(GL_TEXTURE_2D, black_texture);
@@ -189,7 +249,9 @@ Rasterizer::~Rasterizer() {
     }
     gl::DeleteFramebuffers(2, resolve_framebuffers);
     gl::DeleteTextures(1, &black_texture);
-    gl::DeleteVertexArrays(1, &vertex_array);
+    if (vertex_array) {
+        gl::DeleteVertexArrays(1, &vertex_array);
+    }
 }
 
 void Rasterizer::Report(const std::string& what) {
@@ -201,6 +263,12 @@ void Rasterizer::Report(const std::string& what) {
 void Rasterizer::Report(const char* literal) {
     if (reported_literals.insert(literal).second) {
         std::printf("OpenGL: %s\n", literal);
+    }
+}
+
+void Rasterizer::ReportFirst(const char* cause, const std::string& details) {
+    if (reported_literals.insert(cause).second) {
+        std::printf("OpenGL: %s: %s\n", cause, details.c_str());
     }
 }
 
@@ -412,7 +480,7 @@ void Rasterizer::ClearTargets(const AttachedTargets& targets) {
     }
 }
 
-GLuint Rasterizer::SamplerFor(AmdGpu::Sampler sharp, bool shadow, bool is_depth) {
+GLuint Rasterizer::SamplerFor(AmdGpu::Sampler sharp, bool shadow, bool is_depth, bool nearest_only) {
     using namespace Vulkan::LiverpoolToVK;
     const int forced = DcpSettings::Get().anisotropy;
     bool force_aniso = false;
@@ -421,30 +489,36 @@ GLuint Rasterizer::SamplerFor(AmdGpu::Sampler sharp, bool shadow, bool is_depth)
          sharp.xy_min_filter == AmdGpu::Filter::AnisoLinear)) {
         force_aniso = !AmdGpu::IsAnisoFilter(sharp.xy_min_filter) || sharp.MaxAniso() < float(forced);
     }
-    const SamplerKey key{sharp.raw0, sharp.raw1 ^ (force_aniso ? u64(forced) << 44 : 0), shadow};
+    const SamplerKey key{sharp.raw0, sharp.raw1 ^ (force_aniso ? u64(forced) << 44 : 0), shadow,
+                         nearest_only};
     if (const auto it = samplers.find(key); it != samplers.end()) {
         return it->second;
     }
     GLuint sampler = 0;
     gl::GenSamplers(1, &sampler);
-    const bool linear_min = Filter(sharp.xy_min_filter) == vk::Filter::eLinear;
+    const bool linear_min = !nearest_only && Filter(sharp.xy_min_filter) == vk::Filter::eLinear;
     GLint min_filter = linear_min ? GL_LINEAR : GL_NEAREST;
-    if (sharp.mip_filter != AmdGpu::MipFilter::None) {
+    if (sharp.mip_filter != AmdGpu::MipFilter::None && !nearest_only) {
         const bool linear_mip = MipFilter(sharp.mip_filter) == vk::SamplerMipmapMode::eLinear;
         min_filter = linear_min ? (linear_mip ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR_MIPMAP_NEAREST)
                                 : (linear_mip ? GL_NEAREST_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST);
     }
     gl::SamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, min_filter);
     gl::SamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER,
-                          Filter(sharp.xy_mag_filter) == vk::Filter::eLinear ? GL_LINEAR
-                                                                             : GL_NEAREST);
+                          !nearest_only && Filter(sharp.xy_mag_filter) == vk::Filter::eLinear
+                              ? GL_LINEAR
+                              : GL_NEAREST);
     gl::SamplerParameteri(sampler, GL_TEXTURE_WRAP_S, GLint(WrapMode(ClampMode(sharp.clamp_x))));
     gl::SamplerParameteri(sampler, GL_TEXTURE_WRAP_T, GLint(WrapMode(ClampMode(sharp.clamp_y))));
     gl::SamplerParameteri(sampler, GL_TEXTURE_WRAP_R, GLint(WrapMode(ClampMode(sharp.clamp_z))));
-    gl::SamplerParameterf(sampler, GL_TEXTURE_LOD_BIAS, sharp.LodBias());
+    if (!gles) {
+        gl::SamplerParameterf(sampler, GL_TEXTURE_LOD_BIAS, sharp.LodBias());
+    } else if (sharp.LodBias() != 0.0f) {
+        Report("a sampler's LOD bias has no OpenGL ES equivalent and was ignored");
+    }
     gl::SamplerParameterf(sampler, GL_TEXTURE_MIN_LOD, sharp.MinLod());
     gl::SamplerParameterf(sampler, GL_TEXTURE_MAX_LOD, sharp.MaxLod());
-    if (anisotropy) {
+    if (anisotropy && !nearest_only) {
         const bool aniso_filter = force_aniso || AmdGpu::IsAnisoFilter(sharp.xy_mag_filter) ||
                                   AmdGpu::IsAnisoFilter(sharp.xy_min_filter);
         const float wanted = force_aniso ? float(forced) : aniso_filter ? sharp.MaxAniso() : 1.0f;
@@ -513,7 +587,12 @@ void Rasterizer::BindTexture(const Shader::Info& info,
         return;
     }
     const auto sampler = info.samplers[combined.sampler].GetSharp(info);
-    state.BindSampler(unit, SamplerFor(sampler, combined.shadow, desc.is_depth));
+    // OpenGL ES calls these incomplete under a linear filter, where desktop drivers filter anyway.
+    const auto number_class = AmdGpu::GetNumberClass(number_format);
+    const bool nearest_only = gles && ((image->info.props.is_depth && !combined.shadow) ||
+                                       number_class == AmdGpu::NumberClass::Uint ||
+                                       number_class == AmdGpu::NumberClass::Sint);
+    state.BindSampler(unit, SamplerFor(sampler, combined.shadow, desc.is_depth, nearest_only));
 }
 
 void Rasterizer::BindStage(const Shader::Info& info, StageLocations& locations,
@@ -544,7 +623,7 @@ void Rasterizer::BindStage(const Shader::Info& info, StageLocations& locations,
                 const auto sharp = desc.GetSharp(info);
                 if (sharp.base_address != 0 && sharp.GetSize() != 0) {
                     size = u32(memory->ClampRangeSize(sharp.base_address, sharp.GetSize()));
-                    offset = ring.PushGuest(sharp.base_address, size, DwordAlignment);
+                    offset = shader_ring.PushGuest(sharp.base_address, size, DwordAlignment);
                     Perf::Count(Perf::ConstantBytes, size);
                 }
                 break;
@@ -552,7 +631,7 @@ void Rasterizer::BindStage(const Shader::Info& info, StageLocations& locations,
             case Shader::BufferType::Flatbuf: {
                 const auto flat = info.FlatUserData();
                 size = u32(flat.size_bytes());
-                offset = ring.Push(flat.data(), size, DwordAlignment);
+                offset = shader_ring.Push(flat.data(), size, DwordAlignment);
                 break;
             }
             case Shader::BufferType::ClipPlanes: {
@@ -565,7 +644,7 @@ void Rasterizer::BindStage(const Shader::Info& info, StageLocations& locations,
                     planes[plane * 4 + 3] = std::bit_cast<float>(data.data_w);
                 }
                 size = u32(sizeof(planes));
-                offset = ring.Push(planes.data(), size, DwordAlignment);
+                offset = shader_ring.Push(planes.data(), size, DwordAlignment);
                 break;
             }
             default:
@@ -586,12 +665,50 @@ void Rasterizer::BindStage(const Shader::Info& info, StageLocations& locations,
     }
 }
 
-bool Rasterizer::BindVertexInputs(const GraphicsProgram& program, u32 first_instance) {
+Rasterizer::GuestIndices Rasterizer::GuestIndexRange(u32 index_offset) {
+    const auto& regs = liverpool->regs;
+    const u32 size = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16 ? 2 : 4;
+    const VAddr address = regs.index_base_address.Address<VAddr>() + VAddr(index_offset) * size;
+    const u64 readable = memory->ClampRangeSize(address, u64(regs.num_indices) * size);
+    const u32 count = ReadableIndexCount(regs.num_indices, readable, size);
+    if (count < regs.num_indices) {
+        ReportFirst("an index buffer runs past mapped guest memory and was cut short",
+                    fmt::format("{} of {} indices at {:#x}", count, u32(regs.num_indices), address));
+    }
+    return {address, count, size};
+}
+
+bool Rasterizer::VerticesReachable(u64 highest_vertex) {
+    if (highest_vertex > vertex_reach) {
+        ReportFirst("a draw naming a vertex past the vertex stream was dropped",
+                    fmt::format("vertex {}, last reachable {}", highest_vertex, vertex_reach));
+        return false;
+    }
+    return true;
+}
+
+void Rasterizer::SetEnabledAttributes(u32 wanted) {
+    for (u32 changed = wanted ^ enabled_attributes; changed != 0; changed &= changed - 1) {
+        const u32 location = std::countr_zero(changed);
+        if (wanted & (1u << location)) {
+            gl::EnableVertexAttribArray(location);
+        } else {
+            gl::DisableVertexAttribArray(location);
+        }
+    }
+    enabled_attributes = wanted;
+}
+
+// `first_vertex` moves the attributes themselves when the draw has no way to say it (OpenGL ES).
+bool Rasterizer::BindVertexInputs(const GraphicsProgram& program, u32 first_instance, u32 first_vertex,
+                                  bool rect_list) {
+    using Shader::Backend::GLSL::RectVertexCount;
     const auto& info = *program.vertex->info;
     const auto& fetch = program.vertex->spec.fetch_shader_data;
     state.BindArrayBuffer(ring.Buffer());
     u32 wanted = 0;
     const auto& regs = liverpool->regs;
+    vertex_reach = std::numeric_limits<u64>::max();
     if (fetch) {
         using InstanceIdType = Shader::Gcn::VertexAttribute::InstanceIdType;
         for (const auto& attrib : fetch->attributes) {
@@ -611,12 +728,13 @@ bool Rasterizer::BindVertexInputs(const GraphicsProgram& program, u32 first_inst
                 continue;
             }
             const u32 size = u32(memory->ClampRangeSize(buffer.base_address, buffer.GetSize()));
-            const u32 offset = ring.PushGuest(buffer.base_address, size, VertexAlignment);
+            const u32 pushed = ring.PushGuest(buffer.base_address, size, VertexAlignment);
             Perf::Count(Perf::VertexBytes, size);
-            if (offset == StreamRing::NoOffset) {
+            if (pushed == StreamRing::NoOffset) {
                 Report("vertex data larger than the stream ring was dropped");
                 return false;
             }
+            const u64 offset = ring.PointerBase() + pushed;
             const u32 stride = buffer.GetStride();
             const auto step_rate = attrib.GetStepRate();
             u32 divisor = 0;
@@ -625,24 +743,228 @@ bool Rasterizer::BindVertexInputs(const GraphicsProgram& program, u32 first_inst
                           : step_rate == InstanceIdType::OverStepRate1 ? regs.vgt_instance_step_rate_1
                                                                        : 1;
             }
+            const bool per_vertex = step_rate == InstanceIdType::None && stride != 0;
             const u64 first = step_rate != InstanceIdType::None ? u64(first_instance) * stride : 0;
+            if (rect_list) {
+                const auto& inputs = program.vertex->glsl.vertex_inputs;
+                const auto input = std::ranges::find(inputs, attrib.semantic,
+                                                     &Shader::Backend::GLSL::VertexInput::semantic);
+                const u32 slot = u32(input - inputs.begin());
+                if (input == inputs.end() || (slot + 1) * RectVertexCount > MaxVertexAttributes) {
+                    Report("a rectangle list reads too many vertex attributes and was dropped");
+                    return false;
+                }
+                // One instance per rectangle: each attribute advances three vertices at a time.
+                for (u32 corner = 0; corner < RectVertexCount; ++corner) {
+                    const GLuint location = slot * RectVertexCount + corner;
+                    const u64 start = per_vertex ? u64(first_vertex + corner) * stride : first;
+                    state.VertexAttrib(location, format->integer, format->size, format->type,
+                                       format->normalized, GLsizei(stride * RectVertexCount),
+                                       offset + start);
+                    state.VertexDivisor(location, per_vertex ? 1 : ConstantAttributeDivisor);
+                    wanted |= 1u << location;
+                }
+                continue;
+            }
+            const u64 start = per_vertex ? u64(first_vertex) * stride : first;
+            // ANGLE copies client memory by what the draw names, so nothing may name past the ring.
+            if (gles) {
+                const u32 instances = regs.num_instances.NumInstances();
+                const u64 instance_step = u64(stride) * ((instances - 1) / std::max(divisor, 1u));
+                const auto reach = HighestElementInside(u64(pushed) + start + (divisor ? instance_step : 0),
+                                                        VertexFormatBytes(*format), divisor ? 0 : stride,
+                                                        ring.Capacity());
+                if (!reach) {
+                    Report("a vertex attribute past the vertex stream was dropped");
+                    return false;
+                }
+                vertex_reach = std::min(vertex_reach, *reach);
+            }
             const GLuint location = attrib.semantic;
             state.VertexAttrib(location, format->integer, format->size, format->type,
-                               format->normalized, GLsizei(stride), offset + first);
+                               format->normalized, GLsizei(stride), offset + start);
             state.VertexDivisor(location, stride == 0 ? ConstantAttributeDivisor : divisor);
             wanted |= 1u << location;
         }
     }
-    for (u32 changed = wanted ^ enabled_attributes; changed != 0; changed &= changed - 1) {
-        const u32 location = std::countr_zero(changed);
-        if (wanted & (1u << location)) {
-            gl::EnableVertexAttribArray(location);
+    SetEnabledAttributes(wanted);
+    return true;
+}
+
+// Each input becomes a table of decoded elements in the shader ring: a vertex stage that has to run
+// the guest for three vertices at once cannot get them from attributes, which give it one.
+bool Rasterizer::WriteRectInputs(const GraphicsProgram& program, u32 first_instance, u32 guest_instances) {
+    using InstanceIdType = Shader::Gcn::VertexAttribute::InstanceIdType;
+    constexpr u32 NoTable = ~0u;
+    const auto& info = *program.vertex->info;
+    const auto& fetch = program.vertex->spec.fetch_shader_data;
+    const auto& inputs = program.vertex->glsl.vertex_inputs;
+    const auto& regs = liverpool->regs;
+    const auto reserve = [this](u32 elements, u32& offset) {
+        const u64 bytes = u64(elements) * RectInputElementBytes;
+        return bytes > shader_ring.Capacity() ? nullptr : shader_ring.Reserve(u32(bytes), DwordAlignment, offset);
+    };
+    rect_input_table.assign(inputs.size(), {NoTable, RectConstantDivisor, 0, 0});
+    const u32 fetched = fetch ? u32(fetch->attributes.size()) : 0;
+    for (u32 index = 0; index < fetched; ++index) {
+        const auto& attrib = fetch->attributes[index];
+        const auto input = std::ranges::find(inputs, attrib.semantic,
+                                             &Shader::Backend::GLSL::VertexInput::semantic);
+        if (input == inputs.end()) {
+            continue;
+        }
+        const auto buffer = attrib.GetSharp(info);
+        const auto vk_format =
+            Vulkan::LiverpoolToVK::TrySurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
+        const auto* format = FindVertexFormat(vk_format);
+        if (!format) {
+            Report(fmt::format("unsupported vertex format {}", vk::to_string(vk_format)));
+            continue;
+        }
+        const u64 size = buffer.base_address != 0
+                             ? memory->ClampRangeSize(buffer.base_address, buffer.GetSize())
+                             : 0;
+        const auto* data = reinterpret_cast<const u8*>(buffer.base_address);
+        const u32 stride = buffer.GetStride();
+        const auto step_rate = attrib.GetStepRate();
+        auto& table = rect_input_table[size_t(input - inputs.begin())];
+        u32 offset = 0;
+        u8* out = nullptr;
+        if (stride != 0 && step_rate == InstanceIdType::None) {
+            out = reserve(u32(expanded_indices.size()), offset);
+            for (size_t position = 0; out && position < expanded_indices.size(); ++position) {
+                const auto element = ReadVertexElement(*format, data, size, stride, expanded_indices[position]);
+                std::memcpy(out + position * RectInputElementBytes, element.data(), RectInputElementBytes);
+            }
+            table = {offset / DwordAlignment, 0, 0, 0};
         } else {
-            gl::DisableVertexAttribArray(location);
+            const u32 rate = step_rate == InstanceIdType::OverStepRate0   ? regs.vgt_instance_step_rate_0
+                             : step_rate == InstanceIdType::OverStepRate1 ? regs.vgt_instance_step_rate_1
+                                                                          : 1;
+            const u32 divisor = stride == 0 ? RectConstantDivisor : std::max(rate, 1u);
+            const u64 stored = stride == 0 ? 0 : size / stride;
+            const u32 elements = RectInstanceElements(guest_instances, divisor, stored);
+            out = reserve(elements, offset);
+            for (u32 element = 0; out && element < elements; ++element) {
+                const auto value = ReadVertexElement(*format, data, size, stride,
+                                                     stride == 0 ? 0 : u64(first_instance) + element);
+                std::memcpy(out + element * RectInputElementBytes, value.data(), RectInputElementBytes);
+            }
+            table = {offset / DwordAlignment, divisor, elements - 1, 0};
+        }
+        if (!out) {
+            Report("a rectangle list's vertex data larger than the stream ring was dropped");
+            return false;
         }
     }
-    enabled_attributes = wanted;
+    for (size_t slot = 0; slot < rect_input_table.size(); ++slot) {
+        if (rect_input_table[slot][0] != NoTable) {
+            continue;
+        }
+        u32 offset = 0;
+        u8* out = reserve(1, offset);
+        if (!out) {
+            Report("a rectangle list's vertex data larger than the stream ring was dropped");
+            return false;
+        }
+        const VertexElement missing{0, 0, 0,
+                                    inputs[slot].number_class == AmdGpu::NumberClass::Float
+                                        ? std::bit_cast<u32>(1.0f)
+                                        : 1u};
+        std::memcpy(out, missing.data(), RectInputElementBytes);
+        rect_input_table[slot][0] = offset / DwordAlignment;
+    }
     return true;
+}
+
+bool Rasterizer::PrepareIndexedRectangles(const GraphicsProgram& program, u32 index_offset, u32 first_vertex,
+                                          u32 first_instance, GLsizei& strip_instances) {
+    const auto& regs = liverpool->regs;
+    const bool restart = (regs.enable_primitive_restart & 1) != 0;
+    if (regs.num_indices > shader_ring.Capacity() / sizeof(u32)) {
+        Report("a rectangle list larger than the stream ring was dropped");
+        return false;
+    }
+    const auto indices = GuestIndexRange(index_offset);
+    VisitGuestIndices(indices.address, indices.count, indices.size, [&](auto span) {
+        AssembleRectVertices(span, restart, first_vertex, expanded_indices);
+    });
+    if (expanded_indices.empty()) {
+        return false;
+    }
+    const u32 rectangles = u32(expanded_indices.size()) / RectVerticesPerRect;
+    const u32 guest_instances = regs.num_instances.NumInstances();
+    const auto instances = RectDrawInstances(rectangles, guest_instances);
+    if (!instances) {
+        ReportFirst("a rectangle list with too many instances was dropped",
+                    fmt::format("{} rectangles, {} instances", rectangles, guest_instances));
+        return false;
+    }
+    SetEnabledAttributes(0);
+    const u32 vertices = shader_ring.Push(expanded_indices.data(),
+                                          u32(expanded_indices.size() * sizeof(u32)), DwordAlignment);
+    if (vertices == StreamRing::NoOffset) {
+        Report("a rectangle list larger than the stream ring was dropped");
+        return false;
+    }
+    if (!WriteRectInputs(program, first_instance, guest_instances)) {
+        return false;
+    }
+    const std::array<u32, 2> draw{vertices / DwordAlignment, rectangles};
+    if (program.rect_draw >= 0) {
+        gl::Uniform2uiv(program.rect_draw, 1, draw.data());
+    }
+    if (program.rect_inputs >= 0 && !rect_input_table.empty()) {
+        gl::Uniform4uiv(program.rect_inputs, GLsizei(rect_input_table.size()), rect_input_table[0].data());
+    }
+    strip_instances = *instances;
+    LogFirstRect(program, true, index_offset, u32(expanded_indices.size()), first_vertex);
+    return true;
+}
+
+// DEBUG_SAULO: temporary, the first rectangle list of each kind.
+void Rasterizer::LogFirstRect(const GraphicsProgram& program, bool is_indexed, u32 index_offset,
+                              u32 host_vertices, u32 first_vertex) {
+    bool& logged = is_indexed ? indexed_rect_logged : plain_rect_logged;
+    if (logged) {
+        return;
+    }
+    logged = true;
+    const auto& regs = liverpool->regs;
+    std::string indices;
+    if (is_indexed) {
+        const auto range = GuestIndexRange(index_offset);
+        VisitGuestIndices(range.address, std::min(range.count, 6u), range.size, [&](auto span) {
+            for (const auto index : span) {
+                indices += fmt::format(" {}", u32(index));
+            }
+        });
+    }
+    std::printf("DEBUG_SAULO: rect list: primitive %u, indexed %d, guest count %u, host vertices %u, inputs %zu, "
+                "instances %u, base vertex %u, restart %u, max index size %u, tables %d, indices%s\n",
+                u32(regs.primitive_type), is_indexed, u32(regs.num_indices), host_vertices,
+                program.vertex->glsl.vertex_inputs.size(), regs.num_instances.NumInstances(), first_vertex,
+                regs.enable_primitive_restart & 1, u32(regs.max_index_size), indexed_rect_tables,
+                indices.c_str());
+    if (is_indexed) {
+        LogDepthState("indexed rect");
+    }
+}
+
+// DEBUG_SAULO: temporary, what a depth-only rectangle would write and what the next draws test.
+void Rasterizer::LogDepthState(const char* draw) {
+    const auto& regs = liverpool->regs;
+    const auto& viewport = regs.viewports[0];
+    std::printf("DEBUG_SAULO: depth state of %s: test %u, write %u, func %u, stencil %u, depth clear enable %u, "
+                "stencil clear enable %u, clear value %f, stencil clear %u, zoffset %f, zscale %f, clip space %u, "
+                "zclip %d, clip disabled %d, depth valid %d, color mode %u\n",
+                draw, u32(regs.depth_control.depth_enable), u32(regs.depth_control.depth_write_enable),
+                u32(regs.depth_control.depth_func), u32(regs.depth_control.stencil_enable),
+                u32(regs.depth_render_control.depth_clear_enable),
+                u32(regs.depth_render_control.stencil_clear_enable), double(regs.depth_clear),
+                u32(regs.stencil_clear), double(viewport.zoffset), double(viewport.zscale),
+                u32(regs.clipper_control.clip_space), regs.clipper_control.ZclipEnable(), regs.IsClipDisabled(),
+                regs.depth_buffer.DepthValid(), u32(regs.color_control.mode));
 }
 
 void Rasterizer::ApplyViewportScissor(GraphicsProgram& program) {
@@ -737,6 +1059,8 @@ void Rasterizer::ApplyDepthStencil() {
     }
     const auto& control = regs.stencil_control;
     const bool two_sided = regs.depth_control.backface_enable;
+    // Direct3D has one set of stencil masks and references: ANGLE rejects a draw whose faces differ.
+    const bool shared_face_state = gles;
     const auto replaces = [](AmdGpu::StencilFunc fail, AmdGpu::StencilFunc pass,
                              AmdGpu::StencilFunc zfail) {
         using enum AmdGpu::StencilFunc;
@@ -746,7 +1070,7 @@ void Rasterizer::ApplyDepthStencil() {
     const auto back_func =
         two_sided ? CompareFunc(CompareOp(regs.depth_control.stencil_bf_func)) : front_func;
     const auto& front = regs.stencil_ref_front;
-    const auto& back = two_sided ? regs.stencil_ref_back : regs.stencil_ref_front;
+    const auto& back = two_sided && !shared_face_state ? regs.stencil_ref_back : regs.stencil_ref_front;
     const bool front_replaces = replaces(control.stencil_fail_front, control.stencil_zpass_front,
                                          control.stencil_zfail_front);
     const bool back_replaces = two_sided ? replaces(control.stencil_fail_back,
@@ -756,9 +1080,14 @@ void Rasterizer::ApplyDepthStencil() {
     state.StencilFunc(GL_FRONT, front_func,
                       GLint(front_replaces ? front.stencil_op_val : front.stencil_test_val),
                       front.stencil_mask);
-    state.StencilFunc(GL_BACK, back_func,
-                      GLint(back_replaces ? back.stencil_op_val : back.stencil_test_val),
-                      back.stencil_mask);
+    const GLint front_ref = GLint(front_replaces ? front.stencil_op_val : front.stencil_test_val);
+    const GLint back_ref = GLint(back_replaces ? back.stencil_op_val : back.stencil_test_val);
+    if (shared_face_state && two_sided &&
+        (front_ref != back_ref || front.stencil_mask != regs.stencil_ref_back.stencil_mask ||
+         front.stencil_write_mask != regs.stencil_ref_back.stencil_write_mask)) {
+        Report("two-sided stencil with different masks or references uses the front face's");
+    }
+    state.StencilFunc(GL_BACK, back_func, shared_face_state ? front_ref : back_ref, back.stencil_mask);
     const bool clearing = regs.depth_render_control.stencil_clear_enable;
     state.StencilMask(GL_FRONT, clearing ? 0u : front.stencil_write_mask);
     state.StencilMask(GL_BACK, clearing ? 0u : back.stencil_write_mask);
@@ -791,9 +1120,13 @@ void Rasterizer::ApplyRasterState() {
     state.FrontFace(regs.polygon_control.front_face == AmdGpu::FrontFace::CounterClockwise ? GL_CW
                                                                                            : GL_CCW);
     const auto mode = regs.polygon_control.PolyMode();
-    state.PolygonMode(mode == AmdGpu::PolygonMode::Point  ? GL_POINT
-                      : mode == AmdGpu::PolygonMode::Line ? GL_LINE
-                                                          : GL_FILL);
+    if (gles && mode == AmdGpu::PolygonMode::Point) {
+        Report("point polygon mode has no OpenGL ES equivalent and fills");
+    } else {
+        state.PolygonMode(mode == AmdGpu::PolygonMode::Point  ? GL_POINT
+                          : mode == AmdGpu::PolygonMode::Line ? GL_LINE
+                                                              : GL_FILL);
+    }
     const bool bias = regs.polygon_control.NeedsBias();
     state.Enable(Cap::PolygonOffsetFill, bias);
     if (bias) {
@@ -819,6 +1152,9 @@ void Rasterizer::ApplyBlend(const GraphicsProgram& program, const AttachedTarget
     state.Enable(GlState::Cap::ColorLogicOp, uses_logic_op);
     if (uses_logic_op) {
         state.LogicOp(OpenGL::LogicOp(LiverpoolToVK::LogicOp(logic_op)));
+        if (gles) {
+            Report("a logic operation has no OpenGL ES equivalent and was ignored");
+        }
     }
     bool global_set = false;
     const auto apply = [&](u32 cb, GLenum src_color, GLenum dst_color, GLenum eq_color,
@@ -828,6 +1164,13 @@ void Rasterizer::ApplyBlend(const GraphicsProgram& program, const AttachedTarget
             return;
         }
         global_set = true;
+        const bool mixes_constants = (IsConstantColorFactor(src_color) || IsConstantColorFactor(dst_color)) &&
+                                     (IsConstantAlphaFactor(src_color) || IsConstantAlphaFactor(dst_color));
+        if (gles && mixes_constants) {
+            Report("blending with constant colour and alpha together uses the colour");
+            src_color = ConstantAlphaAsColor(src_color);
+            dst_color = ConstantAlphaAsColor(dst_color);
+        }
         state.BlendFunc(cb, separate_blend, src_color, dst_color, src_alpha, dst_alpha);
         state.BlendEquation(cb, separate_blend, eq_color, eq_alpha);
     };
@@ -886,18 +1229,38 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
         return;
     }
     const auto& regs = liverpool->regs;
+    const bool rect_list = gles && regs.primitive_type == AmdGpu::PrimitiveType::RectList;
+    const bool rect_tables = RectListUsesTables(rect_list, is_indexed, indexed_rect_tables);
     GraphicsProgram* program = nullptr;
     {
         Perf::Scope timer{Perf::ShaderLookup};
-        program = shaders.GetGraphics(regs);
+        program = shaders.GetGraphics(regs, rect_tables);
     }
     if (!program) {
         return;
     }
-    const GLenum mode = PrimitiveMode(regs.primitive_type);
+    const GLenum mode = gles ? GlesPrimitiveMode(regs.primitive_type) : PrimitiveMode(regs.primitive_type);
     if (mode == 0) {
         Report(fmt::format("primitive type {} is not implemented", u32(regs.primitive_type)));
         return;
+    }
+    const bool quad_list = gles && regs.primitive_type == AmdGpu::PrimitiveType::QuadList;
+    if (rect_list && is_indexed && !rect_tables) {
+        // DEBUG_SAULO: temporary, what the first skipped rectangle would have drawn.
+        if (!indexed_rect_logged) {
+            const auto indices = GuestIndexRange(index_offset);
+            VisitGuestIndices(indices.address, indices.count, indices.size, [&](auto span) {
+                AssembleRectVertices(span, (regs.enable_primitive_restart & 1) != 0, 0, expanded_indices);
+            });
+            LogFirstRect(*program, true, index_offset, u32(expanded_indices.size()), 0);
+        }
+        Report("indexed rectangle lists are not implemented");
+        return;
+    }
+    // DEBUG_SAULO: temporary, the depth test the first ordinary draw runs.
+    if (!rect_list && !depth_state_logged) {
+        depth_state_logged = true;
+        LogDepthState("first ordinary draw");
     }
     AttachedTargets targets{};
     {
@@ -908,43 +1271,97 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
     }
     state.BindVertexArray(vertex_array);
     state.UseProgram(program->handle);
-    ring.BeginDraw();
+    BeginStreams();
 
     const auto& vs_info = *program->vertex->info;
     const auto [vertex_offset, instance_offset] =
         DrawOffsets(regs, vs_info, program->vertex->spec.fetch_shader_data);
 
     state.BindSampler(0, 0);
-    state.BindTexture(0, GL_TEXTURE_BUFFER, ring.Texture());
+    state.BindTexture(0, shader_ring.TextureTarget(), shader_ring.Texture());
     BindStage(vs_info, program->vs, program->vertex->glsl);
     if (program->fragment) {
         BindStage(*program->fragment->info, program->fs, program->fragment->glsl);
     }
+    // Elements on OpenGL ES have no base vertex here, and gl_VertexID would not include it anyway.
+    const u32 moved_vertices = gles && (is_indexed || quad_list || rect_list) ? vertex_offset : 0;
+    GLsizei rect_strips = 0;
     {
         Perf::Scope timer{Perf::BufferPush};
-        if (!BindVertexInputs(*program, instance_offset)) {
+        const bool prepared =
+            rect_tables ? PrepareIndexedRectangles(*program, index_offset, vertex_offset, instance_offset, rect_strips)
+                        : BindVertexInputs(*program, instance_offset, moved_vertices, rect_list);
+        if (!prepared) {
             return;
         }
     }
+    if (rect_list && !is_indexed) {
+        LogFirstRect(*program, false, 0, regs.num_indices - regs.num_indices % RectVerticesPerRect, vertex_offset);
+    }
 
     u32 index_ring_offset = 0;
-    const bool index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
-    if (is_indexed) {
-        const u32 index_size = index16 ? 2 : 4;
-        const VAddr address =
-            regs.index_base_address.Address<VAddr>() + VAddr(index_offset) * index_size;
+    bool index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
+    GLsizei count = GLsizei(regs.num_indices);
+    if (quad_list) {
         Perf::Scope timer{Perf::BufferPush};
-        index_ring_offset = ring.PushGuest(address, regs.num_indices * index_size, index_size);
-        Perf::Count(Perf::IndexBytes, regs.num_indices * index_size);
+        if (regs.num_indices > ring.Capacity() / sizeof(u32) / 2) {
+            Report("a quad list larger than the stream ring was dropped");
+            return;
+        }
+        if (is_indexed) {
+            const auto indices = GuestIndexRange(index_offset);
+            const bool restart = (regs.enable_primitive_restart & 1) != 0;
+            VisitGuestIndices(indices.address, indices.count, indices.size,
+                              [&](auto span) { ExpandQuadIndices(span, restart, expanded_indices); });
+        } else {
+            ExpandSequentialQuads(regs.num_indices, expanded_indices);
+        }
+        const auto highest = HighestIndex(std::span<const u32>{expanded_indices}, false);
+        if (!highest || !VerticesReachable(*highest)) {
+            return;
+        }
+        index16 = false;
+        count = GLsizei(expanded_indices.size());
+        index_ring_offset = ring.Push(expanded_indices.data(),
+                                      u32(expanded_indices.size() * sizeof(u32)), sizeof(u32));
         if (index_ring_offset == StreamRing::NoOffset) {
             Report("index data larger than the stream ring was dropped");
             return;
         }
+    } else if (is_indexed && !rect_list) {
+        const u32 index_size = index16 ? 2 : 4;
+        const VAddr address =
+            regs.index_base_address.Address<VAddr>() + VAddr(index_offset) * index_size;
+        Perf::Scope timer{Perf::BufferPush};
+        const u32 index_count = gles ? GuestIndexRange(index_offset).count : u32(regs.num_indices);
+        count = GLsizei(index_count);
+        index_ring_offset = ring.PushGuest(address, index_count * index_size, index_size);
+        Perf::Count(Perf::IndexBytes, index_count * index_size);
+        if (index_ring_offset == StreamRing::NoOffset) {
+            Report("index data larger than the stream ring was dropped");
+            return;
+        }
+        // The ring's copy, not guest memory: it is what the driver will read.
+        if (gles) {
+            std::optional<u32> highest;
+            const bool restart = (regs.enable_primitive_restart & 1) != 0;
+            VisitGuestIndices(ring.PointerBase() + index_ring_offset, index_count, index_size,
+                              [&](auto span) { highest = HighestIndex(span, restart); });
+            if (!highest || !VerticesReachable(*highest)) {
+                return;
+            }
+        }
+    } else if (gles && !rect_list && !VerticesReachable(u64(vertex_offset) + regs.num_indices)) {
+        return;
     }
-    ring.Commit();
+    CommitStreams();
 
     {
         Perf::Scope timer{Perf::ApplyState};
+        if (program->vertex_id_base >= 0 &&
+            UniformChanged(program->sent_vertex_id_base, moved_vertices)) {
+            gl::Uniform1ui(program->vertex_id_base, moved_vertices);
+        }
         if (program->base_vertex >= 0 && UniformChanged(program->sent_base_vertex, vertex_offset)) {
             gl::Uniform1ui(program->base_vertex, vertex_offset);
         }
@@ -965,11 +1382,22 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
         }
     }
 
-    const GLsizei count = GLsizei(regs.num_indices);
     const GLsizei instances = GLsizei(regs.num_instances.NumInstances());
     Perf::Count(Perf::DrawCalls);
     Perf::Scope draw_timer{Perf::DriverDraw};
-    if (is_indexed) {
+    if (rect_tables) {
+        gl::DrawArraysInstanced(mode, 0, RectStripVertices, rect_strips);
+    } else if (rect_list) {
+        if (instances > 1) {
+            Report("instanced rectangle lists draw their first instance");
+        }
+        gl::DrawArraysInstanced(mode, 0, RectStripVertices, count / GLsizei(RectVerticesPerRect));
+    } else if (gles && (is_indexed || quad_list)) {
+        state.BindElementBuffer(ring.Buffer());
+        gl::DrawElementsInstanced(
+            mode, count, index16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
+            reinterpret_cast<const void*>(uintptr_t(ring.PointerBase() + index_ring_offset)), instances);
+    } else if (is_indexed) {
         state.BindElementBuffer(ring.Buffer());
         gl::DrawElementsInstancedBaseVertex(
             mode, count, index16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
@@ -1115,13 +1543,42 @@ void Rasterizer::Finish() {
 }
 
 void Rasterizer::OnSubmit() {
+    ForgetStreamCopies();
+}
+
+void Rasterizer::BeginStreams() {
+    ring.BeginDraw();
+    if (gles_shader_ring) {
+        gles_shader_ring->BeginDraw();
+    }
+}
+
+void Rasterizer::CommitStreams() {
+    ring.Commit();
+    if (gles_shader_ring) {
+        gles_shader_ring->Commit();
+    }
+}
+
+void Rasterizer::ForgetStreamCopies() {
     ring.ForgetGuestCopies();
+    if (gles_shader_ring) {
+        gles_shader_ring->ForgetGuestCopies();
+    }
 }
 
 void Rasterizer::OnFlip() {
     watch->AdvanceFrame();
     texture_cache.NextFrame();
-    ring.ForgetGuestCopies();
+    ForgetStreamCopies();
+    // DEBUG_SAULO: temporary, Direct3D 11 first runs: errors past the first draws, once a frame.
+    if (gles && reported_frame_errors < 32) {
+        if (const GLenum error = gl::GetError(); error != GL_NO_ERROR) {
+            ++reported_frame_errors;
+            std::printf("DEBUG_SAULO: OpenGL ES error %#x after draw %llu\n", error,
+                        static_cast<unsigned long long>(draws_reaching_gl));
+        }
+    }
     // DEBUG_SAULO: temporary, the frame profile.
     Perf::OnFlip({draws, draws_reaching_gl, DcpStats::gpu_idle_ns.load(std::memory_order_relaxed),
                   watch});

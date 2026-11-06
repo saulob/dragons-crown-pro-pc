@@ -9,10 +9,10 @@ namespace VideoCore {
 
 std::unique_ptr<PresenterBackend> CreatePresenter(Frontend::WindowSDL& window,
                                                   AmdGpu::Liverpool* liverpool) {
-    if (DcpRenderer::Active() == DcpRenderer::Backend::OpenGL) {
-        return std::make_unique<OpenGL::Presenter>(window, liverpool);
+    if (DcpRenderer::Active() == DcpRenderer::Backend::Vulkan) {
+        return std::make_unique<Vulkan::Presenter>(window, liverpool);
     }
-    return std::make_unique<Vulkan::Presenter>(window, liverpool);
+    return std::make_unique<OpenGL::Presenter>(window, liverpool);
 }
 
 } // namespace VideoCore

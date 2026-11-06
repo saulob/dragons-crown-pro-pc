@@ -29,13 +29,15 @@ public:
     };
 
     static constexpr u32 MaxUnits = 48;
-    /// OpenGL 3.3 guarantees 48 combined units: the last is kept for uploads, so that one never
-    /// disturbs what a draw has bound.
-    static constexpr GLuint EditUnit = MaxUnits - 1;
+    /// OpenGL 3.3 guarantees 48 combined units and OpenGL ES 3.0 only 32: the last is kept for
+    /// uploads, so that one never disturbs what a draw has bound.
+    static constexpr GLuint DesktopEditUnit = MaxUnits - 1;
+    static constexpr GLuint GlesEditUnit = 31;
     static constexpr u32 MaxAttributes = 16;
     static constexpr u32 MaxColorTargets = 8;
 
-    GlState() {
+    explicit GlState(bool gles_ = false, bool depth_clamp_ = true)
+        : gles{gles_}, depth_clamp{depth_clamp_}, edit_unit{gles_ ? GlesEditUnit : DesktopEditUnit} {
         // DEBUG_SAULO: the switch goes with the rest of the profile.
         filter = Perf::Optimizations().state;
         std::memset(&attributes, 0xFF, sizeof(attributes));
@@ -61,15 +63,20 @@ public:
             GL_FRAMEBUFFER_SRGB,    GL_PROGRAM_POINT_SIZE,
         };
         const u32 bit = 1u << u32(cap);
+        if (gles && !ExistsOnGles(cap)) {
+            return;
+        }
         if (filter && (known_caps & bit) != 0 && ((enabled_caps & bit) != 0) == on) {
             return;
         }
         known_caps |= bit;
         enabled_caps = on ? enabled_caps | bit : enabled_caps & ~bit;
+        const GLenum name =
+            gles && cap == Cap::PrimitiveRestart ? GL_PRIMITIVE_RESTART_FIXED_INDEX : names[u32(cap)];
         if (on) {
-            gl::Enable(names[u32(cap)]);
+            gl::Enable(name);
         } else {
-            gl::Disable(names[u32(cap)]);
+            gl::Disable(name);
         }
         Perf::Count(cap == Cap::DepthTest     ? Perf::DepthChanges
                     : cap == Cap::StencilTest ? Perf::StencilChanges
@@ -152,8 +159,8 @@ public:
 
     /// Binds a texture to change it; the calls that follow act on the active unit.
     void BindForEdit(GLenum target, GLuint texture) {
-        BindTexture(EditUnit, target, texture);
-        ActiveTexture(EditUnit);
+        BindTexture(edit_unit, target, texture);
+        ActiveTexture(edit_unit);
     }
 
     /// Before deleting textures: their names can come back as new objects.
@@ -184,7 +191,11 @@ public:
 
     void DepthRange(GLdouble near_value, GLdouble far_value) {
         if (Changed(shadow.depth_range, std::array<GLdouble, 2>{near_value, far_value})) {
-            gl::DepthRange(near_value, far_value);
+            if (gles) {
+                gl::DepthRangef(GLfloat(near_value), GLfloat(far_value));
+            } else {
+                gl::DepthRange(near_value, far_value);
+            }
             Perf::Count(Perf::Viewports);
         }
     }
@@ -241,6 +252,9 @@ public:
     }
 
     void PolygonMode(GLenum mode) {
+        if (gles && !gl::PolygonMode) {
+            return;
+        }
         if (Changed(shadow.polygon_mode, mode)) {
             gl::PolygonMode(GL_FRONT_AND_BACK, mode);
             Perf::Count(Perf::RasterChanges);
@@ -262,6 +276,9 @@ public:
     }
 
     void ProvokingVertex(GLenum mode) {
+        if (gles && !gl::ProvokingVertex) {
+            return;
+        }
         if (Changed(shadow.provoking_vertex, mode)) {
             gl::ProvokingVertex(mode);
             Perf::Count(Perf::RasterChanges);
@@ -269,7 +286,7 @@ public:
     }
 
     void PrimitiveRestartIndex(GLuint index) {
-        if (Changed(shadow.restart_index, index)) {
+        if (!gles && Changed(shadow.restart_index, index)) {
             gl::PrimitiveRestartIndex(index);
             Perf::Count(Perf::RasterChanges);
         }
@@ -283,7 +300,7 @@ public:
     }
 
     void LogicOp(GLenum op) {
-        if (Changed(shadow.logic_op, op)) {
+        if (!gles && Changed(shadow.logic_op, op)) {
             gl::LogicOp(op);
             Perf::Count(Perf::BlendChanges);
         }
@@ -394,6 +411,19 @@ private:
 
     static constexpr u32 TextureTargetSlots = 6;
 
+    bool ExistsOnGles(Cap cap) const {
+        switch (cap) {
+        case Cap::ColorLogicOp:
+        case Cap::FramebufferSrgb:
+        case Cap::ProgramPointSize:
+            return false;
+        case Cap::DepthClamp:
+            return depth_clamp;
+        default:
+            return true;
+        }
+    }
+
     struct Shadow {
         GLuint program;
         GLuint read_framebuffer;
@@ -463,6 +493,9 @@ private:
     u32 enabled_caps{};
     u32 clip_distances{};
     bool filter{true};
+    bool gles;
+    bool depth_clamp;
+    GLuint edit_unit;
 };
 
 } // namespace OpenGL

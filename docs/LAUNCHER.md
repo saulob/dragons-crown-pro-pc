@@ -57,7 +57,7 @@ without copying, and only the build that is already active is reported as up to 
 The settings file is always `<user>\dcp.ini`; the loader hands its path to the launcher and the video core. The
 correctness defaults (draw preparation workers 0, asynchronous shaders off, vertex descriptor validation, linear image
 readbacks, the stick dead zone) are code, and the environment cannot change them (docs/GRAPHICS.md).
-`tools\build.ps1 -Run` starts the executable with no folder arguments: it resolves the development folders itself.
+Started with no folder arguments, the development executable resolves the development folders itself.
 
 The loader writes the one numbered log itself, `logs\dragons_crown_pro_NNN.log` (the next free number, never an
 existing file) in the folder above, and echoes it to the standard output the process started with, when it has one
@@ -72,8 +72,7 @@ existing file) in the folder above, and echoes it to the standard output the pro
 | Valid | Off | the game starts directly |
 | Any | any, with Shift held or `--launcher` | the launcher opens |
 
-On Linux Shift is read from the X11 server; in a Wayland session start with `--launcher` instead (see [Linux port](LINUX.md)). `--dcp-skip-launcher` skips it once for valid game files (automated runs: `tools\build.ps1 -Run -TimeoutSeconds N` adds
-it). `--check-imports` and `--cpu-only` never open it. The launcher is the only recovery path, so it cannot be hidden
+On Linux Shift is read from the X11 server; in a Wayland session start with `--launcher` instead (see [Linux port](LINUX.md)). `--dcp-skip-launcher` skips it once for valid game files. `--check-imports` and `--cpu-only` never open it. The launcher is the only recovery path, so it cannot be hidden
 while the game files are not valid. If its window cannot be opened, the game starts when the files are valid.
 
 ## Game files
@@ -300,10 +299,12 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   every supported build; on CUSA10454 1.01 and CUSA10209 1.02 its sites are found by signature, and if any of them does
   not resolve the feature stays off and the log says which.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
-- **Renderer**: Vulkan (the default), Auto or OpenGL (experimental). Auto uses Vulkan and falls back to OpenGL when this
-  system cannot run Vulkan; a renderer chosen by name starts or fails as itself. Saved as `renderer=vulkan`, `auto` or
-  `opengl` in `dcp.ini`; a missing or unknown value is Vulkan. It takes effect the next time the game starts, and the log
-  shows `Renderer: selected <setting>, active <backend>`. See docs/GRAPHICS.md for what OpenGL does not render yet.
+- **Renderer**: Vulkan (the default), Auto, OpenGL (experimental) or, on Windows, Direct3D 11 (experimental). Auto uses
+  Vulkan and falls back to OpenGL when this system cannot run Vulkan; a renderer chosen by name starts or fails as itself.
+  Saved as `renderer=vulkan`, `auto`, `opengl` or `d3d11` in `dcp.ini`; a missing or unknown value is Vulkan, and so is
+  `d3d11` on Linux. It takes effect the next time the game starts, and the log shows
+  `Renderer: selected <setting>, active <backend>`. See docs/GRAPHICS.md for what OpenGL does not render yet, and
+  docs/d3d11-renderer.md for Direct3D 11.
 - **Graphics card**: each Vulkan device the renderer can use (the launcher enumerates them without creating
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
   name. The first listed device is the default. A name that is not there any more, or not usable, falls back to the first
@@ -695,7 +696,7 @@ appearance, the About heart, the footer and the overall balance. The gate comple
 
 ## Manual test
 
-1. `tools\build.ps1 -Run`: the launcher opens on Play with "Ready to play", the gold accent and the controller icon.
+1. Build with `tools\build.ps1` and start the game yourself: the launcher opens on Play with "Ready to play", the gold accent and the controller icon.
 2. Change Display mode and Window size, press Save, quit, start again: the values are kept.
 3. Press PLAY: "Settings saved. Starting game...", then the game window opens on the chosen monitor at the chosen size.
 4. In the game press F11 twice: Windowed, Borderless Fullscreen, back; the picture keeps its size.

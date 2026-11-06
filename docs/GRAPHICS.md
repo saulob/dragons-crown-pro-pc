@@ -47,7 +47,7 @@ out of the free queue while it shows it, so the GPU thread can neither draw into
 Where this backend came from, and what it does not use, is in [opengl-renderer.md](opengl-renderer.md).
 
 Vulkan is the renderer of the game: the default, and the reference for every behaviour on this page. The launcher's
-**Renderer** setting (`renderer` in `dcp.ini`: `vulkan`, `auto` or `opengl`, see docs/LAUNCHER.md) selects it at start; the
+**Renderer** setting (`renderer` in `dcp.ini`: `vulkan`, `auto`, `opengl` or, on Windows, `d3d11`, see docs/LAUNCHER.md) selects it at start; the
 Options menu (F1) saves the same setting and it applies the next time the game starts, since a running game cannot change its
 renderer.
 `dcpgpu_init` (`gpu/shim/dcpgpu.cpp`) resolves the setting through `gpu/shim/dcp_renderer.h`, and the factory in
@@ -84,6 +84,12 @@ game itself and apply to both renderers. The overlay uses the ImGui OpenGL 3 bac
 
 Each `OpenGL:` log line names what was refused, once: `OpenGL: first guest draw submitted` and `OpenGL: first guest frame
 presented` mark the first real work, and `Renderer: selected <setting>, active <backend>` opens the session.
+
+## Direct3D 11 renderer (experimental)
+
+On Windows, `d3d11` runs this same OpenGL backend as OpenGL ES 3.0 on ANGLE's Direct3D 11 backend, instead of being a
+separate renderer. Vulkan and desktop OpenGL do not go through ANGLE. What differs, and what it does not do yet, is in
+[d3d11-renderer.md](d3d11-renderer.md).
 
 ## Render resolution
 

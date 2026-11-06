@@ -105,6 +105,7 @@ extern "C" int dcp_check_renderer(const char* settings_file, char* cause, size_t
     DcpSettings::Read(settings_file ? settings_file : "", values);
     switch (DcpRenderer::Choice(values.renderer.load())) {
     case DcpRenderer::OpenGL:
+    case DcpRenderer::Direct3D11:
         return 1;
     case DcpRenderer::Auto:
         dcp_check_vulkan(cause, cause_size, advice, advice_size);

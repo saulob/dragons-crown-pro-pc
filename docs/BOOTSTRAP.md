@@ -143,10 +143,10 @@ tools\build.ps1 -Run -CheckImports   # runtime's own list of imports it cannot b
 | First graphics requirement | 97 Gnm driver + 7 VideoOut imports, i.e. the whole video core (Vulkan device, window, VideoOut buffers, flip/vblank events). |
 | Risks | No `fs:` absolute accesses and no static TLS found in the eboot (heuristic scan), `libc.prx` has TLS. The Windows TCB redirect found 0 sites, so verify TLS behaviour early. Game data is two CRI CPK archives, presumably read through Fios2 (`sce_discmap.plt` is present). |
 
-First controlled boot attempt:
+First controlled boot attempt: build, then start the game yourself.
 
 ```powershell
-tools\build.ps1 -Run
+tools\build.ps1
 ```
 
 Recommended first action: add `sceLibcHeapGetTraceInfo` in a new `src/runtime_dcp.c` (title-specific imports kept apart, as
@@ -159,4 +159,4 @@ compatibility rewriting (gow3 `isa_rewrite`), save-data behaviour, launcher, pat
 
 ## Canonical build
 
-One configuration, `RelWithDebInfo` (`-O2 -g -DNDEBUG`, the CMake default in `CMakeLists.txt`), in `build\cmake\clang64`. It is what `tools\build.ps1 -Run` launches and what a package step must take as it is; there is no separate Release tree. Nothing in `CMakeLists.txt` or `gpu\CMakeLists.txt` branches on the build type, and the video core defines `NDEBUG` itself, so debug info is the only difference from Release.
+One configuration, `RelWithDebInfo` (`-O2 -g -DNDEBUG`, the CMake default in `CMakeLists.txt`), in `build\cmake\clang64`. It is what `tools\build.ps1` builds and what a package step must take as it is; there is no separate Release tree. Nothing in `CMakeLists.txt` or `gpu\CMakeLists.txt` branches on the build type, and the video core defines `NDEBUG` itself, so debug info is the only difference from Release.

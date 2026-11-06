@@ -94,19 +94,22 @@ void BindSamplerUnits(GLuint program, const Shader::Backend::GLSL::Stage* stage,
 
 } // namespace
 
-PrimitiveExpansion ExpansionOf(AmdGpu::PrimitiveType type) {
+PrimitiveExpansion ExpansionOf(AmdGpu::PrimitiveType type, Shader::Backend::GLSL::Target target,
+                               bool rect_tables) {
     switch (type) {
     case AmdGpu::PrimitiveType::RectList:
-        return PrimitiveExpansion::RectList;
+        return rect_tables ? PrimitiveExpansion::IndexedRectList : PrimitiveExpansion::RectList;
     case AmdGpu::PrimitiveType::QuadList:
-        return PrimitiveExpansion::QuadList;
+        return target == Shader::Backend::GLSL::Target::Gles300 ? PrimitiveExpansion::None
+                                                                : PrimitiveExpansion::QuadList;
     default:
         return PrimitiveExpansion::None;
     }
 }
 
-ShaderCache::ShaderCache(GlState& state_, u32 max_viewport_width, u32 max_viewport_height)
-    : state{state_} {
+ShaderCache::ShaderCache(GlState& state_, u32 max_viewport_width, u32 max_viewport_height,
+                         Shader::Backend::GLSL::Target target_)
+    : state{state_}, target{target_} {
     profile.max_viewport_width = max_viewport_width;
     profile.max_viewport_height = max_viewport_height;
     profile.subgroup_size = 64;
@@ -223,7 +226,7 @@ StageModule* ShaderCache::GetModule(HwStage hw_stage, SwStage sw_stage,
         Shader::TranslateProgram(params.code, pools, *module->info, runtime_info, profile);
     module->spec = Shader::StageSpecialization(*module->info, runtime_info, profile, {});
     if (sw_stage != SwStage::Compute) {
-        module->glsl = Shader::Backend::GLSL::EmitGLSL(profile, runtime_info, program);
+        module->glsl = Shader::Backend::GLSL::EmitGLSL(profile, runtime_info, program, target);
     }
     LOG_INFO(Render, "OpenGL: recompiled {} shader {:#x} (permutation {})",
              magic_enum::enum_name(hw_stage), params.hash, modules.size());
@@ -291,6 +294,9 @@ GraphicsProgram* ShaderCache::Link(StageModule* vertex, StageModule* fragment,
     out.flip_y = gl::GetUniformLocation(program, "vs_flip_y");
     out.base_vertex = gl::GetUniformLocation(program, "vs_base_vertex");
     out.base_instance = gl::GetUniformLocation(program, "vs_base_instance");
+    out.vertex_id_base = gl::GetUniformLocation(program, "vs_vertex_id_base");
+    out.rect_draw = gl::GetUniformLocation(program, "vs_rect_draw");
+    out.rect_inputs = gl::GetUniformLocation(program, "vs_rect_inputs");
     state.UseProgram(program);
     if (const GLint ring = gl::GetUniformLocation(program, "dcp_ring"); ring >= 0) {
         gl::Uniform1i(ring, 0);
@@ -302,7 +308,7 @@ GraphicsProgram* ShaderCache::Link(StageModule* vertex, StageModule* fragment,
         .first->second.get();
 }
 
-GraphicsProgram* ShaderCache::GetGraphics(const AmdGpu::Regs& regs) {
+GraphicsProgram* ShaderCache::GetGraphics(const AmdGpu::Regs& regs, bool rect_tables) {
     if (regs.stage_enable.raw != AmdGpu::ShaderStageEnable::VgtStages::Vs) {
         ReportOnce(u64(regs.stage_enable.raw) | 1ull << 63,
                    fmt::format("shader stage set {:#x} (only VS + PS is implemented)",
@@ -329,12 +335,14 @@ GraphicsProgram* ShaderCache::GetGraphics(const AmdGpu::Regs& regs) {
     for (const StageModule* module : {vertex, fragment}) {
         if (module && !module->glsl.error.empty()) {
             ReportOnce(module->info->pgm_hash,
-                       fmt::format("shader {:#x}: GLSL 3.30 cannot express {}",
-                                   module->info->pgm_hash, module->glsl.error));
+                       fmt::format("shader {:#x}: {} cannot express {}", module->info->pgm_hash,
+                                   target == Shader::Backend::GLSL::Target::Gles300 ? "GLSL ES 3.00"
+                                                                                    : "GLSL 3.30",
+                                   module->glsl.error));
             return nullptr;
         }
     }
-    const auto expansion = ExpansionOf(regs.primitive_type);
+    const auto expansion = ExpansionOf(regs.primitive_type, target, rect_tables);
     const auto it = graphics.find(ProgramKey{vertex, fragment, expansion});
     return it != graphics.end() ? it->second.get() : Link(vertex, fragment, expansion);
 }

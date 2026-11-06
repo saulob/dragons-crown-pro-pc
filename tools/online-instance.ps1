@@ -118,7 +118,7 @@ try {
     Write-Host "  logs:        $logs"
     # -WhatIf resolves and prints all of the above and starts nothing (tests/online_instance_tests.ps1).
     if ($PSCmdlet.ShouldProcess($Executable, "Start test instance $Name")) {
-        # The development build loads SDL3, FreeType, libpng, libc++ and the other DLLs from the toolchain, as tools\build.ps1 -Run does.
+        # For a build older than the DLLs staged beside the executable.
         $tc = Resolve-Toolchain 'auto'
         $env:PATH = "$($tc.Bin);$env:PATH"
         Start-Process -FilePath $Executable -ArgumentList @('--user', "`"$user`"", '--logs', "`"$logs`"", '--launcher') -WorkingDirectory (Split-Path -Parent $Executable)

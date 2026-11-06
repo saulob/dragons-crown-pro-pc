@@ -2,8 +2,9 @@
 .SYNOPSIS
   Builds dragons_crown_pro.exe and, on Windows, trg-updater.exe incrementally (MSYS2 CLANG64, CMake + Ninja). -Run launches it.
 .DESCRIPTION
-  Reuses what is current and updates only what is stale: the video core dependencies (gpu\deps.txt), the CMake
-  configuration and, once the game is installed, its boot image (build\image\v1.03). The one build configuration,
+  Reuses what is current and updates only what is stale: the video core dependencies (gpu\deps.txt), the pinned ANGLE
+  runtime (gpu\angle-runtime.txt, cached in cache\deps), the CMake configuration and, once the game is installed, its boot
+  image (build\image\v1.03). Every DLL the game loads ends up beside it. The one build configuration,
   RelWithDebInfo (-O2 -g -DNDEBUG), is what is tested and what a package must contain; nothing else is built.
   The game is installed from the launcher (Play page, Install game...), as in a release.
 .PARAMETER Run
@@ -60,6 +61,7 @@ $env:PATH = "$($tc.Bin);$env:PATH"
 Write-Step "Toolchain clang64 ($($tc.Bin)), $config"
 
 Sync-GpuDependencies
+$angleRuntime = Sync-AngleRuntime $tc.Bin
 
 if ($Clean -and (Test-Path -LiteralPath $buildDir)) {
     Write-Step 'Cleaning build\cmake'
@@ -77,6 +79,7 @@ Write-Step 'Building'
 & ninja -C $buildDir dragons_crown_pro trg-updater
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Build failed' }
 if (-not (Test-Path -LiteralPath $loader)) { Stop-Tool "Missing $loader" }
+Install-GameRuntime $loader $angleRuntime $tc.Bin
 
 if (-not (Test-Path -LiteralPath $marker)) {
     Write-Warn 'The game is not installed yet: start the game and use Install game... on the launcher''s Play page.'

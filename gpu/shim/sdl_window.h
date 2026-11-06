@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "common/types.h"
 #include "dcp_cursor.h"
+#include "dcp_renderer.h"
 
 struct SDL_Window;
 union SDL_Event;
@@ -22,10 +23,23 @@ struct WindowSystemInfo {
     WindowSystemType type = WindowSystemType::Headless;
 };
 
+enum class GraphicsApi : u8 { Vulkan, OpenGL, Angle };
+
+inline GraphicsApi GraphicsApiFor(DcpRenderer::Backend backend) {
+    switch (backend) {
+    case DcpRenderer::Backend::OpenGL:
+        return GraphicsApi::OpenGL;
+    case DcpRenderer::Backend::Direct3D11:
+        return GraphicsApi::Angle;
+    default:
+        return GraphicsApi::Vulkan;
+    }
+}
+
 class WindowSDL {
 public:
-    /// The window is created for one renderer: Vulkan and OpenGL windows are different SDL windows.
-    WindowSDL(s32 width, s32 height, const char* title, bool opengl);
+    /// The window is created for one renderer: each API needs a different SDL window.
+    WindowSDL(s32 width, s32 height, const char* title, GraphicsApi api);
     ~WindowSDL();
     s32 GetWidth() const { return width.load(std::memory_order_relaxed); }
     s32 GetHeight() const { return height.load(std::memory_order_relaxed); }

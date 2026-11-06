@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "common/alignment.h"
+#include "shader_recompiler/backend/glsl/ring_layout.h"
 #include "video_core/renderer_opengl/gl_guest_watch.h"
 #include "video_core/renderer_opengl/gl_state.h"
 #include "video_core/renderer_opengl/gl_stream_ring.h"
@@ -15,11 +16,23 @@ constexpr u32 RingBytes = 64 * 1024 * 1024;
 constexpr GLbitfield PersistentFlags =
     GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
 constexpr GLuint64 FenceWaitNanoseconds = 1'000'000'000;
+constexpr u32 ShaderRowTexels = 1u << Shader::Backend::GLSL::RingRowBits;
+constexpr u32 ShaderTexelBytes = sizeof(u32);
 
 } // namespace
 
-StreamRing::StreamRing(GlState& state_, bool persistent)
-    : state{state_}, guest_copies(GuestCopySlots) {
+StreamRing::StreamRing(GlState& state_, RingStorage storage_)
+    : state{state_}, storage{storage_}, guest_copies(GuestCopySlots) {
+    if (storage == RingStorage::ClientMemory || storage == RingStorage::ShaderTexture) {
+        capacity = RingBytes;
+        segment_bytes = capacity / SegmentCount;
+        client.resize(capacity);
+        if (storage == RingStorage::ShaderTexture) {
+            CreateShaderTexture();
+        }
+        return;
+    }
+    const bool persistent = storage == RingStorage::Persistent;
     GLint max_texels = 0;
     gl::GetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE, &max_texels);
     segment_bytes = u32(std::min<u64>(RingBytes, u64(max_texels) * 4) / SegmentCount);
@@ -42,6 +55,15 @@ StreamRing::StreamRing(GlState& state_, bool persistent)
     gl::GenTextures(1, &texture);
     state.BindTexture(0, GL_TEXTURE_BUFFER, texture);
     gl::TexBuffer(GL_TEXTURE_BUFFER, GL_R32UI, buffer);
+}
+
+void StreamRing::CreateShaderTexture() {
+    gl::GenTextures(1, &texture);
+    state.BindForEdit(GL_TEXTURE_2D, texture);
+    const u32 rows = capacity / ShaderTexelBytes / ShaderRowTexels;
+    gl::TexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, GLsizei(ShaderRowTexels), GLsizei(rows));
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
 
 StreamRing::~StreamRing() {
@@ -89,7 +111,7 @@ void StreamRing::Wrap() {
         FenceSegments((head + segment_bytes - 1) / segment_bytes);
         fenced_segments = 0;
         acquired_end = 0;
-    } else {
+    } else if (client.empty()) {
         state.BindArrayBuffer(buffer);
         gl::BufferData(GL_ARRAY_BUFFER, capacity, nullptr, GL_STREAM_DRAW);
     }
@@ -112,7 +134,9 @@ u32 StreamRing::Push(const void* data, u32 size, u32 alignment) {
     if (u64(offset) + size > capacity) {
         return NoOffset;
     }
-    if (mapped) {
+    if (!client.empty()) {
+        std::memcpy(client.data() + offset, data, size);
+    } else if (mapped) {
         AcquireThrough(offset + size);
         std::memcpy(mapped + offset, data, size);
     } else {
@@ -121,6 +145,16 @@ u32 StreamRing::Push(const void* data, u32 size, u32 alignment) {
     }
     head = offset + size;
     return offset;
+}
+
+u8* StreamRing::Reserve(u32 size, u32 alignment, u32& offset) {
+    offset = Common::AlignUp(head, alignment);
+    if (client.empty() || u64(offset) + size > capacity) {
+        offset = NoOffset;
+        return nullptr;
+    }
+    head = offset + size;
+    return client.data() + offset;
 }
 
 u32 StreamRing::PushGuest(VAddr address, u32 size, u32 alignment) {
@@ -147,7 +181,33 @@ u32 StreamRing::PushGuest(VAddr address, u32 size, u32 alignment) {
     return offset;
 }
 
+// Uploads are in order with the draws, so a draw already issued keeps what it read and no fence is needed.
+void StreamRing::UploadPending() {
+    if (head == pending_start) {
+        return;
+    }
+    const u32 first = pending_start / ShaderTexelBytes;
+    const u32 last = (head + ShaderTexelBytes - 1) / ShaderTexelBytes;
+    const u32 first_row = first / ShaderRowTexels;
+    const u32 last_row = (last - 1) / ShaderRowTexels;
+    // Several rows go up whole: the ring's memory holds what the rest of each row already has.
+    const u32 column = first_row == last_row ? first % ShaderRowTexels : 0;
+    const u32 width = first_row == last_row ? last - first : ShaderRowTexels;
+    state.BindForEdit(GL_TEXTURE_2D, texture);
+    gl::TexSubImage2D(GL_TEXTURE_2D, 0, GLint(column), GLint(first_row), GLsizei(width),
+                      GLsizei(last_row - first_row + 1), GL_RED_INTEGER, GL_UNSIGNED_INT,
+                      client.data() + (size_t(first_row) * ShaderRowTexels + column) * ShaderTexelBytes);
+    pending_start = head;
+}
+
 void StreamRing::Commit() {
+    if (storage == RingStorage::ClientMemory) {
+        return;
+    }
+    if (storage == RingStorage::ShaderTexture) {
+        UploadPending();
+        return;
+    }
     if (pending.empty()) {
         return;
     }

@@ -541,9 +541,10 @@ void TestRendererRow(const fs::path& folder) {
     Check(std::string(setting.key) == "renderer" && setting.page == Page::Graphics && setting.apply == Apply::Restart &&
               setting.feature == 0,
           "Renderer is a restart-required Graphics row on every build");
-    Check(setting.choices.size() == 3 && setting.choices[0].value == "auto" && setting.choices[1].value == "vulkan" &&
-              setting.choices[2].value == "opengl",
-          "Renderer offers Auto, Vulkan and OpenGL");
+    const size_t renderers = DcpRenderer::Direct3D11Available ? 4 : 3;
+    Check(setting.choices.size() == renderers && setting.choices[0].value == "auto" &&
+              setting.choices[1].value == "vulkan" && setting.choices[2].value == "opengl",
+          "Renderer offers Auto, Vulkan, OpenGL, and Direct3D 11 only on Windows");
     const std::string launcher = Source("launcher/settings.h");
     for (const Choice& choice : setting.choices) {
         Check(DcpRenderer::ChoiceKeys[size_t(DcpRenderer::ParseChoice(choice.value))] == choice.value,
@@ -573,6 +574,17 @@ void TestRendererRow(const fs::path& folder) {
     DcpSettings::Values untouched;
     ApplyLive(untouched, Id::Renderer, "opengl");
     Check(untouched.renderer == DcpRenderer::Vulkan, "nothing switches the renderer live");
+#ifdef _WIN32
+    Check(setting.choices[3].value == "d3d11" && setting.choices[3].label == "Direct3D 11 (experimental)",
+          "Direct3D 11 is named in full");
+    const Outcome direct3d = options.Choose(Id::Renderer, "d3d11");
+    Check(direct3d.changed && direct3d.saved && options.RestartPending(), "Direct3D 11 waits for the restart too");
+    Check(live.renderer == DcpRenderer::Vulkan, "and leaves the running renderer alone");
+    DcpSettings::Values restarted_d3d11;
+    Check(Contains(ReadAll(file), "renderer = d3d11\n") && DcpSettings::Read(file.string(), restarted_d3d11) &&
+              restarted_d3d11.renderer == DcpRenderer::Direct3D11,
+          "the same key holds it");
+#endif
     options.Choose(Id::Renderer, "vulkan");
     Check(!options.Pending(Id::Renderer) && !options.RestartPending(), "choosing the running renderer clears the wait");
     const std::string menu = Source("gpu/shim/dcp_options_menu.cpp");

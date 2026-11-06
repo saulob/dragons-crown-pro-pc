@@ -276,7 +276,7 @@ git clone https://github.com/saulob/dragons-crown-pro-pc.git
 
 1. Install [MSYS2](https://www.msys2.org) with the CLANG64 toolchain. `.\tools\setup.ps1` checks it and prints the `pacman` command for anything missing.
 2. `.\tools\build.ps1` fetches the pinned dependencies (TRG Launcher, Dear ImGui and a few small libraries) and builds `build\cmake\clang64\bin\dragons_crown_pro.exe`.
-3. `.\tools\build.ps1 -Run` also starts it. Install the game from the launcher's Play page, as in a release; the development build keeps it in `game\` and the boot image in `build\image\` of the repository.
+3. Start that executable yourself: the build only builds, and puts every DLL the game loads beside it. Install the game from the launcher's Play page, as in a release; the development build keeps it in `game\` and the boot image in `build\image\` of the repository.
 4. `.\tools\package.ps1` makes the release folder, ZIP and `.zip.sha256` file in `dist\` from the same build: the program without debug information (the symbols stay in `dist\`), the DLLs it needs and the licences. It is local only and never uploads, tags or publishes anything. The release version is the project `VERSION` in `CMakeLists.txt`.
 5. `.\tools\package-release.ps1` prepares the whole release in `dist\`: that Windows ZIP, and the Linux AppImage built in WSL2 (`tools/package-release-linux.sh`, which runs `tools/package-linux.sh`), each with its `.sha256` file. It needs the Ubuntu 20.04 WSL2 distribution `DcpFocalBuild`, prepared once as [docs/LINUX.md](docs/LINUX.md#building) describes, installs nothing, fails if either platform fails, and never uploads anything.
 
@@ -295,7 +295,7 @@ bash tools/package-linux.sh       # dist/DragonsCrownProPC-v<version>-x86_64.App
 
 `tools/build.sh --run` starts the loader that was built. Python is not needed. The AppImage is built on Ubuntu 20.04, whose glibc (2.31) is the oldest one it runs on, and `tools/package-linux.sh` checks every ELF file in it against that; `.github/workflows/linux-appimage.yml` does the same in GitHub Actions (started by hand, publishes nothing).
 
-The technical notes are in [docs](docs): [launcher and settings](docs/LAUNCHER.md), [online play](docs/ONLINE.md), [Linux port](docs/LINUX.md), [graphics](docs/GRAPHICS.md), [OpenGL renderer: origin and independence](docs/opengl-renderer.md), [first boot](docs/FIRST_BOOT.md), [bootstrap](docs/BOOTSTRAP.md) and [references](docs/REFERENCES.md).
+The technical notes are in [docs](docs): [launcher and settings](docs/LAUNCHER.md), [online play](docs/ONLINE.md), [Linux port](docs/LINUX.md), [graphics](docs/GRAPHICS.md), [OpenGL renderer: origin and independence](docs/opengl-renderer.md), [Direct3D 11 renderer](docs/d3d11-renderer.md), [first boot](docs/FIRST_BOOT.md), [bootstrap](docs/BOOTSTRAP.md) and [references](docs/REFERENCES.md).
 
 ## Sponsoring
 
@@ -312,6 +312,7 @@ Dragon's Crown Pro PC is maintained and developed in my free time. If you enjoy 
 - [gow3_pc](https://github.com/FelipePrado0/gow3_pc) and its lineage, uncharted-ndc-native, MediEvil PC and the HayatoG ports, for the loader, runtime and video core this port grew from (see [docs/REFERENCES.md](docs/REFERENCES.md))
 - [OpenCrown-PC](https://github.com/Nezara/OpenCrown-PC) by Nezara for published Dragon's Crown Pro reverse-engineering research used as a technical reference, including parts of the online/lobby research and the original CUSA10454 1.00 story/tutorial skip patch-site research. Dragon's Crown Pro PC's implementations were written separately for this project
 - The experimental OpenGL renderer is an independent backend on the shadPS4-derived video core; the projects it was informed by, and what was and was not taken from each, are listed in [docs/opengl-renderer.md](docs/opengl-renderer.md)
+- [ANGLE](https://chromium.googlesource.com/angle/angle) runs the experimental Direct3D 11 renderer on Windows (BSD-3-Clause); see [docs/d3d11-renderer.md](docs/d3d11-renderer.md)
 - Brazilian Portuguese translation, images and manual based on the work of [Marcelo - Uma Ficha](https://www.youtube.com/@umaficha1), used with permission
 - [bloodborne_pc_windows](https://github.com/Phroster/bloodborne_pc_windows) for the anisotropic filtering approach
 - [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al., and AMD FidelityFX Super Resolution 1

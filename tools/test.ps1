@@ -185,6 +185,7 @@ $tests = @(
     (Test-Step 'renderer selection tests (Auto, Vulkan, OpenGL, requirements)' 'dcp-renderer-selection-tests'),
     (Test-Step 'OpenGL backend tests (detiler, emitted GLSL through glslang, no context)' 'dcp-opengl-backend-tests'),
     (Test-Step 'OpenGL fast path tests (write watch with real faults, state tracker, stream ring, no context)' 'dcp-opengl-perf-tests'),
+    (Test-Step 'ANGLE dependency tests (pin, cache, extraction, DLL staging, package checks, no network)' -Script 'tests\angle_dependency_tests.ps1'),
     (Test-Step 'updater tests' 'dcp-update-tests'),
     (Test-Step 'updater helper tests' 'dcp-update-helper-tests'),
     (Test-Step 'RTC tests (Win32 file time)' 'dcp-rtc-tests'),

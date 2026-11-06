@@ -9,6 +9,7 @@
 #include "core/memory.h"
 #include "shader_recompiler/resource.h"
 #include "video_core/amdgpu/resource.h"
+#include "video_core/renderer_opengl/gl_capabilities.h"
 #include "video_core/renderer_opengl/gl_detile.h"
 #include "video_core/renderer_opengl/gl_state.h"
 #include "video_core/renderer_opengl/gl_texture_cache.h"
@@ -50,8 +51,9 @@ GLenum ImageTarget(AmdGpu::ImageType type) {
     }
 }
 
-TextureCache::TextureCache(GlState& state_, GuestWriteWatch& watch_)
-    : state{state_}, watch{watch_}, resolved(ResolvedSlots) {}
+TextureCache::TextureCache(GlState& state_, GuestWriteWatch& watch_, const Capabilities& capabilities_)
+    : state{state_}, watch{watch_}, capabilities{capabilities_}, gles{capabilities_.gles},
+      resolved(ResolvedSlots) {}
 
 TextureCache::~TextureCache() {
     for (auto& [address, list] : images) {
@@ -70,6 +72,11 @@ void TextureCache::Allocate(Image& image) {
     gl::TexParameteri(image.target, GL_TEXTURE_BASE_LEVEL, 0);
     gl::TexParameteri(image.target, GL_TEXTURE_MAX_LEVEL, GLint(levels - 1));
     image.view.max_level = GLint(levels - 1);
+    if (gles) {
+        // A fetch has no sampler: OpenGL ES calls integer and depth images incomplete under the defaults.
+        gl::TexParameteri(image.target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl::TexParameteri(image.target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    }
     const u32 layers = image.target == GL_TEXTURE_3D ? info.size.depth : info.resources.layers;
     for (u32 level = 0; level < levels; ++level) {
         const GLsizei width = GLsizei(std::max(info.size.width >> level, 1u));
@@ -112,8 +119,12 @@ void TextureCache::Allocate(Image& image) {
 }
 
 Image* TextureCache::Create(const VideoCore::ImageInfo& info, GLenum target) {
-    const auto* format = FindTextureFormat(info.pixel_format);
-    if (!format) {
+    const auto* format = FindTextureFormat(info.pixel_format, gles);
+    // ANGLE's Direct3D backends refuse a block compressed base level that is not whole blocks.
+    const bool unusable = gles && format &&
+                          (!FormatAvailable(*format, capabilities) ||
+                           (format->compressed && (info.size.width % 4 != 0 || info.size.height % 4 != 0)));
+    if (!format || unusable) {
         if (reported_formats.insert(u32(info.pixel_format)).second) {
             std::printf("OpenGL: unsupported image format %s at %#llx; its draws use a black "
                         "texture\n",
@@ -315,6 +326,12 @@ void TextureCache::UploadLevel(Image& image, u32 level, const u8* data, u32 pitc
         return;
     }
     Perf::Count(Perf::TextureBytes, u64(pitch) * rows * layers * element_bytes);
+    if (format->conversion != TexelConversion::None) {
+        const size_t bytes = size_t(pitch) * rows * layers * element_bytes;
+        converted.assign(data, data + bytes);
+        ConvertTexels(format->conversion, converted.data(), bytes);
+        data = converted.data();
+    }
     gl::PixelStorei(GL_UNPACK_ALIGNMENT, 1);
     gl::PixelStorei(GL_UNPACK_ROW_LENGTH, GLint(pitch));
     gl::PixelStorei(GL_UNPACK_IMAGE_HEIGHT, GLint(rows));
@@ -406,7 +423,14 @@ void TextureCache::ApplyView(Image& image, GLuint unit, const SampledView& view)
     }
     state.ActiveTexture(unit);
     if (!state.Filtering() || image.view.swizzle != view.swizzle) {
-        gl::TexParameteriv(image.target, GL_TEXTURE_SWIZZLE_RGBA, view.swizzle.data());
+        if (gles) {
+            gl::TexParameteri(image.target, GL_TEXTURE_SWIZZLE_R, view.swizzle[0]);
+            gl::TexParameteri(image.target, GL_TEXTURE_SWIZZLE_G, view.swizzle[1]);
+            gl::TexParameteri(image.target, GL_TEXTURE_SWIZZLE_B, view.swizzle[2]);
+            gl::TexParameteri(image.target, GL_TEXTURE_SWIZZLE_A, view.swizzle[3]);
+        } else {
+            gl::TexParameteriv(image.target, GL_TEXTURE_SWIZZLE_RGBA, view.swizzle.data());
+        }
         Perf::Count(Perf::TextureParams);
     }
     if (!state.Filtering() || image.view.base_level != view.base_level) {

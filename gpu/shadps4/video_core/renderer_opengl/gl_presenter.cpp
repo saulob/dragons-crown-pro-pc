@@ -10,10 +10,14 @@
 #include "core/libraries/videoout/buffer.h"
 #include "dcp_graphics.h"
 #include "dcp_overlay.h"
+#include "dcp_renderer.h"
 #include "dcp_settings.h"
 #include "dcp_ultrawide_sides.h"
 #include "sdl_window.h"
 #include "video_core/amdgpu/liverpool.h"
+#ifdef _WIN32
+#include "video_core/renderer_opengl/gl_angle.h"
+#endif
 #include "video_core/renderer_opengl/gl_capabilities.h"
 #include "video_core/renderer_opengl/gl_presenter.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
@@ -27,7 +31,10 @@ using PixelFormat = Libraries::VideoOut::PixelFormat;
 
 constexpr u32 MaxPendingShows = 2;
 
-constexpr const char* FullscreenVertex = R"(#version 330 core
+constexpr const char* DesktopVersion = "#version 330 core\n";
+constexpr const char* GlesVersion = "#version 300 es\nprecision highp float;\nprecision highp int;\n";
+
+constexpr const char* FullscreenVertex = R"(
 out vec2 uv;
 uniform float flip_v;
 void main() {
@@ -38,7 +45,7 @@ void main() {
 )";
 
 // post_process.frag without HDR, which has no OpenGL path here.
-constexpr const char* PrepareFragment = R"(#version 330 core
+constexpr const char* PrepareFragment = R"(
 in vec2 uv;
 out vec4 color;
 uniform sampler2D source;
@@ -61,7 +68,7 @@ void main() {
 }
 )";
 
-constexpr const char* ShowFragment = R"(#version 330 core
+constexpr const char* ShowFragment = R"(
 in vec2 uv;
 out vec4 color;
 uniform sampler2D source;
@@ -70,19 +77,26 @@ void main() {
 }
 )";
 
+bool RunsOnGles() {
+    return DcpRenderer::Active() == DcpRenderer::Backend::Direct3D11;
+}
+
 [[noreturn]] void Fatal(const std::string& message) {
-    std::printf("OpenGL: %s\n", message.c_str());
+    const std::string name = RunsOnGles() ? "Direct3D 11" : "OpenGL";
+    std::printf("%s: %s\n", name.c_str(), message.c_str());
     std::fflush(stdout);
     runtime_log_flush();
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Dragon's Crown Pro",
-                             ("The OpenGL renderer could not start.\n\n" + message).c_str(),
+                             ("The " + name + " renderer could not start.\n\n" + message).c_str(),
                              nullptr);
     std::_Exit(1);
 }
 
 GLuint BuildProgram(const char* vertex_source, const char* fragment_source) {
-    const auto compile = [](GLenum type, const char* source) {
+    const auto compile = [](GLenum type, const char* body) {
         const GLuint shader = gl::CreateShader(type);
+        const std::string text = std::string{RunsOnGles() ? GlesVersion : DesktopVersion} + body;
+        const char* source = text.c_str();
         gl::ShaderSource(shader, 1, &source, nullptr);
         gl::CompileShader(shader);
         GLint compiled = GL_FALSE;
@@ -150,15 +164,52 @@ SDL_Rect FitInside(u32 picture_width, u32 picture_height, int window_width, int 
     return {(window_width - width) / 2, (window_height - height) / 2, width, height};
 }
 
+Capabilities QueryGlesCapabilities() {
+    Capabilities capabilities;
+    capabilities.gles = true;
+    gl::GetIntegerv(GL_MAJOR_VERSION, &capabilities.major);
+    gl::GetIntegerv(GL_MINOR_VERSION, &capabilities.minor);
+    capabilities.s3tc = HasExtension("GL_EXT_texture_compression_s3tc") ||
+                        (HasExtension("GL_EXT_texture_compression_dxt1") &&
+                         HasExtension("GL_ANGLE_texture_compression_dxt3") &&
+                         HasExtension("GL_ANGLE_texture_compression_dxt5"));
+    capabilities.s3tc_srgb = HasExtension("GL_EXT_texture_compression_s3tc_srgb");
+    capabilities.rgtc = HasExtension("GL_EXT_texture_compression_rgtc");
+    capabilities.bptc = HasExtension("GL_EXT_texture_compression_bptc");
+    capabilities.norm16 = HasExtension("GL_EXT_texture_norm16");
+    capabilities.anisotropy = HasExtension("GL_EXT_texture_filter_anisotropic");
+    capabilities.depth_clamp = HasExtension("GL_EXT_depth_clamp");
+    capabilities.draw_buffers_blend =
+        gl::Enablei && gl::Disablei && gl::ColorMaski && gl::BlendFuncSeparatei && gl::BlendEquationSeparatei;
+    gl::GetIntegerv(GL_MAX_TEXTURE_SIZE, &capabilities.max_texture_size);
+    return capabilities;
+}
+
+void LogGlesDevice(const Capabilities& capabilities) {
+    std::printf("Direct3D 11: vendor %s, renderer %s, version %s, GLSL ES %s\n", Text(GL_VENDOR),
+                Text(GL_RENDERER), Text(GL_VERSION), Text(GL_SHADING_LANGUAGE_VERSION));
+#ifdef _WIN32
+    std::printf("Direct3D 11: %s\n", AngleDeviceDescription().c_str());
+#endif
+    const auto yes_no = [](bool value) { return value ? "yes" : "no"; };
+    std::printf("Direct3D 11: BC4/BC5 %s, BC6/BC7 %s, sRGB BC1-BC3 %s, 16-bit normalized %s, anisotropy %s, "
+                "depth clamp %s, provoking vertex %s, polygon mode %s, largest texture %d\n",
+                yes_no(capabilities.rgtc), yes_no(capabilities.bptc), yes_no(capabilities.s3tc_srgb),
+                yes_no(capabilities.norm16), yes_no(capabilities.anisotropy), yes_no(capabilities.depth_clamp),
+                yes_no(gl::ProvokingVertex != nullptr), yes_no(gl::PolygonMode != nullptr),
+                capabilities.max_texture_size);
+}
+
 } // namespace
 
 Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_)
-    : window{window_}, liverpool{liverpool_} {
+    : window{window_}, liverpool{liverpool_}, gles{RunsOnGles()} {
     blank_frame.blank = true;
     SDL_Window* sdl_window = window.GetSDLWindow();
     context = SDL_GL_CreateContext(sdl_window);
     if (!context) {
-        Fatal(std::string{"no OpenGL 3.3 core context: "} + SDL_GetError());
+        Fatal(std::string{gles ? "no OpenGL ES 3.0 context through ANGLE: " : "no OpenGL 3.3 core context: "} +
+              SDL_GetError());
     }
     SDL_GL_MakeCurrent(sdl_window, nullptr);
     liverpool->SendCommand<true>([this] { InitializeOnGpuThread(); });
@@ -172,8 +223,24 @@ void Presenter::InitializeOnGpuThread() {
         Fatal(std::string{"the context could not be made current: "} + SDL_GetError());
     }
     std::string missing_function;
-    if (!gl::Load(missing_function)) {
+    if (!gl::Load(missing_function, gles)) {
         Fatal("the driver does not export " + missing_function);
+    }
+    if (gles) {
+        if (!IsAngleDirect3D11(Text(GL_RENDERER))) {
+            Fatal(std::string{"ANGLE started on another backend: "} + Text(GL_RENDERER));
+        }
+        const Capabilities capabilities = QueryGlesCapabilities();
+        LogGlesDevice(capabilities);
+        if (const auto missing = MissingRequirement(capabilities); !missing.empty()) {
+            Fatal(missing);
+        }
+        rasterizer = std::make_unique<Rasterizer>(liverpool, capabilities);
+        CreatePasses();
+        DcpOverlay::InitOpenGL();
+        rasterizer->State().Invalidate();
+        ApplySwapInterval();
+        return;
     }
     Capabilities capabilities;
     gl::GetIntegerv(GL_MAJOR_VERSION, &capabilities.major);
@@ -270,7 +337,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     state.BindSampler(0, linear_sampler);
     rasterizer->GetTextureCache().ApplyView(*image, 0, SampledView{});
     const auto pixel_format = attribute.attrib.pixel_format;
-    const bool image_blue_first = image->format->format == GL_BGRA;
+    const bool image_blue_first = StoresBlueFirst(*image->format);
     gl::Uniform1f(prepare_gamma, gamma.load(std::memory_order_relaxed));
     gl::Uniform1i(prepare_swap, DisplayStoresBlueFirst(pixel_format) != image_blue_first);
     gl::Uniform1i(prepare_decode, DisplayIsSrgb(pixel_format) && !image->is_srgb);
@@ -361,10 +428,27 @@ void Presenter::Show(const Frame& frame, bool is_game_frame) {
     }
     {
         Perf::Scope swap_timer{Perf::SwapWindow};
-        SDL_GL_SwapWindow(window.GetSDLWindow());
+        const bool swapped = SDL_GL_SwapWindow(window.GetSDLWindow());
+        if (gles) {
+            CheckSwap(swapped);
+        }
     }
     Perf::OnPresent();
     state.Enable(GlState::Cap::FramebufferSrgb, true);
+}
+
+void Presenter::CheckSwap(bool swapped) {
+    if (swapped) {
+        return;
+    }
+    const std::string error = SDL_GetError();
+    if (error.find("EGL_CONTEXT_LOST") != std::string::npos) {
+        Fatal("the Direct3D 11 device was lost: " + error);
+    }
+    if (!swap_failure_logged) {
+        swap_failure_logged = true;
+        std::printf("Direct3D 11: presenting failed: %s\n", error.c_str());
+    }
 }
 
 } // namespace OpenGL

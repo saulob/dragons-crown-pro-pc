@@ -120,10 +120,14 @@
 
 // Absent on a plain 3.3 context: per-target blending (OpenGL 4.0) and persistent buffers
 // (ARB_buffer_storage). Check the capability, not the pointer: a driver can return one anyway.
+// The last three are OpenGL ES core calls the desktop path never makes.
 #define DCP_GL_OPTIONAL_FUNCTIONS(X)                                                               \
     X(PFNGLBLENDEQUATIONSEPARATEIPROC, BlendEquationSeparatei)                                     \
     X(PFNGLBLENDFUNCSEPARATEIPROC, BlendFuncSeparatei)                                             \
-    X(PFNGLBUFFERSTORAGEPROC, BufferStorage)
+    X(PFNGLBUFFERSTORAGEPROC, BufferStorage)                                                       \
+    X(PFNGLDEPTHRANGEFPROC, DepthRangef)                                                           \
+    X(PFNGLDRAWELEMENTSINSTANCEDPROC, DrawElementsInstanced)                                       \
+    X(PFNGLTEXSTORAGE2DPROC, TexStorage2D)
 
 namespace gl {
 
@@ -136,6 +140,7 @@ DCP_GL_OPTIONAL_FUNCTIONS(DCP_GL_DECLARATION)
 #undef DCP_GL_DECLARATION
 
 /// With a context current. False and the entry point's name when a required one is missing.
-bool Load(std::string& missing);
+/// `gles`: OpenGL ES has no equivalent for some, and spells others with an extension suffix.
+bool Load(std::string& missing, bool gles = false);
 
 } // namespace gl

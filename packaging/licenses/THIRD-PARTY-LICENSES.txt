@@ -91,6 +91,37 @@ FreeType                    FTL (FreeType licence; offered as FTL or GPL-2.0-or-
 libpng                      libpng licence                                                       licenses\libpng
 Zydis                       MIT                                                                  licenses\zydis
 xxHash                      BSD-2-Clause                                                         licenses\xxhash
+ANGLE (libEGL.dll, libGLESv2.dll), the Direct3D 11 renderer
+                            BSD-3-Clause. Copyright 2018 The ANGLE Project Authors.              licenses\angleproject
+  https://chromium.googlesource.com/angle/angle, revision 890b5d8fa2988e3719e0d80421bf3e927db9cd5c, as built by the
+  MSYS2 angleproject package. libGLESv2.dll also contains, compiled in from that build:
+  - Chromium base code (BSD-3-Clause, Copyright The Chromium Authors, on the same terms as the ANGLE licence)
+  - xxHash                  BSD-2-Clause                                                         licenses\xxhash
+  - SPIRV-Tools             Apache-2.0                                                           licenses\spirv-tools
+  - Vulkan-Loader           Apache-2.0                                                           licenses\vulkan-loader
+  - Vulkan Memory Allocator MIT                                                                  licenses\VulkanMemoryAllocator
+  - cJSON, inside Vulkan-Loader. MIT:
+
+    Copyright (c) 2009-2017 Dave Gamble and cJSON contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+    THE SOFTWARE.
+
 libc++                      Apache-2.0 WITH LLVM-exception                                       licenses\libc++
 winpthreads                 MIT AND BSD-3-Clause-Clear                                           licenses\libwinpthread
 zlib                        Zlib                                                                 licenses\zlib

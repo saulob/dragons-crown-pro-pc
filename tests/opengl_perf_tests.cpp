@@ -51,6 +51,7 @@ namespace {
 
 using OpenGL::GlState;
 using OpenGL::GuestWriteWatch;
+using OpenGL::RingStorage;
 using OpenGL::StreamRing;
 namespace Perf = OpenGL::Perf;
 
@@ -857,6 +858,139 @@ void InstallRingFakes() {
     };
 }
 
+struct RecordedUpload {
+    GLint x, y;
+    GLsizei width, height;
+    u32 first_value;
+};
+std::vector<RecordedUpload> g_uploads;
+
+void InstallGlesFakes() {
+    InstallRingFakes();
+    g_uploads.clear();
+    gl::DepthRangef = [](GLfloat, GLfloat) { Called("DepthRangef"); };
+    gl::TexStorage2D = [](GLenum, GLsizei, GLenum, GLsizei, GLsizei) { Called("TexStorage2D"); };
+    gl::TexParameteri = [](GLenum, GLenum, GLint) {};
+    gl::TexSubImage2D = [](GLenum, GLint, GLint x, GLint y, GLsizei width, GLsizei height, GLenum, GLenum,
+                           const void* pixels) {
+        u32 first = 0;
+        std::memcpy(&first, pixels, sizeof(first));
+        g_uploads.push_back({x, y, width, height, first});
+    };
+    gl::PolygonMode = nullptr;
+    gl::ProvokingVertex = nullptr;
+}
+
+void TestGlesState() {
+    g_calls.clear();
+    InstallGlesFakes();
+    GlState state{true, false};
+    using Cap = GlState::Cap;
+    for (const Cap cap : {Cap::ColorLogicOp, Cap::FramebufferSrgb, Cap::ProgramPointSize, Cap::DepthClamp}) {
+        state.Enable(cap, true);
+        state.Enable(cap, false);
+    }
+    CHECK(Calls("Enable") == 0 && Calls("Disable") == 0);
+    state.Enable(Cap::PrimitiveRestart, true);
+    CHECK(Calls("Enable") == 1);
+    GlState with_clamp{true, true};
+    with_clamp.Enable(Cap::DepthClamp, true);
+    CHECK(Calls("Enable") == 2);
+
+    state.DepthRange(0.0, 1.0);
+    CHECK(Calls("DepthRangef") == 1 && Calls("DepthRange") == 0);
+    state.PolygonMode(GL_FILL);
+    state.ProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
+    state.PrimitiveRestartIndex(0xFFFF);
+    state.LogicOp(GL_COPY);
+
+    // The upload unit must exist: OpenGL ES guarantees 32, not 48.
+    GLenum last_unit = 0;
+    static GLenum* unit_seen;
+    unit_seen = &last_unit;
+    gl::ActiveTexture = [](GLenum unit) { *unit_seen = unit; };
+    state.BindForEdit(GL_TEXTURE_2D, 9);
+    CHECK(last_unit == GL_TEXTURE0 + 31);
+    GlState desktop;
+    desktop.BindForEdit(GL_TEXTURE_2D, 9);
+    CHECK(last_unit == GL_TEXTURE0 + 47);
+}
+
+void TestRingReserve() {
+    g_calls.clear();
+    InstallGlesFakes();
+    GlState state{true, true};
+    StreamRing texture_ring{state, RingStorage::ShaderTexture};
+    u32 offset = 0;
+    u8* out = texture_ring.Reserve(16, 4, offset);
+    CHECK(out != nullptr && offset == 0);
+    const std::array<u32, 4> words{21, 22, 23, 24};
+    std::memcpy(out, words.data(), sizeof(words));
+    texture_ring.Commit();
+    CHECK(g_uploads.size() == 1 && g_uploads[0].width == 4 && g_uploads[0].first_value == 21);
+
+    out = texture_ring.Reserve(texture_ring.Capacity(), 4, offset);
+    CHECK(out == nullptr && offset == StreamRing::NoOffset);
+    out = texture_ring.Reserve(4, 4, offset);
+    CHECK(out != nullptr && offset == 16);
+
+    GlState desktop;
+    StreamRing buffer_ring{desktop, true};
+    CHECK(buffer_ring.Reserve(4, 4, offset) == nullptr);
+}
+
+void TestClientRing() {
+    g_calls.clear();
+    InstallGlesFakes();
+    GlState state{true, true};
+    StreamRing ring{state, RingStorage::ClientMemory};
+    CHECK(ring.Buffer() == 0 && ring.Texture() == 0);
+    CHECK(ring.PointerBase() != 0);
+    ring.BeginDraw();
+    const u32 data = 0xAABBCCDD;
+    const u32 offset = ring.Push(&data, sizeof(data), 16);
+    CHECK(offset != StreamRing::NoOffset);
+    ring.Commit();
+    CHECK(std::memcmp(reinterpret_cast<const void*>(uintptr_t(ring.PointerBase() + offset)), &data, sizeof(data)) == 0);
+    CHECK(Calls("BufferStorage") == 0 && Calls("BufferData") == 0 && Calls("MapBufferRange") == 0);
+}
+
+void TestShaderTextureRing() {
+    g_calls.clear();
+    InstallGlesFakes();
+    GlState state{true, true};
+    constexpr GLsizei row = 1 << Shader::Backend::GLSL::RingRowBits;
+    StreamRing ring{state, RingStorage::ShaderTexture};
+    CHECK(Calls("TexStorage2D") == 1);
+    CHECK(ring.TextureTarget() == GL_TEXTURE_2D && ring.Texture() != 0);
+
+    ring.BeginDraw();
+    const std::array<u32, 3> small{7, 8, 9};
+    const u32 offset = ring.Push(small.data(), sizeof(small), 4);
+    CHECK(offset == 0);
+    CHECK(g_uploads.empty());
+    ring.Commit();
+    CHECK(g_uploads.size() == 1 && g_uploads[0].x == 0 && g_uploads[0].y == 0 && g_uploads[0].width == 3 &&
+          g_uploads[0].height == 1 && g_uploads[0].first_value == 7);
+    ring.Commit();
+    CHECK(g_uploads.size() == 1);
+
+    const std::array<u32, 1> next{11};
+    ring.Push(next.data(), sizeof(next), 4);
+    ring.Commit();
+    CHECK(g_uploads.size() == 2 && g_uploads[1].x == 3 && g_uploads[1].width == 1 && g_uploads[1].first_value == 11);
+
+    // Across a row boundary whole rows go up, and the first keeps what was already there.
+    std::vector<u32> wide(size_t(row) + 8, 5);
+    ring.Push(wide.data(), u32(wide.size() * sizeof(u32)), 4);
+    ring.Commit();
+    CHECK(g_uploads.size() == 3 && g_uploads[2].x == 0 && g_uploads[2].y == 0 && g_uploads[2].width == row &&
+          g_uploads[2].height == 2 && g_uploads[2].first_value == 7);
+
+    // A shared buffer read as shader data never reaches the driver as a buffer.
+    CHECK(Calls("BufferStorage") == 0 && Calls("BufferData") == 0);
+}
+
 void TestPersistentRing() {
     g_calls.clear();
     InstallRingFakes();
@@ -1056,6 +1190,10 @@ int main() {
     TestPersistentRing();
     TestGuestCopies();
     TestMappedRing();
+    TestGlesState();
+    TestRingReserve();
+    TestClientRing();
+    TestShaderTextureRing();
     TestNothingBypassesTheTracker();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
