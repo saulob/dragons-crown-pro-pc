@@ -60,6 +60,7 @@
     X(PFNGLBLITFRAMEBUFFERPROC, BlitFramebuffer)                                                   \
     X(PFNGLBUFFERDATAPROC, BufferData)                                                             \
     X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, CheckFramebufferStatus)                                     \
+    X(PFNGLCLIENTWAITSYNCPROC, ClientWaitSync)                                                     \
     X(PFNGLCLEARBUFFERFVPROC, ClearBufferfv)                                                       \
     X(PFNGLCLEARBUFFERIVPROC, ClearBufferiv)                                                       \
     X(PFNGLCLEARBUFFERUIVPROC, ClearBufferuiv)                                                     \
@@ -72,6 +73,7 @@
     X(PFNGLDELETEPROGRAMPROC, DeleteProgram)                                                       \
     X(PFNGLDELETESAMPLERSPROC, DeleteSamplers)                                                     \
     X(PFNGLDELETESHADERPROC, DeleteShader)                                                         \
+    X(PFNGLDELETESYNCPROC, DeleteSync)                                                             \
     X(PFNGLDELETEVERTEXARRAYSPROC, DeleteVertexArrays)                                             \
     X(PFNGLDISABLEIPROC, Disablei)                                                                 \
     X(PFNGLDISABLEVERTEXATTRIBARRAYPROC, DisableVertexAttribArray)                                 \
@@ -80,6 +82,7 @@
     X(PFNGLDRAWELEMENTSINSTANCEDBASEVERTEXPROC, DrawElementsInstancedBaseVertex)                   \
     X(PFNGLENABLEIPROC, Enablei)                                                                   \
     X(PFNGLENABLEVERTEXATTRIBARRAYPROC, EnableVertexAttribArray)                                   \
+    X(PFNGLFENCESYNCPROC, FenceSync)                                                               \
     X(PFNGLFRAMEBUFFERTEXTURE2DPROC, FramebufferTexture2D)                                         \
     X(PFNGLGENBUFFERSPROC, GenBuffers)                                                             \
     X(PFNGLGENFRAMEBUFFERSPROC, GenFramebuffers)                                                   \
@@ -115,10 +118,12 @@
     X(PFNGLVERTEXATTRIBIPOINTERPROC, VertexAttribIPointer)                                         \
     X(PFNGLVERTEXATTRIBPOINTERPROC, VertexAttribPointer)
 
-// OpenGL 4.0: absent on a 3.3 context, where blending is one state for all render targets.
+// Absent on a plain 3.3 context: per-target blending (OpenGL 4.0) and persistent buffers
+// (ARB_buffer_storage). Check the capability, not the pointer: a driver can return one anyway.
 #define DCP_GL_OPTIONAL_FUNCTIONS(X)                                                               \
     X(PFNGLBLENDEQUATIONSEPARATEIPROC, BlendEquationSeparatei)                                     \
-    X(PFNGLBLENDFUNCSEPARATEIPROC, BlendFuncSeparatei)
+    X(PFNGLBLENDFUNCSEPARATEIPROC, BlendFuncSeparatei)                                             \
+    X(PFNGLBUFFERSTORAGEPROC, BufferStorage)
 
 namespace gl {
 

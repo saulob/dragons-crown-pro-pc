@@ -11,7 +11,10 @@
 #include "video_core/amdgpu/regs.h"
 #include "video_core/renderer_backend.h"
 #include "video_core/renderer_opengl/gl_api.h"
+#include "video_core/renderer_opengl/gl_guest_watch.h"
 #include "video_core/renderer_opengl/gl_shader_cache.h"
+#include "video_core/renderer_opengl/gl_state.h"
+#include "video_core/renderer_opengl/gl_stream_ring.h"
 #include "video_core/renderer_opengl/gl_texture_cache.h"
 
 namespace AmdGpu {
@@ -25,43 +28,6 @@ class MemoryManager;
 namespace OpenGL {
 
 struct Capabilities;
-
-/// One buffer shared by vertex, index and shader data; shaders read it as a buffer texture
-/// because OpenGL 3.3 has no storage buffers.
-class StreamRing {
-public:
-    StreamRing();
-    ~StreamRing();
-
-    /// Before a draw's first Push: its offsets stay valid until the draw is issued.
-    void BeginDraw();
-    /// The offset of a copy of `data`, or NoOffset when it cannot fit.
-    u32 Push(const void* data, u32 size, u32 alignment);
-    /// A copy of guest memory, shared by the draws of one submission.
-    u32 PushGuest(VAddr address, u32 size, u32 alignment);
-    void Commit();
-    void ForgetGuestCopies();
-
-    [[nodiscard]] GLuint Buffer() const {
-        return buffer;
-    }
-    [[nodiscard]] GLuint Texture() const {
-        return texture;
-    }
-
-    static constexpr u32 NoOffset = ~0u;
-
-private:
-    void Wrap();
-
-    GLuint buffer{};
-    GLuint texture{};
-    u32 capacity{};
-    u32 head{};
-    u32 pending_start{};
-    std::vector<u8> pending;
-    std::unordered_map<u64, u32> guest_copies;
-};
 
 class Rasterizer final : public VideoCore::RasterizerBackend {
 public:
@@ -85,9 +51,7 @@ public:
     void FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) override;
     void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) override;
     u32 ReadDataFromGds(u32 gds_offset) override;
-    bool InvalidateMemory(VAddr, u64, bool) override {
-        return false;
-    }
+    bool InvalidateMemory(VAddr address, u64 size, bool assume_locks) override;
     void WaitHostCopies() override {}
 
     void DrainDrawPipe(u32, u32, const char*) override {}
@@ -124,6 +88,9 @@ public:
     TextureCache& GetTextureCache() {
         return texture_cache;
     }
+    GlState& State() {
+        return state;
+    }
     /// Plain state for the presenter's own passes.
     void ResetState();
     void OnFlip();
@@ -138,16 +105,20 @@ private:
     void EliminateFastClear();
     void Resolve();
     void Report(const std::string& what);
+    /// For string literals: cheap enough for the draw path.
+    void Report(const char* literal);
+    template <typename Sent, typename Value>
+    bool UniformChanged(Sent& sent, const Value& value);
     bool BindTargets(const GraphicsProgram& program, AttachedTargets& targets);
     GLuint FramebufferFor(const AttachedTargets& targets);
     void ClearTargets(const AttachedTargets& targets);
-    void BindStage(const Shader::Info& info, const StageLocations& locations,
+    void BindStage(const Shader::Info& info, StageLocations& locations,
                    const Shader::Backend::GLSL::Stage& glsl);
     void BindTexture(const Shader::Info& info, const Shader::Backend::GLSL::CombinedSampler& combined,
                      GLuint unit);
     GLuint SamplerFor(AmdGpu::Sampler sharp, bool shadow, bool is_depth);
     bool BindVertexInputs(const GraphicsProgram& program, u32 first_instance);
-    void ApplyViewportScissor(const GraphicsProgram& program);
+    void ApplyViewportScissor(GraphicsProgram& program);
     void ApplyDepthStencil();
     void ApplyRasterState();
     void ApplyBlend(const GraphicsProgram& program, const AttachedTargets& targets);
@@ -160,6 +131,8 @@ private:
     float max_anisotropy{1.0f};
     u32 max_viewport_width;
     u32 max_viewport_height;
+    GlState state;
+    GuestWriteWatch* watch;
     StreamRing ring;
     TextureCache texture_cache;
     ShaderCache shaders;
@@ -167,8 +140,11 @@ private:
     GLuint black_texture{};
     GLuint resolve_framebuffers[2]{};
     u32 enabled_attributes{};
-    u32 enabled_clip_distances{};
-    std::unordered_map<u64, GLuint> framebuffers;
+    struct CachedFramebuffer {
+        GLuint handle;
+        std::array<GLuint, AmdGpu::NUM_COLOR_BUFFERS + 1> textures;
+    };
+    std::unordered_map<u64, CachedFramebuffer> framebuffers;
     struct SamplerKey {
         u64 raw0;
         u64 raw1;
@@ -183,9 +159,9 @@ private:
     std::unordered_map<SamplerKey, GLuint, SamplerKeyHash> samplers;
     std::vector<u8> gds;
     std::unordered_set<std::string> reported;
+    std::unordered_set<const char*> reported_literals;
     u64 draws{};
     u64 draws_reaching_gl{};
-    u64 flips{};
 };
 
 } // namespace OpenGL

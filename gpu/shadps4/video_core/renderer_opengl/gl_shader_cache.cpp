@@ -12,6 +12,7 @@
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/ir/program.h"
 #include "video_core/renderer_opengl/gl_shader_cache.h"
+#include "video_core/renderer_opengl/gl_state.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 
 namespace OpenGL {
@@ -104,7 +105,8 @@ PrimitiveExpansion ExpansionOf(AmdGpu::PrimitiveType type) {
     }
 }
 
-ShaderCache::ShaderCache(u32 max_viewport_width, u32 max_viewport_height) {
+ShaderCache::ShaderCache(GlState& state_, u32 max_viewport_width, u32 max_viewport_height)
+    : state{state_} {
     profile.max_viewport_width = max_viewport_width;
     profile.max_viewport_height = max_viewport_height;
     profile.subgroup_size = 64;
@@ -214,6 +216,7 @@ StageModule* ShaderCache::GetModule(HwStage hw_stage, SwStage sw_stage,
             return module.get();
         }
     }
+    Perf::Count(Perf::Modules);
     auto module = std::make_unique<StageModule>();
     module->info = std::make_unique<Shader::Info>(hw_stage, sw_stage, params);
     const auto program =
@@ -230,6 +233,8 @@ StageModule* ShaderCache::GetModule(HwStage hw_stage, SwStage sw_stage,
 
 GraphicsProgram* ShaderCache::Link(StageModule* vertex, StageModule* fragment,
                                    PrimitiveExpansion expansion) {
+    Perf::Scope timer{Perf::ShaderLink};
+    Perf::Count(Perf::Links);
     const auto sources = Shader::Backend::GLSL::LinkStages(
         vertex->glsl, fragment ? &fragment->glsl : nullptr, expansion);
     std::string error;
@@ -286,7 +291,7 @@ GraphicsProgram* ShaderCache::Link(StageModule* vertex, StageModule* fragment,
     out.flip_y = gl::GetUniformLocation(program, "vs_flip_y");
     out.base_vertex = gl::GetUniformLocation(program, "vs_base_vertex");
     out.base_instance = gl::GetUniformLocation(program, "vs_base_instance");
-    gl::UseProgram(program);
+    state.UseProgram(program);
     if (const GLint ring = gl::GetUniformLocation(program, "dcp_ring"); ring >= 0) {
         gl::Uniform1i(ring, 0);
     }

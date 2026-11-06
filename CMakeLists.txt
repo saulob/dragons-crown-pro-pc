@@ -332,6 +332,15 @@ target_include_directories(dcp-opengl-backend-tests PRIVATE gpu/shim gpu/shadps4
 target_compile_definitions(dcp-opengl-backend-tests PRIVATE DCP_GLSLANG="${GLSLANG_COMPILER}")
 target_link_libraries(dcp-opengl-backend-tests PRIVATE dcpgpu)
 
+# Focused tests of the OpenGL write watch against real page faults, and of the state tracker and stream ring against
+# recording entry points (tools/test.ps1); no OpenGL context. Not part of the default build.
+add_executable(dcp-opengl-perf-tests EXCLUDE_FROM_ALL tests/opengl_perf_tests.cpp)
+set_target_properties(dcp-opengl-perf-tests PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-opengl-perf-tests PRIVATE gpu/shim gpu/shadps4)
+target_compile_definitions(dcp-opengl-perf-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-opengl-perf-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-opengl-perf-tests PRIVATE SDL3::SDL3 Threads::Threads)
+
 # Focused tests of the narrower-than-16:9 water reader skip (tools/test.ps1); not part of the default build.
 add_executable(dcp-narrow-water-reader-tests EXCLUDE_FROM_ALL tests/narrow_water_reader_tests.cpp)
 set_target_properties(dcp-narrow-water-reader-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)

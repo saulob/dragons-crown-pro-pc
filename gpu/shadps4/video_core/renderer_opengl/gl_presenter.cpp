@@ -185,6 +185,9 @@ void Presenter::InitializeOnGpuThread() {
                               HasExtension("GL_ARB_texture_filter_anisotropic");
     capabilities.draw_buffers_blend =
         capabilities.major >= 4 && gl::BlendFuncSeparatei && gl::BlendEquationSeparatei;
+    capabilities.buffer_storage =
+        gl::BufferStorage && ((capabilities.major == 4 && capabilities.minor >= 4) ||
+                              capabilities.major > 4 || HasExtension("GL_ARB_buffer_storage"));
     gl::GetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE, &capabilities.max_texture_buffer_texels);
     std::printf("OpenGL: vendor %s, renderer %s, version %s, GLSL %s\n", Text(GL_VENDOR),
                 Text(GL_RENDERER), Text(GL_VERSION), Text(GL_SHADING_LANGUAGE_VERSION));
@@ -196,9 +199,10 @@ void Presenter::InitializeOnGpuThread() {
     if (const auto missing = MissingRequirement(capabilities); !missing.empty()) {
         Fatal(missing);
     }
-    CreatePasses();
     rasterizer = std::make_unique<Rasterizer>(liverpool, capabilities);
+    CreatePasses();
     DcpOverlay::InitOpenGL();
+    rasterizer->State().Invalidate();
     ApplySwapInterval();
 }
 
@@ -210,7 +214,7 @@ void Presenter::CreatePasses() {
     prepare_swap = gl::GetUniformLocation(prepare_program, "swap_red_blue");
     prepare_decode = gl::GetUniformLocation(prepare_program, "decode_input");
     for (const GLuint program : {prepare_program, show_program}) {
-        gl::UseProgram(program);
+        rasterizer->State().UseProgram(program);
         gl::Uniform1i(gl::GetUniformLocation(program, "source"), 0);
         gl::Uniform1f(gl::GetUniformLocation(program, "flip_v"), program == show_program ? 1.0f : 0.0f);
     }
@@ -235,6 +239,7 @@ void Presenter::ApplySwapInterval() {
 
 Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
                                VAddr cpu_address) {
+    Perf::Scope timer{Perf::PrepareFrame};
     rasterizer->OnFlip();
     Image* image = rasterizer->GetTextureCache().FindDisplayBuffer(attribute, cpu_address);
     if (!image) {
@@ -243,12 +248,13 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     Frame& frame = frames[next_frame];
     next_frame = (next_frame + 1) % u32(frames.size());
     const u32 width = image->info.size.width, height = image->info.size.height;
+    GlState& state = rasterizer->State();
     rasterizer->ResetState();
-    gl::BindFramebuffer(GL_FRAMEBUFFER, frame.framebuffer);
+    state.BindFramebuffer(frame.framebuffer);
     if (frame.width != width || frame.height != height) {
         frame.width = width;
         frame.height = height;
-        gl::BindTexture(GL_TEXTURE_2D, frame.texture);
+        state.BindForEdit(GL_TEXTURE_2D, frame.texture);
         gl::TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, GLsizei(width), GLsizei(height), 0, GL_RGBA,
                        GL_UNSIGNED_BYTE, nullptr);
         gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
@@ -257,23 +263,19 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         const GLenum attachment = GL_COLOR_ATTACHMENT0;
         gl::DrawBuffers(1, &attachment);
     }
-    gl::Viewport(0, 0, GLsizei(width), GLsizei(height));
-    gl::BindVertexArray(vertex_array);
-    gl::UseProgram(prepare_program);
-    gl::ActiveTexture(GL_TEXTURE0);
-    gl::BindTexture(GL_TEXTURE_2D, image->handle);
-    gl::BindSampler(0, linear_sampler);
-    constexpr std::array<GLint, 4> identity{GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA};
-    gl::TexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, identity.data());
-    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    state.Viewport(0, 0, GLsizei(width), GLsizei(height));
+    state.BindVertexArray(vertex_array);
+    state.UseProgram(prepare_program);
+    state.BindTexture(0, GL_TEXTURE_2D, image->handle);
+    state.BindSampler(0, linear_sampler);
+    rasterizer->GetTextureCache().ApplyView(*image, 0, SampledView{});
     const auto pixel_format = attribute.attrib.pixel_format;
     const bool image_blue_first = image->format->format == GL_BGRA;
     gl::Uniform1f(prepare_gamma, gamma.load(std::memory_order_relaxed));
     gl::Uniform1i(prepare_swap, DisplayStoresBlueFirst(pixel_format) != image_blue_first);
     gl::Uniform1i(prepare_decode, DisplayIsSrgb(pixel_format) && !image->is_srgb);
     gl::DrawArrays(GL_TRIANGLES, 0, 3);
-    gl::Enable(GL_FRAMEBUFFER_SRGB);
+    state.Enable(GlState::Cap::FramebufferSrgb, true);
 
     auto& settings = DcpSettings::Get();
     settings.image_width = int(width);
@@ -300,11 +302,14 @@ Frame* Presenter::PrepareLastFrame() {
 
 void Presenter::Present(VideoCore::PresentFrame* present_frame, bool, bool is_game_frame) {
     if (pending_shows.load(std::memory_order_relaxed) >= MaxPendingShows) {
+        Perf::dropped_shows.fetch_add(1, std::memory_order_relaxed);
         return;
     }
     pending_shows.fetch_add(1, std::memory_order_relaxed);
     auto* frame = static_cast<Frame*>(present_frame);
-    liverpool->SendCommand([this, frame, is_game_frame] {
+    const u64 posted = Perf::Now();
+    liverpool->SendCommand([this, frame, is_game_frame, posted] {
+        Perf::timers[Perf::ShowWait] += Perf::Now() - posted;
         Show(*frame, is_game_frame);
         pending_shows.fetch_sub(1, std::memory_order_relaxed);
     });
@@ -314,8 +319,10 @@ void Presenter::Show(const Frame& frame, bool is_game_frame) {
     const int window_width = std::max(window.GetWidth(), 1);
     const int window_height = std::max(window.GetHeight(), 1);
     ApplySwapInterval();
+    GlState& state = rasterizer->State();
+    Perf::Scope timer{Perf::ShowFrame};
     rasterizer->ResetState();
-    gl::Viewport(0, 0, window_width, window_height);
+    state.Viewport(0, 0, window_width, window_height);
     gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     gl::Clear(GL_COLOR_BUFFER_BIT);
     if (!frame.blank && frame.width != 0) {
@@ -323,33 +330,41 @@ void Presenter::Show(const Frame& frame, bool is_game_frame) {
         const SDL_Rect area = stretch ? SDL_Rect{0, 0, window_width, window_height}
                                       : FitInside(frame.width, frame.height, window_width,
                                                   window_height);
-        gl::Viewport(area.x, area.y, area.w, area.h);
-        gl::BindVertexArray(vertex_array);
-        gl::UseProgram(show_program);
-        gl::ActiveTexture(GL_TEXTURE0);
-        gl::BindTexture(GL_TEXTURE_2D, frame.texture);
-        gl::BindSampler(0, linear_sampler);
+        state.Viewport(area.x, area.y, area.w, area.h);
+        state.BindVertexArray(vertex_array);
+        state.UseProgram(show_program);
+        state.BindTexture(0, GL_TEXTURE_2D, frame.texture);
+        state.BindSampler(0, linear_sampler);
         gl::DrawArrays(GL_TRIANGLES, 0, 3);
         if (DcpUltrawide::SideMaskWanted()) {
             const auto sides = DcpUltrawide::SidesOf({u32(area.w), u32(area.h)});
-            gl::Enable(GL_SCISSOR_TEST);
+            state.Enable(GlState::Cap::ScissorTest, true);
             for (const auto& side : {sides.left, sides.right}) {
                 if (!side.Empty()) {
-                    gl::Scissor(area.x + GLint(side.left), area.y, GLsizei(side.right - side.left),
-                                area.h);
+                    state.Scissor(area.x + GLint(side.left), area.y,
+                                  GLsizei(side.right - side.left), area.h);
                     gl::Clear(GL_COLOR_BUFFER_BIT);
                 }
             }
-            gl::Disable(GL_SCISSOR_TEST);
+            state.Enable(GlState::Cap::ScissorTest, false);
         }
     }
-    gl::Viewport(0, 0, window_width, window_height);
-    DcpOverlay::RenderOpenGL(u32(window_width), u32(window_height));
+    state.Viewport(0, 0, window_width, window_height);
+    {
+        Perf::Scope overlay_timer{Perf::Overlay};
+        DcpOverlay::RenderOpenGL(u32(window_width), u32(window_height));
+    }
+    // ImGui sets state behind the tracker's back.
+    state.Invalidate();
     if (is_game_frame) {
         DcpOverlay::LogPresent();
     }
-    SDL_GL_SwapWindow(window.GetSDLWindow());
-    gl::Enable(GL_FRAMEBUFFER_SRGB);
+    {
+        Perf::Scope swap_timer{Perf::SwapWindow};
+        SDL_GL_SwapWindow(window.GetSDLWindow());
+    }
+    Perf::OnPresent();
+    state.Enable(GlState::Cap::FramebufferSrgb, true);
 }
 
 } // namespace OpenGL

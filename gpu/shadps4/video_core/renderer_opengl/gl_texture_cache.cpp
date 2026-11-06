@@ -10,15 +10,20 @@
 #include "shader_recompiler/resource.h"
 #include "video_core/amdgpu/resource.h"
 #include "video_core/renderer_opengl/gl_detile.h"
+#include "video_core/renderer_opengl/gl_state.h"
 #include "video_core/renderer_opengl/gl_texture_cache.h"
 
 namespace OpenGL {
 namespace {
 
 constexpr u64 UnusedFramesBeforeEviction = 1800;
-constexpr u64 FullHashLimit = 256 * 1024;
-constexpr u64 SampleBytes = 64 * 1024;
 constexpr u32 TileRows = 8;
+
+enum class ResolvedKind : u64 { Texture = 1, Color = 2, Depth = 3 };
+
+u64 ResolveKey(ResolvedKind kind, const void* descriptor, size_t size, u64 extra) {
+    return XXH3_64bits_withSeed(descriptor, size, extra << 2 | u64(kind));
+}
 
 bool IsSrgbFormat(vk::Format format) {
     return vk::to_string(format).find("Srgb") != std::string::npos;
@@ -45,16 +50,8 @@ GLenum ImageTarget(AmdGpu::ImageType type) {
     }
 }
 
-u64 HashGuestRange(const u8* data, u64 size) {
-    if (size <= FullHashLimit) {
-        return XXH3_64bits(data, size);
-    }
-    u64 hash = XXH3_64bits(data, SampleBytes);
-    hash = XXH3_64bits_withSeed(data + (size - SampleBytes) / 2, SampleBytes, hash);
-    return XXH3_64bits_withSeed(data + size - SampleBytes, SampleBytes, hash);
-}
-
-TextureCache::TextureCache() = default;
+TextureCache::TextureCache(GlState& state_, GuestWriteWatch& watch_)
+    : state{state_}, watch{watch_}, resolved(ResolvedSlots) {}
 
 TextureCache::~TextureCache() {
     for (auto& [address, list] : images) {
@@ -68,10 +65,11 @@ void TextureCache::Allocate(Image& image) {
     const auto& info = image.info;
     const auto* format = image.format;
     gl::GenTextures(1, &image.handle);
-    gl::BindTexture(image.target, image.handle);
+    state.BindForEdit(image.target, image.handle);
     const u32 levels = std::max(info.resources.levels, 1u);
     gl::TexParameteri(image.target, GL_TEXTURE_BASE_LEVEL, 0);
     gl::TexParameteri(image.target, GL_TEXTURE_MAX_LEVEL, GLint(levels - 1));
+    image.view.max_level = GLint(levels - 1);
     const u32 layers = image.target == GL_TEXTURE_3D ? info.size.depth : info.resources.layers;
     for (u32 level = 0; level < levels; ++level) {
         const GLsizei width = GLsizei(std::max(info.size.width >> level, 1u));
@@ -133,7 +131,22 @@ Image* TextureCache::Create(const VideoCore::ImageInfo& info, GLenum target) {
     image->last_used_frame = frame;
     auto& list = images[info.guest_address];
     list.push_back(std::move(image));
+    ++resolve_generation;
     return list.back().get();
+}
+
+Image* TextureCache::Resolved(u64 key) {
+    if (!Perf::Optimizations().lookup) {
+        return nullptr;
+    }
+    const ResolvedImage& slot = resolved[key & (ResolvedSlots - 1)];
+    const bool hit = slot.key == key && slot.generation == resolve_generation;
+    Perf::Count(hit ? Perf::LookupHits : Perf::LookupMisses);
+    return hit ? slot.image : nullptr;
+}
+
+void TextureCache::Remember(u64 key, Image* image) {
+    resolved[key & (ResolvedSlots - 1)] = {key, resolve_generation, image};
 }
 
 Image* TextureCache::Find(const VideoCore::ImageInfo& info, GLenum target, bool is_target) {
@@ -177,19 +190,45 @@ void TextureCache::Refresh(Image& image) {
         return;
     }
     image.checked_frame = frame;
+    Perf::Count(Perf::TexturesChecked);
     const auto& info = image.info;
     const u64 size = ReadableSize(info.guest_address, info.guest_size);
     if (size == 0) {
         return;
     }
+    // A partly mapped image could gain pages the watch never saw: those stay hashed each frame.
+    const bool watchable = Perf::Optimizations().watch && size == info.guest_size &&
+                           info.guest_address + size <= GuestWriteWatch::AddressLimit;
+    if (watchable && image.watched &&
+        !watch.WrittenSince(info.guest_address, size, image.watch_stamp)) {
+        return;
+    }
+    Perf::Count(image.watched ? Perf::TexturesDirtied : Perf::TexturesUnwatched);
+    image.watched = false;
+    if (watchable) {
+        Perf::Scope timer{Perf::WatchArm};
+        if (const auto stamp = watch.TryArm(info.guest_address, size)) {
+            image.watch_stamp = *stamp;
+            image.watched = true;
+            Perf::Count(Perf::WatchArms);
+        }
+    }
     const auto* guest = reinterpret_cast<const u8*>(info.guest_address);
-    const u64 hash = image.gpu_written ? HashGuestRange(guest, size) : XXH3_64bits(guest, size);
+    u64 hash;
+    {
+        Perf::Scope timer{Perf::TextureHash};
+        hash = image.gpu_written ? HashGuestRange(guest, size) : XXH3_64bits(guest, size);
+        Perf::Count(Perf::TexturesHashed);
+    }
     if (hash == image.content_hash) {
         return;
     }
     image.content_hash = hash;
     if (!info.props.is_depth) {
         Upload(image);
+    }
+    if (image.gpu_written) {
+        ++resolve_generation;
     }
     image.gpu_written = false;
 }
@@ -201,6 +240,7 @@ void TextureCache::MarkTarget(Image& image) {
         return;
     }
     image.gpu_written = true;
+    ++resolve_generation;
     const auto& info = image.info;
     const u64 size = ReadableSize(info.guest_address, info.guest_size);
     image.content_hash =
@@ -210,6 +250,8 @@ void TextureCache::MarkTarget(Image& image) {
 // Refresh would see this only at the next frame's first use, or not at all when the bytes match
 // last time's, and would then replace whatever was rendered after the write.
 void TextureCache::NoteGpuWrite(VAddr address, u64 size) {
+    Perf::Scope timer{Perf::GpuWrites};
+    Perf::Count(Perf::GpuWriteCalls);
     const VAddr end = address + size;
     for (auto& [base, list] : images) {
         for (auto& image : list) {
@@ -221,16 +263,19 @@ void TextureCache::NoteGpuWrite(VAddr address, u64 size) {
             if (!image->gpu_written) {
                 image->checked_frame = ~0ull;
                 image->content_hash = 0;
+                image->watched = false;
                 continue;
             }
             if (address <= info.guest_address && end >= image_end && !info.props.is_depth) {
                 Upload(*image);
+                Perf::Count(Perf::GpuWriteUploads);
             }
             const u64 readable = ReadableSize(info.guest_address, info.guest_size);
             image->content_hash =
                 readable ? HashGuestRange(reinterpret_cast<const u8*>(info.guest_address), readable)
                          : 0;
             image->checked_frame = frame;
+            image->watched = false;
         }
     }
 }
@@ -238,6 +283,7 @@ void TextureCache::NoteGpuWrite(VAddr address, u64 size) {
 void TextureCache::UploadLevel(Image& image, u32 level, const u8* data, u32 pitch, u32 rows) {
     const auto& info = image.info;
     const auto* format = image.format;
+    Perf::Scope timer{Perf::TextureUpload};
     const u32 element_bytes = info.num_bits / 8;
     const GLsizei width = GLsizei(std::max(info.size.width >> level, 1u));
     const GLsizei height = GLsizei(std::max(info.size.height >> level, 1u));
@@ -257,6 +303,7 @@ void TextureCache::UploadLevel(Image& image, u32 level, const u8* data, u32 pitc
             }
         }
         const GLsizei bytes = GLsizei(tight.size());
+        Perf::Count(Perf::TextureBytes, tight.size());
         if (image.target == GL_TEXTURE_2D) {
             gl::CompressedTexSubImage2D(GL_TEXTURE_2D, GLint(level), 0, 0, width, height,
                                         format->internal_format, bytes, tight.data());
@@ -267,6 +314,7 @@ void TextureCache::UploadLevel(Image& image, u32 level, const u8* data, u32 pitc
         }
         return;
     }
+    Perf::Count(Perf::TextureBytes, u64(pitch) * rows * layers * element_bytes);
     gl::PixelStorei(GL_UNPACK_ALIGNMENT, 1);
     gl::PixelStorei(GL_UNPACK_ROW_LENGTH, GLint(pitch));
     gl::PixelStorei(GL_UNPACK_IMAGE_HEIGHT, GLint(rows));
@@ -300,7 +348,8 @@ void TextureCache::Upload(Image& image) {
     const u32 slices = info.props.is_volume ? info.size.depth : info.resources.layers;
     const TilingParams tiling{info.tile_mode, info.array_mode, info.num_bits, info.num_samples,
                               info.alt_tile,  info.bank_swizzle};
-    gl::BindTexture(image.target, image.handle);
+    state.BindForEdit(image.target, image.handle);
+    Perf::Count(Perf::TexturesUploaded);
     for (u32 level = 0; level < info.resources.levels; ++level) {
         const auto& layout = info.mips_layout[level];
         const u32 pitch = std::max((layout.pitch + block - 1) / block, 1u);
@@ -318,7 +367,11 @@ void TextureCache::Upload(Image& image) {
         }
         if (info.props.is_tiled) {
             scratch.resize(size_t(pitch) * rows * element_bytes * slices);
-            SurfaceTiler{tiling, pitch, rows}.Detile(source, size, scratch.data(), slices);
+            {
+                Perf::Scope timer{Perf::TextureDetile};
+                SurfaceTiler{tiling, pitch, rows}.Detile(source, size, scratch.data(), slices);
+                Perf::Count(Perf::TexturesDetiled);
+            }
             UploadLevel(image, level, scratch.data(), pitch, rows);
         } else {
             if (size < u64(pitch) * rows * element_bytes) {
@@ -330,17 +383,53 @@ void TextureCache::Upload(Image& image) {
 }
 
 Image* TextureCache::FindTexture(const AmdGpu::Image& sharp, const Shader::ImageResource& desc) {
-    const VideoCore::ImageInfo info{sharp, desc};
-    Image* image = Find(info, ImageTarget(sharp.GetViewType(desc.is_array)), false);
+    Perf::Scope timer{Perf::TextureLookup};
+    const u64 key = ResolveKey(ResolvedKind::Texture, &sharp, sizeof(sharp),
+                               u64(desc.is_depth) | u64(desc.is_array) << 1);
+    Image* image = Resolved(key);
+    if (!image) {
+        const VideoCore::ImageInfo info{sharp, desc};
+        image = Find(info, ImageTarget(sharp.GetViewType(desc.is_array)), false);
+        if (image) {
+            Remember(key, image);
+        }
+    }
     if (image) {
         Refresh(*image);
     }
     return image;
 }
 
+void TextureCache::ApplyView(Image& image, GLuint unit, const SampledView& view) {
+    if (state.Filtering() && image.view == view) {
+        return;
+    }
+    state.ActiveTexture(unit);
+    if (!state.Filtering() || image.view.swizzle != view.swizzle) {
+        gl::TexParameteriv(image.target, GL_TEXTURE_SWIZZLE_RGBA, view.swizzle.data());
+        Perf::Count(Perf::TextureParams);
+    }
+    if (!state.Filtering() || image.view.base_level != view.base_level) {
+        gl::TexParameteri(image.target, GL_TEXTURE_BASE_LEVEL, view.base_level);
+        Perf::Count(Perf::TextureParams);
+    }
+    if (!state.Filtering() || image.view.max_level != view.max_level) {
+        gl::TexParameteri(image.target, GL_TEXTURE_MAX_LEVEL, view.max_level);
+        Perf::Count(Perf::TextureParams);
+    }
+    image.view = view;
+}
+
 Image* TextureCache::FindColorTarget(const AmdGpu::ColorBuffer& buffer, AmdGpu::CbDbExtent hint) {
-    const VideoCore::ImageInfo info{buffer, hint};
-    Image* image = Find(info, GL_TEXTURE_2D, true);
+    const u64 key = ResolveKey(ResolvedKind::Color, &buffer, sizeof(buffer), hint.raw);
+    Image* image = Resolved(key);
+    if (!image) {
+        const VideoCore::ImageInfo info{buffer, hint};
+        image = Find(info, GL_TEXTURE_2D, true);
+        if (image) {
+            Remember(key, image);
+        }
+    }
     if (image) {
         Refresh(*image);
         MarkTarget(*image);
@@ -350,8 +439,16 @@ Image* TextureCache::FindColorTarget(const AmdGpu::ColorBuffer& buffer, AmdGpu::
 
 Image* TextureCache::FindDepthTarget(const AmdGpu::DepthBuffer& buffer, u32 num_slices,
                                      VAddr htile_address, AmdGpu::CbDbExtent hint) {
-    const VideoCore::ImageInfo info{buffer, num_slices, htile_address, hint};
-    Image* image = Find(info, GL_TEXTURE_2D, true);
+    const u64 key = ResolveKey(ResolvedKind::Depth, &buffer, sizeof(buffer),
+                               (u64(hint.raw) | u64(num_slices) << 32) ^ htile_address);
+    Image* image = Resolved(key);
+    if (!image) {
+        const VideoCore::ImageInfo info{buffer, num_slices, htile_address, hint};
+        image = Find(info, GL_TEXTURE_2D, true);
+        if (image) {
+            Remember(key, image);
+        }
+    }
     if (image) {
         Refresh(*image);
         MarkTarget(*image);
@@ -419,14 +516,18 @@ void TextureCache::Sweep() {
                 ++image;
                 continue;
             }
-            if (!destroyed && on_destroy) {
-                on_destroy();
+            if (on_destroy) {
+                on_destroy((*image)->handle);
             }
             destroyed = true;
             gl::DeleteTextures(1, &(*image)->handle);
             image = list.erase(image);
         }
         it = list.empty() ? images.erase(it) : std::next(it);
+    }
+    if (destroyed) {
+        ++resolve_generation;
+        state.ForgetTextures();
     }
 }
 

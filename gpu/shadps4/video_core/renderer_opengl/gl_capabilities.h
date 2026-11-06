@@ -13,6 +13,7 @@ struct Capabilities {
     bool bptc{};
     bool anisotropy{};
     bool draw_buffers_blend{};
+    bool buffer_storage{};
     int max_texture_buffer_texels{};
 };
 

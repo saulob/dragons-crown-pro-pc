@@ -58,10 +58,11 @@ check and still fails to start is not caught. Vulkan and OpenGL chosen by name n
 |---|---|
 | Thread | One context, current on the GPU command thread. EGL allows a surface on one thread only, so the present thread posts its work there (`Presenter::Present`) and a vsync wait holds up that thread |
 | Shaders | The same recompiler, then `shader_recompiler/backend/glsl`: GLSL 3.30 from the IR. It refuses what 3.30 cannot express, with the reason in the log, and the draw is skipped |
-| Guest buffers | No storage buffers in 3.3: one streaming ring, read by the shaders as a `usamplerBuffer` of dwords and by vertex and index fetch directly |
+| Guest buffers | No storage buffers in 3.3: one streaming ring, read by the shaders as a `usamplerBuffer` of dwords and by vertex and index fetch directly. With `ARB_buffer_storage` it stays mapped and fences guard its 16 segments; otherwise each draw maps what it wrote and a wrap orphans the storage |
 | Images | `ImageInfo` from the T#, CB and DB as in Vulkan; `vk::Format` is the shared name, mapped in `gl_format.cpp`. Unmapped formats are logged and draw black |
 | Detiling | On the CPU (`gl_detile.cpp`, a port of `tiling.comp`): 3.3 has no compute |
-| Coherency | No page tracking: a texture is hashed the first time each frame uses it; a target hashes three windows, so a guest write over it brings guest memory back. Fills and copies from the command stream reach the image at once |
+| Coherency | `GuestWriteWatch` write protects an image's pages, as Vulkan's `PageManager` does but without its rasterizer: only a page written since the last check gets the image hashed, and only a changed hash uploads it. A written page stays unprotected for 16 frames, doubling up to 1024 for a page that keeps being written, and an image over such a page is hashed the first time each frame uses it, as is one with unmapped pages. Fills and copies the GPU thread makes itself tell the watch first, so they do not fault. A target hashes three windows, so a guest write over it brings guest memory back. Fills and copies from the command stream reach the image at once |
+| State | Bindings and fixed-function state go through `GlState`, which drops calls that change nothing. Anything that sets OpenGL state behind it must be followed by `GlState::Invalidate`, as the ImGui overlay is |
 | Rect and quad lists | A generated geometry shader completes them, with the fourth vertex of `emit_spirv_quad_rect.cpp` |
 | Coordinates | Render targets keep Vulkan's window coordinates: row 0 of an image is OpenGL's y = 0, so only the final picture is flipped. A negative viewport height becomes a flip in the vertex stage, and clip Z [0, w] is converted to [-w, w] |
 

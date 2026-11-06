@@ -4,8 +4,10 @@
 #pragma once
 
 #include <array>
+#include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -19,6 +21,8 @@
 
 namespace OpenGL {
 
+class GlState;
+
 /// One recompilation of a guest shader: a permutation chosen by its specialization.
 struct StageModule {
     std::unique_ptr<Shader::Info> info;
@@ -30,6 +34,8 @@ struct StageLocations {
     GLint user_data = -1;
     GLint buffers = -1;
     std::vector<GLuint> sampler_units;
+    std::optional<std::array<u32, Shader::NUM_USER_DATA_REGS>> sent_user_data;
+    std::optional<std::array<std::array<u32, 2>, Shader::NUM_BUFFERS>> sent_buffers;
 };
 
 struct GraphicsProgram {
@@ -42,11 +48,15 @@ struct GraphicsProgram {
     GLint flip_y = -1;
     GLint base_vertex = -1;
     GLint base_instance = -1;
+    std::optional<std::array<float, 4>> sent_transform;
+    std::optional<float> sent_flip_y;
+    std::optional<u32> sent_base_vertex;
+    std::optional<u32> sent_base_instance;
 };
 
 class ShaderCache {
 public:
-    ShaderCache(u32 max_viewport_width, u32 max_viewport_height);
+    ShaderCache(GlState& state, u32 max_viewport_width, u32 max_viewport_height);
     ~ShaderCache();
 
     /// Null when the draw needs something this backend cannot do yet (logged once per cause).
@@ -66,6 +76,7 @@ private:
                           Shader::Backend::GLSL::PrimitiveExpansion expansion);
     void ReportOnce(u64 key, const std::string& what);
 
+    GlState& state;
     Shader::Profile profile{};
     Shader::Pools pools;
     Programs programs;
