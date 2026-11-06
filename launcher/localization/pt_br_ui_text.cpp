@@ -312,7 +312,6 @@ Logs folder	Pasta de registros
 Open the folder containing session and crash logs	Abre a pasta com os registros de sessão e de falhas
 Open logs folder	Abrir pasta de registros
 Port version	Versão do port
-Renderer	Renderizador
 Platform	Plataforma
 Libraries	Bibliotecas
 Not installed	Não instalado

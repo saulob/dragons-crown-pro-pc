@@ -768,8 +768,12 @@ InstallResult StageUpdate(const fs::path& base_app0, const fs::path& update_dir,
 InstallResult InstallGame(const fs::path& source, const GameRoots& roots, const InstallHooks& hooks,
                           std::span<const GameBuild> builds) {
     std::error_code ec;
-    return fs::is_directory(source, ec) ? InstallFromFolder(source, roots, hooks, builds)
-                                        : InstallFromPackage(source, roots, hooks, builds);
+    InstallResult result = fs::is_directory(source, ec) ? InstallFromFolder(source, roots, hooks, builds)
+                                                        : InstallFromPackage(source, roots, hooks, builds);
+    if (result.ok() && result.build && SitesOnlySearched(*result.build)) {
+        result.site_report = DescribeBuildSites(*OpenFolderSource(BuildPaths(roots, *result.build).app0), result.build->label);
+    }
+    return result;
 }
 
 InstallResult InstallFromPackage(const fs::path& package_file, const GameRoots& roots, const InstallHooks& hooks,

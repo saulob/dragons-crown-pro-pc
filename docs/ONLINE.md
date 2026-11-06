@@ -241,7 +241,7 @@ storage is not provided: every TUS call, synchronous or not, answers signed out.
 key (`net::kOnlineGame`), so players of different regions and versions meet; only the online protocol keeps them apart.
 The System type, Story Skip Offer and Tutorial Skip Offer sites are verified for each local build
 (`tests/system_type_tests.c`, `tests/skip_offers_tests.c`, `tests/online_builds_tests.cpp`); a supported build without
-a known site (CUSA10454 1.01, CUSA10209 1.02) uses the single place its image has the same verified code, and is left
+a known site (CUSA10454 1.01, CUSA10209 1.02, CUSA10487 1.03) uses the single place its image has the same verified code, and is left
 unchanged when there is none.
 
 ## Settings
@@ -506,7 +506,7 @@ Headless tests (no game, no window):
 ```
 cd server\lobby; node --test "test/*.test.js"            # protocol, rooms, friends, grace, limits, real WebSockets
 tools\test.ps1                                             # dcp-net-tests (transport, relay fallback, failure paths), the Worker tests,
-                                                           # the Linux net tests through WSL (-SkipLinux skips them), seven-build parity
+                                                           # the Linux net tests through WSL (-SkipLinux skips them), eight-build parity
 tools\online-lobby.ps1 -Port 8791                          # in another window, then:
 $env:DCP_TEST_LOBBY='ws://127.0.0.1:8791/'; build\cmake\clang64\bin\dcp-online-hle-tests.exe
 ```
@@ -514,7 +514,7 @@ $env:DCP_TEST_LOBBY='ws://127.0.0.1:8791/'; build\cmake\clang64\bin\dcp-online-h
 `tools\test.ps1` starts a development lobby on a free loopback port for the net and build tests and prints a relay summary:
 direct networking, relay transport, automatic fallback, Worker relay, protocol compatibility, failure paths, the
 Connection test, address classification, endpoint selection, the endpoint path, Worker address security, the public
-endpoint budget, Windows and Linux parity, and the seven builds. For the builds it separates structural parity (the same
+endpoint budget, Windows and Linux parity, and the eight builds. For the builds it separates structural parity (the same
 code path and tables, no build-specific relay code; always checked) from runtime validation (needs the local boot images
 in `build\image`; reported as DATA UNAVAILABLE or PARTIAL when they are missing). Nothing there starts the game, and the
 production lobby is never contacted.

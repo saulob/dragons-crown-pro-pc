@@ -1073,7 +1073,7 @@ void CheckCheatsStayOff(const std::string& build) {
 void TestEveryBuild() {
     using namespace dcp::cheats;
     const std::span<const dcp::GameBuild> builds = dcp::SupportedBuilds();
-    Check(builds.size() == 7, "the Options menu is checked against all 7 supported builds");
+    Check(builds.size() == 8, "the Options menu is checked against all 8 supported builds");
     const unsigned every_cheat = (1u << kCheatCount) - 1;
     for (const dcp::GameBuild& build : builds) {
         for (int online = 0; online <= 1; ++online) {

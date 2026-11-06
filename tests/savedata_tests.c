@@ -240,7 +240,7 @@ static void set_category(Startup *s, int32_t category) {
 }
 
 static uint8_t *new_image(const StartupSaveRecord *r, int valid) {
-    uint8_t *image = calloc(1, IMAGE_SIZE + STUB_ROOM);
+    uint8_t *image = calloc(1, r->image.size + STUB_ROOM);
     if (!image) return NULL;
     memcpy(image + r->step_offset, r->step_original, STARTUP_SAVE_SITE_LENGTH);
     memcpy(image + r->save_offset, r->save_prologue, STARTUP_SAVE_PROLOGUE_LENGTH);
@@ -302,15 +302,19 @@ static void test_records_are_explicit_per_build(void) {
     CHECK(!strcmp(startup_save_records[2].build, "CUSA07001 1.03 Japan"));
     CHECK(startup_save_records[2].step_offset == 0x4dc120 && startup_save_records[2].save_offset == 0x813a0 &&
           startup_save_records[2].accept_offset == 0x8b4d0 && startup_save_records[2].image.entry == 0x54a720);
+    CHECK(!strcmp(startup_save_records[3].build, "CUSA10487 1.03 Europe"));
+    CHECK(startup_save_records[3].step_offset == 0x4ddbb0 && startup_save_records[3].save_offset == 0x81a20 &&
+          startup_save_records[3].accept_offset == 0x8bb50 && startup_save_records[3].image.size == 0x11f8060 &&
+          startup_save_records[3].image.entry == 0x54c6a0);
 }
 
-static void test_each_japanese_build_installs_its_own_record(void) {
+static void test_each_listed_build_installs_its_own_record(void) {
     for (size_t i = 0; i < STARTUP_SAVE_RECORD_COUNT; ++i) {
         const StartupSaveRecord *r = &startup_save_records[i];
         uint8_t *image = new_image(r, 1);
         CHECK(image != NULL);
         if (!image) return;
-        CHECK(startup_save_hook_install(image, IMAGE_SIZE, r->image.entry, image + IMAGE_SIZE, STUB_ROOM) == 1);
+        CHECK(startup_save_hook_install(image, r->image.size, r->image.entry, image + r->image.size, STUB_ROOM) == 1);
         CHECK(image[r->step_offset] == 0xe9);
         free(image);
     }
@@ -359,6 +363,15 @@ static void test_a_build_never_uses_another_builds_record(void) {
     CHECK(startup_save_hook_install(image, IMAGE_SIZE, startup_save_records[1].image.entry, image + IMAGE_SIZE, STUB_ROOM) == 0);
     CHECK(image[v103->step_offset] == 0x48);
     free(image);
+
+    /* CUSA10454 1.00 has the size of CUSA10487 1.03; only the entry tells them apart. */
+    const StartupSaveRecord *europe = &startup_save_records[3];
+    image = new_image(europe, 1);
+    CHECK(image != NULL);
+    if (!image) return;
+    CHECK(startup_save_hook_install(image, europe->image.size, 0x54c690, image + europe->image.size, STUB_ROOM) == 0);
+    CHECK(image[europe->step_offset] == 0x48);
+    free(image);
 }
 
 int main(void) {
@@ -373,7 +386,7 @@ int main(void) {
     test_existing_save_runs_no_compatibility_behavior();
     test_other_errors_keep_the_question();
     test_records_are_explicit_per_build();
-    test_each_japanese_build_installs_its_own_record();
+    test_each_listed_build_installs_its_own_record();
     test_wrong_original_bytes_reject_installation();
     test_us_and_other_builds_get_no_hook();
     test_a_build_never_uses_another_builds_record();

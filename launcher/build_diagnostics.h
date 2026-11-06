@@ -44,10 +44,15 @@ struct UnsupportedReport {
 
 inline constexpr char kDiagnosticsBegin[] = "Unsupported Dragon's Crown Pro build diagnostics begin";
 inline constexpr char kDiagnosticsEnd[] = "Unsupported Dragon's Crown Pro build diagnostics end";
+inline constexpr char kSiteReportBegin[] = "Dragon's Crown Pro build site report begin";
+inline constexpr char kSiteReportEnd[] = "Dragon's Crown Pro build site report end";
 
 // Classifies the selection and, when it is Dragon's Crown Pro, scans its executable and describes it. `sfo` is the
 // selection's param.sfo (empty when it has none). Nothing is written.
 UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::string& sfo);
+
+// What the scan and the loader's searches find in a supported build no local image has proven, for the log. Nothing is written.
+std::vector<std::string> DescribeBuildSites(const GameSource& source, const std::string& label);
 
 // True when the source carries an eboot.bin that is not `build`'s executable; false when it carries none.
 bool ExecutableDiffers(const GameSource& source, const GameBuild& build);

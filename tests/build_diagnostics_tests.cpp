@@ -830,12 +830,12 @@ MemorySource PackageLike(const std::string& archive_name, const std::string& arc
     return source;
 }
 
-const std::vector<std::pair<std::string, std::string>> kEuropeSfo = {
-    {"APP_VER", "01.00"}, {"CATEGORY", "gd"}, {"CONTENT_ID", "EP2611-CUSA10487_00-DRAGONSCROWNPRO1"},
-    {"TITLE", "Dragon's Crown Pro"}, {"TITLE_ID", "CUSA10487"}, {"VERSION", "01.00"}};
+const std::vector<std::pair<std::string, std::string>> kUnknownTitleSfo = {
+    {"APP_VER", "01.00"}, {"CATEGORY", "gd"}, {"CONTENT_ID", "EP2611-CUSA99999_00-DRAGONSCROWNPRO1"},
+    {"TITLE", "Dragon's Crown Pro"}, {"TITLE_ID", "CUSA99999"}, {"VERSION", "01.00"}};
 const std::vector<std::pair<std::string, std::string>> kBlandSfo = {
-    {"APP_VER", "01.00"}, {"CONTENT_ID", "EP0000-CUSA10487_00-PRODUCT0000000001"}, {"TITLE", "Product"},
-    {"TITLE_ID", "CUSA10487"}, {"VERSION", "01.00"}};
+    {"APP_VER", "01.00"}, {"CONTENT_ID", "EP0000-CUSA99999_00-PRODUCT0000000001"}, {"TITLE", "Product"},
+    {"TITLE_ID", "CUSA99999"}, {"VERSION", "01.00"}};
 
 bool Reported(const UnsupportedReport& report) {
     return report.dragons_crown && !report.lines.empty() && report.lines.front() == kDiagnosticsBegin &&
@@ -843,26 +843,26 @@ bool Reported(const UnsupportedReport& report) {
 }
 
 void TestIdentityIndependentOfExecutable() {
-    const std::string europe = MakeSfo(kEuropeSfo), bland = MakeSfo(kBlandSfo);
+    const std::string unlisted = MakeSfo(kUnknownTitleSfo), bland = MakeSfo(kBlandSfo);
     const Bytes unfamiliar = SyntheticExecutable();
 
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(std::string(build.title_id) != "CUSA10487");
+        CHECK(std::string(build.title_id) != "CUSA99999");
     }
 
     // Unknown TITLE_ID, metadata, resources, executable fingerprints that still match.
     {
         MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), FingerprintExecutable());
-        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, europe);
+        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, unlisted);
         CHECK(Reported(report));
         CHECK(Contains(report.lines, "[unique] submit"));
-        CHECK(Contains(report.lines, "TITLE_ID: CUSA10487"));
+        CHECK(Contains(report.lines, "TITLE_ID: CUSA99999"));
         CHECK(Contains(report.lines, "an archive holds the Dragon's Crown resource set"));
     }
     // Zero fingerprints: the report still comes, with the mapping incomplete.
     {
         MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), unfamiliar);
-        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, europe);
+        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, unlisted);
         CHECK(Reported(report));
         CHECK(Contains(report.lines, "Mapping incomplete"));
         CHECK(Contains(report.lines, "Build-specific features: 0/9 mapped"));
@@ -872,7 +872,7 @@ void TestIdentityIndependentOfExecutable() {
     // A different LZCNT digest and count.
     {
         MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), LzcntExecutable());
-        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, europe);
+        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, unlisted);
         CHECK(Reported(report));
         CHECK(Contains(report.lines, "LZCNT instructions: 2 (expected 62)"));
         CHECK(Contains(report.lines, "LZCNT compatibility: 0/1 sites mapped"));
@@ -887,16 +887,16 @@ void TestIdentityIndependentOfExecutable() {
     // Dragon's Crown metadata with a named archive that holds nothing recognizable.
     {
         MemorySource source = PackageLike("DRACRO_EU.CPK", "not a cpk", unfamiliar);
-        CHECK(Reported(DiagnoseUnsupportedBuild(source, europe)));
+        CHECK(Reported(DiagnoseUnsupportedBuild(source, unlisted)));
         MemorySource generic = PackageLike("DRACRO_EU.CPK", GenericCpk(), unfamiliar);
-        CHECK(Reported(DiagnoseUnsupportedBuild(generic, europe)));
+        CHECK(Reported(DiagnoseUnsupportedBuild(generic, unlisted)));
     }
 
     // Unrelated games.
     {
         MemorySource no_archive = PackageLike("", "", unfamiliar);
         CHECK(!DiagnoseUnsupportedBuild(no_archive, bland).dragons_crown);
-        CHECK(!DiagnoseUnsupportedBuild(no_archive, europe).dragons_crown);
+        CHECK(!DiagnoseUnsupportedBuild(no_archive, unlisted).dragons_crown);
         MemorySource fake = PackageLike("DRACRO.CPK", "fake contents", unfamiliar);
         CHECK(!DiagnoseUnsupportedBuild(fake, bland).dragons_crown);
         CHECK(!DiagnoseUnsupportedBuild(fake, std::string()).dragons_crown);
@@ -988,7 +988,7 @@ void TestOneShotPackageDiagnostics() {
 
     // An unknown TITLE_ID with Dragon's Crown evidence.
     MemorySource unknown = PackageLike("DRACRO_EU.CPK", GameCpk(), eboot);
-    const UnsupportedReport plausible = DiagnoseUnsupportedBuild(unknown, MakeSfo(kEuropeSfo));
+    const UnsupportedReport plausible = DiagnoseUnsupportedBuild(unknown, MakeSfo(kUnknownTitleSfo));
     CHECK(Reported(plausible) && Contains(plausible.lines, "SHA-256: " + sha) && !AsksForManualWork(plausible.lines));
 
     // The same sections the log shows, in order.
@@ -1000,7 +1000,8 @@ void TestOneShotPackageDiagnostics() {
     CHECK(at("Game identification:") < at("Executable (eboot.bin):"));
     CHECK(at("Executable (eboot.bin):") < at("Build-specific feature mapping"));
     CHECK(at("Build-specific feature mapping") < at("Runtime validators"));
-    CHECK(at("Runtime validators") < at("Overall diagnostic result:"));
+    CHECK(at("Runtime validators") < at("Search-only features (the loader's own searches"));
+    CHECK(at("Search-only features (the loader's own searches") < at("Overall diagnostic result:"));
     CHECK(known.lines.size() < 400);
 }
 
@@ -1042,7 +1043,7 @@ void TestPackageEdgeCases() {
     // A damaged executable keeps its hash and size in the rejection.
     {
         MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), Bytes(500, 0x41));
-        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kEuropeSfo));
+        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kUnknownTitleSfo));
         CHECK(!report.dragons_crown && Contains(report.evidence, "not a readable PS4 executable"));
         CHECK(report.rejection.find("SHA-256 " + Sha256Of(Bytes(500, 0x41))) != std::string::npos);
         CHECK(report.rejection.find("500 bytes") != std::string::npos);
@@ -1087,7 +1088,7 @@ void TestPackageEdgeCases() {
         segments[0].data = code;
         segments[0].memsz = code.size();
         MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), MakeSelf(segments, 0x40));
-        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kEuropeSfo));
+        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kUnknownTitleSfo));
         CHECK(Reported(report));
         CHECK(Contains(report.lines, "[ambiguous] submit: 2 matches, expected 1"));
         CHECK(Contains(report.lines, "True ultrawide: REJECTED"));
@@ -1099,7 +1100,7 @@ void TestPackageEdgeCases() {
     // Some sites found, some not: each is reported on its own and the missing ones are named.
     {
         MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), FingerprintExecutable());
-        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kEuropeSfo));
+        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kUnknownTitleSfo));
         CHECK(Reported(report));
         CHECK(Contains(report.lines, "[unique] submit") && Contains(report.lines, "[unique] fill call 1"));
         CHECK(Contains(report.lines, "[missing] queue: no match"));
@@ -1115,7 +1116,7 @@ void TestPackageEdgeCases() {
             cheats += build.cheats ? 1 : 0;
         }
         MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), unfamiliar);
-        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kEuropeSfo));
+        const UnsupportedReport report = DiagnoseUnsupportedBuild(source, MakeSfo(kUnknownTitleSfo));
         CHECK(Contains(report.lines, "Cheats (enabled today in: " + std::to_string(cheats) + " of " +
                                          std::to_string(SupportedBuilds().size()) + " supported builds)"));
     }
@@ -1137,10 +1138,10 @@ void TestPackageEdgeCases() {
     }
 }
 
-void TestEuropeanInstall() {
-    GameFolder base(fs::temp_directory_path() / "dcp_diag_cusa10487");
+void TestUnknownTitleInstall() {
+    GameFolder base(fs::temp_directory_path() / "dcp_diag_unknown_title");
     const fs::path game = base.root / "game";
-    WriteFile(game / "sce_sys" / "param.sfo", MakeSfo(kEuropeSfo));
+    WriteFile(game / "sce_sys" / "param.sfo", MakeSfo(kUnknownTitleSfo));
     WriteFile(game / "eboot.bin", SyntheticExecutable());
     for (const char* module : kBundledModules) WriteFile(game / "sce_module" / module, SyntheticExecutable(0x90));
     WriteFile(game / "sce_discmap.plt", std::string(64, 'p'));
@@ -1150,13 +1151,62 @@ void TestEuropeanInstall() {
 
     const InstallResult result = InstallFromFolder(game, roots);
     CHECK(result.status == InstallStatus::kUnsupportedBuild && !result.ok());
-    CHECK(Contains(result.diagnostics, "TITLE_ID: CUSA10487"));
+    CHECK(Contains(result.diagnostics, "TITLE_ID: CUSA99999"));
     CHECK(Contains(result.diagnostics, "Dragon's Crown monster resources"));
     CHECK(Contains(result.diagnostics, "no executable patch or hook was applied"));
     CHECK(!fs::exists(roots.prepared) && !fs::exists(roots.image));
     CHECK(Snapshot(game) == before);
-    CHECK(FindBuildOfTitle("CUSA10487") == nullptr);
+    CHECK(FindBuildOfTitle("CUSA99999") == nullptr);
     CHECK(DescribeInstall(result.status).title == "Dragon's Crown Pro version not supported yet");
+}
+
+// A build with no tables gets the searches' results in the log even though it is supported; an executable that holds none
+// of their code says so instead of inventing a site.
+void TestSiteReport() {
+    MemorySource source = PackageLike("DRACRO.CPK", GameCpk(), SyntheticExecutable());
+    const std::vector<std::string> lines = DescribeBuildSites(source, "CUSA10487 1.03 Europe");
+    CHECK(!lines.empty() && lines.front() == kSiteReportBegin && lines.back() == kSiteReportEnd);
+    CHECK(Contains(lines, "Build: CUSA10487 1.03 Europe; read-only"));
+    CHECK(Contains(lines, "Skip intro: UNRESOLVED") && Contains(lines, "Unlock Gallery: UNRESOLVED") &&
+          Contains(lines, "Japanese Menu Buttons: UNRESOLVED"));
+    CHECK(Contains(lines, "Skip intro, opening poll: 0 matches"));
+    CHECK(Contains(lines, "Search-only features: 0/3 resolved"));
+    for (const GameBuild& build : SupportedBuilds()) {
+        const bool tables = !build.resolution_sites.empty();
+        CHECK(SitesOnlySearched(build) == !tables);
+    }
+}
+
+// CUSA10487 1.03 is identified by the executable the installer reads: its other eboot.bin is not this build, and is
+// diagnosed like any unknown executable, with nothing installed.
+void TestEuropeanExecutableIdentity() {
+    const GameBuild* europe = FindBuildOfTitle("CUSA10487");
+    CHECK(europe != nullptr);
+    if (!europe) return;
+    CHECK(std::string(europe->label) == "CUSA10487 1.03 Europe");
+    CHECK(std::string(europe->eboot_sha256) == "25c58f473337bc1da768d86e4cd12fe8a15e4af48e0826ac9a857fd9e3c09845");
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(std::string(build.eboot_sha256) != "7362f2e73396a188e18b64fb7aa7cd762f87e70ee0e71a13d727d95b0ab20796");
+    }
+
+    GameFolder base(fs::temp_directory_path() / "dcp_diag_cusa10487");
+    const fs::path game = base.root / "game";
+    WriteFile(game / "sce_sys" / "param.sfo",
+              MakeSfo({{"APP_VER", "01.00"}, {"CATEGORY", "gd"}, {"CONTENT_ID", europe->content_id},
+                       {"TITLE", "Dragon's Crown Pro"}, {"TITLE_ID", "CUSA10487"}, {"VERSION", "01.03"}}));
+    WriteFile(game / "eboot.bin", SyntheticExecutable());
+    for (const char* module : kBundledModules) WriteFile(game / "sce_module" / module, SyntheticExecutable(0x90));
+    WriteFile(game / "sce_discmap.plt", std::string(64, 'p'));
+    WriteFile(game / "DRACRO.CPK", GameCpk());
+    WriteFile(game / "DRACRO_EU.CPK", GameCpk());
+    const GameRoots roots{base.root / "prepared", base.root / "image"};
+    const auto before = Snapshot(game);
+
+    const InstallResult result = InstallFromFolder(game, roots);
+    CHECK(result.status == InstallStatus::kUnsupportedBuild && !result.ok());
+    CHECK(Contains(result.diagnostics, "TITLE_ID: CUSA10487"));
+    CHECK(!fs::exists(roots.prepared / europe->folder) && !fs::exists(roots.image / europe->folder));
+    CHECK(Snapshot(game) == before);
 }
 
 // ---- known-build self-test against the local game fixtures ----
@@ -1364,6 +1414,9 @@ void TestKnownBuilds() {
         const UnsupportedReport known_report = DiagnoseUnsupportedBuild(*source, std::string());
         CHECK(Reported(known_report));
         CHECK(Contains(known_report.lines, "Runtime validators: 3/3 accepted"));
+        CHECK(Contains(known_report.lines, "Search-only features: 3/3 resolved"));
+        CHECK(Contains(known_report.lines, "Skip intro: resolved") && Contains(known_report.lines, "Unlock Gallery: resolved") &&
+              Contains(known_report.lines, "Japanese Menu Buttons: resolved"));
         CHECK(Contains(known_report.lines, "Cheats: accepted") && Contains(known_report.lines, "True ultrawide: accepted"));
         CHECK(Contains(known_report.lines, "Japanese NPC voices: accepted"));
         std::printf("%s: expected %zu build-dependent sites (+%zu render sites, 61 LZCNT sites), recovered %zu, unique %zu, "
@@ -1403,7 +1456,9 @@ int main() {
     TestIdentityIndependentOfExecutable();
     TestOneShotPackageDiagnostics();
     TestPackageEdgeCases();
-    TestEuropeanInstall();
+    TestUnknownTitleInstall();
+    TestEuropeanExecutableIdentity();
+    TestSiteReport();
     TestKnownBuilds();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

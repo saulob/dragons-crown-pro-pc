@@ -93,6 +93,7 @@ constexpr PackageLayer kJapan102Layers[] = {{"01.00", "01.00", false}, {"01.02",
 constexpr PackageLayer kJapan103Layers[] = {{"01.00", "01.00", false}, {"01.03", "01.00", true}};
 constexpr PackageLayer kAsia100Layers[] = {{"01.00", "01.02", false}};
 constexpr PackageLayer kAsia102Layers[] = {{"01.00", "01.02", false}, {"01.02", "01.00", true}};
+constexpr PackageLayer kEuropeLayers[] = {{"01.00", "01.03", false}};
 
 constexpr const char* kDiscmapPatchFiles[] = {"sce_discmap_patch.plt"};
 
@@ -254,6 +255,30 @@ constexpr GameBuild kGameBuilds[] = {
         kAsiaLanguages,
         true,
         false,
+        true,
+    },
+    {
+        "CUSA10487",
+        "EP2475-CUSA10487_00-DRAGONSCROWNPRO1",
+        "1.03",
+        "CUSA10487-1.03",
+        "25c58f473337bc1da768d86e4cd12fe8a15e4af48e0826ac9a857fd9e3c09845",
+        "DRACRO_EU.CPK",
+        {},
+        "CUSA10487 1.03 Europe",
+        "Europe",
+        true,
+        true,
+        true,
+        true,
+        kEuropeLayers,
+        {},
+        kWesternLanguages,
+        true,
+        false,
+        true,
+        true,
+        true,
         true,
     },
 };

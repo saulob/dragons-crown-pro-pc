@@ -292,6 +292,9 @@ void TestLocalPaths() {
     CHECK(Scrub("Settings: C:\\Users\\Zefa Tester\\AppData\\dcp.ini") == "Settings: <home>\\AppData\\dcp.ini");
     CHECK(Scrub("Settings: c:/users/zefa tester/AppData/dcp.ini") == "Settings: <home>/AppData/dcp.ini");
     CHECK(Scrub("{\"path\":\"C:\\\\Users\\\\Zefa Tester\\\\x.ini\"}") == "{\"path\":\"<home>\\\\x.ini\"}");
+    CHECK(Scrub("{\"path\":\"D:\\\\Jogos\\\\Zefa\\\\DCP\\\\x.ini\"}") == "{\"path\":\"<install>\\\\x.ini\"}");
+    CHECK(Scrub("{\"path\":\"\\\\\\\\FILESERVER\\\\ana\\\\a.log\"}") == "{\"path\":\"<network-path>\\\\a.log\"}");
+    CHECK(Scrub("x>\\\\FILESERVER\\ana\\a.log") == "x><network-path>\\a.log");
     CHECK(Scrub("other C:\\Users\\Someone Else\\Documents\\a.txt") == "other <home>\\Documents\\a.txt");
     CHECK(Scrub("[run] \"D:\\Jogos\\Zefa\\DCP\\dragons_crown_pro.exe\"") == "[run] \"<install>\\dragons_crown_pro.exe\"");
     CHECK(Scrub("Launcher: game files in D:\\Jogos\\Zefa\\DCP\\game\\prepared\\v1.03: valid") ==

@@ -88,6 +88,11 @@ const GuestImageId* ImageOf(const GameBuild& build) {
             return &record.image;
         }
     }
+    for (const StartupSaveRecord& record : startup_save_records) {
+        if (std::string_view(record.build) == build.label) {
+            return &record.image;
+        }
+    }
     return nullptr;
 }
 
@@ -187,7 +192,7 @@ const char* const kFeatureNames[kFeatureCount] = {
 struct Contract {
     const char* label;
     bool native_japanese_voices; // Japanese NPC Voices NOT APPLICABLE: the build already speaks Japanese
-    Mapping startup_save;        // the Japanese builds' startup save step, part of their save handling
+    Mapping startup_save;        // the startup save step, on the builds that list its exact sites
     const char* languages;       // the regional base's languages; an update keeps all of them
 };
 
@@ -203,6 +208,7 @@ const Contract kContracts[] = {
     {"CUSA07001 1.03 Japan", true, T, "japanese"},
     {"CUSA10209 1.00 Asia/Hong Kong", false, N, kAsia},
     {"CUSA10209 1.02 Asia/Hong Kong", false, N, kAsia},
+    {"CUSA10487 1.03 Europe", false, T, kWestern},
 };
 
 // Each update's chain: the base it must match, then the siblings that must match each other.
@@ -621,7 +627,8 @@ void TestGateConsistency() {
         CHECK(!Listed(ultrawide_records, build) || caps.true_ultrawide);
         CHECK(caps.cheats && (IsUs100(build) || build.features_by_signature));
         CHECK(caps.npc_voices == !NativeJapaneseNpcVoices(&build));
-        CHECK(caps.startup_save == (std::string_view(build.title_id) == "CUSA07001" ? Mapping::kTable : Mapping::kNone));
+        const std::string_view title = build.title_id;
+        CHECK(caps.startup_save == (title == "CUSA07001" || title == "CUSA10487" ? Mapping::kTable : Mapping::kNone));
         CHECK(caps.xbox_prompts);
         CHECK(!build.keep_base_languages || BaseBuildOf(build) != nullptr);
         CHECK(!Key(build).empty());
@@ -659,7 +666,9 @@ void TestGateConsistency() {
                                    "build_->label",                        "BuildMetadataText(*build_)",
                                    "InstalledGameName(files_, build_)",    "build_ = check.build",
                                    "const GameBuild* build_",              "|| !build_)",
-                                   "build_(check.build)",                  "build = *build_"};
+                                   "build_(check.build)",                  "build = *build_",
+                                   "const bool known = build_ && files_ == GameFileState::kValid;",
+                                   "known ? build_->title_id : \"\""};
     std::map<std::string, int> seen;
     size_t line_start = 0, unknown = 0;
     const std::regex word("\\bbuild_\\b");
@@ -805,6 +814,41 @@ size_t CountLzcnt(const uint8_t* image, uint64_t size) {
 }
 
 // Synthetic LZCNT image: the shapes at spread offsets stand for a build without a table.
+// The European build stands alone: no other build's tables reach it, its features resolve in its own image, and the
+// one table it has is keyed to that image.
+void TestEuropeBuild() {
+    g_scope = "europe";
+    const GameBuild* europe = FindBuild("CUSA10487 1.03 Europe");
+    CHECK(europe != nullptr);
+    if (!europe) return;
+    CHECK(europe == &SupportedBuilds().back() && BaseBuildOf(*europe) == nullptr);
+    CHECK(Key(*europe) == "CUSA10487-1.03" && std::string_view(europe->folder) == "CUSA10487-1.03");
+    const Capabilities caps = CapabilitiesOf(*europe);
+    CHECK(caps.cheats && caps.xbox_prompts && caps.npc_voices && caps.true_ultrawide && caps.custom_resolution);
+    CHECK(caps.resolution == Mapping::kSignature && caps.skip_offers == Mapping::kSignature &&
+          caps.skip_intro == Mapping::kSignature && caps.menu_buttons == Mapping::kSignature &&
+          caps.unlock_gallery == Mapping::kSignature && caps.system_type == Mapping::kSignature &&
+          caps.lzcnt == Mapping::kSignature && caps.startup_save == Mapping::kTable);
+    CHECK(caps.languages == kWestern && caps.translations.empty());
+    CHECK(europe->features_by_signature && europe->resolution_by_signature && europe->check_prompt_fit);
+    CHECK(!Listed(ultrawide_records, *europe));
+
+    const GuestImageId* image = ImageOf(*europe);
+    CHECK(image && image->size == 0x11f8060 && image->entry == 0x54c6a0);
+    CHECK(!IsUs100(*europe));
+    const StartupSaveRecord& record = startup_save_records[STARTUP_SAVE_RECORD_COUNT - 1];
+    CHECK(std::string_view(record.build) == europe->label);
+    CHECK(record.step_offset == 0x4ddbb0 && record.save_offset == 0x81a20 && record.accept_offset == 0x8bb50);
+
+    std::vector<uint8_t> memory(0x20000, 0x90), stubs(1 << 16);
+    CHECK(lzcnt_compat_install(memory.data(), image->size, image->entry, stubs.data(), stubs.size(), nullptr) ==
+          LZCNT_COMPAT_UNKNOWN_IMAGE);
+    CHECK(!voice_hooks_install(memory.data(), image->size, image->entry, stubs.data(), stubs.size()));
+    char detail[200];
+    CHECK(!ultrawide_hooks_install(memory.data(), image->size, image->entry, stubs.data(), stubs.size(), 1.3125, detail,
+                                   sizeof(detail)));
+}
+
 void TestSyntheticLzcnt() {
     g_scope = "synthetic";
     const size_t size = 0x10000, stubs = lzcnt_compat_stub_bytes();
@@ -870,7 +914,7 @@ void TestUnknownBuilds() {
     CHECK(labels(system_type_records) == fixture_labels);
     CHECK(labels(ultrawide_records) == fixture_labels);
     for (const StartupSaveRecord& record : startup_save_records) {
-        CHECK(std::string_view(record.build).starts_with("CUSA07001 "));
+        CHECK(std::string_view(record.build).starts_with("CUSA07001 ") || std::string_view(record.build).starts_with("CUSA10487 "));
     }
 
     std::vector<uint8_t> image(0x20000, 0x90);
@@ -1309,6 +1353,57 @@ struct FixtureReport {
     std::string note;
 };
 
+// What stands behind a feature on a build. A fallback path or a profile flag is not evidence.
+enum class Proof { kNotNeeded, kRealExecutable, kReporterLog, kDataUnavailable };
+
+// What a reporter's read-only scan of the real CUSA10487 1.03 executable mapped; tests/feature_sites_tests.cpp pins the
+// sites. The scan had no Skip Intro, Unlock Gallery or Japanese Menu Buttons signatures.
+constexpr Feature kEuropeScanned[] = {kCheats,  kOnlinePlay, kTrueUltrawide, kRenderResolution, kAspectRatio, kStorySkip,
+                                      kTutorialSkip, kLzcnt, kSaveLoad, kJapaneseNpcVoices, kExitGame};
+
+Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, const FixtureReport& report) {
+    switch (feature) {
+    case kController:
+    case kKeyboard:
+    case kGraphics:
+        return Proof::kNotNeeded;
+    case kArachnophobia:
+    case kXboxPrompts:
+        return report.prepared ? Proof::kRealExecutable : Proof::kDataUnavailable;
+    case kSaveLoad:
+        if (row.startup_save == Mapping::kNone) return Proof::kNotNeeded;
+        break;
+    case kJapaneseNpcVoices:
+        if (row.native_japanese_voices) return Proof::kNotNeeded;
+        break;
+    default:
+        break;
+    }
+    if (report.executable) return Proof::kRealExecutable;
+    const bool scanned = std::string_view(build.title_id) == "CUSA10487" &&
+                         std::find(std::begin(kEuropeScanned), std::end(kEuropeScanned), feature) != std::end(kEuropeScanned);
+    return scanned ? Proof::kReporterLog : Proof::kDataUnavailable;
+}
+
+// Nothing counts as proven by being offered: without an image, a log or a game folder a site-dependent feature has no proof.
+void TestProofNeedsEvidence() {
+    g_scope = "contract";
+    const FixtureReport none, real{true, true, true, ""};
+    for (const GameBuild& build : SupportedBuilds()) {
+        const Contract* row = FindContract(build.label);
+        if (!row) continue;
+        const bool europe = std::string_view(build.title_id) == "CUSA10487";
+        for (const Feature feature : {kSkipIntro, kMenuButtons, kUnlockGallery, kXboxPrompts, kArachnophobia}) {
+            CHECK(ProofOf(build, *row, feature, none) == Proof::kDataUnavailable);
+            CHECK(ProofOf(build, *row, feature, real) == Proof::kRealExecutable);
+        }
+        for (const Feature feature : {kCheats, kTrueUltrawide, kRenderResolution, kStorySkip, kLzcnt, kExitGame}) {
+            CHECK(ProofOf(build, *row, feature, none) == (europe ? Proof::kReporterLog : Proof::kDataUnavailable));
+        }
+        for (const Feature feature : {kController, kKeyboard, kGraphics}) CHECK(ProofOf(build, *row, feature, none) == Proof::kNotNeeded);
+    }
+}
+
 FixtureReport CheckFixtures(const GameBuild& build) {
     FixtureReport report;
     const fs::path root(DCP_SOURCE_DIR);
@@ -1372,6 +1467,10 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(skip_offers_locate(bytes, size, Key(build).c_str(), &story, &tutorial) == 1 && story && tutorial);
         CHECK(skip_offers_locate(bytes, size, "unlisted", &found_story, &found_tutorial) == 0);
         CHECK(found_story == story && found_tutorial == tutorial);
+
+        uint64_t gallery = 0, found_gallery = 0;
+        CHECK(gallery_unlock_locate(bytes, size, Key(build).c_str(), &gallery) == 1 && gallery);
+        CHECK(gallery_unlock_locate(bytes, size, "unlisted", &found_gallery) == 0 && found_gallery == gallery);
 
         uint64_t intro = 0, found_intro = 0;
         CHECK(skip_intro_locate(bytes, size, Key(build).c_str(), &intro) == 1 && intro);
@@ -1480,6 +1579,8 @@ int main() {
     TestResolutionStrategy();
     TestSyntheticRenderLocator();
     TestSyntheticLzcnt();
+    TestEuropeBuild();
+    TestProofNeedsEvidence();
     TestOnline();
     TestUnknownBuilds();
     TestLauncherAgreesWithLoader();
@@ -1492,20 +1593,46 @@ int main() {
 
     std::printf("\n");
     int shared_failures = g_scope_failures["contract"] + g_scope_failures["synthetic"] + g_scope_failures["unknown"];
+    struct Evidence {
+        size_t real = 0, log = 0, none = 0;
+        std::string missing;
+    };
+    Evidence evidence[kFeatureCount];
     for (const GameBuild& build : SupportedBuilds()) {
         const FixtureReport& report = reports[build.label];
+        const Contract* row = FindContract(build.label);
+        std::string missing;
+        size_t unavailable = 0;
+        for (size_t f = 0; row && f < kFeatureCount; ++f) {
+            Evidence& item = evidence[f];
+            switch (ProofOf(build, *row, Feature(f), report)) {
+            case Proof::kRealExecutable: ++item.real; break;
+            case Proof::kReporterLog: ++item.log; break;
+            case Proof::kNotNeeded: break;
+            case Proof::kDataUnavailable:
+                ++item.none;
+                ++unavailable;
+                item.missing += (item.missing.empty() ? "" : ", ") + std::string(build.title_id) + " " + build.version;
+                missing += (missing.empty() ? "" : ", ") + std::string(kFeatureNames[f]);
+                break;
+            }
+        }
         const bool failed = g_scope_failures[build.label] > 0 || shared_failures > 0;
-        const char* status = failed ? "FAIL" : report.executable ? "PASS real" : "PASS synthetic";
-        std::string detail = report.executable ? "executable" : "real fixture unavailable";
+        const char* status = failed ? "FAIL" : unavailable ? "PARTIAL" : "PASS";
+        std::string detail = report.executable ? "executable" : "no real executable here";
         if (report.executable && !report.note.empty()) detail += ": " + report.note;
         detail += report.prepared ? "; prepared folder" : "; no prepared folder";
+        if (unavailable) detail += "; DATA UNAVAILABLE: " + missing;
         std::printf("PARITY-BUILD|%s|%s|%s\n", build.label, status, detail.c_str());
     }
     const size_t builds = SupportedBuilds().size();
     for (size_t f = 0; f < kFeatureCount; ++f) {
         const FeatureTally& tally = g_tally[f];
-        std::string status = (tally.passed == builds && shared_failures == 0 ? "PASS " : "FAIL ") +
-                             std::to_string(tally.passed) + "/" + std::to_string(builds);
+        const Evidence& item = evidence[f];
+        const char* verdict = tally.passed != builds || shared_failures ? "FAIL " : item.none ? "PARTIAL " : "PASS ";
+        std::string status = verdict + std::to_string(builds - item.none) + "/" + std::to_string(builds);
+        if (item.log) status += " (" + std::to_string(item.real) + " real, " + std::to_string(item.log) + " reporter log)";
+        if (item.none) status += "; DATA UNAVAILABLE: " + item.missing;
         if (tally.native) {
             status += " (" + std::to_string(tally.passed - tally.native) + " toggle, " + std::to_string(tally.native) +
                       " native)";

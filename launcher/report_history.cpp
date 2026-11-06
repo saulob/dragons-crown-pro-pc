@@ -102,8 +102,12 @@ void ReportHistory::Load() {
     reports_.clear();
     std::error_code ec;
     if (!fs::exists(file_, ec)) return;
-    std::ifstream in(file_, std::ios::binary);
-    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    std::string text;
+    {
+        // Closed before parsing: Windows cannot rename a damaged file while this stream holds it.
+        std::ifstream in(file_, std::ios::binary);
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
     const std::optional<net::Json> root = net::Json::parse(text);
     if (!root || !root->is_object() || !(*root)["reports"].is_array()) {
         SetAside(file_);

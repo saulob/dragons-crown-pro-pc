@@ -15,6 +15,9 @@
 #include <system_error>
 
 #include "build_scan.h"
+#include "gallery_unlock.h"
+#include "menu_buttons.h"
+#include "skip_intro.h"
 #include "cpk_patch.h"
 #include "crypto.h"
 #include "feature_sites.h"
@@ -51,11 +54,32 @@ constexpr FeatureScope kScopes[] = {
     {"True ultrawide", "every supported build with verified sites"},
     {"System type", "every supported build with verified sites"},
     {"Skip offers", "every supported build"},
-    {"Startup save", "the CUSA07001 builds"},
+    {"Startup save", "the CUSA07001 and CUSA10487 builds"},
     {"LZCNT compatibility", "every supported build"},
 };
 
 constexpr size_t kValidatorCount = 3;
+constexpr size_t kSearchOnlyFeatures = 3;
+constexpr char kUnlistedBuild[] = "diagnostic";
+
+struct SearchShape {
+    const char* feature;
+    const char* name;
+    const char* pattern;
+};
+
+// What each search below is built from, so a log shows which part moved when a search finds nothing.
+constexpr SearchShape kSearchShapes[] = {
+    {"Skip intro", "opening poll", "49 8b 04 24 4c 89 e7 48 8b 98 38 01 00 00 e8 ?? ?? ?? ?? 4c 89 e7 89 c6 ff d3 84 c0 0f 84"},
+    {"Skip intro", "startup notice", "be cb 01 00 00 48 89 df 49 89 9d d8 00 00 00"},
+    {"Unlock Gallery", "list builder", "e8 ?? ?? ?? ?? 41 89 c4 45 85 e4 78 ?? 49 8b 45 28 48 8b b8 e8 00 00 00 e8"},
+    {"Unlock Gallery", "art array getter", "48 8d 87 cc ea 20 00 c3"},
+    {"Unlock Gallery", "entry key", "b8 ff ff ff ff 83 ff 38 77 12 48 63 c7 48 8d 0d"},
+    {"Japanese Menu Buttons", "key setup", "8b 93 a0 00 00 00 83 b8 34 01 00 00 ?? 48 8d 8b a0 00 00 00 74 17"},
+    {"Japanese Menu Buttons", "flag store, loaded by register", "41 c7 84 24 34 01 00 00 01 00 00 00"},
+    {"Japanese Menu Buttons", "flag store, in scene", "c7 83 34 01 00 00 01 00 00 00"},
+    {"Japanese Menu Buttons", "prompt reader", "31 c9 83 b8 34 01 00 00"},
+};
 
 class FolderSource final : public GameSource {
 public:
@@ -879,6 +903,68 @@ ArchiveEvidence ProbeArchive(const GameSource& source, const SourceEntry& file) 
     return evidence;
 }
 
+std::string SearchedSite(uint64_t site) {
+    return site ? Hex(site) : "not found exactly once";
+}
+
+const char* NoticeText(SkipIntroNotice notice) {
+    switch (notice) {
+    case SKIP_INTRO_NOTICE_ABSENT: return "absent";
+    case SKIP_INTRO_NOTICE_FOUND: return "found";
+    case SKIP_INTRO_NOTICE_UNMATCHED: return "constructed, but not by the verified step";
+    }
+    return "unknown";
+}
+
+// The features the loader only finds by searching the running image, by the searches it uses.
+size_t DescribeSearchOnly(Lines& out, const scan::MappedImage& image) {
+    out.Add("Search-only features (the loader's own searches, run on this image; nothing is patched):");
+    if (image.bytes.empty()) {
+        out.Add("  not run: the executable did not map");
+        return 0;
+    }
+    const unsigned char* bytes = image.bytes.data();
+    const uint64_t size = image.bytes.size();
+    size_t resolved = 0;
+
+    uint64_t poll = 0, notice_site = 0;
+    skip_intro_locate(bytes, size, kUnlistedBuild, &poll);
+    const SkipIntroNotice notice = skip_intro_locate_notice(bytes, size, kUnlistedBuild, &notice_site);
+    const bool intro_ok = poll && notice != SKIP_INTRO_NOTICE_UNMATCHED;
+    resolved += intro_ok ? 1 : 0;
+    out.Add("  Skip intro: %s, opening poll %s, startup notice %s%s", intro_ok ? "resolved" : "UNRESOLVED",
+            SearchedSite(poll).c_str(), NoticeText(notice), notice_site ? (" at " + Hex(notice_site)).c_str() : "");
+
+    uint64_t gallery = 0;
+    gallery_unlock_locate(bytes, size, kUnlistedBuild, &gallery);
+    resolved += gallery ? 1 : 0;
+    out.Add("  Unlock Gallery: %s, list builder %s", gallery ? "resolved" : "UNRESOLVED", SearchedSite(gallery).c_str());
+
+    MenuButtonSites buttons;
+    menu_buttons_locate(bytes, size, kUnlistedBuild, &buttons);
+    const bool buttons_ok = buttons.reader && (buttons.write_count || buttons.western_sites);
+    resolved += buttons_ok ? 1 : 0;
+    std::string writes;
+    for (int i = 0; i < buttons.write_count; ++i) writes += " " + Hex(buttons.writes[i]);
+    out.Add("  Japanese Menu Buttons: %s, key setup %s, %d flag stores%s, readers %s", buttons_ok ? "resolved" : "UNRESOLVED",
+            SearchedSite(buttons.reader).c_str(), buttons.write_count, writes.c_str(), buttons.western_sites ? "found" : "not found");
+
+    out.Add("  Shapes behind these searches:");
+    for (const SearchShape& shape : kSearchShapes) {
+        size_t total = 0;
+        const std::vector<uint64_t> matches = scan::FindPattern(image, shape.pattern, scan::kMaxListedMatches, total);
+        std::string line = std::string("    ") + shape.feature + ", " + shape.name + ": " + std::to_string(total) + " matches";
+        for (const uint64_t match : matches) {
+            char fingerprint[32];
+            std::snprintf(fingerprint, sizeof(fingerprint), " fp %016llx",
+                          static_cast<unsigned long long>(scan::SolidFingerprint(image, shape.pattern, match)));
+            line += " " + Hex(match) + fingerprint;
+        }
+        out.Add(line);
+    }
+    return resolved;
+}
+
 Classification Classify(const GameSource& source, const std::string& sfo, const std::vector<SourceEntry>& files) {
     Classification cls;
     const std::string title_id = SfoString(sfo, "TITLE_ID");
@@ -939,6 +1025,25 @@ std::unique_ptr<GameSource> OpenFolderSource(const fs::path& folder) {
     return std::make_unique<FolderSource>(folder);
 }
 
+std::vector<std::string> DescribeBuildSites(const GameSource& source, const std::string& label) {
+    Executables exe;
+    LoadExecutables(source, exe);
+    Lines out;
+    out.Add(kSiteReportBegin);
+    out.Add("Build: %s; read-only, nothing was patched", label.c_str());
+    const scan::ScanResult result = scan::ScanImage(exe.image);
+    std::map<std::string, FeatureTotals> totals;
+    std::vector<std::string> order;
+    DescribeSites(out, exe.image, result, totals, order);
+    DescribeRelations(out, result, totals);
+    const size_t validators = DescribeValidators(out, exe.image);
+    const size_t searches = DescribeSearchOnly(out, exe.image);
+    out.Add("Runtime validators: %zu/%zu accepted", validators, kValidatorCount);
+    out.Add("Search-only features: %zu/%zu resolved", searches, kSearchOnlyFeatures);
+    out.Add(kSiteReportEnd);
+    return std::move(out.Take());
+}
+
 std::unique_ptr<GameSource> OpenPackageSource(Package& package) {
     return std::make_unique<PackageSource>(package);
 }
@@ -994,6 +1099,7 @@ UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::
     DescribeRelations(out, result, totals);
     DescribeProfiles(out, result);
     const size_t validators = DescribeValidators(out, exe.image);
+    const size_t searches = DescribeSearchOnly(out, exe.image);
 
     size_t mapped_features = 0, ambiguous = 0, missing = 0;
     std::vector<std::string> unresolved;
@@ -1017,12 +1123,13 @@ UnsupportedReport DiagnoseUnsupportedBuild(const GameSource& source, const std::
                                    !SfoString(sfo, "APP_VER").empty() && !SfoString(sfo, "VERSION").empty();
     const bool executable_complete = exe.eboot_info.mappable && modules_mapped;
     const bool all_complete = identity_complete && executable_complete && mapped_features == order.size() && missing == 0 &&
-                              ambiguous == 0 && validators == kValidatorCount;
+                              ambiguous == 0 && validators == kValidatorCount && searches == kSearchOnlyFeatures;
     out.Add("Overall diagnostic result:");
     out.Add("  Identity: %s", identity_complete ? "complete" : "incomplete");
     out.Add("  Executable mapping: %s", executable_complete ? "complete" : "incomplete");
     out.Add("  Build-specific features: %zu/%zu mapped", mapped_features, order.size());
     out.Add("  Runtime validators: %zu/%zu accepted", validators, kValidatorCount);
+    out.Add("  Search-only features: %zu/%zu resolved", searches, kSearchOnlyFeatures);
     out.Add("  Ambiguous sites: %zu", ambiguous);
     out.Add("  Missing sites: %zu", missing);
     if (!unresolved.empty()) {

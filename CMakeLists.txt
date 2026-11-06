@@ -330,7 +330,7 @@ set_target_properties(dcp-opengl-backend-tests PROPERTIES CXX_STANDARD 23 CXX_ST
 target_include_directories(dcp-opengl-backend-tests PRIVATE gpu/shim gpu/shadps4 tests src ${CMAKE_BINARY_DIR}/gpu/include
     gpu/third_party/gcn/include gpu/third_party/half/include gpu/third_party/xbyak)
 target_compile_definitions(dcp-opengl-backend-tests PRIVATE DCP_GLSLANG="${GLSLANG_COMPILER}")
-target_link_libraries(dcp-opengl-backend-tests PRIVATE dcpgpu)
+target_link_libraries(dcp-opengl-backend-tests PRIVATE dcpgpu $<$<BOOL:${WIN32}>:onecore>)
 
 # Focused tests of the OpenGL write watch against real page faults, and of the state tracker and stream ring against
 # recording entry points (tools/test.ps1); no OpenGL context. Not part of the default build.

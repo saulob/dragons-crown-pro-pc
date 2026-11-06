@@ -359,7 +359,7 @@ void TestOneLobbyGame(const fs::path& base) {
 }
 
 // The relay is one code path below the game's Matching2 and Rudp entry points: it adds no import any build must bind,
-// no build-specific code, and all seven builds go through the same relay-capable hello and PeerSocket.
+// no build-specific code, and all eight builds go through the same relay-capable hello and PeerSocket.
 std::set<std::string> g_static_parity;
 
 void TestRelayIsBuildIndependent(const fs::path& base) {
@@ -367,7 +367,7 @@ void TestRelayIsBuildIndependent(const fs::path& base) {
     std::set<std::string> keys;
     for (const GameBuild& build : SupportedBuilds()) keys.insert(Key(build));
     CHECK(keys == (std::set<std::string>{"CUSA10454-1.00", "CUSA10454-1.01", "CUSA07001-1.00", "CUSA07001-1.02",
-                                         "CUSA07001-1.03", "CUSA10209-1.00", "CUSA10209-1.02"}));
+                                         "CUSA07001-1.03", "CUSA10209-1.00", "CUSA10209-1.02", "CUSA10487-1.03"}));
     const auto read = [](const char* relative) {
         std::ifstream in(fs::path(DCP_SOURCE_DIR) / relative, std::ios::binary);
         return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
@@ -384,7 +384,7 @@ void TestRelayIsBuildIndependent(const fs::path& base) {
             CHECK(text->substr(at, text->find('\n', at) - at).find("elay") == std::string::npos);
         }
     }
-    CHECK(matching2.find("hello_body(s.identity, s.name, s.game, true, true)") != std::string::npos);
+    CHECK(matching2.find("hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible)") != std::string::npos);
     bool active = true;
     for (const GameBuild& build : SupportedBuilds()) {
         Configure(base, Key(build).c_str(), true);
@@ -451,7 +451,7 @@ void TestCrossBuildRooms(const fs::path& base) {
         const char *host, *guest;
     } kPairs[] = {
         {"CUSA10454-1.00", "CUSA07001-1.03"}, {"CUSA10454-1.00", "CUSA10209-1.00"}, {"CUSA07001-1.00", "CUSA07001-1.03"},
-        {"CUSA07001-1.02", "CUSA10209-1.02"}, {"CUSA10454-1.01", "CUSA07001-1.00"},
+        {"CUSA07001-1.02", "CUSA10209-1.02"}, {"CUSA10454-1.01", "CUSA07001-1.00"}, {"CUSA10487-1.03", "CUSA10454-1.00"},
     };
     for (const auto& pair : kPairs) {
         CHECK(BuildNamed(pair.host) && BuildNamed(pair.guest));

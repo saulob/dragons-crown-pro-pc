@@ -174,6 +174,7 @@ const GameBuild& kJp102 = SupportedBuilds()[3];
 const GameBuild& kJp103 = SupportedBuilds()[4];
 const GameBuild& kCk100 = SupportedBuilds()[5];
 const GameBuild& kCk = SupportedBuilds()[6];
+const GameBuild& kEu = SupportedBuilds()[7];
 
 constexpr char kEboot[] = "synthetic eboot bytes";
 
@@ -355,7 +356,7 @@ void TestFingerprintMatchesProfile() {
         }
     }
     CHECK(SupportedBuildsText() ==
-          "CUSA10454 1.00 USA, CUSA10454 1.01 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong and CUSA10209 1.02 Asia/Hong Kong");
+          "CUSA10454 1.00 USA, CUSA10454 1.01 USA, CUSA07001 1.00 Japan, CUSA07001 1.02 Japan, CUSA07001 1.03 Japan, CUSA10209 1.00 Asia/Hong Kong, CUSA10209 1.02 Asia/Hong Kong and CUSA10487 1.03 Europe");
     CHECK(std::string(kUs.folder) != kCk.folder);
     std::string modules = "'modules': (";
     for (const char* module : kBundledModules) {
@@ -994,7 +995,7 @@ void TestDefaultsAgree() {
     // 0 is "the loader's size", 1920 x 1080 (src/loader.c), the launcher's default.
     CHECK(game.requested_width == 0 && launcher_default(kWindowWidthKey) == "1920");
     CHECK(game.requested_height == 0 && launcher_default(kWindowHeightKey) == "1080");
-    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c").find(",1920,1080};") != std::string::npos);
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c").find(",attributes,1920,1080,features};") != std::string::npos);
 
     // The launcher shows the default for values the game would not accept.
     CHECK(!IsValidSetting(kDisplayModeKey, "fullscreen") && IsValidSetting(kDisplayModeKey, "borderless"));
@@ -1309,7 +1310,7 @@ void TestOnlineSettings(const fs::path& base) {
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
     CHECK(page.find("client_.Update(on, config, net::kOnlineGame, now);") != std::string::npos);
     CHECK(page.find("game = std::string(net::kOnlineGame)") != std::string::npos);
-    CHECK(SupportedBuilds().size() == 7);
+    CHECK(SupportedBuilds().size() == 8);
 }
 
 // Each friend's line under the name: presence, then the platform and port version that friend's own client advertised,
@@ -2149,7 +2150,7 @@ void TestUnlockGallerySettings(const fs::path& base) {
     GameBuild without = SupportedBuilds()[0];
     without.unlock_gallery = false;
     CHECK(!UnlockGalleryAvailable(&without) && UnlockGalleryAvailable(nullptr));
-    CHECK(SupportedBuilds().size() == 7);
+    CHECK(SupportedBuilds().size() == 8);
 
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
     const std::string gated = "if (UnlockGalleryAvailable(build_)) {\n            ui.Toggle(\"Unlock Gallery\", kUnlockGalleryHelp, "
@@ -4250,11 +4251,22 @@ void TestSeparatorPages() {
 
     // Border colours come from the theme's two roles; no page picks its own.
     const fs::path launcher_dir = fs::path(DCP_SOURCE_DIR) / "launcher";
-    for (const char* file : {"launcher.cpp", "online_page.cpp", "trophy_page.cpp"}) {
+    for (const char* file : {"launcher.cpp", "trophy_page.cpp"}) {
         const std::string text = ReadAll(launcher_dir / file);
         CHECK(text.find("border_row") == std::string::npos && text.find("border_panel") == std::string::npos);
         CHECK(text.find("kRowBorder") == std::string::npos && text.find("kPanelBorder") == std::string::npos);
     }
+    // The Online page draws two lines the rows do not: under its tabs and around the lobby list, in those same roles.
+    const std::string online = ReadAll(launcher_dir / "online_page.cpp");
+    const auto occurrences = [](const std::string& text, std::string_view word) {
+        size_t count = 0;
+        for (size_t at = text.find(word); at != std::string::npos; at = text.find(word, at + 1)) ++count;
+        return count;
+    };
+    CHECK(online.find("kRowBorder") == std::string::npos && online.find("kPanelBorder") == std::string::npos);
+    CHECK(occurrences(online, "border_row") == 1 && occurrences(online, "border_panel") == 1);
+    CHECK(Between(online, "void OnlinePage::DrawTabs(", "void OnlinePage::DrawFriendRequests(").find("t.border_row") != std::string::npos);
+    CHECK(Between(online, "void OnlinePage::DrawLobbyList(", "void OnlinePage::DrawLobbyPlayers(").find("t.border_panel") != std::string::npos);
     for (const char* file : {"launcher.cpp", "trophy_page.cpp"}) {
         CHECK(ReadAll(launcher_dir / file).find("ImGuiCol_Border") == std::string::npos);
     }
@@ -6485,6 +6497,74 @@ void TestUsBuild() {
     CHECK(launcher.find("Tr(\". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their \"") != std::string::npos);
 }
 
+// CUSA10487 is one complete package: APP_VER 01.00, VERSION 01.03, no update and no patch file.
+void TestEuropeBuild(const fs::path& base) {
+    CHECK(std::string(kEu.title_id) == "CUSA10487" && std::string(kEu.content_id) == "EP2475-CUSA10487_00-DRAGONSCROWNPRO1");
+    CHECK(std::string(kEu.version) == "1.03" && std::string(kEu.folder) == "CUSA10487-1.03");
+    CHECK(BuildKey(kEu) == "CUSA10487-1.03" && std::string(kEu.label) == "CUSA10487 1.03 Europe");
+    CHECK(std::string(kEu.region) == "Europe" && std::string(kEu.regional_archive) == "DRACRO_EU.CPK");
+    CHECK(std::string(kEu.eboot_sha256) == "25c58f473337bc1da768d86e4cd12fe8a15e4af48e0826ac9a857fd9e3c09845");
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "README.md").find("`eboot.bin` 22283899 bytes, SHA-256 `" + std::string(kEu.eboot_sha256)) !=
+          std::string::npos);
+    CHECK(kEu.extra_files.empty() && kEu.layers.size() == 1 && BaseBuildOf(kEu) == nullptr);
+    CHECK(std::string(kEu.layers[0].app_ver) == "01.00" && std::string(kEu.layers[0].sfo_version) == "01.03" && !kEu.layers[0].update);
+    CHECK(BuildMetadataText(kEu) == "APP_VER 1.00 \xC2\xB7 VERSION 1.03");
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(&build == &kEu || (std::string(build.folder) != kEu.folder && std::string(build.eboot_sha256) != kEu.eboot_sha256));
+    }
+
+    const GameCheck package = CheckPackageIdentity(PackageSfo(kEu, "01.00", "01.03", "gd"));
+    CHECK(package.state == GameFileState::kValid && package.build == &kEu && package.layer == 0);
+    CHECK(CheckSfoIdentity(SfoFor(kEu)).build == &kEu);
+    CHECK(CheckPackageIdentity(PackageSfo(kEu, "01.00", "01.03", "gp")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kEu, "01.00", "01.00", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckPackageIdentity(PackageSfo(kEu, "01.03", "01.03", "gd")).state == GameFileState::kDifferentVersion);
+    CHECK(CheckSfoIdentity(SfoFor(kEu, "01.03", "01.03")).state == GameFileState::kDifferentVersion);
+    // The USA package has the same APP_VER and VERSION; the title decides.
+    CHECK(CheckPackageIdentity(PackageSfo(kUs, "01.00", "01.03", "gd")).build == &kUs);
+
+    const fs::path image = base / "eu-image";
+    fs::create_directories(image);
+    const auto report = [&](const std::string& sha) {
+        WriteAll(image / "image.json", "{\n  \"title_id\": \"CUSA10487\",\n  \"eboot_sha256\": \"" + sha +
+                                           "\",\n  \"app_ver\": \"01.00\"\n}");
+        return BuildOfImageDir(image.string().c_str());
+    };
+    CHECK(report(kEu.eboot_sha256) == &kEu);
+    CHECK(report("7362f2e73396a188e18b64fb7aa7cd762f87e70ee0e71a13d727d95b0ab20796") == nullptr);
+    fs::remove_all(image);
+
+    using namespace cpk_test;
+    const fs::path app0 = base / "eu-languages";
+    fs::remove_all(app0);
+    std::vector<Entry> sheets;
+    for (const char* suffix : {"DE", "ES", "FR", "IT", "UK", "US"}) {
+        sheets.push_back({std::string("msgsheet/SystemMsg_") + suffix + ".fms", "FMSB", false});
+        sheets.push_back({std::string("msgsheet/ItemList_") + suffix + ".fms", "FMSB", false});
+    }
+    WriteAll(app0 / "DRACRO_EU.CPK", BuildCpk(sheets, true));
+    CHECK(LanguageNames(InstalledTextLanguages(app0, &kEu)) == "English, French, German, Italian, Spanish");
+    CHECK(ResolveTextLanguage(&kEu, {}).key == "english" && ResolveTextLanguage(&kEu, "french").suffix == "FR");
+    CHECK(ResolveTextLanguage(&kEu, kPortugueseBrazilKey).key == "english");
+
+    // No copy of this archive was ever read: Xbox prompts are offered only while its atlases are the patch's.
+    const fs::path prompts = base / "eu-prompts";
+    fs::remove_all(prompts);
+    std::string atlas(8192, '\0');
+    for (size_t i = 0; i < atlas.size(); ++i) atlas[i] = char((i * 3 + i / 32) & 255);
+    std::string xbox = atlas, other = atlas;
+    xbox.replace(0x400, 16, 16, 'X');
+    other.replace(0x400, 16, 16, 'O');
+    const std::string patch = MakePatch({{"stage/Interface.ftx", {atlas, xbox}}, {"stage/Interface_UK.ftx", {atlas, xbox}}});
+    WriteAll(prompts / "DRACRO.CPK", BuildCpk({{"stage/Interface.ftx", atlas, true}}, false));
+    WriteAll(prompts / "DRACRO_EU.CPK", BuildCpk({{"stage/Interface_UK.ftx", atlas, true}}, true));
+    CHECK(XboxPromptsAvailable(prompts, kEu, Span(patch)));
+    WriteAll(prompts / "DRACRO_EU.CPK", BuildCpk({{"stage/Interface_UK.ftx", other, true}}, true));
+    CHECK(!XboxPromptsAvailable(prompts, kEu, Span(patch)));
+    fs::remove_all(prompts);
+    fs::remove_all(app0);
+}
+
 // Prepared CUSA10454 folders made before the build was named 1.00 carry the marker version 1.03.
 void TestLegacyMarker(const fs::path& base) {
     const auto write_marker = [](Fixture& f, const char* version) {
@@ -6777,7 +6857,7 @@ void TestSafeMode(const fs::path& base) {
 }
 
 void TestBuilds(const fs::path& base) {
-    CHECK(SupportedBuilds().size() == 7);
+    CHECK(SupportedBuilds().size() == 8);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
     CHECK(std::string(kUs.folder) == "v1.03" && std::string(kCk.folder) == "CUSA10209-1.02");
     CHECK(std::string(kCk.content_id) == "HP0177-CUSA10209_00-DRAGONSCROWN0001");
@@ -7064,7 +7144,7 @@ void TestResolutionProbe() {
         } else if (!build.resolution_sites.empty()) {
             CHECK(build.resolution_sites.size() == 23 && !build.resolution_by_signature);
         } else {
-            CHECK(&build == &kUs101 && build.resolution_by_signature);
+            CHECK((&build == &kUs101 || &build == &kEu) && build.resolution_by_signature);
         }
     }
 
@@ -7380,6 +7460,7 @@ int main(int argc, char** argv) {
     TestBuildMetadata();
     TestLayers(base);
     TestUsBuild();
+    TestEuropeBuild(base);
     TestLegacyMarker(base);
     TestInstalledGameName(base);
     TestLauncherLocalization();

@@ -69,7 +69,7 @@ foreach ($info in $infos) {
         $verdict = 1
     }
 }
-if (-not ($infos | Where-Object { $_.profile })) { Write-Bad 'no package of a supported build (CUSA10454, CUSA07001 or CUSA10209)'; $verdict = 1 }
+if (-not ($infos | Where-Object { $_.profile })) { Write-Bad 'no package of a supported build (CUSA10454, CUSA07001, CUSA10209 or CUSA10487)'; $verdict = 1 }
 
 $prepared = Join-Path $GameRoot 'prepared'
 $views = @(Get-ChildItem -LiteralPath $prepared -Directory -ErrorAction SilentlyContinue)

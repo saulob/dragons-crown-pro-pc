@@ -56,6 +56,7 @@ struct GameBuild {
     bool features_by_signature = false; // cheats, NPC voices and True Ultrawide are found by structural locators, not tables
     bool exit_game = true;            // the title menu's Exit Game row is installed from structural locators
     bool unlock_gallery = true;       // the Gallery list builder is found by signature (src/gallery_unlock.h)
+    bool check_prompt_fit = false;    // no copy of this base's atlases was read: Xbox is offered only while they fit the patch
 };
 
 // The supported builds, US first.
@@ -74,6 +75,11 @@ const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> 
 // The launcher hides and the loader refuses the custom Render resolution and Aspect Ratio for such a build; the unknown
 // build (nullptr) is not restricted here, and the loader refuses to patch it anyway.
 bool RestrictedToNativeResolution(const GameBuild* build);
+
+// True when the build has no site tables: its sites were never read from an image here, only searched for at run time.
+inline bool SitesOnlySearched(const GameBuild& build) {
+    return build.resolution_by_signature;
+}
 
 // The build's languages; the Western ones when the build is not known.
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);

@@ -49,8 +49,8 @@ and `--logs` win, and everything else is found next to the executable (`launcher
 | User data, `dcp.ini` | `user` | `<repository>\user` |
 | Logs | `logs` | `<repository>\build\logs` |
 
-`<build>` is `v1.03` or `CUSA10454-1.01` for CUSA10454 (USA), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan) and
-`CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong). Each build has its own folders. With several installed, the one
+`<build>` is `v1.03` or `CUSA10454-1.01` for CUSA10454 (USA), `CUSA07001-1.00`, `CUSA07001-1.02` or `CUSA07001-1.03` for CUSA07001 (Japan),
+`CUSA10209-1.00` or `CUSA10209-1.02` for CUSA10209 (Asia and Hong Kong) and `CUSA10487-1.03` for CUSA10487 (Europe). Each build has its own folders. With several installed, the one
 selected last is active. Selecting a package makes its exact build active: a complete prepared folder of it is activated
 without copying, and only the build that is already active is reported as up to date.
 
@@ -84,7 +84,7 @@ while the game files are not valid. If its window cannot be opened, the game sta
    regional archive, or `none`.
 2. `game\prepared\<build>\.dcp_view.json`: the build's version and scope `full` (written last by the installer, or by
    `prepare_game.py`).
-3. The shared files, the build's regional archive (`DRACRO_US.CPK`, `DRACRO_PATCH_JP.CPK` or `DRACRO_CK.CPK`, none for
+3. The shared files, the build's regional archive (`DRACRO_US.CPK`, `DRACRO_PATCH_JP.CPK`, `DRACRO_CK.CPK` or `DRACRO_EU.CPK`, none for
    Japanese 1.00) and its update files (`sce_discmap_patch.plt` for Japanese 1.02 and 1.03) are present and not empty.
    The archives are not hashed: the marker records that their extraction finished (and the Controller prompts setting
    appends to them, see Controls).
@@ -113,6 +113,13 @@ update changes, so 1.03 does not need 1.02.
 different `eboot.bin` files. An update needs the 1.00 folder to be installed; the launcher says so
 otherwise.
 
+**European build.** `EP2475-CUSA10487_00-DRAGONSCROWNPRO1` (CATEGORY `gd`, APP_VER 01.00, VERSION 01.03) is one complete
+package, installed into `CUSA10487-1.03`, with `DRACRO_EU.CPK` as its regional archive. It has no update and needs no
+`sce_discmap_patch.plt`. The build is named by its VERSION, which is how it is known; its APP_VER and VERSION are the same
+as USA 1.00's, and the title tells them apart. The hash covers the whole `eboot.bin` file as the package holds it, signed
+wrapper included, so a copy of the same game re-wrapped by a dump or packaging tool has another hash and is diagnosed as an
+unknown executable.
+
 **Update archives.** A finished update is its base plus the update. An archive (`.CPK`) that the update holds and that
 lacks some entries of the base's archive at the same path is composed, not swapped: the staged game gets a copy of the
 base's archive with every entry of the update's laid over it (the USA 1.01 regional archive keeps the base's language
@@ -122,18 +129,23 @@ only read, and a failed step leaves the active build as it was.
 **Features by build.** Every build offers every feature of USA 1.00; Japanese NPC Voices is not applicable to the
 Japanese builds, whose NPCs already speak Japanese:
 
-| Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 |
-| --- | --- | --- | --- | --- | --- |
-| Menu & Subtitles | 5 Western | 5 Western | Japanese | Chinese, Korean | Chinese, Korean |
-| Render resolution, Aspect Ratio | yes | yes (sites found by signature) | yes | yes | yes (sites found by signature) |
-| True Ultrawide | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
-| Story and Tutorial Skip Offers | yes | yes (found by signature) | yes | yes | yes (found by signature) |
-| Online Play, System type | yes | yes (found by signature) | yes | yes | yes (found by signature) |
-| Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) |
-| Cheats | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
-| Japanese NPC Voices | yes | yes (found by signature) | not applicable | yes (found by signature) | yes (found by signature) |
-| Xbox prompts | yes | yes, when its archives hold the patch's files | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK`, when it holds the patch's file |
-| Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes |
+| Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 | Europe 1.03 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Menu & Subtitles | 5 Western | 5 Western | Japanese | Chinese, Korean | Chinese, Korean | 5 Western |
+| Render resolution, Aspect Ratio | yes | yes (sites found by signature) | yes | yes | yes (sites found by signature) | yes (sites found by signature) |
+| True Ultrawide | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Story and Tutorial Skip Offers | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
+| Online Play, System type | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
+| Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
+| Cheats | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Japanese NPC Voices | yes | yes (found by signature) | not applicable | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Xbox prompts | yes | yes, when its archives hold the patch's files | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK`, when it holds the patch's file | yes, when its archives hold the patch's files |
+| Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes | yes |
+
+"yes" here says the build offers the feature and the loader can try it, not that it was seen working. USA 1.01, Asia and
+Hong Kong 1.02 and Europe 1.03 have no local executable: `tools\test.ps1` reports what stands behind each feature on each
+build and prints DATA UNAVAILABLE where nothing does. Installing or selecting one of these builds writes a read-only
+`Dragon's Crown Pro build site report` to the log, with what the scan and the loader's searches find in its real executable.
 
 "Found by signature" means the loader does not use a table: it finds each site in the build's own image from
 the byte patterns that give exactly the tables of the five builds checked locally, uses them only when every pattern
@@ -281,8 +293,8 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   of showing more of the world (issue #1) unless True Ultrawide is on, and 16:10, 4:3 and 5:4 squeeze it. In those narrower shapes the port skips the one draw that painted black rectangles in water (issue #32); 16:9 and wider are untouched. The HUD, menus and
   prerendered videos are not adjusted. Changing it moves the saved Window size to the same height in the new shape. Borderless Fullscreen on a monitor
   of another shape shows bars, as set by Presentation. The Japanese and Asia and Hong Kong builds are not yet tested in game.
-  Every supported build offers every shape (see Render resolution for how the USA 1.01 and Asia and Hong Kong 1.02 sites
-  are found).
+  Every supported build offers every shape (see Render resolution for how the USA 1.01, Asia and Hong Kong 1.02 and
+  Europe 1.03 sites are found).
 - **True Ultrawide** (experimental, Off by default; `true_ultrawide` in `dcp.ini`, a missing or unknown value is Off): with
   21:9 or 32:9 the game draws more of the world instead of stretching it. The vertical view stays the one of 16:9 and the
   horizontal view grows by the render target's shape over 16:9 (× 1.3125 for 21:9, × 2 for 32:9), so characters and
@@ -296,7 +308,7 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   frame edges, other message bands keep their 16:9 width, and the town map is scaled up evenly to fill the width (at
   32:9 only as far as its markers stay on screen, with black beyond). The row is disabled for the other shapes, where it
   changes nothing. Off gives back the Aspect Ratio's own picture exactly. It is available on
-  every supported build; on CUSA10454 1.01 and CUSA10209 1.02 its sites are found by signature, and if any of them does
+  every supported build; on CUSA10454 1.01, CUSA10209 1.02 and CUSA10487 1.03 its sites are found by signature, and if any of them does
   not resolve the feature stays off and the log says which.
 - **Monitor**: `Display N`, the primary display first, then SDL's order; the same list creates the game window.
 - **Renderer**: Vulkan (the default), Auto, OpenGL (experimental) or, on Windows, Direct3D 11 (experimental). Auto uses
@@ -333,7 +345,7 @@ RCAS, on) with a
 
 The game chooses its display render targets with `mov reg, imm32` of 1920 / 3840 and 1080 / 2160, picked by
 `sceKernelIsNeoMode`. Each supported build with verified sites has its own 23 of them (`launcher/game_profile.cpp`); the
-USA 1.01 and Asia and Hong Kong 1.02 builds have no table and find their 23 in their own image by the instruction context
+USA 1.01, Asia and Hong Kong 1.02 and Europe 1.03 builds have no table and find their 23 in their own image by the instruction context
 of each site (`dcp_render_size_signatures`, `launcher/resolution_probe.c`), which gives exactly the table of every build
 that has one. All 23 must be found once, with the original instruction and without overlap, or the game does not start
 with a custom size. The loader refuses to patch a build the launcher does not know. Unless the render target is
@@ -381,20 +393,22 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   | CUSA10454 1.01 USA | English, French, German, Italian, Spanish: as 1.00 without Portuguese (Brazil) |
   | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese (`japanese`): the executable does not read the system language |
   | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean (`traditional_chinese`, `korean`) |
+  | CUSA10487 1.03 Europe | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
 
-  Portuguese (Brazil) is the port's own translation of the English slot, for CUSA10454 1.00 USA only (not 1.01, the
-  Japanese builds or the Asia/Hong Kong build). It covers the game text, the launcher, the F1 options, the F10 overlay,
+  Portuguese (Brazil) is the port's own translation of the English slot, for CUSA10454 1.00 USA only (not 1.01 or the
+  Japanese, Asia/Hong Kong or European builds). It covers the game text, the launcher, the F1 options, the F10 overlay,
   the online screens and runtime visual replacements; the installed archive is never written. Still English: the
   DefaultBone dialogue, trophy text, some baked visual labels and the credits. See `localization/pt-BR/README.md`.
 
-  For the USA and Asia/Hong Kong builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
-  `DRACRO_CK.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
+  For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
+  `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
   is never offered: the 1.01 update's archive has no Russian slot, only Russian text in its US slot, which the install
-  does not take over (see USA builds). When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
+  does not take over (see USA builds). `DRACRO_EU.CPK` has a UK slot beside the US one, as `DRACRO_US.CPK` does; it is
+  not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
-- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). USA and Asia and Hong Kong builds; on the builds
+- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). USA, Asia and Hong Kong and European builds; on the builds
   whose hooks are found by signature the option appears only while the installed `DRACRO.CPK` holds the sound table and
   the Japanese banks (`launcher/npc_voice_resources.h`), and it never changes the Menu & Subtitles language. It is hidden
   for the Japanese builds, which already use the Japanese NPC voices. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
@@ -437,7 +451,8 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   `DCP_JAPANESE_MENU_BUTTONS` overrides it for a run). The setting picks the menu layout the same way in every build and
   with every text language. Off: Cross confirms and Circle cancels (A and B with Xbox prompts). On: Circle confirms and
   Cross cancels (B and A). The game has one "Cross confirms" setting that its key setup and some button pictures read.
-  The USA builds start with it set, so On zeroes the two places that set it; the Japanese and the Asia and Hong Kong
+  The USA builds start with it set, so On zeroes the two places that set it (the European build's are found by
+  signature); the Japanese and the Asia and Hong Kong
   builds start with it clear, so Off makes their five readers see it set. Every site is checked byte for byte first and
   nothing is written on a mismatch (the log says why). The row's description names A and B instead of Cross and Circle
   when the Xbox controller prompts are installed, and follows the Controller prompts choice as soon as it is applied;
@@ -462,7 +477,7 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   byte first and nothing is written on a mismatch (the log says why). The log shows
   `Unlock Gallery: on, 57 legitimate entries exposed (<build>)` when installed and `Unlock Gallery: off` otherwise.
   Changing it in the F1 Options menu needs a restart. The launcher hides the row for a build whose profile does not
-  list the Gallery list builder; all seven supported builds do. The builder is found by its code, so a build whose code
+  list the Gallery list builder; all eight supported builds do. The builder is found by its code, so a build whose code
   differs gets the log line `Unlock Gallery: requested but unavailable ...` and the Gallery stays as the save has it.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
   recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
@@ -531,7 +546,8 @@ in the installed game files: Xbox applies a block patch to the archives that hol
 (`launcher/controller_prompts.h`, `launcher/cpk_patch.h`), PlayStation reverts it. USA 1.01 offers Xbox only while its
 finished archives hold every file the patch was made for (or its patched result): each is read and its CRC checked when
 the launcher starts or the build changes, and an update that changed one of them shows PlayStation only, with nothing
-written. The Japanese and Asia and Hong Kong 1.02 updates are checked the same way, and an archive holding a button atlas
+written. The Japanese and Asia and Hong Kong 1.02 updates and the European build, whose atlases were never read here, are checked
+the same way, and an archive holding a button atlas
 the patch does not cover is refused. Their `stage/Interface.ftx` is the same file as the USA one; the translated
 touchpad wording of the Western message sheets has no counterpart in their own sheets.
 The patch (`launcher/prompts/xbox-prompts.dcpx`, compiled into the executable as a byte array by `launcher/embed.cmake`) holds the

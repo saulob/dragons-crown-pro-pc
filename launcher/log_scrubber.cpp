@@ -185,11 +185,20 @@ std::optional<size_t> PosixProfileEnd(std::string_view line, size_t at) {
     return std::nullopt;
 }
 
-// The end of `\\server\share` starting at `at`, or nullopt. `\\?\C:\` is a local path.
+// True after a replaced folder: JSON doubles a path's separators, so `<home>\\x.ini` is not a share.
+bool FollowsReplacedFolder(std::string_view line, size_t at) {
+    const std::string_view before = line.substr(0, at);
+    return before.ends_with(kHome) || before.ends_with(kInstall);
+}
+
+// The end of `\\server\share` starting at `at`, plain or JSON-escaped, or nullopt. `\\?\C:\` is a local path.
 std::optional<size_t> NetworkPathEnd(std::string_view line, size_t at) {
-    if (!line.substr(at).starts_with("\\\\") || at + 2 >= line.size() || !IsWord(line[at + 2])) return std::nullopt;
+    if (!line.substr(at).starts_with("\\\\")) return std::nullopt;
+    const size_t server = SkipSeparators(line, at);
+    if (server >= line.size() || !IsWord(line[server])) return std::nullopt;
     if (at > 0 && (IsWord(line[at - 1]) || line[at - 1] == ':' || IsSeparator(line[at - 1]))) return std::nullopt;
-    const size_t host = NameEnd(line, at + 2);
+    if (FollowsReplacedFolder(line, at)) return std::nullopt;
+    const size_t host = NameEnd(line, server);
     return host < line.size() && IsSeparator(line[host]) ? NameEnd(line, SkipSeparators(line, host)) : host;
 }
 

@@ -1,4 +1,4 @@
-/* First boot of a Japanese build with no save: the startup screen creates the save itself, then continues through the
+/* First boot of a listed build with no save: the startup screen creates the save itself, then continues through the
  * code it runs after a successful load. One explicit record per verified build; others have none. */
 #ifndef DCP_STARTUP_SAVE_HOOK_H
 #define DCP_STARTUP_SAVE_HOOK_H
@@ -26,7 +26,7 @@ typedef struct {
     uint8_t accept_prologue[STARTUP_SAVE_PROLOGUE_LENGTH];
 } StartupSaveRecord;
 
-#define STARTUP_SAVE_RECORD_COUNT 3
+#define STARTUP_SAVE_RECORD_COUNT 4
 extern const StartupSaveRecord startup_save_records[STARTUP_SAVE_RECORD_COUNT];
 
 typedef uint64_t(GUEST_HOOK_ABI *StartupSaveBlockFn)(uint64_t owner);

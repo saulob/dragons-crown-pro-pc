@@ -16,8 +16,9 @@
   feature of CUSA10454 1.00; the global feature summary counts the builds that do.
 
   Local boot images (build\image) and prepared folders (game\prepared) are read only. A build without one is proven by
-  synthetic images and reported as "PASS synthetic" (no real executable was inspected); "PASS real" means its
-  executable image was inspected.
+  synthetic images only, which prove the checks and not the build. A feature that depends on the executable or the game
+  archives counts as PASS only with a real boot image, a prepared folder or a reporter's scan of the real executable behind
+  it; otherwise it is PARTIAL with DATA UNAVAILABLE, which names the builds and is no failure.
 
   Online relay: the net tests (frame codec, direct regression, automatic fallback, mixed rooms, failure paths, timeouts,
   compatibility, Connection test) run against loopback sockets and an in-process stand-in for the lobby; with Node.js
@@ -313,6 +314,7 @@ $parityOutput = @($captured['dcp-build-parity-tests'])
 
 Write-Host ''
 Write-Host 'Build parity:' -ForegroundColor Cyan
+$partial = $false
 $rows = @($parityOutput | Where-Object { $_ -like 'PARITY-BUILD|*' } | ForEach-Object { ,$_.Split('|') })
 if ($rows.Count -eq 0) {
     Write-Host '  no result from dcp-build-parity-tests' -ForegroundColor Red
@@ -320,9 +322,10 @@ if ($rows.Count -eq 0) {
 }
 foreach ($row in $rows) {
     $status = $row[2]
-    $good = $status -like 'PASS*' -and $parityFailed.Count -eq 0
-    if ($status -like 'PASS*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }
-    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if ($good) { 'Green' } else { 'Red' })
+    $good = $status -notlike 'FAIL*' -and $parityFailed.Count -eq 0
+    if ($status -notlike 'FAIL*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }
+    if ($status -like 'PARTIAL*') { $status += " ($(($row[3] -split '; ' | Where-Object { $_ -like 'DATA UNAVAILABLE*' })))"; $partial = $true }
+    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if (-not $good) { 'Red' } elseif ($status -like 'PARTIAL*') { 'Yellow' } else { 'Green' })
 }
 Write-Host ''
 Write-Host 'Global feature parity:' -ForegroundColor Cyan
@@ -333,12 +336,12 @@ if ($features.Count -eq 0) {
 }
 foreach ($row in $features) {
     $status = $row[2]
-    $good = $status -like 'PASS*' -and $parityFailed.Count -eq 0
-    if ($status -like 'PASS*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }
-    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if ($good) { 'Green' } else { 'Red' })
+    $good = $status -notlike 'FAIL*' -and $parityFailed.Count -eq 0
+    if ($status -notlike 'FAIL*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }
+    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if (-not $good) { 'Red' } elseif ($status -like 'PARTIAL*') { 'Yellow' } else { 'Green' })
 }
 Write-Host ''
-Write-Host 'Seven-build online parity (structural = same code path and tables; runtime = local boot image inspected; no game is started):' -ForegroundColor Cyan
+Write-Host 'Eight-build online parity (structural = same code path and tables; runtime = local boot image inspected; no game is started):' -ForegroundColor Cyan
 $buildRows = @($captured['dcp-online-builds-tests'] | Where-Object { $_ -like 'ONLINE-BUILD|*' } | ForEach-Object { ,$_.Split('|') })
 if ($buildRows.Count -eq 0 -and -not $failed.Contains('dcp-online-builds-tests')) { $failed.Add('dcp-online-builds-tests') }
 foreach ($row in $buildRows) {
@@ -438,8 +441,8 @@ $summary = [ordered]@{
     'Windows parity' = $windows
     'Online HLE' = $hle
     'Linux parity' = $linuxSummary
-    '7-build structural parity' = $(if ($structuralRows.Count -eq 7) { 'PASS' } else { "FAIL ($($structuralRows.Count)/7)" })
-    '7-build runtime validation' = $(if ($runtimeRows.Count -eq 7) { 'PASS' } elseif ($runtimeRows.Count -eq 0) { 'DATA UNAVAILABLE (no local boot image: not runtime-tested)' } else { "PARTIAL ($($runtimeRows.Count)/7 inspected)" })
+    '8-build structural parity' = $(if ($structuralRows.Count -eq 8) { 'PASS' } else { "FAIL ($($structuralRows.Count)/8)" })
+    '8-build runtime validation' = $(if ($runtimeRows.Count -eq 8) { 'PASS' } elseif ($runtimeRows.Count -eq 0) { 'DATA UNAVAILABLE (no local boot image: not runtime-tested)' } else { "PARTIAL ($($runtimeRows.Count)/8 inspected)" })
 }
 Write-Host ''
 Write-Host 'Online relay summary:' -ForegroundColor Cyan
@@ -511,5 +514,9 @@ if ($failed.Count -gt 0) {
     Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
     exit 1
 }
-Write-Host 'All tests passed.' -ForegroundColor Green
+if ($partial) {
+    Write-Host 'All tests passed. Feature parity is PARTIAL: DATA UNAVAILABLE above is unproven, not passing.' -ForegroundColor Yellow
+} else {
+    Write-Host 'All tests passed.' -ForegroundColor Green
+}
 exit 0

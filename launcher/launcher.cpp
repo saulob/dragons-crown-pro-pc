@@ -890,6 +890,9 @@ private:
                     Log("language resources, %s", line.c_str());
                 }
             }
+            for (const std::string& line : outcome->site_report) {
+                std::printf("%s\n", line.c_str());
+            }
             paths_ = ActiveBuildPaths(RootsOf(paths_));
             Recheck();
             if (trophy_page_) {

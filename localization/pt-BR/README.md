@@ -1,7 +1,7 @@
 # Brazilian Portuguese localization
 
 Portuguese (Brazil) is a Menu & Subtitles language for CUSA10454 USA 1.00 only. It is not offered for USA 1.01, the
-Japan builds (CUSA07001) or the Asia/Hong Kong builds (CUSA10209). The game runs in its English slot, and the port
+Japan builds (CUSA07001), the Asia/Hong Kong builds (CUSA10209) or the Europe build (CUSA10487). The game runs in its English slot, and the port
 serves translated copies of the English message sheets (`msgsheet/*_US.fms`) and replacement textures and layouts when
 the game reads `DRACRO_US.CPK`. The archive on disk is never written (`launcher/game_translation.h`,
 `runtime_file_overlay`).

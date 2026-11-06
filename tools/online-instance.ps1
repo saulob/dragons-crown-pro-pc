@@ -40,6 +40,7 @@ $GameBuilds = [ordered]@{
     'CUSA07001-1.03' = @{ Folder = 'CUSA07001-1.03'; Label = 'CUSA07001 1.03 Japan' }
     'CUSA10209-1.00' = @{ Folder = 'CUSA10209-1.00'; Label = 'CUSA10209 1.00 Asia/Hong Kong' }
     'CUSA10209-1.02' = @{ Folder = 'CUSA10209-1.02'; Label = 'CUSA10209 1.02 Asia/Hong Kong' }
+    'CUSA10487-1.03' = @{ Folder = 'CUSA10487-1.03'; Label = 'CUSA10487 1.03 Europe' }
 }
 
 # The executable's game folders, as launcher/paths.cpp finds them: the repository's for a build-tree executable.
