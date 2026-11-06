@@ -96,7 +96,6 @@ void StreamRing::AcquireThrough(u32 end) {
         if (!fence) {
             continue;
         }
-        Perf::Scope timer{Perf::RingWait};
         GLenum result;
         do {
             result = gl::ClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, FenceWaitNanoseconds);
@@ -161,17 +160,12 @@ u32 StreamRing::PushGuest(VAddr address, u32 size, u32 alignment) {
     // By content: the guest and the command stream can rewrite a buffer between two draws.
     const auto* data = reinterpret_cast<const u8*>(address);
     u64 hash;
-    {
-        Perf::Scope timer{Perf::BufferHash};
-        hash = HashGuestRange(data, size);
-        Perf::Count(Perf::BufferHashedBytes, size);
-    }
+    hash = HashGuestRange(data, size);
     const u64 key = hash ^ (address * 0x9E3779B97F4A7C15ull) ^ (u64(size) << 32);
     GuestCopy& copy = guest_copies[key & (GuestCopySlots - 1)];
     // A fence over the copy's segment predates this draw, so it would not protect the copy.
     if (copy.key == key && copy.generation == copy_generation && copy.offset % alignment == 0 &&
         (!mapped || copy.offset >= fenced_segments * segment_bytes)) {
-        Perf::Count(Perf::CopiesReused);
         return copy.offset;
     }
     const u32 offset = Push(data, size, alignment);

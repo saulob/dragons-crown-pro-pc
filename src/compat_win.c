@@ -76,8 +76,6 @@ static ssize_t positioned(int fd, void *buffer, size_t size, int64_t offset, int
         if (!ok) {
             DWORD e = GetLastError();
             if (e == ERROR_HANDLE_EOF) break;
-            /* DEBUG_SAULO: temporary, a kernel copy into a write-protected page reports no fault. */
-            if (e == ERROR_NOACCESS) fprintf(stderr, "DEBUG_SAULO: ReadFile into %p refused (%llu of %llu bytes done)\n", (void *)((char *)buffer + done), (unsigned long long)done, (unsigned long long)size);
             SetFilePointerEx(h, saved, NULL, FILE_BEGIN);
             if (done) return (ssize_t)done;
             errno = compat_errno_from_win32(e);

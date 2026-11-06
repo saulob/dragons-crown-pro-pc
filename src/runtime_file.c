@@ -413,8 +413,6 @@ static int64_t do_read(int fd,void *buffer,uint64_t size) {
     }
     const int64_t at=observed_position(fd,h);
     ssize_t n=host_read(h,buffer,size);
-    /* DEBUG_SAULO: temporary, a kernel copy into a write-protected page reports no fault. */
-    if (n<0) fprintf(stderr,"DEBUG_SAULO: read into %p failed, errno %d (%llu bytes)\n",buffer,errno,(unsigned long long)size);
     if (n<0) return -errno;
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
     observe_read(fd,at,n);

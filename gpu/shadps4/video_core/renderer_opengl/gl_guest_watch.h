@@ -8,7 +8,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <thread>
 #include "common/types.h"
 
 namespace OpenGL {
@@ -30,28 +29,6 @@ public:
         NotOurs,  ///< No page there was ever armed.
         Released, ///< The page was armed and is writable now.
         Retry,    ///< Nothing to release: another thread did it, or the fault is not about us.
-    };
-
-    /// DEBUG_SAULO: temporary, one reporting window of the fault profile.
-    struct Stats {
-        u64 faults;
-        u64 faults_gpu_thread;
-        u64 faults_shared_page;
-        u64 faults_repeat;
-        u64 unique_pages;
-        u64 unique_blocks;
-        u64 pages_released;
-        u64 pages_armed;
-        u64 pages_rearmed;
-        u64 pages_dirty;
-        u64 arms_deferred;
-        u64 host_writes;
-        u64 host_write_pages;
-        u64 forgets;
-        u64 forget_pages;
-        u64 invalidates;
-        u64 retries;
-        u64 armed_pages_now;
     };
 
     /// Addresses at or past this cannot be watched: the PS4's GPU sees 40 bits.
@@ -94,12 +71,6 @@ public:
         return faults.load(std::memory_order_relaxed);
     }
 
-    /// DEBUG_SAULO: temporary.
-    void SetGpuThread() {
-        gpu_thread = std::this_thread::get_id();
-    }
-    Stats TakeStats();
-
 private:
     static constexpr u32 PageBits = 12;
     static constexpr u64 PageBytes = 1ull << PageBits;
@@ -120,10 +91,6 @@ private:
         std::array<u32, PagesPerLeaf> cool_until{};
         std::array<u8, PagesPerLeaf> state{};
         std::array<u8, PagesPerLeaf> strikes{};
-        // DEBUG_SAULO: temporary, for the fault profile.
-        std::array<u8, PagesPerLeaf> shared{};
-        std::array<u32, PagesPerLeaf> fault_window{};
-        std::array<u32, PagesPerLeaf / PagesPerFault> block_window{};
     };
 
     /// Gives back pages run by run; touching nothing else keeps lock hold times short.
@@ -166,10 +133,6 @@ private:
     std::atomic<u32> frame{1};
     std::atomic<u64> faults{0};
     std::unique_ptr<std::atomic<Leaf*>[]> leaves;
-    u64 armed_pages{};
-    Stats stats{};
-    u32 stats_window{1};
-    std::thread::id gpu_thread{};
 };
 
 } // namespace OpenGL

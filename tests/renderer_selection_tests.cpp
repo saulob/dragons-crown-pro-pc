@@ -125,7 +125,7 @@ void TestRectPathsStaySeparate() {
     CHECK(rasterizer.find("RectListUsesTables(rect_list, is_indexed, indexed_rect_tables)") != std::string::npos);
     CHECK(rasterizer.find("rect_tables ? PrepareIndexedRectangles(") != std::string::npos);
     CHECK(rasterizer.find("BindVertexInputs(*program, instance_offset, moved_vertices, rect_list)") != std::string::npos);
-    CHECK(rasterizer.find("if (rect_list && is_indexed && !rect_tables) {") < rasterizer.find("AttachedTargets targets{};\n    {"));
+    CHECK(rasterizer.find("if (rect_list && is_indexed && !rect_tables) {") < rasterizer.find("AttachedTargets targets{};\n    if (!BindTargets(*program, targets)) {"));
     CHECK(rasterizer.find("Report(\"indexed rectangle lists are not implemented\");") != std::string::npos);
     size_t calls = 0;
     for (size_t at = rasterizer.find("PrepareIndexedRectangles("); at != std::string::npos;

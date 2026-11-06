@@ -452,7 +452,7 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   with every text language. Off: Cross confirms and Circle cancels (A and B with Xbox prompts). On: Circle confirms and
   Cross cancels (B and A). The game has one "Cross confirms" setting that its key setup and some button pictures read.
   The USA builds start with it set, so On zeroes the two places that set it (the European build's are found by
-  signature); the Japanese and the Asia and Hong Kong
+  signature, not yet proven on its executable); the Japanese and the Asia and Hong Kong
   builds start with it clear, so Off makes their five readers see it set. Every site is checked byte for byte first and
   nothing is written on a mismatch (the log says why). The row's description names A and B instead of Cross and Circle
   when the Xbox controller prompts are installed, and follows the Controller prompts choice as soon as it is applied;

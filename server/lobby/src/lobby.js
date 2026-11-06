@@ -45,6 +45,12 @@ const BUCKETS = {
   room: { burst: 30, perSecond: 1 },
   chat: { burst: 5, perSecond: 1 },
 };
+// Each kind is shared by a socket (kept in its attachment, so hibernation does not refill it), an account (a reconnect
+// does not refill it) and an address group (every account behind it).
+const WRITE_BUDGETS = {
+  state: { socket: 'wstate', account: 'stateWriteAccount', address: 'stateWriteAddress' },
+  friend: { socket: 'wfriend', account: 'friendWriteAccount', address: 'friendWriteAddress' },
+};
 const ROOM_OPS = new Set(['room.create', 'room.join', 'room.leave', 'room.search', 'room.resume']);
 // A receipt is the whole proof for these, so looking up a report never involves an account.
 const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read']);
@@ -240,6 +246,10 @@ export class Lobby {
       lobbyListAccount: new RateLimiter(PROTECTION.lobbyListAccount),
       lobbyListAddress: new RateLimiter(PROTECTION.lobbyListAddress),
       lobbyRequestAccount: new RateLimiter(PROTECTION.lobbyRequestAccount),
+      stateWriteAccount: new RateLimiter(PROTECTION.stateWriteAccount),
+      stateWriteAddress: new RateLimiter(PROTECTION.stateWriteAddress),
+      friendWriteAccount: new RateLimiter(PROTECTION.friendWriteAccount),
+      friendWriteAddress: new RateLimiter(PROTECTION.friendWriteAddress),
       rejects: new RateLimiter({ burst: 1, perSecond: 1000 / PROTECTION.rejectWindowMs }),
     };
     this.relays = new Relay(this);
@@ -318,7 +328,7 @@ export class Lobby {
 
   message(conn, text) {
     const att = conn.attachment();
-    if (!att) return;
+    if (!att || att.abusive) return;
     let seq = null;
     this.current = att;
     try {
@@ -353,6 +363,7 @@ export class Lobby {
       if (GROWING_OPS.has(msg.op)) this.observe();
     } catch (error) {
       this.deferred = null;
+      const abusive = error instanceof LobbyError && this.strike(att, error, seq);
       conn.setAttachment(att);
       if (!(error instanceof LobbyError)) {
         this.host.log(`lobby: internal error in request ${seq}: ${error?.stack ?? error}`);
@@ -360,6 +371,7 @@ export class Lobby {
       } else {
         conn.send(JSON.stringify({ re: seq, code: error.code, ...error.body }));
       }
+      if (abusive) this.closeAbusive(conn);
     } finally {
       this.current = null;
       this.index = null;
@@ -369,6 +381,28 @@ export class Lobby {
   // One binary message: a relay frame, forwarded to a member of the sender's own room (relay.js).
   relay(conn, bytes) {
     this.relays.frame(conn, bytes);
+  }
+
+  // A refused or malformed request costs its sender nothing, so a socket that keeps producing them loses its connection.
+  // True when this one was the last it gets.
+  strike(att, error, seq) {
+    if (error.code !== 'limit' && error.code !== 'too_large' && seq !== null) return false;
+    const left = takeToken(att.strikes, PROTECTION.refusedRequests, this.host.now());
+    if (left) {
+      att.strikes = left;
+      return false;
+    }
+    att.abusive = true;
+    return true;
+  }
+
+  closeAbusive(conn) {
+    this.diagnose('lobby_abuse_closed');
+    try {
+      conn.close(1008, 'too many refused requests');
+    } catch {
+      // Already closing.
+    }
   }
 
   // Work queued while handling a message runs after its answer went out (events follow the response).
@@ -670,9 +704,11 @@ export class Lobby {
   exchangeEndpoints(roomId, joinerId) {
     const rows = this.memberRows(roomId);
     const joiner = rows.find((m) => m.member === joinerId);
+    // A seat can be taken before its first report, and its socket always knows the observed address the LAN rule needs.
+    const receiver = { ...joiner, ip: this.socketByCid(joiner.conn)?.att.ip ?? joiner.ip };
     for (const other of rows) {
       if (other.member === joinerId) continue;
-      this.sendPeer(roomId, other, joiner);
+      this.sendPeer(roomId, other, receiver);
       this.sendPeer(roomId, joiner, other);
     }
   }
@@ -772,10 +808,34 @@ export class Lobby {
     fail('limit', 'joining rooms too fast');
   }
 
+  // Spent only by a request about to change a stored row, once it is valid: the game repeats most of its updates, and those
+  // write nothing. A refusal spends nothing and writes nothing.
+  limitWrite(att, kind) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const budget = WRITE_BUDGETS[kind];
+    const spec = PROTECTION[budget.account];
+    const account = this.guards[budget.account];
+    const address = this.guards[budget.address];
+    const group = ipGroup(att.ip);
+    const socket = takeToken(att[budget.socket], spec, now);
+    if (!socket || !account.allows(att.account, now) || !address.allows(group, now)) {
+      this.diagnose('write_limited');
+      fail('limit', 'writing too fast', { retry_ms: Math.ceil(1000 / spec.perSecond) });
+    }
+    att[budget.socket] = socket;
+    account.take(att.account, now);
+    address.take(group, now);
+  }
+
+  claimedIp(att, msg) {
+    return att.ip.includes(':') && ipv4Kind(msg.public_ip) === 'public' ? msg.public_ip : '';
+  }
+
   // Peers send UDP toward a client's advertised IPv4 and nothing can verify it, so each new endpoint spends budget of the
   // observed address. Past that budget the client has no public IPv4 and its peers use the relay.
   advertisedIp(att, msg, lan) {
-    if (!att.ip.includes(':') || ipv4Kind(msg.public_ip) !== 'public') return '';
+    if (!this.claimedIp(att, msg)) return '';
     const last = att.udp;
     if (last?.public_ip === msg.public_ip && last.port === msg.port && JSON.stringify(last.lan) === JSON.stringify(lan)) {
       return msg.public_ip;
@@ -1005,21 +1065,21 @@ const HANDLERS = {
       if (!isObject(c) || !isInt(c.port, 1, 0xffff)) fail('bad_request', 'lan');
       if (['private', 'loopback', 'link'].includes(ipv4Kind(c.ip))) lan.push({ ip: c.ip, port: c.port });
     }
+    const rows = att.room ? this.memberRows(att.room) : [];
+    const me = rows.find((m) => m.member === att.member);
+    const lanText = JSON.stringify(lan);
+    const differs = (ip) => me.ip !== att.ip || me.public_ip !== ip || me.port !== msg.port || me.lan !== lanText;
+    if (me && differs(this.claimedIp(att, msg))) this.limitWrite(att, 'state');
     const publicIp = this.advertisedIp(att, msg, lan);
     att.udp = { ip: att.ip, public_ip: publicIp, port: msg.port, lan };
-    if (att.room) {
-      const rows = this.memberRows(att.room);
-      const me = rows.find((m) => m.member === att.member);
-      if (me) {
-        const lanText = JSON.stringify(lan);
-        const changed = me.ip !== att.ip || me.public_ip !== publicIp || me.port !== msg.port || me.lan !== lanText;
-        if (changed) {
-          this.host.sql.run('UPDATE members SET ip = ?, public_ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip,
-            publicIp, msg.port, lanText, att.room, att.member);
-          Object.assign(me, { ip: att.ip, public_ip: publicIp, port: msg.port, lan: lanText });
-        }
-        if (changed || !publicIp) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
+    if (me) {
+      const changed = differs(publicIp);
+      if (changed) {
+        this.host.sql.run('UPDATE members SET ip = ?, public_ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip,
+          publicIp, msg.port, lanText, att.room, att.member);
+        Object.assign(me, { ip: att.ip, public_ip: publicIp, port: msg.port, lan: lanText });
       }
+      if (changed || !publicIp) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
     }
     return { ip: att.ip, port: msg.port, ...(publicIp && { public_ip: publicIp }) };
   },
@@ -1132,16 +1192,20 @@ const HANDLERS = {
     return {};
   },
 
-  // Retakes a seat held after a lost connection (LIMITS.graceMs); the events held for it follow the answer.
+  // Retakes a seat held after a lost connection (LIMITS.graceMs). The events held for it follow the answer, then the
+  // endpoints: peer events are not held, so a member who joined meanwhile is known only from here.
   'room.resume'(att, msg, conn) {
     if (att.room) fail('in_room');
     const roomId = Number(decimalId(msg.room));
     if (!isInt(msg.member, 1, 0xffff)) fail('bad_request', 'member');
     const member = this.memberRow(roomId, msg.member);
     if (!member || member.account !== att.account) fail('not_found');
-    const old = this.socketByCid(member.conn);
+    if (member.grace_until !== null && member.grace_until <= this.host.now()) fail('not_found');
+    const found = this.socketByCid(member.conn);
+    const old = found && found.att.cid !== att.cid ? found : null;
+    if (!old && member.grace_until === null && member.conn !== null) fail('not_found');
     this.relays.forgetMember(roomId, msg.member);
-    if (old && old.att.cid !== att.cid) {
+    if (old) {
       this.relays.forgetConnection(old.att.cid);
       old.att.room = 0;
       old.conn.setAttachment(old.att);
@@ -1150,8 +1214,6 @@ const HANDLERS = {
       } catch {
         // Already closing.
       }
-    } else if (member.grace_until === null && member.conn !== null) {
-      fail('not_found');
     }
     const udp = memberEndpoint(att);
     this.host.sql.run(`UPDATE members SET conn = ?, grace_until = NULL, held = '[]', name = ?, ip = ?, public_ip = ?, port = ?,
@@ -1162,6 +1224,7 @@ const HANDLERS = {
     const held = JSON.parse(member.held);
     this.later(() => {
       for (const event of held) this.send(conn, event);
+      this.exchangeEndpoints(roomId, msg.member);
     });
     return { room: this.fullRoom(this.roomRow(roomId)), me: msg.member };
   },
@@ -1175,9 +1238,9 @@ const HANDLERS = {
     const binInt = merge(JSON.parse(room.bin_int), changed, LIMITS.binAttrsPerArray);
     const flags = (((room.flags & ~mask) | (value & mask)) & ~FLAG_FULL) >>> 0;
     const binIntText = JSON.stringify(binInt);
-    if (flags !== room.flags || binIntText !== room.bin_int) {
-      this.host.sql.run('UPDATE rooms SET flags = ?, bin_int = ? WHERE id = ?', flags, binIntText, room.id);
-    }
+    if (flags === room.flags && binIntText === room.bin_int) return {};
+    this.limitWrite(att, 'state');
+    this.host.sql.run('UPDATE rooms SET flags = ?, bin_int = ? WHERE id = ?', flags, binIntText, room.id);
     const count = this.memberRows(room.id).length;
     this.toRoom(room.id, { ev: 'room.internal', room: String(room.id), flags: this.roomFlags({ ...room, flags }, count),
       bin_int: changed }, att.member);
@@ -1191,9 +1254,9 @@ const HANDLERS = {
     const binExt = merge(JSON.parse(room.bin_ext), binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const intsText = JSON.stringify(ints);
     const binExtText = JSON.stringify(binExt);
-    if (intsText !== room.ints || binExtText !== room.bin_ext) {
-      this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ? WHERE id = ?', intsText, binExtText, room.id);
-    }
+    if (intsText === room.ints && binExtText === room.bin_ext) return {};
+    this.limitWrite(att, 'state');
+    this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ? WHERE id = ?', intsText, binExtText, room.id);
     return {};
   },
 
@@ -1260,6 +1323,7 @@ const HANDLERS = {
     this.expireRequests();
     if (this.host.sql.get('SELECT 1 AS x FROM friend_requests WHERE sender = ? AND target = ?', target.account, att.account)) {
       this.requireFriendRoom(att.account, target.account);
+      this.limitWrite(att, 'friend');
       this.makeFriends(att.account, target.account);
       this.notifyAccount(target.account, { ev: 'friend.added', friend: this.friendView(att.account, att.game) });
       return { ...result, state: 'friends' };
@@ -1271,6 +1335,7 @@ const HANDLERS = {
     const incoming = this.host.sql.get('SELECT COUNT(*) AS n FROM friend_requests WHERE target = ?', target.account).n;
     if (outgoing >= LIMITS.pendingOut || incoming >= LIMITS.pendingIn) fail('limit', 'too many pending requests');
     this.requireFriendRoom(att.account, target.account);
+    this.limitWrite(att, 'friend');
     this.host.sql.run('INSERT INTO friend_requests (sender, target, ms) VALUES (?, ?, ?)', att.account, target.account, this.host.now());
     this.notifyAccount(target.account, { ev: 'friend.request', account: att.account, name: att.name });
     return { ...result, state: 'pending' };
@@ -1281,6 +1346,7 @@ const HANDLERS = {
     this.expireRequests();
     if (!this.host.sql.get('SELECT 1 AS x FROM friend_requests WHERE sender = ? AND target = ?', sender, att.account)) fail('not_found');
     this.requireFriendRoom(att.account, sender);
+    this.limitWrite(att, 'friend');
     this.makeFriends(att.account, sender);
     this.notifyAccount(sender, { ev: 'friend.added', friend: this.friendView(att.account, att.game) });
     return { friend: this.friendView(sender, att.game) };
@@ -1291,6 +1357,7 @@ const HANDLERS = {
     const before = this.host.sql.get(`SELECT COUNT(*) AS n FROM friend_requests WHERE (sender = ? AND target = ?)
       OR (sender = ? AND target = ?)`, other, att.account, att.account, other).n;
     if (!before) fail('not_found');
+    this.limitWrite(att, 'friend');
     this.host.sql.run('DELETE FROM friend_requests WHERE (sender = ? AND target = ?) OR (sender = ? AND target = ?)', other,
       att.account, att.account, other);
     return {};
@@ -1299,6 +1366,10 @@ const HANDLERS = {
   'friends.remove'(att, msg) {
     const other = decimalId(msg.account);
     const were = this.areFriends(att.account, other);
+    const pending = this.host.sql.get(`SELECT 1 AS x FROM friend_requests WHERE (sender = ? AND target = ?)
+      OR (sender = ? AND target = ?)`, other, att.account, att.account, other);
+    if (!were && !pending) return {};
+    this.limitWrite(att, 'friend');
     this.host.sql.run('DELETE FROM friends WHERE (account = ? AND friend = ?) OR (account = ? AND friend = ?)', att.account,
       other, other, att.account);
     this.host.sql.run('DELETE FROM friend_requests WHERE (sender = ? AND target = ?) OR (sender = ? AND target = ?)', other,

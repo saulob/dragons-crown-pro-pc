@@ -1356,10 +1356,10 @@ struct FixtureReport {
 // What stands behind a feature on a build. A fallback path or a profile flag is not evidence.
 enum class Proof { kNotNeeded, kRealExecutable, kReporterLog, kDataUnavailable };
 
-// What a reporter's read-only scan of the real CUSA10487 1.03 executable mapped; tests/feature_sites_tests.cpp pins the
-// sites. The scan had no Skip Intro, Unlock Gallery or Japanese Menu Buttons signatures.
-constexpr Feature kEuropeScanned[] = {kCheats,  kOnlinePlay, kTrueUltrawide, kRenderResolution, kAspectRatio, kStorySkip,
-                                      kTutorialSkip, kLzcnt, kSaveLoad, kJapaneseNpcVoices, kExitGame};
+// What a reporter's read-only scan of the real CUSA10487 1.03 executable proved; tests/feature_sites_tests.cpp pins the
+// sites. The scan had no Skip Intro, Unlock Gallery or Japanese Menu Buttons signatures, and its signatures for the Skip
+// offers, Exit Game, Online Play and the startup save do not cover what those features check when they install.
+constexpr Feature kEuropeScanned[] = {kCheats, kTrueUltrawide, kRenderResolution, kAspectRatio, kLzcnt, kJapaneseNpcVoices};
 
 Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, const FixtureReport& report) {
     switch (feature) {
@@ -1393,11 +1393,12 @@ void TestProofNeedsEvidence() {
         const Contract* row = FindContract(build.label);
         if (!row) continue;
         const bool europe = std::string_view(build.title_id) == "CUSA10487";
-        for (const Feature feature : {kSkipIntro, kMenuButtons, kUnlockGallery, kXboxPrompts, kArachnophobia}) {
+        for (const Feature feature : {kSkipIntro, kMenuButtons, kUnlockGallery, kXboxPrompts, kArachnophobia, kStorySkip, kTutorialSkip,
+                                      kOnlinePlay, kExitGame}) {
             CHECK(ProofOf(build, *row, feature, none) == Proof::kDataUnavailable);
             CHECK(ProofOf(build, *row, feature, real) == Proof::kRealExecutable);
         }
-        for (const Feature feature : {kCheats, kTrueUltrawide, kRenderResolution, kStorySkip, kLzcnt, kExitGame}) {
+        for (const Feature feature : {kCheats, kTrueUltrawide, kRenderResolution, kLzcnt}) {
             CHECK(ProofOf(build, *row, feature, none) == (europe ? Proof::kReporterLog : Proof::kDataUnavailable));
         }
         for (const Feature feature : {kController, kKeyboard, kGraphics}) CHECK(ProofOf(build, *row, feature, none) == Proof::kNotNeeded);

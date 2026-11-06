@@ -282,7 +282,7 @@ test('the per-socket message budget still applies to the new operation', () => {
   const env = makeLobby();
   const a = hosting(env);
   const codes = new Set();
-  for (let i = 0; i < 100; i++) codes.add(report(a, { classes: [0] }).code);
+  for (let i = 0; i < 100; i++) codes.add(report(a, { classes: [0] })?.code);
   assert.ok(codes.has('ok'));
   assert.ok(codes.has('limit'));
 });

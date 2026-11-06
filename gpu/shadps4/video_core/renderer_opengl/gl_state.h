@@ -7,7 +7,6 @@
 #include <cstring>
 #include "common/types.h"
 #include "video_core/renderer_opengl/gl_api.h"
-#include "video_core/renderer_opengl/gl_perf.h"
 
 namespace OpenGL {
 
@@ -38,8 +37,6 @@ public:
 
     explicit GlState(bool gles_ = false, bool depth_clamp_ = true)
         : gles{gles_}, depth_clamp{depth_clamp_}, edit_unit{gles_ ? GlesEditUnit : DesktopEditUnit} {
-        // DEBUG_SAULO: the switch goes with the rest of the profile.
-        filter = Perf::Optimizations().state;
         std::memset(&attributes, 0xFF, sizeof(attributes));
         Invalidate();
     }
@@ -49,10 +46,6 @@ public:
         // 0xFF never equals a real value: floats become NaN, handles and enums an impossible one.
         std::memset(&shadow, 0xFF, sizeof(shadow));
         known_caps = 0;
-    }
-
-    [[nodiscard]] bool Filtering() const {
-        return filter;
     }
 
     void Enable(Cap cap, bool on) {
@@ -66,7 +59,7 @@ public:
         if (gles && !ExistsOnGles(cap)) {
             return;
         }
-        if (filter && (known_caps & bit) != 0 && ((enabled_caps & bit) != 0) == on) {
+        if ((known_caps & bit) != 0 && ((enabled_caps & bit) != 0) == on) {
             return;
         }
         known_caps |= bit;
@@ -78,15 +71,11 @@ public:
         } else {
             gl::Disable(name);
         }
-        Perf::Count(cap == Cap::DepthTest     ? Perf::DepthChanges
-                    : cap == Cap::StencilTest ? Perf::StencilChanges
-                                              : Perf::RasterChanges);
     }
 
     void UseProgram(GLuint program) {
         if (Changed(shadow.program, program)) {
             gl::UseProgram(program);
-            Perf::Count(Perf::Programs);
         }
     }
 
@@ -95,21 +84,18 @@ public:
         const bool draw = Changed(shadow.draw_framebuffer, framebuffer);
         if (read || draw) {
             gl::BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-            Perf::Count(Perf::Framebuffers);
         }
     }
 
     void BindReadFramebuffer(GLuint framebuffer) {
         if (Changed(shadow.read_framebuffer, framebuffer)) {
             gl::BindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
-            Perf::Count(Perf::Framebuffers);
         }
     }
 
     void BindDrawFramebuffer(GLuint framebuffer) {
         if (Changed(shadow.draw_framebuffer, framebuffer)) {
             gl::BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-            Perf::Count(Perf::Framebuffers);
         }
     }
 
@@ -124,21 +110,18 @@ public:
             gl::BindVertexArray(vertex_array);
             // The element buffer binding belongs to the vertex array.
             shadow.element_buffer = ~0u;
-            Perf::Count(Perf::VertexArrays);
         }
     }
 
     void BindArrayBuffer(GLuint buffer) {
         if (Changed(shadow.array_buffer, buffer)) {
             gl::BindBuffer(GL_ARRAY_BUFFER, buffer);
-            Perf::Count(Perf::BufferBinds);
         }
     }
 
     void BindElementBuffer(GLuint buffer) {
         if (Changed(shadow.element_buffer, buffer)) {
             gl::BindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer);
-            Perf::Count(Perf::BufferBinds);
         }
     }
 
@@ -154,7 +137,6 @@ public:
         }
         ActiveTexture(unit);
         gl::BindTexture(target, texture);
-        Perf::Count(Perf::TextureBinds);
     }
 
     /// Binds a texture to change it; the calls that follow act on the active unit.
@@ -171,21 +153,18 @@ public:
     void BindSampler(GLuint unit, GLuint sampler) {
         if (unit >= MaxUnits || Changed(shadow.samplers[unit], sampler)) {
             gl::BindSampler(unit, sampler);
-            Perf::Count(Perf::SamplerBinds);
         }
     }
 
     void Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
         if (Changed(shadow.viewport, std::array<GLint, 4>{x, y, width, height})) {
             gl::Viewport(x, y, width, height);
-            Perf::Count(Perf::Viewports);
         }
     }
 
     void Scissor(GLint x, GLint y, GLsizei width, GLsizei height) {
         if (Changed(shadow.scissor, std::array<GLint, 4>{x, y, width, height})) {
             gl::Scissor(x, y, width, height);
-            Perf::Count(Perf::Scissors);
         }
     }
 
@@ -196,21 +175,18 @@ public:
             } else {
                 gl::DepthRange(near_value, far_value);
             }
-            Perf::Count(Perf::Viewports);
         }
     }
 
     void DepthFunc(GLenum func) {
         if (Changed(shadow.depth_func, func)) {
             gl::DepthFunc(func);
-            Perf::Count(Perf::DepthChanges);
         }
     }
 
     void DepthMask(GLboolean mask) {
         if (Changed(shadow.depth_mask, u8(mask))) {
             gl::DepthMask(mask);
-            Perf::Count(Perf::DepthChanges);
         }
     }
 
@@ -218,14 +194,12 @@ public:
         const std::array<u32, 3> value{func, u32(reference), mask};
         if (Changed(shadow.stencil_func[Face(face)], value)) {
             gl::StencilFuncSeparate(face, func, reference, mask);
-            Perf::Count(Perf::StencilChanges);
         }
     }
 
     void StencilMask(GLenum face, GLuint mask) {
         if (Changed(shadow.stencil_mask[Face(face)], mask)) {
             gl::StencilMaskSeparate(face, mask);
-            Perf::Count(Perf::StencilChanges);
         }
     }
 
@@ -233,21 +207,18 @@ public:
         const std::array<GLenum, 3> value{stencil_fail, depth_fail, pass};
         if (Changed(shadow.stencil_op[Face(face)], value)) {
             gl::StencilOpSeparate(face, stencil_fail, depth_fail, pass);
-            Perf::Count(Perf::StencilChanges);
         }
     }
 
     void CullFace(GLenum face) {
         if (Changed(shadow.cull_face, face)) {
             gl::CullFace(face);
-            Perf::Count(Perf::RasterChanges);
         }
     }
 
     void FrontFace(GLenum mode) {
         if (Changed(shadow.front_face, mode)) {
             gl::FrontFace(mode);
-            Perf::Count(Perf::RasterChanges);
         }
     }
 
@@ -257,21 +228,18 @@ public:
         }
         if (Changed(shadow.polygon_mode, mode)) {
             gl::PolygonMode(GL_FRONT_AND_BACK, mode);
-            Perf::Count(Perf::RasterChanges);
         }
     }
 
     void PolygonOffset(GLfloat factor, GLfloat units) {
         if (Changed(shadow.polygon_offset, std::array<GLfloat, 2>{factor, units})) {
             gl::PolygonOffset(factor, units);
-            Perf::Count(Perf::RasterChanges);
         }
     }
 
     void LineWidth(GLfloat width) {
         if (Changed(shadow.line_width, width)) {
             gl::LineWidth(width);
-            Perf::Count(Perf::RasterChanges);
         }
     }
 
@@ -281,28 +249,24 @@ public:
         }
         if (Changed(shadow.provoking_vertex, mode)) {
             gl::ProvokingVertex(mode);
-            Perf::Count(Perf::RasterChanges);
         }
     }
 
     void PrimitiveRestartIndex(GLuint index) {
         if (!gles && Changed(shadow.restart_index, index)) {
             gl::PrimitiveRestartIndex(index);
-            Perf::Count(Perf::RasterChanges);
         }
     }
 
     void BlendColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
         if (Changed(shadow.blend_color, std::array<GLfloat, 4>{red, green, blue, alpha})) {
             gl::BlendColor(red, green, blue, alpha);
-            Perf::Count(Perf::BlendChanges);
         }
     }
 
     void LogicOp(GLenum op) {
         if (!gles && Changed(shadow.logic_op, op)) {
             gl::LogicOp(op);
-            Perf::Count(Perf::BlendChanges);
         }
     }
 
@@ -313,7 +277,6 @@ public:
             } else {
                 gl::Disablei(GL_BLEND, target);
             }
-            Perf::Count(Perf::BlendChanges);
         }
     }
 
@@ -322,7 +285,6 @@ public:
         if (Changed(shadow.color_mask[target], u8(mask))) {
             gl::ColorMaski(target, (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0,
                            (mask & 8) != 0);
-            Perf::Count(Perf::MaskChanges);
         }
     }
 
@@ -338,7 +300,6 @@ public:
         } else {
             gl::BlendFuncSeparate(src_color, dst_color, src_alpha, dst_alpha);
         }
-        Perf::Count(Perf::BlendChanges);
     }
 
     void BlendEquation(u32 target, bool per_target, GLenum color, GLenum alpha) {
@@ -351,7 +312,6 @@ public:
         } else {
             gl::BlendEquationSeparate(color, alpha);
         }
-        Perf::Count(Perf::BlendChanges);
     }
 
     void ClipDistances(u32 count) {
@@ -374,7 +334,7 @@ public:
         value.normalized = normalized;
         value.stride = stride;
         value.offset = offset;
-        if (filter && value == attributes[location]) {
+        if (value == attributes[location]) {
             return;
         }
         attributes[location] = value;
@@ -385,16 +345,14 @@ public:
             gl::VertexAttribPointer(location, size, type, normalized ? GL_TRUE : GL_FALSE, stride,
                                     pointer);
         }
-        Perf::Count(Perf::Attributes);
     }
 
     void VertexDivisor(GLuint location, GLuint divisor) {
-        if (filter && attributes[location].divisor == divisor) {
+        if (attributes[location].divisor == divisor) {
             return;
         }
         attributes[location].divisor = divisor;
         gl::VertexAttribDivisor(location, divisor);
-        Perf::Count(Perf::Attributes);
     }
 
 private:
@@ -480,7 +438,7 @@ private:
 
     template <typename T>
     bool Changed(T& cached, const T& value) {
-        if (filter && cached == value) {
+        if (cached == value) {
             return false;
         }
         cached = value;
@@ -492,7 +450,6 @@ private:
     u32 known_caps{};
     u32 enabled_caps{};
     u32 clip_distances{};
-    bool filter{true};
     bool gles;
     bool depth_clamp;
     GLuint edit_unit;

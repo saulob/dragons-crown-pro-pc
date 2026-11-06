@@ -72,6 +72,8 @@ release must keep those notices.
 
 Everything [GRAPHICS.md](GRAPHICS.md) lists for OpenGL applies. In addition:
 
+- An early test run of the shared backend stopped without an error in the log, and the cause was never found. Later runs
+  did not stop that way, so a silent stop or hang remains possible on both experimental renderers.
 - Indexed rectangle lists are skipped and logged, including the one that opens each frame: drawing it blacks out the
   picture on Direct3D 11, for a reason not yet known. Instanced rectangle lists draw their first instance, and a rectangle
   list reading more than five vertex attributes is skipped. All are logged.

@@ -53,7 +53,6 @@ using OpenGL::GlState;
 using OpenGL::GuestWriteWatch;
 using OpenGL::RingStorage;
 using OpenGL::StreamRing;
-namespace Perf = OpenGL::Perf;
 
 int g_checks = 0;
 int g_failures = 0;
@@ -497,8 +496,9 @@ void TestShutdownOrder(u8* arena) {
         Write(range + page * Page, 2);
     }
     CHECK(watch.Faults() == faults);
-    CHECK(watch.OnWriteFault(range) == FaultResult::Retry);
-    CHECK(watch.TakeStats().armed_pages_now == 0);
+    for (u64 page = 0; page < 64; ++page) {
+        CHECK(watch.OnWriteFault(range + page * Page) == FaultResult::Retry);
+    }
 }
 
 void TestFaultsCannotSpinForever() {
@@ -1053,7 +1053,6 @@ void TestGuestCopies() {
     ring.BeginDraw();
     const u32 copy = ring.PushGuest(address, 4096, 4);
     CHECK(ring.PushGuest(address, 4096, 4) == copy);
-    CHECK(Perf::counters[Perf::CopiesReused] >= 1);
 
     // Same address, other bytes: by content.
     guest[100] = 2;

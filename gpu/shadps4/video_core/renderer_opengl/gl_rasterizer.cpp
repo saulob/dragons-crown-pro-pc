@@ -182,8 +182,8 @@ Rasterizer::Rasterizer(AmdGpu::Liverpool* liverpool_, const Capabilities& capabi
       // Never freed: guest threads can fault on armed pages until the process ends.
       watch{new GuestWriteWatch(ProtectGuest)},
       ring{state, capabilities_.gles                                       ? RingStorage::ClientMemory
-                  : capabilities_.buffer_storage && Perf::Optimizations().ring ? RingStorage::Persistent
-                                                                               : RingStorage::Mapped},
+                  : capabilities_.buffer_storage ? RingStorage::Persistent
+                                                               : RingStorage::Mapped},
       gles_shader_ring{capabilities_.gles
                            ? std::make_unique<StreamRing>(state, RingStorage::ShaderTexture)
                            : nullptr},
@@ -192,20 +192,12 @@ Rasterizer::Rasterizer(AmdGpu::Liverpool* liverpool_, const Capabilities& capabi
       shaders{state, max_viewport_width, max_viewport_height,
               capabilities_.gles ? Shader::Backend::GLSL::Target::Gles300
                                  : Shader::Backend::GLSL::Target::Desktop330},
-      gds(GdsBytes), indexed_rect_tables{capabilities_.gles && std::getenv("DCP_GL_INDEXED_RECTS")} {
+      gds(GdsBytes) {
     fault_watch = watch;
-    watch->SetGpuThread();
     Core::Signals::Instance()->RegisterAccessViolationHandler(OnGuestFault, WatchFaultPriority);
-    // DEBUG_SAULO: temporary, the watch's life cycle.
-    std::printf("DEBUG_SAULO: OpenGL watch created %p, fault handler registered at priority %u\n",
-                static_cast<void*>(watch), WatchFaultPriority);
     std::printf("OpenGL: stream ring %s\n", gles            ? "client memory, shader data in a texture"
                                             : ring.Persistent() ? "persistent"
                                                                 : "mapped per draw");
-    // DEBUG_SAULO: temporary, the A/B state of this run.
-    const auto& switches = Perf::Optimizations();
-    std::printf("DEBUG_SAULO: OpenGL perf switches watch=%d ring=%d state=%d lookup=%d\n",
-                switches.watch, switches.ring, switches.state, switches.lookup);
     if (anisotropy) {
         gl::GetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &max_anisotropy);
     }
@@ -238,9 +230,6 @@ Rasterizer::Rasterizer(AmdGpu::Liverpool* liverpool_, const Capabilities& capabi
 
 Rasterizer::~Rasterizer() {
     watch->ReleaseAll();
-    // DEBUG_SAULO: temporary, the watch's life cycle.
-    std::printf("DEBUG_SAULO: OpenGL rasterizer destroyed, every page released, the watch and its "
-                "fault handler stay\n");
     for (const auto& [key, framebuffer] : framebuffers) {
         gl::DeleteFramebuffers(1, &framebuffer.handle);
     }
@@ -274,11 +263,10 @@ void Rasterizer::ReportFirst(const char* cause, const std::string& details) {
 
 template <typename Sent, typename Value>
 bool Rasterizer::UniformChanged(Sent& sent, const Value& value) {
-    if (state.Filtering() && sent == value) {
+    if (sent == value) {
         return false;
     }
     sent = value;
-    Perf::Count(Perf::Uniforms);
     return true;
 }
 
@@ -360,7 +348,6 @@ GLuint Rasterizer::FramebufferFor(const AttachedTargets& targets) {
     if (const auto it = framebuffers.find(key); it != framebuffers.end()) {
         return it->second.handle;
     }
-    Perf::Count(Perf::FramebuffersCreated);
     CachedFramebuffer cached{};
     GLuint framebuffer = 0;
     gl::GenFramebuffers(1, &framebuffer);
@@ -611,7 +598,6 @@ void Rasterizer::BindStage(const Shader::Info& info, StageLocations& locations,
         }
     }
     if (locations.buffers >= 0) {
-        Perf::Scope timer{Perf::BufferPush};
         std::array<std::array<u32, 2>, Shader::NUM_BUFFERS> table{};
         const auto& regs = liverpool->regs;
         for (u32 i = 0; i < info.buffers.size(); ++i) {
@@ -624,7 +610,6 @@ void Rasterizer::BindStage(const Shader::Info& info, StageLocations& locations,
                 if (sharp.base_address != 0 && sharp.GetSize() != 0) {
                     size = u32(memory->ClampRangeSize(sharp.base_address, sharp.GetSize()));
                     offset = shader_ring.PushGuest(sharp.base_address, size, DwordAlignment);
-                    Perf::Count(Perf::ConstantBytes, size);
                 }
                 break;
             }
@@ -729,7 +714,6 @@ bool Rasterizer::BindVertexInputs(const GraphicsProgram& program, u32 first_inst
             }
             const u32 size = u32(memory->ClampRangeSize(buffer.base_address, buffer.GetSize()));
             const u32 pushed = ring.PushGuest(buffer.base_address, size, VertexAlignment);
-            Perf::Count(Perf::VertexBytes, size);
             if (pushed == StreamRing::NoOffset) {
                 Report("vertex data larger than the stream ring was dropped");
                 return false;
@@ -918,53 +902,7 @@ bool Rasterizer::PrepareIndexedRectangles(const GraphicsProgram& program, u32 in
         gl::Uniform4uiv(program.rect_inputs, GLsizei(rect_input_table.size()), rect_input_table[0].data());
     }
     strip_instances = *instances;
-    LogFirstRect(program, true, index_offset, u32(expanded_indices.size()), first_vertex);
     return true;
-}
-
-// DEBUG_SAULO: temporary, the first rectangle list of each kind.
-void Rasterizer::LogFirstRect(const GraphicsProgram& program, bool is_indexed, u32 index_offset,
-                              u32 host_vertices, u32 first_vertex) {
-    bool& logged = is_indexed ? indexed_rect_logged : plain_rect_logged;
-    if (logged) {
-        return;
-    }
-    logged = true;
-    const auto& regs = liverpool->regs;
-    std::string indices;
-    if (is_indexed) {
-        const auto range = GuestIndexRange(index_offset);
-        VisitGuestIndices(range.address, std::min(range.count, 6u), range.size, [&](auto span) {
-            for (const auto index : span) {
-                indices += fmt::format(" {}", u32(index));
-            }
-        });
-    }
-    std::printf("DEBUG_SAULO: rect list: primitive %u, indexed %d, guest count %u, host vertices %u, inputs %zu, "
-                "instances %u, base vertex %u, restart %u, max index size %u, tables %d, indices%s\n",
-                u32(regs.primitive_type), is_indexed, u32(regs.num_indices), host_vertices,
-                program.vertex->glsl.vertex_inputs.size(), regs.num_instances.NumInstances(), first_vertex,
-                regs.enable_primitive_restart & 1, u32(regs.max_index_size), indexed_rect_tables,
-                indices.c_str());
-    if (is_indexed) {
-        LogDepthState("indexed rect");
-    }
-}
-
-// DEBUG_SAULO: temporary, what a depth-only rectangle would write and what the next draws test.
-void Rasterizer::LogDepthState(const char* draw) {
-    const auto& regs = liverpool->regs;
-    const auto& viewport = regs.viewports[0];
-    std::printf("DEBUG_SAULO: depth state of %s: test %u, write %u, func %u, stencil %u, depth clear enable %u, "
-                "stencil clear enable %u, clear value %f, stencil clear %u, zoffset %f, zscale %f, clip space %u, "
-                "zclip %d, clip disabled %d, depth valid %d, color mode %u\n",
-                draw, u32(regs.depth_control.depth_enable), u32(regs.depth_control.depth_write_enable),
-                u32(regs.depth_control.depth_func), u32(regs.depth_control.stencil_enable),
-                u32(regs.depth_render_control.depth_clear_enable),
-                u32(regs.depth_render_control.stencil_clear_enable), double(regs.depth_clear),
-                u32(regs.stencil_clear), double(viewport.zoffset), double(viewport.zscale),
-                u32(regs.clipper_control.clip_space), regs.clipper_control.ZclipEnable(), regs.IsClipDisabled(),
-                regs.depth_buffer.DepthValid(), u32(regs.color_control.mode));
 }
 
 void Rasterizer::ApplyViewportScissor(GraphicsProgram& program) {
@@ -1223,7 +1161,6 @@ void Rasterizer::ApplyBlend(const GraphicsProgram& program, const AttachedTarget
 }
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedDraw*) {
-    Perf::Scope total_timer{Perf::DrawTotal};
     ++draws;
     if (!FilterDraw()) {
         return;
@@ -1231,11 +1168,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
     const auto& regs = liverpool->regs;
     const bool rect_list = gles && regs.primitive_type == AmdGpu::PrimitiveType::RectList;
     const bool rect_tables = RectListUsesTables(rect_list, is_indexed, indexed_rect_tables);
-    GraphicsProgram* program = nullptr;
-    {
-        Perf::Scope timer{Perf::ShaderLookup};
-        program = shaders.GetGraphics(regs, rect_tables);
-    }
+    GraphicsProgram* program = shaders.GetGraphics(regs, rect_tables);
     if (!program) {
         return;
     }
@@ -1246,28 +1179,12 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
     }
     const bool quad_list = gles && regs.primitive_type == AmdGpu::PrimitiveType::QuadList;
     if (rect_list && is_indexed && !rect_tables) {
-        // DEBUG_SAULO: temporary, what the first skipped rectangle would have drawn.
-        if (!indexed_rect_logged) {
-            const auto indices = GuestIndexRange(index_offset);
-            VisitGuestIndices(indices.address, indices.count, indices.size, [&](auto span) {
-                AssembleRectVertices(span, (regs.enable_primitive_restart & 1) != 0, 0, expanded_indices);
-            });
-            LogFirstRect(*program, true, index_offset, u32(expanded_indices.size()), 0);
-        }
         Report("indexed rectangle lists are not implemented");
         return;
     }
-    // DEBUG_SAULO: temporary, the depth test the first ordinary draw runs.
-    if (!rect_list && !depth_state_logged) {
-        depth_state_logged = true;
-        LogDepthState("first ordinary draw");
-    }
     AttachedTargets targets{};
-    {
-        Perf::Scope timer{Perf::BindTargets};
-        if (!BindTargets(*program, targets)) {
-            return;
-        }
+    if (!BindTargets(*program, targets)) {
+        return;
     }
     state.BindVertexArray(vertex_array);
     state.UseProgram(program->handle);
@@ -1286,24 +1203,17 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
     // Elements on OpenGL ES have no base vertex here, and gl_VertexID would not include it anyway.
     const u32 moved_vertices = gles && (is_indexed || quad_list || rect_list) ? vertex_offset : 0;
     GLsizei rect_strips = 0;
-    {
-        Perf::Scope timer{Perf::BufferPush};
-        const bool prepared =
-            rect_tables ? PrepareIndexedRectangles(*program, index_offset, vertex_offset, instance_offset, rect_strips)
-                        : BindVertexInputs(*program, instance_offset, moved_vertices, rect_list);
-        if (!prepared) {
-            return;
-        }
-    }
-    if (rect_list && !is_indexed) {
-        LogFirstRect(*program, false, 0, regs.num_indices - regs.num_indices % RectVerticesPerRect, vertex_offset);
+    const bool prepared =
+        rect_tables ? PrepareIndexedRectangles(*program, index_offset, vertex_offset, instance_offset, rect_strips)
+                    : BindVertexInputs(*program, instance_offset, moved_vertices, rect_list);
+    if (!prepared) {
+        return;
     }
 
     u32 index_ring_offset = 0;
     bool index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
     GLsizei count = GLsizei(regs.num_indices);
     if (quad_list) {
-        Perf::Scope timer{Perf::BufferPush};
         if (regs.num_indices > ring.Capacity() / sizeof(u32) / 2) {
             Report("a quad list larger than the stream ring was dropped");
             return;
@@ -1332,11 +1242,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
         const u32 index_size = index16 ? 2 : 4;
         const VAddr address =
             regs.index_base_address.Address<VAddr>() + VAddr(index_offset) * index_size;
-        Perf::Scope timer{Perf::BufferPush};
         const u32 index_count = gles ? GuestIndexRange(index_offset).count : u32(regs.num_indices);
         count = GLsizei(index_count);
         index_ring_offset = ring.PushGuest(address, index_count * index_size, index_size);
-        Perf::Count(Perf::IndexBytes, index_count * index_size);
         if (index_ring_offset == StreamRing::NoOffset) {
             Report("index data larger than the stream ring was dropped");
             return;
@@ -1356,35 +1264,30 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
     }
     CommitStreams();
 
-    {
-        Perf::Scope timer{Perf::ApplyState};
-        if (program->vertex_id_base >= 0 &&
-            UniformChanged(program->sent_vertex_id_base, moved_vertices)) {
-            gl::Uniform1ui(program->vertex_id_base, moved_vertices);
-        }
-        if (program->base_vertex >= 0 && UniformChanged(program->sent_base_vertex, vertex_offset)) {
-            gl::Uniform1ui(program->base_vertex, vertex_offset);
-        }
-        if (program->base_instance >= 0 &&
-            UniformChanged(program->sent_base_instance, instance_offset)) {
-            gl::Uniform1ui(program->base_instance, instance_offset);
-        }
-        ClearTargets(targets);
-        ApplyViewportScissor(*program);
-        ApplyDepthStencil();
-        ApplyRasterState();
-        ApplyBlend(*program, targets);
-        state.ClipDistances(program->vertex->glsl.clip_distances);
-        const bool restart = (regs.enable_primitive_restart & 1) != 0;
-        state.Enable(GlState::Cap::PrimitiveRestart, restart);
-        if (restart) {
-            state.PrimitiveRestartIndex(index16 ? 0xFFFFu : 0xFFFFFFFFu);
-        }
+    if (program->vertex_id_base >= 0 &&
+        UniformChanged(program->sent_vertex_id_base, moved_vertices)) {
+        gl::Uniform1ui(program->vertex_id_base, moved_vertices);
+    }
+    if (program->base_vertex >= 0 && UniformChanged(program->sent_base_vertex, vertex_offset)) {
+        gl::Uniform1ui(program->base_vertex, vertex_offset);
+    }
+    if (program->base_instance >= 0 &&
+        UniformChanged(program->sent_base_instance, instance_offset)) {
+        gl::Uniform1ui(program->base_instance, instance_offset);
+    }
+    ClearTargets(targets);
+    ApplyViewportScissor(*program);
+    ApplyDepthStencil();
+    ApplyRasterState();
+    ApplyBlend(*program, targets);
+    state.ClipDistances(program->vertex->glsl.clip_distances);
+    const bool restart = (regs.enable_primitive_restart & 1) != 0;
+    state.Enable(GlState::Cap::PrimitiveRestart, restart);
+    if (restart) {
+        state.PrimitiveRestartIndex(index16 ? 0xFFFFu : 0xFFFFFFFFu);
     }
 
     const GLsizei instances = GLsizei(regs.num_instances.NumInstances());
-    Perf::Count(Perf::DrawCalls);
-    Perf::Scope draw_timer{Perf::DriverDraw};
     if (rect_tables) {
         gl::DrawArraysInstanced(mode, 0, RectStripVertices, rect_strips);
     } else if (rect_list) {
@@ -1412,13 +1315,6 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const Vulkan::PreparedD
                     static_cast<unsigned long long>(
                         program->fragment ? program->fragment->info->pgm_hash : 0),
                     count);
-    }
-    // DEBUG_SAULO: temporary, driver errors of the first draws.
-    if (draws_reaching_gl <= 256) {
-        if (const GLenum error = gl::GetError(); error != GL_NO_ERROR) {
-            std::printf("DEBUG_SAULO: OpenGL error %#x at draw %llu\n", error,
-                        static_cast<unsigned long long>(draws_reaching_gl));
-        }
     }
 }
 
@@ -1460,7 +1356,6 @@ bool Rasterizer::TryKnownCompute(const Shader::Info& info) {
         auto* out = reinterpret_cast<u32*>(written.base_address);
         watch->BeforeHostWrite(written.base_address, count * sizeof(u32));
         std::fill(out, out + count, *reinterpret_cast<const u32*>(read.base_address));
-        Perf::NoteGpuWrite(Perf::GpuComputeBytes, count * sizeof(u32));
         texture_cache.NoteGpuWrite(written.base_address, count * sizeof(u32));
         return true;
     }
@@ -1492,7 +1387,6 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
     auto* out = reinterpret_cast<u32*>(address);
     watch->BeforeHostWrite(address, num_bytes);
     std::fill(out, out + num_bytes / 4, value);
-    Perf::NoteGpuWrite(Perf::GpuFillBytes, num_bytes);
     texture_cache.NoteGpuWrite(address, num_bytes);
 }
 
@@ -1504,7 +1398,6 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
     }
     std::memmove(target, source, num_bytes);
     if (!dst_gds) {
-        Perf::NoteGpuWrite(Perf::GpuCopyBytes, num_bytes);
         texture_cache.NoteGpuWrite(dst, num_bytes);
     }
 }
@@ -1531,14 +1424,11 @@ bool Rasterizer::InvalidateMemory(VAddr address, u64 size, bool) {
 }
 
 u64 Rasterizer::Flush() {
-    Perf::Scope timer{Perf::GlFlush};
     gl::Flush();
     return 0;
 }
 
 void Rasterizer::Finish() {
-    Perf::Scope timer{Perf::GlFinish};
-    Perf::Count(Perf::Finishes);
     gl::Finish();
 }
 
@@ -1571,17 +1461,6 @@ void Rasterizer::OnFlip() {
     watch->AdvanceFrame();
     texture_cache.NextFrame();
     ForgetStreamCopies();
-    // DEBUG_SAULO: temporary, Direct3D 11 first runs: errors past the first draws, once a frame.
-    if (gles && reported_frame_errors < 32) {
-        if (const GLenum error = gl::GetError(); error != GL_NO_ERROR) {
-            ++reported_frame_errors;
-            std::printf("DEBUG_SAULO: OpenGL ES error %#x after draw %llu\n", error,
-                        static_cast<unsigned long long>(draws_reaching_gl));
-        }
-    }
-    // DEBUG_SAULO: temporary, the frame profile.
-    Perf::OnFlip({draws, draws_reaching_gl, DcpStats::gpu_idle_ns.load(std::memory_order_relaxed),
-                  watch});
 }
 
 void Rasterizer::ResetState() {

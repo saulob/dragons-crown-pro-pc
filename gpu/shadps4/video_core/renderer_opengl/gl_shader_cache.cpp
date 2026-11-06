@@ -219,7 +219,6 @@ StageModule* ShaderCache::GetModule(HwStage hw_stage, SwStage sw_stage,
             return module.get();
         }
     }
-    Perf::Count(Perf::Modules);
     auto module = std::make_unique<StageModule>();
     module->info = std::make_unique<Shader::Info>(hw_stage, sw_stage, params);
     const auto program =
@@ -236,8 +235,6 @@ StageModule* ShaderCache::GetModule(HwStage hw_stage, SwStage sw_stage,
 
 GraphicsProgram* ShaderCache::Link(StageModule* vertex, StageModule* fragment,
                                    PrimitiveExpansion expansion) {
-    Perf::Scope timer{Perf::ShaderLink};
-    Perf::Count(Perf::Links);
     const auto sources = Shader::Backend::GLSL::LinkStages(
         vertex->glsl, fragment ? &fragment->glsl : nullptr, expansion);
     std::string error;
@@ -274,10 +271,6 @@ GraphicsProgram* ShaderCache::Link(StageModule* vertex, StageModule* fragment,
         ReportOnce(report_key, fmt::format("shaders {:#x}/{:#x} did not compile: {}",
                                            vertex->info->pgm_hash,
                                            fragment ? fragment->info->pgm_hash : 0, error));
-        // DEBUG_SAULO: temporary, the rejected GLSL for the first test rounds.
-        std::printf("DEBUG_SAULO: vertex source\n%s\nDEBUG_SAULO: geometry source\n%s\n"
-                    "DEBUG_SAULO: fragment source\n%s\n",
-                    sources.vertex.c_str(), sources.geometry.c_str(), sources.fragment.c_str());
         return nullptr;
     }
 

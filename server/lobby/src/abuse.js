@@ -22,6 +22,11 @@ export const PROTECTION = {
   lobbyListAccount: { burst: 6, perSecond: 1 / 5 },
   lobbyListAddress: { burst: 60, perSecond: 3 },
   lobbyRequestAccount: { burst: 10, perSecond: 1 / 15 },
+  stateWriteAccount: { burst: 40, perSecond: 1 },
+  stateWriteAddress: { burst: 160, perSecond: 4 },
+  friendWriteAccount: { burst: 20, perSecond: 1 / 3 },
+  friendWriteAddress: { burst: 60, perSecond: 1 },
+  refusedRequests: { burst: 30, perSecond: 1 / 2 },
   trackedKeys: 4096,
 };
 

@@ -93,13 +93,19 @@ Every protection below is invisible to a client that behaves, and none changes t
 - **Relay**: a sender that keeps producing frames no well-behaved client sends (malformed, wrong token, no room,
   stale seat, unknown member, relay not negotiated, no sign-in) is allowed 200 of them and then 5 per second; past that
   its connection is closed with 1008. A destination that is offline or still resuming is not a fault.
-- **Writes**: unchanged `udp`, `room.set_internal` and `room.set_external` updates write nothing, and a woken object
-  reads its stored alarm instead of setting it again.
+- **Writes**: unchanged `udp`, `room.set_internal` and `room.set_external` updates write nothing and send no event, and a
+  woken object reads its stored alarm instead of setting it again. A request that would change a row spends a budget of
+  its socket (kept in the attachment, so hibernation does not refill it), its account and its address group (IPv6 per
+  /64): room data and endpoints in a room 40 burst then 1/s, 160 then 4/s per address; friend changes 20 burst then 1 per
+  3 s, 60 then 1/s per address. A refusal answers `limit` with `retry_ms`, spends nothing, writes nothing and is counted
+  in memory as `write_limited`. `room.resume` spends none of it.
+- **Refusals**: more than 30 `limit`, oversized or malformed requests on one socket, refilled 1 per 2 s, close it with
+  1008, counted as `lobby_abuse_closed`. Its seat gets the usual grace.
 - **Diagnostics** are counted in memory and written together at the next 15-minute alarm as `abuse` rows of
   `metrics_daily_dimensions` (no address, no account): `ws_upgrade_accepted`, `ws_upgrade_limited` (reported by the
   Worker on the next upgrade it forwards), `ws_upgrade_ip_cap`, `hello_accepted`, `hello_reconnect_deduped`,
   `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`,
-  `party_report_limited`, `public_lobby_limited`, and for reports `incident_filed`, `incident_limited`,
+  `party_report_limited`, `public_lobby_limited`, `write_limited`, `lobby_abuse_closed`, and for reports `incident_filed`, `incident_limited`,
   `incident_hourly_limited`, `incident_daily_limited`. They
   are in `/admin/api/history` under `dimensions.abuse` and on the dashboard. Counts of the last interval are lost if
   the object is evicted first. Rooms, members, accounts, friends, requests and reports

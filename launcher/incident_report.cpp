@@ -11,6 +11,7 @@
 #include "net/identity.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
+#include "utf8.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -124,7 +125,7 @@ std::vector<Candidate> LogCandidates(const fs::path& folder, const fs::path& run
     std::error_code ec;
     for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec)) {
         std::error_code entry;
-        const std::string name = it->path().filename().string();
+        const std::string name = Utf8(it->path().filename());
         if (!IsGameLogName(name) || !it->is_regular_file(entry) || it->is_symlink(entry)) continue;
         const bool running = IsRunningLog(it->path(), running_log);
         const uintmax_t bytes = running ? fs::file_size(it->path(), entry) : it->file_size(entry);

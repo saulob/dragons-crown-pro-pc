@@ -415,7 +415,8 @@ export const ADMIN_JS = String.raw`(function () {
     relay_abuse_closed: 'Relay connections closed for abuse', party_report_limited: 'Party snapshots refused: too many',
     public_endpoint_limited: 'Public IPv4 claims ignored: too many', incident_filed: 'Bug reports accepted',
     incident_limited: 'Bug reports refused: too many', incident_hourly_limited: 'Bug reports refused: hourly limit',
-    incident_daily_limited: 'Bug reports refused: daily limit', public_lobby_limited: 'Public Lobby requests refused: too many'
+    incident_daily_limited: 'Bug reports refused: daily limit', public_lobby_limited: 'Public Lobby requests refused: too many',
+    write_limited: 'Room and friend changes refused: too many', lobby_abuse_closed: 'Lobby connections closed for repeated refusals'
   };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol' };
 

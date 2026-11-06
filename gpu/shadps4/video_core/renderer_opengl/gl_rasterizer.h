@@ -130,9 +130,6 @@ private:
     void SetEnabledAttributes(u32 wanted);
     bool PrepareIndexedRectangles(const GraphicsProgram& program, u32 index_offset, u32 first_vertex,
                                   u32 first_instance, GLsizei& strip_instances);
-    void LogFirstRect(const GraphicsProgram& program, bool is_indexed, u32 index_offset, u32 host_vertices,
-                      u32 first_vertex); // DEBUG_SAULO: temporary
-    void LogDepthState(const char* draw); // DEBUG_SAULO: temporary
     bool WriteRectInputs(const GraphicsProgram& program, u32 first_instance, u32 guest_instances);
     bool VerticesReachable(u64 highest_vertex);
     GuestIndices GuestIndexRange(u32 index_offset);
@@ -187,15 +184,12 @@ private:
     std::vector<u32> expanded_indices;
     std::vector<std::array<u32, 4>> rect_input_table;
     u64 vertex_reach{}; ///< the last vertex every attribute of this draw can name inside the ring
-    bool indexed_rect_tables; // DEBUG_SAULO: off until the black screen they cause on D3D11 is understood
-    bool indexed_rect_logged{}; // DEBUG_SAULO: temporary
-    bool plain_rect_logged{}; // DEBUG_SAULO: temporary
-    bool depth_state_logged{}; // DEBUG_SAULO: temporary
+    // These tables black out the picture on Direct3D 11.
+    static constexpr bool indexed_rect_tables = false;
     std::unordered_set<std::string> reported;
     std::unordered_set<const char*> reported_literals;
     u64 draws{};
     u64 draws_reaching_gl{};
-    u32 reported_frame_errors{}; // DEBUG_SAULO: temporary
 };
 
 } // namespace OpenGL

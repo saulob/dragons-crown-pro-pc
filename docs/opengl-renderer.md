@@ -26,7 +26,7 @@ The `gl_*` files are in `gpu/shadps4/video_core/renderer_opengl`.
 | `gl_rasterizer.*`, `gl_shader_cache.*`, `gl_presenter.*` | Adapted from shadPS4's `vk_rasterizer`, `vk_pipeline_cache` and `vk_presenter`, with the Vulkan calls replaced; they keep the shadPS4 copyright notice |
 | `gl_detile.*` | Port of shadPS4's `tiling.comp` to the CPU, because OpenGL 3.3 has no compute; keeps the shadPS4 notice |
 | `shader_recompiler/backend/glsl/emit_glsl.*` | A GLSL 3.30 backend over the recompiler's IR, structured after shadPS4's SPIR-V backend; keeps the shadPS4 notice |
-| `gl_state.h` (`GlState`), `gl_stream_ring.*`, `gl_guest_watch.*` (`GuestWriteWatch`), `gl_texture_cache.*`, `gl_format.*`, `gl_api.*`, `gl_capabilities.h`, `gl_perf.*` | Original to this project. State caching, a streaming buffer, write-protecting guest pages to detect changes and a format table are standard emulator and OpenGL practice; `GuestWriteWatch` plays the role shadPS4's `PageManager` plays for Vulkan |
+| `gl_state.h` (`GlState`), `gl_stream_ring.*`, `gl_guest_watch.*` (`GuestWriteWatch`), `gl_texture_cache.*`, `gl_format.*`, `gl_api.*`, `gl_capabilities.h` | Original to this project. State caching, a streaming buffer, write-protecting guest pages to detect changes and a format table are standard emulator and OpenGL practice; `GuestWriteWatch` plays the role shadPS4's `PageManager` plays for Vulkan |
 | `renderer_backend.h`, `renderer_factory.cpp`, `gpu/shim/dcp_renderer.h` | Original to this project: the boundary between the GPU front end and a renderer, and the Renderer setting |
 
 ## Licensing

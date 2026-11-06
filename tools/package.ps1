@@ -140,7 +140,7 @@ function Test-ReleaseFolder([string]$Dir) {
     foreach ($problem in Get-AngleRuntimeProblems $base $AnglePin { param($path) Get-Imports $path $objdump }) { $problems.Add($problem) }
     if (-not (Test-Sha256 (Join-Path $base $AngleLicence) $AngleLicenceSha256)) { $problems.Add("missing or stale: $AngleLicence") }
     foreach ($folder in $AngleLinkedLicences) {
-        if (-not (Test-Path -LiteralPath (Join-Path $base "licenses\$folder\*"))) { $problems.Add("missing licence: licenses\$folder") }
+        if (-not (Get-ChildItem -LiteralPath (Join-Path $base "licenses\$folder") -File -ErrorAction SilentlyContinue)) { $problems.Add("missing licence: licenses\$folder") }
     }
     if (Test-Path -LiteralPath $exe) {
         foreach ($name in (Get-DllClosure $exe $bin $objdump).Keys) {

@@ -306,7 +306,6 @@ void Presenter::ApplySwapInterval() {
 
 Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
                                VAddr cpu_address) {
-    Perf::Scope timer{Perf::PrepareFrame};
     rasterizer->OnFlip();
     Image* image = rasterizer->GetTextureCache().FindDisplayBuffer(attribute, cpu_address);
     if (!image) {
@@ -369,14 +368,11 @@ Frame* Presenter::PrepareLastFrame() {
 
 void Presenter::Present(VideoCore::PresentFrame* present_frame, bool, bool is_game_frame) {
     if (pending_shows.load(std::memory_order_relaxed) >= MaxPendingShows) {
-        Perf::dropped_shows.fetch_add(1, std::memory_order_relaxed);
         return;
     }
     pending_shows.fetch_add(1, std::memory_order_relaxed);
     auto* frame = static_cast<Frame*>(present_frame);
-    const u64 posted = Perf::Now();
-    liverpool->SendCommand([this, frame, is_game_frame, posted] {
-        Perf::timers[Perf::ShowWait] += Perf::Now() - posted;
+    liverpool->SendCommand([this, frame, is_game_frame] {
         Show(*frame, is_game_frame);
         pending_shows.fetch_sub(1, std::memory_order_relaxed);
     });
@@ -387,7 +383,6 @@ void Presenter::Show(const Frame& frame, bool is_game_frame) {
     const int window_height = std::max(window.GetHeight(), 1);
     ApplySwapInterval();
     GlState& state = rasterizer->State();
-    Perf::Scope timer{Perf::ShowFrame};
     rasterizer->ResetState();
     state.Viewport(0, 0, window_width, window_height);
     gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -417,23 +412,16 @@ void Presenter::Show(const Frame& frame, bool is_game_frame) {
         }
     }
     state.Viewport(0, 0, window_width, window_height);
-    {
-        Perf::Scope overlay_timer{Perf::Overlay};
-        DcpOverlay::RenderOpenGL(u32(window_width), u32(window_height));
-    }
+    DcpOverlay::RenderOpenGL(u32(window_width), u32(window_height));
     // ImGui sets state behind the tracker's back.
     state.Invalidate();
     if (is_game_frame) {
         DcpOverlay::LogPresent();
     }
-    {
-        Perf::Scope swap_timer{Perf::SwapWindow};
-        const bool swapped = SDL_GL_SwapWindow(window.GetSDLWindow());
-        if (gles) {
-            CheckSwap(swapped);
-        }
+    const bool swapped = SDL_GL_SwapWindow(window.GetSDLWindow());
+    if (gles) {
+        CheckSwap(swapped);
     }
-    Perf::OnPresent();
     state.Enable(GlState::Cap::FramebufferSrgb, true);
 }
 

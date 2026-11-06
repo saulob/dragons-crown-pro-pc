@@ -54,6 +54,9 @@ CUSA07001 1.00, 1.02 and 1.03 and CUSA10209 1.00. CUSA10454 1.01, CUSA10209 1.02
 Reported by the contributor from play on Windows, CUSA10454 1.00, with an earlier image-based presence under another
 application: class, level, title, town, buildings, all nine stages, Lost Zone, Labyrinth of Chaos and camp.
 
+While Online Play is on, the presence counts as online from the title screen on: **Online, waiting for players** can
+show with no room open, and couch players are not counted.
+
 Not verified by anyone yet: the official application and this text-only presence on real Discord, the Prison, any online
 state (**Online co-op**, **Online, waiting for players**, the player's own class in a room) and real Discord on Linux,
 Flatpak, Snap or Proton. On a build where a place is missing or the player-unit tick is unavailable, the presence stays

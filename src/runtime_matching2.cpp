@@ -650,7 +650,7 @@ void OnEvent(const net::LobbyMessage& m) {
         const Member joined = MemberOf(b["member"]);
         g.members[joined.id] = joined;
         Remember(joined.name, b["member"]);
-        std::printf("Matching2: member 0x%x (%s) joined\n", joined.id, joined.name.c_str());
+        std::printf("Matching2: member 0x%x joined\n", joined.id);
         uint8_t* data = block->alloc(0x20);
         Wr<uint8_t*>(data, 0, MemberStruct(*block, joined));
         PushRoomEvent(kRoomMemberJoined, block, data);

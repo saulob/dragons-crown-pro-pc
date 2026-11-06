@@ -80,15 +80,12 @@ void GuestWriteWatch::ReleaseRun::Flush() {
 
 void GuestWriteWatch::Disarm(Leaf& leaf, u32 index) {
     leaf.state[index] = Writable;
-    --armed_pages;
-    ++stats.pages_released;
 }
 
 void GuestWriteWatch::RecordWrite(Leaf& leaf, u32 index, u32 written) {
     const u32 now = frame.load(std::memory_order_relaxed);
     const u32 last = leaf.last_write_frame[index];
     leaf.written[index].store(written, std::memory_order_relaxed);
-    ++stats.pages_dirty;
     if (last == now) {
         return;
     }
@@ -102,7 +99,6 @@ void GuestWriteWatch::RecordWrite(Leaf& leaf, u32 index, u32 written) {
 void GuestWriteWatch::RecordNeighbor(Leaf& leaf, u32 index, u32 written) {
     const u32 now = frame.load(std::memory_order_relaxed);
     leaf.written[index].store(written, std::memory_order_relaxed);
-    ++stats.pages_dirty;
     leaf.cool_until[index] = std::max(leaf.cool_until[index], now + cooldown_frames);
 }
 
@@ -119,7 +115,6 @@ std::optional<u64> GuestWriteWatch::TryArm(VAddr address, u64 size) {
     for (u64 page = first; page < end; ++page) {
         const Leaf* leaf = LeafOf(page);
         if (leaf && leaf->cool_until[page & (PagesPerLeaf - 1)] > now) {
-            ++stats.arms_deferred;
             return std::nullopt;
         }
     }
@@ -130,16 +125,7 @@ std::optional<u64> GuestWriteWatch::TryArm(VAddr address, u64 size) {
             leaf = new Leaf{};
             leaves[page >> LeafBits].store(leaf, std::memory_order_release);
         }
-        const u32 index = u32(page & (PagesPerLeaf - 1));
-        const bool partly_ours = (page == first && (address & (PageBytes - 1)) != 0) ||
-                                 (page == end - 1 && ((address + size) & (PageBytes - 1)) != 0);
-        leaf->shared[index] = partly_ours ? 1 : 0;
-        if (leaf->state[index] == Armed) {
-            continue;
-        }
-        ++(leaf->state[index] == Unknown ? stats.pages_armed : stats.pages_rearmed);
-        leaf->state[index] = Armed;
-        ++armed_pages;
+        leaf->state[page & (PagesPerLeaf - 1)] = Armed;
     }
     // Whole range, whatever the states say: a remap the hooks have not reported yet leaves an
     // armed page writable, and protecting it again is free of side effects.
@@ -178,23 +164,9 @@ GuestWriteWatch::FaultResult GuestWriteWatch::OnWriteFault(VAddr address) {
         return FaultResult::NotOurs;
     }
     faults.fetch_add(1, std::memory_order_relaxed);
-    ++stats.faults;
-    stats.faults_gpu_thread += std::this_thread::get_id() == gpu_thread ? 1 : 0;
-    stats.faults_shared_page += leaf->shared[faulted_index];
-    stats.faults_repeat += leaf->strikes[faulted_index] != 0 ? 1 : 0;
-    if (leaf->fault_window[faulted_index] != stats_window) {
-        leaf->fault_window[faulted_index] = stats_window;
-        ++stats.unique_pages;
-    }
-    u32& block_window = leaf->block_window[faulted_index / PagesPerFault];
-    if (block_window != stats_window) {
-        block_window = stats_window;
-        ++stats.unique_blocks;
-    }
 
     if (state != Armed) {
         protect(faulted << PageBits, PageBytes, true);
-        ++stats.retries;
         return FaultResult::Retry;
     }
     const u32 written = NextEpoch();
@@ -243,10 +215,8 @@ void GuestWriteWatch::BeforeHostWrite(VAddr address, u64 size) {
     std::scoped_lock lock{mutex};
     u32 written = 0;
     ReleaseRun run{*this};
-    ++stats.host_writes;
     ForEachKnownPage(address, size, [&](Leaf& leaf, u32 index, u64 page) {
         written = written != 0 ? written : NextEpoch();
-        ++stats.host_write_pages;
         if (leaf.state[index] == Armed) {
             Disarm(leaf, index);
             run.Add(page);
@@ -260,7 +230,6 @@ void GuestWriteWatch::BeforeHostWrite(VAddr address, u64 size) {
 void GuestWriteWatch::NoteWritten(VAddr address, u64 size) {
     std::scoped_lock lock{mutex};
     u32 written = 0;
-    ++stats.invalidates;
     ForEachKnownPage(address, size, [&](Leaf& leaf, u32 index, u64) {
         written = written != 0 ? written : NextEpoch();
         if (leaf.state[index] == Armed) {
@@ -277,10 +246,8 @@ void GuestWriteWatch::Forget(VAddr address, u64 size) {
     const u32 now = frame.load(std::memory_order_relaxed);
     u32 written = 0;
     ReleaseRun run{*this};
-    ++stats.forgets;
     ForEachKnownPage(address, size, [&](Leaf& leaf, u32 index, u64 page) {
         written = written != 0 ? written : NextEpoch();
-        ++stats.forget_pages;
         if (leaf.state[index] == Armed) {
             Disarm(leaf, index);
             run.Add(page);
@@ -314,15 +281,6 @@ void GuestWriteWatch::ReleaseAll() {
             run.Add((u64(slot) << LeafBits) | index);
         }
     }
-}
-
-GuestWriteWatch::Stats GuestWriteWatch::TakeStats() {
-    std::scoped_lock lock{mutex};
-    Stats taken = stats;
-    taken.armed_pages_now = armed_pages;
-    stats = {};
-    ++stats_window;
-    return taken;
 }
 
 } // namespace OpenGL

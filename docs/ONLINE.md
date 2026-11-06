@@ -350,11 +350,15 @@ Rules the lobby enforces:
   is ignored and the peers use the relay. Repeating an unchanged advertised endpoint sends peers nothing.
 - Seat grace: when a greeted socket in a room closes, its seat is kept 30 s and room events for it are held (<= 32;
   more ends the seat at once). `room.resume` on a new socket of the same account retakes it and receives the held
-  events after the answer. Afterwards it is a disconnect (owner migration, `peer.gone`, `member_left`). Chat is never
-  held or stored.
+  events after the answer, then the current endpoint of every other member, including one who joined meanwhile. The
+  seat starts without an endpoint until the client reports one. Afterwards it is a disconnect (owner migration,
+  `peer.gone`, `member_left`). Chat is never held or stored.
 - Limits: frames 32 KB (160 KB for `incident.file`); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
   32 int attrs; 16 filters; 200 friends; 50 pending requests each way (expire after 14 days); chat 120 characters, 5
-  burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; 16 sockets and 20 new
+  burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; requests that change a stored
+  row, per socket and account: room data and endpoints in a room 40 burst then 1/s (160 then 4/s per address), friend
+  changes 20 burst then 1 per 3 s (60 then 1/s per address), answered `limit` with `retry_ms`; unchanged updates are free;
+  more than 30 refused or malformed requests, refilled 1 per 2 s, close the socket with 1008; 16 sockets and 20 new
   accounts per day per address (IPv6 per /64; loopback exempt on the development server); 30 new connections per 60 s per
   address at the Worker (HTTP 429); per account, sign-ins 12 burst then 1 per 15 s, `room.create` 6 burst then 1 per
   20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; party

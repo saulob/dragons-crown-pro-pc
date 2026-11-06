@@ -52,6 +52,10 @@ constexpr std::string_view kVersionWords[] = {"amd",   "api",  "build",  "driver
 
 constexpr std::string_view kProfileRoots[] = {"/var/home/", "/run/media/", "/home/", "/Users/", "/media/"};
 
+constexpr std::string_view kPosixSystemRoots[] = {"app", "app0", "bin", "boot", "dev", "etc", "lib", "lib32", "lib64", "nix", "opt",
+                                                  "proc", "run", "savedata0", "sbin", "snap", "sys", "system", "temp0", "tmp",
+                                                  "usr", "var"};
+
 char Folded(char c) { return c >= 'A' && c <= 'Z' ? char(c + 32) : c; }
 bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 bool IsLetter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
@@ -191,7 +195,42 @@ bool FollowsReplacedFolder(std::string_view line, size_t at) {
     return before.ends_with(kHome) || before.ends_with(kInstall);
 }
 
-// The end of `\\server\share` starting at `at`, plain or JSON-escaped, or nullopt. `\\?\C:\` is a local path.
+// True when the punctuation at `at` is part of a folder name: a separator follows, before any other path starts.
+bool FolderContinues(std::string_view line, size_t at) {
+    constexpr std::string_view kStops = "\"<>|*?";
+    for (size_t i = at; i < line.size() && kStops.find(line[i]) == std::string_view::npos; ++i) {
+        if (!IsSeparator(line[i])) continue;
+        const bool drive = i >= 2 && line[i - 1] == ':' && IsLetter(line[i - 2]);
+        return !drive && !IsBlank(line[i - 1]);
+    }
+    return false;
+}
+
+// Paths in a log run to the end of the line, a quote, or the words after them.
+size_t PathEnd(std::string_view line, size_t at) {
+    constexpr std::string_view kStops = "\"<>|*?";
+    for (size_t i = at; i < line.size(); ++i) {
+        if (kStops.find(line[i]) != std::string_view::npos) return i;
+        const bool closes = line[i] == ':' || line[i] == ',' || line[i] == ';';
+        const bool soft_stop = (closes && i + 1 < line.size() && line[i + 1] == ' ') ||
+                               (line[i] == ' ' && i + 1 < line.size() && line[i + 1] == '(');
+        if (soft_stop && !FolderContinues(line, i)) return i;
+    }
+    return line.size();
+}
+
+// Where the last name of the path in [at, end) starts, on the separators before it.
+size_t LastNameStart(std::string_view line, size_t at, size_t end) {
+    while (end > at && IsSeparator(line[end - 1])) --end;
+    const size_t separator = line.substr(at, end - at).find_last_of("\\/");
+    if (separator == std::string_view::npos) return end;
+    size_t start = at + separator;
+    while (start > at && IsSeparator(line[start - 1])) --start;
+    return start;
+}
+
+// The end of the folders of `\\server\share\...` starting at `at`, plain or JSON-escaped, or nullopt. `\\?\C:\` is a
+// local path.
 std::optional<size_t> NetworkPathEnd(std::string_view line, size_t at) {
     if (!line.substr(at).starts_with("\\\\")) return std::nullopt;
     const size_t server = SkipSeparators(line, at);
@@ -199,7 +238,9 @@ std::optional<size_t> NetworkPathEnd(std::string_view line, size_t at) {
     if (at > 0 && (IsWord(line[at - 1]) || line[at - 1] == ':' || IsSeparator(line[at - 1]))) return std::nullopt;
     if (FollowsReplacedFolder(line, at)) return std::nullopt;
     const size_t host = NameEnd(line, server);
-    return host < line.size() && IsSeparator(line[host]) ? NameEnd(line, SkipSeparators(line, host)) : host;
+    if (host >= line.size() || !IsSeparator(line[host])) return host;
+    const size_t share = NameEnd(line, SkipSeparators(line, host));
+    return std::max(share, LastNameStart(line, share, PathEnd(line, share)));
 }
 
 std::string ReplaceProfilePaths(std::string_view line) {
@@ -229,16 +270,18 @@ bool IsSystemFolder(std::string_view path_after_drive) {
     });
 }
 
-// Paths in a log run to the end of the line, a quote, or the words after them.
-size_t PathEnd(std::string_view line, size_t at) {
-    constexpr std::string_view kStops = "\"<>|*?";
-    for (size_t i = at; i < line.size(); ++i) {
-        if (kStops.find(line[i]) != std::string_view::npos) return i;
-        const bool closes = line[i] == ':' || line[i] == ',' || line[i] == ';';
-        if (closes && i + 1 < line.size() && line[i + 1] == ' ') return i;
-        if (line[i] == ' ' && i + 1 < line.size() && line[i + 1] == '(') return i;
+// A mount point or other root folder can be named after a person; the system's and the guest's cannot.
+bool StartsPosixFolder(std::string_view line, size_t at) {
+    if (line[at] != '/' || at + 1 >= line.size() || !IsWord(line[at + 1])) return false;
+    if (at > 0 && !IsBlank(line[at - 1]) && line[at - 1] != '"' && line[at - 1] != '\'' && line[at - 1] != '(' && line[at - 1] != '=') {
+        return false;
     }
-    return line.size();
+    const size_t name = at + 1, end = NameEnd(line, name);
+    if (end >= line.size() || !IsSeparator(line[end])) return false;
+    const std::string_view root = line.substr(name, end - name);
+    return std::none_of(std::begin(kPosixSystemRoots), std::end(kPosixSystemRoots), [&](std::string_view system) {
+        return system.size() == root.size() && StartsFolded(root, system);
+    });
 }
 
 // A folder outside the system's can be named after anyone, and only the file's own name helps a diagnosis.
@@ -248,12 +291,12 @@ std::string ReplaceLocalFolders(std::string_view line) {
     for (size_t i = 0; i < line.size();) {
         const bool drive = i + 2 < line.size() && IsLetter(line[i]) && line[i + 1] == ':' && IsSeparator(line[i + 2]) &&
                            (i == 0 || !IsWord(line[i - 1]));
-        if (!drive) {
+        if (!drive && !StartsPosixFolder(line, i)) {
             out += line[i++];
             continue;
         }
-        const size_t start = SkipSeparators(line, i + 2), end = PathEnd(line, start);
-        if (IsSystemFolder(line.substr(start, end - start))) {
+        const size_t start = drive ? SkipSeparators(line, i + 2) : i + 1, end = PathEnd(line, start);
+        if (drive && IsSystemFolder(line.substr(start, end - start))) {
             out += line.substr(i, end - i);
         } else {
             size_t last = end;
@@ -264,7 +307,7 @@ std::string ReplaceLocalFolders(std::string_view line) {
             if (separator != std::string_view::npos) {
                 out += path.substr(separator);
             } else {
-                out += line[i + 2];
+                out += line[start - 1];
                 out += path;
             }
         }
@@ -461,6 +504,12 @@ size_t Ipv6Size(std::string_view text) {
     size_t end = 0;
     while (end < text.size() && (IsHex(text[end]) || text[end] == ':' || text[end] == '.')) ++end;
     while (end > 0 && (text[end - 1] == '.' || (text[end - 1] == ':' && !(end >= 2 && text[end - 2] == ':')))) --end;
+    if (end >= 3 && !IsIpv6(text.substr(0, end))) {
+        // `address:port`, which a log prints without brackets.
+        const size_t colon = text.substr(0, end).rfind(':');
+        const std::string_view port = text.substr(colon + 1, end - colon - 1);
+        if (colon != std::string_view::npos && std::all_of(port.begin(), port.end(), IsDigit)) end = colon;
+    }
     if (end < 3 || !IsIpv6(text.substr(0, end))) return 0;
     if (end < text.size() && text[end] == '%') {
         size_t zone = end + 1;

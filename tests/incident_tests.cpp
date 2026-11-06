@@ -261,6 +261,7 @@ void TestAddresses() {
 
     CHECK(Scrub("it sees 2001:db8:85a3::8a2e:370:7334") == "it sees <ipv6>");
     CHECK(Scrub("peer [2001:db8::1]:3658") == "peer [<ipv6>]:3658");
+    CHECK(Scrub("lobby has 2804:14c:65:8ba2:1111:2222:3333:1122:3658)") == "lobby has <ipv6>:3658)");
     CHECK(Scrub("link fe80::1c2d:3eff:fe4a:5b6c%eth0 up") == "link <ipv6> up");
     CHECK(Scrub("full 2001:0db8:0000:0000:0000:ff00:0042:8329.") == "full <ipv6>.");
     CHECK(Scrub("mapped ::ffff:203.0.113.7 here") == "mapped <ipv6> here");
@@ -302,7 +303,18 @@ void TestLocalPaths() {
     CHECK(Scrub("package E:\\torrent_complete\\Zefas Stuff\\game.pkg") == "package <folder>\\game.pkg");
     CHECK(Scrub("Linux /home/ana/.local/share/dcp/x.log") == "Linux <home>/.local/share/dcp/x.log");
     CHECK(Scrub("Linux /run/media/ana/Games/dcp") == "Linux <home>/Games/dcp");
-    CHECK(Scrub("share \\\\FILESERVER\\ana\\logs\\a.log") == "share <network-path>\\logs\\a.log");
+    CHECK(Scrub("share \\\\FILESERVER\\ana\\logs\\a.log") == "share <network-path>\\a.log");
+    CHECK(Scrub("share \\\\NAS\\Games\\Jane Roe\\x.pkg: refused") == "share <network-path>\\x.pkg: refused");
+
+    // Folders are named after people outside the profile too, with any punctuation.
+    CHECK(Scrub("package /mnt/nas/Jane Roe/x.pkg") == "package <folder>/x.pkg");
+    CHECK(Scrub("package \"/srv/Jane Roe/x.pkg\"") == "package \"<folder>/x.pkg\"");
+    CHECK(Scrub("package D:\\Jane Roe (Backup)\\x.pkg") == "package <folder>\\x.pkg");
+    CHECK(Scrub("package D:\\Roe, Jane\\x.pkg: refused") == "package <folder>\\x.pkg: refused");
+    CHECK(Scrub("loaded C:\\Windows\\a.dll, D:\\Jane Roe\\x.pkg") == "loaded C:\\Windows\\a.dll, <folder>\\x.pkg");
+    CHECK(Scrub("loaded /usr/lib/libvulkan.so.1 (found)") == "loaded /usr/lib/libvulkan.so.1 (found)");
+    CHECK(Scrub("guest open /app0/data/DRACRO.CPK") == "guest open /app0/data/DRACRO.CPK");
+    CHECK(Scrub("Render 1920/1080 and/or 21:9") == "Render 1920/1080 and/or 21:9");
 
     // An encoded name that is not UTF-8 goes with its path, and the rest of the text stays valid.
     CHECK(Scrub("Settings: C:\\Users\\Jo\xE3o\\dcp.ini") == "Settings: <home>\\dcp.ini");
