@@ -31,6 +31,7 @@
 #include "runtime_log.h"
 #include "isa_emulate.h"
 #include "lzcnt_compat.h"
+#include "discord_presence.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error Dragon's Crown Pro PC requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -636,6 +637,7 @@ int main(int argc, char **argv) {
         printf("DCP: game build pinned by DCP_GAME_BUILD\n");
     }
     runtime_online_configure(settings_file,user_dir,known_build ? build_key : NULL);
+    const int discord_presence=!check_imports && !cpu_only && discord_presence_start(settings_file,app0);
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
     render_target=dcp_render_target(render_resolution,aspect_ratio);
@@ -644,6 +646,7 @@ int main(int argc, char **argv) {
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir,app0));
     runtime_pad_set_settings(settings_file);
     runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file));

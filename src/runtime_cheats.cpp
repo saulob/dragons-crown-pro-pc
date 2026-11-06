@@ -20,6 +20,7 @@ std::atomic<int> g_saved_movement{dcp::cheats::kMovementSpeedOff};
 std::atomic<int> g_available{0};
 std::atomic<bool> g_online{false};
 int (*g_slot_human)(int slot) = nullptr;
+void (*g_player_observer)(uint64_t unit) = nullptr;
 
 bool Valid(int cheat) {
     return cheat >= 0 && static_cast<size_t>(cheat) < dcp::cheats::kCheatCount;
@@ -105,6 +106,14 @@ extern "C" int runtime_cheat_movement_cycle(void) {
 
 extern "C" void runtime_cheats_set_slot_human(int (*is_human)(int slot)) {
     g_slot_human = is_human;
+}
+
+extern "C" void runtime_cheats_set_player_observer(void (*observe)(uint64_t unit)) {
+    g_player_observer = observe;
+}
+
+extern "C" void runtime_cheat_observe_player(uint64_t unit) {
+    if (g_player_observer) g_player_observer(unit);
 }
 
 extern "C" int runtime_cheat_slot_human(int slot) {

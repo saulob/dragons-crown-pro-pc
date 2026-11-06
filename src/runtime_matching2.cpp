@@ -1300,6 +1300,12 @@ void friends_fetch() {
     g.pending[seq] = Pending{Kind::kFriends, 0, nullptr, nullptr, 0};
 }
 
+RoomView room_view() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g.room) return {};
+    return {party::MemberSlot(g.me), int(g.members.size())};
+}
+
 PageLink page_link() {
     PageLink out;
     if (!settings().enabled) return out;

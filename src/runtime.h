@@ -84,6 +84,9 @@ int64_t runtime_file_open(const char *path, int flags, int mode);
 int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
 int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
+/* Called after every successful read with the guest path, the file offset and the size (Discord presence). It runs on
+ * the reading thread and must not block. */
+void runtime_file_set_read_observer(void (*observe)(const char *guest, uint64_t offset, uint64_t size));
 int64_t runtime_file_write(int fd, const void *buffer, uint64_t size);
 int64_t runtime_file_lseek(int fd, int64_t offset, int whence);
 int64_t runtime_file_stat(const char *path, void *guest_stat);

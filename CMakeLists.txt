@@ -127,12 +127,16 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
     add_executable(dragons_crown_pro ${DCP_MAIN_SOURCES})
 endif()
+# Discord Rich Presence (docs/DISCORD.md): dcp.ini can override the application id. Not a cache variable: a configured
+# build folder would keep the id it cached first.
+set(DCP_DISCORD_CLIENT_ID "1568342665970458705")
+set_source_files_properties(src/discord_presence.cpp PROPERTIES COMPILE_DEFINITIONS "DCP_DISCORD_CLIENT_ID=\"${DCP_DISCORD_CLIENT_ID}\"")
 set_target_properties(dragons_crown_pro PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dragons_crown_pro PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(dragons_crown_pro PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)
@@ -421,6 +425,12 @@ target_compile_options(dcp-system-type-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the online party snapshot: the observer, the snapshot and its report rules, the hook on a synthetic
 # image, and the client's sources (tools/test.ps1); not part of the default build.
+add_executable(dcp-discord-tests EXCLUDE_FROM_ALL tests/discord_tests.cpp)
+set_target_properties(dcp-discord-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-discord-tests PRIVATE src)
+target_compile_definitions(dcp-discord-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-discord-tests PRIVATE -Wall -Wextra)
+
 add_executable(dcp-party-tests EXCLUDE_FROM_ALL tests/party_tests.cpp src/guest_hook.c src/party_hook.cpp)
 set_target_properties(dcp-party-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-party-tests PRIVATE src)

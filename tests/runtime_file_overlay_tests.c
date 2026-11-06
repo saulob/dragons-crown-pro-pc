@@ -31,6 +31,59 @@ static void write_host_file(const char *path, const char *text) {
     }
 }
 
+static struct { char guest[64]; uint64_t offset, size; int calls; } observed;
+static void observe(const char *guest, uint64_t offset, uint64_t size) {
+    snprintf(observed.guest, sizeof(observed.guest), "%s", guest);
+    observed.offset = offset;
+    observed.size = size;
+    ++observed.calls;
+}
+
+/* The observer sees successful reads only and changes nothing about them, overlaid or not. */
+static void test_read_observer(void) {
+    unsigned char seen[32];
+    const int plain = (int)runtime_file_open("/app0/plain.cpk", 0, 0);
+    const int overlaid = (int)runtime_file_open("/app0/arch.cpk", 0, 0);
+    CHECK(plain >= 0 && overlaid >= 0);
+
+    CHECK(runtime_file_read(plain, seen, 4) == 4 && observed.calls == 0);
+    CHECK(runtime_file_pread(plain, seen, 4, 8) == 4 && memcmp(seen, "89AB", 4) == 0 && observed.calls == 0);
+    CHECK(runtime_file_lseek(plain, 0, SEEK_SET) == 0);
+
+    runtime_file_set_read_observer(observe);
+    CHECK(runtime_file_read(plain, seen, 4) == 4 && memcmp(seen, "0123", 4) == 0);
+    CHECK(observed.calls == 1 && !strcmp(observed.guest, "/app0/plain.cpk") && observed.offset == 0 && observed.size == 4);
+    CHECK(runtime_file_read(plain, seen, 4) == 4 && memcmp(seen, "4567", 4) == 0);
+    CHECK(observed.calls == 2 && observed.offset == 4 && runtime_file_lseek(plain, 0, SEEK_CUR) == 8);
+
+    CHECK(runtime_file_pread(plain, seen, 2, 12) == 2 && memcmp(seen, "CD", 2) == 0);
+    CHECK(observed.calls == 3 && observed.offset == 12 && observed.size == 2 && runtime_file_lseek(plain, 0, SEEK_CUR) == 8);
+
+    /* A short read at the end reports what came back. */
+    CHECK(runtime_file_lseek(plain, 14, SEEK_SET) == 14 && runtime_file_read(plain, seen, 8) == 2);
+    CHECK(observed.calls == 4 && observed.offset == 14 && observed.size == 2);
+
+    const int quiet = observed.calls;
+    CHECK(runtime_file_read(plain, seen, 8) == 0);
+    CHECK(runtime_file_pread(plain, seen, 8, 100) == 0);
+    CHECK(runtime_file_read(9999, seen, 8) < 0 && runtime_file_pread(9999, seen, 8, 0) < 0);
+    CHECK(runtime_file_read(-1, seen, 8) < 0 && runtime_file_pread(plain, seen, 8, -1) < 0);
+    CHECK(observed.calls == quiet);
+
+    CHECK(runtime_file_read(overlaid, seen, 8) == 8 && memcmp(seen, "0123QQQQ", 8) == 0);
+    CHECK(observed.calls == quiet + 1 && !strcmp(observed.guest, "/app0/arch.cpk") && observed.offset == 0 && observed.size == 8);
+    CHECK(runtime_file_read(overlaid, seen, 8) == 8 && memcmp(seen, "QQQQCDEF", 8) == 0);
+    CHECK(observed.calls == quiet + 2 && observed.offset == 8);
+    CHECK(runtime_file_pread(overlaid, seen, 4, 20) == 4 && observed.calls == quiet + 3 && observed.offset == 20);
+    CHECK(runtime_file_pread(overlaid, seen, 4, 200) == 0 && observed.calls == quiet + 3);
+
+    runtime_file_set_read_observer(NULL);
+    CHECK(runtime_file_pread(plain, seen, 4, 0) == 4 && runtime_file_pread(overlaid, seen, 4, 0) == 4);
+    CHECK(observed.calls == quiet + 3);
+    runtime_file_close(plain);
+    runtime_file_close(overlaid);
+}
+
 static int64_t read_all(const char *guest, unsigned char *out, uint64_t size) {
     const int64_t fd = runtime_file_open(guest, 0, 0);
     if (fd < 0) return fd;
@@ -50,6 +103,8 @@ int main(void) {
     snprintf(host, sizeof(host), "%s/arch.cpk", app0);
     write_host_file(host, "0123456789ABCDEF");
     snprintf(host, sizeof(host), "%s/other.cpk", app0);
+    write_host_file(host, "0123456789ABCDEF");
+    snprintf(host, sizeof(host), "%s/plain.cpk", app0);
     write_host_file(host, "0123456789ABCDEF");
     runtime_file_configure(app0, user);
 
@@ -86,6 +141,8 @@ int main(void) {
     CHECK(runtime_file_overlay("/app0/third.cpk", 8, NULL, 0) == 0);
     CHECK(runtime_file_overlay("/app0/fourth.cpk", 8, NULL, 0) == 0);
     CHECK(runtime_file_overlay("/app0/fifth.cpk", 8, NULL, 0) == -1);
+
+    test_read_observer();
 
     printf("runtime overlay tests: %d checks, %d failures\n", checks, failures);
     free(patch);

@@ -379,6 +379,24 @@ static int64_t overlay_pread(const File *f,void *buffer,uint64_t size,int64_t of
     }
     return (int64_t)size;
 }
+/* Only told what was read: an observer has no way to change how a read went for the guest. */
+typedef void (*ReadObserver)(const char *guest,uint64_t offset,uint64_t size);
+static ReadObserver read_observer;
+void runtime_file_set_read_observer(ReadObserver observe) { __atomic_store_n(&read_observer,observe,__ATOMIC_RELEASE); }
+/* The host position a read is about to start at, when someone is watching; -1 otherwise. */
+static int64_t observed_position(int fd,int h) {
+    return fd>=3 && __atomic_load_n(&read_observer,__ATOMIC_ACQUIRE) ? host_lseek(h,0,SEEK_CUR) : -1;
+}
+static void observe_read(int fd,int64_t offset,int64_t n) {
+    ReadObserver observe=__atomic_load_n(&read_observer,__ATOMIC_ACQUIRE);
+    if (!observe || fd<3 || offset<0 || n<=0) return;
+    char path[sizeof(files[0].path)];
+    pthread_mutex_lock(&lock);
+    const File *f=get(fd);
+    if (f) memcpy(path,f->path,sizeof(path));
+    pthread_mutex_unlock(&lock);
+    if (f) observe(path,(uint64_t)offset,(uint64_t)n);
+}
 static int64_t do_read(int fd,void *buffer,uint64_t size) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
@@ -390,13 +408,16 @@ static int64_t do_read(int fd,void *buffer,uint64_t size) {
         int64_t n=overlay_pread(f,buffer,size,at);
         if (n>0 && host_lseek(h,at+n,SEEK_SET)<0) return -errno;
         if (n>0) { __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED); }
+        observe_read(fd,at,n);
         return n;
     }
+    const int64_t at=observed_position(fd,h);
     ssize_t n=host_read(h,buffer,size);
     /* DEBUG_SAULO: temporary, a kernel copy into a write-protected page reports no fault. */
     if (n<0) fprintf(stderr,"DEBUG_SAULO: read into %p failed, errno %d (%llu bytes)\n",buffer,errno,(unsigned long long)size);
     if (n<0) return -errno;
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
+    observe_read(fd,at,n);
     return n;
 }
 static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
@@ -407,11 +428,13 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     if (f && f->overlay) {
         int64_t n=overlay_pread(f,buffer,size,offset);
         if (n>0) { __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED); }
+        observe_read(fd,offset,n);
         return n;
     }
     ssize_t n=pread(h,buffer,size,offset);
     if (n<0) return -errno;
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
+    observe_read(fd,offset,n);
     return n;
 }
 static int64_t do_write(int fd,const void *buffer,uint64_t size) {
