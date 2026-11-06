@@ -446,7 +446,7 @@ Rudp entry points, in `net::PeerSocket`.
   frame is dropped and counted. A relayed frame is delivered to the link layer directly on receipt, so nothing queues
   on the way in.
 - Relay frames pass through the lobby's Durable Object, so unlike signalling their volume grows with the traffic of
-  relayed pairs. The relay exists only in the updated lobby: it has to be deployed before the relay can be used.
+  relayed pairs. The relay is part of the production lobby; an older lobby does not offer it.
 
 ## Friends, presence, chat, reports
 
@@ -499,7 +499,7 @@ browser or chat: a request made here is the normal `friends.add`, and nothing in
   **Refresh lobby** (one read at a time, 5 s apart) and after a friend event or a change in the requests. See
   `server/lobby/README.md` for the rate limits.
 - **Older clients** never send these requests and see no change. Against an older lobby the launcher shows that the Lobby
-  is not available and keeps working; the Worker has to be deployed before the feature can be used.
+  is not available and keeps working. The production lobby provides it.
 
 ## Developer and testing notes
 
