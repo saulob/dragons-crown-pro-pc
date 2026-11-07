@@ -45,6 +45,7 @@
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
+#include "default_message_hook.h"
 #include "file_browser.h"
 #include "fms_sheet.h"
 #include "game_files.h"
@@ -68,6 +69,8 @@
 #include "play_gate.h"
 #include "runtime_log.h"
 #include "settings.h"
+#include "latin_font.h"
+#include "latin_glyphs.h"
 #include "text_languages.h"
 #include "trg/layout.h"
 #include "trg/page_navigation.h"
@@ -2735,12 +2738,13 @@ void TestTextLanguage(const fs::path& base) {
     struct Expected { const char* key; const char* name; int id; };
     const Expected western[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
                                 {"italian", "Italian", 5}, {"spanish", "Spanish", 3}};
-    // USA 1.00 adds Brazilian Portuguese, the port's translation played in the English slot.
+    // Every build adds Brazilian Portuguese, the port's translation played in one of its own slots.
     const Expected us_languages[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
                                      {"italian", "Italian", 5}, {"brazilian_portuguese", "Portuguese (Brazil)", 1},
                                      {"spanish", "Spanish", 3}};
-    const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9}};
-    const Expected japanese[] = {{"japanese", "Japanese", 0}};
+    const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9},
+                              {"brazilian_portuguese", "Portuguese (Brazil)", 10}};
+    const Expected japanese[] = {{"japanese", "Japanese", 0}, {"brazilian_portuguese", "Portuguese (Brazil)", 0}};
     const auto check_list = [&](const GameBuild* build, std::span<const Expected> expected) {
         const std::span<const TextLanguage> languages = TextLanguagesOf(build);
         CHECK(languages.size() == expected.size());
@@ -2754,14 +2758,14 @@ void TestTextLanguage(const fs::path& base) {
         const std::string_view title = build.title_id;
         check_list(&build, title == "CUSA10209"   ? std::span<const Expected>(asian)
                            : title == "CUSA07001" ? std::span<const Expected>(japanese)
-                           : &build == &kUs       ? std::span<const Expected>(us_languages)
-                                                  : std::span<const Expected>(western));
+                                                  : std::span<const Expected>(us_languages));
     }
     CHECK(TextLanguagesOf(&kUs)[4].translation == "pt-BR" && TextLanguagesOf(&kUs)[4].suffix == "US");
     for (const GameBuild& build : SupportedBuilds()) {
-        for (const TextLanguage& language : build.text_languages) {
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
             CHECK(language.translation.empty() == (language.key != "brazilian_portuguese"));
         }
+        for (const TextLanguage& language : build.text_languages) CHECK(language.translation.empty());
     }
 
     for (const char* image : {us.c_str(), static_cast<const char*>(nullptr)}) {
@@ -2777,8 +2781,10 @@ void TestTextLanguage(const fs::path& base) {
     CHECK(IsValidSetting(kTextLanguageKey, "brazilian_portuguese"));
     CHECK(dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1); // the English slot
     CHECK(dcp_text_language(ini.c_str(), nullptr, nullptr) == 1);    // an unknown build: English
-    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10);
-    CHECK(ResolveTextLanguage(&kUs101, "brazilian_portuguese").key == "english");
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10); // the Traditional Chinese slot
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(ResolveTextLanguage(&build, "brazilian_portuguese").key == "brazilian_portuguese");
+    }
     for (const Expected& language : asian) {
         LauncherSettings settings(file);
         settings.Set(kTextLanguageKey, language.key);
@@ -2808,8 +2814,9 @@ void TestTextLanguage(const fs::path& base) {
     // Both CUSA10209 builds share one list: Traditional Chinese and Korean, no Western or Simplified Chinese language.
     for (const GameBuild* asia : {&kCk100, &kCk}) {
         const std::span<const TextLanguage> languages = TextLanguagesOf(asia);
-        CHECK(languages.size() == 2 && languages[0].key == "traditional_chinese" && languages[1].key == "korean");
+        CHECK(languages.size() == 3 && languages[0].key == "traditional_chinese" && languages[1].key == "korean");
         CHECK(languages[0].ps4_id == 10 && languages[1].ps4_id == 9);
+        CHECK(languages[2].key == kPortugueseBrazilKey && languages[2].ps4_id == 10 && languages[2].suffix == "CT");
         for (const char* absent : {"english", "french", "german", "italian", "spanish", "simplified_chinese"}) {
             CHECK(std::none_of(languages.begin(), languages.end(),
                                [&](const TextLanguage& language) { return language.key == absent; }));
@@ -5269,17 +5276,18 @@ void TestInstalledTextLanguages(const fs::path& base) {
     const auto keys = [&](const GameBuild* build) {
         std::string joined;
         for (const TextLanguage& language : InstalledTextLanguages(app0, build)) {
+            if (!language.translation.empty()) continue;
             joined += (joined.empty() ? "" : " ") + std::string(language.key) + "=" + std::to_string(language.ps4_id);
         }
         return joined;
     };
     const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
-    const std::string us_languages = "english=1 french=2 german=4 italian=5 brazilian_portuguese=1 spanish=3";
+    const std::string& us_languages = western; // the native slots: Brazilian Portuguese follows the English one
 
     // Every Western slot (the official 1.00 archive's layout): all five, in the build's order, on 1.00 and 1.01 alike;
-    // 1.00 adds Brazilian Portuguese over the English slot.
+    // both add Brazilian Portuguese over the English slot.
     WriteAll(regional, LanguageArchive({us, fr, de, it, es, uk}));
-    CHECK(keys(&kUs) == us_languages && keys(&kUs101) == western);
+    CHECK(keys(&kUs) == us_languages && keys(&kUs101) == us_languages);
     CHECK(SameLanguages(InstalledTextLanguages(app0, &kUs), TextLanguagesOf(&kUs)));
 
     // The reported 1.01 archive, Russian text in the US slot and no other slot, offers English and never Russian: the
@@ -5287,6 +5295,7 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(regional, LanguageArchive({Slot("US", russian), uk}));
     const std::vector<TextLanguage> russian_slot = InstalledTextLanguages(app0, &kUs101);
     CHECK(keys(&kUs101) == "english=1" && russian_slot[0].name == "English" && russian_slot[0].suffix == "US");
+    CHECK(russian_slot.size() == 2 && russian_slot[1].key == kPortugueseBrazilKey);
     for (const char* saved : {"english", "french", "german", "italian", "spanish", "russian"}) {
         CHECK(ResolveTextLanguage(russian_slot, saved).key == "english");
     }
@@ -5332,10 +5341,10 @@ void TestInstalledTextLanguages(const fs::path& base) {
     const std::string described = DescribeLanguageResources(app0, &kUs101);
     CHECK(described.starts_with("DRACRO_US.CPK: 22 entries") && contains(described, "; US 4 files, SystemMsg crc "));
     CHECK(contains(described, "; FR 4 files, SystemMsg crc ") && contains(described, "; DE 4 files, SystemMsg crc "));
-    CHECK(described.ends_with("; offered English, French, German, Italian, Spanish") && !contains(described, "Russian"));
+    CHECK(described.ends_with("; offered English, French, German, Italian, Portuguese (Brazil), Spanish") && !contains(described, "Russian"));
     CHECK(!contains(described, "Новая") && DescribeLanguageResources(app0, &kUs101) == described);
     WriteAll(regional, LanguageArchive({us}));
-    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English"));
+    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English, Portuguese (Brazil)"));
     WriteAll(regional, "not an archive");
     CHECK(DescribeLanguageResources(app0, &kUs101) == "DRACRO_US.CPK unreadable");
     fs::remove(regional);
@@ -5364,7 +5373,7 @@ void TestInstalledTextLanguages(const fs::path& base) {
     CHECK(keys(&kUs101) == western);
     fs::remove(regional);
     CHECK(keys(&kUs) == us_languages && keys(&kUs101) == western && keys(nullptr) == western);
-    CHECK(InstalledTextLanguages({}, &kUs101).size() == 5);
+    CHECK(InstalledTextLanguages({}, &kUs101).size() == 6);
 
     // Asia/Hong Kong: Traditional Chinese and Korean from DRACRO_CK.CPK, unchanged.
     WriteAll(app0 / "DRACRO_CK.CPK", LanguageArchive({Slot("CT", Sheet("繁體中文")), Slot("KR", Sheet("한국어"))}));
@@ -5384,9 +5393,10 @@ void TestInstalledTextLanguages(const fs::path& base) {
     // Every archive language names its own slot; Japanese has none and a translation the slot of a language before it.
     for (const GameBuild& build : SupportedBuilds()) {
         std::set<std::string_view> suffixes;
-        for (const TextLanguage& language : build.text_languages) {
-            CHECK(language.key == "japanese"      ? language.suffix.empty()
-                  : !language.translation.empty() ? suffixes.count(language.suffix) == 1
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
+            CHECK(language.key == "japanese"                                   ? language.suffix.empty()
+                  : !language.translation.empty() && !language.suffix.empty()  ? suffixes.count(language.suffix) == 1
+                  : !language.translation.empty()                              ? std::string_view(build.title_id) == "CUSA07001"
                                                   : language.suffix.size() == 2 && suffixes.insert(language.suffix).second);
         }
     }
@@ -5425,7 +5435,8 @@ void TestTextLanguageSwitching(const fs::path& base) {
 
     for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
         const std::vector<TextLanguage> languages = InstalledTextLanguages(app0_of(*japan), japan);
-        CHECK(languages.size() == 1 && languages[0].key == "japanese" && languages[0].name == "Japanese");
+        CHECK(languages.size() == 2 && languages[0].key == "japanese" && languages[0].name == "Japanese");
+        CHECK(languages[1].key == kPortugueseBrazilKey && languages[1].ps4_id == 0 && NativeJapaneseNpcVoices(japan));
         CHECK(languages[0].ps4_id == 0 && SameLanguages(languages, TextLanguagesOf(japan)));
         for (const char* saved : {"japanese", "english", "french", "korean", "traditional_chinese", "russian", "", "x"}) {
             CHECK(told(*japan, saved) == 0);
@@ -5460,11 +5471,13 @@ void TestTextLanguageSwitching(const fs::path& base) {
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs), &kUs), switch_to(kUs)).key == "english"); // a stale Russian -> USA
     WriteAll(ini, "text_language=russian\n");
     CHECK(ResolveTextLanguage(InstalledTextLanguages(app0_of(kUs101), &kUs101), switch_to(kUs101)).key == "english"); // -> 1.01
-    CHECK(told(kUs, "brazilian_portuguese") == 1);
+    CHECK(told(kUs, "brazilian_portuguese") == 1 && told(kCk, "brazilian_portuguese") == 10);
+    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) CHECK(told(*japan, "brazilian_portuguese") == 0);
+    // The saved language survives every switch between supported builds.
     WriteAll(ini, "text_language=brazilian_portuguese\n");
-    CHECK(switch_to(kUs101) == "english");          // USA -> 1.01: the translation is 1.00's
-    WriteAll(ini, "text_language=brazilian_portuguese\n");
-    CHECK(switch_to(kCk) == "traditional_chinese"); // USA -> Asia
+    for (const GameBuild* build : {&kUs101, &kJp100, &kCk, &kJp102, &kUs, &kJp103, &kUs101}) {
+        CHECK(switch_to(*build) == "brazilian_portuguese");
+    }
     for (const char* kept : {"english", "french", "german", "italian", "brazilian_portuguese", "spanish"}) {
         WriteAll(ini, std::string("text_language=") + kept + "\n");
         LauncherSettings settings(ini);
@@ -5567,7 +5580,7 @@ void TestNpcVoiceResources(const fs::path& base) {
     const std::vector<TextLanguage> with_voices = InstalledTextLanguages(staged, &kUs101);
     fs::remove(staged / "DRACRO.CPK");
     CHECK(!NpcVoiceResourcesPresent(staged));
-    CHECK(SameLanguages(with_voices, InstalledTextLanguages(staged, &kUs101)) && with_voices.size() == 5);
+    CHECK(SameLanguages(with_voices, InstalledTextLanguages(staged, &kUs101)) && with_voices.size() == 6);
 }
 
 void TestKeepBaseLanguages(const fs::path& base) {
@@ -5596,12 +5609,13 @@ void TestKeepBaseLanguages(const fs::path& base) {
     const auto keys = [](const fs::path& app0, const GameBuild& build) {
         std::string joined;
         for (const TextLanguage& language : InstalledTextLanguages(app0, &build)) {
+            if (!language.translation.empty()) continue;
             joined += (joined.empty() ? "" : " ") + std::string(language.key) + "=" + std::to_string(language.ps4_id);
         }
         return joined;
     };
     const std::string western = "english=1 french=2 german=4 italian=5 spanish=3";
-    const std::string us_languages = "english=1 french=2 german=4 italian=5 brazilian_portuguese=1 spanish=3";
+    const std::string& us_languages = western; // the native slots: Brazilian Portuguese follows the English one
 
     std::vector<Entry> us = Slot("US", kEnglishSheet);
     us.push_back({"msgsheet/StaffRollMsg_PS4_US.fms", "staff", false});
@@ -5670,11 +5684,10 @@ void TestKeepBaseLanguages(const fs::path& base) {
         CHECK(merged.entries()[i].id == i);
         CHECK(i == 0 || order_key(merged.entries()[i - 1].path) < order_key(merged.entries()[i].path));
     }
-    CHECK(keys(merged_app0, kUs101) == western && keys(merged_app0, kUs) == us_languages);
+    CHECK(keys(merged_app0, kUs101) == us_languages && keys(merged_app0, kUs) == us_languages);
     for (const GameBuild* us_build : {&kUs, &kUs101}) {
         const std::vector<TextLanguage> offered = InstalledTextLanguages(merged_app0, us_build);
-        CHECK(LanguageNames(offered) == (us_build == &kUs ? "English, French, German, Italian, Portuguese (Brazil), Spanish"
-                                                          : "English, French, German, Italian, Spanish"));
+        CHECK(LanguageNames(offered) == "English, French, German, Italian, Portuguese (Brazil), Spanish");
         CHECK(offered[0].key == "english" && offered[0].ps4_id == 1 && offered[0].suffix == "US");
         CHECK(std::none_of(offered.begin(), offered.end(), [](const TextLanguage& language) {
             return language.suffix == "UK" || language.key == "russian" || language.name == "Russian";
@@ -5968,7 +5981,7 @@ void TestGameTranslation(const fs::path& base) {
     const ArchiveTranslation missing = TranslateArchive(app0 / "MISSING.CPK", "US", files);
     CHECK(!missing.overlay && missing.error.rfind("MISSING.CPK: ", 0) == 0);
 
-    // The loader's call: only Brazilian Portuguese on USA 1.00 is a translation; English and Spanish say nothing.
+    // The loader's call: only Brazilian Portuguese is a translation; English and Spanish say nothing.
     const fs::path ini = base / "translation_dcp.ini";
     const fs::path image = base / "translation_image";
     WriteAll(image / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") +
@@ -5981,7 +5994,7 @@ void TestGameTranslation(const fs::path& base) {
         char text[1024];
         const std::string image_text = image_dir ? image_dir->string() : std::string();
         const char* archive = dcp_text_translation(ini.string().c_str(), image_dir ? image_text.c_str() : nullptr,
-                                                   app0.string().c_str(), &length, &patches, &count, text, sizeof(text));
+                                                   app0.string().c_str(), &length, &patches, &count, text, sizeof(text), 0, nullptr);
         message = text;
         localization::SetActiveLanguage("english");
         return archive;
@@ -6004,7 +6017,7 @@ void TestGameTranslation(const fs::path& base) {
             uint64_t length = 0;
             char text[1024];
             return dcp_text_translation(ini.string().c_str(), image_text.c_str(), installed.string().c_str(), &length,
-                                        &patches, &count, text, sizeof(text));
+                                        &patches, &count, text, sizeof(text), 0, nullptr);
         };
         DcpFilePatch* patches = nullptr;
         size_t count = 0;
@@ -6023,6 +6036,522 @@ void TestGameTranslation(const fs::path& base) {
     fs::remove_all(app0);
     fs::remove_all(image);
     fs::remove(ini);
+}
+
+// A font pack of a 4096 x 4096 Thin_1dThin BC7 atlas, blank but for filled rectangles in the cells of the given characters.
+std::vector<uint8_t> SyntheticFont(std::string_view glyphs) {
+    const size_t data_at = 0x1c0, bytes = size_t(1024) * 1024 * 16;
+    std::vector<uint8_t> font(data_at + bytes);
+    const auto put = [&](size_t at, uint32_t value) {
+        for (int i = 0; i < 4; ++i) font[at + size_t(i)] = uint8_t(value >> (i * 8));
+    };
+    std::copy_n("FTEX", 4, font.begin());
+    put(8, 0x80);
+    put(12, 1);
+    std::copy_n("FTX0", 4, font.begin() + 0x80);
+    put(0x84, uint32_t(bytes + 0x100));
+    put(0x88, 0x40);
+    std::copy_n("GNF ", 4, font.begin() + 0xc0);
+    const size_t descriptor = 0xc0 + 16;
+    put(descriptor + 4, 41u << 20);
+    put(descriptor + 8, 4095u | 4095u << 14);
+    put(descriptor + 12, 13u << 20);
+    put(descriptor + 16, 4095u << 13);
+    const auto block = [&](int bx, int by) {
+        const int x = bx & 7, y = by & 7;
+        const int micro = (x & 1) | (y & 1) << 1 | (x & 2) << 1 | (y & 2) << 2 | (x & 4) << 2 | (y & 4) << 3;
+        return data_at + (size_t(by / 8) * 128 + size_t(bx / 8)) * 64 * 16 + size_t(micro) * 16;
+    };
+    uint8_t solid[16] = {};
+    solid[0] = 0x40; // mode 6, every channel's endpoints 127
+    for (const int bit : {7, 14, 21, 28, 35, 42}) {
+        for (int i = 0; i < 7; ++i) solid[(bit + i) >> 3] |= uint8_t(1 << ((bit + i) & 7));
+    }
+    for (int bit = 49; bit < 63; ++bit) solid[bit >> 3] |= uint8_t(1 << (bit & 7));
+    solid[7] |= 0x80 | 0x40; // endpoint alpha 255 on both P bits
+    for (const char c : glyphs) {
+        const int cell = uint8_t(c) - 0x1f;
+        const int left = (cell % 60) * kLatinFontCellPixels, top = (cell / 60) * kLatinFontCellPixels;
+        for (int by = top / 4 + 6; by < top / 4 + 14; ++by) {
+            for (int bx = left / 4 + 2; bx < left / 4 + 8; ++bx) std::copy_n(solid, 16, font.begin() + std::ptrdiff_t(block(bx, by)));
+        }
+    }
+    return font;
+}
+
+void TestLatinGlyphs() {
+    CHECK(FoldLatinLetters("A\xC3\xA7\xC3\xA3o \xC3\x89 @#(34) %d") == "Acao E @#(34) %d");
+    CHECK(FoldLatinLetters("\xE2\x98\x85 plain") == "\xE2\x98\x85 plain");
+    CHECK(SameArguments("@#(36)%s\xE4\xBD\xBF\xE7\x94\xA8", "Usa %s @#(36)") && !SameArguments("%s", "%d") && !SameArguments("@#(53)x", "@#(34)x"));
+    CHECK(SameArguments("@c(14)%s##(ABILITY)", "A %s") && !SameArguments("\xE7\x84\xA1\xE5\x8A\xB9", "%d") );
+
+    std::vector<uint8_t> blank = SyntheticFont("");
+    std::string why;
+    const std::vector<uint8_t> marks = SyntheticFont("`^~.,");
+    CHECK(!ComposeLatinFont(blank, marks, &why) && why == "a base glyph is missing");
+    CHECK(blank == SyntheticFont(""));
+    std::vector<uint8_t> font = SyntheticFont("ACEIOUaceioux");
+    const std::vector<uint8_t> original = font;
+    CHECK(ComposeLatinFont(font, marks, &why));
+    CHECK(font != original);
+    for (int i = 0; i < LATIN_GLYPH_COUNT; ++i) {
+        std::vector<uint8_t> alpha;
+        CHECK(LatinFontCellAlpha(font, LATIN_FIRST_CELL + i, alpha) && *std::max_element(alpha.begin(), alpha.end()) > 200);
+    }
+    std::vector<uint8_t> occupied = font;
+    CHECK(!ComposeLatinFont(occupied, marks, &why) && why == "the atlas rows are not free" && occupied == font);
+    std::vector<uint8_t> not_a_font(64);
+    CHECK(!ComposeLatinFont(not_a_font, marks, &why) && why == "not a font atlas the port can read");
+
+    // A main font: a descriptor, its pages, then 'a' and every letter's base with their metrics.
+    std::vector<uint8_t> image(0x10000);
+    const auto u16_at = [&](size_t at, uint16_t value) {
+        image[at] = uint8_t(value);
+        image[at + 1] = uint8_t(value >> 8);
+    };
+    const auto descriptor = [&](size_t at, size_t page, size_t chinese_page) {
+        const uint8_t header[16] = {0, 0, 0, 0, 0, 0x10, 0, 0x10, 1, 0x44, 0x44, 2, 2, 0x3c, 0x3c, 0};
+        std::copy_n(header, 16, image.begin() + std::ptrdiff_t(at));
+        const uint64_t first = page, chinese = chinese_page;
+        std::memcpy(image.data() + at + 16, &first, 8);
+        std::memcpy(image.data() + at + 16 + 0x4f * 8, &chinese, 8);
+    };
+    descriptor(0x100, 0x2000, 0x3000);
+    for (const char base : std::string_view("ACEIOUaceiou")) {
+        u16_at(0x2000 + size_t(uint8_t(base)) * 8, uint16_t(base));
+        u16_at(0x2000 + size_t(uint8_t(base)) * 8 + 2, 548);
+    }
+    u16_at(0x3000 + 0x53 * 8, 2175);
+    const uint8_t* page = latin_glyphs_locate(image.data(), image.size(), 0x4F53);
+    CHECK(page == image.data() + 0x2000);
+    CHECK(!latin_glyphs_locate(image.data(), image.size(), 0x4F54));
+    std::vector<uint8_t> twice = image;
+    std::copy_n(image.begin() + 0x100, 16 + 256 * 8, twice.begin() + 0x1000 - 0x100);
+    CHECK(!latin_glyphs_locate(twice.data(), twice.size(), 0x4F53));
+    CHECK(latin_glyphs_install(image.data(), image.size(), page));
+    for (int i = 0; i < LATIN_GLYPH_COUNT; ++i) {
+        const uint8_t* slot = page + size_t(latin_glyphs[i].code) * 8;
+        CHECK((slot[0] | slot[1] << 8) == LATIN_FIRST_CELL + i && (slot[2] | slot[3] << 8) == 548);
+    }
+    CHECK(latin_glyphs_install(image.data(), image.size(), page)); // the Japanese updates' entries point at the free rows
+    u16_at(0x2000 + 0xE7 * 8, 100);
+    const std::vector<uint8_t> real_glyph = image;
+    CHECK(!latin_glyphs_install(image.data(), image.size(), page) && image == real_glyph);
+}
+
+// What can be measured of a letter in its cell: the mark above it, split off at the first blank row under it.
+struct GlyphShape {
+    int top = -1, bottom = -1, left = -1, right = -1;
+    int mark_top = -1, mark_bottom = -1, mark_left = -1, mark_right = -1, base_top = -1;
+};
+
+GlyphShape ShapeOf(const std::vector<uint8_t>& alpha) {
+    constexpr int kSize = kLatinFontCellPixels, kInk = 40;
+    const auto inked = [&](int x, int y) { return alpha[size_t(y) * kSize + size_t(x)] > kInk; };
+    const auto row_inked = [&](int y) {
+        for (int x = 0; x < kSize; ++x) {
+            if (inked(x, y)) return true;
+        }
+        return false;
+    };
+    GlyphShape shape;
+    for (int y = 0; y < kSize; ++y) {
+        if (!row_inked(y)) continue;
+        if (shape.top < 0) shape.top = y;
+        shape.bottom = y;
+        for (int x = 0; x < kSize; ++x) {
+            if (!inked(x, y)) continue;
+            shape.left = shape.left < 0 ? x : std::min(shape.left, x);
+            shape.right = std::max(shape.right, x);
+        }
+    }
+    int y = shape.top;
+    while (y >= 0 && y < kSize && row_inked(y)) ++y;
+    if (shape.top < 0 || y >= shape.bottom) return shape;
+    shape.mark_top = shape.top;
+    shape.mark_bottom = y - 1;
+    while (y < kSize && !row_inked(y)) ++y;
+    shape.base_top = y;
+    for (int row = shape.mark_top; row <= shape.mark_bottom; ++row) {
+        for (int x = 0; x < kSize; ++x) {
+            if (!inked(x, row)) continue;
+            shape.mark_left = shape.mark_left < 0 ? x : std::min(shape.mark_left, x);
+            shape.mark_right = std::max(shape.mark_right, x);
+        }
+    }
+    return shape;
+}
+
+// Native USA cells follow Unicode, without the two signs between the letters.
+int UsaLatinCell(uint16_t code) {
+    return 3481 + (code - 0xC0) - (code > 0xD7 ? 1 : 0) - (code > 0xF7 ? 1 : 0);
+}
+
+// The composed letters of a real font, against their base letters and, when it is here, the USA font as a local reference.
+void CheckComposedGlyphs(const char* label, std::vector<uint8_t> font, const std::vector<uint8_t>& marks, const std::vector<uint8_t>& usa) {
+    const std::vector<uint8_t> original = font;
+    std::string why;
+    CHECK(ComposeLatinFont(font, marks, &why));
+    CHECK(font.size() == original.size());
+    const auto shape_at = [](const std::vector<uint8_t>& atlas, int cell) {
+        std::vector<uint8_t> alpha;
+        CHECK(LatinFontCellAlpha(atlas, cell, alpha));
+        return alpha.empty() ? GlyphShape{} : ShapeOf(alpha);
+    };
+    const std::string_view reported = "\xE1\xE3\xE7\xE9\xEA\xF3\xF5";
+    for (int i = 0; i < LATIN_GLYPH_COUNT; ++i) {
+        const LatinGlyph& glyph = latin_glyphs[i];
+        const bool capital = glyph.base >= 'A' && glyph.base <= 'Z';
+        const GlyphShape letter = shape_at(font, LATIN_FIRST_CELL + i);
+        const GlyphShape base = shape_at(original, uint8_t(glyph.base) - 0x1f);
+        CHECK(letter.left > 0 && letter.right < kLatinFontCellPixels - 1 && letter.top >= 0);
+        CHECK(letter.left == base.left || std::abs(letter.left - base.left) <= 12);
+        if (glyph.mark == LATIN_MARK_CEDILLA) {
+            CHECK(letter.bottom > base.bottom && letter.bottom < kLatinFontCellPixels);
+            CHECK(letter.top == (capital ? letter.top : base.top));
+        } else {
+            CHECK(letter.bottom == base.bottom);
+            CHECK(letter.mark_top >= 0 && letter.mark_bottom >= letter.mark_top);
+            const int gap = letter.base_top - letter.mark_bottom - 1;
+            CHECK(gap >= 1 && gap <= 3);
+            CHECK(capital || glyph.base == 'i' || letter.base_top == base.top);
+            const double centre = (letter.mark_left + letter.mark_right) / 2.0, middle = (base.left + base.right) / 2.0;
+            CHECK(std::abs(centre - middle) <= 3.5);
+        }
+        if (glyph.code >= 0x100 || reported.find(char(glyph.code)) == std::string_view::npos) continue;
+        std::string line = std::string("PT-BR-GLYPH|") + label + "|U+" + std::to_string(glyph.code) + "|baseline " + std::to_string(letter.bottom);
+        if (letter.mark_top >= 0) {
+            line += ", mark " + std::to_string(letter.mark_bottom - letter.mark_top + 1) + "h, gap " + std::to_string(letter.base_top - letter.mark_bottom - 1);
+        }
+        if (!usa.empty() && glyph.mark != LATIN_MARK_CEDILLA) {
+            // The USA cells sit lower and the executable lifts them: the comparison is of the mark against its letter.
+            const GlyphShape native = shape_at(usa, UsaLatinCell(glyph.code));
+            const int native_rise = native.base_top - native.mark_top, rise = letter.base_top - letter.mark_top;
+            line += ", USA gap " + std::to_string(native.base_top - native.mark_bottom - 1) + ", mark rise difference " + std::to_string(rise - native_rise) + " px";
+            CHECK(std::abs(rise - native_rise) <= 3);
+        }
+        std::printf("%s\n", line.c_str());
+    }
+}
+
+void TestComposedGlyphGeometry() {
+    const fs::path prepared = fs::path(DCP_SOURCE_DIR) / "game" / "prepared";
+    const auto entry = [&](const char* folder, const char* archive, const char* path) {
+        CpkArchive cpk;
+        std::vector<uint8_t> bytes;
+        if (cpk.Open(prepared / folder / archive)) {
+            if (const CpkEntry* found = cpk.Find(path)) bytes = cpk.Read(*found);
+        }
+        return bytes;
+    };
+    const std::vector<uint8_t> usa = entry("v1.03", "DRACRO_US.CPK", "other/fontUTF16.ftx");
+    const std::vector<uint8_t> japanese = entry("CUSA07001-1.00", "DRACRO.CPK", "other/fontUTF16.ftx");
+    if (!japanese.empty()) CheckComposedGlyphs("Japan", japanese, japanese, usa);
+    const std::vector<uint8_t> chinese = entry("CUSA10209-1.00", "DRACRO_CK.CPK", "other/CT_fontUTF16.ftx");
+    const std::vector<uint8_t> shared = entry("CUSA10209-1.00", "DRACRO.CPK", "other/fontUTF16.ftx");
+    if (!chinese.empty() && !shared.empty()) CheckComposedGlyphs("Asia/Hong Kong", chinese, shared, usa);
+}
+
+// The SystemMsg records the character screen uses: four row labels, the entry prompt and the empty-field placeholder.
+struct MessageRecord {
+    size_t index;
+    const char* pt_br;
+};
+const MessageRecord kCharacterMessageRecords[] = {
+    {844, "Mensagem de morte"}, {845, "Mensagem de ressurrei\xC3\xA7\xC3\xA3o"}, {846, "Mensagem de sele\xC3\xA7\xC3\xA3o"},
+    {847, "Mensagem de sauda\xC3\xA7\xC3\xA3o"}, {848, "Digite sua mensagem."}, {849, "Voc\xC3\xAA n\xC3\xA3o tem mensagem."},
+};
+
+std::set<size_t> CorpusIndices(std::string_view sheet) {
+    std::set<size_t> indices;
+    for (const TranslationFile& file : PtBrTranslationFiles()) {
+        if (file.name != std::string(sheet) + ".json") continue;
+        const std::optional<net::Json> json = net::Json::parse(std::string_view(reinterpret_cast<const char*>(file.data), file.size), 8);
+        if (!json) continue;
+        for (const net::Json& entry : (*json)["entries"].items()) {
+            const net::Json& index = entry["index"];
+            if (index.is_array()) {
+                for (const net::Json& one : index.items()) indices.insert(size_t(one.as_int()));
+            } else {
+                indices.insert(size_t(index.as_int()));
+            }
+        }
+    }
+    return indices;
+}
+
+// The picker's records as served: every class and category translated, unlike the placeholder and each other, in the
+// right block. Names and the blocks' markers stay the slot's own.
+void CheckServedDefaultBone(const ArchiveTranslation& result, const std::vector<std::string>& native, const std::string& placeholder) {
+    const std::vector<std::string>& served = result.default_bone;
+    CHECK(served.size() == native.size() && served.size() == 2049);
+    if (served.size() != native.size() || served.size() != 2049) return;
+    const std::set<size_t> corpus = CorpusIndices("DefaultBone");
+    CHECK(corpus.size() == 366);
+    const auto pt_br = [&](size_t index) { return served[index] != native[index] && !served[index].empty(); };
+    for (int character_class = 0; character_class < DEFAULT_MESSAGE_CLASSES; ++character_class) {
+        for (int variant = 0; variant < DEFAULT_MESSAGE_VARIANTS; ++variant) {
+            for (int category = 0; category < DEFAULT_MESSAGE_CATEGORIES; ++category) {
+                const int record = default_message_record(character_class, DefaultMessageCategory(category), variant);
+                CHECK(record >= 1641 && record < 2049 && corpus.count(size_t(record)) == 1);
+                CHECK(pt_br(size_t(record)) && served[size_t(record)] != placeholder);
+                CHECK(served[size_t(record)].size() <= 2 * DEFAULT_MESSAGE_MAX_UNITS);
+            }
+            const auto apart = [&](DefaultMessageCategory a, DefaultMessageCategory b) {
+                const size_t first = size_t(default_message_record(character_class, a, variant));
+                const size_t second = size_t(default_message_record(character_class, b, variant));
+                CHECK(native[first] == native[second] || served[first] != served[second]);
+            };
+            apart(DEFAULT_MESSAGE_GREETING, DEFAULT_MESSAGE_SELECTION);
+            apart(DEFAULT_MESSAGE_RESURRECTION, DEFAULT_MESSAGE_DEATH);
+        }
+    }
+    for (size_t i = 0; i < 1635; ++i) CHECK(served[i] == native[i]);
+    for (size_t i = 1641; i < 2049; ++i) {
+        if (!corpus.count(i)) CHECK(served[i] == native[i]);
+    }
+}
+
+// What the game reads as SystemMsg once the slot is translated: each row keeps its own record and only corpus records change.
+void CheckServedSystemMsg(const ArchiveTranslation& result, const std::vector<std::string>& native) {
+    const std::vector<uint8_t>* served = nullptr;
+    if (result.overlay) {
+        for (const auto& patch : result.overlay->patches) {
+            uint32_t count = 0;
+            if (patch.second.size() > 0x20) std::memcpy(&count, patch.second.data() + 0x14, 4);
+            if (patch.second.size() > 0x20 && !std::memcmp(patch.second.data(), "FMSB", 4) && count == native.size()) served = &patch.second;
+        }
+    }
+    CHECK(served != nullptr);
+    if (!served) return;
+    const std::optional<FmsSheet> sheet = ParseFms(*served);
+    CHECK(sheet && sheet->records.size() == native.size());
+    if (!sheet) return;
+    std::set<std::string> texts;
+    for (const MessageRecord& record : kCharacterMessageRecords) {
+        CHECK(sheet->records[record.index] == record.pt_br);
+        texts.insert(sheet->records[record.index]);
+    }
+    CHECK(texts.size() == std::size(kCharacterMessageRecords));
+    const std::set<size_t> corpus = CorpusIndices("SystemMsg");
+    size_t moved = 0;
+    for (size_t i = 0; i < native.size(); ++i) {
+        if (sheet->records[i] != native[i]) {
+            ++moved;
+            CHECK(corpus.count(i) == 1);
+        }
+    }
+    CHECK(moved > 0 && moved <= corpus.size());
+}
+
+void TestTranslationAcrossSlots(const fs::path& base) {
+    using namespace cpk_test;
+    const auto sheet_of = [](const std::vector<std::string>& records) {
+        std::string body;
+        for (const std::string& record : records) body += record + std::string(1, '\0');
+        body.resize((0x20 + records.size() * 8 + body.size() + 15) / 16 * 16 - 0x20 - records.size() * 8, '\0');
+        std::string out(0x20 + records.size() * 8, '\0');
+        out.replace(0, 4, "FMSB");
+        const uint32_t tail = uint32_t(records.size() * 8 + body.size()), header = 0x20, count = uint32_t(records.size());
+        std::memcpy(out.data() + 4, &tail, 4);
+        std::memcpy(out.data() + 8, &header, 4);
+        std::memcpy(out.data() + 0x14, &count, 4);
+        return out + body + "FEOC" + std::string(12, '\0');
+    };
+    const auto digest = [&](const std::string& text) {
+        WriteAll(base / "slot_record.txt", text);
+        return Sha256Hex(base / "slot_record.txt");
+    };
+    const std::string japanese = sheet_of({"\xE9\x96\x8B\xE5\xA7\x8B", "%d\xE9\x9A\x8E", "\xE7\x84\xA1\xE5\x8A\xB9", "\xE5\xA4\x89"});
+    const std::string objects = sheet_of({"\xE5\xAE\x9D"});
+    const fs::path app0 = base / "slot_app0";
+    fs::remove_all(app0);
+    WriteAll(app0 / "DRACRO.CPK", BuildCpk({{"msgsheet/SystemMsg.fms", japanese, false}, {"msgsheet/ObjectParamMsg.fms", objects, false}}, false));
+    const std::string before = ReadAll(app0 / "DRACRO.CPK");
+
+    const std::string sheet = "{\"sheet\": \"SystemMsg\", \"entries\": ["
+        "{\"index\": 0, \"source_sha256\": \"english\", \"pt_br\": \"A\xC3\xA7\xC3\xA3o\"},"
+        "{\"index\": 1, \"source_sha256\": \"english\", \"pt_br\": \"Andar %d\"},"
+        "{\"index\": 2, \"source_sha256\": \"english\", \"pt_br\": \"%d de chance\"},"
+        "{\"index\": 3, \"source_sha256\": \"english\", \"pt_br\": \"Trocado\"}]}";
+    const std::string object_sheet = "{\"sheet\": \"ObjectParam\", \"entries\": [{\"index\": 0, \"source_sha256\": \"x\", \"pt_br\": \"Ba\xC3\xBA\"}]}";
+    const std::string map = "{\"source\": \"JP\", \"sheets\": [{\"sheet\": \"SystemMsg\", \"hashes\": [[0, \"" +
+                            digest("\xE9\x96\x8B\xE5\xA7\x8B").substr(0, 16) + "\"], [1, \"" + digest("%d\xE9\x9A\x8E").substr(0, 16) +
+                            "\"], [2, \"" + digest("\xE7\x84\xA1\xE5\x8A\xB9").substr(0, 16) +
+                            "\"], [3, \"0000000000000000\"]]}, {\"sheet\": \"ObjectParam\", \"hashes\": [[0, \"" +
+                            digest("\xE5\xAE\x9D").substr(0, 16) + "\"]]}]}";
+    const auto file_of = [](const char* name, const std::string& text) {
+        return TranslationFile{name, reinterpret_cast<const uint8_t*>(text.data()), text.size()};
+    };
+    const TranslationFile files[] = {file_of("SystemMsg.json", sheet), file_of("ObjectParam.json", object_sheet)};
+    const TranslationFile source = file_of("JP.json", map);
+
+    // The font cannot be completed here: the letters fold, every other record still shows, and one bad record stays native.
+    TranslationRecipe recipe{{}, files};
+    recipe.source = &source;
+    recipe.font_entry = "other/fontUTF16.ftx";
+    recipe.mark_archive = app0 / "DRACRO.CPK";
+    const ArchiveTranslation folded = TranslateArchive(app0 / "DRACRO.CPK", recipe);
+    CHECK(folded.error.empty() && folded.overlay && folded.folded && !folded.latin_glyphs);
+    CHECK(folded.corpus == 5 && folded.translated == 3 && folded.sheets == 2 && folded.refused == 2);
+    CHECK((folded.problems == std::vector<std::string>{"other/fontUTF16.ftx: no glyph table for the letters in the executable, letters shown without accents",
+                                                         "SystemMsg 2: printf or button sequences differ from the source",
+                                                         "SystemMsg 3: the source record changed"}));
+    std::string seen = before;
+    if (folded.overlay) {
+        seen.resize(folded.overlay->length, '\0');
+        for (const auto& [offset, data] : folded.overlay->patches) std::copy(data.begin(), data.end(), seen.begin() + std::ptrdiff_t(offset));
+    }
+    CHECK(ReadAll(app0 / "DRACRO.CPK") == before);
+    WriteAll(base / "slot_seen.cpk", seen);
+    CpkArchive shown;
+    CHECK(shown.Open(base / "slot_seen.cpk"));
+    const CpkEntry* entry = shown.Find("msgsheet/SystemMsg.fms");
+    const std::optional<FmsSheet> translated = entry ? ParseFms(shown.Read(*entry)) : std::nullopt;
+    CHECK(translated && (translated->records == std::vector<std::string>{"Acao", "Andar %d", "\xE7\x84\xA1\xE5\x8A\xB9", "\xE5\xA4\x89"}));
+    entry = shown.Find("msgsheet/ObjectParamMsg.fms");
+    const std::optional<FmsSheet> object = entry ? ParseFms(shown.Read(*entry)) : std::nullopt;
+    CHECK(object && object->records == std::vector<std::string>{"Bau"});
+
+    // With the font and the table, the letters stay and the font is served.
+    const std::vector<uint8_t> font = SyntheticFont("ACEIOUaceioux`^~.,");
+    const std::string font_text(font.begin(), font.end());
+    WriteAll(app0 / "DRACRO.CPK", BuildCpk({{"msgsheet/SystemMsg.fms", japanese, false}, {"msgsheet/ObjectParamMsg.fms", objects, false},
+                                            {"other/fontUTF16.ftx", font_text, false}}, false));
+    recipe.glyph_table = true;
+    const ArchiveTranslation composed = TranslateArchive(app0 / "DRACRO.CPK", recipe);
+    CHECK(composed.overlay && composed.latin_glyphs && !composed.folded && composed.translated == 3);
+    bool font_served = false;
+    if (composed.overlay) {
+        for (const auto& patch : composed.overlay->patches) font_served = font_served || patch.second.size() == font.size();
+    }
+    CHECK(font_served);
+
+    const TranslationFile no_map = file_of("JP.json", "{\"sheets\": 3}");
+    recipe.source = &no_map;
+    CHECK(!TranslateArchive(app0 / "DRACRO.CPK", recipe).error.empty());
+    fs::remove_all(app0);
+    fs::remove(base / "slot_seen.cpk");
+    fs::remove(base / "slot_record.txt");
+
+    // The real data, when it is here: what the launcher would serve on the prepared games.
+    struct RealBuild {
+        const GameBuild* build;
+        const char* folder;
+        size_t applied;
+    };
+    const RealBuild real[] = {{&kUs, "v1.03", 9670}, {&kJp100, "CUSA07001-1.00", 9649}, {&kJp102, "CUSA07001-1.02", 9649},
+                              {&kJp103, "CUSA07001-1.03", 9649}, {&kCk100, "CUSA10209-1.00", 9659}};
+    for (const RealBuild& item : real) {
+        const fs::path game = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / item.folder;
+        const TranslationProfile& profile = *item.build->translation;
+        if (!fs::exists(game / profile.archive) || PtBrTranslationFiles().empty()) continue;
+        const TextLanguage& language = ResolveTextLanguage(item.build, kPortugueseBrazilKey);
+        TranslationRecipe actual{language.suffix, PtBrTranslationFiles()};
+        if (!profile.source.empty()) actual.source = PtBrSource(profile.source);
+        actual.font_entry = profile.font_entry;
+        actual.mark_archive = game / "DRACRO.CPK";
+        actual.glyph_table = true;
+        const ArchiveTranslation result = TranslateArchive(game / profile.archive, actual);
+        CHECK(result.error.empty() && result.overlay && result.corpus == 9670 && result.translated == item.applied);
+        CHECK(result.latin_glyphs == !profile.font_entry.empty() && !result.folded);
+        std::printf("PT-BR %s: %zu of %zu records, %zu kept native\n", item.build->label, result.translated, result.corpus, result.refused);
+        CpkArchive slot;
+        CHECK(slot.Open(game / profile.archive));
+        const std::string system = language.suffix.empty() ? "msgsheet/SystemMsg.fms" : "msgsheet/SystemMsg_" + std::string(language.suffix) + ".fms";
+        const CpkEntry* found = slot.Find(system);
+        const std::optional<FmsSheet> native = found ? ParseFms(slot.Read(*found)) : std::nullopt;
+        CHECK(native.has_value());
+        if (native) CheckServedSystemMsg(result, native->records);
+        const std::string bone = language.suffix.empty() ? "msgsheet/DefaultBone.fms" : "msgsheet/DefaultBone_" + std::string(language.suffix) + ".fms";
+        const CpkEntry* bone_entry = slot.Find(bone);
+        const std::optional<FmsSheet> bone_native = bone_entry ? ParseFms(slot.Read(*bone_entry)) : std::nullopt;
+        CHECK(bone_native.has_value());
+        if (bone_native) CheckServedDefaultBone(result, bone_native->records, native ? (*native).records[849] : std::string());
+        if (!bone_native || !actual.source) continue;
+
+        // A character message whose source changed stays native, and its neighbours stay translated.
+        const TranslationFile* bone_sheet = nullptr;
+        for (const TranslationFile& file : PtBrTranslationFiles()) {
+            if (std::string_view(file.name) == "DefaultBone.json") bone_sheet = &file;
+        }
+        CHECK(bone_sheet != nullptr);
+        if (!bone_sheet) continue;
+        std::string changed(reinterpret_cast<const char*>(actual.source->data), actual.source->size);
+        const size_t record = changed.find("[1642, \"", changed.find("\"DefaultBone\""));
+        CHECK(record != std::string::npos);
+        if (record == std::string::npos) continue;
+        char& digit = changed[record + 8];
+        digit = digit == '0' ? '1' : '0';
+        const TranslationFile changed_map{"source.json", reinterpret_cast<const uint8_t*>(changed.data()), changed.size()};
+        TranslationRecipe one_sheet{language.suffix, std::span(bone_sheet, 1)};
+        one_sheet.source = &changed_map;
+        const ArchiveTranslation fallback = TranslateArchive(game / profile.archive, one_sheet);
+        CHECK(fallback.translated == 365 && fallback.refused == 1);
+        CHECK(fallback.default_bone.size() == 2049);
+        if (fallback.default_bone.size() == 2049) {
+            CHECK(fallback.default_bone[1642] == bone_native->records[1642]);
+            CHECK(fallback.default_bone[1643] == result.default_bone[1643]);
+        }
+    }
+
+    // A hash that stops matching leaves one record native: the row's neighbours keep their translation.
+    {
+        const std::string native = "{\"source\": \"JP\", \"sheets\": [{\"sheet\": \"SystemMsg\", \"hashes\": [[0, \"" +
+                                   std::string(16, '0') + "\"]]}]}";
+        const auto file_of = [](const char* name, const std::string& text) {
+            return TranslationFile{name, reinterpret_cast<const uint8_t*>(text.data()), text.size()};
+        };
+        const std::string one_sheet = "{\"sheet\": \"SystemMsg\", \"entries\": [{\"index\": 0, \"source_sha256\": \"x\", \"pt_br\": \"Morte\"}]}";
+        const TranslationFile files[] = {file_of("SystemMsg.json", one_sheet)};
+        const TranslationFile map = file_of("JP.json", native);
+        const fs::path single = base / "message_fallback.cpk";
+        std::string records("FMSB");
+        records.resize(0x20, '\0');
+        const uint32_t count = 1, header = 0x20, tail = 16;
+        std::memcpy(records.data() + 4, &tail, 4);
+        std::memcpy(records.data() + 8, &header, 4);
+        std::memcpy(records.data() + 0x14, &count, 4);
+        records += std::string(8, '\0') + "\xE6\xAD\xBB" + std::string(5, '\0') + "FEOC" + std::string(12, '\0');
+        WriteAll(single, cpk_test::BuildCpk({{"msgsheet/SystemMsg.fms", records, false}}, false));
+        TranslationRecipe recipe{{}, files};
+        recipe.source = &map;
+        const ArchiveTranslation refused = TranslateArchive(single, recipe);
+        CHECK(!refused.overlay && refused.translated == 0 && refused.refused == 1);
+        CHECK((refused.problems == std::vector<std::string>{"SystemMsg 0: the source record changed"}));
+        fs::remove(single);
+    }
+
+    // The loader's calls on a real game: PT-BR gives the slot's overlay and, in Hong Kong, DRACRO.CPK's; Japanese or
+    // Traditional Chinese gives neither, so the native art is served untouched.
+    const fs::path hk_game = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / "CUSA10209-1.00";
+    if (fs::exists(hk_game / "DRACRO_CK.CPK") && !PtBrTranslationFiles().empty()) {
+        const fs::path ini = base / "stage_dcp.ini", image = base / "stage_image";
+        WriteAll(image / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") + kCk100.eboot_sha256 + "\"\n}");
+        const auto loader_call = [&](const char* saved, uint64_t& length, DcpFilePatch*& patches, size_t& count, std::string& message) {
+            WriteAll(ini, std::string("text_language=") + saved + "\n");
+            char text[1024];
+            int composed = 0;
+            const char* archive = dcp_text_translation(ini.string().c_str(), image.string().c_str(), hk_game.string().c_str(), &length, &patches,
+                                                       &count, text, sizeof(text), 1, &composed);
+            message = text;
+            return archive;
+        };
+        uint64_t length = 0;
+        DcpFilePatch* patches = nullptr;
+        size_t count = 0;
+        std::string message;
+        const char* archive = loader_call("brazilian_portuguese", length, patches, count, message);
+        CHECK(archive && std::string_view(archive) == "DRACRO_CK.CPK");
+        CHECK(message.find("9659 records translated of 9670") != std::string::npos && message.find(", 4 visual replacements") != std::string::npos);
+        const char* stage = dcp_text_stage_overlay(&length, &patches, &count);
+        CHECK(stage && std::string_view(stage) == "DRACRO.CPK" && count > 0);
+        CHECK(!loader_call("traditional_chinese", length, patches, count, message) && message.empty());
+        CHECK(!dcp_text_stage_overlay(&length, &patches, &count));
+        localization::SetActiveLanguage("english");
+        fs::remove_all(image);
+        fs::remove(ini);
+    }
 }
 
 void TestInGameUiText() {
@@ -6119,6 +6648,65 @@ void TestVisualPatchFallback(const fs::path& base) {
     CHECK(missing.visuals == 0 && missing.visual_skipped >= 1);
     const std::string garbage = "not a patch";
     CHECK(run(BuildCpk({{entry_name, source, false}}, true), garbage).visual_skipped >= 1);
+
+    // One run list, several accepted sources: each source is held to its own result, an unknown one stays as it is.
+    const auto shared_patch = [&](std::vector<std::pair<uint32_t, uint32_t>> states) {
+        std::string raw("DCPX2\0\0\0", 8);
+        le32(raw, 1);
+        raw += char(entry_name.size());
+        raw += '\0';
+        raw += entry_name;
+        le32(raw, uint32_t(source.size()));
+        le32(raw, uint32_t(states.size()));
+        for (const auto& [before, after] : states) {
+            le32(raw, before);
+            le32(raw, after);
+        }
+        le32(raw, 1);
+        le32(raw, 32);
+        raw += target.substr(32, 16);
+        std::string packed;
+        le32(packed, uint32_t(raw.size()));
+        uLongf size = compressBound(uLong(raw.size()));
+        std::string deflated(size, '\0');
+        compress2(reinterpret_cast<Bytef*>(deflated.data()), &size, reinterpret_cast<const Bytef*>(raw.data()), uLong(raw.size()), 9);
+        return packed + deflated.substr(0, size);
+    };
+    std::string second_source = source;
+    second_source[100] = 'q';
+    std::string second_target = target;
+    second_target[100] = 'q';
+    const std::string both = shared_patch({{crc(source), crc(target)}, {crc(second_source), crc(second_target)}});
+    CHECK(run(BuildCpk({{entry_name, source, false}}, true), both).visuals == 1);
+    const ArchiveTranslation other_state = run(BuildCpk({{entry_name, second_source, false}}, true), both);
+    CHECK(other_state.visuals == 1);
+    if (other_state.overlay) {
+        std::string served;
+        for (const auto& [offset, data] : other_state.overlay->patches) {
+            if (data.size() == second_target.size()) served.assign(data.begin(), data.end());
+        }
+        CHECK(served == second_target);
+    }
+    const ArchiveTranslation unknown_source = run(BuildCpk({{entry_name, std::string(256, 'z'), false}}, true), both);
+    CHECK(unknown_source.visuals == 0 && unknown_source.visual_skipped >= 1);
+    CHECK(std::find(unknown_source.visual_problems.begin(), unknown_source.visual_problems.end(),
+                    entry_name + ": source fingerprint not recognized") != unknown_source.visual_problems.end());
+    CHECK(!ParseBlockPatch(std::span(reinterpret_cast<const uint8_t*>("DCPX2\0\0\0\x01\0\0\0\x09"), 13)));
+
+    // A patch set belongs to one kind of archive: the base stage files or the USA packs, never both.
+    for (const TranslationFile& file : PtBrVisualPatches(VisualSet::kBaseStage)) CHECK(std::string_view(file.name).starts_with("base-"));
+    for (const TranslationFile& file : PtBrVisualPatches(VisualSet::kEnglishSlot)) CHECK(!std::string_view(file.name).starts_with("base-"));
+    CHECK(PtBrVisualPatches(VisualSet::kBaseStage).size() + PtBrVisualPatches(VisualSet::kEnglishSlot).size() == PtBrVisualPatches().size());
+    for (const GameBuild& build : SupportedBuilds()) {
+        const TranslationProfile& profile = *build.translation;
+        const std::string_view title = build.title_id;
+        CHECK(profile.visuals == (title == "CUSA07001" || title == "CUSA10209" ? VisualSet::kBaseStage : VisualSet::kEnglishSlot));
+        CHECK(profile.visual_archive == std::string_view(title == "CUSA10454" ? "DRACRO_US.CPK" : title == "CUSA10487" ? "DRACRO_EU.CPK" : "DRACRO.CPK"));
+        CHECK(profile.archive == std::string_view(title == "CUSA10454"   ? "DRACRO_US.CPK"
+                                                  : title == "CUSA10487" ? "DRACRO_EU.CPK"
+                                                  : title == "CUSA07001" ? "DRACRO.CPK"
+                                                                         : "DRACRO_CK.CPK"));
+    }
     fs::remove(base / "visual_fallback.cpk");
 }
 
@@ -6543,9 +7131,10 @@ void TestEuropeBuild(const fs::path& base) {
         sheets.push_back({std::string("msgsheet/ItemList_") + suffix + ".fms", "FMSB", false});
     }
     WriteAll(app0 / "DRACRO_EU.CPK", BuildCpk(sheets, true));
-    CHECK(LanguageNames(InstalledTextLanguages(app0, &kEu)) == "English, French, German, Italian, Spanish");
+    CHECK(LanguageNames(InstalledTextLanguages(app0, &kEu)) == "English, French, German, Italian, Portuguese (Brazil), Spanish");
     CHECK(ResolveTextLanguage(&kEu, {}).key == "english" && ResolveTextLanguage(&kEu, "french").suffix == "FR");
-    CHECK(ResolveTextLanguage(&kEu, kPortugueseBrazilKey).key == "english");
+    CHECK(ResolveTextLanguage(&kEu, kPortugueseBrazilKey).key == kPortugueseBrazilKey);
+    CHECK(kEu.translation->archive == std::string_view("DRACRO_EU.CPK"));
 
     // No copy of this archive was ever read: Xbox prompts are offered only while its atlases are the patch's.
     const fs::path prompts = base / "eu-prompts";
@@ -7451,6 +8040,9 @@ int main(int argc, char** argv) {
     TestKeepBaseLanguages(base);
     TestNpcVoiceResources(base);
     TestGameTranslation(base);
+    TestLatinGlyphs();
+    TestComposedGlyphGeometry();
+    TestTranslationAcrossSlots(base);
     TestInGameUiText();
     TestVisualPatchFallback(base);
     TestSafeMode(base);

@@ -23,6 +23,7 @@ typedef struct {
     const char *language;
     const char *install_original, *help_original; /* records 387 and 394 of this language's SystemMsg */
     const char *row, *help;                        /* the new records 388 and 394 */
+    const char *install_unaccented;                /* record 387 where the font could not show its letters */
 } ExitGameLanguage;
 
 #define EXIT_GAME_LANGUAGE_COUNT 9

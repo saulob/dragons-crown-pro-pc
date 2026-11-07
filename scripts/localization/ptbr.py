@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Brazilian Portuguese game text: a port-side language played in the English slot of DRACRO_US.CPK (CUSA10454 1.00).
+"""Brazilian Portuguese game text: a port-side language played in a native slot of every supported build. The corpus was
+written against the English sheets of CUSA10454 1.00.
 
 Tracked: localization/pt-BR/sheets/<Sheet>.json, the PT-BR text with each entry's record indices and the SHA-256 of
-the English record it was written from, and localization/pt-BR/glossary.tsv. Game text is read from the installed game
-and written only under cache/ (git-ignored); it never enters the repository.
+the English record it was written from; localization/pt-BR/sources/<source>.json, the hash of each mapped record of a slot
+in another language; and localization/pt-BR/glossary.tsv. Game text is read from the installed game and written only under
+cache/ (git-ignored); it never enters the repository.
 
     ptbr.py batches  [--game DIR]                the translation batches, with progress
     ptbr.py extract  [--game DIR] [--batch ID]   working files: cache/localization/pt-BR/work/<batch>.json
@@ -13,6 +15,8 @@ and written only under cache/ (git-ignored); it never enters the repository.
     ptbr.py reference [--game DIR] [--folder DIR]  audit Marcelo's PT-BR reference against the installed English
     ptbr.py import-reference [--game DIR]         import the safe Marcelo baseline into the tracked sheets
     ptbr.py format                               rewrites the tracked sheets in their canonical layout
+    ptbr.py sources [--prepared DIR]             the slot maps of the builds not in English, from their prepared games
+    ptbr.py parity [--prepared DIR]              each build's sheets against the corpus; exit 1 when a map is stale
     ptbr.py selftest                             the checks themselves, on synthetic text; no game needed
 """
 import argparse
@@ -33,8 +37,10 @@ REPO = Path(__file__).resolve().parents[2]
 TRACKED = REPO / 'localization' / 'pt-BR'
 SHEETS_DIR = TRACKED / 'sheets'
 GLOSSARY = TRACKED / 'glossary.tsv'
+SOURCES_DIR = TRACKED / 'sources'
 CACHE = REPO / 'cache' / 'localization' / 'pt-BR'
 DEFAULT_GAME = REPO / 'game' / 'prepared' / 'v1.03'
+PREPARED = REPO / 'game' / 'prepared'
 
 # The US slot's sheets; that slot reads StaffRollMsg_PS4_US, not StaffRollMsg_US.
 SHEETS = ('AbilityList', 'BonusScore', 'ChallengeQuest', 'CustomItem', 'DefaultBone', 'EventMsg', 'ItemList',
@@ -367,6 +373,9 @@ def glossary_hits(glossary, english):
 
 # ------------------------------------------------------------------ checks
 
+CHARACTER_MESSAGE_UNITS = 30
+
+
 def disallowed_characters(text, source):
     allowed = PT_LETTERS | set(source)
     bad = sorted({c for c in text if not (' ' <= c <= '~' or c == '\n' or c in allowed)})
@@ -398,6 +407,8 @@ def record_errors(sheet, english, index, text):
     bad = disallowed_characters(text, source)
     if bad:
         errors.append(f'characters outside the PT-BR set: {bad!r}')
+    if sheet == 'DefaultBone' and len(text.encode('utf-16-le')) // 2 > CHARACTER_MESSAGE_UNITS:
+        errors.append(f'longer than the {CHARACTER_MESSAGE_UNITS} units a character message keeps')
     return errors
 
 
@@ -1157,6 +1168,150 @@ def cmd_import_reference(args):
     return 0
 
 
+# ------------------------------------------------------------------ the builds not in English
+
+CORPUS_SHEETS = ('AbilityList', 'BonusScore', 'ChallengeQuest', 'CustomItem', 'DefaultBone', 'EventMsg', 'ItemList', 'ObjectParam',
+                 'RoundContinue', 'SystemMsg', 'Temple', 'TreasureArt', 'Tutorial')
+SOURCE_HASH_LENGTH = 16
+# The slot each build plays PT-BR in. A folder missing from the prepared games is a build with no local data.
+SLOTS = {
+    'CUSA10454 1.00 USA': ('v1.03', 'DRACRO_US.CPK', 'US', None),
+    'CUSA10454 1.01 USA': ('CUSA10454-1.01', 'DRACRO_US.CPK', 'US', None),
+    'CUSA07001 1.00 Japan': ('CUSA07001-1.00', 'DRACRO.CPK', '', 'JP'),
+    'CUSA07001 1.02 Japan': ('CUSA07001-1.02', 'DRACRO.CPK', '', 'JP'),
+    'CUSA07001 1.03 Japan': ('CUSA07001-1.03', 'DRACRO.CPK', '', 'JP'),
+    'CUSA10209 1.00 Asia/Hong Kong': ('CUSA10209-1.00', 'DRACRO_CK.CPK', 'CT', 'CT'),
+    'CUSA10209 1.02 Asia/Hong Kong': ('CUSA10209-1.02', 'DRACRO_CK.CPK', 'CT', 'CT'),
+    'CUSA10487 1.03 Europe': ('CUSA10487-1.03', 'DRACRO_EU.CPK', 'US', None),
+}
+
+
+def corpus_entries(sheet):
+    return load_tracked(tracked_path(sheet))[0]['entries']
+
+
+def slot_path(sheet, suffix):
+    if suffix:
+        return f'msgsheet/{sheet}_{suffix}.fms'
+    return f'msgsheet/{JAPANESE_SHEET.get(sheet, sheet)}.fms'
+
+
+def source_hash(text):
+    return sha256(text)[:SOURCE_HASH_LENGTH]
+
+
+def arguments(text):
+    """The printf conversions in order and the button glyphs, what a slot must share with the translation."""
+    found = tokens(text)
+    return [t for t in found if is_printf(t) and t[1] != ' '], sorted(t for t in found if t.startswith('@#('))
+
+
+def tag_keys(records):
+    return {record for record in records[TAG_KEYS.start:TAG_KEYS.stop]}
+
+
+def exclusion(record, text, keys):
+    """Why this slot's record cannot safely show `text`; None when it can."""
+    if not record.strip():
+        return 'empty'
+    ours, theirs = arguments(text), arguments(record)
+    if ours[0] != theirs[0]:
+        return 'printf'
+    if ours[1] != theirs[1]:
+        return 'button'
+    if any(t not in keys for t in tokens(text) if t.startswith('##(')):
+        return 'tag'
+    return None
+
+
+def slot_sheets(folder, archive_name, suffix):
+    archive = Cpk(folder / archive_name)
+    return {sheet: archive.read(archive.find(slot_path(sheet, suffix))) for sheet in CORPUS_SHEETS}
+
+
+def source_map(name, raw):
+    keys = tag_keys(fms.parse(raw['SystemMsg']).records)
+    sheets = []
+    for sheet in CORPUS_SHEETS:
+        records = fms.parse(raw[sheet]).records
+        hashes, excluded = [], []
+        for entry in corpus_entries(sheet):
+            for index in entry_indices(entry):
+                why = 'no record' if index >= len(records) else exclusion(records[index], entry['pt_br'], keys)
+                if why:
+                    excluded.append([index, why])
+                else:
+                    hashes.append([index, source_hash(records[index])])
+        sheets.append({'sheet': sheet, 'records': len(records), 'sha256': hashlib.sha256(raw[sheet]).hexdigest(),
+                       'hashes': sorted(hashes), 'excluded': sorted(excluded)})
+    return {'source': name, 'sheets': sheets}
+
+
+def dump_source(data):
+    rows = []
+    for sheet in data['sheets']:
+        head = {k: sheet[k] for k in ('sheet', 'records', 'sha256')}
+        body = ',\n'.join(f'      {json.dumps(row, ensure_ascii=False)}' for row in sheet['hashes'])
+        excluded = json.dumps(sheet['excluded'])
+        rows.append(f'    {json.dumps(head)[:-1]}, "excluded": {excluded}, "hashes": [\n{body}\n    ]}}')
+    return '{\n  "source": ' + json.dumps(data['source']) + ',\n  "sheets": [\n' + ',\n'.join(rows) + '\n  ]\n}\n'
+
+
+def cmd_sources(args):
+    SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+    written = {}
+    for label, (folder, archive, suffix, source) in SLOTS.items():
+        game = args.prepared / folder
+        if source is None or source in written or not (game / archive).is_file():
+            continue
+        data = source_map(source, slot_sheets(game, archive, suffix))
+        (SOURCES_DIR / f'{source}.json').write_bytes(dump_source(data).encode('utf-8'))
+        written[source] = label
+        print(f'{source}: from {label}')
+    return 0 if written else 1
+
+
+def cmd_parity(args):
+    corpus = {sheet: corpus_entries(sheet) for sheet in CORPUS_SHEETS}
+    total = sum(len(entry_indices(entry)) for entries in corpus.values() for entry in entries)
+    print(f'corpus {total} records')
+    stale = 0
+    for label, (folder, archive, suffix, source) in SLOTS.items():
+        game = args.prepared / folder
+        if not (game / archive).is_file():
+            print(f'{label}: DATA UNAVAILABLE ({folder}/{archive})')
+            continue
+        raw = slot_sheets(game, archive, suffix)
+        applied, reasons, changed = 0, Counter(), []
+        mapped = json.loads((SOURCES_DIR / f'{source}.json').read_text('utf-8')) if source else None
+        for sheet in CORPUS_SHEETS:
+            records = fms.parse(raw[sheet]).records
+            if mapped:
+                row = next(s for s in mapped['sheets'] if s['sheet'] == sheet)
+                if hashlib.sha256(raw[sheet]).hexdigest() != row['sha256']:
+                    changed.append(sheet)
+                hashes = dict(row['hashes'])
+                reasons.update(why for _, why in row['excluded'])
+            for entry in corpus[sheet]:
+                for index in entry_indices(entry):
+                    if index >= len(records):
+                        reasons['no record'] += 1
+                    elif mapped:
+                        if index in hashes:
+                            if hashes[index] == source_hash(records[index]):
+                                applied += 1
+                            else:
+                                reasons['source changed'] += 1
+                    elif entry['source_sha256'] == sha256(records[index]):
+                        applied += 1
+                    else:
+                        reasons['source changed'] += 1
+        stale += reasons['source changed']
+        print(f'{label}: applied {applied}/{total}, kept native {dict(reasons)}'
+              + (f', sheets differing from the map: {changed}' if changed else ''))
+    return 1 if stale else 0
+
+
 def cmd_format(_args):
     for path in sorted(SHEETS_DIR.glob('*.json')) if SHEETS_DIR.is_dir() else []:
         data, _, error = load_tracked(path)
@@ -1241,6 +1396,8 @@ def main():
     sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
+    for name in ('sources', 'parity'):
+        sub.add_parser(name).add_argument('--prepared', type=Path, default=PREPARED)
     for name in ('batches', 'extract', 'merge', 'validate', 'generate', 'reference', 'import-reference', 'format'):
         p = sub.add_parser(name)
         p.add_argument('--sheets', type=Path, default=SHEETS_DIR, help='the tracked sheets folder (for trying changes)')

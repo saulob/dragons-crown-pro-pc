@@ -30,7 +30,7 @@
 - **Local PS4 trophies**, offline on this PC, shown on the launcher's Trophies page
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
-- **Menu & Subtitles language**: English, French, German, Italian, Spanish or Brazilian Portuguese (CUSA10454 1.00 USA only); Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build
+- **Menu & Subtitles language**: English, French, German, Italian or Spanish on the USA and European builds; Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build; Brazilian Portuguese on every supported build
 - **Story Skip Offer** and **Tutorial Skip Offer**: the game's own offers to skip the tutorial and start a new character in the second half of the story
 - **Unlock Gallery**: an option to see every Gallery picture without changing your save
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time, **F2**)
@@ -38,7 +38,7 @@
 - Local multiplayer with up to four controllers
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
 - **A PC title menu**: Start Game, Options, Gallery and **Exit Game**, with the game's own menu art and animations. Exit Game is in the game's language and closes the game through the same clean shutdown as closing the window (Alt+F4 still works). The PlayStation Network **Upload Save Data** and **Download Save Data** rows are not shown, because the PlayStation Network save transfer is not available in the PC port.
-- **Brazilian Portuguese**: game text, menus, subtitles, launcher and F1 options on the CUSA10454 1.00 USA build. Character speech bubbles, credits, trophies and some baked labels stay in English
+- **Brazilian Portuguese**: game text, menus, subtitles, launcher and F1 options on every supported build. New characters get Portuguese default messages, previewed while they are created; characters already in a save keep theirs. Credits, trophies and some baked labels stay in the build's own language, and the translated manual pages are shown on the USA and European builds only
 - **Discord Rich Presence**: your class, level, current place and party in your Discord status, through the Discord desktop app. On by default; `discord_presence = off` in `user\dcp.ini` turns it off. See [docs/DISCORD.md](docs/DISCORD.md)
 - **Bug Report page**: send a report with a filtered log from the launcher and follow its status under **My reports**. See [Reporting problems](#reporting-problems)
 - **Experimental renderers**: OpenGL, and on Windows Direct3D 11, for systems that cannot run Vulkan. They render only part of the game's features; Vulkan stays the default and the supported renderer
@@ -209,7 +209,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 - **Texture filtering**: Game, 2x, 4x, 8x or 16x
 
 ### Gameplay
-- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian, Spanish or Portuguese (Brazil); Portuguese (Brazil) is offered only for CUSA10454 1.00 USA, not for 1.01 or the Japanese, Asia/Hong Kong or European builds, and it also translates the launcher, the F1 options, the F10 overlay and the online screens. The Japanese builds (CUSA07001) show Japanese only, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. The European build (CUSA10487) offers English (default), French, German, Italian and Spanish. Voices are chosen inside the game.
+- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish. The Japanese builds (CUSA07001) show Japanese, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. The European build (CUSA10487) offers English (default), French, German, Italian and Spanish. Every build also offers Portuguese (Brazil), the port's translation, which additionally translates the launcher, the F1 options, the F10 overlay and the online screens. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. USA and Asia and Hong Kong builds (the Japanese builds already use them); narrator and player-character choices are unchanged
 - **Skip Intro** (Off by default): skips the startup logo and goes straight to the title screen. Applies at the next game start
 - **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)

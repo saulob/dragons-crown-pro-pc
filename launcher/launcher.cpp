@@ -289,8 +289,7 @@ GameCheck CheckAndLog(const GamePaths& paths) {
     Log("game files in %s: %s%s%s%s", Utf8(paths.app0).c_str(), StateName(check.state), check.detail.empty() ? "" : " (",
         check.detail.c_str(), check.detail.empty() ? "" : ")");
     if (check.build) {
-        Log("build %s, regional archive %s", check.build->label,
-            check.build->regional_archive ? check.build->regional_archive : "none");
+        Log("build %s, language archive %s", check.build->label, check.build->translation->archive);
     }
     if (!check.eboot_sha256.empty()) {
         Log("eboot.bin SHA-256 %s", check.eboot_sha256.c_str());

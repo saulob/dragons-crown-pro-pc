@@ -14,10 +14,12 @@
 #include "runtime_online.h"
 #include "menu_buttons.h"
 #include "skip_intro.h"
+#include "default_message_hook.h"
 #include "gallery_unlock.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "exit_game_hook.h"
+#include "latin_glyphs.h"
 #include "system_type_hook.h"
 #include "party_hook.h"
 #include "ultrawide_hooks.h"
@@ -466,22 +468,50 @@ static int install_true_ultrawide(int requested, const DcpGameBuild *build, cons
            build ? build->label : "unknown game build",detail);
     return effective;
 }
-/* A port-side Menu & Subtitles language: its translated message sheets served over the regional archive's slot. */
-static void install_text_translation(const char *settings_file, const char *image_dir, const char *app0) {
+static int overlay_archive(const char *archive, uint64_t length, const DcpFilePatch *patches, size_t count) {
+    char guest[256];
+    snprintf(guest,sizeof(guest),"/app0/%s",archive);
+    RuntimeFilePatch *table=calloc(count ? count : 1,sizeof(*table));
+    for (size_t i=0;table && i<count;++i) table[i]=(RuntimeFilePatch){patches[i].offset,patches[i].size,patches[i].data};
+    const int overlaid=table && !runtime_file_overlay(guest,length,table,count);
+    free(table);
+    return overlaid;
+}
+/* The character-message text draws with libSceFont from the game's OpenType font, not the atlas: on Asia/Hong Kong that
+ * font lacks the letters too. */
+static void share_composed_glyphs(void) {
+    static RuntimeComposedGlyph shared[LATIN_GLYPH_COUNT];
+    size_t count=0;
+    int cell=0;
+    const DcpComposedGlyph *glyphs=dcp_text_composed_glyphs(&count,&cell);
+    if (!glyphs || count>LATIN_GLYPH_COUNT) return;
+    for (size_t i=0;i<count;++i) shared[i]=(RuntimeComposedGlyph){glyphs[i].code,glyphs[i].base,glyphs[i].alpha,glyphs[i].base_alpha};
+    runtime_font_set_composed_glyphs(shared,count,cell);
+}
+/* A port-side Menu & Subtitles language: its translated message sheets served over the slot's archive. A build whose
+ * font lacks the letters gets them in its glyph table; the sheets show them unaccented when the table cannot be found. */
+static void install_text_translation(const char *settings_file, const char *image_dir, const char *app0, uint8_t *image, size_t size,
+                                     uint64_t entry, uint8_t *message_stubs, size_t message_stub_bytes) {
     char message[1024]="";
     uint64_t length=0;
     DcpFilePatch *patches=NULL;
     size_t count=0;
-    const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message));
+    const unsigned probe=dcp_text_font_probe(settings_file,image_dir,app0);
+    const uint8_t *glyph_page=probe ? latin_glyphs_locate(image,size,(uint16_t)probe) : NULL;
+    int glyphs_composed=0;
+    const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message),
+                                             latin_glyphs_fit(image,size,glyph_page),&glyphs_composed);
     if (archive) {
-        char guest[256];
-        snprintf(guest,sizeof(guest),"/app0/%s",archive);
-        RuntimeFilePatch *table=calloc(count ? count : 1,sizeof(*table));
-        for (size_t i=0;table && i<count;++i) table[i]=(RuntimeFilePatch){patches[i].offset,patches[i].size,patches[i].data};
-        if (!table || runtime_file_overlay(guest,length,table,count))
-            snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid), showing English",archive);
-        free(table);
+        if (!overlay_archive(archive,length,patches,count))
+            snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid)",archive);
+        else {
+            if (glyphs_composed && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
+            default_message_install(image,size,entry,dcp_text_default_bone,message_stubs,message_stub_bytes);
+        }
     }
+    const char *stage=dcp_text_stage_overlay(&length,&patches,&count);
+    if (stage && !overlay_archive(stage,length,patches,count))
+        printf("Menu & Subtitles: PT-BR visual skipped: %s could not be overlaid\n",stage);
     if (*message) printf("Menu & Subtitles: %s\n",message);
 }
 static const char *command_line(int argc, char **argv) {
@@ -668,7 +698,7 @@ int main(int argc, char **argv) {
     }
     if (app0) {
         runtime_file_configure(app0, user_dir ? user_dir : "user");
-        install_text_translation(settings_file,paths.image_dir,app0);
+        dcp_activate_text_language(settings_file,paths.image_dir,app0);
         char sfo[4096], id[16]="";
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0);
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))
@@ -799,9 +829,10 @@ int main(int argc, char **argv) {
     const size_t gallery_unlock_stub_area = known_build && game_build.unlock_gallery && gallery_unlock_requested ? gallery_unlock_stub_bytes() : 0;
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
-    const size_t hook_bytes = round_page(cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
-                                         ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
-                                         gallery_unlock_stub_area);
+    const size_t message_stub_offset = cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
+                                       ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
+                                       gallery_unlock_stub_area;
+    const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes());
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -1015,6 +1046,8 @@ int main(int argc, char **argv) {
     const int ultrawide_effective=install_true_ultrawide(true_ultrawide_requested,known_build ? &game_build : NULL,&located,size,entry,
                            ultrawide_bytes ? round_page(size)+hook_bytes : 0,
                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
+    if (app0) install_text_translation(settings_file,paths.image_dir,app0,image,size,entry,image+round_page(size)+message_stub_offset,
+                                       default_message_stub_bytes());
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
                                        ultrawide_effective,skip_applied,skip_intro_applied,japanese_menu_buttons && menu_buttons_applied,gallery_unlock_applied};

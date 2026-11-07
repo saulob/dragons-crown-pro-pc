@@ -86,6 +86,7 @@ typedef struct {
     float scale_w, scale_h;          /* sceFontSetScalePixel: metrics and layout */
     float render_w, render_h;        /* sceFontSetupRenderScalePixel: rendering */
     FT_F26Dot6 size_w, size_h;       /* char size currently set on the face */
+    int game_font;                   /* opened on the game's own data, not a system font set */
     uint8_t guest_reserved[256];     /* the PS4 handle is a 256-byte object */
 } Font;
 
@@ -117,6 +118,20 @@ static const LibrarySelection library_ft={0x53464C46u /* "FLFS" */,0,NULL,{0,0,0
 static const RendererSelection renderer_ft={0x53524646u /* "FFRS" */,sizeof(RendererSelection),{0,0,0}};
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static FT_Library freetype; /* created with the first library, kept for the process lifetime */
+static const RuntimeComposedGlyph *composed_glyphs;
+static size_t composed_count;
+static int composed_cell;
+
+void runtime_font_set_composed_glyphs(const RuntimeComposedGlyph *glyphs, size_t count, int cell) {
+    pthread_mutex_lock(&lock);
+    composed_glyphs=cell>0 ? glyphs : NULL; composed_count=composed_glyphs ? count : 0; composed_cell=cell;
+    pthread_mutex_unlock(&lock);
+}
+
+static const RuntimeComposedGlyph *composed_glyph(uint32_t code) {
+    for (size_t i=0;i<composed_count;++i) if (composed_glyphs[i].code==code) return &composed_glyphs[i];
+    return NULL;
+}
 
 static Font *font_of(void *handle) {
     Font *font=handle;
@@ -286,7 +301,9 @@ static ABI int32_t font_open_memory(Library *library, const void *data, uint32_t
     if (!data || !size || !out) { if (out) *out=NULL; return ERR_INVALID_PARAMETER; }
     *out=NULL;
     /* The data stays owned by the guest, which keeps it mapped while the font is open. */
-    return font_create(library,data,size,params,out);
+    int32_t result=font_create(library,data,size,params,out);
+    if (result==FONT_OK) (*out)->game_font=1;
+    return result;
 }
 
 /* The PS4 system font sets live in the firmware; known sets open a built-in font instead. */
@@ -416,6 +433,112 @@ static ABI void font_render_surface_init(RenderSurface *surface, void *buffer, i
 static int ceil_int(float v) { return (int)ceilf(v); }
 static int floor_int(float v) { return (int)floorf(v); }
 
+typedef struct {
+    const uint8_t *top_row;
+    ptrdiff_t pitch;
+    int width, height, mono, grays;
+} Coverage;
+
+static Coverage bitmap_coverage(const FT_Bitmap *bitmap) {
+    Coverage c={NULL,bitmap->pitch,(int)bitmap->width,(int)bitmap->rows,bitmap->pixel_mode==FT_PIXEL_MODE_MONO,bitmap->num_grays};
+    if (bitmap->pixel_mode==FT_PIXEL_MODE_GRAY || bitmap->pixel_mode==FT_PIXEL_MODE_MONO)
+        /* A negative pitch stores the rows bottom-up: the top row is the last one in the buffer. */
+        c.top_row=bitmap->pitch<0 ? bitmap->buffer-(ptrdiff_t)bitmap->pitch*(c.height-1) : bitmap->buffer;
+    return c;
+}
+
+static uint8_t coverage_at(const Coverage *c, int64_t x, int64_t y) {
+    const uint8_t *row=c->top_row+y*c->pitch;
+    if (c->mono) return (row[x>>3]>>(7-(x&7)))&1 ? 255 : 0;
+    return c->grays==256 || c->grays<2 ? row[x] : (uint8_t)(row[x]*255/(c->grays-1));
+}
+
+/* Writes `c` with its top-left at dest, clipped to the scissor; `update` gets the rectangle written. */
+static void blit(RenderSurface *surface, int bpp, const Coverage *c, int64_t dest_x, int64_t dest_y, int update[4]) {
+    int64_t clip_x0=surface->scissor_x0, clip_y0=surface->scissor_y0;
+    int64_t clip_x1=surface->scissor_x1<(uint32_t)surface->width ? surface->scissor_x1 : (uint32_t)surface->width;
+    int64_t clip_y1=surface->scissor_y1<(uint32_t)surface->height ? surface->scissor_y1 : (uint32_t)surface->height;
+    if ((int64_t)surface->width_byte<clip_x1*bpp) clip_x1=surface->width_byte/bpp;
+    int64_t x0=dest_x>clip_x0 ? dest_x : clip_x0, y0=dest_y>clip_y0 ? dest_y : clip_y0;
+    int64_t x1=dest_x+c->width<clip_x1 ? dest_x+c->width : clip_x1, y1=dest_y+c->height<clip_y1 ? dest_y+c->height : clip_y1;
+    if (x1>x0 && y1>y0 && c->top_row) {
+        uint8_t *base=surface->buffer;
+        for (int64_t row=y0;row<y1;++row) {
+            uint8_t *target=base+row*surface->width_byte;
+            for (int64_t column=x0;column<x1;++column) {
+                uint8_t value=coverage_at(c,column-dest_x,row-dest_y);
+                if (bpp==1) target[column]=value;
+                else memset(target+column*4,value,4);
+            }
+        }
+        update[0]=(int)x0; update[1]=(int)y0; update[2]=(int)(x1-x0); update[3]=(int)(y1-y0);
+    } else {
+        update[0]=(int)(x0<clip_x1 ? x0 : clip_x1); update[1]=(int)(y0<clip_y1 ? y0 : clip_y1);
+        if (update[0]<0) update[0]=0;
+        if (update[1]<0) update[1]=0;
+        update[2]=update[3]=0;
+    }
+}
+
+/* launcher/latin_font.cpp's ink threshold: the boxes the letters were composed against. */
+#define COMPOSED_INK 40
+
+typedef struct { int x0, y0, x1, y1; } InkBox; /* half-open */
+
+static InkBox coverage_ink(const Coverage *c) {
+    InkBox box={c->width,c->height,0,0};
+    for (int y=0;c->top_row && y<c->height;++y)
+        for (int x=0;x<c->width;++x)
+            if (coverage_at(c,x,y)>COMPOSED_INK) {
+                if (x<box.x0) box.x0=x;
+                if (y<box.y0) box.y0=y;
+                if (x+1>box.x1) box.x1=x+1;
+                if (y+1>box.y1) box.y1=y+1;
+            }
+    return box;
+}
+
+static float cell_sample(const uint8_t *alpha, int cell, float u, float v) {
+    int x=floor_int(u), y=floor_int(v);
+    float fx=u-(float)x, fy=v-(float)y, sum=0.0f;
+    for (int dy=0;dy<2;++dy)
+        for (int dx=0;dx<2;++dx) {
+            int sx=x+dx, sy=y+dy;
+            if (sx<0 || sy<0 || sx>=cell || sy>=cell) continue;
+            sum+=alpha[sy*cell+sx]*(dx ? fx : 1.0f-fx)*(dy ? fy : 1.0f-fy);
+        }
+    return sum;
+}
+
+/* The composed cell placed so that the atlas's base letter covers the font's own `base` ink: the letter keeps this
+ * font's size, baseline and advance. Returns the pixels (caller frees) and their surface box. */
+static uint8_t *fit_composed(const RuntimeComposedGlyph *glyph, int cell, const Coverage *base, int64_t base_x, int64_t base_y,
+                             float box[4], int64_t *left, int64_t *top, int *width, int *height) {
+    const Coverage atlas_base={glyph->base_alpha,cell,cell,cell,0,256}, letter={glyph->alpha,cell,cell,cell,0,256};
+    const InkBox own=coverage_ink(base), from=coverage_ink(&atlas_base), ink=coverage_ink(&letter);
+    if (own.x1<=own.x0 || from.x1<=from.x0 || ink.x1<=ink.x0) return NULL;
+    const float scale_x=(float)(own.x1-own.x0)/(float)(from.x1-from.x0), scale_y=(float)(own.y1-own.y0)/(float)(from.y1-from.y0);
+    const float origin_x=(float)(base_x+own.x0), origin_y=(float)(base_y+own.y0);
+    box[0]=origin_x+(float)(ink.x0-from.x0)*scale_x; box[2]=origin_x+(float)(ink.x1-from.x0)*scale_x;
+    box[1]=origin_y+(float)(ink.y0-from.y0)*scale_y; box[3]=origin_y+(float)(ink.y1-from.y0)*scale_y;
+    *left=floor_int(box[0]); *top=floor_int(box[1]);
+    *width=ceil_int(box[2])-(int)*left; *height=ceil_int(box[3])-(int)*top;
+    uint8_t *pixels=*width>0 && *height>0 ? malloc((size_t)*width*(size_t)*height) : NULL;
+    enum { SAMPLES=4 };
+    for (int y=0;pixels && y<*height;++y)
+        for (int x=0;x<*width;++x) {
+            float sum=0.0f;
+            for (int sy=0;sy<SAMPLES;++sy)
+                for (int sx=0;sx<SAMPLES;++sx) {
+                    float px=(float)(*left+x)+(sx+0.5f)/SAMPLES, py=(float)(*top+y)+(sy+0.5f)/SAMPLES;
+                    sum+=cell_sample(glyph->alpha,cell,from.x0+(px-origin_x)/scale_x-0.5f,from.y0+(py-origin_y)/scale_y-0.5f);
+                }
+            float value=sum/(SAMPLES*SAMPLES);
+            pixels[y**width+x]=(uint8_t)(value>255.0f ? 255.0f : value+0.5f);
+        }
+    return pixels;
+}
+
 /* Rasterizes `code` into the surface (pixels, y down), clipped to the scissor. Unlike the
  * ...Horizontal variant, y is the top of the line: the baseline is y plus the horizontal layout's
  * baseline offset at the render scale, which is what the game's glyph cells rely on. A missing
@@ -430,14 +553,19 @@ static ABI int32_t font_render_char_glyph_image(Font *handle, uint32_t code, Ren
     Font *font=font_of(handle);
     int32_t result=FONT_OK;
     int bpp=surface->pixel_size_byte;
+    const RuntimeComposedGlyph *composed=NULL;
     if (!font) result=ERR_INVALID_FONT_HANDLE;
     else if (!font->renderer) result=ERR_NOT_BOUND_RENDERER;
     else if (!surface->buffer || surface->width<=0 || surface->height<=0 || surface->width_byte<=0 || (bpp!=1 && bpp!=4))
         result=ERR_NO_SUPPORT_SURFACE;
     else if (!isfinite(x) || !isfinite(y) || fabsf(x)>1e6f || fabsf(y)>1e6f) result=ERR_INVALID_PARAMETER;
     else if (set_size(font,font->render_w,font->render_h)) result=ERR_INVALID_PARAMETER;
-    else if (load_glyph(font,code)) result=ERR_NO_SUPPORT_GLYPH;
-    else {
+    else if (load_glyph(font,code)) {
+        /* The game's own font draws a composed letter it lacks, so the letter matches its neighbours. */
+        composed=font->game_font ? composed_glyph(code) : NULL;
+        if (!composed || load_glyph(font,composed->base)) result=ERR_NO_SUPPORT_GLYPH;
+    }
+    if (result==FONT_OK) {
         FT_GlyphSlot slot=font->face->glyph;
         fill_metrics(&slot->metrics,metrics);
         FT_Long baseline, descent;
@@ -447,48 +575,33 @@ static ABI int32_t font_render_char_glyph_image(Font *handle, uint32_t code, Ren
         int64_t cell_x=floor_div64(pen_x), cell_y=floor_div64(pen_y);
         if (slot->format==FT_GLYPH_FORMAT_OUTLINE)
             FT_Outline_Translate(&slot->outline,(FT_Pos)(pen_x-cell_x*64),(FT_Pos)-(pen_y-cell_y*64));
-        int update_x=0, update_y=0, update_w=0, update_h=0;
+        int update[4]={0,0,0,0};
         if (FT_Render_Glyph(slot,FT_RENDER_MODE_NORMAL)) result=ERR_NO_SUPPORT_GLYPH;
         else {
-            const FT_Bitmap *bitmap=&slot->bitmap;
-            int glyph_w=(int)bitmap->width, glyph_h=(int)bitmap->rows;
+            Coverage coverage=bitmap_coverage(&slot->bitmap);
             int64_t dest_x=cell_x+slot->bitmap_left, dest_y=cell_y-slot->bitmap_top;
-            int64_t clip_x0=surface->scissor_x0, clip_y0=surface->scissor_y0;
-            int64_t clip_x1=surface->scissor_x1<(uint32_t)surface->width ? surface->scissor_x1 : (uint32_t)surface->width;
-            int64_t clip_y1=surface->scissor_y1<(uint32_t)surface->height ? surface->scissor_y1 : (uint32_t)surface->height;
-            if ((int64_t)surface->width_byte<clip_x1*bpp) clip_x1=surface->width_byte/bpp;
-            int64_t x0=dest_x>clip_x0 ? dest_x : clip_x0, y0=dest_y>clip_y0 ? dest_y : clip_y0;
-            int64_t x1=dest_x+glyph_w<clip_x1 ? dest_x+glyph_w : clip_x1, y1=dest_y+glyph_h<clip_y1 ? dest_y+glyph_h : clip_y1;
-            if (x1>x0 && y1>y0 && (bitmap->pixel_mode==FT_PIXEL_MODE_GRAY || bitmap->pixel_mode==FT_PIXEL_MODE_MONO)) {
-                uint8_t *base=surface->buffer;
-                /* A negative pitch stores the rows bottom-up: the top row is the last one in the buffer. */
-                const uint8_t *top_row=bitmap->pitch<0 ? bitmap->buffer-(ptrdiff_t)bitmap->pitch*(glyph_h-1) : bitmap->buffer;
-                for (int64_t row=y0;row<y1;++row) {
-                    const uint8_t *source=top_row+(row-dest_y)*bitmap->pitch;
-                    uint8_t *target=base+row*surface->width_byte;
-                    for (int64_t column=x0;column<x1;++column) {
-                        int64_t sx=column-dest_x;
-                        uint8_t value=bitmap->pixel_mode==FT_PIXEL_MODE_GRAY
-                            ? (bitmap->num_grays==256 || bitmap->num_grays<2 ? source[sx] : (uint8_t)(source[sx]*255/(bitmap->num_grays-1)))
-                            : ((source[sx>>3]>>(7-(sx&7)))&1 ? 255 : 0);
-                        if (bpp==1) target[column]=value;
-                        else memset(target+column*4,value,4);
-                    }
+            uint8_t *fitted=NULL;
+            if (composed) {
+                float box[4];
+                int width=0, height=0;
+                fitted=fit_composed(composed,composed_cell,&coverage,dest_x,dest_y,box,&dest_x,&dest_y,&width,&height);
+                if (!fitted) result=ERR_NO_SUPPORT_GLYPH;
+                else {
+                    coverage=(Coverage){fitted,width,width,height,0,256};
+                    metrics->width=box[2]-box[0]; metrics->height=box[3]-box[1];
+                    metrics->h_bearing_x=box[0]-x; metrics->h_bearing_y=pen_origin_y-box[1];
                 }
-                update_x=(int)x0; update_y=(int)y0; update_w=(int)(x1-x0); update_h=(int)(y1-y0);
-            } else {
-                update_x=(int)(x0<clip_x1 ? x0 : clip_x1); update_y=(int)(y0<clip_y1 ? y0 : clip_y1);
-                if (update_x<0) update_x=0;
-                if (update_y<0) update_y=0;
             }
+            if (result==FONT_OK) blit(surface,bpp,&coverage,dest_x,dest_y,update);
+            free(fitted);
         }
         if (result==FONT_OK) {
             output->stage=NULL;
-            output->image.address=(uint8_t *)surface->buffer+(size_t)update_y*(size_t)surface->width_byte+(size_t)update_x*(size_t)bpp;
+            output->image.address=(uint8_t *)surface->buffer+(size_t)update[1]*(size_t)surface->width_byte+(size_t)update[0]*(size_t)bpp;
             output->image.width_byte=(uint32_t)surface->width_byte;
             output->image.pixel_size_byte=(uint8_t)bpp;
-            output->update.x=(uint32_t)update_x; output->update.y=(uint32_t)update_y;
-            output->update.w=(uint32_t)update_w; output->update.h=(uint32_t)update_h;
+            output->update.x=(uint32_t)update[0]; output->update.y=(uint32_t)update[1];
+            output->update.w=(uint32_t)update[2]; output->update.h=(uint32_t)update[3];
             /* Image metrics: integer pixel box of the glyph relative to the pen position. */
             float left=x+metrics->h_bearing_x, top=pen_origin_y-metrics->h_bearing_y;
             float right=left+metrics->width, bottom=top+metrics->height;

@@ -8,20 +8,21 @@
 
 /* UK shares the US text. Japanese and Korean keep the English row words their title menus already use. */
 const ExitGameLanguage exit_game_languages[EXIT_GAME_LANGUAGE_COUNT] = {
-    {"english", "English", "Data Install", "Install the game to the ##(HDD) for reduced load times.", "Exit Game", "Exit the game."},
+    {"english", "English", "Data Install", "Install the game to the ##(HDD) for reduced load times.", "Exit Game", "Exit the game.", NULL},
     {"german", "German", "Installation", "Installiere das Spiel auf die ##(HDD), um Ladezeiten zu verkürzen.", "Spiel beenden",
-     "Beende das Spiel."},
+     "Beende das Spiel.", NULL},
     {"spanish", "Spanish", "Instalación de datos", "Instala el juego en el ##(HDD) para reducir el tiempo de carga.",
-     "Salir del juego", "Sal del juego."},
+     "Salir del juego", "Sal del juego.", NULL},
     {"french", "French", "Installation des données", "Installez le jeu sur le ##(HDD) pour réduire les temps de chargement.",
-     "Quitter le jeu", "Quittez le jeu."},
+     "Quitter le jeu", "Quittez le jeu.", NULL},
     {"italian", "Italian", "Installazione dei dati", "Installa il gioco sul ##(HDD) per ridurre i tempi di caricamento.",
-     "Esci dal gioco", "Esci dal gioco."},
+     "Esci dal gioco", "Esci dal gioco.", NULL},
     {"brazilian_portuguese", "Portuguese (Brazil)", "Instalação de Dados",
-     "Instale o jogo no ##(HDD) para diminuir os tempos de carregamento.", "Sair do Jogo", "Saia do jogo."},
-    {"japanese", "Japanese", "Data Install", "##(HDD)にデータをインストールして読み込みを高速化します", "Exit Game", "ゲームを終了します"},
-    {"traditional_chinese", "Traditional Chinese", "安裝遊戲資料", "將遊戲資料安裝至##(HDD)中以加速載入速度。", "結束遊戲", "結束遊戲。"},
-    {"korean", "Korean", "Data Install", "##(HDD)에 데이터를 설치하여 로딩 시간을 빠르게 합니다", "Exit Game", "게임을 종료합니다"},
+     "Instale o jogo no ##(HDD) para diminuir os tempos de carregamento.", "Sair do Jogo", "Saia do jogo.",
+     "Instalacao de Dados"},
+    {"japanese", "Japanese", "Data Install", "##(HDD)にデータをインストールして読み込みを高速化します", "Exit Game", "ゲームを終了します", NULL},
+    {"traditional_chinese", "Traditional Chinese", "安裝遊戲資料", "將遊戲資料安裝至##(HDD)中以加速載入速度。", "結束遊戲", "結束遊戲。", NULL},
+    {"korean", "Korean", "Data Install", "##(HDD)에 데이터를 설치하여 로딩 시간을 빠르게 합니다", "Exit Game", "게임을 종료합니다", NULL},
 };
 
 typedef struct {
@@ -62,12 +63,13 @@ ExitGameTextStatus exit_game_text_patch(uint8_t *sheet, size_t size, const ExitG
     for (size_t i = 0; i < EXIT_GAME_LANGUAGE_COUNT; ++i) {
         const ExitGameLanguage *candidate = &exit_game_languages[i];
         const int done = is_record(records.row, candidate->row) && is_record(records.help, candidate->help);
-        const int original = is_record(records.install, candidate->install_original) &&
-                             is_record(records.row, STORE_ROW) && is_record(records.help, candidate->help_original);
+        const int install = is_record(records.install, candidate->install_original) ||
+                            (candidate->install_unaccented && is_record(records.install, candidate->install_unaccented));
+        const int original = install && is_record(records.row, STORE_ROW) && is_record(records.help, candidate->help_original);
         if (!original && !done) continue;
         if (language) *language = candidate;
         if (done) return EXIT_GAME_TEXT_ALREADY;
-        const size_t install_length = strlen(candidate->install_original), store_length = strlen(STORE_ROW);
+        const size_t install_length = strlen((const char *)records.install), store_length = strlen(STORE_ROW);
         const size_t help_length = strlen(candidate->help_original), store_help_length = strlen((const char *)records.store_help);
         const size_t row_length = strlen(candidate->row), new_help_length = strlen(candidate->help);
         if (row_length > store_length || new_help_length > help_length) return EXIT_GAME_TEXT_NO_ROOM;

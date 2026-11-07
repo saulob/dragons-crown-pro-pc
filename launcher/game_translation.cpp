@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iterator>
 #include <list>
+#include <map>
 #include <system_error>
 
 #include <zlib.h>
@@ -15,6 +16,8 @@
 #include "dcp_launcher.h"
 #include "fms_sheet.h"
 #include "game_files.h"
+#include "latin_font.h"
+#include "latin_glyphs.h"
 #include "net/json.h"
 #include "settings.h"
 #include "text_languages.h"
@@ -22,16 +25,34 @@
 
 namespace dcp {
 
+namespace {
+
+struct OverlayFile {
+    const char* archive;
+    uint64_t length;
+    std::vector<DcpFilePatch> patches;
+};
+std::optional<OverlayFile> second_overlay; // a build whose stage files are not in its slot's archive
+const std::vector<std::string>* served_default_bone = nullptr; // the records of the overlay in use
+std::vector<DcpComposedGlyph> served_composed_glyphs;
+
+} // namespace
+
 extern const TranslationFile kPtBrTranslation[];
 extern const size_t kPtBrTranslationCount;
 extern const TranslationFile kPtBrVisualPatches[];
 extern const size_t kPtBrVisualPatchesCount;
+extern const TranslationFile kPtBrSources[];
+extern const size_t kPtBrSourcesCount;
 
 namespace {
 
 constexpr size_t kMaxProblems = 5;
 // SystemMsg records 109-225 are the ##(NAME) keys the other records look up; 226-342 are their values.
 constexpr size_t kFirstTagKey = 109, kLastTagKey = 225;
+constexpr size_t kSourceHashLength = 16;
+constexpr char kMarkFontEntry[] = "other/fontUTF16.ftx";
+constexpr char kSharedArchive[] = "DRACRO.CPK";
 
 // The French layouts have the label boxes the Portuguese textures were made for. They are read from the user's own
 // archive and served under the USA paths; only the embedded file name changes.
@@ -144,17 +165,50 @@ std::vector<size_t> Indices(const net::Json& index) {
     return out;
 }
 
-// Why the record cannot show `text`; empty when it can.
+// A slot's records by sheet, each translated index with the leading hex of its record's SHA-256.
+using SourceHashes = std::map<size_t, std::string>;
+using SourceMap = std::map<std::string, SourceHashes, std::less<>>;
+
+std::optional<SourceMap> ParseSourceMap(const TranslationFile& file) {
+    const std::optional<net::Json> json =
+        net::Json::parse(std::string_view(reinterpret_cast<const char*>(file.data), file.size), 8);
+    if (!json || !json->is_object() || !(*json)["sheets"].is_array()) return std::nullopt;
+    SourceMap map;
+    for (const net::Json& sheet : (*json)["sheets"].items()) {
+        if (!sheet["sheet"].is_string() || !sheet["hashes"].is_array()) return std::nullopt;
+        SourceHashes& hashes = map[sheet["sheet"].as_string()];
+        for (const net::Json& row : sheet["hashes"].items()) {
+            if (!row.is_array() || row.items().size() != 2 || row.items()[0].type() != net::Json::Type::kInt ||
+                !row.items()[1].is_string()) {
+                return std::nullopt;
+            }
+            hashes[size_t(row.items()[0].as_int())] = row.items()[1].as_string();
+        }
+    }
+    return map;
+}
+
+// Why the record cannot show `text`; empty when it can. `mapped`: the slot's source map, for a slot not in English.
 std::string RecordProblem(std::string_view sheet, const std::vector<std::string>& records, size_t index,
-                          std::string_view source_sha256, std::string_view text) {
+                          std::string_view source_sha256, std::string_view text, const SourceHashes* mapped) {
     if (index >= records.size()) return "no such record";
     if (sheet == "SystemMsg" && index >= kFirstTagKey && index <= kLastTagKey) return "a tag key, never translated";
-    if (Sha256Hex(records[index]) != source_sha256) return "the English record changed";
+    if (mapped) {
+        const auto found = mapped->find(index);
+        if (found == mapped->end()) return "no record of this slot maps to it";
+        if (Sha256Hex(records[index]).substr(0, kSourceHashLength) != found->second) return "the source record changed";
+    } else if (Sha256Hex(records[index]) != source_sha256) {
+        return "the English record changed";
+    }
     if (!ValidUtf8(text)) return "not UTF-8";
     if (std::any_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 && c != '\n'; })) {
         return "a control character";
     }
-    if (!SameControlTokens(records[index], text)) return "control sequences differ from the English";
+    if (mapped) {
+        if (!SameArguments(records[index], text)) return "printf or button sequences differ from the source";
+    } else if (!SameControlTokens(records[index], text)) {
+        return "control sequences differ from the English";
+    }
     return {};
 }
 
@@ -176,8 +230,14 @@ struct SheetResult {
     std::vector<uint8_t> data;
 };
 
+// DRACRO.CPK's unsuffixed sheets name ObjectParam differently.
+std::string SheetEntry(std::string_view sheet, std::string_view suffix) {
+    if (suffix.empty()) return "msgsheet/" + std::string(sheet == "ObjectParam" ? "ObjectParamMsg" : sheet) + ".fms";
+    return "msgsheet/" + std::string(sheet) + "_" + std::string(suffix) + ".fms";
+}
+
 std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string_view suffix, const TranslationFile& file,
-                                          ArchiveTranslation& result) {
+                                          const SourceMap* source, bool fold, ArchiveTranslation& result) {
     const auto problem = [&](const std::string& text) {
         if (result.problems.size() < kMaxProblems) result.problems.push_back(text);
     };
@@ -189,7 +249,7 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
         return std::nullopt;
     }
     const std::string& sheet = (*json)["sheet"].as_string();
-    SheetResult out{"msgsheet/" + sheet + "_" + std::string(suffix) + ".fms", {}};
+    SheetResult out{SheetEntry(sheet, suffix), {}};
     const CpkEntry* entry = archive.Find(out.entry);
     std::string error;
     const std::vector<uint8_t> original = entry ? archive.Read(*entry, &error) : std::vector<uint8_t>{};
@@ -200,9 +260,15 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
                                    : ": not in the archive"));
         return std::nullopt;
     }
-    const std::vector<std::string> english = parsed->records;
-    std::vector<bool> done(english.size());
+    const std::vector<std::string> native = parsed->records;
+    std::vector<bool> done(native.size());
     size_t translated = 0;
+    static const SourceHashes kNoHashes;
+    const SourceHashes* mapped = nullptr;
+    if (source) {
+        const auto found = source->find(sheet);
+        mapped = found == source->end() ? &kNoHashes : &found->second;
+    }
     for (const net::Json& item : (*json)["entries"].items()) {
         const std::vector<size_t> indices = Indices(item["index"]);
         const net::Json& hash = item["source_sha256"];
@@ -213,7 +279,8 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
             continue;
         }
         for (const size_t index : indices) {
-            std::string why = RecordProblem(sheet, english, index, hash.as_string(), text.as_string());
+            ++result.corpus;
+            std::string why = RecordProblem(sheet, native, index, hash.as_string(), text.as_string(), mapped);
             if (why.empty() && done[index]) why = "translated twice";
             if (!why.empty()) {
                 ++result.refused;
@@ -222,10 +289,11 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
             }
             done[index] = true;
             ++translated;
-            parsed->records[index] = text.as_string();
+            parsed->records[index] = fold ? FoldLatinLetters(text.as_string()) : text.as_string();
         }
     }
     if (!translated) return std::nullopt;
+    if (sheet == "DefaultBone") result.default_bone = parsed->records;
     result.translated += translated;
     ++result.sheets;
     out.data = BuildFms(*parsed);
@@ -236,6 +304,42 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
 
 std::span<const TranslationFile> PtBrTranslationFiles() { return {kPtBrTranslation, kPtBrTranslationCount}; }
 std::span<const TranslationFile> PtBrVisualPatches() { return {kPtBrVisualPatches, kPtBrVisualPatchesCount}; }
+
+std::vector<TranslationFile> PtBrVisualPatches(VisualSet set) {
+    std::vector<TranslationFile> chosen;
+    for (const TranslationFile& file : PtBrVisualPatches()) {
+        if (std::string_view(file.name).starts_with("base-") == (set == VisualSet::kBaseStage)) chosen.push_back(file);
+    }
+    return chosen;
+}
+
+const TranslationFile* PtBrSource(std::string_view source) {
+    const std::string name = std::string(source) + ".json";
+    for (const TranslationFile& file : std::span<const TranslationFile>(kPtBrSources, kPtBrSourcesCount)) {
+        if (file.name == name) return &file;
+    }
+    return nullptr;
+}
+
+std::string FoldLatinLetters(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if ((lead == 0xC3) && i + 1 < text.size()) {
+            const uint16_t code = uint16_t((lead & 0x1f) << 6 | (static_cast<unsigned char>(text[i + 1]) & 0x3f));
+            const auto found = std::find_if(std::begin(latin_glyphs), std::end(latin_glyphs),
+                                            [&](const LatinGlyph& glyph) { return glyph.code == code; });
+            if (found != std::end(latin_glyphs)) {
+                out += found->base;
+                ++i;
+                continue;
+            }
+        }
+        out += text[i];
+    }
+    return out;
+}
 
 std::vector<std::string> ControlTokens(std::string_view text) {
     std::vector<std::string> tokens;
@@ -284,6 +388,19 @@ bool SameControlTokens(std::string_view source, std::string_view translation) {
     return printf_a == printf_b && a == b;
 }
 
+bool SameArguments(std::string_view source, std::string_view translation) {
+    const auto arguments = [](std::string_view text) {
+        std::vector<std::string> conversions, buttons;
+        for (std::string& token : ControlTokens(text)) {
+            if (IsPrintf(token) && token[1] != ' ') conversions.push_back(std::move(token));
+            else if (token.rfind("@#(", 0) == 0) buttons.push_back(std::move(token));
+        }
+        std::sort(buttons.begin(), buttons.end());
+        return std::pair(std::move(conversions), std::move(buttons));
+    };
+    return arguments(source) == arguments(translation);
+}
+
 std::vector<uint8_t> InflateVisual(const TranslationFile& file) {
     if (file.size < 4) return {};
     const uint32_t size = uint32_t(file.data[0]) | uint32_t(file.data[1]) << 8 | uint32_t(file.data[2]) << 16 |
@@ -305,7 +422,7 @@ void AddVisualPatches(const CpkArchive& archive, std::span<const TranslationFile
         std::optional<BlockPatch> patch = data.empty() ? std::nullopt : ParseBlockPatch(data);
         if (!patch) {
             ++result.visual_skipped;
-            if (result.problems.size() < kMaxProblems) result.problems.push_back(std::string(file.name) + ": unreadable visual patch");
+            result.visual_problems.push_back(std::string(file.name) + ": unreadable visual patch");
             continue;
         }
         patches.push_back(std::move(*patch));
@@ -331,7 +448,7 @@ void AddVisualPatches(const CpkArchive& archive, std::span<const TranslationFile
         result.read_ms += watch.Lap();
         if (!entry || (data.empty() && entry->extract_size != 0)) {
             ++result.visual_skipped;
-            if (result.problems.size() < kMaxProblems) result.problems.push_back(names[i] + ": not in the archive");
+            result.visual_problems.push_back(names[i] + ": not in the archive");
             continue;
         }
         bool applied = false;
@@ -351,7 +468,7 @@ void AddVisualPatches(const CpkArchive& archive, std::span<const TranslationFile
         }
         if (!applied) {
             ++result.visual_skipped;
-            if (result.problems.size() < kMaxProblems) result.problems.push_back(names[i] + ": source changed, kept English");
+            result.visual_problems.push_back(names[i] + ": source fingerprint not recognized");
             continue;
         }
         const bool repeated = std::any_of(entries.begin(), entries.end(),
@@ -372,12 +489,12 @@ void AddLayoutMirrors(const CpkArchive& archive, std::vector<std::pair<std::stri
         std::vector<uint8_t> data = entry ? archive.Read(*entry) : std::vector<uint8_t>();
         if (!entry || data.empty()) {
             ++result.visual_skipped;
-            if (result.problems.size() < kMaxProblems) result.problems.push_back(std::string(mirror.source) + ": not in the archive");
+            result.visual_problems.push_back(std::string(mirror.source) + ": not in the archive");
             continue;
         }
         if (Sha256Hex(std::string_view(reinterpret_cast<const char*>(data.data()), data.size())) != mirror.sha256) {
             ++result.visual_skipped;
-            if (result.problems.size() < kMaxProblems) result.problems.push_back(std::string(mirror.source) + ": source changed");
+            result.visual_problems.push_back(std::string(mirror.source) + ": source fingerprint not recognized");
             continue;
         }
         const std::string old = mirror.embedded;
@@ -386,7 +503,7 @@ void AddLayoutMirrors(const CpkArchive& archive, std::vector<std::pair<std::stri
         auto at = std::search(data.begin(), data.end(), old.begin(), old.end());
         if (at == data.end() || std::search(at + old.size(), data.end(), old.begin(), old.end()) != data.end()) {
             ++result.visual_skipped;
-            if (result.problems.size() < kMaxProblems) result.problems.push_back(std::string(mirror.source) + ": layout name not found");
+            result.visual_problems.push_back(std::string(mirror.source) + ": layout name not found");
             continue;
         }
         std::copy(name.begin(), name.end(), at);
@@ -395,7 +512,7 @@ void AddLayoutMirrors(const CpkArchive& archive, std::vector<std::pair<std::stri
         });
         if (!edited) {
             ++result.visual_skipped;
-            if (result.problems.size() < kMaxProblems) result.problems.push_back(std::string(mirror.source) + ": layout edit does not match");
+            result.visual_problems.push_back(std::string(mirror.source) + ": layout edit does not match");
             continue;
         }
         for (const LayoutEdit& edit : mirror.edits) std::copy(edit.after, edit.after + 4, data.begin() + edit.offset);
@@ -410,9 +527,43 @@ void AddLayoutMirrors(const CpkArchive& archive, std::vector<std::pair<std::stri
     }
 }
 
+namespace {
+
+// The font with the letters, or why not. The marks come from DRACRO.CPK's font in every region.
+std::optional<std::vector<uint8_t>> CompletedFont(const CpkArchive& archive, const TranslationRecipe& recipe, std::string& why,
+                                                  std::vector<LatinCell>& cells) {
+    if (!recipe.glyph_table) {
+        why = "no glyph table for the letters in the executable";
+        return std::nullopt;
+    }
+    const CpkEntry* entry = archive.Find(recipe.font_entry);
+    std::vector<uint8_t> font = entry ? archive.Read(*entry, &why) : std::vector<uint8_t>();
+    if (font.empty()) {
+        if (why.empty()) why = "not in the archive";
+        return std::nullopt;
+    }
+    CpkArchive shared;
+    const CpkEntry* marks_entry = nullptr;
+    std::vector<uint8_t> marks;
+    if (shared.Open(recipe.mark_archive, &why) && (marks_entry = shared.Find(kMarkFontEntry))) marks = shared.Read(*marks_entry, &why);
+    if (marks.empty()) {
+        if (why.empty()) why = "the mark font is missing";
+        return std::nullopt;
+    }
+    if (!ComposeLatinFont(font, marks, &why, &cells)) return std::nullopt;
+    return font;
+}
+
+} // namespace
+
 ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, std::string_view suffix,
                                     std::span<const TranslationFile> files,
                                     std::span<const TranslationFile> visual_patches) {
+    return TranslateArchive(archive_path, TranslationRecipe{suffix, files, visual_patches});
+}
+
+ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, const TranslationRecipe& recipe) {
+    const std::span<const TranslationFile> files = recipe.files, visual_patches = recipe.visual_patches;
     ArchiveTranslation result;
     if (files.empty() && visual_patches.empty()) return result;
     CpkArchive archive;
@@ -424,8 +575,30 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, s
     }
     std::vector<std::pair<std::string, std::vector<uint8_t>>> sheets;
     Stopwatch watch;
+    std::optional<SourceMap> source;
+    if (recipe.source) {
+        source = ParseSourceMap(*recipe.source);
+        if (!source) {
+            result.error = std::string(recipe.source->name) + ": not a source map";
+            return result;
+        }
+    }
+    bool fold = false;
+    if (!recipe.font_entry.empty()) {
+        std::string why;
+        std::optional<std::vector<uint8_t>> font = CompletedFont(archive, recipe, why, result.latin_cells);
+        if (font) {
+            sheets.emplace_back(std::string(recipe.font_entry), std::move(*font));
+            result.latin_glyphs = true;
+        } else {
+            fold = result.folded = true;
+            if (result.problems.size() < kMaxProblems) {
+                result.problems.push_back(std::string(recipe.font_entry) + ": " + why + ", letters shown without accents");
+            }
+        }
+    }
     for (const TranslationFile& file : files) {
-        std::optional<SheetResult> sheet = TranslateSheet(archive, suffix, file, result);
+        std::optional<SheetResult> sheet = TranslateSheet(archive, recipe.suffix, file, source ? &*source : nullptr, fold, result);
         if (!sheet) continue;
         const bool repeated = std::any_of(sheets.begin(), sheets.end(), [&](const auto& s) { return s.first == sheet->entry; });
         if (repeated) {
@@ -439,7 +612,7 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, s
     if (!visual_patches.empty()) {
         AddVisualPatches(archive, visual_patches, sheets, result);
         result.visual_ms = watch.Lap();
-        AddLayoutMirrors(archive, sheets, result);
+        if (recipe.french_layouts) AddLayoutMirrors(archive, sheets, result);
         result.mirror_ms = watch.Lap();
     }
     if (!sheets.empty()) {
@@ -452,28 +625,103 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, s
 
 } // namespace dcp
 
+extern "C" void dcp_activate_text_language(const char* settings_file, const char* image_dir, const char* app0) {
+    using namespace dcp;
+    const GameBuild* build = BuildOfImageDir(image_dir);
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    localization::SetActiveLanguage(ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).key);
+}
+
+namespace dcp {
+namespace {
+
+OverlayFile OverlayTable(const ArchiveTranslation& translation, const char* archive) {
+    OverlayFile file{archive, translation.overlay->length, {}};
+    for (const auto& [offset, data] : translation.overlay->patches) file.patches.push_back({offset, data.size(), data.data()});
+    return file;
+}
+
+} // namespace
+} // namespace dcp
+
+extern "C" const char* dcp_text_default_bone(unsigned record) {
+    if (!dcp::served_default_bone || record >= dcp::served_default_bone->size()) return nullptr;
+    return (*dcp::served_default_bone)[record].c_str();
+}
+
+extern "C" const DcpComposedGlyph* dcp_text_composed_glyphs(size_t* count, int* cell_pixels) {
+    *count = dcp::served_composed_glyphs.size();
+    *cell_pixels = dcp::kLatinFontCellPixels;
+    return *count ? dcp::served_composed_glyphs.data() : nullptr;
+}
+
+extern "C" const char* dcp_text_stage_overlay(uint64_t* length, DcpFilePatch** patches, size_t* count) {
+    if (!dcp::second_overlay) return nullptr;
+    *length = dcp::second_overlay->length;
+    *patches = dcp::second_overlay->patches.data();
+    *count = dcp::second_overlay->patches.size();
+    return dcp::second_overlay->archive;
+}
+
+extern "C" unsigned dcp_text_font_probe(const char* settings_file, const char* image_dir, const char* app0) {
+    using namespace dcp;
+    const GameBuild* build = BuildOfImageDir(image_dir);
+    if (!build || build->translation->font_entry.empty()) return 0;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    const TextLanguage& language = ResolveTextLanguage(languages, settings.Get(kTextLanguageKey));
+    return language.translation.empty() ? 0 : build->translation->font_probe;
+}
+
 extern "C" const char* dcp_text_translation(const char* settings_file, const char* image_dir, const char* app0,
                                             uint64_t* length, DcpFilePatch** patches, size_t* count, char* message,
-                                            size_t message_size) {
+                                            size_t message_size, int glyph_table, int* glyphs_composed) {
     using namespace dcp;
     static std::list<ArchiveTranslation> retained; // the runtime borrows the overlay data for the life of the process
     static std::vector<DcpFilePatch> table;
     if (message_size) *message = '\0';
+    if (glyphs_composed) *glyphs_composed = 0;
     const GameBuild* build = BuildOfImageDir(image_dir);
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     const std::filesystem::path folder = PathFromUtf8(app0 ? app0 : "");
     const std::vector<TextLanguage> languages = InstalledTextLanguages(folder, build);
     const TextLanguage& language = ResolveTextLanguage(languages, settings.Get(kTextLanguageKey));
     localization::SetActiveLanguage(language.key);
-    if (language.translation.empty() || !build || !build->regional_archive) return nullptr;
+    second_overlay.reset();
+    served_default_bone = nullptr;
+    served_composed_glyphs.clear();
+    if (language.translation.empty() || !build) return nullptr;
+    const TranslationProfile& profile = *build->translation;
     const std::string name(language.name);
+    const char* const native = profile.source.empty() ? "English" : "the game's own language";
     const auto started = std::chrono::steady_clock::now();
-    retained.push_back(TranslateArchive(folder / build->regional_archive, language.suffix,
-                                   language.translation == "pt-BR" ? PtBrTranslationFiles()
-                                                                   : std::span<const TranslationFile>(),
-                                   language.translation == "pt-BR" ? PtBrVisualPatches()
-                                                                   : std::span<const TranslationFile>()));
-    const ArchiveTranslation& translation = retained.back();
+    const std::vector<TranslationFile> visuals = PtBrVisualPatches(profile.visuals);
+    const bool same_archive = std::string_view(profile.archive) == profile.visual_archive;
+    TranslationRecipe recipe{language.suffix, {}};
+    if (language.translation == "pt-BR") {
+        recipe.files = PtBrTranslationFiles();
+        if (same_archive) recipe.visual_patches = visuals;
+        if (!profile.source.empty()) recipe.source = PtBrSource(profile.source);
+    }
+    recipe.font_entry = profile.font_entry;
+    recipe.mark_archive = folder / kSharedArchive;
+    recipe.glyph_table = glyph_table != 0;
+    recipe.french_layouts = profile.visuals == VisualSet::kEnglishSlot;
+    retained.push_back(TranslateArchive(folder / profile.archive, recipe));
+    ArchiveTranslation& translation = retained.back();
+    if (!same_archive && language.translation == "pt-BR") {
+        TranslationRecipe stage{{}, {}};
+        stage.visual_patches = visuals;
+        stage.french_layouts = false;
+        retained.push_back(TranslateArchive(folder / profile.visual_archive, stage));
+        const ArchiveTranslation& second = retained.back();
+        translation.visuals += second.visuals;
+        translation.visual_skipped += second.visual_skipped;
+        translation.visual_problems.insert(translation.visual_problems.end(), second.visual_problems.begin(), second.visual_problems.end());
+        if (!second.error.empty()) translation.visual_problems.push_back(second.error);
+        if (second.overlay) second_overlay = OverlayTable(second, profile.visual_archive);
+    }
     const long long total_ms = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started).count());
     std::printf("Menu & Subtitles: overlay prepared in %lld ms (sheets %u, visual patches %u [inflate %u, read %u], layouts %u, overlay %u)\n",
@@ -481,26 +729,35 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
                 translation.mirror_ms, translation.overlay_ms);
     std::string text;
     if (!translation.error.empty()) {
-        text = name + " unavailable (" + translation.error + "), showing English";
+        text = name + " unavailable (" + translation.error + "), showing " + native;
     } else if (!translation.overlay) {
-        text = name + ": no record translated yet, showing English";
+        text = name + ": no record translated yet, showing " + native;
     } else {
-        text = name + ": " + std::to_string(translation.translated) + " records translated in " +
-               std::to_string(translation.sheets) + " sheets, " + std::to_string(translation.visuals) +
-               " visual replacements, the others in English";
+        text = name + ": " + std::to_string(translation.translated) + " records translated of " +
+               std::to_string(translation.corpus) + " in " + std::to_string(translation.sheets) + " sheets, " +
+               std::to_string(translation.visuals) + " visual replacements, the others in " + native;
     }
-    if (translation.refused || translation.visual_skipped) {
-        const size_t refused = translation.refused + translation.visual_skipped;
-        text += "; " + std::to_string(refused) + " kept in English (";
+    if (translation.latin_glyphs) text += "; accented letters composed from the installed font";
+    for (const std::string& skipped : translation.visual_problems) std::printf("Menu & Subtitles: PT-BR visual skipped: %s\n", skipped.c_str());
+    if (translation.refused || translation.folded) {
+        const size_t refused = translation.refused;
+        text += "; " + std::to_string(refused) + " kept in " + native + " (";
         for (size_t i = 0; i < translation.problems.size(); ++i) text += (i ? "; " : "") + translation.problems[i];
         text += refused > translation.problems.size() ? "; ...)" : ")";
     }
     std::snprintf(message, message_size, "%s", text.c_str());
     if (!translation.error.empty() || !translation.overlay) return nullptr;
+    if (glyphs_composed) *glyphs_composed = translation.latin_glyphs;
+    served_default_bone = &translation.default_bone;
+    if (translation.latin_glyphs) {
+        for (const LatinCell& cell : translation.latin_cells) {
+            served_composed_glyphs.push_back({cell.code, uint8_t(cell.base), cell.alpha.data(), cell.base_alpha.data()});
+        }
+    }
     table.clear();
     for (const auto& [offset, data] : translation.overlay->patches) table.push_back({offset, data.size(), data.data()});
     *length = translation.overlay->length;
     *patches = table.data();
     *count = table.size();
-    return build->regional_archive;
+    return profile.archive;
 }

@@ -39,7 +39,8 @@ struct BlockPatch {
     std::vector<BlockPatchTarget> targets;
 };
 
-// Nothing when the bytes are not a DCPX patch; `error` says why.
+// Nothing when the bytes are not a DCPX patch; `error` says why. DCPX2 gives one entry several accepted sources, each
+// with its own result, over a single list of runs: it comes back as one target per source.
 std::optional<BlockPatch> ParseBlockPatch(std::span<const uint8_t> bytes, std::string* error = nullptr);
 
 // One entry of an archive's table of contents.

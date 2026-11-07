@@ -70,7 +70,7 @@ bool IsSlotted(std::span<const TextLanguage> languages) {
 
 std::string_view SavedLanguageName(std::string_view key) {
     for (const GameBuild& build : SupportedBuilds()) {
-        for (const TextLanguage& language : build.text_languages) {
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
             if (language.key == key) {
                 return language.name;
             }
@@ -89,13 +89,16 @@ std::vector<TextLanguage> InstalledTextLanguages(const std::filesystem::path& ap
         !archive.Open(app0 / build->regional_archive)) {
         return fallback;
     }
-    std::vector<std::set<std::string>> files;
+    std::map<std::string_view, std::set<std::string>> files;
     std::map<std::string, size_t> holders;
     size_t present = 0;
     for (const TextLanguage& language : listed) {
-        files.push_back(FilesOf(archive, language.suffix));
-        present += !files.back().empty();
-        for (const std::string& file : files.back()) {
+        if (!language.translation.empty()) {
+            continue;
+        }
+        const std::set<std::string>& slot = files[language.suffix] = FilesOf(archive, language.suffix);
+        present += !slot.empty();
+        for (const std::string& file : slot) {
             ++holders[file];
         }
     }
@@ -107,11 +110,12 @@ std::vector<TextLanguage> InstalledTextLanguages(const std::filesystem::path& ap
         }
     }
     std::vector<TextLanguage> installed;
-    for (size_t i = 0; i < listed.size(); ++i) {
-        if (files[i].empty() || !std::includes(files[i].begin(), files[i].end(), required.begin(), required.end())) {
+    for (const TextLanguage& language : listed) {
+        const std::set<std::string>& slot = files[language.suffix];
+        if (slot.empty() || !std::includes(slot.begin(), slot.end(), required.begin(), required.end())) {
             continue;
         }
-        installed.push_back(listed[i]);
+        installed.push_back(language);
     }
     return installed.empty() ? fallback : installed;
 }
@@ -161,6 +165,9 @@ std::string DescribeLanguageResources(const std::filesystem::path& app0, const G
     }
     text += ": " + std::to_string(archive.entries().size()) + " entries";
     for (const TextLanguage& language : listed) {
+        if (!language.translation.empty()) {
+            continue;
+        }
         text += "; " + std::string(language.suffix) + " " + std::to_string(FilesOf(archive, language.suffix).size()) + " files";
         const CpkEntry* sheet = archive.Find("msgsheet/SystemMsg_" + std::string(language.suffix) + ".fms");
         if (!sheet) {

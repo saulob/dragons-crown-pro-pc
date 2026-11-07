@@ -101,16 +101,27 @@ constexpr TextLanguage kWesternLanguages[] = {
     {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
     {"italian", "Italian", 5, "IT"}, {"spanish", "Spanish", 3, "ES"},
 };
-// Brazilian Portuguese is the port's translation of the English slot (game_translation.h), made for 1.00's sheets.
-constexpr TextLanguage kUsLanguages[] = {
-    {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
-    {"italian", "Italian", 5, "IT"}, {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
-    {"spanish", "Spanish", 3, "ES"},
-};
 constexpr TextLanguage kAsiaLanguages[] = {{"traditional_chinese", "Traditional Chinese", 10, "CT"},
                                            {"korean", "Korean", 9, "KR"}};
 // The Japanese executables never read the system language: their only text is DRACRO.CPK's unsuffixed sheets.
 constexpr TextLanguage kJapaneseLanguages[] = {{"japanese", "Japanese", 0, {}}};
+
+// Brazilian Portuguese is the port's translation of a native slot (game_translation.h): the game runs in that language.
+constexpr TextLanguage kWesternOffered[] = {
+    {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
+    {"italian", "Italian", 5, "IT"}, {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
+    {"spanish", "Spanish", 3, "ES"},
+};
+constexpr TextLanguage kAsiaOffered[] = {kAsiaLanguages[0], kAsiaLanguages[1],
+                                         {kPortugueseBrazilKey, "Portuguese (Brazil)", 10, "CT", "pt-BR"}};
+constexpr TextLanguage kJapaneseOffered[] = {kJapaneseLanguages[0], {kPortugueseBrazilKey, "Portuguese (Brazil)", 0, {}, "pt-BR"}};
+
+constexpr TranslationProfile kUsaTranslation = {kWesternOffered, "DRACRO_US.CPK", {}, {}, 0, "DRACRO_US.CPK", VisualSet::kEnglishSlot};
+constexpr TranslationProfile kEuropeTranslation = {kWesternOffered, "DRACRO_EU.CPK", {}, {}, 0, "DRACRO_EU.CPK", VisualSet::kEnglishSlot};
+constexpr TranslationProfile kJapanTranslation = {kJapaneseOffered, "DRACRO.CPK", "JP", "other/fontUTF16.ftx", 0x4F53,
+                                                  "DRACRO.CPK", VisualSet::kBaseStage};
+constexpr TranslationProfile kAsiaTranslation = {kAsiaOffered, "DRACRO_CK.CPK", "CT", "other/CT_fontUTF16.ftx", 0x9AD4,
+                                                 "DRACRO.CPK", VisualSet::kBaseStage};
 
 constexpr GameBuild kGameBuilds[] = {
     {
@@ -129,7 +140,8 @@ constexpr GameBuild kGameBuilds[] = {
         true,
         kUsLayers,
         kUsResolutionSites,
-        kUsLanguages,
+        kWesternLanguages,
+        &kUsaTranslation,
     },
     {
         "CUSA10454",
@@ -148,6 +160,7 @@ constexpr GameBuild kGameBuilds[] = {
         kUs101Layers,
         {},
         kWesternLanguages,
+        &kUsaTranslation,
         true,
         true,
         true,
@@ -169,6 +182,7 @@ constexpr GameBuild kGameBuilds[] = {
         kJapanBaseLayers,
         kJapan100ResolutionSites,
         kJapaneseLanguages,
+        &kJapanTranslation,
         false,
         false,
         true,
@@ -190,6 +204,7 @@ constexpr GameBuild kGameBuilds[] = {
         kJapan102Layers,
         kJapan102ResolutionSites,
         kJapaneseLanguages,
+        &kJapanTranslation,
         false,
         false,
         true,
@@ -211,6 +226,7 @@ constexpr GameBuild kGameBuilds[] = {
         kJapan103Layers,
         kJapan103ResolutionSites,
         kJapaneseLanguages,
+        &kJapanTranslation,
         false,
         false,
         true,
@@ -232,6 +248,7 @@ constexpr GameBuild kGameBuilds[] = {
         kAsia100Layers,
         kAsiaResolutionSites,
         kAsiaLanguages,
+        &kAsiaTranslation,
         false,
         false,
         true,
@@ -253,6 +270,7 @@ constexpr GameBuild kGameBuilds[] = {
         kAsia102Layers,
         {},
         kAsiaLanguages,
+        &kAsiaTranslation,
         true,
         false,
         true,
@@ -274,6 +292,7 @@ constexpr GameBuild kGameBuilds[] = {
         kEuropeLayers,
         {},
         kWesternLanguages,
+        &kEuropeTranslation,
         true,
         false,
         true,
@@ -326,7 +345,7 @@ const GameBuild* BaseBuildOf(const GameBuild& build, std::span<const GameBuild> 
 }
 
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build) {
-    return build ? build->text_languages : std::span<const TextLanguage>(kWesternLanguages);
+    return build ? build->translation->offered : std::span<const TextLanguage>(kWesternLanguages);
 }
 
 bool RestrictedToNativeResolution(const GameBuild* build) {

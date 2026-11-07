@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,6 +35,20 @@ struct TextLanguage {
     std::string_view translation = {}; // the port's translation laid over the suffix's sheets (localization/<translation>)
 };
 
+// Which of a translation's visual patches a build takes: the USA packs' *_Add atlases, or the base stage files.
+enum class VisualSet { kEnglishSlot, kBaseStage };
+
+// How the port's translation is served on a build. One profile serves every build sharing its archive and sheets.
+struct TranslationProfile {
+    std::span<const TextLanguage> offered; // the native languages and the port's, as the launcher lists them
+    const char* archive;                   // the archive holding the translated slot's sheets
+    std::string_view source;               // localization/<translation>/sources/<source>.json; empty: English, the corpus's own hashes
+    std::string_view font_entry;           // the font that lacks the translation's letters; empty when it has them
+    uint16_t font_probe;                   // a character only that font has in its executable
+    const char* visual_archive;            // the archive holding the stage files the visual patches target
+    VisualSet visuals;
+};
+
 struct GameBuild {
     const char* title_id;
     const char* content_id;
@@ -50,7 +65,8 @@ struct GameBuild {
     bool true_ultrawide;          // dcp_pass_ortho_sites are verified in this build's executable
     std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
     std::span<const DcpResolutionSite> resolution_sites;
-    std::span<const TextLanguage> text_languages; // the first is the default
+    std::span<const TextLanguage> text_languages; // the game's own languages; the first is the default
+    const TranslationProfile* translation;
     bool resolution_by_signature = false;
     bool keep_base_languages = false; // an update's regional archive is laid over the base's, which keeps its language slots
     bool features_by_signature = false; // cheats, NPC voices and True Ultrawide are found by structural locators, not tables
@@ -81,7 +97,7 @@ inline bool SitesOnlySearched(const GameBuild& build) {
     return build.resolution_by_signature;
 }
 
-// The build's languages; the Western ones when the build is not known.
+// The languages offered for the build, the port's included; the Western ones when the build is not known.
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);
 
 // True when the build offers the Japanese NPC Voices toggle.

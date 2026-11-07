@@ -28,6 +28,8 @@
 #include "dcp_resolution.h"
 #include "exit_game_hook.h"
 #include "exit_game_text.h"
+#include "game_translation.h"
+#include "latin_glyphs.h"
 #include "gallery_unlock.h"
 #include "feature_sites.h"
 #include "game_files.h"
@@ -180,13 +182,15 @@ enum Feature : size_t {
     kJapaneseNpcVoices,
     kExitGame,
     kUnlockGallery,
+    kBrazilianPortuguese,
     kFeatureCount
 };
 
 const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
     "Story Skip", "Tutorial Skip", "Skip Intro", "Japanese Menu Buttons", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
-    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game", "Unlock Gallery"};
+    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game", "Unlock Gallery",
+    "Brazilian Portuguese"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
 struct Contract {
@@ -299,9 +303,28 @@ bool LauncherOffers(const GameBuild& build, Feature feature) {
         return SupportsJapaneseNpcVoices(&build);
     case kUnlockGallery:
         return UnlockGalleryAvailable(&build);
+    case kBrazilianPortuguese: {
+        const std::span<const TextLanguage> languages = TextLanguagesOf(&build);
+        return std::any_of(languages.begin(), languages.end(), [](const TextLanguage& language) {
+            return language.key == kPortugueseBrazilKey && language.translation == "pt-BR";
+        });
+    }
     default:
         return true;
     }
+}
+
+// The translation can start: the slot's sheets have an archive, a slot not in English its source map, a font without the
+// letters its glyph probe, and the title menu's Exit Game row its text.
+bool TranslationReady(const GameBuild& build) {
+    const TranslationProfile* profile = build.translation;
+    if (!profile || !profile->archive || !*profile->archive || PtBrTranslationFiles().empty()) return false;
+    if (!profile->source.empty() && !PtBrSource(profile->source)) return false;
+    if (!profile->visual_archive || !*profile->visual_archive || PtBrVisualPatches(profile->visuals).empty()) return false;
+    if (profile->font_entry.empty() != (profile->font_probe == 0)) return false;
+    return std::any_of(std::begin(exit_game_languages), std::end(exit_game_languages), [](const ExitGameLanguage& language) {
+        return language.key == kPortugueseBrazilKey && *language.row && *language.help;
+    });
 }
 
 // Whether the loader has a way to install the feature for the build: a table for this exact image or a locator its
@@ -341,6 +364,8 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
         return known && game.exit_game;
     case kUnlockGallery:
         return known && game.unlock_gallery && CapabilitiesOf(build).unlock_gallery != Mapping::kNone;
+    case kBrazilianPortuguese:
+        return known && TranslationReady(build);
     default:
         return known;
     }
@@ -381,7 +406,7 @@ void TestContract() {
         const Capabilities caps = CapabilitiesOf(build);
         CHECK(caps.startup_save == row->startup_save);
         CHECK(caps.languages == row->languages);
-        CHECK(caps.translations == (IsUs100(build) ? "brazilian_portuguese" : ""));
+        CHECK(caps.translations == "brazilian_portuguese");
         CHECK(NativeJapaneseNpcVoices(&build) == row->native_japanese_voices);
         g_scope = "contract";
     }
@@ -549,6 +574,27 @@ void TestDisabledFeatureCannotPass() {
         copy.exit_game = false;
         CHECK(refuses(copy, kExitGame));
         copy = build;
+        const TranslationProfile no_port_language = {build.text_languages, build.translation->archive, {}, {}, 0, build.translation->visual_archive, build.translation->visuals};
+        copy.translation = &no_port_language;
+        CHECK(refuses(copy, kBrazilianPortuguese));
+        TranslationProfile no_visuals = *build.translation;
+        no_visuals.visual_archive = "";
+        copy.translation = &no_visuals;
+        CHECK(refuses(copy, kBrazilianPortuguese));
+        TranslationProfile no_archive = *build.translation;
+        no_archive.archive = "";
+        copy.translation = &no_archive;
+        CHECK(refuses(copy, kBrazilianPortuguese));
+        TranslationProfile no_map = *build.translation;
+        no_map.source = "NONE";
+        copy.translation = &no_map;
+        CHECK(refuses(copy, kBrazilianPortuguese));
+        TranslationProfile no_probe = *build.translation;
+        no_probe.font_entry = "other/fontUTF16.ftx";
+        no_probe.font_probe = 0;
+        copy.translation = &no_probe;
+        CHECK(refuses(copy, kBrazilianPortuguese));
+        copy = build;
         copy.unlock_gallery = false;
         CHECK(refuses(copy, kUnlockGallery));
         CHECK(CheatsAvailable(&build));
@@ -596,7 +642,7 @@ void TestUpdateParity() {
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
         CHECK(u.languages == b.languages);
-        CHECK(u.translations.empty());
+        CHECK(u.translations == b.translations);
         CHECK(update->features_by_signature && base->features_by_signature == !IsUs100(*base));
         CHECK(update->cheats == base->cheats && update->japanese_npc_voices == base->japanese_npc_voices &&
               update->true_ultrawide == base->true_ultrawide);
@@ -829,7 +875,7 @@ void TestEuropeBuild() {
           caps.skip_intro == Mapping::kSignature && caps.menu_buttons == Mapping::kSignature &&
           caps.unlock_gallery == Mapping::kSignature && caps.system_type == Mapping::kSignature &&
           caps.lzcnt == Mapping::kSignature && caps.startup_save == Mapping::kTable);
-    CHECK(caps.languages == kWestern && caps.translations.empty());
+    CHECK(caps.languages == kWestern && caps.translations == "brazilian_portuguese");
     CHECK(europe->features_by_signature && europe->resolution_by_signature && europe->check_prompt_fit);
     CHECK(!Listed(ultrawide_records, *europe));
 
@@ -1354,7 +1400,8 @@ struct FixtureReport {
 };
 
 // What stands behind a feature on a build. A fallback path or a profile flag is not evidence.
-enum class Proof { kNotNeeded, kRealExecutable, kReporterLog, kDataUnavailable };
+// kStatic: everything the feature needs from the port is proven without the game's data; only its run on that data is not.
+enum class Proof { kNotNeeded, kRealExecutable, kReporterLog, kStatic, kDataUnavailable };
 
 // What a reporter's read-only scan of the real CUSA10487 1.03 executable proved; tests/feature_sites_tests.cpp pins the
 // sites. The scan had no Skip Intro, Unlock Gallery or Japanese Menu Buttons signatures, and its signatures for the Skip
@@ -1370,6 +1417,8 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
     case kArachnophobia:
     case kXboxPrompts:
         return report.prepared ? Proof::kRealExecutable : Proof::kDataUnavailable;
+    case kBrazilianPortuguese:
+        return report.prepared ? Proof::kRealExecutable : Proof::kStatic;
     case kSaveLoad:
         if (row.startup_save == Mapping::kNone) return Proof::kNotNeeded;
         break;
@@ -1403,6 +1452,57 @@ void TestProofNeedsEvidence() {
         }
         for (const Feature feature : {kController, kKeyboard, kGraphics}) CHECK(ProofOf(build, *row, feature, none) == Proof::kNotNeeded);
     }
+}
+
+// What the launcher would serve from a prepared game: the mapped sheets, the completed font and the Exit Game row on them.
+void CheckPreparedTranslation(const GameBuild& build, const fs::path& game) {
+    const TranslationProfile& profile = *build.translation;
+    if (PtBrTranslationFiles().empty()) return;
+    const TextLanguage& language = ResolveTextLanguage(&build, kPortugueseBrazilKey);
+    TranslationRecipe recipe{language.suffix, PtBrTranslationFiles()};
+    if (!profile.source.empty()) recipe.source = PtBrSource(profile.source);
+    recipe.font_entry = profile.font_entry;
+    recipe.mark_archive = game / "DRACRO.CPK";
+    recipe.glyph_table = true;
+    const ArchiveTranslation result = TranslateArchive(game / profile.archive, recipe);
+    CHECK(result.error.empty() && result.overlay && result.corpus == 9670 && !result.folded);
+    CHECK(result.latin_glyphs == !profile.font_entry.empty());
+    if (!result.overlay) return;
+    size_t system_sheets = 0;
+    for (const auto& [offset, data] : result.overlay->patches) {
+        if (data.size() < 0x20 || std::memcmp(data.data(), "FMSB", 4)) continue;
+        uint32_t count = 0;
+        std::memcpy(&count, data.data() + 0x14, 4);
+        if (count != EXIT_GAME_SYSTEM_MSG_COUNT) continue;
+        ++system_sheets;
+        std::vector<uint8_t> sheet = data;
+        const ExitGameLanguage* found = nullptr;
+        CHECK(exit_game_text_patch(sheet.data(), sheet.size(), &found) == EXIT_GAME_TEXT_PATCHED);
+        CHECK(found && found->key == kPortugueseBrazilKey);
+        CHECK(found && std::string_view(found->row) == "Sair do Jogo");
+    }
+    CHECK(system_sheets == 1);
+
+    // The released visuals, on the file that holds each build's stage assets.
+    const std::vector<TranslationFile> visuals = PtBrVisualPatches(profile.visuals);
+    const bool base_stage = profile.visuals == VisualSet::kBaseStage;
+    const fs::path stage_archive = game / profile.visual_archive;
+    TranslationRecipe stage{{}, {}};
+    stage.visual_patches = visuals;
+    stage.french_layouts = !base_stage;
+    const ArchiveTranslation staged = TranslateArchive(stage_archive, stage);
+    if (!staged.visual_problems.empty()) std::printf("  %s: %s\n", build.label, staged.visual_problems.front().c_str());
+    CHECK(staged.error.empty() && staged.overlay && staged.visual_skipped == 0);
+    CHECK(staged.visuals == (base_stage ? 4u : 15u));
+    std::printf("PT-BR-VISUALS|%s|%zu replacements on %s\n", build.label, staged.visuals, profile.visual_archive);
+    if (!base_stage) return;
+    // A USA patch never applies to a base file: its targets are not in this archive.
+    TranslationRecipe other{{}, {}};
+    const std::vector<TranslationFile> usa = PtBrVisualPatches(VisualSet::kEnglishSlot);
+    other.visual_patches = usa;
+    other.french_layouts = false;
+    const ArchiveTranslation refused = TranslateArchive(stage_archive, other);
+    CHECK(refused.visuals == 0 && refused.visual_skipped > 0);
 }
 
 FixtureReport CheckFixtures(const GameBuild& build) {
@@ -1446,6 +1546,19 @@ FixtureReport CheckFixtures(const GameBuild& build) {
             std::printf("  %s: Exit Game: %s\n", build.label, exit_failure);
         }
         CHECK(dcp_resolve_exit_game(&game, &view, &exit_game, exit_failure, sizeof(exit_failure)) == 1);
+
+        // The executable takes the letters its font lacks; the other builds' fonts have them.
+        if (const TranslationProfile& profile = *build.translation; !profile.font_entry.empty()) {
+            std::vector<uint8_t> patched = image.bytes;
+            const uint8_t* page = latin_glyphs_locate(patched.data(), patched.size(), profile.font_probe);
+            CHECK(page != nullptr);
+            CHECK(latin_glyphs_install(patched.data(), patched.size(), page));
+            if (page) {
+                const uint8_t* cedilla = page + 0xE7 * 8;
+                CHECK((cedilla[0] | cedilla[1] << 8) >= LATIN_FIRST_CELL);
+                CHECK(std::memcmp(cedilla + 2, page + 'c' * 8 + 2, 6) == 0);
+            }
+        }
 
         std::vector<Patched> ranges = PatchedRanges(build, image, located);
         std::sort(ranges.begin(), ranges.end(), [](const Patched& a, const Patched& b) { return a.begin < b.begin; });
@@ -1528,6 +1641,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
     const fs::path prepared = root / "game" / "prepared" / build.folder;
     if (fs::is_directory(prepared)) {
         report.prepared = true;
+        CheckPreparedTranslation(build, prepared);
         const GameCheck check = CheckGameTree(prepared);
         if (check.state != GameFileState::kValid || check.build != &build) {
             std::printf("  %s: prepared folder: %s\n", build.label, check.detail.c_str());
@@ -1595,7 +1709,7 @@ int main() {
     std::printf("\n");
     int shared_failures = g_scope_failures["contract"] + g_scope_failures["synthetic"] + g_scope_failures["unknown"];
     struct Evidence {
-        size_t real = 0, log = 0, none = 0;
+        size_t real = 0, log = 0, none = 0, unproven = 0;
         std::string missing;
     };
     Evidence evidence[kFeatureCount];
@@ -1610,6 +1724,10 @@ int main() {
             case Proof::kRealExecutable: ++item.real; break;
             case Proof::kReporterLog: ++item.log; break;
             case Proof::kNotNeeded: break;
+            case Proof::kStatic:
+                ++item.unproven;
+                item.missing += (item.missing.empty() ? "" : ", ") + std::string(build.title_id) + " " + build.version;
+                break;
             case Proof::kDataUnavailable:
                 ++item.none;
                 ++unavailable;
@@ -1633,7 +1751,9 @@ int main() {
         const char* verdict = tally.passed != builds || shared_failures ? "FAIL " : item.none ? "PARTIAL " : "PASS ";
         std::string status = verdict + std::to_string(builds - item.none) + "/" + std::to_string(builds);
         if (item.log) status += " (" + std::to_string(item.real) + " real, " + std::to_string(item.log) + " reporter log)";
+        if (item.unproven) status += " (" + std::to_string(item.real) + " real, " + std::to_string(item.unproven) + " static)";
         if (item.none) status += "; DATA UNAVAILABLE: " + item.missing;
+        else if (item.unproven) status += "; RUNTIME DATA UNAVAILABLE: " + item.missing;
         if (tally.native) {
             status += " (" + std::to_string(tally.passed - tally.native) + " toggle, " + std::to_string(tally.native) +
                       " native)";

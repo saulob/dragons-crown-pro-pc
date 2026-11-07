@@ -97,9 +97,12 @@ PLAYING
   whoever can see your status. To turn it off, add discord_presence = off to
   user/dcp.ini.
 - Brazilian Portuguese covers game text, menus, subtitles, the launcher and the
-  F1 options on the CUSA10454 1.00 USA build. It is based on the work of
+  F1 options on every supported build. It is based on the work of
   Marcelo - Uma Ficha (https://www.youtube.com/@umaficha1), used with
-  permission. Character speech bubbles, credits and trophies stay in English.
+  permission. New characters get Portuguese default messages; characters
+  already in a save keep theirs. Credits and trophies stay in the build's
+  own language. The translated manual pages are shown on the USA and
+  European builds only.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
 - An experimental AMD water workaround (black areas under characters standing

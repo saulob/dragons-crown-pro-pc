@@ -81,7 +81,7 @@ while the game files are not valid. If its window cannot be opened, the game sta
 
 1. `sce_sys\param.sfo` names a supported build: `TITLE_ID`, `CONTENT_ID`, `APP_VER` and `VERSION` of the finished game
    (the builds listed in `launcher/game_profile.cpp`, each identified by its finished game). The build is logged with its
-   regional archive, or `none`.
+   language archive: where the build's Menu & Subtitles sheets are, `DRACRO.CPK` for Japan.
 2. `game\prepared\<build>\.dcp_view.json`: the build's version and scope `full` (written last by the installer, or by
    `prepare_game.py`).
 3. The shared files, the build's regional archive (`DRACRO_US.CPK`, `DRACRO_PATCH_JP.CPK`, `DRACRO_CK.CPK` or `DRACRO_EU.CPK`, none for
@@ -389,16 +389,50 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   | Build | Languages |
   | --- | --- |
-  | CUSA10454 1.00 USA | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
-  | CUSA10454 1.01 USA | English, French, German, Italian, Spanish: as 1.00 without Portuguese (Brazil) |
-  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese (`japanese`): the executable does not read the system language |
-  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean (`traditional_chinese`, `korean`) |
-  | CUSA10487 1.03 Europe | English, French, German, Italian, Spanish (`english`, `french`, `german`, `italian`, `spanish`) |
+  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
+  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, Portuguese (Brazil) (`japanese`, `brazilian_portuguese`): the executable does not read the system language |
+  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, Portuguese (Brazil) (`traditional_chinese`, `korean`, `brazilian_portuguese`) |
+  | CUSA10487 1.03 Europe | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
 
-  Portuguese (Brazil) is the port's own translation of the English slot, for CUSA10454 1.00 USA only (not 1.01 or the
-  Japanese, Asia/Hong Kong or European builds). It covers the game text, the launcher, the F1 options, the F10 overlay,
-  the online screens and runtime visual replacements; the installed archive is never written. Still English: the
-  DefaultBone dialogue, trophy text, some baked visual labels and the credits. See `localization/pt-BR/README.md`.
+  Portuguese (Brazil) is the port's own translation, not a language of the game, so it is offered on every supported
+  build and a saved choice survives switching builds. The game runs in a native slot and the port serves translated
+  copies of that slot's sheets when the game reads them; the installed archive is never written:
+
+  | Builds | Slot | Archive | Sheets |
+  | --- | --- | --- | --- |
+  | CUSA10454 1.00, 1.01 | English | `DRACRO_US.CPK` | checked against the corpus's English hashes |
+  | CUSA10487 1.03 | English | `DRACRO_EU.CPK` | checked against the corpus's English hashes |
+  | CUSA07001 1.00, 1.02, 1.03 | Japanese | `DRACRO.CPK` | matched by record index, `localization/pt-BR/sources/JP.json` |
+  | CUSA10209 1.00, 1.02 | Traditional Chinese | `DRACRO_CK.CPK` | matched by record index, `localization/pt-BR/sources/CT.json` |
+
+  It covers the game text, the launcher, the F1 options, the F10 overlay and the online screens. Text the port has no
+  translation of stays in the slot's language: trophy text and the credits are the build's own.
+
+  The DefaultBone character messages are translated too. While a character is being created, an empty message row
+  shows the default it will receive (src/default_message_hook.c): the variant previewed for a class is held and given
+  to the game's one pick when the character is added, so the saved text is the previewed one. The guest's random
+  number is still drawn once, nothing is written before the character is added, and characters already in a save
+  keep the messages they have. Other languages keep the game's own "no message" row.
+
+  The released image labels (PONTOS, VAI!, RANKS DE TESOURO, ENTRE, CARREGANDO, SALVANDO, SIM, NÃO, DADOS, NOVO and the
+  copyright line) reach every build. The USA packs draw them from `*_Add` atlases; the Japanese and Asia/Hong Kong
+  builds read the base `stage/Interface` and `stage/title` files of `DRACRO.CPK`, which have no such atlases, so
+  `base-*.dcpx.z` puts the same art into the sprites those files draw (NOW + LOADING becomes CARREGANDO) and moves their
+  quads. In Asia/Hong Kong the text is in `DRACRO_CK.CPK` and the stage files in `DRACRO.CPK`, so two archives are
+  overlaid. The manual stays the build's own on those builds: their pages are other images, and most of a page would
+  have to be shipped. A visual whose installed file is not a known source is left as it is, and the log says so
+  (`PT-BR visual skipped: stage/Interface.ftx: source fingerprint not recognized`); the others still apply.
+
+  The Japanese and Asia/Hong Kong fonts have no accented letters, and their executables list none that the font draws.
+  When Portuguese (Brazil) is selected there, `launcher/latin_font.cpp` draws the letters into free atlas cells of a
+  copy of the installed font, from its base letters and marks made from `DRACRO.CPK`'s punctuation, and
+  `src/latin_glyphs.c` adds them to the executable's glyph table in memory. If that cannot be done the text is shown
+  without accents and the log says why. The Japanese and Asia/Hong Kong marks are composed on the player's machine;
+  nothing of the game is stored by the port.
+
+  Records of a slot that cannot take the translation safely stay in that slot's language and are counted in the log
+  (`Menu & Subtitles: ... kept in the game's own language`); the rest of the sheet is translated. See
+  `localization/pt-BR/README.md`.
 
   For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian

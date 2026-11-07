@@ -79,7 +79,28 @@ typedef struct {
  * until the next call). NULL for every other language. `message` says how much is translated or why it is not, empty
  * when the language is not a translation. */
 const char *dcp_text_translation(const char *settings_file, const char *image_dir, const char *app0, uint64_t *length,
-                                 DcpFilePatch **patches, size_t *count, char *message, size_t message_size);
+                                 DcpFilePatch **patches, size_t *count, char *message, size_t message_size,
+                                 int glyph_table, int *glyphs_composed);
+
+/* After dcp_text_translation: the second archive to overlay when the build's stage files are not in the slot's archive;
+ * NULL when there is none. */
+const char *dcp_text_stage_overlay(uint64_t *length, DcpFilePatch **patches, size_t *count);
+
+/* After dcp_text_translation: a DefaultBone record as the translated archive serves it; NULL without one. */
+const char *dcp_text_default_bone(unsigned record);
+
+typedef struct {
+    uint32_t code, base;
+    const unsigned char *alpha, *base_alpha; /* cell_pixels square */
+} DcpComposedGlyph;
+/* After dcp_text_translation: the accented letters drawn into the font atlas, as it holds them; NULL when none were. */
+const DcpComposedGlyph *dcp_text_composed_glyphs(size_t *count, int *cell_pixels);
+
+/* The character latin_glyphs_locate needs when the saved language shows letters this build's font lacks; 0 otherwise. */
+unsigned dcp_text_font_probe(const char *settings_file, const char *image_dir, const char *app0);
+
+/* Tells the launcher's text the saved language, before the game starts. */
+void dcp_activate_text_language(const char *settings_file, const char *image_dir, const char *app0);
 
 /* The cheats the settings file turns on, one bit per cheat (dcp_cheats.h); 0 when the file or the keys are missing. */
 unsigned dcp_saved_cheats(const char *settings_file);

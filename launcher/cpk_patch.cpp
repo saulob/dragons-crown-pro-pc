@@ -18,6 +18,7 @@ namespace dcp {
 namespace {
 
 constexpr char kPatchMagic[8] = {'D', 'C', 'P', 'X', '1', 0, 0, 0};
+constexpr char kSharedRunsMagic[8] = {'D', 'C', 'P', 'X', '2', 0, 0, 0};
 constexpr char kUndoMagic[8] = {'D', 'C', 'P', 'U', 'N', 'D', 'O', '1'};
 constexpr uint8_t kStorageMask = 0xF0, kStorageConstant = 0x30, kStoragePerRow = 0x50;
 constexpr uint8_t kTypeMask = 0x0F, kTypeString = 0x0A, kTypeData = 0x0B;
@@ -271,6 +272,39 @@ std::optional<BlockPatch> ParseBlockPatch(std::span<const uint8_t> b, std::strin
         if (error) *error = why;
         return std::optional<BlockPatch>();
     };
+    if (b.size() >= 12 && std::memcmp(b.data(), kSharedRunsMagic, 8) == 0) {
+        const uint32_t entries = ReadLe32(b.data() + 8);
+        size_t at = 12;
+        BlockPatch shared;
+        for (uint32_t e = 0; e < entries; ++e) {
+            if (at + 2 > b.size()) return fail("DCPX truncated");
+            const uint16_t len = ReadLe16(b.data() + at);
+            at += 2;
+            if (at + len + 8 > b.size()) return fail("DCPX truncated");
+            const std::string name(reinterpret_cast<const char*>(b.data() + at), len);
+            at += len;
+            const uint32_t size = ReadLe32(b.data() + at), sources = ReadLe32(b.data() + at + 4);
+            at += 8;
+            if (at + uint64_t(sources) * 8 + 4 > b.size()) return fail("DCPX truncated");
+            const size_t states = at;
+            at += size_t(sources) * 8;
+            const uint32_t runs = ReadLe32(b.data() + at);
+            at += 4;
+            if (at + uint64_t(runs) * 20 > b.size()) return fail("DCPX truncated");
+            std::vector<BlockRun> list(runs);
+            for (uint32_t r = 0; r < runs; ++r) {
+                list[r].offset = ReadLe32(b.data() + at);
+                if (uint64_t(list[r].offset) + 16 > size) return fail("DCPX run outside the file");
+                std::memcpy(list[r].data.data(), b.data() + at + 4, 16);
+                at += 20;
+            }
+            for (uint32_t s = 0; s < sources; ++s) {
+                shared.targets.push_back({name, size, ReadLe32(b.data() + states + size_t(s) * 8),
+                                          ReadLe32(b.data() + states + size_t(s) * 8 + 4), list});
+            }
+        }
+        return shared;
+    }
     if (b.size() < 12 || std::memcmp(b.data(), kPatchMagic, 8) != 0) return fail("not a DCPX patch");
     const uint32_t count = ReadLe32(b.data() + 8);
     size_t pos = 12;

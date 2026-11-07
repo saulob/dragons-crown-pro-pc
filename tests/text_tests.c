@@ -1,7 +1,9 @@
 /* Focused tests of the text paths: libSceImeDialog's panel size and libSceFont's system font set, resolved the
- * way the loader binds the game's imports (runtime_resolve with the eboot's NID#library names). No game files,
- * no window. */
+ * way the loader binds the game's imports (runtime_resolve with the eboot's NID#library names). Game files only from
+ * game/prepared, skipped when absent; no window. */
 #include "runtime.h"
+#include "dcp_launcher.h"
+#include "latin_glyphs.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -408,11 +410,235 @@ static void test_font_memory(const char *path) {
     free(data);
 }
 
+/* ---- PT-BR letters composed into the atlas, drawn by libSceFont ---- */
+unsigned char *test_archive_entry(const char *archive, const char *entry, size_t *size);
+const DcpComposedGlyph *test_compose_latin_font(unsigned char *font, size_t size, const unsigned char *marks, size_t marks_size,
+                                                size_t *count, int *cell_pixels);
+int test_atlas_cell(const unsigned char *font, size_t size, int cell, unsigned char *alpha);
+
+static uint32_t fnv1a(const unsigned char *data, size_t size) {
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < size; ++i) hash = (hash ^ data[i]) * 16777619u;
+    return hash;
+}
+
+typedef struct { int x0, y0, x1, y1, inked; } Ink; /* half-open, surface pixels */
+
+static Ink ink_of(void) {
+    Ink ink = {SURFACE, SURFACE, 0, 0, 0};
+    for (int y = 0; y < SURFACE; ++y)
+        for (int x = 0; x < SURFACE; ++x)
+            if (pixels[y * SURFACE + x] > 40) {
+                ink.inked = 1;
+                if (x < ink.x0) ink.x0 = x;
+                if (y < ink.y0) ink.y0 = y;
+                if (x + 1 > ink.x1) ink.x1 = x + 1;
+                if (y + 1 > ink.y1) ink.y1 = y + 1;
+            }
+    return ink;
+}
+
+/* The Asia/Hong Kong system font manager (eboot 0x80970 / 0x80ac0): the game font at h*h/lineAdvance*0.75 with its pen
+ * 13 pixels into the cell, then the font set at h*h/lineAdvance with its pen 1 pixel in. */
+typedef struct { void *game, *set; } FontPair;
+enum { CELL_LEFT = 16, CELL_TOP = 32 };
+
+static int size_like_the_game(void *handle, int size, float factor) {
+    Layout layout = {0};
+    if (font.set_scale(handle, (float)size, (float)size) || font.horizontal_layout(handle, &layout)) return 0;
+    float render = (float)(uint32_t)((float)size * ((float)size / layout.b * factor) + 0.99999f);
+    return font.setup_render_scale(handle, render, render) == FONT_OK;
+}
+
+/* Renders `code` the way the game picks its font; 1 for the game font, 2 for the set, 0 when neither draws it. */
+static int render_like_the_game(const FontPair *fonts, uint32_t code, Ink *ink, float *advance) {
+    GlyphMetrics metrics;
+    RenderOutput out;
+    memset(pixels, 0, sizeof(pixels));
+    int used = 0;
+    if (font.render(fonts->game, code, surface, CELL_LEFT + 1, CELL_TOP + 13, &metrics, &out) == FONT_OK) used = 1;
+    else {
+        memset(pixels, 0, sizeof(pixels));
+        if (font.render(fonts->set, code, surface, CELL_LEFT + 1, CELL_TOP + 1, &metrics, &out) == FONT_OK) used = 2;
+    }
+    *ink = ink_of();
+    *advance = used ? out.metrics.advance : 0.0f;
+    return used;
+}
+
+static size_t utf8_codes(const char *text, uint32_t *codes, size_t capacity) {
+    size_t count = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p && count < capacity;) {
+        uint32_t code = *p++;
+        if (code >= 0xC0 && code < 0xE0 && *p) code = (code & 0x1F) << 6 | (*p++ & 0x3F);
+        codes[count++] = code;
+    }
+    return count;
+}
+
+static const DcpComposedGlyph *composed_entry(const DcpComposedGlyph *glyphs, size_t count, uint32_t code) {
+    for (size_t i = 0; i < count; ++i) if (glyphs[i].code == code) return &glyphs[i];
+    return NULL;
+}
+
+static int band_width(int y0, int y1) {
+    int x0 = SURFACE, x1 = 0;
+    for (int y = y0; y < y1; ++y)
+        for (int x = 0; x < SURFACE; ++x)
+            if (pixels[y * SURFACE + x] > 40) {
+                if (x < x0) x0 = x;
+                if (x + 1 > x1) x1 = x + 1;
+            }
+    return x1 > x0 ? x1 - x0 : 0;
+}
+
+/* An accented letter keeps its base letter's scale: the same width over the half of the base away from the mark, the
+ * same baseline (the cedilla: the same top) and the same advance. */
+static int same_scale_as_base(const FontPair *fonts, uint32_t code, uint32_t base, int *used) {
+    Ink letter, plain;
+    float letter_advance, plain_advance;
+    const int cedilla = code == 0xE7 || code == 0xC7;
+    if (!render_like_the_game(fonts, base, &plain, &plain_advance) || !plain.inked) return 0;
+    const int half = (plain.y1 - plain.y0) / 2;
+    const int band0 = cedilla ? plain.y0 : plain.y1 - half, band1 = cedilla ? plain.y0 + half : plain.y1;
+    const int base_width = band_width(band0, band1);
+    *used = render_like_the_game(fonts, code, &letter, &letter_advance);
+    if (*used != 1 || !letter.inked) return 0;
+    const int aligned = cedilla ? abs(letter.y0 - plain.y0) <= 1 : abs(letter.y1 - plain.y1) <= 1;
+    return abs(band_width(band0, band1) - base_width) <= 2 && aligned && letter_advance == plain_advance;
+}
+
+static void test_composed_letters(void) {
+    size_t font_size = 0, marks_size = 0, song_size = 0, skip_size = 0;
+    unsigned char *atlas = test_archive_entry("CUSA10209-1.00/DRACRO_CK.CPK", "other/CT_fontUTF16.ftx", &font_size);
+    unsigned char *marks = test_archive_entry("CUSA10209-1.00/DRACRO.CPK", "other/fontUTF16.ftx", &marks_size);
+    unsigned char *song = test_archive_entry("CUSA10209-1.00/DRACRO_CK.CPK", "other/FOTC-arstdsongb5heavy.OTF", &song_size);
+    unsigned char *skip = test_archive_entry("CUSA10209-1.00/DRACRO.CPK", "other/FOT-SKIPSTD-B.OTF", &skip_size);
+    if (!atlas || !marks || !song || !skip) {
+        printf("  composed letters: no local Asia/Hong Kong 1.00 archives, skipped\n");
+        free(atlas), free(marks), free(song), free(skip);
+        return;
+    }
+    size_t count = 0;
+    int cell = 0;
+    const DcpComposedGlyph *glyphs = test_compose_latin_font(atlas, font_size, marks, marks_size, &count, &cell);
+    CHECK(glyphs && count == LATIN_GLYPH_COUNT && cell == 68);
+    if (!glyphs || cell != 68) goto done;
+
+    /* Both consumers read one cell: the atlas the main font samples and the cell libSceFont is given. */
+    static unsigned char cell_pixels[68 * 68];
+    const uint32_t sampled[] = {0xF3, 0xE3, 0xE7};
+    for (size_t i = 0; i < sizeof(sampled) / sizeof(*sampled); ++i) {
+        const DcpComposedGlyph *glyph = composed_entry(glyphs, count, sampled[i]);
+        int index = -1;
+        for (int g = 0; g < LATIN_GLYPH_COUNT; ++g) if (latin_glyphs[g].code == sampled[i]) index = g;
+        CHECK(glyph && index >= 0 && test_atlas_cell(atlas, font_size, LATIN_FIRST_CELL + index, cell_pixels));
+        if (!glyph || index < 0) continue;
+        const uint32_t atlas_hash = fnv1a(cell_pixels, sizeof(cell_pixels)), served_hash = fnv1a(glyph->alpha, sizeof(cell_pixels));
+        CHECK(atlas_hash == served_hash);
+        printf("  COMPOSED-CELL|U+%04X|cell %d|atlas %08x|libSceFont %08x\n", (unsigned)sampled[i], LATIN_FIRST_CELL + index,
+               (unsigned)atlas_hash, (unsigned)served_hash);
+    }
+
+    static unsigned char region[4096];
+    unsigned char memory[64];
+    void *library = NULL, *renderer = NULL, *native = NULL;
+    FontPair fonts = {NULL, NULL};
+    const OpenDetail detail = {.tag = 0xfd2, .unique_id = 1};
+    CHECK(font.memory_init(memory, region, sizeof(region), NULL, NULL, NULL, NULL) == FONT_OK);
+    CHECK(font.create_library(memory, font.select_library(0), 0, &library) == FONT_OK);
+    CHECK(font.create_renderer(memory, font.select_renderer(0), 0, &renderer) == FONT_OK);
+    CHECK(font.open_memory(library, song, (uint32_t)song_size, &detail, &fonts.game) == FONT_OK && fonts.game);
+    CHECK(font.open_set(library, FONTSET_SST_STD_SCHINESE_GBCJK, 2, &detail, &fonts.set) == FONT_OK && fonts.set);
+    CHECK(font.open_memory(library, skip, (uint32_t)skip_size, &detail, &native) == FONT_OK && native);
+    if (!fonts.game || !fonts.set || !native) goto close;
+    CHECK(font.bind(fonts.game, renderer) == FONT_OK && font.bind(fonts.set, renderer) == FONT_OK &&
+          font.bind(native, renderer) == FONT_OK);
+    font.surface_init(surface, pixels, SURFACE, 1, SURFACE, SURFACE);
+
+    const int sizes[] = {24, 32, 40};
+    uint32_t before_set[3], before_native[3];
+    for (size_t s = 0; s < sizeof(sizes) / sizeof(*sizes); ++s) {
+        CHECK(size_like_the_game(fonts.game, sizes[s], 0.75f) && size_like_the_game(fonts.set, sizes[s], 1.0f) &&
+              size_like_the_game(native, sizes[s], 1.0f));
+        /* Without the composed cells the game font has none of the letters: the set draws them at its own scale. */
+        Ink letter, plain;
+        float advance;
+        int used = render_like_the_game(&fonts, 0xE3, &letter, &advance);
+        render_like_the_game(&fonts, 'a', &plain, &advance);
+        CHECK(used == 2);
+        printf("  size %d without the cells: U+00E3 from the font set, ink %dx%d against a %dx%d\n", sizes[s],
+               letter.x1 - letter.x0, letter.y1 - letter.y0, plain.x1 - plain.x0, plain.y1 - plain.y0);
+        GlyphMetrics metrics;
+        RenderOutput out;
+        memset(pixels, 0, sizeof(pixels));
+        CHECK(font.render(fonts.set, 0xE3, surface, 17, 33, &metrics, &out) == FONT_OK);
+        before_set[s] = fnv1a(pixels, sizeof(pixels));
+        memset(pixels, 0, sizeof(pixels));
+        CHECK(font.render(native, 0xE3, surface, 17, 45, &metrics, &out) == FONT_OK);
+        before_native[s] = fnv1a(pixels, sizeof(pixels));
+    }
+
+    RuntimeComposedGlyph shared[LATIN_GLYPH_COUNT];
+    for (size_t i = 0; i < count; ++i) shared[i] = (RuntimeComposedGlyph){glyphs[i].code, glyphs[i].base, glyphs[i].alpha, glyphs[i].base_alpha};
+    runtime_font_set_composed_glyphs(shared, count, cell);
+
+    for (size_t s = 0; s < sizeof(sizes) / sizeof(*sizes); ++s) {
+        CHECK(size_like_the_game(fonts.game, sizes[s], 0.75f) && size_like_the_game(fonts.set, sizes[s], 1.0f) &&
+              size_like_the_game(native, sizes[s], 1.0f));
+        for (size_t i = 0; i < count; ++i) {
+            int used = 0;
+            const int same = same_scale_as_base(&fonts, glyphs[i].code, glyphs[i].base, &used);
+            CHECK(same);
+            if (!same) printf("  size %d U+%04X: font %d, not at its base letter's scale\n", sizes[s], (unsigned)glyphs[i].code, used);
+        }
+        /* System font sets and fonts that have the letters draw them as before. */
+        GlyphMetrics metrics;
+        RenderOutput out;
+        memset(pixels, 0, sizeof(pixels));
+        CHECK(font.render(fonts.set, 0xE3, surface, 17, 33, &metrics, &out) == FONT_OK && fnv1a(pixels, sizeof(pixels)) == before_set[s]);
+        memset(pixels, 0, sizeof(pixels));
+        CHECK(font.render(native, 0xE3, surface, 17, 45, &metrics, &out) == FONT_OK && fnv1a(pixels, sizeof(pixels)) == before_native[s]);
+    }
+
+    /* The character-message phrases: every letter from the game font, accented ones at their base letter's scale. */
+    CHECK(size_like_the_game(fonts.game, 32, 0.75f) && size_like_the_game(fonts.set, 32, 1.0f));
+    const char *phrases[] = {"ação", "ótima", "não", "Não", "Graças à deusa!", "Situação sem saída..."};
+    for (size_t p = 0; p < sizeof(phrases) / sizeof(*phrases); ++p) {
+        uint32_t codes[64];
+        const size_t length = utf8_codes(phrases[p], codes, 64);
+        int ok = 1;
+        for (size_t i = 0; i < length; ++i) {
+            const DcpComposedGlyph *glyph = composed_entry(glyphs, count, codes[i]);
+            int used = 0;
+            if (glyph) ok &= same_scale_as_base(&fonts, codes[i], glyph->base, &used);
+            else if (codes[i] != ' ') {
+                Ink ink;
+                float advance;
+                ok &= render_like_the_game(&fonts, codes[i], &ink, &advance) == 1;
+            }
+        }
+        CHECK(ok);
+        printf("  PT-BR-MESSAGE|%s|%s\n", phrases[p], ok ? "every letter at the game font's scale" : "MISMATCH");
+    }
+
+close:
+    runtime_font_set_composed_glyphs(NULL, 0, 0);
+    if (fonts.game) CHECK(font.close(fonts.game) == FONT_OK);
+    if (fonts.set) CHECK(font.close(fonts.set) == FONT_OK);
+    if (native) CHECK(font.close(native) == FONT_OK);
+    CHECK(font.destroy_library(&library) == FONT_OK);
+    CHECK(font.destroy_renderer(&renderer) == FONT_OK);
+done:
+    free(atlas), free(marks), free(song), free(skip);
+}
+
 int main(void) {
     runtime_start(1);
     test_ime_panel_size();
     test_font_set();
     test_font_memory(DCP_SOURCE_DIR "/gpu/third_party/fonts/DejaVuSans.ttf");
+    test_composed_letters();
     printf("text tests: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

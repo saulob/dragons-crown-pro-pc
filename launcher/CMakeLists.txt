@@ -33,12 +33,12 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp
-    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp latin_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp
-    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c
+    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/default_message_hook.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c
     ${PROJECT_SOURCE_DIR}/src/guest_hook.c)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_ui_text dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
@@ -68,6 +68,19 @@ add_custom_command(OUTPUT ${DCP_PTBR_SOURCE}
     DEPENDS ${DCP_PTBR_LIST} ${DCP_PTBR_SHEETS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
     COMMENT "Embedding the pt-BR translation")
 target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_SOURCE})
+
+# The source record hashes of the slots PT-BR maps by index (localization/pt-BR/sources/*.json), game_translation.h.
+file(GLOB DCP_PTBR_SOURCE_MAPS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/sources/*.json)
+list(SORT DCP_PTBR_SOURCE_MAPS)
+set(DCP_PTBR_SOURCE_MAP_LIST ${CMAKE_BINARY_DIR}/generated/ptbr_sources.txt)
+file(CONFIGURE OUTPUT ${DCP_PTBR_SOURCE_MAP_LIST} CONTENT "${DCP_PTBR_SOURCE_MAPS}")
+set(DCP_PTBR_SOURCE_MAP_SOURCE ${CMAKE_BINARY_DIR}/generated/ptbr_source_maps.cpp)
+add_custom_command(OUTPUT ${DCP_PTBR_SOURCE_MAP_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_PTBR_SOURCE_MAP_LIST} -DOUTPUT=${DCP_PTBR_SOURCE_MAP_SOURCE}
+            -DSYMBOL=kPtBrSources -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_PTBR_SOURCE_MAP_LIST} ${DCP_PTBR_SOURCE_MAPS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the pt-BR source maps")
+target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_SOURCE_MAP_SOURCE})
 
 # The PT-BR visual patches (localization/pt-BR/visual/*.dcpx.z) as a table of byte arrays, game_translation.h.
 file(GLOB DCP_PTBR_VISUAL_PATCHES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/visual/*.dcpx.z)

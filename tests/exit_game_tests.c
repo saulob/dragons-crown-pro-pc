@@ -114,6 +114,16 @@ static void test_text_leaves_other_sheets_alone(void) {
     CHECK(exit_game_text_patch(sheet, size - 1, NULL) == EXIT_GAME_TEXT_NOT_SYSTEM_MSG);
     CHECK(!memcmp(sheet, copy, size));
 
+    for (int i = 0; i < EXIT_GAME_LANGUAGE_COUNT; ++i) {
+        ExitGameLanguage unaccented = exit_game_languages[i];
+        if (!unaccented.install_unaccented) continue;
+        unaccented.install_original = unaccented.install_unaccented;
+        const ExitGameLanguage *found = NULL;
+        size_t folded = build_sheet(sheet, &unaccented, 0);
+        CHECK(exit_game_text_patch(sheet, folded, &found) == EXIT_GAME_TEXT_PATCHED && found == &exit_game_languages[i]);
+    }
+    size = build_sheet(sheet, &exit_game_languages[0], 0);
+
     /* a language the table does not know, and a row the sheet does not hold, are left as they are */
     ExitGameLanguage other = exit_game_languages[0];
     other.install_original = "Foreign";

@@ -125,7 +125,8 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (key == kTextLanguageKey) {
         const std::span<const GameBuild> builds = SupportedBuilds();
         return std::any_of(builds.begin(), builds.end(), [&](const GameBuild& build) {
-            return std::any_of(build.text_languages.begin(), build.text_languages.end(),
+            const std::span<const TextLanguage> languages = TextLanguagesOf(&build);
+            return std::any_of(languages.begin(), languages.end(),
                                [&](const TextLanguage& language) { return value == language.key; });
         });
     }
@@ -413,7 +414,7 @@ std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* b
          (build_label ? build_label : "not a supported build"));
 
     if (!SameLanguages(languages, TextLanguagesOf(build))) {
-        line(std::string("Menu & Subtitles languages in ") + build->regional_archive + ": " + LanguageNames(languages));
+        line(std::string("Menu & Subtitles languages in ") + build->translation->archive + ": " + LanguageNames(languages));
     }
     const std::string saved_language = settings.Get(kTextLanguageKey);
     const TextLanguage& language = ResolveTextLanguage(languages, saved_language);

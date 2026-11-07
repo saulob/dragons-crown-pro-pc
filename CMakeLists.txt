@@ -79,6 +79,7 @@ set(DCP_RUNTIME_SOURCES
     src/exit_game_hook.c
     src/exit_game_text.c
     src/gallery_unlock.c
+    src/default_message_hook.c
     src/guest_hook.c
     src/title_layout.c
     src/runtime.c
@@ -202,6 +203,11 @@ add_executable(dcp-gallery-unlock-tests EXCLUDE_FROM_ALL tests/gallery_unlock_te
 target_include_directories(dcp-gallery-unlock-tests PRIVATE src)
 target_compile_definitions(dcp-gallery-unlock-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-gallery-unlock-tests PRIVATE -Wall -Wextra -Werror)
+add_executable(dcp-default-message-tests EXCLUDE_FROM_ALL tests/default_message_tests.c src/default_message_hook.c src/guest_hook.c)
+target_include_directories(dcp-default-message-tests PRIVATE src)
+target_compile_definitions(dcp-default-message-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-default-message-tests PRIVATE -Wall -Wextra -Werror)
+
 add_executable(dcp-menu-buttons-tests EXCLUDE_FROM_ALL tests/menu_buttons_tests.c src/menu_buttons.c)
 target_include_directories(dcp-menu-buttons-tests PRIVATE src)
 target_compile_definitions(dcp-menu-buttons-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -235,7 +241,7 @@ target_compile_options(dcp-cheats-tests PRIVATE -Wall -Wextra -fno-omit-frame-po
 
 # Focused tests of the text dialog and the system font set through the import resolver (tools/test.ps1,
 # tools/build.sh --test); not part of the default build.
-add_executable(dcp-text-tests EXCLUDE_FROM_ALL tests/text_tests.c src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES}
+add_executable(dcp-text-tests EXCLUDE_FROM_ALL tests/text_tests.c tests/composed_glyph_data.cpp src/runtime_cheats.cpp ${DCP_RUNTIME_SOURCES}
     $<$<BOOL:${WIN32}>:src/compat_win.c src/runtime_log.c> $<$<NOT:$<BOOL:${WIN32}>>:src/runtime_log_posix.c>)
 set_target_properties(dcp-text-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-text-tests PRIVATE src launcher ${CMAKE_BINARY_DIR}/generated)
