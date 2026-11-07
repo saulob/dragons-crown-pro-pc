@@ -44,6 +44,10 @@ extern const TranslationFile kPtBrVisualPatches[];
 extern const size_t kPtBrVisualPatchesCount;
 extern const TranslationFile kPtBrSources[];
 extern const size_t kPtBrSourcesCount;
+extern const TranslationFile kEnTranslation[];
+extern const size_t kEnTranslationCount;
+extern const TranslationFile kEnSources[];
+extern const size_t kEnSourcesCount;
 
 namespace {
 
@@ -188,6 +192,23 @@ std::optional<SourceMap> ParseSourceMap(const TranslationFile& file) {
     return map;
 }
 
+// A delta's hashes join the map; its excluded records leave it.
+bool ApplySourceDelta(SourceMap& map, const TranslationFile& file) {
+    const std::optional<SourceMap> added = ParseSourceMap(file);
+    const std::optional<net::Json> json =
+        net::Json::parse(std::string_view(reinterpret_cast<const char*>(file.data), file.size), 8);
+    if (!added || !json) return false;
+    for (const auto& [sheet, hashes] : *added) map[sheet].insert(hashes.begin(), hashes.end());
+    for (const net::Json& sheet : (*json)["sheets"].items()) {
+        SourceHashes& hashes = map[sheet["sheet"].as_string()];
+        for (const net::Json& row : sheet["excluded"].items()) {
+            if (!row.is_array() || row.items().empty() || row.items()[0].type() != net::Json::Type::kInt) return false;
+            hashes.erase(size_t(row.items()[0].as_int()));
+        }
+    }
+    return true;
+}
+
 // Why the record cannot show `text`; empty when it can. `mapped`: the slot's source map, for a slot not in English.
 std::string RecordProblem(std::string_view sheet, const std::vector<std::string>& records, size_t index,
                           std::string_view source_sha256, std::string_view text, const SourceHashes* mapped) {
@@ -210,6 +231,13 @@ std::string RecordProblem(std::string_view sheet, const std::vector<std::string>
         return "control sequences differ from the English";
     }
     return {};
+}
+
+bool TextHashMatches(const SourceMap& expected, const std::string& sheet, size_t index, std::string_view text) {
+    const auto found = expected.find(sheet);
+    if (found == expected.end()) return false;
+    const auto hash = found->second.find(index);
+    return hash != found->second.end() && Sha256Hex(text).substr(0, kSourceHashLength) == hash->second;
 }
 
 class Stopwatch {
@@ -236,8 +264,15 @@ std::string SheetEntry(std::string_view sheet, std::string_view suffix) {
     return "msgsheet/" + std::string(sheet) + "_" + std::string(suffix) + ".fms";
 }
 
+struct SheetSources {
+    const SourceMap* slot = nullptr; // the slot's records by index
+    const SourceMap* text = nullptr; // the hash each entry's text must have
+    std::string_view text_key;
+};
+
 std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string_view suffix, const TranslationFile& file,
-                                          const SourceMap* source, bool fold, ArchiveTranslation& result) {
+                                          const SheetSources& sources, bool fold, ArchiveTranslation& result) {
+    const SourceMap* source = sources.slot;
     const auto problem = [&](const std::string& text) {
         if (result.problems.size() < kMaxProblems) result.problems.push_back(text);
     };
@@ -272,15 +307,18 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
     for (const net::Json& item : (*json)["entries"].items()) {
         const std::vector<size_t> indices = Indices(item["index"]);
         const net::Json& hash = item["source_sha256"];
-        const net::Json& text = item["pt_br"];
+        const net::Json& text = item[sources.text_key];
         if (indices.empty() || !hash.is_string() || !text.is_string()) {
             ++result.refused;
-            problem(sheet + ": an entry without index, source_sha256 and pt_br");
+            problem(sheet + ": an entry without index, source_sha256 and " + std::string(sources.text_key));
             continue;
         }
         for (const size_t index : indices) {
             ++result.corpus;
             std::string why = RecordProblem(sheet, native, index, hash.as_string(), text.as_string(), mapped);
+            if (why.empty() && sources.text && !TextHashMatches(*sources.text, sheet, index, text.as_string())) {
+                why = "not the expected text";
+            }
             if (why.empty() && done[index]) why = "translated twice";
             if (!why.empty()) {
                 ++result.refused;
@@ -303,6 +341,7 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
 } // namespace
 
 std::span<const TranslationFile> PtBrTranslationFiles() { return {kPtBrTranslation, kPtBrTranslationCount}; }
+std::span<const TranslationFile> EnglishTranslationFiles() { return {kEnTranslation, kEnTranslationCount}; }
 std::span<const TranslationFile> PtBrVisualPatches() { return {kPtBrVisualPatches, kPtBrVisualPatchesCount}; }
 
 std::vector<TranslationFile> PtBrVisualPatches(VisualSet set) {
@@ -316,6 +355,14 @@ std::vector<TranslationFile> PtBrVisualPatches(VisualSet set) {
 const TranslationFile* PtBrSource(std::string_view source) {
     const std::string name = std::string(source) + ".json";
     for (const TranslationFile& file : std::span<const TranslationFile>(kPtBrSources, kPtBrSourcesCount)) {
+        if (file.name == name) return &file;
+    }
+    return nullptr;
+}
+
+const TranslationFile* EnglishSource(std::string_view source) {
+    const std::string name = std::string(source) + ".json";
+    for (const TranslationFile& file : std::span<const TranslationFile>(kEnSources, kEnSourcesCount)) {
         if (file.name == name) return &file;
     }
     return nullptr;
@@ -575,14 +622,23 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, c
     }
     std::vector<std::pair<std::string, std::vector<uint8_t>>> sheets;
     Stopwatch watch;
-    std::optional<SourceMap> source;
+    std::optional<SourceMap> source, text_hashes;
     if (recipe.source) {
         source = ParseSourceMap(*recipe.source);
         if (!source) {
             result.error = std::string(recipe.source->name) + ": not a source map";
             return result;
         }
+        if (recipe.source_delta && !ApplySourceDelta(*source, *recipe.source_delta)) {
+            result.error = std::string(recipe.source_delta->name) + ": not a source map delta";
+            return result;
+        }
     }
+    if (recipe.text_hashes && !(text_hashes = ParseSourceMap(*recipe.text_hashes))) {
+        result.error = std::string(recipe.text_hashes->name) + ": not a hash map";
+        return result;
+    }
+    const SheetSources sources{source ? &*source : nullptr, text_hashes ? &*text_hashes : nullptr, recipe.text_key};
     bool fold = false;
     if (!recipe.font_entry.empty()) {
         std::string why;
@@ -598,7 +654,7 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, c
         }
     }
     for (const TranslationFile& file : files) {
-        std::optional<SheetResult> sheet = TranslateSheet(archive, recipe.suffix, file, source ? &*source : nullptr, fold, result);
+        std::optional<SheetResult> sheet = TranslateSheet(archive, recipe.suffix, file, sources, fold, result);
         if (!sheet) continue;
         const bool repeated = std::any_of(sheets.begin(), sheets.end(), [&](const auto& s) { return s.first == sheet->entry; });
         if (repeated) {
@@ -671,7 +727,7 @@ extern "C" unsigned dcp_text_font_probe(const char* settings_file, const char* i
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
     const TextLanguage& language = ResolveTextLanguage(languages, settings.Get(kTextLanguageKey));
-    return language.translation.empty() ? 0 : build->translation->font_probe;
+    return language.translation == "pt-BR" ? build->translation->font_probe : 0;
 }
 
 extern "C" const char* dcp_text_translation(const char* settings_file, const char* image_dir, const char* app0,
@@ -703,8 +759,14 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
         recipe.files = PtBrTranslationFiles();
         if (same_archive) recipe.visual_patches = visuals;
         if (!profile.source.empty()) recipe.source = PtBrSource(profile.source);
+        recipe.font_entry = profile.font_entry;
+    } else if (language.translation == kPortEnglish) {
+        recipe.files = EnglishTranslationFiles();
+        recipe.text_key = "en";
+        recipe.text_hashes = EnglishSource("US");
+        recipe.source = PtBrSource(profile.source);
+        recipe.source_delta = EnglishSource(profile.source);
     }
-    recipe.font_entry = profile.font_entry;
     recipe.mark_archive = folder / kSharedArchive;
     recipe.glyph_table = glyph_table != 0;
     recipe.french_layouts = profile.visuals == VisualSet::kEnglishSlot;

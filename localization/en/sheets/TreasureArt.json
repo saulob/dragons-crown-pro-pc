@@ -1,0 +1,862 @@
+{
+ "sheet": "TreasureArt",
+ "records": 171,
+ "sha256": "0947ec3c2714937a0698f1eab6263cc212ec616bad79b0495d8b8cf4f025adfb",
+ "entries": [
+  {
+   "index": 0,
+   "source_sha256": "7359ea0d6f8ef1c059b80650df28c4d3653cbf7f256e487e7a88c38a6c0e17c5",
+   "en": "The Harpy's Charms"
+  },
+  {
+   "index": 1,
+   "source_sha256": "d980b1b960234095e65f716b33bd686b4b798a7ab7a0269cab485d17e4a23f19",
+   "en": "Harpy Chicks"
+  },
+  {
+   "index": 2,
+   "source_sha256": "417111e062f24503733e2cdaec83433764c262e0497836da87e5e8bd5e1d3418",
+   "en": "Honey Buzzards, Eaters of Wasps"
+  },
+  {
+   "index": 3,
+   "source_sha256": "32dcf54b24eed27a66d8ba57c1a97a0200d0b9adbf4ce65f247f76d3a8dc1246",
+   "en": "Deinonychus"
+  },
+  {
+   "index": 4,
+   "source_sha256": "31164151dbbb84db861a689c4bc4f88b33beaa3a0741cd6b41f3201729cbb8ca",
+   "en": "The Gorgon Sisters"
+  },
+  {
+   "index": 5,
+   "source_sha256": "380861aa745a607273744c0e8f1478f08643be233b6c964117875ad0a2815943",
+   "en": "Dragonriders"
+  },
+  {
+   "index": 6,
+   "source_sha256": "a83f49d3f2e0e659b62ba51cee087743bc201c57bb10581986fcd572b5adf817",
+   "en": "The Dark Elf Beastmaster"
+  },
+  {
+   "index": 7,
+   "source_sha256": "5a2c0385ca3e0cd581f68bd9210a947cd6210b499d40d5421a4d2435a7b66240",
+   "en": "Banshee"
+  },
+  {
+   "index": 8,
+   "source_sha256": "3c994e6b3074487b487b1f41dcc070a7e8f7baf396aeb50400e7edf7386c6a4a",
+   "en": "Princess Meriad, the Martyr"
+  },
+  {
+   "index": 9,
+   "source_sha256": "91e4e82fced85d86fc7c2c141e2c1192c48475b37fc07987fae35cbf67f14dca",
+   "en": "The Genie's Harem"
+  },
+  {
+   "index": 10,
+   "source_sha256": "25f3b1a58462e097d71e6f3933983fa58f8d070576ae6edabb99406d2dd659cf",
+   "en": "Elliot Pid, Explorer Extraordinaire"
+  },
+  {
+   "index": 11,
+   "source_sha256": "99b73448d922a24723f4cd713a91115d30b8dff19dac1db069117fab5fbc55a0",
+   "en": "Slayer of 40 Thieves"
+  },
+  {
+   "index": 12,
+   "source_sha256": "971c7b549c83be48ffb91a34cf761dc56ce6fb1b10e464d93a8886ff5d4c0088",
+   "en": "Anna Bonnie: Pirate, Legend"
+  },
+  {
+   "index": 13,
+   "source_sha256": "7e83618040fcb79ce3ad9310d70e7c59639b88d80e8de81fb22e4c590710b8b2",
+   "en": "The Mythical Sea Serpent"
+  },
+  {
+   "index": 14,
+   "source_sha256": "23322815ef97199f55209614f1515b686b3740b4d2787c69f69fc60c2a541ee7",
+   "en": "Children of the Labyrinth"
+  },
+  {
+   "index": 15,
+   "source_sha256": "e0374d592b117b0316573b35f6c18b64a4e284ccf00f887c247674ba3be0364e",
+   "en": "Death Zeppelin"
+  },
+  {
+   "index": 16,
+   "source_sha256": "33b3b0f8aa72504c02094172fd275a7a515eef0dd1e70d085bf2f7371c5a01c1",
+   "en": "Javleen the Hero"
+  },
+  {
+   "index": 17,
+   "source_sha256": "55699c2a7f9eb8039b5c8740df37fdb347f99fa311b9d725cc14f9c7e8809f45",
+   "en": "Cooperation at Work"
+  },
+  {
+   "index": 18,
+   "source_sha256": "a760c3d400d7aa31405fffcebe13e7383d4ed504ba21d54b4bc3c0d91c646b0e",
+   "en": "The Gazers' Homeworld"
+  },
+  {
+   "index": 19,
+   "source_sha256": "598b280b31441632a2854853923e8fddcb207eeac1178efb51a63573de9f8ac5",
+   "en": "Dark Crystal"
+  },
+  {
+   "index": 20,
+   "source_sha256": "5ba3bc5b08f78aab7415c5e54596f01d81d227f92bfcdca543bd6e23f80a9617",
+   "en": "Tree Tumult"
+  },
+  {
+   "index": 21,
+   "source_sha256": "dec295e492a85c1b35613ccc6fb8453a2dc629ecc747daf02711e4a0b105ed44",
+   "en": "Ill-Tempered Beast"
+  },
+  {
+   "index": 22,
+   "source_sha256": "3f8fb6c0f9be8c9606adbc32f162e94ee6d89481fc6220ae1290ec5b8c23557c",
+   "en": "Scylla in the Depths"
+  },
+  {
+   "index": 23,
+   "source_sha256": "d632229aa902bc12ee834795766a0c3320b9118812918402d97ec510221454af",
+   "en": "Golem Master"
+  },
+  {
+   "index": 24,
+   "source_sha256": "6699753dc06050256efe68b132485c7e33592e6b1abe05a75b2682071f33c3a3",
+   "en": "Hellhounds"
+  },
+  {
+   "index": 25,
+   "source_sha256": "4ee4c93056bfc5bffcf2108c90cc605f4e3d0867827a47a58e637d5b8a850229",
+   "en": "Fallen Angel"
+  },
+  {
+   "index": 26,
+   "source_sha256": "82979dde3225a15472462e08a352c8df682cb868ef2b039aa2c83a1905af1350",
+   "en": "Hell Evangelists"
+  },
+  {
+   "index": 27,
+   "source_sha256": "083b916dabdd7a06abd1bc9f203bbbd84ef924aa2e90e0df725863eae5b58156",
+   "en": "Sinful Succubi"
+  },
+  {
+   "index": 28,
+   "source_sha256": "e5372b3c7552c9793412a8c9f49021e715b9e3e6550352b78b2277201bf7d811",
+   "en": "Giant Worms"
+  },
+  {
+   "index": 29,
+   "source_sha256": "c26ee0e4b915257d995cffde4cc7b77a97c1e0cfa544836fdcb28329d1dc749a",
+   "en": "Mutation"
+  },
+  {
+   "index": 30,
+   "source_sha256": "d17580caa313a746b5e14c384aed9a12f9cb4cd6073a27d85571488e6a264398",
+   "en": "Fungi Researchers"
+  },
+  {
+   "index": 31,
+   "source_sha256": "a189cacc5323717ea2e95f260d374d0cc4a68b0c74ba2d7850533f2c84f320fc",
+   "en": "Goddess of Fertility"
+  },
+  {
+   "index": 32,
+   "source_sha256": "22a9b6bfe57e84b6493f68f38bd90844002d6253ef3d12ed6cf2307d72addf46",
+   "en": "Lima Ray the Witch"
+  },
+  {
+   "index": 33,
+   "source_sha256": "3d6ca464ed8e894c347de31ec9d480a9987bbf200baf66dd2b4515d193326353",
+   "en": "Vampire Hunter"
+  },
+  {
+   "index": 34,
+   "source_sha256": "abc91790b2ac20a1e205dc8adb57364c8f8fb0486f1195ed95de97236644a9ba",
+   "en": "The Blood Countess"
+  },
+  {
+   "index": 35,
+   "source_sha256": "590b2eab19af823fcaa9a27f875d16f80750c02a6f064b38536294791598fc2f",
+   "en": "Dead Man's Party"
+  },
+  {
+   "index": 36,
+   "source_sha256": "7660a041bd18362fcd7b52e27401afa3c7498e5c9cc523cee89f3b724e1ed152",
+   "en": "Angel of Destiny"
+  },
+  {
+   "index": 37,
+   "source_sha256": "aa7ee6c7d87c291a643b49eae8c4b2d38c0cc022a5f197fb718570f386752924",
+   "en": "Lord of the Undead Swordsmen"
+  },
+  {
+   "index": 38,
+   "source_sha256": "543d1f4a0e69679196e27e528ac9cfdda139c46b60e258b9335ec2e577b9d192",
+   "en": "The Corrupted Magician"
+  },
+  {
+   "index": 39,
+   "source_sha256": "4a70eb4d8a160a77f9add633087f61e589915705e396b3acd6344f6e7b92538c",
+   "en": "Dragonkin"
+  },
+  {
+   "index": 40,
+   "source_sha256": "fcaea65e10c051f6750b50b76181b1b43bae2beee85cce98513ce21ca1012c50",
+   "en": "Henritta's Dolls"
+  },
+  {
+   "index": 41,
+   "source_sha256": "ed4daa1d7ec1b664fee3040d48f81a2d48267098ad5e183f0862d4f2181ed988",
+   "en": "Homunculus"
+  },
+  {
+   "index": 42,
+   "source_sha256": "8760bbb3349d87e395050ec2ec52f8e1577c3801d7d93ea35407354e590f36f8",
+   "en": "Arachne"
+  },
+  {
+   "index": 43,
+   "source_sha256": "526e088f690472675d7707684a2083f26ffa58e2c0c7bbd7479c23fb0b9d1716",
+   "en": "Owlbear Parent and Cub"
+  },
+  {
+   "index": 44,
+   "source_sha256": "3df10066aae8a8576628d113431ab0045f7bf88577cb4ca0117aeabef882d658",
+   "en": "Sea God's Envoy"
+  },
+  {
+   "index": 45,
+   "source_sha256": "1f0cc9c91ce643797bbd2a2b4e21f7917d0dc10c66312ee4e32d52f1056d672b",
+   "en": "Gladiator"
+  },
+  {
+   "index": 46,
+   "source_sha256": "ba2b0489f870bf43e49b118b3b89862ac36b1e75635000db24368d64660f9ee0",
+   "en": "Amazon Hunters"
+  },
+  {
+   "index": 47,
+   "source_sha256": "8ced022acc1cdaba2518fe574806f90c8857f91b144c97c4362ce56e54903995",
+   "en": "Spider Silk Mantle"
+  },
+  {
+   "index": 48,
+   "source_sha256": "56f3005acf26eacea9a2ed7e15940636bdad0889ab0e324b5dcf610bc631a7d7",
+   "en": "Saint March Rosa"
+  },
+  {
+   "index": 49,
+   "source_sha256": "513545bf29bfbd08416097e2691f2d85e94315ed6e81d28b2541761580efdc5b",
+   "en": "Midsummer Night's Dream"
+  },
+  {
+   "index": 50,
+   "source_sha256": "b69e00cae514b190fe52f63242987caa91e7e359c22e72f6828c00d16527e95f",
+   "en": "Fighter Epilogue"
+  },
+  {
+   "index": 51,
+   "source_sha256": "20e8e4b697c260f873a5b6840afa6c425e2098b2235823d7cc2c69a23442e007",
+   "en": "Amazon Epilogue"
+  },
+  {
+   "index": 52,
+   "source_sha256": "8b666c5c1a33f04bb76a6e3e140875311d501c580eb3c30fe88cb2a7c9c0fe76",
+   "en": "Dwarf Epilogue"
+  },
+  {
+   "index": 53,
+   "source_sha256": "80393f60a10991da6e2b4e13d5cf18ae4894243412b24fd839e6ea12513968db",
+   "en": "Elf Epilogue"
+  },
+  {
+   "index": 54,
+   "source_sha256": "2ee7c4c645ff01abfb2fc6a07ec77f5d4d02b5c964f438f9479be094d9e2f7d5",
+   "en": "Sorceress Epilogue"
+  },
+  {
+   "index": 55,
+   "source_sha256": "727ac34478975a36fe8ea9a7fa020bb3d3004d1893919599b5fb172e1c1f98dc",
+   "en": "Wizard Epilogue"
+  },
+  {
+   "index": 56,
+   "source_sha256": "d2894997b95a23b4469ba1e4f7d7a85f5fb3ee868c1e6799d41bf49a78bc54fd",
+   "en": "Three Goddesses"
+  },
+  {
+   "index": 57,
+   "source_sha256": "1f9f106202c9719da1205a95c71c24aa09000b5f9517a6967810b945dab26952",
+   "en": "The young knight, charmed by the harpy's magic, had been\ngoing to see his strange new lover at her nest every night.\n\nThe harpy's top half is a human woman's torso, with a giant\nbird's legs and tail. His infatuation seems very strange, but\nnothing makes him happier.\n\nOne night she opens her wings wide and he holds his lover,\nburying his face in her bosom tenderly. He notices similarities\nbetween her and his late belle, when the harpy's talons tear\ninto his back."
+  },
+  {
+   "index": 58,
+   "source_sha256": "0d3a3bdd2106645105f414e8e292dabafd33c2ad4de974aa9f80b04a4cac4181",
+   "en": "The only harpies ever seen have always been female, with a\nwoman's body wed to a bird's wings and talons. Some\nspeculate that they reproduce by mating with human men.\n\nWhile they may appear beautiful, harpies are very violent and\ncruel. Thus, not much research has been done on them... but\nwhat of their chicks? Surely, a smaller, weaker subject would\nbe much less of a problem to deal with...\n\nHowever, the researchers were wrong. The hungry chicks\ndevoured the researchers, and any thoughts of\ncommunicating with them have been destroyed."
+  },
+  {
+   "index": 59,
+   "source_sha256": "524649591bb082ccc556363724bde5191218243c92a70edfbd44bbf5957c090e",
+   "en": "An advanced detachment of orc troops had been invading the\nruins, and were absentmindedly feeding on honey buzzard\neggs and chicks. This resulted in a marked decline of\nHydeland's honey buzzard population.\n\nThese large avians typically build their nests in caves and\nruins. They eat insects, reptiles, other birds, eggs, small\nmammals, etc. Their favorite foods appear to be wasps, and\nthey will actively attack wasp nests in order to get at them.\nThis leads to their nicknames of \"Wasp-Eaters\" or \"Bug\nBuzzards\".\n\nWith the orcs driven off, the wasp population will likely be\nreined in once again."
+  },
+  {
+   "index": 60,
+   "source_sha256": "df9d6dffbd8f6ceeeaff40f3ad7a1eac5136e26e9f80688ecf0aa058d590daa7",
+   "en": "The ancestors of dragons have come to light through ancient\nElician texts. These primogenitors adapted to the land and\nsea and flourished, possessing all manner of shapes and skills.\n\nAncient magicians, in an attempt to take the great power of\nthe dragons for their own, tried to create a spell to control\nand enslave these dragons. It is due to this arrogance that\nElicia was destroyed by the Ancient Dragon long ago."
+  },
+  {
+   "index": 61,
+   "source_sha256": "507668441180e43e49bb178a99ca71d307e206297ef1aa1b81e3223b42c7ab10",
+   "en": "Medusa is known throughout mythology as a beauty,\nyoungest of the Gorgon sisters. It is said that the goddess\nAlthena punished her for meeting men at the temple.\n\nHer long and beautiful hair became snakes, her skin covered\nin bronze-like scales, becoming a monster inside and out.\nShe hid in a remote area with her sisters who felt sorry for\nher.\n\nMedusa appeared at the temple again, enraged at the goddess,\nbut you put an end to her reign of terror by severing her\nhead. Shortly afterward, she turned to stone and crumbled. "
+  },
+  {
+   "index": 62,
+   "source_sha256": "c2f955ed807dff15ffd6fd617906e8915dbc334e7c32f3256d80f1d124b0c2f4",
+   "en": "Flying dragons are a direct result of human mages altering\nthe forms of dragons in ancient times. Because of this,\nwyverns seem to have inherited memories that make them\nview humans as ancestral enemies.\n\nIn captive conditions, only about 50% of wyvern eggs will\nhatch. It is said that wyvern riders stay with their wyvern\nmounts at all times, and after much training, they consume\nsome of each others' flesh as part of a ritual to complete a\nblood-bond between the rider and beast."
+  },
+  {
+   "index": 63,
+   "source_sha256": "0896a2c5535f6ced8b707e30c8ddba220ed0033e05c3f7f9f6ec684ed92ecd6d",
+   "en": "Dark elves are antisocial by nature, even amongst\nthemselves, a trait which ultimately led to their demise at\nthe hands of other races.\n\nSurviving dark elves were forced from their lands by other\nelves, and mostly reside underground. Without a large central\npopulation, it's unlikely that future generations will inherit and\ncarry on their customs.\n\nHowever, some individual dark elves still wander the land,\nusing their magic to dominate violent beasts.\n\n\"You have the potential to be a beast-tamer, a very powerful\nskill. Keep your bloodline going so you can spread this power\nto your descendants,\" the dark elf tells you before departing,\nnever to be seen again."
+  },
+  {
+   "index": 64,
+   "source_sha256": "8f13c63fef046b66088baddc155c409ce99cbc659de5de484f90174d3751e21d",
+   "en": "If you hear the frightening cry of the banshee, superstitious\npeople claim this means your death is near.\n\nInside the sealed room where the treasure lay, bandits who\nperished had become skeletons who would slaughter\nany who set foot in the room.\n\nPerhaps the disembodied woman's voice that was audible from\nthis room was in fact a banshee, crying to lament over those\nwho died, yet only drawing new victims to their graves."
+  },
+  {
+   "index": 65,
+   "source_sha256": "9ed5c4bb328419a7175ed3f4eb72bbd0463dcaacde99bf2ae0815b12878eb50a",
+   "en": "You have successfully defeated the red dragon. Within the\ndragon's treasure chambers, you discover the ring from\nMeriad, the princess who gave her life to save her people.\n\nFor those who view your slaying of the dragon as an act of\nthe goddess' benedictions, this will no doubt galvanize their\nown faith. However, the discovery of Meriad's ring also\nenergizes her followers.\n\nLater, the Morneon Church declares Meriad's deeds as also\nbeing the work of their goddesses. They canonize her as a\nsaint, and claim her as part of their own religion."
+  },
+  {
+   "index": 66,
+   "source_sha256": "57eee318d17177bd47f05eb355e4f68acbee054b104d92842f4c9210e02b51cb",
+   "en": "The Genie had grown frustrated that he was bound to remain\nwithin the lamp for centuries, if not millennia, doing the\nbidding of whomever held the lamp.\n\nSo, while he was out granting a wish, he wrote and submitted\na request in secret, plotting to have a third party take\npossession of the lamp and grant the genie's wish: freedom\nfrom the lamp's prison.\n\nAfter having served the will of others for so long, the Genie\nwas glad to use his powers for himself for once. Not long\nafter, he had amassed a plethora of treasure and gained a\nfollowing of beautiful women from every corner of the globe."
+  },
+  {
+   "index": 67,
+   "source_sha256": "71780e075c7cba76b916ed755d49200b9e6196b0f978bdb35a22403372612176",
+   "en": "Elliot Pid, the famed adventurer, sailed on his eponymous\nship to explore the world and seek glory. At some point he\nmust have lost the ship to pirates, who have used and\nabused it ever since.\n\nNow it is a ghost ship. The captain's logs tell epic tales of\ndangers and treasure, and the last entries speak of fighting a\nkraken, a giant sea monster encountered in unpioneered\nwaters.\n\nSince then, the kraken has become famous, and its very\nname is feared by sailors wherever they roam."
+  },
+  {
+   "index": 68,
+   "source_sha256": "be1f3c389ab8cb711a9571a1262a79866150bc9fcea7f1a70d0326c2b5c6c054",
+   "en": "The greedy client tried to take all the treasure later, and was,\nunsurprisingly, waylaid and killed by bandits.\n\nHis younger brother brought the body home for burial. The\nbandits came after him too, but one of their slaves, a\nstunning and cunning woman, had secretly replaced the wine\nin the 40 vases the bandits were going to hide inside with oil,\nand then burned them all to death.\n\nThe brother was so thankful for the slave's actions that he\nmarried her to his own son. He then claimed the bandits'\ntreasure and shared it with all the people of his village.\nOne could say that they made out like bandits."
+  },
+  {
+   "index": 69,
+   "source_sha256": "51a6a8c5941ba64c4d42ef7294b6ad65c4a2bf31b5bdf62c1d5504c40d7490cc",
+   "en": "The three men followed you to see if you would emerge\nvictorious over the kraken, as Anna Bonnie did. However,\nbefore reaching the kraken, you battled monster bats,\nskeletons, armored demi-beasts, and the like. These battles\nwere so terrifying that all three men fled in fear.\n\nAnd so, none witnessed your battle with the kraken, and\nnone saw you perform a deed which rivaled the great\nAnna Bonnie's legendary exploits.\n\nTo this day, the three men still drink to and speak of Anna\nBonnie with much admiration, and her name sparks hopes and\ndesires in the hearts of sailors."
+  },
+  {
+   "index": 70,
+   "source_sha256": "c7bcc22ff2f0401683277e93686157749b770d9fb7cdc1f443e5575dfc6976cb",
+   "en": "While what you discovered was still a baby, the sea serpent\nlooks exactly like the wall paintings.\n\nIf the stories in ancient texts are true, this serpentling\nshould grow even larger than a red dragon.\n\nThis living fossil is an ancient amphibian who shares a\ncommon ancestor with the dragons who ruled the world in\nancient times. Thus, their strength and power are notable,\nthough the texts say that their intelligence was beastly."
+  },
+  {
+   "index": 71,
+   "source_sha256": "e6ff8583685be05e689a855bee7bfa4f0334608ef9ecf61f66621fc651bd351b",
+   "en": "The seven boys and seven girls who were to be sacrificed\nto the minotaur had been saved. One of the boys had\nsecretly been unraveling a ball of string he carried with him\ninto the labyrinth so they would be able to follow the thread\nback out.\n\nThe minotaur, who has the head of a cow and the body of a\nhuman, is said to be an apostle of a heretic religion that\nfanatic orcs follow. They treated it kindly at first, but later\ntrapped it deep underground after tiring of its violent nature."
+  },
+  {
+   "index": 72,
+   "source_sha256": "9d81911f880fcc6a5ad0e7032abb73796a1d2f7e66407b4a8ffeb29b571b6094",
+   "en": "The goblins were secretly sharpening their fangs against\ntheir own allies, the orcs, who had taken control of Bilbaron\nFortress. The goblins' long-term goal was to build a flying\nfortress, the Sky Terror.\n\nRecovered designs show it to be the size of a giant whale,\nable to hold over 100 goblins. It boasts twenty massive\ncannons, and can move at such a speed that it would be able\nto cross the length of Hydeland in one night. The amount of\nskycrime the goblins could commit with it is unfathomable.\n\nThanks to your efforts, their dreams were crushed before\nthey could come to fruition. You likely saved the entire\nkingdom."
+  },
+  {
+   "index": 73,
+   "source_sha256": "d2c556e4b2a0e74b67c502b517ba61b0f3fb05eabc369e38cc5db72c45570fa2",
+   "en": "Javleen's handkerchief was returned to the woman intact,\nthus honoring the last promise he made.\n\nAn oft-decorated knight commander, Javleen is a hero who,\nwith his prized horse and trusty weapon, rode out into the\nfront lines with his knights and won one hundred battles\nagainst the orc army.\n\nHe died in battle at Gargoyle Gate, but his work in boosting\nthe morale of Hydeland's army will be spoken of in legends\nfor generations to come."
+  },
+  {
+   "index": 74,
+   "source_sha256": "75b6779263d9d5845b154a72c8c291378333613f690ce30c38ae746cb8a83a20",
+   "en": "Dwarven crafters have incredible technical skills that are\npassed down through generations. Human engineers have\ngiven the world great scientific innovations, and the dark\nelves, though few in number, have a wealth of unique skills\nand knowledge.\n\nBilbaron Fortress and its impregnable gate were created with\nthe combined efforts and abilities of many races. One of\nthose contributing architects tells you, without hesitation, to\ndestroy the gate, for they will band together once again to\nbuild something even stronger and greater to replace it."
+  },
+  {
+   "index": 75,
+   "source_sha256": "a9fccd00f5318fa7a760f340411196995f5ffb1ca8c46931718b7cad3e6db60a",
+   "en": "Floating cities, twisted plants, insects the likes of which\nhave never been seen... The researchers who successfully\npeered into the souls of gazers saw fantastical scenery that\nwas quite unlike the reality they knew.\n\nThe researchers began furiously detailing the sights of the\nnetherworld they had witnessed. However, they were not\nwell received by the general public.\n\nApparently, society did not appreciate the subject matter and\nwere worried that the researchers' depictions of the\nnetherworld would only stoke certain peoples' desires to\nvisit it."
+  },
+  {
+   "index": 76,
+   "source_sha256": "27d37ba95b524c53269755eed3ef72a051a1910951356200f5f3fdda6d57b83f",
+   "en": "When you return with the amethysts, you learn that the\nrequester has been captured by the guards.\n\nShe turned out not to be a sculptor, but a heretic magician\nwho specialized in research concerning the undead...\nShe has a long list of prior grave robbery convictions to \nher name.\n\nPure amethysts trap magic extremely well and are used as\nmediums for fortune tellers and witches.\n\nThe requester was trying to inject a spell into the amethysts\nand embed them in the flesh of corpses to create high\nfunctioning undead. "
+  },
+  {
+   "index": 77,
+   "source_sha256": "300d84b0cc71b99fee13ea35947dfe805d55a137c9a0d66149df1db328f17122",
+   "en": "In an attempt to harness golem might, the heathen magicians\nof Morneon have been experimenting with golemetry. Tired\nof mere Wood Golems, they moved on to trying to control\nthe ambulating and benevolent wise old tree, Torent.\n\nThe forest, formerly beautifully maintained by the elves,\nbecame a dangerous place after the affliction of the miasma\ngrew stronger.\n\nOutlaws and strange mages now use the forest as hideouts,\nattacking adventurers and patrol squads. The elves grieved\nand shook with anger."
+  },
+  {
+   "index": 78,
+   "source_sha256": "d20a644c8e45c4dd00041a12085deaf80173372053d136c0d2ee49b7c35042da",
+   "en": "A number of years ago, when a group of knights pursuing a\nholy relic stepped into a cave, the ones that fled reported\nthat their retinue were viciously waylaid by a rabbit there.\nRumors of this foul, terrifying lagomorph spread.\n\nToday, many bloodthirsty knights in the neighboring country\nof Bolga, in an attempt to make a name for themselves, go\nto challenge the killer rabbit. They only manage to increase\nits body count.\n\nThe duplicitous duke made this request in an attempt to\ngenerate a similar phenomenon in our kingdom. However, as\nlong as a true hero like you calls Hydeland home, such\nattempts at trickery will be in vain."
+  },
+  {
+   "index": 79,
+   "source_sha256": "a8250265153c3f050fd2a81d77bccb3309fd9c33e4ca057f208b3fcaa06ed215",
+   "en": "For a moment, you saw the shadow of an otherworldly being\non the bottom of the lake. \n\nThere are rumors of a human man who fell in love with\nScylla, a beautiful mermaid. Because they lived in different\nworlds, the man asked a witch to cast a spell so that he\ncould be with his love.\n\nHowever, the witch took a liking to this man, and instead\ncast a spell on both of them to destroy her mermaid rival.\nThe beautiful mermaid was transmogrified into a monster,\nthe man lost his memory, and the witch wooed Scylla's lover.\n\nThe mermaid still waits at the bottom of the lake for the day\nshe encounters the two again."
+  },
+  {
+   "index": 80,
+   "source_sha256": "b7de826f2fe1d1c8b678076244d067ed109f32675569a2862b01bc1096327a44",
+   "en": "The spells used to create golems are ancient, and the\nthought process behind creating them is completely different\nfrom the present day schools of magic. Golem magic is\nbeyond the mastery of even the researchers who are on the\ncutting edge of magical experimentation.\n\nIt is said that not many who can wield that kind of magic\nexist in this era, but over a century ago, there was one\nyoung genius runic mage that kept their talents out of the\npublic eye.\n\nThe young Lisley could simultaneously control many golems\nwith her raw magical talent. The notes say that she would\nplay with them as if they were dolls."
+  },
+  {
+   "index": 81,
+   "source_sha256": "6083307d8ce0ef5c72aa7687dd1c2fa62625fd06466d01b35943a6caa0b7884e",
+   "en": "You return, having survived the sharp fangs and fire of the\nhellhounds. The man who hired you seems pleased with the\nresults.\n\nHellhounds are feared as creatures of evil, but the man\nasserts that this is mere superstition. He says that canines\nand humans have been friends since before the dawn of\nhistory.\n\nIn an unsurprising turn of events, the man who so fondly\ndreamed of holding a young hellpup in his arms went missing\nsoon after and was never heard from again."
+  },
+  {
+   "index": 82,
+   "source_sha256": "9adb3be0ad19b86237b4055f5d7f807c4ac99fa6049e26f4638a672d436ed8d2",
+   "en": "In the days of mythology, the angels who were tasked with\noverseeing humanity gave them knowledge and magic.\nHumans immediately began using these gifts to fight each\nother, and God lamented the devastation. He imprisoned\nthe angels responsible. \n\nThus humans began calling these fallen angels demons.\nThese fallen angels, cast out of the heavens and feeling\nbetrayed by humans, embraced their new evil typecasting. \n\nThanks to your efforts, the man is freed from the contract\nhe signed with the demons, and joins a monastery. One has\nto wonder if the demons' attitudes towards humanity are\nnot justified..."
+  },
+  {
+   "index": 83,
+   "source_sha256": "5c289d125f5160eaf8de5827ac2a30a36eb9cd4ec147ef893ba8bfc1a0afd4bf",
+   "en": "The Morneon splinter sect known as the \"Hell Evangelists\"\nhas attracted many followers who were seeking spirituality\nand enlightenment.\n\nThey had no sociopolitical agenda, and were only seeking to\nfurther an objective understanding of black magic. However,\nthere have been some recent schisms within the sect. The\nmore radical faction does not seem to care for morals or\ncommon decency.\n\nEven if their interests and the kingdom's were aligned,\nworking with this faction would not benefit Hydeland in the\nlong run. As such, the kingdom has decided to cut ties to this\ncult."
+  },
+  {
+   "index": 84,
+   "source_sha256": "fc3cbc99d3962e89e0c62d639a7927384573a6796478ed5bff48f6656640406a",
+   "en": "Perhaps the monk's blind faith worked; destroying the statue\nof the false god completely removed the temptations from\nthe monk's dreams.\n\nSometimes, those who discipline themselves the hardest are\nones who are the most likely to break. The demons who\nwield dominion over lust can find the smallest crack in a\nperson's psyche to tempt them down the path of\ndestruction.\n\nIt is likely that the monk will never truly be free from this\nproblem, and the incubi's promises of otherwordly parties and\npleasures may one day prove too much for him to resist."
+  },
+  {
+   "index": 85,
+   "source_sha256": "a4abc095a4b0a0c9a3c1e2babe0b4c7b2eb7d638ce4706b09ceccfcced8c9f7b",
+   "en": "The researchers repeatedly experimented on the bodily fluid\nsamples you brought back, and created a giant worm. As\naberrations of nature created in a research lab are wont to\ndo, this worm later destroyed the lab and escaped, and began\nbreeding unchecked in the nearby forest.\n\nThis causes no end of trouble for local residents, although\nsome adventurers passing through the area report that the\nworms do serve as a convenient source of protein."
+  },
+  {
+   "index": 86,
+   "source_sha256": "79ffaa3836e6a19a574f5cdf679fa17e01b1d32afde2fb0e61e34a0cdff9cd9f",
+   "en": "Doom Beetles, which are influenced by strong magic while\nstill in cocoons, may sometimes emerge with a giant horn.\nThe magician Wallace seems to have made a connection\nbetween the magic and the beetles' evolution, and had been\nworking to speed up their mutation process.\n\nSurprisingly, Rickey is a successful example of Wallace's\nexperiments. Rickey squeaks enthusiastically and says that\nhe will work hard to complete his master's research."
+  },
+  {
+   "index": 87,
+   "source_sha256": "6a64825b28bd0d0abfa93881720bccb19a8594ed9cc86961aef65b166693add8",
+   "en": "The fungi incubation experiment was held in an\nenvironment protected from the effects of magic by\ntripling the normal amount of sacred barriers.\n\nThe fungi did not grow like the myconids, but neither did\nthey grow to be poisonous. At the same time, it was\ndiscovered that the taste of the non-poisonous fungi is\nquite terrible.\n\nWhile these results disappointed the gourmands, the\nresearchers don't seem to be deterred. They will continue\ntheir fungus research regardless."
+  },
+  {
+   "index": 88,
+   "source_sha256": "a18471084247252e32945eabe679904424912b881c4ca0a85f96d966baf01d73",
+   "en": "The Goddess gave birth to many creatures and deities,\nincluding the race of giants known as the cyclopes. Morneon\nseemed to be under the assumption that by releasing the\nmyopia of cyclopes - her creations - they would gain her\nfavor and she would give birth to a great new monster that\nthey could control.\n\nHowever, they had no actual way to possibly communicate\nwith either the Goddess or the giants. Their messenger was\ntrampled and killed the instant he opened the cell door."
+  },
+  {
+   "index": 89,
+   "source_sha256": "f403b331acc8fd7a5dc2939616ba2825dcadd3b77a468f9b8f158555b563692c",
+   "en": "On a whim, the witch Lima Ray helped the goblins being\npersecuted by the elves and ended the elf nuisance for\nthem. After that, the goblins worshipped her as a living god.\n\nLima Ray's powerful magic worked in tandem with the goblins\nwho served as her transportation, and they went around the\nworld causing all kinds of mayhem. \n\nThe goblins would love to return to those glory days. Thus,\nthey have been conspiring to bring her back from the dead\nwith a spell she had taught them. However, without Lima\nRay, it's a simple matter to crush their ambitions. You easily\nstaved off her attempted resurrection."
+  },
+  {
+   "index": 90,
+   "source_sha256": "f686c24c808f720ffde58080be02b756ed9c2222da59e3196a09e04b4cb2efef",
+   "en": "The hunter appears before you after you have finished off\nthe last of the vampires. He is clad in black armor and has a\ncomely face. The request he received was to expose the\npartnership between the local priest and the vampires. The\npriest had become enamored with the vampires, and instead\nof trying to purge the world of their evil, he actually created\na cursed seal to invite them to the village.\n\nThe hunter leaves silently before the sun rises. There is\nnothing more for you to do. The priest will be judged by the\nvillagers accordingly."
+  },
+  {
+   "index": 91,
+   "source_sha256": "e7d8851a8d9af70071d575af7c2da085a5f309dcf0d1fcca4b98675e559a6ebf",
+   "en": "Rumor holds that some of the kidnapped girls became\nvampires and adapted to their new lifestyle. They were freed\nfrom their lives of poverty and grew to become powerful\nleaders of their vampire clan. The wealth and power of the\nclans grew, and the vampire leaders infiltrated noble society.\n\nDesiccated beautiful flowers have a certain charm to some,\nand the undead's reach spread throughout high society. Not\nmany in the upper classes have even realized the influence\nof the vampires has spread so far."
+  },
+  {
+   "index": 92,
+   "source_sha256": "896c63ed35223db9f2f407e12fe07bd2714f6d70015087c962c7870397f2e7d7",
+   "en": "The death of the landlord's family was due to an epidemic.\nCarried by rats and flies, it spread like wildfire - it was not\nuncommon for an entire village to be devastated overnight.\n\nThe landlord's family died at their final rave. This gala was\nheld during the height of the outbreak, and in their frenzied\nterror the party-goers began dancing madly, day and night,\nsome even dying on their feet.\n\nEven today, the skeletons dance side by side with humans.\nDeath comes to all, regardless of class or wealth."
+  },
+  {
+   "index": 93,
+   "source_sha256": "600d655c991349d9a8e461dcb570861fd725119a71b8ac5463312e9c51369035",
+   "en": "Legends claim that the death god first appeared to humans\nwhen some of the deities granted the powers of\nresurrection to some people, and souls that were marked\nfor death weren't making the journey to the afterlife.\n\nThe father laments that his resurrected daughter took the\nhand of a young man and eloped. The anti-resurrection\nleague firmly believes that souls should be sent naturally to\nheaven, even if this means losing their own children.\n\nPerhaps in their eyes, the terrifying death gods look like\nbeautiful angels leading souls to heaven."
+  },
+  {
+   "index": 94,
+   "source_sha256": "c20003f5937c94efe243c222e6afbe1158411a4b73fce476fa1100204056aea1",
+   "en": "The unusually large wight rules over the other skeletal\nswordsmen. He watches over the colosseum.\n\nWhen he was alive, he was too big to be a knight, but could\nonly release his aggressive impulses by fighting. Even after\ndeath, he could not stop, and so he led other skeletons with\nsimilar unending drives to join together for a neverending\nbattle.\n\nThe hero Roland admires these warriors, and has excitedly\nrequested that he be buried there when he dies himself."
+  },
+  {
+   "index": 95,
+   "source_sha256": "35f48699dcc7897198f30a83835970acc99318f85ff5b8e4102a5d1a28913add",
+   "en": "When you touch the temples of the leader of the\nunderground organization, you feel his memories flooding\nthrough your fingertips.\n\nThe young man, once burning with dreams and ideals,\nblossomed in his talent for black magic and even became a\nteacher. However, those days ended, and his hope turned\nto despair. When he was falsely blamed for spreading a raging\nepidemic, his girlfriend and his family were all executed. \n\nSince then, his path has become twisted. He sold his soul\nto the devil in an attempt to destroy this crazy kingdom\nwhere evil is passed off as justice."
+  },
+  {
+   "index": 96,
+   "source_sha256": "bc08d8fb94ba09d9d122fb019f65624210fe5b5aea53583f1e25a9d68d33538c",
+   "en": "The \"correct\" way for a dragon worshipper to live his life is\nto admire the great beasts' bodies and train himself to be\nstronger, but this man wanted more: he wanted to become\none. He researched a taboo art used to fuse dragons and\nhumans together.\n\nFusion of humans and creatures to create hybrid lifeforms\nis wrong on a fundamental level. This work will only create\ncursed beings, and all of his research materials were burned."
+  },
+  {
+   "index": 97,
+   "source_sha256": "075ab8de5ec26532f632953b1c1fae84d47493d36848f9fcb2f605a68676af42",
+   "en": "A dancing doll was discovered behind the hidden door in\nHenritta's room.\n\nThe mechanics of the automatic doll's movements were\ncreated by applying golem magic to machinery, which comes\nas a disappointment to the requester.\n\nHenritta had not been trying to replicate the human body,\nnor create artificial power; she had sought the smaller\nwonder of love. The automatic doll will dance forever, as if\nseeking to protect the dreams of her deceased master."
+  },
+  {
+   "index": 98,
+   "source_sha256": "0b9ab07e4f9f642e18da098998ab4fa26ce1341766a58d082e6ce27ae2f8b35d",
+   "en": "\"If a new body can be created to house it, a soul can be\nresurrected. If a human soul can be preserved repeatedly,\nthen it can live forever.\" Or so the man claimed.\n\nThe reality of the situation is that a homunculus can only\nlive within the container it was created in; if it leaves, the\nbody collapses and it dies instantly. The church\nexcommunicated the man, burned his research, and\nexplicitly forbade any further research on homunculi."
+  },
+  {
+   "index": 99,
+   "source_sha256": "11f41e888788c2c93c368b276c6b5622c7d2dbabe77df35bfdd3e9cb358d8908",
+   "en": "The spinning wheel you found in the tower belonged to\nArachne, the great weaver. In ancient times long past, the\npoor girl's bottom half was turned into that of a spider to\npunish her for her conceit.\n\nArachne later had a change of heart, and lived quietly in a\nremote area, making beautiful carpets from her own silken\nthread. Despite her newfound humility, the beauty and magic\nof her carpets only angered the gods even further."
+  },
+  {
+   "index": 100,
+   "source_sha256": "72cd1ba434a7cc0539e76ffa5fe999058ad90f917b8193a9603e7dd4d3cc7523",
+   "en": "When owlbears were declared to be a menace, owlbear\nhunting became popular, and their numbers dropped sharply\nat the hands of adventurers and hunters.\n\nOnce their coats became sought after amongst the nobles,\nthey were hunted even more intensely, and they quickly\nbecame an endangered species.\n\nSome of the wise scholars point out that it is quite\nhypocritical that it was humans who brought these creatures\ninto the world, and now humans are trying to slaughter them."
+  },
+  {
+   "index": 101,
+   "source_sha256": "1dda48979ef9ebfa5fcad0d2b30b9297769c28328d822c9cb4d3e090cf89a2cf",
+   "en": "Your copious amount of fish destruction was overshadowed\nby the sudden appearance of a mysterious fisherman. He\napparently went about slaughtering the fish with an amazing\nspearing display.\n\nAncient myths state that the killer fish committed the sin of\ngluttony and were duly punished by the sea god. Whenever\nthe sea god isn't nearby, they take advantage of the\nopportunity and eat everything in the water.\n\nThe mysterious fisherman's identity is unknown, but his\nshell horn leads people to speculate that he is a form of\nthe sea god."
+  },
+  {
+   "index": 102,
+   "source_sha256": "792420e664585bcdad4119b3874946916302842b0cdf6166cde1f37ffb1cea85",
+   "en": "The guildmaster Samuel welcomes you back after defeating\nthe swordsmen. When he was a young knight, he was\ncaptured by the Bolgan Kingdom in a battle along the\nnorthern border. The prisoners were forced to fight in\nmortal gladiatorial combat.\n\nSamuel won battle after battle, winning the favor of the\ncrowd. Another fighter became popular as well, and even\nrenounced his Hydeland citizenship to live in Bolga. Now,\nas an old soldier, he commands the Bolgan knights invading\nHydeland.\n\nSamuel feels a premonition that he will have to stand on the\nbattlefield again to face his former rival."
+  },
+  {
+   "index": 103,
+   "source_sha256": "ac28ce8b26c22fae707f881f991b0debbb1081929aa07b431923a7f24f188c9b",
+   "en": "The Amazons of the south are an all-female tribe who fight\nwith great ferocity.\n\nIn order to protect their independence, they have created\nan isolated society and constantly battle enemy nations.\nIn this culture, warriors are highly valued, and becoming a\nwarrior requires fierce trials and rituals.\n\nCompleting the trial of taking 50 orcs' heads has earned\nyou the trust of the Amazons, and status equal to that of\na warrior. Their efforts have slowed the progress of the\ninvading orc army."
+  },
+  {
+   "index": 104,
+   "source_sha256": "50628c0b2bccae3d075f2f0e81a27773116bd0cc000a9e991401da334f0f61e4",
+   "en": "The cape created by the witch Morgan Lisley is a one-of-a-\nkind item made by enchanting each thread as she wove it. It\nis an ultimate example of exquisite and delicate detail.\n\nWhile it is light, it is amazingly resilient. Adventurers began\nto fight for possession of this rare item.\n\nMorgan was sent mountains of spider webs, but she never\nmade another such cape. Indeed, she was sick of all the\ncommotion over the first one."
+  },
+  {
+   "index": 105,
+   "source_sha256": "061b89ddc6dc5e3c09255137f49f9bc2272f65f75d7ef5d0262c73017f6c0c99",
+   "en": "You were awarded the title of Saint March Rosa in\nrecognition of your exemplary efforts.\n\nThe original March Rosa healed many illnesses with medical\ncare and medicine. This was different from the unscientific\nremedies the priests were prescribing, and thus surprised\nthe church and made them fearful. \n\nMarch Rosa's medical skills only grew, and eventually, he\nmade the dead come back to life using Medusa's blood which\nhe allegedly got from a goddess. He continued healing until\nhe was felled by a lightning bolt."
+  },
+  {
+   "index": 106,
+   "source_sha256": "710a79d4c917de6dee9374fc3f8001f9432b694883b4c6f8c4a2ec23bb22cbae",
+   "en": "The fairies trapped in the cage were dreaming. They come\nfrom the Great Forest, their home and the origin of the fairy\nrace. It was where the fairy king used to rule, a paradise\nwhere all fairies could freely dance and sing.\n\nOn Walpurgis Night, demons, humans, and fairies could all\ncelebrate together. If it is a dream, then everyone should be\nable to take part regardless of species. The fairies wish and\nhope that this night will come."
+  },
+  {
+   "index": 107,
+   "source_sha256": "4d83791f52c301ec2cf1a53cc45daca42d0bc1e635226280c70729011a7a6c4e",
+   "en": "Among historians, there is a lot of doubt about what you truly\naccomplished, likely because you never spoke of it yourself.\n\nOnly when Hydeland's official records of the hero who\ndefeated the ancient dragon were published did your deeds\ncome to light. Those records chronicle your deeds in many\nlands. At the end of each, you return to Hydeland and drink\nat the Dragon's Haven Inn.\n\nThe tales patrons claim you told, of the land in the sky, or\nthe one ring, become oral tradition passed on for generations.\nThe last mention of your name says you ventured far into\nthe sea in your seventies, but even after a half century,\nsome still wait..."
+  },
+  {
+   "index": 108,
+   "source_sha256": "ee6530c848d57c8546308902a820545ff22486518f8618ca7dfec8c9b7469605",
+   "en": "You suddenly remember the moment you left the village.\n\nYou had just been acknowledged as a mature warrior. Long\nago, in the wildlands, a carriage was waylaid by orcs. Only an\ninfant survived - you. The amazons raised you as their own.\n\nYou came to Hydeland to discover your roots, but you had\ngiven up by the time the Dragon's Crown incident occurred.\nWhile the citizens grant you a hero's welcome, an elderly\nnoble couple look at you in stunned surprise.\n\nThey will soon realize that you have the same eyes as their\nson, who died years ago in a remote land...\n"
+  },
+  {
+   "index": 109,
+   "source_sha256": "69c52241ff992c77f925ef4de31574cec2acad7a27111ad91e9332adbb3857bb",
+   "en": "The dwarves had once built a great kingdom underground.\nNow, the few surviving dwarves lived banded together in\nsmall villages. They were nearly exterminated by the ancient\ndragon, and the underground kingdom became his.\n\nThe dwarves dub you the noble avenger and convey heroic\nstatus upon you. Your words are given incredible weight.\nDwarves drink with you and dream of a great and powerful\nnation led by the noble avenger.\n\nTheir hopes are rightly placed, as you will eventually lead\nthem to glory, your name echoing throughout the halls of\ntime."
+  },
+  {
+   "index": 110,
+   "source_sha256": "2ae6632ee27ed0cc4ef9e9364aaf4b841c807819481d1f599a243c5f06be0043",
+   "en": "The elves' kingdom is deep in a forest where humans never\ntread. Elves don't trust outsiders. Most have never seen a\nhuman. You, however, dreamt of adventure and leaving the\nforest. That made you a bit of a social outcast.\n\nYou return to the forest after a long hiatus, worried about\nhow you would be treated now that you have human and\ndwarf friends. To your surprise, you were treated well in all\nthe land.\n\nThe elf king even granted you the title of Crown Regent.\nHe's relieved because elves had foretold of the ancient\ndragon's revival, but laws dictated the king must fight it."
+  },
+  {
+   "index": 111,
+   "source_sha256": "f5d42eb70fc72068ae0fe42c1b06bb15213098f1dacf67ad89408ab81e9d39a2",
+   "en": "You became quite a hit with the nobles. Perhaps they\nthought an alluring, powerful sorceress could grant their\nevery desire.\n\nEnticed by the glamorous life you'd always dreamed of, you\ndo prophecies and palm readings to enjoy life in high society.\nPeople criticized you for trading in your old life for the finer\nthings, but that wasn't true. You were working for the\nkingdom.\n\nYour prophecies were clever distractions from the nobles'\nworries, avarice, and ambitions. You placated all their unrest. \nBut this mundane life bores you. You long for ale from the\nDragon's Haven Inn. It isn't luxury you crave, but adventure..."
+  },
+  {
+   "index": 112,
+   "source_sha256": "66721defc695bc5b993168be87941b9a14f706960f934be9d6d9faf02419cca3",
+   "en": "An arrogant young magician was attempting to save his\nsister's life by tinkering with immortality spells beyond\nhis ken.\n\nWorry became elation as you saw your sister drift into a\ndeep sleep, obviously free of the pain that plagued her\nevery moment. Sadly, your joy was fleeting.\n\nShe neither breathed nor woke again. Your spell left her in\nlimbo; neither alive nor dead. Your journey was a quest to\nsave her from your foolish actions. You traveled the world\nbefore ending up at Hydeland.\n\nNow, you return as a great magician to fix your error.\nYou distilled the ancient dragon blood to create the elixir..."
+  },
+  {
+   "index": 113,
+   "source_sha256": "85601ff9a75687f0929d28a42f5bb6d566b25edae6604ef7289c3fd28d005b9a",
+   "en": "The heavens and earth were created, followed by a\ntumultuous period where deities, giants, and dragons lived\ntogether, but after the humans became rulers of the world,\nthe balance was kept by three guardian deities; the goddess\nJula, deity of trees and hunting, the goddess Vernas, deity of\nlove and harvest, and the goddess Althena, deity of battles\nand mercy.\n\nThese goddesses are said to have nobly sacrificed their\npowers to seal the ancient dragon in the Illusionary Land\nin order to save the world."
+  },
+  {
+   "index": 114,
+   "source_sha256": "23129e5be80226dd9661a40d1562ff8ce830a2c46aed9528e1118cf1041c8d25",
+   "en": "Art by Haruka Kawamura"
+  },
+  {
+   "index": 115,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 116,
+   "source_sha256": "23129e5be80226dd9661a40d1562ff8ce830a2c46aed9528e1118cf1041c8d25",
+   "en": "Art by Haruka Kawamura"
+  },
+  {
+   "index": 117,
+   "source_sha256": "8ef015a22ef34c27f3e5c448fd13ce9365e768cf28a6598c75c82df27706376e",
+   "en": "Art by Yukitsuna Maeda"
+  },
+  {
+   "index": 118,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 119,
+   "source_sha256": "745551d335f3041e90fca2682e2b9cb72b78bd43d2aec6c76a8208a9035b5a7d",
+   "en": "Art by Yasuo Shirai"
+  },
+  {
+   "index": 120,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 121,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 122,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 123,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 124,
+   "source_sha256": "91a14e924561007b6f862eeaf3e383f15a4f18698fe3ba3fc28db7c0ac49950c",
+   "en": "Art by Akira Murakami"
+  },
+  {
+   "index": 125,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 126,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 127,
+   "source_sha256": "91a14e924561007b6f862eeaf3e383f15a4f18698fe3ba3fc28db7c0ac49950c",
+   "en": "Art by Akira Murakami"
+  },
+  {
+   "index": 128,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 129,
+   "source_sha256": "ba0ff18f5bba31f6c8ba8084852c43cfa5db04a154466a2f2587d6d6ece34a01",
+   "en": "Art by Yasuhiro Fujiwara"
+  },
+  {
+   "index": 130,
+   "source_sha256": "b3c6efd1f9fe7dc9ac790be1e60d92c1159cc9102434d27e2bbf0abf63f0e880",
+   "en": "Art by Kentaro Onishi"
+  },
+  {
+   "index": 131,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 132,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 133,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 134,
+   "source_sha256": "fc80a135d0d1fdc59a61320be8213f618cb0493a80f3bc62e562388f83d976b9",
+   "en": "Art by Ryo Kobayashi"
+  },
+  {
+   "index": 135,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 136,
+   "source_sha256": "745551d335f3041e90fca2682e2b9cb72b78bd43d2aec6c76a8208a9035b5a7d",
+   "en": "Art by Yasuo Shirai"
+  },
+  {
+   "index": 137,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 138,
+   "source_sha256": "23129e5be80226dd9661a40d1562ff8ce830a2c46aed9528e1118cf1041c8d25",
+   "en": "Art by Haruka Kawamura"
+  },
+  {
+   "index": 139,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 140,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 141,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 142,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 143,
+   "source_sha256": "745551d335f3041e90fca2682e2b9cb72b78bd43d2aec6c76a8208a9035b5a7d",
+   "en": "Art by Yasuo Shirai"
+  },
+  {
+   "index": 144,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 145,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 146,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 147,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 148,
+   "source_sha256": "77c3cd9860bf096f2d7123a537738216cc4fe4bfc1cc1e289145991f3f54c9bb",
+   "en": "Art by Koichi Maenou"
+  },
+  {
+   "index": 149,
+   "source_sha256": "ba0ff18f5bba31f6c8ba8084852c43cfa5db04a154466a2f2587d6d6ece34a01",
+   "en": "Art by Yasuhiro Fujiwara"
+  },
+  {
+   "index": 150,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 151,
+   "source_sha256": "91a14e924561007b6f862eeaf3e383f15a4f18698fe3ba3fc28db7c0ac49950c",
+   "en": "Art by Akira Murakami"
+  },
+  {
+   "index": 152,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 153,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 154,
+   "source_sha256": "91a14e924561007b6f862eeaf3e383f15a4f18698fe3ba3fc28db7c0ac49950c",
+   "en": "Art by Akira Murakami"
+  },
+  {
+   "index": 155,
+   "source_sha256": "23129e5be80226dd9661a40d1562ff8ce830a2c46aed9528e1118cf1041c8d25",
+   "en": "Art by Haruka Kawamura"
+  },
+  {
+   "index": 156,
+   "source_sha256": "91a14e924561007b6f862eeaf3e383f15a4f18698fe3ba3fc28db7c0ac49950c",
+   "en": "Art by Akira Murakami"
+  },
+  {
+   "index": 157,
+   "source_sha256": "bfc3f7cac574c522602b0f0642549569390bb905fe455da37ed088ed78985534",
+   "en": "Art by Yukiko Hirai"
+  },
+  {
+   "index": 158,
+   "source_sha256": "a3c488a445440f76da998474918e591dc87f6ec1d2c5db7f046db178b672a906",
+   "en": "Art by Tomoyo Shimabukuro"
+  },
+  {
+   "index": 159,
+   "source_sha256": "ba0ff18f5bba31f6c8ba8084852c43cfa5db04a154466a2f2587d6d6ece34a01",
+   "en": "Art by Yasuhiro Fujiwara"
+  },
+  {
+   "index": 160,
+   "source_sha256": "ba0ff18f5bba31f6c8ba8084852c43cfa5db04a154466a2f2587d6d6ece34a01",
+   "en": "Art by Yasuhiro Fujiwara"
+  },
+  {
+   "index": 161,
+   "source_sha256": "ba0ff18f5bba31f6c8ba8084852c43cfa5db04a154466a2f2587d6d6ece34a01",
+   "en": "Art by Yasuhiro Fujiwara"
+  },
+  {
+   "index": 162,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 163,
+   "source_sha256": "964d738bedc4cee979d55592484103e3f7d8cc0461635cd1096d54753c29d8bd",
+   "en": "Art by SHIGATAKE"
+  },
+  {
+   "index": 164,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 165,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 166,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 167,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 168,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 169,
+   "source_sha256": "4de2884314bbe79e95f10699342ef8ef3a6e0de3a0a09e0deb86dac57d516c59",
+   "en": "Art by Emika Kida"
+  },
+  {
+   "index": 170,
+   "source_sha256": "2f3f70c62b832b248ad1e268d32e600e5405176ab4cc86854af58b471bfbfb32",
+   "en": "Art by Takafumi Noma"
+  }
+ ]
+}

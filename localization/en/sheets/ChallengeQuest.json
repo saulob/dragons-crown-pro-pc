@@ -1,0 +1,1007 @@
+{
+ "sheet": "ChallengeQuest",
+ "records": 200,
+ "sha256": "14171b824404a4e82d36af88c7dbfb0268eed4df3c0e67c0b579e8c468aecb5c",
+ "entries": [
+  {
+   "index": 0,
+   "source_sha256": "248c45db0decd65ba2a479b5c4ea07206490631c293b9a6a9e080fe998938ae5",
+   "en": "Help the Honey Buzzards"
+  },
+  {
+   "index": 1,
+   "source_sha256": "807f630fc4ab95e082369efaffe60b19b21f1a5b3ad3e4892415d5e6fd5e42de",
+   "en": "Beastmaster"
+  },
+  {
+   "index": 2,
+   "source_sha256": "0f74b3618ddc89f3704b03220cba99e270509b5f3cddfcc10841817519c2f95f",
+   "en": "Delicacy Delivery"
+  },
+  {
+   "index": 3,
+   "source_sha256": "3dafa49f40231589af4b4679d6317dd262178e5dfbe00b1cc079215d95b3f24a",
+   "en": "Reclamation of Honor"
+  },
+  {
+   "index": 4,
+   "source_sha256": "1d36afbacd6e97ec848af20cc291148658b4a7d4ec6bd5c85ed6ae9865e89094",
+   "en": "Morgan's Web"
+  },
+  {
+   "index": 5,
+   "source_sha256": "a3586dca1b4f82a892873b16f84316a0043773056f28c10d8f9d2d580682045a",
+   "en": "Ship Sleuthing"
+  },
+  {
+   "index": 6,
+   "source_sha256": "5e0ae4904a63582ba6b8dbb09c08983f8c058ce2c5fa4da17b7f121b740489d0",
+   "en": "Must Love Hellhounds"
+  },
+  {
+   "index": 7,
+   "source_sha256": "71046cc4091e9acc0fd7463817cdec387650af315366b988dc93c0d4e8ffad69",
+   "en": "Henritta's Automatic Doll"
+  },
+  {
+   "index": 8,
+   "source_sha256": "d687c8d4de8ff4b7306b32ef1e5e78ae8cb1e1dd2beb04c01fccb75789dc8bfd",
+   "en": "Forest Clearing"
+  },
+  {
+   "index": 9,
+   "source_sha256": "cdadc33cc9b788ebeafbdc6cfb7347f8cfe0f3cc735525e98c7c9e765b428f02",
+   "en": "The Owlbear Menace"
+  },
+  {
+   "index": 10,
+   "source_sha256": "bb8d2b98b675b591eb44ff9aabb9268c8d6a8c6d60cb4cf2828b29c8bfc7615f",
+   "en": "Draconic History"
+  },
+  {
+   "index": 11,
+   "source_sha256": "9fc06aed797d351c0c43c42eab2486fae31f969166414c4a8b35316477826678",
+   "en": "Kill Killer Fish"
+  },
+  {
+   "index": 12,
+   "source_sha256": "bd951ccebe11d179287d3d1425fe2f95909a114ed6a40a4fcfd5eb3066314518",
+   "en": "Reacquire Research"
+  },
+  {
+   "index": 13,
+   "source_sha256": "6989b718caed7e1f452aed72e832703bf5217bac245e49af4351f45f7daf795a",
+   "en": "Flying Fortress Blueprints"
+  },
+  {
+   "index": 14,
+   "source_sha256": "f289bfb4f2423e742b7a0f703de7d108281c4bd08081bb2b17850a8c02cb9211",
+   "en": "Best of the Dead"
+  },
+  {
+   "index": 15,
+   "source_sha256": "7cb89be263253e2196661f303926cfb1bc662a607220486a69266dffb737af02",
+   "en": "Open Sesame"
+  },
+  {
+   "index": 16,
+   "source_sha256": "63aef468e3c4413de9ffa1f376f8cc083bc6219a3683eee2fa1ee1529eb16554",
+   "en": "Hunt for the Forbidden Text"
+  },
+  {
+   "index": 17,
+   "source_sha256": "9d9513f1516d1cfe085c104544f336e12f1f44bbdf6b85701c6d79bcb0287660",
+   "en": "Crystal Collection"
+  },
+  {
+   "index": 18,
+   "source_sha256": "78c8e8753c7575ddfbf439cf673c1f3f08cf3540451f1e7cda237001bec3ed67",
+   "en": "Harpy Adoption"
+  },
+  {
+   "index": 19,
+   "source_sha256": "0f523a1c8ac86208dfcd5ae005a18d3b911f19593dba67471cc76fadde1fa42a",
+   "en": "Steal Wyvern Eggs"
+  },
+  {
+   "index": 20,
+   "source_sha256": "715ced7e127f736cdb571b53dcb002bbb1310a890145aa15b694562efce6de5a",
+   "en": "Doom Cocoons"
+  },
+  {
+   "index": 21,
+   "source_sha256": "e5472068aec8e7f752daac3742c5930db3e301dc704a69e5d4fdefaa6d9b8e87",
+   "en": "Rescue the Children"
+  },
+  {
+   "index": 22,
+   "source_sha256": "a6c6199c4d16eb5fccaa485483bb65a5318b2741da66f28e04785f73bd5a9264",
+   "en": "Save the Seamstresses"
+  },
+  {
+   "index": 23,
+   "source_sha256": "f53863c33356f22dcb82b4d047184646bffd710146e8d9fcf3828c6f3954fe45",
+   "en": "Release the Genie"
+  },
+  {
+   "index": 24,
+   "source_sha256": "d2dc06ab64df995ae41775d8cdca14c106131b8e79311e9d87b41888f1878046",
+   "en": "Decipher Golem Runes"
+  },
+  {
+   "index": 25,
+   "source_sha256": "4cdb3771cf1f7150534bb44806d9e36546bf1ffe6ce67d5fd3e698d574fe821f",
+   "en": "Peer into the Past"
+  },
+  {
+   "index": 26,
+   "source_sha256": "f2bb7dce23035a0dc3812e875cecf65bfd09185e64219b8babd21d67b41b5ab4",
+   "en": "Soul Gazing"
+  },
+  {
+   "index": 27,
+   "source_sha256": "58c7c0bb9aec2b8fc89518e6716240235b70091cc9c92e923260b4dc621b5f75",
+   "en": "Crush Hydeland's Enemies"
+  },
+  {
+   "index": 28,
+   "source_sha256": "a00181c89d46b2f31dcec71a3aa8bd7cc7ae58f04c92b8b4847513c864b1e44d",
+   "en": "Harpy Problems"
+  },
+  {
+   "index": 29,
+   "source_sha256": "4f3cb6186f91956ad1b3681da614a9d402bc826ec9d597886fcf9c0e7e9a9961",
+   "en": "Mysterious Whispers"
+  },
+  {
+   "index": 30,
+   "source_sha256": "6ec92532492b6c5edddade9adf8dcb4d449410ebe67e8f75122c84eae6ff0cf2",
+   "en": "Lima Ray's Resurrection"
+  },
+  {
+   "index": 31,
+   "source_sha256": "9525d12b1e9386f85ba3a161a146c99e93b022a3dfe47f809d276d05cf5908df",
+   "en": "Rite of Passage"
+  },
+  {
+   "index": 32,
+   "source_sha256": "e8c46a3d03a602e9c95682f121d159023542ea03e250fc90a741774cbc6712c2",
+   "en": "Church Cover-up"
+  },
+  {
+   "index": 33,
+   "source_sha256": "8a98c8a587590df93aff09fe4eaaba35dfc978369738fb5abf413a778a56f1e8",
+   "en": "Dead Master's Party"
+  },
+  {
+   "index": 34,
+   "source_sha256": "cb353393f1168d5199c5e12bfd0f6959c9752d41f2ee2bc4da985f88d546ffc4",
+   "en": "Living Fossil"
+  },
+  {
+   "index": 35,
+   "source_sha256": "812861a3efd26833e82c9f538f3e09c897a06589257681feaba9a5608716ab65",
+   "en": "Informer"
+  },
+  {
+   "index": 36,
+   "source_sha256": "f798d5814c02b6fd167b3c895f0d03c12f50e47b044694b10a588788b3233086",
+   "en": "A Monk's Struggle"
+  },
+  {
+   "index": 37,
+   "source_sha256": "93d18704d48c4161903a0d0698a3512d70b8653ba079c9b399d8a6793977b55d",
+   "en": "Magic Carpet Secrets"
+  },
+  {
+   "index": 38,
+   "source_sha256": "58acbf46107b1f9db638d5b33bfd6f25b7c7320c7f5a549296c719e039b7564f",
+   "en": "Submerged Memories"
+  },
+  {
+   "index": 39,
+   "source_sha256": "e7a9354587249de3ea238edca48df102153cbb7a27cb24edb376f2174604cbc7",
+   "en": "Search and Resurrection"
+  },
+  {
+   "index": 40,
+   "source_sha256": "708591572e7370de2071daf652e425836cad28bff7405d8ed099d63feab194da",
+   "en": "Looks Can Kill"
+  },
+  {
+   "index": 41,
+   "source_sha256": "35bf894f2b25d5c65631e2fddae0172be88f1be8fc903c97a03ca3d420c063bb",
+   "en": "Bear Witness"
+  },
+  {
+   "index": 42,
+   "source_sha256": "d515abab013b35deeaf79eded591fc2d554df61d00526f07d7f91c840146e368",
+   "en": "Cyclops Problems"
+  },
+  {
+   "index": 43,
+   "source_sha256": "ae4b6e1a0e30155f8dff5ed435f7604758c7e67b91ed3b627685757b67762722",
+   "en": "Breach Gargoyle Gate"
+  },
+  {
+   "index": 44,
+   "source_sha256": "6e1b5caeef364d436e3d7b982cd2ee7af58251719691fd706a9dad0e24bb35b2",
+   "en": "Family Matters"
+  },
+  {
+   "index": 45,
+   "source_sha256": "e99c486989dd689854db226c8e9347f00ef721b2a6d8f662f658548fa69184de",
+   "en": "Myth Buster"
+  },
+  {
+   "index": 46,
+   "source_sha256": "c591456c1e78953e1bc6a0cb5673533c2a4124cc1e5f1a211a43987bacd66757",
+   "en": "Contract Renegotiations"
+  },
+  {
+   "index": 47,
+   "source_sha256": "cbe8c34fa9dd28db0c0467a5b0d3a27ef6d00eff7f736fef5af75c824885c6fa",
+   "en": "Unnatural Life"
+  },
+  {
+   "index": 48,
+   "source_sha256": "dad87268186b582f804abeb80becd0d63ed40cef790ea9f14571b16e9253b3c8",
+   "en": "A Beast Most Foul"
+  },
+  {
+   "index": 49,
+   "source_sha256": "ef51a71df954f5ef2fce4f784d386fea89d6559bc35875b857ba4a227bd1a1d0",
+   "en": "A Midsummer Day's Request"
+  },
+  {
+   "index": 50,
+   "source_sha256": "906eaded395895e55bae3de9c8c584f7c4691b4eb02bf07f1016dc5b2cdd4021",
+   "en": "We've seen a dramatic increase in the wasp\npopulation in recent days. Some of our top\nscholars believe that this wasp explosion is\ndue to the decline of honey buzzards. The\nscholars postulate that orcs have taken up\nresidence in the Ancient Temple Ruins and\nare hunting the buzzards for food. Without\nthe buzzards consuming the wasps, the wasp\npopulation is growing unchecked.\n\nIf their supply chain can be broken, the orcs\nresiding in the ruins will be forced to leave,\nthus allowing the buzzard population to\nrebound.\n\nDestroying a recent orc shipment in the\nharbor should be enough to encourage the\norcs' relocation."
+  },
+  {
+   "index": 51,
+   "source_sha256": "367279899a5ffa7e6bf6d4138c5721e2d66ef7dbc2d1b232648ab923b8c96843",
+   "en": "For those who aren't adventurers, it is\nextremely rare for a human to ever\nencounter an elf. However, an elf shrouded\nin a heavy coat recently filed a request\nwith the guild. \n\nCertain beasts have been sighted recently in\nmany areas: a beast with giant fangs and\nsmall, bipedal dragons. These are known to be\nspecial beasts that the dark elves used to\nride. This elf believes that the fact that these\nbeasts exist is proof that dark elves must also\nstill exist in this world.\n \nThe task requested of you is to face these\nbeasts and see if you can mount one as your\nsteed. Apparently, exerting dominance over\none of the dark elves' most formidable assets\nwould allay this fearful elf's concerns."
+  },
+  {
+   "index": 52,
+   "source_sha256": "6e43e5e1c5b972a6699716a03e3e377016afc12b4dbab6874d0a5d57f9eb6fd3",
+   "en": "The flesh of the giant walking fungi, myconids,\nis a legendary delicacy among gourmands.\nHowever, myconids are also legendarily toxic.\nThe lethal poison that they produce means\nthat only a small portion of their bodies can\nbe rendered safe for consumption.\n\nTo balance the rampant demand for myconid\nflesh with safety concerns, a group of\nscholars would like to research how to cull\nthese creatures in a manner that would\nprovide the largest yield. They request that\nsomeone gather myconid spores from\nWallace's Underground Labyrinth."
+  },
+  {
+   "index": 53,
+   "source_sha256": "b5f2f55e2e3edd4a3a71a704fdcbb05b9cf3acb0bc96f2cd02c6d8bbcbd0b493",
+   "en": "The hero Javleen's famed sword would be the\ncrowning object in any knight's collection.\nHowever, a lesser-known relic of Javleen's\nlies in the subterranean fortress. \n\nIt is said that a noblewoman Javleen loved\ngave him a handkerchief before the famous\nbattle against the orcs that claimed his life.\nThat noblewoman wept away the rest of her\ndays, dismayed that Javleen was unable to\nfulfill his promise to return her favor.\n\nAny soldier loyal to Hydeland would move\nmountains in order to reclaim the\nhandkerchief from those filthy pigs."
+  },
+  {
+   "index": 54,
+   "source_sha256": "c8e4a90756b4ee2a8223e3d1b1facf68637dc859a0830b4f511e04e0d3ea53b6",
+   "en": "Morgan Lisley, the witch who runs the magic\nitem shop, has always had a burning desire for\nfurthering the development and research of\nmagic items.\n\nShe has seized upon the idea of combining\nhighly elastic spider silk with magic in an\nattempt to develop a fiber that would be\nresilient against any kind of attack.\n\nTo test her idea, she requires some giant\nspider webs. Go and acquire some for her. "
+  },
+  {
+   "index": 55,
+   "source_sha256": "3b204db9a4b17009ccee2d18c5ad3ce7badec314744392da8e8e261a68231fe2",
+   "en": "A famous adventure ship called the Elliot,\nwhich was thought to have been lost at sea,\nhas been sighted recently at a cove infested\nwith pirates.\n\nAn investor who had been financing the\nadventures of Elliot Pid, the Elliot's owner, is\nunderstandably curious about what became of\nMr. Pid. Please go and gain some information\non Mr. Pid's recent activity."
+  },
+  {
+   "index": 56,
+   "source_sha256": "63da43205ed5a0c5ec677d0f6c5c4d9dc4a78a6dafb5e60f40fae41b33dd6f2a",
+   "en": "A man known for his habit of caring for the\nmany wild dogs on the outskirts of town\nexcitedly placed a request about hellhounds.\nAccording to the man, they are strong,\nbeautiful, intelligent dogs that live in packs\nand can control fire. However, he is\ndismayed that they live in terrible conditions.\n\nThe man adamantly believes that he can\nraise hellhounds to be less fearsome. Go and\nprovide firsthand proof that hellhounds aren't\nharmful to humans. If you approach them\nwith love in your heart, he feels that they\nwill accept you, given their intelligence."
+  },
+  {
+   "index": 57,
+   "source_sha256": "515428782d5c50b1f0747f2630c75774351d4b1eaa5a1a08f0c0eac2d2029bd2",
+   "en": "A magician who is researching golems and\nnecromancy has put in a request. He wants\nyou to search for an automatic doll that the\nlate tinkerer Henritta made.\n\nThis doll, crafted by Henritta, is said to have\nbeen incredibly articulated. The requester\nwould like to use Henritta's technology to\nallow his creations to have the same range\nof movement. \n\nGo to Henritta's laboratory in the Mage's\nTower and find the automatic doll that is her\nlegacy. To gain entrance, you must figure out\nhow to pass a magical mechanism which bars\naccess. \n\nIt is said that the mechanism that Henritta\nmost liked when she was alive was one that\nwould \"reflect magic with a giant shield.\""
+  },
+  {
+   "index": 58,
+   "source_sha256": "c6f40d7aaf41d73f79c6404c2f0abfe0fd6d5185cc84f811825af5be2ec33ed5",
+   "en": "The king has always appointed the elves as\nstewards of the forests. In times past, the\nforests were the pride and joy of the elves,\nsaid to be the most beautiful in all the land.\n\nNow the once-magnificent forests have\ndegenerated into a haven of terror, danger,\nand miasmas. There are reports of wood\ngolems menacing passersby and of people\nentering the forests, never to be seen again.\nWe want to know what put the forests in this\nstate. Is there perhaps some kind of evil spell\nor mystical force twisting the land?\n\nIn order to get to the bottom of this mystery,\nwe ask for your assistance to help the\npatrollers destroy the wood golems. This will\nallow us to search the area for clues."
+  },
+  {
+   "index": 59,
+   "source_sha256": "491448dc09504f37e0c6a0c50c0738754930cd91d3d2a2f26f1619a2256532f1",
+   "en": "If you ever happen upon an owlbear in the\nforest, it will invariably attack you.\nThis is known.\n\nThese creatures were birthed as part of\nsome ungodly experiments. They escaped\ninto the forest and have been breeding ever\nsince. Owlbears' numbers have increased as\nof late, and they are no longer confining\nthemselves to the forest. Some are even\nreporting that councils of owlbears are\nvisible from their homes, and that fierce\nowlbear attacks are wreaking havoc upon\ntheir townsfolk and their trade.\n\nI need you to cull the owlbear population, so\nthey will no longer stray from their habitat to\nfind food."
+  },
+  {
+   "index": 60,
+   "source_sha256": "7129c73ca026302394619e69aecfbc6731f62977c358cb1546278068e0fe2c2d",
+   "en": "The fire-breathing dragon is a frightening\ncreature made by the gods in the days of\nlegends. \n\nThe dragons, with their overwhelming power,\nonce ruled the land. However, since the\nancient dragon was sealed by the goddess,\nthey decreased in number. They do still exist,\nand they are still quite powerful, though.\n \nRecently, a piece of writing written in Elician\ntimes concerning the origin of dragons was\nuncovered in the Ancient Temple Ruins. \nI'd like you to search for other ancient works\nthat contain information regarding the origin\nof dragons."
+  },
+  {
+   "index": 61,
+   "source_sha256": "9236361672dc83b8ecd00780542a4dc328144e41f195d698756ad2979cf9c0a3",
+   "en": "Killer fish are doing much damage to the\nfishing industry. These finned fiends swarm\nonce every few years, consuming all the fish\n(and sometimes humans) that they can find.\n\nThe damned things are out in especially high\nnumbers this year, and the fishermen brave\nenough to attempt to deal with them are\ngetting slaughtered.\n\nI need you to go out and exterminate these\nkiller fish from the local waterways."
+  },
+  {
+   "index": 62,
+   "source_sha256": "5e298225484dcbe6c2855cf1690bccbef2564a0fd3f9ed68d86b472365977ae2",
+   "en": "Rickey, the rodent apprentice of the magician\nWallace, submitted a request for you.\n\nSince his master's passing, his research into\nthe evolution of species has been abandoned.\n\nHis work was secreted away inside a treasure\nbox, which itself was locked in a cage, and\nonly the diminutive Rickey had the key.\nHowever, he's since lost the key. He would\nlike you to open the treasure box and\nreacquire the research. To access the\ntreasure box, you will need to step on the\ncolored switches in this order: Red, yellow,\nnavy, purple.\n\nRickey has specifically requested you for this\njob, as he feels that you are the only one he\ncan trust."
+  },
+  {
+   "index": 63,
+   "source_sha256": "01176b16036f97b06f97a9f8bac63153c04c8b0903fdc1390e123ef36dee9779",
+   "en": "During a battle with the orcs at Bilbaron\nFortress, we obtained information that the\ngoblins are constructing a flying fortress.\n \nTo finish their flying terror, they need the\ndwarves' steam engine, but the dwarves are\nheld captive in the fortress. Not only that,\nthey hid the blueprint for it in a secret room\nas an act of defiance. The goblins are\nfrantically looking for it. You must find the\nblueprint and put a stop to their plans.\n\nBe swift, as reports say the goblins have\nalready started using explosives to look for\nrooms hidden behind the walls. "
+  },
+  {
+   "index": 64,
+   "source_sha256": "a57349a56fde68b23589ac609dbb44c9c1aaa226c91d04509f7b0f789093b06f",
+   "en": "The hero Roland is very intrigued by the\nnight skeletons. Among the many common\nskeletons, there are occasionally darker\nskeleton warriors. Rumor has it that they are\nnot actually mindless servants controlled by\nmagicians, but that they are dead legendary\nheroes. They are said to have escaped from\nthe underground cemetery, where they\ncongregate and train each other with their\nswords. \n\nRoland throws you a provocative glance. Will\nYOU be able to best the abilities of the\nlegendary undead warriors? Do battle with\nthem and report back on your experience."
+  },
+  {
+   "index": 65,
+   "source_sha256": "aff3f896012f249200059fbd2089313bce0c6d43fa8604afeccc9c3cd13e54f8",
+   "en": "A man who looks irresponsible with money\nwhispered in your ear a secret request.\nA brigand crew about 40 strong is said to have\namassed a great deal of treasure in a hidden\ncave in Ghost Ship Cove. A large stone that\nseals the cave is said to open only with a\nmagical password, which the man says is\n\"Open The Sesame\".\n\nThe man claimed that stealing the money\nwasn't a crime, because it's filthy brigand\nmoney. He also stated that the treasure was\nall his, and that you don't get to lay a finger\non it."
+  },
+  {
+   "index": 66,
+   "source_sha256": "2265ba56826c7b67df98b5ffa021e5407bc3d2e8d772b913895a25d86b159d9e",
+   "en": "A group of stout men in masks and scale mail\nhas made a request. They are most likely the\nmembers of a dragon faith group. \n\nOne of their former comrades had completed\nsome taboo research. After that man had been\ndealt with, someone absconded with his\nresearch documents. These men have a\nsource which told them that the documents\nare in a hidden office belonging to one of the\nleaders of the magic religion Morneon. \n\nThey don't want Morneon misusing the\nforbidden text, but they've been unable to\nfind the documents. There must be some\nmechanism hiding everything. Find and disable\nthe mechanism to locate the hidden office\nholding those documents."
+  },
+  {
+   "index": 67,
+   "source_sha256": "e32933d43854e82b80c8a402a4bcb350536c4d7645f3e773d29f0ea66ab2e77a",
+   "en": "We received a request from a woman who\nworks as a crystal sculptor. In the back of the\nLost Woods, there is a massive crystal trove.\n\nTroves like this are valued for being locations\nwhere one can harvest very pure amethysts.\nThe purer the amethyst, the better material it\nwill be for sculpting. However, crystal troves\nexist in areas so remote that the requester\nwould never be able to travel to one herself.\n\nYou must go to the crystal trove and gather\nas many amethysts as possible. "
+  },
+  {
+   "index": 68,
+   "source_sha256": "37e829b0719d7c912a73c6d8037347040e455f09424b8cf05a289896af4b1408",
+   "en": "Harpies inhabit the Ancient Temple Ruins.\nResearchers note that they are highly\nintelligent, understand human language,\nand display a variety of emotions. \n\nTherefore, they believe that there is a\npossibility that if a harpy was raised by\nhumans from birth, it could be taught to\ncoexist with them. \n\nThese researchers request eggs to proceed\nwith their research. Go and kill a harpy without\ndestroying its nest."
+  },
+  {
+   "index": 69,
+   "source_sha256": "15dc5104060b25d131705470208961550f3cccc0e99a953ce323d81ef5ff941c",
+   "en": "We've gotten a request for a wyvern egg from\na dragon-riding clan in a distant land. It's quite\ndifficult to breed wyverns, so the preferred\nmethod for raising a wyvern mount is to steal\nan egg.\n\nA menagerie of wyverns is organized much\nlike a harem with one alpha male and a few\nfemales. You are being tasked with traveling\ninto the valley behind the ruins of the old\ncapital and stealing a clutch of eggs from the\nfemale while trying to steer clear of the male."
+  },
+  {
+   "index": 70,
+   "source_sha256": "b914f5c51bd0f774a8b5aeeed8bebf05af1f0bf5a91ea6516023cf0b51889d85",
+   "en": "Inside the late magician Wallace's underground\nmaze, he had a magic lab where he was\nstudying the evolution of creatures. Without\nWallace overseeing the lab, his experiments\nhave now gone awry.\n\nAs a result, the doom beetles he housed there\nare hatching at a much greater rate than they\nwould in the wild. Even their worm forms have\nbeen becoming aggressive and violent.\n\nInsect researchers would like to research\nthese violent worms. Please bring the bodily\nfluids of five worms in their cocoons."
+  },
+  {
+   "index": 71,
+   "source_sha256": "bc4a6cffa7967abae9510dc57b79b290e55926f467916e7e626fdbd5c556c0d0",
+   "en": "An urgent cooperation request has been\ngiven to us by a patrol squad from a village\nin western Hydeland. \n\nA number of village children who had been\nkidnapped by orcs will be sacrificed to a\nminotaur who lives in the depths of Bilbaron\nFortress. We must rescue them before that\nhappens.\n\nOne group will invade the fortress as a\ndistraction. You will follow them in and\ndefeat the minotaur, while the patrol squad\nrescues the children. If the enemies that the\ndistraction is supposed to occupy notice\nyou, your escape will be that much harder.\nThis plan must be executed quickly for it to\nhave any chance of success."
+  },
+  {
+   "index": 72,
+   "source_sha256": "567f8936386aa2f02ee4ad0275294e811629d13b8ca772f7785c388226d4caed",
+   "en": "This is a request from a female business\nowner in a remote village. She reports the\ngirls who work at her shop have been\nkidnapped by vampires, and further adds that\nthose girls, mere seamstresses, stayed up\nlate dreaming about actually wearing the\ndresses they made. \n\nThe shop owner claims that the lamps that her\nemployees were burning in order to stay awake,\nas they fantasized about a life they could\nnever reach instead of knowing their places,\nare obviously what attracted the vampires'\nattentions.\n\nShe then adds that because she has no\nworkers, she can't afford to pay much as a\nreward, and states that if you could bring even\none of the girls back to work posthaste, it\nwould help her business greatly. "
+  },
+  {
+   "index": 73,
+   "source_sha256": "fc130a1f86537a6d64159de17bb29d865ce525fc1018cb75637d19655b753f02",
+   "en": "This strange request was paid for in advance,\nbut no one seems to know who made it.\n\nA magic lamp is now in the hands of pirates.\nIf the owner rubs the lamp while thinking of\na wish, he can have three wishes granted\nto him. It is a legendary item famous through\nall the world. The requester would like you to\ngrant his wish. Take possession of the lamp\nand wish, \"Free yourself.\" "
+  },
+  {
+   "index": 74,
+   "source_sha256": "ba88b5969e06a1a052f302cee567ff4a4230343a15db90aec087f86ad6b8d231",
+   "en": "We've got a new request from a man who\ncalls himself the best strategist of his era. \n\nIn the Forgotten Sanctuary, a spell to control\nstatues freely has remained active. If you\ncould use this rune magic to control several\nstatues, you could mass produce golem\nwarriors to form an indomitable army, warding\noff nearly all threats from foreign invasion.\n\nTravel there and defeat the golems and\ndemons in the area, so that the runes may\nbe deciphered. You cannot activate the runes\nwhile taking on this task."
+  },
+  {
+   "index": 75,
+   "source_sha256": "8f053ce5f7d609ab27327434167485e25b597804b7385a7a2556265339e95a63",
+   "en": "An old magician appears, saying he recognizes\none of the leaders in the shadowy magic\nreligion of Morneon.\n\nHe says that in old times, many apprentice\nmagicians learned magic and wisdom at the\nMage's Tower, and there was a teacher there\nthat looked exactly like one of the Morneon\nleaders. Confront him, and discover why he's\nstrayed to Morneon. \n\nThe old magician says that in order to learn\nthe former teacher's past, you must look into\nhis memories directly. With the help of the old\nmagician, you can touch his temple with your\nindex finger once to peer inside, just once.\nYou must go alone, to get the target to\nunderestimate you."
+  },
+  {
+   "index": 76,
+   "source_sha256": "f49b0b6697985db7ca95856c05c2b823471ef056d1f74b776ebe293518a1da12",
+   "en": "Gazers, monsters with a giant eye, are the\nbane of magicians. A gazer is able to nullify\nmagic with a look from its evil eye.\nA researcher has proffered a theory that this\nunnatural ability is proof that gazers are from\nanother world.\n\nHe says that he can glean information from a\ngazer's soul in order to find out more about its\nworld.\n\nWith a mysterious urn in hand, he asks you to\ndefeat a gazer and bring back its soul in this\nurn. However, the urn is extremely powerful,\nand it may also claim the souls of any allies\naround you. \n\nTo limit casualties, you must complete this\nquest alone."
+  },
+  {
+   "index": 77,
+   "source_sha256": "ac47f1069b86d71822931778c1cd47d9584451589b5aa1c736240dd76f4251a8",
+   "en": "The soldiers of the mountainous northern\nkingdom of Bolga are known for their fearsome\nbloodthirstiness. Some speculate that this is\nbecause colosseum fights that were permitted\nin ancient Elician times in Hydeland are still\ngoing strong today in Bolga.\n\nBolgan fighting tournaments consist of forcing\nprisoners of war to fight each other to the\ndeath in an arena in front of a rabid audience.\n\nWe've received reports that a detachment\ncomprised of victorious gladiators are beginning\na clandestine invasion into our kingdom. \n\nDrive these proven warriors out of Hydeland\nand thwart Bolga's stratagem."
+  },
+  {
+   "index": 78,
+   "source_sha256": "5d0e9f3337deeb216ed78d86c055638a1c45e91c4ae0c995b48be727be95a37d",
+   "en": "A young knight, the eldest son from a long line\nof knights, has run away from home, and his\nfather is desperately trying to find him.\n\nThe rumor surrounding this knight is that he\nwas agonizing over his dead girlfriend when he\nwas charmed by a harpy's magic. The harpy is\nresiding in the back of the Ancient Temple, \nthe same spot where the knight was last seen.\n\nThe requester has asked to keep this discreet\nso as not to heap even more shame upon the\nfamily name. You must go alone."
+  },
+  {
+   "index": 79,
+   "source_sha256": "65cd2745f494ef5da34f7dc5202b321b900395bc5e30b39c3e785a3b7bd66311",
+   "en": "Many people have attempted to sneak into the\nformer royal city in search of the riches there,\nand have never returned. \n\nRumors claim that the sound of a woman\nspeaking and weeping can be heard beyond a\nwall somewhere in the ruins' halls. Adventurers\nwho break through the wall and pass through\nfind themselves in a cursed room filled with\ntreasure. The hole they made in the wall to\nenter the room would magically seal itself. \n\nI want you to go into the hidden room and find\nout what happened to them and their treasure."
+  },
+  {
+   "index": 80,
+   "source_sha256": "2f3a2a6e48fb2dd5ed534981e32359bc934361781897d45d3e6e2854166d930a",
+   "en": "Lima Ray is an evil witch who lived for two\nhundred years. Her body was destroyed and\nsealed far beneath the ground forty years ago\nafter the magician Wallace defeated her, but\nmany prophesies have predicted her\nresurrection.\n\nA source informed us that the goblins who\nworship her are up to something. They're\nskulking around a room in Wallace's\nunderground maze. If the goblins are stirring\nup trouble, put an end to it."
+  },
+  {
+   "index": 81,
+   "source_sha256": "7e3697086480c4c25df2374c226331b038b93f9621bbcf33f362817cbb07e293",
+   "en": "The Chignac tribe is known as a fierce tribe of\nwarriors, even amongst the orcs. After claiming\nthe fortress, they show no signs of stopping as\nthey march on the kingdom. Politicians have\ndetermined that it would be strategically wise\nto form an alliance with a large Amazon tribe\nto the south, to contain the Chignac orcs'\npotential invasion routes.\n\nTo gain the trust of the noble and proud\nAmazonians, one of us must pass the\nAmazons' test to become a warrior.\nEquip their ritual equipment and collect the\nheads of 50 orcs."
+  },
+  {
+   "index": 82,
+   "source_sha256": "31dbc1ebca7d4670acfccd4543391c1e54d2597388cd50e2ee4d6a96fcd8c6a1",
+   "en": "The kidnapping of village girls by vampires has\nstill not stopped, and the mayor of the village\nhas asked a vampire hunter to exterminate\nthe vampires.\n\nThe church who rules over the region has put\nup a demon-repelling barrier, but it has not had\nthe desired effect. This makes the church look\nlike they are making promises that they can't\nhonor.\n\nI want you, as a holy knight of the church, to\ngo and kill the vampires off before the vampire\nhunter can get there."
+  },
+  {
+   "index": 83,
+   "source_sha256": "b2856fbd0de1aea8422f802e5036038a8e42bc8caca6b81d5e72d9a3474010b5",
+   "en": "An aged woman came by with a request\nregarding her former landlord's castle.\nHe loved parties and these bashes were\nquite the rage among the citizens.\n\nHowever, when the woman returned to the\ncastle after a long break, the landlord's family\nhad died off from illness, and the castle was\nsealed shut.\n\nThe castle is now replete with ghosts, and this\nwoman believes that these spirits are the\ndeceased landlord and his family. If one were\nto greet the landlord by spinning and dancing in\nfront of him, they may tell you the truth.\n\nThe requester would like you to contact the\nghosts in order to determine what happened\nto her former landlord. "
+  },
+  {
+   "index": 84,
+   "source_sha256": "947d22c4946611f5df12d2176ca5cec9324282640c5d4b2609d7dd6b83ec968f",
+   "en": "In the ruins in the ancient temple, there are\nwall paintings of strange beings. They seem\nlike they may be depicting great sea serpents,\nlegendary creatures spoken of in ancient\ntimes.\n\nTheir habitat, as recorded in the old texts, is\npresently teeming with kraken, so researchers\ncannot investigate the area.\n\nGo there on behalf of the scientists and see if\nthere's any indication that the great sea\nserpents once roamed there."
+  },
+  {
+   "index": 85,
+   "source_sha256": "2ac079e1e3588a3b5a02147ee1b3f130a8bcd101f0cb7386b641866e508bb3c7",
+   "en": "Aside from the magic religion Morneon, there\nare other, lesser known magical heresy cults.\n\nOf these fringe groups, the most controversial\nis the \"Hell Evangelists\". One of them has\nrequested to speak to someone of the\nkingdom, seeking to expose secrets of\nMorneon.\n\nThey say they must test the messenger,\nhowever. Only the one who can open the\nmagically sealed door and can show with\nrunes the answer to \"where all living things\ngo\" can be acknowledged as the messenger.\nDecipher their riddle and act as the \nmessenger. "
+  },
+  {
+   "index": 86,
+   "source_sha256": "fbde964835f259a72cd0e67a9b1f3b10a8ab45323c662ad4046a0453845ba371",
+   "en": "A monk confessed his problem. It's been thirty\nyears since he gave his life to the Goddesses,\nhoping for inner peace, but he was fighting his\nlust all those years.\n\nRecently, incubi have been inviting him to join\nthem in depravity. He must not be allowed to\ngive into the demons' temptations. He has\nalready flogged himself many times, but they\nstill haunt his dreams.\n\nI want you to go destroy the statue of the\nfalse god in the Forgotten Sanctuary, that\ncompound of evil, in the hopes that it will\nhelp him resist giving in to depravity."
+  },
+  {
+   "index": 87,
+   "source_sha256": "ecad555853058121a206359a9f981cb1571724b8e910ef15bc27cc264bd9e689",
+   "en": "There's an old weaver who told me a story\nfrom when she was young. She touched a\nmagic carpet, and from that moment forward,\nshe dedicated her life to crafting something\nthat was of equal quality.\n\nDespite giving her entire life to the craft, she\nwas never able to duplicate the level of\ncraftsmanship that was employed in making\nthat carpet she remembered from her youth.\n\nShe handed over what little money she had,\nentreating the Guild to discover the secret\nbehind that masterwork. She would take it to\nher grave. I need you to go see if there's \nanything having to do with creating this carpet\nin the Mage's Tower, where the carpet is kept."
+  },
+  {
+   "index": 88,
+   "source_sha256": "1337a6309f88b946ebbcd00be6b9a158a1cfcc29ec20da8a829a9d386c4e1bbc",
+   "en": "A man who lost his memories has sent us a\nrequest. He was saved from drowning in the \nlake in the Lost Woods, and his memory of \nanything before that is fuzzy.\n\nHe's been dreaming lately of a crying woman \ncalling to him from the bottom of the lake, \neven waking up in the middle of the night with \nthese dreams. He thinks the woman in his \ndreams has to do with his lost memories. \nHowever, he says his wife adamantly refuses \nto allow him to go anywhere near the lake.\n\nYou must get on a boat in the depths of the \nLost Woods and find out if there's a woman at \nthe bottom of the lake."
+  },
+  {
+   "index": 89,
+   "source_sha256": "f504e29b3201da4ad1627fea075a2a96ae9f44c01a8ac1c819c750abeaeaf801",
+   "en": "The Church of Althena, the governing body of\nCanaan Temple, is trying to expand their \nefforts to gain followers and glorify their\ngoddesses.\n\nThey are striving to show the populace the \npower and achievements of Althena's miracles \nby resurrecting adventurers at the temple.\n\nHowever, the monks' prayers do not reach the \nadventurers who have perished within the \ndangerous labyrinths. If their bones are left \nuninterred for too long, the death god will \ncome and reap their souls swiftly.\n\nBring back as many bones as possible from\nthe labyrinths in the monks' stead, and\nresurrect them at the temple."
+  },
+  {
+   "index": 90,
+   "source_sha256": "a9bc9fcce0114e0a9d53dff09ed47ee382dfead313301220a5946b67caf17061",
+   "en": "Medusa is a snake monster who appeared deep\nwithin the ancient ruins. The moment you look\ninto her beautiful, gem-like eyes, you will\nbecome a mineral yourself. At least, that's\nwhat the myths say.\n\nThese myths are important, because Medusa\nhas apparently returned from those days of\nmyth. The knights' order that the Temple is\naffiliated with is trying to perform a ritual to\nput Medusa to rest by following the old legend,\nwhich states that it was done by severing\nMedusa's head and offering it to the goddess.\n\nHowever, many knight-monks have been \nturned into stone while trying to attempt this. \nAs one of the strongest in our guild, we ask \nyou to go alone, and return with Medusa's\nhead."
+  },
+  {
+   "index": 91,
+   "source_sha256": "b026d2ccc98daaed9e0b55bf79314ef897babd92b671ff5f09624804a817ac01",
+   "en": "In an outer region, there exists a legend of a\nprincess who saved the kingdom by offering \nherself to a red dragon, the most terrifying of \ndragons. Now, a new religion worshipping her \nhas sprouted up.\n\nThe Church cannot condone anyone \nworshipping anything that is not their\ngoddesses, so this concerns them.\n\nThe request is that you present yourself as a \nholy knight representing their religion, and slay \nthe red dragon by the power and protection \nof their gods in order to spread their word to \nthe unenlightened populace."
+  },
+  {
+   "index": 92,
+   "source_sha256": "67788c21670fc6a1ea365008225b5652bbca44e7e81dd6e01e9b50203df2c26b",
+   "en": "Deeper in Wallace's Underground Labyrinth lies \na prison holding a myopia of cyclopes.\n\nThese creatures are said to have been alive \nsince the days of mythology. They waged \nmultiple wars against the three goddesses, and \nhave tried to invade the human world. Each \ntime, the gods and heroes have controlled or \nsealed them.\n\nSources have informed us that members of \nthe Morneon religion are conspiring to free \nthese dangerous cyclopes and sow chaos.\nYou are to covertly surveil the underground \nlabyrinth and discern their plans, and, if \nnecessary, put a stop to them."
+  },
+  {
+   "index": 93,
+   "source_sha256": "695f4faa0d80bd42f96376d60146d0f7a71d5561a4b20c8a3b5c510b67650427",
+   "en": "A dwarf who was one of the architects of\nBilbaron Fortress has come to you with a\nsurefire plan to destroy Gargoyle Gate.\n\nNo matter how you tried to destroy the gate \nonce and for all, the goblins would simply fix it, \nallowing the enemy to further entrench \nthemselves. \n\nHowever, the architect has informed us that \nthere is a hidden passageway that only the \narchitects would know of. He will enter \nthrough this passageway and weaken the gate \nfrom the inside.\n\nThe army doesn't wish to expend any more \nforces, so you and the dwarf will need to go \nrogue to complete this mission off the books. \nTravel to Gargoyle Gate alone and attract the \nenemy army's attention while the dwarf \nweakens the gate from within, then finish the \ngate off."
+  },
+  {
+   "index": 94,
+   "source_sha256": "69ca7d26a42cdf20aea14d74663aa7c920212d18a041bda83802e01c3c7f2d28",
+   "en": "There are a growing number of believers who \nare staunchly opposed to the resurrection of \nthe dead.\n\nA certain young man is trying to resurrect\nhis girlfriend who was killed by monsters.\nHowever, her father is among the group\nof anti-resurrection zealots and adamantly\nopposes bringing her back to life.\n\nBefore her funeral happens, the young man\nand his friends plan to steal the girl's corpse\nso she can be resurrected. He requests that\nsomeone defeat the death god as it comes\nto claim her soul. If you take too long to\ndeal with it, the anti-resurrection fanatics\nwill become aware of your efforts, and\nattempt to stymie you."
+  },
+  {
+   "index": 95,
+   "source_sha256": "cb94262981063f2d99c44c6379e31d28bf7724e8dac2270738d1417109e28163",
+   "en": "The female pirate Anna Bonnie is a venerable \nlegend amongst men of the sea for having \ndefeated a kraken with only a dagger. One man \ninsults those who believe the legend, saying \nit's an obvious fabrication. Another is \nspellbound by the tales and insists that they \nare undeniably true. Still another drunkenly \nboasts that slaying a kraken with a dagger is \neasy, and that he knows others who could\ndo it.\n\nAnd so he has come to the guild, requesting \nthat someone pose as his friend and defeat a \nkraken. He won't restrict you to only using a \ndagger, but he does ask that you go about this \ntask alone."
+  },
+  {
+   "index": 96,
+   "source_sha256": "1d1f5b68de3ddd213c5435f6fce0f1abfd5e47e1e1ed4bcdd8de47b527bd43db",
+   "en": "The Forgotten Sanctuary stands as a\nmonument to the temerity of humanity's\nboundless ambition, much like the chastened\ntower of antiquity that dared to reach to the\nheavens. Does mankind believe omniscience\ncan be gained in the brief fluttering of a single\nlifetime?\n\nIt seems at least one man does: a scholar who\nhas come to you with a request. He claims he\nsigned a contract with the devil that would\nallow him to gain all the knowledge in the\nworld... in exchange for his body and soul.\n\nWhile the devil is under his contractual control,\nhe can sate his every worldly desire. However,\nafter a certain period, the terms of his\ncontract will be executed.\n\nIt has been twenty-four years since the\ncontract, and he's starting to hear the bells of\nhell tolling for him. He wants you to go to the\nForgotten Sanctuary alone and convince the\ndevil to have a change of heart."
+  },
+  {
+   "index": 97,
+   "source_sha256": "5512d8e45ceca682e4ff12c40f80dfe0bc6270af6bce6157eac128f22bccf86a",
+   "en": "A potential officer of a religious group came to \nus in a cold sweat with this request, after \nrealizing that in his religion, praying to God \ndoes not guarantee equal blessings to all. He \nthen realized that if God won't save the \nfaithful who are sick, humans must do their \nutmost to aid them.\n\nHe wants you to capture chimerae, that evil \nmagicians have produced, in order to subvert \ntheir evil magic and use it to aid citizens as a \nsupplement to his god's blessings. However, his \nchurch has declared any research into \nunnatural life verboten, which means this \nrequest needs to be completed secretly."
+  },
+  {
+   "index": 98,
+   "source_sha256": "c403c302dea5850cbd252538d49d78d479a91187dc09c759c3a6640f0ed7a0f5",
+   "en": "A duke from Bolga has come to us. He says \nhe will pay a handsome reward if you can \nsingle-handedly slay the Killer Rabbit in the\nLost Woods.\n\nThis killer rabbit is known as an extremely \ndangerous monster. The bones of nearly 500 \npeople lay strewn about its lair. It is reportedly \nthe most foul, cruel, and bad-tempered \ncreature anyone's laid eyes on. \n\nSomething about this request is amiss, so stay \non your guard. Complete the request and \ndiscover the true intentions of this duke from \nan enemy land."
+  },
+  {
+   "index": 99,
+   "source_sha256": "9a8229eb86f7c9b650e65d83e338f53fb7ada7f96ee30da75de69ed1bd1cb222",
+   "en": "The fairy Tiki has learned enough human \nlanguage to request something of you.\n\nSince knowledge of rune magic has spread \nthroughout the kingdom through the Morneon \nreligion, many have begun using it for evil \npurposes, such as capturing fairies to use as \nmediums for their spells.\n\nShe produces some coins and asks if you \ncould help her friends the same way you \nsaved her."
+  },
+  {
+   "index": 100,
+   "source_sha256": "89c41fb6398320bbdbdc18b55d2988d73329c59a793930c8ff785858fe87294a",
+   "en": "At ##(COLOR_R_MR), destroy the orcs'\ncargo found at the harbor."
+  },
+  {
+   "index": 101,
+   "source_sha256": "e7755e738f09959ce2fd64ae0ecafdeb5a65acd39688ebaefaef1bfb4c771a35",
+   "en": "Kill 10 enemies while riding atop a\ndragonlisk or sabertooth."
+  },
+  {
+   "index": 102,
+   "source_sha256": "a4996046eedf27a73e55dab17e142795544a20e0765af4b63b5a6a2919d0a220",
+   "en": "Collect 10 spores from the myconids."
+  },
+  {
+   "index": 103,
+   "source_sha256": "e953a4d3dff3d16f917a37415838255524f607014c9462f836fdc46e976d9de2",
+   "en": "At ##(COLOR_R_UC), open\nthe treasure chests without waking the\nsleeping orcs."
+  },
+  {
+   "index": 104,
+   "source_sha256": "a3f727d0548c8425ed1712328c8313caa51b09f5f1c2c9db80b143d4f22d255c",
+   "en": "Slay giant spiders and gather 5 strands of\nspider silk."
+  },
+  {
+   "index": 105,
+   "source_sha256": "728c8676d2d1fac058b068b15bcade0bb52d9b8abd8ea5a97ceb1520eca6642c",
+   "en": "Search for clues aboard the famed Elliot\nat ##(COLOR_R_GC)."
+  },
+  {
+   "index": 106,
+   "source_sha256": "a9bf29962432775f3ef75af7910baff94f01d00408eed7042ba1cc1627b3e19f",
+   "en": "Withstand 5 attacks from a hellhound."
+  },
+  {
+   "index": 107,
+   "source_sha256": "8236e6f7509cd8da05eabdbfef5ac997be1f07a9d5816a2b63e8f53c051b8f3a",
+   "en": "On the first floor of ##(COLOR_R_MT),\ndeflect magic with a giant shield and look\nfor a doll in the opened room."
+  },
+  {
+   "index": 108,
+   "source_sha256": "3465d4bfcab0cf022645a3f1572120dcf7154cb658a563657a626ba06d4a67a4",
+   "en": "At ##(COLOR_R_LW), destroy 30 wood golems."
+  },
+  {
+   "index": 109,
+   "source_sha256": "b20b371c3dcae084058e9e1e42260ca9c529cf7cf50d414d31e2e4b5dfba0d76",
+   "en": "Slay 10 owlbears."
+  },
+  {
+   "index": 110,
+   "source_sha256": "acbb16c89981a4fb7be42bd7021c0c39a33671eb71d566ac75b78710db028b9a",
+   "en": "Investigate the room behind the wall painting\nin the ##(COLOR_R_MR)."
+  },
+  {
+   "index": 111,
+   "source_sha256": "f7cb2fcb106743d71a346eaade3474e8b0e6d38ccf60acbc0034e61985f5fcae",
+   "en": "Slay 10 killer fish."
+  },
+  {
+   "index": 112,
+   "source_sha256": "fa3bf46bc9560baf6a8cb5985c1c097d731111eacd092db0a1f54e7aa5d68452",
+   "en": "In a lab of ##(COLOR_R_MD), \nstep on the floor switches in the proper order \nto open the chest."
+  },
+  {
+   "index": 113,
+   "source_sha256": "bdbb15fc00b7310fa069371bea5463bd8f5a422c0ccf8521b8c32302f17d9643",
+   "en": "Find the treasure chest hidden in\n##(COLOR_R_UC) that\ncontains the blueprint."
+  },
+  {
+   "index": 114,
+   "source_sha256": "29abaac9ed69a5ed7798b1b78b1cb10a83ebab79cc82574bb5f2d32773ceb12a",
+   "en": "Defeat 5 dark skeleton swordsmen wights."
+  },
+  {
+   "index": 115,
+   "source_sha256": "ce67623a26466fd9ba9b2c0da84faaa58b0ac9a4a43a1f1799595879676d4df7",
+   "en": "Open the stone entrance somewhere in\n##(COLOR_R_GC) with rune magic."
+  },
+  {
+   "index": 116,
+   "source_sha256": "8c3c7d0894638683d62167e5686abfe82a3081a34eb181ec9dd392e67e9fdb90",
+   "en": "At ##(COLOR_R_MT), search the bookcase \nof the official and knock to open the hidden\nlibrary."
+  },
+  {
+   "index": 117,
+   "source_sha256": "871af257fb222c0228405d1adf5136023dc327d1c52918d17cddc280188e16d5",
+   "en": "Obtain 20 amethysts from the crystal \noutcropping."
+  },
+  {
+   "index": 118,
+   "source_sha256": "5b9210257c653fddc2688fd363bd0ad33abb627d7c5d3c912369a29eb6c51b13",
+   "en": "At ##(COLOR_R_MR), defeat the harpy\nwithout destroying the nest."
+  },
+  {
+   "index": 119,
+   "source_sha256": "cf372d10245e99ecff383df084f19277ae68d7b6255364a4a8ec0a54d907df7e",
+   "en": "At ##(COLOR_R_AL), collect 12 eggs dropped \nby female wyverns."
+  },
+  {
+   "index": 120,
+   "source_sha256": "56b6f44fa96da8d63bdf023cab2dc4884da090528f0f2a2df4e31e1d4cc3ad01",
+   "en": "At ##(COLOR_R_MD), \nsmash 5 doom beetle cocoons."
+  },
+  {
+   "index": 121,
+   "source_sha256": "a736c7c64ae16b358312c53b97c07df03c7596fc1d4cfddf49d12b9d2a6b9725",
+   "en": "At ##(COLOR_R_UC), defeat \nthe minotaur within two minutes."
+  },
+  {
+   "index": 122,
+   "source_sha256": "b9091dfdfaaf7585ebde6ff6bfdc331e140df4020f6c460b49f051b708ed8c99",
+   "en": "At ##(COLOR_R_CC), save the \ngirls and protect them from the vampires."
+  },
+  {
+   "index": 123,
+   "source_sha256": "c8267f5f91e7f2e9afe493d2277e1f73a0e340ada9c25e521e67e10402b2b733",
+   "en": "At ##(COLOR_R_GC), use the magic lamp to \ncall the genie 3 times."
+  },
+  {
+   "index": 124,
+   "source_sha256": "5a6839c4eaf127dfb90c39b1e756142e7af2dc7032f272ce6b34f93615cc2dbd",
+   "en": "At ##(COLOR_R_FR), destroy the enemy \ngolem without activating runes."
+  },
+  {
+   "index": 125,
+   "source_sha256": "7c4628c17442c26bac8c6567e911b71a972825c8728d9187919e4fa290f6cc7a",
+   "en": "At ##(COLOR_R_MT), defeat the warlock \nleader of the underground organization alone."
+  },
+  {
+   "index": 126,
+   "source_sha256": "af7447260e2cc4b8ecf8267c8b4f68d8e506a61239ce6f1182123e709cbeb706",
+   "en": "At ##(COLOR_R_LW), equip the urn and defeat\na gazer alone."
+  },
+  {
+   "index": 127,
+   "source_sha256": "f5a19401ab7b1fbf51003ec766b9fb3840efaba99306c597a2a565ccb7d6d28f",
+   "en": "Defeat 10 gladiators."
+  },
+  {
+   "index": 128,
+   "source_sha256": "d94bc08d0f0af540862cbb1705090c499c57d6259a37ac0c2bc8efba310aea3a",
+   "en": "Investigate ##(COLOR_R_MR) alone and \ndefeat the harpy."
+  },
+  {
+   "index": 129,
+   "source_sha256": "fce882ad66ddfd50137a3883f3a93309f333bb9d55ac7dfc9f86afa4ccbf23a1",
+   "en": "Investigate the hidden room at ##(COLOR_R_AL)\nand obtain the treasure."
+  },
+  {
+   "index": 130,
+   "source_sha256": "fd17b488695dbd726e41426d4033ab04c5818d2c78a828b0104fd985cb304221",
+   "en": "Snuff the candles in the room with the magic \ncircle at ##(COLOR_R_MD) \nand search the statue of the false god."
+  },
+  {
+   "index": 131,
+   "source_sha256": "371f5c4acd36a8a309d603a30058a43870d3455ec30d6372bb13fbaf856ca42c",
+   "en": "Wear the Amazons' ritual armor and slay\n50 orcs."
+  },
+  {
+   "index": 132,
+   "source_sha256": "92761619446da8314e645d89023fc147153bd593df92c7f08e78a96cd73590fc",
+   "en": "At ##(COLOR_R_CC), defeat all\nvampires within two minutes."
+  },
+  {
+   "index": 133,
+   "source_sha256": "4ea04a6d871e1f96f14fc9dafa39e2caac17d77db21dbbcb1b2159f031806fb3",
+   "en": "At ##(COLOR_R_CC), turn three \ntimes clockwise in front of the ghost\nand dance."
+  },
+  {
+   "index": 134,
+   "source_sha256": "2c23e6f2d3e70ce42c6d4b78b0b076d972867f40a6e3f38a56d632f89009c973",
+   "en": "Look for a young great sea serpent in the \nshallow waters of ##(COLOR_R_GC)."
+  },
+  {
+   "index": 135,
+   "source_sha256": "686da584de2f242b74831679e9e950b76e5d67c75d495588417d88f5d10ecc78",
+   "en": "At ##(COLOR_R_FR) in the room with the \nblue door, show \"death\" with the runes to \nobtain information."
+  },
+  {
+   "index": 136,
+   "source_sha256": "a40d0cf34c2d51debfa9db92a4f63fed8252c8619933116ff6fc5f53cfb81633",
+   "en": "At ##(COLOR_R_FR), destroy the \nfalse god statue."
+  },
+  {
+   "index": 137,
+   "source_sha256": "1868191b026b4845f79cd41d82ade7405c5795d679140ca00172e801919c71b9",
+   "en": "At ##(COLOR_R_MT), look for a tool used \nin magic carpet construction."
+  },
+  {
+   "index": 138,
+   "source_sha256": "754a07da5f1fa3ba1b01d3d9ba41e05359338da795663f581cd68d7ef667f41f",
+   "en": "At ##(COLOR_R_LW), steer a small boat \ninto the vortex."
+  },
+  {
+   "index": 139,
+   "source_sha256": "7c577fc42be688f20ae9021c145a1c4be3788a42955bae2e74b32a56e94a3477",
+   "en": "Resurrect 30 sets of bones at Canaan \nTemple."
+  },
+  {
+   "index": 140,
+   "source_sha256": "180460e55e78f8b2ca15d6843e2cc3e92021b17c3a5fd281e3ee54cdd853c0e3",
+   "en": "At ##(COLOR_R_MR), challenge Medusa \nalone and defeat her."
+  },
+  {
+   "index": 141,
+   "source_sha256": "cc473ec62b165cf2b885b9c547608b598d2abae14e46142269129f42269ce1fd",
+   "en": "At ##(COLOR_R_AL), challenge the red dragon \nalone and defeat it within the treasure room."
+  },
+  {
+   "index": 142,
+   "source_sha256": "2357df77d5a11adbd2d024870841db57aaf2960e517d2838a502bdb8bbcdfb53",
+   "en": "At ##(COLOR_R_MD), close \nthe door to the cyclopes' prison alone."
+  },
+  {
+   "index": 143,
+   "source_sha256": "924d8f02830201c62232f015d04e123ad6fb325d8698520249cb40898ff46b40",
+   "en": "Go to Gargoyle Gate at \n##(COLOR_R_UC) alone \nand destroy it without anyone's help."
+  },
+  {
+   "index": 144,
+   "source_sha256": "947b98a567d32b5702db40170d644210494d7c6edea40aa1062964988e339242",
+   "en": "At ##(COLOR_R_CC), defeat \nthe wraith within two minutes."
+  },
+  {
+   "index": 145,
+   "source_sha256": "f943a0874d9902c6090392a6766ff71220344b10e437716eb7bde6f667da68e6",
+   "en": "Go alone to ##(COLOR_R_GC) and defeat \nthe kraken."
+  },
+  {
+   "index": 146,
+   "source_sha256": "22cd91d160749dbba36bc706e05d9bf4ea62191f5c355ec58b9f3eb2fef96004",
+   "en": "At ##(COLOR_R_FR), defeat the \narch demon alone."
+  },
+  {
+   "index": 147,
+   "source_sha256": "ce5dc46984802916af3886227095e921e97494f9340c2c383e2f0acd42155d5e",
+   "en": "At ##(COLOR_R_MT), defeat a chimera alone."
+  },
+  {
+   "index": 148,
+   "source_sha256": "944f0bcf12fe261c9c62b46f038940dd8dc6ad4ac0ef6a66e311f25549c72096",
+   "en": "Without anyone else's assistance, defeat \nthe Killer Rabbit at ##(COLOR_R_LW)."
+  },
+  {
+   "index": 149,
+   "source_sha256": "278735b487eebeb31a200430b1fad387628fd2b8beaf206649366e450035babf",
+   "en": "Free 10 fairies trapped in cages in various \nlocations."
+  },
+  {
+   "index": 150,
+   "source_sha256": "2bb3d337eba69c7369b41ad651246bfecf8e68732bfa12eb34f772caf71c0d44",
+   "en": "You have restored balance\nto the ecosystem."
+  },
+  {
+   "index": 151,
+   "source_sha256": "fcd4f4a2f0753677c3721833e55d0e1a8fec5126e6ee7b93f966287276281a88",
+   "en": "You established dominance \nand rode the beasts."
+  },
+  {
+   "index": 152,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 153,
+   "source_sha256": "fa61220c3dde401d012f6d74bfe453c55f9d5b6c9d90daf6f4711807c0067e50",
+   "en": "You pilfered Javleen's lost\nheirloom from the treasure chest."
+  },
+  {
+   "index": 154,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 155,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 156,
+   "source_sha256": "20af7cf5bd304051a8a234e1d5d560b4b157e36d41d28dd37e8177db15251efc",
+   "en": "You withstood the \nattacks from the hellhounds."
+  },
+  {
+   "index": 157,
+   "source_sha256": "a945a9cadbc1244f05d3298160e5540c205e228a1b462db5cd7b21e4efb1212c",
+   "en": "You found Henritta's automatic doll."
+  },
+  {
+   "index": 158,
+   "source_sha256": "2c9b5971ae18b28441198e6d1144ee330126874c880deef33de0352643712dd7",
+   "en": "You freed many trees from the\nevil magic that was controlling them."
+  },
+  {
+   "index": 159,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 160,
+   "source_sha256": "a9cdf3572750f05bdc9fbf1afb6b23819ceab877f4dd7d26926d3920e9205637",
+   "en": "You discovered documents detail-\ning the origin of the dragon species."
+  },
+  {
+   "index": 161,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 162,
+   "source_sha256": "16832db676834cac4cd15ea71d40ee4170814077c27c7c3bc6d8190c51af6760",
+   "en": "You obtained the research \ndocuments that Wallace left behind."
+  },
+  {
+   "index": 163,
+   "source_sha256": "f05e9f94ca06eb45717d9968f3da54776bfd5d48b6f6060834257eef41286c61",
+   "en": "You obtained the blueprint\nfor the flying fortress."
+  },
+  {
+   "index": 164,
+   "source_sha256": "ba0e9ba6612c534140fa172418300e2bec8ad877c82e912cef2c33cb42413d93",
+   "en": "You defeated five \npowerful skeleton swordsmen."
+  },
+  {
+   "index": 165,
+   "source_sha256": "a5aec64bef13ddfa65968deac89437c08868e73ec8034c1a74347ed5fe5bf8e0",
+   "en": "You used the password to\nremove the stone barring the passage."
+  },
+  {
+   "index": 166,
+   "source_sha256": "cb9a84618b775b6a379eec0c6c644ce19633fa0cf62b099513053e1c27add00f",
+   "en": "You solved the puzzle\nand found the secret library."
+  },
+  {
+   "index": 167,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 168,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 169,
+   "source_sha256": "87d5dce9c404c4c2b7f82702a538ebf78cb4f2c66dd4a792e18717f9443d549e",
+   "en": "You harvested the\nrequested number of wyvern eggs."
+  },
+  {
+   "index": 170,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 171,
+   "source_sha256": "c2b7279388593f3c2db714615fe7f7b9c4d286da1ba3c5327707d81d4ed4d68a",
+   "en": "You quickly defeated the minotaur\nand successfully executed the rescue plan."
+  },
+  {
+   "index": 172,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 173,
+   "source_sha256": "111c051ca352951718b1d2a396f0bcfe9f85eb5fc9f4a16f9166e5b7f3a3919d",
+   "en": "You freed the genie from\nthe magic lamp."
+  },
+  {
+   "index": 174,
+   "source_sha256": "70746d00ae63da5e8c981cfc5ad2ef1d652f505c89fc77b94e9e7c7775872690",
+   "en": "You obliterated the golem\nso you could interpret the runes."
+  },
+  {
+   "index": 175,
+   "source_sha256": "402f2102adb5f37b8685e958e3c02579fdaf826586cd996badf6379eda812928",
+   "en": "You saw the memories of the\nimportant underground organization member."
+  },
+  {
+   "index": 176,
+   "source_sha256": "06097d5ff501f3289029d11dbc995ae46c42a4d215ca8fdb26f05e6dfe3d7ab1",
+   "en": "You captured the soul of a gazer."
+  },
+  {
+   "index": 177,
+   "source_sha256": "fb55d3c0669b600f22bbfc535fb4da18930e79deb7a505a1fca5d905331d0f73",
+   "en": "You struck down ten swordsmen."
+  },
+  {
+   "index": 178,
+   "source_sha256": "0fea81146bcea8c9f58d4680bd925b6b2f17e586c2171ed4089ac7aa001b7655",
+   "en": "You found the remains \nof a knight in the harpy's nest."
+  },
+  {
+   "index": 179,
+   "source_sha256": "5a72015ef5ca15147f773ec286bbf831f7746e18c4ef29f768459a5ff50cc61d",
+   "en": "You investigated the\nroom hidden behind the wall."
+  },
+  {
+   "index": 180,
+   "source_sha256": "eeac014142daf14c026df71cbb6142ca71e2c681582b85ba6523ca82f467fb43",
+   "en": "You stopped the attempted \nresurrection of the witch Lima Ray."
+  },
+  {
+   "index": 181,
+   "source_sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+   "en": "*"
+  },
+  {
+   "index": 182,
+   "source_sha256": "b1be38386dea276955de1dee440130ec80c27d5d4d6f61dfac1cd87852a17b83",
+   "en": "You defeated the vampires for the\nchurch before the hunters could get to them."
+  },
+  {
+   "index": 183,
+   "source_sha256": "025de4413271d22b1b9555c17c847bd9800ea73d7bc8625b4dc2cae0659bf35c",
+   "en": "You learned the truth \nfrom the master of the house."
+  },
+  {
+   "index": 184,
+   "source_sha256": "4015c4878fdf213f77064d45fc54b69f7016e8383828bf4c31192b1e2551cbc7",
+   "en": "You found a young sea serpent."
+  },
+  {
+   "index": 185,
+   "source_sha256": "03ba3652908029abb8a7d4b577bfde75d6737901446b6ae517b8f85c6d0a8d50",
+   "en": "You proved yourself a worthy \nmessenger and received the information."
+  },
+  {
+   "index": 186,
+   "source_sha256": "c2d06ccdde84fdcb59338abe9bd7a6625f44be430ecb1f4dd0734f164f815b38",
+   "en": "You destroyed the heathen god\nstatue that was vexing the monk."
+  },
+  {
+   "index": 187,
+   "source_sha256": "23b38fef40acb79c06191575fffb64cfd8ac845bcf27585928aa2a6bc61cb785",
+   "en": "You discovered an item used \nin the construction of magic carpets."
+  },
+  {
+   "index": 188,
+   "source_sha256": "3f4f748256a77afa581e4978ba204f862e3a9d1fb95fca155698793b4920f425",
+   "en": "You saw something while \nbeing swallowed by the current."
+  },
+  {
+   "index": 189,
+   "source_sha256": "dba141a314846fa8323550ee930fc696ef817eac979b1434dd8dc71dc0fa99fc",
+   "en": "You resurrected 30 different \npeople after collecting their bones."
+  },
+  {
+   "index": 190,
+   "source_sha256": "fbecc888613d2be17b4ae256bf48be5859209b839ed29f5a292b404bbde514d7",
+   "en": "You defeated Medusa alone."
+  },
+  {
+   "index": 191,
+   "source_sha256": "a16c463845976ddea81e22b06dec7451cafcfcb4b7d413e07d218cfa7b308b9e",
+   "en": "You defeated the red dragon alone."
+  },
+  {
+   "index": 192,
+   "source_sha256": "4aaa3254f7727f41924fccea9854df73c8f43a6c129dbb08a0cb67bc856495cd",
+   "en": "You shut the door to the \ncyclopes' cell by yourself."
+  },
+  {
+   "index": 193,
+   "source_sha256": "3624606f230e63d61b164a0cd8202b4b06e73ef2084ef21b10ee3ff116eafa4e",
+   "en": "You bought the dwarf time and\nsuccessfully breached Gargoyle Gate."
+  },
+  {
+   "index": 194,
+   "source_sha256": "7c740d2b5cbfde61ac68157d07fa6521aadbb409a5e657433de96f6530288a9d",
+   "en": "You completed your mission before \nthe anti-resurrection faction could thwart it."
+  },
+  {
+   "index": 195,
+   "source_sha256": "3c2e4133c18bf2aca1d1fba71f599dbb2f5d5127a0d5de799fd7b94e176fa9f2",
+   "en": "You defeated the kraken alone."
+  },
+  {
+   "index": 196,
+   "source_sha256": "4d3c17dc1babe3acd149dbd0abc3d8b541af0c0ff81d682910bcee4785e924d7",
+   "en": "You defeated the demon and made\nit void the contract."
+  },
+  {
+   "index": 197,
+   "source_sha256": "104d931e6af17667006c6e7a5008870c8b17fb76d79015ff632c426e1b722320",
+   "en": "You obtained chimera tissue."
+  },
+  {
+   "index": 198,
+   "source_sha256": "53c808673f2e7ef9e51b6ac7fdc345252853cfc56381956d2160ee660926684d",
+   "en": "You defeated the killer rabbit alone."
+  },
+  {
+   "index": 199,
+   "source_sha256": "6c4ab428a3abf2b5e42295f499e29d02d146d91d4641fe992fdc147abc0d904f",
+   "en": "You saved 10 fairies as Tiki requested."
+  }
+ ]
+}

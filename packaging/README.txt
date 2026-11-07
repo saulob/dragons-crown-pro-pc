@@ -103,6 +103,9 @@ PLAYING
   already in a save keep theirs. Credits and trophies stay in the build's
   own language. The translated manual pages are shown on the USA and
   European builds only.
+- English on the Japanese and Asia/Hong Kong builds is provided by the PC
+  port, not by the PS4 release. It is always listed, needs no other game or
+  setup, and uses the same Menu & Subtitles selector as Portuguese (Brazil).
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
 - An experimental AMD water workaround (black areas under characters standing

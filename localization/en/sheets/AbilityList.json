@@ -1,0 +1,4042 @@
+{
+ "sheet": "AbilityList",
+ "records": 807,
+ "sha256": "cb0f2f2c464d29f6eef321de20cc4052c339d6002189a4c8739952fef5ed4d50",
+ "entries": [
+  {
+   "index": 0,
+   "source_sha256": "4f0e78669008f74f22fb33619aea884051e9bb6dfb31a9bbd32d81bec40a875f",
+   "en": "Increased chance of taking enemy down when sliding (@#(43)＋@#(25))."
+  },
+  {
+   "index": 1,
+   "source_sha256": "01fb5370c710a62765620af20fd9e70112a66b52bafa46782d138fbda9400142",
+   "en": "Picking up coins recovers HP."
+  },
+  {
+   "index": 2,
+   "source_sha256": "5578c2b4d7d71649150804094bfe21ab9ca4e7f98c49a878caccf6c6212670a0",
+   "en": "Picking up coins adds to your score."
+  },
+  {
+   "index": 3,
+   "source_sha256": "55b6f1e6862d51c58f9baa4f52d892dc71e45646a5c800cede53751b948a42ae",
+   "en": "Increases your max HP."
+  },
+  {
+   "index": 4,
+   "source_sha256": "2b16b7880e2da2afbbd8e95609fff39b40b12a2140110e7d714628c97e616c24",
+   "en": "Increases the healing effectiveness of food."
+  },
+  {
+   "index": 5,
+   "source_sha256": "35b84f5c477511d806ca39a51e622a9637939add8358188460802457edf5d36e",
+   "en": "Grants a chance that using a temporary weapon won't decrease the \nnumber of uses."
+  },
+  {
+   "index": 6,
+   "source_sha256": "1846eb6f0625a30b5d7bd38372cce75ab390e5f2f8ec4b4bcfe0099a43ce9953",
+   "en": "Reduces cooldown time in between using items."
+  },
+  {
+   "index": 7,
+   "source_sha256": "040eda1c58c3966d4f019bca4f9777b329e5ec8689e9bfe894d280a347a11c2d",
+   "en": "Increases the number of times you can evade (@#(5)) in a row.\n"
+  },
+  {
+   "index": 8,
+   "source_sha256": "973e979364bd33c85ee8267b1f1d0f78b51ae99277c0cf4b7d6bab621de1d877",
+   "en": "Increases the number of item slots in ##(CUSTOMSET)s."
+  },
+  {
+   "index": 9,
+   "source_sha256": "3cb8ff821513e802f2d0c1d8b3d3b26411b457ed6d3fd891ec5afb25a444e788",
+   "en": "Increases duration of aerial attacks. Rapidly press @#(25) to activate."
+  },
+  {
+   "index": 10,
+   "source_sha256": "8400c912a3c125e00e5b4d221eac49f41335620afc5616116aa4f577aba7cf6e",
+   "en": "Send out ripples that creep along the ground. Activate with @#(42)+@#(25)."
+  },
+  {
+   "index": 11,
+   "source_sha256": "1e08278107019c6f4d6b30db69c49444330f71a13d3d023f4f5e100a5d029a78",
+   "en": "Add a shockwave to your diving attack. \nPress @#(43)＋@#(25) in midair to activate."
+  },
+  {
+   "index": 12,
+   "source_sha256": "bad0b7faddc56d92b8c266cbe16a4f4676a874af25e5b66c97f591d9f0664552",
+   "en": "##(MEGACLASH) and its shockwaves are strengthened. Press @#(26) on the ground."
+  },
+  {
+   "index": 13,
+   "source_sha256": "fef14f8a077a4d748040a107b6f545af0dae795d06f59e5682457fe673644999",
+   "en": "Create a powerful storm of sword attacks by rapidly pressing @#(25). "
+  },
+  {
+   "index": 14,
+   "source_sha256": "6f718044f7bd1851d35f2ebabda1f136484ba5e302555153b96c09f8a62b46ff",
+   "en": "Hold @#(25) on the ground to use your shield to protect allies and \ntemporarily increase your attack power upon successful block."
+  },
+  {
+   "index": 15,
+   "source_sha256": "209ca46014a0b4a67393f1047eb3180fe590bd113bc3b63f6dc3f2332dbe4a0e",
+   "en": "Grants a chance to automatically guard when attacked."
+  },
+  {
+   "index": 16,
+   "source_sha256": "ebd0cb225675819f303aeeaed53c654393885f338b24c15a102a9d680fc1f587",
+   "en": "Press @#(25) after blocking an attack to counterattack and stun with your shield."
+  },
+  {
+   "index": 17,
+   "source_sha256": "d2e82e6bea9443fda93541a3a6733a4731541312d760a73ed61e2e9998a209a0",
+   "en": "Grants a chance to reflect projectile weapons when guarding with your shield."
+  },
+  {
+   "index": 18,
+   "source_sha256": "9902d60992108ba20230b636436c8adf17352ac98d210ec5f39772520beac2a2",
+   "en": "Call enemies' attention to yourself. Use the ##(ABILITY) item @#(36)%s."
+  },
+  {
+   "index": 19,
+   "source_sha256": "0d8a7b5db85254d134e7e0f48a7831ace79759728cd095cc5d3877fd2c658f54",
+   "en": "Take damage inflicted on your allies. Use the ##(ABILITY) item @#(36)%s."
+  },
+  {
+   "index": 20,
+   "source_sha256": "e6bca4cc99d241c91b2a35f2a87e31ca07836dfec34ab61dd69c7ececb11279b",
+   "en": "Boost your shield's effectiveness and make it harder to be moved."
+  },
+  {
+   "index": 21,
+   "source_sha256": "3ccb54abbc272bb4579cec66a37297ba95a41022b17fd4e681b5be196f877cd5",
+   "en": "A diving attack that creates a shockwave. @#(43)+@#(25) in midair to use."
+  },
+  {
+   "index": 22,
+   "source_sha256": "c498fb19661a159711972529540fd30e53cc24bfa11f1035f7aed38443624492",
+   "en": "Double jump + @#(43)＋@#(25) for a diving attack that's effective against downed enemies."
+  },
+  {
+   "index": 23,
+   "source_sha256": "2e4f987b6da6b5f594469b107817a4f08b58bbef494a82dfe7580592afdfe557",
+   "en": "Increase directional changes and damage for midair @#(25) attacks with @#(47)."
+  },
+  {
+   "index": 24,
+   "source_sha256": "8259cd2fba8c84b7fc23929f58483b4e63f314c48777eae55966b62cfe4efba0",
+   "en": "##(MEGACLASH) and its shockwaves are strengthened. Activate with @#(26)."
+  },
+  {
+   "index": 25,
+   "source_sha256": "e136c412f73207f791daabfee6683845053d265aa9b1224b58a4b1dc5ceabaf1",
+   "en": "Hold @#(25) on the ground to parry enemy attacks, add temporary invincibility, and trigger Berserk."
+  },
+  {
+   "index": 26,
+   "source_sha256": "ae760ae0bb1abd4c710e3a5ca1c8cc50970dda7fe7ae94dca6e202f03db0db04",
+   "en": "Deal multiple four-hit combos on the ground. Will increase damage and chance of Berserk."
+  },
+  {
+   "index": 27,
+   "source_sha256": "57fb4594b2b3dd4277b4e8f60c421ebe1d1e1721cee4d4144015b7f0f1fcf75c",
+   "en": "A spinning attack with invincibility. Press @#(47)+@#(25) after a four-hit combo on the ground."
+  },
+  {
+   "index": 28,
+   "source_sha256": "437f6d90ff90d49243e0b87ea1c6db4a67412b8aa549652ee16666bcf7a155a8",
+   "en": "Attack an enemy multiple times consecutively for increased attack power and speed."
+  },
+  {
+   "index": 29,
+   "source_sha256": "a6cef138f07c234c3140c17dced8c3a5a4c1db6d6f6f541883ab4ad43e2c4668",
+   "en": "Strength increases as HP decreases."
+  },
+  {
+   "index": 30,
+   "source_sha256": "0937f6fca363510666fe610e92a76f09f6e812cbfcb8f0006f638a0d546282d5",
+   "en": "Summon clones that unleash multiple attacks. (Use @#(36)%s)"
+  },
+  {
+   "index": 31,
+   "source_sha256": "8b76319ddc0798684b79740a093242d7b501028cd2f2cc849557365d9b38764d",
+   "en": "Exchange HP to trigger Berserk. (Use @#(36)%s)"
+  },
+  {
+   "index": 32,
+   "source_sha256": "e6fb010722ffdc6b6a87fe66a65d49cee28218f283a3125a7b4bff35fab6c928",
+   "en": "Exchange HP to temporarily ignore knockback and take 1 damage from all attacks. (Use @#(36)%s)"
+  },
+  {
+   "index": 33,
+   "source_sha256": "172f415117a8c9f9bed11f7368371d2f58b627ea5d9509e43fbc621107516bbf",
+   "en": "Adds shockwaves to throwing attacks."
+  },
+  {
+   "index": 34,
+   "source_sha256": "a70ed1ce92e212f2aca43fb8964d113f838f36ed8603cf4120b02fba59836cba",
+   "en": "Increases the damage dealt for all bare-fisted attacks."
+  },
+  {
+   "index": 35,
+   "source_sha256": "cef98d762f1223276ebaee8dcc3da254b7aa5875009f6ad0cb74c7b44ee163d5",
+   "en": "A midair glide attack. (Double jump and @#(24))"
+  },
+  {
+   "index": 36,
+   "source_sha256": "f1b21d7d75e0260a02a5b261e9af8dba30df99de925c2c40c44d9b72e0210877",
+   "en": "A powerful attack which requires the temporary loss of your weapon. Activate with ##(MEGACLASH). (@#(26))"
+  },
+  {
+   "index": 37,
+   "source_sha256": "02cb6909871e39021686d2032596cfb40455cd1c2255fc82c8550d113ec2951f",
+   "en": "A powerful rush attack. Activate by rapidly pressing @#(25)."
+  },
+  {
+   "index": 38,
+   "source_sha256": "d8a2403c8a38a2c788d0f3b35737335b58896e3feaecbc6edd41aceb91810fbf",
+   "en": "Use a @#(36)%s item to carry around and use bombs."
+  },
+  {
+   "index": 39,
+   "source_sha256": "2f983282e086b2ef51d025f0da4df1b9361d39c155591669718ee18eebeea965",
+   "en": "Use a @#(36)%s item to produce an exploding barrel that can be picked up and hurled."
+  },
+  {
+   "index": 40,
+   "source_sha256": "6f99b586319e42ca3fbf519f7c2fe454e1db9d61cb391ee6a4107aed64bf2c53",
+   "en": "Use a @#(36)%s item to add fire properties to any attack."
+  },
+  {
+   "index": 41,
+   "source_sha256": "87b2d89cea47fb8f68b6d35a6efda2c3a6843117048bdf62d1bae14ec79ff9db",
+   "en": "Increases damage of fire-enhanced physical attacks."
+  },
+  {
+   "index": 42,
+   "source_sha256": "5b6eae3b7d9d1adcf31956a4f23b15459003d77d3cecd6241ed7098f5a6cb2ad",
+   "en": "Heal HP and equipment durability when picking up score items."
+  },
+  {
+   "index": 43,
+   "source_sha256": "2979e3f03eb00062bc7b1c3518b135209104e0c83dbc4bfb74fc2200227bad54",
+   "en": "Increased defense while pumped up. Activate by holding @#(25)."
+  },
+  {
+   "index": 44,
+   "source_sha256": "5d438105f05f2a6c7c3a5e2cc10a2f286cd1f0493c97d0bbf49030dfb6c38f28",
+   "en": "Smaller attacks won't cause you to flinch."
+  },
+  {
+   "index": 45,
+   "source_sha256": "15960ea91c8e5c2e656c92d7ad2fe6c62d1280d5e082343f29dd32538fb59bfa",
+   "en": "Charge an arrow to unleash a powerful wind shot. Hold @#(26) and then release @#(26) to shoot."
+  },
+  {
+   "index": 46,
+   "source_sha256": "9fae7d03b77a03842ef06482a270979aebcdc50aa22a9cf53ff3bdf282304c1e",
+   "en": "Quickly loose a volley of arrows. Increase number of arrows with higher skill levels."
+  },
+  {
+   "index": 47,
+   "source_sha256": "473049dda42bafa5bcde35235d6429a6fa9ed579bb9e5840d028a7c8ce28cea6",
+   "en": "Increase the number of arrows you can carry."
+  },
+  {
+   "index": 48,
+   "source_sha256": "164613af4a573b1d73a7ca5e49d8a57af4845569ac0b4d7c5210ce12b8453468",
+   "en": "Fire an arrow that produces a shockwave. Higher skill levels boost range and power. "
+  },
+  {
+   "index": 49,
+   "source_sha256": "1ccf14a9a0374ee73b2b9195a5f5113419460989bd6894bdb19de751eaa6189f",
+   "en": "Shoot more arrows when using crouched charge attacks and when shooting while dashing."
+  },
+  {
+   "index": 50,
+   "source_sha256": "69092a71a266962e53a41c2e2e59498ccfa63945c09c21c3357cdfc4e495a98d",
+   "en": "Use the @#(36)%s to grant arrow and dagger attacks poison properties. \n(Use again to deactivate.)"
+  },
+  {
+   "index": 51,
+   "source_sha256": "1c8ea32ae98877dad251ca0047c62201d82a2f831f1c17024b0deaa9146532b0",
+   "en": "Use @#(36)%s to produce a dagger to attack with."
+  },
+  {
+   "index": 52,
+   "source_sha256": "324f79842959d90fe46d0800ea8797ebd475343a3da2f1d9cbdfb5126a7e6e63",
+   "en": "Use the @#(36)%s to grant arrow and dagger attacks fire properties. \n(Use again to deactivate.)"
+  },
+  {
+   "index": 53,
+   "source_sha256": "7eecbab42bf17746e01180be66160683cbd9cb24f3dce25d1dd44822cfed30c2",
+   "en": "Use spirit magic to attack. Activate by holding @#(25)."
+  },
+  {
+   "index": 54,
+   "source_sha256": "6d42309b54be0917e843ca97605905eb37e7c399628e7a580319abf5c5cc7585",
+   "en": "Add your boots' DEF to kick attack power. Higher Skill levels increase this boost."
+  },
+  {
+   "index": 55,
+   "source_sha256": "af74ef2969cf61d5ac4315cc746a9f11a8323aaa97d4ceccccce08e487afa296",
+   "en": "Increase damage when attacking an enemy from behind with a dagger."
+  },
+  {
+   "index": 56,
+   "source_sha256": "65b7a71c4fedc890deb415c82a17e5f4ff645ef8db174e9d07dfaf20669f801c",
+   "en": "Reduce knockback chance and damage taken while charging arrows."
+  },
+  {
+   "index": 57,
+   "source_sha256": "fd6f7e7f6fff803c0c1075f6970cf3579e66b3d6bbed17d18f7bdc56a2d0ac9d",
+   "en": "Gain MP with every enemy you defeat."
+  },
+  {
+   "index": 58,
+   "source_sha256": "409b109db7964e0b7a40af1d0f3431bb9f91bbc7c3dafaa62c0e50351a17a257",
+   "en": "If your magic shot hits an enemy, you will recover MP. Press @#(25) for a magic shot."
+  },
+  {
+   "index": 59,
+   "source_sha256": "d89f594f0f6e1ac61cc654a224c5b4599eb1bd7032b9e70dd91fc6632ecf4893",
+   "en": "Increase MP charge speed by holding @#(25)."
+  },
+  {
+   "index": 60,
+   "source_sha256": "a2be8f6d34eebd16dbec1c493d104fab9e153cc7abe0df7241cc551087430cf5",
+   "en": "Increase maximum MP."
+  },
+  {
+   "index": 61,
+   "source_sha256": "23887de5175c37a292ac802142950b9f127a6816b261653fc9263dc0dcfebf63",
+   "en": "@#(36)%s - Cast to encase your enemies in ice."
+  },
+  {
+   "index": 62,
+   "source_sha256": "728c4b8279325f7557534211d52daad0066786fbc1eee5505b29cf2e6ac7b886",
+   "en": "@#(36)%s - Cast to magically shield all your allies."
+  },
+  {
+   "index": 63,
+   "source_sha256": "d355d94db6e2d0cb90d57bf875fd33190ac405184a95c74aac790055166eee78",
+   "en": "@#(36)%s - Cast to create a gravity field that pulls in enemies."
+  },
+  {
+   "index": 64,
+   "source_sha256": "8ced6e491f2ae0f7b4cd8cc257baf4f1d29cc6f6e62b5de48d1389b74c66c523",
+   "en": "@#(36)%s - Cast to summon a small cloud that will attack foes with lightning. "
+  },
+  {
+   "index": 65,
+   "source_sha256": "ae9753801492047cbea8de194cb63c2c29a1fd6db029f5da25cdbc7c08405fb7",
+   "en": "@#(36)%s - Cast to create a boulder to crush foes and stun nearby enemies."
+  },
+  {
+   "index": 66,
+   "source_sha256": "a85f96185db233835eee36a4bfe46bc21c48b776846e1efb5dcb6c79eb41707c",
+   "en": "@#(36)%s - Cast to call forth a blizzard which will freeze enemies."
+  },
+  {
+   "index": 67,
+   "source_sha256": "79c73354bb7b9555887e4e17f8564c5f7e56d8c227ef853ba26164f4d2be20dc",
+   "en": "Create skeletal allies. (Press @#(25) near bones.)"
+  },
+  {
+   "index": 68,
+   "source_sha256": "72e406417af75a8bcdd0b9f46ac8b50a6ab836486e319c44ca67ecdd30e4629f",
+   "en": "Enable witch flight. (Double jump and press @#(24).)"
+  },
+  {
+   "index": 69,
+   "source_sha256": "8f5db39bf5e84ed9f52529fddbebdc9ac1a5507a0156908947c3c469f2f1771c",
+   "en": "@#(36)%s - Cast to create nutritious food."
+  },
+  {
+   "index": 70,
+   "source_sha256": "0ff127ad0bd11c7bcf7780763509420c2deb727f581bfe5917bf2eff4e24e194",
+   "en": "@#(36)%s - Cast to curse your enemies to live as frogs."
+  },
+  {
+   "index": 71,
+   "source_sha256": "e9689b15d552ab3201be8b02eb14ce756eb19dc322a5b27c5036dd6340d22a2e",
+   "en": "@#(36)%s - Cast to turn your enemies to stone."
+  },
+  {
+   "index": 72,
+   "source_sha256": "d89f594f0f6e1ac61cc654a224c5b4599eb1bd7032b9e70dd91fc6632ecf4893",
+   "en": "Increase MP charge speed by holding @#(25)."
+  },
+  {
+   "index": 73,
+   "source_sha256": "409b109db7964e0b7a40af1d0f3431bb9f91bbc7c3dafaa62c0e50351a17a257",
+   "en": "If your magic shot hits an enemy, you will recover MP. Press @#(25) for a magic shot."
+  },
+  {
+   "index": 74,
+   "source_sha256": "fd6f7e7f6fff803c0c1075f6970cf3579e66b3d6bbed17d18f7bdc56a2d0ac9d",
+   "en": "Gain MP with every enemy you defeat."
+  },
+  {
+   "index": 75,
+   "source_sha256": "a2be8f6d34eebd16dbec1c493d104fab9e153cc7abe0df7241cc551087430cf5",
+   "en": "Increase maximum MP."
+  },
+  {
+   "index": 76,
+   "source_sha256": "d367704c84e40b94afb3852dd0219be4e736dc3bff02f5fe104df52dcc80743d",
+   "en": "@#(36)%s - Cast to create a magic circle which grants fire protection."
+  },
+  {
+   "index": 77,
+   "source_sha256": "b09ecd1e42108699985951da34a75ba7590e179c7752e742c65b3d03b02f0f43",
+   "en": "@#(36)%s - Cast to create long-burning flames."
+  },
+  {
+   "index": 78,
+   "source_sha256": "c876abea3aa3c4c4fde061606f19d0eb90c45840502c62a4147f3489aaf40d21",
+   "en": "@#(36)%s - Cast to summon a tornado which will slash enemies."
+  },
+  {
+   "index": 79,
+   "source_sha256": "ce29ff6ceee19d5ebca11de4e0f5107161d17d66ac8caf34a70fd8498c79bf9c",
+   "en": "@#(36)%s - Cast to raze everything in front of you."
+  },
+  {
+   "index": 80,
+   "source_sha256": "c961ddec7eca23a539f9a9cc0358830a93a59ab64e0293230303c8d5d96fd76d",
+   "en": "@#(36)%s - Cast to summon lightning and stun enemies."
+  },
+  {
+   "index": 81,
+   "source_sha256": "8a77a855963496d223a865775678d4b84fe31ed196c392df110a1d8c9f1ec9c3",
+   "en": "@#(36)%s - Cast a grand magic that calls down meteors from the heavens. "
+  },
+  {
+   "index": 82,
+   "source_sha256": "64d255b95e00cf37648e28f5096a3800b7352887453920986307a33cd6f600f3",
+   "en": "Create golems. (Press @#(25) near wooden boxes/barrels.)"
+  },
+  {
+   "index": 83,
+   "source_sha256": "74fdce28248486a2ec8558445507222bbaa01668399b379bcd3fe10b4a665b06",
+   "en": "Enable floating. (Double jump and press @#(24).)"
+  },
+  {
+   "index": 84,
+   "source_sha256": "158e5819102ccee4ff1976254ab93a58588ecf8d659be7e89d9bb13c293842d4",
+   "en": "@#(36)%s - Cast to create a magic circle that slows enemy movements."
+  },
+  {
+   "index": 85,
+   "source_sha256": "7901cd6e282bd007f38e86865c9e751774da640a4c3f3e5d179fbb98b792df03",
+   "en": "@#(36)%s - Cast to make one enemy cease to exist. Ineffective on bosses."
+  },
+  {
+   "index": 86,
+   "source_sha256": "77b3c519b15a16ac5e4349ef72fa5d71c306daa5bbbeec563d1d14fb656f4ac2",
+   "en": "Slide Attack"
+  },
+  {
+   "index": 87,
+   "source_sha256": "08f700e3e1f81aa9d01db19f2aa5c8737d1071845075fa0fe2afb6bd65d9a5c2",
+   "en": "Wealth to Health"
+  },
+  {
+   "index": 88,
+   "source_sha256": "3a999ab7921952fe3390021dfbda2e4e40334a090d85039c95839a086a146ca0",
+   "en": "Money is Power"
+  },
+  {
+   "index": 89,
+   "source_sha256": "a1745727c7e140ab2e0cc88b2b9f39a3b18d5fad5eef7aa4bb1f95ffa9233e6c",
+   "en": "Vitality Boost"
+  },
+  {
+   "index": 90,
+   "source_sha256": "ce4b8eb6ef53a11b4643152e892d1e3bacc2890a3e740b1fc5e83d07292d3059",
+   "en": "Nutritionist"
+  },
+  {
+   "index": 91,
+   "source_sha256": "17ccfa5b681e3e7b293165981520187dfe2c3d5d610669735da1c9ea0421d55d",
+   "en": "Maintenance"
+  },
+  {
+   "index": 92,
+   "source_sha256": "62df07698bc511f94bef6af4d21a820da59da5f1f83334ac7fbd112c971015db",
+   "en": "Adroit Hands"
+  },
+  {
+   "index": 93,
+   "source_sha256": "3643dd816bb8e97a8ce28589d18507c131d49e0d67d64cebcb22d9bcc2b79e6a",
+   "en": "Evasion"
+  },
+  {
+   "index": 94,
+   "source_sha256": "01b7348dd08154bf8e21b4a482f84ae29cab53505be2605b7102169404b49d6b",
+   "en": "Deep Pockets"
+  },
+  {
+   "index": 95,
+   "source_sha256": "998b20d9659a979dc2c23fd7b168bad45f04272df4e8579c29bad138fc7a6411",
+   "en": "Cyclone Masher"
+  },
+  {
+   "index": 96,
+   "source_sha256": "6da37aae54832bb17a7b27d274f5d572175761ef0b1a707ef44bcf9a5362bb51",
+   "en": "Shockwave"
+  },
+  {
+   "index": 97,
+   "source_sha256": "18d3597ca7321b870805999b94b4303977f1a29cdfe6eabea08163a478156d73",
+   "en": "Judgement"
+  },
+  {
+   "index": 98,
+   "source_sha256": "b729f880ae397e8eedd9b1e93aaab464d98abc273a98ec06ba2e03bf7c0c97a6",
+   "en": "Rebuke"
+  },
+  {
+   "index": 99,
+   "source_sha256": "e8d37092694eb8025851e51f6ff86b59819d8a020a7fe990d2adceb877e2f14b",
+   "en": "Tempest Edge"
+  },
+  {
+   "index": 100,
+   "source_sha256": "3ed456412de4e397803a868a01e5c6bbd64cc6ea1186cfe35a79ca6abaa37dae",
+   "en": "Cover Allies "
+  },
+  {
+   "index": 101,
+   "source_sha256": "a90b3c99e83ab1839b0277b30f31bc92a0466244341cbad75d1b5bff50b510db",
+   "en": "Reflex Guard"
+  },
+  {
+   "index": 102,
+   "source_sha256": "d1e9567da9a8a4b0c43da0791da1d2594cf5d7b78547fea132d06bccc1b06091",
+   "en": "Bash"
+  },
+  {
+   "index": 103,
+   "source_sha256": "a886bbd1dc909e2bc70701498dabcb623d77e85558c4e028d5a2ad6d2bf1194e",
+   "en": "Missile Reflect"
+  },
+  {
+   "index": 104,
+   "source_sha256": "14e74cf2e88947452d17cc4f3a079b42a19bcef24ad69e746203e649bdea2b45",
+   "en": "Distraction"
+  },
+  {
+   "index": 105,
+   "source_sha256": "33403d8f77f3caa9aa8f59a1a0290c3e349fe6a5893c3b812340601ac4a0629a",
+   "en": "Sacrifice"
+  },
+  {
+   "index": 106,
+   "source_sha256": "c985aa8aee5ab923a4f56171b7fb33be1e0ed6b3fde7a071f837b39783a52342",
+   "en": "Shield Tactics"
+  },
+  {
+   "index": 107,
+   "source_sha256": "9b63152e4a94dbbf4c0263ef94d238642d27430fd699bda8895a7e3c59b3e17f",
+   "en": "Stun Wave"
+  },
+  {
+   "index": 108,
+   "source_sha256": "445e24c6224da8bb587125343e9fb2c0819a405967e67fb3cdb6297489659da0",
+   "en": "Neck Splitter"
+  },
+  {
+   "index": 109,
+   "source_sha256": "d1558f796e55c1b7a2d3e853710adee9fc350a6feae7fcb9bacaaf3de24b3ee5",
+   "en": "Deadly Revolution"
+  },
+  {
+   "index": 110,
+   "source_sha256": "bb8b82ac463267cc3e90eddea0e35980b5ca71df6bd9319006fe11f5563399b2",
+   "en": "Brutal Drive"
+  },
+  {
+   "index": 111,
+   "source_sha256": "e5567f841f437ac99989eab2e477ba8eebe7f39bc9b55311bf7037b30444f024",
+   "en": "Parry"
+  },
+  {
+   "index": 112,
+   "source_sha256": "5170944f28b7108232dce33469798d06602cab9c80db6de306795a1f8895b952",
+   "en": "Punisher"
+  },
+  {
+   "index": 113,
+   "source_sha256": "76f55482a72bfeec7aff21fd34370e4629a6b5a49491911f9822dd73e0e15e33",
+   "en": "Brandish"
+  },
+  {
+   "index": 114,
+   "source_sha256": "08bd7cbf4b138e67be4a5cce28bc717ce3be31615b3daa16bf10cde894de77f9",
+   "en": "Berserk"
+  },
+  {
+   "index": 115,
+   "source_sha256": "2608729251008c9658e7d21d8041325c145bd07af6bb87c6a441153a37f79551",
+   "en": "Adrenaline"
+  },
+  {
+   "index": 116,
+   "source_sha256": "783bf0217446a934e89c177c28727c46296d5a0f75044c82f03c8b4081dc3cab",
+   "en": "War Paint"
+  },
+  {
+   "index": 117,
+   "source_sha256": "48e77991e601e1f0c22090c474a8adae4500faf1e92f893e94da1bc33ea49462",
+   "en": "Incite Rage"
+  },
+  {
+   "index": 118,
+   "source_sha256": "6793fdbb1c078c43c5407fe1f8bc9bca341d34c4c4f44a8ca4fe3ad314232ba1",
+   "en": "Iron Will"
+  },
+  {
+   "index": 119,
+   "source_sha256": "0eb23455a6f2191b21889c02272fe9ca495982c08c5f8e3cb31c56b62a585c06",
+   "en": "Power Bomb"
+  },
+  {
+   "index": 120,
+   "source_sha256": "2a1e1592171232ee1b7bb6f87e093839d5f94d740f66c614cea04738a845cdbd",
+   "en": "Lethal Fists"
+  },
+  {
+   "index": 121,
+   "source_sha256": "b19754d70e21e67e4e5ae1b6153ca9bc40fccb9f388d9fbc55b9e004984ff40d",
+   "en": "Eagle Dive"
+  },
+  {
+   "index": 122,
+   "source_sha256": "0749c5dd42168ef788dbe899ead148ad84c07ddab0313f00ae9a42b2a030bfef",
+   "en": "Grand Smash"
+  },
+  {
+   "index": 123,
+   "source_sha256": "148b8f01ccb30c07d3bd3fb26370f7976cdc4a08a1e1d2c6be996306d8cc274e",
+   "en": "Frenzy"
+  },
+  {
+   "index": 124,
+   "source_sha256": "a39a01648a9b07dbb1e0d57ff5b693cdc0d9cb820a054d2faf8f677660b797ce",
+   "en": "Bomb Satchel"
+  },
+  {
+   "index": 125,
+   "source_sha256": "9ea60ab38c9f8ccbae3aaf081c1770dee058f1250355fbb506210f2314ec0404",
+   "en": "Fire Barrel"
+  },
+  {
+   "index": 126,
+   "source_sha256": "bb1282f6b4fc226ca5bf8fc3bbbe1211ab483b7166d65486329c1b683d30ad2a",
+   "en": "Magma Infusion"
+  },
+  {
+   "index": 127,
+   "source_sha256": "a5d2ffd3381853e3d4102f718f36280e78d6ed5b6906384e3a9c7dce0783d628",
+   "en": "Powder Mastery"
+  },
+  {
+   "index": 128,
+   "source_sha256": "3e4e38b750278329e3b408d1505c055c63353a7b273f07298126fd6c40eb5910",
+   "en": "Trinket Maniac"
+  },
+  {
+   "index": 129,
+   "source_sha256": "f75a2b31f765c5338300539af447678fcba2cf6a76b482a501214991beba44d4",
+   "en": "Rock Skin"
+  },
+  {
+   "index": 130,
+   "source_sha256": "19cd2c1eecf145e78797bbd8c1dcccdbfdf6d563a1d4c51a4ecf667ac81eba5b",
+   "en": "Toughness"
+  },
+  {
+   "index": 131,
+   "source_sha256": "840ca027434dc32b1503b141ddd07ac70d625b094a80c60cc1eea283c2cea149",
+   "en": "Power Shot"
+  },
+  {
+   "index": 132,
+   "source_sha256": "c5e30b06c99f1687acfcb245914eb4f67cfcf8ba60ad99bbb4a60d128d0b29d8",
+   "en": "Rapid Fire"
+  },
+  {
+   "index": 133,
+   "source_sha256": "693e4f4f17237287d55f203e0d38e9a94e6bc32e2755edc680b4d237ffd0ee40",
+   "en": "Spacious Quiver"
+  },
+  {
+   "index": 134,
+   "source_sha256": "26397c30006463ff6f05679fb3861c44797c5b57b9b1eb9fcbf3043ae1c479ea",
+   "en": "Impact Arrow"
+  },
+  {
+   "index": 135,
+   "source_sha256": "12bde7ed927adfeae6a05b96d57753283a2901a8a71542b361b9e5fd86dd237a",
+   "en": "Clone Strikes"
+  },
+  {
+   "index": 136,
+   "source_sha256": "c675ddd1e44deebe344930d8583e162c4723d5e1de867d1df15827bcaa15834a",
+   "en": "Toxic Extract"
+  },
+  {
+   "index": 137,
+   "source_sha256": "25b9f46951df2bee245a43887a155f93a5bb89b3fe0a9c4b5704ad4a54881e65",
+   "en": "Holdout Dagger"
+  },
+  {
+   "index": 138,
+   "source_sha256": "5b1b20c22dba13e8af27e3ae16691b5811cec629bfff4bd54dd73784e92aa547",
+   "en": "Salamander Oil"
+  },
+  {
+   "index": 139,
+   "source_sha256": "0b3675eb880c63c3eeb6c9228993d8fac108133207358616fc15b79eebab498f",
+   "en": "Elemental Lore"
+  },
+  {
+   "index": 140,
+   "source_sha256": "45e389d437f80abc6f9d38a5e4da2c6a12c423f97aaa6541cbf1d7185ca4c916",
+   "en": "Deadly Boots"
+  },
+  {
+   "index": 141,
+   "source_sha256": "e0937ebfa8052c0bba841ea9791c5cf2cd4c7886b1b69f95b25442984673e4e6",
+   "en": "Backstab"
+  },
+  {
+   "index": 142,
+   "source_sha256": "77b2d835d717e65c79b98f7399c6211af6314c5e4339d2bd46bba187e11c8bc3",
+   "en": "Battle Hardened"
+  },
+  {
+   "index": 143,
+   "source_sha256": "3a0e658ac6fea7f2ec6297be262284df2570fbf588b96273dc1daf6587b5fe33",
+   "en": "Mental Absorb"
+  },
+  {
+   "index": 144,
+   "source_sha256": "c15301c0e6470e212900d9ac191be58d753a8aab44a51720610ed916886da522",
+   "en": "Extract"
+  },
+  {
+   "index": 145,
+   "source_sha256": "faa895f1e7713ee3a12d2dc5921967e2171457086b5582208825c5b0eae45fd6",
+   "en": "Concentrate"
+  },
+  {
+   "index": 146,
+   "source_sha256": "4bcc79e7856b953610f013ef3121d23f8434b75bd6f15aba94c270b463440a73",
+   "en": "Spirit Up"
+  },
+  {
+   "index": 147,
+   "source_sha256": "71acdcf85471474f8efa700b1bfe8ab1af0e35836bbf700f221426a45f6481f5",
+   "en": "Ice Prison"
+  },
+  {
+   "index": 148,
+   "source_sha256": "0e97ad021672d434a066dc50b8681813907da9f1f706aa1fa4402b9c4ba4c006",
+   "en": "Protection"
+  },
+  {
+   "index": 149,
+   "source_sha256": "19602d23667cf93d3528812e7b1eec9daeaf9d459c9cda1aa94eab8c9cdf7ccc",
+   "en": "Gravity"
+  },
+  {
+   "index": 150,
+   "source_sha256": "97730cf44d300ca2e54711be19a5057d5539256c96d28493140f8ccd0009838f",
+   "en": "Thunderhead"
+  },
+  {
+   "index": 151,
+   "source_sha256": "61dd7ccbd593338fdf8321ab2933ec1592c76ba6c0266079036da90360a995b7",
+   "en": "Rock Press"
+  },
+  {
+   "index": 152,
+   "source_sha256": "4e00ad2bdbffd737174b244f2bdfd718ba7633673a7e38548636477b0ddaf42d",
+   "en": "Blizzard"
+  },
+  {
+   "index": 153,
+   "source_sha256": "a9b39a247b929e676641cb5359c48bf4d1b246c5b162724acc47dfd67b8b7b65",
+   "en": "Animate Skeleton"
+  },
+  {
+   "index": 154,
+   "source_sha256": "9ff114c265142d0244c13260b59f7b9ff3eede551b0b20ad69a49e3b60ca926c",
+   "en": "Levitation"
+  },
+  {
+   "index": 155,
+   "source_sha256": "143309176ac4ed9d0b3d2c69a9bac5e282fb7bb3fb76224da328e9801709ed81",
+   "en": "Create Food"
+  },
+  {
+   "index": 156,
+   "source_sha256": "88b3d8eed54f6ff0f810aacca7226460fdb72ab34c99e5c4d002192a463a2e72",
+   "en": "Curse"
+  },
+  {
+   "index": 157,
+   "source_sha256": "77676577aa9db03475bdfa01bec893bac99f5a565c3146dc5f07388309fc5889",
+   "en": "Petrification"
+  },
+  {
+   "index": 158,
+   "source_sha256": "faa895f1e7713ee3a12d2dc5921967e2171457086b5582208825c5b0eae45fd6",
+   "en": "Concentrate"
+  },
+  {
+   "index": 159,
+   "source_sha256": "c15301c0e6470e212900d9ac191be58d753a8aab44a51720610ed916886da522",
+   "en": "Extract"
+  },
+  {
+   "index": 160,
+   "source_sha256": "3a0e658ac6fea7f2ec6297be262284df2570fbf588b96273dc1daf6587b5fe33",
+   "en": "Mental Absorb"
+  },
+  {
+   "index": 161,
+   "source_sha256": "4bcc79e7856b953610f013ef3121d23f8434b75bd6f15aba94c270b463440a73",
+   "en": "Spirit Up"
+  },
+  {
+   "index": 162,
+   "source_sha256": "02f0868f65d4828566bba3bc49d11bbeb175157b385d7cc4de4b758d40ed6953",
+   "en": "Fire Ward"
+  },
+  {
+   "index": 163,
+   "source_sha256": "36f2a17105bc157dc9b1d252ec7c103e0bf83bb365cc73c677581b91c0a6ed9d",
+   "en": "Blaze"
+  },
+  {
+   "index": 164,
+   "source_sha256": "5870f9bfd157bd7ef0571f07b16a533d02bfac9265afd50380265cb75d3cac58",
+   "en": "Storm"
+  },
+  {
+   "index": 165,
+   "source_sha256": "93f52fd9b6f91234b0238835526f961940130eec7b37fa0fd8fcb92e47fa06df",
+   "en": "Flame Burst"
+  },
+  {
+   "index": 166,
+   "source_sha256": "a6583674d3ec803684fd5efa7d04d60f9d98850ce788fd82daec6c1a2d52a616",
+   "en": "Thunderbolt"
+  },
+  {
+   "index": 167,
+   "source_sha256": "b8908bc094a23d0e2e2e4d6e49b26adca89b2942931365c2b99301233b23e1c1",
+   "en": "Meteor Swarm"
+  },
+  {
+   "index": 168,
+   "source_sha256": "6477bc57611292345c7452ff1f25033201209ac97552a89943a5f7786e290697",
+   "en": "Create Wood Golem"
+  },
+  {
+   "index": 169,
+   "source_sha256": "9ff114c265142d0244c13260b59f7b9ff3eede551b0b20ad69a49e3b60ca926c",
+   "en": "Levitation"
+  },
+  {
+   "index": 170,
+   "source_sha256": "4b2bebbf33aeb7aea11cbab9d95019a647ca038b638f99f593aae85b986ed2e2",
+   "en": "Slow"
+  },
+  {
+   "index": 171,
+   "source_sha256": "a3070afa0acf4347d1476db1465dbe6cb27369eaa66fd202e402c0fa29f73369",
+   "en": "Extinction"
+  },
+  {
+   "index": 172,
+   "source_sha256": "4743dce09e0a0aac176f91701af6a59e54df6aba01af3722174df60df416a098",
+   "en": "##(SKILL_POWER): 30  ##(SKILL_DOWN_VALUE)30％"
+  },
+  {
+   "index": 173,
+   "source_sha256": "feac5675b8630f28510af89c8dcb3ffd3ad6fb42c4e4ff3f579b7a9515985ba8",
+   "en": "##(SKILL_POWER): 34  ##(SKILL_DOWN_VALUE)40％"
+  },
+  {
+   "index": 174,
+   "source_sha256": "eaa82a04f1429e16422b5014ce554a28ff015c15bf2709c58d93254be2b72fa3",
+   "en": "##(SKILL_POWER): 40  ##(SKILL_DOWN_VALUE)55％"
+  },
+  {
+   "index": 175,
+   "source_sha256": "1d201645f6d8e7a66d6c8bf007053bf7e569e02d24c6fe9e97140dd9607f1c84",
+   "en": "##(SKILL_POWER): 46  ##(SKILL_DOWN_VALUE)70％"
+  },
+  {
+   "index": 176,
+   "source_sha256": "dcd0ff87a9342c5f2153ba9717b99a21a3bfe710406af622e305378414a12f82",
+   "en": "##(SKILL_POWER): 60  ##(SKILL_DOWN_VALUE)100％"
+  },
+  {
+   "index": 177,
+   "source_sha256": "dcd0ff87a9342c5f2153ba9717b99a21a3bfe710406af622e305378414a12f82",
+   "en": "##(SKILL_POWER): 60  ##(SKILL_DOWN_VALUE)100％"
+  },
+  {
+   "index": 178,
+   "source_sha256": "cd33f24a38aeff21ed716daad197e0b0ea9aa27d1c3c69a4de934d0ea064a945",
+   "en": "HP Recovered per coin: 2"
+  },
+  {
+   "index": 179,
+   "source_sha256": "c6de5f25de5c991f81f2aab3db99fc81a4054074220bcb69d0f523da7bca0ea8",
+   "en": "HP Recovered per coin: 3"
+  },
+  {
+   "index": 180,
+   "source_sha256": "b20fb2bb6522efc22dd7729cbd6868c726e653b0f43e65b5e9dc41372d693f7f",
+   "en": "HP Recovered per coin: 5"
+  },
+  {
+   "index": 181,
+   "source_sha256": "53ddde3667c602645ae530aeda3b5a0f42c543a55f7c52e1c001ebaedbbb4886",
+   "en": "HP Recovered per coin: 7"
+  },
+  {
+   "index": 182,
+   "source_sha256": "70b3a5251e9be5f134c207622764679fae76c516953636de4b1c8227da78f582",
+   "en": "HP Recovered per coin: 10"
+  },
+  {
+   "index": 183,
+   "source_sha256": "70b3a5251e9be5f134c207622764679fae76c516953636de4b1c8227da78f582",
+   "en": "HP Recovered per coin: 10"
+  },
+  {
+   "index": 184,
+   "source_sha256": "a471eca38b05d0fafa99797352ec3e996580e7288bf1d80e92034c7303f27be1",
+   "en": "Score obtained +10"
+  },
+  {
+   "index": 185,
+   "source_sha256": "313d6e30df3d26f972619ce29c0331ff2c6abd2bf28fdce3fbd1a7c4a96561f1",
+   "en": "Score obtained +20"
+  },
+  {
+   "index": 186,
+   "source_sha256": "5462d04da16030bc1501ae14fb7a60986688eb16ddb525b40904898d947d5252",
+   "en": "Score obtained +40"
+  },
+  {
+   "index": 187,
+   "source_sha256": "3ffc6d9fcc3bcb1b37faa56fde0bff2e4f27b627441207ad50be18b7c8344e81",
+   "en": "Score obtained +60"
+  },
+  {
+   "index": 188,
+   "source_sha256": "0e8b1413c4191afc330d23c0fc61a4410f0dead71deb795b84a93602a6877c00",
+   "en": "Score obtained +100"
+  },
+  {
+   "index": 189,
+   "source_sha256": "0e8b1413c4191afc330d23c0fc61a4410f0dead71deb795b84a93602a6877c00",
+   "en": "Score obtained +100"
+  },
+  {
+   "index": 190,
+   "source_sha256": "02d887ec0ac03a67f93b67c5fbbf62def7ec5f1e975305fe2358dbf570fd31ed",
+   "en": "Max HP +20"
+  },
+  {
+   "index": 191,
+   "source_sha256": "13f0e15b18271897ffdf329feeb1ddc63387f725b5362d2228eb329850bea6cc",
+   "en": "Max HP +35"
+  },
+  {
+   "index": 192,
+   "source_sha256": "71b629b8346166ee40bb7ff8e785383ed3bd8ce6189eb67ed2b2047d77bd0c08",
+   "en": "Max HP +50"
+  },
+  {
+   "index": 193,
+   "source_sha256": "29e87b5694f4f9117b7add35ed7cb4977af5a2a5c064f72b1a6bccdca15692ec",
+   "en": "Max HP +65"
+  },
+  {
+   "index": 194,
+   "source_sha256": "b10be3eb4be9eb3883ffaa3f20da62c6267fc011307a9ff325574c497000a7a5",
+   "en": "Max HP +80"
+  },
+  {
+   "index": 195,
+   "source_sha256": "5345d104d24c7f4a0ed0883383ae24a62d88f5a7320bbb15ace97e34f86c338c",
+   "en": "Max HP +100"
+  },
+  {
+   "index": 196,
+   "source_sha256": "9ecd164a5d41aca9a8ffaf533ae79342c5ff1b35f8344a972475a19a3b09118f",
+   "en": "Max HP +120"
+  },
+  {
+   "index": 197,
+   "source_sha256": "20b5e6e19c3ac07805313dcf0f6ad986d5d9098d4735f038b2bf93fcac49c868",
+   "en": "Max HP +145"
+  },
+  {
+   "index": 198,
+   "source_sha256": "f8dc48d61ebd39126fadc1578e135d182a42ed11d641a458d3f420e7019f4f12",
+   "en": "Max HP +170"
+  },
+  {
+   "index": 199,
+   "source_sha256": "e26f4c4b9a0f57204996552b682ae694a682f1c54ff0cb7bbb1490dc4c10222c",
+   "en": "Max HP +200"
+  },
+  {
+   "index": 200,
+   "source_sha256": "e26f4c4b9a0f57204996552b682ae694a682f1c54ff0cb7bbb1490dc4c10222c",
+   "en": "Max HP +200"
+  },
+  {
+   "index": 201,
+   "source_sha256": "e327720c6d0b1c7a37a45a186f66bd16999f33d800ab0ccbe839c5a130fa7184",
+   "en": "Recovery Amount +20％"
+  },
+  {
+   "index": 202,
+   "source_sha256": "e27df633b325b0f4bf3322b6d0667f9bc2168d05eefb0db267cb63e0777f7da8",
+   "en": "Recovery Amount +25％"
+  },
+  {
+   "index": 203,
+   "source_sha256": "fcea486922adc96ce0b5263578d0645c55e6c36b48c332801aa127e0f01672ea",
+   "en": "Recovery Amount +30％"
+  },
+  {
+   "index": 204,
+   "source_sha256": "b29449318b2a58c67f209c41333e31d22bcff1df2552ebefdeaa1cd88d5aad03",
+   "en": "Recovery Amount +35％"
+  },
+  {
+   "index": 205,
+   "source_sha256": "08a57da267ee1f169af6a94577980b76c3f80e5c8e5e879806beae75b6a847d1",
+   "en": "Recovery Amount +50％"
+  },
+  {
+   "index": 206,
+   "source_sha256": "08a57da267ee1f169af6a94577980b76c3f80e5c8e5e879806beae75b6a847d1",
+   "en": "Recovery Amount +50％"
+  },
+  {
+   "index": 207,
+   "source_sha256": "36531f38084051175b0025335b6edd7e6465a52f482f0c80bbd760c6e2f83645",
+   "en": "Chance that # of uses won't deplete: 20％"
+  },
+  {
+   "index": 208,
+   "source_sha256": "b7960a4657280364651a3e823801560590b78c1b7b61d5be745d1844f3f6d50e",
+   "en": "Chance that # of uses won't deplete: 25％"
+  },
+  {
+   "index": 209,
+   "source_sha256": "9204e177aa7b2e79000f3b5be254f543fe62364fae98427a59542c342a1a0b6d",
+   "en": "Chance that # of uses won't deplete: 30％"
+  },
+  {
+   "index": 210,
+   "source_sha256": "0a985cf914158b007aeff349bf9258838a20462f946817df16f9e70ac33a901b",
+   "en": "Chance that # of uses won't deplete: 35％"
+  },
+  {
+   "index": 211,
+   "source_sha256": "b45992974d0b947aff59cd8a38d8c0e92806d4dffe98e980243b8e26e065f9ad",
+   "en": "Chance that # of uses won't deplete: 50％"
+  },
+  {
+   "index": 212,
+   "source_sha256": "b45992974d0b947aff59cd8a38d8c0e92806d4dffe98e980243b8e26e065f9ad",
+   "en": "Chance that # of uses won't deplete: 50％"
+  },
+  {
+   "index": 213,
+   "source_sha256": "30c78e48f947c5f78f86280e82809a311d381977acdbb33ec1bf6a001c706af0",
+   "en": "Item use cooldown -10％"
+  },
+  {
+   "index": 214,
+   "source_sha256": "fe3c9640ed5df2295b88e46176108454c3f02902d016af53ebd7066655544e96",
+   "en": "Item use cooldown -15％"
+  },
+  {
+   "index": 215,
+   "source_sha256": "f61416f2039decc338557f85784a305952d9f47cd79305835794f7a0ec0d410d",
+   "en": "Item use cooldown -20％"
+  },
+  {
+   "index": 216,
+   "source_sha256": "4d991454ffaa5d3db4a18f236de80c6a956e439bf4e9da4015b86101c650dff3",
+   "en": "Item use cooldown -25％"
+  },
+  {
+   "index": 217,
+   "source_sha256": "e81a2dfa13f49a7cbc2177251ba17edacda37216ca0aead25dce52ce65484f87",
+   "en": "Item use cooldown -30％"
+  },
+  {
+   "index": 218,
+   "source_sha256": "9f4d6359ceab50b68cbb7600b1f38db5d26a06db4f00b71fb6f048d3f29ad0fe",
+   "en": "Item use cooldown -35％"
+  },
+  {
+   "index": 219,
+   "source_sha256": "e755d95974dbad65106decd766bab3d9311474ab96d13761b9334b1a93b4928d",
+   "en": "Item use cooldown -50％"
+  },
+  {
+   "index": 220,
+   "source_sha256": "e755d95974dbad65106decd766bab3d9311474ab96d13761b9334b1a93b4928d",
+   "en": "Item use cooldown -50％"
+  },
+  {
+   "index": 221,
+   "source_sha256": "a1c5d3826e60462dbdc19cf12820f2c02ee5d64c6b1bce858dac4a6d3fb4e1c8",
+   "en": "Number of evasions +1"
+  },
+  {
+   "index": 222,
+   "source_sha256": "3f6e48560f9dcd6aae3cd0df6816eae88615eaf062761bd9162dca5f07973bf5",
+   "en": "Number of evasions +2"
+  },
+  {
+   "index": 223,
+   "source_sha256": "5a1040d3f62f70d00d5d045f3ee5741977e6eb9f04218f8268414ba5c22bcbc8",
+   "en": "Number of evasions +3"
+  },
+  {
+   "index": 224,
+   "source_sha256": "5a1040d3f62f70d00d5d045f3ee5741977e6eb9f04218f8268414ba5c22bcbc8",
+   "en": "Number of evasions +3"
+  },
+  {
+   "index": 225,
+   "source_sha256": "8d958cc65725df6a9c2f49ad965a5950c14c67abb3b43acfcd1ba65c258fb5ca",
+   "en": "Number of ##(CUSTOMSET) slots: 8"
+  },
+  {
+   "index": 226,
+   "source_sha256": "93f6188c96fb39afbd8b2d4b4159048aee0b6411630fbe0bd48c14e5bffe1a74",
+   "en": "Number of ##(CUSTOMSET) slots: 9"
+  },
+  {
+   "index": 227,
+   "source_sha256": "801d291cd655f33114620deb48699e1b9984bbaf300f448b4275d7119a9714e4",
+   "en": "Number of ##(CUSTOMSET) slots: 10"
+  },
+  {
+   "index": 228,
+   "source_sha256": "801d291cd655f33114620deb48699e1b9984bbaf300f448b4275d7119a9714e4",
+   "en": "Number of ##(CUSTOMSET) slots: 10"
+  },
+  {
+   "index": 229,
+   "source_sha256": "66ff248003417751290a0de4243f5de02ed59c152ba6318c8fd3a61c0e852a12",
+   "en": "##(SKILL_POWER): 20  Descent speed -30％"
+  },
+  {
+   "index": 230,
+   "source_sha256": "9b2b746ab1e6596845e71a321268f24ccc672f7469ad7b53e33f803f9eb8e8dd",
+   "en": "##(SKILL_POWER): 22  Descent speed -45％  ##(SKILL_RANGE_ATTACK): 105％"
+  },
+  {
+   "index": 231,
+   "source_sha256": "cac1aa86bdb7ef4190385fa5ace4e566b5c50dcebccdf271cd1ea347e3bd5c9e",
+   "en": "##(SKILL_POWER): 23  Descent speed -60％  ##(SKILL_RANGE_ATTACK): 110％"
+  },
+  {
+   "index": 232,
+   "source_sha256": "574a253391ce5abbac9eeba2df86f6844465b0983ab3cbc090236ca41fee2cc9",
+   "en": "##(SKILL_POWER): 25  Descent speed -75％  ##(SKILL_RANGE_ATTACK): 115％"
+  },
+  {
+   "index": 233,
+   "source_sha256": "e654933ef47526b4f72668ae4965ac96a15f50e0d2466e74f5d85ea0d56925e9",
+   "en": "##(SKILL_POWER): 30  Descent speed -95％  ##(SKILL_RANGE_ATTACK): 125％"
+  },
+  {
+   "index": 234,
+   "source_sha256": "e654933ef47526b4f72668ae4965ac96a15f50e0d2466e74f5d85ea0d56925e9",
+   "en": "##(SKILL_POWER): 30  Descent speed -95％  ##(SKILL_RANGE_ATTACK): 125％"
+  },
+  {
+   "index": 235,
+   "source_sha256": "40a46232f100c5d6565ed6c00c5cd2d15b31176e819b3f91c8ba6d277f7ea7f8",
+   "en": "##(SKILL_POWER): 15  Number of shockwaves: 2"
+  },
+  {
+   "index": 236,
+   "source_sha256": "ad36d8e84f50e40d5d14e25f28ad9c5422be2e89e7df0c31c1e469a51d888397",
+   "en": "##(SKILL_POWER): 18  Number of shockwaves: 2"
+  },
+  {
+   "index": 237,
+   "source_sha256": "8cd49829dfcdbacdc1b938c129985ad43335b0779d6053ee79a05e4773cc3ed0",
+   "en": "##(SKILL_POWER): 23  Number of shockwaves: 3"
+  },
+  {
+   "index": 238,
+   "source_sha256": "96561befbdab952b7a2ca190cbe72ba98777d3b7e4054d842ad1d0be4f716681",
+   "en": "##(SKILL_POWER): 30  Number of shockwaves: 3"
+  },
+  {
+   "index": 239,
+   "source_sha256": "c0800a3b210ed63e7f3aea90e1d64465072005fd34bb5e4803537de766561d74",
+   "en": "##(SKILL_POWER): 45  Number of shockwaves: 4"
+  },
+  {
+   "index": 240,
+   "source_sha256": "c0800a3b210ed63e7f3aea90e1d64465072005fd34bb5e4803537de766561d74",
+   "en": "##(SKILL_POWER): 45  Number of shockwaves: 4"
+  },
+  {
+   "index": 241,
+   "source_sha256": "1a5ac541a7854fb547b1c7a40813f986d1e492a0f7ef4b5d2ed1482a9eb6c007",
+   "en": "##(SKILL_POWER): 40  "
+  },
+  {
+   "index": 242,
+   "source_sha256": "bc104852f8add900cc020f44a1b406eb08178389762f84b4aba7cb0b7979fe6f",
+   "en": "##(SKILL_POWER): 44  ##(SKILL_RANGE_SHOCK_WAVE): 120％"
+  },
+  {
+   "index": 243,
+   "source_sha256": "2a61efce3ba5cd646daabf12ba61319c0cf15745b172d18d310255f2389a592d",
+   "en": "##(SKILL_POWER): 46  ##(SKILL_RANGE_SHOCK_WAVE): 140％"
+  },
+  {
+   "index": 244,
+   "source_sha256": "d3162cb11a9e1391a6f5d99ccd8a8ef23e9a4cb3eb05ddef3f13275391deaddf",
+   "en": "##(SKILL_POWER): 48  ##(SKILL_RANGE_SHOCK_WAVE): 160％"
+  },
+  {
+   "index": 245,
+   "source_sha256": "0622ba5fceb5bda863a4edf96873671a0dff647d647745a305837b9054a36271",
+   "en": "##(SKILL_POWER): 50  ##(SKILL_RANGE_SHOCK_WAVE): 180％"
+  },
+  {
+   "index": 246,
+   "source_sha256": "02846851d77722cbb9399e96ed930eb049ab9f94ae753d47c1023b8da871cf92",
+   "en": "##(SKILL_POWER): 52  ##(SKILL_RANGE_SHOCK_WAVE): 200％"
+  },
+  {
+   "index": 247,
+   "source_sha256": "2205df8f3a7eba26a743fce14ebf74b7a265f26a767965c171834ce20c4b12da",
+   "en": "##(SKILL_POWER): 60  ##(SKILL_RANGE_SHOCK_WAVE): 300％"
+  },
+  {
+   "index": 248,
+   "source_sha256": "2205df8f3a7eba26a743fce14ebf74b7a265f26a767965c171834ce20c4b12da",
+   "en": "##(SKILL_POWER): 60  ##(SKILL_RANGE_SHOCK_WAVE): 300％"
+  },
+  {
+   "index": 249,
+   "source_sha256": "328931c1b2c4ec77ca7e6172f66917b7df10ad83d04e40ef89fd5f8b67e7443a",
+   "en": "##(SKILL_POWER): 440  Shockwave ##(SKILL_POWER): 165"
+  },
+  {
+   "index": 250,
+   "source_sha256": "45342652bc5b2b972a7013aca3a12537e94dc1775c2224686c4b3f631a0d0c05",
+   "en": "##(SKILL_POWER): 480  Shockwave ##(SKILL_POWER): 180  ##(SKILL_RANGE_SHOCK_WAVE): 115％"
+  },
+  {
+   "index": 251,
+   "source_sha256": "7154374582b9423565fce8a51c9e0b1302159a589c2180fc7cfa0a055ac5d531",
+   "en": "##(SKILL_POWER): 520  Shockwave ##(SKILL_POWER): 195  ##(SKILL_RANGE_SHOCK_WAVE): 130％"
+  },
+  {
+   "index": 252,
+   "source_sha256": "ad0d9219b15d587bddd610da0ef2c5318946251a71803490d9b55e01f797b8f8",
+   "en": "##(SKILL_POWER): 560  Shockwave ##(SKILL_POWER): 210  ##(SKILL_RANGE_SHOCK_WAVE): 145％"
+  },
+  {
+   "index": 253,
+   "source_sha256": "f1c08a0b21afdad90bb1e4b9fbd04f1895ef0e8e1b4c6856256ddcff495144f2",
+   "en": "##(SKILL_POWER): 600  Shockwave ##(SKILL_POWER): 225  ##(SKILL_RANGE_SHOCK_WAVE): 160％"
+  },
+  {
+   "index": 254,
+   "source_sha256": "d91ddc1914d9a9971b444e0c927944e90100b4b0bdafeb2d86087d666909831f",
+   "en": "##(SKILL_POWER): 640  Shockwave ##(SKILL_POWER): 240  ##(SKILL_RANGE_SHOCK_WAVE): 185％"
+  },
+  {
+   "index": 255,
+   "source_sha256": "3a0dbb6ce3737788d7560e21722def655c0d9740b46708fa006de11e11d6c08a",
+   "en": "##(SKILL_POWER): 800  Shockwave ##(SKILL_POWER): 300  ##(SKILL_RANGE_SHOCK_WAVE): 285％"
+  },
+  {
+   "index": 256,
+   "source_sha256": "3a0dbb6ce3737788d7560e21722def655c0d9740b46708fa006de11e11d6c08a",
+   "en": "##(SKILL_POWER): 800  Shockwave ##(SKILL_POWER): 300  ##(SKILL_RANGE_SHOCK_WAVE): 285％"
+  },
+  {
+   "index": 257,
+   "source_sha256": "6bcf3f3b378ae432ef290d69b086613fb46476098c6f666ad9a7488d40b7ecb8",
+   "en": "##(SKILL_POWER): 30  Duration: 1.5s"
+  },
+  {
+   "index": 258,
+   "source_sha256": "deb046eb187b9d16f4b4417f3800309264a63beb144ff4fd5adc3d2faed4a3a3",
+   "en": "##(SKILL_POWER): 33  Duration: 1.9s  ##(SKILL_RANGE_ATTACK): 103％"
+  },
+  {
+   "index": 259,
+   "source_sha256": "8d711c1de62e48f7a0b94ca813ad0a474974ca287b55dd5163ecb46f5e346bd7",
+   "en": "##(SKILL_POWER): 36  Duration: 2.2s  ##(SKILL_RANGE_ATTACK): 106％"
+  },
+  {
+   "index": 260,
+   "source_sha256": "b9301c801e67612954aab6d0ee3d60f1e99cb8af1edeb01b262e8778df91b6ee",
+   "en": "##(SKILL_POWER): 41  Duration: 2.4s  ##(SKILL_RANGE_ATTACK): 110％"
+  },
+  {
+   "index": 261,
+   "source_sha256": "9cade75cbec9bc17deac6f07d97640f75b380ea9b29f659848983b95e8162507",
+   "en": "##(SKILL_POWER): 45  Duration: 2.7s  ##(SKILL_RANGE_ATTACK): 114％"
+  },
+  {
+   "index": 262,
+   "source_sha256": "62a992f82a6e2a5569ba755b5d01fd50c7b627a081ff1deafbb4305f9f17c7ed",
+   "en": "##(SKILL_POWER): 50  Duration: 2.9s  ##(SKILL_RANGE_ATTACK): 119％"
+  },
+  {
+   "index": 263,
+   "source_sha256": "5cae16fd184af9a1a58c2ba4c4382b0003c96110e73cfe5ab13d53c18413e712",
+   "en": "##(SKILL_POWER): 54  Duration: 3.2s  ##(SKILL_RANGE_ATTACK): 124％"
+  },
+  {
+   "index": 264,
+   "source_sha256": "8f7d3510d847454a80274673b6fffb8c283f256a8c23e51a4e3bd8c121c8899e",
+   "en": "##(SKILL_POWER): 60  Duration: 3.4s  ##(SKILL_RANGE_ATTACK): 130％"
+  },
+  {
+   "index": 265,
+   "source_sha256": "d6b6d4dd192d7c2c97c04fdfbdcce10f3670744a172a7ef0aedfd140ffc6579f",
+   "en": "##(SKILL_POWER): 66  Duration: 3.7s  ##(SKILL_RANGE_ATTACK): 136％"
+  },
+  {
+   "index": 266,
+   "source_sha256": "1f60162f758befb8f0b674adb5ca85c0f65e6657f9b45f27ec882bf76978a045",
+   "en": "##(SKILL_POWER): 75  Duration: 4.2s  ##(SKILL_RANGE_ATTACK): 150％"
+  },
+  {
+   "index": 267,
+   "source_sha256": "1f60162f758befb8f0b674adb5ca85c0f65e6657f9b45f27ec882bf76978a045",
+   "en": "##(SKILL_POWER): 75  Duration: 4.2s  ##(SKILL_RANGE_ATTACK): 150％"
+  },
+  {
+   "index": 268,
+   "source_sha256": "f334cf468fd6f6e565327a67a87be345671ba5226140aae5ccc62fb76fd80ffa",
+   "en": "Max ATK Damage Increase: +40％"
+  },
+  {
+   "index": 269,
+   "source_sha256": "51869ddb2e0356fcf91ffe83d59d29ec13dfc59174241ae20ea29e96e5f2cf1f",
+   "en": "##(SKILL_RANGE_EFFECT): 125％  Max ATK Damage Increase: +70％"
+  },
+  {
+   "index": 270,
+   "source_sha256": "b713b7224c8f7bb4ad0aa5a42143ed81a5952f7948858b4ed97e1faf5ffd32b6",
+   "en": "##(SKILL_RANGE_EFFECT): 200％  Max ATK Damage Increase: +100％"
+  },
+  {
+   "index": 271,
+   "source_sha256": "b713b7224c8f7bb4ad0aa5a42143ed81a5952f7948858b4ed97e1faf5ffd32b6",
+   "en": "##(SKILL_RANGE_EFFECT): 200％  Max ATK Damage Increase: +100％"
+  },
+  {
+   "index": 272,
+   "source_sha256": "66eade5d36aeedf1af9b1f68cd35419542a40607bce48cdf3044934af45e439a",
+   "en": "Chance of auto-defense: 25％"
+  },
+  {
+   "index": 273,
+   "source_sha256": "561699cfa3d675012057bdfe9bbb232ad9c6c257e9c3bcfd8f092113f109e1d1",
+   "en": "Chance of auto-defense: 30％"
+  },
+  {
+   "index": 274,
+   "source_sha256": "0ba3dbfb7a4b9c8c6b9d43782d8efa8e527e9c62ecffd7e5e0e0c3f67a401d4d",
+   "en": "Chance of auto-defense: 35％"
+  },
+  {
+   "index": 275,
+   "source_sha256": "41fda92b1ff8d567d069850847c3b6aecbc149b7809e73d015de026b4bfb3c01",
+   "en": "Chance of auto-defense: 40％"
+  },
+  {
+   "index": 276,
+   "source_sha256": "cc05ea5691e25343793f3f54b5d37c2589fbd3720cb7401eb8bef811bb3fb7f6",
+   "en": "Chance of auto-defense: 50％"
+  },
+  {
+   "index": 277,
+   "source_sha256": "cc05ea5691e25343793f3f54b5d37c2589fbd3720cb7401eb8bef811bb3fb7f6",
+   "en": "Chance of auto-defense: 50％"
+  },
+  {
+   "index": 278,
+   "source_sha256": "2a05647749ad39cd44955843751f71fffe8be3b46023b51b7aab83c50957355b",
+   "en": "##(SKILL_POWER): 20  Stun rate: 20％  Bash ##(YODAMAGE_UP_RATE)10％"
+  },
+  {
+   "index": 279,
+   "source_sha256": "4b13554c5bc110bc9b0702fe91b02f74f6db2f76cda4a9c08a1963781ff2537b",
+   "en": "##(SKILL_POWER): 24  Stun rate: 25％  Bash ##(YODAMAGE_UP_RATE)20％"
+  },
+  {
+   "index": 280,
+   "source_sha256": "24d28cfd777638e433dcea0a5842f868b103f9392741723e8ff2f7261195932f",
+   "en": "##(SKILL_POWER): 28  Stun rate: 30％  Bash ##(YODAMAGE_UP_RATE)40％"
+  },
+  {
+   "index": 281,
+   "source_sha256": "0d2771be84dfe465fdca683d81e99a7ef232aeffaac177482ab54858f3223316",
+   "en": "##(SKILL_POWER): 32  Stun rate: 35％  Bash ##(YODAMAGE_UP_RATE)60％"
+  },
+  {
+   "index": 282,
+   "source_sha256": "fc74adc77dc3687c6db42ccb038e2a4e7d3cea6098d67b7edfd1b9748a8c1d32",
+   "en": "##(SKILL_POWER): 36  Stun rate: 40％  Bash ##(YODAMAGE_UP_RATE)80％"
+  },
+  {
+   "index": 283,
+   "source_sha256": "0195789714047b497cdbf4b0f73e7753cfdbd3cd7a0bb01ee9580269c89402a5",
+   "en": "##(SKILL_POWER): 40  Stun rate: 45％  Bash ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 284,
+   "source_sha256": "7f0b05ea414237f364f77f7f5c5804c3d0634d090ef2e0d2825b9a4282f72c55",
+   "en": "##(SKILL_POWER): 44  Stun rate: 50％  Bash ##(YODAMAGE_UP_RATE)120％"
+  },
+  {
+   "index": 285,
+   "source_sha256": "394d4b0c1479482760c36742bbfdda970e4b491930c9be5ef012e16a66c6ad28",
+   "en": "##(SKILL_POWER): 48  Stun rate: 55％  Bash ##(YODAMAGE_UP_RATE)140％"
+  },
+  {
+   "index": 286,
+   "source_sha256": "75cb9e86aa0e404c66e04738a6c398d7c8eb5f86b4bac27295394249a819c1a6",
+   "en": "##(SKILL_POWER): 52  Stun rate: 60％  Bash ##(YODAMAGE_UP_RATE)160％"
+  },
+  {
+   "index": 287,
+   "source_sha256": "843034c3f2c4b857b3d4b897e0de9816312162d4a29be6c83daa09e519db1c47",
+   "en": "##(SKILL_POWER): 60  Stun rate: 80％  Bash ##(YODAMAGE_UP_RATE)200％"
+  },
+  {
+   "index": 288,
+   "source_sha256": "843034c3f2c4b857b3d4b897e0de9816312162d4a29be6c83daa09e519db1c47",
+   "en": "##(SKILL_POWER): 60  Stun rate: 80％  Bash ##(YODAMAGE_UP_RATE)200％"
+  },
+  {
+   "index": 289,
+   "source_sha256": "d11770ab12f8ca4a7b669ebcb908ab4f867e12e581646d86a7d031507058a16f",
+   "en": "Chance of reflection: 30％"
+  },
+  {
+   "index": 290,
+   "source_sha256": "4b979e7ba33fb71fc52868b8ea2ee079f3e00311a0ebb69c94f374149992847c",
+   "en": "Chance of reflection: 35％ Reflected shot ##(YODAMAGE_UP_RATE)20％"
+  },
+  {
+   "index": 291,
+   "source_sha256": "28084320f5d58b3724f7cdf987d619af62d1e6628a110ef6981da619c51b8134",
+   "en": "Chance of reflection: 40％ Reflected shot ##(YODAMAGE_UP_RATE)40％"
+  },
+  {
+   "index": 292,
+   "source_sha256": "48113664d60236863b09a3890271a0412cdd783a5f333c12ca9c2727d74e9d3f",
+   "en": "Chance of reflection: 45％ Reflected shot ##(YODAMAGE_UP_RATE)65％"
+  },
+  {
+   "index": 293,
+   "source_sha256": "3b5143cbb72a731d0623c50c66ac132cf0ac6ff2d55717aa4842fd5410be4a80",
+   "en": "Chance of reflection: 50％ Reflected shot ##(YODAMAGE_UP_RATE)90％"
+  },
+  {
+   "index": 294,
+   "source_sha256": "b4785e933261ce87bcfbd2f9d8aaeb0885bc7f75e740c0fd9d51a1d7ee9ececf",
+   "en": "Chance of reflection: 55％ Reflected shot ##(YODAMAGE_UP_RATE)115％"
+  },
+  {
+   "index": 295,
+   "source_sha256": "5594853e1f8d14c0bf7385ddf7d935d5d8085fdee61107ac775834a169f3f85e",
+   "en": "Chance of reflection: 65％ Reflected shot ##(YODAMAGE_UP_RATE)140％"
+  },
+  {
+   "index": 296,
+   "source_sha256": "b01f95516fb99a0781448f86800a5f5c8493528dadaada000d7386da5416d6bf",
+   "en": "Chance of reflection: 75％ Reflected shot ##(YODAMAGE_UP_RATE)165％"
+  },
+  {
+   "index": 297,
+   "source_sha256": "3dcf967f8a6a18afd058926b3a7f1a2ee740cfb2184aa101477ffd80508efaeb",
+   "en": "Chance of reflection: 90％ Reflected shot ##(YODAMAGE_UP_RATE)200％"
+  },
+  {
+   "index": 298,
+   "source_sha256": "aa56e83dbb98f0ad94fad7563a57f54a2c23c7002b2485fd36f61b3ad73c8ebb",
+   "en": "Chance of reflection: 100％ Reflected shot ##(YODAMAGE_UP_RATE)250％"
+  },
+  {
+   "index": 299,
+   "source_sha256": "aa56e83dbb98f0ad94fad7563a57f54a2c23c7002b2485fd36f61b3ad73c8ebb",
+   "en": "Chance of reflection: 100％ Reflected shot ##(YODAMAGE_UP_RATE)250％"
+  },
+  {
+   "index": 300,
+   "source_sha256": "c85aa9e58d78aae2ced01d379a65834103e4658efffe7190f90b2737257ca9dc",
+   "en": "Uses: 5  Enemies distracted: 5  ##(YODAMAGE_UP_RATE)10％"
+  },
+  {
+   "index": 301,
+   "source_sha256": "dd099d74757a08673c88d918ff6c3164f514f529be39b7aba554d42e977b17df",
+   "en": "Uses: 5  Enemies distracted: 6  ##(YODAMAGE_UP_RATE)20％"
+  },
+  {
+   "index": 302,
+   "source_sha256": "d863129c039d5f3dd12339b77a712c6904f53ce0742c406aca459f0397f21937",
+   "en": "Uses: 5  Enemies distracted: 9  ##(YODAMAGE_UP_RATE)30％"
+  },
+  {
+   "index": 303,
+   "source_sha256": "d863129c039d5f3dd12339b77a712c6904f53ce0742c406aca459f0397f21937",
+   "en": "Uses: 5  Enemies distracted: 9  ##(YODAMAGE_UP_RATE)30％"
+  },
+  {
+   "index": 304,
+   "source_sha256": "7adc28ec7eee8cd49ab5b0b59c68d0859bc41cd68e1317ff520d89b23e82d7ad",
+   "en": "Uses: 3  ##(HIDAMAGE_DOWN_RATE)30％"
+  },
+  {
+   "index": 305,
+   "source_sha256": "736ef47976151693669570ddfb5f99fcba52a267a210db59609103357ac34a0f",
+   "en": "Uses: 3  ##(HIDAMAGE_DOWN_RATE)40％"
+  },
+  {
+   "index": 306,
+   "source_sha256": "5f90c51ea566d982411a760aca472b0b8c4a0250ae05269aedfed66f5d009ea3",
+   "en": "Uses: 3  ##(HIDAMAGE_DOWN_RATE)50％"
+  },
+  {
+   "index": 307,
+   "source_sha256": "0f98684f080a9578408563ce1889e9ff48e4608e5857061384d08016ddb8d0ba",
+   "en": "Uses: 3  ##(HIDAMAGE_DOWN_RATE)60％"
+  },
+  {
+   "index": 308,
+   "source_sha256": "b96c1292d709959fa35f9279074df6a05eebeafcea088bcd82c9fb5848456834",
+   "en": "Uses: 3  ##(HIDAMAGE_DOWN_RATE)70％"
+  },
+  {
+   "index": 309,
+   "source_sha256": "b96c1292d709959fa35f9279074df6a05eebeafcea088bcd82c9fb5848456834",
+   "en": "Uses: 3  ##(HIDAMAGE_DOWN_RATE)70％"
+  },
+  {
+   "index": 310,
+   "source_sha256": "f2a24daab8b7eb03e759c3cc6422752678c0eb7889765d8b14c3ec7ab5e3a113",
+   "en": "Guard resistance +20％ Shield durability loss -5％"
+  },
+  {
+   "index": 311,
+   "source_sha256": "5697186ccdf79936e14d14e96ce7099a88a999ef321956a85195c510e4609b79",
+   "en": "Guard resistance +30％ Shield durability loss -7％"
+  },
+  {
+   "index": 312,
+   "source_sha256": "26c751d50330c50b84caf009c1e3d7c2375bbc74b90469a13fb221478b94bffb",
+   "en": "Guard resistance +40％ Shield durability loss -10％"
+  },
+  {
+   "index": 313,
+   "source_sha256": "99d77914fc3a19d6dfda0d01344e8649089306dc1efeb50f5b24ae75fd0e736e",
+   "en": "Guard resistance +50％ Shield durability loss -13％"
+  },
+  {
+   "index": 314,
+   "source_sha256": "265ad24e7d62daa22b755878a3dbf1683d1860848835943bae8abb11cedb9b40",
+   "en": "Guard resistance +60％ Shield durability loss -16％"
+  },
+  {
+   "index": 315,
+   "source_sha256": "8f5bd293468e5f51c5989dc17c16e56e95ffa0a15d187b198b13f57789bc69c0",
+   "en": "Guard resistance +70％ Shield durability loss -19％"
+  },
+  {
+   "index": 316,
+   "source_sha256": "7fc7705475d7913de0b2c5decd6fc90cc62dd765eff5bcf33851e71affd044d9",
+   "en": "Guard resistance +85％ Shield durability loss -25％"
+  },
+  {
+   "index": 317,
+   "source_sha256": "93a1bbd77964d8f69261d34c8f2c1296b2ba0dd902ddda3e0a970bafe6a35751",
+   "en": "Guard resistance +100％ Shield durability loss -31％"
+  },
+  {
+   "index": 318,
+   "source_sha256": "2e53baf434fe46862eac345b535bbb77f135c15684b00db0070a739877ed6149",
+   "en": "Guard resistance +120％ Shield durability loss -40％"
+  },
+  {
+   "index": 319,
+   "source_sha256": "b4fe268cd8301cf0bb6df6c9e22b7fd1b48fe2f84a0a1bcea04296b8611b1d7b",
+   "en": "Guard resistance +150％ Shield durability loss -50％"
+  },
+  {
+   "index": 320,
+   "source_sha256": "b4fe268cd8301cf0bb6df6c9e22b7fd1b48fe2f84a0a1bcea04296b8611b1d7b",
+   "en": "Guard resistance +150％ Shield durability loss -50％"
+  },
+  {
+   "index": 321,
+   "source_sha256": "5712b461bc19280e228e494060b5dac488d6fe8f5a3d45a5f66a12fda23910fe",
+   "en": "##(SKILL_POWER): 20"
+  },
+  {
+   "index": 322,
+   "source_sha256": "f63c7332db4886f6b10853696b38556e9881f08722422936401bee441fe13039",
+   "en": "##(SKILL_POWER): 24  Shockwave distance 110％"
+  },
+  {
+   "index": 323,
+   "source_sha256": "ef5ac7588fabd7bd5960728c661b01fee9ea5450f4e9e792c0ff8236e8c3c559",
+   "en": "##(SKILL_POWER): 28  Shockwave distance 120％"
+  },
+  {
+   "index": 324,
+   "source_sha256": "ebeaedb741e430d952e55df30a696978aa448da294181281d07a7e5c8ecdcf88",
+   "en": "##(SKILL_POWER): 32  Shockwave distance 130％"
+  },
+  {
+   "index": 325,
+   "source_sha256": "da365cd86d8fcc90fd57bc597963d4aa427875eaddffde99d2aa4725d81706ff",
+   "en": "##(SKILL_POWER): 36  Shockwave distance 140％"
+  },
+  {
+   "index": 326,
+   "source_sha256": "15a4d41d9075ce89f8ea2c6490d7f6c7a75c1e143cdf8d929e13f5c91953aaf7",
+   "en": "##(SKILL_POWER): 40  Shockwave distance 150％"
+  },
+  {
+   "index": 327,
+   "source_sha256": "707be89d52285bb312aa9867189c11a3bf141a351ab992606bcc20b1711bb39c",
+   "en": "##(SKILL_POWER): 60  Shockwave distance 190％"
+  },
+  {
+   "index": 328,
+   "source_sha256": "707be89d52285bb312aa9867189c11a3bf141a351ab992606bcc20b1711bb39c",
+   "en": "##(SKILL_POWER): 60  Shockwave distance 190％"
+  },
+  {
+   "index": 329,
+   "source_sha256": "0659278a588af1a2c9e0fd75306baa548ba6d5a2c4976a197b48b2efe0f3b2b0",
+   "en": "##(SKILL_POWER): 150  ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 330,
+   "source_sha256": "c255e899bf4c1a26d349c8867668d8f7ca9b6563af20e232a7744e7554cbf180",
+   "en": "##(SKILL_POWER): 155  ##(YODAMAGE_UP_RATE)105％"
+  },
+  {
+   "index": 331,
+   "source_sha256": "e881c2c4f198a3b48c540940e38811e7a27199fd91953b98804e370bd7a7ef73",
+   "en": "##(SKILL_POWER): 162  ##(YODAMAGE_UP_RATE)110％"
+  },
+  {
+   "index": 332,
+   "source_sha256": "7e0ce21525047570a1c742fe33fe75f58c1338823a4c253d685367583c230ea9",
+   "en": "##(SKILL_POWER): 169  ##(YODAMAGE_UP_RATE)115％"
+  },
+  {
+   "index": 333,
+   "source_sha256": "4eb984c0e9bd80be42b95373941942d3976eddaf7c35b9b7a85f63762b731354",
+   "en": "##(SKILL_POWER): 176  ##(YODAMAGE_UP_RATE)120％"
+  },
+  {
+   "index": 334,
+   "source_sha256": "19e60af7272d3789d4988bef24335a4927ee883bd87b22a5ae0899c88c6f4ec4",
+   "en": "##(SKILL_POWER): 182  ##(YODAMAGE_UP_RATE)130％"
+  },
+  {
+   "index": 335,
+   "source_sha256": "345fe2544ca8e2f4603de0eab7f8db14838b0ad9223bc0d008538fca21668eb3",
+   "en": "##(SKILL_POWER): 189  ##(YODAMAGE_UP_RATE)140％"
+  },
+  {
+   "index": 336,
+   "source_sha256": "4502cace9bbfda1210fd4b0cac3a7248a382c6bb283421d78c29a4943b9f482d",
+   "en": "##(SKILL_POWER): 196  ##(YODAMAGE_UP_RATE)155％"
+  },
+  {
+   "index": 337,
+   "source_sha256": "48dd4b68acf25c400c48daccb865250ecd805584d701a0244179b0783c07e291",
+   "en": "##(SKILL_POWER): 203  ##(YODAMAGE_UP_RATE)170％"
+  },
+  {
+   "index": 338,
+   "source_sha256": "f4b3771f38dd411e65ffa942ff641c99c7aa1575118b5ea5c3f19f36bb790322",
+   "en": "##(SKILL_POWER): 230  ##(YODAMAGE_UP_RATE)200％"
+  },
+  {
+   "index": 339,
+   "source_sha256": "f4b3771f38dd411e65ffa942ff641c99c7aa1575118b5ea5c3f19f36bb790322",
+   "en": "##(SKILL_POWER): 230  ##(YODAMAGE_UP_RATE)200％"
+  },
+  {
+   "index": 340,
+   "source_sha256": "8461d8968febeee211d5a3f0a24762cdc7827693a635a57e5ea90ea09af00f41",
+   "en": "##(SKILL_POWER): 18  Direction changes: 2  ##(YODAMAGE_UP_RATE)30％"
+  },
+  {
+   "index": 341,
+   "source_sha256": "e5857d10db28a05527c1b90275a456bf090c90af1353e6214aba3904352a4c8f",
+   "en": "##(SKILL_POWER): 20  Direction changes: 2  ##(YODAMAGE_UP_RATE)35％"
+  },
+  {
+   "index": 342,
+   "source_sha256": "4727a810c9b8da55d533c0fcac2b4c3318a0b023a3a122a286d61c7133e26fe7",
+   "en": "##(SKILL_POWER): 22  Direction changes: 2  ##(YODAMAGE_UP_RATE)45％"
+  },
+  {
+   "index": 343,
+   "source_sha256": "8b9a7ae42b1913be10660c9f243db50bba90825b0e5c90b38f450da6e76da430",
+   "en": "##(SKILL_POWER): 24  Direction changes: 3  ##(YODAMAGE_UP_RATE)55％"
+  },
+  {
+   "index": 344,
+   "source_sha256": "ccb0990548d410e9193d63f5dea943bbfee55c73e4add2f04d7db39ec0ac628f",
+   "en": "##(SKILL_POWER): 26  Direction changes: 3  ##(YODAMAGE_UP_RATE)70％"
+  },
+  {
+   "index": 345,
+   "source_sha256": "1c3693e24d1a36b564423e96e3be09859e9ff8477237cf5408156cb71a46932a",
+   "en": "##(SKILL_POWER): 28  Direction changes: 3  ##(YODAMAGE_UP_RATE)85％"
+  },
+  {
+   "index": 346,
+   "source_sha256": "a5812ef3a603325161c8b4896fe91c73af1cc1528828cbe989efd0f4e4e4b740",
+   "en": "##(SKILL_POWER): 30  Direction changes: 4  ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 347,
+   "source_sha256": "a5812ef3a603325161c8b4896fe91c73af1cc1528828cbe989efd0f4e4e4b740",
+   "en": "##(SKILL_POWER): 30  Direction changes: 4  ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 348,
+   "source_sha256": "c9f947a6f81400eb4c3925d7f65dfd4bc1c701e3d0a61f4328203b4966e72122",
+   "en": "##(SKILL_POWER): 440　Shockwave ##(SKILL_POWER): 165"
+  },
+  {
+   "index": 349,
+   "source_sha256": "a19a116ad3f945eb180f2df6b7592ffc50b601ae10d1e8ffde5653673c57b3b6",
+   "en": "##(SKILL_POWER): 480　Shockwave ##(SKILL_POWER): 180　##(SKILL_RANGE_SHOCK_WAVE): 105％"
+  },
+  {
+   "index": 350,
+   "source_sha256": "1bd788d591edb1d171eab4e7b102f1f7824c9cc35cc4cc5385c57efb6813780c",
+   "en": "##(SKILL_POWER): 520　Shockwave ##(SKILL_POWER): 195　##(SKILL_RANGE_SHOCK_WAVE): 110％"
+  },
+  {
+   "index": 351,
+   "source_sha256": "a9d6ad953113381db7a152a494d7dad1958e3647d17e66acf80db09c1fddac5b",
+   "en": "##(SKILL_POWER): 560　Shockwave ##(SKILL_POWER): 210　##(SKILL_RANGE_SHOCK_WAVE): 115％"
+  },
+  {
+   "index": 352,
+   "source_sha256": "04a1d2900bdc362ce800dc65f47724df8b28b96a1b2e6a6a5f57213b5bcc6f46",
+   "en": "##(SKILL_POWER): 600　Shockwave ##(SKILL_POWER): 225　##(SKILL_RANGE_SHOCK_WAVE): 120％"
+  },
+  {
+   "index": 353,
+   "source_sha256": "cecda950310aee2b6308e52228a01c70632c46f215b37da08c4648b582699c20",
+   "en": "##(SKILL_POWER): 640　Shockwave ##(SKILL_POWER): 248　##(SKILL_RANGE_SHOCK_WAVE): 125％"
+  },
+  {
+   "index": 354,
+   "source_sha256": "9b08ab0618fe29bccb809b4027c6a7ff1085a38c84d98756ca4b6a456ed38ab8",
+   "en": "##(SKILL_POWER): 680　Shockwave ##(SKILL_POWER): 270　##(SKILL_RANGE_SHOCK_WAVE): 130％"
+  },
+  {
+   "index": 355,
+   "source_sha256": "1cfe72c5e394f83aa2ede2ef9d76b42a59cf6745664b0411c6a122f51577701d",
+   "en": "##(SKILL_POWER): 740　Shockwave ##(SKILL_POWER): 300　##(SKILL_RANGE_SHOCK_WAVE): 135％"
+  },
+  {
+   "index": 356,
+   "source_sha256": "1a15e0b6c2f9bbcce89f959256e5244d1469cf7557b82af1ef72b697f59ecb74",
+   "en": "##(SKILL_POWER): 800　Shockwave ##(SKILL_POWER): 330　##(SKILL_RANGE_SHOCK_WAVE): 140％"
+  },
+  {
+   "index": 357,
+   "source_sha256": "000755939e1aaf333b8a6a436276b0c6e5d70b5d34cc3855e2b567c3b9bae8ad",
+   "en": "##(SKILL_POWER): 900　Shockwave ##(SKILL_POWER): 400　##(SKILL_RANGE_SHOCK_WAVE): 190％"
+  },
+  {
+   "index": 358,
+   "source_sha256": "000755939e1aaf333b8a6a436276b0c6e5d70b5d34cc3855e2b567c3b9bae8ad",
+   "en": "##(SKILL_POWER): 900　Shockwave ##(SKILL_POWER): 400　##(SKILL_RANGE_SHOCK_WAVE): 190％"
+  },
+  {
+   "index": 359,
+   "source_sha256": "bec9c0702f4ccb7acefcabec4fd69efa570c49d3b39891ee249dc46b87cbf080",
+   "en": "##(SKILL_POWER): 100  Duration of invincibility: 2.0s"
+  },
+  {
+   "index": 360,
+   "source_sha256": "cb5a984774e2996179d950a0defb0567f5705e18179b2e1e1edb8d17c19ca7fa",
+   "en": "##(SKILL_POWER): 110  Duration of invincibility: 2.3s"
+  },
+  {
+   "index": 361,
+   "source_sha256": "90c7870d4da8e716bbbd73e5968f8b6266b6bfcb29cbd9b72004c0e7202d4bb3",
+   "en": "##(SKILL_POWER): 120  Duration of invincibility: 2.7s"
+  },
+  {
+   "index": 362,
+   "source_sha256": "030dac676025c8f053d3f7b514d91393357be34eaa45c306d957bb154701b9ca",
+   "en": "##(SKILL_POWER): 130  Duration of invincibility: 3.0s"
+  },
+  {
+   "index": 363,
+   "source_sha256": "e83ca585b698fe6c12878343dc10bca77c0739580db4bb4670c1f434a144276b",
+   "en": "##(SKILL_POWER): 140  Duration of invincibility: 3.3s"
+  },
+  {
+   "index": 364,
+   "source_sha256": "273ecda4aec47daffc09c283964e95884e1b82a70f9f4b4aed6da0beac80f767",
+   "en": "##(SKILL_POWER): 150  Duration of invincibility: 3.7s"
+  },
+  {
+   "index": 365,
+   "source_sha256": "a65b15fc0562c4c4ee7b85d9e3b1bc305042aa7cfb845a1cc80ebdb4f69d5e3c",
+   "en": "##(SKILL_POWER): 160  Duration of invincibility: 4.0s"
+  },
+  {
+   "index": 366,
+   "source_sha256": "c84eb3b675909fd433ff893c8dd34ebe87e76157ad7a146217fe75413ee0af3a",
+   "en": "##(SKILL_POWER): 180  Duration of invincibility: 4.3s"
+  },
+  {
+   "index": 367,
+   "source_sha256": "7cd3d633ff7a83ffd57a01a07ade7e351ecebf10b94fcac9f8d104d9e752334f",
+   "en": "##(SKILL_POWER): 190  Duration of invincibility: 4.7s"
+  },
+  {
+   "index": 368,
+   "source_sha256": "398d857a3113fdb2ca55cb6a9f215ba5ce482b6f92f04b015464eaf6e58d0bf9",
+   "en": "##(SKILL_POWER): 250  Duration of invincibility: 5.0s"
+  },
+  {
+   "index": 369,
+   "source_sha256": "398d857a3113fdb2ca55cb6a9f215ba5ce482b6f92f04b015464eaf6e58d0bf9",
+   "en": "##(SKILL_POWER): 250  Duration of invincibility: 5.0s"
+  },
+  {
+   "index": 370,
+   "source_sha256": "5712b461bc19280e228e494060b5dac488d6fe8f5a3d45a5f66a12fda23910fe",
+   "en": "##(SKILL_POWER): 20"
+  },
+  {
+   "index": 371,
+   "source_sha256": "6cf27992d2d613d1b9cd82036e012f4ce9cf9b20162b0b8ff0566c6d626ed23d",
+   "en": "##(SKILL_POWER): 40"
+  },
+  {
+   "index": 372,
+   "source_sha256": "ef0a6559f0e7ee8e7711665041997e56cb1961255e3664e086590d8d6b8ce177",
+   "en": "##(SKILL_POWER): 60"
+  },
+  {
+   "index": 373,
+   "source_sha256": "ef0a6559f0e7ee8e7711665041997e56cb1961255e3664e086590d8d6b8ce177",
+   "en": "##(SKILL_POWER): 60"
+  },
+  {
+   "index": 374,
+   "source_sha256": "87c91b89f8979b227d1d9e88cbfa2dbc5daa5122854b5cb8e4e768edc08bc59e",
+   "en": "##(SKILL_POWER): 100  # of spins: 1"
+  },
+  {
+   "index": 375,
+   "source_sha256": "8fa0a37015c36728703787ae516844528c845bc6f59e9b547950fa46a5f025e5",
+   "en": "##(SKILL_POWER): 110  # of spins: 2"
+  },
+  {
+   "index": 376,
+   "source_sha256": "0aad30b66e2ea43de921e19cb7cbb2407c8ea15b6a8d4f3b32a42e935ebf11db",
+   "en": "##(SKILL_POWER): 120  # of spins: 3"
+  },
+  {
+   "index": 377,
+   "source_sha256": "1ba2d0c885bf8648eacfd5a50beb7fb9db994578e587ac6771d634d577fa6d91",
+   "en": "##(SKILL_POWER): 130  # of spins: 4"
+  },
+  {
+   "index": 378,
+   "source_sha256": "fe492a2c3855690fdc38041875853f7076bfef7db8740f6eee640e950a7996b0",
+   "en": "##(SKILL_POWER): 150  # of spins: 5"
+  },
+  {
+   "index": 379,
+   "source_sha256": "fe492a2c3855690fdc38041875853f7076bfef7db8740f6eee640e950a7996b0",
+   "en": "##(SKILL_POWER): 150  # of spins: 5"
+  },
+  {
+   "index": 380,
+   "source_sha256": "ce173e8e3f9eb29c9f224fa9fa50149bf73611705b6669ee86beb0974d31d385",
+   "en": "##(YODAMAGE_UP_RATE)10％ while Berserk"
+  },
+  {
+   "index": 381,
+   "source_sha256": "775deea8052121ddc5b9c4081410a070f7dcd0ce71a44ad55a1eea44f5396edd",
+   "en": "##(YODAMAGE_UP_RATE)15％ while Berserk"
+  },
+  {
+   "index": 382,
+   "source_sha256": "e83c845c1008e4f4cf7ce58334e16074d759b6d7b3db078c354d05448f7d0cba",
+   "en": "##(YODAMAGE_UP_RATE)20％ while Berserk"
+  },
+  {
+   "index": 383,
+   "source_sha256": "8b69d7831a72361f7482ffb51e4735ebff49ea869f027483a30ce424b1a4371c",
+   "en": "##(YODAMAGE_UP_RATE)25％ while Berserk"
+  },
+  {
+   "index": 384,
+   "source_sha256": "8746e238c7c30adeca2dd205d57a3075d9c07703515926a2429603aeac8909d6",
+   "en": "##(YODAMAGE_UP_RATE)30％ while Berserk"
+  },
+  {
+   "index": 385,
+   "source_sha256": "4ecaec231072ef97e686977ce7d273e20c9e97ce102eb020dcc8a2c94f56f97f",
+   "en": "##(YODAMAGE_UP_RATE)35％ while Berserk"
+  },
+  {
+   "index": 386,
+   "source_sha256": "b8af922332daf842b741ff5c625511b3447ec050a272a16c9683285e511f54ee",
+   "en": "##(YODAMAGE_UP_RATE)40％ while Berserk"
+  },
+  {
+   "index": 387,
+   "source_sha256": "e05a23a0aadcc6888658789253af8f3a4a1ee94c1775bd3be9c88274d2f9b2bc",
+   "en": "##(YODAMAGE_UP_RATE)45％ while Berserk"
+  },
+  {
+   "index": 388,
+   "source_sha256": "10bdef719158da58b27777d165a1559f5f86746366081ce045118bf69ce79f5b",
+   "en": "##(YODAMAGE_UP_RATE)50％ while Berserk"
+  },
+  {
+   "index": 389,
+   "source_sha256": "d54e2d1543c32ee2c3ae98820cfd11a20d884ebb1f5ba6031f738534971bbf43",
+   "en": "##(YODAMAGE_UP_RATE)60％ while Berserk"
+  },
+  {
+   "index": 390,
+   "source_sha256": "d54e2d1543c32ee2c3ae98820cfd11a20d884ebb1f5ba6031f738534971bbf43",
+   "en": "##(YODAMAGE_UP_RATE)60％ while Berserk"
+  },
+  {
+   "index": 391,
+   "source_sha256": "ae2912b4d32456a876939112657421c485665fc063ae073e3d8a9f36ca96e065",
+   "en": "##(YODAMAGE_UP_RATE)30％ while HP decreased"
+  },
+  {
+   "index": 392,
+   "source_sha256": "b8ba0929d9e665dc2947d079358cebc16ccf07df3be46c0f8bc6c2b7e2c86eb0",
+   "en": "##(YODAMAGE_UP_RATE)40％ while HP decreased"
+  },
+  {
+   "index": 393,
+   "source_sha256": "1c0ef55ffb853c640a64157e30bb145e87611bc36d43e46e57f9c128f3d87088",
+   "en": "##(YODAMAGE_UP_RATE)50％ while HP decreased"
+  },
+  {
+   "index": 394,
+   "source_sha256": "43d0ff36b99d916044bbb9d622f123674e5708166623edb54b09d56c77b9601d",
+   "en": "##(YODAMAGE_UP_RATE)60％ while HP decreased"
+  },
+  {
+   "index": 395,
+   "source_sha256": "4bc032c7ff2d01122563c7aae47c333c9b9b84a543172933de5dd96bad9fa888",
+   "en": "##(YODAMAGE_UP_RATE)70％ while HP decreased"
+  },
+  {
+   "index": 396,
+   "source_sha256": "95a5db4ae2196f192a8023173e645261b4f3feefe0e1f6f34ac8bfdaeb678f02",
+   "en": "##(YODAMAGE_UP_RATE)80％ while HP decreased"
+  },
+  {
+   "index": 397,
+   "source_sha256": "ca1fd35b7fc4ba552d12b7a1e6865ef0042bef206fb64e95b05c95763d5e219c",
+   "en": "##(YODAMAGE_UP_RATE)100％ while HP decreased"
+  },
+  {
+   "index": 398,
+   "source_sha256": "ca1fd35b7fc4ba552d12b7a1e6865ef0042bef206fb64e95b05c95763d5e219c",
+   "en": "##(YODAMAGE_UP_RATE)100％ while HP decreased"
+  },
+  {
+   "index": 399,
+   "source_sha256": "03a2b843ddbbaccffc7a4dc8c1ca7434a3015121c893776b208e693da5440563",
+   "en": "Uses: 3  Number of clones: 1  Duration: 10s"
+  },
+  {
+   "index": 400,
+   "source_sha256": "b3fc2dd148c6d07efc9be778ad8075456f71e1981b02643d57657e403919dbd8",
+   "en": "Uses: 3  Number of clones: 1  Duration: 15s"
+  },
+  {
+   "index": 401,
+   "source_sha256": "15c3493dbc62f45bd65bba6e9e5c0863097dab16e9ad6056922904ed5f6fae3f",
+   "en": "Uses: 3  Number of clones: 2  Duration: 20s"
+  },
+  {
+   "index": 402,
+   "source_sha256": "15c3493dbc62f45bd65bba6e9e5c0863097dab16e9ad6056922904ed5f6fae3f",
+   "en": "Uses: 3  Number of clones: 2  Duration: 20s"
+  },
+  {
+   "index": 403,
+   "source_sha256": "85bebd5d30565ea5d6aecc15668e4f713b5d2e214b9ce45228b6e65357e137ce",
+   "en": "Uses: 3 Current HP decreased by 50％  Duration +3s"
+  },
+  {
+   "index": 404,
+   "source_sha256": "ea625a492d2ed34a06f68920ffd738ebf9b1835b7553f514f6468df51765133d",
+   "en": "Uses: 4 Current HP decreased by 60％  Duration +6s"
+  },
+  {
+   "index": 405,
+   "source_sha256": "ba989e2e867024f60bbf994083a2154f8c879ed025366cd0b97858515503d557",
+   "en": "Uses: 5 Current HP decreased by 70％  Duration +12s"
+  },
+  {
+   "index": 406,
+   "source_sha256": "ba989e2e867024f60bbf994083a2154f8c879ed025366cd0b97858515503d557",
+   "en": "Uses: 5 Current HP decreased by 70％  Duration +12s"
+  },
+  {
+   "index": 407,
+   "source_sha256": "89ac1218b093f883b52eae66a277bbc52830ae93d6cff37c0f977e42f0cb71d8",
+   "en": "Number of uses: 3 Time effective: 8s"
+  },
+  {
+   "index": 408,
+   "source_sha256": "2c1a79e24fe62018851a3a27bd32b1521357cdd3ed9d3d741878be5c0fc5a224",
+   "en": "Number of uses: 3 Time effective: 12s"
+  },
+  {
+   "index": 409,
+   "source_sha256": "7d76c9e24aeff7ec4b63ad5e92c39d8a3dc2ab436f4bf2ba726c726d2b979489",
+   "en": "Number of uses: 4 Time effective: 12s"
+  },
+  {
+   "index": 410,
+   "source_sha256": "74587ced60b74478c9cf4b0a8d65e2b8edb82e3be5ede748ed62c73f184d7d57",
+   "en": "Number of uses: 4 Time effective: 16s"
+  },
+  {
+   "index": 411,
+   "source_sha256": "7e782a76b59b49fc31770e53da038f807bf5da2a8d266fbab8b9cde20a73fcf2",
+   "en": "Number of uses: 5 Time effective: 20s"
+  },
+  {
+   "index": 412,
+   "source_sha256": "7e782a76b59b49fc31770e53da038f807bf5da2a8d266fbab8b9cde20a73fcf2",
+   "en": "Number of uses: 5 Time effective: 20s"
+  },
+  {
+   "index": 413,
+   "source_sha256": "7732118e64418c01eefce096156ed4497731f235690fe94911bf6bb30cea4fc7",
+   "en": "##(YODAMAGE_UP_RATE)30％ to throws"
+  },
+  {
+   "index": 414,
+   "source_sha256": "e2a2c51e667bcd07c25246aff1d278c71a06e5a44ef8e07ae1f1e0911c0d28e4",
+   "en": "##(YODAMAGE_UP_RATE)45％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 105％"
+  },
+  {
+   "index": 415,
+   "source_sha256": "e626f28212a0863bcb74f9a63ad76ed8a772580075c1773f887904b1f68e9297",
+   "en": "##(YODAMAGE_UP_RATE)60％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 110％"
+  },
+  {
+   "index": 416,
+   "source_sha256": "fcd01ca9fb3c920915cc1f9e830898f466a428144e2cadd9ef683d8495da35f3",
+   "en": "##(YODAMAGE_UP_RATE)75％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 115％"
+  },
+  {
+   "index": 417,
+   "source_sha256": "1c7f2e1cd9e1632deb6b0fcd28279f83a511333cce520e1e261f8a9917ef1260",
+   "en": "##(YODAMAGE_UP_RATE)90％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 120％"
+  },
+  {
+   "index": 418,
+   "source_sha256": "8061343a47e6c3ad7ba5e10720b19a9f1e68deb0a562574f5013f5b6620370d1",
+   "en": "##(YODAMAGE_UP_RATE)110％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 125％"
+  },
+  {
+   "index": 419,
+   "source_sha256": "7c7553a1bf47d320f6a87874de03e4ed5b25120fbc0ea628acd14f2d0d822cb1",
+   "en": "##(YODAMAGE_UP_RATE)130％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 130％"
+  },
+  {
+   "index": 420,
+   "source_sha256": "cd0c98ba59bd72c15a20c2e253c799f7d6f92266bb775ff028bd04d00cfa40f6",
+   "en": "##(YODAMAGE_UP_RATE)160％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 135％"
+  },
+  {
+   "index": 421,
+   "source_sha256": "e58b5857d1650539612e0af72d74a1739a9a33cb3dc603ec2fde7f041766481e",
+   "en": "##(YODAMAGE_UP_RATE)190％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 140％"
+  },
+  {
+   "index": 422,
+   "source_sha256": "c3dcb1640b345ce9a4424d650c5d29cffe52a0aeb5357f699faa7c7583d2bb50",
+   "en": "##(YODAMAGE_UP_RATE)250％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 180％"
+  },
+  {
+   "index": 423,
+   "source_sha256": "c3dcb1640b345ce9a4424d650c5d29cffe52a0aeb5357f699faa7c7583d2bb50",
+   "en": "##(YODAMAGE_UP_RATE)250％ to throws  ##(SKILL_RANGE_SHOCK_WAVE): 180％"
+  },
+  {
+   "index": 424,
+   "source_sha256": "5e8751240c5ff90d85653f93b3ab664ddd628df553d6c4dcb5f48afe26e7dab7",
+   "en": "##(YODAMAGE_UP_RATE)20％ to barehanded attacks"
+  },
+  {
+   "index": 425,
+   "source_sha256": "756219b244dc027a73734f0aa890a120e0fd605dc5d352ad201e1f309a37ef16",
+   "en": "##(YODAMAGE_UP_RATE)40％ to barehanded attacks"
+  },
+  {
+   "index": 426,
+   "source_sha256": "d08ce6d7c2bac0341451ba13a3a2b4f5adc8e5c950ee74f729dd241c68f8c78c",
+   "en": "##(YODAMAGE_UP_RATE)60％ to barehanded attacks"
+  },
+  {
+   "index": 427,
+   "source_sha256": "8261e91a975357ce7fb156c57e651c91dbba576df3970a70ef93c0c67f974d9a",
+   "en": "##(YODAMAGE_UP_RATE)80％ to barehanded attacks"
+  },
+  {
+   "index": 428,
+   "source_sha256": "79b495ec3ef3c64057131fbc3830034f0a5e5a87e454c53eb6d87c0616e86b1e",
+   "en": "##(YODAMAGE_UP_RATE)100％ to barehanded attacks"
+  },
+  {
+   "index": 429,
+   "source_sha256": "3981e3d1b065301a47fc0180d3abf68a6fbe2b3070baa2588b74e93d34234829",
+   "en": "##(YODAMAGE_UP_RATE)120％ to barehanded attacks"
+  },
+  {
+   "index": 430,
+   "source_sha256": "8033f52ecb4f9d4dd4a7bdb9eecd06b30486c12d190d6e22d054e62849fd7474",
+   "en": "##(YODAMAGE_UP_RATE)140％ to barehanded attacks"
+  },
+  {
+   "index": 431,
+   "source_sha256": "c1842a6575bb59a5711be6b3448fcd94b6b2df364f21a33dca2bb7904868d858",
+   "en": "##(YODAMAGE_UP_RATE)160％ to barehanded attacks"
+  },
+  {
+   "index": 432,
+   "source_sha256": "776b1f0911bf11039b013a3a4fae207daf82a57064b5de01323ec19f7afe2ce2",
+   "en": "##(YODAMAGE_UP_RATE)180％ to barehanded attacks"
+  },
+  {
+   "index": 433,
+   "source_sha256": "56c63bc4329af8d4ade97c2865a1c346d87904904bda95148d16752d76eb8780",
+   "en": "##(YODAMAGE_UP_RATE)250％ to barehanded attacks"
+  },
+  {
+   "index": 434,
+   "source_sha256": "56c63bc4329af8d4ade97c2865a1c346d87904904bda95148d16752d76eb8780",
+   "en": "##(YODAMAGE_UP_RATE)250％ to barehanded attacks"
+  },
+  {
+   "index": 435,
+   "source_sha256": "bad7617d537dda43ad9995ef2f5f079a702527c98bffefbea6cce5962ed20e83",
+   "en": "Allows glide attacks"
+  },
+  {
+   "index": 436,
+   "source_sha256": "3404c7e46d67792813d4c49b6250aa99b70a2dd710754416d91a667fe33edfc2",
+   "en": "Drop bombs during glide attacks"
+  },
+  {
+   "index": 437,
+   "source_sha256": "aa5ad0ad0726bb0eef10adcbf9a4f4b38576e04806ff6078e01c507222d287ef",
+   "en": "##(SKILL_POWER) of bombs: 70  Bombs: 4"
+  },
+  {
+   "index": 438,
+   "source_sha256": "8ba2407da743a9dbc1d8f9941e4023cf9b2befcc2402d73f20b7877fcfbc2d67",
+   "en": "##(SKILL_POWER) of bombs: 80  Bombs: 5"
+  },
+  {
+   "index": 439,
+   "source_sha256": "d7fefdebaddbba0be6e5fd080018190fadd647fb2834d317accb4723f299a051",
+   "en": "##(SKILL_POWER) of bombs: 90  Bombs: 6"
+  },
+  {
+   "index": 440,
+   "source_sha256": "d7fefdebaddbba0be6e5fd080018190fadd647fb2834d317accb4723f299a051",
+   "en": "##(SKILL_POWER) of bombs: 90  Bombs: 6"
+  },
+  {
+   "index": 441,
+   "source_sha256": "b15857e36908f538dacb5561153a10399c79687edde60745f36ef5b0406b8655",
+   "en": "##(SKILL_POWER): 110  ##(SKILL_POWER) (Lightning): 36"
+  },
+  {
+   "index": 442,
+   "source_sha256": "a2b1543d0610b3ccdfe8b3e7092b4f0d018b6e6975a7672133fbae035dafef2a",
+   "en": "##(SKILL_POWER): 120  ##(SKILL_POWER) (Lightning): 39"
+  },
+  {
+   "index": 443,
+   "source_sha256": "c9296b86973b67469dcb1476e702534af8e2745fa76c75dbc758c242030223a5",
+   "en": "##(SKILL_POWER): 135  ##(SKILL_POWER) (Lightning): 42"
+  },
+  {
+   "index": 444,
+   "source_sha256": "abab72dba36e4790d9c88ce9f78f121ffe348bdef934a2d2bccfaae90c070739",
+   "en": "##(SKILL_POWER): 150  ##(SKILL_POWER) (Lightning): 47"
+  },
+  {
+   "index": 445,
+   "source_sha256": "b7fa3b06d02e5d60542e0f1e578757f057782515dd37fbfe9175a0eab7c6e430",
+   "en": "##(SKILL_POWER): 170  ##(SKILL_POWER) (Lightning): 55"
+  },
+  {
+   "index": 446,
+   "source_sha256": "b7fa3b06d02e5d60542e0f1e578757f057782515dd37fbfe9175a0eab7c6e430",
+   "en": "##(SKILL_POWER): 170  ##(SKILL_POWER) (Lightning): 55"
+  },
+  {
+   "index": 447,
+   "source_sha256": "ba1c1ad839d5455bf91a05d6183b7d6874e5d6442c4bf8ae8ede0325c8f4223e",
+   "en": "##(SKILL_POWER): 40  Duration: 1.5s"
+  },
+  {
+   "index": 448,
+   "source_sha256": "e66e798b09d4c3a6ac071aa2daa49e85c7c5c4da026c0a754151aa7a70f1339e",
+   "en": "##(SKILL_POWER): 45  Duration: 2.0s"
+  },
+  {
+   "index": 449,
+   "source_sha256": "21c8381fb84e0ae5f50252ef4b15c50d4ffd919e595158d2eaa31dc7eac23963",
+   "en": "##(SKILL_POWER): 50  Duration: 2.5s"
+  },
+  {
+   "index": 450,
+   "source_sha256": "34d135ac0b7e4609ab8e9e99b5d66bd48c37bf61fff18ff49a1ccdb26068738d",
+   "en": "##(SKILL_POWER): 60  Duration: 3.0s"
+  },
+  {
+   "index": 451,
+   "source_sha256": "418c9d7d03005ad87de13657822d034cb1d8f2a67a5c1093b74e30062357997e",
+   "en": "##(SKILL_POWER): 70  Duration: 4.0s"
+  },
+  {
+   "index": 452,
+   "source_sha256": "418c9d7d03005ad87de13657822d034cb1d8f2a67a5c1093b74e30062357997e",
+   "en": "##(SKILL_POWER): 70  Duration: 4.0s"
+  },
+  {
+   "index": 453,
+   "source_sha256": "b5c43a6f3a79fb673d8594901232836d52faa0e6acc8e00feb186fc818389597",
+   "en": "Number of uses: 4"
+  },
+  {
+   "index": 454,
+   "source_sha256": "12c41f4cffe42f0cb369338b98ffb68a9a316384cb1df0494e201fd48e693764",
+   "en": "Number of uses: 6"
+  },
+  {
+   "index": 455,
+   "source_sha256": "868690e6871fc2ca453f252bf83f066965900a359da5ddc0cbae03ba85b2b44e",
+   "en": "Number of uses: 8"
+  },
+  {
+   "index": 456,
+   "source_sha256": "99479c3b095fed17c1c096807985149cf691bd3c3afcb700214b41635460ccaa",
+   "en": "Number of uses: 10"
+  },
+  {
+   "index": 457,
+   "source_sha256": "bee486b19f78533212915e2ea354099ee76c719c58f14279cfd08762368e36f9",
+   "en": "Number of uses: 15"
+  },
+  {
+   "index": 458,
+   "source_sha256": "bee486b19f78533212915e2ea354099ee76c719c58f14279cfd08762368e36f9",
+   "en": "Number of uses: 15"
+  },
+  {
+   "index": 459,
+   "source_sha256": "6ec23bd059d3c09dea53e0a4e756b230ae9cc1e96e92242c819b8ee55ff13680",
+   "en": "Number of uses: 3"
+  },
+  {
+   "index": 460,
+   "source_sha256": "b5c43a6f3a79fb673d8594901232836d52faa0e6acc8e00feb186fc818389597",
+   "en": "Number of uses: 4"
+  },
+  {
+   "index": 461,
+   "source_sha256": "810c0390c5125823196cdb5960159b808acd375c7fcf8b212a95adb838407075",
+   "en": "Number of uses: 5"
+  },
+  {
+   "index": 462,
+   "source_sha256": "12c41f4cffe42f0cb369338b98ffb68a9a316384cb1df0494e201fd48e693764",
+   "en": "Number of uses: 6"
+  },
+  {
+   "index": 463,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 464,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 465,
+   "source_sha256": "08a895c09291349fb1d0495aca8784d4aea8c1915be4720c3cf91da97e4ddb93",
+   "en": "Number of uses: 3  Duration: 15s"
+  },
+  {
+   "index": 466,
+   "source_sha256": "2f8b3b732c8b282de242201942dde47ea16378db03fbd02b78e212ac9ccd8f89",
+   "en": "Number of uses: 4  Duration: 18s"
+  },
+  {
+   "index": 467,
+   "source_sha256": "bdefcffe5f1756176f158b4c9625c47e5c8e05c6f94d1eb0d52c5afad80f5a5c",
+   "en": "Number of uses: 5  Duration: 21s"
+  },
+  {
+   "index": 468,
+   "source_sha256": "50bfb849ec67a556d6cf35d9cc89666891379365cea4b21531922e265b22fb9c",
+   "en": "Number of uses: 6  Duration: 25s"
+  },
+  {
+   "index": 469,
+   "source_sha256": "4c02d3c52088ca40e549d6a91fb4c609e56f44700facfa173119c037bc05ec12",
+   "en": "Number of uses: 12  Duration: 35s"
+  },
+  {
+   "index": 470,
+   "source_sha256": "4c02d3c52088ca40e549d6a91fb4c609e56f44700facfa173119c037bc05ec12",
+   "en": "Number of uses: 12  Duration: 35s"
+  },
+  {
+   "index": 471,
+   "source_sha256": "3c2c691200d10cb88292ceba75a5823f1110951d4d3d8e9d1c3bfc03d4d66c94",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)20％"
+  },
+  {
+   "index": 472,
+   "source_sha256": "bd31b77cddd32d51a19d7b6d935ae0199a13cb7e2de62cb6e1349f2c7dc8b2de",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)25％"
+  },
+  {
+   "index": 473,
+   "source_sha256": "2c4aecf1720c393677da350a70657a03f2119b2ee2145b0c464f4d89fe20855c",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)30％"
+  },
+  {
+   "index": 474,
+   "source_sha256": "1f49f089277851230703f10890f3d196d4a7b1cdaa869b4ac433292702cf8e00",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)35％"
+  },
+  {
+   "index": 475,
+   "source_sha256": "8b824d50c155dde30d9884f698b4688e0b74c80abc045b0ee35f7931a05c2c8a",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)40％"
+  },
+  {
+   "index": 476,
+   "source_sha256": "17277fd91c52ef208217d657f97a573d016163d68946a44ea08b993ad5fc4344",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)50％"
+  },
+  {
+   "index": 477,
+   "source_sha256": "21f41a786f08d905d23632addb84e50daa9397974197433069e28d812f75de66",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)60％"
+  },
+  {
+   "index": 478,
+   "source_sha256": "a7e8f684e657d5ad17ab72106512449bf47cde0e0b8ae206590abe22a9483444",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)70％"
+  },
+  {
+   "index": 479,
+   "source_sha256": "2a55c9b10c6d974a2c6ee858830e1a7b5696847c1a23a8125e763ca606e0c21e",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)80％"
+  },
+  {
+   "index": 480,
+   "source_sha256": "4a9d6e6e46b3c4ff19bca0d4c55c4169c1914fe73c9181765164abf3895247cd",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 481,
+   "source_sha256": "4a9d6e6e46b3c4ff19bca0d4c55c4169c1914fe73c9181765164abf3895247cd",
+   "en": "Fire-enhanced physical attacks ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 482,
+   "source_sha256": "f30795ae41e7b23ea1ab07700748785185378925eaab4f0f19b7048c912661ca",
+   "en": "HP Recovered +2 Durability recovery +1"
+  },
+  {
+   "index": 483,
+   "source_sha256": "8a2434fe96c63b1aa94504e0740e967320c4bfa35cb2b3486418c19f729d35b5",
+   "en": "HP Recovered +3 Durability recovery +1"
+  },
+  {
+   "index": 484,
+   "source_sha256": "25f7bcbaf22d574faced3fdcb62cda288c0c6df52ef86c247228a8b6d558d46d",
+   "en": "HP Recovered +4 Durability recovery +1"
+  },
+  {
+   "index": 485,
+   "source_sha256": "68eed2a7febf024237570b5ac632c2016c1662ed57e37162d8f965a1b4b45b04",
+   "en": "HP Recovered +5 Durability recovery +2"
+  },
+  {
+   "index": 486,
+   "source_sha256": "cb040795a76f6766d1142fa721428af0a6c59bf3fe5201a4c00044d84954584c",
+   "en": "HP Recovered +6 Durability recovery +2"
+  },
+  {
+   "index": 487,
+   "source_sha256": "6a04f373d2fef6e0a989a31f8483c25231e4fe93b01f12b6dbff31f679fd4f3a",
+   "en": "HP Recovered +7 Durability recovery +2"
+  },
+  {
+   "index": 488,
+   "source_sha256": "37708ea00d452d032ab21b423af79f2a2a9448d78324ecf6b716f39c13499112",
+   "en": "HP Recovered +8 Durability recovery +3"
+  },
+  {
+   "index": 489,
+   "source_sha256": "0b75b181b94452ac2f1d1fd44fd926bdfadc83d388ad226454a4cc2d20d9a8c3",
+   "en": "HP Recovered +9 Durability recovery +3"
+  },
+  {
+   "index": 490,
+   "source_sha256": "257b7415e0229afab04e58b3e1cbfcff724d7016ee8c8ff60a861158cfb5c454",
+   "en": "HP Recovered +10 Durability recovery +3"
+  },
+  {
+   "index": 491,
+   "source_sha256": "3b8e799a30af11527be5a385f9dcff53e360357560972b03d182bd2893dacad1",
+   "en": "HP Recovered +15 Durability recovery +5"
+  },
+  {
+   "index": 492,
+   "source_sha256": "3b8e799a30af11527be5a385f9dcff53e360357560972b03d182bd2893dacad1",
+   "en": "HP Recovered +15 Durability recovery +5"
+  },
+  {
+   "index": 493,
+   "source_sha256": "2c4aae8d37c53c28fd4566e207fb77a49b184f0454fa0cb3ff5a30972c65dcc4",
+   "en": "##(HIDAMAGE_DOWN_RATE)20％ during Pump Up"
+  },
+  {
+   "index": 494,
+   "source_sha256": "1b5ae79c09eed8628b9358c51857014431511965cf0bc4e8dc3e8f98b4bf4e55",
+   "en": "##(HIDAMAGE_DOWN_RATE)25％ during Pump Up"
+  },
+  {
+   "index": 495,
+   "source_sha256": "bb7ef8a47ba5044eda4b829b815405d9d720f6eb8cf4d2f419e9ea056b06902c",
+   "en": "##(HIDAMAGE_DOWN_RATE)30％ during Pump Up"
+  },
+  {
+   "index": 496,
+   "source_sha256": "014d46144dd1733ffa2217a606b3737303c571128a7bc2a5b15f11beb8ed8192",
+   "en": "##(HIDAMAGE_DOWN_RATE)35％ during Pump Up"
+  },
+  {
+   "index": 497,
+   "source_sha256": "67a6a64e994f39111f86dbb0074210020566f7955157308729ae43c327f8622e",
+   "en": "##(HIDAMAGE_DOWN_RATE)50％ during Pump Up"
+  },
+  {
+   "index": 498,
+   "source_sha256": "67a6a64e994f39111f86dbb0074210020566f7955157308729ae43c327f8622e",
+   "en": "##(HIDAMAGE_DOWN_RATE)50％ during Pump Up"
+  },
+  {
+   "index": 499,
+   "source_sha256": "5662405e1992da7453af8e4fadb17dd833312b9ce6c83e4d054f52a8416722b0",
+   "en": "Damage resistance: 30"
+  },
+  {
+   "index": 500,
+   "source_sha256": "39872793bde9f38f7dadab722f774c571fd3e95be722e7dc9f1d0e40ca5aac83",
+   "en": "Damage resistance: 45"
+  },
+  {
+   "index": 501,
+   "source_sha256": "3a8bef023e28f6282160305d97dd198222ef11e9f93884995f16a9c5d88d436c",
+   "en": "Damage resistance: 60"
+  },
+  {
+   "index": 502,
+   "source_sha256": "4d5f33f05e06f31fa9feeea2d2a257160a59ac35468c39936cd8476b0bc1fc60",
+   "en": "Damage resistance: 80"
+  },
+  {
+   "index": 503,
+   "source_sha256": "8cda6a744b4b9873e525ff1a898e4f93678d5d46a5fd3c287cd05c32fe5c854a",
+   "en": "Damage resistance: 120"
+  },
+  {
+   "index": 504,
+   "source_sha256": "8cda6a744b4b9873e525ff1a898e4f93678d5d46a5fd3c287cd05c32fe5c854a",
+   "en": "Damage resistance: 120"
+  },
+  {
+   "index": 505,
+   "source_sha256": "942098af02c00881280cc542aac4ab19f51b10f07068629b75a33eea044ac1b8",
+   "en": "##(SKILL_POWER): 210"
+  },
+  {
+   "index": 506,
+   "source_sha256": "273e921ba16ed354b43ef09a7b1172ddb5bbdc1fa1b3fe808c0e94a2e932081d",
+   "en": "##(SKILL_POWER): 220  ##(SKILL_RANGE_SHOCK_WAVE): 105％"
+  },
+  {
+   "index": 507,
+   "source_sha256": "99d607c88d64089d401be9f37c4c06c52a3fa3524dfaa710ee4044a3dfe732c9",
+   "en": "##(SKILL_POWER): 230  ##(SKILL_RANGE_SHOCK_WAVE): 110％"
+  },
+  {
+   "index": 508,
+   "source_sha256": "0775e0a462103009cdc7fbe92dd13409d6b7769142ece3c293cb1a57b4b09e65",
+   "en": "##(SKILL_POWER): 240  ##(SKILL_RANGE_SHOCK_WAVE): 115％"
+  },
+  {
+   "index": 509,
+   "source_sha256": "0bec8b7c400aa018e416cf96422de200035377073f3f476c9724c7ba799a3a9d",
+   "en": "##(SKILL_POWER): 250  ##(SKILL_RANGE_SHOCK_WAVE): 120％"
+  },
+  {
+   "index": 510,
+   "source_sha256": "cb54010b1807012bdf98189c12c77d8f2f41b860d5760440016090129e63725a",
+   "en": "##(SKILL_POWER): 260  ##(SKILL_RANGE_SHOCK_WAVE): 125％"
+  },
+  {
+   "index": 511,
+   "source_sha256": "8ab73d65aeefeaa0139cc13d8d31e6984efd9737e3dc1ed1bbf6b11ab9e5fb2a",
+   "en": "##(SKILL_POWER): 270  ##(SKILL_RANGE_SHOCK_WAVE): 130％"
+  },
+  {
+   "index": 512,
+   "source_sha256": "057eea338bbce71243ed2857c24430701e11b51f66cbfb291614055b17998616",
+   "en": "##(SKILL_POWER): 280  ##(SKILL_RANGE_SHOCK_WAVE): 135％"
+  },
+  {
+   "index": 513,
+   "source_sha256": "08c9c89e5b24601e1eed949734abeab7166f41974885ab27c7312d961bf4e721",
+   "en": "##(SKILL_POWER): 290  ##(SKILL_RANGE_SHOCK_WAVE): 140％"
+  },
+  {
+   "index": 514,
+   "source_sha256": "fec23a1a01d687e32cce1d835f48c5de506a792284d2e262a781ce84110ab2bd",
+   "en": "##(SKILL_POWER): 320  ##(SKILL_RANGE_SHOCK_WAVE): 170％"
+  },
+  {
+   "index": 515,
+   "source_sha256": "fec23a1a01d687e32cce1d835f48c5de506a792284d2e262a781ce84110ab2bd",
+   "en": "##(SKILL_POWER): 320  ##(SKILL_RANGE_SHOCK_WAVE): 170％"
+  },
+  {
+   "index": 516,
+   "source_sha256": "e39c1b1e145dce699f2ecc5849599b6e9a64072d682d41176885bcce6ddc1983",
+   "en": "Shots in Volley +1"
+  },
+  {
+   "index": 517,
+   "source_sha256": "f90d3e70b49dadf1736b348a15560f6efa037d4136af2bdf859084e753581ee4",
+   "en": "Shots in Volley +2"
+  },
+  {
+   "index": 518,
+   "source_sha256": "07f0a4d14bb35c89f1d49545e12c5e27e0b568b7084d225a2de5059d34e6d63b",
+   "en": "Shots in Volley +3"
+  },
+  {
+   "index": 519,
+   "source_sha256": "67b092214fd47f8cb577aa85e14f16b57af093cd1e6944179aec92d7eb12e570",
+   "en": "Shots in Volley +4"
+  },
+  {
+   "index": 520,
+   "source_sha256": "67b092214fd47f8cb577aa85e14f16b57af093cd1e6944179aec92d7eb12e570",
+   "en": "Shots in Volley +4"
+  },
+  {
+   "index": 521,
+   "source_sha256": "9052dddb528e9313d543a63c04569e98072d72fbab47d9207904fd526d539b6f",
+   "en": "Arrow max +2"
+  },
+  {
+   "index": 522,
+   "source_sha256": "768fb8ec941287aba6653932cc84a8513d488701558ab15caae19b5fc85efe74",
+   "en": "Arrow max +4"
+  },
+  {
+   "index": 523,
+   "source_sha256": "b513a89f90d6c0433d03bb323933557c6f7a37e999955297e9b8d7358334d7b2",
+   "en": "Arrow max +7"
+  },
+  {
+   "index": 524,
+   "source_sha256": "41bd3fbe653dd702a44f8e14bb23e2afd72aa621465fe855c98718f6e45b4bdb",
+   "en": "Arrow max +10"
+  },
+  {
+   "index": 525,
+   "source_sha256": "612ad1fadf26bd0a687a9186b4ec024bdd57852575e28064933a71f30d1d3bc3",
+   "en": "Arrow max +15"
+  },
+  {
+   "index": 526,
+   "source_sha256": "612ad1fadf26bd0a687a9186b4ec024bdd57852575e28064933a71f30d1d3bc3",
+   "en": "Arrow max +15"
+  },
+  {
+   "index": 527,
+   "source_sha256": "4f12eb39c97a001fcc0cf6887be914e4a8e56ad0e7893adf89dc0de654ef7139",
+   "en": "##(SKILL_POWER): 50  ##(SKILL_RANGE_SHOCK_WAVE): 105％"
+  },
+  {
+   "index": 528,
+   "source_sha256": "c9d2f242b60d6512114f34892900177924e8f10e4139e424f73e73833039c853",
+   "en": "##(SKILL_POWER): 65  ##(SKILL_RANGE_SHOCK_WAVE): 110％"
+  },
+  {
+   "index": 529,
+   "source_sha256": "9e6b245b3262ed8e7cf4db5784e3b7ff2aef27a68ad3232bc8edf34b6ad37ad5",
+   "en": "##(SKILL_POWER): 80  ##(SKILL_RANGE_SHOCK_WAVE): 115％"
+  },
+  {
+   "index": 530,
+   "source_sha256": "47bc37132e00cd4b6184f8f61f94ef3f9e7e667a492ff31760dc2e445948eae8",
+   "en": "##(SKILL_POWER): 95  ##(SKILL_RANGE_SHOCK_WAVE): 120％"
+  },
+  {
+   "index": 531,
+   "source_sha256": "9bc99f9ec0db5b0376fc872409a98dfefe1a38426b25c4c9bcdf2be13b5c5087",
+   "en": "##(SKILL_POWER): 110  ##(SKILL_RANGE_SHOCK_WAVE): 125％"
+  },
+  {
+   "index": 532,
+   "source_sha256": "9cf9c27c85347d152530dfade05af9945cddc099a4562d9ad1711f5fcb121832",
+   "en": "##(SKILL_POWER): 125  ##(SKILL_RANGE_SHOCK_WAVE): 130％"
+  },
+  {
+   "index": 533,
+   "source_sha256": "e2fa75204166caf320c9d2c7d67a02365dd9c39021dac2eb164bb58119ddae26",
+   "en": "##(SKILL_POWER): 175  ##(SKILL_RANGE_SHOCK_WAVE): 150％"
+  },
+  {
+   "index": 534,
+   "source_sha256": "e2fa75204166caf320c9d2c7d67a02365dd9c39021dac2eb164bb58119ddae26",
+   "en": "##(SKILL_POWER): 175  ##(SKILL_RANGE_SHOCK_WAVE): 150％"
+  },
+  {
+   "index": 535,
+   "source_sha256": "d8929b26b64338cc21355a421ba05b10936e7c90871da86bded75a47566f8541",
+   "en": "Multiple shots +1"
+  },
+  {
+   "index": 536,
+   "source_sha256": "092c66a15443c7f1b5cc5e18ba6c576a4f1621c0ae0ff2d43c15164e925e8357",
+   "en": "Multiple shots +2"
+  },
+  {
+   "index": 537,
+   "source_sha256": "bbcc6502e8f55e59f428c517ebf57f58d849b5e40f106607312b636016f8009e",
+   "en": "Multiple shots +3"
+  },
+  {
+   "index": 538,
+   "source_sha256": "5d0fa550b827f7206b0f9e5ceb8b6c6c09a938b845aa13e913328149f5a59096",
+   "en": "Multiple shots +4"
+  },
+  {
+   "index": 539,
+   "source_sha256": "5d0fa550b827f7206b0f9e5ceb8b6c6c09a938b845aa13e913328149f5a59096",
+   "en": "Multiple shots +4"
+  },
+  {
+   "index": 540,
+   "source_sha256": "414b2c94b1ecbda1e51f969c380806d86114d9cd786adfd03e2b143ccd60d6f5",
+   "en": "Number of uses: 20"
+  },
+  {
+   "index": 541,
+   "source_sha256": "6c11f9a6da43361df799d552461a015c520aedfd8ea403c37b749be6bf7b39d9",
+   "en": "Number of uses: 25"
+  },
+  {
+   "index": 542,
+   "source_sha256": "328d5125ba40761a70dc5e82b3ba68af1a0e41b358d58b33b431dab87d1c3d6a",
+   "en": "Number of uses: 30"
+  },
+  {
+   "index": 543,
+   "source_sha256": "f9838a03f8b53a3477b1d9b8e8837b0523c1eff9f4b65c7b12b4bcc8c0f89312",
+   "en": "Number of uses: 35"
+  },
+  {
+   "index": 544,
+   "source_sha256": "976b55c96f08e8de98ef42118f6f5a18cfd5f8763a612f7154d415be1ad95e08",
+   "en": "Number of uses: 50"
+  },
+  {
+   "index": 545,
+   "source_sha256": "976b55c96f08e8de98ef42118f6f5a18cfd5f8763a612f7154d415be1ad95e08",
+   "en": "Number of uses: 50"
+  },
+  {
+   "index": 546,
+   "source_sha256": "6ec23bd059d3c09dea53e0a4e756b230ae9cc1e96e92242c819b8ee55ff13680",
+   "en": "Number of uses: 3"
+  },
+  {
+   "index": 547,
+   "source_sha256": "b5c43a6f3a79fb673d8594901232836d52faa0e6acc8e00feb186fc818389597",
+   "en": "Number of uses: 4"
+  },
+  {
+   "index": 548,
+   "source_sha256": "810c0390c5125823196cdb5960159b808acd375c7fcf8b212a95adb838407075",
+   "en": "Number of uses: 5"
+  },
+  {
+   "index": 549,
+   "source_sha256": "12c41f4cffe42f0cb369338b98ffb68a9a316384cb1df0494e201fd48e693764",
+   "en": "Number of uses: 6"
+  },
+  {
+   "index": 550,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 551,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 552,
+   "source_sha256": "414b2c94b1ecbda1e51f969c380806d86114d9cd786adfd03e2b143ccd60d6f5",
+   "en": "Number of uses: 20"
+  },
+  {
+   "index": 553,
+   "source_sha256": "6c11f9a6da43361df799d552461a015c520aedfd8ea403c37b749be6bf7b39d9",
+   "en": "Number of uses: 25"
+  },
+  {
+   "index": 554,
+   "source_sha256": "328d5125ba40761a70dc5e82b3ba68af1a0e41b358d58b33b431dab87d1c3d6a",
+   "en": "Number of uses: 30"
+  },
+  {
+   "index": 555,
+   "source_sha256": "f9838a03f8b53a3477b1d9b8e8837b0523c1eff9f4b65c7b12b4bcc8c0f89312",
+   "en": "Number of uses: 35"
+  },
+  {
+   "index": 556,
+   "source_sha256": "976b55c96f08e8de98ef42118f6f5a18cfd5f8763a612f7154d415be1ad95e08",
+   "en": "Number of uses: 50"
+  },
+  {
+   "index": 557,
+   "source_sha256": "976b55c96f08e8de98ef42118f6f5a18cfd5f8763a612f7154d415be1ad95e08",
+   "en": "Number of uses: 50"
+  },
+  {
+   "index": 558,
+   "source_sha256": "14e699d35c144814576e8c9c4edd6164404a0af11545a2131358f8bb2faab4b1",
+   "en": "Enables Spirit magic use"
+  },
+  {
+   "index": 559,
+   "source_sha256": "4a9fa1e1194788835f9da527f916c3a568573bd321a6cae4617d4996a1bc9ff2",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)20％"
+  },
+  {
+   "index": 560,
+   "source_sha256": "3f45227ad3f00dffe93648ba43859e9a35275c7ca895df2484539a726bd8308a",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)30％"
+  },
+  {
+   "index": 561,
+   "source_sha256": "d1233fdcd965bc098f15d2ba2b621148d08c5c84c864f40eedc6705ba34ab0f1",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)40％"
+  },
+  {
+   "index": 562,
+   "source_sha256": "ab186517dbf606ba22e55bd47e105279d6f53ac3d8b3a8ea675fa884051b38ab",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)50％"
+  },
+  {
+   "index": 563,
+   "source_sha256": "962b5913f5b1f1836892187bdbe1f2c2dcda8164b10e6cb61601df0ab46e16c4",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)60％"
+  },
+  {
+   "index": 564,
+   "source_sha256": "ae51bb6cd5aa3ca4269fe4a970ca25d156722aa1a69c11af29709c472c0d636e",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)70％"
+  },
+  {
+   "index": 565,
+   "source_sha256": "440fa188b215399fa559c33f332c9c442fbba0cffcc192094a332053f03088ca",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)80％"
+  },
+  {
+   "index": 566,
+   "source_sha256": "607e9f307c69265695cb821cf305b11d70dc208061fba393a226f87640ef5c0a",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)90％"
+  },
+  {
+   "index": 567,
+   "source_sha256": "bb5f0e4e3e0f1004536ee4c4b379e89fa48df98c3dc0323ac04a58500abea3b2",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 568,
+   "source_sha256": "bb5f0e4e3e0f1004536ee4c4b379e89fa48df98c3dc0323ac04a58500abea3b2",
+   "en": "Spirit magic elemental ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 569,
+   "source_sha256": "4d68652bad16e2a2457cae584fc1293e270a079293c746271cd96b36f1fbe3b6",
+   "en": "Kick attack + 50％ of boot defense"
+  },
+  {
+   "index": 570,
+   "source_sha256": "e99f69992fcd08d818412e3737146e4b69c59217c3d86a8b51090bcd6be12387",
+   "en": "Kick attack + 75％ of boot defense"
+  },
+  {
+   "index": 571,
+   "source_sha256": "817916c3e725064bc07bc412c823ccc4a9904ed6492526d18d00916d7d778b00",
+   "en": "Kick attack + 100％ of boot defense"
+  },
+  {
+   "index": 572,
+   "source_sha256": "266e785d7ace8d1f623329ddcf789f811d2781157ea3cf5f1a09be1482da79d8",
+   "en": "Kick attack + 125％ of boot defense"
+  },
+  {
+   "index": 573,
+   "source_sha256": "32cb305b3576422691646ca7204f5930989177f82f5f44c8d1c4a911852c58cb",
+   "en": "Kick attack + 150％ of boot defense"
+  },
+  {
+   "index": 574,
+   "source_sha256": "c42470385cc97ebc644dc8dae51709d90b440b0f86661ec0a8f6a00f7aeb6170",
+   "en": "Kick attack + 175％ of boot defense"
+  },
+  {
+   "index": 575,
+   "source_sha256": "3dfce1a835a0abba921b5b9d4f69398c3ad3fd09d87f4dd9ec17c3cd3e14e9f2",
+   "en": "Kick attack + 200％ of boot defense"
+  },
+  {
+   "index": 576,
+   "source_sha256": "3355b13b3807a1418e5b4f0e25b71e611f4e26a47ef5516c2610ad76a9467db9",
+   "en": "Kick attack + 230％ of boot defense"
+  },
+  {
+   "index": 577,
+   "source_sha256": "1be71adaf5016d5fea7652e499657041439c37731edd56b7300f468d111b145b",
+   "en": "Kick attack + 260％ of boot defense"
+  },
+  {
+   "index": 578,
+   "source_sha256": "02806e297749cb0f6ddd04fb7bae3a2ece4392f4de755d7414cf8f215720b593",
+   "en": "Kick attack + 300％ of boot defense"
+  },
+  {
+   "index": 579,
+   "source_sha256": "02806e297749cb0f6ddd04fb7bae3a2ece4392f4de755d7414cf8f215720b593",
+   "en": "Kick attack + 300％ of boot defense"
+  },
+  {
+   "index": 580,
+   "source_sha256": "a18c1edcdae4968bb36d04e7fa06630c45e930f1a01afbb7e4136d8e358ba94e",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)80％"
+  },
+  {
+   "index": 581,
+   "source_sha256": "fca68866b73b1276b0375af8216d7c1cb26379ab121b4dd835592b042de3026e",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)100％"
+  },
+  {
+   "index": 582,
+   "source_sha256": "aa4811f102c9a1c0e33ae9b467d781e4a408ecf7b62d3e89e4e34d5dfa6a3ebd",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)120％"
+  },
+  {
+   "index": 583,
+   "source_sha256": "e043ee3a706a3a7e10df09a2b44503ad4622595987f75d3c1dd8d732e0f545cf",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)135％"
+  },
+  {
+   "index": 584,
+   "source_sha256": "da2c1fb91a0c5b7cef3d9d1fc42cfa3a45e7d7a6fd4883dd5bb333b42eb0bfe6",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)155％"
+  },
+  {
+   "index": 585,
+   "source_sha256": "1b0010bb514bbfea6c75b7d27a075477209896015d887541bea52aaab279e003",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)175％"
+  },
+  {
+   "index": 586,
+   "source_sha256": "e9c257085ba791e5bc4d98afdea428f429915287dadec0b2ebfc7be9547d72aa",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)195％"
+  },
+  {
+   "index": 587,
+   "source_sha256": "1de21f88869e01532016a679c54292cac08bfc6c5e67485df5c4f0a2d9cfda5f",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)210％"
+  },
+  {
+   "index": 588,
+   "source_sha256": "e4f6a68408a307d6b06af2621f5b3f238d100a7236c8bc2121f1d5e7120bfce9",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)230％"
+  },
+  {
+   "index": 589,
+   "source_sha256": "14405ce3f21909a96dc92f358463060f959c117ae0d1ac45511f4124bfbf2b31",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)300％"
+  },
+  {
+   "index": 590,
+   "source_sha256": "14405ce3f21909a96dc92f358463060f959c117ae0d1ac45511f4124bfbf2b31",
+   "en": "Dagger back attack ##(YODAMAGE_UP_RATE)300％"
+  },
+  {
+   "index": 591,
+   "source_sha256": "6a751067c21a80eb14059fe775de654ae04103d39a2bd2006aeb11e9750082f1",
+   "en": "##(HIDAMAGE_DOWN_RATE)20％ while aiming  ##(SKILL_KNOCKBACKP): 50"
+  },
+  {
+   "index": 592,
+   "source_sha256": "e89ce502567341d5f83e10ff100b6d3be4f78163729963e0eef070fe5dd189cd",
+   "en": "##(HIDAMAGE_DOWN_RATE)25％ while aiming  ##(SKILL_KNOCKBACKP): 66"
+  },
+  {
+   "index": 593,
+   "source_sha256": "faf09dc09f66324324a65319c45148e903a70448239c02fde6f5e778e2b11ec5",
+   "en": "##(HIDAMAGE_DOWN_RATE)30％ while aiming  ##(SKILL_KNOCKBACKP): 75"
+  },
+  {
+   "index": 594,
+   "source_sha256": "4c278bd31a82c762ddd579cebeab5ada5acbd2c9d36e10f32f20bee428219e6a",
+   "en": "##(HIDAMAGE_DOWN_RATE)35％ while aiming  ##(SKILL_KNOCKBACKP): 80"
+  },
+  {
+   "index": 595,
+   "source_sha256": "316c91930c37b8dba284ea5741a99144099b61f83214331a6ce9624f60d67921",
+   "en": "##(HIDAMAGE_DOWN_RATE)50％ while aiming  ##(SKILL_KNOCKBACKP): 83"
+  },
+  {
+   "index": 596,
+   "source_sha256": "316c91930c37b8dba284ea5741a99144099b61f83214331a6ce9624f60d67921",
+   "en": "##(HIDAMAGE_DOWN_RATE)50％ while aiming  ##(SKILL_KNOCKBACKP): 83"
+  },
+  {
+   "index": 597,
+   "source_sha256": "4bcb848573e14535efa99e0af51ad588f676ef86b00bc88c3287a79ebf95981b",
+   "en": "MP recovered +15"
+  },
+  {
+   "index": 598,
+   "source_sha256": "e52872d4a5b20bbdc7f9a682d088d0d3960b0e8fd62f1cf2a969c02528346251",
+   "en": "MP recovered +18"
+  },
+  {
+   "index": 599,
+   "source_sha256": "4acee6cc07a3682639b9e1b8e347f27557c5563077b73aca608ebaefe82bfd16",
+   "en": "MP recovered +21"
+  },
+  {
+   "index": 600,
+   "source_sha256": "001bd15e831acb08b4aed0c5c5cdeb8002d70970f81f43a2c0d9ff52b994cbab",
+   "en": "MP recovered +24"
+  },
+  {
+   "index": 601,
+   "source_sha256": "8d6a30e21682cfbc35c3b575268fb567bc3ff1127fff76be4730689cc9524aaf",
+   "en": "MP recovered +27"
+  },
+  {
+   "index": 602,
+   "source_sha256": "41d1240bd572bd2bc06ffe7fdc653fb5adb33b43cbd50c2cc6d2abf741d7e5c9",
+   "en": "MP recovered +30"
+  },
+  {
+   "index": 603,
+   "source_sha256": "60f8bc9c0656d6f4e25880abaea906638889b90198bebe7213c8205c7138334d",
+   "en": "MP recovered +34"
+  },
+  {
+   "index": 604,
+   "source_sha256": "34173790ddaeb543c4e51aff0aae5e6389b4450fff323c28666905bb87730680",
+   "en": "MP recovered +38"
+  },
+  {
+   "index": 605,
+   "source_sha256": "fa3defc14d611dad9c2774a6b59307df608615521966aa6874740a6130fa3c35",
+   "en": "MP recovered +42"
+  },
+  {
+   "index": 606,
+   "source_sha256": "196cc42f949feb12e8600bb010c7215e92cbbc50e11e6c1e0ff9b6ee534b8177",
+   "en": "MP recovered +50"
+  },
+  {
+   "index": 607,
+   "source_sha256": "196cc42f949feb12e8600bb010c7215e92cbbc50e11e6c1e0ff9b6ee534b8177",
+   "en": "MP recovered +50"
+  },
+  {
+   "index": 608,
+   "source_sha256": "294ce8fb547a6a75179aea25297db332e381f88e53e93680b1a8ce744a057e69",
+   "en": "MP recovered +5"
+  },
+  {
+   "index": 609,
+   "source_sha256": "d08c81e0a76e72159339a53247991685493db40fb8a37e3dd01a4de93c6d3c0a",
+   "en": "MP recovered +7"
+  },
+  {
+   "index": 610,
+   "source_sha256": "179ee07a2e9419db11dedd70e76ef2483c474661f6ad343762f15046996bc5fd",
+   "en": "MP recovered +9"
+  },
+  {
+   "index": 611,
+   "source_sha256": "d81a72eb571351b8a496fbcbee71416539ee084711a490e775f41cece2a28ce5",
+   "en": "MP recovered +11"
+  },
+  {
+   "index": 612,
+   "source_sha256": "a5c6dad223ba71730e33314026369ea63bcdfaa94daf41d600229f10d6a571cb",
+   "en": "MP recovered +13"
+  },
+  {
+   "index": 613,
+   "source_sha256": "4bcb848573e14535efa99e0af51ad588f676ef86b00bc88c3287a79ebf95981b",
+   "en": "MP recovered +15"
+  },
+  {
+   "index": 614,
+   "source_sha256": "482a64a447c63f0a3ec8345d59a2cad07753e123bfefb0dc19e6a8b43bb6e58f",
+   "en": "MP recovered +20"
+  },
+  {
+   "index": 615,
+   "source_sha256": "482a64a447c63f0a3ec8345d59a2cad07753e123bfefb0dc19e6a8b43bb6e58f",
+   "en": "MP recovered +20"
+  },
+  {
+   "index": 616,
+   "source_sha256": "c219120088fbc1dc46c2d9e70226d507158053bb94734bbac6d34e060ab41176",
+   "en": "MP charge speed +10％"
+  },
+  {
+   "index": 617,
+   "source_sha256": "c49828af21dfb58e7938ad059198afb02c1ddc64ae24fb3e204f694b5d9f2c2c",
+   "en": "MP charge speed +14％"
+  },
+  {
+   "index": 618,
+   "source_sha256": "d1877f839207a78d424a6715c6f6e33114faf74168121114dfb184a58518cb21",
+   "en": "MP charge speed +18％"
+  },
+  {
+   "index": 619,
+   "source_sha256": "8f710fadd4261f7f0075d359c44f9463f64aedf4245b2219b401488fbd8f6228",
+   "en": "MP charge speed +22％"
+  },
+  {
+   "index": 620,
+   "source_sha256": "ad0f9e4b3ae5591e2fd57719b9169dafc8d514f8d6d204ea7d4b5ffda5bca2a6",
+   "en": "MP charge speed +30％"
+  },
+  {
+   "index": 621,
+   "source_sha256": "ad0f9e4b3ae5591e2fd57719b9169dafc8d514f8d6d204ea7d4b5ffda5bca2a6",
+   "en": "MP charge speed +30％"
+  },
+  {
+   "index": 622,
+   "source_sha256": "225d456ac08722b3a548b515f39aff10356f93fda38e847c1a26a4926b37b283",
+   "en": "Max MP +30"
+  },
+  {
+   "index": 623,
+   "source_sha256": "6f02238d4716b5e4dc342b463ce6c241ceb6bdc42e725801301d893f79c1c81e",
+   "en": "Max MP +50"
+  },
+  {
+   "index": 624,
+   "source_sha256": "36f3f3dac4307bfa08a36c4c5f9d09073b681e077ee62947ef45cac863ddbb84",
+   "en": "Max MP +70"
+  },
+  {
+   "index": 625,
+   "source_sha256": "e7c9dbbe5ce9a5ea010c3e75623347a665db0e1bfb1b5c8785571f1e83bbcee2",
+   "en": "Max MP +100"
+  },
+  {
+   "index": 626,
+   "source_sha256": "8e0a255c48b91372bfbf413f2d7a2d3faa1de9c1ec448bcb8d47d6b965b9ef93",
+   "en": "Max MP +150"
+  },
+  {
+   "index": 627,
+   "source_sha256": "8e0a255c48b91372bfbf413f2d7a2d3faa1de9c1ec448bcb8d47d6b965b9ef93",
+   "en": "Max MP +150"
+  },
+  {
+   "index": 628,
+   "source_sha256": "a4f9ec35db64462c0ea8bfef0d6fdfec4e328fdbabce525c20f9d89125cf27a8",
+   "en": "Uses: 5  ##(SKILL_POWER): 50  Duration: 8s"
+  },
+  {
+   "index": 629,
+   "source_sha256": "4f84589ec9b6bb6bbc5c3981b1198c7c27af580d5bf67f7f9d3dad1aca6d76f5",
+   "en": "Uses: 7  ##(SKILL_POWER): 63  Duration: 12s"
+  },
+  {
+   "index": 630,
+   "source_sha256": "f3fc0472fe37fdb0276575bd322758ade7ea95b323669e73bab048ddfbec096d",
+   "en": "Uses: 9  ##(SKILL_POWER): 75  Duration: 20s"
+  },
+  {
+   "index": 631,
+   "source_sha256": "f3fc0472fe37fdb0276575bd322758ade7ea95b323669e73bab048ddfbec096d",
+   "en": "Uses: 9  ##(SKILL_POWER): 75  Duration: 20s"
+  },
+  {
+   "index": 632,
+   "source_sha256": "14b33f391b001de200692e5b03b51c8abd54757c59019062a76892a6fd00ebee",
+   "en": "Uses: 3  Duration: 20s  Damage reduction: 25％"
+  },
+  {
+   "index": 633,
+   "source_sha256": "fd06accad1b54a37b4dc7f8ba9a04fdea0f98f60e37686f2ed85a135ae4dfcd5",
+   "en": "Uses: 3  Duration: 24s  Damage reduction: 30％"
+  },
+  {
+   "index": 634,
+   "source_sha256": "6ac8b5ffa9a4e1829746d61ac12a276227f76ab0230579245e9bc115836b109f",
+   "en": "Uses: 4  Duration: 28s  Damage reduction: 35％"
+  },
+  {
+   "index": 635,
+   "source_sha256": "bf0adba9c5662ffe6cbaffef2d0bd799820dcd282f692b295eed7490513ff76e",
+   "en": "Uses: 4  Duration: 32s  Damage reduction: 40％"
+  },
+  {
+   "index": 636,
+   "source_sha256": "ba0dfb0f83debe7cbd2a7fb9e46ea620ea4c8176215b5d6419c8a031630b8ce0",
+   "en": "Uses: 5  Duration: 40s  Damage reduction: 50％"
+  },
+  {
+   "index": 637,
+   "source_sha256": "ba0dfb0f83debe7cbd2a7fb9e46ea620ea4c8176215b5d6419c8a031630b8ce0",
+   "en": "Uses: 5  Duration: 40s  Damage reduction: 50％"
+  },
+  {
+   "index": 638,
+   "source_sha256": "ede525607f5cf152ca4663fda552eec3f31180efd11ddfa1e8f585bcade05d56",
+   "en": "Uses: 3  ##(SKILL_POWER): 10"
+  },
+  {
+   "index": 639,
+   "source_sha256": "ffbf370209f5e0a1b2dfa3809e739fd399bb0379558c31688ae0102df30fbdf7",
+   "en": "Uses: 5  ##(SKILL_POWER): 16  Increase absorption"
+  },
+  {
+   "index": 640,
+   "source_sha256": "80fa5742f03aeb4bf6e024fafaecb3f196006455d35c732a89e8c4ce4fba5964",
+   "en": "Uses: 8  ##(SKILL_POWER): 25  Increase absorption"
+  },
+  {
+   "index": 641,
+   "source_sha256": "80fa5742f03aeb4bf6e024fafaecb3f196006455d35c732a89e8c4ce4fba5964",
+   "en": "Uses: 8  ##(SKILL_POWER): 25  Increase absorption"
+  },
+  {
+   "index": 642,
+   "source_sha256": "4fc0a7f41c94899cc853b28d840273b4f842060e7b05b7d55af4a0623a41b7ee",
+   "en": "Uses: 3  ##(SKILL_POWER): 80  Duration: 20s"
+  },
+  {
+   "index": 643,
+   "source_sha256": "c3963e88a8be813a783836a2ca70ec432ca0aa852da7416b9b89786904588025",
+   "en": "Uses: 3  ##(SKILL_POWER): 92  Duration: 22s"
+  },
+  {
+   "index": 644,
+   "source_sha256": "364f40990b06491ad8c7272254224c5df9b4d04a6b8e4922c8fa7447893549d1",
+   "en": "Uses: 4  ##(SKILL_POWER): 104  Duration: 24s"
+  },
+  {
+   "index": 645,
+   "source_sha256": "9acc9e762972b7e3c557561bd34d6ab9a5dcaaddf5ee5ca9b037f076bc35f176",
+   "en": "Uses: 4  ##(SKILL_POWER): 116  Duration: 26s"
+  },
+  {
+   "index": 646,
+   "source_sha256": "da2f97982a0507db25ec875408c39af90e4f5cf5e75a5c93ca22b672b25c597a",
+   "en": "Uses: 5  ##(SKILL_POWER): 128  Duration: 28s"
+  },
+  {
+   "index": 647,
+   "source_sha256": "ac1fd47ae234b39668389405fa59ef74fa2ec9ead49f670875a83c0cea1a8b0d",
+   "en": "Uses: 5  ##(SKILL_POWER): 140  Duration: 30s"
+  },
+  {
+   "index": 648,
+   "source_sha256": "2db7ee664eb97bd4d2dc83b16ff41a7810d42fbdc3c8f468c6763d42e46d3fba",
+   "en": "Uses: 7  ##(SKILL_POWER): 160  Duration: 32s"
+  },
+  {
+   "index": 649,
+   "source_sha256": "2db7ee664eb97bd4d2dc83b16ff41a7810d42fbdc3c8f468c6763d42e46d3fba",
+   "en": "Uses: 7  ##(SKILL_POWER): 160  Duration: 32s"
+  },
+  {
+   "index": 650,
+   "source_sha256": "bc608cc17f76aeecd92efd5d844b0973ddec760f5a9dc8a7e03b81d2b453bc99",
+   "en": "Uses: 5  ##(SKILL_POWER): 350"
+  },
+  {
+   "index": 651,
+   "source_sha256": "98afc95d63becf7867a306ed20c444f9a1981fb022ad38344c620f181048ac77",
+   "en": "Uses: 5  ##(SKILL_POWER): 420"
+  },
+  {
+   "index": 652,
+   "source_sha256": "d1439f50ede4f3cc611d863258f41e13996a2ba2393068f9149043fc3c30737d",
+   "en": "Uses: 6  ##(SKILL_POWER): 490"
+  },
+  {
+   "index": 653,
+   "source_sha256": "727a24171fd9e843f2fbf9c45287274e8a6983a6a0b3b27bf772a80e140a7530",
+   "en": "Uses: 6  ##(SKILL_POWER): 560"
+  },
+  {
+   "index": 654,
+   "source_sha256": "0e76b1e183daf33452ce143eee88d9fd540828b0c68d302222c5b4434998ebd3",
+   "en": "Uses: 7  ##(SKILL_POWER): 665"
+  },
+  {
+   "index": 655,
+   "source_sha256": "4a89b78b794312ed93ba1fa95d6867467a69e13c4c4bc2979cbbbb4f95bbfe28",
+   "en": "Uses: 7  ##(SKILL_POWER): 770"
+  },
+  {
+   "index": 656,
+   "source_sha256": "01682faf8908578d1562233b5938c5d65ed44fa39ac2855083901a52a0d62be2",
+   "en": "Uses: 9  ##(SKILL_POWER): 875"
+  },
+  {
+   "index": 657,
+   "source_sha256": "01682faf8908578d1562233b5938c5d65ed44fa39ac2855083901a52a0d62be2",
+   "en": "Uses: 9  ##(SKILL_POWER): 875"
+  },
+  {
+   "index": 658,
+   "source_sha256": "9b51a9198426e2ec8b22f5233029726e01e04200638f2c43fb3545fcead81864",
+   "en": "Uses: 3  ##(SKILL_POWER): 35  Duration: 4s"
+  },
+  {
+   "index": 659,
+   "source_sha256": "4cd35223dc9456ca91c604be05566c79d01295d320cb99033bb0e4fb8a04ffc5",
+   "en": "Uses: 3  ##(SKILL_POWER): 40  Duration: 5s"
+  },
+  {
+   "index": 660,
+   "source_sha256": "16cf1627300fc5ccbc0e0ccb36a8a47ec811a3c34cc1c01d109d825389f96ca3",
+   "en": "Uses: 4  ##(SKILL_POWER): 42  Duration: 6s"
+  },
+  {
+   "index": 661,
+   "source_sha256": "eaf7bf4ebcd5af3c2da0adde3eefe28b78ac1faccbe681fa749a00c6847c9ed4",
+   "en": "Uses: 4  ##(SKILL_POWER): 44  Duration: 7s"
+  },
+  {
+   "index": 662,
+   "source_sha256": "fe9847a79c18e28ec31997060514f7052166f93a7e778849b29008f35f811487",
+   "en": "Uses: 5  ##(SKILL_POWER): 50  Duration: 10s"
+  },
+  {
+   "index": 663,
+   "source_sha256": "fe9847a79c18e28ec31997060514f7052166f93a7e778849b29008f35f811487",
+   "en": "Uses: 5  ##(SKILL_POWER): 50  Duration: 10s"
+  },
+  {
+   "index": 664,
+   "source_sha256": "b348c10695d71c49cfcb553e5ea28491467788088f5f8e3c1d7bbf840dee8b04",
+   "en": "Skeleton's LV: 50％ of Player LV  Max 1 (Party max is 4)"
+  },
+  {
+   "index": 665,
+   "source_sha256": "1954e0d353b43f9f5f56cd3cbff38f71a6e82eb4dc627cfa4c51b72a5494f592",
+   "en": "Skeleton's LV: 60％ of Player LV  Max 2 (Party max is 4)"
+  },
+  {
+   "index": 666,
+   "source_sha256": "3b9e8f5f524e02f9d112a1f504a53fbba7e84bc798836e937ef6f14783a56d49",
+   "en": "Skeleton's LV: 70％ of Player LV  Max 2 (Party max is 4)"
+  },
+  {
+   "index": 667,
+   "source_sha256": "ea99310a8fb7c02f29c376634dd758a85b4476269e87ae6b26df5666256210fc",
+   "en": "Skeleton's LV: 80％ of Player LV  Max 3 (Party max is 4)"
+  },
+  {
+   "index": 668,
+   "source_sha256": "b92c384b32577284be5bf8c52c42ee768e81488ffee5a374df6ced9f841c3da2",
+   "en": "Skeleton's LV: 100％ of Player LV  Max 4 (Party max is 4)"
+  },
+  {
+   "index": 669,
+   "source_sha256": "b92c384b32577284be5bf8c52c42ee768e81488ffee5a374df6ced9f841c3da2",
+   "en": "Skeleton's LV: 100％ of Player LV  Max 4 (Party max is 4)"
+  },
+  {
+   "index": 670,
+   "source_sha256": "24802e3fe7b4e0372d5e26d93aafd0f616873b2fbc171796ee1d7684600d7d82",
+   "en": "Magic ##(YODAMAGE_UP_RATE)20％ while in air"
+  },
+  {
+   "index": 671,
+   "source_sha256": "bd4cf8e4c7dcd1e96ab2d671a1526209d4f93856097700f5ee92818aa4651ec2",
+   "en": "Magic ##(YODAMAGE_UP_RATE)35％ while in air"
+  },
+  {
+   "index": 672,
+   "source_sha256": "f69ba89549c8c61188f34d943a545fa6f151e442e5302b6b5a40ae0d88c3c35b",
+   "en": "Magic ##(YODAMAGE_UP_RATE)50％ while in air"
+  },
+  {
+   "index": 673,
+   "source_sha256": "f69ba89549c8c61188f34d943a545fa6f151e442e5302b6b5a40ae0d88c3c35b",
+   "en": "Magic ##(YODAMAGE_UP_RATE)50％ while in air"
+  },
+  {
+   "index": 674,
+   "source_sha256": "810c0390c5125823196cdb5960159b808acd375c7fcf8b212a95adb838407075",
+   "en": "Number of uses: 5"
+  },
+  {
+   "index": 675,
+   "source_sha256": "810c0390c5125823196cdb5960159b808acd375c7fcf8b212a95adb838407075",
+   "en": "Number of uses: 5"
+  },
+  {
+   "index": 676,
+   "source_sha256": "7649f2d02092a86413ac782360ea612e23f0a9a3394d3c18b47c03761d2e3d07",
+   "en": "Number of uses: 7"
+  },
+  {
+   "index": 677,
+   "source_sha256": "7649f2d02092a86413ac782360ea612e23f0a9a3394d3c18b47c03761d2e3d07",
+   "en": "Number of uses: 7"
+  },
+  {
+   "index": 678,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 679,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 680,
+   "source_sha256": "f7e497be841ac131defb23fce9fd4b84f5f23a7db8ffbce8bd0f53fc2cbfe06d",
+   "en": "Number of uses: 5  Range 1"
+  },
+  {
+   "index": 681,
+   "source_sha256": "affa742dba59506d6e5d891674d3e311101090a44df28fe9d6f15f6961a1235e",
+   "en": "Number of uses: 7  Range 2"
+  },
+  {
+   "index": 682,
+   "source_sha256": "d768fcd7bdfd01f7d27e9151ec1169d6573485b2d5e3962c6a85aa241bc5b8b3",
+   "en": "Number of uses: 9  Range 3"
+  },
+  {
+   "index": 683,
+   "source_sha256": "d768fcd7bdfd01f7d27e9151ec1169d6573485b2d5e3962c6a85aa241bc5b8b3",
+   "en": "Number of uses: 9  Range 3"
+  },
+  {
+   "index": 684,
+   "source_sha256": "83b4388bbad7dde7b3ff5114a65c4ae16d54ecf094b6ddde6b043ba205ea95b6",
+   "en": "Number of uses: 3  Duration: 5s"
+  },
+  {
+   "index": 685,
+   "source_sha256": "3332a28e7537d52da6fae0c17c33710bc832f3e42091fc893a83acb98979c931",
+   "en": "Number of uses: 3  Duration: 6s"
+  },
+  {
+   "index": 686,
+   "source_sha256": "f379c485d0e40e53754ce28db37ac126a678e5dbeac1ce3cfbeb42799961d7a8",
+   "en": "Number of uses: 4  Duration: 7s"
+  },
+  {
+   "index": 687,
+   "source_sha256": "b589f414c76f86dbcc881591c50e2ea493e0b6e93d2ed2d121eb600834ae55c7",
+   "en": "Number of uses: 4  Duration: 8s"
+  },
+  {
+   "index": 688,
+   "source_sha256": "6f4e3cdc65c2de6913ca256f7459584d72de7457adfe18eb722f9f8e181fee5b",
+   "en": "Number of uses: 5  Duration: 9s"
+  },
+  {
+   "index": 689,
+   "source_sha256": "6d7e3b883f519e27d9f39869339765d0db4707b32a2a18a9c5704dccc7e33aaf",
+   "en": "Number of uses: 5  Duration: 10s"
+  },
+  {
+   "index": 690,
+   "source_sha256": "641b21f37503fe9cc574e20015cdd7d5735ed4f76ef086be7efb3e85cf474207",
+   "en": "Number of uses: 7  Duration: 15s"
+  },
+  {
+   "index": 691,
+   "source_sha256": "641b21f37503fe9cc574e20015cdd7d5735ed4f76ef086be7efb3e85cf474207",
+   "en": "Number of uses: 7  Duration: 15s"
+  },
+  {
+   "index": 692,
+   "source_sha256": "c219120088fbc1dc46c2d9e70226d507158053bb94734bbac6d34e060ab41176",
+   "en": "MP charge speed +10％"
+  },
+  {
+   "index": 693,
+   "source_sha256": "c49828af21dfb58e7938ad059198afb02c1ddc64ae24fb3e204f694b5d9f2c2c",
+   "en": "MP charge speed +14％"
+  },
+  {
+   "index": 694,
+   "source_sha256": "d1877f839207a78d424a6715c6f6e33114faf74168121114dfb184a58518cb21",
+   "en": "MP charge speed +18％"
+  },
+  {
+   "index": 695,
+   "source_sha256": "8f710fadd4261f7f0075d359c44f9463f64aedf4245b2219b401488fbd8f6228",
+   "en": "MP charge speed +22％"
+  },
+  {
+   "index": 696,
+   "source_sha256": "38a5733d0bfcb8fab594c5372c56caceacf642f66c902a5c8206deb751f8122a",
+   "en": "MP charge speed +26％"
+  },
+  {
+   "index": 697,
+   "source_sha256": "ad0f9e4b3ae5591e2fd57719b9169dafc8d514f8d6d204ea7d4b5ffda5bca2a6",
+   "en": "MP charge speed +30％"
+  },
+  {
+   "index": 698,
+   "source_sha256": "c1d9701847a2c2132ba9bc3608184c13af03aa585c4ca39333a53979eacad2f2",
+   "en": "MP charge speed +34％"
+  },
+  {
+   "index": 699,
+   "source_sha256": "e006fd8411dca4cbce4072ff4cd3e98a1379b7f54b2b5eaf8c129a3059236c80",
+   "en": "MP charge speed +38％"
+  },
+  {
+   "index": 700,
+   "source_sha256": "6fb15049ac024a1551927fa3ad73eb1a69001f212326711ddaca9d202ef25740",
+   "en": "MP charge speed +42％"
+  },
+  {
+   "index": 701,
+   "source_sha256": "2e610e2326510a46a01ac46844eb36d0992bb13bd9832adaf6af66ff6e640c14",
+   "en": "MP charge speed +50％"
+  },
+  {
+   "index": 702,
+   "source_sha256": "2e610e2326510a46a01ac46844eb36d0992bb13bd9832adaf6af66ff6e640c14",
+   "en": "MP charge speed +50％"
+  },
+  {
+   "index": 703,
+   "source_sha256": "1a020cf1356ff638ee63bccacca3d7dd16ab06faeb4496c00eeee6e3bd4c1f86",
+   "en": "MP recovered  +5"
+  },
+  {
+   "index": 704,
+   "source_sha256": "df6ce3d7d2c5191b33fe7996387e07810363f2bf44c9bd13b7f4eeaead8f134e",
+   "en": "MP recovered  +7"
+  },
+  {
+   "index": 705,
+   "source_sha256": "29f3743d855445ab1d4032cfe5101f1e4753cd0e728fcbccac76151d05d585bb",
+   "en": "MP recovered  +9"
+  },
+  {
+   "index": 706,
+   "source_sha256": "786dcbb574509bf362c27cd0f7e99698ec44ff43fdd51c636e9763fe1097212a",
+   "en": "MP recovered  +11"
+  },
+  {
+   "index": 707,
+   "source_sha256": "921efca46f8599558bf13ff9b413bed43b7a09353a1301451d186dd858c6272c",
+   "en": "MP recovered  +13"
+  },
+  {
+   "index": 708,
+   "source_sha256": "e24b2583877e88404f907ebfc2056c5c019437e278d43581dfa44ce3f4811551",
+   "en": "MP recovered  +15"
+  },
+  {
+   "index": 709,
+   "source_sha256": "d502bfbaadcc360c13f27e4fd420e7b5e682207f733034c760398ae6c5acfd3a",
+   "en": "MP recovered  +20"
+  },
+  {
+   "index": 710,
+   "source_sha256": "d502bfbaadcc360c13f27e4fd420e7b5e682207f733034c760398ae6c5acfd3a",
+   "en": "MP recovered  +20"
+  },
+  {
+   "index": 711,
+   "source_sha256": "e24b2583877e88404f907ebfc2056c5c019437e278d43581dfa44ce3f4811551",
+   "en": "MP recovered  +15"
+  },
+  {
+   "index": 712,
+   "source_sha256": "14991641b40f9760cd3c0a432b971ca5a2dfd0e5d199224c4c9ed53c95548d73",
+   "en": "MP recovered  +18"
+  },
+  {
+   "index": 713,
+   "source_sha256": "150cd8d1164538a1aaf4429782b8b0fcd6786b1070fbf98e6590524cca385640",
+   "en": "MP recovered  +21"
+  },
+  {
+   "index": 714,
+   "source_sha256": "715a8d9f8de78d348dcbb73422e7a7e593b95822e5259f824c3d536a152de489",
+   "en": "MP recovered  +24"
+  },
+  {
+   "index": 715,
+   "source_sha256": "9182c21ae9b4479e2ac357c7660266c593e315e2e90a37e50cd6cbf3d7c1956f",
+   "en": "MP recovered  +30"
+  },
+  {
+   "index": 716,
+   "source_sha256": "9182c21ae9b4479e2ac357c7660266c593e315e2e90a37e50cd6cbf3d7c1956f",
+   "en": "MP recovered  +30"
+  },
+  {
+   "index": 717,
+   "source_sha256": "225d456ac08722b3a548b515f39aff10356f93fda38e847c1a26a4926b37b283",
+   "en": "Max MP +30"
+  },
+  {
+   "index": 718,
+   "source_sha256": "6f02238d4716b5e4dc342b463ce6c241ceb6bdc42e725801301d893f79c1c81e",
+   "en": "Max MP +50"
+  },
+  {
+   "index": 719,
+   "source_sha256": "36f3f3dac4307bfa08a36c4c5f9d09073b681e077ee62947ef45cac863ddbb84",
+   "en": "Max MP +70"
+  },
+  {
+   "index": 720,
+   "source_sha256": "e7c9dbbe5ce9a5ea010c3e75623347a665db0e1bfb1b5c8785571f1e83bbcee2",
+   "en": "Max MP +100"
+  },
+  {
+   "index": 721,
+   "source_sha256": "8e0a255c48b91372bfbf413f2d7a2d3faa1de9c1ec448bcb8d47d6b965b9ef93",
+   "en": "Max MP +150"
+  },
+  {
+   "index": 722,
+   "source_sha256": "8e0a255c48b91372bfbf413f2d7a2d3faa1de9c1ec448bcb8d47d6b965b9ef93",
+   "en": "Max MP +150"
+  },
+  {
+   "index": 723,
+   "source_sha256": "865eb16f9c73315f1e56aba4417cdf02f1ee5b7ae79a71ae8e31a1ed7aa2a910",
+   "en": "Uses: 3  Duration: 15s  ##(YODAMAGE_UP_RATE)20％"
+  },
+  {
+   "index": 724,
+   "source_sha256": "38748188c3c80992cf68512fc459e9d034329e38e8a820614acbf42050382ff0",
+   "en": "Uses: 5  Duration: 20s  ##(YODAMAGE_UP_RATE)35％ ##(SKILL_RANGE_EFFECT): 150％"
+  },
+  {
+   "index": 725,
+   "source_sha256": "d94b3d50b39f9788b30492a5314c21ae28236af2eeb2959ac21064689286d220",
+   "en": "Uses: 7  Duration: 30s  ##(YODAMAGE_UP_RATE)50％ ##(SKILL_RANGE_EFFECT): 200％"
+  },
+  {
+   "index": 726,
+   "source_sha256": "d94b3d50b39f9788b30492a5314c21ae28236af2eeb2959ac21064689286d220",
+   "en": "Uses: 7  Duration: 30s  ##(YODAMAGE_UP_RATE)50％ ##(SKILL_RANGE_EFFECT): 200％"
+  },
+  {
+   "index": 727,
+   "source_sha256": "ebd445cc7ed647956fd42661778ec5eb739116555b34a1cf1d1965b3fc2e277d",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 25"
+  },
+  {
+   "index": 728,
+   "source_sha256": "d963637e17968e89dfcc4d2df80686725df96a60181892975161289f02d90985",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 30"
+  },
+  {
+   "index": 729,
+   "source_sha256": "5082ba69688c54443dbdeef2c8bd16e9b30c8fc1fcb1af8a661777faab66b37e",
+   "en": "Number of uses: 5  ##(SKILL_POWER): 35"
+  },
+  {
+   "index": 730,
+   "source_sha256": "caa23c522edd1578b19a5226cf9315cb8a5722685b09fea3597ad3a0d1efc8d4",
+   "en": "Number of uses: 6  ##(SKILL_POWER): 40"
+  },
+  {
+   "index": 731,
+   "source_sha256": "9f935fbaa03e8c0e0332adf9dae1f5d0e9942cee1df4275c74e85bc1de3313af",
+   "en": "Number of uses: 9  ##(SKILL_POWER): 50"
+  },
+  {
+   "index": 732,
+   "source_sha256": "9f935fbaa03e8c0e0332adf9dae1f5d0e9942cee1df4275c74e85bc1de3313af",
+   "en": "Number of uses: 9  ##(SKILL_POWER): 50"
+  },
+  {
+   "index": 733,
+   "source_sha256": "3b9e79133d96b6244fce4ff28983721dfaf8360188757fb1fcdd1bf2c9501e4c",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 10"
+  },
+  {
+   "index": 734,
+   "source_sha256": "ef6340786468cb3f4dfe5500d9c0a115c4766c3ffb44c94a09ea6e8a1ecd2c78",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 12"
+  },
+  {
+   "index": 735,
+   "source_sha256": "629092907f32024d170afadf838658ac7af26499dc2614ffa15ad0328275aab4",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 14"
+  },
+  {
+   "index": 736,
+   "source_sha256": "b89f0832c9f841b0dd24fcc627f0563c8fbb653cb0b2622730b1497196b849d6",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 16"
+  },
+  {
+   "index": 737,
+   "source_sha256": "48b3fbfa96c7198e21d35c223a5c76dfc6753ba800fff5d2c918aeecdd59ee3b",
+   "en": "Number of uses: 5  ##(SKILL_POWER): 18"
+  },
+  {
+   "index": 738,
+   "source_sha256": "0295a0c9455d7dbecbc3eda5efc560da9e7386b7b05cf71d34a1870995c6b869",
+   "en": "Number of uses: 6  ##(SKILL_POWER): 20"
+  },
+  {
+   "index": 739,
+   "source_sha256": "99bdb4e3e03e6389d849a716bcdf3c4da97b03345d5696f7a8f9fedf5af87740",
+   "en": "Number of uses: 9  ##(SKILL_POWER): 25"
+  },
+  {
+   "index": 740,
+   "source_sha256": "99bdb4e3e03e6389d849a716bcdf3c4da97b03345d5696f7a8f9fedf5af87740",
+   "en": "Number of uses: 9  ##(SKILL_POWER): 25"
+  },
+  {
+   "index": 741,
+   "source_sha256": "0d05dd03f5db7a1d4d5d8f2114913c68c8c15f837d2492217a1524acee8791b8",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 30"
+  },
+  {
+   "index": 742,
+   "source_sha256": "be410533a1af9e48706c65f6aa972025d9cfd95499c48febcd1ff4cc3c47f9ad",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 35"
+  },
+  {
+   "index": 743,
+   "source_sha256": "412059d50b12a0377cf70f138c48da2cb966f738cbe52dc3a4e97026fb97cf0b",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 39"
+  },
+  {
+   "index": 744,
+   "source_sha256": "1f64b0a405d04bc0a29d023ffb8419dc1697b3659abb01ad992e3cbc7fa96ace",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 44"
+  },
+  {
+   "index": 745,
+   "source_sha256": "ede83efc322953ee9f5b5efdfda3c60dd82a42e25b17074f4fea1c6a9407916d",
+   "en": "Number of uses: 5  ##(SKILL_POWER): 45"
+  },
+  {
+   "index": 746,
+   "source_sha256": "4529c92961d41843115398af35b6f6eb8df41b3fd7b16d2cdcf7a5aaee663838",
+   "en": "Number of uses: 6  ##(SKILL_POWER): 50"
+  },
+  {
+   "index": 747,
+   "source_sha256": "a30b8d7b96b8db3c04789295d7681841beda474e45972a80d485d874968ca624",
+   "en": "Number of uses: 9  ##(SKILL_POWER): 60"
+  },
+  {
+   "index": 748,
+   "source_sha256": "a30b8d7b96b8db3c04789295d7681841beda474e45972a80d485d874968ca624",
+   "en": "Number of uses: 9  ##(SKILL_POWER): 60"
+  },
+  {
+   "index": 749,
+   "source_sha256": "30e65a755f1c0b8efd3f3e4e7282c22449dbf0c562e526e99c30b69821bb857d",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 40"
+  },
+  {
+   "index": 750,
+   "source_sha256": "102f46948a57113bbc56ecce0219c116406c33e119a2d6f73da78bc2c3d389d4",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 46"
+  },
+  {
+   "index": 751,
+   "source_sha256": "d4cd657fbbfc8957767486673c4fd2aa81833f33d6f9e11d833f8395f49ddf7d",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 52"
+  },
+  {
+   "index": 752,
+   "source_sha256": "e8546ea2313eb2470392d4c86f1a7d601149dbefbcb40ee76554889696213464",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 58"
+  },
+  {
+   "index": 753,
+   "source_sha256": "3f78952754b6c94d51356185d8a4cec866d80688f3f767bb4803d1e9bd797b88",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 64"
+  },
+  {
+   "index": 754,
+   "source_sha256": "aa90b1f66da1c692c99aaab1c4437b99316f46311edb8b059a4b57c080d2fec9",
+   "en": "Number of uses: 4  ##(SKILL_POWER): 70"
+  },
+  {
+   "index": 755,
+   "source_sha256": "bff51cbe8f621b9bb1213c9564c4e336593d0a68c3e411f09a0f72d22ad031c6",
+   "en": "Number of uses: 5  ##(SKILL_POWER): 76"
+  },
+  {
+   "index": 756,
+   "source_sha256": "99cc1947a9b08e30f726c95d80f6628aff001b0d00a977e4790e22d8b4fbf0b1",
+   "en": "Number of uses: 5  ##(SKILL_POWER): 82"
+  },
+  {
+   "index": 757,
+   "source_sha256": "98435860b4f33f551a001f78bbd4617169693b32185294937c79b8c6f728527c",
+   "en": "Number of uses: 5  ##(SKILL_POWER): 88"
+  },
+  {
+   "index": 758,
+   "source_sha256": "6d8c9239f85cf4d8f2be18c6d1c6edcfde6300411b7b9929b60568531b148a17",
+   "en": "Number of uses: 7  ##(SKILL_POWER): 110"
+  },
+  {
+   "index": 759,
+   "source_sha256": "6d8c9239f85cf4d8f2be18c6d1c6edcfde6300411b7b9929b60568531b148a17",
+   "en": "Number of uses: 7  ##(SKILL_POWER): 110"
+  },
+  {
+   "index": 760,
+   "source_sha256": "3e239ffa998acf1ade34e0b95622c78b11dac9e456036d3627edbf1176b4ed9a",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 1200 No. Meteors: 3"
+  },
+  {
+   "index": 761,
+   "source_sha256": "1b8de593de4f763ef5697ce3cef35af44cdd23f27bec7fc56d1b27e334afc4cf",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 1350 No. Meteors: 4"
+  },
+  {
+   "index": 762,
+   "source_sha256": "be9cc1e035d433443fc0f3c929be5bd56db4525e8b2f2d81e187845c4553f72b",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 1500 No. Meteors: 5"
+  },
+  {
+   "index": 763,
+   "source_sha256": "be9cc1e035d433443fc0f3c929be5bd56db4525e8b2f2d81e187845c4553f72b",
+   "en": "Number of uses: 3  ##(SKILL_POWER): 1500 No. Meteors: 5"
+  },
+  {
+   "index": 764,
+   "source_sha256": "ef873707f0637c7720f91cdaf4c05061802a03f618052a4c8b35a5c8b7e99d14",
+   "en": "Golem's LV: 50％ of player LV"
+  },
+  {
+   "index": 765,
+   "source_sha256": "2595cfe5e7a4552661554146579d4d078c8f4fbe166269b791c7b12f5c0eacf3",
+   "en": "Golem's LV: 60％ of player LV, enhance max 1 rank by adding more wood."
+  },
+  {
+   "index": 766,
+   "source_sha256": "e068ba3f15edfb4a1acf9e73e460e7f661cf43f6886a6a3fb79cc572388ea55c",
+   "en": "Golem's LV: 70％ of player LV, enhance max 2 ranks by adding more wood."
+  },
+  {
+   "index": 767,
+   "source_sha256": "122dbbd2423ac4a28b46c72802293cfe69f22858eac1b34accef16968f7247bc",
+   "en": "Golem's LV: 80％ of player LV, enhance max 3 ranks by adding more wood."
+  },
+  {
+   "index": 768,
+   "source_sha256": "ec1a6aca1eb76beaccc7990d0e5785691bd9447f3bc70d5b971eb6b0f30bdb51",
+   "en": "Golem's LV: 100％ of player LV, enhance max 3 ranks by adding more wood."
+  },
+  {
+   "index": 769,
+   "source_sha256": "ec1a6aca1eb76beaccc7990d0e5785691bd9447f3bc70d5b971eb6b0f30bdb51",
+   "en": "Golem's LV: 100％ of player LV, enhance max 3 ranks by adding more wood."
+  },
+  {
+   "index": 770,
+   "source_sha256": "24802e3fe7b4e0372d5e26d93aafd0f616873b2fbc171796ee1d7684600d7d82",
+   "en": "Magic ##(YODAMAGE_UP_RATE)20％ while in air"
+  },
+  {
+   "index": 771,
+   "source_sha256": "bd4cf8e4c7dcd1e96ab2d671a1526209d4f93856097700f5ee92818aa4651ec2",
+   "en": "Magic ##(YODAMAGE_UP_RATE)35％ while in air"
+  },
+  {
+   "index": 772,
+   "source_sha256": "f69ba89549c8c61188f34d943a545fa6f151e442e5302b6b5a40ae0d88c3c35b",
+   "en": "Magic ##(YODAMAGE_UP_RATE)50％ while in air"
+  },
+  {
+   "index": 773,
+   "source_sha256": "f69ba89549c8c61188f34d943a545fa6f151e442e5302b6b5a40ae0d88c3c35b",
+   "en": "Magic ##(YODAMAGE_UP_RATE)50％ while in air"
+  },
+  {
+   "index": 774,
+   "source_sha256": "204e29a77de9b30f2e5eb3178d4f31823ae2d6762a17f2ee18b8369810aef0f7",
+   "en": "Uses: 4  Speed reduction 60％"
+  },
+  {
+   "index": 775,
+   "source_sha256": "7eb82482ca9ac947e47c851fdfa289ec561ec1ba98c194c0129d014d2dbce0b9",
+   "en": "Uses: 5  ##(SKILL_RANGE_EFFECT) 105％  Speed reduction 65％"
+  },
+  {
+   "index": 776,
+   "source_sha256": "af065341c9831526dada2b63fd35b57732d40560457e7499d54d02dd02d78e4c",
+   "en": "Uses: 6  ##(SKILL_RANGE_EFFECT) 110％  Speed reduction 70％"
+  },
+  {
+   "index": 777,
+   "source_sha256": "f8b40fb0c6e39da223ad7f4f004fcc6fd7dd679097174b7092bf5adb9bd7892e",
+   "en": "Uses: 7  ##(SKILL_RANGE_EFFECT) 120％  Speed reduction 75％"
+  },
+  {
+   "index": 778,
+   "source_sha256": "89727ddd966d9a3fa5975405fe901404ac64d8614483dcb166e29a2898f6843c",
+   "en": "Uses: 9  ##(SKILL_RANGE_EFFECT) 130％  Speed reduction 85％"
+  },
+  {
+   "index": 779,
+   "source_sha256": "89727ddd966d9a3fa5975405fe901404ac64d8614483dcb166e29a2898f6843c",
+   "en": "Uses: 9  ##(SKILL_RANGE_EFFECT) 130％  Speed reduction 85％"
+  },
+  {
+   "index": 780,
+   "source_sha256": "6ec23bd059d3c09dea53e0a4e756b230ae9cc1e96e92242c819b8ee55ff13680",
+   "en": "Number of uses: 3"
+  },
+  {
+   "index": 781,
+   "source_sha256": "b5c43a6f3a79fb673d8594901232836d52faa0e6acc8e00feb186fc818389597",
+   "en": "Number of uses: 4"
+  },
+  {
+   "index": 782,
+   "source_sha256": "810c0390c5125823196cdb5960159b808acd375c7fcf8b212a95adb838407075",
+   "en": "Number of uses: 5"
+  },
+  {
+   "index": 783,
+   "source_sha256": "12c41f4cffe42f0cb369338b98ffb68a9a316384cb1df0494e201fd48e693764",
+   "en": "Number of uses: 6"
+  },
+  {
+   "index": 784,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 785,
+   "source_sha256": "95edab030999d18ca73a51b9961a9cfb610409a51b053ff22c5dd682528eec89",
+   "en": "Number of uses: 9"
+  },
+  {
+   "index": 786,
+   "source_sha256": "309955e00850b8afeb148450c7208585a85f8b652d5c625c777726f44837f69c",
+   "en": "Common"
+  },
+  {
+   "index": 787,
+   "source_sha256": "6d3b491cc4b3b8c942decedece5f1f363e8f996b489f995acb320c18f73b3ca5",
+   "en": "Defense"
+  },
+  {
+   "index": 788,
+   "source_sha256": "f9a36d3e7bc3d4a1438c30437677df28f4de04be180b124c6241666be0e0e130",
+   "en": "Supplemental"
+  },
+  {
+   "index": 789,
+   "source_sha256": "4cd548f3cc29cf9c99a0134a971b1be03c8f6bf80ba8f03e174e030b0d292396",
+   "en": "Attack"
+  },
+  {
+   "index": 790,
+   "source_sha256": "6d3b491cc4b3b8c942decedece5f1f363e8f996b489f995acb320c18f73b3ca5",
+   "en": "Defense"
+  },
+  {
+   "index": 791,
+   "source_sha256": "f9a36d3e7bc3d4a1438c30437677df28f4de04be180b124c6241666be0e0e130",
+   "en": "Supplemental"
+  },
+  {
+   "index": 792,
+   "source_sha256": "151bf493947164c723a941113bcf3930547c6694ae21f7ba9535f76a9393b884",
+   "en": "Ground"
+  },
+  {
+   "index": 793,
+   "source_sha256": "aa42ff595bdb92d6618061414a70b7a5cf7e994d00ae8ee2a413579435996a75",
+   "en": "Air"
+  },
+  {
+   "index": 794,
+   "source_sha256": "f9a36d3e7bc3d4a1438c30437677df28f4de04be180b124c6241666be0e0e130",
+   "en": "Supplemental"
+  },
+  {
+   "index": 795,
+   "source_sha256": "4cd548f3cc29cf9c99a0134a971b1be03c8f6bf80ba8f03e174e030b0d292396",
+   "en": "Attack"
+  },
+  {
+   "index": 796,
+   "source_sha256": "ea93d6a262ecb87a9fa4d09edbd7654c046597936a8e235fc3949eb01775ff99",
+   "en": "Tools"
+  },
+  {
+   "index": 797,
+   "source_sha256": "f9a36d3e7bc3d4a1438c30437677df28f4de04be180b124c6241666be0e0e130",
+   "en": "Supplemental"
+  },
+  {
+   "index": 798,
+   "source_sha256": "f670438f848559845c5c4063ad9cd6a851bba02dae2c0b0cb3e2f443dccfee36",
+   "en": "Bow and arrow"
+  },
+  {
+   "index": 799,
+   "source_sha256": "ea93d6a262ecb87a9fa4d09edbd7654c046597936a8e235fc3949eb01775ff99",
+   "en": "Tools"
+  },
+  {
+   "index": 800,
+   "source_sha256": "f9a36d3e7bc3d4a1438c30437677df28f4de04be180b124c6241666be0e0e130",
+   "en": "Supplemental"
+  },
+  {
+   "index": 801,
+   "source_sha256": "4cd548f3cc29cf9c99a0134a971b1be03c8f6bf80ba8f03e174e030b0d292396",
+   "en": "Attack"
+  },
+  {
+   "index": 802,
+   "source_sha256": "997c544f1be0a2dde15ce4e764321511ce9abdb34c7e7c661439e0382191a396",
+   "en": "Special"
+  },
+  {
+   "index": 803,
+   "source_sha256": "f9a36d3e7bc3d4a1438c30437677df28f4de04be180b124c6241666be0e0e130",
+   "en": "Supplemental"
+  },
+  {
+   "index": 804,
+   "source_sha256": "4cd548f3cc29cf9c99a0134a971b1be03c8f6bf80ba8f03e174e030b0d292396",
+   "en": "Attack"
+  },
+  {
+   "index": 805,
+   "source_sha256": "997c544f1be0a2dde15ce4e764321511ce9abdb34c7e7c661439e0382191a396",
+   "en": "Special"
+  },
+  {
+   "index": 806,
+   "source_sha256": "f9a36d3e7bc3d4a1438c30437677df28f4de04be180b124c6241666be0e0e130",
+   "en": "Supplemental"
+  }
+ ]
+}

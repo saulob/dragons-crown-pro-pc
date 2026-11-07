@@ -1,0 +1,27 @@
+{
+ "sheet": "RoundContinue",
+ "records": 4,
+ "sha256": "5d3392db86bdf894a5ab4674ae2bae147da1142a36423039a501d80cd17f743e",
+ "entries": [
+  {
+   "index": 0,
+   "source_sha256": "c2cf6eef9b3be707505704e9917fac8c98840696c879b22061fdde75073c6472",
+   "en": "Increase obtained score ＋%d％"
+  },
+  {
+   "index": 1,
+   "source_sha256": "efb824aec21595abfcf4dd2d5638980003ffb7c0eefe58eceb435787888d43b4",
+   "en": "Increase obtained gold＋%d％"
+  },
+  {
+   "index": 2,
+   "source_sha256": "96495b6164659e5aa481a5f444210c77c0d46fbf7da76c3e94eaf6b29922e736",
+   "en": "Increase treasure rank＋%d％"
+  },
+  {
+   "index": 3,
+   "source_sha256": "e6c9c1adf92a2170493b3729579ff0ee43c510e308cd759e3d742797b6c79ce2",
+   "en": "Increase effectiveness of spoils＋%d％"
+  }
+ ]
+}

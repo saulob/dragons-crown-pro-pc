@@ -1,0 +1,207 @@
+{
+ "sheet": "Temple",
+ "records": 40,
+ "sha256": "4cfa96c4eee62612ef606a0d083e9116060615c8cdb4b0daacd263bc7156b79c",
+ "entries": [
+  {
+   "index": 0,
+   "source_sha256": "973c57e81c6711fd233476499a025503b7c9410a2bcdc9da08f3c8f7bc87e6a7",
+   "en": "Paladin's Prayer"
+  },
+  {
+   "index": 1,
+   "source_sha256": "4f90b930b9bb9f2c28b159f745337657d1c83e197bdb319432de8217ff61c4e6",
+   "en": "Warrior Maiden's Benediction"
+  },
+  {
+   "index": 2,
+   "source_sha256": "5a68dc43f9b78c6a8059fe30cc5cdf27fd01ecd40ed9979794b2996f09a35e1b",
+   "en": "Life Protection"
+  },
+  {
+   "index": 3,
+   "source_sha256": "14c9487e3712b1e5acfa0fb9584bac67eaf51929ba7874c6e386c98acfe77354",
+   "en": "Bountiful Protection"
+  },
+  {
+   "index": 4,
+   "source_sha256": "24fdcd2c0b717295cbe9bbe58b8c9f5d26e998e104f64e2e17b2335d86a10fb9",
+   "en": "Heaven's Protection"
+  },
+  {
+   "index": 5,
+   "source_sha256": "fd93998e57ec3247d492af9efd1c0110aa9ef21ffc630b8bf7eb3a9e3776a60e",
+   "en": "Prayer of Profit"
+  },
+  {
+   "index": 6,
+   "source_sha256": "df5a7cd6ac4c2f967257c009121d64f0f5abb119b4ac6e008727daab3abbca57",
+   "en": "Prayer of Fortune"
+  },
+  {
+   "index": 7,
+   "source_sha256": "f6b259c158f6a0913c38b79c81f251257b7b63e00addb0c92ba1ec8b8dfcacdc",
+   "en": "Prayer of Wealth"
+  },
+  {
+   "index": 8,
+   "source_sha256": "a93d739c3a7c176ff06ca6ebf4c781991cdafcf1527fc9308350cd2ab26df32e",
+   "en": "Adventurer's Boon"
+  },
+  {
+   "index": 9,
+   "source_sha256": "132f06a710980b13daf2264e53fe4afcf21060429d43ddc3715c73db095111a3",
+   "en": "Explorer's Boon"
+  },
+  {
+   "index": 10,
+   "source_sha256": "9d8eb05ec637367951bf9a4e5a7ad737188fd966ea056da23a05916139047fad",
+   "en": "Trailblazer's Boon"
+  },
+  {
+   "index": 11,
+   "source_sha256": "a7830642283655a1d051e0f3c438c75e0312fc916ea688730974fc808de7e180",
+   "en": "Althena's Blessing"
+  },
+  {
+   "index": 12,
+   "source_sha256": "d493634d718eb9ba5b376d6ca7ac92ad804c34a243d53607d4e85cc26b685113",
+   "en": "Jula's Blessing"
+  },
+  {
+   "index": 13,
+   "source_sha256": "e96654336ed296ae7f47b3b4a976c05d2c059a7d719a02f2589acdcd9853da62",
+   "en": "Vernas's Blessing"
+  },
+  {
+   "index": 14,
+   "source_sha256": "517fbe4e06bba40a402e792560012dc94e0c433c4a1c85b745236776407b4bfd",
+   "en": "Change difficulty to ##(MDLV0)"
+  },
+  {
+   "index": 15,
+   "source_sha256": "e73bc2c43a19391551fdbd09bcd445182557f73ab1fa0850184b523b3818ece5",
+   "en": "Reincarnate into ##(MDLV1) world."
+  },
+  {
+   "index": 16,
+   "source_sha256": "9e1936e0eff01c4de1da98aaeb86946124de593ba430505ed39e7e97ba082534",
+   "en": "Change difficulty to ##(MDLV2)"
+  },
+  {
+   "index": 17,
+   "source_sha256": "f5dfd23c37bfe1c9945a6d37343108dccb4a7584f6a2851892abc6d655b0d6e0",
+   "en": "Reincarnate into ##(MDLV3) world."
+  },
+  {
+   "index": 18,
+   "source_sha256": "abe1c8a057edeb89422be5841b94ddffafcb18c0a6b5cbdb96291b13be131d84",
+   "en": "Change difficulty to ##(MDLV4)"
+  },
+  {
+   "index": 19,
+   "source_sha256": "4a25f11d71dc7c5cb1acf343ed0ffd826d26d1b3b946e24489d3c17f7ad1cefc",
+   "en": "Change difficulty to ##(MDLVFINAL)"
+  },
+  {
+   "index": 20,
+   "source_sha256": "43bdbb17ff871c1dccf93613a4f67712d7b0fe0d856233d212e10ecc9ec01cbe",
+   "en": "Boosts rate of finding weapons and shields in chests"
+  },
+  {
+   "index": 21,
+   "source_sha256": "45242099c9b9c91dad4c3d81a78f54758ea51e3f22b301b274e5e6c954d38fba",
+   "en": "Boosts rate of finding accessories in chests"
+  },
+  {
+   "index": 22,
+   "source_sha256": "1ffc0f6bf8a54bd4bd88a973c405a3307885712d486772b4290f455982bb90a1",
+   "en": "Increase life points by 1 when adventuring"
+  },
+  {
+   "index": 23,
+   "source_sha256": "f91f50f5a3e17b1484d7e2f265beaa4b00bf837567344cde5a021e8cbd51ee3c",
+   "en": "Increase life points by 2 when adventuring"
+  },
+  {
+   "index": 24,
+   "source_sha256": "1a37e66fc1d3d0f798a9a7f10b75dfb2bfa8c44a18ed638f3d008caa3ca633cf",
+   "en": "Increase life points by 3 when adventuring"
+  },
+  {
+   "index": 25,
+   "source_sha256": "a8bcfdc4232b16da0ef40d2ee828ddf8eca40d9154d707d257bb9c30b46f3330",
+   "en": "Slightly increase money gained during results"
+  },
+  {
+   "index": 26,
+   "source_sha256": "896fba8bdd1d957ef72eae27b8a2a777559b70191ccf149943aae1db3be9c5d5",
+   "en": "Modestly increase money gained during results"
+  },
+  {
+   "index": 27,
+   "source_sha256": "ceaf5afaa49f286bfe886547969567b1a3d3b52f94220863b609ce9158ef9785",
+   "en": "Greatly increase money gained during results"
+  },
+  {
+   "index": 28,
+   "source_sha256": "722e168bb97079468d03f4ce9656d9a8857f7be1c1db2352b59c56e0040ab5e4",
+   "en": "Slightly increase round score during results"
+  },
+  {
+   "index": 29,
+   "source_sha256": "9eeb2205aaceac7ff690cee570ad492cdb4a2bb5fadb13a9dbaca5385c0f2e30",
+   "en": "Modestly increase round score during results"
+  },
+  {
+   "index": 30,
+   "source_sha256": "67b4aca46f2ae490d3783933d5143ecdf0ca458d876f5d080974a776c3c28cba",
+   "en": "Greatly increase round score gained during results"
+  },
+  {
+   "index": 31,
+   "source_sha256": "fc49a682b258842bc42b4ed5ece5f3066bad389fd8d37714637a4f095319b2f8",
+   "en": "Sometimes gain extra spoils from chests"
+  },
+  {
+   "index": 32,
+   "source_sha256": "20308bc00c91282854701aacd92331425ebef106d86b364751ece49a1016a7ac",
+   "en": "Boost chance of getting high-ranking weapons"
+  },
+  {
+   "index": 33,
+   "source_sha256": "12b9985b891780c49d1065bad503b2a7990a03455ef6134a8def4c24652d646f",
+   "en": "Quality of spoils increases"
+  },
+  {
+   "index": 34,
+   "source_sha256": "416860084cc886edcfce2b8d743253886c8f41286422d89ff4fc8564f539a070",
+   "en": "Change current difficulty to ##(MDLV0)"
+  },
+  {
+   "index": 35,
+   "source_sha256": "6b077306f9a4d7de24d9553cfde8f9198fcbe97ca5fb10bcaaa80f7272a3dee7",
+   "en": "Change current difficulty to ##(MDLV1)"
+  },
+  {
+   "index": 36,
+   "source_sha256": "b13b4342d355e31f6c1a4a79e0959e7d013e678dea0787da91c96890ef1f6ed0",
+   "en": "Change current difficulty to ##(MDLV2)"
+  },
+  {
+   "index": 37,
+   "source_sha256": "ed9a37a6d337df0ae6f936b3e69d4b82aa423180aada85a7a9d75827e30e4ff9",
+   "en": "Change current difficulty to ##(MDLV3)"
+  },
+  {
+   "index": 38,
+   "source_sha256": "a2bb977816e5ecc566f2f8ef6b830841973a0639ff1803115efb4803925272e3",
+   "en": "Change current difficulty to ##(MDLV4)"
+  },
+  {
+   "index": 39,
+   "source_sha256": "dd1b0332096a19ff1318e06c604a0537dca0d5b7758095433c6080520d262c64",
+   "en": "Change current difficulty to ##(MDLVFINAL)\nThis is the ultimate difficulty level for the super players that finished it all.\nIt is meant to be played infinitely with no end. Play if you dare."
+  }
+ ]
+}

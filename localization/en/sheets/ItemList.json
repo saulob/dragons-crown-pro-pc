@@ -1,0 +1,3707 @@
+{
+ "sheet": "ItemList",
+ "records": 740,
+ "sha256": "4792a4e16be2960f66df95d7e305d0db17e91fd6fdefddcbed4413a60f8973f5",
+ "entries": [
+  {
+   "index": 0,
+   "source_sha256": "dc937b59892604f5a86ac96936cd7ff09e25f18ae6b758e8014a24c7fa039e91",
+   "en": "None"
+  },
+  {
+   "index": 1,
+   "source_sha256": "ddfab491be52f14f92debc2699163e6b70a9d4c9926eb2c2d62f606aa8f8a500",
+   "en": "Heal (Small)"
+  },
+  {
+   "index": 2,
+   "source_sha256": "111467cf392162f02072255c22c2fc2a3e2d2668344b1de2cabd80b883599456",
+   "en": "Heal (Med)"
+  },
+  {
+   "index": 3,
+   "source_sha256": "436ec42e3d7366ad5291574f00ae771935c8dcc77678130c435311e2428ce63a",
+   "en": "Heal (Large)"
+  },
+  {
+   "index": 4,
+   "source_sha256": "74723f182aa96b1bae715da43a1e9bd81e688cfa3295206b9a2fc1e2b64a2bf3",
+   "en": "Grenade"
+  },
+  {
+   "index": 5,
+   "source_sha256": "9243e1cacf391427f241c9f36989e41a3cd17ba917f3be69307e79996c99089b",
+   "en": "Bones"
+  },
+  {
+   "index": 6,
+   "source_sha256": "1afc6bc3a864c25e3d5954461e983da46377abc63a7b21d2a8ddb51c0622f121",
+   "en": "Decayed Bones"
+  },
+  {
+   "index": 7,
+   "source_sha256": "a03b221c6c6eae7122ca51695d456d5222e524889136394944b2f9763b483615",
+   "en": "???"
+  },
+  {
+   "index": 8,
+   "source_sha256": "fab9fc8262e8ce44b3d7ef017ebbc38530e7a66454a9c3166a7ff042f1eca4bd",
+   "en": "Begin Food Items"
+  },
+  {
+   "index": 9,
+   "source_sha256": "f223faa96f22916294922b171a2696d868fd1f9129302eb41a45b2a2ea2ebbfd",
+   "en": "Apple"
+  },
+  {
+   "index": 10,
+   "source_sha256": "bf70552eb765992c6222a8c28b69f8ae8750bbcd0ee4afed34f0ca6db091d1d0",
+   "en": "Pear"
+  },
+  {
+   "index": 11,
+   "source_sha256": "24adb72e01fdfe2552cafb34cbbb9679ca92759d0b3d9407b448c6ae92c3983b",
+   "en": "Grape"
+  },
+  {
+   "index": 12,
+   "source_sha256": "8d9f0e9b6ec924f3c79b1a24844c3235c1a525cf15aae1915012619e5e8a207c",
+   "en": "Sausage"
+  },
+  {
+   "index": 13,
+   "source_sha256": "6e5a59d4fd56f798e609d28e3d6300b2d80bfbb76d27711c0c24006a129d4e17",
+   "en": "Cheese"
+  },
+  {
+   "index": 14,
+   "source_sha256": "37c50c935cd2a9ad065faec4824b7484acfd2b235c52368ccdb05d1f50240af0",
+   "en": "Egg"
+  },
+  {
+   "index": 15,
+   "source_sha256": "80c5f7f3bb0ba9e9a5da803bfee916a2328243d9cbf4b936a8ce4acb0dd09a84",
+   "en": "Fig"
+  },
+  {
+   "index": 16,
+   "source_sha256": "1483af970476f18ee85aea6458b898dc0d89f1b54d52002b177393ab867a4c28",
+   "en": "Peach "
+  },
+  {
+   "index": 17,
+   "source_sha256": "887faf457ae198a292754ee6322369fcc935afdd2008fca18956e410dbf9d924",
+   "en": "Ham"
+  },
+  {
+   "index": 18,
+   "source_sha256": "d003dadb78981e299f5b00a5c9837b08e255b640dbd65469f0a2d74594ae0919",
+   "en": "Chicken"
+  },
+  {
+   "index": 19,
+   "source_sha256": "72e8a4ec22ac7d7f7e08712822e19c15a5e555365c8ebc7b36a901b898ff6ada",
+   "en": "Bone-in Roast"
+  },
+  {
+   "index": 20,
+   "source_sha256": "22f84df98a0e2f0753ba2051773181cc43230d19d345b9111312963921893d03",
+   "en": "Pretzel"
+  },
+  {
+   "index": 21,
+   "source_sha256": "47f53b5553889a8d0cbf84d8f9bc0b2f2639293db9ca3211bd26580b99e2bf5a",
+   "en": "Sweet Roll"
+  },
+  {
+   "index": 22,
+   "source_sha256": "d504195d7cd7b2d7b5e47fb16cdc482607e08285caedf5a61cb6fc234f2c791c",
+   "en": "Bun"
+  },
+  {
+   "index": 23,
+   "source_sha256": "8867ebccdc1de5b8a6f46c16c5f3f510320c6539ae63876f094e85ea4cb678ca",
+   "en": "Meat Pie"
+  },
+  {
+   "index": 24,
+   "source_sha256": "db82da0f33dcca193ea0732c1e9dc4f42469298e0cf19727c2d6dd06fa0fdd5e",
+   "en": "Berry Pie"
+  },
+  {
+   "index": 25,
+   "source_sha256": "be08cccfcc419624ea96764f88a17053d96c4e700dd11afef92215f4520b2196",
+   "en": "Food End"
+  },
+  {
+   "index": 26,
+   "source_sha256": "e4eb18069d65aaa901cecb66371155f389643796428e9d54c5f5127c91ab3fdc",
+   "en": "Food"
+  },
+  {
+   "index": 27,
+   "source_sha256": "05800e70aa10c86f5ab898d18ad6884245a149f3b945bb0bd8cd05a8e469cd27",
+   "en": "Arrow"
+  },
+  {
+   "index": 28,
+   "source_sha256": "6828475f617f4ea50002ceee4c0741415e1cad1a31053c3e882737b2fe44c817",
+   "en": "Arrow Bundle"
+  },
+  {
+   "index": 29,
+   "source_sha256": "210b56c8d06acd330fcb201585c07eef5e4ebbcabd78ee3e04a4b0dfc56fc4be",
+   "en": "Quiver"
+  },
+  {
+   "index": 30,
+   "source_sha256": "def8880c7b392265d82e4abb199973976f2616f68e9a380bf99455b4c37c06de",
+   "en": "Begin Score Items"
+  },
+  {
+   "index": 31,
+   "source_sha256": "5fc3337c7bc55e0f77f9a0d0866cc20ed567f26ffe2e6e80e7462c5b2018fd21",
+   "en": "Jewel A"
+  },
+  {
+   "index": 32,
+   "source_sha256": "3ba940cbc5cf15337b9ed2b865fb928d614c898863fd1de66f71523cefe71ad7",
+   "en": "Jewel B"
+  },
+  {
+   "index": 33,
+   "source_sha256": "4732ca217b4de702367ae7fe855944dde2d1969997fd7239aac1d200139367d1",
+   "en": "Jewel Pouch (Small)"
+  },
+  {
+   "index": 34,
+   "source_sha256": "312384e93987c18072a5e446efa6753ad1c0e3ca5a8c0ad4a82a59bb19cefbb5",
+   "en": "Jewel Pouch (Large)"
+  },
+  {
+   "index": 35,
+   "source_sha256": "a4a863612bd4ab69110ad39fa3f17693391c0f4b1b50ee21170e4e2ba07ab102",
+   "en": "Crystal Ball"
+  },
+  {
+   "index": 36,
+   "source_sha256": "12b5f6e8cf8f8c49475e700a5776cfee7726e2c3d89b21da6b704c4b4eaf6eaa",
+   "en": "Purple Crystal (Small)"
+  },
+  {
+   "index": 37,
+   "source_sha256": "112bc76d672a7883edbc6e38fca9e9d9ed17ca635a7b58aeb229c993c111e0a5",
+   "en": "Purple Crystal (Large)"
+  },
+  {
+   "index": 38,
+   "source_sha256": "bae01a8cc822a7e0541bb8ae12208d67cc3b90d5ff76d7e9f2634b8168c392b1",
+   "en": "Bronze Goblet"
+  },
+  {
+   "index": 39,
+   "source_sha256": "b4b5d009b0297d1c48229bcc4c60a3e89202411a4e1169cde11203da631b0bf8",
+   "en": "Silver Goblet"
+  },
+  {
+   "index": 40,
+   "source_sha256": "505ff8e5e5abfc453b45705232ed4dd76e84d8d7a7acfc19ffff0012650922a0",
+   "en": "Gold Goblet"
+  },
+  {
+   "index": 41,
+   "source_sha256": "5b74f2ef2593069e81245315102f0a77e29a83ed3f53f1fc57a4ad9e4e387092",
+   "en": "Bronze Pitcher"
+  },
+  {
+   "index": 42,
+   "source_sha256": "d19df645cfb21cfb308b008c31f657f8c95e272f4b6c401aa258d4244bbfb6cf",
+   "en": "Armband 0"
+  },
+  {
+   "index": 43,
+   "source_sha256": "55af692394876dbb3906e7ccad5322932b532f99ade8d5bed852ce91f4b84c8b",
+   "en": "Armband 1"
+  },
+  {
+   "index": 44,
+   "source_sha256": "9b4f80c377626dc506952ad3cc37386b2b4ef7a6f9983489d7d95e221466b71d",
+   "en": "Armband 2"
+  },
+  {
+   "index": 45,
+   "source_sha256": "2c4789835c1d71fafe9f0f7de46c47c9e75039d3f97739d89d43b32881113ed9",
+   "en": "Armband 3"
+  },
+  {
+   "index": 46,
+   "source_sha256": "2dfa71f1d4d6798a4e1b412400d9001e029c5d90d367f2669195ae6c8ebc3bda",
+   "en": "Necklace 0"
+  },
+  {
+   "index": 47,
+   "source_sha256": "3696963be098f3c32fbdb17987e8adb834bf72b42c30396a61093dcadc2f76b7",
+   "en": "Necklace 1"
+  },
+  {
+   "index": 48,
+   "source_sha256": "f1005c8e7b845a5406c0e59bc9cc8d804a4472fa7ece6a7e9926f1333d654e24",
+   "en": "Necklace 2"
+  },
+  {
+   "index": 49,
+   "source_sha256": "1987a9c54417f775ec3be995afc0bcc990fc02a9b83a4aa19d6df62b7c4667b8",
+   "en": "Necklace 3"
+  },
+  {
+   "index": 50,
+   "source_sha256": "f06a747b204ac1ed3f13db69bcc3012ffbdd5651855c25035c323a171cc6b0ab",
+   "en": "Necklace 4"
+  },
+  {
+   "index": 51,
+   "source_sha256": "3e68a5d40efff70b49d68344521b8e9baebc3b1c7e189a10940fbd98a32b60a2",
+   "en": "Necklace 5"
+  },
+  {
+   "index": 52,
+   "source_sha256": "028e0f7035e0f28202e84c6670cea41301474f7c99ac3dc12ccc4c65227e1987",
+   "en": "Necklace 6"
+  },
+  {
+   "index": 53,
+   "source_sha256": "7ced08c929ab6e1733ae66ee14b396a86fb8567ce28f7f30ea630d0318f9804f",
+   "en": "Necklace 7"
+  },
+  {
+   "index": 54,
+   "source_sha256": "559d6af3a6260ad7522ba4cfd429427e527db1554917ddcb1e34b315a8e254b0",
+   "en": "Necklace 8"
+  },
+  {
+   "index": 55,
+   "source_sha256": "ec0b619b7d6c684a5d277ad63934f88c85a188188f31d8bb686c05e40edadf3d",
+   "en": "Necklace 9"
+  },
+  {
+   "index": 56,
+   "source_sha256": "d42881ae80f5ccc9b5f5f4a9601696ff432603c0b000156f8350ed719d9bf8b0",
+   "en": "Brooch 0"
+  },
+  {
+   "index": 57,
+   "source_sha256": "51203fad4ac948098f434ea85ea45304163457cb4f90c6c8e08bc0e669377a58",
+   "en": "Brooch 1"
+  },
+  {
+   "index": 58,
+   "source_sha256": "75e4287414ede4137160a291d33d4c0a2958bfe5b0a5cd7d34281df0b0e128f7",
+   "en": "Brooch 2"
+  },
+  {
+   "index": 59,
+   "source_sha256": "ae11645cd4e5bced67b65969d9eaf06c28c37a35906a90119556c97bac4cf427",
+   "en": "Brooch 3"
+  },
+  {
+   "index": 60,
+   "source_sha256": "78ffb31e4d07b33c396754ef5c97e655480d0457cb78d08147a09ebf0b71cb38",
+   "en": "Silver Cup"
+  },
+  {
+   "index": 61,
+   "source_sha256": "4efe657cbb94cc59bc14430417b70174f08dc077afc9e6bc72252b75602774e2",
+   "en": "Gold Cup"
+  },
+  {
+   "index": 62,
+   "source_sha256": "58af3f1e5534e381820dc3b1cf6e1bf3941cec107d48806ae5a83f1087dbd6eb",
+   "en": "Bronze Vase"
+  },
+  {
+   "index": 63,
+   "source_sha256": "4aca30242085ebfeb59203cc81f9d6331f56385575e4ad04a8f4617e23e05fe4",
+   "en": "Gold Vessel"
+  },
+  {
+   "index": 64,
+   "source_sha256": "5ad549c568f266b3bb816f4a2582c25a30ce8f0e013e9f47badbcb56c35fa200",
+   "en": "Silver Pot"
+  },
+  {
+   "index": 65,
+   "source_sha256": "09d3b21c740b88a96a2dc30072ce50162ff1d11e65ceb03b3ccccc4aa2688cdd",
+   "en": "Gold Pot"
+  },
+  {
+   "index": 66,
+   "source_sha256": "9af29294544e98b5a2eb0c2a0c1d3699fb7fd46145450055d1b8f0e881ce6d63",
+   "en": "Gold Laurel Crown"
+  },
+  {
+   "index": 67,
+   "source_sha256": "d6b2d617e780a0adb18d28ca40755ac46898ab9121dd7460d80159168f627daf",
+   "en": "Gold Skull"
+  },
+  {
+   "index": 68,
+   "source_sha256": "0d835d5a53c2f31d85d2404f867192891ebab1708b46b551176dc8900d162d48",
+   "en": "Gold Claw"
+  },
+  {
+   "index": 69,
+   "source_sha256": "2f2d06d782ef4c3abffcdbb03b58c75d1d87942087bdcf94a10d31180ade3a49",
+   "en": "Silver Bell"
+  },
+  {
+   "index": 70,
+   "source_sha256": "907cb11ef17e3ea852b1e3103c957d7cdcf5135b32f19f89b6ed9101917532d7",
+   "en": "Gold Bell"
+  },
+  {
+   "index": 71,
+   "source_sha256": "dc3f155be01fb1bf22be2a2af3e374d60b3e50b87dc1e9421dd81d2d6c277eed",
+   "en": "Wyvern Egg"
+  },
+  {
+   "index": 72,
+   "source_sha256": "aac7a122529a2ba3fc6b2673118b3432546a026bb2fe7cb5493213eee5f96f1d",
+   "en": "Mushroom Spore"
+  },
+  {
+   "index": 73,
+   "source_sha256": "db8b37083d1898bb2e018aa2562bb586dbaf8cc1855b762ef8d297b20fde22ab",
+   "en": "Spider Web"
+  },
+  {
+   "index": 74,
+   "source_sha256": "7ae0ec55970120ebdd7f7f2205836d5e6acb6ef693d9770b334d6b1e1cee819c",
+   "en": "End Score Items"
+  },
+  {
+   "index": 75,
+   "source_sha256": "9c0465260464ac92ace8a374b9a8be5d74f90e9749e08a0e73653dea5846eda2",
+   "en": "Begin Money Items"
+  },
+  {
+   "index": 76,
+   "source_sha256": "68e2a3748a39fca5c8c813aeed3fb898e4a20618e59d7763220947b6071ccef7",
+   "en": "Copper Coin"
+  },
+  {
+   "index": 77,
+   "source_sha256": "d747dd779a07a2add1c1f9e9121fc3fbabff0978a8cda90d307be2a2a2752e45",
+   "en": "Silver Coin"
+  },
+  {
+   "index": 78,
+   "source_sha256": "96960859445843e1e25783f66a148648d5e6a8553d5650af31de72eec1fd1adb",
+   "en": "Gold Coin"
+  },
+  {
+   "index": 79,
+   "source_sha256": "d4bc05b913b5cf7a6a3d0860686e0bdff073754d5c4f61231aa7ae033040b7fa",
+   "en": "Bag of Coppers (S)"
+  },
+  {
+   "index": 80,
+   "source_sha256": "45838a009f9c46a18fd973bc12e68cd351d532cda2a7eaa7875f54b25e30da25",
+   "en": "Bag of Silvers (S)"
+  },
+  {
+   "index": 81,
+   "source_sha256": "297799301610afa03ed5a749f65f0c53d13e855431c18fb8f500e8ba76d50e66",
+   "en": "Bag of Golds (S)"
+  },
+  {
+   "index": 82,
+   "source_sha256": "149f3b6ae5ad45d2f35da6ff05284926ad668811b6593b574de02956d37247ad",
+   "en": "Bag of Coppers (L)"
+  },
+  {
+   "index": 83,
+   "source_sha256": "7aa5c169334810fadcc696b31184c7ac2179349fdd20dfd801b4e51264008184",
+   "en": "Bag of Silvers (L)"
+  },
+  {
+   "index": 84,
+   "source_sha256": "3346c31ec7ee514bbf8c8d0a89684f4450c782059705128e9324ea5b510f8976",
+   "en": "Bag of Golds (L)"
+  },
+  {
+   "index": 85,
+   "source_sha256": "5568f05cd5774acae8230e2604a4f4c478767c89ed06d22f7ca9e7348409814a",
+   "en": "End Money Items"
+  },
+  {
+   "index": 86,
+   "source_sha256": "962ea66524cca1accae7e4dc8e4b87190ffaaaf222fd505dcc7d9dddce6a6cad",
+   "en": "Weapon Ticket (E)"
+  },
+  {
+   "index": 87,
+   "source_sha256": "99d0c3298f80873d697ff9d7e501f79e2ece0ede64fbc0f317361ceeab374f06",
+   "en": "Weapon Ticket (D)"
+  },
+  {
+   "index": 88,
+   "source_sha256": "55ce6338ddebad52621fb34feb94f48124d97d3aeeedfeeb6bf7a51abe156877",
+   "en": "Weapon Ticket (C)"
+  },
+  {
+   "index": 89,
+   "source_sha256": "282b365ebf496c3963a84a90f7acff93d51c36b026cfc78ec968d55a31aca44d",
+   "en": "Weapon Ticket (B)"
+  },
+  {
+   "index": 90,
+   "source_sha256": "2ecb5b7ae5b23e4b484e74ffe1930160a5f8bba1e6fee1b5c1ac565908a0ab09",
+   "en": "Weapon Ticket (A)"
+  },
+  {
+   "index": 91,
+   "source_sha256": "8dd5b7a49434c9198435ade42dd83e74bf3b4a66434191d5fa075e7d7ba92694",
+   "en": "Weapon Ticket (S)"
+  },
+  {
+   "index": 92,
+   "source_sha256": "cd61331273a249831632eaa6b49d87a38f2c9a5cfa8877a79abbbb9bce0784e8",
+   "en": "Accessory Ticket (E)"
+  },
+  {
+   "index": 93,
+   "source_sha256": "f6c53919fb09468cbcfd0c7ed03c68887463fd6dc885090d6d92a0a8b5a4b3f1",
+   "en": "Accessory Ticket (D)"
+  },
+  {
+   "index": 94,
+   "source_sha256": "b0832f9db8e43ddee065937fb8f1ff363c3c94a4c243709aa4c485ec2c2b8927",
+   "en": "Accessory Ticket (C)"
+  },
+  {
+   "index": 95,
+   "source_sha256": "ffde97e3295bd880bf1207838a187041091b4f4f0da27102d95e4b8f9a03a032",
+   "en": "Accessory Ticket (B)"
+  },
+  {
+   "index": 96,
+   "source_sha256": "26407c720581f83d74831d294718b793fe552e2fac5a8e94bb42ad1d4486a091",
+   "en": "Accessory Ticket (A)"
+  },
+  {
+   "index": 97,
+   "source_sha256": "e996e6a0cefc057c175fc23cee3e0bf108a5127153bca4dd1c184f2e490bc70c",
+   "en": "Accessory Ticket (S)"
+  },
+  {
+   "index": 98,
+   "source_sha256": "08a6ea50b2681e0264c3056891a3e3eaa110c9e7223aa505d90e9421e68e2d87",
+   "en": "E Rank Ticket"
+  },
+  {
+   "index": 99,
+   "source_sha256": "f9192cf171ec7747cf1fd21c6a518a672647bca98b160b2a227c5120a0517729",
+   "en": "D Rank Ticket"
+  },
+  {
+   "index": 100,
+   "source_sha256": "02fdf6aa050c36a8f32b8cf40b107abb1e298ff303c237ac033c04e216f62fff",
+   "en": "C Rank Ticket"
+  },
+  {
+   "index": 101,
+   "source_sha256": "86824b3f9730d139a6d2bff66447ae5917f634cde3ca8bf6f763bd6bddc904c7",
+   "en": "B Rank Ticket"
+  },
+  {
+   "index": 102,
+   "source_sha256": "0951c0d7603f7008b790527353f59ac000e4abe50143c6e8fd8cd7bb1a7d5a79",
+   "en": "A Rank Ticket"
+  },
+  {
+   "index": 103,
+   "source_sha256": "41784912db0ba837cf570552967c0f6b6ba58c252cd57eb5c9d24b4679cebacb",
+   "en": "S Rank Ticket"
+  },
+  {
+   "index": 104,
+   "source_sha256": "6d015df4f46c068378a1571e9d958befc17842a1441068d41f7363bc8cafa96d",
+   "en": "Talisman"
+  },
+  {
+   "index": 105,
+   "source_sha256": "231aedffacea10497c1851e05277da1baa518600f56ebd2123410bc90e7a0190",
+   "en": "Unused"
+  },
+  {
+   "index": 106,
+   "source_sha256": "a0d88baa32eea69f740abfd668aed56e41b2a5515f6c147459ebd1d1b6428b65",
+   "en": "Spellbook A"
+  },
+  {
+   "index": 107,
+   "source_sha256": "84419e8d7ed579b6ef4cb4b3c2e6b01da0fc51a84101ffb4479887a353d28783",
+   "en": "Spellbook B"
+  },
+  {
+   "index": 108,
+   "source_sha256": "7af39d63ac12264efa9ce65355097cb7b4a34dd67a94af876e2ca50cf0205952",
+   "en": "Poison Phial"
+  },
+  {
+   "index": 109,
+   "source_sha256": "7083778357b9bdac4e37757e443c1885d064124866285e261f1b86bf138673e0",
+   "en": "Fire Phial"
+  },
+  {
+   "index": 110,
+   "source_sha256": "9ea60ab38c9f8ccbae3aaf081c1770dee058f1250355fbb506210f2314ec0404",
+   "en": "Fire Barrel"
+  },
+  {
+   "index": 111,
+   "source_sha256": "803ce5cf335eea76864199d4c97299c1de17f186e29de08eb92182ef2e61bdcf",
+   "en": "Spell Ring (for test)"
+  },
+  {
+   "index": 112,
+   "source_sha256": "f684c73cba75b2ba0b6833f62a8fa8af6b8a2d3711b775d52596105f4917e38d",
+   "en": "%s"
+  },
+  {
+   "index": 113,
+   "source_sha256": "150fe5514030b1434a5deaf491ece92c0e6497447d6de7bd6ba85e8cae1e00a3",
+   "en": "Salt"
+  },
+  {
+   "index": 114,
+   "source_sha256": "4e7bcd0c8d5b25bdb683b29be3304f89cf6a516eada88f227fe04018b876fdfb",
+   "en": "Garlic"
+  },
+  {
+   "index": 115,
+   "source_sha256": "96b4387ed3e0615ce1b16e37a9b86ac4d9f3d06da5e6a42ad7ec895a7a7de44b",
+   "en": "Sake"
+  },
+  {
+   "index": 116,
+   "source_sha256": "ba7596557d430c31e563741fe5846aecbd0bf20aac4a64650859b96f9b418ff1",
+   "en": "Spices"
+  },
+  {
+   "index": 117,
+   "source_sha256": "d9538cf97df1f8d5643401d36fc8f15eaad2b490a20cd16ba94c18e8e75ac449",
+   "en": "Pepper"
+  },
+  {
+   "index": 118,
+   "source_sha256": "c448a0c2fcc2d781c83991a20163ad4d8259cba17c9b7705a05e73ef121b9cbc",
+   "en": "Smoked Meat"
+  },
+  {
+   "index": 119,
+   "source_sha256": "6ce6b2f2bbe9a234b9c77aa854850d1af18a02419bc45932fd0f6d15fedb5df3",
+   "en": "Chimera Meat"
+  },
+  {
+   "index": 120,
+   "source_sha256": "9deaff1e4ba2912fb3455dcef370033cf4958457974c6d1c7090b412aaa835fd",
+   "en": "Rabbit Meat"
+  },
+  {
+   "index": 121,
+   "source_sha256": "c0b8942a03c797c21d7e80dd03bcf0ed341bc9b39143175bdcc43c9add8d13db",
+   "en": "Killer Rabbit Meat"
+  },
+  {
+   "index": 122,
+   "source_sha256": "26751e470e3fa570852f5cd4f26453fe1e3f9dfcc97466bfb4109b3865009f3f",
+   "en": "Salamander"
+  },
+  {
+   "index": 123,
+   "source_sha256": "38be535b693da399d17ae58816975853435563031d9a7ed46efa895cade76649",
+   "en": "Gazer Eye"
+  },
+  {
+   "index": 124,
+   "source_sha256": "6bb938829aa4200685faba059053279c0d26ef415a7d4569c0e1c5fbf0389228",
+   "en": "Herring"
+  },
+  {
+   "index": 125,
+   "source_sha256": "fff7972bb2667c0f21cfaea5a0a9a29a8a27fe67ff90adaa955bde7142a2a94e",
+   "en": "Oyster"
+  },
+  {
+   "index": 126,
+   "source_sha256": "65c8a60566a70e29b6205dd64ae7c76a14c04c0a648d4e8a1ee6337fc7ce4a29",
+   "en": "Mussels"
+  },
+  {
+   "index": 127,
+   "source_sha256": "375d1adaba7f0c4d25f6c49b69eedb0b2a3e85c60f4bad32012ed46fe7cfd2a7",
+   "en": "Barracuda"
+  },
+  {
+   "index": 128,
+   "source_sha256": "3bc406963f13878049e7881dd132cbd8b2b4f578a5670ea38c5630fe2f064a21",
+   "en": "Lobster"
+  },
+  {
+   "index": 129,
+   "source_sha256": "b1fdf767738c8a27f327f31e0b633034894deb3bff1d172023a3de251a518ee0",
+   "en": "Kraken"
+  },
+  {
+   "index": 130,
+   "source_sha256": "6f7fc5ee7cb62b249884b465f6dd701d1324b491ac68b8ceb75e3b160ef40a0a",
+   "en": "Pea"
+  },
+  {
+   "index": 131,
+   "source_sha256": "72e4f43131c7facaf7f6971082dbfee4d8d93d798006d2336f379aeb48bbac01",
+   "en": "Wild Boar Meat"
+  },
+  {
+   "index": 132,
+   "source_sha256": "d6287f54bc2fd134f71da8584277e2961604d9f4c0671c184075b574f0812c04",
+   "en": "Minotaur Tongue"
+  },
+  {
+   "index": 133,
+   "source_sha256": "335545010f420a47928a4e2b78445da5cce5a6bc3cc77d4a89df45041c85a785",
+   "en": "Escargot"
+  },
+  {
+   "index": 134,
+   "source_sha256": "f2813a523c21f6654fc4185c14aa02280dfd91e3271a4db43929fe61fa7222d1",
+   "en": "Bat"
+  },
+  {
+   "index": 135,
+   "source_sha256": "d37db9788605b5e15f27aeb62f54e892cf6a0d09df8f6a4645bc4394e7ab2e39",
+   "en": "Cabbage"
+  },
+  {
+   "index": 136,
+   "source_sha256": "13d83610d3508d9c300e30a1f381060cad0f69ac26e9ab11049d5a3df3b3f810",
+   "en": "Green Onion"
+  },
+  {
+   "index": 137,
+   "source_sha256": "9e87ba4dd07da92b8ecae2ed4d36e503c875d3e19548db7957402f570cefb39e",
+   "en": "Carrot"
+  },
+  {
+   "index": 138,
+   "source_sha256": "e9eaa58ea00fb8ff31b7ce20308e66f183722d57c92207090dc6907117608bd6",
+   "en": "Snake Meat"
+  },
+  {
+   "index": 139,
+   "source_sha256": "e8c6c74416a541c1c9ecc06056c7735623dd6a624f4805c207329ef2c74bab05",
+   "en": "Harpy Egg"
+  },
+  {
+   "index": 140,
+   "source_sha256": "409167a25062e57cf4164c8ba430a71b4813e052f48ffe5a7666e481c3f3daf2",
+   "en": "Enoki"
+  },
+  {
+   "index": 141,
+   "source_sha256": "6d61374da4b4df53c6f8fbf4c9b05576d647a07da7498b400abaf7e1f4f44124",
+   "en": "Potato"
+  },
+  {
+   "index": 142,
+   "source_sha256": "f5159b17b9b2e2d5de3640b197d360155b329cb5b3b9352e9ac82f8e9ebedf9d",
+   "en": "Sliced Myconid"
+  },
+  {
+   "index": 143,
+   "source_sha256": "4ae8bfbd81db6b755bdebdfad74efd66c281e210f8ce62720ba7bf7ee7d985b1",
+   "en": "Sliced Worm"
+  },
+  {
+   "index": 144,
+   "source_sha256": "ce4efb313e3f576273eaa1517c3c04b6d2629e426aa211f01ab8d02dd56f3aa9",
+   "en": "Smoked Beast Meat"
+  },
+  {
+   "index": 145,
+   "source_sha256": "cca303e99f5f821dfd9d74b81b18be6a03a7ee271123158a9d6a7092f326b1bf",
+   "en": "Wheat"
+  },
+  {
+   "index": 146,
+   "source_sha256": "8ec64f59fd8eed757c84762effb7a5c2ff2907cf12a4802c80f137bdb423818e",
+   "en": "Scorpion"
+  },
+  {
+   "index": 147,
+   "source_sha256": "817c94926e498e26949ef07c7d22b589057a4d7433a5052eedec3338793bbe94",
+   "en": "Demon Heart"
+  },
+  {
+   "index": 148,
+   "source_sha256": "1d086001c6e5975be0172586a6cfe53a03781ff43a15881ebd5e68a863402e27",
+   "en": "Bean"
+  },
+  {
+   "index": 149,
+   "source_sha256": "bcaebb3b129a9b0ce387cd35d2b14b087d884e067cba95dd6a4144afc0a7de05",
+   "en": "Salt Pork"
+  },
+  {
+   "index": 150,
+   "source_sha256": "adbe58db2f2a50e34d15141cca22e23af8df57588d454e58adb2a787c977adaa",
+   "en": "Wyvern Meat"
+  },
+  {
+   "index": 151,
+   "source_sha256": "74e44da33e524721dde7af627b80744419cc49df7d6297b4a840984e2f2627a5",
+   "en": "Red Dragon Meat"
+  },
+  {
+   "index": 152,
+   "source_sha256": "d003dadb78981e299f5b00a5c9837b08e255b640dbd65469f0a2d74594ae0919",
+   "en": "Chicken"
+  },
+  {
+   "index": 153,
+   "source_sha256": "dcc578acd71a7bf2c0e96de641cc4656cffa744e1cadd724c18b4780ce007e40",
+   "en": "Torch"
+  },
+  {
+   "index": 154,
+   "source_sha256": "44f05d34905904b1f30acedd9cecd321b5b0e88f95dff561c54524716f50ed3c",
+   "en": "Crossbow"
+  },
+  {
+   "index": 155,
+   "source_sha256": "bf74e110ea3be0bed435e268537c692ae0a44a8af9a8f846cb2ab6b44c567408",
+   "en": "Cranequin"
+  },
+  {
+   "index": 156,
+   "source_sha256": "471ffac1e4e3fa20c26fa0c7fe3e2ecd9972783390d2b2c0a19e0e08227e394a",
+   "en": "Arbalest"
+  },
+  {
+   "index": 157,
+   "source_sha256": "4f91d7fbbd9df33afcb5b6e25b90380c6e7542c2fcc870c094d651447ae04002",
+   "en": "Fire Thrower"
+  },
+  {
+   "index": 158,
+   "source_sha256": "5679daa7c55dde153a0e3f2e5d7c5318f149fa10716a7d874fa97e46639426a3",
+   "en": "Dagger"
+  },
+  {
+   "index": 159,
+   "source_sha256": "c5d51218c7306a865853e12dfaae02c48d7319ddb3e387a4e1242bc6af6092bd",
+   "en": "Poison Dagger"
+  },
+  {
+   "index": 160,
+   "source_sha256": "3c3f1383f363b15453c618cc703477120c1dce4123a3a1e7c80a1cd18bbf818d",
+   "en": "Magic Lamp"
+  },
+  {
+   "index": 161,
+   "source_sha256": "359be5f850889fd1fec2febe58b390e171991bdc7a33e3a6535cd77b0d92903f",
+   "en": "Bomb"
+  },
+  {
+   "index": 162,
+   "source_sha256": "359be5f850889fd1fec2febe58b390e171991bdc7a33e3a6535cd77b0d92903f",
+   "en": "Bomb"
+  },
+  {
+   "index": 163,
+   "source_sha256": "13cf0cc10ffd76b3d549a972356adfe21677799060ef5c624e35457067e2814a",
+   "en": "Burning Oil"
+  },
+  {
+   "index": 164,
+   "source_sha256": "3650f9f95b3e81a994420eb9f3087d19c148c0c5a138ffdb2d9a01a5f3c6b51b",
+   "en": "Saint Orb"
+  },
+  {
+   "index": 165,
+   "source_sha256": "f9dfcfbadcf2d3fb0ab38db548db11f6a74344728a689751e95e416546470e23",
+   "en": "Great Shield"
+  },
+  {
+   "index": 166,
+   "source_sha256": "56e21f3f31f751e21839369bfcbc1cbcf55a98cb80bebb9bd5ffd6cc8f3a96c3",
+   "en": "Ballista Bolt"
+  },
+  {
+   "index": 167,
+   "source_sha256": "edac30d99a59536f31d15f3e63c3c980c0c2879ff15d2f8cf62668a195d3b74d",
+   "en": "Statue Head"
+  },
+  {
+   "index": 168,
+   "source_sha256": "770e3f027a75c6ffc18cb5899291c2a205933f3fc598d490db67a9aa6939349c",
+   "en": "Statue Left Arm "
+  },
+  {
+   "index": 169,
+   "source_sha256": "fe68449fba36fd7e948f7a728c6102a650912400ab779635a9527be1c81a504b",
+   "en": "Statue Right Arm "
+  },
+  {
+   "index": 170,
+   "source_sha256": "785afd37136401d6926c709afe5c9a7f055e2c5d3d5b89a917ff8755eb82af2c",
+   "en": "Statue Legs"
+  },
+  {
+   "index": 171,
+   "source_sha256": "63faebb494c84e362d8072c0b5f759b35e8de6e3ebe638882199ff43a7959684",
+   "en": "Cannonball"
+  },
+  {
+   "index": 172,
+   "source_sha256": "99a52df3ff3d499488e2fa28150c4106a2cb5e928891a830a9aa3922b2d32160",
+   "en": "Key"
+  },
+  {
+   "index": 173,
+   "source_sha256": "4e9204e839cd2ce95752f3f6904c38e3e85b8ae791dc99c48003f05b75437420",
+   "en": "Key to Cyclopes' Prison"
+  },
+  {
+   "index": 174,
+   "source_sha256": "5afc1da107e6a5e5a735df6843855ea1dbe00847c32df2da59c0a9e6bb54c566",
+   "en": "Goblin Sword"
+  },
+  {
+   "index": 175,
+   "source_sha256": "cc5bd0a4399caba83cc083aa05a2086a2b660b1ff7cdbf777daefc9a579e859c",
+   "en": "Goblin Leader's Sword"
+  },
+  {
+   "index": 176,
+   "source_sha256": "bb21c8f4b99f469d7c539557aa71088e80f7c0830f7bb13f259eb6da0590b26e",
+   "en": "Redcap Goblin's Sword"
+  },
+  {
+   "index": 177,
+   "source_sha256": "a4d0c0bd1417028ea823a359966dd1a56858665beba6783048ffd65cf4b4e8e1",
+   "en": "Goblin Shield"
+  },
+  {
+   "index": 178,
+   "source_sha256": "c903fabe1a8a422c912d031878e95191c8b5bf83516bad9ccfb0818de32cf24d",
+   "en": "Goblin Leader's Shield"
+  },
+  {
+   "index": 179,
+   "source_sha256": "504c3dd3b722e766653cbb0df7fd28cde56fae855a595aa844cd7d63bdb0a5c0",
+   "en": "Redcap Goblin's Shield"
+  },
+  {
+   "index": 180,
+   "source_sha256": "13a15f1f672b09bae1e1529420651efa59fee3dd376d8202e10250c5b728880c",
+   "en": "Orc Hammer A"
+  },
+  {
+   "index": 181,
+   "source_sha256": "9152e3770f982103580025dc1321370a6bdf3ff10f7aae1a0d71961f10f1434c",
+   "en": "Orc Hammer B"
+  },
+  {
+   "index": 182,
+   "source_sha256": "c213960c02937a9ced2673153b2b71d98f79079332276c30294815d59c08f1fd",
+   "en": "Lizardman Harpoon"
+  },
+  {
+   "index": 183,
+   "source_sha256": "6a140ebcc719c67db88c68623e84d3845a98e5e65d0a88a44415e01c04015400",
+   "en": "Lizardman Harpoon (R)"
+  },
+  {
+   "index": 184,
+   "source_sha256": "ebcd19d82413c26759e7c96aa38a91649137a44bdab5bb26e1faaac3f4a8c296",
+   "en": "Lizardman Harpoon (B)"
+  },
+  {
+   "index": 185,
+   "source_sha256": "eaca0bd345ec923fc8588a1fd0ff3e367d75a68e4f2a517043427f6d290b7e70",
+   "en": "Evil Wizard Rod (B)"
+  },
+  {
+   "index": 186,
+   "source_sha256": "20ec81f6ce612f28647f6026474545b61d2c4435802b350461c35089d3d0baeb",
+   "en": "Evil Wizard Rod (R)"
+  },
+  {
+   "index": 187,
+   "source_sha256": "07467b84a7ed394bd83a1407d914d000abff0d60a4cdc11f5e23a633064f1f26",
+   "en": "Short Sword"
+  },
+  {
+   "index": 188,
+   "source_sha256": "750f9f904f0a8c1372a0e2aa39ef427e8a3f4967d01bb6bb3e362242344bc934",
+   "en": "Baselard"
+  },
+  {
+   "index": 189,
+   "source_sha256": "c0cea7e3c5b4f8659a35bf8d4de13edf0ff022d078f2cfc725c6c375bb0b1bbb",
+   "en": "Gladius"
+  },
+  {
+   "index": 190,
+   "source_sha256": "357ad3cc89a37597c61c97358b3f34cd1af74eada928ed82f46969b44cecdacb",
+   "en": "Broadsword"
+  },
+  {
+   "index": 191,
+   "source_sha256": "17c75bd691746357072663c5d668880b9f62cc699f3339ab2fd354fcf13540ab",
+   "en": "Great Sword"
+  },
+  {
+   "index": 192,
+   "source_sha256": "9760e90581ce58d0221a064e76b0dcc0a71f50de769e92029c894a403452f1f3",
+   "en": "Bastard Sword"
+  },
+  {
+   "index": 193,
+   "source_sha256": "cab923a670e4baa826aa3de381c8b992bf33987fcb0d65feb75ca538a8681010",
+   "en": "Long Sword"
+  },
+  {
+   "index": 194,
+   "source_sha256": "7606edf0523745f552b8ff7e3e61fed01d0c6e58d6946ebb34483efd8d06a20e",
+   "en": "Claymore"
+  },
+  {
+   "index": 195,
+   "source_sha256": "982f00f32de7e0a25cbd741da3b8d5477392a3f1cffcc47445c76898c51b7f1c",
+   "en": "Zweihander"
+  },
+  {
+   "index": 196,
+   "source_sha256": "5f002f3dd83cc82f1cd6ded97adb46f14c8342d23e7e4b61ee77df8399a9f79a",
+   "en": "Saber"
+  },
+  {
+   "index": 197,
+   "source_sha256": "d2224e242c312fc4b57edf66e96c57200549f774e225d1c6d8bde1261b358a24",
+   "en": "Falx"
+  },
+  {
+   "index": 198,
+   "source_sha256": "92df7fecbb348bc0d3cc2ac1c7bbd418199c9d5cbbf1bc9dd564f71e9b51559f",
+   "en": "Cutlass"
+  },
+  {
+   "index": 199,
+   "source_sha256": "cff42f91e1f854c722f3696e6db5a75a66fe76f3f736d56dc991e268ed40a9e1",
+   "en": "Axe Blade"
+  },
+  {
+   "index": 200,
+   "source_sha256": "c740a9fb086d5504a5ec88f30df6a5df3dc893c2aede34a7a63d427b23601d80",
+   "en": "Crescent Sword"
+  },
+  {
+   "index": 201,
+   "source_sha256": "a8526a1a0368a2fa2d431d6885782fff17f87030cd449fa61f2fdb6db6fda9c0",
+   "en": "Orichalcum"
+  },
+  {
+   "index": 202,
+   "source_sha256": "301a4b35bdd6dca88b276c5433d8cea3491146b3e69249fa1b320e3d8854237d",
+   "en": "Battle Sword"
+  },
+  {
+   "index": 203,
+   "source_sha256": "552657b202133fe1054d6f8ff619d83c488b8a663fa7c440570a15c11f90354b",
+   "en": "Talwar"
+  },
+  {
+   "index": 204,
+   "source_sha256": "95726a924b5872cee3d1c73acf8bee8704396ababbadccc37dd71e589bdfeb0a",
+   "en": "Falchion"
+  },
+  {
+   "index": 205,
+   "source_sha256": "24f2a302d2efe1a10f6575d2df510854e8cf46e086fdf867b563bde238c1a655",
+   "en": "Damascus Sword"
+  },
+  {
+   "index": 206,
+   "source_sha256": "cc9d2eb591c0a419b674086541996c7180dc18f31c68a15413fa579e4d53373f",
+   "en": "Sword Breaker"
+  },
+  {
+   "index": 207,
+   "source_sha256": "2c7f832ea1c3ad04a109e06731383004bce4e81660569694190ac323dd7e3290",
+   "en": "Flamberge"
+  },
+  {
+   "index": 208,
+   "source_sha256": "2f3a95113034891e37449060cc6ae3b954dee33bca0b789bd458af97ee2a9998",
+   "en": "Demon's Sword"
+  },
+  {
+   "index": 209,
+   "source_sha256": "5c516126eaf1c230272a0de6e8a87e60c4394b982561e3815c61d17c395091e8",
+   "en": "Avenger"
+  },
+  {
+   "index": 210,
+   "source_sha256": "8521a6f4c57d6d92a7358b95461e0dd771d5b53be4a7636ab4af2a03d4b23f73",
+   "en": "Death Bringer"
+  },
+  {
+   "index": 211,
+   "source_sha256": "84192ae2e414e4386afa5c64b87fea4a922b793e1d5f9e25947177e8cc9d788f",
+   "en": "Chaos Sword"
+  },
+  {
+   "index": 212,
+   "source_sha256": "84192ae2e414e4386afa5c64b87fea4a922b793e1d5f9e25947177e8cc9d788f",
+   "en": "Chaos Sword"
+  },
+  {
+   "index": 213,
+   "source_sha256": "84192ae2e414e4386afa5c64b87fea4a922b793e1d5f9e25947177e8cc9d788f",
+   "en": "Chaos Sword"
+  },
+  {
+   "index": 214,
+   "source_sha256": "d5aeb8938fbb0eebabc8b452e519dc6a6968e310eb90b5017c1adbebb44408ba",
+   "en": "Poleaxe"
+  },
+  {
+   "index": 215,
+   "source_sha256": "218e607c02c8cdc9724cc5fc004f5d881c31df8e366db89a4c90396a7743e88f",
+   "en": "Battle Axe"
+  },
+  {
+   "index": 216,
+   "source_sha256": "9f9c0022115fac723c63b0f565128a86aff9d39e40dab3bc6f85126ff6edc92f",
+   "en": "Combat Axe"
+  },
+  {
+   "index": 217,
+   "source_sha256": "6a45cdfbff0ce4a089a0196242d7ca11fb0998d4b36a23ab7c106e438893c1e6",
+   "en": "Scythe"
+  },
+  {
+   "index": 218,
+   "source_sha256": "d8e891dba9cff5177f19365e7af4bddb5676c96ac970a6ffb5e7838438516d61",
+   "en": "Battle Scythe"
+  },
+  {
+   "index": 219,
+   "source_sha256": "6941b181eaab54ad356c000ffe4e8de413d265bef0b2eab74129520de4df8405",
+   "en": "Death Scythe"
+  },
+  {
+   "index": 220,
+   "source_sha256": "8aae35e5602ef492bbd17958eacc06bf6ea95ce363960d7d3ddd752775c4ebdf",
+   "en": "Long Axe"
+  },
+  {
+   "index": 221,
+   "source_sha256": "f65678294f3b5f71d23774ff6cd55414491b6ed8226975c3e7420b1f12a24bfe",
+   "en": "Crescent"
+  },
+  {
+   "index": 222,
+   "source_sha256": "60c397046c19b1d1cd1962952390fc8ed88c821cdc105b69a6e3916744a4ab10",
+   "en": "Halberd"
+  },
+  {
+   "index": 223,
+   "source_sha256": "b85025850e4f4c1edd4ad7dd557404b263b81b6f3b3000a5417586f56656c73e",
+   "en": "Falcon Axe"
+  },
+  {
+   "index": 224,
+   "source_sha256": "19faf34ba1c0d8afb4c6dfb97dce19ea1d65b88c7c207ca1411c8a6a458539dd",
+   "en": "Colossal Axe"
+  },
+  {
+   "index": 225,
+   "source_sha256": "a084d75996c5335940e8c850465e0390c643e4710e52855932af47d2c43107f6",
+   "en": "Roncone"
+  },
+  {
+   "index": 226,
+   "source_sha256": "a1869f4fa4c9d648a440bcf0a8b52b0a1dd3f9cd9d691484bf2835f22c018657",
+   "en": "Long Spike"
+  },
+  {
+   "index": 227,
+   "source_sha256": "c195066561d8c1e5727fe7436460004fa1ee47675a4ce41ed33c0b6510904114",
+   "en": "Iron Spike"
+  },
+  {
+   "index": 228,
+   "source_sha256": "62df5ab9d925607bd3dcf31850d5d7edd40f05a50ee11d259960989483783afb",
+   "en": "Perforator"
+  },
+  {
+   "index": 229,
+   "source_sha256": "9f794bdedc2b0c099f0550d4022e3c008120e7af4de7d9f558864e28b3b9c80d",
+   "en": "Tall Axe"
+  },
+  {
+   "index": 230,
+   "source_sha256": "714b2660608e6ffa474b7772664c3fcf40c37cb4c5d33329b4d380b2b45d708f",
+   "en": "Wing Axe"
+  },
+  {
+   "index": 231,
+   "source_sha256": "ee1e8d76bf8e168c1efd233e2f6b4aeb2590df9bcdec783e4f31b8e530b96a61",
+   "en": "Strike Axe"
+  },
+  {
+   "index": 232,
+   "source_sha256": "3915fe44f408cc7ab9195d49f9c8349c6f12c899d1c7d59a702f00de56cc860e",
+   "en": "Voulge"
+  },
+  {
+   "index": 233,
+   "source_sha256": "0b044e4d50e1199c07d433c658fedb48832e840988009b12fe330b52e76bc2c1",
+   "en": "Bullova"
+  },
+  {
+   "index": 234,
+   "source_sha256": "687e08795161f8074bf333cf0caf384079cbb810e30fa7d695d88a3c6579a799",
+   "en": "Helmbarte"
+  },
+  {
+   "index": 235,
+   "source_sha256": "cd8c3da77306cde6533a31a460980fb36f629a68b00b8b60a6eb1883efde7ce6",
+   "en": "Runca"
+  },
+  {
+   "index": 236,
+   "source_sha256": "b68beafc96edb7646557bc4bfe8591ee2b13aaf86352dd355e54935d5918101c",
+   "en": "Glaive"
+  },
+  {
+   "index": 237,
+   "source_sha256": "2d204a36cbd7ec8a5dac7d815cee85b5c8cb6c1ff57c0770c2cc24a17e41dcb8",
+   "en": "Bardiche"
+  },
+  {
+   "index": 238,
+   "source_sha256": "37f5ca3fdbaec382828f77527fcaa6842959931651cf678520814b69b0a762bb",
+   "en": "Chaos Axe"
+  },
+  {
+   "index": 239,
+   "source_sha256": "37f5ca3fdbaec382828f77527fcaa6842959931651cf678520814b69b0a762bb",
+   "en": "Chaos Axe"
+  },
+  {
+   "index": 240,
+   "source_sha256": "37f5ca3fdbaec382828f77527fcaa6842959931651cf678520814b69b0a762bb",
+   "en": "Chaos Axe"
+  },
+  {
+   "index": 241,
+   "source_sha256": "bc0f80620ba6caca3610b225b8778d82fa0ea15189970a0aed91f8adbdc450ff",
+   "en": "Short Bow"
+  },
+  {
+   "index": 242,
+   "source_sha256": "d7560d75506bbfeff4ec003b2385665567f359f2a0595a62260d6a8a1faf8e98",
+   "en": "Light Bow"
+  },
+  {
+   "index": 243,
+   "source_sha256": "4bf238f7455cc66eabab7d408b6db2a81d7c46eaf1a10e67b94b85dbcc4a3656",
+   "en": "Feather Bow"
+  },
+  {
+   "index": 244,
+   "source_sha256": "4cf469d6ea547ff7636dff67c26b7b4b72240ce1378f4c2e286df9cb9e038550",
+   "en": "Long Bow"
+  },
+  {
+   "index": 245,
+   "source_sha256": "3f5350b74c3a787160e30c643d88a3975bb9490cdb9b028b4fe1329357632bc6",
+   "en": "Power Bow"
+  },
+  {
+   "index": 246,
+   "source_sha256": "e1a767aad854de0a05a34ae403178e34b1cb0415cc08c18211458131d4ccb6ac",
+   "en": "Grand Bow"
+  },
+  {
+   "index": 247,
+   "source_sha256": "90577680f7c8877b4e2891f4fd1b17347ae6599b3812707c7a8ef74f09b91377",
+   "en": "Self Bow"
+  },
+  {
+   "index": 248,
+   "source_sha256": "7d55765e542339acafd85c66778325c9d7f8449eb75f2af71f9ee83301afdcb5",
+   "en": "Custom Bow"
+  },
+  {
+   "index": 249,
+   "source_sha256": "8b9b06578187ff610593e3a732c531338b49803ed506d3d63b42170a218bbdc6",
+   "en": "Composite Bow"
+  },
+  {
+   "index": 250,
+   "source_sha256": "d1ed029de57406382f7f8f87069d260b7918a65b0d6d8968df78d52f4c4a1ab3",
+   "en": "Edge Bow"
+  },
+  {
+   "index": 251,
+   "source_sha256": "e8b5ebfe9ddb3ceb1815a10b5446c62e3b127478c7b0b2a2bedf22b45e650a4f",
+   "en": "Blade Bow"
+  },
+  {
+   "index": 252,
+   "source_sha256": "fb5ea606d8d0e5fe6f8b9355856d7eb1c5f9ce35b32c234921f635e3b88ab20c",
+   "en": "Diamond Bow"
+  },
+  {
+   "index": 253,
+   "source_sha256": "9fb4899f972bd2385e8cae0349791dbe9f5673877697b30ed11707f1437981ce",
+   "en": "Great Bow"
+  },
+  {
+   "index": 254,
+   "source_sha256": "995d9b69a94eb0b666cfa327eb16e3cbed1cc4de0ba56ad03766f7e3877b47e6",
+   "en": "Battle Bow"
+  },
+  {
+   "index": 255,
+   "source_sha256": "00353bceedad6e4fa235bdf05fa5f2a8b93698c7fd86a7fd7d3f5a7b53908c38",
+   "en": "War Bow"
+  },
+  {
+   "index": 256,
+   "source_sha256": "30b7aae65f166c52108e61a57a6aa57c32b4b44ff6a1797fd655a72ab2c2528f",
+   "en": "Hunter Bow"
+  },
+  {
+   "index": 257,
+   "source_sha256": "a72b367ef96130b9083f54e1a5c5746d8a8c21878c9779fb0e8afb42be14349c",
+   "en": "Sniper Bow"
+  },
+  {
+   "index": 258,
+   "source_sha256": "c26fd10829df2259da47b91629bde6d1cf34100cbf467ec9cee0b4a01c08609b",
+   "en": "Assassin Bow"
+  },
+  {
+   "index": 259,
+   "source_sha256": "1e64a7789b64bf655f0812a258260c03b94de82dd8729e742982f4c95e88a17c",
+   "en": "Gothic Bow"
+  },
+  {
+   "index": 260,
+   "source_sha256": "f85908c722cbfc0e296e191846c09ed823ac26f7b40ea443dc32fce05a774a0f",
+   "en": "Night Bow"
+  },
+  {
+   "index": 261,
+   "source_sha256": "b70d0e49f121cd10aa8946bda3addf6f33fa1dc8fff323b6086230c3e29f16a9",
+   "en": "Crusade Bow"
+  },
+  {
+   "index": 262,
+   "source_sha256": "7219f9d4f2c318bed905e714d3618af30a9036169297e7edd9c7bca2d66ff570",
+   "en": "Rune Bow"
+  },
+  {
+   "index": 263,
+   "source_sha256": "36ec0f288ba9ec06f7ffd03bdd1399285fc3904aea9721ac47ecb0284ada7c6c",
+   "en": "Cedar Bow"
+  },
+  {
+   "index": 264,
+   "source_sha256": "5cf4aeb67880d662ac9d08772175052bfbc7b487279611cfb52e49b89ec265b3",
+   "en": "Elven Bow"
+  },
+  {
+   "index": 265,
+   "source_sha256": "c7bcce9d07f21328d6e1c56445e05abc4e3d0a3c17541b8b5d363c06c0348a00",
+   "en": "Chaos Bow"
+  },
+  {
+   "index": 266,
+   "source_sha256": "c7bcce9d07f21328d6e1c56445e05abc4e3d0a3c17541b8b5d363c06c0348a00",
+   "en": "Chaos Bow"
+  },
+  {
+   "index": 267,
+   "source_sha256": "c7bcce9d07f21328d6e1c56445e05abc4e3d0a3c17541b8b5d363c06c0348a00",
+   "en": "Chaos Bow"
+  },
+  {
+   "index": 268,
+   "source_sha256": "eed43ac3bc045c761effa94a7ffce81b04574bd9f143e791fa3837c4ce8615e7",
+   "en": "Short Hammer"
+  },
+  {
+   "index": 269,
+   "source_sha256": "5c2dc8c6d00473abe772f4b346c640b7a698299670dc6f4b64b2ab95dc62d2e2",
+   "en": "Iron Hammer"
+  },
+  {
+   "index": 270,
+   "source_sha256": "11fb9a3a7171dc0e83129354dbafdd94a5d0e559730bc61a6f14b2daaecf4ae8",
+   "en": "Titan Hammer"
+  },
+  {
+   "index": 271,
+   "source_sha256": "5f18bb4de108943b12151cb000910e8bff6e011ce99d790d6fd430cdf4000dcf",
+   "en": "Broad Hammer"
+  },
+  {
+   "index": 272,
+   "source_sha256": "10f04748c65a12dfd66cfe13def1fadf2ec5a0433fe014363154a4859cb4700c",
+   "en": "Assault Hammer"
+  },
+  {
+   "index": 273,
+   "source_sha256": "7c7bb9fa539767124901a13bed99db9c5c094a01be5bea7c83008539520a368c",
+   "en": "War Hammer"
+  },
+  {
+   "index": 274,
+   "source_sha256": "53ccad3c0512a61c44b265099f2c681250fc15339b643ca36f9e5b39fcab0918",
+   "en": "Double Axe"
+  },
+  {
+   "index": 275,
+   "source_sha256": "23ade9ed3f189cba2e9749f7ca2da12fa162d43c6b20f14967cf9ae45f01c3bf",
+   "en": "Large Axe"
+  },
+  {
+   "index": 276,
+   "source_sha256": "53ee0af7ca07c4c28ee824037cd7ba84483069910e49c3f8c94c070fdc91efb7",
+   "en": "Golden Axe"
+  },
+  {
+   "index": 277,
+   "source_sha256": "decf212bca7d7d0ba2d530becf3629d8cf0f0af9d824416be88ee13d8d2ac47c",
+   "en": "Spike Hammer"
+  },
+  {
+   "index": 278,
+   "source_sha256": "0f8b194bbd408afac06261553eec6a33a768f1574b3112ee8f87e638ad2fd9ce",
+   "en": "Great Hammer"
+  },
+  {
+   "index": 279,
+   "source_sha256": "77119afb986c21de69e984989b6366b0f160153d70aa37d30ba9cf9768bf2b1c",
+   "en": "Berserk Hammer"
+  },
+  {
+   "index": 280,
+   "source_sha256": "c600613067cb9953be49ac98f0fa0f2b219159b771499110bd307781e2a747d4",
+   "en": "Hand Axe"
+  },
+  {
+   "index": 281,
+   "source_sha256": "16d457d002b87fd454725dded4ae78e7d1243e0cb20dc5eb053fe9fae324a0ea",
+   "en": "Straight Axe"
+  },
+  {
+   "index": 282,
+   "source_sha256": "4e04bf5c590e70d202ba4f15742ff6147fe5ee928832d6fcdd31da6816c5ac4e",
+   "en": "Great Axe"
+  },
+  {
+   "index": 283,
+   "source_sha256": "97b5a11dac262617bcd93accb6a9d3115de2d3fadaf4ecd2c8b569634e64ac82",
+   "en": "Rock Hammer"
+  },
+  {
+   "index": 284,
+   "source_sha256": "14e6746aac8658d917d25ba09cbbfba2576d8902c487b28c5a253ed46d4a216a",
+   "en": "Martial Hammer"
+  },
+  {
+   "index": 285,
+   "source_sha256": "ff15856b63d33c863144f636ca2878ba551fbe3a283f3b45f4a8458f0ca995cb",
+   "en": "Glorious Hammer"
+  },
+  {
+   "index": 286,
+   "source_sha256": "10b488fa4f9fc9752e8967bdc71abe905a8ac2df6068355bfee4031d46ab399c",
+   "en": "Heavy Axe"
+  },
+  {
+   "index": 287,
+   "source_sha256": "691c08fd177f1e69a065a8ed8d005e18658d02e63d99e5edb8d9eb74b76f56d3",
+   "en": "Ogre Axe"
+  },
+  {
+   "index": 288,
+   "source_sha256": "7eb1618c522455228e74a44e72f49ecf639efd16f3c83ad8a113c56ef00ce570",
+   "en": "Gaia Axe"
+  },
+  {
+   "index": 289,
+   "source_sha256": "a0abc30d4dc9047598f12af0e0d931954c0f2f0a5426947ab57844ab7101ab3b",
+   "en": "Steel Hammer"
+  },
+  {
+   "index": 290,
+   "source_sha256": "cf26fcb5a1cb2784fdd6af2626fb98cc30bd204b7380e3f6b93f6e7dffb1a784",
+   "en": "Damascus Hammer"
+  },
+  {
+   "index": 291,
+   "source_sha256": "1364efb5fe224c2d99c85504c364a044a0200cbad7d8aa96e51391caedcc562d",
+   "en": "Adamant Hammer"
+  },
+  {
+   "index": 292,
+   "source_sha256": "c0e541833c23a061392560c6e1f0f761278898ab234f64770de760d83d6b4338",
+   "en": "Chaos Hammer"
+  },
+  {
+   "index": 293,
+   "source_sha256": "c0e541833c23a061392560c6e1f0f761278898ab234f64770de760d83d6b4338",
+   "en": "Chaos Hammer"
+  },
+  {
+   "index": 294,
+   "source_sha256": "c0e541833c23a061392560c6e1f0f761278898ab234f64770de760d83d6b4338",
+   "en": "Chaos Hammer"
+  },
+  {
+   "index": 295,
+   "source_sha256": "a3f75e74b765f09ae4c7facee58bb1aca9588cdbe4b850499306797203291986",
+   "en": "Light Staff"
+  },
+  {
+   "index": 296,
+   "source_sha256": "2d06d862158717d00c4e6921862099d47b3b07a4e86e14c27011f50f7dda35a9",
+   "en": "Middle Staff"
+  },
+  {
+   "index": 297,
+   "source_sha256": "3f72434f5fd8b70b712f3c816ddda4aac98fa9de567f3356c023697cdf742a1f",
+   "en": "Grand Staff"
+  },
+  {
+   "index": 298,
+   "source_sha256": "bae9c1279a8eb31655bd78f6cb1a4b70e339e6377cd7997139b82b6bc0e865a1",
+   "en": "Witch Wand"
+  },
+  {
+   "index": 299,
+   "source_sha256": "17eaa92f67a8085b7be52cc4afa311a4af5fb9085f2cd2b22091bd1ec5cc0642",
+   "en": "Shaman Wand"
+  },
+  {
+   "index": 300,
+   "source_sha256": "4d242bd82379e3fe9cc3205cc851f6e9df9a7a7bfaf970adfcf574f37899b473",
+   "en": "Magician Wand"
+  },
+  {
+   "index": 301,
+   "source_sha256": "abe8d6e143bea8edcdfdbdd0957137459feb6f8fc52987a6dce348755665e77e",
+   "en": "Moon Staff"
+  },
+  {
+   "index": 302,
+   "source_sha256": "8f0d4515115b0c7990eba589815e07f97ee90a99e2e98d14fe53eea0a0c98a66",
+   "en": "Crescent Staff"
+  },
+  {
+   "index": 303,
+   "source_sha256": "289cacbf53e8edc5c22489e0dcc244ce7445f4b61160bd34501dd3488798d914",
+   "en": "Energy Staff"
+  },
+  {
+   "index": 304,
+   "source_sha256": "cbb528881c0df1d8a09008e661852bef5f7c4e9982d8ef3ec3083a64cce1e893",
+   "en": "Royal Scepter"
+  },
+  {
+   "index": 305,
+   "source_sha256": "cbf3f9b9956fb1f2cfb3fcea1f4997fec2435d66f22368f22c78dce7b0c0ceba",
+   "en": "Lich Scepter"
+  },
+  {
+   "index": 306,
+   "source_sha256": "23d9f3c3a71fb1b3b42ec6f8a0708c950ed035f38ae4f37f47e8b8e1902db42b",
+   "en": "Noble Scepter"
+  },
+  {
+   "index": 307,
+   "source_sha256": "1c4836f6b1ef10a666527cd25f89b060c7ce840d31a5d5dafb9f7132b5a9c840",
+   "en": "Wood Staff"
+  },
+  {
+   "index": 308,
+   "source_sha256": "81ff6d25593217fca337d1bc8bedf7b77471602d32fd9b839c89100f462d9301",
+   "en": "Wise Staff"
+  },
+  {
+   "index": 309,
+   "source_sha256": "8fd64ffb9b3f3e30cb9e71b35d74c92cec73debad3ca371ed53083be15a0395a",
+   "en": "Mage Staff"
+  },
+  {
+   "index": 310,
+   "source_sha256": "0d629f6eb4c7a8e3f48e9533b3287c066fef2583054ca664e0a4186fd55692c4",
+   "en": "Grim Wand"
+  },
+  {
+   "index": 311,
+   "source_sha256": "8df0891a05e6ce849797c29479123b65f168313f6c7ffccfb434ca379a40b7cd",
+   "en": "Oracle Wand"
+  },
+  {
+   "index": 312,
+   "source_sha256": "e94248f4adf63efdd791d8b27e529dea255386bd39896dfcbde9cb859ec2d8a0",
+   "en": "Doom Wand"
+  },
+  {
+   "index": 313,
+   "source_sha256": "da860184064372a852b9e77063ab1e6c4028d13ceaf6686bd7ac222b938c761e",
+   "en": "Garnet Scepter"
+  },
+  {
+   "index": 314,
+   "source_sha256": "4f467284b0364b3f9f3ee6dc186c26789502af512b7b587d339e0cc396afa4dd",
+   "en": "Ruby Scepter"
+  },
+  {
+   "index": 315,
+   "source_sha256": "c5177230b34baed560aa26a69ab07f13e8e81f11b7cfc3758bdb76d4d41822e8",
+   "en": "Rune Scepter"
+  },
+  {
+   "index": 316,
+   "source_sha256": "573c4a2eaa03c7cca9ced00565ff685a80d4b12305e821da4bddcdf073b6007b",
+   "en": "Dispeller"
+  },
+  {
+   "index": 317,
+   "source_sha256": "f175ca6a1307e3c0bd9032793028ffb3f11779cc6890c5a8fe22ef9cd17c803e",
+   "en": "Sweep Glove"
+  },
+  {
+   "index": 318,
+   "source_sha256": "3c490a60d018d49b21928ab4a7c48112974b6e01cb6c7e3e943b081979a1f1f2",
+   "en": "Hexagram Wand"
+  },
+  {
+   "index": 319,
+   "source_sha256": "506dda300904bd0d01313d6bfc4c635b47ab1fe4e6829b1041b8a84f9efa2ec9",
+   "en": "Chaos Wand"
+  },
+  {
+   "index": 320,
+   "source_sha256": "ba2ab79119a03a5d839b496d0a08a918d26a36b099ea8e2f806357adc594d67a",
+   "en": "Chaos Scepter"
+  },
+  {
+   "index": 321,
+   "source_sha256": "964ee2cc33e4643dede0d8555283d92f168ddcab389e9f1f380c426915e131d5",
+   "en": "Chaos Broom"
+  },
+  {
+   "index": 322,
+   "source_sha256": "8ef1185e377d2ef39a81d63ed2e2516409cc4df99010442a962a6c8c6c58dda9",
+   "en": "Light Rod"
+  },
+  {
+   "index": 323,
+   "source_sha256": "dc817e304f42c6611c54a731c9658c110f030fbbb895f7633f86a0df3ba5dffa",
+   "en": "Elder Rod"
+  },
+  {
+   "index": 324,
+   "source_sha256": "80e9ae770b5c9a6b4c6fc87946754a713a65a37a8cae7a42d21fb26b3a77f41c",
+   "en": "Oak Rod"
+  },
+  {
+   "index": 325,
+   "source_sha256": "add2b24cd8b5cb082c6f6c4f2e91a03c6f84ec1441dbc994346ae5975d55af9b",
+   "en": "Magic Rod"
+  },
+  {
+   "index": 326,
+   "source_sha256": "14ce9989b3d55332fc687b4c31531de2a51ef5701d2e011a438023be3355d16d",
+   "en": "Psychic Rod"
+  },
+  {
+   "index": 327,
+   "source_sha256": "329a08585f52742799514a20c08b1d98c2f367a3da2f49e4b8d9d84503bacca2",
+   "en": "Mystic Rod"
+  },
+  {
+   "index": 328,
+   "source_sha256": "0703766c89639b4e0806a8d8e567df9359558d6720039c43e635cfbb6f021c1d",
+   "en": "Hyper Rod"
+  },
+  {
+   "index": 329,
+   "source_sha256": "3d1fbb0f5f940cb48e1867e08814216498d72c08cc79349fdd7deff6f07e3924",
+   "en": "Mana Rod"
+  },
+  {
+   "index": 330,
+   "source_sha256": "a25112a74951d6e81dc606a09e7e42747d2d2d70c2a82b9aa6045c324e4ed701",
+   "en": "Clerical Rod"
+  },
+  {
+   "index": 331,
+   "source_sha256": "fb4a6a455bc143fbc66082df6ddb8a49174f698d83ff9f73ed687f5cb6bae352",
+   "en": "Sage Scepter"
+  },
+  {
+   "index": 332,
+   "source_sha256": "940b7912892a98a6326f65b394559699950c988f0731286ad8ff5eb253567330",
+   "en": "Leaf Scepter"
+  },
+  {
+   "index": 333,
+   "source_sha256": "d992e85bd83bc0653a36850028c3b7ed04d380b04a293ac143ce040d85dbf424",
+   "en": "Emerald Scepter"
+  },
+  {
+   "index": 334,
+   "source_sha256": "e7058333f13072d7eb15a272d15b2dd7fe86488d9a735cbd9680a29ab9777517",
+   "en": "Feather Rod"
+  },
+  {
+   "index": 335,
+   "source_sha256": "96e26acfe55ed4514d1edb7584a33d6becc8025916a07ed8e99763c4c17d8e3a",
+   "en": "Eagle Rod"
+  },
+  {
+   "index": 336,
+   "source_sha256": "03d3877b8047235b6a473e201ed0ebbf6276298f4297645af8db8354bd06c35d",
+   "en": "Harpy Rod"
+  },
+  {
+   "index": 337,
+   "source_sha256": "b7ad6230b18ed01a85a4c5feb72ebaf9f5a0a39bcc55277ca92c5e17a7e6c87d",
+   "en": "Mind Rod"
+  },
+  {
+   "index": 338,
+   "source_sha256": "f932aa8843cffa23b58d40be4ab93e6befc09e2a22a09e71861effc3cb991a7a",
+   "en": "Evil Rod"
+  },
+  {
+   "index": 339,
+   "source_sha256": "e945aec7b6daf3e0a4e96f2e2b623de25b65649c916618ab5553e194c534fb0a",
+   "en": "Amethyst Rod"
+  },
+  {
+   "index": 340,
+   "source_sha256": "ef36d015f003342854bf16c651616059d5cb1f218906986dc307586dfe9b435c",
+   "en": "Glass Scepter"
+  },
+  {
+   "index": 341,
+   "source_sha256": "df5a9e1dc2e3c30839f5fc1c9f4f296addce492c5a4650bde3dd63547ea37d31",
+   "en": "Prism Scepter"
+  },
+  {
+   "index": 342,
+   "source_sha256": "cbd22b84af7311f83eaea9589e504d9fffbb94af88c780245fc0a9cae4ac4073",
+   "en": "Crystal Scepter"
+  },
+  {
+   "index": 343,
+   "source_sha256": "5170944f28b7108232dce33469798d06602cab9c80db6de306795a1f8895b952",
+   "en": "Punisher"
+  },
+  {
+   "index": 344,
+   "source_sha256": "adaff0e56bf78ac46711970bafad192e40279940f49d40d7f1be36539f479218",
+   "en": "High Punisher"
+  },
+  {
+   "index": 345,
+   "source_sha256": "b200953d69122ee74ba6c46bd2c7befe18139b1076272aecce44afdcb1c5d760",
+   "en": "Lord Punisher "
+  },
+  {
+   "index": 346,
+   "source_sha256": "8b2f53fd386527500911ea16c2710e08689f42300af8aa83c9ad387cdb9a071a",
+   "en": "Chaos Rod"
+  },
+  {
+   "index": 347,
+   "source_sha256": "ba2ab79119a03a5d839b496d0a08a918d26a36b099ea8e2f806357adc594d67a",
+   "en": "Chaos Scepter"
+  },
+  {
+   "index": 348,
+   "source_sha256": "3e149a2b41a411d3dcbe5480a73b0892f8b31aac10d6187111b0d5becc4920b6",
+   "en": "Chaos Punisher"
+  },
+  {
+   "index": 349,
+   "source_sha256": "614ea15d02fb6ab18a96cee67ded37bb0d9ba32efe58c916fd70db7a2ee02969",
+   "en": "Buckler"
+  },
+  {
+   "index": 350,
+   "source_sha256": "0f79c3b10235ccc787f639c092b6bc951996097cf2ab820dc27cc9438577ba1b",
+   "en": "Targe"
+  },
+  {
+   "index": 351,
+   "source_sha256": "157ddc59b5e4e7ca9a05ffa09e4fa7cdefe073d8a3ebdf56b70a8446b64ae83f",
+   "en": "Defender"
+  },
+  {
+   "index": 352,
+   "source_sha256": "aaf665dd5b922eed07465461c7a50fd80bb4f38c8ff23d31a57fe61bb1c24785",
+   "en": "Large Shield"
+  },
+  {
+   "index": 353,
+   "source_sha256": "577a1b47bcaea05e6987d98177ed54c04a8e77dbab12be9225793839c8d5ef58",
+   "en": "Round Shield"
+  },
+  {
+   "index": 354,
+   "source_sha256": "77ebbcabe4a1023f61faae80310dee92cfb2b415db5ba8dc27b92b1c75ffe3df",
+   "en": "Ether Shield"
+  },
+  {
+   "index": 355,
+   "source_sha256": "a1d107b4d02e06a32ca0f738093f1a2e65e0a581ec8b632f7bf1e784bbe3f2b4",
+   "en": "Kite Shield"
+  },
+  {
+   "index": 356,
+   "source_sha256": "7c0041e2d2521b1ebce7f79483068107a7a9205335689ac9ab42503548b31132",
+   "en": "Heater Shield"
+  },
+  {
+   "index": 357,
+   "source_sha256": "ec2bd44ebd262060b7e6c86524ee690141a7db979baa6709fc0c52ca6417bab0",
+   "en": "Crest Shield"
+  },
+  {
+   "index": 358,
+   "source_sha256": "ef9bf5f34b9b770b2d8b7c06124e6395a05886e53bf4e39283716ca4ff8b4ab1",
+   "en": "Scale Shield"
+  },
+  {
+   "index": 359,
+   "source_sha256": "3498d8f26e6c147b69783699ce83a7bcfcdc5c53dc0d534fc3bb3719f5b37485",
+   "en": "Knight Shield"
+  },
+  {
+   "index": 360,
+   "source_sha256": "338b4dd3e2413446924f64a81b7e7bd24d29c664ea6915d815a3489e0d0ccd7c",
+   "en": "Glorious Shield"
+  },
+  {
+   "index": 361,
+   "source_sha256": "d7894d12b78cb715b34d9950629b3a1d746209732a746c77f0769e3ea01cea3a",
+   "en": "Howl Shield"
+  },
+  {
+   "index": 362,
+   "source_sha256": "f3270b7c84e3f37d761e0c1c896bd8a8227794ef53ed803fe95bf0a8650eb9f8",
+   "en": "Leon Shield"
+  },
+  {
+   "index": 363,
+   "source_sha256": "aa3e533b34ec55a960df504e5083eec0a67503cf2c6e282c9c116ced6ae166fb",
+   "en": "Beast Shield"
+  },
+  {
+   "index": 364,
+   "source_sha256": "0c9cad33a68520ba0a5a9ef0f67c6b5b2307f07d3d58c16941e6ab4cef181375",
+   "en": "Order Shield"
+  },
+  {
+   "index": 365,
+   "source_sha256": "dc6e75e22958ed955cc844b2da3355cd8568174aee8367c98d56f1ba41886a86",
+   "en": "Lord Shield"
+  },
+  {
+   "index": 366,
+   "source_sha256": "4115b2c70ea7ceed7fa405d0824947a9c570bf07e8bdd6503970e671f6e9ac7f",
+   "en": "Paladin Shield"
+  },
+  {
+   "index": 367,
+   "source_sha256": "dbf0dd0a856e602edf344cae8e1f5216f71d6736616a89b02d4e036b4990dec1",
+   "en": "Climb Shield"
+  },
+  {
+   "index": 368,
+   "source_sha256": "0fabaab3b6783c592febd097966b8fe27c9fca3032fd3918cd5e783ae91b6486",
+   "en": "Curse Shield"
+  },
+  {
+   "index": 369,
+   "source_sha256": "3d41f233c85b35c77a9f0dd6eedb87dc529e1f540feb23953f1e1f3379792886",
+   "en": "Ogre Shield"
+  },
+  {
+   "index": 370,
+   "source_sha256": "083054cb5a3f87f6dea250c4a8bbb8ecc24a9be325e51260074805e59d358f54",
+   "en": "Wyvern Shield"
+  },
+  {
+   "index": 371,
+   "source_sha256": "d255abb2beb844ca917037ddec2f70d157842768a55adf8d54ff025ac54ca866",
+   "en": "Dragon Shield"
+  },
+  {
+   "index": 372,
+   "source_sha256": "d3bfeb332c69bf48eac5977f57ef0a87e0c86ef269d7a5150de7ff0a62ed7ea0",
+   "en": "Ancient Shield"
+  },
+  {
+   "index": 373,
+   "source_sha256": "808984d17cd1577f8f688ad70404e8bd6492568994c339319172af46ec6107d4",
+   "en": "Chaos Shield"
+  },
+  {
+   "index": 374,
+   "source_sha256": "808984d17cd1577f8f688ad70404e8bd6492568994c339319172af46ec6107d4",
+   "en": "Chaos Shield"
+  },
+  {
+   "index": 375,
+   "source_sha256": "1d76d6aa7ded85a2d55f365b63d306ebdb8111fea0c9d795a094a12989750535",
+   "en": "Oracle Pendant"
+  },
+  {
+   "index": 376,
+   "source_sha256": "2f42630a25e6643d76c3b4935eb11bc5962b8f26900bb2ebc09ba38fca7c3355",
+   "en": "Rose Pendant"
+  },
+  {
+   "index": 377,
+   "source_sha256": "0fdfc499d66664e054b03e4cda9d1f12beb9755c239f9b9b1a8a697f44dc38e2",
+   "en": "Silver Necklace"
+  },
+  {
+   "index": 378,
+   "source_sha256": "e2053156808aaca1763deee2bbc37beea5837b4f4bd2baa8a343d339d1991075",
+   "en": "Gold Necklace"
+  },
+  {
+   "index": 379,
+   "source_sha256": "26ac3e33fb9fc701d5313b0b74a73d70162ed507cbc38191a2aa069ee212cb00",
+   "en": "Fang Pendant"
+  },
+  {
+   "index": 380,
+   "source_sha256": "a369a5b7ebbab8e7c79d9e0d361a59776a82af3b8bf63d250b5a784f71602e00",
+   "en": "Temple Necklace"
+  },
+  {
+   "index": 381,
+   "source_sha256": "95aefd3ecbbf50c22f11e2b9645083ca42991e313dd99997816d94f421600f62",
+   "en": "Opal Necklace"
+  },
+  {
+   "index": 382,
+   "source_sha256": "4f920f4588822d04efe439937791a874257d444e3a7e81976682959a0cf2140a",
+   "en": "Shell Pendant"
+  },
+  {
+   "index": 383,
+   "source_sha256": "73fd4a4d752f01bb207c5234eda5c867c16d22f28856ab5ec4fed40088b61498",
+   "en": "Tri-Amulet"
+  },
+  {
+   "index": 384,
+   "source_sha256": "381286230fffc663a34535440cd108d19bd5d42a13ce7e32c26b0e6f5eeda390",
+   "en": "Grace Charm"
+  },
+  {
+   "index": 385,
+   "source_sha256": "94924abcd50c0870e3899339d58c66ec7fbab32e3ebbe8258034db8796b2bf83",
+   "en": "Brave Charm"
+  },
+  {
+   "index": 386,
+   "source_sha256": "1e7c8176c231f2787500380c93a36cf57d9bef008a299a1e9e547f454ab81ed2",
+   "en": "Royal Amulet"
+  },
+  {
+   "index": 387,
+   "source_sha256": "9f34fc28982c327d6ae7f4524ae24727631c7c8ce7d4002770cb79969ab6d770",
+   "en": "Chrome Amulet"
+  },
+  {
+   "index": 388,
+   "source_sha256": "89623f0841163f2e70b1070006161ea7033689db539d306f688ef04c6f22eddb",
+   "en": "Force Amulet"
+  },
+  {
+   "index": 389,
+   "source_sha256": "16478cf5f0fe49ce696fd7cee9187a6ba6d223e689b21f9bade34b08ae78cf1b",
+   "en": "Queen Charm"
+  },
+  {
+   "index": 390,
+   "source_sha256": "18efc25c6ecf4b307d2eb752e5e1f2faa7af40f77145a1de8a4263299ad9678d",
+   "en": "Jewel Amulet"
+  },
+  {
+   "index": 391,
+   "source_sha256": "22b7150b0719b424127beb796066fb50d2169f807b30765899435dff7af54b89",
+   "en": "Chaos Necklace"
+  },
+  {
+   "index": 392,
+   "source_sha256": "c9a61f733485167e08e4a006cd638f1d4175c33e531b32403e21f0a9498ccfc0",
+   "en": "Chaos Amulet"
+  },
+  {
+   "index": 393,
+   "source_sha256": "c9a61f733485167e08e4a006cd638f1d4175c33e531b32403e21f0a9498ccfc0",
+   "en": "Chaos Amulet"
+  },
+  {
+   "index": 394,
+   "source_sha256": "f9360b1a5b451e7c37f32caf9934142ed5d13261055f1df700bb1f47f3b801bd",
+   "en": "Chaos Pendant"
+  },
+  {
+   "index": 395,
+   "source_sha256": "22b7150b0719b424127beb796066fb50d2169f807b30765899435dff7af54b89",
+   "en": "Chaos Necklace"
+  },
+  {
+   "index": 396,
+   "source_sha256": "5ca2b93e6fbb0dc11927ef18b3e26524cba457ffa7687555f22a5b859a188cda",
+   "en": "Chaos Charm"
+  },
+  {
+   "index": 397,
+   "source_sha256": "f9360b1a5b451e7c37f32caf9934142ed5d13261055f1df700bb1f47f3b801bd",
+   "en": "Chaos Pendant"
+  },
+  {
+   "index": 398,
+   "source_sha256": "f9360b1a5b451e7c37f32caf9934142ed5d13261055f1df700bb1f47f3b801bd",
+   "en": "Chaos Pendant"
+  },
+  {
+   "index": 399,
+   "source_sha256": "c9a61f733485167e08e4a006cd638f1d4175c33e531b32403e21f0a9498ccfc0",
+   "en": "Chaos Amulet"
+  },
+  {
+   "index": 400,
+   "source_sha256": "22b7150b0719b424127beb796066fb50d2169f807b30765899435dff7af54b89",
+   "en": "Chaos Necklace"
+  },
+  {
+   "index": 401,
+   "source_sha256": "5ca2b93e6fbb0dc11927ef18b3e26524cba457ffa7687555f22a5b859a188cda",
+   "en": "Chaos Charm"
+  },
+  {
+   "index": 402,
+   "source_sha256": "c9a61f733485167e08e4a006cd638f1d4175c33e531b32403e21f0a9498ccfc0",
+   "en": "Chaos Amulet"
+  },
+  {
+   "index": 403,
+   "source_sha256": "9ac56369a264086be7af3c4735ae2bdecbaea7a5c626c4290f479b9b4b318015",
+   "en": "Hide Gauntlet"
+  },
+  {
+   "index": 404,
+   "source_sha256": "445d4b2e850688804eac6c1730d4ce90a41ceeeb1d2bbffcbc9137f2e98c4697",
+   "en": "Light Gauntlet"
+  },
+  {
+   "index": 405,
+   "source_sha256": "77b31f7de9daf7760a811877aa6461ad14e6550d9375bd92eaf12b621ccd8264",
+   "en": "Battle Arm"
+  },
+  {
+   "index": 406,
+   "source_sha256": "9760ad55b6ad38213768d9384d3e40cd30c0608c93653884323c02c7c594cfbb",
+   "en": "Titan Arm"
+  },
+  {
+   "index": 407,
+   "source_sha256": "61e2822ea320fb3a95fd4f1c4db2a7ddff5d63b76d572a948fe979db8f03f470",
+   "en": "Silver Arm"
+  },
+  {
+   "index": 408,
+   "source_sha256": "6adfee438be47e77d9b6db5aa24c1776bf723022934e0f356754908a9a45aa8a",
+   "en": "Bronze Arm"
+  },
+  {
+   "index": 409,
+   "source_sha256": "7acdc11720d15033bcbde7969a2acaa95f9871f28139684731ae2319adced1d2",
+   "en": "Iron Arm"
+  },
+  {
+   "index": 410,
+   "source_sha256": "a6441fa76e859c931470abc03da8a4a4570d639e8a9e602245b9445b915d8031",
+   "en": "Gold Arm"
+  },
+  {
+   "index": 411,
+   "source_sha256": "0e1af60441619dd16125cd97184915d02e0c437e3849ff3fe2b7a2478809c818",
+   "en": "Chaos Arm"
+  },
+  {
+   "index": 412,
+   "source_sha256": "0e1af60441619dd16125cd97184915d02e0c437e3849ff3fe2b7a2478809c818",
+   "en": "Chaos Arm"
+  },
+  {
+   "index": 413,
+   "source_sha256": "0e1af60441619dd16125cd97184915d02e0c437e3849ff3fe2b7a2478809c818",
+   "en": "Chaos Arm"
+  },
+  {
+   "index": 414,
+   "source_sha256": "fd0c335ae70b833f4366a4cd70502fed945839e168a88d903c8ffe7a67957a84",
+   "en": "Leather Belt"
+  },
+  {
+   "index": 415,
+   "source_sha256": "82d4668c0ede23127f537e43e985b3e1c0bce05bb869ab35065c318a188428d0",
+   "en": "Light Belt"
+  },
+  {
+   "index": 416,
+   "source_sha256": "14f741899773ef70c4fd1bc653009f312bfedaa4426b8a2e8514361f55a012ac",
+   "en": "Lord Belt"
+  },
+  {
+   "index": 417,
+   "source_sha256": "cf2416ca94ff1adafab9320dbf1ddb1981f1b8e1c06d7259c8e7c3c4833cdc5c",
+   "en": "Mage Belt"
+  },
+  {
+   "index": 418,
+   "source_sha256": "422f91a468932b2f39dedcb1086ba430a092312aa461c66a9d29440b98e9843f",
+   "en": "Royal Belt"
+  },
+  {
+   "index": 419,
+   "source_sha256": "c97188a38bb2d87fb72c72092ba6698094a2c4854b58da0434cabdecd60c4248",
+   "en": "Hard Belt"
+  },
+  {
+   "index": 420,
+   "source_sha256": "42b65c62741e6d9e7c0d291f751343ccc741bfde79ca950b366974084a8d5340",
+   "en": "Platinum Chain"
+  },
+  {
+   "index": 421,
+   "source_sha256": "a23f12b62cd52a563192b6cd9ae2b26a5e018637fd9fa4f8a5a82fdd4e42bdb4",
+   "en": "Gold Chain"
+  },
+  {
+   "index": 422,
+   "source_sha256": "4039c9e646473a4e0a22b80d433f28ec20cb72983aa15d4a32e1e4c185d1ea0c",
+   "en": "Chaos Belt"
+  },
+  {
+   "index": 423,
+   "source_sha256": "4039c9e646473a4e0a22b80d433f28ec20cb72983aa15d4a32e1e4c185d1ea0c",
+   "en": "Chaos Belt"
+  },
+  {
+   "index": 424,
+   "source_sha256": "4039c9e646473a4e0a22b80d433f28ec20cb72983aa15d4a32e1e4c185d1ea0c",
+   "en": "Chaos Belt"
+  },
+  {
+   "index": 425,
+   "source_sha256": "d5fb222f490ffa2933e04a44fa2240cc9f8526d9f6a835130e4863d7087d2c7c",
+   "en": "Gold Studs"
+  },
+  {
+   "index": 426,
+   "source_sha256": "d4ba2ad4ea03b828bb9bf328aebc8f72892a7098891cf2ded075c3dbf614da96",
+   "en": "Silver Studs"
+  },
+  {
+   "index": 427,
+   "source_sha256": "ceb5b3d8b0775077965f7dfb9302114cd440fc2b62f98c6482175c314e8d05b0",
+   "en": "Iron Studs"
+  },
+  {
+   "index": 428,
+   "source_sha256": "bc398b1a5fe88a44fdcc3f066e82bd5604edc73faaab292add95b4e27244962d",
+   "en": "Bronze Studs"
+  },
+  {
+   "index": 429,
+   "source_sha256": "4ea3f34b1305db72723af4c262cba7d7a85c9687985394b1b9bda96b24d4db82",
+   "en": "Pearl Studs"
+  },
+  {
+   "index": 430,
+   "source_sha256": "6a5ae70887913ffe24ce9c3ed559ed84bc9bdbc9eebca8ce2b090a21c639f2c3",
+   "en": "Onyx Studs"
+  },
+  {
+   "index": 431,
+   "source_sha256": "ebbe5eccb32dac7e7650ecd6d2b1f3afa71259436a666cd648c3d35f5e78554e",
+   "en": "Garnet Studs"
+  },
+  {
+   "index": 432,
+   "source_sha256": "483d9cec783656334b293c59049a5fbfcff3c49d401648232479eecfdc6aafd9",
+   "en": "Amethyst Studs"
+  },
+  {
+   "index": 433,
+   "source_sha256": "fdf73911908e18df73b4bab22dbc4da7969703177ca541dc7a364680c1153a26",
+   "en": "Chaos Studs"
+  },
+  {
+   "index": 434,
+   "source_sha256": "fdf73911908e18df73b4bab22dbc4da7969703177ca541dc7a364680c1153a26",
+   "en": "Chaos Studs"
+  },
+  {
+   "index": 435,
+   "source_sha256": "7d5a92ec82aa5ed3d708c802cd28299f9933f0075ced057d8a6ee18007e91ed1",
+   "en": "Silver Bracelet"
+  },
+  {
+   "index": 436,
+   "source_sha256": "1f37d98a63c512ad069f6d28a716d5c4d0e781137756c510c91b30c38da5217b",
+   "en": "Bronze Bracelet"
+  },
+  {
+   "index": 437,
+   "source_sha256": "71082a61e0b808e6562f8554c1d7db5fd68c7494d2832dea1c8baa926369982a",
+   "en": "Platinum Bangle"
+  },
+  {
+   "index": 438,
+   "source_sha256": "e66b55a81625902b30517b65c31368e727370b3cfb407af9c02cc12413fd6662",
+   "en": "Gold Bangle"
+  },
+  {
+   "index": 439,
+   "source_sha256": "66453605e5e36b2cc832406c35610be34187a1e9ad59df7ff0b80de7ff84094d",
+   "en": "Ancient Ring"
+  },
+  {
+   "index": 440,
+   "source_sha256": "726c85345703796a183bbdca16aab0a46f902f8b381703b884d1e29b798af565",
+   "en": "Gospel Ring"
+  },
+  {
+   "index": 441,
+   "source_sha256": "ec09a0579cf17443a0b79a8eb6bf049ef4e78f8caa0510eb31e091939a10a321",
+   "en": "Angel Ring"
+  },
+  {
+   "index": 442,
+   "source_sha256": "3491aa95a762fff5b7cfda79c9a3ed9d5bcaebc1d4c00e1ef9af37a12c399e74",
+   "en": "Venus Ring"
+  },
+  {
+   "index": 443,
+   "source_sha256": "30b3976b61679e6b11bf32b6e126256dd5de2d4b88af899a25f53f87a9c5f7cb",
+   "en": "Chaos Bangle"
+  },
+  {
+   "index": 444,
+   "source_sha256": "f93b164ac91baba33276844f032a2fae25bbd457e7a7d4d5e5daf58091be7c41",
+   "en": "Chaos Ring"
+  },
+  {
+   "index": 445,
+   "source_sha256": "f8e3c289cecfe95e8769e1f20204828021a8b518485f81889486275ca2b45119",
+   "en": "Leather Boots"
+  },
+  {
+   "index": 446,
+   "source_sha256": "78905e2b8c66bea720413bd0072cc724e50c9759a456f289958ecc37b65bb5a0",
+   "en": "Light Boots"
+  },
+  {
+   "index": 447,
+   "source_sha256": "5f7b41a4da111afd0efdaae728cd59ddea45f4952044e7849a75cc41ba569256",
+   "en": "Camel Boots"
+  },
+  {
+   "index": 448,
+   "source_sha256": "90cb370024d1bf009fe6650b0c612641cfec0e2c037942c2aded346fc4dd94d7",
+   "en": "Work Boots"
+  },
+  {
+   "index": 449,
+   "source_sha256": "e08ba37a399f593af6688878810b591eee434533efd11884bbcda112c3b484e1",
+   "en": "Lord Boots"
+  },
+  {
+   "index": 450,
+   "source_sha256": "c10b5690f94402cee12b59c18301fbf81c79e639a503801b98b3e89d9bce33ad",
+   "en": "Guardian Boots"
+  },
+  {
+   "index": 451,
+   "source_sha256": "b650f0dc45b3850412bffab213378b85269994f68e9dd3907b84b13854fc08ec",
+   "en": "Bear Boots"
+  },
+  {
+   "index": 452,
+   "source_sha256": "68d278ae744bfe9d961b9de87b85452365f5dc3c9ef926d03306763b3f86d1e1",
+   "en": "Hunter Boots"
+  },
+  {
+   "index": 453,
+   "source_sha256": "02f61f8991e9679603d3aba30210b6fbbe83d2cce00e916bca8edb41f629b3a2",
+   "en": "Chaos Boots"
+  },
+  {
+   "index": 454,
+   "source_sha256": "02f61f8991e9679603d3aba30210b6fbbe83d2cce00e916bca8edb41f629b3a2",
+   "en": "Chaos Boots"
+  },
+  {
+   "index": 455,
+   "source_sha256": "02f61f8991e9679603d3aba30210b6fbbe83d2cce00e916bca8edb41f629b3a2",
+   "en": "Chaos Boots"
+  },
+  {
+   "index": 456,
+   "source_sha256": "a45c7a842fa00218faebf946ce2a9339a30e58f13e05fac5f226f34def520045",
+   "en": "Leather Mantle"
+  },
+  {
+   "index": 457,
+   "source_sha256": "472aa2954ff5c5f2a34dc3885737ecd2ea6ca8b88bc117f95c9be2941617b43d",
+   "en": "Blow Mantle"
+  },
+  {
+   "index": 458,
+   "source_sha256": "e4a3523ea9b2089507fdefe6c79305d8534fde76588bfe59a89ec989ba92d2dc",
+   "en": "Royal Mantle"
+  },
+  {
+   "index": 459,
+   "source_sha256": "be98e5194087c591405ac20634c512ed0af05e01257265dab1779bd1dd2be5a4",
+   "en": "Shadow Mantle"
+  },
+  {
+   "index": 460,
+   "source_sha256": "2f6b7ea5d8488f14ffb16b358398dd1fcaf6baef39257b0aa2a485b5368ddeb3",
+   "en": "Lord Mantle"
+  },
+  {
+   "index": 461,
+   "source_sha256": "0253e76aa1f956a7ac8c444a85cdb27985caf76f8e62dc493bb001ce16724004",
+   "en": "Assassin Mantle"
+  },
+  {
+   "index": 462,
+   "source_sha256": "3daa2324adf321d5fee500212249763c3970e3365f419b1d8eae5d5ede091414",
+   "en": "Hunter Mantle"
+  },
+  {
+   "index": 463,
+   "source_sha256": "b82da22da448024e286f48adc27d09a8097340f532e325476adc4e9bc829a1f4",
+   "en": "Duel Mantle"
+  },
+  {
+   "index": 464,
+   "source_sha256": "c676ba27ceafbff60dd239eb6370cb22fe3767dee2a78af8dfec951febd7c657",
+   "en": "Chaos Mantle"
+  },
+  {
+   "index": 465,
+   "source_sha256": "c676ba27ceafbff60dd239eb6370cb22fe3767dee2a78af8dfec951febd7c657",
+   "en": "Chaos Mantle"
+  },
+  {
+   "index": 466,
+   "source_sha256": "c676ba27ceafbff60dd239eb6370cb22fe3767dee2a78af8dfec951febd7c657",
+   "en": "Chaos Mantle"
+  },
+  {
+   "index": 467,
+   "source_sha256": "d1281ce9db094dc1e299f98bfbfbed65c5fb0fbc876e17578759b0e3454c4764",
+   "en": "Leather Glove"
+  },
+  {
+   "index": 468,
+   "source_sha256": "a9d57ac82af90ca4040bb5fd56aa717848211225a45042434c8d4d085fb791d8",
+   "en": "Light Glove"
+  },
+  {
+   "index": 469,
+   "source_sha256": "d1e65d0abc6b0bbc7d87accaf9dd49f4062378428486c7fd8015bb056f6ff829",
+   "en": "Lord Glove"
+  },
+  {
+   "index": 470,
+   "source_sha256": "894c589a46e303c0f791b6dd34d792c8bd7dca1bcff69bf301307239bf17360c",
+   "en": "Mage Glove"
+  },
+  {
+   "index": 471,
+   "source_sha256": "c35b2b5df375ca2f1e222ee2e16a595766ceb94adf872a51bbeed830210888b6",
+   "en": "Hunter Glove"
+  },
+  {
+   "index": 472,
+   "source_sha256": "2af05675746ebcd2048dec157e1cce33d40da6271269cb3cd2219fedf8a2558a",
+   "en": "Caesar Glove"
+  },
+  {
+   "index": 473,
+   "source_sha256": "01ea205fa9394f85a4a9637f52746462ad95c71fc1d474c622e14db3eede1c59",
+   "en": "Shadow Glove"
+  },
+  {
+   "index": 474,
+   "source_sha256": "a6bf03ce475d9e4597f9a05e99e9a101d68120fa7a679bb3d0e92fa70fd34539",
+   "en": "Silk Glove"
+  },
+  {
+   "index": 475,
+   "source_sha256": "e43ebaeb96dfeed955f705c1992e42bf5a3130178ddf5e54a97ad2ce8c3cfd5a",
+   "en": "Chaos Glove"
+  },
+  {
+   "index": 476,
+   "source_sha256": "e43ebaeb96dfeed955f705c1992e42bf5a3130178ddf5e54a97ad2ce8c3cfd5a",
+   "en": "Chaos Glove"
+  },
+  {
+   "index": 477,
+   "source_sha256": "68245f2f9231b62c0ac52994ec576a9600790396aece5e638a60ae936cb47ca9",
+   "en": "Wood Glasses"
+  },
+  {
+   "index": 478,
+   "source_sha256": "ae86db8209c2401e609c8894fa2703d723ceae3a4fa6707a55fe39fcb02ddd20",
+   "en": "Rivet Glasses"
+  },
+  {
+   "index": 479,
+   "source_sha256": "c05b20e96e2230e5bc3773093617329eceae992acd2c90d06faab30ab7101659",
+   "en": "Union Glasses"
+  },
+  {
+   "index": 480,
+   "source_sha256": "a0344c6e1a254091c12472064e1ccf1c701131ca8e52fc1dfafef84ba7cf58ce",
+   "en": "Witch Glasses"
+  },
+  {
+   "index": 481,
+   "source_sha256": "590c74e15ad8f012b32a29f59be1d7e108f068693b81dfb41b4a125fdfa76106",
+   "en": "Mana Glasses"
+  },
+  {
+   "index": 482,
+   "source_sha256": "ccd6ae4f52847562d338fadfc70f0d4a1f313880f2163468d2c7c9f210ffbcff",
+   "en": "General Glasses"
+  },
+  {
+   "index": 483,
+   "source_sha256": "f6c2d7461612dc78128b24b7093e6c1983f996715548b6a7dd2c7f9711b7c55a",
+   "en": "Magic Monocle"
+  },
+  {
+   "index": 484,
+   "source_sha256": "7c5b3973d0d1d93179a9d7dff0a44c7cb9dc20ece297dc510382890dcb577c3c",
+   "en": "Leaf Monocle"
+  },
+  {
+   "index": 485,
+   "source_sha256": "c4e3f91edf133a4faeeb0a6beece0ae1f512e3e9bd2356230d9a6af043c642f4",
+   "en": "Chaos Glasses"
+  },
+  {
+   "index": 486,
+   "source_sha256": "c4e3f91edf133a4faeeb0a6beece0ae1f512e3e9bd2356230d9a6af043c642f4",
+   "en": "Chaos Glasses"
+  },
+  {
+   "index": 487,
+   "source_sha256": "a527900f64b89c779801cef66b5127c000d6f2cd23e97af28f0505a9b04f9270",
+   "en": "Chaos Monocle"
+  },
+  {
+   "index": 488,
+   "source_sha256": "a527900f64b89c779801cef66b5127c000d6f2cd23e97af28f0505a9b04f9270",
+   "en": "Chaos Monocle"
+  },
+  {
+   "index": 489,
+   "source_sha256": "c086126479a4ba8b8cc2e4c877853b662ee36d6cbd7a9708c658154f56508ff4",
+   "en": "Money in Treasure Chest"
+  },
+  {
+   "index": 490,
+   "source_sha256": "72ab20e5bc937fc35924a6079272d2724d37860e2d93b072bb14681b743f0b51",
+   "en": "*HEAVEN SWORD START*"
+  },
+  {
+   "index": 491,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 492,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 493,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 494,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 495,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 496,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 497,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 498,
+   "source_sha256": "04ac99256ab8fd5cda1715fab821c37185b65511a2346f876e510dbe779cf2b8",
+   "en": "Heaven Sword"
+  },
+  {
+   "index": 499,
+   "source_sha256": "ece705c797fe26e1c534b4c09fbe0f8aed6518c3175b0710a60e59c24585aca2",
+   "en": "＊ヘヴン剣終了＊"
+  },
+  {
+   "index": 500,
+   "source_sha256": "e4735f34428777526d109cb7c1f8637138991ab0970aa418f3a59fd1846984bb",
+   "en": "＊ヘヴン斧槍開始＊"
+  },
+  {
+   "index": 501,
+   "source_sha256": "0e82d1e260cd623d655d572ff9e54b71ba2c3938218a5a188f6bef3d0fbefec1",
+   "en": "Heaven Halberd"
+  },
+  {
+   "index": 502,
+   "source_sha256": "21d91e9ee524a4a39fbe1c223d86be3e3b9ace7cc41277734270200cb5405358",
+   "en": "Heaven Scythe"
+  },
+  {
+   "index": 503,
+   "source_sha256": "0e82d1e260cd623d655d572ff9e54b71ba2c3938218a5a188f6bef3d0fbefec1",
+   "en": "Heaven Halberd"
+  },
+  {
+   "index": 504,
+   "source_sha256": "0e82d1e260cd623d655d572ff9e54b71ba2c3938218a5a188f6bef3d0fbefec1",
+   "en": "Heaven Halberd"
+  },
+  {
+   "index": 505,
+   "source_sha256": "c3108f2afe7d9520d086de1fbb1ff5467d146b63c56d9dac4febdc96a9759d03",
+   "en": "Heaven Spike"
+  },
+  {
+   "index": 506,
+   "source_sha256": "0e82d1e260cd623d655d572ff9e54b71ba2c3938218a5a188f6bef3d0fbefec1",
+   "en": "Heaven Halberd"
+  },
+  {
+   "index": 507,
+   "source_sha256": "0e82d1e260cd623d655d572ff9e54b71ba2c3938218a5a188f6bef3d0fbefec1",
+   "en": "Heaven Halberd"
+  },
+  {
+   "index": 508,
+   "source_sha256": "0e82d1e260cd623d655d572ff9e54b71ba2c3938218a5a188f6bef3d0fbefec1",
+   "en": "Heaven Halberd"
+  },
+  {
+   "index": 509,
+   "source_sha256": "6f0e6094e66aae6a96aba94897bcd8d96483c9e43d37645e3d7b2630a6a8a7f6",
+   "en": "＊ヘヴン斧槍終了＊"
+  },
+  {
+   "index": 510,
+   "source_sha256": "5694a4f7b08761724656fb570c21130e359b129e9a91ca922b5f5fca22652460",
+   "en": "＊ヘヴン弓開始＊"
+  },
+  {
+   "index": 511,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 512,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 513,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 514,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 515,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 516,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 517,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 518,
+   "source_sha256": "647dd70234f9df3a949f1f23662dda196da9fc25ac61d5e5e7a6c8e63c6c76eb",
+   "en": "Heaven Bow"
+  },
+  {
+   "index": 519,
+   "source_sha256": "e8d8ea476a608959c63ed89b59101882eda6feb17ada446ca542888f8a64791d",
+   "en": "＊ヘヴン弓終了＊"
+  },
+  {
+   "index": 520,
+   "source_sha256": "11c1552e8149f14b156d2c5a6f3bc982604f37c81564e6fff39d38e786023b20",
+   "en": "＊ヘヴン鎚開始＊"
+  },
+  {
+   "index": 521,
+   "source_sha256": "cb3237c357ec4bf67c13368e8e7fddc86d8ec89302b6e2e9d6d1041600c01842",
+   "en": "Heaven Hammer"
+  },
+  {
+   "index": 522,
+   "source_sha256": "cb3237c357ec4bf67c13368e8e7fddc86d8ec89302b6e2e9d6d1041600c01842",
+   "en": "Heaven Hammer"
+  },
+  {
+   "index": 523,
+   "source_sha256": "bd00683eb7c37392c221ae425abf26e5e6401a15ec56b812cff7e19312a2a947",
+   "en": "Heaven Axe"
+  },
+  {
+   "index": 524,
+   "source_sha256": "cb3237c357ec4bf67c13368e8e7fddc86d8ec89302b6e2e9d6d1041600c01842",
+   "en": "Heaven Hammer"
+  },
+  {
+   "index": 525,
+   "source_sha256": "bd00683eb7c37392c221ae425abf26e5e6401a15ec56b812cff7e19312a2a947",
+   "en": "Heaven Axe"
+  },
+  {
+   "index": 526,
+   "source_sha256": "cb3237c357ec4bf67c13368e8e7fddc86d8ec89302b6e2e9d6d1041600c01842",
+   "en": "Heaven Hammer"
+  },
+  {
+   "index": 527,
+   "source_sha256": "bd00683eb7c37392c221ae425abf26e5e6401a15ec56b812cff7e19312a2a947",
+   "en": "Heaven Axe"
+  },
+  {
+   "index": 528,
+   "source_sha256": "cb3237c357ec4bf67c13368e8e7fddc86d8ec89302b6e2e9d6d1041600c01842",
+   "en": "Heaven Hammer"
+  },
+  {
+   "index": 529,
+   "source_sha256": "d8826eab745cabd9cb66883bab2cffb08b5ed5c27ef3e0da8f954bcc92d7304b",
+   "en": "＊ヘヴン鎚終了＊"
+  },
+  {
+   "index": 530,
+   "source_sha256": "5ec4321fbe1025aa720d950237a52c4bebfb0d9879eb750f5e1ad884151cd337",
+   "en": "＊ヘヴン杖開始＊"
+  },
+  {
+   "index": 531,
+   "source_sha256": "8723bb5fbaa64a93c15b833f2f7451c37acf6a7bd02869e8e45688ac5bd6009f",
+   "en": "Heaven Staff"
+  },
+  {
+   "index": 532,
+   "source_sha256": "f4b4436e3c4d3ed5994cf353d22e774dd0f24639cc3fd267740129cee3420136",
+   "en": "Heaven Wand"
+  },
+  {
+   "index": 533,
+   "source_sha256": "8723bb5fbaa64a93c15b833f2f7451c37acf6a7bd02869e8e45688ac5bd6009f",
+   "en": "Heaven Staff"
+  },
+  {
+   "index": 534,
+   "source_sha256": "dcaac15bf11916f6c4ec39ebda5d7ea789b5c629b7d0f59f5e36cdfbb08c18b1",
+   "en": "Heaven Scepter"
+  },
+  {
+   "index": 535,
+   "source_sha256": "8723bb5fbaa64a93c15b833f2f7451c37acf6a7bd02869e8e45688ac5bd6009f",
+   "en": "Heaven Staff"
+  },
+  {
+   "index": 536,
+   "source_sha256": "f4b4436e3c4d3ed5994cf353d22e774dd0f24639cc3fd267740129cee3420136",
+   "en": "Heaven Wand"
+  },
+  {
+   "index": 537,
+   "source_sha256": "dcaac15bf11916f6c4ec39ebda5d7ea789b5c629b7d0f59f5e36cdfbb08c18b1",
+   "en": "Heaven Scepter"
+  },
+  {
+   "index": 538,
+   "source_sha256": "f4b4436e3c4d3ed5994cf353d22e774dd0f24639cc3fd267740129cee3420136",
+   "en": "Heaven Wand"
+  },
+  {
+   "index": 539,
+   "source_sha256": "4b5cd6c4ee155d555f2220a3287efc37b693cb3b4c06d01d98eb674bcc3bd4cf",
+   "en": "Heaven Broom"
+  },
+  {
+   "index": 540,
+   "source_sha256": "3e6f093e8e810023994e697ab3661caf9dfade01bf9d737c97ef6c4ba706aec4",
+   "en": "＊ヘヴン杖終了＊"
+  },
+  {
+   "index": 541,
+   "source_sha256": "f4b4436e3c4d3ed5994cf353d22e774dd0f24639cc3fd267740129cee3420136",
+   "en": "Heaven Wand"
+  },
+  {
+   "index": 542,
+   "source_sha256": "4cd70d4dad304137afa80049fa2417eb9af177b3ad451b543357b70ada071915",
+   "en": "＊ヘヴン竿開始＊"
+  },
+  {
+   "index": 543,
+   "source_sha256": "81f3b4a014473e1b89acd95947041ea4ee0571cb4072b6d641832eaf4c24e7a7",
+   "en": "Heaven Rod"
+  },
+  {
+   "index": 544,
+   "source_sha256": "81f3b4a014473e1b89acd95947041ea4ee0571cb4072b6d641832eaf4c24e7a7",
+   "en": "Heaven Rod"
+  },
+  {
+   "index": 545,
+   "source_sha256": "81f3b4a014473e1b89acd95947041ea4ee0571cb4072b6d641832eaf4c24e7a7",
+   "en": "Heaven Rod"
+  },
+  {
+   "index": 546,
+   "source_sha256": "dcaac15bf11916f6c4ec39ebda5d7ea789b5c629b7d0f59f5e36cdfbb08c18b1",
+   "en": "Heaven Scepter"
+  },
+  {
+   "index": 547,
+   "source_sha256": "81f3b4a014473e1b89acd95947041ea4ee0571cb4072b6d641832eaf4c24e7a7",
+   "en": "Heaven Rod"
+  },
+  {
+   "index": 548,
+   "source_sha256": "81f3b4a014473e1b89acd95947041ea4ee0571cb4072b6d641832eaf4c24e7a7",
+   "en": "Heaven Rod"
+  },
+  {
+   "index": 549,
+   "source_sha256": "dcaac15bf11916f6c4ec39ebda5d7ea789b5c629b7d0f59f5e36cdfbb08c18b1",
+   "en": "Heaven Scepter"
+  },
+  {
+   "index": 550,
+   "source_sha256": "b2a731678ce9d22cec95e69a3150b9deb944adcec76118425b91bb5c4a70c9e7",
+   "en": "Heaven Punisher"
+  },
+  {
+   "index": 551,
+   "source_sha256": "c735f8b445949d3a56a90d6859f937078834a8282effc2557de52e88e4fba90c",
+   "en": "＊ヘヴン竿終了＊"
+  },
+  {
+   "index": 552,
+   "source_sha256": "a76627bac8ee6532f578e4a2e731ef0627661d0bf333e6aab7a82174a52f6898",
+   "en": "＊ヘヴン盾開始＊"
+  },
+  {
+   "index": 553,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 554,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 555,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 556,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 557,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 558,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 559,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 560,
+   "source_sha256": "73b023142ba136a29877321503c94c2d6ecccc5591185dc95daa265cc787f6d2",
+   "en": "Heaven Shield"
+  },
+  {
+   "index": 561,
+   "source_sha256": "f9a658125849ab5ec240f2c85723dcd5d6f14ad5e9d6a2049f5ca5b770c726dd",
+   "en": "＊ヘヴン盾終了＊"
+  },
+  {
+   "index": 562,
+   "source_sha256": "38d3a3d6a56a855e261fd295a271fc226536fd70b85b276bc13598f375214fce",
+   "en": "＊ヘヴンアミュレット開始＊"
+  },
+  {
+   "index": 563,
+   "source_sha256": "11a20ac56d203032b76b99eba964637e450636a11051be967ebcf59236574d1e",
+   "en": "Heaven Pendant"
+  },
+  {
+   "index": 564,
+   "source_sha256": "11a20ac56d203032b76b99eba964637e450636a11051be967ebcf59236574d1e",
+   "en": "Heaven Pendant"
+  },
+  {
+   "index": 565,
+   "source_sha256": "6275dd33a2c87ea1b1a40c17f4ca20ff1f99eb6b5d03a0601274b772aa7a49c5",
+   "en": "Heaven Necklace"
+  },
+  {
+   "index": 566,
+   "source_sha256": "6275dd33a2c87ea1b1a40c17f4ca20ff1f99eb6b5d03a0601274b772aa7a49c5",
+   "en": "Heaven Necklace"
+  },
+  {
+   "index": 567,
+   "source_sha256": "11a20ac56d203032b76b99eba964637e450636a11051be967ebcf59236574d1e",
+   "en": "Heaven Pendant"
+  },
+  {
+   "index": 568,
+   "source_sha256": "6275dd33a2c87ea1b1a40c17f4ca20ff1f99eb6b5d03a0601274b772aa7a49c5",
+   "en": "Heaven Necklace"
+  },
+  {
+   "index": 569,
+   "source_sha256": "6275dd33a2c87ea1b1a40c17f4ca20ff1f99eb6b5d03a0601274b772aa7a49c5",
+   "en": "Heaven Necklace"
+  },
+  {
+   "index": 570,
+   "source_sha256": "11a20ac56d203032b76b99eba964637e450636a11051be967ebcf59236574d1e",
+   "en": "Heaven Pendant"
+  },
+  {
+   "index": 571,
+   "source_sha256": "36f40f1beb0fcf0471e029b64c2f1b362b131e9ceb9760169879dc9fb0a50ec4",
+   "en": "Heaven Amulet"
+  },
+  {
+   "index": 572,
+   "source_sha256": "9e88cc0d339d3ee79706dbb754969abe6403545c7a91f16cf8212cb35f191b5a",
+   "en": "Heaven Charm"
+  },
+  {
+   "index": 573,
+   "source_sha256": "9e88cc0d339d3ee79706dbb754969abe6403545c7a91f16cf8212cb35f191b5a",
+   "en": "Heaven Charm"
+  },
+  {
+   "index": 574,
+   "source_sha256": "9e88cc0d339d3ee79706dbb754969abe6403545c7a91f16cf8212cb35f191b5a",
+   "en": "Heaven Charm"
+  },
+  {
+   "index": 575,
+   "source_sha256": "9e88cc0d339d3ee79706dbb754969abe6403545c7a91f16cf8212cb35f191b5a",
+   "en": "Heaven Charm"
+  },
+  {
+   "index": 576,
+   "source_sha256": "36f40f1beb0fcf0471e029b64c2f1b362b131e9ceb9760169879dc9fb0a50ec4",
+   "en": "Heaven Amulet"
+  },
+  {
+   "index": 577,
+   "source_sha256": "9e88cc0d339d3ee79706dbb754969abe6403545c7a91f16cf8212cb35f191b5a",
+   "en": "Heaven Charm"
+  },
+  {
+   "index": 578,
+   "source_sha256": "36f40f1beb0fcf0471e029b64c2f1b362b131e9ceb9760169879dc9fb0a50ec4",
+   "en": "Heaven Amulet"
+  },
+  {
+   "index": 579,
+   "source_sha256": "affc337ebaab60525c64181484f96b7a0a9126196b86bd7e58c18ad60c079324",
+   "en": "＊ヘヴンアミュレット終了＊"
+  },
+  {
+   "index": 580,
+   "source_sha256": "7d468f06049d05f25cfd2c0edbba3f4f5709fcb28ee9e95b1c49b99c58384928",
+   "en": "＊ヘヴンガントレット開始＊"
+  },
+  {
+   "index": 581,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 582,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 583,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 584,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 585,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 586,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 587,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 588,
+   "source_sha256": "6b76de538123b56f8cf102766db1616c32a7c560088fb546197d508daa73fc87",
+   "en": "Heaven Arm"
+  },
+  {
+   "index": 589,
+   "source_sha256": "f9242519da60a11e68a8fa7deff0ab9bb776ab39cbc3d1066b6a2cff8a96126c",
+   "en": "＊ヘヴンガントレット終了＊"
+  },
+  {
+   "index": 590,
+   "source_sha256": "90939e8ecc14a84b80c320b2ba4157dadf123ea03658fcebeb56d4ad9126b4ee",
+   "en": "＊ヘヴンベルト開始＊"
+  },
+  {
+   "index": 591,
+   "source_sha256": "4f1bbf2a44ccd48f0c153cea94ae844446293590121fd8ccd60770a165f983b1",
+   "en": "Heaven Belt"
+  },
+  {
+   "index": 592,
+   "source_sha256": "4f1bbf2a44ccd48f0c153cea94ae844446293590121fd8ccd60770a165f983b1",
+   "en": "Heaven Belt"
+  },
+  {
+   "index": 593,
+   "source_sha256": "4f1bbf2a44ccd48f0c153cea94ae844446293590121fd8ccd60770a165f983b1",
+   "en": "Heaven Belt"
+  },
+  {
+   "index": 594,
+   "source_sha256": "4f1bbf2a44ccd48f0c153cea94ae844446293590121fd8ccd60770a165f983b1",
+   "en": "Heaven Belt"
+  },
+  {
+   "index": 595,
+   "source_sha256": "4f1bbf2a44ccd48f0c153cea94ae844446293590121fd8ccd60770a165f983b1",
+   "en": "Heaven Belt"
+  },
+  {
+   "index": 596,
+   "source_sha256": "4f1bbf2a44ccd48f0c153cea94ae844446293590121fd8ccd60770a165f983b1",
+   "en": "Heaven Belt"
+  },
+  {
+   "index": 597,
+   "source_sha256": "943ec5ec2290200147db69e5c6684e7675da4866e84df5fc43b911eb58c3cced",
+   "en": "Heaven Chain"
+  },
+  {
+   "index": 598,
+   "source_sha256": "943ec5ec2290200147db69e5c6684e7675da4866e84df5fc43b911eb58c3cced",
+   "en": "Heaven Chain"
+  },
+  {
+   "index": 599,
+   "source_sha256": "0b215f4cdb742e7bdc759b681ec44a30873144bc9a6b29853c6e6c145235af30",
+   "en": "＊ヘヴンベルト終了＊"
+  },
+  {
+   "index": 600,
+   "source_sha256": "af6ea6e79c9ec5728e159fd6bf64ba692c3514078c01f9c5a9d0f1fd7dd1ae18",
+   "en": "＊ヘヴンイヤリング開始＊"
+  },
+  {
+   "index": 601,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 602,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 603,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 604,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 605,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 606,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 607,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 608,
+   "source_sha256": "4b0032093d5826d7ff003b9347e9e8ecd70591efc88086255e10c59452dd3058",
+   "en": "Heaven Studs"
+  },
+  {
+   "index": 609,
+   "source_sha256": "b0391d4b22886d9e28eba9383d5132a28877d07509bbb123cec1895ff486d550",
+   "en": "＊ヘヴンイヤリング終了＊"
+  },
+  {
+   "index": 610,
+   "source_sha256": "645f07833b8a007cfe8797e80f28b0814d95a199847f36e5ea80baa6be9406fd",
+   "en": "＊ヘヴンブレスレット開始＊"
+  },
+  {
+   "index": 611,
+   "source_sha256": "6280179f5c7f111a01a0b36a202a4a819873b79f80e13c462ac9b72f051708fb",
+   "en": "Heaven Bracelet"
+  },
+  {
+   "index": 612,
+   "source_sha256": "6280179f5c7f111a01a0b36a202a4a819873b79f80e13c462ac9b72f051708fb",
+   "en": "Heaven Bracelet"
+  },
+  {
+   "index": 613,
+   "source_sha256": "f42dff5e891721b5c29aa723eecf8d7e65f34d8cb40a966e4b8c252580a6cf8a",
+   "en": "Heaven Bangle"
+  },
+  {
+   "index": 614,
+   "source_sha256": "f42dff5e891721b5c29aa723eecf8d7e65f34d8cb40a966e4b8c252580a6cf8a",
+   "en": "Heaven Bangle"
+  },
+  {
+   "index": 615,
+   "source_sha256": "b622bc1f1d16695445eec255a674fe96e62665f1b47e426031315c0cb98a8abb",
+   "en": "Heaven Ring"
+  },
+  {
+   "index": 616,
+   "source_sha256": "b622bc1f1d16695445eec255a674fe96e62665f1b47e426031315c0cb98a8abb",
+   "en": "Heaven Ring"
+  },
+  {
+   "index": 617,
+   "source_sha256": "b622bc1f1d16695445eec255a674fe96e62665f1b47e426031315c0cb98a8abb",
+   "en": "Heaven Ring"
+  },
+  {
+   "index": 618,
+   "source_sha256": "b622bc1f1d16695445eec255a674fe96e62665f1b47e426031315c0cb98a8abb",
+   "en": "Heaven Ring"
+  },
+  {
+   "index": 619,
+   "source_sha256": "c1801e3a79c2f4e3e5f0f3e0074d3f238805e5e0d9d25db614225be66071d96b",
+   "en": "＊ヘヴンブレスレット終了＊"
+  },
+  {
+   "index": 620,
+   "source_sha256": "81edd853e49f4de6c4c298750e6e8bcf4ff9916ef1b22b9d4823dc8e22fc4032",
+   "en": "＊ヘヴンブーツ開始＊"
+  },
+  {
+   "index": 621,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 622,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 623,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 624,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 625,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 626,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 627,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 628,
+   "source_sha256": "9faf8a20f88b196c273e3ee5205a8a34eda8e67921cdb376a41add75c155514c",
+   "en": "Heaven Boots"
+  },
+  {
+   "index": 629,
+   "source_sha256": "fdf7fbdc9a27aeb560da57de1e68acf17022a5db8e958d0adc671441b1c2dd41",
+   "en": "＊ヘヴンブーツ終了＊"
+  },
+  {
+   "index": 630,
+   "source_sha256": "8425283c7ac2cd4f607ced509fa399c5c9ef586a6ebf08153c77b2c12970735a",
+   "en": "＊ヘヴンマント開始＊"
+  },
+  {
+   "index": 631,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 632,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 633,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 634,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 635,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 636,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 637,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 638,
+   "source_sha256": "c39e809c428679ecf1e6724599acab56a4d8c889b257fad23c60d92b726f9eba",
+   "en": "Heaven Mantle"
+  },
+  {
+   "index": 639,
+   "source_sha256": "241dc5439de895d28adc0078d8b1720da0576cb8a313f424311f89eaa16b28e8",
+   "en": "＊ヘヴンマント終了＊"
+  },
+  {
+   "index": 640,
+   "source_sha256": "2af79990cb088b80559410d2e0aa6203d1b0f4b874590e140f0773013b52fda9",
+   "en": "＊ヘヴングローブ開始＊"
+  },
+  {
+   "index": 641,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 642,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 643,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 644,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 645,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 646,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 647,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 648,
+   "source_sha256": "cc529659f528b07879a6b5c562c1be0a019e3195251147c7775b255d8ae24b9f",
+   "en": "Heaven Glove"
+  },
+  {
+   "index": 649,
+   "source_sha256": "258df479a338253eef4460c0b6293c090c3c85d65e7f693930bde5bf6c9fb557",
+   "en": "＊ヘヴングローブ終了＊"
+  },
+  {
+   "index": 650,
+   "source_sha256": "3e80bfca14c8cb94a9c4f8f2f292ab5cde65087a129123d7608748b316585de3",
+   "en": "＊ヘヴンメガネ開始＊"
+  },
+  {
+   "index": 651,
+   "source_sha256": "0777cce896bea3b05daa8327b86b3700912be060d02012e026d6f5c0e6237937",
+   "en": "Heaven Glasses"
+  },
+  {
+   "index": 652,
+   "source_sha256": "0777cce896bea3b05daa8327b86b3700912be060d02012e026d6f5c0e6237937",
+   "en": "Heaven Glasses"
+  },
+  {
+   "index": 653,
+   "source_sha256": "0777cce896bea3b05daa8327b86b3700912be060d02012e026d6f5c0e6237937",
+   "en": "Heaven Glasses"
+  },
+  {
+   "index": 654,
+   "source_sha256": "0777cce896bea3b05daa8327b86b3700912be060d02012e026d6f5c0e6237937",
+   "en": "Heaven Glasses"
+  },
+  {
+   "index": 655,
+   "source_sha256": "0777cce896bea3b05daa8327b86b3700912be060d02012e026d6f5c0e6237937",
+   "en": "Heaven Glasses"
+  },
+  {
+   "index": 656,
+   "source_sha256": "0777cce896bea3b05daa8327b86b3700912be060d02012e026d6f5c0e6237937",
+   "en": "Heaven Glasses"
+  },
+  {
+   "index": 657,
+   "source_sha256": "cd827bc51a9a3f8fc9fdb8350bcd907912db80ddef43afe02c5b48e8e95a0fbd",
+   "en": "Heaven Monocle"
+  },
+  {
+   "index": 658,
+   "source_sha256": "cd827bc51a9a3f8fc9fdb8350bcd907912db80ddef43afe02c5b48e8e95a0fbd",
+   "en": "Heaven Monocle"
+  },
+  {
+   "index": 659,
+   "source_sha256": "7497ae90bc6e9f4f02789caa26d9d6904ea76bd814f05a3f6dbd9d88d157a664",
+   "en": "＊ヘヴンメガネ終了＊"
+  },
+  {
+   "index": 660,
+   "source_sha256": "150fe5514030b1434a5deaf491ece92c0e6497447d6de7bd6ba85e8cae1e00a3",
+   "en": "Salt"
+  },
+  {
+   "index": 661,
+   "source_sha256": "4e7bcd0c8d5b25bdb683b29be3304f89cf6a516eada88f227fe04018b876fdfb",
+   "en": "Garlic"
+  },
+  {
+   "index": 662,
+   "source_sha256": "f1b6ecb37e2d05a8ffd92bcf7f87ba0a1f351af208eeeb0d4550489729272c4f",
+   "en": "Cooking Wine"
+  },
+  {
+   "index": 663,
+   "source_sha256": "ba7596557d430c31e563741fe5846aecbd0bf20aac4a64650859b96f9b418ff1",
+   "en": "Spices"
+  },
+  {
+   "index": 664,
+   "source_sha256": "d9538cf97df1f8d5643401d36fc8f15eaad2b490a20cd16ba94c18e8e75ac449",
+   "en": "Pepper"
+  },
+  {
+   "index": 665,
+   "source_sha256": "a4a7cc9d455ad3a8ee2706bcd2b1633366d4fdeabd324770c492cc3f89bfb96e",
+   "en": "Ham Steak"
+  },
+  {
+   "index": 666,
+   "source_sha256": "656d3b4fb32b194651bbedf707b9ed83c37464c0adb1b97eeddc7ea841ccfacd",
+   "en": "Chimera Steak"
+  },
+  {
+   "index": 667,
+   "source_sha256": "96a051382818e5a8feb7cf10e54bf8a292d95400bae80de7a36bdaa464fa5c57",
+   "en": "Seared Hare"
+  },
+  {
+   "index": 668,
+   "source_sha256": "a0cd3a5cdfc6029144ac76743f772d98fbcc239287479e8a710ca108440191a0",
+   "en": "Killer Rabbit Filet"
+  },
+  {
+   "index": 669,
+   "source_sha256": "d56367a67bb8b82d20bbb57c63c046835c4a95d7557ddf58c7c881d68ba3547c",
+   "en": "Roasted Salamander"
+  },
+  {
+   "index": 670,
+   "source_sha256": "bf9464166a1ea0698ed2c3e9e5f12234faad77546e25b158a0622f0b449da9f0",
+   "en": "Deep-fried Gazer"
+  },
+  {
+   "index": 671,
+   "source_sha256": "108dd9fea6548f4416aaa060ab39594d832cb9e8068fe6370e78bbe9d6932096",
+   "en": "Deep-fried Herrings"
+  },
+  {
+   "index": 672,
+   "source_sha256": "9a1589794f101312065e6f65d0261e88429c3e4b8b5dc3fc5a1c56da4d849e25",
+   "en": "Sauteed Oysters"
+  },
+  {
+   "index": 673,
+   "source_sha256": "375104527dd5ba4696bf7036096d33125449ba9572bbcc52d22bfae7b0b1e097",
+   "en": "Paella with Mussels"
+  },
+  {
+   "index": 674,
+   "source_sha256": "d081a9a01e90a30c3516746818665d801291508f1ba5abb5b3ba71542791c1ad",
+   "en": "Barracuda Meunière"
+  },
+  {
+   "index": 675,
+   "source_sha256": "e63871b4f93242a1f0b90e0f7a3bd326c68be868c4b51fcbf72412582337b30e",
+   "en": "Lobster Thermidor"
+  },
+  {
+   "index": 676,
+   "source_sha256": "f1a650e7a804b610705efc19a7bbf9fbe92bf92972e57fe7bfc66b18603d616b",
+   "en": "Deep-fried Kraken"
+  },
+  {
+   "index": 677,
+   "source_sha256": "abc226fa4b2359191c165083eb7aed72f9a7430e22138fcfd3b277d50d0fc8c0",
+   "en": "Pea Croquettes"
+  },
+  {
+   "index": 678,
+   "source_sha256": "8c96f4b331a7573f608701b6e09651628f44fe2fe31f9332e2b47192fab7b18f",
+   "en": "Boar Piccata"
+  },
+  {
+   "index": 679,
+   "source_sha256": "de035b380a3f9bafead5b5a7e9ee160daf30e775c7e930765e7bff538d60f7a4",
+   "en": "Sauteed Minotaur Tongue"
+  },
+  {
+   "index": 680,
+   "source_sha256": "335545010f420a47928a4e2b78445da5cce5a6bc3cc77d4a89df45041c85a785",
+   "en": "Escargot"
+  },
+  {
+   "index": 681,
+   "source_sha256": "359c68172fd6545c9bcabc83f90eb1839e894615ef1693eb5e2c404b1f4fa7e4",
+   "en": "Stir-fried Bat"
+  },
+  {
+   "index": 682,
+   "source_sha256": "7d8c366d640741806dff7ce9b0a1abc29889e21bfa12b181b7c6a76eac36339a",
+   "en": "Stuffed Cabbage"
+  },
+  {
+   "index": 683,
+   "source_sha256": "02140a8d5dfdf5a893c02f79b966e12fa1132160365ce213a6d7a603769e9b1e",
+   "en": "Onion Rings"
+  },
+  {
+   "index": 684,
+   "source_sha256": "5c050a5c55dd4d239ae9586ce575dc64cad421d418f31683171b0d0cf7c132fa",
+   "en": "Sauteed Carrots"
+  },
+  {
+   "index": 685,
+   "source_sha256": "c305269d011ec79e30b648c4f03b9e47acd2873de08849aa6a6d9ec054b8d0ae",
+   "en": "Grilled Snake"
+  },
+  {
+   "index": 686,
+   "source_sha256": "e3ce1c8b1c2c761bc0a4519a7d7c8c4cb7b4e658934c25faa4a08878526ce70d",
+   "en": "Harpy Egg Omelette"
+  },
+  {
+   "index": 687,
+   "source_sha256": "778d3822f8e6146e4dda907a4939c7afd3c6b6486bd550f5288cbc5e87db8001",
+   "en": "Grilled Enoki Mushrooms"
+  },
+  {
+   "index": 688,
+   "source_sha256": "f336a7dc4ac1eb8a77c6b96de4d3f3d6187f1d3e64686341e0563f76ecc1c317",
+   "en": "French Fries"
+  },
+  {
+   "index": 689,
+   "source_sha256": "989ad37dc043b4395747b8e2732d7ffba6a3cb9e483a4864ec5708362cdee7a9",
+   "en": "Sauteed Myconid"
+  },
+  {
+   "index": 690,
+   "source_sha256": "72495fd1f9a59bd90ad5e8ef823d6687652e2eb19416685df0dcc3156c26e6fa",
+   "en": "Julienned Sauteed Worms"
+  },
+  {
+   "index": 691,
+   "source_sha256": "f7819effd15a301e88ee579ef05b5345309b40674a44536b304a869b323fdf4d",
+   "en": "Smoked Beast Cutlet"
+  },
+  {
+   "index": 692,
+   "source_sha256": "a916d36c026a76af0ce4cfc8b1f702340ec4a366857c5c13f3403d50c2ccf729",
+   "en": "Toasted Bread"
+  },
+  {
+   "index": 693,
+   "source_sha256": "93c356bda822149296a9f8ad0003f1560751a65fb68f6cc2a7a634833f0dbd52",
+   "en": "Deep-fried Scorpion"
+  },
+  {
+   "index": 694,
+   "source_sha256": "25f419162a26c326f867fc105cd01a32d40c04d151d6244b693e84f20a0d4fab",
+   "en": "Sauteed Demon Heart"
+  },
+  {
+   "index": 695,
+   "source_sha256": "3af8dd18331fc376fcc41d59e099c00108c3600ba142596695e123fdd7d2f875",
+   "en": "Fried Beans"
+  },
+  {
+   "index": 696,
+   "source_sha256": "9642c029dfa2349286c0f041d380744f2a06f5e4878ab1595228962a26c6f021",
+   "en": "Roast Ham Steak"
+  },
+  {
+   "index": 697,
+   "source_sha256": "2df8ab5b8dd900ca0d5fc8adc96198a6151a50c5a1e1deb4f76e9598c9bac76a",
+   "en": "Wyvern Steak"
+  },
+  {
+   "index": 698,
+   "source_sha256": "647b18f0b9ee7b85bbb6fca74f59313ff3ba43ece9361fede5008b31027ad934",
+   "en": "Red Dragon Steak"
+  },
+  {
+   "index": 699,
+   "source_sha256": "2e765232c5deefe1dca09d8fdbd57ee1b30b2cba0f3bd2acf50308d165f8f74e",
+   "en": "Roasted Chicken"
+  },
+  {
+   "index": 700,
+   "source_sha256": "150fe5514030b1434a5deaf491ece92c0e6497447d6de7bd6ba85e8cae1e00a3",
+   "en": "Salt"
+  },
+  {
+   "index": 701,
+   "source_sha256": "4e7bcd0c8d5b25bdb683b29be3304f89cf6a516eada88f227fe04018b876fdfb",
+   "en": "Garlic"
+  },
+  {
+   "index": 702,
+   "source_sha256": "f1b6ecb37e2d05a8ffd92bcf7f87ba0a1f351af208eeeb0d4550489729272c4f",
+   "en": "Cooking Wine"
+  },
+  {
+   "index": 703,
+   "source_sha256": "ba7596557d430c31e563741fe5846aecbd0bf20aac4a64650859b96f9b418ff1",
+   "en": "Spices"
+  },
+  {
+   "index": 704,
+   "source_sha256": "d9538cf97df1f8d5643401d36fc8f15eaad2b490a20cd16ba94c18e8e75ac449",
+   "en": "Pepper"
+  },
+  {
+   "index": 705,
+   "source_sha256": "ddfcc0b99caec860faae273fe72baf4d35842b60735c6a3ef1c4e752f0f7ccfb",
+   "en": "Ham Soup"
+  },
+  {
+   "index": 706,
+   "source_sha256": "6af460519e18dfedf5242ee3b323ef0aa9b4016d87da2f325efae9fce5de4a37",
+   "en": "Chimera Pot Roast"
+  },
+  {
+   "index": 707,
+   "source_sha256": "673b33c4c9eefc11a926b3a4f233fb0dad7fc600466b0f93b006d678c74649ad",
+   "en": "Rabbit Stew"
+  },
+  {
+   "index": 708,
+   "source_sha256": "2db1da94cc3bb7acbf393516dba5957d63f06ad73674adb84045126931825d18",
+   "en": "Killer Rabbit Royale "
+  },
+  {
+   "index": 709,
+   "source_sha256": "ba85a6c2d34af92f0a00a0340c7dad0ada7fda7e7bc32a2d1cbd3bbde80b7827",
+   "en": "Diced Salamander Soup"
+  },
+  {
+   "index": 710,
+   "source_sha256": "881ec465e9a198e4be184b787a567c74fc06e743558bd4ca7902e2c757d5700f",
+   "en": "Gazer Soup"
+  },
+  {
+   "index": 711,
+   "source_sha256": "bd544aabdda24035b15c9f5a1d1a58992489404794ad1eb3469bef273ab55ec7",
+   "en": "Herring Soup"
+  },
+  {
+   "index": 712,
+   "source_sha256": "f383bf9bc1edd292857617d587e88f46bfe06e0f166120af3312519771f1bb83",
+   "en": "Oyster Stew"
+  },
+  {
+   "index": 713,
+   "source_sha256": "81b81c18b8f4b72e712d3fbc78cf68ead2d4236e78b94b5a2edc35428d9ee9e9",
+   "en": "Mussels Bouillabaisse"
+  },
+  {
+   "index": 714,
+   "source_sha256": "f9368834e12a22704dcfd872392f05da6be5c0c5476e2c567f06daac52849db3",
+   "en": "Creamy Barracuda Stew"
+  },
+  {
+   "index": 715,
+   "source_sha256": "cedc3f4cf689b4c4156fcdb960aae4222974a87c23ab5af96e96f866b6356144",
+   "en": "Lobster Soup"
+  },
+  {
+   "index": 716,
+   "source_sha256": "6958835790b68c1c627f399430f044ebd6fb4c93a282e9105f0f10850114d4fe",
+   "en": "Kraken Cacciatore"
+  },
+  {
+   "index": 717,
+   "source_sha256": "9a599a395a127525d21d768a48188495dc32fe3b08639daa3b2f019d743cd610",
+   "en": "Pea Potage"
+  },
+  {
+   "index": 718,
+   "source_sha256": "c7af08d6079021b2dd23fc13a93eacdeffaf553895ba79630d262d48e4353f47",
+   "en": "Slow-cooked Boar Stew"
+  },
+  {
+   "index": 719,
+   "source_sha256": "18df691441684c12ddee18dcb09640a09e400f76760aec659925b977b5b94085",
+   "en": "Stewed Minotaur Tongue"
+  },
+  {
+   "index": 720,
+   "source_sha256": "024fdca7c065e765c0061c6ba18ce4492722ccdb24a1fdccc1af10d3c2df6cc4",
+   "en": "Snail Soup"
+  },
+  {
+   "index": 721,
+   "source_sha256": "07bb29147f0c6983d4600e084395f6867ea6a5d497a13b5e867ad6bd2aa62234",
+   "en": "Bat Soup"
+  },
+  {
+   "index": 722,
+   "source_sha256": "93f0698df1f39632aa6dafbab1dddb3cc497848f3215dcc8483d71b6913cc683",
+   "en": "Cabbage Soup"
+  },
+  {
+   "index": 723,
+   "source_sha256": "2145bebc852505b79bf83f2c2bd61723988a174f5b563ba0b9681b9d0cb55464",
+   "en": "Onion Soup"
+  },
+  {
+   "index": 724,
+   "source_sha256": "62fd80d58c3ac0504fb236fc62d167d87f87a921c339b9fbd58331456bf06b81",
+   "en": "Carrot Soup"
+  },
+  {
+   "index": 725,
+   "source_sha256": "5f784cf21a2b78311935d462027f502675d17b12b896bcf50ffe0d13cea26a3a",
+   "en": "Snake Stew"
+  },
+  {
+   "index": 726,
+   "source_sha256": "e8ea8b0cfe4c9a4d88cd5150bda9e7ad836eebdca52b2344bf650a3203aa0751",
+   "en": "Harpy Egg Drop Soup"
+  },
+  {
+   "index": 727,
+   "source_sha256": "57ed9e90644abc3d23fede4517d5f8982b6bc2bc4719999df5448a98ed366cbb",
+   "en": "Enoki Mushroom Soup"
+  },
+  {
+   "index": 728,
+   "source_sha256": "da06fffb7ad43ffbffdaa5fa225718ddc16bc6c83ce7866cfe8fe38337001f33",
+   "en": "Potato Potage"
+  },
+  {
+   "index": 729,
+   "source_sha256": "03f21d75ff325654b74c7785df844c1105dd511bcad325b4434336f70f089c04",
+   "en": "Myconid Soup"
+  },
+  {
+   "index": 730,
+   "source_sha256": "b0921f092a9285305b57b6f65b0d6f485fd089036ecd696a41b9d258147ba05c",
+   "en": "Gelatinous Worm Soup"
+  },
+  {
+   "index": 731,
+   "source_sha256": "4323837e7cd00191f2fd58d92ff9c93ebfc3310bbbcabfd645bc831c6756a7a5",
+   "en": "Hearty Meat Soup"
+  },
+  {
+   "index": 732,
+   "source_sha256": "5064286217f902724f8e59f125fcf5e2427cd2aa9f77642b8e1cd62710a6d882",
+   "en": "Macaroni Soup"
+  },
+  {
+   "index": 733,
+   "source_sha256": "e81afbf872a066bad4703a3d31e0a4bba6b42c9bb45a61b48f24f4658fa025f1",
+   "en": "Scorpion Soup"
+  },
+  {
+   "index": 734,
+   "source_sha256": "a92efa3c1743efb70456eb768d9b4602ff565f8c1624ce127fe3dd7702f817cb",
+   "en": "Demon Heart Soup"
+  },
+  {
+   "index": 735,
+   "source_sha256": "23625064fd46cb050699fad919ad79885a615aa88c3d6afcc535504aaca64cfa",
+   "en": "Bean Soup"
+  },
+  {
+   "index": 736,
+   "source_sha256": "03a28fd382d51e1ec7bc6e2760d8d7c1e0adc258a2446ed070986f6f768a2fd6",
+   "en": "Roast Ham Soup"
+  },
+  {
+   "index": 737,
+   "source_sha256": "c7df76edb32c6643475dc04d0e1a23bea3128c5b8a1e89618082185260693290",
+   "en": "Stewed Wyvern Soup"
+  },
+  {
+   "index": 738,
+   "source_sha256": "c218365125d1b7cbaaa8d749c5f6e945f83542937ae960b0fae59fc8ee52d3c7",
+   "en": "Red Dragon Stew"
+  },
+  {
+   "index": 739,
+   "source_sha256": "0813c43381f72b61b5a0910382cc4c3a885d9253c187112dc09f5d0458f4f1c8",
+   "en": "Chicken Soup"
+  }
+ ]
+}

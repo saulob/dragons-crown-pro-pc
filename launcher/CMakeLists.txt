@@ -82,6 +82,32 @@ add_custom_command(OUTPUT ${DCP_PTBR_SOURCE_MAP_SOURCE}
     COMMENT "Embedding the pt-BR source maps")
 target_sources(dcp_launcher_core PRIVATE ${DCP_PTBR_SOURCE_MAP_SOURCE})
 
+# The English translation (localization/en/sheets/*.json) as a table of byte arrays, game_translation.h.
+file(GLOB DCP_EN_SHEETS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/en/sheets/*.json)
+list(SORT DCP_EN_SHEETS)
+set(DCP_EN_SHEET_LIST ${CMAKE_BINARY_DIR}/generated/en_sheets.txt)
+file(CONFIGURE OUTPUT ${DCP_EN_SHEET_LIST} CONTENT "${DCP_EN_SHEETS}")
+set(DCP_EN_SHEET_SOURCE ${CMAKE_BINARY_DIR}/generated/en_translation_data.cpp)
+add_custom_command(OUTPUT ${DCP_EN_SHEET_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_EN_SHEET_LIST} -DOUTPUT=${DCP_EN_SHEET_SOURCE} -DSYMBOL=kEnTranslation
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_EN_SHEET_LIST} ${DCP_EN_SHEETS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the English translation")
+target_sources(dcp_launcher_core PRIVATE ${DCP_EN_SHEET_SOURCE})
+
+# The English record hashes and slot maps (localization/en/sources/*.json), game_translation.h.
+file(GLOB DCP_EN_SOURCE_MAPS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/en/sources/*.json)
+list(SORT DCP_EN_SOURCE_MAPS)
+set(DCP_EN_SOURCE_MAP_LIST ${CMAKE_BINARY_DIR}/generated/en_sources.txt)
+file(CONFIGURE OUTPUT ${DCP_EN_SOURCE_MAP_LIST} CONTENT "${DCP_EN_SOURCE_MAPS}")
+set(DCP_EN_SOURCE_MAP_SOURCE ${CMAKE_BINARY_DIR}/generated/en_source_maps.cpp)
+add_custom_command(OUTPUT ${DCP_EN_SOURCE_MAP_SOURCE}
+    COMMAND ${CMAKE_COMMAND} -DINPUT_LIST=${DCP_EN_SOURCE_MAP_LIST} -DOUTPUT=${DCP_EN_SOURCE_MAP_SOURCE}
+            -DSYMBOL=kEnSources -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    DEPENDS ${DCP_EN_SOURCE_MAP_LIST} ${DCP_EN_SOURCE_MAPS} ${CMAKE_CURRENT_SOURCE_DIR}/embed_files.cmake
+    COMMENT "Embedding the English source maps")
+target_sources(dcp_launcher_core PRIVATE ${DCP_EN_SOURCE_MAP_SOURCE})
+
 # The PT-BR visual patches (localization/pt-BR/visual/*.dcpx.z) as a table of byte arrays, game_translation.h.
 file(GLOB DCP_PTBR_VISUAL_PATCHES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/visual/*.dcpx.z)
 list(SORT DCP_PTBR_VISUAL_PATCHES)

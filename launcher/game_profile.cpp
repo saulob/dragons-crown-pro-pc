@@ -112,9 +112,11 @@ constexpr TextLanguage kWesternOffered[] = {
     {"italian", "Italian", 5, "IT"}, {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
     {"spanish", "Spanish", 3, "ES"},
 };
-constexpr TextLanguage kAsiaOffered[] = {kAsiaLanguages[0], kAsiaLanguages[1],
+// English shares the native key: a build with its own English slot plays that, the others the port's own text.
+constexpr TextLanguage kAsiaOffered[] = {kAsiaLanguages[0], kAsiaLanguages[1], {kEnglishKey, "English", 10, "CT", kPortEnglish},
                                          {kPortugueseBrazilKey, "Portuguese (Brazil)", 10, "CT", "pt-BR"}};
-constexpr TextLanguage kJapaneseOffered[] = {kJapaneseLanguages[0], {kPortugueseBrazilKey, "Portuguese (Brazil)", 0, {}, "pt-BR"}};
+constexpr TextLanguage kJapaneseOffered[] = {kJapaneseLanguages[0], {kEnglishKey, "English", 0, {}, kPortEnglish},
+                                             {kPortugueseBrazilKey, "Portuguese (Brazil)", 0, {}, "pt-BR"}};
 
 constexpr TranslationProfile kUsaTranslation = {kWesternOffered, "DRACRO_US.CPK", {}, {}, 0, "DRACRO_US.CPK", VisualSet::kEnglishSlot};
 constexpr TranslationProfile kEuropeTranslation = {kWesternOffered, "DRACRO_EU.CPK", {}, {}, 0, "DRACRO_EU.CPK", VisualSet::kEnglishSlot};

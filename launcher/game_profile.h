@@ -25,6 +25,8 @@ struct PackageLayer {
 };
 
 inline constexpr std::string_view kPortugueseBrazilKey = "brazilian_portuguese";
+inline constexpr std::string_view kEnglishKey = "english";
+inline constexpr std::string_view kPortEnglish = "en"; // TextLanguage::translation of the port's English text
 
 // A system language the game can be told for its menus and subtitles; a build lists the ones its executable maps.
 struct TextLanguage {
@@ -99,6 +101,19 @@ inline bool SitesOnlySearched(const GameBuild& build) {
 
 // The languages offered for the build, the port's included; the Western ones when the build is not known.
 std::span<const TextLanguage> TextLanguagesOf(const GameBuild* build);
+
+// True when the build's English is the port's built-in text, not a slot of its own.
+inline bool OffersPortEnglish(const GameBuild* build) {
+    if (build == nullptr) {
+        return false;
+    }
+    for (const TextLanguage& language : TextLanguagesOf(build)) {
+        if (language.translation == kPortEnglish) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // True when the build offers the Japanese NPC Voices toggle.
 inline bool SupportsJapaneseNpcVoices(const GameBuild* build) {

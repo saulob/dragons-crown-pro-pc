@@ -1,8 +1,9 @@
 // Port-side Menu & Subtitles languages: a translation laid over the message sheets of a build's language slot when the
-// game reads them (runtime_file_overlay); the archive on disk is never written. Each entry names the SHA-256 of the English
-// record it was translated from; a slot in another language has a source map with the hash of its record at that index. A
-// record whose installed text differs keeps that text. The tracked files are localization/<language>/sheets/<sheet>.json
-// and localization/<language>/sources/<source>.json; scripts/localization/ptbr.py writes and validates them.
+// game reads them (runtime_file_overlay); the archive on disk is never written. Each entry names the SHA-256 of the
+// record it was translated from; a slot in another language has a source map with the hash of its record at that index.
+// A record whose installed text differs keeps that text. The tracked files are localization/<language>/sheets/<sheet>.json
+// and localization/<language>/sources/<source>.json; scripts/localization/ptbr.py and scripts/localization/english.py
+// write and validate them.
 #pragma once
 
 #include <cstddef>
@@ -26,14 +27,16 @@ struct TranslationFile {
     size_t size;
 };
 
-// localization/pt-BR/sheets, embedded at build time (launcher/embed_files.cmake).
+// localization/pt-BR/sheets and localization/en/sheets, embedded at build time (launcher/embed_files.cmake).
 std::span<const TranslationFile> PtBrTranslationFiles();
+std::span<const TranslationFile> EnglishTranslationFiles();
 // localization/pt-BR/visual/*.dcpx.z: compressed DCPX patches against the English slot's archive entries.
 std::span<const TranslationFile> PtBrVisualPatches();
 // The patches of one set: localization/pt-BR/visual/base-*.dcpx.z target the base stage files, the others the USA packs.
 std::vector<TranslationFile> PtBrVisualPatches(VisualSet set);
-// localization/pt-BR/sources/<source>.json; nullptr when there is none.
+// localization/<language>/sources/<source>.json; nullptr when there is none.
 const TranslationFile* PtBrSource(std::string_view source);
+const TranslationFile* EnglishSource(std::string_view source);
 
 struct ArchiveTranslation {
     std::optional<ArchiveOverlay> overlay; // nothing when no record is translated or the archive cannot be read
@@ -59,6 +62,9 @@ struct TranslationRecipe {
     std::span<const TranslationFile> files;
     std::span<const TranslationFile> visual_patches = {}; // DCPX patches against the archive's own entries
     const TranslationFile* source = nullptr;          // the slot's source map; nullptr: the entries' English hashes
+    const TranslationFile* source_delta = nullptr;    // hashes added to the source map and records taken out of it
+    const TranslationFile* text_hashes = nullptr;     // the hash each entry's own text must have; nullptr: not checked
+    std::string_view text_key = "pt_br";              // the entries' text member
     std::string_view font_entry = {};                 // the font to complete with the letters, when the slot's lacks them
     std::filesystem::path mark_archive = {};          // the archive whose other/fontUTF16.ftx gives the marks
     bool glyph_table = false;                         // the executable's glyph table can take the letters

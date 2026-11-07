@@ -131,7 +131,7 @@ Japanese builds, whose NPCs already speak Japanese:
 
 | Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 | Europe 1.03 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Menu & Subtitles | 5 Western | 5 Western | Japanese | Chinese, Korean | Chinese, Korean | 5 Western |
+| Menu & Subtitles | 5 Western | 5 Western | Japanese, English (port) | Chinese, Korean, English (port) | Chinese, Korean, English (port) | 5 Western |
 | Render resolution, Aspect Ratio | yes | yes (sites found by signature) | yes | yes | yes (sites found by signature) | yes (sites found by signature) |
 | True Ultrawide | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
 | Story and Tutorial Skip Offers | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
@@ -390,8 +390,8 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   | Build | Languages |
   | --- | --- |
   | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
-  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, Portuguese (Brazil) (`japanese`, `brazilian_portuguese`): the executable does not read the system language |
-  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, Portuguese (Brazil) (`traditional_chinese`, `korean`, `brazilian_portuguese`) |
+  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, English, Portuguese (Brazil) (`japanese`, `english`, `brazilian_portuguese`): the executable does not read the system language |
+  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, English, Portuguese (Brazil) (`traditional_chinese`, `korean`, `english`, `brazilian_portuguese`) |
   | CUSA10487 1.03 Europe | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
 
   Portuguese (Brazil) is the port's own translation, not a language of the game, so it is offered on every supported
@@ -434,13 +434,22 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   (`Menu & Subtitles: ... kept in the game's own language`); the rest of the sheet is translated. See
   `localization/pt-BR/README.md`.
 
+  English on the Japanese and Asia/Hong Kong builds is provided by the PC port; the PS4 releases have none. The port
+  ships the game's English text as its own corpus (`localization/en/sheets`, embedded at build time) and serves it over
+  the Japanese slot or the Traditional Chinese one, like Portuguese (Brazil): the same `english` key plays native English
+  on the USA and European builds and the built-in English on the others. A record that cannot map safely keeps the
+  slot's own text, as does one whose English uses a character the slot never shows (Japan 11,970 and Asia/Hong Kong
+  1.00 11,686 of 11,992 records). No other game or setup is needed. English uses the regional font as it is (no composed
+  letters) and no visual patch: the regional labels (NOW LOADING, YES, NO...) are already English. Exit Game and the
+  DefaultBone character messages follow the served text. See `localization/en/README.md`.
+
   For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
   is never offered: the 1.01 update's archive has no Russian slot, only Russian text in its US slot, which the install
   does not take over (see USA builds). `DRACRO_EU.CPK` has a UK slot beside the US one, as `DRACRO_US.CPK` does; it is
   not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
   language the installed game does not have is replaced by its first one, and the log says so
-  (`Settings: saved language English unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
+  (`Settings: saved language Korean unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). USA, Asia and Hong Kong and European builds; on the builds
   whose hooks are found by signature the option appears only while the installed `DRACRO.CPK` holds the sound table and

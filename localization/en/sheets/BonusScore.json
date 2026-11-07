@@ -1,0 +1,72 @@
+{
+ "sheet": "BonusScore",
+ "records": 13,
+ "sha256": "b99fe71e2f9f52fbdc7cda6107f8f1d09a02ab66654f3f9ac9a6c6011cda585d",
+ "entries": [
+  {
+   "index": 0,
+   "source_sha256": "b3ab341f20c1fcf34d8dded12e1fc1b592b5241ca1f9c3553dd3d8629bf945fd",
+   "en": "Defeat boss without dying"
+  },
+  {
+   "index": 1,
+   "source_sha256": "addda7a8415cda099f6a7c48eb90985de0496a7e1b69d13e415c2b3bf288786f",
+   "en": "Defeat boss without damage"
+  },
+  {
+   "index": 2,
+   "source_sha256": "4127bcb62efe646302b955c8c06810b8cf7eff55955144cd9c8efd2dbe8c8552",
+   "en": "Beat round unbowed"
+  },
+  {
+   "index": 3,
+   "source_sha256": "3e5e5866573b3c8b72776cf7e3920ed45102191ed297e683e3f9e0eeb514c920",
+   "en": "Beat round unharmed"
+  },
+  {
+   "index": 4,
+   "source_sha256": "7e0b4fb017d757d99f694bfa950cba9c54ba0e3a813aad4f8476aa78474cf565",
+   "en": "LP bonus"
+  },
+  {
+   "index": 5,
+   "source_sha256": "3d2863cf08817105fdc2ea782c91d4887709f983924bd92035deedb780245d55",
+   "en": "Remaining HP bonus"
+  },
+  {
+   "index": 6,
+   "source_sha256": "e921d239f2df8e11904682e0b5781386cdeac0b3a1d3d9506ede9e0a481dd362",
+   "en": "Ally revival bonus"
+  },
+  {
+   "index": 7,
+   "source_sha256": "b0009c1ff34e6370e3ebb4d8707beb96a041262dbbe23fdae525f3c957573413",
+   "en": "Foes defeated bonus"
+  },
+  {
+   "index": 8,
+   "source_sha256": "87dba3df85b37f0160bd6f6d667aef7907d9877dd863a77ff4e216aab7e478e0",
+   "en": "Food gathered bonus"
+  },
+  {
+   "index": 9,
+   "source_sha256": "b152dc2f2a392bf0826d3101445bb25400ce7774c379095d039be75f3df15b74",
+   "en": "Coins pocketed bonus"
+  },
+  {
+   "index": 10,
+   "source_sha256": "278eb6838c969c34864f9c7264b23b5a82e27b0b0ed1e1e54e9d0f2a454d3b81",
+   "en": "Collected 100+ coins"
+  },
+  {
+   "index": 11,
+   "source_sha256": "b1cc4a4b9cf76f7f1369a872edef7ed8edefe3c2903b6b9624015df81ef981ce",
+   "en": "Didn't pick up any items"
+  },
+  {
+   "index": 12,
+   "source_sha256": "d838869246d1bb502c005c1d3e8fe10bb9e9c88ad75de34db9c7f311613a11c1",
+   "en": "Unafflicted by status effect"
+  }
+ ]
+}

@@ -30,7 +30,7 @@
 - **Local PS4 trophies**, offline on this PC, shown on the launcher's Trophies page
 - **SMAA** anti-aliasing and **anisotropic texture filtering** (Game, 2x, 4x, 8x, 16x)
 - **AMD FidelityFX Super Resolution 1** upscaling and **RCAS sharpening** with a strength setting
-- **Menu & Subtitles language**: English, French, German, Italian or Spanish on the USA and European builds; Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build; Brazilian Portuguese on every supported build
+- **Menu & Subtitles language**: English, French, German, Italian or Spanish on the USA and European builds; Japanese on the Japanese builds; Traditional Chinese or Korean on the Asia/Hong Kong build; English on the Japanese and Asia/Hong Kong builds (built into the port); Brazilian Portuguese on every supported build
 - **Story Skip Offer** and **Tutorial Skip Offer**: the game's own offers to skip the tutorial and start a new character in the second half of the story
 - **Unlock Gallery**: an option to see every Gallery picture without changing your save
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time, **F2**)
@@ -209,7 +209,7 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 - **Texture filtering**: Game, 2x, 4x, 8x or 16x
 
 ### Gameplay
-- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish. The Japanese builds (CUSA07001) show Japanese, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. The European build (CUSA10487) offers English (default), French, German, Italian and Spanish. Every build also offers Portuguese (Brazil), the port's translation, which additionally translates the launcher, the F1 options, the F10 overlay and the online screens. Voices are chosen inside the game.
+- **Menu & Subtitles**: the language of the game's menus and subtitles: English (default), French, German, Italian or Spanish. The Japanese builds (CUSA07001) show Japanese, and the Asia/Hong Kong build (CUSA10209) offers Traditional Chinese (default) and Korean instead. The European build (CUSA10487) offers English (default), French, German, Italian and Spanish. Every build also offers Portuguese (Brazil), the port's translation, which additionally translates the launcher, the F1 options, the F10 overlay and the online screens. On the Japanese and Asia/Hong Kong builds English is always listed and is provided by the PC port itself, with no other game or setup needed. The saved `english` choice plays native English on the USA and European builds and the port's English on the others. Voices are chosen inside the game.
 - **Japanese NPC Voices**: Off by default. On uses the Japanese voice banks already in the USA installation for town and event NPCs. USA and Asia and Hong Kong builds (the Japanese builds already use them); narrator and player-character choices are unchanged
 - **Skip Intro** (Off by default): skips the startup logo and goes straight to the title screen. Applies at the next game start
 - **Frame rate**: 30, 60 (Original, default), 90, 120, 144, 165, 240 or Unlimited frames per second reaching the window. The game makes 60 new frames a second whatever the setting, so game speed does not change and the frames above 60 show the last frame again (no interpolation)
