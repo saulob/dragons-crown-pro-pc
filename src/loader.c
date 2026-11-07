@@ -697,6 +697,8 @@ int main(int argc, char **argv) {
     sigemptyset(&dump.sa_mask); sigaction(SIGUSR2, &dump, NULL);
     struct sigaction alarm_action = {0}; alarm_action.sa_sigaction = watchdog; alarm_action.sa_flags = SA_SIGINFO;
     sigemptyset(&alarm_action.sa_mask); sigaction(SIGALRM, &alarm_action, NULL);
+    /* A peer that closes a socket (the lobby's TLS stream, a router's UPnP answer) makes the write fail, not the game. */
+    signal(SIGPIPE, SIG_IGN);
     alarm(timeout_seconds); /* 0 disables the watchdog */
 #endif
     FILE *f = fopen(boot, "rb");

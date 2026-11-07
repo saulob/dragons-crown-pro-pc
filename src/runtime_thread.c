@@ -382,10 +382,23 @@ static ABI int32_t thread_detach(GuestThread *t) {
 #endif
     return 0;
 }
+static int thread_running(GuestThread *t) {
+    int running=0;
+    pthread_mutex_lock(&lock);
+    for (GuestThread *x=threads;x;x=x->next) if (x==t) { running=!x->finished; break; }
+    pthread_mutex_unlock(&lock);
+    return running;
+}
+/* No cancellation points: the thread the game cancels on leaving the Inn (an ally loader) has always finished by then
+ * on a fast host; a slower one waits up to 2 s for it, then lets it run on. */
 static ABI int32_t thread_cancel(GuestThread *t) {
-    if (!find_thread(t) || t->finished) return ERR(3);
-    fputs("STOP: scePthreadCancel of a running thread is not supported\n",stderr);
-    exit(21);
+    if (!thread_running(t)) return ERR(3);
+    for (int i=0;i<200;++i) {
+        usleep(10000);
+        if (!thread_running(t)) return 0;
+    }
+    puts("Runtime: scePthreadCancel: the thread is still running, it is left to finish");
+    return 0;
 }
 static ABI __attribute__((noreturn)) void thread_exit(void *value) {
     GuestThread *t=runtime_thread_current();

@@ -171,13 +171,19 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint64
            exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
     return 0;
 }
+/* A failed mount is logged too: a save the game could not write is otherwise invisible. */
+static int32_t mount_logged(int32_t user, const char *title, const DirName *dir, uint64_t blocks, uint32_t mode, MountResult *result) {
+    int32_t r=mount(user,title,dir,blocks,mode,result);
+    if (r) printf("Runtime: save data '%.32s' mount failed (%#x, mode %#x)\n",dir ? dir->data : "?",(unsigned)r,mode);
+    return r;
+}
 static ABI int32_t save_mount(const Mount1 *m, MountResult *result) {
     if (!m) return ERR_PARAMETER;
-    return mount(m->user,m->title ? m->title->data : NULL,m->dir,m->blocks,m->mode,result);
+    return mount_logged(m->user,m->title ? m->title->data : NULL,m->dir,m->blocks,m->mode,result);
 }
 static ABI int32_t save_mount2(const Mount2 *m, MountResult *result) {
     if (!m) return ERR_PARAMETER;
-    return mount(m->user,NULL,m->dir,m->blocks,m->mode,result);
+    return mount_logged(m->user,NULL,m->dir,m->blocks,m->mode,result);
 }
 static int slot_of(const MountPoint *point) {
     if (!point || strncmp(point->data,"/savedata",9)) return -1;
