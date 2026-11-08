@@ -41,12 +41,16 @@ static const uint8_t *page_at(const uint8_t *image, size_t size, uint64_t value)
     return image + offset;
 }
 
+const uint8_t *font_glyph_page(const uint8_t *image, size_t size, const uint8_t *pages, unsigned high) {
+    return pages && high < PAGE_COUNT ? page_at(image, size, read_u64(pages + (size_t)high * 8)) : NULL;
+}
+
 static int has_glyph(const uint8_t *image, size_t size, const uint8_t *pages, uint16_t code) {
-    const uint8_t *page = page_at(image, size, read_u64(pages + (size_t)(code >> 8) * 8));
+    const uint8_t *page = font_glyph_page(image, size, pages, code >> 8);
     return page && read_u16(page + (size_t)(code & 0xff) * PAGE_ENTRY) != 0;
 }
 
-const uint8_t *latin_glyphs_locate(const uint8_t *image, size_t size, uint16_t probe) {
+const uint8_t *font_glyph_pages(const uint8_t *image, size_t size, uint16_t probe) {
     const size_t needed = DESCRIPTOR_HEADER + PAGE_COUNT * 8;
     const uint8_t *found = NULL;
     if (!image || size < needed) return NULL;
@@ -55,9 +59,13 @@ const uint8_t *latin_glyphs_locate(const uint8_t *image, size_t size, uint16_t p
         const uint8_t *pages = image + at + DESCRIPTOR_HEADER;
         if (!has_glyph(image, size, pages, 'a') || !has_glyph(image, size, pages, probe)) continue;
         if (found) return NULL;
-        found = page_at(image, size, read_u64(pages));
+        found = pages;
     }
     return found;
+}
+
+const uint8_t *latin_glyphs_locate(const uint8_t *image, size_t size, uint16_t probe) {
+    return font_glyph_page(image, size, font_glyph_pages(image, size, probe), 0);
 }
 
 int latin_glyphs_fit(const uint8_t *image, size_t size, const uint8_t *page) {

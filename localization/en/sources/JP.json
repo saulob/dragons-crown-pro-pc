@@ -2149,7 +2149,7 @@
     {"sheet": "RoundContinue", "records": 4, "sha256": "d685d8d3928b93bb8ab7ea7f06e856e51861be8460ec06ff5989de8013b05fe9", "excluded": [], "hashes": [
 
     ]},
-    {"sheet": "SystemMsg", "records": 1611, "sha256": "38c9ea64a9c67cd1a762ce03eae9fa3c7eb16ca627d5764e48a4c1be7d9df430", "excluded": [[504, "button"], [510, "button"], [534, "button"], [665, "tag"], [750, "button"], [1257, "button"], [1473, "button"]], "hashes": [
+    {"sheet": "SystemMsg", "records": 1611, "sha256": "38c9ea64a9c67cd1a762ce03eae9fa3c7eb16ca627d5764e48a4c1be7d9df430", "excluded": [[504, "button"], [510, "button"], [534, "button"], [665, "tag"], [750, "button"], [1257, "button"], [1473, "button"]], "dropped_buttons": [1444], "hashes": [
       [14, "8fa64e15b836a314"],
       [15, "83b68ea8c7ad8655"],
       [16, "40f754ac1e1c5ea1"],

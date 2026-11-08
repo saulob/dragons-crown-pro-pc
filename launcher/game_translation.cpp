@@ -8,11 +8,13 @@
 #include <iterator>
 #include <list>
 #include <map>
+#include <set>
 #include <system_error>
 
 #include <zlib.h>
 
 #include "crypto.h"
+#include "cyrillic_font.h"
 #include "dcp_launcher.h"
 #include "fms_sheet.h"
 #include "game_files.h"
@@ -35,6 +37,7 @@ struct OverlayFile {
 std::optional<OverlayFile> second_overlay; // a build whose stage files are not in its slot's archive
 const std::vector<std::string>* served_default_bone = nullptr; // the records of the overlay in use
 std::vector<DcpComposedGlyph> served_composed_glyphs;
+std::vector<CyrillicMetrics> served_cyrillic_metrics;
 
 } // namespace
 
@@ -48,6 +51,12 @@ extern const TranslationFile kEnTranslation[];
 extern const size_t kEnTranslationCount;
 extern const TranslationFile kEnSources[];
 extern const size_t kEnSourcesCount;
+extern const TranslationFile kRuTranslation[];
+extern const size_t kRuTranslationCount;
+extern const TranslationFile kRuSources[];
+extern const size_t kRuSourcesCount;
+extern const TranslationFile kRuFont[];
+extern const size_t kRuFontCount;
 
 namespace {
 
@@ -209,9 +218,36 @@ bool ApplySourceDelta(SourceMap& map, const TranslationFile& file) {
     return true;
 }
 
+using DroppedButtons = std::map<std::string, std::set<size_t>, std::less<>>;
+
+std::optional<DroppedButtons> ParseDroppedButtons(const TranslationFile& file) {
+    const std::optional<net::Json> json =
+        net::Json::parse(std::string_view(reinterpret_cast<const char*>(file.data), file.size), 8);
+    if (!json || !(*json)["sheets"].is_array()) return std::nullopt;
+    DroppedButtons dropped;
+    for (const net::Json& sheet : (*json)["sheets"].items()) {
+        for (const net::Json& index : sheet["dropped_buttons"].items()) {
+            if (index.type() != net::Json::Type::kInt || index.as_int() < 0) return std::nullopt;
+            dropped[sheet["sheet"].as_string()].insert(size_t(index.as_int()));
+        }
+    }
+    return dropped;
+}
+
+std::string WithoutButtons(std::string_view text) {
+    std::string out;
+    for (size_t i = 0; i < text.size();) {
+        const size_t end = text.substr(i, 3) == "@#(" ? ClosingParen(text, i + 2) : std::string_view::npos;
+        if (end == std::string_view::npos) out += text[i++];
+        else i = end;
+    }
+    return out;
+}
+
 // Why the record cannot show `text`; empty when it can. `mapped`: the slot's source map, for a slot not in English.
 std::string RecordProblem(std::string_view sheet, const std::vector<std::string>& records, size_t index,
-                          std::string_view source_sha256, std::string_view text, const SourceHashes* mapped) {
+                          std::string_view source_sha256, std::string_view text, const SourceHashes* mapped,
+                          bool same_arguments, bool buttons_dropped) {
     if (index >= records.size()) return "no such record";
     if (sheet == "SystemMsg" && index >= kFirstTagKey && index <= kLastTagKey) return "a tag key, never translated";
     if (mapped) {
@@ -225,8 +261,10 @@ std::string RecordProblem(std::string_view sheet, const std::vector<std::string>
     if (std::any_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 && c != '\n'; })) {
         return "a control character";
     }
-    if (mapped) {
-        if (!SameArguments(records[index], text)) return "printf or button sequences differ from the source";
+    if (mapped || same_arguments) {
+        if (!SameArguments(buttons_dropped ? WithoutButtons(records[index]) : records[index], text)) {
+            return "printf or button sequences differ from the source";
+        }
     } else if (!SameControlTokens(records[index], text)) {
         return "control sequences differ from the English";
     }
@@ -268,6 +306,9 @@ struct SheetSources {
     const SourceMap* slot = nullptr; // the slot's records by index
     const SourceMap* text = nullptr; // the hash each entry's text must have
     std::string_view text_key;
+    bool same_arguments = false;
+    const DroppedButtons* dropped_buttons = nullptr;
+    bool kana = false; // Russian written as the kana the font draws it at, but where the system font draws the record
 };
 
 std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string_view suffix, const TranslationFile& file,
@@ -315,7 +356,10 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
         }
         for (const size_t index : indices) {
             ++result.corpus;
-            std::string why = RecordProblem(sheet, native, index, hash.as_string(), text.as_string(), mapped);
+            const auto dropped = sources.dropped_buttons ? sources.dropped_buttons->find(sheet) : std::optional<DroppedButtons::const_iterator>{};
+            const bool buttons_dropped = dropped && *dropped != sources.dropped_buttons->end() && (*dropped)->second.count(index);
+            std::string why = RecordProblem(sheet, native, index, hash.as_string(), text.as_string(), mapped,
+                                            sources.same_arguments, buttons_dropped);
             if (why.empty() && sources.text && !TextHashMatches(*sources.text, sheet, index, text.as_string())) {
                 why = "not the expected text";
             }
@@ -327,7 +371,8 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
             }
             done[index] = true;
             ++translated;
-            parsed->records[index] = fold ? FoldLatinLetters(text.as_string()) : text.as_string();
+            const std::string served = fold ? FoldLatinLetters(text.as_string()) : text.as_string();
+            parsed->records[index] = sources.kana && !item["system_font"].as_bool() ? CyrillicKana(served) : served;
         }
     }
     if (!translated) return std::nullopt;
@@ -342,6 +387,11 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
 
 std::span<const TranslationFile> PtBrTranslationFiles() { return {kPtBrTranslation, kPtBrTranslationCount}; }
 std::span<const TranslationFile> EnglishTranslationFiles() { return {kEnTranslation, kEnTranslationCount}; }
+std::span<const TranslationFile> RussianTranslationFiles() { return {kRuTranslation, kRuTranslationCount}; }
+
+const TranslationFile* RussianGlyphs() {
+    return kRuFontCount == 1 ? &kRuFont[0] : nullptr;
+}
 std::span<const TranslationFile> PtBrVisualPatches() { return {kPtBrVisualPatches, kPtBrVisualPatchesCount}; }
 
 std::vector<TranslationFile> PtBrVisualPatches(VisualSet set) {
@@ -352,21 +402,21 @@ std::vector<TranslationFile> PtBrVisualPatches(VisualSet set) {
     return chosen;
 }
 
-const TranslationFile* PtBrSource(std::string_view source) {
+namespace {
+
+const TranslationFile* SourceIn(std::span<const TranslationFile> files, std::string_view source) {
     const std::string name = std::string(source) + ".json";
-    for (const TranslationFile& file : std::span<const TranslationFile>(kPtBrSources, kPtBrSourcesCount)) {
+    for (const TranslationFile& file : files) {
         if (file.name == name) return &file;
     }
     return nullptr;
 }
 
-const TranslationFile* EnglishSource(std::string_view source) {
-    const std::string name = std::string(source) + ".json";
-    for (const TranslationFile& file : std::span<const TranslationFile>(kEnSources, kEnSourcesCount)) {
-        if (file.name == name) return &file;
-    }
-    return nullptr;
-}
+} // namespace
+
+const TranslationFile* PtBrSource(std::string_view source) { return SourceIn({kPtBrSources, kPtBrSourcesCount}, source); }
+const TranslationFile* EnglishSource(std::string_view source) { return SourceIn({kEnSources, kEnSourcesCount}, source); }
+const TranslationFile* RussianSource(std::string_view source) { return SourceIn({kRuSources, kRuSourcesCount}, source); }
 
 std::string FoldLatinLetters(std::string_view text) {
     std::string out;
@@ -601,6 +651,32 @@ std::optional<std::vector<uint8_t>> CompletedFont(const CpkArchive& archive, con
     return font;
 }
 
+// The main font with the Russian letters, or why not: without them the text would show nothing.
+std::optional<std::vector<uint8_t>> FontWithCyrillic(const CpkArchive& archive, const TranslationRecipe& recipe, std::string& why,
+                                                     std::vector<CyrillicMetrics>& metrics) {
+    if (!recipe.glyph_table) {
+        why = "the executable's glyph table cannot take the letters";
+        return std::nullopt;
+    }
+    const std::optional<std::vector<CyrillicGlyph>> glyphs =
+        recipe.cyrillic_glyphs ? ParseCyrillicGlyphs({recipe.cyrillic_glyphs->data, recipe.cyrillic_glyphs->size})
+                               : std::nullopt;
+    if (!glyphs) {
+        why = "the letters are missing from the launcher";
+        return std::nullopt;
+    }
+    const CpkEntry* entry = archive.Find(recipe.cyrillic->entry);
+    std::vector<uint8_t> font = entry ? archive.Read(*entry, &why) : std::vector<uint8_t>();
+    if (font.empty()) {
+        if (why.empty()) why = "not in the archive";
+        return std::nullopt;
+    }
+    if (!ComposeCyrillicFont(font, *glyphs, CyrillicCells(recipe.cyrillic->cells), &why)) return std::nullopt;
+    metrics.clear();
+    for (const CyrillicGlyph& glyph : *glyphs) metrics.push_back(glyph.metrics);
+    return font;
+}
+
 } // namespace
 
 ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, std::string_view suffix,
@@ -629,16 +705,34 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, c
             result.error = std::string(recipe.source->name) + ": not a source map";
             return result;
         }
-        if (recipe.source_delta && !ApplySourceDelta(*source, *recipe.source_delta)) {
-            result.error = std::string(recipe.source_delta->name) + ": not a source map delta";
-            return result;
+        for (const TranslationFile* delta : {recipe.source_delta, recipe.own_delta}) {
+            if (delta && !ApplySourceDelta(*source, *delta)) {
+                result.error = std::string(delta->name) + ": not a source map delta";
+                return result;
+            }
         }
     }
     if (recipe.text_hashes && !(text_hashes = ParseSourceMap(*recipe.text_hashes))) {
         result.error = std::string(recipe.text_hashes->name) + ": not a hash map";
         return result;
     }
-    const SheetSources sources{source ? &*source : nullptr, text_hashes ? &*text_hashes : nullptr, recipe.text_key};
+    std::optional<DroppedButtons> dropped_buttons;
+    if (recipe.button_overrides && !(dropped_buttons = ParseDroppedButtons(*recipe.button_overrides))) {
+        result.error = std::string(recipe.button_overrides->name) + ": not a source map delta";
+        return result;
+    }
+    const bool kana = recipe.cyrillic && recipe.cyrillic->cells == CYRILLIC_CELLS_KANA;
+    const SheetSources sources{source ? &*source : nullptr, text_hashes ? &*text_hashes : nullptr, recipe.text_key,
+                               recipe.same_arguments, dropped_buttons ? &*dropped_buttons : nullptr, kana};
+    if (recipe.cyrillic) {
+        std::string why;
+        std::optional<std::vector<uint8_t>> font = FontWithCyrillic(archive, recipe, why, result.cyrillic_metrics);
+        if (!font) {
+            result.error = std::string(recipe.cyrillic->entry) + ": " + why;
+            return result;
+        }
+        sheets.emplace_back(std::string(recipe.cyrillic->entry), std::move(*font));
+    }
     bool fold = false;
     if (!recipe.font_entry.empty()) {
         std::string why;
@@ -712,6 +806,23 @@ extern "C" const DcpComposedGlyph* dcp_text_composed_glyphs(size_t* count, int* 
     return *count ? dcp::served_composed_glyphs.data() : nullptr;
 }
 
+extern "C" const CyrillicMetrics* dcp_text_cyrillic_metrics(size_t* count) {
+    *count = dcp::served_cyrillic_metrics.size();
+    return *count ? dcp::served_cyrillic_metrics.data() : nullptr;
+}
+
+extern "C" int dcp_text_cyrillic_cells(const char* settings_file, const char* image_dir, const char* app0, unsigned* probe) {
+    using namespace dcp;
+    *probe = 0;
+    const GameBuild* build = BuildOfImageDir(image_dir);
+    if (!build) return CYRILLIC_CELLS_NONE;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    if (ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).translation != kPortRussian) return CYRILLIC_CELLS_NONE;
+    *probe = build->translation->cyrillic.probe;
+    return build->translation->cyrillic.cells;
+}
+
 extern "C" const char* dcp_text_stage_overlay(uint64_t* length, DcpFilePatch** patches, size_t* count) {
     if (!dcp::second_overlay) return nullptr;
     *length = dcp::second_overlay->length;
@@ -747,6 +858,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     second_overlay.reset();
     served_default_bone = nullptr;
     served_composed_glyphs.clear();
+    served_cyrillic_metrics.clear();
     if (language.translation.empty() || !build) return nullptr;
     const TranslationProfile& profile = *build->translation;
     const std::string name(language.name);
@@ -766,6 +878,18 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
         recipe.text_hashes = EnglishSource("US");
         recipe.source = PtBrSource(profile.source);
         recipe.source_delta = EnglishSource(profile.source);
+        recipe.button_overrides = recipe.source_delta;
+    } else if (language.translation == kPortRussian) {
+        recipe.files = RussianTranslationFiles();
+        recipe.text_key = "ru";
+        recipe.same_arguments = true;
+        if (!profile.source.empty()) {
+            recipe.source = PtBrSource(profile.source);
+            recipe.source_delta = EnglishSource(profile.source);
+            recipe.own_delta = RussianSource(profile.source);
+        }
+        recipe.cyrillic = &profile.cyrillic;
+        recipe.cyrillic_glyphs = RussianGlyphs();
     }
     recipe.mark_archive = folder / kSharedArchive;
     recipe.glyph_table = glyph_table != 0;
@@ -800,6 +924,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
                std::to_string(translation.visuals) + " visual replacements, the others in " + native;
     }
     if (translation.latin_glyphs) text += "; accented letters composed from the installed font";
+    if (!translation.cyrillic_metrics.empty()) text += "; Cyrillic letters drawn into the font";
     for (const std::string& skipped : translation.visual_problems) std::printf("Menu & Subtitles: PT-BR visual skipped: %s\n", skipped.c_str());
     if (translation.refused || translation.folded) {
         const size_t refused = translation.refused;
@@ -809,8 +934,9 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     }
     std::snprintf(message, message_size, "%s", text.c_str());
     if (!translation.error.empty() || !translation.overlay) return nullptr;
-    if (glyphs_composed) *glyphs_composed = translation.latin_glyphs;
+    if (glyphs_composed) *glyphs_composed = translation.latin_glyphs || !translation.cyrillic_metrics.empty();
     served_default_bone = &translation.default_bone;
+    served_cyrillic_metrics = translation.cyrillic_metrics;
     if (translation.latin_glyphs) {
         for (const LatinCell& cell : translation.latin_cells) {
             served_composed_glyphs.push_back({cell.code, uint8_t(cell.base), cell.alpha.data(), cell.base_alpha.data()});

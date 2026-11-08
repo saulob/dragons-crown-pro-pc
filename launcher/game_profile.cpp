@@ -2,6 +2,7 @@
 
 #include <string_view>
 
+#include "cyrillic_glyphs.h"
 #include "localization/ui_text.h"
 
 namespace dcp {
@@ -110,20 +111,28 @@ constexpr TextLanguage kJapaneseLanguages[] = {{"japanese", "Japanese", 0, {}}};
 constexpr TextLanguage kWesternOffered[] = {
     {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
     {"italian", "Italian", 5, "IT"}, {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
-    {"spanish", "Spanish", 3, "ES"},
+    {kRussianKey, "Russian", 1, "US", kPortRussian}, {"spanish", "Spanish", 3, "ES"},
 };
 // English shares the native key: a build with its own English slot plays that, the others the port's own text.
 constexpr TextLanguage kAsiaOffered[] = {kAsiaLanguages[0], kAsiaLanguages[1], {kEnglishKey, "English", 10, "CT", kPortEnglish},
-                                         {kPortugueseBrazilKey, "Portuguese (Brazil)", 10, "CT", "pt-BR"}};
+                                         {kPortugueseBrazilKey, "Portuguese (Brazil)", 10, "CT", "pt-BR"},
+                                         {kRussianKey, "Russian", 10, "CT", kPortRussian}};
 constexpr TextLanguage kJapaneseOffered[] = {kJapaneseLanguages[0], {kEnglishKey, "English", 0, {}, kPortEnglish},
-                                             {kPortugueseBrazilKey, "Portuguese (Brazil)", 0, {}, "pt-BR"}};
+                                             {kPortugueseBrazilKey, "Portuguese (Brazil)", 0, {}, "pt-BR"},
+                                             {kRussianKey, "Russian", 0, {}, kPortRussian}};
 
-constexpr TranslationProfile kUsaTranslation = {kWesternOffered, "DRACRO_US.CPK", {}, {}, 0, "DRACRO_US.CPK", VisualSet::kEnglishSlot};
-constexpr TranslationProfile kEuropeTranslation = {kWesternOffered, "DRACRO_EU.CPK", {}, {}, 0, "DRACRO_EU.CPK", VisualSet::kEnglishSlot};
+// The USA and European fonts take the Russian letters where the fan package draws them, over kana; U+3060 is one of them.
+constexpr CyrillicFont kKanaCyrillic = {"other/fontUTF16.ftx", 0x3060, CYRILLIC_CELLS_KANA};
+constexpr TranslationProfile kUsaTranslation = {kWesternOffered, "DRACRO_US.CPK", {}, {}, 0, "DRACRO_US.CPK",
+                                                VisualSet::kEnglishSlot, kKanaCyrillic};
+constexpr TranslationProfile kEuropeTranslation = {kWesternOffered, "DRACRO_EU.CPK", {}, {}, 0, "DRACRO_EU.CPK",
+                                                   VisualSet::kEnglishSlot, kKanaCyrillic};
 constexpr TranslationProfile kJapanTranslation = {kJapaneseOffered, "DRACRO.CPK", "JP", "other/fontUTF16.ftx", 0x4F53,
-                                                  "DRACRO.CPK", VisualSet::kBaseStage};
+                                                  "DRACRO.CPK", VisualSet::kBaseStage,
+                                                  {"other/fontUTF16.ftx", 0x4F53, CYRILLIC_CELLS_FREE}};
 constexpr TranslationProfile kAsiaTranslation = {kAsiaOffered, "DRACRO_CK.CPK", "CT", "other/CT_fontUTF16.ftx", 0x9AD4,
-                                                 "DRACRO.CPK", VisualSet::kBaseStage};
+                                                 "DRACRO.CPK", VisualSet::kBaseStage,
+                                                 {"other/CT_fontUTF16.ftx", 0x9AD4, CYRILLIC_CELLS_FREE}};
 
 constexpr GameBuild kGameBuilds[] = {
     {

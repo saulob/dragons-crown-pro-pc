@@ -32,7 +32,12 @@ extern const LatinGlyph latin_glyphs[LATIN_GLYPH_COUNT];
 #define LATIN_ATLAS_COLUMNS 60
 #define LATIN_FIRST_CELL (58 * LATIN_ATLAS_COLUMNS)
 
-/* The first code page of the main font holding `probe`, a character only that font has; NULL unless exactly one does. */
+/* The 256 code page pointers of the main font holding `probe`, a character only that font has; NULL unless exactly one
+ * does. A page is 256 entries of 8 bytes: the atlas cell (u16), then the glyph's width and spacing bytes. */
+const uint8_t *font_glyph_pages(const uint8_t *image, size_t size, uint16_t probe);
+/* Code page `high` of that font; NULL when the font has none. */
+const uint8_t *font_glyph_page(const uint8_t *image, size_t size, const uint8_t *pages, unsigned high);
+/* Its first code page. */
 const uint8_t *latin_glyphs_locate(const uint8_t *image, size_t size, uint16_t probe);
 
 /* 0 when a base letter is missing or a slot holds a real glyph. The Japanese updates list these letters at cells of the

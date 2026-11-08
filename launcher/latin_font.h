@@ -3,12 +3,15 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace dcp {
 
 inline constexpr int kLatinFontCellPixels = 68;
+inline constexpr int kFontCellBlocks = kLatinFontCellPixels / 4; // BC7 blocks along a cell's side
 
 // A composed letter and its base letter as the atlas holds them: alpha, kLatinFontCellPixels square.
 struct LatinCell {
@@ -25,5 +28,10 @@ bool ComposeLatinFont(std::vector<uint8_t>& font, const std::vector<uint8_t>& ma
 
 // The alpha of `cell`, kLatinFontCellPixels square, for tests.
 bool LatinFontCellAlpha(const std::vector<uint8_t>& font, int cell, std::vector<uint8_t>& alpha);
+
+// The highest alpha of a main font atlas cell; nothing when `font` is not such an atlas or a block's format is unknown.
+std::optional<int> FontCellInk(std::vector<uint8_t>& font, int cell);
+// Replaces the cell with `blocks`, its kFontCellBlocks x kFontCellBlocks BC7 blocks row by row.
+bool WriteFontCell(std::vector<uint8_t>& font, int cell, std::span<const uint8_t> blocks);
 
 } // namespace dcp

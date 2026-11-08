@@ -27,6 +27,8 @@ struct PackageLayer {
 inline constexpr std::string_view kPortugueseBrazilKey = "brazilian_portuguese";
 inline constexpr std::string_view kEnglishKey = "english";
 inline constexpr std::string_view kPortEnglish = "en"; // TextLanguage::translation of the port's English text
+inline constexpr std::string_view kRussianKey = "russian";
+inline constexpr std::string_view kPortRussian = "ru";
 
 // A system language the game can be told for its menus and subtitles; a build lists the ones its executable maps.
 struct TextLanguage {
@@ -40,6 +42,13 @@ struct TextLanguage {
 // Which of a translation's visual patches a build takes: the USA packs' *_Add atlases, or the base stage files.
 enum class VisualSet { kEnglishSlot, kBaseStage };
 
+// Where the build's main font takes the Russian letters (src/cyrillic_glyphs.h).
+struct CyrillicFont {
+    std::string_view entry; // the main font in the profile's archive
+    uint16_t probe;         // a character only that font has in its executable
+    int cells;              // CyrillicCells
+};
+
 // How the port's translation is served on a build. One profile serves every build sharing its archive and sheets.
 struct TranslationProfile {
     std::span<const TextLanguage> offered; // the native languages and the port's, as the launcher lists them
@@ -49,6 +58,7 @@ struct TranslationProfile {
     uint16_t font_probe;                   // a character only that font has in its executable
     const char* visual_archive;            // the archive holding the stage files the visual patches target
     VisualSet visuals;
+    CyrillicFont cyrillic;
 };
 
 struct GameBuild {

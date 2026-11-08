@@ -459,7 +459,8 @@ target_compile_options(dcp-ultrawide-sides-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the title's four-row menu with Exit Game: text, hooks and install checks on synthetic images
 # (tools/test.ps1); not part of the default build.
-add_executable(dcp-exit-game-tests EXCLUDE_FROM_ALL tests/exit_game_tests.c src/guest_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c)
+add_executable(dcp-exit-game-tests EXCLUDE_FROM_ALL tests/exit_game_tests.c src/guest_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c
+    src/cyrillic_glyphs.c src/latin_glyphs.c)
 target_include_directories(dcp-exit-game-tests PRIVATE src)
 target_compile_definitions(dcp-exit-game-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-exit-game-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)

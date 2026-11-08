@@ -106,6 +106,11 @@ PLAYING
 - English on the Japanese and Asia/Hong Kong builds is provided by the PC
   port, not by the PS4 release. It is always listed, needs no other game or
   setup, and uses the same Menu & Subtitles selector as Portuguese (Brazil).
+- Russian covers game text, menus, subtitles and character messages on every
+  supported build. It is based on the fan translation by Exclusive Studio
+  (https://ex-s.ru/dc.html), with PS4 porting work by AlchemistLab; it is not
+  an official translation. No fan package is needed. The launcher, the F1
+  options and the F10 overlay stay in English.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start.
 - An experimental AMD water workaround (black areas under characters standing

@@ -24,9 +24,10 @@ typedef struct {
     const char *install_original, *help_original; /* records 387 and 394 of this language's SystemMsg */
     const char *row, *help;                        /* the new records 388 and 394 */
     const char *install_unaccented;                /* record 387 where the font could not show its letters */
+    int kana_cyrillic;                             /* also matched as the USA font's kana (cyrillic_kana_encode) */
 } ExitGameLanguage;
 
-#define EXIT_GAME_LANGUAGE_COUNT 9
+#define EXIT_GAME_LANGUAGE_COUNT 10
 extern const ExitGameLanguage exit_game_languages[EXIT_GAME_LANGUAGE_COUNT];
 
 typedef enum {

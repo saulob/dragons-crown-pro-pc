@@ -1,0 +1,21 @@
+{
+  "source": "JP",
+  "base": "en",
+  "sheets": [
+    {"sheet": "AbilityList", "records": 807, "sha256": "e1b3cc8b09765ac2bb1f619ec1aea60c35ae8d1dfae99a00bfa532bca16e11f6", "excluded": [], "hashes": []},
+    {"sheet": "BonusScore", "records": 13, "sha256": "bf5f3227244851ae5259f69287216e166ec331e86313a738724b40001c7f3fdd", "excluded": [], "hashes": []},
+    {"sheet": "ChallengeQuest", "records": 200, "sha256": "8d535fb5bde3811bb8484296ca834477a7dcaea5e7eef02c5ed069289340a87f", "excluded": [], "hashes": []},
+    {"sheet": "CustomItem", "records": 5238, "sha256": "4ad3ad4ed26e3c09ab5641fbf4f00fd597d96526ed3591b4636d98d547bf9155", "excluded": [], "hashes": []},
+    {"sheet": "DefaultBone", "records": 2049, "sha256": "585f0745cde6ef7054eff4d4f2cf255a096f146db05674ceee4dc37bcc3affb9", "excluded": [], "hashes": []},
+    {"sheet": "EventMsg", "records": 1045, "sha256": "def7add7fb0dd504e920f3c6433235fbd8a4ff1792586329a4fbbb2068b2af49", "excluded": [], "hashes": []},
+    {"sheet": "ItemList", "records": 740, "sha256": "350fc764d17899f9414074723bb84bbd70fd8aef7e27c49ef0a9fac460e750e6", "excluded": [], "hashes": [
+      [674, "fc0021e3f553eae3"]
+    ]},
+    {"sheet": "ObjectParam", "records": 98, "sha256": "7a49e402677f42a63785c586db006a554946f2c71da5302fc5aadf451136c63a", "excluded": [], "hashes": []},
+    {"sheet": "RoundContinue", "records": 4, "sha256": "d685d8d3928b93bb8ab7ea7f06e856e51861be8460ec06ff5989de8013b05fe9", "excluded": [], "hashes": []},
+    {"sheet": "SystemMsg", "records": 1611, "sha256": "38c9ea64a9c67cd1a762ce03eae9fa3c7eb16ca627d5764e48a4c1be7d9df430", "excluded": [[1444, "button"]], "hashes": []},
+    {"sheet": "Temple", "records": 40, "sha256": "57a9f391835bd1a54f58228a70e3fcb123d65b74dbb797c6d3656f4d7a87abb3", "excluded": [], "hashes": []},
+    {"sheet": "TreasureArt", "records": 171, "sha256": "a7905cf4e2eb9b822b826abb586c1f4a5caab3d02fb1205b36d0313d10c0d26a", "excluded": [], "hashes": []},
+    {"sheet": "Tutorial", "records": 98, "sha256": "0198299838f7550fdd9649e5b2c5009c19386a6943c0b58e9bdc0d38a9181bb5", "excluded": [], "hashes": []}
+  ]
+}

@@ -389,10 +389,10 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   | Build | Languages |
   | --- | --- |
-  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
-  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, English, Portuguese (Brazil) (`japanese`, `english`, `brazilian_portuguese`): the executable does not read the system language |
-  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, English, Portuguese (Brazil) (`traditional_chinese`, `korean`, `english`, `brazilian_portuguese`) |
-  | CUSA10487 1.03 Europe | English, French, German, Italian, Portuguese (Brazil), Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `spanish`) |
+  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
+  | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, English, Portuguese (Brazil), Russian (`japanese`, `english`, `brazilian_portuguese`, `russian`): the executable does not read the system language |
+  | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, English, Portuguese (Brazil), Russian (`traditional_chinese`, `korean`, `english`, `brazilian_portuguese`, `russian`) |
+  | CUSA10487 1.03 Europe | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
 
   Portuguese (Brazil) is the port's own translation, not a language of the game, so it is offered on every supported
   build and a saved choice survives switching builds. The game runs in a native slot and the port serves translated
@@ -442,6 +442,20 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   1.00 11,686 of 11,992 records). No other game or setup is needed. English uses the regional font as it is (no composed
   letters) and no visual patch: the regional labels (NOW LOADING, YES, NO...) are already English. Exit Game and the
   DefaultBone character messages follow the served text. See `localization/en/README.md`.
+
+  Russian is the fan translation by Exclusive Studio, with PS4 porting work by AlchemistLab
+  (https://ex-s.ru/dc.html), built into the port from `localization/ru`; no fan package is needed. It is served over
+  the same slot as Portuguese (Brazil) and uses the English and Portuguese record maps on the Japanese and Asia/Hong Kong
+  builds, plus a small delta of its own (USA 9,946, Japan 9,926 and Asia/Hong Kong 1.00 9,791 of 9,946 records). A
+  record whose printf conversions or buttons differ from the slot's keeps the slot's text; tags and colours may differ,
+  as the fan text writes some tag values out. No regional font has Cyrillic, so `launcher/cyrillic_font.cpp` copies the
+  fan font's 66 letters into a copy of the installed font and `src/cyrillic_glyphs.c` lists them in the executable's
+  glyph table: on the USA and European builds over the kana cells the fan package uses, with the text written as those
+  kana, and on the Japanese and Asia/Hong Kong builds as Unicode in blank cells after the Portuguese letters. When the
+  table or the font cannot take them, Russian is not served and the log says why
+  (`Menu & Subtitles: Russian unavailable (...)`). The character messages are drawn by the system font, whose OpenType
+  fonts have Cyrillic in every region. The launcher, the F1 options, the F10 overlay and the online screens stay in
+  English: the fan translation has no text for them. Exit Game shows `Выйти`. See `localization/ru/README.md`.
 
   For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian

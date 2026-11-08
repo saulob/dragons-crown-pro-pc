@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cyrillic_glyphs.h"
 #include "exit_game_hook.h"
 #include "exit_game_text.h"
 #include "title_layout_fixture.h"
@@ -55,7 +56,7 @@ static const char *record_at(const uint8_t *sheet, int index) {
 }
 
 static void test_language_table(void) {
-    CHECK(EXIT_GAME_LANGUAGE_COUNT == 9);
+    CHECK(EXIT_GAME_LANGUAGE_COUNT == 10);
     for (int i = 0; i < EXIT_GAME_LANGUAGE_COUNT; ++i) {
         const ExitGameLanguage *l = &exit_game_languages[i];
         CHECK(l->language && l->install_original && l->help_original && l->row && l->help);
@@ -91,6 +92,31 @@ static void test_text_every_language(void) {
     }
     free(sheet);
     free(original);
+}
+
+/* The USA and European fonts draw Russian at the fan package's kana: the row, written so, is recognised and written so. */
+static void test_text_russian_kana(void) {
+    const ExitGameLanguage *russian = NULL;
+    for (int i = 0; i < EXIT_GAME_LANGUAGE_COUNT; ++i) {
+        if (!strcmp(exit_game_languages[i].key, "russian")) russian = &exit_game_languages[i];
+    }
+    CHECK(russian && russian->kana_cyrillic);
+    if (!russian) return;
+    static char text[4][512];
+    const char *plain[4] = {russian->install_original, russian->help_original, russian->row, russian->help};
+    for (int i = 0; i < 4; ++i) CHECK(cyrillic_kana_encode(plain[i], text[i], sizeof(text[i])) > 0 && strcmp(text[i], plain[i]));
+    CHECK(strlen(text[2]) <= strlen("PlayStation$Store"));
+    const ExitGameLanguage kana = {russian->key, russian->language, text[0], text[1], text[2], text[3], NULL, 0};
+    uint8_t *sheet = malloc(SHEET_BYTES);
+    CHECK(sheet != NULL);
+    if (!sheet) return;
+    const size_t size = build_sheet(sheet, &kana, 0);
+    const ExitGameLanguage *found = NULL;
+    CHECK(exit_game_text_patch(sheet, size, &found) == EXIT_GAME_TEXT_PATCHED && found == russian);
+    CHECK(!strcmp(record_at(sheet, EXIT_GAME_ROW_RECORD), text[2]));
+    CHECK(!strcmp(record_at(sheet, EXIT_GAME_HELP_RECORD), text[3]));
+    CHECK(exit_game_text_patch(sheet, size, NULL) == EXIT_GAME_TEXT_ALREADY);
+    free(sheet);
 }
 
 static void test_text_leaves_other_sheets_alone(void) {
@@ -682,6 +708,7 @@ static void test_install(void) {
 int main(void) {
     test_language_table();
     test_text_every_language();
+    test_text_russian_kana();
     test_text_leaves_other_sheets_alone();
     test_counts();
     test_row_hook();

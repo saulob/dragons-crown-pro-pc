@@ -24,6 +24,8 @@
 #include "cheat_hooks.h"
 #include "controller_prompts.h"
 #include "cpk_patch.h"
+#include "cyrillic_font.h"
+#include "cyrillic_glyphs.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
 #include "exit_game_hook.h"
@@ -188,6 +190,7 @@ enum Feature : size_t {
     kEnglishAvailable,
     kEnglishReady,
     kEnglishPort,
+    kRussian,
     kFeatureCount
 };
 
@@ -195,7 +198,7 @@ const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
     "Story Skip", "Tutorial Skip", "Skip Intro", "Japanese Menu Buttons", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
     "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game", "Unlock Gallery",
-    "Brazilian Portuguese", "English available", "English ready", "Port English supported"};
+    "Brazilian Portuguese", "English available", "English ready", "Port English supported", "Russian"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
 struct Contract {
@@ -331,6 +334,12 @@ bool LauncherOffers(const GameBuild& build, Feature feature) {
     }
     case kEnglishPort:
         return OffersPortEnglish(&build);
+    case kRussian: {
+        const std::span<const TextLanguage> languages = TextLanguagesOf(&build);
+        return std::any_of(languages.begin(), languages.end(), [](const TextLanguage& language) {
+            return language.key == kRussianKey && language.translation == kPortRussian;
+        });
+    }
     default:
         return true;
     }
@@ -362,6 +371,26 @@ bool PortEnglishReady(const GameBuild& build) {
            english.ps4_id == portuguese.ps4_id &&
            std::any_of(std::begin(exit_game_languages), std::end(exit_game_languages),
                        [](const ExitGameLanguage& language) { return language.key == kEnglishKey; });
+}
+
+// The Russian corpus and letters, the slot's maps when it is not English, a main font for the letters, Russian in the
+// same slot as Portuguese, and Exit Game's Russian row in both spellings.
+bool RussianReady(const GameBuild& build) {
+    const TranslationProfile* profile = build.translation;
+    const TranslationFile* glyphs = RussianGlyphs();
+    if (!profile || RussianTranslationFiles().size() != 13 || !glyphs || !ParseCyrillicGlyphs({glyphs->data, glyphs->size})) {
+        return false;
+    }
+    if (!profile->source.empty() &&
+        (!PtBrSource(profile->source) || !EnglishSource(profile->source) || !RussianSource(profile->source))) {
+        return false;
+    }
+    if (profile->cyrillic.entry.empty() || !profile->cyrillic.probe || profile->cyrillic.cells == CYRILLIC_CELLS_NONE) return false;
+    const TextLanguage& russian = ResolveTextLanguage(&build, kRussianKey);
+    const TextLanguage& portuguese = ResolveTextLanguage(&build, kPortugueseBrazilKey);
+    return russian.translation == kPortRussian && russian.suffix == portuguese.suffix && russian.ps4_id == portuguese.ps4_id &&
+           std::any_of(std::begin(exit_game_languages), std::end(exit_game_languages),
+                       [](const ExitGameLanguage& language) { return language.key == kRussianKey && language.kana_cyrillic; });
 }
 
 bool NativeEnglishSlot(const GameBuild& build) {
@@ -413,6 +442,8 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
         return known && (NativeEnglishSlot(build) || PortEnglishReady(build));
     case kEnglishPort:
         return known && PortEnglishReady(build);
+    case kRussian:
+        return known && RussianReady(build);
     default:
         return known;
     }
@@ -455,7 +486,8 @@ void TestContract() {
         const Capabilities caps = CapabilitiesOf(build);
         CHECK(caps.startup_save == row->startup_save);
         CHECK(caps.languages == row->languages);
-        CHECK(caps.translations == (NativeEnglish(*row) ? "brazilian_portuguese" : "english brazilian_portuguese"));
+        CHECK(caps.translations ==
+              (NativeEnglish(*row) ? "brazilian_portuguese russian" : "english brazilian_portuguese russian"));
         CHECK(NativeJapaneseNpcVoices(&build) == row->native_japanese_voices);
         g_scope = "contract";
     }
@@ -624,7 +656,7 @@ void TestDisabledFeatureCannotPass() {
         copy.exit_game = false;
         CHECK(refuses(copy, kExitGame));
         copy = build;
-        const TranslationProfile no_port_language = {build.text_languages, build.translation->archive, {}, {}, 0, build.translation->visual_archive, build.translation->visuals};
+        const TranslationProfile no_port_language = {build.text_languages, build.translation->archive, {}, {}, 0, build.translation->visual_archive, build.translation->visuals, {}};
         copy.translation = &no_port_language;
         CHECK(refuses(copy, kBrazilianPortuguese));
         TranslationProfile no_visuals = *build.translation;
@@ -648,6 +680,12 @@ void TestDisabledFeatureCannotPass() {
         no_probe.font_probe = 0;
         copy.translation = &no_probe;
         CHECK(refuses(copy, kBrazilianPortuguese));
+        copy.translation = &no_port_language;
+        CHECK(refuses(copy, kRussian));
+        TranslationProfile no_cyrillic = *build.translation;
+        no_cyrillic.cyrillic = {};
+        copy.translation = &no_cyrillic;
+        CHECK(refuses(copy, kRussian));
         copy = build;
         copy.unlock_gallery = false;
         CHECK(refuses(copy, kUnlockGallery));
@@ -929,7 +967,7 @@ void TestEuropeBuild() {
           caps.skip_intro == Mapping::kSignature && caps.menu_buttons == Mapping::kSignature &&
           caps.unlock_gallery == Mapping::kSignature && caps.system_type == Mapping::kSignature &&
           caps.lzcnt == Mapping::kSignature && caps.startup_save == Mapping::kTable);
-    CHECK(caps.languages == kWestern && caps.translations == "brazilian_portuguese");
+    CHECK(caps.languages == kWestern && caps.translations == "brazilian_portuguese russian");
     CHECK(europe->features_by_signature && europe->resolution_by_signature && europe->check_prompt_fit);
     CHECK(!Listed(ultrawide_records, *europe));
 
@@ -1474,6 +1512,7 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
     case kBrazilianPortuguese:
     case kEnglishAvailable:
     case kEnglishReady:
+    case kRussian:
         return report.prepared ? Proof::kRealExecutable : Proof::kStatic;
     case kEnglishPort:
         if (NativeEnglish(row)) return Proof::kNotNeeded;
@@ -1526,6 +1565,7 @@ void CheckPreparedEnglish(const GameBuild& build, const fs::path& game) {
     recipe.text_hashes = EnglishSource("US");
     recipe.source = PtBrSource(profile.source);
     recipe.source_delta = EnglishSource(profile.source);
+    recipe.button_overrides = recipe.source_delta;
     const ArchiveTranslation result = TranslateArchive(game / profile.archive, recipe);
     const size_t expected = profile.source == "JP" ? 11971 : 11686;
     CHECK(result.error.empty() && result.overlay && result.corpus == 11992 && result.translated == expected);
@@ -1540,6 +1580,7 @@ void CheckPreparedEnglish(const GameBuild& build, const fs::path& game) {
         if (!sheet || sheet->records.size() != EXIT_GAME_SYSTEM_MSG_COUNT) continue;
         ++system_sheets;
         CHECK(sheet->records[382] == "Start Game" && sheet->records[385] == "Options" && sheet->records[386] == "Gallery");
+        CHECK(sheet->records[1444] == "The ##(COLOR_TOWN_MENU) allows you to select a\ntown facility and quickly move about.");
         std::vector<uint8_t> patched = data;
         const ExitGameLanguage* found = nullptr;
         CHECK(exit_game_text_patch(patched.data(), patched.size(), &found) == EXIT_GAME_TEXT_PATCHED);
@@ -1568,6 +1609,50 @@ void CheckPreparedEnglish(const GameBuild& build, const fs::path& game) {
     CHECK(messages == 2049 - 1635);
 }
 
+// Russian on a real game: the corpus over the slot, the letters drawn into its font, Exit Game's row in its spelling.
+void CheckPreparedRussian(const GameBuild& build, const fs::path& game) {
+    const TranslationProfile& profile = *build.translation;
+    const TextLanguage& language = ResolveTextLanguage(&build, kRussianKey);
+    TranslationRecipe recipe{language.suffix, RussianTranslationFiles()};
+    recipe.text_key = "ru";
+    recipe.same_arguments = true;
+    if (!profile.source.empty()) {
+        recipe.source = PtBrSource(profile.source);
+        recipe.source_delta = EnglishSource(profile.source);
+        recipe.own_delta = RussianSource(profile.source);
+    }
+    recipe.cyrillic = &profile.cyrillic;
+    recipe.cyrillic_glyphs = RussianGlyphs();
+    recipe.glyph_table = true;
+    const ArchiveTranslation result = TranslateArchive(game / profile.archive, recipe);
+    const size_t expected = profile.source.empty() ? 9946 : profile.source == "JP" ? 9926 : 9791;
+    CHECK(result.error.empty() && result.overlay && result.corpus == 9946 && result.translated == expected);
+    CHECK(result.cyrillic_metrics.size() == CYRILLIC_GLYPH_COUNT && !result.latin_glyphs && result.visuals == 0);
+    std::printf("RUSSIAN|%s|%zu of %zu records, %zu kept native\n", build.label, result.translated, result.corpus,
+                result.refused);
+    if (!result.overlay) return;
+    const bool kana = profile.cyrillic.cells == CYRILLIC_CELLS_KANA;
+    size_t system_sheets = 0;
+    for (const auto& [offset, data] : result.overlay->patches) {
+        const std::optional<FmsSheet> sheet = ParseFms(data);
+        if (!sheet || sheet->records.size() != EXIT_GAME_SYSTEM_MSG_COUNT) continue;
+        ++system_sheets;
+        std::vector<uint8_t> patched = data;
+        const ExitGameLanguage* found = nullptr;
+        CHECK(exit_game_text_patch(patched.data(), patched.size(), &found) == EXIT_GAME_TEXT_PATCHED);
+        CHECK(found && found->key == kRussianKey);
+        const std::optional<FmsSheet> after = ParseFms(patched);
+        CHECK(after && after->records[EXIT_GAME_ROW_RECORD] == (kana ? CyrillicKana("Выйти") : std::string("Выйти")));
+    }
+    CHECK(system_sheets == 1);
+    size_t messages = 0;
+    for (size_t index = 1635; index < result.default_bone.size(); ++index) {
+        const std::string& line = result.default_bone[index];
+        messages += line.find('\xD0') != std::string::npos || line.find('\xD1') != std::string::npos;
+    }
+    CHECK(messages == 366);
+}
+
 void CheckPreparedTranslation(const GameBuild& build, const fs::path& game) {
     const TranslationProfile& profile = *build.translation;
     if (PtBrTranslationFiles().empty()) return;
@@ -1588,6 +1673,10 @@ void CheckPreparedTranslation(const GameBuild& build, const fs::path& game) {
         std::memcpy(&count, data.data() + 0x14, 4);
         if (count != EXIT_GAME_SYSTEM_MSG_COUNT) continue;
         ++system_sheets;
+        if (profile.source == "JP") {
+            const std::optional<FmsSheet> served = ParseFms(data);
+            CHECK(served && served->records[1444].find("@#(11)") != std::string::npos);
+        }
         std::vector<uint8_t> sheet = data;
         const ExitGameLanguage* found = nullptr;
         CHECK(exit_game_text_patch(sheet.data(), sheet.size(), &found) == EXIT_GAME_TEXT_PATCHED);
@@ -1671,6 +1760,30 @@ FixtureReport CheckFixtures(const GameBuild& build) {
                 CHECK((cedilla[0] | cedilla[1] << 8) >= LATIN_FIRST_CELL);
                 CHECK(std::memcmp(cedilla + 2, page + 'c' * 8 + 2, 6) == 0);
             }
+        }
+
+        // The executable takes the Russian letters: over the fan package's kana on USA, on a page of their own elsewhere.
+        if (const CyrillicFont& cyrillic = build.translation->cyrillic; cyrillic.cells != CYRILLIC_CELLS_NONE) {
+            std::vector<uint8_t> patched = image.bytes;
+            const CyrillicCells cells = CyrillicCells(cyrillic.cells);
+            const uint8_t* pages = font_glyph_pages(patched.data(), patched.size(), cyrillic.probe);
+            CHECK(pages && cyrillic_glyphs_fit(patched.data(), patched.size(), pages, cells));
+            CyrillicMetrics metrics[CYRILLIC_GLYPH_COUNT];
+            for (int i = 0; i < CYRILLIC_GLYPH_COUNT; ++i) metrics[i] = {uint8_t(30 + i % 20), 2};
+            CHECK(cyrillic_glyphs_install(patched.data(), patched.size(), pages, cells, metrics));
+            for (int i = 0; pages && i < CYRILLIC_GLYPH_COUNT; ++i) {
+                const uint16_t code = cells == CYRILLIC_CELLS_KANA ? cyrillic_kana(i) : cyrillic_letter(i);
+                uint64_t page_address = 0;
+                std::memcpy(&page_address, pages + size_t(code >> 8) * 8, sizeof(page_address));
+                const uint8_t* page = cells == CYRILLIC_CELLS_KANA ? patched.data() + page_address
+                                                                   : reinterpret_cast<const uint8_t*>(uintptr_t(page_address));
+                const uint8_t* entry = page + size_t(code & 0xff) * 8;
+                CHECK((entry[0] | entry[1] << 8) == cyrillic_cell(cells, i) && entry[2] == metrics[i].width && entry[3] == 2);
+            }
+            CHECK(cells == CYRILLIC_CELLS_KANA || !cyrillic_glyphs_fit(patched.data(), patched.size(), pages, cells));
+            const uint8_t* before = latin_glyphs_locate(image.bytes.data(), image.bytes.size(), cyrillic.probe);
+            const uint8_t* after = latin_glyphs_locate(patched.data(), patched.size(), cyrillic.probe);
+            CHECK(before && after && std::memcmp(before, after, 0x80 * 8) == 0);
         }
 
         std::vector<Patched> ranges = PatchedRanges(build, image, located);
@@ -1763,6 +1876,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(check.eboot_sha256 == build.eboot_sha256);
         CHECK(SameLanguages(InstalledTextLanguages(prepared, &build), TextLanguagesOf(&build)));
         CheckPreparedEnglish(build, prepared);
+        CheckPreparedRussian(build, prepared);
         CHECK(build.regional_archive == nullptr || fs::is_regular_file(prepared / build.regional_archive));
         CHECK(!build.japanese_npc_voices || NpcVoiceResourcesPresent(prepared));
         CHECK(JapaneseNpcVoicesOffered(prepared, &build) == build.japanese_npc_voices);

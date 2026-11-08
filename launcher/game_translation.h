@@ -2,8 +2,8 @@
 // game reads them (runtime_file_overlay); the archive on disk is never written. Each entry names the SHA-256 of the
 // record it was translated from; a slot in another language has a source map with the hash of its record at that index.
 // A record whose installed text differs keeps that text. The tracked files are localization/<language>/sheets/<sheet>.json
-// and localization/<language>/sources/<source>.json; scripts/localization/ptbr.py and scripts/localization/english.py
-// write and validate them.
+// and localization/<language>/sources/<source>.json; scripts/localization/ptbr.py, english.py and russian.py write and
+// validate them.
 #pragma once
 
 #include <cstddef>
@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "cpk_patch.h"
+#include "cyrillic_glyphs.h"
 #include "game_profile.h"
 #include "latin_font.h"
 
@@ -27,9 +28,12 @@ struct TranslationFile {
     size_t size;
 };
 
-// localization/pt-BR/sheets and localization/en/sheets, embedded at build time (launcher/embed_files.cmake).
+// localization/<language>/sheets, embedded at build time (launcher/embed_files.cmake).
 std::span<const TranslationFile> PtBrTranslationFiles();
 std::span<const TranslationFile> EnglishTranslationFiles();
+std::span<const TranslationFile> RussianTranslationFiles();
+// localization/ru/font/cyrillic.glyphs.z; nullptr when it was not embedded.
+const TranslationFile* RussianGlyphs();
 // localization/pt-BR/visual/*.dcpx.z: compressed DCPX patches against the English slot's archive entries.
 std::span<const TranslationFile> PtBrVisualPatches();
 // The patches of one set: localization/pt-BR/visual/base-*.dcpx.z target the base stage files, the others the USA packs.
@@ -37,6 +41,7 @@ std::vector<TranslationFile> PtBrVisualPatches(VisualSet set);
 // localization/<language>/sources/<source>.json; nullptr when there is none.
 const TranslationFile* PtBrSource(std::string_view source);
 const TranslationFile* EnglishSource(std::string_view source);
+const TranslationFile* RussianSource(std::string_view source);
 
 struct ArchiveTranslation {
     std::optional<ArchiveOverlay> overlay; // nothing when no record is translated or the archive cannot be read
@@ -53,6 +58,7 @@ struct ArchiveTranslation {
     bool folded = false;                   // the font could not be completed: letters are shown without their accents
     std::vector<std::string> default_bone; // the DefaultBone records as served
     std::vector<LatinCell> latin_cells;    // the letters as the completed font holds them
+    std::vector<CyrillicMetrics> cyrillic_metrics; // the Russian letters drawn into the font: their glyph table metrics
     uint32_t sheets_ms = 0, visual_ms = 0, mirror_ms = 0, overlay_ms = 0; // time spent per phase
     uint32_t inflate_ms = 0, read_ms = 0;                                     // within visual_ms
 };
@@ -63,12 +69,17 @@ struct TranslationRecipe {
     std::span<const TranslationFile> visual_patches = {}; // DCPX patches against the archive's own entries
     const TranslationFile* source = nullptr;          // the slot's source map; nullptr: the entries' English hashes
     const TranslationFile* source_delta = nullptr;    // hashes added to the source map and records taken out of it
+    const TranslationFile* own_delta = nullptr;       // then the language's own delta over that map
+    const TranslationFile* button_overrides = nullptr; // a delta whose dropped_buttons records may omit the slot's glyphs
     const TranslationFile* text_hashes = nullptr;     // the hash each entry's own text must have; nullptr: not checked
     std::string_view text_key = "pt_br";              // the entries' text member
     std::string_view font_entry = {};                 // the font to complete with the letters, when the slot's lacks them
     std::filesystem::path mark_archive = {};          // the archive whose other/fontUTF16.ftx gives the marks
     bool glyph_table = false;                         // the executable's glyph table can take the letters
     bool french_layouts = true;                       // serve the French layouts the English slot's art was drawn for
+    bool same_arguments = false;                      // only printf conversions and buttons must match the English
+    const CyrillicFont* cyrillic = nullptr;           // the main font to draw the Russian letters into
+    const TranslationFile* cyrillic_glyphs = nullptr; // and the letters
 };
 
 ArchiveTranslation TranslateArchive(const std::filesystem::path& archive, const TranslationRecipe& recipe);

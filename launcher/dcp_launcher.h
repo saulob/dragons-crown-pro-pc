@@ -7,6 +7,7 @@
 
 #include "feature_sites.h"
 
+#include "cyrillic_glyphs.h"
 #include "dcp_resolution.h"
 
 #ifdef __cplusplus
@@ -98,6 +99,12 @@ const DcpComposedGlyph *dcp_text_composed_glyphs(size_t *count, int *cell_pixels
 
 /* The character latin_glyphs_locate needs when the saved language shows letters this build's font lacks; 0 otherwise. */
 unsigned dcp_text_font_probe(const char *settings_file, const char *image_dir, const char *app0);
+
+/* Where the saved language's Russian letters go in this build's main font (CyrillicCells), with the character
+ * font_glyph_pages needs in probe; CYRILLIC_CELLS_NONE for every other language. */
+int dcp_text_cyrillic_cells(const char *settings_file, const char *image_dir, const char *app0, unsigned *probe);
+/* After dcp_text_translation: the glyph table metrics of the Russian letters drawn into the font; NULL when none were. */
+const CyrillicMetrics *dcp_text_cyrillic_metrics(size_t *count);
 
 /* Tells the launcher's text the saved language, before the game starts. */
 void dcp_activate_text_language(const char *settings_file, const char *image_dir, const char *app0);

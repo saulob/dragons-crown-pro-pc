@@ -475,4 +475,28 @@ bool LatinFontCellAlpha(const std::vector<uint8_t>& font, int cell, std::vector<
     return true;
 }
 
+std::optional<int> FontCellInk(std::vector<uint8_t>& font, int cell) {
+    const std::optional<Atlas> atlas = Atlas::Open(font.data(), font.size());
+    if (!atlas || cell < 0 || cell >= LATIN_ATLAS_COLUMNS * LATIN_ATLAS_COLUMNS) return std::nullopt;
+    const std::optional<Bitmap> bitmap = ReadCell(*atlas, cell);
+    if (!bitmap) return std::nullopt;
+    return int(*std::max_element(bitmap->pixels().begin(), bitmap->pixels().end()));
+}
+
+bool WriteFontCell(std::vector<uint8_t>& font, int cell, std::span<const uint8_t> blocks) {
+    const std::optional<Atlas> atlas = Atlas::Open(font.data(), font.size());
+    if (!atlas || cell < 0 || cell >= LATIN_ATLAS_COLUMNS * LATIN_ATLAS_COLUMNS ||
+        blocks.size() != size_t(kFontCellBlocks) * kFontCellBlocks * kBlockBytes) {
+        return false;
+    }
+    const int left = CellOrigin(cell % LATIN_ATLAS_COLUMNS) / kBlockSize, top = CellOrigin(cell / LATIN_ATLAS_COLUMNS) / kBlockSize;
+    for (int by = 0; by < kFontCellBlocks; ++by) {
+        for (int bx = 0; bx < kFontCellBlocks; ++bx) {
+            std::memcpy(atlas->Block(left + bx, top + by), blocks.data() + size_t(by * kFontCellBlocks + bx) * kBlockBytes,
+                        kBlockBytes);
+        }
+    }
+    return true;
+}
+
 } // namespace dcp

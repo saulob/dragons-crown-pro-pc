@@ -319,6 +319,12 @@ def slot_delta(source, corpus, raw):
             else:
                 hashes.append([index, source_hash(records[index])])
         head = {'sheet': sheet, 'records': len(records), 'sha256': row['sha256'], 'excluded': sorted(excluded)}
+        texts = {e['index']: e['en'] for e in corpus[sheet]['entries']}
+        mapped_here = {index for index, _ in hashes}
+        dropped = sorted(index for name, index in DROPPED_BUTTONS
+                         if name == sheet and index in mapped_here and exclusion(records[index], texts[index], keys) == 'button')
+        if dropped:
+            head['dropped_buttons'] = dropped
         sheets.append(dump_rows(head, sorted(hashes), 'hashes'))
     return dump(source, sheets, 'pt-BR')
 

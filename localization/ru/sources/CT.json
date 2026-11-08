@@ -1,0 +1,24 @@
+{
+  "source": "CT",
+  "base": "en",
+  "sheets": [
+    {"sheet": "AbilityList", "records": 807, "sha256": "bb26be58826303e41f70115dfa025d569d40c791819546967808138b174de441", "excluded": [], "hashes": []},
+    {"sheet": "BonusScore", "records": 13, "sha256": "19b85fa37e7c78a70007c5dbe0d36d836f59b94181df45388994ea210d77de08", "excluded": [], "hashes": []},
+    {"sheet": "ChallengeQuest", "records": 200, "sha256": "d9ea7d39163f42c2184f280a93724160fb2badb36ba25dbc234c9de6c1785a3c", "excluded": [], "hashes": []},
+    {"sheet": "CustomItem", "records": 5238, "sha256": "e29ebba3949e074996e3ee6d48ffb66f9ddc76f295e8c1a96fc7198e0a9465fd", "excluded": [[2308, "glyph"], [2312, "glyph"], [2319, "glyph"], [2323, "glyph"], [2325, "glyph"], [2327, "glyph"], [2328, "glyph"]], "hashes": []},
+    {"sheet": "DefaultBone", "records": 2049, "sha256": "a29665acb775b9f033406fa0dce593719de68fff69e4108911b803f9d52f70c0", "excluded": [], "hashes": []},
+    {"sheet": "EventMsg", "records": 1045, "sha256": "d614297079fc3e5cb32668064d5f6a2e3ce5db3c0a777fa82b3d0ee60eaf98d9", "excluded": [], "hashes": []},
+    {"sheet": "ItemList", "records": 740, "sha256": "639466c8f28b18473c0bb211a1cac128b7ced94e642730666120eda2d3ec5c68", "excluded": [], "hashes": [
+      [674, "2fd59a0fe1c05ee3"]
+    ]},
+    {"sheet": "ObjectParam", "records": 98, "sha256": "a54f1d612916d2ccad96cda93a0b063a7aea48db990078e34911d5b9e3344999", "excluded": [], "hashes": []},
+    {"sheet": "RoundContinue", "records": 4, "sha256": "3c0f4715e6dc8251099ead2167885c9a8cdd75e8e184f22fcd49acd5d605413a", "excluded": [], "hashes": []},
+    {"sheet": "SystemMsg", "records": 1611, "sha256": "e5d833e825a99941ba79687f3d51c9cf5284131f1e223a8fbceb42658355db8b", "excluded": [], "hashes": [
+      [80, "05f84d61a7e78133"],
+      [101, "5e197b82fe766ad5"]
+    ]},
+    {"sheet": "Temple", "records": 40, "sha256": "2feade20870620953dba42bf0a3355e8ce9d7bc388bdab6530809c282fa7fe72", "excluded": [], "hashes": []},
+    {"sheet": "TreasureArt", "records": 171, "sha256": "8d49ce3f892bcf7bb35b29d3ba340bc758fead1cd98306d3a63e17cb021dfb78", "excluded": [], "hashes": []},
+    {"sheet": "Tutorial", "records": 98, "sha256": "cdbd7a77819ff1351d7b7f963fe8d1f0c62470d2b659655f263df15fd13f176c", "excluded": [], "hashes": []}
+  ]
+}
