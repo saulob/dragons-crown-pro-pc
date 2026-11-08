@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <xmmintrin.h>
 
@@ -19,6 +20,7 @@
 #define PROT_CPU_RW 3
 #define PROT_CPU_RWX 7
 #define GUEST_MAP_FIXED 0x10
+#define GUEST_ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n))) /* mirrors runtime_thread.c's private ERR() */
 
 static int checks, failures;
 #define CHECK(condition) do { __atomic_add_fetch(&checks, 1, __ATOMIC_RELAXED); if (!(condition)) { __atomic_add_fetch(&failures, 1, __ATOMIC_RELAXED); printf("FAIL line %d: %s\n", __LINE__, #condition); } } while (0)
@@ -395,6 +397,82 @@ static void test_thread_stacks(void) {
     CHECK(mapping_count() < maps_before + 100);
 }
 
+/* ---- scePthreadCancel: leaving the Inn's tavern cancels an ally-loading thread that may still be running ---- */
+typedef int32_t (ABI *ThreadCancel)(void *thread);
+static ThreadCancel thread_cancel;
+
+static void *ABI sleepy_worker(void *argument) {
+    usleep((unsigned)(uintptr_t)argument * 1000);
+    atomic_fetch_add(&workers_done, 1);
+    return argument;
+}
+
+static double elapsed_ms(struct timespec start) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (double)(now.tv_sec - start.tv_sec) * 1000.0 + (double)(now.tv_nsec - start.tv_nsec) / 1e6;
+}
+
+static void test_thread_cancel(void) {
+    thread_cancel = (ThreadCancel)runtime_thread_resolve("qBDmpCyGssE#libkernel");
+    CHECK(thread_cancel != NULL);
+
+    /* A: a handle that was never a guest thread. */
+    CHECK(thread_cancel(NULL) == GUEST_ERR(3));
+    CHECK(thread_cancel((void *)0x1) == GUEST_ERR(3));
+
+    /* B: a thread that already finished (but was not joined/detached yet) keeps the existing error. */
+    atomic_store(&workers_done, 0);
+    void *finished = NULL;
+    CHECK(thread_create(&finished, NULL, exiting_worker, NULL, "cancel-finished") == 0);
+    wait_for_workers(1);
+    usleep(20000); /* let host_start finish marking it, past the host_start()/workers_done race */
+    CHECK(thread_cancel(finished) == GUEST_ERR(3));
+    CHECK(thread_join(finished, NULL) == 0);
+
+    /* C: a running thread that finishes well inside the grace period; cancel does not kill the process and the
+     * thread joins normally afterward (join state is not corrupted by the cancel). */
+    atomic_store(&workers_done, 0);
+    void *quick = NULL;
+    CHECK(thread_create(&quick, NULL, sleepy_worker, (void *)(uintptr_t)150, "cancel-quick") == 0);
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    CHECK(thread_cancel(quick) == 0);
+    CHECK(elapsed_ms(t0) < 1500.0);
+    CHECK(atomic_load(&workers_done) == 1);
+    void *quick_result = NULL;
+    CHECK(thread_join(quick, &quick_result) == 0 && quick_result == (void *)(uintptr_t)150);
+
+    /* D: a running thread that outlives the ~2s grace period. The process stays alive, cancel returns
+     * deterministically, and the thread is still joinable (no double join, no premature stack release) once it
+     * finishes naturally. */
+    atomic_store(&workers_done, 0);
+    void *slow = NULL;
+    CHECK(thread_create(&slow, NULL, sleepy_worker, (void *)(uintptr_t)2500, "cancel-slow") == 0);
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    CHECK(thread_cancel(slow) == 0);
+    double waited = elapsed_ms(t1);
+    CHECK(waited >= 1800.0 && waited < 2600.0);
+    CHECK(atomic_load(&workers_done) == 0); /* still running past the grace period */
+    wait_for_workers(1);
+    void *slow_result = NULL;
+    CHECK(thread_join(slow, &slow_result) == 0 && slow_result == (void *)(uintptr_t)2500);
+
+    /* E: a detached thread. Cancel waits on the same finished flag the reaper does, so a cancel that outlasts the
+     * thread and a later reap never race each other. */
+    atomic_store(&workers_done, 0);
+    void *detach_attr = NULL;
+    CHECK(attr_init(&detach_attr) == 0 && attr_set_detach(&detach_attr, 1) == 0);
+    void *detached = NULL;
+    CHECK(thread_create(&detached, &detach_attr, sleepy_worker, (void *)(uintptr_t)100, "cancel-detached") == 0);
+    CHECK(thread_cancel(detached) == 0);
+    CHECK(atomic_load(&workers_done) == 1);
+    void *flushed = NULL;
+    CHECK(thread_create(&flushed, &detach_attr, exiting_worker, NULL, "cancel-flush") == 0); /* drives reap_detached() */
+    wait_for_workers(2);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     test_reservation_failure();
@@ -404,6 +482,7 @@ int main(void) {
     test_flexible_split();
     test_fibers();
     test_thread_stacks();
+    test_thread_cancel();
     printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
 }

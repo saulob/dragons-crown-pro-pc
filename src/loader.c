@@ -740,6 +740,9 @@ int main(int argc, char **argv) {
     sigemptyset(&dump.sa_mask); sigaction(SIGUSR2, &dump, NULL);
     struct sigaction alarm_action = {0}; alarm_action.sa_sigaction = watchdog; alarm_action.sa_flags = SA_SIGINFO;
     sigemptyset(&alarm_action.sa_mask); sigaction(SIGALRM, &alarm_action, NULL);
+    /* A peer closing the lobby's TLS stream (or a router's UPnP answer) must fail the write, not kill the process. */
+    struct sigaction ignore_pipe = {0}; ignore_pipe.sa_handler = SIG_IGN;
+    sigemptyset(&ignore_pipe.sa_mask); sigaction(SIGPIPE, &ignore_pipe, NULL);
     alarm(timeout_seconds); /* 0 disables the watchdog */
 #endif
     FILE *f = fopen(boot, "rb");

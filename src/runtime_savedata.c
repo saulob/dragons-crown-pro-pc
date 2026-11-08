@@ -171,13 +171,25 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint64
            exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
     return 0;
 }
+/* A failed mount is logged with its directory name (when the request named one), error and mode: otherwise a save
+ * the game could not write is invisible. Shared by save_mount and save_mount2 so neither logs on its own. */
+static void log_mount_failure(const DirName *dir, uint32_t mode, int32_t error) {
+    char name[33];
+    snprintf(name,sizeof(name),"%s",dir && valid_name(dir->data,sizeof(dir->data)) ? dir->data : "(unnamed)");
+    printf("Runtime: save data mount '%s' failed (error=%#x, mode=%#x)\n",name,(unsigned)error,mode);
+}
+static int32_t mount_logged(int32_t user, const char *title, const DirName *dir, uint64_t blocks, uint32_t mode, MountResult *result) {
+    int32_t r=mount(user,title,dir,blocks,mode,result);
+    if (r) log_mount_failure(dir,mode,r);
+    return r;
+}
 static ABI int32_t save_mount(const Mount1 *m, MountResult *result) {
     if (!m) return ERR_PARAMETER;
-    return mount(m->user,m->title ? m->title->data : NULL,m->dir,m->blocks,m->mode,result);
+    return mount_logged(m->user,m->title ? m->title->data : NULL,m->dir,m->blocks,m->mode,result);
 }
 static ABI int32_t save_mount2(const Mount2 *m, MountResult *result) {
     if (!m) return ERR_PARAMETER;
-    return mount(m->user,NULL,m->dir,m->blocks,m->mode,result);
+    return mount_logged(m->user,NULL,m->dir,m->blocks,m->mode,result);
 }
 static int slot_of(const MountPoint *point) {
     if (!point || strncmp(point->data,"/savedata",9)) return -1;

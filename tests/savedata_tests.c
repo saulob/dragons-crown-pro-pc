@@ -193,6 +193,79 @@ static void test_create_failure_propagates(void) {
     end();
 }
 
+static char *capture_stdout_begin(const char *path) {
+    fflush(stdout);
+    int *saved = malloc(sizeof(int));
+    *saved = dup(STDOUT_FILENO);
+    freopen(path, "w", stdout);
+    return (char *)saved;
+}
+static void capture_stdout_end(char *saved) {
+    fflush(stdout);
+    dup2(*(int *)saved, STDOUT_FILENO);
+    close(*(int *)saved);
+    free(saved);
+}
+
+static void test_failed_mount_is_logged_without_changing_the_result(void) {
+    begin("mount_log", "CUSA07001");
+    char log_path[1200];
+    snprintf(log_path, sizeof(log_path), "%s/stdout.log", root_dir);
+    char text[1024];
+
+    /* A missing directory: the error, mode and directory name all reach the log. */
+    char *saved = capture_stdout_begin(log_path);
+    MountResult mounted;
+    int32_t r = mount_save(1, "SAVEDATA00", MODE_RDONLY, &mounted);
+    capture_stdout_end(saved);
+    CHECK(r == ERR_NOT_FOUND);
+    CHECK(read_text(log_path, text, sizeof(text)));
+    char expect_error[64], expect_mode[32];
+    snprintf(expect_error, sizeof(expect_error), "error=%#x", (unsigned)ERR_NOT_FOUND);
+    snprintf(expect_mode, sizeof(expect_mode), "mode=%#x", (unsigned)MODE_RDONLY);
+    CHECK(strstr(text, "SAVEDATA00") != NULL);
+    CHECK(strstr(text, expect_error) != NULL);
+    CHECK(strstr(text, expect_mode) != NULL);
+
+    /* An invalid, unprintable directory name is not echoed into the log. */
+    saved = capture_stdout_begin(log_path);
+    DirName bad;
+    memset(&bad, 'A', sizeof(bad)); /* 32 bytes, no NUL: valid_name() rejects it */
+    Mount2 request;
+    memset(&request, 0, sizeof(request));
+    request.user = 1;
+    request.dir = &bad;
+    request.mode = MODE_RDONLY;
+    r = ((Mount2Fn)guest("sceSaveDataMount2"))(&request, &mounted);
+    capture_stdout_end(saved);
+    CHECK(r == ERR_PARAMETER);
+    CHECK(read_text(log_path, text, sizeof(text)));
+    CHECK(strstr(text, "(unnamed)") != NULL);
+    CHECK(strncmp(text, "AAAA", 4) != 0);
+
+    /* The successful create that follows is not reported as a failure. */
+    saved = capture_stdout_begin(log_path);
+    r = mount_save(1, "SAVEDATA00", GUEST_CREATE_MODE, &mounted);
+    capture_stdout_end(saved);
+    CHECK(r == 0);
+    CHECK(read_text(log_path, text, sizeof(text)));
+    CHECK(strstr(text, "failed") == NULL);
+    unmount_save(&mounted);
+
+    /* Mounting it again while it is still mounted: same error, logged the same way. */
+    MountResult first;
+    CHECK(mount_save(1, "SAVEDATA00", MODE_RDONLY, &first) == 0);
+    saved = capture_stdout_begin(log_path);
+    r = mount_save(1, "SAVEDATA00", MODE_RDONLY, &mounted);
+    capture_stdout_end(saved);
+    CHECK(r == ERR_BAD_MOUNTED);
+    CHECK(read_text(log_path, text, sizeof(text)));
+    snprintf(expect_error, sizeof(expect_error), "error=%#x", (unsigned)ERR_BAD_MOUNTED);
+    CHECK(strstr(text, expect_error) != NULL);
+    unmount_save(&first);
+    end();
+}
+
 enum { IMAGE_SIZE = 0x11e8060, STUB_ROOM = 0x1000 };
 enum { SCENE_BYTES = 0x100, CONTROLLER_BYTES = 0x200, T_CATEGORY = 0x70, T_BLOCK_OWNER = 0xe8 };
 enum { STEP_ASK = 1, STEP_CREATE = 3, STEP_TITLE = 4, CATEGORY_NONE = 0, CATEGORY_MISSING = 3, CATEGORY_OTHER = 6 };
@@ -380,6 +453,7 @@ int main(void) {
     test_guest_create_mount_then_existing_load();
     test_existing_save_is_not_recreated();
     test_create_failure_propagates();
+    test_failed_mount_is_logged_without_changing_the_result();
     test_missing_save_enters_the_guest_create_step();
     test_finished_create_continues_through_the_successful_load_path();
     test_failed_create_does_not_continue();

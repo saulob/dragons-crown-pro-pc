@@ -499,4 +499,8 @@ if (NOT WIN32)
     target_include_directories(dcp-runtime-tests PRIVATE src)
     target_compile_options(dcp-runtime-tests PRIVATE -Wall -Wextra -Werror -fno-omit-frame-pointer)
     target_link_libraries(dcp-runtime-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+
+    # Focused test of the loader's SIGPIPE handling (tools/build.sh --test); not part of the default build.
+    add_executable(dcp-sigpipe-tests EXCLUDE_FROM_ALL tests/sigpipe_tests.c)
+    target_compile_options(dcp-sigpipe-tests PRIVATE -Wall -Wextra -Werror)
 endif()

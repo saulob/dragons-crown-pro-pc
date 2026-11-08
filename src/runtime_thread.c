@@ -14,6 +14,7 @@
 #include <sched.h>
 #include <setjmp.h>
 #include <errno.h>
+#include <time.h>
 #include <unistd.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -66,6 +67,22 @@ static _Thread_local int32_t guest_errno;
 static const unsigned char *tls_template;
 static uint64_t tls_filesz, tls_memsz, tls_align=16;
 static size_t created, joined_count, exited;
+/* scePthreadCancel waits on this instead of polling. winpthreads condition variables accept
+ * only CLOCK_REALTIME (pthread_condattr_setclock(CLOCK_MONOTONIC) fails with EINVAL), as in runtime_sema.c. */
+#ifdef _WIN32
+#define WAIT_CLOCK CLOCK_REALTIME
+#else
+#define WAIT_CLOCK CLOCK_MONOTONIC
+#endif
+static pthread_cond_t finished_cond;
+static pthread_once_t finished_cond_once=PTHREAD_ONCE_INIT;
+static void finished_cond_init(void) {
+    pthread_condattr_t attr;
+    pthread_condattr_init(&attr);
+    pthread_condattr_setclock(&attr,WAIT_CLOCK);
+    pthread_cond_init(&finished_cond,&attr);
+    pthread_condattr_destroy(&attr);
+}
 #ifndef _WIN32
 /* Detached threads whose stacks can be reused once they have exited; the host threads stay joinable for that. */
 static GuestThread *to_reap;
@@ -303,10 +320,12 @@ static void *host_start(void *p) {
     set_host_name(t->name);
     if (!exit_setjmp(t)) t->result=t->entry(t->argument);
     runtime_thread_keys_cleanup();
+    pthread_once(&finished_cond_once,finished_cond_init);
     pthread_mutex_lock(&lock); t->finished=1; ++exited;
 #ifndef _WIN32
     queue_for_reap_locked(t);
 #endif
+    pthread_cond_broadcast(&finished_cond);
     pthread_mutex_unlock(&lock);
     return t->result;
 }
@@ -382,10 +401,24 @@ static ABI int32_t thread_detach(GuestThread *t) {
 #endif
     return 0;
 }
+/* No cancellation points are implemented: a host-side async cancel could unwind through guest frames with no
+ * registered unwind info. Leaving the Inn's tavern cancels an ally-loading thread that, on a slow host, is still
+ * running; this gives it 2s to finish naturally and otherwise leaves it running rather than killing the game. */
 static ABI int32_t thread_cancel(GuestThread *t) {
-    if (!find_thread(t) || t->finished) return ERR(3);
-    fputs("STOP: scePthreadCancel of a running thread is not supported\n",stderr);
-    exit(21);
+    if (!find_thread(t)) return ERR(3);
+    pthread_once(&finished_cond_once,finished_cond_init);
+    struct timespec deadline;
+    clock_gettime(WAIT_CLOCK,&deadline);
+    deadline.tv_sec+=2;
+    pthread_mutex_lock(&lock);
+    if (t->finished) { pthread_mutex_unlock(&lock); return ERR(3); }
+    int timed_out=0;
+    while (!t->finished && !timed_out)
+        timed_out=pthread_cond_timedwait(&finished_cond,&lock,&deadline)==ETIMEDOUT;
+    int still_running=!t->finished;
+    pthread_mutex_unlock(&lock);
+    if (still_running) puts("Runtime: scePthreadCancel: thread still running after the 2s grace period, left to finish on its own");
+    return 0;
 }
 static ABI __attribute__((noreturn)) void thread_exit(void *value) {
     GuestThread *t=runtime_thread_current();
