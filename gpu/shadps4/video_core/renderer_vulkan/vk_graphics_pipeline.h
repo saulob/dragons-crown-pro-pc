@@ -4,6 +4,8 @@
 #pragma once
 
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 #include <boost/container/static_vector.hpp>
 #include <xxhash.h>
@@ -30,6 +32,13 @@ class DescriptorHeap;
 
 template <typename T>
 using VertexInputs = boost::container::static_vector<T, MaxVertexBufferCount>;
+
+/// dcp: the driver refused a graphics pipeline even without the shared pipeline cache.
+struct PipelineCreationFailed : std::runtime_error {
+    PipelineCreationFailed(vk::Result result_, const std::string& message)
+        : std::runtime_error{message}, result{result_} {}
+    vk::Result result;
+};
 
 struct GraphicsPipelineKey {
     std::array<size_t, MaxShaderStages> stage_hashes;

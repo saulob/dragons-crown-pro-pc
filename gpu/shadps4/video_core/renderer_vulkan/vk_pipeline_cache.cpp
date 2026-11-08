@@ -24,6 +24,7 @@
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/cache_storage.h"
+#include "video_core/pipeline_cache_policy.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_depth_stencil_state.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
@@ -756,9 +757,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         CompileTimer timer;
 
         GraphicsPipeline::SerializationSupport sdata{};
-        it.value() = std::make_unique<GraphicsPipeline>(
-            instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
-            sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
+        it.value() = CreateGamePipeline(sdata);
 
         RegisterPipelineData(sel.graphics_key, pipeline_hash, sdata);
         ++num_new_pipelines;
@@ -774,6 +773,28 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         sel.fetch_shader.reset();
     }
     return it->second.get();
+}
+
+std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGamePipeline(
+    GraphicsPipeline::SerializationSupport& sdata) {
+    using namespace PipelineCachePolicy;
+    for (bool retried = false;; retried = true) {
+        try {
+            const BuildGate::Slot slot{build_gate};
+            return std::make_unique<GraphicsPipeline>(
+                instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache,
+                sel.infos, sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
+        } catch (const PipelineCreationFailed& error) {
+            if (OnPipelineFailure(PipelineOrigin::Game, retried) == FailureAction::Fatal) {
+                ASSERT_MSG(false, "Failed to create graphics pipeline: {}", error.what());
+                throw;
+            }
+            LOG_WARNING(Render_Vulkan, "Pipeline: {}; retrying with the warm-up paused",
+                        error.what());
+            PauseParallelWarmUp();
+            sdata = {};
+        }
+    }
 }
 
 const ComputePipeline* PipelineCache::GetComputePipeline() {

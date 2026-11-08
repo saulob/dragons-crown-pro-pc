@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <boost/container/small_vector.hpp>
 
@@ -30,6 +33,18 @@ namespace {
 using Clock = std::chrono::steady_clock;
 u64 NsSince(Clock::time_point start) {
     return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
+}
+
+std::string DescribeKey(const GraphicsPipelineKey& key, std::span<const vk::Format> color_formats,
+                        const vk::PipelineRenderingCreateInfo& rendering) {
+    std::string colors;
+    for (u32 i = 0; i < key.num_color_attachments; ++i) {
+        colors += fmt::format("{}{}", i ? "," : "", vk::to_string(color_formats[i]));
+    }
+    return fmt::format("color [{}], depth {}, stencil {}, topology {}, samples {}", colors,
+                       vk::to_string(rendering.depthAttachmentFormat),
+                       vk::to_string(rendering.stencilAttachmentFormat), u32(key.prim_type),
+                       u32(key.num_samples));
 }
 } // namespace
 
@@ -430,12 +445,30 @@ GraphicsPipeline::GraphicsPipeline(
 
     const auto binary_directory = Common::FS::GetUserPath(Common::FS::PathType::CacheDir) /
         Common::ElfInfo::Instance().GameSerial() / "pipeline-binaries";
-    auto [pipeline_result, pipe] =
-        CreateCachedGraphicsPipeline(device, pipeline_cache, pipeline_info, key,
-                                     instance.GetPipelineBinaryGlobalKey(), binary_directory);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
-    pipeline = std::move(pipe);
+    const auto create = [&](const vk::GraphicsPipelineCreateInfo& info, std::string_view pass) {
+        auto [result, pipe] =
+            CreateCachedGraphicsPipeline(device, pipeline_cache, info, key,
+                                         instance.GetPipelineBinaryGlobalKey(), binary_directory);
+        if (result == vk::Result::eSuccess) {
+            return std::move(pipe);
+        }
+        const auto hash = std::hash<GraphicsPipelineKey>{}(key);
+        LOG_WARNING(Render_Vulkan,
+                    "Pipeline {}: {:#x}{} failed with {}, retrying without the pipeline cache "
+                    "({}; {})",
+                    preloading ? "warm-up" : "creation", hash, pass, vk::to_string(result),
+                    debug_str, DescribeKey(key, color_formats, pipeline_rendering_ci));
+        auto [clean_result, clean] = device.createGraphicsPipelineUnique(nullptr, info);
+        if (clean_result == vk::Result::eSuccess) {
+            LOG_WARNING(Render_Vulkan, "Pipeline {:#x}{}: clean retry succeeded", hash, pass);
+            return std::move(clean);
+        }
+        throw PipelineCreationFailed{clean_result,
+                                     fmt::format("pipeline {:#x}{} ({}): clean creation failed: {}",
+                                                 hash, pass, debug_str,
+                                                 vk::to_string(clean_result))};
+    };
+    pipeline = create(pipeline_info, "");
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 
     if (needs_square_pass) {
@@ -444,12 +477,7 @@ GraphicsPipeline::GraphicsPipeline(
         square_blending.pAttachments = square_attachments.data();
         auto square_info = pipeline_info;
         square_info.pColorBlendState = &square_blending;
-        auto [square_result, square] =
-            CreateCachedGraphicsPipeline(device, pipeline_cache, square_info, key,
-                                         instance.GetPipelineBinaryGlobalKey(), binary_directory);
-        ASSERT_MSG(square_result == vk::Result::eSuccess,
-                   "Failed to create the squaring pipeline: {}", vk::to_string(square_result));
-        square_pipeline = std::move(square);
+        square_pipeline = create(square_info, " squaring pass");
         SetObjectName(device, *square_pipeline, "Graphics Pipeline {} squaring pass", debug_str);
     }
     g_dcp_pipeline_total_ns += NsSince(started);
@@ -531,7 +559,9 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
             });
         }
         for (const auto& image : stage->images) {
-            const u32 num_bindings = image.NumBindings(*stage);
+            // Preloading runs on warm-up threads while the GPU thread rewrites this stage's user
+            // data; preloadable stages have no per-mip bindings (IsPreloadable).
+            const u32 num_bindings = preloading ? 1 : image.NumBindings(*stage);
             bindings.push_back({
                 .binding = binding,
                 .descriptorType = image.is_written ? vk::DescriptorType::eStorageImage

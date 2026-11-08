@@ -25,6 +25,7 @@
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/info.h"
 #include "video_core/cache_storage.h"
+#include "video_core/pipeline_cache_policy.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -608,6 +609,19 @@ void RegisterShaderBinary(std::vector<u32>&& spv, u64 pgm_hash, size_t perm_idx)
                                        std::move(spv));
 }
 
+namespace {
+// Per-mip image bindings are sized from live sharps, which a preloaded pipeline must not read.
+bool IsPreloadable(const Shader::Info& info) {
+    return std::ranges::none_of(info.images, [](const auto& image) {
+        return image.mip_fallback_mode == Shader::MipStorageFallbackMode::DynamicIndex;
+    });
+}
+
+std::string GraphicsBlobName(u64 hash) {
+    return fmt::format("g_{:#018x}", hash);
+}
+} // namespace
+
 bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
                     std::optional<Shader::Gcn::FetchShaderData>& fetch_shader_data,
                     Shader::StageSpecialization& spec, size_t& perm_idx) {
@@ -626,15 +640,23 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
     }
 
     u64 perm_hash_ar{};
-    meta.Read(perm_hash_ar);
-    meta.Read(perm_idx);
+    try {
+        meta.Read(perm_hash_ar);
+        meta.Read(perm_idx);
 
-    spec.Deserialize(ar);
-    info.Deserialize(ar);
+        spec.Deserialize(ar);
+        info.Deserialize(ar);
+    } catch (const Serialization::CorruptData&) {
+        LOG_WARNING(Render, "Pipeline cache: discarded corrupt shader entry");
+        return false;
+    }
 
     // Motion vertex shaders embed session-local buffer device addresses. They must be
     // recompiled for the current allocation, never loaded from a previous process.
     if (info.hw_stage == Shader::HwStage::Vertex && spec.runtime_info.hw.vs.motion_vectors) {
+        return false;
+    }
+    if (!IsPreloadable(info)) {
         return false;
     }
 
@@ -757,18 +779,29 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
-    const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
-    ASSERT(is_new);
-
-    it.value() = std::make_unique<GraphicsPipeline>(
-        instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
-        sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
+    std::unique_ptr<GraphicsPipeline> pipeline;
+    try {
+        pipeline = std::make_unique<GraphicsPipeline>(
+            instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
+            sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
+    } catch (const PipelineCreationFailed& error) {
+        LOG_WARNING(Render_Vulkan, "Pipeline warm-up: {}; left to the game", error.what());
+        Storage::DataBase::Instance().Remove(
+            Storage::BlobType::PipelineKey,
+            GraphicsBlobName(std::hash<GraphicsPipelineKey>{}(sel.graphics_key)));
+    }
+    const bool built = pipeline != nullptr;
+    if (built) {
+        const bool is_new =
+            graphics_pipelines.try_emplace(sel.graphics_key, std::move(pipeline)).second;
+        ASSERT(is_new);
+    }
 
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
     sel.fetch_shader.reset();
 
-    return true;
+    return built;
 }
 
 bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) {
@@ -829,42 +862,86 @@ bool PipelineCache::CheckCacheProfile() {
         return false;
     }
 
-    Storage::DataBase::Instance().Open();
+    using namespace PipelineCachePolicy;
+    auto& db = Storage::DataBase::Instance();
+    db.Open();
 
-    // Check if cache is compatible
-    std::vector<u8> profile_data{};
-    Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile", profile_data);
-    if (profile_data.empty()) {
-        Storage::DataBase::Instance().FinishPreload();
-
-        profile_data.resize(sizeof(profile));
-        std::memcpy(profile_data.data(), &profile, sizeof(profile));
-        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
-                                           std::move(profile_data));
-        return false;
-    }
-    if (profile_data.size() != sizeof(Shader::Profile)) {
-        LOG_WARNING(Render, "Pipeline cache profile has unexpected size ({} != {})",
-                    profile_data.size(), sizeof(Shader::Profile));
-    }
-    Shader::Profile cached_profile{};
+    std::vector<u8> profile_data, identity_data;
+    db.Load(Storage::BlobType::ShaderProfile, "profile", profile_data);
+    db.Load(Storage::BlobType::ShaderProfile, "identity", identity_data);
+    const StoreIdentity current{
+        .vendor_id = instance.GetVendorID(),
+        .device_id = instance.GetDeviceID(),
+        .driver_id = u32(instance.GetDriverID()),
+        .shader_binary_version = Serialization::ShaderBinaryVersion,
+        .shader_meta_version = Serialization::ShaderMetaVersion,
+        .pipeline_key_version = Serialization::PipelineKeyVersion,
+    };
+    const auto verdict = CheckStore(identity_data, current);
+    bool profile_match = false;
     if (profile_data.size() == sizeof(Shader::Profile)) {
+        Shader::Profile cached_profile{};
         std::memcpy(&cached_profile, profile_data.data(), sizeof(cached_profile));
+        profile_match = cached_profile == profile;
     }
-    if (profile_data.size() != sizeof(Shader::Profile) || cached_profile != profile) {
-        // dcp: upstream closed the cache for the session here, so it was never rewritten
-        // and every later session compiled every shader again (stutters on each new area).
-        // Start a fresh cache for this build and GPU instead.
-        LOG_WARNING(Render, "Pipeline cache isn't compatible with current system: rebuilding it");
-        Storage::DataBase::Instance().Clear();
-        Storage::DataBase::Instance().FinishPreload();
-        profile_data.resize(sizeof(profile));
-        std::memcpy(profile_data.data(), &profile, sizeof(profile));
-        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
-                                           std::move(profile_data));
-        return false;
+    if (verdict == StoreVerdict::Reuse && profile_match) {
+        return true;
     }
-    return true;
+    // dcp: upstream closed the cache for the session here, so it was never rewritten and every
+    // later session compiled every shader again. Start a fresh cache instead.
+    if (!profile_data.empty() || verdict != StoreVerdict::Missing) {
+        std::printf("Pipeline cache: %s, rebuilding\n",
+                    profile_match ? std::string(ToString(verdict)).c_str()
+                                  : "shader profile changed");
+    }
+    db.Clear();
+    db.FinishPreload();
+    profile_data.resize(sizeof(profile));
+    std::memcpy(profile_data.data(), &profile, sizeof(profile));
+    db.Save(Storage::BlobType::ShaderProfile, "profile", std::move(profile_data));
+    db.Save(Storage::BlobType::ShaderProfile, "identity", EncodeStoreIdentity(current));
+    return false;
+}
+
+namespace {
+PipelineCachePolicy::GpuIdentity CurrentGpu(const Instance& instance) {
+    return {
+        .vendor_id = instance.GetVendorID(),
+        .device_id = instance.GetDeviceID(),
+        .driver_id = u32(instance.GetDriverID()),
+        .driver_version = instance.GetDriverVersion(),
+        .api_version = instance.ApiVersion(),
+    };
+}
+} // namespace
+
+void PipelineCache::ChooseWarmupMode() {
+    using namespace PipelineCachePolicy;
+    auto& db = Storage::DataBase::Instance();
+    std::vector<u8> stored;
+    db.Load(Storage::BlobType::ShaderProfile, "warmup", stored);
+    if (stored.empty()) {
+        return;
+    }
+    if (PipelineCachePolicy::ChooseWarmupMode(stored, CurrentGpu(instance)) == WarmupMode::Serial) {
+        build_gate.EnableSerial();
+        std::printf("Pipeline warm-up: one pipeline at a time on this driver (a parallel build "
+                    "failed before)\n");
+        return;
+    }
+    db.Remove(Storage::BlobType::ShaderProfile, "warmup");
+    std::printf("Pipeline warm-up: driver changed, parallel builds again\n");
+}
+
+void PipelineCache::EnableSerialBuilds(std::string_view reason) {
+    if (!build_gate.EnableSerial()) {
+        return;
+    }
+    std::printf("Pipeline warm-up: %.*s; building one pipeline at a time from now on\n",
+                int(reason.size()), reason.data());
+    const PipelineCachePolicy::WarmupPolicy policy{CurrentGpu(instance), 1};
+    Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "warmup",
+                                       PipelineCachePolicy::EncodeWarmupPolicy(policy));
 }
 
 void PipelineCache::WarmUp(const std::function<void(u32, u32)>& progress) {
@@ -891,24 +968,25 @@ void PipelineCache::WarmUp(const std::function<void(u32, u32)>& progress) {
             Serialization::Archive ar{std::move(data)};
             Serialization::Reader pldata{ar};
 
-            u32 version{};
-            pldata.Read(version);
-            if (version != Serialization::PipelineKeyVersion) {
-                return;
-            }
+            try {
+                u32 version{};
+                pldata.Read(version);
+                if (version != Serialization::PipelineKeyVersion) {
+                    return;
+                }
 
-            u32 is_compute{};
-            pldata.Read(is_compute);
+                u32 is_compute{};
+                pldata.Read(is_compute);
 
-            bool result{};
-            if (is_compute) {
-                result = LoadComputePipeline(ar);
-            } else {
-                result = LoadGraphicsPipeline(ar);
-            }
-
-            if (result) {
-                ++num_pipelines;
+                const bool result = is_compute ? LoadComputePipeline(ar) : LoadGraphicsPipeline(ar);
+                if (result) {
+                    ++num_pipelines;
+                }
+            } catch (const Serialization::CorruptData&) {
+                LOG_WARNING(Render, "Pipeline cache: discarded corrupt pipeline entry");
+                sel.infos.fill(nullptr);
+                sel.modules.fill(nullptr);
+                sel.fetch_shader.reset();
             }
         });
 
@@ -996,6 +1074,9 @@ bool PipelineCache::StartBackgroundWarmUp() {
     if (!CheckCacheProfile()) {
         return true; // nothing cached yet
     }
+    std::printf("Pipeline cache: profile match, %zu pipelines queued\n",
+                Storage::DataBase::Instance().CountBlobs(Storage::BlobType::PipelineKey));
+    ChooseWarmupMode();
     background = new BackgroundWarmup;
     auto& warm = *background;
     warm.started = std::chrono::steady_clock::now();
@@ -1025,28 +1106,33 @@ void PipelineCache::ReadWarmEntry(BackgroundWarmup& warm, std::vector<u8>&& data
     const auto skip = [&] { warm.done.fetch_add(1, std::memory_order_relaxed); };
     Serialization::Archive ar{std::move(data)};
     Serialization::Reader pldata{ar};
-    u32 version{};
-    pldata.Read(version);
-    if (version != Serialization::PipelineKeyVersion) {
-        return skip();
-    }
-    u32 is_compute{};
-    pldata.Read(is_compute);
-
     BackgroundWarmup::Entry entry{};
-    entry.compute = is_compute != 0;
     std::array<u64, MaxShaderStages> hashes{};
-    if (entry.compute) {
-        entry.compute_key.Deserialize(ar);
-        ComputePipeline::SerializationSupport sdata{};
-        sdata.Deserialize(ar);
-        hashes[0] = entry.compute_key.value;
-    } else {
-        entry.graphics_key.Deserialize(ar);
-        entry.sdata.Deserialize(ar);
-        for (u32 i = 0; i < MaxShaderStages; ++i) {
-            hashes[i] = entry.graphics_key.stage_hashes[i];
+    try {
+        u32 version{};
+        pldata.Read(version);
+        if (version != Serialization::PipelineKeyVersion) {
+            return skip();
         }
+        u32 is_compute{};
+        pldata.Read(is_compute);
+
+        entry.compute = is_compute != 0;
+        if (entry.compute) {
+            entry.compute_key.Deserialize(ar);
+            ComputePipeline::SerializationSupport sdata{};
+            sdata.Deserialize(ar);
+            hashes[0] = entry.compute_key.value;
+        } else {
+            entry.graphics_key.Deserialize(ar);
+            entry.sdata.Deserialize(ar);
+            for (u32 i = 0; i < MaxShaderStages; ++i) {
+                hashes[i] = entry.graphics_key.stage_hashes[i];
+            }
+        }
+    } catch (const Serialization::CorruptData&) {
+        LOG_WARNING(Render, "Pipeline cache: discarded corrupt pipeline entry");
+        return skip();
     }
 
     auto& db = Storage::DataBase::Instance();
@@ -1208,6 +1294,7 @@ void PipelineCache::PumpWarmUp() {
             const auto build_started = std::chrono::steady_clock::now();
             warm.build_queue_ns += ElapsedNs(queued);
             SCOPE_EXIT { warm.build_ns += ElapsedNs(build_started); ++warm.completed; };
+            const PipelineCachePolicy::BuildGate::Slot slot{build_gate};
             BackgroundWarmup::Built built{graphics_key, compute_key};
             if (compute) {
                 ComputePipeline::SerializationSupport compute_data{};
@@ -1215,9 +1302,21 @@ void PipelineCache::PumpWarmUp() {
                     instance, scheduler, desc_heap, profile, *pipeline_cache, compute_key,
                     *infos[0], modules[0], compute_data, true);
             } else {
-                built.graphics = std::make_unique<GraphicsPipeline>(
-                    instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
-                    no_runtime_infos, fetch, modules, sdata, true);
+                try {
+                    built.graphics = std::make_unique<GraphicsPipeline>(
+                        instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache,
+                        infos, no_runtime_infos, fetch, modules, sdata, true);
+                } catch (const PipelineCreationFailed& error) {
+                    LOG_WARNING(Render_Vulkan, "Pipeline warm-up: {}; left to the game",
+                                error.what());
+                    Storage::DataBase::Instance().Remove(
+                        Storage::BlobType::PipelineKey,
+                        GraphicsBlobName(std::hash<GraphicsPipelineKey>{}(graphics_key)));
+                    if (slot.Parallel()) {
+                        EnableSerialBuilds("a pipeline failed in a parallel build");
+                    }
+                    return false;
+                }
             }
             warm.built.Push(std::move(built));
             return true;
@@ -1268,6 +1367,13 @@ void PipelineCache::PumpWarmUp() {
     warm.finished = true;
     DcpOverlay::SetBackgroundLoading(0, 0);
     Storage::DataBase::Instance().FinishPreload();
+}
+
+void PipelineCache::PauseParallelWarmUp() {
+    if (background && !background->finished) {
+        EnableSerialBuilds("a game pipeline failed during the warm-up");
+    }
+    build_gate.WaitForParallelBuilds();
 }
 
 void PipelineCache::StopWarmUp() {

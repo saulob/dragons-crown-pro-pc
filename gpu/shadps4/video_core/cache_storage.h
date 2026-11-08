@@ -40,11 +40,13 @@ public:
 
     void Load(BlobType type, const std::string& name, std::vector<u8>& data);
     void Load(BlobType type, const std::string& name, std::vector<u32>& data);
+    /// dcp: queued behind the pending saves, so it removes what they wrote too.
+    void Remove(BlobType type, const std::string& name);
 
     /// dcp: `stop` returning true ends the walk early (background warm-up at exit).
     void ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func,
                      const std::function<bool()>& stop = {});
-    /// dcp: blobs are plain files written beside and renamed into place, so other threads
+    /// dcp: blobs are sealed files written beside and renamed into place, so other threads
     /// may read them while the IO thread saves (the zip archive cannot).
     [[nodiscard]] bool ConcurrentReads() const;
     /// dcp: number of blobs ForEachBlob visits (the loading screen's total).

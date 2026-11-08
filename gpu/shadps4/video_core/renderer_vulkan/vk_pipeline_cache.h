@@ -4,6 +4,7 @@
 #pragma once
 
 #include <functional>
+#include <string_view>
 #include <unordered_map>
 #include <shared_mutex>
 #include <variant>
@@ -12,6 +13,7 @@
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/specialization.h"
+#include "video_core/pipeline_cache_policy.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
@@ -185,6 +187,11 @@ private:
     void FinishCompilations();
     void SeedWorkerCaches();
     bool CheckCacheProfile();
+    void ChooseWarmupMode();
+    void EnableSerialBuilds(std::string_view reason);
+    void PauseParallelWarmUp();
+    std::unique_ptr<GraphicsPipeline> CreateGamePipeline(
+        GraphicsPipeline::SerializationSupport& sdata);
     struct BackgroundWarmup;
     struct WarmStage;
     void ReadWarmEntry(BackgroundWarmup& warm, std::vector<u8>&& data);
@@ -226,6 +233,8 @@ private:
     struct WarmupPool;
     /// dcp: StartBackgroundWarmUp state; owned here, deleted by StopWarmUp.
     BackgroundWarmup* background = nullptr;
+    /// dcp: serial after a pipeline failed while warm-up threads built in parallel.
+    PipelineCachePolicy::BuildGate build_gate;
     tsl::robin_map<GraphicsPipelineKey, std::shared_ptr<AsyncGraphicsCompilation>> pending_graphics;
     tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
     std::vector<Program*> pending_programs;
