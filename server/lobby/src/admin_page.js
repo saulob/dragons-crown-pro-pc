@@ -72,6 +72,10 @@ export const ADMIN_HTML = String.raw`<!doctype html>
         <div id="d-occupancy"></div>
         <div id="d-lifetime"></div>
       </div>
+      <h2>Platforms in multiplayer rooms</h2>
+      <p id="platform-note" class="muted"></p>
+      <div class="cards" id="platform-cards"></div>
+      <div id="d-mix"></div>
     </div>
     <h2 class="section">Characters &amp; parties</h2>
     <div class="panel">
@@ -806,6 +810,34 @@ export const ADMIN_JS = String.raw`(function () {
     clear(life);
     rows(occ, 'Largest party reached', ordered(history.dimensions.occupancy, OCCUPANCY), function (v) { return OCCUPANCY[v]; });
     rows(life, 'Room lifetime', ordered(history.dimensions.lifetime, LIFETIME), function (v) { return LIFETIME[v]; });
+    platformRooms(history);
+  }
+
+  function platformRooms(history) {
+    var t = history.totals;
+    var mixes = history.dimensions.platform_mix || [];
+    var classified = total(mixes);
+    var since = history.platform_mix_first_day || null;
+    var cards = $('platform-cards');
+    var mix = $('d-mix');
+    clear(cards);
+    clear(mix);
+    var began = since ? ' Platform tracking began on ' + since + '; earlier rooms are not part of these counts.' : '';
+    if (classified === 0) {
+      $('platform-note').textContent = since ? 'No data yet in the last ' + history.days + ' days.' + began
+        : 'No data yet: platform mixes are counted as multiplayer rooms end, from the first one after this version was deployed.';
+      return;
+    }
+    $('platform-note').textContent = 'Last ' + history.days + ' days, multiplayer rooms that ended (' + fmt(classified) + '). ' +
+      'Used relay means the relay carried at least one frame of the room; a room can also have been direct.' + began;
+    cards.appendChild(card('Cross-platform rooms', fmt(t.rooms_cross_platform) + ' · ' + share(t.rooms_cross_platform, classified)));
+    cards.appendChild(card('Android multiplayer rooms', fmt(t.rooms_android) + ' · ' + share(t.rooms_android, classified)));
+    cards.appendChild(card('Android cross-platform rooms', fmt(t.rooms_android_cross)));
+    cards.appendChild(card('PC \u2194 Android rooms', fmt(t.rooms_android_pc)));
+    cards.appendChild(card('Android rooms that used relay', fmt(t.rooms_android_relayed) + ' · ' + share(t.rooms_android_relayed, t.rooms_android)));
+    cards.appendChild(card('Android cross-platform rooms that used relay',
+      fmt(t.rooms_android_cross_relayed) + ' · ' + share(t.rooms_android_cross_relayed, t.rooms_android_cross)));
+    rows(mix, 'Platforms in a room', mixes, function (v) { return v.split('+').join(' + '); });
   }
 
   var CHARACTERS = { Fighter: 'Fighter', Amazon: 'Amazon', Dwarf: 'Dwarf', Elf: 'Elf', Wizard: 'Wizard', Sorceress: 'Sorceress' };

@@ -8,13 +8,16 @@ export const METRICS_TIME_ZONE = 'America/Sao_Paulo';
 export const SAMPLE_MS = 15 * 60 * 1000;
 export const SAMPLE_DAYS = 90;
 export const HISTORY_MAX_DAYS = 365;
-export const DIMENSIONS = ['platform', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime', ...PARTY_DIMENSIONS];
+export const DIMENSIONS = ['platform', 'platform_mix', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime',
+  ...PARTY_DIMENSIONS];
 export const LIFETIMES = [['under_1m', 60e3], ['1_5m', 5 * 60e3], ['5_15m', 15 * 60e3], ['15_60m', 60 * 60e3], ['over_1h', Infinity]];
 export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited', 'ws_upgrade_ip_cap', 'hello_accepted',
   'hello_reconnect_deduped', 'hello_limited', 'room_create_accepted', 'room_create_limited', 'room_join_limited',
   'relay_abuse_closed', 'party_report_limited', 'public_endpoint_limited', 'incident_filed', 'incident_limited',
   'incident_hourly_limited', 'incident_daily_limited', 'public_lobby_limited', 'write_limited', 'lobby_abuse_closed']);
-export const PLATFORMS = ['Windows', 'Linux', 'Steam Deck'];
+export const PLATFORMS = ['Windows', 'Linux', 'Steam Deck', 'Android'];
+export const PLATFORM_ORDER = [...PLATFORMS, 'Other'];
+const PC_PLATFORMS = ['Windows', 'Linux', 'Steam Deck'];
 
 const DAY_MS = 24 * 3600 * 1000;
 // Bounds what a client can add to the table: further new versions in a day count as Other.
@@ -22,7 +25,9 @@ const VALUES_PER_DIMENSION_PER_DAY = 64;
 const CLEANUP_ROWS = 500;
 const COUNTERS = new Set(['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects']);
 
-const ROOM_COLUMNS = ['rooms_closed', 'rooms_with_guest', 'rooms_relayed', 'party_total'];
+const PLATFORM_ROOM_COLUMNS = ['rooms_cross_platform', 'rooms_android', 'rooms_android_cross', 'rooms_android_pc',
+  'rooms_android_relayed', 'rooms_android_cross_relayed'];
+const ROOM_COLUMNS = ['rooms_closed', 'rooms_with_guest', 'rooms_relayed', 'party_total', ...PLATFORM_ROOM_COLUMNS];
 const DAY_COLUMNS = ['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects', 'peak_online', 'peak_in_rooms',
   'peak_rooms', ...ROOM_COLUMNS];
 const SUMMED = ['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects', ...ROOM_COLUMNS];
@@ -55,6 +60,13 @@ function daysBefore(day, n) {
 export const sampleBucket = (ms) => ms - (ms % SAMPLE_MS);
 
 export const platformCategory = (text) => (PLATFORMS.includes(text) ? text : 'Other');
+
+// A room remembers which platform categories ever sat in it as bits in PLATFORM_ORDER; 0 means it was not tracked.
+export const platformBit = (platform) => 1 << PLATFORM_ORDER.indexOf(platformCategory(platform));
+
+export const platformsOfMask = (mask) => PLATFORM_ORDER.filter((_, i) => mask & (1 << i));
+
+export const platformMix = (mask) => platformsOfMask(mask).join('+');
 
 export function versionCategory(text) {
   if (!text) return 'Unknown';
@@ -123,14 +135,17 @@ export class Metrics {
 
   // A room whose last seat is gone: `peak` seats at most were taken (0: unknown, not counted), `relayed` when the relay
   // carried a frame of it.
-  roomClosed({ peak, lifetimeMs, relayed }) {
+  roomClosed({ peak, lifetimeMs, relayed, platforms = 0 }) {
     if (!Number.isInteger(peak) || peak < 1) return;
     const day = metricsDay(this.now());
     const party = Math.min(peak, MAX_PARTY);
-    this.sql.run(`INSERT INTO metrics_daily (day, rooms_closed, rooms_with_guest, rooms_relayed, party_total)
-      VALUES (?, 1, ?, ?, ?) ON CONFLICT(day) DO UPDATE SET rooms_closed = rooms_closed + 1,
-      rooms_with_guest = rooms_with_guest + excluded.rooms_with_guest, rooms_relayed = rooms_relayed + excluded.rooms_relayed,
-      party_total = party_total + excluded.party_total`, day, party > 1 ? 1 : 0, relayed ? 1 : 0, party);
+    const added = { rooms_closed: 1, rooms_with_guest: party > 1 ? 1 : 0, rooms_relayed: relayed ? 1 : 0, party_total: party,
+      ...(party > 1 ? platformRoom(platforms, relayed) : {}) };
+    const columns = Object.keys(added);
+    this.sql.run(`INSERT INTO metrics_daily (day, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+      ON CONFLICT(day) DO UPDATE SET ${columns.map((c) => `${c} = ${c} + excluded.${c}`).join(', ')}`, day,
+    ...Object.values(added));
+    if (party > 1 && platforms) this.addDimension(day, 'platform_mix', platformMix(platforms));
     this.addDimension(day, 'occupancy', String(party));
     this.addDimension(day, 'lifetime', LIFETIMES.find(([, limit]) => (Number(lifetimeMs) || 0) < limit)[0]);
   }
@@ -235,16 +250,34 @@ export class Metrics {
     const samples = this.sql.all('SELECT bucket, online, in_rooms, rooms FROM metrics_samples WHERE bucket >= ? ORDER BY bucket',
       sampleBucket(since));
     const partyFirst = this.sql.get(`SELECT MIN(day) AS day FROM metrics_daily_dimensions WHERE dimension = 'party_size'`).day;
+    const mixFirst = this.sql.get(`SELECT MIN(day) AS day FROM metrics_daily_dimensions WHERE dimension = 'platform_mix'`).day;
     const totals = this.totals(first, last);
     const previous = this.totals(daysBefore(first, days), daysBefore(first, 1));
     return { generated: now, time_zone: METRICS_TIME_ZONE, days, first, last, sample_ms: SAMPLE_MS, daily, dimensions,
-      party_first_day: partyFirst ?? null, samples, totals, previous, comparison: compare(totals, previous) };
+      party_first_day: partyFirst ?? null, platform_mix_first_day: mixFirst ?? null, samples, totals, previous, comparison: compare(totals, previous) };
   }
 
   totals(from, to) {
     const select = [...SUMMED.map((c) => `COALESCE(SUM(${c}), 0) AS ${c}`), ...PEAKS.map((c) => `COALESCE(MAX(${c}), 0) AS ${c}`)];
     return this.sql.get(`SELECT ${select.join(', ')} FROM metrics_daily WHERE day >= ? AND day <= ?`, from, to);
   }
+}
+
+// The platform counters one multiplayer room adds; none when its platforms were not tracked.
+function platformRoom(mask, relayed) {
+  const platforms = platformsOfMask(mask);
+  if (!platforms.length) return {};
+  const android = platforms.includes('Android');
+  const cross = platforms.length > 1;
+  const used = relayed ? 1 : 0;
+  return {
+    rooms_cross_platform: cross ? 1 : 0,
+    rooms_android: android ? 1 : 0,
+    rooms_android_cross: android && cross ? 1 : 0,
+    rooms_android_pc: android && platforms.some((p) => PC_PLATFORMS.includes(p)) ? 1 : 0,
+    rooms_android_relayed: android ? used : 0,
+    rooms_android_cross_relayed: android && cross ? used : 0,
+  };
 }
 
 const emptyDay = () => Object.fromEntries(DAY_COLUMNS.map((c) => [c, 0]));

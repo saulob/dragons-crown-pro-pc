@@ -122,9 +122,16 @@ showing the last status it knew.
 
 The online service stores anonymous aggregate usage statistics: player counts, sessions, rooms created and joined,
 how many players each room reached and how long it lasted, how many rooms needed the relay,
-the Dragon's Crown Pro PC version, the platform (Windows, Linux, Steam Deck) and the country. These statistics do not
+the Dragon's Crown Pro PC version, the platform (Windows, Linux, Steam Deck, Android) and the country. These statistics do not
 store player names, Online names, Friend Codes, account IDs, IP addresses, room codes or friend lists, and there is no
 per-player or per-session record. The same holds for the party statistics below.
+
+Android clients use this same lobby and the same `online_protocol`, so Android and PC players can share rooms. The `platform`
+a client reports is informational: it never decides who can join, and it is the only device information the service sees (no
+model, GPU or Android version). Android sessions were counted as Other before platform tracking learned the name; those rows
+are not rewritten, and only sessions after the Worker was updated count as Android. Multiplayer rooms that end after the update
+also count their platform mix: cross-platform rooms, Android rooms, Android cross-platform and PC and Android rooms, and
+Android rooms that **used relay**, meaning the relay carried at least one frame of the room (a room can also have been direct).
 
 - The country is worked out by Cloudflare from your connection and kept only as a count per day (for example "Brazil:
   12 sessions"). The service never keeps your city, region or address for these statistics, and the game never sends a

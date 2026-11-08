@@ -53,7 +53,8 @@ Nothing in the repository deploys or logs in. To publish a lobby:
    the Connection test of a test instance started with `DCP_LOBBY` set to its address says the lobby is reachable.
 6. To make it the default for players, set `kDefaultLobbyUrl` in `src/net/online_config.h`.
 
-Updating the deployed Worker is `wrangler deploy` in this folder (`npm run deploy` is the same command); run
+Updating the deployed Worker is `.\tools\worker.ps1` from the repository root (`.\tools\worker.ps1 -DryRun` bundles without
+uploading). It runs `npx wrangler deploy` in this folder, the same as `wrangler deploy` here or `npm run deploy`; run
 `wrangler deploy --dry-run` first to bundle it without uploading. Reports are read in `/admin`, tab Bugs, or with the same
 token from `/admin/api/incidents`, `/admin/api/incidents/<ticket>` and `/admin/api/incidents/<ticket>/log`. An older
 deployment may still hold an empty `reports` table from before the Bug Report page; nothing reads, writes or deletes it.
@@ -172,7 +173,7 @@ nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
 
 | Table | Row | Columns |
 |---|---|---|
-| `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms`, `rooms_closed`, `rooms_with_guest`, `rooms_relayed`, `party_total` |
+| `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms`, `rooms_closed`, `rooms_with_guest`, `rooms_relayed`, `party_total` and the six platform room counters below |
 | `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
 | `metrics_samples` | one per 15 minutes (UTC ms) | the highest `online`, `in_rooms` and `rooms` in the interval; 90 days kept |
 
@@ -196,6 +197,14 @@ nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
   from creation to that moment, in five fixed buckets. The room table carries two counters for this, `peak_members`
   and `relayed`, which disappear with the room; nothing in the metrics names a room. Rooms already open when this was
   deployed (`peak_members` 0) are not counted. Failed or malformed requests never reach these counters.
+- **Platform mixes**: a room keeps a bitmask of the platform categories (`platformCategory`) that ever sat in it, and at close a
+  multiplayer room (largest party above 1) adds `rooms_cross_platform` (two or more categories), `rooms_android`,
+  `rooms_android_cross`, `rooms_android_pc` (Android with Windows, Linux or Steam Deck), `rooms_android_relayed` and
+  `rooms_android_cross_relayed`, and one value of the `platform_mix` dimension: the categories in the fixed order Windows, Linux,
+  Steam Deck, Android, Other joined by `+` (at most 31 values). Single-player rooms, rooms open when this was deployed and
+  reconnects add nothing, and a room is counted once when its last seat goes. `platform_mix_first_day` in the history says
+  when it began, and the dashboard shows it under Multiplayer activity. Used relay is the `relayed` flag below: the relay
+  carried at least one frame, so a room can be both direct and relayed.
 - **Relay rooms** (`rooms_relayed`) are ended rooms in which the relay forwarded at least one frame; the room is marked
   with one write, never per packet. Peer-to-peer traffic is invisible to the lobby, so direct success is not measured.
 - **History** (`/admin/api/history`) also returns `totals` for the range, `previous` for the same number of days
@@ -203,7 +212,8 @@ nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
   rooms created, joins, rooms with a guest and the peaks.
 - **Country** is Cloudflare's `request.cf.country`, set by the Worker in `X-DCP-Edge-Country` (replacing any value the
   client sent) and kept in the socket's attachment while it is open. Missing, `XX` or `T1` is `Unknown`. The local
-  server counts every client as `Unknown`. Platforms other than Windows, Linux and Steam Deck are `Other`; versions that are not
+  server counts every client as `Unknown`. Platforms other than Windows, Linux, Steam Deck and Android are `Other` (Android sessions
+  before this was added were counted as `Other` and are not rewritten); versions that are not
   a dotted number such as `0.8.0` are `Other`, and after 64 values in a day new ones are `Other` too.
 
 **Party snapshots.** `party.report` is an optional request: a client that never sends it signs in, creates and joins

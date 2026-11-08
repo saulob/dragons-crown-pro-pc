@@ -7,7 +7,7 @@ import { COUNTRY_HEADER, handleAdmin, internalMetricsRoute, tokenMatches, withEd
 import { PROTECTION } from '../src/abuse.js';
 import { ADMIN_CSS, ADMIN_HTML, ADMIN_JS } from '../src/admin_page.js';
 import { Lobby } from '../src/lobby.js';
-import { SAMPLE_MS, countryCode, metricsDay, percentChange, sampleBucket } from '../src/metrics.js';
+import { SAMPLE_MS, countryCode, metricsDay, percentChange, platformBit, platformCategory, platformMix, sampleBucket } from '../src/metrics.js';
 import { encodeRelayFrame, roomToken } from '../src/relay.js';
 import { LocalHost, sqliteStore } from '../local/host.js';
 import { ROOM, makeLobby } from './harness.js';
@@ -248,7 +248,7 @@ test('no per-session or per-player analytics table exists', () => {
   for (const table of tables.filter((t) => t.startsWith('metrics_'))) {
     for (const { name } of env.host.sql.all(`PRAGMA table_info(${table})`)) {
       assert.ok(!forbidden.test(name) || name === 'rooms_created' || name === 'room_joins' || name === 'peak_rooms' ||
-        name === 'in_rooms' || name === 'peak_in_rooms', `${table}.${name}`);
+        name === 'in_rooms' || name === 'peak_in_rooms' || /^rooms_(cross_platform|android(_[a-z]+)*)$/.test(name), `${table}.${name}`);
     }
   }
 });
@@ -650,4 +650,210 @@ test('the client party report is the exact frame the lobby accepts: op, seq and 
   assert.equal(c.call('room.create', ROOM).code, 'ok');
   assert.equal(c.raw('{"op":"party.report","seq":9,"classes":[0,2]}').code, 'ok');
   assert.equal(c.call('party.report', { classes: [0, 2], host: 0 }).code, 'ok');
+});
+
+// ---- Android and platform mixes ----
+
+const hello = (platform) => ({ online_protocol: 1, version: '0.9.3', platform, relay: true });
+
+let nextPlayer = 1;
+
+function playRoom(env, platforms, { relay = false, leave = true } = {}) {
+  const players = platforms.map((platform) => {
+    const client = env.connect(`198.51.${(nextPlayer >> 8) & 255}.${nextPlayer++ & 255}`, 'BR');
+    assert.equal(client.hello(hello(platform)).code, 'ok');
+    return client;
+  });
+  const created = players[0].call('room.create', ROOM);
+  const joins = players.slice(1).map((p) => p.call('room.join', { room: created.room.id }));
+  if (relay && joins[0]) {
+    players[0].relay(encodeRelayFrame(roomToken(created.room.key), joins[0].me, 1, new Uint8Array([1])));
+  }
+  if (leave) {
+    for (const p of [...players].reverse()) p.call('room.leave', { room: created.room.id });
+  }
+  return { players, created, joins };
+}
+
+test('platformCategory knows Android and keeps the others; anything else is Other', () => {
+  for (const known of ['Windows', 'Linux', 'Steam Deck', 'Android']) assert.equal(platformCategory(known), known);
+  for (const other of ['android', 'macOS', 'iOS', '', undefined, null, 'Android 14', 'Pixel 8', 'Windows+Android']) {
+    assert.equal(platformCategory(other), 'Other', String(other));
+  }
+});
+
+test('an Android session counts as Android, shows live as Android and is not Other', () => {
+  const env = makeLobby({ log: () => {} });
+  online(env, hello('Android'), '203.0.113.1');
+  online(env, hello('Windows'), '203.0.113.2');
+  online(env, { ...hello('Android'), version: '0.9.3' }, '203.0.113.3');
+  online(env, hello('Fire OS'), '203.0.113.4');
+  assert.deepEqual(dimension(env, 'platform'), { Android: 2, Windows: 1, Other: 1 });
+  assert.deepEqual(live(env).platform, [{ value: 'Android', count: 2 }, { value: 'Other', count: 1 }, { value: 'Windows', count: 1 }]);
+  assert.ok(ADMIN_HTML.includes('d-platform'));
+});
+
+test('platform mixes use one canonical order, whichever platform hosts', () => {
+  assert.equal(platformMix(platformBit('Android') | platformBit('Windows')), 'Windows+Android');
+  assert.equal(platformMix(platformBit('Windows') | platformBit('Android')), 'Windows+Android');
+  assert.equal(platformMix(platformBit('Steam Deck') | platformBit('Linux') | platformBit('weird')), 'Linux+Steam Deck+Other');
+  assert.equal(platformMix(platformBit('Unknown') | platformBit('Other')), 'Other');
+  const env = makeLobby({ log: () => {} });
+  playRoom(env, ['Android', 'Windows']);
+  playRoom(env, ['Windows', 'Android']);
+  assert.deepEqual(dimension(env, 'platform_mix'), { 'Windows+Android': 2 });
+});
+
+test('Android with Windows, Linux or Steam Deck is a cross-platform Android room with a PC', () => {
+  for (const pc of ['Windows', 'Linux', 'Steam Deck']) {
+    const env = makeLobby({ log: () => {} });
+    playRoom(env, [pc, 'Android']);
+    const t = today(env);
+    assert.deepEqual([t.rooms_with_guest, t.rooms_cross_platform, t.rooms_android, t.rooms_android_cross, t.rooms_android_pc],
+      [1, 1, 1, 1, 1], pc);
+    assert.deepEqual(dimension(env, 'platform_mix'), { [`${pc}+Android`]: 1 }, pc);
+  }
+});
+
+test('two Android players are a same-platform Android room, and two PCs are not Android', () => {
+  const env = makeLobby({ log: () => {} });
+  playRoom(env, ['Android', 'Android']);
+  let t = today(env);
+  assert.deepEqual([t.rooms_cross_platform, t.rooms_android, t.rooms_android_cross, t.rooms_android_pc], [0, 1, 0, 0]);
+  playRoom(env, ['Windows', 'Linux']);
+  t = today(env);
+  assert.deepEqual([t.rooms_cross_platform, t.rooms_android, t.rooms_android_cross, t.rooms_android_pc], [1, 1, 0, 0]);
+  assert.deepEqual(dimension(env, 'platform_mix'), { Android: 1, 'Windows+Linux': 1 });
+});
+
+test('Android and an unknown platform are cross-platform but not PC and Android', () => {
+  const env = makeLobby({ log: () => {} });
+  playRoom(env, ['Android', 'Fire OS']);
+  const t = today(env);
+  assert.deepEqual([t.rooms_cross_platform, t.rooms_android_cross, t.rooms_android_pc], [1, 1, 0]);
+  assert.deepEqual(dimension(env, 'platform_mix'), { 'Android+Other': 1 });
+});
+
+test('a single-player Android room is not multiplayer and adds no platform metric', () => {
+  const env = makeLobby({ log: () => {} });
+  playRoom(env, ['Android']);
+  const t = today(env);
+  assert.deepEqual([t.rooms_closed, t.rooms_with_guest, t.rooms_cross_platform, t.rooms_android, t.rooms_android_relayed], [1, 0, 0, 0, 0]);
+  assert.deepEqual(dimension(env, 'platform_mix'), {});
+});
+
+test('an Android room that used the relay counts once as relayed; one that did not does not', () => {
+  const env = makeLobby({ log: () => {} });
+  playRoom(env, ['Windows', 'Android'], { relay: true });
+  playRoom(env, ['Android', 'Android']);
+  playRoom(env, ['Windows', 'Linux'], { relay: true });
+  const t = today(env);
+  assert.deepEqual([t.rooms_android, t.rooms_android_relayed, t.rooms_android_cross, t.rooms_android_cross_relayed, t.rooms_relayed],
+    [2, 1, 1, 1, 2]);
+});
+
+test('a member who leaves and rejoins, or resumes, does not add a room or change the mix', () => {
+  const env = makeLobby({ log: () => {} });
+  const { players, created, joins } = playRoom(env, ['Windows', 'Android'], { leave: false });
+  const guest = players[1];
+  guest.drop();
+  const back = env.connect('203.0.113.99');
+  Object.assign(back, { account: guest.account, secret: guest.secret });
+  assert.equal(back.hello(hello('Android')).code, 'ok');
+  assert.equal(back.call('room.resume', { room: created.room.id, member: joins[0].me }).code, 'ok');
+  assert.equal(today(env).rooms_closed, 0);
+  back.call('room.leave', { room: created.room.id });
+  players[0].call('room.leave', { room: created.room.id });
+  const t = today(env);
+  assert.deepEqual([t.rooms_closed, t.rooms_cross_platform, t.rooms_android], [1, 1, 1]);
+  assert.deepEqual(dimension(env, 'platform_mix'), { 'Windows+Android': 1 });
+});
+
+test('a platform that left before the room closed still counts toward its mix', () => {
+  const env = makeLobby({ log: () => {} });
+  const { players, created } = playRoom(env, ['Windows', 'Android'], { leave: false });
+  players[1].call('room.leave', { room: created.room.id });
+  players[0].call('room.leave', { room: created.room.id });
+  assert.deepEqual(dimension(env, 'platform_mix'), { 'Windows+Android': 1 });
+});
+
+test('platform mixes stay inside a fixed vocabulary however clients name their platform', () => {
+  const env = makeLobby({ log: () => {} });
+  for (let i = 0; i < 40; i++) playRoom(env, ['Windows', `Weird ${i}`]);
+  const mixes = Object.keys(dimension(env, 'platform_mix'));
+  assert.deepEqual(mixes, ['Windows+Other']);
+  const allowed = new Set();
+  for (let mask = 1; mask < 32; mask++) allowed.add(platformMix(mask));
+  assert.equal(allowed.size, 31);
+  assert.ok(mixes.every((m) => allowed.has(m)));
+});
+
+test('rooms from before platform tracking add no platform metric, and a joiner cannot make them look single-platform', () => {
+  const env = makeLobby({ log: () => {} });
+  const a = online(env, hello('Windows'), '203.0.113.1');
+  const created = a.call('room.create', ROOM);
+  env.host.sql.run('UPDATE rooms SET platforms = 0');
+  const b = online(env, hello('Android'), '203.0.113.2');
+  b.call('room.join', { room: created.room.id });
+  b.call('room.leave', { room: created.room.id });
+  a.call('room.leave', { room: created.room.id });
+  const t = today(env);
+  assert.deepEqual([t.rooms_closed, t.rooms_with_guest, t.rooms_cross_platform, t.rooms_android], [1, 1, 0, 0]);
+  assert.deepEqual(dimension(env, 'platform_mix'), {});
+});
+
+test('a metrics database from before the platform columns keeps its rows and gains zeroed columns', () => {
+  const store = sqliteStore();
+  store.run(`CREATE TABLE metrics_daily (day TEXT PRIMARY KEY, sessions INTEGER NOT NULL DEFAULT 0,
+     rooms_created INTEGER NOT NULL DEFAULT 0, room_joins INTEGER NOT NULL DEFAULT 0,
+     incompatible_rejects INTEGER NOT NULL DEFAULT 0, peak_online INTEGER NOT NULL DEFAULT 0,
+     peak_in_rooms INTEGER NOT NULL DEFAULT 0, peak_rooms INTEGER NOT NULL DEFAULT 0, rooms_closed INTEGER NOT NULL DEFAULT 0,
+     rooms_with_guest INTEGER NOT NULL DEFAULT 0, rooms_relayed INTEGER NOT NULL DEFAULT 0, party_total INTEGER NOT NULL DEFAULT 0)`);
+  store.run(`INSERT INTO metrics_daily (day, sessions, rooms_closed, rooms_with_guest) VALUES ('2026-11-01', 5, 3, 2)`);
+  store.run(`CREATE TABLE metrics_daily_dimensions (day TEXT NOT NULL, dimension TEXT NOT NULL, value TEXT NOT NULL,
+     count INTEGER NOT NULL, PRIMARY KEY (day, dimension, value))`);
+  store.run(`INSERT INTO metrics_daily_dimensions VALUES ('2026-11-01', 'platform', 'Other', 4)`);
+  const host = new LocalHost(store, { now: () => Date.UTC(2026, 10, 2, 15), log: (text) => { throw new Error(text); } });
+  const lobby = new Lobby(host);
+  const row = host.sql.get(`SELECT * FROM metrics_daily WHERE day = '2026-11-01'`);
+  assert.deepEqual([row.sessions, row.rooms_closed, row.rooms_with_guest], [5, 3, 2]);
+  for (const column of ['rooms_cross_platform', 'rooms_android', 'rooms_android_cross', 'rooms_android_pc', 'rooms_android_relayed',
+    'rooms_android_cross_relayed']) assert.equal(row[column], 0, column);
+  assert.deepEqual(host.sql.all(`SELECT value, count FROM metrics_daily_dimensions WHERE dimension = 'platform'`), [{ value: 'Other', count: 4 }]);
+  const history = lobby.metricsHistory(7);
+  assert.equal(history.platform_mix_first_day, null);
+  assert.equal(history.totals.rooms_android, 0);
+});
+
+test('the platform mix start day is reported, and the comparison never invents a zero for missing history', () => {
+  const env = makeLobby({ log: () => {} });
+  assert.equal(env.lobby.metricsHistory(7).platform_mix_first_day, null);
+  playRoom(env, ['Windows', 'Android']);
+  const history = env.lobby.metricsHistory(7);
+  assert.equal(history.platform_mix_first_day, metricsDay(env.clock.now));
+  assert.equal(history.comparison.rooms_with_guest.change, null);
+  assert.ok(!('rooms_android' in history.comparison));
+  assert.deepEqual(history.dimensions.platform_mix, [{ value: 'Windows+Android', count: 1 }]);
+});
+
+test('Android and PC share the lobby: the platform field never decides who may join', () => {
+  const env = makeLobby({ log: () => {} });
+  const pc = online(env, hello('Windows'), '203.0.113.1');
+  const created = pc.call('room.create', ROOM);
+  for (const [i, platform] of ['Android', 'Linux', 'Steam Deck', 'Fire OS', ''].entries()) {
+    const guest = online(env, hello(platform), `203.0.113.${20 + i}`);
+    assert.equal(guest.call('room.join', { room: created.room.id }).code, 'ok', platform);
+    guest.call('room.leave', { room: created.room.id });
+  }
+  const source = readFileSync(join(import.meta.dirname, '..', 'src', 'lobby.js'), 'utf8');
+  const compatible = source.slice(source.indexOf('function compatible('), source.indexOf('}', source.indexOf('function compatible(')));
+  assert.ok(!/platform/.test(compatible));
+});
+
+test('the dashboard shows Android platform cards and the used-relay wording, from the summed counters only', () => {
+  for (const label of ['Cross-platform rooms', 'Android multiplayer rooms', 'Android cross-platform rooms', 'Android rooms that used relay',
+    'Used relay means the relay carried at least one frame']) assert.ok(ADMIN_JS.includes(label), label);
+  assert.ok(ADMIN_JS.includes('PC \\u2194 Android rooms'));
+  assert.ok(ADMIN_HTML.includes('id="platform-cards"') && ADMIN_HTML.includes('id="d-mix"'));
+  assert.ok(!/Relay transport/i.test(ADMIN_JS));
 });

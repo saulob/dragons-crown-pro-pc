@@ -7,7 +7,7 @@ import { ipGroup } from './edge.js';
 import { INCIDENT, INCIDENT_LIMITED, IncidentDesk, readClaim, readClaims, readIncident } from './incidents.js';
 import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
-import { Metrics, countryCode, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
+import { Metrics, countryCode, platformBit, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
 
 export const PROTOCOL = 1;
@@ -112,6 +112,7 @@ const MIGRATIONS = [
   [`ALTER TABLE rooms ADD COLUMN peak_members INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE rooms ADD COLUMN relayed INTEGER NOT NULL DEFAULT 0`],
   [`ALTER TABLE members ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''`],
+  [`ALTER TABLE rooms ADD COLUMN platforms INTEGER NOT NULL DEFAULT 0`],
 ];
 
 // ---- input validation ----
@@ -665,7 +666,7 @@ export class Lobby {
     const rest = this.memberRows(roomId);
     if (!rest.length) {
       this.track(() => this.metrics.roomClosed({ peak: room.peak_members, lifetimeMs: this.host.now() - room.created,
-        relayed: room.relayed === 1 }));
+        relayed: room.relayed === 1, platforms: room.platforms }));
       this.host.sql.run('DELETE FROM rooms WHERE id = ?', roomId);
       this.relays.forgetRoom(roomId);
       return;
@@ -1104,9 +1105,9 @@ const HANDLERS = {
     do code = this.randomCode(6);
     while (this.host.sql.get('SELECT 1 AS x FROM rooms WHERE code = ?', code));
     this.host.sql.run(`INSERT INTO rooms (id, game, world, slots, flags, owner, code, key, ints, bin_int, bin_ext, created,
-      online_protocol, peak_members) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`, id, att.game, msg.world, msg.slots,
-      (flags & ~FLAG_FULL) >>> 0, MEMBER_IDS[0], code, this.randomHex(16), JSON.stringify(ints), JSON.stringify(binInt),
-      JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0);
+      online_protocol, peak_members, platforms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`, id, att.game, msg.world,
+    msg.slots, (flags & ~FLAG_FULL) >>> 0, MEMBER_IDS[0], code, this.randomHex(16), JSON.stringify(ints), JSON.stringify(binInt),
+    JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0, platformBit(att.platform));
     this.insertMember(att, id, MEMBER_IDS[0], memberBin);
     this.track(() => this.metrics.count('rooms_created'));
     this.diagnose('room_create_accepted');
@@ -1179,6 +1180,7 @@ const HANDLERS = {
     this.insertMember(att, room.id, memberId, memberBin);
     this.host.sql.run('UPDATE rooms SET peak_members = MAX(peak_members, ?) WHERE id = ? AND peak_members > 0', members.length + 1,
       room.id);
+    this.host.sql.run('UPDATE rooms SET platforms = platforms | ? WHERE id = ? AND platforms > 0', platformBit(att.platform), room.id);
     const joined = this.memberView(this.memberRow(room.id, memberId));
     this.toRoom(room.id, { ev: 'room.member_joined', room: String(room.id), member: joined }, memberId);
     const roomId = room.id;
