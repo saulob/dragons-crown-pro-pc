@@ -99,7 +99,7 @@ std::string GameFilesHelp() {
            SupportedBuildsText() +
            Tr(". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their "
               "respective 1.00 base packages. The game is unpacked into the game folder next to the program (about 6 "
-              "GB). No game files are included. Reinstalling keeps your saves and settings.");
+              "GB). The game itself is not included. Reinstalling keeps your saves and settings.");
 }
 #ifdef _WIN32
 constexpr char kShowLauncherHelp[] = "Off starts the game directly. Hold Shift while starting to bring it back.";
@@ -1325,8 +1325,8 @@ private:
             "This open source PC port is maintained and developed in my free time. If you enjoy the project and would "
             "like to support its continued development, you can sponsor my work on GitHub.",
             "Support is completely optional and helps support ongoing improvements and future projects.");
-        ui.Paragraph("Dragon's Crown Pro for PlayStation 4, running natively on this PC. No game files are included; "
-                     "the game runs from the user's own copy.");
+        ui.Paragraph("Dragon's Crown Pro for PlayStation 4, running natively on this PC. The game itself is not included; "
+                     "it runs from the user's own copy.");
         ui.Spacer(4);
         std::error_code ec;
         if (std::filesystem::is_directory(paths_.app0, ec)) {

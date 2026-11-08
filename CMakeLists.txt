@@ -399,6 +399,7 @@ add_executable(dcp-pipeline-cache-tests EXCLUDE_FROM_ALL tests/pipeline_cache_te
 set_target_properties(dcp-pipeline-cache-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-pipeline-cache-tests PRIVATE gpu/shadps4)
 target_compile_options(dcp-pipeline-cache-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-pipeline-cache-tests PRIVATE Threads::Threads)
 
 # Focused tests of the issue #32 water diagnostics (classification, deduplication, the cap); not part of the default build.
 add_executable(dcp-water-diag-tests EXCLUDE_FROM_ALL tests/water_diag_tests.cpp)
@@ -509,5 +510,6 @@ if (NOT WIN32)
 
     # Focused test of the loader's SIGPIPE handling (tools/build.sh --test); not part of the default build.
     add_executable(dcp-sigpipe-tests EXCLUDE_FROM_ALL tests/sigpipe_tests.c)
+    target_compile_definitions(dcp-sigpipe-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     target_compile_options(dcp-sigpipe-tests PRIVATE -Wall -Wextra -Werror)
 endif()

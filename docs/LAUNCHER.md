@@ -99,8 +99,8 @@ into `CUSA10454-1.01`. The two builds have different `eboot.bin` files. An updat
 the launcher says so otherwise. The 1.01 install keeps the base game's English, French, German, Italian and Spanish
 menu and subtitle resources: its `DRACRO_US.CPK` is the 1.00 archive with the update's entries outside the language
 sets laid over it, so the 1.00 folder is never changed. The update's own archive holds Russian text in its US slot
-(and has no Russian slot); that text is not installed, so English stays English and Russian is not a language of this
-build. A 1.01 folder installed by an older launcher keeps that text until the update is installed again.
+(and has no Russian slot); that text is not installed, so English stays English. Russian is the port's built-in
+translation, served over the English slot. A 1.01 folder installed by an older launcher keeps that text until the update is installed again.
 
 **Japanese builds.** The base package (`drcpro.pkg`, CATEGORY `gd`, APP_VER 01.00) is a complete game: it is installed
 into `CUSA07001-1.00`. The 1.02 and 1.03 updates (CATEGORY `gp`) are each laid over
@@ -459,8 +459,8 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
-  is never offered: the 1.01 update's archive has no Russian slot, only Russian text in its US slot, which the install
-  does not take over (see USA builds). `DRACRO_EU.CPK` has a UK slot beside the US one, as `DRACRO_US.CPK` does; it is
+  is offered wherever the native slot is complete, like Portuguese (Brazil); the 1.01 update's own Russian text in its
+  US slot is not taken over (see USA builds). `DRACRO_EU.CPK` has a UK slot beside the US one, as `DRACRO_US.CPK` does; it is
   not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language Korean unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`

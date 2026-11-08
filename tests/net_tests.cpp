@@ -2129,6 +2129,24 @@ void TestRelayStaysInsideTheLobbyBudget() {
     CHECK(net.a().socket->relay_stats().throttled > 0);
 }
 
+// A directory only this run uses, removed with it; an older run's leftovers are never touched.
+struct RunRoot {
+    fs::path path;
+    RunRoot() {
+        for (int attempt = 0; attempt < 16 && path.empty(); ++attempt) {
+            uint8_t tag[6];
+            if (!random_bytes(tag, sizeof(tag))) break;
+            const fs::path candidate = fs::temp_directory_path() / ("dcp-net-tests-" + hex_encode(tag, sizeof(tag)));
+            std::error_code error;
+            if (fs::create_directory(candidate, error)) path = candidate;
+        }
+    }
+    ~RunRoot() {
+        std::error_code error;
+        if (!path.empty()) fs::remove_all(path, error);
+    }
+};
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2137,8 +2155,12 @@ int main(int argc, char** argv) {
         std::printf("FAILED: no sockets\n");
         return 1;
     }
-    const fs::path base = fs::temp_directory_path() / "dcp-net-tests";
-    fs::create_directories(base);
+    const RunRoot root;
+    if (root.path.empty()) {
+        std::printf("FAILED: no private temporary directory\n");
+        return 1;
+    }
+    const fs::path& base = root.path;
     const char* lobby = std::getenv("DCP_TEST_LOBBY");
     const bool lobby_set = lobby && *lobby;
     Group("foundations", [&] {

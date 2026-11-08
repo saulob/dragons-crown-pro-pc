@@ -8,7 +8,7 @@
 [![Downloads](https://img.shields.io/github/downloads/saulob/dragons-crown-pro-pc/total?style=for-the-badge&color=e0bb32&labelColor=07101f&cacheSeconds=300)](https://github.com/saulob/dragons-crown-pro-pc/releases)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20experimental%20%7C%20Steam%20Deck%20experimental-00acc1?style=for-the-badge&labelColor=07101f)
 
-<sub>The original PS4 game code runs on the PC with a replacement for the PS4 system libraries and a Vulkan renderer derived from <a href="https://github.com/shadps4-emu/shadPS4">shadPS4</a>. <b>No game files included</b>: bring your own legally obtained Dragon's Crown Pro PS4 package.</sub>
+<sub>The original PS4 game code runs on the PC with a replacement for the PS4 system libraries and a Vulkan renderer derived from <a href="https://github.com/shadps4-emu/shadPS4">shadPS4</a>. <b>The game itself is not included</b>: bring your own legally obtained Dragon's Crown Pro PS4 package.</sub>
 
 </div>
 
@@ -142,7 +142,7 @@ The Linux package is the same game and launcher, so the package requirements are
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
 5. Press **PLAY**.
 
-**No game files are included** in the release, and the port does not download the game.
+**The game itself is not included**: the release contains no game package or executable, and the port does not download the game. It does include the localization resources used for its additional languages (see [Credits](#credits)).
 
 **Reinstall game...** replaces only the installed game files and keeps your settings, saves, shader cache and logs. If an installation fails or is cancelled, the previous one is left as it was.
 
@@ -321,7 +321,7 @@ Dragon's Crown Pro PC is maintained and developed in my free time. If you enjoy 
 
 ## Credits
 
-- Dragon's Crown Pro by Vanillaware, published by Atlus (2018). This is an unofficial fan-made PC port. It is not affiliated with or endorsed by Vanillaware, Atlus, SEGA, Sony Interactive Entertainment or any other rights holder, and it contains none of their files.
+- Dragon's Crown Pro by Vanillaware, published by Atlus (2018). This is an unofficial fan-made PC port. It is not affiliated with or endorsed by Vanillaware, Atlus, SEGA, Sony Interactive Entertainment or any other rights holder, and it contains no game package or executable.
 - [shadPS4](https://github.com/shadps4-emu/shadPS4) for the Vulkan renderer, shader recompiler and GPU command processing the video core is built on, and for the PS4 package extractor the installer is adapted from, as it was before upstream commit `be22674f` removed it (GPL-2.0-or-later)
 - [gow3_pc](https://github.com/FelipePrado0/gow3_pc) and its lineage, uncharted-ndc-native, MediEvil PC and the HayatoG ports, for the loader, runtime and video core this port grew from (see [docs/REFERENCES.md](docs/REFERENCES.md))
 - [OpenCrown-PC](https://github.com/Nezara/OpenCrown-PC) by Nezara for published Dragon's Crown Pro reverse-engineering research used as a technical reference, including parts of the online/lobby research and the original CUSA10454 1.00 story/tutorial skip patch-site research. Dragon's Crown Pro PC's implementations were written separately for this project
@@ -346,4 +346,4 @@ Original code in this project is licensed under the GNU General Public License v
 
 Third-party components retain their respective licenses and notices. See [licenses/THIRD-PARTY-LICENSES.txt](packaging/licenses/THIRD-PARTY-LICENSES.txt).
 
-No game files are included. Dragon's Crown Pro and its assets are not covered by this project's license.
+The game package and executable are not included. Dragon's Crown Pro and its assets are not covered by this project's license. The localization resources shipped for the port's additional languages are credited under [Credits](#credits).

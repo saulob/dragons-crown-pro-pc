@@ -101,7 +101,7 @@ uint32_t RtoFor(double srtt, double rttvar) {
 }
 
 std::string PeerClosed(const uint8_t* data, size_t size) {
-    switch (size > kHeader ? data[kHeader] : kCloseUnspecified) {
+    switch (size > kHeader ? data[kHeader] : uint8_t(kCloseUnspecified)) {
     case kCloseByGame: return "the peer's game closed the connection";
     case kCloseBySocket: return "the peer's P2P socket closed";
     case kCloseProtocol: return "the peer refused our data (a message larger than the game accepts)";

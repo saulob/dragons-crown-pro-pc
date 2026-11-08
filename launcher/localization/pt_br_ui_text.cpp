@@ -95,7 +95,7 @@ Install a supported build from your own .pkg file.	Instale uma versão compatív
 Check that the game folder can be read, then install again.	Verifique se a pasta do jogo pode ser lida e instale novamente.
 Game files	Arquivos do jogo
 Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported:\s	Selecione o seu próprio pacote de Dragon's Crown Pro obtido legalmente (.pkg). Compatível com:\s
-. The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages. The game is unpacked into the game folder next to the program (about 6 GB). No game files are included. Reinstalling keeps your saves and settings.	. As atualizações 1.01 dos EUA, 1.02 e 1.03 do Japão e 1.02 da Ásia/Hong Kong são instaladas sobre os respectivos pacotes base 1.00. O jogo é descompactado na pasta de jogo ao lado do programa (cerca de 6 GB). Nenhum arquivo do jogo está incluído. Reinstalar mantém seus jogos salvos e configurações.
+. The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages. The game is unpacked into the game folder next to the program (about 6 GB). The game itself is not included. Reinstalling keeps your saves and settings.	. As atualizações 1.01 dos EUA, 1.02 e 1.03 do Japão e 1.02 da Ásia/Hong Kong são instaladas sobre os respectivos pacotes base 1.00. O jogo é descompactado na pasta de jogo ao lado do programa (cerca de 6 GB). O jogo em si não está incluído. Reinstalar mantém seus jogos salvos e configurações.
 The game files are not ready: see the Play page.	Os arquivos do jogo não estão prontos: veja a página Jogar.
 Wait for the installation to finish.	Aguarde a instalação terminar.
 Wait for the game file changes to finish.	Aguarde as alterações dos arquivos do jogo terminarem.
@@ -295,7 +295,7 @@ Cheats menu	Menu de trapaças
 Window mode	Modo janela
 This open source PC port is maintained and developed in my free time. If you enjoy the project and would like to support its continued development, you can sponsor my work on GitHub.	Este port para PC de código aberto é mantido e desenvolvido no meu tempo livre. Se você gosta do projeto e quer apoiar seu desenvolvimento contínuo, pode patrocinar meu trabalho pelo GitHub.
 Support is completely optional and helps support ongoing improvements and future projects.	O apoio é totalmente opcional e ajuda no desenvolvimento de melhorias e novos projetos.
-Dragon's Crown Pro for PlayStation 4, running natively on this PC. No game files are included; the game runs from the user's own copy.	Dragon's Crown Pro para PlayStation 4, rodando nativamente neste PC. Nenhum arquivo do jogo está incluído; o jogo roda a partir da cópia do próprio usuário.
+Dragon's Crown Pro for PlayStation 4, running natively on this PC. The game itself is not included; it runs from the user's own copy.	Dragon's Crown Pro para PlayStation 4, rodando nativamente neste PC. O jogo em si não está incluído; ele roda a partir da cópia do próprio usuário.
 Where the prepared game is read from.	De onde o jogo preparado é lido.
 Open game folder	Abrir pasta do jogo
 Saves and settings	Jogos salvos e configurações

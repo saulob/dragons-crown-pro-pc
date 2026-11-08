@@ -67,9 +67,26 @@ static void test_ignored_sigpipe_survives_the_write(void) {
     CHECK(exited_normally && exit_code == 0);
 }
 
+/* The loader itself installs the ignore disposition (its Windows build has no sigaction, so it compiles only in the POSIX branch). */
+static void test_loader_ignores_sigpipe(void) {
+    FILE *file = fopen(DCP_SOURCE_DIR "/src/loader.c", "rb");
+    CHECK(file != NULL);
+    if (!file) return;
+    char line[512];
+    int handler = 0, installed = 0;
+    while (fgets(line, sizeof(line), file)) {
+        if (strstr(line, "ignore_pipe.sa_handler = SIG_IGN")) handler = 1;
+        if (strstr(line, "sigaction(SIGPIPE, &ignore_pipe")) installed = 1;
+    }
+    fclose(file);
+    CHECK(handler);
+    CHECK(installed);
+}
+
 int main(void) {
     test_default_disposition_is_killed_by_sigpipe();
     test_ignored_sigpipe_survives_the_write();
+    test_loader_ignores_sigpipe();
     printf("sigpipe tests: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

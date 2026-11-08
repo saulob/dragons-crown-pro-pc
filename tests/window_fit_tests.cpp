@@ -76,6 +76,19 @@ void TestScaleOnlyChangesTheEstimate() {
     }
 }
 
+void TestDisplayScales() {
+    CHECK(dcp::EstimatedBorders(2.25f).top == 90);
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const dcp::WindowBorders borders = dcp::EstimatedBorders(scale);
+        const dcp::WindowFit roomy = Fit(1920, 1080, borders, {0, 0, 3840, 2100});
+        CHECK(roomy.width == 1920 && roomy.height == 1080);
+        const dcp::WindowFit tight = Fit(1920, 1080, borders, {0, 0, 1920, 1040});
+        CHECK(tight.width <= 1920 && tight.height + borders.top <= 1040);
+        CHECK(std::abs(tight.width * 1080 - tight.height * 1920) <= 1920);
+        CHECK(tight.y - borders.top >= 0 && tight.y + tight.height <= 1040);
+    }
+}
+
 void TestCentring() {
     const dcp::WindowFit f = Fit(1280, 720, kBars, {0, 0, 1920, 1040});
     const int outer_w = f.width + 2, outer_h = f.height + 32;
@@ -112,6 +125,7 @@ int main() {
     TestOversizedShrinksProportionally();
     TestUltrawideKeepsShape();
     TestScaleOnlyChangesTheEstimate();
+    TestDisplayScales();
     TestCentring();
     TestDegenerateInput();
     TestConfiguredSizeUntouched();

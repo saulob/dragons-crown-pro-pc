@@ -1,4 +1,4 @@
-/* Focused tests of the PT-BR character message preview: the class and category records, the preview that writes nothing,
+/* Focused tests of the translated character message preview: the class and category records, the preview that writes nothing,
  * the pick that commits what was previewed, the callers it must leave alone, and the all-or-nothing install on synthetic
  * and local boot images (read only). */
 #include <stdint.h>

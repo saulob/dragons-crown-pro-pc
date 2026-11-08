@@ -1,4 +1,4 @@
-/* PT-BR character creation: an empty message row shows the default the character will receive, not "no message". The
+/* Character creation in a translated language: an empty message row shows the default the character will receive, not "no message". The
  * game picks one DefaultBone variant per character when it is added, so the variant previewed for a class is held and
  * given to that pick. The guest's rand still runs once, and nothing is written to the character before it is added. */
 #ifndef DCP_DEFAULT_MESSAGE_HOOK_H

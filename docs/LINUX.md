@@ -95,7 +95,7 @@ and stays open, so a driver can be installed and Play pressed again. When the la
 launcher** off, `--dcp-skip-launcher`) the same text appears in a small window and the program exits with status 1.
 Without any `libvulkan.so.1` it cannot start at all.
 `libstdc++` and `libgcc_s` are carried in `usr/lib/compat` and used by `AppRun` only when the system's are older than
-the build needs. The package contains no game files, no drivers and no local paths (`package-linux.sh`
+the build needs. The package contains no game package or executable, no drivers and no local paths (`package-linux.sh`
 checks the staged folder before it writes the AppImage).
 
 ### FUSE and the AppImage runtime

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -174,6 +175,149 @@ void TestInvalidEntry() {
     CHECK(threw);
 }
 
+template <typename F>
+bool ThrowsCorruptData(F&& read) {
+    try {
+        read();
+    } catch (const Serialization::CorruptData&) {
+        return true;
+    }
+    return false;
+}
+
+Bytes Serialized(const auto&... values) {
+    Serialization::Archive ar;
+    Serialization::Writer writer{ar};
+    (writer.Write(values), ...);
+    return ar.TakeOff();
+}
+
+struct FixedList {
+    using iterator = std::uint32_t*;
+    iterator begin() { return items; }
+    iterator end() { return items + count; }
+    std::size_t size() const { return count; }
+    static constexpr std::size_t max_size() { return 4; }
+    void emplace_back() { items[count++] = 0; }
+    std::uint32_t& back() { return items[count - 1]; }
+    std::uint32_t items[4]{};
+    std::size_t count{};
+};
+
+// F2: lengths and sizes read from a sealed entry are proven against the bytes left before anything
+// is allocated or read; the offset arithmetic cannot wrap.
+void TestMalformedLengths() {
+    constexpr std::size_t kMax = std::numeric_limits<std::size_t>::max();
+    for (const std::size_t length : {std::size_t(9), std::size_t(1) << 31, std::size_t(1) << 62, kMax - 7, kMax}) {
+        Serialization::Archive ar{Serialized(length, std::uint32_t{0x41424344})};
+        Serialization::Reader reader{ar};
+        std::string text;
+        CHECK(ThrowsCorruptData([&] { reader.Read(text); }));
+        CHECK(text.empty() && text.capacity() < 64);
+    }
+
+    Serialization::Archive at_end{Bytes(8, 1)};
+    Serialization::Reader end_reader{at_end};
+    std::uint64_t eight{};
+    end_reader.Read(eight);
+    CHECK(at_end.Remaining() == 0 && at_end.IsEoS());
+    std::uint8_t one{};
+    CHECK(ThrowsCorruptData([&] { end_reader.Read(one); }));
+    CHECK(ThrowsCorruptData([&] { at_end.Require(1); }));
+    CHECK(ThrowsCorruptData([&] { at_end.Advance(1); }));
+    at_end.Require(0);
+    at_end.Advance(0);
+
+    Serialization::Archive partial{Bytes(16, 2)};
+    Serialization::Reader partial_reader{partial};
+    partial_reader.Read(one);
+    char sink[32];
+    CHECK(ThrowsCorruptData([&] { partial_reader.Read(sink, 16); }));
+    CHECK(ThrowsCorruptData([&] { partial_reader.Read(sink, kMax); }));
+    CHECK(ThrowsCorruptData([&] { partial_reader.Read(sink, kMax - 1); }));
+    CHECK(partial.Remaining() == 15);
+    partial_reader.Read(sink, 15);
+    CHECK(partial.Remaining() == 0);
+
+    // A declared walker code size larger than the bytes left is refused before its pointer is used.
+    Serialization::Archive walker{Bytes(28, 3)};
+    Serialization::Reader walker_reader{walker};
+    std::uint32_t head{};
+    walker_reader.Read(head);
+    CHECK(walker.Remaining() == 24);
+    CHECK(ThrowsCorruptData([&] { walker.Require(25); }));
+    CHECK(ThrowsCorruptData([&] { walker.Require(kMax); }));
+    walker.Require(24);
+
+    // A container count the remaining bytes cannot hold, or a fixed-capacity container cannot take.
+    for (const std::size_t count : {std::size_t(9), std::size_t(1) << 40, kMax}) {
+        Serialization::Archive ar{Serialized(count, std::uint32_t{1}, std::uint32_t{2})};
+        Serialization::Reader reader{ar};
+        std::vector<std::uint32_t> values;
+        CHECK(ThrowsCorruptData([&] { reader.Read(values); }));
+        CHECK(values.empty() && values.capacity() < 64);
+    }
+    Serialization::Archive short_list{Serialized(std::size_t{3}, std::uint32_t{1}, std::uint32_t{2})};
+    Serialization::Reader short_reader{short_list};
+    std::vector<std::uint32_t> short_values;
+    CHECK(ThrowsCorruptData([&] { short_reader.Read(short_values); }));
+    Serialization::Archive full{Serialized(std::size_t{5}, std::uint32_t{1}, std::uint32_t{1}, std::uint32_t{1},
+                                           std::uint32_t{1}, std::uint32_t{1})};
+    Serialization::Reader full_reader{full};
+    FixedList list;
+    CHECK(ThrowsCorruptData([&] { full_reader.Read(list); }));
+    CHECK(list.count == 0);
+}
+
+// F3: a sealed entry cut short inside its payload is rejected by the reader; a valid one is read back.
+void TestSealedEntries() {
+    const std::vector<std::uint32_t> numbers{10, 20, 30};
+    const std::vector<std::string> names{"alpha", "", "gamma"};
+    auto valid = Serialized(std::string{"bits"}, numbers, names, std::uint64_t{99});
+    auto sealed = Sealed(valid);
+    CHECK(Unseal(sealed));
+    Serialization::Archive ar{std::move(sealed)};
+    Serialization::Reader reader{ar};
+    std::string text;
+    std::vector<std::uint32_t> read_numbers;
+    std::vector<std::string> read_names;
+    std::uint64_t tail{};
+    reader.Read(text);
+    reader.Read(read_numbers);
+    reader.Read(read_names);
+    reader.Read(tail);
+    CHECK(text == "bits" && read_numbers == numbers && read_names == names && tail == 99);
+    CHECK(ar.IsEoS());
+
+    FixedList four;
+    Serialization::Archive fixed{Serialized(std::size_t{4}, std::uint32_t{1}, std::uint32_t{2}, std::uint32_t{3},
+                                            std::uint32_t{4})};
+    Serialization::Reader fixed_reader{fixed};
+    fixed_reader.Read(four);
+    CHECK(four.count == 4);
+
+    for (const std::size_t cut : {std::size_t(1), std::size_t(5), valid.size() - 1}) {
+        auto truncated_payload = Bytes(valid.begin(), valid.end() - std::ptrdiff_t(cut));
+        auto resealed = Sealed(truncated_payload);
+        CHECK(Unseal(resealed));
+        Serialization::Archive cut_ar{std::move(resealed)};
+        Serialization::Reader cut_reader{cut_ar};
+        CHECK(ThrowsCorruptData([&] {
+            std::string a;
+            std::vector<std::uint32_t> b;
+            std::vector<std::string> c;
+            std::uint64_t d{};
+            cut_reader.Read(a);
+            cut_reader.Read(b);
+            cut_reader.Read(c);
+            cut_reader.Read(d);
+        }));
+    }
+    auto torn = Sealed(valid);
+    torn.resize(torn.size() - 1);
+    CHECK(!Unseal(torn));
+}
+
 // G: a preloaded pipeline is dropped; the game's own gets exactly one paused retry.
 void TestFailurePolicy() {
     static_assert(OnPipelineFailure(PipelineOrigin::Preload, false) ==
@@ -266,6 +410,8 @@ int main() {
     TestDriverDependentData();
     TestDamagedBlobs();
     TestInvalidEntry();
+    TestMalformedLengths();
+    TestSealedEntries();
     TestFailurePolicy();
     TestBuildGate();
     TestInterruptedWrite();

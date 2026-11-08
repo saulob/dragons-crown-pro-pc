@@ -1452,6 +1452,7 @@ bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
     srt.Read(this, sizeof(*this));
 
     if (walker_func_size) {
+        ar.Require(walker_func_size);
         walker_func = RegisterWalkerCode(ar.CurrPtr(), walker_func_size);
         ar.Advance(walker_func_size);
     }
@@ -1489,6 +1490,9 @@ bool StageSpecialization::Deserialize(Serialization::Archive& ar) {
 
     std::string bits{};
     spec.Read(bits);
+    if (bits.find_first_not_of("01") != std::string::npos) {
+        throw Serialization::CorruptData{};
+    }
     bitset = std::bitset<MaxStageResources>(bits);
 
     u64 fetch_data_size{};

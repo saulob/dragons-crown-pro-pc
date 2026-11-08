@@ -9,10 +9,12 @@ Source code and issue tracker:
 https://github.com/saulob/dragons-crown-pro-pc
 
 
-NO GAME FILES ARE INCLUDED
---------------------------
-You need your own legally obtained copy of the game: a decrypted Dragon's
-Crown Pro PS4 package (.pkg). This port runs these releases:
+THE GAME ITSELF IS NOT INCLUDED
+-------------------------------
+No game package or executable is included. You need your own legally obtained
+copy of the game: a decrypted Dragon's Crown Pro PS4 package (.pkg). The port
+does include the localization resources for its additional languages
+(credited under PLAYING below). This port runs these releases:
 
   US:                 Title ID CUSA10454, versions 1.00 (the base package) and 1.01 (the base package, then the update)
   Japan:              Title ID CUSA07001, versions 1.00 (the base package), 1.02 and 1.03 (the base package, then the update)
@@ -149,7 +151,8 @@ LICENSE.txt.
 Third-party components keep their own licenses. Their license files and
 notices are in the "licenses" folder, starting with THIRD-PARTY-LICENSES.txt.
 
-Game files are not included and are not covered by this project's license.
+The game package and executable are not included. The game and its assets are
+not covered by this project's license.
 This port is not affiliated with or endorsed by Vanillaware, Atlus, SEGA,
 Sony Interactive Entertainment or any other rights holder of Dragon's Crown
 Pro.
