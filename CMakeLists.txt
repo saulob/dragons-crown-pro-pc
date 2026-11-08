@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 1.0.0 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 1.1.0 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
