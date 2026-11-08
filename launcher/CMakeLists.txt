@@ -247,6 +247,19 @@ endif()
 set_target_properties(dcp-update-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-update-tests PRIVATE -Wall -Wextra)
 
+# Update failures against a scripted loopback HTTP server: 504, dropped connections, stalls, redirects and retries.
+add_executable(dcp-update-network-tests EXCLUDE_FROM_ALL ../tests/update_network_tests.cpp
+    updater/github_release.cpp updater/install_transaction.cpp updater/json.cpp updater/sha256.cpp
+    updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
+    updater/update_zip.cpp updater/version.cpp updater/third_party/miniz/miniz.c)
+target_include_directories(dcp-update-network-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(dcp-update-network-tests PRIVATE trg_core)
+if (WIN32)
+    target_link_libraries(dcp-update-network-tests PRIVATE shell32 ws2_32)
+endif()
+set_target_properties(dcp-update-network-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-update-network-tests PRIVATE -Wall -Wextra)
+
 # Focused tests of the Bug Report page's logic, on synthetic logs in temporary folders: no window, no network.
 add_executable(dcp-incident-tests EXCLUDE_FROM_ALL ../tests/incident_tests.cpp)
 target_compile_definitions(dcp-incident-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

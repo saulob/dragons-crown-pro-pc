@@ -1,0 +1,1113 @@
+diff --git a/include/trg/download.h b/include/trg/download.h
+index cda6755..09d076b 100644
+--- a/include/trg/download.h
++++ b/include/trg/download.h
+@@ -3,6 +3,7 @@
+ // the game calls these, so a launcher stays offline until the player asks.
+ #pragma once
+ 
++#include <functional>
+ #include <string>
+ #include <vector>
+ 
+@@ -15,17 +16,38 @@ struct HttpHeader {
+   std::string value;
+ };
+ 
++// What a request did, for diagnostics and for deciding whether to try again.
++struct HttpReport {
++  int status = 0;                // last HTTP status received, 0 when none arrived
++  unsigned long system_error = 0;
++  long long bytes = 0;           // body bytes received
++  long long expected = -1;       // Content-Length of the final response, -1 when unknown
++  int redirects = 0;
++  std::string host;              // host of the last request
++  bool timed_out = false;
++  bool cancelled = false;
++  bool interrupted = false;      // the connection dropped or the body ended early
++  bool transient = false;        // worth trying again later
++};
++
+ struct HttpOptions {
+-  std::vector<HttpHeader> headers;
++  std::vector<HttpHeader> headers;  // sent to the first host only, never to a redirect target
+   std::string user_agent = "TRG-Launcher/1.1";
++  // DNS, connect, TLS and sending the request.
+   int connect_timeout_ms = 15000;
++  // Waiting for the response headers, and the longest gap between body bytes.
+   int receive_timeout_ms = 30000;
+-  // 0 leaves the transfer unlimited; otherwise the whole request is aborted.
++  // 0 leaves the transfer unlimited; otherwise the whole request, redirects included, is aborted.
+   int total_timeout_ms = 0;
+   // 0 leaves the size unlimited.
+   long long max_bytes = 0;
+   // 0 uses the size the server reports; otherwise this is the expected total.
+   long long progress_total = 0;
++  int max_redirects = 5;
++  // Names the request in the log ("release metadata", "checksum", "update package").
++  std::string operation;
++  HttpReport* report = nullptr;
++  std::function<void(const std::string&)> log;
+ };
+ 
+ // GETs `url` (following redirects) into `out`. When `task` is given it reports
+@@ -33,7 +55,8 @@ struct HttpOptions {
+ std::string HttpGet(const std::string& url, std::string& out, Task* task = nullptr,
+                     const HttpOptions& options = {});
+ 
+-// Downloads `url` to `utf8_path` on a Task, through `<path>.part`.
++// Downloads `url` to `utf8_path` on a Task, through `<path>.part`. A failed
++// transfer removes `<path>.part` and leaves `<path>` as it was.
+ std::string DownloadFile(Task& task, const std::string& url, const std::string& utf8_path,
+                          const HttpOptions& options = {});
+ 
+diff --git a/src/download.cpp b/src/download.cpp
+index 3096280..2621b23 100644
+--- a/src/download.cpp
++++ b/src/download.cpp
+@@ -1,11 +1,16 @@
+ #include "trg/download.h"
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cctype>
+ #include <chrono>
++#include <condition_variable>
+ #include <cstdio>
+-#include <limits>
++#include <cstdlib>
++#include <functional>
++#include <mutex>
+ #include <string_view>
++#include <thread>
+ #include <vector>
+ 
+ #include "trg/platform.h"
+@@ -19,11 +24,33 @@
+ #endif
+ #include <windows.h>
+ #include <winhttp.h>
++#else
++#include <cerrno>
++#include <csignal>
++#include <fcntl.h>
++#include <poll.h>
++#include <spawn.h>
++#include <sys/wait.h>
++#include <unistd.h>
++
++extern char** environ;
+ #endif
+ 
+ namespace trg {
+ namespace {
+ 
++using Clock = std::chrono::steady_clock;
++using Sink = std::function<bool(const char*, size_t)>;
++
++constexpr const char* kTooSlow = "The server took too long to answer.";
++constexpr const char* kInterrupted = "The download was interrupted.";
++constexpr const char* kUnreachable = "Could not reach the server. Check your internet connection and try again.";
++constexpr const char* kTooMuch = "The server sent more data than expected.";
++constexpr const char* kTooManyRedirects = "The server redirected too many times.";
++constexpr const char* kInsecureRedirect = "The server redirected to an insecure address.";
++constexpr const char* kBadAddress = "Not a valid web address.";
++constexpr const char* kNotSaved = "The download could not be saved.";
++
+ bool ValidHeader(const HttpHeader& header) {
+   if (header.name.empty()) {
+     return false;
+@@ -53,6 +80,191 @@ bool ValidOptions(const HttpOptions& options) {
+   return true;
+ }
+ 
++struct ParsedUrl {
++  std::string scheme;
++  std::string host;
++  int port = 0;
++  std::string target;  // path and query
++
++  bool Secure() const { return scheme == "https"; }
++  bool SameOrigin(const ParsedUrl& other) const {
++    return scheme == other.scheme && host == other.host && port == other.port;
++  }
++  std::string Origin() const {
++    const bool default_port = port == (Secure() ? 443 : 80);
++    return scheme + "://" + host + (default_port ? std::string() : ":" + std::to_string(port));
++  }
++};
++
++std::string Lower(std::string text) {
++  for (char& c : text) {
++    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++  }
++  return text;
++}
++
++bool ParseUrl(const std::string& url, ParsedUrl& out) {
++  for (const char c : url) {
++    if (static_cast<unsigned char>(c) <= 0x20 || static_cast<unsigned char>(c) >= 0x7f || c == '\\') {
++      return false;
++    }
++  }
++  const size_t scheme_end = url.find("://");
++  if (scheme_end == std::string::npos) {
++    return false;
++  }
++  out.scheme = Lower(url.substr(0, scheme_end));
++  if (out.scheme != "https" && out.scheme != "http") {
++    return false;
++  }
++  std::string rest = url.substr(scheme_end + 3);
++  if (const size_t fragment = rest.find('#'); fragment != std::string::npos) {
++    rest.resize(fragment);
++  }
++  const size_t authority_end = rest.find_first_of("/?");
++  const std::string authority = rest.substr(0, authority_end);
++  out.target = authority_end == std::string::npos ? "/" : rest.substr(authority_end);
++  if (out.target[0] == '?') {
++    out.target.insert(out.target.begin(), '/');
++  }
++  if (authority.empty() || authority.find('@') != std::string::npos) {
++    return false;
++  }
++  std::string port_text;
++  if (authority[0] == '[') {
++    const size_t close = authority.find(']');
++    if (close == std::string::npos) {
++      return false;
++    }
++    out.host = authority.substr(1, close - 1);
++    if (close + 1 < authority.size()) {
++      if (authority[close + 1] != ':') {
++        return false;
++      }
++      port_text = authority.substr(close + 2);
++    }
++  } else {
++    const size_t colon = authority.rfind(':');
++    out.host = authority.substr(0, colon);
++    if (colon != std::string::npos) {
++      port_text = authority.substr(colon + 1);
++    }
++  }
++  if (out.host.empty()) {
++    return false;
++  }
++  for (const char c : out.host) {
++    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '-' && c != '_' && c != ':') {
++      return false;
++    }
++  }
++  out.host = Lower(out.host);
++  out.port = out.Secure() ? 443 : 80;
++  if (!port_text.empty()) {
++    char* end = nullptr;
++    const long port = std::strtol(port_text.c_str(), &end, 10);
++    if (*end != '\0' || port <= 0 || port > 65535) {
++      return false;
++    }
++    out.port = static_cast<int>(port);
++  }
++  return true;
++}
++
++std::string ResolveLocation(const ParsedUrl& base, const std::string& location) {
++  if (location.rfind("https://", 0) == 0 || location.rfind("http://", 0) == 0) {
++    return location;
++  }
++  if (location.rfind("//", 0) == 0) {
++    return base.scheme + ":" + location;
++  }
++  if (!location.empty() && location[0] == '/') {
++    return base.Origin() + location;
++  }
++  std::string directory = base.target.substr(0, base.target.find('?'));
++  directory.resize(directory.rfind('/') + 1);
++  return base.Origin() + directory + location;
++}
++
++bool IsRedirectStatus(int status) {
++  return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
++}
++
++bool IsTransientStatus(int status) {
++  return status == 408 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
++}
++
++long long ElapsedMs(Clock::time_point since) {
++  return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - since).count();
++}
++
++void LogResult(const HttpOptions& options, const HttpReport& report, const char* outcome, Clock::time_point started) {
++  if (!options.log) {
++    return;
++  }
++  options.log("http " + (options.operation.empty() ? std::string("request") : options.operation) + ": " + outcome +
++              " host=" + report.host + " status=" + std::to_string(report.status) +
++              " error=" + std::to_string(report.system_error) + " bytes=" + std::to_string(report.bytes) + "/" +
++              std::to_string(report.expected) + " redirects=" + std::to_string(report.redirects) +
++              " elapsed_ms=" + std::to_string(ElapsedMs(started)));
++}
++
++std::string StatusError(HttpReport& report) {
++  report.transient = IsTransientStatus(report.status);
++  return "The server answered " + std::to_string(report.status) + ".";
++}
++
++Clock::time_point TotalDeadline(const HttpOptions& options, Clock::time_point started) {
++  return options.total_timeout_ms > 0 ? started + std::chrono::milliseconds(options.total_timeout_ms)
++                                      : Clock::time_point::max();
++}
++
++long long ProgressTotal(const HttpOptions& options, const HttpReport& report) {
++  return options.progress_total > 0 ? options.progress_total : report.expected;
++}
++
++enum class Hop { kDone, kRedirect, kFailed };
++
++using HopFetch = std::function<Hop(const ParsedUrl& target, bool same_origin, std::string& error,
++                                   std::string& location)>;
++
++// Redirects are followed here, not by the backend, so each one is counted, logged and checked: only https may
++// stay https, and the caller's headers go to the first origin only.
++std::string FollowRedirects(const ParsedUrl& first, const HttpOptions& options, HttpReport& report,
++                            Clock::time_point started, const HopFetch& fetch) {
++  ParsedUrl current = first;
++  std::string error;
++  for (;;) {
++    std::string location;
++    const Hop hop = fetch(current, current.SameOrigin(first), error, location);
++    if (hop == Hop::kDone) {
++      error.clear();
++      break;
++    }
++    if (hop == Hop::kFailed) {
++      break;
++    }
++    if (report.redirects >= options.max_redirects) {
++      error = kTooManyRedirects;
++      break;
++    }
++    ParsedUrl next;
++    if (!ParseUrl(ResolveLocation(current, location), next)) {
++      error = kBadAddress;
++      break;
++    }
++    if (current.Secure() && !next.Secure()) {
++      error = kInsecureRedirect;
++      break;
++    }
++    ++report.redirects;
++    LogResult(options, report, "redirect", started);
++    current = std::move(next);
++  }
++  LogResult(options, report, error.empty() ? "done" : "failed", started);
++  return error;
++}
++
+ }  // namespace
+ 
+ #if defined(_WIN32)
+@@ -72,131 +284,309 @@ std::wstring Widen(const std::string& text) {
+   return wide;
+ }
+ 
+-}  // namespace
++std::string Narrow(const std::wstring& text) {
++  if (text.empty()) {
++    return {};
++  }
++  const int length = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), int(text.size()), nullptr, 0, nullptr, nullptr);
++  if (length <= 0) {
++    return {};
++  }
++  std::string narrow(size_t(length), '\0');
++  WideCharToMultiByte(CP_UTF8, 0, text.c_str(), int(text.size()), narrow.data(), length, nullptr, nullptr);
++  return narrow;
++}
+ 
+-std::string HttpGet(const std::string& url, std::string& out, Task* task, const HttpOptions& options) {
+-  out.clear();
+-  if (!ValidOptions(options)) {
+-    return "The request headers are not valid.";
++std::wstring QueryHeader(HINTERNET request, DWORD level) {
++  DWORD size = 0;
++  WinHttpQueryHeaders(request, level, WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER, &size,
++                      WINHTTP_NO_HEADER_INDEX);
++  if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || size == 0) {
++    return {};
+   }
+-  const std::wstring wurl = Widen(url);
+-  const std::wstring user_agent = Widen(options.user_agent);
+-  if (wurl.empty() || user_agent.empty()) {
+-    return "Not a valid web address.";
++  std::wstring value(size / sizeof(wchar_t) + 1, L'\0');
++  if (!WinHttpQueryHeaders(request, level, WINHTTP_HEADER_NAME_BY_INDEX, value.data(), &size,
++                           WINHTTP_NO_HEADER_INDEX)) {
++    return {};
++  }
++  value.resize(size / sizeof(wchar_t));
++  return value;
++}
++
++// WinHTTP's own timeouts do not cover proxy discovery, redirects or a peer that stops mid-response, and a
++// synchronous call cannot be interrupted from its own thread. This closes the request handle from outside
++// when a stage runs out of time or the task is cancelled, which makes the blocked call return.
++class Watchdog {
++ public:
++  enum class Reason { kNone, kStalled, kTotal, kCancelled };
++
++  Watchdog(Task* task, Clock::time_point total_deadline) : task_(task), total_deadline_(total_deadline) {
++    thread_ = std::thread([this] { Run(); });
++  }
++  ~Watchdog() {
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      stop_ = true;
++    }
++    wake_.notify_all();
++    thread_.join();
++  }
++  Watchdog(const Watchdog&) = delete;
++  Watchdog& operator=(const Watchdog&) = delete;
++
++  void Arm(HINTERNET handle, int budget_ms) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    handle_ = handle;
++    stage_deadline_ = Clock::now() + std::chrono::milliseconds(budget_ms);
++  }
++  void Touch(int budget_ms) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    stage_deadline_ = Clock::now() + std::chrono::milliseconds(budget_ms);
++  }
++  // True when the caller still owns the handle and must close it.
++  bool Release() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    const bool owned = handle_ != nullptr;
++    handle_ = nullptr;
++    return owned;
++  }
++  Reason reason() const { return reason_.load(); }
++
++ private:
++  void Run() {
++    std::unique_lock<std::mutex> lock(mutex_);
++    while (!stop_) {
++      wake_.wait_for(lock, std::chrono::milliseconds(50));
++      if (stop_ || !handle_ || reason_.load() != Reason::kNone) {
++        continue;
++      }
++      const auto now = Clock::now();
++      Reason fire = Reason::kNone;
++      if (task_ && task_->cancelled()) {
++        fire = Reason::kCancelled;
++      } else if (now >= total_deadline_) {
++        fire = Reason::kTotal;
++      } else if (now >= stage_deadline_) {
++        fire = Reason::kStalled;
++      }
++      if (fire != Reason::kNone) {
++        reason_ = fire;
++        HINTERNET handle = handle_;
++        handle_ = nullptr;
++        WinHttpCloseHandle(handle);
++      }
++    }
++  }
++
++  Task* task_;
++  Clock::time_point total_deadline_;
++  Clock::time_point stage_deadline_ = Clock::time_point::max();
++  HINTERNET handle_ = nullptr;
++  std::atomic<Reason> reason_{Reason::kNone};
++  bool stop_ = false;
++  std::mutex mutex_;
++  std::condition_variable wake_;
++  std::thread thread_;
++};
++
++bool IsSecurityError(DWORD error) {
++  return error == ERROR_WINHTTP_SECURE_FAILURE || error == ERROR_WINHTTP_SECURE_CERT_DATE_INVALID ||
++         error == ERROR_WINHTTP_SECURE_CERT_CN_INVALID || error == ERROR_WINHTTP_SECURE_INVALID_CA ||
++         error == ERROR_WINHTTP_SECURE_CERT_REV_FAILED || error == ERROR_WINHTTP_SECURE_CHANNEL_ERROR ||
++         error == ERROR_WINHTTP_SECURE_INVALID_CERT || error == ERROR_WINHTTP_SECURE_CERT_REVOKED ||
++         error == ERROR_WINHTTP_SECURE_CERT_WRONG_USAGE;
++}
++
++std::string FailureFor(DWORD error, Watchdog::Reason reason, bool receiving, HttpReport& report) {
++  report.system_error = error;
++  if (reason == Watchdog::Reason::kCancelled) {
++    report.cancelled = true;
++    return "Cancelled.";
+   }
++  if (reason != Watchdog::Reason::kNone || error == ERROR_WINHTTP_TIMEOUT) {
++    report.timed_out = true;
++    report.transient = true;
++    return kTooSlow;
++  }
++  if (receiving) {
++    report.interrupted = true;
++    report.transient = true;
++    return kInterrupted;
++  }
++  report.transient = !IsSecurityError(error);
++  return kUnreachable;
++}
++
++struct Handles {
++  Watchdog& dog;
++  HINTERNET connection = nullptr;
++  HINTERNET request = nullptr;
++  ~Handles() {
++    if (request && dog.Release()) {
++      WinHttpCloseHandle(request);
++    }
++    if (connection) {
++      WinHttpCloseHandle(connection);
++    }
++  }
++};
++
++Hop FetchHop(HINTERNET session, Watchdog& dog, const ParsedUrl& target, bool send_headers, const HttpOptions& options,
++             const Sink& sink, Task* task, HttpReport& report, std::string& error, std::string& location) {
++  report.host = target.host;
++  report.status = 0;
++  report.expected = -1;
++  report.system_error = 0;
+ 
+-  URL_COMPONENTSW parts{};
+-  parts.dwStructSize = sizeof(parts);
+-  std::vector<wchar_t> host(wurl.size() + 1);
+-  std::vector<wchar_t> path(wurl.size() + 1);
+-  parts.lpszHostName = host.data();
+-  parts.dwHostNameLength = DWORD(host.size());
+-  parts.lpszUrlPath = path.data();
+-  parts.dwUrlPathLength = DWORD(path.size());
+-  if (!WinHttpCrackUrl(wurl.c_str(), DWORD(wurl.size()), 0, &parts)) {
+-    return "Not a valid web address.";
++  Handles handles{dog};
++  const std::wstring host = Widen(target.host);
++  const std::wstring path = Widen(target.target);
++  handles.connection = WinHttpConnect(session, host.c_str(), INTERNET_PORT(target.port), 0);
++  if (!handles.connection) {
++    error = FailureFor(GetLastError(), dog.reason(), false, report);
++    return Hop::kFailed;
+   }
+-  if (parts.nScheme != INTERNET_SCHEME_HTTPS && parts.nScheme != INTERNET_SCHEME_HTTP) {
+-    return "Only web addresses can be downloaded.";
++  handles.request = WinHttpOpenRequest(handles.connection, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
++                                       WINHTTP_DEFAULT_ACCEPT_TYPES, target.Secure() ? WINHTTP_FLAG_SECURE : 0);
++  if (!handles.request) {
++    error = FailureFor(GetLastError(), dog.reason(), false, report);
++    return Hop::kFailed;
+   }
++  DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
++  WinHttpSetOption(handles.request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
+ 
+   std::wstring headers;
+-  for (const HttpHeader& header : options.headers) {
+-    headers += Widen(header.name + ": " + header.value + "\r\n");
++  if (send_headers) {
++    for (const HttpHeader& header : options.headers) {
++      headers += Widen(header.name + ": " + header.value + "\r\n");
++    }
++  }
++
++  dog.Arm(handles.request, options.connect_timeout_ms + options.receive_timeout_ms);
++  if (!WinHttpSendRequest(handles.request, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
++                          DWORD(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
++      !WinHttpReceiveResponse(handles.request, nullptr)) {
++    error = FailureFor(GetLastError(), dog.reason(), false, report);
++    return Hop::kFailed;
++  }
++  DWORD code = 0;
++  DWORD length = sizeof(code);
++  if (!WinHttpQueryHeaders(handles.request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
++                           WINHTTP_HEADER_NAME_BY_INDEX, &code, &length, WINHTTP_NO_HEADER_INDEX)) {
++    error = FailureFor(GetLastError(), dog.reason(), false, report);
++    return Hop::kFailed;
++  }
++  report.status = int(code);
++  dog.Touch(options.receive_timeout_ms);
++
++  if (IsRedirectStatus(report.status)) {
++    location = Narrow(QueryHeader(handles.request, WINHTTP_QUERY_LOCATION));
++    if (location.empty()) {
++      error = StatusError(report);
++      return Hop::kFailed;
++    }
++    return Hop::kRedirect;
++  }
++  if (report.status != 200) {
++    error = StatusError(report);
++    return Hop::kFailed;
++  }
++
++  const std::string content = Narrow(QueryHeader(handles.request, WINHTTP_QUERY_CONTENT_LENGTH));
++  if (!content.empty()) {
++    char* end = nullptr;
++    const long long value = std::strtoll(content.c_str(), &end, 10);
++    if (end != content.c_str() && value >= 0) {
++      report.expected = value;
++    }
++  }
++  if (options.max_bytes > 0 && report.expected > options.max_bytes) {
++    error = kTooMuch;
++    return Hop::kFailed;
+   }
+ 
+-  HINTERNET session =
+-      WinHttpOpen(user_agent.c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+-                  WINHTTP_NO_PROXY_BYPASS, 0);
++  std::vector<char> buffer(size_t(64) << 10);
++  for (;;) {
++    DWORD available = 0;
++    if (!WinHttpQueryDataAvailable(handles.request, &available)) {
++      error = FailureFor(GetLastError(), dog.reason(), true, report);
++      return Hop::kFailed;
++    }
++    if (available == 0) {
++      break;
++    }
++    available = std::min<DWORD>(available, DWORD(buffer.size()));
++    if (options.max_bytes > 0 && report.bytes + static_cast<long long>(available) > options.max_bytes) {
++      error = kTooMuch;
++      return Hop::kFailed;
++    }
++    DWORD read = 0;
++    if (!WinHttpReadData(handles.request, buffer.data(), available, &read)) {
++      error = FailureFor(GetLastError(), dog.reason(), true, report);
++      return Hop::kFailed;
++    }
++    if (read == 0) {
++      break;
++    }
++    dog.Touch(options.receive_timeout_ms);
++    if (!sink(buffer.data(), read)) {
++      error = kNotSaved;
++      return Hop::kFailed;
++    }
++    report.bytes += read;
++    if (task) {
++      task->Progress(report.bytes, ProgressTotal(options, report));
++    }
++  }
++  if (report.expected >= 0 && report.bytes != report.expected) {
++    report.interrupted = true;
++    report.transient = true;
++    error = kInterrupted;
++    return Hop::kFailed;
++  }
++  return Hop::kDone;
++}
++
++std::string Transfer(const std::string& url, const Sink& sink, Task* task, const HttpOptions& options) {
++  HttpReport local;
++  HttpReport& report = options.report ? *options.report : local;
++  report = HttpReport{};
++  if (!ValidOptions(options)) {
++    return "The request headers are not valid.";
++  }
++  ParsedUrl first;
++  const std::wstring user_agent = Widen(options.user_agent);
++  if (!ParseUrl(url, first) || user_agent.empty()) {
++    return kBadAddress;
++  }
++  report.host = first.host;
++
++  const auto started = Clock::now();
++  Watchdog dog(task, TotalDeadline(options, started));
++  HINTERNET session = WinHttpOpen(user_agent.c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
++                                  WINHTTP_NO_PROXY_BYPASS, 0);
+   if (!session) {
++    report.system_error = GetLastError();
+     return "Could not start the download.";
+   }
+   WinHttpSetTimeouts(session, options.connect_timeout_ms, options.connect_timeout_ms, options.receive_timeout_ms,
+                      options.receive_timeout_ms);
+-  std::string error = "Could not reach the server. Check your internet connection and try again.";
+-  if (HINTERNET conn = WinHttpConnect(session, host.data(), parts.nPort, 0)) {
+-    const DWORD flags = parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0;
+-    if (HINTERNET req = WinHttpOpenRequest(conn, L"GET", path.data(), nullptr, WINHTTP_NO_REFERER,
+-                                           WINHTTP_DEFAULT_ACCEPT_TYPES, flags)) {
+-      DWORD redirects = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+-      WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY, &redirects, sizeof(redirects));
+-      DWORD code = 0;
+-      DWORD length = sizeof(code);
+-      if (WinHttpSendRequest(req, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
+-                             DWORD(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+-          WinHttpReceiveResponse(req, nullptr) &&
+-          WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &length,
+-                              nullptr)) {
+-        if (code != 200) {
+-          error = "The server answered " + std::to_string(code) + ".";
+-        } else {
+-          DWORD content = 0;
+-          length = sizeof(content);
+-          const bool sized = WinHttpQueryHeaders(req, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+-                                                 nullptr, &content, &length, nullptr) != FALSE;
+-          error.clear();
+-          const auto started = std::chrono::steady_clock::now();
+-          for (DWORD available = 0; WinHttpQueryDataAvailable(req, &available) && available;) {
+-            if (task && task->cancelled()) {
+-              error = "Cancelled.";
+-              break;
+-            }
+-            if (options.total_timeout_ms > 0) {
+-              const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+-                                       std::chrono::steady_clock::now() - started)
+-                                       .count();
+-              if (elapsed > options.total_timeout_ms) {
+-                error = "The server took too long to answer.";
+-                break;
+-              }
+-            }
+-            const size_t at = out.size();
+-            if (options.max_bytes > 0 && at + size_t(available) > size_t(options.max_bytes)) {
+-              error = "The server sent more data than expected.";
+-              break;
+-            }
+-            out.resize(at + available);
+-            DWORD read = 0;
+-            if (!WinHttpReadData(req, out.data() + at, available, &read)) {
+-              error = "The download was interrupted.";
+-              out.resize(at);
+-              break;
+-            }
+-            out.resize(at + read);
+-            if (task) {
+-              const long long total =
+-                  options.progress_total > 0 ? options.progress_total
+-                                             : (sized ? static_cast<long long>(content) : -1);
+-              task->Progress(static_cast<long long>(out.size()), total);
+-            }
+-          }
+-        }
+-      }
+-      WinHttpCloseHandle(req);
+-    }
+-    WinHttpCloseHandle(conn);
+-  }
++
++  const std::string error = FollowRedirects(
++      first, options, report, started,
++      [&](const ParsedUrl& target, bool same_origin, std::string& hop_error, std::string& location) {
++        return FetchHop(session, dog, target, same_origin, options, sink, task, report, hop_error, location);
++      });
+   WinHttpCloseHandle(session);
+   return error;
+ }
+ 
++}  // namespace
++
+ #else
+ 
+ namespace {
+ 
+-std::string ShellQuote(std::string_view text) {
+-  std::string quoted = "'";
+-  for (const char c : text) {
+-    if (c == '\'') {
+-      quoted += "'\\''";
+-    } else {
+-      quoted += c;
+-    }
+-  }
+-  quoted += '\'';
+-  return quoted;
+-}
+-
+ long long Seconds(int milliseconds) {
+   if (milliseconds <= 0) {
+     return 0;
+@@ -204,78 +594,345 @@ long long Seconds(int milliseconds) {
+   return std::max<long long>(1, (static_cast<long long>(milliseconds) + 999) / 1000);
+ }
+ 
+-}  // namespace
++struct Child {
++  pid_t pid = -1;
++  int out = -1;
++  int err = -1;
+ 
+-std::string HttpGet(const std::string& url, std::string& out, Task* task, const HttpOptions& options) {
+-  out.clear();
+-  if (!ValidOptions(options)) {
+-    return "The request headers are not valid.";
++  ~Child() {
++    if (out >= 0) {
++      close(out);
++    }
++    if (err >= 0) {
++      close(err);
++    }
++    if (pid > 0) {
++      kill(pid, SIGKILL);
++      int status = 0;
++      waitpid(pid, &status, 0);
++    }
+   }
+-  for (const char c : url) {
+-    if (c == '\'' || c == '"' || c == '\\' || c == '`' || c == '$' || static_cast<unsigned char>(c) < 0x21) {
+-      return "Not a valid web address.";
++  int Wait() {
++    int status = 0;
++    if (pid > 0 && waitpid(pid, &status, 0) == pid) {
++      pid = -1;
++      return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+     }
++    pid = -1;
++    return -1;
+   }
++};
+ 
+-  std::string command = "curl -fsSL --proto-redir =https --connect-timeout " +
+-                        std::to_string(Seconds(options.connect_timeout_ms));
+-  if (const long long total = Seconds(options.total_timeout_ms); total > 0) {
+-    command += " --max-time " + std::to_string(total);
++bool SpawnCurl(const std::vector<std::string>& arguments, Child& child) {
++  int out[2];
++  int err[2];
++  if (pipe(out) != 0) {
++    return false;
+   }
+-  command += " -A " + ShellQuote(options.user_agent);
+-  for (const HttpHeader& header : options.headers) {
+-    command += " -H " + ShellQuote(header.name + ": " + header.value);
++  if (pipe(err) != 0) {
++    close(out[0]);
++    close(out[1]);
++    return false;
+   }
+-  command += " " + ShellQuote(url);
++  for (const int descriptor : {out[0], err[0]}) {
++    fcntl(descriptor, F_SETFD, FD_CLOEXEC);
++  }
++  posix_spawn_file_actions_t actions;
++  posix_spawn_file_actions_init(&actions);
++  posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
++  posix_spawn_file_actions_adddup2(&actions, out[1], STDOUT_FILENO);
++  posix_spawn_file_actions_adddup2(&actions, err[1], STDERR_FILENO);
++  posix_spawn_file_actions_addclose(&actions, out[1]);
++  posix_spawn_file_actions_addclose(&actions, err[1]);
+ 
+-  FILE* pipe = popen(command.c_str(), "r");
+-  if (!pipe) {
+-    return "curl is needed to download. Install it with your package manager.";
++  std::vector<std::string> storage = {"curl"};
++  storage.insert(storage.end(), arguments.begin(), arguments.end());
++  std::vector<char*> argv;
++  for (std::string& argument : storage) {
++    argv.push_back(argument.data());
+   }
+-  std::string error;
+-  char buffer[1 << 16];
+-  for (size_t count; (count = fread(buffer, 1, sizeof(buffer), pipe)) > 0;) {
+-    if (options.max_bytes > 0 && out.size() + count > size_t(options.max_bytes)) {
+-      error = "The server sent more data than expected.";
+-      break;
++  argv.push_back(nullptr);
++
++  pid_t pid = 0;
++  const int result = posix_spawnp(&pid, "curl", &actions, nullptr, argv.data(), environ);
++  posix_spawn_file_actions_destroy(&actions);
++  close(out[1]);
++  close(err[1]);
++  if (result != 0) {
++    close(out[0]);
++    close(err[0]);
++    return false;
++  }
++  child.pid = pid;
++  child.out = out[0];
++  child.err = err[0];
++  return true;
++}
++
++constexpr const char* kResultMarker = "DCPHTTP ";
++constexpr size_t kHoldBytes = size_t(64) << 10;
++
++struct CurlResult {
++  int status = 0;
++  std::string redirect;
++};
++
++CurlResult ParseResultLine(const std::string& text) {
++  CurlResult result;
++  const size_t at = text.rfind(kResultMarker);
++  if (at == std::string::npos) {
++    return result;
++  }
++  const size_t line_end = text.find('\n', at);
++  const std::string line = text.substr(at + std::char_traits<char>::length(kResultMarker),
++                                       line_end == std::string::npos ? std::string::npos : line_end - at - 8);
++  result.status = std::atoi(line.c_str());
++  if (const size_t space = line.find(' '); space != std::string::npos) {
++    result.redirect = line.substr(space + 1);
++  }
++  return result;
++}
++
++// One request without curl's own redirect handling. A response body is held back until curl exits or enough has
++// arrived that it cannot be a redirect page, so a redirect's body never reaches the caller's sink.
++Hop FetchHop(const std::string& url, const ParsedUrl& target, bool send_headers, Clock::time_point started,
++             const HttpOptions& options, const Sink& sink, Task* task, HttpReport& report, std::string& error,
++             std::string& location) {
++  report.host = target.host;
++  report.status = 0;
++  report.expected = -1;
++  report.system_error = 0;
++
++  std::vector<std::string> arguments = {
++      "-sS", "-f", "--proto", target.Secure() ? "=https" : "=http", "--connect-timeout",
++      std::to_string(Seconds(options.connect_timeout_ms)), "--speed-limit", "1", "--speed-time",
++      std::to_string(Seconds(options.receive_timeout_ms)), "-A", options.user_agent, "-w",
++      "%{stderr}" + std::string(kResultMarker) + "%{http_code} %{redirect_url}\\n"};
++  if (options.total_timeout_ms > 0) {
++    const long long remaining = options.total_timeout_ms - ElapsedMs(started);
++    arguments.push_back("--max-time");
++    arguments.push_back(std::to_string(Seconds(int(std::max<long long>(remaining, 1)))));
++  }
++  if (send_headers) {
++    for (const HttpHeader& header : options.headers) {
++      arguments.push_back("-H");
++      arguments.push_back(header.name + ": " + header.value);
++    }
++  }
++  arguments.push_back("--");
++  arguments.push_back(url);
++
++  Child child;
++  if (!SpawnCurl(arguments, child)) {
++    error = "curl is needed to download. Install it with your package manager.";
++    return Hop::kFailed;
++  }
++
++  const Clock::time_point total_deadline = TotalDeadline(options, started);
++  Clock::time_point stage_deadline = Clock::now() + std::chrono::milliseconds(options.connect_timeout_ms +
++                                                                              options.receive_timeout_ms);
++  std::string diagnostics;
++  std::string held;
++  bool releasing = false;
++  bool receiving = false;
++  bool out_open = true;
++  bool err_open = true;
++  std::vector<char> buffer(size_t(1) << 16);
++
++  const auto deliver = [&](const char* data, size_t size) {
++    if (options.max_bytes > 0 && report.bytes + static_cast<long long>(size) > options.max_bytes) {
++      error = kTooMuch;
++      return false;
++    }
++    if (!sink(data, size)) {
++      error = kNotSaved;
++      return false;
+     }
+-    out.append(buffer, count);
++    report.bytes += static_cast<long long>(size);
+     if (task) {
+-      task->Progress(static_cast<long long>(out.size()),
+-                     options.progress_total > 0 ? options.progress_total : -1);
+-      if (task->cancelled()) {
+-        error = "Cancelled.";
+-        break;
++      task->Progress(report.bytes, ProgressTotal(options, report));
++    }
++    return true;
++  };
++
++  while (out_open || err_open) {
++    pollfd fds[2] = {{out_open ? child.out : -1, POLLIN, 0}, {err_open ? child.err : -1, POLLIN, 0}};
++    const int ready = poll(fds, 2, 100);
++    if (ready < 0 && errno != EINTR) {
++      break;
++    }
++    const auto now = Clock::now();
++    if (task && task->cancelled()) {
++      report.cancelled = true;
++      error = "Cancelled.";
++      return Hop::kFailed;
++    }
++    if (now >= total_deadline || now >= stage_deadline) {
++      report.timed_out = true;
++      report.transient = true;
++      error = kTooSlow;
++      return Hop::kFailed;
++    }
++    if (ready <= 0) {
++      continue;
++    }
++    if (out_open && (fds[0].revents & (POLLIN | POLLHUP | POLLERR))) {
++      const ssize_t count = read(child.out, buffer.data(), buffer.size());
++      if (count > 0) {
++        receiving = true;
++        stage_deadline = now + std::chrono::milliseconds(options.receive_timeout_ms);
++        if (releasing) {
++          if (!deliver(buffer.data(), size_t(count))) {
++            return Hop::kFailed;
++          }
++        } else {
++          held.append(buffer.data(), size_t(count));
++          if (held.size() > kHoldBytes) {
++            releasing = true;
++            if (!deliver(held.data(), held.size())) {
++              return Hop::kFailed;
++            }
++            held.clear();
++          }
++        }
++      } else if (count == 0 || errno != EINTR) {
++        out_open = false;
+       }
+     }
++    if (err_open && (fds[1].revents & (POLLIN | POLLHUP | POLLERR))) {
++      const ssize_t count = read(child.err, buffer.data(), buffer.size());
++      if (count > 0) {
++        if (diagnostics.size() < (size_t(1) << 16)) {
++          diagnostics.append(buffer.data(), size_t(count));
++        }
++      } else if (count == 0 || errno != EINTR) {
++        err_open = false;
++      }
++    }
++  }
++
++  const int exit_code = child.Wait();
++  const CurlResult result = ParseResultLine(diagnostics);
++  report.status = result.status;
++  report.system_error = static_cast<unsigned long>(exit_code < 0 ? 0 : exit_code);
++
++  if (exit_code == 0 && IsRedirectStatus(report.status)) {
++    location = result.redirect;
++    if (!location.empty()) {
++      return Hop::kRedirect;
++    }
++    error = StatusError(report);
++    return Hop::kFailed;
+   }
+-  const int status = pclose(pipe);
+-  if (error.empty() && status != 0) {
+-    error = "The download failed. Check your internet connection and try again.";
++  if (exit_code == 0) {
++    if (report.status != 200 && report.status != 0) {
++      error = StatusError(report);
++      return Hop::kFailed;
++    }
++    if (!releasing && !held.empty() && !deliver(held.data(), held.size())) {
++      return Hop::kFailed;
++    }
++    return Hop::kDone;
+   }
+-  return error;
++  switch (exit_code) {
++    case 22:
++      error = StatusError(report);
++      break;
++    case 28:
++      report.timed_out = true;
++      report.transient = true;
++      error = kTooSlow;
++      break;
++    case 18:
++    case 52:
++    case 55:
++    case 56:
++      report.interrupted = true;
++      report.transient = true;
++      error = receiving ? kInterrupted : kUnreachable;
++      break;
++    case 1:
++    case 3:
++    case 35:
++    case 51:
++    case 58:
++    case 60:
++    case 77:
++      error = kUnreachable;
++      break;
++    default:
++      report.transient = true;
++      error = receiving ? kInterrupted : kUnreachable;
++      break;
++  }
++  return Hop::kFailed;
++}
++
++std::string Transfer(const std::string& url, const Sink& sink, Task* task, const HttpOptions& options) {
++  HttpReport local;
++  HttpReport& report = options.report ? *options.report : local;
++  report = HttpReport{};
++  if (!ValidOptions(options)) {
++    return "The request headers are not valid.";
++  }
++  ParsedUrl first;
++  if (!ParseUrl(url, first)) {
++    return kBadAddress;
++  }
++  report.host = first.host;
++
++  const auto started = Clock::now();
++  return FollowRedirects(
++      first, options, report, started,
++      [&](const ParsedUrl& target, bool same_origin, std::string& error, std::string& location) {
++        return FetchHop(target.Origin() + target.target, target, same_origin, started, options, sink, task, report, error, location);
++      });
+ }
+ 
++}  // namespace
++
+ #endif
+ 
++std::string HttpGet(const std::string& url, std::string& out, Task* task, const HttpOptions& options) {
++  out.clear();
++  const Sink sink = [&out](const char* data, size_t size) {
++    out.append(data, size);
++    return true;
++  };
++  std::string error = Transfer(url, sink, task, options);
++  if (!error.empty()) {
++    out.clear();
++  }
++  return error;
++}
++
+ std::string DownloadFile(Task& task, const std::string& url, const std::string& utf8_path,
+                          const HttpOptions& options) {
+-  std::string data;
+-  if (std::string error = HttpGet(url, data, &task, options); !error.empty()) {
+-    return error;
+-  }
+   const std::string part = utf8_path + ".part";
++  const std::string write_error = "Cannot write " + utf8_path + ".";
+   FILE* file = OpenFile(part, "wb");
+   if (!file) {
+-    return "Cannot write " + utf8_path + ".";
++    return write_error;
+   }
+-  const bool ok = std::fwrite(data.data(), 1, data.size(), file) == data.size();
++  bool write_failed = false;
++  const Sink sink = [&](const char* data, size_t size) {
++    if (std::fwrite(data, 1, size, file) != size) {
++      write_failed = true;
++    }
++    return !write_failed;
++  };
++  std::string error = Transfer(url, sink, &task, options);
+   const bool closed = std::fclose(file) == 0;
+-  if (!ok || !closed || !MoveFileOver(part, utf8_path)) {
++  if (write_failed || (error.empty() && !closed)) {
++    error = write_error;
++  }
++  if (error.empty() && !MoveFileOver(part, utf8_path)) {
++    error = write_error;
++  }
++  if (!error.empty()) {
+     RemoveFile(part);
+-    return "Cannot write " + utf8_path + ".";
+   }
+-  return "";
++  return error;
+ }
+ 
+ }  // namespace trg

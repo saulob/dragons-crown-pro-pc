@@ -16,6 +16,7 @@ namespace {
 
 constexpr const char* kReleasesUrl =
     "https://api.github.com/repos/saulob/dragons-crown-pro-pc/releases/latest";
+constexpr const char* kDownloadUrlPrefix = "https://github.com/saulob/dragons-crown-pro-pc/releases/download/";
 
 std::optional<std::string> Environment(const char* name) {
 #if defined(_WIN32)
@@ -71,6 +72,7 @@ trg::update::UpdateConfig MakeUpdateConfig(const std::filesystem::path& install_
     trg::update::UpdateConfig config;
     config.current_version = DCP_PORT_VERSION;
     config.releases_url = kReleasesUrl;
+    config.download_url_prefix = kDownloadUrlPrefix;
     config.user_agent = std::string("DragonsCrownProPC-Updater/") + DCP_PORT_VERSION;
     config.install_dir = install_dir;
     config.restart_arguments = RestartArguments();

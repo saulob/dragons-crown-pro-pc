@@ -18,6 +18,7 @@
 #include "updater/update_job.h"
 #include "updater/update_paths.h"
 #include "updater/update_zip.h"
+#include "updater/url_policy.h"
 #include "updater/version.h"
 
 using namespace trg::update;
@@ -496,6 +497,32 @@ void TestPackagingNames() {
   CHECK(linux_package.find("project\\(dragons_crown_pro_pc VERSION") != std::string::npos);
 }
 
+void TestUrlPolicy() {
+  std::printf("Update address policy\n");
+  const std::vector<std::string> hosts = GitHubReleaseHosts();
+  CHECK(UrlHostAllowed("https://api.github.com/repos/saulob/dragons-crown-pro-pc/releases/latest", hosts));
+  CHECK(UrlHostAllowed("https://release-assets.githubusercontent.com/github-production-release-asset/1?sig=a", hosts));
+  CHECK(UrlHostAllowed("https://objects.githubusercontent.com/x", hosts));
+  CHECK(UrlHostAllowed("HTTPS://GitHub.com:443/saulob", hosts));
+  CHECK(!UrlHostAllowed("http://github.com/saulob", hosts));
+  CHECK(!UrlHostAllowed("https://example.com/github.com", hosts));
+  CHECK(!UrlHostAllowed("https://github.com.example.com/x", hosts));
+  CHECK(!UrlHostAllowed("https://github.com@example.com/x", hosts));
+  CHECK(!UrlHostAllowed("https://github.com:8443/x", hosts));
+  CHECK(!UrlHostAllowed("https://github.com\\@example.com/x", hosts));
+  CHECK(!UrlHostAllowed("https://", hosts));
+  CHECK(!UrlHostAllowed("https://github.com/x", {}));
+
+  const std::string prefix = "https://github.com/saulob/dragons-crown-pro-pc/releases/download/";
+  CHECK(UrlAllowed(prefix + "v1.1.0/DragonsCrownProPC-v1.1.0-windows-x64.zip", hosts, prefix));
+  CHECK(UrlAllowed(prefix + "v1.1.0/DragonsCrownProPC-v1.1.0-x86_64.AppImage.sha256", hosts, prefix));
+  CHECK(!UrlAllowed("https://github.com/someone/else/releases/download/v1/DragonsCrownProPC-v1-windows-x64.zip", hosts,
+                    prefix));
+  CHECK(!UrlAllowed("https://objects.githubusercontent.com/DragonsCrownProPC-v1.1.0-windows-x64.zip", hosts, prefix));
+  CHECK(!UrlAllowed("http://github.com/saulob/dragons-crown-pro-pc/releases/download/v1.1.0/a.zip", hosts, prefix));
+  CHECK(UrlAllowed("https://github.com/anything", hosts, ""));
+}
+
 void TestPaths() {
   std::printf("path safety\n");
   CHECK(IsSafeRelativePath("dragons_crown_pro.exe"));
@@ -544,6 +571,7 @@ int main() {
   TestSameVersionReplacement();
   TestRollback();
   TestPackagingNames();
+  TestUrlPolicy();
   TestPaths();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

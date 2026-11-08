@@ -1,0 +1,36 @@
+diff --git a/include/trg/download.h b/include/trg/download.h
+index 09d076b..bf1734b 100644
+--- a/include/trg/download.h
++++ b/include/trg/download.h
+@@ -46,6 +46,8 @@ struct HttpOptions {
+   int max_redirects = 5;
+   // Names the request in the log ("release metadata", "checksum", "update package").
+   std::string operation;
++  // When set, the first address and every redirect target must pass before it is requested.
++  std::function<bool(const std::string& url)> allow_url;
+   HttpReport* report = nullptr;
+   std::function<void(const std::string&)> log;
+ };
+diff --git a/src/download.cpp b/src/download.cpp
+index 2621b23..143d7ec 100644
+--- a/src/download.cpp
++++ b/src/download.cpp
+@@ -49,6 +49,7 @@ constexpr const char* kTooMuch = "The server sent more data than expected.";
+ constexpr const char* kTooManyRedirects = "The server redirected too many times.";
+ constexpr const char* kInsecureRedirect = "The server redirected to an insecure address.";
+ constexpr const char* kBadAddress = "Not a valid web address.";
++constexpr const char* kNotAllowed = "The download address is not allowed.";
+ constexpr const char* kNotSaved = "The download could not be saved.";
+ 
+ bool ValidHeader(const HttpHeader& header) {
+@@ -235,6 +236,10 @@ std::string FollowRedirects(const ParsedUrl& first, const HttpOptions& options,
+   ParsedUrl current = first;
+   std::string error;
+   for (;;) {
++    if (options.allow_url && !options.allow_url(current.Origin() + current.target)) {
++      error = kNotAllowed;
++      break;
++    }
+     std::string location;
+     const Hop hop = fetch(current, current.SameOrigin(first), error, location);
+     if (hop == Hop::kDone) {

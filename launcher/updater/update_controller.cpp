@@ -34,11 +34,30 @@ constexpr int kCheckTimeoutMs = 30000;
 constexpr int kDownloadTimeoutMs = 30 * 60 * 1000;
 constexpr long long kMaxReleaseJsonBytes = 4ll << 20;
 
-trg::HttpOptions HttpOptionsFor(const UpdateConfig& config, int total_timeout_ms, long long max_bytes) {
+bool IsAllowedHost(const UpdateConfig& config, std::string_view url) {
+  return config.url_filter ? config.url_filter(std::string(url)) : UrlHostAllowed(url, config.allowed_hosts);
+}
+
+bool IsAllowedDownload(const UpdateConfig& config, std::string_view url) {
+  return config.url_filter ? config.url_filter(std::string(url))
+                           : UrlAllowed(url, config.allowed_hosts, config.download_url_prefix);
+}
+
+trg::HttpOptions HttpOptionsFor(const UpdateConfig& config, const char* operation, int total_timeout_ms,
+                                long long max_bytes) {
   trg::HttpOptions options;
   options.user_agent = config.user_agent;
-  options.connect_timeout_ms = 15000;
-  options.receive_timeout_ms = 30000;
+  options.operation = operation;
+  options.log = [log = config.log](const std::string& text) {
+    if (log) {
+      log(text);
+    }
+  };
+  options.allow_url = [hosts = config.allowed_hosts, filter = config.url_filter](const std::string& url) {
+    return filter ? filter(url) : UrlHostAllowed(url, hosts);
+  };
+  options.connect_timeout_ms = config.connect_timeout_ms;
+  options.receive_timeout_ms = config.receive_timeout_ms;
   options.total_timeout_ms = total_timeout_ms;
   options.max_bytes = max_bytes;
   options.headers = {
@@ -62,10 +81,6 @@ bool ReadTextFile(const std::filesystem::path& path, std::string& text, std::str
     return false;
   }
   return true;
-}
-
-bool IsHttpsUrl(std::string_view url) {
-  return url.rfind("https://", 0) == 0;
 }
 
 void Log(const UpdateConfig& config, std::string_view text) {
@@ -177,10 +192,11 @@ void UpdateController::StartCheck(bool manual) {
         return error;
       }
     } else {
-      if (!IsHttpsUrl(config.releases_url)) {
+      if (!IsAllowedHost(config, config.releases_url)) {
         return std::string("The update address is not secure.");
       }
-      error = trg::HttpGet(config.releases_url, json, &task, HttpOptionsFor(config, kCheckTimeoutMs, kMaxReleaseJsonBytes));
+      error = trg::HttpGet(config.releases_url, json, &task,
+                           HttpOptionsFor(config, "release metadata", kCheckTimeoutMs, kMaxReleaseJsonBytes));
       if (!error.empty()) {
         return error;
       }
@@ -210,7 +226,7 @@ void UpdateController::StartCheck(bool manual) {
     if (!asset) {
       return "The latest release does not include " + name + ".";
     }
-    if (!IsHttpsUrl(asset->download_url)) {
+    if (!IsAllowedDownload(config, asset->download_url)) {
       return std::string("The update package address is not secure.");
     }
     if (asset->size == 0 || asset->size > std::uint64_t(kMaxDownloadBytes)) {
@@ -221,7 +237,7 @@ void UpdateController::StartCheck(bool manual) {
       const std::string checksum_name = config.checksum_asset_name(release->version);
       if (!checksum_name.empty()) {
         if (const ReleaseAsset* found = FindAsset(*release, checksum_name); found) {
-          if (!IsHttpsUrl(found->download_url)) {
+          if (!IsAllowedDownload(config, found->download_url)) {
             return std::string("The checksum address is not secure.");
           }
           outcome->checksum_asset = *found;
@@ -233,32 +249,31 @@ void UpdateController::StartCheck(bool manual) {
   });
   if (!started) {
     task_kind_ = TaskKind::kNone;
-    Fail("The update check could not start.", RetryKind::kCheck, true);
+    snapshot_.manual_check = false;
+    FailCheck("The update check could not start.", manual);
   }
+}
+
+// The startup check fails quietly (offline, rate limited, assets not uploaded yet); only a requested one shows it.
+void UpdateController::FailCheck(std::string error, bool manual) {
+  if (manual) {
+    Fail(std::move(error), RetryKind::kCheck, true);
+    return;
+  }
+  snapshot_.state = UpdateState::kIdle;
+  Log(config_, "Update check failed: " + error);
 }
 
 void UpdateController::FinishCheck(trg::Task::State state, const std::string& error) {
   const bool manual = snapshot_.manual_check;
   snapshot_.manual_check = false;
-  // The automatic check at start stays quiet when offline or rate-limited; only a retry the player asked for reports it.
-  const auto check_failed = [&](const std::string& why) {
-    if (manual) {
-      Fail(why, RetryKind::kCheck, true);
-      return;
-    }
-    snapshot_.state = UpdateState::kIdle;
-    snapshot_.error.clear();
-    snapshot_.progress = -1.0f;
-    snapshot_.retry_available = false;
-    Log(config_, "Update check failed: " + why);
-  };
   const std::shared_ptr<CheckOutcome> outcome = std::move(check_outcome_);
   if (state == trg::Task::State::kFailed || state == trg::Task::State::kCancelled || !outcome) {
-    check_failed(error.empty() ? "The update check failed." : error);
+    FailCheck(error.empty() ? "The update check failed." : error, manual);
     return;
   }
   if (!outcome->release) {
-    check_failed("The update check failed.");
+    FailCheck("The update check failed.", manual);
     return;
   }
 
@@ -278,7 +293,8 @@ void UpdateController::FinishCheck(trg::Task::State state, const std::string& er
   checksum_asset_ = std::move(outcome->checksum_asset);
   snapshot_.state = UpdateState::kAvailable;
   snapshot_.latest_version = release_->version.ToString();
-  snapshot_.release_url = IsHttpsUrl(release_->html_url) ? release_->html_url : std::string();
+  snapshot_.release_url =
+      IsAllowedHost(config_, release_->html_url) ? release_->html_url : std::string();
   snapshot_.asset_name = asset_->name;
   snapshot_.progress = -1.0f;
   snapshot_.error.clear();
@@ -335,7 +351,7 @@ void UpdateController::StartDownload() {
     } else if (checksum_asset) {
       std::string checksum;
       std::string error = trg::HttpGet(checksum_asset->download_url, checksum, &task,
-                                       HttpOptionsFor(config, 20000, 64ll << 10));
+                                       HttpOptionsFor(config, "checksum", 20000, 64ll << 10));
       if (!error.empty()) {
         return error;
       }
@@ -353,7 +369,7 @@ void UpdateController::StartDownload() {
       return std::string("The release does not provide a trusted SHA-256 checksum.");
     }
 
-    trg::HttpOptions download_options = HttpOptionsFor(config, kDownloadTimeoutMs, kMaxDownloadBytes);
+    trg::HttpOptions download_options = HttpOptionsFor(config, "update package", kDownloadTimeoutMs, kMaxDownloadBytes);
     download_options.progress_total = static_cast<long long>(asset.size);
     download_options.max_bytes = static_cast<long long>(asset.size) + (1ll << 20);
     std::string error = trg::DownloadFile(task, asset.download_url, Utf8Path(download_path), download_options);
