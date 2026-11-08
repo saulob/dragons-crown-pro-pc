@@ -55,13 +55,20 @@ std::string lobby_endpoint_text(const std::string& public_ip, const std::string&
 struct RelayStats {
     uint64_t frames_out = 0, bytes_out = 0, frames_in = 0, bytes_in = 0;
     uint64_t send_failures = 0, rejected = 0;
+    uint64_t throttled = 0; // held back to stay inside the lobby's relay budget
 };
 
+// How well a connected link delivers, judged once a second from sustained evidence (docs/ONLINE.md, "Link quality").
+enum class LinkQuality { kHealthy, kDegraded, kCritical, kRecovering };
+
+// Messages are the game's; packets are DATA datagrams (a message is one or more fragments). Resends count packets.
 struct LinkStats {
     uint64_t messages_in = 0, messages_out = 0, bytes_in = 0, bytes_out = 0;
-    uint64_t resends = 0;
-    uint32_t rtt_ms = 0;
+    uint64_t packets_out = 0, resends = 0;
+    uint32_t rtt_ms = 0, rto_ms = 0;
     bool rtt_sampled = false;
+    LinkQuality quality = LinkQuality::kHealthy;
+    bool moved_to_relay = false;
 };
 
 struct LinkView {
@@ -94,6 +101,9 @@ public:
         int connect_timeout_ms = 15000;
         int idle_timeout_ms = 10000;
         int relay_after_ms = 2500; // direct-only head start; the direct candidates keep being tried after it
+        // Tests only: datagrams go here instead of to a UDP socket, and nothing runs on its own; the caller drives the
+        // clock with the simulated_* calls.
+        std::function<void(const Endpoint& to, const uint8_t* data, size_t size)> simulated_network;
     };
 
     // Hands one encoded relay frame to the lobby's connection; false when it cannot take it now.
@@ -142,6 +152,11 @@ public:
     // Opens our NAT towards an endpoint before the handshake (throwaway datagrams).
     void punch(const Endpoint& to);
 
+    // Options::simulated_network only: set the clock, hand in one datagram, run the timers one pass.
+    void simulated_clock(uint64_t now);
+    void simulated_datagram(const uint8_t* data, size_t size, const Endpoint& from);
+    void simulated_tick();
+
 private:
     struct Packet {
         uint32_t seq = 0;
@@ -149,6 +164,27 @@ private:
         uint64_t sent_ms = 0;
         int tries = 0;
         bool acked = false;
+        bool due = false; // resend at the next flush, whatever its timer says
+    };
+
+    // The quality monitor's evidence for one link: per-second DATA counts over the last five seconds, the streaks of
+    // judged seconds, and the relay probe that proves a fallback path before it is needed.
+    struct Health {
+        LinkQuality state = LinkQuality::kHealthy;
+        uint64_t next_check_ms = 0;
+        std::array<std::pair<uint32_t, uint32_t>, 5> seconds{};
+        size_t slot = 0;
+        uint32_t sent = 0, resent = 0;
+        int bad = 0, critical = 0, severe = 0, slow = 0, good = 0;
+        uint64_t probe_due_ms = 0, relay_ready_ms = 0, moved_ms = 0;
+        uint32_t probe_stamp = 0, relay_rtt_ms = 0;
+        bool moved = false, move_confirmed = false, stuck_logged = false;
+    };
+
+    struct Assessment {
+        uint32_t sent = 0, resent = 0;
+        double resend_share = -1; // resends among all DATA transmissions; -1: too few to judge
+        uint64_t stall_ms = 0, silence_ms = 0, backlog_ms = 0; // backlog: the oldest unsent message has waited this long
     };
 
     struct Link {
@@ -164,13 +200,18 @@ private:
         std::string closed_why;
         // sending
         std::deque<std::vector<uint8_t>> outbox;
+        std::deque<uint64_t> outbox_ms; // when each outbox message was queued
         size_t outbox_offset = 0;
         size_t queued = 0;
         uint32_t next_seq = 1;
         std::deque<Packet> unacked;
         uint32_t window = 64;
+        size_t sacked = 0; // packets in `unacked` the peer already reported (SACK) behind a hole
+        uint32_t recovery_seq = 0; // the window shrinks once per loss episode: only for packets sent after the last cut
         double srtt = 0, rttvar = 0;
-        uint32_t rto_ms = 300;
+        uint32_t rto_ms = 1000; // until the first sample (RFC 6298); a path slower than this is measured by PING/PONG
+        uint64_t last_progress_ms = 0, outstanding_since_ms = 0, next_ping_ms = 0;
+        Health health;
         // receiving
         uint32_t expected = 1;
         std::map<uint32_t, std::pair<uint8_t, std::vector<uint8_t>>> early;
@@ -190,11 +231,28 @@ private:
     void Flush(Link& link, uint64_t now);
     void SendHello(Link& link, const Endpoint& to, bool reply);
     void SendAck(Link& link);
+    void SendPing(Link& link, const Endpoint& to, uint32_t stamp);
     void SendRaw(const Endpoint& to, const void* data, size_t size);
     void SendRelay(uint16_t member, const void* data, size_t size);
+    bool RelayBudget(size_t frame_bytes, uint64_t now, bool data);
     bool HasDirect(uint64_t account) const;
     bool RelayReachable(const Link& link, uint64_t now) const;
-    void Close(Link& link, const std::string& why, bool tell_peer);
+    bool CanRelay(const Link& link) const;
+    bool FromRelayOf(const Link& link, const Endpoint& from) const;
+    void Sample(Link& link, double rtt_ms);
+    void Pong(Link& link, uint32_t echo, uint64_t now);
+    void ShrinkWindow(Link& link, uint32_t lost_seq);
+    void Expedite(Link& link, bool everything);
+    void Resend(Link& link, Packet& p, uint64_t now, uint32_t sack);
+    static uint32_t Sack(const Link& link);
+    Assessment Measure(const Link& link, uint64_t now) const;
+    std::string QualityText(const Link& link, const Assessment& a) const;
+    void Assess(Link& link, uint64_t now);
+    void PrepareRelay(Link& link, uint64_t now);
+    void MoveToRelay(Link& link, uint64_t now, const std::string& why);
+    std::string Transport(const Link& link) const;
+    void Close(Link& link, const std::string& why, bool tell_peer, uint8_t code = 0);
+    uint64_t Now() const;
     void StunStep(uint64_t now);
     Link* Find(int id);
     const Link* Find(int id) const;
@@ -216,6 +274,10 @@ private:
     RelaySend relay_send_;
     uint32_t relay_seq_ = 0;
     RelayStats relay_stats_;
+    double relay_frame_tokens_ = 0, relay_byte_tokens_ = 0;
+    uint64_t relay_bucket_ms_ = 0;
+    bool simulated_ = false;
+    uint64_t simulated_now_ = 0;
     std::map<int, Link> links_;
     int next_link_ = 1;
     // STUN

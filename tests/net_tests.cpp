@@ -31,6 +31,7 @@
 #include "net/relay_frame.h"
 #include "net/stun.h"
 #include "fake_stun.h"
+#include "transport_sim.h"
 #include "net/websocket.h"
 
 namespace fs = std::filesystem;
@@ -66,7 +67,11 @@ void SetEnv(const char* name, const char* value) {
 #endif
 }
 
+// `dcp-net-tests <group>` runs that group alone (the transport simulator needs no sockets).
+const char* g_only = nullptr;
+
 void Group(const char* name, const std::function<void()>& run) {
+    if (g_only && std::strcmp(g_only, name) != 0) return;
     const int before = g_failures;
     run();
     std::printf("GROUP|%s|%s\n", name, g_failures == before ? "PASS" : "FAIL");
@@ -1851,9 +1856,283 @@ void TestLinuxParity() {
     }
 }
 
+// ---- Link quality and relay migration on the deterministic network (tests/transport_sim.h) ----
+
+using sim::Network;
+
+double ResendShare(const LinkStats& s) { return s.packets_out ? double(s.resends) / double(s.packets_out) : 0.0; }
+
+const char* PathName(LinkPath path) {
+    switch (path) {
+    case LinkPath::kDirect: return "direct";
+    case LinkPath::kRelay: return "relay";
+    case LinkPath::kFailed: return "closed";
+    default: return "connecting";
+    }
+}
+
+// Every message written arrived once, whole and in order, in both directions.
+bool Intact(Network& net) {
+    const sim::Delivery& x = net.a().in;
+    const sim::Delivery& y = net.b().in;
+    return x.sent > 0 && y.sent > 0 && x.delivered == x.sent && y.delivered == y.sent && x.duplicates == 0 &&
+           y.duplicates == 0 && x.out_of_order == 0 && y.out_of_order == 0;
+}
+
+void PrintSim(const char* name, Network& net) {
+    Network::End& a = net.a();
+    const LinkStats s = a.socket->stats(a.link);
+    const sim::Delivery& in = net.b().in;
+    std::printf("SIM|%-22s|rtt %3u|loss %4.1f%%|path %-6s|srtt %4s|rto %4u|packets %6llu|resends %5.1f%%|max latency %5llu ms|"
+                "max gap %5llu ms|late %4llu|%s|moved %s|relay overruns %llu|throttled %llu\n",
+                name, net.rtt_ms, net.loss_percent, PathName(a.socket->path(a.link)),
+                s.rtt_sampled ? std::to_string(s.rtt_ms).c_str() : "n/a", s.rto_ms, (unsigned long long)s.packets_out,
+                100.0 * ResendShare(s), (unsigned long long)in.max_latency_ms, (unsigned long long)in.max_gap_ms,
+                (unsigned long long)in.late, a.reached_critical ? "critical" : a.reached_degraded ? "degraded" : "healthy ",
+                a.moved_at || net.b().moved_at ? "yes" : "no", (unsigned long long)(a.relay_overruns + net.b().relay_overruns),
+                (unsigned long long)(a.socket->relay_stats().throttled + net.b().socket->relay_stats().throttled));
+}
+
+bool Moved(Network& net) { return net.a().moved_at || net.b().moved_at; }
+
+// The matrix of round trips and loss rates: a minute of game traffic each, both ways, with the relay available.
+void TestTransportMatrix() {
+    for (const uint32_t rtt : {50u, 100u, 200u, 250u, 300u, 500u}) {
+        for (const double loss : {0.0, 1.0, 2.0, 5.0, 10.0, 20.0}) {
+            Network net(rtt, loss, 7000 + rtt * 100 + uint64_t(loss));
+            CHECK(net.Connect());
+            net.Run(60000);
+            const bool closed = net.Closed();
+            net.Drain();
+            char name[32];
+            std::snprintf(name, sizeof(name), "matrix %u/%.0f", rtt, loss);
+            PrintSim(name, net);
+            const LinkStats s = net.a().socket->stats(net.a().link);
+            CHECK(!closed && Intact(net));
+            CHECK(s.rtt_sampled && s.rto_ms >= s.rtt_ms);
+            CHECK(ResendShare(s) <= 2.0 * loss / (100.0 - loss) + 0.02);
+            if (loss == 0) CHECK(ResendShare(s) < 0.005 && !net.a().reached_degraded);
+            if (loss <= 5) CHECK(!Moved(net));
+            if (loss <= 2) CHECK(!net.a().reached_critical && !net.b().reached_critical);
+            if (!Moved(net)) CHECK(s.rtt_ms >= rtt * 9 / 10 && s.rtt_ms <= rtt * 3 / 2 + 20);
+            if (loss >= 10) CHECK(net.a().reached_degraded);
+            if (loss >= 20) CHECK(Moved(net));
+        }
+    }
+}
+
+// The report's pattern: a round trip above the first RTO (300 ms) once left every packet unmeasured and resent once.
+void TestSlowPathIsMeasured() {
+    for (const uint32_t rtt : {250u, 400u, 700u}) {
+        Network net(rtt, 0, 11 + rtt);
+        CHECK(net.Connect());
+        net.Run(30000);
+        net.Drain();
+        PrintSim("slow path", net);
+        const LinkStats s = net.a().socket->stats(net.a().link);
+        CHECK(s.rtt_sampled && s.rtt_ms >= rtt * 9 / 10 && s.rtt_ms <= rtt * 6 / 5 + 20);
+        CHECK(ResendShare(s) < 0.01 && !Moved(net) && Intact(net));
+        CHECK(net.b().in.max_latency_ms < rtt + 300);
+    }
+}
+
+// The report's other link: measured fast, then the path slowed to 250 ms. The estimate must follow instead of staying at
+// the old value with every packet resent.
+void TestRttRiseIsFollowed() {
+    Network net(40, 0, 13);
+    CHECK(net.Connect());
+    net.Run(10000);
+    net.rtt_ms = 250, net.jitter_ms = 12;
+    net.Run(5000);
+    const LinkStats settled = net.a().socket->stats(net.a().link);
+    net.Run(30000);
+    net.Drain();
+    PrintSim("rtt 40 -> 250", net);
+    const LinkStats s = net.a().socket->stats(net.a().link);
+    CHECK(s.rtt_ms >= 240 && s.rtt_ms <= 300 && s.rto_ms > s.rtt_ms);
+    CHECK(s.resends - settled.resends <= (s.packets_out - settled.packets_out) / 100);
+    CHECK(!Moved(net) && Intact(net));
+}
+
+// B and C: 250 ms with 2% and 5% loss stays direct and delivers everything with bounded resends.
+void TestHighLatencyModestLoss() {
+    for (const double loss : {2.0, 5.0}) {
+        Network net(250, loss, 21 + uint64_t(loss));
+        CHECK(net.Connect());
+        net.Run(90000);
+        net.Drain();
+        PrintSim("250 ms modest loss", net);
+        const LinkStats s = net.a().socket->stats(net.a().link);
+        CHECK(!Moved(net) && Intact(net) && net.a().socket->path(net.a().link) == LinkPath::kDirect);
+        CHECK(ResendShare(s) < 2.0 * loss / 100.0 + 0.01);
+    }
+}
+
+// D: 80 ms with 10% loss is judged by delivery, not by its low round trip.
+void TestLossNotLatencyDegrades() {
+    Network net(80, 10, 31);
+    CHECK(net.Connect());
+    net.Run(20000);
+    PrintSim("80 ms 10% loss", net);
+    CHECK(net.a().reached_degraded && net.a().degraded_srtt > 0 && net.a().degraded_srtt < 130);
+    net.Drain();
+    CHECK(Intact(net));
+}
+
+// E: 250 ms with 10% loss: no resend storm; after sustained degradation the relay takes over.
+void TestHighLatencySustainedLoss() {
+    Network net(250, 10, 41);
+    CHECK(net.Connect());
+    net.Run(60000);
+    net.Drain();
+    PrintSim("250 ms 10% loss", net);
+    const LinkStats s = net.a().socket->stats(net.a().link);
+    CHECK(net.a().reached_degraded && ResendShare(s) < 0.25 && Intact(net));
+    CHECK(!net.Closed());
+}
+
+// F: a 1 s outage recovers on the direct path without the relay.
+void TestShortOutageStaysDirect() {
+    Network net(250, 0, 51);
+    CHECK(net.Connect());
+    net.Run(20000);
+    net.outages.push_back({net.now(), net.now() + 1000});
+    net.Run(20000);
+    net.Drain();
+    PrintSim("1 s outage", net);
+    CHECK(!Moved(net) && Intact(net) && net.a().socket->path(net.a().link) == LinkPath::kDirect);
+    CHECK(net.b().in.max_gap_ms < 2500);
+}
+
+// G: a 3 s outage never reaches the game as a disconnect.
+void TestLongerOutageSurvives() {
+    Network net(250, 0, 61);
+    CHECK(net.Connect());
+    net.Run(20000);
+    net.outages.push_back({net.now(), net.now() + 3000});
+    net.Run(20000);
+    CHECK(!net.Closed());
+    net.Drain();
+    PrintSim("3 s outage", net);
+    CHECK(Intact(net) && net.b().in.max_gap_ms < 6000);
+}
+
+// H and I: the direct path stops delivering for good while the relay works. The link moves with packets in flight;
+// the peer follows; nothing is duplicated, reordered or lost and the game never sees the link close.
+void TestDeadDirectMovesToRelay() {
+    for (const bool heavy : {false, true}) {
+        Network net(250, 0, 71 + heavy);
+        if (heavy) net.messages_per_second = 100, net.big_bytes = 20000, net.big_every_ms = 500;
+        CHECK(net.Connect());
+        net.Run(20000);
+        const uint64_t died = net.now();
+        net.direct_dead_from = died;
+        net.Run(30000);
+        CHECK(!net.Closed());
+        net.Drain();
+        PrintSim(heavy ? "dead direct, heavy" : "dead direct", net);
+        CHECK(net.a().moved_at && net.a().moved_at - died < 8000);
+        CHECK(net.a().socket->path(net.a().link) == LinkPath::kRelay && net.b().socket->path(net.b().link) == LinkPath::kRelay);
+        CHECK(net.a().socket->stats(net.a().link).moved_to_relay && net.b().socket->stats(net.b().link).moved_to_relay);
+        CHECK(Intact(net));
+        CHECK(net.a().relay_overruns == 0 && net.b().relay_overruns == 0);
+    }
+}
+
+// Once on the relay for quality, a link stays there even when the direct path heals.
+void TestRelayIsKeptAfterTheMove() {
+    Network net(250, 0, 81);
+    CHECK(net.Connect());
+    net.Run(10000);
+    net.outages.push_back({net.now(), net.now() + 12000});
+    net.Run(12000);
+    CHECK(Moved(net) && !net.Closed());
+    net.Run(20000);
+    CHECK(net.a().socket->path(net.a().link) == LinkPath::kRelay && net.b().socket->path(net.b().link) == LinkPath::kRelay);
+    net.Drain();
+    PrintSim("relay kept", net);
+    CHECK(Intact(net));
+}
+
+// No relay, or a relay that never answers: the direct link keeps its old failure path (10 s without traffic).
+void TestNoRelayKeepsTheIdleTimeout() {
+    for (const bool offered : {false, true}) {
+        Network net(250, 0, 91 + offered, offered);
+        net.relay_forwarding = false;
+        CHECK(net.Connect());
+        net.Run(10000);
+        const uint64_t died = net.now();
+        net.direct_dead_from = died;
+        while (!net.Closed() && net.now() - died < 15000) net.Run(Network::kTick);
+        const uint64_t closed_after = net.now() - died;
+        CHECK(net.Closed() && !Moved(net) && closed_after >= 9900 && closed_after <= 10500);
+        std::printf("SIM|%-22s|closed %llu ms after the direct path died\n", offered ? "relay never answers" : "no relay",
+                    (unsigned long long)closed_after);
+    }
+}
+
+// A CLOSE now carries a reason byte; the peer still ends the link at once instead of waiting for the idle rule.
+void TestGameCloseReachesThePeer() {
+    Network net(250, 0, 131);
+    CHECK(net.Connect());
+    net.Run(3000);
+    net.traffic = false;
+    net.a().socket->close(net.a().link);
+    net.Run(1000);
+    CHECK(net.b().socket->state(net.b().link) == LinkState::kClosed);
+}
+
+// J: the lobby link drops (relay refused at the source) while direct is healthy: nothing changes for the game.
+void TestLobbyDropLeavesDirectAlone() {
+    Network net(250, 0, 101);
+    CHECK(net.Connect());
+    net.Run(15000);
+    net.relay_paused = true;
+    net.Run(20000);
+    net.relay_paused = false;
+    net.Run(10000);
+    net.Drain();
+    PrintSim("lobby drop, direct ok", net);
+    CHECK(!Moved(net) && Intact(net) && net.relay_frames == 0);
+    CHECK(ResendShare(net.a().socket->stats(net.a().link)) < 0.005);
+}
+
+// K: the direct path degrades while the lobby is reconnecting; after the seat resumes the relay is proved and taken.
+void TestFallbackAfterLobbyResume() {
+    Network net(250, 0, 111);
+    CHECK(net.Connect());
+    net.Run(15000);
+    net.relay_paused = true;
+    net.loss_percent = 30;
+    net.Run(15000);
+    CHECK(!Moved(net) && net.a().reached_critical && !net.Closed() && net.a().socket->relay_stats().send_failures > 0);
+    const uint64_t resumed = net.now();
+    net.relay_paused = false;
+    net.Run(20000);
+    CHECK(!net.Closed() && net.a().moved_at > resumed && net.a().moved_at - resumed < 5000);
+    net.Drain();
+    PrintSim("fallback after resume", net);
+    CHECK(Intact(net));
+}
+
+// A link on the relay never sends more than the lobby's per-connection budget allows, even when the game floods it.
+void TestRelayStaysInsideTheLobbyBudget() {
+    Network net(100, 0, 121);
+    net.messages_per_second = 400, net.message_bytes = 1000, net.big_bytes = 200000, net.big_every_ms = 1000;
+    CHECK(net.Connect());
+    net.Run(5000);
+    net.direct_dead_from = net.now();
+    net.Run(20000);
+    PrintSim("relay flood", net);
+    CHECK(Moved(net) && !net.Closed());
+    CHECK(net.a().relay_overruns == 0 && net.b().relay_overruns == 0);
+    CHECK(net.a().socket->relay_stats().throttled > 0);
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1) g_only = argv[1];
     if (!sockets_ready()) {
         std::printf("FAILED: no sockets\n");
         return 1;
@@ -1909,6 +2188,23 @@ int main() {
         TestRelayLossAfterConnectionEndsTheLink();
         TestRelayDoesNotBypassTheRoomKey();
     });
+    Group("transport-quality", [&] {
+        TestSlowPathIsMeasured();
+        TestRttRiseIsFollowed();
+        TestHighLatencyModestLoss();
+        TestLossNotLatencyDegrades();
+        TestHighLatencySustainedLoss();
+        TestShortOutageStaysDirect();
+        TestLongerOutageSurvives();
+        TestDeadDirectMovesToRelay();
+        TestRelayIsKeptAfterTheMove();
+        TestNoRelayKeepsTheIdleTimeout();
+        TestGameCloseReachesThePeer();
+        TestLobbyDropLeavesDirectAlone();
+        TestFallbackAfterLobbyResume();
+        TestRelayStaysInsideTheLobbyBudget();
+        TestTransportMatrix();
+    });
     Group("protocol", [&] { TestRelayCompatibilityMatrix(); });
     Group("linux-parity", [&] {
         TestSystemCaBundle();
@@ -1919,7 +2215,7 @@ int main() {
             TestLobby(base);
             TestLobbyRelay(base);
         });
-    } else {
+    } else if (!g_only) {
         std::printf("GROUP|lobby-binary|SKIPPED|DCP_TEST_LOBBY is not set\n");
     }
     std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);

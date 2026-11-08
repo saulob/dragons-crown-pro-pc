@@ -74,9 +74,9 @@ void Attach(int id, Context& c) {
 void Release(int id, Context& c, const char* why) {
     if (c.link >= 0 && g_peer) {
         const net::LinkStats s = g_peer->stats(c.link);
-        std::printf("Rudp: context %d %s: in %llu msgs / %llu B, out %llu msgs / %llu B, %llu resends\n", id, why,
-                    (unsigned long long)s.messages_in, (unsigned long long)s.bytes_in, (unsigned long long)s.messages_out,
-                    (unsigned long long)s.bytes_out, (unsigned long long)s.resends);
+        std::printf("Rudp: context %d %s: in %llu msgs / %llu B, out %llu msgs / %llu B in %llu packets, %llu resends\n", id,
+                    why, (unsigned long long)s.messages_in, (unsigned long long)s.bytes_in, (unsigned long long)s.messages_out,
+                    (unsigned long long)s.bytes_out, (unsigned long long)s.packets_out, (unsigned long long)s.resends);
         g_peer->close(c.link);
     }
     c.link = -1;

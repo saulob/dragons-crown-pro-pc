@@ -176,9 +176,10 @@ observer described below.
 
 ### Ping
 
-The in-game Ping is the round trip to the other players over the direct P2P link: the smoothed round trip the peer
-transport already measures from its acknowledgements (see Peer transport), read about three times a second. It sends no
-extra packets and makes no request to the online service. With several players it shows the highest round trip among
+The in-game Ping is the round trip to the other players over their P2P links (direct or relayed): the smoothed round
+trip the peer transport already measures from its acknowledgements and its once-a-second PING (see Peer transport),
+read about three times a second. The panel adds no packets of its own and makes no request to the online service. A
+link's close line and its quality lines in the log print the same value as `srtt`. With several players it shows the highest round trip among
 the connected ones, the worst connection in the room. "Ping: --" means no player is connected yet, or the last one
 left. The panel uses the frame counter's style and corner, next to it when both are shown.
 
@@ -376,15 +377,98 @@ tag and the source link tag (u32 little endian). STUN answers on the same socket
 | 1 HELLO / 2 HELLO_ACK | sender account u64, target account u64, link nonce u32, HMAC-SHA-256(room key, first 32 bytes)[0..16] |
 | 3 DATA | seq u32, cumulative ack u32, SACK bits u32 (ack+1..ack+32), flags (1 first, 2 last fragment), <= 1150 bytes |
 | 4 ACK | ack u32, SACK u32 |
-| 5 PING / 6 PONG | time u32 (keepalive after 1 s without traffic) |
-| 7 CLOSE, 8 PUNCH | - |
+| 5 PING / 6 PONG | time u32, echoed by the PONG (every second on a connected link; also the relay probe, below) |
+| 7 CLOSE | optional reason byte: 1 the game closed the link, 2 the P2P socket closed, 3 an oversized message (older clients send none and ignore it) |
+| 8 PUNCH | - |
 
 Both ends send HELLO to every candidate of the peer every 100 ms (250 ms after 3 s) for 15 s; the first authenticated
 HELLO or HELLO_ACK fixes the address (a reply from an unexpected port is taken as it is: NATs that change ports). A
 HELLO must name this player's account, a peer the lobby introduced, and carry the room key's MAC. DATA, ACK and PING
-must carry both link tags. Retransmission: RTO from smoothed RTT (100 ms - 2 s, doubling per try), fast resend after
-three later packets are acknowledged, congestion window 16-512 packets halved on loss. A link closes after 10 s without
-any datagram, after 30 tries of one packet, or on CLOSE.
+must carry both link tags. A PING is answered on the path it came from.
+
+Counters: a message is one game write; a packet is one DATA datagram (a message of more than 1150 bytes is several);
+resends count packets. The close line prints both: `out <messages> msgs / <bytes> B in <packets> packets, <resends>
+resends (<resends / packets>% of packets), srtt <ms>` (`n/a` when the link never measured a round trip).
+
+Retransmission:
+
+- Round trip: one sample per ACK, from the newest packet it covers that was sent once, and none from an ACK that also
+  covers a retransmission (Karn's rule; such an ACK may have been released by a filled hole). The echoed PING time is a
+  second, unambiguous sample every second, so a path slower than the current RTO is still measured. RTO = smoothed RTT
+  + max(4 x variance, 50 ms), 100 ms - 2 s, 1 s before the first sample.
+- Loss: a packet is lost when a packet sent more than a quarter round trip after it has been acknowledged (this also
+  catches a retransmission lost again), or when its timer expires. A timer waits RTO x 2^(tries-1), at most 2 x RTO while
+  the peer is still sending and at most 16 x RTO when it is silent. Timers fire only within the 32 packets an ACK can
+  report past its cumulative point; later ones wait until that point moves.
+- Window: 64-512 packets not yet confirmed (packets reported by SACK behind a hole do not count), halved at most once
+  per loss episode. At the floor a 500 ms path still carries about 120 packets/s while random loss keeps halving it.
+- A link closes after 10 s without any datagram (`direct path timed out` / `relay path timed out`), after 30 tries of
+  one packet, or on CLOSE.
+
+### Link quality
+
+Each connected link is judged once a second from the last five seconds; one bad second never changes anything.
+
+| Signal | Meaning |
+|---|---|
+| resend share | resends among all DATA sends (judged with at least 20 new packets); tracks the path's loss |
+| ack stall | time since the oldest outstanding packet last saw progress |
+| send queue | how long the oldest message the game wrote has waited to be sent |
+| rx silence | time since anything arrived (both ends PING every second, so 2.5 s is never idle traffic) |
+
+Thresholds are relative to the round trip, never the round trip itself: a steady 250 ms path with no loss is healthy.
+
+- Degraded: for 3 s in a row, resend share >= 8%, ack stall or send queue >= max(1 s, 2 x srtt), or anything critical.
+- Critical (only from degraded): 2 s in a row of ack stall or send queue >= max(2 s, 4 x srtt) or rx silence >= 2.5 s; or 8 s in a row of
+  resend share >= 18% (longer than the 5 s window, so one outage's retransmissions are not enough); or 15 s of
+  degradation during which delivery itself stalled in at least 3 seconds (steady loss that retransmission hides stays
+  direct).
+- Healthy again after 5 good seconds. Recovering: the state right after a move to the relay.
+
+Measured with the deterministic simulator (`dcp-net-tests transport-quality`, tests/transport_sim.h): up to 5% loss
+stays direct at every round trip from 50 to 500 ms; 20% loss moves to the relay; 10% loss stays direct unless delivery
+stalls; a 1 s or 3 s outage recovers on the direct path; a dead direct path moves within about 4 s.
+
+### Relay fallback for a running link
+
+A direct link that becomes critical moves to the relay without the game noticing.
+
+1. Any non-healthy second starts a relay probe: a PING through the relay once a second, its stamp marked so its PONG is
+   told apart. A PONG on either path proves the peer hears the relay (`relay answered in N ms`). Nothing else uses the
+   relay while direct is still in use, and no data goes both ways at once.
+2. Direct recovery comes first: RUDP keeps retransmitting on the direct path, and a peer that is heard again after a
+   silence gets its backed-off packets resent at once.
+3. When the link is critical and the relay answered within the last 10 s, the link's address becomes the relay's for
+   that member. Tags, sequence numbers, acknowledgements, buffers and the game's Rudp context stay the same; the first
+   32 outstanding packets are resent through the relay, the round trip estimate restarts from the probe's, and the
+   window starts at 64.
+4. A packet sent on the old path that arrives late is a duplicate by sequence number and is dropped; delivery to the
+   game stays in order and exactly once. ACKs are cumulative, so an old one changes nothing.
+5. The peer follows on the first DATA or ACK it receives from the relay for that link (`the peer moved this link to the
+   relay`). An older client does not follow: its traffic keeps arriving directly, which still works for the half that is
+   healthy. No protocol field was added.
+6. A moved link stays on the relay for the rest of that peer session; it never probes direct again.
+7. Without a relay (not offered, not relayable, or never answering) nothing changes: the link keeps the 10 s rule and its
+   close line says why (`no relay for this peer`, `relay fallback failed: the relay never answered`).
+
+The relay sender stays below the lobby's per-connection budget: 300 frames/s and 96 KB/s (bursts 600 and 192 KB),
+keeping 60 frames and 8 KB for ACK and PING; frames over it are held back and retransmitted like lost ones
+(`RelayStats::throttled`).
+
+Log lines from the simulator, a 250 ms direct path that stops delivering (endpoint addresses never appear in them):
+
+```
+P2P: link 1 relay answered in 310 ms; ready if the direct path fails
+P2P: link 1 quality degraded: transport direct, srtt 267 ms, rto 316 ms, resends 41.1% of 241 sends in 5 s, ack stall 2880 ms, rx silence 1690 ms, send queue 1590 ms
+P2P: link 1 quality critical: transport direct, srtt 267 ms, rto 316 ms, resends 53.7% of 214 sends in 5 s, ack stall 3880 ms, rx silence 2690 ms, send queue 2590 ms
+P2P: link 1 direct quality critical; switching to the relay (transport direct, srtt 267 ms, ...)
+P2P: link 1 migrated to the relay; session preserved (transport relay (moved from direct), srtt 310 ms, ...)
+P2P: link 1 quality recovered: transport relay (moved from direct), srtt 310 ms, rto 360 ms, resends 0.0% of 206 sends in 5 s, ...
+```
+
+On the peer that did not decide: `P2P: link 1 the peer moved this link to the relay; switching to the relay (...)`. With
+no fallback the close line says so: `closed: direct path timed out: no traffic from the peer for 10 s (no relay for this
+peer); transport direct, ...`.
 
 ## NAT traversal
 
@@ -405,10 +489,10 @@ any datagram, after 30 tries of one packet, or on CLOSE.
 
 ## Relay
 
-Direct UDP is always tried first and is unchanged. The lobby's relay is a second path for one pair of players at a
-time, used only when the direct one does not answer. There is no setting for it; it needs no router configuration. It
-works the same on Windows and Linux and for every supported game build, because it lives below the game's Matching2 and
-Rudp entry points, in `net::PeerSocket`.
+Direct UDP is always tried first. The lobby's relay is a second path for one pair of players at a time, used only when
+the direct one does not answer or a running direct link turns critical (Peer transport). There is no setting for it; it
+needs no router configuration. It works the same on Windows and Linux and for every supported game build, because it
+lives below the game's Matching2 and Rudp entry points, in `net::PeerSocket`.
 
 - A client says `relay: true` in `hello` and uses the relay only when the answer carries
   `capabilities.relay_supported` with `relay_max_payload` of at least 1200. A client or lobby without the capability
@@ -417,8 +501,9 @@ Rudp entry points, in `net::PeerSocket`.
   is still not authenticated, the relay is offered beside them: the same authenticated HELLOs also go through the lobby.
   Direct is not cancelled; the first HELLO or HELLO_ACK that authenticates fixes the path of that link
   (`LinkPath`: `kConnectingDirect`, `kRelayOffered`, `kDirect`, `kRelay`, `kFailed`). A link that came up on the relay
-  stays on it for the session; one that came up directly never uses it. In a room of three, A-B can be direct while A-C
-  and B-C are relayed. The 15 s connection timeout is unchanged.
+  stays on it for the session; one that came up directly uses it only when its quality fails (Peer transport, "Relay
+  fallback for a running link"). In a room of three, A-B can be direct while A-C and B-C are relayed. The 15 s
+  connection timeout is unchanged.
 - A peer with no usable direct candidate (the lobby has no IPv4 endpoint for it, because it connects over IPv6 and found
   no public IPv4, and no LAN candidate) does not wait for the head start: its link is created at once and the relay is
   offered immediately, since there is nothing direct to try. The game is given `127.82.76.89` with that member as the port as
@@ -445,6 +530,9 @@ Rudp entry points, in `net::PeerSocket`.
 - The client queues at most 512 frames for the socket (`kMaxQueuedBinary`); when full, or with no greeted socket, a
   frame is dropped and counted. A relayed frame is delivered to the link layer directly on receipt, so nothing queues
   on the way in.
+- While the lobby link reconnects, the game's client sends no relay frames until `room.resume` answers (before that the
+  lobby would count them as frames of a sender with no room); the links retransmit what was held back. Direct links
+  are not touched by a lobby reconnect.
 - Relay frames pass through the lobby's Durable Object, so unlike signalling their volume grows with the traffic of
   relayed pairs. The relay is part of the production lobby; an older lobby does not offer it.
 

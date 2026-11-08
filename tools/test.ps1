@@ -245,6 +245,7 @@ try {
         $lobby = Start-DevLobby
         if ($lobby.Url) {
             $env:DCP_TEST_LOBBY = $lobby.Url
+            Write-Host "Online tests: Node $(& (Get-Node) --version) via $(Get-Node)"
             Write-Host "Development lobby ready at $($lobby.Url) (pid $($lobby.Process.Id)); DCP_TEST_LOBBY is set for every test below."
         } elseif ($lobby.Error) {
             $lobbyProblem = $lobby.Error
@@ -371,7 +372,7 @@ function Read-Groups([string[]]$Lines) {
     return $table
 }
 $net = Read-Groups $captured['dcp-net-tests']
-$netGroups = 'foundations', 'address-classification', 'endpoint-selection', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'protocol', 'linux-parity', 'lobby-binary'
+$netGroups = 'foundations', 'address-classification', 'endpoint-selection', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'transport-quality', 'protocol', 'linux-parity', 'lobby-binary'
 if ($captured.ContainsKey('dcp-net-tests')) {
     foreach ($group in $netGroups | Where-Object { -not $net.ContainsKey($_) }) { $net[$group] = 'FAIL' }
 }
@@ -433,6 +434,7 @@ $summary = [ordered]@{
     'Worker relay' = $(if ($workerState -eq 'SKIPPED') { "SKIPPED ($($skipped[$workerName]))" } else { $workerState })
     'Protocol compatibility' = $protocolSummary
     'Failure paths' = Group-Status $net @('failure-paths')
+    'Link quality and relay migration' = Group-Status $net @('transport-quality')
     'Connection test' = Group-Status $net @('connection-test')
     'Address classification' = Group-Status $net @('address-classification')
     'Endpoint selection' = Group-Status $net @('endpoint-selection')
