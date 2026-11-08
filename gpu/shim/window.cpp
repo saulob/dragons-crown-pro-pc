@@ -60,9 +60,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     const dcp::Display* display = dcp::DisplayForSetting(displays, settings.monitor);
     int window_width = settings.requested_width > 0 ? settings.requested_width.load() : width_;
     int window_height = settings.requested_height > 0 ? settings.requested_height.load() : height_;
+    const int requested_width = window_width, requested_height = window_height;
     int window_x = SDL_WINDOWPOS_CENTERED, window_y = SDL_WINDOWPOS_CENTERED;
     if (display) {
-        dcp::FitToDisplay(window_width, window_height, *display);
         window_x = window_y = SDL_WINDOWPOS_CENTERED_DISPLAY(display->id);
     }
     SDL_PropertiesID props = SDL_CreateProperties();
@@ -124,11 +124,16 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     if (display) {
         // Hidden until the real title bar and frame are known, so the decorated window is fitted and centred once.
         dcp::WindowBorders borders;
-        SDL_GetWindowBordersSize(window, &borders.top, &borders.left, &borders.bottom, &borders.right);
+        if (!SDL_GetWindowBordersSize(window, &borders.top, &borders.left, &borders.bottom, &borders.right)) {
+            borders = dcp::EstimatedBorders(display->scale);
+        }
         const dcp::WindowFit fit = dcp::FitWindowToArea(window_width, window_height, borders, display->usable.x,
                                                         display->usable.y, display->usable.w, display->usable.h);
         window_width = fit.width;
         window_height = fit.height;
+        std::printf("Window fit: bounds %dx%d, usable %dx%d, scale %.2f, borders %d+%d, requested %dx%d, fitted %dx%d\n",
+                    display->bounds.w, display->bounds.h, display->usable.w, display->usable.h, display->scale,
+                    borders.top, borders.bottom, requested_width, requested_height, fit.width, fit.height);
         SDL_SetWindowSize(window, fit.width, fit.height);
         SDL_SetWindowPosition(window, fit.x, fit.y);
     }
@@ -143,7 +148,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
     const std::string display_name = display && !display->name.empty() ? " (" + display->name + ")" : "";
-    std::printf("Window: display %d of %zu%s, requested %dx%d, VSync %s, frame rate in title %s, "
+    std::printf("Window: display %d of %zu%s, size %dx%d, VSync %s, frame rate in title %s, "
                 "resolution in title %s\n",
                 display ? int(display - displays.data()) + 1 : 0, displays.size(), display_name.c_str(),
                 window_width, window_height, settings.vsync ? "on" : "off", settings.show_fps_title ? "on" : "off",

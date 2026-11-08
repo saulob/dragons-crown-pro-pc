@@ -919,8 +919,6 @@ private:
         launcher_->SetStatus(Tr("Install failed: ") + install_failure_, 8.0);
     }
 
-    const Display* SelectedDisplay() const { return DisplayForSetting(displays_, settings_.GetInt(kMonitorKey, 1)); }
-
     void PageDisplay(trg::Ui& ui) {
         ui.Choice("Display mode", "Borderless Fullscreen fills the monitor. F11 switches while playing.", kDisplayModeKey,
                   "windowed", {{"windowed", "Windowed"}, {"borderless", "Borderless Fullscreen"}}, 2);
@@ -981,13 +979,9 @@ private:
             height = kDefaultWindowHeight;
         }
         const WindowSize current{width, height};
-        const Display* display = SelectedDisplay();
         if (ImGui::BeginCombo("##window_size", WindowSizeLabel(current).c_str())) {
             for (const WindowSize size : WindowSizesFor(SavedAspectRatio())) {
                 const bool selected = size == current;
-                if (!selected && display && !WindowSizeFits(size, *display)) {
-                    continue;
-                }
                 if (ImGui::Selectable(WindowSizeLabel(size).c_str(), selected) && !selected) {
                     settings_.SetInt(kWindowWidthKey, size.width);
                     settings_.SetInt(kWindowHeightKey, size.height);

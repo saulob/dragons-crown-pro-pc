@@ -44,15 +44,6 @@ const char* PageName(PageId page) {
     return "";
 }
 
-WindowSize FitGameWindow(WindowSize requested, const Display& display) {
-    FitToDisplay(requested.width, requested.height, display);
-    return requested;
-}
-
-bool WindowSizeFits(WindowSize size, const Display& display) {
-    return FitGameWindow(size, display) == size;
-}
-
 std::string ResolutionLabel(const DcpResolution& resolution) {
     return std::string(Tr(resolution.name)) + " \xE2\x80\x94 " + Dimensions(resolution.width, resolution.height);
 }

@@ -3612,25 +3612,17 @@ void TestPlacement() {
 }
 
 void TestOptions() {
-    Display display;
-    display.usable = {0, 0, 1920, 1040};
-    display.bounds = {0, 0, 1920, 1080};
-    display.scale = 1.0f;
-    CHECK(WindowSizeFits({1280, 720}, display));
-    CHECK(WindowSizeFits({1600, 900}, display));
-    CHECK(!WindowSizeFits({1920, 1080}, display)); // the title bar leaves no room on a 1080p desktop
-    CHECK(!WindowSizeFits({2560, 1440}, display));
-    const WindowSize fitted = FitGameWindow({1920, 1080}, display);
-    CHECK(fitted.width <= 1920 && fitted.height <= 1040 - 40);
-    CHECK(fitted.width * 9 / 16 >= fitted.height - 1 && fitted.width * 9 / 16 <= fitted.height + 1); // shape kept
-
-    Display large;
-    large.usable = {0, 0, 3840, 2100};
-    large.bounds = {0, 0, 3840, 2160};
-    large.scale = 2.25f;
-    CHECK(WindowSizeFits({3840, 2160}, large) == false);
-    CHECK(WindowSizeFits({2560, 1440}, large));
-    CHECK(FitGameWindow({1920, 1080}, large) == WindowSize({1920, 1080}));
+    const std::vector<WindowSize> standard = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+    CHECK(WindowSizesFor(dcp_aspect_ratios[0]) == standard); // independent of the monitor and of the selection
+    for (const DcpAspectRatio& aspect : dcp_aspect_ratios) {
+        const std::vector<WindowSize> sizes = WindowSizesFor(aspect);
+        CHECK(sizes.size() == std::size(kWindowHeights)); // the entry count never depends on the selection
+        for (size_t i = 0; i < sizes.size(); ++i) {
+            CHECK(sizes[i].height == kWindowHeights[i] && sizes[i].width > 0);
+        }
+    }
+    CHECK(WindowSizeLabel({1920, 1080}).find("game's own size") != std::string::npos);
+    CHECK(WindowSizeLabel({3840, 2160}).find("game's own size") == std::string::npos);
 
     CHECK(WindowSizeLabel({1280, 720}) == "1280 \xC3\x97 720");
     CHECK(WindowSizeLabel(kGamePictureSize).find("1920 \xC3\x97 1080") == 0);

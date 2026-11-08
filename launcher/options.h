@@ -33,12 +33,6 @@ inline constexpr PageId kPageOrder[] = {PageId::kPlay,   PageId::kDisplay,  Page
 
 const char* PageName(PageId page);
 
-// The window a requested size becomes on this display: unchanged when it fits, else shrunk to fit, keeping its shape.
-WindowSize FitGameWindow(WindowSize requested, const Display& display);
-
-// Whether the size fits the display, so the game window is not larger than the screen.
-bool WindowSizeFits(WindowSize size, const Display& display);
-
 // "Native (1080p) — 1920 × 1080".
 std::string ResolutionLabel(const DcpResolution& resolution);
 

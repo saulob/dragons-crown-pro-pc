@@ -281,10 +281,10 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
 ## Display
 
 - **Display mode**: Windowed or Borderless Fullscreen (SDL desktop fullscreen, no display mode change).
-- **Window size**: 1280 × 720, 1600 × 900, 1920 × 1080 (the game's own size), 2560 × 1440, 3840 × 2160, in pixels, listed
-  when they fit the selected monitor's usable area with the title bar; the current value is shown. A size that
-  does not fit when the game opens is reduced keeping its shape, so that the whole window, title bar included, takes at
-  most 80% of the monitor's usable area, and the window opens centred there. This is applied at start only: the saved
+- **Window size**: 1280 × 720, 1600 × 900, 1920 × 1080 (the game's own size), 2560 × 1440, 3840 × 2160, in pixels, always
+  all listed, whatever the monitor; the saved value is exactly the one chosen. A size that
+  does not fit when the game opens is reduced keeping its shape until the whole window, title bar included, fits the
+  monitor's usable area; a size that fits opens unchanged. The window opens centred there. This is applied at start only: the saved
   Window size is not changed, and a window you resize afterwards is left alone. The picture keeps its shape and is
   letterboxed or pillarboxed in the window. The listed sizes (heights 720, 900, 1080, 1440, 2160) follow the Aspect Ratio.
 - **Aspect Ratio**: 16:9 Original, 16:10, 21:9 Ultrawide, 32:9 Super Ultrawide, 4:3, 5:4 (`aspect_ratio` in `dcp.ini`;
