@@ -270,6 +270,17 @@ export class IncidentDesk {
     return this.status(ticket);
   }
 
+  // The whole report: its fields and log, and the status and receipt hash that let its owner look it up. False when
+  // nothing was stored under the ticket.
+  remove(ticket) {
+    return this.sql.transaction(() => {
+      const existed = this.taken(ticket);
+      this.sql.run('DELETE FROM incidents WHERE ticket = ?', ticket);
+      this.sql.run('DELETE FROM incident_tracking WHERE ticket = ?', ticket);
+      return existed;
+    });
+  }
+
   taken(ticket) {
     return Boolean(this.sql.get(`SELECT 1 AS x FROM incidents WHERE ticket = ?
       UNION ALL SELECT 1 AS x FROM incident_tracking WHERE ticket = ?`, ticket, ticket));

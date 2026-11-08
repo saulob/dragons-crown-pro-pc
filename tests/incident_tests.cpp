@@ -749,6 +749,215 @@ void TestRemoveIsLocal() {
     CHECK(!Has(ReadAll(kSource / "launcher" / "incident_report.cpp"), "incident.delete"));
 }
 
+void TestDeveloperReplyIsKeptApartFromAStatusChange() {
+    TempFolder temp;
+    const fs::path file = temp.path / kReportHistoryFile;
+    ReportHistory history(file);
+    history.Add(Tracked("DCP-AAAAAA", 1000));
+    history.Add(Tracked("DCP-BBBBBB", 2000));
+    CHECK(!history.HasUnseen() && !history.HasUnseenMessage() && history.NextUnseen().empty());
+
+    // A status with no message is an update, never a reply.
+    CHECK(history.Apply({StatusOf("DCP-AAAAAA", "investigating", 3000)}));
+    CHECK(history.HasUnseen() && !history.HasUnseenMessage());
+    CHECK(!history.reports()[1].message_unseen && history.reports()[1].player_message.empty());
+
+    // A new message is a reply.
+    CHECK(history.Apply({StatusOf("DCP-BBBBBB", "investigating", 3500, "", "Please send a newer log")}));
+    CHECK(history.HasUnseenMessage() && history.reports()[0].message_unseen && !history.reports()[1].message_unseen);
+
+    // The reply comes first even though the other report changed later, and the newest update leads within a kind.
+    CHECK(history.Apply({StatusOf("DCP-AAAAAA", "fixed", 9000, "0.9.4")}));
+    CHECK(history.NextUnseen() == "DCP-BBBBBB");
+    CHECK(history.MarkSeen("DCP-BBBBBB"));
+    CHECK(!history.HasUnseenMessage() && history.HasUnseen() && history.NextUnseen() == "DCP-AAAAAA");
+    CHECK(!history.reports()[0].unseen && !history.reports()[0].message_unseen && history.reports()[1].unseen);
+
+    // An unchanged message with a new status does not make the old message new again.
+    CHECK(history.Apply({StatusOf("DCP-BBBBBB", "fixed", 9500, "0.9.4", "Please send a newer log")}));
+    CHECK(history.HasUnseen() && !history.reports()[0].message_unseen);
+    CHECK(history.MarkSeen("DCP-BBBBBB"));
+    // A changed message is new again, and removing the message ends the reply.
+    CHECK(history.Apply({StatusOf("DCP-BBBBBB", "fixed", 9600, "0.9.4", "Thanks, it is fixed")}));
+    CHECK(history.reports()[0].message_unseen);
+    CHECK(history.Apply({StatusOf("DCP-BBBBBB", "fixed", 9700, "0.9.4", "")}));
+    CHECK(!history.reports()[0].message_unseen && history.reports()[0].unseen);
+    history.MarkSeen("DCP-BBBBBB");
+
+    // Two updates: the most recently updated report leads.
+    ReportHistory two(temp.path / "two.json");
+    two.Add(Tracked("DCP-AAAAAA", 1000));
+    two.Add(Tracked("DCP-BBBBBB", 2000));
+    two.Apply({StatusOf("DCP-AAAAAA", "investigating", 5000), StatusOf("DCP-BBBBBB", "investigating", 4000)});
+    CHECK(two.NextUnseen() == "DCP-AAAAAA");
+    two.Apply({StatusOf("DCP-BBBBBB", "fixed", 6000, "0.9.4")});
+    CHECK(two.NextUnseen() == "DCP-BBBBBB");
+    two.MarkSeen("DCP-BBBBBB");
+    CHECK(two.HasUnseen() && two.NextUnseen() == "DCP-AAAAAA");
+    two.MarkSeen("DCP-AAAAAA");
+    CHECK(!two.HasUnseen() && two.NextUnseen().empty());
+}
+
+void TestReadStateSurvivesARestart() {
+    TempFolder temp;
+    const fs::path file = temp.path / kReportHistoryFile;
+    {
+        ReportHistory history(file);
+        history.Add(Tracked("DCP-AAAAAA", 1000));
+        history.Add(Tracked("DCP-BBBBBB", 2000));
+        history.Apply({StatusOf("DCP-AAAAAA", "investigating", 3000, "", "We are looking"), StatusOf("DCP-BBBBBB", "closed", 3100)});
+        CHECK(history.Save());
+    }
+    ReportHistory restarted(file);
+    restarted.Load();
+    CHECK(restarted.reports().size() == 2);
+    if (restarted.reports().size() != 2) return;
+    const TrackedReport& reply = restarted.reports()[1];
+    const TrackedReport& plain = restarted.reports()[0];
+    CHECK(reply.ticket == "DCP-AAAAAA" && reply.unseen && reply.message_unseen && reply.player_message == "We are looking");
+    CHECK(plain.ticket == "DCP-BBBBBB" && plain.unseen && !plain.message_unseen);
+    CHECK(restarted.HasUnseenMessage() && restarted.NextUnseen() == "DCP-AAAAAA");
+    restarted.MarkSeen("DCP-AAAAAA");
+    CHECK(restarted.Save());
+
+    ReportHistory again(file);
+    again.Load();
+    CHECK(!again.HasUnseenMessage() && again.HasUnseen() && again.NextUnseen() == "DCP-BBBBBB");
+    CHECK(again.reports()[1].status == "investigating" && again.reports()[1].status_updated_at == 3000);
+    CHECK(again.reports()[1].player_message == "We are looking");
+}
+
+void TestOlderHistoryFilesLoadSafely() {
+    TempFolder temp;
+    const fs::path file = temp.path / kReportHistoryFile;
+    const std::string receipt = kReceipt;
+    const auto entry = [&](const std::string& ticket, const std::string& extra) {
+        return "{\"ticket\":\"" + ticket + "\",\"receipt\":\"" + receipt + "\",\"submitted_at\":1000,\"description\":\"It froze\"," +
+               "\"log_file\":\"dragons_crown_pro_186.log\",\"launcher_version\":\"0.9.3\",\"game_build\":\"CUSA10454 1.03 USA\"," +
+               "\"cusa\":\"CUSA10454\",\"operating_system\":\"Windows 11\",\"status\":\"investigating\",\"status_updated_at\":2000," +
+               "\"fixed_version\":\"\"," + extra + "}";
+    };
+    std::ofstream(file, std::ios::binary) << "{\"version\":1,\"reports\":[" +
+        entry("DCP-AAAAAA", "\"player_message\":\"Old reply\",\"unseen\":true") + "," +
+        entry("DCP-BBBBBB", "\"player_message\":\"\",\"unseen\":true") + "," +
+        entry("DCP-CCCCCC", "\"player_message\":\"Read reply\",\"unseen\":false") + "," +
+        entry("DCP-DDDDDD", "\"player_message\":\"\",\"unseen\":false,\"message_unseen\":true") + "]}";
+    ReportHistory history(file);
+    history.Load();
+    CHECK(history.reports().size() == 4);
+    if (history.reports().size() != 4) return;
+    const auto find = [&](const char* ticket) -> const TrackedReport& {
+        for (const TrackedReport& report : history.reports()) {
+            if (report.ticket == ticket) return report;
+        }
+        return history.reports().front();
+    };
+    for (const char* ticket : {"DCP-AAAAAA", "DCP-BBBBBB", "DCP-CCCCCC", "DCP-DDDDDD"}) {
+        CHECK(find(ticket).receipt == receipt && find(ticket).status == "investigating" && !find(ticket).unavailable);
+    }
+    CHECK(find("DCP-AAAAAA").unseen && find("DCP-AAAAAA").message_unseen);
+    CHECK(find("DCP-BBBBBB").unseen && !find("DCP-BBBBBB").message_unseen);
+    CHECK(!find("DCP-CCCCCC").unseen && !find("DCP-CCCCCC").message_unseen);
+    CHECK(!find("DCP-DDDDDD").message_unseen);
+    CHECK(history.Save());
+    const std::string saved = ReadAll(file);
+    CHECK(Has(saved, "\"message_unseen\"") && Has(saved, "\"unavailable\"") && Has(saved, receipt));
+    ReportHistory again(file);
+    again.Load();
+    CHECK(again.reports().size() == 4);
+}
+
+void TestReportDeletedOnTheServiceIsUnavailable() {
+    TempFolder temp;
+    const fs::path file = temp.path / kReportHistoryFile;
+    ReportHistory history(file);
+    history.Add(Tracked("DCP-AAAAAA", 1000));
+    history.Add(Tracked("DCP-BBBBBB", 2000));
+    history.Apply({StatusOf("DCP-AAAAAA", "fixed", 3000, "0.9.4", "Done")});
+    history.MarkSeen("DCP-AAAAAA");
+
+    // A check that answered, without DCP-AAAAAA: it is marked once, keeps everything it knew, and is not an update.
+    const std::vector<std::string> asked = {"DCP-AAAAAA", "DCP-BBBBBB"};
+    CHECK(history.Apply({StatusOf("DCP-BBBBBB", "new", 2000)}, asked));
+    const TrackedReport& gone = history.reports()[1];
+    CHECK(gone.ticket == "DCP-AAAAAA" && gone.unavailable);
+    CHECK(gone.status == "fixed" && gone.fixed_version == "0.9.4" && gone.player_message == "Done" && gone.receipt == kReceipt);
+    CHECK(!gone.unseen && !gone.message_unseen && !history.HasUnseen() && history.NextUnseen().empty());
+    CHECK(!history.reports()[0].unavailable);
+
+    // The same answer again changes nothing, so nothing is saved and nothing is shown as new.
+    CHECK(!history.Apply({StatusOf("DCP-BBBBBB", "new", 2000)}, asked));
+    CHECK(!history.HasUnseen());
+
+    // A report that was not asked about is never marked.
+    ReportHistory partial(temp.path / "partial.json");
+    partial.Add(Tracked("DCP-AAAAAA", 1000));
+    partial.Add(Tracked("DCP-BBBBBB", 2000));
+    CHECK(!partial.Apply({}, {}));
+    CHECK(!partial.Apply({}, {"DCP-ZZZZZZ"}));
+    CHECK(!partial.reports()[0].unavailable && !partial.reports()[1].unavailable);
+
+    // It survives a restart, and a report that comes back clears the mark without calling itself an update.
+    CHECK(history.Save());
+    ReportHistory restarted(file);
+    restarted.Load();
+    CHECK(restarted.reports().size() == 2 && restarted.reports()[1].unavailable && !restarted.HasUnseen());
+    CHECK(restarted.Apply({StatusOf("DCP-AAAAAA", "fixed", 3000, "0.9.4", "Done")}, {"DCP-AAAAAA"}));
+    CHECK(!restarted.reports()[1].unavailable && !restarted.HasUnseen());
+    CHECK(restarted.Remove("DCP-AAAAAA") && restarted.Save());
+    CHECK(!Has(ReadAll(file), "DCP-AAAAAA"));
+
+    // A damaged or unreadable answer is no answer: it never reaches Apply as an empty list.
+    const std::string report = ReadAll(kSource / "launcher" / "incident_report.cpp");
+    CHECK(Has(Body(report, "std::optional<std::vector<ReportStatus>> FetchReportStatuses("), "!(*answer)[\"reports\"].is_array()"));
+}
+
+void TestStartupCheckNoticesAndShowWork() {
+    const std::string page = ReadAll(kSource / "launcher" / "my_reports.cpp");
+    const std::string refresh = Body(page, "void MyReports::Refresh(");
+    CHECK(Has(refresh, "if (!report.unavailable || asked_by_player) reports.push_back(report);"));
+    CHECK(Has(refresh, "check_->asked.push_back(report.ticket);") && Has(refresh, "if (check_) return;"));
+    CHECK(Has(Body(page, "void MyReports::Collect("), "history_.Apply(*check_->statuses, check_->asked)"));
+    CHECK(Has(Body(page, "bool MyReports::HasUpdates("), "history_.HasUnseen() || history_.HasUnseenMessage()"));
+    CHECK(Has(Body(page, "bool MyReports::HasNewReply("), "history_.HasUnseenMessage()"));
+
+    const std::string show = Body(page, "void MyReports::ShowUpdate(");
+    CHECK(Has(show, "history_.NextUnseen()") && Has(show, "Open(ticket);") && Has(show, "if (open_ticket_ == ticket)"));
+    CHECK(Has(Body(page, "void MyReports::Open("), "fresh_reply_.clear();") && Has(Body(page, "void MyReports::Collapse("), "fresh_reply_.clear();"));
+
+    const std::string incident = ReadAll(kSource / "launcher" / "incident_page.cpp");
+    const std::string draw = Body(incident, "void IncidentPage::Draw(");
+    CHECK(Has(draw, "if (my_reports_.HasUpdates()) {") && Has(draw, "const bool reply = my_reports_.HasNewReply();"));
+    CHECK(Has(draw, "reply ? \"A report has a new reply\" : \"A report has an update\""));
+    CHECK(Has(draw, "reply ? \"The developer replied to one of your reports.\" : \"Its status changed since you last looked.\""));
+    CHECK(Has(draw, "my_reports_.ShowUpdate();") && !Has(draw, "BringIntoView"));
+    CHECK(draw.find("my_reports_.RefreshIfStale(config);") < draw.find("my_reports_.HasUpdates()"));
+    const std::string launcher = ReadAll(kSource / "launcher" / "launcher.cpp");
+    CHECK(Has(launcher, "incident_page_->CheckReports(online);") && CountOf(launcher, "CheckReports(") == 1);
+    CHECK(Has(ReadAll(kSource / "launcher" / "incident_page.h"), "bool HasReportUpdates() { return my_reports_.HasUpdates(); }"));
+    CHECK(!Has(launcher, "OpenPopup(\"Report") && !Has(incident, "OpenPopup("));
+}
+
+void TestDeveloperMessageIsItsOwnPanel() {
+    const std::string page = ReadAll(kSource / "launcher" / "my_reports.cpp");
+    const std::string expanded = Body(page, "void MyReports::DrawExpanded(");
+    const size_t fresh = expanded.find("if (report.message_unseen) fresh_reply_ = report.ticket;");
+    const size_t seen = expanded.find("history_.MarkSeen(report.ticket)");
+    const size_t summary = expanded.find("DrawSummary("), message = expanded.find("DrawDeveloperMessage("), facts = expanded.find("DrawFacts(");
+    CHECK(fresh != std::string::npos && fresh < seen && seen < summary && summary < message && message < facts);
+    CHECK(Has(expanded, "if (!report.player_message.empty()) {") && Has(expanded, "fresh_reply_ == report.ticket"));
+    CHECK(!Has(Body(page, "void DrawFacts("), "Message from developer"));
+    const std::string panel = Body(page, "void DrawDeveloperMessage(");
+    CHECK(Has(panel, "Tr(\"Message from developer\")") && Has(panel, "Tr(\"New reply\")") && Has(panel, "if (fresh) {"));
+    CHECK(Has(panel, "theme.accent") && Has(panel, "theme.on_accent") && Has(panel, "ImGui::Dummy("));
+    const std::string row = Body(page, "void MyReports::DrawRow(");
+    CHECK(Has(row, "if (report.message_unseen) NewReplyMarker(ui);"));
+    CHECK(row.find("StatusText(report)") < row.find("NewReplyMarker(ui)") && row.find("NewReplyMarker(ui)") < row.find("DateText(report.submitted_at)"));
+    CHECK(Has(Body(page, "std::string StatusText("), "\"No longer available\"") && Has(Body(page, "std::string StatusText("), "\"Updated\""));
+    CHECK(Has(expanded, "if (report.unavailable) {") && Has(expanded, "This report was removed from the online service."));
+    CHECK(!Has(ReadAll(kSource / "launcher" / "report_history.h"), "dashboard") && !Has(page, "dashboard"));
+}
+
 void TestStatusProtocol() {
     TempFolder temp;
     ReportHistory history(temp.path / kReportHistoryFile);
@@ -837,7 +1046,7 @@ void TestNewStatusesCollectOnTheUiThread() {
     const size_t save = page.find("void MyReports::SaveHistory()");
     CHECK(collect != std::string::npos && collect < save);
     const std::string collected = page.substr(collect, save - collect);
-    CHECK(Has(collected, "check_->statuses && history_.Apply(*check_->statuses)"));
+    CHECK(Has(collected, "check_->statuses && history_.Apply(*check_->statuses, check_->asked)"));
     CHECK(Has(collected, "check_failed_ = asked_by_player_ && !check_->statuses;"));
     const std::string thread = page.substr(page.find("check->statuses = FetchReportStatuses"), 90);
     CHECK(Has(thread, "check->done = true;") && !Has(thread, "history_"));
@@ -927,7 +1136,7 @@ void TestDetailsExpandInPlace() {
     const std::string row = Body(page, "void MyReports::DrawRow(");
     CHECK(Has(row, "ImGui::Button(Tr(\"View details\")") && Has(row, "toggled = report.ticket;"));
     CHECK(Has(row, "ReportPreview(report.description)") && Has(row, "StatusText(report)") && Has(row, "DateText(report.submitted_at)"));
-    CHECK(Has(Body(page, "std::string StatusText("), "Tr(\"Updated\")"));
+    CHECK(Has(Body(page, "std::string StatusText("), "\"Updated\""));
 }
 
 void TestExpandedReportIsOneFramedItem() {
@@ -960,10 +1169,10 @@ void TestExpandedReportIsOneFramedItem() {
 
     const std::string facts = Body(page, "void DrawFacts(");
     for (const char* label : {"Report ID", "Submitted", "Description", "Selected log", "Game build", "Launcher version", "Status",
-                              "Status updated", "Fixed in version", "Message from developer"}) {
+                              "Status updated", "Fixed in version"}) {
         CHECK(Has(facts, std::string("\"") + label + "\""));
     }
-    CHECK(Has(facts, "report.status == \"fixed\" && !report.fixed_version.empty()") && Has(facts, "!report.player_message.empty()"));
+    CHECK(Has(facts, "report.status == \"fixed\" && !report.fixed_version.empty()"));
     CHECK(!Has(page, "BeginChild") && !Has(page, "SetScrollHereY(1.0f)"));
     CHECK(Has(Body(page, "void KeepInView("), "top < window->InnerRect.Min.y"));
 }
@@ -1122,6 +1331,11 @@ void TestPortuguese() {
     for (const auto& [status, text] : statuses) CHECK(std::string(Tr(ReportStatusText(status))) == text);
     const std::pair<const char*, const char*> reports[] = {{"My reports", "Meus relatórios"}, {"Fixed in version", "Corrigido na versão"},
         {"Message from developer", "Mensagem do desenvolvedor"}, {"Updated", "Atualizado"}, {"Refresh", "Atualizar"},
+        {"New reply", "Nova resposta"}, {"No longer available", "N\xC3\xA3o est\xC3\xA1 mais dispon\xC3\xADvel"},
+        {"A report has a new reply", "Um relat\xC3\xB3rio recebeu uma nova resposta"},
+        {"The developer replied to one of your reports.", "O desenvolvedor respondeu a um dos seus relat\xC3\xB3rios."},
+        {"This report was removed from the online service. The last known status is shown.",
+         "Este relat\xC3\xB3rio foi removido do servi\xC3\xA7o online. O \xC3\xBAltimo status conhecido \xC3\xA9 mostrado."},
         {"No reports sent from this PC", "Nenhum relatório enviado por este PC"}, {"Remove from this PC", "Remover deste PC"},
         {"Only reports sent from this PC are listed here.", "Somente relatórios enviados por este PC aparecem aqui."}};
     for (const auto& [english, portuguese] : reports) CHECK(std::string(Tr(english)) == portuguese);
@@ -1174,6 +1388,10 @@ int main() {
     TestHistorySaveFailureKeepsThePrevious();
     TestDamagedHistoryIsSetAside();
     TestStatusChangesMarkAReportUpdated();
+    TestDeveloperReplyIsKeptApartFromAStatusChange();
+    TestReadStateSurvivesARestart();
+    TestOlderHistoryFilesLoadSafely();
+    TestReportDeletedOnTheServiceIsUnavailable();
     TestRemoveIsLocal();
     TestStatusProtocol();
     TestStatusTexts();
@@ -1185,6 +1403,8 @@ int main() {
     TestDetailsExpandInPlace();
     TestExpandedReportIsOneFramedItem();
     TestWhatWasSentStaysInTheReport();
+    TestStartupCheckNoticesAndShowWork();
+    TestDeveloperMessageIsItsOwnPanel();
     TestSelectedLogButtonSitsInItsFacts();
     TestLobbyAgrees();
     TestProductionLobbyOnly();

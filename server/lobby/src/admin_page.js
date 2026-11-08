@@ -1,5 +1,5 @@
 // The private dashboard (/admin): a static shell, its stylesheet and script, served same-origin under a strict CSP.
-// The script keeps the token in memory (sessionStorage only when asked) and sends it as a Bearer header.
+// The script keeps the token in memory, in this tab's sessionStorage only when asked, and sends it as a Bearer header.
 export const ADMIN_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -12,7 +12,17 @@ export const ADMIN_HTML = String.raw`<!doctype html>
 </head>
 <body>
 <header class="top">
-  <h1>Dragon's Crown Pro PC · Online Admin</h1>
+  <div class="top-bar">
+    <h1>Dragon's Crown Pro PC · Online Admin</h1>
+    <div id="session" class="session" hidden>
+      <button id="menu-button" type="button" class="icon-button" aria-label="Dashboard session menu" aria-haspopup="true" aria-expanded="false" aria-controls="session-menu"><span class="bars" aria-hidden="true"></span></button>
+      <div id="session-menu" class="menu" role="menu" aria-label="Dashboard session" hidden>
+        <p class="menu-title">Dashboard session</p>
+        <p id="session-state" class="muted"></p>
+        <button id="signout" type="button" role="menuitem" class="quiet">Sign out</button>
+      </div>
+    </div>
+  </div>
   <p class="muted">Dashboard: anonymous aggregate statistics of the online service, days in America/Sao_Paulo. Bugs: reports players sent from the launcher.</p>
 </header>
 <main>
@@ -27,7 +37,6 @@ export const ADMIN_HTML = String.raw`<!doctype html>
     <nav class="tabs" role="tablist" aria-label="Admin sections">
       <button id="tab-dashboard" type="button" role="tab" aria-selected="true" aria-controls="view-dashboard">Dashboard</button>
       <button id="tab-bugs" type="button" role="tab" aria-selected="false" aria-controls="view-bugs">Bugs</button>
-      <button id="signout" type="button" class="quiet">Sign out</button>
     </nav>
     <div id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
     <div class="toolbar">
@@ -199,10 +208,26 @@ export const ADMIN_HTML = String.raw`<!doctype html>
         <h3 id="bug-log-name"></h3>
         <p class="muted bug-snapshot">This is the sanitized log snapshot captured when the report was sent. Previous report IDs may appear if they were already present in the selected log.</p>
         <pre id="bug-log" class="bug-log" tabindex="0"></pre>
+        <div class="bug-danger">
+          <h3>Delete report</h3>
+          <p class="muted">Permanently removes this report, its log and the status its player sees. Meant for test and unwanted reports.</p>
+          <button id="bug-delete" type="button" class="danger">Delete report</button>
+        </div>
       </div>
     </div>
   </section>
 </main>
+<div id="delete-backdrop" class="backdrop" hidden>
+  <div id="delete-dialog" class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-text">
+    <h2 id="delete-title"></h2>
+    <p id="delete-text">This removes the stored report and log and cannot be undone.</p>
+    <p id="delete-error" class="error" role="alert"></p>
+    <div class="dialog-actions">
+      <button id="delete-cancel" type="button" class="quiet">Cancel</button>
+      <button id="delete-confirm" type="button" class="danger">Delete report</button>
+    </div>
+  </div>
+</div>
 <div id="tip" class="tip" hidden></div>
 <script src="/admin/app.js"></script>
 </body>
@@ -257,6 +282,7 @@ export const ADMIN_CSS = String.raw`:root {
   --error: #f97066;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -266,7 +292,20 @@ body {
 }
 .top, main { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
 .top { padding-top: 24px; }
-h1 { font-size: 22px; margin: 0 0 4px; }
+.top-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+h1 { font-size: 22px; margin: 0 0 4px; min-width: 0; }
+.session { position: relative; flex: none; }
+.icon-button { padding: 8px 10px; background: transparent; color: var(--text-secondary); border-color: var(--border); line-height: 0; }
+.icon-button[aria-expanded="true"] { color: var(--text-primary); border-color: var(--accent); }
+.bars, .bars::before, .bars::after { display: block; width: 18px; height: 2px; border-radius: 1px; background: currentColor; }
+.bars { position: relative; }
+.bars::before, .bars::after { content: ""; position: absolute; left: 0; }
+.bars::before { top: -6px; }
+.bars::after { top: 6px; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 260px; padding: 12px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+.menu-title { margin: 0 0 4px; font-weight: 600; }
+.menu .muted { margin: 0 0 12px; }
+.menu button { width: 100%; }
 h2 { font-size: 15px; margin: 0 0 8px; }
 h2.section { font-size: 17px; margin: 24px 0 10px; }
 .up { color: var(--series-3); }
@@ -356,9 +395,19 @@ details summary { cursor: pointer; font-weight: 600; }
 .tabs button[role="tab"][aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--accent); font-weight: 600; }
 .tabs .quiet { margin-left: auto; }
 .bug-detail h2 { margin: 0; }
-.bug-list { max-height: 340px; overflow-y: auto; }
-#bug-list th, #bug-list td { text-align: left; }
-#bug-list td.bug-summary { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.bug-list { max-height: 420px; overflow-y: auto; }
+#bug-list th, #bug-list td { text-align: left; vertical-align: top; }
+#bug-list td.col-build, #bug-list td.col-os { white-space: normal; overflow-wrap: anywhere; }
+#bug-list td.col-build { max-width: 12em; }
+#bug-list td.col-os { max-width: 10em; }
+#bug-list td.bug-summary { white-space: normal; overflow-wrap: anywhere; width: 100%; min-width: 14em; }
+@media (max-width: 1000px) {
+  #bug-list .col-os { display: none; }
+}
+@media (max-width: 760px) {
+  #bug-list .col-launcher { display: none; }
+  #bug-list td.bug-summary { min-width: 10em; }
+}
 #bug-list tr.selected td { background: var(--grid); }
 button.ticket { padding: 0; background: transparent; border: 0; color: var(--accent); text-decoration: underline; font-variant-numeric: tabular-nums; }
 .bug-detail { margin-top: 16px; }
@@ -377,6 +426,15 @@ button.ticket { padding: 0; background: transparent; border: 0; color: var(--acc
 .bug-status-field textarea { max-width: 640px; font: inherit; }
 .bug-facts dt { color: var(--text-secondary); }
 .bug-facts dd { margin: 0; overflow-wrap: anywhere; }
+.bug-danger { margin: 28px 0 0; padding: 16px 0 0; border-top: 1px solid var(--border); }
+.bug-danger .muted { margin: 0 0 10px; }
+button.danger { background: var(--error); border-color: var(--error); color: #fff; }
+.backdrop { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, .5); }
+.dialog { width: 100%; max-width: 420px; padding: 20px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; }
+.dialog h2 { font-size: 17px; margin: 0 0 8px; overflow-wrap: anywhere; }
+.dialog p { margin: 0 0 12px; color: var(--text-secondary); }
+.dialog p.error { margin: 0 0 12px; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .bug-log { max-height: 480px; overflow: auto; margin: 0; padding: 10px; background: var(--surface-0); border: 1px solid var(--border); border-radius: 6px; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre; }
 .notes ul { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 13px; }
 .notes li { margin: 4px 0; }
@@ -398,9 +456,14 @@ button.ticket { padding: 0; background: transparent; border: 0; color: var(--acc
 export const ADMIN_JS = String.raw`(function () {
   'use strict';
   var KEY = 'dcp-dashboard-token';
+  var VIEW_KEY = 'dcp-dashboard-view';
   var ZONE = 'America/Sao_Paulo';
   var SVG = 'http://www.w3.org/2000/svg';
   var token = '';
+  var kept = false;
+  var menuOpen = false;
+  var deleteTicket = '';
+  var deleting = false;
   var timer = null;
   var $ = function (id) { return document.getElementById(id); };
   var regionNames = null;
@@ -420,11 +483,16 @@ export const ADMIN_JS = String.raw`(function () {
   };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol' };
 
-  function storedToken() {
-    try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; }
+  function readStored(key) {
+    try { return sessionStorage.getItem(key) || ''; } catch (e) { return ''; }
+  }
+  function writeStored(key, value) {
+    try { if (value) sessionStorage.setItem(key, value); else sessionStorage.removeItem(key); } catch (e) { /* storage blocked */ }
   }
   function storeToken(value) {
-    try { if (value) sessionStorage.setItem(KEY, value); else sessionStorage.removeItem(KEY); } catch (e) { /* storage blocked */ }
+    writeStored(KEY, value);
+    kept = Boolean(value) && readStored(KEY) === value;
+    if (!kept) writeStored(VIEW_KEY, '');
   }
 
   function el(tag, cls, text) {
@@ -448,11 +516,15 @@ export const ADMIN_JS = String.raw`(function () {
 
   function AuthError() {}
 
-  function request(path, body) {
-    return fetch(path, { method: body ? 'POST' : 'GET', body: body, headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' })
+  function request(path, body, method) {
+    return fetch(path, { method: method || (body ? 'POST' : 'GET'), body: body, headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' })
       .then(function (r) {
         if (r.status === 401) throw new AuthError();
-        if (!r.ok) throw new Error('The service answered ' + r.status + '.');
+        if (!r.ok) {
+          var failure = new Error('The service answered ' + r.status + '.');
+          failure.status = r.status;
+          throw failure;
+        }
         return r;
       });
   }
@@ -643,17 +715,21 @@ export const ADMIN_JS = String.raw`(function () {
     rows(node, 'Sessions · last ' + days + ' days', range, name);
   }
 
-  function table(node, head, body, rowClass) {
+  function table(node, head, body, rowClass, columns) {
     clear(node);
     var thead = el('thead');
     var tr = el('tr');
-    head.forEach(function (h) { tr.appendChild(el('th', '', h)); });
+    head.forEach(function (h, i) { tr.appendChild(el('th', columns ? columns[i] : '', h)); });
     thead.appendChild(tr);
     node.appendChild(thead);
     var tbody = el('tbody');
     body.forEach(function (cells, i) {
       var row = el('tr', rowClass ? rowClass(i) : '');
-      cells.forEach(function (c) { row.appendChild(typeof c === 'string' ? el('td', '', c) : c); });
+      cells.forEach(function (c, i) {
+        var td = typeof c === 'string' ? el('td', '', c) : c;
+        if (columns && columns[i]) td.className = td.className ? td.className + ' ' + columns[i] : columns[i];
+        row.appendChild(td);
+      });
       tbody.appendChild(row);
     });
     node.appendChild(tbody);
@@ -991,6 +1067,58 @@ export const ADMIN_JS = String.raw`(function () {
     });
   }
 
+  var BUG_COLUMNS = ['Report ID', 'Status', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description'];
+  var BUG_COLUMN_CLASSES = ['col-id', 'col-status', 'col-submitted', 'col-launcher', 'col-build', 'col-os', ''];
+
+  function removeBugReport(ticket) {
+    bugReports = bugReports.filter(function (r) { return r.ticket !== ticket; });
+    if (bugTicket === ticket || bugLoadingTicket === ticket) forgetBugReport();
+    bugOptions('bug-version', 'launcher_version');
+    bugOptions('bug-build', 'game_build');
+    renderBugList();
+    $('bug-count').textContent = ticket + ' deleted. ' + $('bug-count').textContent;
+  }
+
+  function setDeleteBusy(busy) {
+    deleting = busy;
+    $('delete-cancel').disabled = busy;
+    $('delete-confirm').disabled = busy;
+  }
+
+  function openDelete() {
+    if (!bugTicket) return;
+    deleteTicket = bugTicket;
+    $('delete-title').textContent = 'Delete ' + deleteTicket + ' permanently?';
+    $('delete-error').textContent = '';
+    setDeleteBusy(false);
+    $('delete-backdrop').hidden = false;
+    $('delete-cancel').focus();
+  }
+
+  function closeDelete() {
+    if (deleting) return;
+    deleteTicket = '';
+    $('delete-backdrop').hidden = true;
+  }
+
+  function confirmDelete() {
+    var ticket = deleteTicket;
+    if (!ticket || deleting) return Promise.resolve();
+    setDeleteBusy(true);
+    var finish = function () {
+      setDeleteBusy(false);
+      deleteTicket = '';
+      $('delete-backdrop').hidden = true;
+      removeBugReport(ticket);
+    };
+    return request('/admin/api/incidents/' + encodeURIComponent(ticket), undefined, 'DELETE').then(finish, function (error) {
+      if (error instanceof AuthError) { setDeleteBusy(false); signOut('The token was not accepted.'); return; }
+      if (error && error.status === 404) { finish(); return; }
+      setDeleteBusy(false);
+      $('delete-error').textContent = 'Could not delete the report. Try again.';
+    });
+  }
+
   function bugTicketCell(r) {
     var td = el('td');
     var button = el('button', 'ticket', r.ticket);
@@ -1002,10 +1130,10 @@ export const ADMIN_JS = String.raw`(function () {
 
   function renderBugList() {
     var shown = bugShown();
-    table($('bug-list'), ['Report ID', 'Submitted', 'Launcher', 'Game build', 'CUSA', 'Operating system', 'Description', 'Status'], shown.map(function (r) {
-      return [bugTicketCell(r), stampLabel.format(r.ms), r.launcher_version, r.game_build || '–', r.cusa || '–', r.operating_system,
-        el('td', 'bug-summary', r.preview), BUG_STATUSES[r.status][0]];
-    }), function (i) { return shown[i].ticket === bugTicket ? 'selected' : ''; });
+    table($('bug-list'), BUG_COLUMNS, shown.map(function (r) {
+      return [bugTicketCell(r), BUG_STATUSES[r.status][0], stampLabel.format(r.ms), r.launcher_version, r.game_build || '–',
+        r.operating_system, el('td', 'bug-summary', r.preview)];
+    }), function (i) { return shown[i].ticket === bugTicket ? 'selected' : ''; }, BUG_COLUMN_CLASSES);
     $('bug-count').textContent = !bugReports.length ? 'No reports yet.'
       : shown.length === bugReports.length ? fmt(shown.length) + ' reports' : fmt(shown.length) + ' of ' + fmt(bugReports.length) + ' reports';
   }
@@ -1025,6 +1153,7 @@ export const ADMIN_JS = String.raw`(function () {
 
   function showView(name) {
     view = name;
+    if (kept) writeStored(VIEW_KEY, name === 'bugs' ? name : '');
     $('view-dashboard').hidden = name !== 'dashboard';
     $('view-bugs').hidden = name !== 'bugs';
     $('tab-dashboard').setAttribute('aria-selected', String(name === 'dashboard'));
@@ -1070,24 +1199,47 @@ export const ADMIN_JS = String.raw`(function () {
       });
   }
 
+  function setMenu(open) {
+    menuOpen = open;
+    $('session-menu').hidden = !open;
+    $('menu-button').setAttribute('aria-expanded', String(open));
+  }
+
+  function showSessionState() {
+    $('session-state').textContent = kept
+      ? 'Signed in. The token is kept for this tab only, until you sign out or close the tab.'
+      : 'Signed in. The token is held in memory only; reloading the page asks for it again.';
+  }
+
   function showDashboard() {
     $('login').hidden = true;
     $('dash').hidden = false;
-    load();
+    $('session').hidden = false;
+    setMenu(false);
+    showSessionState();
     if (timer) clearInterval(timer);
     timer = setInterval(function () { if (!document.hidden && view === 'dashboard') load(); }, 60000);
+    if (view === 'bugs') loadBugReports();
+    else load();
   }
 
   function signOut(message) {
     token = '';
     storeToken('');
+    writeStored(VIEW_KEY, '');
     if (timer) clearInterval(timer);
     timer = null;
     bugReports = [];
+    deleting = false;
+    deleteTicket = '';
+    $('delete-backdrop').hidden = true;
     forgetBugReport();
     showView('dashboard');
+    setMenu(false);
+    $('session').hidden = true;
     $('dash').hidden = true;
     $('login').hidden = false;
+    $('remember').checked = false;
     $('token').value = '';
     $('login-error').textContent = message || '';
     $('token').focus();
@@ -1114,8 +1266,35 @@ export const ADMIN_JS = String.raw`(function () {
   $('range').addEventListener('change', load);
   ['bug-version', 'bug-build', 'bug-day', 'bug-status-filter'].forEach(function (id) { $(id).addEventListener('change', renderBugList); });
   $('signout').addEventListener('click', function () { signOut(''); });
+  $('menu-button').addEventListener('click', function () {
+    setMenu(!menuOpen);
+    if (menuOpen) $('signout').focus();
+  });
+  $('bug-delete').addEventListener('click', openDelete);
+  $('delete-cancel').addEventListener('click', closeDelete);
+  $('delete-confirm').addEventListener('click', confirmDelete);
+  $('delete-backdrop').addEventListener('click', function (event) { if (event.target === $('delete-backdrop')) closeDelete(); });
+  document.addEventListener('click', function (event) {
+    if (menuOpen && !$('session').contains(event.target)) setMenu(false);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (deleteTicket && event.key === 'Tab') {
+      event.preventDefault();
+      ($('delete-cancel') === document.activeElement ? $('delete-confirm') : $('delete-cancel')).focus();
+    } else if (event.key === 'Escape' && deleteTicket) {
+      closeDelete();
+    } else if (event.key === 'Escape' && menuOpen) {
+      setMenu(false);
+      $('menu-button').focus();
+    }
+  });
 
-  token = storedToken();
-  if (token) { $('remember').checked = true; showDashboard(); }
+  token = readStored(KEY);
+  if (token) {
+    kept = true;
+    $('remember').checked = true;
+    if (readStored(VIEW_KEY) === 'bugs') showView('bugs');
+    showDashboard();
+  }
 }());
 `;

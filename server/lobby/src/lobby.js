@@ -910,6 +910,10 @@ export class Lobby {
     return this.incidents.setStatus(ticket, change, this.host.now());
   }
 
+  deleteIncident(ticket) {
+    return this.incidents.remove(ticket);
+  }
+
   requireFriendRoom(a, b) {
     if (this.friendCount(a) >= LIMITS.friends || this.friendCount(b) >= LIMITS.friends) fail('limit', 'friend list full');
   }

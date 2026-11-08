@@ -27,6 +27,10 @@ public:
     // False when the report could not be added to the saved history; the report itself was sent.
     bool Remember(const IncidentPackage& package, const IncidentReceipt& receipt);
     bool HasUpdates();
+    // An unseen developer message, which the page shows before a plain status change.
+    bool HasNewReply();
+    // Opens the report the page notice is about: a reply first, then the most recently updated.
+    void ShowUpdate();
     void BringIntoView() { bring_into_view_ = true; }
 
 private:
@@ -34,6 +38,7 @@ private:
     struct StatusCheck {
         std::atomic<bool> done{false};
         std::optional<std::vector<ReportStatus>> statuses;
+        std::vector<std::string> asked;
     };
     struct SentReportRead {
         std::atomic<bool> done{false};
@@ -63,6 +68,8 @@ private:
     bool bring_into_view_ = false;
     bool bring_detail_into_view_ = false;
     std::string open_ticket_;
+    // The open report whose developer message was unseen when it was opened; labelled "New reply" until it closes.
+    std::string fresh_reply_;
     std::shared_ptr<SentReportRead> reading_;
     std::string sent_ticket_;
     std::string sent_text_;

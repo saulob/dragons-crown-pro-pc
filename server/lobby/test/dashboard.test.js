@@ -86,6 +86,7 @@ async function dashboard(env, days) {
     createElementNS: (ns, tag) => new Node(tag),
     createTextNode: (text) => Object.assign(new Node('#text'), { ownText: text }),
     querySelectorAll: () => cards,
+    addEventListener() {},
   };
   get('range').value = String(days);
   get('tip').hidden = true;

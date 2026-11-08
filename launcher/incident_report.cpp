@@ -442,7 +442,7 @@ std::optional<std::vector<ReportStatus>> FetchReportStatuses(const net::OnlineCo
     if (!session.connect(config.lobby, &error)) return std::nullopt;
     const std::optional<net::Json> answer = session.call(kIncidentStatusOperation, IncidentStatusRequest(reports), &code);
     session.close();
-    if (!answer) return std::nullopt;
+    if (!answer || !(*answer)["reports"].is_array()) return std::nullopt;
     return ReadReportStatuses(*answer);
 }
 

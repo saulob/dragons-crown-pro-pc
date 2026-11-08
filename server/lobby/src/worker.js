@@ -74,6 +74,9 @@ export class LobbyObject extends DurableObject {
   async fetch(request) {
     const incident = internalIncidentRoute(request);
     if (incident?.kind === 'list') return Response.json(this.lobby.incidentList());
+    if (incident?.kind === 'delete') {
+      return this.lobby.deleteIncident(incident.ticket) ? Response.json({ deleted: incident.ticket }) : new Response('Not found', { status: 404 });
+    }
     if (incident?.kind === 'one') {
       const found = this.lobby.incidentForAdmin(incident.ticket);
       return found ? Response.json(found) : new Response('Not found', { status: 404 });
@@ -147,6 +150,7 @@ export default {
         incidents: () => internal('/incidents'),
         incident: (ticket) => report(`/incidents/${ticket}`),
         setIncidentStatus: (ticket, change) => report(`/incidents/${ticket}/status`, { method: 'POST', body: JSON.stringify(change) }),
+        deleteIncident: (ticket) => report(`/incidents/${ticket}`, { method: 'DELETE' }),
       }, (text) => console.log(text));
     }
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') return handleUpgrade(request, env, stub);

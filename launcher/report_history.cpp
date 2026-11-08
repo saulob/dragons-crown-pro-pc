@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iterator>
 #include <system_error>
+#include <utility>
 
 #include "incident_report.h"
 #include "localization/ui_text.h"
@@ -43,6 +44,8 @@ net::Json EntryJson(const TrackedReport& report) {
     entry.set("fixed_version", report.fixed_version);
     entry.set("player_message", report.player_message);
     entry.set("unseen", report.unseen);
+    entry.set("message_unseen", report.message_unseen);
+    entry.set("unavailable", report.unavailable);
     return entry;
 }
 
@@ -62,6 +65,9 @@ TrackedReport EntryOf(const net::Json& entry) {
     report.fixed_version = entry["fixed_version"].as_string();
     report.player_message = entry["player_message"].as_string();
     report.unseen = entry["unseen"].as_bool();
+    report.message_unseen = entry.has("message_unseen") ? entry["message_unseen"].as_bool() : report.unseen && !report.player_message.empty();
+    report.message_unseen = report.message_unseen && !report.player_message.empty();
+    report.unavailable = entry["unavailable"].as_bool();
     return report;
 }
 
@@ -153,6 +159,21 @@ bool ReportHistory::HasUnseen() const {
     return std::any_of(reports_.begin(), reports_.end(), [](const TrackedReport& report) { return report.unseen; });
 }
 
+bool ReportHistory::HasUnseenMessage() const {
+    return std::any_of(reports_.begin(), reports_.end(), [](const TrackedReport& report) { return report.message_unseen; });
+}
+
+std::string ReportHistory::NextUnseen() const {
+    const TrackedReport* best = nullptr;
+    for (const TrackedReport& report : reports_) {
+        if (!report.unseen && !report.message_unseen) continue;
+        const bool better = !best || (report.message_unseen && !best->message_unseen) ||
+                            (report.message_unseen == best->message_unseen && report.status_updated_at > best->status_updated_at);
+        if (better) best = &report;
+    }
+    return best ? best->ticket : std::string();
+}
+
 bool ReportHistory::Add(TrackedReport report) {
     Remove(report.ticket);
     reports_.push_back(std::move(report));
@@ -160,16 +181,18 @@ bool ReportHistory::Add(TrackedReport report) {
     return Save();
 }
 
-bool ReportHistory::Apply(const std::vector<ReportStatus>& statuses) {
+bool ReportHistory::Apply(const std::vector<ReportStatus>& statuses, const std::vector<std::string>& asked) {
     bool changed = false;
     for (const ReportStatus& status : statuses) {
         if (!ReportStatusText(status.status)) continue;
         const auto found = std::find_if(reports_.begin(), reports_.end(), [&](const TrackedReport& r) { return r.ticket == status.ticket; });
         if (found == reports_.end()) continue;
+        if (std::exchange(found->unavailable, false)) changed = true;
         if (found->status == status.status && found->status_updated_at == status.updated_at &&
             found->fixed_version == status.fixed_version && found->player_message == status.player_message) {
             continue;
         }
+        if (found->player_message != status.player_message) found->message_unseen = !status.player_message.empty();
         found->status = status.status;
         found->status_updated_at = status.updated_at;
         found->fixed_version = status.fixed_version;
@@ -177,13 +200,21 @@ bool ReportHistory::Apply(const std::vector<ReportStatus>& statuses) {
         found->unseen = true;
         changed = true;
     }
+    for (const std::string& ticket : asked) {
+        const bool answered = std::any_of(statuses.begin(), statuses.end(), [&](const ReportStatus& s) { return s.ticket == ticket; });
+        const auto found = std::find_if(reports_.begin(), reports_.end(), [&](const TrackedReport& r) { return r.ticket == ticket; });
+        if (answered || found == reports_.end() || found->unavailable) continue;
+        found->unavailable = true;
+        changed = true;
+    }
     return changed;
 }
 
 bool ReportHistory::MarkSeen(std::string_view ticket) {
     const auto found = std::find_if(reports_.begin(), reports_.end(), [&](const TrackedReport& r) { return r.ticket == ticket; });
-    if (found == reports_.end() || !found->unseen) return false;
+    if (found == reports_.end() || (!found->unseen && !found->message_unseen)) return false;
     found->unseen = false;
+    found->message_unseen = false;
     return true;
 }
 

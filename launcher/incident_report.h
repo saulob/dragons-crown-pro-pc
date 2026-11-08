@@ -134,7 +134,8 @@ IncidentReceipt FileIncident(const net::OnlineConfig& config, const std::filesys
                              const IncidentPackage& package);
 
 // Both block, take no account and need no Online Play: the receipts are the only proof sent. nullopt when the service could
-// not answer, or for FetchSentReport when it no longer has the report.
+// not answer, or for FetchSentReport when it no longer has the report. An answer to FetchReportStatuses leaves out each report
+// whose receipt the service does not know, which is how a report deleted there shows.
 std::optional<std::vector<ReportStatus>> FetchReportStatuses(const net::OnlineConfig& config, const std::vector<TrackedReport>& reports);
 std::optional<IncidentPackage> FetchSentReport(const net::OnlineConfig& config, const TrackedReport& report);
 

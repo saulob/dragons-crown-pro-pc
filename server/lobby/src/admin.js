@@ -59,6 +59,7 @@ export function historyDays(params) {
 }
 
 const INCIDENTS_PATH = '/admin/api/incidents';
+const METHODS = { incident: ['GET', 'DELETE'], incident_status: ['POST'] };
 
 // The dashboard API behind a path, or null. A report id is checked after the token, before anything reads it.
 function adminApi(pathname) {
@@ -89,13 +90,13 @@ async function saveIncidentStatus(request, ticket, metrics) {
   return saved ? json(saved) : json({ error: 'not_found' }, 404);
 }
 
-// metrics: { summary(), history(days), incidents(), incident(ticket), setIncidentStatus(ticket, change) } as promises, used
-// only after the token matched.
+// metrics: { summary(), history(days), incidents(), incident(ticket), setIncidentStatus(ticket, change),
+// deleteIncident(ticket) } as promises, used only after the token matched.
 export async function handleAdmin(request, env, metrics, log = () => {}) {
   const url = new URL(request.url);
   const api = adminApi(url.pathname);
-  const method = api?.name === 'incident_status' ? 'POST' : 'GET';
-  if (request.method !== method) return json({ error: 'method_not_allowed' }, 405, { Allow: method });
+  const methods = METHODS[api?.name] ?? ['GET'];
+  if (!methods.includes(request.method)) return json({ error: 'method_not_allowed' }, 405, { Allow: methods.join(', ') });
   const asset = ASSETS[url.pathname];
   if (asset) return reply(asset[0], 200, asset[1]);
   if (!api) return json({ error: 'not_found' }, 404);
@@ -116,6 +117,9 @@ export async function handleAdmin(request, env, metrics, log = () => {}) {
     if (api.name === 'history') return json(await metrics.history(days));
     if (api.name === 'incidents') return json(await metrics.incidents());
     if (api.name === 'incident_status') return await saveIncidentStatus(request, api.ticket, metrics);
+    if (request.method === 'DELETE') {
+      return await metrics.deleteIncident(api.ticket) ? json({ deleted: api.ticket }) : json({ error: 'not_found' }, 404);
+    }
     const incident = await metrics.incident(api.ticket);
     if (!incident) return json({ error: 'not_found' }, 404);
     if (api.name === 'incident') return json(incident);
@@ -146,7 +150,7 @@ export function internalIncidentRoute(request) {
   if (pathname === '/incidents') return { kind: 'list' };
   const [ticket, rest, ...more] = pathname.startsWith('/incidents/') ? pathname.slice('/incidents/'.length).split('/') : [];
   if (!isTicket(ticket) || more.length > 0) return null;
-  if (rest === undefined) return { kind: 'one', ticket };
+  if (rest === undefined) return { kind: request.method === 'DELETE' ? 'delete' : 'one', ticket };
   return rest === 'status' && request.method === 'POST' ? { kind: 'status', ticket } : null;
 }
 

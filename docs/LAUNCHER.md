@@ -670,12 +670,23 @@ scrollbar, and has four steps:
 5. **My reports** lists the reports this PC sent, newest first, from `user/bug_reports.json` (`launcher/report_history.cpp`, saved
    through a new file moved into place; a damaged file is set aside as `.damaged`). Each row shows the report ID, a preview, the
    status (with the fixed version on a Fixed report) and the date. **View details** expands that report in place, as one framed
-   item that holds its summary, its facts (status, fixed version, the developer's message), **What was sent**, which reads the stored
-   report back, and **Remove from this PC**, which deletes only the local entry. Only one report is open at a time, and **Hide details**
-   closes it. **Refresh** sits at the top right of the section.
+   item that holds its summary, the developer's message when there is one, its facts (status, fixed version), **What was sent**,
+   which reads the stored report back, and **Remove from this PC**, which deletes only the local entry. Only one report is open at a
+   time, and **Hide details** closes it. **Refresh** sits at the top right of the section.
    The statuses are checked at startup, when the page opens and on **Refresh**, off the UI thread and silently when offline. A
-   change marks the report **Updated** and puts a dot on the sidebar entry, until the report is opened. If the list cannot be saved
-   the report still counts as sent: the Report ID shows normally with a short note.
+   change marks the report **Updated** and puts a dot on the sidebar entry, until that report is opened. Opening the page
+   does not clear anything: each report clears when it is opened. If the list cannot be saved the report still counts as sent:
+   the Report ID shows normally with a short note.
+   A new or changed developer message is a **new reply**, kept as `message_unseen` in `bug_reports.json` (an older file without
+   it loads safely: an unseen report with a message counts as a reply). A reply shows a **New reply** marker in its row and a
+   banner at the top of the page, "A report has a new reply", which comes before the plain "A report has an update". **Show**
+   opens the report with an unseen reply, otherwise the most recently updated one, and the next unread report can then take the
+   banner. The message sits in its own highlighted panel, **Message from developer**, apart from the status, with a **New reply**
+   badge until the report is closed. A status with no message is only an update.
+   A report the service no longer has (the admin deleted it) is marked `unavailable`: its row says **No longer available**, its
+   details keep the last known status and message and say it was removed, it is never shown as an update, and it is left out of
+   the automatic checks. **Refresh** asks about it again, and the mark clears if the service answers. **Remove from this PC**
+   deletes the local entry as before.
 
 The request and the privacy rules are in [ONLINE.md](ONLINE.md#bug-reports). Online Play does not have to be on.
 

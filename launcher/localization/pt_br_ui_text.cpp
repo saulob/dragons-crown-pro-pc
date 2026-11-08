@@ -684,6 +684,11 @@ Removes it from this list only. The report stays with the developer.	Remove apen
 Remove this report from this PC?	Remover este relatório deste PC?
 A report has an update	Um relatório foi atualizado
 Its status changed since you last looked.	O status mudou desde a última vez que você olhou.
+A report has a new reply	Um relatório recebeu uma nova resposta
+The developer replied to one of your reports.	O desenvolvedor respondeu a um dos seus relatórios.
+New reply	Nova resposta
+No longer available	Não está mais disponível
+This report was removed from the online service. The last known status is shown.	Este relatório foi removido do serviço online. O último status conhecido é mostrado.
 Show	Mostrar
 The report was sent, but it could not be added to My reports on this PC.	O relatório foi enviado, mas não pôde ser adicionado a Meus relatórios neste PC.
 Last gameplay	Última partida

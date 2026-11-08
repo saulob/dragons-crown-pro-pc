@@ -156,8 +156,12 @@ void IncidentPage::Draw(trg::Ui& ui, const ReportFacts& facts) {
     KeepClearOfScrollbar(std::floor(trg::layout::kContentPadding * ui.scale()));
     AccentText(ui, kPrivacyHeadline);
     ui.Paragraph(kPrivacyNote);
-    if (my_reports_.HasUpdates() && ui.ButtonRow("A report has an update", "Its status changed since you last looked.", "Show")) {
-        my_reports_.BringIntoView();
+    if (my_reports_.HasUpdates()) {
+        const bool reply = my_reports_.HasNewReply();
+        if (ui.ButtonRow(reply ? "A report has a new reply" : "A report has an update",
+                         reply ? "The developer replied to one of your reports." : "Its status changed since you last looked.", "Show")) {
+            my_reports_.ShowUpdate();
+        }
     }
     ui.Heading("1. Report the problem");
     DrawDescription(ui, sending);

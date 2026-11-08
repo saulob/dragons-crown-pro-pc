@@ -59,6 +59,7 @@ function adminSource(env) {
     incidents: async () => env.lobby.incidentList(),
     incident: async (ticket) => env.lobby.incidentForAdmin(ticket),
     setIncidentStatus: async (ticket, change) => env.lobby.setIncidentStatus(ticket, change),
+    deleteIncident: async (ticket) => env.lobby.deleteIncident(ticket),
   };
 }
 
@@ -67,6 +68,9 @@ const adminGet = (env, path, token = TOKEN) => handleAdmin(new Request(`https://
 
 const adminPost = (env, path, body, token = TOKEN) => handleAdmin(new Request(`https://dcp-lobby.example${path}`,
   { method: 'POST', body, headers: token ? { Authorization: `Bearer ${token}` } : {} }), ENV, adminSource(env));
+
+const adminDelete = (env, path, token = TOKEN) => handleAdmin(new Request(`https://dcp-lobby.example${path}`,
+  { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} }), ENV, adminSource(env));
 
 const saveStatus = (env, ticket, change) => adminPost(env, `/admin/api/incidents/${ticket}/status`, JSON.stringify(change));
 
@@ -550,11 +554,15 @@ class Node {
 
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
 
-  fire(type) { for (const fn of this.listeners[type] ?? []) fn({ clientX: 0, clientY: 0 }); }
+  fire(type, event = {}) { for (const fn of this.listeners[type] ?? []) fn({ clientX: 0, clientY: 0, preventDefault() {}, ...event }); }
 
   click() { this.clicked = true; }
 
-  focus() {}
+  focus() {
+    this.focused = true;
+  }
+
+  contains(node) { return node === this || this.children.some((c) => c.contains(node)); }
 
   find(predicate, found = []) {
     for (const child of this.children) {
@@ -565,7 +573,10 @@ class Node {
   }
 }
 
-async function adminPage(env, { clipboard = true } = {}) {
+const TOKEN_KEY = 'dcp-dashboard-token';
+const VIEW_KEY = 'dcp-dashboard-view';
+
+async function adminPage(env, { clipboard = true, stored = { [TOKEN_KEY]: TOKEN }, token = TOKEN, route } = {}) {
   const ids = new Map();
   const get = (id) => {
     if (!ids.has(id)) ids.set(id, new Node('div'));
@@ -583,29 +594,38 @@ async function adminPage(env, { clipboard = true } = {}) {
     createElementNS: (ns, tag) => new Node(tag),
     createTextNode: (text) => Object.assign(new Node('#text'), { ownText: text }),
     querySelectorAll: () => [],
+    addEventListener: (type, fn) => { (documentListeners[type] ??= []).push(fn); },
   };
+  const documentListeners = {};
   get('range').value = '30';
   for (const [, id] of ADMIN_HTML.matchAll(/id="([a-z-]+)"[^>]*\shidden/g)) get(id).hidden = true;
   const requests = [];
   const fetch = async (path, options) => {
     requests.push({ path, authorization: options.headers.Authorization, method: options.method, body: options.body });
-    return options.method === 'POST' ? adminPost(env, path, options.body) : adminGet(env, path);
+    if (route) return route(path, options);
+    const sent = options.headers.Authorization.slice('Bearer '.length);
+    if (options.method === 'POST') return adminPost(env, path, options.body, sent);
+    if (options.method === 'DELETE') return adminDelete(env, path, sent);
+    return adminGet(env, path, sent);
   };
   const blobs = [];
   const urls = { createObjectURL: (blob) => { blobs.push(blob); return 'blob:test'; }, revokeObjectURL() {} };
   const copied = [];
   const navigator = clipboard ? { clipboard: { writeText: async (text) => { copied.push(text); } } } : {};
-  const storage = { getItem: () => TOKEN, setItem() {}, removeItem() {} };
+  const store = new Map(Object.entries(stored));
+  const storage = { getItem: (key) => store.get(key) ?? null, setItem: (key, value) => { store.set(key, String(value)); }, removeItem: (key) => { store.delete(key); } };
+  const fire = (type, event = {}) => { for (const fn of documentListeners[type] ?? []) fn(event); };
   new Function('document', 'window', 'fetch', 'sessionStorage', 'setInterval', 'clearInterval', 'URL', 'navigator', ADMIN_JS)(
     document, { innerWidth: 1200, innerHeight: 800 }, fetch, storage, () => 0, () => {}, urls, navigator);
   const settle = async () => {
     for (let i = 0; i < 30; i++) await new Promise((resolve) => setImmediate(resolve));
   };
   await settle();
-  return { get, settle, requests, links, blobs, copied };
+  return { get, settle, requests, links, blobs, copied, store, document, fire };
 }
 
 const cssRule = (selector) => ADMIN_CSS.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+const bugRows = (page) => page.get('bug-list').find((n) => n.tag === 'tr').map((row) => row.children.map((cell) => cell.textContent));
 const ticketButtons = (page) => page.get('bug-list').find((n) => n.tag === 'button');
 const paths = (page) => page.requests.map((r) => r.path).sort();
 
@@ -665,9 +685,10 @@ test('the Bugs tab lists reports newest first, opens one and filters by version,
   await openBugs(page);
   assert.deepEqual(ticketButtons(page).map((b) => b.textContent), [newer.ticket, older.ticket]);
   assert.equal(page.get('bug-count').textContent, '2 reports');
-  const rows = page.get('bug-list').find((n) => n.tag === 'tr').map((r) => r.textContent);
-  assert.ok(rows[0].startsWith('Report IDSubmittedLauncherGame buildCUSAOperating systemDescription'));
-  assert.ok(rows[2].includes(older.ticket) && rows[2].includes('CUSA07001') && rows[2].includes('0.9.2') && rows[2].includes('Older report'));
+  const rows = bugRows(page);
+  assert.deepEqual(rows[0], ['Report ID', 'Status', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description']);
+  assert.deepEqual([rows[2][0], rows[2][1], rows[2][3], rows[2][4], rows[2][5], rows[2][6]],
+    [older.ticket, 'New', '0.9.2', 'CUSA07001 1.03 Japan', report().operating_system, 'Older report']);
   assert.equal(page.get('bug-detail').hidden, true);
 
   ticketButtons(page)[1].fire('click');
@@ -1295,12 +1316,12 @@ test('a filed report starts as New, and a stored report is unchanged by anything
 
 test('the Status column and filter list reports by status, and keep the other filters', async () => {
   const { env, page, older, newer } = await twoReports();
-  const header = page.get('bug-list').find((n) => n.tag === 'tr')[0].textContent;
-  assert.ok(header.endsWith('DescriptionStatus'), header);
+  assert.deepEqual(bugRows(page)[0].slice(0, 2), ['Report ID', 'Status']);
   await saveStatus(env, older, { status: 'cannot_reproduce' });
   await openBugs(page);
-  const rows = page.get('bug-list').find((n) => n.tag === 'tr').map((r) => r.textContent);
-  assert.ok(rows[1].endsWith('New') && rows[2].endsWith('Cannot reproduce'));
+  const rows = bugRows(page);
+  assert.equal(rows[1][1], 'New');
+  assert.equal(rows[2][1], 'Cannot reproduce');
 
   page.get('bug-status-filter').value = 'cannot_reproduce';
   page.get('bug-status-filter').fire('change');
@@ -1342,7 +1363,7 @@ test('the status form shows the report, keeps changes until Save, and updates th
   assert.equal(page.get('bug-status-note').textContent, 'Saved.');
   const saved = env.lobby.incidentForAdmin(older);
   assert.deepEqual([saved.status, saved.fixed_version, saved.player_message], ['fixed', '0.9.3', 'Fixed the crash']);
-  assert.ok(page.get('bug-list').find((n) => n.tag === 'tr')[2].textContent.endsWith('Fixed'));
+  assert.equal(bugRows(page)[2][1], 'Fixed');
   assert.equal(page.get('bug-log').textContent, 'Launcher: older\n');
 
   page.get('bug-status').value = 'closed';
@@ -1438,4 +1459,457 @@ test('an empty report list says so', async () => {
   await openBugs(page);
   assert.equal(page.get('bug-count').textContent, 'No reports yet.');
   assert.equal(ticketButtons(page).length, 0);
+});
+
+// ---- Deleting a report ----
+
+const deleteReport = (env, ticket, token) => adminDelete(env, `/admin/api/incidents/${ticket}`, token);
+const claimOf = ({ ticket, receipt }) => ({ ticket, receipt });
+const storedRows = (env, ticket) => ['incidents', 'incident_tracking']
+  .map((table) => env.host.sql.get(`SELECT COUNT(*) AS n FROM ${table} WHERE ticket = ?`, ticket).n);
+
+test('an authenticated delete removes the whole report: fields, log, status, message and receipt', async () => {
+  const env = makeLobby();
+  const gone = file(greeted(env), { description: 'A test report' });
+  await saveStatus(env, gone.ticket, { status: 'fixed', fixed_version: '0.9.3', player_message: 'Thanks, fixed.' });
+  const owner = anonymous(env);
+  assert.equal(lookup(owner, [claimOf(gone)]).reports[0].player_message, 'Thanks, fixed.');
+  assert.deepEqual(storedRows(env, gone.ticket), [1, 1]);
+
+  const response = await deleteReport(env, gone.ticket);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { deleted: gone.ticket });
+  assert.deepEqual(storedRows(env, gone.ticket), [0, 0]);
+  assert.equal(env.lobby.incidents.taken(gone.ticket), false);
+  assert.equal(env.lobby.incidentForAdmin(gone.ticket), null);
+});
+
+test('a deleted report is gone for the admin and for its owner', async () => {
+  const env = makeLobby();
+  const gone = file(greeted(env), { description: 'Delete me', log_text: 'Launcher: private log\n' });
+  const kept = file(greeted(env), { description: 'Keep me' });
+  await deleteReport(env, gone.ticket);
+
+  const list = await (await adminGet(env, '/admin/api/incidents')).json();
+  assert.deepEqual(list.incidents.map((row) => row.ticket), [kept.ticket]);
+  assert.equal((await adminGet(env, `/admin/api/incidents/${gone.ticket}`)).status, 404);
+  assert.equal((await adminGet(env, `/admin/api/incidents/${gone.ticket}/log`)).status, 404);
+  const owner = anonymous(env);
+  assert.deepEqual(lookup(owner, [claimOf(gone)]).reports, []);
+  assert.equal(owner.call('incident.read', claimOf(gone)).code, 'not_found');
+  assert.deepEqual(lookup(owner, [claimOf(gone), claimOf(kept)]).reports.map((r) => r.ticket), [kept.ticket]);
+});
+
+test('deleting one report leaves the others, their statuses, their receipts and the quota alone', async () => {
+  const env = makeLobby();
+  const client = greeted(env);
+  const gone = file(client, { description: 'Delete me' });
+  env.advance(SPACED_MS);
+  const kept = file(client, { description: 'Keep me', log_text: 'Launcher: kept\n' });
+  await saveStatus(env, kept.ticket, { status: 'investigating', player_message: 'Looking' });
+  const quota = quotaRows(env);
+  await deleteReport(env, gone.ticket);
+
+  assert.equal(quotaRows(env), quota);
+  assert.deepEqual(storedRows(env, kept.ticket), [1, 1]);
+  const one = await (await adminGet(env, `/admin/api/incidents/${kept.ticket}`)).json();
+  assert.equal(one.description, 'Keep me');
+  assert.equal(one.status, 'investigating');
+  assert.equal(await (await adminGet(env, `/admin/api/incidents/${kept.ticket}/log`)).text(), 'Launcher: kept\n');
+  const owner = anonymous(env);
+  assert.equal(lookup(owner, [claimOf(kept)]).reports[0].player_message, 'Looking');
+  assert.equal(owner.call('incident.read', claimOf(kept)).report.description, 'Keep me');
+});
+
+test('deleting needs the admin token: a missing or wrong one is 401 and the report stays', async () => {
+  const env = makeLobby();
+  const { ticket } = file(greeted(env));
+  for (const token of [null, '', 'wrong-token-of-enough-length']) {
+    const response = await deleteReport(env, ticket, token);
+    assert.equal(response.status, 401, String(token));
+    assert.equal(response.headers.get('WWW-Authenticate'), 'Bearer');
+  }
+  const unconfigured = await handleAdmin(new Request(`https://dcp-lobby.example/admin/api/incidents/${ticket}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${TOKEN}` } }), {}, adminSource(env));
+  assert.equal(unconfigured.status, 503);
+  assert.deepEqual(storedRows(env, ticket), [1, 1]);
+  assert.equal((await deleteReport(env, ticket)).status, 200);
+});
+
+test('deleting a report that is not stored is 404, and a second delete is too', async () => {
+  const env = makeLobby();
+  const { ticket } = file(greeted(env));
+  assert.equal((await deleteReport(env, 'DCP-ZZZZZZ')).status, 404);
+  assert.deepEqual(await (await deleteReport(env, 'DCP-ZZZZZZ')).json(), { error: 'not_found' });
+  assert.equal((await deleteReport(env, ticket)).status, 200);
+  assert.equal((await deleteReport(env, ticket)).status, 404);
+});
+
+test('a malformed report id is refused after the token check and deletes nothing', async () => {
+  const env = makeLobby();
+  const { ticket } = file(greeted(env));
+  for (const id of ['nope', '1%20OR%201=1', 'dcp-abc234', 'DCP-ABC23', 'DCP-ABC2345', '..%2Fx', 'DCP-ABC23%00']) {
+    const response = await deleteReport(env, id);
+    assert.equal(response.status, 400, id);
+    assert.deepEqual(await response.json(), { error: 'bad_request', detail: 'invalid report id' });
+    assert.equal((await deleteReport(env, id, null)).status, 401, id);
+  }
+  for (const path of ['/admin/api/incidents', `/admin/api/incidents/${ticket}/log`, `/admin/api/incidents/${ticket}/status`,
+    '/admin/api/summary', '/admin/api/history', '/admin']) {
+    assert.equal((await adminDelete(env, path)).status, 405, path);
+  }
+  assert.deepEqual(storedRows(env, ticket), [1, 1]);
+});
+
+test('only the report route takes DELETE, and the player-facing operations cannot delete', async () => {
+  const env = makeLobby();
+  const filed = file(greeted(env));
+  const post = await handleAdmin(new Request(`https://dcp-lobby.example/admin/api/incidents/${filed.ticket}`,
+    { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` } }), ENV, adminSource(env));
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.get('Allow'), 'GET, DELETE');
+  const owner = anonymous(env);
+  for (const op of ['incident.delete', 'incident.remove', 'incident.forget']) {
+    assert.notEqual(owner.call(op, claimOf(filed)).code, 'ok', op);
+  }
+  assert.deepEqual(storedRows(env, filed.ticket), [1, 1]);
+  assert.deepEqual(internalIncidentRoute(new Request(`https://x/incidents/${filed.ticket}`, { method: 'DELETE' })),
+    { kind: 'delete', ticket: filed.ticket });
+  assert.deepEqual(internalIncidentRoute(new Request(`https://x/incidents/${filed.ticket}`)), { kind: 'one', ticket: filed.ticket });
+  assert.equal(internalIncidentRoute(new Request(`https://x/incidents/${filed.ticket}/log`, { method: 'DELETE' })), null);
+  const source = readFileSync(new URL('../src/lobby.js', import.meta.url), 'utf8');
+  assert.ok(!/'incident\.(delete|remove|forget)'/.test(source));
+});
+
+test('deleting keeps the newest-reports limit: a delete frees a place and the limit still trims the oldest', async () => {
+  const env = makeLobby();
+  const kept = INCIDENT.kept;
+  INCIDENT.kept = 3;
+  try {
+    const tickets = [];
+    for (let i = 0; i < 3; i++) {
+      env.advance(DAY_MS);
+      tickets.push(file(greeted(env)).ticket);
+    }
+    await deleteReport(env, tickets[1]);
+    assert.equal(env.lobby.incidentList().incidents.length, 2);
+    for (let i = 0; i < 3; i++) {
+      env.advance(DAY_MS);
+      tickets.push(file(greeted(env)).ticket);
+    }
+    const left = env.lobby.incidentList().incidents.map((row) => row.ticket);
+    assert.equal(left.length, 3);
+    assert.deepEqual(left, tickets.slice(3).reverse());
+  } finally {
+    INCIDENT.kept = kept;
+  }
+});
+
+// ---- The admin page: Bugs table, sign-in, menu and delete ----
+
+const stateOf = (page, id) => page.get(id).hidden;
+const dialogOpen = (page) => !page.get('delete-backdrop').hidden;
+
+async function signedIn(env, options) {
+  const page = await adminPage(env, options);
+  assert.equal(stateOf(page, 'dash'), false);
+  return page;
+}
+
+test('the Bugs table reads Report ID, Status, Submitted, Launcher, Game build, Operating system, Description', async () => {
+  const env = makeLobby();
+  const { ticket } = file(greeted(env), { game_build: 'CUSA10209 1.02 Asia/Hong Kong', cusa: 'CUSA10209' });
+  const page = await adminPage(env);
+  await openBugs(page);
+  const [header, row] = bugRows(page);
+  assert.deepEqual(header, ['Report ID', 'Status', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description']);
+  assert.ok(!header.includes('CUSA'));
+  assert.equal(row[1], 'New');
+  assert.equal(row[4], 'CUSA10209 1.02 Asia/Hong Kong');
+  assert.ok(!row.includes('CUSA10209'));
+  const detail = await (await adminGet(env, `/admin/api/incidents/${ticket}`)).json();
+  assert.equal(detail.cusa, 'CUSA10209');
+  await clickTicket(page, ticket);
+  assert.ok(page.get('bug-facts').textContent.includes('CUSACUSA10209'));
+});
+
+test('the Bugs table keeps its important columns in view: wrapping text, columns that give way, a status near the left', () => {
+  const columns = ADMIN_JS.match(/BUG_COLUMN_CLASSES = \[([^\]]+)\]/)[1];
+  assert.match(columns, /^'col-id', 'col-status', 'col-submitted'/);
+  assert.match(ADMIN_CSS, /#bug-list td\.bug-summary \{[^}]*white-space: normal[^}]*width: 100%/);
+  assert.match(ADMIN_CSS, /#bug-list td\.col-build, #bug-list td\.col-os \{ white-space: normal/);
+  assert.match(ADMIN_CSS, /@media \(max-width: 1000px\) \{\s*#bug-list \.col-os \{ display: none; \}/);
+  assert.match(ADMIN_CSS, /@media \(max-width: 760px\) \{\s*#bug-list \.col-launcher \{ display: none; \}/);
+  assert.ok(!/#bug-list \.col-(id|status|submitted|build)[^{]*\{[^}]*display: none/.test(ADMIN_CSS));
+  assert.match(ADMIN_CSS, /\.bug-log \{[^}]*white-space: pre/);
+  assert.match(cssRule('.bug-list'), /overflow-y: auto/);
+});
+
+test('hidden panels stay hidden: a display rule never overrides the hidden attribute', () => {
+  assert.match(ADMIN_CSS, /\n\[hidden\] \{ display: none !important; \}/);
+});
+
+test('Delete report sits at the bottom of the open report, apart from the status form, and asks first', () => {
+  const detail = ADMIN_HTML.slice(ADMIN_HTML.indexOf('id="bug-detail"'));
+  assert.ok(detail.indexOf('id="bug-status-save"') < detail.indexOf('id="bug-log"'));
+  assert.ok(detail.indexOf('id="bug-log"') < detail.indexOf('id="bug-delete"'));
+  assert.match(ADMIN_HTML, /<div class="bug-danger">\s*<h3>Delete report<\/h3>[^]*id="bug-delete"[^>]*class="danger"/);
+  assert.match(cssRule('.bug-danger'), /border-top/);
+  assert.match(ADMIN_HTML, /role="alertdialog" aria-modal="true"/);
+  assert.match(ADMIN_HTML, /This removes the stored report and log and cannot be undone\./);
+  assert.match(ADMIN_HTML, /id="delete-cancel"[^>]*>Cancel</);
+  assert.match(ADMIN_HTML, /id="delete-confirm"[^>]*>Delete report</);
+});
+
+test('the first click on Delete report asks and deletes nothing; Cancel, Escape and the backdrop all keep the report', async () => {
+  const { env, page, older, newer } = await twoReports();
+  await clickTicket(page, older);
+  assert.equal(dialogOpen(page), false);
+  page.get('bug-delete').fire('click');
+  assert.equal(dialogOpen(page), true);
+  assert.equal(page.get('delete-title').textContent, `Delete ${older} permanently?`);
+  assert.ok(page.get('delete-cancel').focused);
+  assert.ok(page.requests.every((r) => r.method !== 'DELETE'));
+
+  page.get('delete-cancel').fire('click');
+  assert.equal(dialogOpen(page), false);
+  page.get('bug-delete').fire('click');
+  page.fire('keydown', { key: 'Escape' });
+  assert.equal(dialogOpen(page), false);
+  page.get('bug-delete').fire('click');
+  page.get('delete-backdrop').fire('click', { target: page.get('delete-dialog') });
+  assert.equal(dialogOpen(page), true);
+  page.get('delete-backdrop').fire('click', { target: page.get('delete-backdrop') });
+  assert.equal(dialogOpen(page), false);
+
+  await page.settle();
+  assert.ok(page.requests.every((r) => r.method !== 'DELETE'));
+  assert.equal(env.lobby.incidentForAdmin(older).ticket, older);
+  assert.deepEqual(ticketButtons(page).map((b) => b.textContent), [newer, older]);
+  assert.equal(page.get('bug-detail').hidden, false);
+});
+
+test('confirming deletes the report with the admin token, closes it and removes it from the list', async () => {
+  const { env, page, older, newer } = await twoReports();
+  await clickTicket(page, older);
+  page.get('bug-delete').fire('click');
+  page.get('delete-confirm').fire('click');
+  assert.equal(page.get('delete-confirm').disabled, true);
+  await page.settle();
+
+  const deletes = page.requests.filter((r) => r.method === 'DELETE');
+  assert.deepEqual(deletes.map((r) => r.path), [`/admin/api/incidents/${older}`]);
+  assert.equal(deletes[0].authorization, `Bearer ${TOKEN}`);
+  assert.equal(dialogOpen(page), false);
+  assert.equal(page.get('bug-detail').hidden, true);
+  assert.deepEqual(ticketButtons(page).map((b) => b.textContent), [newer]);
+  assert.ok(page.get('bug-count').textContent.startsWith(`${older} deleted.`));
+  assert.equal(env.lobby.incidentForAdmin(older), null);
+  assert.equal(env.lobby.incidentForAdmin(newer).ticket, newer);
+});
+
+test('a report another admin already deleted leaves the list too, and a refused delete keeps the dialog with its message', async () => {
+  const gone = await twoReports();
+  await clickTicket(gone.page, gone.older);
+  await deleteReport(gone.env, gone.older);
+  gone.page.get('bug-delete').fire('click');
+  gone.page.get('delete-confirm').fire('click');
+  await gone.page.settle();
+  assert.equal(dialogOpen(gone.page), false);
+  assert.deepEqual(ticketButtons(gone.page).map((b) => b.textContent), [gone.newer]);
+
+  const env = makeLobby();
+  file(greeted(env));
+  let answer = 500;
+  const page = await adminPage(env, {
+    route: (path, options) => {
+      const sent = options.headers.Authorization.slice('Bearer '.length);
+      if (options.method === 'DELETE') return new Response('{}', { status: answer });
+      return options.method === 'POST' ? adminPost(env, path, options.body, sent) : adminGet(env, path, sent);
+    },
+  });
+  await openBugs(page);
+  await clickTicket(page, ticketButtons(page)[0].textContent);
+  page.get('bug-delete').fire('click');
+  page.get('delete-confirm').fire('click');
+  await page.settle();
+  assert.equal(dialogOpen(page), true);
+  assert.equal(page.get('delete-error').textContent, 'Could not delete the report. Try again.');
+  assert.equal(page.get('delete-confirm').disabled, false);
+  assert.equal(ticketButtons(page).length, 1);
+
+  answer = 401;
+  page.get('delete-confirm').fire('click');
+  await page.settle();
+  assert.equal(stateOf(page, 'dash'), true);
+  assert.equal(stateOf(page, 'login'), false);
+  assert.equal(dialogOpen(page), false);
+});
+
+test('a delete cannot be confirmed twice', async () => {
+  const { page, older, newer } = await twoReports();
+  await clickTicket(page, older);
+  page.get('bug-delete').fire('click');
+  page.get('delete-confirm').fire('click');
+  page.get('delete-confirm').fire('click');
+  await page.settle();
+  assert.equal(page.requests.filter((r) => r.method === 'DELETE').length, 1);
+  assert.deepEqual(ticketButtons(page).map((b) => b.textContent), [newer]);
+  page.get('delete-confirm').fire('click');
+  await page.settle();
+  assert.equal(page.requests.filter((r) => r.method === 'DELETE').length, 1);
+});
+
+test('without a stored token the login panel shows; Keep for this tab stores the token in sessionStorage only when checked', async () => {
+  const env = makeLobby();
+  const page = await adminPage(env, { stored: {} });
+  assert.equal(stateOf(page, 'login'), false);
+  assert.equal(stateOf(page, 'dash'), true);
+  assert.equal(stateOf(page, 'session'), true);
+  assert.equal(page.requests.length, 0);
+
+  page.get('token').value = ` ${TOKEN} `;
+  page.get('remember').checked = false;
+  page.get('login').fire('submit');
+  await page.settle();
+  assert.equal(stateOf(page, 'login'), true);
+  assert.equal(stateOf(page, 'dash'), false);
+  assert.equal(page.store.size, 0);
+  assert.equal(page.get('token').value, '');
+  assert.ok(page.requests.every((r) => r.authorization === `Bearer ${TOKEN}`));
+  assert.match(page.get('session-state').textContent, /memory only/);
+
+  page.get('signout').fire('click');
+  page.get('token').value = TOKEN;
+  page.get('remember').checked = true;
+  page.get('login').fire('submit');
+  await page.settle();
+  assert.deepEqual([...page.store], [[TOKEN_KEY, TOKEN]]);
+  assert.match(page.get('session-state').textContent, /kept for this tab/);
+  assert.ok(!page.get('session-state').textContent.includes(TOKEN));
+});
+
+test('a reload in the same tab signs in again from the kept token, on the same tab of the page', async () => {
+  const env = makeLobby();
+  file(greeted(env));
+  const first = await adminPage(env, { stored: {} });
+  first.get('token').value = TOKEN;
+  first.get('remember').checked = true;
+  first.get('login').fire('submit');
+  await first.settle();
+  assert.deepEqual(paths(first), ['/admin/api/history?days=30', '/admin/api/summary']);
+  await openBugs(first);
+  assert.equal(first.store.get(VIEW_KEY), 'bugs');
+
+  const reloaded = await adminPage(env, { stored: Object.fromEntries(first.store) });
+  assert.equal(stateOf(reloaded, 'login'), true);
+  assert.equal(stateOf(reloaded, 'dash'), false);
+  assert.equal(reloaded.get('remember').checked, true);
+  assert.equal(stateOf(reloaded, 'view-bugs'), false);
+  assert.equal(stateOf(reloaded, 'view-dashboard'), true);
+  assert.equal(reloaded.get('tab-bugs').attrs['aria-selected'], 'true');
+  assert.deepEqual(paths(reloaded), ['/admin/api/incidents']);
+  assert.equal(ticketButtons(reloaded).length, 1);
+  reloaded.get('tab-dashboard').fire('click');
+  await reloaded.settle();
+  assert.equal(reloaded.store.has(VIEW_KEY), false);
+  assert.equal(reloaded.store.get(TOKEN_KEY), TOKEN);
+});
+
+test('a reload without Keep for this tab asks for the token again and remembers nothing, not even the tab', async () => {
+  const env = makeLobby();
+  const page = await adminPage(env, { stored: {} });
+  page.get('token').value = TOKEN;
+  page.get('login').fire('submit');
+  await page.settle();
+  await openBugs(page);
+  assert.equal(page.store.size, 0);
+  const reloaded = await adminPage(env, { stored: Object.fromEntries(page.store) });
+  assert.equal(stateOf(reloaded, 'login'), false);
+  assert.equal(stateOf(reloaded, 'dash'), true);
+  assert.equal(reloaded.requests.length, 0);
+});
+
+test('a kept token the service refuses is removed, with the tab, and the login shows again', async () => {
+  const env = makeLobby();
+  const page = await adminPage(env, { stored: { [TOKEN_KEY]: 'an-old-token-that-no-longer-works', [VIEW_KEY]: 'bugs' } });
+  assert.equal(stateOf(page, 'login'), false);
+  assert.equal(stateOf(page, 'dash'), true);
+  assert.equal(stateOf(page, 'session'), true);
+  assert.equal(page.store.size, 0);
+  assert.equal(page.get('login-error').textContent, 'The token was not accepted.');
+});
+
+test('Sign out clears the token, the tab and the report on screen, and returns to the login', async () => {
+  const { page, older } = await twoReports();
+  await clickTicket(page, older);
+  page.get('menu-button').fire('click');
+  page.get('signout').fire('click');
+  assert.equal(page.store.size, 0);
+  assert.equal(stateOf(page, 'dash'), true);
+  assert.equal(stateOf(page, 'session'), true);
+  assert.equal(stateOf(page, 'session-menu'), true);
+  assert.equal(stateOf(page, 'login'), false);
+  assert.equal(page.get('remember').checked, false);
+  assert.equal(page.get('bug-detail').hidden, true);
+  assert.equal(page.get('tab-dashboard').attrs['aria-selected'], 'true');
+  const before = page.requests.length;
+  page.get('refresh').fire('click');
+  await page.settle();
+  assert.ok(page.requests.slice(before).every((r) => r.authorization === 'Bearer '), 'no token is sent after signing out');
+});
+
+test('once signed in the login panel gives way to a compact menu button that opens Dashboard session and Sign out', async () => {
+  const page = await signedIn(makeLobby());
+  assert.equal(stateOf(page, 'login'), true);
+  assert.equal(stateOf(page, 'session'), false);
+  assert.equal(stateOf(page, 'session-menu'), true);
+  assert.equal(page.get('menu-button').attrs['aria-expanded'], 'false');
+  assert.equal(stateOf(page, 'tab-dashboard'), false);
+  assert.ok(ADMIN_HTML.indexOf('id="menu-button"') < ADMIN_HTML.indexOf('id="login"'));
+  assert.match(ADMIN_HTML, /id="menu-button"[^>]*aria-label="Dashboard session menu"/);
+  assert.match(ADMIN_HTML, /<button id="menu-button"[^>]*><span class="bars" aria-hidden="true"><\/span><\/button>/);
+
+  page.get('menu-button').fire('click');
+  assert.equal(stateOf(page, 'session-menu'), false);
+  assert.equal(page.get('menu-button').attrs['aria-expanded'], 'true');
+  assert.ok(page.get('signout').focused);
+  assert.ok(ADMIN_HTML.includes('<p class="menu-title">Dashboard session</p>'));
+  const menu = ADMIN_HTML.slice(ADMIN_HTML.indexOf('id="session-menu"'), ADMIN_HTML.indexOf('id="login"'));
+  assert.ok(menu.includes('Sign out') && !/token/i.test(menu));
+  assert.ok(!page.get('session-state').textContent.includes(TOKEN));
+  page.get('menu-button').fire('click');
+  assert.equal(stateOf(page, 'session-menu'), true);
+});
+
+test('the menu closes on Escape and on a click outside it, and stays open for a click inside', async () => {
+  const page = await signedIn(makeLobby());
+  page.get('session').appendChild(page.get('menu-button'));
+  page.get('session').appendChild(page.get('session-menu'));
+  page.get('session-menu').appendChild(page.get('session-state'));
+
+  page.get('menu-button').fire('click');
+  page.fire('keydown', { key: 'Escape' });
+  assert.equal(stateOf(page, 'session-menu'), true);
+  assert.ok(page.get('menu-button').focused);
+
+  page.get('menu-button').fire('click');
+  page.fire('click', { target: page.get('session-state') });
+  assert.equal(stateOf(page, 'session-menu'), false);
+  page.fire('click', { target: page.get('tab-bugs') });
+  assert.equal(stateOf(page, 'session-menu'), true);
+});
+
+test('the dashboard token never reaches a URL, cookie or localStorage, and only sessionStorage when asked', async () => {
+  assert.ok(!/localStorage|document\.cookie|location\.(search|hash)|[?&]token=/.test(ADMIN_JS));
+  assert.match(ADMIN_JS, /sessionStorage\.setItem\(key, value\)/);
+  const page = await adminPage(makeLobby(), { stored: {} });
+  page.get('token').value = TOKEN;
+  page.get('remember').checked = true;
+  page.get('login').fire('submit');
+  await page.settle();
+  await openBugs(page);
+  assert.ok(page.requests.length > 0 && page.requests.every((r) => !r.path.includes(TOKEN) && r.authorization === `Bearer ${TOKEN}`));
+  assert.deepEqual([...page.store.keys()].sort(), [TOKEN_KEY, VIEW_KEY].sort());
+  assert.ok([...page.store.values()].every((value) => value === TOKEN || value === 'bugs'));
 });

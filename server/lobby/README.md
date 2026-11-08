@@ -147,6 +147,18 @@ is no public or permanent link.
 500 characters, stored and shown as plain text. **Save status** posts to `/admin/api/incidents/<ticket>/status`; nothing is
 saved until then, and a save that changes nothing keeps `status_updated_at`. The list has a Status column and filter.
 
+The list reads Report ID, Status, Submitted, Launcher, Game build, Operating system, Description, so the status sits next to the
+ID; CUSA is only in the detail. The description takes the remaining width and wraps. On narrower windows Operating system hides
+below 1000 px and Launcher below 760 px; the detail still shows both.
+
+**Delete report**, at the bottom of an open report and apart from the status form, permanently removes a test or unwanted
+report. It asks first ("Delete DCP-XXXXXX permanently? This removes the stored report and log and cannot be undone."), then calls
+`DELETE /admin/api/incidents/<ticket>` with the dashboard token (401 without it, 400 for a malformed id, 404 for an unknown
+report, otherwise `{"deleted": "<ticket>"}`). It deletes the `incidents` row (fields and log) and the `incident_tracking` row
+(status, message, fixed version, receipt hash) in one transaction. The player operations cannot delete, the quota rows are left
+alone, and the newest-500 limit is unchanged. The owner's `incident.status` then leaves the report out and `incident.read`
+answers `not_found`.
+
 `incident_tracking` holds what a report's owner may read: the ticket, a salted SHA-256 of the receipt, the submission time, the
 status, its time, the fixed version and the message. It has no account and no address, and the newest 5000 rows are kept,
 apart from the 500 logs, so a status outlives its log. A report from before this table has no row and counts as New; saving
@@ -236,7 +248,11 @@ Cloudflare's Durable Object data browser shows them too.
 `https://dcp-lobby.saulobenigno.workers.dev`). The page and its script and stylesheet are public static files; the
 numbers come from `GET /admin/api/summary` and `GET /admin/api/history?days=N` (1 to 365, 30 by default), which need
 `Authorization: Bearer <DCP_DASHBOARD_TOKEN>`. The page asks for the token in a password field, keeps it in memory
-(in `sessionStorage` only with "Keep for this tab") and never puts it in a URL. Every `/admin` answer is `no-store`
+(in `sessionStorage` only with "Keep for this tab") and never puts it in a URL. With **Keep for this tab** a reload of the same tab
+signs in again from `sessionStorage` and returns to the same Dashboard or Bugs tab; another tab, a new window or a browser restart
+asks again, and without it a reload always asks again. A refused token is removed at once. Once signed in the login panel gives way
+to a menu button at the top right (Dashboard session, Sign out); **Sign out** clears the token and the saved tab. Nothing is
+stored in `localStorage` or a cookie. Every `/admin` answer is `no-store`
 with a restrictive Content-Security-Policy (own script and style only, no inline code, no framing), `nosniff` and
 `no-referrer`, and no CORS headers.
 

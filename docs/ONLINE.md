@@ -101,6 +101,14 @@ accept only a ticket with its receipt: a report ID alone reads nothing. A wrong 
 before receipts all answer alike: left out of the list, or `not_found`. Lookups have their own limits, write nothing and
 cost no report quota. Seen and unseen are local: the service never learns whether a player read a status.
 
+A developer message is a message the admin typed with the status; an empty one is not a reply. The launcher shows a message that
+is new or changed as a **new reply** and any other change as an **update**, and a reply is announced before a plain update. The
+admin can also **Delete report** in `/admin` → Bugs: it removes the report, its log, its status and message, and the receipt hash,
+so the owner's lookups no longer find it. The service does not say a report was deleted: it simply stops answering for it, like
+an unknown ticket. A launcher whose check was answered without a report it asked about marks that report **No longer
+available**, keeps its last known status and message, stops asking about it on its own (a manual **Refresh** asks again) and
+never shows it as an update.
+
 My reports belongs to one installation. It is not an account feature: another PC, or a removed file, sees none of these reports.
 Reports from before receipts have none and cannot be claimed, so they stay out of My reports; they still have a status in
 `/admin`. The local list keeps the newest 50 reports, and **Remove from this PC** deletes only the local entry and its receipt.

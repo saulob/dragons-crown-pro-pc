@@ -37,6 +37,10 @@ struct TrackedReport {
     std::string fixed_version;
     std::string player_message;
     bool unseen = false;
+    // The developer message appeared or changed and the report has not been opened since.
+    bool message_unseen = false;
+    // The service answered a check without this report, so it was deleted there. Its last known state stays.
+    bool unavailable = false;
 };
 
 // English, for Tr; nullptr for a status this launcher does not know.
@@ -57,11 +61,17 @@ public:
 
     const std::vector<TrackedReport>& reports() const { return reports_; }
     bool HasUnseen() const;
+    bool HasUnseenMessage() const;
+    // The report to show first: one with an unseen developer message before one with only a status change, the most recently
+    // updated first. Empty when nothing is unseen.
+    std::string NextUnseen() const;
 
     // The history changes in memory even when saving fails; false says it was not saved.
     bool Add(TrackedReport report);
-    // Newer facts for the reports held here; a difference marks the report unseen. False when nothing changed.
-    bool Apply(const std::vector<ReportStatus>& statuses);
+    // Newer facts for the reports held here; a difference marks the report unseen, and a new or changed developer message
+    // also marks its message unseen. A report in `asked` that the answer leaves out is marked unavailable, once. False when
+    // nothing changed.
+    bool Apply(const std::vector<ReportStatus>& statuses, const std::vector<std::string>& asked = {});
     bool MarkSeen(std::string_view ticket);
     bool Remove(std::string_view ticket);
 
