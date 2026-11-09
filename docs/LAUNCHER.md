@@ -570,7 +570,7 @@ line "Press F10 while playing to open the Cheats menu. Changes made there apply 
 offline and local play." and Off / On
 rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Mana**, **Infinite Ally Mana**,
 **Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill
-Points**, **Infinite Skill Uses**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
+Points**, **Infinite Skill Uses**, **Infinite Items**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
 below them the **Movement Speed** combo
 (Off, 2x, 4x) and the **Experience Multiplier** combo (Off, 2x, 5x, 10x, 100x).
 Cheats work on every supported build: the tables of CUSA10454 1.00, or the sites found by signature on the others. All

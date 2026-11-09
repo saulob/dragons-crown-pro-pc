@@ -60,7 +60,7 @@ std::string ReadSource(const char* relative) {
 }
 
 void TestCheatList() {
-    CHECK(kCheatCount == 11);
+    CHECK(kCheatCount == 12);
     CHECK(std::size(kCheats) == kCheatCount);
     CHECK(!kCheatDefault);
     struct Expected {
@@ -82,6 +82,7 @@ void TestCheatList() {
         {Cheat::InfiniteSkillPoints, "Infinite Skill Points", "Prevent skill points from decreasing when spent"},
         {Cheat::InfiniteSkillUses, "Infinite Skill Uses",
          "Prevent equipped skill uses from decreasing when used"},
+        {Cheat::InfiniteItems, "Infinite Items", "Prevent consumable items from decreasing when used"},
         {Cheat::InfiniteGold, "Infinite Gold", "Prevent gold from decreasing when spent"},
     };
     for (size_t i = 0; i < kCheatCount; ++i) { // the final order, in the launcher page and in the F10 menu
@@ -101,12 +102,13 @@ void TestCheatList() {
     CHECK(std::string(kLauncherHelp) ==
           "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant "
           "for offline and local play.");
-    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 4 && Bit(Cheat::InfiniteGold) == 1024);
+    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 4 && Bit(Cheat::InfiniteGold) == 2048);
     CHECK(std::string(kMovementSpeedKey) == "cheat_movement_speed");
     CHECK(std::string(kLegacyMovementSpeedKey) == "cheat_movement_speed_2x");
     CHECK(std::string(kInfiniteAllyHealthKey) == "cheat_infinite_ally_health");
     CHECK(std::string(kInfiniteAllyManaKey) == "cheat_infinite_ally_mana");
     CHECK(std::string(kInfiniteSkillUsesKey) == "cheat_infinite_skill_uses");
+    CHECK(std::string(kInfiniteItemsKey) == "cheat_infinite_items");
     CHECK(std::string(kInfiniteAllyDurabilityKey) == "cheat_infinite_ally_durability");
     CHECK(EnabledCheatsText(0) == "none");
     CHECK(EnabledCheatsText(Bit(Cheat::InfiniteHealth)) == "Infinite Health");
@@ -114,7 +116,7 @@ void TestCheatList() {
     CHECK(EnabledCheatsText(0xffffffffu) ==
           "Infinite Health, Infinite Ally Health, Infinite Mana, Infinite Ally Mana, Infinite Lives, Infinite "
           "Durability, Infinite Ally Durability, Infinite Arrows, Infinite Skill Points, Infinite Skill Uses, "
-          "Infinite Gold");
+          "Infinite Items, Infinite Gold");
 }
 
 void TestSessionOverride() {
@@ -313,7 +315,7 @@ void TestRefillTransitions() {
 }
 
 void TestMenuModel() {
-    CHECK(kMenuRows.size() == 20);
+    CHECK(kMenuRows.size() == 21);
     CHECK(kMenuRows.size() == kCheatCount + kActionCount + 2);
     CHECK(std::string(kMenuTitle) == "CHEATS");
     CHECK(std::string(kMenuCloseHint) == "F10 Close");
@@ -322,7 +324,7 @@ void TestMenuModel() {
                                  "Fill Ally Health",       "Set Low Health",      "Set Ally Low Health", "Infinite Mana",       "Infinite Ally Mana",  "Infinite Lives",
                                  "Infinite Durability",    "Infinite Ally Durability", "Infinite Arrows",
                                  "Infinite Skill Points",  "Add 100 Skill Points", "Infinite Skill Uses",
-                                 "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
+                                 "Infinite Items",         "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
                                  "Movement Speed",         "Experience Multiplier"};
     for (size_t i = 0; i < kMenuRows.size(); ++i) {
         CHECK(std::string(kMenuRows[i].label) == order[i]);
@@ -348,13 +350,14 @@ void TestMenuModel() {
     CHECK(kMenuRows[13].kind == RowKind::Action && kMenuRows[13].action == Action::AddSkillPoints);
     CHECK(std::string(kMenuRows[13].verb) == "Add");
     CHECK(kMenuRows[14].kind == RowKind::Toggle && kMenuRows[14].cheat == Cheat::InfiniteSkillUses);
-    CHECK(kMenuRows[15].kind == RowKind::Toggle && kMenuRows[15].cheat == Cheat::InfiniteGold);
-    CHECK(kMenuRows[16].kind == RowKind::Action && kMenuRows[16].action == Action::AddGold);
-    CHECK(std::string(kMenuRows[16].verb) == "Add");
-    CHECK(kMenuRows[17].kind == RowKind::Action && kMenuRows[17].action == Action::AddLevel);
+    CHECK(kMenuRows[15].kind == RowKind::Toggle && kMenuRows[15].cheat == Cheat::InfiniteItems);
+    CHECK(kMenuRows[16].kind == RowKind::Toggle && kMenuRows[16].cheat == Cheat::InfiniteGold);
+    CHECK(kMenuRows[17].kind == RowKind::Action && kMenuRows[17].action == Action::AddGold);
     CHECK(std::string(kMenuRows[17].verb) == "Add");
-    CHECK(kMenuRows[18].kind == RowKind::MovementSpeed && std::string(kMenuRows[18].label) == "Movement Speed");
-    CHECK(kMenuRows[19].kind == RowKind::Experience && std::string(kMenuRows[19].label) == "Experience Multiplier");
+    CHECK(kMenuRows[18].kind == RowKind::Action && kMenuRows[18].action == Action::AddLevel);
+    CHECK(std::string(kMenuRows[18].verb) == "Add");
+    CHECK(kMenuRows[19].kind == RowKind::MovementSpeed && std::string(kMenuRows[19].label) == "Movement Speed");
+    CHECK(kMenuRows[20].kind == RowKind::Experience && std::string(kMenuRows[20].label) == "Experience Multiplier");
     CHECK(std::string(kActions[0].label) == "Add 100 Skill Points" && kSkillPointsPerAdd == 100);
     CHECK(std::string(kActions[1].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
     CHECK(std::string(kActions[2].label) == "Level Up (+1 Level)");
@@ -1541,6 +1544,15 @@ void TestSkillItemWear() {
     GuestRegs none{};
     SkillItemWearHook(&none); // no item: nothing is read
     CHECK(none.skip == 0);
+
+    // Infinite Items is the same site for what is not a skill item, and does not cover skill items.
+    runtime_cheats_start(Bit(Cheat::InfiniteItems), 1);
+    CHECK(wear(player1, 0x1dc, kItemEffectCountMask, 5)); // not a skill effect
+    CHECK(wear(player1, 0x1d7, 0, 5));                    // no effects: not a skill item
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 0)); // empty: the game's own handling
+    CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(!wear(enemy, 0x1dc, kItemEffectCountMask, 5));
 
     runtime_cheats_start(0, 1);
     CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));

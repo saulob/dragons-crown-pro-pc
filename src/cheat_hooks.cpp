@@ -245,16 +245,18 @@ void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs) {
 }
 
 // At the two item-count decrements of the equipment wear function (rdi = item, rbx = the unit's equipment list). Every
-// skill item the skill-item use function does not handle (the Dwarf's, for one) is counted down here.
+// skill item the skill-item use function does not handle (the Dwarf's, for one) is counted down here, as are consumables.
 void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs) {
-    if (!Enabled(Cheat::InfiniteSkillUses) || regs->rdi == 0) {
+    const bool skills = Enabled(Cheat::InfiniteSkillUses);
+    const bool items = Enabled(Cheat::InfiniteItems);
+    if ((!skills && !items) || regs->rdi == 0) {
         return;
     }
     const HostMemory memory;
     const bool skill_item =
         IsSkillItem(memory.U32(regs->rdi + kItemFlagsOffset), HostMemory::Load<uint16_t>(regs->rdi));
     const UnitKind kind = Classify(regs->rbx - kUnitEquipmentOffset);
-    if (skill_item && PreservedSkillUse(true, kind, memory.U8(regs->rdi + kItemUsesOffset))) {
+    if (PreservedSkillUse(skill_item ? skills : items, kind, memory.U8(regs->rdi + kItemUsesOffset))) {
         regs->skip = 1;
     }
 }

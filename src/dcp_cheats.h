@@ -24,9 +24,10 @@ enum class Cheat : uint8_t {
     InfiniteArrows,
     InfiniteSkillPoints,
     InfiniteSkillUses,
+    InfiniteItems,
     InfiniteGold
 };
-inline constexpr size_t kCheatCount = 11;
+inline constexpr size_t kCheatCount = 12;
 inline constexpr bool kCheatDefault = false;
 
 inline constexpr char kInfiniteHealthKey[] = "cheat_infinite_health";
@@ -39,6 +40,7 @@ inline constexpr char kInfiniteAllyDurabilityKey[] = "cheat_infinite_ally_durabi
 inline constexpr char kInfiniteArrowsKey[] = "cheat_infinite_arrows";
 inline constexpr char kInfiniteSkillPointsKey[] = "cheat_infinite_skill_points";
 inline constexpr char kInfiniteSkillUsesKey[] = "cheat_infinite_skill_uses";
+inline constexpr char kInfiniteItemsKey[] = "cheat_infinite_items";
 inline constexpr char kInfiniteGoldKey[] = "cheat_infinite_gold";
 inline constexpr char kLegacyMovementSpeedKey[] = "cheat_movement_speed_2x";
 
@@ -66,6 +68,7 @@ inline constexpr CheatInfo kCheats[] = {
      "Prevent skill points from decreasing when spent"},
     {Cheat::InfiniteSkillUses, kInfiniteSkillUsesKey, "Infinite Skill Uses",
      "Prevent equipped skill uses from decreasing when used"},
+    {Cheat::InfiniteItems, kInfiniteItemsKey, "Infinite Items", "Prevent consumable items from decreasing when used"},
     {Cheat::InfiniteGold, kInfiniteGoldKey, "Infinite Gold", "Prevent gold from decreasing when spent"},
 };
 static_assert(std::size(kCheats) == kCheatCount);
