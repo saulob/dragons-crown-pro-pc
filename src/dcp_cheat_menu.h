@@ -13,7 +13,7 @@ inline constexpr char kMenuTitle[] = "CHEATS";
 inline constexpr char kMenuCloseHint[] = "F10 Close";
 inline constexpr char kMenuNote[] = "Not saved to the launcher";
 
-enum class RowKind { Toggle, Action, MovementSpeed, Experience };
+enum class RowKind { Toggle, Action, MovementSpeed, Experience, Damage };
 
 // A toggle row shows Off / On for its cheat; an action row shows its verb and runs once per press; a setting row shows
 // its multiplier and moves to the next one per press.
@@ -25,7 +25,7 @@ struct MenuRow {
     const char* verb;
 };
 
-inline constexpr size_t kMenuRowCount = kCheatCount + kActionCount + 2;
+inline constexpr size_t kMenuRowCount = kCheatCount + kActionCount + 3;
 
 constexpr std::array<MenuRow, kMenuRowCount> MakeMenuRows() {
     std::array<MenuRow, kMenuRowCount> rows{};
@@ -39,7 +39,8 @@ constexpr std::array<MenuRow, kMenuRowCount> MakeMenuRows() {
         }
     }
     rows[next++] = {RowKind::MovementSpeed, Cheat{}, Action{}, kMovementSpeedName, nullptr};
-    rows[next] = {RowKind::Experience, Cheat{}, Action{}, kExperienceMultiplierName, nullptr};
+    rows[next++] = {RowKind::Experience, Cheat{}, Action{}, kExperienceMultiplierName, nullptr};
+    rows[next] = {RowKind::Damage, Cheat{}, Action{}, kDamageMultiplierName, nullptr};
     return rows;
 }
 
@@ -107,7 +108,8 @@ constexpr bool StepActivates(RowKind kind, int direction, bool on) {
     switch (kind) {
     case RowKind::Toggle: return direction != 0 && (direction > 0) != on;
     case RowKind::MovementSpeed:
-    case RowKind::Experience: return direction > 0;
+    case RowKind::Experience:
+    case RowKind::Damage: return direction > 0;
     case RowKind::Action: return false;
     }
     return false;

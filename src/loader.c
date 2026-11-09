@@ -692,7 +692,7 @@ int main(int argc, char **argv) {
     if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
-                         dcp_saved_movement_speed(settings_file));
+                         dcp_saved_movement_speed(settings_file), dcp_saved_damage_multiplier(settings_file));
     voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
     printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
     runtime_cheats_log_state(known_build && game_build.cheats);

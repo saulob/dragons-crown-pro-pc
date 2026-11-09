@@ -77,6 +77,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {cheats::kMovementSpeedKey, "1"},
     {cheats::kLegacyMovementSpeedKey, "0"},
     {cheats::kExperienceMultiplierKey, "1"},
+    {cheats::kDamageMultiplierKey, "1"},
     {kLauncherXKey, ""},
     {kLauncherYKey, ""},
     {kLauncherWidthKey, ""},
@@ -143,6 +144,10 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == kControllerPromptsKey) {
         return one_of({"playstation", "xbox"});
+    }
+    if (key == cheats::kDamageMultiplierKey) {
+        return std::any_of(std::begin(cheats::kDamageChoices), std::end(cheats::kDamageChoices),
+                           [&](const cheats::Choice& choice) { return value == choice.saved; });
     }
     if (key == cheats::kExperienceMultiplierKey) {
         return std::any_of(std::begin(cheats::kExperienceChoices), std::end(cheats::kExperienceChoices),
@@ -273,7 +278,7 @@ bool TurnCheatsOff(trg::SettingsStore& settings) {
         settings.SetBool(cheats::kLegacyMovementSpeedKey, false);
         changed = true;
     }
-    for (const char* key : {cheats::kMovementSpeedKey, cheats::kExperienceMultiplierKey}) {
+    for (const char* key : {cheats::kMovementSpeedKey, cheats::kExperienceMultiplierKey, cheats::kDamageMultiplierKey}) {
         if (settings.Get(key, "1") != "1") {
             settings.Set(key, "1");
             changed = true;
@@ -335,6 +340,12 @@ extern "C" int dcp_saved_experience_multiplier(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return cheats::ExperienceMultiplierFromSaved(settings.Get(cheats::kExperienceMultiplierKey, "1"));
+}
+
+extern "C" int dcp_saved_damage_multiplier(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return cheats::DamageMultiplierFromSaved(settings.Get(cheats::kDamageMultiplierKey, "1"));
 }
 
 extern "C" int dcp_saved_movement_speed(const char* settings_file) {

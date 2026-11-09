@@ -268,6 +268,7 @@ use the same defaults).
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
 | `cheat_movement_speed_2x` (old) | 1, 0 | 0 | read only when `cheat_movement_speed` is missing: 1 means 2x |
 | `cheat_experience_multiplier` | 1 (Off), 2, 5, 10, 100 | 1 | at game start (F10 changes the session only) |
+| `cheat_damage_multiplier` | 1 (Off), 2, 5, 10, 100 | 1 | at game start (F10 changes the session only) |
 | `overlay_scale`, `overlay_corner` | 50-300 %; 0-3 (top left, top right, bottom left, bottom right) | 100; 1 | at game start (no launcher control) |
 | `launcher_x`, `_y`, `_width`, `_height`, `_maximized`, `_fullscreen` | | | launcher window only |
 
@@ -572,7 +573,7 @@ rows in this order: **Infinite Health**, **Infinite Ally Health**, **Infinite Ma
 **Infinite Lives**, **Infinite Durability**, **Infinite Ally Durability**, **Infinite Arrows**, **Infinite Skill
 Points**, **Infinite Skill Uses**, **Infinite Gold**, each with its one-line description (`src/dcp_cheats.h`), and
 below them the **Movement Speed** combo
-(Off, 2x, 4x) and the **Experience Multiplier** combo (Off, 2x, 5x, 10x, 100x).
+(Off, 2x, 4x), the **Experience Multiplier** combo and the **Damage Multiplier** combo (each Off, 2x, 5x, 10x, 100x).
 Cheats work on every supported build: the tables of CUSA10454 1.00, or the sites found by signature on the others. All
 are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
 them back to Off. The saved values are the start of every game session; the F10 menu changes the running session only

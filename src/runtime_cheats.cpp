@@ -13,9 +13,11 @@ dcp::cheats::SessionCheats g_session;
 dcp::cheats::RefillRequests g_refills;
 dcp::cheats::ActionRequests g_actions;
 dcp::cheats::SessionExperience g_experience;
+dcp::cheats::SessionDamage g_damage;
 dcp::cheats::SessionMovementSpeed g_movement;
 std::atomic<unsigned> g_saved{0};
 std::atomic<int> g_saved_experience{dcp::cheats::kExperienceMultiplierOff};
+std::atomic<int> g_saved_damage{dcp::cheats::kDamageMultiplierOff};
 std::atomic<int> g_saved_movement{dcp::cheats::kMovementSpeedOff};
 std::atomic<int> g_available{0};
 std::atomic<bool> g_online{false};
@@ -41,6 +43,7 @@ bool OnlineSessionActive() {
 void ClearSession() {
     g_session.Reset();
     g_experience.Reset();
+    g_damage.Reset();
     g_movement.Reset();
     g_refills.Clear();
     g_actions.Clear();
@@ -59,16 +62,19 @@ extern "C" int runtime_cheats_online_locked(void) {
     return OnlineSessionActive() ? 1 : 0;
 }
 
-extern "C" void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed) {
+extern "C" void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed,
+                                     int damage_multiplier) {
     ClearSession();
     if (OnlineSessionActive()) {
         saved_mask = 0;
         experience_multiplier = dcp::cheats::kExperienceMultiplierOff;
         movement_speed = dcp::cheats::kMovementSpeedOff;
+        damage_multiplier = dcp::cheats::kDamageMultiplierOff;
     }
     g_saved.store(saved_mask, std::memory_order_relaxed);
     g_saved_experience.store(dcp::cheats::ListedExperienceMultiplier(experience_multiplier), std::memory_order_relaxed);
     g_saved_movement.store(dcp::cheats::ListedMovementSpeed(movement_speed), std::memory_order_relaxed);
+    g_saved_damage.store(dcp::cheats::ListedDamageMultiplier(damage_multiplier), std::memory_order_relaxed);
     for (const dcp::cheats::CheatInfo& info : dcp::cheats::kCheats) {
         if (dcp::cheats::RefillsOnEnable(info.cheat) && (saved_mask & dcp::cheats::Bit(info.cheat)) != 0) {
             g_refills.Request(info.cheat);
@@ -88,6 +94,20 @@ extern "C" int runtime_cheat_experience_cycle(void) {
         return dcp::cheats::kExperienceMultiplierOff;
     }
     return g_experience.Cycle(g_saved_experience.load(std::memory_order_relaxed));
+}
+
+extern "C" int runtime_cheat_damage_multiplier(void) {
+    if (OnlineSessionActive()) {
+        return dcp::cheats::kDamageMultiplierOff;
+    }
+    return g_damage.Effective(g_saved_damage.load(std::memory_order_relaxed));
+}
+
+extern "C" int runtime_cheat_damage_cycle(void) {
+    if (OnlineSessionActive()) {
+        return dcp::cheats::kDamageMultiplierOff;
+    }
+    return g_damage.Cycle(g_saved_damage.load(std::memory_order_relaxed));
 }
 
 extern "C" int runtime_cheat_movement_speed(void) {
@@ -186,6 +206,7 @@ extern "C" int runtime_cheats_log_state(int build_has_hooks) {
     std::printf("Cheats: enabled: %s\n", dcp::cheats::EnabledCheatsText(mask).c_str());
     std::printf("Cheats: Experience Multiplier %s\n",
                 dcp::cheats::ExperienceMultiplierLabel(runtime_cheat_experience_multiplier()));
+    std::printf("Cheats: Damage Multiplier %s\n", dcp::cheats::DamageMultiplierLabel(runtime_cheat_damage_multiplier()));
     std::printf("Cheats: Movement Speed %s\n", dcp::cheats::MovementSpeedLabel(runtime_cheat_movement_speed()));
     return RUNTIME_CHEATS_LISTED;
 }

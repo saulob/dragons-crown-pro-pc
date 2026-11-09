@@ -115,6 +115,7 @@ unsigned dcp_saved_cheats(const char *settings_file);
 /* The Experience Multiplier the settings file sets (1 = Off, 2, 5 or 10); Off when the file or the value is missing or not
  * one of those. */
 int dcp_saved_experience_multiplier(const char *settings_file);
+int dcp_saved_damage_multiplier(const char *settings_file);
 
 /* The Movement Speed the settings file sets (1 = Off, 2 or 4); Off when the file or the value is missing, invalid or the
  * old 2x setting is off. The old boolean setting is read only when the newer setting is absent. */

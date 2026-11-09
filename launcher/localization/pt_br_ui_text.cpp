@@ -248,6 +248,8 @@ Movement Speed	Velocidade de movimento
 Multiplies the normal movement speed	Multiplica a velocidade normal de movimento
 Experience Multiplier	Multiplicador de experiência
 Multiplies the experience each award adds	Multiplica a experiência que cada recompensa concede
+Damage Multiplier	Multiplicador de dano
+Multiplies the damage enemies take	Multiplica o dano que os inimigos recebem
 Controller	Controle
 Automatic: Xbox controllers work without setup.	Automático: controles do Xbox funcionam sem configuração.
 Controller prompts	Ícones do controle

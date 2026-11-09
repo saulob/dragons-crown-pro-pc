@@ -157,6 +157,15 @@ inline constexpr Choice kExperienceChoices[] = {
 };
 inline constexpr int kExperienceMultiplierOff = 1;
 
+inline constexpr char kDamageMultiplierKey[] = "cheat_damage_multiplier";
+inline constexpr char kDamageMultiplierName[] = "Damage Multiplier";
+inline constexpr char kDamageMultiplierHelp[] = "Multiplies the damage enemies take";
+
+inline constexpr Choice kDamageChoices[] = {
+    {1, "1", "Off"}, {2, "2", "2x"}, {5, "5", "5x"}, {10, "10", "10x"}, {100, "100", "100x"},
+};
+inline constexpr int kDamageMultiplierOff = 1;
+
 inline constexpr char kMovementSpeedKey[] = "cheat_movement_speed";
 inline constexpr char kMovementSpeedName[] = "Movement Speed";
 inline constexpr char kMovementSpeedHelp[] = "Multiplies the normal movement speed";
@@ -225,6 +234,22 @@ constexpr int NextExperienceMultiplier(int multiplier) {
     return NextChoice(kExperienceChoices, multiplier);
 }
 
+constexpr int ListedDamageMultiplier(int multiplier) {
+    return ListedChoice(kDamageChoices, multiplier, kDamageMultiplierOff);
+}
+
+constexpr int DamageMultiplierFromSaved(std::string_view saved) {
+    return ChoiceFromSaved(kDamageChoices, saved, kDamageMultiplierOff);
+}
+
+constexpr const char* DamageMultiplierLabel(int multiplier) {
+    return ChoiceLabel(kDamageChoices, multiplier);
+}
+
+constexpr int NextDamageMultiplier(int multiplier) {
+    return NextChoice(kDamageChoices, multiplier);
+}
+
 constexpr int ListedMovementSpeed(int multiplier) {
     return ListedChoice(kMovementSpeedChoices, multiplier, kMovementSpeedOff);
 }
@@ -284,6 +309,11 @@ private:
 class SessionExperience : public SessionChoice {
 public:
     int Cycle(int saved) { return SessionChoice::Cycle(kExperienceChoices, saved); }
+};
+
+class SessionDamage : public SessionChoice {
+public:
+    int Cycle(int saved) { return SessionChoice::Cycle(kDamageChoices, saved); }
 };
 
 class SessionMovementSpeed : public SessionChoice {
@@ -404,6 +434,18 @@ private:
     };
     std::array<Entry, kSlots> entries_{};
 };
+
+// A hit on anything outside the party is multiplied; a heal (negative) and a party member's hit are left alone. The
+// result stops at the int32 maximum: the game subtracts it from an HP of 0 or more, which cannot wrap, and clamps to 0.
+constexpr int32_t MultipliedDamage(int multiplier, UnitKind kind, int32_t amount) {
+    if (multiplier <= kDamageMultiplierOff || kind != UnitKind::Other || amount <= 0) {
+        return amount;
+    }
+    if (amount > INT32_MAX / multiplier) {
+        return INT32_MAX;
+    }
+    return amount * multiplier;
+}
 
 // UseMP deducts only when its consume flag is 1; with 0 the cast still succeeds and costs nothing.
 constexpr uint32_t ProtectedConsumeFlag(bool enabled, UnitKind kind, uint32_t consume) {

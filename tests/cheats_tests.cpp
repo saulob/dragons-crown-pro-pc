@@ -313,8 +313,8 @@ void TestRefillTransitions() {
 }
 
 void TestMenuModel() {
-    CHECK(kMenuRows.size() == 20);
-    CHECK(kMenuRows.size() == kCheatCount + kActionCount + 2);
+    CHECK(kMenuRows.size() == 21);
+    CHECK(kMenuRows.size() == kCheatCount + kActionCount + 3);
     CHECK(std::string(kMenuTitle) == "CHEATS");
     CHECK(std::string(kMenuCloseHint) == "F10 Close");
     CHECK(std::string(kMenuNote) == "Not saved to the launcher");
@@ -323,7 +323,7 @@ void TestMenuModel() {
                                  "Infinite Durability",    "Infinite Ally Durability", "Infinite Arrows",
                                  "Infinite Skill Points",  "Add 100 Skill Points", "Infinite Skill Uses",
                                  "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
-                                 "Movement Speed",         "Experience Multiplier"};
+                                 "Movement Speed",         "Experience Multiplier", "Damage Multiplier"};
     for (size_t i = 0; i < kMenuRows.size(); ++i) {
         CHECK(std::string(kMenuRows[i].label) == order[i]);
     }
@@ -355,6 +355,7 @@ void TestMenuModel() {
     CHECK(std::string(kMenuRows[17].verb) == "Add");
     CHECK(kMenuRows[18].kind == RowKind::MovementSpeed && std::string(kMenuRows[18].label) == "Movement Speed");
     CHECK(kMenuRows[19].kind == RowKind::Experience && std::string(kMenuRows[19].label) == "Experience Multiplier");
+    CHECK(kMenuRows[20].kind == RowKind::Damage && std::string(kMenuRows[20].label) == "Damage Multiplier");
     CHECK(std::string(kActions[0].label) == "Add 100 Skill Points" && kSkillPointsPerAdd == 100);
     CHECK(std::string(kActions[1].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
     CHECK(std::string(kActions[2].label) == "Level Up (+1 Level)");
@@ -2894,6 +2895,59 @@ void TestArrowHold() {
     runtime_cheats_start(0, 1);
 }
 
+// Damage Multiplier: the saved value, the menu's cycle, the rule and the hook on the damage function.
+void TestDamageMultiplier() {
+    CHECK(kDamageMultiplierOff == 1 && std::string(kDamageMultiplierKey) == "cheat_damage_multiplier");
+    CHECK(DamageMultiplierFromSaved("100") == 100 && DamageMultiplierFromSaved("") == 1 && DamageMultiplierFromSaved("3") == 1);
+    CHECK(ListedDamageMultiplier(10) == 10 && ListedDamageMultiplier(7) == 1);
+    CHECK(NextDamageMultiplier(1) == 2 && NextDamageMultiplier(10) == 100 && NextDamageMultiplier(100) == 1);
+    CHECK(std::string(DamageMultiplierLabel(1)) == "Off" && std::string(DamageMultiplierLabel(100)) == "100x");
+
+    // Only a loss outside the party is scaled, and it stops at the int32 maximum.
+    CHECK(MultipliedDamage(2, UnitKind::Other, 50) == 100);
+    CHECK(MultipliedDamage(100, UnitKind::Other, 50) == 5000);
+    CHECK(MultipliedDamage(1, UnitKind::Other, 50) == 50);
+    CHECK(MultipliedDamage(100, UnitKind::PlayerOne, 50) == 50);
+    CHECK(MultipliedDamage(100, UnitKind::OtherPlayer, 50) == 50);
+    CHECK(MultipliedDamage(100, UnitKind::Other, -30) == -30); // a heal
+    CHECK(MultipliedDamage(100, UnitKind::Other, 0) == 0);
+    CHECK(MultipliedDamage(100, UnitKind::Other, INT32_MAX / 100) == INT32_MAX / 100 * 100);
+    CHECK(MultipliedDamage(100, UnitKind::Other, INT32_MAX / 100 + 1) == INT32_MAX);
+    CHECK(MultipliedDamage(2, UnitKind::Other, INT32_MAX) == INT32_MAX);
+
+    SetCheats(false, false);
+    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    const auto damage = [&](FakeGame& unit, int32_t amount) {
+        GuestRegs regs = unit.DamageRegs(amount);
+        HealthDamageHook(&regs);
+        return static_cast<int32_t>(regs.rcx);
+    };
+    runtime_cheats_start(0, 1, 1, 1);
+    CHECK(damage(enemy, 50) == 50);
+    runtime_cheats_start(0, 1, 1, 100);
+    CHECK(runtime_cheat_damage_multiplier() == 100);
+    CHECK(damage(enemy, 50) == 5000);
+    CHECK(damage(enemy, INT32_MAX / 2) == INT32_MAX);
+    CHECK(damage(enemy, -30) == -30);
+    CHECK(damage(player1, 50) == 50 && damage(player2, 50) == 50);
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1, 1, 100); // the multiplier does not undo the freeze
+    CHECK(damage(player1, 50) == 0 && damage(enemy, 50) == 5000);
+
+    // The menu's change lasts the session; an unlisted saved value is Off.
+    runtime_cheats_start(0, 1, 1, 5);
+    CHECK(runtime_cheat_damage_cycle() == 10 && runtime_cheat_damage_multiplier() == 10);
+    runtime_cheats_start(0, 1, 1, 7);
+    CHECK(runtime_cheat_damage_multiplier() == 1);
+
+    // Online Play locks it, whatever was saved or cycled.
+    runtime_cheats_set_online(1);
+    runtime_cheats_start(0, 1, 1, 100);
+    CHECK(runtime_cheat_damage_multiplier() == 1 && runtime_cheat_damage_cycle() == 1 && damage(enemy, 50) == 50);
+    runtime_cheats_set_online(0);
+    runtime_cheats_start(0, 1, 1, 1);
+    SetCheats(false, false);
+}
+
 // Experience Multiplier: the saved value, the menu's cycle, the award rule and the hook on the award.
 void TestExperienceMultiplier() {
     CHECK(kExperienceMultiplierOff == 1);
@@ -3006,6 +3060,7 @@ int main(int argc, char** argv) {
     TestHealthCheats();
     TestArrowHold();
     TestExperienceMultiplier();
+    TestDamageMultiplier();
     TestDurability();
     TestDurabilityRefill();
     TestLives();

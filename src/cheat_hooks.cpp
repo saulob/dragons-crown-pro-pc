@@ -103,8 +103,9 @@ void GUEST_HOOK_ABI GoldStoreHook(GuestRegs* regs) {
 // In the damage function (rcx = signed amount, positive is a loss; r15 = the victim's owner).
 void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     const int32_t amount = static_cast<int32_t>(regs->rcx);
+    const int damage = runtime_cheat_damage_multiplier();
     if (amount == 0 || g_applying_health_action ||
-        (!Enabled(Cheat::InfiniteHealth) && !Enabled(Cheat::InfiniteAllyHealth))) {
+        (!Enabled(Cheat::InfiniteHealth) && !Enabled(Cheat::InfiniteAllyHealth) && damage == kDamageMultiplierOff)) {
         return;
     }
     const HostMemory memory;
@@ -112,7 +113,8 @@ void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     if (unit == 0 || memory.U64(unit + kUnitOwnerOffset) != regs->r15) {
         return;
     }
-    regs->rcx = static_cast<uint32_t>(FrozenHealthDelta(true, IsFrozen(memory, unit), amount));
+    const int32_t kept = FrozenHealthDelta(true, IsFrozen(memory, unit), amount);
+    regs->rcx = static_cast<uint32_t>(MultipliedDamage(damage, Classify(unit), kept));
 }
 
 // At the entry of UseMP (rdi = the caster's unit, ecx = the consume flag).
