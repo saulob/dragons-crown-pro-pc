@@ -146,6 +146,26 @@ void TestEveryBuildAndLanguageSharesThePath() {
     CHECK(pad.find("runtime_language") == std::string::npos && pad.find("language") == std::string::npos);
 }
 
+void TestGamepadMappings() {
+    char path[64];
+    CHECK(dcp_gamepad_db_path("user/dcp.ini", path, sizeof(path)) && std::string(path) == "user/gamecontrollerdb.txt");
+    CHECK(dcp_gamepad_db_path("C:\\a\\user\\dcp.ini", path, sizeof(path)) &&
+          std::string(path) == "C:\\a\\user\\gamecontrollerdb.txt");
+    CHECK(dcp_gamepad_db_path("C:/a\\b/dcp.ini", path, sizeof(path)) && std::string(path) == "C:/a\\b/gamecontrollerdb.txt");
+    CHECK(dcp_gamepad_db_path("dcp.ini", path, sizeof(path)) && std::string(path) == "gamecontrollerdb.txt");
+    CHECK(!dcp_gamepad_db_path("", path, sizeof(path)));
+    CHECK(!dcp_gamepad_db_path(nullptr, path, sizeof(path)));
+    char small[8];
+    CHECK(!dcp_gamepad_db_path("user/dcp.ini", small, sizeof(small)));
+
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    CHECK(Pos(pad, "SDL_AddGamepadMappingsFromFile") != std::string::npos);
+    CHECK(Pos(pad, "SDL_InitSubSystem(SDL_INIT_GAMEPAD)") < Pos(pad, "if (sdl_ready>0) load_user_gamepad_mappings();"));
+    CHECK(Pos(pad, "joystick without a gamepad mapping") != std::string::npos);
+    CHECK(Pos(pad, "SDL_GUIDToString") != std::string::npos);
+    CHECK(pad.find("SDL_SetGamepadMapping") == std::string::npos); // nothing is guessed for an unknown device
+}
+
 void TestEnumerationUnchanged() {
     const std::string pad = ReadSource("src/runtime_pad.c");
     CHECK(Pos(pad, "#define MAX_PADS 4") != std::string::npos);
@@ -165,6 +185,7 @@ void TestEnumerationUnchanged() {
 } // namespace
 
 int main() {
+    TestGamepadMappings();
     TestPolicy();
     TestProbeIsNotWineOnNative();
     TestNativeAndWineMatrix();

@@ -98,12 +98,40 @@ static int free_slot(void) {
     for (int i=0;i<MAX_PADS;++i) if (!slots[i].gamepad) return i;
     return -1;
 }
+static char keys_file[4200];
+/* The player's own mappings. SDL_GAMECONTROLLERCONFIG, which SDL reads itself, keeps priority over them. */
+static void load_user_gamepad_mappings(void) {
+    char path[4300];
+    if (!dcp_gamepad_db_path(keys_file,path,sizeof(path)) || !SDL_GetPathInfo(path,NULL)) return;
+    const int added=SDL_AddGamepadMappingsFromFile(path);
+    if (added<0) printf("Runtime: gamepad mappings not read from %s: %s\n",path,SDL_GetError());
+    else printf("Runtime: %d gamepad mappings read from %s\n",added,path);
+}
+/* SDL lists a joystick as a gamepad only when it has a mapping: says once per connection which ones have none. */
+static void log_unmapped_joysticks(void) {
+    static SDL_JoystickID logged[16];
+    static size_t next;
+    int count=0;
+    SDL_JoystickID *ids=SDL_GetJoysticks(&count);
+    for (int j=0;ids && j<count;++j) {
+        bool seen=SDL_IsGamepad(ids[j]);
+        for (size_t i=0;i<sizeof(logged)/sizeof(*logged);++i) if (logged[i]==ids[j]) seen=true;
+        if (seen) continue;
+        logged[next++%(sizeof(logged)/sizeof(*logged))]=ids[j];
+        char guid[33];
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(ids[j]),guid,sizeof(guid));
+        printf("Runtime: joystick without a gamepad mapping: %s (guid %s, %04x:%04x); add a line for this GUID to gamecontrollerdb.txt in the user folder\n",
+               SDL_GetJoystickNameForID(ids[j]),guid,SDL_GetJoystickVendorForID(ids[j]),SDL_GetJoystickProductForID(ids[j]));
+    }
+    SDL_free(ids);
+}
 /* Gives new gamepads, in SDL's order, the lowest slots without one; called under lock. A disconnected
  * gamepad frees its slot, but the player stays logged in, as on the PS4. */
 static void refresh_gamepads(void) {
     if (!sdl_ready) {
         if (!SDL_WasInit(SDL_INIT_GAMEPAD)) dcp_prepare_sdl_gamepad();
         sdl_ready = SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+        if (sdl_ready>0) load_user_gamepad_mappings();
     }
     if (sdl_ready<0) return;
     for (int i=0;i<MAX_PADS;++i) {
@@ -116,6 +144,7 @@ static void refresh_gamepads(void) {
     const uint64_t now=now_us();
     if (free_slot()<0 || (last_scan && now-last_scan<250000)) return;
     last_scan=now;
+    log_unmapped_joysticks();
     int count=0;
     SDL_JoystickID *ids=SDL_GetGamepads(&count);
     for (int j=0;ids && j<count && free_slot()>=0;++j) {
@@ -157,7 +186,6 @@ static ButtonMap pad_map={{
 },15};
 static ButtonMap key_map;
 static DcpKeyMap keys;
-static char keys_file[4200];
 void runtime_pad_set_settings(const char *settings_file) { snprintf(keys_file,sizeof(keys_file),"%s",settings_file ? settings_file : ""); }
 
 static const struct { DcpKeyAction action; uint32_t ps; } key_buttons[]={
