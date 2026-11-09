@@ -1,5 +1,6 @@
 #pragma once
 #include <stdio.h>
+#include <string.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -21,6 +22,16 @@ static inline int dcp_running_under_wine(void) {
 #else
     return 0;
 #endif
+}
+
+/* The player's gamepad mapping file, beside the settings file; 0 when it cannot be named. */
+static inline int dcp_gamepad_db_path(const char *settings_file, char *out, size_t size) {
+    if (!settings_file || !*settings_file || !size) return 0;
+    const char *end = strrchr(settings_file, '/'), *back = strrchr(settings_file, '\\');
+    if (back && (!end || back > end)) end = back;
+    const int folder = end ? (int)(end - settings_file) + 1 : 0;
+    const int written = snprintf(out, size, "%.*sgamecontrollerdb.txt", folder, settings_file);
+    return written > 0 && (size_t)written < size;
 }
 
 #ifndef DCP_SDL_COMPAT_POLICY_ONLY
