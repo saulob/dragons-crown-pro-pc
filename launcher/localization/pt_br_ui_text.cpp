@@ -242,6 +242,8 @@ Infinite Skill Points	Pontos de habilidade infinitos
 Prevent skill points from decreasing when spent	Impede que os pontos de habilidade diminuam ao serem gastos
 Infinite Skill Uses	Usos de habilidade infinitos
 Prevent equipped skill uses from decreasing when used	Impede que os usos das habilidades equipadas diminuam ao serem usados
+Infinite Items	Itens infinitos
+Prevent consumable items from decreasing when used	Impede que os itens consumíveis diminuam ao serem usados
 Infinite Gold	Ouro infinito
 Prevent gold from decreasing when spent	Impede que o ouro diminua ao ser gasto
 Movement Speed	Velocidade de movimento

@@ -73,6 +73,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {cheats::kInfiniteArrowsKey, "0"},
     {cheats::kInfiniteSkillPointsKey, "0"},
     {cheats::kInfiniteSkillUsesKey, "0"},
+    {cheats::kInfiniteItemsKey, "0"},
     {cheats::kInfiniteAllySkillUsesKey, "0"},
     {cheats::kInfiniteAllyItemsKey, "0"},
     {cheats::kInfiniteGoldKey, "0"},

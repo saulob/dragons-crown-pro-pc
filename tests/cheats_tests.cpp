@@ -60,7 +60,7 @@ std::string ReadSource(const char* relative) {
 }
 
 void TestCheatList() {
-    CHECK(kCheatCount == 13);
+    CHECK(kCheatCount == 14);
     CHECK(std::size(kCheats) == kCheatCount);
     CHECK(!kCheatDefault);
     struct Expected {
@@ -82,6 +82,7 @@ void TestCheatList() {
         {Cheat::InfiniteSkillPoints, "Infinite Skill Points", "Prevent skill points from decreasing when spent"},
         {Cheat::InfiniteSkillUses, "Infinite Skill Uses",
          "Prevent equipped skill uses from decreasing when used"},
+        {Cheat::InfiniteItems, "Infinite Items", "Prevent consumable items from decreasing when used"},
         {Cheat::InfiniteAllySkillUses, "Infinite Ally Skill Uses",
          "Prevent AI allies' equipped skill uses from decreasing when used"},
         {Cheat::InfiniteAllyItems, "Infinite Ally Items", "Prevent AI allies' consumable items from decreasing when used"},
@@ -104,12 +105,13 @@ void TestCheatList() {
     CHECK(std::string(kLauncherHelp) ==
           "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant "
           "for offline and local play.");
-    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 4 && Bit(Cheat::InfiniteGold) == 4096);
+    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 4 && Bit(Cheat::InfiniteGold) == 8192);
     CHECK(std::string(kMovementSpeedKey) == "cheat_movement_speed");
     CHECK(std::string(kLegacyMovementSpeedKey) == "cheat_movement_speed_2x");
     CHECK(std::string(kInfiniteAllyHealthKey) == "cheat_infinite_ally_health");
     CHECK(std::string(kInfiniteAllyManaKey) == "cheat_infinite_ally_mana");
     CHECK(std::string(kInfiniteSkillUsesKey) == "cheat_infinite_skill_uses");
+    CHECK(std::string(kInfiniteItemsKey) == "cheat_infinite_items");
     CHECK(std::string(kInfiniteAllySkillUsesKey) == "cheat_infinite_ally_skill_uses");
     CHECK(std::string(kInfiniteAllyItemsKey) == "cheat_infinite_ally_items");
     CHECK(std::string(kInfiniteAllyDurabilityKey) == "cheat_infinite_ally_durability");
@@ -119,7 +121,7 @@ void TestCheatList() {
     CHECK(EnabledCheatsText(0xffffffffu) ==
           "Infinite Health, Infinite Ally Health, Infinite Mana, Infinite Ally Mana, Infinite Lives, Infinite "
           "Durability, Infinite Ally Durability, Infinite Arrows, Infinite Skill Points, Infinite Skill Uses, "
-          "Infinite Ally Skill Uses, Infinite Ally Items, Infinite Gold");
+          "Infinite Items, Infinite Ally Skill Uses, Infinite Ally Items, Infinite Gold");
 }
 
 void TestSessionOverride() {
@@ -318,7 +320,7 @@ void TestRefillTransitions() {
 }
 
 void TestMenuModel() {
-    CHECK(kMenuRows.size() == 23);
+    CHECK(kMenuRows.size() == 24);
     CHECK(kMenuRows.size() == kCheatCount + kActionCount + 3);
     CHECK(std::string(kMenuTitle) == "CHEATS");
     CHECK(std::string(kMenuCloseHint) == "F10 Close");
@@ -327,7 +329,7 @@ void TestMenuModel() {
                                  "Fill Ally Health",       "Set Low Health",      "Set Ally Low Health", "Infinite Mana",       "Infinite Ally Mana",  "Infinite Lives",
                                  "Infinite Durability",    "Infinite Ally Durability", "Infinite Arrows",
                                  "Infinite Skill Points",  "Add 100 Skill Points", "Infinite Skill Uses",
-                                 "Infinite Ally Skill Uses", "Infinite Ally Items", "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
+                                 "Infinite Items", "Infinite Ally Skill Uses", "Infinite Ally Items", "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
                                  "Movement Speed",         "Experience Multiplier", "Damage Taken"};
     for (size_t i = 0; i < kMenuRows.size(); ++i) {
         CHECK(std::string(kMenuRows[i].label) == order[i]);
@@ -353,16 +355,17 @@ void TestMenuModel() {
     CHECK(kMenuRows[13].kind == RowKind::Action && kMenuRows[13].action == Action::AddSkillPoints);
     CHECK(std::string(kMenuRows[13].verb) == "Add");
     CHECK(kMenuRows[14].kind == RowKind::Toggle && kMenuRows[14].cheat == Cheat::InfiniteSkillUses);
-    CHECK(kMenuRows[15].kind == RowKind::Toggle && kMenuRows[15].cheat == Cheat::InfiniteAllySkillUses);
-    CHECK(kMenuRows[16].kind == RowKind::Toggle && kMenuRows[16].cheat == Cheat::InfiniteAllyItems);
-    CHECK(kMenuRows[17].kind == RowKind::Toggle && kMenuRows[17].cheat == Cheat::InfiniteGold);
-    CHECK(kMenuRows[18].kind == RowKind::Action && kMenuRows[18].action == Action::AddGold);
-    CHECK(std::string(kMenuRows[18].verb) == "Add");
-    CHECK(kMenuRows[19].kind == RowKind::Action && kMenuRows[19].action == Action::AddLevel);
+    CHECK(kMenuRows[15].kind == RowKind::Toggle && kMenuRows[15].cheat == Cheat::InfiniteItems);
+    CHECK(kMenuRows[16].kind == RowKind::Toggle && kMenuRows[16].cheat == Cheat::InfiniteAllySkillUses);
+    CHECK(kMenuRows[17].kind == RowKind::Toggle && kMenuRows[17].cheat == Cheat::InfiniteAllyItems);
+    CHECK(kMenuRows[18].kind == RowKind::Toggle && kMenuRows[18].cheat == Cheat::InfiniteGold);
+    CHECK(kMenuRows[19].kind == RowKind::Action && kMenuRows[19].action == Action::AddGold);
     CHECK(std::string(kMenuRows[19].verb) == "Add");
-    CHECK(kMenuRows[20].kind == RowKind::MovementSpeed && std::string(kMenuRows[20].label) == "Movement Speed");
-    CHECK(kMenuRows[21].kind == RowKind::Experience && std::string(kMenuRows[21].label) == "Experience Multiplier");
-    CHECK(kMenuRows[22].kind == RowKind::DamageTaken && std::string(kMenuRows[22].label) == "Damage Taken");
+    CHECK(kMenuRows[20].kind == RowKind::Action && kMenuRows[20].action == Action::AddLevel);
+    CHECK(std::string(kMenuRows[20].verb) == "Add");
+    CHECK(kMenuRows[21].kind == RowKind::MovementSpeed && std::string(kMenuRows[21].label) == "Movement Speed");
+    CHECK(kMenuRows[22].kind == RowKind::Experience && std::string(kMenuRows[22].label) == "Experience Multiplier");
+    CHECK(kMenuRows[23].kind == RowKind::DamageTaken && std::string(kMenuRows[23].label) == "Damage Taken");
     CHECK(std::string(kActions[0].label) == "Add 100 Skill Points" && kSkillPointsPerAdd == 100);
     CHECK(std::string(kActions[1].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
     CHECK(std::string(kActions[2].label) == "Level Up (+1 Level)");
@@ -1550,13 +1553,30 @@ void TestSkillItemWear() {
     SkillItemWearHook(&none); // no item: nothing is read
     CHECK(none.skip == 0);
 
+    // Infinite Items: the same sites for Player 1's non-skill items; skill items, allies and enemies are not covered.
+    runtime_cheats_start(Bit(Cheat::InfiniteItems), 1);
+    CHECK(wear(player1, 0x1dc, kItemEffectCountMask, 5)); // not a skill effect
+    CHECK(wear(player1, 0x1d7, 0, 5));                    // no effects: not a skill item
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5)); // a skill item
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 0)); // empty: the game's own handling
+    CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 5)); // an AI ally
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5));
+    CHECK(!wear(enemy, 0x1dc, kItemEffectCountMask, 5));
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 5)); // a human Player 2
+    runtime_cheats_set_slot_human(nullptr);
+
     // Infinite Ally Skill Uses: the same sites for an AI ally; Player 1 and enemies are not covered.
     runtime_cheats_start(Bit(Cheat::InfiniteAllySkillUses), 1);
     CHECK(wear(player2, 0x1d7, kItemEffectCountMask, 5));
     CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 0)); // empty: the game's own handling
     CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 5)); // not a skill item
     CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 5));
     CHECK(!wear(enemy, 0x1d7, kItemEffectCountMask, 5));
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5)); // a human Player 2
+    runtime_cheats_set_slot_human(nullptr);
 
     // Infinite Ally Items: an AI ally's non-skill items, and nothing the skill toggle covers.
     runtime_cheats_start(Bit(Cheat::InfiniteAllyItems), 1);
@@ -1564,9 +1584,33 @@ void TestSkillItemWear() {
     CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 0)); // empty: the game's own handling
     CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5)); // a skill item
     CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
     CHECK(!wear(enemy, 0x1dc, kItemEffectCountMask, 5));
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 5)); // a human Player 2
+    runtime_cheats_set_slot_human(nullptr);
+
+    // All four together keep each unit to its own rule.
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses) | Bit(Cheat::InfiniteItems) |
+                             Bit(Cheat::InfiniteAllySkillUses) | Bit(Cheat::InfiniteAllyItems),
+                         1);
+    CHECK(wear(player1, 0x1d7, kItemEffectCountMask, 5) && wear(player1, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(wear(player2, 0x1d7, kItemEffectCountMask, 5) && wear(player2, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 0) && !wear(player2, 0x1d7, kItemEffectCountMask, 0));
+    CHECK(!wear(enemy, 0x1d7, kItemEffectCountMask, 5) && !wear(enemy, 0x1dc, kItemEffectCountMask, 5));
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5) && !wear(player2, 0x1dc, kItemEffectCountMask, 5));
+    runtime_cheats_set_slot_human(nullptr);
+    runtime_cheats_set_online(1);
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses) | Bit(Cheat::InfiniteItems) |
+                             Bit(Cheat::InfiniteAllySkillUses) | Bit(Cheat::InfiniteAllyItems),
+                         1);
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5) && !wear(player1, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5) && !wear(player2, 0x1dc, kItemEffectCountMask, 5));
+    runtime_cheats_set_online(0);
 
     runtime_cheats_start(0, 1);
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 5)); // Infinite Items Off: the game's own handling
     CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
     SetCheats(false, false);
 }

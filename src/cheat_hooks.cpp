@@ -258,10 +258,11 @@ void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs) {
 // At the two item-count decrements of the equipment wear function (rdi = item, rbx = the unit's equipment list). Every
 // skill item the skill-item use function does not handle (the Dwarf's, for one) is counted down here, as are consumables.
 void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs) {
-    const bool player = Enabled(Cheat::InfiniteSkillUses);
-    const bool ally = Enabled(Cheat::InfiniteAllySkillUses);
+    const bool player_skills = Enabled(Cheat::InfiniteSkillUses);
+    const bool player_items = Enabled(Cheat::InfiniteItems);
+    const bool ally_skills = Enabled(Cheat::InfiniteAllySkillUses);
     const bool ally_items = Enabled(Cheat::InfiniteAllyItems);
-    if ((!player && !ally && !ally_items) || regs->rdi == 0) {
+    if ((!player_skills && !player_items && !ally_skills && !ally_items) || regs->rdi == 0) {
         return;
     }
     const HostMemory memory;
@@ -269,9 +270,10 @@ void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs) {
         IsSkillItem(memory.U32(regs->rdi + kItemFlagsOffset), HostMemory::Load<uint16_t>(regs->rdi));
     const uint64_t unit = regs->rbx - kUnitEquipmentOffset;
     const int32_t uses = memory.U8(regs->rdi + kItemUsesOffset);
+    const UnitKind kind = Classify(unit);
     const bool is_ally = IsAlly(memory, unit);
-    if (skill_item ? PreservedSkillUse(player, Classify(unit), uses) || PreservedAllySkillUse(ally, is_ally, uses)
-                   : PreservedAllySkillUse(ally_items, is_ally, uses)) {
+    if (PreservedSkillUse(skill_item ? player_skills : player_items, kind, uses) ||
+        PreservedAllySkillUse(skill_item ? ally_skills : ally_items, is_ally, uses)) {
         regs->skip = 1;
     }
 }
