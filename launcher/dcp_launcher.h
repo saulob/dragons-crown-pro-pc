@@ -216,6 +216,8 @@ int dcp_resolve_exit_game(const DcpGameBuild *build, const DcpImageView *image, 
 
 /* 1 when the game folder holds the files Japanese NPC Voices needs (npc_voice_resources.h). */
 int dcp_npc_voice_resources(const char *app0);
+/* 1 when DRACRO.CPK of the game folder holds every Japanese enemy and AI ally voice bank. */
+int dcp_enemy_voice_resources(const char *app0);
 
 typedef enum {
     DCP_LAUNCHER_PLAY = 0,

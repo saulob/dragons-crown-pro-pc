@@ -26,15 +26,18 @@ extern const uint8_t voice_res_acquire_site[VOICE_RES_ACQUIRE_SITE_LENGTH];
 
 /* Process-lifetime pin of the Japanese NPC voice banks: one extra reference each, taken through the game's own
  * resource acquire. */
-#define VOICE_PIN_BANKS 9
+#define VOICE_PIN_NPC_BANKS 9 /* the first nine; the enemy and ally banks follow them */
+#define VOICE_PIN_BANKS 49
 typedef void *(GUEST_HOOK_ABI *ResourceAcquire)(void *manager, const char *name);
 const char *voice_pin_bank_name(int index);
 int voice_pin_target_index(const char *name, int *english);
 int voice_pin_bank(int index, void *manager, ResourceAcquire acquire);
-unsigned voice_pinned_mask(void);
+uint64_t voice_pinned_mask(void);
 void voice_pin_reset(void);
 
 void voice_hooks_set_enabled(int enabled);
+/* 1 when the installed archive holds every enemy and ally bank: without it only the NPC families are routed. */
+void voice_hooks_set_enemy_banks(int present);
 int voice_hooks_enabled(void);
 void GUEST_HOOK_ABI voice_npc_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI voice_res_acquire_hook(GuestRegs *regs);

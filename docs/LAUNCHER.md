@@ -469,8 +469,9 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   whose hooks are found by signature the option appears only while the installed `DRACRO.CPK` holds the sound table and
   the Japanese banks (`launcher/npc_voice_resources.h`), and it never changes the Menu & Subtitles language. It is hidden
   for the Japanese builds, which already use the Japanese NPC voices. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
-  town/event NPC voice cue families to the Japanese cue IDs at run time. The narrator and player-character voice choices
-  are untouched.
+  town/event NPC voice cue families to the Japanese cue IDs at run time, and, when `DRACRO.CPK` holds all 40 of their
+  banks, the enemy and AI ally families too (`src/dcp_voice.h`). The narrator and player-character voice choices are
+  untouched.
 - **Frame rate** (30 FPS, 60 FPS (Original), 90, 120, 144, 165, 240 FPS, Unlimited; `frame_rate`, 60 FPS (Original) by
   default; applied at start, every build) sets how often frames reach the window. 60 is the game's own rate. 30 FPS
   shows every second frame. The game makes one frame per logic tick at 59.94 Hz, builds that frame's draw lists inside

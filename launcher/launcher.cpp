@@ -164,7 +164,7 @@ constexpr char kArachnophobiaHelp[] =
 constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
-constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPC dialogue";
+constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPCs, enemies and AI allies";
 constexpr char kSkipIntroHelp[] = "Skip the startup logo and go straight to the title screen";
 constexpr char kJapaneseMenuButtonsHelp[] =
     "Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat "

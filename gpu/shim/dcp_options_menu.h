@@ -211,7 +211,7 @@ inline constexpr Setting kSettings[] = {
     {Id::SkipIntro, Page::Gameplay, "skip_intro", "Skip Intro",
      "Skips the startup logo and starts at the title screen.", Apply::Restart, kOffOn},
     {Id::JapaneseNpcVoices, Page::Gameplay, "dcp_japanese_npc_voices", "Japanese NPC Voices",
-     "Use Japanese voices for NPC dialogue", Apply::Restart, kOffOn, DcpSettings::JapaneseNpcVoices},
+     "Use Japanese voices for NPCs, enemies and AI allies", Apply::Restart, kOffOn, DcpSettings::JapaneseNpcVoices},
     {Id::JapaneseMenuButtons, Page::Controls, "japanese_menu_buttons", "Japanese Menu Buttons",
      "Swaps Confirm and Cancel in the menus, as in the Japanese release. Combat controls do not change.", Apply::Restart, kOffOn},
     {Id::FrameRate, Page::Gameplay, "frame_rate", "Frame rate",
