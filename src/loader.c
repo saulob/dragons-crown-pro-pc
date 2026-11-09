@@ -1022,6 +1022,9 @@ int main(int argc, char **argv) {
     if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled() &&
         (!game_build.features_by_signature || dcp_npc_voice_resources(app0))) {
         uint8_t *voice_stubs=image+round_page(size)+cheat_stub_bytes+save_stub_bytes;
+        const int enemy_banks=dcp_enemy_voice_resources(app0);
+        voice_hooks_set_enemy_banks(enemy_banks);
+        printf("Japanese NPC Voices: enemy and AI ally banks %s\n",enemy_banks ? "found, those voices follow" : "not in this archive, NPCs only");
         if (!game_build.features_by_signature) voice_hooks_install(image,size,entry,voice_stubs,voice_stub_bytes);
         else if (located.voices) voice_hooks_install_located(image,size,entry,&located.voice_sites,voice_stubs,voice_stub_bytes);
         else printf("Japanese NPC Voices: unavailable, %s\n",located.voice_failure);

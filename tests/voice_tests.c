@@ -106,6 +106,32 @@ static void TestMapperTable(void) {
     voice_hooks_set_enabled(0);
 }
 
+static void TestEnemyFamilies(void) {
+    const uint32_t routed[] = {3000, 3025, 3100, 3325, 4700, 5600, 6225, 7300, 7900, 8525, 8700, 90000, 90925, 91000, 91625};
+    for (size_t i = 0; i < sizeof(routed) / sizeof(routed[0]); ++i) {
+        CHECK(dcp_is_japanese_enemy_cue(routed[i]));
+    }
+    const uint32_t other[] = {2999, 3026, 3200, 1000, 1500, 7100, 7200, 8800, 8799, 89999, 90026, 91626, 103000, 190000};
+    for (size_t i = 0; i < sizeof(other) / sizeof(other[0]); ++i) {
+        CHECK(!dcp_is_japanese_enemy_cue(other[i]));
+    }
+    voice_hooks_set_enabled(1);
+    for (int present = 0; present < 2; ++present) {
+        voice_hooks_set_enemy_banks(present);
+        Frame frame = {0};
+        frame.regs.rdi = 90900;
+        frame.regs.rax = 0xdead;
+        voice_npc_hook(&frame.regs);
+        CHECK(frame.regs.skip == (uint32_t)present && frame.regs.rax == (present ? 90900u : 0xdeadu));
+        Frame npc = {0};
+        npc.regs.rdi = 10040;
+        voice_npc_hook(&npc.regs); /* the NPC families do not depend on the enemy banks */
+        CHECK(npc.regs.skip == 1 && npc.regs.rax == 10040);
+    }
+    voice_hooks_set_enemy_banks(0);
+    voice_hooks_set_enabled(0);
+}
+
 static void TestResourceAcquireHook(void) {
     char gimmick[] = "snd/se_gimmick110000_v.acb";
     char other[] = "snd/bgm.acb";
@@ -141,17 +167,17 @@ static void *GUEST_HOOK_ABI FakeAcquire(void *manager, const char *name) {
 }
 
 static void TestPinClassification(void) {
-    const char *japanese[VOICE_PIN_BANKS] = {"snd/se_gimmick10000_v.acb", "snd/se_gimmick10200_v.acb",
+    const char *japanese[VOICE_PIN_NPC_BANKS] = {"snd/se_gimmick10000_v.acb", "snd/se_gimmick10200_v.acb",
                                              "snd/se_gimmick10400_v.acb", "snd/se_gimmick10500_v.acb",
                                              "snd/se_gimmick10600_v.acb", "snd/se_gimmick10800_v.acb",
                                              "snd/se_enemy7100_v.acb",    "snd/se_enemy7200_v.acb",
                                              "snd/se_enemy8800_v.acb"};
-    const char *english[VOICE_PIN_BANKS] = {"snd/se_gimmick110000_v.acb", "SND/SE_GIMMICK110200_V.ACB",
+    const char *english[VOICE_PIN_NPC_BANKS] = {"snd/se_gimmick110000_v.acb", "SND/SE_GIMMICK110200_V.ACB",
                                             "snd/se_gimmick110400_v.acb", "se_gimmick110500_v.acb",
                                             "snd/se_gimmick110600_v.acb", "snd/se_gimmick110800_v.acb",
                                             "snd/se_enemy107100_v.acb",  "SND/SE_ENEMY107200_V.ACB",
                                             "snd/se_enemy108800_v.acb"};
-    for (int i = 0; i < VOICE_PIN_BANKS; ++i) {
+    for (int i = 0; i < VOICE_PIN_NPC_BANKS; ++i) {
         int is_english = -1;
         CHECK(voice_pin_target_index(japanese[i], &is_english) == i && is_english == 0);
         CHECK(voice_pin_target_index(english[i], &is_english) == i && is_english == 1);
@@ -159,20 +185,34 @@ static void TestPinClassification(void) {
     }
     const char *others[] = {"snd/se_gimmick10000.acb", "snd/se_gimmick10100.acb", "snd/se_gimmick10100_v.acb",
                             "snd/se_gimmick110100_v.acb", "snd/se_gimmick10900.acb", "snd/se_player1000_v.acb",
-                            "snd/se_player101000_v.acb", "snd/se_enemy3000_v.acb", "snd/se_common.acb",
-                            "snd/bgm.acb", "snd/se_gimmick10000_v.acb.bak", "snd/se_enemy3000_v.acb",
-                            "snd/se_enemy107300_v.acb", "snd/se_enemy7100.acb", "snd/se_enemy7100_v.acb2",
-                            "snd/se_enemy90900_v.acb", "snd/se_enemy7300_v.acb", "snd/se_gimmick7100_v.acb",
+                            "snd/se_player101000_v.acb", "snd/se_common.acb",
+                            "snd/bgm.acb", "snd/se_gimmick10000_v.acb.bak",
+                            "snd/se_enemy7100.acb", "snd/se_enemy7100_v.acb2", "snd/se_gimmick7100_v.acb",
                             "snd/se_enemy10000_v.acb", "snd/se_gimmick_v.acb", "", NULL};
     for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); ++i) {
         CHECK(voice_pin_target_index(others[i], NULL) == -1);
     }
     CHECK(voice_pin_bank_name(-1) == NULL && voice_pin_bank_name(VOICE_PIN_BANKS) == NULL);
+    /* Every enemy family is pinned by both of its names. */
+    for (int i = 0; i < DCP_ENEMY_VOICE_FAMILY_COUNT; ++i) {
+        char name[64];
+        int index, is_english = -1;
+        snprintf(name, sizeof(name), "snd/se_enemy%u_v.acb", (unsigned)kDcpEnemyVoiceFamilies[i]);
+        index = voice_pin_target_index(name, &is_english);
+        CHECK(index == VOICE_PIN_NPC_BANKS + i && is_english == 0 && strcmp(voice_pin_bank_name(index), name) == 0);
+        snprintf(name, sizeof(name), "snd/se_enemy%u_v.acb", (unsigned)kDcpEnemyVoiceFamilies[i] + 100000);
+        CHECK(voice_pin_target_index(name, &is_english) == index && is_english == 1);
+    }
 }
 
 static void TestPinLifecycle(void) {
     int manager = 0;
     voice_pin_reset();
+    voice_hooks_set_enabled(1);
+    voice_hooks_set_enemy_banks(0);
+    CHECK(voice_pin_bank(VOICE_PIN_NPC_BANKS, &manager, FakeAcquire) == 0 && voice_pinned_mask() == 0); /* no banks, no pin */
+    voice_hooks_set_enemy_banks(1);
+    voice_hooks_set_enabled(0);
     voice_hooks_set_enabled(0);
     acquire_calls = 0;
     memset(fake_refs, 0, sizeof(fake_refs));
@@ -196,7 +236,7 @@ static void TestPinLifecycle(void) {
         CHECK(voice_pin_bank(i, &manager, FakeAcquire) == 1);
         CHECK(voice_pin_bank(i, &manager, FakeAcquire) == 0);
     }
-    CHECK(acquire_calls == VOICE_PIN_BANKS && voice_pinned_mask() == (1u << VOICE_PIN_BANKS) - 1);
+    CHECK(acquire_calls == VOICE_PIN_BANKS && voice_pinned_mask() == (UINT64_C(1) << VOICE_PIN_BANKS) - 1);
     for (int i = 0; i < VOICE_PIN_BANKS; ++i) {
         CHECK(fake_refs[i] == 1);
     }
@@ -337,6 +377,7 @@ static void TestInstall(int enabled) {
 
 int main(void) {
     TestCueRanges();
+    TestEnemyFamilies();
     TestHandler();
     TestOffIsVanilla();
     TestMapperTable();

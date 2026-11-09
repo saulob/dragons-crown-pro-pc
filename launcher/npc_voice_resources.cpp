@@ -1,9 +1,11 @@
 #include "npc_voice_resources.h"
 
 #include <algorithm>
+#include <string>
 
 #include "cpk_patch.h"
 #include "dcp_launcher.h"
+#include "dcp_voice.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -35,6 +37,16 @@ bool JapaneseNpcVoicesOffered(const std::filesystem::path& app0, const GameBuild
 }
 
 } // namespace dcp
+
+extern "C" int dcp_enemy_voice_resources(const char* app0) {
+    dcp::CpkArchive archive;
+    if (!app0 || !archive.Open(dcp::PathFromUtf8(app0) / "DRACRO.CPK")) {
+        return 0;
+    }
+    return std::all_of(std::begin(kDcpEnemyVoiceFamilies), std::end(kDcpEnemyVoiceFamilies), [&](uint32_t family) {
+        return archive.Find("snd/se_enemy" + std::to_string(family) + "_v.acb") != nullptr;
+    });
+}
 
 extern "C" int dcp_npc_voice_resources(const char* app0) {
     return app0 && dcp::NpcVoiceResourcesPresent(dcp::PathFromUtf8(app0)) ? 1 : 0;
