@@ -250,17 +250,21 @@ CheatRowText CheatRowState(const dcp::cheats::MenuRow& row) {
     const bool movement = row.kind == dcp::cheats::RowKind::MovementSpeed;
     const bool experience = row.kind == dcp::cheats::RowKind::Experience;
     const bool taken = row.kind == dcp::cheats::RowKind::DamageTaken;
-    const bool choice = movement || experience || taken;
-    const int off = taken ? dcp::cheats::kDamageTakenOff
-                    : movement ? dcp::cheats::kMovementSpeedOff
-                               : dcp::cheats::kExperienceMultiplierOff;
-    const int multiplier = movement   ? runtime_cheat_movement_speed()
-                          : experience ? runtime_cheat_experience_multiplier()
-                          : taken      ? runtime_cheat_damage_taken()
-                                       : off;
-    const char* choice_label = movement   ? dcp::cheats::MovementSpeedLabel(multiplier)
-                               : experience ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
-                               : taken      ? dcp::cheats::DamageTakenLabel(multiplier)
+    const bool damage_multiplier = row.kind == dcp::cheats::RowKind::DamageMultiplier;
+    const bool choice = movement || experience || taken || damage_multiplier;
+    const int off = taken              ? dcp::cheats::kDamageTakenOff
+                    : damage_multiplier ? dcp::cheats::kDamageMultiplierOff
+                    : movement          ? dcp::cheats::kMovementSpeedOff
+                                        : dcp::cheats::kExperienceMultiplierOff;
+    const int multiplier = movement          ? runtime_cheat_movement_speed()
+                          : experience        ? runtime_cheat_experience_multiplier()
+                          : taken             ? runtime_cheat_damage_taken()
+                          : damage_multiplier ? runtime_cheat_damage_multiplier()
+                                              : off;
+    const char* choice_label = movement          ? dcp::cheats::MovementSpeedLabel(multiplier)
+                               : experience        ? dcp::cheats::ExperienceMultiplierLabel(multiplier)
+                               : taken             ? dcp::cheats::DamageTakenLabel(multiplier)
+                               : damage_multiplier ? dcp::cheats::DamageMultiplierLabel(multiplier)
                                             : nullptr;
     const bool usable = CheatRowsUsable();
     const bool on = row.kind == dcp::cheats::RowKind::Toggle && runtime_cheat_enabled(int(row.cheat)) != 0;
@@ -277,15 +281,18 @@ void ActivateCheatRow(const dcp::cheats::MenuRow& row) {
     }
     const bool movement = row.kind == dcp::cheats::RowKind::MovementSpeed;
     const bool taken = row.kind == dcp::cheats::RowKind::DamageTaken;
+    const bool damage_multiplier = row.kind == dcp::cheats::RowKind::DamageMultiplier;
     if (row.kind == dcp::cheats::RowKind::Action) {
         runtime_cheat_action(int(row.action));
         std::printf("Cheats: %s requested\n", row.label);
-    } else if (movement || taken || row.kind == dcp::cheats::RowKind::Experience) {
-        const int next = movement ? runtime_cheat_movement_cycle()
-                         : taken  ? runtime_cheat_damage_taken_cycle()
-                                  : runtime_cheat_experience_cycle();
-        const char* label = movement ? dcp::cheats::MovementSpeedLabel(next)
-                            : taken  ? dcp::cheats::DamageTakenLabel(next)
+    } else if (movement || taken || damage_multiplier || row.kind == dcp::cheats::RowKind::Experience) {
+        const int next = movement          ? runtime_cheat_movement_cycle()
+                         : taken             ? runtime_cheat_damage_taken_cycle()
+                         : damage_multiplier ? runtime_cheat_damage_multiplier_cycle()
+                                             : runtime_cheat_experience_cycle();
+        const char* label = movement          ? dcp::cheats::MovementSpeedLabel(next)
+                            : taken             ? dcp::cheats::DamageTakenLabel(next)
+                            : damage_multiplier ? dcp::cheats::DamageMultiplierLabel(next)
                                      : dcp::cheats::ExperienceMultiplierLabel(next);
         std::printf("Cheats: %s %s (this session)\n", row.label, label);
     } else {
@@ -335,6 +342,7 @@ const char* CheatRowHelp(const dcp::cheats::MenuRow& row) {
     case dcp::cheats::RowKind::MovementSpeed: return dcp::Tr(dcp::cheats::kMovementSpeedHelp);
     case dcp::cheats::RowKind::Experience: return dcp::Tr(dcp::cheats::kExperienceMultiplierHelp);
     case dcp::cheats::RowKind::DamageTaken: return dcp::Tr(dcp::cheats::kDamageTakenHelp);
+    case dcp::cheats::RowKind::DamageMultiplier: return dcp::Tr(dcp::cheats::kDamageMultiplierHelp);
     }
     return "";
 }

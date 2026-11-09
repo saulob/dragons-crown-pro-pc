@@ -256,6 +256,8 @@ Infinite Ally Skill Uses	Usos de habilidade infinitos dos aliados
 Prevent AI allies' equipped skill uses from decreasing when used	Impede que os usos das habilidades equipadas dos aliados de IA diminuam ao serem usados
 Infinite Ally Items	Itens infinitos dos aliados
 Prevent AI allies' consumable items from decreasing when used	Impede que os itens consumíveis dos aliados de IA diminuam ao serem usados
+Damage Multiplier	Multiplicador de dano
+Multiplies the damage enemies take	Multiplica o dano que os inimigos recebem
 Controller	Controle
 Automatic: Xbox controllers work without setup.	Automático: controles do Xbox funcionam sem configuração.
 Controller prompts	Ícones do controle

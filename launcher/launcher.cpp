@@ -1103,6 +1103,12 @@ private:
             taken.push_back({choice.saved, choice.label});
         }
         ui.Combo(cheats::kDamageTakenName, cheats::kDamageTakenHelp, cheats::kDamageTakenKey, "100", taken);
+        std::vector<trg::Option> damage_multiplier;
+        for (const cheats::Choice& choice : cheats::kDamageMultiplierChoices) {
+            damage_multiplier.push_back({choice.saved, choice.label});
+        }
+        ui.Combo(cheats::kDamageMultiplierName, cheats::kDamageMultiplierHelp, cheats::kDamageMultiplierKey, "1",
+                 damage_multiplier);
         ImGui::EndDisabled();
         ui.EndRows();
     }

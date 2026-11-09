@@ -81,6 +81,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {cheats::kLegacyMovementSpeedKey, "0"},
     {cheats::kExperienceMultiplierKey, "1"},
     {cheats::kDamageTakenKey, "100"},
+    {cheats::kDamageMultiplierKey, "1"},
     {kLauncherXKey, ""},
     {kLauncherYKey, ""},
     {kLauncherWidthKey, ""},
@@ -150,6 +151,10 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == cheats::kDamageTakenKey) {
         return std::any_of(std::begin(cheats::kDamageTakenChoices), std::end(cheats::kDamageTakenChoices),
+                           [&](const cheats::Choice& choice) { return value == choice.saved; });
+    }
+    if (key == cheats::kDamageMultiplierKey) {
+        return std::any_of(std::begin(cheats::kDamageMultiplierChoices), std::end(cheats::kDamageMultiplierChoices),
                            [&](const cheats::Choice& choice) { return value == choice.saved; });
     }
     if (key == cheats::kExperienceMultiplierKey) {
@@ -281,7 +286,7 @@ bool TurnCheatsOff(trg::SettingsStore& settings) {
         settings.SetBool(cheats::kLegacyMovementSpeedKey, false);
         changed = true;
     }
-    for (const char* key : {cheats::kMovementSpeedKey, cheats::kExperienceMultiplierKey}) {
+    for (const char* key : {cheats::kMovementSpeedKey, cheats::kExperienceMultiplierKey, cheats::kDamageMultiplierKey}) {
         if (settings.Get(key, "1") != "1") {
             settings.Set(key, "1");
             changed = true;
@@ -353,6 +358,12 @@ extern "C" int dcp_saved_damage_taken(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return cheats::DamageTakenFromSaved(settings.Get(cheats::kDamageTakenKey, "100"));
+}
+
+extern "C" int dcp_saved_damage_multiplier(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return cheats::DamageMultiplierFromSaved(settings.Get(cheats::kDamageMultiplierKey, "1"));
 }
 
 extern "C" int dcp_saved_movement_speed(const char* settings_file) {

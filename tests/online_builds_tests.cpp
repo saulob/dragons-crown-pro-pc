@@ -295,6 +295,8 @@ void CheckCheatsLocked(const GameBuild& build, const CheatRun& run) {
           runtime_cheat_experience_cycle() == cheats::kExperienceMultiplierOff);
     CHECK(runtime_cheat_damage_taken() == cheats::kDamageTakenOff &&
           runtime_cheat_damage_taken_cycle() == cheats::kDamageTakenOff);
+    CHECK(runtime_cheat_damage_multiplier() == cheats::kDamageMultiplierOff &&
+          runtime_cheat_damage_multiplier_cycle() == cheats::kDamageMultiplierOff);
     CHECK(runtime_cheat_movement_speed() == cheats::kMovementSpeedOff &&
           runtime_cheat_movement_cycle() == cheats::kMovementSpeedOff);
     CHECK(cheats::MenuKeyPress(false, runtime_cheats_online_locked() != 0, false, false) ==

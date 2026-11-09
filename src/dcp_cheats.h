@@ -168,6 +168,15 @@ inline constexpr Choice kExperienceChoices[] = {
 };
 inline constexpr int kExperienceMultiplierOff = 1;
 
+inline constexpr char kDamageMultiplierKey[] = "cheat_damage_multiplier";
+inline constexpr char kDamageMultiplierName[] = "Damage Multiplier";
+inline constexpr char kDamageMultiplierHelp[] = "Multiplies the damage enemies take";
+
+inline constexpr Choice kDamageMultiplierChoices[] = {
+    {1, "1", "Off"}, {2, "2", "2x"}, {5, "5", "5x"}, {10, "10", "10x"}, {100, "100", "100x"},
+};
+inline constexpr int kDamageMultiplierOff = 1;
+
 inline constexpr char kMovementSpeedKey[] = "cheat_movement_speed";
 inline constexpr char kMovementSpeedName[] = "Movement Speed";
 inline constexpr char kMovementSpeedHelp[] = "Multiplies the normal movement speed";
@@ -261,6 +270,22 @@ constexpr int NextDamageTaken(int percent) {
     return NextChoice(kDamageTakenChoices, percent);
 }
 
+constexpr int ListedDamageMultiplier(int multiplier) {
+    return ListedChoice(kDamageMultiplierChoices, multiplier, kDamageMultiplierOff);
+}
+
+constexpr int DamageMultiplierFromSaved(std::string_view saved) {
+    return ChoiceFromSaved(kDamageMultiplierChoices, saved, kDamageMultiplierOff);
+}
+
+constexpr const char* DamageMultiplierLabel(int multiplier) {
+    return ChoiceLabel(kDamageMultiplierChoices, multiplier);
+}
+
+constexpr int NextDamageMultiplier(int multiplier) {
+    return NextChoice(kDamageMultiplierChoices, multiplier);
+}
+
 constexpr int ListedMovementSpeed(int multiplier) {
     return ListedChoice(kMovementSpeedChoices, multiplier, kMovementSpeedOff);
 }
@@ -326,6 +351,11 @@ public:
 class SessionDamageTaken : public SessionChoice {
 public:
     int Cycle(int saved) { return SessionChoice::Cycle(kDamageTakenChoices, saved); }
+};
+
+class SessionDamageMultiplier : public SessionChoice {
+public:
+    int Cycle(int saved) { return SessionChoice::Cycle(kDamageMultiplierChoices, saved); }
 };
 
 class SessionMovementSpeed : public SessionChoice {
@@ -457,6 +487,18 @@ constexpr int32_t ScaledDamageTaken(int percent, UnitKind kind, int32_t amount) 
     }
     const int64_t scaled = static_cast<int64_t>(amount) * percent / 100;
     return scaled < 1 ? 1 : static_cast<int32_t>(scaled);
+}
+
+// A hit on anything outside the party is multiplied; a heal (negative) and a party member's hit are left alone. The
+// result stops at the int32 maximum: the game subtracts it from an HP of 0 or more, which cannot wrap, and clamps to 0.
+constexpr int32_t MultipliedDamage(int multiplier, UnitKind kind, int32_t amount) {
+    if (multiplier <= kDamageMultiplierOff || kind != UnitKind::Other || amount <= 0) {
+        return amount;
+    }
+    if (amount > INT32_MAX / multiplier) {
+        return INT32_MAX;
+    }
+    return amount * multiplier;
 }
 
 // UseMP deducts only when its consume flag is 1; with 0 the cast still succeeds and costs nothing.
