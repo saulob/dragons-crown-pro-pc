@@ -7,6 +7,8 @@
   image (build\image\v1.03). Every DLL the game loads ends up beside it. The one build configuration,
   RelWithDebInfo (-O2 -g -DNDEBUG), is what is tested and what a package must contain; nothing else is built.
   The game is installed from the launcher (Play page, Install game...), as in a release.
+  Each run writes one consolidated log, build\logs\build\dragons_crown_pro_NNN.log (next number, never reused): the
+  configuration, incremental or complete mode, start and end, every tool's output and the result.
 .PARAMETER Run
   Launches the loader that was just built and stays attached until the game is closed. The launcher opens first
   when its rules say so (docs\LAUNCHER.md). Logs to build\logs\dragons_crown_pro_NNN.log.
@@ -56,6 +58,13 @@ function Test-ImageCurrent {
     return $true
 }
 
+trap {
+    Write-Host "error: $($_.Exception.Message)" -ForegroundColor Red
+    Stop-BuildLog 1
+    break
+}
+Start-BuildLog 'dragons_crown_pro' $config $(if ($Clean) { 'complete (clean)' } else { 'incremental' })
+
 $tc = Resolve-Toolchain 'auto'
 $env:PATH = "$($tc.Bin);$env:PATH"
 Write-Step "Toolchain clang64 ($($tc.Bin)), $config"
@@ -72,12 +81,12 @@ $configured = (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja')) -and 
     (Select-String -Path $cache -SimpleMatch "CMAKE_BUILD_TYPE:STRING=$config" -Quiet)
 if (-not $configured) {
     Write-Step 'Configuring'
-    & cmake -S $root -B $buildDir -G Ninja "-DCMAKE_BUILD_TYPE=$config" '-DCMAKE_C_COMPILER=clang'
-    if ($LASTEXITCODE -ne 0) { Stop-Tool 'CMake configuration failed' }
+    $code = Invoke-Logged 'cmake' @('-S', $root, '-B', $buildDir, '-G', 'Ninja', "-DCMAKE_BUILD_TYPE=$config", '-DCMAKE_C_COMPILER=clang')
+    if ($code -ne 0) { Stop-Tool 'CMake configuration failed' }
 }
 Write-Step 'Building'
-& ninja -C $buildDir dragons_crown_pro trg-updater
-if ($LASTEXITCODE -ne 0) { Stop-Tool 'Build failed' }
+$code = Invoke-Logged 'ninja' @('-C', $buildDir, 'dragons_crown_pro', 'trg-updater')
+if ($code -ne 0) { Stop-Tool 'Build failed' }
 if (-not (Test-Path -LiteralPath $loader)) { Stop-Tool "Missing $loader" }
 Install-GameRuntime $loader $angleRuntime $tc.Bin
 
@@ -87,11 +96,12 @@ if (-not (Test-Path -LiteralPath $marker)) {
 elseif (-not (Test-ImageCurrent)) {
     Write-Step 'Updating the boot image'
     # The call operator waits for a Windows-subsystem program only when its output is piped.
-    & $loader --prepare-image $view $image | Out-Host
+    & $loader --prepare-image $view $image | ForEach-Object { Write-Host "$_" }
     if ($LASTEXITCODE -ne 0) { Stop-Tool 'Boot image build failed' }
 }
 Write-Host ''
 Write-Host "Built $loader" -ForegroundColor Green
+Stop-BuildLog 0
 if (-not $Run) { return }
 
 $running = @(Get-Process dragons_crown_pro -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $loader })

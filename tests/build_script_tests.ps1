@@ -42,6 +42,26 @@ if ($prepare.Count -ne 1) {
     $failures++
 }
 
+$buildCommands = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true))
+$logStart = @($buildCommands | Where-Object { $_.GetCommandName() -eq 'Start-BuildLog' })
+$logStop = @($buildCommands | Where-Object { $_.GetCommandName() -eq 'Stop-BuildLog' })
+if ($logStart.Count -ne 1 -or $logStop.Count -lt 1) {
+    Write-Host 'FAIL: build.ps1 must start exactly one numbered build log and stop it when the build ends'
+    $failures++
+}
+$logged = @($buildCommands | Where-Object { $_.GetCommandName() -eq 'Invoke-Logged' } | ForEach-Object { $_.CommandElements[1].Extent.Text })
+foreach ($tool in "'cmake'", "'ninja'") {
+    if ($logged -notcontains $tool) {
+        Write-Host "FAIL: build.ps1 must run $tool through Invoke-Logged so its output reaches the build log"
+        $failures++
+    }
+}
+$commonText = Get-Content -Raw -LiteralPath (Join-Path (Split-Path $script -Parent) '_common.ps1')
+if ($commonText -notmatch 'CreateNew' -or $commonText -notmatch 'build\\logs\\build') {
+    Write-Host 'FAIL: _common.ps1 must reserve each build log with CreateNew under build\logs\build'
+    $failures++
+}
+
 $testScript = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')).Path 'tools\test.ps1'
 $testAst = [Management.Automation.Language.Parser]::ParseFile($testScript, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) {

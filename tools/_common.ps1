@@ -11,7 +11,58 @@ function Write-Bad([string]$Text)  { Write-Host "  [miss] $Text" -ForegroundColo
 
 function Stop-Tool([string]$Text) {
     Write-Host "error: $Text" -ForegroundColor Red
+    Stop-BuildLog 1
     exit 1
+}
+
+$script:BuildLogPath = $null
+
+# One consolidated log per build run: build\logs\build\<project>_NNN.log, numbered above every existing log and
+# reserved atomically, so concurrent builds never share a file and a number is never reused.
+function Start-BuildLog([string]$Project, [string]$Configuration, [string]$Mode) {
+    $dir = Join-Path $script:RepoRoot 'build\logs\build'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $last = 0
+    foreach ($file in @(Get-ChildItem -LiteralPath $dir -Filter "${Project}_*.log")) {
+        if ($file.Name -match "^$([regex]::Escape($Project))_(\d+)\.log$") { $last = [Math]::Max($last, [int]$Matches[1]) }
+    }
+    $path = $null
+    for ($number = $last + 1; $number -lt $last + 1000; $number++) {
+        $candidate = Join-Path $dir ('{0}_{1:D3}.log' -f $Project, $number)
+        try {
+            [IO.File]::Open($candidate, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
+            $path = $candidate
+            break
+        }
+        catch [IO.IOException] { }
+    }
+    if (-not $path) { Write-Warn 'No free build log number; this run is not logged.'; return }
+    try { Start-Transcript -LiteralPath $path -Append -Force | Out-Null }
+    catch { Write-Warn "Build log unavailable: $($_.Exception.Message)"; return }
+    $script:BuildLogPath = $path
+    Write-Host "Build log:     $path"
+    Write-Host "Project:       $Project"
+    Write-Host "Configuration: $Configuration"
+    Write-Host "Mode:          $Mode"
+    Write-Host "Started:       $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+}
+
+# Runs a native tool with stdout and stderr merged into the host output, which the build log records;
+# a native tool's own console output is not transcribed. Returns the tool's exit code.
+function Invoke-Logged([string]$Exe, [string[]]$Arguments) {
+    $ErrorActionPreference = 'Continue'
+    & $Exe @Arguments 2>&1 | ForEach-Object { Write-Host "$_" }
+    return $LASTEXITCODE
+}
+
+function Stop-BuildLog([int]$ExitCode) {
+    if (-not $script:BuildLogPath) { return }
+    $path = $script:BuildLogPath
+    $script:BuildLogPath = $null
+    Write-Host "Finished:      $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+    Write-Host "Result:        $(if ($ExitCode -eq 0) { 'success' } else { 'failure' }), exit code $ExitCode"
+    try { Stop-Transcript | Out-Null } catch { }
+    Write-Host "Build log: $path"
 }
 
 function Get-VenvPython {

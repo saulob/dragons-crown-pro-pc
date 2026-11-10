@@ -62,7 +62,7 @@ an update ever appears. Core scope is enough for the loader now; the CPKs are on
 | `tools\setup.ps1 [-InstallPython]` | Reports Python, `cryptography`, MSYS2 CLANG64 (clang, CMake, Ninja, pkgconf, SDL3), video-core libraries (warn only), package, free disk. `-InstallPython` creates `.venv` with `cryptography` only. |
 | `tools\inspect-game.ps1 [-List]` | PKG metadata, profile check, executables/modules report once extracted. Read-only. |
 | `tools\prepare-game.ps1 [-Scope core\|full]` | Optional, development only: extract a fake PKG into `game\extracted\base` and build the view (Python). The launcher's Install game... unpacks the same `.pkg` natively. |
-| `tools\build.ps1 [-Run] [-Clean]` | The normal command. Updates what is stale (GPU deps, CMake configuration, the boot image of an installed game, natively), builds incrementally; `-Run` launches that binary and logs to `build\logs\dragons_crown_pro_NNN.log` (next free number). `-CheckImports` (diagnostic) lists imports the runtime lacks. |
+| `tools\build.ps1 [-Run] [-Clean]` | The normal command. Updates what is stale (GPU deps, CMake configuration, the boot image of an installed game, natively), builds incrementally and writes one build log per run to `build\logs\build\dragons_crown_pro_NNN.log`; `-Run` launches that binary and logs to `build\logs\dragons_crown_pro_NNN.log` (next free number). `-CheckImports` (diagnostic) lists imports the runtime lacks. |
 | `tools\run.ps1` | Wrapper for `tools\build.ps1 -Run`. |
 | `tools\clean.ps1 [-Prepared] [-Logs] [-WhatIf]` | Removes `build\`, `dist\`; optionally the link views and logs. Never touches the `.pkg`, `game\extracted` or saves. |
 | `scripts\import_inventory.py` | Import inventory, see below. |
