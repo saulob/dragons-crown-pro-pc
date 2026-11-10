@@ -73,10 +73,13 @@ constexpr ManagedSetting kBaseSettings[] = {
     {cheats::kInfiniteArrowsKey, "0"},
     {cheats::kInfiniteSkillPointsKey, "0"},
     {cheats::kInfiniteSkillUsesKey, "0"},
+    {cheats::kInfiniteAllySkillUsesKey, "0"},
+    {cheats::kInfiniteAllyItemsKey, "0"},
     {cheats::kInfiniteGoldKey, "0"},
     {cheats::kMovementSpeedKey, "1"},
     {cheats::kLegacyMovementSpeedKey, "0"},
     {cheats::kExperienceMultiplierKey, "1"},
+    {cheats::kDamageTakenKey, "100"},
     {kLauncherXKey, ""},
     {kLauncherYKey, ""},
     {kLauncherWidthKey, ""},
@@ -143,6 +146,10 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == kControllerPromptsKey) {
         return one_of({"playstation", "xbox"});
+    }
+    if (key == cheats::kDamageTakenKey) {
+        return std::any_of(std::begin(cheats::kDamageTakenChoices), std::end(cheats::kDamageTakenChoices),
+                           [&](const cheats::Choice& choice) { return value == choice.saved; });
     }
     if (key == cheats::kExperienceMultiplierKey) {
         return std::any_of(std::begin(cheats::kExperienceChoices), std::end(cheats::kExperienceChoices),
@@ -279,6 +286,10 @@ bool TurnCheatsOff(trg::SettingsStore& settings) {
             changed = true;
         }
     }
+    if (settings.Get(cheats::kDamageTakenKey, "100") != "100") {
+        settings.Set(cheats::kDamageTakenKey, "100");
+        changed = true;
+    }
     return changed;
 }
 
@@ -335,6 +346,12 @@ extern "C" int dcp_saved_experience_multiplier(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return cheats::ExperienceMultiplierFromSaved(settings.Get(cheats::kExperienceMultiplierKey, "1"));
+}
+
+extern "C" int dcp_saved_damage_taken(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return cheats::DamageTakenFromSaved(settings.Get(cheats::kDamageTakenKey, "100"));
 }
 
 extern "C" int dcp_saved_movement_speed(const char* settings_file) {

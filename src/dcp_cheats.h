@@ -24,9 +24,11 @@ enum class Cheat : uint8_t {
     InfiniteArrows,
     InfiniteSkillPoints,
     InfiniteSkillUses,
+    InfiniteAllySkillUses,
+    InfiniteAllyItems,
     InfiniteGold
 };
-inline constexpr size_t kCheatCount = 11;
+inline constexpr size_t kCheatCount = 13;
 inline constexpr bool kCheatDefault = false;
 
 inline constexpr char kInfiniteHealthKey[] = "cheat_infinite_health";
@@ -39,6 +41,8 @@ inline constexpr char kInfiniteAllyDurabilityKey[] = "cheat_infinite_ally_durabi
 inline constexpr char kInfiniteArrowsKey[] = "cheat_infinite_arrows";
 inline constexpr char kInfiniteSkillPointsKey[] = "cheat_infinite_skill_points";
 inline constexpr char kInfiniteSkillUsesKey[] = "cheat_infinite_skill_uses";
+inline constexpr char kInfiniteAllySkillUsesKey[] = "cheat_infinite_ally_skill_uses";
+inline constexpr char kInfiniteAllyItemsKey[] = "cheat_infinite_ally_items";
 inline constexpr char kInfiniteGoldKey[] = "cheat_infinite_gold";
 inline constexpr char kLegacyMovementSpeedKey[] = "cheat_movement_speed_2x";
 
@@ -66,6 +70,10 @@ inline constexpr CheatInfo kCheats[] = {
      "Prevent skill points from decreasing when spent"},
     {Cheat::InfiniteSkillUses, kInfiniteSkillUsesKey, "Infinite Skill Uses",
      "Prevent equipped skill uses from decreasing when used"},
+    {Cheat::InfiniteAllySkillUses, kInfiniteAllySkillUsesKey, "Infinite Ally Skill Uses",
+     "Prevent AI allies' equipped skill uses from decreasing when used"},
+    {Cheat::InfiniteAllyItems, kInfiniteAllyItemsKey, "Infinite Ally Items",
+     "Prevent AI allies' consumable items from decreasing when used"},
     {Cheat::InfiniteGold, kInfiniteGoldKey, "Infinite Gold", "Prevent gold from decreasing when spent"},
 };
 static_assert(std::size(kCheats) == kCheatCount);
@@ -141,7 +149,7 @@ private:
     std::array<std::atomic<uint8_t>, kCheatCount> states_{};
 };
 
-// A multi-value setting, not a cheat: the saved text is the value itself; Off is 1.
+// A multi-value setting, not a cheat: the saved text is the value itself; Off is 1, or 100 for a percentage.
 struct Choice {
     int value;
     const char* saved;
@@ -165,6 +173,15 @@ inline constexpr Choice kMovementSpeedChoices[] = {
     {1, "1", "Off"}, {2, "2", "2x"}, {4, "4", "4x"},
 };
 inline constexpr int kMovementSpeedOff = 1;
+
+inline constexpr char kDamageTakenKey[] = "cheat_damage_taken";
+inline constexpr char kDamageTakenName[] = "Damage Taken";
+inline constexpr char kDamageTakenHelp[] = "Scales the damage Player 1 takes";
+
+inline constexpr Choice kDamageTakenChoices[] = {
+    {100, "100", "100%"}, {75, "75", "75%"}, {50, "50", "50%"}, {25, "25", "25%"}, {0, "0", "0%"},
+};
+inline constexpr int kDamageTakenOff = 100;
 
 constexpr bool IsListedChoice(std::span<const Choice> choices, int value) {
     for (const Choice& choice : choices) {
@@ -225,6 +242,22 @@ constexpr int NextExperienceMultiplier(int multiplier) {
     return NextChoice(kExperienceChoices, multiplier);
 }
 
+constexpr int ListedDamageTaken(int percent) {
+    return ListedChoice(kDamageTakenChoices, percent, kDamageTakenOff);
+}
+
+constexpr int DamageTakenFromSaved(std::string_view saved) {
+    return ChoiceFromSaved(kDamageTakenChoices, saved, kDamageTakenOff);
+}
+
+constexpr const char* DamageTakenLabel(int percent) {
+    return ChoiceLabel(kDamageTakenChoices, percent);
+}
+
+constexpr int NextDamageTaken(int percent) {
+    return NextChoice(kDamageTakenChoices, percent);
+}
+
 constexpr int ListedMovementSpeed(int multiplier) {
     return ListedChoice(kMovementSpeedChoices, multiplier, kMovementSpeedOff);
 }
@@ -264,26 +297,32 @@ class SessionChoice {
 public:
     int Effective(int saved) const {
         const int changed = changed_.load(std::memory_order_relaxed);
-        return changed == 0 ? saved : changed;
+        return changed == kFollowsSaved ? saved : changed;
     }
 
-    void Reset() { changed_.store(0, std::memory_order_relaxed); }
+    void Reset() { changed_.store(kFollowsSaved, std::memory_order_relaxed); }
 
 protected:
     // Returns the new value.
     int Cycle(std::span<const Choice> choices, int saved) {
         const int next = NextChoice(choices, Effective(saved));
-        changed_.store(next == saved ? 0 : next, std::memory_order_relaxed);
+        changed_.store(next == saved ? kFollowsSaved : next, std::memory_order_relaxed);
         return next;
     }
 
 private:
-    std::atomic<int> changed_{0};
+    static constexpr int kFollowsSaved = -1; // 0 is a value: Damage Taken 0%
+    std::atomic<int> changed_{kFollowsSaved};
 };
 
 class SessionExperience : public SessionChoice {
 public:
     int Cycle(int saved) { return SessionChoice::Cycle(kExperienceChoices, saved); }
+};
+
+class SessionDamageTaken : public SessionChoice {
+public:
+    int Cycle(int saved) { return SessionChoice::Cycle(kDamageTakenChoices, saved); }
 };
 
 class SessionMovementSpeed : public SessionChoice {
@@ -405,6 +444,18 @@ private:
     std::array<Entry, kSlots> entries_{};
 };
 
+// A hit on Player 1 is scaled; heals and everyone else are left alone. A scaled hit stays at least 1 unless the setting is 0%.
+constexpr int32_t ScaledDamageTaken(int percent, UnitKind kind, int32_t amount) {
+    if (percent >= kDamageTakenOff || kind != UnitKind::PlayerOne || amount <= 0) {
+        return amount;
+    }
+    if (percent <= 0) {
+        return 0;
+    }
+    const int64_t scaled = static_cast<int64_t>(amount) * percent / 100;
+    return scaled < 1 ? 1 : static_cast<int32_t>(scaled);
+}
+
 // UseMP deducts only when its consume flag is 1; with 0 the cast still succeeds and costs nothing.
 constexpr uint32_t ProtectedConsumeFlag(bool enabled, UnitKind kind, uint32_t consume) {
     return enabled && kind == UnitKind::PlayerOne ? 0 : consume;
@@ -505,6 +556,10 @@ inline constexpr uint32_t kItemUsesOffset = 0x4c;
 // A skill item with uses left keeps its count; an empty one is left to the game's own empty handling.
 constexpr bool PreservedSkillUse(bool enabled, UnitKind kind, int32_t uses) {
     return enabled && kind == UnitKind::PlayerOne && uses > 0;
+}
+
+constexpr bool PreservedAllySkillUse(bool enabled, bool ally, int32_t uses) {
+    return enabled && ally && uses > 0;
 }
 
 inline constexpr uint32_t kItemEffectCountMask = 0x1e000000;

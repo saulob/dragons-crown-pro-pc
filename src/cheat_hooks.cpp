@@ -53,6 +53,14 @@ bool IsAlly(const HostMemory& memory, uint64_t unit) {
     return IsAiAlly(memory.U32(owner + kOwnerCategoryOffset), slot, memory.U8(unit + kUnitClassOffset));
 }
 
+bool OwnerIsAlly(const HostMemory& memory, uint64_t owner) {
+    if (owner == 0) {
+        return false;
+    }
+    const uint64_t unit = memory.U64(owner + kOwnerUnitOffset);
+    return unit != 0 && memory.U64(unit + kUnitOwnerOffset) == owner && IsAlly(memory, unit);
+}
+
 constexpr uint64_t kDamageUnitFrameOffset = 0x200; // the victim unit, [rbp-0x200] in the damage function
 constexpr uint64_t kUnitContextVirtual = 0xd0;     // unit->vtable[+0xd0]() is the game object
 constexpr uint64_t kGameSaveBaseOffset = 0x80;     // the save records, 0x23b0 bytes each, Player 1 at +0xa8
@@ -103,8 +111,9 @@ void GUEST_HOOK_ABI GoldStoreHook(GuestRegs* regs) {
 // In the damage function (rcx = signed amount, positive is a loss; r15 = the victim's owner).
 void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     const int32_t amount = static_cast<int32_t>(regs->rcx);
+    const int taken = runtime_cheat_damage_taken();
     if (amount == 0 || g_applying_health_action ||
-        (!Enabled(Cheat::InfiniteHealth) && !Enabled(Cheat::InfiniteAllyHealth))) {
+        (!Enabled(Cheat::InfiniteHealth) && !Enabled(Cheat::InfiniteAllyHealth) && taken == kDamageTakenOff)) {
         return;
     }
     const HostMemory memory;
@@ -112,7 +121,8 @@ void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     if (unit == 0 || memory.U64(unit + kUnitOwnerOffset) != regs->r15) {
         return;
     }
-    regs->rcx = static_cast<uint32_t>(FrozenHealthDelta(true, IsFrozen(memory, unit), amount));
+    const int32_t kept = FrozenHealthDelta(true, IsFrozen(memory, unit), amount);
+    regs->rcx = static_cast<uint32_t>(ScaledDamageTaken(taken, Classify(unit), kept));
 }
 
 // At the entry of UseMP (rdi = the caster's unit, ecx = the consume flag).
@@ -232,29 +242,36 @@ void GUEST_HOOK_ABI SkillPointsHook(GuestRegs* regs) {
 
 // At the two item-count decrements of the skill-item use function (rdi = item, r12 = the using owner).
 void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs) {
-    const bool enabled = Enabled(Cheat::InfiniteSkillUses);
-    if (!enabled || regs->rdi == 0) {
+    const bool player = Enabled(Cheat::InfiniteSkillUses);
+    const bool ally = Enabled(Cheat::InfiniteAllySkillUses);
+    if ((!player && !ally) || regs->rdi == 0) {
         return;
     }
     const HostMemory memory;
     const UnitKind kind = ClassifyOwner(memory, regs->r12);
     const int32_t uses = memory.U8(regs->rdi + kItemUsesOffset);
-    if (PreservedSkillUse(enabled, kind, uses)) {
+    if (PreservedSkillUse(player, kind, uses) || PreservedAllySkillUse(ally, OwnerIsAlly(memory, regs->r12), uses)) {
         regs->skip = 1;
     }
 }
 
 // At the two item-count decrements of the equipment wear function (rdi = item, rbx = the unit's equipment list). Every
-// skill item the skill-item use function does not handle (the Dwarf's, for one) is counted down here.
+// skill item the skill-item use function does not handle (the Dwarf's, for one) is counted down here, as are consumables.
 void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs) {
-    if (!Enabled(Cheat::InfiniteSkillUses) || regs->rdi == 0) {
+    const bool player = Enabled(Cheat::InfiniteSkillUses);
+    const bool ally = Enabled(Cheat::InfiniteAllySkillUses);
+    const bool ally_items = Enabled(Cheat::InfiniteAllyItems);
+    if ((!player && !ally && !ally_items) || regs->rdi == 0) {
         return;
     }
     const HostMemory memory;
     const bool skill_item =
         IsSkillItem(memory.U32(regs->rdi + kItemFlagsOffset), HostMemory::Load<uint16_t>(regs->rdi));
-    const UnitKind kind = Classify(regs->rbx - kUnitEquipmentOffset);
-    if (skill_item && PreservedSkillUse(true, kind, memory.U8(regs->rdi + kItemUsesOffset))) {
+    const uint64_t unit = regs->rbx - kUnitEquipmentOffset;
+    const int32_t uses = memory.U8(regs->rdi + kItemUsesOffset);
+    const bool is_ally = IsAlly(memory, unit);
+    if (skill_item ? PreservedSkillUse(player, Classify(unit), uses) || PreservedAllySkillUse(ally, is_ally, uses)
+                   : PreservedAllySkillUse(ally_items, is_ally, uses)) {
         regs->skip = 1;
     }
 }

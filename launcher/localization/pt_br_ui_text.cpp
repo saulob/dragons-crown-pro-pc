@@ -248,6 +248,12 @@ Movement Speed	Velocidade de movimento
 Multiplies the normal movement speed	Multiplica a velocidade normal de movimento
 Experience Multiplier	Multiplicador de experiência
 Multiplies the experience each award adds	Multiplica a experiência que cada recompensa concede
+Damage Taken	Dano recebido
+Scales the damage Player 1 takes	Ajusta o dano que o Jogador 1 recebe
+Infinite Ally Skill Uses	Usos de habilidade infinitos dos aliados
+Prevent AI allies' equipped skill uses from decreasing when used	Impede que os usos das habilidades equipadas dos aliados de IA diminuam ao serem usados
+Infinite Ally Items	Itens infinitos dos aliados
+Prevent AI allies' consumable items from decreasing when used	Impede que os itens consumíveis dos aliados de IA diminuam ao serem usados
 Controller	Controle
 Automatic: Xbox controllers work without setup.	Automático: controles do Xbox funcionam sem configuração.
 Controller prompts	Ícones do controle

@@ -12,12 +12,13 @@ extern "C" {
 #endif
 
 /* Called once, after the launcher: `saved_mask` is dcp_saved_cheats(), `experience_multiplier` is
- * dcp_saved_experience_multiplier() and `movement_speed` is dcp_saved_movement_speed(), the start of this game session.
+ * dcp_saved_experience_multiplier(), `movement_speed` is dcp_saved_movement_speed() and `damage_taken` is
+ * dcp_saved_damage_taken(), the start of this game session.
  * Starting clears every override the menu made. */
 #ifdef __cplusplus
-void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed = 1);
+void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed = 1, int damage_taken = 100);
 #else
-void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed);
+void runtime_cheats_start(unsigned saved_mask, int experience_multiplier, int movement_speed, int damage_taken);
 #endif
 
 /* Online Play on (runtime_online_play_enabled) locks every cheat Off for the whole process: saved values, the menu,
@@ -30,6 +31,12 @@ int runtime_cheat_experience_multiplier(void);
 
 /* The F10 menu's Experience Multiplier: moves to the next value for this session and returns it. */
 int runtime_cheat_experience_cycle(void);
+
+/* Damage Taken this session as a percentage (100 = Off, 75, 50, 25 or 0): the saved value, or the menu's change of it. */
+int runtime_cheat_damage_taken(void);
+
+/* The F10 menu's Damage Taken: moves to the next value for this session and returns it. */
+int runtime_cheat_damage_taken_cycle(void);
 
 /* Movement Speed this session (1 = Off, 2 or 4): the saved value, or the menu's change of it. */
 int runtime_cheat_movement_speed(void);
@@ -70,7 +77,7 @@ void runtime_cheat_toggle(int cheat);
  * cheat support. Online Play wins on every build. */
 #define RUNTIME_CHEATS_ONLINE_LOCKED 0 /* "Cheats: disabled for Online Play" */
 #define RUNTIME_CHEATS_UNAVAILABLE 1   /* "Cheats: enabled: none": the build has no cheat hooks */
-#define RUNTIME_CHEATS_LISTED 2        /* the enabled cheats, Experience Multiplier and Movement Speed */
+#define RUNTIME_CHEATS_LISTED 2        /* the enabled cheats, Experience Multiplier, Damage Taken and Movement Speed */
 int runtime_cheats_log_state(int build_has_hooks);
 
 /* 1 when the native cheat hooks go in: the build has them and Online Play is off. */

@@ -60,7 +60,7 @@ std::string ReadSource(const char* relative) {
 }
 
 void TestCheatList() {
-    CHECK(kCheatCount == 11);
+    CHECK(kCheatCount == 13);
     CHECK(std::size(kCheats) == kCheatCount);
     CHECK(!kCheatDefault);
     struct Expected {
@@ -82,6 +82,9 @@ void TestCheatList() {
         {Cheat::InfiniteSkillPoints, "Infinite Skill Points", "Prevent skill points from decreasing when spent"},
         {Cheat::InfiniteSkillUses, "Infinite Skill Uses",
          "Prevent equipped skill uses from decreasing when used"},
+        {Cheat::InfiniteAllySkillUses, "Infinite Ally Skill Uses",
+         "Prevent AI allies' equipped skill uses from decreasing when used"},
+        {Cheat::InfiniteAllyItems, "Infinite Ally Items", "Prevent AI allies' consumable items from decreasing when used"},
         {Cheat::InfiniteGold, "Infinite Gold", "Prevent gold from decreasing when spent"},
     };
     for (size_t i = 0; i < kCheatCount; ++i) { // the final order, in the launcher page and in the F10 menu
@@ -101,12 +104,14 @@ void TestCheatList() {
     CHECK(std::string(kLauncherHelp) ==
           "Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant "
           "for offline and local play.");
-    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 4 && Bit(Cheat::InfiniteGold) == 1024);
+    CHECK(Bit(Cheat::InfiniteHealth) == 1 && Bit(Cheat::InfiniteMana) == 4 && Bit(Cheat::InfiniteGold) == 4096);
     CHECK(std::string(kMovementSpeedKey) == "cheat_movement_speed");
     CHECK(std::string(kLegacyMovementSpeedKey) == "cheat_movement_speed_2x");
     CHECK(std::string(kInfiniteAllyHealthKey) == "cheat_infinite_ally_health");
     CHECK(std::string(kInfiniteAllyManaKey) == "cheat_infinite_ally_mana");
     CHECK(std::string(kInfiniteSkillUsesKey) == "cheat_infinite_skill_uses");
+    CHECK(std::string(kInfiniteAllySkillUsesKey) == "cheat_infinite_ally_skill_uses");
+    CHECK(std::string(kInfiniteAllyItemsKey) == "cheat_infinite_ally_items");
     CHECK(std::string(kInfiniteAllyDurabilityKey) == "cheat_infinite_ally_durability");
     CHECK(EnabledCheatsText(0) == "none");
     CHECK(EnabledCheatsText(Bit(Cheat::InfiniteHealth)) == "Infinite Health");
@@ -114,7 +119,7 @@ void TestCheatList() {
     CHECK(EnabledCheatsText(0xffffffffu) ==
           "Infinite Health, Infinite Ally Health, Infinite Mana, Infinite Ally Mana, Infinite Lives, Infinite "
           "Durability, Infinite Ally Durability, Infinite Arrows, Infinite Skill Points, Infinite Skill Uses, "
-          "Infinite Gold");
+          "Infinite Ally Skill Uses, Infinite Ally Items, Infinite Gold");
 }
 
 void TestSessionOverride() {
@@ -313,8 +318,8 @@ void TestRefillTransitions() {
 }
 
 void TestMenuModel() {
-    CHECK(kMenuRows.size() == 20);
-    CHECK(kMenuRows.size() == kCheatCount + kActionCount + 2);
+    CHECK(kMenuRows.size() == 23);
+    CHECK(kMenuRows.size() == kCheatCount + kActionCount + 3);
     CHECK(std::string(kMenuTitle) == "CHEATS");
     CHECK(std::string(kMenuCloseHint) == "F10 Close");
     CHECK(std::string(kMenuNote) == "Not saved to the launcher");
@@ -322,8 +327,8 @@ void TestMenuModel() {
                                  "Fill Ally Health",       "Set Low Health",      "Set Ally Low Health", "Infinite Mana",       "Infinite Ally Mana",  "Infinite Lives",
                                  "Infinite Durability",    "Infinite Ally Durability", "Infinite Arrows",
                                  "Infinite Skill Points",  "Add 100 Skill Points", "Infinite Skill Uses",
-                                 "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
-                                 "Movement Speed",         "Experience Multiplier"};
+                                 "Infinite Ally Skill Uses", "Infinite Ally Items", "Infinite Gold",          "Add 1,000 Gold",      "Level Up (+1 Level)",
+                                 "Movement Speed",         "Experience Multiplier", "Damage Taken"};
     for (size_t i = 0; i < kMenuRows.size(); ++i) {
         CHECK(std::string(kMenuRows[i].label) == order[i]);
     }
@@ -348,13 +353,16 @@ void TestMenuModel() {
     CHECK(kMenuRows[13].kind == RowKind::Action && kMenuRows[13].action == Action::AddSkillPoints);
     CHECK(std::string(kMenuRows[13].verb) == "Add");
     CHECK(kMenuRows[14].kind == RowKind::Toggle && kMenuRows[14].cheat == Cheat::InfiniteSkillUses);
-    CHECK(kMenuRows[15].kind == RowKind::Toggle && kMenuRows[15].cheat == Cheat::InfiniteGold);
-    CHECK(kMenuRows[16].kind == RowKind::Action && kMenuRows[16].action == Action::AddGold);
-    CHECK(std::string(kMenuRows[16].verb) == "Add");
-    CHECK(kMenuRows[17].kind == RowKind::Action && kMenuRows[17].action == Action::AddLevel);
-    CHECK(std::string(kMenuRows[17].verb) == "Add");
-    CHECK(kMenuRows[18].kind == RowKind::MovementSpeed && std::string(kMenuRows[18].label) == "Movement Speed");
-    CHECK(kMenuRows[19].kind == RowKind::Experience && std::string(kMenuRows[19].label) == "Experience Multiplier");
+    CHECK(kMenuRows[15].kind == RowKind::Toggle && kMenuRows[15].cheat == Cheat::InfiniteAllySkillUses);
+    CHECK(kMenuRows[16].kind == RowKind::Toggle && kMenuRows[16].cheat == Cheat::InfiniteAllyItems);
+    CHECK(kMenuRows[17].kind == RowKind::Toggle && kMenuRows[17].cheat == Cheat::InfiniteGold);
+    CHECK(kMenuRows[18].kind == RowKind::Action && kMenuRows[18].action == Action::AddGold);
+    CHECK(std::string(kMenuRows[18].verb) == "Add");
+    CHECK(kMenuRows[19].kind == RowKind::Action && kMenuRows[19].action == Action::AddLevel);
+    CHECK(std::string(kMenuRows[19].verb) == "Add");
+    CHECK(kMenuRows[20].kind == RowKind::MovementSpeed && std::string(kMenuRows[20].label) == "Movement Speed");
+    CHECK(kMenuRows[21].kind == RowKind::Experience && std::string(kMenuRows[21].label) == "Experience Multiplier");
+    CHECK(kMenuRows[22].kind == RowKind::DamageTaken && std::string(kMenuRows[22].label) == "Damage Taken");
     CHECK(std::string(kActions[0].label) == "Add 100 Skill Points" && kSkillPointsPerAdd == 100);
     CHECK(std::string(kActions[1].label) == "Add 1,000 Gold" && kGoldPerAdd == 1000);
     CHECK(std::string(kActions[2].label) == "Level Up (+1 Level)");
@@ -1541,6 +1549,22 @@ void TestSkillItemWear() {
     GuestRegs none{};
     SkillItemWearHook(&none); // no item: nothing is read
     CHECK(none.skip == 0);
+
+    // Infinite Ally Skill Uses: the same sites for an AI ally; Player 1 and enemies are not covered.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllySkillUses), 1);
+    CHECK(wear(player2, 0x1d7, kItemEffectCountMask, 5));
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 0)); // empty: the game's own handling
+    CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 5)); // not a skill item
+    CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
+    CHECK(!wear(enemy, 0x1d7, kItemEffectCountMask, 5));
+
+    // Infinite Ally Items: an AI ally's non-skill items, and nothing the skill toggle covers.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyItems), 1);
+    CHECK(wear(player2, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 0)); // empty: the game's own handling
+    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5)); // a skill item
+    CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(!wear(enemy, 0x1dc, kItemEffectCountMask, 5));
 
     runtime_cheats_start(0, 1);
     CHECK(!wear(player1, 0x1d7, kItemEffectCountMask, 5));
@@ -2894,6 +2918,55 @@ void TestArrowHold() {
     runtime_cheats_start(0, 1);
 }
 
+// Damage Taken: the saved value, the menu's cycle (0% is a value), the rule and the hook on the damage function.
+void TestDamageTaken() {
+    CHECK(kDamageTakenOff == 100 && std::string(kDamageTakenKey) == "cheat_damage_taken");
+    CHECK(DamageTakenFromSaved("0") == 0 && DamageTakenFromSaved("75") == 75);
+    CHECK(DamageTakenFromSaved("") == 100 && DamageTakenFromSaved("60") == 100);
+    CHECK(ListedDamageTaken(25) == 25 && ListedDamageTaken(30) == 100);
+    CHECK(NextDamageTaken(100) == 75 && NextDamageTaken(25) == 0 && NextDamageTaken(0) == 100);
+    CHECK(std::string(DamageTakenLabel(100)) == "100%" && std::string(DamageTakenLabel(0)) == "0%");
+
+    CHECK(ScaledDamageTaken(50, UnitKind::PlayerOne, 100) == 50);
+    CHECK(ScaledDamageTaken(25, UnitKind::PlayerOne, 100) == 25);
+    CHECK(ScaledDamageTaken(0, UnitKind::PlayerOne, 100) == 0);
+    CHECK(ScaledDamageTaken(100, UnitKind::PlayerOne, 100) == 100);
+    CHECK(ScaledDamageTaken(25, UnitKind::PlayerOne, 1) == 1);   // a hit still lands
+    CHECK(ScaledDamageTaken(50, UnitKind::PlayerOne, -30) == -30); // a heal
+    CHECK(ScaledDamageTaken(50, UnitKind::OtherPlayer, 100) == 100);
+    CHECK(ScaledDamageTaken(50, UnitKind::Other, 100) == 100);
+    CHECK(ScaledDamageTaken(75, UnitKind::PlayerOne, INT32_MAX) == static_cast<int32_t>(int64_t{INT32_MAX} * 75 / 100));
+
+    SetCheats(false, false);
+    FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
+    const auto damage = [&](FakeGame& unit, int32_t amount) {
+        GuestRegs regs = unit.DamageRegs(amount);
+        HealthDamageHook(&regs);
+        return static_cast<int32_t>(regs.rcx);
+    };
+    runtime_cheats_start(0, 1, 1, 100);
+    CHECK(damage(player1, 50) == 50);
+    runtime_cheats_start(0, 1, 1, 50);
+    CHECK(damage(player1, 50) == 25 && damage(player1, -30) == -30);
+    CHECK(damage(player2, 50) == 50 && damage(enemy, 50) == 50);
+    runtime_cheats_start(0, 1, 1, 0);
+    CHECK(runtime_cheat_damage_taken() == 0 && damage(player1, 50) == 0);
+
+    // Cycling to 0% and on: 0 is a real value here, not "follows the launcher".
+    runtime_cheats_start(0, 1, 1, 25);
+    CHECK(runtime_cheat_damage_taken_cycle() == 0 && runtime_cheat_damage_taken() == 0);
+    CHECK(runtime_cheat_damage_taken_cycle() == 100 && runtime_cheat_damage_taken() == 100);
+    runtime_cheats_start(0, 1, 1, 30);
+    CHECK(runtime_cheat_damage_taken() == 100);
+
+    runtime_cheats_set_online(1);
+    runtime_cheats_start(0, 1, 1, 0);
+    CHECK(runtime_cheat_damage_taken() == 100 && runtime_cheat_damage_taken_cycle() == 100 && damage(player1, 50) == 50);
+    runtime_cheats_set_online(0);
+    runtime_cheats_start(0, 1, 1, 100);
+    SetCheats(false, false);
+}
+
 // Experience Multiplier: the saved value, the menu's cycle, the award rule and the hook on the award.
 void TestExperienceMultiplier() {
     CHECK(kExperienceMultiplierOff == 1);
@@ -3006,6 +3079,7 @@ int main(int argc, char** argv) {
     TestHealthCheats();
     TestArrowHold();
     TestExperienceMultiplier();
+    TestDamageTaken();
     TestDurability();
     TestDurabilityRefill();
     TestLives();
