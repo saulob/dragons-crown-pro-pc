@@ -2618,6 +2618,12 @@ void TestCheatSettings(const fs::path& base) {
 
     // Experience Multiplier: the saved value is the multiplier; a value that is not listed is Off.
     CHECK(launcher_default(cheats::kExperienceMultiplierKey) == "1");
+    CHECK(launcher_default(cheats::kDamageTakenKey) == "100");
+    WriteAll(file, "cheat_damage_taken=0\n");
+    CHECK(dcp_saved_damage_taken(file.string().c_str()) == 0);
+    WriteAll(file, "cheat_damage_taken=60\n");
+    CHECK(dcp_saved_damage_taken(file.string().c_str()) == 100);
+    CHECK(dcp_saved_damage_taken(nullptr) == 100);
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 1);
     WriteAll(file, "cheat_experience_multiplier=5\n");
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == 5);
@@ -2666,7 +2672,7 @@ void TestOnlineCheatLockout(const fs::path& base) {
     const fs::path file = base / "online_cheats" / "dcp.ini";
     fs::remove_all(file.parent_path());
     WriteAll(file, "online_enabled = 1\ncheat_infinite_health = 1\ncheat_infinite_gold = on\ncheat_movement_speed = 4\n"
-                   "cheat_movement_speed_2x = 1\ncheat_experience_multiplier = 100\nstory_skip_offer = 1\n"
+                   "cheat_movement_speed_2x = 1\ncheat_experience_multiplier = 100\ncheat_damage_taken = 0\nstory_skip_offer = 1\n"
                    "tutorial_skip_offer = 1\nvsync = 0\n");
     CHECK(dcp_saved_cheats(file.string().c_str()) != 0); // a hand-edited file: the game's lockout ignores this
     {
@@ -2678,6 +2684,7 @@ void TestOnlineCheatLockout(const fs::path& base) {
     CHECK(dcp_saved_cheats(file.string().c_str()) == 0);
     CHECK(dcp_saved_movement_speed(file.string().c_str()) == cheats::kMovementSpeedOff);
     CHECK(dcp_saved_experience_multiplier(file.string().c_str()) == cheats::kExperienceMultiplierOff);
+    CHECK(dcp_saved_damage_taken(file.string().c_str()) == cheats::kDamageTakenOff);
     CHECK(dcp_skip_offers(file.string().c_str()) == 3);
     CHECK(ReadOnlineConfig(file).enabled);
     CHECK(WrittenValue(ReadAll(file), "vsync", "0"));

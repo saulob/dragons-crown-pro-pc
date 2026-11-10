@@ -1098,6 +1098,11 @@ private:
         }
         ui.Combo(cheats::kExperienceMultiplierName, cheats::kExperienceMultiplierHelp, cheats::kExperienceMultiplierKey,
                  "1", experience);
+        std::vector<trg::Option> taken;
+        for (const cheats::Choice& choice : cheats::kDamageTakenChoices) {
+            taken.push_back({choice.saved, choice.label});
+        }
+        ui.Combo(cheats::kDamageTakenName, cheats::kDamageTakenHelp, cheats::kDamageTakenKey, "100", taken);
         ImGui::EndDisabled();
         ui.EndRows();
     }
