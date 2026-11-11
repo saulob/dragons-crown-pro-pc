@@ -132,10 +132,31 @@ int voice_hooks_enabled(void) {
     return enabled;
 }
 
+/* DEBUG_SAULO: temporary, remove with the call in voice_npc_hook. One line per distinct cue of the 40 enemy and ally
+ * families, whether or not it is routed. */
+#define DEBUG_SAULO_VOICE_CUES 512
+static uint32_t debug_saulo_seen[DEBUG_SAULO_VOICE_CUES];
+static int debug_saulo_seen_count;
+
+static void debug_saulo_voice_cue(uint32_t cue, int routed) {
+    for (int i = 0; i < DCP_ENEMY_VOICE_FAMILY_COUNT; ++i) {
+        const uint32_t family = kDcpEnemyVoiceFamilies[i];
+        if (!dcp_cue_in_range(cue, family, family + 59)) continue;
+        for (int k = 0; k < debug_saulo_seen_count; ++k) {
+            if (debug_saulo_seen[k] == cue) return;
+        }
+        if (debug_saulo_seen_count >= DEBUG_SAULO_VOICE_CUES) return;
+        debug_saulo_seen[debug_saulo_seen_count++] = cue;
+        printf("DEBUG_SAULO voice cue %u family %u japanese route %s\n", cue, family, routed ? "yes" : "no");
+        return;
+    }
+}
+
 /* On the US-only path of the cue mapper, before `mov eax, 0x1971b`: returning the cue unchanged and skipping the rest
  * of the mapper leaves the NPC cue on its Japanese ID. */
 void GUEST_HOOK_ABI voice_npc_hook(GuestRegs *regs) {
     const uint32_t cue = (uint32_t)regs->rdi;
+    if (enabled) debug_saulo_voice_cue(cue, enemy_banks && dcp_is_japanese_enemy_cue(cue));
     if (!enabled || !(dcp_is_japanese_npc_cue(cue) || (enemy_banks && dcp_is_japanese_enemy_cue(cue)))) return;
     regs->rax = regs->rdi;
     regs->skip = 1;
