@@ -51,10 +51,3 @@ eboot.bin
 # Android build output and the OpenSSL sources it builds, kept local
 /android/app/.cxx/
 /third_party/openssl-android/
-
-# Local AI tooling (Claude Code, OpenCode), never tracked
-/CLAUDE.md
-/CLAUDE.local.md
-/.claude/
-/AGENTS.md
-/.opencode/
