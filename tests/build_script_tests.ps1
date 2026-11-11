@@ -62,6 +62,16 @@ if ($commonText -notmatch 'CreateNew' -or $commonText -notmatch 'build\\logs\\bu
     $failures++
 }
 
+if ($commonText -notmatch "'build_\{0:D3\}\.log'" -or $commonText -match '(?m)^\s*(?!#).*dragons_crown_pro_') {
+    Write-Host 'FAIL: the build log must be build_NNN.log; dragons_crown_pro_NNN.log is the loader run log, so one build -Run must not allocate two'
+    $failures++
+}
+$buildText = Get-Content -Raw -LiteralPath $script
+if ($buildText -match '(?m)^\s*(?!#)[^#\r\n]*--logs?\b') {
+    Write-Host 'FAIL: build.ps1 must leave the run log to the loader (no --log or --logs argument)'
+    $failures++
+}
+
 $testScript = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')).Path 'tools\test.ps1'
 $testAst = [Management.Automation.Language.Parser]::ParseFile($testScript, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) {

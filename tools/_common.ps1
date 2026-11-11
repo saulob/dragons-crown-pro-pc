@@ -17,18 +17,19 @@ function Stop-Tool([string]$Text) {
 
 $script:BuildLogPath = $null
 
-# One consolidated log per build run: build\logs\build\<project>_NNN.log, numbered above every existing log and
-# reserved atomically, so concurrent builds never share a file and a number is never reused.
+# One consolidated log per build run: build\logs\build\build_NNN.log, numbered above every existing build log and
+# reserved atomically, so concurrent builds never share a file and a number is never reused. The dragons_crown_pro_NNN
+# name belongs to the loader's run log alone.
 function Start-BuildLog([string]$Project, [string]$Configuration, [string]$Mode) {
     $dir = Join-Path $script:RepoRoot 'build\logs\build'
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $last = 0
-    foreach ($file in @(Get-ChildItem -LiteralPath $dir -Filter "${Project}_*.log")) {
-        if ($file.Name -match "^$([regex]::Escape($Project))_(\d+)\.log$") { $last = [Math]::Max($last, [int]$Matches[1]) }
+    foreach ($file in @(Get-ChildItem -LiteralPath $dir -Filter 'build_*.log')) {
+        if ($file.Name -match '^build_(\d+)\.log$') { $last = [Math]::Max($last, [int]$Matches[1]) }
     }
     $path = $null
     for ($number = $last + 1; $number -lt $last + 1000; $number++) {
-        $candidate = Join-Path $dir ('{0}_{1:D3}.log' -f $Project, $number)
+        $candidate = Join-Path $dir ('build_{0:D3}.log' -f $number)
         try {
             [IO.File]::Open($candidate, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
             $path = $candidate

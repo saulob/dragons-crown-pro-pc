@@ -7,7 +7,7 @@
   image (build\image\v1.03). Every DLL the game loads ends up beside it. The one build configuration,
   RelWithDebInfo (-O2 -g -DNDEBUG), is what is tested and what a package must contain; nothing else is built.
   The game is installed from the launcher (Play page, Install game...), as in a release.
-  Each run writes one consolidated log, build\logs\build\dragons_crown_pro_NNN.log (next number, never reused): the
+  Each run writes one consolidated log, build\logs\build\build_NNN.log (next number, never reused): the
   configuration, incremental or complete mode, start and end, every tool's output and the result.
 .PARAMETER Run
   Launches the loader that was just built and stays attached until the game is closed. The launcher opens first
