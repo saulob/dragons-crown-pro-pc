@@ -57,7 +57,7 @@ Swapchain::~Swapchain() {
 void Swapchain::Create(u32 width_, u32 height_) {
     width = width_;
     height = height_;
-    needs_recreation = false;
+    health.Recreated();
 
     Destroy();
 
@@ -140,23 +140,15 @@ bool Swapchain::AcquireNextImage() {
         device.acquireNextImageKHR(swapchain, std::numeric_limits<u64>::max(),
                                    image_acquired[frame_index], VK_NULL_HANDLE, &image_index);
 
-    switch (result) {
-    case vk::Result::eSuccess:
-        break;
-    case vk::Result::eSuboptimalKHR:
-    case vk::Result::eErrorSurfaceLostKHR:
-    case vk::Result::eErrorOutOfDateKHR:
-    case vk::Result::eErrorUnknown:
-        needs_recreation = true;
-        break;
-    default:
+    const DcpPresent::SwapResult kind = AcquireResult(result);
+    if (kind == DcpPresent::SwapResult::Failure) {
         LOG_CRITICAL(Render_Vulkan, "Swapchain acquire returned unknown result {}",
                      vk::to_string(result));
         UNREACHABLE();
-        break;
     }
-
-    return !needs_recreation;
+    const DcpPresent::SwapStep step = health.Acquire(kind);
+    LogKeptSuboptimal(kind, step);
+    return step.usable;
 }
 
 bool Swapchain::Present() {
@@ -169,16 +161,52 @@ bool Swapchain::Present() {
     };
 
     auto result = instance.GetPresentQueue().presentKHR(present_info);
-    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
-        needs_recreation = true;
-    } else {
-        ASSERT_MSG(result == vk::Result::eSuccess, "Swapchain presentation failed: {}",
-                   vk::to_string(result));
-    }
+    const DcpPresent::SwapResult kind = PresentResult(result);
+    ASSERT_MSG(kind != DcpPresent::SwapResult::Failure, "Swapchain presentation failed: {}",
+               vk::to_string(result));
+    LogKeptSuboptimal(kind, health.Present(kind));
 
     frame_index = (frame_index + 1) % image_count;
 
-    return !needs_recreation;
+    return !health.NeedsRecreation();
+}
+
+DcpPresent::SwapResult Swapchain::AcquireResult(vk::Result result) {
+    switch (result) {
+    case vk::Result::eSuccess:
+        return DcpPresent::SwapResult::Success;
+    case vk::Result::eSuboptimalKHR:
+        return DcpPresent::SwapResult::Suboptimal;
+    case vk::Result::eErrorSurfaceLostKHR:
+    case vk::Result::eErrorOutOfDateKHR:
+    case vk::Result::eErrorUnknown:
+        return DcpPresent::SwapResult::OutOfDate;
+    default:
+        return DcpPresent::SwapResult::Failure;
+    }
+}
+
+DcpPresent::SwapResult Swapchain::PresentResult(vk::Result result) {
+    switch (result) {
+    case vk::Result::eSuccess:
+        return DcpPresent::SwapResult::Success;
+    case vk::Result::eSuboptimalKHR:
+        return DcpPresent::SwapResult::Suboptimal;
+    case vk::Result::eErrorOutOfDateKHR:
+        return DcpPresent::SwapResult::OutOfDate;
+    default:
+        return DcpPresent::SwapResult::Failure;
+    }
+}
+
+// Once: a surface that stays suboptimal after its recreation is used as it is.
+void Swapchain::LogKeptSuboptimal(DcpPresent::SwapResult kind, DcpPresent::SwapStep step) {
+    if (kind != DcpPresent::SwapResult::Suboptimal || step.recreate || logged_kept_suboptimal) {
+        return;
+    }
+    logged_kept_suboptimal = true;
+    std::printf("Swapchain: the surface stays suboptimal after recreation; presenting with it (%ux%u)\n",
+                extent.width, extent.height);
 }
 
 void Swapchain::FindPresentFormat() {

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "common/types.h"
+#include "dcp_present.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Frontend {
@@ -75,6 +76,10 @@ public:
         return extent;
     }
 
+    bool NeedsRecreation() const {
+        return health.NeedsRecreation();
+    }
+
     [[nodiscard]] vk::Semaphore GetImageAcquiredSemaphore() const {
         return image_acquired[frame_index];
     }
@@ -118,6 +123,10 @@ private:
 
     void LogImages();
 
+    static DcpPresent::SwapResult AcquireResult(vk::Result result);
+    static DcpPresent::SwapResult PresentResult(vk::Result result);
+    void LogKeptSuboptimal(DcpPresent::SwapResult kind, DcpPresent::SwapStep step);
+
 private:
     const Instance& instance;
     const Frontend::WindowSDL& window;
@@ -145,7 +154,8 @@ private:
     std::string logged_images;
     u32 image_index = 0;
     u32 frame_index = 0;
-    bool needs_recreation = true;
+    DcpPresent::SwapchainHealth health;
+    bool logged_kept_suboptimal = false;
     bool needs_hdr = false;    // The game requested HDR swapchain
     bool supports_hdr = false; // SC supports HDR output
 };

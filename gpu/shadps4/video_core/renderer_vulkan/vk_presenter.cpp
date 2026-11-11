@@ -524,7 +524,8 @@ void Presenter::PresentLoadingFrame() {
         return;
     }
     swapchain.UpdateVsync();
-    if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight()) {
+    if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight() ||
+        swapchain.NeedsRecreation()) {
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
     }
     if (!swapchain.AcquireNextImage()) {

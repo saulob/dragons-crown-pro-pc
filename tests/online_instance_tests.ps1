@@ -30,18 +30,28 @@ $labels = @{
 }
 $tree = Join-Path ([IO.Path]::GetTempPath()) "dcp-online-instance-tests-$PID"
 if (Test-Path -LiteralPath $tree) { Remove-Item -LiteralPath $tree -Recurse -Force }
-$bin = Join-Path $tree 'build\cmake\clang64\bin'
-New-Item -ItemType Directory -Force $bin | Out-Null
-$exe = Join-Path $bin 'dragons_crown_pro.exe'
-[IO.File]::WriteAllBytes($exe, [byte[]]@())
-function Prepare([string]$Folder, [string]$Scope) {
-    $app0 = Join-Path $tree "game\prepared\$Folder"
-    New-Item -ItemType Directory -Force $app0, (Join-Path $tree "build\image\$Folder") | Out-Null
-    [IO.File]::WriteAllText((Join-Path $app0 '.dcp_view.json'), "{`n  `"version`": `"x`",`n  `"scope`": `"$Scope`"`n}`n")
-    [IO.File]::WriteAllBytes((Join-Path $tree "build\image\$Folder\boot.bin"), [byte[]]@(1))
+function New-BuildTree([string]$Root) {
+    $bin = Join-Path $Root 'build\cmake\clang64\bin'
+    New-Item -ItemType Directory -Force $bin | Out-Null
+    $executable = Join-Path $bin 'dragons_crown_pro.exe'
+    [IO.File]::WriteAllBytes($executable, [byte[]]@())
+    return $executable
 }
+function Prepare([string]$Folder, [string]$Scope, [string]$Root = $tree) {
+    $app0 = Join-Path $Root "game\prepared\$Folder"
+    New-Item -ItemType Directory -Force $app0, (Join-Path $Root "build\image\$Folder") | Out-Null
+    [IO.File]::WriteAllText((Join-Path $app0 '.dcp_view.json'), "{`n  `"version`": `"x`",`n  `"scope`": `"$Scope`"`n}`n")
+    [IO.File]::WriteAllBytes((Join-Path $Root "build\image\$Folder\boot.bin"), [byte[]]@(1))
+}
+$exe = New-BuildTree $tree
 foreach ($folder in $folders.Values) { Prepare $folder 'full' }
 Prepare 'CUSA10209-1.02' 'core'
+
+# A root whose Game root line is longer than any console width the output could be formatted for.
+$wideTree = Join-Path $tree ('wide-' + ('w' * 80))
+$wideExe = New-BuildTree $wideTree
+Prepare 'v1.03' 'full' $wideTree
+Prepare 'CUSA10209-1.00' 'full' $wideTree
 
 function Snapshot {
     Get-ChildItem -LiteralPath $tree -Recurse -File | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" }
@@ -50,10 +60,10 @@ $watched = 'PATH', 'DCP_ONLINE', 'DCP_ONLINE_NAME', 'DCP_JOIN_CODE', 'DCP_STORY_
 function Environment { ($watched | ForEach-Object { "$_=$([Environment]::GetEnvironmentVariable($_, 'Process'))" }) -join "`n" }
 
 # One run of the script in this session: its output and exit code.
-function Run([hashtable]$Arguments) {
+function Run([hashtable]$Arguments, [string]$Executable = $exe) {
     $global:LASTEXITCODE = 0
-    $text = & $script @Arguments -Executable $exe -WhatIf 6>&1 2>&1 | Out-String
-    return @{ Text = $text; Code = $global:LASTEXITCODE }
+    $lines = & $script @Arguments -Executable $Executable -WhatIf 6>&1 2>&1 | ForEach-Object { "$_" }
+    return @{ Text = $lines -join "`n"; Code = $global:LASTEXITCODE }
 }
 function Line([string]$Text, [string]$Label) {
     $match = [regex]::Match($Text, "(?m)^\s*$([regex]::Escape($Label)):\s*(.+?)\s*$")
@@ -91,6 +101,15 @@ $unknown = Run @{ Name = 'b'; Build = 'CUSA99999-1.00' }
 Check ($unknown.Code -eq 1 -and $unknown.Text -match 'Unknown build CUSA99999-1\.00') 'unknown key refused'
 $unpinned = Run @{ Name = 'a' }
 Check ($unpinned.Code -eq 0 -and (Line $unpinned.Text 'Game build') -like 'the active build*') 'no -Build keeps the active build'
+
+# The full Game root survives capture whatever the console width, and different builds stay distinguishable.
+$wideUs = Run @{ Name = 'a'; Build = 'CUSA10454-1.00' } $wideExe
+$wideHk = Run @{ Name = 'b'; Build = 'CUSA10209-1.00' } $wideExe
+$wideHkRoot = Join-Path $wideTree 'game\prepared\CUSA10209-1.00'
+Check ((Line $wideHk.Text 'Game root').Length -gt 160) 'wide root is longer than a console line'
+Check ((Line $wideHk.Text 'Game root') -eq $wideHkRoot) 'wide Asia/Hong Kong root is complete'
+Check ((Line $wideUs.Text 'Game root') -eq (Join-Path $wideTree 'game\prepared\v1.03')) 'wide USA root is complete'
+Check ((Line $wideUs.Text 'Game root') -ne (Line $wideHk.Text 'Game root')) 'wide roots stay distinguishable'
 
 # 7-9: separate user folders (settings, identity) and logs.
 Check ((Line $a1.Text 'user folder') -eq (Join-Path $repo 'user\test-client-a')) 'A user folder'

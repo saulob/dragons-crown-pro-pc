@@ -222,6 +222,136 @@ void TestSwapchainRecreation() {
     CHECK(InOrder(swapchain, "void Swapchain::Recreate(u32 width_, u32 height_) {", "    Create(width_, height_);"));
 }
 
+using DcpPresent::SwapResult;
+using DcpPresent::SwapStep;
+
+void TestAcquireResults() {
+    for (const SwapResult result : {SwapResult::Success, SwapResult::Suboptimal}) {
+        DcpPresent::SwapchainHealth health;
+        const SwapStep step = health.Acquire(result);
+        CHECK(step.usable); // VK_SUBOPTIMAL_KHR is a success code: the image was acquired
+        CHECK(step.recreate == (result == SwapResult::Suboptimal));
+    }
+    DcpPresent::SwapchainHealth out_of_date;
+    const SwapStep stale = out_of_date.Acquire(SwapResult::OutOfDate);
+    CHECK(!stale.usable && stale.recreate && out_of_date.NeedsRecreation());
+    DcpPresent::SwapchainHealth failed;
+    CHECK(!failed.Acquire(SwapResult::Failure).usable);
+}
+
+void TestPresentResults() {
+    DcpPresent::SwapchainHealth health;
+    const SwapStep ok = health.Present(SwapResult::Success);
+    CHECK(ok.usable && !ok.recreate);
+    const SwapStep suboptimal = health.Present(SwapResult::Suboptimal);
+    CHECK(suboptimal.usable && suboptimal.recreate);
+    DcpPresent::SwapchainHealth out_of_date;
+    const SwapStep stale = out_of_date.Present(SwapResult::OutOfDate);
+    CHECK(!stale.usable && stale.recreate);
+    DcpPresent::SwapchainHealth failed;
+    CHECK(!failed.Present(SwapResult::Failure).usable);
+}
+
+struct PresenterRun {
+    int presented = 0;
+    int skipped = 0;
+    int recreations = 0;
+};
+
+// Presenter::Present's control flow: acquire, on failure recreate and acquire once more or skip the frame; present;
+// recreate when Swapchain::Present asks for it. The scripts get the swapchain generation and the frame.
+template <typename AcquireScript, typename PresentScript>
+PresenterRun RunPresenter(int frames, AcquireScript acquire_result, PresentScript present_result) {
+    DcpPresent::SwapchainHealth health;
+    PresenterRun run;
+    int generation = 0;
+    const auto recreate = [&] {
+        health.Recreated();
+        ++run.recreations;
+        ++generation;
+    };
+    for (int frame = 0; frame < frames; ++frame) {
+        if (!health.Acquire(acquire_result(generation, frame)).usable) {
+            recreate();
+            if (!health.Acquire(acquire_result(generation, frame)).usable) {
+                ++run.skipped;
+                continue;
+            }
+        }
+        run.presented += health.Present(present_result(generation, frame)).usable;
+        if (health.NeedsRecreation()) {
+            recreate();
+        }
+    }
+    return run;
+}
+
+constexpr int kFrames = 120;
+
+// DCP-LACF6H: a surface that reports suboptimal on every acquire and present, as on every replacement swapchain.
+void TestPersistentSuboptimalPresents() {
+    const auto suboptimal = [](int, int) { return SwapResult::Suboptimal; };
+    const PresenterRun run = RunPresenter(kFrames, suboptimal, suboptimal);
+    std::printf("persistent suboptimal surface: %d of %d frames presented, %d skipped, %d recreations\n",
+                run.presented, kFrames, run.skipped, run.recreations);
+    CHECK(run.presented == kFrames);
+    CHECK(run.skipped == 0);
+    CHECK(run.recreations == 1);
+}
+
+void TestSuboptimalRecovery() {
+    const auto success = [](int, int) { return SwapResult::Success; };
+    const auto first_suboptimal = [](int generation, int) {
+        return generation == 0 ? SwapResult::Suboptimal : SwapResult::Success;
+    };
+    const PresenterRun recovered = RunPresenter(kFrames, first_suboptimal, success);
+    CHECK(recovered.presented == kFrames && recovered.skipped == 0 && recovered.recreations == 1);
+
+    const auto suboptimal = [](int, int) { return SwapResult::Suboptimal; };
+    const PresenterRun present_only = RunPresenter(kFrames, success, suboptimal);
+    CHECK(present_only.presented == kFrames && present_only.recreations == 1);
+
+    // A clean frame ends the episode: a later suboptimal surface gets its one recreation again.
+    const auto episodes = [](int, int frame) {
+        return frame < 10 || frame >= 20 ? SwapResult::Suboptimal : SwapResult::Success;
+    };
+    const PresenterRun twice = RunPresenter(kFrames, episodes, episodes);
+    CHECK(twice.presented == kFrames && twice.recreations == 2);
+}
+
+void TestOutOfDateAndFailures() {
+    const auto success = [](int, int) { return SwapResult::Success; };
+    const auto first_out_of_date = [](int generation, int) {
+        return generation == 0 ? SwapResult::OutOfDate : SwapResult::Success;
+    };
+    const PresenterRun recovered = RunPresenter(kFrames, first_out_of_date, success);
+    CHECK(recovered.presented == kFrames && recovered.skipped == 0 && recovered.recreations == 1);
+
+    const PresenterRun present_stale = RunPresenter(kFrames, success, first_out_of_date);
+    CHECK(present_stale.presented == kFrames - 1 && present_stale.recreations == 1);
+
+    // Out-of-date and real failures are never turned into presented frames.
+    for (const SwapResult hard : {SwapResult::OutOfDate, SwapResult::Failure}) {
+        const auto always = [hard](int, int) { return hard; };
+        const PresenterRun run = RunPresenter(kFrames, always, success);
+        CHECK(run.presented == 0 && run.skipped == kFrames);
+    }
+    const auto out_of_date = [](int, int) { return SwapResult::OutOfDate; };
+    CHECK(RunPresenter(kFrames, out_of_date, success).recreations >= kFrames);
+}
+
+void TestSwapchainUsesResultPolicy() {
+    const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
+    CHECK(Contains(swapchain, "    case vk::Result::eSuboptimalKHR:\n        return DcpPresent::SwapResult::Suboptimal;"));
+    CHECK(InOrder(swapchain, "bool Swapchain::AcquireNextImage() {", "    const DcpPresent::SwapStep step = health.Acquire(kind);"));
+    CHECK(InOrder(swapchain, "bool Swapchain::AcquireNextImage() {", "    return step.usable;\n}"));
+    CHECK(InOrder(swapchain, "bool Swapchain::Present() {", "health.Present(kind)"));
+    CHECK(InOrder(swapchain, "void Swapchain::Create(u32 width_, u32 height_) {", "    health.Recreated();"));
+    CHECK(!Contains(swapchain, "needs_recreation"));
+    const std::string presenter = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp");
+    CHECK(InOrder(presenter, "void Presenter::PresentLoadingFrame() {", "        swapchain.NeedsRecreation()) {"));
+}
+
 void TestPadSamplingUntouched() {
     const std::string pad = ReadSource("src/runtime_pad.c");
     CHECK(!Contains(pad, "Gamescope") && !Contains(pad, "gamescope"));
@@ -245,6 +375,12 @@ int main() {
     TestFlipPacingIsGamescopeOnly();
     TestSwapchainRecreation();
     TestPadSamplingUntouched();
+    TestAcquireResults();
+    TestPresentResults();
+    TestPersistentSuboptimalPresents();
+    TestSuboptimalRecovery();
+    TestOutOfDateAndFailures();
+    TestSwapchainUsesResultPolicy();
     if (g_failures) {
         std::printf("%d present test(s) failed\n", g_failures);
         return 1;

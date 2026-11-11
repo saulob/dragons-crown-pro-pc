@@ -439,22 +439,40 @@ void TestUnmapWhileWatched(u8* arena) {
 
     // Writers keep hitting the range while it is armed and forgotten over and over.
     std::atomic<bool> stop{false};
+    std::atomic<u64> writes{0};
     std::thread writer{[&] {
         u32 value = 0;
         while (!stop.load(std::memory_order_relaxed)) {
             Write(scoped.base + Far + (value++ % 8) * Page, 1);
+            writes.fetch_add(1, std::memory_order_release);
         }
     }};
+    // The write in flight, then one to every page.
+    const auto wait_for_a_lap = [&] {
+        const u64 from = writes.load(std::memory_order_acquire);
+        while (writes.load(std::memory_order_acquire) < from + 9) {
+            std::this_thread::yield();
+        }
+    };
     for (u32 round = 0; round < 2000; ++round) {
         watch.AdvanceFrame();
         (void)watch.TryArm(scoped.base + Far, 8 * Page);
         if (round % 3 == 0) {
             watch.Forget(scoped.base + Far, 8 * Page);
+            // The forgotten cooldown spans about a second of flips, so a write that faulted before the Forget has
+            // retried long before the range can be armed again. Instant frames would let a re-arm beat every retry.
+            wait_for_a_lap();
             for (u32 frame = 0; frame < 70; ++frame) {
                 watch.AdvanceFrame();
             }
         }
     }
+    // Forgotten under a live writer: no page stays protected.
+    watch.Forget(scoped.base + Far, 8 * Page);
+    wait_for_a_lap();
+    const u64 faults_after_forget = watch.Faults();
+    wait_for_a_lap();
+    CHECK(watch.Faults() == faults_after_forget);
     stop = true;
     writer.join();
 }

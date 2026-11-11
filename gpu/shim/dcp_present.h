@@ -52,6 +52,85 @@ inline std::uint32_t ImageCount(std::uint32_t surface_min, std::uint32_t surface
     return count;
 }
 
+/// A swapchain acquire or present result as the frame sees it. OutOfDate also covers a lost surface.
+enum class SwapResult { Success, Suboptimal, OutOfDate, Failure };
+
+struct SwapStep {
+    bool usable;   ///< acquire: the image can be drawn and presented; present: the image was queued for display
+    bool recreate; ///< the swapchain is to be recreated before the next acquire
+};
+
+/// Suboptimal is a Vulkan success code: the image was acquired or presented and the frame goes on. It asks for one
+/// recreation; a replacement that is suboptimal again is kept until a clean frame, or a compositor that always reports
+/// it (Gamescope) would get a new swapchain every frame.
+class SwapchainHealth {
+public:
+    SwapStep Acquire(SwapResult result) {
+        clean_acquire = result == SwapResult::Success;
+        switch (result) {
+        case SwapResult::Success:
+            return {true, recreate};
+        case SwapResult::Suboptimal:
+            RequestForSuboptimal();
+            return {true, recreate};
+        case SwapResult::OutOfDate:
+            RequestRequired();
+            return {false, true};
+        case SwapResult::Failure:
+            break;
+        }
+        return {false, recreate};
+    }
+
+    SwapStep Present(SwapResult result) {
+        switch (result) {
+        case SwapResult::Success:
+            if (clean_acquire) {
+                replaced_suboptimal = false;
+            }
+            return {true, recreate};
+        case SwapResult::Suboptimal:
+            RequestForSuboptimal();
+            return {true, recreate};
+        case SwapResult::OutOfDate:
+            RequestRequired();
+            return {false, true};
+        case SwapResult::Failure:
+            break;
+        }
+        return {false, recreate};
+    }
+
+    void Recreated() {
+        replaced_suboptimal = recreate && suboptimal_only;
+        recreate = false;
+        suboptimal_only = false;
+        clean_acquire = false;
+    }
+
+    bool NeedsRecreation() const {
+        return recreate;
+    }
+
+private:
+    void RequestForSuboptimal() {
+        if (!replaced_suboptimal && !recreate) {
+            recreate = true;
+            suboptimal_only = true;
+        }
+    }
+
+    void RequestRequired() {
+        recreate = true;
+        suboptimal_only = false;
+    }
+
+    bool recreate = false;
+    bool suboptimal_only = false;     ///< only a suboptimal result asked for the pending recreation
+    bool replaced_suboptimal = false; ///< this swapchain replaced a suboptimal one and stays even if suboptimal
+    bool clean_acquire = false;
+};
+
 /// Linux session facts that change presentation; values that look like paths are not shown.
 template <typename GetEnv>
 std::string DescribeSession(bool gamescope, GetEnv get_env) {
