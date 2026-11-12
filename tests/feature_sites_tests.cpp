@@ -909,6 +909,11 @@ const std::vector<MappedSite> kEuropeSites = {
     {"Exit Game", "part GALLERY_2", {0x53ff2a}},
 };
 
+// Sites added after that scan: not reported by it, planted at the US 1.00 offset moved like their neighbours (+0x10).
+const std::vector<MappedSite> kEuropeSitesAfterScan = {
+    {"Cheats", "hook: lethal check", {0x29df05}},
+};
+
 const scan::SiteSpec* SpecOf(std::string_view feature, std::string_view name) {
     for (const scan::SiteSpec& spec : scan::Sites()) {
         if (feature == spec.feature && name == spec.name) return &spec;
@@ -920,11 +925,13 @@ const scan::SiteSpec* SpecOf(std::string_view feature, std::string_view name) {
 std::vector<uint8_t> BuildEuropeMap() {
     constexpr uint64_t kSize = 0xed0000, kProbes = 0xd00000, kConstantsAt = 0xe00000;
     std::vector<uint8_t> bytes(kSize, 0);
-    for (const MappedSite& site : kEuropeSites) {
-        const scan::SiteSpec* spec = SpecOf(site.feature, site.name);
-        CHECK(spec != nullptr);
-        if (!spec) continue;
-        for (const uint64_t at : site.at) Plant(bytes, spec->pattern, at - spec->anchor);
+    for (const std::vector<MappedSite>* sites : {&kEuropeSites, &kEuropeSitesAfterScan}) {
+        for (const MappedSite& site : *sites) {
+            const scan::SiteSpec* spec = SpecOf(site.feature, site.name);
+            CHECK(spec != nullptr);
+            if (!spec) continue;
+            for (const uint64_t at : site.at) Plant(bytes, spec->pattern, at - spec->anchor);
+        }
     }
     uint64_t cursor = kProbes;
     for (size_t probe = 0; probe < dcp_layout_probe_count(); ++probe) {
@@ -941,8 +948,10 @@ std::vector<uint8_t> BuildEuropeMap() {
 }
 
 uint64_t EuropeSite(std::string_view feature, std::string_view name, size_t index = 0) {
-    for (const MappedSite& site : kEuropeSites) {
-        if (feature == site.feature && name == site.name) return site.at[index];
+    for (const std::vector<MappedSite>* sites : {&kEuropeSites, &kEuropeSitesAfterScan}) {
+        for (const MappedSite& site : *sites) {
+            if (feature == site.feature && name == site.name) return site.at[index];
+        }
     }
     return 0;
 }

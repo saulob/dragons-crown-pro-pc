@@ -272,6 +272,12 @@ constexpr SiteSpec kSiteTable[] = {
         "f4 41 01 dd 45 29 ec 0f 8d ?? ?? ?? ?? b8 0f 00 "
         "00 00 49 8d bf 38 01 00 00",
         11, 1, {0x8ab24, 0x8a204, 0x8a4a4, 0x8a4a4, 0x8a374}},
+    {"Cheats", "hook: lethal check", SiteKind::kHook,
+        "c5 fa 2c 45 ?? eb 16 83 c9 20 31 c0 c6 45 ?? 01 "
+        "41 c7 46 1c 00 00 00 00 66 41 89 4e 16 4d 8b af "
+        "b8 09 00 00 ba 01 00 00 00 4d 85 ed 74 07 41 8b "
+        "95 b0 00 00 00 83 e6 02 39 c2 0f 8e",
+        29, 1, {0x29def5, 0x29d425, 0x29d7c5, 0x29d815, 0x29d5b5}},
     {"Cheats", "function: IsDead", SiteKind::kFunction,
         "48 8b 8f b8 09 00 00 48 85 c9 74 ?? 83 b9 b0 00 "
         "00 00 00 b0 01 7e ?? 8a 8f 03 01 00 00 b0 83 80 "

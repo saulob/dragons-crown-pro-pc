@@ -30,7 +30,7 @@ typedef struct {
     char failure[192];
 } DcpLocateReport;
 
-#define DCP_CHEAT_HOOKS 25
+#define DCP_CHEAT_HOOKS 26
 #define DCP_CHEAT_FUNCTIONS 15
 
 /* The game's struct displacements the cheat handlers use, as the game's own instructions encode them. */

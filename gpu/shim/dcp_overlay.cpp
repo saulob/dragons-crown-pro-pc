@@ -74,7 +74,7 @@ std::atomic<bool> options_open{false};
 dcp::menu::CloseGate menu_close;
 std::bitset<ImGuiKey_NamedKey_COUNT> menu_pressed;
 bool cheat_focused = false;
-int cheat_selected_row = -1; // the row the list last scrolled to show
+dcp::cheats::MenuList cheat_list;
 std::atomic<float> display_scale{1.0f};
 std::atomic<bool> loading{false};
 std::atomic<u32> loading_done{0}, loading_total{0};
@@ -301,18 +301,16 @@ void ActivateCheatRow(const dcp::cheats::MenuRow& row) {
     }
 }
 
-void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, const ImVec4& accent,
+// True when the row was clicked.
+bool DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, bool selected, float scale, const ImVec4& accent,
                   const ImVec4& focus, const ImVec4& dim) {
     const float height = ImGui::GetFrameHeight() + 4.0f * scale;
     ImGui::PushID(int(index));
     const bool pressed = ImGui::Selectable("##row", false, ImGuiSelectableFlags_None, ImVec2(0.0f, height));
-    if (index == 0) {
-        ImGui::SetItemDefaultFocus();
-    }
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    if (ImGui::IsItemFocused()) {
+    if (selected) {
         draw->AddRectFilled(min, max, ImGui::GetColorU32(focus), 3.0f * scale);
     }
     const float pad = ImGui::GetFontSize() * 0.4f;
@@ -324,8 +322,23 @@ void DrawCheatRow(const dcp::cheats::MenuRow& row, size_t index, float scale, co
                       ImGui::GetColorU32(text.lit ? accent : dim), text.state);
     }
     ImGui::PopID();
-    if (pressed) {
-        ActivateCheatRow(row);
+    return pressed;
+}
+
+void CheatMenuInput() {
+    const auto pressed = [](ImGuiKey key, bool repeat = false) { return ImGui::IsKeyPressed(key, repeat); };
+    const int count = int(dcp::cheats::kMenuRows.size());
+    cheat_list.Clamp(count);
+    if (pressed(ImGuiKey_GamepadDpadUp, true) || pressed(ImGuiKey_GamepadLStickUp, true) || pressed(ImGuiKey_UpArrow, true)) {
+        cheat_list.Step(-1, count);
+    }
+    if (pressed(ImGuiKey_GamepadDpadDown, true) || pressed(ImGuiKey_GamepadLStickDown, true) ||
+        pressed(ImGuiKey_DownArrow, true)) {
+        cheat_list.Step(1, count);
+    }
+    if (pressed(ImGuiKey_GamepadFaceDown) || pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter) ||
+        pressed(ImGuiKey_Space)) {
+        ActivateCheatRow(dcp::cheats::kMenuRows[size_t(cheat_list.selected)]);
     }
 }
 
@@ -375,7 +388,6 @@ void CloseCheatMenu() {
     menu_close = {};
     menu_pressed.reset();
     cheat_focused = false;
-    cheat_selected_row = -1;
     ImGuiIO& io = ImGui::GetIO();
     io.ClearInputKeys();
     io.MouseDrawCursor = false;
@@ -393,6 +405,7 @@ void CheatMenu() {
         }
         return;
     }
+    CheatMenuInput();
     const ImVec4 accent = Accent();
     const ImVec4 dim(0.64f, 0.66f, 0.76f, 1.0f);
     const ImVec4 focus(accent.x, accent.y, accent.z, 0.42f);
@@ -430,9 +443,11 @@ void CheatMenu() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x * scale, style.FramePadding.y * scale));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x * scale, spacing));
+    // No ImGui navigation: it would scroll the list on its own (the left stick scrolls the nav window every frame).
     constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
+                                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
+                                       ImGuiWindowFlags_NoNav;
     if (ImGui::Begin("##dcp_cheat_menu", nullptr, flags)) {
         ImGui::SetWindowFontScale(scale);
         ImGui::TextColored(accent, "%s", dcp::Tr(dcp::cheats::kMenuTitle));
@@ -441,32 +456,34 @@ void CheatMenu() {
         const float child_height = std::max(std::min(body_height, body_available), 1.0f);
         const bool needs_scrollbar = dcp::cheats::MenuNeedsScrollbar(body_height, child_height);
         const ImGuiWindowFlags child_flags =
-            needs_scrollbar ? ImGuiWindowFlags_AlwaysVerticalScrollbar : ImGuiWindowFlags_NoScrollbar;
-        // Focus the list itself so Up/Down enters it and the first row's default focus applies.
-        if (opening) {
-            ImGui::SetNextWindowFocus();
-        }
+            (needs_scrollbar ? ImGuiWindowFlags_AlwaysVerticalScrollbar : ImGuiWindowFlags_NoScrollbar) |
+            ImGuiWindowFlags_NoNav;
         ImGui::BeginChild("##cheat_rows", ImVec2(0.0f, child_height), ImGuiChildFlags_None, child_flags);
         // The child does not inherit the outer window's font scale.
         ImGui::SetWindowFontScale(scale);
-        int focused_row = -1;
-        ImVec2 focused_min{}, focused_max{};
-        for (size_t i = 0; i < dcp::cheats::kMenuRows.size(); ++i) {
-            DrawCheatRow(dcp::cheats::kMenuRows[i], i, scale, accent, focus, dim);
-            if (ImGui::IsItemFocused()) {
-                focused_row = int(i);
-                focused_min = ImGui::GetItemRectMin();
-                focused_max = ImGui::GetItemRectMax();
+        const int count = int(dcp::cheats::kMenuRows.size());
+        ImVec2 selected_min{}, selected_max{};
+        int clicked = -1;
+        for (int i = 0; i < count; ++i) {
+            const bool selected = i == cheat_list.selected;
+            if (DrawCheatRow(dcp::cheats::kMenuRows[size_t(i)], size_t(i), selected, scale, accent, focus, dim)) {
+                clicked = i;
+            }
+            if (selected) {
+                selected_min = ImGui::GetItemRectMin();
+                selected_max = ImGui::GetItemRectMax();
             }
         }
-        if (focused_row >= 0 && focused_row != cheat_selected_row) {
-            cheat_selected_row = focused_row;
-            const ImDrawList* rows = ImGui::GetWindowDrawList();
-            const float delta = dcp::cheats::MenuScrollToShowRow(
-                focused_min.y, focused_max.y, rows->GetClipRectMin().y, rows->GetClipRectMax().y);
-            if (delta != 0.0f) {
-                ImGui::SetScrollY(ImGui::GetScrollY() + delta);
-            }
+        const ImDrawList* rows = ImGui::GetWindowDrawList();
+        const float scroll = ImGui::GetScrollY();
+        const float wanted = cheat_list.Resolve(scroll, ImGui::GetScrollMaxY(), selected_min.y, selected_max.y,
+                                                rows->GetClipRectMin().y, rows->GetClipRectMax().y);
+        if (wanted != scroll) {
+            ImGui::SetScrollY(wanted);
+        }
+        if (clicked >= 0) {
+            cheat_list.Click(clicked, count);
+            ActivateCheatRow(dcp::cheats::kMenuRows[size_t(clicked)]);
         }
         ImGui::EndChild();
         ImGui::Separator();
@@ -483,7 +500,7 @@ void OpenCheatMenu() {
     menu_close = {};
     menu_pressed.reset();
     cheat_focused = false;
-    cheat_selected_row = -1;
+    cheat_list.Open();
     ImGui::GetIO().MouseDrawCursor = true;
 }
 
@@ -992,8 +1009,9 @@ bool HandleEvent(const SDL_Event& event) {
             const bool vertical = event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
             const ImGuiKey negative = vertical ? ImGuiKey_GamepadLStickUp : ImGuiKey_GamepadLStickLeft;
             const ImGuiKey positive = vertical ? ImGuiKey_GamepadLStickDown : ImGuiKey_GamepadLStickRight;
-            io.AddKeyAnalogEvent(negative, amount < -kStickDeadZone, std::max(-amount, 0.0f));
-            io.AddKeyAnalogEvent(positive, amount > kStickDeadZone, std::max(amount, 0.0f));
+            const bool up = amount < -kStickDeadZone, down = amount > kStickDeadZone;
+            io.AddKeyAnalogEvent(negative, up, up ? -amount : 0.0f);
+            io.AddKeyAnalogEvent(positive, down, down ? amount : 0.0f);
             return true;
         }
         return false;

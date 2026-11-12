@@ -17,6 +17,7 @@ namespace dcp::cheats {
 inline constexpr GuestImageId kSupportedImage{0x11f8060, 0x54c690};
 
 void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs);
+void GUEST_HOOK_ABI LethalCheckHook(GuestRegs* regs);
 void GUEST_HOOK_ABI ManaCostHook(GuestRegs* regs);
 void GUEST_HOOK_ABI ManaDrainHook(GuestRegs* regs);
 void GUEST_HOOK_ABI ArrowHook(GuestRegs* regs);

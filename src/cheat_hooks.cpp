@@ -106,9 +106,43 @@ void GUEST_HOOK_ABI GoldStoreHook(GuestRegs* regs) {
     regs->*Value = static_cast<uint32_t>(ProtectedGold(true, before, after));
 }
 
+// [rbp-0x15c] in the damage function: a hit with this field nonzero sends its HP change as a message instead of
+// writing HP there.
+constexpr uint64_t kDamageMessageFrameOffset = 0x15c;
+
+bool HitWritesHp(const GuestRegs* regs) {
+    const float message = HostMemory::Load<float>(regs->rbp - kDamageMessageFrameOffset);
+    return message > -1.0f && message < 1.0f;
+}
+
+// Lowers HP so the game's own, unchanged hit takes it to hp - amount * multiplier.
+void MultiplyHpLoss(const HostMemory& memory, uint64_t owner, uint64_t unit, UnitKind kind, int multiplier,
+                    int32_t amount) {
+    if (memory.U64(owner + kOwnerUnitOffset) != unit) {
+        return;
+    }
+    const int32_t hp = memory.S32(unit + kUnitHpOffset);
+    const int32_t before_hit = MultipliedHpBeforeHit(multiplier, kind, hp, amount);
+    if (before_hit != hp) {
+        HostMemory::Store<int32_t>(unit + kUnitHpOffset, before_hit);
+    }
+}
+
 } // namespace
 
-// In the damage function (rcx = signed amount, positive is a loss; r15 = the victim's owner).
+// In the hit check, before the game compares the target's HP with the hit to choose a lethal reaction or a break
+// (eax = the hit, r15 = the target's owner).
+void GUEST_HOOK_ABI LethalCheckHook(GuestRegs* regs) {
+    const int multiplier = runtime_cheat_damage_multiplier();
+    const int32_t amount = static_cast<int32_t>(regs->rax);
+    if (multiplier == kDamageMultiplierOff || amount <= 0) {
+        return;
+    }
+    regs->rax = static_cast<uint32_t>(MultipliedDamage(multiplier, ClassifyOwner(HostMemory{}, regs->r15), amount));
+}
+
+// In the damage function (rcx = signed amount, positive is a loss; r15 = the victim's owner), just before HP is read.
+// Damage Multiplier leaves the amount alone, so every reaction, effect and total sees the game's own hit.
 void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     const int32_t amount = static_cast<int32_t>(regs->rcx);
     const int taken = runtime_cheat_damage_taken();
@@ -123,9 +157,15 @@ void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     if (unit == 0 || memory.U64(unit + kUnitOwnerOffset) != regs->r15) {
         return;
     }
-    const int32_t kept = FrozenHealthDelta(true, IsFrozen(memory, unit), amount);
     const UnitKind kind = Classify(unit);
-    regs->rcx = static_cast<uint32_t>(MultipliedDamage(multiplier, kind, ScaledDamageTaken(taken, kind, kept)));
+    if (kind == UnitKind::Other) {
+        if (HitWritesHp(regs)) {
+            MultiplyHpLoss(memory, regs->r15, unit, kind, multiplier, amount);
+        }
+        return;
+    }
+    const int32_t kept = FrozenHealthDelta(true, IsFrozen(memory, unit), amount);
+    regs->rcx = static_cast<uint32_t>(ScaledDamageTaken(taken, kind, kept));
 }
 
 // At the entry of UseMP (rdi = the caster's unit, ecx = the consume flag).
@@ -647,6 +687,7 @@ std::span<const GuestHook> Hooks() {
         {"skill item wear mirror", 0x225fb1, 5, {0xe8, 0x9a, 0xa4, 0xdf, 0xff}, SkillItemWearHook},
         {"skill budget", 0x8ab24, 12, {0x8b, 0x5d, 0xa4, 0x45, 0x01, 0xf4, 0x41, 0x01, 0xdd, 0x45, 0x29, 0xec},
          SkillBudgetHook},
+        {"lethal check", 0x29def5, 7, {0x4d, 0x8b, 0xaf, 0xb8, 0x09, 0x00, 0x00}, LethalCheckHook},
     };
     return hooks;
 }

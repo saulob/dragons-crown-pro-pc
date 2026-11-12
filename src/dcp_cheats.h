@@ -489,8 +489,8 @@ constexpr int32_t ScaledDamageTaken(int percent, UnitKind kind, int32_t amount) 
     return scaled < 1 ? 1 : static_cast<int32_t>(scaled);
 }
 
-// A hit on anything outside the party is multiplied; a heal (negative) and a party member's hit are left alone. The
-// result stops at the int32 maximum: the game subtracts it from an HP of 0 or more, which cannot wrap, and clamps to 0.
+// The hit the game's lethal check weighs against HP: multiplied outside the party, so the hit that empties HP is the
+// one the game treats as lethal (death reaction, break). Heals and party members are left alone; it stops at INT32_MAX.
 constexpr int32_t MultipliedDamage(int multiplier, UnitKind kind, int32_t amount) {
     if (multiplier <= kDamageMultiplierOff || kind != UnitKind::Other || amount <= 0) {
         return amount;
@@ -499,6 +499,19 @@ constexpr int32_t MultipliedDamage(int multiplier, UnitKind kind, int32_t amount
         return INT32_MAX;
     }
     return amount * multiplier;
+}
+
+// The HP to give the target just before the game subtracts its own hit, so the hit itself lowers HP to
+// hp - amount * multiplier and, when that is 0 or less, is still the hit that crosses from above 0 to 0.
+constexpr int32_t MultipliedHpBeforeHit(int multiplier, UnitKind kind, int32_t hp, int32_t amount) {
+    if (multiplier <= kDamageMultiplierOff || kind != UnitKind::Other || amount <= 0 || hp <= 0) {
+        return hp;
+    }
+    const int64_t loss = static_cast<int64_t>(amount) * multiplier;
+    if (loss >= hp) {
+        return amount < hp ? amount : hp;
+    }
+    return static_cast<int32_t>(hp - (loss - amount));
 }
 
 // UseMP deducts only when its consume flag is 1; with 0 the cast still succeeds and costs nothing.

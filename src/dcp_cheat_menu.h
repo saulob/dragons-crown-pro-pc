@@ -1,6 +1,7 @@
 // The in-game cheat menu's model: what it lists and says, and when the game gets its input back.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 
@@ -86,6 +87,41 @@ constexpr float MenuScrollToShowRow(float row_top, float row_bottom, float view_
     }
     return 0.0f;
 }
+
+constexpr float MenuClampScroll(float scroll, float max_scroll) {
+    const float top = max_scroll > 0.0f ? max_scroll : 0.0f;
+    return scroll < 0.0f ? 0.0f : (scroll > top ? top : scroll);
+}
+
+// The selected row of the F10 list and when the list scrolls to it. Only a controller or keyboard step brings the
+// selection into view; the mouse wheel, the scrollbar and clicks leave the scroll where the user put it.
+struct MenuList {
+    int selected = 0;
+    bool reveal = true;
+
+    void Open() {
+        selected = 0;
+        reveal = true;
+    }
+
+    void Step(int step, int count) {
+        selected = count <= 0 ? 0 : std::clamp(selected + step, 0, count - 1);
+        reveal = true;
+    }
+
+    void Click(int row, int count) { selected = count <= 0 ? 0 : std::clamp(row, 0, count - 1); }
+
+    void Clamp(int count) { selected = count <= 0 ? 0 : std::clamp(selected, 0, count - 1); }
+
+    // Once per frame with the selected row's and the view's edges (same space as `scroll`): the scroll to keep.
+    float Resolve(float scroll, float max_scroll, float row_top, float row_bottom, float view_top, float view_bottom) {
+        if (!reveal) {
+            return MenuClampScroll(scroll, max_scroll);
+        }
+        reveal = false;
+        return MenuClampScroll(scroll + MenuScrollToShowRow(row_top, row_bottom, view_top, view_bottom), max_scroll);
+    }
+};
 
 enum class MenuKeyAction { None, Open, Close, OnlineHint };
 

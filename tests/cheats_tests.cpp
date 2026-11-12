@@ -59,6 +59,103 @@ std::string ReadSource(const char* relative) {
     return text.str();
 }
 
+// The F10 list's scrolling with uniform rows, as the overlay lays them out: content space, the view [scroll, scroll+view].
+struct ListGeometry {
+    int rows;
+    float row_height, spacing, view;
+    float Body() const { return MenuBodyHeight(size_t(rows), row_height, spacing); }
+    float MaxScroll() const { return Body() > view ? Body() - view : 0.0f; }
+    float Top(int row) const { return float(row) * (row_height + spacing); }
+    float Bottom(int row) const { return Top(row) + row_height; }
+    bool Shown(int row, float scroll) const { return Top(row) >= scroll && Bottom(row) <= scroll + view; }
+    // One overlay frame: the rows are drawn at the current scroll, then the list says which scroll to keep.
+    float Frame(MenuList& list, float scroll) const {
+        const int row = list.selected;
+        return list.Resolve(scroll, MaxScroll(), Top(row) - scroll, Bottom(row) - scroll, 0.0f, view);
+    }
+};
+
+void TestMenuListScrolling() {
+    const ListGeometry list25{25, 30.0f, 4.0f, 300.0f};
+    CHECK(int(kMenuRows.size()) == list25.rows && MenuNeedsScrollbar(list25.Body(), list25.view));
+    CHECK(list25.MaxScroll() == 846.0f - 300.0f);
+
+    // Opening shows the first row at the top, wherever the list was left.
+    MenuList list;
+    list.selected = 17;
+    list.Open();
+    float scroll = list25.Frame(list, 400.0f);
+    CHECK(list.selected == 0 && scroll == 0.0f && !list.reveal);
+
+    // Down walks all 25 rows; the view follows only once the selection reaches its lower edge, and ends at the bottom.
+    bool always_shown = true, followed_late = true;
+    for (int step = 1; step < list25.rows; ++step) {
+        const float before = scroll;
+        list.Step(1, list25.rows);
+        scroll = list25.Frame(list, scroll);
+        always_shown = always_shown && list.selected == step && list25.Shown(step, scroll);
+        followed_late = followed_late && (list25.Bottom(step) <= before + list25.view ? scroll == before : scroll > before);
+    }
+    CHECK(always_shown && followed_late);
+    CHECK(list.selected == 24 && scroll == list25.MaxScroll());
+    list.Step(1, list25.rows); // no wrap past the last row
+    scroll = list25.Frame(list, scroll);
+    CHECK(list.selected == 24 && scroll == list25.MaxScroll());
+
+    // Up is the mirror image and ends at the first row with the view at the top.
+    always_shown = true;
+    for (int step = 23; step >= 0; --step) {
+        list.Step(-1, list25.rows);
+        scroll = list25.Frame(list, scroll);
+        always_shown = always_shown && list.selected == step && list25.Shown(step, scroll);
+    }
+    CHECK(always_shown && list.selected == 0 && scroll == 0.0f);
+    list.Step(-1, list25.rows);
+    CHECK(list.selected == 0 && list25.Frame(list, scroll) == 0.0f);
+
+    // The mouse wheel moves the view away from the selection and it stays there, frame after frame.
+    scroll = 200.0f;
+    bool stayed = true;
+    for (int frame = 0; frame < 10; ++frame) {
+        scroll = list25.Frame(list, scroll);
+        stayed = stayed && scroll == 200.0f;
+    }
+    CHECK(stayed && list.selected == 0 && !list25.Shown(0, scroll));
+    // The next controller or keyboard step moves from the selection and brings it back into view.
+    list.Step(1, list25.rows);
+    scroll = list25.Frame(list, scroll);
+    CHECK(list.selected == 1 && list25.Shown(1, scroll) && scroll == list25.Top(1));
+
+    // The scrollbar: top, middle and bottom positions are kept, the bottom shows the last row, the ends clamp.
+    for (const float dragged : {0.0f, list25.MaxScroll() / 2.0f, list25.MaxScroll()}) {
+        CHECK(list25.Frame(list, dragged) == dragged && list25.Frame(list, dragged) == dragged);
+    }
+    CHECK(list25.Shown(0, 0.0f) && list25.Shown(24, list25.MaxScroll()));
+    CHECK(list25.Frame(list, -50.0f) == 0.0f && list25.Frame(list, 9999.0f) == list25.MaxScroll());
+
+    // A click selects a visible row after scrolling and does not move the view.
+    scroll = 400.0f;
+    list.Click(15, list25.rows);
+    CHECK(list.selected == 15 && list25.Shown(15, scroll) && list25.Frame(list, scroll) == 400.0f);
+    list.Click(99, list25.rows);
+    CHECK(list.selected == 24);
+    list.Click(-3, list25.rows);
+    CHECK(list.selected == 0);
+
+    // Fewer rows or a taller view re-clamp the selection and the scroll.
+    list.selected = 24;
+    list.Clamp(10);
+    CHECK(list.selected == 9);
+    const ListGeometry list10{10, 30.0f, 4.0f, 300.0f};
+    CHECK(list10.Frame(list, list25.MaxScroll()) == list10.MaxScroll());
+    const ListGeometry tall{25, 30.0f, 4.0f, 2000.0f};
+    CHECK(tall.MaxScroll() == 0.0f && tall.Frame(list, 300.0f) == 0.0f);
+    list.Clamp(0);
+    list.Step(1, 0);
+    CHECK(list.selected == 0);
+    CHECK(MenuClampScroll(5.0f, -1.0f) == 0.0f && MenuClampScroll(-1.0f, 10.0f) == 0.0f && MenuClampScroll(11.0f, 10.0f) == 10.0f);
+}
+
 void TestCheatList() {
     CHECK(kCheatCount == 14);
     CHECK(std::size(kCheats) == kCheatCount);
@@ -427,6 +524,7 @@ void TestMenuModel() {
         CHECK(MenuScrollToShowRow(60.0f * dpi, 90.0f * dpi, 80.0f * dpi, 200.0f * dpi) == -20.0f * dpi);
         CHECK(MenuScrollToShowRow(190.0f * dpi, 220.0f * dpi, 80.0f * dpi, 200.0f * dpi) == 20.0f * dpi);
     }
+    TestMenuListScrolling();
     for (const float display : {2.0f, 2.5f, 3.0f}) { // smaller than the first oversized menu, larger than the tiny one
         CHECK(MenuScale(display, 3840, 18) < display && MenuScale(display, 3840, 18) > 1.0f);
     }
@@ -441,7 +539,17 @@ void TestMenuModel() {
     CHECK(overlay.find("MenuScale(") != std::string::npos);
     CHECK(overlay.find("MenuBodyHeight(") != std::string::npos);
     CHECK(overlay.find("MenuNeedsScrollbar(") != std::string::npos);
-    CHECK(overlay.find("MenuScrollToShowRow(") != std::string::npos);
+    CHECK(overlay.find("cheat_list.Resolve(") != std::string::npos);
+    CHECK(overlay.find("cheat_list.Step(") != std::string::npos && overlay.find("cheat_list.Click(") != std::string::npos);
+    // ImGui navigation is off for the list: it scrolled the window from the left stick on its own every frame.
+    const size_t menu_begin = overlay.find("void CheatMenu()");
+    const size_t menu_end = overlay.find("void OpenCheatMenu()");
+    CHECK(menu_begin != std::string::npos && menu_end != std::string::npos);
+    const std::string menu = overlay.substr(menu_begin, menu_end - menu_begin);
+    const size_t outer_no_nav = menu.find("ImGuiWindowFlags_NoNav;");
+    CHECK(outer_no_nav != std::string::npos && menu.find("ImGuiWindowFlags_NoNav;", outer_no_nav + 1) != std::string::npos);
+    CHECK(overlay.find("IsItemFocused") == std::string::npos && overlay.find("SetItemDefaultFocus") == std::string::npos);
+    CHECK(overlay.find("std::max(-amount, 0.0f)") == std::string::npos); // no stick value inside the dead zone
     CHECK(overlay.find("needs_scrollbar ? ImGuiWindowFlags_AlwaysVerticalScrollbar : ImGuiWindowFlags_NoScrollbar") !=
           std::string::npos);
     const size_t child = overlay.find("BeginChild(\"##cheat_rows\"");
@@ -2449,13 +2557,14 @@ void TestHealthCheats() {
 
 void TestHookTable() {
     const std::span<const GuestHook> hooks = Hooks();
-    CHECK(hooks.size() == 25);
+    CHECK(hooks.size() == 26);
     CHECK(hooks[19].offset == 0x27511 && hooks[19].length == 7); // the experience award
     CHECK(hooks[20].offset == 0x1af0dc && hooks[20].length == 5); // the skill item's count decrement
     CHECK(hooks[21].offset == 0x1af12a && hooks[21].length == 5); // its mirror decrement
     CHECK(hooks[22].offset == 0x225f90 && hooks[22].length == 5); // the equipment wear's count decrement
     CHECK(hooks[23].offset == 0x225fb1 && hooks[23].length == 5); // its mirror decrement
     CHECK(hooks[24].offset == 0x8ab24 && hooks[24].length == 12); // the skill budget comparison
+    CHECK(hooks[25].offset == 0x29def5 && hooks[25].length == 7);  // the hit's lethal check
     CHECK(kSupportedImage.size == 0x11f8060 && kSupportedImage.entry == 0x54c690);
     for (const GuestHook& hook : hooks) {
         CHECK(hook.length >= GUEST_HOOK_MIN_LENGTH && hook.length <= GUEST_HOOK_MAX_LENGTH);
@@ -3033,40 +3142,107 @@ void TestDamageMultiplier() {
     CHECK(MultipliedDamage(100, UnitKind::Other, INT32_MAX / 100 + 1) == INT32_MAX);
     CHECK(MultipliedDamage(2, UnitKind::Other, INT32_MAX) == INT32_MAX);
 
+    // The HP the target gets before the game's own hit, which then takes it to hp - amount * multiplier.
+    for (const int multiplier : {2, 5, 10, 100}) {
+        CHECK(MultipliedHpBeforeHit(multiplier, UnitKind::Other, 100000, 20) == 100000 - 20 * (multiplier - 1));
+    }
+    CHECK(MultipliedHpBeforeHit(1, UnitKind::Other, 200, 22) == 200);    // Off
+    CHECK(MultipliedHpBeforeHit(10, UnitKind::Other, 200, 20) == 20);    // exactly lethal: the hit empties it
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 200, 22) == 22);   // overkill
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 200, 500) == 200); // the game's hit already kills
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 1, 1) == 1);       // HP 1
+    CHECK(MultipliedHpBeforeHit(2, UnitKind::Other, 2, 1) == 1);         // HP 2, exactly lethal at 2x
+    CHECK(MultipliedHpBeforeHit(2, UnitKind::Other, 3, 1) == 2);         // HP 3 survives 2x at 1
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 0, 50) == 0);      // already empty
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, -5, 50) == -5);
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 200, 0) == 200);   // no damage
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 200, -30) == 200); // a heal
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::PlayerOne, 200, 22) == 200);
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::OtherPlayer, 200, 22) == 200);
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, INT32_MAX, 1) == INT32_MAX - 99);
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, INT32_MAX, INT32_MAX / 100 + 1) == INT32_MAX / 100 + 1);
+    CHECK(MultipliedHpBeforeHit(2, UnitKind::Other, INT32_MAX, INT32_MAX) == INT32_MAX);
+    CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 1000000, 9999) == 1000000 - 9999 * 99);
+
+    // The game's rules after the hooks, against the policy: HP ends at max(0, hp - amount * multiplier), the hit that
+    // empties HP is the one the lethal check calls lethal, and that hit crosses from above 0 to 0 itself.
+    bool consistent = true;
+    for (const int multiplier : {1, 2, 5, 10, 100}) {
+        for (const int32_t hp : {1, 2, 3, 99, 100, 200, 5000, INT32_MAX}) {
+            for (const int32_t amount : {1, 2, 22, 39, 100, 199, 200, 201, 1000000, INT32_MAX}) {
+                const int64_t wanted = std::max<int64_t>(0, int64_t(hp) - int64_t(amount) * multiplier);
+                const int32_t before = MultipliedHpBeforeHit(multiplier, UnitKind::Other, hp, amount);
+                const int64_t after = std::max<int64_t>(0, int64_t(before) - amount);
+                const bool lethal_reaction = hp <= MultipliedDamage(multiplier, UnitKind::Other, amount);
+                const bool death_callback = before > 0 && int64_t(before) - amount <= 0;
+                consistent = consistent && after == wanted && lethal_reaction == (wanted == 0) &&
+                             death_callback == (wanted == 0) && before >= 1 && before <= hp;
+            }
+        }
+    }
+    CHECK(consistent);
+
     SetCheats(false, false);
     FakeGame player1(true, 0), player2(true, 1), enemy(false, 0);
-    const auto damage = [&](FakeGame& unit, int32_t amount) {
+    // The damage hook on a target with `hp`: the amount the game goes on with, and the HP it subtracts it from.
+    struct Hit {
+        int32_t amount, hp;
+    };
+    const auto damage = [&](FakeGame& unit, int32_t hp, int32_t amount) {
+        SetHp(unit, hp);
         GuestRegs regs = unit.DamageRegs(amount);
         HealthDamageHook(&regs);
-        return static_cast<int32_t>(regs.rcx);
+        return Hit{static_cast<int32_t>(regs.rcx), Hp(unit)};
     };
+    const auto lethal_check = [&](FakeGame& unit, int32_t amount) {
+        GuestRegs regs{};
+        regs.rax = static_cast<uint32_t>(amount);
+        regs.r15 = unit.Owner();
+        LethalCheckHook(&regs);
+        return static_cast<int32_t>(regs.rax);
+    };
+    const auto same = [](Hit hit, int32_t amount, int32_t hp) { return hit.amount == amount && hit.hp == hp; };
+
     runtime_cheats_start(0, 1, 1, 100, 1);
-    CHECK(damage(enemy, 50) == 50);
+    CHECK(same(damage(enemy, 200, 50), 50, 200) && lethal_check(enemy, 50) == 50);
     for (const int multiplier : {2, 5, 10, 100}) {
         runtime_cheats_start(0, 1, 1, 100, multiplier);
         CHECK(runtime_cheat_damage_multiplier() == multiplier);
-        CHECK(damage(enemy, 50) == 50 * multiplier);
+        CHECK(same(damage(enemy, 100000, 50), 50, 100000 - 50 * (multiplier - 1)));
+        CHECK(lethal_check(enemy, 50) == 50 * multiplier);
     }
+    // The game's own amount goes on to every later consumer; only HP and the lethal check see the multiplier.
     runtime_cheats_start(0, 1, 1, 100, 100);
-    CHECK(damage(enemy, INT32_MAX / 2) == INT32_MAX);
-    CHECK(damage(enemy, -30) == -30 && damage(enemy, 0) == 0);
-    CHECK(damage(player1, 50) == 50 && damage(player2, 50) == 50); // Player 1 and an AI ally
+    CHECK(same(damage(enemy, 200, 22), 22, 22) && lethal_check(enemy, 22) == 2200);
+    CHECK(same(damage(enemy, 2, 1), 1, 1) && lethal_check(enemy, 1) == 100);
+    CHECK(same(damage(enemy, 200, INT32_MAX / 2), INT32_MAX / 2, 200) && lethal_check(enemy, INT32_MAX / 2) == INT32_MAX);
+    CHECK(same(damage(enemy, 200, -30), -30, 200) && lethal_check(enemy, -30) == -30);
+    CHECK(same(damage(enemy, 200, 0), 0, 200) && lethal_check(enemy, 0) == 0);
+    CHECK(same(damage(enemy, 0, 50), 50, 0));
+    // A hit whose HP change goes as a message does not write HP here, so HP is left for it.
+    FakeGame::Store<float>(enemy.frame + 0x300 - 0x15c, 30.0f);
+    CHECK(same(damage(enemy, 200, 22), 22, 200));
+    FakeGame::Store<float>(enemy.frame + 0x300 - 0x15c, 0.0f);
+    CHECK(same(damage(player1, 200, 50), 50, 200) && same(damage(player2, 200, 50), 50, 200)); // Player 1, AI ally
+    CHECK(lethal_check(player1, 50) == 50 && lethal_check(player2, 50) == 50);
     runtime_cheats_set_slot_human(FakeHumanSlot);
-    CHECK(damage(player2, 50) == 50); // a human Player 2
+    CHECK(same(damage(player2, 200, 50), 50, 200) && lethal_check(player2, 50) == 50); // a human Player 2
     runtime_cheats_set_slot_human(nullptr);
 
     // The freeze of Infinite Health and Infinite Ally Health comes first; the multiplier only reaches enemies.
     runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1, 1, 100, 100);
-    CHECK(damage(player1, 50) == 0 && damage(enemy, 50) == 5000);
+    CHECK(damage(player1, 200, 50).amount == 0 && same(damage(enemy, 200, 50), 50, 50));
     runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth), 1, 1, 100, 100);
-    CHECK(damage(player2, 50) == 0 && damage(player1, 50) == 50 && damage(enemy, 50) == 5000);
+    CHECK(damage(player2, 200, 50).amount == 0 && damage(player1, 200, 50).amount == 50);
+    CHECK(same(damage(enemy, 100000, 50), 50, 100000 - 50 * 99));
 
     // With Damage Taken also set, each setting keeps to its own target.
     runtime_cheats_start(0, 1, 1, 50, 10);
-    CHECK(damage(player1, 100) == 50 && damage(enemy, 100) == 1000 && damage(player2, 100) == 100);
-    CHECK(damage(player1, -30) == -30 && damage(enemy, -30) == -30);
+    CHECK(same(damage(player1, 200, 100), 50, 200) && same(damage(enemy, 5000, 100), 100, 4100));
+    CHECK(same(damage(player2, 200, 100), 100, 200) && lethal_check(player1, 100) == 100);
+    CHECK(damage(player1, 200, -30).amount == -30 && same(damage(enemy, 200, -30), -30, 200));
     runtime_cheats_start(0, 1, 1, 0, 1);
-    CHECK(damage(player1, 100) == 0 && damage(enemy, 100) == 100);
+    CHECK(damage(player1, 200, 100).amount == 0 && same(damage(enemy, 200, 100), 100, 200));
 
     // The menu's change lasts the session, leaves Damage Taken alone, and an unlisted saved value is Off.
     runtime_cheats_start(0, 1, 1, 50, 5);
@@ -3081,7 +3257,8 @@ void TestDamageMultiplier() {
     runtime_cheats_start(Bit(Cheat::InfiniteHealth), 100, 4, 0, 100);
     CHECK(runtime_cheat_damage_multiplier() == 1 && runtime_cheat_damage_multiplier_cycle() == 1);
     CHECK(runtime_cheat_damage_taken() == 100 && runtime_cheat_damage_taken_cycle() == 100);
-    CHECK(damage(player1, 50) == 50 && damage(enemy, 50) == 50);
+    CHECK(damage(player1, 200, 50).amount == 50 && same(damage(enemy, 200, 50), 50, 200) &&
+          lethal_check(enemy, 50) == 50);
     runtime_cheats_set_online(0);
     runtime_cheats_start(0, 1, 1, 100, 1);
     SetCheats(false, false);

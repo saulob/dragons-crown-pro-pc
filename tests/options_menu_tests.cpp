@@ -809,7 +809,8 @@ void TestSharedCheatState() {
           "the Options menu holds no cheat state of its own");
     Check(Contains(overlay, "void ActivateCheatRow(const dcp::cheats::MenuRow& row)"),
           "one function runs a cheat row");
-    Check(Contains(overlay, "        ActivateCheatRow(row);\n    }\n}\n\nconst char* CheatRowHelp"),
+    Check(Contains(overlay, "ActivateCheatRow(dcp::cheats::kMenuRows[size_t(cheat_list.selected)]);") &&
+              Contains(overlay, "ActivateCheatRow(dcp::cheats::kMenuRows[size_t(clicked)]);"),
           "the F10 menu runs its rows through it");
     Check(Contains(overlay, "ActivateCheatRow(row);\n    }\n}\n\nconst char* OptionsCheatNote"),
           "the Options menu runs its rows through it");
