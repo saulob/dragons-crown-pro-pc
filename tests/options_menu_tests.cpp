@@ -433,6 +433,66 @@ void TestUnlockGallery(const fs::path& folder) {
           "Unlock Gallery has one reader and one table row");
 }
 
+void TestControllerRumble(const fs::path& folder) {
+    using namespace DcpOptions;
+    int rows = 0;
+    for (const Setting& setting : kSettings) {
+        rows += std::string(setting.label) == "Controller Rumble";
+    }
+    const Setting& setting = SettingOf(Id::ControllerRumble);
+    Check(rows == 1 && setting.page == Page::Controls && setting.apply == Apply::Live && setting.choices.size() == 2 &&
+              std::string(setting.key) == "controller_rumble" && setting.feature == 0,
+          "Controller Rumble is one live Off/On row in the Controls page for every build");
+    Check(Current(DcpSettings::Values{}, Id::ControllerRumble) == "1", "it reads On by default");
+
+    const fs::path file = folder / "rumble.ini";
+    WriteFile(file, "# keep\ncontroller_rumble = 0\n");
+    DcpSettings::Values seeded;
+    Check(DcpSettings::Read(file.string(), seeded) && !seeded.controller_rumble &&
+              Current(seeded, Id::ControllerRumble) == "0",
+          "the saved launcher value seeds what F1 shows");
+
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    live.controller_rumble = true;
+    Options options(live);
+    Check(options.Shown(Id::ControllerRumble) == "1", "F1 reads the current runtime state");
+    Outcome outcome = options.Choose(Id::ControllerRumble, "0");
+    Check(outcome.changed && outcome.saved && !live.controller_rumble && !options.Pending(Id::ControllerRumble) &&
+              !options.RestartPending() && options.Shown(Id::ControllerRumble) == "0",
+          "On to Off takes effect at once, with no restart");
+    outcome = options.Choose(Id::ControllerRumble, "1");
+    Check(outcome.changed && live.controller_rumble && options.Shown(Id::ControllerRumble) == "1",
+          "Off to On takes effect at once");
+    live.controller_rumble = false;
+    Check(options.Shown(Id::ControllerRumble) == "0", "F1 follows the runtime state when something else changed it");
+    Check(Contains(ReadAll(file), "controller_rumble = 1\n") && Contains(ReadAll(file), "# keep\n"),
+          "like every Options row it saves under the launcher's key and keeps the rest of the file");
+    live.controller_rumble = true;
+
+    const std::string menu = Source("gpu/shim/dcp_options_menu.cpp");
+    const size_t change = menu.find("outcome.changed && id == DcpOptions::Id::ControllerRumble");
+    Check(change != std::string::npos && menu.find("runtime_pad_rumble_changed();", change) < change + 120,
+          "F1 tells the pad when the setting changes");
+    const std::string pad = Source("src/runtime_pad.c");
+    const size_t vibration = pad.find("static ABI int32_t pad_vibration(");
+    const size_t end = pad.find("return 0;", vibration);
+    Check(pad.find("if (g && dcpgpu_controller_rumble()) SDL_RumbleGamepad(", vibration) < end &&
+              pad.find("SDL_RumbleGamepad(") == pad.find("SDL_RumbleGamepad(", pad.find("dcpgpu_controller_rumble()", vibration)) &&
+              !Contains(pad, "static int rumble_enabled"),
+          "the pad reads the one shared state on every request, for every slot");
+    const size_t changed = pad.find("void runtime_pad_rumble_changed(void) {");
+    Check(changed != std::string::npos && pad.find("SDL_RumbleGamepad(slots[i].gamepad,0,0,0)", changed) < changed + 400,
+          "switching Off stops a rumble in progress on every connected pad");
+    Check(Contains(Source("src/loader.c"), "runtime_pad_set_rumble(dcp_controller_rumble(settings_file));") &&
+              Contains(pad, "dcpgpu_set_controller_rumble(enabled);"),
+          "the launcher value still seeds the same state at start");
+    Check(Contains(pad, "if (dcpgpu_overlay_captures_input()) return; /* settings menu open: neutral input */"),
+          "input handling is as before");
+    const std::string portuguese = Source("launcher/localization/pt_br_ui_text.cpp");
+    Check(Contains(portuguese, "Controller Rumble\tVibração do controle\n"), "the Portuguese (Brazil) label is present");
+}
+
 void TestJapaneseMenuButtons(const fs::path& folder) {
     using namespace DcpOptions;
     int rows = 0;
@@ -1182,6 +1242,7 @@ int main() {
     TestSkipIntro(folder);
     TestUnlockGallery(folder);
     TestJapaneseMenuButtons(folder);
+    TestControllerRumble(folder);
     TestLauncherParity();
     TestRendererRow(folder);
     TestRenderShapeRows(folder);

@@ -2245,6 +2245,51 @@ void TestJapaneseMenuButtonsSettings(const fs::path& base) {
     CHECK(loader.find("exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied)") != std::string::npos);
 }
 
+void TestControllerRumbleSettings(const fs::path& base) {
+    const fs::path file = base / "controller_rumble" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kControllerRumbleKey && setting.default_value == "1";
+    }
+    CHECK(managed == 1 && std::string(kControllerRumbleKey) == "controller_rumble");
+    CHECK(dcp_controller_rumble(nullptr) == 1 && dcp_controller_rumble(file.string().c_str()) == 1);
+    WriteAll(file, "vsync = 1\n");
+    CHECK(dcp_controller_rumble(file.string().c_str()) == 1);
+    WriteAll(file, "controller_rumble = 1\n");
+    CHECK(dcp_controller_rumble(file.string().c_str()) == 1);
+    WriteAll(file, "controller_rumble = 0\n");
+    CHECK(dcp_controller_rumble(file.string().c_str()) == 0);
+    WriteAll(file, "controller_rumble = banana\n");
+    CHECK(dcp_controller_rumble(file.string().c_str()) == 1);
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kControllerRumbleKey, false);
+        CHECK(settings.Save());
+        CHECK(dcp_controller_rumble(file.string().c_str()) == 0);
+        settings.ResetToDefaults();
+        CHECK(settings.GetBool(kControllerRumbleKey, false));
+    }
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const std::string toggle = "ui.Toggle(\"Controller Rumble\", kControllerRumbleHelp, kControllerRumbleKey, true, \"Off\", \"On\");";
+    const size_t row = launcher.find(toggle);
+    const size_t controls = launcher.find("void PageControls(trg::Ui& ui) {");
+    CHECK(row != std::string::npos && launcher.find(toggle, row + 1) == std::string::npos);
+    CHECK(row > launcher.find("ui.Toggle(\"Japanese Menu Buttons\"", controls) && row < launcher.find("ui.Info(\"Keyboard\"", controls));
+
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("runtime_pad_set_rumble(dcp_controller_rumble(settings_file));") != std::string::npos);
+    const std::string pad = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "runtime_pad.c");
+    const size_t vibration = pad.find("static ABI int32_t pad_vibration(");
+    const size_t end = pad.find("return 0;", vibration);
+    CHECK(vibration != std::string::npos && pad.find("if (g && dcpgpu_controller_rumble()) SDL_RumbleGamepad(", vibration) < end);
+    CHECK(pad.find("slots[slot].gamepad", vibration) < end);
+    CHECK(pad.find("if (slot<0) return ERR_INVALID_HANDLE;", vibration) < pad.find("dcpgpu_controller_rumble()", vibration));
+
+    const std::string portuguese = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    CHECK(portuguese.find("Controller Rumble\tVibração do controle\n") != std::string::npos);
+}
+
 void TestSkipOfferSettings(const fs::path& base) {
     const fs::path file = base / "skip_offers" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -8290,6 +8335,7 @@ int main(int argc, char** argv) {
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestSkipIntroSettings(base);
+    TestControllerRumbleSettings(base);
     TestUnlockGallerySettings(base);
     TestJapaneseMenuButtonsSettings(base);
     TestPinnedBuild(base);

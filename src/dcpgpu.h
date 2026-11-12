@@ -43,6 +43,9 @@ int dcpgpu_choice_begin(const char *title, const char *const *items, const char 
 int dcpgpu_choice_poll(void);
 /* The choice list reads PS4 pad button bits from this callback every frame while it is open. */
 void dcpgpu_choice_set_input(uint32_t (*buttons)(void));
+/* Whether the game's vibration reaches the controllers (the Options menu changes it live). */
+int dcpgpu_controller_rumble(void);
+void dcpgpu_set_controller_rumble(int enabled);
 /* 1 while the settings menu is open: the game's pad input should be held neutral. */
 int dcpgpu_overlay_captures_input(void);
 /* DCP_INPUT_LATENCY_TRACE=1: 1 when set; the SDL_GetTicksNS time of the newest host button or key press. */

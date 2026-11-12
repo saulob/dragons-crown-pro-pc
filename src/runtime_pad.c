@@ -5,6 +5,7 @@
  * (see apply_button_map) change them. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "runtime_pad_rumble.h"
 #include "dcpgpu.h"
 #include "dcp_keys.h"
 #include "dcp_sdl_compat.h"
@@ -186,6 +187,13 @@ static ButtonMap pad_map={{
 },15};
 static ButtonMap key_map;
 static DcpKeyMap keys;
+static void log_rumble(const char *source) {
+    printf("Controller rumble: %s%s\n",dcpgpu_controller_rumble() ? "on" : "off",source);
+}
+void runtime_pad_set_rumble(int enabled) {
+    dcpgpu_set_controller_rumble(enabled);
+    log_rumble("");
+}
 void runtime_pad_set_settings(const char *settings_file) { snprintf(keys_file,sizeof(keys_file),"%s",settings_file ? settings_file : ""); }
 
 static const struct { DcpKeyAction action; uint32_t ps; } key_buttons[]={
@@ -589,9 +597,16 @@ static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     pthread_mutex_lock(&lock);
     refresh_gamepads();
     SDL_Gamepad *g=slots[slot].gamepad;
-    if (g) SDL_RumbleGamepad(g,(uint16_t)(param[0]*257),(uint16_t)(param[1]*257),1000);
+    if (g && dcpgpu_controller_rumble()) SDL_RumbleGamepad(g,(uint16_t)(param[0]*257),(uint16_t)(param[1]*257),1000);
     pthread_mutex_unlock(&lock);
     return 0;
+}
+void runtime_pad_rumble_changed(void) {
+    log_rumble(" (Options menu)");
+    if (dcpgpu_controller_rumble()) return;
+    pthread_mutex_lock(&lock);
+    for (int i=0;i<MAX_PADS;++i) if (slots[i].gamepad) SDL_RumbleGamepad(slots[i].gamepad,0,0,0);
+    pthread_mutex_unlock(&lock);
 }
 static ABI int32_t pad_ok_handle(int32_t handle) { return open_slot(handle)>=0 ? 0 : ERR_INVALID_HANDLE; }
 static ABI int32_t pad_ok_handle_flag(int32_t handle, uint8_t flag) { (void)flag; return pad_ok_handle(handle); }

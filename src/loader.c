@@ -688,6 +688,7 @@ int main(int argc, char **argv) {
     runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir,app0));
     runtime_pad_set_settings(settings_file);
+    runtime_pad_set_rumble(dcp_controller_rumble(settings_file));
     runtime_cheats_set_slot_human(runtime_pad_slot_human);
     if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);
     runtime_cheats_set_online(runtime_online_play_enabled());

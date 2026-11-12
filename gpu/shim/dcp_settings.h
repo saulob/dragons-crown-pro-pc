@@ -53,6 +53,8 @@ struct Values {
     // Japanese NPC Voices.
     std::string render_resolution{"native"}, aspect_ratio{"16:9"};
     std::atomic<bool> true_ultrawide{false}, japanese_npc_voices{false};
+    // Whether the game's vibration requests reach the controllers; the pad reads it on every request.
+    std::atomic<bool> controller_rumble{true};
     // What the running game build supports (Feature bits), set by the loader.
     std::atomic<unsigned> features{AllFeatures};
     // Set by the window: the refresh rate of the display it opened on; 0 when unknown.

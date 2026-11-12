@@ -165,6 +165,7 @@ constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPCs, enemies and AI allies";
+constexpr char kControllerRumbleHelp[] = "Off disables controller vibration. Applies at the next game start.";
 constexpr char kSkipIntroHelp[] = "Skip the startup logo and go straight to the title screen";
 constexpr char kJapaneseMenuButtonsHelp[] =
     "Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat "
@@ -1121,6 +1122,7 @@ private:
             ui.Help("Xbox prompts are not available for this game build.");
         }
         ui.Toggle("Japanese Menu Buttons", JapaneseMenuButtonsHelp().c_str(), kJapaneseMenuButtonsKey, false, "Off", "On");
+        ui.Toggle("Controller Rumble", kControllerRumbleHelp, kControllerRumbleKey, true, "Off", "On");
         ui.Info("Keyboard", "Always on, together with the controller.");
         if (ui.ConfirmRow("Keyboard defaults", "Puts the keyboard controls and the port hotkeys back to their defaults.",
                           "Reset to defaults", "Put every key back to its default?", "Reset")) {

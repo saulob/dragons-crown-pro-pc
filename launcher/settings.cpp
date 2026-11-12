@@ -53,6 +53,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kAllowOverlayProgramsKey, "0"},
     {kSkipIntroKey, "0"},
     {kJapaneseMenuButtonsKey, "0"},
+    {kControllerRumbleKey, "1"},
     {kStorySkipOfferKey, "0"},
     {kTutorialSkipOfferKey, "0"},
     {kUnlockGalleryKey, "0"},
@@ -403,6 +404,12 @@ extern "C" int dcp_japanese_menu_buttons(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return settings.GetBool(kJapaneseMenuButtonsKey, false) ? 1 : 0;
+}
+
+extern "C" int dcp_controller_rumble(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return settings.GetBool(kControllerRumbleKey, true) ? 1 : 0;
 }
 
 extern "C" int dcp_unlock_gallery(const char* settings_file) {

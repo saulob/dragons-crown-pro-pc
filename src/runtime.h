@@ -53,6 +53,8 @@ void runtime_font_set_composed_glyphs(const RuntimeComposedGlyph *glyphs, size_t
 uintptr_t runtime_eventflag_resolve(const char *name);
 /* The dcp.ini whose keyboard bindings the pad reads, once, at the first sample. */
 void runtime_pad_set_settings(const char *settings_file);
+/* Seeds whether scePadSetVibration reaches the controllers (the Options menu changes it later); the request still succeeds when off. */
+void runtime_pad_set_rumble(int enabled);
 /* 1 when the slot is Player 1 or has a live gamepad; 0 for a slot the game may drive with AI. */
 int runtime_pad_slot_human(int slot);
 uintptr_t runtime_pad_resolve(const char *name);

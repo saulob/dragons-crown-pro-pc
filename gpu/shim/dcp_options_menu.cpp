@@ -12,6 +12,7 @@
 #include "dcp_options_online.h"
 #include "localization/ui_text.h"
 #include "dcp_ping.h"
+#include "runtime_pad_rumble.h"
 #include "imgui.h"
 
 namespace DcpOptionsUi {
@@ -207,6 +208,9 @@ void Change(const RowRef& row, int direction, const CheatRows& cheats) {
         const DcpOptions::Id id = DcpOptions::Id(row.index);
         const DcpOptions::Outcome outcome = direction == 0 ? Model().Cycle(id) : Model().Step(id, direction);
         state.status = outcome.changed && !outcome.saved ? "Could not save the settings." : std::string();
+        if (outcome.changed && id == DcpOptions::Id::ControllerRumble) {
+            runtime_pad_rumble_changed();
+        }
         break;
     }
     case Kind::Cheat: cheats.activate(row.index, direction); break;

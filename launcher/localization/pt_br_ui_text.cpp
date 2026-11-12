@@ -558,6 +558,9 @@ Cannot create the update workspace.	Não foi possível criar a área de trabalho
 Automatic installation is not available in this build.	A instalação automática não está disponível nesta compilação.
 The update test checksum is not valid.	O checksum de teste da atualização não é válido.
 Skip Intro	Pular introdução
+Controller Rumble	Vibração do controle
+Off disables controller vibration.	Desligado desativa a vibração do controle.
+Off disables controller vibration. Applies at the next game start.	Desligado desativa a vibração do controle. Vale a partir do próximo início do jogo.
 Skip the startup logo and go straight to the title screen	Pula o logo de abertura e vai direto para a tela de título
 Skips the startup logo and starts at the title screen.	Pula o logo de abertura e começa na tela de título.
 Unlock Gallery	Desbloquear Galeria

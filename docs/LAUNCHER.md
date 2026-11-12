@@ -220,6 +220,7 @@ does. Both write byte-identical files from the game's package.
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
 | Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
+| Controls | Controller Rumble | at once |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
 
@@ -261,6 +262,7 @@ use the same defaults).
 | `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (the USA and Asia and Hong Kong builds; the Japanese builds always use them) |
 | `skip_intro` | 1, 0 | 0 | at game start |
 | `japanese_menu_buttons` | 1, 0 | 0 | at game start |
+| `controller_rumble` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `unlock_gallery` | 1, 0 | 0 | at game start |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |

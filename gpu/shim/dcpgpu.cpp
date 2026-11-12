@@ -337,6 +337,14 @@ extern "C" int dcpgpu_overlay_captures_input(void) {
     return DcpOverlay::CapturesInput() ? 1 : 0;
 }
 
+extern "C" int dcpgpu_controller_rumble(void) {
+    return DcpSettings::Get().controller_rumble ? 1 : 0;
+}
+
+extern "C" void dcpgpu_set_controller_rumble(int enabled) {
+    DcpSettings::Get().controller_rumble = enabled != 0;
+}
+
 extern "C" int dcpgpu_latency_trace_enabled(void) {
     return DcpLatencyTrace::enabled ? 1 : 0;
 }

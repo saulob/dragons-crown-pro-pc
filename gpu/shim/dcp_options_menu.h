@@ -157,6 +157,7 @@ enum class Id {
     SkipIntro,
     JapaneseNpcVoices,
     JapaneseMenuButtons,
+    ControllerRumble,
     FrameRate,
     FrameRateInTitle,
     ResolutionInTitle,
@@ -214,6 +215,8 @@ inline constexpr Setting kSettings[] = {
      "Use Japanese voices for NPCs, enemies and AI allies", Apply::Restart, kOffOn, DcpSettings::JapaneseNpcVoices},
     {Id::JapaneseMenuButtons, Page::Controls, "japanese_menu_buttons", "Japanese Menu Buttons",
      "Swaps Confirm and Cancel in the menus, as in the Japanese release. Combat controls do not change.", Apply::Restart, kOffOn},
+    {Id::ControllerRumble, Page::Controls, "controller_rumble", "Controller Rumble",
+     "Off disables controller vibration.", Apply::Live, kOffOn},
     {Id::FrameRate, Page::Gameplay, "frame_rate", "Frame rate",
      "60 FPS is the original game rate. Faster targets show the last frame again; game speed does not change.",
      Apply::Restart, kFrameRates},
@@ -279,6 +282,7 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::SkipIntro: return flag(v.skip_intro);
     case Id::JapaneseNpcVoices: return flag(v.japanese_npc_voices);
     case Id::JapaneseMenuButtons: return flag(v.japanese_menu_buttons);
+    case Id::ControllerRumble: return flag(v.controller_rumble);
     case Id::FrameRate: return std::to_string(v.frame_rate.load());
     case Id::FrameRateInTitle: return flag(v.show_fps_title);
     case Id::ResolutionInTitle: return flag(v.show_resolution_title);
@@ -309,6 +313,7 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::FrameRateInTitle: v.show_fps_title = on; break;
     case Id::ResolutionInTitle: v.show_resolution_title = on; break;
     case Id::FrameCounter: v.show_fps = on; break;
+    case Id::ControllerRumble: v.controller_rumble = on; break;
     case Id::AspectRatio:
     case Id::TrueUltrawide:
     case Id::Renderer:

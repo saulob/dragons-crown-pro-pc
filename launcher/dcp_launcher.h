@@ -134,6 +134,9 @@ int dcp_skip_intro(const char *settings_file);
 /* 1 when the settings file asks for Circle to confirm in the menus (japanese_menu_buttons; 0 by default). */
 int dcp_japanese_menu_buttons(const char *settings_file);
 
+/* 1 when the settings file lets the controllers vibrate (controller_rumble; 1 by default and for an invalid value). */
+int dcp_controller_rumble(const char *settings_file);
+
 /* 1 when the settings file shows every Gallery picture (unlock_gallery; 0 by default). */
 int dcp_unlock_gallery(const char *settings_file);
 

@@ -101,6 +101,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.skip_intro = ParseBool(value, v.skip_intro);
     } else if (key == "japanese_menu_buttons") {
         v.japanese_menu_buttons = ParseBool(value, v.japanese_menu_buttons);
+    } else if (key == "controller_rumble") {
+        v.controller_rumble = ParseBool(value, v.controller_rumble);
     } else if (key == "unlock_gallery") {
         v.unlock_gallery = ParseBool(value, v.unlock_gallery);
     } else if (key == "story_skip_offer") {
