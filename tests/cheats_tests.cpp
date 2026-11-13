@@ -541,7 +541,7 @@ void TestMenuModel() {
     CHECK(overlay.find("MenuNeedsScrollbar(") != std::string::npos);
     CHECK(overlay.find("cheat_list.Resolve(") != std::string::npos);
     CHECK(overlay.find("cheat_list.Step(") != std::string::npos && overlay.find("cheat_list.Click(") != std::string::npos);
-    // ImGui navigation is off for the list: it scrolled the window from the left stick on its own every frame.
+    // No ImGui navigation: it would scroll the list from the left stick.
     const size_t menu_begin = overlay.find("void CheatMenu()");
     const size_t menu_end = overlay.find("void OpenCheatMenu()");
     CHECK(menu_begin != std::string::npos && menu_end != std::string::npos);
@@ -3131,8 +3131,8 @@ void GUEST_HOOK_ABI ProbeTailSite(GuestRegs* regs) {
     g_probes[2] = *regs;
 }
 
-// The skill-item use function's end as CUSA10454 1.00 has it (its bag load, lookup, epilogue and tail jump byte for
-// byte, the lookup's own body), entered from a caller that keeps its own value in r12.
+// Reduced replica of the skill-item use function: CUSA10454 1.00 bag load, lookup, epilogue and tail jump, called
+// from a caller that keeps its own r12.
 struct SkillUseReplica {
     static constexpr uint32_t kDecrement = 0x100, kLookup = 0x140, kFunction = 0x200, kCaller = 0x300;
     static constexpr uint32_t kCountSite = kFunction + 0x23, kBagSite = kFunction + 0x32, kTailSite = kFunction + 0x4c;
@@ -3159,7 +3159,7 @@ struct SkillUseReplica {
             0xe8, 0, 0, 0, 0,                                                 // call lookup (the bag site)
             0x48, 0x85, 0xc0, 0x74, 0x15, 0xbe, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xc7,
             0x5b, 0x41, 0x5c, 0x41, 0x5e, 0x41, 0x5f, 0x5d,                   // the epilogue gives r12 back
-            0xe9, 0, 0, 0, 0,                                                 // jmp decrement (the former site)
+            0xe9, 0, 0, 0, 0,                                                 // jmp decrement (tail jump, not hooked)
             0x5b, 0x41, 0x5c, 0x41, 0x5e, 0x41, 0x5f, 0x5d, 0xc3};
         // push r12; mov r12,rcx; call function; mov rax,r12; pop r12; ret
         const uint8_t caller[] = {0x41, 0x54, 0x49, 0x89, 0xcc, 0xe8, 0, 0, 0, 0, 0x4c, 0x89, 0xe0, 0x41, 0x5c, 0xc3};

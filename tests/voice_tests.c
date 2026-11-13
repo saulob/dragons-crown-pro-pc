@@ -213,7 +213,6 @@ static void TestPinLifecycle(void) {
     CHECK(voice_pin_bank(VOICE_PIN_NPC_BANKS, &manager, FakeAcquire) == 0 && voice_pinned_mask() == 0); /* no banks, no pin */
     voice_hooks_set_enemy_banks(1);
     voice_hooks_set_enabled(0);
-    voice_hooks_set_enabled(0);
     acquire_calls = 0;
     memset(fake_refs, 0, sizeof(fake_refs));
     CHECK(voice_pin_bank(0, &manager, FakeAcquire) == 0 && acquire_calls == 0 && voice_pinned_mask() == 0);

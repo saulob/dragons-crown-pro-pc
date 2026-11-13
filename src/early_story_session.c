@@ -51,11 +51,13 @@ void early_story_session_joined(int is_owner, int room_attr) {
     atomic_store(&role, is_owner ? EARLY_STORY_ROLE_HOST : EARLY_STORY_ROLE_GUEST);
 }
 
+/* A story session ends with its owner; the room then follows the normal-room rule. */
 void early_story_session_owner_changed(int is_owner) {
     if (atomic_load(&role) == EARLY_STORY_ROLE_NONE) return;
     if (atomic_load(&room_host_step) != EARLY_STORY_NO_STEP) {
-        early_story_session_reset();
-        return;
+        atomic_store(&room_host_step, EARLY_STORY_NO_STEP);
+        atomic_store(&native_host_step, EARLY_STORY_NO_STEP);
+        atomic_store(&live_host_step, EARLY_STORY_NO_STEP);
     }
     atomic_store(&role, is_owner ? EARLY_STORY_ROLE_HOST : EARLY_STORY_ROLE_GUEST);
 }

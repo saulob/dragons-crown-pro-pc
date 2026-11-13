@@ -1419,8 +1419,8 @@ static int original_threshold_frame(void) {
     return (int)regs.rax;
 }
 
-/* Bug: own step 0 -> 1 while visiting. The guest's own step is held at its value from the visit's start through the
- * whole session and is what it returns to. */
+/* The guest's own step is held at its value from the visit's start through the whole session and is what it returns
+ * to. */
 static void test_own_step_baseline(void) {
     GuestRegs regs;
     start(0, 0, 0);
@@ -1493,7 +1493,7 @@ static void test_own_step_baseline(void) {
     selected(&regs, 0);
 }
 
-/* Bug: "own story restored" / "following" every frame at the Town Gate. A visit is the room membership: scene changes,
+/* A visit is the room membership: scene changes,
  * reads of the real record and other records never end or restart it. */
 static void test_visit_lifetime(void) {
     static const char *const scenes[] = {"Hydeland -> Guild", "Guild -> Hydeland", "Hydeland -> Shop",
@@ -1685,6 +1685,17 @@ static void test_reset_paths(void) {
         early_story_session_owner_changed(0);
         CHECK(!early_story_visiting());
     }
+
+    /* after the story owner leaves, a remaining early guest is protected again by the normal-room rule */
+    start(10, 0, 5);
+    early_story_note_own_step(10);
+    selected(&regs, 0);
+    CHECK(early_story_visiting());
+    early_story_session_owner_changed(0);
+    CHECK(!early_story_visiting() && !early_story_story_room_guest());
+    early_story_note_host_step(60);
+    CHECK(early_story_visiting());
+    early_story_session_reset();
 
     /* a normal room keeps swapping the role */
     start(45, 0, EARLY_STORY_NO_STEP);

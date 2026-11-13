@@ -119,7 +119,8 @@ sends each new story step as a private room internal binary attribute (`0x7f02`:
 SetRoomDataInternal path, and members get it as `room.internal`, also with the join answer. The guest's port takes it
 out before the game's room callback (an update with nothing else is not delivered), so the game only ever sees its own
 `0x57`. The latest live step wins; a replicated host record never overrides it. If the room changes owner, the story
-session ends for everyone in it, and the new owner's search attributes drop `0x7f01`.
+session ends for everyone in it, the room follows the normal-room rule, and the new owner's search attributes drop
+`0x7f01`.
 
 ### Bug reports
 
@@ -201,7 +202,8 @@ The online service stores anonymous aggregate usage statistics: player counts, s
 how many players each room reached and how long it lasted, how many rooms needed the relay,
 the Dragon's Crown Pro PC version, the platform (Windows, Linux, Steam Deck, Android) and the country. These statistics do not
 store player names, Online names, Friend Codes, account IDs, IP addresses, room codes or friend lists, and there is no
-per-player or per-session record. The same holds for the party statistics below.
+per-player or per-session record, except the Early Story Online record described below. The same holds for the party
+statistics below.
 
 Android clients use this same lobby and the same `online_protocol`, so Android and PC players can share rooms. The `platform`
 a client reports is informational: it never decides who can join, and it is the only device information the service sees (no

@@ -17,9 +17,7 @@ function Stop-Tool([string]$Text) {
 
 $script:BuildLogPath = $null
 
-# One consolidated log per build run: build\logs\build\build_NNN.log, numbered above every existing build log and
-# reserved atomically, so concurrent builds never share a file and a number is never reused. The dragons_crown_pro_NNN
-# name belongs to the loader's run log alone.
+# build\logs\build\build_NNN.log, reserved with CreateNew; dragons_crown_pro_NNN is the loader's run log.
 function Start-BuildLog([string]$Project, [string]$Configuration, [string]$Mode) {
     $dir = Join-Path $script:RepoRoot 'build\logs\build'
     New-Item -ItemType Directory -Force -Path $dir | Out-Null

@@ -122,8 +122,9 @@ static void log_unmapped_joysticks(void) {
         logged[next++%(sizeof(logged)/sizeof(*logged))]=ids[j];
         char guid[33];
         SDL_GUIDToString(SDL_GetJoystickGUIDForID(ids[j]),guid,sizeof(guid));
+        const char *name=SDL_GetJoystickNameForID(ids[j]);
         printf("Runtime: joystick without a gamepad mapping: %s (guid %s, %04x:%04x); add a line for this GUID to gamecontrollerdb.txt in the user folder\n",
-               SDL_GetJoystickNameForID(ids[j]),guid,SDL_GetJoystickVendorForID(ids[j]),SDL_GetJoystickProductForID(ids[j]));
+               name?name:"unknown",guid,SDL_GetJoystickVendorForID(ids[j]),SDL_GetJoystickProductForID(ids[j]));
     }
     SDL_free(ids);
 }

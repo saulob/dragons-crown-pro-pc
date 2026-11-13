@@ -95,8 +95,33 @@ test('an old owner cannot turn a normal room into a story room; a capable owner 
   const modern = greeted(env, MODERN, '198.51.100.4');
   const own = modern.call('room.create', ROOM).room;
   assert.equal(modern.call('room.set_external', { room: own.id, ints: [[STORY_SESSION_ATTR, 2]] }).code, 'ok');
+  assert.ok(env.host.sql.get('SELECT flags FROM rooms WHERE id = ?', Number(own.id)).flags & FLAG_HIDDEN);
   const old2 = greeted(env, OLD, '198.51.100.5');
+  assert.equal(old2.call('room.search', { world: 1 }).total, 1);
   assert.equal(old2.call('room.join', { room: own.id }).code, 'incompatible');
+});
+
+test('the game reopening its story room keeps it hidden from random search', () => {
+  const env = makeLobby();
+  const host = greeted(env, MODERN);
+  const room = host.call('room.create', storyRoom(3, 0x96000000)).room;
+  const guest = greeted(env, MODERN, '198.51.100.4');
+  assert.equal(guest.call('room.join', { code: room.code }).code, 'ok');
+  for (const value of [0x54000000, 0x04000000]) {
+    assert.equal(host.call('room.set_internal', { room: room.id, flag_mask: 0x54000000, flag_value: value }).code, 'ok');
+  }
+  const flags = env.host.sql.get('SELECT flags FROM rooms WHERE id = ?', Number(room.id)).flags;
+  assert.ok(flags & FLAG_HIDDEN);
+  assert.equal(flags & 0x40000000, 0);
+  assert.ok(guest.events('room.internal').at(-1).flags & FLAG_HIDDEN);
+  for (const fields of [MODERN, OLD]) {
+    assert.equal(greeted(env, fields, '198.51.100.9').call('room.search', { world: 1 }).total, 0);
+  }
+  const normal = greeted(env, MODERN, '198.51.100.7');
+  const own = normal.call('room.create', ROOM).room;
+  normal.call('room.set_internal', { room: own.id, flag_mask: 0x54000000, flag_value: 0x54000000 });
+  normal.call('room.set_internal', { room: own.id, flag_mask: 0x54000000, flag_value: 0x04000000 });
+  assert.equal(env.host.sql.get('SELECT flags FROM rooms WHERE id = ?', Number(own.id)).flags & FLAG_HIDDEN, 0);
 });
 
 test('attribute value 0 is not a story session', () => {

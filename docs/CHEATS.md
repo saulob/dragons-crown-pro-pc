@@ -101,7 +101,7 @@ Skill points are an int16 at `+0x24` of the player's save record (record 0 is Pl
 
 ### Infinite Skill Uses
 
-Equipped skill items keep a byte count at `+0x4c` of their item record. The count is decremented in one function, `0x20450`, which has four call sites in two paths. The skill-item use path (`0x1af070`) finds an item by effect id and handles only the Elf's two skill effects (`0x1d9`, `0x1da`). Every other skill item, the Dwarf's Bomb Satchel and its two siblings (effects `0x1d6` to `0x1d8`) among them, is counted down by the equipment wear function (`0x225ce0`), which skips those two effects. Four hooks sit on the four decrement calls and skip them for Player 1 when the item still has at least one use; on the wear function's two sites the item must also pass the game's own skill-item test (`0x206b0`: a skill effect `0x1d1` to `0x1f8` as the first effect), so gear and consumables are not covered by this cheat (Infinite Items covers consumables). The skill action, animation, mana cost and cooldown are unchanged. A skill with 0 uses is not refilled and keeps the game's own empty handling. Players 2 to 4 and enemies are not affected. The recharge to the maximum on returning to town and at stage change (`0x205d0`, `0x1fa40`) is untouched.
+Equipped skill items keep a byte count at `+0x4c` of their item record. The count is decremented in one function, `0x20450`, which has four call sites in two paths. The skill-item use path (`0x1af070`) finds an item by effect id and handles only the Elf's two skill effects (`0x1d9`, `0x1da`). Every other skill item, the Dwarf's Bomb Satchel and its two siblings (effects `0x1d6` to `0x1d8`) among them, is counted down by the equipment wear function (`0x225ce0`), which skips those two effects. Three hooks sit on decrement calls, and one on the bag lookup before the tail-jumped fourth decrement; they skip them for Player 1 when the item still has at least one use; on the wear function's two sites the item must also pass the game's own skill-item test (`0x206b0`: a skill effect `0x1d1` to `0x1f8` as the first effect), so gear and consumables are not covered by this cheat (Infinite Items covers consumables). The skill action, animation, mana cost and cooldown are unchanged. A skill with 0 uses is not refilled and keeps the game's own empty handling. Players 2 to 4 and enemies are not affected. The recharge to the maximum on returning to town and at stage change (`0x205d0`, `0x1fa40`) is untouched.
 
 ### Infinite Items
 
@@ -109,7 +109,7 @@ Non-skill items with a use count (consumables) are counted down at the same two 
 
 ### Infinite Ally Skill Uses
 
-The same four decrement calls as Infinite Skill Uses, for AI-controlled allies instead of Player 1 (the same ally classifier as Infinite Ally Health, so a slot with a human controller is not an ally). It adds no new site. An empty skill keeps the game's own handling. Human Players 2 to 4 are not affected.
+The same four sites as Infinite Skill Uses, for AI-controlled allies instead of Player 1 (the same ally classifier as Infinite Ally Health, so a slot with a human controller is not an ally). It adds no new site. An empty skill keeps the game's own handling. Human Players 2 to 4 are not affected.
 
 ### Infinite Ally Items
 

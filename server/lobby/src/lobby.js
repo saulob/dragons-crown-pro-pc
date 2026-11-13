@@ -1336,7 +1336,9 @@ const HANDLERS = {
     const value = uint32(msg.flag_value ?? 0);
     const changed = binAttrs(msg.bin_int);
     const binInt = merge(JSON.parse(room.bin_int), changed, LIMITS.binAttrsPerArray);
-    const flags = (((room.flags & ~mask) | (value & mask)) & ~FLAG_FULL) >>> 0;
+    let flags = (((room.flags & ~mask) | (value & mask)) & ~FLAG_FULL) >>> 0;
+    // The game reopens its room with HIDDEN under the mask; a story room stays out of random search.
+    if (roomIsStory(room)) flags = (flags | FLAG_HIDDEN) >>> 0;
     const binIntText = JSON.stringify(binInt);
     if (flags === room.flags && binIntText === room.bin_int) return {};
     this.limitWrite(att, 'state');
@@ -1355,9 +1357,10 @@ const HANDLERS = {
     const binExt = merge(JSON.parse(room.bin_ext), binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const intsText = JSON.stringify(ints);
     const binExtText = JSON.stringify(binExt);
-    if (intsText === room.ints && binExtText === room.bin_ext) return {};
+    const flags = isStorySession(ints) ? (room.flags | FLAG_HIDDEN) >>> 0 : room.flags;
+    if (intsText === room.ints && binExtText === room.bin_ext && flags === room.flags) return {};
     this.limitWrite(att, 'state');
-    this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ? WHERE id = ?', intsText, binExtText, room.id);
+    this.host.sql.run('UPDATE rooms SET ints = ?, bin_ext = ?, flags = ? WHERE id = ?', intsText, binExtText, flags, room.id);
     return {};
   },
 

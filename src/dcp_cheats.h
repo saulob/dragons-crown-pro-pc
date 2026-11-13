@@ -490,7 +490,7 @@ constexpr int32_t ScaledDamageTaken(int percent, UnitKind kind, int32_t amount) 
 }
 
 // The hit the game's lethal check weighs against HP: multiplied outside the party, so the hit that empties HP is the
-// one the game treats as lethal (death reaction, break). Heals and party members are left alone; it stops at INT32_MAX.
+// one the game treats as lethal (death reaction, break). Heals and party members are left alone.
 constexpr int32_t MultipliedDamage(int multiplier, UnitKind kind, int32_t amount) {
     if (multiplier <= kDamageMultiplierOff || kind != UnitKind::Other || amount <= 0) {
         return amount;

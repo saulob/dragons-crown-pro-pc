@@ -1,4 +1,3 @@
-/* The Options menu's hook into the pad's rumble state (runtime_pad.c). */
 #ifndef DCP_RUNTIME_PAD_RUMBLE_H
 #define DCP_RUNTIME_PAD_RUMBLE_H
 

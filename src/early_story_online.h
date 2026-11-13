@@ -1,18 +1,5 @@
-/* Early Story Online, the native side. The game offers online play only from story step 45. The one online check is
- * answered by a handler: step 45 as shipped, or true once the access latch is set and for a character visiting a host's
- * story (the two callers that must keep the original threshold get a handler that reproduces it). A guest whose
- * own story differs from the host's is shown a copy of its lead character record carrying the host's step, and the four
- * functions that write campaign progression do nothing for it, so its saved story never changes. The hooks are installed
- * for every online player, which is what lets a guest with the feature off join a host who has it on. Everything is
- * installed together or not at all: one site that does not match leaves the game exactly as it shipped. Sites come from
- * the structural locator (feature_sites.h).
- *
- * A host with the setting on gets online access once Hydeland accepts input, kept for the run (the access latch in
- * early_story_session.h, never saved), and is offered the game's own "Go online?" prompt: the town object's update runs
- * the game's prompt function, which the game itself only runs on the Castle Gate and Stables logic objects, on a
- * stand-in owner object. The prompt's rules, once-per-run flag, Yes/No, sign-in and Network Status are all the original's.
- * Hydeland has no character menu this early, so Triangle opens the original Network Menu there: the pad layer keeps the
- * press and the scene director's own Menu path creates the window as a Network Menu. */
+/* Native hooks for Early Story Online (docs/ONLINE.md). Installed for every online player so a guest can join with the
+ * setting off; all sites install together or none, leaving the game as shipped (sites: feature_sites.h). */
 #ifndef DCP_EARLY_STORY_ONLINE_H
 #define DCP_EARLY_STORY_ONLINE_H
 

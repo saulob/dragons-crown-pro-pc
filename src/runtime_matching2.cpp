@@ -718,6 +718,10 @@ void OnResponse(const net::LobbyMessage& m) {
     } else {
         std::printf("Matching2: request 0x%04x failed: %s\n", p.event, m.code.c_str());
         if (p.event == kEvSetExternal) g.last_external.clear();
+        if (p.event == kEvCreateJoin) {
+            g.story_room_hosted = false;
+            g.story_sent = EARLY_STORY_NO_STEP;
+        }
         if (p.kind == Kind::kCreateJoin && m.code == "incompatible") {
             if (m.body["story_session_required"].as_bool()) {
                 g.notice = "This room is an Early Story Online session.\nThis game version cannot join it.";
@@ -1170,6 +1174,8 @@ DCP_SYSV int32_t m2_join_room(uint16_t context, const uint8_t* request, const vo
     Json body = Json::Object();
     body.set("room", net::u64_text(Rd<uint64_t>(request, 0)));
     std::printf("Matching2: join room %llu\n", (unsigned long long)Rd<uint64_t>(request, 0));
+    g.story_room_hosted = g.clear_story_attr = false;
+    g.story_sent = EARLY_STORY_NO_STEP;
     const uint32_t r = Issue(Kind::kCreateJoin, "room.join", std::move(body), opt, kEvJoin);
     if (id) *id = r;
     return 0;

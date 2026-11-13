@@ -219,7 +219,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Renderer, Render resolution (builds that support it), Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
 | Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
-| Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status; the experimental Early Story Online toggle (Off by default, needs a restart; for the host only: online right after the tutorial, the host controls the story, guests keep their own progress and do not need the option, early-story rooms are friend/direct only) | read only; the test runs on request; Early Story Online is saved and read at the next game start |
+| Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | Controller Rumble | at once |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |

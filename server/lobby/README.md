@@ -74,6 +74,7 @@ hidden. Old clients would desync inside such a room, so the server enforces a cl
   sessions, whatever its player's Early Story Online setting is; the setting only decides who hosts.
 - `room.create` with the attribute above 0 needs that capability (`bad_request`, `story_session`) and always stores
   `FLAG_HIDDEN` (`0x10000000`), so the room stays out of random `room.search`; `room.search` with `code` still finds it.
+  `room.set_internal` and `room.set_external` keep `FLAG_HIDDEN` on a story room, also when the game reopens its room.
 - `room.set_external` by an owner without the capability cannot add the attribute (same error).
 - `room.join`, by id or by code, refuses a client without the capability before it becomes a member: `incompatible`
   with `story_session_required: true`, `online_protocol` and the owner's `version`/`platform`. It is counted as a
