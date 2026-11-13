@@ -865,7 +865,7 @@ void TestIdentityIndependentOfExecutable() {
         const UnsupportedReport report = DiagnoseUnsupportedBuild(source, unlisted);
         CHECK(Reported(report));
         CHECK(Contains(report.lines, "Mapping incomplete"));
-        CHECK(Contains(report.lines, "Build-specific features: 0/9 mapped"));
+        CHECK(Contains(report.lines, "Build-specific features: 0/10 mapped"));
         CHECK(Contains(report.lines, "[missing] submit"));
         CHECK(Contains(report.lines, "LZCNT instructions: 0"));
     }

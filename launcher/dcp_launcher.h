@@ -71,6 +71,9 @@ int dcp_aspect_ratio(const char *settings_file, const char *image_dir);
  * when the file or the value is missing or not one of them. */
 int dcp_text_language(const char *settings_file, const char *image_dir, const char *app0);
 
+/* Whether the saved text_language is the port's Brazilian Portuguese translation. */
+int dcp_text_language_is_portuguese_brazil(const char *settings_file, const char *image_dir, const char *app0);
+
 typedef struct {
     uint64_t offset, size;
     const unsigned char *data;
@@ -139,6 +142,9 @@ int dcp_controller_rumble(const char *settings_file);
 
 /* 1 when the settings file shows every Gallery picture (unlock_gallery; 0 by default). */
 int dcp_unlock_gallery(const char *settings_file);
+
+/* 1 when this player may host Early Story Online (early_story_online; 0 by default; DCP_EARLY_STORY_ONLINE overrides); Online play is not checked. */
+int dcp_early_story_online(const char *settings_file);
 
 /* The Skip Offers the settings file turns on (skip_offers.h bits; none by default). */
 unsigned dcp_skip_offers(const char *settings_file);
@@ -218,6 +224,11 @@ int dcp_resolve_party(const DcpGameBuild *build, const DcpImageView *image, DcpP
  * says why nothing resolved. Returns 1 when resolved. */
 int dcp_resolve_exit_game(const DcpGameBuild *build, const DcpImageView *image, DcpExitGameSites *out, char *failure,
                           size_t failure_size);
+
+/* The same gate for Early Story Online: every supported build, tables or not. `failure` says why nothing resolved.
+ * Returns 1 when resolved. */
+int dcp_resolve_early_story(const DcpGameBuild *build, const DcpImageView *image, DcpEarlyStorySites *out, char *failure,
+                            size_t failure_size);
 
 /* 1 when the game folder holds the files Japanese NPC Voices needs (npc_voice_resources.h). */
 int dcp_npc_voice_resources(const char *app0);

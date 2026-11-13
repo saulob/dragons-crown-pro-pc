@@ -56,6 +56,8 @@ Dragon's Crown Pro includes Online Co-op. Add your friends with a Friend Code, t
 > **Online play is unlocked by the game, not at the first start.** Dragon's Crown does not offer online multiplayer to a new character right away. It becomes available only after the opening tutorial and story section. If the online options are missing early in a new save, that is the game's normal progression, not a problem with the port.
 >
 > To reach Online Co-op faster, turn on **Story Skip Offer** and **Tutorial Skip Offer** on the launcher's **Gameplay** page before creating a new character. The game then lets that character skip the tutorial and start from the second half of the story. Existing characters are not affected.
+>
+> **Early Story Online** (experimental, Off by default, on the launcher's **Online** page) is a different approach: it opens online play for the host right after the opening tutorial, so the first story stage can be played with friends, with the host's story shared and every guest keeping their own saved progress. Only the host needs the option. Early story rooms are friends/join-code only. It is untested in real multiplayer sessions, so treat it as experimental.
 
 ### Playing online
 

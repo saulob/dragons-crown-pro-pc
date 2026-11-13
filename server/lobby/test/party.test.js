@@ -308,7 +308,7 @@ test('a client that never sends party reports behaves exactly as before and adds
 test('the hello answer is unchanged: no capability announces party reports', () => {
   const env = makeLobby();
   const reply = env.connect().hello(GAME);
-  assert.deepEqual(reply.capabilities, { relay_supported: true, relay_max_payload: 1200 });
+  assert.deepEqual(reply.capabilities, { relay_supported: true, relay_max_payload: 1200, story_session: true });
   assert.deepEqual(Object.keys(reply).sort(), ['account', 'capabilities', 'code', 'friend_code', 'ip', 'name', 're', 'time']);
 });
 
@@ -388,7 +388,8 @@ test('analytics hold no player, account, address, room or save information after
     .map((r) => r.name).sort();
   assert.deepEqual(tables, ['accounts', 'friend_requests', 'friends', 'incident_quota', 'incident_tracking', 'incidents', 'members', 'meta',
     'metrics_daily',
-    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'rooms']);
+    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'rooms', 'story_users']);
+  assert.equal(env.host.sql.get('SELECT COUNT(*) AS n FROM story_users').n, 0);
   assert.deepEqual(env.host.sql.all('PRAGMA table_info(metrics_daily_dimensions)').map((c) => c.name),
     ['day', 'dimension', 'value', 'count']);
 });

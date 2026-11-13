@@ -76,6 +76,8 @@ add_subdirectory(gpu)
 add_subdirectory(launcher)
 
 set(DCP_RUNTIME_SOURCES
+    src/early_story_online.c
+    src/early_story_session.c
     src/exit_game_hook.c
     src/exit_game_text.c
     src/gallery_unlock.c
@@ -183,7 +185,7 @@ target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
 # The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
 # DCP_TEST_LOBBY names one. Not part of the default build.
 add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp
-    launcher/online_view.cpp)
+    src/early_story_session.c launcher/online_view.cpp)
 target_include_directories(dcp-online-hle-tests PRIVATE launcher)
 target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
 set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -207,6 +209,13 @@ add_executable(dcp-default-message-tests EXCLUDE_FROM_ALL tests/default_message_
 target_include_directories(dcp-default-message-tests PRIVATE src)
 target_compile_definitions(dcp-default-message-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-default-message-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of Early Story Online: the session rules, the hooks on synthetic images and the local boot images
+# (tools/test.ps1); not part of the default build.
+add_executable(dcp-early-story-tests EXCLUDE_FROM_ALL tests/early_story_online_tests.c src/early_story_online.c src/early_story_session.c src/guest_hook.c)
+target_include_directories(dcp-early-story-tests PRIVATE src)
+target_compile_definitions(dcp-early-story-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-early-story-tests PRIVATE -Wall -Wextra -Werror)
 
 add_executable(dcp-menu-buttons-tests EXCLUDE_FROM_ALL tests/menu_buttons_tests.c src/menu_buttons.c)
 target_include_directories(dcp-menu-buttons-tests PRIVATE src)
@@ -307,7 +316,8 @@ endif()
 # tables, synthetic images with every refusal case, and the known-build-only rule (tools/test.ps1); not part of the
 # default build.
 add_executable(dcp-feature-sites-tests EXCLUDE_FROM_ALL tests/feature_sites_tests.cpp src/cheat_hooks.cpp
-    src/runtime_cheats.cpp src/guest_hook.c src/party_hook.cpp src/ultrawide_hooks.c src/voice_hooks.c)
+    src/runtime_cheats.cpp src/guest_hook.c src/party_hook.cpp src/ultrawide_hooks.c src/voice_hooks.c
+    src/early_story_online.c src/early_story_session.c)
 set_target_properties(dcp-feature-sites-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-feature-sites-tests PRIVATE src launcher)
 target_compile_definitions(dcp-feature-sites-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

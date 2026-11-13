@@ -9,6 +9,7 @@ import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
 import { Metrics, countryCode, platformBit, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
+import { STORY_ROLES, STORY_SEEN_PER_ROOM, StoryUsage, storyRole } from './story_usage.js';
 
 export const PROTOCOL = 1;
 
@@ -60,6 +61,7 @@ const GROWING_OPS = new Set(['hello', 'room.create', 'room.join', 'room.resume']
 export const FLAG_CLOSED = 0x40000000;
 export const FLAG_FULL = 0x20000000;
 export const FLAG_HIDDEN = 0x10000000;
+export const STORY_SESSION_ATTR = 0x7f01;
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const DAY_MS = 24 * 3600 * 1000;
@@ -113,6 +115,7 @@ const MIGRATIONS = [
     `ALTER TABLE rooms ADD COLUMN relayed INTEGER NOT NULL DEFAULT 0`],
   [`ALTER TABLE members ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''`],
   [`ALTER TABLE rooms ADD COLUMN platforms INTEGER NOT NULL DEFAULT 0`],
+  [`ALTER TABLE rooms ADD COLUMN story_seen TEXT NOT NULL DEFAULT '[]'`],
 ];
 
 // ---- input validation ----
@@ -176,6 +179,13 @@ function compatible(att, room) {
   return (att.online_protocol ?? 0) === room.online_protocol;
 }
 
+// A story session room carries STORY_SESSION_ATTR > 0; only clients that declared story_session may host or join one.
+function isStorySession(ints) {
+  return ints.some(([id, value]) => id === STORY_SESSION_ATTR && value > 0);
+}
+
+const roomIsStory = (room) => isStorySession(JSON.parse(room.ints));
+
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 export function ipv4Kind(ip) {
@@ -226,6 +236,8 @@ export class Lobby {
     if (!this.meta('salt')) this.setMeta('salt', this.randomHex(16));
     this.salt = this.meta('salt');
     this.metrics = new Metrics(host.sql, () => host.now());
+    this.story = new StoryUsage(host.sql, () => host.now());
+    if (!this.meta('story_since')) this.setMeta('story_since', host.now());
     this.incidents = new IncidentDesk(host.sql, this.meta('salt'));
     this.alarmAt = options.alarmAt ?? null;
     this.guards = {
@@ -519,7 +531,51 @@ export class Lobby {
   }
 
   metricsSummary() {
-    return this.metrics.summary(this.liveMetrics());
+    return { ...this.metrics.summary(this.liveMetrics()), story: this.storySummary() };
+  }
+
+  // Early Story Online as the dashboard shows it: rooms and seats from the live tables, history from the counters.
+  storySummary() {
+    const now = this.host.now();
+    const seats = new Map();
+    for (const m of this.host.sql.all('SELECT room, member, account, name FROM members WHERE conn IS NOT NULL')) {
+      if (!seats.has(m.room)) seats.set(m.room, []);
+      seats.get(m.room).push(m);
+    }
+    const live = { rooms: 0, parties: 0, waiting: 0, players: 0 };
+    const active = new Map();
+    for (const room of this.host.sql.all('SELECT id, owner, ints, created FROM rooms')) {
+      if (!roomIsStory(room)) continue;
+      const connected = seats.get(room.id) ?? [];
+      live.rooms += 1;
+      live.players += connected.length;
+      if (connected.length > 1) live.parties += 1;
+      else if (connected.length === 1) live.waiting += 1;
+      for (const m of connected) {
+        active.set(m.account, { role: m.member === room.owner ? 'Host' : 'Guest', members: connected.length,
+          age_ms: Math.max(0, now - room.created) });
+      }
+    }
+    const used = this.story.totals();
+    const counted = this.metrics.storyTotals();
+    return {
+      since: Number(this.meta('story_since')),
+      live,
+      totals: { rooms_created: counted.rooms_created, guest_joins: counted.guest_joins, sessions: used.sessions,
+        users: used.users },
+      users: this.story.users(active.keys()).map((u) => ({ name: u.name, account: u.account, role: storyRole(u),
+        sessions: u.hosted + u.guested, last_used: u.last_used, active: active.get(u.account) ?? null })),
+    };
+  }
+
+  // One account's first seat in this story room, as host or guest: counted once however it leaves, returns or resumes.
+  noteStoryParticipation(roomId, att, column) {
+    this.track(() => {
+      const seen = JSON.parse(this.host.sql.get('SELECT story_seen FROM rooms WHERE id = ?', roomId)?.story_seen ?? '[]');
+      if (seen.includes(att.account) || seen.length >= STORY_SEEN_PER_ROOM) return;
+      this.host.sql.run('UPDATE rooms SET story_seen = ? WHERE id = ?', JSON.stringify([...seen, att.account]), roomId);
+      this.story.record(att.account, att.name, column);
+    });
   }
 
   metricsHistory(days) {
@@ -1043,7 +1099,7 @@ const HANDLERS = {
     const version = cleanText(msg.version ?? '', LIMITS.versionChars);
     const platform = cleanText(msg.platform ?? '', LIMITS.platformChars);
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
-      version, platform, relay: msg.relay === true });
+      version, platform, relay: msg.relay === true, story_session: msg.story_session === true });
     if (att.relay) this.relays.negotiated(att);
     if (msg.lobby === true && presence && LOBBY_NAME.test(name)) this.showInLobby(att, now);
     this.index = null;
@@ -1051,7 +1107,8 @@ const HANDLERS = {
     if (newSession) this.track(() => this.metrics.session(att));
     else if (presence) this.diagnose('hello_reconnect_deduped');
     this.diagnose('hello_accepted');
-    return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now, capabilities: CAPABILITIES };
+    return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now,
+      capabilities: { ...CAPABILITIES, story_session: true } };
   },
 
   worlds(att) {
@@ -1092,8 +1149,12 @@ const HANDLERS = {
   'room.create'(att, msg) {
     if (att.room) fail('in_room');
     if (!isInt(msg.world, 1, 0xffff) || !isInt(msg.slots, 1, MEMBER_IDS.length)) fail('bad_request', 'room');
-    const flags = uint32(msg.flags ?? 0);
+    let flags = uint32(msg.flags ?? 0);
     const ints = merge([], intAttrs(msg.ints), LIMITS.intAttrsPerRoom);
+    if (isStorySession(ints)) {
+      if (!att.story_session) fail('bad_request', 'story_session');
+      flags = (flags | FLAG_HIDDEN) >>> 0;
+    }
     const binInt = merge([], binAttrs(msg.bin_int), LIMITS.binAttrsPerArray);
     const binExt = merge([], binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const memberBin = binAttrs(msg.member_bin);
@@ -1110,6 +1171,10 @@ const HANDLERS = {
     JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0, platformBit(att.platform));
     this.insertMember(att, id, MEMBER_IDS[0], memberBin);
     this.track(() => this.metrics.count('rooms_created'));
+    if (isStorySession(ints)) {
+      this.track(() => this.metrics.count('story_rooms'));
+      this.noteStoryParticipation(id, att, STORY_ROLES.host);
+    }
     this.diagnose('room_create_accepted');
     return { room: this.fullRoom(this.roomRow(id)), me: MEMBER_IDS[0] };
   },
@@ -1169,6 +1234,11 @@ const HANDLERS = {
       const owner = this.memberRow(room.id, room.owner);
       fail('incompatible', '', { online_protocol: room.online_protocol, ...clientOf(owner) });
     }
+    if (!att.story_session && isStorySession(JSON.parse(room.ints))) {
+      this.countReject('story_session', att.account);
+      const owner = this.memberRow(room.id, room.owner);
+      fail('incompatible', '', { online_protocol: room.online_protocol, story_session_required: true, ...clientOf(owner) });
+    }
     const members = this.memberRows(room.id);
     if (members.length >= room.slots) fail('full');
     if (room.flags & FLAG_CLOSED) fail('closed');
@@ -1186,6 +1256,10 @@ const HANDLERS = {
     const roomId = room.id;
     this.later(() => this.exchangeEndpoints(roomId, memberId));
     this.track(() => this.metrics.count('room_joins'));
+    if (roomIsStory(room)) {
+      this.track(() => this.metrics.count('story_guest_joins'));
+      this.noteStoryParticipation(room.id, att, STORY_ROLES.guest);
+    }
     return { room: this.fullRoom(this.roomRow(room.id)), me: memberId };
   },
 
@@ -1257,6 +1331,7 @@ const HANDLERS = {
     const room = this.requireRoom(att, msg.room);
     this.requireOwner(att, room);
     const ints = merge(JSON.parse(room.ints), intAttrs(msg.ints), LIMITS.intAttrsPerRoom);
+    if (!att.story_session && isStorySession(ints)) fail('bad_request', 'story_session');
     const binExt = merge(JSON.parse(room.bin_ext), binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const intsText = JSON.stringify(ints);
     const binExtText = JSON.stringify(binExt);

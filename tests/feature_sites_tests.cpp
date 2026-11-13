@@ -21,6 +21,7 @@
 #include "dcp_cheats.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "early_story_online.h"
 #include "feature_sites.h"
 #include "game_profile.h"
 #include "party_hook.h"
@@ -1094,6 +1095,493 @@ void TestKnownBuildsOnly() {
           voices.find("settings_file") == std::string::npos);
 }
 
+
+struct EarlyStoryReference {
+    const char* label;
+    DcpEarlyStorySites sites;
+};
+
+// {selector, online check, hint call, notice call, host record call, {advance, tier, talisman, flag}, prompt call,
+// prompt function, prompt owner vtable, town portal call, menu press call, menu step call, menu kind store, hint create,
+// hint text, hint hide, hint refresh, room wish, room wish location test, room info location store.
+const EarlyStoryReference kEarlyStory[] = {
+    {"CUSA10454 1.00 USA",
+     {0x4763d0, 0x86f00, 0x39cd1f, 0x369d0e, 0x42a8dc, {0x476490, 0x478560, 0x4769e0, 0x4778c0}, 0x369a06, 0x369920, 0xb14ce8, 0x3cdbd9,
+      0x432904, 0x432b21, 0x432cf2, 0x4b09f0, 0x4ec630, 0x4ec910, 0x5910a0, 0x43bc60, 0x43bd40, 0x439069}},
+    {"CUSA07001 1.00 Japan",
+     {0x4755d0, 0x865e0, 0x39c29f, 0x3692ae, 0x429acc, {0x475690, 0x477760, 0x475be0, 0x476ac0}, 0x368fa6, 0x368ec0, 0xb10958, 0x3cce49,
+      0x431b34, 0x431d51, 0x431f22, 0x4aed00, 0x4ea490, 0x4ea770, 0x58f140, 0x43ae90, 0x43af70, 0x438299}},
+    {"CUSA07001 1.02 Japan",
+     {0x4759a0, 0x86880, 0x39c60f, 0x3695fe, 0x429eec, {0x475a60, 0x477b30, 0x475fb0, 0x476e90}, 0x3692f6, 0x369210, 0xb10958, 0x3cd259,
+      0x431f14, 0x432131, 0x432302, 0x4af180, 0x4eaa10, 0x4eacf0, 0x58f070, 0x43b270, 0x43b350, 0x438679}},
+    {"CUSA07001 1.03 Japan",
+     {0x475a60, 0x86880, 0x39c65f, 0x36964e, 0x429fac, {0x475b20, 0x477bf0, 0x476070, 0x476f50}, 0x369346, 0x369260, 0xb10958, 0x3cd2a9,
+      0x431fd4, 0x4321f1, 0x4323c2, 0x4af240, 0x4eaad0, 0x4eadb0, 0x58f130, 0x43b330, 0x43b410, 0x438739}},
+    {"CUSA10209 1.00 Asia/Hong Kong",
+     {0x475740, 0x86750, 0x39c40f, 0x36941e, 0x429c3c, {0x475800, 0x4778d0, 0x475d50, 0x476c30}, 0x369116, 0x369030, 0xb59978, 0x3ccfb9,
+      0x431ca4, 0x431ec1, 0x432092, 0x4aee70, 0x4ea4a0, 0x4ea780, 0x58f1a0, 0x43b000, 0x43b0e0, 0x438409}},
+};
+
+bool SameEarlyStory(const DcpEarlyStorySites& a, const DcpEarlyStorySites& b) {
+    return a.selector == b.selector && a.online_accessor == b.online_accessor && a.hint_call == b.hint_call &&
+           a.notice_call == b.notice_call && a.host_record_call == b.host_record_call &&
+           !std::memcmp(a.writers, b.writers, sizeof(a.writers)) && a.prompt_call == b.prompt_call &&
+           a.prompt_function == b.prompt_function && a.prompt_owner_vtable == b.prompt_owner_vtable &&
+           a.town_portal_call == b.town_portal_call && a.menu_press_call == b.menu_press_call &&
+           a.menu_step_call == b.menu_step_call && a.menu_kind_store == b.menu_kind_store && a.hint_create == b.hint_create &&
+           a.hint_text == b.hint_text && a.hint_hide == b.hint_hide && a.hint_refresh == b.hint_refresh &&
+           a.room_wish_function == b.room_wish_function && a.room_wish_location == b.room_wish_location &&
+           a.room_info_location == b.room_info_location;
+}
+
+uint64_t CallTarget(const std::vector<uint8_t>& bytes, uint64_t at) {
+    int32_t displacement = 0;
+    std::memcpy(&displacement, &bytes[at + 1], sizeof(displacement));
+    return uint64_t(int64_t(at) + 5 + displacement);
+}
+
+size_t CallsTo(const std::vector<uint8_t>& bytes, uint64_t size, uint64_t function) {
+    size_t calls = 0;
+    for (uint64_t i = 0; i + 5 <= size; ++i) calls += bytes[i] == 0xe8 && CallTarget(bytes, i) == function;
+    return calls;
+}
+
+// The game's own "Go online?" prompt (its Castle Gate and Stables facility step), shipped and with the feature installed.
+void CheckOriginalPrompt(const std::vector<uint8_t>& shipped, const std::vector<uint8_t>& patched, uint64_t size,
+                         const DcpEarlyStorySites& sites, const GuestHook (&hooks)[EARLY_STORY_HOOKS]) {
+    const uint64_t wrapper = CallTarget(shipped, sites.prompt_call);
+    CHECK(CallTarget(shipped, wrapper + 17) == sites.online_accessor && CallsTo(shipped, size, sites.online_accessor) == 1);
+    // The prompt's own call still reaches the wrapper and the one accessor; the accessor answers as shipped (step > 0x2c)
+    // or, for a host with the setting on, from step 4.
+    const auto reaches_accessor = [&](const std::vector<uint8_t>& bytes) {
+        return bytes[sites.prompt_call] == 0xe8 && CallTarget(bytes, sites.prompt_call) == wrapper &&
+               CallTarget(bytes, wrapper + 17) == sites.online_accessor;
+    };
+    CHECK(reaches_accessor(shipped) && reaches_accessor(patched));
+    CHECK(shipped[sites.online_accessor + 3] == 0x2c);
+    const auto offered_shipped = [&](int step) { return step > shipped[sites.online_accessor + 3]; };
+    CHECK(!offered_shipped(4) && !offered_shipped(5) && !offered_shipped(44) && offered_shipped(45) && offered_shipped(60));
+    early_story_set_active(1);
+    early_story_session_reset();
+    early_story_set_hosting(0);
+    for (int step = 0; step <= 60; ++step) CHECK(early_story_online_unlocked(step) == offered_shipped(step));
+    early_story_set_hosting(1);
+    for (int step = 0; step <= 60; ++step) CHECK(early_story_online_unlocked(step) == offered_shipped(step));
+    early_story_grant_access();
+    for (int step = 0; step <= 60; ++step) CHECK(early_story_online_unlocked(step));
+    early_story_set_hosting(0);
+    for (int step = 0; step <= 60; ++step) CHECK(early_story_online_unlocked(step) == offered_shipped(step));
+    CHECK(patched[sites.online_accessor] == 0xe9 && hooks[8].offset == sites.online_accessor &&
+          hooks[8].handler == early_story_online_check_hook);
+    for (const GuestHook& hook : hooks)
+        CHECK(hook.offset + hook.length <= sites.prompt_call || hook.offset >= sites.prompt_call + 5);
+
+    // Once per run: the runtime byte [manager+0x14d] has a single writer in the game, the prompt's eligible branch.
+    const uint64_t once = sites.prompt_call + 0x57;
+    const uint8_t once_store[] = {0xc6, 0x83, 0x4d, 0x01, 0x00, 0x00, 0x01};
+    CHECK(std::equal(std::begin(once_store), std::end(once_store), shipped.begin() + once));
+    std::vector<uint64_t> once_writers;
+    for (uint64_t i = 0; i + 6 <= size; ++i) {
+        if ((shipped[i] == 0xc6 || shipped[i] == 0x88) && (shipped[i + 1] & 0xc0) == 0x80 && shipped[i + 2] == 0x4d &&
+            shipped[i + 3] == 0x01 && !shipped[i + 4] && !shipped[i + 5])
+            once_writers.push_back(i);
+    }
+    CHECK(once_writers == std::vector<uint64_t>{once});
+    CHECK(std::equal(shipped.begin() + sites.prompt_call - 4, shipped.begin() + once + sizeof(once_store),
+                     patched.begin() + sites.prompt_call - 4));
+
+    // Reached only from its two facility callers, and every caller of the online wrapper but the hint and the notice
+    // (the prompt, the Network Status line, the Network Menu rows) keeps calling it.
+    const uint64_t prompt_function = sites.prompt_function;
+    CHECK(prompt_function < sites.prompt_call && sites.prompt_call - prompt_function < 0x200);
+    const uint8_t prologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57};
+    CHECK(std::equal(std::begin(prologue), std::end(prologue), shipped.begin() + prompt_function));
+    CHECK(CallsTo(shipped, size, prompt_function) == 2 && CallsTo(patched, size, prompt_function) == 2);
+    CHECK(CallsTo(shipped, size, wrapper) == 13 && CallsTo(patched, size, wrapper) == 11);
+
+    // The step-45 "Network Menu" notice keeps its save write behind the original threshold.
+    const uint8_t notice_store[] = {0xc6, 0x83, 0x9d, 0x01, 0x00, 0x00, 0x01};
+    CHECK(std::equal(std::begin(notice_store), std::end(notice_store), patched.begin() + sites.notice_call + 0x21));
+    CHECK(hooks[2].offset == sites.notice_call && hooks[2].handler == early_story_original_online_hook);
+
+    // Every other story gate (the Stables' step > 0x28 among them) compares the same step as shipped.
+    size_t gates = 0, stables = 0;
+    for (uint64_t i = 0; i + 4 <= size; ++i) {
+        if (shipped[i] != 0x80 || shipped[i + 1] != 0x7f || shipped[i + 2] != 0x6f || i == sites.online_accessor)
+            continue;
+        ++gates;
+        stables += shipped[i + 3] == 0x28;
+        CHECK(std::equal(shipped.begin() + i, shipped.begin() + i + 4, patched.begin() + i));
+    }
+    CHECK(gates > 40 && stables >= 1);
+
+    // The three other accessors with the same body (B routes, Act-2 stage events, one more) are not hooked.
+    const uint8_t accessor_body[] = {0x80, 0x7f, 0x6f, 0x2c, 0x0f, 0x97, 0xc0, 0xc3};
+    size_t same_body = 0, same_body_patched = 0;
+    for (uint64_t i = 0; i + sizeof(accessor_body) <= size; ++i) {
+        same_body += std::equal(std::begin(accessor_body), std::end(accessor_body), shipped.begin() + i);
+        same_body_patched += std::equal(std::begin(accessor_body), std::end(accessor_body), patched.begin() + i);
+    }
+    CHECK(same_body >= 4 && same_body_patched == same_body - 1);
+}
+
+bool ContainsBytes(const std::vector<uint8_t>& bytes, uint64_t from, uint64_t length, std::initializer_list<uint8_t> needle) {
+    return std::search(bytes.begin() + from, bytes.begin() + from + length, needle.begin(), needle.end()) !=
+           bytes.begin() + from + length;
+}
+
+uint64_t StoredPointer(const std::vector<uint8_t>& bytes, uint64_t at) {
+    uint64_t value = 0;
+    std::memcpy(&value, &bytes[at], sizeof(value));
+    return value;
+}
+
+// The Hydeland trigger: the game's prompt function runs from the town object's update, and everything it relies on is in
+// the image as the native side assumes.
+void CheckHydelandTrigger(const std::vector<uint8_t>& shipped, const std::vector<uint8_t>& patched, uint64_t size,
+                          const DcpEarlyStorySites& sites, const GuestHook (&hooks)[EARLY_STORY_HOOKS]) {
+    CHECK(hooks[9].offset == sites.town_portal_call && hooks[9].handler == early_story_town_portal_hook);
+    CHECK(shipped[sites.town_portal_call] == 0xe8 && patched[sites.town_portal_call] == 0xe9);
+
+    // The town menu window's creation is untouched.
+    const std::vector<std::vector<uint8_t>> menu_code = {
+        {0x80, 0xf9, 0x02, 0x75, 0x0a, 0x4c, 0x89, 0xf7, 0xe8},
+        {0x84, 0xc0, 0x0f, 0x84}};
+    const auto first = std::search(shipped.begin(), shipped.begin() + size, menu_code[0].begin(), menu_code[0].end());
+    CHECK(first != shipped.begin() + size);
+    if (first != shipped.begin() + size) {
+        const uint64_t at = uint64_t(first - shipped.begin());
+        CHECK(std::equal(shipped.begin() + at, shipped.begin() + at + 15, patched.begin() + at));
+    }
+
+    // The portal call is the town's own every-frame call with the town object in rdi (mov rdi, rbx before it).
+    CHECK(shipped[sites.town_portal_call - 3] == 0x48 && shipped[sites.town_portal_call - 2] == 0x89 &&
+          shipped[sites.town_portal_call - 1] == 0xdf);
+    // The town state byte the trigger reads is the one the town's input check reads right after its two calls.
+    const uint8_t state_load[] = {0x8a, 0x83, 0x04, 0x01, 0x00, 0x00, 0x3c, 0x01};
+    CHECK(std::equal(std::begin(state_load), std::end(state_load), shipped.begin() + sites.town_portal_call + 5 + 3 + 5));
+
+    // The prompt function is not patched and still has the two callers the game gave it (Castle Gate and Stables).
+    const uint64_t function = sites.prompt_function;
+    CHECK(std::equal(shipped.begin() + function, shipped.begin() + function + 0x100, patched.begin() + function));
+    CHECK(CallsTo(shipped, size, function) == 2 && CallsTo(patched, size, function) == 2);
+    // What it reads and writes of its owner and of the game manager is what the stand-in owner provides.
+    CHECK(ContainsBytes(shipped, function, 0x400, {0x49, 0x8b, 0x87, 0xe0, 0x01, 0x00, 0x00}));       // owner + 0x1e0
+    CHECK(ContainsBytes(shipped, function, 0x400, {0x41, 0x80, 0x4c, 0x24, 0x51, 0x80}));             // owner + 0x51 |= 0x80
+    CHECK(ContainsBytes(shipped, function, 0x400, {0x41, 0x89, 0x84, 0x24, 0x74, 0x0a, 0x00, 0x00}));  // owner + 0xa74
+    CHECK(ContainsBytes(shipped, function, 0x400, {0x80, 0xbb, 0x4d, 0x01, 0x00, 0x00, 0x00}));        // manager + 0x14d
+    CHECK(sites.prompt_owner_vtable + 0xe0 < size);
+    CHECK(ContainsBytes(shipped, StoredPointer(shipped, sites.prompt_owner_vtable + 0xa0), 8,
+                        {0x83, 0xfe, 0x03, 0x77, 0x20, 0x48, 0x63, 0xc6}));
+    CHECK(ContainsBytes(shipped, StoredPointer(shipped, sites.prompt_owner_vtable + 0xd0), 8,
+                        {0x48, 0x8b, 0xbf, 0xe0, 0x01, 0x00, 0x00, 0xe9}));
+    // Each manager and context offset the trigger uses is in the manager getter the town update calls first.
+    const uint8_t getter[] = {0x48, 0x8b, 0x87, 0x98, 0x09, 0x00, 0x00, 0x48, 0x8b, 0x40, 0x20, 0xc3};
+    size_t getters = 0;
+    for (uint64_t i = 0; i + sizeof(getter) <= size; ++i)
+        getters += std::equal(std::begin(getter), std::end(getter), shipped.begin() + i);
+    CHECK(getters == 1);
+}
+
+// The Network Menu shortcut rides the scene director's Menu path: the press test is the action test with the Menu
+// action, the step check selects the lead record, and the kind store ends the creation path that the creation flag
+// guards. Every site is a hook on the shipped bytes.
+void CheckMenuShortcut(const std::vector<uint8_t>& shipped, const std::vector<uint8_t>& patched,
+                       const DcpEarlyStorySites& sites, const GuestHook (&hooks)[EARLY_STORY_HOOKS]) {
+    CHECK(hooks[10].offset == sites.menu_press_call && hooks[10].handler == early_story_menu_press_hook);
+    CHECK(hooks[11].offset == sites.menu_step_call && hooks[11].handler == early_story_menu_step_hook);
+    CHECK(hooks[12].offset == sites.menu_kind_store && hooks[12].handler == early_story_menu_kind_hook);
+    CHECK(hooks[10].length == 5 && hooks[11].length == 5 && hooks[12].length == EARLY_STORY_MENU_KIND_HOOK_LENGTH);
+    const uint8_t menu_action[] = {0xbe, 0x23, 0x00, 0x00, 0x00, 0x48, 0x89, 0xc7};
+    CHECK(std::equal(std::begin(menu_action), std::end(menu_action), shipped.begin() + sites.menu_press_call - 8));
+    CHECK(shipped[sites.menu_press_call] == 0xe8 && shipped[sites.menu_step_call] == 0xe8);
+    CHECK(patched[sites.menu_press_call] == 0xe9 && patched[sites.menu_step_call] == 0xe9 &&
+          patched[sites.menu_kind_store] == 0xe9);
+    // the creation flag's branch lands on the kind store hook, and the kind field is the one the window reads
+    const uint64_t test = sites.menu_kind_store - EARLY_STORY_MENU_CREATED_BACK;
+    int32_t over = 0;
+    std::memcpy(&over, &shipped[test + 6], sizeof(over));
+    CHECK(shipped[test] == 0x41 && shipped[test + 1] == 0xf6 && shipped[test + 2] == 0xc7 && shipped[test + 3] == 0x01 &&
+          uint64_t(int64_t(test) + 10 + over) == sites.menu_kind_store);
+    uint32_t kind_field = 0;
+    std::memcpy(&kind_field, &shipped[sites.menu_kind_store - 10 + 2], sizeof(kind_field));
+    CHECK(kind_field == EARLY_STORY_MENU_KIND);
+    // the press test and the step check are the game's own functions
+    const uint64_t press = CallTarget(shipped, sites.menu_press_call), step = CallTarget(shipped, sites.menu_step_call);
+    const uint8_t press_prologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x56, 0x53, 0x89, 0xf0, 0x49, 0x89, 0xfe, 0x48, 0x8d, 0x1c, 0x40};
+    CHECK(std::equal(std::begin(press_prologue), std::end(press_prologue), shipped.begin() + press));
+    CHECK(shipped[step + 4] == 0xe8 && CallTarget(shipped, step + 4) == sites.selector);
+}
+
+// The hint calls the game's top help dialog (window type 0x28) functions, none of them patched: the window function
+// asks for that type and sets the top mode, the text function formats into the dialog's text object, the hide sets the
+// dialog's hide state, and the dialog's own show method (the one the window's vtable holds) is the one the native side
+// verifies before it calls it.
+void CheckHintSites(const std::vector<uint8_t>& shipped, const std::vector<uint8_t>& patched, uint64_t size,
+                    const DcpEarlyStorySites& sites) {
+    CHECK(sites.hint_create && sites.hint_text && sites.hint_hide && sites.hint_refresh);
+    for (const uint32_t site : {sites.hint_create, sites.hint_text, sites.hint_hide, sites.hint_refresh}) {
+        CHECK(site + 8 <= size && std::equal(shipped.begin() + site, shipped.begin() + site + 8, patched.begin() + site));
+    }
+    const uint8_t type_request[] = {0xbe, 0x28, 0x00, 0x00, 0x00, 0xe8};
+    CHECK(std::equal(std::begin(type_request), std::end(type_request), shipped.begin() + sites.hint_create + 10));
+    const uint8_t top_mode[] = {0xbe, 0x07, 0x00, 0x00, 0x00};
+    CHECK(std::search(shipped.begin() + sites.hint_create, shipped.begin() + sites.hint_create + 0x30, std::begin(top_mode),
+                      std::end(top_mode)) != shipped.begin() + sites.hint_create + 0x30);
+    const uint8_t text_object[] = {0x48, 0x81, 0xc7, 0xe0, 0x03, 0x00, 0x00};
+    CHECK(std::search(shipped.begin() + sites.hint_text, shipped.begin() + sites.hint_text + 0x80, std::begin(text_object),
+                      std::end(text_object)) != shipped.begin() + sites.hint_text + 0x80);
+    CHECK(shipped[sites.hint_hide + 15] == 0x2b && shipped[sites.hint_refresh + 7] == 0xff && shipped[sites.hint_refresh + 8] == 0x7f);
+    // the show method: a pointer to it sits at the show slot of a vtable that also holds the dialog's hide target
+    const uint8_t show_body[] = {0x89, 0xb7, 0x34, 0x06, 0x00, 0x00, 0x88, 0x97, 0x39, 0x06, 0x00, 0x00,
+                                 0xbe, 0x01, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x47, 0x50};
+    size_t methods = 0, slots = 0;
+    for (uint64_t at = 0; at + sizeof(show_body) <= size; ++at) {
+        if (shipped[at] != 0x89 || !std::equal(std::begin(show_body), std::end(show_body), shipped.begin() + at)) continue;
+        ++methods;
+        for (uint64_t slot = 0; slot + 8 <= size; slot += 8) slots += StoredPointer(shipped, slot) == at;
+    }
+    CHECK(methods == 2 && slots >= 6);
+    CHECK(EARLY_STORY_HINT_WINDOW_TYPE == 0x28 && EARLY_STORY_HINT_SHOW_SLOT == 0x188 && EARLY_STORY_HINT_TEXT_OBJECT == 0x3e0);
+}
+
+// The host room: the room wish asks the online wrapper first; its town branch wants a room for the Castle Gate and Stables
+// (`or eax, 8; cmp eax, 9` on the location) and otherwise drops it, and the hook sits on that location test.
+void CheckRoomWish(const std::vector<uint8_t>& shipped, const std::vector<uint8_t>& patched, const DcpEarlyStorySites& sites,
+                   const GuestHook (&hooks)[EARLY_STORY_HOOKS]) {
+    CHECK(hooks[13].offset == sites.room_wish_location && hooks[13].handler == early_story_room_wish_hook &&
+          hooks[13].length == EARLY_STORY_ROOM_WISH_HOOK_LENGTH);
+    CHECK(shipped[sites.room_wish_function + 0x5b] == 0xe8 &&
+          CallTarget(shipped, sites.room_wish_function + 0x5b) == CallTarget(shipped, sites.hint_call));
+    const uint8_t location_test[] = {0x8b, 0x83, 0xf0, 0x00, 0x00, 0x00, 0x83, 0xc8, 0x08, 0x83, 0xf8, 0x09, 0x75};
+    CHECK(std::equal(std::begin(location_test), std::end(location_test), shipped.begin() + sites.room_wish_location - 6));
+    CHECK(patched[sites.room_wish_location] == 0xe9 &&
+          std::equal(shipped.begin() + sites.room_wish_function, shipped.begin() + sites.room_wish_location,
+                     patched.begin() + sites.room_wish_function));
+    // the two branches: the Castle Gate path asks for a room (vtable +0x158), the other drops it (+0x160)
+    const uint8_t keep[] = {0xff, 0x90, 0x58, 0x01, 0x00, 0x00};
+    const uint8_t drop[] = {0xff, 0x90, 0x60, 0x01, 0x00, 0x00};
+    const auto window = [&](const uint8_t* bytes, size_t n) {
+        return std::search(shipped.begin() + sites.room_wish_location, shipped.begin() + sites.room_wish_location + 0x50, bytes,
+                           bytes + n) != shipped.begin() + sites.room_wish_location + 0x50;
+    };
+    CHECK(window(keep, sizeof(keep)) && window(drop, sizeof(drop)));
+}
+
+// The room info friends read: the hook sits on the store of the scene's location, in the builder the room wish calls.
+// A friend's game accepts a town host only at location 1 or 9 (`movsx eax, word [rcx+0x5c]; or eax, 8; cmp eax, 9`
+// after the stage-type test, 6 = "cannot accept participants"): one such check per build.
+void CheckRoomInfo(const std::vector<uint8_t>& shipped, const std::vector<uint8_t>& patched, uint64_t size,
+                   const DcpEarlyStorySites& sites, const GuestHook (&hooks)[EARLY_STORY_HOOKS]) {
+    CHECK(hooks[14].offset == sites.room_info_location && hooks[14].handler == early_story_room_info_hook &&
+          hooks[14].length == EARLY_STORY_ROOM_INFO_HOOK_LENGTH);
+    const uint8_t store[] = {0x41, 0x0f, 0xb7, 0x85, 0xf0, 0x00, 0x00, 0x00, 0x66, 0x41, 0x89, 0x47, 0x5c};
+    CHECK(std::equal(std::begin(store), std::end(store), shipped.begin() + sites.room_info_location - 8));
+    CHECK(patched[sites.room_info_location] == 0xe9);
+    const uint64_t builder = CallTarget(shipped, sites.room_wish_function + 0x96);
+    CHECK(shipped[sites.room_wish_function + 0x96] == 0xe8 && builder < sites.room_info_location &&
+          sites.room_info_location - builder < 0x600);
+    const uint8_t guest_check[] = {0x83, 0xf8, 0x09, 0x75};
+    const uint8_t guest_location[] = {0x0f, 0xbf, 0x41, 0x5c, 0xbb, 0x06, 0x00, 0x00, 0x00, 0x83, 0xc8, 0x08, 0x83, 0xf8, 0x09};
+    size_t checks = 0;
+    for (uint64_t at = 0; at + sizeof(guest_location) <= size; ++at) {
+        if (shipped[at] != 0x0f || !std::equal(std::begin(guest_location), std::end(guest_location), shipped.begin() + at)) continue;
+        checks += at >= 6 && std::equal(std::begin(guest_check), std::end(guest_check), shipped.begin() + at - 5);
+    }
+    CHECK(checks == 1);
+}
+
+std::vector<std::pair<uint64_t, uint64_t>> EarlyStoryPatchRanges(const DcpEarlyStorySites& s) {
+    std::vector<std::pair<uint64_t, uint64_t>> ranges = {{s.selector + EARLY_STORY_SELECTOR_EXIT, 8},
+                                                         {s.online_accessor, 8},
+                                                         {s.hint_call, 5},
+                                                         {s.notice_call, 5},
+                                                         {s.host_record_call, 5},
+                                                         {s.town_portal_call, 5}};
+    for (const uint32_t writer : s.writers) ranges.push_back({writer, 8});
+    ranges.push_back({s.menu_press_call, 5});
+    ranges.push_back({s.menu_step_call, 5});
+    ranges.push_back({s.menu_kind_store, EARLY_STORY_MENU_KIND_HOOK_LENGTH});
+    ranges.push_back({s.room_wish_location, EARLY_STORY_ROOM_WISH_HOOK_LENGTH});
+    ranges.push_back({s.room_info_location, EARLY_STORY_ROOM_INFO_HOOK_LENGTH});
+    return ranges;
+}
+
+void TestEarlyStory() {
+    const DcpExecRange none{0, 0};
+    CHECK(dcp_resolve_early_story(nullptr, nullptr, nullptr, nullptr, 0) == 0);
+    for (const GameBuild& build : SupportedBuilds()) {
+        const EarlyStoryReference* reference = nullptr;
+        for (const EarlyStoryReference& r : kEarlyStory)
+            if (std::string_view(r.label) == build.label) reference = &r;
+        Image image;
+        if (!reference || !LoadBootImage(build, image)) {
+            std::printf("%s: Early Story Online: DATA UNAVAILABLE (no local boot image); synthetic proof only\n", build.label);
+            continue;
+        }
+        const DcpExecRange range{0, image.bytes.size()};
+        const DcpImageView view{image.bytes.data(), image.bytes.size(), &range, 1};
+        DcpEarlyStorySites sites{};
+        DcpLocateReport report{};
+        CHECK(dcp_locate_early_story_sites(&view, &sites, &report) == 1);
+        CHECK(SameEarlyStory(sites, reference->sites));
+        const DcpGameBuild profile = ProfileOf(build);
+        DcpEarlyStorySites resolved{};
+        char failure[192] = {};
+        CHECK(dcp_resolve_early_story(&profile, &view, &resolved, failure, sizeof(failure)) == 1 &&
+              SameEarlyStory(resolved, reference->sites));
+        CHECK(dcp_resolve_early_story(nullptr, &view, &resolved, failure, sizeof(failure)) == 0 && failure[0]);
+
+        const size_t base = (image.bytes.size() + 0xfff) / 0x1000 * 0x1000;
+        std::vector<uint8_t> copy(base + early_story_online_stub_bytes() + 0x100, 0);
+        std::memcpy(copy.data(), image.bytes.data(), image.bytes.size());
+        const std::vector<uint8_t> shipped = copy;
+        GuestHook hooks[EARLY_STORY_HOOKS] = {};
+        const int hook_count = EARLY_STORY_HOOKS;
+        const char* why = nullptr;
+        CHECK(early_story_online_hooks(copy.data(), image.bytes.size(), &sites, hooks, &why) == hook_count);
+        early_story_set_active(0);
+        CHECK(early_story_online_install(copy.data(), image.bytes.size(), image.entry, &sites, copy.data() + base,
+                                         copy.size() - base) == 1);
+        CHECK(early_story_active() == 1 && copy[sites.online_accessor] == 0xe9);
+        const auto ranges = EarlyStoryPatchRanges(sites);
+        size_t changed_outside = 0, jumps = 0;
+        for (uint64_t i = 0; i < image.bytes.size(); ++i) {
+            if (copy[i] == shipped[i]) continue;
+            bool inside = false;
+            for (const auto& [begin, length] : ranges) inside |= i >= begin && i < begin + length;
+            changed_outside += !inside;
+        }
+        for (const auto& range : ranges) jumps += copy[range.first] == 0xe9;
+        CHECK(changed_outside == 0 && jumps == size_t(hook_count));
+        CHECK(hooks[1].handler == early_story_original_online_hook && hooks[2].handler == early_story_original_online_hook &&
+              hooks[0].handler == early_story_selector_hook && hooks[3].handler == early_story_host_record_hook &&
+              hooks[4].handler == early_story_advance_story_hook && hooks[7].handler == early_story_flag_hook &&
+              hooks[8].handler == early_story_online_check_hook);
+        CHECK(hooks[1].offset == sites.hint_call && hooks[2].offset == sites.notice_call);
+        CheckOriginalPrompt(shipped, copy, image.bytes.size(), sites, hooks);
+        CheckHydelandTrigger(shipped, copy, image.bytes.size(), sites, hooks);
+        CheckMenuShortcut(shipped, copy, sites, hooks);
+        CheckHintSites(shipped, copy, image.bytes.size(), sites);
+        CheckRoomWish(shipped, copy, sites, hooks);
+        CheckRoomInfo(shipped, copy, image.bytes.size(), sites, hooks);
+        early_story_set_active(0);
+
+        // One site that does not match leaves the game as it shipped.
+        for (const size_t victim :
+             {size_t(0), size_t(4), size_t(6), size_t(7), size_t(8), size_t(9), size_t(10), size_t(11), size_t(12), size_t(13),
+              size_t(14), size_t(15)}) {
+            std::vector<uint8_t> broken = shipped;
+            const uint64_t at = victim == 0    ? sites.selector + EARLY_STORY_SELECTOR_EXIT + 4
+                                : victim == 8  ? sites.online_accessor + 1
+                                : victim == 9  ? sites.town_portal_call
+                                : victim == 10 ? sites.menu_press_call - 3
+                                : victim == 11 ? sites.menu_step_call + 6
+                                : victim == 12 ? sites.menu_kind_store + 1
+                                : victim == 13 ? sites.menu_kind_store - EARLY_STORY_MENU_CREATED_BACK + 3
+                                : victim == 14 ? sites.room_wish_location + 4
+                                : victim == 15 ? sites.room_info_location + 4
+                                               : sites.writers[victim - 4] + 1;
+            broken[at] ^= 0x40;
+            const std::vector<uint8_t> before = broken;
+            CHECK(early_story_online_install(broken.data(), image.bytes.size(), image.entry, &sites, broken.data() + base,
+                                             broken.size() - base) == 0);
+            CHECK(broken == before && early_story_active() == 0);
+        }
+        std::vector<uint8_t> wrong_check = shipped;
+        wrong_check[sites.online_accessor + 3] = 0x2d;
+        const std::vector<uint8_t> wrong_before = wrong_check;
+        CHECK(early_story_online_install(wrong_check.data(), image.bytes.size(), image.entry, &sites,
+                                         wrong_check.data() + base, wrong_check.size() - base) == 0 &&
+              wrong_check == wrong_before);
+        std::vector<uint8_t> no_room = shipped;
+        CHECK(early_story_online_install(no_room.data(), image.bytes.size(), image.entry, &sites, no_room.data() + base, 1) == 0 &&
+              no_room == shipped && early_story_active() == 0);
+
+        // The locator itself refuses a build whose site changed.
+        std::vector<uint8_t> altered = shipped;
+        altered[sites.selector + 3] ^= 1;
+        const DcpImageView altered_view{altered.data(), altered.size(), &range, 1};
+        DcpEarlyStorySites none_found{};
+        CHECK(dcp_locate_early_story_sites(&altered_view, &none_found, &report) == 0 && report.failure[0]);
+        std::vector<uint8_t> altered_check = shipped;
+        altered_check[sites.online_accessor + 3] = 0x2b;
+        const DcpImageView check_view{altered_check.data(), altered_check.size(), &range, 1};
+        CHECK(dcp_locate_early_story_sites(&check_view, &none_found, &report) == 0);
+        std::vector<uint8_t> owner_changed = shipped;
+        owner_changed[sites.prompt_owner_vtable + 0xa0] ^= 0x10;
+        const DcpImageView owner_view{owner_changed.data(), owner_changed.size(), &range, 1};
+        CHECK(dcp_locate_early_story_sites(&owner_view, &none_found, &report) == 0 &&
+              std::string_view(report.failure).find("prompt owner") != std::string_view::npos);
+        // As loaded: the loader relocates before resolving, so the owner's method slots hold loaded addresses.
+        std::vector<uint8_t> relocated = shipped;
+        const uint64_t loaded_base = uint64_t(uintptr_t(relocated.data()));
+        for (uint64_t slot = 0; slot < 0x300; slot += 8) {
+            const uint64_t at = sites.prompt_owner_vtable + slot;
+            const uint64_t stored = StoredPointer(relocated, at);
+            if (stored && stored < image.bytes.size()) {
+                const uint64_t loaded = loaded_base + stored;
+                std::memcpy(&relocated[at], &loaded, sizeof(loaded));
+            }
+        }
+        const DcpImageView relocated_view{relocated.data(), relocated.size(), &range, 1};
+        DcpEarlyStorySites relocated_sites{};
+        CHECK(dcp_locate_early_story_sites(&relocated_view, &relocated_sites, &report) == 1 &&
+              SameEarlyStory(relocated_sites, reference->sites));
+        std::vector<uint8_t> relocated_wrong = relocated;
+        const uint64_t wrong_method = loaded_base + StoredPointer(shipped, sites.prompt_owner_vtable + 0xd0);
+        std::memcpy(&relocated_wrong[sites.prompt_owner_vtable + 0xa0], &wrong_method, sizeof(wrong_method));
+        const DcpImageView relocated_wrong_view{relocated_wrong.data(), relocated_wrong.size(), &range, 1};
+        CHECK(dcp_locate_early_story_sites(&relocated_wrong_view, &none_found, &report) == 0 &&
+              std::string_view(report.failure).find("prompt owner") != std::string_view::npos);
+        std::vector<uint8_t> outside = relocated;
+        const uint64_t elsewhere = loaded_base + relocated.size() + 0x1000;
+        std::memcpy(&outside[sites.prompt_owner_vtable + 0xd0], &elsewhere, sizeof(elsewhere));
+        const DcpImageView outside_view{outside.data(), outside.size(), &range, 1};
+        CHECK(dcp_locate_early_story_sites(&outside_view, &none_found, &report) == 0);
+        std::vector<uint8_t> portal_moved = shipped;
+        portal_moved[sites.town_portal_call + 1] ^= 0x10;
+        const DcpImageView portal_view{portal_moved.data(), portal_moved.size(), &range, 1};
+        DcpEarlyStorySites portal_sites{};
+        CHECK(dcp_locate_early_story_sites(&portal_view, &portal_sites, &report) == 1 &&
+              portal_sites.town_portal_call == sites.town_portal_call);
+
+        // Each of the prompt function's control checks, and the table it loads the input mask from, is required.
+        const std::vector<std::vector<uint8_t>> control_checks = {
+            {0x41, 0x80, 0x7c, 0x24, 0x5b, 0x03}, {0x8b, 0x40, 0x04, 0x41, 0x85, 0x84, 0x24, 0x14, 0x05, 0x00, 0x00},
+            {0x41, 0x80, 0x7e, 0x5b, 0x02}, {0x4c, 0x8b, 0xbb, 0x08, 0x01, 0x00, 0x00}};
+        for (const auto& check : control_checks) {
+            std::vector<uint8_t> altered_checks = shipped;
+            const auto found = std::search(altered_checks.begin() + sites.prompt_function,
+                                           altered_checks.begin() + sites.prompt_function + 0xc0, check.begin(), check.end());
+            CHECK(found != altered_checks.begin() + sites.prompt_function + 0xc0);
+            *found ^= 0x20;
+            const std::vector<uint8_t> checks_before = altered_checks;
+            CHECK(early_story_online_install(altered_checks.data(), image.bytes.size(), image.entry, &sites,
+                                             altered_checks.data() + base, altered_checks.size() - base) == 0 &&
+                  altered_checks == checks_before && early_story_active() == 0);
+        }
+        std::vector<uint8_t> no_mask_table = shipped;
+        no_mask_table[sites.prompt_function + EARLY_STORY_PROMPT_MASK_LEA + 2] ^= 0x10;
+        const std::vector<uint8_t> mask_before = no_mask_table;
+        CHECK(early_story_online_install(no_mask_table.data(), image.bytes.size(), image.entry, &sites,
+                                         no_mask_table.data() + base, no_mask_table.size() - base) == 0 &&
+              no_mask_table == mask_before);
+        std::vector<uint8_t> prompt_elsewhere = shipped;
+        prompt_elsewhere[sites.prompt_call + 1] ^= 0x10;
+        const DcpImageView prompt_view{prompt_elsewhere.data(), prompt_elsewhere.size(), &range, 1};
+        CHECK(dcp_locate_early_story_sites(&prompt_view, &none_found, &report) == 0 &&
+              std::string_view(report.failure).find("prompt") != std::string_view::npos);
+        std::printf("%s: Early Story Online sites verified (hooks, atomic install, original Go online prompt)\n",
+                    build.label);
+    }
+    const std::vector<uint8_t> empty(0x1000, 0);
+    const DcpImageView empty_view{empty.data(), empty.size(), &none, 0};
+    DcpEarlyStorySites nothing{};
+    DcpLocateReport report{};
+    CHECK(dcp_locate_early_story_sites(&empty_view, &nothing, &report) == 0 && report.failure[0]);
+}
+
 } // namespace
 
 int main() {
@@ -1104,6 +1592,7 @@ int main() {
     TestExitGame();
     TestEuropeanSites();
     TestKnownBuildsOnly();
+    TestEarlyStory();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

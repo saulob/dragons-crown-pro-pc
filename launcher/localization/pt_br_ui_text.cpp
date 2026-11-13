@@ -393,6 +393,8 @@ Connection test	Teste de Conexão
 Checks that you can reach the online service and that other players can reach you. Takes a few seconds.	Verifica se você consegue acessar o serviço online e se outros jogadores conseguem acessar você. Leva alguns segundos.
 Ping display	Exibição do ping
 Shows the round trip to the other players in game. F3 switches it while playing.	Mostra, durante o jogo, o tempo de ida e volta até os outros jogadores. F3 liga ou desliga enquanto você joga.
+Early Story Online	Online no início da história
+Lets you host online play right after the tutorial. The tutorial remains single-player. Only the host needs this option; guests keep their own campaign progress. Early story rooms are friend/direct only.	Permite hospedar jogo online logo depois do tutorial. O tutorial continua sendo single-player. Só o anfitrião precisa desta opção; os convidados mantêm o próprio progresso. Salas da história inicial são apenas para amigos ou entrada direta.
 Cannot reach the online service right now. Run the Connection test for details.	Não foi possível acessar o serviço online agora. Execute o Teste de Conexão para ver os detalhes.
 Incompatible	Incompatível
 New friend request	Novo pedido de amizade

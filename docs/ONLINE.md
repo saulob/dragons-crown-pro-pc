@@ -44,6 +44,83 @@ The Gameplay page's Story Skip Offer and Tutorial Skip Offer let a new character
 
 Nothing else needs setting up. With Online play Off the game runs offline as before, and F3 does nothing.
 
+### Early Story Online (experimental)
+
+Off by default. The launcher's Online page has an **Early Story Online** switch (`early_story_online`, applied at the
+next game start, only with Online play On; it is not in the in-game Options menu). The switch is for the **host**: with
+it On, online play opens as soon as the character reaches controllable Hydeland after Dragon's Haven Inn, whatever its
+story step, so the first story stage can be played with friends. The tutorial stays single-player. Off keeps the game's
+own unlock at step 45 exactly. A guest does not need the
+switch: every current client can join an early story room whatever its own setting is.
+
+- **The game's own online UI.** Nothing new is drawn. Once Hydeland accepts input (the four checks the game's own
+  prompt makes), the game's Network Status line and its Network Menu (Begin online; once online, Join a random
+  room and Join a Friend's room) are available for the rest of the run, in Hydeland and in the stages, Yes or No. The
+  same moment shows the game's own "Go online? Network games will become available.", also for a character loaded
+  straight into Hydeland, and without moving or visiting the Town Gate. It is the game's own prompt function and rules,
+  run from the town's update: once per run (the game's own flag), so returning from the Inn, the Guild or a shop, or
+  walking to the Town Gate, asks nothing more. No stays offline with the menu still there. The access is a runtime
+  latch, never saved, and the story step is never changed. If the town does not ask, the Castle Gate and the Stables still do, as
+  the game does from step 45. The Stables keep their own story unlock, and the step-45 "Network Menu" story notice
+  still waits for step 45. Nothing is saved for this.
+- **Network Menu in Hydeland: Y / Triangle.** Hydeland has no character menu this early in the story, so with the
+  switch On, Y (Triangle on a PlayStation layout, or the key bound to it) opens the game's own Network Menu there, once
+  the prompt above is out of the way, offline or online; Cancel returns to Hydeland. MENU stays the game's: it opens the
+  character menu when the game offers one, and Y keeps opening the Network Menu. While the shortcut is armed (Hydeland
+  with the switch On, no menu or prompt open) the game does not receive player 1's Triangle. With the switch Off Y is
+  the game's own button. While it is armed the game's own top help dialog shows the hint "[Triangle] Open Network Menu"
+  (the glyph is the game's logical Triangle button: Y with Xbox prompts, Triangle with PlayStation ones; "Abrir Menu de
+  Rede" with Brazilian Portuguese). It is hidden in the Network Menu, while the prompt is open, and everywhere but
+  Hydeland. The hint always shows the controller glyph; it does not follow the keyboard. A build that lacks one of the
+  dialog's functions keeps the shortcut and has no hint. The Network Status line is not shown.
+- **An early host is joinable in Hydeland.** The game only keeps a room for a player at the Castle Gate, the Stables
+  and in stages: being online in Hydeland is a flag, and Join a Friend's room finds nobody. With the switch On, an early
+  host (below step 45) keeps the game's own room in every town location, as the game does at the Castle Gate: the room is
+  created by the game's room machinery as soon as the host is online (Yes on the prompt, or Begin online in the Network
+  Menu), carries the story session attribute and stays out of random search, and friends see it in Join a Friend's room.
+  A friend's game accepts a host in town only at the Castle Gate or the Stables, so the early host's room info gives the
+  Castle Gate as its town location; the friend's own game then leaves its room and joins, as it always does.
+  A guest seated in a story room keeps it in town the same way until it leaves. It closes as any room does: End online,
+  leaving, a disconnect, the title. A host at step 45 or later keeps the game's own room lifecycle.
+- **Capability is not the setting.** A client declares `story_session` when its game hooks are installed, so it can
+  join a story room, follow the host's story and keep its own progress, with the switch On or Off. The switch only
+  lets that player open online play early and host. A guest below step 45 who has the switch Off still has no Network
+  Menu of their own; this does not add an invitation flow.
+
+- **The host owns the story.** A guest whose own story differs from the host's follows the host's story for the shared
+  stage scripts and cutscenes while in the room. The guest's saved story step, level, gear, skills, gold, talismans and
+  B routes are never rewritten, and the four functions that write campaign progression (story step, difficulty tier,
+  talismans, story flags) do nothing for that guest. The guest's in-memory story step is also held at its value from the
+  join: the game refills the character record during the session, and the step goes back to it. XP, gold, loot and items
+  are ordinary rewards and stay normal. When the guest leaves, disconnects or the room closes, its own story applies again
+  at once.
+- **One session, one story.** A guest in a story session room follows the host's story for its whole membership, also
+  while both are at the same step, through every town facility and stage; only leaving the room (or a disconnect, the
+  room closing, End online) gives it its own story back. Two characters past step 45 in a normal room keep today's online
+  play.
+- **Advanced characters can replay the early story with friends.** An early character (below step 45) can join an
+  advanced host only in a Normal difficulty story stage 0-8; Hard, Infernal, the Labyrinth and the Arena are refused.
+- **Early story rooms are not public.** A room hosted below step 45 is hidden from random search and reached through
+  friends or the join code. The tutorial stays solo.
+- **Old versions.** A story room only admits clients that declare the `story_session` capability, and a host refuses to
+  create one until the online service says it enforces that. This needs the updated Worker (see below); until it is
+  deployed, Early Story Online can join rooms but cannot host early rooms.
+
+Details a test cannot see (story cutscenes with remote players, same-step guests receiving the stage clear, local
+co-op players in an online session) are still unproven in the game, so the feature is experimental and its multiplayer
+behaviour is not claimed to work yet. `DCP_EARLY_STORY_ONLINE=1` or `0` overrides the saved choice for test instances.
+Technically: the lead character record selector returns a copy with the host's step for a visitor, the online check's
+threshold is answered by a hook (step 45 as shipped; always once the host's access latch is set, and for a visitor; the
+story hint and the Network Menu notice keep the original threshold), the prompt function the Castle Gate and Stables
+run is also run on a stand-in owner object from the town object's update, and the room carries a private attribute
+(`0x7f01`, the host's step plus one, so a step-0 host counts) plus the hidden flag; every site is located by its bytes and installed all together or not at all, on
+each supported build. `0x7f01` is for finding the room and the guest's starting point. While the room lives, its owner
+sends each new story step as a private room internal binary attribute (`0x7f02`: format 1, step) through the normal
+SetRoomDataInternal path, and members get it as `room.internal`, also with the join answer. The guest's port takes it
+out before the game's room callback (an update with nothing else is not delivered), so the game only ever sees its own
+`0x57`. The latest live step wins; a replicated host record never overrides it. If the room changes owner, the story
+session ends for everyone in it, and the new owner's search attributes drop `0x7f01`.
+
 ### Bug reports
 
 The launcher's Bug Report page sends a report only when the player presses Send report, and an optional preview shows exactly
@@ -138,7 +215,12 @@ Android rooms that **used relay**, meaning the relay carried at least one frame 
   country.
 - A session is a sign-in of the launcher or the game to the online service that has no counted sign-in of the same
   account in the previous 10 minutes, so a quick reconnect is not counted again and sessions are not a number of players.
-  There is no unique-player count.
+  There is no unique-player count for these statistics.
+- The one exception is Early Story Online. The online service keeps, for each account that hosted or joined an Early Story
+  Online room, its online name, its account id, how many such rooms it took part in as host and as guest, and when it last
+  did. It exists so the maintainer can see who uses the feature; it holds no address, endpoint, room or join code, only the
+  maintainer sees it on the same private page, and merely turning the option on records nothing. The game sends nothing
+  extra for it: it comes from the room requests the game already makes.
 - Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Saves, character names, levels, equipment, gold,
   progress, quests, Ping and FPS are not collected. Apart from the optional party snapshot below, the game sends nothing
   extra for these statistics: they come from the sign-in and room requests it already makes.
@@ -272,6 +354,7 @@ unchanged when there is none.
 | `online_stun` | `DCP_STUN` | `stun.cloudflare.com:3478,stun.l.google.com:19302` | STUN servers; `off` disables |
 | `online_connection_test_port` | - | 0 | the UDP port of the last finished Connection test; 0 after Online play is turned off |
 | `show_in_lobby` | - | 0 | list the Online name in the public Lobby; Reset turns it off |
+| `early_story_online` | `DCP_EARLY_STORY_ONLINE` | 0 | experimental, for the host: online once Hydeland is reachable, whatever the story step, and early story rooms; guests do not need it (needs Online play on; restart) |
 | - | `DCP_LOBBY` | `net::kDefaultLobbyUrl` | developer override of the production lobby (`ws://` or `wss://`), for diagnostics |
 | - | `DCP_UPNP` | 1 | ask the router to map the UDP port; `0` for diagnostics |
 | - | `DCP_JOIN_CODE` | - | the game's room search returns only the room with this code |
@@ -350,7 +433,7 @@ without I O 0 1), `key` (16 random bytes, hex: the peer handshake secret), `memb
 
 Events: `room.member_joined {room, member}`, `room.member_left {room, member, why: leave | kicked | disconnect}`,
 `room.owner {room, from, to}` (before `member_left`; the new owner is the lowest connected member), `room.internal
-{room, flags, bin_int}` (not to the sender), `room.kicked`, `room.gone`, `peer {room, member, account, ip, port, lan?}`,
+{room, flags, bin_int}` (not to the sender; `bin_int` holds the attributes that request carried), `room.kicked`, `room.gone`, `peer {room, member, account, ip, port, lan?}`,
 `peer.gone {room, member}`, `chat {room, member, account, name, text}` (to everyone in the room, the sender included),
 `friend.request`, `friend.added`, `friend.removed`, `friend.online`, `friend.offline`.
 

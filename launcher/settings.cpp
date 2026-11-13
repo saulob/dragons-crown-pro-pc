@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <initializer_list>
@@ -64,6 +65,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kConnectionTestPortKey, "0"},
     {kPingDisplayKey, "0"},
     {kLobbyVisibleKey, "0"},
+    {kEarlyStoryOnlineKey, "0"},
     {cheats::kInfiniteHealthKey, "0"},
     {cheats::kInfiniteAllyHealthKey, "0"},
     {cheats::kInfiniteManaKey, "0"},
@@ -418,6 +420,16 @@ extern "C" int dcp_unlock_gallery(const char* settings_file) {
     return settings.GetBool(kUnlockGalleryKey, false) ? 1 : 0;
 }
 
+extern "C" int dcp_early_story_online(const char* settings_file) {
+    using namespace dcp;
+    if (const char* forced = std::getenv("DCP_EARLY_STORY_ONLINE"); forced && *forced) {
+        if (!std::strcmp(forced, "1") || !std::strcmp(forced, "on") || !std::strcmp(forced, "true")) return 1;
+        if (!std::strcmp(forced, "0") || !std::strcmp(forced, "off") || !std::strcmp(forced, "false")) return 0;
+    }
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return settings.GetBool(kEarlyStoryOnlineKey, false) ? 1 : 0;
+}
+
 extern "C" unsigned dcp_skip_offers(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
@@ -511,6 +523,14 @@ extern "C" void dcp_log_settings_summary(const char* settings_file, const char* 
     const GameBuild* build = BuildOfImageDir(image_dir);
     const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
     std::fputs(SettingsSummary(settings, build, languages, run).c_str(), stdout);
+}
+
+extern "C" int dcp_text_language_is_portuguese_brazil(const char* settings_file, const char* image_dir, const char* app0) {
+    using namespace dcp;
+    const GameBuild* build = BuildOfImageDir(image_dir);
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    return ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).key == kPortugueseBrazilKey;
 }
 
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir, const char* app0) {

@@ -61,6 +61,46 @@ deployment may still hold an empty `reports` table from before the Bug Report pa
 
 The Worker uses `CF-Connecting-IP` as each player's address.
 
+## Story sessions (Early Story Online)
+
+A host still in the opening story can host a story session room. The client marks it with the room int attribute
+`0x7f01` (`STORY_SESSION_ATTR`, the host's story step plus one; `0` means not a story session) and the server keeps the room
+hidden. Old clients would desync inside such a room, so the server enforces a client capability:
+
+- `hello` accepts `story_session: true` (kept on the connection's attachment) and its reply `capabilities` carries
+  `story_session: true` beside `relay_supported` and `relay_max_payload`. A client sends it when it supports story
+  sessions, whatever its player's Early Story Online setting is; the setting only decides who hosts.
+- `room.create` with the attribute above 0 needs that capability (`bad_request`, `story_session`) and always stores
+  `FLAG_HIDDEN` (`0x10000000`), so the room stays out of random `room.search`; `room.search` with `code` still finds it.
+- `room.set_external` by an owner without the capability cannot add the attribute (same error).
+- `room.join`, by id or by code, refuses a client without the capability before it becomes a member: `incompatible`
+  with `story_session_required: true`, `online_protocol` and the owner's `version`/`platform`. It is counted as a
+  reject with reason `story_session`.
+
+Rooms without the attribute behave as before. The protocol versions are unchanged. The host's live story step travels
+as an ordinary room internal binary attribute (`room.set_internal` / `room.internal`); the server does not interpret it. Deploying this needs a Worker
+redeploy (`.\tools\worker.ps1`); nothing in the repository deploys it.
+
+### Early Story Online on the dashboard
+
+`/admin/api/summary` carries a `story` section; the game sends nothing for it. A room is a story room by the one test the
+lobby already uses (`isStorySession`: the `0x7f01` room attribute above 0), checked on the live room, so a room whose new
+owner cleared the attribute stops counting.
+
+- **Live** (from the `rooms` and `members` tables, never stored): `rooms` story rooms; `parties` those with two or more
+  connected members; `waiting` those with exactly one; `players` connected members in them. A held seat (reconnect grace)
+  is not connected, as for `in_rooms`, so a room whose seats are all held is a room but neither a party nor waiting.
+- **Totals** since `since` (the first start after this was deployed; earlier use is unknown): `rooms_created` and
+  `guest_joins` are the daily counters `story_rooms` and `story_guest_joins` in `metrics_daily` summed; `sessions` and
+  `users` come from `story_users`.
+- **`story_users`** is the one table that names a player: `account`, the latest `name`, `hosted` and `guested` counts,
+  `first_used`, `last_used`. An account is recorded when it creates a story room or successfully joins one, once per room
+  (the room remembers up to 64 accounts in `rooms.story_seen`, which disappears with it), so reconnects, resumes, leaving
+  and rejoining the same room, presence, search and room updates add nothing. `guest_joins` still counts each successful
+  join. Nothing records an address, endpoint, room id or join code, and a failed join records nothing. The summary lists
+  the 50 most recent users and every account playing now, with a live `active` entry (`role`, connected `members`, room
+  `age_ms`).
+
 ## Abuse and quota protection
 
 Every protection below is invisible to a client that behaves, and none changes the protocol or needs a client update.
@@ -181,7 +221,8 @@ nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
 - A **session** is a `hello` with `presence: true` that succeeded for an account with no counted session in the last
   10 minutes. A reconnect (or the launcher and the game opening in turn) inside that window is the same session; the
   Connection test (`presence: false`) and refused sign-ins are none. Sessions are not players: there is no unique-player, DAU or MAU
-  count, and the daily platform, version and country counts are sessions started, not players.
+  count, and the daily platform, version and country counts are sessions started, not players. The one exception is
+  Early Story Online (below), which keeps a table of its users.
 - **Live** numbers are never stored: they come from the open sockets and the `rooms`/`members` tables when asked.
   Online now and the live breakdowns count accounts with an open presence connection (one per account), in rooms
   counts accounts seated with a connection, open rooms counts rooms. A socket that disappears without a close callback,

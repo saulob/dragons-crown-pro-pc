@@ -22,6 +22,7 @@
 #include "net/lobby_link.h"
 #include "net/online_version.h"
 #include "dcp_party.h"
+#include "early_story_session.h"
 #include "net/relay_frame.h"
 #include "runtime_online.h"
 
@@ -108,7 +109,7 @@ struct Signal {
     bool delivered = false;
 };
 
-enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kSearch, kCreateJoin, kWorlds };
+enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kSearch, kCreateJoin, kWorlds, kStory };
 
 struct Pending {
     Kind kind = Kind::kInternal;
@@ -116,6 +117,7 @@ struct Pending {
     RequestCallback callback = nullptr;
     void* arg = nullptr;
     uint16_t event = 0;
+    int story_step = EARLY_STORY_NO_STEP;
 };
 
 struct State {
@@ -144,6 +146,11 @@ struct State {
     // our endpoint as reported to the lobby
     std::shared_ptr<net::PeerSocket> socket;
     bool relay_capable = false;
+    bool story_capable = false, story_room_hosted = false;
+    // the live story step the room has from us (EARLY_STORY_NO_STEP: none, or the last one was refused)
+    int story_sent = EARLY_STORY_NO_STEP;
+    // we inherited a story room: our external updates clear its story attribute
+    bool clear_story_attr = false;
     uint64_t bound_ms = 0;
     uint16_t reported_port = 0;
     uint32_t reported_ip = 0;
@@ -178,6 +185,19 @@ void Remember(const std::string& name, const Json& client) {
 }
 
 bool Compatible(const Json& remote) { return net::online_compatible(int(remote["online_protocol"].as_int())); }
+
+int64_t IntAttrOf(const Json& ints, int64_t id, int64_t fallback) {
+    for (const Json& pair : ints.items())
+        if (pair.items().size() == 2 && pair.items()[0].as_int() == id) return pair.items()[1].as_int();
+    return fallback;
+}
+
+void AddStoryAttr(Json& ints, int value) {
+    Json pair = Json::Array();
+    pair.push(int64_t(EARLY_STORY_ROOM_ATTR));
+    pair.push(int64_t(value));
+    ints.push(std::move(pair));
+}
 
 // One support line and one notice for the player per refused room; `who` names the other side in the notice.
 void Refuse(const char* who, const std::string& about, const Json& remote) {
@@ -221,6 +241,34 @@ std::vector<uint8_t> Unhex(const Json& j) {
     std::vector<uint8_t> v;
     net::hex_decode(j.as_string(), v);
     return v;
+}
+
+// Internal attributes as the game may see them: the private live story state is taken out, the rest kept in order.
+// `step` gets the state's step when there was one (EARLY_STORY_NO_STEP if unreadable).
+Json WithoutStoryState(const Json& attrs, bool& had_state, int& step) {
+    Json kept = Json::Array();
+    had_state = false;
+    step = EARLY_STORY_NO_STEP;
+    for (const Json& pair : attrs.items()) {
+        if (pair.items().empty() || pair.items()[0].as_int() != EARLY_STORY_STATE_ATTR) {
+            kept.push(pair);
+            continue;
+        }
+        const std::vector<uint8_t> data = Unhex(pair.items().size() > 1 ? pair.items()[1] : Json());
+        had_state = true;
+        step = early_story_state_decode(data.data(), data.size());
+    }
+    return kept;
+}
+
+// SetRoomDataInternal as the lobby takes it.
+Json InternalBody(uint64_t room, uint32_t flag_mask, uint32_t flag_value, Json bin_int) {
+    Json body = Json::Object();
+    body.set("room", net::u64_text(room));
+    body.set("flag_mask", int64_t(flag_mask));
+    body.set("flag_value", int64_t(flag_value));
+    body.set("bin_int", std::move(bin_int));
+    return body;
 }
 
 // ---- response structs for the game ----
@@ -350,6 +398,9 @@ void ApplyPeers() {
 }
 
 void ClearRoom() {
+    early_story_session_reset();
+    g.story_room_hosted = g.clear_story_attr = false;
+    g.story_sent = EARLY_STORY_NO_STEP;
     if (g.socket) {
         for (const auto& [member, s] : g.signals) g.socket->forget_peer(s.account);
         g.socket->disable_relay();
@@ -362,7 +413,7 @@ void ClearRoom() {
 }
 
 // The room from a create or join answer; also becomes our room. Caller holds g_mutex.
-uint8_t* JoinResponse(Block& b, const Json& body) {
+uint8_t* JoinResponse(Block& b, const Json& body, int& story_step) {
     const Json& room = body["room"];
     g.room = room["id"].as_u64();
     g.me = uint16_t(body["me"].as_int());
@@ -377,8 +428,9 @@ uint8_t* JoinResponse(Block& b, const Json& body) {
     Wr<uint32_t>(internal, 0xc, uint32_t(room["world"].as_int(1)));
     Wr<uint64_t>(internal, 0x18, g.room);
     Wr<uint32_t>(internal, 0x40, uint32_t(room["flags"].as_int()));
+    bool had_state = false;
     uint32_t attrs = 0;
-    Wr<uint8_t*>(internal, 0x48, InternalAttrs(b, room["bin_int"], attrs));
+    Wr<uint8_t*>(internal, 0x48, InternalAttrs(b, WithoutStoryState(room["bin_int"], had_state, story_step), attrs));
     Wr<uint32_t>(internal, 0x50, attrs);
     uint8_t* response = b.alloc(0x30);
     Wr<uint8_t*>(response, 0, internal);
@@ -528,7 +580,50 @@ void RoomGone(uint16_t event) {
 
 Json HelloBody() {
     const Settings& s = settings();
-    return net::hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible);
+    Json hello = net::hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible);
+    if (early_story_active()) hello.set("story_session", true);
+    return hello;
+}
+
+// A joined room an Early Story Online rule refuses: the seat is given back and the game is told the join failed.
+bool RefuseStoryJoin(const Json& room) {
+    const Json& ints = room["ints"];
+    const char* reason = "";
+    if (early_story_join_allowed(early_story_own_step(), int(IntAttrOf(ints, EARLY_STORY_ROOM_ATTR, 0)),
+                                 int(IntAttrOf(ints, EARLY_STORY_STAGE_ATTR, EARLY_STORY_NO_STEP)),
+                                 int(IntAttrOf(ints, EARLY_STORY_PACKED_ATTR, EARLY_STORY_NO_STEP)), &reason))
+        return false;
+    Json body = Json::Object();
+    body.set("room", room["id"].as_string());
+    Issue(Kind::kInternal, "room.leave", std::move(body), nullptr, 0);
+    g.notice = std::string("Cannot join this room: ") + reason + ".";
+    std::printf("Early Story Online: join refused, %s\n", reason);
+    return true;
+}
+
+// The owner of a story room it created sends its live step through SetRoomDataInternal when it changes; the members get
+// it as room.internal. Its own request: the game's room updates are not tied to the story.
+void PublishStoryState() {
+    if (!g.story_room_hosted || !g.room || g.me != g.owner || !LinkUsable()) return;
+    const int step = early_story_own_step();
+    if (step < 0 || step == g.story_sent) return;
+    uint8_t state[EARLY_STORY_STATE_SIZE];
+    early_story_state_encode(step, state);
+    Json attr = Json::Array();
+    attr.push(int64_t(EARLY_STORY_STATE_ATTR));
+    attr.push(net::hex_encode(state, sizeof(state)));
+    Json attrs = Json::Array();
+    attrs.push(std::move(attr));
+    g.story_sent = step;
+    Pending p;
+    p.kind = Kind::kStory;
+    p.story_step = step;
+    g.pending[g.link->request("room.set_internal", InternalBody(g.room, 0, 0, std::move(attrs)))] = p;
+}
+
+void OnOwnStoryStep(int) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    PublishStoryState();
 }
 
 // ---- lobby messages ----
@@ -537,9 +632,12 @@ void OnResponse(const net::LobbyMessage& m) {
     if (it == g.pending.end()) return;
     const Pending p = it->second;
     g.pending.erase(it);
-    const int32_t error = ErrorOf(m.code);
+    int32_t error = ErrorOf(m.code);
     switch (p.kind) {
     case Kind::kInternal: return;
+    case Kind::kStory:
+        if (error && g.story_sent == p.story_step) g.story_sent = EARLY_STORY_NO_STEP;
+        return;
     case Kind::kUdp:
         g.udp_inflight = false;
         g.udp_acked = !error;
@@ -605,16 +703,29 @@ void OnResponse(const net::LobbyMessage& m) {
             data = SearchResponse(*block, m.body);
             std::printf("Matching2: search found %d room(s)\n", Rd<int32_t>(data, 8));
         }
-        if (p.kind == Kind::kCreateJoin) {
-            data = JoinResponse(*block, m.body);
+        if (p.kind == Kind::kCreateJoin && p.event == kEvJoin && RefuseStoryJoin(m.body["room"])) {
+            error = kErrRefused;
+        } else if (p.kind == Kind::kCreateJoin) {
+            int story_step = EARLY_STORY_NO_STEP;
+            data = JoinResponse(*block, m.body, story_step);
+            early_story_session_joined(g.me == g.owner, int(IntAttrOf(m.body["room"]["ints"], EARLY_STORY_ROOM_ATTR, 0)));
             std::printf("Matching2: %s room %llu as member 0x%x (owner 0x%x, %zu member(s), code %s)\n",
                         p.event == kEvJoin ? "joined" : "created", (unsigned long long)g.room, g.me, g.owner, g.members.size(),
                         m.body["room"]["code"].as_string().c_str());
+            early_story_session_internal_update(story_step);
+            PublishStoryState();
         }
     } else {
         std::printf("Matching2: request 0x%04x failed: %s\n", p.event, m.code.c_str());
         if (p.event == kEvSetExternal) g.last_external.clear();
-        if (p.kind == Kind::kCreateJoin && m.code == "incompatible") Refuse("Host", "room host", m.body);
+        if (p.kind == Kind::kCreateJoin && m.code == "incompatible") {
+            if (m.body["story_session_required"].as_bool()) {
+                g.notice = "This room is an Early Story Online session.\nThis game version cannot join it.";
+                std::printf("Early Story Online: not declared as supported here, the room is refused\n");
+            } else {
+                Refuse("Host", "room host", m.body);
+            }
+        }
     }
     const RequestCallback cb = p.callback;
     void* arg = p.arg;
@@ -678,19 +789,30 @@ void OnEvent(const net::LobbyMessage& m) {
         PushRoomEvent(kRoomMemberLeft, block, data);
     } else if (m.event == "room.owner") {
         const uint16_t from = uint16_t(b["from"].as_int()), to = uint16_t(b["to"].as_int());
+        const bool story_guest = early_story_story_room_guest();
         g.owner = to;
+        early_story_session_owner_changed(g.me == g.owner);
+        if (g.me != g.owner) g.story_room_hosted = false;
+        else if (story_guest) g.clear_story_attr = true;
+        if (story_guest) std::printf("Early Story Online: the room changed owner, the story session ended (own story restored)\n");
         std::printf("Matching2: room owner 0x%x -> 0x%x\n", from, to);
         uint8_t* data = block->alloc(0x10);
         Wr<uint16_t>(data, 0, from);
         Wr<uint16_t>(data, 2, to);
         PushRoomEvent(kRoomOwner, block, data);
     } else if (m.event == "room.internal") {
+        bool had_state = false;
+        int story_step = EARLY_STORY_NO_STEP;
+        const Json game_attrs = WithoutStoryState(b["bin_int"], had_state, story_step);
+        if (had_state) early_story_session_internal_update(story_step);
+        // Only the owner's story state changed: the game would never have been called.
+        if (had_state && game_attrs.size() == 0) return;
         uint8_t* data = block->alloc(0x50);
         uint8_t* flags = block->alloc(8);
         Wr<uint32_t>(flags, 0, uint32_t(b["flags"].as_int()));
         Wr<uint8_t*>(data, 8, flags);
         uint32_t n = 0;
-        uint8_t* attrs = InternalAttrs(*block, b["bin_int"], n);
+        uint8_t* attrs = InternalAttrs(*block, game_attrs, n);
         if (n) {
             uint8_t* pointers = block->alloc(8 * n);
             for (uint32_t i = 0; i < n; ++i) Wr<uint8_t*>(pointers, i * 8, attrs + i * 0x28);
@@ -726,6 +848,7 @@ void OnEvent(const net::LobbyMessage& m) {
 void NoteRelayCapability(const Json& hello_reply) {
     const net::RelayCapability capability = net::relay_capability(hello_reply);
     g.relay_capable = capability.usable();
+    g.story_capable = net::story_session_capability(hello_reply);
     std::printf("Matching2: lobby relay %s\n", g.relay_capable ? "available as a fallback" : "not offered");
     ConfigureRelay();
 }
@@ -770,6 +893,7 @@ void OnLink(const net::LobbyMessage& m) {
         PauseRelay(false);
         const bool was_up = g.up;
         g.relay_capable = false;
+        g.story_capable = false;
         ConfigureRelay();
         g.up = false;
         g.down = true;
@@ -891,12 +1015,14 @@ DCP_SYSV int32_t m2_initialize(const void* param) {
     (void)param;
     std::lock_guard<std::mutex> lock(g_mutex);
     g.initialized = true;
+    early_story_session_observe_own_step(OnOwnStoryStep);
     return 0;
 }
 
 DCP_SYSV int32_t m2_terminate() {
     std::lock_guard<std::mutex> lock(g_mutex);
     g.initialized = false;
+    early_story_session_observe_own_step(nullptr);
     return 0;
 }
 
@@ -935,6 +1061,7 @@ DCP_SYSV int32_t m2_context_start(uint16_t context, uint64_t timeout) {
     g.link.reset();
     g.down = g.up = g.lost = false;
     g.relay_capable = false;
+    g.story_capable = false;
     net::LobbyLink::Options options;
     options.url = s.config.lobby;
     options.hello = HelloBody;
@@ -1011,13 +1138,25 @@ DCP_SYSV int32_t m2_create_join_room(uint16_t context, const uint8_t* request, c
     Json body = Json::Object();
     body.set("world", int64_t(std::max<uint32_t>(1, Rd<uint32_t>(request, 0xc))));
     body.set("slots", int64_t(std::clamp<uint16_t>(Rd<uint16_t>(request, 0), 1, 4)));
-    body.set("flags", int64_t(Rd<uint32_t>(request, 8)));
-    body.set("ints", IntAttrs(Rd<const uint8_t*>(request, 0x70), Rd<uint64_t>(request, 0x78)));
+    const int own_step = early_story_own_step();
+    const bool story_room = early_story_hosts_story_room(own_step);
+    if (story_room && !g.story_capable) {
+        g.notice = "Early Story Online is not available yet:\nthe online service has to be updated first.";
+        std::printf("Early Story Online: not hosting, the online service does not keep story rooms to capable players\n");
+        return kErrRefused;
+    }
+    body.set("flags", int64_t(early_story_room_flags(Rd<uint32_t>(request, 8), own_step)));
+    Json ints = IntAttrs(Rd<const uint8_t*>(request, 0x70), Rd<uint64_t>(request, 0x78));
+    if (story_room) AddStoryAttr(ints, early_story_room_attr_value(own_step));
+    body.set("ints", std::move(ints));
     body.set("bin_int", BinAttrs(Rd<const uint8_t*>(request, 0x60), Rd<uint64_t>(request, 0x68)));
     body.set("bin_ext", BinAttrs(Rd<const uint8_t*>(request, 0x90), Rd<uint64_t>(request, 0x98)));
     body.set("member_bin", BinAttrs(Rd<const uint8_t*>(request, 0xa0), Rd<uint64_t>(request, 0xa8)));
-    std::printf("Matching2: create room (slots %lld, flags 0x%08llx)\n", (long long)body["slots"].as_int(),
-                (unsigned long long)body["flags"].as_int());
+    std::printf("Matching2: create room (slots %lld, flags 0x%08llx%s)\n", (long long)body["slots"].as_int(),
+                (unsigned long long)body["flags"].as_int(), story_room ? ", story session" : "");
+    g.story_room_hosted = story_room;
+    g.clear_story_attr = false;
+    g.story_sent = story_room ? own_step : EARLY_STORY_NO_STEP;
     const uint32_t r = Issue(Kind::kCreateJoin, "room.create", std::move(body), opt, kEvCreateJoin);
     if (id) *id = r;
     return 0;
@@ -1092,11 +1231,10 @@ DCP_SYSV int32_t m2_set_room_internal(uint16_t context, const uint8_t* request, 
     (void)context;
     if (!request) return kErrInvalid;
     std::lock_guard<std::mutex> lock(g_mutex);
-    Json body = Json::Object();
-    body.set("room", net::u64_text(Rd<uint64_t>(request, 0)));
-    body.set("flag_mask", int64_t(Rd<uint32_t>(request, 8)));
-    body.set("flag_value", int64_t(Rd<uint32_t>(request, 0xc)));
-    body.set("bin_int", BinAttrs(Rd<const uint8_t*>(request, 0x10), Rd<uint64_t>(request, 0x18)));
+    // A refused story update goes out again with the game's next one.
+    PublishStoryState();
+    Json body = InternalBody(Rd<uint64_t>(request, 0), Rd<uint32_t>(request, 8), Rd<uint32_t>(request, 0xc),
+                             BinAttrs(Rd<const uint8_t*>(request, 0x10), Rd<uint64_t>(request, 0x18)));
     std::printf("Matching2: room flags 0x%08llx under mask 0x%08llx\n", (unsigned long long)body["flag_value"].as_int(),
                 (unsigned long long)body["flag_mask"].as_int());
     const uint32_t r = Issue(Kind::kGame, "room.set_internal", std::move(body), opt, kEvSetInternal);
@@ -1112,7 +1250,10 @@ DCP_SYSV int32_t m2_set_room_external(uint16_t context, const uint8_t* request, 
     std::lock_guard<std::mutex> lock(g_mutex);
     Json body = Json::Object();
     body.set("room", net::u64_text(Rd<uint64_t>(request, 0)));
-    body.set("ints", IntAttrs(Rd<const uint8_t*>(request, 8), Rd<uint64_t>(request, 0x10)));
+    Json ints = IntAttrs(Rd<const uint8_t*>(request, 8), Rd<uint64_t>(request, 0x10));
+    if (g.story_room_hosted) AddStoryAttr(ints, early_story_room_attr_value(early_story_own_step()));
+    else if (g.clear_story_attr) AddStoryAttr(ints, 0);
+    body.set("ints", std::move(ints));
     body.set("bin_ext", BinAttrs(Rd<const uint8_t*>(request, 0x28), Rd<uint64_t>(request, 0x30)));
     const std::string text = body.dump();
     uint32_t r;

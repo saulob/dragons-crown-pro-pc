@@ -17,6 +17,7 @@ enum class OnlineSection {
     kFriendCode,
     kConnectionTest,
     kPingDisplay,
+    kEarlyStoryOnline,
     kFriends,
     kLobbyVisibility,
     kLobbyPlayers

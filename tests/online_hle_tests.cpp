@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "early_story_session.h"
 #include "fake_stun.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
@@ -62,12 +63,15 @@ struct Seen {
         uint64_t room = 0;
         uint16_t me = 0, first_member = 0, slots = 0;
         int32_t count = 0;
+        std::vector<uint16_t> internal_ids; // the room's internal attributes the game was given
     };
     std::vector<Request> requests;
     struct Room {
         uint16_t event;
         uint16_t member = 0, prev = 0, next = 0;
         std::string name;
+        uint32_t flags = 0;
+        std::vector<std::pair<uint16_t, std::vector<uint8_t>>> attrs; // 0x1106
     };
     std::vector<Room> rooms;
     std::vector<std::pair<uint16_t, uint16_t>> signals; // member, event
@@ -80,7 +84,8 @@ SYSV void OnContext(uint16_t ctx, uint16_t event, uint8_t cause, int32_t error, 
 
 SYSV void OnRequest(uint16_t ctx, uint32_t id, uint16_t event, int32_t error, const void* data, void* arg) {
     (void)ctx, (void)arg;
-    Seen::Request r{id, event, error, {}};
+    Seen::Request r;
+    r.id = id, r.event = event, r.error = error;
     if (data && !error && (event == 0x0101 || event == 0x0102)) {
         const uint8_t* internal = Rd<const uint8_t*>(data, 0);
         r.room = Rd<uint64_t>(internal, 0x18);
@@ -92,6 +97,7 @@ SYSV void OnRequest(uint16_t ctx, uint32_t id, uint16_t event, int32_t error, co
             const uint8_t* bytes = Rd<const uint8_t*>(attrs, 0x18);
             r.copy.assign(bytes, bytes + Rd<uint64_t>(attrs, 0x20));
         }
+        for (uint32_t i = 0; attrs && i < Rd<uint32_t>(internal, 0x50); ++i) r.internal_ids.push_back(Rd<uint16_t>(attrs + i * 0x28, 0x10));
     }
     if (data && !error && event == 0x0002) r.count = Rd<int32_t>(data, 8);
     if (data && !error && event == 0x0106) {
@@ -116,6 +122,15 @@ SYSV void OnRoom(uint16_t ctx, uint64_t room, uint16_t event, const void* data, 
         r.name = reinterpret_cast<const char*>(member + 0x20);
     }
     if (event == 0x1105 && data) r.prev = Rd<uint16_t>(data, 0), r.next = Rd<uint16_t>(data, 2);
+    if (event == 0x1106 && data) {
+        r.flags = Rd<uint32_t>(Rd<const uint8_t*>(data, 8), 0);
+        const uint8_t* pointers = Rd<const uint8_t*>(data, 0x38);
+        for (uint64_t i = 0; pointers && i < Rd<uint64_t>(data, 0x40); ++i) {
+            const uint8_t* attr = Rd<const uint8_t*>(pointers, size_t(i * 8));
+            const uint8_t* bytes = Rd<const uint8_t*>(attr, 0x18);
+            r.attrs.push_back({Rd<uint16_t>(attr, 0x10), std::vector<uint8_t>(bytes, bytes + Rd<uint64_t>(attr, 0x20))});
+        }
+    }
     g_seen.rooms.push_back(r);
 }
 
@@ -291,6 +306,288 @@ int RunEndpointScenario(const std::string& lobby_root, const std::string& observ
     return g_failures ? 1 : 0;
 }
 
+// Another player speaking the lobby protocol itself, with story session support; waiting on it pumps the runtime.
+class RawPlayer {
+public:
+    RawPlayer(const std::string& url, const fs::path& base, const std::string& name) {
+        const net::Identity id = net::load_identity(base / name);
+        net::LobbyLink::Options options;
+        options.url = url;
+        options.hello = [id, name] {
+            net::Json hello = net::hello_body(id, name, "HLE-TEST", true);
+            hello.set("story_session", true);
+            return hello;
+        };
+        link_ = std::make_unique<net::LobbyLink>(std::move(options));
+        link_->start();
+        CHECK(Next([](const net::LobbyMessage& m) { return m.kind == net::LobbyMessage::Kind::kUp; }));
+    }
+
+    std::optional<net::LobbyMessage> Next(const std::function<bool(const net::LobbyMessage&)>& match, int timeout_ms = 8000) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        do {
+            online::pump();
+            net::LobbyMessage m;
+            while (link_->poll(m)) inbox_.push_back(std::move(m));
+            for (size_t i = 0; i < inbox_.size(); ++i) {
+                if (!match(inbox_[i])) continue;
+                net::LobbyMessage found = std::move(inbox_[i]);
+                inbox_.erase(inbox_.begin() + ptrdiff_t(i));
+                return found;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (std::chrono::steady_clock::now() < deadline);
+        return std::nullopt;
+    }
+
+    std::optional<net::LobbyMessage> Event(const std::string& name, int timeout_ms = 8000) {
+        return Next([&](const net::LobbyMessage& m) { return m.kind == net::LobbyMessage::Kind::kEvent && m.event == name; },
+                    timeout_ms);
+    }
+
+    // The answer's body when the lobby said ok.
+    std::optional<net::Json> Call(const std::string& op, net::Json body, std::string* code = nullptr) {
+        const uint32_t seq = link_->request(op, std::move(body));
+        auto answer = Next([seq](const net::LobbyMessage& m) { return m.kind == net::LobbyMessage::Kind::kResponse && m.seq == seq; });
+        if (code) *code = answer ? answer->code : "timeout";
+        if (!answer || answer->code != "ok") return std::nullopt;
+        return answer->body;
+    }
+
+private:
+    std::unique_ptr<net::LobbyLink> link_;
+    std::vector<net::LobbyMessage> inbox_;
+};
+
+std::string StoryStateHex(int step) {
+    uint8_t state[EARLY_STORY_STATE_SIZE];
+    early_story_state_encode(step, state);
+    return net::hex_encode(state, sizeof(state));
+}
+
+net::Json AttrPair(int64_t id, net::Json value) {
+    net::Json pair = net::Json::Array();
+    pair.push(id);
+    pair.push(std::move(value));
+    return pair;
+}
+
+net::Json BinInt(std::initializer_list<std::pair<int, std::string>> attrs) {
+    net::Json list = net::Json::Array();
+    for (const auto& [id, hex] : attrs) list.push(AttrPair(id, hex));
+    return list;
+}
+
+net::Json SetInternal(uint64_t room, net::Json bin_int, uint32_t mask = 0, uint32_t value = 0) {
+    net::Json body = net::Json::Object();
+    body.set("room", net::u64_text(room));
+    body.set("flag_mask", int64_t(mask));
+    body.set("flag_value", int64_t(value));
+    body.set("bin_int", std::move(bin_int));
+    return body;
+}
+
+std::vector<std::pair<int64_t, std::string>> Pairs(const net::Json& attrs) {
+    std::vector<std::pair<int64_t, std::string>> out;
+    for (const net::Json& pair : attrs.items())
+        out.push_back({pair.items()[0].as_int(), pair.items().size() > 1 ? pair.items()[1].as_string() : std::string()});
+    return out;
+}
+
+const Seen::Request* Await(uint32_t id) {
+    PumpUntil([&] { return RequestById(id) != nullptr; });
+    return RequestById(id);
+}
+
+size_t RoomEvents(uint16_t event) {
+    return size_t(std::count_if(g_seen.rooms.begin(), g_seen.rooms.end(), [&](const Seen::Room& r) { return r.event == event; }));
+}
+
+// The game's SetRoomDataInternal: one internal attribute 0x57 (the room info) under a flag mask.
+uint32_t GameSetInternal(uint16_t ctx, void* opt[2], uint64_t room, const std::vector<uint8_t>& info, uint32_t mask, uint32_t value) {
+    uint8_t attr[0x18] = {};
+    Wr<uint16_t>(attr, 0, 0x57);
+    Wr<const uint8_t*>(attr, 8, info.data());
+    Wr<uint64_t>(attr, 0x10, info.size());
+    uint8_t request[0x20] = {};
+    Wr<uint64_t>(request, 0, room);
+    Wr<uint32_t>(request, 8, mask);
+    Wr<uint32_t>(request, 0xc, value);
+    Wr<uint8_t*>(request, 0x10, attr);
+    Wr<uint64_t>(request, 0x18, 1);
+    uint32_t id = 0;
+    CHECK(Fn<Request>("sceNpMatching2SetRoomDataInternal")(ctx, request, opt, &id) == 0);
+    return id;
+}
+
+// The runtime is a story room's owner: each new step of its own reaches the members as the private internal attribute
+// through room.set_internal, once, in order; the game's own internal updates go out untouched.
+void TestStoryHost(const std::string& url, const fs::path& base, uint16_t ctx, void* opt[2]) {
+    early_story_set_hosting(1);
+    early_story_grant_access();
+    early_story_note_own_step(0);
+    CHECK(early_story_hosts_story_room(0));
+
+    const std::vector<uint8_t> info(0x78, 0x31), info2(0x78, 0x32);
+    uint8_t bin_internal[0x18] = {}, ints[8 * 8] = {};
+    Wr<uint16_t>(bin_internal, 0, 0x57);
+    Wr<const uint8_t*>(bin_internal, 8, info.data());
+    Wr<uint64_t>(bin_internal, 0x10, info.size());
+    for (int i = 0; i < 8; ++i) Wr<uint16_t>(ints, size_t(i * 8), uint16_t(0x4c + i));
+    Wr<uint32_t>(ints, 1 * 8 + 4, 9);
+    uint8_t create[0xc0] = {};
+    Wr<uint16_t>(create, 0, 4);
+    Wr<uint32_t>(create, 8, 0x86000000u);
+    Wr<uint32_t>(create, 0xc, 1);
+    Wr<uint8_t*>(create, 0x60, bin_internal);
+    Wr<uint64_t>(create, 0x68, 1);
+    Wr<uint8_t*>(create, 0x70, ints);
+    Wr<uint64_t>(create, 0x78, 8);
+    uint32_t created = 0;
+    CHECK(Fn<Request>("sceNpMatching2CreateJoinRoomA")(ctx, create, opt, &created) == 0);
+    const Seen::Request* made = Await(created);
+    CHECK(made && made->error == 0 && made->internal_ids == std::vector<uint16_t>{0x57});
+    if (!made || made->error) return;
+    const uint64_t room = made->room;
+
+    RawPlayer guest(url, base, "StoryGuest");
+    net::Json join = net::Json::Object();
+    join.set("room", net::u64_text(room));
+    auto joined = guest.Call("room.join", join);
+    CHECK(joined && Pairs((*joined)["room"]["bin_int"]) == (std::vector<std::pair<int64_t, std::string>>{{0x57, net::hex_encode(info.data(), info.size())}}));
+    CHECK(joined && (*joined)["room"]["ints"].dump().find("[32513,1]") != std::string::npos);
+    const int64_t flags = joined ? (*joined)["room"]["flags"].as_int() : -1;
+
+    for (int step = 1; step <= 4; ++step) {
+        early_story_note_own_step(step);
+        auto update = guest.Event("room.internal");
+        CHECK(update && Pairs(update->body["bin_int"]) == (std::vector<std::pair<int64_t, std::string>>{{EARLY_STORY_STATE_ATTR, StoryStateHex(step)}}));
+        CHECK(update && update->body["flags"].as_int() == flags);
+    }
+    // the same step again, and the game's own update: no story traffic, the game's attribute alone
+    early_story_note_own_step(4);
+    const uint32_t game_update = GameSetInternal(ctx, opt, room, info2, 0x54000000u, 0x04000000u);
+    CHECK(Await(game_update) && Await(game_update)->error == 0);
+    auto ordinary = guest.Event("room.internal");
+    CHECK(ordinary && Pairs(ordinary->body["bin_int"]) == (std::vector<std::pair<int64_t, std::string>>{{0x57, net::hex_encode(info2.data(), info2.size())}}));
+    CHECK(!guest.Event("room.internal", 400));
+
+    // a later joiner gets the live state with the join, after the game's attribute
+    RawPlayer late(url, base, "StoryLate");
+    auto late_join = late.Call("room.join", join);
+    CHECK(late_join && Pairs((*late_join)["room"]["bin_int"]) ==
+                           (std::vector<std::pair<int64_t, std::string>>{{0x57, net::hex_encode(info2.data(), info2.size())},
+                                                                         {EARLY_STORY_STATE_ATTR, StoryStateHex(4)}}));
+
+    uint8_t leave[16] = {};
+    Wr<uint64_t>(leave, 0, room);
+    uint32_t left = 0;
+    CHECK(Fn<Request>("sceNpMatching2LeaveRoom")(ctx, leave, opt, &left) == 0);
+    CHECK(Await(left) && Await(left)->error == 0);
+    early_story_note_own_step(5);
+    CHECK(!guest.Event("room.internal", 400));
+    early_story_set_hosting(0);
+    std::printf("GROUP|story-host|%s\n", g_failures ? "FAIL" : "PASS");
+}
+
+// The runtime is a story room's guest: the owner's live state is read from the join answer and from room.internal and is
+// never given to the game; the game's own attributes and flags reach it as before. When the owner leaves, the story
+// session ends and the new owner (the runtime) publishes no story state and clears the room's story attribute.
+void TestStoryGuest(const std::string& url, const fs::path& base, uint16_t ctx, void* opt[2]) {
+    early_story_note_own_step(0);
+    const std::vector<uint8_t> info(0x78, 0x41), info2(0x78, 0x42);
+    const std::string info_hex = net::hex_encode(info.data(), info.size()), info2_hex = net::hex_encode(info2.data(), info2.size());
+
+    RawPlayer host(url, base, "StoryHost");
+    net::Json create = net::Json::Object();
+    create.set("world", 1);
+    create.set("slots", 4);
+    net::Json room_ints = net::Json::Array();
+    room_ints.push(AttrPair(0x4d, int64_t(9)));
+    room_ints.push(AttrPair(EARLY_STORY_ROOM_ATTR, int64_t(1)));
+    create.set("ints", std::move(room_ints));
+    create.set("bin_int", BinInt({{0x57, info_hex}}));
+    auto made = host.Call("room.create", create);
+    CHECK(made);
+    if (!made) return;
+    const uint64_t room = (*made)["room"]["id"].as_u64();
+    const std::string code = (*made)["room"]["code"].as_string();
+    // the host is already at step 1 when the guest joins (the failed run's order)
+    CHECK(host.Call("room.set_internal", SetInternal(room, BinInt({{EARLY_STORY_STATE_ATTR, StoryStateHex(1)}}))));
+
+    const size_t internal_events = RoomEvents(0x1106);
+    uint8_t join[16] = {};
+    Wr<uint64_t>(join, 0, room);
+    uint32_t joined = 0;
+    CHECK(Fn<Request>("sceNpMatching2JoinRoomA")(ctx, join, opt, &joined) == 0);
+    const Seen::Request* seat = Await(joined);
+    CHECK(seat && seat->error == 0 && seat->copy == info && seat->internal_ids == std::vector<uint16_t>{0x57});
+    const uint16_t me = seat ? seat->me : 0;
+    CHECK(early_story_session_host_step() == 1 && early_story_visiting());
+
+    CHECK(host.Call("room.set_internal", SetInternal(room, BinInt({{EARLY_STORY_STATE_ATTR, StoryStateHex(2)}}))));
+    CHECK(PumpUntil([] { return early_story_session_host_step() == 2; }));
+    PumpUntil([] { return false; }, 300);
+    CHECK(RoomEvents(0x1106) == internal_events);
+
+    CHECK(host.Call("room.set_internal", SetInternal(room, BinInt({{0x57, info2_hex}, {EARLY_STORY_STATE_ATTR, StoryStateHex(3)}}))));
+    CHECK(PumpUntil([&] { return RoomEvents(0x1106) == internal_events + 1; }));
+    CHECK(!g_seen.rooms.empty() && g_seen.rooms.back().event == 0x1106 && g_seen.rooms.back().attrs.size() == 1 &&
+          g_seen.rooms.back().attrs[0].first == 0x57 && g_seen.rooms.back().attrs[0].second == info2);
+    CHECK(early_story_session_host_step() == 3);
+
+    // flags alone still reach the game as before; a stale replicated host record moves nothing back
+    CHECK(host.Call("room.set_internal", SetInternal(room, net::Json::Array(), 0x04000000u, 0x04000000u)));
+    CHECK(PumpUntil([&] { return RoomEvents(0x1106) == internal_events + 2; }));
+    CHECK(!g_seen.rooms.empty() && g_seen.rooms.back().attrs.empty() && (g_seen.rooms.back().flags & 0x04000000u));
+    early_story_note_host_step(0);
+    CHECK(early_story_session_host_step() == 3);
+    early_story_note_own_step(7);
+    CHECK(early_story_session_host_step() == 3 && early_story_visiting());
+
+    // the owner leaves: the runtime is the next owner, the story session is over and it never speaks for the story
+    RawPlayer watcher(url, base, "StoryWatcher");
+    net::Json by_id = net::Json::Object();
+    by_id.set("room", net::u64_text(room));
+    CHECK(watcher.Call("room.join", by_id));
+    net::Json leave = net::Json::Object();
+    leave.set("room", net::u64_text(room));
+    const size_t owner_events = RoomEvents(0x1105);
+    CHECK(host.Call("room.leave", leave));
+    CHECK(PumpUntil([&] { return RoomEvents(0x1105) > owner_events; }));
+    const auto owner_event = std::find_if(g_seen.rooms.rbegin(), g_seen.rooms.rend(), [](const Seen::Room& r) { return r.event == 0x1105; });
+    CHECK(owner_event != g_seen.rooms.rend() && owner_event->next == me);
+    CHECK(!early_story_visiting() && early_story_session_host_step() == EARLY_STORY_NO_STEP);
+    early_story_note_own_step(8);
+    const uint32_t game_update = GameSetInternal(ctx, opt, room, info, 0x54000000u, 0x04000000u);
+    CHECK(Await(game_update) && Await(game_update)->error == 0);
+    auto ordinary = watcher.Event("room.internal");
+    CHECK(ordinary && Pairs(ordinary->body["bin_int"]) == (std::vector<std::pair<int64_t, std::string>>{{0x57, info_hex}}));
+    CHECK(!watcher.Event("room.internal", 400));
+    uint8_t search_ints[8] = {};
+    Wr<uint16_t>(search_ints, 0, 0x4d);
+    Wr<uint32_t>(search_ints, 4, 9);
+    uint8_t external[0x38] = {};
+    Wr<uint64_t>(external, 0, room);
+    Wr<uint8_t*>(external, 8, search_ints);
+    Wr<uint64_t>(external, 0x10, 1);
+    uint32_t set_external = 0;
+    CHECK(Fn<Request>("sceNpMatching2SetRoomDataExternal")(ctx, external, opt, &set_external) == 0);
+    CHECK(Await(set_external) && Await(set_external)->error == 0);
+    net::Json by_code = net::Json::Object();
+    by_code.set("code", code);
+    auto found = watcher.Call("room.search", by_code);
+    CHECK(found && found->dump().find("[32513,0]") != std::string::npos);
+    CHECK(!watcher.Event("room.external", 300));
+
+    uint8_t leave_request[16] = {};
+    Wr<uint64_t>(leave_request, 0, room);
+    uint32_t left = 0;
+    CHECK(Fn<Request>("sceNpMatching2LeaveRoom")(ctx, leave_request, opt, &left) == 0);
+    CHECK(Await(left));
+    std::printf("GROUP|story-guest|%s\n", g_failures ? "FAIL" : "PASS");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -307,7 +604,8 @@ int main(int argc, char** argv) {
     using Register = int32_t SYSV (*)(uint16_t, void*, void*);
     using Status = int32_t SYSV (*)(uint16_t, uint64_t, uint16_t, int32_t*, uint32_t*, uint16_t*);
 
-    // Bring-up: context, start (lobby hello), world list.
+    // Bring-up: context, start (lobby hello, story session support declared), world list.
+    early_story_set_active(1);
     CHECK(Fn<Init>("sceNpMatching2Initialize")(nullptr) == 0);
     uint16_t ctx = 0;
     CHECK(Fn<CreateContext>("sceNpMatching2CreateContextA")(nullptr, &ctx) == 0 && ctx == 1);
@@ -592,6 +890,10 @@ int main(int argc, char** argv) {
     old_session.close();
     new_session.close();
     self.close();
+
+    TestStoryHost(url, base, ctx, opt);
+    TestStoryGuest(url, base, ctx, opt);
+
     CHECK(Fn<Close>("sceRudpTerminate")(rudp_ctx) == 0);
     CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);
     CHECK(Fn<Stop>("sceNpMatching2ContextStop")(ctx) == 0);

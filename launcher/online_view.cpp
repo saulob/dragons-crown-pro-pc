@@ -28,7 +28,8 @@ std::vector<OnlineSection> OnlinePageSections(bool on, OnlineTab tab, size_t fri
     switch (tab) {
     case OnlineTab::kSettings:
         for (const OnlineSection section : {OnlineSection::kOnlineName, OnlineSection::kFriendCode,
-                                            OnlineSection::kConnectionTest, OnlineSection::kPingDisplay}) {
+                                            OnlineSection::kConnectionTest, OnlineSection::kPingDisplay,
+                                            OnlineSection::kEarlyStoryOnline}) {
             sections.push_back(section);
         }
         break;

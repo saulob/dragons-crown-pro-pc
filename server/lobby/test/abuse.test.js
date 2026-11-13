@@ -302,9 +302,10 @@ test('a database from before the session column gains it and keeps its accounts'
   env.host.sql.run('ALTER TABLE rooms DROP COLUMN relayed');
   env.host.sql.run('ALTER TABLE members DROP COLUMN public_ip');
   env.host.sql.run('ALTER TABLE rooms DROP COLUMN platforms');
+  env.host.sql.run('ALTER TABLE rooms DROP COLUMN story_seen');
   env.host.sql.run(`UPDATE meta SET v = '1' WHERE k = 'schema'`);
   env.lobby = new Lobby(env.host);
-  assert.equal(env.lobby.meta('schema'), '5');
+  assert.equal(env.lobby.meta('schema'), '6');
   assert.equal(env.lobby.accountRow(owner.account).session, 0);
   const next = env.connect();
   Object.assign(next, { account: owner.account, secret: owner.secret });

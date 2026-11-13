@@ -236,14 +236,15 @@ test('analytics tables hold no names, accounts, addresses, Friend Codes or room 
   assert.ok(dump.includes('"BR"') && dump.includes('Windows'));
 });
 
-test('no per-session or per-player analytics table exists', () => {
+test('no per-session or per-player analytics table exists; story_users is the one named exception, empty without a story room', () => {
   const env = makeLobby();
   online(env);
   const tables = env.host.sql.all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
     .map((r) => r.name).sort();
   assert.deepEqual(tables, ['accounts', 'friend_requests', 'friends', 'incident_quota', 'incident_tracking', 'incidents', 'members', 'meta',
     'metrics_daily',
-    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'rooms']);
+    'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'rooms', 'story_users']);
+  assert.equal(env.host.sql.get('SELECT COUNT(*) AS n FROM story_users').n, 0);
   const forbidden = /account|name|ip|port|code|friend|room_id|session_id|user|device|machine|hash|city|lat|lon|postal/;
   for (const table of tables.filter((t) => t.startsWith('metrics_'))) {
     for (const { name } of env.host.sql.all(`PRAGMA table_info(${table})`)) {

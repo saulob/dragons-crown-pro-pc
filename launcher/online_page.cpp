@@ -24,6 +24,9 @@ const char* kFriendCodeHelp = "Share this code so another player can add you.";
 const char* kTestHelp = "Checks that you can reach the online service and that other players can reach you. Takes a few "
                         "seconds.";
 const char* kPingHelp = "Shows the round trip to the other players in game. F3 switches it while playing.";
+const char* kEarlyStoryHelp =
+    "Lets you host online play right after the tutorial. The tutorial remains single-player. Only the host needs this "
+    "option; guests keep their own campaign progress. Early story rooms are friend/direct only.";
 const char* kUnreachable = "Cannot reach the online service right now. Run the Connection test for details.";
 const char* kLobbyHiddenHelp =
     "Enable this option to let other Dragon's Crown Pro players see your Online name and send you a friend request.";
@@ -181,6 +184,9 @@ void OnlinePage::Draw(trg::Ui& ui) {
         case OnlineSection::kFriendCode: DrawFriendCode(ui); break;
         case OnlineSection::kConnectionTest: DrawConnectionTest(ui); break;
         case OnlineSection::kPingDisplay: ui.Toggle("Ping display", kPingHelp, kPingDisplayKey, false, "Off", "On"); break;
+        case OnlineSection::kEarlyStoryOnline:
+            ui.Toggle("Early Story Online", kEarlyStoryHelp, kEarlyStoryOnlineKey, false, "Off", "On");
+            break;
         case OnlineSection::kFriends: DrawFriends(ui); break;
         case OnlineSection::kLobbyVisibility: DrawLobbyVisibility(ui); break;
         case OnlineSection::kLobbyPlayers: DrawLobbyPlayers(ui); break;

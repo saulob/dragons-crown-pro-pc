@@ -219,7 +219,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Renderer, Render resolution (builds that support it), Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
 | Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
-| Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
+| Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status; the experimental Early Story Online toggle (Off by default, needs a restart; for the host only: online right after the tutorial, the host controls the story, guests keep their own progress and do not need the option, early-story rooms are friend/direct only) | read only; the test runs on request; Early Story Online is saved and read at the next game start |
 | Controls | Controller Rumble | at once |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
@@ -256,6 +256,7 @@ use the same defaults).
 | `show_resolution_title` | 1, 0 | 0 | at start |
 | `show_fps` | 1, 0 | 0 | live; F2 changes the session |
 | `show_ping` | 1, 0 | 0 | at game start, Online Play only; F3 changes the session |
+| `early_story_online` | 1, 0 (`DCP_EARLY_STORY_ONLINE` overrides it) | 0 | at game start (restart), Online Play only; experimental, for the host: online right after the tutorial, the host controls the story, guests keep their own campaign progress and do not need it, early-story rooms are friend/direct only |
 | `detailed_logging` | 1, 0 | 1 | at exit |
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |

@@ -1503,7 +1503,7 @@ void TestOnlinePage() {
         CHECK(on.size() >= 3 && on[0] == S::kOnlinePlay && on[1] == S::kTabs);
     }
     const std::vector<S> settings_tab{S::kOnlinePlay, S::kTabs, S::kOnlineName, S::kFriendCode, S::kConnectionTest,
-                                      S::kPingDisplay};
+                                      S::kPingDisplay, S::kEarlyStoryOnline};
     CHECK(OnlinePageSections(true, T::kSettings, 0, false) == settings_tab);
     CHECK(OnlinePageSections(true, T::kSettings, 3, true) == settings_tab);
     CHECK(OnlinePageSections(true, T::kFriends, 0, false) == (std::vector<S>{S::kOnlinePlay, S::kTabs, S::kFriends}));
@@ -2124,6 +2124,107 @@ void TestSkipIntroSettings(const fs::path& base) {
 
 // The one gallery option: Off by default, in the Gameplay page after the skip offers, offered only where the Gallery
 // list builder is validated, and no other gallery switch anywhere in the product.
+void TestEarlyStoryOnlineSetting(const fs::path& base) {
+    using namespace localization;
+    CHECK(std::string(kEarlyStoryOnlineKey) == "early_story_online" && !IsOnlineSetting(kEarlyStoryOnlineKey));
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kEarlyStoryOnlineKey && setting.default_value == "0";
+    }
+    CHECK(managed == 1 && IsValidSetting(kEarlyStoryOnlineKey, "0") && IsValidSetting(kEarlyStoryOnlineKey, "1"));
+
+    const fs::path file = base / "early_story_online" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    {
+        LauncherSettings settings(file);
+        CHECK(!settings.GetBool(kEarlyStoryOnlineKey, false));
+        settings.SetBool(kEarlyStoryOnlineKey, true);
+        CHECK(settings.Save());
+    }
+    CHECK(LauncherSettings(file).GetBool(kEarlyStoryOnlineKey, false));
+    {
+        LauncherSettings settings(file);
+        settings.ResetToDefaults();
+        CHECK(!settings.GetBool(kEarlyStoryOnlineKey, true));
+    }
+
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "online_page.cpp");
+    CHECK(page.find("ui.Toggle(\"Early Story Online\", kEarlyStoryHelp, kEarlyStoryOnlineKey, false, \"Off\", \"On\");") !=
+          std::string::npos);
+    const std::string help =
+        "Lets you host online play right after the tutorial. The tutorial remains single-player. Only the host needs this "
+        "option; guests keep their own campaign progress. Early story rooms are friend/direct only.";
+    CHECK(page.find("\"Lets you host online play right after the tutorial. The tutorial remains single-player. Only the "
+                    "host needs this \"") != std::string::npos &&
+          page.find("\"option; guests keep their own campaign progress. Early story rooms are friend/direct only.\";") !=
+              std::string::npos);
+
+    using S = OnlineSection;
+    using T = OnlineTab;
+    for (const T tab : kOnlineTabs) {
+        const std::vector<S> off = OnlinePageSections(false, tab, 1, true);
+        CHECK(std::find(off.begin(), off.end(), S::kEarlyStoryOnline) == off.end());
+    }
+    const std::vector<S> settings_tab = OnlinePageSections(true, T::kSettings, 0, false);
+    const auto at = std::find(settings_tab.begin(), settings_tab.end(), S::kEarlyStoryOnline);
+    CHECK(at != settings_tab.end() && at != settings_tab.begin() && *(at - 1) == S::kPingDisplay);
+    for (const T tab : {T::kFriends, T::kLobby}) {
+        const std::vector<S> other = OnlinePageSections(true, tab, 2, true);
+        CHECK(std::find(other.begin(), other.end(), S::kEarlyStoryOnline) == other.end());
+    }
+
+    const auto set_env = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if (value) setenv(name, value, 1);
+        else unsetenv(name);
+#endif
+    };
+    const char* previous_raw = std::getenv("DCP_EARLY_STORY_ONLINE");
+    const bool had_previous = previous_raw != nullptr;
+    const std::string previous = previous_raw ? previous_raw : "";
+    const std::string path = file.string();
+    set_env("DCP_EARLY_STORY_ONLINE", nullptr);
+    CHECK(dcp_early_story_online(nullptr) == 0);
+    WriteAll(file, "vsync = 1\n");
+    CHECK(dcp_early_story_online(path.c_str()) == 0);
+    WriteAll(file, "early_story_online = banana\n");
+    CHECK(dcp_early_story_online(path.c_str()) == 0);
+    WriteAll(file, "early_story_online = 1\n");
+    CHECK(dcp_early_story_online(path.c_str()) == 1);
+    for (const char* off : {"0", "off", "false"}) {
+        set_env("DCP_EARLY_STORY_ONLINE", off);
+        CHECK(dcp_early_story_online(path.c_str()) == 0);
+    }
+    set_env("DCP_EARLY_STORY_ONLINE", "maybe");
+    CHECK(dcp_early_story_online(path.c_str()) == 1);
+    WriteAll(file, "early_story_online = 0\n");
+    CHECK(dcp_early_story_online(path.c_str()) == 0);
+    for (const char* on : {"1", "on", "true"}) {
+        set_env("DCP_EARLY_STORY_ONLINE", on);
+        CHECK(dcp_early_story_online(path.c_str()) == 1);
+        CHECK(dcp_early_story_online(nullptr) == 1);
+    }
+    set_env("DCP_EARLY_STORY_ONLINE", had_previous ? previous.c_str() : nullptr);
+
+    int translated = 0;
+    for (const UiTextRow& row : PortugueseBrazilUiText().rows) {
+        if (row.english == "Early Story Online" || row.english == help) {
+            ++translated;
+            CHECK(!row.text.empty() && row.text != row.english);
+        }
+    }
+    CHECK(translated == 2);
+
+    for (const char* menu : {"dcp_options_menu.cpp", "dcp_options_menu.h"}) {
+        const fs::path source = fs::path(DCP_SOURCE_DIR) / "gpu" / "shim" / menu;
+        if (fs::exists(source)) {
+            CHECK(ReadAll(source).find("early_story_online") == std::string::npos);
+        }
+    }
+}
+
 void TestUnlockGallerySettings(const fs::path& base) {
     const fs::path file = base / "unlock_gallery" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -8337,6 +8438,7 @@ int main(int argc, char** argv) {
     TestSkipIntroSettings(base);
     TestControllerRumbleSettings(base);
     TestUnlockGallerySettings(base);
+    TestEarlyStoryOnlineSetting(base);
     TestJapaneseMenuButtonsSettings(base);
     TestPinnedBuild(base);
     TestOverlayProgramsSetting(base);

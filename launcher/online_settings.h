@@ -24,6 +24,8 @@ inline constexpr char kConnectionTestPortKey[] = "online_connection_test_port";
 inline constexpr char kPingDisplayKey[] = "show_ping";
 // Opt-in to the public Lobby; Reset turns it off with the display preferences.
 inline constexpr char kLobbyVisibleKey[] = "show_in_lobby";
+// Experimental; read at game start only, and only with Online play on.
+inline constexpr char kEarlyStoryOnlineKey[] = "early_story_online";
 
 // Kept by "Reset all settings": the player's name is not a display preference.
 bool IsOnlineSetting(std::string_view key);

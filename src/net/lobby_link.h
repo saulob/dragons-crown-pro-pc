@@ -58,6 +58,10 @@ struct RelayCapability {
 };
 RelayCapability relay_capability(const Json& hello_reply);
 
+// Whether the lobby's hello answer says it keeps Early Story Online rooms to clients that declared `story_session`; an
+// older lobby says nothing and would let any client in.
+bool story_session_capability(const Json& hello_reply);
+
 // Relay frames waiting for the socket; a link this far behind is not carrying a game any more.
 inline constexpr size_t kMaxQueuedBinary = 512;
 

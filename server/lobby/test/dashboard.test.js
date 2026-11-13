@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import { ADMIN_HTML, ADMIN_JS } from '../src/admin_page.js';
 import { metricsDay } from '../src/metrics.js';
-import { makeLobby } from './harness.js';
+import { ROOM, makeLobby } from './harness.js';
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -369,4 +369,69 @@ test('the dashboard reads only its metrics and report endpoints, with no extra r
   assert.deepEqual([...ADMIN_JS.matchAll(/api\('([^']+)/g)].map((m) => m[1]).sort(), ['/admin/api/history?days=', '/admin/api/incidents', '/admin/api/incidents/', '/admin/api/summary']);
   assert.equal([...ADMIN_JS.matchAll(/fetch\(/g)].length, 1);
   assert.ok(!/innerHTML|eval\(|new Function/.test(ADMIN_JS));
+});
+
+const STORY_FIELDS = { online_protocol: 1, version: '1.2.0', platform: 'Windows', story_session: true };
+
+function storyHost(env, name, step = 1) {
+  const client = env.connect(`198.51.100.${(env.storyIps = (env.storyIps ?? 0) + 1)}`);
+  assert.equal(client.hello({ ...STORY_FIELDS, name }).code, 'ok');
+  const reply = client.call('room.create', { ...ROOM, ints: [...ROOM.ints, [0x7f01, step]] });
+  assert.equal(reply.code, 'ok');
+  return { client, room: reply.room };
+}
+
+test('the Early Story section shows live figures, totals, who played and who is playing now', async () => {
+  const env = makeLobby();
+  const empty = await dashboard(env, 30);
+  assert.ok(empty.get('story-users-note').textContent.includes('No Early Story Online session has been recorded yet'));
+  assert.deepEqual(empty.get('story-live').find((n) => n.hasClass('card')).map((c) => c.textContent),
+    ['Early Story rooms0', 'Early Story parties0', 'Waiting for player0', 'Early Story players0']);
+
+  const first = storyHost(env, 'HostA');
+  const guest = env.connect('198.51.100.90');
+  assert.equal(guest.hello({ ...STORY_FIELDS, name: 'GuestA' }).code, 'ok');
+  assert.equal(guest.call('room.join', { room: first.room.id }).code, 'ok');
+  storyHost(env, 'HostB');
+  env.advance(5 * 60 * 1000);
+  const page = await dashboard(env, 30);
+  assert.deepEqual(page.get('story-live').find((n) => n.hasClass('card')).map((c) => c.textContent),
+    ['Early Story rooms2', 'Early Story parties1', 'Waiting for player1', 'Early Story players3']);
+  assert.deepEqual(page.get('story-totals').find((n) => n.hasClass('card')).map((c) => c.textContent),
+    ['Parties created2', 'Guest joins1', 'Sessions3', 'Unique users3']);
+  const table = page.get('story-users');
+  const rows = table.find((n) => n.tag === 'tr').slice(1).map((tr) => tr.children.map((td) => td.textContent));
+  assert.deepEqual(table.find((n) => n.tag === 'th').map((th) => th.textContent),
+    ['Online Name', 'Account ID', 'Role', 'Sessions', 'Last Used', 'Status']);
+  assert.deepEqual(rows.map((r) => [r[0], r[2], r[3]]).sort(), [['GuestA', 'Guest', '1'], ['HostA', 'Host', '1'], ['HostB', 'Host', '1']]);
+  assert.ok(rows.every((r) => r[5].startsWith('Playing now')));
+  assert.ok(rows.find((r) => r[0] === 'GuestA')[5].includes('Guest · 2 players · 5 min'));
+  assert.ok(rows.find((r) => r[0] === 'HostB')[5].includes('Host · 1 player · 5 min'));
+  assert.ok(page.get('story-note').textContent.includes('earlier use is not known'));
+  assert.ok(!everyText(page).includes('NaN') && !everyText(page).includes('undefined'));
+});
+
+test('a user no longer playing says so, and a lobby without the section leaves the rest of the page intact', async () => {
+  const env = makeLobby();
+  const { client, room } = storyHost(env, 'Gone');
+  client.call('room.leave', { room: room.id });
+  const page = await dashboard(env, 30);
+  const rows = page.get('story-users').find((n) => n.tag === 'tr').slice(1).map((tr) => tr.children.map((td) => td.textContent));
+  assert.deepEqual(rows.map((r) => [r[0], r[5]]), [['Gone', 'Not playing']]);
+
+  const original = env.lobby.metricsSummary.bind(env.lobby);
+  env.lobby.metricsSummary = () => { const { story, ...old } = original(); return old; };
+  const older = await dashboard(env, 30);
+  assert.ok(older.get('story-note').textContent.includes('has not reported'));
+  assert.equal(older.get('c-online').textContent, '1');
+});
+
+test('names in the Early Story table are text, never markup', async () => {
+  const env = makeLobby();
+  storyHost(env, '<b>Bold</b>');
+  const page = await dashboard(env, 30);
+  const cell = page.get('story-users').find((n) => n.tag === 'td')[0];
+  assert.equal(cell.textContent, '<b>Bold</b>');
+  assert.equal(cell.tag, 'td');
+  assert.equal(cell.children.length, 0);
 });

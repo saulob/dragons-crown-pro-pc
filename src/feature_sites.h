@@ -103,6 +103,35 @@ typedef struct {
     uint32_t unit_owner, unit_slot, unit_class, owner_category;
 } DcpPartySites;
 
+#define DCP_EARLY_STORY_WRITERS 4
+
+/* Early Story Online: the start of the lead character selector, the start of the online check (`cmp byte [rdi+0x6f], 0x2c`),
+ * the two callers of the online wrapper that keep the original threshold, the call that reads the host's replicated
+ * record at stage setup, and the starts of the four campaign progression writers (advance story, difficulty tier,
+ * talisman award, story flag). `prompt_call` is the original "Go online?" prompt's call of the online wrapper: located
+ * to prove the prompt follows the online check, never patched. The Hydeland trigger runs the original prompt function
+ * (`prompt_function`) from the town object's update: `town_portal_call` is a call that runs every frame;
+ * `prompt_owner_vtable` is the vtable of the Castle Gate logic object the prompt function normally runs on.
+ * The Network Menu shortcut goes through the scene director's own Menu path: `menu_press_call` is its test of the Menu
+ * button, `menu_step_call` its story-step check for a town menu, and `menu_kind_store` the first instruction after the
+ * menu window's kind is chosen. The hint on the top help dialog needs its window function (`hint_create`), its
+ * formatted text, its hide and the text object's reveal reset (all 0 where a build lacks one: no hint). The host room
+ * follows the director's room wish (`room_wish_function`), whose town branch wants a room only at the Castle Gate and
+ * Stables: `room_wish_location` is its location test. `room_info_location` stores the location into the room info that
+ * friends read; a friend's game accepts a town host only at the Castle Gate or the Stables. */
+typedef struct {
+    uint32_t selector;
+    uint32_t online_accessor;
+    uint32_t hint_call, notice_call, host_record_call;
+    uint32_t writers[DCP_EARLY_STORY_WRITERS];
+    uint32_t prompt_call;
+    uint32_t prompt_function, prompt_owner_vtable;
+    uint32_t town_portal_call;
+    uint32_t menu_press_call, menu_step_call, menu_kind_store;
+    uint32_t hint_create, hint_text, hint_hide, hint_refresh;
+    uint32_t room_wish_function, room_wish_location, room_info_location;
+} DcpEarlyStorySites;
+
 typedef struct {
     uint32_t npc_cue;          /* the cue mapper's `mov eax, 0x1971b` */
     uint32_t resource_acquire; /* the resource manager's acquire */
@@ -159,6 +188,7 @@ int dcp_ranges_overlap(const DcpExecRange *ranges, size_t count);
 int dcp_locate_cheat_sites(const DcpImageView *image, DcpCheatSites *out, DcpLocateReport *report);
 int dcp_locate_party_sites(const DcpImageView *image, DcpPartySites *out, DcpLocateReport *report);
 int dcp_locate_exit_game_sites(const DcpImageView *image, DcpExitGameSites *out, DcpLocateReport *report);
+int dcp_locate_early_story_sites(const DcpImageView *image, DcpEarlyStorySites *out, DcpLocateReport *report);
 int dcp_locate_voice_sites(const DcpImageView *image, DcpVoiceSites *out, DcpLocateReport *report);
 int dcp_locate_ultrawide_sites(const DcpImageView *image, DcpUltrawideSites *out, DcpLocateReport *report);
 

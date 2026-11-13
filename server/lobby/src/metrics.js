@@ -1,6 +1,7 @@
 // Aggregate service metrics for the private dashboard (README.md, Telemetry): daily counters, daily counts of sessions
 // per platform, version and country, and 15-minute usage samples. No row names a player, an account, an address or a
-// room, and nothing here keeps per-session state: live numbers come from the lobby's sockets and tables.
+// room, and nothing here keeps per-session state: live numbers come from the lobby's sockets and tables. Who used Early
+// Story Online is kept apart, in story_usage.js.
 import { MAX_PARTY, PARTY_DIMENSIONS, partyCounts } from './party.js';
 
 export { MAX_PARTY };
@@ -23,7 +24,8 @@ const DAY_MS = 24 * 3600 * 1000;
 // Bounds what a client can add to the table: further new versions in a day count as Other.
 const VALUES_PER_DIMENSION_PER_DAY = 64;
 const CLEANUP_ROWS = 500;
-const COUNTERS = new Set(['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects']);
+const STORY_COLUMNS = ['story_rooms', 'story_guest_joins'];
+const COUNTERS = new Set(['sessions', 'rooms_created', 'room_joins', 'incompatible_rejects', ...STORY_COLUMNS]);
 
 const PLATFORM_ROOM_COLUMNS = ['rooms_cross_platform', 'rooms_android', 'rooms_android_cross', 'rooms_android_pc',
   'rooms_android_relayed', 'rooms_android_cross_relayed'];
@@ -87,7 +89,7 @@ export class Metrics {
     this.now = now;
     for (const statement of METRICS_SCHEMA) sql.run(statement);
     const have = new Set(sql.all('PRAGMA table_info(metrics_daily)').map((c) => c.name));
-    for (const column of ROOM_COLUMNS) {
+    for (const column of [...ROOM_COLUMNS, ...STORY_COLUMNS]) {
       if (!have.has(column)) sql.run(`ALTER TABLE metrics_daily ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
     }
     this.peaks = null;
@@ -255,6 +257,12 @@ export class Metrics {
     const previous = this.totals(daysBefore(first, days), daysBefore(first, 1));
     return { generated: now, time_zone: METRICS_TIME_ZONE, days, first, last, sample_ms: SAMPLE_MS, daily, dimensions,
       party_first_day: partyFirst ?? null, platform_mix_first_day: mixFirst ?? null, samples, totals, previous, comparison: compare(totals, previous) };
+  }
+
+  // Early Story Online rooms created and guest joins since the columns exist; the dashboard sums them, never a period.
+  storyTotals() {
+    return this.sql.get(`SELECT COALESCE(SUM(story_rooms), 0) AS rooms_created,
+      COALESCE(SUM(story_guest_joins), 0) AS guest_joins FROM metrics_daily`);
   }
 
   totals(from, to) {

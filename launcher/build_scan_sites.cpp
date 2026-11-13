@@ -411,6 +411,117 @@ constexpr SiteSpec kSiteTable[] = {
     {"Exit Game", "part GALLERY_2", SiteKind::kWindow,
         "?? 8d ?? d0 03 00 00 be 8e 00 00 00 c5 f8 57 c0 e8 ?? ?? ?? ?? 4c 89 ff 44 89 f6 e8",
         8, 1, {0x53ff1a, 0x53df7a, 0x53defa, 0x53dfba, 0x53df0a}},
+    {"Early Story Online", "lead selector", SiteKind::kFunction,
+        "48 8b 4f 70 48 8b 81 80 00 00 00 8b 90 88 22 00 "
+        "00 83 fa ff 74 0b 31 f6 f6 80 a8 00 00 00 01 74 "
+        "4c 83 b8 38 46 00 00 ff 74 0e f6 80 58 24 00 00 "
+        "01 be 01 00 00 00 74 35 83 b8 e8 69 00 00 ff 74 "
+        "0e f6 80 08 48 00 00 01 be 02 00 00 00 74 1e 83 "
+        "b8 98 8d 00 00 ff 74 0e f6 80 b8 6b 00 00 01 be "
+        "03 00 00 00 74 07 31 f6 83 fa ff 74 10 48 69 ce "
+        "b0 23 00 00 48 8d 84 08 a8 00 00 00 c3",
+        0, 1, {0x4763d0, 0x4755d0, 0x4759a0, 0x475a60, 0x475740}},
+    {"Early Story Online", "hint call", SiteKind::kCall,
+        "e8 ?? ?? ?? ?? 84 c0 75 ?? be 01 00 00 00 31 d2 "
+        "4c 89 e7 e8 ?? ?? ?? ?? 84 c0 74 ?? 48 8b 7d ?? "
+        "be 27 00 00 00 e8 ?? ?? ?? ?? 84 c0 74 ?? 48 8b "
+        "bd ?? ?? ?? ?? be e8 02 00 00",
+        0, 1, {0x39cd1f, 0x39c29f, 0x39c60f, 0x39c65f, 0x39c40f}},
+    {"Early Story Online", "notice call", SiteKind::kCall,
+        "4c 89 ff e8 ?? ?? ?? ?? 84 c0 74 09 80 bb 9d 01 "
+        "00 00 00 74 0f",
+        3, 1, {0x369d0e, 0x3692ae, 0x3695fe, 0x36964e, 0x36941e}},
+    {"Early Story Online", "prompt call", SiteKind::kCall,
+        "48 8b 7d ?? e8 ?? ?? ?? ?? 41 b5 01 84 c0 0f 84 "
+        "?? ?? ?? ?? 4c 8b 7d ?? 49 8b bf 10 69 01 00 48 "
+        "8b 07 ff 90 48 02 00 00 84 c0 0f 85 ?? ?? ?? ?? "
+        "49 8b bf 10 69 01 00 48 8b 07 ff 90 50 02 00 00 "
+        "84 c0 0f 85 ?? ?? ?? ?? 80 bb 4d 01 00 00 00 0f "
+        "85 ?? ?? ?? ?? 4c 89 e7 44 89 f6 c6 83 4d 01 00 "
+        "00 01 e8",
+        4, 1, {0x369a06, 0x368fa6, 0x3692f6, 0x369346, 0x369116}},
+    {"Early Story Online", "prompt function", SiteKind::kFunction,
+        "55 48 89 e5 41 57 41 56 41 55 41 54 53 48 83 ec 28 89 75 cc 49 89 ff 49 8b 07 ff 90 d0 00 00 00 "
+        "48 89 c3 48 8b 83 f0 00 00 00 48 89 45 c0 48 8b 43 78 48 89 45 d0 4c 8b ab a8 00 00 00 "
+        "4c 8b b3 88 00 00 00 4c 8b a3 b8 00 00 00 4c 89 ef e8",
+        0, 1, {0x369920, 0x368ec0, 0x369210, 0x369260, 0x369030}},
+    {"Early Story Online", "prompt owner ctor", SiteKind::kCall,
+        "e8 ?? ?? ?? ?? 48 8d 05 ?? ?? ?? ?? 48 8d 48 10 48 05 58 0a 00 00 48 89 0b 48 8d 0d ?? ?? ?? ?? "
+        "48 89 83 c0 01 00 00",
+        0, 6, {0x3335f9, 0x332ae9, 0x332ed9, 0x332f29, 0x332c79}},
+    {"Early Story Online", "manager getter", SiteKind::kFunction,
+        "48 8b 87 98 09 00 00 48 8b 40 20 c3",
+        0, 1, {0x281620, 0x280b90, 0x280ef0, 0x280f40, 0x280d20}},
+    {"Early Story Online", "town update", SiteKind::kFunction,
+        "55 48 89 e5 41 57 41 56 41 55 41 54 53 48 83 ec 18 48 89 fb e8 ?? ?? ?? ?? 48 8b 88 f0 00 00 00 "
+        "4c 8b a0 88 00 00 00 4c 8b b0 b0 00 00 00 4c 8b b8 b8 00 00 00",
+        0, 1, {0x3cda90, 0x3ccd00, 0x3cd110, 0x3cd160, 0x3cce70}},
+    {"Early Story Online", "town portal call", SiteKind::kCall,
+        "48 89 df e8 ?? ?? ?? ?? 48 89 df e8 ?? ?? ?? ?? 8a 83 04 01 00 00 3c 01 74",
+        3, 1, {0x3cdbd9, 0x3cce49, 0x3cd259, 0x3cd2a9, 0x3ccfb9}},
+    {"Early Story Online", "menu press call", SiteKind::kCall,
+        "be 23 00 00 00 48 89 c7 e8 ?? ?? ?? ?? b1 01 84 c0 75 ?? 89 d9",
+        8, 1, {0x432904, 0x431b34, 0x431f14, 0x431fd4, 0x431ca4}},
+    {"Early Story Online", "menu step call", SiteKind::kCall,
+        "e8 ?? ?? ?? ?? 84 c0 0f 84 ?? ?? ?? ?? 48 8b 4d ?? 8b 81 08 01 00 00 83 f8 0f",
+        0, 1, {0x432b21, 0x431d51, 0x432131, 0x4321f1, 0x431ec1}},
+    {"Early Story Online", "menu kind store", SiteKind::kHook,
+        "c7 83 10 15 00 00 01 00 00 00 48 8b 5d ?? 48 85 db",
+        10, 1, {0x432cf2, 0x431f22, 0x432302, 0x4323c2, 0x432092}},
+    {"Early Story Online", "hint create", SiteKind::kFunction,
+        "55 48 89 e5 41 56 53 41 89 f6 be 28 00 00 00 e8 ?? ?? ?? ?? 48 89 c3 45 85 f6 75 ?? be 07 00 00 00 48 89 df e8 ?? ?? ?? ??",
+        0, 1, {0x4b09f0, 0x4aed00, 0x4af180, 0x4af240, 0x4aee70}},
+    {"Early Story Online", "hint text", SiteKind::kFunction,
+        "55 48 89 e5 53 48 81 ec d8 00 00 00 84 c0 74 31 c5 f8 29 85 50 ff ff ff c5 f8 29 8d 60 ff ff ff c5 f8 29 95 70 ff ff ff "
+        "c5 f8 29 5d 80 c5 f8 29 65 90 c5 f8 29 6d a0 c5 f8 29 75 b0 c5 f8 29 7d c0 48 8b 1d ?? ?? ?? ?? 4c 89 8d 48 ff ff ff "
+        "4c 89 85 40 ff ff ff 48 89 8d 38 ff ff ff 48 89 95 30 ff ff ff 48 8d 95 20 ff ff ff 48 8d 4d 10 48 81 c7 e0 03 00 00",
+        0, 1, {0x4ec630, 0x4ea490, 0x4eaa10, 0x4eaad0, 0x4ea4a0}},
+    {"Early Story Online", "hint hide", SiteKind::kFunction,
+        "55 48 89 e5 53 50 48 89 fb c7 83 3c 06 00 00 2b 00 00 00 8a 83 ab 00 00 00 3c 01 74 ?? 3c 03 75",
+        0, 1, {0x4ec910, 0x4ea770, 0x4eacf0, 0x4eadb0, 0x4ea780}},
+    {"Early Story Online", "hint refresh", SiteKind::kFunction,
+        "c7 87 0c 01 00 00 00 ff 7f 47 c3",
+        0, 1, {0x5910a0, 0x58f140, 0x58f070, 0x58f130, 0x58f1a0}},
+    {"Early Story Online", "room wish", SiteKind::kFunction,
+        "55 48 89 e5 41 57 41 56 41 55 41 54 53 48 81 ec 88 00 00 00 4c 8b 25 ?? ?? ?? ?? 48 89 fb 49 8b 04 24 48 89 45 d0 "
+        "48 8b 03 ff 90 d0 00 00 00 4c 8b a8 b0 00 00 00 48 8b 03 48 89 df ff 90 d0 00 00 00 4c 8b b8 f0 00 00 00 48 8b 03 "
+        "48 89 df ff 90 70 01 00 00 4c 89 ff 49 89 c6 e8",
+        0, 1, {0x43bc60, 0x43ae90, 0x43b270, 0x43b330, 0x43b000}},
+    {"Early Story Online", "room wish location", SiteKind::kHook,
+        "83 f9 09 75 ?? 8b 83 f0 00 00 00 83 c8 08 83 f8 09 75 ?? 49 8b be 10 69 01 00 48 8b 07 eb",
+        11, 1, {0x43bd40, 0x43af70, 0x43b350, 0x43b410, 0x43b0e0}},
+    {"Early Story Online", "room info location", SiteKind::kHook,
+        "4c 8b 6d ?? 41 0f b7 85 f0 00 00 00 66 41 89 47 5c 48 8b 83 88 22 00 00",
+        12, 1, {0x439069, 0x438299, 0x438679, 0x438739, 0x438409}},
+    {"Early Story Online", "host record call", SiteKind::kCall,
+        "49 8b 04 24 ff 90 d0 00 00 00 4c 8b a8 20 01 00 "
+        "00 4c 89 ff e8 ?? ?? ?? ?? 41 88 85 88 00 00 00",
+        20, 1, {0x42a8dc, 0x429acc, 0x429eec, 0x429fac, 0x429c3c}},
+    {"Early Story Online", "advance story", SiteKind::kFunction,
+        "55 48 89 e5 41 57 41 56 41 55 41 54 53 50 41 89 "
+        "f7 49 89 fc e8 ?? ?? ?? ?? 48 89 c3 48 85 db 0f "
+        "84 ?? ?? ?? ?? 44 89 ff e8 ?? ?? ?? ?? 48 89 df "
+        "e8 ?? ?? ?? ?? 89 45 d4",
+        0, 1, {0x476490, 0x475690, 0x475a60, 0x475b20, 0x475800}},
+    {"Early Story Online", "tier writer", SiteKind::kFunction,
+        "55 48 89 e5 41 57 41 56 53 50 41 89 f6 48 89 fb "
+        "e8 ?? ?? ?? ?? 48 85 c0 74 ?? 48 89 c7 44 89 f6 "
+        "e8 ?? ?? ?? ?? 48 8b 43 70 4c 8b b8 80 00 00 00",
+        0, 1, {0x478560, 0x477760, 0x477b30, 0x477bf0, 0x4778d0}},
+    {"Early Story Online", "talisman award", SiteKind::kFunction,
+        "55 48 89 e5 41 57 41 56 41 55 41 54 53 48 83 ec "
+        "18 89 4d d4 89 55 d0 48 89 75 c8 49 89 ff 45 89 "
+        "c6 49 8b 47 70 48 8b 80 80 00 00 00 48 8d 98 a8 "
+        "00 00 00",
+        0, 1, {0x4769e0, 0x475be0, 0x475fb0, 0x476070, 0x475d50}},
+    {"Early Story Online", "flag body", SiteKind::kFunction,
+        "40 88 b7 f1 00 00 00 c3",
+        0, 1, {0x86d20, 0x86400, 0x866a0, 0x866a0, 0x86570}},
+    {"Early Story Online", "flag facade", SiteKind::kFunction,
+        "55 48 89 e5 53 50 89 f3 e8 ?? ?? ?? ?? 48 85 c0 "
+        "74 11 0f b6 f3 48 89 c7 48 83 c4 08 5b 5d e9 ?? "
+        "?? ?? ?? 48 83 c4 08 5b 5d c3",
+        0, 3, {0x477870, 0x476a70, 0x476e40, 0x476f00, 0x476be0}},
 };
 
 constexpr RelationSpec kRelationTable[] = {

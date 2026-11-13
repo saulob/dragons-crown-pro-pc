@@ -89,6 +89,15 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       </div>
       <div id="d-composition"></div>
     </div>
+    <h2 class="section">Early Story Online</h2>
+    <div class="panel">
+      <p id="story-note" class="muted"></p>
+      <div class="cards" id="story-live"></div>
+      <div class="cards" id="story-totals"></div>
+      <h2>Early Story Online Users</h2>
+      <p id="story-users-note" class="muted"></p>
+      <div class="scroll"><table id="story-users"></table></div>
+    </div>
     <h2 class="section">Historical activity</h2>
     <div class="panel">
       <h2>Usage over time</h2>
@@ -130,7 +139,7 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       <h2>How to read this</h2>
       <ul>
         <li>A session is one connection of a launcher or game that went online. The launcher and the game each count,
-          and a reconnect within ten minutes of a counted session does not count again. Sessions are not players: there is no unique-player count.</li>
+          and a reconnect within ten minutes of a counted session does not count again. Sessions are not players: there is no unique-player count, except for Early Story Online, which lists its users.</li>
         <li>Platform, version and country by day count sessions started. "Now" counts players online, one per account,
           from the connections open at this moment.</li>
         <li>Country comes from Cloudflare and is stored only as a daily count. Unknown: Cloudflare did not say.</li>
@@ -393,6 +402,7 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-nu
 th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
+tr.live td { color: var(--text-primary); font-weight: 600; }
 details summary { cursor: pointer; font-weight: 600; }
 .tabs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 16px; border-bottom: 1px solid var(--border); }
 .tabs button[role="tab"] { background: transparent; color: var(--text-secondary); border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 14px; }
@@ -485,7 +495,8 @@ export const ADMIN_JS = String.raw`(function () {
     incident_daily_limited: 'Bug reports refused: daily limit', public_lobby_limited: 'Public Lobby requests refused: too many',
     write_limited: 'Room and friend changes refused: too many', lobby_abuse_closed: 'Lobby connections closed for repeated refusals'
   };
-  var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol' };
+  var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol',
+    story_session: 'Room join refused: client without story session support' };
 
   function readStored(key) {
     try { return sessionStorage.getItem(key) || ''; } catch (e) { return ''; }
@@ -876,6 +887,54 @@ export const ADMIN_JS = String.raw`(function () {
     rows(compositions, 'Most common compositions · top 12', d.party_composition || [], function (v) { return v.split('+').join(' + '); });
   }
 
+  function ageText(ms) {
+    var minutes = Math.floor(Number(ms || 0) / 60000);
+    if (minutes < 1) return 'under 1 min';
+    return minutes < 60 ? minutes + ' min' : Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min';
+  }
+
+  function storyStatus(user) {
+    var a = user.active;
+    if (!a) return 'Not playing';
+    return 'Playing now · ' + a.role + ' · ' + a.members + (a.members === 1 ? ' player' : ' players') + ' · ' + ageText(a.age_ms);
+  }
+
+  function story(data) {
+    var live = $('story-live');
+    var totals = $('story-totals');
+    var note = $('story-note');
+    var usersNote = $('story-users-note');
+    [live, totals].forEach(clear);
+    if (!data) {
+      note.textContent = 'The service has not reported Early Story Online yet.';
+      usersNote.textContent = '';
+      clear($('story-users'));
+      return;
+    }
+    live.appendChild(card('Early Story rooms', fmt(data.live.rooms)));
+    live.appendChild(card('Early Story parties', fmt(data.live.parties)));
+    live.appendChild(card('Waiting for player', fmt(data.live.waiting)));
+    live.appendChild(card('Early Story players', fmt(data.live.players)));
+    totals.appendChild(card('Parties created', fmt(data.totals.rooms_created)));
+    totals.appendChild(card('Guest joins', fmt(data.totals.guest_joins)));
+    totals.appendChild(card('Sessions', fmt(data.totals.sessions)));
+    totals.appendChild(card('Unique users', fmt(data.totals.users)));
+    note.textContent = 'Rooms, parties (two or more connected players), waiting rooms (one) and players are live. Totals count from ' +
+      timeLabel.format(data.since) + ' (Sao Paulo), when this was first started; earlier use is not known. Parties created are story rooms hosted, ' +
+      'guest joins are successful joins of a story room (leaving and rejoining counts again), and sessions are accounts taking part in a room, once per room as host or guest.';
+    usersNote.textContent = data.users.length
+      ? 'Accounts that hosted or joined a story room, playing now first, then the most recent. Enabling the option alone is not use.'
+      : 'No Early Story Online session has been recorded yet.';
+    var users = data.users.slice().sort(function (a, b) {
+      return (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.last_used - a.last_used;
+    });
+    var node = $('story-users');
+    if (!users.length) { clear(node); return; }
+    table(node, ['Online Name', 'Account ID', 'Role', 'Sessions', 'Last Used', 'Status'], users.map(function (u) {
+      return [u.name || '–', u.account, u.role, fmt(u.sessions), timeLabel.format(u.last_used), storyStatus(u)];
+    }), function (i) { return users[i].active ? 'live' : ''; });
+  }
+
   function health(history) {
     var t = history.totals;
     var abuseCounts = history.dimensions.abuse;
@@ -1203,6 +1262,7 @@ export const ADMIN_JS = String.raw`(function () {
     comparison(history);
     activity(history);
     parties(history);
+    story(summary.story);
     health(history);
     usageChart($('usage'), history);
     barChart($('h-sessions'), history.daily, 'sessions', 'Sessions');

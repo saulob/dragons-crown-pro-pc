@@ -474,6 +474,257 @@ int dcp_locate_party_sites(const DcpImageView* image, DcpPartySites* out, DcpLoc
     return 1;
 }
 
+namespace {
+
+bool BytesAre(const Locator& locator, uint64_t at, std::initializer_list<uint8_t> expected) {
+    if (at + expected.size() > locator.size()) {
+        return false;
+    }
+    return std::equal(expected.begin(), expected.end(), locator.bytes() + at);
+}
+
+// The target of the call or jump at `at`, or UINT64_MAX when it is not a rel32 branch.
+uint64_t BranchTarget(const Locator& locator, uint64_t at) {
+    if (at + 5 > locator.size() || (locator.bytes()[at] != 0xe8 && locator.bytes()[at] != 0xe9)) {
+        return UINT64_MAX;
+    }
+    int32_t displacement = 0;
+    std::memcpy(&displacement, locator.bytes() + at + 1, sizeof(displacement));
+    return uint64_t(int64_t(at) + 5 + displacement);
+}
+
+// The target of the `lea reg, [rip+disp32]` at `at`, or UINT64_MAX when it is not one.
+uint64_t RipTarget(const Locator& locator, uint64_t at) {
+    if (at + 7 > locator.size() || (locator.bytes()[at] & 0xfb) != 0x48 || locator.bytes()[at + 1] != 0x8d ||
+        (locator.bytes()[at + 2] & 0xc7) != 0x05) {
+        return UINT64_MAX;
+    }
+    int32_t displacement = 0;
+    std::memcpy(&displacement, locator.bytes() + at + 3, sizeof(displacement));
+    return uint64_t(int64_t(at) + 7 + displacement);
+}
+
+// Whether the function pointer stored at `table + slot` leads to `body`.
+bool MethodIs(const Locator& locator, uint64_t table, uint64_t slot, std::initializer_list<uint8_t> body) {
+    if (table + slot + sizeof(uint64_t) > locator.size()) {
+        return false;
+    }
+    uint64_t target = 0;
+    std::memcpy(&target, locator.bytes() + table + slot, sizeof(target));
+    // The loader relocates the image before the sites are resolved: a stored pointer is then the loaded address.
+    const uint64_t base = uint64_t(uintptr_t(locator.bytes()));
+    if (target >= base && target - base < locator.size()) {
+        target -= base;
+    }
+    return target < locator.size() && BytesAre(locator, target, body);
+}
+
+} // namespace
+
+namespace {
+
+// The one match of a hint site; false, without a failure, when the build does not have it.
+bool OptionalSite(Locator& locator, const char* name, uint32_t& at) {
+    const SiteSpec* spec = SpecNamed("Early Story Online", name);
+    if (!spec) {
+        return false;
+    }
+    size_t total = 0;
+    const std::vector<uint64_t> found = locator.Find(spec->pattern, total);
+    if (total != spec->expected || found.empty() || found.front() + spec->anchor > UINT32_MAX) {
+        return false;
+    }
+    at = uint32_t(found.front() + spec->anchor);
+    return true;
+}
+
+// The hint's four functions, all or none: a build without one keeps the shortcut and has no hint.
+void LocateHint(Locator& locator, DcpEarlyStorySites& sites) {
+    uint32_t create = 0, text = 0, hide = 0, refresh = 0;
+    if (!OptionalSite(locator, "hint create", create) || !OptionalSite(locator, "hint text", text) ||
+        !OptionalSite(locator, "hint hide", hide) || !OptionalSite(locator, "hint refresh", refresh)) {
+        return;
+    }
+    sites.hint_create = create;
+    sites.hint_text = text;
+    sites.hint_hide = hide;
+    sites.hint_refresh = refresh;
+}
+
+} // namespace
+
+int dcp_resolve_early_story(const DcpGameBuild* build, const DcpImageView* image, DcpEarlyStorySites* out, char* failure,
+                            size_t failure_size) {
+    DcpLocateReport report{};
+    std::snprintf(report.failure, sizeof(report.failure), "not a supported game build");
+    const int resolved = build && image && out && dcp_locate_early_story_sites(image, out, &report);
+    if (failure && failure_size) {
+        std::snprintf(failure, failure_size, "%s", report.failure);
+    }
+    return resolved;
+}
+
+int dcp_locate_early_story_sites(const DcpImageView* image, DcpEarlyStorySites* out, DcpLocateReport* report) {
+    if (!ValidView(image, report) || !out) {
+        return 0;
+    }
+    Locator locator(*image, *report);
+    std::vector<uint64_t> selector, hint, notice, prompt, record, advance, tier, talisman, body, facades;
+    std::vector<uint64_t> prompt_function, owner_ctors, manager_getter, town_update, town_portal;
+    std::vector<uint64_t> menu_press, menu_step, menu_kind, room_wish, room_wish_location, room_info_location;
+    const auto find = [&](const char* name, std::vector<uint64_t>& found) {
+        const SiteSpec* spec = SpecNamed("Early Story Online", name);
+        return spec ? locator.Site(*spec, found) : locator.Fail("site", name, "not defined");
+    };
+    if (!find("lead selector", selector) || !find("hint call", hint) || !find("notice call", notice) ||
+        !find("prompt call", prompt) || !find("host record call", record) || !find("advance story", advance) ||
+        !find("tier writer", tier) || !find("talisman award", talisman) || !find("flag body", body) ||
+        !find("flag facade", facades) || !find("prompt function", prompt_function) ||
+        !find("prompt owner ctor", owner_ctors) || !find("manager getter", manager_getter) ||
+        !find("town update", town_update) || !find("town portal call", town_portal) ||
+        !find("menu press call", menu_press) || !find("menu step call", menu_step) ||
+        !find("menu kind store", menu_kind) || !find("room wish", room_wish) ||
+        !find("room wish location", room_wish_location) || !find("room info location", room_info_location)) {
+        return 0;
+    }
+    // Both callers call the online wrapper: a facade function that selects the lead record and tests its story step.
+    const uint64_t wrapper = BranchTarget(locator, hint.front());
+    if (wrapper == UINT64_MAX || BranchTarget(locator, notice.front()) != wrapper) {
+        return locator.Fail("relation", "online wrapper", "the two callers call different functions");
+    }
+    if (!BytesAre(locator, wrapper, {0x55, 0x48, 0x89, 0xe5, 0xe8}) ||
+        BranchTarget(locator, wrapper + 4) != selector.front() ||
+        !BytesAre(locator, wrapper + 9, {0x48, 0x85, 0xc0, 0x74, 0x0a, 0x48, 0x89, 0xc7, 0xe8})) {
+        return locator.Fail("relation", "online wrapper", "does not select the lead record");
+    }
+    const uint64_t check = BranchTarget(locator, wrapper + 17);
+    if (check == UINT64_MAX || !BytesAre(locator, check, {0x80, 0x7f, 0x6f, 0x2c, 0x0f, 0x97, 0xc0, 0xc3})) {
+        return locator.Fail("relation", "online check", "is not the step comparison");
+    }
+    if (BranchTarget(locator, prompt.front()) != wrapper) {
+        return locator.Fail("relation", "Go online prompt", "does not call the online wrapper");
+    }
+    // The Hydeland trigger: the town update reads the game manager first, the call it hooks lies in it, and the prompt
+    // function is the one that holds the original prompt's call.
+    constexpr uint64_t kTownUpdateSpan = 0x400, kPromptFunctionSpan = 0x200, kOwnerBaseSpan = 0x100;
+    if (BranchTarget(locator, town_update.front() + 20) != manager_getter.front()) {
+        return locator.Fail("relation", "Hydeland update", "does not read the game manager first");
+    }
+    if (town_portal.front() <= town_update.front() || town_portal.front() - town_update.front() > kTownUpdateSpan) {
+        return locator.Fail("relation", "Hydeland update", "the hooked call is not in it");
+    }
+    if (prompt.front() <= prompt_function.front() || prompt.front() - prompt_function.front() > kPromptFunctionSpan) {
+        return locator.Fail("relation", "Go online prompt", "is not in the prompt function");
+    }
+    // The three Menu path sites lie in one function, in this order: the press test, the step check, the kind store.
+    constexpr uint64_t kMenuPathSpan = 0x600;
+    if (!(menu_press.front() < menu_step.front() && menu_step.front() < menu_kind.front()) ||
+        menu_kind.front() - menu_press.front() > kMenuPathSpan) {
+        return locator.Fail("relation", "Menu path", "the press, step and kind sites are not in one function");
+    }
+    // The press test marks the action as taken once; the step check selects the lead record, as the online wrapper does.
+    const uint64_t press_test = BranchTarget(locator, menu_press.front());
+    const uint64_t step_check = BranchTarget(locator, menu_step.front());
+    if (press_test == UINT64_MAX ||
+        !BytesAre(locator, press_test, {0x55, 0x48, 0x89, 0xe5, 0x41, 0x56, 0x53, 0x89, 0xf0, 0x49, 0x89, 0xfe, 0x48, 0x8d, 0x1c,
+                                        0x40, 0x48, 0xc1, 0xe3, 0x04, 0x41, 0x80, 0xbc, 0x1e, 0xb2, 0x00, 0x00, 0x00, 0x00})) {
+        return locator.Fail("relation", "Menu path", "the press test is not the once-per-press action test");
+    }
+    if (step_check == UINT64_MAX || !BytesAre(locator, step_check, {0x55, 0x48, 0x89, 0xe5, 0xe8}) ||
+        BranchTarget(locator, step_check + 4) != selector.front()) {
+        return locator.Fail("relation", "Menu path", "the step check does not select the lead record");
+    }
+    // The room wish asks the online wrapper first, and its location test lies in it.
+    constexpr uint64_t kRoomWishCall = 0x5b, kRoomWishSpan = 0x200;
+    if (BranchTarget(locator, room_wish.front() + kRoomWishCall) != wrapper || room_wish_location.front() <= room_wish.front() ||
+        room_wish_location.front() - room_wish.front() > kRoomWishSpan) {
+        return locator.Fail("relation", "room wish", "the location test is not in the wrapper-gated room wish");
+    }
+    // The room wish builds the room info first: the location store lies in the function it calls for that.
+    constexpr uint64_t kRoomInfoCall = 0x96, kRoomInfoSpan = 0x600;
+    const uint64_t room_info = BranchTarget(locator, room_wish.front() + kRoomInfoCall);
+    if (room_info == UINT64_MAX || room_info_location.front() <= room_info ||
+        room_info_location.front() - room_info > kRoomInfoSpan) {
+        return locator.Fail("relation", "room info", "the location store is not in the room wish's room info builder");
+    }
+    uint64_t owner_vtable = 0;
+    for (const uint64_t ctor : owner_ctors) {
+        const uint64_t base = BranchTarget(locator, ctor);
+        const uint64_t table = RipTarget(locator, ctor + 5);
+        if (base != UINT64_MAX && table != UINT64_MAX && base < prompt_function.front() &&
+            prompt_function.front() - base <= kOwnerBaseSpan) {
+            owner_vtable = table + 0x10;
+            break;
+        }
+    }
+    if (!owner_vtable || owner_vtable > UINT32_MAX) {
+        return locator.Fail("relation", "prompt owner", "no logic object derives from the prompt's base");
+    }
+    // The stand-in owner needs only these three methods: set a slot's state, the forwarder the prompt calls it through,
+    // and the system object lookup.
+    if (!MethodIs(locator, owner_vtable, 0xa0, {0x83, 0xfe, 0x03, 0x77, 0x20, 0x48, 0x63, 0xc6}) ||
+        !MethodIs(locator, owner_vtable, 0xb0, {0x48, 0x8b, 0x07, 0x48, 0x8b, 0x80, 0xa0, 0x00, 0x00, 0x00, 0xff, 0xe0}) ||
+        !MethodIs(locator, owner_vtable, 0xd0, {0x48, 0x8b, 0xbf, 0xe0, 0x01, 0x00, 0x00, 0xe9})) {
+        return locator.Fail("relation", "prompt owner", "its methods are not the state setter and system object lookup");
+    }
+    // The story flag facade is the one of three alike that jumps to the flag setter.
+    uint64_t flag = 0;
+    size_t flag_facades = 0;
+    for (const uint64_t facade : facades) {
+        if (BranchTarget(locator, facade + 30) == body.front() && BranchTarget(locator, facade + 8) == selector.front()) {
+            flag = facade;
+            ++flag_facades;
+        }
+    }
+    if (flag_facades != 1) {
+        return locator.Fail("relation", "story flag setter", "no single facade reaches the flag");
+    }
+    DcpEarlyStorySites sites{};
+    sites.selector = uint32_t(selector.front());
+    sites.online_accessor = uint32_t(check);
+    sites.hint_call = uint32_t(hint.front());
+    sites.notice_call = uint32_t(notice.front());
+    sites.host_record_call = uint32_t(record.front());
+    sites.writers[0] = uint32_t(advance.front());
+    sites.writers[1] = uint32_t(tier.front());
+    sites.writers[2] = uint32_t(talisman.front());
+    sites.writers[3] = uint32_t(flag);
+    sites.prompt_call = uint32_t(prompt.front());
+    sites.prompt_function = uint32_t(prompt_function.front());
+    sites.prompt_owner_vtable = uint32_t(owner_vtable);
+    sites.town_portal_call = uint32_t(town_portal.front());
+    sites.menu_press_call = uint32_t(menu_press.front());
+    sites.menu_step_call = uint32_t(menu_step.front());
+    sites.menu_kind_store = uint32_t(menu_kind.front());
+    sites.room_wish_function = uint32_t(room_wish.front());
+    sites.room_wish_location = uint32_t(room_wish_location.front());
+    sites.room_info_location = uint32_t(room_info_location.front());
+    LocateHint(locator, sites);
+    DcpExecRange ranges[9 + DCP_EARLY_STORY_WRITERS + 5];
+    size_t count = 0;
+    ranges[count++] = {sites.selector + 0x74u, sites.selector + 0x74u + 8u};
+    ranges[count++] = {sites.online_accessor, sites.online_accessor + 8u};
+    ranges[count++] = {sites.hint_call, sites.hint_call + 5u};
+    ranges[count++] = {sites.notice_call, sites.notice_call + 5u};
+    ranges[count++] = {sites.host_record_call, sites.host_record_call + 5u};
+    for (const uint32_t writer : sites.writers) {
+        ranges[count++] = {writer, writer + 8u};
+    }
+    ranges[count++] = {sites.town_portal_call, sites.town_portal_call + 5u};
+    ranges[count++] = {sites.menu_press_call, sites.menu_press_call + 5u};
+    ranges[count++] = {sites.menu_step_call, sites.menu_step_call + 5u};
+    ranges[count++] = {sites.menu_kind_store, sites.menu_kind_store + 7u};
+    ranges[count++] = {sites.room_wish_location, sites.room_wish_location + 6u};
+    ranges[count++] = {sites.room_info_location, sites.room_info_location + 5u};
+    // Not patched: listed so that no patch can land on the original prompt's call.
+    ranges[count++] = {sites.prompt_call, sites.prompt_call + 5u};
+    if (dcp_ranges_overlap(ranges, count)) {
+        return locator.Fail("patch", "ranges", "two patches overlap");
+    }
+    *out = sites;
+    return 1;
+}
+
 int dcp_locate_voice_sites(const DcpImageView* image, DcpVoiceSites* out, DcpLocateReport* report) {
     if (!ValidView(image, report) || !out) {
         return 0;
