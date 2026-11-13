@@ -457,7 +457,8 @@ Rules the lobby enforces:
   burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; requests that change a stored
   row, per socket and account: room data and endpoints in a room 40 burst then 1/s (160 then 4/s per address), friend
   changes 20 burst then 1 per 3 s (60 then 1/s per address), answered `limit` with `retry_ms`; unchanged updates are free;
-  more than 30 refused or malformed requests, refilled 1 per 2 s, close the socket with 1008; 16 sockets and 20 new
+  more than 30 refused, unknown-operation or malformed requests, refilled 1 per 2 s, close the socket with 1008, as does a
+  4th frame before sign-in (the client sends one); 16 sockets and 20 new
   accounts per day per address (IPv6 per /64; loopback exempt on the development server); 30 new connections per 60 s per
   address at the Worker (HTTP 429); per account, sign-ins 12 burst then 1 per 15 s, `room.create` 6 burst then 1 per
   20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; party
@@ -619,12 +620,16 @@ lives below the game's Matching2 and Rudp entry points, in `net::PeerSocket`.
   for the relay and has the same online protocol. It never looks at the payload. Routes are cached in memory, rebuilt
   from the tables on a miss, and dropped when a member leaves, is kicked, disconnects or resumes its seat on a new
   socket, and when the room ends.
-- Limits (`server/lobby/src/relay.js`, to be tuned after real measurements): per connection 400 frames/s and 128 KB/s
-  (bursts 800 and 256 KB); per room twice that; a destination socket with more than 256 KB buffered gets nothing. Excess
-  frames are dropped (the link's own retransmission covers them); 256 of them close the relay for that connection with a
-  `relay.closed` event. A sender of frames that are never valid (malformed, wrong token, not in a room, stale seat,
-  unknown member, no relay negotiated) is allowed 200 and then 5 per second before its connection is closed (1008);
-  frames to a member that is offline or resuming are only dropped. Drops are logged for the first few of each reason, then one in a thousand.
+- Limits (`server/lobby/src/relay.js`): per connection 400 frames/s and 128 KB/s (bursts 800 and 256 KB, a third above
+  the client's own cap); per room 1200 frames/s and 384 KB/s (bursts 2400 and 768 KB, four members at that cap); a
+  destination socket with more than 256 KB buffered gets nothing. Excess frames are dropped (the link's own retransmission
+  covers them). Only a sender's own connection budget counts against it: 256 overruns, then 4 per second, suspend the relay
+  for it in that room with a `relay.closed` event, and its frames there then count as stale. The room budget and a full
+  destination buffer drop frames without any penalty for the sender. A sender of malformed frames (bad magic, version or
+  type, truncated, oversized, bad length, no relay negotiated) is allowed 16 and then one per minute; one of frames only sent
+  around leaving a room (wrong token, not in a room, stale seat, unknown member, suspended relay) 200 and then one per
+  second, before its connection is closed (1008). Frames to a member that is offline or resuming are only dropped. Drops
+  are logged for the first few of each reason, then one in a thousand, without room, member or connection.
 - The client queues at most 512 frames for the socket (`kMaxQueuedBinary`); when full, or with no greeted socket, a
   frame is dropped and counted. A relayed frame is delivered to the link layer directly on receipt, so nothing queues
   on the way in.

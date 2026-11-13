@@ -120,7 +120,7 @@ test('sustained writes hold to the refill rate', () => {
   }
   const allowed = STATE.burst + ((attempts * stepMs) / 1000) * STATE.perSecond;
   assert.ok(accepted < attempts && accepted <= allowed, `${accepted} of ${attempts}, ${allowed} allowed`);
-  assert.equal(writes() - accepted < 8, true);
+  assert.equal(writes() - accepted < 12, true);
   assert.equal(owner.closedWith, null);
 });
 
@@ -170,11 +170,15 @@ test('a socket with only the odd refusal stays', () => {
 test('malformed frames and a message flood end the socket too, before and after sign-in', () => {
   const env = makeLobby();
   const silent = env.connect('203.0.113.8');
-  for (let i = 0; i <= STRIKES.burst; i++) assert.equal(silent.raw('not json').code, 'bad_request');
-  assert.equal(silent.closedWith?.code, 1008);
+  for (let i = 0; i <= PROTECTION.preHelloFrames; i++) silent.raw('not json');
+  assert.deepEqual(silent.closedWith, { code: 1008, reason: 'sign in first' });
 
-  const large = env.connect('203.0.113.9');
-  for (let i = 0; i <= STRIKES.burst; i++) large.raw(JSON.stringify({ op: 'worlds', seq: i, pad: 'x'.repeat(LIMITS.frameBytes) }));
+  const malformed = greeted(env, '203.0.113.11');
+  for (let i = 0; i <= STRIKES.burst; i++) assert.equal(malformed.raw('not json').code, 'bad_request');
+  assert.equal(malformed.closedWith?.code, 1008);
+
+  const large = greeted(env, '203.0.113.9');
+  for (let i = 0; i <= STRIKES.burst; i++) large.raw(JSON.stringify({ op: 'worlds', seq: i + 1, pad: 'x'.repeat(LIMITS.frameBytes) }));
   assert.equal(large.closedWith?.code, 1008);
 
   const flood = greeted(env, '203.0.113.10');

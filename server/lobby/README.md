@@ -8,7 +8,9 @@ messages, no new binding or storage). The protocol is in [docs/ONLINE.md](../../
 
 - `src/worker.js`: a Cloudflare Worker with one SQLite-backed Durable Object (WebSocket Hibernation, `ping`/`pong`
   answered without waking the object, the seat grace as a Durable Object alarm).
-- `local/server.js`: the development server on Node.js 22.13 or later (`node:http` + `node:sqlite`), no account needed.
+- `local/server.js`: the development server on Node.js 22.13 or later (`node:http` + `node:sqlite`), no account needed. The
+  tests that load `src/worker.js` under a model of the Hibernation runtime (`test/worker.test.js`) need 22.15 or later and
+  are skipped, visibly, on older versions.
 
 No dependencies are installed for either the tests or the local server.
 
@@ -131,22 +133,33 @@ Every protection below is invisible to a client that behaves, and none changes t
   one per 5 s) and per address group (burst 60, then 3 per second; a refusal spends neither), and a request by handle per
   account (burst 10, then one per 15 s) on top of the usual friend limits. Answers hold at most 100 rows and an unchanged
   list is not sent again. Refusals are counted as `public_lobby_limited`. See `docs/ONLINE.md`.
-- **Relay**: a sender that keeps producing frames no well-behaved client sends (malformed, wrong token, no room,
-  stale seat, unknown member, relay not negotiated, no sign-in) is allowed 200 of them and then 5 per second; past that
-  its connection is closed with 1008. A destination that is offline or still resuming is not a fault.
+- **Established sockets**: a frame costs an invocation before any code can refuse it, so the lobby bounds how many an abusive
+  socket gets and keeps that state in the socket's attachment, which a rebuilt object still has. Before sign-in a socket
+  is handled for 3 frames, text and binary together (the client sends one), and the 4th closes it with 1008 (`sign in first`).
+  Unknown operations, malformed envelopes, oversized frames and `limit` answers are strikes (see Refusals). Once closed for
+  abuse a socket is ignored without a read or a write. A text frame over 160 Ki characters is closed with 1009 by the Worker.
+- **Relay**: a sender of malformed frames (bad magic, version or type, truncated, oversized, bad length, relay not negotiated)
+  is allowed 16 and then one per minute; frames a client only sends around leaving a room (stale seat, wrong token, no room,
+  unknown member, relay suspended) 200 and then one per second; past either its connection is closed with 1008. A sender over
+  its connection budget (400 frames/s, 128 KiB/s, bursts 800 and 256 KiB) is allowed 256 such frames and then 4 per second;
+  past that the relay is suspended for it in that room (`relay.closed`) and its next frames there count as stale. The room
+  budget (four members at the client's cap: 1200 frames/s, 384 KiB/s, bursts 2400 and 768 KiB) and a destination with more
+  than 256 KiB buffered only drop the frame: neither is the sender's doing. A destination that is offline or still resuming
+  is not a fault.
 - **Writes**: unchanged `udp`, `room.set_internal` and `room.set_external` updates write nothing and send no event, and a
   woken object reads its stored alarm instead of setting it again. A request that would change a row spends a budget of
   its socket (kept in the attachment, so hibernation does not refill it), its account and its address group (IPv6 per
   /64): room data and endpoints in a room 40 burst then 1/s, 160 then 4/s per address; friend changes 20 burst then 1 per
   3 s, 60 then 1/s per address. A refusal answers `limit` with `retry_ms`, spends nothing, writes nothing and is counted
   in memory as `write_limited`. `room.resume` spends none of it.
-- **Refusals**: more than 30 `limit`, oversized or malformed requests on one socket, refilled 1 per 2 s, close it with
-  1008, counted as `lobby_abuse_closed`. Its seat gets the usual grace.
+- **Refusals**: more than 30 `limit`, unknown-operation, oversized or malformed requests on one socket, refilled 1 per 2 s,
+  close it with 1008, counted as `lobby_abuse_closed`. Its seat gets the usual grace.
 - **Diagnostics** are counted in memory and written together at the next 15-minute alarm as `abuse` rows of
   `metrics_daily_dimensions` (no address, no account): `ws_upgrade_accepted`, `ws_upgrade_limited` (reported by the
   Worker on the next upgrade it forwards), `ws_upgrade_ip_cap`, `hello_accepted`, `hello_reconnect_deduped`,
   `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`,
-  `party_report_limited`, `public_lobby_limited`, `write_limited`, `lobby_abuse_closed`, and for reports `incident_filed`, `incident_limited`,
+  `party_report_limited`, `public_lobby_limited`, `write_limited`, `lobby_abuse_closed`, `ws_text_messages`, `ws_binary_messages`,
+  `ws_control_limited`, `ws_preauth_closed`, `relay_overrun`, `relay_invalid`, `relay_suspended`, and for reports `incident_filed`, `incident_limited`,
   `incident_hourly_limited`, `incident_daily_limited`. They
   are in `/admin/api/history` under `dimensions.abuse` and on the dashboard. Counts of the last interval are lost if
   the object is evicted first. Rooms, members, accounts, friends, requests and reports

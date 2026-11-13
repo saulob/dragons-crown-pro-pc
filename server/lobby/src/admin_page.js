@@ -493,7 +493,11 @@ export const ADMIN_JS = String.raw`(function () {
     public_endpoint_limited: 'Public IPv4 claims ignored: too many', incident_filed: 'Bug reports accepted',
     incident_limited: 'Bug reports refused: too many', incident_hourly_limited: 'Bug reports refused: hourly limit',
     incident_daily_limited: 'Bug reports refused: daily limit', public_lobby_limited: 'Public Lobby requests refused: too many',
-    write_limited: 'Room and friend changes refused: too many', lobby_abuse_closed: 'Lobby connections closed for repeated refusals'
+    write_limited: 'Room and friend changes refused: too many', lobby_abuse_closed: 'Lobby connections closed for repeated refusals',
+    ws_text_messages: 'Lobby messages handled', ws_binary_messages: 'Relay frames handled',
+    ws_control_limited: 'Lobby messages refused: too many', ws_preauth_closed: 'Connections closed: too many frames before sign-in',
+    relay_overrun: 'Relay frames over the sender budget', relay_invalid: 'Relay frames refused as invalid or stale',
+    relay_suspended: 'Relay suspended for a sender over its budget'
   };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol',
     story_session: 'Room join refused: client without story session support' };

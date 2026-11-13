@@ -1025,6 +1025,13 @@ test('the Dashboard has none of the report detail controls and closing a report 
 
 const anonymous = (env, ip = `198.18.0.${nextAddress++ % 250}`) => env.connect(ip);
 const lookup = (client, reports) => client.call('incident.status', { reports });
+// The launcher opens a socket for each lookup and closes it after the answer.
+const askOnce = (env, ip, op, body) => {
+  const client = anonymous(env, ip);
+  const answer = client.call(op, body);
+  client.drop();
+  return answer;
+};
 const OTHER_RECEIPT = 'ab'.repeat(32);
 const LEGACY_TICKET = 'DCP-ABCDEF';
 
@@ -1074,44 +1081,41 @@ test('a status needs the right receipt: a wrong one, none, or another report\'s 
   const client = greeted(env);
   const a = file(client);
   const b = file(client);
-  const stranger = anonymous(env);
-  assert.deepEqual(lookup(stranger, [{ ticket: a.ticket, receipt: OTHER_RECEIPT }]).reports, []);
-  assert.deepEqual(lookup(stranger, [{ ticket: a.ticket, receipt: b.receipt }]).reports, []);
-  assert.equal(lookup(stranger, [{ ticket: a.ticket }]).code, 'bad_request');
-  assert.equal(lookup(stranger, [{ ticket: a.ticket, receipt: '' }]).code, 'bad_request');
-  assert.equal(stranger.call('incident.read', { ticket: a.ticket }).code, 'bad_request');
+  assert.deepEqual(lookup(anonymous(env), [{ ticket: a.ticket, receipt: OTHER_RECEIPT }]).reports, []);
+  assert.deepEqual(lookup(anonymous(env), [{ ticket: a.ticket, receipt: b.receipt }]).reports, []);
+  assert.equal(lookup(anonymous(env), [{ ticket: a.ticket }]).code, 'bad_request');
+  assert.equal(lookup(anonymous(env), [{ ticket: a.ticket, receipt: '' }]).code, 'bad_request');
+  assert.equal(anonymous(env).call('incident.read', { ticket: a.ticket }).code, 'bad_request');
 });
 
 test('malformed lookups are refused and a batch has a limit', () => {
   const env = makeLobby();
   const { ticket, receipt } = file(greeted(env));
-  const client = anonymous(env);
   const good = { ticket, receipt };
   for (const reports of [undefined, 'x', {}, [null], [[]], [{ ...good, ticket: 'dcp-abcdef' }], [{ ...good, receipt: 'AB'.repeat(32) }],
     [{ ...good, receipt: 'ab' }], [{ ...good, receipt: 7 }], [good, 'x']]) {
-    assert.equal(client.call('incident.status', { reports }).code, 'bad_request', JSON.stringify(reports));
+    assert.equal(anonymous(env).call('incident.status', { reports }).code, 'bad_request', JSON.stringify(reports));
     env.advance(HOUR_MS);
   }
-  assert.equal(client.call('incident.status', { reports: [good], extra: 1 }).code, 'bad_request');
+  assert.equal(anonymous(env).call('incident.status', { reports: [good], extra: 1 }).code, 'bad_request');
   env.advance(HOUR_MS);
-  assert.equal(lookup(client, Array(INCIDENT.statusBatch + 1).fill(good)).code, 'bad_request');
+  assert.equal(lookup(anonymous(env), Array(INCIDENT.statusBatch + 1).fill(good)).code, 'bad_request');
   env.advance(HOUR_MS);
-  assert.equal(lookup(client, Array(INCIDENT.statusBatch).fill(good)).code, 'ok');
+  assert.equal(lookup(anonymous(env), Array(INCIDENT.statusBatch).fill(good)).code, 'ok');
 });
 
 test('a batch shows only what its receipts prove: an unknown ticket and a wrong receipt look the same', () => {
   const env = makeLobby();
   const { ticket, receipt } = file(greeted(env));
   const other = file(greeted(env));
-  const client = anonymous(env);
-  const answer = lookup(client, [{ ticket: other.ticket, receipt: OTHER_RECEIPT }, { ticket, receipt }, { ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT }]);
+  const answer = lookup(anonymous(env), [{ ticket: other.ticket, receipt: OTHER_RECEIPT }, { ticket, receipt }, { ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT }]);
   assert.deepEqual(answer.reports.map((r) => r.ticket), [ticket]);
 
-  const known = lookup(client, [{ ticket: other.ticket, receipt: OTHER_RECEIPT }]);
-  const unknown = lookup(client, [{ ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT }]);
+  const known = lookup(anonymous(env), [{ ticket: other.ticket, receipt: OTHER_RECEIPT }]);
+  const unknown = lookup(anonymous(env), [{ ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT }]);
   assert.deepEqual({ ...known, re: 0 }, { ...unknown, re: 0 });
-  const readKnown = client.call('incident.read', { ticket: other.ticket, receipt: OTHER_RECEIPT });
-  const readUnknown = client.call('incident.read', { ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT });
+  const readKnown = anonymous(env).call('incident.read', { ticket: other.ticket, receipt: OTHER_RECEIPT });
+  const readUnknown = anonymous(env).call('incident.read', { ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT });
   assert.equal(readKnown.code, 'not_found');
   assert.deepEqual({ ...readKnown, re: 0 }, { ...readUnknown, re: 0 });
 });
@@ -1121,18 +1125,20 @@ test('looking up costs no report quota and writes nothing, and it has a budget o
   const client = greeted(env);
   const first = file(client);
   const before = everyRow(env);
-  const stranger = anonymous(env, '198.51.100.40');
   const codes = [];
-  for (let i = 0; i < PROTECTION.incidentStatusAddress.burst + 1; i++) codes.push(lookup(stranger, [first]).code);
+  for (let i = 0; i < PROTECTION.incidentStatusAddress.burst + 1; i++) {
+    codes.push(askOnce(env, '198.51.100.40', 'incident.status', { reports: [first] }).code);
+  }
   assert.deepEqual(codes.slice(0, -1), Array(PROTECTION.incidentStatusAddress.burst).fill('ok'));
   assert.equal(codes.at(-1), 'limit');
   assert.equal(everyRow(env), before);
   assert.equal(quotaRows(env), 1);
   assert.equal(file(client).code, 'ok');
 
-  const reader = anonymous(env, '198.51.100.41');
-  for (let i = 0; i < PROTECTION.incidentReadAddress.burst; i++) assert.equal(reader.call('incident.read', first).code, 'ok');
-  assert.equal(reader.call('incident.read', first).code, 'limit');
+  for (let i = 0; i < PROTECTION.incidentReadAddress.burst; i++) {
+    assert.equal(askOnce(env, '198.51.100.41', 'incident.read', first).code, 'ok');
+  }
+  assert.equal(askOnce(env, '198.51.100.41', 'incident.read', first).code, 'limit');
 });
 
 test('a lookup never meets an account: no hello is sent and report filing still needs one', () => {
@@ -1141,8 +1147,9 @@ test('a lookup never meets an account: no hello is sent and report filing still 
   const client = anonymous(env);
   assert.equal(lookup(client, [{ ticket, receipt }]).code, 'ok');
   assert.equal(client.call('incident.read', { ticket, receipt }).code, 'ok');
-  assert.equal(file(client).code, 'no_session');
-  assert.equal(client.call('worlds').code, 'no_session');
+  const unsigned = anonymous(env);
+  assert.equal(file(unsigned).code, 'no_session');
+  assert.equal(unsigned.call('worlds').code, 'no_session');
 });
 
 test('a report older than receipts cannot be claimed, whatever is tried, and the admin can still set its status', async () => {
@@ -1184,9 +1191,8 @@ test('a status outlives the log it came with, and the status table has its own l
   const { ticket, receipt } = file(greeted(env));
   await saveStatus(env, ticket, { status: 'fixed', fixed_version: '0.9.3' });
   env.host.sql.run('DELETE FROM incidents WHERE ticket = ?', ticket);
-  const client = anonymous(env);
-  assert.equal(lookup(client, [{ ticket, receipt }]).reports[0].fixed_version, '0.9.3');
-  assert.equal(client.call('incident.read', { ticket, receipt }).code, 'not_found');
+  assert.equal(lookup(anonymous(env), [{ ticket, receipt }]).reports[0].fixed_version, '0.9.3');
+  assert.equal(anonymous(env).call('incident.read', { ticket, receipt }).code, 'not_found');
   assert.ok(env.lobby.incidents.taken(ticket));
 
   const kept = INCIDENT.statusKept;
@@ -1196,9 +1202,9 @@ test('a status outlives the log it came with, and the status table has its own l
     file(greeted(env));
     env.advance(HOUR_MS);
     const newest = file(greeted(env));
-    assert.deepEqual(lookup(client, [{ ticket, receipt }]).reports, []);
+    assert.deepEqual(lookup(anonymous(env), [{ ticket, receipt }]).reports, []);
     assert.equal(env.host.sql.get('SELECT COUNT(*) AS n FROM incident_tracking').n, 2);
-    assert.equal(lookup(client, [newest]).code, 'ok');
+    assert.equal(lookup(anonymous(env), [newest]).code, 'ok');
     assert.equal(env.lobby.incidentList().incidents.length, 2);
   } finally {
     INCIDENT.statusKept = kept;

@@ -50,13 +50,12 @@ test('hello registers an identity and refuses a wrong secret', () => {
 
 test('hello validates its fields and the protocol', () => {
   const env = makeLobby();
-  const c = env.connect();
-  assert.equal(c.hello({ proto: 2 }).code, 'proto');
-  assert.equal(c.hello({ account: '0' }).code, 'bad_request');
-  assert.equal(c.hello({ account: '18446744073709551616' }).code, 'bad_request');
-  assert.equal(c.hello({ secret: 'short' }).code, 'bad_request');
-  assert.equal(c.hello({ game: 'bad game!' }).code, 'bad_request');
-  assert.equal(c.hello({ name: '\u0001\u0002' }).name, 'Player');
+  assert.equal(env.connect().hello({ proto: 2 }).code, 'proto');
+  assert.equal(env.connect().hello({ account: '0' }).code, 'bad_request');
+  assert.equal(env.connect().hello({ account: '18446744073709551616' }).code, 'bad_request');
+  assert.equal(env.connect().hello({ secret: 'short' }).code, 'bad_request');
+  assert.equal(env.connect().hello({ game: 'bad game!' }).code, 'bad_request');
+  assert.equal(env.connect().hello({ name: '\u0001\u0002' }).name, 'Player');
   const long = env.connect();
   assert.equal(long.hello({ name: 'A'.repeat(40) }).name, 'A'.repeat(16));
 });

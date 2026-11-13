@@ -74,6 +74,7 @@ const LOBBY_REV = /^[0-9a-f]{16}$/;
 const LOBBY_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,15}$/;
 const LOBBY_RANK = { incoming: 0, pending: 1, friend: 2, none: 3 };
 const DEFAULT_NAME = 'Player';
+const UNKNOWN_OP = 'unknown op';
 
 export class LobbyError extends Error {
   constructor(code, detail = '', body = {}) {
@@ -342,6 +343,8 @@ export class Lobby {
   message(conn, text) {
     const att = conn.attachment();
     if (!att || att.abusive) return;
+    this.diagnose('ws_text_messages');
+    if (!att.hello && !this.beforeHello(conn, att)) return;
     let seq = null;
     this.current = att;
     try {
@@ -358,15 +361,15 @@ export class Lobby {
       if (text.length > LIMITS.frameBytes && msg.op !== 'incident.file') fail('too_large');
       const now = this.host.now();
       const any = takeToken(att.ra, BUCKETS.any, now);
-      if (!any) fail('limit', 'slow down');
+      if (!any) this.slowDown();
       att.ra = any;
       if (att.lobby) att.lobby.seen = now;
       if (ROOM_OPS.has(msg.op)) {
         const room = takeToken(att.rr, BUCKETS.room, now);
-        if (!room) fail('limit', 'slow down');
+        if (!room) this.slowDown();
         att.rr = room;
       }
-      if (!Object.hasOwn(HANDLERS, msg.op)) fail('bad_request', 'unknown op');
+      if (!Object.hasOwn(HANDLERS, msg.op)) fail('bad_request', UNKNOWN_OP);
       if (!NO_SESSION_OPS.has(msg.op) && !att.hello) fail('no_session');
       this.index = null;
       const body = HANDLERS[msg.op].call(this, att, msg, conn, text) ?? {};
@@ -384,7 +387,7 @@ export class Lobby {
       } else {
         conn.send(JSON.stringify({ re: seq, code: error.code, ...error.body }));
       }
-      if (abusive) this.closeAbusive(conn);
+      if (abusive) this.closeAbusive(conn, att);
     } finally {
       this.current = null;
       this.index = null;
@@ -396,23 +399,40 @@ export class Lobby {
     this.relays.frame(conn, bytes);
   }
 
+  slowDown() {
+    this.diagnose('ws_control_limited');
+    fail('limit', 'slow down');
+  }
+
   // A refused or malformed request costs its sender nothing, so a socket that keeps producing them loses its connection.
   // True when this one was the last it gets.
   strike(att, error, seq) {
-    if (error.code !== 'limit' && error.code !== 'too_large' && seq !== null) return false;
+    const counted = error.code === 'limit' || error.code === 'too_large' || seq === null || error.message === UNKNOWN_OP;
+    if (!counted) return false;
     const left = takeToken(att.strikes, PROTECTION.refusedRequests, this.host.now());
-    if (left) {
-      att.strikes = left;
+    if (left) att.strikes = left;
+    return !left;
+  }
+
+  // Counted in the attachment, so a socket that never signs in cannot outlast the limit through hibernation. True while
+  // the frame may be handled.
+  beforeHello(conn, att) {
+    att.early = (att.early ?? 0) + 1;
+    if (att.early > PROTECTION.preHelloFrames) {
+      this.closeAbusive(conn, att, 'ws_preauth_closed', 'sign in first');
       return false;
     }
-    att.abusive = true;
+    conn.setAttachment(att);
     return true;
   }
 
-  closeAbusive(conn) {
-    this.diagnose('lobby_abuse_closed');
+  // Nothing the socket sends afterwards is handled, even what the runtime still delivers.
+  closeAbusive(conn, att, diagnostic = 'lobby_abuse_closed', reason = 'too many refused requests') {
+    att.abusive = true;
+    conn.setAttachment(att);
+    this.diagnose(diagnostic);
     try {
-      conn.close(1008, 'too many refused requests');
+      conn.close(1008, reason);
     } catch {
       // Already closing.
     }
@@ -1100,7 +1120,7 @@ const HANDLERS = {
     const platform = cleanText(msg.platform ?? '', LIMITS.platformChars);
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
       version, platform, relay: msg.relay === true, story_session: msg.story_session === true });
-    if (att.relay) this.relays.negotiated(att);
+    if (att.relay) this.relays.negotiated();
     if (msg.lobby === true && presence && LOBBY_NAME.test(name)) this.showInLobby(att, now);
     this.index = null;
     if (presence && !wasOnline) this.notifyFriends(account, { ev: 'friend.online', account, name });

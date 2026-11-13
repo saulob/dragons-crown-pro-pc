@@ -443,15 +443,16 @@ test('a sender of malformed frames loses its connection after a bounded number',
   const env = makeLobby();
   const { a } = pair(env);
   const junk = new Uint8Array([1, 2, 3]);
-  for (let i = 0; i < RELAY.invalid.burst; i++) a.relay(junk);
+  for (let i = 0; i < RELAY.malformed.burst; i++) a.relay(junk);
   assert.equal(a.closedWith, null);
   a.relay(junk);
   assert.deepEqual(a.closedWith, { code: 1008, reason: 'relay abuse' });
   env.advance(SAMPLE_MS);
   assert.equal(abuse(env).relay_abuse_closed, 1);
+  assert.equal(abuse(env).relay_invalid, RELAY.malformed.burst + 1);
 });
 
-test('frames with a bad token, to a missing member, from a sender without a room or relay, or from a stranger end the same way', () => {
+test('wrong-token, missing-member and roomless frames end a sender at the stale budget; impossible ones at the malformed budget', () => {
   const env = makeLobby();
   const { token } = pair(env);
   const member = (ip) => {
@@ -460,23 +461,29 @@ test('frames with a bad token, to a missing member, from a sender without a room
     return host;
   };
   const cases = [
-    [member('198.51.100.8'), encodeRelayFrame(token ^ 1, 0x20, 1, payload)],
-    [member('198.51.100.9'), encodeRelayFrame(token, 0x30, 1, payload)],
-    [signedIn(env, CLIENT, '198.51.100.10'), encodeRelayFrame(token, 0x20, 1, payload)],
-    [signedIn(env, { ...CLIENT, relay: false }, '198.51.100.11'), encodeRelayFrame(token, 0x20, 1, payload)],
-    [env.connect('198.51.100.12'), encodeRelayFrame(token, 0x20, 1, payload)],
+    [member('198.51.100.8'), encodeRelayFrame(token ^ 1, 0x20, 1, payload), RELAY.stale.burst],
+    [member('198.51.100.9'), encodeRelayFrame(token, 0x30, 1, payload), RELAY.stale.burst],
+    [signedIn(env, CLIENT, '198.51.100.10'), encodeRelayFrame(token, 0x20, 1, payload), RELAY.stale.burst],
+    [signedIn(env, { ...CLIENT, relay: false }, '198.51.100.11'), encodeRelayFrame(token, 0x20, 1, payload), RELAY.malformed.burst],
+    [env.connect('198.51.100.12'), encodeRelayFrame(token, 0x20, 1, payload), PROTECTION.preHelloFrames],
   ];
-  for (const [sender, frame] of cases) {
-    for (let i = 0; i < RELAY.invalid.burst + 1; i++) sender.relay(frame);
+  for (const [sender, frame, allowed] of cases) {
+    for (let i = 0; i < allowed; i++) sender.relay(frame);
+    assert.equal(sender.closedWith, null);
+    sender.relay(frame);
     assert.equal(sender.closedWith?.code, 1008);
   }
 });
 
 test('invalid frames are budgeted over time: an occasional stray one never closes a sender', () => {
   const env = makeLobby();
-  const { a } = pair(env);
-  for (let i = 0; i < 600; i++) {
+  const { a, token } = pair(env);
+  for (let i = 0; i < 200; i++) {
     a.relay(new Uint8Array([9]));
+    env.advance(60_000);
+  }
+  for (let i = 0; i < 600; i++) {
+    a.relay(encodeRelayFrame(token, 0x30, i, payload));
     env.advance(1000);
   }
   assert.equal(a.closedWith, null);
@@ -497,21 +504,25 @@ test('a closed sender is ignored, and a connection that never greeted cannot rel
   const env = makeLobby();
   const { a, b, token } = pair(env);
   const junk = new Uint8Array([1]);
-  for (let i = 0; i <= RELAY.invalid.burst; i++) a.relay(junk);
+  for (let i = 0; i <= RELAY.malformed.burst; i++) a.relay(junk);
   assert.equal(a.closedWith?.code, 1008);
   a.relay(encodeRelayFrame(token, 0x20, 1, payload));
   assert.equal(b.binary.length, 0);
   const silent = env.connect('198.51.100.30');
-  for (let i = 0; i <= RELAY.invalid.burst; i++) silent.relay(encodeRelayFrame(token, 0x20, 1, payload));
-  assert.equal(silent.closedWith?.code, 1008);
+  for (let i = 0; i <= PROTECTION.preHelloFrames; i++) silent.relay(encodeRelayFrame(token, 0x20, 1, payload));
+  assert.deepEqual(silent.closedWith, { code: 1008, reason: 'sign in first' });
 });
 
-test('relay state of a connection that never greeted is released when it closes', () => {
+test('a connection that never greeted keeps no relay state, and a greeted one releases it when it closes', () => {
   const env = makeLobby();
   const silent = env.connect('198.51.100.30');
   silent.relay(new Uint8Array([1]));
-  assert.equal(env.lobby.relays.connections.size, 1);
+  assert.equal(env.lobby.relays.connections.size, 0);
   silent.drop();
+  const { a } = pair(env);
+  a.relay(encodeRelayFrame(1, 0x20, 1, payload));
+  assert.equal(env.lobby.relays.connections.size, 1);
+  a.drop();
   assert.equal(env.lobby.relays.connections.size, 0);
 });
 

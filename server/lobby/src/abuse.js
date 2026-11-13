@@ -27,6 +27,8 @@ export const PROTECTION = {
   friendWriteAccount: { burst: 20, perSecond: 1 / 3 },
   friendWriteAddress: { burst: 60, perSecond: 1 },
   refusedRequests: { burst: 30, perSecond: 1 / 2 },
+  // The client sends one request before sign-in (hello, or a bug report lookup); "ping" never reaches the lobby.
+  preHelloFrames: 3,
   trackedKeys: 4096,
 };
 
