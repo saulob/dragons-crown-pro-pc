@@ -551,6 +551,35 @@ int main(int argc, char **argv) {
         printf("Boot image written to %s\n", argv[3]);
         return 0;
     }
+    /* Headless installation from the player's package or extracted game folder: the launcher's installer, with
+       progress on stdout, for front ends that install the game without opening the launcher window. */
+    if (argc == 3 && !strcmp(argv[1], "--install")) {
+        static DcpPaths paths;
+        const DcpPathRequest request={NULL,NULL,NULL,NULL,NULL};
+        if (!dcp_resolve_paths(&request,&paths)) {
+            fprintf(stderr, "Install failed: cannot locate the game folders%s%s\n", paths.error[0] ? ": " : "", paths.error);
+            return 1;
+        }
+        char detail[1024] = "";
+        if (dcp_install_game(argv[2], paths.app0, paths.image_dir, detail, sizeof(detail))) {
+            fprintf(stderr, "Install failed: %s\n", detail);
+            return 1;
+        }
+        if (dcp_resolve_paths(&request,&paths)) printf("Ready: %s\n", paths.app0); /* the build now active */
+        return 0;
+    }
+    /* Headless readiness check: the launcher's check of the active build, without a window or the game. */
+    if (argc == 2 && !strcmp(argv[1], "--check-game")) {
+        static DcpPaths paths;
+        const DcpPathRequest request={NULL,NULL,NULL,NULL,NULL};
+        char detail[1024] = "";
+        if (!dcp_resolve_paths(&request,&paths) || !dcp_check_game(paths.app0, paths.image_dir, detail, sizeof(detail))) {
+            fprintf(stderr, "Game files: not ready%s%s\n", detail[0] ? ": " : "", detail);
+            return 1;
+        }
+        printf("Game files: ready: %s\n", detail);
+        return 0;
+    }
 #ifndef _WIN32
     /* Keep host heap objects handed to the guest (thread handles, TLS) in the
        non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */

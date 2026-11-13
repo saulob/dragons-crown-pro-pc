@@ -1467,6 +1467,29 @@ DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const ch
 }
 
 // Play without the launcher on screen: the same checks, explained in a window of its own.
+// The launcher applies the saved controller prompts and Arachnophobia Safe Mode when it opens (ApplySavedPatches).
+// A run that skips it (show_launcher off, --dcp-skip-launcher) applies them here, so the game shows what was chosen.
+void ApplySavedPatchesWithoutWindow(const GamePaths& paths, const GameCheck& check, const LauncherSettings& settings) {
+    if (check.state != GameFileState::kValid || !check.build) {
+        return;
+    }
+    const GameBuild& build = *check.build;
+    const bool xbox_available = XboxPromptsAvailable(paths.app0, build, XboxPromptsPatch());
+    const PromptStyle style = xbox_available ? ParsePromptStyle(settings.Get(kControllerPromptsKey, kPromptsPlayStation))
+                                                   .value_or(PromptStyle::kPlayStation)
+                                             : PromptStyle::kPlayStation;
+    const bool safe_mode = settings.GetBool(kArachnophobiaSafeModeKey, false);
+    if (style == InstalledPromptStyle(paths.app0, build, XboxPromptsPatch()) && safe_mode == InstalledSafeMode(paths.app0)) {
+        return;
+    }
+    Log("game patches (launcher skipped): prompts %s, arachnophobia safe mode %s", PromptStyleKey(style),
+        safe_mode ? "on" : "off");
+    const PromptsResult result =
+        SetGamePatches(paths.app0, build, style, safe_mode, XboxPromptsPatch(), SpiderSafeModePatch());
+    Log("game patches: %s%s%s", result.ok ? "applied" : "not applied", result.detail.empty() ? "" : ": ",
+        result.detail.c_str());
+}
+
 DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherSettings& settings) {
     localization::SetActiveLanguage(settings.Get(kTextLanguageKey, "english"));
     char cause[320] = "", advice[320] = "";
@@ -1496,6 +1519,9 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     const bool shift = ShiftHeldAtStart() || config->force_show != 0;
     if (!LauncherWanted(ready, show_setting, shift, config->skip_once != 0)) {
         Log("skipped (show_launcher %s%s)", show_setting ? "on" : "off", config->skip_once ? ", skip requested" : "");
+        if (ready) {
+            ApplySavedPatchesWithoutWindow(paths, check, settings);
+        }
         return PlayOrExplain(*config, settings);
     }
     Log("settings file %s", Utf8(settings.file()).c_str());
