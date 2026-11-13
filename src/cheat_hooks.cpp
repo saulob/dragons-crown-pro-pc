@@ -61,6 +61,22 @@ bool OwnerIsAlly(const HostMemory& memory, uint64_t owner) {
     return unit != 0 && memory.U64(unit + kUnitOwnerOffset) == owner && IsAlly(memory, unit);
 }
 
+// The owner is classified first: the item is read only for an owner one of the skill cheats covers.
+bool KeepsSkillUse(const HostMemory& memory, uint64_t owner, uint64_t item) {
+    const bool player = Enabled(Cheat::InfiniteSkillUses);
+    const bool ally = Enabled(Cheat::InfiniteAllySkillUses);
+    if ((!player && !ally) || item == 0) {
+        return false;
+    }
+    const UnitKind kind = player ? ClassifyOwner(memory, owner) : UnitKind::Other;
+    const bool is_ally = ally && OwnerIsAlly(memory, owner);
+    if (kind != UnitKind::PlayerOne && !is_ally) {
+        return false;
+    }
+    const int32_t uses = memory.U8(item + kItemUsesOffset);
+    return PreservedSkillUse(player, kind, uses) || PreservedAllySkillUse(ally, is_ally, uses);
+}
+
 constexpr uint64_t kDamageUnitFrameOffset = 0x200; // the victim unit, [rbp-0x200] in the damage function
 constexpr uint64_t kUnitContextVirtual = 0xd0;     // unit->vtable[+0xd0]() is the game object
 constexpr uint64_t kGameSaveBaseOffset = 0x80;     // the save records, 0x23b0 bytes each, Player 1 at +0xa8
@@ -283,17 +299,19 @@ void GUEST_HOOK_ABI SkillPointsHook(GuestRegs* regs) {
     regs->r13 = (regs->r13 & ~uint64_t{0xffff}) | static_cast<uint16_t>(kept);
 }
 
-// At the two item-count decrements of the skill-item use function (rdi = item, r12 = the using owner).
+// At the item-count decrement of the skill-item use function (rdi = item, r12 = the using owner).
 void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs) {
-    const bool player = Enabled(Cheat::InfiniteSkillUses);
-    const bool ally = Enabled(Cheat::InfiniteAllySkillUses);
-    if ((!player && !ally) || regs->rdi == 0) {
-        return;
+    if (KeepsSkillUse(HostMemory{}, regs->r12, regs->rdi)) {
+        regs->skip = 1;
     }
-    const HostMemory memory;
-    const UnitKind kind = ClassifyOwner(memory, regs->r12);
-    const int32_t uses = memory.U8(regs->rdi + kItemUsesOffset);
-    if (PreservedSkillUse(player, kind, uses) || PreservedAllySkillUse(ally, OwnerIsAlly(memory, regs->r12), uses)) {
+}
+
+// At the same function's bag lookup (rdi = the bag, esi = the slot, r12 = the using owner). Its bag decrement is a tail
+// jump made after the epilogue has given r12 back to the caller, so the owner is only known here. A skipped lookup finds
+// no record, and the function returns without that decrement.
+void GUEST_HOOK_ABI SkillUseMirrorHook(GuestRegs* regs) {
+    if (KeepsSkillUse(HostMemory{}, regs->r12, BagItem(regs->rdi, static_cast<uint32_t>(regs->rsi)))) {
+        regs->rax = 0;
         regs->skip = 1;
     }
 }
@@ -682,7 +700,7 @@ std::span<const GuestHook> Hooks() {
         {"gold equip", 0x4cc47a, 6, {0x89, 0x82, 0x38, 0xf2, 0x0a, 0x00}, GoldStoreHook<&GuestRegs::rdx, &GuestRegs::rax>},
         {"experience", 0x27511, 7, {0x48, 0x83, 0xc4, 0x08, 0x5b, 0x41, 0x5c}, ExperienceHook},
         {"skill use", 0x1af0dc, 5, {0xe8, 0x6f, 0x13, 0xe7, 0xff}, SkillUseHook},
-        {"skill use mirror", 0x1af12a, 5, {0xe9, 0x21, 0x13, 0xe7, 0xff}, SkillUseHook},
+        {"skill use mirror", 0x1af110, 5, {0xe8, 0x4b, 0x38, 0xe7, 0xff}, SkillUseMirrorHook},
         {"skill item wear", 0x225f90, 5, {0xe8, 0xbb, 0xa4, 0xdf, 0xff}, SkillItemWearHook},
         {"skill item wear mirror", 0x225fb1, 5, {0xe8, 0x9a, 0xa4, 0xdf, 0xff}, SkillItemWearHook},
         {"skill budget", 0x8ab24, 12, {0x8b, 0x5d, 0xa4, 0x45, 0x01, 0xf4, 0x41, 0x01, 0xdd, 0x45, 0x29, 0xec},

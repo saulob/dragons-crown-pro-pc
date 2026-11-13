@@ -43,7 +43,7 @@ All offsets are image offsets, the same as the eboot offsets cheat tools use. Ev
 | Arrows | `0x1b06f0`, entry of `ConsumeArrow` | `55 48 89 e5 41 57` | The amount becomes 0 for Player 1's Elf; the shot still goes out |
 | Skill Points | `0x537e8a`, in `BuySkill`, before the points are stored | `66 44 89 ab c8 00 00 00` | The stored points stay at what Player 1 had |
 | Skill Uses | `0x1af0dc`, in the skill-item use function, at the count decrement | `e8 6f 13 e7 ff` | The decrement is skipped for Player 1 while the item has uses left |
-| Skill Uses | `0x1af12a`, the same function's mirror decrement | `e9 21 13 e7 ff` | The mirror decrement is skipped the same way |
+| Skill Uses | `0x1af110`, the same function's bag lookup, before the epilogue that precedes its tail-jumped bag decrement | `e8 4b 38 e7 ff` | The lookup finds no record for the same owner and rule, so the bag decrement is skipped the same way |
 | Skill Uses | `0x225f90`, in the equipment wear function `0x225ce0`, at the count decrement | `e8 bb a4 df ff` | The decrement is skipped for Player 1's skill items (Infinite Skill Uses) or other items (Infinite Items) while the item has uses left |
 | Skill Uses | `0x225fb1`, the same function's mirror decrement | `e8 9a a4 df ff` | The mirror decrement is skipped the same way |
 | Skill Points | `0x8ab24`, in the record's skill budget check `0x8aa00`, before it compares owned with allowed | `8b 5d a4 45 01 f4 41 01 dd 45 29 ec` | An excess of owned over allowed is added to the allowance, so the check finds nothing to repair |

@@ -606,6 +606,9 @@ struct FakeGame {
     }
 };
 
+// Inside the first 64 KiB, which no process maps: a read through it ends the test process.
+constexpr uint64_t kUnreadable = 0x10;
+
 struct TestMemory {
     uint64_t U64(uint64_t a) const { uint64_t v; std::memcpy(&v, reinterpret_cast<void*>(a), 8); return v; }
     uint32_t U32(uint64_t a) const { uint32_t v; std::memcpy(&v, reinterpret_cast<void*>(a), 4); return v; }
@@ -1613,6 +1616,93 @@ void TestSkillUses() {
     CHECK(!use(player2, 5));
     CHECK(!use(enemy, 5));
 
+    // The owner decides before the item is read: an owner no skill cheat covers never has its item touched, so an
+    // unreadable one (a read would end the test process) changes nothing.
+    FakeGame npc(false, 4);
+    const auto use_at = [](uint64_t owner, uint64_t item_address) {
+        GuestRegs regs{};
+        regs.rdi = item_address;
+        regs.r12 = owner;
+        SkillUseHook(&regs);
+        return regs.skip != 0;
+    };
+    for (const uint64_t unreadable : {kUnreadable, uint64_t{0x801d0027c}}) {
+        CHECK(!use_at(player2.Owner(), unreadable)); // an AI ally
+        CHECK(!use_at(enemy.Owner(), unreadable));
+        CHECK(!use_at(npc.Owner(), unreadable));
+    }
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    CHECK(!use_at(player2.Owner(), kUnreadable)); // a human Player 2
+    runtime_cheats_set_slot_human(nullptr);
+    CHECK(!use_at(player1.Owner(), 0));
+    runtime_cheats_start(0, 1);
+    CHECK(!use_at(kUnreadable, kUnreadable)); // Off: nothing at all is read
+
+    // Infinite Ally Skill Uses: an AI ally's item, not Player 1's or an enemy's.
+    runtime_cheats_start(Bit(Cheat::InfiniteAllySkillUses), 1);
+    CHECK(use(player2, 5) && use(player2, 1) && !use(player2, 0));
+    CHECK(!use(player1, 5) && !use(enemy, 5));
+    CHECK(!use_at(player1.Owner(), kUnreadable) && !use_at(enemy.Owner(), kUnreadable));
+    runtime_cheats_set_slot_human(FakeHumanSlot);
+    CHECK(!use(player2, 5));
+    runtime_cheats_set_slot_human(nullptr);
+
+    // The bag lookup's own indexing: records of kBagItemSize bytes, an unsigned slot below kEquipmentSlotLimit.
+    static_assert(kItemUsesOffset < kBagItemSize);
+    CHECK(kUnitEquipmentOffset + kEquipmentBagOffset == 0x6f8); // the [unit+0x6f8] the skill-item use function loads
+    CHECK(BagItem(0x10000, 0) == 0x10000 && BagItem(0x10000, 9) == 0x10000 + 9 * kBagItemSize);
+    CHECK(BagItem(0x10000, 10) == 0 && BagItem(0x10000, 0xffffffffu) == 0 && BagItem(0, 3) == 0);
+
+    // At the bag lookup a kept record makes the lookup find nothing (rax 0, the call skipped); otherwise the game's
+    // lookup runs untouched.
+    alignas(16) uint8_t bag[kEquipmentSlotLimit * kBagItemSize] = {};
+    struct Lookup {
+        bool skipped;
+        uint64_t rax;
+    };
+    const auto lookup = [&](uint64_t owner, uint64_t bag_address, uint64_t slot) {
+        GuestRegs regs{};
+        regs.rdi = bag_address;
+        regs.rsi = slot;
+        regs.r12 = owner;
+        regs.rax = 0x1234;
+        SkillUseMirrorHook(&regs);
+        return Lookup{regs.skip != 0, regs.rax};
+    };
+    const uint64_t bag_address = reinterpret_cast<uint64_t>(bag);
+    const auto set_bag_uses = [&](uint32_t slot, uint8_t uses) {
+        FakeGame::Store<uint8_t>(bag + slot * kBagItemSize + kItemUsesOffset, uses);
+    };
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses), 1);
+    set_bag_uses(3, 5);
+    Lookup kept = lookup(player1.Owner(), bag_address, 3);
+    CHECK(kept.skipped && kept.rax == 0);
+    CHECK(FakeGame::Load<uint8_t>(bag + 3 * kBagItemSize + kItemUsesOffset) == 5);
+    kept = lookup(player1.Owner(), bag_address, 0xdeadbeef00000003ull); // the game passes esi: the upper half is not the slot
+    CHECK(kept.skipped && kept.rax == 0);
+    set_bag_uses(3, 1);
+    CHECK(lookup(player1.Owner(), bag_address, 3).skipped);
+    set_bag_uses(3, 0);
+    Lookup left = lookup(player1.Owner(), bag_address, 3); // empty: the game's own handling
+    CHECK(!left.skipped && left.rax == 0x1234);
+    set_bag_uses(9, 2);
+    CHECK(lookup(player1.Owner(), bag_address, 9).skipped);
+    CHECK(!lookup(player1.Owner(), kUnreadable, 10).skipped);          // past the last record: nothing to read
+    CHECK(!lookup(player1.Owner(), kUnreadable, 0xffffffffu).skipped); // a negative slot
+    CHECK(!lookup(player1.Owner(), 0, 3).skipped);                     // no bag
+    set_bag_uses(0, 5);
+    CHECK(!lookup(player2.Owner(), bag_address, 0).skipped);
+    CHECK(!lookup(enemy.Owner(), bag_address, 0).skipped);
+    CHECK(!lookup(player2.Owner(), kUnreadable, 0).skipped); // owners the cheat does not cover: the bag is not read
+    CHECK(!lookup(enemy.Owner(), kUnreadable, 0).skipped);
+    CHECK(!lookup(npc.Owner(), kUnreadable, 0).skipped);
+    runtime_cheats_start(Bit(Cheat::InfiniteAllySkillUses), 1);
+    CHECK(lookup(player2.Owner(), bag_address, 0).skipped);
+    CHECK(!lookup(player1.Owner(), bag_address, 0).skipped && !lookup(enemy.Owner(), bag_address, 0).skipped);
+    runtime_cheats_start(0, 1);
+    Lookup off = lookup(kUnreadable, kUnreadable, 0); // Off: nothing at all is read
+    CHECK(!off.skipped && off.rax == 0x1234);
+
     runtime_cheats_start(0, 1);
     CHECK(!use(player1, 5));
     SetCheats(false, false);
@@ -2559,8 +2649,9 @@ void TestHookTable() {
     const std::span<const GuestHook> hooks = Hooks();
     CHECK(hooks.size() == 26);
     CHECK(hooks[19].offset == 0x27511 && hooks[19].length == 7); // the experience award
-    CHECK(hooks[20].offset == 0x1af0dc && hooks[20].length == 5); // the skill item's count decrement
-    CHECK(hooks[21].offset == 0x1af12a && hooks[21].length == 5); // its mirror decrement
+    CHECK(hooks[20].offset == 0x1af0dc && hooks[20].length == 5 && hooks[20].handler == SkillUseHook); // the count decrement
+    CHECK(hooks[21].offset == 0x1af110 && hooks[21].length == 5 && hooks[21].handler == SkillUseMirrorHook); // the bag lookup
+    CHECK(std::memcmp(hooks[21].original, "\xe8\x4b\x38\xe7\xff", 5) == 0); // a call, ahead of the function's epilogue
     CHECK(hooks[22].offset == 0x225f90 && hooks[22].length == 5); // the equipment wear's count decrement
     CHECK(hooks[23].offset == 0x225fb1 && hooks[23].length == 5); // its mirror decrement
     CHECK(hooks[24].offset == 0x8ab24 && hooks[24].length == 12); // the skill budget comparison
@@ -2570,6 +2661,7 @@ void TestHookTable() {
         CHECK(hook.length >= GUEST_HOOK_MIN_LENGTH && hook.length <= GUEST_HOOK_MAX_LENGTH);
         CHECK(hook.handler != nullptr && hook.name != nullptr);
         CHECK(hook.offset + hook.length <= kSupportedImage.size);
+        CHECK(hook.original[0] != 0xe9); // a tail jump follows an epilogue: the handler would see the caller's registers
     }
     CHECK(hooks[0].offset == 0xd8703 && hooks[1].offset == 0xd6d70 && hooks[2].offset == 0x345380);
     CHECK(hooks[3].offset == 0x1b06f0 && hooks[4].offset == 0x537e8a && hooks[5].offset == 0x2ea420 && hooks[6].offset == 0xfe183 && hooks[7].offset == 0x2ec7cb);
@@ -3027,6 +3119,145 @@ void TestNativeHooks() {
     CHECK(g_hook_calls == 12);
 }
 
+GuestRegs g_probes[3]{};
+
+void GUEST_HOOK_ABI ProbeCountSite(GuestRegs* regs) {
+    g_probes[0] = *regs;
+}
+void GUEST_HOOK_ABI ProbeBagSite(GuestRegs* regs) {
+    g_probes[1] = *regs;
+}
+void GUEST_HOOK_ABI ProbeTailSite(GuestRegs* regs) {
+    g_probes[2] = *regs;
+}
+
+// The skill-item use function's end as CUSA10454 1.00 has it (its bag load, lookup, epilogue and tail jump byte for
+// byte, the lookup's own body), entered from a caller that keeps its own value in r12.
+struct SkillUseReplica {
+    static constexpr uint32_t kDecrement = 0x100, kLookup = 0x140, kFunction = 0x200, kCaller = 0x300;
+    static constexpr uint32_t kCountSite = kFunction + 0x23, kBagSite = kFunction + 0x32, kTailSite = kFunction + 0x4c;
+    using Caller = uint64_t(GUEST_HOOK_ABI*)(uint64_t owner, uint32_t slot, uint64_t item, uint64_t caller_r12);
+
+    CodeBuffer memory{0x4000};
+
+    SkillUseReplica() {
+        if (!memory.base) return;
+        uint8_t* image = memory.base;
+        // inc byte [rdi+0x50] (calls); cmp byte [rdi+0x4c],0; je; dec byte [rdi+0x4c]; ret
+        const uint8_t decrement[] = {0xfe, 0x47, 0x50, 0x80, 0x7f, 0x4c, 0x00, 0x74, 0x03, 0xfe, 0x4f, 0x4c, 0xc3};
+        const uint8_t lookup[] = {0x48, 0x63, 0xce, 0x31, 0xc0, 0x48, 0x6b, 0xd1, 0x54, 0x48,
+                                  0x01, 0xfa, 0x83, 0xf9, 0x0a, 0x48, 0x0f, 0x42, 0xc2, 0xc3};
+        const uint8_t function[] = {
+            0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x54, 0x53, // push rbp, r15, r14, r12, rbx
+            0x49, 0x89, 0xfc,                                                 // mov r12,rdi: the owner
+            0x41, 0x89, 0xf6,                                                 // mov r14d,esi: the slot
+            0x48, 0x89, 0xd3,                                                 // mov rbx,rdx: the item
+            0x4c, 0x8b, 0xbf, 0xb8, 0x09, 0x00, 0x00,                         // mov r15,[rdi+0x9b8]: the unit
+            0xbe, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xdf,                   // mov esi,1; mov rdi,rbx
+            0xe8, 0, 0, 0, 0,                                                 // call decrement (the count site)
+            0x49, 0x8b, 0xbf, 0xf8, 0x06, 0x00, 0x00, 0x44, 0x89, 0xf6,       // mov rdi,[r15+0x6f8]; mov esi,r14d
+            0xe8, 0, 0, 0, 0,                                                 // call lookup (the bag site)
+            0x48, 0x85, 0xc0, 0x74, 0x15, 0xbe, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xc7,
+            0x5b, 0x41, 0x5c, 0x41, 0x5e, 0x41, 0x5f, 0x5d,                   // the epilogue gives r12 back
+            0xe9, 0, 0, 0, 0,                                                 // jmp decrement (the former site)
+            0x5b, 0x41, 0x5c, 0x41, 0x5e, 0x41, 0x5f, 0x5d, 0xc3};
+        // push r12; mov r12,rcx; call function; mov rax,r12; pop r12; ret
+        const uint8_t caller[] = {0x41, 0x54, 0x49, 0x89, 0xcc, 0xe8, 0, 0, 0, 0, 0x4c, 0x89, 0xe0, 0x41, 0x5c, 0xc3};
+        std::memcpy(image + kDecrement, decrement, sizeof(decrement));
+        std::memcpy(image + kLookup, lookup, sizeof(lookup));
+        std::memcpy(image + kFunction, function, sizeof(function));
+        std::memcpy(image + kCaller, caller, sizeof(caller));
+        Branch(kCountSite, kDecrement);
+        Branch(kBagSite, kLookup);
+        Branch(kTailSite, kDecrement);
+        Branch(kCaller + 5, kFunction);
+    }
+    void Branch(uint32_t at, uint32_t target) {
+        const int32_t distance = int32_t(target) - int32_t(at + 5);
+        std::memcpy(memory.base + at + 1, &distance, 4);
+    }
+    bool Install(std::initializer_list<std::pair<uint32_t, GuestHookHandler>> sites) {
+        std::vector<GuestHook> hooks;
+        for (const auto& [offset, handler] : sites) {
+            GuestHook hook{"site", offset, 5, {}, handler};
+            std::memcpy(hook.original, memory.base + offset, 5);
+            hooks.push_back(hook);
+        }
+        const GuestImageId id{0x1000, 0x40};
+        size_t bad = 0;
+        return guest_hooks_install(memory.base, 0x1000, 0x40, &id, hooks.data(), hooks.size(), memory.base + 0x2000,
+                                   0x1000, &bad) == GUEST_HOOK_OK;
+    }
+    uint64_t Run(const FakeGame& owner, uint32_t slot, uint8_t* item, uint64_t caller_r12) const {
+        return reinterpret_cast<Caller>(memory.base + kCaller)(owner.Owner(), slot, reinterpret_cast<uint64_t>(item),
+                                                               caller_r12);
+    }
+};
+
+// At the tail jump the epilogue has already given r12 back to the caller; at the bag lookup r12 is still the owner.
+void TestSkillUseSites() {
+    FakeGame player1(true, 0), ally(true, 1), enemy(false, 0);
+    alignas(16) uint8_t item[kBagItemSize] = {};
+    alignas(16) uint8_t bag[kEquipmentSlotLimit * kBagItemSize] = {};
+    for (FakeGame* game : {&player1, &ally, &enemy}) {
+        FakeGame::Store<uint64_t>(game->unit + kUnitEquipmentOffset + kEquipmentBagOffset, reinterpret_cast<uint64_t>(bag));
+    }
+    constexpr uint32_t kSlot = 3;
+    uint8_t* const record = bag + kSlot * kBagItemSize;
+    const auto reset = [&](uint8_t uses) {
+        std::memset(item, 0, sizeof(item));
+        std::memset(bag, 0, sizeof(bag));
+        item[kItemUsesOffset] = uses;
+        record[kItemUsesOffset] = uses;
+    };
+    constexpr size_t kCalls = 0x50; // the replica decrement counts its calls here
+
+    SkillUseReplica probed;
+    CHECK(probed.memory.base != nullptr);
+    if (!probed.memory.base) return;
+    CHECK(probed.Install({{SkillUseReplica::kCountSite, ProbeCountSite},
+                          {SkillUseReplica::kBagSite, ProbeBagSite},
+                          {SkillUseReplica::kTailSite, ProbeTailSite}}));
+    reset(5);
+    std::memset(g_probes, 0, sizeof(g_probes));
+    CHECK(probed.Run(player1, kSlot, item, kUnreadable) == kUnreadable);
+    CHECK(g_probes[0].r12 == player1.Owner() && g_probes[0].rdi == reinterpret_cast<uint64_t>(item));
+    CHECK(g_probes[1].r12 == player1.Owner() && g_probes[1].rdi == reinterpret_cast<uint64_t>(bag) &&
+          static_cast<uint32_t>(g_probes[1].rsi) == kSlot);
+    CHECK(g_probes[2].r12 == kUnreadable && g_probes[2].rdi == reinterpret_cast<uint64_t>(record)); // the caller's r12
+    CHECK(item[kItemUsesOffset] == 4 && record[kItemUsesOffset] == 4);
+
+    const std::span<const GuestHook> table = Hooks();
+    SkillUseReplica replica;
+    CHECK(replica.memory.base != nullptr);
+    if (!replica.memory.base) return;
+    CHECK(replica.Install({{SkillUseReplica::kCountSite, table[20].handler}, {SkillUseReplica::kBagSite, table[21].handler}}));
+    const auto run = [&](const FakeGame& owner, uint8_t uses, uint32_t slot = kSlot, uint64_t caller_r12 = kUnreadable) {
+        reset(uses);
+        return replica.Run(owner, slot, item, caller_r12) == caller_r12; // the caller's r12 survives either way
+    };
+
+    // The caller's r12 is unreadable throughout: a handler that read it would end the test process.
+    runtime_cheats_start(0, 1);
+    CHECK(run(player1, 5) && item[kItemUsesOffset] == 4 && record[kItemUsesOffset] == 4);
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillUses), 1);
+    CHECK(run(player1, 5) && item[kItemUsesOffset] == 5 && record[kItemUsesOffset] == 5);
+    CHECK(item[kCalls] == 0 && record[kCalls] == 0); // both decrements skipped
+    CHECK(run(player1, 1) && item[kItemUsesOffset] == 1 && record[kItemUsesOffset] == 1);
+    CHECK(run(player1, 0) && item[kCalls] == 1 && record[kCalls] == 1); // empty: both run as the game's
+    CHECK(run(ally, 5) && item[kItemUsesOffset] == 4 && record[kItemUsesOffset] == 4);
+    CHECK(run(enemy, 5) && item[kItemUsesOffset] == 4 && record[kItemUsesOffset] == 4);
+    CHECK(run(player1, 5, kEquipmentSlotLimit) && item[kItemUsesOffset] == 5 && record[kCalls] == 0); // no record found
+    // A caller r12 that is a readable Player 1 owner does not stand in for the enemy that uses the item.
+    CHECK(run(enemy, 5, kSlot, player1.Owner()) && item[kItemUsesOffset] == 4 && record[kItemUsesOffset] == 4);
+    CHECK(run(player1, 5, kSlot, enemy.Owner()) && item[kItemUsesOffset] == 5 && record[kItemUsesOffset] == 5);
+    runtime_cheats_start(Bit(Cheat::InfiniteAllySkillUses), 1);
+    CHECK(run(ally, 5) && item[kItemUsesOffset] == 5 && record[kItemUsesOffset] == 5);
+    CHECK(run(player1, 5) && item[kItemUsesOffset] == 4 && record[kItemUsesOffset] == 4);
+    CHECK(run(enemy, 5) && item[kItemUsesOffset] == 4 && record[kItemUsesOffset] == 4);
+    runtime_cheats_start(0, 1);
+}
+
 // Infinite Arrows holds Player 1's Elf at 10 from the next tick on, whatever the count was; Off lets the count go.
 void TestArrowHold() {
     FakeGame elf(true, 0), fighter(true, 0), player2(true, 1), enemy(false, 0);
@@ -3388,6 +3619,7 @@ int main(int argc, char** argv) {
     TestHookTable();
     TestPartialInstall();
     TestNativeHooks();
+    TestSkillUseSites();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

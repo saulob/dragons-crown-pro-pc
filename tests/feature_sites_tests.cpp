@@ -876,7 +876,6 @@ const std::vector<MappedSite> kEuropeSites = {
     {"Cheats", "hook: gold equip", {0x4cc48a}},
     {"Cheats", "hook: experience", {0x27511}},
     {"Cheats", "hook: skill use", {0x1af0ec}},
-    {"Cheats", "hook: skill use mirror", {0x1af13a}},
     {"Cheats", "hook: skill item wear", {0x225fa0}},
     {"Cheats", "hook: skill item wear mirror", {0x225fc1}},
     {"Cheats", "hook: skill budget", {0x8ab24}},
@@ -912,6 +911,7 @@ const std::vector<MappedSite> kEuropeSites = {
 
 // Sites added after that scan: not reported by it, planted at the US 1.00 offset moved like their neighbours (+0x10).
 const std::vector<MappedSite> kEuropeSitesAfterScan = {
+    {"Cheats", "hook: skill use mirror", {0x1af120}},
     {"Cheats", "hook: lethal check", {0x29df05}},
 };
 
@@ -1036,6 +1036,26 @@ void TestEuropeanSites() {
     }
     CHECK(compared == kEuropeSites.size());
     CHECK(scan::kLzcntInstructions == 62 && scan::kLzcntDigest == 0xe53eadb9792a3e8eull);
+}
+
+// The skill-use bag hook reads the owner from r12, so on every build its call must come before the epilogue that gives r12
+// back to the caller for the tail-jumped decrement.
+void TestSkillUseMirrorSite() {
+    const scan::SiteSpec* spec = SpecOf("Cheats", "hook: skill use mirror");
+    CHECK(spec != nullptr);
+    if (!spec) return;
+    const std::vector<int> bytes = Parse(spec->pattern).bytes;
+    const auto first = [&](std::initializer_list<int> sequence) {
+        return size_t(std::search(bytes.begin(), bytes.end(), sequence.begin(), sequence.end()) - bytes.begin());
+    };
+    const size_t pop_r12 = first({0x41, 0x5c});
+    CHECK(bytes[spec->anchor] == 0xe8 && spec->anchor + 5u <= pop_r12 && pop_r12 < bytes.size());
+    CHECK(first({0xe9}) > pop_r12);
+    CHECK(bytes[0] == 0x49 && bytes[1] == 0x8b && bytes[2] == 0xbf); // mov rdi, [r15 + the bag]
+    uint32_t bag = 0;
+    for (size_t i = 0; i < 4; ++i) bag |= uint32_t(bytes[3 + i]) << (8 * i);
+    CHECK(bag == cheats::kUnitEquipmentOffset + cheats::kEquipmentBagOffset);
+    CHECK(spec->reference[0] == cheats::Hooks()[21].offset && cheats::Hooks()[21].handler == cheats::SkillUseMirrorHook);
 }
 
 void TestKnownBuildsOnly() {
@@ -1591,6 +1611,7 @@ int main() {
     TestParty();
     TestExitGame();
     TestEuropeanSites();
+    TestSkillUseMirrorSite();
     TestKnownBuildsOnly();
     TestEarlyStory();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

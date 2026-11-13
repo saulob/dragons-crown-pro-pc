@@ -256,9 +256,11 @@ constexpr SiteSpec kSiteTable[] = {
         "7b 4c 00 75 ?? 4c 89 e7 e8 ?? ?? ?? ??",
         10, 1, {0x1af0dc, 0x1ae66c, 0x1ae9ac, 0x1ae9fc, 0x1ae7fc}},
     {"Cheats", "hook: skill use mirror", SiteKind::kHook,
-        "48 89 c7 5b 41 5c 41 5e 41 5f 5d e9 ?? ?? ?? ?? "
-        "5b 41 5c 41 5e 41 5f 5d c3 90 90 90 90 90",
-        11, 1, {0x1af12a, 0x1ae6ba, 0x1ae9fa, 0x1aea4a, 0x1ae84a}},
+        "49 8b bf f8 06 00 00 44 89 f6 e8 ?? ?? ?? ?? 48 "
+        "85 c0 74 ?? be 01 00 00 00 48 89 c7 5b 41 5c 41 "
+        "5e 41 5f 5d e9 ?? ?? ?? ?? 5b 41 5c 41 5e 41 5f "
+        "5d c3",
+        10, 1, {0x1af110, 0x1ae6a0, 0x1ae9e0, 0x1aea30, 0x1ae830}},
     {"Cheats", "hook: skill item wear", SiteKind::kHook,
         "72 ?? be 01 00 00 00 4c 89 ef e8 ?? ?? ?? ?? 48 "
         "8b bb 10 05 00 00 44 89 fe e8 ?? ?? ?? ??",

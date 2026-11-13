@@ -620,6 +620,14 @@ constexpr bool PreservedAllySkillUse(bool enabled, bool ally, int32_t uses) {
     return enabled && ally && uses > 0;
 }
 
+// The equipment bag at [list + kEquipmentBagOffset]: kEquipmentSlotLimit item records of kBagItemSize bytes, indexed the
+// way the game's own bag lookup does (an unsigned slot, nothing past the last record).
+inline constexpr uint32_t kBagItemSize = 0x54;
+
+constexpr uint64_t BagItem(uint64_t bag, uint32_t slot) {
+    return bag != 0 && slot < kEquipmentSlotLimit ? bag + uint64_t{slot} * kBagItemSize : 0;
+}
+
 inline constexpr uint32_t kItemEffectCountMask = 0x1e000000;
 inline constexpr uint32_t kFirstSkillEffect = 0x1d1;
 inline constexpr uint32_t kSkillEffectCount = 0x28;
