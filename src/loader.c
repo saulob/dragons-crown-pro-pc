@@ -1085,7 +1085,6 @@ int main(int argc, char **argv) {
     boss_battle_set_enabled(dcp_enable_boss_battle(settings_file));
     boss_battle_set_save_guard(runtime_savedata_isolate,runtime_savedata_release);
     boss_battle_record_configure(user_dir);
-    boss_battle_progress_configure(user_dir);
     boss_battle_install(image,size,entry,known_build ? build_key : NULL,online_play,early_story_located ? &early_story_sites : NULL,
                         image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area,
                         boss_battle_stub_area);

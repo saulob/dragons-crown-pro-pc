@@ -1,4 +1,4 @@
-// Focused tests of the Boss Battle screen on the native Options page (order, rows, choices, Return to tavern), the
+// Focused tests of the Boss Battle screen on the native Options page (order, rows, choices, Fight All, Return to tavern), the
 // single quit path behind F4, and what the redesigns removed: no ImGui selector, no boss list on the Inn's own list,
 // no Boss Battle on the title menu.
 #include <cstdio>
@@ -40,15 +40,33 @@ void TestOrder() {
         "11 Wraith",        "12 Killer Rabbit", "13 Kraken",   "14 Cyclops",      "15 Chimera",
         "16 Gargoyle Gate", "17 Red Dragon", "18 Arch Demon",  "19 Ancient Dragon", "20 Demon King"};
     char label[64];
-    CHECK(BOSS_BATTLE_SCREEN_ROWS == 8 && BOSS_BATTLE_SCREEN_TITLE_ROW == 0 && BOSS_BATTLE_SCREEN_BOSS_ROWS == 6 &&
+    CHECK(BOSS_BATTLE_SCREEN_ROWS == 8 && BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW == 0 && BOSS_BATTLE_SCREEN_BOSS_ROWS == 6 &&
           BOSS_BATTLE_SCREEN_RETURN_ROW == 7 && BOSS_BATTLE_INN_OPTIONS_ROW == 3);
     for (int i = 0; i < BOSS_BATTLE_ENCOUNTERS; ++i) CHECK(boss_battle_label(i, label, sizeof(label)) && !std::strcmp(label, kLabels[i]));
     CHECK(!boss_battle_label(BOSS_BATTLE_ENCOUNTERS, label, sizeof(label)));
     CHECK(BOSS_BATTLE_RETURN_TO_TAVERN_RECORD == 1120);
+
+    // the screen, walked down from its top: Fight All, 01-20, Return to tavern
+    boss_battle_reset();
+    boss_battle_screen_request();
+    CHECK(boss_battle_screen_built() == 1);
+    std::string order;
+    int row = BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW;
+    for (int entry = BOSS_BATTLE_ENTRY_FIGHT_ALL; entry < BOSS_BATTLE_ENTRIES; ++entry) {
+        CHECK(boss_battle_screen_entry(row) == entry);
+        boss_battle_screen_label(row, label, sizeof(label));
+        order += entry == BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN ? "Return to tavern" : label;
+        order += '|';
+        if (!boss_battle_screen_move(row, 1)) ++row;
+    }
+    std::string expected = "Fight All|";
+    for (const char* boss : kLabels) expected += std::string(boss) + "|";
+    CHECK(order == expected + "Return to tavern|");
+    boss_battle_reset();
 }
 
-// Every boss can be reached by scrolling the six boss rows and starts from its row; the bottom action closes; nothing
-// else acts, and a screen that is not shown never answers.
+// Every boss can be reached by scrolling the six boss rows and starts from its row; Fight All is its own choice, never
+// a boss; the bottom action closes; nothing else acts, and a screen that is not shown never answers.
 void TestChoices() {
     boss_battle_reset();
     int index = -1;
@@ -67,17 +85,20 @@ void TestChoices() {
     }
     for (int i = 0; i < BOSS_BATTLE_ENCOUNTERS; ++i) CHECK(reached[i]);
     CHECK(boss_battle_screen_choose(BOSS_BATTLE_SCREEN_RETURN_ROW, &index) == BOSS_BATTLE_SCREEN_CLOSE);
-    CHECK(boss_battle_screen_choose(BOSS_BATTLE_SCREEN_TITLE_ROW, &index) == BOSS_BATTLE_SCREEN_NONE);
+    index = -1;
+    CHECK(boss_battle_screen_choose(BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW, &index) == BOSS_BATTLE_SCREEN_FIGHT_ALL && index == -1);
+    CHECK(boss_battle_screen_boss(BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW) == -1 &&
+          boss_battle_entry_boss(BOSS_BATTLE_ENTRY_FIGHT_ALL) == -1);
     CHECK(boss_battle_screen_choose(-1, &index) == BOSS_BATTLE_SCREEN_NONE);
     CHECK(boss_battle_screen_choose(-2, &index) == BOSS_BATTLE_SCREEN_NONE);
     boss_battle_reset();
 }
 
-void TestPending() {
-    for (int i = 0; i < BOSS_BATTLE_ENCOUNTERS; ++i) {
-        const BossBattleEncounter* encounter = boss_battle_encounter(i);
-        CHECK(encounter->unavailable == nullptr && (encounter->pending != nullptr) == (i == BOSS_BATTLE_ENCOUNTERS - 1));
-    }
+// Every boss is confirmed: none carries a pending state or text, the Demon King included.
+void TestNoPendingBoss() {
+    for (int i = 0; i < BOSS_BATTLE_ENCOUNTERS; ++i) CHECK(boss_battle_encounter(i)->unavailable == nullptr);
+    for (const char* path : {"src/boss_battle.c", "src/boss_battle.h", "src/boss_battle_hook.c"})
+        CHECK(!Contains(Source(path), "not yet confirmed") && !Contains(Source(path), "Pending:"));
     CHECK(boss_battle_mode_pending(BOSS_BATTLE_MODE_OFFLINE) == nullptr &&
           boss_battle_mode_pending(BOSS_BATTLE_MODE_ONLINE) != nullptr && boss_battle_mode() == BOSS_BATTLE_MODE_OFFLINE);
 }
@@ -112,7 +133,7 @@ void TestTitleRestored() {
 int main() {
     TestOrder();
     TestChoices();
-    TestPending();
+    TestNoPendingBoss();
     TestNoImGuiSelector();
     TestTitleRestored();
     if (failures) {

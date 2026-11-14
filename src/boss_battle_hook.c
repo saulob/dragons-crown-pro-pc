@@ -112,6 +112,9 @@ typedef struct {
     uint64_t options_open_block, options_setup_title, options_setup_built, options_window_vtable, options_update_block;
     uint64_t options_result_block, options_body_vtable, row_frame;
     uint64_t results_window_vtable, set_level, level_pattern, write_stats;
+    uint64_t cue_player, leave_save_block;
+    uint64_t pause_start_gate, pause_level_gate, pause_mode, pause_row, pause_quit_row, pause_setup;
+    uint64_t pause_setup_calls[3], pause_confirm_text, pause_result;
 } BuildSites;
 
 /* The Inn menu builder's last row widget and its six items (SystemMsg 919-925 without 922), then the cut to six. */
@@ -361,6 +364,55 @@ enum {
     LIST_MOVE_LENGTH = 6
 };
 
+/* The Inn's Options mode: state 0's first-frame check opens the page; state 3's, once the page closed, ends the page's
+ * window and shows the Inn menu again. */
+static const short kOptionsEnter[] = {
+    0xbe, 0x01, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xff, 0xe8, ANY, ANY, ANY, ANY, 0x84, 0xc0, 0x0f, 0x84, ANY, ANY, ANY,
+    ANY, 0x4c, 0x89, 0xf7, 0xe8,
+};
+static const short kOptionsLeave[] = {
+    0xbe, 0x01, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xff, 0xe8, ANY, ANY, ANY, ANY, 0x84, 0xc0, 0x0f, 0x84, ANY, ANY, ANY,
+    ANY, 0x49, 0x8d, 0xbe, 0xd0, 0x38, 0x00, 0x00, 0xbe, 0x3a, 0x00, 0x00, 0x00,
+};
+/* The state flags' read: whether the state was just entered, clearing the flag when asked to. */
+static const short kStateEntered[] = {0x8b, 0x4f, 0x50, 0x89, 0xc8, 0x25, 0x00, 0x10, 0x00, 0x00};
+enum { kOptionsEnterInMode = 0x74, kOptionsLeaveInMode = 0x253, kOptionsLeaveCall = 0x08 };
+
+/* The scene's fader, owned by the game manager (+0xd8): the Inn's Leave mode cuts it to black before its travel
+ * request, and the scene's arrival step (act 4, step 19, STEP_FADEIN) fades it back in. */
+static const short kLeaveFade[] = {
+    0x48, 0x8b, 0xb8, 0xd8, 0x00, 0x00, 0x00, 0xe8, ANY, ANY, ANY, ANY, 0xbe, 0x00, 0x00, 0x00, 0xff, 0x31, 0xd2, 0xb9,
+    0x27, 0x00, 0x00, 0x00, 0x48, 0x89, 0xc7, 0xe8, ANY, ANY, ANY, ANY,
+};
+static const short kArrivalSteps[] = {
+    0x41, 0x0f, 0xb6, 0x47, 0x5c, 0x48, 0x83, 0xf8, 0x15, 0x0f, 0x87, ANY, ANY, ANY, ANY, 0x48, 0x8d, 0x0d, ANY, ANY, ANY, ANY,
+};
+static const short kArrivalFadeIn[] = {
+    0x48, 0x89, 0xdf, 0xe8, ANY, ANY, ANY, ANY, 0x31, 0xf6, 0xba, 0x1e, 0x00, 0x00, 0x00, 0xb9, 0x27, 0x00, 0x00, 0x00,
+    0x48, 0x89, 0xc7, 0xe8, ANY, ANY, ANY, ANY,
+};
+/* The fade's layer goes through the draw layer map, which takes layers up to 0x2a, the topmost. */
+static const short kLayerMap[] = {0x83, 0xfe, 0x2a, 0x7f, 0x06};
+static const short kGetFader[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x53, 0x50, 0x48, 0x89, 0xfb, 0x48, 0x8b, 0x43, 0x78};
+static const short kFade[] = {
+    0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x54, 0x53, 0x48, 0x89, 0xfb, 0x41, 0x89, 0xcf, 0x41, 0x89, 0xd4,
+    0x41, 0x89, 0xf6,
+};
+enum {
+    kLeaveFadeInLeave = 0x1d9,
+    kLeaveFaderCall = 0x07,
+    kLeaveFadeCall = 0x1b,
+    ARRIVAL_ACT = 4,
+    kArrivalStepsInAct = 0x698,
+    kArrivalTableLea = 0x0f,
+    ARRIVAL_STEP_FADE_IN = 19,
+    kArrivalStepLabel = 0x15,
+    kArrivalFadeInStep = 0xbf,
+    kArrivalFaderCall = 0x03,
+    kArrivalFadeCall = 0x17,
+    kFadeLayerMapCall = 0x26
+};
+
 /* The Inn's Leave mode (its vtable's 0x7d0), state 8: the party goes to the game server, then the Inn is left. */
 static const short kLeaveParty[] = {
     0xbe, 0x01, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xf7, 0xe8, ANY, ANY, ANY, ANY, 0x84, 0xc0, 0x0f, 0x84, ANY, ANY, ANY,
@@ -520,7 +572,8 @@ static const BuildSites kBuilds[] = {
      0x3a442e, 0x3a6296, 0x3a6511, 0x4502e9, 0x4c4634, 0x435dab, 0x10da1d, 0x4af5d9, 0xbbbba0, 0xbad618, 0x3a2e20,
      0x3a3153, 0x8cc50, 0x7c8ce, 0x815a8, 0x3ac250, 0x3ac534, 0x4b0c30, 0x4294c3, 0xce7c6, 0x42e921, 0x42f644,
      0x4300c1, 0x3abf50, 0x507a5f, 0x507ae7, 0xbb84a8, 0x5074a2, 0x5075a2, 0xbb82b0, 0x578f40, 0xbb2720, 0x81fb0,
-     0x81fe0, 0x82000},
+     0x81fe0, 0x82000, 0x5837f0, 0x3ac486, 0x432b21, 0x432c4f, 0x432c8c, 0x50b160, 0x50b94f, 0x50b740,
+     {0x50e299, 0x50e41b, 0x50e8ab}, 0x510f5e, 0x4327be},
 };
 
 static const struct {
@@ -668,6 +721,11 @@ static const char *check_options(const unsigned char *image, uint64_t size, cons
     if (!image_pointer(image, size, b->inn_vtable + INN_VTABLE_OPTIONS, &mode) ||
         b->options_open_block != mode + kOptionsOpenInMode || !SHAPE(image, size, b->options_open_block, kOptionsOpen))
         return "Inn Options mode";
+    const uint64_t enter = mode + kOptionsEnterInMode, leave = mode + kOptionsLeaveInMode;
+    const uint64_t state_entered = call_target(image, leave + kOptionsLeaveCall);
+    if (!SHAPE(image, size, enter, kOptionsEnter) || !SHAPE(image, size, leave, kOptionsLeave) || !state_entered ||
+        call_target(image, enter + kOptionsLeaveCall) != state_entered || !SHAPE(image, size, state_entered, kStateEntered))
+        return "Inn Options mode states";
     const uint64_t setup = call_target(image, b->options_open_block + kOptionsOpenCall);
     if (!setup || !within(b->options_setup_title, setup, OPTIONS_SETUP_SPAN) ||
         !within(b->options_setup_built, setup, OPTIONS_SETUP_SPAN) || !SHAPE(image, size, b->options_setup_title, kOptionsTitle) ||
@@ -694,6 +752,7 @@ static const char *check_options(const unsigned char *image, uint64_t size, cons
     sites->options_built = b->options_setup_built + kOptionsBuiltHook;
     sites->options_update = b->options_update_block + kOptionsUpdateCall;
     sites->options_result = b->options_result_block + kOptionsResultCall;
+    sites->options_leave = leave + kOptionsLeaveCall;
     sites->list_up = up;
     sites->list_down = down;
     sites->options_body_vtable = b->options_body_vtable;
@@ -712,6 +771,174 @@ static const char *check_leave(const unsigned char *image, uint64_t size, const 
     if (!party || !SHAPE(image, size, party, kInnParty) || !SHAPE(image, size, party + kInnPartyTailAt, kInnPartyTail))
         return "Inn party requests";
     sites->inn_party = party;
+    return NULL;
+}
+
+/* The Inn's save step, which its Leave mode runs: the play data is committed into the save's current slot, then the
+ * save manager (the town manager's +0xe0) runs its save act. */
+static const short kLeaveSave[] = {0xbe, 0x03, 0x00, 0x00, 0x00, 0x31, 0xd2, 0x4c, 0x89, 0xff, 0xe8};
+static const short kInnSaveStep[] = {
+    0x4c, 0x8b, 0x6d, 0xd0, 0x4c, 0x8d, 0xb3, 0x40, 0x28, 0x01, 0x00, 0x4c, 0x89, 0xef, 0xe8, ANY, ANY, ANY, ANY, 0x0f,
+    0xbe, 0xf0, 0x4c, 0x89, 0xef, 0xe8, ANY, ANY, ANY, ANY, 0xba, 0xd4, 0xf8, 0x0a, 0x00, 0x4c, 0x89, 0xf7, 0x48, 0x89,
+    0xc6, 0xe8, ANY, ANY, ANY, ANY, 0x4c, 0x89, 0xef, 0xe8, ANY, ANY, ANY, ANY, 0x48, 0x89, 0xdf, 0xe8, ANY, ANY, ANY,
+    ANY, 0x48, 0x8b, 0xb8, 0xe0, 0x00, 0x00, 0x00, 0x8b, 0x45, 0xcc, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0xb6, 0xf0, 0xe8,
+    ANY, ANY, ANY, ANY, 0x84, 0xc0,
+};
+static const short kSaveCommit[] = {
+    0x66, 0x8b, 0x87, 0x14, 0xeb, 0x20, 0x00, 0x3c, 0x02, 0x76, 0x01, 0xc3, 0x0f, 0xb6, 0xcc, 0x48, 0x8d, 0x15, ANY, ANY,
+    ANY, ANY, 0x48, 0x0f, 0xbe, 0xc0, 0x48, 0x8b, 0x34, 0xca, 0x48, 0x69, 0xc0, 0xd4, 0xf8, 0x0a, 0x00, 0xba, 0xd4, 0xf8,
+    0x0a, 0x00,
+};
+static const short kSaveRequest[] = {
+    0x80, 0x7f, 0x5b, 0x00, 0x74, 0x03, 0x31, 0xc0, 0xc3, 0x55, 0x48, 0x89, 0xe5, 0xc7, 0x47, 0x70, 0x00, 0x00, 0x00,
+    0x00, 0xbe, 0x01, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x07, 0xff, 0x90, 0xa8, 0x00, 0x00, 0x00, 0xb0, 0x01,
+};
+enum {
+    kLeaveSaveCall = 0x0a,
+    kInnSaveStepBlock = 0x6a,
+    kInnSaveCommitCall = 0x31,
+    kInnSaveRequestCall = 0x50,
+    kSaveCommitTableLea = 0x0f
+};
+
+static const char *check_save(const unsigned char *image, uint64_t size, const BuildSites *b, BossBattleSites *sites) {
+    if (!within(b->leave_save_block, b->leave_mode, LEAVE_SPAN) || !SHAPE(image, size, b->leave_save_block, kLeaveSave))
+        return "Inn Leave save";
+    const uint64_t step = call_target(image, b->leave_save_block + kLeaveSaveCall), block = step + kInnSaveStepBlock;
+    if (!step || !SHAPE(image, size, block, kInnSaveStep)) return "Inn save step";
+    const uint64_t commit = call_target(image, block + kInnSaveCommitCall);
+    const uint64_t request = call_target(image, block + kInnSaveRequestCall);
+    if (!commit || !SHAPE(image, size, commit, kSaveCommit) ||
+        rel32_target(image, commit + kSaveCommitTableLea + 3, commit + kSaveCommitTableLea + 7) != (int64_t)sites->play_data_table)
+        return "save commit";
+    if (!request || !SHAPE(image, size, request, kSaveRequest)) return "save request";
+    sites->save_commit = commit;
+    sites->save_request = request;
+    return NULL;
+}
+
+/* The stage scene opens the adventure pause menu (window 14) for Start: it needs a progressed character and, in one kind
+ * of scene, a level; the window's mode picks the rows. Each row is built by one helper with its message; the title and
+ * the quit confirmation are messages of the window. */
+static const short kStartGate[] = {
+    0xe8, ANY, ANY, ANY, ANY, 0x84, 0xc0, 0x0f, 0x84, 0xac, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x4d, 0xa8, 0x8b, 0x81, 0x08, 0x01,
+    0x00, 0x00,
+};
+static const short kStartGateFn[] = {0x55, 0x48, 0x89, 0xe5, 0xe8, ANY, ANY, ANY, ANY, 0x48, 0x85, 0xc0, 0x74, 0x0a, 0x48, 0x89,
+                                     0xc7, 0xe8, ANY, ANY, ANY, ANY, 0xeb, 0x02, 0x31, 0xc0, 0x5d, 0xc3};
+static const short kLevelGate[] = {0x48, 0x8b, 0x7d, 0x90, 0xe8, ANY, ANY, ANY, ANY, 0x83, 0xf8, 0x05, 0x7d, 0x03, 0x45, 0x31,
+                                   0xff, 0x41, 0xf6, 0xc7, 0x01};
+static const short kLevelGateFn[] = {0x55, 0x48, 0x89, 0xe5, 0xe8, ANY, ANY, ANY, ANY, 0x48, 0x85, 0xc0, 0x74, 0x09, 0x48,
+                                     0x89, 0xc7, 0x5d, 0xe9};
+static const short kPauseMode[] = {0x8b, 0x81, 0x08, 0x01, 0x00, 0x00, 0x83, 0xf8, 0x0f, 0x74, 0x39, 0x83, 0xf8, 0x0e, 0x74,
+                                   0x40, 0x83, 0xf8, 0x09, 0x75, 0x23};
+static const short kPauseModeStore[] = {0xc7, 0x83, 0x10, 0x15, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+static const short kPauseRow[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x48, 0x83,
+                                  0xec, 0x18, 0x41, 0x89, 0xd5, 0x31, 0xd2};
+static const short kPauseQuitRow[] = {0xbe, 0xa8, 0x04, 0x00, 0x00, 0xba, 0x01, 0x00, 0x00, 0x00, 0xb9, 0x01, 0x00, 0x00,
+                                      0x00, 0x4c, 0x89, 0xef, 0xe8};
+static const short kPauseSetup[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x48, 0x83,
+                                    0xec, 0x68, 0x48, 0x8b, 0x05, ANY, ANY, ANY, ANY, 0x49, 0x89, 0xfe};
+static const short kPauseSetupCallRbx[] = {0x48, 0x89, 0xdf, 0xe8};
+static const short kPauseSetupCallR13[] = {0x4c, 0x89, 0xef, 0xe8};
+static const short kPauseConfirmMode[] = {0x41, 0x8b, 0x87, 0x10, 0x15, 0x00, 0x00, 0x49, 0x8d, 0xbc, 0x24, 0xe0, 0x03, 0x00,
+                                          0x00, 0x83, 0xf8, 0x04, 0x74, 0x13, 0x83, 0xf8, 0x03};
+static const short kPauseConfirmText[] = {0xbe, 0xac, 0x04, 0x00, 0x00, 0xe8};
+static const short kPauseResult[] = {0x31, 0xf6, 0x48, 0x89, 0xd7, 0x49, 0x89, 0xd4, 0xe8, ANY, ANY, ANY, ANY, 0xff, 0xc0,
+                                     0x4c, 0x89, 0xe7, 0x83, 0xf8, 0x15, 0x0f, 0x87};
+static const short kPauseResultFn[] = {0x55, 0x48, 0x89, 0xe5, 0x53, 0x50, 0x48, 0x89, 0xfb, 0x83, 0xbb, 0x10, 0x15, 0x00,
+                                       0x00, 0x05, 0x74, 0x13, 0x40, 0x84, 0xf6, 0x75, 0x0e, 0x80, 0xbb, 0xab, 0x00, 0x00,
+                                       0x00, 0x16};
+enum { kPauseModeStoreAt = 0x38, kPauseResultCallAt = 8 };
+
+static const char *check_pause(const unsigned char *image, uint64_t size, const BuildSites *b, BossBattleSites *sites) {
+    if (!SHAPE(image, size, b->pause_start_gate, kStartGate) || !SHAPE(image, size, b->pause_level_gate - 4, kLevelGate))
+        return "pause menu Start checks";
+    const uint64_t start_fn = call_target(image, b->pause_start_gate), level_fn = call_target(image, b->pause_level_gate);
+    if (!start_fn || !level_fn || !SHAPE(image, size, start_fn, kStartGateFn) || !SHAPE(image, size, level_fn, kLevelGateFn) ||
+        call_target(image, start_fn + 4) != call_target(image, level_fn + 4))
+        return "pause menu Start check functions";
+    if (!SHAPE(image, size, b->pause_mode, kPauseMode) || !SHAPE(image, size, b->pause_mode + kPauseModeStoreAt, kPauseModeStore))
+        return "pause menu mode";
+    if (!SHAPE(image, size, b->pause_row, kPauseRow) || !SHAPE(image, size, b->pause_quit_row - 0x12, kPauseQuitRow) ||
+        call_target(image, b->pause_quit_row) != b->pause_row)
+        return "pause menu rows";
+    if (!SHAPE(image, size, b->pause_setup, kPauseSetup)) return "pause menu setup";
+    for (int i = 0; i < 3; ++i) {
+        const uint64_t call = b->pause_setup_calls[i];
+        const int matches = i ? SHAPE(image, size, call - 3, kPauseSetupCallR13) : SHAPE(image, size, call - 3, kPauseSetupCallRbx);
+        if (!matches || call_target(image, call) != b->pause_setup)
+            return "pause menu setup call";
+        sites->pause_setup_calls[i] = call;
+    }
+    if (!SHAPE(image, size, b->pause_confirm_text - 0x3f, kPauseConfirmMode) ||
+        !SHAPE(image, size, b->pause_confirm_text - 5, kPauseConfirmText) ||
+        call_target(image, b->pause_confirm_text) != sites->set_message)
+        return "pause menu quit confirmation";
+    const uint64_t result_fn = call_target(image, b->pause_result);
+    if (!SHAPE(image, size, b->pause_result - kPauseResultCallAt, kPauseResult) || !result_fn ||
+        !SHAPE(image, size, result_fn, kPauseResultFn))
+        return "pause menu result";
+    sites->pause_start_gate = b->pause_start_gate;
+    sites->pause_level_gate = b->pause_level_gate;
+    sites->pause_mode = b->pause_mode;
+    sites->pause_row = b->pause_row;
+    sites->pause_setup = b->pause_setup;
+    sites->pause_confirm_text = b->pause_confirm_text;
+    sites->pause_result = b->pause_result;
+    sites->pause_result_fn = result_fn;
+    return NULL;
+}
+
+/* DEBUG_SAULO: the cue player the menu sounds reach, through the cue lookup that reports an unknown cue ID. */
+static const short kCuePlayer[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x58};
+enum { kCueLookupInPlayer = 0x1ee, kCueLookupMessage = 0x186 };
+
+static const char *check_cues(const unsigned char *image, uint64_t size, const BuildSites *b, BossBattleSites *sites) {
+    static const char kMessage[] = "E2010040101:Can not find specified cue ID.";
+    if (!SHAPE(image, size, b->cue_player, kCuePlayer)) return "cue player";
+    const uint64_t lookup = call_target(image, b->cue_player + kCueLookupInPlayer);
+    if (!lookup || lookup + kCueLookupMessage + 7 > size) return "cue lookup";
+    const int64_t text = rel32_target(image, lookup + kCueLookupMessage + 3, lookup + kCueLookupMessage + 7);
+    if (text < 0 || (uint64_t)text > size - sizeof(kMessage) || memcmp(image + text, kMessage, sizeof(kMessage) - 1))
+        return "cue lookup message";
+    sites->cue_player = b->cue_player;
+    return NULL;
+}
+
+/* The one scene fader both the Inn's Leave mode and the scene's arrival fade-in use. */
+static const char *check_fader(const unsigned char *image, uint64_t size, const BuildSites *b, BossBattleSites *sites) {
+    const uint64_t leave = b->leave_mode + kLeaveFadeInLeave;
+    if (!SHAPE(image, size, leave, kLeaveFade)) return "Inn Leave fade";
+    const uint64_t get_fader = call_target(image, leave + kLeaveFaderCall), fade = call_target(image, leave + kLeaveFadeCall);
+    if (!SHAPE(image, size, get_fader, kGetFader) || !SHAPE(image, size, fade, kFade) ||
+        !SHAPE(image, size, call_target(image, fade + kFadeLayerMapCall), kLayerMap))
+        return "scene fader";
+    const int64_t acts = rel32_target(image, b->dispatcher + kActTableLea + 3, b->dispatcher + kActTableLea + 7);
+    if (acts < 0 || (uint64_t)acts + 4 * (ARRIVAL_ACT + 1) > size) return "scene arrival act";
+    int32_t entry;
+    memcpy(&entry, image + acts + 4 * ARRIVAL_ACT, sizeof(entry));
+    const int64_t act_case = acts + entry;
+    const uint64_t act = act_case < 0 || !SHAPE(image, size, (uint64_t)act_case, kActCase) ? 0 : call_target(image, (uint64_t)act_case + 3);
+    if (!act || !SHAPE(image, size, act + kArrivalStepsInAct, kArrivalSteps)) return "scene arrival steps";
+    const uint64_t lea = act + kArrivalStepsInAct + kArrivalTableLea;
+    const int64_t table = rel32_target(image, lea + 3, lea + 7);
+    if (table < 0 || (uint64_t)table + 4 * (ARRIVAL_STEP_FADE_IN + 1) > size) return "scene arrival step table";
+    memcpy(&entry, image + table + 4 * ARRIVAL_STEP_FADE_IN, sizeof(entry));
+    const int64_t step = table + entry;
+    static const char kLabel[] = "STEP_FADEIN";
+    if (step < 0 || (uint64_t)step + kArrivalFadeInStep + sizeof(kArrivalFadeIn) / sizeof(*kArrivalFadeIn) > size)
+        return "scene arrival fade-in step";
+    const int64_t label = rel32_target(image, (uint64_t)step + kArrivalStepLabel + 3, (uint64_t)step + kArrivalStepLabel + 7);
+    if (label < 0 || (uint64_t)label > size - sizeof(kLabel) || memcmp(image + label, kLabel, sizeof(kLabel)))
+        return "scene arrival fade-in step";
+    const uint64_t fade_in = (uint64_t)step + kArrivalFadeInStep;
+    if (!SHAPE(image, size, fade_in, kArrivalFadeIn) || call_target(image, fade_in + kArrivalFaderCall) != get_fader ||
+        call_target(image, fade_in + kArrivalFadeCall) != fade)
+        return "scene arrival fade-in";
+    sites->arrival_fade_in = fade_in + kArrivalFadeCall;
+    sites->get_fader = get_fader;
+    sites->fade = fade;
     return NULL;
 }
 
@@ -742,6 +969,39 @@ static int64_t stage_end_step(const unsigned char *image, uint64_t size, const B
 static uint64_t jump_target(const unsigned char *image, uint64_t at) {
     const int64_t target = rel32_target(image, at + 1, at + 5);
     return image[at] == 0xe9 && target > 0 ? (uint64_t)target : 0;
+}
+
+/* A list's menu sound (the Options list's virtual 0xb0, which the Options row logic calls for its confirmation): the SE
+ * player of the list's manager, by index into the game's SE table (a name and a cue per 16-byte entry). */
+static const short kListPlaySe[] = {0x48, 0x8b, 0x47, 0x28, 0xba, 0x01, 0x00, 0x00, 0x00, 0x48,
+                                    0x8b, 0xb8, 0x30, 0x01, 0x00, 0x00, 0xe9};
+static const short kPlaySe[] = {0x81, 0xfe, ANY, ANY, 0x00, 0x00, 0x0f, 0x87, ANY, ANY, ANY, ANY, 0x48, 0x8d, 0x0d};
+enum { LIST_VTABLE_PLAY_SE = 0xb0, kListPlaySeJump = 0x10, kPlaySeTableLea = 0x0c, SE_ENTRY_BYTES = 16 };
+
+static const char *check_menu_sounds(const unsigned char *image, uint64_t size, const BuildSites *b,
+                                     BossBattleSites *sites) {
+    static const struct {
+        int se;
+        const char *name;
+    } kSounds[] = {{BOSS_BATTLE_SE_SELECT, "COMMON_SELECT"},
+                   {BOSS_BATTLE_SE_DECIDE, "COMMON_DECIDE"},
+                   {BOSS_BATTLE_SE_CANCEL, "COMMON_CANCEL"}};
+    uint64_t list_play;
+    if (!image_pointer(image, size, b->options_body_vtable + LIST_VTABLE_PLAY_SE, &list_play) ||
+        !SHAPE(image, size, list_play, kListPlaySe))
+        return "list menu sound";
+    const uint64_t play = jump_target(image, list_play + kListPlaySeJump);
+    if (!play || !SHAPE(image, size, play, kPlaySe)) return "menu sound player";
+    const int64_t table = rel32_target(image, play + kPlaySeTableLea + 3, play + kPlaySeTableLea + 7);
+    for (size_t i = 0; i < sizeof(kSounds) / sizeof(kSounds[0]); ++i) {
+        uint64_t name;
+        const size_t length = strlen(kSounds[i].name) + 1;
+        if (table < 0 || !image_pointer(image, size, (uint64_t)table + SE_ENTRY_BYTES * (uint64_t)kSounds[i].se, &name) ||
+            size - name < length || memcmp(image + name, kSounds[i].name, length))
+            return "menu sound table";
+    }
+    sites->list_play_se = list_play;
+    return NULL;
 }
 
 /* The stage-end act's screens and its way back to Town00, reached through its own step table. */
@@ -787,6 +1047,7 @@ static const char *check_text(const unsigned char *image, uint64_t size, const B
     const uint64_t set_text = by_number ? call_target(image, by_number + kByNumberStringCall) : 0;
     if (!set_text || !SHAPE(image, size, set_text, kSetString)) return "text string setter";
     sites->set_text = set_text;
+    sites->inn_help_line = b->inn_help_block + kInnHelpTail;
     sites->set_message = message;
     return NULL;
 }
@@ -901,32 +1162,44 @@ int boss_battle_locate(const unsigned char *image, uint64_t size, const char *ga
     found.scene_vtable = b->scene_vtable;
     if ((*why = check_inn(image, size, b, &found))) return 0;
     if ((*why = check_leave(image, size, b, &found))) return 0;
+    if ((*why = check_fader(image, size, b, &found))) return 0;
+    if ((*why = check_cues(image, size, b, &found))) return 0;
     if ((*why = check_special(image, size, b, &found))) return 0;
     if ((*why = check_title(image, size, b, &found))) return 0;
     if ((*why = check_campaign(image, size, b, &found))) return 0;
+    if ((*why = check_save(image, size, b, &found))) return 0;
     if ((*why = check_outcomes(image, size, b, &found))) return 0;
     if ((*why = check_result_act(image, size, b, &found))) return 0;
     if ((*why = check_text(image, size, b, &found))) return 0;
     if ((*why = check_options(image, size, b, &found))) return 0;
+    if ((*why = check_menu_sounds(image, size, b, &found))) return 0;
+    if ((*why = check_pause(image, size, b, &found))) return 0;
     if ((*why = check_progression(image, size, b, &found))) return 0;
     *sites = found;
     return 1;
 }
 
-enum { FIXED_HOOKS = 22, HOOKS = FIXED_HOOKS + INN_CALLS };
+enum { FIXED_HOOKS = 36, HOOKS = FIXED_HOOKS + INN_CALLS, FUNCTION_ENTRY_LENGTH = 6 };
 
 size_t boss_battle_stub_bytes(void) {
     return HOOKS * guest_hook_stub_size();
 }
 
-typedef void(GUEST_HOOK_ABI *SceneRequestFn)(uint64_t server, const char *round, int stage, int entry,
-                                             const char *stage_name, const uint8_t *route_flag, int force, int code,
-                                             int slot, int option, const void *places);
-typedef const uint8_t *(GUEST_HOOK_ABI *LeadSelectorFn)(uint64_t facade);
+typedef BossBattleSceneRequestFn SceneRequestFn;
+typedef BossBattleLeadSelectorFn LeadSelectorFn;
 
 static _Atomic(SceneRequestFn) request_function;
 static _Atomic(LeadSelectorFn) lead_selector;
+
+void boss_battle_set_lead_selector(BossBattleLeadSelectorFn selector) {
+    atomic_store(&lead_selector, selector);
+}
 static _Atomic uint64_t scene_vtable, inn_help_table;
+
+void boss_battle_set_scene(uint64_t vtable, BossBattleSceneRequestFn request) {
+    atomic_store(&scene_vtable, vtable);
+    atomic_store(&request_function, request);
+}
 
 enum {
     SCENE_CONTEXT = 0x90,
@@ -1062,6 +1335,7 @@ static BossBattleProbe probe_scene(uint64_t scene) {
         probe.player_lives = status ? (int8_t)guest_u8(status + STATUS_LIVES) : 0;
     }
     const uint64_t gauge = boss_gauge(context);
+    probe.gauge_window = gauge != 0;
     if (gauge) {
         probe.bosses = (int)guest_u64(gauge + GAUGE_BOSS_COUNT);
         const uint64_t head = guest_u64(gauge + GAUGE_BOSSES), node = head ? guest_u64(head) : 0;
@@ -1152,6 +1426,8 @@ static void supply_return_choice(uint64_t scene) {
     screen_functions.set_step(scene, 1, BOSS_BATTLE_STEP_AFTER_CHOICE);
 }
 
+static void reveal_arena(uint64_t scene, const BossBattleProbe *probe);
+
 /* At the scene frame's call into the menu handler: r15 is the scene manager. */
 void GUEST_HOOK_ABI boss_battle_scene_hook(GuestRegs *regs) {
     const uint64_t scene = regs->r15;
@@ -1164,6 +1440,7 @@ void GUEST_HOOK_ABI boss_battle_scene_hook(GuestRegs *regs) {
     if (reached & BOSS_BATTLE_PLAYABLE) log_party("at Playable", scene_context(scene));
     if (action == BOSS_BATTLE_FRAME_REQUEST_INN && request_inn(scene)) boss_battle_inn_requested();
     if (action == BOSS_BATTLE_FRAME_ANSWER_CHOICE) supply_return_choice(scene);
+    reveal_arena(scene, &probe);
 }
 
 /* The labyrinth's own floor choice writes these before its round request; the request carries them into the round. */
@@ -1238,6 +1515,103 @@ static void add_boss_row(uint64_t list) {
     if (list_items(list) == BOSS_BATTLE_INN_ROWS) move_boss_item_up(list);
 }
 
+enum {
+    PAUSE_WINDOW_STATE = 0xab,
+    PAUSE_WINDOW_TITLE = 0xbf0,
+    PAUSE_WINDOW_MODE = 0x1510,
+    PAUSE_WINDOW_LIST = 0x1520,
+    PAUSE_WINDOW_RESULT = 0xadf4,
+    PAUSE_STATE_DONE = 0x16,
+    PAUSE_ROW_TEXT = 0x370,
+    PAUSE_ROW_ACTION = 0x5b4,
+    PAUSE_ACTION_QUIT = 1,
+    PAUSE_MESSAGE_QUIT = 0x4a8,
+    PAUSE_NO_RESULT = -1,
+    PAUSE_LEVEL_PASSED = 5
+};
+
+static BossBattlePauseFunctions pause_functions;
+/* The scene kind the pause menu reads is none of those with their own rows: the plain adventure menu. */
+static uint8_t pause_plain_scene[0x200];
+
+void boss_battle_set_pause_functions(const BossBattlePauseFunctions *functions) {
+    pause_functions = functions ? *functions : (BossBattlePauseFunctions){0};
+}
+
+/* At the scene's check that the character has progressed far enough to pause: a fight needs none. */
+void GUEST_HOOK_ABI boss_battle_pause_start_gate_hook(GuestRegs *regs) {
+    if (!boss_battle_pause_available()) return;
+    regs->rax = 1;
+    regs->skip = 1;
+}
+
+/* At the scene's level check for Start: a fight needs none. */
+void GUEST_HOOK_ABI boss_battle_pause_level_gate_hook(GuestRegs *regs) {
+    if (!boss_battle_pause_available()) return;
+    regs->rax = PAUSE_LEVEL_PASSED;
+    regs->skip = 1;
+}
+
+/* At the scene's read of its kind as it picks the opened menu's mode (rcx the scene): the plain adventure menu. */
+void GUEST_HOOK_ABI boss_battle_pause_mode_hook(GuestRegs *regs) {
+    if (boss_battle_pause_available()) regs->rcx = (uint64_t)(uintptr_t)pause_plain_scene;
+}
+
+/* At the pause menu's row builder (rsi the row's message): only Quit is built. */
+void GUEST_HOOK_ABI boss_battle_pause_row_hook(GuestRegs *regs) {
+    if (!boss_battle_pause_owned() || (uint32_t)regs->rsi == PAUSE_MESSAGE_QUIT) return;
+    regs->skip = 1;
+}
+
+/* At a call of the pause menu's setup (rdi the window): the menu the game builds, then the boss's name and Quit Boss
+ * Battle. */
+void GUEST_HOOK_ABI boss_battle_pause_setup_hook(GuestRegs *regs) {
+    const uint64_t window = regs->rdi;
+    char title[64];
+    if (!pause_functions.setup || !screen_functions.set_text || !boss_battle_pause_opened(title, sizeof(title))) return;
+    const int32_t plain = 0;
+    memcpy((void *)(uintptr_t)(window + PAUSE_WINDOW_MODE), &plain, sizeof(plain));
+    pause_functions.setup(window);
+    screen_functions.set_text(window + PAUSE_WINDOW_TITLE, title);
+    const uint64_t list = window + PAUSE_WINDOW_LIST;
+    if (list_widgets(list) != 1)
+        printf("Boss Battle [%u]: the pause menu has %llu rows\n", boss_battle_session_id(),
+               (unsigned long long)list_widgets(list));
+    for (uint64_t i = 0; i < list_widgets(list); ++i) {
+        const uint64_t row = guest_u64(guest_u64(list + LIST_WIDGETS_BEGIN) + i * sizeof(uint64_t));
+        if (row && guest_i32(row + PAUSE_ROW_ACTION) == PAUSE_ACTION_QUIT)
+            screen_functions.set_text(row + PAUSE_ROW_TEXT, BOSS_BATTLE_PAUSE_QUIT_ROW);
+    }
+    regs->skip = 1;
+}
+
+/* At the quit confirmation's message (rdi its text, esi the message): Quit Boss Battle? */
+void GUEST_HOOK_ABI boss_battle_pause_confirm_hook(GuestRegs *regs) {
+    if (!boss_battle_pause_owned() || !screen_functions.set_text || !screen_functions.set_message) return;
+    screen_functions.set_message(regs->rdi, (int)(int32_t)regs->rsi);
+    screen_functions.set_text(regs->rdi, BOSS_BATTLE_PAUSE_QUIT_CONFIRM);
+    regs->skip = 1;
+}
+
+/* At the scene's read of the pause menu's result (rdi the window): the game's answer, except that Yes to the quit
+ * leaves through Boss Battle's own quit, and the menu then closes as Back does. */
+void GUEST_HOOK_ABI boss_battle_pause_result_hook(GuestRegs *regs) {
+    if (!boss_battle_pause_owned() || !pause_functions.result) return;
+    const uint64_t window = regs->rdi;
+    int32_t result = pause_functions.result(window, (uint32_t)regs->rsi & 0xff);
+    if (guest_u8(window + PAUSE_WINDOW_STATE) == PAUSE_STATE_DONE) {
+        if (result > 0) {
+            boss_battle_pause_quit();
+            const int32_t none = PAUSE_NO_RESULT;
+            memcpy((void *)(uintptr_t)(window + PAUSE_WINDOW_RESULT), &none, sizeof(none));
+            result = PAUSE_NO_RESULT;
+        }
+        boss_battle_pause_closed();
+    }
+    regs->rax = (uint32_t)result;
+    regs->skip = 1;
+}
+
 /* After the Inn menu builder cut its item list to six (r14 the Inn): a seventh widget like the sixth and the Boss Battle
  * item, after Report adventurers. */
 void GUEST_HOOK_ABI boss_battle_inn_built_hook(GuestRegs *regs) {
@@ -1262,30 +1636,55 @@ void GUEST_HOOK_ABI boss_battle_inn_built_hook(GuestRegs *regs) {
     puts("Boss Battle: Inn row available");
 }
 
-enum { RECORD_XP_POOL = 0x04, RECORD_XP_PROGRESS = 0x08 };
+enum { RECORD_XP_POOL = 0x04, RECORD_XP_PROGRESS = 0x08, RECORD_SKILL_POINTS = 0x24 };
 
 static uint64_t session_record;
 
-static BossBattleProgress record_progress(uint64_t record) {
-    return (BossBattleProgress){guest_u8(record + RECORD_LEVEL), guest_i32(record + RECORD_XP_POOL),
-                                guest_i32(record + RECORD_XP_PROGRESS)};
+static BossBattleCharacterProgress record_progress(uint64_t record) {
+    int16_t skill_points;
+    memcpy(&skill_points, (const void *)(uintptr_t)(record + RECORD_SKILL_POINTS), sizeof(skill_points));
+    BossBattleCharacterProgress p = {guest_i32(record + RECORD_XP_POOL), guest_i32(record + RECORD_XP_PROGRESS),
+                                     skill_points, guest_u8(record + RECORD_LEVEL), guest_u8(record + RECORD_CLASS), {0}};
+    memcpy(p.name, (const void *)(uintptr_t)(record + RECORD_NAME), sizeof(p.name));
+    return p;
 }
 
-/* As the game's own level-up does on a record: experience, level, then the stats of that level. */
-static void apply_progress(uint64_t record, const BossBattleProgress *progress) {
-    memcpy((void *)(uintptr_t)(record + RECORD_XP_POOL), &progress->xp_pool, sizeof(int32_t));
-    memcpy((void *)(uintptr_t)(record + RECORD_XP_PROGRESS), &progress->xp_progress, sizeof(int32_t));
-    level_functions.set_level(record, (uint32_t)progress->level);
-    level_functions.write_stats(record, level_functions.level_pattern(record), 0, progress->level, 0);
+/* As the native level-up leaves a record: experience and skill points, then a new level with that level's stats. */
+static void write_progress(uint64_t record, const BossBattleCharacterProgress *p) {
+    const int16_t skill_points = (int16_t)p->skill_points;
+    memcpy((void *)(uintptr_t)(record + RECORD_XP_POOL), &p->xp_pool, sizeof(int32_t));
+    memcpy((void *)(uintptr_t)(record + RECORD_XP_PROGRESS), &p->xp_progress, sizeof(int32_t));
+    memcpy((void *)(uintptr_t)(record + RECORD_SKILL_POINTS), &skill_points, sizeof(skill_points));
+    if (guest_u8(record + RECORD_LEVEL) == p->level) return;
+    level_functions.set_level(record, (uint32_t)p->level);
+    level_functions.write_stats(record, level_functions.level_pattern(record), 0, p->level, 0);
 }
 
-/* After the snapshot and before the party is sent: the fight is the Boss Battle character's. */
-static void begin_progression(uint64_t record) {
-    BossBattleProgress effective;
-    session_record = record;
-    if (!record || !level_functions.set_level) return;
-    const BossBattleProgress campaign = record_progress(record);
-    if (boss_battle_progress_begin(&campaign, &effective)) apply_progress(record, &effective);
+static BossBattleSaveFunctions save_functions;
+
+void boss_battle_set_save_functions(const BossBattleSaveFunctions *functions) {
+    save_functions = functions ? *functions : (BossBattleSaveFunctions){0};
+}
+
+enum { MANAGER_SAVER = 0xe0, MANAGER_SAVE = 0xe8, SAVER_ACT = 0x5b, SAVER_ERROR = 0x70, SAVER_FAILED = 0x74 };
+
+/* A merged character goes to disk as the Inn's save step sends it: once no save runs, the play data is committed into
+ * the save and the save manager's save act runs; its result is read when the act ends. */
+static void drive_campaign_save(uint64_t manager) {
+    if (boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE) return;
+    const uint64_t saver = manager ? guest_u64(manager + MANAGER_SAVER) : 0;
+    const uint64_t save = manager ? guest_u64(manager + MANAGER_SAVE) : 0;
+    if (!saver || !save || !save_functions.commit || guest_u8(saver + SAVER_ACT)) return;
+    switch (boss_battle_progress_save_state()) {
+    case BOSS_BATTLE_SAVE_PENDING:
+        save_functions.commit(save);
+        if (save_functions.request(saver)) boss_battle_progress_save_started();
+        break;
+    case BOSS_BATTLE_SAVE_RUNNING:
+        boss_battle_progress_save_finished(!guest_i32(saver + SAVER_ERROR) && !guest_u8(saver + SAVER_FAILED));
+        break;
+    default: break;
+    }
 }
 
 static void send_request(int index, uint64_t inn, uint64_t context) {
@@ -1312,7 +1711,11 @@ static void start_boss(uint64_t inn, uint64_t context, int index) {
     printf("Boss Battle [%u]: lead record %#llx -> %#llx, play data %#llx -> %#llx (%s)\n", boss_battle_session_id(),
            (unsigned long long)lead_before, (unsigned long long)lead_after, (unsigned long long)play_before,
            (unsigned long long)play_after, lead_before == lead_after && play_before == play_after ? "unchanged" : "CHANGED");
-    begin_progression(lead_after);
+    session_record = lead_after;
+    if (lead_after) {
+        const BossBattleCharacterProgress before = record_progress(lead_after);
+        boss_battle_progress_before(&before);
+    }
     send_request(index, inn, context);
 }
 
@@ -1321,42 +1724,192 @@ static void no_choice(GuestRegs *regs) {
     regs->skip = 1;
 }
 
+enum {
+    INN_ACT = 0x103,
+    INN_STEP = 0x104,
+    INN_ACT_OPTIONS = 0x8e,
+    MANAGER_FADER_OWNER = 0xd8,
+    TRANSITION_LAYER = 0x2a, /* above every Inn, town, list and Options layer (0x25-0x28) and the travel fade (0x27) */
+    FADE_FRAMES = 30,
+    FADE_TRACE_LINES = 32,
+    SOUND_TRACE_LINES = 64
+};
+#define FADE_BLACK 0xff000000u
+#define FADE_CLEAR 0u
+
+static BossBattleFadeFunctions fade_functions;
+static _Atomic uint64_t screen_manager, screen_inn, held_fader, transition_scene;
+static atomic_int black_held, own_fade, fade_lines, help_closed_logged;
+
+void boss_battle_set_fade_functions(const BossBattleFadeFunctions *functions) {
+    fade_functions = functions ? *functions : (BossBattleFadeFunctions){0};
+    atomic_store(&black_held, 0);
+    atomic_store(&held_fader, 0);
+    atomic_store(&transition_scene, 0);
+}
+
+static uint64_t scene_fader(uint64_t owner_holder) {
+    const uint64_t owner = owner_holder ? guest_u64(owner_holder + MANAGER_FADER_OWNER) : 0;
+    return owner && fade_functions.get_fader ? fade_functions.get_fader(owner) : 0;
+}
+
+/* The scene fader the travel fades use, reached as the Inn's Leave mode reaches it (the game manager) or as the scene's
+ * own acts do (its context): both hold the fader's owner at +0xd8. */
+static void fade_scene(uint64_t owner_holder, uint32_t colour, int frames) {
+    const uint64_t fader = scene_fader(owner_holder);
+    if (!fader || !fade_functions.fade) return;
+    atomic_store(&own_fade, 1);
+    fade_functions.fade(fader, colour, frames, TRANSITION_LAYER);
+    atomic_store(&own_fade, 0);
+}
+
+static void release_black(uint64_t manager, const char *why) {
+    if (!atomic_exchange(&black_held, 0)) return;
+    fade_scene(manager, FADE_CLEAR, FADE_FRAMES);
+    printf("DEBUG_SAULO Boss Battle transition: scene fader fades in (%s)\n", why);
+}
+
+static void transition_act(int *act, int *step) {
+    const uint64_t scene = atomic_load(&transition_scene);
+    *act = is_scene(scene) ? guest_u8(scene + SCENE_ACT) : -1;
+    *step = is_scene(scene) ? guest_u8(scene + SCENE_STEP) : -1;
+}
+
+/* A boss confirmed on the screen: the scene fader fades to black above every UI layer, and holds it until the arena. */
+static void begin_start_transition(void) {
+    const uint64_t manager = atomic_load(&screen_manager);
+    const uint64_t scene = manager ? guest_u64(manager + HYDELAND_MANAGER_SCENE) : 0;
+    atomic_store(&transition_scene, is_scene(scene) ? scene : 0);
+    atomic_store(&held_fader, scene_fader(manager));
+    atomic_store(&fade_lines, 0);
+    atomic_store(&help_closed_logged, 0);
+    boss_battle_start_transition_set(BOSS_BATTLE_START_FADING);
+    fade_scene(manager, FADE_BLACK, FADE_FRAMES);
+    puts("DEBUG_SAULO Boss Battle start: fade-out begins");
+}
+
+static void cancel_start_transition(uint64_t manager) {
+    boss_battle_start_transition_set(BOSS_BATTLE_START_NONE);
+    fade_scene(manager, FADE_CLEAR, FADE_FRAMES);
+    puts("DEBUG_SAULO Boss Battle start: not started, the Inn fades back in");
+}
+
 /* The native Options row opens the Inn's Options page, which becomes the Boss Battle screen. */
-static void open_screen(GuestRegs *regs, uint64_t context) {
+static void open_screen(GuestRegs *regs, uint64_t inn, uint64_t context) {
     read_character(context);
+    atomic_store(&screen_manager, context);
+    atomic_store(&screen_inn, inn);
     boss_battle_screen_request();
     regs->rax = BOSS_BATTLE_INN_OPTIONS_ROW;
     regs->skip = 1;
 }
 
-/* At the Inn menu frame's read of the list result (r13 the Inn, rdi its list): the native switch sees native rows. The
- * menu frame runs again once the screen closed; a boss chosen there starts here, as from the Inn itself. */
+/* At the Inn menu frame's read of the list result (r13 the Inn, rdi its list): the native switch sees native rows. A boss
+ * chosen on the screen starts here, from the menu frame as before, under the held black. */
 void GUEST_HOOK_ABI boss_battle_inn_result_hook(GuestRegs *regs) {
     const uint64_t inn = regs->r13, list = regs->rdi, context = hydeland_town_manager(inn);
     boss_battle_campaign_use(context);
+    drive_campaign_save(context);
     if (boss_battle_inn_frame() == BOSS_BATTLE_INN_HOLD || boss_battle_screen_waiting()) {
         no_choice(regs);
         return;
     }
     int index = -1;
     if (boss_battle_screen_shown()) {
-        if (boss_battle_screen_closed(&index)) start_boss(inn, context, index);
+        if (boss_battle_screen_closed(&index)) {
+            printf("DEBUG_SAULO Boss Battle transition: Inn menu act=%#x step=%u, party send and arena request\n",
+                   guest_u8(inn + INN_ACT), guest_u8(inn + INN_STEP));
+            const int holding = boss_battle_start_transition_holds();
+            start_boss(inn, context, index);
+            if (holding && !boss_battle_session_active()) cancel_start_transition(context);
+        }
         no_choice(regs);
         return;
     }
+    const int reopening = boss_battle_menu_reopen_pending() && has_boss_row(list);
+    if (!reopening && !boss_battle_screen_requested()) release_black(context, "no Boss Battle page to show");
     if (!has_boss_row(list)) return;
     if (boss_battle_take_menu_reopen()) {
-        open_screen(regs, context);
+        printf("Boss Battle [%u]: Boss Battle page reopens after the campaign restore\n", boss_battle_reopen_session());
+        open_screen(regs, inn, context);
         return;
     }
     const int row = list_result(list);
     if (row == BOSS_BATTLE_INN_ROW) {
-        if (boss_battle_inn_row_wanted()) open_screen(regs, context);
+        if (boss_battle_inn_row_wanted()) open_screen(regs, inn, context);
         else no_choice(regs);
         return;
     }
     regs->rax = (uint32_t)boss_battle_inn_native_row(row);
     regs->skip = 1;
+}
+
+/* At the first-frame check of the Inn's Options mode once its page closed (r14 the Inn), which runs as the game has it: a
+ * boss chosen on the screen cuts the scene fader to black before the Inn menu is shown again, as the Inn's Leave does. */
+void GUEST_HOOK_ABI boss_battle_options_leave_hook(GuestRegs *regs) {
+    if (!boss_battle_screen_take_close_cut()) return;
+    const uint64_t inn = regs->r14;
+    fade_scene(hydeland_town_manager(inn), FADE_BLACK, 0);
+    if (boss_battle_start_transition() == BOSS_BATTLE_START_FADING) boss_battle_start_transition_set(BOSS_BATTLE_START_HELD);
+    printf("DEBUG_SAULO Boss Battle start: full black reached, options close completed act=%#x step=%u\n",
+           guest_u8(inn + INN_ACT), guest_u8(inn + INN_STEP));
+}
+
+/* At the scene arrival's fade-in (esi its colour): the Inn a fight returns to stays black until its Boss Battle page is
+ * shown. */
+void GUEST_HOOK_ABI boss_battle_arrival_fade_hook(GuestRegs *regs) {
+    if (!boss_battle_menu_reopen_pending()) return;
+    regs->rsi = FADE_BLACK;
+    regs->rcx = TRANSITION_LAYER;
+    atomic_store(&black_held, 1);
+    printf("DEBUG_SAULO Boss Battle transition: Inn arrival kept black for the Boss Battle page [%u]\n",
+           boss_battle_reopen_session());
+}
+
+/* At a fader's fade (rdi the fader, esi the colour, edx the frames, ecx the layer): while a Boss Battle start holds the
+ * black, the scene fader stays black on the top layer whatever the travel asks of it. */
+void GUEST_HOOK_ABI boss_battle_fade_hook(GuestRegs *regs) {
+    if (atomic_load(&own_fade)) return;
+    const int holds = boss_battle_start_transition_holds();
+    const int traced = holds || (boss_battle_start_transition() == BOSS_BATTLE_START_DONE && boss_battle_session_active());
+    const int scene = regs->rdi == atomic_load(&held_fader);
+    if (traced && atomic_fetch_add(&fade_lines, 1) < FADE_TRACE_LINES) {
+        int act, step;
+        transition_act(&act, &step);
+        printf("DEBUG_SAULO Boss Battle start fade: source=native %s act=%d step=%d colour=%#x frames=%d layer=%#x%s\n",
+               scene ? "scene fader" : "other fader", act, step, (uint32_t)regs->rsi, (int)(int32_t)regs->rdx,
+               (uint32_t)regs->rcx, holds && scene ? ", held black" : "");
+    }
+    if (!holds || !scene) return;
+    regs->rsi = FADE_BLACK;
+    regs->rdx = 0;
+    regs->rcx = TRANSITION_LAYER;
+}
+
+/* The Boss Battle start's black ends once: the travel is over and the arena is played. */
+static void reveal_arena(uint64_t scene, const BossBattleProbe *probe) {
+    if (!boss_battle_start_reveal_due(probe)) return;
+    fade_scene(scene_context(scene), FADE_CLEAR, FADE_FRAMES);
+    printf("DEBUG_SAULO Boss Battle start: final arena reveal, transition complete [%u]\n", boss_battle_session_id());
+}
+
+/* At the Inn menu frame's call of the help line (edx 1 shows it): during a Boss Battle start it is closed instead, as the
+ * help line's own show flag does. */
+void GUEST_HOOK_ABI boss_battle_inn_help_line_hook(GuestRegs *regs) {
+    if (!boss_battle_start_transition_holds() || !(regs->rdx & 1)) return;
+    regs->rdx = 0;
+    if (!atomic_exchange(&help_closed_logged, 1)) puts("DEBUG_SAULO Boss Battle start: Inn help line closed");
+}
+
+/* DEBUG_SAULO: the three menu cues (COMMON_SELECT, COMMON_DECIDE, COMMON_CANCEL) outside a fight, one line each. */
+void GUEST_HOOK_ABI boss_battle_cue_hook(GuestRegs *regs) {
+    static const char *const kMenuCues[] = {"cursor (COMMON_SELECT)", "confirm (COMMON_DECIDE)", "cancel (COMMON_CANCEL)"};
+    static atomic_int lines;
+    const uint32_t cue = (uint32_t)regs->rsi;
+    if (cue < 0x6a || cue > 0x6c || boss_battle_session_active() || atomic_fetch_add(&lines, 1) >= SOUND_TRACE_LINES)
+        return;
+    const int screen = boss_battle_screen_shown() || boss_battle_screen_requested();
+    printf("DEBUG_SAULO sound: %s %s\n", screen ? "Boss Battle" : "native menu (Inn/Options)", kMenuCues[cue - 0x6a]);
 }
 
 /* At the Inn menu frame's help text call (r13 the Inn, esi the native row's message, from the cursor read as a native
@@ -1414,15 +1967,18 @@ void GUEST_HOOK_ABI boss_battle_dragon_hook(GuestRegs *regs) {
 /* At the Inn constructor, once it moved the party records back into the play data and before anything reads it. */
 void GUEST_HOOK_ABI boss_battle_inn_flushed_hook(GuestRegs *regs) {
     (void)regs;
-    const unsigned session = boss_battle_session_id();
+    const uint64_t record = boss_battle_session_active() ? session_record : 0;
+    if (record) {
+        const BossBattleCharacterProgress after = record_progress(record);
+        boss_battle_progress_after(&after);
+    }
     boss_battle_screen_reset();
     boss_battle_inn_arrived();
-    if (session && session_record && !boss_battle_session_active()) {
-        const BossBattleProgress campaign = record_progress(session_record);
-        printf("Boss Battle [%u]: campaign restored level %d xp %lld\n", session, campaign.level + 1,
-               (long long)campaign.xp_progress + campaign.xp_pool);
-        session_record = 0;
-    }
+    if (!record || boss_battle_session_active()) return;
+    session_record = 0;
+    const BossBattleCharacterProgress restored = record_progress(record);
+    BossBattleCharacterProgress merged;
+    if (level_functions.set_level && boss_battle_progress_merge(&restored, &merged)) write_progress(record, &merged);
 }
 
 /* At the results screen's act 2 asking for act 3 (esi): the closing act instead, once the level-ups are done. */
@@ -1444,6 +2000,7 @@ void GUEST_HOOK_ABI boss_battle_save_copy_hook(GuestRegs *regs) {
 /* At the scene factory's call of the title constructor: the session's campaign is put back before the title runs. */
 void GUEST_HOOK_ABI boss_battle_title_hook(GuestRegs *regs) {
     (void)regs;
+    atomic_store(&black_held, 0);
     boss_battle_screen_reset();
     boss_battle_title_reached();
 }
@@ -1476,11 +2033,6 @@ void GUEST_HOOK_ABI boss_battle_results_screen_hook(GuestRegs *regs) {
 /* At the stage-end act's Town00 request (rdx the stage, rcx the entry, r8 the stage name; r14 the scene). */
 void GUEST_HOOK_ABI boss_battle_town_return_hook(GuestRegs *regs) {
     if (!is_scene(regs->r14)) return;
-    const uint64_t context = scene_context(regs->r14), slot = context ? party_slot(context, 0) : 0;
-    if (boss_battle_outcome() == BOSS_BATTLE_OUTCOME_WIN && slot && guest_i32(slot + SLOT_KIND) == SLOT_LOCAL) {
-        const BossBattleProgress after = record_progress(slot);
-        boss_battle_progress_won(&after);
-    }
     if (!boss_battle_town_return()) return;
     regs->rdx = (uint32_t)boss_battle_inn_entry.stage;
     regs->rcx = (uint32_t)boss_battle_inn_entry.entry;
@@ -1527,7 +2079,7 @@ static int is_first_page(uint64_t body) {
         const uint64_t row = screen_row(body, i);
         if (!row || guest_i32(row + ROW_INDEX) != i) return 0;
     }
-    return guest_i32(screen_row(body, BOSS_BATTLE_SCREEN_TITLE_ROW) + ROW_TYPE) == ROW_TITLE &&
+    return guest_i32(screen_row(body, BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW) + ROW_TYPE) == ROW_TITLE &&
            guest_i32(screen_row(body, BOSS_BATTLE_SCREEN_RETURN_ROW) + ROW_TYPE) == ROW_BUTTON;
 }
 
@@ -1547,6 +2099,8 @@ static int is_screen(uint64_t body) {
 static void refresh_screen(uint64_t body) {
     char text[160];
     const int cursor = guest_i32(body + LIST_CURSOR);
+    boss_battle_screen_label(BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW, text, sizeof(text));
+    set_row_text(screen_row(body, BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW), ROW_VALUE, text);
     for (int i = 1; i <= BOSS_BATTLE_SCREEN_BOSS_ROWS; ++i) {
         const uint64_t row = screen_row(body, i);
         boss_battle_screen_label(i, text, sizeof(text));
@@ -1554,8 +2108,6 @@ static void refresh_screen(uint64_t body) {
         boss_battle_screen_statistic(i, cursor, text, sizeof(text));
         set_row_text(row, ROW_LABEL, text);
     }
-    boss_battle_screen_title(cursor, text, sizeof(text));
-    set_row_text(screen_row(body, BOSS_BATTLE_SCREEN_TITLE_ROW), ROW_VALUE, text);
     boss_battle_screen_help(cursor, text, sizeof(text));
     screen_functions.set_text(atomic_load(&screen_window) + OPTIONS_HELP, text);
 }
@@ -1574,6 +2126,7 @@ void GUEST_HOOK_ABI boss_battle_options_built_hook(GuestRegs *regs) {
         !inn_functions.set_cursor || !is_first_page(body)) {
         puts("Boss Battle: the Options page is not as expected; it stays the game's Options");
         boss_battle_screen_reset();
+        release_black(atomic_load(&screen_manager), "the Options page stays the game's");
         return;
     }
     const int32_t page = BOSS_PAGE, single = ROW_SINGLE;
@@ -1593,23 +2146,55 @@ void GUEST_HOOK_ABI boss_battle_options_built_hook(GuestRegs *regs) {
     atomic_store(&screen_window, window);
     inn_functions.set_cursor(body, boss_battle_screen_built(), 0, 1);
     refresh_screen(body);
+    if (atomic_load(&black_held)) puts("DEBUG_SAULO Boss Battle transition: page constructed, black kept until it is shown");
+}
+
+/* The reopened page is shown and takes input: its window runs its input act and the Options mode left its opening state. */
+static int reopened_page_ready(uint64_t body) {
+    const uint64_t inn = atomic_load(&screen_inn);
+    return is_screen(body) && inn && guest_u8(inn + INN_ACT) == INN_ACT_OPTIONS && guest_u8(inn + INN_STEP) >= 1;
 }
 
 /* At the page window's call of the page's row logic (rbx the page's list): the screen has none. */
 void GUEST_HOOK_ABI boss_battle_options_update_hook(GuestRegs *regs) {
+    static unsigned failure_logged;
+    const BossBattleState now = boss_battle_state();
+    const unsigned session = boss_battle_session_id();
+    if ((now == BOSS_BATTLE_INITIALIZING || now == BOSS_BATTLE_FIGHTING) && failure_logged != session) {
+        failure_logged = session;
+        printf("DEBUG_SAULO Boss Battle transition: FAILURE an Options page still runs after the arena loaded [%u]\n",
+               session);
+    }
+    drive_campaign_save(atomic_load(&screen_manager));
+    if (atomic_load(&black_held) && reopened_page_ready(regs->rbx)) {
+        puts("DEBUG_SAULO Boss Battle transition: page show complete");
+        release_black(atomic_load(&screen_manager), "Boss Battle page ready");
+    }
     if (!is_screen(regs->rbx)) return;
     regs->rax = 0;
     regs->skip = 1;
 }
 
 /* After the list read this frame's input (eax its result, rbx the list; r15b set closes the page as its row logic
- * would): the texts follow the cursor, a boss row starts its fight, the bottom action returns to the tavern. */
+ * would): the texts follow the cursor, a boss row starts its fight, Fight All asks for its run, the bottom action
+ * returns to the tavern. The list sounds the cursor and Back itself but leaves the confirmation to the row logic the
+ * screen skips, so every choice sounds it here as that logic does. */
 void GUEST_HOOK_ABI boss_battle_options_result_hook(GuestRegs *regs) {
     const uint64_t body = regs->rbx;
     if (!is_screen(body)) return;
     refresh_screen(body);
     int index = -1;
-    if (boss_battle_screen_choose((int)(int32_t)regs->rax, &index) != BOSS_BATTLE_SCREEN_NONE) regs->r15 = 1;
+    const BossBattleScreenChoice choice = boss_battle_screen_choose((int)(int32_t)regs->rax, &index);
+    if (choice == BOSS_BATTLE_SCREEN_NONE) return;
+    if (screen_functions.play_se) screen_functions.play_se(body, BOSS_BATTLE_SE_DECIDE);
+    switch (choice) {
+    case BOSS_BATTLE_SCREEN_START:
+        begin_start_transition();
+        regs->r15 = 1;
+        break;
+    case BOSS_BATTLE_SCREEN_FIGHT_ALL: boss_battle_fight_all_request(); break;
+    default: regs->r15 = 1; break;
+    }
 }
 
 /* At a list's cursor move (rdi the list): on the screen the boss rows scroll at their ends, as a moved cursor. */
@@ -1672,6 +2257,20 @@ int boss_battle_install(unsigned char *image, uint64_t size, uint64_t entry, con
         {"list cursor down", (uint32_t)sites.list_down, LIST_MOVE_LENGTH, {0}, boss_battle_list_down_hook},
         {"results level-up end", (uint32_t)sites.results_level_done, RESULTS_LEVEL_DONE_LENGTH, {0},
          boss_battle_results_level_done_hook},
+        {"Options page closed", (uint32_t)sites.options_leave, HOOK_LENGTH, {0}, boss_battle_options_leave_hook},
+        {"scene arrival fade-in", (uint32_t)sites.arrival_fade_in, HOOK_LENGTH, {0}, boss_battle_arrival_fade_hook},
+        {"scene fade", (uint32_t)sites.fade, FUNCTION_ENTRY_LENGTH, {0}, boss_battle_fade_hook},
+        {"Inn help line", (uint32_t)sites.inn_help_line, HOOK_LENGTH, {0}, boss_battle_inn_help_line_hook},
+        {"cue player", (uint32_t)sites.cue_player, FUNCTION_ENTRY_LENGTH, {0}, boss_battle_cue_hook},
+        {"pause Start check", (uint32_t)sites.pause_start_gate, HOOK_LENGTH, {0}, boss_battle_pause_start_gate_hook},
+        {"pause level check", (uint32_t)sites.pause_level_gate, HOOK_LENGTH, {0}, boss_battle_pause_level_gate_hook},
+        {"pause mode", (uint32_t)sites.pause_mode, FUNCTION_ENTRY_LENGTH, {0}, boss_battle_pause_mode_hook},
+        {"pause row", (uint32_t)sites.pause_row, FUNCTION_ENTRY_LENGTH, {0}, boss_battle_pause_row_hook},
+        {"pause setup A", (uint32_t)sites.pause_setup_calls[0], HOOK_LENGTH, {0}, boss_battle_pause_setup_hook},
+        {"pause setup B", (uint32_t)sites.pause_setup_calls[1], HOOK_LENGTH, {0}, boss_battle_pause_setup_hook},
+        {"pause setup C", (uint32_t)sites.pause_setup_calls[2], HOOK_LENGTH, {0}, boss_battle_pause_setup_hook},
+        {"pause quit confirmation", (uint32_t)sites.pause_confirm_text, HOOK_LENGTH, {0}, boss_battle_pause_confirm_hook},
+        {"pause result", (uint32_t)sites.pause_result, HOOK_LENGTH, {0}, boss_battle_pause_result_hook},
     };
     for (int i = 0; i < INN_CALLS; ++i)
         hooks[FIXED_HOOKS + i] = (GuestHook){"Inn row call", (uint32_t)sites.inn_calls[i], HOOK_LENGTH, {0},
@@ -1684,9 +2283,8 @@ int boss_battle_install(unsigned char *image, uint64_t size, uint64_t entry, con
         printf("Boss Battle: unavailable for %s: %s (%s)\n", game, guest_hook_status_text(status), hooks[bad].name);
         return 0;
     }
-    atomic_store(&request_function, (SceneRequestFn)(uintptr_t)(image + sites.request));
-    atomic_store(&lead_selector, (LeadSelectorFn)(uintptr_t)(image + town->selector));
-    atomic_store(&scene_vtable, (uint64_t)(uintptr_t)(image + sites.scene_vtable));
+    boss_battle_set_scene((uint64_t)(uintptr_t)(image + sites.scene_vtable), (SceneRequestFn)(uintptr_t)(image + sites.request));
+    boss_battle_set_lead_selector((LeadSelectorFn)(uintptr_t)(image + town->selector));
     boss_battle_set_inn_help_table((uint64_t)(uintptr_t)(image + sites.inn_help_table));
     const BossBattleInnFunctions functions = {
         (uint64_t(GUEST_HOOK_ABI *)(uint64_t))(uintptr_t)(image + sites.allocate),
@@ -1698,11 +2296,17 @@ int boss_battle_install(unsigned char *image, uint64_t size, uint64_t entry, con
         (void(GUEST_HOOK_ABI *)(uint64_t))(uintptr_t)(image + sites.inn_party),
     };
     boss_battle_set_inn_functions(&functions);
+    const BossBattleFadeFunctions fades = {
+        (uint64_t(GUEST_HOOK_ABI *)(uint64_t))(uintptr_t)(image + sites.get_fader),
+        (void(GUEST_HOOK_ABI *)(uint64_t, uint32_t, int, int))(uintptr_t)(image + sites.fade),
+    };
+    boss_battle_set_fade_functions(&fades);
     const BossBattleScreenFunctions screen = {
         (void(GUEST_HOOK_ABI *)(uint64_t, int, int))(uintptr_t)(image + sites.set_step),
         (void(GUEST_HOOK_ABI *)(uint64_t, const char *))(uintptr_t)(image + sites.set_text),
         (void(GUEST_HOOK_ABI *)(uint64_t, int))(uintptr_t)(image + sites.set_message),
         (void(GUEST_HOOK_ABI *)(uint64_t, int, float))(uintptr_t)(image + sites.row_frame),
+        (void(GUEST_HOOK_ABI *)(uint64_t, int))(uintptr_t)(image + sites.list_play_se),
     };
     boss_battle_set_screen_functions(&screen);
     const BossBattleLevelFunctions levels = {
@@ -1711,6 +2315,16 @@ int boss_battle_install(unsigned char *image, uint64_t size, uint64_t entry, con
         (void(GUEST_HOOK_ABI *)(uint64_t, int, int, int, int))(uintptr_t)(image + sites.write_stats),
     };
     boss_battle_set_level_functions(&levels);
+    const BossBattleSaveFunctions saves = {
+        (void(GUEST_HOOK_ABI *)(uint64_t))(uintptr_t)(image + sites.save_commit),
+        (uint8_t(GUEST_HOOK_ABI *)(uint64_t))(uintptr_t)(image + sites.save_request),
+    };
+    boss_battle_set_save_functions(&saves);
+    const BossBattlePauseFunctions pause = {
+        (void(GUEST_HOOK_ABI *)(uint64_t))(uintptr_t)(image + sites.pause_setup),
+        (int32_t(GUEST_HOOK_ABI *)(uint64_t, uint32_t))(uintptr_t)(image + sites.pause_result_fn),
+    };
+    boss_battle_set_pause_functions(&pause);
     atomic_store(&options_body_vtable, (uint64_t)(uintptr_t)(image + sites.options_body_vtable));
     boss_battle_campaign_configure((uint64_t)(uintptr_t)(image + sites.play_data_table));
     boss_battle_set_memory_guard(boss_battle_campaign_snapshot, boss_battle_campaign_restore);

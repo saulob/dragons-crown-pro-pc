@@ -3,6 +3,7 @@
  * Win (native boss clear and stage clear), Death and Quit rules, the stage-end act bypass, the return to the Inn with
  * the campaign put back, the help-line statistics, the capped telemetry, the special bosses' hooks, and the site
  * checks and install on the local boot images under build/image when they are there. */
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,7 +60,7 @@ static const struct {
     {"gargoyle_gate", 1, 17, 17, "2_st05"}, {"red_dragon", 6, 11, 13, "2_st01"},   {"arch_demon", 5, 16, 16, "2_st06"},
 };
 
-enum { HARPY = 0, MEDUSA = 9, WRAITH = 10, ANCIENT_DRAGON = 18, DEMON_KING = 19 };
+enum { HARPY = 0, GOLEM = 3, MEDUSA = 9, WRAITH = 10, ANCIENT_DRAGON = 18, DEMON_KING = 19 };
 
 static void put_pointer(uint8_t *where, const void *target) {
     const uint64_t value = (uint64_t)(uintptr_t)target;
@@ -82,7 +83,7 @@ static void test_encounters(void) {
         CHECK(e->round_index >= 0 && e->round_index < (int)(sizeof(kRounds) / sizeof(*kRounds)));
         CHECK(kRounds[e->round_index] && !strcmp(kRounds[e->round_index], e->round));
         CHECK(e->stage >= 0 && e->last_stage >= e->stage && e->stage_name && *e->stage_name);
-        CHECK(!e->unavailable && !e->pending == (i != DEMON_KING));
+        CHECK(!e->unavailable);
         route_a += e->route == 'A';
         route_b += e->route == 'B';
         if (i < 18) {
@@ -542,81 +543,6 @@ static void test_defeat(void) {
     boss_battle_reset();
 }
 
-/* The Boss Battle character keeps its own level: it starts from the campaign, grows with Wins only, never falls behind
- * the campaign, and a broken file leaves the campaign's. */
-static void test_progression(const char *user_dir) {
-    const BossBattleProgress campaign = {0, 0, 120}, saved = {1, 0, 40}, behind = {0, 0, 80}, ahead_xp = {0, 0, 200};
-    BossBattleProgress effective = boss_battle_progress_effective(NULL, &campaign);
-    CHECK(effective.level == 0 && effective.xp_progress == 120);
-    effective = boss_battle_progress_effective(&saved, &campaign);
-    CHECK(effective.level == 1 && effective.xp_progress == 40);
-    effective = boss_battle_progress_effective(&behind, &campaign);
-    CHECK(effective.level == 0 && effective.xp_progress == 120);
-    effective = boss_battle_progress_effective(&ahead_xp, &campaign);
-    CHECK(effective.xp_progress == 200);
-    const BossBattleProgress campaign_later = {2, 0, 10};
-    effective = boss_battle_progress_effective(&saved, &campaign_later);
-    CHECK(effective.level == 2 && effective.xp_progress == 10); /* the campaign passed it */
-
-    char text[512];
-    static const char kGood[] = "DCP Boss Battle Progress 1\nZak|Fighter\t1\t0\t40\n";
-    static const char kLevelTooHigh[] = "DCP Boss Battle Progress 1\nZak|Fighter\t999\t0\t40\n";
-    static const char kNegative[] = "DCP Boss Battle Progress 1\nZak|Fighter\t1\t-3\t40\n";
-    CHECK(boss_battle_progress_parse(kGood, sizeof(kGood) - 1));
-    CHECK(boss_battle_progress_format(text, sizeof(text)) && !strcmp(text, kGood));
-    CHECK(!boss_battle_progress_parse(kLevelTooHigh, sizeof(kLevelTooHigh) - 1));
-    CHECK(!boss_battle_progress_parse(kNegative, sizeof(kNegative) - 1));
-    CHECK(!boss_battle_progress_parse("garbage", 7));
-
-    /* a Win's level-up is saved; Death and Quit save nothing */
-    char path[1200];
-    snprintf(path, sizeof(path), "%s/boss_battle_progress.dat", user_dir);
-    remove(path);
-    boss_battle_progress_configure(user_dir);
-    start_guarded();
-    CHECK(start_playable(HARPY, kArenaPlay));
-    CHECK(!boss_battle_progress_begin(&campaign, &effective) && effective.level == 0); /* first time: the campaign's */
-    boss_battle_boss_cleared(1);
-    const BossBattleProgress won = {1, 0, 30};
-    boss_battle_progress_won(&won);
-    boss_battle_progress_won(&saved); /* captured once */
-    BossBattleProgress stored;
-    CHECK(boss_battle_progress_get("Zak|Fighter", &stored) && stored.level == 1 && stored.xp_progress == 30);
-    boss_battle_inn_arrived();
-
-    CHECK(start_playable(HARPY, kArenaPlay));
-    CHECK(boss_battle_progress_begin(&campaign, &effective) && effective.level == 1 && effective.xp_progress == 30);
-    CHECK(boss_battle_party_wiped());
-    const BossBattleProgress lost = {3, 0, 0};
-    boss_battle_progress_won(&lost);
-    CHECK(boss_battle_progress_get("Zak|Fighter", &stored) && stored.level == 1);
-    boss_battle_inn_arrived();
-
-    CHECK(start_playable(HARPY, kArenaPlay));
-    boss_battle_progress_begin(&campaign, &effective);
-    CHECK(boss_battle_quit_key(0, 0, 0) && frames(probe(kArenaPlay, 1, 1, 1), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
-    boss_battle_progress_won(&lost);
-    CHECK(boss_battle_progress_get("Zak|Fighter", &stored) && stored.level == 1);
-    boss_battle_reset();
-
-    /* kept across a restart; an unreadable file is left alone and the campaign is used */
-    boss_battle_progress_configure(user_dir);
-    CHECK(boss_battle_progress_get("Zak|Fighter", &stored) && stored.level == 1);
-    FILE *broken = fopen(path, "wb");
-    if (broken) {
-        fputs("DCP Boss Battle Progress 1\nZak|Fighter\tnot a level\n", broken);
-        fclose(broken);
-    }
-    boss_battle_progress_configure(user_dir);
-    CHECK(!boss_battle_progress_get("Zak|Fighter", &stored) && !boss_battle_progress_put("Zak|Fighter", &won));
-    start_guarded();
-    CHECK(start_playable(HARPY, kArenaPlay));
-    CHECK(!boss_battle_progress_begin(&campaign, &effective) && effective.level == 0 && effective.xp_progress == 120);
-    boss_battle_reset();
-    remove(path);
-    boss_battle_progress_configure(user_dir);
-}
-
 static void test_death(void) {
     start_guarded();
     const BossBattleStats before = harpy_stats();
@@ -790,7 +716,7 @@ static void test_telemetry(const char *user_dir) {
     boss_battle_reset();
     fflush(stdout);
     dup2(saved, fileno(stdout));
-    CHECK(count_in(path, "WAITING player record") == 4);
+    CHECK(count_in(path, "WAITING player record") == 6);
     CHECK(count_in(path, "heartbeat") == 24);
     CHECK(count_in(path, "]: scene act") == 96);
     remove(path);
@@ -869,9 +795,11 @@ static void GUEST_HOOK_ABI fake_set_cursor(uint64_t list, int row, int unused, i
     cursor_row = row;
     memcpy((uint8_t *)(uintptr_t)list + 0x958, &row, sizeof(row));
 }
+static char party_guard[32];
 static void GUEST_HOOK_ABI fake_inn_party(uint64_t inn) {
     (void)inn;
     ++party_sends;
+    snprintf(party_guard, sizeof(party_guard), "%s", guard_log);
 }
 
 /* The Inn's native rows carry their SystemMsg record. */
@@ -906,6 +834,7 @@ static void use_fake_inn_functions(void) {
                                               fake_inn_party};
     boss_battle_set_inn_functions(&functions);
     widgets_added = items_added = disabled_calls = cursor_calls = party_sends = 0;
+    party_guard[0] = 0;
 }
 
 static int main_rows_are_inn(void) {
@@ -995,6 +924,13 @@ static void GUEST_HOOK_ABI fake_row_frame(uint64_t layout, int frame, float star
     ++frame_calls;
     frame_value = frame;
 }
+static int se_calls, se_value = -1;
+static uint64_t se_list;
+static void GUEST_HOOK_ABI fake_play_se(uint64_t list, int se) {
+    ++se_calls;
+    se_list = list;
+    se_value = se;
+}
 static int step_sets, step_level, step_value;
 static void GUEST_HOOK_ABI fake_set_step(uint64_t scene, int level, int value) {
     (void)scene;
@@ -1004,10 +940,12 @@ static void GUEST_HOOK_ABI fake_set_step(uint64_t scene, int level, int value) {
 }
 
 static void use_fake_screen_functions(void) {
-    const BossBattleScreenFunctions functions = {fake_set_step, fake_set_text, fake_set_message, fake_row_frame};
+    const BossBattleScreenFunctions functions = {fake_set_step, fake_set_text, fake_set_message, fake_row_frame, fake_play_se};
     boss_battle_set_screen_functions(&functions);
     memset(screen_texts, 0, sizeof(screen_texts));
-    text_sets = frame_calls = 0;
+    text_sets = frame_calls = se_calls = 0;
+    se_value = -1;
+    se_list = 0;
     frame_value = message_value = -1;
 }
 
@@ -1085,7 +1023,7 @@ static GuestRegs page_move(int down) {
     return regs;
 }
 
-/* Rows 1-6 scroll through the twenty bosses at their ends; the title bar and the bottom action stay. */
+/* Rows 1-6 scroll through the twenty bosses at their ends; Fight All and the bottom action stay. */
 static void test_screen_rows(void) {
     char text[160];
     boss_battle_reset();
@@ -1099,7 +1037,7 @@ static void test_screen_rows(void) {
     for (int expected = 5; expected <= 14; ++expected)
         CHECK(boss_battle_screen_move(6, 1) == 1 && boss_battle_screen_offset() == expected);
     CHECK(boss_battle_screen_move(6, 1) == 0 && boss_battle_screen_boss(6) == DEMON_KING); /* on to Return to tavern */
-    CHECK(boss_battle_screen_move(7, 1) == 0 && boss_battle_screen_offset() == 0);       /* wraps to the title bar */
+    CHECK(boss_battle_screen_move(7, 1) == 0 && boss_battle_screen_offset() == 0);       /* wraps to Fight All */
     CHECK(boss_battle_screen_move(0, 0) == 0 && boss_battle_screen_offset() == 14);      /* and back */
     CHECK(boss_battle_screen_move(1, 0) == 1 && boss_battle_screen_offset() == 13);
     CHECK(boss_battle_screen_move(3, 1) == 0 && boss_battle_screen_move(3, 0) == 0 && boss_battle_screen_offset() == 13);
@@ -1107,28 +1045,27 @@ static void test_screen_rows(void) {
     boss_battle_screen_label(1, text, sizeof(text));
     CHECK(!strcmp(text, "14 Cyclops"));
     boss_battle_screen_label(0, text, sizeof(text));
+    CHECK(!strcmp(text, "Fight All"));
+    boss_battle_screen_label(7, text, sizeof(text));
     CHECK(!strcmp(text, ""));
-    boss_battle_screen_title(6, text, sizeof(text)); /* the number and the name only: no Ready */
+    boss_battle_screen_label(6, text, sizeof(text)); /* the number and the name only: no Ready */
     CHECK(!strcmp(text, "19 Ancient Dragon"));
-    boss_battle_screen_help(6, text, sizeof(text));
-    CHECK(!strcmp(text, "")); /* no help line for a boss */
-    boss_battle_screen_title(7, text, sizeof(text)); /* the bottom action keeps the boss last highlighted */
-    CHECK(!strcmp(text, "19 Ancient Dragon"));
+    boss_battle_screen_help(6, text, sizeof(text)); /* a boss shows the character */
+    CHECK(!strcmp(text, "Zak - Fighter, level 1"));
     boss_battle_screen_move(6, 1);
-    boss_battle_screen_title(6, text, sizeof(text)); /* no Pending in the title either */
+    boss_battle_screen_label(6, text, sizeof(text));
     CHECK(!strcmp(text, "20 Demon King"));
-    boss_battle_screen_help(6, text, sizeof(text));
-    CHECK(!strcmp(text, "Pending: not yet confirmed in game."));
-    boss_battle_screen_help(5, text, sizeof(text));
-    CHECK(!strcmp(text, ""));
+    boss_battle_screen_help(6, text, sizeof(text)); /* the Demon King as every other boss */
+    CHECK(!strcmp(text, "Zak - Fighter, level 1"));
     boss_battle_screen_help(7, text, sizeof(text));
     CHECK(!strcmp(text, "Return to Dragon's Haven Inn."));
     boss_battle_screen_help(0, text, sizeof(text));
-    CHECK(!strcmp(text, "Zak - Fighter, level 1"));
+    CHECK(!strcmp(text, "Fight every boss in sequence."));
 
     int index = -1;
     CHECK(boss_battle_screen_choose(-1, &index) == BOSS_BATTLE_SCREEN_NONE);
-    CHECK(boss_battle_screen_choose(0, &index) == BOSS_BATTLE_SCREEN_NONE);
+    CHECK(boss_battle_screen_choose(0, &index) == BOSS_BATTLE_SCREEN_FIGHT_ALL && index == -1);
+    CHECK(boss_battle_screen_choose(8, &index) == BOSS_BATTLE_SCREEN_NONE && index == -1);
     CHECK(boss_battle_screen_choose(7, &index) == BOSS_BATTLE_SCREEN_CLOSE);
     CHECK(boss_battle_screen_choose(2, &index) == BOSS_BATTLE_SCREEN_START && index == 15);
     CHECK(boss_battle_screen_closed(&index) && index == 15 && !boss_battle_screen_shown());
@@ -1138,6 +1075,73 @@ static void test_screen_rows(void) {
     boss_battle_screen_request();
     CHECK(boss_battle_screen_waiting() && boss_battle_screen_waiting() && boss_battle_screen_waiting());
     CHECK(!boss_battle_screen_waiting() && !boss_battle_screen_requested());
+    boss_battle_reset();
+}
+
+/* Walking down the screen meets Fight All, the twenty bosses and Return to tavern, each once and in that order; no boss
+ * is marked pending. Fight All is its own entry, not the first boss: confirming it starts nothing and records nothing. */
+static void test_screen_entries(void) {
+    char text[160], key[160];
+    boss_battle_reset();
+    boss_battle_record_clear();
+    start_guarded();
+    boss_battle_screen_request();
+    CHECK(boss_battle_screen_built() == 1 && boss_battle_screen_offset() == 0);
+    int row = 0, count = 0;
+    BossBattleEntry entry = boss_battle_screen_entry(row);
+    for (;;) {
+        CHECK(entry == (BossBattleEntry)count);
+        boss_battle_screen_label(row, text, sizeof(text));
+        if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL) CHECK(!strcmp(text, "Fight All"));
+        else if (entry != BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN) CHECK(!strncmp(text + 3, kNames[count - 1], 20));
+        boss_battle_screen_help(row, text, sizeof(text));
+        CHECK(!strstr(text, "Pending") && !strstr(text, "confirmed"));
+        for (int i = 1; i <= BOSS_BATTLE_SCREEN_BOSS_ROWS; ++i) {
+            boss_battle_screen_statistic(i, row, text, sizeof(text));
+            CHECK(!strstr(text, "Pending"));
+        }
+        ++count;
+        if (entry == BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN || count > BOSS_BATTLE_ENTRIES) break;
+        if (!boss_battle_screen_move(row, 1)) ++row;
+        entry = boss_battle_screen_entry(row);
+    }
+    CHECK(count == BOSS_BATTLE_ENTRIES && row == BOSS_BATTLE_SCREEN_RETURN_ROW);
+    CHECK(BOSS_BATTLE_ENTRY_FIGHT_ALL == 0 && BOSS_BATTLE_ENTRY_BOSS_20 == BOSS_BATTLE_ENCOUNTERS &&
+          BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN == BOSS_BATTLE_ENCOUNTERS + 1);
+    CHECK(boss_battle_entry_boss(BOSS_BATTLE_ENTRY_FIGHT_ALL) == -1 && boss_battle_entry_boss(BOSS_BATTLE_ENTRY_BOSS_01) == HARPY &&
+          boss_battle_entry_boss(BOSS_BATTLE_ENTRY_BOSS_20) == DEMON_KING &&
+          boss_battle_entry_boss(BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN) == -1);
+
+    /* Fight All highlighted: its own empty statistics, not the first boss's */
+    CHECK(start_playable(HARPY, kArenaPlay) && boss_battle_party_wiped());
+    boss_battle_inn_arrived();
+    boss_battle_take_menu_reopen();
+    boss_battle_screen_request();
+    CHECK(boss_battle_screen_built() == 1 && boss_battle_screen_boss(1) == HARPY);
+    boss_battle_screen_statistic(1, 1, text, sizeof(text));
+    CHECK(!strcmp(text, "Attempts 1"));
+    static const char *const kFightAll[6] = {"Attempts -", "Wins -", "Deaths -", "Quits -", "Win Rate -", "Best Time -"};
+    for (int i = 1; i <= 6; ++i) {
+        boss_battle_screen_statistic(i, 0, text, sizeof(text));
+        CHECK(!strcmp(text, kFightAll[i - 1]));
+        boss_battle_screen_statistic(i, 7, text, sizeof(text)); /* the bottom action keeps Fight All's */
+        CHECK(!strcmp(text, kFightAll[i - 1]));
+    }
+
+    /* confirming Fight All: no boss, no session, no transition, no statistics */
+    BossBattleStats before[BOSS_BATTLE_ENCOUNTERS];
+    boss_battle_character_key(key, sizeof(key));
+    for (int i = 0; i < BOSS_BATTLE_ENCOUNTERS; ++i) before[i] = boss_battle_record_stats(key, boss_battle_encounter(i)->id);
+    int index = -1;
+    CHECK(boss_battle_screen_choose(0, &index) == BOSS_BATTLE_SCREEN_FIGHT_ALL && index == -1);
+    CHECK(boss_battle_fight_all_request() == 0);
+    CHECK(boss_battle_screen_shown() && !boss_battle_screen_take_close_cut() && !boss_battle_session_active());
+    CHECK(boss_battle_start_transition() == BOSS_BATTLE_START_NONE && boss_battle_begin_queued(&index) == 0);
+    for (int i = 0; i < BOSS_BATTLE_ENCOUNTERS; ++i) {
+        const BossBattleStats after = boss_battle_record_stats(key, boss_battle_encounter(i)->id);
+        CHECK(!memcmp(&after, &before[i], sizeof(after)));
+    }
+    CHECK(!boss_battle_screen_closed(&index) && index == -1);
     boss_battle_reset();
 }
 
@@ -1195,8 +1199,9 @@ static void test_screen_statistics(void) {
     boss_battle_reset();
 }
 
-/* The Inn's Boss Battle row opens the native Options page as the screen; a boss chosen there starts from the Inn's next
- * menu frame; Return to tavern and Back leave the Inn menu as it was; the game's own Options stay its own. */
+/* The Inn's Boss Battle row opens the native Options page as the screen; a boss chosen there starts as the Options mode
+ * leaves the page (see test_direct_start), or else from the Inn's next menu frame; Return to tavern and Back leave the
+ * Inn menu as it was; the game's own Options stay its own. */
 static void test_screen_hooks(void) {
     start_guarded();
     use_fake_inn_functions();
@@ -1215,7 +1220,7 @@ static void test_screen_hooks(void) {
     regs = page_regs();
     boss_battle_options_update_hook(&regs);
     CHECK(!regs.skip);
-    CHECK(page_result(3).r15 == (uint64_t)(uintptr_t)fake_body && !page_move(1).skip);
+    CHECK(page_result(3).r15 == (uint64_t)(uintptr_t)fake_body && !page_move(1).skip && !se_calls);
 
     /* Boss Battle row: the native Options row, as the screen */
     set_inn(7, 7, BOSS_BATTLE_INN_ROW, BOSS_BATTLE_INN_ROW);
@@ -1230,13 +1235,14 @@ static void test_screen_hooks(void) {
     for (int i = 1; i <= 6; ++i)
         CHECK(i32_at(fake_rows[i], 0x364) == 1 && !strcmp(text_at(fake_rows[i], 0x800), "") && label_colour_is_plain(i));
     CHECK(i32_at(fake_rows[0], 0x364) == 0 && i32_at(fake_rows[7], 0x364) == 5);
-    CHECK(label_colours_differ(0) && label_colours_differ(7)); /* the title bar and Return to tavern stay the game's */
+    CHECK(label_colours_differ(0) && label_colours_differ(7)); /* Fight All and Return to tavern stay the game's */
     CHECK(frame_calls == 6 && frame_value == 0xe0 && message_value == BOSS_BATTLE_RETURN_TO_TAVERN_RECORD);
     /* the bosses are the selectable value column (right), the statistics the static label column (left) */
     CHECK(!strcmp(text_at(fake_rows[1], 0x5c0), "01 Harpy") && !strcmp(text_at(fake_rows[6], 0x5c0), "06 Pirates"));
     CHECK(!strcmp(text_at(fake_rows[1], 0x380), "Attempts 0") && !strcmp(text_at(fake_rows[6], 0x380), "Best Time -"));
-    CHECK(!strcmp(text_at(fake_rows[0], 0x5c0), "01 Harpy"));
-    CHECK(!strcmp(text_at(fake_window, 0xfa0), ""));
+    char character[160];
+    CHECK(boss_battle_character_text(character, sizeof(character)));
+    CHECK(!strcmp(text_at(fake_rows[0], 0x5c0), "Fight All") && !strcmp(text_at(fake_window, 0xfa0), character));
     /* every boss name in the one plain value colour, played or not */
     for (int i = 1; i <= 6; ++i) CHECK(i32_at(fake_rows[i], 0x5c0 + 0x110) == 0x7fffffff);
 
@@ -1246,7 +1252,8 @@ static void test_screen_hooks(void) {
     CHECK(regs.skip && regs.rax == 0);
     set_page_cursor(3);
     regs = page_result(-1);
-    CHECK(regs.r15 == (uint64_t)(uintptr_t)fake_body && !strcmp(text_at(fake_rows[0], 0x5c0), "03 Doom Beetle"));
+    CHECK(regs.r15 == (uint64_t)(uintptr_t)fake_body && !strcmp(text_at(fake_rows[0], 0x5c0), "Fight All") &&
+          !strcmp(text_at(fake_rows[3], 0x380), "Deaths 0"));
     set_page_cursor(6);
     regs = page_move(1);
     CHECK(regs.skip && regs.rax == 1 && boss_battle_screen_offset() == 1);
@@ -1256,23 +1263,41 @@ static void test_screen_hooks(void) {
     set_page_cursor(7);
     page_result(-1);
     CHECK(!strcmp(text_at(fake_window, 0xfa0), "Return to Dragon's Haven Inn."));
+    /* the list sounds the cursor (scrolled or moved) and Back itself */
+    page_result(-2);
+    CHECK(!se_calls);
 
-    /* Return to tavern closes the page; the Inn's next menu frame starts nothing */
+    /* Fight All: a distinct entry with its help, confirmed with the game's menu sound once; the page stays open and
+     * nothing starts */
+    set_page_cursor(0);
+    page_result(-1);
+    CHECK(!strcmp(text_at(fake_window, 0xfa0), "Fight every boss in sequence.") &&
+          !strcmp(text_at(fake_rows[1], 0x380), "Attempts -") && !strcmp(text_at(fake_rows[6], 0x380), "Best Time -"));
+    regs = page_result(0);
+    CHECK(regs.r15 == (uint64_t)(uintptr_t)fake_body && se_calls == 1 && se_value == BOSS_BATTLE_SE_DECIDE &&
+          se_list == (uint64_t)(uintptr_t)fake_body);
+    CHECK(boss_battle_screen_shown() && !boss_battle_session_active() &&
+          boss_battle_start_transition() == BOSS_BATTLE_START_NONE);
+    page_result(-1);
+    CHECK(se_calls == 1);
+
+    /* Return to tavern closes the page with the game's menu sound once; the Inn's next menu frame starts nothing */
     regs = page_result(7);
-    CHECK(regs.r15 == 1);
+    CHECK(regs.r15 == 1 && se_calls == 2 && se_value == BOSS_BATTLE_SE_DECIDE);
     set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
     regs = result_frame();
     CHECK(regs.skip && (uint32_t)regs.rax == 0xffffffffu && !boss_battle_screen_shown() && !boss_battle_session_active());
     CHECK(!guard_log[0]);
 
-    /* a boss closes the page and starts from the Inn's next menu frame (no game server here: put back at once) */
+    /* fallback: a page still open at the Inn's next menu frame starts its boss there (no game server here: put back at once) */
     set_inn(7, 7, BOSS_BATTLE_INN_ROW, BOSS_BATTLE_INN_ROW);
     result_frame();
     fake_options_page(8);
     build_page();
     set_page_cursor(2);
+    se_calls = 0;
     regs = page_result(2);
-    CHECK(regs.r15 == 1);
+    CHECK(regs.r15 == 1 && se_calls == 1 && se_value == BOSS_BATTLE_SE_DECIDE); /* a boss: the menu sound once */
     set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
     regs = result_frame();
     CHECK(regs.skip && !strcmp(guard_log, "PSBR") && !boss_battle_session_active() && boss_battle_menu_cursor() == 1);
@@ -1289,7 +1314,7 @@ static void test_screen_hooks(void) {
     fake_options_page(8);
     build_page();
     CHECK(cursor_row == 6 && !strcmp(text_at(fake_rows[6], 0x5c0), "10 Medusa") &&
-          !strcmp(text_at(fake_rows[0], 0x5c0), "10 Medusa"));
+          !strcmp(text_at(fake_rows[0], 0x5c0), "Fight All"));
     regs = page_result(-2); /* Back: the game closes the page */
     set_inn(7, 7, -1, 0);
     result_frame();
@@ -1312,6 +1337,471 @@ static void test_screen_hooks(void) {
     boss_battle_set_inn_help_table(0);
     boss_battle_set_screen_functions(NULL);
     boss_battle_reset();
+}
+
+/* ---- the arena and the Boss Battle screen without a visible Inn menu, the Inn's lifecycle untouched ---- */
+
+enum { INN_ACT = 0x103, INN_STEP = 0x104, INN_SHOWN = 0x3989, FADE_BLACK = (int)0xff000000u, FADE_LAYER = 0x2a };
+
+static uint8_t game_manager[0x200], game_scene[0x200], game_context[0x100], fader_owner[0x100], scene_class;
+static struct {
+    int calls, party_sends_before, stage;
+    char round[64], guard_before[32];
+} arena_request;
+static struct {
+    int calls, colour[8], frames[8], layer[8], requests_before[8];
+} fades;
+
+static void GUEST_HOOK_ABI fake_scene_request(uint64_t server, const char *round, int stage, int entry,
+                                              const char *stage_name, const uint8_t *route_flag, int force, int code,
+                                              int slot, int option, const void *places) {
+    (void)server, (void)entry, (void)stage_name, (void)route_flag, (void)force, (void)code, (void)slot, (void)option,
+        (void)places;
+    ++arena_request.calls;
+    arena_request.party_sends_before = party_sends;
+    arena_request.stage = stage;
+    snprintf(arena_request.round, sizeof(arena_request.round), "%s", round);
+    snprintf(arena_request.guard_before, sizeof(arena_request.guard_before), "%s", guard_log);
+}
+
+static uint64_t GUEST_HOOK_ABI fake_get_fader(uint64_t owner) {
+    return owner == (uint64_t)(uintptr_t)fader_owner ? owner + 0x78 : 0;
+}
+
+static void GUEST_HOOK_ABI fake_fade(uint64_t fader, uint32_t colour, int frames, int layer) {
+    CHECK(fader == (uint64_t)(uintptr_t)fader_owner + 0x78);
+    if (fades.calls < 8) {
+        fades.colour[fades.calls] = (int)colour;
+        fades.frames[fades.calls] = frames;
+        fades.layer[fades.calls] = layer;
+        fades.requests_before[fades.calls] = arena_request.calls;
+    }
+    ++fades.calls;
+}
+
+static void use_fake_game(void) {
+    memset(game_manager, 0, sizeof(game_manager));
+    memset(game_scene, 0, sizeof(game_scene));
+    memset(game_context, 0, sizeof(game_context));
+    memset(&arena_request, 0, sizeof(arena_request));
+    memset(&fades, 0, sizeof(fades));
+    put_pointer(fake_inn_context + HYDELAND_CONTEXT_MANAGER, game_manager);
+    put_pointer(game_manager + HYDELAND_MANAGER_SCENE, game_scene);
+    put_pointer(game_manager + 0xd8, fader_owner);
+    put_pointer(game_scene, &scene_class);
+    put_pointer(game_scene + 0x90, game_context);
+    put_pointer(game_context + 0x88, game_scene);
+    put_pointer(game_context + 0x80, game_context);
+    boss_battle_set_scene((uint64_t)(uintptr_t)&scene_class, fake_scene_request);
+    const BossBattleFadeFunctions functions = {fake_get_fader, fake_fade};
+    boss_battle_set_fade_functions(&functions);
+}
+
+static void release_fake_game(void) {
+    memset(fake_inn_context + HYDELAND_CONTEXT_MANAGER, 0, 8);
+    boss_battle_set_scene(0, NULL);
+    boss_battle_set_fade_functions(NULL);
+    boss_battle_set_screen_functions(NULL);
+    boss_battle_reset();
+}
+
+/* The Inn's Boss Battle row opened the page as the screen, with the cursor on `row`. */
+static void open_boss_screen(int row) {
+    set_inn(7, 7, BOSS_BATTLE_INN_ROW, BOSS_BATTLE_INN_ROW);
+    result_frame();
+    fake_options_page(8);
+    build_page();
+    set_page_cursor(row);
+}
+
+/* The Options mode's first-frame check after the page closed, with the Inn's own bytes recorded around it. */
+static GuestRegs options_leave_frame(void) {
+    uint8_t before[0x200];
+    memcpy(before, fake_inn + INN_SHOWN - 0x100, sizeof(before));
+    GuestRegs regs = inn_regs();
+    boss_battle_options_leave_hook(&regs);
+    CHECK(!regs.skip && !memcmp(before, fake_inn + INN_SHOWN - 0x100, sizeof(before))); /* the mode runs as native */
+    return regs;
+}
+
+static GuestRegs arrival_fade(void) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    boss_battle_arrival_fade_hook(&regs);
+    CHECK(!regs.skip);
+    return regs;
+}
+
+/* A frame of the page window's input act, with the Options mode in `step`. */
+static void page_tick(int step) {
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = (uint8_t)step;
+    GuestRegs regs = page_regs();
+    boss_battle_options_update_hook(&regs);
+}
+
+static void inn_arrives(void) {
+    GuestRegs regs = inn_regs();
+    boss_battle_inn_flushed_hook(&regs);
+}
+
+/* Confirming a boss fades the scene fader to black while the page closes natively; once the Options mode found the page
+ * closed it cuts to black as the Inn's Leave does; the party and the arena request then go out from the Inn's next menu
+ * frame, as before. */
+static void test_direct_start(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    use_fake_game();
+    open_boss_screen(3);
+    CHECK(!fades.calls);
+    GuestRegs page = page_result(3);
+    CHECK(page.r15 == 1 && !boss_battle_session_active() && !arena_request.calls && !party_sends);
+    CHECK(fades.calls == 1 && fades.colour[0] == FADE_BLACK && fades.frames[0] == 30 && fades.layer[0] == FADE_LAYER);
+
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = 3;
+    options_leave_frame();
+    CHECK(fades.calls == 2 && fades.colour[1] == FADE_BLACK && fades.frames[1] == 0 && fades.layer[1] == FADE_LAYER);
+    CHECK(!boss_battle_session_active() && !arena_request.calls && !party_sends && boss_battle_screen_shown());
+    options_leave_frame();
+    CHECK(fades.calls == 2); /* once */
+
+    set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
+    fake_inn[INN_ACT] = 0xa4;
+    fake_inn[INN_STEP] = 1;
+    GuestRegs menu = result_frame();
+    CHECK(menu.skip && (uint32_t)menu.rax == 0xffffffffu);
+    CHECK(boss_battle_session_active() && boss_battle_state() == BOSS_BATTLE_TRAVELLING && boss_battle_menu_cursor() == 2);
+    CHECK(party_sends == 1 && arena_request.calls == 1 && arena_request.party_sends_before == 1);
+    CHECK(!strcmp(party_guard, "PS") && !strcmp(arena_request.guard_before, "PS")); /* isolation and snapshot first */
+    CHECK(!strcmp(arena_request.round, "round/MoldyDungeon.brb") && arena_request.stage == 10);
+    CHECK(!boss_battle_screen_shown() && !boss_battle_screen_requested() && fades.calls == 2);
+
+    /* travel: the arena's own fades take over; the page is gone before the arena loads */
+    const BossBattleScene from = {2, 0, 4, 2, 10, 0}, loading = {4, 3, 4, 2, 10, 0}, arena = {2, 0, 4, 10, -1, 0};
+    frames(probe(from, 0, 0, 0), 1);
+    frames(probe(loading, 0, 0, 0), 3);
+    frames(probe(arena, 1, 1, 0), 1);
+    CHECK(boss_battle_state() == BOSS_BATTLE_INITIALIZING && !boss_battle_screen_shown() && !boss_battle_screen_requested());
+    frames(probe(arena, 1, 1, 1), 1);
+    CHECK(boss_battle_state() == BOSS_BATTLE_FIGHTING && boss_battle_milestones() & BOSS_BATTLE_PLAYABLE);
+    CHECK(fades.calls == 2 && arena_request.calls == 1);
+    release_fake_game();
+}
+
+static GuestRegs native_fade(uint64_t fader, uint32_t colour, int frames, int layer) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = fader;
+    regs.rsi = colour;
+    regs.rdx = (uint32_t)frames;
+    regs.rcx = (uint32_t)layer;
+    boss_battle_fade_hook(&regs);
+    CHECK(!regs.skip);
+    return regs;
+}
+
+static uint64_t scene_fader_address(void) {
+    return (uint64_t)(uintptr_t)fader_owner + 0x78;
+}
+
+static GuestRegs help_line(int show) {
+    GuestRegs regs = inn_regs();
+    regs.rdx = (uint32_t)show;
+    boss_battle_inn_help_line_hook(&regs);
+    CHECK(!regs.skip);
+    return regs;
+}
+
+static int native_fade_passes(void) {
+    const GuestRegs regs = native_fade(scene_fader_address(), 0, 30, 0x27);
+    return regs.rsi == 0 && regs.rdx == 30 && regs.rcx == 0x27;
+}
+
+/* Back and Return to tavern never hold black; a confirmed boss holds the scene fader black on the top layer against every
+ * native fade of the travel, closes the Inn help line instead of showing it, and leaves other faders alone. */
+static void test_start_black_hold(void) {
+    for (int back = 0; back < 2; ++back) {
+        start_guarded();
+        use_fake_inn_functions();
+        use_fake_screen_functions();
+        use_fake_game();
+        open_boss_screen(back ? 3 : 7);
+        page_result(back ? -2 : 7);
+        options_leave_frame();
+        CHECK(boss_battle_start_transition() == BOSS_BATTLE_START_NONE && !fades.calls);
+        CHECK(native_fade_passes() && help_line(1).rdx == 1);
+        release_fake_game();
+    }
+
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    use_fake_game();
+    open_boss_screen(3);
+    page_result(3);
+    CHECK(boss_battle_start_transition() == BOSS_BATTLE_START_FADING && fades.calls == 1);
+    CHECK(help_line(1).rdx == 0 && help_line(0).rdx == 0);
+    GuestRegs held = native_fade(scene_fader_address(), 0, 30, 0x27);
+    CHECK(held.rsi == (uint32_t)FADE_BLACK && held.rdx == 0 && held.rcx == FADE_LAYER);
+    const GuestRegs other = native_fade(0x1234, 0, 30, 0x27);
+    CHECK(other.rsi == 0 && other.rdx == 30 && other.rcx == 0x27);
+
+    options_leave_frame();
+    CHECK(boss_battle_start_transition() == BOSS_BATTLE_START_HELD && fades.calls == 2);
+    set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
+    result_frame();
+    CHECK(boss_battle_session_active() && party_sends == 1 && arena_request.calls == 1);
+    CHECK(boss_battle_start_transition() == BOSS_BATTLE_START_HELD && help_line(1).rdx == 0);
+    /* the travel's own fade-out and fade-in stay black */
+    held = native_fade(scene_fader_address(), (uint32_t)FADE_BLACK, 30, 0x27);
+    CHECK(held.rsi == (uint32_t)FADE_BLACK && held.rdx == 0 && held.rcx == FADE_LAYER);
+    held = native_fade(scene_fader_address(), 0, 30, 0x27);
+    CHECK(held.rsi == (uint32_t)FADE_BLACK && held.rdx == 0 && held.rcx == FADE_LAYER);
+    CHECK(fades.calls == 2);
+    release_fake_game();
+}
+
+/* The black ends once, on the first frame the arena is played after the travel: not at round load, not at stage load,
+ * not while the travel's act runs, not without the player. */
+static void test_start_reveal(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    use_fake_game();
+    open_boss_screen(3);
+    page_result(3);
+    options_leave_frame();
+    set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
+    result_frame();
+    const BossBattleScene from = {2, 0, 4, 2, 10, 0}, loading = {4, 3, 4, 2, 10, 0}, loaded = {4, 6, 4, 10, -1, 0},
+                          arena = {2, 0, 4, 10, -1, 0};
+    BossBattleProbe p = probe(from, 0, 0, 0);
+    frames(p, 1);
+    CHECK(!boss_battle_start_reveal_due(&p));
+    p = probe(loading, 0, 0, 0);
+    frames(p, 3);
+    CHECK(!boss_battle_start_reveal_due(&p));
+    p = probe(loaded, 1, 1, 0);
+    frames(p, 1);
+    CHECK(boss_battle_state() == BOSS_BATTLE_INITIALIZING && !boss_battle_screen_shown() && !boss_battle_screen_requested());
+    CHECK(!boss_battle_start_reveal_due(&p)); /* the stage is loaded, the travel still runs */
+    p = probe(arena, 0, 0, 0);
+    CHECK(!boss_battle_start_reveal_due(&p)); /* no player yet */
+    p = probe(arena, 1, 1, 0);
+    CHECK(boss_battle_start_reveal_due(&p) && boss_battle_start_transition() == BOSS_BATTLE_START_DONE);
+    CHECK(!boss_battle_start_reveal_due(&p));
+    CHECK(native_fade_passes() && help_line(1).rdx == 1);
+    frames(probe(arena, 1, 1, 1), 1);
+    CHECK(boss_battle_state() == BOSS_BATTLE_FIGHTING);
+
+    /* the return ends the transition for good */
+    CHECK(boss_battle_quit_key(0, 0, 0));
+    frames(probe(arena, 1, 1, 1), 1);
+    boss_battle_inn_requested();
+    inn_arrives();
+    CHECK(boss_battle_start_transition() == BOSS_BATTLE_START_NONE && native_fade_passes());
+    release_fake_game();
+}
+
+/* A request the game would not take ends the session at once and fades back to the Inn menu. */
+static void test_direct_start_refused(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    use_fake_game();
+    memset(game_context + 0x80, 0, 8); /* no game server */
+    open_boss_screen(3);
+    page_result(3);
+    options_leave_frame();
+    set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
+    result_frame();
+    CHECK(!boss_battle_session_active() && !arena_request.calls && !strcmp(guard_log, "PSBR"));
+    CHECK(fades.calls == 3 && fades.colour[2] == 0 && fades.frames[2] == 30);
+    release_fake_game();
+}
+
+/* Return to tavern and Back close the page for the Inn menu: no fade, nothing starts, the menu is shown as native. */
+static void test_intentional_returns(void) {
+    for (int back = 0; back < 2; ++back) {
+        start_guarded();
+        use_fake_inn_functions();
+        use_fake_screen_functions();
+        use_fake_game();
+        open_boss_screen(back ? 3 : 7);
+        const GuestRegs page = page_result(back ? -2 : 7);
+        CHECK((page.r15 == 1) == !back);
+        options_leave_frame();
+        set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
+        const GuestRegs menu = result_frame();
+        CHECK(menu.skip && (uint32_t)menu.rax == 0xffffffffu && !boss_battle_screen_shown());
+        CHECK(!boss_battle_session_active() && !arena_request.calls && !party_sends && !guard_log[0] && !fades.calls);
+        CHECK(!boss_battle_menu_reopen_pending() && !boss_battle_screen_requested());
+        const GuestRegs arrival = arrival_fade();
+        CHECK(arrival.rsi == 0 && !fades.calls);
+        release_fake_game();
+    }
+}
+
+typedef enum { ENDING_WIN, ENDING_DEATH, ENDING_QUIT, ENDING_CANCEL } Ending;
+
+static void fight_and_return(int boss, BossBattleScene arena, Ending ending) {
+    if (ending == ENDING_CANCEL) {
+        CHECK(start_session(boss));
+        reach_arena();
+        frames(probe(kArenaPlay, 1, 1, 0), 10);
+        CHECK(boss_battle_request_quit(BOSS_BATTLE_QUIT_MENU) == 1);
+        CHECK(frames(probe(kArenaPlay, 1, 1, 0), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+        CHECK(boss_battle_outcome() == BOSS_BATTLE_OUTCOME_CANCELLED);
+        boss_battle_inn_requested();
+        return;
+    }
+    CHECK(start_playable(boss, arena));
+    switch (ending) {
+    case ENDING_WIN:
+        boss_battle_boss_cleared(1);
+        CHECK(!boss_battle_skip_results_screen() && boss_battle_results_level_up_done()); /* experience and level-up run */
+        CHECK(boss_battle_town_return());
+        break;
+    case ENDING_DEATH:
+        CHECK(boss_battle_party_wiped() == 1 && boss_battle_outcome() == BOSS_BATTLE_OUTCOME_DEATH);
+        CHECK(boss_battle_skip_results_screen());
+        boss_battle_inn_requested();
+        break;
+    default:
+        CHECK(boss_battle_quit_key(0, 0, 0));
+        CHECK(frames(probe(arena, 1, 1, 1), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+        CHECK(boss_battle_outcome() == BOSS_BATTLE_OUTCOME_QUIT && boss_battle_skip_results_screen());
+        boss_battle_inn_requested();
+        break;
+    }
+}
+
+/* Win, Death, Quit and a cancel before Playable all come back to the Inn: the campaign is put back as the Inn is built,
+ * the arrival keeps the scene black, the Inn's menu frame opens the page on the same boss with its new statistics, and
+ * the scene fades in once the page is built. */
+static void test_direct_reopen(void) {
+    static const struct {
+        int boss;
+        BossBattleScene arena;
+        Ending ending;
+    } kReturns[] = {
+        {MEDUSA, {2, 0, 3, 15, -1, 0}, ENDING_WIN},
+        {2, {2, 0, 4, 10, -1, 0}, ENDING_DEATH},
+        {HARPY, {2, 0, 3, 8, -1, 0}, ENDING_QUIT},
+        {HARPY, {2, 0, 3, 8, -1, 0}, ENDING_CANCEL},
+    };
+    for (size_t i = 0; i < sizeof(kReturns) / sizeof(*kReturns); ++i) {
+        const int boss = kReturns[i].boss;
+        start_guarded();
+        use_fake_inn_functions();
+        use_fake_screen_functions();
+        use_fake_game();
+        const BossBattleStats before = stats_of(boss);
+        fight_and_return(boss, kReturns[i].arena, kReturns[i].ending);
+        const BossBattleStats after = stats_of(boss);
+        CHECK(boss_battle_session_active() && !boss_battle_menu_reopen_pending() && !strcmp(guard_log, "PS"));
+
+        inn_arrives();
+        CHECK(!strcmp(guard_log, "PSBR") && !boss_battle_session_active() && boss_battle_menu_reopen_pending());
+        GuestRegs arrival = arrival_fade();
+        CHECK(arrival.rsi == (uint32_t)FADE_BLACK && arrival.rcx == FADE_LAYER && !fades.calls);
+
+        set_inn(7, 7, -1, 0);
+        GuestRegs menu = result_frame();
+        CHECK(menu.skip && menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW && boss_battle_screen_requested());
+        CHECK(!boss_battle_menu_reopen_pending() && boss_battle_menu_cursor() == boss && !fades.calls);
+        set_inn(7, 7, -1, 0);
+        result_frame(); /* the Options mode has not built the page yet: still black */
+        CHECK(!fades.calls);
+
+        boss_battle_set_character("Zak", "Fighter", 1);
+        fake_options_page(8);
+        build_page();
+        CHECK(!fades.calls); /* constructed is not shown */
+        page_tick(0);
+        CHECK(!fades.calls); /* the Options mode still opening */
+        page_tick(1);
+        CHECK(fades.calls == 1 && fades.colour[0] == 0 && fades.frames[0] == 30 && fades.layer[0] == FADE_LAYER);
+        char label[64], expected[64];
+        boss_battle_label(boss, label, sizeof(label));
+        CHECK(boss_battle_screen_shown() && !strcmp(text_at(fake_rows[0], 0x5c0), "Fight All"));
+        CHECK(!strcmp(text_at(fake_rows[cursor_row], 0x5c0), label));
+        snprintf(expected, sizeof(expected), "Attempts %u", after.attempts);
+        CHECK(!strcmp(text_at(fake_rows[1], 0x380), expected));
+        snprintf(expected, sizeof(expected), "Wins %u", after.wins);
+        CHECK(!strcmp(text_at(fake_rows[2], 0x380), expected));
+        snprintf(expected, sizeof(expected), "Deaths %u", after.deaths);
+        CHECK(!strcmp(text_at(fake_rows[3], 0x380), expected));
+        snprintf(expected, sizeof(expected), "Quits %u", after.quits);
+        CHECK(!strcmp(text_at(fake_rows[4], 0x380), expected));
+        CHECK(after.attempts == before.attempts + (kReturns[i].ending != ENDING_CANCEL) &&
+              after.wins == before.wins + (kReturns[i].ending == ENDING_WIN) &&
+              after.deaths == before.deaths + (kReturns[i].ending == ENDING_DEATH) &&
+              after.quits == before.quits + (kReturns[i].ending == ENDING_QUIT));
+        page_tick(1);
+        CHECK(fades.calls == 1); /* once */
+        release_fake_game();
+    }
+}
+
+/* A failed restore never reopens nor holds black; a held black always ends when no Boss Battle page will show. */
+static void test_reopen_conditions(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    use_fake_game();
+    restore_result = 0;
+    CHECK(start_session(HARPY));
+    inn_arrives();
+    CHECK(!boss_battle_menu_reopen_pending() && arrival_fade().rsi == 0);
+    char text[192];
+    CHECK(boss_battle_take_notice(text, sizeof(text)));
+
+    /* Boss Battle switched off before the Inn menu: no Boss Battle row, the scene fades in at the menu frame */
+    start_guarded();
+    use_fake_game();
+    CHECK(start_session(HARPY));
+    inn_arrives();
+    CHECK(arrival_fade().rsi == (uint32_t)FADE_BLACK);
+    set_inn(6, 6, -1, 0);
+    result_frame();
+    CHECK(fades.calls == 1 && fades.colour[0] == 0);
+    set_inn(6, 6, -1, 0);
+    result_frame();
+    CHECK(fades.calls == 1);
+
+    /* the page is not the expected one: it stays the game's Options, and the scene fades in */
+    start_guarded();
+    use_fake_game();
+    CHECK(start_session(HARPY));
+    inn_arrives();
+    arrival_fade();
+    set_inn(7, 7, -1, 0);
+    result_frame();
+    fake_options_page(7);
+    build_page();
+    CHECK(!boss_battle_screen_shown() && fades.calls == 1 && fades.colour[0] == 0);
+    release_fake_game();
+}
+
+/* Outside Boss Battle the Inn, the arrival and the game's own Options page run exactly as the game has them. */
+static void test_normal_inn_untouched(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    use_fake_game();
+    set_inn(7, 7, -1, 0);
+    options_leave_frame();
+    CHECK(arrival_fade().rsi == 0);
+    fake_options_page(8);
+    build_page();
+    CHECK(!boss_battle_screen_shown() && i32_at(fake_body, 0xc50) == 1);
+    options_leave_frame();
+    const GuestRegs menu = result_frame();
+    CHECK((int32_t)menu.rax == -1 && !fades.calls && !guard_log[0] && !arena_request.calls && !party_sends);
+    release_fake_game();
 }
 
 static void test_inn_help(void) {
@@ -1495,6 +1985,605 @@ static void test_campaign_session(void) {
     CHECK(!boss_battle_session_active() && boss_battle_campaign_save_source(live) != live && !boss_battle_take_menu_reopen());
     boss_battle_reset();
     boss_battle_campaign_reset();
+}
+
+/* ---- character progression: shared with the campaign, the world kept apart ---- */
+
+enum { RECORD_AT = 0x12bc0, WORLD_FLAG = 0x70, SAVE_SLOTS = 0x50 };
+static uint8_t fake_saver[0x100], *fake_disk;
+static int commits, save_requests;
+
+static uint8_t *campaign_record(void) {
+    return fake_play_data + RECORD_AT;
+}
+
+static const uint8_t *GUEST_HOOK_ABI fake_lead_selector(uint64_t facade) {
+    (void)facade;
+    return campaign_record();
+}
+
+static void GUEST_HOOK_ABI fake_record_level(uint64_t record, uint32_t level) {
+    ((uint8_t *)(uintptr_t)record)[0x26] = (uint8_t)level;
+}
+static int GUEST_HOOK_ABI fake_level_pattern(uint64_t record) {
+    return ((const uint8_t *)(uintptr_t)record)[0x27];
+}
+/* the level's stats, as a marker the tests can tell apart */
+static void GUEST_HOOK_ABI fake_write_stats(uint64_t record, int pattern, int unused, int level, int unused2) {
+    (void)pattern, (void)unused, (void)unused2;
+    put_u32((uint8_t *)(uintptr_t)record + 0x0c, 1000u + (uint32_t)level);
+    put_u32((uint8_t *)(uintptr_t)record + 0x10, 1000u + (uint32_t)level);
+}
+
+/* As the game's commit and save act: the user's play data into the save's current slot, then the slot to disk. */
+static void GUEST_HOOK_ABI fake_commit(uint64_t save) {
+    uint8_t *object = (uint8_t *)(uintptr_t)save;
+    ++commits;
+    if (object[0x20eb14] > 2) return;
+    memcpy(object + SAVE_SLOTS + (size_t)object[0x20eb14] * BOSS_BATTLE_PLAY_DATA_BYTES,
+           (const void *)(uintptr_t)fake_play_table[object[0x20eb15]], BOSS_BATTLE_PLAY_DATA_BYTES);
+}
+static uint8_t GUEST_HOOK_ABI fake_save_request(uint64_t saver) {
+    uint8_t *object = (uint8_t *)(uintptr_t)saver;
+    if (object[0x5b]) return 0;
+    ++save_requests;
+    object[0x5b] = 1;
+    put_u32(object + 0x70, 0);
+    memcpy(fake_disk, fake_save + SAVE_SLOTS, BOSS_BATTLE_PLAY_DATA_BYTES);
+    return 1;
+}
+
+static int32_t record_i32(int offset) {
+    return i32_at(campaign_record(), offset);
+}
+static int record_level(void) {
+    return campaign_record()[0x26];
+}
+static int record_skill_points(void) {
+    int16_t value;
+    memcpy(&value, campaign_record() + 0x24, sizeof(value));
+    return value;
+}
+
+/* A campaign with Zak the Fighter at `level` (from 0) in its play data, the Inn's game manager holding the save and the
+ * save manager, and the real campaign snapshot. */
+static void progression_campaign(int level, int32_t xp_progress, int16_t skill_points) {
+    fake_campaign();
+    if (!fake_disk) fake_disk = calloc(1, BOSS_BATTLE_PLAY_DATA_BYTES);
+    fake_save[0x20eb14] = 0;
+    uint8_t *record = campaign_record();
+    put_u32(record + 0x04, 0);
+    put_u32(record + 0x08, (uint32_t)xp_progress);
+    put_u32(record + 0x0c, 1000u + (uint32_t)level);
+    put_u32(record + 0x10, 1000u + (uint32_t)level);
+    memcpy(record + 0x24, &skill_points, sizeof(skill_points));
+    record[0x26] = (uint8_t)level;
+    record[0x27] = 0;
+    memcpy(record + 0x138, "Zak\0\0\0\0\0", 8);
+    start_guarded();
+    boss_battle_set_memory_guard(boss_battle_campaign_snapshot, boss_battle_campaign_restore);
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    use_fake_game();
+    put_pointer(game_manager + 0xe0, fake_saver);
+    put_pointer(game_manager + 0xe8, fake_save);
+    memset(fake_saver, 0, sizeof(fake_saver));
+    boss_battle_set_lead_selector(fake_lead_selector);
+    const BossBattleLevelFunctions levels = {fake_record_level, fake_level_pattern, fake_write_stats};
+    boss_battle_set_level_functions(&levels);
+    const BossBattleSaveFunctions saves = {fake_commit, fake_save_request};
+    boss_battle_set_save_functions(&saves);
+    commits = save_requests = 0;
+}
+
+static void release_progression(void) {
+    boss_battle_set_lead_selector(NULL);
+    boss_battle_set_level_functions(NULL);
+    boss_battle_set_save_functions(NULL);
+    release_fake_game();
+    boss_battle_campaign_reset();
+}
+
+/* The page opened from the Inn's Boss Battle row. */
+static void open_page(void) {
+    open_boss_screen(1);
+}
+
+/* The page the Inn opens again after a fight: its menu frame takes the reopen, then the Options page is built. */
+static void reopened_page(void) {
+    set_inn(7, 7, -1, 0);
+    result_frame();
+    fake_options_page(8);
+    build_page();
+    set_page_cursor(1);
+}
+
+/* A frame of the shown page. */
+static void page_frame(void) {
+    GuestRegs regs = page_regs();
+    boss_battle_options_update_hook(&regs);
+}
+
+/* Harpy confirmed on the shown page, and the Inn's next menu frame starts her fight. */
+static void start_harpy_from_page(void) {
+    CHECK(boss_battle_screen_shown() && boss_battle_screen_boss(1) == HARPY);
+    page_result(1);
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = 3;
+    options_leave_frame();
+    set_inn(7, 7, -1, BOSS_BATTLE_INN_ROW);
+    fake_inn[INN_ACT] = 0xa4;
+    fake_inn[INN_STEP] = 1;
+    result_frame();
+    CHECK(boss_battle_session_active() && boss_battle_campaign_held());
+}
+
+static void reach_harpy_arena(int playable) {
+    BossBattleScene loading = kArenaPlay;
+    loading.act = 4;
+    loading.next_stage = kArenaPlay.stage;
+    frames(probe(kInnScene, 0, 0, 0), 3);
+    frames(probe(loading, 0, 0, 0), 3);
+    loading.next_stage = -1;
+    frames(probe(loading, 0, 0, 0), 1);
+    frames(probe(kArenaPlay, 1, 1, playable), 1);
+}
+
+/* The fight's way back: the Inn requested, then the Inn constructor's hook (party records back in the play data). */
+static void arrive_at_inn(void) {
+    CHECK(frames(probe(kArenaPlay, 1, 1, 0), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+    boss_battle_inn_requested();
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    boss_battle_inn_flushed_hook(&regs);
+    CHECK(!boss_battle_session_active() && !boss_battle_campaign_held());
+}
+
+/* What the stage and the native result leave behind in a fight: world progress, transient state, and a level-up. */
+static void fight_changes_world(void) {
+    memset(fake_play_data + WORLD_FLAG, 0x5a, 16);            /* a boss-clear / story flag in the play data */
+    memset(fake_save + SAVE_SLOTS + WORLD_FLAG, 0x5b, 16);    /* and in the save's slot */
+    put_u32(campaign_record() + 0x10, 7);                     /* HP after the fight */
+    campaign_record()[0x30] = 0x99;                           /* other record state of the fight */
+}
+
+static void native_level_up(int levels, int32_t progress_after, int32_t pool_after) {
+    uint8_t *record = campaign_record();
+    put_u32(record + 0x04, (uint32_t)pool_after);
+    put_u32(record + 0x08, (uint32_t)progress_after);
+    for (int i = 0; i < levels; ++i) {
+        const int16_t skill_points = (int16_t)(record_skill_points() + 1);
+        memcpy(record + 0x24, &skill_points, sizeof(skill_points));
+        fake_record_level((uint64_t)(uintptr_t)record, (uint32_t)record[0x26] + 1);
+        fake_write_stats((uint64_t)(uintptr_t)record, 0, 0, record[0x26], 0);
+    }
+}
+
+static void finish_save(int error) {
+    fake_saver[0x5b] = 0;
+    put_u32(fake_saver + 0x70, (uint32_t)error);
+    page_frame();
+}
+
+static void test_character_progression(void) {
+    char text[160];
+
+    /* campaign level 1 enters at level 1; a Win's native level-up to 2 survives the campaign restore */
+    progression_campaign(0, 40, 0);
+    open_page();
+    CHECK(boss_battle_character_text(text, sizeof(text)) && !strcmp(text, "Zak - Fighter, level 1"));
+    start_harpy_from_page();
+    CHECK(record_level() == 0 && record_i32(0x08) == 40); /* the fight's character is the campaign's */
+    reach_harpy_arena(1);
+    CHECK(boss_battle_state() == BOSS_BATTLE_FIGHTING);
+    fight_changes_world();
+    boss_battle_boss_cleared(1);
+    native_level_up(1, 15, 0);
+    arrive_at_inn();
+    CHECK(record_level() == 1 && record_i32(0x08) == 15 && record_i32(0x04) == 0 && record_skill_points() == 1);
+    CHECK(record_i32(0x0c) == 1001 && record_i32(0x10) == 1001); /* level 2's stats, not the fight's HP */
+    CHECK(campaign_record()[0x30] == 0x22);                       /* nothing else of the record */
+    CHECK(fake_play_data[WORLD_FLAG] == 0x22 && fake_save[SAVE_SLOTS + WORLD_FLAG] == 0x11); /* world put back */
+    CHECK(boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_PENDING && !commits);
+    CHECK(stats_of(HARPY).wins >= 1);
+
+    /* the reopened page reads the character again; the game's own save takes the merged character to disk */
+    reopened_page();
+    CHECK(boss_battle_character_text(text, sizeof(text)) && !strcmp(text, "Zak - Fighter, level 2"));
+    CHECK(commits == 1 && save_requests == 1 && boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_RUNNING);
+    CHECK(fake_save[SAVE_SLOTS + RECORD_AT + 0x26] == 1 && fake_save[SAVE_SLOTS + WORLD_FLAG] == 0x22);
+    page_frame();
+    CHECK(save_requests == 1); /* the save act still runs */
+    finish_save(0);
+    CHECK(boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE && save_requests == 1);
+
+    /* a restart loads the saved slot: still level 2, world as the campaign had it */
+    memset(fake_play_data, 0, BOSS_BATTLE_PLAY_DATA_BYTES);
+    memcpy(fake_play_data, fake_disk, BOSS_BATTLE_PLAY_DATA_BYTES);
+    CHECK(record_level() == 1 && record_skill_points() == 1 && record_i32(0x08) == 15 && fake_play_data[WORLD_FLAG] == 0x22);
+
+    /* the second fight starts at level 2; a Death gives nothing and takes nothing */
+    const BossBattleStats before_death = stats_of(HARPY);
+    start_harpy_from_page();
+    CHECK(record_level() == 1 && record_i32(0x08) == 15);
+    reach_harpy_arena(1);
+    fight_changes_world();
+    put_u32(campaign_record() + 0x08, 99); /* a change without a Win */
+    CHECK(boss_battle_party_wiped());
+    arrive_at_inn();
+    CHECK(record_level() == 1 && record_i32(0x08) == 15 && record_skill_points() == 1 && fake_play_data[WORLD_FLAG] == 0x22);
+    CHECK(boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE && stats_of(HARPY).deaths == before_death.deaths + 1);
+
+    /* Quit after Playable and a cancel before it: the same */
+    reopened_page();
+    start_harpy_from_page();
+    reach_harpy_arena(1);
+    put_u32(campaign_record() + 0x08, 77);
+    CHECK(boss_battle_quit_key(0, 0, 0));
+    arrive_at_inn();
+    CHECK(record_level() == 1 && record_i32(0x08) == 15 && boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE);
+    reopened_page();
+    start_harpy_from_page();
+    reach_harpy_arena(0);
+    CHECK(boss_battle_state() == BOSS_BATTLE_INITIALIZING && boss_battle_quit_key(0, 0, 0));
+    arrive_at_inn();
+    CHECK(record_level() == 1 && record_i32(0x08) == 15 && boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE);
+
+    /* a Win without a level-up keeps its experience; the fight's HP stays out */
+    reopened_page();
+    start_harpy_from_page();
+    reach_harpy_arena(1);
+    fight_changes_world();
+    boss_battle_boss_cleared(1);
+    native_level_up(0, 60, 0);
+    arrive_at_inn();
+    CHECK(record_level() == 1 && record_i32(0x08) == 60 && record_i32(0x10) == 1001 && fake_play_data[WORLD_FLAG] == 0x22);
+    CHECK(boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_PENDING);
+    reopened_page();
+    finish_save(1); /* a failed save is reported; the character stays merged in memory */
+    CHECK(boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE && record_i32(0x08) == 60);
+    release_progression();
+
+    /* campaign level 10 enters at level 10: nothing of Boss Battle lowers it */
+    progression_campaign(9, 500, 9);
+    open_page();
+    CHECK(boss_battle_character_text(text, sizeof(text)) && !strcmp(text, "Zak - Fighter, level 10"));
+    start_harpy_from_page();
+    CHECK(record_level() == 9 && record_i32(0x08) == 500 && record_skill_points() == 9);
+    reach_harpy_arena(1);
+    boss_battle_boss_cleared(1);
+    native_level_up(2, 3, 0);
+    arrive_at_inn();
+    CHECK(record_level() == 11 && record_skill_points() == 11 && record_i32(0x0c) == 1011);
+    release_progression();
+
+    /* a record that does not look like a native level-up of the same character is not merged */
+    progression_campaign(0, 40, 0);
+    open_page();
+    start_harpy_from_page();
+    reach_harpy_arena(1);
+    boss_battle_boss_cleared(1);
+    native_level_up(1, 15, 0);
+    const int16_t five = 5;
+    memcpy(campaign_record() + 0x24, &five, sizeof(five)); /* five skill points from one level */
+    arrive_at_inn();
+    CHECK(record_level() == 0 && record_i32(0x08) == 40 && boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE);
+    reopened_page();
+    start_harpy_from_page();
+    reach_harpy_arena(1);
+    boss_battle_boss_cleared(1);
+    native_level_up(1, 15, 0);
+    memcpy(campaign_record() + 0x138, "Tia\0\0\0\0\0", 8); /* another character */
+    arrive_at_inn();
+    CHECK(record_level() == 0 && !memcmp(campaign_record() + 0x138, "Zak", 3));
+    CHECK(boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE);
+
+    /* a restore that fails merges nothing and keeps the saves on the campaign kept before the fight */
+    reopened_page();
+    start_harpy_from_page();
+    reach_harpy_arena(1);
+    boss_battle_boss_cleared(1);
+    native_level_up(1, 15, 0);
+    fake_play_table[1] = (uint64_t)(uintptr_t)other_play_data;
+    CHECK(frames(probe(kArenaPlay, 1, 1, 0), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+    boss_battle_inn_requested();
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    boss_battle_inn_flushed_hook(&regs);
+    CHECK(!boss_battle_session_active() && boss_battle_progress_save_state() == BOSS_BATTLE_SAVE_IDLE);
+    CHECK(boss_battle_campaign_save_source((uint64_t)(uintptr_t)fake_save) != (uint64_t)(uintptr_t)fake_save);
+    release_progression();
+}
+
+/* ---- the pause menu of a fight ---- */
+
+enum {
+    PAUSE_WINDOW_BYTES = 0x1c00,
+    PAUSE_ROW_BYTES = 0x5c0,
+    PAUSE_LIST = 0x1520,
+    PAUSE_TITLE = 0xbf0,
+    PAUSE_MODE = 0x1510,
+    PAUSE_STATE = 0xab,
+    PAUSE_RESULT = 0xadf4,
+    PAUSE_MAX_ROWS = 4,
+    MESSAGE_CHECK_REQUESTS = 0x4aa,
+    MESSAGE_QUIT_ADVENTURE = 0x4a8,
+    MESSAGE_EXTRA = 0x4ea
+};
+static uint8_t pause_window[PAUSE_WINDOW_BYTES], pause_rows[PAUSE_MAX_ROWS][PAUSE_ROW_BYTES], pause_dialog[0x800];
+static uint64_t pause_row_list[PAUSE_MAX_ROWS];
+static int pause_built[PAUSE_MAX_ROWS], pause_built_count, pause_setups, pause_mode_seen = -1;
+
+static const char *const kNativeTitle = "Ancient Temple Ruins";
+
+/* The game's setup: it builds its rows through the row builder, whatever the hook there leaves of them, and titles the
+ * menu with its location. */
+static void GUEST_HOOK_ABI fake_pause_setup(uint64_t window) {
+    static const int kMessages[3] = {MESSAGE_CHECK_REQUESTS, MESSAGE_QUIT_ADVENTURE, MESSAGE_EXTRA};
+    static const int kActions[3] = {2, 1, 9};
+    uint8_t *base = (uint8_t *)(uintptr_t)window;
+    ++pause_setups;
+    pause_mode_seen = i32_at(base, PAUSE_MODE);
+    pause_built_count = 0;
+    put_u32(base + PAUSE_LIST + 0x68, 0);
+    for (int i = 0; i < 3; ++i) {
+        GuestRegs regs;
+        memset(&regs, 0, sizeof(regs));
+        regs.rdi = window + PAUSE_LIST;
+        regs.rsi = (uint32_t)kMessages[i];
+        boss_battle_pause_row_hook(&regs);
+        if (regs.skip) continue;
+        uint8_t *row = pause_rows[pause_built_count];
+        memset(row, 0, PAUSE_ROW_BYTES);
+        put_u32(row + 0x5b4, (uint32_t)kActions[i]);
+        pause_row_list[pause_built_count] = (uint64_t)(uintptr_t)row;
+        pause_built[pause_built_count++] = kMessages[i];
+    }
+    put_pointer(base + PAUSE_LIST + 0x68, pause_row_list);
+    put_pointer(base + PAUSE_LIST + 0x70, pause_row_list + pause_built_count);
+    fake_set_text(window + PAUSE_TITLE, kNativeTitle);
+}
+
+/* As the game's accessor: -1 while the menu is open, the answer once it closed. */
+static int32_t GUEST_HOOK_ABI fake_pause_result(uint64_t window, uint32_t pending) {
+    (void)pending;
+    const uint8_t *base = (const uint8_t *)(uintptr_t)window;
+    return base[PAUSE_STATE] == 0x16 ? i32_at(base, PAUSE_RESULT) : -1;
+}
+
+static void use_fake_pause_functions(void) {
+    const BossBattlePauseFunctions functions = {fake_pause_setup, fake_pause_result};
+    boss_battle_set_pause_functions(&functions);
+    memset(pause_window, 0, sizeof(pause_window));
+    memset(pause_dialog, 0, sizeof(pause_dialog));
+    pause_setups = pause_built_count = 0;
+    pause_mode_seen = -1;
+}
+
+static GuestRegs pause_call(void (GUEST_HOOK_ABI *hook)(GuestRegs *), uint64_t rdi, uint64_t rsi) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = rdi;
+    regs.rsi = rsi;
+    regs.rax = 0x1234;
+    regs.rcx = 0x5678;
+    hook(&regs);
+    return regs;
+}
+
+static uint64_t window_address(void) {
+    return (uint64_t)(uintptr_t)pause_window;
+}
+
+/* Start on a fight: the gates pass, the scene reads the plain kind, the setup builds the menu. */
+static void open_pause_menu(void) {
+    GuestRegs gate = pause_call(boss_battle_pause_start_gate_hook, 0, 0);
+    CHECK(gate.skip && gate.rax == 1);
+    gate = pause_call(boss_battle_pause_level_gate_hook, 0, 0);
+    CHECK(gate.skip && gate.rax == 5);
+    GuestRegs mode = pause_call(boss_battle_pause_mode_hook, 0, 0);
+    CHECK(mode.rcx != 0x5678 && i32_at((const uint8_t *)(uintptr_t)mode.rcx, 0x108) == 0 &&
+          i32_at((const uint8_t *)(uintptr_t)mode.rcx, 0xf0) == 0);
+    put_u32(pause_window + PAUSE_MODE, 3); /* what the scene's kind would have chosen */
+    const GuestRegs setup = pause_call(boss_battle_pause_setup_hook, window_address(), 0);
+    CHECK(setup.skip && pause_setups >= 1);
+}
+
+static void check_pause_rows(const char *title) {
+    CHECK(pause_mode_seen == 0); /* the plain adventure menu */
+    CHECK(!strcmp(text_at(pause_window, PAUSE_TITLE), title) && strcmp(text_at(pause_window, PAUSE_TITLE), kNativeTitle));
+    CHECK(!isdigit((unsigned char)title[0]) && !strstr(title, " - ")); /* no number */
+    CHECK(pause_built_count == 1 && pause_built[0] == MESSAGE_QUIT_ADVENTURE); /* no Check requests, no other row */
+    CHECK(i32_at(pause_rows[0], 0x5b4) == 1 && !strcmp(text_at(pause_rows[0], 0x370), "Quit Boss Battle"));
+    CHECK(!strstr(text_at(pause_rows[0], 0x370), "adventure") && !strstr(text_at(pause_rows[0], 0x370), "requests"));
+    const uint8_t *list = pause_window + PAUSE_LIST;
+    uint64_t begin, end;
+    memcpy(&begin, list + 0x68, 8);
+    memcpy(&end, list + 0x70, 8);
+    CHECK((end - begin) / 8 == 1); /* nothing else to select */
+}
+
+static void close_pause(int32_t answer) {
+    pause_window[PAUSE_STATE] = 0x16;
+    put_u32(pause_window + PAUSE_RESULT, (uint32_t)answer);
+}
+
+static BossBattleStats stats_for(const char *class_name) {
+    char key[64];
+    snprintf(key, sizeof(key), "Zak|%s", class_name);
+    return boss_battle_record_stats(key, "harpy");
+}
+
+static BossBattleScene arena_of(int index) {
+    return (BossBattleScene){2, 0, kArenas[index].round, kArenas[index].first, -1, 0};
+}
+
+static void test_pause_menu(void) {
+    static const struct {
+        const char *class_name;
+        int level;
+    } kCharacters[] = {{"Fighter", 1}, {"Amazon", 25}, {"Elf", 99}, {"Dwarf", 1}, {"Sorceress", 25}, {"Wizard", 99}};
+    GuestRegs regs;
+
+    /* the campaign's own pause menu is not touched */
+    start_guarded();
+    use_fake_screen_functions();
+    use_fake_pause_functions();
+    CHECK(!boss_battle_pause_available() && !boss_battle_pause_owned());
+    regs = pause_call(boss_battle_pause_start_gate_hook, 0, 0);
+    CHECK(!regs.skip && regs.rax == 0x1234);
+    regs = pause_call(boss_battle_pause_level_gate_hook, 0, 0);
+    CHECK(!regs.skip && regs.rax == 0x1234);
+    regs = pause_call(boss_battle_pause_mode_hook, 0, 0);
+    CHECK(regs.rcx == 0x5678);
+    regs = pause_call(boss_battle_pause_row_hook, 0, MESSAGE_CHECK_REQUESTS);
+    CHECK(!regs.skip);
+    regs = pause_call(boss_battle_pause_confirm_hook, (uint64_t)(uintptr_t)pause_dialog, 0x4ac);
+    CHECK(!regs.skip && !text_sets);
+    put_u32(pause_window + PAUSE_MODE, 3);
+    fake_pause_setup(window_address()); /* what the game's own setup does, its rows all built */
+    regs = pause_call(boss_battle_pause_setup_hook, window_address(), 0);
+    CHECK(!regs.skip && pause_built_count == 3 && pause_mode_seen == 3 && !strcmp(text_at(pause_window, PAUSE_TITLE), kNativeTitle));
+    close_pause(1);
+    regs = pause_call(boss_battle_pause_result_hook, window_address(), 0);
+    CHECK(!regs.skip && regs.rax == 0x1234 && i32_at(pause_window, PAUSE_RESULT) == 1 && !boss_battle_quit_available());
+    CHECK(se_calls == 0);
+
+    /* every class and level: the same menu, its one row quits as F4 does, Back does not */
+    for (size_t c = 0; c < sizeof(kCharacters) / sizeof(*kCharacters); ++c) {
+        start_guarded();
+        use_fake_screen_functions();
+        use_fake_pause_functions();
+        boss_battle_set_character("Zak", kCharacters[c].class_name, kCharacters[c].level);
+        CHECK(start_session(HARPY));
+        reach_arena();
+        frames(probe(kArenaPlay, 1, 1, 0), 10);
+        CHECK(boss_battle_state() == BOSS_BATTLE_INITIALIZING && boss_battle_pause_available());
+        char title[64];
+        CHECK(boss_battle_pause_opened(title, sizeof(title)) && !strcmp(title, "Harpy"));
+        boss_battle_pause_closed();
+
+        /* before Playable: Quit Boss Battle cancels, no Attempt and no outcome */
+        const BossBattleStats early = stats_for(kCharacters[c].class_name);
+        open_pause_menu();
+        check_pause_rows("Harpy");
+        CHECK(boss_battle_pause_owned() && boss_battle_quit_available());
+        regs = pause_call(boss_battle_pause_confirm_hook, (uint64_t)(uintptr_t)pause_dialog, 0x4ac);
+        CHECK(regs.skip && message_value == 0x4ac && !strcmp(text_at(pause_dialog, 0), "Quit Boss Battle?"));
+        regs = pause_call(boss_battle_pause_result_hook, window_address(), 0);
+        CHECK(regs.skip && (int32_t)regs.rax == -1 && boss_battle_pause_owned() && boss_battle_quit_available());
+        close_pause(1);
+        regs = pause_call(boss_battle_pause_result_hook, window_address(), 0);
+        CHECK(regs.skip && (int32_t)regs.rax == -1 && i32_at(pause_window, PAUSE_RESULT) == -1 && !boss_battle_pause_owned());
+        CHECK(!boss_battle_quit_available()); /* the one quit is pending */
+        regs = pause_call(boss_battle_pause_result_hook, window_address(), 0);
+        CHECK(!regs.skip); /* the menu is no longer Boss Battle's */
+        CHECK(frames(probe(kArenaPlay, 1, 1, 0), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+        boss_battle_inn_requested();
+        boss_battle_inn_arrived();
+        CHECK(boss_battle_outcome() == BOSS_BATTLE_OUTCOME_CANCELLED);
+        CHECK(stats_for(kCharacters[c].class_name).attempts == early.attempts &&
+              stats_for(kCharacters[c].class_name).quits == early.quits);
+
+        /* at Playable: Back resumes without quitting, Quit Boss Battle records exactly one Quit */
+        start_guarded();
+        use_fake_screen_functions();
+        use_fake_pause_functions();
+        boss_battle_set_character("Zak", kCharacters[c].class_name, kCharacters[c].level);
+        const BossBattleStats before = stats_for(kCharacters[c].class_name);
+        CHECK(start_playable(HARPY, kArenaPlay));
+        open_pause_menu();
+        check_pause_rows("Harpy");
+        close_pause(-1);
+        regs = pause_call(boss_battle_pause_result_hook, window_address(), 0);
+        CHECK(regs.skip && (int32_t)regs.rax == -1 && !boss_battle_pause_owned() && boss_battle_quit_available());
+        CHECK(boss_battle_state() == BOSS_BATTLE_FIGHTING && stats_for(kCharacters[c].class_name).quits == before.quits);
+        memset(pause_window, 0, sizeof(pause_window));
+        open_pause_menu();
+        close_pause(1);
+        regs = pause_call(boss_battle_pause_result_hook, window_address(), 0);
+        pause_call(boss_battle_pause_result_hook, window_address(), 0);
+        CHECK((int32_t)regs.rax == -1 && !boss_battle_quit_available());
+        CHECK(frames(probe(kArenaPlay, 1, 1, 1), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+        boss_battle_inn_requested();
+        boss_battle_inn_arrived();
+        CHECK(boss_battle_outcome() == BOSS_BATTLE_OUTCOME_QUIT);
+        const BossBattleStats after = stats_for(kCharacters[c].class_name);
+        CHECK(after.quits == before.quits + 1 && after.attempts == before.attempts + 1 && after.wins == before.wins);
+    }
+
+    /* the same quit as F4: the same outcome and statistics */
+    start_guarded();
+    use_fake_screen_functions();
+    use_fake_pause_functions();
+    BossBattleStats mark = harpy_stats();
+    CHECK(start_playable(HARPY, kArenaPlay) && boss_battle_quit_key(0, 0, 0));
+    CHECK(frames(probe(kArenaPlay, 1, 1, 1), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+    boss_battle_inn_requested();
+    boss_battle_inn_arrived();
+    const BossBattleStats by_key = harpy_stats();
+    const BossBattleOutcomeKind key_outcome = boss_battle_outcome();
+    CHECK(by_key.quits == mark.quits + 1);
+    mark = harpy_stats();
+    start_guarded();
+    use_fake_screen_functions();
+    use_fake_pause_functions();
+    CHECK(start_playable(HARPY, kArenaPlay));
+    open_pause_menu();
+    close_pause(1);
+    pause_call(boss_battle_pause_result_hook, window_address(), 0);
+    CHECK(frames(probe(kArenaPlay, 1, 1, 1), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+    boss_battle_inn_requested();
+    boss_battle_inn_arrived();
+    CHECK(boss_battle_outcome() == key_outcome && harpy_stats().quits == mark.quits + 1 &&
+          harpy_stats().attempts == mark.attempts + 1);
+
+    /* the title is the boss, never the stage's name, whatever the stage holds */
+    for (int boss = 0; boss < 18; ++boss) {
+        start_guarded();
+        use_fake_screen_functions();
+        use_fake_pause_functions();
+        CHECK(start_playable(boss, arena_of(boss)));
+        open_pause_menu();
+        check_pause_rows(boss_battle_encounter(boss)->name);
+        boss_battle_reset();
+    }
+    start_guarded();
+    use_fake_screen_functions();
+    use_fake_pause_functions();
+    CHECK(start_playable(GOLEM, arena_of(GOLEM)));
+    open_pause_menu();
+    CHECK(!strcmp(text_at(pause_window, PAUSE_TITLE), "Golem"));
+    boss_battle_reset();
+
+    /* not Boss Battle's outside a fight: travelling, resolving and returning leave the game's menu */
+    start_guarded();
+    use_fake_screen_functions();
+    use_fake_pause_functions();
+    CHECK(start_session(HARPY) && !boss_battle_pause_available());
+    regs = pause_call(boss_battle_pause_start_gate_hook, 0, 0);
+    CHECK(!regs.skip);
+    boss_battle_reset();
+    CHECK(!boss_battle_pause_available() && !boss_battle_pause_owned());
+    regs = pause_call(boss_battle_pause_setup_hook, window_address(), 0);
+    CHECK(!regs.skip && !strcmp(text_at(pause_window, PAUSE_TITLE), ""));
+
+    /* a menu open when the fight is won stays Boss Battle's until it closes; the session's end drops it */
+    start_guarded();
+    use_fake_screen_functions();
+    use_fake_pause_functions();
+    CHECK(start_playable(HARPY, kArenaPlay));
+    open_pause_menu();
+    boss_battle_boss_cleared(1);
+    CHECK(boss_battle_state() == BOSS_BATTLE_RESOLVING && !boss_battle_pause_available() && boss_battle_pause_owned());
+    regs = pause_call(boss_battle_pause_row_hook, 0, MESSAGE_CHECK_REQUESTS);
+    CHECK(regs.skip);
+    finish_at_inn();
+    CHECK(!boss_battle_pause_owned());
+    CHECK(se_calls == 0); /* the menu's sounds are the game's */
+    boss_battle_reset();
+    boss_battle_set_screen_functions(NULL);
+    boss_battle_set_pause_functions(NULL);
 }
 
 /* ---- the local boot images ---- */
@@ -1682,8 +2771,16 @@ static void test_us_image(void) {
     CHECK(sites.options_title == 0x507a91 && sites.options_built == 0x507aef && sites.options_update == 0x5074b7 &&
           sites.options_result == 0x5075a5 && sites.list_up == 0x482300 && sites.list_down == 0x4824a0 &&
           sites.options_body_vtable == 0xbb82b0 && sites.row_frame == 0x578f40);
+    CHECK(sites.options_leave == 0x3ac08b && sites.arrival_fade_in == 0x42c77c && sites.inn_help_line == 0x3a6540 &&
+          sites.cue_player == 0x5837f0 && sites.list_play_se == 0x484da0 && sites.get_fader == 0x443af0 &&
+          sites.fade == 0x4437d0);
     CHECK(sites.results_level_done == 0x4c3d7a && sites.set_level == 0x81fb0 && sites.level_pattern == 0x81fe0 &&
           sites.write_stats == 0x82000);
+    CHECK(sites.save_commit == 0x81910 && sites.save_request == 0x8e5a0);
+    CHECK(sites.pause_start_gate == 0x432b21 && sites.pause_level_gate == 0x432c4f && sites.pause_mode == 0x432c8c &&
+          sites.pause_row == 0x50b160 && sites.pause_setup == 0x50b740 && sites.pause_setup_calls[0] == 0x50e299 &&
+          sites.pause_setup_calls[1] == 0x50e41b && sites.pause_setup_calls[2] == 0x50e8ab &&
+          sites.pause_confirm_text == 0x510f5e && sites.pause_result == 0x4327be && sites.pause_result_fn == 0x514fe0);
     CHECK(boss_battle_locate(image, size, NULL, &sites, &why) == 0 && boss_battle_locate(image, size, "CUSA00000-9.99", &sites, &why) == 0);
 
     const uint64_t probes[] = {
@@ -1702,7 +2799,13 @@ static void test_us_image(void) {
         0x3abf6f, 0x507a5f, 0x507a83, 0x507a91, 0x507ae7, 0x507aef, 0x506730, 0x506745, 0xbb84a8 + 0xe0, 0x50710e,
         0x507250, 0x5074a2, 0x5074b7, 0x5074c7, 0x5075a2, 0x5075a5, 0xbb82b0 + 0xb8, 0x5032a9, 0xbb82b0 + 0x148,
         0xbb82b0 + 0x150, 0x482300, 0x4824a0, 0x578f40, 0xbb2720 + 0xe0, 0x4c39f0, 0x757b88 + 2 * 4, 0x4c3a1b,
-        0x4c3cf0, 0x4c3d76, 0x4c3d7a, 0x4c3d81, 0x81fb0,  0x81fe0,  0x82000};
+        0x4c3cf0, 0x4c3d76, 0x4c3d7a, 0x4c3d81, 0x81fb0,  0x81fe0,  0x82000,   0x3abea4, 0x3ac083, 0x3ac08b, 0x58dbe0,
+        0x3ac429, 0x3ac430, 0x3ac444, 0x443af0, 0x4437d0, 0x4288ab, 0x42bb08, 0x753ec4 + 19 * 4, 0x42c6be, 0x7544ff,
+        0x42c765, 0x42c768, 0x42c77c, 0x4437f6, 0x7d672, 0x5837f0, 0x5839de, 0x5c9e69, 0xbb82b0 + 0xb0, 0x484da0,
+        0x484db0, 0x68630, 0x6863c, 0xbef620 + 43 * 16, 0x3ac486, 0x3ac491, 0x3a5a7a, 0x3a5aac, 0x3a5acb, 0x81910,
+        0x8191f, 0x8e5a0, 0x8e5bc, 0x432b21, 0x432b2a, 0x432b37, 0x432c4f, 0x432c54, 0x432c8c, 0x432c92, 0x432cc4,
+        0x477d20, 0x477d24, 0x4763b0, 0x4763b4, 0x50b160, 0x50b171, 0x50b93d, 0x50b94f, 0x50b740, 0x50b751, 0x50e296,
+        0x50e299, 0x50e41b, 0x50e8ab, 0x510f1f, 0x510f5e, 0x4327b6, 0x4327be, 0x514fe0, 0x514ff7};
     for (size_t p = 0; p < sizeof(probes) / sizeof(*probes); ++p) {
         image[probes[p]] ^= 0x10;
         const int found = boss_battle_locate(image, size, "CUSA10454-1.00", &sites, &why);
@@ -1729,12 +2832,14 @@ static void test_us_image(void) {
     CHECK(boss_battle_install(image, size, 0, "CUSA10454-1.00", 0, &town, image + size, room - 1) == 0);
     CHECK(!memcmp(image, before, size + room));
 
-    PatchedSite all[22 + BOSS_BATTLE_INN_CALLS] = {
+    PatchedSite all[36 + BOSS_BATTLE_INN_CALLS] = {
         {0x428948, 5}, {0x3a4501, 8}, {0x3a62a0, 5}, {0x3a652a, 5}, {0x45030b, 5}, {0x4c4649, 5}, {0x10da5c, 5},
         {0x4af5ec, 5}, {0x3a316f, 11}, {0x8cc6e, 5}, {0x429564, 5}, {0xce806, 5},  {0x42e929, 5}, {0x42f678, 5},
         {0x4300ef, 5}, {0x507a91, 5}, {0x507aef, 6}, {0x5074b7, 5}, {0x5075a5, 5}, {0x482300, 6}, {0x4824a0, 6},
-        {0x4c3d7a, 10}};
-    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) all[22 + i] = (PatchedSite){kCalls[i], 5};
+        {0x4c3d7a, 10}, {0x3ac08b, 5}, {0x42c77c, 5}, {0x4437d0, 6}, {0x3a6540, 5}, {0x5837f0, 6},
+        {0x432b21, 5}, {0x432c4f, 5}, {0x432c8c, 6}, {0x50b160, 6}, {0x50e299, 5}, {0x50e41b, 5}, {0x50e8ab, 5},
+        {0x510f5e, 5}, {0x4327be, 5}};
+    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) all[36 + i] = (PatchedSite){kCalls[i], 5};
     const size_t sites_count = sizeof(all) / sizeof(*all);
     for (size_t i = 0; i < sites_count; ++i) {
         for (size_t j = 0; j < i; ++j)
@@ -1784,7 +2889,6 @@ int main(void) {
 #endif
     remove(record_file);
     boss_battle_record_configure(user_dir);
-    boss_battle_progress_configure(user_dir);
     test_encounters();
     test_arena_rooms();
     test_shared_hook();
@@ -1795,7 +2899,6 @@ int main(void) {
     test_win_signals();
     test_stage_end_kinds();
     test_defeat();
-    test_progression(user_dir);
     test_result_bypass();
     test_death();
     test_quit();
@@ -1808,13 +2911,24 @@ int main(void) {
     test_inn_build();
     test_inn_results();
     test_screen_rows();
+    test_screen_entries();
     test_screen_statistics();
     test_screen_hooks();
+    test_direct_start();
+    test_start_black_hold();
+    test_start_reveal();
+    test_direct_start_refused();
+    test_intentional_returns();
+    test_direct_reopen();
+    test_reopen_conditions();
+    test_normal_inn_untouched();
     test_inn_help();
     test_inn_row_calls();
     test_outcome_hooks();
     test_campaign_restore();
     test_campaign_session();
+    test_character_progression();
+    test_pause_menu();
     test_us_image();
     test_other_images();
     remove(record_file);

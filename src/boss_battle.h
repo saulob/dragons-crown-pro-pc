@@ -1,7 +1,9 @@
 /* Boss Battle: with enable_boss_battle on, the Dragon's Haven Inn menu gains a Boss Battle row after Report adventurers.
  * The row opens the Boss Battle screen on the Inn's native Options page; a boss chosen there sets the campaign aside
  * (saves protected, campaign memory kept), sends the Inn's party to the game server as leaving the Inn does, then
- * requests the boss's arena. Every way back ends in the Inn, where the campaign is put back and the screen opens again. */
+ * requests the boss's arena from the Inn's next menu frame. Every way back ends in the Inn, where the campaign is put
+ * back with a Win's character progression, saved by the game, and the screen opens again from the Inn's menu frame. On both ways the scene's own fader stays black while the
+ * Inn menu runs, so only Return to tavern and Back show it. */
 #ifndef DCP_BOSS_BATTLE_H
 #define DCP_BOSS_BATTLE_H
 
@@ -30,7 +32,6 @@ typedef struct {
     int labyrinth_floor;     /* the Labyrinth of Chaos floor index the scene is set to before the request, or -1 */
     int story_gated;         /* the room places its boss only for characters past Lucain's Tower (story step 45) */
     const char *unavailable; /* why it cannot be started yet; NULL when it can */
-    const char *pending;     /* startable, but not yet confirmed in a full run: what is unconfirmed; NULL when proven */
 } BossBattleEncounter;
 
 /* Menu order, top to bottom; NULL out of range. */
@@ -167,6 +168,7 @@ typedef struct {
     int player_lives;     /* respawns it has left */
     int party_slots;      /* occupied party slots */
     int party_units;      /* of them, the ones whose unit exists */
+    int gauge_window;     /* the boss HP gauge window exists */
     int bosses;           /* bosses on the boss HP gauge */
     uint64_t player_unit_address, boss_address;
     int boss_hp;
@@ -201,6 +203,18 @@ int boss_battle_request_quit(BossBattleQuitSource source);
 int boss_battle_quit_key(int repeat, int modifiers, int input_owned);
 int boss_battle_quit_available(void);
 
+/* The pause menu of a fight: Start's native menu holds only Quit Boss Battle, under the boss's name. It is Boss Battle's
+ * while the arena is initializing or fought, and stays so until it closes. */
+#define BOSS_BATTLE_PAUSE_QUIT_ROW "Quit Boss Battle"
+#define BOSS_BATTLE_PAUSE_QUIT_CONFIRM "Quit Boss Battle?"
+int boss_battle_pause_available(void);
+int boss_battle_pause_owned(void);
+/* The menu opens or is rebuilt: 1 with the boss's name (no number) when it is Boss Battle's. */
+int boss_battle_pause_opened(char *title, size_t size);
+/* Quit Boss Battle confirmed: the one quit path of F4; 1 when it was accepted. */
+int boss_battle_pause_quit(void);
+void boss_battle_pause_closed(void);
+
 /* Game thread signals from the hooks. A boss whose placement ends the stage died and the game requests the round end
  * with that boss's end kind: the Win once the fight is playable. */
 void boss_battle_boss_cleared(int end_kind);
@@ -216,13 +230,27 @@ int boss_battle_town_return(void);
  * General results, the story and the item menu. */
 int boss_battle_results_level_up_done(void);
 
-/* The Boss Battle character: at a session start the campaign record's progression and the saved one give the
- * effective one (1 when the record must take it); after a Win's level-up the record's is saved. The campaign put back
- * afterwards never keeps it. */
-int boss_battle_progress_begin(const BossBattleProgress *campaign, BossBattleProgress *effective);
-void boss_battle_progress_won(const BossBattleProgress *after);
-/* The later of the two: the saved Boss Battle progression, or the campaign's once it caught up. */
-BossBattleProgress boss_battle_progress_effective(const BossBattleProgress *saved, const BossBattleProgress *campaign);
+/* The campaign character's progression, as its record keeps it (level from 0): what the native experience award and
+ * level-up change, with the name and class that tell the character. Boss Battle fights with the campaign character as
+ * it is; a Win's progression is the only thing of the fight the restored campaign keeps. */
+typedef struct {
+    int32_t xp_pool, xp_progress, skill_points, level, class_index;
+    char name[8];
+} BossBattleCharacterProgress;
+/* After the snapshot, the record the fight starts with. */
+void boss_battle_progress_before(const BossBattleCharacterProgress *before);
+/* Back at the Inn, before the campaign restore: the record as the fight left it. Kept only for a Win, for the same
+ * character, and only when it changed as the native award and level-ups change a record. */
+void boss_battle_progress_after(const BossBattleCharacterProgress *after);
+/* After a successful campaign restore, `restored` the record put back: 1 once, with that record and the Win's
+ * progression in `merged`; the campaign save is then pending. */
+int boss_battle_progress_merge(const BossBattleCharacterProgress *restored, BossBattleCharacterProgress *merged);
+/* The merged character reaches the campaign save through the game's own save: pending until the save job is started,
+ * running until it ends. */
+typedef enum { BOSS_BATTLE_SAVE_IDLE, BOSS_BATTLE_SAVE_PENDING, BOSS_BATTLE_SAVE_RUNNING } BossBattleSaveState;
+BossBattleSaveState boss_battle_progress_save_state(void);
+void boss_battle_progress_save_started(void);
+void boss_battle_progress_save_finished(int ok);
 
 /* Game thread, as the title scene is created: a session still running is ended there. */
 void boss_battle_title_reached(void);
@@ -236,19 +264,39 @@ enum { BOSS_BATTLE_INN_ROW = 3, BOSS_BATTLE_INN_ROWS = 7, BOSS_BATTLE_INN_NO_ROW
 int boss_battle_inn_native_row(int row);
 int boss_battle_inn_display_row(int row);
 
-/* The Boss Battle screen is the native Options page the Inn opens for its Options row, given other rows: row 0 the
- * title bar (the highlighted boss), rows 1-6 six of the bosses in the selectable value column with the highlighted
- * boss's statistics in the static label column, row 7 the bottom action (Return to tavern). The six boss rows scroll
- * through the twenty bosses. */
+/* The Boss Battle screen is the native Options page the Inn opens for its Options row, given other rows: row 0 (the
+ * page's title bar) Fight All, rows 1-6 six of the bosses in the selectable value column with the highlighted entry's
+ * statistics in the static label column, row 7 the bottom action (Return to tavern). The six boss rows scroll through
+ * the twenty bosses. */
 enum {
     BOSS_BATTLE_SCREEN_ROWS = 8,
-    BOSS_BATTLE_SCREEN_TITLE_ROW = 0,
+    BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW = 0,
     BOSS_BATTLE_SCREEN_BOSS_ROWS = 6,
     BOSS_BATTLE_SCREEN_RETURN_ROW = 7,
     BOSS_BATTLE_INN_OPTIONS_ROW = 3, /* the native Inn row that opens the Options page */
     BOSS_BATTLE_RETURN_TO_TAVERN_RECORD = 1120
 };
-typedef enum { BOSS_BATTLE_SCREEN_NONE, BOSS_BATTLE_SCREEN_START, BOSS_BATTLE_SCREEN_CLOSE } BossBattleScreenChoice;
+/* The screen's entries, top to bottom. */
+typedef enum {
+    BOSS_BATTLE_ENTRY_NONE = -1,
+    BOSS_BATTLE_ENTRY_FIGHT_ALL,
+    BOSS_BATTLE_ENTRY_BOSS_01,
+    BOSS_BATTLE_ENTRY_BOSS_20 = BOSS_BATTLE_ENTRY_BOSS_01 + BOSS_BATTLE_ENCOUNTERS - 1,
+    BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN,
+    BOSS_BATTLE_ENTRIES
+} BossBattleEntry;
+/* The boss of an entry, -1 for Fight All and Return to tavern. */
+int boss_battle_entry_boss(BossBattleEntry entry);
+typedef enum {
+    BOSS_BATTLE_SCREEN_NONE,
+    BOSS_BATTLE_SCREEN_START,
+    BOSS_BATTLE_SCREEN_FIGHT_ALL,
+    BOSS_BATTLE_SCREEN_CLOSE
+} BossBattleScreenChoice;
+/* Fight All confirmed on the screen: 1 when a run was queued. No run exists yet, so nothing changes. */
+int boss_battle_fight_all_request(void);
+/* The game's menu sounds (its SE table indexes): the list's cursor, confirmation and back. */
+enum { BOSS_BATTLE_SE_SELECT = 42, BOSS_BATTLE_SE_DECIDE = 43, BOSS_BATTLE_SE_CANCEL = 44 };
 
 /* The Inn asks for its Options page as the Boss Battle screen; the page reports itself built, then closed. A request
  * the Inn never turns into a page is dropped after a few menu frames (`waiting` 0 then). */
@@ -258,26 +306,45 @@ int boss_battle_screen_waiting(void);
 /* The page is the screen: the cursor row it opens on, the last boss chosen in view. */
 int boss_battle_screen_built(void);
 int boss_battle_screen_shown(void);
+/* The page closed natively with a boss chosen: 1 once, for the cut to black before the Inn menu shows again. */
+int boss_battle_screen_take_close_cut(void);
 /* The screen closed; 1 with the boss chosen in it. */
 int boss_battle_screen_closed(int *index);
 void boss_battle_screen_reset(void);
 int boss_battle_screen_offset(void);
-/* The boss of a row, -1 for the title bar and the bottom action. */
+BossBattleEntry boss_battle_screen_entry(int row);
+/* The boss of a row, -1 for Fight All and the bottom action. */
 int boss_battle_screen_boss(int row);
 /* The native cursor about to move from `row`: 1 when the boss rows scroll instead and the cursor stays. */
 int boss_battle_screen_move(int row, int down);
-/* A list result of the page (row, -1 nothing): a boss row starts it, the bottom action closes. */
+/* A list result of the page (row, -1 nothing): a boss row starts it, Fight All asks for its run, the bottom action
+ * closes. */
 BossBattleScreenChoice boss_battle_screen_choose(int result, int *index);
-/* The texts of the page for the cursor row: a row's boss (the selectable value column) and the highlighted boss's
- * statistic on that row (the static label column), the title bar's boss, the help line. */
+/* The texts of the page for the cursor row: a row's entry (the selectable value column), the highlighted entry's
+ * statistic on that row (the static label column), the help line. */
 void boss_battle_screen_label(int row, char *out, size_t size);
 void boss_battle_screen_statistic(int row, int cursor_row, char *out, size_t size);
-void boss_battle_screen_title(int cursor_row, char *out, size_t size);
 void boss_battle_screen_help(int cursor_row, char *out, size_t size);
 /* The boss the screen opens on: the last one chosen. */
 int boss_battle_menu_cursor(void);
-/* The Inn's first menu frame after a return opens the screen once; 0 after a failed restore. */
+/* A fight's return to the Inn put the campaign back and asks for the screen once, from the Inn's menu frame; never after a
+ * failed restore. */
+int boss_battle_menu_reopen_pending(void);
 int boss_battle_take_menu_reopen(void);
+/* The session number the reopen belongs to, for the log. */
+unsigned boss_battle_reopen_session(void);
+/* A boss confirmed on the screen: black from the confirmation until the arena is played, then one fade-in. */
+typedef enum {
+    BOSS_BATTLE_START_NONE,
+    BOSS_BATTLE_START_FADING, /* fading to black while the page closes */
+    BOSS_BATTLE_START_HELD,   /* fully black: the Inn and the travel run under it */
+    BOSS_BATTLE_START_DONE    /* the arena was revealed */
+} BossBattleStartTransition;
+BossBattleStartTransition boss_battle_start_transition(void);
+void boss_battle_start_transition_set(BossBattleStartTransition next);
+int boss_battle_start_transition_holds(void);
+/* Once, on the first frame the arena is played after the travel (act 2, player unit, held black): 1 to reveal it. */
+int boss_battle_start_reveal_due(const BossBattleProbe *probe);
 /* MM:SS.mmm */
 void boss_battle_format_time(uint32_t ms, char *out, size_t size);
 
@@ -328,11 +395,24 @@ typedef struct {
     uint64_t options_built;    /* after the page's rows are built */
     uint64_t options_update;   /* the page's per-frame row logic */
     uint64_t options_result;   /* after the page's list read its input (eax the result) */
+    uint64_t options_leave;    /* the Inn's Options mode, once its page closed: its first-frame check */
+    uint64_t arrival_fade_in;  /* the scene's arrival step: its fade-in of the scene fader */
+    uint64_t inn_help_line;    /* the Inn menu frame's call of its help line (edx 1 shows it, 0 closes it) */
+    uint64_t cue_player;       /* DEBUG_SAULO: the cue player the menu sounds reach */
+    uint64_t list_play_se;     /* a list's menu sound by SE table index */
+    uint64_t get_fader, fade;  /* the scene fader of the game manager's fader owner, and its fade */
     uint64_t list_up, list_down; /* the list's cursor moves, every list's */
     uint64_t options_body_vtable;
     uint64_t row_frame;        /* a layout's frame setter: a row's background */
     uint64_t results_level_done;               /* the results screen asking for its General results */
     uint64_t set_level, level_pattern, write_stats; /* a character record's level, stat pattern and stats */
+    uint64_t save_commit, save_request;        /* the play data into the save's current slot; the save manager's save */
+    uint64_t pause_start_gate, pause_level_gate; /* the stage scene's Start checks: a progressed character, a level */
+    uint64_t pause_mode;                       /* the scene's read of its kind as it opens the pause menu */
+    uint64_t pause_row;                        /* the pause menu's row builder */
+    uint64_t pause_setup, pause_setup_calls[3]; /* the pause menu's setup and its three calls */
+    uint64_t pause_confirm_text;               /* the quit confirmation's message */
+    uint64_t pause_result, pause_result_fn;    /* the scene's read of the pause menu's result */
 } BossBattleSites;
 
 /* The game functions the Inn hooks call. Set by the install; the tests set their own. */
@@ -385,9 +465,38 @@ void GUEST_HOOK_ABI boss_battle_options_title_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_built_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_update_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_result_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_options_leave_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_arrival_fade_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_fade_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_inn_help_line_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_cue_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_start_gate_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_level_gate_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_mode_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_row_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_setup_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_confirm_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_result_hook(GuestRegs *regs);
+
+/* The scene fader (the game manager's +0xd8 owns it): found, then faded to an ARGB colour over frames on a layer. */
+typedef struct {
+    uint64_t(GUEST_HOOK_ABI *get_fader)(uint64_t owner);
+    void(GUEST_HOOK_ABI *fade)(uint64_t fader, uint32_t colour, int frames, int layer);
+} BossBattleFadeFunctions;
+void boss_battle_set_fade_functions(const BossBattleFadeFunctions *functions);
 void GUEST_HOOK_ABI boss_battle_list_up_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_list_down_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_results_level_done_hook(GuestRegs *regs);
+
+/* The scene object's class and its scene request function, which the hooks use to tell a scene and to request one; set by
+ * the install, the tests set their own. */
+typedef void(GUEST_HOOK_ABI *BossBattleSceneRequestFn)(uint64_t server, const char *round, int stage, int entry,
+                                                       const char *stage_name, const uint8_t *route_flag, int force,
+                                                       int code, int slot, int option, const void *places);
+void boss_battle_set_scene(uint64_t vtable, BossBattleSceneRequestFn request);
+/* The game's lead character selector (the facade's game manager is all it reads); set by the install. */
+typedef const uint8_t *(GUEST_HOOK_ABI *BossBattleLeadSelectorFn)(uint64_t facade);
+void boss_battle_set_lead_selector(BossBattleLeadSelectorFn selector);
 
 /* The game functions the scene and screen hooks call; set by the install, the tests set their own. */
 typedef struct {
@@ -395,6 +504,7 @@ typedef struct {
     void(GUEST_HOOK_ABI *set_text)(uint64_t text, const char *value);
     void(GUEST_HOOK_ABI *set_message)(uint64_t text, int message);
     void(GUEST_HOOK_ABI *row_frame)(uint64_t layout, int frame, float start);
+    void(GUEST_HOOK_ABI *play_se)(uint64_t list, int se);
 } BossBattleScreenFunctions;
 void boss_battle_set_screen_functions(const BossBattleScreenFunctions *functions);
 
@@ -404,6 +514,22 @@ typedef struct {
     void(GUEST_HOOK_ABI *write_stats)(uint64_t stats, int pattern, int unused, int level, int unused2);
 } BossBattleLevelFunctions;
 void boss_battle_set_level_functions(const BossBattleLevelFunctions *functions);
+
+/* The game's own campaign save, as the Inn's save step runs it: commit, then the save manager's request (0 while a save
+ * runs). */
+typedef struct {
+    void(GUEST_HOOK_ABI *commit)(uint64_t save);
+    uint8_t(GUEST_HOOK_ABI *request)(uint64_t saver);
+} BossBattleSaveFunctions;
+void boss_battle_set_save_functions(const BossBattleSaveFunctions *functions);
+
+/* The pause menu's own functions: its setup, and the result the scene reads (-1 while it is open; 0 or the row's answer
+ * once it closed). */
+typedef struct {
+    void(GUEST_HOOK_ABI *setup)(uint64_t window);
+    int32_t(GUEST_HOOK_ABI *result)(uint64_t window, uint32_t pending);
+} BossBattlePauseFunctions;
+void boss_battle_set_pause_functions(const BossBattlePauseFunctions *functions);
 
 #ifdef __cplusplus
 }

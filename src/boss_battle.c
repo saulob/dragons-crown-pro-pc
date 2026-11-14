@@ -20,7 +20,7 @@ enum {
 };
 
 #define ARENA(id, name, file, round, first, last, stage_name, route) \
-    {id, name, "round/" file ".brb", round, first, last, stage_name, route, -1, 0, NULL, NULL}
+    {id, name, "round/" file ".brb", round, first, last, stage_name, route, -1, 0, NULL}
 
 /* The order of play: route A then route B, each by the round table's normal-difficulty reward for that route, then the
  * two special bosses. Arenas are the rounds' BOSSTEST rooms; a multi-room fight spans first..last. The Demon King's room
@@ -44,9 +44,8 @@ static const BossBattleEncounter kEncounters[BOSS_BATTLE_ENCOUNTERS] = {
     ARENA("gargoyle_gate", "Gargoyle Gate", "UnderCitadel", 1, 17, 17, "2_st05", 'B'),
     ARENA("red_dragon", "Red Dragon", "AncientLabyrinth", 6, 11, 13, "2_st01", 'B'),
     ARENA("arch_demon", "Arch Demon", "ForgottenRealms", 5, 16, 16, "2_st06", 'B'),
-    {"ancient_dragon", "Ancient Dragon", "round/LostZone.brb", 10, 0, 0, "st00", 0, -1, 1, NULL, NULL},
-    {"demon_king", "Demon King", "round/RandomDungeon.brb", 17, 68, 68, "bg27f", 0, 8, 0, NULL,
-     "Pending: not yet confirmed in game."},
+    {"ancient_dragon", "Ancient Dragon", "round/LostZone.brb", 10, 0, 0, "st00", 0, -1, 1, NULL},
+    {"demon_king", "Demon King", "round/RandomDungeon.brb", 17, 68, 68, "bg27f", 0, 8, 0, NULL},
 };
 
 const BossBattleInnEntry boss_battle_inn_entry = {"round/Town00.brb", 2, 0, "Inn"};
@@ -72,9 +71,12 @@ int boss_battle_startable_count(void) {
     return count;
 }
 
+/* Game thread only. */
+static int pause_owned;
+
 static atomic_int enabled, hook_installed, state = BOSS_BATTLE_OFF, session = 0, quit_pending = 0;
-static atomic_int pending = NONE, travelling = NONE, menu_reopen = 0;
-static atomic_uint session_number, current_session;
+static atomic_int pending = NONE, travelling = NONE, menu_reopen = 0, start_transition = BOSS_BATTLE_START_NONE;
+static atomic_uint session_number, current_session, reopen_session;
 static struct {
     BossBattleGuardFn protect_saves, snapshot, restore;
     BossBattleUndoFn release_saves;
@@ -292,18 +294,57 @@ int boss_battle_begin_queued(int *index) {
     return 1;
 }
 
+BossBattleStartTransition boss_battle_start_transition(void) {
+    return (BossBattleStartTransition)atomic_load(&start_transition);
+}
+
+void boss_battle_start_transition_set(BossBattleStartTransition next) {
+    atomic_store(&start_transition, next);
+}
+
+int boss_battle_start_transition_holds(void) {
+    const BossBattleStartTransition now = boss_battle_start_transition();
+    return now == BOSS_BATTLE_START_FADING || now == BOSS_BATTLE_START_HELD;
+}
+
+int boss_battle_start_reveal_due(const BossBattleProbe *probe) {
+    const BossBattleState now = boss_battle_state();
+    if (boss_battle_start_transition() != BOSS_BATTLE_START_HELD || (now != BOSS_BATTLE_INITIALIZING && now != BOSS_BATTLE_FIGHTING) ||
+        probe->scene.act != SCENE_ACT_PLAY || probe->scene.next_stage != NONE || !probe->player_unit)
+        return 0;
+    boss_battle_start_transition_set(BOSS_BATTLE_START_DONE);
+    return 1;
+}
+
+enum { MAX_RECORD_LEVEL = 98 }; /* the record keeps the level from 0: level 99 */
+
+/* Game thread only. */
+static struct {
+    BossBattleCharacterProgress before, after;
+    unsigned session;
+    int before_known, after_valid, restore_ok;
+    BossBattleSaveState save;
+} progress;
+
 static void end_session(int reopen_menu) {
     if (!boss_battle_session_active()) return;
+    boss_battle_start_transition_set(BOSS_BATTLE_START_NONE);
     LOG("campaign restore begins");
+    pause_owned = 0;
     const int restored = guard.restore();
+    progress.restore_ok = restored;
     guard.release_saves();
     atomic_store(&session, 0);
     atomic_store(&quit_pending, 0);
     atomic_store(&travelling, NONE);
     set_state(BOSS_BATTLE_OFF);
     if (restored) {
-        LOG("campaign restored, campaign saves released");
-        if (reopen_menu) atomic_store(&menu_reopen, 1);
+        LOG("campaign world restored, campaign saves released");
+        if (reopen_menu) {
+            atomic_store(&reopen_session, atomic_load(&current_session));
+            atomic_store(&menu_reopen, 1);
+            LOG("automatic Boss Battle reopen armed");
+        }
     } else {
         LOG("campaign NOT restored; saving keeps the campaign from before the fight until the game exits");
         atomic_store(&menu_reopen, 0);
@@ -379,7 +420,7 @@ static const char *missing_milestone(const BossBattleProbe *probe) {
 
 static int waiting_mark(unsigned frames) {
     return frames == 1 || frames == 2 * FRAMES_PER_SECOND || frames == 5 * FRAMES_PER_SECOND ||
-           frames == 10 * FRAMES_PER_SECOND;
+           frames == 10 * FRAMES_PER_SECOND || frames == 20 * FRAMES_PER_SECOND || frames == 30 * FRAMES_PER_SECOND;
 }
 
 static void reach(unsigned milestone, const char *line) {
@@ -419,7 +460,9 @@ static void follow_start(const BossBattleProbe *probe) {
     }
     ++s.arena_frames;
     if (waiting_mark(s.arena_frames))
-        LOG("WAITING %s (%u s after the arena loaded)", missing_milestone(probe), s.arena_frames / FRAMES_PER_SECOND);
+        LOG("WAITING %s (%u s after the arena loaded) DEBUG_SAULO boss gauge window %s, bosses on it %d, scene act %d",
+            missing_milestone(probe), s.arena_frames / FRAMES_PER_SECOND, probe->gauge_window ? "present" : "absent",
+            probe->bosses, probe->scene.act);
 }
 
 static void follow_travel(const BossBattleProbe *probe) {
@@ -445,6 +488,8 @@ static void follow_travel(const BossBattleProbe *probe) {
         snprintf(line, sizeof(line), "stage loaded: round %d stage %d entry %d", scene->round, scene->stage, scene->entry);
         reach(BOSS_BATTLE_ARENA_LOADED, line);
         set_state(BOSS_BATTLE_INITIALIZING);
+        LOG("DEBUG_SAULO Boss Battle transition: arena loaded page_active=%d",
+            boss_battle_screen_shown() || boss_battle_screen_requested());
         s.arena_frames = 0;
     } else {
         post_notice("Boss Battle: the game did not enter the boss arena.");
@@ -638,6 +683,36 @@ int boss_battle_quit_available(void) {
     return boss_battle_session_active() && now != BOSS_BATTLE_RESOLVING && quit_state(now) && !atomic_load(&quit_pending);
 }
 
+int boss_battle_pause_available(void) {
+    const BossBattleState now = boss_battle_state();
+    return boss_battle_session_active() && (now == BOSS_BATTLE_INITIALIZING || now == BOSS_BATTLE_FIGHTING);
+}
+
+int boss_battle_pause_owned(void) {
+    return pause_owned && boss_battle_session_active();
+}
+
+int boss_battle_pause_opened(char *title, size_t size) {
+    const BossBattleEncounter *encounter = current_encounter();
+    if (!encounter || !(boss_battle_pause_owned() || boss_battle_pause_available())) return 0;
+    snprintf(title, size, "%s", encounter->name);
+    if (!pause_owned) LOG("pause menu opened for %s", encounter->name);
+    pause_owned = 1;
+    return 1;
+}
+
+int boss_battle_pause_quit(void) {
+    if (!boss_battle_pause_owned()) return 0;
+    LOG("Quit Boss Battle selected");
+    return boss_battle_request_quit(BOSS_BATTLE_QUIT_MENU);
+}
+
+void boss_battle_pause_closed(void) {
+    if (!boss_battle_pause_owned()) return;
+    pause_owned = 0;
+    LOG("pause menu closed");
+}
+
 void boss_battle_boss_cleared(int end_kind) {
     if (!boss_battle_session_active()) return;
     LOG("boss clear committed: the round end is requested (end kind %d)", end_kind);
@@ -673,54 +748,97 @@ int boss_battle_results_level_up_done(void) {
     return 1;
 }
 
-/* Game thread only. */
-static struct {
-    BossBattleProgress begin;
-    int known;
-} progress;
-
-static int progress_ahead(const BossBattleProgress *a, const BossBattleProgress *b) {
-    if (a->level != b->level) return a->level > b->level;
-    return (int64_t)a->xp_progress + a->xp_pool > (int64_t)b->xp_progress + b->xp_pool;
+static void progress_log(const char *what, const BossBattleCharacterProgress *p) {
+    printf("Boss Battle [%u]: character progression %s level %d xp_pool %d xp_progress %d skill_points %d\n", progress.session,
+           what, p->level + 1, p->xp_pool, p->xp_progress, p->skill_points);
 }
 
-BossBattleProgress boss_battle_progress_effective(const BossBattleProgress *saved, const BossBattleProgress *campaign) {
-    return saved && progress_ahead(saved, campaign) ? *saved : *campaign;
+static int same_character(const BossBattleCharacterProgress *a, const BossBattleCharacterProgress *b) {
+    return a->class_index == b->class_index && !memcmp(a->name, b->name, sizeof(a->name));
 }
 
-static int64_t progress_xp(const BossBattleProgress *p) {
-    return (int64_t)p->xp_progress + p->xp_pool;
+static int same_progression(const BossBattleCharacterProgress *a, const BossBattleCharacterProgress *b) {
+    return a->level == b->level && a->xp_pool == b->xp_pool && a->xp_progress == b->xp_progress &&
+           a->skill_points == b->skill_points;
 }
 
-int boss_battle_progress_begin(const BossBattleProgress *campaign, BossBattleProgress *effective) {
-    char key[160];
-    BossBattleProgress saved;
-    boss_battle_character_key(key, sizeof(key));
-    const int have = boss_battle_progress_get(key, &saved);
-    *effective = boss_battle_progress_effective(have ? &saved : NULL, campaign);
-    LOG("campaign baseline level %d xp %lld", campaign->level + 1, (long long)progress_xp(campaign));
-    LOG("Boss Battle progression loaded level %d xp %lld%s", effective->level + 1, (long long)progress_xp(effective),
-        !have ? " (first Boss Battle: the campaign's)" : progress_ahead(&saved, campaign) ? "" : " (the campaign caught up)");
-    progress.begin = *effective;
-    progress.known = 1;
-    return memcmp(effective, campaign, sizeof(*effective)) != 0;
+/* What the native award and level-ups can do to a record: experience only grows, levels only rise, and each new level
+ * below 99 gives one skill point. */
+static const char *progression_refused(const BossBattleCharacterProgress *before, const BossBattleCharacterProgress *after) {
+    if (!same_character(before, after)) return "another character";
+    if (after->level < before->level || after->level > MAX_RECORD_LEVEL) return "level out of range";
+    if (after->xp_pool < 0 || after->xp_progress < 0) return "negative experience";
+    if (after->level == before->level &&
+        (int64_t)after->xp_pool + after->xp_progress < (int64_t)before->xp_pool + before->xp_progress)
+        return "experience went down";
+    const int levels = after->level - before->level;
+    if (after->skill_points < before->skill_points || after->skill_points - before->skill_points > levels)
+        return "skill points not from level-ups";
+    return NULL;
 }
 
-void boss_battle_progress_won(const BossBattleProgress *after) {
-    char key[160];
-    if (!boss_battle_session_active() || !progress.known || s.outcome != BOSS_BATTLE_OUTCOME_WIN) return;
-    progress.known = 0;
-    const BossBattleProgress *before = &progress.begin;
-    if (after->level > before->level) {
-        LOG("level-up begin %d -> %d", before->level + 1, after->level + 1);
-        LOG("level-up complete level %d", after->level + 1);
-    } else {
-        LOG("XP +%lld, level unchanged %d", (long long)(progress_xp(after) - progress_xp(before)), after->level + 1);
+void boss_battle_progress_before(const BossBattleCharacterProgress *before) {
+    const BossBattleSaveState save = progress.save;
+    memset(&progress, 0, sizeof(progress));
+    progress.save = save;
+    progress.session = boss_battle_session_id();
+    progress.before = *before;
+    progress.before_known = 1;
+    progress_log("before fight", before);
+}
+
+void boss_battle_progress_after(const BossBattleCharacterProgress *after) {
+    if (!boss_battle_session_active() || !progress.before_known || progress.session != boss_battle_session_id()) return;
+    progress_log("after native result", after);
+    if (s.outcome != BOSS_BATTLE_OUTCOME_WIN) {
+        if (!same_progression(&progress.before, after)) LOG("character progression changed without a Win: discarded");
+        return;
     }
-    boss_battle_character_key(key, sizeof(key));
-    const int written = boss_battle_progress_put(key, after);
-    LOG("Boss Battle progression %s level %d xp %lld", written ? "saved" : "NOT saved", after->level + 1,
-        (long long)progress_xp(after));
+    const char *refused = progression_refused(&progress.before, after);
+    if (refused) {
+        LOG("character progression NOT kept: %s", refused);
+        return;
+    }
+    if (same_progression(&progress.before, after)) return;
+    progress.after = *after;
+    progress.after_valid = 1;
+}
+
+int boss_battle_progress_merge(const BossBattleCharacterProgress *restored, BossBattleCharacterProgress *merged) {
+    const int valid = progress.after_valid && progress.restore_ok;
+    progress.after_valid = progress.restore_ok = 0;
+    if (!valid) return 0;
+    if (!same_character(restored, &progress.before) || !same_progression(restored, &progress.before)) {
+        printf("Boss Battle [%u]: character progression NOT merged: the restored record is not the campaign's\n",
+               progress.session);
+        return 0;
+    }
+    *merged = *restored;
+    merged->xp_pool = progress.after.xp_pool;
+    merged->xp_progress = progress.after.xp_progress;
+    merged->skill_points = progress.after.skill_points;
+    merged->level = progress.after.level;
+    progress.save = BOSS_BATTLE_SAVE_PENDING;
+    progress_log("merged", merged);
+    return 1;
+}
+
+BossBattleSaveState boss_battle_progress_save_state(void) {
+    return progress.save;
+}
+
+void boss_battle_progress_save_started(void) {
+    if (progress.save != BOSS_BATTLE_SAVE_PENDING) return;
+    progress.save = BOSS_BATTLE_SAVE_RUNNING;
+    printf("Boss Battle [%u]: campaign save requested for the character progression\n", progress.session);
+}
+
+void boss_battle_progress_save_finished(int ok) {
+    if (progress.save != BOSS_BATTLE_SAVE_RUNNING) return;
+    progress.save = BOSS_BATTLE_SAVE_IDLE;
+    if (ok) printf("Boss Battle [%u]: character progression persisted to campaign save\n", progress.session);
+    else printf("Boss Battle [%u]: campaign save FAILED; the character progression is kept in memory and saved by the "
+                "game's next save\n", progress.session);
 }
 
 int boss_battle_town_return(void) {
@@ -775,8 +893,16 @@ int boss_battle_menu_cursor(void) {
     return s.cursor;
 }
 
+int boss_battle_menu_reopen_pending(void) {
+    return atomic_load(&menu_reopen);
+}
+
 int boss_battle_take_menu_reopen(void) {
     return atomic_exchange(&menu_reopen, 0);
+}
+
+unsigned boss_battle_reopen_session(void) {
+    return atomic_load(&reopen_session);
 }
 
 void boss_battle_format_time(uint32_t ms, char *out, size_t size) {
@@ -788,8 +914,8 @@ enum { LAST_OFFSET = BOSS_BATTLE_ENCOUNTERS - BOSS_BATTLE_SCREEN_BOSS_ROWS };
 
 /* Game thread only. */
 static struct {
-    int state, waits, offset, choice, highlighted;
-} screen = {SCREEN_IDLE, 0, 0, NONE, 0};
+    int state, waits, offset, choice, highlighted, cut;
+} screen = {SCREEN_IDLE, 0, 0, NONE, BOSS_BATTLE_ENTRY_BOSS_01, 0};
 
 void boss_battle_screen_request(void) {
     screen.state = SCREEN_REQUESTED;
@@ -812,7 +938,7 @@ int boss_battle_screen_waiting(void) {
 int boss_battle_screen_built(void) {
     const int boss = s.cursor >= 0 && s.cursor < BOSS_BATTLE_ENCOUNTERS ? s.cursor : 0;
     screen.state = SCREEN_SHOWN;
-    screen.highlighted = boss;
+    screen.highlighted = BOSS_BATTLE_ENTRY_BOSS_01 + boss;
     screen.offset = boss < BOSS_BATTLE_SCREEN_BOSS_ROWS ? 0 : boss - BOSS_BATTLE_SCREEN_BOSS_ROWS + 1;
     char label[64];
     boss_battle_label(boss, label, sizeof(label));
@@ -822,6 +948,12 @@ int boss_battle_screen_built(void) {
 
 int boss_battle_screen_shown(void) {
     return screen.state == SCREEN_SHOWN;
+}
+
+int boss_battle_screen_take_close_cut(void) {
+    if (screen.state != SCREEN_SHOWN || screen.choice == NONE || screen.cut) return 0;
+    screen.cut = 1;
+    return 1;
 }
 
 int boss_battle_screen_closed(int *index) {
@@ -843,13 +975,28 @@ int boss_battle_screen_offset(void) {
     return screen.offset;
 }
 
-int boss_battle_screen_boss(int row) {
-    if (row < 1 || row > BOSS_BATTLE_SCREEN_BOSS_ROWS) return NONE;
-    return screen.offset + row - 1;
+int boss_battle_entry_boss(BossBattleEntry entry) {
+    return entry >= BOSS_BATTLE_ENTRY_BOSS_01 && entry <= BOSS_BATTLE_ENTRY_BOSS_20 ? entry - BOSS_BATTLE_ENTRY_BOSS_01 : NONE;
 }
 
-/* At the last boss row the rows scroll; from the bottom action the cursor wraps to the title bar, which shows the list
- * from its top again, and the other way round. */
+BossBattleEntry boss_battle_screen_entry(int row) {
+    if (row == BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW) return BOSS_BATTLE_ENTRY_FIGHT_ALL;
+    if (row == BOSS_BATTLE_SCREEN_RETURN_ROW) return BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN;
+    if (row < 1 || row > BOSS_BATTLE_SCREEN_BOSS_ROWS) return BOSS_BATTLE_ENTRY_NONE;
+    return (BossBattleEntry)(BOSS_BATTLE_ENTRY_BOSS_01 + screen.offset + row - 1);
+}
+
+int boss_battle_screen_boss(int row) {
+    return boss_battle_entry_boss(boss_battle_screen_entry(row));
+}
+
+int boss_battle_fight_all_request(void) {
+    puts("Boss Battle: Fight All selected");
+    return 0;
+}
+
+/* At the last boss row the rows scroll; from the bottom action the cursor wraps to Fight All, with the list from its
+ * top again, and the other way round. */
 int boss_battle_screen_move(int row, int down) {
     if (down) {
         if (row == BOSS_BATTLE_SCREEN_BOSS_ROWS && screen.offset < LAST_OFFSET) return ++screen.offset, 1;
@@ -857,66 +1004,79 @@ int boss_battle_screen_move(int row, int down) {
         return 0;
     }
     if (row == 1 && screen.offset > 0) return --screen.offset, 1;
-    if (row == BOSS_BATTLE_SCREEN_TITLE_ROW) screen.offset = LAST_OFFSET;
+    if (row == BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW) screen.offset = LAST_OFFSET;
     return 0;
 }
 
 BossBattleScreenChoice boss_battle_screen_choose(int result, int *index) {
     if (screen.state != SCREEN_SHOWN) return BOSS_BATTLE_SCREEN_NONE;
-    if (result == BOSS_BATTLE_SCREEN_RETURN_ROW) {
+    const BossBattleEntry entry = boss_battle_screen_entry(result);
+    if (entry == BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN) {
         puts("Boss Battle: Return to tavern");
         return BOSS_BATTLE_SCREEN_CLOSE;
     }
-    const int boss = boss_battle_screen_boss(result);
+    if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL) return BOSS_BATTLE_SCREEN_FIGHT_ALL;
+    const int boss = boss_battle_entry_boss(entry);
     if (boss == NONE) return BOSS_BATTLE_SCREEN_NONE;
     screen.choice = boss;
+    screen.cut = 0;
     *index = boss;
     return BOSS_BATTLE_SCREEN_START;
 }
 
-static int highlighted_boss(int cursor_row) {
-    const int boss = boss_battle_screen_boss(cursor_row);
-    if (boss != NONE) screen.highlighted = boss;
-    return screen.highlighted;
+/* The bottom action keeps the entry highlighted before it. */
+static BossBattleEntry highlighted_entry(int cursor_row) {
+    const BossBattleEntry entry = boss_battle_screen_entry(cursor_row);
+    if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL || boss_battle_entry_boss(entry) != NONE) screen.highlighted = entry;
+    return (BossBattleEntry)screen.highlighted;
 }
 
 void boss_battle_screen_label(int row, char *out, size_t size) {
-    const int boss = boss_battle_screen_boss(row);
-    if (boss == NONE || !boss_battle_label(boss, out, size)) snprintf(out, size, "%s", "");
+    const BossBattleEntry entry = boss_battle_screen_entry(row);
+    if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL) snprintf(out, size, "Fight All");
+    else if (!boss_battle_label(boss_battle_entry_boss(entry), out, size)) snprintf(out, size, "%s", "");
 }
 
+static const char *const kStatisticNames[BOSS_BATTLE_SCREEN_BOSS_ROWS] = {"Attempts", "Wins", "Deaths",
+                                                                          "Quits", "Win Rate", "Best Time"};
+
+/* Fight All has no statistics yet: every value is "-". */
 void boss_battle_screen_statistic(int row, int cursor_row, char *out, size_t size) {
-    const BossBattleEncounter *encounter = boss_battle_encounter(highlighted_boss(cursor_row));
-    char key[160], text[24] = "-";
-    boss_battle_character_key(key, sizeof(key));
-    const BossBattleStats stats = boss_battle_record_stats(key, encounter->id);
-    switch (row) {
-    case 1: snprintf(out, size, "Attempts %u", stats.attempts); break;
-    case 2: snprintf(out, size, "Wins %u", stats.wins); break;
-    case 3: snprintf(out, size, "Deaths %u", stats.deaths); break;
-    case 4: snprintf(out, size, "Quits %u", stats.quits); break;
-    case 5:
-        if (stats.attempts) snprintf(text, sizeof(text), "%.1f%%", 100.0 * stats.wins / stats.attempts);
-        snprintf(out, size, "Win Rate %s", text);
-        break;
-    case 6:
-        if (stats.wins && stats.best_ms) boss_battle_format_time(stats.best_ms, text, sizeof(text));
-        snprintf(out, size, "Best Time %s", text);
-        break;
-    default: snprintf(out, size, "%s", ""); break;
+    const BossBattleEncounter *encounter = boss_battle_encounter(boss_battle_entry_boss(highlighted_entry(cursor_row)));
+    if (row < 1 || row > BOSS_BATTLE_SCREEN_BOSS_ROWS) {
+        snprintf(out, size, "%s", "");
+        return;
     }
-}
-
-void boss_battle_screen_title(int cursor_row, char *out, size_t size) {
-    boss_battle_label(highlighted_boss(cursor_row), out, size);
+    char text[24] = "-";
+    if (encounter) {
+        char key[160];
+        boss_battle_character_key(key, sizeof(key));
+        const BossBattleStats stats = boss_battle_record_stats(key, encounter->id);
+        switch (row) {
+        case 1: snprintf(text, sizeof(text), "%u", stats.attempts); break;
+        case 2: snprintf(text, sizeof(text), "%u", stats.wins); break;
+        case 3: snprintf(text, sizeof(text), "%u", stats.deaths); break;
+        case 4: snprintf(text, sizeof(text), "%u", stats.quits); break;
+        case 5:
+            if (stats.attempts) snprintf(text, sizeof(text), "%.1f%%", 100.0 * stats.wins / stats.attempts);
+            break;
+        default:
+            if (stats.wins && stats.best_ms) boss_battle_format_time(stats.best_ms, text, sizeof(text));
+            break;
+        }
+    }
+    snprintf(out, size, "%s %s", kStatisticNames[row - 1], text);
 }
 
 void boss_battle_screen_help(int cursor_row, char *out, size_t size) {
-    const int boss = boss_battle_screen_boss(cursor_row);
-    if (cursor_row == BOSS_BATTLE_SCREEN_RETURN_ROW) snprintf(out, size, "Return to Dragon's Haven Inn.");
-    else if (boss != NONE && boss_battle_encounter(boss)->pending) snprintf(out, size, "Pending: not yet confirmed in game.");
-    else if (boss != NONE) snprintf(out, size, "%s", "");
-    else if (!boss_battle_character_text(out, size)) snprintf(out, size, "Choose a boss.");
+    switch (boss_battle_screen_entry(cursor_row)) {
+    case BOSS_BATTLE_ENTRY_FIGHT_ALL: snprintf(out, size, "Fight every boss in sequence."); break;
+    case BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN: snprintf(out, size, "Return to Dragon's Haven Inn."); break;
+    case BOSS_BATTLE_ENTRY_NONE: snprintf(out, size, "%s", ""); break;
+    default:
+        if (!boss_battle_character_text(out, size)) snprintf(out, size, "%s", "");
+        break;
+    }
 }
 
 void boss_battle_reset(void) {
@@ -925,9 +1085,13 @@ void boss_battle_reset(void) {
     atomic_store(&pending, NONE);
     atomic_store(&travelling, NONE);
     atomic_store(&menu_reopen, 0);
+    atomic_store(&reopen_session, 0);
+    atomic_store(&start_transition, BOSS_BATTLE_START_NONE);
     boss_battle_screen_reset();
-    screen.offset = screen.highlighted = 0;
-    progress.known = 0;
+    screen.offset = 0;
+    screen.highlighted = BOSS_BATTLE_ENTRY_BOSS_01;
+    memset(&progress, 0, sizeof(progress));
+    pause_owned = 0;
     atomic_store(&state, BOSS_BATTLE_OFF);
     atomic_store(&session, 0);
     atomic_store(&current_session, 0);

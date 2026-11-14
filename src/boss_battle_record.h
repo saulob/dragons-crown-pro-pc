@@ -27,18 +27,6 @@ int boss_battle_record_note(const char *character, const char *boss_id, BossBatt
 /* What is recorded for the pair; zeros when nothing is. */
 BossBattleStats boss_battle_record_stats(const char *character, const char *boss_id);
 
-/* The Boss Battle character's own progression, kept apart from the campaign in <user>/boss_battle_progress.dat: its
- * level (as the character record keeps it, from 0) and experience. An unreadable file is left untouched and every
- * character starts from the campaign. */
-typedef struct {
-    int32_t level, xp_pool, xp_progress;
-} BossBattleProgress;
-void boss_battle_progress_configure(const char *user_dir);
-int boss_battle_progress_get(const char *character, BossBattleProgress *out);
-int boss_battle_progress_put(const char *character, const BossBattleProgress *progress);
-int boss_battle_progress_parse(const char *text, size_t length);
-size_t boss_battle_progress_format(char *out, size_t size);
-
 /* The file format, for the tests: parse replaces the table, format writes it. */
 int boss_battle_record_parse(const char *text, size_t length);
 size_t boss_battle_record_format(char *out, size_t size);
