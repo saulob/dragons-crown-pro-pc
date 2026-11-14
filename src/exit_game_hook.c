@@ -4,8 +4,14 @@
 #include <string.h>
 #include <time.h>
 
+#include "dcpgpu.h"
 #include "exit_game_text.h"
 #include "title_layout.h"
+
+/* DEBUG_SAULO: the video core's stall telemetry counts title updates; a no-op without a video core (tests). */
+__attribute__((weak)) void dcpgpu_debug_title_tick(int cursor) {
+    (void)cursor;
+}
 
 enum {
     SHEET_DATA_OFFSET = 0xf8,
@@ -201,14 +207,15 @@ int exit_game_filter_accept(int accept_down) {
 void GUEST_HOOK_ABI exit_game_tick_hook(GuestRegs *regs) {
     const uint8_t *scene = (const uint8_t *)(uintptr_t)regs->r13;
     int selected = 0;
+    int32_t cursor = -1;
     if (scene && regs->r13 + TITLE_MENU_OFFSET == title_menu) {
         uint64_t items, widgets;
-        int32_t cursor;
         menu_counts(scene + TITLE_MENU_OFFSET, &items, &widgets);
         memcpy(&cursor, scene + TITLE_CURSOR_OFFSET, sizeof(cursor));
         selected = cursor == EXIT_GAME_ROW_INDEX && items == EXIT_GAME_MENU_ITEMS && widgets == EXIT_GAME_MENU_WIDGETS;
     }
     exit_game_set_selected(selected);
+    dcpgpu_debug_title_tick(cursor); /* DEBUG_SAULO */
 }
 
 /* Before the help text id is computed from the menu position (rax = the position): the id follows the row's action. */

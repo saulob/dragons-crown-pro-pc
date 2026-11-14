@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -131,6 +132,11 @@ private:
 
     void SetExpectedGameSize(s32 width, s32 height);
 
+    // DEBUG_SAULO: free_queue validation; the Note/Check helpers require free_mutex.
+    bool IsPresentationFrame(const Frame* frame) const;
+    void NoteFreeQueue(const Frame* frame, char op);
+    void CheckFreeQueueFrame(const Frame* frame, const char* where);
+
 private:
     std::atomic<float> expected_ratio{1920.0f / 1080.0f};
     std::atomic<u64> expected_frame_size{1920 | u64(1080) << 32}; ///< width | height << 32
@@ -154,6 +160,13 @@ private:
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;
     std::deque<Frame*> free_queue;
+    struct FreeQueueEvent {
+        const Frame* frame;
+        u32 tid;
+        char op;
+    };
+    std::array<FreeQueueEvent, 32> free_queue_history{}; ///< DEBUG_SAULO
+    u32 free_queue_history_next = 0;
     Frame* last_submit_frame{};
     std::mutex free_mutex;
     std::condition_variable free_cv;

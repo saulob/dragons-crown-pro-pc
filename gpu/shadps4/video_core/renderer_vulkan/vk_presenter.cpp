@@ -14,6 +14,7 @@
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "dcp_overlay.h"
 #include "dcp_settings.h"
+#include "dcp_startup_watch.h"
 #include "dcp_graphics.h"
 #include "dcp_ultrawide_sides.h"
 #include "dcp_water_diag.h"
@@ -28,6 +29,7 @@
 #include <chrono>
 #include <cmath>
 #include <csetjmp>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -291,6 +293,7 @@ Frame* Presenter::PrepareLastFrame() {
         }
         free_queue.erase(it);
         frame = last_submit_frame;
+        NoteFreeQueue(frame, 'L');
     }
 
     while (true) {
@@ -625,8 +628,13 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             last_submit_frame = frame;
         }
         free_queue.push_back(frame);
+        NoteFreeQueue(frame, 'P');
         free_cv.notify_one();
     };
+    {
+        std::scoped_lock fl{free_mutex};
+        CheckFreeQueueFrame(frame, "Present");
+    }
 
     // A minimized window has no pixels on Windows (0x0): keep the swapchain and skip presenting
     // until the window is restored.
@@ -641,7 +649,12 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
     }
 
-    if (!swapchain.AcquireNextImage()) {
+    bool acquired;
+    {
+        DcpStartupWatch::WaitScope wait{DcpStartupWatch::Acquire}; // DEBUG_SAULO
+        acquired = swapchain.AcquireNextImage();
+    }
+    if (!acquired) {
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
         if (!swapchain.AcquireNextImage()) {
             // User resizes the window too fast and GPU can't keep up. Skip this frame.
@@ -785,6 +798,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     bool presented;
     {
         std::scoped_lock submit_lock{Scheduler::submit_mutex};
+        DcpStartupWatch::WaitScope wait{DcpStartupWatch::QueuePresent}; // DEBUG_SAULO
         presented = swapchain.Present();
     }
     if (!presented && window.GetWidth() != 0 && window.GetHeight() != 0) {
@@ -800,9 +814,52 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
 void Presenter::RetireFrame(Frame* frame) {
     std::scoped_lock fl{free_mutex};
+    CheckFreeQueueFrame(frame, "RetireFrame");
     last_submit_frame = frame;
     free_queue.push_back(frame);
+    NoteFreeQueue(frame, 'R');
     free_cv.notify_one();
+}
+
+bool Presenter::IsPresentationFrame(const Frame* frame) const {
+    const auto at = reinterpret_cast<uintptr_t>(frame);
+    const auto first = reinterpret_cast<uintptr_t>(present_frames.data());
+    return at >= first && at < first + present_frames.size() * sizeof(Frame) &&
+           (at - first) % sizeof(Frame) == 0;
+}
+
+void Presenter::NoteFreeQueue(const Frame* frame, char op) {
+    free_queue_history[free_queue_history_next++ % free_queue_history.size()] = {
+        frame, static_cast<u32>(gettid()), op};
+    DcpStartupWatch::SetGauge(DcpStartupWatch::FreeFrames, static_cast<s64>(free_queue.size()));
+}
+
+void Presenter::CheckFreeQueueFrame(const Frame* frame, const char* where) {
+    if (IsPresentationFrame(frame)) {
+        return;
+    }
+    char entries[256] = "";
+    int used = 0;
+    for (const Frame* entry : free_queue) {
+        if (used >= int(sizeof(entries))) {
+            break;
+        }
+        used += std::snprintf(entries + used, sizeof(entries) - used, " %p", static_cast<const void*>(entry));
+    }
+    char history[1024] = "";
+    used = 0;
+    for (u32 i = 0; i < free_queue_history.size() && used < int(sizeof(history)); ++i) {
+        const auto& event = free_queue_history[(free_queue_history_next + i) % free_queue_history.size()];
+        if (event.op) {
+            used += std::snprintf(history + used, sizeof(history) - used, " %c%u:%p", event.op, event.tid,
+                                  static_cast<const void*>(event.frame));
+        }
+    }
+    std::printf("DEBUG_SAULO presenter: %s on thread %u: frame %p is not one of the %zu presentation frames at %p; "
+                "free queue (%zu):%s; history (oldest first; G get, L reuse, P present, R retire):%s\n",
+                where, static_cast<u32>(gettid()), static_cast<const void*>(frame), present_frames.size(),
+                static_cast<const void*>(present_frames.data()), free_queue.size(), entries, history);
+    UNREACHABLE_MSG("DEBUG_SAULO invalid presentation frame in {}", where);
 }
 
 Frame* Presenter::GetRenderFrame() {
@@ -810,12 +867,17 @@ Frame* Presenter::GetRenderFrame() {
     Frame* frame;
     {
         std::unique_lock lock{free_mutex};
-        free_cv.wait(lock, [this] { return !free_queue.empty(); });
+        if (free_queue.empty()) {
+            DcpStartupWatch::WaitScope wait{DcpStartupWatch::FreeFrame}; // DEBUG_SAULO
+            free_cv.wait(lock, [this] { return !free_queue.empty(); });
+        }
         LOG_DEBUG(Render_Vulkan, "Got render frame, remaining {}", free_queue.size() - 1);
 
         // Take the frame from the queue
         frame = free_queue.front();
         free_queue.pop_front();
+        NoteFreeQueue(frame, 'G');
+        CheckFreeQueueFrame(frame, "GetRenderFrame");
     }
 
     const vk::Device device = instance.GetDevice();
@@ -827,12 +889,15 @@ Frame* Presenter::GetRenderFrame() {
     };
 
     // Wait for the presentation to be finished so all frame resources are free
-    while (wait() != vk::Result::eSuccess) {
-        ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
-                   "Device lost during waiting for a frame");
-        // Retry if the waiting times out
-        if (result == vk::Result::eTimeout) {
-            continue;
+    {
+        DcpStartupWatch::WaitScope fence_wait{DcpStartupWatch::FrameFence}; // DEBUG_SAULO
+        while (wait() != vk::Result::eSuccess) {
+            ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
+                       "Device lost during waiting for a frame");
+            // Retry if the waiting times out
+            if (result == vk::Result::eTimeout) {
+                continue;
+            }
         }
     }
 

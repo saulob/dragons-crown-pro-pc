@@ -56,6 +56,8 @@ uint64_t dcpgpu_latency_press_ns(void);
 /* 1 while the final presenter should black out the ultrawide side extensions for the frame being built: the real
  * loading/saving fade is drawn, or the fixed-screen transition fallback is active. Set once per guest frame. */
 void dcpgpu_ultrawide_side_mask(int wanted);
+/* DEBUG_SAULO: one title menu update (the menu cursor, -1 when the scene is not the title's); stall telemetry. */
+void dcpgpu_debug_title_tick(int cursor);
 #ifdef __cplusplus
 }
 #endif
