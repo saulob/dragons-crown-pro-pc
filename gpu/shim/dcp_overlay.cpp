@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <SDL3/SDL.h>
+#include "boss_battle.h"
 #include "dcp_accent.h"
 #include "dcp_cheat_menu.h"
 #include "dcp_menu_input.h"
@@ -67,6 +68,9 @@ namespace {
 
 std::mutex imgui_mutex; // the ImGui context: window thread (input) and present thread
 bool initialized = false;
+// Bare F4 quits a Boss Battle fight; any modifier (Alt+F4 closes the game) leaves it alone.
+constexpr SDL_Scancode kBossBattleQuitKey = SDL_SCANCODE_F4;
+constexpr SDL_Keymod kBossBattleQuitModifiers = SDL_KMOD_ALT | SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_GUI;
 // The cheat menu (F10) and the Options menu (F1): open, or closing and still holding the game's input until what the
 // menu received is released. Only one of them is ever open.
 std::atomic<bool> cheat_open{false};
@@ -654,6 +658,15 @@ void LoadingScreen() {
     ImGui::End();
 }
 
+// DEBUG_SAULO: the F4 hint while a Boss Battle fight can be quit.
+void BossBattleQuitHint() {
+    const char* text = "DEBUG_SAULO  F4 Quit Boss Battle";
+    const float size = ImGui::GetFontSize() * 0.8f;
+    const ImGuiIO& io = ImGui::GetIO();
+    ImGui::GetForegroundDrawList()->AddText(ImGui::GetFont(), size, ImVec2(size, io.DisplaySize.y - size * 2.0f),
+                                            IM_COL32(255, 255, 255, 150), text);
+}
+
 void FpsCounter() {
     if (frame_ms_avg <= 0.0f) {
         return;
@@ -725,6 +738,15 @@ void PollOnlineNotice() {
     }
     std::scoped_lock lock{imgui_mutex};
     SetNotice(TranslateNotice(text), std::chrono::seconds(6));
+}
+
+void PollBossBattleNotice() {
+    char text[192];
+    if (!boss_battle_take_notice(text, sizeof(text))) {
+        return;
+    }
+    std::scoped_lock lock{imgui_mutex};
+    SetNotice(dcp::Tr(text));
 }
 
 } // namespace
@@ -956,6 +978,11 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
+        if (down && event.key.scancode == kBossBattleQuitKey &&
+            boss_battle_quit_key(event.key.repeat, (event.key.mod & kBossBattleQuitModifiers) != 0,
+                                 MenuOpen() || text_entry_active || choice_active)) {
+            return true;
+        }
         if (event.key.scancode == DcpSettings::Get().menu_key) {
             if (down) {
                 PressCheatMenuKey(event.key.repeat);
@@ -1070,7 +1097,7 @@ void ShowNotice(const std::string& text) {
 bool Visible() {
     const auto& s = DcpSettings::Get();
     return initialized && (loading || background_total || cheat_open || options_open || text_entry_active || choice_active ||
-                           choice_retiring || s.show_fps || PingShown() || NoticeShown());
+                           choice_retiring || s.show_fps || PingShown() || NoticeShown() || boss_battle_quit_available());
 }
 
 void SetDisplayScale(float scale) {
@@ -1134,6 +1161,7 @@ bool BeginPresent() {
         ping_readout.Reset();
     }
     PollOnlineNotice();
+    PollBossBattleNotice();
     return Visible();
 }
 
@@ -1166,6 +1194,9 @@ void BuildFrame(u32 width, u32 height, void (*new_frame)()) {
     }
     if (DcpSettings::Get().show_fps) {
         FpsCounter();
+    }
+    if (boss_battle_quit_available()) {
+        BossBattleQuitHint();
     }
     if (PingShown()) {
         PingCounter();

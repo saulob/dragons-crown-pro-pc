@@ -218,6 +218,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Presentation, Upscaling (FSR 1), Sharpening, Sharpening strength, Anti-aliasing | at once |
 | Graphics | Renderer, Render resolution (builds that support it), Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
+| Gameplay | Enable Boss Battle (builds that support it, Online Play off) | the next time the Inn menu opens |
 | Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | Controller Rumble | at once |
@@ -266,6 +267,7 @@ use the same defaults).
 | `controller_rumble` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `unlock_gallery` | 1, 0 | 0 | at game start |
+| `enable_boss_battle` | 1, 0 | 0 | at game start; F1 changes it the next time the Inn menu opens |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
@@ -542,6 +544,21 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   Changing it in the F1 Options menu needs a restart. The launcher hides the row for a build whose profile does not
   list the Gallery list builder; all eight supported builds do. The builder is found by its code, so a build whose code
   differs gets the log line `Unlock Gallery: requested but unavailable ...` and the Gallery stays as the save has it.
+- **Enable Boss Battle** (Gameplay page, after Unlock Gallery): Off by default (`enable_boss_battle`). On, the
+  Dragon's Haven Inn menu gains a Boss Battle row after Report adventurers; Off leaves the Inn menu as the game has it.
+  The row opens the Boss Battle screen on the game's own Options page: the twenty bosses in the selectable right column
+  (six at a time, scrolling), the highlighted boss's attempts, wins, deaths, quits, win rate and best time in the left
+  column, the boss in the title bar, and Return to tavern (or Back) at the bottom; prepare the party
+  first with Select player and Choose allies. Starting a boss sets the campaign aside: the save on disk is protected and
+  the campaign state in memory is put back when the fight returns to the Inn, so nothing earned or lost in a Boss Battle
+  reaches the campaign. A win shows the game's experience award and level-up, then returns straight to the Inn, without
+  the continue choice, items, General results or story; going down with no lives left (no paid continue in Boss
+  Battle) and quitting (F4, the pause menu's return or an exit) return straight to the Inn. The screen then opens again
+  on the same boss with the new numbers. Per character and boss, `boss_battle.dat` in the user folder keeps attempts
+  (counted once the fight is playable), wins, deaths, quits and the best win time; per character,
+  `boss_battle_progress.dat` keeps the Boss Battle level and experience, which every fight starts from and which never
+  reaches the campaign (a campaign that has caught up is used instead). Offline only, and only for the USA 1.00 build. The F1 Options menu changes it the next time the
+  Inn menu opens.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
   recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
   separate process from the launcher (see Architecture), so these tools attach to a clean game process. Off keeps the

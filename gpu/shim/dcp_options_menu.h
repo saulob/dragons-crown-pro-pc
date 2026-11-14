@@ -165,6 +165,7 @@ enum class Id {
     StorySkipOffer,
     TutorialSkipOffer,
     UnlockGallery,
+    EnableBossBattle,
 };
 
 struct Setting {
@@ -234,6 +235,10 @@ inline constexpr Setting kSettings[] = {
     {Id::UnlockGallery, Page::Gameplay, "unlock_gallery", "Unlock Gallery",
      "Unlocks all Gallery content while enabled without changing save progress.", Apply::Restart, kOffOn,
      DcpSettings::UnlockGallery},
+    {Id::EnableBossBattle, Page::Gameplay, "enable_boss_battle", "Enable Boss Battle",
+     "Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu "
+     "opens. Fights there never change campaign progress. Offline only.",
+     Apply::Live, kOffOn, DcpSettings::BossBattle},
 };
 
 constexpr const Setting& SettingOf(Id id) {
@@ -290,6 +295,7 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::StorySkipOffer: return flag(v.story_skip_offer);
     case Id::TutorialSkipOffer: return flag(v.tutorial_skip_offer);
     case Id::UnlockGallery: return flag(v.unlock_gallery);
+    case Id::EnableBossBattle: return flag(v.enable_boss_battle);
     }
     return {};
 }
@@ -314,6 +320,7 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::ResolutionInTitle: v.show_resolution_title = on; break;
     case Id::FrameCounter: v.show_fps = on; break;
     case Id::ControllerRumble: v.controller_rumble = on; break;
+    case Id::EnableBossBattle: v.enable_boss_battle = on; break;
     case Id::AspectRatio:
     case Id::TrueUltrawide:
     case Id::Renderer:

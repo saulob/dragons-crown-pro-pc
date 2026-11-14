@@ -143,6 +143,9 @@ int dcp_controller_rumble(const char *settings_file);
 /* 1 when the settings file shows every Gallery picture (unlock_gallery; 0 by default). */
 int dcp_unlock_gallery(const char *settings_file);
 
+/* 1 when the settings file adds Boss Battle to the Inn menu (enable_boss_battle; 0 by default). */
+int dcp_enable_boss_battle(const char *settings_file);
+
 /* 1 when this player may host Early Story Online (early_story_online; 0 by default; DCP_EARLY_STORY_ONLINE overrides); Online play is not checked. */
 int dcp_early_story_online(const char *settings_file);
 

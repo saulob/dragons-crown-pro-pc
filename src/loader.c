@@ -20,6 +20,8 @@
 #include "startup_save_hook.h"
 #include "exit_game_hook.h"
 #include "early_story_online.h"
+#include "boss_battle.h"
+#include "boss_battle_record.h"
 #include "cyrillic_glyphs.h"
 #include "latin_glyphs.h"
 #include "system_type_hook.h"
@@ -849,11 +851,13 @@ int main(int argc, char **argv) {
     const size_t gallery_unlock_stub_area = known_build && game_build.unlock_gallery && gallery_unlock_requested ? gallery_unlock_stub_bytes() : 0;
     const int early_story_requested=dcp_early_story_online(settings_file);
     const size_t early_story_stub_area = known_build && runtime_online_active() ? early_story_online_stub_bytes() : 0;
+    const int online_play = runtime_online_play_enabled() || runtime_online_active();
+    const size_t boss_battle_stub_area = known_build && !online_play ? boss_battle_stub_bytes() : 0;
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t message_stub_offset = cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
                                        ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
-                                       gallery_unlock_stub_area + early_story_stub_area;
+                                       gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area;
     const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes());
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
@@ -884,6 +888,7 @@ int main(int argc, char **argv) {
             if (game_build.japanese_npc_voices && (!game_build.features_by_signature || dcp_npc_voice_resources(app0)))
                 features|=DCP_GPU_FEATURE_JAPANESE_NPC_VOICES;
             if (game_build.unlock_gallery) features|=DCP_GPU_FEATURE_UNLOCK_GALLERY;
+            if (!online_play && boss_battle_build_listed(build_key)) features|=DCP_GPU_FEATURE_BOSS_BATTLE;
         }
         DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080,features};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
@@ -957,7 +962,7 @@ int main(int argc, char **argv) {
         }
         if (known_build)
             exit_game_located=dcp_resolve_exit_game(&game_build,&view,&exit_game_sites,exit_game_failure,sizeof(exit_game_failure));
-        if (known_build && runtime_online_active())
+        if (known_build && (runtime_online_active() || !online_play))
             early_story_located=dcp_resolve_early_story(&game_build,&view,&early_story_sites,early_story_failure,sizeof(early_story_failure));
     }
     if (check_imports) {
@@ -1077,6 +1082,13 @@ int main(int argc, char **argv) {
                                             early_story_stub_area))
             early_story_set_hosting(early_story_requested);
     } else if (known_build && early_story_requested) printf("Early Story Online: off, Online Play is not active\n");
+    boss_battle_set_enabled(dcp_enable_boss_battle(settings_file));
+    boss_battle_set_save_guard(runtime_savedata_isolate,runtime_savedata_release);
+    boss_battle_record_configure(user_dir);
+    boss_battle_progress_configure(user_dir);
+    boss_battle_install(image,size,entry,known_build ? build_key : NULL,online_play,early_story_located ? &early_story_sites : NULL,
+                        image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area,
+                        boss_battle_stub_area);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);

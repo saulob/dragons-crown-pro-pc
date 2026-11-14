@@ -447,6 +447,63 @@ static void test_a_build_never_uses_another_builds_record(void) {
     free(image);
 }
 
+typedef int32_t (ABI *DeleteFn)(const Delete *);
+
+/* Boss Battle: isolation copies the campaign saves and every later save operation, delete included, uses the copy until
+ * the release; then the campaign saves are the ones used again, and the next session starts from a fresh copy. */
+static void test_boss_battle_isolation_keeps_the_campaign_save(void) {
+    begin("isolation", "CUSA10454");
+    char campaign[1200], campaign_file[1300], copy[1200], copy_file[1300], copy_param[1300];
+    save_dir_path(campaign, sizeof(campaign), "CUSA10454", "SAVEDATA00");
+    snprintf(campaign_file, sizeof(campaign_file), "%s/SAVE0.DAT", campaign);
+    snprintf(copy, sizeof(copy), "%s/boss_battle/savedata/1/CUSA10454/SAVEDATA00", user_dir);
+    snprintf(copy_file, sizeof(copy_file), "%s/SAVE0.DAT", copy);
+    snprintf(copy_param, sizeof(copy_param), "%s.sce_sys/param.bin", copy);
+
+    MountResult mounted;
+    CHECK(mount_save(1, "SAVEDATA00", GUEST_CREATE_MODE, &mounted) == 0);
+    write_text(campaign_file, "campaign");
+    CHECK(!runtime_savedata_isolate() && !runtime_savedata_isolated()); /* never while a save is mounted */
+    unmount_save(&mounted);
+
+    write_text(copy_file, "stale"); /* an older session's copy is replaced */
+    CHECK(runtime_savedata_isolate() && runtime_savedata_isolated());
+    char text[64];
+    CHECK(read_text(copy_file, text, sizeof(text)) && !strcmp(text, "campaign") && is_file(copy_param));
+
+    CHECK(mount_save(1, "SAVEDATA00", MODE_RDONLY, &mounted) == 0 && !strcmp(mounted_host, copy));
+    write_text(copy_file, "boss battle");
+    unmount_save(&mounted);
+    CHECK(read_text(campaign_file, text, sizeof(text)) && !strcmp(text, "campaign"));
+
+    CHECK(runtime_savedata_protects(campaign_file) && runtime_savedata_protects(campaign));
+    CHECK(!runtime_savedata_protects(copy_file) && !runtime_savedata_protects(NULL));
+    CHECK(runtime_savedata_isolate()); /* already isolated: no second copy */
+    CHECK(read_text(copy_file, text, sizeof(text)) && !strcmp(text, "boss battle"));
+
+    DirName dir;
+    memset(&dir, 0, sizeof(dir));
+    snprintf(dir.data, sizeof(dir.data), "SAVEDATA00");
+    Delete request;
+    memset(&request, 0, sizeof(request));
+    request.user = 1;
+    request.dir = &dir;
+    ((DeleteFn)guest("sceSaveDataDelete"))(&request);
+    CHECK(is_file(campaign_file));
+
+    runtime_savedata_release();
+    CHECK(!runtime_savedata_isolated() && !runtime_savedata_protects(campaign_file));
+    CHECK(mount_save(1, "SAVEDATA00", MODE_RDONLY, &mounted) == 0 && !strcmp(mounted_host, campaign));
+    unmount_save(&mounted);
+    write_text(campaign_file, "campaign after");
+    CHECK(runtime_savedata_isolate());
+    CHECK(read_text(copy_file, text, sizeof(text)) && !strcmp(text, "campaign after"));
+    runtime_savedata_release();
+    runtime_savedata_release();
+    CHECK(!runtime_savedata_isolated());
+    end();
+}
+
 int main(void) {
     test_missing_save_is_not_found_for_every_title();
     test_other_names_and_modes_are_not_found();
@@ -464,6 +521,7 @@ int main(void) {
     test_wrong_original_bytes_reject_installation();
     test_us_and_other_builds_get_no_hook();
     test_a_build_never_uses_another_builds_record();
+    test_boss_battle_isolation_keeps_the_campaign_save();
     printf("savedata tests: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

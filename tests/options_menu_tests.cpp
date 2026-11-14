@@ -433,6 +433,49 @@ void TestUnlockGallery(const fs::path& folder) {
           "Unlock Gallery has one reader and one table row");
 }
 
+// Enable Boss Battle: one live Off/On Gameplay row, Off by default, offered only where Boss Battle is installed; F1
+// tells the runtime, which reads it each time the Inn builds its menu.
+void TestEnableBossBattle(const fs::path& folder) {
+    using namespace DcpOptions;
+    int rows = 0;
+    size_t boss = 0, gallery = 0, position = 0;
+    for (const Setting& setting : kSettings) {
+        rows += std::string(setting.label) == "Enable Boss Battle";
+        if (setting.page != Page::Gameplay) continue;
+        boss = setting.id == Id::EnableBossBattle ? position : boss;
+        gallery = setting.id == Id::UnlockGallery ? position : gallery;
+        ++position;
+    }
+    const Setting& setting = SettingOf(Id::EnableBossBattle);
+    Check(rows == 1 && boss == gallery + 1 && setting.page == Page::Gameplay && setting.apply == Apply::Live &&
+              setting.choices.size() == 2 && std::string(setting.key) == "enable_boss_battle" &&
+              setting.feature == DcpSettings::BossBattle,
+          "Enable Boss Battle is one live Off/On Gameplay row after Unlock Gallery, for builds with Boss Battle");
+    Check(Contains(setting.help, "Applies the next time the Inn menu opens"), "its help says when it applies");
+    Check(Current(DcpSettings::Values{}, Id::EnableBossBattle) == "0", "it is Off by default");
+    Check(Contains(Source("launcher/settings.h"), "kEnableBossBattleKey[] = \"enable_boss_battle\";") &&
+              Contains(Source("launcher/settings.cpp"), "{kEnableBossBattleKey, \"0\"}"),
+          "the key and the default are the launcher's");
+
+    const fs::path file = folder / "boss_battle.ini";
+    WriteFile(file, "# keep\nenable_boss_battle = 1\n");
+    DcpSettings::Values seeded;
+    Check(DcpSettings::Read(file.string(), seeded) && seeded.enable_boss_battle, "the saved launcher value seeds F1");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    Options options(live);
+    const Outcome outcome = options.Choose(Id::EnableBossBattle, "0");
+    Check(outcome.changed && outcome.saved && !live.enable_boss_battle && !options.Pending(Id::EnableBossBattle),
+          "Off takes effect without a restart");
+    Check(Contains(ReadAll(file), "enable_boss_battle = 0\n") && Contains(ReadAll(file), "# keep\n"), "and is saved");
+    const std::string menu = Source("gpu/shim/dcp_options_menu.cpp");
+    const size_t change = menu.find("outcome.changed && id == DcpOptions::Id::EnableBossBattle");
+    Check(change != std::string::npos && menu.find("boss_battle_set_enabled(", change) < change + 160,
+          "F1 tells the runtime when the setting changes");
+    Check(Contains(Source("src/loader.c"), "boss_battle_set_enabled(dcp_enable_boss_battle(settings_file));"),
+          "the loader seeds the runtime from the file");
+}
+
 void TestControllerRumble(const fs::path& folder) {
     using namespace DcpOptions;
     int rows = 0;
@@ -740,7 +783,8 @@ void TestBuildFeatureRows() {
     DcpSettings::Values none;
     none.features = 0;
     DcpSettings::Values all;
-    const Id gated[] = {Id::AspectRatio, Id::RenderResolution, Id::TrueUltrawide, Id::JapaneseNpcVoices, Id::UnlockGallery};
+    const Id gated[] = {Id::AspectRatio,  Id::RenderResolution, Id::TrueUltrawide, Id::JapaneseNpcVoices, Id::UnlockGallery,
+                        Id::EnableBossBattle};
     for (const Setting& setting : kSettings) {
         const bool is_gated = std::find(std::begin(gated), std::end(gated), setting.id) != std::end(gated);
         Check(Available(setting, all), "a build with every feature offers every row");
@@ -755,7 +799,8 @@ void TestBuildFeatureRows() {
 
     const std::string loader = Source("src/loader.c");
     for (const char* feature : {"DCP_GPU_FEATURE_RENDER_RESOLUTION", "DCP_GPU_FEATURE_TRUE_ULTRAWIDE",
-                                "DCP_GPU_FEATURE_JAPANESE_NPC_VOICES", "DCP_GPU_FEATURE_UNLOCK_GALLERY"}) {
+                                "DCP_GPU_FEATURE_JAPANESE_NPC_VOICES", "DCP_GPU_FEATURE_UNLOCK_GALLERY",
+                                "DCP_GPU_FEATURE_BOSS_BATTLE"}) {
         Check(Contains(loader, feature) && Contains(Source("src/dcpgpu.h"), feature), "the loader reports every feature");
     }
     Check(Contains(loader, "game_build.japanese_npc_voices && (!game_build.features_by_signature || dcp_npc_voice_resources(app0))"),
@@ -1243,6 +1288,7 @@ int main() {
     TestUnlockGallery(folder);
     TestJapaneseMenuButtons(folder);
     TestControllerRumble(folder);
+    TestEnableBossBattle(folder);
     TestLauncherParity();
     TestRendererRow(folder);
     TestRenderShapeRows(folder);

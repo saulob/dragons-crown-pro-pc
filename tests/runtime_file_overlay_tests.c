@@ -15,6 +15,11 @@
 static int checks, failures;
 #define CHECK(condition) do { ++checks; if (!(condition)) { ++failures; printf("FAIL line %d: %s\n", __LINE__, #condition); } } while (0)
 
+int runtime_savedata_protects(const char *host_path) {
+    (void)host_path;
+    return 0;
+}
+
 static int32_t error_slot;
 int32_t *runtime_errno(void) { return &error_slot; }
 int32_t runtime_guest_errno(int host_errno) { return host_errno; }

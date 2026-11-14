@@ -9,6 +9,7 @@
 #include "early_story_session.h"
 #include "feature_sites.h"
 #include "guest_hook.h"
+#include "hydeland_town.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,8 +25,8 @@ extern "C" {
 #define EARLY_STORY_ORIGINAL_CHECK 0x2c
 
 /* The guest layouts the Hydeland trigger reads, the same on every supported build. */
-#define EARLY_STORY_TOWN_CONTEXT 0x998        /* town object -> context object */
-#define EARLY_STORY_CONTEXT_MANAGER 0x20      /* context object -> game manager */
+#define EARLY_STORY_TOWN_CONTEXT HYDELAND_TOWN_CONTEXT
+#define EARLY_STORY_CONTEXT_MANAGER HYDELAND_CONTEXT_MANAGER
 #define EARLY_STORY_MANAGER_PROMPT_SHOWN 0x14d /* game manager: set once the prompt has been shown this run */
 #define EARLY_STORY_OWNER_SIZE 0xb00          /* the prompt owner objects are 0xa78 bytes */
 #define EARLY_STORY_OWNER_SYSOBJ 0x1e0        /* owner -> the system object it belongs to */
@@ -34,18 +35,17 @@ extern "C" {
 #define EARLY_STORY_PROMPT_SLOT 2
 #define EARLY_STORY_SLOT1_CHANGED 0x1000
 
-/* The prompt function's own control checks (game manager fields), repeated by the town trigger. */
-#define EARLY_STORY_MANAGER_MODE 0xb8
-#define EARLY_STORY_MANAGER_SCENE 0x88
-#define EARLY_STORY_MANAGER_QUEUE 0x108
-#define EARLY_STORY_OBJECT_STATE 0x5b
-#define EARLY_STORY_MODE_TOWN 3
-#define EARLY_STORY_SCENE_PLAY 2
-#define EARLY_STORY_MODE_INPUT 0x514
-#define EARLY_STORY_MASK_INPUT 4
-#define EARLY_STORY_QUEUE_BEGIN 0x78
-#define EARLY_STORY_QUEUE_END 0x80
-#define EARLY_STORY_PROMPT_MASK_LEA 0x65
+#define EARLY_STORY_MANAGER_MODE HYDELAND_MANAGER_MODE
+#define EARLY_STORY_MANAGER_SCENE HYDELAND_MANAGER_SCENE
+#define EARLY_STORY_MANAGER_QUEUE HYDELAND_MANAGER_QUEUE
+#define EARLY_STORY_OBJECT_STATE HYDELAND_OBJECT_STATE
+#define EARLY_STORY_MODE_TOWN HYDELAND_MODE_TOWN
+#define EARLY_STORY_SCENE_PLAY HYDELAND_SCENE_PLAY
+#define EARLY_STORY_MODE_INPUT HYDELAND_MODE_INPUT
+#define EARLY_STORY_MASK_INPUT HYDELAND_MASK_INPUT
+#define EARLY_STORY_QUEUE_BEGIN HYDELAND_QUEUE_BEGIN
+#define EARLY_STORY_QUEUE_END HYDELAND_QUEUE_END
+#define EARLY_STORY_PROMPT_MASK_LEA HYDELAND_PROMPT_MASK_LEA
 #define EARLY_STORY_MANAGER_UI 0xa8       /* game manager: the window manager */
 #define EARLY_STORY_UI_WINDOWS 0x78       /* window manager: one 0x20 byte slot per window type, from type 1 */
 #define EARLY_STORY_UI_SLOT_SIZE 0x20
@@ -53,13 +53,13 @@ extern "C" {
 #define EARLY_STORY_HINT_TEXT_OBJECT 0x3e0
 #define EARLY_STORY_HINT_SHOW_SLOT 0x188
 #define EARLY_STORY_HINT_MESSAGE 0x432 /* SystemMsg "%s" */
-#define EARLY_STORY_PROMPT_CHECKS_SPAN 0xc0
+#define EARLY_STORY_PROMPT_CHECKS_SPAN HYDELAND_PROMPT_CHECKS_SPAN
 
 /* The scene director opens the town menu and the Network Menu as one window kind-switched by location. */
-#define EARLY_STORY_AREA_TYPE 0x108 /* scene object: stage type, 9 in a town */
-#define EARLY_STORY_AREA_LOCATION 0xf0
-#define EARLY_STORY_AREA_TOWN 9
-#define EARLY_STORY_AREA_HYDELAND 0
+#define EARLY_STORY_AREA_TYPE HYDELAND_AREA_TYPE
+#define EARLY_STORY_AREA_LOCATION HYDELAND_AREA_LOCATION
+#define EARLY_STORY_AREA_TOWN HYDELAND_AREA_TOWN
+#define EARLY_STORY_AREA_HYDELAND HYDELAND_AREA_STREET
 #define EARLY_STORY_MENU_KIND 0x1510
 #define EARLY_STORY_MENU_KIND_NETWORK 2
 #define EARLY_STORY_PAD_TRIANGLE 0x1000 /* libScePad's button bit */
@@ -138,7 +138,7 @@ int early_story_hint_visible(void);
 size_t early_story_online_stub_bytes(void);
 
 /* The hooks for `sites` on `image`, in the order selector, hint call, notice call, host record, the four writers, the
- * online check, the town's every-frame call, the director's Menu press test, step check and kind store, the room wish's
+ * online check, the town's every-frame call (the shared hydeland_town_hook), the director's Menu press test, step check and kind store, the room wish's
  * location test, then the room info's location store.
  * The number of hooks when every site holds the verified bytes; 0 otherwise, with `why` naming the first that did not. */
 int early_story_online_hooks(const uint8_t *image, uint64_t size, const DcpEarlyStorySites *sites,

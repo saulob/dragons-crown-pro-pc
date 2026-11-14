@@ -12,7 +12,7 @@ static const uint8_t kOnlineAccessor[8] = {0x80, 0x7f, 0x6f, 0x2c, 0x0f, 0x97, 0
 
 static _Atomic(EarlyStorySelectorFn) selector_function;
 static _Atomic(EarlyStoryPromptFn) prompt_function;
-static _Atomic uint64_t prompt_owner_vtable, control_mask_table;
+static _Atomic uint64_t prompt_owner_vtable;
 static _Alignas(16) uint8_t prompt_owner[EARLY_STORY_OWNER_SIZE];
 static uint64_t current_town, owner_town;
 static int prompt_open, prompt_settled;
@@ -39,7 +39,7 @@ void early_story_online_set_selector(EarlyStorySelectorFn selector) {
 
 void early_story_online_set_prompt(EarlyStoryPromptFn prompt, uint64_t owner_vtable, uint64_t control_mask_address) {
     atomic_store(&prompt_owner_vtable, owner_vtable);
-    atomic_store(&control_mask_table, control_mask_address);
+    hydeland_town_set_mask_table(control_mask_address);
     atomic_store(&prompt_function, prompt);
     early_story_town_prompt_reset();
 }
@@ -212,26 +212,6 @@ static uint8_t guest_u8(uint64_t at) {
     return *(const uint8_t *)(uintptr_t)at;
 }
 
-static uint64_t manager_of(uint64_t town) {
-    const uint64_t context = guest_u64(town + EARLY_STORY_TOWN_CONTEXT);
-    return context ? guest_u64(context + EARLY_STORY_CONTEXT_MANAGER) : 0;
-}
-
-/* The four checks the game's prompt function makes before it does anything: the same ones, read the same way. */
-static int town_accepts_input(uint64_t manager) {
-    const uint64_t mask_table = atomic_load(&control_mask_table);
-    if (!manager || !mask_table) return 0;
-    const uint64_t mode = guest_u64(manager + EARLY_STORY_MANAGER_MODE);
-    const uint64_t scene = guest_u64(manager + EARLY_STORY_MANAGER_SCENE);
-    const uint64_t queue = guest_u64(manager + EARLY_STORY_MANAGER_QUEUE);
-    if (!mode || !scene || !queue) return 0;
-    return guest_u8(mode + EARLY_STORY_OBJECT_STATE) == EARLY_STORY_MODE_TOWN &&
-           (guest_u32(mode + EARLY_STORY_MODE_INPUT) & guest_u32(mask_table + EARLY_STORY_MASK_INPUT)) != 0 &&
-           guest_u8(scene + EARLY_STORY_OBJECT_STATE) == EARLY_STORY_SCENE_PLAY &&
-           guest_u8(queue + EARLY_STORY_OBJECT_STATE) == 0 &&
-           guest_u64(queue + EARLY_STORY_QUEUE_END) == guest_u64(queue + EARLY_STORY_QUEUE_BEGIN);
-}
-
 static void run_prompt(void) {
     const EarlyStoryPromptFn prompt = atomic_load(&prompt_function);
     const int done = prompt((uint64_t)(uintptr_t)prompt_owner, EARLY_STORY_PROMPT_SLOT) != 0;
@@ -349,12 +329,6 @@ void GUEST_HOOK_ABI early_story_room_info_hook(GuestRegs *regs) {
         regs->rax = (regs->rax & ~(uint64_t)0xffff) | EARLY_STORY_ROOM_WISH_GATE;
 }
 
-static int hydeland_shortcut_ready(uint64_t manager) {
-    const uint64_t scene = guest_u64(manager + EARLY_STORY_MANAGER_SCENE);
-    return guest_u32(scene + EARLY_STORY_AREA_TYPE) == EARLY_STORY_AREA_TOWN &&
-           guest_u32(scene + EARLY_STORY_AREA_LOCATION) == EARLY_STORY_AREA_HYDELAND;
-}
-
 /* Every frame of the town update. An open prompt is kept running whatever the town's checks say. Otherwise, once the
  * town accepts input for a host with the setting on, online access is enabled for the run and the game's own prompt is
  * offered once; its own once-per-run flag keeps the Castle Gate and Stables from asking again. Hydeland's Network Menu
@@ -368,9 +342,9 @@ void GUEST_HOOK_ABI early_story_town_portal_hook(GuestRegs *regs) {
         hide_hint();
         return;
     }
-    const uint64_t manager = manager_of(current_town);
+    const uint64_t manager = hydeland_town_manager(current_town);
     if (!atomic_load(&prompt_function) || !early_story_active() || !early_story_hosting() || early_story_visiting() ||
-        !town_accepts_input(manager)) {
+        !hydeland_town_accepts_input(manager)) {
         hide_hint();
         return;
     }
@@ -383,7 +357,7 @@ void GUEST_HOOK_ABI early_story_town_portal_hook(GuestRegs *regs) {
         hide_hint();
         return;
     }
-    const int ready = hydeland_shortcut_ready(manager);
+    const int ready = hydeland_town_is_hydeland(manager);
     arm_shortcut(ready);
     if (ready) wish_host_room(manager);
     if (ready && shortcut_armed(now_ms())) show_hint(manager);
@@ -458,27 +432,6 @@ static int function_at(const uint8_t *image, uint64_t size, uint32_t at, GuestHo
     *hook = (GuestHook){name, at, 8, {0}, handler};
     memcpy(hook->original, prologue, 8);
     return 1;
-}
-
-static int contains(const uint8_t *image, uint32_t from, uint32_t length, const uint8_t *needle, size_t needle_size) {
-    for (uint32_t i = 0; i + needle_size <= length; ++i)
-        if (!memcmp(image + from + i, needle, needle_size)) return 1;
-    return 0;
-}
-
-/* The prompt function opens with the four checks town_accepts_input repeats, and loads the input mask from a table. */
-static int prompt_checks_match(const uint8_t *image, uint64_t size, uint32_t function) {
-    static const uint8_t mode[] = {0x41, 0x80, 0x7c, 0x24, 0x5b, 0x03};
-    static const uint8_t mask[] = {0x8b, 0x40, 0x04, 0x41, 0x85, 0x84, 0x24, 0x14, 0x05, 0x00, 0x00};
-    static const uint8_t scene[] = {0x41, 0x80, 0x7e, 0x5b, 0x02};
-    static const uint8_t queue[] = {0x4c, 0x8b, 0xbb, 0x08, 0x01, 0x00, 0x00};
-    if ((uint64_t)function + EARLY_STORY_PROMPT_CHECKS_SPAN > size) return 0;
-    const uint8_t *lea = image + function + EARLY_STORY_PROMPT_MASK_LEA;
-    return lea[0] == 0x48 && lea[1] == 0x8d && lea[2] == 0x05 &&
-           contains(image, function, EARLY_STORY_PROMPT_CHECKS_SPAN, mode, sizeof(mode)) &&
-           contains(image, function, EARLY_STORY_PROMPT_CHECKS_SPAN, mask, sizeof(mask)) &&
-           contains(image, function, EARLY_STORY_PROMPT_CHECKS_SPAN, scene, sizeof(scene)) &&
-           contains(image, function, EARLY_STORY_PROMPT_CHECKS_SPAN, queue, sizeof(queue));
 }
 
 /* The press test is `mov esi, 0x23` (the Menu action) then a call with the pad object in rdi. */
@@ -569,9 +522,8 @@ int early_story_online_hooks(const uint8_t *image, uint64_t size, const DcpEarly
     if (!function_at(image, size, sites->online_accessor, &hooks[8], "online check", kOnlineAccessor,
                      early_story_online_check_hook))
         return *why = "online check", 0;
-    if (!call_at(image, size, sites->town_portal_call, &hooks[9], "hydeland update", early_story_town_portal_hook))
-        return *why = "hydeland update call", 0;
-    if (!prompt_checks_match(image, size, sites->prompt_function)) return *why = "prompt control checks", 0;
+    if (!hydeland_town_hook_at(image, size, sites->town_portal_call, &hooks[9])) return *why = "hydeland update call", 0;
+    if (!hydeland_town_prompt_checks_match(image, size, sites->prompt_function)) return *why = "prompt control checks", 0;
     if (!menu_press_at(image, size, sites->menu_press_call, &hooks[10])) return *why = "menu press call", 0;
     if (!menu_step_at(image, size, sites->menu_step_call, &hooks[11])) return *why = "menu step call", 0;
     if (!menu_kind_at(image, size, sites->menu_kind_store, &hooks[12])) return *why = "menu kind store", 0;
@@ -597,12 +549,11 @@ int early_story_online_install(uint8_t *image, uint64_t size, uint64_t entry, co
         return 0;
     }
     early_story_online_set_selector((EarlyStorySelectorFn)(uintptr_t)(image + sites->selector));
-    const uint8_t *lea = image + sites->prompt_function + EARLY_STORY_PROMPT_MASK_LEA;
-    int32_t displacement;
-    memcpy(&displacement, lea + 3, sizeof(displacement));
     early_story_online_set_prompt((EarlyStoryPromptFn)(uintptr_t)(image + sites->prompt_function),
                                   (uint64_t)(uintptr_t)(image + sites->prompt_owner_vtable),
-                                  (uint64_t)(uintptr_t)(lea + 7 + displacement));
+                                  hydeland_town_mask_table(image, sites->prompt_function));
+    hydeland_town_set_installed(1);
+    hydeland_town_observe(HYDELAND_TOWN_EARLY_STORY, early_story_town_portal_hook);
     early_story_online_set_room_wish((EarlyStoryRoomWishFn)(uintptr_t)(image + sites->room_wish_function));
     const int hint = sites->hint_create && sites->hint_text && sites->hint_hide && sites->hint_refresh;
     if (hint) {

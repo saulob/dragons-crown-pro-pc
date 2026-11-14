@@ -13,6 +13,7 @@
 #include "localization/ui_text.h"
 #include "dcp_ping.h"
 #include "runtime_pad_rumble.h"
+#include "boss_battle.h"
 #include "imgui.h"
 
 namespace DcpOptionsUi {
@@ -210,6 +211,9 @@ void Change(const RowRef& row, int direction, const CheatRows& cheats) {
         state.status = outcome.changed && !outcome.saved ? "Could not save the settings." : std::string();
         if (outcome.changed && id == DcpOptions::Id::ControllerRumble) {
             runtime_pad_rumble_changed();
+        }
+        if (outcome.changed && id == DcpOptions::Id::EnableBossBattle) {
+            boss_battle_set_enabled(DcpSettings::Get().enable_boss_battle ? 1 : 0);
         }
         break;
     }

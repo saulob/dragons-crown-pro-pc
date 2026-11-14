@@ -25,7 +25,14 @@ static void put_u32(uint8_t *at, uint32_t value) {
     for (int i = 0; i < 4; ++i) at[i] = (uint8_t)(value >> (8 * i));
 }
 
-/* A SystemMsg-shaped sheet: record i is "r<i>", except the four title records. Returns the sheet size. */
+/* The Inn's unused Tutorial row and help, together long enough for every language's Inn row and help. */
+static const char kTutorialRow[] = "Tutorial";
+static const char kTutorialHelp[] = "Learn to use the current lead character class, as long as the longest Inn row and help any "
+                                    "language gives these two records together, kana included.";
+static const char *tutorial_row = kTutorialRow, *tutorial_help = kTutorialHelp;
+
+/* A SystemMsg-shaped sheet: record i is "r<i>", except the four title records and the two Inn records. Returns the sheet
+ * size. */
 static size_t build_sheet(uint8_t *sheet, const ExitGameLanguage *language, int patched_row) {
     memset(sheet, 0, SHEET_BYTES);
     memcpy(sheet, "FMSB", 4);
@@ -40,6 +47,8 @@ static size_t build_sheet(uint8_t *sheet, const ExitGameLanguage *language, int 
         else if (i == EXIT_GAME_ROW_RECORD) record = patched_row ? language->row : "PlayStation$Store";
         else if (i == EXIT_GAME_HELP_RECORD) record = patched_row ? language->help : language->help_original;
         else if (i == EXIT_GAME_STORE_HELP_RECORD) record = "Accessing ##(PSSTORE).";
+        else if (i == BOSS_BATTLE_INN_ROW_RECORD) record = tutorial_row;
+        else if (i == BOSS_BATTLE_INN_HELP_RECORD) record = tutorial_help;
         memcpy(p, record, strlen(record) + 1);
         p += strlen(record) + 1;
     }
@@ -55,11 +64,30 @@ static const char *record_at(const uint8_t *sheet, int index) {
     return (const char *)p;
 }
 
+/* The Inn records hold exactly the row and the help, every other record keeps its text and index, and the bytes the
+ * two freed are zeros after the last record, before the trailer. */
+static void check_inn(const uint8_t *sheet, const uint8_t *original, size_t size, const char *row, const char *help) {
+    CHECK(!strcmp(record_at(sheet, BOSS_BATTLE_INN_ROW_RECORD), row));
+    CHECK(!strcmp(record_at(sheet, BOSS_BATTLE_INN_HELP_RECORD), help));
+    for (int r = BOSS_BATTLE_INN_ROW_RECORD + 1; r < EXIT_GAME_SYSTEM_MSG_COUNT; ++r)
+        if (r != BOSS_BATTLE_INN_HELP_RECORD) CHECK(!strcmp(record_at(sheet, r), record_at(original, r)));
+    const char *last = record_at(sheet, EXIT_GAME_SYSTEM_MSG_COUNT - 1);
+    const char *original_last = record_at(original, EXIT_GAME_SYSTEM_MSG_COUNT - 1);
+    const size_t end = (size_t)(last - (const char *)sheet) + strlen(last) + 1;
+    const size_t original_end = (size_t)(original_last - (const char *)original) + strlen(original_last) + 1;
+    const size_t freed = strlen(record_at(original, BOSS_BATTLE_INN_ROW_RECORD)) +
+                         strlen(record_at(original, BOSS_BATTLE_INN_HELP_RECORD)) - strlen(row) - strlen(help);
+    CHECK(end + freed == original_end);
+    for (size_t i = end; i < original_end; ++i) CHECK(sheet[i] == 0);
+    CHECK(!memcmp(sheet + original_end, original + original_end, size - original_end));
+}
+
 static void test_language_table(void) {
     CHECK(EXIT_GAME_LANGUAGE_COUNT == 10);
     for (int i = 0; i < EXIT_GAME_LANGUAGE_COUNT; ++i) {
         const ExitGameLanguage *l = &exit_game_languages[i];
         CHECK(l->language && l->install_original && l->help_original && l->row && l->help);
+        CHECK(l->inn_row && *l->inn_row && l->inn_help && *l->inn_help);
         CHECK(strlen(l->row) > 0 && strlen(l->row) <= strlen("PlayStation$Store"));
         CHECK(strlen(l->help) > 0 && strlen(l->help) <= strlen(l->help_original));
         for (int j = 0; j < i; ++j) CHECK(strcmp(l->language, exit_game_languages[j].language));
@@ -77,8 +105,10 @@ static void test_text_every_language(void) {
         CHECK(exit_game_text_patch(sheet, size, &found) == EXIT_GAME_TEXT_PATCHED && found == l);
         CHECK(!strcmp(record_at(sheet, EXIT_GAME_ROW_RECORD), l->row));
         CHECK(!strcmp(record_at(sheet, EXIT_GAME_HELP_RECORD), l->help));
+        check_inn(sheet, original, size, l->inn_row, l->inn_help);
         /* the sheet keeps its size and every record keeps its index: the other records are byte for byte as they were */
         for (int r = 0; r < EXIT_GAME_SYSTEM_MSG_COUNT; ++r) {
+            if (r == BOSS_BATTLE_INN_ROW_RECORD || r == BOSS_BATTLE_INN_HELP_RECORD) continue;
             if (r >= EXIT_GAME_INSTALL_RECORD && r <= EXIT_GAME_ROW_RECORD) continue;
             if (r >= EXIT_GAME_HELP_RECORD && r <= EXIT_GAME_STORE_HELP_RECORD) continue;
             CHECK(!strcmp(record_at(sheet, r), record_at(original, r)));
@@ -86,12 +116,42 @@ static void test_text_every_language(void) {
         CHECK(!memcmp(sheet + size - 4, "FEOC", 4));
         CHECK(!memcmp(sheet, original, 0x20 + EXIT_GAME_SYSTEM_MSG_COUNT * 8));
         CHECK(exit_game_text_patch(sheet, size, NULL) == EXIT_GAME_TEXT_ALREADY);
+        check_inn(sheet, original, size, l->inn_row, l->inn_help);
         const ExitGameLanguage *pre_patched = NULL;
         build_sheet(sheet, l, 1);
         CHECK(exit_game_text_patch(sheet, size, &pre_patched) == EXIT_GAME_TEXT_ALREADY && pre_patched == l);
     }
     free(sheet);
     free(original);
+}
+
+/* Inn records too short for a language's words: its row alone, else the English row alone, else left as they are. */
+static void inn_fallback(const ExitGameLanguage *language, const char *row, const char *help, const char *expected) {
+    uint8_t *sheet = malloc(SHEET_BYTES), *original = malloc(SHEET_BYTES);
+    CHECK(sheet && original);
+    if (!sheet || !original) return;
+    tutorial_row = row;
+    tutorial_help = help;
+    const size_t size = build_sheet(sheet, language, 0);
+    memcpy(original, sheet, size);
+    CHECK(exit_game_text_patch(sheet, size, NULL) == EXIT_GAME_TEXT_PATCHED);
+    if (expected) check_inn(sheet, original, size, expected, "");
+    else CHECK(!memcmp(record_at(sheet, BOSS_BATTLE_INN_ROW_RECORD), record_at(original, BOSS_BATTLE_INN_ROW_RECORD),
+                       (size_t)(record_at(original, BOSS_BATTLE_INN_HELP_RECORD + 1) -
+                                record_at(original, BOSS_BATTLE_INN_ROW_RECORD))));
+    tutorial_row = kTutorialRow;
+    tutorial_help = kTutorialHelp;
+    free(sheet);
+    free(original);
+}
+
+static void test_text_inn_fallback(void) {
+    const ExitGameLanguage *german = &exit_game_languages[1], *spanish = &exit_game_languages[2];
+    CHECK(strlen(german->inn_row) == 9 && strlen(german->inn_row) + strlen(german->inn_help) > 9 + 31);
+    inn_fallback(german, "Tutorial", "Help with 23 bytes left", german->inn_row);
+    CHECK(strlen(spanish->inn_row) == 16 && strlen(exit_game_languages[0].inn_row) == 11);
+    inn_fallback(spanish, "Tutorial", "Help", exit_game_languages[0].inn_row);
+    inn_fallback(german, "T", "H", NULL);
 }
 
 /* The USA and European fonts draw Russian at the fan package's kana: the row, written so, is recognised and written so. */
@@ -102,11 +162,12 @@ static void test_text_russian_kana(void) {
     }
     CHECK(russian && russian->kana_cyrillic);
     if (!russian) return;
-    static char text[4][512];
-    const char *plain[4] = {russian->install_original, russian->help_original, russian->row, russian->help};
-    for (int i = 0; i < 4; ++i) CHECK(cyrillic_kana_encode(plain[i], text[i], sizeof(text[i])) > 0 && strcmp(text[i], plain[i]));
+    static char text[6][512];
+    const char *plain[6] = {russian->install_original, russian->help_original, russian->row, russian->help, russian->inn_row,
+                            russian->inn_help};
+    for (int i = 0; i < 6; ++i) CHECK(cyrillic_kana_encode(plain[i], text[i], sizeof(text[i])) > 0 && strcmp(text[i], plain[i]));
     CHECK(strlen(text[2]) <= strlen("PlayStation$Store"));
-    const ExitGameLanguage kana = {russian->key, russian->language, text[0], text[1], text[2], text[3], NULL, 0};
+    const ExitGameLanguage kana = {russian->key, russian->language, text[0], text[1], text[2], text[3], NULL, 0, text[4], text[5]};
     uint8_t *sheet = malloc(SHEET_BYTES);
     CHECK(sheet != NULL);
     if (!sheet) return;
@@ -115,6 +176,8 @@ static void test_text_russian_kana(void) {
     CHECK(exit_game_text_patch(sheet, size, &found) == EXIT_GAME_TEXT_PATCHED && found == russian);
     CHECK(!strcmp(record_at(sheet, EXIT_GAME_ROW_RECORD), text[2]));
     CHECK(!strcmp(record_at(sheet, EXIT_GAME_HELP_RECORD), text[3]));
+    CHECK(!strcmp(record_at(sheet, BOSS_BATTLE_INN_ROW_RECORD), text[4]) ||
+          !strcmp(record_at(sheet, BOSS_BATTLE_INN_ROW_RECORD), exit_game_languages[0].inn_row));
     CHECK(exit_game_text_patch(sheet, size, NULL) == EXIT_GAME_TEXT_ALREADY);
     free(sheet);
 }
@@ -708,6 +771,7 @@ static void test_install(void) {
 int main(void) {
     test_language_table();
     test_text_every_language();
+    test_text_inn_fallback();
     test_text_russian_kana();
     test_text_leaves_other_sheets_alone();
     test_counts();

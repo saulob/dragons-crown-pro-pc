@@ -58,6 +58,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kStorySkipOfferKey, "0"},
     {kTutorialSkipOfferKey, "0"},
     {kUnlockGalleryKey, "0"},
+    {kEnableBossBattleKey, "0"},
     {kOnlineEnabledKey, "0"},
     {kOnlineNameKey, net::kDefaultOnlineName},
     {kOnlineUdpPortKey, "0"},
@@ -420,6 +421,12 @@ extern "C" int dcp_unlock_gallery(const char* settings_file) {
     return settings.GetBool(kUnlockGalleryKey, false) ? 1 : 0;
 }
 
+extern "C" int dcp_enable_boss_battle(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return settings.GetBool(kEnableBossBattleKey, false) ? 1 : 0;
+}
+
 extern "C" int dcp_early_story_online(const char* settings_file) {
     using namespace dcp;
     if (const char* forced = std::getenv("DCP_EARLY_STORY_ONLINE"); forced && *forced) {
@@ -508,7 +515,8 @@ std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* b
     const bool buttons = run ? run->japanese_menu_buttons != 0 : settings.GetBool(kJapaneseMenuButtonsKey, false);
     const bool gallery = run ? run->unlock_gallery != 0 : settings.GetBool(kUnlockGalleryKey, false);
     line(std::string("Skip Intro ") + OnOff(intro) + ", Japanese Menu Buttons " + OnOff(buttons) + ", Story Skip Offer " + OnOff(story) + ", Tutorial Skip Offer " +
-         OnOff(tutorial) + ", Unlock Gallery " + OnOff(gallery) +
+         OnOff(tutorial) + ", Unlock Gallery " + OnOff(gallery) + ", Boss Battle " +
+         OnOff(settings.GetBool(kEnableBossBattleKey, false)) +
          ", overlay programs " +
          (kSeparateGameProcessAvailable ? OnOff(settings.GetBool(kAllowOverlayProgramsKey, false)) : "unsupported"));
     return out;

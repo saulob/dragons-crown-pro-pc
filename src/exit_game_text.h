@@ -1,7 +1,9 @@
 /* Exit Game title text. The title menu adds the PlayStation Store record (388) as its last item and shows the help record
  * 394 for it; the loaded sheet is rewritten in memory before the game builds its string table, so the active language
  * picks the text as for every other row. The sheet keeps its size: the bytes the new strings free are given to the
- * neighbouring records (387, 395) as trailing spaces, so no record moves. */
+ * neighbouring records (387, 395) as trailing spaces, so no record moves. The Inn's Boss Battle row takes the Tutorial
+ * row the Inn never adds (922) and its help (956); the records after them move, which the string table, filled by walking
+ * the sheet after this rewrite, follows, and the freed bytes join the zero padding after the last record. */
 #ifndef DCP_EXIT_GAME_TEXT_H
 #define DCP_EXIT_GAME_TEXT_H
 
@@ -17,6 +19,8 @@ extern "C" {
 #define EXIT_GAME_ROW_RECORD 388
 #define EXIT_GAME_HELP_RECORD 394
 #define EXIT_GAME_STORE_HELP_RECORD 395
+#define BOSS_BATTLE_INN_ROW_RECORD 922  /* the Inn menu's unused Tutorial row */
+#define BOSS_BATTLE_INN_HELP_RECORD 956 /* its unused help line */
 
 typedef struct {
     const char *key; /* the launcher's TextLanguage key */
@@ -25,6 +29,7 @@ typedef struct {
     const char *row, *help;                        /* the new records 388 and 394 */
     const char *install_unaccented;                /* record 387 where the font could not show its letters */
     int kana_cyrillic;                             /* also matched as the USA font's kana (cyrillic_kana_encode) */
+    const char *inn_row, *inn_help;                /* the new records 922 and 956 */
 } ExitGameLanguage;
 
 #define EXIT_GAME_LANGUAGE_COUNT 10

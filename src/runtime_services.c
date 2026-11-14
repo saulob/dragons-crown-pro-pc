@@ -10,6 +10,7 @@
 #include "dcpgpu.h"
 #include "runtime_log.h"
 #include "trophies/trophy_runtime.h"
+#include "boss_battle.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -512,7 +513,15 @@ static ABI int32_t ime_panel_size_extended(const ImeParam *param, const void *ex
 static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) { return trophy_runtime_create_context(ctx,user,label,options); }
 static ABI int32_t trophy_handle(int32_t *handle) { return trophy_runtime_create_handle(handle); }
 static ABI int32_t trophy_register(int32_t ctx,int32_t handle,uint64_t options) { return trophy_runtime_register_context(ctx,handle,options); }
-static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) { return trophy_runtime_unlock(ctx,handle,id,platinum); }
+/* A Boss Battle session is not campaign play: its trophies are answered as earned and never stored. */
+static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
+    if (boss_battle_session_active()) {
+        if (platinum) *platinum=-1;
+        printf("Boss Battle: trophy %d not stored (Boss Battle session)\n",id);
+        return 0;
+    }
+    return trophy_runtime_unlock(ctx,handle,id,platinum);
+}
 static ABI int32_t trophy_game_info(int32_t ctx,int32_t handle,void *details,void *data) { return trophy_runtime_game_info(ctx,handle,details,data); }
 static ABI int32_t trophy_info(int32_t ctx,int32_t handle,int32_t id,void *details,void *data) { return trophy_runtime_trophy_info(ctx,handle,id,details,data); }
 static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flags,uint32_t *count) { return trophy_runtime_unlock_state(ctx,handle,flags,count); }

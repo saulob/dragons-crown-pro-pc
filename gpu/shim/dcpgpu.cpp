@@ -211,7 +211,8 @@ static void SelectRenderer() {
 static_assert(DCP_GPU_FEATURE_RENDER_RESOLUTION == DcpSettings::RenderResolution &&
               DCP_GPU_FEATURE_TRUE_ULTRAWIDE == DcpSettings::TrueUltrawide &&
               DCP_GPU_FEATURE_JAPANESE_NPC_VOICES == DcpSettings::JapaneseNpcVoices &&
-              DCP_GPU_FEATURE_UNLOCK_GALLERY == DcpSettings::UnlockGallery);
+              DCP_GPU_FEATURE_UNLOCK_GALLERY == DcpSettings::UnlockGallery &&
+              DCP_GPU_FEATURE_BOSS_BATTLE == DcpSettings::BossBattle);
 
 extern "C" int dcpgpu_init(const DcpGpuConfig* config) {
     DcpSettings::Load(config->settings_file);

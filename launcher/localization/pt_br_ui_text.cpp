@@ -568,6 +568,22 @@ Skips the startup logo and starts at the title screen.	Pula o logo de abertura e
 Unlock Gallery	Desbloquear Galeria
 Unlocks all Gallery content while enabled without changing save progress	Desbloqueia todo o conteúdo da Galeria enquanto estiver ligado, sem alterar o progresso salvo
 Unlocks all Gallery content while enabled without changing save progress.	Desbloqueia todo o conteúdo da Galeria enquanto estiver ligado, sem alterar o progresso salvo.
+Enable Boss Battle	Ativar Batalha de Chefes
+Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fights there never change campaign progress. Offline only.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. As lutas ali nunca alteram o progresso da campanha. Somente offline.
+Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu opens. Fights there never change campaign progress. Offline only.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. Vale a partir da próxima vez que o menu da taverna abrir. As lutas ali nunca alteram o progresso da campanha. Somente offline.
+Boss Battle	Batalha de Chefes
+Return to tavern	Voltar à taverna
+Attempts	Tentativas
+Return to Dragon's Haven Inn.	Volta para a Dragon's Haven Inn.
+Fight this boss with the party prepared in the Inn. Campaign progress does not change.	Enfrente este chefe com o grupo preparado na taverna. O progresso da campanha não muda.
+Pending: not yet confirmed in game. The fight, the victory and the return to the Inn still need a full run.	Pendente: ainda não confirmado no jogo. A luta, a vitória e a volta à taverna ainda precisam de um teste completo.
+This boss cannot be started now.	Este chefe não pode ser iniciado agora.
+Boss Battle is not available for this game build.	A Batalha de Chefes não está disponível para esta versão do jogo.
+Boss Battle did not start: the campaign save could not be protected. Try again.	A Batalha de Chefes não começou: o save da campanha não pôde ser protegido. Tente de novo.
+Boss Battle did not start: the campaign state could not be kept.	A Batalha de Chefes não começou: o estado da campanha não pôde ser guardado.
+Boss Battle: the game did not start the battle.	Batalha de Chefes: o jogo não iniciou a luta.
+Boss Battle: the game did not enter the boss arena.	Batalha de Chefes: o jogo não entrou na arena do chefe.
+Boss Battle could not put the campaign back. Saving keeps your progress from before the fight; restart the game before playing on.	A Batalha de Chefes não conseguiu restaurar a campanha. O save mantém seu progresso de antes da luta; reinicie o jogo antes de continuar jogando.
 Japanese Menu Buttons	Botões de menu japoneses
 Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat controls do not change. Applies at the next game start.	Desligado: %s confirma e %s cancela nos menus. Ligado: %s confirma e %s cancela, como na versão japonesa. Os controles de combate não mudam. Vale a partir do próximo início do jogo.
 Swaps Confirm and Cancel in the menus, as in the Japanese release. Combat controls do not change.	Troca Confirmar e Cancelar nos menus, como na versão japonesa. Os controles de combate não mudam.

@@ -273,6 +273,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     char path[1024];
     int e=translate(guest,path,sizeof(path));
     if (e) return -e;
+    if ((flags & (3|0x8|0x200|0x400|0x800)) && runtime_savedata_protects(path)) return -EACCES;
 #ifdef _WIN32
     /* Windows cannot open a directory as a CRT descriptor: directories are listings only. */
     (void)mode;
@@ -528,6 +529,7 @@ static int64_t path_op(const char *guest,int op,int mode) {
     char path[1024];
     int e=translate(guest,path,sizeof(path));
     if (e) return -e;
+    if (runtime_savedata_protects(path)) return -EACCES;
     int r= op==0 ? mkdir(path,mode ? mode : 0755) : op==1 ? rmdir(path) : unlink(path);
     return r ? -errno : 0;
 }
@@ -537,6 +539,7 @@ static int64_t do_rename(const char *from,const char *to) {
     int e=translate(from,a,sizeof(a));
     if (!e) e=translate(to,b,sizeof(b));
     if (e) return -e;
+    if (runtime_savedata_protects(a) || runtime_savedata_protects(b)) return -EACCES;
 #ifdef _WIN32
     /* POSIX rename replaces an existing target; the CRT's fails. */
     return MoveFileExA(a,b,MOVEFILE_REPLACE_EXISTING) ? 0 : -compat_errno_from_win32(GetLastError());
@@ -558,6 +561,7 @@ static int64_t do_truncate(const char *guest,int64_t length) {
     char path[1024];
     int e=translate(guest,path,sizeof(path));
     if (e) return -e;
+    if (runtime_savedata_protects(path)) return -EACCES;
 #ifdef _WIN32
     int h=open(path,O_RDWR|O_BINARY);
     if (h<0) return -errno;

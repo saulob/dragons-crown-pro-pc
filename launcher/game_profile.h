@@ -155,6 +155,12 @@ inline bool UnlockGalleryAvailable(const GameBuild* build) {
     return build == nullptr || build->unlock_gallery;
 }
 
+// Boss Battle's sites are verified for the USA 1.00 build only; the unknown build is not restricted here.
+inline bool BossBattleAvailable(const GameBuild* build) {
+    return build == nullptr ||
+           (std::string_view(build->title_id) == "CUSA10454" && std::string_view(build->version) == "1.00");
+}
+
 // False only for a known build whose pass projection sites are not verified; the unknown build is not restricted here,
 // and the loader refuses to patch it anyway.
 inline bool TrueUltrawideAvailable(const GameBuild* build) {

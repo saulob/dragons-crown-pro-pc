@@ -18,7 +18,8 @@ enum Feature : unsigned {
     TrueUltrawide = 1u << 1,
     JapaneseNpcVoices = 1u << 2,
     UnlockGallery = 1u << 3,
-    AllFeatures = (1u << 4) - 1,
+    BossBattle = 1u << 4,
+    AllFeatures = (1u << 5) - 1,
 };
 
 struct Values {
@@ -55,6 +56,8 @@ struct Values {
     std::atomic<bool> true_ultrawide{false}, japanese_npc_voices{false};
     // Whether the game's vibration requests reach the controllers; the pad reads it on every request.
     std::atomic<bool> controller_rumble{true};
+    // Whether the Inn menu offers Boss Battle; read each time the Inn builds its menu.
+    std::atomic<bool> enable_boss_battle{false};
     // What the running game build supports (Feature bits), set by the loader.
     std::atomic<unsigned> features{AllFeatures};
     // Set by the window: the refresh rate of the display it opened on; 0 when unknown.

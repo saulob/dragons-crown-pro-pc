@@ -1260,7 +1260,7 @@ uint64_t StoredPointer(const std::vector<uint8_t>& bytes, uint64_t at) {
 // the image as the native side assumes.
 void CheckHydelandTrigger(const std::vector<uint8_t>& shipped, const std::vector<uint8_t>& patched, uint64_t size,
                           const DcpEarlyStorySites& sites, const GuestHook (&hooks)[EARLY_STORY_HOOKS]) {
-    CHECK(hooks[9].offset == sites.town_portal_call && hooks[9].handler == early_story_town_portal_hook);
+    CHECK(hooks[9].offset == sites.town_portal_call && hooks[9].handler == hydeland_town_hook);
     CHECK(shipped[sites.town_portal_call] == 0xe8 && patched[sites.town_portal_call] == 0xe9);
 
     // The town menu window's creation is untouched.

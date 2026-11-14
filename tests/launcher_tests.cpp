@@ -2225,6 +2225,41 @@ void TestEarlyStoryOnlineSetting(const fs::path& base) {
     }
 }
 
+// Enable Boss Battle: a managed Off-by-default key, read by the loader, offered on the Gameplay page for the USA 1.00 build.
+void TestEnableBossBattleSettings(const fs::path& base) {
+    const fs::path file = base / "enable_boss_battle" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kEnableBossBattleKey && setting.default_value == "0";
+    }
+    CHECK(managed == 1 && std::string(kEnableBossBattleKey) == "enable_boss_battle");
+    CHECK(dcp_enable_boss_battle(nullptr) == 0 && dcp_enable_boss_battle(file.string().c_str()) == 0);
+    WriteAll(file, "enable_boss_battle = 1\n");
+    CHECK(dcp_enable_boss_battle(file.string().c_str()) == 1);
+    WriteAll(file, "enable_boss_battle = banana\n");
+    CHECK(dcp_enable_boss_battle(file.string().c_str()) == 0);
+
+    int offered = 0;
+    for (const GameBuild& build : SupportedBuilds()) {
+        const bool usa_100 = std::string_view(build.title_id) == "CUSA10454" && std::string_view(build.version) == "1.00";
+        CHECK(BossBattleAvailable(&build) == usa_100);
+        offered += BossBattleAvailable(&build);
+    }
+    CHECK(offered == 1 && BossBattleAvailable(nullptr));
+
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const std::string gated = "if (BossBattleAvailable(build_)) {\n            ui.Toggle(\"Enable Boss Battle\", kEnableBossBattleHelp, "
+                              "kEnableBossBattleKey, false, \"Off\", \"On\");";
+    const size_t row = launcher.find(gated);
+    const size_t page = launcher.find("void PageGameplay(trg::Ui& ui) {");
+    CHECK(row != std::string::npos && page != std::string::npos && row > launcher.find("ui.Toggle(\"Unlock Gallery\"", page));
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("boss_battle_set_enabled(dcp_enable_boss_battle(settings_file));") != std::string::npos);
+    CHECK(loader.find("boss_battle_set_save_guard(runtime_savedata_isolate,runtime_savedata_release);") != std::string::npos);
+    CHECK(loader.find("exit_game_set_row_gate") == std::string::npos);
+}
+
 void TestUnlockGallerySettings(const fs::path& base) {
     const fs::path file = base / "unlock_gallery" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -8438,6 +8473,7 @@ int main(int argc, char** argv) {
     TestSkipIntroSettings(base);
     TestControllerRumbleSettings(base);
     TestUnlockGallerySettings(base);
+    TestEnableBossBattleSettings(base);
     TestEarlyStoryOnlineSetting(base);
     TestJapaneseMenuButtonsSettings(base);
     TestPinnedBuild(base);

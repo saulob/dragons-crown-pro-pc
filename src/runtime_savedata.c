@@ -13,6 +13,7 @@
 #include <time.h>
 #include <dirent.h>
 #include <errno.h>
+#include <stdatomic.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #ifndef _WIN32
@@ -68,6 +69,8 @@ static char title_id[16]="UNKNOWN";
 static struct { int used; char host[700], meta[700]; uint64_t blocks; } slots[SLOTS];
 static char memory_path[720];
 static uint64_t memory_size;
+static int32_t memory_user;
+static atomic_int isolated;
 static size_t mounts_done, memory_writes;
 
 void runtime_savedata_configure(const char *title) {
@@ -80,8 +83,11 @@ static int make_dirs(const char *path) {
     for (char *p=buffer+1;*p;++p) if (*p=='/') { *p=0; mkdir(buffer,0755); *p='/'; }
     return mkdir(buffer,0755) && errno!=EEXIST ? -1 : 0;
 }
+#define CAMPAIGN_SAVES "savedata"
+#define ISOLATED_SAVES "boss_battle/savedata"
 static void root(int32_t user, const char *title, char *out, size_t size) {
-    snprintf(out,size,"%s/savedata/%d/%s",runtime_file_user_dir(),user,title && *title ? title : title_id);
+    snprintf(out,size,"%s/%s/%d/%s",runtime_file_user_dir(),atomic_load(&isolated) ? ISOLATED_SAVES : CAMPAIGN_SAVES,user,
+             title && *title ? title : title_id);
 }
 static int valid_name(const char *name, size_t max) {
     size_t n=strnlen(name,max);
@@ -112,6 +118,87 @@ static int remove_entry(const char *path, const struct stat *st, int flag, struc
 }
 static void remove_tree(const char *path) { nftw(path,remove_entry,16,FTW_DEPTH|FTW_PHYS); }
 #endif
+
+static int copy_file(const char *from, const char *to) {
+    FILE *in=fopen(from,"rb");
+    if (!in) return -1;
+    FILE *out=fopen(to,"wb");
+    if (!out) { fclose(in); return -1; }
+    char buffer[65536];
+    size_t n;
+    int ok=1;
+    while (ok && (n=fread(buffer,1,sizeof(buffer),in))>0) ok=fwrite(buffer,1,n,out)==n;
+    if (ferror(in)) ok=0;
+    fclose(in);
+    if (fclose(out)) ok=0;
+    return ok ? 0 : -1;
+}
+static int copy_tree(const char *from, const char *to) {
+    struct stat st;
+    if (stat(from,&st)) return errno==ENOENT ? 0 : -1;
+    if (make_dirs(to)) return -1;
+    DIR *d=opendir(from);
+    if (!d) return -1;
+    int r=0;
+    for (struct dirent *e; !r && (e=readdir(d));) {
+        if (!strcmp(e->d_name,".") || !strcmp(e->d_name,"..")) continue;
+        char a[1100], b[1100];
+        snprintf(a,sizeof(a),"%s/%s",from,e->d_name);
+        snprintf(b,sizeof(b),"%s/%s",to,e->d_name);
+        if (stat(a,&st)) r=-1;
+        else if (S_ISDIR(st.st_mode)) r=copy_tree(a,b);
+        else if (S_ISREG(st.st_mode)) r=copy_file(a,b);
+    }
+    closedir(d);
+    return r;
+}
+static void point_memory_at_root(void) {
+    if (!memory_size) return;
+    char base[600];
+    root(memory_user,NULL,base,sizeof(base));
+    snprintf(memory_path,sizeof(memory_path),"%s.memory/memory.dat",base);
+}
+/* Boss Battle: until runtime_savedata_release() every save operation uses a fresh copy of the campaign saves. */
+int runtime_savedata_isolate(void) {
+    char campaign[600], copy[600];
+    snprintf(campaign,sizeof(campaign),"%s/%s",runtime_file_user_dir(),CAMPAIGN_SAVES);
+    snprintf(copy,sizeof(copy),"%s/%s",runtime_file_user_dir(),ISOLATED_SAVES);
+    pthread_mutex_lock(&lock);
+    if (atomic_load(&isolated)) { pthread_mutex_unlock(&lock); return 1; }
+    for (int i=0;i<SLOTS;++i) if (slots[i].used) {
+        pthread_mutex_unlock(&lock);
+        puts("Runtime: save data not isolated: a save is mounted right now");
+        return 0;
+    }
+    remove_tree(copy);
+    const int ok=!make_dirs(copy) && !copy_tree(campaign,copy);
+    if (ok) {
+        atomic_store(&isolated,1);
+        point_memory_at_root();
+    } else {
+        remove_tree(copy);
+    }
+    pthread_mutex_unlock(&lock);
+    printf("Runtime: save data %s: campaign saves read-only, session copy in %s\n",ok ? "isolated" : "NOT isolated",
+           ISOLATED_SAVES);
+    return ok;
+}
+/* A save mounted from the copy keeps its host path until it is unmounted; only new operations reach the campaign. */
+void runtime_savedata_release(void) {
+    pthread_mutex_lock(&lock);
+    const int was=atomic_exchange(&isolated,0);
+    if (was) point_memory_at_root();
+    pthread_mutex_unlock(&lock);
+    if (was) puts("Runtime: save data released: campaign saves writable again");
+}
+int runtime_savedata_isolated(void) { return atomic_load(&isolated); }
+/* 1 for a host path inside the campaign saves while they are isolated: nothing may write there. */
+int runtime_savedata_protects(const char *host_path) {
+    if (!atomic_load(&isolated) || !host_path) return 0;
+    char campaign[620];
+    const int n=snprintf(campaign,sizeof(campaign),"%s/%s/",runtime_file_user_dir(),CAMPAIGN_SAVES);
+    return n>0 && !strncmp(host_path,campaign,(size_t)n);
+}
 
 /* A save's param (title, subtitle, date) for the save dialog; 0 when it exists. */
 int runtime_savedata_param(int32_t user, const char *dir, void *param) {
@@ -335,6 +422,7 @@ static ABI int32_t memory_setup(int32_t user, uint64_t size, const Param *param)
     snprintf(dir,sizeof(dir),"%s.memory",base);
     if (make_dirs(dir)) return ERR_INTERNAL;
     pthread_mutex_lock(&lock);
+    memory_user=user;
     snprintf(memory_path,sizeof(memory_path),"%s/memory.dat",dir);
     FILE *f=fopen(memory_path,"r+b");
     if (!f) f=fopen(memory_path,"w+b");
