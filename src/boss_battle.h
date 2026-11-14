@@ -174,6 +174,8 @@ typedef struct {
     int boss_hp;
     int end_kind;         /* the stage end's kind, meaningful in the stage-end act */
     int clear_choice;     /* the stage clear screen's answer: -1 none, 1 return to town */
+    int fader_busy;       /* the scene fader still runs a fade */
+    uint32_t host_ms;     /* DEBUG_SAULO: the host's clock, for the transition telemetry */
 } BossBattleProbe;
 
 /* The scene's stage-end act and its steps the session acts on. */
@@ -243,7 +245,8 @@ void boss_battle_progress_before(const BossBattleCharacterProgress *before);
  * character, and only when it changed as the native award and level-ups change a record. */
 void boss_battle_progress_after(const BossBattleCharacterProgress *after);
 /* After a successful campaign restore, `restored` the record put back: 1 once, with that record and the Win's
- * progression in `merged`; the campaign save is then pending. */
+ * progression in `merged`; the campaign save is then pending. A Fight All checkpoint needs this merge and its save to
+ * have gone through before the next boss starts. */
 int boss_battle_progress_merge(const BossBattleCharacterProgress *restored, BossBattleCharacterProgress *merged);
 /* The merged character reaches the campaign save through the game's own save: pending until the save job is started,
  * running until it ends. */
@@ -293,8 +296,60 @@ typedef enum {
     BOSS_BATTLE_SCREEN_FIGHT_ALL,
     BOSS_BATTLE_SCREEN_CLOSE
 } BossBattleScreenChoice;
-/* Fight All confirmed on the screen: 1 when a run was queued. No run exists yet, so nothing changes. */
+/* Fight All: the twenty bosses in menu order, one session each; after a Win the hidden Inn is the checkpoint where the
+ * campaign is put back and the character saved before the next boss starts. The screen reopens on Fight All when it ends. */
+typedef enum {
+    BOSS_BATTLE_FIGHT_ALL_NONE,
+    BOSS_BATTLE_FIGHT_ALL_CLEARED,
+    BOSS_BATTLE_FIGHT_ALL_DIED,
+    BOSS_BATTLE_FIGHT_ALL_QUIT_RUN,
+    BOSS_BATTLE_FIGHT_ALL_CANCELLED, /* quit before the first boss was playable: not a run */
+    BOSS_BATTLE_FIGHT_ALL_ABORTED    /* a technical failure: no statistics */
+} BossBattleFightAllResult;
+
+typedef struct {
+    int active;            /* confirmed and not ended */
+    int run_started;       /* the first boss reached Playable */
+    int checkpoint;        /* between bosses, at the hidden Inn */
+    int boss;              /* the current boss; the next one at a checkpoint that passed */
+    int cleared;           /* bosses defeated */
+    uint32_t combat_ms;    /* Playable to Win, summed */
+    unsigned run;          /* the run's number in the statistics */
+    BossBattleFightAllResult result; /* kept until the next run is confirmed */
+} BossBattleFightAllState;
+BossBattleFightAllState boss_battle_fight_all_state(void);
+int boss_battle_fight_all_active(void);
+int boss_battle_fight_all_checkpoint(void);
+
+/* Fight All confirmed on the screen: 1 when a run was queued; the screen then closes as for a chosen boss. */
 int boss_battle_fight_all_request(void);
+
+/* The way from one won boss to the next, under the held black. */
+typedef enum {
+    BOSS_BATTLE_TRANSIT_NONE,
+    BOSS_BATTLE_TRANSIT_CHECKPOINT,    /* the campaign is put back, the character merged and saved */
+    BOSS_BATTLE_TRANSIT_SCENE_WAIT,    /* saved; the Inn scene cannot start a travel yet */
+    BOSS_BATTLE_TRANSIT_REQUESTED,     /* the next boss's travel was requested; the scene has not left yet */
+    BOSS_BATTLE_TRANSIT_STAGE_LOADING, /* the scene's travel act runs */
+    BOSS_BATTLE_TRANSIT_ARENA_READY,   /* the arena is set up, not revealed */
+    BOSS_BATTLE_TRANSIT_DONE           /* revealed */
+} BossBattleFightAllTransit;
+BossBattleFightAllTransit boss_battle_fight_all_transit(void);
+
+/* The Inn can start a travel as its own menu does: the scene plays (act 2) in the Inn's stage, no stage is pending and
+ * the scene fader has finished its fade. */
+int boss_battle_fight_all_scene_ready(const BossBattleScene *scene, int fader_busy);
+
+typedef enum {
+    BOSS_BATTLE_FIGHT_ALL_STEP_IDLE,  /* no checkpoint: the Inn runs as the game has it */
+    BOSS_BATTLE_FIGHT_ALL_STEP_WAIT,  /* the campaign is being put back or saved, or the scene is not ready: hold */
+    BOSS_BATTLE_FIGHT_ALL_STEP_START, /* every requirement is met: start `index` now */
+    BOSS_BATTLE_FIGHT_ALL_STEP_ENDED  /* the run ended here (cleared or aborted) */
+} BossBattleFightAllStep;
+/* Game thread, once per Inn menu frame of a checkpoint, with the Inn's scene and whether its fader still fades. */
+BossBattleFightAllStep boss_battle_fight_all_poll(const BossBattleScene *scene, int fader_busy, int *index);
+/* A technical failure: ends the run without touching any statistic, and reopens the screen after a checkpoint. */
+void boss_battle_fight_all_abort(const char *why);
 /* The game's menu sounds (its SE table indexes): the list's cursor, confirmation and back. */
 enum { BOSS_BATTLE_SE_SELECT = 42, BOSS_BATTLE_SE_DECIDE = 43, BOSS_BATTLE_SE_CANCEL = 44 };
 
@@ -317,8 +372,8 @@ BossBattleEntry boss_battle_screen_entry(int row);
 int boss_battle_screen_boss(int row);
 /* The native cursor about to move from `row`: 1 when the boss rows scroll instead and the cursor stays. */
 int boss_battle_screen_move(int row, int down);
-/* A list result of the page (row, -1 nothing): a boss row starts it, Fight All asks for its run, the bottom action
- * closes. */
+/* A list result of the page (row, -1 nothing): a boss row starts it, Fight All asks for its run (the caller then calls
+ * boss_battle_fight_all_request), the bottom action closes. */
 BossBattleScreenChoice boss_battle_screen_choose(int result, int *index);
 /* The texts of the page for the cursor row: a row's entry (the selectable value column), the highlighted entry's
  * statistic on that row (the static label column), the help line. */
@@ -337,16 +392,21 @@ unsigned boss_battle_reopen_session(void);
 typedef enum {
     BOSS_BATTLE_START_NONE,
     BOSS_BATTLE_START_FADING, /* fading to black while the page closes */
-    BOSS_BATTLE_START_HELD,   /* fully black: the Inn and the travel run under it */
-    BOSS_BATTLE_START_DONE    /* the arena was revealed */
+    BOSS_BATTLE_START_HELD,      /* fully black: the Inn and the travel run under it */
+    BOSS_BATTLE_START_REVEALING, /* the arena's native arrival fade-in runs */
+    BOSS_BATTLE_START_DONE       /* the arena was revealed */
 } BossBattleStartTransition;
 BossBattleStartTransition boss_battle_start_transition(void);
 void boss_battle_start_transition_set(BossBattleStartTransition next);
 int boss_battle_start_transition_holds(void);
-/* Once, on the first frame the arena is played after the travel (act 2, player unit, held black): 1 to reveal it. */
-int boss_battle_start_reveal_due(const BossBattleProbe *probe);
+/* At the scene's arrival fade-in: 1 when it is the held arena's, which then reveals it. */
+int boss_battle_start_reveal_begins(void);
+/* Once, on the first frame that fade-in has finished: 1 when the start transition is complete. */
+int boss_battle_start_reveal_finished(int fader_busy);
 /* MM:SS.mmm */
 void boss_battle_format_time(uint32_t ms, char *out, size_t size);
+/* MM:SS.mmm, HH:MM:SS.mmm from one hour: a Fight All run's time. */
+void boss_battle_format_run_time(uint32_t ms, char *out, size_t size);
 
 typedef enum {
     BOSS_BATTLE_INN_IDLE, /* the menu runs as the game wants */

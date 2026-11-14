@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define ANY (-1)
 
@@ -412,6 +413,10 @@ enum {
     kArrivalFadeCall = 0x17,
     kFadeLayerMapCall = 0x26
 };
+
+/* The fade keeps its frames to go at +0x7c. */
+static const short kFadeFrames[] = {0x44, 0x89, 0x73, 0x78, 0x44, 0x89, 0x63, 0x7c};
+enum { kFadeFramesStore = 0x31 };
 
 /* The Inn's Leave mode (its vtable's 0x7d0), state 8: the party goes to the game server, then the Inn is left. */
 static const short kLeaveParty[] = {
@@ -906,13 +911,16 @@ static const char *check_cues(const unsigned char *image, uint64_t size, const B
     return NULL;
 }
 
+static uint64_t jump_target(const unsigned char *image, uint64_t at);
+
 /* The one scene fader both the Inn's Leave mode and the scene's arrival fade-in use. */
 static const char *check_fader(const unsigned char *image, uint64_t size, const BuildSites *b, BossBattleSites *sites) {
     const uint64_t leave = b->leave_mode + kLeaveFadeInLeave;
     if (!SHAPE(image, size, leave, kLeaveFade)) return "Inn Leave fade";
     const uint64_t get_fader = call_target(image, leave + kLeaveFaderCall), fade = call_target(image, leave + kLeaveFadeCall);
     if (!SHAPE(image, size, get_fader, kGetFader) || !SHAPE(image, size, fade, kFade) ||
-        !SHAPE(image, size, call_target(image, fade + kFadeLayerMapCall), kLayerMap))
+        !SHAPE(image, size, call_target(image, fade + kFadeLayerMapCall), kLayerMap) ||
+        !SHAPE(image, size, fade + kFadeFramesStore, kFadeFrames))
         return "scene fader";
     const int64_t acts = rel32_target(image, b->dispatcher + kActTableLea + 3, b->dispatcher + kActTableLea + 7);
     if (acts < 0 || (uint64_t)acts + 4 * (ARRIVAL_ACT + 1) > size) return "scene arrival act";
@@ -1309,10 +1317,34 @@ static int probe_objects(const BossBattleScene *scene) {
            (now == BOSS_BATTLE_TRAVELLING || now == BOSS_BATTLE_INITIALIZING || now == BOSS_BATTLE_FIGHTING);
 }
 
+enum {
+    CONTEXT_SCREEN = 0xd8, /* the screen object: the scene fader belongs to it */
+    SCREEN_SCENE_FADER = 0x78,
+    FADER_FRAMES = 0x7c
+};
+
+static uint64_t screen_of(uint64_t holder) {
+    return holder ? guest_u64(holder + CONTEXT_SCREEN) : 0;
+}
+
+static int fader_busy(uint64_t screen) {
+    const uint64_t fader = screen ? guest_u64(screen + SCREEN_SCENE_FADER) : 0;
+    return fader && guest_i32(fader + FADER_FRAMES) != 0;
+}
+
+/* DEBUG_SAULO: wall time for the transition telemetry. */
+static uint32_t host_ms(void) {
+    struct timespec now;
+    if (!timespec_get(&now, TIME_UTC)) return 0;
+    return (uint32_t)((uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u);
+}
+
 static BossBattleProbe probe_scene(uint64_t scene) {
     BossBattleProbe probe;
     memset(&probe, 0, sizeof(probe));
     probe.scene = scene_state(scene);
+    probe.fader_busy = fader_busy(screen_of(scene_context(scene)));
+    probe.host_ms = host_ms();
     probe.end_kind = guest_i32(scene + SCENE_END_KIND);
     probe.clear_choice = guest_i32(scene + SCENE_CLEAR_CHOICE);
     const uint64_t context = probe_objects(&probe.scene) ? scene_context(scene) : 0;
@@ -1426,7 +1458,7 @@ static void supply_return_choice(uint64_t scene) {
     screen_functions.set_step(scene, 1, BOSS_BATTLE_STEP_AFTER_CHOICE);
 }
 
-static void reveal_arena(uint64_t scene, const BossBattleProbe *probe);
+static void follow_arena_fade_in(const BossBattleProbe *probe);
 
 /* At the scene frame's call into the menu handler: r15 is the scene manager. */
 void GUEST_HOOK_ABI boss_battle_scene_hook(GuestRegs *regs) {
@@ -1440,7 +1472,7 @@ void GUEST_HOOK_ABI boss_battle_scene_hook(GuestRegs *regs) {
     if (reached & BOSS_BATTLE_PLAYABLE) log_party("at Playable", scene_context(scene));
     if (action == BOSS_BATTLE_FRAME_REQUEST_INN && request_inn(scene)) boss_battle_inn_requested();
     if (action == BOSS_BATTLE_FRAME_ANSWER_CHOICE) supply_return_choice(scene);
-    reveal_arena(scene, &probe);
+    follow_arena_fade_in(&probe);
 }
 
 /* The labyrinth's own floor choice writes these before its round request; the request carries them into the round. */
@@ -1794,6 +1826,42 @@ static void cancel_start_transition(uint64_t manager) {
     puts("DEBUG_SAULO Boss Battle start: not started, the Inn fades back in");
 }
 
+/* A Fight All run that ended at the hidden Inn: the black stays for the page that reopens, or fades in when none will. */
+static void run_ended_at_inn(uint64_t manager) {
+    atomic_store(&black_held, 1);
+    if (!boss_battle_menu_reopen_pending()) release_black(manager, "Fight All ended without a Boss Battle page");
+}
+
+/* The next boss of a Fight All run starts from the hidden Inn exactly as a chosen boss does, under the black the run
+ * holds; the scene fader is looked up again for this Inn. */
+static void start_next_fight_all_boss(uint64_t inn, uint64_t manager, int index) {
+    const uint64_t scene = guest_u64(manager + HYDELAND_MANAGER_SCENE);
+    atomic_store(&black_held, 0);
+    atomic_store(&held_fader, scene_fader(manager));
+    atomic_store(&transition_scene, is_scene(scene) ? scene : 0);
+    start_boss(inn, manager, index);
+    if (boss_battle_session_active()) return;
+    boss_battle_fight_all_abort("the next boss could not be started");
+    run_ended_at_inn(manager);
+}
+
+/* At a Fight All checkpoint (the Inn menu frame, under black): 1 when the Inn menu must do nothing this frame. */
+static int continue_fight_all(GuestRegs *regs, uint64_t inn, uint64_t manager) {
+    const uint64_t scene = guest_u64(manager + HYDELAND_MANAGER_SCENE);
+    const BossBattleScene unknown = {-1, -1, -1, -1, -1, -1};
+    const BossBattleScene state = is_scene(scene) ? scene_state(scene) : unknown;
+    int index = -1;
+    switch (boss_battle_fight_all_poll(&state, fader_busy(screen_of(manager)), &index)) {
+    case BOSS_BATTLE_FIGHT_ALL_STEP_WAIT: no_choice(regs); return 1;
+    case BOSS_BATTLE_FIGHT_ALL_STEP_START:
+        start_next_fight_all_boss(inn, manager, index);
+        no_choice(regs);
+        return 1;
+    case BOSS_BATTLE_FIGHT_ALL_STEP_ENDED: run_ended_at_inn(manager); return 0;
+    default: return 0;
+    }
+}
+
 /* The native Options row opens the Inn's Options page, which becomes the Boss Battle screen. */
 static void open_screen(GuestRegs *regs, uint64_t inn, uint64_t context) {
     read_character(context);
@@ -1814,6 +1882,7 @@ void GUEST_HOOK_ABI boss_battle_inn_result_hook(GuestRegs *regs) {
         no_choice(regs);
         return;
     }
+    if (boss_battle_fight_all_checkpoint() && continue_fight_all(regs, inn, context)) return;
     int index = -1;
     if (boss_battle_screen_shown()) {
         if (boss_battle_screen_closed(&index)) {
@@ -1821,6 +1890,7 @@ void GUEST_HOOK_ABI boss_battle_inn_result_hook(GuestRegs *regs) {
                    guest_u8(inn + INN_ACT), guest_u8(inn + INN_STEP));
             const int holding = boss_battle_start_transition_holds();
             start_boss(inn, context, index);
+            if (!boss_battle_session_active()) boss_battle_fight_all_abort("the first boss could not be started");
             if (holding && !boss_battle_session_active()) cancel_start_transition(context);
         }
         no_choice(regs);
@@ -1855,10 +1925,16 @@ void GUEST_HOOK_ABI boss_battle_options_leave_hook(GuestRegs *regs) {
            guest_u8(inn + INN_ACT), guest_u8(inn + INN_STEP));
 }
 
-/* At the scene arrival's fade-in (esi its colour): the Inn a fight returns to stays black until its Boss Battle page is
- * shown. */
+/* At the scene arrival's fade-in (rdi the scene fader, esi its colour, edx its frames): the arena's own fade-in reveals
+ * it as on any stage travel; the Inn a fight returns to stays black until its Boss Battle page is shown, or until the
+ * next Fight All boss has started. */
 void GUEST_HOOK_ABI boss_battle_arrival_fade_hook(GuestRegs *regs) {
-    if (!boss_battle_menu_reopen_pending()) return;
+    if (boss_battle_start_reveal_begins()) {
+        printf("Boss Battle [%u]: native arena fade-in begins, frames=%d\n", boss_battle_session_id(), (int)(int32_t)regs->rdx);
+        return;
+    }
+    if (!boss_battle_menu_reopen_pending() && !boss_battle_fight_all_checkpoint()) return;
+    if (boss_battle_fight_all_checkpoint()) atomic_store(&held_fader, regs->rdi);
     regs->rsi = FADE_BLACK;
     regs->rcx = TRANSITION_LAYER;
     atomic_store(&black_held, 1);
@@ -1871,7 +1947,8 @@ void GUEST_HOOK_ABI boss_battle_arrival_fade_hook(GuestRegs *regs) {
 void GUEST_HOOK_ABI boss_battle_fade_hook(GuestRegs *regs) {
     if (atomic_load(&own_fade)) return;
     const int holds = boss_battle_start_transition_holds();
-    const int traced = holds || (boss_battle_start_transition() == BOSS_BATTLE_START_DONE && boss_battle_session_active());
+    const BossBattleStartTransition now = boss_battle_start_transition();
+    const int traced = holds || ((now == BOSS_BATTLE_START_REVEALING || now == BOSS_BATTLE_START_DONE) && boss_battle_session_active());
     const int scene = regs->rdi == atomic_load(&held_fader);
     if (traced && atomic_fetch_add(&fade_lines, 1) < FADE_TRACE_LINES) {
         int act, step;
@@ -1886,11 +1963,9 @@ void GUEST_HOOK_ABI boss_battle_fade_hook(GuestRegs *regs) {
     regs->rcx = TRANSITION_LAYER;
 }
 
-/* The Boss Battle start's black ends once: the travel is over and the arena is played. */
-static void reveal_arena(uint64_t scene, const BossBattleProbe *probe) {
-    if (!boss_battle_start_reveal_due(probe)) return;
-    fade_scene(scene_context(scene), FADE_CLEAR, FADE_FRAMES);
-    printf("DEBUG_SAULO Boss Battle start: final arena reveal, transition complete [%u]\n", boss_battle_session_id());
+static void follow_arena_fade_in(const BossBattleProbe *probe) {
+    if (boss_battle_start_reveal_finished(probe->fader_busy))
+        printf("Boss Battle [%u]: native arena fade-in complete, transition complete\n", boss_battle_session_id());
 }
 
 /* At the Inn menu frame's call of the help line (edx 1 shows it): during a Boss Battle start it is closed instead, as the
@@ -2192,7 +2267,11 @@ void GUEST_HOOK_ABI boss_battle_options_result_hook(GuestRegs *regs) {
         begin_start_transition();
         regs->r15 = 1;
         break;
-    case BOSS_BATTLE_SCREEN_FIGHT_ALL: boss_battle_fight_all_request(); break;
+    case BOSS_BATTLE_SCREEN_FIGHT_ALL:
+        if (!boss_battle_fight_all_request()) break;
+        begin_start_transition();
+        regs->r15 = 1;
+        break;
     default: regs->r15 = 1; break;
     }
 }

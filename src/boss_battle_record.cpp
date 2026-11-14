@@ -1,5 +1,6 @@
 #include "boss_battle_record.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -22,8 +23,10 @@
 
 namespace {
 
-constexpr char kHeader[] = "DCP Boss Battle 2";
+constexpr char kHeader[] = "DCP Boss Battle 3";
+constexpr char kHeaderV2[] = "DCP Boss Battle 2";
 constexpr char kHeaderV1[] = "DCP Boss Battle 1";
+constexpr char kFightAllId[] = "@fight_all";
 constexpr char kFileName[] = "boss_battle.dat";
 constexpr size_t kCharacterLimit = 64;
 
@@ -32,8 +35,14 @@ struct Row {
     BossBattleStats stats{};
 };
 
+struct FightAllRow {
+    std::string character;
+    BossBattleFightAllStats stats{};
+};
+
 std::mutex lock;
 std::vector<Row> rows;
+std::vector<FightAllRow> fight_all_rows;
 std::filesystem::path file;
 bool writable = false;
 
@@ -56,6 +65,15 @@ Row* Find(const std::string& character, const std::string& boss) {
     return nullptr;
 }
 
+FightAllRow* FindFightAll(const std::string& character) {
+    for (FightAllRow& row : fight_all_rows) {
+        if (row.character == character) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
 bool ParseNumber(const std::string& text, uint32_t* value) {
     if (text.empty() || text.size() > 10) {
         return false;
@@ -69,14 +87,30 @@ bool ParseNumber(const std::string& text, uint32_t* value) {
     return true;
 }
 
-bool Parse(const std::string& text, std::vector<Row>* out) {
+bool ParseFightAll(const std::vector<std::string>& fields, FightAllRow* row) {
+    uint32_t numbers[6] = {};
+    for (size_t i = 0; i < 6; ++i) {
+        if (!ParseNumber(fields[i + 2], &numbers[i])) {
+            return false;
+        }
+    }
+    row->character = fields[0];
+    row->stats = {numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5]};
+    const BossBattleFightAllStats& stats = row->stats;
+    return uint64_t(stats.clears) + stats.deaths + stats.quits <= stats.runs &&
+           stats.best_progress <= BOSS_BATTLE_FIGHT_ALL_BOSSES;
+}
+
+bool Parse(const std::string& text, std::vector<Row>* out, std::vector<FightAllRow>* fight_all_out) {
     std::istringstream in(text);
     std::string line;
-    if (!std::getline(in, line) || (line != kHeader && line != kHeaderV1)) {
+    if (!std::getline(in, line) || (line != kHeader && line != kHeaderV2 && line != kHeaderV1)) {
         return false;
     }
-    const size_t numbers_count = line == kHeader ? 5 : 4;
+    const bool has_fight_all = line == kHeader;
+    const size_t numbers_count = line == kHeaderV1 ? 4 : 5;
     std::vector<Row> parsed;
+    std::vector<FightAllRow> parsed_fight_all;
     while (std::getline(in, line)) {
         if (line.empty()) {
             continue;
@@ -86,9 +120,20 @@ bool Parse(const std::string& text, std::vector<Row>* out) {
         for (std::string cell; std::getline(cells, cell, '\t');) {
             fields.push_back(cell);
         }
+        if (fields.size() < 2 || fields[0].empty() || fields[1].empty()) {
+            return false;
+        }
+        if (has_fight_all && fields[1] == kFightAllId) {
+            FightAllRow fight_all;
+            if (fields.size() != 8 || !ParseFightAll(fields, &fight_all)) {
+                return false;
+            }
+            parsed_fight_all.push_back(fight_all);
+            continue;
+        }
         Row row;
         uint32_t numbers[5] = {};
-        if (fields.size() != numbers_count + 2 || fields[0].empty() || fields[1].empty()) {
+        if (fields.size() != numbers_count + 2 || fields[1][0] == '@') {
             return false;
         }
         for (size_t i = 0; i < numbers_count; ++i) {
@@ -109,6 +154,7 @@ bool Parse(const std::string& text, std::vector<Row>* out) {
         parsed.push_back(row);
     }
     *out = std::move(parsed);
+    *fight_all_out = std::move(parsed_fight_all);
     return true;
 }
 
@@ -118,6 +164,12 @@ std::string Format() {
         text += row.character + "\t" + row.boss + "\t" + std::to_string(row.stats.attempts) + "\t" +
                 std::to_string(row.stats.wins) + "\t" + std::to_string(row.stats.deaths) + "\t" +
                 std::to_string(row.stats.quits) + "\t" + std::to_string(row.stats.best_ms) + "\n";
+    }
+    for (const FightAllRow& row : fight_all_rows) {
+        const BossBattleFightAllStats& stats = row.stats;
+        text += row.character + "\t" + kFightAllId + "\t" + std::to_string(stats.runs) + "\t" +
+                std::to_string(stats.clears) + "\t" + std::to_string(stats.deaths) + "\t" + std::to_string(stats.quits) +
+                "\t" + std::to_string(stats.best_progress) + "\t" + std::to_string(stats.best_ms) + "\n";
     }
     return text;
 }
@@ -166,6 +218,7 @@ bool WriteAtomically(const std::filesystem::path& path, const std::string& text)
 extern "C" void boss_battle_record_configure(const char* user_dir) {
     std::scoped_lock guard{lock};
     rows.clear();
+    fight_all_rows.clear();
     file = dcp::PathFromUtf8(user_dir && *user_dir ? user_dir : "user") / kFileName;
     std::error_code error;
     if (!std::filesystem::exists(file, error)) {
@@ -174,9 +227,10 @@ extern "C" void boss_battle_record_configure(const char* user_dir) {
     }
     std::ifstream in(file, std::ios::binary);
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    writable = in.good() || in.eof() ? Parse(text, &rows) : false;
+    writable = in.good() || in.eof() ? Parse(text, &rows, &fight_all_rows) : false;
     if (!writable) {
         rows.clear();
+        fight_all_rows.clear();
         std::printf("Boss Battle: %s is not readable; it is left untouched and nothing is recorded\n", kFileName);
     }
 }
@@ -187,7 +241,7 @@ extern "C" int boss_battle_record_note(const char* character, const char* boss_i
         return 0;
     }
     const std::string who = Clean(character, kCharacterLimit), boss = Clean(boss_id, kCharacterLimit);
-    if (who.empty() || boss.empty()) {
+    if (who.empty() || boss.empty() || boss[0] == '@') {
         return 0;
     }
     Row* row = Find(who, boss);
@@ -219,6 +273,63 @@ extern "C" int boss_battle_record_note(const char* character, const char* boss_i
     return written;
 }
 
+extern "C" int boss_battle_record_fight_all_note(const char* character, BossBattleFightAllEvent event, unsigned value) {
+    std::scoped_lock guard{lock};
+    if (!writable || file.empty()) {
+        return 0;
+    }
+    const std::string who = Clean(character, kCharacterLimit);
+    if (who.empty()) {
+        return 0;
+    }
+    FightAllRow* row = FindFightAll(who);
+    if (!row) {
+        if (event != BOSS_BATTLE_FIGHT_ALL_RUN) {
+            return 0;
+        }
+        fight_all_rows.push_back({who, {}});
+        row = &fight_all_rows.back();
+    }
+    BossBattleFightAllStats& stats = row->stats;
+    const bool closes_run = event == BOSS_BATTLE_FIGHT_ALL_CLEAR || event == BOSS_BATTLE_FIGHT_ALL_DEATH ||
+                            event == BOSS_BATTLE_FIGHT_ALL_QUIT;
+    if (closes_run && stats.clears + stats.deaths + stats.quits >= stats.runs) {
+        std::printf("Boss Battle: no open Fight All run; outcome not recorded\n");
+        return 0;
+    }
+    const unsigned progress = std::min<unsigned>(value, BOSS_BATTLE_FIGHT_ALL_BOSSES);
+    switch (event) {
+    case BOSS_BATTLE_FIGHT_ALL_RUN: ++stats.runs; break;
+    case BOSS_BATTLE_FIGHT_ALL_PROGRESS:
+        if (!stats.runs || progress <= stats.best_progress) {
+            return 1;
+        }
+        stats.best_progress = progress;
+        break;
+    case BOSS_BATTLE_FIGHT_ALL_CLEAR:
+        ++stats.clears;
+        stats.best_progress = BOSS_BATTLE_FIGHT_ALL_BOSSES;
+        if (value && (!stats.best_ms || value < stats.best_ms)) {
+            stats.best_ms = value;
+        }
+        break;
+    case BOSS_BATTLE_FIGHT_ALL_DEATH:
+    case BOSS_BATTLE_FIGHT_ALL_QUIT:
+        ++(event == BOSS_BATTLE_FIGHT_ALL_DEATH ? stats.deaths : stats.quits);
+        stats.best_progress = std::max(stats.best_progress, progress);
+        break;
+    }
+    const bool written = WriteAtomically(file, Format());
+    std::printf("Boss Battle: metadata %s (%s)\n", written ? "written" : "NOT written", kFileName);
+    return written;
+}
+
+extern "C" BossBattleFightAllStats boss_battle_record_fight_all_stats(const char* character) {
+    std::scoped_lock guard{lock};
+    const FightAllRow* row = FindFightAll(Clean(character, kCharacterLimit));
+    return row ? row->stats : BossBattleFightAllStats{};
+}
+
 extern "C" BossBattleStats boss_battle_record_stats(const char* character, const char* boss_id) {
     std::scoped_lock guard{lock};
     const Row* row = Find(Clean(character, kCharacterLimit), Clean(boss_id, kCharacterLimit));
@@ -228,10 +339,12 @@ extern "C" BossBattleStats boss_battle_record_stats(const char* character, const
 extern "C" int boss_battle_record_parse(const char* text, size_t length) {
     std::scoped_lock guard{lock};
     std::vector<Row> parsed;
-    if (!Parse(std::string(text ? text : "", text ? length : 0), &parsed)) {
+    std::vector<FightAllRow> parsed_fight_all;
+    if (!Parse(std::string(text ? text : "", text ? length : 0), &parsed, &parsed_fight_all)) {
         return 0;
     }
     rows = std::move(parsed);
+    fight_all_rows = std::move(parsed_fight_all);
     return 1;
 }
 
@@ -247,4 +360,5 @@ extern "C" size_t boss_battle_record_format(char* out, size_t size) {
 extern "C" void boss_battle_record_clear(void) {
     std::scoped_lock guard{lock};
     rows.clear();
+    fight_all_rows.clear();
 }

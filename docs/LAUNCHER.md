@@ -546,9 +546,13 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   differs gets the log line `Unlock Gallery: requested but unavailable ...` and the Gallery stays as the save has it.
 - **Enable Boss Battle** (Gameplay page, after Unlock Gallery): Off by default (`enable_boss_battle`). On, the
   Dragon's Haven Inn menu gains a Boss Battle row after Report adventurers; Off leaves the Inn menu as the game has it.
-  The row opens the Boss Battle screen on the game's own Options page: Fight All at the top (selectable; fighting every
-  boss in sequence is not available yet, so it starts nothing), the twenty bosses in the selectable right column (six at
-  a time, scrolling), the highlighted boss's attempts, wins, deaths, quits, win rate and best time in the left column,
+  The row opens the Boss Battle screen on the game's own Options page: Fight All at the top (selectable; the twenty
+  bosses in menu order, one after the other: each Win puts the campaign back, keeps the character's experience,
+  level and skill points, saves them through the game, and starts the next boss without showing the Inn or this
+  screen, the screen staying black until the next arena appears; a Death, Quit, the twentieth Win, or a failed safety
+  check ends the run and returns to the screen on Fight All), the twenty bosses in the selectable right column (six at
+  a time, scrolling), the highlighted boss's attempts, wins, deaths, quits, win rate and best time in the left column
+  (Fight All shows its runs, clears, deaths, quits, best progress and best time, the combat time of a full clear),
   and Return to tavern (or Back) at the bottom, all with the game's menu sounds; prepare the party
   first with Select player and Choose allies. Starting a boss sets the campaign aside: the save on disk is protected and
   the campaign state in memory is put back when the fight returns to the Inn, so no boss clear, story, route, item or
@@ -561,7 +565,8 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   character whatever its level or progress; Back resumes the fight. The screen then opens again
   on the same boss with the new numbers. The Inn menu is not shown between the screen and the arena, nor between the
   fight and the reopened screen; only Return to tavern and Back show it. Per character and boss, `boss_battle.dat` in the user folder keeps attempts
-  (counted once the fight is playable), wins, deaths, quits and the best win time (an older
+  (counted once the fight is playable), wins, deaths, quits and the best win time, and per character the Fight All runs,
+  clears, deaths, quits, best progress and best time (an older
   `boss_battle_progress.dat` is no longer read). Offline only, and only for the USA 1.00 build. The F1 Options menu changes it the next time the
   Inn menu opens.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
