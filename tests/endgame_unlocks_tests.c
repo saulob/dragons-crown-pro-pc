@@ -282,6 +282,10 @@ static unsigned char *boot_image(const char *folder, uint64_t *size) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/build/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
     FILE *f = fopen(path, "rb");
+    if (!f) { /* a build the launcher has not prepared here: its research copy */
+        snprintf(path, sizeof(path), "%s/build/research/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
+        f = fopen(path, "rb");
+    }
     if (!f) return NULL;
     char magic[8];
     if (fread(magic, 1, 8, f) != 8 || memcmp(magic, "DCPBOOT1", 8)) return fclose(f), NULL;
@@ -307,6 +311,7 @@ static const struct {
     uint64_t setter, story_skip;
 } kRealBuilds[] = {
     {"v1.03", "CUSA10454-1.00", 0x54c690, {0x477e91, 0x3bd162, 0x3bc9e7, 0x3bca0e, 0x3c1edf}, 0x26b40, 0x3ae3c2},
+    {"CUSA10454-1.01", "CUSA10454-1.01", 0x54c690, {0x477e91, 0x3bd162, 0x3bc9e7, 0x3bca0e, 0x3c1edf}, 0x26b40, 0x3ae3c2},
     {"CUSA07001-1.00", "CUSA07001-1.00", 0x54a800, {0x477091, 0x3bc4c2, 0x3bbd47, 0x3bbd6e, 0x3c11df}, 0x26490, 0x3ad7a2},
     {"CUSA07001-1.02", "CUSA07001-1.02", 0x54a660, {0x477461, 0x3bc892, 0x3bc117, 0x3bc13e, 0x3c15ef}, 0x26510, 0x3adb62},
     {"CUSA07001-1.03", "CUSA07001-1.03", 0x54a720, {0x477521, 0x3bc8e2, 0x3bc167, 0x3bc18e, 0x3c163f}, 0x26510, 0x3adbb2},
@@ -429,8 +434,12 @@ static void check_build(const unsigned char *loaded, uint64_t size, int index) {
     CHECK(endgame_unlocks_locate(image, size, game, &sites) == 1 && same_sites(&sites, expected));
     CHECK(endgame_unlocks_locate(image, size, "CUSA00000-9.99", &sites) == 0 && same_sites(&sites, expected));
     CHECK(endgame_unlocks_locate(image, size, NULL, &sites) == 0 && no_sites(&sites));
-    for (int j = 0; j < kRealCount; ++j)
-        if (j != index) CHECK(endgame_unlocks_locate(image, size, kRealBuilds[j].game, &sites) == 1 && no_sites(&sites));
+    for (int j = 0; j < kRealCount; ++j) {
+        if (j == index) continue;
+        const int same_code = same_sites(&kRealBuilds[j].sites, expected) && kRealBuilds[j].entry == kRealBuilds[index].entry;
+        CHECK(endgame_unlocks_locate(image, size, kRealBuilds[j].game, &sites) == 1 &&
+              (same_code ? same_sites(&sites, expected) : no_sites(&sites)));
+    }
 
     /* The checks the hooks answer for: the Labyrinth's and the Stables' story checks, the prayer tier and cleared
      * difficulty, and the difficulty setter. A changed byte in any refuses every site. */
@@ -490,7 +499,7 @@ static void test_real_images(void) {
     static const struct {
         const char *game;
         int base;
-    } kSynthetic[] = {{"CUSA10454-1.01", 0}, {"CUSA10209-1.02", 4}};
+    } kSynthetic[] = {{"CUSA10487-1.03", 0}, {"CUSA10209-1.02", 5}};
     for (size_t k = 0; k < sizeof(kSynthetic) / sizeof(*kSynthetic); ++k) {
         const int base = kSynthetic[k].base;
         if (!loaded[base]) continue;

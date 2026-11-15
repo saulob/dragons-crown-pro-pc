@@ -15,10 +15,12 @@
   marked in the summary: if one fails, no build is reported as passing. Every supported build must offer every GLOBAL
   feature of CUSA10454 1.00; the global feature summary counts the builds that do.
 
-  Local boot images (build\image) and prepared folders (game\prepared) are read only. A build without one is proven by
-  synthetic images only, which prove the checks and not the build. A feature that depends on the executable or the game
-  archives counts as PASS only with a real boot image, a prepared folder or a reporter's scan of the real executable behind
-  it; otherwise it is PARTIAL with DATA UNAVAILABLE, which names the builds and is no failure.
+  Local boot images (build\image, then build\research\image for a build the launcher has not prepared) and prepared
+  folders (game\prepared) are read only. A build without a real executable is BLOCKED, never supported by synthetic images
+  alone: the summary names it and it is no failure. These six builds must PASS with their real executable, or the run
+  fails: CUSA10454 1.00 and 1.01, CUSA07001 1.00, 1.02 and 1.03, CUSA10209 1.00. CUSA10209 1.02 and CUSA10487 1.03
+  have no executable here and are reported BLOCKED. A feature that needs the game archives counts as proven by the executable and the port's static
+  checks where the build has no prepared folder, and the summary says so.
 
   Online relay: the net tests (frame codec, direct regression, automatic fallback, mixed rooms, failure paths, timeouts,
   compatibility, Connection test) run against loopback sockets and an in-process stand-in for the lobby; with Node.js
@@ -145,12 +147,30 @@ function Invoke-LinuxNetTests {
     [pscustomobject]@{ Code = $LASTEXITCODE; Skip = ''; Lines = $lines; Distro = $distro }
 }
 
+function Invoke-LinuxGate {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    $lines = @(& wsl.exe -d $distro --exec bash -c "cd '$root' && bash tools/build.sh --test 2>&1" 2>&1 | ForEach-Object { "$_" })
+    [pscustomobject]@{ Code = $LASTEXITCODE; Skip = ''; Lines = $lines; Distro = $distro }
+}
+
 $quietLines = '^(GROUP\||ONLINE-BUILD\||LINUX-NET\||FAIL|OK |FAILED|.*STATIC PARITY|.*RUNTIME DATA|.*skipped|# (tests|pass|fail|skipped))'
 function Show-Output([string[]]$Lines, [bool]$Failed) {
     foreach ($line in $Lines) {
         if ($Failed -or $line -cmatch $quietLines) { Write-Host $line }
     }
 }
+
+$requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
+                  'dcp-boss-battle-record-tests', 'dcp-skip-intro-tests', 'dcp-gallery-unlock-tests', 'dcp-endgame-unlocks-tests',
+                  'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
+                  'dcp-launcher-tests'
+$requiredBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
+                  'CUSA10209 1.00 Asia/Hong Kong'
+$blockedBuilds = 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
 
 $tests = @(
     (Test-Step 'Windows memory tests (sparse backing, commitment, aliases, release)' 'dcp-memory-windows-tests'),
@@ -198,6 +218,7 @@ $tests = @(
     (Test-Step 'Unlock Gallery tests (view, save safety, synthetic and local boot images)' 'dcp-gallery-unlock-tests' -Parity),
     (Test-Step 'Endgame unlock tests (Stables rule, independent settings, hooks, synthetic and local boot images)' 'dcp-endgame-unlocks-tests' -Parity),
     (Test-Step 'Boss Battle tests (Boss Battle screen on the native Options page, session milestones, native Win signals, Attempt/Win/Death/Quit, result bypass, Inn return and campaign restore, statistics, telemetry caps, local boot images)' 'dcp-boss-battle-tests' -Parity),
+    (Test-Step 'Boss Battle text tests (every Menu & Subtitles language: official boss names, labels, Fight All, quit texts, kana Russian)' 'dcp-boss-battle-text-tests'),
     (Test-Step 'Boss Battle record tests (own data file: format, outcomes, attempt invariant, atomic replace)' 'dcp-boss-battle-record-tests'),
     (Test-Step 'Boss Battle menu tests (bosses 01 to 20 on the screen, Return to tavern, F4 quit path, no ImGui selector or Inn-list menu, title menu restored)' 'dcp-boss-battle-menu-tests'),
     (Test-Step 'Early Story Online tests (session rules, shadow record, writer blocks, atomic install, synthetic and local boot images)' 'dcp-early-story-tests' -Parity),
@@ -209,6 +230,7 @@ $tests = @(
     (Test-Step 'online build tests (every supported build''s online imports, structural relay parity, one lobby game, cheat lock)' 'dcp-online-builds-tests' -Parity -Capture -Quiet -Lobby),
     (Test-Step 'Worker tests (node --test: lobby protocol, relay routing, limits, cleanup, compatibility)' -Block { Invoke-WorkerTests }),
     (Test-Step 'Linux network tests (WSL: POSIX WebSocket, the same net tests; skipped without WSL)' -Block { Invoke-LinuxNetTests }),
+    (Test-Step 'Linux gate (WSL: tools/build.sh --test, the authoritative Linux build and test run; skipped without WSL)' -Block { Invoke-LinuxGate }),
     (Test-Step 'relay source hygiene (no debug logs, no force option, no build or Windows dependency, protocols unchanged)' -Script 'tests\relay_hygiene_tests.ps1'),
     (Test-Step 'online test instance script tests (-Build, with -WhatIf only)' -Script 'tests\online_instance_tests.ps1'),
     (Test-Step 'build.ps1 waits for every loader run (a Windows-subsystem program needs the pipe)' -Script 'tests\build_script_tests.ps1'),
@@ -230,10 +252,13 @@ Sync-GpuDependencies
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
     if ($test.Exe -and -not (Test-Path -LiteralPath (Join-Path $buildDir "bin\$($test.Exe).exe"))) { Stop-Tool "$($test.Exe) is not built: add it to the ninja line above." }
+}
+foreach ($suite in $requiredSuites) {
+    if (-not ($tests | Where-Object { $_.Exe -eq $suite })) { Stop-Tool "$suite is a required suite but is not in the test list." }
 }
 
 $failed = New-Object System.Collections.Generic.List[string]
@@ -325,6 +350,7 @@ $parityOutput = @($captured['dcp-build-parity-tests'])
 Write-Host ''
 Write-Host 'Build parity:' -ForegroundColor Cyan
 $partial = $false
+$blockedNames = New-Object System.Collections.Generic.List[string]
 $rows = @($parityOutput | Where-Object { $_ -like 'PARITY-BUILD|*' } | ForEach-Object { ,$_.Split('|') })
 if ($rows.Count -eq 0) {
     Write-Host '  no result from dcp-build-parity-tests' -ForegroundColor Red
@@ -335,7 +361,18 @@ foreach ($row in $rows) {
     $good = $status -notlike 'FAIL*' -and $parityFailed.Count -eq 0
     if ($status -notlike 'FAIL*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }
     if ($status -like 'PARTIAL*') { $status += " ($(($row[3] -split '; ' | Where-Object { $_ -like 'DATA UNAVAILABLE*' })))"; $partial = $true }
-    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if (-not $good) { 'Red' } elseif ($status -like 'PARTIAL*') { 'Yellow' } else { 'Green' })
+    if ($status -like 'BLOCKED*') { $status = 'BLOCKED (no real executable here; not supported on synthetic evidence)'; $blockedNames.Add($row[1]); $partial = $true }
+    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if (-not $good) { 'Red' } elseif ($status -like 'PARTIAL*' -or $status -like 'BLOCKED*') { 'Yellow' } else { 'Green' })
+}
+foreach ($name in $requiredBuilds) {
+    $row = $rows | Where-Object { $_[1] -eq $name } | Select-Object -First 1
+    if (-not $row -or $row[2] -ne 'PASS' -or $row[3] -notlike 'executable*') {
+        Write-Host "  required build $name did not PASS with its real executable" -ForegroundColor Red
+        $failed.Add("required build: $name")
+    }
+}
+foreach ($name in $blockedNames) {
+    if ($blockedBuilds -notcontains $name) { Write-Host "  $name lost its executable evidence" -ForegroundColor Red; $failed.Add("required build: $name") }
 }
 Write-Host ''
 Write-Host 'Global feature parity:' -ForegroundColor Cyan
@@ -367,7 +404,7 @@ function Group-Status([hashtable]$Table, [string[]]$Names) {
     $states = @($Names | ForEach-Object { if ($Table.ContainsKey($_)) { $Table[$_] } else { 'NOT RUN' } })
     if ($states -contains 'FAIL') { return 'FAIL' }
     if ($states -contains 'NOT RUN') { return 'NOT RUN' }
-    if ($states -contains 'SKIPPED') { return 'PASS (part skipped: see above)' }
+    if ($states -contains 'SKIPPED') { return 'SKIPPED (a part did not run, see above; the rest PASS)' }
     return 'PASS'
 }
 function Read-Groups([string[]]$Lines) {
@@ -411,6 +448,19 @@ $workerName = Block-Name 'Worker tests'
 $linuxName = Block-Name 'Linux network tests'
 $workerState = Block-State $workerName
 $linuxState = Block-State $linuxName
+$linuxGateName = Block-Name 'Linux gate'
+$linuxGateState = Block-State $linuxGateName
+$linuxNet = Read-Groups $captured[$linuxName]
+$linuxWebSocket = if ($linuxState -eq 'SKIPPED') { "SKIPPED ($($skipped[$linuxName]))" }
+                  elseif ($linuxNet['lobby-binary'] -eq 'PASS') { 'PASS' }
+                  elseif ($linuxNet['lobby-binary'] -eq 'SKIPPED') { 'SKIPPED (WSL runs the net tests without a lobby)' }
+                  else { 'NOT RUN' }
+$linuxGateSummary = switch ($linuxGateState) {
+    'PASS' { 'PASS (tools/build.sh --test exited 0)' }
+    'SKIPPED' { "SKIPPED ($($skipped[$linuxGateName]))" }
+    'FAIL' { "FAIL ($(Format-ExitCode $exitCodes[$linuxGateName]))" }
+    default { 'NOT RUN' }
+}
 $runtimeRows = @($buildRows | Where-Object { $_[4] -eq 'runtime=PASS' })
 $structuralRows = @($buildRows | Where-Object { $_[3] -eq 'structural=PASS' })
 $staticLinux = Group-Status $net @('linux-parity')
@@ -427,8 +477,8 @@ $hle = if (-not $captured.ContainsKey('dcp-online-hle-tests')) { 'NOT RUN' }
        elseif ($hleLines -match 'skipped') { "SKIPPED ($lobbySkip$lobbyProblem)" }
        else { 'PASS (against the same loopback lobby)' }
 $linuxSummary = switch ($linuxState) {
-    'PASS' { "PASS (net tests compiled with the POSIX WebSocket and run in WSL; static checks $staticLinux; the WebSocket round trip is not run from WSL)" }
-    'SKIPPED' { "static checks $staticLinux; WSL run SKIPPED ($($skipped[$linuxName]))" }
+    'PASS' { "PASS (net tests compiled with the POSIX WebSocket and run in WSL; static checks $staticLinux)" }
+    'SKIPPED' { "SKIPPED ($($skipped[$linuxName])); static checks $staticLinux" }
     default { 'FAIL or NOT RUN' }
 }
 $protocolSummary = "$(Group-Status $net @('protocol'))"
@@ -451,7 +501,9 @@ $summary = [ordered]@{
     'Public endpoint budget' = Worker-Coverage '(advertised endpoints spend|repeating an advertised|flipping the LAN list|clients that advertise nothing|repeating an unchanged room or endpoint)' 5
     'Windows parity' = $windows
     'Online HLE' = $hle
-    'Linux parity' = $linuxSummary
+    'Linux net tests (WSL)' = $linuxSummary
+    'Linux WebSocket round trip' = $linuxWebSocket
+    'Linux gate (build.sh --test)' = $linuxGateSummary
     '8-build structural parity' = $(if ($structuralRows.Count -eq 8) { 'PASS' } else { "FAIL ($($structuralRows.Count)/8)" })
     '8-build runtime validation' = $(if ($runtimeRows.Count -eq 8) { 'PASS' } elseif ($runtimeRows.Count -eq 0) { 'DATA UNAVAILABLE (no local boot image: not runtime-tested)' } else { "PARTIAL ($($runtimeRows.Count)/8 inspected)" })
 }
@@ -460,7 +512,7 @@ Write-Host 'Online relay summary:' -ForegroundColor Cyan
 foreach ($entry in $summary.GetEnumerator()) {
     $good = $entry.Value -like 'PASS*'
     $color = if ($entry.Value -like 'FAIL*' -or $entry.Value -like 'NOT RUN*') { 'Red' } elseif ($good) { 'Green' } else { 'Yellow' }
-    Write-Host ('  {0,-28} {1}' -f ($entry.Key + ':'), $entry.Value) -ForegroundColor $color
+    Write-Host ('  {0,-30} {1}' -f ($entry.Key + ':'), $entry.Value) -ForegroundColor $color
     if ($entry.Value -like 'FAIL*' -or $entry.Value -like 'NOT RUN*') { if (-not $failed.Contains("summary: $($entry.Key)")) { $failed.Add("summary: $($entry.Key)") } }
 }
 $launcherCore = 'dcp-launcher-tests'
@@ -520,13 +572,17 @@ foreach ($entry in $launcherSummary.GetEnumerator()) {
     Write-Host ('  {0,-28} {1}' -f ($entry.Key + ':'), $entry.Value) -ForegroundColor $color
     if ($entry.Value -like 'FAIL*' -and -not $failed.Contains("launcher: $($entry.Key)")) { $failed.Add("launcher: $($entry.Key)") }
 }
+$ranCount = $tests.Count - $skipped.Count
 Write-Host ''
+Write-Host ('Result: {0} PASS, {1} FAIL, {2} SKIPPED, {3} BLOCKED' -f ($ranCount - $failed.Count), $failed.Count, $skipped.Count, $blockedNames.Count) -ForegroundColor Cyan
+foreach ($name in $skipped.Keys) { Write-Host "  SKIPPED: $name ($($skipped[$name]))" -ForegroundColor Yellow }
+foreach ($name in $blockedNames) { Write-Host "  BLOCKED: $name (no real executable here)" -ForegroundColor Yellow }
 if ($failed.Count -gt 0) {
     Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
     exit 1
 }
 if ($partial) {
-    Write-Host 'All tests passed. Feature parity is PARTIAL: DATA UNAVAILABLE above is unproven, not passing.' -ForegroundColor Yellow
+    Write-Host ('All tests passed. The six required builds PASS; BLOCKED (no real executable): ' + ($blockedNames -join ', ') + '.') -ForegroundColor Yellow
 } else {
     Write-Host 'All tests passed.' -ForegroundColor Green
 }

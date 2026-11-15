@@ -569,6 +569,7 @@ Unlock Gallery	Desbloquear Galeria
 Unlocks all Gallery content while enabled without changing save progress	Desbloqueia todo o conteúdo da Galeria enquanto estiver ligado, sem alterar o progresso salvo
 Unlocks all Gallery content while enabled without changing save progress.	Desbloqueia todo o conteúdo da Galeria enquanto estiver ligado, sem alterar o progresso salvo.
 Enable Boss Battle	Ativar Batalha de Chefes
+Not available for this build yet: its executable has not been checked.	Ainda não disponível nesta versão: o executável dela ainda não foi verificado.
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fights there never change campaign progress. Offline only.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. As lutas ali nunca alteram o progresso da campanha. Somente offline.
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu opens. Fights there never change campaign progress. Offline only.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. Vale a partir da próxima vez que o menu da taverna abrir. As lutas ali nunca alteram o progresso da campanha. Somente offline.
 Boss Battle	Batalha de Chefes
@@ -583,6 +584,8 @@ Fight this boss with the party prepared in the Inn. Campaign progress does not c
 Pending: not yet confirmed in game. The fight, the victory and the return to the Inn still need a full run.	Pendente: ainda não confirmado no jogo. A luta, a vitória e a volta à taverna ainda precisam de um teste completo.
 This boss cannot be started now.	Este chefe não pode ser iniciado agora.
 Boss Battle is not available for this game build.	A Batalha de Chefes não está disponível para esta versão do jogo.
+Fight All stopped: a safety check failed. The character progression saved so far is kept.	Enfrentar Todos parou: uma verificação de segurança falhou. A progressão do personagem salva até agora foi mantida.
+Online Boss Battle is not available yet.	A Batalha de Chefes online ainda não está disponível.
 Boss Battle did not start: the campaign save could not be protected. Try again.	A Batalha de Chefes não começou: o save da campanha não pôde ser protegido. Tente de novo.
 Boss Battle did not start: the campaign state could not be kept.	A Batalha de Chefes não começou: o estado da campanha não pôde ser guardado.
 Boss Battle: the game did not start the battle.	Batalha de Chefes: o jogo não iniciou a luta.

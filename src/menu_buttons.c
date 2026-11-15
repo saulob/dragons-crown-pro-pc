@@ -58,6 +58,7 @@ typedef struct {
 
 static const BuildSites kBuilds[] = {
     {"CUSA10454-1.00", 0x7ee45, {0x176c8, 0x177e0}, 2},
+    {"CUSA10454-1.01", 0x7ee45, {0x176c8, 0x177e0}, 2},
     {"CUSA07001-1.00", 0x7e775, {0, 0}, 0},
     {"CUSA07001-1.02", 0x7e7c5, {0, 0}, 0},
     {"CUSA07001-1.03", 0x7e7c5, {0, 0}, 0},

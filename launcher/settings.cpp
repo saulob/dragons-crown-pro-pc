@@ -552,6 +552,17 @@ extern "C" int dcp_text_language_is_portuguese_brazil(const char* settings_file,
     return ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).key == kPortugueseBrazilKey;
 }
 
+extern "C" void dcp_text_language_key(const char* settings_file, const char* image_dir, const char* app0, char* out,
+                                      size_t size) {
+    using namespace dcp;
+    if (!out || !size) return;
+    const GameBuild* build = BuildOfImageDir(image_dir);
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    const std::string_view key = ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).key;
+    std::snprintf(out, size, "%.*s", int(key.size()), key.data());
+}
+
 extern "C" int dcp_text_language(const char* settings_file, const char* image_dir, const char* app0) {
     using namespace dcp;
     const GameBuild* build = BuildOfImageDir(image_dir);

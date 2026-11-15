@@ -2287,11 +2287,12 @@ void TestEnableBossBattleSettings(const fs::path& base) {
 
     int offered = 0;
     for (const GameBuild& build : SupportedBuilds()) {
-        const bool usa_100 = std::string_view(build.title_id) == "CUSA10454" && std::string_view(build.version) == "1.00";
-        CHECK(BossBattleAvailable(&build) == usa_100);
+        const std::string_view label = build.label;
+        const bool unchecked = label == "CUSA10209 1.02 Asia/Hong Kong" || label == "CUSA10487 1.03 Europe";
+        CHECK(BossBattleAvailable(&build) == !unchecked);
         offered += BossBattleAvailable(&build);
     }
-    CHECK(offered == 1 && BossBattleAvailable(nullptr));
+    CHECK(offered == int(SupportedBuilds().size()) - 2 && BossBattleAvailable(nullptr));
 
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
     const std::string gated = "if (BossBattleAvailable(build_)) {\n            ui.Toggle(\"Enable Boss Battle\", kEnableBossBattleHelp, "

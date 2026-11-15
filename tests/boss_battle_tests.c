@@ -10,9 +10,11 @@
 #include <string.h>
 
 #include "boss_battle.h"
+#include "boss_battle_text.h"
 #include "boss_battle_record.h"
 #include "exit_game_text.h"
 #include "hydeland_town.h"
+#include "inn_layout.h"
 
 #ifdef _WIN32
 #include <direct.h>
@@ -38,6 +40,12 @@ static const char *const kNames[BOSS_BATTLE_ENCOUNTERS] = {
     "Harpy",  "Wyvern", "Doom Beetle",   "Golem",  "Gazer",   "Pirates", "Minotaur",      "Vampire",    "Warlock", "Medusa",
     "Wraith", "Killer Rabbit", "Kraken", "Cyclops", "Chimera", "Gargoyle Gate", "Red Dragon", "Arch Demon",
     "Ancient Dragon", "Demon King",
+};
+/* As the English game names them: the Demon King's room holds the DemonLord object, ObjectParam 81 "Demon Lord". */
+static const char *const kShownNames[BOSS_BATTLE_ENCOUNTERS] = {
+    "Harpy",  "Wyvern", "Doom Beetle",   "Golem",  "Gazer",   "Pirates", "Minotaur",      "Vampire",    "Warlock", "Medusa",
+    "Wraith", "Killer Rabbit", "Kraken", "Cyclops", "Chimera", "Gargoyle Gate", "Red Dragon", "Arch Demon",
+    "Ancient Dragon", "Demon Lord",
 };
 
 static const char *const kRounds[] = {
@@ -77,7 +85,7 @@ static void test_encounters(void) {
         const BossBattleEncounter *e = boss_battle_encounter(i);
         char label[64], expected[64];
         CHECK(e && !strcmp(e->name, kNames[i]) && boss_battle_number(i) == i + 1);
-        snprintf(expected, sizeof(expected), "%02d %s", i + 1, kNames[i]);
+        snprintf(expected, sizeof(expected), "%02d %s", i + 1, kShownNames[i]);
         CHECK(boss_battle_label(i, label, sizeof(label)) && !strcmp(label, expected));
         for (int j = 0; j < i; ++j) CHECK(strcmp(e->id, boss_battle_encounter(j)->id));
         CHECK(e->round_index >= 0 && e->round_index < (int)(sizeof(kRounds) / sizeof(*kRounds)));
@@ -208,7 +216,7 @@ static void start_guarded(void) {
     boss_battle_set_memory_guard(fake_snapshot, fake_restore);
     boss_battle_set_available(1);
     boss_battle_set_enabled(1);
-    boss_battle_set_character("Zak", "Fighter", 1);
+    boss_battle_set_character("Zak", 0, 1);
 }
 
 static const BossBattleScene kInnScene = {2, 0, 9, 2, -1, 0};
@@ -727,6 +735,7 @@ static void test_telemetry(const char *user_dir) {
 static void test_inn_rows(void) {
     static const int kNative[BOSS_BATTLE_INN_ROWS] = {0, 1, 2, BOSS_BATTLE_INN_NO_ROW, 3, 4, 5};
     CHECK(BOSS_BATTLE_INN_ROW == 3 && BOSS_BATTLE_INN_ROWS == 7);
+    CHECK(boss_battle_inn_native_row(4) == 3 && boss_battle_inn_native_row(5) == 4 && boss_battle_inn_native_row(6) == 5);
     for (int row = 0; row < BOSS_BATTLE_INN_ROWS; ++row) CHECK(boss_battle_inn_native_row(row) == kNative[row]);
     CHECK(boss_battle_inn_native_row(-2) == -2 && boss_battle_inn_native_row(-1) == -1);
     for (int native = 0; native < BOSS_BATTLE_INN_ROWS - 1; ++native) {
@@ -735,12 +744,123 @@ static void test_inn_rows(void) {
     }
 }
 
-enum { INN_LIST = 0x3ba0, INN_SIZE = 0x5000, ITEM_SIZE = 0x30, MAX_ITEMS = 32 };
+enum { INN_LIST = 0x3ba0, INN_SIZE = 0x5000, ITEM_SIZE = 0x30, MAX_ITEMS = 32, WIDGET_BYTES = 0x5c0, POOL = 24 };
 static uint8_t fake_inn[INN_SIZE], fake_inn_context[0x100], fake_items[MAX_ITEMS * ITEM_SIZE];
 static uint64_t fake_widgets[8];
-static uint8_t fake_new_widget[0x5c0];
-static int widgets_added, items_added, disabled_calls, disabled_row = -1, disabled_flag = -1;
+static uint8_t fake_new_widget[WIDGET_BYTES], fake_inn_rows[6][WIDGET_BYTES];
+static uint8_t widget_pool[POOL][WIDGET_BYTES], fake_list_manager[0x200];
+static uint64_t fake_list_vtable[0x200 / 8], fake_widget_vtable[0x100 / 8];
+static int pool_used, widgets_added, items_added, disabled_calls, disabled_row = -1, disabled_flag = -1;
 static int cursor_calls, cursor_row = -1, party_sends;
+
+/* What the custom Inn menu asked of the game's list and row primitives. */
+typedef struct {
+    uint64_t widget;
+    float y, cell_height;
+    int32_t height;
+    uint8_t state;
+} TextDraw;
+typedef struct {
+    uint64_t widget;
+    int y, height;
+    float scale;
+} ArtDraw;
+static struct {
+    int titles, backgrounds, scroll_bars, helps, hovers, deletes, applies, texts, arts;
+    TextDraw text[16];
+    ArtDraw art[16];
+    uint64_t applied[8];
+    int applied_item[8];
+} menu_calls;
+
+static int pooled(uint64_t widget) {
+    return widget >= (uint64_t)(uintptr_t)widget_pool && widget < (uint64_t)(uintptr_t)widget_pool + sizeof(widget_pool);
+}
+
+static void GUEST_HOOK_ABI fake_widget_delete(uint64_t widget) {
+    (void)widget;
+    ++menu_calls.deletes;
+}
+static void GUEST_HOOK_ABI fake_widget_noop(uint64_t widget) {
+    (void)widget;
+}
+static void GUEST_HOOK_ABI fake_widget_frame(uint64_t widget, int on) {
+    (void)widget, (void)on;
+}
+static void GUEST_HOOK_ABI fake_widget_draw(uint64_t widget) {
+    if (menu_calls.texts >= 16) return;
+    TextDraw *draw = &menu_calls.text[menu_calls.texts++];
+    const uint8_t *w = (const uint8_t *)(uintptr_t)widget;
+    draw->widget = widget;
+    memcpy(&draw->y, w + 0x34, sizeof(draw->y));
+    memcpy(&draw->cell_height, w + 0x35c, sizeof(draw->cell_height));
+    memcpy(&draw->height, w + 0x354, sizeof(draw->height));
+    draw->state = w[0x360];
+}
+static void GUEST_HOOK_ABI fake_list_title(uint64_t list) {
+    (void)list;
+    ++menu_calls.titles;
+}
+static void GUEST_HOOK_ABI fake_list_background(uint64_t list) {
+    (void)list;
+    ++menu_calls.backgrounds;
+}
+static void GUEST_HOOK_ABI fake_list_scroll_bar(uint64_t list) {
+    (void)list;
+    ++menu_calls.scroll_bars;
+}
+static uint64_t count_of(int begin, int end, int stride);
+static int GUEST_HOOK_ABI fake_list_count(uint64_t list) {
+    (void)list;
+    return (int)count_of(0xc78, 0xc80, ITEM_SIZE);
+}
+static void GUEST_HOOK_ABI fake_list_cursor_art(uint64_t list, uint64_t widget, int x, int y, int width, int height) {
+    (void)x, (void)width;
+    if (menu_calls.arts >= 16) return;
+    ArtDraw *art = &menu_calls.art[menu_calls.arts++];
+    art->widget = widget;
+    art->y = y;
+    art->height = height;
+    memcpy(&art->scale, (const uint8_t *)(uintptr_t)list + 0xe0 + 0x90, sizeof(art->scale));
+}
+static void GUEST_HOOK_ABI fake_list_help(uint64_t list, uint64_t widget, int x, int y, int width, int height) {
+    (void)list, (void)widget, (void)x, (void)y, (void)width, (void)height;
+    ++menu_calls.helps;
+}
+static void GUEST_HOOK_ABI fake_list_hover(uint64_t list, uint64_t widget, int x, int y, int width, int height) {
+    (void)list, (void)widget, (void)x, (void)y, (void)width, (void)height;
+    ++menu_calls.hovers;
+}
+static void GUEST_HOOK_ABI fake_list_apply(uint64_t list, uint64_t widget, int item) {
+    (void)list;
+    if (menu_calls.applies < 8) {
+        menu_calls.applied[menu_calls.applies] = widget;
+        menu_calls.applied_item[menu_calls.applies] = item;
+    }
+    ++menu_calls.applies;
+}
+
+static void set_slot(uint64_t *vtable, int slot, void *function) {
+    vtable[slot / 8] = (uint64_t)(uintptr_t)function;
+}
+
+static void set_fake_vtables(void) {
+    set_slot(fake_widget_vtable, 0x08, (void *)fake_widget_delete);
+    set_slot(fake_widget_vtable, 0x88, (void *)fake_widget_noop);
+    set_slot(fake_widget_vtable, 0x90, (void *)fake_widget_noop);
+    set_slot(fake_widget_vtable, 0x98, (void *)fake_widget_noop);
+    set_slot(fake_widget_vtable, 0xa8, (void *)fake_widget_frame);
+    set_slot(fake_widget_vtable, 0xb0, (void *)fake_widget_draw);
+    set_slot(fake_widget_vtable, 0xb8, (void *)fake_widget_noop);
+    set_slot(fake_list_vtable, 0xb8, (void *)fake_list_apply);
+    set_slot(fake_list_vtable, 0xd8, (void *)fake_list_count);
+    set_slot(fake_list_vtable, 0x190, (void *)fake_list_scroll_bar);
+    set_slot(fake_list_vtable, 0x198, (void *)fake_list_background);
+    set_slot(fake_list_vtable, 0x1a0, (void *)fake_list_title);
+    set_slot(fake_list_vtable, 0x1a8, (void *)fake_list_cursor_art);
+    set_slot(fake_list_vtable, 0x1b0, (void *)fake_list_help);
+    set_slot(fake_list_vtable, 0x1b8, (void *)fake_list_hover);
+}
 
 static uint8_t *inn_list(void) {
     return fake_inn + INN_LIST;
@@ -767,10 +887,13 @@ static void push_item(int32_t tag) {
 }
 
 static uint64_t GUEST_HOOK_ABI fake_allocate(uint64_t size) {
-    return size == sizeof(fake_new_widget) ? (uint64_t)(uintptr_t)fake_new_widget : 0;
+    if (size != WIDGET_BYTES || pool_used >= POOL) return 0;
+    memset(widget_pool[pool_used], 0, WIDGET_BYTES);
+    return (uint64_t)(uintptr_t)widget_pool[pool_used++];
 }
 static void GUEST_HOOK_ABI fake_widget(uint64_t widget, uint64_t manager) {
-    (void)widget, (void)manager;
+    (void)manager;
+    put_pointer((uint8_t *)(uintptr_t)widget, fake_widget_vtable);
 }
 static int GUEST_HOOK_ABI fake_add_widget(uint64_t list, uint64_t widget) {
     (void)widget;
@@ -802,6 +925,41 @@ static void GUEST_HOOK_ABI fake_inn_party(uint64_t inn) {
     snprintf(party_guard, sizeof(party_guard), "%s", guard_log);
 }
 
+static void put_f32_at(uint8_t *where, float value) {
+    memcpy(where, &value, sizeof(value));
+}
+
+static void put_i32_at(uint8_t *where, int32_t value) {
+    memcpy(where, &value, sizeof(value));
+}
+
+/* The vanilla Inn list (x -520, first row at y -155, 200 x 50 cells, its title offset to the side) and its row widgets
+ * (200 x 50, no margins, the colour and state the game gives them). */
+static void set_native_geometry(void) {
+    uint8_t *list = inn_list();
+    put_pointer(list, fake_list_vtable);
+    put_pointer(list + 0x28, fake_list_manager);
+    put_f32_at(list + 0x30, -520.0f);
+    put_f32_at(list + 0x34, -155.0f);
+    put_pointer(list + 0x58, fake_new_widget);
+    put_i32_at(list + 0x9c, 1);
+    put_f32_at(list + 0xa0, 200.0f);
+    put_f32_at(list + 0xa4, 50.0f);
+    put_f32_at(list + 0xd4, -585.0f);
+    put_f32_at(list + 0xd8, -345.0f);
+    put_f32_at(list + 0xe0 + 0x90, 1.0f);
+    put_f32_at(list + 0x3b0 + 0x90, 1.0f);
+    put_i32_at(list + 0x95c, -1);
+    put_i32_at(list + 0x964, 0x10000000);
+    list[0x47] = 0xff;
+    for (int i = 0; i < 6; ++i) {
+        put_i32_at(fake_inn_rows[i] + 0x350, 200);
+        put_i32_at(fake_inn_rows[i] + 0x354, 50);
+        put_i32_at(fake_inn_rows[i] + 0x44, 0x80ffffff);
+        fake_inn_rows[i][0x360] = i == 1 ? 0x2 : 0;
+    }
+}
+
 /* The Inn's native rows carry their SystemMsg record. */
 static void set_inn(unsigned items, unsigned widgets, int32_t result, int32_t cursor) {
     static const int32_t kRows[7] = {919, 920, 921, 922, 923, 924, 925};
@@ -812,9 +970,12 @@ static void set_inn(unsigned items, unsigned widgets, int32_t result, int32_t cu
     put_pointer(inn_list() + 0xc78, fake_items);
     put_pointer(inn_list() + 0xc80, fake_items);
     for (unsigned i = 0; i < items; ++i) push_item(items == 7 ? kRows[i] : items == 6 ? kSix[i] : (int32_t)i);
-    for (unsigned i = 0; i < 8; ++i) fake_widgets[i] = (uint64_t)(uintptr_t)fake_new_widget;
+    memset(fake_inn_rows, 0, sizeof(fake_inn_rows));
+    for (unsigned i = 0; i < 8; ++i)
+        fake_widgets[i] = (uint64_t)(uintptr_t)(i < 6 ? fake_inn_rows[i] : fake_new_widget);
     put_pointer(inn_list() + 0x68, fake_widgets);
     put_pointer(inn_list() + 0x70, fake_widgets + widgets);
+    set_native_geometry();
     memcpy(inn_list() + 0x960, &result, sizeof(result));
     memcpy(inn_list() + 0x958, &cursor, sizeof(cursor));
 }
@@ -833,7 +994,13 @@ static void use_fake_inn_functions(void) {
                                               fake_add_item,     fake_set_disabled, fake_set_cursor,
                                               fake_inn_party};
     boss_battle_set_inn_functions(&functions);
-    widgets_added = items_added = disabled_calls = cursor_calls = party_sends = 0;
+    set_fake_vtables();
+    GuestRegs gone;
+    memset(&gone, 0, sizeof(gone));
+    gone.rdi = (uint64_t)(uintptr_t)fake_inn;
+    boss_battle_inn_destroyed_hook(&gone);
+    memset(&menu_calls, 0, sizeof(menu_calls));
+    pool_used = widgets_added = items_added = disabled_calls = cursor_calls = party_sends = 0;
     party_guard[0] = 0;
 }
 
@@ -858,16 +1025,676 @@ static void test_inn_build(void) {
     set_inn(6, 6, -1, 0);
     GuestRegs regs = inn_regs();
     boss_battle_inn_built_hook(&regs);
-    CHECK(count_of(0xc78, 0xc80, ITEM_SIZE) == 6 && !widgets_added && !items_added);
+    CHECK(count_of(0xc78, 0xc80, ITEM_SIZE) == 6 && !widgets_added && !items_added && !pool_used);
     boss_battle_set_enabled(1);
     set_inn(5, 5, -1, 0);
     regs = inn_regs();
     boss_battle_inn_built_hook(&regs);
-    CHECK(count_of(0xc78, 0xc80, ITEM_SIZE) == 5 && !items_added);
+    CHECK(count_of(0xc78, 0xc80, ITEM_SIZE) == 5 && !items_added && !pool_used);
     set_inn(6, 6, -1, 0);
     regs = inn_regs();
     boss_battle_inn_built_hook(&regs);
     CHECK(widgets_added == 1 && items_added == 1 && main_rows_are_inn() && count_of(0x68, 0x70, 8) == 7);
+    boss_battle_reset();
+}
+
+static void test_inn_layout(void) {
+    BossBattleInnLayout layout;
+    CHECK(boss_battle_inn_layout(-520.0f, 200.0f, 50.0f, -130.0f, 120.0f, &layout) == 1);
+    CHECK(layout.center[0] == -130.0f && layout.center[BOSS_BATTLE_INN_ROWS - 1] == 120.0f);
+    CHECK(layout.row_height == 40.0f && layout.art_scale == 0.8f && layout.x == -520.0f && layout.width == 200.0f);
+    CHECK(layout.pitch > 41.66f && layout.pitch < 41.67f);
+    for (int row = 0; row + 1 < BOSS_BATTLE_INN_ROWS; ++row) {
+        const float step = layout.center[row + 1] - layout.center[row];
+        CHECK(step > 41.66f && step < 41.67f);
+        CHECK(boss_battle_inn_row_top(&layout, row) + layout.row_height < boss_battle_inn_row_top(&layout, row + 1));
+    }
+    CHECK(boss_battle_inn_layout(-520.0f, 200.0f, 50.0f, -130.0f, -125.0f, &layout) == 0);
+    CHECK(boss_battle_inn_layout(-520.0f, 200.0f, 30.0f, -130.0f, 120.0f, &layout) == 0);
+}
+
+static void reset_frame_calls(void) {
+    menu_calls.titles = menu_calls.backgrounds = menu_calls.scroll_bars = menu_calls.helps = menu_calls.hovers = 0;
+    menu_calls.texts = menu_calls.arts = 0;
+}
+
+static GuestRegs draw_frame(uint8_t *list) {
+    GuestRegs regs = inn_regs();
+    regs.rdi = (uint64_t)(uintptr_t)list;
+    reset_frame_calls();
+    boss_battle_inn_draw_hook(&regs);
+    return regs;
+}
+
+static void build_custom_menu(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    boss_battle_set_enabled(1);
+    set_inn(6, 6, -1, 0);
+    GuestRegs regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+}
+
+static int32_t list_i32(int offset) {
+    int32_t value;
+    memcpy(&value, inn_list() + offset, sizeof(value));
+    return value;
+}
+
+static float list_f32(int offset) {
+    float value;
+    memcpy(&value, inn_list() + offset, sizeof(value));
+    return value;
+}
+
+static int selected_rows(int *selected) {
+    int count = 0;
+    for (int i = 0; i < menu_calls.texts; ++i)
+        if (menu_calls.text[i].state & 0x8) ++count, *selected = i;
+    return count;
+}
+
+/* Boss Battle off: the Inn menu is the game's own, drawn by the game. */
+static void test_inn_menu_off(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    boss_battle_set_enabled(0);
+    set_inn(6, 6, -1, 0);
+    GuestRegs regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+    static uint8_t before[INN_SIZE];
+    memcpy(before, fake_inn, sizeof(before));
+    regs = draw_frame(inn_list());
+    CHECK(!regs.skip && !pool_used && !menu_calls.applies && !menu_calls.texts && !menu_calls.titles && !menu_calls.arts);
+    CHECK(!memcmp(before, fake_inn, sizeof(before)));
+    boss_battle_reset();
+}
+
+/* Boss Battle on: seven rows of the game's row class, named from the list's own items, Boss Battle fourth. */
+static void test_inn_menu_built(void) {
+    build_custom_menu();
+    CHECK(pool_used == BOSS_BATTLE_INN_ROWS + 1 && widgets_added == 1 && items_added == 1 && main_rows_are_inn());
+    CHECK(menu_calls.applies == BOSS_BATTLE_INN_ROWS);
+    for (int row = 0; row < BOSS_BATTLE_INN_ROWS; ++row) {
+        const uint8_t *widget = widget_pool[row];
+        int32_t width, height;
+        uint64_t owner;
+        memcpy(&width, widget + 0x350, sizeof(width));
+        memcpy(&height, widget + 0x354, sizeof(height));
+        memcpy(&owner, widget + 0x348, sizeof(owner));
+        CHECK(menu_calls.applied[row] == (uint64_t)(uintptr_t)widget && menu_calls.applied_item[row] == row);
+        CHECK(width == 200 && height == 40 && owner == (uint64_t)(uintptr_t)inn_list());
+    }
+    CHECK(item_tag(menu_calls.applied_item[BOSS_BATTLE_INN_ROW]) == BOSS_BATTLE_INN_ROW_RECORD);
+    CHECK(boss_battle_inn_native_row(4) == 3 && boss_battle_inn_native_row(5) == 4 && boss_battle_inn_native_row(6) == 5);
+    boss_battle_reset();
+}
+
+/* Each frame: the game's title, then the seven custom rows inside the vanilla envelope, one highlighted row with the
+ * native cursor art at the row's height, and nothing of the Inn changed. */
+static void test_inn_menu_draw(void) {
+    build_custom_menu();
+    static uint8_t before[INN_SIZE];
+    static const int kCursors[] = {0, 1, 2, 3, 4, 5, 6, 0, 6, 5};
+    for (size_t c = 0; c < sizeof(kCursors) / sizeof(*kCursors); ++c) {
+        const int cursor = kCursors[c];
+        put_i32_at(inn_list() + 0x958, cursor);
+        memcpy(before, fake_inn, sizeof(before));
+        const GuestRegs regs = draw_frame(inn_list());
+        CHECK(regs.skip && menu_calls.texts == BOSS_BATTLE_INN_ROWS && menu_calls.titles == 1);
+        CHECK(!menu_calls.backgrounds && menu_calls.scroll_bars == 1 && menu_calls.helps == 1 && !menu_calls.hovers);
+        CHECK(!memcmp(before, fake_inn, sizeof(before)));
+        int selected = -1;
+        CHECK(selected_rows(&selected) == 1 && selected == cursor);
+        CHECK(menu_calls.arts == 1 && menu_calls.art[0].widget == menu_calls.text[cursor].widget);
+        CHECK(menu_calls.art[0].scale == 0.8f && menu_calls.art[0].height == 40 && list_f32(0xe0 + 0x90) == 1.0f);
+        CHECK(menu_calls.art[0].y == (int)menu_calls.text[cursor].y);
+        for (int row = 0; row < BOSS_BATTLE_INN_ROWS; ++row) {
+            const TextDraw *text = &menu_calls.text[row];
+            CHECK(text->widget == (uint64_t)(uintptr_t)widget_pool[row] && pooled(text->widget));
+            CHECK(text->height == 40 && text->cell_height == 40.0f);
+        }
+    }
+    const TextDraw *text = menu_calls.text;
+    CHECK(text[0].y + (float)(text[0].height / 2) == -130.0f);
+    CHECK(text[6].y + (float)(text[6].height / 2) == 120.0f);
+    for (int row = 0; row + 1 < BOSS_BATTLE_INN_ROWS; ++row) {
+        const float step = text[row + 1].y - text[row].y;
+        CHECK(step > 41.66f && step < 41.67f && text[row].y + text[row].cell_height < text[row + 1].y);
+    }
+    CHECK(text[1].state & 0x2);
+    uint32_t colour;
+    memcpy(&colour, widget_pool[0] + 0x44, sizeof(colour));
+    CHECK(colour == 0x80ffffff);
+    boss_battle_reset();
+}
+
+/* The native list's flags keep their meaning: an open submenu hides the cursor art, a decided row blinks, the result
+ * latch counts down, a hidden list draws nothing; other lists are never drawn by the custom menu. */
+static void test_inn_menu_states(void) {
+    build_custom_menu();
+    put_i32_at(inn_list() + 0x958, 2);
+    put_i32_at(inn_list() + 0x964, 0x10000000 | 0x8);
+    GuestRegs regs = draw_frame(inn_list());
+    int selected = -1;
+    CHECK(regs.skip && !menu_calls.arts && menu_calls.texts == 7 && selected_rows(&selected) == 1 && selected == 2);
+
+    put_i32_at(inn_list() + 0x964, 0x10000000 | 0x10000);
+    fake_list_manager[0x140] = 0x2;
+    regs = draw_frame(inn_list());
+    CHECK(regs.skip && menu_calls.texts == 6);
+    fake_list_manager[0x140] = 0;
+    regs = draw_frame(inn_list());
+    CHECK(menu_calls.texts == 7);
+
+    put_i32_at(inn_list() + 0x964, 0x10000000 | 0x800);
+    put_i32_at(inn_list() + 0x960, 2);
+    put_i32_at(inn_list() + 0xb8, 3);
+    draw_frame(inn_list());
+    CHECK(list_i32(0xb8) == 2);
+    put_i32_at(inn_list() + 0x960, -1);
+    draw_frame(inn_list());
+    CHECK(list_i32(0xb8) == 2);
+
+    put_i32_at(inn_list() + 0x964, 0x10000000 | 0x400);
+    regs = draw_frame(inn_list());
+    CHECK(regs.skip && !menu_calls.texts && !menu_calls.titles);
+
+    put_i32_at(inn_list() + 0x964, 0x10000000);
+    regs = draw_frame(fake_inn + 0x4e10);
+    CHECK(!regs.skip && !menu_calls.texts && !menu_calls.titles);
+    boss_battle_reset();
+}
+
+/* The rows belong to their Inn: deleted with it, made once per build, never doubled. */
+static void test_inn_menu_lifetime(void) {
+    build_custom_menu();
+    GuestRegs gone;
+    memset(&gone, 0, sizeof(gone));
+    gone.rdi = (uint64_t)(uintptr_t)fake_inn + 0x10;
+    boss_battle_inn_destroyed_hook(&gone);
+    CHECK(!menu_calls.deletes && draw_frame(inn_list()).skip);
+
+    GuestRegs again = inn_regs();
+    boss_battle_inn_built_hook(&again);
+    CHECK(pool_used == BOSS_BATTLE_INN_ROWS + 1 && draw_frame(inn_list()).skip && menu_calls.texts == 7);
+
+    gone.rdi = (uint64_t)(uintptr_t)fake_inn;
+    boss_battle_inn_destroyed_hook(&gone);
+    CHECK(menu_calls.deletes == BOSS_BATTLE_INN_ROWS && !draw_frame(inn_list()).skip && !menu_calls.texts);
+
+    set_inn(6, 6, -1, 0);
+    GuestRegs regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+    CHECK(pool_used == 2 * (BOSS_BATTLE_INN_ROWS + 1) && menu_calls.applies == 2 * BOSS_BATTLE_INN_ROWS);
+    regs = draw_frame(inn_list());
+    CHECK(regs.skip && menu_calls.texts == BOSS_BATTLE_INN_ROWS && menu_calls.deletes == BOSS_BATTLE_INN_ROWS);
+    for (int row = 0; row < BOSS_BATTLE_INN_ROWS; ++row)
+        CHECK(menu_calls.text[row].widget == (uint64_t)(uintptr_t)widget_pool[BOSS_BATTLE_INN_ROWS + 1 + row]);
+
+    boss_battle_inn_destroyed_hook(&gone);
+    CHECK(menu_calls.deletes == 2 * BOSS_BATTLE_INN_ROWS);
+    boss_battle_reset();
+}
+
+static float absf(float value) {
+    return value < 0.0f ? -value : value;
+}
+
+/* ---- the Inn background's seven rows on the shared menu layout ---- */
+
+enum {
+    MBS_PARTS = 0xf8,
+    MBS_LAYERS = 0x100,
+    MBS_KEYFRAMES = 0xf0,
+    MBS_TRANSFORMS = 0xe8,
+    MBS_PART_COUNT = 471,
+    INN_E0 = 57,
+    INN_1 = 3,
+    ROW_ELEMENT = 123,
+    LIT_ELEMENT = 122,
+    FLASH_ELEMENT = 135
+};
+
+typedef struct {
+    uint8_t *data, *pristine;
+    long size;
+} MenuLayout;
+
+/* The layout as the game holds it once loaded: the file in place, its table offsets turned into addresses and the
+ * header marked as relocated; `relocate` 0 keeps the file as it is on disk. */
+static int read_layout_at(const char *folder, const char *name, MenuLayout *layout, int relocate) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/build/research/archaeology/res/%s/stage/%s", DCP_SOURCE_DIR, folder, name);
+    FILE *file = fopen(path, "rb");
+    if (!file) return 0;
+    fseek(file, 0, SEEK_END);
+    layout->size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    layout->data = malloc((size_t)layout->size);
+    layout->pristine = malloc((size_t)layout->size);
+    const size_t read = fread(layout->data, 1, (size_t)layout->size, file);
+    fclose(file);
+    if (read != (size_t)layout->size) return 0;
+    for (int i = 0; relocate && i < 11; ++i) {
+        uint64_t offset;
+        memcpy(&offset, layout->data + 0xb0 + 8 * i, sizeof(offset));
+        put_pointer(layout->data + 0xb0 + 8 * i, offset ? layout->data + offset : NULL);
+    }
+    if (relocate) layout->data[0x17] |= 0x04;
+    memcpy(layout->pristine, layout->data, (size_t)layout->size);
+    return 1;
+}
+
+static int read_layout(const char *name, MenuLayout *layout, int relocate) {
+    return read_layout_at("us100", name, layout, relocate);
+}
+
+static int load_menu_layout(const char *name, MenuLayout *layout) {
+    return read_layout(name, layout, 1);
+}
+
+/* A copy of the pristine layout whose tables are its own. */
+static uint8_t *clone_layout(const MenuLayout *layout) {
+    uint8_t *copy = malloc((size_t)layout->size);
+    memcpy(copy, layout->pristine, (size_t)layout->size);
+    for (int i = 0; i < 11; ++i) {
+        uint64_t at;
+        memcpy(&at, copy + 0xb0 + 8 * i, sizeof(at));
+        if (at) put_pointer(copy + 0xb0 + 8 * i, copy + (at - (uint64_t)(uintptr_t)layout->data));
+    }
+    return copy;
+}
+
+static const uint8_t *mbs_table(const uint8_t *layout, int at) {
+    uint64_t value;
+    memcpy(&value, layout + at, sizeof(value));
+    return (const uint8_t *)(uintptr_t)value;
+}
+
+static uint16_t mbs_u16(const uint8_t *at) {
+    uint16_t value;
+    memcpy(&value, at, sizeof(value));
+    return value;
+}
+
+static float mbs_f32(const uint8_t *at) {
+    float value;
+    memcpy(&value, at, sizeof(value));
+    return value;
+}
+
+typedef struct {
+    uint16_t first;
+    uint8_t count, master;
+} PartView;
+
+static PartView part_view(const uint8_t *layout, int part) {
+    const uint8_t *record = mbs_table(layout, MBS_PARTS) + part * 48;
+    return (PartView){mbs_u16(record + 0x28), record[0x2a], record[0x2b]};
+}
+
+typedef struct {
+    uint32_t element;
+    float x, y, scale_y;
+    const uint8_t *keyframe, *transform;
+} KeyView;
+
+static int layer_keys(const uint8_t *layout, int layer, KeyView *keys, int max) {
+    const uint8_t *record = mbs_table(layout, MBS_LAYERS) + layer * 24;
+    const int start = mbs_u16(record), count = mbs_u16(record + 2);
+    for (int k = 0; k < count && k < max; ++k) {
+        const uint8_t *keyframe = mbs_table(layout, MBS_KEYFRAMES) + (start + k) * 32;
+        const uint8_t *transform = mbs_table(layout, MBS_TRANSFORMS) + mbs_u16(keyframe + 4) * 36;
+        uint32_t element;
+        memcpy(&element, keyframe, sizeof(element));
+        keys[k] = (KeyView){element, mbs_f32(transform), mbs_f32(transform + 4), mbs_f32(transform + 28), keyframe, transform};
+    }
+    return count < max ? count : max;
+}
+
+/* The y of a part's first key showing `element` on the menu column, or a value off every row. */
+static float element_y(const uint8_t *layout, int part, uint32_t element) {
+    const PartView view = part_view(layout, part);
+    for (int at = 0; at < view.count; ++at) {
+        KeyView keys[16];
+        const int n = layer_keys(layout, view.first + at, keys, 16);
+        for (int k = 0; k < n; ++k)
+            if (keys[k].element == element && keys[k].x == -420.0f) return keys[k].y;
+    }
+    return 9999.0f;
+}
+
+static void custom_centers(float centers[BOSS_BATTLE_INN_ROWS]) {
+    BossBattleInnLayout layout;
+    CHECK(boss_battle_inn_layout(-520.0f, 200.0f, 50.0f, -130.0f, 120.0f, &layout));
+    memcpy(centers, layout.center, sizeof(layout.center));
+}
+
+static int expected_template(int row, int decided) {
+    if (row < 3) return row;
+    if (row > 3) return row - 1;
+    return decided == 3 ? 2 : 3;
+}
+
+static int row_of(const uint8_t *layout, int layer, const float rows[6]) {
+    KeyView keys[16];
+    const int n = layer_keys(layout, layer, keys, 16);
+    for (int k = 0; k < n; ++k)
+        for (int r = 0; r < 6; ++r)
+            if (keys[k].x == -420.0f && keys[k].y == rows[r]) return r;
+    return -1;
+}
+
+/* Each custom row is its native row's layer, keys moved to the custom centre and backings 0.8 as tall; every other
+ * layer of the part is the native one, in the native order. */
+static void check_seven_row_part(const MenuLayout *menu, int part, int first_row, const float centers[7], const float rows[6]) {
+    const PartView before = part_view(menu->pristine, part), after = part_view(menu->data, part);
+    CHECK(after.count == before.count + 1);
+    const int run = first_row - before.first;
+    int decided = -1, decided_at = -1;
+    for (int at = run + 6; at < before.count; ++at) {
+        const int row = row_of(menu->pristine, before.first + at, rows);
+        if (row >= 0) decided = row, decided_at = at;
+    }
+    int native_of_row[6];
+    for (int at = 0; at < 6; ++at) native_of_row[row_of(menu->pristine, first_row + at, rows)] = first_row + at;
+    for (int row = 0; row < 7; ++row) {
+        const int from = expected_template(row, decided);
+        KeyView old_keys[16], new_keys[16];
+        const int n = layer_keys(menu->pristine, native_of_row[from], old_keys, 16);
+        CHECK(layer_keys(menu->data, after.first + run + row, new_keys, 16) == n);
+        int on_centre = 0;
+        for (int k = 0; k < n; ++k) {
+            CHECK(new_keys[k].element == old_keys[k].element && new_keys[k].x == old_keys[k].x);
+            CHECK(absf(new_keys[k].y - (old_keys[k].y + centers[row] - rows[from])) < 0.001f);
+            const float scale = old_keys[k].x == -420.0f ? 0.8f : 1.0f;
+            CHECK(absf(new_keys[k].scale_y - old_keys[k].scale_y * scale) < 0.0001f);
+            CHECK(!memcmp(new_keys[k].keyframe, old_keys[k].keyframe, 4) && !memcmp(new_keys[k].keyframe + 6, old_keys[k].keyframe + 6, 26));
+            on_centre |= old_keys[k].x == -420.0f && new_keys[k].y == centers[row];
+        }
+        CHECK(on_centre);
+    }
+    for (int at = 0; at < before.count; ++at) {
+        if (at >= run && at < run + 6) continue;
+        const int to = at < run ? at : at + 1;
+        const uint8_t *old_record = mbs_table(menu->pristine, MBS_LAYERS) + (before.first + at) * 24;
+        const uint8_t *new_record = mbs_table(menu->data, MBS_LAYERS) + (after.first + to) * 24;
+        if (at == decided_at) {
+            KeyView keys[16];
+            const int n = layer_keys(menu->data, after.first + to, keys, 16);
+            int lit = 0;
+            for (int k = 0; k < n; ++k) lit |= keys[k].x == -420.0f && keys[k].y == centers[decided < 3 ? decided : decided + 1];
+            CHECK(lit);
+        } else {
+            CHECK(!memcmp(old_record, new_record, 24));
+        }
+    }
+    for (int at = 0; at < after.count; ++at) {
+        KeyView keys[16];
+        const int n = layer_keys(menu->data, after.first + at, keys, 16);
+        for (int k = 0; k < n; ++k)
+            for (int r = 1; r < 5; ++r) CHECK(!(keys[k].x == -420.0f && keys[k].y == rows[r]));
+    }
+}
+
+static void test_inn_background_layout(void) {
+    static MenuLayout menu;
+    if (!menu.data && !load_menu_layout("Menu.mbs", &menu)) {
+        puts("build/research/.../Menu.mbs not found: Inn background layout checks skipped");
+        return;
+    }
+    static const char *const kParts[INN_LAYOUT_PARTS] = {"INN_0", "INN_1", "INN_2", "INN_A0", "INN_C0", "INN_C2",
+                                                           "INN_D0", "INN_D2", "INN_E0", "INN_E1", "INN_F0", "INN_G0",
+                                                           "INN_G0_1", "INN_G2", "INN_G2_1", "INN_H0"};
+    static const int kRows[6] = {-130, -80, -30, 20, 70, 120};
+    InnLayoutScan scan;
+    CHECK(inn_layout_scan(menu.data, &scan) == 1 && scan.count == INN_LAYOUT_PARTS);
+    for (int r = 0; r < 6; ++r) CHECK(scan.rows[r] == (float)kRows[r]);
+    for (int i = 0; i < INN_LAYOUT_PARTS; ++i)
+        CHECK(!strcmp((const char *)mbs_table(menu.data, MBS_PARTS) + scan.part[i] * 48 + 0x10, kParts[i]));
+    CHECK(scan.part[1] == INN_1 && scan.first_row_layer[1] == 17);
+    for (int r = 0; r < 6; ++r) {
+        KeyView key;
+        CHECK(layer_keys(menu.data, 17 + r, &key, 1) == 1 && key.element == ROW_ELEMENT && key.x == -420.0f &&
+              key.y == (float)kRows[r] && key.scale_y == 0.9f);
+    }
+
+    float centers[7];
+    custom_centers(centers);
+    CHECK(inn_layout_apply(menu.data, centers, 0.8f) == INN_LAYOUT_APPLIED && inn_layout_applied(menu.data));
+    for (long at = 0; at < menu.size; ++at) {
+        const int header = (at >= 0x5e && at < 0x62) || (at >= 0x66 && at < 0x68) || (at >= 0xe8 && at < 0x108);
+        if (!header && menu.data[at] != menu.pristine[at]) {
+            CHECK(!"the layout's own data is never written");
+            break;
+        }
+    }
+    for (int i = 0; i < INN_LAYOUT_PARTS; ++i) check_seven_row_part(&menu, scan.part[i], scan.first_row_layer[i], centers, scan.rows);
+
+    int untouched = 0, party = 0;
+    for (int part = 0; part < MBS_PART_COUNT; ++part) {
+        int seven = 0;
+        for (int i = 0; i < INN_LAYOUT_PARTS; ++i) seven |= scan.part[i] == part;
+        if (seven) continue;
+        const uint8_t *record = mbs_table(menu.data, MBS_PARTS) + part * 48;
+        CHECK(!memcmp(record, mbs_table(menu.pristine, MBS_PARTS) + part * 48, 48));
+        const PartView view = part_view(menu.data, part);
+        for (int at = 0; at < view.count; ++at) {
+            KeyView old_keys[32], new_keys[32];
+            const int n = layer_keys(menu.pristine, view.first + at, old_keys, 32);
+            CHECK(layer_keys(menu.data, view.first + at, new_keys, 32) == n);
+            for (int k = 0; k < n; ++k) CHECK(!memcmp(old_keys[k].transform, new_keys[k].transform, 36));
+        }
+        party += !strncmp((const char *)record + 0x10, "PARTY_", 6) || !strncmp((const char *)record + 0x10, "INN_CURSOR", 10);
+        ++untouched;
+    }
+    CHECK(untouched == MBS_PART_COUNT - INN_LAYOUT_PARTS && party > 40);
+
+    CHECK(inn_layout_position(menu.data, INN_1, 14, 17) == 15 && inn_layout_position(menu.data, INN_1, 14, 16) == 14);
+    CHECK(inn_layout_position(menu.data, INN_1, 0, 17) == 0 && inn_layout_position(menu.data, 108, 14, 17) == 14);
+    CHECK(!memcmp(mbs_table(menu.data, MBS_LAYERS) + (part_view(menu.data, INN_1).first + 15) * 24,
+                  mbs_table(menu.pristine, MBS_LAYERS) + (part_view(menu.pristine, INN_1).first + 14) * 24, 24));
+
+    CHECK(element_y(menu.data, INN_E0, LIT_ELEMENT) == centers[4] && element_y(menu.data, INN_E0, FLASH_ELEMENT) == centers[4]);
+    inn_layout_options_row(menu.data, 3);
+    CHECK(element_y(menu.data, INN_E0, LIT_ELEMENT) == centers[3] && element_y(menu.data, INN_E0, FLASH_ELEMENT) == centers[3]);
+    inn_layout_options_row(menu.data, 4);
+    CHECK(element_y(menu.data, INN_E0, LIT_ELEMENT) == centers[4]);
+
+    const uint16_t layers = mbs_u16(menu.data + 0x66), keyframes = mbs_u16(menu.data + 0x60);
+    CHECK(inn_layout_restore(menu.data) == 1 && !inn_layout_applied(menu.data));
+    CHECK(!memcmp(menu.data, menu.pristine, (size_t)menu.size));
+    CHECK(inn_layout_restore(menu.data) == 0);
+    CHECK(inn_layout_apply(menu.data, centers, 0.8f) == INN_LAYOUT_APPLIED && inn_layout_apply(menu.data, centers, 0.8f) == INN_LAYOUT_APPLIED);
+    CHECK(mbs_u16(menu.data + 0x66) == layers && mbs_u16(menu.data + 0x60) == keyframes);
+    CHECK(inn_layout_restore(menu.data) == 1 && !memcmp(menu.data, menu.pristine, (size_t)menu.size));
+
+    uint8_t *other = clone_layout(&menu);
+    const uint16_t fewer = MBS_PART_COUNT - 1;
+    memcpy(other + 0x64, &fewer, sizeof(fewer));
+    CHECK(inn_layout_apply(other, centers, 0.8f) == INN_LAYOUT_OTHER && !inn_layout_applied(other));
+    free(other);
+    other = clone_layout(&menu);
+    const uint8_t *row_key = mbs_table(other, MBS_KEYFRAMES) + mbs_u16(mbs_table(other, MBS_LAYERS) + 18 * 24) * 32;
+    const float moved = 21.0f;
+    memcpy((uint8_t *)(uintptr_t)mbs_table(other, MBS_TRANSFORMS) + mbs_u16(row_key + 4) * 36 + 4, &moved, sizeof(moved));
+    uint8_t *copy = malloc((size_t)menu.size);
+    memcpy(copy, other, (size_t)menu.size);
+    CHECK(inn_layout_apply(other, centers, 0.8f) == INN_LAYOUT_UNSUPPORTED && !memcmp(other, copy, (size_t)menu.size));
+    CHECK(!inn_layout_scan(other, &scan) && !strcmp(scan.failure, "INN_1: row layers fingerprint mismatch"));
+    CHECK(!memcmp(menu.data, menu.pristine, (size_t)menu.size));
+    free(copy);
+    free(other);
+
+    other = clone_layout(&menu);
+    const uint16_t more_layers = 2047;
+    memcpy(other + 0x66, &more_layers, sizeof(more_layers));
+    CHECK(inn_layout_apply(other, centers, 0.8f) == INN_LAYOUT_OTHER);
+    CHECK(!inn_layout_scan(other, &scan) && !strcmp(scan.failure, "not the known menu layout"));
+    free(other);
+    other = clone_layout(&menu);
+    put_pointer(other + MBS_PARTS, NULL);
+    CHECK(inn_layout_apply(other, centers, 0.8f) == INN_LAYOUT_OTHER);
+    CHECK(!inn_layout_scan(other, &scan) && !strcmp(scan.failure, "runtime tables unavailable"));
+    free(other);
+    other = clone_layout(&menu);
+    uint8_t *layers_of_other = (uint8_t *)(uintptr_t)mbs_table(other, MBS_LAYERS);
+    const PartView c0 = part_view(other, 42);
+    memcpy(layers_of_other + (c0.first + 3) * 24, layers_of_other + (c0.first + 2) * 24, 4);
+    memcpy(copy = malloc((size_t)menu.size), other, (size_t)menu.size);
+    CHECK(inn_layout_apply(other, centers, 0.8f) == INN_LAYOUT_UNSUPPORTED && !memcmp(other, copy, (size_t)menu.size));
+    CHECK(!inn_layout_scan(other, &scan) && !strcmp(scan.failure, "INN_C0: expected 6 row layers"));
+    free(copy);
+    free(other);
+
+    MenuLayout raw;
+    CHECK(read_layout("Menu.mbs", &raw, 0));
+    CHECK(inn_layout_apply(raw.data, centers, 0.8f) == INN_LAYOUT_OTHER && !memcmp(raw.data, raw.pristine, (size_t)raw.size));
+    CHECK(!inn_layout_scan(raw.data, &scan) && !strcmp(scan.failure, "runtime tables unavailable"));
+    free(raw.data);
+    free(raw.pristine);
+}
+
+/* Every Menu layout a supported build loads takes the seven rows the same way: the shared archive's (the only one of the
+ * Japanese and Asian builds), CUSA10454 1.00's regional base and language copies, and CUSA10454 1.01's. */
+static void test_regional_inn_layouts(void) {
+    static const struct {
+        const char *folder, *name;
+    } kLayouts[] = {{"base", "Menu.mbs"},     {"us100", "Menu.mbs"},    {"us100", "Menu_US.mbs"}, {"us100", "Menu_UK.mbs"},
+                    {"us100", "Menu_FR.mbs"}, {"us100", "Menu_DE.mbs"}, {"us100", "Menu_IT.mbs"}, {"us100", "Menu_ES.mbs"},
+                    {"ru101", "Menu.mbs"},    {"ru101", "Menu_US.mbs"}};
+    float centers[7];
+    custom_centers(centers);
+    int checked = 0;
+    for (size_t i = 0; i < sizeof(kLayouts) / sizeof(*kLayouts); ++i) {
+        MenuLayout menu;
+        if (!read_layout_at(kLayouts[i].folder, kLayouts[i].name, &menu, 1)) continue;
+        inn_layout_reset();
+        InnLayoutScan scan;
+        CHECK(inn_layout_scan(menu.data, &scan) == 1 && scan.count == INN_LAYOUT_PARTS);
+        if (scan.count != INN_LAYOUT_PARTS) printf("  %s/%s: %s\n", kLayouts[i].folder, kLayouts[i].name, scan.failure);
+        CHECK(inn_layout_apply(menu.data, centers, 0.8f) == INN_LAYOUT_APPLIED);
+        for (int p = 0; p < scan.count; ++p) check_seven_row_part(&menu, scan.part[p], scan.first_row_layer[p], centers, scan.rows);
+        CHECK(inn_layout_restore(menu.data) == 1 && !memcmp(menu.data, menu.pristine, (size_t)menu.size));
+        inn_layout_reset();
+        free(menu.data);
+        free(menu.pristine);
+        ++checked;
+    }
+    printf("Inn background: %d regional menu layouts take seven rows\n", checked);
+}
+
+/* The hooks give the Inn's own background seven rows while the Boss Battle menu lives, and only then. */
+static MenuLayout hook_base, hook_language;
+static uint8_t fake_resources[2][0x200];
+
+static int attach_background(void) {
+    if (!hook_base.data && (!load_menu_layout("Menu.mbs", &hook_base) || !load_menu_layout("Menu_US.mbs", &hook_language)))
+        return 0;
+    put_pointer(fake_resources[0] + 0x158, hook_base.data);
+    put_pointer(fake_resources[1] + 0x158, hook_language.data);
+    put_pointer(fake_inn + 0x38d0 + 0xc0, fake_resources[0]);
+    put_pointer(fake_inn + 0x38d0 + 0xc8, fake_resources[1]);
+    return 1;
+}
+
+static int backgrounds_pristine(void) {
+    return !memcmp(hook_base.data, hook_base.pristine, (size_t)hook_base.size) &&
+           !memcmp(hook_language.data, hook_language.pristine, (size_t)hook_language.size);
+}
+
+static GuestRegs layer_call(int part, int layers, int position) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    uint8_t *player = fake_inn + 0x38d0;
+    const int16_t current = (int16_t)part;
+    const uint16_t count = (uint16_t)layers;
+    memcpy(player + 0x150, &current, sizeof(current));
+    memcpy(player + 0x180, &count, sizeof(count));
+    regs.rdi = (uint64_t)(uintptr_t)player;
+    regs.rsi = (uint32_t)position;
+    boss_battle_inn_layer_hook(&regs);
+    return regs;
+}
+
+static void test_inn_background_hooks(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    boss_battle_set_enabled(0);
+    set_inn(6, 6, -1, 0);
+    if (!attach_background()) {
+        puts("build/research/.../Menu.mbs not found: Inn background hook checks skipped");
+        return;
+    }
+    GuestRegs regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+    draw_frame(inn_list());
+    CHECK(!inn_layout_applied(hook_base.data) && !inn_layout_applied(hook_language.data) && backgrounds_pristine());
+    CHECK((int32_t)layer_call(INN_1, 16, 14).rsi == 14);
+
+    boss_battle_set_enabled(1);
+    set_inn(6, 6, -1, 0);
+    regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+    CHECK(!inn_layout_applied(hook_base.data) && main_rows_are_inn() && item_tag(BOSS_BATTLE_INN_ROW) == BOSS_BATTLE_INN_ROW_RECORD);
+    CHECK(draw_frame(inn_list()).skip && menu_calls.texts == BOSS_BATTLE_INN_ROWS);
+    attach_background();
+    draw_frame(inn_list());
+    CHECK(inn_layout_applied(hook_base.data) && inn_layout_applied(hook_language.data));
+    float centers[7];
+    custom_centers(centers);
+    for (int r = 0; r < 7; ++r) {
+        const PartView view = part_view(hook_base.data, INN_1);
+        KeyView key;
+        CHECK(layer_keys(hook_base.data, view.first + 1 + r, &key, 1) == 1 && key.y == centers[r] &&
+              absf(key.scale_y - 0.72f) < 0.0001f);
+        CHECK(menu_calls.text[r].y + (float)(menu_calls.text[r].height / 2) == key.y);
+    }
+    CHECK((int32_t)layer_call(INN_1, 17, 14).rsi == 15 && (int32_t)layer_call(INN_1, 16, 14).rsi == 14);
+    CHECK((int32_t)layer_call(INN_1, 17, 0).rsi == 0);
+    regs = layer_call(INN_1, 17, 14);
+    regs.rdi += 8;
+    regs.rsi = 14;
+    boss_battle_inn_layer_hook(&regs);
+    CHECK((int32_t)regs.rsi == 14);
+
+    set_inn(7, 7, BOSS_BATTLE_INN_ROW, BOSS_BATTLE_INN_ROW);
+    attach_background();
+    regs = result_frame();
+    CHECK(element_y(hook_base.data, INN_E0, LIT_ELEMENT) == centers[3] && element_y(hook_base.data, INN_E0, FLASH_ELEMENT) == centers[3]);
+    start_guarded();
+    set_inn(7, 7, 4, 4);
+    attach_background();
+    regs = result_frame();
+    CHECK((int32_t)regs.rax == 3 && element_y(hook_base.data, INN_E0, LIT_ELEMENT) == centers[4]);
+
+    GuestRegs gone;
+    memset(&gone, 0, sizeof(gone));
+    gone.rdi = (uint64_t)(uintptr_t)fake_inn;
+    boss_battle_inn_destroyed_hook(&gone);
+    CHECK(!inn_layout_applied(hook_base.data) && !inn_layout_applied(hook_language.data) && backgrounds_pristine());
+    CHECK((int32_t)layer_call(INN_1, 17, 14).rsi == 14);
+
+    set_inn(6, 6, -1, 0);
+    attach_background();
+    regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+    const uint16_t layers = mbs_u16(hook_base.data + 0x66);
+    CHECK(inn_layout_applied(hook_base.data) && inn_layout_applied(hook_language.data));
+    boss_battle_inn_destroyed_hook(&gone);
+    set_inn(6, 6, -1, 0);
+    attach_background();
+    regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+    CHECK(inn_layout_applied(hook_base.data) && mbs_u16(hook_base.data + 0x66) == layers);
+
+    boss_battle_set_enabled(0);
+    set_inn(6, 6, -1, 0);
+    attach_background();
+    regs = inn_regs();
+    boss_battle_inn_built_hook(&regs);
+    CHECK(!inn_layout_applied(hook_base.data) && backgrounds_pristine());
     boss_battle_reset();
 }
 
@@ -1054,7 +1881,7 @@ static void test_screen_rows(void) {
     CHECK(!strcmp(text, "Zak - Fighter, level 1"));
     boss_battle_screen_move(6, 1);
     boss_battle_screen_label(6, text, sizeof(text));
-    CHECK(!strcmp(text, "20 Demon King"));
+    CHECK(!strcmp(text, "20 Demon Lord"));
     boss_battle_screen_help(6, text, sizeof(text)); /* the Demon King as every other boss */
     CHECK(!strcmp(text, "Zak - Fighter, level 1"));
     boss_battle_screen_help(7, text, sizeof(text));
@@ -1078,6 +1905,45 @@ static void test_screen_rows(void) {
     boss_battle_reset();
 }
 
+/* The language changes the words only: the character's key, the boss ids, the record file and the numbers stay. */
+static void test_language_independence(void) {
+    boss_battle_reset();
+    boss_battle_record_clear();
+    start_guarded();
+    boss_battle_set_character("Zak", 2, 7);
+    char key[160], english_key[160], text[160];
+    CHECK(boss_battle_character_key(english_key, sizeof(english_key)) && !strcmp(english_key, "Zak|Elf"));
+    CHECK(boss_battle_record_note(english_key, "harpy", BOSS_BATTLE_ATTEMPT, 0) &&
+          boss_battle_record_note(english_key, "harpy", BOSS_BATTLE_WIN, 61000) &&
+          boss_battle_record_note(english_key, "harpy", BOSS_BATTLE_ATTEMPT, 0) &&
+          boss_battle_record_note(english_key, "harpy", BOSS_BATTLE_DEATH, 0));
+    char before[4096];
+    const size_t length = boss_battle_record_format(before, sizeof(before));
+    boss_battle_screen_request();
+    static const char *const kLanguages[] = {"english", "japanese", "brazilian_portuguese", "russian", "korean"};
+    char wins[sizeof(kLanguages) / sizeof(*kLanguages)][64];
+    for (size_t i = 0; i < sizeof(kLanguages) / sizeof(*kLanguages); ++i) {
+        CHECK(boss_battle_text_set_language(kLanguages[i], 0));
+        CHECK(boss_battle_character_key(key, sizeof(key)) && !strcmp(key, english_key));
+        const BossBattleStats stats = boss_battle_record_stats(key, boss_battle_encounter(0)->id);
+        CHECK(stats.attempts == 2 && stats.wins == 1 && stats.deaths == 1);
+        boss_battle_screen_statistic(2, 1, wins[i], sizeof(wins[i]));
+        CHECK(strlen(wins[i]) > 2 && !strcmp(wins[i] + strlen(wins[i]) - 2, " 1"));
+        boss_battle_screen_label(1, text, sizeof(text));
+        CHECK(!strncmp(text, "01 ", 3) && !strcmp(text + 3, boss_battle_text_boss(0)));
+        boss_battle_screen_help(1, text, sizeof(text));
+        CHECK(strstr(text, "Zak") && strstr(text, boss_battle_text_class(2)) && strstr(text, "7"));
+        char after[4096];
+        CHECK(boss_battle_record_format(after, sizeof(after)) == length && !memcmp(after, before, length));
+        CHECK(!strcmp(boss_battle_encounter(19)->id, "demon_king"));
+    }
+    CHECK(strcmp(wins[0], wins[1]) && strcmp(wins[0], wins[2]) && !strcmp(wins[0], "Wins 1"));
+    boss_battle_text_set_language("english", 0);
+    boss_battle_screen_reset();
+    boss_battle_record_clear();
+    boss_battle_reset();
+}
+
 /* Walking down the screen meets Fight All, the twenty bosses and Return to tavern, each once and in that order; no boss
  * is marked pending. Fight All is its own entry, not the first boss: confirming it starts nothing and records nothing. */
 static void test_screen_entries(void) {
@@ -1093,7 +1959,7 @@ static void test_screen_entries(void) {
         CHECK(entry == (BossBattleEntry)count);
         boss_battle_screen_label(row, text, sizeof(text));
         if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL) CHECK(!strcmp(text, "Fight All"));
-        else if (entry != BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN) CHECK(!strncmp(text + 3, kNames[count - 1], 20));
+        else if (entry != BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN) CHECK(!strncmp(text + 3, kShownNames[count - 1], 20));
         boss_battle_screen_help(row, text, sizeof(text));
         CHECK(!strstr(text, "Pending") && !strstr(text, "confirmed"));
         for (int i = 1; i <= BOSS_BATTLE_SCREEN_BOSS_ROWS; ++i) {
@@ -1724,7 +2590,7 @@ static void test_direct_reopen(void) {
         result_frame(); /* the Options mode has not built the page yet: still black */
         CHECK(!fades.calls);
 
-        boss_battle_set_character("Zak", "Fighter", 1);
+        boss_battle_set_character("Zak", 0, 1);
         fake_options_page(8);
         build_page();
         CHECK(!fades.calls); /* constructed is not shown */
@@ -2360,7 +3226,7 @@ static int32_t GUEST_HOOK_ABI fake_pause_result(uint64_t window, uint32_t pendin
 }
 
 static void use_fake_pause_functions(void) {
-    const BossBattlePauseFunctions functions = {fake_pause_setup, fake_pause_result};
+    const BossBattlePauseFunctions functions = {fake_pause_setup, fake_pause_result, PAUSE_RESULT};
     boss_battle_set_pause_functions(&functions);
     memset(pause_window, 0, sizeof(pause_window));
     memset(pause_dialog, 0, sizeof(pause_dialog));
@@ -2429,8 +3295,9 @@ static BossBattleScene arena_of(int index) {
 static void test_pause_menu(void) {
     static const struct {
         const char *class_name;
-        int level;
-    } kCharacters[] = {{"Fighter", 1}, {"Amazon", 25}, {"Elf", 99}, {"Dwarf", 1}, {"Sorceress", 25}, {"Wizard", 99}};
+        int class_index, level;
+    } kCharacters[] = {{"Fighter", 0, 1},   {"Amazon", 1, 25},    {"Elf", 2, 99},
+                       {"Dwarf", 3, 1},     {"Sorceress", 4, 25}, {"Wizard", 5, 99}};
     GuestRegs regs;
 
     /* the campaign's own pause menu is not touched */
@@ -2462,7 +3329,7 @@ static void test_pause_menu(void) {
         start_guarded();
         use_fake_screen_functions();
         use_fake_pause_functions();
-        boss_battle_set_character("Zak", kCharacters[c].class_name, kCharacters[c].level);
+        boss_battle_set_character("Zak", kCharacters[c].class_index, kCharacters[c].level);
         CHECK(start_session(HARPY));
         reach_arena();
         frames(probe(kArenaPlay, 1, 1, 0), 10);
@@ -2497,7 +3364,7 @@ static void test_pause_menu(void) {
         start_guarded();
         use_fake_screen_functions();
         use_fake_pause_functions();
-        boss_battle_set_character("Zak", kCharacters[c].class_name, kCharacters[c].level);
+        boss_battle_set_character("Zak", kCharacters[c].class_index, kCharacters[c].level);
         const BossBattleStats before = stats_for(kCharacters[c].class_name);
         CHECK(start_playable(HARPY, kArenaPlay));
         open_pause_menu();
@@ -3464,6 +4331,10 @@ static unsigned char *boot_image(const char *folder, uint64_t *size, size_t room
     char path[1024];
     snprintf(path, sizeof(path), "%s/build/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
     FILE *f = fopen(path, "rb");
+    if (!f) { /* a build the launcher has not prepared here: its research copy */
+        snprintf(path, sizeof(path), "%s/build/research/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
+        f = fopen(path, "rb");
+    }
     if (!f) return NULL;
     char magic[8];
     if (fread(magic, 1, 8, f) != 8 || memcmp(magic, "DCPBOOT1", 8)) return fclose(f), NULL;
@@ -3481,15 +4352,6 @@ static unsigned char *boot_image(const char *folder, uint64_t *size, size_t room
     fclose(f);
     return image;
 }
-
-static const struct {
-    const char *folder, *game;
-} kOtherBuilds[] = {
-    {"CUSA07001-1.00", "CUSA07001-1.00"},
-    {"CUSA07001-1.02", "CUSA07001-1.02"},
-    {"CUSA07001-1.03", "CUSA07001-1.03"},
-    {"CUSA10209-1.00", "CUSA10209-1.00"},
-};
 
 typedef struct {
     uint64_t at, length;
@@ -3589,11 +4451,23 @@ static void check_result_hooks(const unsigned char *image) {
     boss_battle_town_return_hook(&regs);
     CHECK(regs.rdx == 2 && regs.rcx == 0 && !strcmp((const char *)(uintptr_t)regs.r8, "Inn") &&
           boss_battle_state() == BOSS_BATTLE_RETURNING);
+    /* where the request keeps the scene in rbx (CUSA07001 1.00, CUSA10209 1.00) */
+    GuestRegs in_rbx;
+    memset(&in_rbx, 0, sizeof(in_rbx));
+    in_rbx.rbx = (uint64_t)(uintptr_t)scene;
+    in_rbx.rdx = in_rbx.rcx = 0xffffffffu;
+    in_rbx.r8 = 0x1234;
+    boss_battle_town_return_hook(&in_rbx);
+    CHECK(in_rbx.rdx == 0xffffffffu && in_rbx.r8 == 0x1234);
+    boss_battle_town_return_rbx_hook(&in_rbx);
+    CHECK(in_rbx.rdx == 2 && in_rbx.rcx == 0 && !strcmp((const char *)(uintptr_t)in_rbx.r8, "Inn"));
     boss_battle_set_screen_functions(NULL);
     boss_battle_reset();
 }
 
 static const uint64_t kOtherFeatureSites[] = {0x58e330, 0x53c22a, 0x53d064, 0x578000, 0x53d348, 0x53d38a, 0x86f00, 0x3cdbd9};
+/* Calls other features find by their bytes and return address (Ultrawide's Inn frame draw); they stay unpatched. */
+static const uint64_t kOtherFeatureCalls[] = {0x3a5055};
 static const uint64_t kCalls[BOSS_BATTLE_INN_CALLS] = {0x3a4023, 0x3a4053, 0x3a4ca6, 0x3a5831, 0x3a5843, 0x3a5855,
                                                        0x3a623f, 0x3a624e, 0x3a625d, 0x3a62c9, 0x3a62e5};
 
@@ -3615,8 +4489,7 @@ static void test_us_image(void) {
     const char *why = NULL;
     BossBattleSites sites;
     memset(&sites, 0, sizeof(sites));
-    CHECK(boss_battle_build_listed("CUSA10454-1.00") && !boss_battle_build_listed("CUSA07001-1.00") &&
-          !boss_battle_build_listed(NULL));
+    CHECK(boss_battle_build_listed("CUSA10454-1.00") && !boss_battle_build_listed(NULL));
     CHECK(boss_battle_locate(image, size, "CUSA10454-1.00", &sites, &why) == 1);
     if (why && sites.hook == 0) printf("locate: %s\n", why);
     /* STEP_FADEIN: fade(get_fader(screen), colour 0, 30 frames, layer 0x27), the call the arrival hook sits on */
@@ -3630,7 +4503,8 @@ static void test_us_image(void) {
           sites.inn_help_table == 0x74df30);
     CHECK(sites.allocate == 0x56f340 && sites.widget == 0x480e20 && sites.add_widget == 0x481f50 &&
           sites.add_item == 0x4853c0 && sites.set_disabled == 0x485560 && sites.set_cursor == 0x482080);
-    CHECK(sites.inn_party == 0x3ac840);
+    CHECK(sites.inn_party == 0x3ac840 && sites.inn_draw == 0x3a506d && sites.inn_destroyed == 0x3a3460);
+    CHECK(sites.inn_layer == 0x3a504d && sites.inn_layer_tail == 0x3a3fc3);
     for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) CHECK(sites.inn_calls[i] == kCalls[i] && image[kCalls[i]] == 0xe8);
     CHECK(sites.arrange_story == 0x45030b && sites.story_test == 0x477c20 && sites.story_clear == 0x4c4649);
     CHECK(sites.dragon_talismans == 0x10da5c && sites.title == 0x4af5ec);
@@ -3650,7 +4524,8 @@ static void test_us_image(void) {
     CHECK(sites.pause_start_gate == 0x432b21 && sites.pause_level_gate == 0x432c4f && sites.pause_mode == 0x432c8c &&
           sites.pause_row == 0x50b160 && sites.pause_setup == 0x50b740 && sites.pause_setup_calls[0] == 0x50e299 &&
           sites.pause_setup_calls[1] == 0x50e41b && sites.pause_setup_calls[2] == 0x50e8ab &&
-          sites.pause_confirm_text == 0x510f5e && sites.pause_result == 0x4327be && sites.pause_result_fn == 0x514fe0);
+          sites.pause_confirm_text == 0x510f5e && sites.pause_result == 0x4327be && sites.pause_result_fn == 0x514fe0 &&
+          sites.pause_floor_reward == 0x513d02);
     CHECK(boss_battle_locate(image, size, NULL, &sites, &why) == 0 && boss_battle_locate(image, size, "CUSA00000-9.99", &sites, &why) == 0);
 
     const uint64_t probes[] = {
@@ -3664,7 +4539,7 @@ static void test_us_image(void) {
         0x3ac939, 0x3ac95b, 0x3ac97f, 0x4b0c30, 0x4b0c40, 0x4294c3, 0x4294e3, 0x429564, 0x32350,  0x32372,
         0xce7c6,  0xce7d4,  0xce7fa,  0xce806,  0x2a0e90, 0x2a0eb5, 0x32290,  0x322b1,  0x753f2c + 6 * 4,
         0x753f2c + 21 * 4, 0x42e921, 0x42e929, 0x42e93d, 0x4af4b0, 0x4af4c6, 0x42f644, 0x42f678, 0x42f691, 0x4300c1,
-        0x4300ef, 0x430104, 0x754282, 0xb8cf30 + 0xa0, 0x58da30, 0x3a6540, 0x3664d0, 0x3664ec, 0x366542, 0x366557,
+        0x513cf2, 0x513d02, 0x4300ef, 0x430104, 0x754282, 0xb8cf30 + 0xa0, 0x58da30, 0x3a6540, 0x3664d0, 0x3664ec, 0x366542, 0x366557,
         0x5910a0, 0x6b619,  0x591612, 0x58f0e0, 0x74db9c + 5 * 4, 0x3a64d2, 0x3a64d6, 0xb177b0 + 0x728, 0x3abf50,
         0x3abf6f, 0x507a5f, 0x507a83, 0x507a91, 0x507ae7, 0x507aef, 0x506730, 0x506745, 0xbb84a8 + 0xe0, 0x50710e,
         0x507250, 0x5074a2, 0x5074b7, 0x5074c7, 0x5075a2, 0x5075a5, 0xbb82b0 + 0xb8, 0x5032a9, 0xbb82b0 + 0x148,
@@ -3675,7 +4550,9 @@ static void test_us_image(void) {
         0x484db0, 0x68630, 0x6863c, 0xbef620 + 43 * 16, 0x3ac486, 0x3ac491, 0x3a5a7a, 0x3a5aac, 0x3a5acb, 0x81910,
         0x8191f, 0x8e5a0, 0x8e5bc, 0x432b21, 0x432b2a, 0x432b37, 0x432c4f, 0x432c54, 0x432c8c, 0x432c92, 0x432cc4,
         0x477d20, 0x477d24, 0x4763b0, 0x4763b4, 0x50b160, 0x50b171, 0x50b93d, 0x50b94f, 0x50b740, 0x50b751, 0x50e296,
-        0x50e299, 0x50e41b, 0x50e8ab, 0x510f1f, 0x510f5e, 0x4327b6, 0x4327be, 0x514fe0, 0x514ff7};
+        0x50e299, 0x50e41b, 0x50e8ab, 0x510f1f, 0x510f5e, 0x4327b6, 0x4327be, 0x514fe0, 0x514ff7,
+        0xb177b0 + 0xc08, 0x3a5066, 0x3a506d, 0x3a5073, 0xbad618 + 0x188, 0x484df0, 0x484e3d, 0x483cb0, 0x483cc7,
+        0xb177b0, 0x3a3460, 0x3a346d};
     for (size_t p = 0; p < sizeof(probes) / sizeof(*probes); ++p) {
         image[probes[p]] ^= 0x10;
         const int found = boss_battle_locate(image, size, "CUSA10454-1.00", &sites, &why);
@@ -3683,6 +4560,25 @@ static void test_us_image(void) {
         if (found) printf("  probe %#llx was not refused\n", (unsigned long long)probes[p]);
         image[probes[p]] ^= 0x10;
     }
+    /* A changed Inn background site keeps the background native, never Boss Battle away. */
+    const uint64_t background_probes[] = {0x36700a, 0x367012, 0x36701e, 0x367026, 0x3a558d, 0x3a5595, 0x3a55a9,
+                                          0x3a6182, 0x3a6191, 0x3a5044, 0x3a504d, 0x3a3fb6, 0x3a3fc3, 0x577be0,
+                                          0x577be7, 0x578f64, 0x578fb6, 0x578008, 0x578017, 0x578027, 0x57802f};
+    for (size_t p = 0; p < sizeof(background_probes) / sizeof(*background_probes); ++p) {
+        image[background_probes[p]] ^= 0x10;
+        const int found = boss_battle_locate(image, size, "CUSA10454-1.00", &sites, &why);
+        CHECK(found == 1 && sites.inn_background_failure && !sites.inn_layer && !sites.inn_layer_tail);
+        if (!found || !sites.inn_background_failure)
+            printf("  background probe %#llx: found %d\n", (unsigned long long)background_probes[p], found);
+        image[background_probes[p]] ^= 0x10;
+    }
+    /* Exit Game, installed first, hooks the entry of the layout part's layers. */
+    static const uint8_t kExitGameEntry[8] = {0xe9, 0x10, 0x20, 0x30, 0x00, 0x90, 0x90, 0x90};
+    memcpy(image + 0x578000, kExitGameEntry, sizeof(kExitGameEntry));
+    CHECK(boss_battle_locate(image, size, "CUSA10454-1.00", &sites, &why) == 1 && !sites.inn_background_failure &&
+          sites.inn_layer == 0x3a504d && sites.inn_layer_tail == 0x3a3fc3);
+    memcpy(image + 0x578000, before + 0x578000, sizeof(kExitGameEntry));
+    CHECK(boss_battle_locate(image, size, "CUSA10454-1.00", &sites, &why) == 1 && !sites.inn_background_failure);
     const char *mystic = "round/MysticRuins.brb";
     unsigned char *name = NULL;
     for (uint64_t at = 0; at + 22 < size && !name; ++at)
@@ -3702,20 +4598,44 @@ static void test_us_image(void) {
     CHECK(boss_battle_install(image, size, 0, "CUSA10454-1.00", 0, &town, image + size, room - 1) == 0);
     CHECK(!memcmp(image, before, size + room));
 
-    PatchedSite all[36 + BOSS_BATTLE_INN_CALLS] = {
+    unsigned char *native_background = malloc(size + room);
+    memcpy(native_background, before, size + room);
+    native_background[0x3a5044] ^= 0x10;
+    CHECK(boss_battle_install(native_background, size, 0, "CUSA10454-1.00", 0, &town, native_background + size, room) == 1 &&
+          boss_battle_available());
+    CHECK(native_background[0x3a506d] == 0xe9 && !memcmp(native_background + 0x3a504d, before + 0x3a504d, 5) &&
+          !memcmp(native_background + 0x3a3fc3, before + 0x3a3fc3, 5));
+    use_fake_inn_functions();
+    set_inn(6, 6, -1, 0);
+    if (attach_background()) {
+        GuestRegs built = inn_regs();
+        boss_battle_inn_built_hook(&built);
+        CHECK(main_rows_are_inn() && draw_frame(inn_list()).skip && menu_calls.texts == BOSS_BATTLE_INN_ROWS);
+        CHECK(!inn_layout_applied(hook_base.data) && backgrounds_pristine());
+        GuestRegs gone;
+        memset(&gone, 0, sizeof(gone));
+        gone.rdi = (uint64_t)(uintptr_t)fake_inn;
+        boss_battle_inn_destroyed_hook(&gone);
+    }
+    free(native_background);
+    boss_battle_set_available(0);
+
+    PatchedSite all[41 + BOSS_BATTLE_INN_CALLS] = {
         {0x428948, 5}, {0x3a4501, 8}, {0x3a62a0, 5}, {0x3a652a, 5}, {0x45030b, 5}, {0x4c4649, 5}, {0x10da5c, 5},
         {0x4af5ec, 5}, {0x3a316f, 11}, {0x8cc6e, 5}, {0x429564, 5}, {0xce806, 5},  {0x42e929, 5}, {0x42f678, 5},
         {0x4300ef, 5}, {0x507a91, 5}, {0x507aef, 6}, {0x5074b7, 5}, {0x5075a5, 5}, {0x482300, 6}, {0x4824a0, 6},
         {0x4c3d7a, 10}, {0x3ac08b, 5}, {0x42c77c, 5}, {0x4437d0, 6}, {0x3a6540, 5}, {0x5837f0, 6},
         {0x432b21, 5}, {0x432c4f, 5}, {0x432c8c, 6}, {0x50b160, 6}, {0x50e299, 5}, {0x50e41b, 5}, {0x50e8ab, 5},
-        {0x510f5e, 5}, {0x4327be, 5}};
-    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) all[36 + i] = (PatchedSite){kCalls[i], 5};
+        {0x510f5e, 5}, {0x4327be, 5}, {0x3a506d, 5}, {0x3a3460, 6}, {0x3a504d, 5}, {0x3a3fc3, 5}, {0x513d02, 5}};
+    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) all[41 + i] = (PatchedSite){kCalls[i], 5};
     const size_t sites_count = sizeof(all) / sizeof(*all);
     for (size_t i = 0; i < sites_count; ++i) {
         for (size_t j = 0; j < i; ++j)
             CHECK(all[i].at + all[i].length <= all[j].at || all[j].at + all[j].length <= all[i].at);
         for (size_t k = 0; k < sizeof(kOtherFeatureSites) / sizeof(*kOtherFeatureSites); ++k)
             CHECK(kOtherFeatureSites[k] + 16 <= all[i].at || all[i].at + all[i].length + 16 <= kOtherFeatureSites[k]);
+        for (size_t k = 0; k < sizeof(kOtherFeatureCalls) / sizeof(*kOtherFeatureCalls); ++k)
+            CHECK(kOtherFeatureCalls[k] + 5 <= all[i].at || all[i].at + all[i].length <= kOtherFeatureCalls[k]);
     }
     CHECK(boss_battle_install(image, size, 0, "CUSA10454-1.00", 0, &town, image + size, room) == 1 && boss_battle_available());
     CHECK(bytes_changed_outside(image, before, size, all, sites_count) == 0);
@@ -3734,16 +4654,183 @@ static void test_us_image(void) {
     free(image), free(before);
 }
 
-static void test_other_images(void) {
-    for (size_t i = 0; i < sizeof(kOtherBuilds) / sizeof(*kOtherBuilds); ++i) {
+/* Each listed build's sites from its own boot image. The lead character selector and the town portal call are the
+ * Early Story locator's (tests/feature_sites_tests.cpp pins them per build). */
+static const struct {
+    const char *folder, *game;
+    uint64_t selector, town_portal_call;
+} kRealBuilds[] = {
+    {"v1.03", "CUSA10454-1.00", 0x4763d0, 0x3cdbd9},          {"CUSA10454-1.01", "CUSA10454-1.01", 0x4763d0, 0x3cdbd9},
+    {"CUSA07001-1.00", "CUSA07001-1.00", 0x4755d0, 0x3cce49}, {"CUSA07001-1.02", "CUSA07001-1.02", 0x4759a0, 0x3cd259},
+    {"CUSA07001-1.03", "CUSA07001-1.03", 0x475a60, 0x3cd2a9}, {"CUSA10209-1.00", "CUSA10209-1.00", 0x475740, 0x3ccfb9},
+};
+
+enum { SITE_LIST = 41 + BOSS_BATTLE_INN_CALLS };
+
+static size_t hooked_sites(const BossBattleSites *s, PatchedSite out[SITE_LIST]) {
+    const PatchedSite fixed[41] = {
+        {s->hook, 5}, {s->inn_built, 8}, {s->inn_result, 5}, {s->inn_help, 5}, {s->arrange_story, 5}, {s->story_clear, 5},
+        {s->dragon_talismans, 5}, {s->title, 5}, {s->inn_flushed, 11}, {s->save_copy, 5}, {s->party_wiped, 5},
+        {s->boss_cleared, 5}, {s->clear_screen, 5}, {s->results_screen, 5}, {s->town_return, 5}, {s->options_title, 5},
+        {s->options_built, 6}, {s->options_update, 5}, {s->options_result, 5}, {s->list_up, 6}, {s->list_down, 6},
+        {s->results_level_done, 10}, {s->options_leave, 5}, {s->arrival_fade_in, 5}, {s->fade, 6}, {s->inn_help_line, 5},
+        {s->cue_player, 6}, {s->pause_start_gate, 5}, {s->pause_level_gate, 5}, {s->pause_mode, 6},
+        {s->pause_row, s->pause_rows_inline ? 5 : 6}, {s->pause_setup_calls[0], 5}, {s->pause_setup_calls[1], 5},
+        {s->pause_setup_calls[2], 5}, {s->pause_confirm_text, 5}, {s->pause_result, 5}, {s->inn_draw, 5},
+        {s->inn_destroyed, 6}, {s->inn_layer, 5}, {s->inn_layer_tail, 5}, {s->pause_floor_reward, 5}};
+    memcpy(out, fixed, sizeof(fixed));
+    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) out[41 + i] = (PatchedSite){s->inn_calls[i], 5};
+    return SITE_LIST;
+}
+
+static uint64_t rel32_at(const unsigned char *image, uint64_t at) {
+    int32_t rel;
+    memcpy(&rel, image + at + 1, sizeof(rel));
+    return (uint64_t)((int64_t)at + 5 + rel);
+}
+
+/* Exit Game, installed first, hooks the entry of the layout part's layers: the background still verifies. */
+static void check_after_exit_game(unsigned char *image, uint64_t size, const char *game, const BossBattleSites *sites) {
+    const uint64_t part_set = rel32_at(image, sites->row_frame + 0x24), part_layers = rel32_at(image, part_set + 0x46);
+    unsigned char saved[8];
+    memcpy(saved, image + part_layers, sizeof(saved));
+    static const uint8_t kExitGameEntry[8] = {0xe9, 0x10, 0x20, 0x30, 0x00, 0x90, 0x90, 0x90};
+    memcpy(image + part_layers, kExitGameEntry, sizeof(kExitGameEntry));
+    BossBattleSites again;
+    const char *why = NULL;
+    CHECK(boss_battle_locate(image, size, game, &again, &why) == 1 && !again.inn_background_failure &&
+          again.inn_layer == sites->inn_layer);
+    memcpy(image + part_layers, saved, sizeof(saved));
+}
+
+static int32_t frame_i32(const uint8_t *at) {
+    int32_t value;
+    memcpy(&value, at, sizeof(value));
+    return value;
+}
+
+/* The inline setup's jump to the plain mode's rows goes to its Quit row with the first row's saves, while the fight owns
+ * the menu; any other jump, or the campaign's own menu, is left alone. */
+static void check_inline_pause_rows(const unsigned char *image, const BossBattleSites *sites) {
+    static uint8_t frame[0x100];
+    const uint64_t plain = (uint64_t)(uintptr_t)(image + sites->pause_plain_rows);
+    const uint64_t quit = (uint64_t)(uintptr_t)(image + sites->pause_quit_row);
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    memset(frame, 0, sizeof(frame));
+    regs.rcx = (uint64_t)(uintptr_t)(image + 0x1000);
+    regs.rax = plain - regs.rcx;
+    regs.rbp = (uint64_t)(uintptr_t)(frame + 0x80);
+    regs.rbx = 0x11223344aabbccddull;
+    regs.r15 = 0x55667788u;
+    regs.r12 = 0x77;
+    GuestRegs campaign = regs;
+    boss_battle_pause_rows_hook(&campaign);
+    CHECK(!memcmp(&campaign, &regs, sizeof(regs)));
+    start_guarded();
+    use_fake_screen_functions();
+    use_fake_pause_functions();
+    boss_battle_set_character("Zak", 0, 1);
+    CHECK(start_session(HARPY));
+    reach_arena();
+    frames(probe(kArenaPlay, 1, 1, 0), 10);
+    open_pause_menu();
+    CHECK(boss_battle_pause_owned());
+    GuestRegs other = regs;
+    other.rax += 0x10;
+    boss_battle_pause_rows_hook(&other);
+    CHECK(other.rax == regs.rax + 0x10 && other.r12 == regs.r12);
+    boss_battle_pause_rows_hook(&regs);
+    uint64_t saved_r12;
+    memcpy(&saved_r12, frame + 0x80 - 0x80, sizeof(saved_r12));
+    CHECK(regs.rax + regs.rcx == quit && regs.r12 == (uint64_t)(uintptr_t)(image + sites->pause_row_vtable));
+    CHECK(frame_i32(frame + 0x80 - 0x70) == (int32_t)0xaabbccdd && frame_i32(frame + 0x80 - 0x5c) == 0x55667788 &&
+          saved_r12 == 0x77);
+    boss_battle_pause_closed();
+    boss_battle_set_screen_functions(NULL);
+    boss_battle_reset();
+}
+
+/* The labyrinth's floor reward panel of the pause window stays empty during a fight, and is the game's otherwise. */
+static void check_floor_reward_hook(void) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    boss_battle_reset();
+    boss_battle_pause_floor_reward_hook(&regs);
+    CHECK(!regs.skip);
+    start_guarded();
+    CHECK(start_session(ANCIENT_DRAGON) && boss_battle_session_active());
+    boss_battle_pause_floor_reward_hook(&regs);
+    CHECK(regs.skip);
+    boss_battle_reset();
+}
+
+static void test_real_images(void) {
+    CHECK(!boss_battle_build_listed("CUSA10209-1.02") && !boss_battle_build_listed("CUSA10487-1.03") && !boss_battle_build_listed(NULL));
+    for (size_t b = 0; b < sizeof(kRealBuilds) / sizeof(*kRealBuilds); ++b) {
+        const char *game = kRealBuilds[b].game;
+        const size_t room = boss_battle_stub_bytes();
         uint64_t size = 0;
-        unsigned char *image = boot_image(kOtherBuilds[i].folder, &size, 0);
-        if (!image) continue;
+        unsigned char *image = boot_image(kRealBuilds[b].folder, &size, room);
+        if (!image) {
+            printf("%s: no boot image, real image checks skipped\n", kRealBuilds[b].folder);
+            continue;
+        }
+        CHECK(boss_battle_build_listed(game));
+        unsigned char *before = malloc(size + room);
+        memcpy(before, image, size + room);
         const char *why = NULL;
         BossBattleSites sites;
-        CHECK(boss_battle_locate(image, size, kOtherBuilds[i].game, &sites, &why) == 0 && !strcmp(why, "not a listed build"));
-        printf("%s: not listed, Boss Battle unavailable\n", kOtherBuilds[i].folder);
-        free(image);
+        memset(&sites, 0, sizeof(sites));
+        const int found = boss_battle_locate(image, size, game, &sites, &why);
+        CHECK(found == 1 && !sites.inn_background_failure);
+        if (!found) {
+            printf("%s: %s\n", game, why);
+            free(image), free(before);
+            continue;
+        }
+        PatchedSite all[SITE_LIST];
+        const size_t count = hooked_sites(&sites, all);
+        for (size_t i = 0; i < count; ++i) {
+            CHECK(all[i].at && all[i].at + all[i].length <= size);
+            for (size_t j = 0; j < i; ++j) CHECK(all[i].at + all[i].length <= all[j].at || all[j].at + all[j].length <= all[i].at);
+        }
+        int refused = 0;
+        for (size_t i = 0; i < count; ++i) {
+            image[all[i].at] ^= 0x10;
+            BossBattleSites probe;
+            const int still = boss_battle_locate(image, size, game, &probe, &why);
+            const int background = all[i].at == sites.inn_layer || all[i].at == sites.inn_layer_tail;
+            const int ok = background ? still == 1 && probe.inn_background_failure : still == 0;
+            CHECK(ok);
+            if (!ok) printf("  %s: changed site %#llx was not refused\n", game, (unsigned long long)all[i].at);
+            refused += ok;
+            image[all[i].at] ^= 0x10;
+        }
+        check_after_exit_game(image, size, game, &sites);
+        CHECK(!memcmp(image, before, size + room));
+        DcpEarlyStorySites town;
+        memset(&town, 0, sizeof(town));
+        town.selector = (uint32_t)kRealBuilds[b].selector;
+        town.town_portal_call = (uint32_t)kRealBuilds[b].town_portal_call;
+        start_guarded();
+        boss_battle_set_memory_guard(NULL, NULL);
+        CHECK(boss_battle_install(image, size, 0, game, 0, &town, image + size, room) == 1 && boss_battle_available());
+        CHECK(bytes_changed_outside(image, before, size, all, count) == 0);
+        for (size_t i = 0; i < count; ++i) CHECK(image[all[i].at] == 0xe9);
+        CHECK(image[kRealBuilds[b].town_portal_call] == 0xe8 && !hydeland_town_installed());
+        CHECK(boss_battle_startable_count() == BOSS_BATTLE_ENCOUNTERS);
+        if (sites.pause_rows_inline) check_inline_pause_rows(image, &sites);
+        check_floor_reward_hook();
+        printf("%s: %zu sites, %d of %zu changes refused, %d of %d encounters, pause rows %s, Town00 scene in %s\n", game,
+               count, refused, count, boss_battle_startable_count(), BOSS_BATTLE_ENCOUNTERS,
+               sites.pause_rows_inline ? "inline" : "by helper", sites.town_return_scene_rbx ? "rbx" : "r14");
+        boss_battle_set_available(0);
+        boss_battle_set_inn_functions(NULL);
+        boss_battle_set_pause_functions(NULL);
+        boss_battle_campaign_configure(0);
+        boss_battle_reset();
+        free(image), free(before);
     }
 }
 
@@ -3760,6 +4847,8 @@ int main(void) {
     remove(record_file);
     boss_battle_record_configure(user_dir);
     test_encounters();
+    test_regional_inn_layouts();
+    test_language_independence();
     test_arena_rooms();
     test_shared_hook();
     test_setting();
@@ -3779,6 +4868,14 @@ int main(void) {
     test_telemetry(user_dir);
     test_inn_rows();
     test_inn_build();
+    test_inn_layout();
+    test_inn_menu_off();
+    test_inn_menu_built();
+    test_inn_menu_draw();
+    test_inn_menu_states();
+    test_inn_menu_lifetime();
+    test_inn_background_layout();
+    test_inn_background_hooks();
     test_inn_results();
     test_screen_rows();
     test_screen_entries();
@@ -3813,7 +4910,7 @@ int main(void) {
     test_fight_all_transit();
     test_native_arena_fade_in();
     test_us_image();
-    test_other_images();
+    test_real_images();
     remove(record_file);
     if (failures) {
         printf("%d Boss Battle check(s) failed\n", failures);

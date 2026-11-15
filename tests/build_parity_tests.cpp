@@ -21,6 +21,7 @@
 #include <string_view>
 #include <vector>
 
+#include "boss_battle.h"
 #include "cheat_hooks.h"
 #include "controller_prompts.h"
 #include "cpk_patch.h"
@@ -28,6 +29,7 @@
 #include "cyrillic_glyphs.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "endgame_unlocks.h"
 #include "exit_game_hook.h"
 #include "exit_game_text.h"
 #include "fms_sheet.h"
@@ -120,10 +122,26 @@ bool HasGalleryTable(const GameBuild& build) {
     return gallery_unlock_locate(none, 0, Key(build).c_str(), &site) == 1;
 }
 
+bool HasEndgameTable(const GameBuild& build) {
+    EndgameSites sites;
+    const unsigned char none[1] = {0};
+    return endgame_unlocks_locate(none, 0, Key(build).c_str(), &sites) == 1;
+}
+
 bool HasButtonsTable(const GameBuild& build) {
     MenuButtonSites sites;
     const unsigned char none[1] = {0};
     return menu_buttons_locate(none, 0, Key(build).c_str(), &sites) == 1;
+}
+
+// The first supported build whose tables name this image: a build whose executable is byte-identical to an earlier
+// build's (CUSA10454 1.01) runs through that build's tables.
+const GameBuild& ImageOwner(const GameBuild& build, uint64_t size, uint64_t entry) {
+    for (const GameBuild& candidate : SupportedBuilds()) {
+        const GuestImageId* id = ImageOf(candidate);
+        if (id && id->size == size && id->entry == entry) return candidate;
+    }
+    return build;
 }
 
 bool IsUs100(const GameBuild& build) {
@@ -135,7 +153,7 @@ bool IsUs100(const GameBuild& build) {
 struct Capabilities {
     bool cheats = false, xbox_prompts = false, npc_voices = false, true_ultrawide = false, custom_resolution = false;
     Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, menu_buttons = Mapping::kNone, unlock_gallery = Mapping::kNone, system_type = Mapping::kNone,
-            lzcnt = Mapping::kNone, startup_save = Mapping::kNone;
+            lzcnt = Mapping::kNone, startup_save = Mapping::kNone, endgame = Mapping::kNone, boss_battle = Mapping::kNone;
     std::string languages, translations;
 };
 
@@ -154,6 +172,8 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     caps.skip_intro = table_or_search(HasIntroTable(build));
     caps.menu_buttons = table_or_search(HasButtonsTable(build));
     caps.unlock_gallery = table_or_search(HasGalleryTable(build));
+    caps.endgame = table_or_search(HasEndgameTable(build));
+    caps.boss_battle = boss_battle_build_listed(Key(build).c_str()) ? Mapping::kTable : Mapping::kNone;
     caps.system_type = table_or_search(Listed(system_type_records, build));
     caps.lzcnt = table_or_search(Listed(lzcnt_builds, build));
     caps.startup_save = Listed(startup_save_records, build) ? Mapping::kTable : Mapping::kNone;
@@ -191,6 +211,8 @@ enum Feature : size_t {
     kEnglishReady,
     kEnglishPort,
     kRussian,
+    kBossBattle,
+    kEndgameUnlocks,
     kFeatureCount
 };
 
@@ -198,7 +220,8 @@ const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
     "Story Skip", "Tutorial Skip", "Skip Intro", "Japanese Menu Buttons", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
     "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game", "Unlock Gallery",
-    "Brazilian Portuguese", "English available", "English ready", "Port English supported", "Russian"};
+    "Brazilian Portuguese", "English available", "English ready", "Port English supported", "Russian", "Boss Battle",
+    "Unlock Labyrinth + Ultimate/Tower"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
 struct Contract {
@@ -316,6 +339,8 @@ bool LauncherOffers(const GameBuild& build, Feature feature) {
         return SupportsJapaneseNpcVoices(&build);
     case kUnlockGallery:
         return UnlockGalleryAvailable(&build);
+    case kBossBattle:
+        return BossBattleAvailable(&build);
     case kBrazilianPortuguese: {
         const std::span<const TextLanguage> languages = TextLanguagesOf(&build);
         return std::any_of(languages.begin(), languages.end(), [](const TextLanguage& language) {
@@ -435,6 +460,10 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
         return known && game.exit_game;
     case kUnlockGallery:
         return known && game.unlock_gallery && CapabilitiesOf(build).unlock_gallery != Mapping::kNone;
+    case kBossBattle:
+        return known && CapabilitiesOf(build).boss_battle == Mapping::kTable;
+    case kEndgameUnlocks:
+        return known && CapabilitiesOf(build).endgame != Mapping::kNone;
     case kBrazilianPortuguese:
         return known && TranslationReady(build);
     case kEnglishAvailable:
@@ -449,6 +478,11 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
     }
 }
 
+// Boss Battle is BLOCKED on a build whose executable nobody could check: the launcher says so and the loader refuses it.
+bool BlockedHere(const GameBuild& build, Feature feature) {
+    return feature == kBossBattle && !build.boss_battle;
+}
+
 // A GLOBAL feature passes only when the launcher offers it and the runtime implements it; Japanese NPC Voices passes as
 // NOT APPLICABLE only on a build the contract says already speaks Japanese, which then offers no toggle.
 bool FeaturePasses(const GameBuild& build, const DcpGameBuild& game, const Contract& row, Feature feature,
@@ -458,6 +492,10 @@ bool FeaturePasses(const GameBuild& build, const DcpGameBuild& game, const Contr
     const bool native = (feature == kJapaneseNpcVoices && row.native_japanese_voices) ||
                         (feature == kEnglishPort && NativeEnglish(row));
     const bool native_ok = feature == kEnglishPort ? NativeEnglishSlot(build) : NativeJapaneseNpcVoices(&build);
+    if (BlockedHere(build, feature)) {
+        if ((offered || implemented) && why) *why = "BLOCKED without its executable, yet offered or implemented";
+        return !offered && !implemented;
+    }
     const bool pass = native ? !offered && !implemented && native_ok : offered && implemented;
     if (!pass && why) {
         *why = std::string(native ? "expected native, " : "expected on, ") + "launcher " + (offered ? "on" : "off") +
@@ -733,6 +771,9 @@ void TestUpdateParity() {
         lost("system type", b.system_type != Mapping::kNone, u.system_type != Mapping::kNone);
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
+        lost("endgame unlocks", b.endgame != Mapping::kNone, u.endgame != Mapping::kNone);
+        if (update->boss_battle) lost("boss battle", b.boss_battle != Mapping::kNone, u.boss_battle != Mapping::kNone);
+        else std::printf("  %s: Boss Battle BLOCKED, its executable was never checked\n", update->label);
         CHECK(u.languages == b.languages);
         CHECK(u.translations == b.translations);
         CHECK(update->features_by_signature && base->features_by_signature == !IsUs100(*base));
@@ -797,7 +838,7 @@ void TestGateConsistency() {
     const std::string launcher = ReadText("launcher/launcher.cpp");
     const char* const allowed[] = {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
                                    "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
-                                   "UnlockGalleryAvailable(build_)",
+                                   "UnlockGalleryAvailable(build_)",       "BossBattleAvailable(build_)",
                                    "xbox_available_",                      "XboxPromptsAvailable",
                                    "build_->xbox_prompts",                 "InstalledTextLanguages(paths_.app0, build_)",
                                    "InstalledPromptStyle(paths_.app0, *build_", "PromptArchives(paths_.app0, *build_",
@@ -831,7 +872,7 @@ void TestGateConsistency() {
     CHECK(unknown == 0);
     for (const char* required : {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
                                  "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
-                                 "UnlockGalleryAvailable(build_)", "xbox_available_"}) {
+                                 "UnlockGalleryAvailable(build_)", "BossBattleAvailable(build_)", "xbox_available_"}) {
         CHECK(seen[required] > 0);
     }
 }
@@ -1177,8 +1218,15 @@ uint64_t Read64(std::ifstream& in) {
 }
 
 // The memory image inside boot.bin (layout written by launcher/boot_image.cpp, read as tests/isa_tests.c does).
+// The launcher's image folder, then the research copy of a build the launcher has not prepared here.
+fs::path ImageFolder(const GameBuild& build) {
+    const fs::path normal = fs::path(DCP_SOURCE_DIR) / "build" / "image" / build.folder;
+    const fs::path research = fs::path(DCP_SOURCE_DIR) / "build" / "research" / "image" / build.folder;
+    return !fs::exists(normal / "boot.bin") && fs::exists(research / "boot.bin") ? research : normal;
+}
+
 bool LoadBootImage(const GameBuild& build, BootImage& out) {
-    std::ifstream in(fs::path(DCP_SOURCE_DIR) / "build" / "image" / build.folder / "boot.bin", std::ios::binary);
+    std::ifstream in(ImageFolder(build) / "boot.bin", std::ios::binary);
     char magic[8] = {};
     if (!in.read(magic, 8) || std::memcmp(magic, "DCPBOOT1", 8)) {
         return false;
@@ -1321,7 +1369,8 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     const size_t cheat_stubs = cheats::Hooks().size() * guest_hook_stub_size();
     const size_t room = cheat_stubs + startup_save_hook_stub_bytes() + voice_hooks_stub_bytes() +
                         system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes() +
-                        exit_game_hook_stub_bytes() + skip_intro_stub_bytes() + gallery_unlock_stub_bytes();
+                        exit_game_hook_stub_bytes() + skip_intro_stub_bytes() + gallery_unlock_stub_bytes() +
+                        boss_battle_stub_bytes() + endgame_unlocks_stub_bytes();
     std::vector<uint8_t> memory(base + room + page, 0);
     std::memcpy(memory.data(), image.bytes.data(), size);
     uint8_t* area = memory.data() + base;
@@ -1339,11 +1388,13 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     uint8_t* exit_game_area = take(exit_game_hook_stub_bytes());
     uint8_t* intro_area = take(skip_intro_stub_bytes());
     uint8_t* gallery_area = take(gallery_unlock_stub_bytes());
+    uint8_t* boss_battle_area = take(boss_battle_stub_bytes());
+    uint8_t* endgame_area = take(endgame_unlocks_stub_bytes());
     uint8_t* image_bytes = memory.data();
 
     const char* name = nullptr;
     CHECK(lzcnt_compat_install(image_bytes, size, entry, lzcnt_stubs, lzcnt_compat_stub_bytes(), &name) == LZCNT_COMPAT_OK);
-    CHECK(name && std::string_view(name) == build.label && CountLzcnt(image_bytes, size) == 0);
+    CHECK(name && std::string_view(name) == ImageOwner(build, size, entry).label && CountLzcnt(image_bytes, size) == 0);
 
     const std::span<const GuestHook> cheat_hooks = cheats::Hooks();
     if (build.features_by_signature) {
@@ -1470,6 +1521,25 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     }
     CHECK(std::string_view(detail).find("off (") == std::string_view::npos);
 
+    // Boss Battle and the endgame unlocks go in last, as the loader installs them, over everything above.
+    {
+        const DcpExecRange executable{0, size};
+        const DcpImageView original{image.bytes.data(), size, &executable, 1};
+        DcpEarlyStorySites town{};
+        char failure[200];
+        const DcpGameBuild game = LoaderView(build);
+        const bool town_found = dcp_resolve_early_story(&game, &original, &town, failure, sizeof(failure)) == 1;
+        CHECK(town_found);
+        CHECK(boss_battle_install(image_bytes, size, entry, Key(build).c_str(), 0, town_found ? &town : nullptr,
+                                  boss_battle_area, boss_battle_stub_bytes()) == (build.boss_battle ? 1 : 0));
+        CHECK(!build.boss_battle || boss_battle_startable_count() == BOSS_BATTLE_ENCOUNTERS);
+        boss_battle_set_available(0);
+        const unsigned both = ENDGAME_UNLOCK_LABYRINTH | ENDGAME_UNLOCK_ULTIMATE_TOWER;
+        CHECK(endgame_unlocks_install(image_bytes, size, entry, Key(build).c_str(), both, endgame_area,
+                                      endgame_unlocks_stub_bytes()) == both);
+        endgame_unlocks_set(0);
+    }
+
     // Near misses: the same bytes with another entry or size are no supported image to any mapping.
     std::vector<uint8_t> near(memory.begin(), memory.begin() + std::ptrdiff_t(base + room + page));
     std::memcpy(near.data(), image.bytes.data(), size);
@@ -1508,7 +1578,8 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
         return Proof::kNotNeeded;
     case kArachnophobia:
     case kXboxPrompts:
-        return report.prepared ? Proof::kRealExecutable : Proof::kDataUnavailable;
+        if (report.prepared) return Proof::kRealExecutable;
+        return report.executable ? Proof::kStatic : Proof::kDataUnavailable;
     case kBrazilianPortuguese:
     case kEnglishAvailable:
     case kEnglishReady:
@@ -1522,6 +1593,9 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
         break;
     case kJapaneseNpcVoices:
         if (row.native_japanese_voices) return Proof::kNotNeeded;
+        break;
+    case kBossBattle:
+        if (!build.boss_battle) return Proof::kDataUnavailable;
         break;
     default:
         break;
@@ -1800,7 +1874,8 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         }
         CHECK(overlaps == 0 && outside == 0);
 
-        const GuestImageId* id = ImageOf(build);
+        const GameBuild& owner = ImageOwner(build, size, image.entry);
+        const GuestImageId* id = ImageOf(owner);
         CHECK(id && id->size == size && id->entry == image.entry);
 
         uint64_t story = 0, tutorial = 0, found_story = 0, found_tutorial = 0;
@@ -1830,14 +1905,14 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(buttons.write_count == (build.title_id == std::string_view("CUSA10454") ? 2 : 0));
 
         SystemTypeRecord table{}, searched{};
-        CHECK(system_type_locate(bytes, size, image.entry, &table) == 1 && std::string_view(table.build) == build.label);
+        CHECK(system_type_locate(bytes, size, image.entry, &table) == 1 && std::string_view(table.build) == owner.label);
         CHECK(system_type_locate(bytes, size, image.entry + 1, &searched) == 2);
         CHECK(searched.sites[0] == table.sites[0] && searched.sites[1] == table.sites[1] && searched.set_text == table.set_text);
 
         uint32_t lzcnt[LZCNT_SITE_COUNT];
         const LzcntBuild* lzcnt_table = nullptr;
         for (const LzcntBuild& record : lzcnt_builds) {
-            if (std::string_view(record.build) == build.label) lzcnt_table = &record;
+            if (std::string_view(record.build) == owner.label) lzcnt_table = &record;
         }
         CHECK(lzcnt_compat_locate(bytes, size, lzcnt) == LZCNT_COMPAT_OK);
         CHECK(lzcnt_table && std::equal(std::begin(lzcnt), std::end(lzcnt), lzcnt_table->offsets));
@@ -1847,7 +1922,8 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(dcp_find_resolution_sites(bytes, size, dcp_render_size_signatures, DCP_RENDER_SIZE_SIGNATURE_COUNT, sites,
                                         results) == 1);
         std::set<uint32_t> expected, recovered;
-        for (const DcpResolutionSite& site : build.resolution_sites) expected.insert(site.offset);
+        for (const DcpResolutionSite& site : build.resolution_sites.empty() ? owner.resolution_sites : build.resolution_sites)
+            expected.insert(site.offset);
         for (const DcpResolutionSite& site : sites) recovered.insert(site.offset);
         CHECK(expected == recovered);
 
@@ -1859,7 +1935,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         }
     }
 
-    const fs::path image_dir = root / "build" / "image" / build.folder;
+    const fs::path image_dir = ImageFolder(build);
     if (fs::is_directory(image_dir)) {
         report.image_identity = BuildOfImageDir(image_dir.string().c_str()) == &build;
         CHECK(report.image_identity);
@@ -1963,11 +2039,11 @@ int main() {
             }
         }
         const bool failed = g_scope_failures[build.label] > 0 || shared_failures > 0;
-        const char* status = failed ? "FAIL" : unavailable ? "PARTIAL" : "PASS";
+        const char* status = failed ? "FAIL" : !report.executable ? "BLOCKED" : unavailable ? "PARTIAL" : "PASS";
         std::string detail = report.executable ? "executable" : "no real executable here";
         if (report.executable && !report.note.empty()) detail += ": " + report.note;
         detail += report.prepared ? "; prepared folder" : "; no prepared folder";
-        if (unavailable) detail += "; DATA UNAVAILABLE: " + missing;
+        if (unavailable) detail += std::string(report.executable ? "; DATA UNAVAILABLE: " : "; BLOCKED, missing evidence: ") + missing;
         std::printf("PARITY-BUILD|%s|%s|%s\n", build.label, status, detail.c_str());
         const char* readiness = NativeEnglishSlot(build) ? "ready: native English"
                                 : report.prepared        ? "ready: built-in (served on real data)"
@@ -1978,12 +2054,12 @@ int main() {
     for (size_t f = 0; f < kFeatureCount; ++f) {
         const FeatureTally& tally = g_tally[f];
         const Evidence& item = evidence[f];
-        const char* verdict = tally.passed != builds || shared_failures ? "FAIL " : item.none ? "PARTIAL " : "PASS ";
+        const char* verdict = tally.passed != builds || shared_failures ? "FAIL " : "PASS ";
         const size_t applicable = f == kEnglishPort ? builds - tally.native : builds;
         std::string status = verdict + std::to_string(applicable - item.none) + "/" + std::to_string(applicable);
         if (item.log) status += " (" + std::to_string(item.real) + " real, " + std::to_string(item.log) + " reporter log)";
         if (item.unproven) status += " (" + std::to_string(item.real) + " real, " + std::to_string(item.unproven) + " static)";
-        if (item.none) status += "; DATA UNAVAILABLE: " + item.missing;
+        if (item.none) status += "; BLOCKED, no real executable: " + item.missing;
         else if (item.unproven) status += "; RUNTIME DATA UNAVAILABLE: " + item.missing;
         if (tally.native && f == kEnglishPort) {
             status += " (" + std::to_string(tally.native) + " native English, not applicable)";

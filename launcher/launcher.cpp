@@ -173,6 +173,7 @@ constexpr char kJapaneseMenuButtonsHelp[] =
 constexpr char kStorySkipOfferHelp[] = "Offers the game's built-in story skip when creating a new character";
 constexpr char kTutorialSkipOfferHelp[] = "Lets new characters choose whether to begin the tutorial";
 constexpr char kUnlockGalleryHelp[] = "Unlocks all Gallery content while enabled without changing save progress";
+constexpr char kBossBattleUnverifiedText[] = "Not available for this build yet: its executable has not been checked.";
 constexpr char kEnableBossBattleHelp[] =
     "Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fights there never change campaign "
     "progress. Offline only.";
@@ -1071,6 +1072,8 @@ private:
         }
         if (BossBattleAvailable(build_)) {
             ui.Toggle("Enable Boss Battle", kEnableBossBattleHelp, kEnableBossBattleKey, false, "Off", "On");
+        } else {
+            ui.Info("Enable Boss Battle", kBossBattleUnverifiedText);
         }
         ui.Toggle("Unlock Labyrinth of Chaos", kUnlockLabyrinthHelp, kUnlockLabyrinthKey, false, "Off", "On");
         ui.Toggle("Unlock Ultimate + Tower of Mirages", kUnlockUltimateTowerHelp, kUnlockUltimateTowerKey, false, "Off", "On");

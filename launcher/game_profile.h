@@ -85,6 +85,7 @@ struct GameBuild {
     bool exit_game = true;            // the title menu's Exit Game row is installed from structural locators
     bool unlock_gallery = true;       // the Gallery list builder is found by signature (src/gallery_unlock.h)
     bool check_prompt_fit = false;    // no copy of this base's atlases was read: Xbox is offered only while they fit the patch
+    bool boss_battle = true;          // src/boss_battle_hook.c lists this build's sites, verified on its executable
 };
 
 // The supported builds, US first.
@@ -155,10 +156,10 @@ inline bool UnlockGalleryAvailable(const GameBuild* build) {
     return build == nullptr || build->unlock_gallery;
 }
 
-// Boss Battle's sites are verified for the USA 1.00 build only; the unknown build is not restricted here.
+// False only for a known build whose Boss Battle sites were never checked on its executable; the unknown build is not
+// restricted here, and the loader installs no hook in it anyway.
 inline bool BossBattleAvailable(const GameBuild* build) {
-    return build == nullptr ||
-           (std::string_view(build->title_id) == "CUSA10454" && std::string_view(build->version) == "1.00");
+    return build == nullptr || build->boss_battle;
 }
 
 // False only for a known build whose pass projection sites are not verified; the unknown build is not restricted here,

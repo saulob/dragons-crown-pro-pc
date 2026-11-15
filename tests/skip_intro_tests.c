@@ -37,6 +37,10 @@ static unsigned char *boot_image(const char *folder, uint64_t *size) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/build/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
     FILE *f = fopen(path, "rb");
+    if (!f) { /* a build the launcher has not prepared here: its research copy */
+        snprintf(path, sizeof(path), "%s/build/research/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
+        f = fopen(path, "rb");
+    }
     if (!f) return NULL;
     char magic[8];
     if (fread(magic, 1, 8, f) != 8 || memcmp(magic, "DCPBOOT1", 8)) return fclose(f), NULL;
@@ -95,6 +99,7 @@ static const struct {
     uint64_t window, entry, notice;
 } kRealBuilds[] = {
     {"v1.03", "CUSA10454-1.00", 0x502076, 0x54c690, 0},
+    {"CUSA10454-1.01", "CUSA10454-1.01", 0x502076, 0x54c690, 0},
     {"CUSA07001-1.00", "CUSA07001-1.00", 0x4ffdc6, 0x54a800, 0x174b0},
     {"CUSA07001-1.02", "CUSA07001-1.02", 0x500356, 0x54a660, 0x174d0},
     {"CUSA07001-1.03", "CUSA07001-1.03", 0x500416, 0x54a720, 0x174d0},
@@ -272,7 +277,9 @@ static void test_real_images(void) {
         site = 0;
         CHECK(skip_intro_locate(image, size, "CUSA00000-9.99", &site) == 0 && site == hook);
         for (int j = 0; j < kRealCount; ++j) {
-            if (j != i) CHECK(skip_intro_locate(image, size, kRealBuilds[j].game, &site) == 1 && site == 0);
+            if (j == i) continue;
+            const int same_code = kRealBuilds[j].window == kRealBuilds[i].window && kRealBuilds[j].entry == kRealBuilds[i].entry;
+            CHECK(skip_intro_locate(image, size, kRealBuilds[j].game, &site) == 1 && site == (same_code ? hook : 0));
         }
 
         /* Every byte of the window is verified except two displacements the code does not read back. */
@@ -316,7 +323,7 @@ static void test_real_images(void) {
     static const struct {
         const char *game;
         int base;
-    } kSynthetic[] = {{"CUSA10454-1.01", 0}, {"CUSA10209-1.02", 4}};
+    } kSynthetic[] = {{"CUSA10487-1.03", 0}, {"CUSA10209-1.02", 5}};
     for (size_t k = 0; k < sizeof(kSynthetic) / sizeof(*kSynthetic); ++k) {
         const int base = kSynthetic[k].base;
         if (!loaded[base]) continue;

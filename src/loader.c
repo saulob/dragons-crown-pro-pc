@@ -22,6 +22,7 @@
 #include "exit_game_hook.h"
 #include "early_story_online.h"
 #include "boss_battle.h"
+#include "boss_battle_text.h"
 #include "boss_battle_record.h"
 #include "cyrillic_glyphs.h"
 #include "latin_glyphs.h"
@@ -692,6 +693,13 @@ int main(int argc, char **argv) {
     runtime_dcp_set_neo_mode(render_target.pro_memory);
     runtime_set_language(dcp_text_language(settings_file,paths.image_dir,app0));
     early_story_hint_set_portuguese(dcp_text_language_is_portuguese_brazil(settings_file,paths.image_dir,app0));
+    {
+        char text_key[64];
+        unsigned cyrillic_probe=0;
+        dcp_text_language_key(settings_file,paths.image_dir,app0,text_key,sizeof(text_key));
+        const int kana_cyrillic=dcp_text_cyrillic_cells(settings_file,paths.image_dir,app0,&cyrillic_probe)==CYRILLIC_CELLS_KANA;
+        boss_battle_text_set_language(text_key,kana_cyrillic);
+    }
     runtime_pad_set_settings(settings_file);
     runtime_pad_set_rumble(dcp_controller_rumble(settings_file));
     runtime_cheats_set_slot_human(runtime_pad_slot_human);

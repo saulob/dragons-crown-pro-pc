@@ -38,7 +38,7 @@ void TestOrder() {
         "01 Harpy",         "02 Wyvern",   "03 Doom Beetle",   "04 Golem",        "05 Gazer",
         "06 Pirates",       "07 Minotaur", "08 Vampire",       "09 Warlock",      "10 Medusa",
         "11 Wraith",        "12 Killer Rabbit", "13 Kraken",   "14 Cyclops",      "15 Chimera",
-        "16 Gargoyle Gate", "17 Red Dragon", "18 Arch Demon",  "19 Ancient Dragon", "20 Demon King"};
+        "16 Gargoyle Gate", "17 Red Dragon", "18 Arch Demon",  "19 Ancient Dragon", "20 Demon Lord"};
     char label[64];
     CHECK(BOSS_BATTLE_SCREEN_ROWS == 8 && BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW == 0 && BOSS_BATTLE_SCREEN_BOSS_ROWS == 6 &&
           BOSS_BATTLE_SCREEN_RETURN_ROW == 7 && BOSS_BATTLE_INN_OPTIONS_ROW == 3);

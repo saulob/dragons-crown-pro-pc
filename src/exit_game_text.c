@@ -29,7 +29,7 @@ const ExitGameLanguage exit_game_languages[EXIT_GAME_LANGUAGE_COUNT] = {
      "Выйти из игры.", NULL, 1, "Битва с боссом", "Выберите босса и сразитесь с ним."},
     {"japanese", "Japanese", "Data Install", "##(HDD)にデータをインストールして読み込みを高速化します", "Exit Game", "ゲームを終了します", NULL, 0, "ボスバトル", "ボスを選んで戦います"},
     {"traditional_chinese", "Traditional Chinese", "安裝遊戲資料", "將遊戲資料安裝至##(HDD)中以加速載入速度。", "結束遊戲", "結束遊戲。", NULL, 0, "首領挑戰", "選擇首領進行戰鬥。"},
-    {"korean", "Korean", "Data Install", "##(HDD)에 데이터를 설치하여 로딩 시간을 빠르게 합니다", "Exit Game", "게임을 종료합니다", NULL, 0, "보스 배틀", "보스를 골라 싸웁니다"},
+    {"korean", "Korean", "Data Install", "##(HDD)에 데이터를 설치하여 로딩 시간을 빠르게 합니다", "Exit Game", "게임을 종료합니다", NULL, 0, "보스 배틀", "보스를 골라 싸운다"},
 };
 
 typedef struct {

@@ -37,6 +37,10 @@ static unsigned char *boot_image(const char *folder, uint64_t *size) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/build/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
     FILE *f = fopen(path, "rb");
+    if (!f) { /* a build the launcher has not prepared here: its research copy */
+        snprintf(path, sizeof(path), "%s/build/research/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
+        f = fopen(path, "rb");
+    }
     if (!f) return NULL;
     char magic[8];
     if (fread(magic, 1, 8, f) != 8 || memcmp(magic, "DCPBOOT1", 8)) return fclose(f), NULL;
@@ -143,7 +147,7 @@ static int effective_flag(const unsigned char *image, const MenuButtonSites *sit
 static void test_locate_synthetic(void) {
     MenuButtonSites sites;
     unsigned char *western = synthetic(1);
-    CHECK(menu_buttons_locate(western, kSize, "CUSA10454-1.01", &sites) == 0);
+    CHECK(menu_buttons_locate(western, kSize, "CUSA10487-1.03", &sites) == 0);
     CHECK(sites.reader == kReader && sites.write_count == 2 && sites.western_sites);
     CHECK(sites.writes[0] == kImmediateA && sites.writes[1] == kImmediateB);
     CHECK(menu_buttons_locate(western, kSize, "CUSA10487-1.03", &sites) == 0);
@@ -166,16 +170,16 @@ static void test_locate_synthetic(void) {
 static void test_install_synthetic(void) {
     MenuButtonSites sites;
     unsigned char *image = synthetic(1), *before = synthetic(1);
-    CHECK(menu_buttons_locate(before, kSize, "CUSA10454-1.01", &sites) == 0);
+    CHECK(menu_buttons_locate(before, kSize, "CUSA10487-1.03", &sites) == 0);
     CHECK(effective_flag(before, &sites) == 1);
     CHECK(menu_buttons_install(image, kSize, NULL, 1) == 0 && !memcmp(image, before, kSize));
     CHECK(menu_buttons_install(image, kSize, NULL, 0) == 0 && !memcmp(image, before, kSize));
-    CHECK(menu_buttons_install(image, kSize, "CUSA10454-1.01", 0) == 1);
+    CHECK(menu_buttons_install(image, kSize, "CUSA10487-1.03", 0) == 1);
     CHECK(!memcmp(image, before, kSize));
-    CHECK(menu_buttons_install(image, kSize, "CUSA10454-1.01", 1) == 1);
+    CHECK(menu_buttons_install(image, kSize, "CUSA10487-1.03", 1) == 1);
     CHECK(differences(image, before, kSize) == 2 && image[kImmediateA] == 0 && image[kImmediateB] == 0);
     CHECK(effective_flag(image, &sites) == 0);
-    CHECK(menu_buttons_install(image, kSize, "CUSA10454-1.01", 1) == 1 && differences(image, before, kSize) == 2);
+    CHECK(menu_buttons_install(image, kSize, "CUSA10487-1.03", 1) == 1 && differences(image, before, kSize) == 2);
     free(image);
     free(before);
 
@@ -197,7 +201,7 @@ static void test_install_synthetic(void) {
 static void check_untouched(unsigned char *image, uint64_t size, int japanese) {
     unsigned char *copy = malloc(size);
     memcpy(copy, image, size);
-    CHECK(menu_buttons_install(image, size, "CUSA10454-1.01", japanese) == 0);
+    CHECK(menu_buttons_install(image, size, "CUSA10487-1.03", japanese) == 0);
     CHECK(!memcmp(image, copy, size));
     free(copy);
 }
@@ -245,7 +249,7 @@ static void test_mismatch_writes_nothing(void) {
     memcpy(twice + kSize, original, kSize);
     unsigned char *twice_before = malloc(kSize * 2);
     memcpy(twice_before, twice, kSize * 2);
-    CHECK(menu_buttons_install(twice, kSize * 2, "CUSA10454-1.01", 1) == 0 && !memcmp(twice, twice_before, kSize * 2));
+    CHECK(menu_buttons_install(twice, kSize * 2, "CUSA10487-1.03", 1) == 0 && !memcmp(twice, twice_before, kSize * 2));
 
     unsigned char *extra = synthetic(1);
     memcpy(extra + 0x380, "\xc7\x83\x34\x01\x00\x00\x01\x00\x00\x00", 10);
@@ -254,8 +258,8 @@ static void test_mismatch_writes_nothing(void) {
 
     unsigned char *none = malloc(kSize);
     memset(none, 0x90, kSize);
-    CHECK(menu_buttons_install(none, kSize, "CUSA10454-1.01", 1) == 0);
-    CHECK(menu_buttons_install(none, 0, "CUSA10454-1.01", 0) == 0);
+    CHECK(menu_buttons_install(none, kSize, "CUSA10487-1.03", 1) == 0);
+    CHECK(menu_buttons_install(none, 0, "CUSA10487-1.03", 0) == 0);
 
     free(original);
     free(only_one);
@@ -273,6 +277,7 @@ static const struct {
     uint64_t compares[3], load;
 } kRealBuilds[] = {
     {"v1.03", "CUSA10454-1.00", 0x7ee45, 2, {0x176c8, 0x177e0}, {0x4f3983, 0x4f43b6, 0x508b5a}, 0x6b20b},
+    {"CUSA10454-1.01", "CUSA10454-1.01", 0x7ee45, 2, {0x176c8, 0x177e0}, {0x4f3983, 0x4f43b6, 0x508b5a}, 0x6b20b},
     {"CUSA07001-1.00", "CUSA07001-1.00", 0x7e775, 0, {0, 0}, {0x4f17d3, 0x4f2206, 0x506741}, 0x6ac03},
     {"CUSA07001-1.02", "CUSA07001-1.02", 0x7e7c5, 0, {0, 0}, {0x4f1d63, 0x4f2796, 0x506d7a}, 0x6ac53},
     {"CUSA07001-1.03", "CUSA07001-1.03", 0x7e7c5, 0, {0, 0}, {0x4f1e23, 0x4f2856, 0x506e3a}, 0x6ac53},

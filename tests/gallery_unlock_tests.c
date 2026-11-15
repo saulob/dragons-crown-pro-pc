@@ -212,6 +212,10 @@ static unsigned char *boot_image(const char *folder, uint64_t *size) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/build/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
     FILE *f = fopen(path, "rb");
+    if (!f) { /* a build the launcher has not prepared here: its research copy */
+        snprintf(path, sizeof(path), "%s/build/research/image/%s/boot.bin", DCP_SOURCE_DIR, folder);
+        f = fopen(path, "rb");
+    }
     if (!f) return NULL;
     char magic[8];
     if (fread(magic, 1, 8, f) != 8 || memcmp(magic, "DCPBOOT1", 8)) return fclose(f), NULL;
@@ -235,6 +239,7 @@ static const struct {
     uint64_t window, entry;
 } kRealBuilds[] = {
     {"v1.03", "CUSA10454-1.00", 0x4d5492, 0x54c690},
+    {"CUSA10454-1.01", "CUSA10454-1.01", 0x4d5492, 0x54c690},
     {"CUSA07001-1.00", "CUSA07001-1.00", 0x4d34a2, 0x54a800},
     {"CUSA07001-1.02", "CUSA07001-1.02", 0x4d3962, 0x54a660},
     {"CUSA07001-1.03", "CUSA07001-1.03", 0x4d3a22, 0x54a720},
@@ -334,8 +339,11 @@ static void check_build(const unsigned char *loaded, uint64_t size, int index) {
     CHECK(gallery_unlock_locate(image, size, kRealBuilds[index].game, &site) == 1 && site == hook);
     site = 0;
     CHECK(gallery_unlock_locate(image, size, "CUSA00000-9.99", &site) == 0 && site == hook);
-    for (int j = 0; j < kRealCount; ++j)
-        if (j != index) CHECK(gallery_unlock_locate(image, size, kRealBuilds[j].game, &site) == 1 && site == 0);
+    for (int j = 0; j < kRealCount; ++j) {
+        if (j == index) continue;
+        const int same_code = kRealBuilds[j].window == kRealBuilds[index].window && kRealBuilds[j].entry == kRealBuilds[index].entry;
+        CHECK(gallery_unlock_locate(image, size, kRealBuilds[j].game, &site) == 1 && site == (same_code ? hook : 0));
+    }
 
     /* Every byte of the window, of the key function and of the getter is verified except the few noted above. */
     for (int b = 0; b < kWindowLength; ++b) {
@@ -404,7 +412,7 @@ static void test_real_images(void) {
     static const struct {
         const char *game;
         int base;
-    } kSynthetic[] = {{"CUSA10454-1.01", 0}, {"CUSA10209-1.02", 4}};
+    } kSynthetic[] = {{"CUSA10487-1.03", 0}, {"CUSA10209-1.02", 5}};
     const size_t stub_bytes = gallery_unlock_stub_bytes();
     for (size_t k = 0; k < sizeof(kSynthetic) / sizeof(*kSynthetic); ++k) {
         const int base = kSynthetic[k].base;

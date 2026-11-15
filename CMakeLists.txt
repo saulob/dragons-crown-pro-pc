@@ -80,6 +80,7 @@ set(DCP_RUNTIME_SOURCES
     src/boss_battle_campaign.c
     src/boss_battle_hook.c
     src/boss_battle_record.cpp
+    src/boss_battle_text.c
     src/early_story_online.c
     src/early_story_session.c
     src/endgame_unlocks.c
@@ -89,6 +90,7 @@ set(DCP_RUNTIME_SOURCES
     src/gallery_unlock.c
     src/default_message_hook.c
     src/guest_hook.c
+    src/inn_layout.c
     src/title_layout.c
     src/runtime.c
     src/runtime_audio.c
@@ -216,17 +218,22 @@ target_include_directories(dcp-endgame-unlocks-tests PRIVATE src)
 target_compile_definitions(dcp-endgame-unlocks-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-endgame-unlocks-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c src/boss_battle_campaign.c
-    src/boss_battle_hook.c src/boss_battle_record.cpp src/guest_hook.c src/hydeland_town.c)
+    src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/latin_glyphs.c
+    src/guest_hook.c src/hydeland_town.c src/inn_layout.c)
 set_target_properties(dcp-boss-battle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-boss-battle-tests PRIVATE src launcher)
 target_compile_definitions(dcp-boss-battle-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-boss-battle-tests PRIVATE -Wall -Wextra -Werror)
+add_executable(dcp-boss-battle-text-tests EXCLUDE_FROM_ALL tests/boss_battle_text_tests.c src/boss_battle_text.c
+    src/exit_game_text.c src/cyrillic_glyphs.c src/latin_glyphs.c)
+target_include_directories(dcp-boss-battle-text-tests PRIVATE src)
+target_compile_options(dcp-boss-battle-text-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-record-tests EXCLUDE_FROM_ALL tests/boss_battle_record_tests.cpp src/boss_battle_record.cpp)
 set_target_properties(dcp-boss-battle-record-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-boss-battle-record-tests PRIVATE src launcher)
 target_compile_options(dcp-boss-battle-record-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-menu-tests EXCLUDE_FROM_ALL tests/boss_battle_menu_tests.cpp src/boss_battle.c
-    src/boss_battle_record.cpp)
+    src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/latin_glyphs.c)
 set_target_properties(dcp-boss-battle-menu-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-boss-battle-menu-tests PRIVATE gpu/shim src launcher)
 target_compile_definitions(dcp-boss-battle-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -329,7 +336,8 @@ endif()
 add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
     src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c
     src/gallery_unlock.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c src/system_type_hook.c src/ultrawide_hooks.c
-    src/voice_hooks.c)
+    src/voice_hooks.c src/boss_battle.c src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp
+    src/boss_battle_text.c src/hydeland_town.c src/inn_layout.c src/endgame_unlocks.c)
 set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-build-parity-tests PRIVATE src launcher)
 target_compile_definitions(dcp-build-parity-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

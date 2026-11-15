@@ -150,8 +150,9 @@ BossBattleRequestResult boss_battle_request(int index);
 /* Protect, snapshot and open the session for the queued boss; 1 when the Inn may send it now (`index` gets it). */
 int boss_battle_begin_queued(int *index);
 
-/* The campaign character, read from the game when the boss list opens. `key` names it in the Boss Battle records. */
-void boss_battle_set_character(const char *name, const char *class_name, int level);
+/* The campaign character, read from the game when the boss list opens: `class_index` the game's (0 Fighter .. 5 Wizard;
+ * another is an Adventurer). `key` names it in the Boss Battle records, in English whatever the language. */
+void boss_battle_set_character(const char *name, int class_index, int level);
 int boss_battle_character_text(char *out, size_t size);
 int boss_battle_character_key(char *out, size_t size);
 
@@ -207,8 +208,6 @@ int boss_battle_quit_available(void);
 
 /* The pause menu of a fight: Start's native menu holds only Quit Boss Battle, under the boss's name. It is Boss Battle's
  * while the arena is initializing or fought, and stays so until it closes. */
-#define BOSS_BATTLE_PAUSE_QUIT_ROW "Quit Boss Battle"
-#define BOSS_BATTLE_PAUSE_QUIT_CONFIRM "Quit Boss Battle?"
 int boss_battle_pause_available(void);
 int boss_battle_pause_owned(void);
 /* The menu opens or is rebuilt: 1 with the boss's name (no number) when it is Boss Battle's. */
@@ -266,6 +265,20 @@ void boss_battle_inn_arrived(void);
 enum { BOSS_BATTLE_INN_ROW = 3, BOSS_BATTLE_INN_ROWS = 7, BOSS_BATTLE_INN_NO_ROW = -100, BOSS_BATTLE_INN_CALLS = 11 };
 int boss_battle_inn_native_row(int row);
 int boss_battle_inn_display_row(int row);
+
+/* The Inn menu with Boss Battle is drawn as its own seven rows, inside the vertical envelope of the vanilla six: the
+ * first row centred on vanilla Select player, the last on vanilla Leave tavern. */
+typedef struct {
+    float x, width;
+    float row_height;   /* a row's rectangle and highlight, below the pitch so neighbours never overlap */
+    float pitch;
+    float art_scale;    /* the native cursor art's vertical scale: row_height over the vanilla row height */
+    float center[BOSS_BATTLE_INN_ROWS];
+} BossBattleInnLayout;
+/* 0 when the vanilla rows give no room for seven. */
+int boss_battle_inn_layout(float x, float width, float vanilla_height, float first_center, float last_center,
+                           BossBattleInnLayout *layout);
+float boss_battle_inn_row_top(const BossBattleInnLayout *layout, int row);
 
 /* The Boss Battle screen is the native Options page the Inn opens for its Options row, given other rows: row 0 (the
  * page's title bar) Fight All, rows 1-6 six of the bosses in the selectable value column with the highlighted entry's
@@ -431,6 +444,10 @@ typedef struct {
     uint64_t inn_result;   /* the Inn menu frame's read of the list result */
     uint64_t inn_help;     /* the Inn menu frame's help text for the cursor row */
     uint64_t inn_help_table;
+    uint64_t inn_draw;     /* the Inn's draw: its call of the menu list's draw */
+    uint64_t inn_destroyed; /* the Inn destructor */
+    uint64_t inn_layer, inn_layer_tail; /* the Inn's calls that show or hide a background layer by position */
+    const char *inn_background_failure; /* why the Inn background keeps six rows; NULL when it can have seven */
     uint64_t allocate, widget, add_widget, add_item; /* the game functions the Inn menu builder calls */
     uint64_t set_disabled, set_cursor;               /* the list's row enable switch and cursor */
     uint64_t inn_party;                              /* the Inn's leave: its party sent to the game server */
@@ -448,6 +465,7 @@ typedef struct {
     uint64_t clear_screen;     /* the stage-end act opening the stage clear screen */
     uint64_t results_screen;   /* the stage-end act opening the results screen */
     uint64_t town_return;      /* the stage-end act's request for Hydeland */
+    int town_return_scene_rbx; /* the scene is in rbx there, not r14 */
     uint64_t set_step;         /* the scene's act and step setter */
     uint64_t set_text;         /* a text's plain string setter */
     uint64_t set_message;      /* a text's message setter (SystemMsg number) */
@@ -469,10 +487,15 @@ typedef struct {
     uint64_t save_commit, save_request;        /* the play data into the save's current slot; the save manager's save */
     uint64_t pause_start_gate, pause_level_gate; /* the stage scene's Start checks: a progressed character, a level */
     uint64_t pause_mode;                       /* the scene's read of its kind as it opens the pause menu */
-    uint64_t pause_row;                        /* the pause menu's row builder */
+    uint64_t pause_row;                        /* the pause menu's row builder, or its mode switch where rows are inline */
+    int pause_rows_inline;
+    uint64_t pause_plain_rows, pause_quit_row; /* inline: the plain mode's first row and its Quit row */
+    uint64_t pause_row_vtable;                 /* inline: the row widget vtable the first row loads */
     uint64_t pause_setup, pause_setup_calls[3]; /* the pause menu's setup and its three calls */
     uint64_t pause_confirm_text;               /* the quit confirmation's message */
     uint64_t pause_result, pause_result_fn;    /* the scene's read of the pause menu's result */
+    uint64_t pause_floor_reward;               /* the pause window's call that shows the labyrinth floor's reward */
+    uint32_t pause_result_field;               /* the window's result, as the result function reads it */
 } BossBattleSites;
 
 /* The game functions the Inn hooks call. Set by the install; the tests set their own. */
@@ -508,6 +531,9 @@ void GUEST_HOOK_ABI boss_battle_scene_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_inn_built_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_inn_result_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_inn_help_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_inn_draw_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_inn_destroyed_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_inn_layer_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_inn_shift_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_inn_mirror_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_arrange_story_hook(GuestRegs *regs);
@@ -521,6 +547,9 @@ void GUEST_HOOK_ABI boss_battle_boss_cleared_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_clear_screen_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_results_screen_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_town_return_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_town_return_rbx_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_rows_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_pause_floor_reward_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_title_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_built_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_update_hook(GuestRegs *regs);
@@ -588,6 +617,7 @@ void boss_battle_set_save_functions(const BossBattleSaveFunctions *functions);
 typedef struct {
     void(GUEST_HOOK_ABI *setup)(uint64_t window);
     int32_t(GUEST_HOOK_ABI *result)(uint64_t window, uint32_t pending);
+    uint32_t result_field; /* the window's result the scene reads */
 } BossBattlePauseFunctions;
 void boss_battle_set_pause_functions(const BossBattlePauseFunctions *functions);
 

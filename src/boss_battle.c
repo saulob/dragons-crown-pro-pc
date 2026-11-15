@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "boss_battle_record.h"
+#include "boss_battle_text.h"
 
 enum {
     NONE = -1,
@@ -61,7 +62,7 @@ int boss_battle_number(int index) {
 int boss_battle_label(int index, char *out, size_t size) {
     const BossBattleEncounter *encounter = boss_battle_encounter(index);
     if (!encounter || !size) return 0;
-    snprintf(out, size, "%02d %s", boss_battle_number(index), encounter->name);
+    snprintf(out, size, "%02d %s", boss_battle_number(index), boss_battle_text_boss(index));
     return 1;
 }
 
@@ -84,7 +85,7 @@ static struct {
 } guard;
 static atomic_flag text_lock = ATOMIC_FLAG_INIT;
 static char notice_text[192], character_name[64], character_class[48];
-static int notice_waiting, character_level;
+static int notice_waiting, character_level, character_class_index = -1;
 
 /* Game thread only. */
 static struct {
@@ -223,10 +224,14 @@ int boss_battle_take_notice(char *out, size_t size) {
     return waiting;
 }
 
-void boss_battle_set_character(const char *name, const char *class_name, int level) {
+static const char *const kClassKeys[BOSS_BATTLE_TEXT_CLASSES] = {"Fighter", "Amazon", "Elf", "Dwarf", "Sorceress", "Wizard"};
+
+void boss_battle_set_character(const char *name, int class_index, int level) {
+    const int known = class_index >= 0 && class_index < BOSS_BATTLE_TEXT_CLASSES;
     lock_text();
     snprintf(character_name, sizeof(character_name), "%s", name ? name : "");
-    snprintf(character_class, sizeof(character_class), "%s", class_name ? class_name : "");
+    snprintf(character_class, sizeof(character_class), "%s", known ? kClassKeys[class_index] : "Adventurer");
+    character_class_index = known ? class_index : -1;
     character_level = level;
     unlock_text();
 }
@@ -234,7 +239,10 @@ void boss_battle_set_character(const char *name, const char *class_name, int lev
 int boss_battle_character_text(char *out, size_t size) {
     lock_text();
     const int known = character_name[0] != 0;
-    if (known && size) snprintf(out, size, "%s - %s, level %d", character_name, character_class, character_level);
+    const char *shown = boss_battle_text_class(character_class_index);
+    if (known && size)
+        snprintf(out, size, boss_battle_text(BOSS_BATTLE_TEXT_CHARACTER), character_name, shown ? shown : character_class,
+                 character_level);
     unlock_text();
     return known;
 }
@@ -895,7 +903,7 @@ int boss_battle_pause_owned(void) {
 int boss_battle_pause_opened(char *title, size_t size) {
     const BossBattleEncounter *encounter = current_encounter();
     if (!encounter || !(boss_battle_pause_owned() || boss_battle_pause_available())) return 0;
-    snprintf(title, size, "%s", encounter->name);
+    snprintf(title, size, "%s", boss_battle_text_boss((int)(encounter - kEncounters)));
     if (!pause_owned) LOG("pause menu opened for %s", encounter->name);
     pause_owned = 1;
     return 1;
@@ -1193,6 +1201,25 @@ int boss_battle_inn_display_row(int row) {
     return row >= BOSS_BATTLE_INN_ROW && row < BOSS_BATTLE_INN_ROWS - 1 ? row + 1 : row;
 }
 
+int boss_battle_inn_layout(float x, float width, float vanilla_height, float first_center, float last_center,
+                           BossBattleInnLayout *layout) {
+    const float pitch = (last_center - first_center) / (BOSS_BATTLE_INN_ROWS - 1);
+    const float row_height = (float)(int)pitch - 1.0f;
+    if (!(pitch > 1.0f) || row_height < 1.0f || row_height > vanilla_height) return 0;
+    layout->x = x;
+    layout->width = width;
+    layout->row_height = row_height;
+    layout->pitch = pitch;
+    layout->art_scale = row_height / vanilla_height;
+    for (int row = 0; row < BOSS_BATTLE_INN_ROWS - 1; ++row) layout->center[row] = first_center + pitch * (float)row;
+    layout->center[BOSS_BATTLE_INN_ROWS - 1] = last_center;
+    return 1;
+}
+
+float boss_battle_inn_row_top(const BossBattleInnLayout *layout, int row) {
+    return layout->center[row] - layout->row_height / 2.0f;
+}
+
 int boss_battle_menu_cursor(void) {
     return s.cursor;
 }
@@ -1360,14 +1387,16 @@ static BossBattleEntry highlighted_entry(int cursor_row) {
 
 void boss_battle_screen_label(int row, char *out, size_t size) {
     const BossBattleEntry entry = boss_battle_screen_entry(row);
-    if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL) snprintf(out, size, "Fight All");
+    if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL) snprintf(out, size, "%s", boss_battle_text(BOSS_BATTLE_TEXT_FIGHT_ALL));
     else if (!boss_battle_label(boss_battle_entry_boss(entry), out, size)) snprintf(out, size, "%s", "");
 }
 
-static const char *const kStatisticNames[BOSS_BATTLE_SCREEN_BOSS_ROWS] = {"Attempts", "Wins", "Deaths",
-                                                                          "Quits", "Win Rate", "Best Time"};
-static const char *const kFightAllStatisticNames[BOSS_BATTLE_SCREEN_BOSS_ROWS] = {"Runs", "Clears", "Deaths",
-                                                                                  "Quits", "Best Progress", "Best Time"};
+static const BossBattleTextKey kStatisticNames[BOSS_BATTLE_SCREEN_BOSS_ROWS] = {
+    BOSS_BATTLE_TEXT_ATTEMPTS, BOSS_BATTLE_TEXT_WINS,     BOSS_BATTLE_TEXT_DEATHS,
+    BOSS_BATTLE_TEXT_QUITS,    BOSS_BATTLE_TEXT_WIN_RATE, BOSS_BATTLE_TEXT_BEST_TIME};
+static const BossBattleTextKey kFightAllStatisticNames[BOSS_BATTLE_SCREEN_BOSS_ROWS] = {
+    BOSS_BATTLE_TEXT_RUNS,  BOSS_BATTLE_TEXT_CLEARS,        BOSS_BATTLE_TEXT_DEATHS,
+    BOSS_BATTLE_TEXT_QUITS, BOSS_BATTLE_TEXT_BEST_PROGRESS, BOSS_BATTLE_TEXT_BEST_TIME};
 
 static void fight_all_statistic(int row, char *text, size_t size) {
     char key[160];
@@ -1397,7 +1426,7 @@ void boss_battle_screen_statistic(int row, int cursor_row, char *out, size_t siz
     char text[24] = "-";
     if (highlighted == BOSS_BATTLE_ENTRY_FIGHT_ALL) {
         fight_all_statistic(row, text, sizeof(text));
-        snprintf(out, size, "%s %s", kFightAllStatisticNames[row - 1], text);
+        snprintf(out, size, "%s %s", boss_battle_text(kFightAllStatisticNames[row - 1]), text);
         return;
     }
     if (encounter) {
@@ -1417,13 +1446,13 @@ void boss_battle_screen_statistic(int row, int cursor_row, char *out, size_t siz
             break;
         }
     }
-    snprintf(out, size, "%s %s", kStatisticNames[row - 1], text);
+    snprintf(out, size, "%s %s", boss_battle_text(kStatisticNames[row - 1]), text);
 }
 
 void boss_battle_screen_help(int cursor_row, char *out, size_t size) {
     switch (boss_battle_screen_entry(cursor_row)) {
-    case BOSS_BATTLE_ENTRY_FIGHT_ALL: snprintf(out, size, "Fight every boss in sequence."); break;
-    case BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN: snprintf(out, size, "Return to Dragon's Haven Inn."); break;
+    case BOSS_BATTLE_ENTRY_FIGHT_ALL: snprintf(out, size, "%s", boss_battle_text(BOSS_BATTLE_TEXT_FIGHT_ALL_HELP)); break;
+    case BOSS_BATTLE_ENTRY_RETURN_TO_TAVERN: snprintf(out, size, "%s", boss_battle_text(BOSS_BATTLE_TEXT_RETURN_HELP)); break;
     case BOSS_BATTLE_ENTRY_NONE: snprintf(out, size, "%s", ""); break;
     default:
         if (!boss_battle_character_text(out, size)) snprintf(out, size, "%s", "");
@@ -1455,5 +1484,6 @@ void boss_battle_reset(void) {
     notice_waiting = 0;
     character_name[0] = character_class[0] = 0;
     character_level = 0;
+    character_class_index = -1;
     unlock_text();
 }

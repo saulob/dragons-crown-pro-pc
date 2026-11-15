@@ -658,15 +658,6 @@ void LoadingScreen() {
     ImGui::End();
 }
 
-// DEBUG_SAULO: the F4 hint while a Boss Battle fight can be quit.
-void BossBattleQuitHint() {
-    const char* text = "DEBUG_SAULO  F4 Quit Boss Battle";
-    const float size = ImGui::GetFontSize() * 0.8f;
-    const ImGuiIO& io = ImGui::GetIO();
-    ImGui::GetForegroundDrawList()->AddText(ImGui::GetFont(), size, ImVec2(size, io.DisplaySize.y - size * 2.0f),
-                                            IM_COL32(255, 255, 255, 150), text);
-}
-
 void FpsCounter() {
     if (frame_ms_avg <= 0.0f) {
         return;
@@ -1097,7 +1088,7 @@ void ShowNotice(const std::string& text) {
 bool Visible() {
     const auto& s = DcpSettings::Get();
     return initialized && (loading || background_total || cheat_open || options_open || text_entry_active || choice_active ||
-                           choice_retiring || s.show_fps || PingShown() || NoticeShown() || boss_battle_quit_available());
+                           choice_retiring || s.show_fps || PingShown() || NoticeShown());
 }
 
 void SetDisplayScale(float scale) {
@@ -1194,9 +1185,6 @@ void BuildFrame(u32 width, u32 height, void (*new_frame)()) {
     }
     if (DcpSettings::Get().show_fps) {
         FpsCounter();
-    }
-    if (boss_battle_quit_available()) {
-        BossBattleQuitHint();
     }
     if (PingShown()) {
         PingCounter();

@@ -74,6 +74,9 @@ int dcp_text_language(const char *settings_file, const char *image_dir, const ch
 /* Whether the saved text_language is the port's Brazilian Portuguese translation. */
 int dcp_text_language_is_portuguese_brazil(const char *settings_file, const char *image_dir, const char *app0);
 
+/* The launcher key ("english", "brazilian_portuguese", ...) of the language dcp_text_language resolves. */
+void dcp_text_language_key(const char *settings_file, const char *image_dir, const char *app0, char *out, size_t size);
+
 typedef struct {
     uint64_t offset, size;
     const unsigned char *data;
