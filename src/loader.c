@@ -16,6 +16,7 @@
 #include "skip_intro.h"
 #include "default_message_hook.h"
 #include "gallery_unlock.h"
+#include "endgame_unlocks.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "exit_game_hook.h"
@@ -853,11 +854,13 @@ int main(int argc, char **argv) {
     const size_t early_story_stub_area = known_build && runtime_online_active() ? early_story_online_stub_bytes() : 0;
     const int online_play = runtime_online_play_enabled() || runtime_online_active();
     const size_t boss_battle_stub_area = known_build && !online_play ? boss_battle_stub_bytes() : 0;
+    const unsigned endgame_requested=endgame_unlocks_wanted(dcp_endgame_unlocks(settings_file));
+    const size_t endgame_stub_area = known_build && endgame_requested ? endgame_unlocks_stub_bytes() : 0;
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t message_stub_offset = cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
                                        ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
-                                       gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area;
+                                       gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area + endgame_stub_area;
     const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes());
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
@@ -1088,6 +1091,9 @@ int main(int argc, char **argv) {
     boss_battle_install(image,size,entry,known_build ? build_key : NULL,online_play,early_story_located ? &early_story_sites : NULL,
                         image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area,
                         boss_battle_stub_area);
+    const unsigned endgame_applied=endgame_unlocks_install(image,size,entry,known_build ? build_key : NULL,endgame_requested,
+                                                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area+boss_battle_stub_area,
+                                                           endgame_stub_area);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);
@@ -1098,7 +1104,8 @@ int main(int argc, char **argv) {
                                        default_message_stub_bytes());
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
-                                       ultrawide_effective,skip_applied,skip_intro_applied,japanese_menu_buttons && menu_buttons_applied,gallery_unlock_applied};
+                                       ultrawide_effective,skip_applied,skip_intro_applied,japanese_menu_buttons && menu_buttons_applied,gallery_unlock_applied,
+                                       endgame_applied};
     dcp_startup_phase("patches installed");
     dcp_log_settings_summary(settings_file,paths.image_dir,app0,&run_settings);
 #ifdef _WIN32

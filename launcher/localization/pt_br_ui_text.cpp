@@ -572,6 +572,10 @@ Enable Boss Battle	Ativar Batalha de Chefes
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fights there never change campaign progress. Offline only.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. As lutas ali nunca alteram o progresso da campanha. Somente offline.
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu opens. Fights there never change campaign progress. Offline only.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. Vale a partir da próxima vez que o menu da taverna abrir. As lutas ali nunca alteram o progresso da campanha. Somente offline.
 Boss Battle	Batalha de Chefes
+Unlock Labyrinth of Chaos	Desbloquear Labirinto do Caos
+Unlock Ultimate + Tower of Mirages	Desbloquear Supremo + Torre das Miragens
+Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.	Abre o Labirinto do Caos assim que os Estábulos estiverem disponíveis. Andares, recompensas e progresso continuam sendo os do próprio jogo.
+Lets the Temple change the difficulty to Ultimate as soon as the Stables are available. On Ultimate, the Stables lead to the Tower of Mirages. Nothing is marked as cleared.	Permite que o Templo mude a dificuldade para Supremo assim que os Estábulos estiverem disponíveis. No Supremo, os Estábulos levam à Torre das Miragens. Nada é marcado como concluído.
 Return to tavern	Voltar à taverna
 Attempts	Tentativas
 Return to Dragon's Haven Inn.	Volta para a Dragon's Haven Inn.

@@ -82,6 +82,7 @@ set(DCP_RUNTIME_SOURCES
     src/boss_battle_record.cpp
     src/early_story_online.c
     src/early_story_session.c
+    src/endgame_unlocks.c
     src/hydeland_town.c
     src/exit_game_hook.c
     src/exit_game_text.c
@@ -210,6 +211,10 @@ add_executable(dcp-gallery-unlock-tests EXCLUDE_FROM_ALL tests/gallery_unlock_te
 target_include_directories(dcp-gallery-unlock-tests PRIVATE src)
 target_compile_definitions(dcp-gallery-unlock-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-gallery-unlock-tests PRIVATE -Wall -Wextra -Werror)
+add_executable(dcp-endgame-unlocks-tests EXCLUDE_FROM_ALL tests/endgame_unlocks_tests.c src/endgame_unlocks.c src/guest_hook.c)
+target_include_directories(dcp-endgame-unlocks-tests PRIVATE src)
+target_compile_definitions(dcp-endgame-unlocks-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-endgame-unlocks-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c src/boss_battle_campaign.c
     src/boss_battle_hook.c src/boss_battle_record.cpp src/guest_hook.c src/hydeland_town.c)
 set_target_properties(dcp-boss-battle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)

@@ -111,6 +111,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.story_skip_offer = ParseBool(value, v.story_skip_offer);
     } else if (key == "tutorial_skip_offer") {
         v.tutorial_skip_offer = ParseBool(value, v.tutorial_skip_offer);
+    } else if (key == "unlock_labyrinth") {
+        v.unlock_labyrinth = ParseBool(value, v.unlock_labyrinth);
+    } else if (key == "unlock_ultimate_tower") {
+        v.unlock_ultimate_tower = ParseBool(value, v.unlock_ultimate_tower);
     } else if (key == "frame_rate") {
         v.frame_rate = DcpFramePacing::ParseFrameRate(value);
     } else if (const int scancode = dcp_key_from_name(value.c_str()); scancode != 0) {

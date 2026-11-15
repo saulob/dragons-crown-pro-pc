@@ -65,6 +65,9 @@ inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";
 inline constexpr char kUnlockGalleryKey[] = "unlock_gallery";
 // The Boss Battle row of the Dragon's Haven Inn menu (src/boss_battle.h); Off by default.
 inline constexpr char kEnableBossBattleKey[] = "enable_boss_battle";
+// Labyrinth of Chaos, and Ultimate with Tower of Mirages, once the Stables are open (src/endgame_unlocks.h).
+inline constexpr char kUnlockLabyrinthKey[] = "unlock_labyrinth";
+inline constexpr char kUnlockUltimateTowerKey[] = "unlock_ultimate_tower";
 // Windows, on: Play starts the game as a separate process that overlay programs can attach to (game_process.h).
 inline constexpr char kAllowOverlayProgramsKey[] = "allow_overlay_programs";
 inline constexpr char kLauncherXKey[] = "launcher_x";

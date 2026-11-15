@@ -178,7 +178,7 @@ void TestSettingsTable() {
     for (const Setting& setting : kSettings) {
         restart += setting.apply == Apply::Restart;
     }
-    Check(restart == 12 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
+    Check(restart == 14 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
               SettingOf(Id::Renderer).apply == Apply::Restart && SettingOf(Id::RenderResolution).apply == Apply::Restart &&
               SettingOf(Id::AspectRatio).apply == Apply::Restart && SettingOf(Id::TrueUltrawide).apply == Apply::Restart &&
               SettingOf(Id::JapaneseNpcVoices).apply == Apply::Restart &&
@@ -186,9 +186,11 @@ void TestSettingsTable() {
               SettingOf(Id::JapaneseMenuButtons).apply == Apply::Restart &&
               SettingOf(Id::StorySkipOffer).apply == Apply::Restart &&
               SettingOf(Id::TutorialSkipOffer).apply == Apply::Restart &&
-              SettingOf(Id::UnlockGallery).apply == Apply::Restart,
+              SettingOf(Id::UnlockGallery).apply == Apply::Restart &&
+              SettingOf(Id::UnlockLabyrinth).apply == Apply::Restart &&
+              SettingOf(Id::UnlockUltimateTower).apply == Apply::Restart,
           "the renderer, the render shape, texture filtering, the frame rate, Japanese NPC Voices, Skip Intro, the menu "
-          "buttons, the skip offers and Unlock Gallery are the settings read once");
+          "buttons, the skip offers, Unlock Gallery and the endgame unlocks are the settings read once");
     for (const Id live : {Id::DisplayMode, Id::VSync, Id::Presentation, Id::Upscaling, Id::Sharpening,
                           Id::SharpeningStrength, Id::AntiAliasing, Id::FrameRateInTitle, Id::ResolutionInTitle,
                           Id::FrameCounter}) {
@@ -435,6 +437,72 @@ void TestUnlockGallery(const fs::path& folder) {
 
 // Enable Boss Battle: one live Off/On Gameplay row, Off by default, offered only where Boss Battle is installed; F1
 // tells the runtime, which reads it each time the Inn builds its menu.
+// The endgame unlocks: two independent restart-required Off/On Gameplay rows after Enable Boss Battle, on every build,
+// saved under the launcher's keys and read once by the loader.
+void TestEndgameUnlocks(const fs::path& folder) {
+    using namespace DcpOptions;
+    size_t labyrinth = 0, ultimate = 0, boss = 0, position = 0;
+    int rows = 0;
+    for (const Setting& setting : kSettings) {
+        rows += std::string(setting.label) == "Unlock Labyrinth of Chaos" ||
+                std::string(setting.label) == "Unlock Ultimate + Tower of Mirages";
+        if (setting.page != Page::Gameplay) continue;
+        labyrinth = setting.id == Id::UnlockLabyrinth ? position : labyrinth;
+        ultimate = setting.id == Id::UnlockUltimateTower ? position : ultimate;
+        boss = setting.id == Id::EnableBossBattle ? position : boss;
+        ++position;
+    }
+    Check(rows == 2 && labyrinth == boss + 1 && ultimate == labyrinth + 1,
+          "the endgame unlocks are two Gameplay rows right after Enable Boss Battle");
+    for (const Id id : {Id::UnlockLabyrinth, Id::UnlockUltimateTower}) {
+        const Setting& setting = SettingOf(id);
+        Check(setting.apply == Apply::Restart && setting.choices.size() == 2 && setting.feature == 0,
+              "each is a restart-required Off/On offered on every build");
+        Check(Current(DcpSettings::Values{}, id) == "0", "each is Off by default");
+    }
+    Check(std::string(SettingOf(Id::UnlockLabyrinth).key) == "unlock_labyrinth" &&
+              std::string(SettingOf(Id::UnlockUltimateTower).key) == "unlock_ultimate_tower" &&
+              Contains(Source("launcher/settings.h"), "kUnlockLabyrinthKey[] = \"unlock_labyrinth\";") &&
+              Contains(Source("launcher/settings.h"), "kUnlockUltimateTowerKey[] = \"unlock_ultimate_tower\";") &&
+              Contains(Source("launcher/settings.cpp"), "{kUnlockLabyrinthKey, \"0\"}") &&
+              Contains(Source("launcher/settings.cpp"), "{kUnlockUltimateTowerKey, \"0\"}"),
+          "the keys and the Off defaults are the launcher's");
+
+    const fs::path file = folder / "endgame.ini";
+    WriteFile(file, "# keep\nfuture_setting = 1\n");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    live.unlock_labyrinth = false;
+    live.unlock_ultimate_tower = false;
+    Options options(live);
+    const Outcome outcome = options.Choose(Id::UnlockLabyrinth, "1");
+    Check(outcome.changed && outcome.saved && options.Pending(Id::UnlockLabyrinth) && options.RestartPending() &&
+              !options.Pending(Id::UnlockUltimateTower),
+          "Unlock Labyrinth of Chaos waits for the restart and leaves Ultimate + Tower alone");
+    Check(!live.unlock_labyrinth && options.Shown(Id::UnlockLabyrinth) == "1" && options.Shown(Id::UnlockUltimateTower) == "0",
+          "the running game keeps its values");
+    const std::string text = ReadAll(file);
+    Check(Contains(text, "unlock_labyrinth = 1\n") && !Contains(text, "unlock_ultimate_tower") && Contains(text, "# keep\n"),
+          "only the chosen key is saved and the rest of the file is kept");
+    DcpSettings::Values restarted;
+    Check(DcpSettings::Read(file.string(), restarted) && restarted.unlock_labyrinth && !restarted.unlock_ultimate_tower,
+          "a restart reads Labyrinth on and Ultimate + Tower off");
+
+    WriteFile(file, "unlock_ultimate_tower = 1\n");
+    DcpSettings::Values tower;
+    Check(DcpSettings::Read(file.string(), tower) && tower.unlock_ultimate_tower && !tower.unlock_labyrinth,
+          "Ultimate + Tower on does not turn the Labyrinth setting on");
+
+    DcpSettings::Values untouched;
+    ApplyLive(untouched, Id::UnlockLabyrinth, "1");
+    ApplyLive(untouched, Id::UnlockUltimateTower, "1");
+    Check(!untouched.unlock_labyrinth && !untouched.unlock_ultimate_tower, "nothing applies them live");
+    Check(Contains(Source("src/loader.c"), "endgame_unlocks_wanted(dcp_endgame_unlocks(settings_file))") &&
+              !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "unlock_labyrinth") &&
+              !Contains(Source("gpu/shim/dcp_options_menu.cpp"), "unlock_ultimate_tower"),
+          "the loader reads them once; the menu only saves them");
+}
+
 void TestEnableBossBattle(const fs::path& folder) {
     using namespace DcpOptions;
     int rows = 0;
@@ -1289,6 +1357,7 @@ int main() {
     TestJapaneseMenuButtons(folder);
     TestControllerRumble(folder);
     TestEnableBossBattle(folder);
+    TestEndgameUnlocks(folder);
     TestLauncherParity();
     TestRendererRow(folder);
     TestRenderShapeRows(folder);

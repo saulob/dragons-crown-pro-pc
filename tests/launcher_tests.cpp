@@ -997,6 +997,8 @@ void TestDefaultsAgree() {
     CHECK(launcher_default(kShowFpsTitleKey) == flag(game.show_fps_title));
     CHECK(launcher_default(kShowResolutionTitleKey) == flag(game.show_resolution_title));
     CHECK(launcher_default(kShowFrameCounterKey) == flag(game.show_fps));
+    CHECK(launcher_default(kUnlockLabyrinthKey) == flag(game.unlock_labyrinth) && !game.unlock_labyrinth);
+    CHECK(launcher_default(kUnlockUltimateTowerKey) == flag(game.unlock_ultimate_tower) && !game.unlock_ultimate_tower);
     // 0 is "the loader's size", 1920 x 1080 (src/loader.c), the launcher's default.
     CHECK(game.requested_width == 0 && launcher_default(kWindowWidthKey) == "1920");
     CHECK(game.requested_height == 0 && launcher_default(kWindowHeightKey) == "1080");
@@ -2225,6 +2227,49 @@ void TestEarlyStoryOnlineSetting(const fs::path& base) {
     }
 }
 
+// The endgame unlocks: two managed Off-by-default keys, read independently by the loader, offered on every build's
+// Gameplay page after Enable Boss Battle.
+void TestEndgameUnlockSettings(const fs::path& base) {
+    const fs::path file = base / "endgame_unlocks" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += (setting.key == kUnlockLabyrinthKey || setting.key == kUnlockUltimateTowerKey) && setting.default_value == "0";
+    }
+    CHECK(managed == 2 && std::string(kUnlockLabyrinthKey) == "unlock_labyrinth" &&
+          std::string(kUnlockUltimateTowerKey) == "unlock_ultimate_tower");
+    CHECK(dcp_endgame_unlocks(nullptr) == 0u && dcp_endgame_unlocks(file.string().c_str()) == 0u);
+    WriteAll(file, "unlock_labyrinth = 1\n");
+    CHECK(dcp_endgame_unlocks(file.string().c_str()) == 1u);
+    WriteAll(file, "unlock_ultimate_tower = 1\n");
+    CHECK(dcp_endgame_unlocks(file.string().c_str()) == 2u);
+    WriteAll(file, "unlock_labyrinth = 1\nunlock_ultimate_tower = 1\n");
+    CHECK(dcp_endgame_unlocks(file.string().c_str()) == 3u);
+    WriteAll(file, "unlock_labyrinth = banana\nunlock_ultimate_tower = 0\n");
+    CHECK(dcp_endgame_unlocks(file.string().c_str()) == 0u);
+    {
+        LauncherSettings settings(file);
+        settings.ResetToDefaults();
+        CHECK(settings.Save());
+        CHECK(dcp_endgame_unlocks(file.string().c_str()) == 0u && dcp_enable_boss_battle(file.string().c_str()) == 0);
+    }
+
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t page = launcher.find("void PageGameplay(trg::Ui& ui) {");
+    const size_t boss = launcher.find("ui.Toggle(\"Enable Boss Battle\"", page);
+    const size_t labyrinth = launcher.find("        ui.Toggle(\"Unlock Labyrinth of Chaos\", kUnlockLabyrinthHelp, "
+                                           "kUnlockLabyrinthKey, false, \"Off\", \"On\");", page);
+    const size_t ultimate = launcher.find("        ui.Toggle(\"Unlock Ultimate + Tower of Mirages\", kUnlockUltimateTowerHelp, "
+                                          "kUnlockUltimateTowerKey, false, \"Off\", \"On\");", page);
+    CHECK(page != std::string::npos && boss != std::string::npos && labyrinth != std::string::npos &&
+          ultimate != std::string::npos && boss < labyrinth && labyrinth < ultimate &&
+          ultimate < launcher.find("ui.Toggle(\"Allow overlay programs\"", page));
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("endgame_unlocks_wanted(dcp_endgame_unlocks(settings_file))") != std::string::npos);
+    CHECK(loader.find("endgame_unlocks_install(image,size,entry,known_build ? build_key : NULL,endgame_requested,") !=
+          std::string::npos);
+}
+
 // Enable Boss Battle: a managed Off-by-default key, read by the loader, offered on the Gameplay page for the USA 1.00 build.
 void TestEnableBossBattleSettings(const fs::path& base) {
     const fs::path file = base / "enable_boss_battle" / "dcp.ini";
@@ -3067,7 +3112,7 @@ void TestSettingsSummary(const fs::path& base) {
                            "frame_rate = 120\nshow_fps = 1\ntrue_ultrawide = 1\ndcp_japanese_npc_voices = 1\n"
                            "arachnophobia_safe_mode = 1\nstory_skip_offer = 1\ntutorial_skip_offer = 1\n";
     const LauncherSettings settings(file);
-    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u, 0, 0, 1};
+    const DcpRunSettings run = {kUs.label, 1, 2560, 1080, "native", "21:9 Ultrawide", 0, 1u, 0, 0, 1, 2u};
     const std::string text = SettingsSummary(settings, &kUs, TextLanguagesOf(&kUs), &run);
     const auto has = [&](const std::string& part) { return text.find(part) != std::string::npos; };
     CHECK(has("Settings: Dragon's Crown Pro PC v" + net::port_version() + ", " + net::host_platform() + ", online protocol " +
@@ -3077,6 +3122,7 @@ void TestSettingsSummary(const fs::path& base) {
     CHECK(has("Settings: Render resolution 2560x1080 (native), aspect ratio 21:9 Ultrawide, True Ultrawide off (requested on)\n"));
     CHECK(has("Settings: Menu & Subtitles English, Japanese NPC Voices on, Arachnophobia Safe Mode on\n"));
     CHECK(has("Settings: Skip Intro off, Japanese Menu Buttons off, Story Skip Offer on, Tutorial Skip Offer off, Unlock Gallery on,"));
+    CHECK(has(", Boss Battle off, Unlock Labyrinth of Chaos off, Unlock Ultimate + Tower of Mirages on, overlay programs "));
     for (const char* secret : {"SecretName", "friend", "Friend", "account", "secret", "token", "DCP_DASHBOARD_TOKEN", "lobby"}) {
         CHECK(!has(secret));
     }
@@ -3087,6 +3133,7 @@ void TestSettingsSummary(const fs::path& base) {
     CHECK(offline.find("game build not a supported build\n") != std::string::npos);
     CHECK(offline.find("Settings: Window Windowed, frame rate 60 FPS (Original), frame counter off,") != std::string::npos);
     CHECK(offline.find("True Ultrawide requested off\n") != std::string::npos);
+    CHECK(offline.find("Unlock Labyrinth of Chaos off, Unlock Ultimate + Tower of Mirages off") != std::string::npos);
     CHECK(offline.find("Japanese NPC Voices unsupported") != std::string::npos);
     if (!std::getenv("DCP_ONLINE")) CHECK(offline.find("Settings: Online Play off\n") != std::string::npos);
 }
@@ -8474,6 +8521,7 @@ int main(int argc, char** argv) {
     TestControllerRumbleSettings(base);
     TestUnlockGallerySettings(base);
     TestEnableBossBattleSettings(base);
+    TestEndgameUnlockSettings(base);
     TestEarlyStoryOnlineSetting(base);
     TestJapaneseMenuButtonsSettings(base);
     TestPinnedBuild(base);

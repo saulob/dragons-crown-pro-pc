@@ -219,7 +219,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Renderer, Render resolution (builds that support it), Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
 | Gameplay | Enable Boss Battle (builds that support it, Online Play off) | the next time the Inn menu opens |
-| Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery | saved now, applies at the next start |
+| Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery, Unlock Labyrinth of Chaos, Unlock Ultimate + Tower of Mirages | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | Controller Rumble | at once |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
@@ -268,6 +268,7 @@ use the same defaults).
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `unlock_gallery` | 1, 0 | 0 | at game start |
 | `enable_boss_battle` | 1, 0 | 0 | at game start; F1 changes it the next time the Inn menu opens |
+| `unlock_labyrinth`, `unlock_ultimate_tower` | 1, 0 | 0 | at game start |
 | `allow_overlay_programs` | 1, 0 | 0 | at Play (Windows only) |
 | `cheat_infinite_health`, `_ally_health`, `_mana`, `_ally_mana`, `_lives`, `_durability`, `_ally_durability`, `_arrows`, `_skill_points`, `_skill_uses`, `_gold` | 1, 0 | 0 | at game start (F10 changes the session only) |
 | `cheat_movement_speed` | 1 (Off), 2, 4 | 1 | at game start (F10 changes the session only) |
@@ -569,6 +570,19 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   clears, deaths, quits, best progress and best time (an older
   `boss_battle_progress.dat` is no longer read). Offline only, and only for the USA 1.00 build. The F1 Options menu changes it the next time the
   Inn menu opens.
+- **Unlock Labyrinth of Chaos** and **Unlock Ultimate + Tower of Mirages** (Gameplay page, after Enable Boss Battle):
+  two independent options, Off by default (`unlock_labyrinth`, `unlock_ultimate_tower`; `DCP_UNLOCK_LABYRINTH` and
+  `DCP_UNLOCK_ULTIMATE_TOWER` override them). Neither does anything until the character's own story has opened the
+  Stables, by playing or through the game's Story Skip. From then on, Unlock Labyrinth of Chaos answers the game's own
+  Labyrinth check, so the Stables list the Labyrinth from its first floor with the game's floors, rewards and saves.
+  Unlock Ultimate + Tower of Mirages lets the Temple offer the game's own "Change difficulty to Ultimate" prayer (and
+  "Change difficulty to Normal" while the character is on Ultimate); on Ultimate the game's Labyrinth entry is the
+  Tower of Mirages, so that option also opens it, and only then. Nothing is marked as cleared; what the character earns
+  is saved by the game as usual. The difficulty the Temple sets is the game's own saved choice: a character left on
+  Ultimate stays on it after the option is turned Off, so change back to Normal at the Temple first. Every site is
+  checked byte for byte and nothing is written on a mismatch; the log shows
+  `Endgame unlocks: Labyrinth on|off, Ultimate + Tower on|off, after the Stables open (<build>)`. Changing them in the F1
+  Options menu needs a restart.
 - **Allow overlay programs**: Off / On (`allow_overlay_programs`, Off by default; Windows only, hidden elsewhere). For
   recording, chat, store and performance overlays and other tools that inject into games. On, PLAY starts the game as a
   separate process from the launcher (see Architecture), so these tools attach to a clean game process. Off keeps the

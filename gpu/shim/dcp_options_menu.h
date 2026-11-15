@@ -166,6 +166,8 @@ enum class Id {
     TutorialSkipOffer,
     UnlockGallery,
     EnableBossBattle,
+    UnlockLabyrinth,
+    UnlockUltimateTower,
 };
 
 struct Setting {
@@ -239,6 +241,13 @@ inline constexpr Setting kSettings[] = {
      "Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu "
      "opens. Fights there never change campaign progress. Offline only.",
      Apply::Live, kOffOn, DcpSettings::BossBattle},
+    {Id::UnlockLabyrinth, Page::Gameplay, "unlock_labyrinth", "Unlock Labyrinth of Chaos",
+     "Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.",
+     Apply::Restart, kOffOn},
+    {Id::UnlockUltimateTower, Page::Gameplay, "unlock_ultimate_tower", "Unlock Ultimate + Tower of Mirages",
+     "Lets the Temple change the difficulty to Ultimate as soon as the Stables are available. On Ultimate, the Stables "
+     "lead to the Tower of Mirages. Nothing is marked as cleared.",
+     Apply::Restart, kOffOn},
 };
 
 constexpr const Setting& SettingOf(Id id) {
@@ -296,6 +305,8 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::TutorialSkipOffer: return flag(v.tutorial_skip_offer);
     case Id::UnlockGallery: return flag(v.unlock_gallery);
     case Id::EnableBossBattle: return flag(v.enable_boss_battle);
+    case Id::UnlockLabyrinth: return flag(v.unlock_labyrinth);
+    case Id::UnlockUltimateTower: return flag(v.unlock_ultimate_tower);
     }
     return {};
 }
@@ -332,7 +343,9 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::FrameRate:
     case Id::StorySkipOffer:
     case Id::TutorialSkipOffer:
-    case Id::UnlockGallery: break;
+    case Id::UnlockGallery:
+    case Id::UnlockLabyrinth:
+    case Id::UnlockUltimateTower: break;
     }
 }
 

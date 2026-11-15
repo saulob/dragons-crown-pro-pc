@@ -176,6 +176,11 @@ constexpr char kUnlockGalleryHelp[] = "Unlocks all Gallery content while enabled
 constexpr char kEnableBossBattleHelp[] =
     "Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fights there never change campaign "
     "progress. Offline only.";
+constexpr char kUnlockLabyrinthHelp[] =
+    "Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.";
+constexpr char kUnlockUltimateTowerHelp[] =
+    "Lets the Temple change the difficulty to Ultimate as soon as the Stables are available. On Ultimate, the Stables "
+    "lead to the Tower of Mirages. Nothing is marked as cleared.";
 constexpr char kAllowOverlayProgramsHelp[] =
     "For programs that draw over games (recording, chat, store and performance overlays). On, PLAY starts the game as a "
     "separate program from this launcher, so they can attach to it cleanly. Off starts the game the usual way.";
@@ -1067,6 +1072,8 @@ private:
         if (BossBattleAvailable(build_)) {
             ui.Toggle("Enable Boss Battle", kEnableBossBattleHelp, kEnableBossBattleKey, false, "Off", "On");
         }
+        ui.Toggle("Unlock Labyrinth of Chaos", kUnlockLabyrinthHelp, kUnlockLabyrinthKey, false, "Off", "On");
+        ui.Toggle("Unlock Ultimate + Tower of Mirages", kUnlockUltimateTowerHelp, kUnlockUltimateTowerKey, false, "Off", "On");
         if (kSeparateGameProcessAvailable) {
             ui.Toggle("Allow overlay programs", kAllowOverlayProgramsHelp, kAllowOverlayProgramsKey, false, "Off", "On");
         }
