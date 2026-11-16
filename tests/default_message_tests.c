@@ -1,6 +1,6 @@
-/* Focused tests of the translated character message preview: the class and category records, the preview that writes nothing,
- * the pick that commits what was previewed, the callers it must leave alone, and the all-or-nothing install on synthetic
- * and local boot images (read only). */
+/* Focused tests of the translated character messages: the class and category records, the preview that writes nothing,
+ * the pick that commits what was previewed, the callers it must leave alone, the stored defaults shown translated without
+ * touching the character, and the all-or-nothing install on synthetic and local boot images (read only). */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +63,21 @@ static void put_call(unsigned char *image, uint64_t at, uint64_t target) {
     memcpy(image + at + 1, &displacement, 4);
 }
 
+static void put_loads(unsigned char *image, uint64_t at, int32_t field) {
+    static const unsigned char first[] = {0xc5, 0xfc, 0x10, 0x87}, second[] = {0xc5, 0xfc, 0x10, 0x8f};
+    const int32_t later = field + 0x1c;
+    put(image, at, first, 4);
+    put(image, at + 4, &field, 4);
+    put(image, at + 8, second, 4);
+    put(image, at + 12, &later, 4);
+}
+
+static void put_getter(unsigned char *image, uint64_t getter, int stored_index) {
+    const int32_t field = 0x1f70 + stored_index * 0x78;
+    put_loads(image, getter + 0x38, field);
+    put_loads(image, getter + 0x8c, field + 0x3c);
+}
+
 static void put_row(unsigned char *image, uint64_t block, uint64_t getter, int call_to_jump, uint64_t label) {
     static const unsigned char load[] = {0x48, 0x8b, 0xbd, 0x98, 0xfc, 0xff, 0xff};
     static const unsigned char pattern[] = {0x48, 0x8d, 0xb5, 0x38, 0xfd, 0xff, 0xff, 0x8b, 0x00,
@@ -100,11 +115,21 @@ static void synthetic_image(unsigned char *image) {
     put_row(image, kRows + 0x200, 0x900, 20, kRows + 0x300);
     put_row(image, kRows + 0x400, 0x880, 20, kRows + 0x500);
     put_row(image, kRows + 0x600, 0x810, 20, kRows + 0x700);
+    put_getter(image, 0xa00, 3); /* greeting, selection, resurrection, death: the order the character stores them in is reversed */
+    put_getter(image, 0x900, 2);
+    put_getter(image, 0x880, 1);
+    put_getter(image, 0x810, 0);
 }
 
 static const char *numbered_text(unsigned record) {
     static char text[32];
     snprintf(text, sizeof(text), "Sa\xC3\xBA" "de %u", record);
+    return text;
+}
+
+static const char *native_text(unsigned record) {
+    static char text[32];
+    snprintf(text, sizeof(text), "\xE3\x81\x8A\xE9\xA1\x98 %u", record);
     return text;
 }
 
@@ -258,6 +283,130 @@ static void test_preview_and_commit(unsigned char *image, const DefaultMessageSi
     CHECK(regs.rax == 77);
 }
 
+static size_t decode(const char *text, uint16_t *units) {
+    const unsigned char *in = (const unsigned char *)text;
+    size_t count = 0;
+    while (*in) {
+        unsigned unit = *in++;
+        int continuation = unit < 0x80 ? 0 : (unit & 0xe0) == 0xc0 ? 1 : 2;
+        if (continuation) unit &= 0x3f >> continuation;
+        for (; continuation; --continuation) unit = unit << 6 | (*in++ & 0x3f);
+        units[count++] = (uint16_t)unit;
+    }
+    return count;
+}
+
+static size_t field_of(DefaultMessageCategory category, int alternate) {
+    static const int stored_index[DEFAULT_MESSAGE_CATEGORIES] = {3, 2, 1, 0};
+    return 0x1f70 + (size_t)stored_index[category] * 0x78 + (alternate ? 0x3c : 0);
+}
+
+static void keep(int character_class, DefaultMessageCategory category, int alternate, const char *text) {
+    memset(character, 0, sizeof(character));
+    character[0x27] = (unsigned char)character_class;
+    if (alternate) character[0x21a8] = 0x80;
+    uint16_t units[DEFAULT_MESSAGE_MAX_UNITS + 2] = {0};
+    const size_t count = decode(text, units);
+    memcpy(character + field_of(category, alternate), units, count * sizeof(uint16_t));
+}
+
+/* What the getter would copy: it loads the character's message block from rdi, wherever the hook left rdi. */
+static int shows(const GuestRegs *regs, DefaultMessageCategory category, int alternate, const char *text) {
+    uint16_t expected[DEFAULT_MESSAGE_MAX_UNITS + 2] = {0}, seen[DEFAULT_MESSAGE_MAX_UNITS + 2] = {0};
+    const size_t count = decode(text, expected);
+    memcpy(seen, (const void *)(uintptr_t)(regs->rdi + field_of(category, alternate)), DEFAULT_MESSAGE_MAX_UNITS * sizeof(uint16_t));
+    return !memcmp(seen, expected, (count + 1) * sizeof(uint16_t)) || (count >= DEFAULT_MESSAGE_MAX_UNITS &&
+                                                                      !memcmp(seen, expected, DEFAULT_MESSAGE_MAX_UNITS * sizeof(uint16_t)));
+}
+
+static int unchanged_by_display(DefaultMessageCategory category, int alternate) {
+    static unsigned char before[kCharacterSize];
+    memcpy(before, character, sizeof(before));
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = (uint64_t)(uintptr_t)character;
+    default_message_display(&regs, category, alternate);
+    return regs.rdi == (uint64_t)(uintptr_t)character && !memcmp(before, character, sizeof(before));
+}
+
+static void test_stored_defaults(void) {
+    for (int alternate = 0; alternate < 2; ++alternate) {
+        for (int c = 0; c < DEFAULT_MESSAGE_CLASSES; ++c) {
+            for (int k = 0; k < DEFAULT_MESSAGE_CATEGORIES; ++k) {
+                for (int v = 0; v < DEFAULT_MESSAGE_VARIANTS; ++v) {
+                    const unsigned record = (unsigned)default_message_record(c, (DefaultMessageCategory)k, v);
+                    keep(c, (DefaultMessageCategory)k, alternate, native_text(record));
+                    static unsigned char before[kCharacterSize];
+                    memcpy(before, character, sizeof(before));
+                    GuestRegs regs;
+                    memset(&regs, 0, sizeof(regs));
+                    regs.rdi = (uint64_t)(uintptr_t)character;
+                    default_message_display(&regs, (DefaultMessageCategory)k, alternate);
+                    CHECK(shows(&regs, (DefaultMessageCategory)k, alternate, numbered_text(record)));
+                    CHECK(!memcmp(before, character, sizeof(before))); /* the character keeps what it stored */
+                }
+            }
+        }
+    }
+    printf("  every class, category and variant: the stored native default is shown translated, in both blocks\n");
+
+    const char *native = native_text((unsigned)default_message_record(4, DEFAULT_MESSAGE_DEATH, 7));
+    char custom[64];
+    const char *kept[] = {"\xE3\x81\x8A\xE9\xA1\x98", "", "x", numbered_text((unsigned)default_message_record(4, DEFAULT_MESSAGE_DEATH, 7)),
+                          "Don't turn me into a skeleton!", "Sa\xC3\xBA" "de 1"};
+    for (size_t i = 0; i < sizeof(kept) / sizeof(*kept); ++i) {
+        keep(4, DEFAULT_MESSAGE_DEATH, 0, kept[i]);
+        CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0)); /* custom text, whatever language it is in */
+    }
+    snprintf(custom, sizeof(custom), "%s!", native);
+    keep(4, DEFAULT_MESSAGE_DEATH, 0, custom);
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0)); /* a default with something added */
+    snprintf(custom, sizeof(custom), "%.*s", (int)strlen(native) - 1, native);
+    keep(4, DEFAULT_MESSAGE_DEATH, 0, custom);
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0)); /* a default with one character gone */
+    snprintf(custom, sizeof(custom), "x%s", native);
+    keep(4, DEFAULT_MESSAGE_DEATH, 0, custom);
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0)); /* a default inside a longer text */
+    keep(4, DEFAULT_MESSAGE_DEATH, 0, native_text(1)); /* a number that is no default */
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0));
+
+    keep(3, DEFAULT_MESSAGE_DEATH, 0, native); /* another class's default */
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0));
+    keep(4, DEFAULT_MESSAGE_GREETING, 0, native); /* another category's default in this category's field */
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_GREETING, 0));
+    keep(4, DEFAULT_MESSAGE_DEATH, 0, native); /* the default in the block that is not the one read */
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 1));
+    character[0x27] = 6;
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0));
+    character[0x27] = 0xff;
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0));
+    GuestRegs none;
+    memset(&none, 0, sizeof(none));
+    default_message_display(&none, DEFAULT_MESSAGE_DEATH, 0);
+    CHECK(none.rdi == 0);
+    memset(&none, 0, sizeof(none));
+    none.rdi = 1;
+    default_message_display(&none, DEFAULT_MESSAGE_CATEGORIES, 0);
+    CHECK(none.rdi == 1);
+
+    /* Thirty units with no terminator are read whole. */
+    uint16_t full[DEFAULT_MESSAGE_MAX_UNITS];
+    for (int i = 0; i < DEFAULT_MESSAGE_MAX_UNITS; ++i) full[i] = (uint16_t)('a' + i % 26);
+    character[0x27] = 4;
+    memcpy(character + field_of(DEFAULT_MESSAGE_DEATH, 0), full, sizeof(full));
+    CHECK(unchanged_by_display(DEFAULT_MESSAGE_DEATH, 0));
+}
+
+/* No stored default is shown translated: the previews alone, or nothing installed. */
+static void test_stored_untouched(void) {
+    for (int c = 0; c < DEFAULT_MESSAGE_CLASSES; ++c) {
+        for (int k = 0; k < DEFAULT_MESSAGE_CATEGORIES; ++k) {
+            keep(c, (DefaultMessageCategory)k, 0, native_text((unsigned)default_message_record(c, (DefaultMessageCategory)k, 3)));
+            CHECK(unchanged_by_display((DefaultMessageCategory)k, 0));
+        }
+    }
+}
+
 static void test_synthetic_install(void) {
     unsigned char *memory = malloc(kImageSize + kStubArea);
     CHECK(memory != NULL);
@@ -272,14 +421,17 @@ static void test_synthetic_install(void) {
     CHECK(sites.rows[0] == kRows + 0x100 + 0x13 + 7 && sites.rows[3] == kRows + 0x700 + 0x13 + 7);
     CHECK(sites.pick == kPicker + 0xb0 && sites.picker_return == kDefaults + 0xc5);
 
-    CHECK(!default_message_install(memory, kImageSize, 0, missing_text, memory + kImageSize, kStubArea));
+    CHECK(sites.stored[0][0] == 0xa00 + 0x38 && sites.stored[0][1] == 0xa00 + 0x8c);
+    CHECK(sites.stored[1][0] == 0x900 + 0x38 && sites.stored[2][0] == 0x880 + 0x38 && sites.stored[3][1] == 0x810 + 0x8c);
+
+    CHECK(!default_message_install(memory, kImageSize, 0, missing_text, native_text, memory + kImageSize, kStubArea));
     CHECK(!memcmp(memory, copy, kImageSize));
-    CHECK(!default_message_install(memory, kImageSize, 0, numbered_text, memory + kImageSize, 8));
+    CHECK(!default_message_install(memory, kImageSize, 0, numbered_text, native_text, memory + kImageSize, 8));
     CHECK(!memcmp(memory, copy, kImageSize));
 
     memory[0x100] ^= 1; /* the record tables moved */
     CHECK(!default_message_locate(memory, kImageSize, &sites));
-    CHECK(!default_message_install(memory, kImageSize, 0, numbered_text, memory + kImageSize, kStubArea));
+    CHECK(!default_message_install(memory, kImageSize, 0, numbered_text, native_text, memory + kImageSize, kStubArea));
     memory[0x100] ^= 1;
     memory[kDefaults + 0xc6] ^= 1; /* no call from the character defaults */
     CHECK(!default_message_locate(memory, kImageSize, &sites));
@@ -294,12 +446,37 @@ static void test_synthetic_install(void) {
 
     CHECK(default_message_locate(memory, kImageSize, &sites));
     const DefaultMessageSites located = sites;
-    CHECK(default_message_install(memory, kImageSize, 0, numbered_text, memory + kImageSize, kStubArea));
+    CHECK(default_message_install(memory, kImageSize, 0, numbered_text, native_text, memory + kImageSize, kStubArea));
     CHECK(memory[located.rows[0]] == 0xe9 && memory[located.pick] == 0xe9);
+    for (int category = 0; category < DEFAULT_MESSAGE_CATEGORIES; ++category) {
+        CHECK(memory[located.stored[category][0]] == 0xe9 && memory[located.stored[category][1]] == 0xe9);
+    }
     test_preview_and_commit(memory, &located);
+    test_stored_defaults();
 
     memcpy(memory, copy, kImageSize);
-    CHECK(default_message_install(memory, kImageSize, 0, long_text, memory + kImageSize, kStubArea));
+    CHECK(default_message_install(memory, kImageSize, 0, numbered_text, NULL, memory + kImageSize, kStubArea));
+    CHECK(memory[located.rows[0]] == 0xe9 && memory[located.stored[0][0]] == copy[located.stored[0][0]]);
+    test_stored_untouched();
+
+    memcpy(memory, copy, kImageSize);
+    memory[0x810 + 0x38 + 4] ^= 1; /* a getter that does not load where the character keeps its message */
+    CHECK(default_message_locate(memory, kImageSize, &sites) && !sites.stored[0][0] && !sites.stored[3][1]);
+    CHECK(default_message_install(memory, kImageSize, 0, numbered_text, native_text, memory + kImageSize, kStubArea));
+    CHECK(memory[sites.rows[0]] == 0xe9 && memory[0xa00 + 0x38] == copy[0xa00 + 0x38]);
+    test_stored_untouched();
+    memcpy(memory, copy, kImageSize);
+    put_loads(memory, 0x900 + 0x60, 0x1f70 + 2 * 0x78 + 0x3c); /* a second load of the same block */
+    CHECK(default_message_locate(memory, kImageSize, &sites) && !sites.stored[0][0]); /* two loads of one block: ambiguous */
+
+    memcpy(memory, copy, kImageSize);
+    CHECK(default_message_install(memory, kImageSize, 0, numbered_text, native_text, memory + kImageSize,
+                                  (DEFAULT_MESSAGE_CATEGORIES + 1) * guest_hook_stub_size()));
+    CHECK(memory[located.rows[0]] == 0xe9 && memory[located.stored[0][0]] == copy[located.stored[0][0]]); /* room for the previews only */
+    test_stored_untouched();
+
+    memcpy(memory, copy, kImageSize);
+    CHECK(default_message_install(memory, kImageSize, 0, long_text, NULL, memory + kImageSize, kStubArea));
     memset(character, 0, sizeof(character));
     const ReadText *row = previewed(2, DEFAULT_MESSAGE_GREETING);
     CHECK(row && row->size == DEFAULT_MESSAGE_MAX_UNITS && row->data[DEFAULT_MESSAGE_MAX_UNITS] == 0);
@@ -340,13 +517,13 @@ static unsigned char *boot_image(const char *folder, uint64_t *size) {
 
 static const struct {
     const char *folder;
-    uint64_t rows[DEFAULT_MESSAGE_CATEGORIES], pick, picker_return;
+    uint64_t rows[DEFAULT_MESSAGE_CATEGORIES], pick, picker_return, greeting_getter;
 } kRealBuilds[] = {
-    {"v1.03", {0x3a1346, 0x3a13b7, 0x3a1462, 0x3a150d}, 0x4a2a0, 0x87ee5},
-    {"CUSA07001-1.00", {0x3a07a6, 0x3a0817, 0x3a08aa, 0x3a093d}, 0x49bf0, 0x875c5},
-    {"CUSA07001-1.02", {0x3a0be6, 0x3a0c57, 0x3a0cea, 0x3a0d7d}, 0x49c70, 0x87865},
-    {"CUSA07001-1.03", {0x3a0c36, 0x3a0ca7, 0x3a0d3a, 0x3a0dcd}, 0x49c70, 0x87865},
-    {"CUSA10209-1.00", {0x3a0916, 0x3a0987, 0x3a0a1a, 0x3a0aad}, 0x49cb0, 0x87735},
+    {"v1.03", {0x3a1346, 0x3a13b7, 0x3a1462, 0x3a150d}, 0x4a2a0, 0x87ee5, 0x84c40},
+    {"CUSA07001-1.00", {0x3a07a6, 0x3a0817, 0x3a08aa, 0x3a093d}, 0x49bf0, 0x875c5, 0x84320},
+    {"CUSA07001-1.02", {0x3a0be6, 0x3a0c57, 0x3a0cea, 0x3a0d7d}, 0x49c70, 0x87865, 0x845c0},
+    {"CUSA07001-1.03", {0x3a0c36, 0x3a0ca7, 0x3a0d3a, 0x3a0dcd}, 0x49c70, 0x87865, 0x845c0},
+    {"CUSA10209-1.00", {0x3a0916, 0x3a0987, 0x3a0a1a, 0x3a0aad}, 0x49cb0, 0x87735, 0x84490},
 };
 
 static void test_real_images(void) {
@@ -361,8 +538,12 @@ static void test_real_images(void) {
         CHECK(default_message_locate(image, size, &sites));
         CHECK(!memcmp(sites.rows, kRealBuilds[i].rows, sizeof(sites.rows)));
         CHECK(sites.pick == kRealBuilds[i].pick && sites.picker_return == kRealBuilds[i].picker_return);
-        CHECK(default_message_install(image, size, 0, numbered_text, image + size, kStubArea));
-        printf("  %s: rows, pick and records located\n", kRealBuilds[i].folder);
+        for (int category = 0; category < DEFAULT_MESSAGE_CATEGORIES; ++category) {
+            const uint64_t getter = kRealBuilds[i].greeting_getter - 0xb0u * (unsigned)category;
+            CHECK(sites.stored[category][0] == getter + 0x38 && sites.stored[category][1] == getter + 0x8c);
+        }
+        CHECK(default_message_install(image, size, 0, numbered_text, native_text, image + size, kStubArea));
+        printf("  %s: rows, pick, stored message getters and records located\n", kRealBuilds[i].folder);
         free(image);
     }
 }

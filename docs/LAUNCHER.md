@@ -419,8 +419,13 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   The DefaultBone character messages are translated too. While a character is being created, an empty message row
   shows the default it will receive (src/default_message_hook.c): the variant previewed for a class is held and given
   to the game's one pick when the character is added, so the saved text is the previewed one. The guest's random
-  number is still drawn once, nothing is written before the character is added, and characters already in a save
-  keep the messages they have. Other languages keep the game's own "no message" row.
+  number is still drawn once and nothing is written before the character is added. Characters already in a save keep
+  their stored messages unchanged, but a stored message that is exactly one of the slot's own defaults for the
+  character's class and category (any of its 15 variants) is shown as the translated default whenever the game reads
+  it: the four getters that copy a character's stored message are hooked at their load, and the text they copy is the
+  translated one. The comparison is on the whole UTF-16 text; a message that differs in any unit stays as it is, and
+  the save is never written. Without a port-side language selected the game runs unhooked. Other languages keep the
+  game's own "no message" row.
 
   The released image labels (PONTOS, VAI!, RANKS DE TESOURO, ENTRE, CARREGANDO, SALVANDO, SIM, NÃO, DADOS, NOVO and the
   copyright line) reach every build. The USA packs draw them from `*_Add` atlases; the Japanese and Asia/Hong Kong

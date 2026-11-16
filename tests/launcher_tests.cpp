@@ -6801,6 +6801,7 @@ std::set<size_t> CorpusIndices(std::string_view sheet) {
 // The picker's records as served: every class and category translated, unlike the placeholder and each other, in the
 // right block. Names and the blocks' markers stay the slot's own.
 void CheckServedDefaultBone(const ArchiveTranslation& result, const std::vector<std::string>& native, const std::string& placeholder) {
+    CHECK(result.native_default_bone == native);
     const std::vector<std::string>& served = result.default_bone;
     CHECK(served.size() == native.size() && served.size() == 2049);
     if (served.size() != native.size() || served.size() != 2049) return;
@@ -6830,19 +6831,19 @@ void CheckServedDefaultBone(const ArchiveTranslation& result, const std::vector<
     }
 }
 
+std::optional<FmsSheet> ServedSystemMsg(const ArchiveTranslation& result, size_t records) {
+    if (!result.overlay) return std::nullopt;
+    for (const auto& patch : result.overlay->patches) {
+        uint32_t count = 0;
+        if (patch.second.size() > 0x20) std::memcpy(&count, patch.second.data() + 0x14, 4);
+        if (patch.second.size() > 0x20 && !std::memcmp(patch.second.data(), "FMSB", 4) && count == records) return ParseFms(patch.second);
+    }
+    return std::nullopt;
+}
+
 // What the game reads as SystemMsg once the slot is translated: each row keeps its own record and only corpus records change.
 void CheckServedSystemMsg(const ArchiveTranslation& result, const std::vector<std::string>& native) {
-    const std::vector<uint8_t>* served = nullptr;
-    if (result.overlay) {
-        for (const auto& patch : result.overlay->patches) {
-            uint32_t count = 0;
-            if (patch.second.size() > 0x20) std::memcpy(&count, patch.second.data() + 0x14, 4);
-            if (patch.second.size() > 0x20 && !std::memcmp(patch.second.data(), "FMSB", 4) && count == native.size()) served = &patch.second;
-        }
-    }
-    CHECK(served != nullptr);
-    if (!served) return;
-    const std::optional<FmsSheet> sheet = ParseFms(*served);
+    const std::optional<FmsSheet> sheet = ServedSystemMsg(result, native.size());
     CHECK(sheet && sheet->records.size() == native.size());
     if (!sheet) return;
     std::set<std::string> texts;
@@ -6860,6 +6861,63 @@ void CheckServedSystemMsg(const ArchiveTranslation& result, const std::vector<st
         }
     }
     CHECK(moved > 0 && moved <= corpus.size());
+}
+
+bool HasNativeScript(std::string_view text) {
+    for (size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        const size_t length = lead < 0x80 ? 1 : (lead >> 5) == 6 ? 2 : (lead >> 4) == 14 ? 3 : 4;
+        uint32_t code = length == 1 ? lead : lead & (0x7f >> length);
+        for (size_t k = 1; k < length && i + k < text.size(); ++k) code = code << 6 | (static_cast<unsigned char>(text[i + k]) & 0x3f);
+        if ((code >= 0x3040 && code <= 0x30ff) || (code >= 0x3400 && code <= 0x9fff) || (code >= 0xac00 && code <= 0xd7af)) return true;
+        i += length;
+    }
+    return false;
+}
+
+// A regional slot under PT-BR keeps none of its own language in a record the corpus holds. The Town Map help, the pieces
+// of the Resurrect question and the BGM source values are the records issue 76 saw left in Japanese.
+void CheckRegionalWording(std::string_view source, const ArchiveTranslation& result, const std::vector<std::string>& native) {
+    const std::optional<FmsSheet> sheet = ServedSystemMsg(result, native.size());
+    CHECK(sheet.has_value());
+    if (!sheet) return;
+    for (const size_t index : CorpusIndices("SystemMsg")) CHECK(!HasNativeScript(sheet->records[index]));
+    const std::vector<std::string>& served = sheet->records;
+    CHECK(served[1037] == "Ressuscitar " && served[1038] == "?" && served[1039] == "---");
+    CHECK(served[516] == "Original" && served[399] == "Mono" && served[544] == "Manual");
+    CHECK(served[1444].find("estabelecimento da cidade") != std::string::npos);
+    CHECK((served[1444].find("@#(11)") != std::string::npos) == (source == "JP"));
+    CHECK(served[504] == "Controle do Cursor @#(53)");
+}
+
+// A stored message is translated at display time only when it is one of the slot's own defaults: every default of every
+// class and category must differ from its served text, and no served text may be another default of the slot.
+void CheckStoredDefaults(const ArchiveTranslation& result) {
+    std::set<std::string> natives;
+    for (int character_class = 0; character_class < DEFAULT_MESSAGE_CLASSES; ++character_class) {
+        for (int category = 0; category < DEFAULT_MESSAGE_CATEGORIES; ++category) {
+            std::set<std::string> kinds;
+            for (int variant = 0; variant < DEFAULT_MESSAGE_VARIANTS; ++variant) {
+                const size_t record = size_t(default_message_record(character_class, DefaultMessageCategory(category), variant));
+                CHECK(record < result.default_bone.size() && record < result.native_default_bone.size());
+                if (record >= result.default_bone.size() || record >= result.native_default_bone.size()) continue;
+                CHECK(!result.native_default_bone[record].empty() && result.native_default_bone[record] != result.default_bone[record]);
+                kinds.insert(result.native_default_bone[record]);
+                natives.insert(result.native_default_bone[record]);
+            }
+            CHECK(kinds.size() == DEFAULT_MESSAGE_VARIANTS);
+        }
+    }
+    for (int character_class = 0; character_class < DEFAULT_MESSAGE_CLASSES; ++character_class) {
+        for (int category = 0; category < DEFAULT_MESSAGE_CATEGORIES; ++category) {
+            for (int variant = 0; variant < DEFAULT_MESSAGE_VARIANTS; ++variant) {
+                const size_t record = size_t(default_message_record(character_class, DefaultMessageCategory(category), variant));
+                if (record < result.default_bone.size()) CHECK(natives.count(result.default_bone[record]) == 0);
+            }
+        }
+    }
+    CHECK(result.default_bone.size() > 1921 && result.default_bone[1921] == "N\xC3\xA3o me torne um esqueleto!");
+    CHECK(default_message_record(4, DEFAULT_MESSAGE_DEATH, 7) == 1921);
 }
 
 void TestTranslationAcrossSlots(const fs::path& base) {
@@ -6948,6 +7006,45 @@ void TestTranslationAcrossSlots(const fs::path& base) {
     const TranslationFile no_map = file_of("JP.json", "{\"sheets\": 3}");
     recipe.source = &no_map;
     CHECK(!TranslateArchive(app0 / "DRACRO.CPK", recipe).error.empty());
+
+    // A record whose printf or button sequences the translation cannot share takes the slot's own wording of it, and only
+    // while that wording fits the record and the record is the one mapped.
+    {
+        const std::string stick_text = "@#(53)\xE6\x93\x8D", floor_text = "%d\xE9\x9A\x8E", still_text = "\xE5\xA4\x89", moved_text = "\xE7\xA7\xBB";
+        const fs::path adapted_app0 = base / "adapted_app0";
+        fs::remove_all(adapted_app0);
+        WriteAll(adapted_app0 / "DRACRO.CPK",
+                 BuildCpk({{"msgsheet/SystemMsg.fms", sheet_of({stick_text, floor_text, still_text, moved_text}), false}}, false));
+        const std::string adapted_entries = "{\"sheet\": \"SystemMsg\", \"entries\": ["
+            "{\"index\": 0, \"source_sha256\": \"english\", \"pt_br\": \"Cursor @#(34)\"},"
+            "{\"index\": 1, \"source_sha256\": \"english\", \"pt_br\": \"Andar\"},"
+            "{\"index\": 2, \"source_sha256\": \"english\", \"pt_br\": \"Trocar\"},"
+            "{\"index\": 3, \"source_sha256\": \"english\", \"pt_br\": \"Mover\"}]}";
+        const std::string adapted_map = "{\"source\": \"JP\", \"sheets\": [{\"sheet\": \"SystemMsg\", \"adapted\": ["
+            "[0, \"Cursor @#(53)\"], [1, \"Andar %d\"], [2, \"Trocar %d\"], [3, \"Mover\"]], \"hashes\": [[0, \"" +
+            digest(stick_text).substr(0, 16) + "\"], [1, \"" + digest(floor_text).substr(0, 16) + "\"], [2, \"" +
+            digest(still_text).substr(0, 16) + "\"], [3, \"0000000000000000\"]]}]}";
+        const TranslationFile adapted_files[] = {file_of("SystemMsg.json", adapted_entries)};
+        const TranslationFile adapted_source = file_of("JP.json", adapted_map);
+        TranslationRecipe adapted_recipe{{}, adapted_files};
+        adapted_recipe.source = &adapted_source;
+        adapted_recipe.adapted_texts = &adapted_source;
+        const ArchiveTranslation adapted_result = TranslateArchive(adapted_app0 / "DRACRO.CPK", adapted_recipe);
+        CHECK(adapted_result.error.empty() && adapted_result.overlay && adapted_result.corpus == 4);
+        CHECK(adapted_result.translated == 2 && adapted_result.refused == 2);
+        CHECK((adapted_result.problems == std::vector<std::string>{"SystemMsg 2: printf or button sequences differ from the source",
+                                                                     "SystemMsg 3: the source record changed"}));
+        const std::optional<FmsSheet> adapted_served = ServedSystemMsg(adapted_result, 4);
+        CHECK(adapted_served && (adapted_served->records == std::vector<std::string>{"Cursor @#(53)", "Andar %d", still_text, moved_text}));
+        adapted_recipe.adapted_texts = nullptr;
+        const ArchiveTranslation unadapted = TranslateArchive(adapted_app0 / "DRACRO.CPK", adapted_recipe);
+        CHECK(unadapted.translated == 1 && unadapted.refused == 3);
+        const std::string no_table_text = "{\"sheets\": [{\"sheet\": \"SystemMsg\", \"adapted\": [[0]], \"hashes\": []}]}";
+        const TranslationFile no_table = file_of("JP.json", no_table_text);
+        adapted_recipe.adapted_texts = &no_table;
+        CHECK(!TranslateArchive(adapted_app0 / "DRACRO.CPK", adapted_recipe).error.empty());
+        fs::remove_all(adapted_app0);
+    }
     fs::remove_all(app0);
     fs::remove(base / "slot_seen.cpk");
     fs::remove(base / "slot_record.txt");
@@ -6958,20 +7055,20 @@ void TestTranslationAcrossSlots(const fs::path& base) {
         const char* folder;
         size_t applied;
     };
-    const RealBuild real[] = {{&kUs, "v1.03", 9670}, {&kJp100, "CUSA07001-1.00", 9649}, {&kJp102, "CUSA07001-1.02", 9649},
-                              {&kJp103, "CUSA07001-1.03", 9649}, {&kCk100, "CUSA10209-1.00", 9659}};
+    const RealBuild real[] = {{&kUs, "v1.03", 9866}, {&kJp100, "CUSA07001-1.00", 9860}, {&kJp102, "CUSA07001-1.02", 9860},
+                              {&kJp103, "CUSA07001-1.03", 9860}, {&kCk100, "CUSA10209-1.00", 9866}};
     for (const RealBuild& item : real) {
         const fs::path game = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / item.folder;
         const TranslationProfile& profile = *item.build->translation;
         if (!fs::exists(game / profile.archive) || PtBrTranslationFiles().empty()) continue;
         const TextLanguage& language = ResolveTextLanguage(item.build, kPortugueseBrazilKey);
         TranslationRecipe actual{language.suffix, PtBrTranslationFiles()};
-        if (!profile.source.empty()) actual.source = PtBrSource(profile.source);
+        if (!profile.source.empty()) actual.adapted_texts = actual.source = PtBrSource(profile.source);
         actual.font_entry = profile.font_entry;
         actual.mark_archive = game / "DRACRO.CPK";
         actual.glyph_table = true;
         const ArchiveTranslation result = TranslateArchive(game / profile.archive, actual);
-        CHECK(result.error.empty() && result.overlay && result.corpus == 9670 && result.translated == item.applied);
+        CHECK(result.error.empty() && result.overlay && result.corpus == 9866 && result.translated == item.applied);
         CHECK(result.latin_glyphs == !profile.font_entry.empty() && !result.folded);
         std::printf("PT-BR %s: %zu of %zu records, %zu kept native\n", item.build->label, result.translated, result.corpus, result.refused);
         CpkArchive slot;
@@ -6981,11 +7078,13 @@ void TestTranslationAcrossSlots(const fs::path& base) {
         const std::optional<FmsSheet> native = found ? ParseFms(slot.Read(*found)) : std::nullopt;
         CHECK(native.has_value());
         if (native) CheckServedSystemMsg(result, native->records);
+        if (native && !profile.source.empty()) CheckRegionalWording(profile.source, result, native->records);
         const std::string bone = language.suffix.empty() ? "msgsheet/DefaultBone.fms" : "msgsheet/DefaultBone_" + std::string(language.suffix) + ".fms";
         const CpkEntry* bone_entry = slot.Find(bone);
         const std::optional<FmsSheet> bone_native = bone_entry ? ParseFms(slot.Read(*bone_entry)) : std::nullopt;
         CHECK(bone_native.has_value());
         if (bone_native) CheckServedDefaultBone(result, bone_native->records, native ? (*native).records[849] : std::string());
+        if (bone_native) CheckStoredDefaults(result);
         if (!bone_native || !actual.source) continue;
 
         // A character message whose source changed stays native, and its neighbours stay translated.
@@ -7061,10 +7160,12 @@ void TestTranslationAcrossSlots(const fs::path& base) {
         std::string message;
         const char* archive = loader_call("brazilian_portuguese", length, patches, count, message);
         CHECK(archive && std::string_view(archive) == "DRACRO_CK.CPK");
-        CHECK(message.find("9659 records translated of 9670") != std::string::npos && message.find(", 4 visual replacements") != std::string::npos);
+        CHECK(message.find("9866 records translated of 9866") != std::string::npos && message.find(", 4 visual replacements") != std::string::npos);
         const char* stage = dcp_text_stage_overlay(&length, &patches, &count);
         CHECK(stage && std::string_view(stage) == "DRACRO.CPK" && count > 0);
+        CHECK(dcp_text_native_default_bone(1921) && std::string(dcp_text_native_default_bone(1921)) != dcp_text_default_bone(1921));
         CHECK(!loader_call("traditional_chinese", length, patches, count, message) && message.empty());
+        CHECK(!dcp_text_native_default_bone(1921) && !dcp_text_default_bone(1921));
         CHECK(!dcp_text_stage_overlay(&length, &patches, &count));
         localization::SetActiveLanguage("english");
         fs::remove_all(image);

@@ -4,14 +4,18 @@ Portuguese (Brazil) is a Menu & Subtitles language of every supported build. The
 port serves translated copies of that slot's message sheets when the game reads its archive. The archive on disk is
 never written (`launcher/game_translation.h`, `runtime_file_overlay`).
 
-| Build | Archive | Slot sheets | Records of the 9,670 applied | Art |
+| Build | Archive | Slot sheets | Records of the 9,866 applied | Art |
 | --- | --- | --- | --- | --- |
-| CUSA10454 1.00 USA | `DRACRO_US.CPK` | `msgsheet/*_US.fms` | 9,670 | replaced |
+| CUSA10454 1.00 USA | `DRACRO_US.CPK` | `msgsheet/*_US.fms` | 9,866 | replaced |
 | CUSA10454 1.01 USA | `DRACRO_US.CPK` | `msgsheet/*_US.fms` | not measured: no local archive | replaced where the hash matches |
-| CUSA07001 1.00, 1.02, 1.03 Japan | `DRACRO.CPK` | `msgsheet/*.fms` | 9,649 | labels replaced, manual the game's own |
-| CUSA10209 1.00 Asia/Hong Kong | `DRACRO_CK.CPK` | `msgsheet/*_CT.fms` | 9,659 | labels replaced, manual the game's own |
+| CUSA07001 1.00, 1.02, 1.03 Japan | `DRACRO.CPK` | `msgsheet/*.fms` | 9,860 | labels replaced, manual the game's own |
+| CUSA10209 1.00 Asia/Hong Kong | `DRACRO_CK.CPK` | `msgsheet/*_CT.fms` | 9,866 | labels replaced, manual the game's own |
 | CUSA10209 1.02 Asia/Hong Kong | `DRACRO_CK.CPK` | `msgsheet/*_CT.fms` | not measured: no local archive | replaced where the hash matches, manual the game's own |
 | CUSA10487 1.03 Europe | `DRACRO_EU.CPK` | `msgsheet/*_US.fms` | not measured: no local archive | replaced where the hash matches |
+
+A regional build keeps six translated records in Japanese: the `CustomItem` effect lines (2601, 2679, 2715, 3915, 4006,
+4042) are placeholders there for effects that build does not have. `ptbr.py parity` lists every record a build keeps in
+its own language and fails on one that is not documented.
 
 The Japanese and Asia/Hong Kong fonts have no accented letters. They are composed at run time from the player's own
 font (`launcher/latin_font.cpp`, `src/latin_glyphs.c`); see the Menu & Subtitles section of `docs/LAUNCHER.md`.
@@ -23,6 +27,10 @@ DefaultBone holds the 366 character message records (1635-1640 and the 15 varian
 in 1641-2048); names and the blocks' markers stay the game's own. Each line keeps at most 30 UTF-16 units, the
 length a character's message field keeps (`ptbr.py validate` refuses longer ones).
 
+Characters already in a save keep their stored messages. A stored message that is exactly one of the build's own default
+messages for the character's class and category is shown as the translated default while Portuguese (Brazil) is
+selected; custom messages are never translated and the save is never written.
+
 Not done yet: trophy text, the remaining baked visual labels, further manual cleanup, the
 credits and the Berserk terminology decision.
 
@@ -31,7 +39,8 @@ This folder holds only data written for the port. It never holds English, Spanis
 | Path | Contents |
 | --- | --- |
 | `sheets/<Sheet>.json` | Text translations, embedded into the launcher at build time |
-| `sources/<source>.json` | For a slot not in English, the hash of each of its records that takes a translation, and why any other does not |
+| `sources/<source>.json` | For a slot not in English, the hash of each of its records that takes a translation, the wording an adapted record takes instead, and why any other record does not take one |
+| `adaptations.json` | The translation reworded for the slots whose record has other buttons or printf conversions; `ptbr.py sources` copies each into the slot's map |
 | `visual/*.dcpx.z` | Compressed DCPX patches against the USA archive entries, embedded the same way |
 | `visual/base-*.dcpx.z` | The same art for the base stage files of `DRACRO.CPK` (Japan, Asia/Hong Kong): deltas of the labels and their layout quads, written by `scripts/localization/regional_visuals.py` |
 | `glossary.tsv` | Terminology decisions: `category`, `source` (a short term, or a `##(KEY)` tag), `pt_br`, `status` (`approved` / `review`), optional `notes` |
@@ -50,7 +59,9 @@ This folder holds only data written for the port. It never holds English, Spanis
 
 - **Key:** each entry is tied to the exact English record it was translated from by `source_sha256`.
 - **Changed English:** if the installed English record is different, the game keeps the English text for that record and logs why.
-- **Other slots:** a Japanese or Chinese record takes the translation at its index when its hash is in the slot's source map. A record whose printf conversions or button glyphs differ from the translation, or that lacks a tag the translation uses, stays in the slot's language, and the map says why.
+- **Other slots:** a Japanese or Chinese record takes the translation at its index when its hash is in the slot's source map. A record whose printf conversions or button glyphs differ from the translation, or that lacks a tag the translation uses, stays in the slot's language, and the map says why. A tag the slot's own record already uses counts as the slot's.
+- **Adapted records:** where only the buttons or conversions differ, `adaptations.json` holds the same translation with the slot's own glyph code or conversion; the runtime checks it against the record like any translation.
+- **English kept as Portuguese:** a name or cognate the Portuguese writes as the English (`Mono`, `Original`, `Claymore`) is an entry whose `pt_br` equals the English record, so a regional slot shows it too. The pieces of a sentence the English builds from several records (`Resurrect ` + name + `?`) are entries for every piece, because the Japanese and Chinese slots split the sentence at other records.
 - **Shared text:** an `index` list shares one translation between records with identical English.
 
 ## Workflow

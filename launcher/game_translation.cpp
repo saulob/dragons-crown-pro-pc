@@ -36,6 +36,7 @@ struct OverlayFile {
 };
 std::optional<OverlayFile> second_overlay; // a build whose stage files are not in its slot's archive
 const std::vector<std::string>* served_default_bone = nullptr; // the records of the overlay in use
+const std::vector<std::string>* served_native_default_bone = nullptr; // and the slot's own
 std::vector<DcpComposedGlyph> served_composed_glyphs;
 std::vector<CyrillicMetrics> served_cyrillic_metrics;
 
@@ -234,6 +235,34 @@ std::optional<DroppedButtons> ParseDroppedButtons(const TranslationFile& file) {
     return dropped;
 }
 
+// The slot's own wording of the records whose printf or button sequences the translation cannot share, by sheet and index.
+using AdaptedTexts = std::map<std::string, std::map<size_t, std::string>, std::less<>>;
+
+std::optional<AdaptedTexts> ParseAdaptedTexts(const TranslationFile& file) {
+    const std::optional<net::Json> json =
+        net::Json::parse(std::string_view(reinterpret_cast<const char*>(file.data), file.size), 8);
+    if (!json || !(*json)["sheets"].is_array()) return std::nullopt;
+    AdaptedTexts adapted;
+    for (const net::Json& sheet : (*json)["sheets"].items()) {
+        for (const net::Json& row : sheet["adapted"].items()) {
+            if (!row.is_array() || row.items().size() != 2 || row.items()[0].type() != net::Json::Type::kInt ||
+                row.items()[0].as_int() < 0 || !row.items()[1].is_string()) {
+                return std::nullopt;
+            }
+            adapted[sheet["sheet"].as_string()][size_t(row.items()[0].as_int())] = row.items()[1].as_string();
+        }
+    }
+    return adapted;
+}
+
+const std::string& WordingFor(const AdaptedTexts* adapted, const std::string& sheet, size_t index, const std::string& text) {
+    if (!adapted) return text;
+    const auto rows = adapted->find(sheet);
+    if (rows == adapted->end()) return text;
+    const auto row = rows->second.find(index);
+    return row == rows->second.end() ? text : row->second;
+}
+
 std::string WithoutButtons(std::string_view text) {
     std::string out;
     for (size_t i = 0; i < text.size();) {
@@ -309,6 +338,7 @@ struct SheetSources {
     bool same_arguments = false;
     const DroppedButtons* dropped_buttons = nullptr;
     bool kana = false; // Russian written as the kana the font draws it at, but where the system font draws the record
+    const AdaptedTexts* adapted = nullptr;
 };
 
 std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string_view suffix, const TranslationFile& file,
@@ -358,9 +388,10 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
             ++result.corpus;
             const auto dropped = sources.dropped_buttons ? sources.dropped_buttons->find(sheet) : std::optional<DroppedButtons::const_iterator>{};
             const bool buttons_dropped = dropped && *dropped != sources.dropped_buttons->end() && (*dropped)->second.count(index);
-            std::string why = RecordProblem(sheet, native, index, hash.as_string(), text.as_string(), mapped,
+            const std::string& wording = WordingFor(sources.adapted, sheet, index, text.as_string());
+            std::string why = RecordProblem(sheet, native, index, hash.as_string(), wording, mapped,
                                             sources.same_arguments, buttons_dropped);
-            if (why.empty() && sources.text && !TextHashMatches(*sources.text, sheet, index, text.as_string())) {
+            if (why.empty() && sources.text && !TextHashMatches(*sources.text, sheet, index, wording)) {
                 why = "not the expected text";
             }
             if (why.empty() && done[index]) why = "translated twice";
@@ -371,12 +402,15 @@ std::optional<SheetResult> TranslateSheet(const CpkArchive& archive, std::string
             }
             done[index] = true;
             ++translated;
-            const std::string served = fold ? FoldLatinLetters(text.as_string()) : text.as_string();
+            const std::string served = fold ? FoldLatinLetters(wording) : wording;
             parsed->records[index] = sources.kana && !item["system_font"].as_bool() ? CyrillicKana(served) : served;
         }
     }
     if (!translated) return std::nullopt;
-    if (sheet == "DefaultBone") result.default_bone = parsed->records;
+    if (sheet == "DefaultBone") {
+        result.default_bone = parsed->records;
+        result.native_default_bone = native;
+    }
     result.translated += translated;
     ++result.sheets;
     out.data = BuildFms(*parsed);
@@ -721,9 +755,15 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, c
         result.error = std::string(recipe.button_overrides->name) + ": not a source map delta";
         return result;
     }
+    std::optional<AdaptedTexts> adapted;
+    if (recipe.adapted_texts && !(adapted = ParseAdaptedTexts(*recipe.adapted_texts))) {
+        result.error = std::string(recipe.adapted_texts->name) + ": not an adapted text table";
+        return result;
+    }
     const bool kana = recipe.cyrillic && recipe.cyrillic->cells == CYRILLIC_CELLS_KANA;
     const SheetSources sources{source ? &*source : nullptr, text_hashes ? &*text_hashes : nullptr, recipe.text_key,
-                               recipe.same_arguments, dropped_buttons ? &*dropped_buttons : nullptr, kana};
+                               recipe.same_arguments, dropped_buttons ? &*dropped_buttons : nullptr, kana,
+                               adapted ? &*adapted : nullptr};
     if (recipe.cyrillic) {
         std::string why;
         std::optional<std::vector<uint8_t>> font = FontWithCyrillic(archive, recipe, why, result.cyrillic_metrics);
@@ -800,6 +840,11 @@ extern "C" const char* dcp_text_default_bone(unsigned record) {
     return (*dcp::served_default_bone)[record].c_str();
 }
 
+extern "C" const char* dcp_text_native_default_bone(unsigned record) {
+    if (!dcp::served_native_default_bone || record >= dcp::served_native_default_bone->size()) return nullptr;
+    return (*dcp::served_native_default_bone)[record].c_str();
+}
+
 extern "C" const DcpComposedGlyph* dcp_text_composed_glyphs(size_t* count, int* cell_pixels) {
     *count = dcp::served_composed_glyphs.size();
     *cell_pixels = dcp::kLatinFontCellPixels;
@@ -857,6 +902,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     localization::SetActiveLanguage(language.key);
     second_overlay.reset();
     served_default_bone = nullptr;
+    served_native_default_bone = nullptr;
     served_composed_glyphs.clear();
     served_cyrillic_metrics.clear();
     if (language.translation.empty() || !build) return nullptr;
@@ -870,7 +916,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     if (language.translation == "pt-BR") {
         recipe.files = PtBrTranslationFiles();
         if (same_archive) recipe.visual_patches = visuals;
-        if (!profile.source.empty()) recipe.source = PtBrSource(profile.source);
+        if (!profile.source.empty()) recipe.adapted_texts = recipe.source = PtBrSource(profile.source);
         recipe.font_entry = profile.font_entry;
     } else if (language.translation == kPortEnglish) {
         recipe.files = EnglishTranslationFiles();
@@ -936,6 +982,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     if (!translation.error.empty() || !translation.overlay) return nullptr;
     if (glyphs_composed) *glyphs_composed = translation.latin_glyphs || !translation.cyrillic_metrics.empty();
     served_default_bone = &translation.default_bone;
+    served_native_default_bone = &translation.native_default_bone;
     served_cyrillic_metrics = translation.cyrillic_metrics;
     if (translation.latin_glyphs) {
         for (const LatinCell& cell : translation.latin_cells) {

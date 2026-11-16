@@ -1,0 +1,18 @@
+{
+  "adaptations": [
+    {"sheet": "AbilityList", "index": 46, "sources": ["JP", "CT"], "pt_br": "Dispare rapidamente uma rajada de flechas (aperte @#(26) repetidamente). Níveis mais altos de Habilidade aumentam as flechas."},
+    {"sheet": "CustomItem", "index": 2669, "sources": ["JP"], "pt_br": "@c(22)Adiciona Fogo de poder %d ao ataque deslizante@/c"},
+    {"sheet": "CustomItem", "index": 2670, "sources": ["JP"], "pt_br": "@c(22)Adiciona Gelo de poder %d ao ataque deslizante@/c"},
+    {"sheet": "CustomItem", "index": 2671, "sources": ["JP"], "pt_br": "@c(22)Adiciona Eletricidade de poder %d ao ataque deslizante@/c"},
+    {"sheet": "CustomItem", "index": 3996, "sources": ["JP", "CT"], "pt_br": "@c(22)Adiciona Fogo de poder %d ao ataque deslizante@/c"},
+    {"sheet": "CustomItem", "index": 3997, "sources": ["JP", "CT"], "pt_br": "@c(22)Adiciona Gelo de poder %d ao ataque deslizante@/c"},
+    {"sheet": "CustomItem", "index": 3998, "sources": ["JP", "CT"], "pt_br": "@c(22)Adiciona Eletricidade de poder %d ao ataque deslizante@/c"},
+    {"sheet": "SystemMsg", "index": 504, "sources": ["JP", "CT"], "pt_br": "Controle do Cursor @#(53)"},
+    {"sheet": "SystemMsg", "index": 510, "sources": ["JP", "CT"], "pt_br": "Velocidade do Cursor @#(53)"},
+    {"sheet": "SystemMsg", "index": 534, "sources": ["JP", "CT"], "pt_br": "Altera as configurações de controle do cursor de @#(53)."},
+    {"sheet": "SystemMsg", "index": 750, "sources": ["JP", "CT"], "pt_br": "@#(36) Andar %d"},
+    {"sheet": "SystemMsg", "index": 1257, "sources": ["JP", "CT"], "pt_br": "##(R_RD) @#(33) Buscar salas com andares abaixo de %d"},
+    {"sheet": "SystemMsg", "index": 1444, "sources": ["JP"], "pt_br": "O ##(COLOR_TOWN_MENU) permite selecionar um\nestabelecimento da cidade com @#(11) e se mover rapidamente."},
+    {"sheet": "SystemMsg", "index": 1473, "sources": ["JP", "CT"], "pt_br": "@c(18)##(P_ARENA) @/c\n\nVocê pode batalhar contra outros jogadores aqui.\nUsando a PlayStation Network, pode lutar contra jogadores distantes.\nApós a batalha, a durabilidade do seu equipamento retornará\nao estado de antes da batalha."}
+  ]
+}

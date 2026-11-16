@@ -96,6 +96,9 @@ const char *dcp_text_stage_overlay(uint64_t *length, DcpFilePatch **patches, siz
 /* After dcp_text_translation: a DefaultBone record as the translated archive serves it; NULL without one. */
 const char *dcp_text_default_bone(unsigned record);
 
+/* The same record as the slot's own sheet holds it, for the stored messages that are its defaults. */
+const char *dcp_text_native_default_bone(unsigned record);
+
 typedef struct {
     uint32_t code, base;
     const unsigned char *alpha, *base_alpha; /* cell_pixels square */

@@ -4,7 +4,8 @@ written against the English sheets of CUSA10454 1.00.
 
 Tracked: localization/pt-BR/sheets/<Sheet>.json, the PT-BR text with each entry's record indices and the SHA-256 of
 the English record it was written from; localization/pt-BR/sources/<source>.json, the hash of each mapped record of a slot
-in another language; and localization/pt-BR/glossary.tsv. Game text is read from the installed game and written only under
+in another language; localization/pt-BR/adaptations.json, the wording of the records those slots cannot take as
+translated; and localization/pt-BR/glossary.tsv. Game text is read from the installed game and written only under
 cache/ (git-ignored); it never enters the repository.
 
     ptbr.py batches  [--game DIR]                the translation batches, with progress
@@ -16,7 +17,10 @@ cache/ (git-ignored); it never enters the repository.
     ptbr.py import-reference [--game DIR]         import the safe Marcelo baseline into the tracked sheets
     ptbr.py format                               rewrites the tracked sheets in their canonical layout
     ptbr.py sources [--prepared DIR]             the slot maps of the builds not in English, from their prepared games
-    ptbr.py parity [--prepared DIR]              each build's sheets against the corpus; exit 1 when a map is stale
+                                                 and localization/pt-BR/adaptations.json
+    ptbr.py parity [--prepared DIR]              each build's sheets against the corpus, every record kept in the slot's
+                                                 language and every English record the corpus lacks that the slot shows
+                                                 natively; exit 1 on a stale map, an undocumented omission or a gap
     ptbr.py selftest                             the checks themselves, on synthetic text; no game needed
 """
 import argparse
@@ -38,6 +42,7 @@ TRACKED = REPO / 'localization' / 'pt-BR'
 SHEETS_DIR = TRACKED / 'sheets'
 GLOSSARY = TRACKED / 'glossary.tsv'
 SOURCES_DIR = TRACKED / 'sources'
+ADAPTATIONS = TRACKED / 'adaptations.json'
 CACHE = REPO / 'cache' / 'localization' / 'pt-BR'
 DEFAULT_GAME = REPO / 'game' / 'prepared' / 'v1.03'
 PREPARED = REPO / 'game' / 'prepared'
@@ -1051,7 +1056,7 @@ def cmd_merge(args):
 def cmd_validate(args):
     game = Game(args.game)
     glossary, problems = load_glossary()
-    report = Report(errors=list(problems))
+    report = Report(errors=list(problems) + adaptation_errors())
     usable = tracked_usable(game, glossary, report)
     for sheet, records in usable.items():
         try:
@@ -1185,6 +1190,8 @@ SLOTS = {
     'CUSA10487 1.03 Europe': ('CUSA10487-1.03', 'DRACRO_EU.CPK', 'US', None),
 }
 
+SOURCE_NAMES = {source for *_, source in SLOTS.values() if source}
+
 
 def corpus_entries(sheet):
     return load_tracked(tracked_path(sheet))[0]['entries']
@@ -1210,8 +1217,9 @@ def tag_keys(records):
     return {record for record in records[TAG_KEYS.start:TAG_KEYS.stop]}
 
 
-def exclusion(record, text, keys):
-    """Why this slot's record cannot safely show `text`; None when it can."""
+def exclusion(record, text, keys, own_tags=False):
+    """Why this slot's record cannot safely show `text`; None when it can. `own_tags`: a tag the slot's own record
+    already uses is one its engine resolves, even outside the tag table (##(CATEGORY))."""
     if not record.strip():
         return 'empty'
     ours, theirs = arguments(text), arguments(record)
@@ -1219,7 +1227,8 @@ def exclusion(record, text, keys):
         return 'printf'
     if ours[1] != theirs[1]:
         return 'button'
-    if any(t not in keys for t in tokens(text) if t.startswith('##(')):
+    known = keys | set(tokens(record)) if own_tags else keys
+    if any(t not in known for t in tokens(text) if t.startswith('##(')):
         return 'tag'
     return None
 
@@ -1229,21 +1238,93 @@ def slot_sheets(folder, archive_name, suffix):
     return {sheet: archive.read(archive.find(slot_path(sheet, suffix))) for sheet in CORPUS_SHEETS}
 
 
-def source_map(name, raw):
+def load_adaptations(path=ADAPTATIONS):
+    """{source: {(sheet, index): text}}: the translation as a slot whose record has another contract can take it."""
+    if not path.is_file():
+        return {}
+    found = defaultdict(dict)
+    for entry in json.loads(path.read_bytes().decode('utf-8'))['adaptations']:
+        for source in entry['sources']:
+            found[source][(entry['sheet'], entry['index'])] = entry['pt_br']
+    return found
+
+
+def adaptation_errors(path=ADAPTATIONS):
+    """Everything wrong with the adaptations file that needs no game."""
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_bytes().decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        return [f'{path.name}: not UTF-8 JSON: {error}']
+    if not isinstance(data, dict) or set(data) != {'adaptations'} or not isinstance(data['adaptations'], list):
+        return [f'{path.name}: must be an object with "adaptations" only']
+    errors, seen = [], set()
+    corpus = {sheet: {i: e['pt_br'] for e in corpus_entries(sheet) for i in entry_indices(e)} for sheet in CORPUS_SHEETS}
+    for number, entry in enumerate(data['adaptations']):
+        where = f'{path.name} entry {number}'
+        if not isinstance(entry, dict) or set(entry) != {'sheet', 'index', 'sources', 'pt_br'}:
+            errors.append(f'{where}: needs exactly sheet, index, sources and pt_br')
+            continue
+        sheet, index, sources, text = entry['sheet'], entry['index'], entry['sources'], entry['pt_br']
+        if sheet not in corpus or not isinstance(index, int) or index not in corpus[sheet]:
+            errors.append(f'{where}: {sheet} {index} is not a translated record')
+            continue
+        if not isinstance(sources, list) or not sources or not all(isinstance(x, str) and x in SOURCE_NAMES for x in sources):
+            errors.append(f'{where}: sources must be some of {sorted(SOURCE_NAMES)}')
+            continue
+        if not isinstance(text, str) or text == corpus[sheet][index]:
+            errors.append(f'{where}: {sheet} {index} needs text that differs from the translation')
+            continue
+        bad = disallowed_characters(text, corpus[sheet][index])
+        if bad:
+            errors.append(f'{where}: characters outside the PT-BR set: {bad!r}')
+        for source in sources:
+            if (source, sheet, index) in seen:
+                errors.append(f'{where}: {source} {sheet} {index} adapted twice')
+            seen.add((source, sheet, index))
+    return errors
+
+
+def fit(record, text, adapted_text, keys):
+    """(why, shown): why `record` cannot show the translation `text` (None when it can), and the adapted text it shows
+    instead when one was written for it."""
+    why = exclusion(record, text, keys, True)
+    if adapted_text is None:
+        return why, None
+    if not why:
+        raise ValueError('adapted, but the translation fits the record as it is')
+    again = exclusion(record, adapted_text, keys, True)
+    if again:
+        raise ValueError(f'the adapted text does not fit the record either ({again})')
+    return None, adapted_text
+
+
+def source_map(name, raw, adapted=None):
+    adapted = (adapted or {}).get(name, {})
     keys = tag_keys(fms.parse(raw['SystemMsg']).records)
-    sheets = []
+    sheets, used = [], set()
     for sheet in CORPUS_SHEETS:
         records = fms.parse(raw[sheet]).records
-        hashes, excluded = [], []
+        hashes, excluded, rewritten = [], [], []
         for entry in corpus_entries(sheet):
             for index in entry_indices(entry):
-                why = 'no record' if index >= len(records) else exclusion(records[index], entry['pt_br'], keys)
+                try:
+                    why, shown = ('no record', None) if index >= len(records) else \
+                        fit(records[index], entry['pt_br'], adapted.get((sheet, index)), keys)
+                except ValueError as error:
+                    sys.exit(f'{name} {sheet} {index}: {error}')
+                used.add((sheet, index))
+                if shown is not None:
+                    rewritten.append([index, shown])
                 if why:
                     excluded.append([index, why])
                 else:
                     hashes.append([index, source_hash(records[index])])
         sheets.append({'sheet': sheet, 'records': len(records), 'sha256': hashlib.sha256(raw[sheet]).hexdigest(),
-                       'hashes': sorted(hashes), 'excluded': sorted(excluded)})
+                       'hashes': sorted(hashes), 'excluded': sorted(excluded), 'adapted': sorted(rewritten)})
+    if set(adapted) - used:
+        sys.exit(f'{name}: adapted records with no translation: {sorted(set(adapted) - used)}')
     return {'source': name, 'sheets': sheets}
 
 
@@ -1253,63 +1334,116 @@ def dump_source(data):
         head = {k: sheet[k] for k in ('sheet', 'records', 'sha256')}
         body = ',\n'.join(f'      {json.dumps(row, ensure_ascii=False)}' for row in sheet['hashes'])
         excluded = json.dumps(sheet['excluded'])
-        rows.append(f'    {json.dumps(head)[:-1]}, "excluded": {excluded}, "hashes": [\n{body}\n    ]}}')
+        adapted = ''
+        if sheet.get('adapted'):
+            adapted = ', "adapted": [\n' + ',\n'.join(
+                f'      {json.dumps(row, ensure_ascii=False)}' for row in sheet['adapted']) + '\n    ]'
+        rows.append(f'    {json.dumps(head)[:-1]}, "excluded": {excluded}{adapted}, "hashes": [\n{body}\n    ]}}')
     return '{\n  "source": ' + json.dumps(data['source']) + ',\n  "sheets": [\n' + ',\n'.join(rows) + '\n  ]\n}\n'
 
 
 def cmd_sources(args):
     SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+    adapted = load_adaptations()
     written = {}
     for label, (folder, archive, suffix, source) in SLOTS.items():
         game = args.prepared / folder
         if source is None or source in written or not (game / archive).is_file():
             continue
-        data = source_map(source, slot_sheets(game, archive, suffix))
+        data = source_map(source, slot_sheets(game, archive, suffix), adapted)
         (SOURCES_DIR / f'{source}.json').write_bytes(dump_source(data).encode('utf-8'))
         written[source] = label
         print(f'{source}: from {label}')
     return 0 if written else 1
 
 
+# Translated records a slot keeps in its own language, and why that is right: (source, sheet, index) -> reason.
+DOCUMENTED_KEPT = {('JP', 'CustomItem', index): 'the slot holds a placeholder for an effect this build does not have'
+                   for index in (2601, 2679, 2715, 3915, 4006, 4042)}
+NATIVE_SCRIPT = re.compile('[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]')  # kana, ideographs, hangul
+# Records outside the corpus that a slot shows in its own script, and why that is right.
+KEPT_NATIVE = {('EventMsg', 959): 'a section marker of a developer list', ('EventMsg', 965): 'a section marker of a developer list'}
+
+
+def native_gaps(english, records, covered, sheet):
+    """(index, kind) of the slot's records outside the corpus that show native script. `english`: the English record is
+    native too, `placeholder`: the English has no text where the slot has some, `kept`: KEPT_NATIVE, `missing`: an
+    English record the corpus does not hold, so the slot would show its own language under PT-BR."""
+    gaps = []
+    for index, record in enumerate(records):
+        if index in covered or index >= len(english) or not NATIVE_SCRIPT.search(record):
+            continue
+        if NATIVE_SCRIPT.search(english[index]):
+            kind = 'english'
+        elif english[index].strip() == '---':
+            kind = 'placeholder'
+        elif (sheet, index) in KEPT_NATIVE:
+            kind = 'kept'
+        else:
+            kind = 'missing'
+        gaps.append((index, kind))
+    return gaps
+
+
+def parity_row(raw, english, corpus, mapped):
+    """One build against the corpus: (applied, [(sheet, index, why)] kept native, sheets differing from the map, native gaps)."""
+    applied, kept, changed, gaps = 0, [], [], []
+    for sheet in CORPUS_SHEETS:
+        records = fms.parse(raw[sheet]).records
+        hashes, excluded = {}, {}
+        if mapped:
+            row = next(s for s in mapped['sheets'] if s['sheet'] == sheet)
+            if hashlib.sha256(raw[sheet]).hexdigest() != row['sha256']:
+                changed.append(sheet)
+            hashes, excluded = dict(row['hashes']), dict(row['excluded'])
+        covered = set()
+        for entry in corpus[sheet]:
+            for index in entry_indices(entry):
+                covered.add(index)
+                if index >= len(records):
+                    kept.append((sheet, index, 'no record'))
+                elif mapped and index not in hashes:
+                    kept.append((sheet, index, excluded.get(index, 'unmapped')))
+                elif mapped and hashes[index] != source_hash(records[index]):
+                    kept.append((sheet, index, 'source changed'))
+                elif not mapped and entry['source_sha256'] != sha256(records[index]):
+                    kept.append((sheet, index, 'source changed'))
+                else:
+                    applied += 1
+        if mapped and english:
+            gaps += [(sheet, index, kind) for index, kind in
+                     native_gaps(fms.parse(english[sheet]).records, records, covered, sheet)]
+    return applied, kept, changed, gaps
+
+
 def cmd_parity(args):
     corpus = {sheet: corpus_entries(sheet) for sheet in CORPUS_SHEETS}
     total = sum(len(entry_indices(entry)) for entries in corpus.values() for entry in entries)
     print(f'corpus {total} records')
-    stale = 0
+    base = SLOTS['CUSA10454 1.00 USA']
+    english = slot_sheets(args.prepared / base[0], base[1], base[2]) if (args.prepared / base[0] / base[1]).is_file() else None
+    failed = 0
     for label, (folder, archive, suffix, source) in SLOTS.items():
         game = args.prepared / folder
         if not (game / archive).is_file():
             print(f'{label}: DATA UNAVAILABLE ({folder}/{archive})')
             continue
-        raw = slot_sheets(game, archive, suffix)
-        applied, reasons, changed = 0, Counter(), []
         mapped = json.loads((SOURCES_DIR / f'{source}.json').read_text('utf-8')) if source else None
-        for sheet in CORPUS_SHEETS:
-            records = fms.parse(raw[sheet]).records
-            if mapped:
-                row = next(s for s in mapped['sheets'] if s['sheet'] == sheet)
-                if hashlib.sha256(raw[sheet]).hexdigest() != row['sha256']:
-                    changed.append(sheet)
-                hashes = dict(row['hashes'])
-                reasons.update(why for _, why in row['excluded'])
-            for entry in corpus[sheet]:
-                for index in entry_indices(entry):
-                    if index >= len(records):
-                        reasons['no record'] += 1
-                    elif mapped:
-                        if index in hashes:
-                            if hashes[index] == source_hash(records[index]):
-                                applied += 1
-                            else:
-                                reasons['source changed'] += 1
-                    elif entry['source_sha256'] == sha256(records[index]):
-                        applied += 1
-                    else:
-                        reasons['source changed'] += 1
-        stale += reasons['source changed']
+        applied, kept, changed, gaps = parity_row(slot_sheets(game, archive, suffix), english, corpus, mapped)
+        reasons, tally = Counter(why for _, _, why in kept), Counter(kind for _, _, kind in gaps)
         print(f'{label}: applied {applied}/{total}, kept native {dict(reasons)}'
-              + (f', sheets differing from the map: {changed}' if changed else ''))
-    return 1 if stale else 0
+              + (f', sheets differing from the map: {changed}' if changed else '')
+              + (f', native text outside the corpus {dict(tally)}' if tally else ''))
+        unexplained = 0
+        for sheet, index, why in kept:
+            note = DOCUMENTED_KEPT.get((source, sheet, index))
+            unexplained += note is None
+            print(f'    kept {sheet} {index}: {why}' + (f' ({note})' if note else ' (UNEXPLAINED)'))
+        for sheet, index, kind in gaps:
+            if kind == 'missing':
+                print(f'    gap {sheet} {index}: an English record the corpus does not hold')
+        failed += unexplained + tally['missing']
+    return 1 if failed else 0
 
 
 def cmd_format(_args):
@@ -1387,6 +1521,31 @@ def cmd_selftest(_args):
     usable = check_sheet_file('X', data, '', {'en': english}, set(), report)
     expect(usable == {0: 'Olá'}, 'stale and repeated entries left out')
     expect(any('stale' in e for e in report.errors) and any('twice' in e for e in report.errors), 'their errors')
+    keys = {'##(KNOWN)'}
+    expect(exclusion('##(OWN) go', 'Ir ##(OWN)', keys) == 'tag' and exclusion('##(OWN) go', 'Ir ##(OWN)', keys, True) is None,
+           'a tag the slot record itself uses')
+    expect(exclusion('##(OWN) go', 'Ir ##(OTHER)', keys, True) == 'tag', 'a tag neither the table nor the record has')
+    expect(exclusion('@#(53) x', 'Cursor @#(34)', keys) == 'button' and exclusion('@#(53) x', 'Cursor @#(53)', keys) is None,
+           'button code')
+    expect(exclusion('%d x', 'Andar', keys) == 'printf' and exclusion('%d x', 'Andar %d', keys) is None, 'printf contract')
+    expect(fit('@#(53) x', 'Cursor @#(34)', 'Cursor @#(53)', keys) == (None, 'Cursor @#(53)'), 'adapted text taken')
+    expect(fit('x', 'Cursor', None, keys) == (None, None) and fit('@#(53) x', 'Cursor', None, keys) == ('button', None),
+           'no adaptation')
+    for record, text, adapted in (('x', 'Cursor', 'Cursor @#(53)'), ('@#(53) x', 'Cursor', 'Cursor')):
+        try:
+            fit(record, text, adapted, keys)
+            expect(False, 'a useless or unfit adaptation is refused')
+        except ValueError:
+            expect(True, 'a useless or unfit adaptation is refused')
+    gaps = native_gaps(['Open', '---', 'Mono', '?', 'Open', 'オ'],
+                       ['開く', 'あ', 'モノ', 'を', 'Open', 'オ'], {0}, 'X')
+    expect(gaps == [(1, 'placeholder'), (2, 'missing'), (3, 'missing'), (5, 'english')],
+           'a record outside the corpus that keeps the slot language is a gap, whatever its English text')
+    system = {i for e in corpus_entries('SystemMsg') for i in entry_indices(e)}
+    pieces = [(965, 966), (968, 969, 970), (1037, 1038, 1039), (1045, 1046), (399, 516, 544)]
+    expect(all(set(group) <= system for group in pieces),
+           'every piece of a sentence the English builds from several records, and the cognate option values, is in the corpus')
+    expect(('SystemMsg', 1444) in load_adaptations().get('JP', {}), 'the Town Map help has the Japanese slot\'s wording')
     print(f'selftest: {len(check)} checks passed')
     return 0
 

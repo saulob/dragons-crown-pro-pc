@@ -57,6 +57,7 @@ struct ArchiveTranslation {
     bool latin_glyphs = false;             // the font was completed: the executable's glyph table must be too
     bool folded = false;                   // the font could not be completed: letters are shown without their accents
     std::vector<std::string> default_bone; // the DefaultBone records as served
+    std::vector<std::string> native_default_bone; // the same records as the slot's own sheet holds them
     std::vector<LatinCell> latin_cells;    // the letters as the completed font holds them
     std::vector<CyrillicMetrics> cyrillic_metrics; // the Russian letters drawn into the font: their glyph table metrics
     uint32_t sheets_ms = 0, visual_ms = 0, mirror_ms = 0, overlay_ms = 0; // time spent per phase
@@ -71,6 +72,7 @@ struct TranslationRecipe {
     const TranslationFile* source_delta = nullptr;    // hashes added to the source map and records taken out of it
     const TranslationFile* own_delta = nullptr;       // then the language's own delta over that map
     const TranslationFile* button_overrides = nullptr; // a delta whose dropped_buttons records may omit the slot's glyphs
+    const TranslationFile* adapted_texts = nullptr;   // a map whose "adapted" rows give a slot's own wording of a translation
     const TranslationFile* text_hashes = nullptr;     // the hash each entry's own text must have; nullptr: not checked
     std::string_view text_key = "pt_br";              // the entries' text member
     std::string_view font_entry = {};                 // the font to complete with the letters, when the slot's lacks them

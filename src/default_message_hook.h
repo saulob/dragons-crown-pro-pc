@@ -1,6 +1,9 @@
 /* Character creation in a translated language: an empty message row shows the default the character will receive, not "no message". The
  * game picks one DefaultBone variant per character when it is added, so the variant previewed for a class is held and
- * given to that pick. The guest's rand still runs once, and nothing is written to the character before it is added. */
+ * given to that pick. The guest's rand still runs once, and nothing is written to the character before it is added.
+ *
+ * A stored message that is exactly one of the slot's own defaults for the character's class and category is shown as the
+ * translated default; the character keeps the stored text. */
 #ifndef DCP_DEFAULT_MESSAGE_HOOK_H
 #define DCP_DEFAULT_MESSAGE_HOOK_H
 
@@ -35,6 +38,8 @@ typedef struct {
     uint64_t rows[DEFAULT_MESSAGE_CATEGORIES]; /* the row's empty-field text is loaded here */
     uint64_t pick;                             /* the picker reduces rand's result here */
     uint64_t picker_return;                    /* where the picker returns to in the character defaults */
+    uint64_t stored[DEFAULT_MESSAGE_CATEGORIES][2]; /* where the row's getter loads the stored text, from the main and from
+                                                       the alternate block; all 0 when a getter does not match */
 } DefaultMessageSites;
 
 /* 1 when the row code, the picker, its one call from the character defaults and the record tables all match. */
@@ -43,12 +48,17 @@ int default_message_locate(const unsigned char *image, uint64_t size, DefaultMes
 size_t default_message_stub_bytes(void);
 
 /* Takes every message from record_text (the served sheet) and hooks the rows and the pick; returns 1 when installed.
- * Writes nothing and says why when a record, the code or the stub space does not fit. */
+ * native_text (the slot's own sheet, or NULL) also hooks the getters of the stored messages. Writes nothing and says why
+ * when a record, the code or the stub space does not fit. */
 int default_message_install(unsigned char *image, uint64_t size, uint64_t entry, const char *(*record_text)(unsigned),
-                            unsigned char *stubs, size_t stubs_size);
+                            const char *(*native_text)(unsigned), unsigned char *stubs, size_t stubs_size);
 
 /* From guest code at a row: rsi becomes the class's default for that row. */
 void default_message_preview(GuestRegs *regs, DefaultMessageCategory category);
+
+/* From a getter at the load of the stored text (rdi: the character): when it is one of the slot's own defaults for the
+ * character's class and `category`, rdi moves so the load reads the translated default instead. */
+void default_message_display(GuestRegs *regs, DefaultMessageCategory category, int alternate);
 
 /* From guest code at the pick: rax becomes the variant held for the class, when the character being added has an empty
  * message. */

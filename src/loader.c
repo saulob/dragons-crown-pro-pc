@@ -526,7 +526,7 @@ static void install_text_translation(const char *settings_file, const char *imag
             if (glyphs_composed && cyrillic && !install_cyrillic_glyphs(image,size,glyph_pages,cyrillic))
                 printf("Menu & Subtitles: the Cyrillic letters could not be added to the glyph table\n");
             if (glyphs_composed && !cyrillic && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
-            default_message_install(image,size,entry,dcp_text_default_bone,message_stubs,message_stub_bytes);
+            default_message_install(image,size,entry,dcp_text_default_bone,dcp_text_native_default_bone,message_stubs,message_stub_bytes);
         }
     }
     const char *stage=dcp_text_stage_overlay(&length,&patches,&count);

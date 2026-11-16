@@ -1766,12 +1766,12 @@ void CheckPreparedTranslation(const GameBuild& build, const fs::path& game) {
     if (PtBrTranslationFiles().empty()) return;
     const TextLanguage& language = ResolveTextLanguage(&build, kPortugueseBrazilKey);
     TranslationRecipe recipe{language.suffix, PtBrTranslationFiles()};
-    if (!profile.source.empty()) recipe.source = PtBrSource(profile.source);
+    if (!profile.source.empty()) recipe.adapted_texts = recipe.source = PtBrSource(profile.source);
     recipe.font_entry = profile.font_entry;
     recipe.mark_archive = game / "DRACRO.CPK";
     recipe.glyph_table = true;
     const ArchiveTranslation result = TranslateArchive(game / profile.archive, recipe);
-    CHECK(result.error.empty() && result.overlay && result.corpus == 9670 && !result.folded);
+    CHECK(result.error.empty() && result.overlay && result.corpus == 9866 && !result.folded);
     CHECK(result.latin_glyphs == !profile.font_entry.empty());
     if (!result.overlay) return;
     size_t system_sheets = 0;
@@ -1783,7 +1783,7 @@ void CheckPreparedTranslation(const GameBuild& build, const fs::path& game) {
         ++system_sheets;
         if (profile.source == "JP") {
             const std::optional<FmsSheet> served = ParseFms(data);
-            CHECK(served && served->records[1444].find("@#(11)") != std::string::npos);
+            CHECK(served && served->records[1444].find("estabelecimento da cidade") != std::string::npos);
         }
         std::vector<uint8_t> sheet = data;
         const ExitGameLanguage* found = nullptr;

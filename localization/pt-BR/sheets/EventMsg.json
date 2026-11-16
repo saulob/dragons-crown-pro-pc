@@ -321,6 +321,7 @@
     {"index": 317, "source_sha256": "402498f5bc611aa1ae1c0cb8aa1886bd335927a0d16d0b68e084b744196d85fe", "pt_br": "□Primeira vez - Fortaleza de Bilbaron--------------------------------------------------------------------------------"},
     {"index": 318, "source_sha256": "1b484a56c4bac9c8ce495da65b96ace1e8c4c1cd14faa5bb5e5ecb7128740fee", "pt_br": "O exército de orcs atualmente controla Bilbaron, a\nfortaleza subterrânea construída no cânion."},
     {"index": 319, "source_sha256": "b842b17787126ee8e59071672e8e26242c45b5fcd5c4eea5a90167f9da8a8810", "pt_br": "O exército do rei tem montado uma ofensiva feroz para\ntentar retomar a fortaleza."},
+    {"index": [320, 337], "source_sha256": "2fab0ba30a9efad834e638a13df8752ba4fa78080a6865114b8ed5b29eaa05b8", "pt_br": "@c(17)Hobgoblin \"chef\"@/c"},
     {"index": 321, "source_sha256": "7a87ce49e289bde2324bbb931a1cf9fb80d97a03629a6f93823566f2f1f9590d", "pt_br": "Você entra na cozinha inimiga. Um chef corpulento agarra\num goblin em vez de carne, e para de repente."},
     {"index": 322, "source_sha256": "a038dce861602313664fab44a7fd6fc38ef7363c13b5b9494fb65c34acfc182e", "pt_br": "O cozinheiro, sentindo sua presença, olha diretamente para você.\nFelizmente, sua visão não é tão aguçada, então ele não o percebe."},
     {"index": 323, "source_sha256": "4d70f067af4dd0c0db153e4115ddf4417e7e953bc23e4a33e050bcc0b1c5e2a2", "pt_br": "Eventualmente, o chef volta a cortar carne. Você usa\nos gritos do goblin para mascarar sua fuga."},
