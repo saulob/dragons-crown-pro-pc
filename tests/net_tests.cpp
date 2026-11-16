@@ -1835,7 +1835,7 @@ void TestLinuxParity() {
 
     const std::string windows = ReadSource("tools/test.ps1");
     const std::string build_sh = ReadSource("tools/build.sh");
-    const size_t ninja = windows.find("& ninja -C $buildDir ");
+    const size_t ninja = windows.find("& ninja -C $buildDir dcp-");
     CHECK(ninja != std::string::npos);
     const std::string line = windows.substr(ninja, windows.find('\n', ninja) - ninja);
     size_t targets = 0;

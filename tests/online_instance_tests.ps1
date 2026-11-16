@@ -48,7 +48,7 @@ foreach ($folder in $folders.Values) { Prepare $folder 'full' }
 Prepare 'CUSA10209-1.02' 'core'
 
 # A root whose Game root line is longer than any console width the output could be formatted for.
-$wideTree = Join-Path $tree ('wide-' + ('w' * 80))
+$wideTree = Join-Path $tree ('wide-' + ('w' * [Math]::Max(80, 200 - $tree.Length - 35)))
 $wideExe = New-BuildTree $wideTree
 Prepare 'v1.03' 'full' $wideTree
 Prepare 'CUSA10209-1.00' 'full' $wideTree
@@ -106,7 +106,7 @@ Check ($unpinned.Code -eq 0 -and (Line $unpinned.Text 'Game build') -like 'the a
 $wideUs = Run @{ Name = 'a'; Build = 'CUSA10454-1.00' } $wideExe
 $wideHk = Run @{ Name = 'b'; Build = 'CUSA10209-1.00' } $wideExe
 $wideHkRoot = Join-Path $wideTree 'game\prepared\CUSA10209-1.00'
-Check ((Line $wideHk.Text 'Game root').Length -gt 160) 'wide root is longer than a console line'
+Check ($wideHkRoot.Length -gt 160 -and (Line $wideHk.Text 'Game root').Length -gt 160) 'wide root is longer than a console line'
 Check ((Line $wideHk.Text 'Game root') -eq $wideHkRoot) 'wide Asia/Hong Kong root is complete'
 Check ((Line $wideUs.Text 'Game root') -eq (Join-Path $wideTree 'game\prepared\v1.03')) 'wide USA root is complete'
 Check ((Line $wideUs.Text 'Game root') -ne (Line $wideHk.Text 'Game root')) 'wide roots stay distinguishable'

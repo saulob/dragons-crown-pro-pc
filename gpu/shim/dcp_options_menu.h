@@ -239,7 +239,7 @@ inline constexpr Setting kSettings[] = {
      DcpSettings::UnlockGallery},
     {Id::EnableBossBattle, Page::Gameplay, "enable_boss_battle", "Enable Boss Battle",
      "Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu "
-     "opens. Fights there never change campaign progress. Offline only.",
+     "opens. Fights there never change campaign progress. Online, only the host needs this option.",
      Apply::Live, kOffOn, DcpSettings::BossBattle},
     {Id::UnlockLabyrinth, Page::Gameplay, "unlock_labyrinth", "Unlock Labyrinth of Chaos",
      "Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.",

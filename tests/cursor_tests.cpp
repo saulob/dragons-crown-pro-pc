@@ -274,7 +274,11 @@ void TestWindowedAndBorderless() {
 
     const std::string window = ReadSource("gpu/shim/window.cpp");
     CHECK(!window.empty());
-    CHECK(!Contains(window, "SDL_WINDOW_FULLSCREEN"));
+    CHECK(!Contains(window, "SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN"));
+    CHECK(Contains(window, "SDL_SetWindowFullscreenMode(window, nullptr)"));
+    CHECK(Contains(window, "SDL_SetWindowFullscreen(window, borderless)"));
+    CHECK(Contains(window, "(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0"));
+    CHECK(!Contains(window, "SDL_SetWindowFullscreenMode(window, &"));
 }
 
 void TestLauncherUnaffected() {
