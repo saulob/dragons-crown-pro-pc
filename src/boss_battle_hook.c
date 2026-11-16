@@ -1367,7 +1367,7 @@ static const char *check_pause(const unsigned char *image, uint64_t size, const 
     return NULL;
 }
 
-/* DEBUG_SAULO: the cue player the menu sounds reach, through the cue lookup that reports an unknown cue ID. */
+/* The cue player the menu sounds reach, through the cue lookup that reports an unknown cue ID. */
 static const short kCuePlayer[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x58};
 enum { kCueLookupInPlayer = 0x1ee, kCueLookupMessage = 0x186 };
 
@@ -3011,7 +3011,7 @@ static void fade_scene(uint64_t owner_holder, uint32_t colour, int frames) {
 
 static void release_black(uint64_t manager, const char *why) {
     if (join_cover_holds()) return;
-    if (atomic_exchange(&join_cover, 0)) puts("DEBUG_SAULO guest join cover off");
+    atomic_store(&join_cover, 0);
     if (!atomic_exchange(&black_held, 0)) return;
     const int covered_return = atomic_exchange(&return_cover, 0);
     fade_scene(manager, FADE_CLEAR, covered_return ? RETURN_FADE_IN_FRAMES : FADE_FRAMES);
@@ -3826,13 +3826,18 @@ void GUEST_HOOK_ABI boss_battle_inn_help_line_hook(GuestRegs *regs) {
     if (!atomic_exchange(&help_closed_logged, 1)) puts("DEBUG_SAULO Boss Battle start: Inn help line closed");
 }
 
-/* DEBUG_SAULO: the three menu cues (COMMON_SELECT, COMMON_DECIDE, COMMON_CANCEL) outside a fight, one line each. */
+/* At the cue player (esi the cue): the menu cues the hidden guest join raises are not played while its cover holds. */
 void GUEST_HOOK_ABI boss_battle_cue_hook(GuestRegs *regs) {
     static const char *const kMenuCues[] = {"cursor (COMMON_SELECT)", "confirm (COMMON_DECIDE)", "cancel (COMMON_CANCEL)"};
     static atomic_int lines;
     const uint32_t cue = (uint32_t)regs->rsi;
-    if (cue < 0x6a || cue > 0x6c || boss_battle_session_active() || atomic_fetch_add(&lines, 1) >= SOUND_TRACE_LINES)
+    if (cue < 0x6a || cue > 0x6c) return;
+    if (join_cover_holds()) {
+        regs->rax = 0;
+        regs->skip = 1;
         return;
+    }
+    if (boss_battle_session_active() || atomic_fetch_add(&lines, 1) >= SOUND_TRACE_LINES) return;
     printf("DEBUG_SAULO sound: %s %s\n", bbmenu_sound_source(), kMenuCues[cue - 0x6a]);
 }
 
@@ -4135,7 +4140,8 @@ void GUEST_HOOK_ABI boss_battle_options_update_hook(GuestRegs *regs) {
                session);
     }
     drive_campaign_save(atomic_load(&screen_manager));
-    if (atomic_load(&black_held) && reopened_page_ready(regs->rbx) && !boss_battle_network_menu_returning()) {
+    if (atomic_load(&black_held) && !join_cover_holds() && reopened_page_ready(regs->rbx) &&
+        !boss_battle_network_menu_returning()) {
         puts("DEBUG_SAULO Boss Battle transition: page show complete");
         release_black(atomic_load(&screen_manager), "Boss Battle page ready");
     }
@@ -4535,8 +4541,16 @@ static void begin_guest_join_cover(void) {
     atomic_store(&join_cover, 1);
     atomic_store(&return_cover, 1);
     atomic_store(&black_held, 1);
-    fade_scene(manager, FADE_BLACK, RETURN_FADE_FRAMES);
-    puts("DEBUG_SAULO guest join cover on");
+    fade_scene(manager, FADE_BLACK, 0);
+}
+
+/* A scene the join rebuilt has a fader that starts clear: it is cut to black on its first scene frame. */
+static void keep_join_cover_black(void) {
+    const uint64_t manager = atomic_load(&screen_manager);
+    const uint64_t fader = manager ? scene_fader(manager) : 0;
+    if (!fader || fader == atomic_load(&held_fader)) return;
+    atomic_store(&held_fader, fader);
+    fade_scene(manager, FADE_BLACK, 0);
 }
 
 /* The cover never outlives the visit it hides: a join that ended, or a fight that took over the black, frees it. */
@@ -4547,9 +4561,10 @@ static void guest_join_cover_step(void) {
         atomic_store(&join_cover, 0);
         atomic_store(&return_cover, 0);
         atomic_store(&black_held, 0);
-        puts("DEBUG_SAULO guest join cover off");
     } else if (!boss_battle_online_visitor()) {
         release_black(atomic_load(&screen_manager), "the join ended");
+    } else {
+        keep_join_cover_black();
     }
 }
 

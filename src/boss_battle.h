@@ -498,7 +498,7 @@ typedef struct {
     uint64_t options_leave;    /* the Inn's Options mode, once its page closed: its first-frame check */
     uint64_t arrival_fade_in;  /* the scene's arrival step: its fade-in of the scene fader */
     uint64_t inn_help_line;    /* the Inn menu frame's call of its help line (edx 1 shows it, 0 closes it) */
-    uint64_t cue_player;       /* DEBUG_SAULO: the cue player the menu sounds reach */
+    uint64_t cue_player;       /* the cue player the menu sounds reach */
     uint64_t list_play_se;     /* a list's menu sound by SE table index */
     uint64_t get_fader, fade;  /* the scene fader of the game manager's fader owner, and its fade */
     uint64_t list_up, list_down; /* the list's cursor moves, every list's */

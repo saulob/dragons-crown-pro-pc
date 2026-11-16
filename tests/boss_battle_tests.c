@@ -6555,6 +6555,18 @@ static void run_new_inn(NewInnEntry entry, InnRun *run) {
     for (int frame = 0; frame < 16 && !page_active(); ++frame) inn_game_frame(run);
 }
 
+/* 1 when the cue player is told to skip the menu cue. */
+static int menu_cue_muted(uint32_t cue) {
+    GuestRegs regs = page_regs();
+    regs.rsi = cue;
+    boss_battle_cue_hook(&regs);
+    return (int)regs.skip;
+}
+
+static int all_menu_cues_muted(void) {
+    return menu_cue_muted(0x6a) && menu_cue_muted(0x6b) && menu_cue_muted(0x6c);
+}
+
 /* Phases A to L, on the guest, in the order of the runtime log. */
 static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
     VisitorTranscript t = {0, -1};
@@ -6599,7 +6611,8 @@ static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
     menu_scene_frame();
     PHASE_CHECK("C", "cover on once the join is committed",
                 boss_battle_guest_join_cover() && fades.calls == fades_at_join + 1 && fades.last_colour == FADE_BLACK &&
-                    fades.last_layer == FADE_LAYER);
+                    fades.last_layer == FADE_LAYER && fades.last_frames == 0);
+    PHASE_CHECK("C", "menu cues muted under the cover", all_menu_cues_muted());
 
     /* D: the Network Menu closes */
     put_pointer(shortcut_ui + 0x238, NULL);
@@ -6654,6 +6667,7 @@ static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
     PHASE_CHECK("I", "guest party sent before its page was active", run.party_before_page == 0);
     PHASE_CHECK("I", "cover on when the page is requested", run.covered_at_request);
     PHASE_CHECK("I", "cover on while the page is constructed", run.covered_at_build);
+    PHASE_CHECK("I", "menu cues play once the page is valid", !menu_cue_muted(0x6a) && !menu_cue_muted(0x6b));
     PHASE_CHECK("I", "cover on until the page is valid", run.covered_before_valid && run.released);
     PHASE_CHECK("I", "cover released through a fade in",
                 !boss_battle_guest_join_cover() && fades.last_colour == 0 && fades.last_frames > 0);
@@ -6795,8 +6809,29 @@ static void test_join_cover_cancel(void) {
     lifecycle_end();
 }
 
+static void test_join_cover_sound(void) {
+    join_cover_begin();
+    PHASE_CHECK("S1", "menu cues play before the join", !menu_cue_muted(0x6a) && !menu_cue_muted(0x6b));
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    PHASE_CHECK("S1", "menu cues play until the cover begins", !menu_cue_muted(0x6a));
+    menu_scene_frame();
+    PHASE_CHECK("S2", "cursor, confirm and cancel cues are muted under the cover", all_menu_cues_muted());
+    PHASE_CHECK("S2", "other cues are not muted", !menu_cue_muted(0x10) && !menu_cue_muted(0x6d));
+    boss_battle_online_room_left("the host closed the room");
+    menu_scene_frame();
+    PHASE_CHECK("S3", "menu cues play again once the cover is released", !menu_cue_muted(0x6a) && !menu_cue_muted(0x6c));
+    lifecycle_end();
+
+    join_cover_begin();
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 1, 0);
+    menu_scene_frame();
+    PHASE_CHECK("S4", "the host's menu cues are never muted", !menu_cue_muted(0x6a) && !menu_cue_muted(0x6b));
+    lifecycle_end();
+}
+
 static void test_visitor_lifecycle(void) {
     test_join_cover_cancel();
+    test_join_cover_sound();
     for (int entry = NEW_INN_STALE_OPTIONS; entry <= NEW_INN_MENU; ++entry)
         for (int fight_all = 0; fight_all <= 1; ++fight_all) {
             lifecycle_begin();
