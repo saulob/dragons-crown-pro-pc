@@ -519,7 +519,8 @@ void TestTransportTimeouts() {
   const auto started = std::chrono::steady_clock::now();
   CHECK(!trg::HttpGet(fixture.server.Url("/slow"), out, nullptr, options).empty());
   CHECK(out.empty());
-  CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(3));
+  const auto bound = std::chrono::milliseconds(options.total_timeout_ms + options.receive_timeout_ms * 2);
+  CHECK(std::chrono::steady_clock::now() - started < bound);
 
   fixture.server.Script("/ok", {Body("hello")});
   CHECK(trg::HttpGet(fixture.server.Url("/ok"), out, nullptr, options).empty());
