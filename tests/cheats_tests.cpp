@@ -3582,6 +3582,385 @@ void TestExperienceMultiplier() {
     CHECK(ReadSource("launcher/launcher.cpp").find("kExperienceChoices") != std::string::npos);
 }
 
+// The Chimera fight trace (DCP-8W3A9L): a world of one game object, its round state, a Chimera's parts and an image that
+// holds the class names, all in real memory the handlers read as the game's.
+struct TraceMemory {
+    template <typename T>
+    static T Load(uint64_t address) {
+        T value;
+        std::memcpy(&value, reinterpret_cast<const void*>(address), sizeof(value));
+        return value;
+    }
+    uint64_t U64(uint64_t a) const { return Load<uint64_t>(a); }
+    int32_t S32(uint64_t a) const { return Load<int32_t>(a); }
+    uint8_t U8(uint64_t a) const { return Load<uint8_t>(a); }
+};
+
+std::vector<std::string> g_trace_lines;
+int64_t g_trace_now = 1000;
+uint64_t g_trace_game = 0;
+
+void CollectTraceLine(const char* line) {
+    g_trace_lines.emplace_back(line);
+}
+int64_t TraceNow() {
+    return g_trace_now;
+}
+uint64_t GUEST_HOOK_ABI TraceGameContext(uint64_t) {
+    return g_trace_game;
+}
+
+struct TraceWorld {
+    alignas(16) uint8_t image[0x400] = {};
+    alignas(16) uint8_t game[0x200] = {};
+    alignas(16) uint8_t round[0x200] = {};
+    alignas(16) uint8_t settings[0x100] = {};
+    static constexpr uint32_t kChimera = 0x100, kBody = 0x120, kGoat = 0x140, kSnake = 0x160, kGoblin = 0x180;
+
+    TraceWorld() {
+        const char names[][16] = {"DcChimera", "DcChimeraBody", "DcChimeraGoat", "DcChimeraSnake", "DcGoblin"};
+        const uint32_t at[] = {kChimera, kBody, kGoat, kSnake, kGoblin};
+        for (size_t i = 0; i < 5; ++i) {
+            std::memcpy(image + at[i], names[i], 16);
+        }
+        FakeGame::Store<uint64_t>(game + 0x88, reinterpret_cast<uint64_t>(round));
+        FakeGame::Store<uint64_t>(game + 0x120, reinterpret_cast<uint64_t>(settings));
+        g_trace_game = reinterpret_cast<uint64_t>(game);
+        Place(0x11, 63, 5, true);
+    }
+    void Place(int32_t round_index, int32_t floor, int32_t room, bool ultimate) {
+        FakeGame::Store<int32_t>(round + 0x108, round_index);
+        FakeGame::Store<int32_t>(round + 0xa8, floor);
+        FakeGame::Store<int32_t>(round + 0xb4, room);
+        FakeGame::Store<uint8_t>(settings + 0x89, ultimate ? 1 : 0);
+    }
+    uint64_t Begin() const { return reinterpret_cast<uint64_t>(image); }
+    uint64_t End() const { return reinterpret_cast<uint64_t>(image) + sizeof(image); }
+    void Name(FakeGame& game_part, uint32_t at) const {
+        FakeGame::Store<uint64_t>(game_part.owner + 0xb8, Begin() + at);
+    }
+};
+
+void TraceStart(const TraceWorld& world) {
+    g_trace_lines.clear();
+    g_trace_now = 1000;
+    GuestFunctions functions{};
+    functions.now_ms = TraceNow;
+    functions.game_context = TraceGameContext;
+    SetGuestFunctions(functions);
+    ConfigureBossTrace(world.Begin(), world.End(), CollectTraceLine);
+}
+
+size_t TraceCount(const std::string& text) {
+    size_t count = 0;
+    for (const std::string& line : g_trace_lines) {
+        count += line.find(text) != std::string::npos ? 1 : 0;
+    }
+    return count;
+}
+
+bool TraceHas(const std::string& text) {
+    return TraceCount(text) > 0;
+}
+
+void TestBossTrace() {
+    using dcp::bosstrace::Part;
+    TraceWorld world;
+    FakeGame player1(true, 0), chimera(false, 0), goat(false, 0), goblin(false, 0);
+    world.Name(chimera, TraceWorld::kChimera);
+    world.Name(goat, TraceWorld::kGoat);
+    world.Name(goblin, TraceWorld::kGoblin);
+    const auto set_hp = [](FakeGame& unit, int32_t hp) { FakeGame::Store<int32_t>(unit.unit + kUnitHpOffset, hp); };
+    const auto hit = [&](FakeGame& unit, int32_t amount) {
+        GuestRegs regs = unit.DamageRegs(amount);
+        HealthDamageHook(&regs);
+        return static_cast<int32_t>(regs.rcx);
+    };
+    const auto lethal_check = [&](FakeGame& unit, int32_t amount) {
+        GuestRegs regs{};
+        regs.rax = static_cast<uint32_t>(amount);
+        regs.r15 = unit.Owner();
+        LethalCheckHook(&regs);
+        return static_cast<int32_t>(regs.rax);
+    };
+    const auto tick = [&](int64_t advance_ms) {
+        g_trace_now += advance_ms;
+        GuestRegs regs{};
+        regs.rdi = player1.Unit();
+        PlayerTickHook(&regs);
+    };
+
+    // The class names the trace recognizes, and nothing outside the image or off the list.
+    dcp::bosstrace::ChimeraTrace names;
+    names.Configure(world.Begin(), world.End(), CollectTraceLine);
+    CHECK(names.Identify(TraceMemory{}, chimera.Owner()) == Part::Chimera);
+    CHECK(names.Identify(TraceMemory{}, goat.Owner()) == Part::Goat);
+    CHECK(names.Identify(TraceMemory{}, goblin.Owner()) == Part::None);
+    FakeGame body(false, 0), snake(false, 0), outside(false, 0);
+    world.Name(body, TraceWorld::kBody);
+    world.Name(snake, TraceWorld::kSnake);
+    FakeGame::Store<uint64_t>(outside.owner + 0xb8, world.End() - 8); // too close to the image's end to read a name
+    CHECK(names.Identify(TraceMemory{}, body.Owner()) == Part::Body && names.Identify(TraceMemory{}, snake.Owner()) == Part::Snake);
+    CHECK(names.Identify(TraceMemory{}, outside.Owner()) == Part::None && names.Identify(TraceMemory{}, 0) == Part::None);
+    FakeGame::Store<uint64_t>(outside.owner + 0xb8, 0x10);
+    CHECK(names.Identify(TraceMemory{}, outside.Owner()) == Part::None);
+    const auto context = dcp::bosstrace::ReadContext(TraceMemory{}, g_trace_game);
+    CHECK(context.valid && context.round == 0x11 && context.floor == 63 && context.room == 5 && context.ultimate);
+    CHECK(!dcp::bosstrace::ReadContext(TraceMemory{}, 0).valid);
+
+    // Cheats off: the boss is seen, its HP steps are traced, and the game's hits and HP are exactly the game's own.
+    runtime_cheats_start(0, 1, 1, 100, 1);
+    TraceStart(world);
+    set_hp(chimera, 10000);
+    set_hp(goat, 2000);
+    CHECK(hit(chimera, 700) == 700 && FakeGame::Load<int32_t>(chimera.unit + kUnitHpOffset) == 10000);
+    CHECK(lethal_check(chimera, 700) == 700);
+    tick(300);
+    CHECK(TraceHas("Chimera fight started: floor 64, room 5, round 17, ultimate=1, damage multiplier=1x"));
+    CHECK(TraceHas("Chimera first sight: hp=10000 hit=700"));
+    CHECK(TraceHas("Tower floor 64: room 5"));
+    const size_t after_first = g_trace_lines.size();
+    tick(300);
+    CHECK(g_trace_lines.size() == after_first); // a sample with no change prints nothing
+    set_hp(chimera, 4900);
+    tick(300);
+    CHECK(TraceHas("Chimera hp 4900/10000 (40%)"));
+    CHECK(TraceHas("jumped several steps"));
+    set_hp(chimera, 0);
+    tick(300);
+    CHECK(TraceHas("Chimera defeated: hp=0/10000 hits=1 biggest hit=700"));
+    CHECK(TraceCount("all tracked Chimera parts are down or gone") == 1);
+    CHECK(hit(goat, 50) == 50);
+    tick(300);
+    set_hp(goat, 0);
+    tick(300);
+    CHECK(TraceHas("ChimeraGoat first sight: hp=2000 hit=50") && TraceHas("ChimeraGoat defeated"));
+    CHECK(TraceCount("all tracked Chimera parts are down or gone") == 2);
+
+    // Leaving the dungeon ends the fight once; the trace holds nothing for the next one.
+    const size_t before_leave = g_trace_lines.size();
+    world.Place(9, 0, 0, false);
+    tick(300);
+    CHECK(g_trace_lines.size() == before_leave + 1 && TraceHas("Chimera fight ended: round 9, floor 1, parts seen=2, down or gone=2"));
+    tick(300);
+    CHECK(g_trace_lines.size() == before_leave + 1);
+    world.Place(0x11, 63, 5, true);
+
+    // Another monster, another round and an unlisted floor stay out of the trace.
+    TraceStart(world);
+    set_hp(goblin, 500);
+    CHECK(hit(goblin, 50) == 50);
+    world.Place(7, 3, 1, false);
+    set_hp(chimera, 10000);
+    CHECK(hit(chimera, 50) == 50);
+    tick(300);
+    CHECK(g_trace_lines.empty());
+    world.Place(0x11, 20, 2, false);
+    tick(300);
+    CHECK(g_trace_lines.empty());
+
+    // The floor alone is traced: entering, each room, leaving.
+    world.Place(0x11, 63, 1, true);
+    tick(300);
+    world.Place(0x11, 63, 2, true);
+    tick(300);
+    tick(300);
+    world.Place(0x11, 64, 0, true);
+    tick(300);
+    CHECK(g_trace_lines.size() == 3 && TraceHas("Tower floor 64: room 1") && TraceHas("Tower floor 64: room 2") &&
+          TraceHas("left Tower floor 64: round 17, floor 65"));
+
+    // Damage Multiplier: the lethal check is traced where the game decides, a changed setting is printed once, and the
+    // hooks' own results are the ones the cheat produces without the trace.
+    world.Place(0x11, 63, 5, true);
+    runtime_cheats_start(0, 1, 1, 100, 100);
+    TraceStart(world);
+    set_hp(chimera, 2500);
+    CHECK(lethal_check(chimera, 30) == 3000 && hit(chimera, 30) == 30 &&
+          FakeGame::Load<int32_t>(chimera.unit + kUnitHpOffset) == 30);
+    CHECK(TraceHas("Chimera lethal check: hp=2500 hit=30 damage multiplier=100x native lethal=0"));
+    tick(300);
+    CHECK(!TraceHas("Chimera defeated"));
+    runtime_cheats_start(0, 1, 1, 100, 10);
+    tick(300);
+    CHECK(TraceHas("damage multiplier 100x -> 10x"));
+    tick(1200);
+    CHECK(TraceHas("Chimera lethal check left hp=30/2500"));
+    const size_t settled = g_trace_lines.size();
+    tick(300);
+    CHECK(g_trace_lines.size() == settled); // said once
+
+    // A part that is freed or reused stops being read.
+    FakeGame::Store<uint64_t>(goat.owner + 0xb8, world.Begin() + TraceWorld::kGoblin);
+    tick(300);
+    CHECK(!TraceHas("ChimeraGoat") && hit(goat, 10) == 10); // named like a Goblin now: never tracked
+    FakeGame::Store<uint64_t>(goat.owner + 0xb8, world.Begin() + TraceWorld::kGoat);
+    set_hp(goat, 100);
+    CHECK(hit(goat, 10) == 10);
+    FakeGame::Store<uint64_t>(goat.unit + kUnitOwnerOffset, 0);
+    tick(300);
+    CHECK(TraceHas("ChimeraGoat removed: last hp=100/100"));
+
+    // The trace is bounded: a run of changes ends in one notice and then nothing.
+    TraceStart(world);
+    world.Place(0x11, 63, 5, true);
+    set_hp(chimera, 100000);
+    CHECK(hit(chimera, 1) == 1);
+    for (int step = 0; step < 400; ++step) {
+        set_hp(chimera, step % 2 == 0 ? 20000 : 90000);
+        tick(300);
+    }
+    CHECK(g_trace_lines.size() == dcp::bosstrace::kMaxLines + 1 && g_trace_lines.back().find("line limit reached") != std::string::npos);
+
+    // Without a game context function the hooks trace nothing and read nothing extra.
+    SetGuestFunctions({nullptr, nullptr});
+    ConfigureBossTrace(world.Begin(), world.End(), CollectTraceLine);
+    g_trace_lines.clear();
+    CHECK(hit(chimera, 5) == 5);
+    tick(300);
+    CHECK(g_trace_lines.empty());
+    runtime_cheats_start(0, 1, 1, 100, 1);
+    ConfigureBossTrace(0, 0, nullptr);
+    SetGuestFunctions({nullptr, nullptr});
+}
+
+// The fields the trace reads, in every local boot image: the floor and round state, the Tower flag, the class name the
+// constructors store, and the floor-to-boss table that makes floor 64 the Chimera.
+bool ReadBootImage(const fs::path& path, std::vector<uint8_t>* image) {
+    std::ifstream in(path, std::ios::binary);
+    auto read64 = [&in]() {
+        uint64_t value = 0;
+        in.read(reinterpret_cast<char*>(&value), 8);
+        return value;
+    };
+    char magic[8] = {};
+    in.read(magic, 8);
+    if (!in || std::memcmp(magic, "DCPBOOT1", 8) != 0) {
+        return false;
+    }
+    const uint64_t size = read64();
+    read64();
+    const uint64_t segments = read64(), relocations = read64(), imports = read64();
+    read64();
+    for (int i = 0; i < 5; ++i) read64();
+    const uint64_t modules = read64();
+    for (uint64_t i = 0; i < modules * 7; ++i) read64();
+    const uint64_t bindings = read64();
+    for (uint64_t i = 0; i < bindings * 3 + segments * 3; ++i) read64();
+    in.seekg(static_cast<std::streamoff>(imports * 128 + relocations * 32), std::ios::cur);
+    image->resize(size);
+    in.read(reinterpret_cast<char*>(image->data()), static_cast<std::streamsize>(size));
+    return static_cast<bool>(in);
+}
+
+// A byte pattern with -1 for the bytes that differ between builds; the offsets of every match.
+std::vector<size_t> FindPattern(const std::vector<uint8_t>& image, const std::vector<int>& pattern) {
+    std::vector<size_t> found;
+    const size_t end = std::min<size_t>(image.size(), 0x800000);
+    for (size_t at = 0; at + pattern.size() <= end; ++at) {
+        size_t i = 0;
+        while (i < pattern.size() && (pattern[i] < 0 || image[at + i] == pattern[i])) {
+            ++i;
+        }
+        if (i == pattern.size()) {
+            found.push_back(at);
+        }
+    }
+    return found;
+}
+
+uint64_t CallTarget(const std::vector<uint8_t>& image, size_t call) {
+    int32_t displacement;
+    std::memcpy(&displacement, image.data() + call + 1, 4);
+    return call + 5 + displacement;
+}
+
+void CheckBossTraceImage(const std::string& label, const std::vector<uint8_t>& image) {
+    const std::vector<int> tower_flag = {0x48, 0x8b, 0xbb, 0x20, 0x01, 0x00, 0x00, 0x48, 0x85, 0xff, 0x74, -1, 0x48, 0x83, 0xc7, 0x70,
+                                         0xe8, -1,   -1,   -1,   -1,   0x84, 0xc0, 0x74, -1,   0x48, 0x8b, 0xbb, 0x88, 0x00, 0x00, 0x00,
+                                         0xe8, -1,   -1,   -1,   -1,   0x89, 0xc1};
+    const std::vector<int> ultimate_flag = {0x8a, 0x47, 0x19, 0xc3};
+    const std::vector<int> round_is_dungeon = {0x83, 0xbf, 0x08, 0x01, 0x00, 0x00, 0x11, 0x0f, 0x94, 0xc0, 0xc3};
+    const std::vector<int> floor_room = {0x48, 0x8b, 0x80, 0x88, 0x00, 0x00, 0x00, 0x48, 0x8d, 0x35, -1,   -1,   -1,   -1,   0x4c, 0x89, 0xe7,
+                                         0x8b, 0x98, 0xa8, 0x00, 0x00, 0x00, 0x48, 0x63, 0x80, 0xb4, 0x00, 0x00, 0x00};
+    const std::vector<int> floor_table = {0x48, 0x63, 0xc6, 0x48, 0x69, 0xc8, 0x1f, 0x85, 0xeb, 0x51, 0x48, 0x89, 0xca, 0x48, 0xc1, 0xf9, 0x25,
+                                          0x48, 0xc1, 0xea, 0x3f, 0x01, 0xd1, 0x48, 0x8d, 0x15, -1,   -1,   -1,   -1,   0x6b, 0xc9, 0x64,
+                                          0x29, 0xc8, 0x48, 0x98, 0x0f, 0xb6, 0x04, 0x02, 0xc3};
+    const std::vector<int> floor_seed_call = {0xe8, -1, -1, -1, -1, 0x48, 0x8b, 0x4d, 0x90, 0x4c, 0x89, 0xf7, 0x8d, 0x34, 0x08,
+                                              0xe8, -1, -1, -1, -1, 0x48, 0x8b, 0x8b, 0x60, 0x05, 0x00, 0x00, 0x48, 0x98};
+    CHECK(FindPattern(image, tower_flag).size() == 1);
+    CHECK(FindPattern(image, ultimate_flag).size() == 1);
+    CHECK(FindPattern(image, round_is_dungeon).size() == 1);
+    CHECK(FindPattern(image, floor_room).size() == 1);
+    const std::vector<size_t> lookups = FindPattern(image, floor_table), seeds = FindPattern(image, floor_seed_call);
+    CHECK(lookups.size() == 1 && seeds.size() == 1);
+    if (lookups.size() != 1 || seeds.size() != 1) {
+        std::printf("boss trace image %s: floor table pattern missing\n", label.c_str());
+        return;
+    }
+
+    // The seed the floor adds is the constant 1, and the table behind it sends floor 64 (seed 64) to boss slot 11, the
+    // Chimera's room among the 18 boss rooms.
+    const size_t seed_call = seeds[0];
+    const uint64_t seed_function = CallTarget(image, seed_call);
+    const uint8_t seed_body[] = {0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};
+    CHECK(seed_function + sizeof(seed_body) <= image.size() && std::memcmp(image.data() + seed_function, seed_body, sizeof(seed_body)) == 0);
+    const size_t lookup = lookups[0];
+    int32_t displacement;
+    std::memcpy(&displacement, image.data() + lookup + 26, 4);
+    const uint64_t table = lookup + 30 + displacement;
+    CHECK(table + 100 <= image.size());
+    if (table + 100 <= image.size()) {
+        const int seed = 1 + dcp::bosstrace::kTowerBossFloor;
+        CHECK(image[table + seed % 100] % 18 == 11);
+        for (int floor = 0; floor < 99; ++floor) {
+            CHECK(image[table + (1 + floor) % 100] < 100);
+        }
+    }
+
+    // The Chimera's constructors store the class name at +0xb8.
+    const char name[] = "DcChimera";
+    const std::vector<int> bytes(name, name + sizeof(name));
+    const std::vector<size_t> names = FindPattern(image, bytes);
+    CHECK(names.size() == 1);
+    if (names.size() == 1) {
+        size_t stored = 0, references = 0;
+        for (size_t at = 3; at + 80 < 0x800000 && at + 80 < image.size(); ++at) {
+            int32_t disp;
+            std::memcpy(&disp, image.data() + at + 3, 4);
+            if (image[at] == 0x48 && image[at + 1] == 0x8d && (image[at + 2] & 0xc7) == 0x05 && at + 7 + disp == names[0]) {
+                ++references;
+                for (size_t k = at + 7; k < at + 80; ++k) {
+                    if ((image[k] == 0x48 || image[k] == 0x49 || image[k] == 0x4c || image[k] == 0x4d) && image[k + 1] == 0x89 &&
+                        (image[k + 2] & 0xc0) == 0x80 && image[k + 3] == 0xb8 && image[k + 4] == 0 && image[k + 5] == 0 && image[k + 6] == 0) {
+                        ++stored;
+                        break;
+                    }
+                }
+            }
+        }
+        CHECK(references == 2 && stored == 2);
+    }
+}
+
+void TestBossTraceImages() {
+    const char* const folders[] = {"v1.03", "CUSA07001-1.00", "CUSA07001-1.02", "CUSA07001-1.03", "CUSA10209-1.00"};
+    int checked = 0;
+    for (const char* folder : folders) {
+        std::vector<uint8_t> image;
+        if (ReadBootImage(fs::path(DCP_SOURCE_DIR) / "build" / "image" / folder / "boot.bin", &image)) {
+            CheckBossTraceImage(folder, image);
+            ++checked;
+        }
+    }
+    std::vector<uint8_t> update;
+    if (ReadBootImage(fs::path(DCP_SOURCE_DIR) / "build" / "research" / "image" / "CUSA10454-1.01" / "boot.bin", &update)) {
+        CheckBossTraceImage("CUSA10454-1.01", update);
+        ++checked;
+    }
+    std::printf("boss trace: %d local boot images checked\n", checked);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -3609,6 +3988,8 @@ int main(int argc, char** argv) {
     TestExperienceMultiplier();
     TestDamageTaken();
     TestDamageMultiplier();
+    TestBossTrace();
+    TestBossTraceImages();
     TestDurability();
     TestDurabilityRefill();
     TestLives();

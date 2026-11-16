@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "boss_trace.h"
 #include "feature_sites.h"
 #include "guest_hook.h"
 
@@ -55,8 +56,13 @@ struct GuestFunctions {
     void(GUEST_HOOK_ABI* write_stats)(uint64_t record, int32_t pattern, int32_t arg2, int32_t level,
                                       int32_t arg1) = nullptr;
     int64_t (*now_ms)() = nullptr;
+    uint64_t(GUEST_HOOK_ABI* game_context)(uint64_t unit) = nullptr;
 };
 void SetGuestFunctions(const GuestFunctions& functions);
+
+// The Chimera fight trace: the image the class names lie in and where its lines go. Setting it clears the trace.
+void ConfigureBossTrace(uint64_t image_begin, uint64_t image_end, bosstrace::ChimeraTrace::Sink sink);
+void PrintBossTraceLine(const char* line);
 
 std::span<const GuestHook> Hooks();
 

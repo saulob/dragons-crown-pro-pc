@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "boss_trace.h"
 #include "dcp_cheats.h"
 #include "runtime_cheats.h"
 
@@ -86,6 +87,7 @@ constexpr uint64_t kGameGoldContextOffset = 0x88;  // the object AddGold and Get
 
 GuestFunctions g_guest{};
 FrozenHealth g_frozen;
+bosstrace::ChimeraTrace g_boss_trace;
 
 struct PartyUnit {
     uint64_t unit = 0;
@@ -144,13 +146,51 @@ void MultiplyHpLoss(const HostMemory& memory, uint64_t owner, uint64_t unit, Uni
     }
 }
 
+bosstrace::Context BossContext(const HostMemory& memory, uint64_t unit) {
+    if (g_guest.game_context == nullptr || unit == 0) {
+        return {};
+    }
+    return bosstrace::ReadContext(memory, g_guest.game_context(unit));
+}
+
+void TraceBossHit(const HostMemory& memory, uint64_t owner, uint64_t unit, int32_t amount, bool lethal_check) {
+    if (unit == 0 || memory.U64(unit + kUnitOwnerOffset) != owner) {
+        return;
+    }
+    const bosstrace::Part part = g_boss_trace.Identify(memory, owner);
+    if (part != bosstrace::Part::None) {
+        g_boss_trace.Observe(memory, part, owner, unit, amount, runtime_cheat_damage_multiplier(), lethal_check,
+                             BossContext(memory, unit), NowMs());
+    }
+}
+
+void SampleBossTrace(uint64_t player) {
+    const int64_t now = NowMs();
+    if (g_boss_trace.SampleDue(now)) {
+        const HostMemory memory;
+        g_boss_trace.Sample(memory, BossContext(memory, player), runtime_cheat_damage_multiplier(), now);
+    }
+}
+
 } // namespace
+
+void ConfigureBossTrace(uint64_t image_begin, uint64_t image_end, bosstrace::ChimeraTrace::Sink sink) {
+    g_boss_trace.Configure(image_begin, image_end, sink);
+}
+
+void PrintBossTraceLine(const char* line) {
+    std::puts(line);
+}
 
 // In the hit check, before the game compares the target's HP with the hit to choose a lethal reaction or a break
 // (eax = the hit, r15 = the target's owner).
 void GUEST_HOOK_ABI LethalCheckHook(GuestRegs* regs) {
     const int multiplier = runtime_cheat_damage_multiplier();
     const int32_t amount = static_cast<int32_t>(regs->rax);
+    if (regs->r15 != 0) {
+        const HostMemory memory;
+        TraceBossHit(memory, regs->r15, memory.U64(regs->r15 + kOwnerUnitOffset), amount, true);
+    }
     if (multiplier == kDamageMultiplierOff || amount <= 0) {
         return;
     }
@@ -161,6 +201,10 @@ void GUEST_HOOK_ABI LethalCheckHook(GuestRegs* regs) {
 // Damage Multiplier leaves the amount alone, so every reaction, effect and total sees the game's own hit.
 void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
     const int32_t amount = static_cast<int32_t>(regs->rcx);
+    if (regs->r15 != 0 && regs->rbp != 0) {
+        const HostMemory memory;
+        TraceBossHit(memory, regs->r15, memory.U64(regs->rbp - kDamageUnitFrameOffset), amount, false);
+    }
     const int taken = runtime_cheat_damage_taken();
     const int multiplier = runtime_cheat_damage_multiplier();
     if (amount == 0 || g_applying_health_action ||
@@ -631,6 +675,9 @@ void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
         }
     }
     const UnitKind kind = Classify(regs->rdi);
+    if (kind == UnitKind::PlayerOne) {
+        SampleBossTrace(regs->rdi);
+    }
     const bool ally = kind == UnitKind::OtherPlayer && IsAlly(HostMemory{}, regs->rdi);
     if (ally) {
         RememberAlly(regs->rdi);
@@ -832,6 +879,10 @@ uint64_t GameContext(uint64_t unit) {
     return reinterpret_cast<Virtual>(method)(unit);
 }
 
+uint64_t GUEST_HOOK_ABI GameContextOf(uint64_t unit) {
+    return GameContext(unit);
+}
+
 uint64_t GUEST_HOOK_ABI GameGoldContext(uint64_t unit) {
     const dcp::cheats::HostMemory memory;
     const uint64_t game = GameContext(unit);
@@ -884,9 +935,12 @@ FunctionOffsets StaticOffsets() {
 
 // The game functions the actions call. The static image's are checked by prologue; a located set was matched by the
 // locator's signatures already.
-void BindFunctions(uint8_t* image, const FunctionOffsets& f, bool check_prologues) {
+void BindFunctions(uint8_t* image, uint64_t size, const FunctionOffsets& f, bool check_prologues) {
     dcp::cheats::GuestFunctions functions;
     functions.save_record = GameSaveRecord;
+    functions.game_context = GameContextOf;
+    dcp::cheats::ConfigureBossTrace(reinterpret_cast<uint64_t>(image), reinterpret_cast<uint64_t>(image) + size,
+                                    dcp::cheats::PrintBossTraceLine);
     const auto at = [&](DcpCheatFunction function) { return image + f.at[function]; };
     const auto fits = [&](bool matches) { return !check_prologues || matches; };
     if (fits(PrologueMatches(image, kRecordModeOffset, kRecordModePrologue) &&
@@ -971,7 +1025,7 @@ extern "C" int runtime_cheat_hooks_install(uint8_t* image, uint64_t size, uint64
         std::printf("Cheats: unavailable\n");
         return 0;
     }
-    BindFunctions(image, StaticOffsets(), true);
+    BindFunctions(image, size, StaticOffsets(), true);
     std::printf("Cheats: %zu of %zu native hooks installed\n", installed, hooks.size());
     return 1;
 }
@@ -996,7 +1050,7 @@ extern "C" int runtime_cheat_hooks_install_located(uint8_t* image, uint64_t size
     }
     FunctionOffsets functions{};
     for (size_t i = 0; i < DCP_CHEAT_FUNCTIONS; ++i) functions.at[i] = sites->functions[i];
-    BindFunctions(image, functions, false);
+    BindFunctions(image, size, functions, false);
     std::printf("Cheats: %zu/%zu hooks, %d/%d functions, layout verified by signature\n", hooks.size(), hooks.size(),
                 DCP_CHEAT_FUNCTIONS, DCP_CHEAT_FUNCTIONS);
     return 1;
