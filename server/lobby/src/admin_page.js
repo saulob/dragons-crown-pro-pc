@@ -98,6 +98,15 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       <p id="story-users-note" class="muted"></p>
       <div class="scroll"><table id="story-users"></table></div>
     </div>
+    <h2 class="section">Boss Battle Online</h2>
+    <div class="panel">
+      <p id="boss-note" class="muted"></p>
+      <div class="cards" id="boss-live"></div>
+      <div class="cards" id="boss-totals"></div>
+      <h2>Top Bosses</h2>
+      <p id="boss-top-note" class="muted"></p>
+      <div class="scroll"><table id="boss-top"></table></div>
+    </div>
     <h2 class="section">Historical activity</h2>
     <div class="panel">
       <h2>Usage over time</h2>
@@ -927,16 +936,45 @@ export const ADMIN_JS = String.raw`(function () {
       timeLabel.format(data.since) + ' (Sao Paulo), when this was first started; earlier use is not known. Parties created are story rooms hosted, ' +
       'guest joins are successful joins of a story room (leaving and rejoining counts again), and sessions are accounts taking part in a room, once per room as host or guest.';
     usersNote.textContent = data.users.length
-      ? 'Accounts that hosted or joined a story room, playing now first, then the most recent. Enabling the option alone is not use.'
+      ? 'The 10 most recent users: accounts that hosted or joined a story room, playing now first. Enabling the option alone is not use.'
       : 'No Early Story Online session has been recorded yet.';
     var users = data.users.slice().sort(function (a, b) {
       return (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.last_used - a.last_used;
-    });
+    }).slice(0, 10);
     var node = $('story-users');
     if (!users.length) { clear(node); return; }
     table(node, ['Online Name', 'Account ID', 'Role', 'Sessions', 'Last Used', 'Status'], users.map(function (u) {
       return [u.name || '–', u.account, u.role, fmt(u.sessions), timeLabel.format(u.last_used), storyStatus(u)];
     }), function (i) { return users[i].active ? 'live' : ''; });
+  }
+
+  function boss(data) {
+    var live = $('boss-live');
+    var totals = $('boss-totals');
+    var note = $('boss-note');
+    var topNote = $('boss-top-note');
+    [live, totals].forEach(clear);
+    if (!data) {
+      note.textContent = 'The service has not reported Boss Battle Online yet.';
+      topNote.textContent = '';
+      clear($('boss-top'));
+      return;
+    }
+    live.appendChild(card('Boss Battle parties', fmt(data.live.parties)));
+    live.appendChild(card('Waiting for player', fmt(data.live.waiting)));
+    live.appendChild(card('Boss Battle players', fmt(data.live.players)));
+    totals.appendChild(card('Parties created', fmt(data.totals.parties_created)));
+    totals.appendChild(card('Boss plays', fmt(data.totals.plays)));
+    totals.appendChild(card('Unique users', fmt(data.totals.users)));
+    note.textContent = 'Parties (two or more connected players), waiting rooms (one) and players are live. Totals count from ' +
+      timeLabel.format(data.since) + ' (Sao Paulo), when this was first started; earlier use is not known. Parties created are Boss Battle rooms ' +
+      'that reached two connected players, once per room however often players come and go. A boss play is one boss started by a host in an online ' +
+      'Boss Battle room; republished state and guests do not count again, and each boss of Fight All counts. Unique users are accounts that were in a party.';
+    var top = data.top.slice(0, 10);
+    topNote.textContent = top.length ? 'The 10 most played bosses.' : 'No Boss Battle Online boss has been played yet.';
+    var node = $('boss-top');
+    if (!top.length) { clear(node); return; }
+    table(node, ['Rank', 'Boss', 'Plays'], top.map(function (b) { return [String(b.rank), b.name, fmt(b.plays)]; }));
   }
 
   function health(history) {
@@ -1267,6 +1305,7 @@ export const ADMIN_JS = String.raw`(function () {
     activity(history);
     parties(history);
     story(summary.story);
+    boss(summary.boss);
     health(history);
     usageChart($('usage'), history);
     barChart($('h-sessions'), history.daily, 'sessions', 'Sessions');

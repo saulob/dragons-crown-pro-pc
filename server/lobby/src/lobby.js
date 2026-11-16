@@ -9,6 +9,7 @@ import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
 import { Metrics, countryCode, platformBit, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
+import { BOSS_STATE_ATTR, BossUsage } from './boss_usage.js';
 import { STORY_ROLES, STORY_SEEN_PER_ROOM, StoryUsage, storyRole } from './story_usage.js';
 
 export const PROTOCOL = 1;
@@ -246,6 +247,8 @@ export class Lobby {
     this.metrics = new Metrics(host.sql, () => host.now());
     this.story = new StoryUsage(host.sql, () => host.now());
     if (!this.meta('story_since')) this.setMeta('story_since', host.now());
+    this.boss = new BossUsage(host.sql);
+    if (!this.meta('boss_since')) this.setMeta('boss_since', host.now());
     this.incidents = new IncidentDesk(host.sql, this.meta('salt'));
     this.alarmAt = options.alarmAt ?? null;
     this.guards = {
@@ -558,7 +561,7 @@ export class Lobby {
   }
 
   metricsSummary() {
-    return { ...this.metrics.summary(this.liveMetrics()), story: this.storySummary() };
+    return { ...this.metrics.summary(this.liveMetrics()), story: this.storySummary(), boss: this.bossSummary() };
   }
 
   // Early Story Online as the dashboard shows it: rooms and seats from the live tables, history from the counters.
@@ -593,6 +596,40 @@ export class Lobby {
       users: this.story.users(active.keys()).map((u) => ({ name: u.name, account: u.account, role: storyRole(u),
         sessions: u.hosted + u.guested, last_used: u.last_used, active: active.get(u.account) ?? null })),
     };
+  }
+
+  // Boss Battle Online as the dashboard shows it: a party is two or more connected players in a Boss Battle room.
+  bossSummary() {
+    const live = { rooms: 0, parties: 0, waiting: 0, players: 0 };
+    const seats = new Map();
+    for (const m of this.host.sql.all('SELECT room FROM members WHERE conn IS NOT NULL')) {
+      seats.set(m.room, (seats.get(m.room) ?? 0) + 1);
+    }
+    for (const room of this.host.sql.all('SELECT id, ints FROM rooms')) {
+      if (roomBossBattle(room) <= 0) continue;
+      const connected = seats.get(room.id) ?? 0;
+      live.rooms += 1;
+      live.players += connected;
+      if (connected > 1) live.parties += 1;
+      else if (connected === 1) live.waiting += 1;
+    }
+    return { since: Number(this.meta('boss_since')), live, totals: this.boss.totals(), top: this.boss.top() };
+  }
+
+  // A Boss Battle room counts as a party once, when it first holds two connected players; later joins, rejoins and
+  // republished state never count it again.
+  noteBossParty(roomId) {
+    this.track(() => {
+      const members = this.host.sql.all('SELECT account FROM members WHERE room = ? AND conn IS NOT NULL', roomId);
+      const room = this.host.sql.get('SELECT boss_party FROM rooms WHERE id = ?', roomId);
+      if (!room || members.length < 2) return;
+      if (room.boss_party) {
+        for (const m of members) this.boss.noteUser(m.account);
+        return;
+      }
+      this.host.sql.run('UPDATE rooms SET boss_party = 1 WHERE id = ?', roomId);
+      this.boss.partyCreated(members.map((m) => m.account));
+    });
   }
 
   // One account's first seat in this story room, as host or guest: counted once however it leaves, returns or resumes.
@@ -1303,6 +1340,7 @@ const HANDLERS = {
       this.track(() => this.metrics.count('story_guest_joins'));
       this.noteStoryParticipation(room.id, att, STORY_ROLES.guest);
     }
+    if (boss > 0) this.noteBossParty(room.id);
     return { room: this.fullRoom(this.roomRow(room.id)), me: memberId };
   },
 
@@ -1366,6 +1404,10 @@ const HANDLERS = {
     if (flags === room.flags && binIntText === room.bin_int) return {};
     this.limitWrite(att, 'state');
     this.host.sql.run('UPDATE rooms SET flags = ?, bin_int = ? WHERE id = ?', flags, binIntText, room.id);
+    if (roomBossBattle(room) > 0) {
+      const stateOf = (list) => list.find(([id]) => id === BOSS_STATE_ATTR)?.[1];
+      this.track(() => this.boss.notePublished(stateOf(JSON.parse(room.bin_int)), stateOf(changed)));
+    }
     const count = this.memberRows(room.id).length;
     this.toRoom(room.id, { ev: 'room.internal', room: String(room.id), flags: this.roomFlags({ ...room, flags }, count),
       bin_int: changed }, att.member);

@@ -3,7 +3,7 @@
 export const STORY_USERS_SCHEMA = `CREATE TABLE IF NOT EXISTS story_users (account TEXT PRIMARY KEY, name TEXT NOT NULL,
   hosted INTEGER NOT NULL DEFAULT 0, guested INTEGER NOT NULL DEFAULT 0, first_used INTEGER NOT NULL, last_used INTEGER NOT NULL)`;
 
-export const STORY_USERS_SHOWN = 50;
+export const STORY_USERS_SHOWN = 10;
 // Accounts remembered per room to count each once; a room that churns through more is not counted further.
 export const STORY_SEEN_PER_ROOM = 64;
 
@@ -29,16 +29,21 @@ export class StoryUsage {
     return this.sql.get(`SELECT COUNT(*) AS users, COALESCE(SUM(hosted + guested), 0) AS sessions FROM story_users`);
   }
 
-  // The most recent users, and every account in `active` whatever its last use.
+  // At most STORY_USERS_SHOWN users: those in `active` first, then the most recent.
   users(active) {
-    const rows = new Map(this.sql.all(`SELECT account, name, hosted, guested, last_used FROM story_users
-      ORDER BY last_used DESC, account LIMIT ?`, STORY_USERS_SHOWN).map((r) => [r.account, r]));
-    for (const account of active) {
+    const playing = new Set(active);
+    const columns = 'account, name, hosted, guested, last_used';
+    const rows = new Map(this.sql.all(`SELECT ${columns} FROM story_users ORDER BY last_used DESC, account LIMIT ?`,
+      STORY_USERS_SHOWN).map((r) => [r.account, r]));
+    for (const account of playing) {
       if (rows.has(account)) continue;
-      const row = this.sql.get('SELECT account, name, hosted, guested, last_used FROM story_users WHERE account = ?', account);
+      const row = this.sql.get(`SELECT ${columns} FROM story_users WHERE account = ?`, account);
       if (row) rows.set(account, row);
     }
-    return [...rows.values()];
+    return [...rows.values()]
+      .sort((a, b) => playing.has(b.account) - playing.has(a.account) || b.last_used - a.last_used
+        || (a.account < b.account ? -1 : 1))
+      .slice(0, STORY_USERS_SHOWN);
   }
 }
 

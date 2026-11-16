@@ -221,7 +221,7 @@ test('the summary keeps its existing fields beside the story section, and it hol
   client.call('udp', { port: 41000 });
   guestOf(env, room).call('udp', { port: 41001 });
   const summary = env.lobby.metricsSummary();
-  assert.deepEqual(Object.keys(summary).sort(), ['day', 'generated', 'live', 'story', 'time_zone', 'today']);
+  assert.deepEqual(Object.keys(summary).sort(), ['boss', 'day', 'generated', 'live', 'story', 'time_zone', 'today']);
   const dump = JSON.stringify(summary.story);
   for (const secret of [room.code, room.key, '198.51.100', '41000', '41001', client.secret]) assert.ok(!dump.includes(secret), secret);
   assert.deepEqual(Object.keys(summary.story.users[0]).sort(), ['account', 'active', 'last_used', 'name', 'role', 'sessions']);
@@ -260,4 +260,35 @@ test('a database from before this metric gains its columns and table and keeps i
   assert.deepEqual(s.totals, { rooms_created: 0, guest_joins: 0, sessions: 0, users: 0 });
   assert.equal(s.since, env.clock.now);
   assert.equal(again.metricsSummary().today.rooms_created, 1);
+});
+
+test('the user list holds the 10 playing-now then most recent users while totals count everyone', () => {
+  const env = makeLobby();
+  for (let i = 0; i < 14; i++) {
+    const { client, room } = host(env, `User${String(i).padStart(2, '0')}`);
+    client.call('room.leave', { room: room.id });
+    env.advance(1000);
+  }
+  const playing = host(env, 'Playing');
+  env.advance(1000);
+  const s = story(env);
+  assert.equal(s.totals.users, 15);
+  assert.equal(s.users.length, 10);
+  assert.deepEqual(s.users.map((u) => u.name), ['Playing', ...[13, 12, 11, 10, 9, 8, 7, 6, 5].map((i) => `User${String(i).padStart(2, '0')}`)]);
+  assert.ok(playing.room);
+});
+
+test('an old account that is playing now stays in the list ahead of newer ones', () => {
+  const env = makeLobby();
+  const old = host(env, 'Old');
+  for (let i = 0; i < 12; i++) {
+    env.advance(1000);
+    const { client, room } = host(env, `New${i}`);
+    client.call('room.leave', { room: room.id });
+  }
+  const s = story(env);
+  assert.equal(s.users.length, 10);
+  assert.equal(s.users[0].name, 'Old');
+  assert.equal(s.totals.users, 13);
+  assert.ok(old.room);
 });

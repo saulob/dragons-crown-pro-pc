@@ -101,7 +101,7 @@ owner cleared the attribute stops counting.
   (the room remembers up to 64 accounts in `rooms.story_seen`, which disappears with it), so reconnects, resumes, leaving
   and rejoining the same room, presence, search and room updates add nothing. `guest_joins` still counts each successful
   join. Nothing records an address, endpoint, room id or join code, and a failed join records nothing. The summary lists
-  the 50 most recent users and every account playing now, with a live `active` entry (`role`, connected `members`, room
+  the 10 playing-now-first, then most recent users, with a live `active` entry (`role`, connected `members`, room
   `age_ms`).
 
 ## Abuse and quota protection

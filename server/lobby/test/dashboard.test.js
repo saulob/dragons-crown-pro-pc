@@ -435,3 +435,41 @@ test('names in the Early Story table are text, never markup', async () => {
   assert.equal(cell.tag, 'td');
   assert.equal(cell.children.length, 0);
 });
+
+test('the Early Story table shows 10 users and the Boss Battle section shows parties, plays and 10 bosses', async () => {
+  const env = makeLobby();
+  for (let i = 0; i < 12; i++) {
+    const { client, room } = storyHost(env, `User${i}`);
+    client.call('room.leave', { room: room.id });
+    env.advance(1000);
+  }
+  const bossFields = { ...STORY_FIELDS, boss_battle_session: true };
+  const bossHost = env.connect('198.51.100.200');
+  assert.equal(bossHost.hello({ ...bossFields, name: 'BossHost' }).code, 'ok');
+  const room = bossHost.call('room.create', { ...ROOM, ints: [...ROOM.ints, [0x7f03, 1]] }).room;
+  const guest = env.connect('198.51.100.201');
+  assert.equal(guest.hello({ ...bossFields, name: 'BossGuest' }).code, 'ok');
+  assert.equal(guest.call('room.join', { room: room.id, boss_battle: true }).code, 'ok');
+  for (let boss = 0; boss < 12; boss++) {
+    for (const [phase, id] of [[2, boss], [1, 255]]) {
+      env.advance(60 * 1000);
+      const hex = [1, phase, 0, id, 0, 0, 0, 0].map((b) => b.toString(16).padStart(2, '0')).join('');
+      assert.equal(bossHost.call('room.set_internal', { room: room.id, bin_int: [[0x7f04, hex]] }).code, 'ok');
+    }
+  }
+  const page = await dashboard(env, 30);
+  assert.equal(page.get('story-users').find((n) => n.tag === 'tr').length - 1, 10);
+  assert.ok(page.get('story-users-note').textContent.includes('10 most recent users'));
+  assert.deepEqual(page.get('story-totals').find((n) => n.hasClass('card')).map((c) => c.textContent).slice(-1), ['Unique users12']);
+  assert.deepEqual(page.get('boss-live').find((n) => n.hasClass('card')).map((c) => c.textContent),
+    ['Boss Battle parties1', 'Waiting for player0', 'Boss Battle players2']);
+  assert.deepEqual(page.get('boss-totals').find((n) => n.hasClass('card')).map((c) => c.textContent),
+    ['Parties created1', 'Boss plays12', 'Unique users2']);
+  const table = page.get('boss-top');
+  assert.deepEqual(table.find((n) => n.tag === 'th').map((th) => th.textContent), ['Rank', 'Boss', 'Plays']);
+  const rows = table.find((n) => n.tag === 'tr').slice(1).map((tr) => tr.children.map((td) => td.textContent));
+  assert.equal(rows.length, 10);
+  assert.deepEqual(rows[0], ['1', 'Harpy', '1']);
+  assert.deepEqual(rows[9], ['10', 'Medusa', '1']);
+  assert.ok(page.get('boss-note').textContent.includes('earlier use is not known'));
+});
