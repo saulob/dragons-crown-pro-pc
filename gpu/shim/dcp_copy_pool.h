@@ -4,6 +4,7 @@
 #pragma once
 #include <cstddef>
 #include <functional>
+#include <string>
 
 namespace DcpCopyPool {
 
@@ -42,5 +43,17 @@ void WaitAsync();
 /// far has finished (at once when none is pending), on whichever thread finishes last.
 /// Callbacks run in the order they were registered.
 void AfterCopies(std::function<void()> callback);
+
+/// True when `epoch` is one of the open epochs [base, base + open).
+bool EpochOpen(unsigned long long epoch, unsigned long long base, std::size_t open);
+
+/// Receives the forensic dump of an impossible task transition (dcp_copy_pool_forensics.h). The
+/// default logs it and stops the process; a handler that returns makes the pool skip that task's
+/// bookkeeping. Returns the previous handler; nullptr restores the default.
+using ForensicHandler = void (*)(const std::string& dump);
+ForensicHandler SetForensicHandler(ForensicHandler handler);
+
+/// Impossible transitions reported so far.
+std::size_t ForensicFaults();
 
 } // namespace DcpCopyPool

@@ -505,6 +505,14 @@ target_include_directories(dcp-frame-pacing-tests PRIVATE gpu/shim)
 target_compile_definitions(dcp-frame-pacing-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-frame-pacing-tests PRIVATE -Wall -Wextra -Werror)
 
+# Focused tests of the copy pool's epoch accounting (tools/test.ps1); not part of the default build.
+add_executable(dcp-copy-pool-tests EXCLUDE_FROM_ALL tests/copy_pool_tests.cpp gpu/shim/dcp_copy_pool.cpp
+    gpu/shim/dcp_copy_pool_forensics.cpp)
+set_target_properties(dcp-copy-pool-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-copy-pool-tests PRIVATE gpu/shim gpu/shadps4)
+target_compile_options(dcp-copy-pool-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-copy-pool-tests PRIVATE Threads::Threads)
+
 # Focused tests of the Options menu (F1, L3 + R3): the chord, the close gate, which settings apply live or after a
 # restart, what is saved to dcp.ini and the Online Play lock on its Cheats page (tools/test.ps1); not part of the
 # default build.

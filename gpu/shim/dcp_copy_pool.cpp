@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "dcp_copy_pool.h"
+#include "dcp_copy_pool_forensics.h"
 #include "dcp_threads.h"
 
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <deque>
 #include <memory>
@@ -19,7 +21,23 @@
 namespace DcpCopyPool {
 namespace {
 
+namespace F = Forensics;
+
 thread_local bool in_copy_thread = false;
+
+std::uint32_t ThreadTag() {
+    static std::atomic<std::uint32_t> next{1};
+    thread_local const std::uint32_t tag = next.fetch_add(1);
+    return tag;
+}
+
+void StopOnForensicFault(const std::string& dump) {
+    std::puts(dump.c_str());
+    std::fflush(stdout);
+    __builtin_trap();
+}
+
+ForensicHandler forensic_handler = StopOnForensicFault;
 
 class Pool {
 public:
@@ -47,13 +65,18 @@ public:
         return !threads.empty();
     }
 
-    void Async(std::function<void()> task) {
+    void Async(std::function<void()> run) {
         {
             std::scoped_lock lk{mutex};
             const u64 epoch = epoch_base + epochs.size() - 1;
+            Task task;
+            task.run = std::move(run);
+            F::Seal(task, ++issued, epoch);
             ++epochs.back().pending;
+            ++epochs.back().counted;
             ++pending;
-            async_tasks.push_back({std::move(task), epoch});
+            Check(ledger.Queue(task.id, epoch, ThreadTag()), &task);
+            async_tasks.push_back(std::move(task));
         }
         cv.notify_one();
     }
@@ -81,8 +104,7 @@ public:
                     return;
                 }
                 if (!async_tasks.empty()) {
-                    task = std::move(async_tasks.front());
-                    async_tasks.pop_front();
+                    Take(task);
                 }
             }
             if (task.run) {
@@ -114,15 +136,19 @@ public:
         }
     }
 
+    std::size_t Faults() {
+        std::scoped_lock lk{mutex};
+        return faults;
+    }
+
 private:
     using u64 = unsigned long long;
-    struct Task {
-        std::function<void()> run;
-        u64 epoch{};
-    };
+    using Task = F::CopyTask;
     /// Copies issued between two AfterCopies() calls, and the callbacks waiting for them.
     struct Epoch {
         std::size_t pending = 0;
+        u64 counted = 0;
+        u64 finished = 0;
         std::vector<std::function<void()>> callbacks;
     };
     struct Job {
@@ -132,20 +158,52 @@ private:
         std::atomic<std::size_t> done{0};
     };
 
+    /// Moves the oldest queued task into `task`. Called with the mutex held.
+    void Take(Task& task) {
+        task = std::move(async_tasks.front());
+        async_tasks.pop_front();
+        Check(Intact(task), &task);
+        Check(ledger.Take(task.id, ThreadTag()), &task);
+    }
+
     void RunAsync(Task& task) {
+        {
+            std::scoped_lock lk{mutex};
+            Check(ledger.Start(task.id, ThreadTag(), reinterpret_cast<std::uintptr_t>(&task)), &task);
+        }
         const bool was = in_copy_thread;
         in_copy_thread = true;
         task.run();
         in_copy_thread = was;
-        Complete(task.epoch);
+        Complete(task);
     }
 
     /// Retires a task and runs the callbacks of epochs with nothing left, oldest first. One
     /// thread drains at a time so the callbacks keep their order.
-    void Complete(u64 epoch) {
+    void Complete(const Task& task) {
         std::unique_lock lk{mutex};
-        --epochs[epoch - epoch_base].pending;
+        const F::Fault integrity = Intact(task);
+        const F::Fault lifecycle = ledger.Complete(task.id, ThreadTag());
+        if (lifecycle == F::Fault::CompletedTwice) {
+            Check(lifecycle, &task);
+            return;
+        }
         --pending;
+        ++completed;
+        Check(integrity, &task);
+        if (lifecycle != F::Fault::RecordRetired) {
+            Check(lifecycle, &task);
+        }
+        // An overwritten task still counts against the epoch the ledger recorded when it was queued.
+        const F::TaskRecord* record = ledger.Find(task.id);
+        const u64 task_epoch = integrity == F::Fault::None || !record ? task.epoch : record->epoch;
+        if (!EpochOpen(task_epoch, epoch_base, epochs.size())) {
+            Check(F::Fault::StaleEpoch, &task);
+            return;
+        }
+        Epoch& epoch = epochs[task_epoch - epoch_base];
+        --epoch.pending;
+        ++epoch.finished;
         if (draining) {
             return;
         }
@@ -153,7 +211,10 @@ private:
         while (true) {
             std::vector<std::function<void()>> ready;
             while (epochs.size() > 1 && epochs.front().pending == 0) {
-                for (auto& callback : epochs.front().callbacks) {
+                Epoch& front = epochs.front();
+                retired.Record({epoch_base, front.counted, front.finished, front.pending, front.callbacks.size(),
+                                issued, completed, ++retirements});
+                for (auto& callback : front.callbacks) {
                     ready.push_back(std::move(callback));
                 }
                 epochs.pop_front();
@@ -169,6 +230,35 @@ private:
             lk.lock();
         }
         draining = false;
+    }
+
+    static F::Fault Intact(const Task& task) {
+        if (!F::CanariesIntact(task)) {
+            return F::Fault::CanaryBroken;
+        }
+        return F::SealIntact(task) ? F::Fault::None : F::Fault::SealBroken;
+    }
+
+    /// Reports an impossible transition with everything the ledgers know. Called with the mutex
+    /// held; the production handler does not return.
+    void Check(F::Fault fault, const Task* task) {
+        if (fault == F::Fault::None || fault == F::Fault::RecordRetired) {
+            return;
+        }
+        ++faults;
+        F::Evidence evidence;
+        evidence.fault = fault;
+        evidence.task = task;
+        evidence.epoch_base = epoch_base;
+        evidence.open_epochs = epochs.size();
+        evidence.issued = issued;
+        evidence.completed = completed;
+        evidence.record = ledger.Find(task->id);
+        evidence.previous_storage_user =
+            evidence.record ? ledger.PreviousUser(evidence.record->storage, task->id) : 0;
+        evidence.retired = retired.Find(task->epoch);
+        evidence.thread = Common::GetCurrentThreadName();
+        forensic_handler(F::Describe(evidence));
     }
 
     static void Work(Job& job) {
@@ -193,8 +283,8 @@ private:
                 return;
             }
             if (!async_tasks.empty()) {
-                Task task = std::move(async_tasks.front());
-                async_tasks.pop_front();
+                Task task;
+                Take(task);
                 lk.unlock();
                 RunAsync(task);
                 lk.lock();
@@ -219,6 +309,12 @@ private:
     u64 epoch_base = 0;       ///< epoch number of epochs.front()
     std::size_t pending = 0;
     bool draining = false;
+    u64 issued = 0;
+    u64 completed = 0;
+    u64 retirements = 0;
+    std::size_t faults = 0;
+    F::TaskLedger ledger;
+    F::RetiredHistory retired;
 };
 
 Pool& GetPool() {
@@ -233,6 +329,20 @@ struct Batch {
 thread_local Batch batch;
 
 } // namespace
+
+bool EpochOpen(unsigned long long epoch, unsigned long long base, std::size_t open) {
+    return epoch >= base && epoch - base < open;
+}
+
+ForensicHandler SetForensicHandler(ForensicHandler handler) {
+    const ForensicHandler previous = forensic_handler;
+    forensic_handler = handler ? handler : StopOnForensicFault;
+    return previous;
+}
+
+std::size_t ForensicFaults() {
+    return GetPool().Faults();
+}
 
 bool Enabled() {
     return GetPool().Enabled() && !DcpToggle::Disabled(DcpToggle::ParallelCopies);
