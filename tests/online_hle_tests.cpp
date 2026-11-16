@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "boss_battle_online.h"
 #include "early_story_session.h"
 #include "fake_stun.h"
 #include "net/lobby_link.h"
@@ -309,13 +310,14 @@ int RunEndpointScenario(const std::string& lobby_root, const std::string& observ
 // Another player speaking the lobby protocol itself, with story session support; waiting on it pumps the runtime.
 class RawPlayer {
 public:
-    RawPlayer(const std::string& url, const fs::path& base, const std::string& name) {
+    RawPlayer(const std::string& url, const fs::path& base, const std::string& name, bool boss_capable = true) {
         const net::Identity id = net::load_identity(base / name);
         net::LobbyLink::Options options;
         options.url = url;
-        options.hello = [id, name] {
+        options.hello = [id, name, boss_capable] {
             net::Json hello = net::hello_body(id, name, "HLE-TEST", true);
             hello.set("story_session", true);
+            if (boss_capable) hello.set("boss_battle_session", true);
             return hello;
         };
         link_ = std::make_unique<net::LobbyLink>(std::move(options));
@@ -418,6 +420,246 @@ uint32_t GameSetInternal(uint16_t ctx, void* opt[2], uint64_t room, const std::v
     uint32_t id = 0;
     CHECK(Fn<Request>("sceNpMatching2SetRoomDataInternal")(ctx, request, opt, &id) == 0);
     return id;
+}
+
+std::optional<BossBattleHostState> BossState(const net::Json& attrs) {
+    for (const auto& [id, hex] : Pairs(attrs)) {
+        if (id != BOSS_BATTLE_STATE_ATTR) continue;
+        std::vector<uint8_t> data;
+        net::hex_decode(hex, data);
+        BossBattleHostState state{};
+        if (boss_battle_state_decode(data.data(), data.size(), &state)) return state;
+    }
+    return std::nullopt;
+}
+
+net::Json RoomBody(uint64_t room, bool boss) {
+    net::Json body = net::Json::Object();
+    body.set("room", net::u64_text(room));
+    if (boss) body.set("boss_battle", true);
+    return body;
+}
+
+size_t BossRoomsFound(RawPlayer& seeker) {
+    net::Json search = net::Json::Object();
+    search.set("world", int64_t(1));
+    search.set("boss_battle", true);
+    auto found = seeker.Call("room.search", search);
+    return found ? found->operator[]("rooms").size() : 0;
+}
+
+uint64_t GameCreateRoom(uint16_t ctx, void* opt[2]) {
+    static const std::vector<uint8_t> info(0x78, 0x41);
+    static uint8_t bin_internal[0x18], ints[8 * 8], create[0xc0];
+    Wr<uint16_t>(bin_internal, 0, 0x57);
+    Wr<const uint8_t*>(bin_internal, 8, info.data());
+    Wr<uint64_t>(bin_internal, 0x10, info.size());
+    for (int i = 0; i < 8; ++i) Wr<uint16_t>(ints, size_t(i * 8), uint16_t(0x4c + i));
+    Wr<uint32_t>(ints, 1 * 8 + 4, 9);
+    Wr<uint16_t>(create, 0, 4);
+    Wr<uint32_t>(create, 8, 0x86000000u);
+    Wr<uint32_t>(create, 0xc, 1);
+    Wr<uint8_t*>(create, 0x60, bin_internal);
+    Wr<uint64_t>(create, 0x68, 1);
+    Wr<uint8_t*>(create, 0x70, ints);
+    Wr<uint64_t>(create, 0x78, 8);
+    uint32_t created = 0;
+    CHECK(Fn<Request>("sceNpMatching2CreateJoinRoomA")(ctx, create, opt, &created) == 0);
+    const Seen::Request* made = Await(created);
+    CHECK(made && made->error == 0);
+    return made && !made->error ? made->room : 0;
+}
+
+int32_t GameJoin(uint16_t ctx, void* opt[2], uint64_t room) {
+    uint8_t join[16] = {};
+    Wr<uint64_t>(join, 0, room);
+    uint32_t id = 0;
+    CHECK(Fn<Request>("sceNpMatching2JoinRoomA")(ctx, join, opt, &id) == 0);
+    const Seen::Request* answer = Await(id);
+    return answer ? answer->error : -1;
+}
+
+void GameLeave(uint16_t ctx, void* opt[2], uint64_t room) {
+    uint8_t leave[16] = {};
+    Wr<uint64_t>(leave, 0, room);
+    uint32_t left = 0;
+    CHECK(Fn<Request>("sceNpMatching2LeaveRoom")(ctx, leave, opt, &left) == 0);
+    CHECK(Await(left) && Await(left)->error == 0);
+}
+
+// The runtime hosts Boss Battle: its room is tagged and found only from the Boss Battle page, a campaign client and a
+// normal join are refused, the guest hears each start before the host may travel, the tag says when it fights, and the
+// visit's end clears the tag and tells the guest.
+void TestBossBattleHost(const std::string& url, const fs::path& base, uint16_t ctx, void* opt[2]) {
+    CHECK(boss_battle_online_capable());
+    boss_battle_online_visit_begin(1);
+    CHECK(boss_battle_online_selected() && boss_battle_online_room_attr() == BOSS_BATTLE_ROOM_OPEN);
+    const uint64_t room = GameCreateRoom(ctx, opt);
+    if (!room) return;
+    CHECK(boss_battle_online_is_host() && boss_battle_online_boss_room() && boss_battle_online_slot() == 0);
+
+    RawPlayer seeker(url, base, "BossSeeker");
+    CHECK(BossRoomsFound(seeker) == 1);
+    std::string code;
+    RawPlayer old_client(url, base, "BossOld", false);
+    CHECK(!old_client.Call("room.join", RoomBody(room, false), &code) && code == "incompatible");
+    RawPlayer plain(url, base, "BossPlain");
+    CHECK(plain.Call("room.join", RoomBody(room, false)).has_value());
+    CHECK(PumpUntil([] { return boss_battle_online_members() == 2; }));
+    CHECK(plain.Call("room.leave", RoomBody(room, false)).has_value());
+    CHECK(PumpUntil([] { return boss_battle_online_members() == 1; }));
+    RawPlayer guest(url, base, "BossGuest");
+    auto joined = guest.Call("room.join", RoomBody(room, true));
+    CHECK(joined && (*joined)["room"]["ints"].dump().find("[32515,1]") != std::string::npos);
+    CHECK(joined && BossState((*joined)["room"]["bin_int"]) &&
+          BossState((*joined)["room"]["bin_int"])->phase == BOSS_BATTLE_PHASE_WAITING);
+    CHECK(PumpUntil([] { return boss_battle_online_members() == 2; }));
+
+    // the Demon Lord: the start waits for the lobby's answer, which follows the members' copy
+    CHECK(boss_battle_online_host_start(19, 0) == 1 && boss_battle_online_start_ready() == 0);
+    auto start = guest.Event("room.internal");
+    const auto state = start ? BossState(start->body["bin_int"]) : std::nullopt;
+    CHECK(state && state->phase == BOSS_BATTLE_PHASE_STARTING && state->boss == 19 && !state->fight_all);
+    CHECK(PumpUntil([] { return boss_battle_online_start_ready() == 1; }));
+
+    // in the fight the room takes nobody and leaves the Boss Battle search; back on the page it takes players again
+    boss_battle_online_note_local(BOSS_BATTLE_LOCAL_TRAVELLING, 19, 0);
+    CHECK(PumpUntil([&] { return BossRoomsFound(seeker) == 0; }));
+    RawPlayer late(url, base, "BossLate");
+    CHECK(!late.Call("room.join", RoomBody(room, true), &code) && code == "closed");
+    auto fighting = guest.Event("room.internal");
+    CHECK(fighting && BossState(fighting->body["bin_int"]) && BossState(fighting->body["bin_int"])->phase == BOSS_BATTLE_PHASE_FIGHTING);
+    boss_battle_online_note_local(BOSS_BATTLE_LOCAL_CHECKPOINT, 0, 1);
+    auto checkpoint = guest.Event("room.internal");
+    CHECK(checkpoint && BossState(checkpoint->body["bin_int"]) &&
+          BossState(checkpoint->body["bin_int"])->phase == BOSS_BATTLE_PHASE_CHECKPOINT);
+    CHECK(boss_battle_online_room_wanted() && boss_battle_online_room_attr() == BOSS_BATTLE_ROOM_FIGHTING);
+    boss_battle_online_note_local(BOSS_BATTLE_LOCAL_IDLE, -1, 0);
+    CHECK(PumpUntil([&] { return BossRoomsFound(seeker) == 1; }));
+    CHECK(late.Call("room.join", RoomBody(room, true)).has_value());
+    CHECK(PumpUntil([] { return boss_battle_online_members() == 3; }));
+    CHECK(late.Call("room.leave", RoomBody(room, false)).has_value());
+    CHECK(PumpUntil([] { return boss_battle_online_members() == 2; }) && boss_battle_online_is_host());
+
+    // leaving Boss Battle: the members hear it ended, and the room is a normal one again
+    boss_battle_online_visit_end();
+    bool ended = false;
+    for (int i = 0; i < 4 && !ended; ++i) {
+        auto update = guest.Event("room.internal");
+        ended = update && BossState(update->body["bin_int"]) && BossState(update->body["bin_int"])->phase == BOSS_BATTLE_PHASE_ENDED;
+    }
+    CHECK(ended);
+    CHECK(PumpUntil([&] { return BossRoomsFound(seeker) == 0; }) && !boss_battle_online_room_wanted());
+    CHECK(seeker.Call("room.join", RoomBody(room, false)).has_value());
+
+    // handed back to Early Story with its owner still in the opening: the room is the story session again, and the guest
+    // follows the owner's step as it advances
+    early_story_set_hosting(1);
+    early_story_grant_access();
+    early_story_note_own_step(3);
+    early_story_session_room_handoff(1, 0);
+    const auto story_state = [](int step) {
+        return std::vector<std::pair<int64_t, std::string>>{{EARLY_STORY_STATE_ATTR, StoryStateHex(step)}};
+    };
+    bool resumed = false;
+    for (int i = 0; i < 6 && !resumed; ++i) {
+        auto update = guest.Event("room.internal");
+        resumed = update && Pairs(update->body["bin_int"]) == story_state(3);
+    }
+    CHECK(resumed);
+    early_story_note_own_step(4);
+    auto repaired = guest.Event("room.internal");
+    CHECK(repaired && Pairs(repaired->body["bin_int"]) == story_state(4));
+    RawPlayer resumed_joiner(url, base, "StoryResumed");
+    auto resumed_join = resumed_joiner.Call("room.join", RoomBody(room, false));
+    CHECK(resumed_join && (*resumed_join)["room"]["ints"].dump().find("[32513,4]") != std::string::npos);
+    early_story_set_hosting(0);
+    early_story_session_reset();
+    GameLeave(ctx, opt, room);
+    std::printf("GROUP|boss-battle-host|%s\n", g_failures ? "FAIL" : "PASS");
+}
+
+// The runtime is a Boss Battle guest: the host's starts reach it in order (a stale one is ignored), it never hosts or
+// starts, a normal room is refused from the Boss Battle page, and the host's leaving ends the session and clears the tag.
+void TestBossBattleGuest(const std::string& url, const fs::path& base, uint16_t ctx, void* opt[2]) {
+    RawPlayer normal_host(url, base, "BossNormalHost");
+    net::Json normal = net::Json::Object();
+    normal.set("world", int64_t(1));
+    normal.set("slots", int64_t(4));
+    auto normal_room = normal_host.Call("room.create", normal);
+    boss_battle_online_visit_begin(1);
+    CHECK(normal_room && GameJoin(ctx, opt, (*normal_room)["room"]["id"].as_u64()) == int32_t(0x80550ca2));
+    CHECK(online::take_notice().find("not a Boss Battle session") != std::string::npos);
+
+    RawPlayer host(url, base, "BossHost");
+    net::Json create = normal;
+    net::Json ints = net::Json::Array();
+    ints.push(AttrPair(BOSS_BATTLE_ROOM_ATTR, int64_t(BOSS_BATTLE_ROOM_OPEN)));
+    create.set("ints", std::move(ints));
+    auto made = host.Call("room.create", create);
+    CHECK(made.has_value());
+    if (!made) return;
+    const uint64_t room = (*made)["room"]["id"].as_u64();
+    CHECK(GameJoin(ctx, opt, room) == 0);
+    CHECK(boss_battle_online_is_guest() && boss_battle_online_boss_room() && boss_battle_online_slot() == 1 &&
+          boss_battle_online_members() == 2 && !boss_battle_online_may_start() && !boss_battle_online_hosts_room());
+    CHECK(!early_story_visiting() && !early_story_story_room_guest());
+
+    const auto send = [&](BossBattlePhase phase, int boss, int fight_all, uint32_t sequence) {
+        const BossBattleHostState state{phase, fight_all, boss, sequence};
+        uint8_t bytes[BOSS_BATTLE_STATE_SIZE];
+        boss_battle_state_encode(&state, bytes);
+        CHECK(host.Call("room.set_internal", SetInternal(room, BinInt({{BOSS_BATTLE_STATE_ATTR, net::hex_encode(bytes, sizeof(bytes))}}))));
+    };
+    int boss = -1, fight_all = -1;
+    send(BOSS_BATTLE_PHASE_STARTING, 0, 0, 1);
+    CHECK(PumpUntil([&] { return boss_battle_online_take_follow(&boss, &fight_all) == 1; }) && boss == 0 && fight_all == 0);
+    send(BOSS_BATTLE_PHASE_STARTING, 7, 0, 0);
+    PumpUntil([] { return false; }, 300);
+    CHECK(boss_battle_online_host_state().sequence == 1 && !boss_battle_online_take_follow(&boss, &fight_all));
+    send(BOSS_BATTLE_PHASE_STARTING, 0, 1, 2);
+    CHECK(PumpUntil([&] { return boss_battle_online_take_follow(&boss, &fight_all) == 1; }) && boss == 0 && fight_all == 1);
+    const size_t internal_before = RoomEvents(0x1106);
+    PumpUntil([] { return false; }, 300);
+    CHECK(RoomEvents(0x1106) == internal_before);
+
+    // the host leaves: the runtime owns a room that is no Boss Battle session any more
+    RawPlayer seeker(url, base, "BossGuestSeeker");
+    CHECK(BossRoomsFound(seeker) == 1);
+    CHECK(host.Call("room.leave", RoomBody(room, false)).has_value());
+    CHECK(PumpUntil([] { return boss_battle_online_is_host(); }));
+    CHECK(boss_battle_online_state() == BOSS_BATTLE_ONLINE_ENDED && !boss_battle_online_room_wanted());
+    CHECK(PumpUntil([&] { return BossRoomsFound(seeker) == 0; }));
+    GameLeave(ctx, opt, room);
+    boss_battle_online_visit_end();
+
+    // a guest whose Boss Battle setting is off still joins a Boss Battle room and becomes its visitor for the session
+    const int story_hosting = early_story_hosting();
+    early_story_set_hosting(0);
+    boss_battle_online_set_hosting(0);
+    CHECK(!boss_battle_online_visit_begin(1) && !boss_battle_online_selected() && !boss_battle_online_hosts_room());
+    RawPlayer host2(url, base, "BossHostTwo");
+    auto made2 = host2.Call("room.create", create);
+    CHECK(made2.has_value());
+    if (made2) {
+        const uint64_t room2 = (*made2)["room"]["id"].as_u64();
+        CHECK(GameJoin(ctx, opt, room2) == 0);
+        CHECK(boss_battle_online_visitor() && boss_battle_online_selected() && boss_battle_online_is_guest() &&
+              boss_battle_online_state() == BOSS_BATTLE_ONLINE_GUEST && !boss_battle_online_may_start() &&
+              !boss_battle_online_hosts_room() && !boss_battle_online_hosting());
+        const BossBattleHostState start{BOSS_BATTLE_PHASE_STARTING, 0, 3, 1};
+        uint8_t bytes[BOSS_BATTLE_STATE_SIZE];
+        boss_battle_state_encode(&start, bytes);
+        CHECK(host2.Call("room.set_internal", SetInternal(room2, BinInt({{BOSS_BATTLE_STATE_ATTR, net::hex_encode(bytes, sizeof(bytes))}}))));
+        CHECK(PumpUntil([&] { return boss_battle_online_take_follow(&boss, &fight_all) == 1; }) && boss == 3);
+        CHECK(host2.Call("room.leave", RoomBody(room2, false)).has_value());
+        CHECK(PumpUntil([] { return boss_battle_online_is_host(); }));
+        CHECK(!boss_battle_online_visitor() && !boss_battle_online_selected() && boss_battle_online_state() == BOSS_BATTLE_ONLINE_OFF);
+        GameLeave(ctx, opt, room2);
+    }
+    boss_battle_online_set_hosting(1);
+    early_story_set_hosting(story_hosting);
+    std::printf("GROUP|boss-battle-guest|%s\n", g_failures ? "FAIL" : "PASS");
 }
 
 // The runtime is a story room's owner: each new step of its own reaches the members as the private internal attribute
@@ -604,8 +846,10 @@ int main(int argc, char** argv) {
     using Register = int32_t SYSV (*)(uint16_t, void*, void*);
     using Status = int32_t SYSV (*)(uint16_t, uint64_t, uint16_t, int32_t*, uint32_t*, uint16_t*);
 
-    // Bring-up: context, start (lobby hello, story session support declared), world list.
+    // Bring-up: context, start (lobby hello, story and Boss Battle session support declared), world list.
     early_story_set_active(1);
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(1);
     CHECK(Fn<Init>("sceNpMatching2Initialize")(nullptr) == 0);
     uint16_t ctx = 0;
     CHECK(Fn<CreateContext>("sceNpMatching2CreateContextA")(nullptr, &ctx) == 0 && ctx == 1);
@@ -893,6 +1137,8 @@ int main(int argc, char** argv) {
 
     TestStoryHost(url, base, ctx, opt);
     TestStoryGuest(url, base, ctx, opt);
+    TestBossBattleHost(url, base, ctx, opt);
+    TestBossBattleGuest(url, base, ctx, opt);
 
     CHECK(Fn<Close>("sceRudpTerminate")(rudp_ctx) == 0);
     CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);

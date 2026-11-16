@@ -218,7 +218,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Presentation, Upscaling (FSR 1), Sharpening, Sharpening strength, Anti-aliasing | at once |
 | Graphics | Renderer, Render resolution (builds that support it), Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
-| Gameplay | Enable Boss Battle (builds that support it, Online Play off) | the next time the Inn menu opens |
+| Gameplay | Enable Boss Battle (builds that support it; the host's side of Boss Battle Online) | the next time the Inn menu opens |
 | Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery, Unlock Labyrinth of Chaos, Unlock Ultimate + Tower of Mirages | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | Controller Rumble | at once |
@@ -568,7 +568,9 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   fight and the reopened screen; only Return to tavern and Back show it. Per character and boss, `boss_battle.dat` in the user folder keeps attempts
   (counted once the fight is playable), wins, deaths, quits and the best win time, and per character the Fight All runs,
   clears, deaths, quits, best progress and best time (an older
-  `boss_battle_progress.dat` is no longer read). Offline only, and only for the USA 1.00 build. The F1 Options menu changes it the next time the
+  `boss_battle_progress.dat` is no longer read). With Online Play on, only the host needs this option (as Early Story
+  Online): a guest with a compatible version joins the host's Boss Battle room whatever its own setting, follows the
+  host for that session and does not get the row afterwards. The F1 Options menu changes it the next time the
   Inn menu opens.
 - **Unlock Labyrinth of Chaos** and **Unlock Ultimate + Tower of Mirages** (Gameplay page, after Enable Boss Battle):
   two independent options, Off by default (`unlock_labyrinth`, `unlock_ultimate_tower`; `DCP_UNLOCK_LABYRINTH` and

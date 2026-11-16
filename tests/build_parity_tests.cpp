@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "boss_battle.h"
+#include "boss_battle_online.h"
 #include "cheat_hooks.h"
 #include "controller_prompts.h"
 #include "cpk_patch.h"
@@ -29,6 +30,7 @@
 #include "cyrillic_glyphs.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "early_story_online.h"
 #include "endgame_unlocks.h"
 #include "exit_game_hook.h"
 #include "exit_game_text.h"
@@ -46,6 +48,7 @@
 #include "net/online_version.h"
 #include "runtime_cheats.h"
 #include "menu_buttons.h"
+#include "network_access.h"
 #include "skip_intro.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -1538,6 +1541,37 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
         CHECK(endgame_unlocks_install(image_bytes, size, entry, Key(build).c_str(), both, endgame_area,
                                       endgame_unlocks_stub_bytes()) == both);
         endgame_unlocks_set(0);
+    }
+
+    // Online Play: the Early Story hooks go in first and own the director's Start check; Boss Battle goes in beside them.
+    if (build.boss_battle) {
+        const DcpExecRange executable{0, size};
+        const DcpImageView original{image.bytes.data(), size, &executable, 1};
+        DcpEarlyStorySites town{};
+        char failure[200];
+        const DcpGameBuild game = LoaderView(build);
+        CHECK(dcp_resolve_early_story(&game, &original, &town, failure, sizeof(failure)) == 1);
+        const size_t story_stubs = early_story_online_stub_bytes();
+        std::vector<uint8_t> online(base + story_stubs + boss_battle_stub_bytes() + page, 0);
+        std::memcpy(online.data(), image.bytes.data(), size);
+        CHECK(early_story_online_install(online.data(), size, entry, &town, online.data() + base, story_stubs) == 1);
+        CHECK(boss_battle_install(online.data(), size, entry, Key(build).c_str(), 1, &town, online.data() + base + story_stubs,
+                                  boss_battle_stub_bytes()) == 1);
+        CHECK(boss_battle_online_available() && online[town.menu_step_call] == 0xe9 && online[town.room_wish_location] == 0xe9);
+        const uint64_t create = network_menu_create_function(image.bytes.data(), size, town.menu_kind_store);
+        CHECK(create != 0 && create < size && town.menu_kind_store - town.menu_press_call < 0x400 && network_menu_request_available());
+        for (const uint64_t mutated : {uint64_t(town.menu_kind_store) - 0x86, uint64_t(town.menu_kind_store) - 0x7a, create + 0xb}) {
+            std::vector<uint8_t> copy(image.bytes.begin(), image.bytes.begin() + std::ptrdiff_t(size));
+            copy[mutated] ^= 0x01;
+            CHECK(network_menu_create_function(copy.data(), size, town.menu_kind_store) == 0);
+        }
+        network_menu_set_create(nullptr);
+        boss_battle_set_available(0);
+        boss_battle_online_set_available(0);
+        network_access_set(NETWORK_ACCESS_BOSS_BATTLE, nullptr);
+        network_access_set_installed(0);
+        early_story_set_active(0);
+        hydeland_town_set_installed(0);
     }
 
     // Near misses: the same bytes with another entry or size are no supported image to any mapping.

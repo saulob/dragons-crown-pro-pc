@@ -73,7 +73,7 @@ int boss_battle_startable_count(void) {
 }
 
 /* Game thread only. */
-static int pause_owned;
+static int pause_owned, follower;
 
 static atomic_int enabled, hook_installed, state = BOSS_BATTLE_OFF, session = 0, quit_pending = 0;
 static atomic_int checkpoint_open = 0; /* a Fight All checkpoint runs: a quit is taken there */
@@ -111,6 +111,7 @@ static struct {
     int run_started, boss, cleared, restored;
     uint32_t combat_ms;
     unsigned run, checkpoint_frames, last_session;
+    int follow; /* a guest's run: the host starts each boss */
     /* DEBUG_SAULO: the inter-boss wait telemetry */
     unsigned wait_frames, wait_logged;
     uint32_t wait_ms;
@@ -382,10 +383,29 @@ static void fight_all_boss_name(int index, char *out, size_t size) {
     snprintf(out, size, "%02d/%d %s", boss_battle_number(index), BOSS_BATTLE_ENCOUNTERS, kEncounters[index].name);
 }
 
-static void arm_menu_reopen(unsigned session_number) {
+static atomic_int reopen_reason = BOSS_BATTLE_REOPEN_CAMPAIGN_RESTORE;
+
+static const char *reopen_reason_text(BossBattleReopenReason reason) {
+    switch (reason) {
+    case BOSS_BATTLE_REOPEN_NETWORK_MENU_RETURN: return "Network Menu return";
+    case BOSS_BATTLE_REOPEN_VISITOR_INN: return "visitor Inn rebuild";
+    default: return "campaign restore";
+    }
+}
+
+static void arm_menu_reopen(unsigned session_number, BossBattleReopenReason reason) {
     atomic_store(&reopen_session, session_number);
+    atomic_store(&reopen_reason, reason);
     atomic_store(&menu_reopen, 1);
-    LOG("automatic Boss Battle reopen armed");
+    LOG("automatic Boss Battle reopen armed (%s)", reopen_reason_text(reason));
+}
+
+void boss_battle_arm_menu_reopen(BossBattleReopenReason reason) {
+    arm_menu_reopen(atomic_load(&current_session), reason);
+}
+
+const char *boss_battle_reopen_reason(void) {
+    return reopen_reason_text((BossBattleReopenReason)atomic_load(&reopen_reason));
 }
 
 static void fight_all_stop(BossBattleFightAllResult result, const char *why, int reopen) {
@@ -402,11 +422,19 @@ static void fight_all_stop(BossBattleFightAllResult result, const char *why, int
     boss_battle_start_transition_set(BOSS_BATTLE_START_NONE);
     if (result != BOSS_BATTLE_FIGHT_ALL_ABORTED || !mid_run) return;
     post_notice("Fight All stopped: a safety check failed. The character progression saved so far is kept.");
-    if (reopen) arm_menu_reopen(fight_all.last_session);
+    if (reopen) arm_menu_reopen(fight_all.last_session, BOSS_BATTLE_REOPEN_CAMPAIGN_RESTORE);
 }
 
 void boss_battle_fight_all_abort(const char *why) {
     fight_all_stop(BOSS_BATTLE_FIGHT_ALL_ABORTED, why, 1);
+}
+
+static void fight_all_begin_run(void) {
+    char key[160];
+    memset(&fight_all, 0, sizeof(fight_all));
+    fight_all.phase = FIGHT_ALL_SELECTED;
+    fight_all.run = boss_battle_character_key(key, sizeof(key)) ? boss_battle_record_fight_all_stats(key).runs + 1 : 1;
+    cursor_fight_all = 1;
 }
 
 BossBattleFightAllState boss_battle_fight_all_state(void) {
@@ -501,6 +529,7 @@ static int fight_all_session_ended(int restored, int came_back) {
 
 static void end_session(int reopen_menu) {
     if (!boss_battle_session_active()) return;
+    follower = 0;
     if (!(fight_all.phase == FIGHT_ALL_BOSS && s.outcome == BOSS_BATTLE_OUTCOME_WIN && reopen_menu))
         boss_battle_start_transition_set(BOSS_BATTLE_START_NONE);
     LOG("campaign restore begins");
@@ -515,7 +544,7 @@ static void end_session(int reopen_menu) {
     const int reopen = fight_all_session_ended(restored, reopen_menu);
     if (restored) {
         LOG("campaign world restored, campaign saves released");
-        if (reopen) arm_menu_reopen(atomic_load(&current_session));
+        if (reopen) arm_menu_reopen(atomic_load(&current_session), BOSS_BATTLE_REOPEN_CAMPAIGN_RESTORE);
     } else {
         LOG("campaign NOT restored; saving keeps the campaign from before the fight until the game exits");
         atomic_store(&menu_reopen, 0);
@@ -673,9 +702,17 @@ static void follow_travel(const BossBattleProbe *probe) {
     }
 }
 
+static atomic_int quit_source;
+
 static void take_quit(void) {
     if (!atomic_load(&quit_pending)) return;
     switch (boss_battle_state()) {
+    case BOSS_BATTLE_TRAVELLING:
+        if (atomic_load(&quit_source) != BOSS_BATTLE_QUIT_PEER_LOST) break;
+        atomic_store(&quit_pending, 0);
+        cancel("a player left before the fight");
+        fight_all_lost(BOSS_BATTLE_FIGHT_ALL_QUIT_RUN);
+        break;
     case BOSS_BATTLE_INITIALIZING:
         atomic_store(&quit_pending, 0);
         cancel("Quit before Playable");
@@ -712,12 +749,13 @@ static void trace(const BossBattleProbe *probe) {
     ++s.heartbeats;
     const BossBattleEncounter *encounter = current_encounter();
     LOG("heartbeat %u s: state %s, boss %s, act %d step %d round %d stage %d, player unit %s, party ready %s, "
-        "encounter ready %s, play %s, playable %s",
+        "encounter ready %s, play %s, playable %s%s",
         s.frames / FRAMES_PER_SECOND, boss_battle_state_text(boss_battle_state()), encounter ? encounter->name : "-",
         scene->act, scene->step, scene->round, scene->stage, probe->player_unit ? "yes" : "no",
         s.milestones & BOSS_BATTLE_PARTY_READY ? "yes" : "no", probe->bosses > 0 ? "yes" : "no",
         scene->act == SCENE_ACT_PLAY && probe->player_unit && !probe->player_dead ? "yes" : "no",
-        s.milestones & BOSS_BATTLE_PLAYABLE ? "yes" : "no");
+        s.milestones & BOSS_BATTLE_PLAYABLE ? "yes" : "no",
+        follower ? " (follower: player unit and playable read party slot 0, the host's seat)" : "");
 }
 
 static void defeat(const char *signal) {
@@ -843,6 +881,7 @@ BossBattleFrameAction boss_battle_frame(const BossBattleProbe *probe) {
     }
     follow_transit(probe);
     take_quit();
+    if (follower) return BOSS_BATTLE_FRAME_NONE;
     switch (boss_battle_state()) {
     case BOSS_BATTLE_RESOLVING:
         if (!s.never_left && can_leave(&probe->scene)) return BOSS_BATTLE_FRAME_REQUEST_INN;
@@ -876,7 +915,9 @@ int boss_battle_request_quit(BossBattleQuitSource source) {
     if (!at_checkpoint && (!boss_battle_session_active() || !quit_state(boss_battle_state()))) return 0;
     int expected = 0;
     if (!atomic_compare_exchange_strong(&quit_pending, &expected, 1)) return 0;
-    LOG("Quit requested (%s) while %s", source == BOSS_BATTLE_QUIT_KEY ? "F4" : "menu",
+    atomic_store(&quit_source, source);
+    LOG("Quit requested (%s) while %s",
+        source == BOSS_BATTLE_QUIT_KEY ? "F4" : source == BOSS_BATTLE_QUIT_MENU ? "menu" : "a player left",
         at_checkpoint ? "at the Fight All checkpoint" : boss_battle_state_text(boss_battle_state()));
     return 1;
 }
@@ -1092,6 +1133,7 @@ BossBattleFightAllTransit boss_battle_fight_all_transit(void) {
 
 /* Saved: the next boss waits only for the Inn scene to be able to travel, as the Inn's own menu travels. */
 static BossBattleFightAllStep wait_for_scene(const BossBattleScene *scene, int fader_busy, int *index) {
+    if (fight_all.follow) return BOSS_BATTLE_FIGHT_ALL_STEP_WAIT;
     if (boss_battle_fight_all_scene_ready(scene, fader_busy)) {
         if (fight_all.wait_frames) FIGHT_ALL_LOG("DEBUG_SAULO Inn scene ready after %u frames", fight_all.wait_frames);
         fight_all.transit = BOSS_BATTLE_TRANSIT_REQUESTED;
@@ -1128,7 +1170,7 @@ BossBattleFightAllStep boss_battle_fight_all_poll(const BossBattleScene *scene, 
         fight_all_note(BOSS_BATTLE_FIGHT_ALL_QUIT, (unsigned)fight_all.cleared);
         FIGHT_ALL_LOG("Quit after boss %s, progress %02d/%d", name, fight_all.cleared, BOSS_BATTLE_ENCOUNTERS);
         fight_all_stop(BOSS_BATTLE_FIGHT_ALL_QUIT_RUN, "", 0);
-        arm_menu_reopen(fight_all.last_session);
+        arm_menu_reopen(fight_all.last_session, BOSS_BATTLE_REOPEN_CAMPAIGN_RESTORE);
         return BOSS_BATTLE_FIGHT_ALL_STEP_ENDED;
     }
     if (waiting) return BOSS_BATTLE_FIGHT_ALL_STEP_WAIT;
@@ -1138,7 +1180,7 @@ BossBattleFightAllStep boss_battle_fight_all_poll(const BossBattleScene *scene, 
         boss_battle_format_run_time(fight_all.combat_ms, time, sizeof(time));
         FIGHT_ALL_LOG("CLEAR %d/%d, combat time %s", fight_all.cleared, BOSS_BATTLE_ENCOUNTERS, time);
         fight_all_stop(BOSS_BATTLE_FIGHT_ALL_CLEARED, "", 0);
-        arm_menu_reopen(fight_all.last_session);
+        arm_menu_reopen(fight_all.last_session, BOSS_BATTLE_REOPEN_CAMPAIGN_RESTORE);
         return BOSS_BATTLE_FIGHT_ALL_STEP_ENDED;
     }
     if (fight_all.transit == BOSS_BATTLE_TRANSIT_CHECKPOINT) {
@@ -1298,6 +1340,29 @@ int boss_battle_screen_take_close_cut(void) {
     return 1;
 }
 
+void boss_battle_screen_remember(int row) {
+    if (screen.state != SCREEN_SHOWN) return;
+    const BossBattleEntry entry = boss_battle_screen_entry(row);
+    const int boss = boss_battle_entry_boss(entry);
+    if (boss != NONE) {
+        s.cursor = boss;
+        cursor_fight_all = 0;
+    } else if (entry == BOSS_BATTLE_ENTRY_FIGHT_ALL) {
+        cursor_fight_all = 1;
+    }
+}
+
+int boss_battle_cursor_fight_all(void) {
+    return cursor_fight_all;
+}
+
+void boss_battle_screen_return(void) {
+    if (screen.state != SCREEN_SHOWN) return;
+    screen.state = SCREEN_IDLE;
+    screen.choice = NONE;
+    arm_menu_reopen(atomic_load(&current_session), BOSS_BATTLE_REOPEN_NETWORK_MENU_RETURN);
+}
+
 int boss_battle_screen_closed(int *index) {
     const int chosen = screen.state == SCREEN_SHOWN ? screen.choice : NONE;
     if (screen.state == SCREEN_SHOWN) puts("Boss Battle: Boss Battle screen closed");
@@ -1334,15 +1399,11 @@ int boss_battle_screen_boss(int row) {
 }
 
 int boss_battle_fight_all_request(void) {
-    char key[160];
     if (screen.state != SCREEN_SHOWN || !boss_battle_available() || boss_battle_session_active() ||
         fight_all.phase != FIGHT_ALL_OFF || atomic_load(&pending) != NONE || boss_battle_encounter(0)->unavailable ||
         boss_battle_mode_pending(boss_battle_mode()))
         return 0;
-    memset(&fight_all, 0, sizeof(fight_all));
-    fight_all.phase = FIGHT_ALL_SELECTED;
-    fight_all.run = boss_battle_character_key(key, sizeof(key)) ? boss_battle_record_fight_all_stats(key).runs + 1 : 1;
-    cursor_fight_all = 1;
+    fight_all_begin_run();
     screen.choice = 0;
     screen.cut = 0;
     puts("Boss Battle: Fight All selected");
@@ -1462,6 +1523,7 @@ void boss_battle_screen_help(int cursor_row, char *out, size_t size) {
 
 void boss_battle_reset(void) {
     memset(&s, 0, sizeof(s));
+    follower = 0;
     atomic_store(&quit_pending, 0);
     atomic_store(&pending, NONE);
     atomic_store(&travelling, NONE);
@@ -1486,4 +1548,53 @@ void boss_battle_reset(void) {
     character_level = 0;
     character_class_index = -1;
     unlock_text();
+}
+
+int boss_battle_follower(void) {
+    return follower && boss_battle_session_active();
+}
+
+int boss_battle_fight_all_follow_ready(int index) {
+    int waiting;
+    return fight_all.phase == FIGHT_ALL_CHECKPOINT && fight_all.follow && fight_all.boss + 1 == index &&
+           !checkpoint_failure(&waiting) && !waiting && fight_all.transit == BOSS_BATTLE_TRANSIT_SCENE_WAIT;
+}
+
+int boss_battle_follow(int index, int fight_all_run) {
+    const BossBattleEncounter *encounter = boss_battle_encounter(index);
+    if (!encounter || encounter->unavailable || boss_battle_session_active() || !boss_battle_available()) return 0;
+    if (fight_all_run && index == 0) {
+        if (fight_all.phase == FIGHT_ALL_CHECKPOINT) fight_all_stop(BOSS_BATTLE_FIGHT_ALL_ABORTED, "a new run began", 0);
+        fight_all_begin_run();
+        fight_all.follow = 1;
+    } else if (fight_all_run) {
+        if (!boss_battle_fight_all_follow_ready(index)) return 0;
+        fight_all.transit = BOSS_BATTLE_TRANSIT_REQUESTED;
+    } else if (fight_all.phase != FIGHT_ALL_OFF) {
+        fight_all_stop(BOSS_BATTLE_FIGHT_ALL_ABORTED, "the host started a single boss", 0);
+    }
+    int expected = NONE;
+    if (!atomic_compare_exchange_strong(&pending, &expected, index)) return 0;
+    s.cursor = index;
+    printf("Boss Battle: following the host into %02d %s\n", boss_battle_number(index), encounter->name);
+    return 1;
+}
+
+void boss_battle_follow_started(int index) {
+    follower = 1;
+    atomic_store(&travelling, index);
+    set_state(BOSS_BATTLE_TRAVELLING);
+    LOG("waiting for the host's travel to %s", boss_battle_encounter(index)->name);
+}
+
+void boss_battle_follow_released(const char *why) {
+    if (fight_all.follow && fight_all.phase == FIGHT_ALL_CHECKPOINT) {
+        fight_all_stop(BOSS_BATTLE_FIGHT_ALL_ABORTED, why, 1);
+        return;
+    }
+    fight_all.follow = 0;
+    if (!boss_battle_follower()) return;
+    follower = 0;
+    LOG("the host is gone (%s): the fight is left as a Quit", why);
+    boss_battle_request_quit(BOSS_BATTLE_QUIT_MENU);
 }

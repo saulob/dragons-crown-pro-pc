@@ -10,6 +10,9 @@
 #include "feature_sites.h"
 #include "guest_hook.h"
 #include "hydeland_town.h"
+#include "network_access.h"
+#include "network_hint.h"
+#include "online_prompt.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,13 +30,13 @@ extern "C" {
 /* The guest layouts the Hydeland trigger reads, the same on every supported build. */
 #define EARLY_STORY_TOWN_CONTEXT HYDELAND_TOWN_CONTEXT
 #define EARLY_STORY_CONTEXT_MANAGER HYDELAND_CONTEXT_MANAGER
-#define EARLY_STORY_MANAGER_PROMPT_SHOWN 0x14d /* game manager: set once the prompt has been shown this run */
-#define EARLY_STORY_OWNER_SIZE 0xb00          /* the prompt owner objects are 0xa78 bytes */
-#define EARLY_STORY_OWNER_SYSOBJ 0x1e0        /* owner -> the system object it belongs to */
-#define EARLY_STORY_OWNER_FLAGS 0x50          /* owner: slot change flags, 0x800 << slot */
-#define EARLY_STORY_OWNER_STATES 0x5b         /* owner: one state byte per slot */
-#define EARLY_STORY_PROMPT_SLOT 2
-#define EARLY_STORY_SLOT1_CHANGED 0x1000
+#define EARLY_STORY_MANAGER_PROMPT_SHOWN ONLINE_PROMPT_RUN_FLAG
+#define EARLY_STORY_OWNER_SIZE ONLINE_PROMPT_OWNER_SIZE
+#define EARLY_STORY_OWNER_SYSOBJ ONLINE_PROMPT_OWNER_SYSOBJ
+#define EARLY_STORY_OWNER_FLAGS ONLINE_PROMPT_OWNER_FLAGS
+#define EARLY_STORY_OWNER_STATES ONLINE_PROMPT_OWNER_STATES
+#define EARLY_STORY_PROMPT_SLOT ONLINE_PROMPT_SLOT
+#define EARLY_STORY_SLOT1_CHANGED ONLINE_PROMPT_SLOT1_CHANGED
 
 #define EARLY_STORY_MANAGER_MODE HYDELAND_MANAGER_MODE
 #define EARLY_STORY_MANAGER_SCENE HYDELAND_MANAGER_SCENE
@@ -46,13 +49,13 @@ extern "C" {
 #define EARLY_STORY_QUEUE_BEGIN HYDELAND_QUEUE_BEGIN
 #define EARLY_STORY_QUEUE_END HYDELAND_QUEUE_END
 #define EARLY_STORY_PROMPT_MASK_LEA HYDELAND_PROMPT_MASK_LEA
-#define EARLY_STORY_MANAGER_UI 0xa8       /* game manager: the window manager */
-#define EARLY_STORY_UI_WINDOWS 0x78       /* window manager: one 0x20 byte slot per window type, from type 1 */
-#define EARLY_STORY_UI_SLOT_SIZE 0x20
-#define EARLY_STORY_HINT_WINDOW_TYPE 0x28 /* the top help dialog, which Hydeland leaves unused */
-#define EARLY_STORY_HINT_TEXT_OBJECT 0x3e0
-#define EARLY_STORY_HINT_SHOW_SLOT 0x188
-#define EARLY_STORY_HINT_MESSAGE 0x432 /* SystemMsg "%s" */
+#define EARLY_STORY_MANAGER_UI NETWORK_HINT_MANAGER_UI
+#define EARLY_STORY_UI_WINDOWS NETWORK_HINT_UI_WINDOWS
+#define EARLY_STORY_UI_SLOT_SIZE NETWORK_HINT_UI_SLOT_SIZE
+#define EARLY_STORY_HINT_WINDOW_TYPE NETWORK_HINT_WINDOW_TYPE
+#define EARLY_STORY_HINT_TEXT_OBJECT NETWORK_HINT_TEXT_OBJECT
+#define EARLY_STORY_HINT_SHOW_SLOT NETWORK_HINT_SHOW_SLOT
+#define EARLY_STORY_HINT_MESSAGE NETWORK_HINT_MESSAGE
 #define EARLY_STORY_PROMPT_CHECKS_SPAN HYDELAND_PROMPT_CHECKS_SPAN
 
 /* The scene director opens the town menu and the Network Menu as one window kind-switched by location. */
@@ -63,8 +66,8 @@ extern "C" {
 #define EARLY_STORY_MENU_KIND 0x1510
 #define EARLY_STORY_MENU_KIND_NETWORK 2
 #define EARLY_STORY_PAD_TRIANGLE 0x1000 /* libScePad's button bit */
-#define EARLY_STORY_SHORTCUT_LEASE_MS 150
-#define EARLY_STORY_SHORTCUT_PRESS_MS 250
+#define EARLY_STORY_SHORTCUT_LEASE_MS NETWORK_SHORTCUT_LEASE_MS
+#define EARLY_STORY_SHORTCUT_PRESS_MS NETWORK_SHORTCUT_PRESS_MS
 #define EARLY_STORY_MENU_CREATED_BACK 0x96 /* from the kind store hook back to the director's creation flag test */
 #define EARLY_STORY_MENU_KIND_HOOK_LENGTH 7
 #define EARLY_STORY_ROOM_WISH_HOOK_LENGTH 6
@@ -84,7 +87,7 @@ void GUEST_HOOK_ABI early_story_flag_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI early_story_online_check_hook(GuestRegs *regs);
 
 /* The game's prompt function: the owner object and the slot whose state it runs, 1 once it is finished. */
-typedef uint8_t (GUEST_HOOK_ABI *EarlyStoryPromptFn)(uint64_t owner, int slot);
+typedef OnlinePromptFn EarlyStoryPromptFn;
 
 void GUEST_HOOK_ABI early_story_town_portal_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI early_story_menu_press_hook(GuestRegs *regs);
@@ -119,17 +122,11 @@ uint32_t early_story_blocked_writes(void);
 
 /* The game's top help dialog functions: the window of a type (created on first use), its formatted text, its hide, and
  * the text object's reveal reset. All four, or the hint is left out and the shortcut still works. */
-typedef uint64_t(GUEST_HOOK_ABI *EarlyStoryHintCreateFn)(uint64_t ui, int init);
-typedef void(GUEST_HOOK_ABI *EarlyStoryHintTextFn)(uint64_t window, int message, ...);
-typedef void(GUEST_HOOK_ABI *EarlyStoryHintWindowFn)(uint64_t object);
-typedef void(GUEST_HOOK_ABI *EarlyStoryHintShowFn)(uint64_t window, int duration, int flag);
-
-typedef struct {
-    EarlyStoryHintCreateFn create;
-    EarlyStoryHintTextFn text;
-    EarlyStoryHintWindowFn hide, refresh;
-    int verify_show; /* the window's show method must be the game's (off only where tests fake it) */
-} EarlyStoryHintFunctions;
+typedef NetworkHintCreateFn EarlyStoryHintCreateFn;
+typedef NetworkHintTextFn EarlyStoryHintTextFn;
+typedef NetworkHintWindowFn EarlyStoryHintWindowFn;
+typedef NetworkHintShowFn EarlyStoryHintShowFn;
+typedef NetworkHintFunctions EarlyStoryHintFunctions;
 
 void early_story_hint_configure(const EarlyStoryHintFunctions *functions);
 void early_story_hint_set_portuguese(int portuguese);

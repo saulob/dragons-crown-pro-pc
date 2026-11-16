@@ -21,6 +21,7 @@
 #include "net/json.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
+#include "boss_battle_online.h"
 #include "dcp_party.h"
 #include "early_story_session.h"
 #include "net/relay_frame.h"
@@ -109,7 +110,7 @@ struct Signal {
     bool delivered = false;
 };
 
-enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kSearch, kCreateJoin, kWorlds, kStory };
+enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kBossRooms, kSearch, kCreateJoin, kWorlds, kStory, kBossBattle };
 
 struct Pending {
     Kind kind = Kind::kInternal;
@@ -118,6 +119,7 @@ struct Pending {
     void* arg = nullptr;
     uint16_t event = 0;
     int story_step = EARLY_STORY_NO_STEP;
+    uint32_t boss_version = 0;
 };
 
 struct State {
@@ -151,6 +153,10 @@ struct State {
     int story_sent = EARLY_STORY_NO_STEP;
     // we inherited a story room: our external updates clear its story attribute
     bool clear_story_attr = false;
+    // Boss Battle: the lobby keeps its rooms to capable clients; the tag our room carries and the host state it has
+    bool boss_capable = false;
+    int boss_attr = BOSS_BATTLE_ROOM_NONE;
+    uint32_t boss_published = 0;
     uint64_t bound_ms = 0;
     uint16_t reported_port = 0;
     uint32_t reported_ip = 0;
@@ -161,6 +167,8 @@ struct State {
     bool friends_busy = false;
     uint64_t friends_generation = 0;
     std::vector<FriendRoom> friends;
+    std::vector<std::pair<uint64_t, std::string>> friend_room_owners;
+    std::set<std::string> boss_friend_names;
     // what the Online page shows: the account's friend code and the friend list as the lobby sent it
     std::string friend_code;
     std::vector<OnlinePlayer> friend_list;
@@ -192,12 +200,14 @@ int64_t IntAttrOf(const Json& ints, int64_t id, int64_t fallback) {
     return fallback;
 }
 
-void AddStoryAttr(Json& ints, int value) {
+void AddIntAttr(Json& ints, int id, int value) {
     Json pair = Json::Array();
-    pair.push(int64_t(EARLY_STORY_ROOM_ATTR));
+    pair.push(int64_t(id));
     pair.push(int64_t(value));
     ints.push(std::move(pair));
 }
+
+void AddStoryAttr(Json& ints, int value) { AddIntAttr(ints, EARLY_STORY_ROOM_ATTR, value); }
 
 // One support line and one notice for the player per refused room; `who` names the other side in the notice.
 void Refuse(const char* who, const std::string& about, const Json& remote) {
@@ -243,20 +253,34 @@ std::vector<uint8_t> Unhex(const Json& j) {
     return v;
 }
 
-// Internal attributes as the game may see them: the private live story state is taken out, the rest kept in order.
-// `step` gets the state's step when there was one (EARLY_STORY_NO_STEP if unreadable).
-Json WithoutStoryState(const Json& attrs, bool& had_state, int& step) {
+std::vector<uint8_t> Unhex(const Json& j);
+
+// The private states in a room's internal attributes, which the game never sees.
+struct PrivateStates {
+    bool story = false, boss = false;
+    int step = EARLY_STORY_NO_STEP;
+    std::vector<uint8_t> boss_state;
+};
+
+// Internal attributes as the game may see them: the private live story and Boss Battle states are taken out, the rest
+// kept in order. The story step is EARLY_STORY_NO_STEP if unreadable.
+Json WithoutPrivateStates(const Json& attrs, PrivateStates& states) {
     Json kept = Json::Array();
-    had_state = false;
-    step = EARLY_STORY_NO_STEP;
+    states = PrivateStates{};
     for (const Json& pair : attrs.items()) {
-        if (pair.items().empty() || pair.items()[0].as_int() != EARLY_STORY_STATE_ATTR) {
+        const int64_t id = pair.items().empty() ? 0 : pair.items()[0].as_int();
+        if (id != EARLY_STORY_STATE_ATTR && id != BOSS_BATTLE_STATE_ATTR) {
             kept.push(pair);
             continue;
         }
         const std::vector<uint8_t> data = Unhex(pair.items().size() > 1 ? pair.items()[1] : Json());
-        had_state = true;
-        step = early_story_state_decode(data.data(), data.size());
+        if (id == BOSS_BATTLE_STATE_ATTR) {
+            states.boss = true;
+            states.boss_state = data;
+            continue;
+        }
+        states.story = true;
+        states.step = early_story_state_decode(data.data(), data.size());
     }
     return kept;
 }
@@ -399,6 +423,9 @@ void ApplyPeers() {
 
 void ClearRoom() {
     early_story_session_reset();
+    if (g.room) boss_battle_online_room_left("the room was left");
+    g.boss_attr = BOSS_BATTLE_ROOM_NONE;
+    g.boss_published = 0;
     g.story_room_hosted = g.clear_story_attr = false;
     g.story_sent = EARLY_STORY_NO_STEP;
     if (g.socket) {
@@ -413,7 +440,7 @@ void ClearRoom() {
 }
 
 // The room from a create or join answer; also becomes our room. Caller holds g_mutex.
-uint8_t* JoinResponse(Block& b, const Json& body, int& story_step) {
+uint8_t* JoinResponse(Block& b, const Json& body, PrivateStates& states) {
     const Json& room = body["room"];
     g.room = room["id"].as_u64();
     g.me = uint16_t(body["me"].as_int());
@@ -428,9 +455,8 @@ uint8_t* JoinResponse(Block& b, const Json& body, int& story_step) {
     Wr<uint32_t>(internal, 0xc, uint32_t(room["world"].as_int(1)));
     Wr<uint64_t>(internal, 0x18, g.room);
     Wr<uint32_t>(internal, 0x40, uint32_t(room["flags"].as_int()));
-    bool had_state = false;
     uint32_t attrs = 0;
-    Wr<uint8_t*>(internal, 0x48, InternalAttrs(b, WithoutStoryState(room["bin_int"], had_state, story_step), attrs));
+    Wr<uint8_t*>(internal, 0x48, InternalAttrs(b, WithoutPrivateStates(room["bin_int"], states), attrs));
     Wr<uint32_t>(internal, 0x50, attrs);
     uint8_t* response = b.alloc(0x30);
     Wr<uint8_t*>(response, 0, internal);
@@ -582,23 +608,70 @@ Json HelloBody() {
     const Settings& s = settings();
     Json hello = net::hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible);
     if (early_story_active()) hello.set("story_session", true);
+    if (boss_battle_online_available()) hello.set("boss_battle_session", true);
     return hello;
 }
 
-// A joined room an Early Story Online rule refuses: the seat is given back and the game is told the join failed.
-bool RefuseStoryJoin(const Json& room) {
+// A joined room an Early Story Online or Boss Battle Online rule refuses: the seat is given back and the game is told
+// the join failed.
+bool RefuseJoin(const Json& room) {
     const Json& ints = room["ints"];
     const char* reason = "";
-    if (early_story_join_allowed(early_story_own_step(), int(IntAttrOf(ints, EARLY_STORY_ROOM_ATTR, 0)),
-                                 int(IntAttrOf(ints, EARLY_STORY_STAGE_ATTR, EARLY_STORY_NO_STEP)),
-                                 int(IntAttrOf(ints, EARLY_STORY_PACKED_ATTR, EARLY_STORY_NO_STEP)), &reason))
-        return false;
+    const int boss_attr = int(IntAttrOf(ints, BOSS_BATTLE_ROOM_ATTR, BOSS_BATTLE_ROOM_NONE));
+    const bool boss = boss_attr > 0 || boss_battle_online_search_wanted();
+    const char* feature = boss ? "Boss Battle Online" : "Early Story Online";
+    const bool allowed =
+        boss ? boss_battle_online_join_allowed(boss_attr, &reason)
+             : early_story_join_allowed(early_story_own_step(), int(IntAttrOf(ints, EARLY_STORY_ROOM_ATTR, 0)),
+                                        int(IntAttrOf(ints, EARLY_STORY_STAGE_ATTR, EARLY_STORY_NO_STEP)),
+                                        int(IntAttrOf(ints, EARLY_STORY_PACKED_ATTR, EARLY_STORY_NO_STEP)), &reason);
+    if (allowed) return false;
     Json body = Json::Object();
     body.set("room", room["id"].as_string());
     Issue(Kind::kInternal, "room.leave", std::move(body), nullptr, 0);
     g.notice = std::string("Cannot join this room: ") + reason + ".";
-    std::printf("Early Story Online: join refused, %s\n", reason);
+    std::printf("%s: join refused, %s\n", feature, reason);
     return true;
+}
+
+// The owner of a Boss Battle room tells its members each new host state, in its own SetRoomDataInternal; a member gets
+// it as room.internal. The host's start waits for the lobby's answer: by then the members have been sent it.
+void PublishBossBattleState() {
+    if (!g.room || g.me != g.owner || !LinkUsable() || g.boss_attr == BOSS_BATTLE_ROOM_NONE) return;
+    const uint32_t version = boss_battle_online_publish_version();
+    uint8_t state[BOSS_BATTLE_STATE_SIZE];
+    if (version == g.boss_published || !boss_battle_online_publish(state)) return;
+    Json attr = Json::Array();
+    attr.push(int64_t(BOSS_BATTLE_STATE_ATTR));
+    attr.push(net::hex_encode(state, sizeof(state)));
+    Json attrs = Json::Array();
+    attrs.push(std::move(attr));
+    g.boss_published = version;
+    Pending p;
+    p.kind = Kind::kBossBattle;
+    p.boss_version = version;
+    g.pending[g.link->request("room.set_internal", InternalBody(g.room, 0, 0, std::move(attrs)))] = p;
+}
+
+// The room's Boss Battle tag follows the host: open, in a fight, or gone once the Boss Battle visit ended.
+void PublishBossBattleTag() {
+    if (!g.room || g.me != g.owner || !LinkUsable()) return;
+    const int want = boss_battle_online_room_attr();
+    if (want == g.boss_attr) return;
+    g.boss_attr = want;
+    boss_battle_online_room_tagged(want);
+    Json ints = Json::Array();
+    AddIntAttr(ints, BOSS_BATTLE_ROOM_ATTR, want);
+    if (want != BOSS_BATTLE_ROOM_NONE && g.story_room_hosted) {
+        AddStoryAttr(ints, 0);
+        g.story_room_hosted = false;
+    }
+    Json body = Json::Object();
+    body.set("room", net::u64_text(g.room));
+    body.set("ints", std::move(ints));
+    std::printf("Boss Battle Online: room tag %d, room %llu\n", want, (unsigned long long)g.room);
+    g.pending[g.link->request("room.set_external", std::move(body))] = Pending{Kind::kInternal, 0, nullptr, nullptr, 0};
+    g.last_external.clear();
 }
 
 // The owner of a story room it created sends its live step through SetRoomDataInternal when it changes; the members get
@@ -621,12 +694,57 @@ void PublishStoryState() {
     g.pending[g.link->request("room.set_internal", InternalBody(g.room, 0, 0, std::move(attrs)))] = p;
 }
 
+// A Boss Battle room handed back to normal play becomes the story session a host of this step would have created: the
+// room's story attribute and live step go out as they do for a room created so.
+void ResumeStoryRoom() {
+    if (!g.room || g.me != g.owner || g.story_room_hosted || !g.story_capable || !LinkUsable()) return;
+    if (g.boss_attr != BOSS_BATTLE_ROOM_NONE || boss_battle_online_room_attr() != BOSS_BATTLE_ROOM_NONE) return;
+    const int step = early_story_own_step();
+    if (!early_story_session_resume_story_room(step)) return;
+    g.story_room_hosted = true;
+    g.clear_story_attr = false;
+    g.story_sent = EARLY_STORY_NO_STEP;
+    Json ints = Json::Array();
+    AddStoryAttr(ints, early_story_room_attr_value(step));
+    Json body = Json::Object();
+    body.set("room", net::u64_text(g.room));
+    body.set("ints", std::move(ints));
+    std::printf("Early Story Online: the room is a story session again, step %d\n", step);
+    g.pending[g.link->request("room.set_external", std::move(body))] = Pending{Kind::kInternal, 0, nullptr, nullptr, 0};
+    g.last_external.clear();
+    PublishStoryState();
+}
+
 void OnOwnStoryStep(int) {
     std::lock_guard<std::mutex> lock(g_mutex);
     PublishStoryState();
 }
 
 // ---- lobby messages ----
+void FinishFriends() {
+    g.friends_busy = false;
+    ++g.friends_generation;
+}
+
+// Which friends' rooms are Boss Battle rooms taking players: the lobby's own room search for them, one request per list.
+void RequestFriendBossRooms() {
+    if (g.friend_room_owners.empty() || !LinkUsable()) {
+        g.boss_friend_names.clear();
+        FinishFriends();
+        return;
+    }
+    Json body = Json::Object();
+    body.set("world", int64_t(0));
+    body.set("boss_battle", true);
+    const uint32_t seq = g.link->request("room.search", std::move(body));
+    g.pending[seq] = Pending{Kind::kBossRooms, 0, nullptr, nullptr, 0};
+}
+
+int FriendInBossRoom(const char* online_id) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g.boss_friend_names.count(online_id) ? 1 : 0;
+}
+
 void OnResponse(const net::LobbyMessage& m) {
     auto it = g.pending.find(m.seq);
     if (it == g.pending.end()) return;
@@ -637,6 +755,10 @@ void OnResponse(const net::LobbyMessage& m) {
     case Kind::kInternal: return;
     case Kind::kStory:
         if (error && g.story_sent == p.story_step) g.story_sent = EARLY_STORY_NO_STEP;
+        return;
+    case Kind::kBossBattle:
+        boss_battle_online_published(p.boss_version, !error);
+        if (error && g.boss_published == p.boss_version) g.boss_published = 0;
         return;
     case Kind::kUdp:
         g.udp_inflight = false;
@@ -651,6 +773,8 @@ void OnResponse(const net::LobbyMessage& m) {
         return;
     case Kind::kFriends: {
         g.friends.clear();
+        g.friend_room_owners.clear();
+        boss_battle_online_set_friend_room_lookup(&FriendInBossRoom);
         if (!error) {
             g.friend_list = ReadOnlinePlayers(m.body["friends"]);
             g.friend_list_known = true;
@@ -671,11 +795,22 @@ void OnResponse(const net::LobbyMessage& m) {
                     Refuse("Friend", "friend " + row.name, f);
                 continue;
             }
+            g.friend_room_owners.emplace_back(row.account, row.name);
             g.friends.push_back(std::move(row));
         }
         std::printf("Matching2: friends: %zu, in a joinable room: %zu\n", total, g.friends.size());
-        g.friends_busy = false;
-        ++g.friends_generation;
+        RequestFriendBossRooms();
+        return;
+    }
+    case Kind::kBossRooms: {
+        g.boss_friend_names.clear();
+        if (!error) {
+            for (const Json& room : m.body["rooms"].items())
+                for (const auto& [account, name] : g.friend_room_owners)
+                    if (account && room["owner_account"].as_u64() == account) g.boss_friend_names.insert(name);
+        }
+        std::printf("Matching2: friends in a Boss Battle room: %zu\n", g.boss_friend_names.size());
+        FinishFriends();
         return;
     }
     case Kind::kResume:
@@ -703,17 +838,24 @@ void OnResponse(const net::LobbyMessage& m) {
             data = SearchResponse(*block, m.body);
             std::printf("Matching2: search found %d room(s)\n", Rd<int32_t>(data, 8));
         }
-        if (p.kind == Kind::kCreateJoin && p.event == kEvJoin && RefuseStoryJoin(m.body["room"])) {
+        if (p.kind == Kind::kCreateJoin && p.event == kEvJoin && RefuseJoin(m.body["room"])) {
             error = kErrRefused;
         } else if (p.kind == Kind::kCreateJoin) {
-            int story_step = EARLY_STORY_NO_STEP;
-            data = JoinResponse(*block, m.body, story_step);
-            early_story_session_joined(g.me == g.owner, int(IntAttrOf(m.body["room"]["ints"], EARLY_STORY_ROOM_ATTR, 0)));
+            PrivateStates states;
+            data = JoinResponse(*block, m.body, states);
+            const Json& ints = m.body["room"]["ints"];
+            g.boss_attr = int(IntAttrOf(ints, BOSS_BATTLE_ROOM_ATTR, BOSS_BATTLE_ROOM_NONE));
+            // A Boss Battle room is no story session: each player keeps its own story.
+            if (g.boss_attr > 0) early_story_session_room_handoff(g.me == g.owner, 1);
+            else early_story_session_joined(g.me == g.owner, int(IntAttrOf(ints, EARLY_STORY_ROOM_ATTR, 0)));
+            boss_battle_online_room_joined(g.me == g.owner, g.boss_attr, int(g.members.size()), party::MemberSlot(g.me));
             std::printf("Matching2: %s room %llu as member 0x%x (owner 0x%x, %zu member(s), code %s)\n",
                         p.event == kEvJoin ? "joined" : "created", (unsigned long long)g.room, g.me, g.owner, g.members.size(),
                         m.body["room"]["code"].as_string().c_str());
-            early_story_session_internal_update(story_step);
+            early_story_session_internal_update(states.step);
+            if (states.boss) boss_battle_online_internal_update(states.boss_state.data(), states.boss_state.size());
             PublishStoryState();
+            PublishBossBattleState();
         }
     } else {
         std::printf("Matching2: request 0x%04x failed: %s\n", p.event, m.code.c_str());
@@ -723,7 +865,13 @@ void OnResponse(const net::LobbyMessage& m) {
             g.story_sent = EARLY_STORY_NO_STEP;
         }
         if (p.kind == Kind::kCreateJoin && m.code == "incompatible") {
-            if (m.body["story_session_required"].as_bool()) {
+            if (m.body["boss_battle_required"].as_bool() || m.body["boss_battle_only"].as_bool()) {
+                g.notice = m.body["boss_battle_only"].as_bool()
+                               ? "This room is not a Boss Battle session.\nThe Boss Battle page joins only Boss Battle rooms."
+                               : "This room is a Boss Battle session.\nJoin it from the Boss Battle page.";
+                std::printf("Boss Battle Online: the lobby refused the room (%s)\n",
+                            m.body["boss_battle_only"].as_bool() ? "not a Boss Battle room" : "a Boss Battle room");
+            } else if (m.body["story_session_required"].as_bool()) {
                 g.notice = "This room is an Early Story Online session.\nThis game version cannot join it.";
                 std::printf("Early Story Online: not declared as supported here, the room is refused\n");
             } else {
@@ -775,6 +923,7 @@ void OnEvent(const net::LobbyMessage& m) {
         const Member joined = MemberOf(b["member"]);
         g.members[joined.id] = joined;
         Remember(joined.name, b["member"]);
+        boss_battle_online_members_changed(int(g.members.size()));
         std::printf("Matching2: member 0x%x joined\n", joined.id);
         uint8_t* data = block->alloc(0x20);
         Wr<uint8_t*>(data, 0, MemberStruct(*block, joined));
@@ -785,6 +934,7 @@ void OnEvent(const net::LobbyMessage& m) {
         left.id = id;
         if (g.members.count(id)) left = g.members[id];
         g.members.erase(id);
+        boss_battle_online_members_changed(int(g.members.size()));
         if (g.socket && g.signals.count(id)) g.socket->forget_peer(g.signals[id].account);
         g.signals.erase(id);
         std::printf("Matching2: member 0x%x left (%s)\n", id, b["why"].as_string().c_str());
@@ -796,6 +946,8 @@ void OnEvent(const net::LobbyMessage& m) {
         const bool story_guest = early_story_story_room_guest();
         g.owner = to;
         early_story_session_owner_changed(g.me == g.owner);
+        boss_battle_online_owner_changed(g.me == g.owner);
+        g.boss_published = 0;
         if (g.me != g.owner) g.story_room_hosted = false;
         else if (story_guest) g.clear_story_attr = true;
         if (story_guest) std::printf("Early Story Online: the room changed owner, the story session ended (own story restored)\n");
@@ -805,12 +957,12 @@ void OnEvent(const net::LobbyMessage& m) {
         Wr<uint16_t>(data, 2, to);
         PushRoomEvent(kRoomOwner, block, data);
     } else if (m.event == "room.internal") {
-        bool had_state = false;
-        int story_step = EARLY_STORY_NO_STEP;
-        const Json game_attrs = WithoutStoryState(b["bin_int"], had_state, story_step);
-        if (had_state) early_story_session_internal_update(story_step);
-        // Only the owner's story state changed: the game would never have been called.
-        if (had_state && game_attrs.size() == 0) return;
+        PrivateStates states;
+        const Json game_attrs = WithoutPrivateStates(b["bin_int"], states);
+        if (states.story) early_story_session_internal_update(states.step);
+        if (states.boss) boss_battle_online_internal_update(states.boss_state.data(), states.boss_state.size());
+        // Only the owner's private state changed: the game would never have been called.
+        if ((states.story || states.boss) && game_attrs.size() == 0) return;
         uint8_t* data = block->alloc(0x50);
         uint8_t* flags = block->alloc(8);
         Wr<uint32_t>(flags, 0, uint32_t(b["flags"].as_int()));
@@ -853,6 +1005,8 @@ void NoteRelayCapability(const Json& hello_reply) {
     const net::RelayCapability capability = net::relay_capability(hello_reply);
     g.relay_capable = capability.usable();
     g.story_capable = net::story_session_capability(hello_reply);
+    g.boss_capable = net::boss_battle_session_capability(hello_reply);
+    boss_battle_online_set_capable(g.boss_capable);
     std::printf("Matching2: lobby relay %s\n", g.relay_capable ? "available as a fallback" : "not offered");
     ConfigureRelay();
 }
@@ -898,15 +1052,21 @@ void OnLink(const net::LobbyMessage& m) {
         const bool was_up = g.up;
         g.relay_capable = false;
         g.story_capable = false;
+        g.boss_capable = false;
+        boss_battle_online_set_capable(0);
         ConfigureRelay();
         g.up = false;
         g.down = true;
         g.lost = false;
         std::printf("Matching2: lobby unavailable (%s)\n", m.code.c_str());
-        for (auto& [seq, p] : g.pending) Complete(p, kErrLobbyDown);
+        for (auto& [seq, p] : g.pending) {
+            if (p.kind == Kind::kBossBattle) boss_battle_online_published(p.boss_version, 0);
+            Complete(p, kErrLobbyDown);
+        }
         g.pending.clear();
         g.friends_busy = false;
         g.friends.clear();
+        g.boss_friend_names.clear();
         g.friend_list.clear();
         g.friend_list_known = false;
         ++g.friends_generation;
@@ -1143,7 +1303,13 @@ DCP_SYSV int32_t m2_create_join_room(uint16_t context, const uint8_t* request, c
     body.set("world", int64_t(std::max<uint32_t>(1, Rd<uint32_t>(request, 0xc))));
     body.set("slots", int64_t(std::clamp<uint16_t>(Rd<uint16_t>(request, 0), 1, 4)));
     const int own_step = early_story_own_step();
-    const bool story_room = early_story_hosts_story_room(own_step);
+    const int boss_attr = boss_battle_online_room_attr();
+    if (boss_attr != BOSS_BATTLE_ROOM_NONE && !g.boss_capable) {
+        g.notice = "Boss Battle Online is not available yet:\nthe online service has to be updated first.";
+        std::printf("Boss Battle Online: not hosting, the online service does not keep Boss Battle rooms\n");
+        return kErrRefused;
+    }
+    const bool story_room = boss_attr == BOSS_BATTLE_ROOM_NONE && early_story_hosts_story_room(own_step);
     if (story_room && !g.story_capable) {
         g.notice = "Early Story Online is not available yet:\nthe online service has to be updated first.";
         std::printf("Early Story Online: not hosting, the online service does not keep story rooms to capable players\n");
@@ -1152,12 +1318,14 @@ DCP_SYSV int32_t m2_create_join_room(uint16_t context, const uint8_t* request, c
     body.set("flags", int64_t(early_story_room_flags(Rd<uint32_t>(request, 8), own_step)));
     Json ints = IntAttrs(Rd<const uint8_t*>(request, 0x70), Rd<uint64_t>(request, 0x78));
     if (story_room) AddStoryAttr(ints, early_story_room_attr_value(own_step));
+    if (boss_attr != BOSS_BATTLE_ROOM_NONE) AddIntAttr(ints, BOSS_BATTLE_ROOM_ATTR, boss_attr);
     body.set("ints", std::move(ints));
     body.set("bin_int", BinAttrs(Rd<const uint8_t*>(request, 0x60), Rd<uint64_t>(request, 0x68)));
     body.set("bin_ext", BinAttrs(Rd<const uint8_t*>(request, 0x90), Rd<uint64_t>(request, 0x98)));
     body.set("member_bin", BinAttrs(Rd<const uint8_t*>(request, 0xa0), Rd<uint64_t>(request, 0xa8)));
     std::printf("Matching2: create room (slots %lld, flags 0x%08llx%s)\n", (long long)body["slots"].as_int(),
-                (unsigned long long)body["flags"].as_int(), story_room ? ", story session" : "");
+                (unsigned long long)body["flags"].as_int(),
+                story_room ? ", story session" : boss_attr != BOSS_BATTLE_ROOM_NONE ? ", Boss Battle session" : "");
     g.story_room_hosted = story_room;
     g.clear_story_attr = false;
     g.story_sent = story_room ? own_step : EARLY_STORY_NO_STEP;
@@ -1173,6 +1341,10 @@ DCP_SYSV int32_t m2_join_room(uint16_t context, const uint8_t* request, const vo
     std::lock_guard<std::mutex> lock(g_mutex);
     Json body = Json::Object();
     body.set("room", net::u64_text(Rd<uint64_t>(request, 0)));
+    if (boss_battle_online_search_wanted()) {
+        body.set("boss_battle", true);
+        std::printf("Boss Battle Online: joining friend room %llu\n", (unsigned long long)Rd<uint64_t>(request, 0));
+    }
     std::printf("Matching2: join room %llu\n", (unsigned long long)Rd<uint64_t>(request, 0));
     g.story_room_hosted = g.clear_story_attr = false;
     g.story_sent = EARLY_STORY_NO_STEP;
@@ -1201,6 +1373,7 @@ DCP_SYSV int32_t m2_search_room(uint16_t context, const uint8_t* request, const 
     if (!request) return kErrInvalid;
     std::lock_guard<std::mutex> lock(g_mutex);
     Json body = Json::Object();
+    if (boss_battle_online_search_wanted()) body.set("boss_battle", true);
     body.set("from", int64_t(std::max<uint32_t>(1, Rd<uint32_t>(request, 0x10))));
     body.set("count", int64_t(std::clamp<uint32_t>(Rd<uint32_t>(request, 0x14), 1, 20)));
     const std::string& code = settings().join_code;
@@ -1259,6 +1432,11 @@ DCP_SYSV int32_t m2_set_room_external(uint16_t context, const uint8_t* request, 
     Json ints = IntAttrs(Rd<const uint8_t*>(request, 8), Rd<uint64_t>(request, 0x10));
     if (g.story_room_hosted) AddStoryAttr(ints, early_story_room_attr_value(early_story_own_step()));
     else if (g.clear_story_attr) AddStoryAttr(ints, 0);
+    if (g.boss_attr != BOSS_BATTLE_ROOM_NONE || boss_battle_online_room_attr() != BOSS_BATTLE_ROOM_NONE) {
+        g.boss_attr = boss_battle_online_room_attr();
+        boss_battle_online_room_tagged(g.boss_attr);
+        AddIntAttr(ints, BOSS_BATTLE_ROOM_ATTR, g.boss_attr);
+    }
     body.set("ints", std::move(ints));
     body.set("bin_ext", BinAttrs(Rd<const uint8_t*>(request, 0x28), Rd<uint64_t>(request, 0x30)));
     const std::string text = body.dump();
@@ -1420,6 +1598,9 @@ void pump() {
         Introduce(now);
         FlushPresence();
         ReportParty(now);
+        PublishBossBattleState();
+        PublishBossBattleTag();
+        ResumeStoryRoom();
         calls.swap(g.calls);
     }
     for (auto& call : calls) call();

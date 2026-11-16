@@ -1,4 +1,5 @@
 #include "early_story_online.h"
+#include "network_access.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -11,20 +12,11 @@ static const uint8_t kFlagWriter[8] = {0x55, 0x48, 0x89, 0xe5, 0x53, 0x50, 0x89,
 static const uint8_t kOnlineAccessor[8] = {0x80, 0x7f, 0x6f, 0x2c, 0x0f, 0x97, 0xc0, 0xc3};
 
 static _Atomic(EarlyStorySelectorFn) selector_function;
-static _Atomic(EarlyStoryPromptFn) prompt_function;
-static _Atomic uint64_t prompt_owner_vtable;
-static _Alignas(16) uint8_t prompt_owner[EARLY_STORY_OWNER_SIZE];
-static uint64_t current_town, owner_town;
-static int prompt_open, prompt_settled;
-static _Atomic uint64_t shortcut_town_until, shortcut_poll_until, shortcut_press_at;
-static atomic_int shortcut_previous_down, shortcut_hidden;
-static int shortcut_requested;
-static EarlyStoryHintFunctions hint_functions;
-static int hint_portuguese, hint_shown, hint_failed, hint_blocked;
-static uint64_t hint_window, hint_ui;
+static OnlinePrompt town_prompt;
+static uint64_t current_town;
+static int shortcut_requested, hint_blocked;
 static _Atomic(EarlyStoryRoomWishFn) room_wish_function;
 static uint64_t room_wish_town;
-static _Atomic(uint64_t (*)(void)) shortcut_clock;
 static _Atomic uint32_t blocked_writes;
 static atomic_uint writers_logged;
 static atomic_int visit_baseline = EARLY_STORY_NO_STEP;
@@ -38,71 +30,43 @@ void early_story_online_set_selector(EarlyStorySelectorFn selector) {
 }
 
 void early_story_online_set_prompt(EarlyStoryPromptFn prompt, uint64_t owner_vtable, uint64_t control_mask_address) {
-    atomic_store(&prompt_owner_vtable, owner_vtable);
     hydeland_town_set_mask_table(control_mask_address);
-    atomic_store(&prompt_function, prompt);
+    online_prompt_configure(prompt, owner_vtable);
     early_story_town_prompt_reset();
 }
 
-static uint64_t wall_clock_ms(void) {
-    struct timespec now;
-    timespec_get(&now, TIME_UTC);
-    return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
-}
-
-static uint64_t now_ms(void) {
-    uint64_t (*clock)(void) = atomic_load(&shortcut_clock);
-    return clock ? clock() : wall_clock_ms();
-}
-
 void early_story_shortcut_set_clock(uint64_t (*clock)(void)) {
-    atomic_store(&shortcut_clock, clock);
+    network_access_set_clock(clock);
 }
 
-static void hide_hint(void);
+static void hide_hint(void) {
+    network_hint_hide(NETWORK_HINT_EARLY_STORY);
+}
 
 static void shortcut_reset(void) {
-    atomic_store(&shortcut_town_until, 0);
-    atomic_store(&shortcut_poll_until, 0);
-    atomic_store(&shortcut_press_at, 0);
-    atomic_store(&shortcut_previous_down, 0);
-    atomic_store(&shortcut_hidden, 0);
+    network_shortcut_reset();
     shortcut_requested = 0;
     hint_blocked = 0;
     room_wish_town = 0;
     hide_hint();
 }
 
-static int shortcut_armed(uint64_t now) {
-    return now < atomic_load(&shortcut_town_until) && now < atomic_load(&shortcut_poll_until);
+static int shortcut_armed(void) {
+    return network_shortcut_armed();
 }
 
 int early_story_shortcut_pad_filter(int triangle_down) {
-    const int was_down = atomic_exchange(&shortcut_previous_down, triangle_down != 0);
-    if (!triangle_down) {
-        atomic_store(&shortcut_hidden, 0);
-        return 0;
-    }
-    const uint64_t now = now_ms();
-    if (shortcut_armed(now)) {
-        if (!was_down) atomic_store(&shortcut_press_at, now ? now : 1);
-        atomic_store(&shortcut_hidden, 1);
-    }
-    return atomic_load(&shortcut_hidden);
-}
-
-static int take_shortcut_press(uint64_t now) {
-    const uint64_t pressed_at = atomic_exchange(&shortcut_press_at, 0);
-    return pressed_at && now - pressed_at <= EARLY_STORY_SHORTCUT_PRESS_MS;
+    return network_shortcut_pad_filter(triangle_down);
 }
 
 int early_story_town_prompt_open(void) {
-    return prompt_open;
+    return town_prompt.open;
 }
 
 void early_story_town_prompt_reset(void) {
-    current_town = owner_town = 0;
-    prompt_open = prompt_settled = 0;
+    current_town = 0;
+    online_prompt_drop(&town_prompt);
+    town_prompt.settled = 0;
     shortcut_reset();
 }
 
@@ -192,7 +156,7 @@ void GUEST_HOOK_ABI early_story_host_record_hook(GuestRegs *regs) {
 /* The online wrapper's only accessor: rdi is the lead record, al the answer. */
 void GUEST_HOOK_ABI early_story_online_check_hook(GuestRegs *regs) {
     const uint8_t *record = (const uint8_t *)(uintptr_t)regs->rdi;
-    regs->rax = record && early_story_online_unlocked(record[EARLY_STORY_RECORD_STEP]);
+    regs->rax = record && (early_story_online_unlocked(record[EARLY_STORY_RECORD_STEP]) || network_access_online_check());
     regs->skip = 1;
 }
 
@@ -212,87 +176,42 @@ static uint8_t guest_u8(uint64_t at) {
     return *(const uint8_t *)(uintptr_t)at;
 }
 
+static void log_prompt(OnlinePromptStep step) {
+    if (step == ONLINE_PROMPT_SHOWN) printf("Early Story Online: Hydeland online prompt shown\n");
+    if (step == ONLINE_PROMPT_FINISHED) printf("Early Story Online: Hydeland online prompt finished\n");
+}
+
 static void run_prompt(void) {
-    const EarlyStoryPromptFn prompt = atomic_load(&prompt_function);
-    const int done = prompt((uint64_t)(uintptr_t)prompt_owner, EARLY_STORY_PROMPT_SLOT) != 0;
-    const int was_open = prompt_open;
-    prompt_open = !done && prompt_owner[EARLY_STORY_OWNER_STATES + EARLY_STORY_PROMPT_SLOT] != 0;
-    prompt_settled |= done;
-    if (prompt_open && !was_open) printf("Early Story Online: Hydeland online prompt shown\n");
-    if (done) printf("Early Story Online: Hydeland online prompt finished\n");
+    log_prompt(online_prompt_step(&town_prompt));
 }
 
 static void open_town_prompt(void) {
-    memset(prompt_owner, 0, sizeof(prompt_owner));
-    const uint64_t vtable = atomic_load(&prompt_owner_vtable);
-    memcpy(prompt_owner, &vtable, sizeof(vtable));
-    memcpy(prompt_owner + EARLY_STORY_OWNER_SYSOBJ, &current_town, sizeof(current_town));
-    const uint32_t changed = EARLY_STORY_SLOT1_CHANGED;
-    memcpy(prompt_owner + EARLY_STORY_OWNER_FLAGS, &changed, sizeof(changed));
-    owner_town = current_town;
-    run_prompt();
+    log_prompt(online_prompt_start(&town_prompt, current_town));
 }
 
 static void arm_shortcut(int ready) {
-    atomic_store(&shortcut_town_until, ready ? now_ms() + EARLY_STORY_SHORTCUT_LEASE_MS : 0);
+    network_shortcut_arm(NETWORK_SHORTCUT_EARLY_STORY, ready);
 }
 
 void early_story_hint_configure(const EarlyStoryHintFunctions *functions) {
-    hide_hint();
-    hint_failed = 0;
-    if (functions) hint_functions = *functions;
-    else memset(&hint_functions, 0, sizeof(hint_functions));
+    network_hint_configure(functions);
 }
 
 void early_story_hint_set_portuguese(int portuguese) {
-    hint_portuguese = portuguese != 0;
+    network_hint_set_portuguese(portuguese);
 }
 
 int early_story_hint_visible(void) {
-    return hint_shown;
-}
-
-static uint64_t hint_window_of(uint64_t ui) {
-    return guest_u64(ui + EARLY_STORY_UI_WINDOWS + (uint64_t)EARLY_STORY_HINT_WINDOW_TYPE * EARLY_STORY_UI_SLOT_SIZE);
-}
-
-static uint64_t hint_show_method(uint64_t window) {
-    return guest_u64(guest_u64(window) + EARLY_STORY_HINT_SHOW_SLOT);
-}
-
-static int hint_show_is_the_games(uint64_t window) {
-    static const uint8_t body[] = {0x89, 0xb7, 0x34, 0x06, 0x00, 0x00, 0x88, 0x97, 0x39, 0x06, 0x00, 0x00,
-                                   0xbe, 0x01, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x47, 0x50};
-    const uint64_t method = hint_show_method(window);
-    return method && !memcmp((const void *)(uintptr_t)method, body, sizeof(body));
-}
-
-static void hide_hint(void) {
-    if (!hint_shown) return;
-    hint_shown = 0;
-    if (hint_window_of(hint_ui) == hint_window) hint_functions.hide(hint_window);
+    return network_hint_shown_by(NETWORK_HINT_EARLY_STORY);
 }
 
 static void show_hint(uint64_t manager) {
-    const EarlyStoryHintFunctions *game = &hint_functions;
-    if (hint_failed || hint_blocked || !game->create || !game->text || !game->hide || !game->refresh) return;
-    const uint64_t ui = guest_u64(manager + EARLY_STORY_MANAGER_UI);
-    if (!ui || (hint_shown && hint_ui == ui && hint_window_of(ui) == hint_window)) return;
-    const uint64_t window = game->create(ui, 0);
-    if (!window || (game->verify_show && !hint_show_is_the_games(window))) {
-        hint_failed = 1;
-        return;
-    }
-    game->text(window, EARLY_STORY_HINT_MESSAGE, hint_portuguese ? "@#(2) Abrir Menu de Rede" : "@#(2) Open Network Menu");
-    game->refresh(window + EARLY_STORY_HINT_TEXT_OBJECT);
-    ((EarlyStoryHintShowFn)(uintptr_t)hint_show_method(window))(window, -1, 0);
-    hint_window = window;
-    hint_ui = ui;
-    hint_shown = 1;
+    if (!hint_blocked) network_hint_show(NETWORK_HINT_EARLY_STORY, manager);
 }
 
 void early_story_online_set_room_wish(EarlyStoryRoomWishFn room_wish) {
     atomic_store(&room_wish_function, room_wish);
+    network_access_set_room_wish(room_wish);
     room_wish_town = 0;
 }
 
@@ -315,17 +234,20 @@ static void wish_host_room(uint64_t manager) {
 
 /* At the room wish's `or eax, 8; cmp eax, 9` on a town's location (eax): Castle Gate and Stables keep a room. */
 void GUEST_HOOK_ABI early_story_room_wish_hook(GuestRegs *regs) {
-    if (early_story_town_room_wanted()) regs->rax = EARLY_STORY_ROOM_WISH_GATE;
+    if (network_access_releasing()) return;
+    if (early_story_town_room_wanted() || network_access_room_wanted()) regs->rax = EARLY_STORY_ROOM_WISH_GATE;
 }
 
-/* At the room info's store of the scene's location (ax; r13 is the scene): an early host anywhere in town reads as being
- * at the Castle Gate, the town location a friend's game accepts. */
+/* At the room info's store of the scene's location (ax; r13 is the scene, r15 the room info): an early
+ * host anywhere in town reads as being at the Castle Gate, the town location a friend's game accepts. */
 void GUEST_HOOK_ABI early_story_room_info_hook(GuestRegs *regs) {
     const uint64_t scene = regs->r13;
     const uint32_t location = (uint16_t)regs->rax;
+    network_access_room_info_built(regs->r15);
     if (!scene) return;
     const uint32_t type = guest_u32(scene + EARLY_STORY_AREA_TYPE);
-    if (type == EARLY_STORY_AREA_TOWN && (location | 8) != 9 && early_story_host_room_wanted())
+    if (type == EARLY_STORY_AREA_TOWN && (location | 8) != 9 &&
+        (early_story_host_room_wanted() || network_access_room_wanted()))
         regs->rax = (regs->rax & ~(uint64_t)0xffff) | EARLY_STORY_ROOM_WISH_GATE;
 }
 
@@ -336,14 +258,14 @@ void GUEST_HOOK_ABI early_story_room_info_hook(GuestRegs *regs) {
 void GUEST_HOOK_ABI early_story_town_portal_hook(GuestRegs *regs) {
     current_town = regs->rdi;
     arm_shortcut(0);
-    if (prompt_open) {
-        if (owner_town != current_town) prompt_open = 0;
+    if (town_prompt.open) {
+        if (town_prompt.system_object != current_town) online_prompt_drop(&town_prompt);
         else run_prompt();
         hide_hint();
         return;
     }
     const uint64_t manager = hydeland_town_manager(current_town);
-    if (!atomic_load(&prompt_function) || !early_story_active() || !early_story_hosting() || early_story_visiting() ||
+    if (!online_prompt_configured() || !early_story_active() || !early_story_hosting() || early_story_visiting() ||
         !hydeland_town_accepts_input(manager)) {
         hide_hint();
         return;
@@ -352,7 +274,7 @@ void GUEST_HOOK_ABI early_story_town_portal_hook(GuestRegs *regs) {
         early_story_grant_access();
         printf("Early Story Online: access enabled in Hydeland\n");
     }
-    if (!prompt_settled && !guest_u8(manager + EARLY_STORY_MANAGER_PROMPT_SHOWN)) {
+    if (!town_prompt.settled && !guest_u8(manager + EARLY_STORY_MANAGER_PROMPT_SHOWN)) {
         open_town_prompt();
         hide_hint();
         return;
@@ -360,7 +282,7 @@ void GUEST_HOOK_ABI early_story_town_portal_hook(GuestRegs *regs) {
     const int ready = hydeland_town_is_hydeland(manager);
     arm_shortcut(ready);
     if (ready) wish_host_room(manager);
-    if (ready && shortcut_armed(now_ms())) show_hint(manager);
+    if (ready && shortcut_armed()) show_hint(manager);
     else hide_hint();
 }
 
@@ -370,13 +292,12 @@ void GUEST_HOOK_ABI early_story_menu_press_hook(GuestRegs *regs) {
     shortcut_requested = 0;
     if (regs->r13 != 0) return;
     hint_blocked = 0;
-    const uint64_t now = now_ms();
-    atomic_store(&shortcut_poll_until, now + EARLY_STORY_SHORTCUT_LEASE_MS);
-    if (!shortcut_armed(now)) {
-        hide_hint();
+    network_shortcut_poll();
+    if (!shortcut_armed()) {
+        network_hint_hide_any();
         return;
     }
-    if (!take_shortcut_press(now)) return;
+    if (!network_shortcut_take_press()) return;
     shortcut_requested = 1;
     regs->rax = 1;
     regs->skip = 1;
@@ -384,7 +305,7 @@ void GUEST_HOOK_ABI early_story_menu_press_hook(GuestRegs *regs) {
 
 /* The director's story-step check for a town menu: the shortcut does not wait for the character menu to unlock. */
 void GUEST_HOOK_ABI early_story_menu_step_hook(GuestRegs *regs) {
-    if (!shortcut_requested) return;
+    if (!shortcut_requested && !network_access_menu_step()) return;
     regs->rax = 1;
     regs->skip = 1;
 }
@@ -394,10 +315,9 @@ void GUEST_HOOK_ABI early_story_menu_kind_hook(GuestRegs *regs) {
     const int requested = shortcut_requested;
     shortcut_requested = 0;
     if (!requested || !(regs->r15 & 1) || !regs->rbx) return;
-    const int32_t kind = EARLY_STORY_MENU_KIND_NETWORK;
-    memcpy((void *)(uintptr_t)(regs->rbx + EARLY_STORY_MENU_KIND), &kind, sizeof(kind));
+    network_menu_window_network(regs->rbx);
     hint_blocked = 1;
-    hide_hint();
+    network_hint_hide_any();
 }
 
 static void refuse_for_visitor(GuestRegs *regs, unsigned writer, const char *what) {
@@ -553,6 +473,7 @@ int early_story_online_install(uint8_t *image, uint64_t size, uint64_t entry, co
                                   (uint64_t)(uintptr_t)(image + sites->prompt_owner_vtable),
                                   hydeland_town_mask_table(image, sites->prompt_function));
     hydeland_town_set_installed(1);
+    network_access_set_installed(1);
     hydeland_town_observe(HYDELAND_TOWN_EARLY_STORY, early_story_town_portal_hook);
     early_story_online_set_room_wish((EarlyStoryRoomWishFn)(uintptr_t)(image + sites->room_wish_function));
     const int hint = sites->hint_create && sites->hint_text && sites->hint_hide && sites->hint_refresh;

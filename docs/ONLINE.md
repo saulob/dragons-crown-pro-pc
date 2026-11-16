@@ -122,6 +122,56 @@ out before the game's room callback (an update with nothing else is not delivere
 session ends for everyone in it, the room follows the normal-room rule, and the new owner's search attributes drop
 `0x7f01`.
 
+### Boss Battle Online (experimental)
+
+With Online Play on, opening Boss Battle in the Inn first runs the game's own "Go online?" prompt (the same prompt and
+stand-in owner as Early Story Online, asked once per Boss Battle visit). No keeps the visit offline and Boss Battle
+works solo as before; Yes is the game's own online activation. The page's help line shows the game's Network Status
+(SystemMsg 1252/1253). While the page is online the Network Menu shortcut is Early Story's: the same pad filter and
+the same top help dialog hint ("Open Network Menu" with the logical Triangle glyph, drawn as Y or Triangle by the
+controller). One feature owns the shortcut at a time, Early Story over Boss Battle; the page owns it only while it
+accepts it (the online prompt, the Network Menu, a start or another window hide it), and takes no input while the menu
+is up. The Inn has no player character, so the scene director's Menu loop never reaches its Menu poll there; the page
+makes the request the director makes after that loop (the game's menu window for pad 0 and player 1, the call found
+from the director's code on every build), and both features make that window the Network Menu the same way. The page
+is never closed for it: while the menu is up the page's list is hidden and reads no input (the game's own list flag and
+its update), and once the menu is gone the page comes back on the same boss, with the button that closed the menu held
+back from it until released. The game ends the Options page when the menu closes, so the page is opened again through
+the Inn's own lifecycle; the scene fader covers the Inn menu that lifecycle shows and fades back in once the new page has
+run. The Network Menu opened from the page has Join a random room, Join a Friend's room and Close Network Menu: its Return
+to town row is not built, and its End online row only reads Close Network Menu (its text is set and marked for layout
+again, as the game's own setters do). Confirm on that row is answered by the list as B at the list's Back query, so the
+game takes the B path from there on: the same answer, sound and close, no Confirm handling and no list left locked by a
+choice. The Return to town row is not built: the game's row helper is skipped, or, where the row is built inline,
+the unadded row is released as the game's own list clear releases rows. A list the window kept from before the open was
+known, and that still holds Return to town, is cleared and built again by the game's own setup. Every other Network Menu
+is the game's own. The host's room is made while the page waits: once the visit is online the Inn asks the game's own room wish, the
+one Early Story's town asks, with the Inn's scene (again only after the room was lost). A boss start then reuses that
+room, and the room is joinable again when the page returns. With Online Play off the page is unchanged.
+
+- **Setting and capability.** As in Early Story Online, the capability is the installed hooks and the setting only
+  decides who hosts. With Boss Battle on, a player enters Boss Battle and hosts a room; with it off the Boss Battle row
+  is absent and no room is ever originated. Every player on a build with the hooks declares `boss_battle_session` and
+  can join a Boss Battle room by the Network Menu's friend join, whatever the setting: joining a room tagged `0x7f03`
+  starts a visitor session that follows the host, shows "Waiting for the host" and ends with the room, leaving the
+  saved setting and the Inn menu as they were.
+
+- **Host authority.** The room owner chooses the boss, Fight All and the start. A guest's page shows "Waiting for the
+  host" with the host's boss; a guest's confirm starts nothing. The host's game server takes every player to the arena
+  and back, as for any online stage; each player's own session sets its own campaign aside and puts it back, merges
+  only the progression Boss Battle keeps, saves its own campaign and records its own `boss_battle.dat`.
+- **Rooms.** A Boss Battle room carries the private int attribute `0x7f03` (1 taking players, 2 in a fight or at a
+  Fight All checkpoint) and its host's state as the private internal binary attribute `0x7f04` (format 1, phase,
+  Fight All, boss index, start sequence), taken out before the game's room callback as `0x7f02` is. A host's start
+  waits for the lobby's answer to that update, which the lobby sends after the members' copy. Stale sequences are
+  ignored.
+- **Isolation.** Only clients that declare `boss_battle_session` host or join one, whatever their Boss Battle setting;
+  a search or join made from the Boss Battle page (`boss_battle` in the request) finds only open Boss Battle rooms, and
+  a random search from anywhere else finds none. A normal room that already has other players is never tagged.
+- **Ends.** Leaving Boss Battle clears the tag and tells the members; a change of owner, the host leaving or the room
+  closing ends the session for its guests (a guest in a fight leaves it as a Quit from its own game). A Boss Battle
+  room is no story session. Needs the updated Worker; until it is deployed a host refuses to create one.
+
 ### Bug reports
 
 The launcher's Bug Report page sends a report only when the player presses Send report, and an optional preview shows exactly

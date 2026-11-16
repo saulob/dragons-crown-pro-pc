@@ -4,6 +4,9 @@
   committing parity work: no window, no game launch, no production network (a development lobby on loopback at most).
 .PARAMETER SkipLinux
   Does not run the Linux network tests through WSL.
+.PARAMETER BossBattleOnline
+  Builds and runs only the Boss Battle Online focused suites (visitor lifecycle, handoff, Early Story handoff, Boss Battle Online, Boss Battle, Boss
+  Battle menu, Early Story, feature locators, build parity) and reports their result alone.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -44,7 +47,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux)
+param([switch]$SkipLinux, [switch]$BossBattleOnline)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 $tc = Resolve-Toolchain 'auto'
@@ -165,7 +168,7 @@ function Show-Output([string[]]$Lines, [bool]$Failed) {
 }
 
 $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
-                  'dcp-boss-battle-record-tests', 'dcp-skip-intro-tests', 'dcp-gallery-unlock-tests', 'dcp-endgame-unlocks-tests',
+                  'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-gallery-unlock-tests', 'dcp-endgame-unlocks-tests',
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
                   'dcp-launcher-tests'
 $requiredBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
@@ -221,6 +224,10 @@ $tests = @(
     (Test-Step 'Boss Battle text tests (every Menu & Subtitles language: official boss names, labels, Fight All, quit texts, kana Russian)' 'dcp-boss-battle-text-tests'),
     (Test-Step 'Boss Battle record tests (own data file: format, outcomes, attempt invariant, atomic replace)' 'dcp-boss-battle-record-tests'),
     (Test-Step 'Boss Battle menu tests (bosses 01 to 20 on the screen, Return to tavern, F4 quit path, no ImGui selector or Inn-list menu, title menu restored)' 'dcp-boss-battle-menu-tests'),
+    (Test-Step 'Boss Battle Online tests (prompt once per visit, Network Status, room isolation, host authority, guest follow, Fight All checkpoint, shared Early Story hooks, follower sessions, text in every language)' 'dcp-boss-battle-online-tests'),
+    (Test-Step 'Boss Battle visitor lifecycle tests (own page, Network Menu join, Inn rebuilt into stale Options mode with no menu frame and into its menu act, page back waiting for host, one guest party, host 1 then 2 of 2, first Harpy start followed, second start, Fight All)' 'dcp-boss-battle-visitor-lifecycle-tests'),
+    (Test-Step 'Boss Battle handoff tests (Return to tavern keeps the shared room and resets the Boss seats natively, a lone host leaves its room, guest page closes when the host ends, host reenters as host in the same room and starts Harpy, guest becomes visitor again, Hydeland seats one local and one remote player, handoff sites on six builds)' 'dcp-boss-battle-handoff-tests'),
+    (Test-Step 'Boss Battle to Early Story handoff tests (real order: host Return to tavern sends its end before the room goes neutral, guest cleanup and Early Story guest role in the Inn before host travel, nothing torn down during travel, scene-departure fallback, Boss reclaim, live characters)' 'dcp-boss-battle-early-story-handoff-tests'),
     (Test-Step 'Early Story Online tests (session rules, shadow record, writer blocks, atomic install, synthetic and local boot images)' 'dcp-early-story-tests' -Parity),
     (Test-Step 'Default message preview tests (records, preview, commit pin, synthetic and local boot images)' 'dcp-default-message-tests' -Parity),
     (Test-Step 'Japanese Menu Buttons tests (synthetic and local boot images)' 'dcp-menu-buttons-tests' -Parity),
@@ -247,12 +254,21 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-Sync-GpuDependencies
+$bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
+                          'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
+if ($BossBattleOnline) {
+    $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
+    $requiredSuites = $bossBattleOnlineSuites
+} else {
+    Sync-GpuDependencies
+}
 
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } else {
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
+}
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
     if ($test.Exe -and -not (Test-Path -LiteralPath (Join-Path $buildDir "bin\$($test.Exe).exe"))) { Stop-Tool "$($test.Exe) is not built: add it to the ninja line above." }
@@ -344,6 +360,16 @@ try {
         Remove-Item -LiteralPath $lobby.Files -Force -ErrorAction SilentlyContinue
     }
     if ($null -ne $previousLobbyUrl) { $env:DCP_TEST_LOBBY = $previousLobbyUrl } else { Remove-Item Env:\DCP_TEST_LOBBY -ErrorAction SilentlyContinue }
+}
+if ($BossBattleOnline) {
+    Write-Host ''
+    Write-Host ('Boss Battle Online: {0} PASS, {1} FAIL' -f ($tests.Count - $failed.Count), $failed.Count) -ForegroundColor Cyan
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Boss Battle Online tests passed.' -ForegroundColor Green
+    exit 0
 }
 $parityOutput = @($captured['dcp-build-parity-tests'])
 

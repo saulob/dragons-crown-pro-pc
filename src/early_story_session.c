@@ -10,6 +10,7 @@ static atomic_int room_host_step = EARLY_STORY_NO_STEP;
 static atomic_int native_host_step = EARLY_STORY_NO_STEP;
 static atomic_int live_host_step = EARLY_STORY_NO_STEP;
 static atomic_int own_step_seen = EARLY_STORY_NO_STEP;
+static atomic_int handed_back_room;
 static _Atomic(EarlyStoryStepObserver) own_step_observer;
 
 void early_story_set_active(int active) {
@@ -45,6 +46,7 @@ int early_story_online_unlocked(int step) {
 }
 
 void early_story_session_joined(int is_owner, int room_attr) {
+    atomic_store(&handed_back_room, 0);
     atomic_store(&native_host_step, EARLY_STORY_NO_STEP);
     atomic_store(&live_host_step, EARLY_STORY_NO_STEP);
     atomic_store(&room_host_step, room_attr > 0 ? room_attr - 1 : EARLY_STORY_NO_STEP);
@@ -54,6 +56,7 @@ void early_story_session_joined(int is_owner, int room_attr) {
 /* A story session ends with its owner; the room then follows the normal-room rule. */
 void early_story_session_owner_changed(int is_owner) {
     if (atomic_load(&role) == EARLY_STORY_ROLE_NONE) return;
+    atomic_store(&handed_back_room, 0);
     if (atomic_load(&room_host_step) != EARLY_STORY_NO_STEP) {
         atomic_store(&room_host_step, EARLY_STORY_NO_STEP);
         atomic_store(&native_host_step, EARLY_STORY_NO_STEP);
@@ -68,10 +71,26 @@ int early_story_story_room_guest(void) {
 }
 
 void early_story_session_reset(void) {
+    atomic_store(&handed_back_room, 0);
     atomic_store(&role, EARLY_STORY_ROLE_NONE);
     atomic_store(&room_host_step, EARLY_STORY_NO_STEP);
     atomic_store(&native_host_step, EARLY_STORY_NO_STEP);
     atomic_store(&live_host_step, EARLY_STORY_NO_STEP);
+}
+
+void early_story_session_room_handoff(int is_owner, int boss_room) {
+    if (boss_room) early_story_session_reset();
+    else {
+        early_story_session_joined(is_owner, 0);
+        atomic_store(&handed_back_room, 1);
+    }
+}
+
+int early_story_session_resume_story_room(int own_step) {
+    if (!atomic_load(&handed_back_room) || atomic_load(&role) != EARLY_STORY_ROLE_HOST || !early_story_hosts_story_room(own_step))
+        return 0;
+    early_story_session_joined(1, early_story_room_attr_value(own_step));
+    return 1;
 }
 
 void early_story_note_own_step(int step) {
@@ -92,9 +111,17 @@ void early_story_note_host_step(int step) {
     atomic_store(&native_host_step, step);
 }
 
+static int adopts_story_room(int step) {
+    const int own = atomic_load(&own_step_seen);
+    if (!atomic_load(&handed_back_room) || own < 0 || own >= EARLY_STORY_ORIGINAL_STEP) return 0;
+    atomic_store(&handed_back_room, 0);
+    atomic_store(&room_host_step, step);
+    return 1;
+}
+
 int early_story_session_internal_update(int step) {
-    if (step < 0 || atomic_load(&role) != EARLY_STORY_ROLE_GUEST || atomic_load(&room_host_step) == EARLY_STORY_NO_STEP)
-        return 0;
+    if (step < 0 || atomic_load(&role) != EARLY_STORY_ROLE_GUEST) return 0;
+    if (atomic_load(&room_host_step) == EARLY_STORY_NO_STEP && !adopts_story_room(step)) return 0;
     atomic_store(&live_host_step, step);
     return 1;
 }

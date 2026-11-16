@@ -26,7 +26,7 @@ test('the attribute id is private and hello advertises story_session next to the
   for (const fields of [MODERN, OLD]) {
     const reply = env.connect().hello(fields);
     assert.equal(reply.code, 'ok');
-    assert.deepEqual(reply.capabilities, { ...CAPABILITIES, story_session: true });
+    assert.deepEqual(reply.capabilities, { ...CAPABILITIES, story_session: true, boss_battle_session: true });
     assert.equal(reply.capabilities.relay_supported, true);
     assert.equal(typeof reply.capabilities.relay_max_payload, 'number');
   }

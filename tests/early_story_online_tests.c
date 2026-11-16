@@ -16,6 +16,7 @@
 #endif
 
 #include "early_story_online.h"
+#include "network_access.h"
 
 static int failures = 0;
 #define CHECK(cond)                                              \
@@ -1144,6 +1145,13 @@ static int town_left_to_the_game(void) {
     return 1;
 }
 
+static int released_to_the_game;
+
+static void GUEST_HOOK_ABI releasing_wish(uint64_t director) {
+    (void)director;
+    released_to_the_game = town_left_to_the_game();
+}
+
 static void test_host_room_wish(void) {
     /* an early host: nothing before the access latch, then the room wish once, after the prompt (Yes or No) */
     for (int answer = 0; answer <= 1; ++answer) {
@@ -1164,6 +1172,11 @@ static void test_host_room_wish(void) {
     fake_area(EARLY_STORY_AREA_TOWN, 3);
     for (int i = 0; i < 10; ++i) shortcut_frame();
     CHECK(room_wish_calls == 1 && town_keeps_rooms());
+    /* a feature releasing its room asks the same wish with nothing wanting one: the town's own place decides */
+    network_access_set_room_wish(releasing_wish);
+    CHECK(network_access_release_room(1) && released_to_the_game && !network_access_releasing() && town_keeps_rooms());
+    network_access_set_room_wish(fake_room_wish);
+    CHECK(room_wish_calls == 1);
     fake_area(EARLY_STORY_AREA_TOWN, EARLY_STORY_AREA_HYDELAND);
     memcpy(fake_second_town, fake_town, sizeof(fake_second_town));
     town_in_use = fake_second_town;
@@ -1324,6 +1337,70 @@ static void test_host_step_updates(void) {
     start(50, 0, EARLY_STORY_NO_STEP);
     CHECK(!early_story_session_internal_update(4) && early_story_session_host_step() == EARLY_STORY_NO_STEP);
     CHECK(!early_story_visiting());
+    early_story_session_reset();
+}
+
+/* A Boss Battle room given back to normal play: the owner's story session resumes as if the room had been created so, and
+ * a guest still in the opening follows it; a story past the opening is never moved and never hosts or follows. */
+static void test_boss_room_handed_back(void) {
+    GuestRegs regs;
+    uint8_t before[EARLY_STORY_RECORD_SIZE];
+
+    start(3, 0, EARLY_STORY_NO_STEP);
+    early_story_session_room_handoff(0, 0);
+    memcpy(before, record(0), sizeof(before));
+    CHECK(selected(&regs, 0) == record(0) && !early_story_visiting() && early_story_own_step() == 3);
+    CHECK(early_story_session_internal_update(3) && early_story_story_room_guest() && early_story_visiting());
+    CHECK(selected(&regs, 0)[EARLY_STORY_RECORD_STEP] == 3);
+    CHECK(early_story_session_internal_update(4) && early_story_session_host_step() == 4);
+    CHECK(selected(&regs, 0)[EARLY_STORY_RECORD_STEP] == 4);
+    CHECK(!memcmp(before, record(0), sizeof(before)) && early_story_own_step() == 3);
+    early_story_session_reset();
+    CHECK(selected(&regs, 0) == record(0) && !early_story_visiting() && !memcmp(before, record(0), sizeof(before)));
+
+    start(0x31, 0, EARLY_STORY_NO_STEP);
+    early_story_session_room_handoff(0, 0);
+    memcpy(before, record(0), sizeof(before));
+    CHECK(selected(&regs, 0) == record(0) && early_story_own_step() == 0x31);
+    CHECK(!early_story_session_internal_update(3) && !early_story_story_room_guest() && !early_story_visiting());
+    CHECK(selected(&regs, 0) == record(0) && !memcmp(before, record(0), sizeof(before)));
+    early_story_session_reset();
+
+    start(3, 0, EARLY_STORY_NO_STEP);
+    early_story_session_room_handoff(0, 1);
+    selected(&regs, 0);
+    CHECK(!early_story_session_internal_update(3) && !early_story_visiting());
+
+    start(3, 0, EARLY_STORY_NO_STEP);
+    early_story_session_room_handoff(0, 0);
+    selected(&regs, 0);
+    early_story_session_owner_changed(0);
+    CHECK(!early_story_session_internal_update(3) && !early_story_visiting());
+    early_story_session_reset();
+
+    start(3, 1, EARLY_STORY_NO_STEP);
+    early_story_grant_access();
+    early_story_note_own_step(3);
+    CHECK(!early_story_session_resume_story_room(3));
+    early_story_session_room_handoff(1, 0);
+    CHECK(early_story_session_resume_story_room(3) && !early_story_session_resume_story_room(3));
+    CHECK(!early_story_story_room_guest() && !early_story_visiting() && early_story_room_attr_value(3) == 4);
+
+    start(3, 1, EARLY_STORY_NO_STEP);
+    early_story_session_room_handoff(1, 0);
+    CHECK(!early_story_session_resume_story_room(3));
+    early_story_grant_access();
+    CHECK(early_story_session_resume_story_room(3));
+
+    start(0x31, 1, EARLY_STORY_NO_STEP);
+    early_story_grant_access();
+    early_story_session_room_handoff(1, 0);
+    CHECK(!early_story_session_resume_story_room(0x31) && !early_story_session_resume_story_room(0x2d));
+
+    start(3, 1, EARLY_STORY_NO_STEP);
+    early_story_grant_access();
+    early_story_session_room_handoff(1, 1);
+    CHECK(!early_story_session_resume_story_room(3));
     early_story_session_reset();
 }
 
@@ -1783,18 +1860,18 @@ static void test_source_wiring(void) {
         CHECK(leave && strstr(leave, "ClearRoom();") && strstr(leave, "ClearRoom();") < strstr(leave, "m2_search_room("));
         const char *stop = strstr(matching, "m2_context_stop(");
         CHECK(stop && strstr(stop, "ClearRoom();") && strstr(stop, "ClearRoom();") < strstr(stop, "start_wanted = false"));
-        CHECK(strstr(matching, "early_story_session_owner_changed(") && strstr(matching, "RefuseStoryJoin(") &&
+        CHECK(strstr(matching, "early_story_session_owner_changed(") && strstr(matching, "RefuseJoin(") &&
               strstr(matching, "early_story_room_flags("));
         CHECK(strstr(matching, "early_story_session_joined("));
         /* external data has no room event; the live state rides SetRoomDataInternal and the game never sees it */
         CHECK(!strstr(matching, "room.external") && !strstr(matching, "room_attr_changed"));
         const char *internal = strstr(matching, "m.event == \"room.internal\"");
-        CHECK(internal && strstr(internal, "WithoutStoryState(b[\"bin_int\"]") &&
-              strstr(internal, "WithoutStoryState(b[\"bin_int\"]") < strstr(internal, "PushRoomEvent(kRoomInternal") &&
+        CHECK(internal && strstr(internal, "WithoutPrivateStates(b[\"bin_int\"]") &&
+              strstr(internal, "WithoutPrivateStates(b[\"bin_int\"]") < strstr(internal, "PushRoomEvent(kRoomInternal") &&
               strstr(internal, "InternalAttrs(*block, game_attrs, n)") < strstr(internal, "PushRoomEvent(kRoomInternal"));
         const char *join = strstr(matching, "uint8_t* JoinResponse(");
-        CHECK(join && strstr(join, "WithoutStoryState(room[\"bin_int\"]") &&
-              strstr(join, "WithoutStoryState(room[\"bin_int\"]") < strstr(join, "uint8_t* SearchResponse("));
+        CHECK(join && strstr(join, "WithoutPrivateStates(room[\"bin_int\"]") &&
+              strstr(join, "WithoutPrivateStates(room[\"bin_int\"]") < strstr(join, "uint8_t* SearchResponse("));
         const char *publish = strstr(matching, "void PublishStoryState() {");
         CHECK(publish && strstr(publish, "!g.story_room_hosted || !g.room || g.me != g.owner") &&
               strstr(publish, "\"room.set_internal\"") < strstr(publish, "void OnOwnStoryStep("));
@@ -1805,8 +1882,8 @@ static void test_source_wiring(void) {
         CHECK(strstr(matching, "story_room && !g.story_capable") && strstr(matching, "hello.set(\"story_session\", true)"));
         CHECK(strstr(matching, "story_session_capability(hello_reply)") && strstr(matching, "story_room_hosted"));
         /* the room is refused before the game sees a seat in it */
-        CHECK(strstr(matching, "data = JoinResponse(*block, m.body, story_step);") &&
-              strstr(matching, "RefuseStoryJoin(m.body[\"room\"])") < strstr(matching, "data = JoinResponse(*block, m.body, story_step);"));
+        CHECK(strstr(matching, "data = JoinResponse(*block, m.body, states);") &&
+              strstr(matching, "RefuseJoin(m.body[\"room\"])") < strstr(matching, "data = JoinResponse(*block, m.body, states);"));
     }
     if (matching) {
         const char *hello = strstr(matching, "Json HelloBody() {");
@@ -1869,6 +1946,26 @@ static void test_source_wiring(void) {
     free(matching), free(loader), free(options);
 }
 
+static uint64_t observed_info;
+static void note_room_info(uint64_t info) {
+    observed_info = info;
+}
+
+/* The room info builder's end tells an observer, and changes nothing of the info itself. */
+static void test_room_info_observer(void) {
+    static uint8_t info[0x80], scene[0x200];
+    memset(info, 0, sizeof(info));
+    memset(scene, 0, sizeof(scene));
+    network_access_set_room_info_observer(note_room_info);
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.r13 = (uint64_t)(uintptr_t)scene;
+    regs.r15 = (uint64_t)(uintptr_t)info;
+    early_story_room_info_hook(&regs);
+    CHECK(observed_info == (uint64_t)(uintptr_t)info && info[0] == 0 && !regs.skip);
+    network_access_set_room_info_observer(NULL);
+}
+
 int main(void) {
     test_context_rules();
     test_threshold_and_rooms();
@@ -1885,6 +1982,7 @@ int main(void) {
     test_host_record_capture();
     test_story_session_lifetime();
     test_host_step_updates();
+    test_boss_room_handed_back();
     test_state_attribute();
     test_own_step_observer();
     test_own_step_baseline();
@@ -1893,6 +1991,7 @@ int main(void) {
     test_reset_paths();
     test_join_policy();
     test_source_wiring();
+    test_room_info_observer();
     if (failures) {
         printf("%d check(s) failed\n", failures);
         return 1;

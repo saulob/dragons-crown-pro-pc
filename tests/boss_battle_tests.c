@@ -10,6 +10,10 @@
 #include <string.h>
 
 #include "boss_battle.h"
+#include "boss_battle_online.h"
+#include "early_story_online.h"
+#include "network_access.h"
+#include "network_hint.h"
 #include "boss_battle_text.h"
 #include "boss_battle_record.h"
 #include "exit_game_text.h"
@@ -602,6 +606,18 @@ static void test_quit(void) {
     frames(probe(kLoading, 0, 0, 0), 2);
     CHECK(frames(probe(kArenaSetup, 1, 1, 0), 1) == BOSS_BATTLE_FRAME_NONE); /* not at play: no request yet */
     CHECK(boss_battle_outcome() == BOSS_BATTLE_OUTCOME_CANCELLED);
+    CHECK(frames(probe(kArenaPlay, 1, 1, 1), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
+    CHECK(harpy_stats().attempts == before.attempts && harpy_stats().quits == before.quits);
+
+    /* a player of an online start left while still travelling: cancelled at once, and the Inn asked for as soon as the
+     * scene can leave, with nothing recorded */
+    start_guarded();
+    before = harpy_stats();
+    CHECK(start_session(HARPY));
+    CHECK(boss_battle_request_quit(BOSS_BATTLE_QUIT_PEER_LOST) == 1);
+    frames(probe(kInnScene, 0, 0, 0), 1);
+    CHECK(boss_battle_state() != BOSS_BATTLE_TRAVELLING && boss_battle_outcome() == BOSS_BATTLE_OUTCOME_CANCELLED);
+    frames(probe(kLoading, 0, 0, 0), 2);
     CHECK(frames(probe(kArenaPlay, 1, 1, 1), 1) == BOSS_BATTLE_FRAME_REQUEST_INN);
     CHECK(harpy_stats().attempts == before.attempts && harpy_stats().quits == before.quits);
     boss_battle_reset();
@@ -1733,8 +1749,11 @@ static struct {
 } screen_texts[SCREEN_TEXTS];
 static int text_sets, frame_calls, frame_value = -1, message_value = -1;
 
+static void network_render_text(uint64_t text, const char *value);
+
 static void GUEST_HOOK_ABI fake_set_text(uint64_t text, const char *value) {
     ++text_sets;
+    network_render_text(text, value);
     for (int i = 0; i < SCREEN_TEXTS; ++i)
         if (!screen_texts[i].text || screen_texts[i].text == text) {
             screen_texts[i].text = text;
@@ -1766,8 +1785,16 @@ static void GUEST_HOOK_ABI fake_set_step(uint64_t scene, int level, int value) {
     step_value = value;
 }
 
+static int text_changes;
+static void GUEST_HOOK_ABI fake_text_changed(uint64_t text) {
+    ++text_changes;
+    const uint32_t pending = 0x477fff00u;
+    memcpy((void *)(uintptr_t)(text + 0x10c), &pending, sizeof(pending));
+}
+
 static void use_fake_screen_functions(void) {
-    const BossBattleScreenFunctions functions = {fake_set_step, fake_set_text, fake_set_message, fake_row_frame, fake_play_se};
+    const BossBattleScreenFunctions functions = {fake_set_step,  fake_set_text, fake_set_message,
+                                                 fake_row_frame, fake_play_se,  fake_text_changed};
     boss_battle_set_screen_functions(&functions);
     memset(screen_texts, 0, sizeof(screen_texts));
     text_sets = frame_calls = se_calls = 0;
@@ -1841,6 +1868,18 @@ static GuestRegs page_result(int32_t result) {
     regs.rax = (uint32_t)result;
     boss_battle_options_result_hook(&regs);
     return regs;
+}
+
+static GuestRegs page_update(void) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = (uint64_t)(uintptr_t)fake_body;
+    boss_battle_list_update_hook(&regs);
+    return regs;
+}
+
+static int page_hidden(void) {
+    return (i32_at(fake_body, 0x964) & 0x400) != 0;
 }
 
 static GuestRegs page_move(int down) {
@@ -2214,6 +2253,7 @@ static struct {
 } arena_request;
 static struct {
     int calls, colour[8], frames[8], layer[8], requests_before[8];
+    int last_colour, last_frames, last_layer;
 } fades;
 
 static void GUEST_HOOK_ABI fake_scene_request(uint64_t server, const char *round, int stage, int entry,
@@ -2234,6 +2274,9 @@ static uint64_t GUEST_HOOK_ABI fake_get_fader(uint64_t owner) {
 
 static void GUEST_HOOK_ABI fake_fade(uint64_t fader, uint32_t colour, int frames, int layer) {
     CHECK(fader == (uint64_t)(uintptr_t)fader_owner + 0x78);
+    fades.last_colour = (int)colour;
+    fades.last_frames = frames;
+    fades.last_layer = layer;
     if (fades.calls < 8) {
         fades.colour[fades.calls] = (int)colour;
         fades.frames[fades.calls] = frames;
@@ -4478,6 +4521,7 @@ static void test_us_image(void) {
     town.prompt_function = 0x369920;
     town.selector = 0x4763d0;
     town.town_portal_call = 0x3cdbd9;
+    town.menu_kind_store = 0x432cf2;
     uint64_t size = 0;
     unsigned char *image = boot_image("v1.03", &size, room);
     if (!image) {
@@ -4499,6 +4543,7 @@ static void test_us_image(void) {
           !memcmp(before + 0x42c779, kStepFadeIn, sizeof(kStepFadeIn)) && sites.arrival_fade_in == 0x42c77c &&
           sites.fade == 0x4437d0);
     CHECK(sites.hook == 0x428948 && sites.request == 0x30c70 && sites.scene_vtable == 0xb8cf30);
+    CHECK(network_menu_create_function(before, size, 0x432cf2) == 0x4b0640 && network_menu_create_function(before, size, 0x432cf0) == 0);
     CHECK(sites.inn_built == 0x3a4501 && sites.inn_result == 0x3a62a0 && sites.inn_help == 0x3a652a &&
           sites.inn_help_table == 0x74df30);
     CHECK(sites.allocate == 0x56f340 && sites.widget == 0x480e20 && sites.add_widget == 0x481f50 &&
@@ -4513,7 +4558,7 @@ static void test_us_image(void) {
           sites.results_screen == 0x42f678 && sites.town_return == 0x4300ef && sites.set_step == 0x58da30 &&
           sites.set_text == 0x58f0e0 && sites.set_message == 0x6b500);
     CHECK(sites.options_title == 0x507a91 && sites.options_built == 0x507aef && sites.options_update == 0x5074b7 &&
-          sites.options_result == 0x5075a5 && sites.list_up == 0x482300 && sites.list_down == 0x4824a0 &&
+          sites.options_result == 0x5075a5 && sites.list_up == 0x482300 && sites.list_down == 0x4824a0 && sites.list_update == 0x482a90 &&
           sites.options_body_vtable == 0xbb82b0 && sites.row_frame == 0x578f40);
     CHECK(sites.options_leave == 0x3ac08b && sites.arrival_fade_in == 0x42c77c && sites.inn_help_line == 0x3a6540 &&
           sites.cue_player == 0x5837f0 && sites.list_play_se == 0x484da0 && sites.get_fader == 0x443af0 &&
@@ -4593,7 +4638,22 @@ static void test_us_image(void) {
 
     start_guarded();
     boss_battle_set_memory_guard(NULL, NULL);
-    CHECK(boss_battle_install(image, size, 0, "CUSA10454-1.00", 1, &town, image + size, room) == 0 && !boss_battle_available());
+    /* Online Play: alone, Boss Battle keeps its own Start check; with the Early Story hooks in, theirs (one patch) */
+    unsigned char *online_copy = malloc(size + room);
+    memcpy(online_copy, before, size + room);
+    CHECK(boss_battle_install(online_copy, size, 0, "CUSA10454-1.00", 1, &town, online_copy + size, room) == 1 &&
+          boss_battle_available() && !boss_battle_online_available() && online_copy[0x432b21] == 0xe9);
+    memcpy(online_copy, before, size + room);
+    network_access_set_installed(1);
+    CHECK(boss_battle_install(online_copy, size, 0, "CUSA10454-1.00", 1, &town, online_copy + size, room) == 1 &&
+          online_copy[0x432b21] == 0xe8 && online_copy[0x432c4f] == 0xe9 && network_menu_request_available() &&
+          online_copy[0x43286b] == before[0x43286b]);
+    network_menu_set_create(NULL);
+    network_access_set_installed(0);
+    network_access_set(NETWORK_ACCESS_BOSS_BATTLE, NULL);
+    free(online_copy);
+    boss_battle_set_available(0);
+    boss_battle_set_memory_guard(NULL, NULL);
     CHECK(boss_battle_install(image, size, 0, "CUSA10454-1.00", 0, NULL, image + size, room) == 0);
     CHECK(boss_battle_install(image, size, 0, "CUSA10454-1.00", 0, &town, image + size, room - 1) == 0);
     CHECK(!memcmp(image, before, size + room));
@@ -4620,14 +4680,16 @@ static void test_us_image(void) {
     free(native_background);
     boss_battle_set_available(0);
 
-    PatchedSite all[41 + BOSS_BATTLE_INN_CALLS] = {
+    PatchedSite all[57 + BOSS_BATTLE_INN_CALLS] = {
         {0x428948, 5}, {0x3a4501, 8}, {0x3a62a0, 5}, {0x3a652a, 5}, {0x45030b, 5}, {0x4c4649, 5}, {0x10da5c, 5},
         {0x4af5ec, 5}, {0x3a316f, 11}, {0x8cc6e, 5}, {0x429564, 5}, {0xce806, 5},  {0x42e929, 5}, {0x42f678, 5},
-        {0x4300ef, 5}, {0x507a91, 5}, {0x507aef, 6}, {0x5074b7, 5}, {0x5075a5, 5}, {0x482300, 6}, {0x4824a0, 6},
+        {0x4300ef, 5}, {0x507a91, 5}, {0x507aef, 6}, {0x5074b7, 5}, {0x5075a5, 5}, {0x482300, 6}, {0x4824a0, 6}, {0x482a90, 6},
         {0x4c3d7a, 10}, {0x3ac08b, 5}, {0x42c77c, 5}, {0x4437d0, 6}, {0x3a6540, 5}, {0x5837f0, 6},
         {0x432b21, 5}, {0x432c4f, 5}, {0x432c8c, 6}, {0x50b160, 6}, {0x50e299, 5}, {0x50e41b, 5}, {0x50e8ab, 5},
-        {0x510f5e, 5}, {0x4327be, 5}, {0x3a506d, 5}, {0x3a3460, 6}, {0x3a504d, 5}, {0x3a3fc3, 5}, {0x513d02, 5}};
-    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) all[41 + i] = (PatchedSite){kCalls[i], 5};
+        {0x510f5e, 5}, {0x4327be, 5}, {0x3a506d, 5}, {0x3a3460, 6}, {0x3a504d, 5}, {0x3a3fc3, 5}, {0x513d02, 5},
+        {0x481f50, 6}, {0x50e914, 5}, {0x50e5d0, 5}, {0x483014, 6},
+        {0x438daa, 5}, {0x438dc7, 5}, {0x438dea, 5}, {0x438df3, 5}, {0x2924b, 5}, {0x290e5, 5}, {0x429388, 5}, {0x4295d8, 5}, {0x4d2675, 5}, {0x436fb0, 6}, {0x2f08e, 10}};
+    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) all[57 + i] = (PatchedSite){kCalls[i], 5};
     const size_t sites_count = sizeof(all) / sizeof(*all);
     for (size_t i = 0; i < sites_count; ++i) {
         for (size_t j = 0; j < i; ++j)
@@ -4665,21 +4727,26 @@ static const struct {
     {"CUSA07001-1.03", "CUSA07001-1.03", 0x475a60, 0x3cd2a9}, {"CUSA10209-1.00", "CUSA10209-1.00", 0x475740, 0x3ccfb9},
 };
 
-enum { SITE_LIST = 41 + BOSS_BATTLE_INN_CALLS };
+enum { SITE_LIST = 57 + BOSS_BATTLE_INN_CALLS };
 
 static size_t hooked_sites(const BossBattleSites *s, PatchedSite out[SITE_LIST]) {
-    const PatchedSite fixed[41] = {
+    const PatchedSite fixed[57] = {
         {s->hook, 5}, {s->inn_built, 8}, {s->inn_result, 5}, {s->inn_help, 5}, {s->arrange_story, 5}, {s->story_clear, 5},
         {s->dragon_talismans, 5}, {s->title, 5}, {s->inn_flushed, 11}, {s->save_copy, 5}, {s->party_wiped, 5},
         {s->boss_cleared, 5}, {s->clear_screen, 5}, {s->results_screen, 5}, {s->town_return, 5}, {s->options_title, 5},
-        {s->options_built, 6}, {s->options_update, 5}, {s->options_result, 5}, {s->list_up, 6}, {s->list_down, 6},
+        {s->options_built, 6}, {s->options_update, 5}, {s->options_result, 5}, {s->list_up, 6}, {s->list_down, 6}, {s->list_update, 6},
         {s->results_level_done, 10}, {s->options_leave, 5}, {s->arrival_fade_in, 5}, {s->fade, 6}, {s->inn_help_line, 5},
         {s->cue_player, 6}, {s->pause_start_gate, 5}, {s->pause_level_gate, 5}, {s->pause_mode, 6},
         {s->pause_row, s->pause_rows_inline ? 5 : 6}, {s->pause_setup_calls[0], 5}, {s->pause_setup_calls[1], 5},
         {s->pause_setup_calls[2], 5}, {s->pause_confirm_text, 5}, {s->pause_result, 5}, {s->inn_draw, 5},
-        {s->inn_destroyed, 6}, {s->inn_layer, 5}, {s->inn_layer_tail, 5}, {s->pause_floor_reward, 5}};
+        {s->inn_destroyed, 6}, {s->inn_layer, 5}, {s->inn_layer_tail, 5}, {s->pause_floor_reward, 5},
+        {s->network_rows, 6}, {s->network_choice[0], 5}, {s->network_choice[1], 5},
+        {s->network_back_query, 6}, {s->room_info_calls[0], 5}, {s->room_info_calls[1], 5},
+        {s->room_info_calls[2], 5}, {s->room_info_calls[3], 5}, {s->join_state_call, 5},
+        {s->join_unit_call, 5}, {s->party_slot_calls[0], 5}, {s->party_slot_calls[1], 5}, {s->location_text_call, 5},
+        {s->add_player, 6}, {s->slot_request, 10}};
     memcpy(out, fixed, sizeof(fixed));
-    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) out[41 + i] = (PatchedSite){s->inn_calls[i], 5};
+    for (int i = 0; i < BOSS_BATTLE_INN_CALLS; ++i) out[57 + i] = (PatchedSite){s->inn_calls[i], 5};
     return SITE_LIST;
 }
 
@@ -4765,6 +4832,95 @@ static void check_floor_reward_hook(void) {
     boss_battle_reset();
 }
 
+/* Where the image holds `pattern` (-1 any byte); up to `max` hits. */
+static size_t find_pattern(const unsigned char *image, uint64_t size, const short *pattern, size_t length, uint64_t *hits,
+                           size_t max) {
+    size_t found = 0;
+    for (uint64_t at = 0; at + length <= size && found < max; ++at) {
+        size_t k = 0;
+        while (k < length && (pattern[k] < 0 || image[at + k] == (unsigned char)pattern[k])) ++k;
+        if (k == length) hits[found++] = at;
+    }
+    return found;
+}
+
+/* The Network Menu's row and close-path checks refuse an image whose code is not the code they were written for. */
+static void check_network_row_sites(unsigned char *image, uint64_t size, const char *game) {
+    static const short kClosePath[] = {0x48, 0x85, 0xc0, 0x0f, 0x84, -1, -1, -1, -1, 0x8b, 0x80, 0xb4,
+                                       0x05, 0x00, 0x00, 0x83, 0xf8, 0x13, 0x0f, 0x87, -1, -1, -1, -1};
+    static const short kReturnRow[] = {0xbe, 0xa9, 0x04, 0x00, 0x00};
+    static const short kEndRow[] = {0xbe, 0xba, 0x04, 0x00, 0x00};
+    uint64_t hits[8];
+    const char *why = NULL;
+    BossBattleSites probe;
+    CHECK(find_pattern(image, size, kClosePath, sizeof(kClosePath) / sizeof(*kClosePath), hits, 8) == 1);
+    const uint64_t close = hits[0];
+    image[close + 17] ^= 0x01; /* the largest action that still has a row of its own */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu close path"));
+    image[close + 17] ^= 0x01;
+    image[close + 20] ^= 0x04; /* no longer the path of no row */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu close path"));
+    image[close + 20] ^= 0x04;
+    static const short kConfirmPath[] = {0xe8, -1, -1, -1, -1, 0xb9, 0xff, 0xff, 0xff, 0xff, 0x48, 0x85, 0xc0, 0x0f, 0x84,
+                                         -1, -1, -1, -1, 0x8b, 0x88, 0xb4, 0x05, 0x00, 0x00, 0x8d, 0x41, 0xff, 0x83, 0xf8,
+                                         0x12, 0x0f, 0x87, -1, -1, -1, -1};
+    CHECK(find_pattern(image, size, kConfirmPath, sizeof(kConfirmPath) / sizeof(*kConfirmPath), hits, 8) == 1);
+    const uint64_t confirm = hits[0];
+    image[confirm + 30] ^= 0x01; /* no longer the largest action the table has */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu choice"));
+    image[confirm + 30] ^= 0x01;
+    image[confirm + 33] ^= 0x04; /* the out-of-range jump no longer meets the no-row jump */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu choice"));
+    image[confirm + 33] ^= 0x04;
+    image[confirm + 1] ^= 0x10; /* a different row lookup than the first read's */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu choice"));
+    image[confirm + 1] ^= 0x10;
+    /* the game's list clear releases each row through its deleting destructor, the slot the inline Return row is released by */
+    static const short kListClear[] = {0x49, 0x89, 0xfe, 0x48, 0xbe, 0xf8, 0xff, 0xff, 0xff, 0x07, 0x00,
+                                       0x00, 0x00, 0x49, 0x8b, 0x4e, 0x70, 0x49, 0x8b, 0x46, 0x68};
+    CHECK(find_pattern(image, size, kListClear, sizeof(kListClear) / sizeof(*kListClear), hits, 8) == 1);
+    static const unsigned char kDeleteCall[] = {0x48, 0x8b, 0x07, 0xff, 0x50, 0x08};
+    int deletes = 0;
+    for (uint64_t at = hits[0]; at + sizeof(kDeleteCall) < hits[0] + 96; ++at) deletes |= !memcmp(image + at, kDeleteCall, sizeof(kDeleteCall));
+    CHECK(deletes);
+    static const short kBackQuery[] = {0x41, 0xc7, 0x86, 0x60, 0x09, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x4c, 0x89,
+                                       0xf7, 0x4d, 0x8d, 0xbe, 0x60, 0x09, 0x00, 0x00, 0x49, 0x8b, 0x06, 0xff, 0x90,
+                                       0x20, 0x01, 0x00, 0x00, 0x84, 0xc0, 0x74, -1, 0x41, 0x8b, 0x86, 0x64, 0x09,
+                                       0x00, 0x00, 0x85, 0xc0, 0x78, -1, 0x41, 0xc7, 0x07, 0xfe, 0xff, 0xff, 0xff};
+    CHECK(find_pattern(image, size, kBackQuery, sizeof(kBackQuery) / sizeof(*kBackQuery), hits, 8) == 1);
+    const uint64_t back_query = hits[0];
+    image[back_query + 48] ^= 0x01; /* B no longer answers -2 */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu Back query"));
+    image[back_query + 48] ^= 0x01;
+    image[back_query + 26] ^= 0x08; /* another query than Back */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu Back query"));
+    image[back_query + 26] ^= 0x08;
+    static const short kInfoSlot[] = {0x49, 0x8d, 0x9d, 0x20, 0xde, 0xff, 0xff, 0x48, 0x89, 0xdf, 0xe8, -1, -1, -1, -1, 0x49, 0x89,
+                                      0xc4, 0x4d, 0x85, 0xe4, 0x0f, 0x84, -1, -1, -1, -1, 0xe8, -1, -1, -1, -1, 0x4c, 0x8b,
+                                      0x78, 0x68, 0x4c, 0x89, 0xe7, 0xe8, -1, -1, -1, -1, 0x48, 0x8b, 0x4d, 0x80, 0x89, 0xc0,
+                                      0xf6, 0xc1, 0x01, 0x0f, 0x85, -1, -1, -1, -1, 0x48, 0x69, 0xc0, 0xd0, 0x01, 0x00, 0x00,
+                                      0x48, 0x89, 0xdf, 0x45, 0x8b, 0x7c, 0x07, 0x28, 0xe8, -1, -1, -1, -1, 0x84, 0xc0, 0x74,
+                                      0x6d, 0xe8, -1, -1, -1, -1, 0x44, 0x39, 0xf8, 0x4c, 0x8b, 0x7d, 0xa0, 0x75, 0x63, 0x49,
+                                      0x8b, 0x85, 0x60, 0xdf, 0xff, 0xff, 0x49};
+    CHECK(find_pattern(image, size, kInfoSlot, sizeof(kInfoSlot) / sizeof(*kInfoSlot), hits, 8) == 1);
+    const uint64_t info_block = hits[0];
+    image[info_block + 0x61 + 3] ^= 0x01; /* the host copy is no longer from the slot's host fields */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "room info builder"));
+    image[info_block + 0x61 + 3] ^= 0x01;
+    image[info_block + 0x4f] ^= 0x01; /* the controllable test is not the slot's */
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "room info builder"));
+    image[info_block + 0x4f] ^= 0x01;
+    const short *rows[2] = {kReturnRow, kEndRow};
+    for (int r = 0; r < 2; ++r) {
+        const size_t n = find_pattern(image, size, rows[r], 5, hits, 8);
+        CHECK(n >= 1);
+        for (size_t i = 0; i < n; ++i) image[hits[i] + 1] ^= 0x10;
+        CHECK(boss_battle_locate(image, size, game, &probe, &why) == 0 && why && !strcmp(why, "Network Menu rows"));
+        for (size_t i = 0; i < n; ++i) image[hits[i] + 1] ^= 0x10;
+    }
+    CHECK(boss_battle_locate(image, size, game, &probe, &why) == 1);
+}
+
 static void test_real_images(void) {
     CHECK(!boss_battle_build_listed("CUSA10209-1.02") && !boss_battle_build_listed("CUSA10487-1.03") && !boss_battle_build_listed(NULL));
     for (size_t b = 0; b < sizeof(kRealBuilds) / sizeof(*kRealBuilds); ++b) {
@@ -4807,6 +4963,7 @@ static void test_real_images(void) {
             refused += ok;
             image[all[i].at] ^= 0x10;
         }
+        check_network_row_sites(image, size, game);
         check_after_exit_game(image, size, game, &sites);
         CHECK(!memcmp(image, before, size + room));
         DcpEarlyStorySites town;
@@ -4834,9 +4991,2485 @@ static void test_real_images(void) {
     }
 }
 
+static uint8_t shortcut_manager[0x400], shortcut_ui[0x1000], shortcut_hint_object[0x800], shortcut_menu_window[0x2400];
+static uint64_t shortcut_hint_vtable[0x40], shortcut_now = 1000;
+static int shortcut_hint_creates, shortcut_hint_shows, shortcut_hint_hides;
+static char shortcut_hint_text[96];
+
+static uint64_t shortcut_clock(void) {
+    return shortcut_now;
+}
+
+static uint64_t GUEST_HOOK_ABI shortcut_hint_create(uint64_t ui, int init) {
+    (void)init;
+    CHECK(ui == (uint64_t)(uintptr_t)shortcut_ui);
+    ++shortcut_hint_creates;
+    put_pointer(shortcut_ui + NETWORK_HINT_UI_WINDOWS + (size_t)NETWORK_HINT_WINDOW_TYPE * NETWORK_HINT_UI_SLOT_SIZE,
+                shortcut_hint_object);
+    put_pointer(shortcut_hint_object, shortcut_hint_vtable);
+    return (uint64_t)(uintptr_t)shortcut_hint_object;
+}
+
+static void GUEST_HOOK_ABI shortcut_hint_set_text(uint64_t window, int message, const char *text) {
+    (void)window;
+    (void)message;
+    snprintf(shortcut_hint_text, sizeof(shortcut_hint_text), "%s", text);
+}
+
+static void GUEST_HOOK_ABI shortcut_hint_refresh(uint64_t object) {
+    (void)object;
+}
+
+static void GUEST_HOOK_ABI shortcut_hint_hide(uint64_t window) {
+    (void)window;
+    ++shortcut_hint_hides;
+}
+
+static void GUEST_HOOK_ABI shortcut_hint_show(uint64_t window, int duration, int flag) {
+    (void)window;
+    (void)duration;
+    (void)flag;
+    ++shortcut_hint_shows;
+}
+
+static int shortcut_hint_up(void) {
+    return network_hint_shown_by(NETWORK_HINT_BOSS_BATTLE);
+}
+
+static int shortcut_menu_creates, shortcut_menu_inits, shortcut_menu_refuse;
+static uint32_t shortcut_menu_pad = 0xff;
+static uint64_t shortcut_menu_vtable[0x40];
+
+static void GUEST_HOOK_ABI shortcut_menu_init(uint64_t window) {
+    CHECK(window == (uint64_t)(uintptr_t)shortcut_menu_window);
+    ++shortcut_menu_inits;
+}
+
+/* The game's menu window creation: the window goes into the Inn's menu window slot. */
+static uint64_t GUEST_HOOK_ABI shortcut_menu_create(uint64_t ui, uint32_t pad) {
+    CHECK(ui == (uint64_t)(uintptr_t)shortcut_ui);
+    ++shortcut_menu_creates;
+    shortcut_menu_pad = pad;
+    if (shortcut_menu_refuse) return 0;
+    memset(shortcut_menu_window, 0, sizeof(shortcut_menu_window));
+    shortcut_menu_vtable[0x100 / 8] = (uint64_t)(uintptr_t)shortcut_menu_init;
+    put_pointer(shortcut_menu_window, shortcut_menu_vtable);
+    put_pointer(shortcut_ui + 0x238, shortcut_menu_window);
+    return (uint64_t)(uintptr_t)shortcut_menu_window;
+}
+
+static int network_menu_open_in(const uint8_t *ui) {
+    uint64_t window;
+    memcpy(&window, ui + 0x238, sizeof(window));
+    return window && i32_at((const uint8_t *)(uintptr_t)window, EARLY_STORY_MENU_KIND) == EARLY_STORY_MENU_KIND_NETWORK;
+}
+
+static void menu_scene_frame(void) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    boss_battle_scene_hook(&regs);
+}
+
+static uint64_t fake_steps_vtable[0x40];
+static unsigned inn_step_sets, last_step_slot, last_step_value;
+static int expect_native_hidden;
+
+/* The Inn's step object: a set of the step slot moves the Options mode on. */
+static void GUEST_HOOK_ABI fake_step_set(uint64_t steps, uint32_t slot, uint32_t value) {
+    CHECK(steps == (uint64_t)(uintptr_t)(fake_inn + 0xa8));
+    ++inn_step_sets;
+    last_step_slot = slot;
+    last_step_value = value;
+    fake_inn[INN_ACT + slot] = (uint8_t)value;
+}
+
+static void page_act(void) {
+    GuestRegs regs = page_regs();
+    boss_battle_options_update_hook(&regs);
+}
+
+enum { NETWORK_ROW_ACTION = 0x5b4, NETWORK_ROW_TEXT = 0x370, NETWORK_ROW_LIST = 0x1520, NETWORK_ROW_COUNT = 6 };
+enum { ACTION_JOIN_RANDOM = 0xa, ACTION_JOIN_FRIEND = 0xb, ACTION_END_ONLINE = 0xf, ACTION_RETURN_TO_TOWN = 1 };
+enum { MESSAGE_RETURN_TO_TOWN = 0x4a9, BACK_INDEX = -2 };
+
+static uint8_t network_rows_storage[NETWORK_ROW_COUNT][0x5c0];
+static uint64_t network_row_vtable[4];
+static uint64_t network_list_widgets[NETWORK_ROW_COUNT];
+static int network_rows_alive, network_rows_deleted, network_setups, network_inline_build;
+static int end_online_handler_calls, return_to_town_handler_calls, close_path_calls, other_choice_calls;
+
+/* The row's deleting destructor, which the game's own list clear calls on every row it holds. */
+static char network_render_heap[NETWORK_ROW_COUNT][64];
+
+/* The text object's own string, which the row's draw reads: inline up to 15 bytes, else behind a pointer. */
+static void network_render_text(uint64_t text, const char *value) {
+    if (text < (uint64_t)(uintptr_t)network_rows_storage ||
+        text >= (uint64_t)(uintptr_t)network_rows_storage + sizeof(network_rows_storage))
+        return;
+    const size_t slot = (text - (uint64_t)(uintptr_t)network_rows_storage) / sizeof(network_rows_storage[0]);
+    uint8_t *object = (uint8_t *)(uintptr_t)text;
+    const uint64_t length = strlen(value), capacity = length > 15 ? length : 15;
+    memset(object + 0x10, 0, 0x20);
+    if (length > 15) {
+        snprintf(network_render_heap[slot], sizeof(network_render_heap[slot]), "%s", value);
+        put_pointer(object + 0x10, network_render_heap[slot]);
+    } else {
+        memcpy(object + 0x10, value, length + 1);
+    }
+    memcpy(object + 0x20, &length, sizeof(length));
+    memcpy(object + 0x28, &capacity, sizeof(capacity));
+}
+
+static const char *network_rendered(const uint8_t *row) {
+    uint64_t length, capacity, data;
+    memcpy(&length, row + NETWORK_ROW_TEXT + 0x20, sizeof(length));
+    memcpy(&capacity, row + NETWORK_ROW_TEXT + 0x28, sizeof(capacity));
+    memcpy(&data, row + NETWORK_ROW_TEXT + 0x10, sizeof(data));
+    static char shown[64];
+    const char *source = capacity > 15 ? (const char *)(uintptr_t)data : (const char *)(row + NETWORK_ROW_TEXT + 0x10);
+    snprintf(shown, sizeof(shown), "%.*s", (int)length, source);
+    return shown;
+}
+
+static void GUEST_HOOK_ABI fake_row_delete(uint64_t row) {
+    CHECK(row >= (uint64_t)(uintptr_t)network_rows_storage &&
+          row < (uint64_t)(uintptr_t)network_rows_storage + sizeof(network_rows_storage));
+    ++network_rows_deleted;
+    --network_rows_alive;
+}
+
+static uint8_t *network_list_at(void) {
+    return shortcut_menu_window + NETWORK_ROW_LIST;
+}
+
+static int network_list_count(void) {
+    uint64_t begin, end;
+    memcpy(&begin, network_list_at() + 0x68, sizeof(begin));
+    memcpy(&end, network_list_at() + 0x70, sizeof(end));
+    return (int)((end - begin) / sizeof(uint64_t));
+}
+
+static void set_network_list_count(int count) {
+    put_pointer(network_list_at() + 0x68, network_list_widgets);
+    put_pointer(network_list_at() + 0x70, network_list_widgets + count);
+}
+
+static uint64_t GUEST_HOOK_ABI fake_network_row_at(uint64_t list, int32_t index) {
+    CHECK(list == (uint64_t)(uintptr_t)network_list_at());
+    return index >= 0 && index < network_list_count() ? network_list_widgets[index] : 0;
+}
+
+static uint8_t *network_row(int action) {
+    uint8_t *row = network_rows_storage[0];
+    for (int i = 0; i < NETWORK_ROW_COUNT; ++i) { /* a free storage slot */
+        uint8_t *candidate = network_rows_storage[i];
+        int used = 0;
+        for (int k = 0; k < network_list_count(); ++k) used |= network_list_widgets[k] == (uint64_t)(uintptr_t)candidate;
+        if (!used) {
+            row = candidate;
+            break;
+        }
+    }
+    memset(row, 0, sizeof(network_rows_storage[0]));
+    network_row_vtable[1] = (uint64_t)(uintptr_t)fake_row_delete;
+    put_pointer(row, network_row_vtable);
+    put_u32(row + NETWORK_ROW_ACTION, (uint32_t)action);
+    if (action == ACTION_END_ONLINE) network_render_text((uint64_t)(uintptr_t)row + NETWORK_ROW_TEXT, "End online");
+    ++network_rows_alive;
+    return row;
+}
+
+static void append_network_row(uint8_t *row) {
+    network_list_widgets[network_list_count()] = (uint64_t)(uintptr_t)row;
+    set_network_list_count(network_list_count() + 1);
+}
+
+/* The game's list clear: every row it holds is released through its deleting destructor. */
+static void clear_network_list(void) {
+    for (int i = 0; i < network_list_count(); ++i) fake_row_delete(network_list_widgets[i]);
+    set_network_list_count(0);
+}
+
+/* A window of its own: the previous one went with its rows. */
+static void drop_network_list(void) {
+    network_rows_alive -= network_list_count();
+    set_network_list_count(0);
+}
+
+/* The game's Network Menu setup: each row is built whole and added to the window's list, the Return to town row through
+ * the row helper on the builds that have one, and inline on the others. */
+static void build_network_rows(void) {
+    static const int kNative[] = {ACTION_JOIN_RANDOM, ACTION_JOIN_FRIEND, ACTION_END_ONLINE, ACTION_RETURN_TO_TOWN};
+    memset(screen_texts, 0, sizeof(screen_texts));
+    put_u32(network_list_at() + 0x958, 0);
+    for (size_t i = 0; i < sizeof(kNative) / sizeof(*kNative); ++i) {
+        GuestRegs regs;
+        memset(&regs, 0, sizeof(regs));
+        regs.rdi = (uint64_t)(uintptr_t)network_list_at();
+        if (kNative[i] == ACTION_RETURN_TO_TOWN && !network_inline_build) {
+            regs.rsi = MESSAGE_RETURN_TO_TOWN;
+            boss_battle_pause_row_hook(&regs);
+            if (regs.skip) continue;
+        }
+        uint8_t *row = network_row(kNative[i]);
+        regs.rsi = (uint64_t)(uintptr_t)row;
+        regs.skip = 0;
+        boss_battle_network_row_hook(&regs);
+        if (!regs.skip) append_network_row(row);
+    }
+    for (int i = 0; i < network_list_count(); ++i) { /* the game builds the labels after the rows are added */
+        const uint8_t *row = (const uint8_t *)(uintptr_t)network_list_widgets[i];
+        if (i32_at(row, NETWORK_ROW_ACTION) == ACTION_END_ONLINE) network_render_text((uint64_t)(uintptr_t)row + NETWORK_ROW_TEXT, "End online");
+    }
+}
+
+static void GUEST_HOOK_ABI fake_network_setup(uint64_t window) {
+    CHECK(window == (uint64_t)(uintptr_t)shortcut_menu_window);
+    ++network_setups;
+    clear_network_list();
+    build_network_rows();
+}
+
+/* A call of the menu's setup: the hook decides in the Boss Battle context, the game's setup runs otherwise. */
+static void run_network_setup(void) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = (uint64_t)(uintptr_t)shortcut_menu_window;
+    boss_battle_pause_setup_hook(&regs);
+    if (!regs.skip) fake_network_setup(regs.rdi);
+}
+
+static void count_choice(int index) {
+    uint64_t reads[2];
+    for (int k = 0; k < 2; ++k) { /* the menu reads the chosen row twice, each through the game's row lookup */
+        GuestRegs regs;
+        memset(&regs, 0, sizeof(regs));
+        regs.rdi = (uint64_t)(uintptr_t)network_list_at();
+        regs.rsi = (uint64_t)(int64_t)index;
+        boss_battle_network_choice_hook(&regs);
+        reads[k] = regs.skip ? regs.rax : fake_network_row_at(regs.rdi, index);
+    }
+    const int action = reads[0] ? i32_at((const uint8_t *)(uintptr_t)reads[0], NETWORK_ROW_ACTION) : 0;
+    if (!reads[0] && !reads[1]) ++close_path_calls;
+    else if (action == ACTION_END_ONLINE) ++end_online_handler_calls;
+    else if (action == ACTION_RETURN_TO_TOWN) ++return_to_town_handler_calls;
+    else ++other_choice_calls;
+}
+
+static void reset_choice_counts(void) {
+    end_online_handler_calls = return_to_town_handler_calls = close_path_calls = other_choice_calls = 0;
+}
+
+static int row_index_of(int action) {
+    for (int i = 0; i < network_list_count(); ++i)
+        if (i32_at((const uint8_t *)(uintptr_t)network_list_widgets[i], NETWORK_ROW_ACTION) == action) return i;
+    return -1;
+}
+
+typedef uint8_t(GUEST_HOOK_ABI *TestListQueryFn)(uint64_t list);
+enum { LIST_DECIDE_SLOT = 0x118, LIST_BACK_SLOT = 0x120, LIST_LOCKED = 0x1, SE_LIST_DECIDE = 43, SE_LIST_CANCEL = 44 };
+
+static uint64_t network_list_vtable[0x130 / 8];
+static int pad_decide, pad_back;
+
+static uint8_t GUEST_HOOK_ABI fake_decide_query(uint64_t list) {
+    CHECK(list == (uint64_t)(uintptr_t)network_list_at());
+    return (uint8_t)pad_decide;
+}
+
+static uint8_t GUEST_HOOK_ABI fake_back_query(uint64_t list) {
+    CHECK(list == (uint64_t)(uintptr_t)network_list_at());
+    return (uint8_t)pad_back;
+}
+
+/* What the list update does from its Back query on: what it answers, which button it consumes, what it sounds, and
+ * whether a choice locks the list. */
+typedef struct {
+    int result, cancel_consumed, decide_consumed, sound, locked;
+} ListAnswer;
+
+static ListAnswer list_update_answer(int decide, int back) {
+    uint8_t *list = network_list_at();
+    network_list_vtable[LIST_DECIDE_SLOT / 8] = (uint64_t)(uintptr_t)fake_decide_query;
+    network_list_vtable[LIST_BACK_SLOT / 8] = (uint64_t)(uintptr_t)fake_back_query;
+    put_pointer(list, network_list_vtable);
+    pad_decide = decide;
+    pad_back = back;
+    ListAnswer answer = {-1, 0, 0, 0, 0};
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = (uint64_t)(uintptr_t)list;
+    regs.rax = (uint64_t)(uintptr_t)network_list_vtable;
+    boss_battle_network_back_query_hook(&regs);
+    CHECK(!regs.skip);
+    uint64_t back_query;
+    memcpy(&back_query, (const void *)(uintptr_t)(regs.rax + LIST_BACK_SLOT), sizeof(back_query));
+    if (((TestListQueryFn)(uintptr_t)back_query)(regs.rdi)) {
+        answer.result = BACK_INDEX;
+        answer.cancel_consumed = 1;
+        answer.sound = SE_LIST_CANCEL;
+    } else if (fake_decide_query(regs.rdi)) {
+        answer.result = i32_at(list, 0x958);
+        answer.decide_consumed = 1;
+        answer.sound = SE_LIST_DECIDE;
+        answer.locked = 1;
+        put_u32(list + 0x964, (uint32_t)i32_at(list, 0x964) | LIST_LOCKED);
+    }
+    return answer;
+}
+
+static int same_answer(ListAnswer a, ListAnswer b) {
+    return a.result == b.result && a.cancel_consumed == b.cancel_consumed && a.decide_consumed == b.decide_consumed &&
+           a.sound == b.sound && a.locked == b.locked;
+}
+
+/* Confirm on Close Network Menu is answered by the list exactly as B is, from the Back query on: no Confirm sound, no
+ * Confirm consumed, no locked list, no row read for a choice. Join rows stay the game's own choices. */
+static void check_closing(int close_row) {
+    uint8_t *list = network_list_at();
+    put_u32(list + 0x958, (uint32_t)row_index_of(ACTION_END_ONLINE));
+    put_u32(list + 0x964, 0);
+    const ListAnswer physical_b = list_update_answer(0, 1);
+    CHECK(physical_b.result == BACK_INDEX && physical_b.sound == SE_LIST_CANCEL && !physical_b.locked);
+    const ListAnswer answer = close_row ? list_update_answer(1, 0) : list_update_answer(0, 1);
+    CHECK(same_answer(answer, physical_b));
+    CHECK(!(i32_at(list, 0x964) & LIST_LOCKED));
+    reset_choice_counts();
+    count_choice(answer.result);
+    CHECK(close_path_calls == 1 && end_online_handler_calls == 0 && return_to_town_handler_calls == 0 && other_choice_calls == 0);
+    CHECK(i32_at((const uint8_t *)(uintptr_t)network_list_widgets[row_index_of(ACTION_END_ONLINE)], NETWORK_ROW_ACTION) ==
+          ACTION_END_ONLINE);
+    reset_choice_counts();
+    put_u32(list + 0x958, (uint32_t)row_index_of(ACTION_JOIN_RANDOM));
+    const ListAnswer join = list_update_answer(1, 0);
+    CHECK(join.result == row_index_of(ACTION_JOIN_RANDOM) && join.sound == SE_LIST_DECIDE);
+    count_choice(join.result);
+    CHECK(other_choice_calls == 1 && close_path_calls == 0);
+    put_u32(list + 0x964, 0);
+    put_u32(list + 0x958, (uint32_t)row_index_of(ACTION_END_ONLINE));
+}
+
+/* The list shows exactly Join a random room, Join a Friend's room and Close Network Menu, each row an object the list
+ * owns, End online's own row still carrying its native action. */
+static void check_visible_rows(void) {
+    CHECK(network_list_count() == 3 && network_rows_alive == 3);
+    for (int i = 0; i < network_list_count(); ++i) CHECK(network_list_widgets[i] != 0);
+    CHECK(i32_at(network_list_at(), 0x958) >= 0 && i32_at(network_list_at(), 0x958) < network_list_count());
+    CHECK(row_index_of(ACTION_JOIN_RANDOM) == 0 && row_index_of(ACTION_JOIN_FRIEND) == 1 && row_index_of(ACTION_END_ONLINE) == 2);
+    CHECK(row_index_of(ACTION_RETURN_TO_TOWN) < 0);
+    CHECK(!strcmp(network_rendered((const uint8_t *)(uintptr_t)network_list_widgets[2]), "Close Network Menu"));
+    CHECK(!(i32_at(network_list_at(), 0x964) & 0x1)); /* no list left locked by a choice */
+    CHECK(!*network_rendered((const uint8_t *)(uintptr_t)network_list_widgets[0]) &&
+          !*network_rendered((const uint8_t *)(uintptr_t)network_list_widgets[1]));
+}
+
+/* The Network Menu opened over the Boss Battle page in a window of its own, its rows built by the game's setup. */
+static void check_boss_battle_network_rows(int inline_build, int close_row) {
+    network_inline_build = inline_build;
+    network_setups = network_rows_deleted = 0;
+    drop_network_list();
+    run_network_setup();
+    CHECK(network_rows_deleted == (inline_build ? 1 : 0)); /* the inline Return row is released, not kept */
+    check_visible_rows();
+    CHECK(network_setups == 1);
+    check_closing(close_row);
+}
+
+enum { KEPT_CLEAN, KEPT_WITH_RETURN, KEPT_PARTIAL };
+
+/* The list the window holds on this open was built before the open was known, or is not whole: it is read as it is when
+ * it is right, and rebuilt by the game's own setup when it holds Return to town. */
+static void check_reused_network_rows(int kind, int close_row) {
+    drop_network_list();
+    network_setups = network_rows_deleted = 0;
+    static const int kClean[] = {ACTION_JOIN_RANDOM, ACTION_JOIN_FRIEND, ACTION_END_ONLINE};
+    static const int kWithReturn[] = {ACTION_JOIN_RANDOM, ACTION_JOIN_FRIEND, ACTION_END_ONLINE, ACTION_RETURN_TO_TOWN};
+    static const int kPartial[] = {ACTION_JOIN_RANDOM, ACTION_RETURN_TO_TOWN};
+    const int *actions = kind == KEPT_CLEAN ? kClean : kind == KEPT_WITH_RETURN ? kWithReturn : kPartial;
+    const int count = kind == KEPT_CLEAN ? 3 : kind == KEPT_WITH_RETURN ? 4 : 2;
+    for (int i = 0; i < count; ++i) append_network_row(network_row(actions[i]));
+    put_u32(network_list_at() + 0x958, count - 1);
+    memset(screen_texts, 0, sizeof(screen_texts));
+    const int sets_before = text_sets;
+    menu_scene_frame();
+    menu_scene_frame();
+    CHECK(network_setups == (kind == KEPT_CLEAN ? 0 : 1));
+    CHECK(text_sets > sets_before);
+    if (kind == KEPT_CLEAN) CHECK(network_rows_deleted == 0);
+    check_visible_rows();
+    check_closing(close_row);
+    reset_choice_counts();
+    count_choice(BACK_INDEX);
+    CHECK(close_path_calls == 1);
+}
+
+/* Outside the Boss Battle context the rows and their handlers are the game's. */
+static void check_native_network_rows(void) {
+    network_inline_build = 0;
+    network_rows_deleted = 0;
+    drop_network_list();
+    const int sets_before = text_sets;
+    run_network_setup();
+    CHECK(network_list_count() == 4 && network_rows_deleted == 0 && network_rows_alive == 4 && text_sets == sets_before);
+    CHECK(!strcmp(network_rendered((const uint8_t *)(uintptr_t)network_list_widgets[2]), "End online"));
+    reset_choice_counts();
+    count_choice(row_index_of(ACTION_END_ONLINE));
+    count_choice(row_index_of(ACTION_RETURN_TO_TOWN));
+    CHECK(end_online_handler_calls == 1 && return_to_town_handler_calls == 1 && close_path_calls == 0);
+    count_choice(BACK_INDEX);
+    CHECK(close_path_calls == 1);
+    put_u32(network_list_at() + 0x958, (uint32_t)row_index_of(ACTION_END_ONLINE));
+    put_u32(network_list_at() + 0x964, 0);
+    const ListAnswer confirm = list_update_answer(1, 0);
+    CHECK(confirm.result == row_index_of(ACTION_END_ONLINE) && confirm.sound == SE_LIST_DECIDE && confirm.locked &&
+          confirm.decide_consumed);
+    reset_choice_counts();
+    count_choice(confirm.result);
+    CHECK(end_online_handler_calls == 1 && close_path_calls == 0);
+    put_u32(network_list_at() + 0x964, 0);
+    drop_network_list();
+}
+
+/* The game closes the Network Menu and terminates the Options page it was opened over, while its Inn waits in the
+ * Options mode's step 1: no page callback and no Inn menu frame run, only the scene frame. The scene fader covers the
+ * Inn, which is moved on as for a closed page, leaves the Options mode, and runs its menu frame, which reopens the page
+ * as on a first open; the cover goes once the page runs. */
+static void close_menu_and_reopen(int row) {
+    put_pointer(fake_inn + 0xa8, fake_steps_vtable);
+    fake_steps_vtable[0xa0 / 8] = (uint64_t)(uintptr_t)fake_step_set;
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = 1;
+    inn_step_sets = 0;
+    const int fades_before = fades.calls;
+    put_pointer(shortcut_ui + 0x238, NULL);
+    CHECK(page_update().skip && page_result(3).rax == 0xffffffffu);
+    menu_scene_frame();
+    CHECK(network_menu_quarantine_active() && network_menu_pad_hold(1) == 1);
+    CHECK(boss_battle_screen_shown() && !boss_battle_menu_reopen_pending() && inn_step_sets == 0);
+    CHECK(fades.calls == fades_before + 1 && fades.last_colour == FADE_BLACK && fades.last_frames == 5 &&
+          fades.last_layer == FADE_LAYER);
+    GuestRegs covered = native_fade(scene_fader_address(), 0, 30, 0x27); /* the cover holds against the game's own fades */
+    CHECK(covered.rsi == (uint64_t)(uint32_t)FADE_BLACK && covered.rdx == 0 && covered.rcx == FADE_LAYER);
+    CHECK(page_update().skip && page_result(3).rax == 0xffffffffu);
+    GuestRegs menu = result_frame(); /* the Inn's menu frame running meanwhile must not end the visit */
+    CHECK(boss_battle_screen_shown() && boss_battle_online_selected() && !(menu.skip && menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW));
+    put_u32(fake_body + 0x964, (uint32_t)(i32_at(fake_body, 0x964) | 0x1000)); /* an unrelated native bit */
+    const int32_t stale = i32_at(fake_body, 0x964);
+
+    /* the old page terminated while the cover still fades: the Inn is not moved on under a visible menu */
+    put_u32(fader_owner + 0xf4, 10);
+    put_u32(fake_window + 0xa4, 2);
+    menu_scene_frame();
+    CHECK(inn_step_sets == 0 && !boss_battle_menu_reopen_pending() && fades.calls == fades_before + 1);
+    put_u32(fader_owner + 0xf4, 0);
+
+    /* covered: the Inn takes its own step for a closed page; no window is created here */
+    menu_scene_frame();
+    CHECK(inn_step_sets == 1 && last_step_slot == 1 && last_step_value == 2 && fake_inn[INN_STEP] == 2);
+    CHECK(boss_battle_menu_reopen_pending() && !boss_battle_screen_shown() && !boss_battle_screen_requested());
+    CHECK(!page_update().skip && boss_battle_network_menu_returning());
+    menu_scene_frame();
+    CHECK(inn_step_sets == 1 && fades.calls == fades_before + 1);
+
+    /* the Inn leaves the Options mode and runs its menu frame: the reopen is the first open's own Options row */
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    menu_scene_frame();
+    menu = result_frame();
+    CHECK(menu.skip && menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW && boss_battle_screen_requested() &&
+          !boss_battle_menu_reopen_pending());
+    menu = result_frame();
+    CHECK(!(menu.skip && menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW)); /* opened once */
+    CHECK(fades.calls == fades_before + 1); /* the Inn's lifecycle ran under the cover */
+
+    /* the Options mode builds the page, in the old page's storage */
+    fake_options_page(8);
+    put_u32(fake_body + 0x964, (uint32_t)stale);
+    build_page();
+    CHECK(boss_battle_screen_shown() && page_hidden() == expect_native_hidden && i32_at(fake_body, 0x958) == row);
+    CHECK(i32_at(fake_body, 0x964) == (expect_native_hidden ? stale : (stale & ~0x400)) && (i32_at(fake_body, 0x964) & 0x1000));
+
+    /* built is not running: only the page's own act, list update and result make it the returned page */
+    CHECK(boss_battle_network_menu_returning() && fades.calls == fades_before + 1);
+    page_result(-1);
+    CHECK(boss_battle_network_menu_returning() && fades.calls == fades_before + 1);
+    fake_inn[INN_ACT] = 0x8e; /* the page shown, its window running its act: not the proof yet */
+    fake_inn[INN_STEP] = 1;
+    page_act();
+    CHECK(boss_battle_network_menu_returning() && fades.calls == fades_before + 1);
+    CHECK(!page_update().skip);
+    CHECK(network_menu_pad_hold(0) == 0 && !network_menu_quarantine_active());
+    shortcut_now += 16;
+    CHECK(fades.calls == fades_before + 1);
+    const GuestRegs regs = page_result(-1);
+    CHECK(!boss_battle_network_menu_returning());
+    CHECK(fades.calls == fades_before + 2 && fades.last_colour == 0 && fades.last_frames == 10 && fades.last_layer == FADE_LAYER);
+    CHECK(native_fade_passes());
+    CHECK(shortcut_hint_up() && network_shortcut_owner() == NETWORK_SHORTCUT_BOSS_BATTLE && !regs.skip &&
+          boss_battle_online_selected());
+}
+
+static uint8_t info_slot_data[0x400], info_live_character[0x400], room_info_model[0x80];
+static uint64_t info_live_slot;
+static int info_native_controllable = 1;
+enum { INFO_ID = 0x140, INFO_BLOCK = 0x148, INFO_ID_SIZE = 8, INFO_BLOCK_SIZE = 48 };
+
+static uint64_t GUEST_HOOK_ABI fake_info_character(uint64_t slot) {
+    return slot == info_live_slot ? (uint64_t)(uintptr_t)info_live_character : 0;
+}
+
+/* The game's room info builder for one party slot: the four predicates are the hooked calls, and the host fields are
+ * copied by the game's own code (8 bytes, then 48) from the slot as it holds them at that moment, never by the hooks. */
+enum { INFO_PRESENT = 0x5e, INFO_SLOT_CLASSES = 0x60, INFO_HOST_CLASS = 0x64, LEAD_CLASS = 3 };
+
+static void run_room_info_builder(uint64_t slot, uint64_t r14) {
+    memset(room_info_model, 0, sizeof(room_info_model));
+    memset(room_info_model + INFO_SLOT_CLASSES, 0xff, 4);
+    room_info_model[INFO_HOST_CLASS] = 0xff;
+    GuestRegs a;
+    memset(&a, 0, sizeof(a));
+    a.rdi = slot;
+    a.r14 = r14;
+    boss_battle_info_character_hook(&a);
+    const uint64_t character = a.skip ? a.rax : fake_info_character(slot);
+    if (character) {
+        const int live = character == (uint64_t)(uintptr_t)info_live_character;
+        GuestRegs b = a;
+        b.skip = 0;
+        b.rdi = character;
+        boss_battle_info_index_hook(&b);
+        GuestRegs c = a;
+        c.skip = 0;
+        c.rdi = slot;
+        boss_battle_info_controllable_hook(&c);
+        GuestRegs d = a;
+        d.skip = 0;
+        d.r15 = 7;
+        boss_battle_info_match_hook(&d);
+        if ((c.skip ? c.rax : (uint64_t)(live && info_native_controllable)) &&
+            (d.skip ? d.rax : (live ? 7u : 8u)) == 7u) {
+            memcpy(room_info_model, (const void *)(uintptr_t)(slot + INFO_ID), INFO_ID_SIZE);
+            memcpy(room_info_model + INFO_ID_SIZE, (const void *)(uintptr_t)(slot + INFO_BLOCK), INFO_BLOCK_SIZE);
+        }
+    }
+    network_access_room_info_built((uint64_t)(uintptr_t)room_info_model);
+}
+
+static uint8_t info_lead_record[0x23b0];
+
+static const unsigned char *GUEST_HOOK_ABI info_lead_selector(uint64_t facade) {
+    (void)facade;
+    return info_lead_record;
+}
+
+static void set_identity(uint8_t *record, uint8_t seed) {
+    for (int i = 0; i < INFO_ID_SIZE; ++i) record[INFO_ID + i] = (uint8_t)(seed + i);
+    for (int i = 0; i < INFO_BLOCK_SIZE; ++i) record[INFO_BLOCK + i] = (uint8_t)(seed * 3 + i + 1);
+}
+
+/* The friend row's portrait: the host's class, the first slot's class and its present bit, from the lead character. */
+static int room_info_has_lead_class(void) {
+    return room_info_model[INFO_HOST_CLASS] == LEAD_CLASS && room_info_model[INFO_SLOT_CLASSES] == LEAD_CLASS &&
+           (room_info_model[INFO_PRESENT] & 0x20);
+}
+
+static int room_info_is(uint8_t seed) {
+    uint8_t expected[INFO_ID_SIZE + INFO_BLOCK_SIZE];
+    for (int i = 0; i < INFO_ID_SIZE; ++i) expected[i] = (uint8_t)(seed + i);
+    for (int i = 0; i < INFO_BLOCK_SIZE; ++i) expected[INFO_ID_SIZE + i] = (uint8_t)(seed * 3 + i + 1);
+    return !memcmp(room_info_model, expected, sizeof(expected));
+}
+
+/* A fresh process straight into the Inn: no live character ever existed, the party slot is empty, no room exists. The
+ * game's builder is shown slot 0 as a live character, and the save's lead character record as its identity; the slot's
+ * own bytes are back afterwards, a slot that has its own identity keeps it, and nothing is made up. */
+static void check_room_info_builder(int hosting_here) {
+    boss_battle_set_room_info_character(fake_info_character);
+    boss_battle_set_lead_selector(info_lead_selector);
+    memset(info_slot_data, 0, sizeof(info_slot_data));
+    memset(info_lead_record, 0, sizeof(info_lead_record));
+    const uint64_t slot = (uint64_t)(uintptr_t)info_slot_data;
+    uint8_t empty[sizeof(info_slot_data)];
+    memset(empty, 0, sizeof(empty));
+    info_live_slot = 0;
+    /* an empty lead record: nothing is made up */
+    run_room_info_builder(slot, 0);
+    CHECK(room_info_model[0] == 0 && !memcmp(info_slot_data, empty, sizeof(empty)));
+    /* the save's lead character: its own bytes, 8 then 48, through the game's own copy, and its class for the portrait */
+    set_identity(info_lead_record, 5);
+    info_lead_record[0x27] = LEAD_CLASS;
+    run_room_info_builder(slot, 0);
+    if (hosting_here) CHECK(room_info_is(5) && room_info_has_lead_class());
+    else CHECK(room_info_model[0] == 0 && room_info_model[INFO_HOST_CLASS] == 0xff && !room_info_model[INFO_PRESENT]);
+    CHECK(!memcmp(info_slot_data, empty, sizeof(empty))); /* the Inn's slot is as it was */
+    run_room_info_builder(slot, 0); /* every build, not once */
+    if (hosting_here) CHECK(room_info_is(5));
+    run_room_info_builder(slot, 1); /* another slot is never given it */
+    CHECK(room_info_model[0] == 0 && !memcmp(info_slot_data, empty, sizeof(empty)));
+    /* a slot that holds its own identity keeps it */
+    set_identity(info_slot_data, 9);
+    uint8_t native[sizeof(info_slot_data)];
+    memcpy(native, info_slot_data, sizeof(native));
+    run_room_info_builder(slot, 0);
+    if (hosting_here) CHECK(room_info_is(9));
+    CHECK(!memcmp(native, info_slot_data, sizeof(native)));
+    /* the Inn's character found but not controllable, slot empty: the same lead identity */
+    memset(info_slot_data, 0, sizeof(info_slot_data));
+    info_live_slot = slot;
+    info_native_controllable = 0;
+    run_room_info_builder(slot, 0);
+    if (hosting_here) CHECK(room_info_is(5));
+    else CHECK(room_info_model[0] == 0);
+    CHECK(!memcmp(info_slot_data, empty, sizeof(empty)));
+    info_native_controllable = 1;
+    info_live_slot = 0;
+    boss_battle_set_lead_selector(NULL);
+    boss_battle_set_room_info_character(NULL);
+}
+
+static int round_trips;
+static int room_wishes;
+static uint64_t room_wish_scene;
+
+static int room_wish_releasing, room_wish_wanted;
+
+static void GUEST_HOOK_ABI fake_room_wish(uint64_t scene) {
+    ++room_wishes;
+    room_wish_scene = scene;
+    room_wish_releasing = network_access_releasing();
+    room_wish_wanted = network_access_room_wanted();
+}
+
+enum {
+    JOIN_RECORD_STATE = 4, JOIN_SCENE_STAGE = 0xf0, UNIT_SIDE_AT = 0x2980, UNIT_STATE_AT = 0x7b8, UNIT_COUNTED_AT = 0x1098,
+    JOIN_UNITS = 3, STAGE_INN = 2
+};
+
+static uint8_t join_scene[0x200], join_unit_data[JOIN_UNITS][0x2a00];
+static uint64_t join_unit_vtable[0x1100 / 8];
+static int join_place_closed, join_unit_present[JOIN_UNITS], join_unit_counted, join_action_busy;
+
+static uint64_t GUEST_HOOK_ABI fake_join_unit(uint64_t units, uint32_t index) {
+    (void)units;
+    return index < JOIN_UNITS && join_unit_present[index] ? (uint64_t)(uintptr_t)join_unit_data[index] : 0;
+}
+static uint64_t GUEST_HOOK_ABI fake_unit_counted(uint64_t unit) {
+    (void)unit;
+    return 0xab00 | (uint64_t)(join_unit_counted != 0);
+}
+
+/* The game's join reply for a scene at act 2: closed (1) when the place keeps no room, when a unit of the player's side
+ * that the game counts is not in state 3, or when the player's action is the busy one. Only the unit read is hooked; the
+ * place and the action are the game's own. */
+static int32_t native_join_state(void) {
+    uint8_t record[0x20];
+    memset(record, 0, sizeof(record));
+    int32_t state = join_place_closed;
+    for (uint32_t i = 0; i < JOIN_UNITS; ++i) {
+        GuestRegs unit;
+        memset(&unit, 0, sizeof(unit));
+        unit.rdi = 0x2000;
+        unit.rsi = i;
+        boss_battle_join_unit_hook(&unit);
+        const uint64_t unit_at = unit.skip ? unit.rax : fake_join_unit(unit.rdi, i);
+        if (unit_at && i32_at((const uint8_t *)(uintptr_t)unit_at, UNIT_SIDE_AT) == 1 && (fake_unit_counted(unit_at) & 0xff) &&
+            i32_at((const uint8_t *)(uintptr_t)unit_at, UNIT_STATE_AT) != 3)
+            state = 1;
+    }
+    if (join_action_busy) state = 1;
+    memcpy(record + JOIN_RECORD_STATE, &state, sizeof(state));
+    GuestRegs stored;
+    memset(&stored, 0, sizeof(stored));
+    stored.r13 = (uint64_t)(uintptr_t)record;
+    stored.r14 = (uint64_t)(uintptr_t)join_scene;
+    boss_battle_join_state_hook(&stored);
+    CHECK(!stored.skip);
+    int32_t serialized;
+    memcpy(&serialized, record + JOIN_RECORD_STATE, sizeof(serialized));
+    CHECK(serialized == state);
+    return serialized;
+}
+
+static void set_join_scene(int place_closed, int unit_state, int counted, int action_busy) {
+    memset(join_scene, 0, sizeof(join_scene));
+    put_u32(join_scene + JOIN_SCENE_STAGE, STAGE_INN);
+    join_scene[0x5b] = 2;
+    join_place_closed = place_closed;
+    memset(join_unit_data, 0, sizeof(join_unit_data));
+    memset(join_unit_present, 0, sizeof(join_unit_present));
+    join_unit_vtable[UNIT_COUNTED_AT / 8] = (uint64_t)(uintptr_t)fake_unit_counted;
+    if (unit_state >= 0) {
+        join_unit_present[0] = 1;
+        put_pointer(join_unit_data[0], join_unit_vtable);
+        put_u32(join_unit_data[0] + UNIT_SIDE_AT, 1);
+        put_u32(join_unit_data[0] + UNIT_STATE_AT, (uint32_t)unit_state);
+    }
+    join_unit_counted = counted;
+    join_action_busy = action_busy;
+}
+
+/* The waiting host's own character in the Inn (counted, state 0) is the only read an open Boss Battle host room changes:
+ * the game then computes 0. A fight, a closed room or a non-host keeps the game's 1; the place and the action keep closing
+ * the room as the game decides, for every host. */
+static void check_join_state(int open_boss_host) {
+    const BossBattleJoinProbes probes = {fake_join_unit};
+    boss_battle_set_join_probes(&probes);
+    set_join_scene(0, -1, 0, 0);
+    CHECK(native_join_state() == 0);
+    set_join_scene(0, 3, 1, 0);
+    CHECK(native_join_state() == 0); /* a unit in state 3 never closes it */
+    set_join_scene(0, 0, 0, 0);
+    CHECK(native_join_state() == 0); /* nor one the game does not count */
+    set_join_scene(0, 0, 1, 0);
+    CHECK(native_join_state() == (open_boss_host ? 0 : 1));
+    set_join_scene(1, 0, 1, 0);
+    CHECK(native_join_state() == 1); /* the place stays the game's */
+    set_join_scene(0, 0, 1, 1);
+    CHECK(native_join_state() == 1); /* the action stays the game's */
+    boss_battle_set_join_probes(NULL);
+    set_join_scene(0, 0, 1, 0);
+    GuestRegs none;
+    memset(&none, 0, sizeof(none));
+    boss_battle_join_unit_hook(&none);
+    CHECK(!none.skip);
+}
+
+enum { SEAT_BASE = 0xa8, SEAT_SIZE = 0x23b0, SEAT_OWNER = 0x21e0, SERVER_CONNECTED_SLOTS = 0x8fb0 };
+static uint8_t seat_party[SERVER_CONNECTED_SLOTS + 0x10];
+static int seat_lookups;
+
+static uint64_t GUEST_HOOK_ABI fake_seat_lookup(uint64_t party, uint32_t player) {
+    ++seat_lookups;
+    for (int i = 0; i < 4; ++i) {
+        const uint8_t *slot = (const uint8_t *)(uintptr_t)(party + SEAT_BASE + (uint64_t)i * SEAT_SIZE);
+        if (i32_at(slot, SEAT_OWNER) == 0 && i32_at(slot, SEAT_OWNER - 4) == (int32_t)player) return (uint64_t)i;
+    }
+    return 4;
+}
+
+static uint64_t seat_answer(uint32_t player, int *skipped) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = (uint64_t)(uintptr_t)seat_party;
+    regs.rsi = player;
+    boss_battle_party_slot_hook(&regs);
+    *skipped = (int)regs.skip;
+    return regs.skip ? regs.rax : fake_seat_lookup(regs.rdi, player);
+}
+
+/* The scene's online party pass, on a Boss Battle visitor whose local player has no seat yet: an empty slot, which the
+ * pass skips, never the slot at 0. A seated player gets its own slot; outside Boss Battle Online the game's lookup runs. */
+static void check_party_seat(int boss_online) {
+    boss_battle_set_party_slot_lookup(fake_seat_lookup);
+    memset(seat_party, 0, sizeof(seat_party));
+    for (int i = 0; i < 4; ++i) put_u32(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE + SEAT_OWNER, 0xffffffffu);
+    put_u32(seat_party + SEAT_BASE + SEAT_OWNER, 0x10); /* the host's character, remote */
+    int skipped;
+    const uint64_t unseated = seat_answer(0, &skipped);
+    if (boss_online) CHECK(skipped && unseated == 1 && i32_at(seat_party + SEAT_BASE + SEAT_SIZE, SEAT_OWNER) == -1);
+    else CHECK(!skipped && unseated == 4);
+    put_u32(seat_party + SEAT_BASE + SEAT_SIZE + SEAT_OWNER, 0);
+    put_u32(seat_party + SEAT_BASE + SEAT_SIZE + SEAT_OWNER - 4, 0);
+    CHECK(seat_answer(0, &skipped) == 1);
+    boss_battle_set_party_slot_lookup(NULL);
+}
+
+static uint8_t card_object[0x400], card_line[0x40];
+
+static int friend_in_boss_room(const char *online_id) { return !strcmp(online_id, "BossHost"); }
+
+static void set_card_online_id(const char *name) {
+    uint8_t *text = card_object + 0x370;
+    const uint64_t length = strlen(name), capacity = 15;
+    memset(text + 0x10, 0, 0x20);
+    memcpy(text + 0x10, name, length);
+    memcpy(text + 0x20, &length, sizeof(length));
+    memcpy(text + 0x28, &capacity, sizeof(capacity));
+}
+
+/* The friend card's location line, from the Online ID the card already holds: a friend the lobby says is in a Boss Battle
+ * room reads Boss Battle; any other friend keeps the game's table, and so does any friend when nothing says. */
+static void check_card_location(const char *name, int boss_room) {
+    set_card_online_id(name);
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rdi = (uint64_t)(uintptr_t)card_line;
+    regs.r15 = (uint64_t)(uintptr_t)card_object;
+    const int before = text_sets;
+    boss_battle_location_text_hook(&regs);
+    if (boss_room)
+        CHECK(regs.skip && text_sets == before + 1 && !strcmp(text_at(card_line, 0), "Boss Battle"));
+    else
+        CHECK(!regs.skip && text_sets == before);
+}
+
+/* B and the menu's Close row take the same close path: the cycle after either is the same. */
+static void network_menu_round_trip(int row) {
+    const int close_row = round_trips++ & 1;
+    set_page_cursor(row);
+    CHECK(network_shortcut_pad_filter(1) == 1);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(page_hidden() && network_menu_open_in(shortcut_ui) && !shortcut_hint_up());
+    network_shortcut_pad_filter(0);
+    const int trip = round_trips - 1, route = trip % 4; /* built now (by helper, then inline), kept clean, kept with Return, partial */
+    if (route == 0) check_boss_battle_network_rows((trip / 4) & 1, close_row);
+    else check_reused_network_rows(route - 1, close_row);
+    close_menu_and_reopen(row);
+    check_native_network_rows();
+}
+
+/* The page arms the shared Network Menu shortcut and its hint, takes no part in the menu itself, and never closes. */
+static void test_screen_shortcut_hooks(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    static const int32_t kHelp[6] = {953, 954, 955, 957, 958, 759};
+    boss_battle_set_inn_help_table((uint64_t)(uintptr_t)kHelp);
+    memset(shortcut_manager, 0, sizeof(shortcut_manager));
+    memset(shortcut_ui, 0, sizeof(shortcut_ui));
+    memset(shortcut_hint_object, 0, sizeof(shortcut_hint_object));
+    put_pointer(fake_inn_context + 0x20, shortcut_manager);
+    put_pointer(shortcut_manager + NETWORK_HINT_MANAGER_UI, shortcut_ui);
+    memset(fader_owner, 0, sizeof(fader_owner));
+    memset(&fades, 0, sizeof(fades));
+    put_pointer(shortcut_manager + 0xd8, fader_owner);
+    put_pointer(shortcut_manager + HYDELAND_MANAGER_SCENE, game_scene);
+    network_access_set_room_wish(fake_room_wish);
+    room_wishes = 0;
+    const BossBattleFadeFunctions fade_functions = {fake_get_fader, fake_fade};
+    boss_battle_set_fade_functions(&fade_functions);
+    round_trips = 0;
+    boss_battle_set_network_row_at(fake_network_row_at);
+    const BossBattlePauseFunctions network_setup = {fake_network_setup, 0, 0};
+    boss_battle_set_pause_functions(&network_setup);
+    shortcut_hint_vtable[NETWORK_HINT_SHOW_SLOT / 8] = (uint64_t)(uintptr_t)shortcut_hint_show;
+    shortcut_hint_creates = shortcut_hint_shows = shortcut_hint_hides = 0;
+    const NetworkHintFunctions hint = {shortcut_hint_create, (NetworkHintTextFn)(uintptr_t)shortcut_hint_set_text,
+                                       shortcut_hint_hide, shortcut_hint_refresh, 0};
+    network_hint_configure(&hint);
+    network_hint_set_portuguese(0);
+    network_access_set_installed(1);
+    network_access_set_clock(shortcut_clock);
+    network_shortcut_reset();
+
+    fake_options_page(8);
+    set_inn(7, 7, BOSS_BATTLE_INN_ROW, BOSS_BATTLE_INN_ROW);
+    GuestRegs regs = result_frame();
+    CHECK(regs.skip && boss_battle_screen_requested());
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_visit_begin(1);
+    build_page();
+    CHECK(boss_battle_screen_shown());
+
+    /* the host's room is asked for from the Inn, as Early Story's is from town: before any Network Menu, before a boss */
+    CHECK(room_wishes == 0);
+    shortcut_now += 16;
+    regs = page_result(-1);
+    CHECK(room_wishes == 1 && room_wish_scene == (uint64_t)(uintptr_t)game_scene);
+    /* the state that failed in the game: prompt accepted, page up, no room yet and no room-hosting predicate needed */
+    CHECK(boss_battle_online_selected() && !boss_battle_online_in_room() && !boss_battle_online_visitor());
+    check_room_info_builder(1);
+    CHECK(!boss_battle_online_in_room() && !boss_battle_online_is_host());
+    /* without the game's menu request the page never owns the shortcut */
+    CHECK(network_shortcut_owner() == NETWORK_SHORTCUT_NONE && !network_shortcut_armed() && !shortcut_hint_up());
+
+    /* the Inn has no character and no director poll: the page itself arms the shortcut and the shared hint */
+    network_menu_set_create(shortcut_menu_create);
+    shortcut_now += 16;
+    regs = page_result(-1);
+    CHECK(network_shortcut_owner() == NETWORK_SHORTCUT_BOSS_BATTLE && network_shortcut_armed() && shortcut_hint_up() &&
+          shortcut_hint_creates == 1 && shortcut_hint_shows == 1 && !strcmp(shortcut_hint_text, "@#(2) Open Network Menu"));
+    CHECK(!(regs.r15 & 1) && boss_battle_screen_shown());
+    regs = page_result(-1);
+    CHECK(!(regs.r15 & 1) && boss_battle_screen_shown() && shortcut_hint_shows == 1 && shortcut_menu_creates == 0);
+
+    /* a request the game cannot serve: logged, the page is untouched, the press is spent */
+    set_page_cursor(5);
+    const int32_t cursor = i32_at(fake_body, 0x958);
+    shortcut_menu_refuse = 1;
+    CHECK(network_shortcut_pad_filter(1) == 1);
+    shortcut_now += 16;
+    regs = page_result(-1);
+    CHECK(shortcut_menu_creates == 1 && !(regs.r15 & 1) && boss_battle_screen_shown() &&
+          i32_at(fake_body, 0x958) == cursor && !network_menu_open_in(shortcut_ui));
+    network_shortcut_pad_filter(0);
+    shortcut_menu_refuse = 0;
+
+    /* Y / Triangle: hidden from the game, then the game's menu request for pad 0 and player 0, made the Network Menu;
+     * the page is suspended: hidden, no input, and nothing else of it changes */
+    const unsigned created = network_access_menus_created();
+    memset(shortcut_menu_window, 0, sizeof(shortcut_menu_window));
+    put_u32(shortcut_menu_window + EARLY_STORY_MENU_KIND, EARLY_STORY_MENU_KIND_NETWORK);
+    check_native_network_rows(); /* a Network Menu the Boss Battle page did not open keeps the game's rows */
+    memset(shortcut_menu_window, 0, sizeof(shortcut_menu_window));
+    CHECK(!page_hidden() && !page_update().skip);
+    CHECK(network_shortcut_pad_filter(1) == 1);
+    shortcut_now += 16;
+    regs = page_result(3);
+    CHECK(shortcut_menu_creates == 2 && shortcut_menu_inits == 1 && shortcut_menu_pad == 0 &&
+          i32_at(shortcut_menu_window, 0xf8) == 0 && network_menu_open_in(shortcut_ui) &&
+          network_access_menus_created() == created + 1);
+    CHECK(regs.rax == 0xffffffffu && !(regs.r15 & 1) && boss_battle_screen_shown() && i32_at(fake_body, 0x958) == cursor &&
+          !shortcut_hint_up());
+    CHECK(page_hidden() && boss_battle_online_selected() && boss_battle_online_hosting());
+    check_boss_battle_network_rows(0, 0);
+    put_u32(shortcut_menu_window + EARLY_STORY_MENU_KIND, 5); /* the Inn's own menu kind is not the Network Menu */
+    check_native_network_rows();
+    put_u32(shortcut_menu_window + EARLY_STORY_MENU_KIND, EARLY_STORY_MENU_KIND_NETWORK);
+    CHECK(network_shortcut_pad_filter(1) == 1); /* still held: still hidden */
+    network_shortcut_pad_filter(0);
+
+    /* suspended: the list reads no pad (no cursor, no sound, no Back), nothing is confirmed, the page is not closed */
+    for (int frame = 0; frame < 3; ++frame) {
+        shortcut_now += 16;
+        const GuestRegs update = page_update();
+        CHECK(update.skip && update.rax == 0xffffffffu && page_hidden());
+        regs = page_result(3);
+        CHECK(regs.rax == 0xffffffffu && !(regs.r15 & 1) && boss_battle_screen_shown());
+        CHECK(shortcut_menu_creates == 2 && i32_at(fake_body, 0x958) == cursor && boss_battle_online_selected());
+        CHECK(!network_menu_quarantine_active()); /* the quarantine starts at the close, not before */
+        regs = page_move(1);
+        CHECK(regs.skip && regs.rax == 0 && i32_at(fake_body, 0x958) == cursor);
+    }
+
+    /* closed, the old page terminated, a new one built on the same boss, the same visit */
+    close_menu_and_reopen(cursor);
+    CHECK(boss_battle_menu_cursor() == cursor - 1 && !boss_battle_cursor_fight_all() && boss_battle_online_hosting());
+
+    /* again and again, on a boss row and on Fight All: nothing leaks from one cycle to the next */
+    for (int cycle = 0; cycle < 3; ++cycle) network_menu_round_trip(cycle == 1 ? 1 : 5);
+    CHECK(boss_battle_menu_cursor() == 4);
+    network_menu_round_trip(BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW);
+    CHECK(boss_battle_cursor_fight_all());
+    network_menu_round_trip(3);
+    CHECK(!boss_battle_cursor_fight_all() && boss_battle_menu_cursor() == 2);
+
+    /* a window of the Inn's own is up: the shortcut and the hint go, the page keeps its input */
+    memset(shortcut_menu_window, 0, sizeof(shortcut_menu_window));
+    put_u32(shortcut_menu_window + EARLY_STORY_MENU_KIND, 5);
+    put_pointer(shortcut_ui + 0x238, shortcut_menu_window);
+    shortcut_now += 16;
+    regs = page_result(-1);
+    CHECK(!(regs.r15 & 1) && network_shortcut_owner() == NETWORK_SHORTCUT_NONE && !shortcut_hint_up());
+    CHECK(!page_hidden() && !page_update().skip);
+    regs = page_move(1);
+    CHECK(!regs.skip || regs.rax == 1); /* the page's own move, not the blocked one */
+
+    /* a Network Menu opened by anything else suspends the page the same way */
+    put_u32(shortcut_menu_window + EARLY_STORY_MENU_KIND, EARLY_STORY_MENU_KIND_NETWORK);
+    shortcut_now += 16;
+    regs = page_result(-1);
+    CHECK(regs.rax == 0xffffffffu && !(regs.r15 & 1) && network_shortcut_owner() == NETWORK_SHORTCUT_NONE &&
+          !shortcut_hint_up() && page_hidden() && page_update().skip);
+    close_menu_and_reopen(i32_at(fake_body, 0x958));
+
+    /* a boss start under way hides both */
+    boss_battle_start_transition_set(BOSS_BATTLE_START_FADING);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(network_shortcut_owner() == NETWORK_SHORTCUT_NONE && !shortcut_hint_up());
+    boss_battle_start_transition_set(BOSS_BATTLE_START_NONE);
+
+    /* Early Story, with its conditions, keeps the shortcut from the page */
+    network_shortcut_arm(NETWORK_SHORTCUT_EARLY_STORY, 1);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(network_shortcut_owner() == NETWORK_SHORTCUT_EARLY_STORY && !shortcut_hint_up());
+    network_shortcut_arm(NETWORK_SHORTCUT_EARLY_STORY, 0);
+
+    /* the room is asked for once per visit, whatever the Network Menu, the page and the room do */
+    CHECK(room_wishes == 1);
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 1, 0);
+    CHECK(boss_battle_online_is_host() && boss_battle_online_room_attr() == BOSS_BATTLE_ROOM_OPEN);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(room_wishes == 1);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(room_wishes == 1);
+    boss_battle_online_room_left("test");
+    CHECK(!boss_battle_online_in_room());
+    shortcut_now += 16;
+    page_result(-1);
+    page_result(-1);
+    CHECK(room_wishes == 1); /* a room left to join a friend's is not made again */
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 1, 0);
+
+    /* a page that never comes up live: after the retries the Inn is left to its own menu and the cover goes */
+    set_page_cursor(4);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(network_shortcut_pad_filter(1) == 1);
+    shortcut_now += 16;
+    page_result(-1);
+    network_shortcut_pad_filter(0);
+    put_pointer(shortcut_ui + 0x238, NULL);
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = 1;
+    inn_step_sets = 0;
+    const int cover_before = fades.calls;
+    menu_scene_frame();
+    CHECK(fades.calls == cover_before + 1 && fades.last_colour == FADE_BLACK);
+    put_u32(fake_window + 0xa4, 2);
+    menu_scene_frame();
+    CHECK(inn_step_sets == 1 && boss_battle_menu_reopen_pending());
+    for (int attempt = 1; attempt <= 2; ++attempt) {
+        fake_inn[INN_ACT] = 0x5b;
+        fake_inn[INN_STEP] = 0;
+        CHECK(result_frame().rax == BOSS_BATTLE_INN_OPTIONS_ROW);
+        fake_options_page(8);
+        put_u32(fake_window + 0xa4, 2);
+        build_page();
+        fake_inn[INN_ACT] = 0x8e;
+        fake_inn[INN_STEP] = 1;
+        menu_scene_frame();
+        CHECK(inn_step_sets == (unsigned)attempt + 1 && fades.calls == cover_before + attempt);
+    }
+    CHECK(!boss_battle_menu_reopen_pending() && !boss_battle_screen_shown() && !boss_battle_screen_requested());
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    const int32_t no_press = -1;
+    memcpy(inn_list() + 0x960, &no_press, sizeof(no_press)); /* the player presses nothing on the Inn menu */
+    menu_scene_frame();
+    const GuestRegs menu_after_failure = result_frame();
+    CHECK(!(menu_after_failure.skip && menu_after_failure.rax == BOSS_BATTLE_INN_OPTIONS_ROW) && !boss_battle_screen_requested() &&
+          !boss_battle_menu_reopen_pending());
+    CHECK(fades.calls == cover_before + 2 && fades.last_colour == 0 && fades.last_frames == 10 && native_fade_passes());
+    CHECK(!boss_battle_network_menu_returning() && network_menu_pad_hold(0) == 0); /* released once, not stuck */
+    set_inn(7, 7, BOSS_BATTLE_INN_ROW, BOSS_BATTLE_INN_ROW);
+    CHECK(result_frame().skip && boss_battle_screen_requested());
+    fake_options_page(8);
+    build_page();
+    CHECK(boss_battle_screen_shown());
+    set_page_cursor(3);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(shortcut_hint_up());
+
+    /* a guest with Boss Battle off, in the host's room: the same shortcut while the room and the menu allow it */
+    boss_battle_online_visit_end();
+    boss_battle_online_set_hosting(0);
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    CHECK(boss_battle_online_visitor() && !boss_battle_online_hosting());
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(network_shortcut_owner() == NETWORK_SHORTCUT_BOSS_BATTLE && shortcut_hint_up());
+    network_menu_round_trip(3);
+    CHECK(boss_battle_online_visitor() && !boss_battle_online_hosting() && boss_battle_screen_shown());
+
+    /* the join's scene reload rebuilds the Inn under the Network Menu: the visitor stays, the dead page is dropped, and
+     * the new Inn's menu build asks for the guest's page once through the shared reopen */
+    set_page_cursor(3);
+    CHECK(network_shortcut_pad_filter(1) == 1);
+    shortcut_now += 16;
+    page_result(-1);
+    network_shortcut_pad_filter(0);
+    CHECK(page_hidden() && boss_battle_network_menu_returning() == 0 && boss_battle_online_visitor());
+    GuestRegs rebuilt;
+    memset(&rebuilt, 0, sizeof(rebuilt));
+    put_pointer(shortcut_ui + 0x238, NULL); /* the reload ends the Network Menu window too */
+    boss_battle_inn_destroyed_hook(&rebuilt);
+    CHECK(boss_battle_online_visitor() && boss_battle_online_selected() && !boss_battle_screen_shown() &&
+          !boss_battle_network_menu_returning());
+    set_inn(6, 6, -1, -1);
+    GuestRegs built = inn_regs();
+    boss_battle_inn_built_hook(&built);
+    put_pointer(fake_inn + 0xa8, fake_steps_vtable);
+    CHECK(boss_battle_menu_reopen_pending() && boss_battle_network_menu_returning());
+    const GuestRegs reopened = result_frame();
+    CHECK(reopened.skip && reopened.rax == BOSS_BATTLE_INN_OPTIONS_ROW && boss_battle_screen_requested() &&
+          !boss_battle_menu_reopen_pending());
+    fake_options_page(8);
+    build_page();
+    CHECK(boss_battle_screen_shown() && boss_battle_online_visitor());
+    page_act();
+    page_update();
+    page_result(-1);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(shortcut_hint_up());
+
+    /* a page set up on a terminated window is not the return: the Inn is moved on again and reopens it */
+    set_page_cursor(4);
+    CHECK(network_shortcut_pad_filter(1) == 1);
+    shortcut_now += 16;
+    page_result(-1);
+    network_shortcut_pad_filter(0);
+    put_pointer(shortcut_ui + 0x238, NULL);
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = 1;
+    inn_step_sets = 0;
+    menu_scene_frame();
+    put_u32(fake_window + 0xa4, 2);
+    menu_scene_frame();
+    fake_inn[INN_ACT] = 0x5b;
+    CHECK(inn_step_sets == 1 && result_frame().rax == BOSS_BATTLE_INN_OPTIONS_ROW);
+    fake_options_page(8);
+    put_u32(fake_window + 0xa4, 2);
+    build_page();
+    CHECK(boss_battle_network_menu_returning());
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = 1;
+    menu_scene_frame();
+    CHECK(inn_step_sets == 2 && boss_battle_menu_reopen_pending());
+    fake_inn[INN_ACT] = 0x5b;
+    menu_scene_frame();
+    CHECK(result_frame().rax == BOSS_BATTLE_INN_OPTIONS_ROW);
+    fake_options_page(8);
+    build_page();
+    page_act();
+    page_update();
+    page_result(-1);
+    CHECK(!boss_battle_network_menu_returning() && boss_battle_screen_shown() && !page_hidden() &&
+          i32_at(fake_body, 0x958) == 4 && boss_battle_online_selected());
+    CHECK(network_menu_pad_hold(0) == 0);
+    shortcut_now += 16;
+    page_result(-1);
+    CHECK(shortcut_hint_up());
+
+    /* a hidden bit the game itself set is not Boss Battle's to clear */
+    put_u32(fake_body + 0x964, (uint32_t)(i32_at(fake_body, 0x964) | 0x400));
+    expect_native_hidden = 1;
+    network_menu_round_trip(3);
+    expect_native_hidden = 0;
+    put_u32(fake_body + 0x964, 0);
+
+    /* an open Boss Battle room is joinable from the Castle Gate; a fight, or no Boss room, leaves the game's answer */
+    boss_battle_online_room_left("test");
+    boss_battle_online_visit_end();
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_visit_begin(1);
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 1, 0);
+    CHECK(boss_battle_online_hosts_room() && boss_battle_online_is_host() && boss_battle_online_boss_room());
+    check_join_state(1);
+    check_party_seat(1);
+    boss_battle_online_note_local(BOSS_BATTLE_LOCAL_FIGHTING, 3, 0);
+    check_join_state(0);
+    boss_battle_online_note_local(BOSS_BATTLE_LOCAL_IDLE, -1, 0);
+    check_join_state(1);
+    {
+        const BossBattleScreenFunctions card_functions = {fake_set_step,  fake_set_text, fake_set_message,
+                                                          fake_row_frame, fake_play_se,  fake_text_changed};
+        boss_battle_set_screen_functions(&card_functions);
+        check_card_location("BossHost", 0); /* nothing says it is a Boss Battle room */
+        boss_battle_online_set_friend_room_lookup(friend_in_boss_room);
+        check_card_location("BossHost", 1);
+        check_card_location("Someone", 0);
+        boss_battle_online_set_friend_room_lookup(NULL);
+        check_card_location("BossHost", 0);
+    }
+
+    /* the visit ends with the Inn: the game's own room wish is asked once with nothing wanting a room, so the game leaves
+     * the Boss Battle room; a later Early Story room is the game's new one */
+    const int wishes_before = room_wishes;
+    GuestRegs gone;
+    memset(&gone, 0, sizeof(gone));
+    boss_battle_inn_destroyed_hook(&gone);
+    CHECK(!boss_battle_online_selected() && room_wishes == wishes_before + 1);
+    CHECK(room_wish_releasing && !room_wish_wanted && !network_access_releasing());
+    CHECK(room_wish_scene == (uint64_t)(uintptr_t)game_scene);
+    check_join_state(0);
+    boss_battle_online_room_left("the game left the room");
+    check_party_seat(0);
+    boss_battle_inn_destroyed_hook(&gone);
+    CHECK(room_wishes == wishes_before + 1);
+
+    /* the page is gone: the shortcut and the hint with it, and the saved setting is as it was */
+    regs = page_regs();
+    boss_battle_title_hook(&regs);
+    CHECK(network_shortcut_owner() == NETWORK_SHORTCUT_NONE && !shortcut_hint_up());
+    boss_battle_online_room_left("test");
+    CHECK(!boss_battle_online_visitor() && !boss_battle_online_selected());
+    check_room_info_builder(0); /* no Boss Battle host here: Early Story's and the campaign's builder is the game's */
+
+    check_native_network_rows(); /* the page is gone: no Network Menu is filtered */
+    boss_battle_set_fade_functions(NULL);
+    boss_battle_set_network_row_at(NULL);
+    boss_battle_set_pause_functions(NULL);
+    network_access_set_room_wish(NULL);
+    network_hint_configure(NULL);
+    network_menu_set_create(NULL);
+    put_pointer(fake_inn_context + 0x20, NULL);
+    network_access_set_clock(NULL);
+    network_access_set_installed(0);
+    network_shortcut_reset();
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_set_available(0);
+    boss_battle_online_reset();
+    boss_battle_screen_reset();
+}
+
+static void host_announces(BossBattlePhase phase, int boss, int fight_all, uint32_t sequence) {
+    const BossBattleHostState state = {phase, fight_all, boss, sequence};
+    uint8_t bytes[BOSS_BATTLE_STATE_SIZE];
+    boss_battle_state_encode(&state, bytes);
+    CHECK(boss_battle_online_internal_update(bytes, sizeof(bytes)));
+}
+
+/* A guest in the host's Boss Battle room waits in the Inn; only the host's start moves it. It then takes the host's boss,
+ * whatever its own page showed, once per start, and sends its own party through the Inn's party step as the host does,
+ * before the host's travel takes it to the arena. */
+static uint8_t follow_manager[0x200];
+
+static void set_guest_party(int guest_seated) {
+    for (int i = 0; i < 4; ++i) put_u32(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE + SEAT_OWNER, 0xffffffffu);
+    put_u32(seat_party + SEAT_BASE + SEAT_OWNER, 1); /* the host, remote */
+    if (guest_seated) put_u32(seat_party + SEAT_BASE + SEAT_SIZE + SEAT_OWNER, 0);
+}
+
+/* A guest in the host's Boss Battle room waits in the Inn; only the host's start moves it. A start that arrives before the
+ * room's game server has seated this guest's own party is kept, not consumed; once seated, the host's boss is followed
+ * once, whatever the guest's page showed, and the party it already has is not sent again. Before that, nothing moves. */
+static void test_guest_follows_host_start(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    boss_battle_set_lead_selector(NULL);
+    memset(seat_party, 0, sizeof(seat_party));
+    memset(follow_manager, 0, sizeof(follow_manager));
+    put_pointer(follow_manager + 0x80, seat_party);
+    put_pointer(fake_inn_context + HYDELAND_CONTEXT_MANAGER, follow_manager);
+    set_guest_party(0);
+    boss_battle_online_reset();
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(0);
+    boss_battle_online_visit_begin(1);
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    CHECK(boss_battle_online_is_guest() && boss_battle_online_slot() == 1);
+    set_inn(7, 7, -1, 0);
+    result_frame();
+    CHECK(!boss_battle_session_active() && party_sends == 0); /* the join alone moves nothing */
+    host_announces(BOSS_BATTLE_PHASE_WAITING, -1, 0, 1);
+    result_frame();
+    CHECK(!boss_battle_session_active() && party_sends == 0);
+    /* the host's start reaches a guest not seated yet: kept */
+    host_announces(BOSS_BATTLE_PHASE_STARTING, MEDUSA, 0, 2);
+    result_frame();
+    result_frame();
+    CHECK(!boss_battle_session_active() && party_sends == 0);
+    /* seated by the room's game server: the kept start runs once, without a second party */
+    set_guest_party(1);
+    const GuestRegs started = result_frame();
+    CHECK(started.skip && boss_battle_session_active() && boss_battle_follower() && party_sends == 0);
+    CHECK(boss_battle_online_host_state().boss == MEDUSA);
+    result_frame();
+    CHECK(party_sends == 0 && boss_battle_follower());
+    /* travelling: no empty slot stands in for the guest's seat */
+    set_guest_party(0);
+    boss_battle_set_party_slot_lookup(fake_seat_lookup);
+    int skipped;
+    CHECK(seat_answer(0, &skipped) == 4);
+    boss_battle_set_party_slot_lookup(NULL);
+    boss_battle_follow_released("test");
+    boss_battle_reset();
+    boss_battle_online_reset();
+    memset(fake_inn_context + HYDELAND_CONTEXT_MANAGER, 0, 8);
+}
+
+/* ---- the visitor lifecycle: a guest on its own online page joins a host's Boss Battle room through the Network Menu,
+ * the join's scene reload rebuilds the Inn, and the guest's page comes back on the new Inn, waiting for the host ---- */
+
+#define PHASE_CHECK(phase, name, cond)                                                            \
+    do {                                                                                          \
+        if (!(cond)) {                                                                            \
+            printf("FAIL visitor lifecycle phase %s: %s (line %d)\n", phase, name, __LINE__);    \
+            ++failures;                                                                           \
+        }                                                                                         \
+    } while (0)
+
+typedef struct {
+    int party_sends; /* the guest's waiting party, through the native Inn party step */
+    int slot;        /* the party slot the native "add player" gave the guest's own player */
+} VisitorTranscript;
+
+/* The game's own teardown, as the fixture's game has it: the full party reset empties every seat, and the Matching2 leave
+ * is answered by the room-left event Matching2 reports. */
+static int party_resets, room_leaves, seats_detached;
+/* The characters alive in the scene: the add-player handler makes one for each seat it fills, and only the game's own
+ * removal ends one; a seat reset leaves them standing. */
+enum { MAX_CHARACTERS = 8 };
+typedef struct {
+    int alive, slot, owner;
+} LiveCharacter;
+static LiveCharacter characters[MAX_CHARACTERS];
+
+static void character_created(int slot, int owner) {
+    for (int i = 0; i < MAX_CHARACTERS; ++i)
+        if (!characters[i].alive) {
+            characters[i].alive = 1;
+            characters[i].slot = slot;
+            characters[i].owner = owner;
+            return;
+        }
+}
+
+static int live_characters(int owner) {
+    int count = 0;
+    for (int i = 0; i < MAX_CHARACTERS; ++i)
+        if (characters[i].alive && (owner < -1 || characters[i].owner == owner)) ++count;
+    return count;
+}
+
+static uint64_t GUEST_HOOK_ABI fake_seat_character(uint64_t slot) {
+    const int index = (int)((slot - (uint64_t)(uintptr_t)(seat_party + SEAT_BASE)) / SEAT_SIZE);
+    for (int i = 0; i < MAX_CHARACTERS; ++i)
+        if (characters[i].alive && characters[i].slot == index) return (uint64_t)(uintptr_t)&characters[i];
+    return 0;
+}
+
+static void GUEST_HOOK_ABI fake_remove_character(uint64_t character) {
+    CHECK(((uint8_t *)(uintptr_t)character - (uint8_t *)characters) % sizeof(characters[0]) == 0);
+    ((LiveCharacter *)(uintptr_t)character)->alive = 0;
+}
+
+static void GUEST_HOOK_ABI fake_detach_seat(uint64_t slot, int keep) {
+    CHECK(keep == 0 && slot >= (uint64_t)(uintptr_t)(seat_party + SEAT_BASE));
+    ++seats_detached;
+}
+static uint8_t leave_online[0x16920], leave_matching[0x10];
+static uint64_t leave_scene_vtable[0x40], leave_matching_vtable[0x40];
+
+static void GUEST_HOOK_ABI fake_party_reset(uint64_t party) {
+    CHECK(party == (uint64_t)(uintptr_t)seat_party);
+    ++party_resets;
+    seat_party[SERVER_CONNECTED_SLOTS] = 0;
+    for (int i = 0; i < 4; ++i) {
+        put_u32(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE + SEAT_OWNER, 0xffffffffu);
+        put_u32(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE + SEAT_OWNER - 4, (uint32_t)i);
+    }
+}
+
+static uint64_t GUEST_HOOK_ABI fake_scene_online(uint64_t scene) {
+    CHECK(scene == (uint64_t)(uintptr_t)game_scene);
+    return (uint64_t)(uintptr_t)leave_online;
+}
+
+static void GUEST_HOOK_ABI fake_matching_leave(uint64_t matching) {
+    CHECK(matching == (uint64_t)(uintptr_t)leave_matching);
+    ++room_leaves;
+}
+
+static void GUEST_HOOK_ABI fake_after_leave(uint64_t online) {
+    CHECK(online == (uint64_t)(uintptr_t)leave_online);
+    boss_battle_online_room_left("the game left the room");
+}
+
+static void use_native_teardown(int on) {
+    party_resets = room_leaves = 0;
+    leave_scene_vtable[0x170 / 8] = (uint64_t)(uintptr_t)fake_scene_online;
+    leave_matching_vtable[0x160 / 8] = (uint64_t)(uintptr_t)fake_matching_leave;
+    put_pointer(leave_matching, leave_matching_vtable);
+    put_pointer(leave_online + 0x16910, leave_matching);
+    put_pointer(game_scene, on ? leave_scene_vtable : NULL);
+    memset(characters, 0, sizeof(characters));
+    seats_detached = 0;
+    const BossBattleSeatTeardown teardown = {fake_party_reset, fake_seat_character, fake_remove_character, fake_detach_seat};
+    boss_battle_set_seat_teardown(on ? &teardown : NULL);
+    network_access_set_room_leave(on ? fake_after_leave : NULL);
+}
+
+static void lifecycle_begin(void) {
+    start_guarded();
+    use_fake_inn_functions();
+    use_fake_screen_functions();
+    boss_battle_set_lead_selector(NULL);
+    static const int32_t kHelp[6] = {953, 954, 955, 957, 958, 759};
+    boss_battle_set_inn_help_table((uint64_t)(uintptr_t)kHelp);
+    memset(shortcut_manager, 0, sizeof(shortcut_manager));
+    memset(shortcut_ui, 0, sizeof(shortcut_ui));
+    memset(shortcut_hint_object, 0, sizeof(shortcut_hint_object));
+    memset(shortcut_menu_window, 0, sizeof(shortcut_menu_window));
+    put_pointer(fake_inn_context + 0x20, shortcut_manager);
+    put_pointer(shortcut_manager + NETWORK_HINT_MANAGER_UI, shortcut_ui);
+    memset(fader_owner, 0, sizeof(fader_owner));
+    memset(&fades, 0, sizeof(fades));
+    put_pointer(shortcut_manager + 0xd8, fader_owner);
+    put_pointer(shortcut_manager + HYDELAND_MANAGER_SCENE, game_scene);
+    memset(seat_party, 0, sizeof(seat_party));
+    for (int i = 0; i < 4; ++i) put_u32(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE + SEAT_OWNER, 0xffffffffu);
+    seat_party[SERVER_CONNECTED_SLOTS] = 0x3; /* the host's slot 0 and the guest's slot 1 joined the game session */
+    put_pointer(shortcut_manager + 0x80, seat_party);
+    network_access_set_room_wish(fake_room_wish);
+    room_wishes = 0;
+    const BossBattleFadeFunctions fade_functions = {fake_get_fader, fake_fade};
+    boss_battle_set_fade_functions(&fade_functions);
+    boss_battle_set_network_row_at(fake_network_row_at);
+    const BossBattlePauseFunctions network_setup = {fake_network_setup, 0, 0};
+    boss_battle_set_pause_functions(&network_setup);
+    shortcut_hint_vtable[NETWORK_HINT_SHOW_SLOT / 8] = (uint64_t)(uintptr_t)shortcut_hint_show;
+    const NetworkHintFunctions hint = {shortcut_hint_create, (NetworkHintTextFn)(uintptr_t)shortcut_hint_set_text,
+                                       shortcut_hint_hide, shortcut_hint_refresh, 0};
+    network_hint_configure(&hint);
+    network_hint_set_portuguese(0);
+    network_access_set_installed(1);
+    network_access_set_clock(shortcut_clock);
+    network_shortcut_reset();
+    network_menu_set_create(shortcut_menu_create);
+    shortcut_menu_refuse = 0;
+    boss_battle_online_reset();
+    boss_battle_online_set_available(0);
+    use_native_teardown(1);
+}
+
+static void lifecycle_end(void) {
+    use_native_teardown(0);
+    GuestRegs title = page_regs();
+    boss_battle_title_hook(&title);
+    boss_battle_follow_released("lifecycle end");
+    boss_battle_online_room_left("lifecycle end");
+    boss_battle_set_party_slot_lookup(NULL);
+    boss_battle_set_fade_functions(NULL);
+    boss_battle_set_network_row_at(NULL);
+    boss_battle_set_pause_functions(NULL);
+    network_access_set_room_wish(NULL);
+    network_hint_configure(NULL);
+    network_menu_set_create(NULL);
+    put_pointer(fake_inn_context + 0x20, NULL);
+    network_access_set_clock(NULL);
+    network_access_set_installed(0);
+    network_shortcut_reset();
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_set_available(0);
+    boss_battle_online_reset();
+    boss_battle_screen_reset();
+    boss_battle_reset();
+}
+
+/* A new Inn object as the game constructs it: six native rows, its menu builder (the Boss Battle row added), and the
+ * Inn's step object; nothing pressed. */
+static void construct_inn(void) {
+    set_inn(6, 6, -1, -1);
+    GuestRegs built = inn_regs();
+    boss_battle_inn_built_hook(&built);
+    put_pointer(fake_inn + 0xa8, fake_steps_vtable);
+    fake_steps_vtable[0xa0 / 8] = (uint64_t)(uintptr_t)fake_step_set;
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+}
+
+static void inn_press(int32_t row) {
+    memcpy(inn_list() + 0x960, &row, sizeof(row));
+}
+
+static int local_seat_of(uint32_t player) {
+    for (int i = 0; i < 4; ++i) {
+        const uint8_t *slot = seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE;
+        if (i32_at(slot, SEAT_OWNER) == 0 && i32_at(slot, SEAT_OWNER - 4) == (int32_t)player) return i;
+    }
+    return -1;
+}
+
+static int remote_seats(void) {
+    int seats = 0;
+    for (int i = 0; i < 4; ++i)
+        if (i32_at(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE, SEAT_OWNER) == 1) ++seats;
+    return seats;
+}
+
+/* The game's add-player: a seat filled, with its own new character. */
+static void seat(int slot, int owner, int pad) {
+    put_u32(seat_party + SEAT_BASE + (size_t)slot * SEAT_SIZE + SEAT_OWNER, (uint32_t)owner);
+    put_u32(seat_party + SEAT_BASE + (size_t)slot * SEAT_SIZE + SEAT_OWNER - 4, (uint32_t)pad);
+    if (owner >= 0) character_created(slot, owner);
+}
+
+/* The page as the player sees it: shown, not hidden, out of any Network Menu return, its window running its act. */
+static int page_active(void) {
+    return boss_battle_screen_shown() && !page_hidden() && !boss_battle_network_menu_returning();
+}
+
+static int page_waits_for_host(void) {
+    return !strncmp(text_at(fake_window, 0xfa0), boss_battle_text(BOSS_BATTLE_TEXT_WAITING_FOR_HOST),
+                    strlen(boss_battle_text(BOSS_BATTLE_TEXT_WAITING_FOR_HOST)));
+}
+
+/* One frame of a live page: its window's act, its list's update and its result. */
+static GuestRegs live_page_frame(int32_t result) {
+    fake_inn[INN_ACT] = 0x8e;
+    fake_inn[INN_STEP] = 1;
+    page_act();
+    page_update();
+    shortcut_now += 16;
+    return page_result(result);
+}
+
+/* How the rebuilt Inn comes up after its menu build. The real log: intro acts 0x80 and 0, then Options mode 0x8e step 1,
+ * left there, so its menu frame never runs. The other case reaches the menu act. */
+typedef enum { NEW_INN_STALE_OPTIONS, NEW_INN_MENU } NewInnEntry;
+
+typedef struct {
+    int requested, built, party_before_page;
+} InnRun;
+
+/* One game frame of the new Inn: the scene frame, then the Inn's own act. Only the menu act (0x5b) reads its list result,
+ * which is where the Inn result hook runs; Options mode step 0 makes the page window, step 2 leaves Options mode. */
+static void inn_game_frame(InnRun *run) {
+    menu_scene_frame();
+    const int act = fake_inn[INN_ACT], step = fake_inn[INN_STEP];
+    if (act == 0x8e && step == 2) {
+        fake_inn[INN_ACT] = 0x5b;
+        fake_inn[INN_STEP] = 0;
+    } else if (act == 0x8e && step == 0 && run->requested) {
+        fake_options_page(8);
+        build_page();
+        run->built = 1;
+        fake_inn[INN_STEP] = 1;
+    } else if (act == 0x8e && run->built) {
+        page_act();
+        page_update();
+        shortcut_now += 16;
+        page_result(-1);
+    } else if (act == 0x5b) {
+        const GuestRegs menu = result_frame();
+        if (menu.skip && menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW) {
+            ++run->requested;
+            if (party_sends) run->party_before_page = 1;
+            fake_inn[INN_ACT] = 0x8e;
+            fake_inn[INN_STEP] = 0;
+        }
+    }
+}
+
+static void run_new_inn(NewInnEntry entry, InnRun *run) {
+    static const uint8_t kStale[][2] = {{0x80, 0}, {0, 0}, {0, 2}, {0, 7}, {0, 8}, {0x8e, 1}};
+    static const uint8_t kMenu[][2] = {{0x80, 0}, {0, 0}, {0x5b, 0}};
+    const uint8_t(*acts)[2] = entry == NEW_INN_STALE_OPTIONS ? kStale : kMenu;
+    const size_t count = entry == NEW_INN_STALE_OPTIONS ? sizeof(kStale) / sizeof(*kStale) : sizeof(kMenu) / sizeof(*kMenu);
+    for (size_t i = 0; i < count; ++i) {
+        fake_inn[INN_ACT] = acts[i][0];
+        fake_inn[INN_STEP] = acts[i][1];
+        inn_game_frame(run);
+        if (fake_inn[INN_ACT] != acts[i][0] || fake_inn[INN_STEP] != acts[i][1]) break;
+    }
+    for (int frame = 0; frame < 16 && !page_active(); ++frame) inn_game_frame(run);
+}
+
+/* Phases A to L, on the guest, in the order of the runtime log. */
+static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
+    VisitorTranscript t = {0, -1};
+    const int remembered = fight_all ? BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW : 3;
+
+    /* A: the guest's own Boss Battle visit, online, its page active */
+    construct_inn();
+    inn_press(BOSS_BATTLE_INN_ROW);
+    PHASE_CHECK("A", "Inn row opens the page", result_frame().skip && boss_battle_screen_requested());
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_visit_begin(1);
+    fake_options_page(8);
+    build_page();
+    live_page_frame(-1);
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 1, 0);
+    live_page_frame(-1);
+    PHASE_CHECK("A", "own visit online", boss_battle_online_selected() && !boss_battle_online_visitor());
+    PHASE_CHECK("A", "page active", page_active());
+    PHASE_CHECK("A", "no party sent alone in the room", party_sends == 0);
+
+    /* B: the Network Menu over the page, which is suspended */
+    set_page_cursor(remembered);
+    live_page_frame(-1);
+    PHASE_CHECK("B", "shortcut armed", network_shortcut_armed());
+    network_shortcut_pad_filter(1);
+    live_page_frame(remembered);
+    network_shortcut_pad_filter(0);
+    PHASE_CHECK("B", "Network Menu open", network_menu_open_in(shortcut_ui));
+    PHASE_CHECK("B", "page suspended", page_hidden() && boss_battle_screen_shown());
+
+    /* C: the guest joins the host's room: visitor, guest role, two members, seat 1, the host a remote member */
+    boss_battle_online_room_left("the game left it to join a friend's room");
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    PHASE_CHECK("C", "visitor 0 -> 1", boss_battle_online_visitor() == 1);
+    PHASE_CHECK("C", "room role guest", boss_battle_online_is_guest() && !boss_battle_online_is_host());
+    PHASE_CHECK("C", "room members 2", boss_battle_online_members() == 2);
+    PHASE_CHECK("C", "member seat 1", boss_battle_online_slot() == 1);
+    PHASE_CHECK("C", "no Boss session", !boss_battle_session_active());
+
+    /* D: the Network Menu closes */
+    put_pointer(shortcut_ui + 0x238, NULL);
+    menu_scene_frame();
+    PHASE_CHECK("D", "Network Menu closed", !network_menu_open_in(shortcut_ui));
+    PHASE_CHECK("D", "Network Menu return pending", boss_battle_network_menu_returning());
+
+    /* E: the join's scene reload destroys the old Inn, and its page with it, while the return is pending */
+    GuestRegs gone;
+    memset(&gone, 0, sizeof(gone));
+    gone.rdi = (uint64_t)(uintptr_t)fake_inn;
+    boss_battle_inn_destroyed_hook(&gone);
+    menu_scene_frame();
+    menu_scene_frame();
+    PHASE_CHECK("E", "visitor kept", boss_battle_online_visitor() && boss_battle_online_selected());
+    PHASE_CHECK("E", "old page dropped", !boss_battle_screen_shown() && !boss_battle_network_menu_returning());
+    PHASE_CHECK("E", "still in the host's room", boss_battle_online_is_guest() && boss_battle_online_members() == 2);
+
+    /* F, G: the new Inn object, and the host's party seat replicated into slot 0 before the Inn is ready */
+    set_inn(6, 6, -1, -1);
+    seat(0, 1, 0);
+    boss_battle_set_party_slot_lookup(fake_seat_lookup);
+    int skipped;
+    const uint64_t answered = seat_answer(0, &skipped);
+    PHASE_CHECK("G", "remote Host in slot 0", remote_seats() == 1);
+    PHASE_CHECK("G", "guest has no local seat", local_seat_of(0) < 0 && skipped && answered == 1 &&
+                                                       i32_at(seat_party + SEAT_BASE + SEAT_SIZE, SEAT_OWNER) == -1);
+
+    /* H: the new Inn's menu is built, then the Inn runs its own acts as the runtime log shows them */
+    const unsigned wishes = (unsigned)room_wishes;
+    GuestRegs built = inn_regs();
+    boss_battle_inn_built_hook(&built);
+    put_pointer(fake_inn + 0xa8, fake_steps_vtable);
+    fake_steps_vtable[0xa0 / 8] = (uint64_t)(uintptr_t)fake_step_set;
+    PHASE_CHECK("H", "new Inn ready", main_rows_are_inn());
+    PHASE_CHECK("H", "visitor still 1", boss_battle_online_visitor() == 1);
+    PHASE_CHECK("H", "Network Menu closed", !network_menu_open_in(shortcut_ui));
+    InnRun run = {0, 0, 0};
+    run_new_inn(entry, &run);
+
+    /* I: the page request and the page, from what the game runs, with no menu frame the game does not run */
+    PHASE_CHECK("I", "visitor Inn rebuild completed but Boss Battle page request was not issued", run.requested >= 1);
+    PHASE_CHECK("I", "Boss Battle page requested more than once", run.requested <= 1);
+    PHASE_CHECK("I", "no reopen left armed after the request", !boss_battle_menu_reopen_pending());
+    PHASE_CHECK("I", "page requested but never constructed", run.built && boss_battle_screen_shown());
+    PHASE_CHECK("I", "remembered entry", fight_all ? boss_battle_cursor_fight_all()
+                                                   : i32_at(fake_body, 0x958) == remembered && !boss_battle_cursor_fight_all());
+    PHASE_CHECK("I", "guest party sent before its page was active", run.party_before_page == 0);
+
+    /* J, K: the page becomes active, waiting for the host; the guest's waiting party goes once */
+    live_page_frame(-1);
+    PHASE_CHECK("J", "page active", page_active());
+    PHASE_CHECK("J", "Waiting for host", page_waits_for_host());
+    PHASE_CHECK("J", "visitor role kept", boss_battle_online_visitor() && boss_battle_online_is_guest());
+    PHASE_CHECK("K", "guest visitor page active but waiting party was not sent", party_sends >= 1);
+    live_page_frame(-1);
+    live_page_frame(-1);
+    PHASE_CHECK("K", "guest waiting party sent more than once", party_sends == 1);
+    PHASE_CHECK("J", "guest cannot start a boss", (live_page_frame(1).r15 & 1) == 0 && !boss_battle_session_active() &&
+                                                      se_value == BOSS_BATTLE_SE_CANCEL);
+
+    /* L: the native "add player" seats the guest's own player in slot 1, pad 0 */
+    seat(1, 0, 0);
+    live_page_frame(-1);
+    PHASE_CHECK("L", "local slot valid", local_seat_of(0) == 1 && seat_answer(0, &skipped) == 1);
+    PHASE_CHECK("L", "no second party", party_sends == 1);
+    PHASE_CHECK("L", "no room created or left", room_wishes == (int)wishes && boss_battle_online_is_guest() &&
+                                                     boss_battle_online_members() == 2 && boss_battle_online_visitor());
+    boss_battle_set_party_slot_lookup(NULL);
+    t.party_sends = party_sends;
+    t.slot = local_seat_of(0);
+    return t;
+}
+
+/* M, N: the host, waiting on its page with the guest a member: 1 of 2 seated refuses the start, the guest's seat
+ * replicated from its party send makes 2 of 2, and Harpy then starts. The state the host publishes is returned. */
+static int host_lifecycle(const VisitorTranscript *guest, uint8_t published[BOSS_BATTLE_STATE_SIZE], int fight_all) {
+    construct_inn();
+    inn_press(BOSS_BATTLE_INN_ROW);
+    result_frame();
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_visit_begin(1);
+    fake_options_page(8);
+    build_page();
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 1, 0);
+    live_page_frame(-1);
+    boss_battle_online_members_changed(2);
+    live_page_frame(-1);
+    PHASE_CHECK("M", "host party sent once members > 1", party_sends == 1);
+    seat(0, 0, 0);
+    PHASE_CHECK("M", "room has 2 members", boss_battle_online_is_host() && boss_battle_online_members() == 2);
+    const int32_t start_row = fight_all ? BOSS_BATTLE_SCREEN_FIGHT_ALL_ROW : 1;
+    const uint32_t sequence_before = boss_battle_online_host_state().sequence;
+    se_value = -1;
+    GuestRegs refused = live_page_frame(start_row);
+    PHASE_CHECK("M", "ready 1 of 2 before the guest's seat", 1 + remote_seats() == 1);
+    PHASE_CHECK("M", "start refused at 1 of 2", !(refused.r15 & 1) && se_value == BOSS_BATTLE_SE_CANCEL &&
+                                                     boss_battle_online_host_state().phase == BOSS_BATTLE_PHASE_WAITING);
+    if (guest->party_sends == 1 && guest->slot >= 0) seat(guest->slot, 1, 0);
+    PHASE_CHECK("M", "guest native seat was not replicated to Host readiness",
+                remote_seats() == 1 && 1 + remote_seats() == boss_battle_online_members());
+    se_value = -1;
+    const GuestRegs started = live_page_frame(start_row);
+    const BossBattleHostState host = boss_battle_online_host_state();
+    PHASE_CHECK("N", "start allowed", (started.r15 & 1) && se_value == BOSS_BATTLE_SE_DECIDE);
+    PHASE_CHECK("N", "host start is Harpy", host.phase == BOSS_BATTLE_PHASE_STARTING && host.boss == HARPY &&
+                                                host.fight_all == fight_all && host.sequence == sequence_before + 1);
+    return boss_battle_online_publish(published);
+}
+
+/* O: the guest consumes the host's first start on its first sight of it. */
+static void guest_follows(const uint8_t *published, int boss, int fight_all) {
+    PHASE_CHECK("O", "host state received", boss_battle_online_internal_update(published, BOSS_BATTLE_STATE_SIZE));
+    const GuestRegs page = live_page_frame(-1);
+    PHASE_CHECK("O", "page closes for the host's start", (page.r15 & 1) != 0);
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    result_frame();
+    PHASE_CHECK("O", "host start followed", boss_battle_session_active() && boss_battle_follower());
+    PHASE_CHECK("O", "the host's boss", boss_battle_online_host_state().boss == boss &&
+                                            boss_battle_online_host_state().fight_all == fight_all);
+    PHASE_CHECK("O", "no second party for the start", party_sends == 1);
+}
+
+static void test_visitor_lifecycle(void) {
+    for (int entry = NEW_INN_STALE_OPTIONS; entry <= NEW_INN_MENU; ++entry)
+        for (int fight_all = 0; fight_all <= 1; ++fight_all) {
+            lifecycle_begin();
+            const VisitorTranscript guest = guest_lifecycle(fight_all, (NewInnEntry)entry);
+            lifecycle_end();
+
+            uint8_t published[BOSS_BATTLE_STATE_SIZE] = {0};
+            lifecycle_begin();
+            PHASE_CHECK("N", "host state published", host_lifecycle(&guest, published, fight_all));
+            lifecycle_end();
+            boss_battle_online_note_local(BOSS_BATTLE_LOCAL_TRAVELLING, 3, 0);
+            PHASE_CHECK("N", "no start latch survives the visit", !boss_battle_online_take_start_peer_lost());
+            boss_battle_online_note_local(BOSS_BATTLE_LOCAL_IDLE, -1, 0);
+
+            lifecycle_begin();
+            guest_lifecycle(fight_all, (NewInnEntry)entry);
+            guest_follows(published, HARPY, fight_all);
+            if (!fight_all) {
+                /* a later start of the same room is followed too */
+                boss_battle_follow_released("the first fight ended");
+                boss_battle_reset();
+                const uint32_t first = (uint32_t)published[4] | (uint32_t)published[5] << 8 |
+                                       (uint32_t)published[6] << 16 | (uint32_t)published[7] << 24;
+                host_announces(BOSS_BATTLE_PHASE_WAITING, -1, 0, first + 1);
+                host_announces(BOSS_BATTLE_PHASE_STARTING, MEDUSA, 0, first + 2);
+                result_frame();
+                PHASE_CHECK("O", "second start followed", boss_battle_session_active() && boss_battle_follower() &&
+                                                              boss_battle_online_host_state().boss == MEDUSA);
+            }
+            lifecycle_end();
+        }
+}
+
+/* ---- the handoff: the host ends its Boss Battle visit with Return to tavern, the room stays for normal online play,
+ * and the guest leaves the Inn with the host for Hydeland ---- */
+
+static int seats_with_owner(int owner) {
+    int seats = 0;
+    for (int i = 0; i < 4; ++i)
+        if (i32_at(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE, SEAT_OWNER) == owner) ++seats;
+    return seats;
+}
+
+static int local_pad_seats(int pad) {
+    int seats = 0;
+    for (int i = 0; i < 4; ++i) {
+        const uint8_t *slot = seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE;
+        if (i32_at(slot, SEAT_OWNER) == 0 && i32_at(slot, SEAT_OWNER - 4) == pad) ++seats;
+    }
+    return seats;
+}
+
+static void end_host_session(void) {
+    const BossBattleHostState last = boss_battle_online_host_state();
+    host_announces(BOSS_BATTLE_PHASE_ENDED, -1, 0, last.sequence + 1);
+}
+
+/* After the Boss Battle visit: no page, no pending reopen or start, its room left, its seats reset by the game. */
+static void check_after_visit(const char *phase, int sends) {
+    PHASE_CHECK(phase, "Boss Battle page still active after the visit ended", !boss_battle_screen_shown());
+    PHASE_CHECK(phase, "Boss Battle page still requested after the visit ended", !boss_battle_screen_requested());
+    PHASE_CHECK(phase, "Boss Battle reopen still pending after the visit ended", !boss_battle_menu_reopen_pending());
+    PHASE_CHECK(phase, "Boss Battle page return still running", !boss_battle_network_menu_returning());
+    PHASE_CHECK(phase, "Boss session still active", !boss_battle_session_active() && !boss_battle_follower());
+    int boss = -1, fight_all = 0;
+    PHASE_CHECK(phase, "a Boss start is still pending", !boss_battle_online_take_follow(&boss, &fight_all));
+    PHASE_CHECK(phase, "visitor role still set", !boss_battle_online_visitor());
+    PHASE_CHECK(phase, "Boss Battle visit still online", !boss_battle_online_selected());
+    PHASE_CHECK(phase, "room was left at Return to tavern: the players are no longer together",
+                boss_battle_online_in_room() && boss_battle_online_members() == 2 && room_leaves == 0);
+    PHASE_CHECK(phase, "room still tagged as a Boss Battle room", !boss_battle_online_boss_room());
+    PHASE_CHECK(phase, "Boss seats survive the teardown",
+                party_resets == 1 && seats_with_owner(0) == 0 && seats_with_owner(1) == 0);
+    PHASE_CHECK(phase, "stale Boss characters survive the seat reset (they would stand in Hydeland as NPCs)",
+                live_characters(-2) == 0 && seats_detached == 2);
+    PHASE_CHECK(phase, "more than one party sent after the visit ended", party_sends <= sends + 1);
+    PHASE_CHECK(phase, "a later room would carry the Boss Battle session",
+                boss_battle_online_room_attr() == BOSS_BATTLE_ROOM_NONE && !boss_battle_online_search_wanted());
+}
+
+/* Hydeland's own placement after the visit: the game seats this machine's player and the other one in the first free
+ * seats, as the runtime showed (member 0x8 at the first free slot). */
+static int stage_add(int owner) {
+    for (int i = 0; i < 4; ++i)
+        if (i32_at(seat_party + SEAT_BASE + (size_t)i * SEAT_SIZE, SEAT_OWNER) == -1) {
+            seat(i, owner, owner == 0 ? 0 : 255);
+            return i;
+        }
+    return -1;
+}
+
+/* The scene's online party pass for local player 0, through the production lookup hook: the slot it reads must be a seat,
+ * either empty (skipped) or player 0's own; no seat at all is the null slot 0x271a0 faults on. */
+static void check_local_player_update(const char *phase) {
+    boss_battle_set_party_slot_lookup(fake_seat_lookup);
+    int skipped;
+    const uint64_t slot = seat_answer(0, &skipped);
+    boss_battle_set_party_slot_lookup(NULL);
+    const uint8_t *seat = slot < 4 ? seat_party + SEAT_BASE + slot * SEAT_SIZE : NULL;
+    PHASE_CHECK(phase, "Guest Early Story handoff reached local-player update before a native local seat existed",
+                seat && (i32_at(seat, SEAT_OWNER) == -1 || (i32_at(seat, SEAT_OWNER) == 0 && i32_at(seat, SEAT_OWNER - 4) == 0)));
+}
+
+/* Hydeland seats the players one add at a time: the host's own player first on the host, the other player first on the
+ * guest, and the scene's party pass runs between the adds. */
+static void check_hydeland(const char *phase, int host_machine) {
+    check_local_player_update(phase);
+    stage_add(host_machine ? 0 : 1);
+    check_local_player_update(phase);
+    stage_add(host_machine ? 1 : 0);
+    check_local_player_update(phase);
+    PHASE_CHECK(phase, "Hydeland add duplicated a player", seats_with_owner(0) == 1 && seats_with_owner(1) == 1);
+    PHASE_CHECK(phase, "player 0 drives more than one character", local_pad_seats(0) == 1);
+    PHASE_CHECK(phase, "Hydeland seated a third player", i32_at(seat_party + SEAT_BASE + 2 * SEAT_SIZE, SEAT_OWNER) == -1);
+    PHASE_CHECK(phase, "not exactly two live player characters in Hydeland",
+                live_characters(-2) == 2 && live_characters(0) == 1 && live_characters(1) == 1);
+}
+
+/* The page the guest had, frames later in Hydeland: not the screen any more, so its input is the game's. */
+static void check_no_boss_input(const char *phase) {
+    const int sends = party_sends;
+    const GuestRegs result = page_result(3);
+    PHASE_CHECK(phase, "Boss Battle page input after the session ended", !result.skip && result.r15 == (uint64_t)(uintptr_t)fake_body);
+    PHASE_CHECK(phase, "Boss Battle list input blocked after the session ended", !page_update().skip);
+    PHASE_CHECK(phase, "a party was sent from a stale page", party_sends == sends);
+}
+
+static void guest_leaves_with_host(void) {
+    GuestRegs gone;
+    memset(&gone, 0, sizeof(gone));
+    gone.rdi = (uint64_t)(uintptr_t)fake_inn;
+    boss_battle_inn_destroyed_hook(&gone);
+    menu_scene_frame();
+}
+
+/* The host's page, live in a Boss Battle room the guest joined, both seated, as it is after a fight's return. */
+static void host_page_with_guest(void) {
+    construct_inn();
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_visit_begin(1);
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 2, 0);
+    seat(0, 0, 0);
+    seat(1, 1, 255);
+    boss_battle_arm_menu_reopen(BOSS_BATTLE_REOPEN_CAMPAIGN_RESTORE);
+    inn_press(-1);
+    PHASE_CHECK("R", "Boss page did not reopen after the fight", result_frame().rax == BOSS_BATTLE_INN_OPTIONS_ROW);
+    fake_options_page(8);
+    build_page();
+    live_page_frame(-1);
+    PHASE_CHECK("R", "host page not active with the guest seated", page_active() && seats_with_owner(1) == 1);
+}
+
+/* Matching2's own tag update on the owner's room, which follows the visit's room attribute. */
+static void publish_room_tag(void) {
+    boss_battle_online_room_tagged(boss_battle_online_room_attr());
+}
+
+static void host_return_to_tavern(void) {
+    const GuestRegs back = live_page_frame(BOSS_BATTLE_SCREEN_RETURN_ROW);
+    PHASE_CHECK("T", "Return to tavern did not close the host's page", (back.r15 & 1) != 0);
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    inn_press(-1);
+    result_frame();
+    publish_room_tag();
+}
+
+/* The player chooses Boss Battle on the Inn menu again: a press after frames with none. */
+static void host_enters_boss_battle(void) {
+    inn_press(-1);
+    result_frame();
+    inn_press(BOSS_BATTLE_INN_ROW);
+    PHASE_CHECK("E", "Boss Battle row did not open the page", result_frame().rax == BOSS_BATTLE_INN_OPTIONS_ROW);
+    boss_battle_online_native_changed(1);
+    fake_options_page(8);
+    build_page();
+    live_page_frame(-1);
+}
+
+static void test_leave_and_reenter(void) {
+    lifecycle_begin();
+    host_page_with_guest();
+    const int sends = party_sends;
+    host_return_to_tavern();
+    check_after_visit("T", sends);
+    PHASE_CHECK("T", "Boss page reopened without a new press",
+                result_frame().rax != BOSS_BATTLE_INN_OPTIONS_ROW && !boss_battle_screen_requested());
+
+    /* a fresh visit in the same room: host role again, the room tagged again, a new party and start sequence */
+    const int wishes = room_wishes;
+    const uint32_t sequence = boss_battle_online_host_state().sequence;
+    host_enters_boss_battle();
+    publish_room_tag();
+    live_page_frame(-1);
+    PHASE_CHECK("E", "fresh visit not online", boss_battle_online_selected() && !boss_battle_online_visitor());
+    PHASE_CHECK("E", "Host reentry asked for a new room instead of taking back its own", room_wishes == wishes);
+    PHASE_CHECK("E", "Host reentry is not recognized as Host in its own room",
+                boss_battle_online_is_host() && boss_battle_online_room_attr() == BOSS_BATTLE_ROOM_OPEN &&
+                    boss_battle_online_boss_room() && boss_battle_online_members() == 2 && room_leaves == 0);
+    live_page_frame(-1);
+    PHASE_CHECK("E", "fresh host party not sent with the guest still there", party_sends == sends + 1);
+    seat(0, 0, 0);
+    se_value = -1;
+    live_page_frame(1);
+    PHASE_CHECK("E", "host started at 1 of 2", boss_battle_online_host_state().phase == BOSS_BATTLE_PHASE_WAITING);
+    seat(1, 1, 255);
+    se_value = -1;
+    const GuestRegs started = live_page_frame(1);
+    const BossBattleHostState host = boss_battle_online_host_state();
+    PHASE_CHECK("E", "only the host starts a fight, on the host", boss_battle_online_may_start());
+    PHASE_CHECK("E", "Harpy refused after reentry", (started.r15 & 1) && se_value == BOSS_BATTLE_SE_DECIDE &&
+                                                        host.phase == BOSS_BATTLE_PHASE_STARTING && host.boss == HARPY);
+    PHASE_CHECK("E", "start sequence not fresh", host.sequence == sequence + 1);
+    lifecycle_end();
+
+    /* a host alone in its Boss Battle room leaves it with the visit: nobody is kept waiting in it */
+    lifecycle_begin();
+    host_page_with_guest();
+    boss_battle_online_members_changed(1);
+    host_return_to_tavern();
+    PHASE_CHECK("S", "a room nobody else is in was kept", !boss_battle_online_in_room() && room_leaves == 1);
+    lifecycle_end();
+
+    /* the guest stays in the host's room after the visit, and becomes its visitor again on the host's next visit */
+    lifecycle_begin();
+    guest_lifecycle(0, NEW_INN_MENU);
+    end_host_session();
+    live_page_frame(-1);
+    put_u32(fake_window + 0xa4, 2);
+    menu_scene_frame();
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    inn_press(-1);
+    result_frame();
+    const int guest_sends = party_sends;
+    check_after_visit("G", guest_sends);
+    host_announces(BOSS_BATTLE_PHASE_WAITING, -1, 0, boss_battle_online_host_state().sequence + 1);
+    PHASE_CHECK("G", "guest did not become the host's visitor again", boss_battle_online_visitor() && boss_battle_online_boss_room());
+    const GuestRegs menu = result_frame();
+    PHASE_CHECK("G", "guest Boss page not requested on the host's next visit",
+                menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW && boss_battle_screen_requested());
+    fake_options_page(8);
+    build_page();
+    seat(0, 1, 255);
+    live_page_frame(-1);
+    PHASE_CHECK("G", "guest page not waiting for host", page_active() && page_waits_for_host());
+    PHASE_CHECK("G", "guest waiting party not sent again", party_sends == guest_sends + 1);
+    lifecycle_end();
+
+    /* the host's Hydeland after Return to tavern: one local host, one remote guest */
+    lifecycle_begin();
+    host_page_with_guest();
+    host_return_to_tavern();
+    guest_leaves_with_host();
+    check_after_visit("Y", party_sends);
+    check_hydeland("Y", 1);
+    lifecycle_end();
+}
+
+/* The visit's teardown sites on every supported build with a local image: the full party reset and the room leave. */
+static void test_handoff_sites(void) {
+    static const struct {
+        const char *folder;
+        uint64_t room_wish;
+        BossBattleHandoffSites sites;
+    } kSites[] = {
+        {"v1.03", 0x43bc60, {0x27d20, 0x26f90, 0x2f5620, 0x26fd0, 0x9d9e0}},
+        {"CUSA10454-1.01", 0x43bc60, {0x27d20, 0x26f90, 0x2f5620, 0x26fd0, 0x9d9e0}},
+        {"CUSA07001-1.00", 0x43ae90, {0x27670, 0x268e0, 0x2f4b30, 0x26920, 0x9d060}},
+        {"CUSA07001-1.02", 0x43b270, {0x276f0, 0x26960, 0x2f4f00, 0x269a0, 0x9d300}},
+        {"CUSA07001-1.03", 0x43b330, {0x276f0, 0x26960, 0x2f4f50, 0x269a0, 0x9d300}},
+        {"CUSA10209-1.00", 0x43b000, {0x27730, 0x269a0, 0x2f4cc0, 0x269e0, 0x9d1f0}},
+    };
+    for (size_t b = 0; b < sizeof(kSites) / sizeof(*kSites); ++b) {
+        uint64_t size = 0;
+        BossBattleHandoffSites found;
+        unsigned char *image = boot_image(kSites[b].folder, &size, 0);
+        if (!image) {
+            printf("%s: no boot image, handoff sites skipped\n", kSites[b].folder);
+            continue;
+        }
+        PHASE_CHECK(kSites[b].folder, "handoff sites not found",
+                    boss_battle_locate_handoff(image, size, kSites[b].room_wish, &found));
+        PHASE_CHECK(kSites[b].folder, "party reset, seat teardown or room leave at the wrong place",
+                    !memcmp(&found, &kSites[b].sites, sizeof(found)));
+        image[kSites[b].sites.party_reset + 9] ^= 0xff;
+        PHASE_CHECK(kSites[b].folder, "a changed party reset was accepted",
+                    !boss_battle_locate_handoff(image, size, kSites[b].room_wish, &found));
+        image[kSites[b].sites.party_reset + 9] ^= 0xff;
+        image[kSites[b].sites.party_reset + 0x1f] ^= 0xff;
+        PHASE_CHECK(kSites[b].folder, "a party reset clearing another connected-slot field was accepted",
+                    !boss_battle_locate_handoff(image, size, kSites[b].room_wish, &found));
+        image[kSites[b].sites.party_reset + 0x1f] ^= 0xff;
+        PHASE_CHECK(kSites[b].folder, "a room leave outside the room wish was accepted",
+                    !boss_battle_locate_handoff(image, size, kSites[b].sites.party_reset, &found));
+        printf("%s: handoff sites party reset %#llx, seat character %#llx, removal %#llx, detach %#llx, room leave follow-up "
+               "%#llx\n",
+               kSites[b].folder, (unsigned long long)found.party_reset, (unsigned long long)found.seat_character,
+               (unsigned long long)found.remove_character, (unsigned long long)found.detach_seat,
+               (unsigned long long)found.after_leave);
+        free(image);
+    }
+}
+
+static void test_visitor_handoff(void) {
+    test_handoff_sites();
+    for (int inn_first = 0; inn_first <= 1; ++inn_first) {
+        lifecycle_begin();
+        guest_lifecycle(0, NEW_INN_MENU);
+        const int sends = party_sends;
+        PHASE_CHECK("1", "guest not seated 2 of 2 before the handoff", seats_with_owner(0) == 1 && seats_with_owner(1) == 1);
+
+        /* the host's Return to tavern ends its visit; the guest hears the end */
+        end_host_session();
+        PHASE_CHECK("2", "visitor role kept after the host ended the session", !boss_battle_online_visitor());
+
+        uint64_t page_result_closed = 0;
+        if (inn_first) {
+            /* the guest follows the host out before its page ran a frame */
+            guest_leaves_with_host();
+            const GuestRegs late = page_result(-1);
+            page_result_closed = late.r15;
+            PHASE_CHECK("3", "Boss Battle page outside the Inn not closed", (late.r15 & 1) != 0);
+        } else {
+            const GuestRegs page = live_page_frame(-1);
+            page_result_closed = page.r15;
+            PHASE_CHECK("3", "guest Boss Battle page not closed when the host ended the session", (page.r15 & 1) != 0);
+            PHASE_CHECK("3", "a party was sent while the page closed", party_sends == sends);
+        }
+        const int closed = (page_result_closed & 1) != 0;
+        if (closed) put_u32(fake_window + 0xa4, 2); /* the native close terminates the page's window */
+        menu_scene_frame();
+        if (!inn_first && closed) {
+            fake_inn[INN_ACT] = 0x5b;
+            fake_inn[INN_STEP] = 0;
+            const GuestRegs menu = result_frame();
+            PHASE_CHECK("4", "the Inn reopened the Boss Battle page", !(menu.skip && menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW));
+            check_after_visit("4", sends);
+        }
+        if (!inn_first) guest_leaves_with_host();
+        check_after_visit("5", sends);
+        check_no_boss_input("5");
+        for (int frame = 0; frame < 4; ++frame) menu_scene_frame();
+        check_after_visit("6", sends);
+        check_hydeland("7", 0);
+        lifecycle_end();
+    }
+    test_leave_and_reenter();
+}
+
+#ifdef BOSS_BATTLE_EARLY_STORY_HANDOFF
+/* ---- the Boss Battle room handed to Early Story: the real Early Story session and room-wish code on the shared room ---- */
+
+enum { STORY_STEP = 10, HOST_STORY_STEP = 20, TOWN_LOCATION = 3 };
+
+/* Early Story Online as it is on, in town, before the online check: its own setting, access and the lead's step. */
+static void early_story_on(void) {
+    early_story_set_active(1);
+    early_story_set_hosting(1);
+    early_story_grant_access();
+    early_story_note_own_step(STORY_STEP);
+    early_story_session_reset();
+    boss_battle_online_set_room_handoff(early_story_session_room_handoff);
+}
+
+static void early_story_off(void) {
+    boss_battle_online_set_room_handoff(NULL);
+    early_story_set_active(0);
+    early_story_set_hosting(0);
+    early_story_note_own_step(EARLY_STORY_NO_STEP);
+    early_story_note_host_step(EARLY_STORY_NO_STEP);
+}
+
+/* Matching2's join rule for the room the visit is in (runtime_matching2.cpp, room joined). */
+static void matching2_joined_boss_room(int owner) {
+    early_story_session_room_handoff(owner, 1);
+}
+
+/* The game's room wish at a town location: 1 when Early Story's hook keeps the room (the Castle Gate answer). */
+static int town_keeps_room(void) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rax = TOWN_LOCATION;
+    early_story_room_wish_hook(&regs);
+    return regs.rax == EARLY_STORY_ROOM_WISH_GATE;
+}
+
+enum { INN_LEAVE_DISPLAY_ROW = 6, INN_NATIVE_LEAVE = 5 };
+
+static int host_leaves_inn(void) {
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    inn_press(INN_LEAVE_DISPLAY_ROW);
+    const GuestRegs menu = result_frame();
+    inn_press(-1);
+    return menu.skip && (int32_t)menu.rax == INN_NATIVE_LEAVE;
+}
+
+enum { HOST_MEMBER_SLOT = 0, GUEST_MEMBER_SLOT = 1, SLOT_CHARACTER_ID = 0x1f6c };
+enum { HOST_CHARACTER_ID = 0x4801, GUEST_CHARACTER_ID = 0x7302, PLAYER_PAD = 0 };
+
+/* The host's game server seating a CREATEPLAYER_REQUEST, which every machine then seats as its add-player says: the
+ * production hook at its read of the requested slot, then the game's own choice, the requested seat when it is free,
+ * else the first free one. Every request asks for its sender's pad, 0 on both machines. */
+static int host_seats_request(int sender_seat, int local) {
+    uint8_t request[0x40] = {0};
+    request[0x1b] = (uint8_t)sender_seat;
+    put_i32_at(request + 0x28, PLAYER_PAD);
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.r13 = (uint64_t)(uintptr_t)request;
+    boss_battle_slot_request_hook(&regs);
+    int slot = i32_at(request, 0x28);
+    if (slot < 0 || slot >= 4 || i32_at(seat_party + SEAT_BASE + (size_t)slot * SEAT_SIZE, SEAT_OWNER) != -1)
+        for (slot = 0; slot < 4 && i32_at(seat_party + SEAT_BASE + (size_t)slot * SEAT_SIZE, SEAT_OWNER) != -1; ++slot) {
+        }
+    if (slot >= 4) return -1;
+    seat(slot, local ? 0 : 1, local ? 0 : 255);
+    put_u32(seat_party + SEAT_BASE + (size_t)slot * SEAT_SIZE + SLOT_CHARACTER_ID,
+            sender_seat == HOST_MEMBER_SLOT ? HOST_CHARACTER_ID : GUEST_CHARACTER_ID);
+    return slot;
+}
+
+/* This machine's campaign: its own character in its save's records, the rest of its progression as the fixture fills it. */
+enum { PLAY_DATA_RECORDS = 0xa480, RECORD_SIZE = 0x21d0, RECORDS = 0x4a };
+static uint8_t *progression_before;
+
+static void use_machine_save(int host_machine) {
+    fake_campaign();
+    put_u32(fake_play_data + PLAY_DATA_RECORDS + SLOT_CHARACTER_ID, host_machine ? HOST_CHARACTER_ID : GUEST_CHARACTER_ID);
+    if (!progression_before) progression_before = malloc(BOSS_BATTLE_PLAY_DATA_BYTES);
+    memcpy(progression_before, fake_play_data, BOSS_BATTLE_PLAY_DATA_BYTES);
+}
+
+/* The game's lookup of a party slot's character in this machine's save (0x893c0): its record index, -1 when not there. */
+static int save_record_of_slot(int slot) {
+    const uint32_t id = (uint32_t)i32_at(seat_party + SEAT_BASE + (size_t)slot * SEAT_SIZE, SLOT_CHARACTER_ID);
+    for (int i = 0; i < RECORDS; ++i)
+        if ((uint32_t)i32_at(fake_play_data + PLAY_DATA_RECORDS + (size_t)i * RECORD_SIZE, SLOT_CHARACTER_ID) == id) return i;
+    return -1;
+}
+
+/* Town doors request their scene with no operating slot, so the game's town menus (Morgan's item and repair windows
+ * among them) operate party slot 0 and look its character up in this machine's save. */
+static void check_town_operator(const char *phase, int host_machine) {
+    if (host_machine) {
+        PHASE_CHECK(phase, "Host town interaction resolves party slot 0 to a character missing from the Host's save "
+                           "(the item window's table is null: 0x8b87b)",
+                    save_record_of_slot(HOST_MEMBER_SLOT) == 0);
+        PHASE_CHECK(phase, "Morgan's repair would target the Guest's character on the Host",
+                    i32_at(seat_party + SEAT_BASE + HOST_MEMBER_SLOT * SEAT_SIZE, SLOT_CHARACTER_ID) == HOST_CHARACTER_ID);
+    } else {
+        PHASE_CHECK(phase, "the Guest's own character is not in its member slot or not in its save",
+                    i32_at(seat_party + SEAT_BASE + GUEST_MEMBER_SLOT * SEAT_SIZE, SEAT_OWNER) == 0 &&
+                        save_record_of_slot(GUEST_MEMBER_SLOT) == 0);
+    }
+    PHASE_CHECK(phase, "party slot 0 is not the Host's character, slot 1 not the Guest's",
+                i32_at(seat_party + SEAT_BASE + HOST_MEMBER_SLOT * SEAT_SIZE, SLOT_CHARACTER_ID) == HOST_CHARACTER_ID &&
+                    i32_at(seat_party + SEAT_BASE + GUEST_MEMBER_SLOT * SEAT_SIZE, SLOT_CHARACTER_ID) == GUEST_CHARACTER_ID);
+    PHASE_CHECK(phase, "the handoff changed this machine's campaign progression (its repair tutorial among it)",
+                !memcmp(progression_before, fake_play_data, BOSS_BATTLE_PLAY_DATA_BYTES));
+}
+
+/* The Early Story step the game's lead selector gives this machine's lead record, over a save of its own. */
+static uint8_t story_save[0xa8 + EARLY_STORY_RECORD_SIZE];
+
+static void story_save_begin(int own_step) {
+    for (size_t i = 0; i < sizeof(story_save); ++i) story_save[i] = (uint8_t)(i * 7 + 3);
+    story_save[0xa8 + EARLY_STORY_RECORD_STEP] = (uint8_t)own_step;
+}
+
+static int story_step_seen_by_game(void) {
+    GuestRegs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.rax = (uint64_t)(uintptr_t)story_save;
+    early_story_selector_hook(&regs);
+    return ((const uint8_t *)(uintptr_t)(regs.skip ? regs.rax : (uint64_t)(uintptr_t)(story_save + 0xa8)))[EARLY_STORY_RECORD_STEP];
+}
+
+static int story_step_saved(void) {
+    return story_save[0xa8 + EARLY_STORY_RECORD_STEP];
+}
+
+/* The handed-back room, on the guest machine: the host's story session reaches a guest whose story is still in the opening
+ * with the owner's live step, and the game follows it while the guest's own save keeps its own step. */
+static void check_guest_follows_story(const char *phase, int own_step, int host_step, int host_repairs_to) {
+    story_save_begin(own_step);
+    early_story_note_own_step(own_step);
+    early_story_session_room_handoff(0, 0);
+    uint8_t before[sizeof(story_save)];
+    memcpy(before, story_save, sizeof(before));
+    story_step_seen_by_game();
+    const int opening = own_step < EARLY_STORY_ORIGINAL_STEP;
+    uint8_t state[EARLY_STORY_STATE_SIZE];
+    early_story_state_encode(host_step, state);
+    const int joined = early_story_session_internal_update(early_story_state_decode(state, sizeof(state)));
+    PHASE_CHECK(phase, opening ? "the host's story session did not reach a guest still in the opening"
+                               : "a guest past the opening was put into the host's story session",
+                joined == opening);
+    PHASE_CHECK(phase, "the guest game does not see the host's step", story_step_seen_by_game() == (opening ? host_step : own_step));
+    early_story_state_encode(host_repairs_to, state);
+    early_story_session_internal_update(early_story_state_decode(state, sizeof(state)));
+    PHASE_CHECK(phase, opening ? "the guest stays on the objective the host has repaired past"
+                               : "a guest past the opening was moved to the host's step",
+                story_step_seen_by_game() == (opening ? host_repairs_to : own_step));
+    PHASE_CHECK(phase, "the guest's own save was written", !memcmp(before, story_save, sizeof(before)));
+    early_story_session_reset();
+    PHASE_CHECK(phase, "the guest does not get its own story back", story_step_seen_by_game() == own_step);
+    PHASE_CHECK(phase, "the guest's own step was not restored", story_step_saved() == own_step);
+}
+
+/* The host machine: its handed-back room becomes the story session a host of its step would have created. */
+static void check_host_resumes_story(const char *phase, int own_step, int resumes) {
+    early_story_note_own_step(own_step);
+    PHASE_CHECK(phase, resumes ? "the host's handed-back room did not resume as a story session"
+                               : "a host past the opening resumed the opening's story session",
+                early_story_session_resume_story_room(own_step) == resumes);
+    PHASE_CHECK(phase, "the resumed room is not published with the host's step",
+                !resumes || early_story_room_attr_value(own_step) == own_step + 1);
+    PHASE_CHECK(phase, "the room resumed twice", !early_story_session_resume_story_room(own_step));
+}
+
+/* The host's Inn after the handoff: it does not seat itself again, and its way out waits until the guest's party, sent by
+ * the guest and seated by the host's game server, is seated with it. */
+static void host_waits_for_guest_seat(const char *phase, int seat_first) {
+    const int sends = party_sends;
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    inn_press(-1);
+    result_frame();
+    PHASE_CHECK(phase, "the host seated itself in the Inn (the town would seat it twice)", party_sends == sends);
+    if (!seat_first)
+        PHASE_CHECK(phase, "Early Story handoff attempted travel with 1 of 2 native party participants", !host_leaves_inn());
+    host_seats_request(GUEST_MEMBER_SLOT, 0);
+    result_frame();
+    PHASE_CHECK(phase, "host travel held with every member seated", host_leaves_inn());
+    PHASE_CHECK(phase, "the host's party is not the guest alone before travel", seats_with_owner(1) == 1 && seats_with_owner(0) == 0);
+}
+
+/* The host's game server answers a SETUPSCENE_START_REQUEST (0x5dd) with the start command (0x7dd) only for a slot in its
+ * connected slots, and erases any other request: that slot's scene setup then never starts. */
+static int host_answers_start_request(int slot) {
+    return (seat_party[SERVER_CONNECTED_SLOTS] >> slot) & 1;
+}
+
+static void check_travel_start(const char *phase) {
+    PHASE_CHECK(phase, "the host's game server would drop the guest's travel start request (guest slot left the session)",
+                host_answers_start_request(0) && host_answers_start_request(1));
+}
+
+/* The game's travel out of the Inn seats the host's own character on every machine and carries the guest's seat. */
+static void check_town_arrival(const char *phase, int host_machine) {
+    check_local_player_update(phase);
+    host_seats_request(HOST_MEMBER_SLOT, host_machine);
+    check_local_player_update(phase);
+    static const char *const kTown[] = {"Hydeland", "Adventurers Guild", "Town", "Morgan's Magic Item Shop", "Town"};
+    for (size_t i = 0; i < sizeof(kTown) / sizeof(*kTown); ++i) {
+        menu_scene_frame();
+        check_local_player_update(kTown[i]);
+        check_town_operator(kTown[i], host_machine);
+        check_travel_start(kTown[i]);
+    }
+    PHASE_CHECK(phase, "Hydeland add duplicated a player", seats_with_owner(0) == 1 && seats_with_owner(1) == 1);
+    PHASE_CHECK(phase, "player 0 drives more than one character", local_pad_seats(0) == 1);
+    PHASE_CHECK(phase, "not exactly two live player characters in Hydeland",
+                live_characters(-2) == 2 && live_characters(0) == 1 && live_characters(1) == 1);
+}
+
+static void test_early_story_handoff(void) {
+    /* the host: Return to tavern hands its room, with the guest in it, to Early Story as the owner's normal room */
+    lifecycle_begin();
+    early_story_on();
+    host_page_with_guest();
+    matching2_joined_boss_room(1);
+    PHASE_CHECK("ES-H", "Early Story kept a story role in a Boss Battle room", !early_story_visiting() && !early_story_story_room_guest());
+    use_machine_save(1);
+    host_return_to_tavern();
+    PHASE_CHECK("ES-H", "room left at Return to tavern", boss_battle_online_in_room() && boss_battle_online_members() == 2 &&
+                                                            room_leaves == 0 && boss_battle_online_is_host());
+    PHASE_CHECK("ES-H", "Boss Battle still wants the room", !boss_battle_online_room_wanted() && !boss_battle_online_boss_room());
+    PHASE_CHECK("ES-H", "Early Story does not keep the host's existing room in town", town_keeps_room());
+    PHASE_CHECK("ES-H", "Early Story treats the host as a guest", !early_story_story_room_guest() && !early_story_visiting());
+    host_waits_for_guest_seat("ES-H", 0);
+    check_travel_start("ES-H");
+    const int wishes = room_wishes;
+    guest_leaves_with_host();
+    PHASE_CHECK("ES-H", "Boss Battle asked the game for a room on the way out", room_wishes == wishes && room_leaves == 0);
+    check_town_arrival("ES-H", 1);
+    check_host_resumes_story("ES-H", STORY_STEP, 1);
+    lifecycle_end();
+
+    /* a host already past the opening: its story is not the one the room follows */
+    lifecycle_begin();
+    early_story_on();
+    host_page_with_guest();
+    matching2_joined_boss_room(1);
+    use_machine_save(1);
+    host_return_to_tavern();
+    check_host_resumes_story("ES-H4", 0x31, 0);
+    early_story_off();
+    lifecycle_end();
+
+    /* the guest's seat reaches the host before the host tries to leave */
+    lifecycle_begin();
+    early_story_on();
+    host_page_with_guest();
+    matching2_joined_boss_room(1);
+    use_machine_save(1);
+    host_return_to_tavern();
+    host_waits_for_guest_seat("ES-H2", 1);
+    check_travel_start("ES-H2");
+    guest_leaves_with_host();
+    check_town_arrival("ES-H2", 1);
+    early_story_off();
+
+    /* the other arrival order at the host's game server: the host's own request first, then the guest's */
+    lifecycle_end();
+    lifecycle_begin();
+    early_story_on();
+    host_page_with_guest();
+    matching2_joined_boss_room(1);
+    use_machine_save(1);
+    host_return_to_tavern();
+    host_seats_request(HOST_MEMBER_SLOT, 1);
+    host_seats_request(GUEST_MEMBER_SLOT, 0);
+    check_town_operator("ES-H3", 1);
+    check_local_player_update("ES-H3");
+    check_travel_start("ES-H3");
+    early_story_off();
+
+    /* the same room taken back by a new Boss Battle visit: Early Story lets go of it again */
+    lifecycle_end();
+    lifecycle_begin();
+    early_story_on();
+    host_page_with_guest();
+    matching2_joined_boss_room(1);
+    host_return_to_tavern();
+    PHASE_CHECK("ES-R", "the room did not resume as a story session before the next visit",
+                early_story_session_resume_story_room(STORY_STEP));
+    host_enters_boss_battle();
+    publish_room_tag();
+    PHASE_CHECK("ES-R", "the reclaimed room is not a Boss Battle room again",
+                boss_battle_online_boss_room() && boss_battle_online_room_wanted() && !early_story_visiting());
+    PHASE_CHECK("ES-R", "the Boss room resumed as a story session", !early_story_session_resume_story_room(STORY_STEP));
+    early_story_off();
+    lifecycle_end();
+
+    /* the real order: the host's Return to tavern, then what its Matching2 pump sends (the Boss state goes out before the
+     * room tag), then the guest's frames in the Inn, and only then the host's travel */
+    lifecycle_end();
+    lifecycle_begin();
+    early_story_on();
+    host_page_with_guest();
+    matching2_joined_boss_room(1);
+    host_return_to_tavern();
+    uint8_t host_end[BOSS_BATTLE_STATE_SIZE] = {0};
+    const int host_sent = boss_battle_online_publish(host_end);
+    BossBattleHostState host_end_state = {BOSS_BATTLE_PHASE_NONE, 0, -1, 0};
+    PHASE_CHECK("ES-A", "the host did not send its Boss Battle end before the room went neutral",
+                host_sent && boss_battle_state_decode(host_end, sizeof(host_end), &host_end_state) &&
+                    host_end_state.phase == BOSS_BATTLE_PHASE_ENDED);
+    early_story_off();
+    lifecycle_end();
+
+    lifecycle_begin();
+    early_story_on();
+    guest_lifecycle(0, NEW_INN_MENU);
+    matching2_joined_boss_room(0);
+    use_machine_save(0);
+    early_story_note_host_step(HOST_STORY_STEP);
+    PHASE_CHECK("ES-G", "Early Story followed the host's story inside a Boss Battle room", !early_story_visiting());
+    if (host_sent) boss_battle_online_internal_update(host_end, sizeof(host_end)); /* Matching2's room.internal */
+    menu_scene_frame();
+    const GuestRegs closing = live_page_frame(-1);
+    if (closing.r15 & 1) put_u32(fake_window + 0xa4, 2);
+    menu_scene_frame();
+    early_story_note_host_step(HOST_STORY_STEP); /* the game reads the host's record again in the shared room */
+    PHASE_CHECK("ES-G", "Guest received Boss tag 0 but remained in Boss visitor state before Host travel",
+                !boss_battle_online_visitor() && !boss_battle_online_selected());
+    PHASE_CHECK("ES-G", "Guest Boss page still up before Host travel", (closing.r15 & 1) && !boss_battle_screen_shown());
+    PHASE_CHECK("ES-G", "Guest Boss characters alive before Host travel", live_characters(-2) == 0);
+    PHASE_CHECK("ES-G", "Guest Boss seats not reset before Host travel",
+                party_resets == 1 && seats_with_owner(0) == 0 && seats_with_owner(1) == 0);
+    PHASE_CHECK("ES-G", "Early Story is not the host's guest before Host travel",
+                early_story_visiting() && !early_story_host_room_wanted());
+    PHASE_CHECK("ES-G", "guest left the host's room before Host travel",
+                boss_battle_online_in_room() && boss_battle_online_members() == 2 && !boss_battle_online_is_host() &&
+                    room_leaves == 0);
+    PHASE_CHECK("ES-G", "Boss Battle still wants a room on the guest", !boss_battle_online_room_wanted());
+
+    /* the guest's Inn menu runs again: it sends its own party once and the host's game server seats it */
+    const int guest_sends = party_sends;
+    fake_inn[INN_ACT] = 0x5b;
+    fake_inn[INN_STEP] = 0;
+    inn_press(-1);
+    result_frame();
+    result_frame();
+    PHASE_CHECK("ES-G", "Guest did not send its party to the host's game server before travel", party_sends == guest_sends + 1);
+    host_seats_request(GUEST_MEMBER_SLOT, 1);
+    result_frame();
+    check_local_player_update("ES-G");
+    PHASE_CHECK("ES-G", "Guest is not seated with the host before travel",
+                local_seat_of(0) >= 0 && live_characters(0) == 1 && live_characters(1) == 0 && party_sends == guest_sends + 1);
+
+    /* the host's travel: the guest's Inn goes with the scene; nothing of Boss Battle runs during it */
+    const int guest_wishes = room_wishes;
+    guest_leaves_with_host();
+    menu_scene_frame();
+    PHASE_CHECK("ES-G", "Boss Battle tore the guest down during the Host's travel", party_resets == 1 && seats_detached == 2);
+    PHASE_CHECK("ES-G", "the guest asked the game for a room during the travel", room_wishes == guest_wishes && room_leaves == 0);
+    PHASE_CHECK("ES-G", "the guest is not ready to synchronize with the host",
+                boss_battle_online_in_room() && boss_battle_online_members() == 2 && early_story_visiting() &&
+                    !boss_battle_online_visitor() && !boss_battle_session_active() && live_characters(0) == 1 &&
+                    live_characters(1) == 0);
+    check_town_arrival("ES-G", 0);
+    check_guest_follows_story("ES-G", 3, 3, 4);
+    check_guest_follows_story("ES-G2", 0x31, 3, 4);
+
+    /* the host's next Boss Battle visit in that room: the guest is its visitor again, Early Story lets go */
+    host_announces(BOSS_BATTLE_PHASE_WAITING, -1, 0, boss_battle_online_host_state().sequence + 1);
+    PHASE_CHECK("ES-G", "the guest is not the host's visitor again", boss_battle_online_visitor());
+    PHASE_CHECK("ES-G", "Early Story still follows the host's story in a Boss Battle room", !early_story_visiting());
+    early_story_off();
+    lifecycle_end();
+
+    /* the fallback: no end reached the guest and its scene is already leaving the Inn for town */
+    lifecycle_begin();
+    early_story_on();
+    guest_lifecycle(0, NEW_INN_MENU);
+    matching2_joined_boss_room(0);
+    boss_battle_set_scene((uint64_t)(uintptr_t)leave_scene_vtable, NULL);
+    const BossBattleScene leaving = {kInnScene.act, kInnScene.step, kInnScene.round, kInnScene.stage, 0, 0};
+    set_game_scene(leaving);
+    GuestRegs frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.r15 = (uint64_t)(uintptr_t)game_scene;
+    boss_battle_scene_hook(&frame);
+    PHASE_CHECK("ES-F", "the scene left the Inn while the guest was still a Boss visitor",
+                !boss_battle_online_visitor() && party_resets == 1 && live_characters(-2) == 0 && early_story_visiting() == 0);
+    const GuestRegs late = live_page_frame(-1);
+    PHASE_CHECK("ES-F", "the guest page did not close after the fallback", (late.r15 & 1) != 0);
+    boss_battle_set_scene(0, NULL);
+    early_story_off();
+    lifecycle_end();
+}
+#endif
+
 int main(void) {
     char user_dir[1100];
+#ifdef BOSS_BATTLE_EARLY_STORY_HANDOFF
+    snprintf(user_dir, sizeof(user_dir), "%s/build/boss-battle-early-story-handoff-tests", DCP_SOURCE_DIR);
+#elif defined(BOSS_BATTLE_HANDOFF)
+    snprintf(user_dir, sizeof(user_dir), "%s/build/boss-battle-handoff-tests", DCP_SOURCE_DIR);
+#elif defined(BOSS_BATTLE_VISITOR_LIFECYCLE)
+    snprintf(user_dir, sizeof(user_dir), "%s/build/boss-battle-visitor-lifecycle-tests", DCP_SOURCE_DIR);
+#else
     snprintf(user_dir, sizeof(user_dir), "%s/build/boss-battle-tests", DCP_SOURCE_DIR);
+#endif
     char record_file[1200];
     snprintf(record_file, sizeof(record_file), "%s/boss_battle.dat", user_dir);
 #ifdef _WIN32
@@ -4846,6 +7479,36 @@ int main(void) {
 #endif
     remove(record_file);
     boss_battle_record_configure(user_dir);
+#ifdef BOSS_BATTLE_EARLY_STORY_HANDOFF
+    test_early_story_handoff();
+    remove(record_file);
+    if (failures) {
+        printf("%d Boss Battle Early Story handoff check(s) failed\n", failures);
+        return 1;
+    }
+    puts("Boss Battle Early Story handoff tests passed");
+    return 0;
+#endif
+#ifdef BOSS_BATTLE_HANDOFF
+    test_visitor_handoff();
+    remove(record_file);
+    if (failures) {
+        printf("%d Boss Battle handoff check(s) failed\n", failures);
+        return 1;
+    }
+    puts("Boss Battle handoff tests passed");
+    return 0;
+#endif
+#ifdef BOSS_BATTLE_VISITOR_LIFECYCLE
+    test_visitor_lifecycle();
+    remove(record_file);
+    if (failures) {
+        printf("%d Boss Battle visitor lifecycle check(s) failed\n", failures);
+        return 1;
+    }
+    puts("Boss Battle visitor lifecycle tests passed");
+    return 0;
+#endif
     test_encounters();
     test_regional_inn_layouts();
     test_language_independence();
@@ -4881,6 +7544,9 @@ int main(void) {
     test_screen_entries();
     test_screen_statistics();
     test_screen_hooks();
+    test_screen_shortcut_hooks();
+    test_visitor_lifecycle();
+    test_visitor_handoff();
     test_direct_start();
     test_start_black_hold();
     test_start_reveal();
@@ -4911,6 +7577,7 @@ int main(void) {
     test_native_arena_fade_in();
     test_us_image();
     test_real_images();
+    test_guest_follows_host_start();
     remove(record_file);
     if (failures) {
         printf("%d Boss Battle check(s) failed\n", failures);

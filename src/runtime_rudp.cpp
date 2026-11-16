@@ -12,8 +12,12 @@
 #include <thread>
 #include <vector>
 
+#include "boss_battle_online.h"
+#include "early_story_session.h"
 #include "net/upnp.h"
 #include "runtime_online.h"
+
+extern "C" uintptr_t dcp_rudp_image_base = 0; // DEBUG_SAULO
 
 #define DCP_SYSV __attribute__((sysv_abi))
 
@@ -40,7 +44,41 @@ struct Context {
     int link = -1;
     bool initiated = false, connected = false, terminated = false;
     uint64_t initiated_ms = 0;
+    int traced_in = 0, traced_out = 0; // DEBUG_SAULO
 };
+
+// DEBUG_SAULO: the first native messages of a session, and who ends it.
+const char* SessionMode() {
+    if (boss_battle_online_boss_room()) return "boss";
+    return early_story_visiting() ? "early" : "other";
+}
+
+void TraceMessage(int ctx, int& traced, const char* direction, const void* data, size_t size) {
+    if (traced >= 3) return;
+    ++traced;
+    char hex[3 * 256 + 1] = {0};
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < std::min<size_t>(size, 256); ++i) std::snprintf(hex + 3 * i, 4, "%02x ", bytes[i]);
+    std::printf("DEBUG_SAULO SESSION mode=%s role=%s ctx=%d %s_size=%zu type=%d bytes=%s\n", SessionMode(),
+                boss_battle_online_is_guest() ? "guest" : "host", ctx, direction, size, size > 0xe ? bytes[0xe] : -1,
+                hex);
+}
+
+void TraceCallers(int ctx, const uintptr_t* frame) {
+    char chain[16 * 12 + 1] = {0};
+    size_t used = 0;
+    const uintptr_t base = dcp_rudp_image_base;
+    for (int depth = 0; depth < 12 && frame && base; ++depth) {
+        const uintptr_t ret = frame[1];
+        if (ret < base || ret >= base + 0x4000000) break;
+        used += std::snprintf(chain + used, sizeof(chain) - used, "+0x%llx ", (unsigned long long)(ret - base));
+        const uintptr_t* next = reinterpret_cast<const uintptr_t*>(frame[0]);
+        if (next <= frame || next > frame + 0x40000) break;
+        frame = next;
+    }
+    std::printf("DEBUG_SAULO SESSION accept=0 reason=the game terminated context %d mode=%s role=%s callers=%s\n", ctx,
+                SessionMode(), boss_battle_online_is_guest() ? "guest" : "host", chain);
+}
 
 struct PollEntry {
     int32_t ctx;
@@ -260,6 +298,7 @@ DCP_SYSV int32_t rudp_read(int32_t ctx, void* buffer, uint64_t size, uint8_t fla
     if (message.size() > size) std::printf("Rudp: context %d: a %zu-byte message was cut to %llu bytes\n", ctx, message.size(), (unsigned long long)size);
     const size_t n = std::min<size_t>(message.size(), size);
     if (n && buffer) std::memcpy(buffer, message.data(), n);
+    TraceMessage(ctx, c.traced_in, "rx", message.data(), message.size());
     return int32_t(n);
 }
 
@@ -273,10 +312,12 @@ DCP_SYSV int32_t rudp_write(int32_t ctx, const void* buffer, uint64_t size, uint
     const net::LinkState state = g_peer->state(c.link);
     if (state == net::LinkState::kClosed) return kRudpClosed;
     if (state != net::LinkState::kConnected || !g_peer->send(c.link, buffer, size_t(size))) return kRudpWouldBlock;
+    TraceMessage(ctx, c.traced_out, "tx", buffer, size_t(size));
     return int32_t(size);
 }
 
 DCP_SYSV int32_t rudp_terminate(int32_t ctx) {
+    TraceCallers(ctx, static_cast<const uintptr_t*>(__builtin_frame_address(0)));
     std::lock_guard<std::mutex> lock(g_mutex);
     auto it = g_contexts.find(ctx);
     if (it == g_contexts.end()) return kRudpInvalid;

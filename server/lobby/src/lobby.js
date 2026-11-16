@@ -62,6 +62,10 @@ export const FLAG_CLOSED = 0x40000000;
 export const FLAG_FULL = 0x20000000;
 export const FLAG_HIDDEN = 0x10000000;
 export const STORY_SESSION_ATTR = 0x7f01;
+// A Boss Battle room: 1 taking players, 2 in a fight. Only clients that declared boss_battle_session host or join one,
+// whatever their Boss Battle setting; a search or join from the Boss Battle page (boss_battle) finds no other room.
+export const BOSS_BATTLE_ATTR = 0x7f03;
+export const BOSS_BATTLE_OPEN = 1;
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const DAY_MS = 24 * 3600 * 1000;
@@ -186,6 +190,9 @@ function isStorySession(ints) {
 }
 
 const roomIsStory = (room) => isStorySession(JSON.parse(room.ints));
+
+const bossBattleOf = (ints) => ints.find(([id]) => id === BOSS_BATTLE_ATTR)?.[1] ?? 0;
+const roomBossBattle = (room) => bossBattleOf(JSON.parse(room.ints));
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
@@ -1119,7 +1126,8 @@ const HANDLERS = {
     const version = cleanText(msg.version ?? '', LIMITS.versionChars);
     const platform = cleanText(msg.platform ?? '', LIMITS.platformChars);
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
-      version, platform, relay: msg.relay === true, story_session: msg.story_session === true });
+      version, platform, relay: msg.relay === true, story_session: msg.story_session === true,
+      boss_battle_session: msg.boss_battle_session === true });
     if (att.relay) this.relays.negotiated();
     if (msg.lobby === true && presence && LOBBY_NAME.test(name)) this.showInLobby(att, now);
     this.index = null;
@@ -1128,7 +1136,7 @@ const HANDLERS = {
     else if (presence) this.diagnose('hello_reconnect_deduped');
     this.diagnose('hello_accepted');
     return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now,
-      capabilities: { ...CAPABILITIES, story_session: true } };
+      capabilities: { ...CAPABILITIES, story_session: true, boss_battle_session: true } };
   },
 
   worlds(att) {
@@ -1175,6 +1183,7 @@ const HANDLERS = {
       if (!att.story_session) fail('bad_request', 'story_session');
       flags = (flags | FLAG_HIDDEN) >>> 0;
     }
+    if (bossBattleOf(ints) > 0 && !att.boss_battle_session) fail('bad_request', 'boss_battle_session');
     const binInt = merge([], binAttrs(msg.bin_int), LIMITS.binAttrsPerArray);
     const binExt = merge([], binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const memberBin = binAttrs(msg.member_bin);
@@ -1228,6 +1237,11 @@ const HANDLERS = {
         });
       });
     }
+    const bossSearch = msg.boss_battle === true;
+    rooms = rooms.filter((room) => {
+      const boss = roomBossBattle(room);
+      return bossSearch ? boss === BOSS_BATTLE_OPEN : boss <= 0;
+    });
     const open = [];
     let incompatible = 0;
     for (const room of rooms) {
@@ -1259,6 +1273,15 @@ const HANDLERS = {
       const owner = this.memberRow(room.id, room.owner);
       fail('incompatible', '', { online_protocol: room.online_protocol, story_session_required: true, ...clientOf(owner) });
     }
+    const boss = roomBossBattle(room);
+    const bossJoin = msg.boss_battle === true;
+    if ((boss > 0 && !att.boss_battle_session) || (boss <= 0 && bossJoin)) {
+      this.countReject('boss_battle', att.account);
+      const owner = this.memberRow(room.id, room.owner);
+      fail('incompatible', '', { online_protocol: room.online_protocol, ...(boss > 0 ? { boss_battle_required: true }
+        : { boss_battle_only: true }), ...clientOf(owner) });
+    }
+    if (boss > BOSS_BATTLE_OPEN) fail('closed');
     const members = this.memberRows(room.id);
     if (members.length >= room.slots) fail('full');
     if (room.flags & FLAG_CLOSED) fail('closed');
@@ -1354,6 +1377,7 @@ const HANDLERS = {
     this.requireOwner(att, room);
     const ints = merge(JSON.parse(room.ints), intAttrs(msg.ints), LIMITS.intAttrsPerRoom);
     if (!att.story_session && isStorySession(ints)) fail('bad_request', 'story_session');
+    if (!att.boss_battle_session && bossBattleOf(ints) > 0) fail('bad_request', 'boss_battle_session');
     const binExt = merge(JSON.parse(room.bin_ext), binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const intsText = JSON.stringify(ints);
     const binExtText = JSON.stringify(binExt);

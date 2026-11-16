@@ -53,6 +53,14 @@ void early_story_session_owner_changed(int is_owner);
 int early_story_story_room_guest(void);
 /* Leave, kick, disconnect, room closed, failed join, host gone: the next story read sees the real record. */
 void early_story_session_reset(void);
+/* A room another feature hands over or takes back while everyone stays in it: Matching2's join rule applied in place
+ * (a Boss Battle room is no story session; any other room is a normal room for its owner and members). */
+void early_story_session_room_handoff(int is_owner, int boss_room);
+/* The owner of such a room, once it can host a story session (the access latch, a step before 45): the room becomes the
+ * canonical story session it would have been had it been created so. 1 when it did; the caller then publishes the room's
+ * story attribute and live step. A guest of such a room joins the session when the owner's live state arrives, if its own
+ * story is still in the opening; a story past it is left alone. */
+int early_story_session_resume_story_room(int own_step);
 
 /* The lead character's persistent step as the selector last saw it; the observer hears each change. */
 void early_story_note_own_step(int step);

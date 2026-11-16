@@ -54,7 +54,7 @@ const lastDelivered = (client) => parseRelayFrame(client.binary.at(-1));
 test('hello advertises the relay and its largest payload; a client that did not ask still gets a normal answer', () => {
   const e = env();
   const modern = player(e);
-  assert.deepEqual(modern.helloReply.capabilities, { ...CAPABILITIES, story_session: true });
+  assert.deepEqual(modern.helloReply.capabilities, { ...CAPABILITIES, story_session: true, boss_battle_session: true });
   assert.equal(modern.helloReply.capabilities.relay_max_payload, RELAY.maxPayload);
   const legacy = player(e, { relay: false });
   assert.equal(legacy.helloReply.code, 'ok');

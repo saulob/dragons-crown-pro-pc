@@ -11,6 +11,7 @@
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
 #include "exit_game_hook.h"
+#include "network_access.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -509,6 +510,7 @@ static void sample(int slot, PadData *d) {
     if (slot==0) sample_player1_scripts(d);
     /* Hydeland's Network Menu shortcut keeps player 1's Triangle for itself while it is armed. */
     if (slot==0 && early_story_shortcut_pad_filter((d->buttons & BTN_TRIANGLE)!=0)) d->buttons&=~BTN_TRIANGLE;
+    if (slot==0 && network_menu_pad_hold(d->buttons!=0)) d->buttons=0;
     if (s->hold_after_capture) {
         if (d->buttons) d->buttons=0;
         else s->hold_after_capture=0;

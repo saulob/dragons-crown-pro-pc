@@ -79,10 +79,13 @@ set(DCP_RUNTIME_SOURCES
     src/boss_battle.c
     src/boss_battle_campaign.c
     src/boss_battle_hook.c
+    src/boss_battle_online.c
     src/boss_battle_record.cpp
     src/boss_battle_text.c
     src/early_story_online.c
     src/early_story_session.c
+    src/network_access.c src/network_hint.c
+    src/online_prompt.c
     src/endgame_unlocks.c
     src/hydeland_town.c
     src/exit_game_hook.c
@@ -193,7 +196,7 @@ target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
 # The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
 # DCP_TEST_LOBBY names one. Not part of the default build.
 add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp
-    src/early_story_session.c launcher/online_view.cpp)
+    src/early_story_session.c src/boss_battle_online.c launcher/online_view.cpp)
 target_include_directories(dcp-online-hle-tests PRIVATE launcher)
 target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
 set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -219,11 +222,42 @@ target_compile_definitions(dcp-endgame-unlocks-tests PRIVATE DCP_SOURCE_DIR="${C
 target_compile_options(dcp-endgame-unlocks-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c src/boss_battle_campaign.c
     src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/latin_glyphs.c
-    src/guest_hook.c src/hydeland_town.c src/inn_layout.c)
+    src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
+    src/network_access.c src/network_hint.c src/online_prompt.c)
 set_target_properties(dcp-boss-battle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-boss-battle-tests PRIVATE src launcher)
 target_compile_definitions(dcp-boss-battle-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-boss-battle-tests PRIVATE -Wall -Wextra -Werror)
+# The Boss Battle visitor lifecycle alone, on the same fixture: own page, Network Menu, join, Inn rebuild, page back,
+# guest seat, host 2 of 2, first start followed (tools/test.ps1).
+add_executable(dcp-boss-battle-visitor-lifecycle-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c
+    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c
+    src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
+    src/network_access.c src/network_hint.c src/online_prompt.c)
+set_target_properties(dcp-boss-battle-visitor-lifecycle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-boss-battle-visitor-lifecycle-tests PRIVATE src launcher)
+target_compile_definitions(dcp-boss-battle-visitor-lifecycle-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    BOSS_BATTLE_VISITOR_LIFECYCLE)
+target_compile_options(dcp-boss-battle-visitor-lifecycle-tests PRIVATE -Wall -Wextra -Werror)
+# The handoff from a Boss Battle visit back to normal online play on the same fixture: page closed, room kept, seats.
+add_executable(dcp-boss-battle-handoff-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c
+    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c
+    src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
+    src/network_access.c src/network_hint.c src/online_prompt.c)
+set_target_properties(dcp-boss-battle-handoff-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-boss-battle-handoff-tests PRIVATE src launcher)
+target_compile_definitions(dcp-boss-battle-handoff-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}" BOSS_BATTLE_HANDOFF)
+target_compile_options(dcp-boss-battle-handoff-tests PRIVATE -Wall -Wextra -Werror)
+# The same handoff with the real Early Story session and room-wish code: who keeps the shared room after the visit.
+add_executable(dcp-boss-battle-early-story-handoff-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c
+    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c
+    src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
+    src/network_access.c src/network_hint.c src/online_prompt.c src/early_story_online.c src/early_story_session.c)
+set_target_properties(dcp-boss-battle-early-story-handoff-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-boss-battle-early-story-handoff-tests PRIVATE src launcher)
+target_compile_definitions(dcp-boss-battle-early-story-handoff-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    BOSS_BATTLE_EARLY_STORY_HANDOFF)
+target_compile_options(dcp-boss-battle-early-story-handoff-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-text-tests EXCLUDE_FROM_ALL tests/boss_battle_text_tests.c src/boss_battle_text.c
     src/exit_game_text.c src/cyrillic_glyphs.c src/latin_glyphs.c)
 target_include_directories(dcp-boss-battle-text-tests PRIVATE src)
@@ -243,10 +277,21 @@ target_include_directories(dcp-default-message-tests PRIVATE src)
 target_compile_definitions(dcp-default-message-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-default-message-tests PRIVATE -Wall -Wextra -Werror)
 
+# Focused tests of Boss Battle Online: the session rules, room isolation, host authority and the Inn hooks on fakes
+# (tools/test.ps1); not part of the default build.
+add_executable(dcp-boss-battle-online-tests EXCLUDE_FROM_ALL tests/boss_battle_online_tests.c src/boss_battle_online.c
+    src/boss_battle.c src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c
+    src/cyrillic_glyphs.c src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/network_access.c src/network_hint.c
+    src/online_prompt.c src/early_story_online.c src/early_story_session.c)
+set_target_properties(dcp-boss-battle-online-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-boss-battle-online-tests PRIVATE src launcher)
+target_compile_definitions(dcp-boss-battle-online-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-boss-battle-online-tests PRIVATE -Wall -Wextra -Werror)
+
 # Focused tests of Early Story Online: the session rules, the hooks on synthetic images and the local boot images
 # (tools/test.ps1); not part of the default build.
 add_executable(dcp-early-story-tests EXCLUDE_FROM_ALL tests/early_story_online_tests.c src/early_story_online.c src/early_story_session.c src/guest_hook.c
-    src/hydeland_town.c)
+    src/hydeland_town.c src/network_access.c src/network_hint.c src/online_prompt.c)
 target_include_directories(dcp-early-story-tests PRIVATE src)
 target_compile_definitions(dcp-early-story-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-early-story-tests PRIVATE -Wall -Wextra -Werror)
@@ -337,7 +382,8 @@ add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.
     src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c
     src/gallery_unlock.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c src/system_type_hook.c src/ultrawide_hooks.c
     src/voice_hooks.c src/boss_battle.c src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp
-    src/boss_battle_text.c src/hydeland_town.c src/inn_layout.c src/endgame_unlocks.c)
+    src/boss_battle_text.c src/hydeland_town.c src/inn_layout.c src/endgame_unlocks.c src/boss_battle_online.c
+    src/network_access.c src/network_hint.c src/online_prompt.c src/early_story_online.c src/early_story_session.c)
 set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-build-parity-tests PRIVATE src launcher)
 target_compile_definitions(dcp-build-parity-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -352,7 +398,7 @@ endif()
 # default build.
 add_executable(dcp-feature-sites-tests EXCLUDE_FROM_ALL tests/feature_sites_tests.cpp src/cheat_hooks.cpp
     src/runtime_cheats.cpp src/guest_hook.c src/party_hook.cpp src/ultrawide_hooks.c src/voice_hooks.c
-    src/early_story_online.c src/early_story_session.c src/hydeland_town.c)
+    src/early_story_online.c src/early_story_session.c src/hydeland_town.c src/network_access.c src/network_hint.c src/online_prompt.c)
 set_target_properties(dcp-feature-sites-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-feature-sites-tests PRIVATE src launcher)
 target_compile_definitions(dcp-feature-sites-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

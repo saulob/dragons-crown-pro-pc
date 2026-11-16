@@ -199,7 +199,7 @@ void boss_battle_inn_requested(void);
 
 /* The one way to quit a fight, for F4 and the pause menu alike. Accepted only while a session is travelling,
  * initializing, fighting or resolving; before Playable it cancels without recording anything, after it records Quit. */
-typedef enum { BOSS_BATTLE_QUIT_KEY, BOSS_BATTLE_QUIT_MENU } BossBattleQuitSource;
+typedef enum { BOSS_BATTLE_QUIT_KEY, BOSS_BATTLE_QUIT_MENU, BOSS_BATTLE_QUIT_PEER_LOST } BossBattleQuitSource;
 int boss_battle_request_quit(BossBattleQuitSource source);
 /* Bare F4 from the window thread: never for a repeat, a modifier (Alt+F4 closes the game), or while a menu or a text
  * entry owns the input. */
@@ -395,10 +395,22 @@ void boss_battle_screen_statistic(int row, int cursor_row, char *out, size_t siz
 void boss_battle_screen_help(int cursor_row, char *out, size_t size);
 /* The boss the screen opens on: the last one chosen. */
 int boss_battle_menu_cursor(void);
-/* A fight's return to the Inn put the campaign back and asks for the screen once, from the Inn's menu frame; never after a
- * failed restore. */
+/* The page's highlighted row is kept as the boss (or Fight All) the next page opens on. */
+void boss_battle_screen_remember(int row);
+int boss_battle_cursor_fight_all(void);
+/* The page was replaced by the game: the next one opens on the remembered entry through the Inn's reopen. */
+void boss_battle_screen_return(void);
+/* The page asked for once, from the Inn's menu frame: after a fight's return put the campaign back (never after a failed
+ * restore), after the Network Menu's return, or on the new Inn a visitor's join rebuilt. */
+typedef enum {
+    BOSS_BATTLE_REOPEN_CAMPAIGN_RESTORE,
+    BOSS_BATTLE_REOPEN_NETWORK_MENU_RETURN,
+    BOSS_BATTLE_REOPEN_VISITOR_INN
+} BossBattleReopenReason;
+void boss_battle_arm_menu_reopen(BossBattleReopenReason reason);
 int boss_battle_menu_reopen_pending(void);
 int boss_battle_take_menu_reopen(void);
+const char *boss_battle_reopen_reason(void);
 /* The session number the reopen belongs to, for the log. */
 unsigned boss_battle_reopen_session(void);
 /* A boss confirmed on the screen: black from the confirmation until the arena is played, then one fade-in. */
@@ -431,6 +443,16 @@ typedef enum {
 BossBattleInnAction boss_battle_inn_frame(void);
 void boss_battle_request_sent(int index, const BossBattleScene *from, int party_sent);
 void boss_battle_request_failed(int index, const char *why);
+
+/* An online guest's session: the host's game server takes the party to the arena and back, so a follower never
+ * requests a scene. follow queues the host's boss (Fight All from its first boss, or the next one once this guest's
+ * checkpoint saved); follow_started marks the session that begin_queued opened for it. */
+int boss_battle_follow(int index, int fight_all);
+void boss_battle_follow_started(int index);
+int boss_battle_follower(void);
+int boss_battle_fight_all_follow_ready(int index);
+/* The host is gone: a follower's fight ends as a Quit from its own game, a guest's checkpoint ends its run. */
+void boss_battle_follow_released(const char *why);
 
 /* Clears every session state; the tests use it between cases. */
 void boss_battle_reset(void);
@@ -480,6 +502,7 @@ typedef struct {
     uint64_t list_play_se;     /* a list's menu sound by SE table index */
     uint64_t get_fader, fade;  /* the scene fader of the game manager's fader owner, and its fade */
     uint64_t list_up, list_down; /* the list's cursor moves, every list's */
+    uint64_t list_update;        /* the list's per-frame update, every list's */
     uint64_t options_body_vtable;
     uint64_t row_frame;        /* a layout's frame setter: a row's background */
     uint64_t results_level_done;               /* the results screen asking for its General results */
@@ -495,6 +518,18 @@ typedef struct {
     uint64_t pause_confirm_text;               /* the quit confirmation's message */
     uint64_t pause_result, pause_result_fn;    /* the scene's read of the pause menu's result */
     uint64_t pause_floor_reward;               /* the pause window's call that shows the labyrinth floor's reward */
+    uint64_t network_rows;                     /* the list's widget add, which the Network Menu's rows pass through */
+    uint64_t network_choice[2], network_row_at; /* the menu's two reads of the chosen row, and the row lookup they call */
+    uint64_t network_back_query;               /* the list update's call of its Back query */
+    uint64_t room_info_calls[4];               /* the room info builder's character, index, controllable and match calls */
+    uint64_t room_info_character, room_info_controllable; /* the functions of the first and third */
+    uint64_t join_state_call;                  /* the join reply's call right after it stores its join state */
+    uint64_t join_unit_call, join_unit_function; /* the join reply's read of one unit of the scene, and its function */
+    uint64_t party_slot_calls[2], party_slot_function; /* the online party pass's local slot lookups, and the lookup */
+    uint64_t add_player;                       /* the scene's "add player" message handler, which seats a player */
+    uint64_t slot_request;                     /* the host's read of the slot a CREATEPLAYER_REQUEST asks for */
+    uint64_t location_text_call;               /* the friend card's call that sets the location line's message */
+    uint64_t text_changed;                     /* marks a text object for layout again */
     uint32_t pause_result_field;               /* the window's result, as the result function reads it */
 } BossBattleSites;
 
@@ -550,6 +585,42 @@ void GUEST_HOOK_ABI boss_battle_town_return_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_town_return_rbx_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_pause_rows_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_pause_floor_reward_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_network_row_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_network_choice_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_network_back_query_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_info_character_hook(GuestRegs *regs);
+void boss_battle_set_room_info_character(uint64_t(GUEST_HOOK_ABI *lookup)(uint64_t slot));
+void GUEST_HOOK_ABI boss_battle_info_index_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_info_controllable_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_info_match_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_join_state_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_join_unit_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_party_slot_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_add_player_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_slot_request_hook(GuestRegs *regs);
+void boss_battle_set_party_slot_lookup(uint64_t(GUEST_HOOK_ABI *lookup)(uint64_t party, uint32_t player));
+/* The end of a Boss Battle visit that had a room, at image offsets: the game's full party reset (the one its scene reset
+ * ends with), its own per-seat character teardown (what its add-player handler does to a seat it replaces), and the
+ * call after its own room leave, found in the room wish. */
+typedef struct {
+    uint64_t party_reset, seat_character, remove_character, detach_seat, after_leave;
+} BossBattleHandoffSites;
+int boss_battle_locate_handoff(const uint8_t *image, uint64_t size, uint64_t room_wish_function, BossBattleHandoffSites *sites);
+typedef struct {
+    void(GUEST_HOOK_ABI *party_reset)(uint64_t party);
+    uint64_t(GUEST_HOOK_ABI *seat_character)(uint64_t slot);
+    void(GUEST_HOOK_ABI *remove_character)(uint64_t character);
+    void(GUEST_HOOK_ABI *detach_seat)(uint64_t slot, int keep);
+} BossBattleSeatTeardown;
+void boss_battle_set_seat_teardown(const BossBattleSeatTeardown *teardown);
+void GUEST_HOOK_ABI boss_battle_location_text_hook(GuestRegs *regs);
+
+/* The game's read of one unit of the scene that the join reply's unit check makes (the unit list and an index). */
+typedef struct {
+    uint64_t(GUEST_HOOK_ABI *unit)(uint64_t units, uint32_t index);
+} BossBattleJoinProbes;
+void boss_battle_set_join_probes(const BossBattleJoinProbes *probes);
+void boss_battle_set_network_row_at(uint64_t(GUEST_HOOK_ABI *row_at)(uint64_t list, int32_t index));
 void GUEST_HOOK_ABI boss_battle_options_title_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_built_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_options_update_hook(GuestRegs *regs);
@@ -575,6 +646,9 @@ typedef struct {
 void boss_battle_set_fade_functions(const BossBattleFadeFunctions *functions);
 void GUEST_HOOK_ABI boss_battle_list_up_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_list_down_hook(GuestRegs *regs);
+void GUEST_HOOK_ABI boss_battle_list_update_hook(GuestRegs *regs);
+/* The page the Network Menu was opened over is being replaced and the new one has not run its own frame yet. */
+int boss_battle_network_menu_returning(void);
 void GUEST_HOOK_ABI boss_battle_results_level_done_hook(GuestRegs *regs);
 
 /* The scene object's class and its scene request function, which the hooks use to tell a scene and to request one; set by
@@ -594,6 +668,7 @@ typedef struct {
     void(GUEST_HOOK_ABI *set_message)(uint64_t text, int message);
     void(GUEST_HOOK_ABI *row_frame)(uint64_t layout, int frame, float start);
     void(GUEST_HOOK_ABI *play_se)(uint64_t list, int se);
+    void(GUEST_HOOK_ABI *text_changed)(uint64_t text);
 } BossBattleScreenFunctions;
 void boss_battle_set_screen_functions(const BossBattleScreenFunctions *functions);
 

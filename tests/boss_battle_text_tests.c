@@ -17,7 +17,8 @@ static int failures;
 
 static const char *const kKeyNames[BOSS_BATTLE_TEXT_COUNT] = {
     "Fight All", "Fight All help", "Back to Inn help", "Attempts", "Wins",      "Deaths",           "Quits",       "Win Rate",
-    "Best Time", "Runs",           "Clears",           "Best Progress", "Quit Boss Battle", "Quit confirmation", "character"};
+    "Best Time", "Runs",           "Clears",           "Best Progress", "Quit Boss Battle", "Quit confirmation", "character",
+    "Waiting for the host", "Close Network Menu"};
 
 static const char *english_text[BOSS_BATTLE_TEXT_COUNT];
 static const char *english_boss[BOSS_BATTLE_TEXT_BOSSES];

@@ -176,7 +176,7 @@ constexpr char kUnlockGalleryHelp[] = "Unlocks all Gallery content while enabled
 constexpr char kBossBattleUnverifiedText[] = "Not available for this build yet: its executable has not been checked.";
 constexpr char kEnableBossBattleHelp[] =
     "Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fights there never change campaign "
-    "progress. Offline only.";
+    "progress. Online, only the host needs this option; guests with a compatible version join automatically.";
 constexpr char kUnlockLabyrinthHelp[] =
     "Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.";
 constexpr char kUnlockUltimateTowerHelp[] =
