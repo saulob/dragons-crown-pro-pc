@@ -111,7 +111,7 @@ VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
     }
     swap_thread = std::jthread([&](std::stop_token token) { SwapThread(token); });
     present_thread = std::jthread([&](std::stop_token token) { PresentThread(token); });
-    DcpStartupWatch::StartWatch(); // DEBUG_SAULO
+    DcpStartupWatch::StartWatch();
 }
 
 void VideoOutDriver::RunPresenter(std::function<void()> work, bool if_idle) {
@@ -121,7 +121,7 @@ void VideoOutDriver::RunPresenter(std::function<void()> work, bool if_idle) {
             return; // a redraw of the last frame is pointless while frames are queued
         }
         swap_queue.push_back(std::move(work));
-        DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.size()); // DEBUG_SAULO
+        DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.size());
     }
     swap_cv.notify_one();
 }
@@ -163,7 +163,7 @@ void VideoOutDriver::SwapThread(std::stop_token token) {
             }
             work = std::move(swap_queue.front());
             swap_queue.pop_front();
-            DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.size()); // DEBUG_SAULO
+            DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.size());
             swap_busy = true;
         }
         work();
@@ -360,7 +360,7 @@ void VideoOutDriver::Flip(const Request& req) {
     const bool present =
         DcpFramePacing::PresentsFlip(DcpSettings::Get().frame_rate.load(), flips_consumed++);
     // Update HDR status before presenting, then present the frame on the swap thread.
-    DcpStartupWatch::Mark(DcpStartupWatch::FlipTaken); // DEBUG_SAULO
+    DcpStartupWatch::Mark(DcpStartupWatch::FlipTaken);
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr, submitted = req.submitted, present] {
         if (!present) {
             presenter->RetireFrame(frame);
@@ -368,7 +368,7 @@ void VideoOutDriver::Flip(const Request& req) {
         }
         presenter->SetHDR(hdr);
         presenter->Present(frame);
-        DcpStartupWatch::Mark(DcpStartupWatch::Present); // DEBUG_SAULO
+        DcpStartupWatch::Mark(DcpStartupWatch::Present);
         if (DcpLatencyTrace::enabled) {
             TracePresent(submitted);
         }
@@ -749,9 +749,9 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
             .eop = is_eop,
             .submitted = submitted,
         });
-        DcpStartupWatch::SetGauge(DcpStartupWatch::PendingFlips, requests.size()); // DEBUG_SAULO
+        DcpStartupWatch::SetGauge(DcpStartupWatch::PendingFlips, requests.size());
     }
-    DcpStartupWatch::Mark(DcpStartupWatch::FlipPrepared); // DEBUG_SAULO
+    DcpStartupWatch::Mark(DcpStartupWatch::FlipPrepared);
 }
 
 void VideoOutDriver::PresentThread(std::stop_token token) {
@@ -782,7 +782,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         if (!requests.empty()) {
             const auto request = requests.front();
             requests.pop();
-            DcpStartupWatch::SetGauge(DcpStartupWatch::PendingFlips, requests.size()); // DEBUG_SAULO
+            DcpStartupWatch::SetGauge(DcpStartupWatch::PendingFlips, requests.size());
             return request;
         }
         return {};
@@ -790,7 +790,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
     while (!token.stop_requested()) {
         timer.Start();
-        DcpStartupWatch::Mark(DcpStartupWatch::Vblank); // DEBUG_SAULO
+        DcpStartupWatch::Mark(DcpStartupWatch::Vblank);
         const auto tick_start = std::chrono::steady_clock::now();
         if (const bool vsync_now = DcpSettings::Get().vsync; vsync_now != vsync) {
             vsync = vsync_now;

@@ -13,6 +13,7 @@
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "dcp_overlay.h"
+#include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_startup_watch.h"
 #include "dcp_graphics.h"
@@ -116,22 +117,9 @@ bool CanBlitToSwapchain(const vk::PhysicalDevice physical_device, vk::Format for
 
 static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_width,
                            s32 swapchain_height) {
-    float frame_aspect = static_cast<float>(frame_width) / frame_height;
-    float swapchain_aspect = static_cast<float>(swapchain_width) / swapchain_height;
-
-    u32 dst_width = swapchain_width;
-    u32 dst_height = swapchain_height;
-
-    if (frame_aspect > swapchain_aspect) {
-        dst_height = static_cast<s32>(swapchain_width / frame_aspect);
-    } else {
-        dst_width = static_cast<s32>(swapchain_height * frame_aspect);
-    }
-
-    const s32 offset_x = (swapchain_width - dst_width) / 2;
-    const s32 offset_y = (swapchain_height - dst_height) / 2;
-
-    return vk::Rect2D{{offset_x, offset_y}, {dst_width, dst_height}};
+    const DcpPresent::Region region =
+        DcpPresent::FitRegion({u32(frame_width), u32(frame_height)}, {u32(swapchain_width), u32(swapchain_height)});
+    return vk::Rect2D{{region.x, region.y}, {region.width, region.height}};
 }
 
 [[nodiscard]] vk::ImageBlit MakeImageBlitFit(s32 frame_width, s32 frame_height, s32 swapchain_width,
@@ -407,6 +395,10 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
                     vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
     runtime.FlushBarriers();
     expected_ratio = static_cast<float>(image_size.width) / static_cast<float>(image_size.height);
+    if (DcpPresent::g_progress.videoout_images.fetch_add(1, std::memory_order_relaxed) == 0 &&
+        DcpPresent::GamescopeSession()) {
+        std::printf("Presenter diagnostic: first VideoOut image %ux%u\n", image_size.width, image_size.height);
+    }
 
     // SMAA, FSR 1, RCAS and its strength follow the settings every frame.
     const auto& graphics = DcpSettings::Get();
@@ -620,6 +612,36 @@ void PresentUltrawideSideMask(vk::CommandBuffer cmdbuf, vk::ImageView attachment
     cmdbuf.endRendering();
 }
 
+void Presenter::ReportPresentGeometry(const Frame* frame, vk::Extent2D extent, const vk::ImageBlit& blit,
+                                      bool stretch, bool repeated) {
+    auto& progress = DcpPresent::g_progress;
+    const u64 present = progress.blitted.fetch_add(1, std::memory_order_relaxed) + 1;
+    const DcpPresent::Size source{u32(DcpSettings::Get().image_width.load()), u32(DcpSettings::Get().image_height.load())};
+    const DcpPresent::Region destination{blit.dstOffsets[0].x, blit.dstOffsets[0].y,
+                                         u32(blit.dstOffsets[1].x - blit.dstOffsets[0].x),
+                                         u32(blit.dstOffsets[1].y - blit.dstOffsets[0].y)};
+    progress.source_size = DcpPresent::Pack(source);
+    progress.destination_size = DcpPresent::Pack({destination.width, destination.height});
+    if (!DcpPresent::GamescopeSession()) {
+        return;
+    }
+    static DcpPresent::GeometryReporter reporter;
+    const DcpPresent::PresentGeometry geometry{source,
+                                               {frame->width, frame->height},
+                                               {extent.width, extent.height},
+                                               {u32(window.GetWidth()), u32(window.GetHeight())},
+                                               destination,
+                                               stretch};
+    if (reporter.Observe(present, geometry)) {
+        std::printf("Presenter diagnostic: present %llu source=%ux%u frame=%ux%u swapchain=%ux%u destination=%d,%d %ux%u "
+                    "mode=%s window_pixels=%ux%u%s\n",
+                    static_cast<unsigned long long>(present), source.width, source.height, frame->width, frame->height,
+                    extent.width, extent.height, destination.x, destination.y, destination.width, destination.height,
+                    stretch ? "stretch" : "fit", geometry.window.width, geometry.window.height,
+                    repeated ? " repeated" : "");
+    }
+}
+
 void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
     // Free the frame for reuse (a reused frame was taken out of the queue by PrepareLastFrame).
     const auto free_frame = [&] {
@@ -651,7 +673,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
     bool acquired;
     {
-        DcpStartupWatch::WaitScope wait{DcpStartupWatch::Acquire}; // DEBUG_SAULO
+        DcpStartupWatch::WaitScope wait{DcpStartupWatch::Acquire};
         acquired = swapchain.AcquireNextImage();
     }
     if (!acquired) {
@@ -731,6 +753,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                        : MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height);
         cmdbuf.blitImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
                          vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
+        ReportPresentGeometry(frame, extent, blit, stretch, is_reusing_frame);
         // The overlay and the ultrawide side mask over the frame, at display resolution: both need the swapchain
         // image as a colour attachment, so every path goes through it now.
         const bool overlay = DcpOverlay::Visible();
@@ -798,7 +821,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     bool presented;
     {
         std::scoped_lock submit_lock{Scheduler::submit_mutex};
-        DcpStartupWatch::WaitScope wait{DcpStartupWatch::QueuePresent}; // DEBUG_SAULO
+        DcpStartupWatch::WaitScope wait{DcpStartupWatch::QueuePresent};
         presented = swapchain.Present();
     }
     if (!presented && window.GetWidth() != 0 && window.GetHeight() != 0) {
@@ -868,7 +891,7 @@ Frame* Presenter::GetRenderFrame() {
     {
         std::unique_lock lock{free_mutex};
         if (free_queue.empty()) {
-            DcpStartupWatch::WaitScope wait{DcpStartupWatch::FreeFrame}; // DEBUG_SAULO
+            DcpStartupWatch::WaitScope wait{DcpStartupWatch::FreeFrame};
             free_cv.wait(lock, [this] { return !free_queue.empty(); });
         }
         LOG_DEBUG(Render_Vulkan, "Got render frame, remaining {}", free_queue.size() - 1);
@@ -890,7 +913,7 @@ Frame* Presenter::GetRenderFrame() {
 
     // Wait for the presentation to be finished so all frame resources are free
     {
-        DcpStartupWatch::WaitScope fence_wait{DcpStartupWatch::FrameFence}; // DEBUG_SAULO
+        DcpStartupWatch::WaitScope fence_wait{DcpStartupWatch::FrameFence};
         while (wait() != vk::Result::eSuccess) {
             ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
                        "Device lost during waiting for a frame");
@@ -915,17 +938,10 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
     if (width <= 0 || height <= 0) {
         return; // no surface (minimized window): keep the last frame size
     }
-    const float ratio = (float)width / (float)height;
-    const float image_ratio = expected_ratio.load(std::memory_order_relaxed);
-
-    u32 frame_width = u32(width), frame_height = u32(height);
-    if (ratio > image_ratio) {
-        frame_width = static_cast<u32>(height * image_ratio);
-    } else {
-        frame_height = static_cast<u32>(width / image_ratio);
-    }
+    const DcpPresent::Size frame = DcpPresent::GameFrameSize({u32(width), u32(height)},
+                                                             expected_ratio.load(std::memory_order_relaxed));
     // Present thread; the GPU thread reads it in GetRenderFrame: one value, never half of an update.
-    expected_frame_size.store(u64(frame_width) | u64(frame_height) << 32, std::memory_order_relaxed);
+    expected_frame_size.store(u64(frame.width) | u64(frame.height) << 32, std::memory_order_relaxed);
 }
 
 } // namespace Vulkan

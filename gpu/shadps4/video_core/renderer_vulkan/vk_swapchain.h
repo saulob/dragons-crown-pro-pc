@@ -122,6 +122,10 @@ private:
     void RefreshSemaphores();
 
     void LogImages();
+    void LogCreation();
+
+    void DescribeSurface(const vk::SurfaceCapabilitiesKHR& capabilities);
+    void ReportResult(bool presenting, vk::Result result);
 
     static DcpPresent::SwapResult AcquireResult(vk::Result result);
     static DcpPresent::SwapResult PresentResult(vk::Result result);
@@ -156,6 +160,10 @@ private:
     u32 frame_index = 0;
     DcpPresent::SwapchainHealth health;
     bool logged_kept_suboptimal = false;
+    std::string surface_summary;
+    unsigned logged_creations = 0;
+    DcpPresent::ResultReporter acquire_reporter;
+    DcpPresent::ResultReporter present_reporter;
     bool needs_hdr = false;    // The game requested HDR swapchain
     bool supports_hdr = false; // SC supports HDR output
 };

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// DEBUG_SAULO: temporary startup and stall telemetry. Logs the first advance of each stage of the frame pipeline and, when
-// presenting or the guest's GPU work stops for 3 s, how long ago every stage last advanced and what is waiting.
+// Presenter progress telemetry, active in Gamescope sessions only: the first event of each pipeline stage, a report when
+// presenting stalls while the guest keeps submitting, and a checkpoint when the title screen is reached.
 #pragma once
 
 #include <cstdint>

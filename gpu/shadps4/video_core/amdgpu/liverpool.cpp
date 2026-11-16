@@ -185,7 +185,7 @@ void Liverpool::Process(std::stop_token stoken) {
             rasterizer->DrainDrawPipe(Vulkan::DrawPipe::ReasonSubmissionEnd);
             rasterizer->WaitDeferredSignals();
         }
-        DcpStartupWatch::Mark(DcpStartupWatch::GpuSubmission); // DEBUG_SAULO
+        DcpStartupWatch::Mark(DcpStartupWatch::GpuSubmission);
         {
             std::scoped_lock lk{submit_mutex};
             if (num_submits == 0) {
@@ -1690,7 +1690,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     ++num_submits;
     work_retired = false;
     submit_cv.notify_one();
-    DcpStartupWatch::Mark(DcpStartupWatch::GuestSubmit); // DEBUG_SAULO
+    DcpStartupWatch::Mark(DcpStartupWatch::GuestSubmit);
 }
 
 void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {

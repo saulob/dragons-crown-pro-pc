@@ -8,7 +8,7 @@
 #include "exit_game_text.h"
 #include "title_layout.h"
 
-/* DEBUG_SAULO: the video core's stall telemetry counts title updates; a no-op without a video core (tests). */
+/* The video core's presenter telemetry counts title updates; a no-op without a video core (tests). */
 __attribute__((weak)) void dcpgpu_debug_title_tick(int cursor) {
     (void)cursor;
 }
@@ -215,7 +215,7 @@ void GUEST_HOOK_ABI exit_game_tick_hook(GuestRegs *regs) {
         selected = cursor == EXIT_GAME_ROW_INDEX && items == EXIT_GAME_MENU_ITEMS && widgets == EXIT_GAME_MENU_WIDGETS;
     }
     exit_game_set_selected(selected);
-    dcpgpu_debug_title_tick(cursor); /* DEBUG_SAULO */
+    dcpgpu_debug_title_tick(cursor);
 }
 
 /* Before the help text id is computed from the menu position (rax = the position): the id follows the row's action. */

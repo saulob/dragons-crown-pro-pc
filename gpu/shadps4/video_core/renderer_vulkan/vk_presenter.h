@@ -131,6 +131,8 @@ private:
     void RecreateFrame(Frame* frame, u32 width, u32 height);
 
     void SetExpectedGameSize(s32 width, s32 height);
+    void ReportPresentGeometry(const Frame* frame, vk::Extent2D extent, const vk::ImageBlit& blit, bool stretch,
+                               bool repeated);
 
     // DEBUG_SAULO: free_queue validation; the Note/Check helpers require free_mutex.
     bool IsPresentationFrame(const Frame* frame) const;

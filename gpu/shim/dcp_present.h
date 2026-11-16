@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -130,6 +131,172 @@ private:
     bool replaced_suboptimal = false; ///< this swapchain replaced a suboptimal one and stays even if suboptimal
     bool clean_acquire = false;
 };
+
+struct Size {
+    std::uint32_t width;
+    std::uint32_t height;
+    bool operator==(const Size&) const = default;
+};
+
+struct Region {
+    std::int32_t x;
+    std::int32_t y;
+    std::uint32_t width;
+    std::uint32_t height;
+    bool operator==(const Region&) const = default;
+};
+
+/// The game frame is sized from the swapchain extent, never from the window: the surface decides (Gamescope forces its
+/// own), and the frame keeps the VideoOut image's aspect ratio inside it.
+inline Size GameFrameSize(Size surface, float image_ratio) {
+    const float ratio = static_cast<float>(surface.width) / static_cast<float>(surface.height);
+    Size frame = surface;
+    if (ratio > image_ratio) {
+        frame.width = static_cast<std::uint32_t>(surface.height * image_ratio);
+    } else {
+        frame.height = static_cast<std::uint32_t>(surface.width / image_ratio);
+    }
+    return frame;
+}
+
+/// Where a frame lands inside the swapchain image, letterboxed and centred.
+inline Region FitRegion(Size frame, Size surface) {
+    const float frame_aspect = static_cast<float>(frame.width) / static_cast<float>(frame.height);
+    const float surface_aspect = static_cast<float>(surface.width) / static_cast<float>(surface.height);
+    Size dst = surface;
+    if (frame_aspect > surface_aspect) {
+        dst.height = static_cast<std::uint32_t>(static_cast<std::int32_t>(surface.width / frame_aspect));
+    } else {
+        dst.width = static_cast<std::uint32_t>(static_cast<std::int32_t>(surface.height * frame_aspect));
+    }
+    return {static_cast<std::int32_t>(surface.width - dst.width) / 2,
+            static_cast<std::int32_t>(surface.height - dst.height) / 2, dst.width, dst.height};
+}
+
+struct PresentGeometry {
+    Size source;
+    Size frame;
+    Size swapchain;
+    Size window;
+    Region destination;
+    bool stretch;
+    bool operator==(const PresentGeometry&) const = default;
+};
+
+/// Present 1, 10, 100 and 1000, then only a changed geometry (a few times at most).
+class GeometryReporter {
+public:
+    bool Observe(std::uint64_t present, const PresentGeometry& geometry) {
+        const bool milestone = present == 1 || present == 10 || present == 100 || present == 1000;
+        const bool changed = seen && !(geometry == last);
+        seen = true;
+        last = geometry;
+        return milestone || (changed && changes++ < kMaxChanges);
+    }
+
+private:
+    static constexpr unsigned kMaxChanges = 8;
+    bool seen = false;
+    unsigned changes = 0;
+    PresentGeometry last{};
+};
+
+/// A Vulkan result is reported when it is the first one or differs from the previous one, at most `max_lines` times.
+class ResultReporter {
+public:
+    bool Observe(int result) {
+        const bool report = !seen || result != last;
+        seen = true;
+        last = result;
+        return report && lines++ < max_lines;
+    }
+
+private:
+    static constexpr unsigned max_lines = 8;
+    bool seen = false;
+    int last = 0;
+    unsigned lines = 0;
+};
+
+/// One report when presenting stalls, another every 10 s while it lasts, and one when it resumes.
+class StallReporter {
+public:
+    enum class Action { None, Report, Resumed };
+    static constexpr std::int64_t kRepeatMs = 10000;
+
+    Action Update(bool stalled, std::int64_t now_ms) {
+        if (!stalled) {
+            const bool was_stalled = active;
+            active = false;
+            return was_stalled ? Action::Resumed : Action::None;
+        }
+        if (!active) {
+            active = true;
+            since_ms = last_report_ms = now_ms;
+            return Action::Report;
+        }
+        if (now_ms - last_report_ms >= kRepeatMs) {
+            last_report_ms = now_ms;
+            return Action::Report;
+        }
+        return Action::None;
+    }
+
+    std::int64_t SinceMs() const {
+        return since_ms;
+    }
+
+private:
+    bool active = false;
+    std::int64_t since_ms = 0;
+    std::int64_t last_report_ms = 0;
+};
+
+inline constexpr int kNoResult = INT32_MIN;
+
+inline const char* ResultName(int result) {
+    switch (result) {
+    case kNoResult:
+        return "none yet";
+    case 0:
+        return "VK_SUCCESS";
+    case 1000001003:
+        return "VK_SUBOPTIMAL_KHR";
+    case -1000001004:
+        return "VK_ERROR_OUT_OF_DATE_KHR";
+    case -1000000000:
+        return "VK_ERROR_SURFACE_LOST_KHR";
+    case -4:
+        return "VK_ERROR_DEVICE_LOST";
+    case -13:
+        return "VK_ERROR_UNKNOWN";
+    default:
+        return "unexpected result";
+    }
+}
+
+inline std::uint64_t Pack(Size size) {
+    return std::uint64_t(size.width) | std::uint64_t(size.height) << 32;
+}
+
+inline Size Unpack(std::uint64_t packed) {
+    return {static_cast<std::uint32_t>(packed), static_cast<std::uint32_t>(packed >> 32)};
+}
+
+/// What the presenter has done so far, read by the stall watchdog and the title checkpoint.
+struct Progress {
+    std::atomic<std::uint64_t> videoout_images{0}; ///< guest images prepared for display
+    std::atomic<std::uint64_t> blitted{0};         ///< presentation frames recorded into a swapchain image
+    std::atomic<std::uint64_t> presented{0};       ///< vkQueuePresentKHR calls that returned success or suboptimal
+    std::atomic<int> last_acquire{kNoResult};
+    std::atomic<int> last_present{kNoResult};
+    std::atomic<std::uint64_t> swapchain_size{0};
+    std::atomic<std::uint64_t> source_size{0};
+    std::atomic<std::uint64_t> destination_size{0};
+    std::atomic<bool> window_active{true};
+};
+
+inline Progress g_progress;
 
 /// Linux session facts that change presentation; values that look like paths are not shown.
 template <typename GetEnv>

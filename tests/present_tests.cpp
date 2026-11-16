@@ -352,6 +352,157 @@ void TestSwapchainUsesResultPolicy() {
     CHECK(InOrder(presenter, "void Presenter::PresentLoadingFrame() {", "        swapchain.NeedsRecreation()) {"));
 }
 
+bool InsideSurface(const DcpPresent::Region& r, DcpPresent::Size surface) {
+    return r.x >= 0 && r.y >= 0 && r.width > 0 && r.height > 0 && std::uint32_t(r.x) + r.width <= surface.width &&
+           std::uint32_t(r.y) + r.height <= surface.height;
+}
+
+// DCP-2P6VZW: Gamescope forces a 3840x2160 swapchain under a 1920x1080 logical window. The frame size and the
+// destination depend on the swapchain extent only, so the window size cannot reach them.
+void TestPresentGeometryFollowsSurface() {
+    using DcpPresent::FitRegion;
+    using DcpPresent::GameFrameSize;
+    using DcpPresent::Region;
+    using DcpPresent::Size;
+    const float wide = 16.0f / 9.0f;
+
+    const Size gamescope_surface{3840, 2160};
+    const Size frame = GameFrameSize(gamescope_surface, wide);
+    CHECK((frame == Size{3840, 2160}));
+    CHECK((FitRegion(frame, gamescope_surface) == Region{0, 0, 3840, 2160}));
+
+    const Size desktop_surface{1920, 1080};
+    const Size desktop_frame = GameFrameSize(desktop_surface, wide);
+    CHECK((desktop_frame == Size{1920, 1080}));
+    CHECK((FitRegion(desktop_frame, desktop_surface) == Region{0, 0, 1920, 1080}));
+
+    // Same picture, different surface: the whole surface is used in both cases.
+    CHECK(FitRegion(frame, gamescope_surface).width == 2 * FitRegion(desktop_frame, desktop_surface).width);
+
+    CHECK((FitRegion(GameFrameSize({1280, 800}, wide), {1280, 800}) == Region{0, 40, 1280, 720}));
+    CHECK((FitRegion(GameFrameSize({3440, 1440}, wide), {3440, 1440}) == Region{440, 0, 2560, 1440}));
+}
+
+void TestPresentGeometryAnySurface() {
+    const DcpPresent::Size surfaces[] = {{1280, 720},  {1280, 800},  {1920, 1080}, {1920, 1200}, {2560, 1440},
+                                         {3440, 1440}, {3840, 2160}, {5120, 1440}, {7680, 4320}, {1080, 1920}};
+    const float ratios[] = {16.0f / 9.0f, 4.0f / 3.0f, 21.0f / 9.0f, 1.0f};
+    for (const DcpPresent::Size surface : surfaces) {
+        for (const float ratio : ratios) {
+            const DcpPresent::Size frame = DcpPresent::GameFrameSize(surface, ratio);
+            CHECK(frame.width > 0 && frame.height > 0);
+            CHECK(frame.width <= surface.width && frame.height <= surface.height);
+            const DcpPresent::Region region = DcpPresent::FitRegion(frame, surface);
+            CHECK(InsideSurface(region, surface));
+            // Letterboxed on one axis at most, centred on the other.
+            CHECK(region.width == surface.width || region.height == surface.height);
+            CHECK(std::uint32_t(region.x) * 2 + region.width <= surface.width + 1);
+            CHECK(std::uint32_t(region.y) * 2 + region.height <= surface.height + 1);
+        }
+    }
+}
+
+void TestPresenterUsesSwapchainExtent() {
+    const std::string presenter = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp");
+    const std::size_t at = presenter.find("void Presenter::Present(Frame* frame");
+    CHECK(at != std::string::npos);
+    const std::string body = presenter.substr(at);
+    CHECK(Contains(body, "const vk::Extent2D extent = swapchain.GetExtent();\n        SetExpectedGameSize(s32(extent.width), s32(extent.height));"));
+    CHECK(Contains(body, "MakeImageBlitStretch(frame->width, frame->height, extent.width, extent.height)"));
+    CHECK(Contains(body, "MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height)"));
+    CHECK(Contains(presenter, "DcpPresent::GameFrameSize({u32(width), u32(height)}"));
+    CHECK(Contains(presenter, "DcpPresent::FitRegion({u32(frame_width), u32(frame_height)}"));
+
+    const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
+    CHECK(Contains(swapchain, "    extent = capabilities.currentExtent;\n    if (capabilities.currentExtent.width == std::numeric_limits<u32>::max()) {"));
+    CHECK(Contains(swapchain, ".imageExtent = extent,"));
+}
+
+DcpPresent::PresentGeometry GamescopeGeometry() {
+    return {{3840, 2160}, {3840, 2160}, {3840, 2160}, {1920, 1080}, {0, 0, 3840, 2160}, false};
+}
+
+void TestGeometryReporter() {
+    DcpPresent::GeometryReporter reporter;
+    const DcpPresent::PresentGeometry geometry = GamescopeGeometry();
+    unsigned lines = 0;
+    for (std::uint64_t present = 1; present <= 5000; ++present) {
+        lines += reporter.Observe(present, geometry);
+    }
+    CHECK(lines == 4); // presents 1, 10, 100 and 1000
+    DcpPresent::PresentGeometry moved = geometry;
+    moved.swapchain = {1920, 1080};
+    CHECK(reporter.Observe(5001, moved));
+    CHECK(!reporter.Observe(5002, moved));
+    unsigned flapping = 0;
+    for (std::uint64_t present = 6000; present < 6100; ++present) {
+        moved.window.width = unsigned(present);
+        flapping += reporter.Observe(present, moved);
+    }
+    CHECK(flapping <= 7); // changes are capped
+}
+
+void TestResultReporter() {
+    DcpPresent::ResultReporter reporter;
+    CHECK(reporter.Observe(0));
+    CHECK(!reporter.Observe(0));
+    CHECK(reporter.Observe(1000001003));
+    CHECK(!reporter.Observe(1000001003));
+    CHECK(reporter.Observe(0));
+    unsigned lines = 0;
+    for (int i = 0; i < 100; ++i) {
+        lines += reporter.Observe(i % 2 ? 0 : 1000001003);
+    }
+    CHECK(lines == 5); // alternating results stop at 8 lines in all
+    CHECK(std::string(DcpPresent::ResultName(0)) == "VK_SUCCESS");
+    CHECK(std::string(DcpPresent::ResultName(1000001003)) == "VK_SUBOPTIMAL_KHR");
+    CHECK(std::string(DcpPresent::ResultName(-1000001004)) == "VK_ERROR_OUT_OF_DATE_KHR");
+    CHECK(std::string(DcpPresent::ResultName(DcpPresent::kNoResult)) == "none yet");
+    CHECK(std::string(DcpPresent::ResultName(-77)) == "unexpected result");
+}
+
+void TestStallReporter() {
+    using Action = DcpPresent::StallReporter::Action;
+    DcpPresent::StallReporter reporter;
+    CHECK(reporter.Update(false, 0) == Action::None);
+    CHECK(reporter.Update(true, 3000) == Action::Report);
+    CHECK(reporter.SinceMs() == 3000);
+    for (std::int64_t now = 3250; now < 13000; now += 250) {
+        CHECK(reporter.Update(true, now) == Action::None);
+    }
+    CHECK(reporter.Update(true, 13000) == Action::Report);
+    CHECK(reporter.Update(true, 15000) == Action::None);
+    CHECK(reporter.Update(false, 16000) == Action::Resumed);
+    CHECK(reporter.Update(false, 16250) == Action::None);
+    CHECK(reporter.Update(true, 20000) == Action::Report);
+}
+
+void TestProgressPacking() {
+    const DcpPresent::Size size{3840, 2160};
+    CHECK(DcpPresent::Unpack(DcpPresent::Pack(size)) == size);
+    CHECK(DcpPresent::g_progress.last_present.load() == DcpPresent::kNoResult);
+}
+
+void TestTelemetryIsGamescopeOnlyAndShippable() {
+    const char* files[] = {"gpu/shim/dcp_startup_watch.cpp", "gpu/shim/dcp_startup_watch.h",
+                           "gpu/shim/window.cpp", "gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp",
+                           "gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.h"};
+    const std::string temporary = std::string("DEBUG_") + "SAULO";
+    for (const char* file : files) {
+        CHECK(!Contains(ReadSource(file), temporary));
+    }
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    CHECK(InOrder(window, "void WindowSDL::LogGamescopeWindow() {", "if (!DcpPresent::GamescopeSession()) {"));
+    const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
+    CHECK(Contains(swapchain, "if (!gamescope || logged_creations >= 16) {"));
+    CHECK(Contains(swapchain, "if (!gamescope || !(presenting ? present_reporter : acquire_reporter).Observe(code)) {"));
+    const std::string watch = ReadSource("gpu/shim/dcp_startup_watch.cpp");
+    CHECK(Contains(watch, "if (DcpPresent::GamescopeSession() && !started.exchange(true)) {"));
+    CHECK(Contains(watch, "cursor < 0 || !DcpPresent::GamescopeSession()"));
+    const std::string presenter = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp");
+    CHECK(InOrder(presenter, "void Presenter::ReportPresentGeometry(", "if (!DcpPresent::GamescopeSession()) {"));
+}
+
 void TestPadSamplingUntouched() {
     const std::string pad = ReadSource("src/runtime_pad.c");
     CHECK(!Contains(pad, "Gamescope") && !Contains(pad, "gamescope"));
@@ -381,6 +532,14 @@ int main() {
     TestSuboptimalRecovery();
     TestOutOfDateAndFailures();
     TestSwapchainUsesResultPolicy();
+    TestPresentGeometryFollowsSurface();
+    TestPresentGeometryAnySurface();
+    TestPresenterUsesSwapchainExtent();
+    TestGeometryReporter();
+    TestResultReporter();
+    TestStallReporter();
+    TestProgressPacking();
+    TestTelemetryIsGamescopeOnlyAndShippable();
     if (g_failures) {
         std::printf("%d present test(s) failed\n", g_failures);
         return 1;

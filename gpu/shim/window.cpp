@@ -1,4 +1,5 @@
 // The game window (SDL3) the renderer presents to.
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -147,6 +148,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+    LogGamescopeWindow();
     const std::string display_name = display && !display->name.empty() ? " (" + display->name + ")" : "";
     std::printf("Window: display %d of %zu%s, size %dx%d, VSync %s, frame rate in title %s, "
                 "resolution in title %s\n",
@@ -158,6 +160,29 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
 #ifndef _WIN32
     std::printf("Session: %s\n", DcpPresent::DescribeSession(DcpPresent::GamescopeSession(), std::getenv).c_str());
 #endif
+}
+
+void WindowSDL::LogGamescopeWindow() {
+    if (!DcpPresent::GamescopeSession()) {
+        return;
+    }
+    int logical_w = 0, logical_h = 0, pixel_w = 0, pixel_h = 0;
+    SDL_GetWindowSize(window, &logical_w, &logical_h);
+    SDL_GetWindowSizeInPixels(window, &pixel_w, &pixel_h);
+    SDL_Rect bounds{};
+    SDL_GetDisplayBounds(SDL_GetDisplayForWindow(window), &bounds);
+    const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+    const std::array<int, 7> state{logical_w, logical_h, pixel_w, pixel_h, bounds.w, bounds.h, fullscreen};
+    static std::array<int, 7> last{};
+    static unsigned lines = 0;
+    constexpr unsigned kMaxLines = 8;
+    if (state == last || lines >= kMaxLines) {
+        return;
+    }
+    last = state;
+    std::printf("Display diagnostic: Gamescope window%s logical=%dx%d pixels=%dx%d display=%dx%d fullscreen=%s scale=%.2f\n",
+                lines++ ? " changed" : "", logical_w, logical_h, pixel_w, pixel_h, bounds.w, bounds.h,
+                fullscreen ? "borderless" : "windowed", SDL_GetWindowDisplayScale(window));
 }
 
 // Borderless is a desktop-sized fullscreen window, without a display mode change. Window thread only (SDL); the
@@ -397,8 +422,17 @@ bool WindowSDL::PollEvents() {
             SDL_GetWindowSizeInPixels(window, &w, &h);
             width = w;
             height = h;
+            LogGamescopeWindow();
             break;
         }
+        case SDL_EVENT_WINDOW_MINIMIZED:
+        case SDL_EVENT_WINDOW_HIDDEN:
+            DcpPresent::g_progress.window_active = false;
+            break;
+        case SDL_EVENT_WINDOW_RESTORED:
+        case SDL_EVENT_WINDOW_SHOWN:
+            DcpPresent::g_progress.window_active = true;
+            break;
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             is_open = false;

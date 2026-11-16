@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// DEBUG_SAULO: temporary startup and stall telemetry (dcp_startup_watch.h).
+// Presenter progress telemetry for Gamescope sessions (dcp_startup_watch.h).
 #include "dcp_startup_watch.h"
+
+#include "dcp_present.h"
 
 #include <array>
 #include <atomic>
@@ -18,7 +20,6 @@ constexpr std::array<const char*, StageCount> kStageNames{
     "guest submit", "GPU submission", "stage B packet", "flip prepared",
     "flip taken",   "present",        "vblank",         "title tick",
 };
-constexpr std::array<const char*, WaitCount> kWaitNames{"free frame", "frame fence", "acquire", "queue present"};
 
 struct WaitSlot {
     std::atomic<std::int64_t> since_ms{0};
@@ -40,50 +41,44 @@ std::uint32_t ThreadId() {
     return static_cast<std::uint32_t>(gettid());
 }
 
-void Report(const char* reason, std::int64_t now, std::int64_t stalled_since,
-            const std::array<std::uint64_t, StageCount>& seen,
-            const std::array<std::int64_t, StageCount>& advanced) {
-    char ages[512];
-    int used = 0;
-    for (unsigned s = 0; s < StageCount && used < int(sizeof(ages)); ++s) {
-        used += seen[s] ? std::snprintf(ages + used, sizeof(ages) - used, "%s%s %lld ms", s ? ", " : "",
-                                        kStageNames[s], static_cast<long long>(now - advanced[s]))
-                        : std::snprintf(ages + used, sizeof(ages) - used, "%s%s never", s ? ", " : "",
-                                        kStageNames[s]);
+const char* Blocked(Wait wait, std::int64_t now, char* text, std::size_t size) {
+    const auto since = waits[wait].since_ms.load(std::memory_order_relaxed);
+    if (!since) {
+        return "no";
     }
-    std::printf("DEBUG_SAULO stall: %s for %.1f s; since last: %s\n", reason, (now - stalled_since) / 1000.0, ages);
+    std::snprintf(text, size, "yes, %lld ms", static_cast<long long>(now - since));
+    return text;
+}
 
-    char waiting[256];
-    used = 0;
-    for (unsigned w = 0; w < WaitCount && used < int(sizeof(waiting)); ++w) {
-        const auto since = waits[w].since_ms.load(std::memory_order_relaxed);
-        if (since) {
-            used += std::snprintf(waiting + used, sizeof(waiting) - used, " %s %lld ms (thread %u);", kWaitNames[w],
-                                  static_cast<long long>(now - since), waits[w].tid.load(std::memory_order_relaxed));
-        }
-    }
-    std::printf("DEBUG_SAULO stall: counts submit %llu, GPU %llu, packets %llu, prepared %llu, taken %llu, "
-                "presents %llu, vblanks %llu, title ticks %llu; free frames %lld, pending flips %lld, swap queue %lld, "
-                "stage B in packet %s, title cursor %lld; waiting:%s\n",
-                static_cast<unsigned long long>(seen[GuestSubmit]), static_cast<unsigned long long>(seen[GpuSubmission]),
-                static_cast<unsigned long long>(seen[StageBPacket]), static_cast<unsigned long long>(seen[FlipPrepared]),
+void Report(const char* reason, std::int64_t now, std::int64_t stalled_since, const std::array<std::uint64_t, StageCount>& seen) {
+    const auto& progress = DcpPresent::g_progress;
+    const DcpPresent::Size swapchain = DcpPresent::Unpack(progress.swapchain_size.load());
+    char acquire_wait[32], present_wait[32];
+    std::printf("Presenter diagnostic: %s for %.1f s, last successful present %llu, last acquire %s, last present %s, "
+                "swapchain %ux%u, acquire blocked %s, present blocked %s\n",
+                reason, (now - stalled_since) / 1000.0, static_cast<unsigned long long>(progress.presented.load()),
+                DcpPresent::ResultName(progress.last_acquire.load()), DcpPresent::ResultName(progress.last_present.load()),
+                swapchain.width, swapchain.height, Blocked(Acquire, now, acquire_wait, sizeof(acquire_wait)),
+                Blocked(QueuePresent, now, present_wait, sizeof(present_wait)));
+    std::printf("Presenter diagnostic: guest submits %llu, flips prepared %llu, flips taken %llu, presenter calls %llu, "
+                "vblanks %llu, pending flips %lld, swap queue %lld, free frames %lld\n",
+                static_cast<unsigned long long>(seen[GuestSubmit]), static_cast<unsigned long long>(seen[FlipPrepared]),
                 static_cast<unsigned long long>(seen[FlipTaken]), static_cast<unsigned long long>(seen[Present]),
-                static_cast<unsigned long long>(seen[Vblank]), static_cast<unsigned long long>(seen[TitleTick]),
-                static_cast<long long>(gauges[FreeFrames].load(std::memory_order_relaxed)),
+                static_cast<unsigned long long>(seen[Vblank]),
                 static_cast<long long>(gauges[PendingFlips].load(std::memory_order_relaxed)),
                 static_cast<long long>(gauges[SwapQueue].load(std::memory_order_relaxed)),
-                gauges[StageBBusy].load(std::memory_order_relaxed) ? "yes" : "no",
-                static_cast<long long>(gauges[TitleCursor].load(std::memory_order_relaxed)),
-                used ? waiting : " nothing");
+                static_cast<long long>(gauges[FreeFrames].load(std::memory_order_relaxed)));
 }
 
 void WatchLoop() {
-    constexpr std::int64_t kStallMs = 3000, kRepeatMs = 10000, kFirstPresentMs = 20000;
+    constexpr std::int64_t kStallMs = 3000, kFirstPresentMs = 20000;
     std::array<std::uint64_t, StageCount> seen{};
     std::array<std::int64_t, StageCount> advanced{};
     const std::int64_t start = NowMs();
     advanced.fill(start);
-    std::int64_t stalled_since = 0, last_report = 0;
+    std::uint64_t presented_seen = 0;
+    std::int64_t presented_advanced = start;
+    DcpPresent::StallReporter reporter;
     while (true) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         const std::int64_t now = NowMs();
@@ -94,40 +89,35 @@ void WatchLoop() {
                 advanced[s] = now;
             }
         }
-        const char* reason = nullptr;
-        if (!seen[Present]) {
-            reason = now - start >= kFirstPresentMs ? "no present since the video core started" : nullptr;
-        } else if (now - advanced[Present] >= kStallMs) {
-            reason = "no present";
-        } else if (now - advanced[GuestSubmit] >= kStallMs) {
-            reason = "no guest GPU submission";
-        } else if (now - advanced[Vblank] >= kStallMs) {
-            reason = "no vblank";
+        const auto& progress = DcpPresent::g_progress;
+        if (const auto presented = progress.presented.load(); presented != presented_seen) {
+            presented_seen = presented;
+            presented_advanced = now;
         }
-        if (!reason) {
-            if (stalled_since) {
-                std::printf("DEBUG_SAULO stall: resumed after %.1f s\n", (now - stalled_since) / 1000.0);
-                stalled_since = 0;
-            }
-            continue;
+        const bool submitting = now - advanced[GuestSubmit] < kStallMs;
+        const bool active = progress.window_active.load();
+        const std::int64_t limit = presented_seen ? kStallMs : kFirstPresentMs;
+        const bool stalled = submitting && active && now - presented_advanced >= limit;
+        switch (reporter.Update(stalled, now)) {
+        case DcpPresent::StallReporter::Action::Report:
+            Report(presented_seen ? "no successful present" : "no successful present since start", now,
+                   reporter.SinceMs(), seen);
+            break;
+        case DcpPresent::StallReporter::Action::Resumed:
+            std::printf("Presenter diagnostic: presenting resumed, present %llu\n",
+                        static_cast<unsigned long long>(presented_seen));
+            break;
+        case DcpPresent::StallReporter::Action::None:
+            break;
         }
-        if (!stalled_since) {
-            stalled_since = now;
-            last_report = 0;
-        }
-        if (last_report && now - last_report < kRepeatMs) {
-            continue;
-        }
-        last_report = now;
-        Report(reason, now, stalled_since, seen, advanced);
     }
 }
 
 } // namespace
 
 void Mark(Stage stage) {
-    if (counts[stage].fetch_add(1, std::memory_order_relaxed) == 0) {
-        std::printf("DEBUG_SAULO startup: first %s (thread %u)\n", kStageNames[stage], ThreadId());
+    if (counts[stage].fetch_add(1, std::memory_order_relaxed) == 0 && DcpPresent::GamescopeSession()) {
+        std::printf("Presenter diagnostic: first %s\n", kStageNames[stage]);
     }
 }
 
@@ -136,7 +126,7 @@ void SetGauge(Gauge gauge, std::int64_t value) {
 }
 
 void StartWatch() {
-    if (!started.exchange(true)) {
+    if (DcpPresent::GamescopeSession() && !started.exchange(true)) {
         std::thread(WatchLoop).detach();
     }
 }
@@ -157,10 +147,19 @@ WaitScope::~WaitScope() {
 extern "C" void dcpgpu_debug_title_tick(int cursor) {
     using namespace DcpStartupWatch;
     Mark(TitleTick);
-    const auto previous = gauges[TitleCursor].exchange(cursor, std::memory_order_relaxed);
-    static std::atomic<int> logged{0};
-    if (previous != cursor && counts[TitleTick].load(std::memory_order_relaxed) > 1 &&
-        logged.fetch_add(1, std::memory_order_relaxed) < 16) {
-        std::printf("DEBUG_SAULO title: cursor %lld -> %d\n", static_cast<long long>(previous), cursor);
+    gauges[TitleCursor].store(cursor, std::memory_order_relaxed);
+    static std::atomic<bool> reported{false};
+    if (cursor < 0 || !DcpPresent::GamescopeSession() || reported.exchange(true)) {
+        return;
     }
+    const auto& progress = DcpPresent::g_progress;
+    const DcpPresent::Size source = DcpPresent::Unpack(progress.source_size.load());
+    const DcpPresent::Size destination = DcpPresent::Unpack(progress.destination_size.load());
+    std::printf("Presenter diagnostic: title reached, VideoOut images=%llu blitted=%llu presents=%llu source=%ux%u "
+                "destination=%ux%u last_acquire=%s last_present=%s\n",
+                static_cast<unsigned long long>(progress.videoout_images.load()),
+                static_cast<unsigned long long>(progress.blitted.load()),
+                static_cast<unsigned long long>(progress.presented.load()), source.width, source.height,
+                destination.width, destination.height, DcpPresent::ResultName(progress.last_acquire.load()),
+                DcpPresent::ResultName(progress.last_present.load()));
 }

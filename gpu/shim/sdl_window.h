@@ -67,6 +67,7 @@ private:
         DcpCursor::ControllerActivityFilter filter;
     };
     void ApplyDisplayMode(int mode);
+    void LogGamescopeWindow();
     void ToggleBorderless();
     void UpdateFpsTitle();
     void UpdateCursor();

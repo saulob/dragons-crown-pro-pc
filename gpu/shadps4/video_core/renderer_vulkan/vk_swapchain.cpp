@@ -101,6 +101,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
     RefreshSemaphores();
     frame_index = 0; // the semaphores are new and sized for the returned image count
     LogImages();
+    LogCreation();
 }
 
 // Once per change of the image counts or the present mode: a window resize alone is not logged again.
@@ -140,6 +141,7 @@ bool Swapchain::AcquireNextImage() {
         device.acquireNextImageKHR(swapchain, std::numeric_limits<u64>::max(),
                                    image_acquired[frame_index], VK_NULL_HANDLE, &image_index);
 
+    ReportResult(false, result);
     const DcpPresent::SwapResult kind = AcquireResult(result);
     if (kind == DcpPresent::SwapResult::Failure) {
         LOG_CRITICAL(Render_Vulkan, "Swapchain acquire returned unknown result {}",
@@ -161,6 +163,7 @@ bool Swapchain::Present() {
     };
 
     auto result = instance.GetPresentQueue().presentKHR(present_info);
+    ReportResult(true, result);
     const DcpPresent::SwapResult kind = PresentResult(result);
     ASSERT_MSG(kind != DcpPresent::SwapResult::Failure, "Swapchain presentation failed: {}",
                vk::to_string(result));
@@ -196,6 +199,55 @@ DcpPresent::SwapResult Swapchain::PresentResult(vk::Result result) {
         return DcpPresent::SwapResult::OutOfDate;
     default:
         return DcpPresent::SwapResult::Failure;
+    }
+}
+
+void Swapchain::DescribeSurface(const vk::SurfaceCapabilitiesKHR& capabilities) {
+    if (!gamescope) {
+        return;
+    }
+    const auto usage = [&](vk::ImageUsageFlagBits bit) { return (capabilities.supportedUsageFlags & bit) ? "yes" : "NO"; };
+    char text[384];
+    std::snprintf(text, sizeof(text),
+                  "current=%ux%u min=%ux%u max=%ux%u chosen=%ux%u usage(color=%s transfer_src=%s transfer_dst=%s) "
+                  "transform=%s alpha=%s",
+                  capabilities.currentExtent.width, capabilities.currentExtent.height,
+                  capabilities.minImageExtent.width, capabilities.minImageExtent.height,
+                  capabilities.maxImageExtent.width, capabilities.maxImageExtent.height, extent.width, extent.height,
+                  usage(vk::ImageUsageFlagBits::eColorAttachment), usage(vk::ImageUsageFlagBits::eTransferSrc),
+                  usage(vk::ImageUsageFlagBits::eTransferDst), vk::to_string(transform).c_str(),
+                  vk::to_string(composite_alpha).c_str());
+    surface_summary = text;
+}
+
+void Swapchain::LogCreation() {
+    DcpPresent::g_progress.swapchain_size = DcpPresent::Pack({extent.width, extent.height});
+    if (!gamescope || logged_creations >= 16) {
+        return;
+    }
+    ++logged_creations;
+    const vk::SurfaceFormatKHR format = needs_hdr ? SURFACE_FORMAT_HDR : surface_format;
+    std::printf("Swapchain diagnostic: created #%u %s images=%u mode=%s format=%s colorspace=%s\n", logged_creations,
+                surface_summary.c_str(), image_count, vk::to_string(present_mode).c_str(),
+                vk::to_string(format.format).c_str(), vk::to_string(format.colorSpace).c_str());
+}
+
+void Swapchain::ReportResult(bool presenting, vk::Result result) {
+    const int code = static_cast<int>(result);
+    auto& progress = DcpPresent::g_progress;
+    (presenting ? progress.last_present : progress.last_acquire) = code;
+    if (presenting && PresentResult(result) != DcpPresent::SwapResult::Failure) {
+        progress.presented.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!gamescope || !(presenting ? present_reporter : acquire_reporter).Observe(code)) {
+        return;
+    }
+    if (presenting) {
+        std::printf("Swapchain diagnostic: vkQueuePresentKHR returned %s (present %llu)\n", DcpPresent::ResultName(code),
+                    static_cast<unsigned long long>(progress.presented.load()));
+    } else {
+        std::printf("Swapchain diagnostic: vkAcquireNextImageKHR returned %s, image %u\n", DcpPresent::ResultName(code),
+                    image_index);
     }
 }
 
@@ -312,6 +364,7 @@ void Swapchain::SetSurfaceProperties() {
     if (!(capabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::eOpaque)) {
         composite_alpha = vk::CompositeAlphaFlagBitsKHR::eInherit;
     }
+    DescribeSurface(capabilities);
 }
 
 void Swapchain::Destroy() {

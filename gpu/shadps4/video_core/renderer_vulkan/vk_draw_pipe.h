@@ -195,10 +195,10 @@ private:
                 continue;
             }
             const u64 start = __rdtsc();
-            DcpStartupWatch::SetGauge(DcpStartupWatch::StageBBusy, 1); // DEBUG_SAULO
+            DcpStartupWatch::SetGauge(DcpStartupWatch::StageBBusy, 1);
             handler(context, reinterpret_cast<const u8*>(header + 1), header->payload);
-            DcpStartupWatch::SetGauge(DcpStartupWatch::StageBBusy, 0); // DEBUG_SAULO
-            DcpStartupWatch::Mark(DcpStartupWatch::StageBPacket);      // DEBUG_SAULO
+            DcpStartupWatch::SetGauge(DcpStartupWatch::StageBBusy, 0);
+            DcpStartupWatch::Mark(DcpStartupWatch::StageBPacket);
             busy_cycles.fetch_add(__rdtsc() - start, std::memory_order_relaxed);
             at += header->size;
             consumed.store(at, std::memory_order_release);
