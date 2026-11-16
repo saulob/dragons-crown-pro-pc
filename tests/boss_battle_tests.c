@@ -6052,6 +6052,7 @@ static void test_screen_shortcut_hooks(void) {
     boss_battle_online_visit_end();
     boss_battle_online_set_hosting(0);
     boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    CHECK(boss_battle_online_take_guest_join());
     CHECK(boss_battle_online_visitor() && !boss_battle_online_hosting());
     shortcut_now += 16;
     page_result(-1);
@@ -6501,6 +6502,7 @@ typedef enum { NEW_INN_STALE_OPTIONS, NEW_INN_MENU } NewInnEntry;
 
 typedef struct {
     int requested, built, party_before_page;
+    int covered_at_request, covered_at_build, covered_before_valid, released;
 } InnRun;
 
 /* One game frame of the new Inn: the scene frame, then the Inn's own act. Only the menu act (0x5b) reads its list result,
@@ -6515,16 +6517,23 @@ static void inn_game_frame(InnRun *run) {
         fake_options_page(8);
         build_page();
         run->built = 1;
+        run->covered_at_build = boss_battle_guest_join_cover();
         fake_inn[INN_STEP] = 1;
     } else if (act == 0x8e && run->built) {
         page_act();
         page_update();
         shortcut_now += 16;
+        const int covered = boss_battle_guest_join_cover();
         page_result(-1);
+        if (!run->released && !boss_battle_guest_join_cover()) {
+            run->released = 1;
+            run->covered_before_valid = covered;
+        }
     } else if (act == 0x5b) {
         const GuestRegs menu = result_frame();
         if (menu.skip && menu.rax == BOSS_BATTLE_INN_OPTIONS_ROW) {
             ++run->requested;
+            run->covered_at_request = boss_battle_guest_join_cover();
             if (party_sends) run->party_before_page = 1;
             fake_inn[INN_ACT] = 0x8e;
             fake_inn[INN_STEP] = 0;
@@ -6585,12 +6594,19 @@ static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
     PHASE_CHECK("C", "room members 2", boss_battle_online_members() == 2);
     PHASE_CHECK("C", "member seat 1", boss_battle_online_slot() == 1);
     PHASE_CHECK("C", "no Boss session", !boss_battle_session_active());
+    PHASE_CHECK("C", "no cover before the scene frame sees the join", !boss_battle_guest_join_cover());
+    const int fades_at_join = fades.calls;
+    menu_scene_frame();
+    PHASE_CHECK("C", "cover on once the join is committed",
+                boss_battle_guest_join_cover() && fades.calls == fades_at_join + 1 && fades.last_colour == FADE_BLACK &&
+                    fades.last_layer == FADE_LAYER);
 
     /* D: the Network Menu closes */
     put_pointer(shortcut_ui + 0x238, NULL);
     menu_scene_frame();
     PHASE_CHECK("D", "Network Menu closed", !network_menu_open_in(shortcut_ui));
     PHASE_CHECK("D", "Network Menu return pending", boss_battle_network_menu_returning());
+    PHASE_CHECK("D", "cover stays on", boss_battle_guest_join_cover() && fades.last_colour == FADE_BLACK);
 
     /* E: the join's scene reload destroys the old Inn, and its page with it, while the return is pending */
     GuestRegs gone;
@@ -6602,6 +6618,7 @@ static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
     PHASE_CHECK("E", "visitor kept", boss_battle_online_visitor() && boss_battle_online_selected());
     PHASE_CHECK("E", "old page dropped", !boss_battle_screen_shown() && !boss_battle_network_menu_returning());
     PHASE_CHECK("E", "still in the host's room", boss_battle_online_is_guest() && boss_battle_online_members() == 2);
+    PHASE_CHECK("E", "cover stays on through the Inn teardown", boss_battle_guest_join_cover() && fades.last_colour == FADE_BLACK);
 
     /* F, G: the new Inn object, and the host's party seat replicated into slot 0 before the Inn is ready */
     set_inn(6, 6, -1, -1);
@@ -6622,7 +6639,9 @@ static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
     PHASE_CHECK("H", "new Inn ready", main_rows_are_inn());
     PHASE_CHECK("H", "visitor still 1", boss_battle_online_visitor() == 1);
     PHASE_CHECK("H", "Network Menu closed", !network_menu_open_in(shortcut_ui));
-    InnRun run = {0, 0, 0};
+    PHASE_CHECK("H", "cover stays on through the Inn rebuild",
+                boss_battle_guest_join_cover() && fades.last_colour == FADE_BLACK && fades.last_frames == 0);
+    InnRun run = {0};
     run_new_inn(entry, &run);
 
     /* I: the page request and the page, from what the game runs, with no menu frame the game does not run */
@@ -6633,6 +6652,11 @@ static VisitorTranscript guest_lifecycle(int fight_all, NewInnEntry entry) {
     PHASE_CHECK("I", "remembered entry", fight_all ? boss_battle_cursor_fight_all()
                                                    : i32_at(fake_body, 0x958) == remembered && !boss_battle_cursor_fight_all());
     PHASE_CHECK("I", "guest party sent before its page was active", run.party_before_page == 0);
+    PHASE_CHECK("I", "cover on when the page is requested", run.covered_at_request);
+    PHASE_CHECK("I", "cover on while the page is constructed", run.covered_at_build);
+    PHASE_CHECK("I", "cover on until the page is valid", run.covered_before_valid && run.released);
+    PHASE_CHECK("I", "cover released through a fade in",
+                !boss_battle_guest_join_cover() && fades.last_colour == 0 && fades.last_frames > 0);
 
     /* J, K: the page becomes active, waiting for the host; the guest's waiting party goes once */
     live_page_frame(-1);
@@ -6710,7 +6734,69 @@ static void guest_follows(const uint8_t *published, int boss, int fight_all) {
     PHASE_CHECK("O", "no second party for the start", party_sends == 1);
 }
 
+/* A guest on its own online page, no room yet: the state the cover's failure paths start from. */
+static void join_cover_begin(void) {
+    lifecycle_begin();
+    construct_inn();
+    inn_press(BOSS_BATTLE_INN_ROW);
+    result_frame();
+    boss_battle_online_set_available(1);
+    boss_battle_online_set_hosting(1);
+    boss_battle_online_visit_begin(1);
+}
+
+static void test_join_cover_cancel(void) {
+    /* the join ends before the scene frame sees it: no cover */
+    join_cover_begin();
+    int fades_before = fades.calls;
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    boss_battle_online_room_left("the join failed");
+    menu_scene_frame();
+    PHASE_CHECK("X1", "no cover for a join that ended first", !boss_battle_guest_join_cover() && fades.calls == fades_before);
+    lifecycle_end();
+
+    /* the room disappears while covered: the cover fades in and the normal UI returns */
+    join_cover_begin();
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    menu_scene_frame();
+    PHASE_CHECK("X2", "cover on", boss_battle_guest_join_cover());
+    boss_battle_online_room_left("the host closed the room");
+    fades_before = fades.calls;
+    menu_scene_frame();
+    PHASE_CHECK("X2", "cover released when the room is gone", !boss_battle_guest_join_cover() && !boss_battle_online_visitor());
+    PHASE_CHECK("X2", "released through a fade in", fades.calls == fades_before + 1 && fades.last_colour == 0);
+    lifecycle_end();
+
+    /* the visitor mode ends while covered (the host's session is over) */
+    join_cover_begin();
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    menu_scene_frame();
+    boss_battle_online_end_visitor("the host ended the session");
+    menu_scene_frame();
+    PHASE_CHECK("X3", "cover released when the visitor mode ends", !boss_battle_guest_join_cover() && fades.last_colour == 0);
+    lifecycle_end();
+
+    /* the guest returns to the title while covered */
+    join_cover_begin();
+    boss_battle_online_room_joined(0, BOSS_BATTLE_ROOM_OPEN, 2, 1);
+    menu_scene_frame();
+    PHASE_CHECK("X4", "cover on", boss_battle_guest_join_cover());
+    GuestRegs title = page_regs();
+    boss_battle_title_hook(&title);
+    PHASE_CHECK("X4", "title clears the cover", !boss_battle_guest_join_cover());
+    lifecycle_end();
+
+    /* a host's own room never covers */
+    join_cover_begin();
+    fades_before = fades.calls;
+    boss_battle_online_room_joined(1, BOSS_BATTLE_ROOM_OPEN, 1, 0);
+    menu_scene_frame();
+    PHASE_CHECK("X5", "no cover for the host", !boss_battle_guest_join_cover() && fades.calls == fades_before);
+    lifecycle_end();
+}
+
 static void test_visitor_lifecycle(void) {
+    test_join_cover_cancel();
     for (int entry = NEW_INN_STALE_OPTIONS; entry <= NEW_INN_MENU; ++entry)
         for (int fight_all = 0; fight_all <= 1; ++fight_all) {
             lifecycle_begin();

@@ -649,6 +649,8 @@ void GUEST_HOOK_ABI boss_battle_list_down_hook(GuestRegs *regs);
 void GUEST_HOOK_ABI boss_battle_list_update_hook(GuestRegs *regs);
 /* The page the Network Menu was opened over is being replaced and the new one has not run its own frame yet. */
 int boss_battle_network_menu_returning(void);
+/* The scene fader holds black for a guest that joined a host's room, until its Boss Battle page is active. */
+int boss_battle_guest_join_cover(void);
 void GUEST_HOOK_ABI boss_battle_results_level_done_hook(GuestRegs *regs);
 
 /* The scene object's class and its scene request function, which the hooks use to tell a scene and to request one; set by

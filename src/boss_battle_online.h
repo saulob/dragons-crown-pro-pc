@@ -89,6 +89,8 @@ void boss_battle_online_set_hosting(int allowed);
 int boss_battle_online_hosting(void);
 /* Joined as a guest to a Boss Battle room without a visit of its own: a session-long visit that ends with the room. */
 int boss_battle_online_visitor(void);
+/* 1 once after a guest joined a host's Boss Battle room and is still a visitor. */
+int boss_battle_online_take_guest_join(void);
 
 /* The visit asked for online play: the online check passes for the lead character while it lasts. */
 int boss_battle_online_access(void);

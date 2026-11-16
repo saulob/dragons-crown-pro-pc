@@ -174,6 +174,13 @@ static void end_session(void) {
  * follow the host has nothing of its own to go back to. */
 static atomic_int visitor_own_visit;
 
+/* Set when a guest joins a host's Boss Battle room; the hooks take it once to cover the join visually. */
+static atomic_int guest_join_flag;
+
+int boss_battle_online_take_guest_join(void) {
+    return atomic_exchange(&guest_join_flag, 0) && atomic_load(&visitor_flag);
+}
+
 static void set_visitor(int on, const char *reason) {
     const int was = atomic_exchange(&visitor_flag, on);
     if (was != on) printf("DEBUG_SAULO VISITOR old=%d new=%d reason=%s\n", was, on, reason); /* DEBUG_SAULO */
@@ -222,6 +229,7 @@ void boss_battle_online_visit_end(void) {
 }
 
 void boss_battle_online_reset(void) {
+    atomic_store(&guest_join_flag, 0);
     set_visitor(0, "reset");
     atomic_store(&visitor_own_visit, 0);
     atomic_store(&visit, VISIT_OFF);
@@ -313,7 +321,10 @@ void boss_battle_online_room_joined(int owner, int room_attr, int count, int par
     s.received = (BossBattleHostState){BOSS_BATTLE_PHASE_NONE, 0, -1, 0};
     s.taken_sequence = 0;
     if (room_attr <= 0) return;
-    if (!owner && boss_battle_online_available()) start_visitor();
+    if (!owner && boss_battle_online_available()) {
+        start_visitor();
+        atomic_store(&guest_join_flag, 1);
+    }
     printf("Boss Battle Online: room ready, %s, %d players\n", owner ? "host" : "guest", count);
     if (owner && count <= 1) puts("Boss Battle Online: waiting for party");
     if (!owner) puts("Boss Battle Online: joined as guest, visitor waiting for host");
@@ -352,6 +363,7 @@ void boss_battle_online_owner_changed(int owner) {
 
 void boss_battle_online_room_left(const char *why) {
     const int was_guest = guest_seat() && boss_seat();
+    atomic_store(&guest_join_flag, 0);
     atomic_store(&in_room, 0);
     atomic_store(&is_owner, 0);
     atomic_store(&room_boss, 0);

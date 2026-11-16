@@ -2567,12 +2567,14 @@ void GUEST_HOOK_ABI boss_battle_pause_result_hook(GuestRegs *regs) {
 }
 
 static void reopen_visitor_page(uint64_t inn);
+static void recover_guest_join_cover(uint64_t inn);
 
 /* After the Inn menu builder cut its item list to six (r14 the Inn): the custom menu's seven rows, then the Boss Battle
  * item after Report adventurers with a seventh list widget, which keeps the list's own cursor, input and results on
  * seven rows without scrolling; the list's widgets are never drawn while the custom menu is. */
 void GUEST_HOOK_ABI boss_battle_inn_built_hook(GuestRegs *regs) {
     const uint64_t inn = regs->r14, list = inn + INN_LIST;
+    recover_guest_join_cover(inn);
     const int wanted = boss_battle_available() && (boss_battle_enabled() || boss_battle_online_visitor());
     if (inn_menu.inn && (inn_menu.inn != inn || !wanted)) delete_inn_menu();
     if (!wanted) return;
@@ -2971,12 +2973,23 @@ static void end_online_visit(void) {
     log_handoff("after-cleanup", manager);
 }
 
-static atomic_int black_held, own_fade, fade_lines, help_closed_logged, return_cover;
+static atomic_int black_held, own_fade, fade_lines, help_closed_logged, return_cover, join_cover;
+
+int boss_battle_guest_join_cover(void) {
+    return atomic_load(&join_cover);
+}
+
+/* The visitor's page is valid once it resumed: its window ran, its list updated, its result was read. */
+static int join_cover_holds(void) {
+    return atomic_load(&join_cover) && boss_battle_online_visitor() && visitor_page != VISITOR_PAGE_ACTIVE &&
+           visitor_page != VISITOR_PAGE_SEATED;
+}
 
 void boss_battle_set_fade_functions(const BossBattleFadeFunctions *functions) {
     fade_functions = functions ? *functions : (BossBattleFadeFunctions){0};
     atomic_store(&black_held, 0);
     atomic_store(&return_cover, 0);
+    atomic_store(&join_cover, 0);
     atomic_store(&held_fader, 0);
     atomic_store(&transition_scene, 0);
 }
@@ -2997,6 +3010,8 @@ static void fade_scene(uint64_t owner_holder, uint32_t colour, int frames) {
 }
 
 static void release_black(uint64_t manager, const char *why) {
+    if (join_cover_holds()) return;
+    if (atomic_exchange(&join_cover, 0)) puts("DEBUG_SAULO guest join cover off");
     if (!atomic_exchange(&black_held, 0)) return;
     const int covered_return = atomic_exchange(&return_cover, 0);
     fade_scene(manager, FADE_CLEAR, covered_return ? RETURN_FADE_IN_FRAMES : FADE_FRAMES);
@@ -3717,7 +3732,10 @@ void GUEST_HOOK_ABI boss_battle_inn_result_hook(GuestRegs *regs) {
         return;
     }
     const int reopening = boss_battle_menu_reopen_pending() && has_boss_row(list);
-    if (!reopening && !boss_battle_screen_requested()) release_black(context, "no Boss Battle page to show");
+    if (!reopening && !boss_battle_screen_requested()) {
+        atomic_store(&join_cover, 0);
+        release_black(context, "no Boss Battle page to show");
+    }
     if (!has_boss_row(list)) return;
     if (boss_battle_take_menu_reopen()) {
         printf("Boss Battle [%u]: Boss Battle page reopens (%s)\n", boss_battle_reopen_session(), boss_battle_reopen_reason());
@@ -3762,8 +3780,9 @@ void GUEST_HOOK_ABI boss_battle_arrival_fade_hook(GuestRegs *regs) {
         printf("Boss Battle [%u]: native arena fade-in begins, frames=%d\n", boss_battle_session_id(), (int)(int32_t)regs->rdx);
         return;
     }
-    if (!boss_battle_menu_reopen_pending() && !boss_battle_fight_all_checkpoint()) return;
-    if (boss_battle_fight_all_checkpoint()) atomic_store(&held_fader, regs->rdi);
+    const int joining = atomic_load(&join_cover);
+    if (!boss_battle_menu_reopen_pending() && !boss_battle_fight_all_checkpoint() && !joining) return;
+    if (boss_battle_fight_all_checkpoint() || joining) atomic_store(&held_fader, regs->rdi);
     regs->rsi = FADE_BLACK;
     regs->rcx = TRANSITION_LAYER;
     atomic_store(&black_held, 1);
@@ -3776,7 +3795,8 @@ void GUEST_HOOK_ABI boss_battle_arrival_fade_hook(GuestRegs *regs) {
 void GUEST_HOOK_ABI boss_battle_fade_hook(GuestRegs *regs) {
     if (atomic_load(&own_fade)) return;
     const int holds = boss_battle_start_transition_holds() ||
-                      (atomic_load(&return_cover) && atomic_load(&black_held) && boss_battle_network_menu_returning());
+                      (atomic_load(&return_cover) && atomic_load(&black_held) && boss_battle_network_menu_returning()) ||
+                      atomic_load(&join_cover);
     const BossBattleStartTransition now = boss_battle_start_transition();
     const int traced = holds || ((now == BOSS_BATTLE_START_REVEALING || now == BOSS_BATTLE_START_DONE) && boss_battle_session_active());
     const int scene = regs->rdi == atomic_load(&held_fader);
@@ -3906,6 +3926,7 @@ void GUEST_HOOK_ABI boss_battle_title_hook(GuestRegs *regs) {
     (void)regs;
     atomic_store(&black_held, 0);
     atomic_store(&return_cover, 0);
+    atomic_store(&join_cover, 0);
     atomic_store(&network_window, 0);
     room_wished = 0;
     release_shortcut();
@@ -4503,6 +4524,45 @@ static int return_cover_settled(void) {
     return !fader || guest_i32(fader + FADER_FRAMES) == 0;
 }
 
+/* A guest committed to a host's Boss Battle room: the scene fader covers the join's Network Menu return, Inn rebuild and
+ * page reopen, and fades in once the visitor's page is active. */
+static void begin_guest_join_cover(void) {
+    const uint64_t manager = atomic_load(&screen_manager);
+    const uint64_t fader = manager ? scene_fader(manager) : 0;
+    if (!fader || boss_battle_session_active()) return;
+    atomic_store(&held_fader, fader);
+    atomic_store(&fade_lines, 0);
+    atomic_store(&join_cover, 1);
+    atomic_store(&return_cover, 1);
+    atomic_store(&black_held, 1);
+    fade_scene(manager, FADE_BLACK, RETURN_FADE_FRAMES);
+    puts("DEBUG_SAULO guest join cover on");
+}
+
+/* The cover never outlives the visit it hides: a join that ended, or a fight that took over the black, frees it. */
+static void guest_join_cover_step(void) {
+    if (boss_battle_online_take_guest_join()) begin_guest_join_cover();
+    if (!atomic_load(&join_cover)) return;
+    if (boss_battle_session_active()) {
+        atomic_store(&join_cover, 0);
+        atomic_store(&return_cover, 0);
+        atomic_store(&black_held, 0);
+        puts("DEBUG_SAULO guest join cover off");
+    } else if (!boss_battle_online_visitor()) {
+        release_black(atomic_load(&screen_manager), "the join ended");
+    }
+}
+
+/* A rebuilt Inn has its own fader: it is looked up again and kept black. */
+static void recover_guest_join_cover(uint64_t inn) {
+    if (!atomic_load(&join_cover)) return;
+    const uint64_t manager = hydeland_town_manager(inn);
+    const uint64_t fader = manager ? scene_fader(manager) : 0;
+    if (!fader) return;
+    atomic_store(&held_fader, fader);
+    fade_scene(manager, FADE_BLACK, 0);
+}
+
 static void forget_page(void) {
     atomic_store(&screen_body, 0);
     atomic_store(&screen_window, 0);
@@ -4614,6 +4674,7 @@ static void return_from_terminated_page(void) {
 /* At every scene frame, which keeps running when the game terminates the Options page the Network Menu was opened
  * over: the menu's close is seen here, and the page it leaves is replaced through the Inn's own reopen. */
 static void network_menu_return_step(void) {
+    guest_join_cover_step();
     release_stale_options_mode();
     finish_closed_page();
     if (page_suspended) read_network_rows();
