@@ -35,8 +35,12 @@ bool Enabled(Cheat cheat) {
     return runtime_cheat_enabled(static_cast<int>(cheat)) != 0;
 }
 
+bool SlotHuman(int32_t slot) {
+    return runtime_cheat_slot_human(slot) != 0;
+}
+
 UnitKind Classify(uint64_t unit) {
-    return ClassifyUnit(HostMemory{}, unit);
+    return ClassifyUnit(HostMemory{}, unit, SlotHuman);
 }
 
 bool IsAlly(const HostMemory& memory, uint64_t unit) {
@@ -69,9 +73,9 @@ bool KeepsSkillUse(const HostMemory& memory, uint64_t owner, uint64_t item) {
     if ((!player && !ally) || item == 0) {
         return false;
     }
-    const UnitKind kind = player ? ClassifyOwner(memory, owner) : UnitKind::Other;
+    const UnitKind kind = player ? ClassifyOwner(memory, owner, SlotHuman) : UnitKind::Other;
     const bool is_ally = ally && OwnerIsAlly(memory, owner);
-    if (kind != UnitKind::PlayerOne && !is_ally) {
+    if (!IsLocalHuman(kind) && !is_ally) {
         return false;
     }
     const int32_t uses = memory.U8(item + kItemUsesOffset);
@@ -94,6 +98,7 @@ struct PartyUnit {
     int64_t seen_ms = 0;
 };
 PartyUnit g_allies[FrozenHealth::kSlots];
+RefillRound g_durability_round;
 constexpr int64_t kAllyStaleMs = 250;
 bool g_applying_health_action = false;
 
@@ -106,7 +111,7 @@ int64_t NowMs() {
 }
 
 bool IsFrozen(const HostMemory& memory, uint64_t unit) {
-    if (Classify(unit) == UnitKind::PlayerOne) {
+    if (IsLocalHuman(Classify(unit))) {
         return Enabled(Cheat::InfiniteHealth);
     }
     return Enabled(Cheat::InfiniteAllyHealth) && IsAlly(memory, unit);
@@ -266,10 +271,11 @@ void GUEST_HOOK_ABI ArrowHook(GuestRegs* regs) {
         return;
     }
     const HostMemory memory;
-    if (ClassifyOwner(memory, regs->rdi) != UnitKind::PlayerOne || !IsElf(memory, regs->rdi)) {
+    const UnitKind kind = ClassifyOwner(memory, regs->rdi, SlotHuman);
+    if (!IsLocalHuman(kind) || !IsElf(memory, regs->rdi)) {
         return;
     }
-    regs->rsi = static_cast<uint32_t>(ProtectedArrowAmount(true, UnitKind::PlayerOne, true, static_cast<int32_t>(regs->rsi)));
+    regs->rsi = static_cast<uint32_t>(ProtectedArrowAmount(true, kind, true, static_cast<int32_t>(regs->rsi)));
 }
 
 // Before the return of the experience-gain function (rax = the experience this call gains, int64). The stage result
@@ -339,7 +345,9 @@ void GUEST_HOOK_ABI SkillPointsHook(GuestRegs* regs) {
     }
     const int32_t before = static_cast<int16_t>(HostMemory::Load<uint16_t>(regs->r14 + kSkillPointsOffset));
     const int32_t after = static_cast<int16_t>(regs->r13);
-    const int32_t kept = ProtectedSkillPoints(true, static_cast<int32_t>(regs->r12), before, after);
+    const int32_t index = static_cast<int32_t>(regs->r12);
+    const bool human = index == kPlayerOneSlot || (index > kPlayerOneSlot && index <= kLastPartySlot && SlotHuman(index));
+    const int32_t kept = ProtectedSkillPoints(true, human, before, after);
     regs->r13 = (regs->r13 & ~uint64_t{0xffff}) | static_cast<uint16_t>(kept);
 }
 
@@ -418,17 +426,16 @@ void ApplyRefills(uint64_t unit, unsigned pending) {
     }
 }
 
-// Restores Player 1's worn gear through the game's own durability setter, which the game's repairs also end in.
-// The list is read from the unit on this tick only; nothing is kept for the next.
-void ApplyDurabilityRefill(uint64_t unit) {
+// Restores a local human player's worn gear through the game's own durability setter, which the game's repairs also
+// end in. The list is read from the unit on this tick only; nothing is kept for the next.
+bool ApplyDurabilityRefill(uint64_t unit) {
     if (g_guest.equipment_count == nullptr || g_guest.equipment_item == nullptr || g_guest.is_gear == nullptr ||
         g_guest.set_durability == nullptr) {
-        return;
+        return false;
     }
     const HostMemory memory;
-    if (!EquipmentAvailable(memory, unit) ||
-        runtime_cheat_take_refill(static_cast<int>(Cheat::InfiniteDurability)) == 0) {
-        return;
+    if (!EquipmentAvailable(memory, unit)) {
+        return false;
     }
     const uint64_t list = unit + kUnitEquipmentOffset;
     const uint32_t count = g_guest.equipment_count(list);
@@ -441,6 +448,30 @@ void ApplyDurabilityRefill(uint64_t unit) {
         if (NeedsDurabilityRefill(memory.U32(item + kItemFlagsOffset), memory.S32(item + kItemDurabilityOffset), maximum)) {
             g_guest.set_durability(list, static_cast<int32_t>(slot), maximum);
         }
+    }
+    return true;
+}
+
+// Serves each local human unit once while the request is pending, and takes the request when every human slot has been
+// served or the window after the first one has closed.
+template <typename Serve>
+void RunRefillRound(RefillRound& round, Cheat cheat, bool pending, UnitKind kind, uint64_t unit, Serve serve) {
+    if (!pending) {
+        round.Reset();
+        return;
+    }
+    const int64_t now = NowMs();
+    const int32_t slot = HostMemory{}.S32(unit + kUnitPlayerSlotOffset);
+    if (IsLocalHuman(kind) && !round.Served(slot, unit) && serve(unit)) {
+        round.MarkServed(slot, unit, now);
+    }
+    bool complete = true;
+    for (int32_t human = kPlayerOneSlot; human <= kLastPartySlot; ++human) {
+        complete = complete && ((human != kPlayerOneSlot && !SlotHuman(human)) || round.HasServed(human));
+    }
+    if (complete || round.Expired(now)) {
+        runtime_cheat_take_refill(static_cast<int>(cheat));
+        round.Reset();
     }
 }
 
@@ -640,13 +671,13 @@ void ApplyAddLevel(uint64_t unit) {
 
 namespace {
 
-// Holds Player 1's Elf at the held arrow count while Infinite Arrows is On. The shot hook already keeps a shot from
+// Holds a local human Elf at the held arrow count while Infinite Arrows is On. The shot hook already keeps a shot from
 // taking arrows, so this only puts back what other code changed.
 void HoldArrows(uint64_t unit) {
     const HostMemory memory;
     const uint64_t owner = memory.U64(unit + kUnitOwnerOffset);
     const int32_t count = memory.S32(owner + kArrowCountOffset);
-    const int32_t held = HeldArrowCount(true, UnitKind::PlayerOne, IsElf(memory, owner), count);
+    const int32_t held = HeldArrowCount(true, UnitKind::HumanPlayer, IsElf(memory, owner), count);
     if (held != count) {
         std::memcpy(reinterpret_cast<void*>(static_cast<uintptr_t>(owner + kArrowCountOffset)), &held, sizeof(held));
     }
@@ -666,19 +697,19 @@ void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
     const bool player_frozen = Enabled(Cheat::InfiniteHealth);
     const bool ally_frozen = Enabled(Cheat::InfiniteAllyHealth);
     const bool ally_mana = Enabled(Cheat::InfiniteAllyMana);
-    if (!player_frozen) {
-        g_frozen.ClearSlot(kPlayerOneSlot);
-    }
-    if (!ally_frozen) {
-        for (int32_t slot = kPlayerOneSlot + 1; slot <= kLastPartySlot; ++slot) {
-            g_frozen.ClearSlot(slot);
-        }
+    if ((refills & Bit(Cheat::InfiniteDurability)) == 0) {
+        g_durability_round.Reset();
     }
     const UnitKind kind = Classify(regs->rdi);
     if (kind == UnitKind::PlayerOne) {
         SampleBossTrace(regs->rdi);
     }
     const bool ally = kind == UnitKind::OtherPlayer && IsAlly(HostMemory{}, regs->rdi);
+    if (!player_frozen && !ally_frozen) {
+        g_frozen.Clear();
+    } else if ((IsLocalHuman(kind) && !player_frozen) || (ally && !ally_frozen)) {
+        g_frozen.ClearSlot(HostMemory{}.S32(regs->rdi + kUnitPlayerSlotOffset));
+    }
     if (ally) {
         RememberAlly(regs->rdi);
     }
@@ -687,21 +718,22 @@ void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
         !health_action) {
         return;
     }
-    if (kind == UnitKind::PlayerOne) {
-        if (health_action) {
-            ApplyHealthActions(regs->rdi);
-        }
+    if (kind == UnitKind::PlayerOne && health_action) {
+        ApplyHealthActions(regs->rdi);
+    }
+    if (IsLocalHuman(kind)) {
         if (player_frozen) {
             HoldFrozenHealth(regs->rdi);
         }
         if (arrows) {
             HoldArrows(regs->rdi);
         }
+        RunRefillRound(g_durability_round, Cheat::InfiniteDurability, (refills & Bit(Cheat::InfiniteDurability)) != 0, kind,
+                       regs->rdi, ApplyDurabilityRefill);
+    }
+    if (kind == UnitKind::PlayerOne) {
         if ((refills & Bit(Cheat::InfiniteMana)) != 0) {
             ApplyRefills(regs->rdi, refills);
-        }
-        if ((refills & Bit(Cheat::InfiniteDurability)) != 0) {
-            ApplyDurabilityRefill(regs->rdi);
         }
         if (add_skill_points) {
             ApplyAddSkillPoints(regs->rdi);

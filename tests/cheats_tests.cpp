@@ -39,6 +39,8 @@ using namespace dcp::cheats;
 namespace {
 
 int FakeHumanSlot(int slot);
+int MaskHumanSlot(int slot);
+extern int g_human_mask;
 
 int g_checks = 0;
 int g_failures = 0;
@@ -166,7 +168,7 @@ void TestCheatList() {
         const char* description;
     };
     const Expected expected[] = {
-        {Cheat::InfiniteHealth, "Infinite Health", "Freezes Player 1's current health"},
+        {Cheat::InfiniteHealth, "Infinite Health", "Freezes local human players' current health"},
         {Cheat::InfiniteAllyHealth, "Infinite Ally Health", "Freezes AI allies' current health"},
         {Cheat::InfiniteMana, "Infinite Mana", "Prevent mana from decreasing when casting spells"},
         {Cheat::InfiniteAllyMana, "Infinite Ally Mana",
@@ -857,12 +859,11 @@ void TestArrowsAndSkillPoints() {
     CHECK(ProtectedArrowAmount(true, UnitKind::PlayerOne, false, 1) == 1);
     CHECK(ProtectedArrowAmount(true, UnitKind::OtherPlayer, true, 1) == 1);
     CHECK(ProtectedArrowAmount(true, UnitKind::PlayerOne, true, -3) == -3); // anything but a shot is untouched
-    CHECK(ProtectedSkillPoints(true, 0, 30, 20) == 30); // spending
-    CHECK(ProtectedSkillPoints(true, 0, 30, 45) == 45); // earning
-    CHECK(ProtectedSkillPoints(true, 0, 30, 30) == 30);
-    CHECK(ProtectedSkillPoints(false, 0, 30, 20) == 20);
-    CHECK(ProtectedSkillPoints(true, 1, 30, 20) == 20); // Player 2
-    CHECK(ProtectedSkillPoints(true, 3, 30, 20) == 20);
+    CHECK(ProtectedSkillPoints(true, true, 30, 20) == 30); // spending
+    CHECK(ProtectedSkillPoints(true, true, 30, 45) == 45); // earning
+    CHECK(ProtectedSkillPoints(true, true, 30, 30) == 30);
+    CHECK(ProtectedSkillPoints(false, true, 30, 20) == 20);
+    CHECK(ProtectedSkillPoints(true, false, 30, 20) == 20); // not a local human player
 
     // Handlers.
     SetCheats(false, false);
@@ -907,6 +908,17 @@ void TestArrowsAndSkillPoints() {
     buy.r12 = 1;
     SkillPointsHook(&buy);
     CHECK(static_cast<uint16_t>(buy.r13) == 20); // Player 2 pays
+    runtime_cheats_set_slot_human(MaskHumanSlot);
+    g_human_mask = 0x3;
+    buy.r12 = 1;
+    SkillPointsHook(&buy);
+    CHECK(static_cast<uint16_t>(buy.r13) == 30); // a human Player 2 keeps their points
+    buy.r13 = 20;
+    buy.r12 = 2;
+    SkillPointsHook(&buy);
+    CHECK(static_cast<uint16_t>(buy.r13) == 20); // slot 2 has no human controller
+    runtime_cheats_set_slot_human(nullptr);
+    buy.r13 = 20;
     buy.r12 = 0;
     buy.r14 = 0;
     SkillPointsHook(&buy); // no record: nothing happens, nothing is read
@@ -1283,6 +1295,11 @@ int FakeHumanSlot(int slot) {
     return slot == 1;
 }
 
+int g_human_mask = 1;
+int MaskHumanSlot(int slot) {
+    return slot >= 0 && slot < 4 && (g_human_mask >> slot & 1);
+}
+
 int16_t SkillPoints() {
     int16_t value;
     std::memcpy(&value, g_skill_record + kSkillPointsOffset, sizeof(value));
@@ -1414,7 +1431,7 @@ void TestAddSkillPoints() {
     runtime_cheat_action(action);
     tick(player1);
     CHECK(SkillPoints() == 120);
-    CHECK(ProtectedSkillPoints(true, 0, 120, 20) == 120); // the purchase still keeps the points
+    CHECK(ProtectedSkillPoints(true, true, 120, 20) == 120); // the purchase still keeps the points
 
     // Movement Speed and Experience Multiplier are unaffected by the action.
     CHECK(runtime_cheat_movement_speed() == 4 && runtime_cheat_experience_multiplier() == 1);
@@ -1632,7 +1649,7 @@ void TestSkillUses() {
         CHECK(!use_at(npc.Owner(), unreadable));
     }
     runtime_cheats_set_slot_human(FakeHumanSlot);
-    CHECK(!use_at(player2.Owner(), kUnreadable)); // a human Player 2
+    CHECK(use(player2, 5) && !use(player2, 0)); // a human Player 2 is covered by the normal cheat
     runtime_cheats_set_slot_human(nullptr);
     CHECK(!use_at(player1.Owner(), 0));
     runtime_cheats_start(0, 1);
@@ -1762,7 +1779,7 @@ void TestSkillItemWear() {
     CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5));
     CHECK(!wear(enemy, 0x1dc, kItemEffectCountMask, 5));
     runtime_cheats_set_slot_human(FakeHumanSlot);
-    CHECK(!wear(player2, 0x1dc, kItemEffectCountMask, 5)); // a human Player 2
+    CHECK(wear(player2, 0x1dc, kItemEffectCountMask, 5)); // a human Player 2: covered by the normal cheat
     runtime_cheats_set_slot_human(nullptr);
 
     // Infinite Ally Skill Uses: the same sites for an AI ally; Player 1 and enemies are not covered.
@@ -1798,7 +1815,7 @@ void TestSkillItemWear() {
     CHECK(!wear(player1, 0x1dc, kItemEffectCountMask, 0) && !wear(player2, 0x1d7, kItemEffectCountMask, 0));
     CHECK(!wear(enemy, 0x1d7, kItemEffectCountMask, 5) && !wear(enemy, 0x1dc, kItemEffectCountMask, 5));
     runtime_cheats_set_slot_human(FakeHumanSlot);
-    CHECK(!wear(player2, 0x1d7, kItemEffectCountMask, 5) && !wear(player2, 0x1dc, kItemEffectCountMask, 5));
+    CHECK(wear(player2, 0x1d7, kItemEffectCountMask, 5) && wear(player2, 0x1dc, kItemEffectCountMask, 5));
     runtime_cheats_set_slot_human(nullptr);
     runtime_cheats_set_online(1);
     runtime_cheats_start(Bit(Cheat::InfiniteSkillUses) | Bit(Cheat::InfiniteItems) |
@@ -2002,6 +2019,195 @@ void TestDurability() {
     runtime_cheats_start(0, 1);
 }
 
+int DurabilityWear(const FakeGame& game, int32_t delta) {
+    alignas(16) static uint8_t frame[0x400];
+    std::memset(frame, 0, sizeof(frame));
+    const uint64_t unit = game.Unit();
+    std::memcpy(frame + 0x400 - 0x308 - 0x40, &unit, 8);
+    std::memcpy(frame + 0x400 - 0x2fc - 0x40, &delta, 4);
+    GuestRegs regs{};
+    regs.rbp = reinterpret_cast<uint64_t>(frame) + 0x400 - 0x40;
+    DurabilityHook(&regs);
+    int32_t after;
+    std::memcpy(&after, frame + 0x400 - 0x2fc - 0x40, 4);
+    return after;
+}
+
+void TestLocalMultiplayer() {
+    FakeGame humans[4] = {FakeGame(true, 0), FakeGame(true, 1), FakeGame(true, 2), FakeGame(true, 3)};
+    FakeGame enemy(false, 0), npc(false, 4);
+    const auto kind_of = [](const FakeGame& game, int mask) {
+        g_human_mask = mask;
+        return ClassifyUnit(TestMemory{}, game.Unit(), [](int32_t slot) { return MaskHumanSlot(slot) != 0; });
+    };
+
+    CHECK(kind_of(humans[0], 0x1) == UnitKind::PlayerOne && IsLocalHuman(UnitKind::PlayerOne));
+    for (int slot = 1; slot < 4; ++slot) {
+        CHECK(kind_of(humans[slot], 0x1 | (1 << slot)) == UnitKind::HumanPlayer);
+        CHECK(IsLocalHuman(kind_of(humans[slot], 0x1 | (1 << slot))));
+        CHECK(kind_of(humans[slot], 0x1) == UnitKind::OtherPlayer);
+        CHECK(!IsLocalHuman(kind_of(humans[slot], 0x1)));
+        CHECK(kind_of(humans[slot], 0xf & ~(1 << slot)) == UnitKind::OtherPlayer);
+    }
+    CHECK(kind_of(enemy, 0xf) == UnitKind::Other && kind_of(npc, 0xf) == UnitKind::Other);
+    CHECK(ClassifyUnit(TestMemory{}, 0, [](int32_t) { return true; }) == UnitKind::Other);
+    CHECK(ClassifyOwner(TestMemory{}, humans[2].Owner(), [](int32_t) { return true; }) == UnitKind::HumanPlayer);
+    CHECK(ClassifyOwner(TestMemory{}, humans[2].Owner()) == UnitKind::OtherPlayer);
+    CHECK(!IsLocalHuman(UnitKind::Other) && !IsLocalHuman(UnitKind::OtherPlayer));
+
+    for (const UnitKind human : {UnitKind::PlayerOne, UnitKind::HumanPlayer}) {
+        CHECK(ProtectedConsumeFlag(true, human, 1) == 0);
+        CHECK(SuppressesManaDelta(true, human, -1) && !SuppressesManaDelta(true, human, 1));
+        CHECK(ProtectedDurabilityDelta(true, human, -200) == 0);
+        CHECK(ProtectedDurabilityDelta(true, human, 500) == 500);
+        CHECK(ProtectedDurabilityDelta(true, human, 0) == 0);
+        CHECK(ProtectedDurabilityDelta(false, human, -200) == -200);
+        CHECK(ProtectedLivesInput(true, human, 2) == 3);
+        CHECK(ProtectedArrowAmount(true, human, true, 1) == 0);
+        CHECK(ProtectedArrowAmount(true, human, false, 1) == 1);
+        CHECK(HeldArrowCount(true, human, true, 3) == kInfiniteArrowCount);
+        CHECK(PreservedSkillUse(true, human, 4) && !PreservedSkillUse(true, human, 0));
+        CHECK(ScaledWalkMultiplier(2, human, 1.0f) == 2.0f);
+        CHECK(ScaledDamageTaken(50, human, 100) == 50);
+        CHECK(MultipliedDamage(10, human, 50) == 50);
+    }
+    CHECK(ProtectedDurabilityDelta(true, UnitKind::OtherPlayer, -200) == -200);
+    CHECK(ScaledDamageTaken(50, UnitKind::OtherPlayer, 100) == 100);
+    CHECK(ScaledWalkMultiplier(2, UnitKind::Other, 1.0f) == 1.0f);
+
+    runtime_cheats_set_slot_human(MaskHumanSlot);
+    g_human_mask = 0xf;
+    runtime_cheats_start(Bit(Cheat::InfiniteDurability), 1);
+    for (const FakeGame& human : humans) {
+        CHECK(DurabilityWear(human, -1000) == 0);
+        CHECK(DurabilityWear(human, 700) == 700);
+        CHECK(DurabilityWear(human, 0) == 0);
+    }
+    CHECK(DurabilityWear(enemy, -1000) == -1000 && DurabilityWear(npc, -1000) == -1000);
+    g_human_mask = 0x1;
+    for (int slot = 1; slot < 4; ++slot) {
+        CHECK(DurabilityWear(humans[slot], -1000) == -1000);
+    }
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyDurability), 1);
+    for (int slot = 1; slot < 4; ++slot) {
+        CHECK(DurabilityWear(humans[slot], -1000) == 0);
+    }
+    CHECK(DurabilityWear(humans[0], -1000) == -1000);
+    g_human_mask = 0xf;
+    for (int slot = 1; slot < 4; ++slot) {
+        CHECK(DurabilityWear(humans[slot], -1000) == -1000);
+    }
+
+    runtime_cheats_start(Bit(Cheat::InfiniteHealth), 1);
+    for (FakeGame& human : humans) {
+        GuestRegs hit = human.DamageRegs(50);
+        HealthDamageHook(&hit);
+        CHECK(hit.rcx == 0);
+    }
+    g_human_mask = 0x1;
+    for (int slot = 1; slot < 4; ++slot) {
+        GuestRegs hit = humans[slot].DamageRegs(50);
+        HealthDamageHook(&hit);
+        CHECK(hit.rcx == 50);
+    }
+    runtime_cheats_start(Bit(Cheat::InfiniteAllyHealth), 1);
+    g_human_mask = 0xf;
+    for (int slot = 1; slot < 4; ++slot) {
+        GuestRegs hit = humans[slot].DamageRegs(50);
+        HealthDamageHook(&hit);
+        CHECK(hit.rcx == 50);
+    }
+    g_human_mask = 0x1;
+    for (int slot = 1; slot < 4; ++slot) {
+        GuestRegs hit = humans[slot].DamageRegs(50);
+        HealthDamageHook(&hit);
+        CHECK(hit.rcx == 0);
+    }
+
+    runtime_cheats_start(Bit(Cheat::InfiniteMana), 1);
+    g_human_mask = 0xf;
+    for (const FakeGame& human : humans) {
+        GuestRegs cast{};
+        cast.rdi = human.Unit();
+        cast.rcx = 1;
+        ManaCostHook(&cast);
+        CHECK(cast.rcx == 0);
+        GuestRegs drain{};
+        drain.rdi = human.Unit();
+        drain.rsi = static_cast<uint32_t>(-1);
+        ManaDrainHook(&drain);
+        CHECK(drain.skip == 1);
+    }
+    g_human_mask = 0x1;
+    GuestRegs ally_cast{};
+    ally_cast.rdi = humans[2].Unit();
+    ally_cast.rcx = 1;
+    ManaCostHook(&ally_cast);
+    CHECK(ally_cast.rcx == 1);
+
+    runtime_cheats_start(Bit(Cheat::InfiniteLives), 1);
+    g_human_mask = 0xf;
+    for (const FakeGame& human : humans) {
+        GuestRegs respawn{};
+        respawn.r13 = human.Unit();
+        respawn.rax = 2;
+        LivesHook(&respawn);
+        CHECK(respawn.rax == 3);
+    }
+    g_human_mask = 0x1;
+    GuestRegs ally_respawn{};
+    ally_respawn.r13 = humans[1].Unit();
+    ally_respawn.rax = 2;
+    LivesHook(&ally_respawn);
+    CHECK(ally_respawn.rax == 2);
+
+    runtime_cheats_start(Bit(Cheat::InfiniteArrows), 1);
+    g_human_mask = 0xf;
+    for (const FakeGame& human : humans) {
+        GuestRegs shot{};
+        shot.rdi = human.Owner();
+        shot.rsi = 1;
+        ArrowHook(&shot);
+        CHECK(shot.rsi == 0);
+    }
+    g_human_mask = 0x1;
+    GuestRegs ally_shot{};
+    ally_shot.rdi = humans[1].Owner();
+    ally_shot.rsi = 1;
+    ArrowHook(&ally_shot);
+    CHECK(ally_shot.rsi == 1);
+
+    runtime_cheats_start(Bit(Cheat::InfiniteSkillPoints), 1);
+    g_human_mask = 0xf;
+    alignas(16) uint8_t record[0x100] = {};
+    const uint16_t points = 30;
+    std::memcpy(record + kSkillPointsOffset, &points, sizeof(points));
+    for (uint64_t slot = 0; slot < 4; ++slot) {
+        GuestRegs buy{};
+        buy.r12 = slot;
+        buy.r13 = 20;
+        buy.r14 = reinterpret_cast<uint64_t>(record);
+        SkillPointsHook(&buy);
+        CHECK(static_cast<uint16_t>(buy.r13) == 30);
+    }
+    runtime_cheats_set_slot_human(nullptr);
+    runtime_cheats_start(0, 1);
+
+    RefillRound round;
+    CHECK(!round.Expired(100000) && !round.HasServed(0));
+    for (int32_t slot = 0; slot < 4; ++slot) {
+        CHECK(!round.Served(slot, 0x1000 + slot));
+        round.MarkServed(slot, 0x1000 + slot, 1000);
+        CHECK(round.Served(slot, 0x1000 + slot) && round.HasServed(slot));
+    }
+    CHECK(!round.Expired(1100));
+    CHECK(!round.Served(2, 0x2002));
+    CHECK(round.Served(7, 1));
+    CHECK(round.Expired(1000 + RefillRound::kWindowMs));
+    round.Reset();
+    CHECK(!round.Expired(5000) && !round.Served(0, 0x1000));
+}
+
 // Worn gear in the fake unit's equipment list, as the game's own list functions would hand it out.
 struct FakeEquipment {
     alignas(16) uint8_t bag[0x354] = {};
@@ -2158,6 +2364,25 @@ void TestDurabilityRefill() {
     CHECK(runtime_cheat_refills_pending() == Bit(Cheat::InfiniteDurability));
     tick(player1);
     CHECK(Durability(player1, 0) == 1000 && Durability(player2, 0) == 100);
+
+    // With a human Player 2 the request stays open until their unit has ticked, and repairs both once.
+    FakeGame::Store<int32_t>(Slot(player1, 0) + kItemDurabilityOffset, 600);
+    runtime_cheats_set_slot_human(MaskHumanSlot);
+    g_human_mask = 0x3;
+    runtime_cheats_start(0, 1);
+    runtime_cheat_toggle(durability);
+    tick(enemy);
+    tick(player1);
+    CHECK(Durability(player1, 0) == 1000 && Durability(player2, 0) == 100);
+    CHECK(runtime_cheat_refills_pending() == Bit(Cheat::InfiniteDurability));
+    tick(player2);
+    CHECK(Durability(player2, 0) == 1000 && runtime_cheat_refills_pending() == 0);
+    const int served_calls = g_equipment.set_calls;
+    FakeGame::Store<int32_t>(Slot(player2, 0) + kItemDurabilityOffset, 700);
+    tick(player1);
+    tick(player2);
+    CHECK(Durability(player2, 0) == 700 && g_equipment.set_calls == served_calls); // only once
+    runtime_cheats_set_slot_human(nullptr);
 
     // Enabled before Player 1's gear exists (the launcher's value, or the menu): it waits, then runs once.
     FakeGame late(true, 0);
@@ -2449,7 +2674,7 @@ void TestHealthCheats() {
     SetHp(human1, 20);
     tick(human1);
     runtime_cheats_set_slot_human(nullptr);
-    CHECK(Hp(human1) == 20); // a human-controlled slot is not an ally
+    CHECK(Hp(human1) == 600); // a human-controlled slot follows Infinite Health, not the ally cheat
 
     // A dead member is not brought back, and its revive starts a new snapshot.
     SetHp(ally2, 0);
@@ -3991,6 +4216,7 @@ int main(int argc, char** argv) {
     TestBossTrace();
     TestBossTraceImages();
     TestDurability();
+    TestLocalMultiplayer();
     TestDurabilityRefill();
     TestLives();
     TestGold();

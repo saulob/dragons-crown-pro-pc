@@ -223,7 +223,7 @@ Cheats are disabled while Online Play is enabled	As trapaças ficam desativadas 
 Press F10 while playing to open the Cheats menu. Changes made there apply only to the current session. Meant for offline and local play.	Pressione F10 durante o jogo para abrir o menu de trapaças. As alterações feitas ali valem apenas para a sessão atual. Destinado ao jogo offline e local.
 Cheats are not available for\s	As trapaças não estão disponíveis para\s
 Infinite Health	Vida infinita
-Freezes Player 1's current health	Congela a vida atual do Jogador 1
+Freezes local human players' current health	Congela a vida atual dos jogadores humanos locais
 Infinite Ally Health	Vida infinita dos aliados
 Freezes AI allies' current health	Congela a vida atual dos aliados controlados pela IA
 Infinite Mana	Mana infinita
@@ -251,7 +251,7 @@ Multiplies the normal movement speed	Multiplica a velocidade normal de movimento
 Experience Multiplier	Multiplicador de experiência
 Multiplies the experience each award adds	Multiplica a experiência que cada recompensa concede
 Damage Taken	Dano recebido
-Scales the damage Player 1 takes	Ajusta o dano que o Jogador 1 recebe
+Scales the damage local human players take	Ajusta o dano que os jogadores humanos locais recebem
 Infinite Ally Skill Uses	Usos de habilidade infinitos dos aliados
 Prevent AI allies' equipped skill uses from decreasing when used	Impede que os usos das habilidades equipadas dos aliados de IA diminuam ao serem usados
 Infinite Ally Items	Itens infinitos dos aliados

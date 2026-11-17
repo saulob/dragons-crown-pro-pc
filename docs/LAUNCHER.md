@@ -632,7 +632,7 @@ below them the **Movement Speed** combo
 Cheats work on every supported build: the tables of CUSA10454 1.00, or the sites found by signature on the others. All
 are ordinary saved settings, Off by default: Save and Play keep them, Reset all settings puts
 them back to Off. The saved values are the start of every game session; the F10 menu changes the running session only
-and never writes them. The hooks, the menu and Player 1 targeting are in [CHEATS.md](CHEATS.md).
+and never writes them. The hooks, the menu and the player targeting are in [CHEATS.md](CHEATS.md).
 
 ## Controls
 
@@ -665,7 +665,7 @@ A gamepad that is found takes the lowest free slot and logs its user in once; th
 `LOGIN` event. The keyboard, `DCP_PAD_FILE`, pad recording and replay and the save list's controls belong to Player 1
 only. Unplugging a gamepad closes it and frees its slot, but no `LOGOUT` is sent: the player stays logged in, and the
 next gamepad connected takes the lowest free slot, which is not necessarily the same player. A fifth gamepad is ignored.
-The cheats act on Player 1 only (Infinite Gold, which is one pool for the save, excepted); Infinite Ally Health, Infinite Ally Mana and Infinite Ally Durability act on AI-controlled party allies instead. Add 100 Skill Points and Level Up (+1 Level) change Player 1's save record. The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
+The cheats act on every local human player, Players 1 to 4 (Infinite Gold, which is one pool for the save, excepted); the five Ally cheats act on AI-controlled party allies only, never on a human Player 2 to 4. Fill Health, Set Low Health, Add 100 Skill Points and Level Up (+1 Level) stay on Player 1; Online Play turns every cheat Off. The Experience Multiplier applies to every player's experience award; see [CHEATS.md](CHEATS.md).
 
 **Controller prompts**: PlayStation (original) or Xbox. The game draws its button prompts from one 1024 × 512 BC7
 atlas (`Interface_arranged000`) in `stage/Interface.ftx` and in each language's `stage/Interface_XX.ftx` (DE, ES, FR, IT,

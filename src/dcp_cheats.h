@@ -56,7 +56,7 @@ struct CheatInfo {
 };
 
 inline constexpr CheatInfo kCheats[] = {
-    {Cheat::InfiniteHealth, kInfiniteHealthKey, "Infinite Health", "Freezes Player 1's current health"},
+    {Cheat::InfiniteHealth, kInfiniteHealthKey, "Infinite Health", "Freezes local human players' current health"},
     {Cheat::InfiniteAllyHealth, kInfiniteAllyHealthKey, "Infinite Ally Health",
      "Freezes AI allies' current health"},
     {Cheat::InfiniteMana, kInfiniteManaKey, "Infinite Mana", "Prevent mana from decreasing when casting spells"},
@@ -188,7 +188,7 @@ inline constexpr int kMovementSpeedOff = 1;
 
 inline constexpr char kDamageTakenKey[] = "cheat_damage_taken";
 inline constexpr char kDamageTakenName[] = "Damage Taken";
-inline constexpr char kDamageTakenHelp[] = "Scales the damage Player 1 takes";
+inline constexpr char kDamageTakenHelp[] = "Scales the damage local human players take";
 
 inline constexpr Choice kDamageTakenChoices[] = {
     {100, "100", "100%"}, {75, "75", "75%"}, {50, "50", "50%"}, {25, "25", "25%"}, {0, "0", "0%"},
@@ -373,7 +373,12 @@ inline constexpr int32_t kPlayerOneSlot = 0;
 inline constexpr int32_t kLastPartySlot = 3;
 inline constexpr uint32_t kUnitClassOffset = 0xcb;
 
-enum class UnitKind { Other, PlayerOne, OtherPlayer };
+enum class UnitKind { Other, PlayerOne, OtherPlayer, HumanPlayer };
+
+// Player 1, or a party slot the runtime reports as a live human controller.
+constexpr bool IsLocalHuman(UnitKind kind) {
+    return kind == UnitKind::PlayerOne || kind == UnitKind::HumanPlayer;
+}
 
 // An AI ally is a player-shaped unit in a non-primary party slot with no live human controller on that slot.
 constexpr bool IsAiAlly(uint32_t category, int32_t slot, uint8_t class_index) {
@@ -394,6 +399,17 @@ UnitKind ClassifyUnit(const Memory& memory, uint64_t unit) {
     return memory.S32(unit + kUnitPlayerSlotOffset) == kPlayerOneSlot ? UnitKind::PlayerOne : UnitKind::OtherPlayer;
 }
 
+// `slot_human(slot)` tells whether a live human controller owns that party slot.
+template <typename Memory, typename SlotHuman>
+UnitKind ClassifyUnit(const Memory& memory, uint64_t unit, SlotHuman slot_human) {
+    const UnitKind kind = ClassifyUnit(memory, unit);
+    if (kind != UnitKind::OtherPlayer) {
+        return kind;
+    }
+    const int32_t slot = memory.S32(unit + kUnitPlayerSlotOffset);
+    return slot > kPlayerOneSlot && slot <= kLastPartySlot && slot_human(slot) ? UnitKind::HumanPlayer : kind;
+}
+
 // The chara (owner) side of a unit: [owner+0x9b8] is its unit, [owner+0x39e0] the class index.
 inline constexpr uint32_t kOwnerUnitOffset = 0x9b8;
 inline constexpr uint32_t kOwnerClassOffset = 0x39e0;
@@ -401,8 +417,8 @@ inline constexpr uint32_t kElfClass = 2;
 inline constexpr uint32_t kSorceressClass = 4;
 inline constexpr uint32_t kWizardClass = 5;
 
-template <typename Memory>
-UnitKind ClassifyOwner(const Memory& memory, uint64_t owner) {
+template <typename Memory, typename... SlotHuman>
+UnitKind ClassifyOwner(const Memory& memory, uint64_t owner, SlotHuman... slot_human) {
     if (owner == 0) {
         return UnitKind::Other;
     }
@@ -410,7 +426,7 @@ UnitKind ClassifyOwner(const Memory& memory, uint64_t owner) {
     if (unit == 0 || memory.U64(unit + kUnitOwnerOffset) != owner) {
         return UnitKind::Other;
     }
-    return ClassifyUnit(memory, unit);
+    return ClassifyUnit(memory, unit, slot_human...);
 }
 
 template <typename Memory>
@@ -477,9 +493,9 @@ private:
     std::array<Entry, kSlots> entries_{};
 };
 
-// A hit on Player 1 is scaled; heals and everyone else are left alone. A scaled hit stays at least 1 unless the setting is 0%.
+// A hit on a local human player is scaled; heals and everyone else are left alone. A scaled hit stays at least 1 unless the setting is 0%.
 constexpr int32_t ScaledDamageTaken(int percent, UnitKind kind, int32_t amount) {
-    if (percent >= kDamageTakenOff || kind != UnitKind::PlayerOne || amount <= 0) {
+    if (percent >= kDamageTakenOff || !IsLocalHuman(kind) || amount <= 0) {
         return amount;
     }
     if (percent <= 0) {
@@ -516,7 +532,7 @@ constexpr int32_t MultipliedHpBeforeHit(int multiplier, UnitKind kind, int32_t h
 
 // UseMP deducts only when its consume flag is 1; with 0 the cast still succeeds and costs nothing.
 constexpr uint32_t ProtectedConsumeFlag(bool enabled, UnitKind kind, uint32_t consume) {
-    return enabled && kind == UnitKind::PlayerOne ? 0 : consume;
+    return enabled && IsLocalHuman(kind) ? 0 : consume;
 }
 
 constexpr uint32_t ProtectedAllyConsumeFlag(bool enabled, bool ally, uint32_t consume) {
@@ -525,7 +541,7 @@ constexpr uint32_t ProtectedAllyConsumeFlag(bool enabled, bool ally, uint32_t co
 
 // AddMP's negative deltas are the sustained drain; positive ones (recovery) always go through.
 constexpr bool SuppressesManaDelta(bool enabled, UnitKind kind, int32_t delta) {
-    return enabled && kind == UnitKind::PlayerOne && delta < 0;
+    return enabled && IsLocalHuman(kind) && delta < 0;
 }
 
 constexpr bool SuppressesAllyManaDelta(bool enabled, bool ally, int32_t delta) {
@@ -534,7 +550,7 @@ constexpr bool SuppressesAllyManaDelta(bool enabled, bool ally, int32_t delta) {
 
 // The endurance event (item durability) carries a signed delta: wear is negative, repair and recovery positive.
 constexpr int32_t ProtectedDurabilityDelta(bool enabled, UnitKind kind, int32_t delta) {
-    return enabled && kind == UnitKind::PlayerOne && delta < 0 ? 0 : delta;
+    return enabled && IsLocalHuman(kind) && delta < 0 ? 0 : delta;
 }
 
 constexpr int32_t ProtectedAllyDurabilityDelta(bool enabled, bool ally, int32_t delta) {
@@ -544,7 +560,7 @@ constexpr int32_t ProtectedAllyDurabilityDelta(bool enabled, bool ally, int32_t 
 // The respawn consumes a life as `lp - 1`; handing it `lp + 1` for Player 1 leaves the count where it was, and the
 // player still dies and respawns as always.
 constexpr int32_t ProtectedLivesInput(bool enabled, UnitKind kind, int32_t lives) {
-    return enabled && kind == UnitKind::PlayerOne ? lives + 1 : lives;
+    return enabled && IsLocalHuman(kind) ? lives + 1 : lives;
 }
 
 // Gold is one value for the whole save: a store that would lower it keeps the old value, a gain goes through.
@@ -565,9 +581,9 @@ constexpr int32_t GoldIncrease(int32_t current) {
 }
 
 // The walk multiplier the game builds from MOVE_UP buffs (1.0 without any) scales the pad-driven walk's speeds and its
-// look-ahead alike; Movement Speed scales it for Player 1, as a MOVE_UP buff of the same size would.
+// look-ahead alike; Movement Speed scales it for local human players, as a MOVE_UP buff of the same size would.
 constexpr float ScaledWalkMultiplier(int movement_speed, UnitKind kind, float multiplier) {
-    if (kind != UnitKind::PlayerOne || movement_speed <= kMovementSpeedOff ||
+    if (!IsLocalHuman(kind) || movement_speed <= kMovementSpeedOff ||
         !IsListedChoice(kMovementSpeedChoices, movement_speed)) {
         return multiplier;
     }
@@ -598,7 +614,7 @@ constexpr bool NeedsDurabilityRefill(uint32_t flags, int32_t current, int32_t ma
 
 // The Elf's arrow count drops by the amount of a shot; with 0 the shot still goes out and the count stays.
 constexpr int32_t ProtectedArrowAmount(bool enabled, UnitKind kind, bool elf, int32_t amount) {
-    return enabled && kind == UnitKind::PlayerOne && elf && amount > 0 ? 0 : amount;
+    return enabled && IsLocalHuman(kind) && elf && amount > 0 ? 0 : amount;
 }
 
 // The Elf's arrow count is an int at owner+0x3ad4. Infinite Arrows holds it at 10 while the cheat is On.
@@ -606,14 +622,14 @@ inline constexpr uint32_t kArrowCountOffset = 0x3ad4;
 inline constexpr int32_t kInfiniteArrowCount = 10;
 
 constexpr int32_t HeldArrowCount(bool enabled, UnitKind kind, bool elf, int32_t count) {
-    return enabled && kind == UnitKind::PlayerOne && elf ? kInfiniteArrowCount : count;
+    return enabled && IsLocalHuman(kind) && elf ? kInfiniteArrowCount : count;
 }
 
 inline constexpr uint32_t kItemUsesOffset = 0x4c;
 
 // A skill item with uses left keeps its count; an empty one is left to the game's own empty handling.
 constexpr bool PreservedSkillUse(bool enabled, UnitKind kind, int32_t uses) {
-    return enabled && kind == UnitKind::PlayerOne && uses > 0;
+    return enabled && IsLocalHuman(kind) && uses > 0;
 }
 
 constexpr bool PreservedAllySkillUse(bool enabled, bool ally, int32_t uses) {
@@ -646,9 +662,9 @@ constexpr int32_t SkillAllowance(bool enabled, int32_t base, int32_t bonus, int3
     return enabled && excess > 0 ? base + excess : base;
 }
 
-// The skill purchase stores the points left; Player 1 keeps what they had. Earning and refunds never come here.
-constexpr int32_t ProtectedSkillPoints(bool enabled, int32_t player_index, int32_t before, int32_t after) {
-    return enabled && player_index == kPlayerOneSlot && after < before ? before : after;
+// The skill purchase stores the points left; a local human player keeps what they had. Earning and refunds never come here.
+constexpr int32_t ProtectedSkillPoints(bool enabled, bool local_human, int32_t before, int32_t after) {
+    return enabled && local_human && after < before ? before : after;
 }
 
 inline constexpr uint32_t kSkillPointsOffset = 0x24; // int16 in the player's save record
@@ -701,6 +717,44 @@ constexpr RefillPlan PlanRefill(bool health_pending, bool mana_pending, uint32_t
     const bool has_mana = class_index == kSorceressClass || class_index == kWizardClass;
     return {health_pending, mana_pending && has_mana, health_pending, mana_pending};
 }
+
+// A one-time refill that has to reach every local human player. Each unit is served once per round; once the first one
+// is served, the others have a short window to tick before the request closes.
+class RefillRound {
+public:
+    static constexpr int64_t kWindowMs = 250;
+
+    bool Served(int32_t slot, uint64_t unit) const {
+        return slot < 0 || static_cast<size_t>(slot) >= done_.size() || done_[slot] == unit;
+    }
+
+    bool HasServed(int32_t slot) const {
+        return slot >= 0 && static_cast<size_t>(slot) < done_.size() && done_[slot] != 0;
+    }
+
+    void MarkServed(int32_t slot, uint64_t unit, int64_t now_ms) {
+        if (slot < 0 || static_cast<size_t>(slot) >= done_.size()) {
+            return;
+        }
+        if (!started_) {
+            started_ = true;
+            start_ms_ = now_ms;
+        }
+        done_[slot] = unit;
+    }
+
+    bool Expired(int64_t now_ms) const { return started_ && now_ms - start_ms_ >= kWindowMs; }
+
+    void Reset() {
+        started_ = false;
+        done_ = {};
+    }
+
+private:
+    bool started_ = false;
+    int64_t start_ms_ = 0;
+    std::array<uint64_t, 4> done_{};
+};
 
 // The saved settings as a bit per cheat, the form the loader hands to the runtime.
 constexpr uint32_t Bit(Cheat cheat) {
