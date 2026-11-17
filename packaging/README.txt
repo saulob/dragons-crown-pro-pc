@@ -102,7 +102,8 @@ PLAYING
   F1 options on every supported build. It is based on the work of
   Marcelo - Uma Ficha (https://www.youtube.com/@umaficha1), used with
   permission. New characters get Portuguese default messages; characters
-  already in a save keep theirs. Credits and trophies stay in the build's
+  already in a save keep their own messages, and their unchanged default
+  messages are shown in Portuguese. Credits and trophies stay in the build's
   own language. The translated manual pages are shown on the USA and
   European builds only.
 - English on the Japanese and Asia/Hong Kong builds is provided by the PC
@@ -114,7 +115,16 @@ PLAYING
   an official translation. No fan package is needed. The launcher, the F1
   options and the F10 overlay stay in English.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
-  Cheats page for the values saved for the next start.
+  Cheats page for the values saved for the next start. The cheats apply to
+  every local human player; the Ally cheats apply to AI allies only.
+- Boss Battle: turn on Gameplay > Enable Boss Battle, then choose Boss Battle
+  in the Inn menu to fight any of the 20 bosses, or all of them with Fight All.
+  Your campaign save is protected during the fights.
+- Gameplay > Unlock Labyrinth of Chaos and Unlock Ultimate + Tower of Mirages
+  open that endgame content once the Stables are open; they are independent.
+- Mouse: Left and Right Mouse attack; hold Middle Mouse (Pointer Control) to
+  move the game's red hand pointer. Mouse Controls and Mouse Sensitivity are
+  on the launcher's Controls page.
 - An experimental AMD water workaround (black areas under characters standing
   in water) is on with AMD graphics cards and off elsewhere.
 - If the game closes right after PLAY while a recording, chat or performance

@@ -1884,7 +1884,7 @@ static int fader_busy(uint64_t screen) {
     return fader && guest_i32(fader + FADER_FRAMES) != 0;
 }
 
-/* DEBUG_SAULO: wall time for the transition telemetry. */
+/* wall time for the transition telemetry. */
 static uint32_t host_ms(void) {
     struct timespec now;
     if (!timespec_get(&now, TIME_UTC)) return 0;
@@ -2011,12 +2011,10 @@ static void supply_return_choice(uint64_t scene) {
 static void follow_arena_fade_in(const BossBattleProbe *probe);
 
 static void follow_online(void);
-/* DEBUG_SAULO */
 static void network_menu_return_step(void);
 static int page_built(uint64_t window, uint64_t list);
 static void page_watch_event(int *seen, const char *what);
-static void bbmenu_event(const char *what); /* DEBUG_SAULO */
-static const char *bbmenu_sound_source(void);
+static void bbmenu_event(const char *what);
 
 /* At the scene frame's call into the menu handler: r15 is the scene manager. */
 static _Atomic uint64_t info_character_function;
@@ -2709,7 +2707,7 @@ static void send_follow_party(uint64_t inn, uint64_t context, int index) {
         return;
     }
     if (!inn || !inn_functions.inn_party) {
-        printf("DEBUG_SAULO JOINSEAT failed reason=no Inn to send the guest's party from (boss %d)\n", index);
+        printf("Boss Battle trace: JOINSEAT failed reason=no Inn to send the guest's party from (boss %d)\n", index);
         return;
     }
     log_party("before the guest's party request", context);
@@ -2750,8 +2748,8 @@ static int menu_was_open, page_suspended, page_return_pending, page_reopening, p
 static int page_reopen_attempts, page_leaving_options, page_seen_act, page_seen_list;
 enum { PAGE_WATCH_NONE, PAGE_WATCH_NORMAL, PAGE_WATCH_RETURN };
 static int page_watch;
-static unsigned bbmenu_cycle; /* DEBUG_SAULO */
-/* DEBUG_SAULO: the visitor page's reopen on a rebuilt Inn, logged once per step */
+static unsigned bbmenu_cycle;
+/* the visitor page's reopen on a rebuilt Inn, logged once per step */
 typedef enum { VISITOR_PAGE_NONE, VISITOR_PAGE_ARMED, VISITOR_PAGE_REQUESTED, VISITOR_PAGE_ACTIVE, VISITOR_PAGE_SEATED } VisitorPage;
 static VisitorPage visitor_page;
 /* The page shown belongs to a host's session (built while visiting), or outlived the Inn it was opened from. */
@@ -2855,8 +2853,7 @@ enum {
     FADE_FRAMES = 30,
     RETURN_FADE_FRAMES = 5,
     RETURN_FADE_IN_FRAMES = 10,
-    FADE_TRACE_LINES = 32,
-    SOUND_TRACE_LINES = 64
+    FADE_TRACE_LINES = 32
 };
 #define FADE_BLACK 0xff000000u
 #define FADE_CLEAR 0u
@@ -2869,7 +2866,7 @@ static int room_wished;
 /* The visit ends: its Boss Battle room goes with it, through the game's own room wish asked with no feature wanting a
  * room, as the game leaves a room when the player walks away from the Castle Gate. */
 static void log_handoff(const char *when, uint64_t context);
-static int handoff_lines; /* DEBUG_SAULO */
+static int handoff_lines;
 
 /* A visit that had a Boss Battle room: its waiting seats end with it; its room ends with it only when nobody else is in it. */
 static int visit_had_room, room_leave_pending;
@@ -2938,13 +2935,13 @@ static void finish_boss_to_story_handoff(uint64_t scene) {
     if (boss_battle_session_active() || !visit_had_room) return;
     if (boss_battle_online_visitor()) {
         if (!page_of_visitor || !boss_battle_screen_shown() || !scene_leaves_inn_for_town(scene)) return;
-        puts("DEBUG_SAULO BOSSHANDOFF fallback=scene departure before synchronization");
+        puts("Boss Battle trace: BOSSHANDOFF fallback=scene departure before synchronization");
         boss_battle_online_end_visitor("the scene leaves the Inn for town before the host's end arrived");
     }
     if (boss_battle_online_selected() || boss_battle_online_is_host()) return;
-    puts("DEBUG_SAULO BOSSHANDOFF guest cleanup begins in Inn");
+    puts("Boss Battle trace: BOSSHANDOFF guest cleanup begins in Inn");
     end_online_visit();
-    puts("DEBUG_SAULO BOSSHANDOFF guest cleanup complete early_story_role=guest");
+    puts("Boss Battle trace: BOSSHANDOFF guest cleanup complete early_story_role=guest");
 }
 
 static void end_online_visit(void) {
@@ -2967,7 +2964,7 @@ static void end_online_visit(void) {
     } else {
         handoff_local_seat_pending = canonical_seats = 1;
         handoff_party = HANDOFF_PARTY_PENDING;
-        printf("DEBUG_SAULO BOSSHANDOFF normal party rebuild begins members=%d\n", boss_battle_online_members());
+        printf("Boss Battle trace: BOSSHANDOFF normal party rebuild begins members=%d\n", boss_battle_online_members());
         boss_battle_online_room_neutral();
     }
     log_handoff("after-cleanup", manager);
@@ -3015,7 +3012,7 @@ static void release_black(uint64_t manager, const char *why) {
     if (!atomic_exchange(&black_held, 0)) return;
     const int covered_return = atomic_exchange(&return_cover, 0);
     fade_scene(manager, FADE_CLEAR, covered_return ? RETURN_FADE_IN_FRAMES : FADE_FRAMES);
-    printf("DEBUG_SAULO Boss Battle transition: scene fader fades in (%s)\n", why);
+    printf("Boss Battle trace: Boss Battle transition: scene fader fades in (%s)\n", why);
 }
 
 static void transition_act(int *act, int *step) {
@@ -3034,13 +3031,13 @@ static void begin_start_transition(void) {
     atomic_store(&help_closed_logged, 0);
     boss_battle_start_transition_set(BOSS_BATTLE_START_FADING);
     fade_scene(manager, FADE_BLACK, FADE_FRAMES);
-    puts("DEBUG_SAULO Boss Battle start: fade-out begins");
+    puts("Boss Battle trace: Boss Battle start: fade-out begins");
 }
 
 static void cancel_start_transition(uint64_t manager) {
     boss_battle_start_transition_set(BOSS_BATTLE_START_NONE);
     fade_scene(manager, FADE_CLEAR, FADE_FRAMES);
-    puts("DEBUG_SAULO Boss Battle start: not started, the Inn fades back in");
+    puts("Boss Battle trace: Boss Battle start: not started, the Inn fades back in");
 }
 
 /* A Fight All run that ended at the hidden Inn: the black stays for the page that reopens, or fades in when none will. */
@@ -3101,7 +3098,7 @@ static void open_screen(GuestRegs *regs, uint64_t inn, uint64_t context) {
 
 /* A boss confirmed on the screen: the party send and the arena request, from the Inn menu frame under the held black. */
 static void start_chosen_boss(uint64_t inn, uint64_t context, int index) {
-    printf("DEBUG_SAULO Boss Battle transition: Inn menu act=%#x step=%u, party send and arena request\n",
+    printf("Boss Battle trace: Boss Battle transition: Inn menu act=%#x step=%u, party send and arena request\n",
            guest_u8(inn + INN_ACT), guest_u8(inn + INN_STEP));
     const int holding = boss_battle_start_transition_holds();
     start_boss(inn, context, index);
@@ -3167,7 +3164,7 @@ typedef struct {
     uint8_t id[IDENTITY_ID_SIZE], block[IDENTITY_BLOCK_SIZE];
 } SlotIdentity;
 static SlotIdentity slot_original;
-static int info_identity_restore, info_source_logged;
+static int info_identity_restore;
 static uint64_t info_restore_slot;
 
 static SlotIdentity read_identity(uint64_t record) {
@@ -3188,12 +3185,6 @@ static int identity_empty(const SlotIdentity *identity) {
     return 1;
 }
 
-static unsigned identity_hash(const uint8_t *bytes, size_t size) { /* DEBUG_SAULO */
-    unsigned hash = 2166136261u;
-    for (size_t i = 0; i < size; ++i) hash = (hash ^ bytes[i]) * 16777619u;
-    return hash;
-}
-
 static void restore_slot_identity(void) {
     if (!info_identity_restore) return;
     write_identity(info_restore_slot, &slot_original);
@@ -3207,20 +3198,10 @@ static void expose_lead_identity(uint64_t slot) {
     if (!identity_empty(&slot_original)) return;
     const uint64_t record = lead_record(atomic_load(&screen_manager));
     const SlotIdentity lead = record ? read_identity(record) : (SlotIdentity){{0}, {0}};
-    if (!info_source_logged) { /* DEBUG_SAULO */
-        info_source_logged = 1;
-        if (identity_empty(&lead))
-            puts("DEBUG_SAULO FRIENDINFO no local identity: the lead character record is empty");
-        else
-            printf("DEBUG_SAULO FRIENDINFO local online identity available source=lead character record identity8_hash=%08x "
-                   "identity48_hash=%08x\n",
-                   identity_hash(lead.id, sizeof(lead.id)), identity_hash(lead.block, sizeof(lead.block)));
-    }
     if (identity_empty(&lead)) return;
     write_identity(slot, &lead);
     info_identity_restore = 1;
     info_restore_slot = slot;
-    puts("DEBUG_SAULO FRIENDINFO BossBattle using local online identity");
 }
 
 static int pre_room_context(const GuestRegs *regs) {
@@ -3249,7 +3230,7 @@ void GUEST_HOOK_ABI boss_battle_info_character_hook(GuestRegs *regs) {
     info_override_used = 1;
     if (!info_override_logged) {
         info_override_logged = 1;
-        puts("DEBUG_SAULO FRIENDINFO Boss Battle pre-room live override active");
+        puts("Boss Battle trace: FRIENDINFO Boss Battle pre-room live override active");
     }
     regs->rax = character ? character : (uint64_t)(uintptr_t)info_character_stand_in;
     regs->skip = 1;
@@ -3283,7 +3264,6 @@ static int offers_boss_room(void) {
 }
 
 static BossBattleJoinProbes join_probes;
-static int join_unit_closed, join_unit_state;
 
 void boss_battle_set_join_probes(const BossBattleJoinProbes *probes) {
     join_probes = probes ? *probes : (BossBattleJoinProbes){0};
@@ -3292,7 +3272,6 @@ void boss_battle_set_join_probes(const BossBattleJoinProbes *probes) {
 /* The join reply's unit loop: a character of the player's side (+0x2980 == 1) that its virtual +0x1098 counts closes the
  * room unless its state (+0x7b8) is 3, where the game asks it again (+0x10a0). */
 enum { UNIT_SIDE = 0x2980, UNIT_SIDE_PLAYER = 1, UNIT_JOIN_STATE = 0x7b8, UNIT_JOIN_FREE = 3, UNIT_COUNTED = 0x1098 };
-enum { JOIN_STATE_FIELD = 4 };
 
 typedef uint64_t(GUEST_HOOK_ABI *UnitQueryFn)(uint64_t unit);
 
@@ -3300,38 +3279,18 @@ typedef uint64_t(GUEST_HOOK_ABI *UnitQueryFn)(uint64_t unit);
  * own character in state 0, which closes the room; for an open Boss Battle host room that character is left out of the
  * count, as the game leaves out one that is not counted. A fight, a closed room and a joiner keep the game's count. */
 void GUEST_HOOK_ABI boss_battle_join_unit_hook(GuestRegs *regs) {
-    static int logged;
-    if (!join_probes.unit) return;
+    if (!join_probes.unit || !offers_boss_room()) return;
     const uint64_t unit = join_probes.unit(regs->rdi, (uint32_t)regs->rsi);
     if (!unit || guest_i32(unit + UNIT_SIDE) != UNIT_SIDE_PLAYER) return;
-    const uint64_t vtable = guest_u64(unit);
-    const UnitQueryFn counted = (UnitQueryFn)(uintptr_t)guest_u64(vtable + UNIT_COUNTED);
-    const int gate = counted && (counted(unit) & 0xff) != 0;
-    const int32_t state = guest_i32(unit + UNIT_JOIN_STATE);
-    const int closes = gate && state != UNIT_JOIN_FREE;
-    if (logged < 8) { /* DEBUG_SAULO */
-        ++logged;
-        printf("DEBUG_SAULO JOINUNIT type=vtable %#llx state=%d active=%d gate=%d blocks=%d\n", (unsigned long long)vtable,
-               (int)state, guest_i32(unit + UNIT_SIDE), gate, closes);
-    }
-    if (!closes) return;
-    join_unit_closed = 1;
-    join_unit_state = state;
-    if (!offers_boss_room()) return;
+    const UnitQueryFn counted = (UnitQueryFn)(uintptr_t)guest_u64(guest_u64(unit) + UNIT_COUNTED);
+    if (!counted || !(counted(unit) & 0xff) || guest_i32(unit + UNIT_JOIN_STATE) == UNIT_JOIN_FREE) return;
     regs->rax = 0;
     regs->skip = 1;
 }
 
-/* At the join reply's call after its store of the join state (r13 the record, r14 the scene): what the game computed. */
+/* At the join reply's call after its store of the join state: the game's own result is kept. */
 void GUEST_HOOK_ABI boss_battle_join_state_hook(GuestRegs *regs) {
-    static int logged;
-    const int unit_closed = join_unit_closed;
-    join_unit_closed = 0;
-    if (logged >= 8) return; /* DEBUG_SAULO */
-    ++logged;
-    printf("DEBUG_SAULO JOINSTATE mode=%s unit_block=%d final=%d scene act=%u stage=%u unit_state=%d\n",
-           offers_boss_room() ? "boss" : "other", unit_closed, (int)guest_i32(regs->r13 + JOIN_STATE_FIELD),
-           guest_u8(regs->r14 + SCENE_ACT), (unsigned)guest_i32(regs->r14 + SCENE_STAGE), join_unit_state);
+    (void)regs;
 }
 
 /* The scene's online party pass looks up each signed-in local player's party slot; the game has no answer for "none" and
@@ -3443,16 +3402,16 @@ static int own_empty_slot(uint64_t party) {
     return -1;
 }
 
-static void log_party_slots(uint64_t party, uint32_t player, uint64_t found) { /* DEBUG_SAULO */
+static void log_party_slots(uint64_t party, uint32_t player, uint64_t found) {
     static int logged;
     if (logged++ >= 6) return;
     if ((uint32_t)found < SEAT_SLOTS) {
         const uint64_t slot = party + SEAT_SLOT_BASE + found * SEAT_SLOT_SIZE;
-        printf("DEBUG_SAULO JOINSLOT local player=%u slot=%d owner=%d pad=%d valid=1\n", player, (int)found,
+        printf("Boss Battle trace: JOINSLOT local player=%u slot=%d owner=%d pad=%d valid=1\n", player, (int)found,
                guest_i32(slot + SEAT_SLOT_OWNER), guest_i32(slot + SEAT_SLOT_PAD));
         return;
     }
-    printf("DEBUG_SAULO JOINSLOT local player=%u slot=none member seat %d visitor %d:", player, boss_battle_online_slot(),
+    printf("Boss Battle trace: JOINSLOT local player=%u slot=none member seat %d visitor %d:", player, boss_battle_online_slot(),
            boss_battle_online_visitor());
     for (int i = 0; i < SEAT_SLOTS; ++i) {
         const uint64_t slot = party + SEAT_SLOT_BASE + (uint64_t)i * SEAT_SLOT_SIZE;
@@ -3469,7 +3428,7 @@ void GUEST_HOOK_ABI boss_battle_slot_request_hook(GuestRegs *regs) {
     if (!canonical_seats || !regs->r13) return;
     const int seat = (int8_t)guest_u8(regs->r13 + REQUEST_SENDER_SEAT);
     if (seat < 0 || seat >= SEAT_SLOTS) return;
-    printf("DEBUG_SAULO BOSSHANDOFF slot request net seat=%d asked=%d\n", seat, guest_i32(regs->r13 + REQUEST_SLOT));
+    printf("Boss Battle trace: BOSSHANDOFF slot request net seat=%d asked=%d\n", seat, guest_i32(regs->r13 + REQUEST_SLOT));
     *(int32_t *)(uintptr_t)(regs->r13 + REQUEST_SLOT) = seat;
 }
 
@@ -3486,15 +3445,15 @@ enum { ADD_PLAYER_NET_SEAT = 0x28, ADD_PLAYER_MEMBER = 0x2a, ADD_PLAYER_SLOT = 0
 /* At the "add player" handler's entry (rsi the record): which players the game seats during a Boss Battle online visit. */
 void GUEST_HOOK_ABI boss_battle_add_player_hook(GuestRegs *regs) {
     static int logged, handoff_logged;
-    if (regs->rsi && handoff_lines && handoff_logged < 8) { /* DEBUG_SAULO */
+    if (regs->rsi && handoff_lines && handoff_logged < 8) {
         ++handoff_logged;
-        printf("DEBUG_SAULO HANDOFF add member=%#x from net seat %#x slot=%d pad=%d local seat pending=%d\n",
+        printf("Boss Battle trace: HANDOFF add member=%#x from net seat %#x slot=%d pad=%d local seat pending=%d\n",
                guest_u16(regs->rsi + ADD_PLAYER_MEMBER), guest_u16(regs->rsi + ADD_PLAYER_NET_SEAT),
                guest_i32(regs->rsi + ADD_PLAYER_SLOT), guest_i32(regs->rsi + ADD_PLAYER_PAD), handoff_local_seat_pending);
     }
-    if (!regs->rsi || !boss_online_visit() || logged >= 8) return; /* DEBUG_SAULO */
+    if (!regs->rsi || !boss_online_visit() || logged >= 8) return;
     ++logged;
-    printf("DEBUG_SAULO JOINSEAT add player member=%#x slot=%d pad=%d\n", guest_u16(regs->rsi + ADD_PLAYER_MEMBER),
+    printf("Boss Battle trace: JOINSEAT add player member=%#x slot=%d pad=%d\n", guest_u16(regs->rsi + ADD_PLAYER_MEMBER),
            guest_i32(regs->rsi + ADD_PLAYER_SLOT), guest_i32(regs->rsi + ADD_PLAYER_PAD));
 }
 
@@ -3510,7 +3469,7 @@ void GUEST_HOOK_ABI boss_battle_party_slot_hook(GuestRegs *regs) {
     log_party_slots(regs->rdi, player, slot);
     if ((uint32_t)slot < SEAT_SLOTS && handoff_local_seat_pending && player == 0) {
         handoff_local_seat_pending = 0;
-        printf("DEBUG_SAULO BOSSHANDOFF local seat back slot=%d\n", (int)slot);
+        printf("Boss Battle trace: BOSSHANDOFF local seat back slot=%d\n", (int)slot);
     }
     if ((uint32_t)slot < SEAT_SLOTS || !waiting) return;
     const int empty = own_empty_slot(regs->rdi);
@@ -3539,10 +3498,10 @@ static void room_info_built(uint64_t info) {
     info_override_used = 0;
     if (guest_u64(info)) {
         show_lead_class(info);
-        puts("DEBUG_SAULO FRIENDINFO BossBattle native host copied host_empty=0");
+        puts("Boss Battle trace: FRIENDINFO BossBattle native host copied host_empty=0");
     } else {
-        puts("DEBUG_SAULO FRIENDINFO BossBattle native host copied host_empty=1");
-        puts("DEBUG_SAULO FRIENDINFO slot0 identity source empty");
+        puts("Boss Battle trace: FRIENDINFO BossBattle native host copied host_empty=1");
+        puts("Boss Battle trace: FRIENDINFO slot0 identity source empty");
     }
 }
 
@@ -3562,7 +3521,7 @@ static void request_boss_room(void) {
     const uint64_t manager = atomic_load(&screen_manager);
     if (!manager || !network_access_wish_room(guest_u64(manager + HYDELAND_MANAGER_SCENE))) return;
     room_wished = 1;
-    info_override_logged = info_source_logged = 0;
+    info_override_logged = 0;
     puts("Boss Battle Online: host role selected, requesting room");
 }
 
@@ -3661,13 +3620,13 @@ static void rebuild_handoff_party(uint64_t inn, uint64_t context) {
         !seats_owned(context, SEAT_LOCAL)) {
         inn_functions.inn_party(inn);
         handoff_party = HANDOFF_PARTY_SENT;
-        puts("DEBUG_SAULO BOSSHANDOFF local party sent role=guest");
+        puts("Boss Battle trace: BOSSHANDOFF local party sent role=guest");
     }
     if (!handoff_party_ready(context)) return;
-    printf("DEBUG_SAULO BOSSHANDOFF party ready role=%s room=%d\n", boss_battle_online_is_host() ? "host" : "guest",
+    printf("Boss Battle trace: BOSSHANDOFF party ready role=%s room=%d\n", boss_battle_online_is_host() ? "host" : "guest",
            boss_battle_online_members());
     if (handoff_travel_held)
-        printf("DEBUG_SAULO BOSSHANDOFF travel released party=%d/%d room=%d\n", 1 + seats_owned(context, SEAT_REMOTE),
+        printf("Boss Battle trace: BOSSHANDOFF travel released party=%d/%d room=%d\n", 1 + seats_owned(context, SEAT_REMOTE),
                boss_battle_online_members(), boss_battle_online_members());
     handoff_party = HANDOFF_PARTY_NONE;
     handoff_travel_held = 0;
@@ -3678,7 +3637,7 @@ static int holds_inn_departure(int row, uint64_t context) {
     if (handoff_party == HANDOFF_PARTY_NONE || !boss_battle_online_is_host()) return 0;
     if (boss_battle_inn_native_row(row) != INN_NATIVE_LEAVE_ROW && row != INN_BACK) return 0;
     if (!handoff_travel_held)
-        printf("DEBUG_SAULO BOSSHANDOFF travel held party=%d/%d\n", 1 + seats_owned(context, SEAT_REMOTE),
+        printf("Boss Battle trace: BOSSHANDOFF travel held party=%d/%d\n", 1 + seats_owned(context, SEAT_REMOTE),
                boss_battle_online_members());
     handoff_travel_held = 1;
     return 1;
@@ -3741,7 +3700,7 @@ void GUEST_HOOK_ABI boss_battle_inn_result_hook(GuestRegs *regs) {
         printf("Boss Battle [%u]: Boss Battle page reopens (%s)\n", boss_battle_reopen_session(), boss_battle_reopen_reason());
         if (visitor_page == VISITOR_PAGE_ARMED) {
             visitor_page = VISITOR_PAGE_REQUESTED;
-            puts("DEBUG_SAULO GUESTPAGE action=page requested source=visitor-inn-built");
+            puts("Boss Battle trace: GUESTPAGE action=page requested source=visitor-inn-built");
         }
         open_screen(regs, inn, context);
         return;
@@ -3768,7 +3727,7 @@ void GUEST_HOOK_ABI boss_battle_options_leave_hook(GuestRegs *regs) {
     const uint64_t inn = regs->r14;
     fade_scene(hydeland_town_manager(inn), FADE_BLACK, 0);
     if (boss_battle_start_transition() == BOSS_BATTLE_START_FADING) boss_battle_start_transition_set(BOSS_BATTLE_START_HELD);
-    printf("DEBUG_SAULO Boss Battle start: full black reached, options close completed act=%#x step=%u\n",
+    printf("Boss Battle trace: Boss Battle start: full black reached, options close completed act=%#x step=%u\n",
            guest_u8(inn + INN_ACT), guest_u8(inn + INN_STEP));
 }
 
@@ -3786,7 +3745,7 @@ void GUEST_HOOK_ABI boss_battle_arrival_fade_hook(GuestRegs *regs) {
     regs->rsi = FADE_BLACK;
     regs->rcx = TRANSITION_LAYER;
     atomic_store(&black_held, 1);
-    printf("DEBUG_SAULO Boss Battle transition: Inn arrival kept black for the Boss Battle page [%u]\n",
+    printf("Boss Battle trace: Boss Battle transition: Inn arrival kept black for the Boss Battle page [%u]\n",
            boss_battle_reopen_session());
 }
 
@@ -3803,7 +3762,7 @@ void GUEST_HOOK_ABI boss_battle_fade_hook(GuestRegs *regs) {
     if (traced && atomic_fetch_add(&fade_lines, 1) < FADE_TRACE_LINES) {
         int act, step;
         transition_act(&act, &step);
-        printf("DEBUG_SAULO Boss Battle start fade: source=native %s act=%d step=%d colour=%#x frames=%d layer=%#x%s\n",
+        printf("Boss Battle trace: Boss Battle start fade: source=native %s act=%d step=%d colour=%#x frames=%d layer=%#x%s\n",
                scene ? "scene fader" : "other fader", act, step, (uint32_t)regs->rsi, (int)(int32_t)regs->rdx,
                (uint32_t)regs->rcx, holds && scene ? ", held black" : "");
     }
@@ -3823,22 +3782,15 @@ static void follow_arena_fade_in(const BossBattleProbe *probe) {
 void GUEST_HOOK_ABI boss_battle_inn_help_line_hook(GuestRegs *regs) {
     if (!boss_battle_start_transition_holds() || !(regs->rdx & 1)) return;
     regs->rdx = 0;
-    if (!atomic_exchange(&help_closed_logged, 1)) puts("DEBUG_SAULO Boss Battle start: Inn help line closed");
+    if (!atomic_exchange(&help_closed_logged, 1)) puts("Boss Battle trace: Boss Battle start: Inn help line closed");
 }
 
 /* At the cue player (esi the cue): the menu cues the hidden guest join raises are not played while its cover holds. */
 void GUEST_HOOK_ABI boss_battle_cue_hook(GuestRegs *regs) {
-    static const char *const kMenuCues[] = {"cursor (COMMON_SELECT)", "confirm (COMMON_DECIDE)", "cancel (COMMON_CANCEL)"};
-    static atomic_int lines;
     const uint32_t cue = (uint32_t)regs->rsi;
-    if (cue < 0x6a || cue > 0x6c) return;
-    if (join_cover_holds()) {
-        regs->rax = 0;
-        regs->skip = 1;
-        return;
-    }
-    if (boss_battle_session_active() || atomic_fetch_add(&lines, 1) >= SOUND_TRACE_LINES) return;
-    printf("DEBUG_SAULO sound: %s %s\n", bbmenu_sound_source(), kMenuCues[cue - 0x6a]);
+    if (cue < 0x6a || cue > 0x6c || !join_cover_holds()) return;
+    regs->rax = 0;
+    regs->skip = 1;
 }
 
 /* At the Inn menu frame's help text call (r13 the Inn, esi the native row's message, from the cursor read as a native
@@ -4119,7 +4071,7 @@ void GUEST_HOOK_ABI boss_battle_options_built_hook(GuestRegs *regs) {
     refresh_screen(body);
     if (page_reopening && !live) page_return_pending = 1;
     page_reopening = 0;
-    if (atomic_load(&black_held)) puts("DEBUG_SAULO Boss Battle transition: page constructed, black kept until it is shown");
+    if (atomic_load(&black_held)) puts("Boss Battle trace: Boss Battle transition: page constructed, black kept until it is shown");
 }
 
 /* The reopened page is shown and takes input: its window runs its input act and the Options mode left its opening state. */
@@ -4136,13 +4088,13 @@ void GUEST_HOOK_ABI boss_battle_options_update_hook(GuestRegs *regs) {
     const unsigned session = boss_battle_session_id();
     if ((now == BOSS_BATTLE_INITIALIZING || now == BOSS_BATTLE_FIGHTING) && failure_logged != session) {
         failure_logged = session;
-        printf("DEBUG_SAULO Boss Battle transition: FAILURE an Options page still runs after the arena loaded [%u]\n",
+        printf("Boss Battle trace: Boss Battle transition: FAILURE an Options page still runs after the arena loaded [%u]\n",
                session);
     }
     drive_campaign_save(atomic_load(&screen_manager));
     if (atomic_load(&black_held) && !join_cover_holds() && reopened_page_ready(regs->rbx) &&
         !boss_battle_network_menu_returning()) {
-        puts("DEBUG_SAULO Boss Battle transition: page show complete");
+        puts("Boss Battle trace: Boss Battle transition: page show complete");
         release_black(atomic_load(&screen_manager), "Boss Battle page ready");
     }
     if (!is_screen(regs->rbx)) return;
@@ -4199,9 +4151,9 @@ static void reopen_visitor_page(uint64_t inn) {
     party_requested = 0;
     page_reopening = 1;
     visitor_page = VISITOR_PAGE_ARMED;
-    puts("DEBUG_SAULO GUESTPAGE gate=new Inn ready");
+    puts("Boss Battle trace: GUESTPAGE gate=new Inn ready");
     boss_battle_arm_menu_reopen(BOSS_BATTLE_REOPEN_VISITOR_INN);
-    puts("DEBUG_SAULO GUESTPAGE action=reopen armed");
+    puts("Boss Battle trace: GUESTPAGE action=reopen armed");
 }
 
 static int local_seat(uint64_t context) {
@@ -4212,12 +4164,12 @@ static int local_seat(uint64_t context) {
     return -1;
 }
 
-static void log_visitor_page(void) { /* DEBUG_SAULO */
+static void log_visitor_page(void) {
     if (visitor_page != VISITOR_PAGE_ACTIVE) return;
     const int slot = local_seat(atomic_load(&screen_manager));
     if (slot < 0) return;
     visitor_page = VISITOR_PAGE_SEATED;
-    printf("DEBUG_SAULO GUESTPAGE ready=1 slot=%d\n", slot);
+    printf("Boss Battle trace: GUESTPAGE ready=1 slot=%d\n", slot);
 }
 
 static int other_window_open(void) {
@@ -4248,34 +4200,24 @@ static void set_list_hidden(uint64_t list, int hidden) {
     memcpy((void *)(uintptr_t)(list + LIST_FLAGS), &flags, sizeof(flags));
 }
 
-/* DEBUG_SAULO: begin */
 static int bbmenu_quarantine_watch;
-static uint64_t bbmenu_last_list;
 
 static void bbmenu_event(const char *what) {
-    printf("DEBUG_SAULO BBMENU cycle=%u %s\n", bbmenu_cycle, what);
+    printf("Boss Battle trace: BBMENU cycle=%u %s\n", bbmenu_cycle, what);
 }
-
-static const char *bbmenu_sound_source(void) {
-    const uint64_t window = menu_window();
-    if (bbmenu_last_list && bbmenu_last_list == atomic_load(&screen_body)) return "Boss Battle page input";
-    if (window && bbmenu_last_list == window + 0x1520) return "Network Menu input";
-    return "unknown native menu input";
-}
-/* DEBUG_SAULO: end */
 
 /* The game may build the new page in the old page's storage, so a hidden bit Boss Battle set can outlive the old list. */
 static void reopened_list_visible(uint64_t list) {
     const int32_t before = guest_i32(list + LIST_FLAGS);
     if (page_hidden_owned) set_list_hidden(list, 0);
     page_hidden_owned = 0;
-    printf("DEBUG_SAULO BBMENU cycle=%u new list visual flags before=%#x after=%#x\n", bbmenu_cycle, (unsigned)before,
+    printf("Boss Battle trace: BBMENU cycle=%u new list visual flags before=%#x after=%#x\n", bbmenu_cycle, (unsigned)before,
            (unsigned)guest_i32(list + LIST_FLAGS));
 }
 
 /* A page set up on a terminated window never runs, so it is not the page Boss Battle returns to. 1 when it is live. */
 static int page_built(uint64_t window, uint64_t list) {
-    printf("DEBUG_SAULO BBMENU %s page built ptr=%#llx mode=%d state=%#x\n", page_reopening ? "return" : "normal",
+    printf("Boss Battle trace: BBMENU %s page built ptr=%#llx mode=%d state=%#x\n", page_reopening ? "return" : "normal",
            (unsigned long long)window, guest_i32(window + WINDOW_STEP_MODE), guest_u8(window + WINDOW_STATE));
     if (!live_window(window)) return 0;
     if (page_reopening) reopened_list_visible(list);
@@ -4291,27 +4233,27 @@ int boss_battle_network_menu_returning(void) {
 static void page_watch_event(int *seen, const char *what) {
     if (page_watch == PAGE_WATCH_NONE || *seen) return;
     *seen = 1;
-    printf("DEBUG_SAULO BBMENU %s first %s\n", page_watch == PAGE_WATCH_RETURN ? "return" : "normal", what);
+    printf("Boss Battle trace: BBMENU %s first %s\n", page_watch == PAGE_WATCH_RETURN ? "return" : "normal", what);
 }
 
 /* A built page is the live page once its window ran its act, its list its update, and the page its result. */
 static void page_result_seen(void) {
     if (page_watch == PAGE_WATCH_NONE || !page_seen_act || !page_seen_list) return;
     const int returned = page_watch == PAGE_WATCH_RETURN;
-    printf("DEBUG_SAULO BBMENU %s first page result\n", returned ? "return" : "normal");
+    printf("Boss Battle trace: BBMENU %s first page result\n", returned ? "return" : "normal");
     page_watch = PAGE_WATCH_NONE;
     if (!returned) return;
-    bbmenu_event("valid Boss Battle page active"); /* DEBUG_SAULO */
+    bbmenu_event("valid Boss Battle page active");
     puts("Boss Battle Online: Boss Battle page resumed");
     if (visitor_page == VISITOR_PAGE_REQUESTED) {
         visitor_page = VISITOR_PAGE_ACTIVE;
-        puts("DEBUG_SAULO GUESTPAGE action=page active");
+        puts("Boss Battle trace: GUESTPAGE action=page active");
     }
     release_black(atomic_load(&screen_manager), "the Boss Battle page is active");
 }
 
-static int network_rows_seen, network_rebuilds, network_reported[6]; /* DEBUG_SAULO: once per open */
-static const char *network_close_source = "B"; /* DEBUG_SAULO */
+static int network_rows_seen, network_rebuilds, network_reported[6]; /* once per open */
+static const char *network_close_source = "B";
 
 /* The Network Menu hides the page's list while it is up; the page's cursor is kept for the page that replaces it. */
 static void suspend_page(uint64_t list) {
@@ -4320,8 +4262,8 @@ static void suspend_page(uint64_t list) {
     menu_was_open = 1;
     page_reopen_attempts = 0;
     page_leaving_options = 0;
-    ++bbmenu_cycle; /* DEBUG_SAULO */
-    bbmenu_event("Network Menu opened"); /* DEBUG_SAULO */
+    ++bbmenu_cycle;
+    bbmenu_event("Network Menu opened");
     boss_battle_screen_remember(guest_i32(list + LIST_CURSOR));
     page_hidden_owned = !(guest_i32(list + LIST_FLAGS) & LIST_HIDDEN);
     set_list_hidden(list, 1);
@@ -4341,17 +4283,17 @@ static uint64_t network_list(void) {
                : 0;
 }
 
-static void report_once(int slot, const char *what) { /* DEBUG_SAULO */
+static void report_once(int slot, const char *what) {
     if (network_reported[slot]) return;
     network_reported[slot] = 1;
-    printf("DEBUG_SAULO BBMENU cycle=%u %s\n", bbmenu_cycle, what);
+    printf("Boss Battle trace: BBMENU cycle=%u %s\n", bbmenu_cycle, what);
 }
 
-static void report_close_row(int blocked) { /* DEBUG_SAULO */
+static void report_close_row(int blocked) {
     report_once(blocked, blocked ? "blocked native End online action, closing Network Menu" : "End online -> Close Network Menu");
 }
 
-static void report_return_row(int blocked) { /* DEBUG_SAULO */
+static void report_return_row(int blocked) {
     report_once(2 + blocked, blocked ? "blocked native Return to town action" : "Return to town removed");
 }
 
@@ -4398,7 +4340,7 @@ static void show_close_text(uint64_t row) {
     }
     if (!text_object_is(text, label)) return;
     report_close_row(0);
-    report_once(4, "visible close row text=Close Network Menu"); /* DEBUG_SAULO */
+    report_once(4, "visible close row text=Close Network Menu");
 }
 
 static int network_list_has(uint64_t list, int32_t action) {
@@ -4414,7 +4356,7 @@ static int network_list_has(uint64_t list, int32_t action) {
 static void rebuild_network_rows(uint64_t list) {
     ++network_rebuilds;
     pause_functions.setup(list - PAUSE_WINDOW_LIST);
-    printf("DEBUG_SAULO BBMENU cycle=%u Network Menu rows built again, rows now %llu\n", bbmenu_cycle,
+    printf("Boss Battle trace: BBMENU cycle=%u Network Menu rows built again, rows now %llu\n", bbmenu_cycle,
            (unsigned long long)list_widgets(list));
 }
 
@@ -4424,7 +4366,7 @@ static void read_network_rows(void) {
     if (!list || !list_widgets(list)) return;
     if (!network_rows_seen) {
         network_rows_seen = 1;
-        printf("DEBUG_SAULO BBMENU cycle=%u normalize rows existing=%llu\n", bbmenu_cycle, (unsigned long long)list_widgets(list));
+        printf("Boss Battle trace: BBMENU cycle=%u normalize rows existing=%llu\n", bbmenu_cycle, (unsigned long long)list_widgets(list));
     }
     if (network_list_has(list, NETWORK_ACTION_RETURN_TO_TOWN) && network_rebuilds < 2 && pause_functions.setup)
         rebuild_network_rows(list);
@@ -4506,7 +4448,7 @@ void GUEST_HOOK_ABI boss_battle_network_back_query_hook(GuestRegs *regs) {
     back_vtable[LIST_BACK_QUERY / sizeof(uint64_t)] = (uint64_t)(uintptr_t)back_pressed;
     regs->rax = (uint64_t)(uintptr_t)back_vtable;
     network_close_source = "Close Network Menu";
-    report_once(5, "Close Network Menu confirmed, answered as B"); /* DEBUG_SAULO */
+    report_once(5, "Close Network Menu confirmed, answered as B");
 }
 
 /* The Inn's own lifecycle after the Network Menu closes shows its menu for a moment before the page opens again: the
@@ -4520,7 +4462,7 @@ static void begin_return_cover(void) {
     atomic_store(&return_cover, 1);
     atomic_store(&black_held, 1);
     fade_scene(manager, FADE_BLACK, RETURN_FADE_FRAMES);
-    bbmenu_event("scene fader covers the return"); /* DEBUG_SAULO */
+    bbmenu_event("scene fader covers the return");
 }
 
 static int return_cover_settled(void) {
@@ -4602,10 +4544,10 @@ static void release_stale_options_mode(void) {
         guest_u8(inn + INN_STEP) != OPTIONS_STEP_PAGE_OPEN)
         return;
     close_page_step(inn);
-    puts("DEBUG_SAULO GUESTPAGE action=stale Options mode left");
+    puts("Boss Battle trace: GUESTPAGE action=stale Options mode left");
 }
 
-/* DEBUG_SAULO: after a Boss Battle visit ends, the first stage that is not the Inn and the party changes after it. */
+/* after a Boss Battle visit ends, the first stage that is not the Inn and the party changes after it. */
 static void watch_handoff(uint64_t scene) {
     static int last_stage = -1;
     static uint32_t last_owners;
@@ -4629,8 +4571,8 @@ static void watch_handoff(uint64_t scene) {
     log_handoff(when, context);
 }
 
-static void log_handoff(const char *when, uint64_t context) { /* DEBUG_SAULO */
-    printf("DEBUG_SAULO HANDOFF %s slots=", when);
+static void log_handoff(const char *when, uint64_t context) {
+    printf("Boss Battle trace: HANDOFF %s slots=", when);
     for (int i = 0; i < PARTY_SLOT_COUNT; ++i) {
         const uint64_t slot = context ? party_slot(context, i) : 0;
         if (slot)
@@ -4664,13 +4606,13 @@ static void leave_options_mode(void) {
     if (step != OPTIONS_STEP_PAGE_OPEN) return;
     close_page_step(inn);
     page_leaving_options = 0;
-    printf("DEBUG_SAULO BBMENU cycle=%u Inn return state old act=%#x step=%u -> act=%#x step=%u\n", bbmenu_cycle, act, step,
+    printf("Boss Battle trace: BBMENU cycle=%u Inn return state old act=%#x step=%u -> act=%#x step=%u\n", bbmenu_cycle, act, step,
            guest_u8(inn + INN_ACT), guest_u8(inn + INN_STEP));
 }
 
 /* The old page is gone: the screen waits for the Inn's own reopen, on the remembered boss. */
 static void return_from_terminated_page(void) {
-    bbmenu_event("old page terminated"); /* DEBUG_SAULO */
+    bbmenu_event("old page terminated");
     forget_page();
     page_return_pending = 0;
     if (!atomic_load(&screen_inn) || !boss_battle_online_selected() || ++page_reopen_attempts > 2) {
@@ -4680,7 +4622,7 @@ static void return_from_terminated_page(void) {
         return;
     }
     boss_battle_screen_return();
-    printf("DEBUG_SAULO BBMENU cycle=%u reopen requested boss=%d fight_all=%d\n", bbmenu_cycle, boss_battle_menu_cursor(),
+    printf("Boss Battle trace: BBMENU cycle=%u reopen requested boss=%d fight_all=%d\n", bbmenu_cycle, boss_battle_menu_cursor(),
            boss_battle_cursor_fight_all());
     page_reopening = 1;
     page_leaving_options = 1;
@@ -4700,11 +4642,11 @@ static void network_menu_return_step(void) {
         log_menu_closed();
         network_menu_quarantine_begin();
         begin_return_cover();
-        printf("DEBUG_SAULO BBMENU cycle=%u close source=%s native close path\n", bbmenu_cycle, network_close_source);
-        bbmenu_quarantine_watch = 1; /* DEBUG_SAULO */
-        bbmenu_event("Network Menu closed"); /* DEBUG_SAULO */
+        printf("Boss Battle trace: BBMENU cycle=%u close source=%s native close path\n", bbmenu_cycle, network_close_source);
+        bbmenu_quarantine_watch = 1;
+        bbmenu_event("Network Menu closed");
     }
-    if (bbmenu_quarantine_watch && !network_menu_quarantine_active()) { /* DEBUG_SAULO */
+    if (bbmenu_quarantine_watch && !network_menu_quarantine_active()) {
         bbmenu_quarantine_watch = 0;
         bbmenu_event("quarantine released");
     }
@@ -4743,7 +4685,6 @@ static int network_row_helper_skips(uint64_t list, uint32_t message) {
 /* At the list's update (rdi the list), which reads the pad and answers the result: no input for the page the Network
  * Menu was opened over. */
 void GUEST_HOOK_ABI boss_battle_list_update_hook(GuestRegs *regs) {
-    bbmenu_last_list = regs->rdi; /* DEBUG_SAULO */
     if (is_screen(regs->rdi)) page_watch_event(&page_seen_list, "list update");
     if ((!page_suspended && !page_return_pending) || !is_screen(regs->rdi)) return;
     regs->rax = 0xffffffffu;
@@ -4791,7 +4732,7 @@ static void seat_while_waiting(void) {
     party_requested = 1;
     inn_functions.inn_party(inn);
     printf("Boss Battle Online: %s party sent while waiting\n", host ? "host" : "guest");
-    if (guest && visitor_page == VISITOR_PAGE_ACTIVE) puts("DEBUG_SAULO GUESTPAGE action=party sent");
+    if (guest && visitor_page == VISITOR_PAGE_ACTIVE) puts("Boss Battle trace: GUESTPAGE action=party sent");
 }
 
 /* The page owns the shared Network Menu shortcut while it accepts it. While that menu is up, and until the game's own

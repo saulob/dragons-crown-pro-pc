@@ -58,6 +58,10 @@ void TestFormat() {
     CHECK(run.runs == 4 && run.clears == 1 && run.deaths == 1 && run.quits == 1 && run.best_progress == 20 &&
           run.best_ms == 3600123);
     CHECK(boss_battle_record_stats("Saulo", "harpy").attempts == 1 && boss_battle_record_fight_all_stats("Ana").runs == 0);
+
+    // Outcomes whose 32-bit sum wraps past the attempts are still more than the attempts.
+    const std::string wrapped = "DCP Boss Battle 3\nSaulo\tharpy\t1\t4294967295\t1\t1\t0\n";
+    CHECK(boss_battle_record_parse(wrapped.data(), wrapped.size()) != 1);
     CHECK(boss_battle_record_format(text, sizeof(text)) && std::string(text) == v3);
 
     for (const char* bad : {"", "DCP Boss Battle 4\n",

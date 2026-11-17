@@ -176,7 +176,7 @@ typedef struct {
     int end_kind;         /* the stage end's kind, meaningful in the stage-end act */
     int clear_choice;     /* the stage clear screen's answer: -1 none, 1 return to town */
     int fader_busy;       /* the scene fader still runs a fade */
-    uint32_t host_ms;     /* DEBUG_SAULO: the host's clock, for the transition telemetry */
+    uint32_t host_ms;     /* the host's clock, for the transition log lines */
 } BossBattleProbe;
 
 /* The scene's stage-end act and its steps the session acts on. */

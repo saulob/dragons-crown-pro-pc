@@ -148,7 +148,7 @@ bool Parse(const std::string& text, std::vector<Row>* out, std::vector<FightAllR
         } else {
             row.stats = {numbers[0], numbers[1], numbers[2], 0, numbers[3]};
         }
-        if (row.stats.wins + row.stats.deaths + row.stats.quits > row.stats.attempts) {
+        if (uint64_t(row.stats.wins) + row.stats.deaths + row.stats.quits > row.stats.attempts) {
             return false;
         }
         parsed.push_back(row);

@@ -168,7 +168,7 @@ constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPCs, enemies
 constexpr char kControllerRumbleHelp[] = "Off disables controller vibration. Applies at the next game start.";
 constexpr char kMouseControlsEnabledHelp[] = "Enables mouse buttons, wheel and pointer controls during gameplay.";
 constexpr char kMouseControlsHelp[] =
-    "Always on, together with the keyboard and the controller. Click a row, then press the mouse button to use. Esc "
+    "Used together with the keyboard and the controller while Mouse Controls is On. Click a row, then press the mouse button to use. Esc "
     "cancels. Holding the Pointer Control button hides the cursor and moves the game's pointer with the mouse; the "
     "interaction button then performs the pointer interaction.";
 constexpr const char* kMouseHelp[DCP_MOUSE_ACTION_COUNT] = {
@@ -195,7 +195,8 @@ constexpr char kUnlockLabyrinthHelp[] =
     "Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.";
 constexpr char kUnlockUltimateTowerHelp[] =
     "Lets the Temple change the difficulty to Ultimate as soon as the Stables are available. On Ultimate, the Stables "
-    "lead to the Tower of Mirages. Nothing is marked as cleared.";
+    "lead to the Tower of Mirages. Nothing is marked as cleared. A character on Ultimate stays on it when this is "
+    "turned Off: change back to Normal at the Temple first.";
 constexpr char kAllowOverlayProgramsHelp[] =
     "For programs that draw over games (recording, chat, store and performance overlays). On, PLAY starts the game as a "
     "separate program from this launcher, so they can attach to it cleanly. Off starts the game the usual way.";

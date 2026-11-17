@@ -2,7 +2,7 @@
 
 # Dragon's Crown Pro - PC Port
 
-### Dragon's Crown Pro, Vanillaware's PS4 side-scrolling beat 'em up, running natively on Windows, and experimentally on Linux and Steam Deck, with Online Co-op, the TRG launcher and modern graphics and display options
+### Dragon's Crown Pro, Vanillaware's PS4 side-scrolling beat 'em up, running natively on Windows, and experimentally on Linux and Steam Deck, with a new Boss Battle mode, Online Co-op, the TRG launcher and modern graphics and display options
 
 [![Latest release](https://img.shields.io/github/v/release/saulob/dragons-crown-pro-pc?style=for-the-badge&label=release&color=e0bb32&labelColor=07101f&include_prereleases&cacheSeconds=300)](https://github.com/saulob/dragons-crown-pro-pc/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/saulob/dragons-crown-pro-pc/total?style=for-the-badge&color=e0bb32&labelColor=07101f&cacheSeconds=300)](https://github.com/saulob/dragons-crown-pro-pc/releases)
@@ -16,6 +16,9 @@
 
 ## Features
 
+- **Boss Battle** (new, exclusive to this PC port): fight any of the game's **20 bosses** straight from the Inn, or all of them in a row with **Fight All**, with your campaign protected and your own attempt statistics. See [Boss Battle](#boss-battle)
+- **Unlock Labyrinth of Chaos** and **Unlock Ultimate + Tower of Mirages**: two independent options that open the game's endgame content early, once the Stables are open
+- **Mouse Controls**: attack with the mouse buttons, and hold **Pointer Control** (Middle Mouse) to move the game's own red hand pointer with the mouse, with an adjustable **Mouse Sensitivity**
 - **Online Co-op**: play the game's own online multiplayer over the Internet, with Friend Codes, friend requests, an optional public **Lobby** to meet other players, and Join a Friend's room. See [Online Co-op](#online-co-op)
 - **Regions**: the US (`CUSA10454` 1.00 and 1.01), Japanese (`CUSA07001` 1.00, 1.02 and 1.03) Asia / Hong Kong (`CUSA10209` 1.00 and 1.02) and European (`CUSA10487` 1.03) PS4 releases. European support is new and experimental: it comes from one reporter's package and has not been played yet
 - **Native PC port**: the game's own x86-64 code runs directly on the PC. It is not an emulator. Windows is the primary tested platform, and there is an experimental native Linux / Steam Deck AppImage with the same intended feature set. Linux needs no Proton or Wine.
@@ -35,7 +38,7 @@
 - **Unlock Gallery**: an option to see every Gallery picture without changing your save
 - Frame rate in the window title, and an in-game **frame counter** (frames per second and frame time, **F2**)
 - Xbox controllers without setup, and keyboard support, with **Xbox button prompts** as an option (PlayStation prompts are the default)
-- Local multiplayer with up to four controllers
+- Local multiplayer with up to four controllers; the cheats apply to every local human player, Players 1 to 4
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
 - **A PC title menu**: Start Game, Options, Gallery and **Exit Game**, with the game's own menu art and animations. Exit Game is in the game's language and closes the game through the same clean shutdown as closing the window (Alt+F4 still works). The PlayStation Network **Upload Save Data** and **Download Save Data** rows are not shown, because the PlayStation Network save transfer is not available in the PC port.
 - **Brazilian Portuguese**: game text, menus, subtitles, launcher and F1 options on every supported build. New characters get Portuguese default messages, previewed while they are created; characters already in a save keep their stored data, but their native default messages are shown in Portuguese and any message you wrote yourself stays untouched. Credits, trophies and some baked labels stay in the build's own language, and the translated manual pages are shown on the USA and European builds only
@@ -44,6 +47,21 @@
 - **Bug Report page**: send a report with a filtered log from the launcher and follow its status under **My reports**. See [Reporting problems](#reporting-problems)
 - **Experimental renderers**: OpenGL, and on Windows Direct3D 11, for systems that cannot run Vulkan. They render only part of the game's features; Vulkan stays the default and the supported renderer
 - **Update check**: the launcher looks for a newer release of the port at start and installs it only when you choose to; the game files and the `user` folder are kept
+
+## Boss Battle
+
+Boss Battle is a new mode made for this PC port. It is not part of the original game's flow: pick a boss, fight it right away, and come back to the Inn, without playing through a stage first.
+
+- **Turn it on** with **Enable Boss Battle** on the launcher's **Gameplay** page (or in the F1 Options menu). The Dragon's Haven Inn menu then gains a **Boss Battle** row.
+- **20 bosses**: choose any of them from the Boss Battle screen, in the game's own menu style, sounds and language. Prepare your party first with the Inn's own Select player and Choose allies.
+- **Fight All**: the twenty bosses one after the other, without going back to the Inn between them. A death, quitting or the last win ends the run.
+- **Your campaign is protected**: the save on disk is set aside during a fight and the campaign is put back afterwards, so no boss clear, story progress, route, item or gold from a Boss Battle reaches it. Experience, levels and skill points your character earns in a win are kept.
+- **Straight back to the Inn**: a win shows the game's experience award and level-up, then returns to the Boss Battle screen without the results and loot screens. In a fight, **Start** opens the pause menu with **Quit Boss Battle**. **Return to tavern** closes the screen.
+- **Statistics**: attempts, wins, deaths, quits, win rate and best time for every boss and character, and runs, clears, best progress and best time for Fight All, kept in `user\boss_battle.dat`.
+- **Online (experimental)**: with Online Play on, the host opens Boss Battle and friends join the host's Boss Battle room from the Network Menu; the host chooses the boss and starts the fight. Only the host needs the option, and each player keeps their own campaign and statistics.
+- Available on the USA (1.00, 1.01), Japanese (1.00, 1.02, 1.03) and Asia / Hong Kong 1.00 builds. The Asia / Hong Kong 1.02 and European 1.03 builds do not offer it yet, because their executables could not be checked.
+
+See [docs/LAUNCHER.md](docs/LAUNCHER.md) and [docs/ONLINE.md](docs/ONLINE.md#boss-battle-online-experimental) for the details.
 
 ## Online Co-op
 
@@ -138,7 +156,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v1.2.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v1.3.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -156,6 +174,7 @@ Everything is kept next to the program, so copying the whole folder to another P
 | --- | --- |
 | `user\dcp.ini` | Launcher and game settings |
 | `user\savedata\` | Your saves |
+| `user\boss_battle.dat` | Your Boss Battle statistics |
 | `user\trophy\` | Your trophy progress and the trophy list and icons unpacked from your game |
 | `user\keys.json` | Your Trophy Key, if you configure one |
 | `user\cache\CUSA10454\` | Shader cache, so later starts load faster |
@@ -223,6 +242,9 @@ The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To
 - **Story Skip Offer** (Off by default): when you create a new character, the game offers to start it from the second half of the story, which it normally offers only after a class on the save has finished the game. Recommended if you mainly want Online Co-op
 - **Tutorial Skip Offer** (Off by default): the first character of a save is also asked whether to begin the tutorial, instead of starting it automatically. Existing characters are not affected by either offer
 - **Unlock Gallery** (Off by default): shows all 57 pictures of the title menu's Gallery while it is on, without changing your save. Pictures you have not really found are only shown; turn it Off and the Gallery goes back to exactly what your save holds. Trophies and progress are not affected. Applies at the next game start
+- **Enable Boss Battle** (Off by default): adds the Boss Battle row to the Inn menu (see [Boss Battle](#boss-battle)). In the F1 Options menu it applies the next time the Inn menu opens
+- **Unlock Labyrinth of Chaos** (Off by default): once the character's story has opened the Stables, the Stables list the Labyrinth of Chaos from its first floor, with the game's own floors, rewards and saves
+- **Unlock Ultimate + Tower of Mirages** (Off by default): once the Stables are open, the Temple offers the game's own change to Ultimate difficulty (and back to Normal); on Ultimate the Labyrinth entry is the Tower of Mirages. It does not need Unlock Labyrinth of Chaos, and that option does not need it. A character left on Ultimate stays on it when the option is turned Off, so change back to Normal at the Temple first. Both unlocks apply at the next game start and mark nothing as cleared
 - **Allow overlay programs** (Windows, Off by default): starts the game as a separate process from the launcher, which recording, chat, store and performance overlays can attach to cleanly. Turn it on if the game closes right after Play while such a program is running
 
 The game runs at its own 60 frames per second unless the Frame rate setting asks for more; its logic stays at 60 either way.

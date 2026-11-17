@@ -630,6 +630,10 @@ void TestBossBattleGuest(const std::string& url, const fs::path& base, uint16_t 
     CHECK(PumpUntil([] { return boss_battle_online_is_host(); }));
     CHECK(boss_battle_online_state() == BOSS_BATTLE_ONLINE_ENDED && !boss_battle_online_room_wanted());
     CHECK(PumpUntil([&] { return BossRoomsFound(seeker) == 0; }));
+    auto after_owner = seeker.Call("room.join", RoomBody(room, false));
+    CHECK(after_owner && (*after_owner)["room"]["ints"].dump().find("32515") == std::string::npos &&
+          !BossState((*after_owner)["room"]["bin_int"]));
+    CHECK(seeker.Call("room.leave", RoomBody(room, false)).has_value());
     GameLeave(ctx, opt, room);
     boss_battle_online_visit_end();
 
@@ -656,6 +660,25 @@ void TestBossBattleGuest(const std::string& url, const fs::path& base, uint16_t 
         CHECK(PumpUntil([] { return boss_battle_online_is_host(); }));
         CHECK(!boss_battle_online_visitor() && !boss_battle_online_selected() && boss_battle_online_state() == BOSS_BATTLE_ONLINE_OFF);
         GameLeave(ctx, opt, room2);
+    }
+
+    // an untagged room still holding a former owner's Boss Battle state: a normal join stays a normal guest
+    RawPlayer stale_host(url, base, "BossStaleHost");
+    auto stale = stale_host.Call("room.create", normal);
+    CHECK(stale.has_value());
+    if (stale) {
+        const uint64_t room3 = (*stale)["room"]["id"].as_u64();
+        const BossBattleHostState left{BOSS_BATTLE_PHASE_WAITING, 0, 2, 4};
+        uint8_t bytes[BOSS_BATTLE_STATE_SIZE];
+        boss_battle_state_encode(&left, bytes);
+        CHECK(stale_host.Call("room.set_internal", SetInternal(room3, BinInt({{BOSS_BATTLE_STATE_ATTR, net::hex_encode(bytes, sizeof(bytes))}}))));
+        const int own_step = early_story_own_step();
+        early_story_note_own_step(EARLY_STORY_ORIGINAL_STEP);
+        CHECK(GameJoin(ctx, opt, room3) == 0);
+        CHECK(!boss_battle_online_visitor() && !boss_battle_online_boss_room() && !boss_battle_online_selected() &&
+              !boss_battle_online_search_wanted());
+        GameLeave(ctx, opt, room3);
+        early_story_note_own_step(own_step);
     }
     boss_battle_online_set_hosting(1);
     early_story_set_hosting(story_hosting);

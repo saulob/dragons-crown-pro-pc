@@ -52,9 +52,11 @@ int runtime_cheat_movement_speed(void);
 /* The F10 menu's Movement Speed: moves to the next value for this session and returns it. */
 int runtime_cheat_movement_cycle(void);
 
-/* The port's live controller state: 1 for Player 1 or a slot with a gamepad. The loader sets this. */
+/* 1 for Player 1 or a party slot a joined local player controls. The loader sets runtime_cheat_seat_human. */
 void runtime_cheats_set_slot_human(int (*is_human)(int slot));
 int runtime_cheat_slot_human(int slot);
+/* The game's own party seat: owned locally and controlled by a player (known after Player 1's first tick). */
+int runtime_cheat_seat_human(int slot);
 
 /* Called with each player unit on its per-tick update while the cheat hooks are in (offline); observe only. The loader
  * sets this (Discord presence reads class and level through it). */
@@ -64,8 +66,8 @@ void runtime_cheat_observe_player(uint64_t unit);
 /* 1 when the cheat (a dcp::cheats::Cheat value) is on: the saved value, or the menu's override of it this session. */
 int runtime_cheat_enabled(int cheat);
 
-/* 1 once after a cheat that fills a resource (Infinite Health, Mana, Durability) turned On, from the launcher's value at
- * the start or from the menu; the game thread asks when it holds Player 1's unit and fills it when this says 1. */
+/* 1 once after a cheat that fills a resource (Infinite Mana, Durability) turned On, from the launcher's value at
+ * the start or from the menu; the game thread asks when it holds a local human unit and fills it when this says 1. */
 int runtime_cheat_take_refill(int cheat);
 
 /* One bit per cheat (dcp_cheats.h Bit) whose refill request is waiting; cheap enough for a per-tick hook. */

@@ -65,7 +65,6 @@ typedef struct { uint64_t target, kind, value, addend; } Reloc;
 static char (*names)[128];
 static uint64_t import_count;
 static unsigned char *image;
-extern uintptr_t dcp_rudp_image_base; /* DEBUG_SAULO */
 static const DcpResolution *render_resolution=&dcp_resolutions[0];
 static const DcpAspectRatio *aspect_ratio=&dcp_aspect_ratios[0];
 static DcpResolution render_target;
@@ -704,7 +703,7 @@ int main(int argc, char **argv) {
     }
     runtime_pad_set_settings(settings_file);
     runtime_pad_set_rumble(dcp_controller_rumble(settings_file));
-    runtime_cheats_set_slot_human(runtime_pad_slot_human);
+    runtime_cheats_set_slot_human(runtime_cheat_seat_human);
     if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
@@ -875,7 +874,6 @@ int main(int argc, char **argv) {
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
-    dcp_rudp_image_base = (uintptr_t)image; /* DEBUG_SAULO */
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
     if (runtime_memory_prepare()) {

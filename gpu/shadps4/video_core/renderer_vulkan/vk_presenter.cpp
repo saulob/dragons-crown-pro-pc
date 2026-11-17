@@ -878,11 +878,11 @@ void Presenter::CheckFreeQueueFrame(const Frame* frame, const char* where) {
                                   static_cast<const void*>(event.frame));
         }
     }
-    std::printf("DEBUG_SAULO presenter: %s on thread %u: frame %p is not one of the %zu presentation frames at %p; "
+    std::printf("Presenter diagnostic: %s on thread %u: frame %p is not one of the %zu presentation frames at %p; "
                 "free queue (%zu):%s; history (oldest first; G get, L reuse, P present, R retire):%s\n",
                 where, static_cast<u32>(gettid()), static_cast<const void*>(frame), present_frames.size(),
                 static_cast<const void*>(present_frames.data()), free_queue.size(), entries, history);
-    UNREACHABLE_MSG("DEBUG_SAULO invalid presentation frame in {}", where);
+    UNREACHABLE_MSG("Invalid presentation frame in {}", where);
 }
 
 Frame* Presenter::GetRenderFrame() {

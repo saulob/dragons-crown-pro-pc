@@ -77,7 +77,7 @@ Turning Infinite Mana or Infinite Durability On, in the menu or as the launcher'
 
 ### Infinite Lives
 
-A life is consumed in one place: the RESPAWN_NOTIFY handler computes `lp - 1` (a signed byte at unit `+0xce`) and posts it as event `0x13f1`. The hook hands that code `lp + 1` for Player 1, so the count stays where it was. Death, the respawn itself and the continue flow are unchanged; at 0 lives the count stays 0 instead of becoming -1 (the calculation floors at -1). What the game does with a count of -1, and so what a death at 0 lives does without the cheat, was not traced and has not been tried in play. Increases (the GET_LP buff, ally revive, continue) are other code. AI allies lose nothing here; the hook follows the same local-human classification.
+A life is consumed in one place: the RESPAWN_NOTIFY handler computes `lp - 1` (a signed byte at unit `+0xce`) and posts it as event `0x13f1`. The hook hands that code `lp + 1` for a local human player, so the count stays where it was. Death, the respawn itself and the continue flow are unchanged; at 0 lives the count stays 0 instead of becoming -1 (the calculation floors at -1). What the game does with a count of -1, and so what a death at 0 lives does without the cheat, was not traced and has not been tried in play. Increases (the GET_LP buff, ally revive, continue) are other code. AI allies lose nothing here; the hook follows the same local-human classification.
 
 ### Infinite Durability
 
@@ -109,7 +109,7 @@ Non-skill items with a use count (consumables) are counted down at the same two 
 
 ### Infinite Ally Skill Uses
 
-The same four sites as Infinite Skill Uses, for AI-controlled allies instead of Player 1 (the same ally classifier as Infinite Ally Health, so a slot with a human controller is not an ally). It adds no new site. An empty skill keeps the game's own handling. Human Players 2 to 4 are not affected.
+The same four sites as Infinite Skill Uses, for AI-controlled allies instead of local human players (the same ally classifier as Infinite Ally Health, so a slot with a human controller is not an ally). It adds no new site. An empty skill keeps the game's own handling. Human Players 2 to 4 are not affected.
 
 ### Infinite Ally Items
 
@@ -163,7 +163,7 @@ The game turns the pad into a walk message through `0x2ec9d0`, which builds a mu
 
 ### Local human players
 
-A unit belongs to a human player when its owner's category word (owner `+0x2a0c`) has bit 0, the same bit the game's own player test (`owner->vtable[+0xdd8]`) reads, and its player slot (unit `+0xa70`, stored by the CREATE_PLAYER handler at `0x436fb0`, 0 to 3) is 0 for Player 1. Players 2 to 4 are local humans when the runtime reports their slot as human-controlled (`runtime_cheat_slot_human`, the live gamepad mapping), and the classification follows that state, so a slot that changes between AI and human changes protection at once. Hooks that see the owner (arrows) find the unit through `[owner+0x9b8]` and require it to point back. Hooks in menus (skill points) use the player index of the menu, which is the save record's index. Slot 0 being the player on the first pad rests on the order the runtime logs users in (user 1 is player 1).
+A unit belongs to a human player when its owner's category word (owner `+0x2a0c`) has bit 0, the same bit the game's own player test (`owner->vtable[+0xdd8]`) reads, and its player slot (unit `+0xa70`, stored by the CREATE_PLAYER handler at `0x436fb0`, 0 to 3) is 0 for Player 1. Players 2 to 4 are local humans when the game's own party seat for their slot (save record `+0x21e0` owner 0 = local, flag `+0x21e4` bit 0 clear, the test of `0x271a0`) says a local player controls it (`runtime_cheat_seat_human`). A connected controller whose player never joined leaves the seat to the AI ally, and a joined player keeps the seat when the controller disconnects, as the game does; a slot that changes between AI and human changes protection at once. The seats are read from the party the game object holds, learned from Player 1's first tick. Hooks that see the owner (arrows) find the unit through `[owner+0x9b8]` and require it to point back. Hooks in menus (skill points) use the player index of the menu, which is the save record's index. Slot 0 being the player on the first pad rests on the order the runtime logs users in (user 1 is player 1).
 
 An AI party ally has the same player category, a valid player class, a party slot other than Player 1's and no live human controller on that slot. The slot is the same field the game stores for players (unit `+0xa70`); the runtime's live gamepad mapping is what separates an AI slot from a human-controlled one, so a controller joining a slot removes the ally protection immediately. Locally controlled Players 2 to 4 are never allies, and class 255 or non-player-category actors are excluded.
 

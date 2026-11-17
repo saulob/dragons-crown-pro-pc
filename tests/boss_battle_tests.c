@@ -2869,6 +2869,12 @@ static void test_campaign_restore(void) {
     memset(fake_play_data, 0x33, 16);
     CHECK(!boss_battle_campaign_restore() && fake_play_data[0] == 0x33);
     CHECK(boss_battle_campaign_save_source(live) != live);
+    /* a later fight must not replace the kept campaign with the unrestored state */
+    const uint64_t unrestored_copy = boss_battle_campaign_save_source(live);
+    fake_play_table[1] = (uint64_t)(uintptr_t)fake_play_data;
+    CHECK(!boss_battle_campaign_snapshot());
+    CHECK(boss_battle_campaign_save_source(live) == unrestored_copy &&
+          filled((const uint8_t *)(uintptr_t)unrestored_copy, BOSS_BATTLE_SAVE_BYTES, 0x11));
 
     fake_campaign();
     put_pointer(fake_game_context + 0xe8, NULL);

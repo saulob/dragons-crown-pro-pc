@@ -183,7 +183,7 @@ int boss_battle_online_take_guest_join(void) {
 
 static void set_visitor(int on, const char *reason) {
     const int was = atomic_exchange(&visitor_flag, on);
-    if (was != on) printf("DEBUG_SAULO VISITOR old=%d new=%d reason=%s\n", was, on, reason); /* DEBUG_SAULO */
+    if (was != on) printf("Boss Battle Online: visitor %s (%s)\n", on ? "on" : "off", reason);
 }
 
 static void drop_visitor(void) {
@@ -396,7 +396,6 @@ int boss_battle_online_internal_update(const uint8_t *data, size_t size) {
     if (state.phase == BOSS_BATTLE_PHASE_ENDED && atomic_load(&visit) == VISIT_ONLINE) {
         session_over();
         puts("Boss Battle Online: the host ended the Boss Battle session");
-        puts("DEBUG_SAULO BOSSHANDOFF host end received, visitor=0");
     }
     return 1;
 }

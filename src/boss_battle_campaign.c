@@ -47,6 +47,11 @@ uint64_t boss_battle_campaign_play_data(void) {
 }
 
 int boss_battle_campaign_snapshot(void) {
+    /* A new snapshot would replace the kept campaign with the unrestored fight's state. */
+    if (atomic_load(&unrestored)) {
+        puts("Boss Battle: a previous fight could not be put back; restart the game first");
+        return 0;
+    }
     const uint64_t save = current_save(), play_data = play_data_of(save);
     if (!save || !play_data) {
         puts("Boss Battle: the campaign save is not in memory");

@@ -2271,6 +2271,82 @@ int32_t Durability(FakeGame& game, uint32_t slot) {
     return value;
 }
 
+// The game's party seats (game +0x80, records at +0xa8): owner +0x21e0 (-1 empty, 0 local, 1 remote), flags +0x21e4.
+alignas(16) uint8_t g_seat_party[0xa8 + 4 * 0x23b0];
+alignas(16) uint8_t g_seat_game[0x100];
+
+uint64_t GUEST_HOOK_ABI SeatGameContext(uint64_t) {
+    return reinterpret_cast<uint64_t>(g_seat_game);
+}
+
+void SetSeat(int slot, int32_t owner, uint32_t flags) {
+    uint8_t* seat = g_seat_party + 0xa8 + slot * 0x23b0;
+    FakeGame::Store<int32_t>(seat + 0x21e0, owner);
+    FakeGame::Store<uint32_t>(seat + 0x21e4, flags);
+}
+
+// A local player 2 to 4 is human only while the game's seat says a local player controls it; a pad alone proves nothing.
+void TestSeatOwnership() {
+    FakeGame player1(true, 0);
+    FakeGame others[3] = {FakeGame(true, 1), FakeGame(true, 2), FakeGame(true, 3)};
+    std::memset(g_seat_party, 0, sizeof(g_seat_party));
+    for (int slot = 0; slot < 4; ++slot) {
+        SetSeat(slot, -1, 0);
+    }
+    SetSeat(0, 0, 0);
+    FakeGame::Store<uint64_t>(g_seat_game + 0x80, reinterpret_cast<uint64_t>(g_seat_party));
+    GuestFunctions functions{};
+    functions.game_context = SeatGameContext;
+    SetGuestFunctions(functions);
+    runtime_cheats_set_slot_human(runtime_cheat_seat_human);
+    const auto human = [](const FakeGame& game) {
+        runtime_cheats_start(Bit(Cheat::InfiniteDurability), 1);
+        const bool player = DurabilityWear(game, -1000) == 0;
+        runtime_cheats_start(Bit(Cheat::InfiniteAllyDurability), 1);
+        const bool ally = DurabilityWear(game, -1000) == 0;
+        CHECK(player != ally); // exactly one of the two cheats covers a player-shaped unit
+        return player;
+    };
+
+    // Before Player 1's first tick the seats are unknown: only Player 1 is human.
+    SetSeat(1, 0, 0);
+    CHECK(runtime_cheat_slot_human(0) == 1 && runtime_cheat_slot_human(1) == 0 && !human(others[0]));
+    runtime_cheats_start(0, 1);
+    GuestRegs tick = TickRegs(player1);
+    PlayerTickHook(&tick);
+    CHECK(human(player1));
+
+    for (int slot = 1; slot < 4; ++slot) {
+        const FakeGame& unit = others[slot - 1];
+        SetSeat(slot, -1, 0); // an AI ally in the slot; a connected pad whose player never joined changes no seat
+        CHECK(runtime_cheat_slot_human(slot) == 0 && !human(unit));
+        SetSeat(slot, 0, 1); // a seat no local player controls
+        CHECK(runtime_cheat_slot_human(slot) == 0 && !human(unit));
+        SetSeat(slot, 1, 3); // a remote player's seat
+        CHECK(runtime_cheat_slot_human(slot) == 0 && !human(unit));
+        SetSeat(slot, 0, 0); // the local player joined: human at once
+        CHECK(runtime_cheat_slot_human(slot) == 1 && human(unit));
+        // The game keeps a joined player's seat when the pad disconnects, and so does the classification.
+        CHECK(runtime_cheat_slot_human(slot) == 1 && human(unit));
+    }
+
+    // A mixed party: Player 2 human, Player 3 an AI ally, Player 4 empty.
+    SetSeat(1, 0, 0);
+    SetSeat(2, -1, 0);
+    SetSeat(3, -1, 0);
+    CHECK(human(others[0]) && !human(others[1]) && !human(others[2]));
+
+    // A new game object forgets the seats until Player 1 ticks again.
+    SetGuestFunctions(functions);
+    CHECK(runtime_cheat_slot_human(1) == 0);
+    PlayerTickHook(&tick);
+    CHECK(runtime_cheat_slot_human(1) == 1);
+
+    runtime_cheats_set_slot_human(nullptr);
+    SetGuestFunctions(GuestFunctions{});
+    runtime_cheats_start(0, 1);
+}
+
 void TestDurabilityRefill() {
     CHECK(NeedsDurabilityRefill(kItemEquippedFlag, 835, 1000));
     CHECK(!NeedsDurabilityRefill(kItemEquippedFlag, 1000, 1000) && !NeedsDurabilityRefill(kItemEquippedFlag, 1200, 1200));
@@ -2382,6 +2458,29 @@ void TestDurabilityRefill() {
     tick(player1);
     tick(player2);
     CHECK(Durability(player2, 0) == 700 && g_equipment.set_calls == served_calls); // only once
+
+    // Player 2 served while Player 1's gear does not exist yet: the window does not drop Player 1's refill.
+    GuestFunctions timed{FakeIsDead, FakeRefillFunction, nullptr, nullptr, nullptr, FakeEquipmentCount, FakeEquipmentItem,
+                         FakeIsGear, FakeSetDurability};
+    timed.now_ms = FakeNow;
+    SetGuestFunctions(timed);
+    FakeGame unready(true, 0);
+    SetItem(unready, 0, 300, 1000);
+    SetItem(player2, 0, 100, 1000);
+    runtime_cheats_start(0, 1);
+    runtime_cheat_toggle(durability);
+    g_now_ms = 5000;
+    tick(player2);
+    CHECK(Durability(player2, 0) == 1000);
+    g_now_ms += 4 * RefillRound::kWindowMs;
+    tick(unready);
+    tick(player2);
+    CHECK(Durability(unready, 0) == 300 && runtime_cheat_refills_pending() == Bit(Cheat::InfiniteDurability));
+    GiveEquipment(unready, 1);
+    tick(unready);
+    CHECK(Durability(unready, 0) == 1000 && runtime_cheat_refills_pending() == 0);
+    UseFakeEquipment();
+    g_now_ms = 1000;
     runtime_cheats_set_slot_human(nullptr);
 
     // Enabled before Player 1's gear exists (the launcher's value, or the menu): it waits, then runs once.
@@ -4217,6 +4316,7 @@ int main(int argc, char** argv) {
     TestBossTraceImages();
     TestDurability();
     TestLocalMultiplayer();
+    TestSeatOwnership();
     TestDurabilityRefill();
     TestLives();
     TestGold();

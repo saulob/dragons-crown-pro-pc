@@ -794,7 +794,11 @@ export class Lobby {
     const id = String(roomId);
     if (room.owner === memberId) {
       const next = (rest.find((m) => m.conn) ?? rest[0]).member;
-      this.host.sql.run('UPDATE rooms SET owner = ? WHERE id = ?', next, roomId);
+      // A Boss Battle session belongs to its host: the room the next owner gets is a normal room.
+      const ints = JSON.parse(room.ints).filter(([id]) => id !== BOSS_BATTLE_ATTR);
+      const binInt = JSON.parse(room.bin_int).filter(([id]) => id !== BOSS_STATE_ATTR);
+      this.host.sql.run('UPDATE rooms SET owner = ?, ints = ?, bin_int = ? WHERE id = ?', next, JSON.stringify(ints),
+        JSON.stringify(binInt), roomId);
       this.toRoom(roomId, { ev: 'room.owner', room: id, from: memberId, to: next });
     }
     this.toRoom(roomId, { ev: 'peer.gone', room: id, member: memberId });

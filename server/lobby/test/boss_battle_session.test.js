@@ -122,3 +122,37 @@ test('the host state reaches members through the private internal attribute befo
   assert.deepEqual(update.bin_int, [[0x7f04, state]]);
   assert.equal(guest.call('room.set_internal', { room: room.id, bin_int: [[0x7f04, state]] }).code, 'not_owner');
 });
+
+test('a Boss Battle room whose host leaves passes to the next owner as a normal room, tag and host state gone', () => {
+  const env = makeLobby();
+  const host = greeted(env, MODERN);
+  const room = host.call('room.create', bossRoom()).room;
+  const guest = greeted(env, MODERN, '198.51.100.4');
+  assert.equal(guest.call('room.join', { room: room.id, boss_battle: true }).code, 'ok');
+  assert.equal(host.call('room.set_internal', { room: room.id, bin_int: [[0x7f04, '0101000002000000']] }).code, 'ok');
+  assert.equal(host.call('room.leave', { room: room.id }).code, 'ok');
+  assert.equal(guest.events('room.owner').length, 1);
+
+  const seeker = greeted(env, MODERN, '198.51.100.5');
+  assert.equal(seeker.call('room.search', { code: room.code, boss_battle: true }).total, 0);
+  assert.equal(seeker.call('room.search', { code: room.code }).total, 1);
+  assert.equal(seeker.call('room.join', { room: room.id, boss_battle: true }).boss_battle_only, true);
+  const joined = seeker.call('room.join', { room: room.id });
+  assert.equal(joined.code, 'ok');
+  assert.equal(joined.room.ints.some(([id]) => id === BOSS_BATTLE_ATTR), false);
+  assert.equal(joined.room.bin_int.some(([id]) => id === 0x7f04), false);
+  assert.equal(env.host.sql.get('SELECT ints FROM rooms WHERE id = ?', Number(room.id)).ints.includes(String(BOSS_BATTLE_ATTR)),
+    false);
+});
+
+test('a normal room keeps its attributes when its owner leaves', () => {
+  const env = makeLobby();
+  const host = greeted(env, MODERN);
+  const room = host.call('room.create', ROOM).room;
+  const guest = greeted(env, MODERN, '198.51.100.4');
+  assert.equal(guest.call('room.join', { room: room.id }).code, 'ok');
+  assert.equal(host.call('room.set_internal', { room: room.id, bin_int: [[0x57, 'aa']] }).code, 'ok');
+  const before = env.host.sql.get('SELECT ints, bin_int FROM rooms WHERE id = ?', Number(room.id));
+  assert.equal(host.call('room.leave', { room: room.id }).code, 'ok');
+  assert.deepEqual(env.host.sql.get('SELECT ints, bin_int FROM rooms WHERE id = ?', Number(room.id)), before);
+});

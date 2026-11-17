@@ -112,7 +112,7 @@ static struct {
     uint32_t combat_ms;
     unsigned run, checkpoint_frames, last_session;
     int follow; /* a guest's run: the host starts each boss */
-    /* DEBUG_SAULO: the inter-boss wait telemetry */
+    /* the inter-boss wait, for the transition log lines */
     unsigned wait_frames, wait_logged;
     uint32_t wait_ms;
 } fight_all;
@@ -665,7 +665,7 @@ static void follow_start(const BossBattleProbe *probe) {
     }
     ++s.arena_frames;
     if (waiting_mark(s.arena_frames))
-        LOG("WAITING %s (%u s after the arena loaded) DEBUG_SAULO boss gauge window %s, bosses on it %d, scene act %d",
+        LOG("WAITING %s (%u s after the arena loaded): boss gauge window %s, bosses on it %d, scene act %d",
             missing_milestone(probe), s.arena_frames / FRAMES_PER_SECOND, probe->gauge_window ? "present" : "absent",
             probe->bosses, probe->scene.act);
 }
@@ -693,7 +693,7 @@ static void follow_travel(const BossBattleProbe *probe) {
         snprintf(line, sizeof(line), "stage loaded: round %d stage %d entry %d", scene->round, scene->stage, scene->entry);
         reach(BOSS_BATTLE_ARENA_LOADED, line);
         set_state(BOSS_BATTLE_INITIALIZING);
-        LOG("DEBUG_SAULO Boss Battle transition: arena loaded page_active=%d",
+        LOG("Boss Battle transition: arena loaded page_active=%d",
             boss_battle_screen_shown() || boss_battle_screen_requested());
         s.arena_frames = 0;
     } else {
@@ -832,20 +832,20 @@ static int transit_wait_mark(unsigned frames) {
 }
 
 /* The next boss's travel under the held black: requested until the scene's travel act begins, then loading until the
- * arena is set up. DEBUG_SAULO: how long the scene took to leave the Inn, in its frames and the host's time. */
+ * arena is set up. */
 static void follow_transit(const BossBattleProbe *probe) {
     const BossBattleScene *scene = &probe->scene;
     if (fight_all.transit == BOSS_BATTLE_TRANSIT_REQUESTED) {
         if (scene->act == SCENE_ACT_TRAVEL || boss_battle_state() == BOSS_BATTLE_INITIALIZING) {
-            FIGHT_ALL_LOG("DEBUG_SAULO scene transition started after %u frames, %u ms", fight_all.wait_frames,
+            FIGHT_ALL_LOG("scene transition started after %u frames, %u ms", fight_all.wait_frames,
                           probe->host_ms - fight_all.wait_ms);
             fight_all.transit = BOSS_BATTLE_TRANSIT_STAGE_LOADING;
         } else if (!fight_all.wait_frames++) {
             fight_all.wait_ms = probe->host_ms;
-            FIGHT_ALL_LOG("DEBUG_SAULO next travel requested, waiting for scene transition act=%d step=%d round %d next "
+            FIGHT_ALL_LOG("next travel requested, waiting for scene transition act=%d step=%d round %d next "
                           "stage %d", scene->act, scene->step, scene->round, scene->next_stage);
         } else if (transit_wait_mark(fight_all.wait_frames)) {
-            FIGHT_ALL_LOG("DEBUG_SAULO WAITING transition %u frames (%u ms) act=%d step=%d round %d next stage %d fader %s",
+            FIGHT_ALL_LOG("WAITING transition %u frames (%u ms) act=%d step=%d round %d next stage %d fader %s",
                           fight_all.wait_frames, probe->host_ms - fight_all.wait_ms, scene->act, scene->step,
                           scene->round, scene->next_stage, probe->fader_busy ? "fading" : "settled");
         }
@@ -1135,7 +1135,7 @@ BossBattleFightAllTransit boss_battle_fight_all_transit(void) {
 static BossBattleFightAllStep wait_for_scene(const BossBattleScene *scene, int fader_busy, int *index) {
     if (fight_all.follow) return BOSS_BATTLE_FIGHT_ALL_STEP_WAIT;
     if (boss_battle_fight_all_scene_ready(scene, fader_busy)) {
-        if (fight_all.wait_frames) FIGHT_ALL_LOG("DEBUG_SAULO Inn scene ready after %u frames", fight_all.wait_frames);
+        if (fight_all.wait_frames) FIGHT_ALL_LOG("Inn scene ready after %u frames", fight_all.wait_frames);
         fight_all.transit = BOSS_BATTLE_TRANSIT_REQUESTED;
         fight_all.wait_frames = 0;
         ++fight_all.boss;
@@ -1147,7 +1147,7 @@ static BossBattleFightAllStep wait_for_scene(const BossBattleScene *scene, int f
         return BOSS_BATTLE_FIGHT_ALL_STEP_ENDED;
     }
     if (++fight_all.wait_frames == 1 || transit_wait_mark(fight_all.wait_frames))
-        FIGHT_ALL_LOG("DEBUG_SAULO WAITING scene-ready %u frames act=%d step=%d round %d stage %d next stage %d fader %s",
+        FIGHT_ALL_LOG("WAITING scene-ready %u frames act=%d step=%d round %d stage %d next stage %d fader %s",
                       fight_all.wait_frames, scene ? scene->act : -1, scene ? scene->step : -1, scene ? scene->round : -1,
                       scene ? scene->stage : -1, scene ? scene->next_stage : -1, fader_busy ? "fading" : "settled");
     return BOSS_BATTLE_FIGHT_ALL_STEP_WAIT;

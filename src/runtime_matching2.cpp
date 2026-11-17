@@ -853,7 +853,9 @@ void OnResponse(const net::LobbyMessage& m) {
                         p.event == kEvJoin ? "joined" : "created", (unsigned long long)g.room, g.me, g.owner, g.members.size(),
                         m.body["room"]["code"].as_string().c_str());
             early_story_session_internal_update(states.step);
-            if (states.boss) boss_battle_online_internal_update(states.boss_state.data(), states.boss_state.size());
+            // A state left by a previous owner in an untagged room is stale.
+            if (states.boss && g.boss_attr > 0)
+                boss_battle_online_internal_update(states.boss_state.data(), states.boss_state.size());
             PublishStoryState();
             PublishBossBattleState();
         }
@@ -947,6 +949,7 @@ void OnEvent(const net::LobbyMessage& m) {
         g.owner = to;
         early_story_session_owner_changed(g.me == g.owner);
         boss_battle_online_owner_changed(g.me == g.owner);
+        g.boss_attr = BOSS_BATTLE_ROOM_NONE; // the lobby untags a room when its owner changes
         g.boss_published = 0;
         if (g.me != g.owner) g.story_room_hosted = false;
         else if (story_guest) g.clear_story_attr = true;

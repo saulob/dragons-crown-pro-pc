@@ -1931,6 +1931,15 @@ static void test_source_wiring(void) {
               !strstr(text, "friend_check") && !strstr(text, "host_step_source"));
         free(text);
     }
+    /* the release packaging refuses DEBUG_SAULO in any shipped file */
+    static const char *const shipped_files[] = {"src/boss_battle.c",        "src/boss_battle.h",    "src/boss_battle_hook.c",
+                                                "src/boss_battle_online.c", "src/runtime_rudp.cpp", "src/loader.c",
+                                                "src/dcp_mouse.c",          "src/cheat_hooks.cpp",  "src/endgame_unlocks.c"};
+    for (size_t i = 0; i < sizeof(shipped_files) / sizeof(*shipped_files); ++i) {
+        char *text = read_text(shipped_files[i]);
+        CHECK(text && !strstr(text, "DEBUG_SAULO"));
+        free(text);
+    }
     /* the visit is the session's, never a per-read toggle */
     char *hooks = read_text("src/early_story_online.c");
     if (hooks) {

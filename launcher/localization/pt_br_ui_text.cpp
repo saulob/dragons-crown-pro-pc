@@ -277,7 +277,7 @@ Port hotkeys	Atalhos do port
 Mouse	Mouse
 Mouse Controls	Controles do mouse
 Enables mouse buttons, wheel and pointer controls during gameplay.	Ativa os botões do mouse, roda e controle do ponteiro durante o jogo
-Always on, together with the keyboard and the controller. Click a row, then press the mouse button to use. Esc cancels. Holding the Pointer Control button hides the cursor and moves the game's pointer with the mouse; the interaction button then performs the pointer interaction.	Sempre ativo, junto com o teclado e o controle. Clique em uma linha e pressione o botão do mouse a usar. Esc cancela. Manter o botão do Controle do ponteiro pressionado esconde o cursor e move o ponteiro do jogo com o mouse; o botão de interação então executa a interação do ponteiro.
+Used together with the keyboard and the controller while Mouse Controls is On. Click a row, then press the mouse button to use. Esc cancels. Holding the Pointer Control button hides the cursor and moves the game's pointer with the mouse; the interaction button then performs the pointer interaction.	Usado junto com o teclado e o controle enquanto Controles do mouse estiver ativado. Clique em uma linha e pressione o botão do mouse a usar. Esc cancela. Manter o botão do Controle do ponteiro pressionado esconde o cursor e move o ponteiro do jogo com o mouse; o botão de interação então executa a interação do ponteiro.
 Mouse defaults	Padrões do mouse
 Puts the mouse buttons, wheel and pointer sensitivity back to their defaults.	Restaura os botões, a roda e a sensibilidade do ponteiro do mouse ao padrão.
 Put every mouse control back to its default?	Voltar todos os controles do mouse ao padrão?
@@ -607,7 +607,7 @@ Boss Battle	Batalha de Chefes
 Unlock Labyrinth of Chaos	Desbloquear Labirinto do Caos
 Unlock Ultimate + Tower of Mirages	Desbloquear Supremo + Torre das Miragens
 Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.	Abre o Labirinto do Caos assim que os Estábulos estiverem disponíveis. Andares, recompensas e progresso continuam sendo os do próprio jogo.
-Lets the Temple change the difficulty to Ultimate as soon as the Stables are available. On Ultimate, the Stables lead to the Tower of Mirages. Nothing is marked as cleared.	Permite que o Templo mude a dificuldade para Supremo assim que os Estábulos estiverem disponíveis. No Supremo, os Estábulos levam à Torre das Miragens. Nada é marcado como concluído.
+Lets the Temple change the difficulty to Ultimate as soon as the Stables are available. On Ultimate, the Stables lead to the Tower of Mirages. Nothing is marked as cleared. A character on Ultimate stays on it when this is turned Off: change back to Normal at the Temple first.	Permite que o Templo mude a dificuldade para Supremo assim que os Estábulos estiverem disponíveis. No Supremo, os Estábulos levam à Torre das Miragens. Nada é marcado como concluído. Um personagem no Supremo continua nele quando esta opção é desativada: volte para Normal no Templo antes.
 Return to tavern	Voltar à taverna
 Attempts	Tentativas
 Return to Dragon's Haven Inn.	Volta para a Dragon's Haven Inn.

@@ -169,8 +169,9 @@ room, and the room is joinable again when the page returns. With Online Play off
   a search or join made from the Boss Battle page (`boss_battle` in the request) finds only open Boss Battle rooms, and
   a random search from anywhere else finds none. A normal room that already has other players is never tagged.
 - **Ends.** Leaving Boss Battle clears the tag and tells the members; a change of owner, the host leaving or the room
-  closing ends the session for its guests (a guest in a fight leaves it as a Quit from its own game). A Boss Battle
-  room is no story session. Needs the updated Worker; until it is deployed a host refuses to create one.
+  closing ends the session for its guests (a guest in a fight leaves it as a Quit from its own game). When the owner
+  changes, the lobby removes the tag and the host state, so the next owner has a normal room. A Boss Battle room is no
+  story session. Needs the updated Worker; until it is deployed a host refuses to create one.
 
 ### Bug reports
 

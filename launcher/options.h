@@ -55,7 +55,7 @@ void ResetKeys(trg::SettingsStore& settings);
 // value reads as its default.
 DcpMouseMap SavedMouse(const trg::SettingsStore& settings);
 // Binds a mouse button (DCP_MOUSE_NONE clears the binding). False, and nothing saved, when the binding would leave Pointer
-// Pointer and its click on one button or the click without a button.
+// Control and its click on one button or the click without a button.
 bool SetMouseButton(trg::SettingsStore& settings, DcpMouseAction action, int button);
 void SetWheelTarget(trg::SettingsStore& settings, bool up, int target);
 void SetPointerSensitivity(trg::SettingsStore& settings, int percent);

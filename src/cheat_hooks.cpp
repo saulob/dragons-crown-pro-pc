@@ -1,5 +1,6 @@
 #include "cheat_hooks.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <chrono>
@@ -92,6 +93,37 @@ constexpr uint64_t kGameGoldContextOffset = 0x88;  // the object AddGold and Get
 GuestFunctions g_guest{};
 FrozenHealth g_frozen;
 bosstrace::ChimeraTrace g_boss_trace;
+
+// Each save record is also a party seat. The game's own controllable-seat test: a local owner (-1 empty, 0 local,
+// 1 remote) whose flag bit 0 is clear; an AI ally's seat or a pad that never joined does not pass it.
+constexpr uint64_t kSeatOwnerOffset = 0x21e0;
+constexpr uint64_t kSeatFlagsOffset = 0x21e4;
+constexpr int32_t kSeatOwnerLocal = 0;
+constexpr uint32_t kSeatNotControlled = 1;
+
+// The party is made once at game start, so its address never goes stale.
+std::atomic<uint64_t> g_party{0};
+
+void LearnParty(uint64_t player_one) {
+    if (g_party.load(std::memory_order_relaxed) != 0 || g_guest.game_context == nullptr) {
+        return;
+    }
+    const uint64_t game = g_guest.game_context(player_one);
+    if (game != 0) {
+        g_party.store(HostMemory{}.U64(game + kGameSaveBaseOffset), std::memory_order_release);
+    }
+}
+
+bool SeatLocalHuman(int32_t slot) {
+    const uint64_t party = g_party.load(std::memory_order_acquire);
+    if (party == 0 || slot <= kPlayerOneSlot || slot > kLastPartySlot) {
+        return false;
+    }
+    const HostMemory memory;
+    const uint64_t seat = party + kSaveRecordOffset + uint64_t(slot) * kSaveRecordSize;
+    return memory.S32(seat + kSeatOwnerOffset) == kSeatOwnerLocal &&
+           (memory.U32(seat + kSeatFlagsOffset) & kSeatNotControlled) == 0;
+}
 
 struct PartyUnit {
     uint64_t unit = 0;
@@ -405,6 +437,7 @@ void GUEST_HOOK_ABI SkillBudgetHook(GuestRegs* regs) {
 
 void SetGuestFunctions(const GuestFunctions& functions) {
     g_guest = functions;
+    g_party.store(0, std::memory_order_release);
 }
 
 namespace {
@@ -469,7 +502,7 @@ void RunRefillRound(RefillRound& round, Cheat cheat, bool pending, UnitKind kind
     for (int32_t human = kPlayerOneSlot; human <= kLastPartySlot; ++human) {
         complete = complete && ((human != kPlayerOneSlot && !SlotHuman(human)) || round.HasServed(human));
     }
-    if (complete || round.Expired(now)) {
+    if (complete || (round.HasServed(kPlayerOneSlot) && round.Expired(now))) {
         runtime_cheat_take_refill(static_cast<int>(cheat));
         round.Reset();
     }
@@ -702,6 +735,7 @@ void GUEST_HOOK_ABI PlayerTickHook(GuestRegs* regs) {
     }
     const UnitKind kind = Classify(regs->rdi);
     if (kind == UnitKind::PlayerOne) {
+        LearnParty(regs->rdi);
         SampleBossTrace(regs->rdi);
     }
     const bool ally = kind == UnitKind::OtherPlayer && IsAlly(HostMemory{}, regs->rdi);
@@ -936,6 +970,10 @@ uint64_t GUEST_HOOK_ABI GameSaveRecord(uint64_t unit) {
 }
 
 } // namespace
+
+extern "C" int runtime_cheat_seat_human(int slot) {
+    return slot == dcp::cheats::kPlayerOneSlot || dcp::cheats::SeatLocalHuman(slot) ? 1 : 0;
+}
 
 extern "C" size_t runtime_cheat_hooks_stub_bytes(void) {
     return dcp::cheats::Hooks().size() * guest_hook_stub_size();

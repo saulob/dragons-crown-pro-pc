@@ -255,7 +255,8 @@ inline constexpr Setting kSettings[] = {
      Apply::Restart, kOffOn},
     {Id::UnlockUltimateTower, Page::Gameplay, "unlock_ultimate_tower", "Unlock Ultimate + Tower of Mirages",
      "Lets the Temple change the difficulty to Ultimate as soon as the Stables are available. On Ultimate, the Stables "
-     "lead to the Tower of Mirages. Nothing is marked as cleared.",
+     "lead to the Tower of Mirages. Nothing is marked as cleared. A character on Ultimate stays on it when this is "
+     "turned Off: change back to Normal at the Temple first.",
      Apply::Restart, kOffOn},
 };
 

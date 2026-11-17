@@ -557,7 +557,7 @@ constexpr int32_t ProtectedAllyDurabilityDelta(bool enabled, bool ally, int32_t 
     return enabled && ally && delta < 0 ? 0 : delta;
 }
 
-// The respawn consumes a life as `lp - 1`; handing it `lp + 1` for Player 1 leaves the count where it was, and the
+// The respawn consumes a life as `lp - 1`; handing it `lp + 1` for a local human player leaves the count where it was, and the
 // player still dies and respawns as always.
 constexpr int32_t ProtectedLivesInput(bool enabled, UnitKind kind, int32_t lives) {
     return enabled && IsLocalHuman(kind) ? lives + 1 : lives;
@@ -779,7 +779,7 @@ constexpr bool RefillsOnEnable(Cheat cheat) {
     return cheat == Cheat::InfiniteMana || cheat == Cheat::InfiniteDurability;
 }
 
-// Cheats that fill a resource when they turn On: the request waits until the game thread can apply it to Player 1.
+// Cheats that fill a resource when they turn On: the request waits until the game thread can apply it.
 class RefillRequests {
 public:
     void Request(Cheat cheat) { pending_.fetch_or(Bit(cheat), std::memory_order_relaxed); }

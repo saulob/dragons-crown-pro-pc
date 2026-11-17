@@ -134,7 +134,7 @@ private:
     void ReportPresentGeometry(const Frame* frame, vk::Extent2D extent, const vk::ImageBlit& blit, bool stretch,
                                bool repeated);
 
-    // DEBUG_SAULO: free_queue validation; the Note/Check helpers require free_mutex.
+    // free_queue validation; the Note/Check helpers require free_mutex.
     bool IsPresentationFrame(const Frame* frame) const;
     void NoteFreeQueue(const Frame* frame, char op);
     void CheckFreeQueueFrame(const Frame* frame, const char* where);
@@ -167,7 +167,7 @@ private:
         u32 tid;
         char op;
     };
-    std::array<FreeQueueEvent, 32> free_queue_history{}; ///< DEBUG_SAULO
+    std::array<FreeQueueEvent, 32> free_queue_history{};
     u32 free_queue_history_next = 0;
     Frame* last_submit_frame{};
     std::mutex free_mutex;

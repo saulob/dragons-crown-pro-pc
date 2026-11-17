@@ -541,6 +541,12 @@ void TestMouseControls(const fs::path& folder) {
     DcpSettings::Values malformed_sensitivity;
     Check(DcpSettings::Read(file.string(), malformed_sensitivity) && malformed_sensitivity.mouse_sensitivity == 100,
           "a malformed value reads 100");
+    for (const char* bad : {"150x", "99999999999"}) {
+        WriteFile(file, std::string("mouse_pointer_sensitivity = ") + bad + "\n");
+        DcpSettings::Values game_rule;
+        Check(DcpSettings::Read(file.string(), game_rule) && game_rule.mouse_sensitivity == 100,
+              "F1 rejects a value the game rejects");
+    }
     WriteFile(file, "mouse_pointer_sensitivity = 150\n");
     DcpSettings::Load(file.string());
     DcpSettings::Values& now = DcpSettings::Get();
