@@ -221,7 +221,7 @@ does. Both write byte-identical files from the game's package.
 | Gameplay | Enable Boss Battle (builds that support it; the host's side of Boss Battle Online) | the next time the Inn menu opens |
 | Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery, Unlock Labyrinth of Chaos, Unlock Ultimate + Tower of Mirages | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
-| Controls | Controller Rumble | at once |
+| Controls | Controller Rumble, Mouse Controls | at once |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
 | Cheats (Online Play off) | the F10 menu's rows, through the same session state | session only, never saved |
 
@@ -265,6 +265,7 @@ use the same defaults).
 | `skip_intro` | 1, 0 | 0 | at game start |
 | `japanese_menu_buttons` | 1, 0 | 0 | at game start |
 | `controller_rumble` | 1, 0 | 1 | at game start; F1 changes it at once |
+| `mouse_controls` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `unlock_gallery` | 1, 0 | 0 | at game start |
 | `enable_boss_battle` | 1, 0 | 0 | at game start; F1 changes it the next time the Inn menu opens |
@@ -340,6 +341,7 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   switches the launcher's own fullscreen, saved in `launcher_fullscreen`, and never changes the Display mode.
 - **Mouse cursor**: mouse movement, clicks and the wheel show the cursor in Windowed and Borderless Fullscreen; keyboard or
   controller input hides it. It stays visible while the cheat menu or a dialog is open and when the game window loses focus.
+  While Pointer Control is held (Controls page) the cursor is hidden and the mouse is captured by the window.
 
 Scaling and sharpening, below those on the Display page, are what the presenter already supports: **Upscaling** (AMD
 FSR 1, off by default) enlarges the game's picture (the render resolution) in a bigger window; **Sharpening** (AMD
@@ -641,6 +643,22 @@ Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the 
 The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
 
 Each binding is one line in `dcp.ini`: `key_cross = space`, `key_left_stick_up = w`, `hotkey_cheats_menu = f10`, `hotkey_window_mode = f11` (the full list is `src/dcp_keys.c`). The value is a key name, case-insensitive: the shadPS4 names for common keys (`space`, `enter`, `lshift`, `rctrl`, `pgup`, `kp5`, ...) or SDL's own key names (`F10`, `Left Shift`, `Keypad 5`); the launcher writes lowercase. A missing or invalid line is the default, so a config from an older build keeps the old layout. The same key may be bound to several controls and all of them follow it; a port hotkey is not exclusive of a game control either. The bindings are read when the game starts (`dcp_keys.c`, shared by the launcher, `runtime_pad.c` and the video core); the controller mapping and `DCP_PAD_MAP` are unchanged, and `DCP_KEY_MAP` still overrides the buttons it names.
+
+**Mouse** (the Controls page's **Mouse** section, below the keyboard controls; **Mouse defaults** puts these back and changes nothing else). The mouse is always on, together with the keyboard and the controller, and belongs to Player 1.
+
+| Row | `dcp.ini` key | Default |
+| --- | --- | --- |
+| Mouse Controls | `mouse_controls` | `1` (On) |
+| Primary action | `mouse_square` | `left` (Square) |
+| Secondary action | `mouse_circle` | `right` (Circle) |
+| Pointer Control | `mouse_pointer_control` | `middle` |
+| Pointer Interaction | `mouse_pointer_interact` | `left` |
+| Mouse Sensitivity | `mouse_pointer_sensitivity` | `100` |
+| Wheel up / Wheel down | `mouse_wheel_up` / `mouse_wheel_down` | `none` |
+
+A mouse button is saved as `left`, `right`, `middle`, `x1` (Mouse 4), `x2` (Mouse 5) or `none`; `mouse1` to `mouse5` are read too. The rows show Left Mouse, Right Mouse, Middle Mouse, Mouse 4 and Mouse 5. Click a row, then press the mouse button; Esc cancels and **Clear** unbinds the optional rows. Pointer Control and Pointer Interaction cannot share a button, and the interaction cannot be unbound; a saved file that breaks this reads as the two defaults. Mouse Sensitivity is a slider from 25 to 200 percent in steps of 5, saved as an integer; a value out of range clamps, a value between steps rounds, and a malformed one is 100. The **Default** button beside the slider sets only the sensitivity back to 100 (not Mouse Controls, the bindings or the wheel), and the slider is dimmed with the other mouse rows while Mouse Controls is Off. The game's log says `Mouse controls: on, sensitivity N%` or `Mouse controls: off` at start. The F1 Controls page has the same setting as a live row; the wheel keys take `none`, `cross`, `circle`, `square`, `triangle`, `l1`, `r1`, `l2` or `r2`, and a wheel step holds that button for four game reads. A bad or empty value is the default. **Mouse Controls** is the first row. Off makes the game ignore the mouse completely (no buttons, wheel, Pointer Control, finger or mouse capture, and a moving mouse no longer shows the cursor in the game); the launcher, the Options and Cheats menus and the game's dialogs and text entry keep using the mouse. The other rows stay visible, dimmed, and keep their values. Turning it Off while Pointer Control is held releases the finger, the capture and every held button at once. The Options menu's Controls page (F1) changes it live; the other mouse settings apply the next time the game starts.
+
+Behaviour in the game: moving the mouse alone does nothing. Primary action and Secondary action press Square and Circle while their button is down. While the Pointer Control button is held the game window captures the mouse (relative mouse mode, cursor hidden) and the movement becomes one synthetic finger on the PS4 touch surface (1920 x 943, as the port reports it), so the game moves its own pointer exactly as it does for a finger on the touchpad; nothing is drawn by the port. The finger lands in the middle of the surface when the button goes down; when it leaves the middle three fifths it lifts for one game read and lands in the middle again, which the game takes as a new finger and moves the pointer by nothing, so the pointer never jumps and the mouse never runs out of surface. The Pointer Interaction button presses the touchpad button while the pointer is held, and neither it nor the Pointer Control button presses Square or Circle until it is released. Releasing the button lifts the finger on the next read. Focus loss, the Options and Cheats menus, a text dialog, a Windowed and Borderless switch, closing the game, or a controller becoming the active device end Pointer Control and release the mouse; the controller case stays off until the Pointer Control button is released and pressed again. Mouse input is ordinary pad data, so Online Play needs nothing extra.
 
 **Local multiplayer**: up to four SDL gamepads, player N on pad handle N and user N (`runtime_pad.c`, `runtime_services.c`).
 A gamepad that is found takes the lowest free slot and logs its user in once; the game opens that user's pad on the

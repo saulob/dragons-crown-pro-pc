@@ -103,6 +103,11 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.japanese_menu_buttons = ParseBool(value, v.japanese_menu_buttons);
     } else if (key == "controller_rumble") {
         v.controller_rumble = ParseBool(value, v.controller_rumble);
+    } else if (key == "mouse_pointer_sensitivity") {
+        const int percent = ParseInt(value, -1);
+        v.mouse_sensitivity = percent < 0 ? 100 : dcp_pointer_sensitivity_normalize(percent);
+    } else if (key == "mouse_controls") {
+        v.mouse_controls = ParseBool(value, v.mouse_controls);
     } else if (key == "enable_boss_battle") {
         v.enable_boss_battle = ParseBool(value, v.enable_boss_battle);
     } else if (key == "unlock_gallery") {

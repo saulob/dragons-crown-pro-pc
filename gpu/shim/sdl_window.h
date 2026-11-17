@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "common/types.h"
 #include "dcp_cursor.h"
+#include "dcp_mouse_capture.h"
 #include "dcp_renderer.h"
 
 struct SDL_Window;
@@ -71,9 +72,13 @@ private:
     void ToggleBorderless();
     void UpdateFpsTitle();
     void UpdateCursor();
+    void UpdateMouseCapture();
+    void ReleaseMouse();
     bool TrackControllerEvent(const SDL_Event& event);
     std::unordered_map<u32, PadActivity> pad_activity; ///< window thread
     DcpCursor::State cursor; ///< window thread
+    DcpMouseCapture::Tracker mouse_capture; ///< window thread
+    bool mouse_blocked = false; ///< window thread: the last state given to the mouse input
     void RefreshTitle();
     std::chrono::steady_clock::time_point fps_started{};
     u64 fps_frames = 0;

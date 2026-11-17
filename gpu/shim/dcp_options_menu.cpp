@@ -12,6 +12,7 @@
 #include "dcp_options_online.h"
 #include "localization/ui_text.h"
 #include "dcp_ping.h"
+#include "dcp_mouse.h"
 #include "runtime_pad_rumble.h"
 #include "boss_battle.h"
 #include "imgui.h"
@@ -211,6 +212,12 @@ void Change(const RowRef& row, int direction, const CheatRows& cheats) {
         state.status = outcome.changed && !outcome.saved ? "Could not save the settings." : std::string();
         if (outcome.changed && id == DcpOptions::Id::ControllerRumble) {
             runtime_pad_rumble_changed();
+        }
+        if (outcome.changed && id == DcpOptions::Id::MouseControls) {
+            dcp_mouse_set_enabled(dcp_mouse_global(), DcpSettings::Get().mouse_controls ? 1 : 0);
+        }
+        if (outcome.changed && id == DcpOptions::Id::MouseSensitivity) {
+            dcp_mouse_set_sensitivity(dcp_mouse_global(), DcpSettings::Get().mouse_sensitivity);
         }
         if (outcome.changed && id == DcpOptions::Id::EnableBossBattle) {
             boss_battle_set_enabled(DcpSettings::Get().enable_boss_battle ? 1 : 0);

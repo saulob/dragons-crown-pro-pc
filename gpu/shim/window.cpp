@@ -15,6 +15,7 @@
 #include "dcp_overlay.h"
 #include "dcp_graphics.h"
 #include "dcp_latency_trace.h"
+#include "dcp_mouse.h"
 #include "dcp_ping.h"
 #include "dcp_present.h"
 #include "dcp_settings.h"
@@ -193,12 +194,14 @@ void WindowSDL::ApplyDisplayMode(int mode) {
     if (borderless && !SDL_SetWindowFullscreenMode(window, nullptr)) {
         LOG_WARNING(Frontend, "Borderless fullscreen: {}", SDL_GetError());
     }
+    ReleaseMouse();
     SDL_SetWindowFullscreen(window, borderless);
     SDL_SyncWindow(window);
     std::printf("Window: %s\n", DcpGraphics::DisplayModeNames[borderless ? DcpGraphics::Borderless : DcpGraphics::Windowed]);
 }
 
 WindowSDL::~WindowSDL() {
+    ReleaseMouse();
     SDL_ShowCursor();
     SDL_DestroyWindow(window);
 }
@@ -277,12 +280,39 @@ void WindowSDL::ToggleBorderless() {
 // gameplay input device decides, in Windowed and Borderless alike.
 void WindowSDL::UpdateCursor() {
     const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    if (const auto visible = cursor.Update(true, focused, DcpOverlay::CapturesInput())) {
+    if (const auto visible = cursor.Update(true, focused, DcpOverlay::CapturesInput(), mouse_capture.Captured())) {
         if (*visible) {
             SDL_ShowCursor();
         } else {
             SDL_HideCursor();
         }
+    }
+}
+
+// Window thread. Relative mouse mode is on only while Pointer Control is held and nothing else needs the mouse; whenever
+// the game stops taking mouse input, held buttons and the pointer are dropped.
+void WindowSDL::UpdateMouseCapture() {
+    DcpMouseState* const mouse = dcp_mouse_global();
+    const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    const DcpMouseCapture::Frame frame{dcp_mouse_pointer_active(mouse) != 0, focused, DcpOverlay::CapturesInput(),
+                                       text_active};
+    const bool blocked = DcpMouseCapture::Blocked(frame);
+    if (blocked != mouse_blocked) {
+        mouse_blocked = blocked;
+        dcp_mouse_block(mouse, blocked);
+    }
+    if (const auto relative = mouse_capture.Update(frame)) {
+        if (!SDL_SetWindowRelativeMouseMode(window, *relative)) {
+            LOG_WARNING(Frontend, "Relative mouse mode: {}", SDL_GetError());
+        }
+    }
+}
+
+// Window thread. A window mode switch and closing the game must not leave the mouse captured or a button held.
+void WindowSDL::ReleaseMouse() {
+    dcp_mouse_release_all(dcp_mouse_global());
+    if (mouse_capture.Release()) {
+        SDL_SetWindowRelativeMouseMode(window, false);
     }
 }
 
@@ -324,7 +354,10 @@ bool WindowSDL::TrackControllerEvent(const SDL_Event& event) {
 
 bool WindowSDL::PollEvents() {
     if (close_requested.load(std::memory_order_relaxed)) {
-        if (is_open.exchange(false)) std::printf("Exit Game: hard exit\n");
+        if (is_open.exchange(false)) {
+            std::printf("Exit Game: hard exit\n");
+            ReleaseMouse();
+        }
     }
     {
         std::scoped_lock lock{text_mutex};
@@ -341,6 +374,7 @@ bool WindowSDL::PollEvents() {
     UpdateFpsTitle();
     RefreshTitle();
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
+    cursor.SetMouseControls(dcp_mouse_enabled(dcp_mouse_global()) != 0);
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (DcpLatencyTrace::enabled) {
@@ -380,22 +414,34 @@ bool WindowSDL::PollEvents() {
         }
         if (controller_activity && !ui) {
             cursor.ControllerActivity();
+            dcp_mouse_controller_activity(dcp_mouse_global());
         }
         switch (event.type) {
         case SDL_EVENT_MOUSE_MOTION:
             if (!ui) {
                 cursor.MouseMoved();
+                const float to_game = SDL_GetWindowPixelDensity(window) * dcp_mouse_game_scale(GetWidth(), GetHeight());
+                dcp_mouse_motion(dcp_mouse_global(), event.motion.xrel * to_game, event.motion.yrel * to_game);
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (!ui) {
                 cursor.MouseButtonPressed();
+                dcp_mouse_button(dcp_mouse_global(), event.button.button, 1);
             }
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            dcp_mouse_button(dcp_mouse_global(), event.button.button, 0);
             break;
         case SDL_EVENT_MOUSE_WHEEL:
             if (!ui) {
                 cursor.MouseWheelMoved();
+                dcp_mouse_wheel(dcp_mouse_global(), event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y
+                                                                                                   : event.wheel.y);
             }
+            break;
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            ReleaseMouse();
             break;
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
@@ -436,11 +482,13 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             is_open = false;
+            ReleaseMouse();
             break;
         default:
             break;
         }
     }
+    UpdateMouseCapture();
     UpdateCursor();
     return is_open;
 }

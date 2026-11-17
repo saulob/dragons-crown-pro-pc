@@ -56,6 +56,9 @@ struct Values {
     std::atomic<bool> true_ultrawide{false}, japanese_npc_voices{false};
     // Whether the game's vibration requests reach the controllers; the pad reads it on every request.
     std::atomic<bool> controller_rumble{true};
+    // Mouse Controls: the Options menu mirrors it for the running mouse input (dcp_mouse.h).
+    std::atomic<bool> mouse_controls{true};
+    std::atomic<int> mouse_sensitivity{100};
     // Whether the Inn menu offers Boss Battle; read each time the Inn builds its menu.
     std::atomic<bool> enable_boss_battle{false};
     // What the running game build supports (Feature bits), set by the loader.

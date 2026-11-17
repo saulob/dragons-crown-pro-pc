@@ -35,8 +35,8 @@ int TriggerAt(int units) {
     return units * 128;
 }
 
-bool Apply(DcpCursor::State& state, bool gameplay = true, bool focused = true, bool overlay = false) {
-    state.Update(gameplay, focused, overlay);
+bool Apply(DcpCursor::State& state, bool gameplay = true, bool focused = true, bool overlay = false, bool pointer = false) {
+    state.Update(gameplay, focused, overlay, pointer);
     return state.Visible();
 }
 
@@ -352,6 +352,24 @@ void TestNoSecondGamepadPath() {
     CHECK(Count(window, "SDL_INIT_GAMEPAD") == 1);
 }
 
+// Pointer Control hides the host cursor and the game's own pointer is the cursor; anything that needs the OS cursor wins.
+void TestPointerHidesCursor() {
+    DcpCursor::State state;
+    state.MouseMoved();
+    CHECK(Apply(state));
+    CHECK(!Apply(state, true, true, false, true));
+    state.MouseMoved();
+    CHECK(!Apply(state, true, true, false, true));
+    CHECK(Apply(state, true, true, true, true));  // Options, Cheats or a dialog
+    CHECK(!Apply(state, true, true, false, true));
+    CHECK(Apply(state, true, false, false, true)); // focus lost
+    CHECK(!Apply(state, true, true, false, true));
+    CHECK(Apply(state, false, true, false, true)); // the launcher
+    CHECK(Apply(state, true, true, false, false)); // the pointer ended: the mouse is still the last device
+    state.KeyboardActivity();
+    CHECK(!Apply(state, true, true, false, false));
+}
+
 } // namespace
 
 int main() {
@@ -372,6 +390,7 @@ int main() {
     TestControllersIndependent();
     TestNoTimeout();
     TestNoSecondGamepadPath();
+    TestPointerHidesCursor();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

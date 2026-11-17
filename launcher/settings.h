@@ -58,6 +58,8 @@ inline constexpr char kSkipIntroKey[] = "skip_intro";
 inline constexpr char kJapaneseMenuButtonsKey[] = "japanese_menu_buttons";
 // Forwards the game's vibration requests to the controllers (src/runtime_pad.c); On by default.
 inline constexpr char kControllerRumbleKey[] = "controller_rumble";
+inline constexpr char kMouseControlsKey[] = "mouse_controls";
+inline constexpr char kMouseSensitivityKey[] = "mouse_pointer_sensitivity";
 // The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
 inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
 inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";

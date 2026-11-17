@@ -4970,6 +4970,207 @@ void TestKeyBindings(const fs::path& base) {
     }
 }
 
+void TestMouseSettings(const fs::path& base) {
+    const fs::path file = base / "mouse" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    fs::create_directories(file.parent_path());
+
+    // Every mouse setting is managed with its default, and the default file reads as the default map.
+    for (const DcpMouseActionInfo& action : dcp_mouse_actions) {
+        bool managed = false;
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            managed |= setting.key == action.ini_key && setting.default_value == dcp_mouse_button_name(action.default_button);
+        }
+        CHECK(managed);
+    }
+    bool wheel_up = false, wheel_down = false, sensitivity = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        wheel_up |= setting.key == dcp_wheel_up_key && setting.default_value == "none";
+        wheel_down |= setting.key == dcp_wheel_down_key && setting.default_value == "none";
+        sensitivity |= setting.key == dcp_pointer_sensitivity_key && setting.default_value == "100";
+    }
+    CHECK(wheel_up && wheel_down && sensitivity);
+    bool controls_managed = false;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        controls_managed |= setting.key == kMouseControlsKey && setting.default_value == "1";
+    }
+    CHECK(controls_managed);
+    {
+        const LauncherSettings settings(file);
+        const DcpMouseMap map = SavedMouse(settings);
+        CHECK(map.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_LEFT && map.button[DCP_MOUSE_CIRCLE] == DCP_MOUSE_RIGHT);
+        CHECK(map.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_MIDDLE && map.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_LEFT);
+        CHECK(map.sensitivity == 100 && map.wheel_up == DCP_WHEEL_NONE && map.wheel_down == DCP_WHEEL_NONE);
+        CHECK(map.controls == 1); // Mouse Controls is On by default
+    }
+
+    // Mouse Controls: saved as mouse_controls, read by the runtime, bindings kept while it is Off.
+    CHECK(IsValidSetting("mouse_controls", "0") && IsValidSetting("mouse_controls", "1") && IsValidSetting("mouse_controls", "off"));
+    CHECK(!IsValidSetting("mouse_controls", "maybe"));
+    {
+        LauncherSettings settings(file);
+        CHECK(SetMouseButton(settings, DCP_MOUSE_SQUARE, DCP_MOUSE_X1));
+        settings.SetBool(dcp_mouse_controls_key, false);
+        CHECK(settings.Save());
+        const DcpMouseMap map = SavedMouse(settings);
+        CHECK(map.controls == 0 && map.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_X1);
+    }
+    {
+        const std::string saved = ReadAll(file);
+        CHECK(WrittenValue(saved, "mouse_controls", "0") && WrittenValue(saved, "mouse_square", "x1"));
+        DcpMouseMap runtime_map;
+        dcp_mouse_load(file.string().c_str(), &runtime_map);
+        CHECK(runtime_map.controls == 0 && runtime_map.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_X1);
+        LauncherSettings settings(file);
+        settings.SetBool(dcp_mouse_controls_key, true);
+        CHECK(settings.Save());
+        CHECK(SavedMouse(settings).controls == 1 && SavedMouse(settings).button[DCP_MOUSE_SQUARE] == DCP_MOUSE_X1);
+        settings.Set(dcp_mouse_controls_key, "maybe");
+        CHECK(SavedMouse(settings).controls == 1);
+        ResetMouse(settings);
+        settings.Set(dcp_mouse_controls_key, "1");
+        CHECK(settings.Save());
+    }
+    fs::remove(file);
+
+    // Validation: names, X buttons, wheel targets and the stepped sensitivities.
+    CHECK(IsValidSetting("mouse_square", "x1") && IsValidSetting("mouse_circle", "x2") && IsValidSetting("mouse_square", "none"));
+    CHECK(IsValidSetting("mouse_pointer_control", "middle") && IsValidSetting("mouse_pointer_control", "none"));
+    CHECK(!IsValidSetting("mouse_pointer_interact", "none") && !IsValidSetting("mouse_square", "button9"));
+    CHECK(IsValidSetting("mouse_pointer_sensitivity", "25") && IsValidSetting("mouse_pointer_sensitivity", "200"));
+    CHECK(IsValidSetting("mouse_pointer_sensitivity", "110") && IsValidSetting("mouse_pointer_sensitivity", "300"));
+    CHECK(!IsValidSetting("mouse_pointer_sensitivity", "1.5") && !IsValidSetting("mouse_pointer_sensitivity", "fast"));
+    CHECK(IsValidSetting("mouse_wheel_up", "l1") && IsValidSetting("mouse_wheel_down", "none") && !IsValidSetting("mouse_wheel_up", "start"));
+
+    // Persistence: the launcher writes human readable names and the runtime reads them back.
+    {
+        LauncherSettings settings(file);
+        settings.Set(kVSyncKey, "0");
+        CHECK(SetMouseButton(settings, DCP_MOUSE_SQUARE, DCP_MOUSE_X1));
+        CHECK(SetMouseButton(settings, DCP_MOUSE_CIRCLE, DCP_MOUSE_X2));
+        CHECK(SetMouseButton(settings, DCP_MOUSE_POINTER_CONTROL, DCP_MOUSE_RIGHT));
+        SetPointerSensitivity(settings, 150);
+        SetPointerSensitivity(settings, 143); // normalized to the nearest step
+        CHECK(SavedMouse(settings).sensitivity == 145);
+        SetPointerSensitivity(settings, 150);
+        SetWheelTarget(settings, true, DCP_WHEEL_L1);
+        CHECK(settings.Save());
+    }
+    const std::string written = ReadAll(file);
+    CHECK(WrittenValue(written, "mouse_square", "x1") && WrittenValue(written, "mouse_circle", "x2"));
+    CHECK(WrittenValue(written, "mouse_pointer_control", "right") && WrittenValue(written, "mouse_pointer_sensitivity", "150"));
+    CHECK(WrittenValue(written, "mouse_wheel_up", "l1") && WrittenValue(written, "vsync", "0"));
+    DcpMouseMap runtime;
+    dcp_mouse_load(file.string().c_str(), &runtime);
+    CHECK(runtime.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_X1 && runtime.button[DCP_MOUSE_CIRCLE] == DCP_MOUSE_X2);
+    CHECK(runtime.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_RIGHT && runtime.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_LEFT);
+    CHECK(runtime.sensitivity == 150 && runtime.wheel_up == DCP_WHEEL_L1);
+
+    // Pointer Control and its click cannot share a button, and the click cannot be cleared.
+    {
+        LauncherSettings settings(file);
+        CHECK(!SetMouseButton(settings, DCP_MOUSE_POINTER_INTERACT, DCP_MOUSE_RIGHT));
+        CHECK(!SetMouseButton(settings, DCP_MOUSE_POINTER_CONTROL, DCP_MOUSE_LEFT));
+        CHECK(!SetMouseButton(settings, DCP_MOUSE_POINTER_INTERACT, DCP_MOUSE_NONE));
+        CHECK(SetMouseButton(settings, DCP_MOUSE_POINTER_CONTROL, DCP_MOUSE_NONE));
+        CHECK(SavedMouse(settings).button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_NONE);
+    }
+
+    // A file that gave both the same button, or another build's key, still reads as a usable map.
+    {
+        std::ofstream(file) << "mouse_pointer_control = left\nmouse_pointer_interact = left\nmouse_unknown = left\nmouse_square = notabutton\n";
+    }
+    dcp_mouse_load(file.string().c_str(), &runtime);
+    CHECK(runtime.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_MIDDLE && runtime.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_LEFT);
+    CHECK(runtime.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_LEFT);
+
+    // Reset puts back the mouse settings alone, and the keyboard keeps its own.
+    {
+        LauncherSettings settings(file);
+        settings.Set(kVSyncKey, "0");
+        SetKey(settings, DCP_KEY_CROSS, SDL_SCANCODE_J);
+        SetMouseButton(settings, DCP_MOUSE_SQUARE, DCP_MOUSE_X1);
+        SetPointerSensitivity(settings, 50);
+        ResetMouse(settings);
+        CHECK(settings.Save());
+        const DcpMouseMap map = SavedMouse(settings);
+        CHECK(map.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_LEFT && map.sensitivity == 100);
+        CHECK(SavedKey(settings, DCP_KEY_CROSS) == SDL_SCANCODE_J);
+    }
+    CHECK(WrittenValue(ReadAll(file), "mouse_square", "left") && WrittenValue(ReadAll(file), "vsync", "0"));
+
+    // Mouse Sensitivity: slider steps, the Default button and Mouse Controls Off.
+    {
+        LauncherSettings settings(file);
+        CHECK(kSensitivityStepCount == 36 && SensitivityStepOf(25) == 0 && SensitivityStepOf(200) == 35);
+        CHECK(SensitivityStepOf(100) == 15 && SensitivityOfStep(SensitivityStepOf(100) + 1) == 105);
+        CHECK(SensitivityOfStep(SensitivityStepOf(100) - 1) == 95);
+        CHECK(SensitivityOfStep(-3) == 25 && SensitivityOfStep(500) == 200); // Left and Right stop at the ends
+        SetMouseButton(settings, DCP_MOUSE_SQUARE, DCP_MOUSE_X1);
+        SetMouseButton(settings, DCP_MOUSE_POINTER_CONTROL, DCP_MOUSE_X2);
+        SetWheelTarget(settings, true, DCP_WHEEL_L1);
+        SetPointerSensitivity(settings, 175);
+        settings.SetBool(dcp_mouse_controls_key, false);
+        CHECK(SavedMouse(settings).sensitivity == 175 && SavedMouse(settings).controls == 0);
+        SetPointerSensitivity(settings, DCP_POINTER_SENSITIVITY_DEFAULT); // what the Default button does
+        const DcpMouseMap map = SavedMouse(settings);
+        CHECK(map.sensitivity == 100 && settings.Get(dcp_pointer_sensitivity_key) == "100");
+        CHECK(map.controls == 0 && map.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_X1 && map.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_X2);
+        CHECK(map.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_LEFT && map.wheel_up == DCP_WHEEL_L1);
+        SetPointerSensitivity(settings, 60);
+        settings.SetBool(dcp_mouse_controls_key, true);
+        CHECK(SavedMouse(settings).sensitivity == 60 && SavedMouse(settings).controls == 1);
+        settings.Set(dcp_pointer_sensitivity_key, "garbage");
+        CHECK(SavedMouse(settings).sensitivity == 100);
+        settings.Set(dcp_pointer_sensitivity_key, "999");
+        CHECK(SavedMouse(settings).sensitivity == 200);
+        settings.Set(dcp_pointer_sensitivity_key, "");
+        CHECK(SavedMouse(settings).sensitivity == 100);
+    }
+    {
+        const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+        const size_t row = page.find("void SensitivityRow(trg::Ui& ui, int percent)");
+        const size_t row_end = page.find("// A mouse button binding", row);
+        const std::string body = page.substr(row, row_end - row);
+        const auto has = [&](const char* text) { return body.find(text) != std::string::npos; };
+        CHECK(has("SetPointerSensitivity(settings_, DCP_POINTER_SENSITIVITY_DEFAULT);"));
+        CHECK(!has("ResetMouse") && !has("SetMouseButton") && !has("dcp_mouse_controls_key"));
+        CHECK(has("ImGui::SameLine();") && has("ImGuiSliderFlags_AlwaysClamp"));
+        CHECK(has("GetContentRegionAvail().x") && !has("* 1.5f") && !has("* 2.25f")); // layout follows the DPI scale
+        const size_t disabled = page.find("ImGui::BeginDisabled(!SavedMouse(settings_).controls);");
+        const size_t call = page.find("SensitivityRow(ui, mouse.sensitivity);", disabled);
+        CHECK(disabled < call && call < page.find("ImGui::EndDisabled();", call)); // dimmed like the other mouse rows
+    }
+    // The Controls page offers the mouse next to the keyboard, with Esc to cancel and Clear for optional bindings.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t controls = launcher.find("void PageControls(trg::Ui& ui)");
+    const size_t keyboard = launcher.find("ui.Section(\"Keyboard controls\", true)", controls);
+    const size_t mouse = launcher.find("ui.Section(\"Mouse\", true)", controls);
+    const size_t hotkeys = launcher.find("ui.Section(\"Port hotkeys\", true)", controls);
+    CHECK(controls != std::string::npos && keyboard < mouse && mouse < hotkeys);
+    CHECK(launcher.find("MouseBindRow(ui, dcp_mouse_actions[index].ini_key") != std::string::npos);
+    const size_t slider = launcher.find("SensitivityRow(ui, mouse.sensitivity);", mouse);
+    CHECK(slider != std::string::npos && slider < launcher.find("ui.Combo(\"Wheel up\""));
+    CHECK(launcher.find("ImGui::SliderInt(\"##sensitivity\"") != std::string::npos);
+    CHECK(launcher.find("ImGui::Button(Tr(\"Default\")") != std::string::npos);
+    CHECK(launcher.find("ui.Combo(\"Pointer sensitivity\"") == std::string::npos);
+    const size_t toggle = launcher.find("ui.Toggle(\"Mouse Controls\"", controls);
+    const size_t first_row = launcher.find("MouseBindRow(ui, dcp_mouse_actions[index].ini_key", controls);
+    CHECK(toggle != std::string::npos && toggle < first_row && toggle > mouse);
+    CHECK(launcher.find("ImGui::BeginDisabled(!SavedMouse(settings_).controls);", toggle) < first_row);
+    CHECK(launcher.find("ImGui::EndDisabled();", first_row) < launcher.find("std::optional<int> MouseBindRow("));
+    CHECK(launcher.find("ImGui::IsMouseClicked(imgui_button, false)") != std::string::npos);
+    const std::string portuguese = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    for (const char* text : {"Mouse Controls\tControles do mouse\n",
+                             "Enables mouse buttons, wheel and pointer controls during gameplay.\tAtiva os botões do mouse, roda e controle do ponteiro durante o jogo\n",
+                             "Primary action\t", "Secondary action\t", "Pointer Control\t", "Pointer Interaction\t",
+                             "Mouse Sensitivity\tSensibilidade do mouse\n",
+                             "Controls how fast mouse movement moves the game's pointer.\tControla a velocidade com que o movimento do mouse move o ponteiro do jogo\n",
+                             "Default\t", "Left Mouse\t", "Mouse 4\t", "Mouse 5\t", "Mouse defaults\t"}) {
+        CHECK(portuguese.find(std::string("\n") + text) != std::string::npos);
+    }
+}
+
 // ---- Controller prompts: block patches on synthetic CPK archives ----
 
 namespace cpk_test {
@@ -8658,6 +8859,7 @@ int main(int argc, char** argv) {
     InGroup("header-art", TestHeaderArt);
     InGroup("parity", TestSharedLauncherSource);
     TestKeyBindings(base);
+    TestMouseSettings(base);
     TestFileBrowser(base);
     TestControllerPrompts(base);
     TestInstalledTextLanguages(base);

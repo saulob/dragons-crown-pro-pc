@@ -503,6 +503,61 @@ void TestEndgameUnlocks(const fs::path& folder) {
           "the loader reads them once; the menu only saves them");
 }
 
+void TestMouseControls(const fs::path& folder) {
+    using namespace DcpOptions;
+    const Setting& setting = SettingOf(Id::MouseControls);
+    Check(setting.page == Page::Controls && setting.apply == Apply::Live && setting.choices.size() == 2 &&
+              std::string(setting.key) == "mouse_controls" && setting.feature == 0,
+          "Mouse Controls is one live Off/On row in the Controls page");
+    Check(Current(DcpSettings::Values{}, Id::MouseControls) == "1", "it reads On by default");
+    const fs::path file = folder / "mouse.ini";
+    WriteFile(file, "# keep\nmouse_controls = off\n");
+    DcpSettings::Values seeded;
+    Check(DcpSettings::Read(file.string(), seeded) && !seeded.mouse_controls, "the saved value seeds what F1 shows");
+    WriteFile(file, "mouse_controls = maybe\n");
+    DcpSettings::Values malformed;
+    Check(DcpSettings::Read(file.string(), malformed) && malformed.mouse_controls, "a malformed value reads On");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& live = DcpSettings::Get();
+    Options options(live);
+    Check(options.Choose(Id::MouseControls, "0").changed && !live.mouse_controls && !options.RestartPending(),
+          "Off takes effect at once, with no restart");
+    const std::string menu = Source("gpu/shim/dcp_options_menu.cpp");
+    const size_t change = menu.find("outcome.changed && id == DcpOptions::Id::MouseControls");
+    Check(change != std::string::npos && menu.find("dcp_mouse_set_enabled(dcp_mouse_global()", change) < change + 160,
+          "F1 tells the mouse input when the setting changes");
+    live.mouse_controls = true;
+
+    const Setting& sensitivity = SettingOf(Id::MouseSensitivity);
+    Check(sensitivity.page == Page::Controls && sensitivity.apply == Apply::Live && sensitivity.choices.size() == 36 &&
+              std::string(sensitivity.key) == "mouse_pointer_sensitivity" && sensitivity.choices.front().value == "25" &&
+              sensitivity.choices.back().value == "200" && sensitivity.choices[15].value == "100",
+          "Mouse Sensitivity is one live 25% to 200% row in 5% steps");
+    Check(Current(DcpSettings::Values{}, Id::MouseSensitivity) == "100", "it reads 100 by default");
+    WriteFile(file, "mouse_pointer_sensitivity = 333\n");
+    DcpSettings::Values clamped;
+    Check(DcpSettings::Read(file.string(), clamped) && clamped.mouse_sensitivity == 200, "a saved value above the range clamps");
+    WriteFile(file, "mouse_pointer_sensitivity = fast\n");
+    DcpSettings::Values malformed_sensitivity;
+    Check(DcpSettings::Read(file.string(), malformed_sensitivity) && malformed_sensitivity.mouse_sensitivity == 100,
+          "a malformed value reads 100");
+    WriteFile(file, "mouse_pointer_sensitivity = 150\n");
+    DcpSettings::Load(file.string());
+    DcpSettings::Values& now = DcpSettings::Get();
+    Options menu_options(now);
+    Check(menu_options.Shown(Id::MouseSensitivity) == "150", "F1 shows the saved value");
+    const Outcome stepped = menu_options.Step(Id::MouseSensitivity, 1);
+    Check(stepped.changed && now.mouse_sensitivity == 155 && !menu_options.RestartPending(), "Right adds 5% at once");
+    Check(menu_options.Step(Id::MouseSensitivity, -1).changed && now.mouse_sensitivity == 150, "Left takes 5% off");
+    Check(menu_options.Choose(Id::MouseSensitivity, "25").changed && now.mouse_sensitivity == 25, "the minimum is 25%");
+    now.mouse_sensitivity = 100;
+    const std::string sensitivity_menu = Source("gpu/shim/dcp_options_menu.cpp");
+    const size_t sensitivity_change = sensitivity_menu.find("outcome.changed && id == DcpOptions::Id::MouseSensitivity");
+    Check(sensitivity_change != std::string::npos &&
+              sensitivity_menu.find("dcp_mouse_set_sensitivity(dcp_mouse_global()", sensitivity_change) < sensitivity_change + 200,
+          "F1 tells the mouse input when the sensitivity changes");
+}
+
 void TestEnableBossBattle(const fs::path& folder) {
     using namespace DcpOptions;
     int rows = 0;
@@ -1356,6 +1411,7 @@ int main() {
     TestUnlockGallery(folder);
     TestJapaneseMenuButtons(folder);
     TestControllerRumble(folder);
+    TestMouseControls(folder);
     TestEnableBossBattle(folder);
     TestEndgameUnlocks(folder);
     TestLauncherParity();

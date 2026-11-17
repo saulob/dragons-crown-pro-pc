@@ -39,8 +39,8 @@ find_package(SDL3 CONFIG REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(Threads REQUIRED)
 
-# Keyboard bindings shared by the launcher, the runtime pad and the video core.
-add_library(dcp_keys STATIC src/dcp_keys.c)
+# Keyboard and mouse bindings and the mouse input state shared by the launcher, the runtime pad and the video core.
+add_library(dcp_keys STATIC src/dcp_keys.c src/dcp_mouse.c)
 target_include_directories(dcp_keys PUBLIC src)
 target_link_libraries(dcp_keys PUBLIC SDL3::SDL3)
 target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
@@ -462,6 +462,15 @@ set_target_properties(dcp-cursor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_R
 target_include_directories(dcp-cursor-tests PRIVATE gpu/shim)
 target_compile_definitions(dcp-cursor-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-cursor-tests PRIVATE -Wall -Wextra -Werror)
+
+# Focused tests of the mouse input: bindings, Pointer Control touch finger, capture rules (tools/test.ps1); not part of the
+# default build.
+add_executable(dcp-mouse-tests EXCLUDE_FROM_ALL tests/mouse_input_tests.cpp)
+set_target_properties(dcp-mouse-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-mouse-tests PRIVATE src gpu/shim)
+target_compile_definitions(dcp-mouse-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-mouse-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-mouse-tests PRIVATE dcp_keys)
 
 # Focused tests of the windowed-mode size and centring arithmetic; not part of the default build.
 add_executable(dcp-window-tests EXCLUDE_FROM_ALL tests/window_fit_tests.cpp)

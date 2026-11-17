@@ -55,6 +55,8 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kSkipIntroKey, "0"},
     {kJapaneseMenuButtonsKey, "0"},
     {kControllerRumbleKey, "1"},
+    {kMouseControlsKey, "1"},
+    {kMouseSensitivityKey, "100"},
     {kStorySkipOfferKey, "0"},
     {kTutorialSkipOfferKey, "0"},
     {kUnlockGalleryKey, "0"},
@@ -114,6 +116,11 @@ std::span<const ManagedSetting> ManagedSettings() {
             default_names.emplace_back(dcp_key_name(action.default_scancode, name, sizeof(name)));
             all.push_back({action.ini_key, default_names.back()});
         }
+        for (const DcpMouseActionInfo& action : dcp_mouse_actions) {
+            all.push_back({action.ini_key, dcp_mouse_button_name(action.default_button)});
+        }
+        all.push_back({dcp_wheel_up_key, dcp_wheel_target_name(DCP_WHEEL_NONE)});
+        all.push_back({dcp_wheel_down_key, dcp_wheel_target_name(DCP_WHEEL_NONE)});
         return all;
     }();
     return settings;
@@ -126,6 +133,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (std::any_of(std::begin(dcp_key_actions), std::end(dcp_key_actions),
                     [&](const DcpKeyInfo& action) { return key == action.ini_key; })) {
         return dcp_key_from_name(std::string(value).c_str()) != 0;
+    }
+    if (const std::string mouse_key(key); dcp_mouse_setting_key(mouse_key.c_str())) {
+        return dcp_mouse_setting_value_valid(mouse_key.c_str(), std::string(value).c_str()) != 0;
     }
     if (key == kDisplayModeKey) {
         return one_of({"windowed", "borderless"});

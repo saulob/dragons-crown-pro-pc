@@ -166,6 +166,20 @@ constexpr char kControllerPromptsHelp[] =
     "seconds, reversible); the change is kept across reinstalls.";
 constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPCs, enemies and AI allies";
 constexpr char kControllerRumbleHelp[] = "Off disables controller vibration. Applies at the next game start.";
+constexpr char kMouseControlsEnabledHelp[] = "Enables mouse buttons, wheel and pointer controls during gameplay.";
+constexpr char kMouseControlsHelp[] =
+    "Always on, together with the keyboard and the controller. Click a row, then press the mouse button to use. Esc "
+    "cancels. Holding the Pointer Control button hides the cursor and moves the game's pointer with the mouse; the "
+    "interaction button then performs the pointer interaction.";
+constexpr const char* kMouseHelp[DCP_MOUSE_ACTION_COUNT] = {
+    "The button for the Square (X) action, the main attack.",
+    "The button for the Circle (B) action.",
+    "Hold this button and move the mouse to control the game's pointer. Releasing it goes back to normal play.",
+    ("While Pointer Control is active, this button performs the pointer interaction. It cannot be the same "
+     "button as Pointer Control."),
+};
+constexpr char kPointerSensitivityHelp[] = "Controls how fast mouse movement moves the game's pointer.";
+constexpr char kWheelHelp[] = "The button a wheel step presses. Off by default.";
 constexpr char kSkipIntroHelp[] = "Skip the startup logo and go straight to the title screen";
 constexpr char kJapaneseMenuButtonsHelp[] =
     "Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat "
@@ -1151,11 +1165,126 @@ private:
                 KeyRow(ui, static_cast<DcpKeyAction>(action));
             }
         }
+        if (ui.Section("Mouse", true)) {
+            MouseControls(ui);
+        }
         if (ui.Section("Port hotkeys", true)) {
             for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {
                 KeyRow(ui, static_cast<DcpKeyAction>(action));
             }
         }
+    }
+
+    void MouseControls(trg::Ui& ui) {
+        ui.Toggle("Mouse Controls", kMouseControlsEnabledHelp, dcp_mouse_controls_key, true, "Off", "On");
+        ui.Help(kMouseControlsHelp);
+        ImGui::BeginDisabled(!SavedMouse(settings_).controls);
+        if (ui.ConfirmRow("Mouse defaults", "Puts the mouse buttons, wheel and pointer sensitivity back to their defaults.",
+                          "Reset to defaults", "Put every mouse control back to its default?", "Reset")) {
+            ResetMouse(settings_);
+            mouse_capture_.clear();
+            ui.SetStatus("Mouse controls reset to defaults.");
+        }
+        const DcpMouseMap mouse = SavedMouse(settings_);
+        for (int index = 0; index < DCP_MOUSE_ACTION_COUNT; ++index) {
+            const auto action = static_cast<DcpMouseAction>(index);
+            const bool optional = action != DCP_MOUSE_POINTER_INTERACT;
+            if (const std::optional<int> button = MouseBindRow(ui, dcp_mouse_actions[index].ini_key,
+                                                               dcp_mouse_actions[index].label, kMouseHelp[index],
+                                                               mouse.button[index], optional)) {
+                if (!SetMouseButton(settings_, action, *button)) {
+                    ui.SetStatus("Pointer Control and Pointer Interaction need two different mouse buttons.");
+                }
+            }
+        }
+        SensitivityRow(ui, mouse.sensitivity);
+        std::vector<trg::Option> wheel;
+        for (int target = 0; target < DCP_WHEEL_TARGET_COUNT; ++target) {
+            wheel.push_back({dcp_wheel_target_name(target), dcp_wheel_target_label(target)});
+        }
+        ui.Combo("Wheel up", kWheelHelp, dcp_wheel_up_key, dcp_wheel_target_name(DCP_WHEEL_NONE), wheel);
+        ui.Combo("Wheel down", kWheelHelp, dcp_wheel_down_key, dcp_wheel_target_name(DCP_WHEEL_NONE), wheel);
+        ImGui::EndDisabled();
+    }
+
+    // The slider runs over steps so that Left and Right move it by one step; its text is the percentage.
+    void SensitivityRow(trg::Ui& ui, int percent) {
+        ui.Row("Mouse Sensitivity", kPointerSensitivityHelp);
+        const float default_width = ImGui::CalcTextSize(Tr("Default")).x + 2 * ImGui::GetStyle().FramePadding.x;
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - default_width - ImGui::GetStyle().ItemSpacing.x);
+        int step = SensitivityStepOf(percent);
+        const std::string shown = std::to_string(percent) + "%%";
+        ImGui::PushID(dcp_pointer_sensitivity_key);
+        if (ImGui::SliderInt("##sensitivity", &step, 0, kSensitivityStepCount - 1, shown.c_str(),
+                             ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput)) {
+            SetPointerSensitivity(settings_, SensitivityOfStep(step));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(Tr("Default"), ImVec2(default_width, 0))) {
+            SetPointerSensitivity(settings_, DCP_POINTER_SENSITIVITY_DEFAULT);
+        }
+        ImGui::PopID();
+    }
+
+    // A mouse button binding: click the row, then press the mouse button to use. Esc cancels. Returns the button
+    // (DCP_MOUSE_NONE for Clear) once chosen.
+    std::optional<int> MouseBindRow(trg::Ui& ui, const char* id, const char* label, const char* help, int button,
+                                    bool clearable) {
+        ui.Row(label, help);
+        const float clear_width = clearable ? ImGui::CalcTextSize(Tr("Clear")).x + 2 * ImGui::GetStyle().FramePadding.x : 0;
+        const float width = ImGui::GetContentRegionAvail().x - (clearable ? clear_width + ImGui::GetStyle().ItemSpacing.x : 0);
+        std::optional<int> chosen;
+        ImGui::PushID(id);
+        if (mouse_capture_ == id) {
+            DrawMouseCapturePrompt(width);
+            if (ImGui::GetFrameCount() > mouse_capture_frame_) {
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+                    mouse_capture_.clear();
+                } else if (const int pressed = MouseButtonPressed()) {
+                    chosen = pressed;
+                    mouse_capture_.clear();
+                }
+            }
+        } else if (ImGui::Button(Tr(dcp_mouse_button_label(button)), ImVec2(width, 0))) {
+            mouse_capture_ = id;
+            mouse_capture_frame_ = ImGui::GetFrameCount();
+        }
+        if (clearable) {
+            ImGui::SameLine();
+            ImGui::BeginDisabled(button == DCP_MOUSE_NONE);
+            if (ImGui::Button(Tr("Clear"), ImVec2(clear_width, 0))) {
+                chosen = DCP_MOUSE_NONE;
+                mouse_capture_.clear();
+            }
+            ImGui::EndDisabled();
+        }
+        ImGui::PopID();
+        return chosen;
+    }
+
+    // The prompt is drawn, not a button: the click that picks Left Mouse must not also press a control.
+    static void DrawMouseCapturePrompt(float width) {
+        const char* text = Tr("Press a mouse button...  (Esc cancels)");
+        const ImVec2 size(width, ImGui::GetFrameHeight());
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(size);
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y), ImGui::GetColorU32(kAccent),
+                            ImGui::GetStyle().FrameRounding);
+        const ImVec2 extent = ImGui::CalcTextSize(text);
+        draw->AddText(ImVec2(origin.x + (size.x - extent.x) * 0.5f, origin.y + (size.y - extent.y) * 0.5f),
+                      ImGui::GetColorU32(ImGuiCol_Text), text);
+    }
+
+    // The mouse button pressed this frame as a DcpMouseButton, 0 when none.
+    static int MouseButtonPressed() {
+        static constexpr int kByImGuiButton[] = {DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, DCP_MOUSE_MIDDLE, DCP_MOUSE_X1, DCP_MOUSE_X2};
+        for (int imgui_button = 0; imgui_button < 5; ++imgui_button) {
+            if (ImGui::IsMouseClicked(imgui_button, false)) {
+                return kByImGuiButton[imgui_button];
+            }
+        }
+        return DCP_MOUSE_NONE;
     }
 
     std::string JapaneseMenuButtonsHelp() const {
@@ -1453,6 +1582,8 @@ private:
     std::string install_failure_;
     std::string install_failure_text_;
     PromptStyle prompts_installed_ = PromptStyle::kPlayStation;
+    std::string mouse_capture_;  // the mouse binding row waiting for a button
+    int mouse_capture_frame_ = 0;
     bool xbox_available_ = false;
     bool npc_voices_available_ = false;
     bool safe_mode_installed_ = false;

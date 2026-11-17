@@ -274,6 +274,36 @@ Reset	Restaurar
 Keys reset to defaults.	Teclas restauradas ao padrão.
 Keyboard controls	Controles do teclado
 Port hotkeys	Atalhos do port
+Mouse	Mouse
+Mouse Controls	Controles do mouse
+Enables mouse buttons, wheel and pointer controls during gameplay.	Ativa os botões do mouse, roda e controle do ponteiro durante o jogo
+Always on, together with the keyboard and the controller. Click a row, then press the mouse button to use. Esc cancels. Holding the Pointer Control button hides the cursor and moves the game's pointer with the mouse; the interaction button then performs the pointer interaction.	Sempre ativo, junto com o teclado e o controle. Clique em uma linha e pressione o botão do mouse a usar. Esc cancela. Manter o botão do Controle do ponteiro pressionado esconde o cursor e move o ponteiro do jogo com o mouse; o botão de interação então executa a interação do ponteiro.
+Mouse defaults	Padrões do mouse
+Puts the mouse buttons, wheel and pointer sensitivity back to their defaults.	Restaura os botões, a roda e a sensibilidade do ponteiro do mouse ao padrão.
+Put every mouse control back to its default?	Voltar todos os controles do mouse ao padrão?
+Mouse controls reset to defaults.	Controles do mouse restaurados ao padrão.
+Primary action	Ação principal
+Secondary action	Ação secundária
+Pointer Control	Controle do ponteiro
+Pointer Interaction	Interação do ponteiro
+The button for the Square (X) action, the main attack.	O botão da ação Quadrado (X), o ataque principal.
+The button for the Circle (B) action.	O botão da ação Círculo (B).
+Hold this button and move the mouse to control the game's pointer. Releasing it goes back to normal play.	Segure este botão e mova o mouse para controlar o ponteiro do jogo. Soltá-lo volta ao jogo normal.
+While Pointer Control is active, this button performs the pointer interaction. It cannot be the same button as Pointer Control.	Enquanto o Controle do ponteiro estiver ativo, este botão executa a interação do ponteiro. Não pode ser o mesmo botão do Controle do ponteiro.
+Pointer Control and Pointer Interaction need two different mouse buttons.	O Controle do ponteiro e a Interação do ponteiro precisam de dois botões do mouse diferentes.
+Mouse Sensitivity	Sensibilidade do mouse
+Controls how fast mouse movement moves the game's pointer.	Controla a velocidade com que o movimento do mouse move o ponteiro do jogo
+Default	Padrão
+Wheel up	Roda para cima
+Wheel down	Roda para baixo
+The button a wheel step presses. Off by default.	O botão que cada passo da roda pressiona. Desligado por padrão.
+Clear	Limpar
+Press a mouse button...  (Esc cancels)	Pressione um botão do mouse...  (Esc cancela)
+Left Mouse	Mouse esquerdo
+Right Mouse	Mouse direito
+Middle Mouse	Mouse do meio
+Mouse 4	Mouse 4
+Mouse 5	Mouse 5
 Click a key, then press the new one. Esc cancels. A key can be used for more than one control.	Clique em uma tecla e pressione a nova. Esc cancela. Uma tecla pode ser usada em mais de um controle.
 That key cannot be used.	Essa tecla não pode ser usada.
 Left stick up	Analógico esq. cima

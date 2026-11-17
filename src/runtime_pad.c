@@ -8,6 +8,8 @@
 #include "runtime_pad_rumble.h"
 #include "dcpgpu.h"
 #include "dcp_keys.h"
+#include "dcp_mouse.h"
+#include "dcp_pad_buttons.h"
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
 #include "exit_game_hook.h"
@@ -29,11 +31,6 @@
 #define ERR_USER_NOT_LOGIN ((int32_t)0x809b0081)
 #define MAX_PADS 4
 
-enum {
-    BTN_L3=0x2, BTN_R3=0x4, BTN_OPTIONS=0x8, BTN_UP=0x10, BTN_RIGHT=0x20, BTN_DOWN=0x40, BTN_LEFT=0x80,
-    BTN_L2=0x100, BTN_R2=0x200, BTN_L1=0x400, BTN_R1=0x800, BTN_TRIANGLE=0x1000, BTN_CIRCLE=0x2000,
-    BTN_CROSS=0x4000, BTN_SQUARE=0x8000, BTN_TOUCHPAD=0x100000,
-};
 typedef struct { uint16_t x, y; uint8_t id, reserve[3]; } PadTouch;
 typedef struct {
     uint32_t buttons;
@@ -87,8 +84,10 @@ static uint8_t trigger(int16_t v) { int x=v>>7; return (uint8_t)(x<0 ? 0 : x>255
 static uint16_t touch_axis(float v, int max) {
     return (uint16_t)(v<=0.0f ? 0 : v>=1.0f ? max : (int)(v*max+0.5f));
 }
+static int pointer_owns_touch; /* the last sample: Pointer Control drives the touch surface; under `lock` */
 static void touch_click(PadData *d, int right) {
     d->buttons|=BTN_TOUCHPAD;
+    if (pointer_owns_touch) return;
     d->touch_count=1;
     d->touches[0]=(PadTouch){.x=right ? 1440 : 480,.y=471,.id=0};
 }
@@ -197,7 +196,14 @@ void runtime_pad_set_rumble(int enabled) {
     dcpgpu_set_controller_rumble(enabled);
     log_rumble("");
 }
-void runtime_pad_set_settings(const char *settings_file) { snprintf(keys_file,sizeof(keys_file),"%s",settings_file ? settings_file : ""); }
+void runtime_pad_set_settings(const char *settings_file) {
+    snprintf(keys_file,sizeof(keys_file),"%s",settings_file ? settings_file : "");
+    DcpMouseMap mouse;
+    dcp_mouse_load(keys_file,&mouse);
+    dcp_mouse_configure(dcp_mouse_global(),&mouse);
+    if (mouse.controls) printf("Mouse controls: on, sensitivity %d%%\n",mouse.sensitivity);
+    else puts("Mouse controls: off");
+}
 
 static const struct { DcpKeyAction action; uint32_t ps; } key_buttons[]={
     {DCP_KEY_CROSS,BTN_CROSS}, {DCP_KEY_CIRCLE,BTN_CIRCLE}, {DCP_KEY_SQUARE,BTN_SQUARE}, {DCP_KEY_TRIANGLE,BTN_TRIANGLE},
@@ -265,6 +271,14 @@ static void load_button_maps(void) {
     if (pad || keys) printf("Runtime: pad map: %d gamepad and %d keyboard buttons remapped\n",pad,keys);
 }
 
+static void merge_mouse(PadData *d, const DcpMouseSample *mouse) {
+    d->buttons|=mouse->buttons;
+    if (mouse->pointer) { memset(d->touches,0,sizeof(d->touches)); d->touch_count=0; }
+    if (mouse->touch) {
+        d->touches[0]=(PadTouch){.x=mouse->x,.y=mouse->y,.id=mouse->id};
+        d->touch_count=1;
+    }
+}
 static void key_axis(uint8_t *axis, bool negative, bool positive) {
     if (negative || positive) *axis=(uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0));
 }
@@ -284,8 +298,14 @@ static void sample_host(int slot, PadData *d) {
     SDL_Gamepad *g=slots[slot].gamepad;
     d->connected=slot_connected(slot);
     d->connected_count=slots[slot].connected_count ? slots[slot].connected_count : d->connected;
+    pointer_owns_touch=0;
     if (dcpgpu_overlay_captures_input()) return; /* settings menu open: neutral input */
     const bool *k=slot==0 && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
+    DcpMouseSample mouse={0};
+    if (slot==0) {
+        dcp_mouse_sample(dcp_mouse_global(),&mouse);
+        pointer_owns_touch=mouse.pointer;
+    }
     load_button_maps();
     if (g) {
         /* L3 and R3 together belong to the Options menu: the game never sees the pair. */
@@ -317,6 +337,8 @@ static void sample_host(int slot, PadData *d) {
         // Back/Select on pads without a touch surface is a left-side click.
         if ((d->buttons & BTN_TOUCHPAD) && !d->touch_count) touch_click(d,0);
     }
+    /* The mouse is player 1's too: buttons add to the pad's, and Pointer Control takes the touch surface. */
+    if (slot==0) merge_mouse(d,&mouse);
     /* The keyboard works with or without a gamepad: its buttons add to the pad's, and a stick
      * follows the keys only while one of them is held. */
     if (!k) return;

@@ -51,4 +51,20 @@ void SetKey(trg::SettingsStore& settings, DcpKeyAction action, int scancode);
 // Puts every keyboard control and port hotkey back to its default and nothing else.
 void ResetKeys(trg::SettingsStore& settings);
 
+// The mouse bindings, wheel steps and Pointer Control sensitivity saved in the settings (dcp_keys.h). A missing or unusable
+// value reads as its default.
+DcpMouseMap SavedMouse(const trg::SettingsStore& settings);
+// Binds a mouse button (DCP_MOUSE_NONE clears the binding). False, and nothing saved, when the binding would leave Pointer
+// Pointer and its click on one button or the click without a button.
+bool SetMouseButton(trg::SettingsStore& settings, DcpMouseAction action, int button);
+void SetWheelTarget(trg::SettingsStore& settings, bool up, int target);
+void SetPointerSensitivity(trg::SettingsStore& settings, int percent);
+// The Mouse Sensitivity slider moves in steps: index 0 is the minimum.
+inline constexpr int kSensitivityStepCount =
+    (DCP_POINTER_SENSITIVITY_MAX - DCP_POINTER_SENSITIVITY_MIN) / DCP_POINTER_SENSITIVITY_STEP + 1;
+int SensitivityStepOf(int percent);
+int SensitivityOfStep(int step);
+// Puts the mouse bindings, wheel steps and sensitivity back to their defaults and nothing else.
+void ResetMouse(trg::SettingsStore& settings);
+
 } // namespace dcp

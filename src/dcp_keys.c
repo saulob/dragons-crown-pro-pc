@@ -96,8 +96,7 @@ static char *trim(char *text) {
     return text;
 }
 
-void dcp_keys_load(const char *path, DcpKeyMap *map) {
-    dcp_keys_defaults(map);
+void dcp_ini_visit(const char *path, DcpIniVisitor visit, void *user) {
     size_t size=0;
     char *text=path && *path ? (char *)SDL_LoadFile(path,&size) : NULL;
     if (!text) return;
@@ -111,9 +110,153 @@ void dcp_keys_load(const char *path, DcpKeyMap *map) {
             char *value=trim(eq+1);
             char *comment=strstr(value," #");
             if (comment) *comment=0;
-            dcp_keys_apply(map,trim(line),trim(value));
+            visit(trim(line),trim(value),user);
         }
         line=next;
     }
     SDL_free(text);
+}
+
+static void apply_key_line(const char *key, const char *value, void *map) { dcp_keys_apply((DcpKeyMap *)map,key,value); }
+
+void dcp_keys_load(const char *path, DcpKeyMap *map) {
+    dcp_keys_defaults(map);
+    dcp_ini_visit(path,apply_key_line,map);
+}
+
+const DcpMouseActionInfo dcp_mouse_actions[DCP_MOUSE_ACTION_COUNT] = {
+    {"mouse_square", "Primary action", DCP_MOUSE_LEFT},
+    {"mouse_circle", "Secondary action", DCP_MOUSE_RIGHT},
+    {"mouse_pointer_control", "Pointer Control", DCP_MOUSE_MIDDLE},
+    {"mouse_pointer_interact", "Pointer Interaction", DCP_MOUSE_LEFT},
+};
+const char *const dcp_wheel_up_key="mouse_wheel_up", *const dcp_wheel_down_key="mouse_wheel_down";
+const char *const dcp_pointer_sensitivity_key="mouse_pointer_sensitivity", *const dcp_mouse_controls_key="mouse_controls";
+
+static const struct { const char *name; const char *label; int button; } mouse_buttons[]={
+    {"left","Left Mouse",DCP_MOUSE_LEFT}, {"right","Right Mouse",DCP_MOUSE_RIGHT}, {"middle","Middle Mouse",DCP_MOUSE_MIDDLE},
+    {"x1","Mouse 4",DCP_MOUSE_X1}, {"x2","Mouse 5",DCP_MOUSE_X2},
+};
+static const struct { const char *name; const char *label; } wheel_targets[DCP_WHEEL_TARGET_COUNT]={
+    {"none","(none)"}, {"cross","Cross (A)"}, {"circle","Circle (B)"}, {"square","Square (X)"}, {"triangle","Triangle (Y)"},
+    {"l1","L1"}, {"r1","R1"}, {"l2","L2"}, {"r2","R2"},
+};
+
+void dcp_mouse_defaults(DcpMouseMap *map) {
+    for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) map->button[i]=dcp_mouse_actions[i].default_button;
+    map->wheel_up=map->wheel_down=DCP_WHEEL_NONE;
+    map->sensitivity=DCP_POINTER_SENSITIVITY_DEFAULT;
+    map->controls=1;
+}
+
+int dcp_mouse_button_from_name(const char *name) {
+    if (!name || !*name) return -1;
+    if (!SDL_strcasecmp(name,"none")) return DCP_MOUSE_NONE;
+    for (size_t i=0;i<sizeof(mouse_buttons)/sizeof(*mouse_buttons);++i) {
+        if (!SDL_strcasecmp(name,mouse_buttons[i].name)) return mouse_buttons[i].button;
+    }
+    if (!SDL_strncasecmp(name,"mouse",5) && name[5]>='1' && name[5]<='5' && !name[6]) {
+        static const int by_number[]={DCP_MOUSE_LEFT,DCP_MOUSE_RIGHT,DCP_MOUSE_MIDDLE,DCP_MOUSE_X1,DCP_MOUSE_X2};
+        return by_number[name[5]-'1'];
+    }
+    return -1;
+}
+
+const char *dcp_mouse_button_name(int button) {
+    for (size_t i=0;i<sizeof(mouse_buttons)/sizeof(*mouse_buttons);++i) if (mouse_buttons[i].button==button) return mouse_buttons[i].name;
+    return "none";
+}
+
+const char *dcp_mouse_button_label(int button) {
+    for (size_t i=0;i<sizeof(mouse_buttons)/sizeof(*mouse_buttons);++i) if (mouse_buttons[i].button==button) return mouse_buttons[i].label;
+    return "(none)";
+}
+
+int dcp_wheel_target_from_name(const char *name) {
+    if (!name || !*name) return -1;
+    for (int i=0;i<DCP_WHEEL_TARGET_COUNT;++i) if (!SDL_strcasecmp(name,wheel_targets[i].name)) return i;
+    return -1;
+}
+const char *dcp_wheel_target_name(int target) { return target>=0 && target<DCP_WHEEL_TARGET_COUNT ? wheel_targets[target].name : "none"; }
+const char *dcp_wheel_target_label(int target) { return target>=0 && target<DCP_WHEEL_TARGET_COUNT ? wheel_targets[target].label : "(none)"; }
+
+int dcp_pointer_sensitivity_valid(int percent) {
+    return percent>=DCP_POINTER_SENSITIVITY_MIN && percent<=DCP_POINTER_SENSITIVITY_MAX &&
+           (percent-DCP_POINTER_SENSITIVITY_MIN)%DCP_POINTER_SENSITIVITY_STEP==0;
+}
+
+int dcp_pointer_sensitivity_normalize(int percent) {
+    if (percent<DCP_POINTER_SENSITIVITY_MIN) return DCP_POINTER_SENSITIVITY_MIN;
+    if (percent>DCP_POINTER_SENSITIVITY_MAX) return DCP_POINTER_SENSITIVITY_MAX;
+    const int steps=(percent-DCP_POINTER_SENSITIVITY_MIN+DCP_POINTER_SENSITIVITY_STEP/2)/DCP_POINTER_SENSITIVITY_STEP;
+    return DCP_POINTER_SENSITIVITY_MIN+steps*DCP_POINTER_SENSITIVITY_STEP;
+}
+
+static int parse_percent(const char *value) {
+    if (!value || !*value) return -1;
+    int percent=0;
+    for (const char *c=value;*c;++c) {
+        if (*c<'0' || *c>'9' || percent>1000) return -1;
+        percent=percent*10+(*c-'0');
+    }
+    return percent;
+}
+
+static int parse_flag(const char *value) {
+    if (!value) return -1;
+    if (!SDL_strcasecmp(value,"1") || !SDL_strcasecmp(value,"on") || !SDL_strcasecmp(value,"yes") || !SDL_strcasecmp(value,"true")) return 1;
+    if (!SDL_strcasecmp(value,"0") || !SDL_strcasecmp(value,"off") || !SDL_strcasecmp(value,"no") || !SDL_strcasecmp(value,"false")) return 0;
+    return -1;
+}
+
+int dcp_mouse_setting_key(const char *ini_key) {
+    if (!strcmp(ini_key,dcp_mouse_controls_key)) return 1;
+    if (!strcmp(ini_key,dcp_wheel_up_key) || !strcmp(ini_key,dcp_wheel_down_key) || !strcmp(ini_key,dcp_pointer_sensitivity_key)) return 1;
+    for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) if (!strcmp(ini_key,dcp_mouse_actions[i].ini_key)) return 1;
+    return 0;
+}
+
+int dcp_mouse_setting_value_valid(const char *ini_key, const char *value) {
+    if (!strcmp(ini_key,dcp_mouse_controls_key)) return parse_flag(value)>=0;
+    if (!strcmp(ini_key,dcp_pointer_sensitivity_key)) return parse_percent(value)>=0;
+    if (!strcmp(ini_key,dcp_wheel_up_key) || !strcmp(ini_key,dcp_wheel_down_key)) return dcp_wheel_target_from_name(value)>=0;
+    for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) {
+        if (strcmp(ini_key,dcp_mouse_actions[i].ini_key)) continue;
+        const int button=dcp_mouse_button_from_name(value);
+        return button>=0 && (button!=DCP_MOUSE_NONE || i!=DCP_MOUSE_POINTER_INTERACT);
+    }
+    return 0;
+}
+
+int dcp_mouse_apply(DcpMouseMap *map, const char *ini_key, const char *value) {
+    if (!dcp_mouse_setting_key(ini_key) || !dcp_mouse_setting_value_valid(ini_key,value)) return 0;
+    if (!strcmp(ini_key,dcp_mouse_controls_key)) map->controls=parse_flag(value);
+    else if (!strcmp(ini_key,dcp_pointer_sensitivity_key)) map->sensitivity=dcp_pointer_sensitivity_normalize(parse_percent(value));
+    else if (!strcmp(ini_key,dcp_wheel_up_key)) map->wheel_up=dcp_wheel_target_from_name(value);
+    else if (!strcmp(ini_key,dcp_wheel_down_key)) map->wheel_down=dcp_wheel_target_from_name(value);
+    else for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) if (!strcmp(ini_key,dcp_mouse_actions[i].ini_key)) map->button[i]=dcp_mouse_button_from_name(value);
+    return 1;
+}
+
+void dcp_mouse_normalize(DcpMouseMap *map) {
+    const int control=map->button[DCP_MOUSE_POINTER_CONTROL], click=map->button[DCP_MOUSE_POINTER_INTERACT];
+    if (control!=DCP_MOUSE_NONE && control==click) {
+        map->button[DCP_MOUSE_POINTER_CONTROL]=dcp_mouse_actions[DCP_MOUSE_POINTER_CONTROL].default_button;
+        map->button[DCP_MOUSE_POINTER_INTERACT]=dcp_mouse_actions[DCP_MOUSE_POINTER_INTERACT].default_button;
+    }
+}
+
+int dcp_mouse_binding_allowed(const DcpMouseMap *map, DcpMouseAction action, int button) {
+    if (button<0 || button>=DCP_MOUSE_BUTTON_COUNT) return 0;
+    if (action==DCP_MOUSE_POINTER_INTERACT) return button!=DCP_MOUSE_NONE && button!=map->button[DCP_MOUSE_POINTER_CONTROL];
+    if (action==DCP_MOUSE_POINTER_CONTROL) return button==DCP_MOUSE_NONE || button!=map->button[DCP_MOUSE_POINTER_INTERACT];
+    return 1;
+}
+
+static void apply_mouse_line(const char *key, const char *value, void *map) { dcp_mouse_apply((DcpMouseMap *)map,key,value); }
+
+void dcp_mouse_load(const char *path, DcpMouseMap *map) {
+    dcp_mouse_defaults(map);
+    dcp_ini_visit(path,apply_mouse_line,map);
+    dcp_mouse_normalize(map);
 }

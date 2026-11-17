@@ -1908,16 +1908,17 @@ static void test_source_wiring(void) {
     /* Triangle is the one logical button: Xbox Y, PlayStation Triangle and the Q key all reach it before the filter */
     char *pad = read_text("src/runtime_pad.c");
     char *keys = read_text("src/dcp_keys.c");
-    CHECK(pad && keys);
-    if (pad && keys) {
-        CHECK(strstr(pad, "BTN_TRIANGLE=0x1000") && strstr(pad, "{SDL_GAMEPAD_BUTTON_NORTH,BTN_TRIANGLE}"));
+    char *buttons = read_text("src/dcp_pad_buttons.h");
+    CHECK(pad && keys && buttons);
+    if (pad && keys && buttons) {
+        CHECK(strstr(buttons, "BTN_TRIANGLE=0x1000") && strstr(pad, "{SDL_GAMEPAD_BUTTON_NORTH,BTN_TRIANGLE}"));
         CHECK(strstr(pad, "{DCP_KEY_TRIANGLE,BTN_TRIANGLE}") && strstr(keys, "{\"key_triangle\", \"Triangle (Y)\", SDL_SCANCODE_Q}"));
         CHECK(EARLY_STORY_PAD_TRIANGLE == 0x1000);
         const char *filter = strstr(pad, "early_story_shortcut_pad_filter(");
         CHECK(filter && filter > strstr(pad, "static void sample(int slot") && filter > strstr(pad, "sample_host(slot,d);") &&
               filter > strstr(pad, "sample_player1_scripts(d);"));
     }
-    free(pad), free(keys);
+    free(pad), free(keys), free(buttons);
     /* the investigation's diagnostics and telemetry are gone for good */
     static const char *const feature_files[] = {"src/early_story_online.c",  "src/early_story_online.h",
                                                 "src/early_story_session.c", "src/early_story_session.h",

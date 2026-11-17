@@ -14,8 +14,9 @@ class State {
 public:
     // gameplay: the game window is accepting input (false in the launcher).
     // overlay: a mouse-driven UI is open and needs the cursor.
+    // pointer: Pointer Control is active, so the game's own pointer is the cursor and the host cursor stays hidden.
     // Returns the new visibility when it changes, otherwise nullopt.
-    std::optional<bool> Update(bool gameplay, bool focused, bool overlay) {
+    std::optional<bool> Update(bool gameplay, bool focused, bool overlay, bool pointer = false) {
         if (!gameplay) {
             device_ = Device::Mouse;
             device_before_overlay_ = Device::Mouse;
@@ -27,7 +28,7 @@ public:
             device_ = device_before_overlay_;
             overlay_ = false;
         }
-        const bool visible = !gameplay || !focused || overlay || device_ == Device::Mouse;
+        const bool visible = !gameplay || !focused || overlay || (device_ == Device::Mouse && !pointer);
         if (visible == visible_) {
             return std::nullopt;
         }
@@ -35,9 +36,11 @@ public:
         return visible;
     }
 
-    void MouseMoved() { device_ = Device::Mouse; }
-    void MouseButtonPressed() { device_ = Device::Mouse; }
-    void MouseWheelMoved() { device_ = Device::Mouse; }
+    // With Mouse Controls off the mouse is not a gameplay device: it never becomes the last device.
+    void SetMouseControls(bool on) { mouse_controls_ = on; }
+    void MouseMoved() { MouseActivity(); }
+    void MouseButtonPressed() { MouseActivity(); }
+    void MouseWheelMoved() { MouseActivity(); }
     void KeyboardActivity() { device_ = Device::Keyboard; }
     void ControllerActivity() { device_ = Device::Controller; }
 
@@ -45,6 +48,13 @@ public:
     bool Visible() const { return visible_; }
 
 private:
+    void MouseActivity() {
+        if (mouse_controls_) {
+            device_ = Device::Mouse;
+        }
+    }
+
+    bool mouse_controls_ = true;
     Device device_ = Device::Mouse;
     Device device_before_overlay_ = Device::Mouse;
     bool overlay_ = false;

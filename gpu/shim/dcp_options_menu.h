@@ -15,6 +15,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "dcp_graphics.h"
+#include "dcp_keys.h"
 #include "dcp_menu_input.h"
 #include "dcp_renderer.h"
 #include "dcp_settings.h"
@@ -141,6 +142,8 @@ inline constexpr Choice kStrengths[] = {
     {"35", "35%"}, {"40", "40%"}, {"45", "45%"}, {"50", "50%"}, {"55", "55%"}, {"60", "60%"}, {"65", "65%"},
     {"70", "70%"}, {"75", "75%"}, {"80", "80%"}, {"85", "85%"}, {"90", "90%"}, {"95", "95%"}, {"100", "100%"}};
 
+inline constexpr Choice kMouseSensitivities[] = {{"25", "25%"}, {"30", "30%"}, {"35", "35%"}, {"40", "40%"}, {"45", "45%"}, {"50", "50%"}, {"55", "55%"}, {"60", "60%"}, {"65", "65%"}, {"70", "70%"}, {"75", "75%"}, {"80", "80%"}, {"85", "85%"}, {"90", "90%"}, {"95", "95%"}, {"100", "100%"}, {"105", "105%"}, {"110", "110%"}, {"115", "115%"}, {"120", "120%"}, {"125", "125%"}, {"130", "130%"}, {"135", "135%"}, {"140", "140%"}, {"145", "145%"}, {"150", "150%"}, {"155", "155%"}, {"160", "160%"}, {"165", "165%"}, {"170", "170%"}, {"175", "175%"}, {"180", "180%"}, {"185", "185%"}, {"190", "190%"}, {"195", "195%"}, {"200", "200%"}};
+
 enum class Id {
     DisplayMode,
     VSync,
@@ -158,6 +161,8 @@ enum class Id {
     JapaneseNpcVoices,
     JapaneseMenuButtons,
     ControllerRumble,
+    MouseControls,
+    MouseSensitivity,
     FrameRate,
     FrameRateInTitle,
     ResolutionInTitle,
@@ -220,6 +225,10 @@ inline constexpr Setting kSettings[] = {
      "Swaps Confirm and Cancel in the menus, as in the Japanese release. Combat controls do not change.", Apply::Restart, kOffOn},
     {Id::ControllerRumble, Page::Controls, "controller_rumble", "Controller Rumble",
      "Off disables controller vibration.", Apply::Live, kOffOn},
+    {Id::MouseControls, Page::Controls, "mouse_controls", "Mouse Controls",
+     "Enables mouse buttons, wheel and pointer controls during gameplay.", Apply::Live, kOffOn},
+    {Id::MouseSensitivity, Page::Controls, "mouse_pointer_sensitivity", "Mouse Sensitivity",
+     "Controls how fast mouse movement moves the game's pointer.", Apply::Live, kMouseSensitivities},
     {Id::FrameRate, Page::Gameplay, "frame_rate", "Frame rate",
      "60 FPS is the original game rate. Faster targets show the last frame again; game speed does not change.",
      Apply::Restart, kFrameRates},
@@ -297,6 +306,8 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::JapaneseNpcVoices: return flag(v.japanese_npc_voices);
     case Id::JapaneseMenuButtons: return flag(v.japanese_menu_buttons);
     case Id::ControllerRumble: return flag(v.controller_rumble);
+    case Id::MouseControls: return flag(v.mouse_controls);
+    case Id::MouseSensitivity: return std::to_string(v.mouse_sensitivity.load());
     case Id::FrameRate: return std::to_string(v.frame_rate.load());
     case Id::FrameRateInTitle: return flag(v.show_fps_title);
     case Id::ResolutionInTitle: return flag(v.show_resolution_title);
@@ -331,6 +342,8 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::ResolutionInTitle: v.show_resolution_title = on; break;
     case Id::FrameCounter: v.show_fps = on; break;
     case Id::ControllerRumble: v.controller_rumble = on; break;
+    case Id::MouseControls: v.mouse_controls = on; break;
+    case Id::MouseSensitivity: v.mouse_sensitivity = dcp_pointer_sensitivity_normalize(std::atoi(std::string(value).c_str())); break;
     case Id::EnableBossBattle: v.enable_boss_battle = on; break;
     case Id::AspectRatio:
     case Id::TrueUltrawide:
