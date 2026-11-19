@@ -21,6 +21,7 @@
 #include "net/json.h"
 #include "net/lobby_link.h"
 #include "net/online_version.h"
+#include "appearance_session.h"
 #include "boss_battle_online.h"
 #include "dcp_party.h"
 #include "early_story_session.h"
@@ -110,7 +111,8 @@ struct Signal {
     bool delivered = false;
 };
 
-enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kBossRooms, kSearch, kCreateJoin, kWorlds, kStory, kBossBattle, kCommsReport };
+enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kBossRooms, kSearch, kCreateJoin, kWorlds, kStory, kBossBattle, kCommsReport,
+                  kAppearance };
 
 struct Pending {
     Kind kind = Kind::kInternal;
@@ -426,6 +428,7 @@ void ApplyPeers() {
 
 void ClearRoom() {
     early_story_session_reset();
+    appearance_session::Shared().Left();
     if (g.room) boss_battle_online_room_left("the room was left");
     g.boss_attr = BOSS_BATTLE_ROOM_NONE;
     g.boss_published = 0;
@@ -612,6 +615,7 @@ Json HelloBody() {
     Json hello = net::hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible);
     if (early_story_active()) hello.set("story_session", true);
     if (boss_battle_online_available()) hello.set("boss_battle_session", true);
+    if (appearance_session_enabled()) hello.set("appearance", true);
     return hello;
 }
 
@@ -760,6 +764,9 @@ void OnResponse(const net::LobbyMessage& m) {
         g.comms_result = error ? 2 : 1;
         g.comms_code = m.code;
         return;
+    case Kind::kAppearance:
+        appearance_session::Shared().PublishAnswered(m.code, m.body["retry_ms"].as_int(), net::now_ms());
+        return;
     case Kind::kStory:
         if (error && g.story_sent == p.story_step) g.story_sent = EARLY_STORY_NO_STEP;
         return;
@@ -823,6 +830,7 @@ void OnResponse(const net::LobbyMessage& m) {
     case Kind::kResume:
         if (!error) {
             std::printf("Matching2: seat resumed in room %llu as member 0x%x\n", (unsigned long long)g.room, g.me);
+            appearance_session::Shared().Entered(g.room, g.me, m.body, true);
         } else {
             std::printf("Matching2: seat lost after the reconnect (%s)\n", m.code.c_str());
             RoomGone(kRoomDestroyed);
@@ -860,6 +868,7 @@ void OnResponse(const net::LobbyMessage& m) {
                         p.event == kEvJoin ? "joined" : "created", (unsigned long long)g.room, g.me, g.owner, g.members.size(),
                         m.body["room"]["code"].as_string().c_str());
             early_story_session_internal_update(states.step);
+            appearance_session::Shared().Entered(g.room, g.me, m.body, false);
             // A state left by a previous owner in an untagged room is stale.
             if (states.boss && g.boss_attr > 0)
                 boss_battle_online_internal_update(states.boss_state.data(), states.boss_state.size());
@@ -947,6 +956,7 @@ void OnEvent(const net::LobbyMessage& m) {
         if (g.socket && g.signals.count(id)) g.socket->forget_peer(g.signals[id].account);
         g.signals.erase(id);
         std::printf("Matching2: member 0x%x left (%s)\n", id, b["why"].as_string().c_str());
+        appearance_session::Shared().MemberLeft(id);
         uint8_t* data = block->alloc(0x20);
         Wr<uint8_t*>(data, 0, MemberStruct(*block, left));
         PushRoomEvent(kRoomMemberLeft, block, data);
@@ -989,6 +999,8 @@ void OnEvent(const net::LobbyMessage& m) {
     } else if (m.event == "room.kicked" || m.event == "room.gone") {
         std::printf("Matching2: %s\n", m.event == "room.kicked" ? "kicked from the room" : "the room was closed");
         RoomGone(m.event == "room.kicked" ? kRoomKicked : kRoomDestroyed);
+    } else if (m.event == "room.appearance") {
+        appearance_session::Shared().Received(uint16_t(b["member"].as_int()), b["appearance"]);
     } else if (m.event == "relay.closed") {
         std::printf("Matching2: the lobby stopped relaying for this connection (%s)\n", b["reason"].as_string().c_str());
         if (g.socket) g.socket->disable_relay();
@@ -1011,12 +1023,21 @@ void OnEvent(const net::LobbyMessage& m) {
     }
 }
 
+// This client's look, to the lobby for the room's other members; never with a lost link or a seat being resumed.
+void PublishAppearance(uint64_t now) {
+    if (!LinkUsable() || !g.up || g.lost || !g.room) return;
+    std::optional<Json> body = appearance_session::Shared().TakePublish(now);
+    if (!body) return;
+    g.pending[g.link->request("room.appearance", std::move(*body))] = Pending{Kind::kAppearance, 0, nullptr, nullptr, 0};
+}
+
 void NoteRelayCapability(const Json& hello_reply) {
     const net::RelayCapability capability = net::relay_capability(hello_reply);
     g.relay_capable = capability.usable();
     g.story_capable = net::story_session_capability(hello_reply);
     g.boss_capable = net::boss_battle_session_capability(hello_reply);
     boss_battle_online_set_capable(g.boss_capable);
+    appearance_session::Shared().SetCapable(appearance_session_enabled() && net::appearance_capability(hello_reply));
     std::printf("Matching2: lobby relay %s\n", g.relay_capable ? "available as a fallback" : "not offered");
     ConfigureRelay();
 }
@@ -1064,6 +1085,7 @@ void OnLink(const net::LobbyMessage& m) {
         g.story_capable = false;
         g.boss_capable = false;
         boss_battle_online_set_capable(0);
+        appearance_session::Shared().SetCapable(false);
         ConfigureRelay();
         g.up = false;
         g.down = true;
@@ -1611,6 +1633,7 @@ void pump() {
         PublishBossBattleState();
         PublishBossBattleTag();
         ResumeStoryRoom();
+        PublishAppearance(now);
         calls.swap(g.calls);
     }
     for (auto& call : calls) call();

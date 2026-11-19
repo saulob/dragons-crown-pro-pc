@@ -198,6 +198,10 @@ static size_t instance_count;
 static AppearanceRecordOfUnit record_of_unit;
 static AppearanceWeaponName weapon_names[APPEARANCE_WEAPON_COUNT];
 static _Atomic uint64_t party;
+static AppearanceRemoteOf remote_of;
+static AppearanceRemoteSerial remote_serial;
+static AppearanceLocalSeen local_seen;
+enum { kRemoteNumber = 0x8000 };
 
 static uint64_t guest_u64(uint64_t address) {
     uint64_t value;
@@ -247,6 +251,41 @@ void appearance_hooks_set_record_of_unit(AppearanceRecordOfUnit function) {
     atomic_store(&party, 0);
 }
 
+void appearance_hooks_set_online(AppearanceRemoteOf of, AppearanceRemoteSerial serial, AppearanceLocalSeen seen) {
+    remote_of = of;
+    remote_serial = serial;
+    local_seen = seen;
+}
+
+static int hooks_active(void) {
+    return instance_count || remote_of;
+}
+
+/* Local instances are 1..count, remote looks kRemoteNumber | serial. */
+static uint64_t instance_number(const AppearanceInstance *instance) {
+    if (!instance) return 0;
+    if (instance->remote) return kRemoteNumber | instance->remote;
+    return (uint64_t)(instance - instances) + 1;
+}
+
+static const AppearanceInstance *instance_of_number(uint64_t number) {
+    if (number & kRemoteNumber) return remote_serial ? remote_serial((uint16_t)(number & (kRemoteNumber - 1))) : NULL;
+    return number >= 1 && number <= instance_count ? &instances[number - 1] : NULL;
+}
+
+/* Online, another player's seat wears that player's look from the room, never one of ours (a copied save has our
+ * identity); every other seat keeps the offline rule. */
+static const AppearanceInstance *instance_of_unit(uint64_t unit, int klass, int color) {
+    const uint64_t record = record_of_unit ? record_of_unit(unit) : seat_record(unit);
+    if (!remote_of || !record) return appearance_instance_of_record(record, klass, color);
+    const int32_t owner = guest_i32(record + APPEARANCE_SEAT_OWNER);
+    const int32_t slot = guest_i32(unit + UNIT_PLAYER_SLOT);
+    if (owner == APPEARANCE_SEAT_REMOTE) return remote_of(slot, klass, color);
+    const AppearanceInstance *instance = appearance_instance_of_record(record, klass, color);
+    if (owner == APPEARANCE_SEAT_LOCAL && local_seen) local_seen(slot, instance);
+    return instance;
+}
+
 void appearance_hooks_set_weapon_names(AppearanceWeaponName weapon, AppearanceWeaponName shield) {
     weapon_names[0] = weapon;
     weapon_names[1] = shield;
@@ -277,7 +316,7 @@ static const char *class_name(int klass) {
 static void note_binding(const char *what, uint64_t holder, const AppearanceInstance *instance, int klass, int color) {
     enum { kSeen = 64 };
     static _Atomic uint64_t seen[kSeen];
-    const uint64_t key = holder ^ (instance ? (uint64_t)(instance - instances + 1) << 52 : 0) ^ ((uint64_t)color << 60);
+    const uint64_t key = holder ^ instance_number(instance) << 44 ^ ((uint64_t)color << 60);
     for (int i = 0; i < kSeen; ++i) {
         uint64_t expected = 0;
         if (atomic_load(&seen[i]) == key) return;
@@ -299,9 +338,8 @@ static void answer(GuestRegs *regs, const AppearanceInstance *instance) {
 void GUEST_HOOK_ABI appearance_unit_atlas(GuestRegs *regs) {
     const uint64_t unit = regs->rax;
     const int klass = (int)(int32_t)regs->rdi, color = (int)(uint32_t)regs->rsi;
-    if (!unit || !instance_count) return;
-    const uint64_t record = record_of_unit ? record_of_unit(unit) : seat_record(unit);
-    const AppearanceInstance *instance = appearance_instance_of_record(record, klass, color);
+    if (!unit || !hooks_active()) return;
+    const AppearanceInstance *instance = instance_of_unit(unit, klass, color);
     note_binding("unit", unit, instance, klass, color);
     if (instance) answer(regs, instance);
 }
@@ -326,9 +364,8 @@ static void answer_weapon(GuestRegs *regs, const AppearanceInstance *instance, i
 
 static void unit_weapon(GuestRegs *regs, int weapon) {
     const uint64_t unit = regs->rax;
-    if (!unit || !instance_count) return;
-    const uint64_t record = record_of_unit ? record_of_unit(unit) : seat_record(unit);
-    answer_weapon(regs, appearance_instance_of_record(record, (int)(int32_t)regs->rdi, guest_u8(unit + UNIT_COLOR)), weapon);
+    if (!unit || !hooks_active()) return;
+    answer_weapon(regs, instance_of_unit(unit, (int)(int32_t)regs->rdi, guest_u8(unit + UNIT_COLOR)), weapon);
 }
 
 static void select_weapon(GuestRegs *regs, int weapon) {
@@ -355,7 +392,8 @@ void GUEST_HOOK_ABI appearance_select_shield(GuestRegs *regs) {
 }
 
 /* Effect objects live briefly and are reused: each look copy binds the object to its owner's instance, and an
- * explicit look unbinds it. Entries pack the object's address with the instance number above bit 48. */
+ * explicit look unbinds it. Entries pack the object's address with the instance number above bit 48; a remote look
+ * whose player changed or left is no longer found by its number. */
 enum { kEffectSlots = 256, kEffectProbes = 8 };
 static _Atomic uint64_t effect_bindings[kEffectSlots];
 static const uint64_t kAddressMask = (1ull << 48) - 1;
@@ -371,9 +409,9 @@ static void unbind_effect(uint64_t effect) {
     }
 }
 
-static void bind_effect(uint64_t effect, size_t instance) {
+static void bind_effect(uint64_t effect, const AppearanceInstance *instance) {
     unbind_effect(effect);
-    const uint64_t packed = effect | (uint64_t)(instance + 1) << 48;
+    const uint64_t packed = effect | instance_number(instance) << 48;
     for (int p = 0; p < kEffectProbes; ++p) {
         uint64_t expected = 0;
         if (atomic_compare_exchange_strong(&effect_bindings[effect_slot(effect, p)], &expected, packed)) return;
@@ -384,22 +422,17 @@ static void bind_effect(uint64_t effect, size_t instance) {
 static const AppearanceInstance *effect_instance(uint64_t effect) {
     for (int p = 0; p < kEffectProbes; ++p) {
         const uint64_t packed = atomic_load(&effect_bindings[effect_slot(effect, p)]);
-        const size_t index = (size_t)(packed >> 48);
-        if (packed && (packed & kAddressMask) == effect && index >= 1 && index <= instance_count) return &instances[index - 1];
+        if (packed && (packed & kAddressMask) == effect) return instance_of_number(packed >> 48);
     }
     return NULL;
 }
 
 void GUEST_HOOK_ABI appearance_effect_copy(GuestRegs *regs) {
     const uint64_t effect = regs->rdi, owner = regs->rsi;
-    if (!effect || effect > kAddressMask || !instance_count) return;
+    if (!effect || effect > kAddressMask || !hooks_active()) return;
     const uint64_t unit = owner ? guest_u64(owner + OWNER_UNIT) : 0;
-    const AppearanceInstance *instance = NULL;
-    if (unit) {
-        const uint64_t record = record_of_unit ? record_of_unit(unit) : seat_record(unit);
-        instance = appearance_instance_of_record(record, guest_i16(owner + OWNER_CLASS), guest_u8(unit + UNIT_COLOR));
-    }
-    if (instance) bind_effect(effect, (size_t)(instance - instances));
+    const AppearanceInstance *instance = unit ? instance_of_unit(unit, guest_i16(owner + OWNER_CLASS), guest_u8(unit + UNIT_COLOR)) : NULL;
+    if (instance) bind_effect(effect, instance);
     else unbind_effect(effect);
 }
 
@@ -409,7 +442,7 @@ void GUEST_HOOK_ABI appearance_effect_set(GuestRegs *regs) {
 
 void GUEST_HOOK_ABI appearance_effect_atlas(GuestRegs *regs) {
     const uint64_t effect = regs->rdi;
-    if (!effect || effect > kAddressMask || !instance_count) return;
+    if (!effect || effect > kAddressMask || !hooks_active()) return;
     const AppearanceInstance *instance = effect_instance(effect);
     if (!instance || instance->klass != guest_i16(effect + EFFECT_CLASS) || instance->color != guest_i16(effect + EFFECT_COLOR))
         return;

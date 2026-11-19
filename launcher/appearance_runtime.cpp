@@ -1,11 +1,14 @@
 #include "appearance_runtime.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <list>
 #include <map>
+#include <memory>
 
 #include "character_art.h"
 #include "cpk_patch.h"
@@ -155,12 +158,12 @@ std::vector<CustomInstance> PlanCustomInstances(const CustomStore& store, const 
     return result;
 }
 
-namespace {
-
-bool HidesFighterHelmet(const CustomInstance& instance) {
-    const PartLook* helmet = instance.look.Find("helmet");
-    return instance.instance.klass == CharacterClass::kFighter && instance.look.active() && helmet && helmet->hidden;
+bool HidesFighterHelmet(CharacterClass klass, const CustomLook& look) {
+    const PartLook* helmet = look.Find("helmet");
+    return klass == CharacterClass::kFighter && look.active() && helmet && helmet->hidden;
 }
+
+namespace {
 
 // With a Fighter's helmet hidden, the off-head helmets of the shared model draw from copies in every Fighter atlas, so the
 // model and the native atlases are served with them; the hidden helmet's own atlas leaves its copies empty.
@@ -188,19 +191,57 @@ std::optional<std::vector<std::pair<std::string, std::vector<uint8_t>>>> Fighter
     return files;
 }
 
+std::vector<uint8_t> NetRecipe(const CustomInstance& instance) {
+    const std::optional<appearance_net::Recipe> recipe = RecipeOfLook(instance.instance.klass, instance.instance.base, instance.look);
+    return recipe ? appearance_net::Encode(*recipe) : std::vector<uint8_t>{};
+}
+
 } // namespace
+
+std::optional<LookTextures> BuildLookTextures(std::span<const uint8_t> native_atlas, const EntryReader& read,
+                                              const std::vector<RegionMap>& maps, CharacterClass klass, const CustomLook& look,
+                                              bool helmet_copies, std::vector<std::string>& notes, std::string* error) {
+    std::string why;
+    std::optional<std::vector<uint8_t>> atlas = native_atlas.empty() ? std::nullopt : CustomizeAtlas(native_atlas, maps, klass, look, &why);
+    if (!atlas) {
+        if (error) *error = why.empty() ? "the native atlas is unreadable" : why;
+        return std::nullopt;
+    }
+    if (helmet_copies && klass == CharacterClass::kFighter && !HidesFighterHelmet(klass, look) && !AddHelmetCopies(*atlas)) {
+        if (error) *error = "the helmet copies could not be added";
+        return std::nullopt;
+    }
+    LookTextures textures{std::move(*atlas), {}};
+    const std::span<const WeaponTexture> weapons = WeaponTexturesOf(klass);
+    for (size_t w = 0; w < weapons.size() && w < APPEARANCE_WEAPON_COUNT; ++w) {
+        if (!WeaponChanged(klass, w, look)) continue;
+        const std::string native = WeaponAtlasName(klass, weapons[w]);
+        const std::vector<uint8_t> pack = read(native);
+        why.clear();
+        std::optional<std::vector<uint8_t>> weapon = pack.empty() ? std::nullopt : CustomizeWeapon(pack, klass, w, look, &why);
+        if (!weapon) {
+            notes.push_back(native + " could not be customized" + (why.empty() ? "" : ": " + why));
+            continue;
+        }
+        textures.weapons.emplace_back(w, std::move(*weapon));
+    }
+    return textures;
+}
 
 std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& archive_path,
                                                 const std::vector<CustomInstance>& instances, CharacterArt& art,
-                                                std::vector<std::string>& notes) {
+                                                std::vector<std::string>& notes, const std::vector<RemoteTextureSet>* remote) {
     CpkArchive archive;
     std::string error;
-    if (instances.empty() || !archive.Open(archive_path, &error)) {
+    if ((instances.empty() && !remote) || !archive.Open(archive_path, &error)) {
         if (!error.empty()) notes.push_back(error);
         return std::nullopt;
     }
     std::vector<std::pair<std::string, std::vector<uint8_t>>> added, replaced;
-    if (std::any_of(instances.begin(), instances.end(), HidesFighterHelmet)) {
+    const bool hides = std::any_of(instances.begin(), instances.end(), [](const CustomInstance& instance) {
+        return HidesFighterHelmet(instance.instance.klass, instance.look);
+    });
+    if (hides || remote) {
         if (auto files = FighterHelmetFiles(archive, &error)) {
             replaced = std::move(*files);
             notes.push_back("Fighter helmet copies served with " + GameModelName(CharacterClass::kFighter));
@@ -209,48 +250,49 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
             error.clear();
         }
     }
+    const EntryReader read = [&](const std::string& entry) {
+        const CpkEntry* found = archive.Find(entry);
+        return found ? archive.Read(*found, &error) : std::vector<uint8_t>{};
+    };
     std::vector<AppearanceInstance> runtime;
     std::map<std::string, std::vector<uint8_t>> base_atlases;
     for (const CustomInstance& instance : instances) {
         const CharacterClass klass = instance.instance.klass;
         const std::string atlas = NativeColorAtlas(klass, instance.instance.base);
         auto [found, fresh] = base_atlases.try_emplace(atlas);
-        if (fresh) {
-            const CpkEntry* entry = archive.Find(atlas);
-            if (entry) found->second = archive.Read(*entry, &error);
-        }
+        if (fresh) found->second = read(atlas);
         const std::vector<RegionMap>* maps = art.Regions(klass);
-        std::optional<std::vector<uint8_t>> custom;
-        if (maps && !found->second.empty()) custom = CustomizeAtlas(found->second, *maps, klass, instance.look, &error);
-        if (!custom || instance.entry.empty()) {
-            notes.push_back(instance.instance.Text() + ": " + atlas + " could not be customized" +
-                            (error.empty() ? "" : ": " + error));
+        std::vector<std::string> weapon_notes;
+        std::optional<LookTextures> textures;
+        if (maps && !instance.entry.empty())
+            textures = BuildLookTextures(found->second, read, *maps, klass, instance.look, !replaced.empty(), weapon_notes, &error);
+        for (const std::string& note : weapon_notes) notes.push_back(instance.instance.Text() + ": " + note);
+        if (!textures) {
+            notes.push_back(instance.instance.Text() + ": " + atlas + " could not be customized" + (error.empty() ? "" : ": " + error));
+            error.clear();
             continue;
         }
-        if (!replaced.empty() && klass == CharacterClass::kFighter && !HidesFighterHelmet(instance) && !AddHelmetCopies(*custom)) {
-            notes.push_back(instance.instance.Text() + ": the helmet copies could not be added");
-            continue;
-        }
-        added.emplace_back(instance.entry, std::move(*custom));
+        added.emplace_back(instance.entry, std::move(textures->atlas));
         AppearanceInstance served{};
         std::memcpy(served.identity, instance.identity.data(), kCharIdentityBytes);
         served.klass = uint8_t(klass);
         served.color = uint8_t(instance.instance.base);
         CopyText(served.entry, sizeof(served.entry), instance.entry);
         CopyText(served.label, sizeof(served.label), Label(instance.instance));
-        for (const auto& [weapon, entry] : instance.weapon_entries) {
+        const std::vector<uint8_t> recipe = NetRecipe(instance);
+        if (recipe.size() <= sizeof(served.recipe)) {
+            std::memcpy(served.recipe, recipe.data(), recipe.size());
+            served.recipe_size = uint8_t(recipe.size());
+        }
+        for (auto& [weapon, data] : textures->weapons) {
+            const auto planned = std::find_if(instance.weapon_entries.begin(), instance.weapon_entries.end(),
+                                              [&](const auto& entry) { return entry.first == weapon; });
+            if (planned == instance.weapon_entries.end()) continue;
             const std::string native = WeaponAtlasName(klass, WeaponTexturesOf(klass)[weapon]);
-            const CpkEntry* found_weapon = archive.Find(native);
-            std::optional<std::vector<uint8_t>> custom_weapon;
-            if (found_weapon) custom_weapon = CustomizeWeapon(archive.Read(*found_weapon, &error), klass, weapon, instance.look, &error);
-            if (!custom_weapon || weapon >= std::size(served.weapons)) {
-                notes.push_back(instance.instance.Text() + ": " + native + " could not be customized" + (error.empty() ? "" : ": " + error));
-                continue;
-            }
-            added.emplace_back(entry, std::move(*custom_weapon));
+            added.emplace_back(planned->second, std::move(data));
             CopyText(served.weapons[weapon].native, sizeof(served.weapons[weapon].native), native);
-            CopyText(served.weapons[weapon].entry, sizeof(served.weapons[weapon].entry), entry);
-            notes.push_back("custom weapon texture " + entry + " replaces " + native + " while it is the one drawn");
+            CopyText(served.weapons[weapon].entry, sizeof(served.weapons[weapon].entry), planned->second);
+            notes.push_back("custom weapon texture " + planned->second + " replaces " + native + " while it is the one drawn");
         }
         runtime.push_back(served);
         notes.push_back("custom texture instance " + instance.entry + " created for " + instance.instance.Text() + " (" +
@@ -271,14 +313,21 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
             }
         }
     }
-    if (added.empty()) return std::nullopt;
+    std::vector<std::pair<std::string, uint64_t>> reserved;
+    if (remote) {
+        for (const RemoteTextureSet& set : *remote) {
+            reserved.emplace_back(set.atlas.name, set.atlas.size);
+            for (const RemoteEntry& weapon : set.weapons) reserved.emplace_back(weapon.name, weapon.size);
+        }
+    }
+    if (added.empty() && reserved.empty()) return std::nullopt;
     std::error_code ec;
     const uint64_t length = std::filesystem::file_size(archive_path, ec);
     if (ec) {
         notes.push_back("cannot read the size of " + Utf8(archive_path.filename()));
         return std::nullopt;
     }
-    std::optional<ArchiveOverlay> overlay = OverlayChangedEntries(archive_path, length, replaced, added, &error);
+    std::optional<ArchiveOverlay> overlay = OverlayChangedEntries(archive_path, length, replaced, added, &error, reserved);
     if (!overlay) {
         notes.push_back("overlay failed: " + error);
         return std::nullopt;
@@ -297,45 +346,201 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
             }
         }
     }
-    return CustomOverlay{std::move(*overlay), std::move(runtime)};
+    std::vector<RemoteTextureSet> placed;
+    if (remote) {
+        placed = *remote;
+        const auto place = [&](RemoteEntry& entry) {
+            const CpkEntry* listed = served.Find(entry.name);
+            const auto at = std::find_if(overlay->reserved.begin(), overlay->reserved.end(),
+                                         [&](const ReservedEntry& r) { return r.path == entry.name; });
+            if (!listed || at == overlay->reserved.end() || listed->offset != at->offset || listed->size != entry.size) return false;
+            entry.offset = at->offset;
+            return true;
+        };
+        for (RemoteTextureSet& set : placed) {
+            bool ok = place(set.atlas);
+            for (RemoteEntry& weapon : set.weapons) ok = ok && place(weapon);
+            if (!ok) {
+                notes.push_back("the overlaid archive does not list " + set.atlas.name);
+                return std::nullopt;
+            }
+        }
+        notes.push_back(std::to_string(placed.size()) + " texture sets reserved for other players' looks");
+    }
+    return CustomOverlay{std::move(*overlay), std::move(runtime), std::move(placed), !replaced.empty()};
 }
 
 } // namespace dcp
 
-extern "C" const char* dcp_custom_appearance(const char* image_dir, const char* app0, const char* user_dir, uint64_t* length,
-                                             DcpFilePatch** patches, size_t* count, const AppearanceInstance** instances,
-                                             size_t* instance_count, char* message, size_t message_size) {
+namespace {
+
+// Other players' looks: set up with the overlay, started once the overlay is registered. The archive and the region maps
+// belong to the worker thread.
+struct RemoteRuntime {
+    std::filesystem::path archive;
+    dcp::CharacterArtSources sources;
+    std::vector<dcp::RemoteTextureSet> textures;
+    bool helmet_copies = false;
+    const uint8_t* placeholder = nullptr; // what a reserved texture reads before and after a look
+    std::unique_ptr<dcp::CpkArchive> cpk;
+    std::unique_ptr<dcp::CharacterArt> art;
+    std::unique_ptr<dcp::RemoteLooks> looks;
+};
+
+RemoteRuntime& Remote() {
+    static RemoteRuntime remote;
+    return remote;
+}
+
+std::atomic<dcp::RemoteLooks*> g_looks{nullptr};
+
+uint64_t SteadyMs() {
+    return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+void LogLine(const std::string& line) {
+    std::printf("%s\n", line.c_str());
+}
+
+bool OpenRemoteSources(RemoteRuntime& remote, std::string* error) {
+    if (!remote.cpk) {
+        auto cpk = std::make_unique<dcp::CpkArchive>();
+        if (!cpk->Open(remote.archive, error)) return false;
+        remote.cpk = std::move(cpk);
+    }
+    if (!remote.art) remote.art = std::make_unique<dcp::CharacterArt>(remote.sources);
+    return true;
+}
+
+std::optional<dcp::LookTextures> BuildRemote(dcp::CharacterClass klass, int base, const dcp::CustomLook& look, std::string* error) {
+    using namespace dcp;
+    RemoteRuntime& remote = Remote();
+    if (!OpenRemoteSources(remote, error)) return std::nullopt;
+    const std::vector<RegionMap>* maps = remote.art->Regions(klass);
+    if (!maps) {
+        if (error) *error = "the " + std::string(ClassName(klass)) + " regions are unreadable";
+        return std::nullopt;
+    }
+    std::string read_error;
+    const EntryReader read = [&](const std::string& entry) {
+        const CpkEntry* found = remote.cpk->Find(entry);
+        return found ? remote.cpk->Read(*found, &read_error) : std::vector<uint8_t>{};
+    };
+    std::vector<std::string> notes;
+    std::optional<LookTextures> textures =
+        BuildLookTextures(read(NativeColorAtlas(klass, base)), read, *maps, klass, look, remote.helmet_copies, notes, error);
+    for (const std::string& note : notes) LogLine("Appearance runtime: remote " + note);
+    return textures;
+}
+
+// The region maps of every class, read from the Editor's cache or learned once, before the first look arrives.
+void PrepareRemote() {
+    using namespace dcp;
+    RemoteRuntime& remote = Remote();
+    std::string error;
+    if (!OpenRemoteSources(remote, &error)) {
+        LogLine("Appearance runtime: other players' looks unavailable: " + error);
+        return;
+    }
+    const uint64_t started = SteadyMs();
+    int ready = 0;
+    for (int k = 0; k < appearance_net::kClassCount; ++k) ready += remote.art->Regions(CharacterClass(k)) != nullptr;
+    LogLine("Appearance runtime: region maps of " + std::to_string(ready) + " classes ready for other players' looks in " +
+            std::to_string(SteadyMs() - started) + " ms");
+}
+
+} // namespace
+
+extern "C" const char* dcp_custom_appearance(const char* image_dir, const char* app0, const char* user_dir, int online,
+                                             uint64_t* length, DcpFilePatch** patches, size_t* count,
+                                             const AppearanceInstance** instances, size_t* instance_count, char* message,
+                                             size_t message_size) {
     using namespace dcp;
     static std::list<CustomOverlay> retained; // the runtime borrows the overlay and the instances for the process
     static std::vector<DcpFilePatch> table;
+    static std::vector<uint8_t> unwritten;     // what a remote texture holds before its first look
     if (message_size) *message = '\0';
     const GameBuild* build = BuildOfImageDir(image_dir);
     if (!build || !app0 || !user_dir) return nullptr;
     const std::filesystem::path user = PathFromUtf8(user_dir);
     CustomStore store(CustomStorePath(user));
     std::vector<std::string> notes;
-    if (!store.Load()) {
-        std::snprintf(message, message_size, "%s", store.error().c_str());
-        return nullptr;
-    }
-    const std::vector<CustomInstance> planned =
-        PlanCustomInstances(store, DiscoverSaves(user, build->title_id), build->title_id, notes);
+    std::vector<CustomInstance> planned;
+    if (store.Load()) planned = PlanCustomInstances(store, DiscoverSaves(user, build->title_id), build->title_id, notes);
+    else notes.push_back(store.error());
     const std::filesystem::path archive = PathFromUtf8(app0) / "DRACRO.CPK";
     CharacterArtSources sources = ArtSourcesOf(PathFromUtf8(app0), build->regional_archive);
     sources.cache_dir = EditorCacheDir(user);
-    CharacterArt art(std::move(sources));
-    std::optional<CustomOverlay> overlay = planned.empty() ? std::nullopt : BuildCustomOverlay(archive, planned, art, notes);
+    std::optional<std::vector<RemoteTextureSet>> remote_plan;
+    if (online) {
+        CpkArchive cpk;
+        std::string error;
+        if (cpk.Open(archive, &error)) remote_plan = PlanRemoteTextures(cpk, &error);
+        if (!remote_plan) notes.push_back("other players' looks unavailable: " + error);
+    }
+    CharacterArt art(sources);
+    std::optional<CustomOverlay> overlay = planned.empty() && !remote_plan
+                                               ? std::nullopt
+                                               : BuildCustomOverlay(archive, planned, art, notes, remote_plan ? &*remote_plan : nullptr);
     std::string text;
     for (const std::string& note : notes) text += (text.empty() ? "" : "; ") + note;
     std::snprintf(message, message_size, "%s", text.c_str());
     if (!overlay) return nullptr;
     retained.push_back(std::move(*overlay));
+    const CustomOverlay& kept = retained.back();
     table.clear();
-    for (const auto& [offset, data] : retained.back().overlay.patches) table.push_back({offset, data.size(), data.data()});
-    *length = retained.back().overlay.length;
+    for (const auto& [offset, data] : kept.overlay.patches) table.push_back({offset, data.size(), data.data()});
+    uint64_t largest = 0;
+    for (const ReservedEntry& entry : kept.overlay.reserved) largest = std::max(largest, entry.size);
+    unwritten.assign(size_t(largest), 0);
+    for (const ReservedEntry& entry : kept.overlay.reserved) table.push_back({entry.offset, entry.size, unwritten.data()});
+    if (!kept.remote.empty()) {
+        RemoteRuntime& remote = Remote();
+        remote.archive = archive;
+        remote.sources = std::move(sources);
+        remote.textures = kept.remote;
+        remote.helmet_copies = kept.helmet_copies;
+        remote.placeholder = unwritten.data();
+    }
+    *length = kept.overlay.length;
     *patches = table.data();
     *count = table.size();
-    *instances = retained.back().runtime.data();
-    *instance_count = retained.back().runtime.size();
+    *instances = kept.runtime.data();
+    *instance_count = kept.runtime.size();
     return "DRACRO.CPK";
+}
+
+extern "C" int dcp_remote_appearance_start(DcpOverlayReplace replace) {
+    using namespace dcp;
+    RemoteRuntime& remote = Remote();
+    if (!replace || remote.textures.empty() || remote.looks) return 0;
+    RemoteLooks::Host host;
+    host.build = BuildRemote;
+    host.serve = [replace, placeholder = remote.placeholder](const RemoteEntry& entry, const uint8_t* data) {
+        return replace("/app0/DRACRO.CPK", entry.offset, entry.size, data ? data : placeholder) == 0;
+    };
+    host.log = LogLine;
+    host.now_ms = SteadyMs;
+    host.prepare = PrepareRemote;
+    remote.looks = std::make_unique<RemoteLooks>(remote.textures, std::move(host));
+    g_looks.store(remote.looks.get(), std::memory_order_release);
+    return 1;
+}
+
+extern "C" const AppearanceInstance* dcp_remote_appearance_of(int slot, int klass, int color) {
+    const dcp::RemoteLooks* looks = g_looks.load(std::memory_order_acquire);
+    return looks ? looks->Of(slot, klass, color) : nullptr;
+}
+
+extern "C" const AppearanceInstance* dcp_remote_appearance_serial(uint16_t serial) {
+    const dcp::RemoteLooks* looks = g_looks.load(std::memory_order_acquire);
+    return looks ? looks->BySerial(serial) : nullptr;
+}
+
+extern "C" void dcp_remote_appearance_set(int slot, const uint8_t* recipe, size_t size) {
+    if (dcp::RemoteLooks* looks = g_looks.load(std::memory_order_acquire)) looks->Set(slot, std::span<const uint8_t>(recipe, size));
+}
+
+extern "C" void dcp_remote_appearance_clear(int slot) {
+    if (dcp::RemoteLooks* looks = g_looks.load(std::memory_order_acquire)) looks->Clear(slot);
 }

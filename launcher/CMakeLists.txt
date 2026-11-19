@@ -36,6 +36,7 @@ add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_
     feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     save_edit.cpp save_backup.cpp save_data.cpp save_discovery.cpp save_import.cpp game_texture.cpp game_mbs.cpp
     sprite_render.cpp character_art.cpp editor_model.cpp appearance_custom.cpp appearance_runtime.cpp appearance_loader.cpp fighter_horns.cpp fighter_bare_head.cpp
+    appearance_remote.cpp ${PROJECT_SOURCE_DIR}/src/appearance_net.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
@@ -285,3 +286,12 @@ target_link_libraries(dcp-save-editor-tests PRIVATE dcp_launcher_core)
 target_compile_definitions(dcp-save-editor-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 set_target_properties(dcp-save-editor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-save-editor-tests PRIVATE -Wall -Wextra)
+
+# Online custom looks: the recipe codec, the room session, the remote textures and the seat-aware hooks; the real-archive
+# parity check runs when game/prepared/v1.03 is present. Not part of the default build.
+add_executable(dcp-appearance-online-tests EXCLUDE_FROM_ALL ../tests/appearance_online_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/appearance_session.cpp)
+target_link_libraries(dcp-appearance-online-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-appearance-online-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-appearance-online-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-appearance-online-tests PRIVATE -Wall -Wextra)

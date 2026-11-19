@@ -156,6 +156,15 @@ int runtime_file_overlay(const char *guest,uint64_t length,const RuntimeFilePatc
     overlays[overlay_count++]=o;
     return 0;
 }
+int runtime_file_overlay_replace(const char *guest,uint64_t offset,uint64_t size,const void *data) {
+    const Overlay *o=overlay_of(guest);
+    if (!o || !data) return -1;
+    for (size_t i=0;i<o->count;++i) {
+        OverlayPatch *p=&o->patches[i];
+        if (p->offset==offset && p->size==size) { __atomic_store_n(&p->data,(const unsigned char *)data,__ATOMIC_RELEASE); return 0; }
+    }
+    return -1;
+}
 /* Resolve a guest path to a host path; returns 0 or a host errno. */
 static int translate(const char *guest,char *out,size_t size) {
     if (!guest || !*guest) return ENOENT;
@@ -376,7 +385,7 @@ static int64_t overlay_pread(const File *f,void *buffer,uint64_t size,int64_t of
         const OverlayPatch *p=&o->patches[i];
         uint64_t lo=p->offset>(uint64_t)offset ? p->offset : (uint64_t)offset;
         uint64_t hi=p->offset+p->size<(uint64_t)offset+size ? p->offset+p->size : (uint64_t)offset+size;
-        if (lo<hi) memcpy((unsigned char *)buffer+(lo-(uint64_t)offset),p->data+(lo-p->offset),hi-lo);
+        if (lo<hi) memcpy((unsigned char *)buffer+(lo-(uint64_t)offset),__atomic_load_n(&p->data,__ATOMIC_ACQUIRE)+(lo-p->offset),hi-lo);
     }
     return (int64_t)size;
 }

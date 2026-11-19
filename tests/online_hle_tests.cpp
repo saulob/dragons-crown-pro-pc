@@ -9,10 +9,12 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <thread>
 #include <vector>
 
+#include "appearance_session.h"
 #include "boss_battle_online.h"
 #include "early_story_session.h"
 #include "fake_stun.h"
@@ -310,14 +312,16 @@ int RunEndpointScenario(const std::string& lobby_root, const std::string& observ
 // Another player speaking the lobby protocol itself, with story session support; waiting on it pumps the runtime.
 class RawPlayer {
 public:
-    RawPlayer(const std::string& url, const fs::path& base, const std::string& name, bool boss_capable = true) {
+    RawPlayer(const std::string& url, const fs::path& base, const std::string& name, bool boss_capable = true,
+              bool appearance = false) {
         const net::Identity id = net::load_identity(base / name);
         net::LobbyLink::Options options;
         options.url = url;
-        options.hello = [id, name, boss_capable] {
+        options.hello = [id, name, boss_capable, appearance] {
             net::Json hello = net::hello_body(id, name, "HLE-TEST", true);
             hello.set("story_session", true);
             if (boss_capable) hello.set("boss_battle_session", true);
+            if (appearance) hello.set("appearance", true);
             return hello;
         };
         link_ = std::make_unique<net::LobbyLink>(std::move(options));
@@ -485,6 +489,93 @@ void GameLeave(uint16_t ctx, void* opt[2], uint64_t room) {
     uint32_t left = 0;
     CHECK(Fn<Request>("sceNpMatching2LeaveRoom")(ctx, leave, opt, &left) == 0);
     CHECK(Await(left) && Await(left)->error == 0);
+}
+
+// Custom looks through the lobby: the game's own look goes to the room, a member joining later gets every look in its
+// answer, a change reaches the game by slot, a leave takes it away, an invalid look is native, an old client hears none.
+struct AppearanceSeen {
+    std::map<int, std::vector<uint8_t>> looks;
+    int sets = 0;
+};
+AppearanceSeen g_appearance;
+
+void AppearanceSet(int slot, const uint8_t* recipe, size_t size) {
+    g_appearance.looks[slot] = std::vector<uint8_t>(recipe, recipe + size);
+    ++g_appearance.sets;
+}
+void AppearanceClear(int slot) { g_appearance.looks.erase(slot); }
+
+net::Json AppearanceBody(uint64_t room, const std::vector<uint8_t>& recipe) {
+    net::Json look = net::Json::Object();
+    look.set("schema", int64_t(recipe[0]));
+    look.set("data", net::hex_encode(recipe.data(), recipe.size()));
+    net::Json body = net::Json::Object();
+    body.set("room", net::u64_text(room));
+    body.set("appearance", std::move(look));
+    return body;
+}
+
+std::map<int64_t, std::string> Snapshot(const net::Json& answer) {
+    std::map<int64_t, std::string> out;
+    for (const net::Json& entry : answer["appearances"].items()) out[entry["member"].as_int()] = entry["appearance"]["data"].as_string();
+    return out;
+}
+
+void TestAppearance(const std::string& url, const fs::path& base, uint16_t ctx, void* opt[2], const std::vector<uint8_t>& mine) {
+    const uint64_t room = GameCreateRoom(ctx, opt);
+    if (!room) return;
+    const std::string mine_hex = net::hex_encode(mine.data(), mine.size());
+    RawPlayer b(url, base, "AppearB", true, true);
+    std::optional<net::Json> joined = b.Call("room.join", RoomBody(room, false));
+    PumpUntil([] { return false; }, 300);
+    CHECK(joined && Snapshot(*joined).size() <= 1);
+    // The runtime publishes after its create answer; B sees it in its answer or as the event right after.
+    std::string seen_a = joined ? Snapshot(*joined)[0x10] : "";
+    if (seen_a.empty()) {
+        auto event = b.Event("room.appearance");
+        if (event) seen_a = event->body["appearance"]["data"].as_string();
+    }
+    CHECK(seen_a == mine_hex);
+
+    // B customizes: the game gets it for B's slot, normalized.
+    const std::vector<uint8_t> elf = {1, 2, 1, 2, 14, 2, 0x10, 0xc0, 0x40, 1, 1};
+    const std::vector<uint8_t> elf_normal = {1, 2, 1, 2, 1, 1, 14, 2, 0x10, 0xc0, 0x40};
+    std::string code;
+    CHECK(b.Call("room.appearance", AppearanceBody(room, elf), &code) && code == "ok");
+    CHECK(PumpUntil([] { return g_appearance.looks.count(1) > 0; }));
+    CHECK(g_appearance.looks[1] == elf_normal);
+
+    // C joins late: both looks in its answer; its own look reaches the game.
+    RawPlayer c(url, base, "AppearC", true, true);
+    std::optional<net::Json> late = c.Call("room.join", RoomBody(room, false));
+    CHECK(late && Snapshot(*late).size() == 2 && Snapshot(*late)[0x10] == mine_hex &&
+          Snapshot(*late)[0x20] == net::hex_encode(elf.data(), elf.size()));
+    const std::vector<uint8_t> fighter = {1, 0, 2, 1, 1, 2, 200, 30, 30};
+    CHECK(c.Call("room.appearance", AppearanceBody(room, fighter), &code) && code == "ok");
+    CHECK(PumpUntil([] { return g_appearance.looks.count(2) > 0; }));
+    CHECK(g_appearance.looks[2] == fighter);
+    auto relayed = b.Event("room.appearance");
+    CHECK(relayed && relayed->body["member"].as_int() == 0x30);
+
+    // B leaves: its look goes. C sends a look the lobby relays but the game refuses: drawn native.
+    CHECK(b.Call("room.leave", RoomBody(room, false), &code) && code == "ok");
+    CHECK(PumpUntil([] { return g_appearance.looks.count(1) == 0; }));
+    const int sets = g_appearance.sets;
+    CHECK(c.Call("room.appearance", AppearanceBody(room, {1, 0, 2, 1, 13, 1}), &code) && code == "ok");
+    CHECK(PumpUntil([] { return g_appearance.looks.count(2) == 0; }));
+    CHECK(g_appearance.sets == sets);
+
+    // A client without appearance gets no snapshot and no event.
+    RawPlayer old(url, base, "AppearOld", true, false);
+    std::optional<net::Json> plain = old.Call("room.join", RoomBody(room, false));
+    CHECK(plain && !(*plain).has("appearances"));
+    CHECK(c.Call("room.appearance", AppearanceBody(room, fighter), &code) && code == "ok");
+    CHECK(PumpUntil([] { return g_appearance.looks.count(2) > 0; }));
+    CHECK(!old.Event("room.appearance", 300));
+
+    GameLeave(ctx, opt, room);
+    CHECK(g_appearance.looks.empty());
+    std::printf("GROUP|appearance|%s\n", g_failures ? "FAIL" : "PASS");
 }
 
 // The runtime hosts Boss Battle: its room is tagged and found only from the Boss Battle page, a campaign client and a
@@ -873,6 +964,9 @@ int main(int argc, char** argv) {
     early_story_set_active(1);
     boss_battle_online_set_available(1);
     boss_battle_online_set_hosting(1);
+    appearance_session_enable(AppearanceSet, AppearanceClear);
+    const std::vector<uint8_t> my_look = {1, 0, 0, 2, 1, 2, 0x22, 0xaa, 0x55, 8, 1};
+    appearance_session_set_local(0, my_look.data(), my_look.size());
     CHECK(Fn<Init>("sceNpMatching2Initialize")(nullptr) == 0);
     uint16_t ctx = 0;
     CHECK(Fn<CreateContext>("sceNpMatching2CreateContextA")(nullptr, &ctx) == 0 && ctx == 1);
@@ -1162,6 +1256,7 @@ int main(int argc, char** argv) {
     TestStoryGuest(url, base, ctx, opt);
     TestBossBattleHost(url, base, ctx, opt);
     TestBossBattleGuest(url, base, ctx, opt);
+    TestAppearance(url, base, ctx, opt, my_look);
 
     CHECK(Fn<Close>("sceRudpTerminate")(rudp_ctx) == 0);
     CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);

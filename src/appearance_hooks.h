@@ -23,7 +23,11 @@ enum {
     APPEARANCE_LABEL_BYTES = 80,
     APPEARANCE_WEAPON_NAME_BYTES = 48,
     APPEARANCE_WEAPON_COUNT = 2, /* the weapon, then the Fighter's shield */
-    APPEARANCE_HOOK_COUNT = 12
+    APPEARANCE_HOOK_COUNT = 12,
+    APPEARANCE_RECIPE_BYTES = 84, /* appearance_net.h kMaxBytes */
+    APPEARANCE_SEAT_OWNER = 0x21e0, /* in a party seat: -1 empty, 0 this client, 1 another online player */
+    APPEARANCE_SEAT_LOCAL = 0,
+    APPEARANCE_SEAT_REMOTE = 1
 };
 
 /* A default weapon texture replaced for one character; the equipped item's own texture is never replaced. */
@@ -38,6 +42,9 @@ typedef struct {
     char entry[APPEARANCE_ENTRY_BYTES]; /* the per-character atlas in the archive */
     char label[APPEARANCE_LABEL_BYTES]; /* "DATA 1 slot 2 Amazon colour 0" */
     AppearanceWeapon weapons[APPEARANCE_WEAPON_COUNT];
+    uint8_t recipe[APPEARANCE_RECIPE_BYTES]; /* the look as the other players of an online room get it */
+    uint8_t recipe_size;
+    uint16_t remote; /* 0: a saved character of this client; else the serial of another online player's look */
 } AppearanceInstance;
 
 /* The two in-game atlas getters' tail jumps, the Edit character preview's call, the effect look copy and explicit set,
@@ -63,6 +70,14 @@ void appearance_hooks_set_instances(const AppearanceInstance *instances, size_t 
 /* The record a unit plays: its party seat's. Replaced in the tests. */
 typedef uint64_t (*AppearanceRecordOfUnit)(uint64_t unit);
 void appearance_hooks_set_record_of_unit(AppearanceRecordOfUnit record_of_unit);
+
+/* Online: a seat of another player is drawn with that player's look, by party slot, never with this client's saved
+ * looks; other seats keep the offline rule. `seen` hears each look the game draws in this client's seats (NULL
+ * instance: native). `remote_serial` gives a remote look back while it is still the current one. All NULL: offline. */
+typedef const AppearanceInstance *(*AppearanceRemoteOf)(int slot, int klass, int color);
+typedef const AppearanceInstance *(*AppearanceRemoteSerial)(uint16_t serial);
+typedef void (*AppearanceLocalSeen)(int slot, const AppearanceInstance *instance);
+void appearance_hooks_set_online(AppearanceRemoteOf remote_of, AppearanceRemoteSerial remote_serial, AppearanceLocalSeen seen);
 
 /* The game's weapon and shield texture name functions (class, item); installing sets them, the tests replace them. */
 typedef const char *(GUEST_HOOK_ABI *AppearanceWeaponName)(int klass, uint32_t item);

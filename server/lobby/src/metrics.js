@@ -17,7 +17,7 @@ export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited',
   'relay_abuse_closed', 'party_report_limited', 'comms_report_limited', 'public_endpoint_limited', 'incident_filed', 'incident_limited',
   'incident_hourly_limited', 'incident_daily_limited', 'public_lobby_limited', 'write_limited', 'lobby_abuse_closed',
   'ws_text_messages', 'ws_binary_messages', 'ws_control_limited', 'ws_preauth_closed', 'relay_overrun', 'relay_invalid',
-  'relay_suspended']);
+  'relay_suspended', 'appearance_limited']);
 export const PLATFORMS = ['Windows', 'Linux', 'Steam Deck', 'Android'];
 export const PLATFORM_ORDER = [...PLATFORMS, 'Other'];
 const PC_PLATFORMS = ['Windows', 'Linux', 'Steam Deck'];

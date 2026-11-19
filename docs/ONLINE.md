@@ -358,6 +358,30 @@ address, room, time of use or history. The dashboard's "Comms Wheel" section sho
 and share, and the most used message. Offline play, Online play off and a lobby that predates the request send or lose nothing
 that matters: an older lobby answers `bad_request` and the client drops the counts.
 
+### Custom appearance online
+
+Each player's Editor look (character_appearance.dat) is drawn on every client of the room. Only a recipe travels: the
+class, the colour preset the character is drawn with and the parts it changes, each by a stable network id with an
+optional colour and a hidden bit. Every client builds the textures from its own game files with the same code as a saved
+look (`launcher/appearance_runtime.cpp`), so builds that share the character files draw the same look. No texture, save
+or file crosses the network.
+
+- **Recipe, schema 1** (`src/appearance_net.h`): `[schema][class 0-5][preset 0-4][n]` then `n` parts `[id][flags]`
+  (bit 0 hidden, bit 1 coloured) with `[r g b]` when coloured; ids per class are fixed in `PartTable`, labels are not ids.
+  At most 16 parts, 84 bytes; a Fighter with four changed parts is 21 bytes. Unknown schema, class, preset or part,
+  duplicates, bad flags, truncation or trailing bytes: the player is drawn native.
+- **Lobby.** A client that declares `appearance` in hello publishes its look with `room.appearance` once its seat exists,
+  and again only when the look the game draws for it changes (`null` = native). The lobby keeps it with the seat, answers
+  create, join and resume with the other members' looks (`appearances`), relays each change as `room.appearance` to the
+  members that declared `appearance`, and forgets it with the seat. It reads only the envelope (schema, hex size) and
+  never logs or counts the look. Clients that did not declare `appearance` get nothing and are drawn native by the others.
+- **Drawing.** A unit in another player's seat (seat owner 1) wears the look of the member whose Matching2 member id maps
+  to that party slot, while its class and preset match the recipe; it never wears this client's saved looks. Textures are
+  reserved at launch per class and preset (3 each, `PLAYER/<CLASS>0N_NETk.FTX` and its default weapons) and filled off
+  the game thread; a look built after the game created the unit shows from the next time the unit is created. Default
+  weapons follow the saved-look rule: replaced only while the game would draw the default one. With Online Play on, the
+  Fighter model with helmet copies is always served so another player's hidden helmet draws as it does locally.
+
 ### Ping
 
 The in-game Ping is the round trip to the other players over their P2P links (direct or relayed): the smoothed round
@@ -490,13 +514,14 @@ lower-case hex.
 
 | op | request | answer |
 |---|---|---|
-| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload}` (absent from an older lobby) |
+| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay), `story_session`, `boss_battle_session`, `appearance` (optional) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload, story_session, boss_battle_session, appearance}` (absent from an older lobby) |
 | `worlds` | | `worlds: [{world, rooms, members}]` |
 | `udp` | `port`, `lan: [{ip, port}]` (<= 4, LAN/loopback only), `public_ip` (optional, public IPv4 of a client connected over IPv6) | `ip` (as the lobby sees it), `port`, `public_ip` (when accepted) |
-| `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]` | `room`, `me` |
+| `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]` | `room`, `me`, `appearances` (with `appearance` declared) |
 | `room.search` | `world`, `from` (1-based), `count` (<= 20), `flag_mask`, `flag_value`, `filters: [[id, op, value]]` (op 1 = 2 != 3 < 4 <= 5 > 6 >=); or `code` | `total`, `from`, `rooms`, `incompatible` (rooms of another protocol left out) |
-| `room.join` | `room` or `code`, `member_bin` | `room`, `me`; `incompatible` with the room's `online_protocol` and its owner's `version`, `platform` |
-| `room.leave` / `room.resume` | `room` / `room`, `member` | - / `room`, `me` |
+| `room.join` | `room` or `code`, `member_bin` | `room`, `me`, `appearances: [{member, appearance: {schema, data}}]` (the other members' looks, with `appearance` declared); `incompatible` with the room's `online_protocol` and its owner's `version`, `platform` |
+| `room.leave` / `room.resume` | `room` / `room`, `member` | - / `room`, `me`, `appearances` |
+| `room.appearance` | `room`, `appearance: {schema 1-255, data}` (hex, <= 128 bytes, first byte = schema) or `null`; only with `appearance` declared (see Custom appearance online) | - |
 | `room.set_internal` | `room`, `flag_mask`, `flag_value`, `bin_int` (owner only) | - |
 | `room.set_external` | `room`, `ints`, `bin_ext` (owner only) | - |
 | `room.kick` | `room`, `member` (owner only) | - |
@@ -522,7 +547,8 @@ without I O 0 1), `key` (16 random bytes, hex: the peer handshake secret), `memb
 Events: `room.member_joined {room, member}`, `room.member_left {room, member, why: leave | kicked | disconnect}`,
 `room.owner {room, from, to}` (before `member_left`; the new owner is the lowest connected member), `room.internal
 {room, flags, bin_int}` (not to the sender; `bin_int` holds the attributes that request carried), `room.kicked`, `room.gone`, `peer {room, member, account, ip, port, lan?}`,
-`peer.gone {room, member}`, `chat {room, member, account, name, text}` (to everyone in the room, the sender included),
+`peer.gone {room, member}`, `room.appearance {room, member, appearance}` (to the other members that declared `appearance`;
+never held for a seat in its grace period), `chat {room, member, account, name, text}` (to everyone in the room, the sender included),
 `friend.request`, `friend.added`, `friend.removed`, `friend.online`, `friend.offline`.
 
 Rules the lobby enforces:
@@ -549,7 +575,8 @@ Rules the lobby enforces:
   4th frame before sign-in (the client sends one); 16 sockets and 20 new
   accounts per day per address (IPv6 per /64; loopback exempt on the development server); 30 new connections per 60 s per
   address at the Worker (HTTP 429); per account, sign-ins 12 burst then 1 per 15 s, `room.create` 6 burst then 1 per
-  20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; party
+  20 s (20 burst then 1 per 6 s per address), `room.join` 20 burst then 1 per 5 s, so a reconnect does not reset them; changed
+  `room.appearance` 10 burst then 1 per 30 s per account (40 then 1 per 5 s per address), unchanged free; party
   reports 3 burst then 1 per 2 minutes per account, 12 then 1 per 30 s per address and 30 then 1 per 30 s for the lobby; bug reports
   2 per account per rolling hour and 10 per rolling 24 hours, newest 500 kept; their attempt, address and service protections are
   in `server/lobby/src/abuse.js` and `incidents.js`.

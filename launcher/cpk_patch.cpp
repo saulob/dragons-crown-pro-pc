@@ -1221,7 +1221,8 @@ std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& a
 std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path& archive_path, uint64_t length,
                                                     std::span<const std::pair<std::string, std::vector<uint8_t>>> replaced,
                                                     std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
-                                                    std::string* error) {
+                                                    std::string* error,
+                                                    std::span<const std::pair<std::string, uint64_t>> reserved) {
     const auto fail = [&](std::string why) -> std::optional<ArchiveOverlay> {
         if (error) *error = std::move(why);
         return std::nullopt;
@@ -1255,6 +1256,14 @@ std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path&
         rows.push_back({path, uint32_t(data.size()), uint32_t(data.size()), at - toc_base});
         overlay.patches.emplace_back(at, data);
         pos = at + data.size();
+    }
+    for (const auto& [path, size] : reserved) {
+        if (archive.Find(path) || !seen.insert(Lower(path)).second) return fail(path + " is already in the archive");
+        if (!size || size > UINT32_MAX) return fail(path + " has an unsupported size");
+        const uint64_t at = aligned(pos);
+        rows.push_back({path, uint32_t(size), uint32_t(size), at - toc_base});
+        overlay.reserved.push_back({path, at, size});
+        pos = at + size;
     }
     if (rows.empty() && replaced.empty()) return fail("nothing to add");
     if (!rows.empty() && !InsertRows(toc, rows, &reason, true)) return fail(reason);

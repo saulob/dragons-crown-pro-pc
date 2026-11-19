@@ -91,11 +91,23 @@ const char *dcp_text_translation(const char *settings_file, const char *image_di
                                  int glyph_table, int *glyphs_composed);
 
 /* The saved custom character looks of the build's title: DRACRO.CPK byte ranges that add one atlas per customized
- * character, and the instances the appearance hooks name them by. The archive's file name, or NULL when no look applies.
+ * character, and the instances the appearance hooks name them by. `online` also reserves the textures other players'
+ * looks are built into (dcp_remote_appearance_start). The archive's file name, or NULL when no look applies.
  * `message` lists what was applied or skipped. */
-const char *dcp_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, uint64_t *length,
+const char *dcp_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, int online, uint64_t *length,
                                   DcpFilePatch **patches, size_t *count, const AppearanceInstance **instances,
                                   size_t *instance_count, char *message, size_t message_size);
+
+/* Swaps the bytes the guest reads for one patch of an overlaid file (runtime_file_overlay_replace). */
+typedef int (*DcpOverlayReplace)(const char *guest, uint64_t offset, uint64_t size, const void *data);
+/* Once the overlay of an online dcp_custom_appearance is registered: other players' looks are built from then on. 1 when
+ * started. */
+int dcp_remote_appearance_start(DcpOverlayReplace replace);
+/* For the appearance hooks and the online session (appearance_hooks.h, appearance_session.h). */
+const AppearanceInstance *dcp_remote_appearance_of(int slot, int klass, int color);
+const AppearanceInstance *dcp_remote_appearance_serial(uint16_t serial);
+void dcp_remote_appearance_set(int slot, const uint8_t *recipe, size_t size);
+void dcp_remote_appearance_clear(int slot);
 
 /* After dcp_text_translation: the second archive to overlay when the build's stage files are not in the slot's archive;
  * NULL when there is none. */

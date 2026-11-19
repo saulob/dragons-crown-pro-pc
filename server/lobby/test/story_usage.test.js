@@ -248,6 +248,7 @@ test('a database from before this metric gains its columns and table and keeps i
   const env = makeLobby();
   host(env);
   env.host.sql.run('ALTER TABLE rooms DROP COLUMN story_seen');
+  env.host.sql.run('ALTER TABLE members DROP COLUMN appearance');
   env.host.sql.run('DROP TABLE story_users');
   env.host.sql.run('ALTER TABLE metrics_daily DROP COLUMN story_rooms');
   env.host.sql.run('ALTER TABLE metrics_daily DROP COLUMN story_guest_joins');

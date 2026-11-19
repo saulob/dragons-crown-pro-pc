@@ -1,5 +1,6 @@
 /* Native x86-64 loader: maps the prepared PS4 image and runs the original code on the host CPU. */
 #define _GNU_SOURCE
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include "default_message_hook.h"
 #include "gallery_unlock.h"
 #include "appearance_hooks.h"
+#include "appearance_session.h"
 #include "endgame_unlocks.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -537,21 +539,25 @@ static void install_text_translation(const char *settings_file, const char *imag
         printf("Menu & Subtitles: PT-BR visual skipped: %s could not be overlaid\n",stage);
     if (*message) printf("Menu & Subtitles: %s\n",message);
 }
-/* Custom character looks are local only: they are not served while Online Play is on. Each customized character gets
- * its own atlas entry, and only the hooked atlas-name sites hand it out, for that character. */
-static void install_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, int online_play,
+/* The game draws one of this client's players: the look it drew becomes what the room is told, once per change. */
+static void appearance_local_seen(int slot, const AppearanceInstance *instance) {
+    static _Atomic uintptr_t drawn[4];
+    if (slot<0 || slot>=4) return;
+    const uintptr_t key=(uintptr_t)instance+1;
+    if (atomic_exchange(&drawn[slot],key)==key) return;
+    appearance_session_set_local(slot,instance ? instance->recipe : NULL,instance ? instance->recipe_size : 0);
+}
+/* Each customized character gets its own atlas entry, and only the hooked atlas-name sites hand it out, for that
+ * character. Online, other players' looks arrive as recipes and are built into textures reserved here. */
+static void install_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, int online,
                                       uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size) {
-    if (online_play) {
-        printf("Appearance runtime: custom looks are not used with Online Play\n"); /* DEBUG_SAULO */
-        return;
-    }
     char message[4096]="";
     uint64_t length=0;
     DcpFilePatch *patches=NULL;
     size_t count=0;
     const AppearanceInstance *instances=NULL;
     size_t instance_count=0;
-    const char *archive=dcp_custom_appearance(image_dir,app0,user_dir,&length,&patches,&count,&instances,&instance_count,
+    const char *archive=dcp_custom_appearance(image_dir,app0,user_dir,online,&length,&patches,&count,&instances,&instance_count,
                                               message,sizeof(message));
     if (*message) printf("Appearance runtime: %s\n",message); /* DEBUG_SAULO */
     if (!archive) return;
@@ -568,6 +574,11 @@ static void install_custom_appearance(const char *image_dir, const char *app0, c
     if (!appearance_hooks_install(image,size,entry,&sites,stubs,stubs_size)) {
         appearance_hooks_set_instances(NULL,0);
         return;
+    }
+    if (online && dcp_remote_appearance_start(runtime_file_overlay_replace)) {
+        appearance_hooks_set_online(dcp_remote_appearance_of,dcp_remote_appearance_serial,appearance_local_seen);
+        appearance_session_enable(dcp_remote_appearance_set,dcp_remote_appearance_clear);
+        printf("Appearance runtime: other players' looks enabled for Online Play\n");
     }
     printf("Appearance runtime: %zu custom character(s); unit sites %#llx %#llx, select %#llx, effect %#llx/%#llx/%#llx, "
            "weapon %#llx %#llx %#llx, shield %#llx %#llx %#llx\n",
@@ -917,7 +928,7 @@ int main(int argc, char **argv) {
     const size_t message_stub_offset = cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
                                        ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
                                        gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area + endgame_stub_area;
-    const size_t appearance_stub_area = known_build && !online_play ? appearance_hooks_stub_bytes() : 0;
+    const size_t appearance_stub_area = known_build ? appearance_hooks_stub_bytes() : 0;
     const size_t comms_stub_area = known_build && runtime_online_active() ? comms_bridge_stub_bytes() : 0;
     const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area + comms_stub_area);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
@@ -1161,7 +1172,7 @@ int main(int argc, char **argv) {
                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
     if (app0) install_text_translation(settings_file,paths.image_dir,app0,image,size,entry,image+round_page(size)+message_stub_offset,
                                        default_message_stub_bytes());
-    if (app0) install_custom_appearance(paths.image_dir,app0,user_dir ? user_dir : "user",online_play,image,size,entry,
+    if (app0) install_custom_appearance(paths.image_dir,app0,user_dir ? user_dir : "user",runtime_online_active(),image,size,entry,
                                         image+round_page(size)+message_stub_offset+default_message_stub_bytes(),appearance_stub_area);
     if (comms_stub_area) {
         CommsBridgeSites comms_sites;

@@ -5380,6 +5380,148 @@ void TestRealHelmetHiddenOverlay(const fs::path& base, const fs::path& source_di
     }
 }
 
+// Online: another player's look arrives as a recipe and is built, from this client's own files, into a texture reserved
+// at launch; byte for byte what the saved-look pipeline serves for the same look, weapons included.
+void TestRemoteLookParity(const fs::path& base, const fs::path& source_dir) {
+    const fs::path app0 = source_dir / "game" / "prepared" / "v1.03";
+    const fs::path archive_path = app0 / "DRACRO.CPK";
+    std::error_code ec;
+    if (!fs::is_regular_file(archive_path, ec)) {
+        std::printf("installed game not present, skipping the remote look parity check\n");
+        return;
+    }
+    CpkArchive original;
+    CHECK(original.Open(archive_path));
+    std::string error;
+    const std::optional<std::vector<RemoteTextureSet>> plan = PlanRemoteTextures(original, &error);
+    CHECK(plan && plan->size() == size_t(6 * kNativeColorCount * kRemoteLooksPerPreset));
+    if (!plan) return;
+    uint64_t total = 0;
+    for (const RemoteTextureSet& set : *plan) {
+        const CpkEntry* atlas = original.Find(NativeColorAtlas(set.klass, set.base));
+        CHECK(atlas && std::max(atlas->size, atlas->extract_size) == set.atlas.size);
+        CHECK(set.weapons.size() == WeaponTexturesOf(set.klass).size());
+        total += set.atlas.size;
+        for (const RemoteEntry& weapon : set.weapons) total += weapon.size;
+        if (set.index == 0)
+            std::printf("remote textures: %s colour %d atlas %llu bytes\n", std::string(ClassName(set.klass)).c_str(), set.base,
+                        static_cast<unsigned long long>(set.atlas.size));
+    }
+    std::printf("remote textures: %zu sets, %llu MB of archive space reserved (no memory until a look is built), archive has %zu entries\n",
+                plan->size(), static_cast<unsigned long long>(total >> 20), original.entries().size());
+
+    const fs::path user = base / "remote_parity_user";
+    fs::remove_all(user);
+    WriteSaveFor(user, "CUSA10454", "SAVEDATA00", SaveWithCharacters({{0, 0}, {2, 1}, {0, 0}}));
+    CustomLook fighter{true, 0, {}};
+    fighter.SetPartColor("armor", Rgb{0x22, 0xaa, 0x55});
+    fighter.SetPartHidden("helmet", true);
+    fighter.SetPartColor("horns", Rgb{0x22, 0x55, 0xff});
+    fighter.SetPartColor("shield_accent", Rgb{0xdd, 0x22, 0x22});
+    CustomLook elf{true, 1, {}};
+    elf.SetPartHidden("hood", true);
+    elf.SetPartColor("bow", Rgb{0x10, 0xc0, 0x40});
+    CustomLook red_fighter{true, 0, {}};
+    red_fighter.SetPartColor("armor", Rgb{0xcc, 0x10, 0x10});
+    red_fighter.SetPartColor("sword", Rgb{0xff, 0xd0, 0x00});
+    CustomStore store(CustomStorePath(user));
+    store.Set({"CUSA10454", "SAVEDATA00", 0, 0, CharacterClass::kFighter}, fighter);
+    store.Set({"CUSA10454", "SAVEDATA00", 0, 1, CharacterClass::kElf}, elf);
+    store.Set({"CUSA10454", "SAVEDATA00", 0, 2, CharacterClass::kFighter}, red_fighter);
+    std::vector<std::string> notes;
+    const std::vector<CustomInstance> planned = PlanCustomInstances(store, DiscoverSaves(user, "CUSA10454"), "CUSA10454", notes);
+    CHECK(planned.size() == 3);
+    CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
+    sources.cache_dir = base / "region_cache";
+    CharacterArt art(sources);
+    const std::optional<CustomOverlay> built = BuildCustomOverlay(archive_path, planned, art, notes, &*plan);
+    CHECK(built && built->runtime.size() == 3 && built->remote.size() == plan->size() && built->helmet_copies);
+    if (!built || built->runtime.size() != 3 || built->remote.size() != plan->size()) return;
+
+    // The reserved textures are listed where the overlay leaves room for them; nothing old moved.
+    CpkArchive served;
+    CHECK(OpenOverlaid(archive_path, built->overlay, served));
+    size_t reserved = 0;
+    for (const RemoteTextureSet& set : built->remote) {
+        for (const RemoteEntry* entry : {&set.atlas}) {
+            const CpkEntry* listed = served.Find(entry->name);
+            CHECK(listed && listed->offset == entry->offset && listed->size == entry->size && listed->extract_size == entry->size);
+            ++reserved;
+        }
+        for (const RemoteEntry& weapon : set.weapons) {
+            const CpkEntry* listed = served.Find(weapon.name);
+            CHECK(listed && listed->offset == weapon.offset && listed->size == weapon.size);
+            ++reserved;
+        }
+    }
+    CHECK(built->overlay.reserved.size() == reserved);
+    CHECK(served.entries().size() == original.entries().size() + 3 + 3 + reserved); // three atlases, the shield, the bow, the sword
+    const auto read_served = [&](const std::string& path) {
+        const CpkEntry* entry = served.Find(path);
+        return entry ? ReadOverlaid(archive_path, built->overlay, entry->offset, entry->size) : std::vector<uint8_t>{};
+    };
+
+    // Each saved look carries its recipe for the room.
+    for (size_t i = 0; i < planned.size(); ++i) {
+        const std::optional<appearance_net::Recipe> recipe = RecipeOfLook(planned[i].instance.klass, planned[i].instance.base, planned[i].look);
+        const AppearanceInstance& runtime = built->runtime[i];
+        CHECK(recipe && std::vector<uint8_t>(runtime.recipe, runtime.recipe + runtime.recipe_size) == appearance_net::Encode(*recipe));
+    }
+
+    // Player B's client: the recipes arrive and are built from its own files.
+    std::map<std::string, std::vector<uint8_t>> remote_bytes;
+    RemoteLooks::Host host;
+    host.threaded = false;
+    host.now_ms = [] { return uint64_t(1000000); };
+    host.log = [&](const std::string& line) { notes.push_back(line); };
+    host.serve = [&](const RemoteEntry& entry, const uint8_t* data) {
+        const CpkEntry* listed = served.Find(entry.name);
+        CHECK(listed && listed->offset == entry.offset && listed->size == entry.size);
+        remote_bytes[entry.name] = std::vector<uint8_t>(data, data + entry.size);
+        return true;
+    };
+    host.build = [&](CharacterClass klass, int color, const CustomLook& look, std::string* why) -> std::optional<LookTextures> {
+        const EntryReader read = [&](const std::string& entry) {
+            const CpkEntry* found = original.Find(entry);
+            return found ? original.Read(*found) : std::vector<uint8_t>{};
+        };
+        const std::vector<RegionMap>* maps = art.Regions(klass);
+        if (!maps) return std::nullopt;
+        std::vector<std::string> weapon_notes;
+        return BuildLookTextures(read(NativeColorAtlas(klass, color)), read, *maps, klass, look, built->helmet_copies, weapon_notes, why);
+    };
+    RemoteLooks looks(built->remote, host);
+    for (int slot = 1; slot <= 3; ++slot) {
+        const AppearanceInstance& from = built->runtime[size_t(slot - 1)];
+        looks.Set(slot, std::span<const uint8_t>(from.recipe, from.recipe_size));
+    }
+    looks.Drain();
+    const AppearanceInstance* a = looks.Of(1, 0, 0);
+    const AppearanceInstance* e = looks.Of(2, 2, 1);
+    const AppearanceInstance* r = looks.Of(3, 0, 0);
+    CHECK(a && e && r && a != r);
+    if (!a || !e || !r) return;
+    CHECK(std::string(a->entry) == "PLAYER/FIGHTER00_NET1.FTX" && std::string(r->entry) == "PLAYER/FIGHTER00_NET2.FTX" &&
+          std::string(e->entry) == "PLAYER/ELF01_NET1.FTX");
+    // Same bytes as the saved-look pipeline, per atlas and per default weapon.
+    CHECK(!remote_bytes[a->entry].empty() && remote_bytes[a->entry] == read_served(built->runtime[0].entry));
+    CHECK(!remote_bytes[e->entry].empty() && remote_bytes[e->entry] == read_served(built->runtime[1].entry));
+    CHECK(!remote_bytes[r->entry].empty() && remote_bytes[r->entry] == read_served(built->runtime[2].entry));
+    CHECK(remote_bytes[a->entry] != remote_bytes[r->entry]); // two Fighters, two atlases
+    CHECK(std::string(a->weapons[1].entry) == "PLAYER/FIGHTER00_SHIELD01_NET1.FTX" && a->weapons[0].entry[0] == 0);
+    CHECK(remote_bytes[a->weapons[1].entry] == read_served(built->runtime[0].weapons[1].entry));
+    CHECK(std::string(r->weapons[0].entry) == "PLAYER/FIGHTER00_ARMS01_NET2.FTX" && r->weapons[1].entry[0] == 0);
+    CHECK(remote_bytes[r->weapons[0].entry] == read_served(built->runtime[2].weapons[0].entry));
+    CHECK(std::string(e->weapons[0].entry) == "PLAYER/ELF01_ARMS01_NET1.FTX");
+    CHECK(remote_bytes[e->weapons[0].entry] == read_served(built->runtime[1].weapons[0].entry));
+    // The hidden helmet's atlas leaves the copies empty; the other Fighter's atlas has them, as served natives do.
+    std::vector<uint8_t> native = original.Read(*original.Find(NativeColorAtlas(CharacterClass::kFighter, 0)));
+    CHECK(AddHelmetCopies(native) && read_served(NativeColorAtlas(CharacterClass::kFighter, 0)) == native);
+    std::printf("remote look parity: %zu reserved textures, Fighter/Elf/Fighter recipes of %u/%u/%u bytes built identical to saved looks\n",
+                reserved, unsigned(built->runtime[0].recipe_size), unsigned(built->runtime[1].recipe_size),
+                unsigned(built->runtime[2].recipe_size));
+}
+
 void TestFighterParts(CharacterArt& art, CpkArchive& cpk) {
     const CharacterClass klass = CharacterClass::kFighter;
     const std::optional<Mbs> select = SelectModel(cpk, klass);
@@ -7062,6 +7204,7 @@ int main(int argc, char** argv) {
     TestAppearanceSites(DCP_SOURCE_DIR);
     TestRealCustomOverlay(base, DCP_SOURCE_DIR);
     TestRealHelmetHiddenOverlay(base, DCP_SOURCE_DIR);
+    TestRemoteLookParity(base, DCP_SOURCE_DIR);
     TestCustomBaseInvariant(base, DCP_SOURCE_DIR);
     TestFeather(base, DCP_SOURCE_DIR);
     TestNoHeadgear(base, DCP_SOURCE_DIR);

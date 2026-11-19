@@ -84,6 +84,10 @@ typedef struct {
  * data is borrowed and must outlive the process. Before the guest starts only; -1 with nothing registered when the
  * table is full, the path already has one or a patch falls outside `length`. */
 int runtime_file_overlay(const char *guest, uint64_t length, const RuntimeFilePatch *patches, size_t count);
+/* Any time: the registered patch at exactly `offset` and `size` reads `data` from now on (borrowed, like the patches').
+ * A read already copying the old data finishes with it, so the old data must stay valid a while. 0, or -1 when there is
+ * no such patch. */
+int runtime_file_overlay_replace(const char *guest, uint64_t offset, uint64_t size, const void *data);
 int runtime_file_translate(const char *guest, char *out, size_t size);
 int64_t runtime_file_open(const char *path, int flags, int mode);
 int64_t runtime_file_close(int fd);

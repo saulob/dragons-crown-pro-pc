@@ -29,6 +29,8 @@ export const PROTECTION = {
   stateWriteAddress: { burst: 160, perSecond: 4 },
   friendWriteAccount: { burst: 20, perSecond: 1 / 3 },
   friendWriteAddress: { burst: 60, perSecond: 1 },
+  appearanceAccount: { burst: 10, perSecond: 1 / 30 },
+  appearanceAddress: { burst: 40, perSecond: 1 / 5 },
   refusedRequests: { burst: 30, perSecond: 1 / 2 },
   // The client sends one request before sign-in (hello, or a bug report lookup); "ping" never reaches the lobby.
   preHelloFrames: 3,

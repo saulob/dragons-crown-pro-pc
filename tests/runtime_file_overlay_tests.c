@@ -137,6 +137,20 @@ int main(void) {
     CHECK(runtime_file_overlay("/APP0/ARCH.CPK", 32, &one, 1) == -1);
     CHECK(read_all("/app0/arch.cpk", seen, 32) == 32 && memcmp(seen, "0123QQQQQQQQCDEF", 16) == 0);
 
+    /* A patch's data swapped after registration: later reads see the new bytes; only an exact patch can be swapped. */
+    unsigned char *swapped = malloc(8);
+    memset(swapped, 'R', 8);
+    CHECK(runtime_file_overlay_replace("/app0/arch.cpk", 4, 8, swapped) == 0);
+    CHECK(read_all("/app0/arch.cpk", seen, 32) == 32 && memcmp(seen, "0123RRRRRRRRCDEF", 16) == 0);
+    CHECK(runtime_file_overlay_replace("/APP0/ARCH.CPK", 4, 8, patch) == 0);
+    CHECK(read_all("/app0/arch.cpk", seen, 32) == 32 && memcmp(seen, "0123QQQQQQQQCDEF", 16) == 0);
+    CHECK(runtime_file_overlay_replace("/app0/arch.cpk", 4, 7, swapped) == -1);
+    CHECK(runtime_file_overlay_replace("/app0/arch.cpk", 5, 8, swapped) == -1);
+    CHECK(runtime_file_overlay_replace("/app0/plain.cpk", 4, 8, swapped) == -1);
+    CHECK(runtime_file_overlay_replace("/app0/arch.cpk", 4, 8, NULL) == -1);
+    CHECK(read_all("/app0/arch.cpk", seen, 32) == 32 && memcmp(seen, "0123QQQQQQQQCDEF", 16) == 0);
+    free(swapped);
+
     const RuntimeFilePatch outside = {30, 8, patch};
     CHECK(runtime_file_overlay("/app0/other.cpk", 32, &outside, 1) == -1);
     CHECK(read_all("/app0/other.cpk", seen, 32) == 16 && memcmp(seen, "0123456789ABCDEF", 16) == 0);

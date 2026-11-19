@@ -150,9 +150,15 @@ OverlayResult OverlayArchive(const std::filesystem::path& base, const std::files
 
 // What a reader of the archive sees when entries are replaced the way ApplyBlockPatch does it, without writing the file:
 // the new data appended past `length` (the archive's size) and the rewritten table of contents and header, by position.
+// A listed entry whose bytes the overlay leaves to its user, who serves them at `offset`.
+struct ReservedEntry {
+    std::string path;
+    uint64_t offset = 0, size = 0;
+};
 struct ArchiveOverlay {
     uint64_t length = 0;
     std::vector<std::pair<uint64_t, std::vector<uint8_t>>> patches;
+    std::vector<ReservedEntry> reserved;
 };
 // Nothing when the archive lacks one of the entries; `error` names it.
 std::optional<ArchiveOverlay> OverlayEntries(const CpkArchive& archive, uint64_t length,
@@ -164,10 +170,12 @@ std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& a
                                                   std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
                                                   std::string* error = nullptr);
 // The same with existing entries replaced too: their rows point at the new data, stored uncompressed past `length`.
+// `reserved` entries (path, size) are listed after the added ones with no bytes of their own (ArchiveOverlay::reserved).
 std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path& archive, uint64_t length,
                                                     std::span<const std::pair<std::string, std::vector<uint8_t>>> replaced,
                                                     std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
-                                                    std::string* error = nullptr);
+                                                    std::string* error = nullptr,
+                                                    std::span<const std::pair<std::string, uint64_t>> reserved = {});
 // The archive as a reader sees it with the overlay laid on: its listing, and the bytes of a range.
 bool OpenOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, CpkArchive& out,
                   std::string* error = nullptr);

@@ -41,6 +41,7 @@ export const LIMITS = {
   lobbyPlayers: 100,
   // Three missed keepalives (LobbyLink::Options::keepalive_ms) and a margin.
   lobbyStaleMs: 75000,
+  appearanceBytes: 128,
 };
 
 const BUCKETS = {
@@ -123,6 +124,7 @@ const MIGRATIONS = [
   [`ALTER TABLE members ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''`],
   [`ALTER TABLE rooms ADD COLUMN platforms INTEGER NOT NULL DEFAULT 0`],
   [`ALTER TABLE rooms ADD COLUMN story_seen TEXT NOT NULL DEFAULT '[]'`],
+  [`ALTER TABLE members ADD COLUMN appearance TEXT NOT NULL DEFAULT ''`],
 ];
 
 // ---- input validation ----
@@ -195,6 +197,17 @@ const roomIsStory = (room) => isStorySession(JSON.parse(room.ints));
 
 const bossBattleOf = (ints) => ints.find(([id]) => id === BOSS_BATTLE_ATTR)?.[1] ?? 0;
 const roomBossBattle = (room) => bossBattleOf(JSON.parse(room.ints));
+
+// A member's custom look, opaque here: the clients validate and draw it. Kept as hex; the first byte is its schema.
+function appearanceData(v) {
+  if (v === null) return '';
+  if (!isObject(v) || !isInt(v.schema, 1, 0xff)) fail('bad_request', 'appearance');
+  const data = hexBytes(v.data, LIMITS.appearanceBytes);
+  if (data.length < 2 || parseInt(data.slice(0, 2), 16) !== v.schema) fail('bad_request', 'appearance');
+  return data;
+}
+
+const appearanceView = (data) => (data ? { schema: parseInt(data.slice(0, 2), 16), data } : null);
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
@@ -280,6 +293,8 @@ export class Lobby {
       stateWriteAddress: new RateLimiter(PROTECTION.stateWriteAddress),
       friendWriteAccount: new RateLimiter(PROTECTION.friendWriteAccount),
       friendWriteAddress: new RateLimiter(PROTECTION.friendWriteAddress),
+      appearanceAccount: new RateLimiter(PROTECTION.appearanceAccount),
+      appearanceAddress: new RateLimiter(PROTECTION.appearanceAddress),
       rejects: new RateLimiter({ burst: 1, perSecond: 1000 / PROTECTION.rejectWindowMs }),
     };
     this.relays = new Relay(this);
@@ -773,6 +788,22 @@ export class Lobby {
     }
   }
 
+  // The other members' looks, for a client that declared appearance.
+  appearanceSnapshot(att, roomId) {
+    if (!att.appearance) return {};
+    const appearances = this.memberRows(roomId).filter((m) => m.member !== att.member && m.appearance)
+      .map((m) => ({ member: m.member, appearance: appearanceView(m.appearance) }));
+    return { appearances };
+  }
+
+  toAppearanceMembers(roomId, event, exceptMember) {
+    for (const m of this.memberRows(roomId)) {
+      if (m.member === exceptMember || !m.conn) continue;
+      const s = this.socketByCid(m.conn);
+      if (s?.att.appearance) this.send(s.conn, event);
+    }
+  }
+
   // The endpoint of `about` as `to` may use it. `ip` is the observed address, which alone decides who gets LAN candidates;
   // `public_ip` is unverified, so it is only ever something to dial.
   peerEvent(roomId, about, to) {
@@ -983,6 +1014,20 @@ export class Lobby {
 
   // Party snapshots have their own budget, one lobby-wide and one per account and per address; a refusal spends none of
   // them, and none is shared with room.create or room.join.
+  // Its own budget: a join publishes once and a reconnect republishes nothing, so a few updates a minute is plenty.
+  limitAppearance(att) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { appearanceAccount, appearanceAddress } = this.guards;
+    if (!appearanceAccount.allows(att.account, now) || !appearanceAddress.allows(address, now)) {
+      this.diagnose('appearance_limited');
+      fail('limit', 'appearance updates too fast', { retry_ms: Math.ceil(1000 / PROTECTION.appearanceAccount.perSecond) });
+    }
+    appearanceAccount.take(att.account, now);
+    appearanceAddress.take(address, now);
+  }
+
   limitPartyReport(att) {
     if (this.exempt(att)) return;
     const now = this.host.now();
@@ -1194,7 +1239,7 @@ const HANDLERS = {
     const platform = cleanText(msg.platform ?? '', LIMITS.platformChars);
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
       version, platform, relay: msg.relay === true, story_session: msg.story_session === true,
-      boss_battle_session: msg.boss_battle_session === true });
+      boss_battle_session: msg.boss_battle_session === true, appearance: msg.appearance === true });
     if (att.relay) this.relays.negotiated();
     if (msg.lobby === true && presence && LOBBY_NAME.test(name)) this.showInLobby(att, now);
     this.index = null;
@@ -1203,7 +1248,7 @@ const HANDLERS = {
     else if (presence) this.diagnose('hello_reconnect_deduped');
     this.diagnose('hello_accepted');
     return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now,
-      capabilities: { ...CAPABILITIES, story_session: true, boss_battle_session: true } };
+      capabilities: { ...CAPABILITIES, story_session: true, boss_battle_session: true, appearance: true } };
   },
 
   worlds(att) {
@@ -1272,7 +1317,7 @@ const HANDLERS = {
       this.noteStoryParticipation(id, att, STORY_ROLES.host);
     }
     this.diagnose('room_create_accepted');
-    return { room: this.fullRoom(this.roomRow(id)), me: MEMBER_IDS[0] };
+    return { room: this.fullRoom(this.roomRow(id)), me: MEMBER_IDS[0], ...this.appearanceSnapshot(att, id) };
   },
 
   'room.search'(att, msg) {
@@ -1371,7 +1416,7 @@ const HANDLERS = {
       this.noteStoryParticipation(room.id, att, STORY_ROLES.guest);
     }
     if (boss > 0) this.noteBossParty(room.id);
-    return { room: this.fullRoom(this.roomRow(room.id)), me: memberId };
+    return { room: this.fullRoom(this.roomRow(room.id)), me: memberId, ...this.appearanceSnapshot(att, room.id) };
   },
 
   'room.leave'(att, msg) {
@@ -1417,7 +1462,24 @@ const HANDLERS = {
       for (const event of held) this.send(conn, event);
       this.exchangeEndpoints(roomId, msg.member);
     });
-    return { room: this.fullRoom(this.roomRow(roomId)), me: msg.member };
+    return { room: this.fullRoom(this.roomRow(roomId)), me: msg.member, ...this.appearanceSnapshot(att, roomId) };
+  },
+
+  // A member's custom look for the other members' renderers: stored with the seat, so a member who joins later gets it in
+  // its join answer, and gone with the seat. Sent only to members that declared appearance; never held, never logged.
+  'room.appearance'(att, msg) {
+    if (!att.appearance) fail('bad_request', 'appearance');
+    const room = this.requireRoom(att, msg.room);
+    const data = appearanceData(msg.appearance);
+    const me = this.memberRow(room.id, att.member);
+    if (!me) fail('not_found');
+    if (me.appearance === data) return {};
+    this.limitAppearance(att);
+    this.host.sql.run('UPDATE members SET appearance = ? WHERE room = ? AND member = ?', data, room.id, att.member);
+    const event = { ev: 'room.appearance', room: String(room.id), member: att.member, appearance: appearanceView(data) };
+    const roomId = room.id;
+    this.later(() => this.toAppearanceMembers(roomId, event, att.member));
+    return {};
   },
 
   'room.set_internal'(att, msg) {

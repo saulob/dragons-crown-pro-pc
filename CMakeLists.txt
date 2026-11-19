@@ -95,6 +95,8 @@ set(DCP_RUNTIME_SOURCES
     src/exit_game_text.c
     src/gallery_unlock.c
     src/appearance_hooks.c
+    src/appearance_net.cpp
+    src/appearance_session.cpp
     src/default_message_hook.c
     src/guest_hook.c
     src/inn_layout.c
@@ -200,7 +202,7 @@ target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
 # The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
 # DCP_TEST_LOBBY names one. Not part of the default build.
 add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp
-    src/early_story_session.c src/boss_battle_online.c launcher/online_view.cpp)
+    src/early_story_session.c src/boss_battle_online.c launcher/online_view.cpp src/appearance_net.cpp src/appearance_session.cpp)
 target_include_directories(dcp-online-hle-tests PRIVATE launcher)
 target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
 set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
