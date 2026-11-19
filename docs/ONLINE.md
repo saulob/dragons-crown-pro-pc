@@ -324,6 +324,40 @@ observer described below.
 - Offline play and Online play off send nothing. If the lobby is unreachable or refuses the request, play continues:
   the snapshot is only a best-effort report.
 
+### Comms Wheel
+
+A radial wheel of eight fixed cooperative messages, for online rooms of two or more players. It is not text chat: nothing
+is typed and no text travels. Clockwise from the top: Ready, Hello, Need help, Let's go, Group up, Follow me, Good job,
+Thanks. The message is shown through the game's own greeting balloon of the sender's player, so its place, font,
+duration and Player 1 to 4 colour are the game's; only the text it carries is replaced. Each client looks the message id up
+in its own Menu & Subtitles language (`src/comms_text.c`, the same ten languages as Boss Battle), so an English player
+reads "Need help" while a Brazilian Portuguese player reads "Preciso de ajuda".
+
+- **Controller.** Press D-pad Up once: the wheel opens and stays open. Move the right stick to pick a sector (the pick
+  stays when the stick returns to the centre), press Cross (A) to send and close, or Circle (B) to close without sending.
+  While the wheel is open the game sees no D-pad Up, right stick, Cross or Circle.
+- **Keyboard and mouse.** Press the Comms Wheel key (T by default, rebindable in Controls) once: the wheel opens and stays
+  open. Pick with the mouse or with the direction keys (the left and right stick keys, WASD and the arrows by default),
+  send with the left mouse button or the Cross key, cancel with Escape or the right mouse button. While the wheel is open
+  the mouse buttons, mouse motion, Escape and the direction keys do not reach the game.
+- **When it opens.** Online Play on, a room of at least two players, and this player's unit running in the game.
+- **Limits.** One message every 2 s from a player; a receiver accepts one every 1.5 s per sender slot.
+- **Network.** Peer datagram type 9 (see Peer transport). Builds without the Comms Wheel ignore it and show nothing.
+- **Native hook.** One hook at the text call inside the game's greeting balloon function, found by its bytes on every
+  supported build (`src/comms_bridge.cpp`); the balloon is shown from the player unit's own per-tick update, the same
+  site as the party snapshot. Located on the five boot images that exist locally; the other builds rely on the same
+  structural search and are unproven.
+
+### Comms Wheel statistics
+
+The Comms Wheel (eight fixed cooperative messages) reports how often each message is sent, so the private dashboard can show
+which ones are used. A client sends `comms.report` with eight counts, one per stable message id (0 Hello, 1 Thanks, 2 Good
+job, 3 Follow me, 4 Group up, 5 Need help, 6 Ready, 7 Let's go), at most once every two minutes and not while it has nothing to
+add. The lobby keeps one total per id and nothing else: no text (the messages are ids, never words), no player, account,
+address, room, time of use or history. The dashboard's "Comms Wheel" section shows Total Uses, each message with its count
+and share, and the most used message. Offline play, Online play off and a lobby that predates the request send or lose nothing
+that matters: an older lobby answers `bad_request` and the client drops the counts.
+
 ### Ping
 
 The in-game Ping is the round trip to the other players over their P2P links (direct or relayed): the smoothed round
@@ -477,6 +511,7 @@ lower-case hex.
 | `incident.status` | `reports: [{ticket, receipt}]` (<= 50); no `hello` needed | `reports: [{ticket, status, status_updated_at, fixed_version?, player_message?}]`, only the reports the receipts prove |
 | `incident.read` | `ticket`, `receipt`; no `hello` needed | `report` (the stored fields, `ticket`, `submitted_at`), or `not_found` |
 | `party.report` | `classes` (1-4 class numbers 0-5: Fighter, Amazon, Elf, Dwarf, Sorceress, Wizard), `host` (optional, one of `classes`); room owner only, optional (see Party statistics) | `counted` |
+| `comms.report` | `counts` (exactly 8 non-negative integers, index = Comms Wheel message id 0-7: Hello, Thanks, Good job, Follow me, Group up, Need help, Ready, Let's go); optional, see Comms Wheel statistics | - |
 
 Room (`room`): `id`, `world`, `slots`, `flags` (0x20000000 added while full), `owner`, `code` (6 characters, A-Z 2-9
 without I O 0 1), `key` (16 random bytes, hex: the peer handshake secret), `members: [{id, account, name, joined, bin, version, platform}]`,
@@ -532,6 +567,15 @@ tag and the source link tag (u32 little endian). STUN answers on the same socket
 | 5 PING / 6 PONG | time u32, echoed by the PONG (every second on a connected link; also the relay probe, below) |
 | 7 CLOSE | optional reason byte: 1 the game closed the link, 2 the P2P socket closed, 3 an oversized message (older clients send none and ignore it) |
 | 8 PUNCH | - |
+| 9 COMMS | Comms Wheel message: version u8 (1), sender party slot u8 (0-3), message id u8 (0-7), sequence u8; no text |
+
+COMMS carries only a message id; each client turns it into text in its own language. It is one unauthenticated-by-content
+but link-authenticated datagram (both link tags must match, like PING), sent twice 120 ms apart and deduplicated by
+sequence; a body with another size, version, slot or an id above 7 is dropped. It also travels through the relay like any
+other datagram. Clients that do not know type 9 ignore it (they simply do not show the message), so
+`net::kOnlineProtocolVersion` stays 1 and builds from before the Comms Wheel keep playing with it; there is no version
+gate. The receiver requires the body's slot to be the slot of the room member that owns the link, and accepts at most one
+message per 1.5 s per slot.
 
 Both ends send HELLO to every candidate of the peer every 100 ms (250 ms after 3 s) for 15 s; the first authenticated
 HELLO or HELLO_ACK fixes the address (a reply from an unexpected port is taken as it is: NATs that change ports). A

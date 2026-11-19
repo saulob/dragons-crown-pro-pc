@@ -49,6 +49,20 @@ int dcpgpu_controller_rumble(void);
 void dcpgpu_set_controller_rumble(int enabled);
 /* 1 while the settings menu is open: the game's pad input should be held neutral. */
 int dcpgpu_overlay_captures_input(void);
+/* The Comms Wheel's input, stepped by player 1's pad read: what the pad shows in, what to hide from the game out. `send` is a message id to send now (-1 none). */
+typedef struct {
+    int dpad_up;        /* the gamepad's D-pad Up is held */
+    int available;      /* comms_session_available() */
+    uint8_t right_x, right_y; /* the sampled right stick, 128 at rest */
+    int circle;         /* Circle is held, as the game would see it */
+    int cross;          /* Cross is held, from the pad or its key */
+    int nav;            /* direction keys held: 1 up, 2 down, 4 left, 8 right */
+} DcpCommsPadIn;
+typedef struct {
+    int hide_dpad_up, hide_cross, hide_circle, neutral_right_stick, neutral_keyboard_axes;
+    int send;
+} DcpCommsPadOut;
+void dcpgpu_comms_wheel_step(const DcpCommsPadIn *in, DcpCommsPadOut *out);
 /* DCP_INPUT_LATENCY_TRACE=1: 1 when set; the SDL_GetTicksNS time of the newest host button or key press. */
 int dcpgpu_latency_trace_enabled(void);
 uint64_t dcpgpu_latency_press_ns(void);

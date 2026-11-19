@@ -82,6 +82,9 @@ set(DCP_RUNTIME_SOURCES
     src/boss_battle_online.c
     src/boss_battle_record.cpp
     src/boss_battle_text.c
+    src/comms_bridge.cpp
+    src/comms_session.cpp
+    src/comms_text.c
     src/early_story_online.c
     src/early_story_session.c
     src/network_access.c src/network_hint.c
@@ -534,6 +537,15 @@ target_link_libraries(dcp-options-menu-tests PRIVATE dcp_keys dcp_net dcp_ui_tex
 target_compile_definitions(dcp-options-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-options-menu-tests PRIVATE -Wall -Wextra)
 
+# Focused tests of the Comms Wheel's input glue, layout and key binding (tools/test.ps1); not part of the default build.
+add_executable(dcp-comms-wheel-ui-tests EXCLUDE_FROM_ALL tests/comms_wheel_ui_tests.cpp src/comms_text.c src/cyrillic_glyphs.c
+    src/latin_glyphs.c)
+set_target_properties(dcp-comms-wheel-ui-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-comms-wheel-ui-tests PRIVATE gpu/shim src)
+target_link_libraries(dcp-comms-wheel-ui-tests PRIVATE dcp_keys)
+target_compile_definitions(dcp-comms-wheel-ui-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-comms-wheel-ui-tests PRIVATE -Wall -Wextra)
+
 # Focused tests of the Japanese NPC voice routing (tools/test.ps1); not part of the default build.
 add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)
 target_include_directories(dcp-voice-tests PRIVATE src)
@@ -554,11 +566,31 @@ target_include_directories(dcp-discord-tests PRIVATE src)
 target_compile_definitions(dcp-discord-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-discord-tests PRIVATE -Wall -Wextra)
 
+# Comms Wheel session rules on fakes (tools/test.ps1); not part of the default build.
+add_executable(dcp-comms-session-tests EXCLUDE_FROM_ALL tests/comms_session_tests.cpp)
+set_target_properties(dcp-comms-session-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-comms-session-tests PRIVATE src)
+target_compile_definitions(dcp-comms-session-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-comms-session-tests PRIVATE -Wall -Wextra)
+
+add_executable(dcp-comms-session-runtime-tests EXCLUDE_FROM_ALL tests/comms_session_runtime_tests.cpp src/comms_session.cpp)
+set_target_properties(dcp-comms-session-runtime-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-comms-session-runtime-tests PRIVATE src launcher)
+target_compile_definitions(dcp-comms-session-runtime-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-comms-session-runtime-tests PRIVATE -Wall -Wextra)
+
 add_executable(dcp-party-tests EXCLUDE_FROM_ALL tests/party_tests.cpp src/guest_hook.c src/party_hook.cpp)
 set_target_properties(dcp-party-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-party-tests PRIVATE src)
 target_compile_definitions(dcp-party-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-party-tests PRIVATE -Wall -Wextra)
+
+add_executable(dcp-comms-tests EXCLUDE_FROM_ALL tests/comms_tests.cpp src/comms_bridge.cpp src/comms_text.c src/guest_hook.c
+    src/cyrillic_glyphs.c src/latin_glyphs.c)
+set_target_properties(dcp-comms-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-comms-tests PRIVATE src)
+target_compile_definitions(dcp-comms-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-comms-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the True Ultrawide hooks (tools/test.ps1); not part of the default build.
 add_executable(dcp-ultrawide-tests EXCLUDE_FROM_ALL tests/ultrawide_tests.c src/guest_hook.c src/ultrawide_hooks.c)

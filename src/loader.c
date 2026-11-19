@@ -30,6 +30,9 @@
 #include "latin_glyphs.h"
 #include "system_type_hook.h"
 #include "party_hook.h"
+#include "comms_bridge.h"
+#include "comms_text.h"
+#include "comms_session.h"
 #include "ultrawide_hooks.h"
 #include "voice_hooks.h"
 #include "dcpgpu.h"
@@ -728,6 +731,7 @@ int main(int argc, char **argv) {
         printf("DCP: game build pinned by DCP_GAME_BUILD\n");
     }
     runtime_online_configure(settings_file,user_dir,known_build ? build_key : NULL);
+    comms_session_register();
     const int discord_presence=!check_imports && !cpu_only && discord_presence_start(settings_file,app0);
     render_resolution=&dcp_resolutions[dcp_render_resolution(settings_file,paths.image_dir)];
     aspect_ratio=&dcp_aspect_ratios[dcp_aspect_ratio(settings_file,paths.image_dir)];
@@ -742,6 +746,7 @@ int main(int argc, char **argv) {
         dcp_text_language_key(settings_file,paths.image_dir,app0,text_key,sizeof(text_key));
         const int kana_cyrillic=dcp_text_cyrillic_cells(settings_file,paths.image_dir,app0,&cyrillic_probe)==CYRILLIC_CELLS_KANA;
         boss_battle_text_set_language(text_key,kana_cyrillic);
+        comms_text_set_language(text_key,kana_cyrillic);
     }
     runtime_pad_set_settings(settings_file);
     runtime_pad_set_rumble(dcp_controller_rumble(settings_file));
@@ -913,7 +918,8 @@ int main(int argc, char **argv) {
                                        ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
                                        gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area + endgame_stub_area;
     const size_t appearance_stub_area = known_build && !online_play ? appearance_hooks_stub_bytes() : 0;
-    const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area);
+    const size_t comms_stub_area = known_build && runtime_online_active() ? comms_bridge_stub_bytes() : 0;
+    const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area + comms_stub_area);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -1157,6 +1163,13 @@ int main(int argc, char **argv) {
                                        default_message_stub_bytes());
     if (app0) install_custom_appearance(paths.image_dir,app0,user_dir ? user_dir : "user",online_play,image,size,entry,
                                         image+round_page(size)+message_stub_offset+default_message_stub_bytes(),appearance_stub_area);
+    if (comms_stub_area) {
+        CommsBridgeSites comms_sites;
+        if (!party_located) printf("Comms Wheel: not active, the player unit tick was not located\n");
+        else if (!comms_bridge_locate(image,size,&comms_sites)) printf("Comms Wheel: not active, the greeting balloon was not located\n");
+        else if (comms_bridge_install(image,size,entry,&comms_sites,image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area,comms_stub_area))
+            party_hook_set_unit_listener(comms_bridge_unit_tick);
+    }
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
                                        ultrawide_effective,skip_applied,skip_intro_applied,japanese_menu_buttons && menu_buttons_applied,gallery_unlock_applied,

@@ -67,8 +67,8 @@ struct Values {
     std::atomic<double> display_refresh_hz{0.0};
     // Presentation pacing (driver.cpp). 0: Unlimited.
     std::atomic<int> frame_rate{60};
-    // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu and the window mode switch.
-    std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11};
+    // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu, the window mode switch and the Comms Wheel.
+    std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11}, comms_key{SDL_SCANCODE_T};
 };
 
 Values& Get();

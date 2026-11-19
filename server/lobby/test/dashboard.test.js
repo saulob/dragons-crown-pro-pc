@@ -473,3 +473,43 @@ test('the Early Story table shows 10 users and the Boss Battle section shows par
   assert.deepEqual(rows[9], ['10', 'Medusa', '1']);
   assert.ok(page.get('boss-note').textContent.includes('earlier use is not known'));
 });
+
+const commsCards = (page) => page.get('comms-totals').find((n) => n.hasClass('card')).map((c) => c.textContent);
+const commsRows = (page) => page.get('comms-table').find((n) => n.tag === 'tr').slice(1).map((tr) => tr.children.map((td) => td.textContent));
+
+test('Comms Wheel Usage follows Multiplayer activity and shows Phrase, Uses and Share', () => {
+  const activity = ADMIN_HTML.indexOf('>Multiplayer activity<');
+  const usage = ADMIN_HTML.indexOf('>Comms Wheel Usage<');
+  const next = ADMIN_HTML.indexOf('>Characters &amp; parties<');
+  assert.ok(activity > 0 && activity < usage && usage < next);
+});
+
+test('with no Comms Wheel use every phrase is listed with 0 and 0.0% and Most Used says No data yet', async () => {
+  const page = await dashboard(makeLobby(), 30);
+  assert.deepEqual(commsCards(page), ['Total Uses0', 'Most UsedNo data yet']);
+  assert.deepEqual(page.get('comms-table').find((n) => n.tag === 'th').map((th) => th.textContent), ['Phrase', 'Uses', 'Share']);
+  assert.deepEqual(commsRows(page), ['Hello', 'Thanks', 'Good job', 'Follow me', 'Group up', 'Need help', 'Ready', "Let's go"]
+    .map((name) => [name, '0', '0.0%']));
+});
+
+test('Comms Wheel Usage totals the eight counters, sorts by uses with message order breaking ties, and shows one-decimal shares', async () => {
+  const env = makeLobby();
+  const client = env.connect('203.0.113.7');
+  assert.equal(client.hello({ online_protocol: 1, version: '1.4.0', platform: 'Windows' }).code, 'ok');
+  assert.equal(client.call('comms.report', { counts: [24, 10, 8, 15, 20, 40, 12, 11] }).code, 'ok');
+  const page = await dashboard(env, 30);
+  assert.deepEqual(commsCards(page), ['Total Uses140', 'Most UsedNeed help · 40 uses · 28.6%']);
+  assert.deepEqual(commsRows(page), [['Need help', '40', '28.6%'], ['Hello', '24', '17.1%'], ['Group up', '20', '14.3%'],
+    ['Follow me', '15', '10.7%'], ['Ready', '12', '8.6%'], ["Let's go", '11', '7.9%'], ['Thanks', '10', '7.1%'], ['Good job', '8', '5.7%']]);
+  assert.ok(page.get('comms-note').textContent.includes('Nothing else is kept'));
+});
+
+test('equal Comms Wheel counts keep message order and the first of them is the most used', async () => {
+  const env = makeLobby();
+  const client = env.connect('203.0.113.7');
+  assert.equal(client.hello({ online_protocol: 1, version: '1.4.0', platform: 'Windows' }).code, 'ok');
+  assert.equal(client.call('comms.report', { counts: [0, 5, 0, 0, 0, 0, 5, 0] }).code, 'ok');
+  const page = await dashboard(env, 30);
+  assert.deepEqual(commsCards(page), ['Total Uses10', 'Most UsedThanks · 5 uses · 50.0%']);
+  assert.deepEqual(commsRows(page).slice(0, 3), [['Thanks', '5', '50.0%'], ['Ready', '5', '50.0%'], ['Hello', '0', '0.0%']]);
+});

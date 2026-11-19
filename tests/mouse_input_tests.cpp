@@ -271,7 +271,7 @@ void TestConfigFile() {
 
 void TestKeyboardMappingsUnchanged() {
     // The keyboard layout and the saved key names are what they were before the mouse bindings existed.
-    CHECK(DCP_KEY_COUNT == 27);
+    CHECK(DCP_KEY_COUNT == 28 && DCP_KEY_FIRST_HOTKEY == 25);
     DcpKeyMap keys;
     dcp_keys_defaults(&keys);
     CHECK(keys.scancode[DCP_KEY_LEFT_STICK_UP] == dcp_key_from_name("w") && keys.scancode[DCP_KEY_LEFT_STICK_LEFT] == dcp_key_from_name("a"));

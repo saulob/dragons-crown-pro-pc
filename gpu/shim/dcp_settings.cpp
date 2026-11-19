@@ -124,7 +124,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "frame_rate") {
         v.frame_rate = DcpFramePacing::ParseFrameRate(value);
     } else if (const int scancode = dcp_key_from_name(value.c_str()); scancode != 0) {
-        std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key};
+        std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key, &v.comms_key};
         for (int i = 0; i < DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY; ++i) {
             if (key == dcp_key_actions[DCP_KEY_FIRST_HOTKEY + i].ini_key) {
                 *hotkeys[i] = scancode;

@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "runtime_pad_rumble.h"
+#include "comms_session.h"
 #include "dcpgpu.h"
 #include "dcp_keys.h"
 #include "dcp_mouse.h"
@@ -517,6 +518,30 @@ static int exit_game_accept_down(const PadData *d) {
     return k && (k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER]);
 }
 
+/* The Comms Wheel is modal: while it is open it owns D-pad Up, the right stick, Cross and Circle; a keyboard session also
+ * owns the direction keys. */
+static void apply_comms_wheel(PadData *d) {
+    SDL_Gamepad *g=slots[0].gamepad;
+    const bool *k=SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
+    int nav=0;
+    if (k) {
+        nav|=(k[keys.scancode[DCP_KEY_LEFT_STICK_UP]] || k[keys.scancode[DCP_KEY_RIGHT_STICK_UP]]) ? 1 : 0;
+        nav|=(k[keys.scancode[DCP_KEY_LEFT_STICK_DOWN]] || k[keys.scancode[DCP_KEY_RIGHT_STICK_DOWN]]) ? 2 : 0;
+        nav|=(k[keys.scancode[DCP_KEY_LEFT_STICK_LEFT]] || k[keys.scancode[DCP_KEY_RIGHT_STICK_LEFT]]) ? 4 : 0;
+        nav|=(k[keys.scancode[DCP_KEY_LEFT_STICK_RIGHT]] || k[keys.scancode[DCP_KEY_RIGHT_STICK_RIGHT]]) ? 8 : 0;
+    }
+    const DcpCommsPadIn in={g && SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_DPAD_UP),comms_session_available(),
+                            d->right_x,d->right_y,(d->buttons & BTN_CIRCLE)!=0,(d->buttons & BTN_CROSS)!=0,nav};
+    DcpCommsPadOut out;
+    dcpgpu_comms_wheel_step(&in,&out);
+    if (out.hide_dpad_up) d->buttons&=~BTN_UP;
+    if (out.hide_cross) d->buttons&=~BTN_CROSS;
+    if (out.hide_circle) d->buttons&=~BTN_CIRCLE;
+    if (out.neutral_right_stick) d->right_x=d->right_y=128;
+    if (out.neutral_keyboard_axes) d->left_x=d->left_y=d->right_x=d->right_y=128;
+    if (out.send>=0) comms_session_send(out.send);
+}
+
 static void sample(int slot, PadData *d) {
     PadSlot *s=&slots[slot];
     sample_host(slot,d);
@@ -533,6 +558,7 @@ static void sample(int slot, PadData *d) {
     /* Hydeland's Network Menu shortcut keeps player 1's Triangle for itself while it is armed. */
     if (slot==0 && early_story_shortcut_pad_filter((d->buttons & BTN_TRIANGLE)!=0)) d->buttons&=~BTN_TRIANGLE;
     if (slot==0 && network_menu_pad_hold(d->buttons!=0)) d->buttons=0;
+    if (slot==0) apply_comms_wheel(d);
     if (s->hold_after_capture) {
         if (d->buttons) d->buttons=0;
         else s->hold_after_capture=0;

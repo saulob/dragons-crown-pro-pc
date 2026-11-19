@@ -333,7 +333,8 @@ void TestOnlineLockout() {
 
     // The Cheats menu key is the only cheat hotkey; the overlay opens the menu through MenuKeyPress alone and shows
     // the hint on its existing notice.
-    CHECK(DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY == 2 && DCP_KEY_HOTKEY_WINDOW_MODE == DCP_KEY_HOTKEY_CHEATS + 1);
+    CHECK(DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY == 3 && DCP_KEY_HOTKEY_WINDOW_MODE == DCP_KEY_HOTKEY_CHEATS + 1 &&
+          DCP_KEY_HOTKEY_COMMS_WHEEL == DCP_KEY_HOTKEY_CHEATS + 2);
     CHECK(std::string(kOnlineLockoutText) == "Cheats are disabled while Online Play is enabled");
     const std::string overlay = ReadSource("gpu/shim/dcp_overlay.cpp");
     CHECK(Count(overlay, "cheat_open = true;") == 1 && Count(overlay, "OpenCheatMenu()") == 2);

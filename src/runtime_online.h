@@ -32,6 +32,7 @@ const char *runtime_online_system_type(const char *online_id);
 #ifdef __cplusplus
 }
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -99,6 +100,29 @@ struct RoomView {
     int members = 0;
 };
 RoomView room_view();
+
+// Comms Wheel (comms_session.cpp): this player's room as the session rules read it, and the lobby's usage report.
+struct CommsPeer {
+    uint64_t account = 0;
+    int slot = -1;
+};
+struct CommsRoom {
+    int slot = -1;
+    int members = 0;
+    std::vector<CommsPeer> peers;
+};
+CommsRoom comms_room();
+// The lobby link can take a report now; comms_report_send puts the counts (index = message id) on it.
+bool comms_report_open();
+bool comms_report_send(const std::array<uint64_t, 8>& counts);
+// The lobby's answer to the last report, once: accepted, or failed with its error code.
+struct CommsReportResult {
+    bool accepted = false, failed = false;
+    std::string code;
+};
+CommsReportResult comms_report_result();
+// Called once per game frame after the lobby messages were handled, outside the port lock.
+void set_pump_hook(void (*hook)());
 
 // The player card's System type for an online id: this PC's, or what the lobby reported for that player.
 std::string system_type(const std::string& online_id);

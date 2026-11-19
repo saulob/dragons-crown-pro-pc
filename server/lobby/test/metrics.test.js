@@ -241,7 +241,7 @@ test('no per-session or per-player analytics table exists; story_users is the on
   online(env);
   const tables = env.host.sql.all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
     .map((r) => r.name).sort();
-  assert.deepEqual(tables, ['accounts', 'boss_parties', 'boss_plays', 'boss_users', 'friend_requests', 'friends', 'incident_quota', 'incident_tracking', 'incidents', 'members', 'meta',
+  assert.deepEqual(tables, ['accounts', 'boss_parties', 'boss_plays', 'boss_users', 'comms_usage', 'friend_requests', 'friends', 'incident_quota', 'incident_tracking', 'incidents', 'members', 'meta',
     'metrics_daily',
     'metrics_daily_dimensions', 'metrics_samples', 'registrations', 'rooms', 'story_users']);
   assert.equal(env.host.sql.get('SELECT COUNT(*) AS n FROM story_users').n, 0);

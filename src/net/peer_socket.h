@@ -148,6 +148,17 @@ public:
     bool deliver_relay(const uint8_t* data, size_t size);
     RelayStats relay_stats() const;
 
+    // Comms Wheel: one small unreliable datagram (type 9, a message id and nothing else) to a connected peer, sent twice
+    // 120 ms apart. Peers that do not know the type ignore it. A received body is kept for take_comms().
+    static constexpr size_t kCommsBody = 4;
+    static constexpr size_t kMaxCommsQueued = 32;
+    struct CommsPacket {
+        uint64_t account = 0;
+        std::array<uint8_t, kCommsBody> body{};
+    };
+    bool send_comms(uint64_t account, const uint8_t* body, size_t size);
+    std::vector<CommsPacket> take_comms();
+
     StunState stun(Endpoint* mapped) const;
     // Opens our NAT towards an endpoint before the handshake (throwaway datagrams).
     void punch(const Endpoint& to);
@@ -217,6 +228,7 @@ private:
         std::map<uint32_t, std::pair<uint8_t, std::vector<uint8_t>>> early;
         std::vector<uint8_t> assembling;
         std::deque<std::vector<uint8_t>> inbox;
+        std::deque<std::pair<uint64_t, std::array<uint8_t, kCommsBody>>> comms_repeats; // due time, body
         bool ack_due = false;
         LinkStats stats;
     };
@@ -232,6 +244,7 @@ private:
     void SendHello(Link& link, const Endpoint& to, bool reply);
     void SendAck(Link& link);
     void SendPing(Link& link, const Endpoint& to, uint32_t stamp);
+    void SendComms(Link& link, const uint8_t* body);
     void SendRaw(const Endpoint& to, const void* data, size_t size);
     void SendRelay(uint16_t member, const void* data, size_t size);
     bool RelayBudget(size_t frame_bytes, uint64_t now, bool data);
@@ -279,6 +292,7 @@ private:
     bool simulated_ = false;
     uint64_t simulated_now_ = 0;
     std::map<int, Link> links_;
+    std::deque<CommsPacket> comms_inbox_;
     int next_link_ = 1;
     // STUN
     StunState stun_state_ = StunState::kIdle;

@@ -262,8 +262,12 @@ CC0 (public domain dedication), all from SVG Repo (www.svgrepo.com):
   cheats.svg     Star Alt 1    https://www.svgrepo.com/svg/532289/star-alt-1
   controls.svg   Keyboard      https://www.svgrepo.com/svg/524665/keyboard
   trophies.svg   Achievements  https://www.svgrepo.com/svg/304482/achievements
-  editor.svg     Pencil Revision https://www.svgrepo.com/svg/530379/pencil-revision
   about.svg      About         https://www.svgrepo.com/svg/486929/about
+
+editor.svg, public domain (PD License):
+  "Pencil SVG Vector 420" by Jackey Jia, collection Online Learning Bordered Vectors.
+  Source: SVG Repo (www.svgrepo.com), https://www.svgrepo.com/svg/475303/pencil
+  Adapted: renamed from pencil-svgrepo-com.svg; the grey background circle was removed.
 
 bug-report.svg, MIT License:
   "Bug File" by Vectopus, collection Atlas Variety Line Icons.
@@ -289,3 +293,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+========================================================================
+Comms Wheel icons
+========================================================================
+
+The eight temporary Comms Wheel icons, from assets/comms of the source. assets/comms/icons.png is a white-on-transparent
+rendering of the eight SVGs (scripts/comms_icon_atlas.py), compiled into dragons_crown_pro.exe and drawn tinted.
+assets/comms/SOURCES.md records the source and every change made. None needs attribution.
+
+CC0 (public domain dedication), all from SVG Repo (www.svgrepo.com), uploaded by SVG Repo with no named author:
+  thanks.svg     "Praying Hands SVG Vector 2", collection Easter                      https://www.svgrepo.com/svg/73698/praying-hands
+  good-job.svg   "Thumb Up Outline Symbol", collection Essential Random               https://www.svgrepo.com/svg/76020/thumb-up-outline-symbol
+  follow-me.svg  "Footsteps Silhouette Variant", collection Computer And Media 2      https://www.svgrepo.com/svg/814/footsteps-silhouette-variant
+  group-up.svg   "Group People Profile User Person", collection User Action Line Vectors https://www.svgrepo.com/svg/392261/group-people-profile-user-person
+  need-help.svg  "Raise Your Hand To Ask SVG Vector 2", collection Study              https://www.svgrepo.com/svg/101551/raise-your-hand-to-ask
+  ready.svg      "Check Mark In A Circle", collection Universalicons                  https://www.svgrepo.com/svg/96431/check-mark-in-a-circle
+  lets-go.svg    "Arrow Chevron Double Right Direction Navigation", collection Arrow Interface Line Icons
+                 https://www.svgrepo.com/svg/392602/arrow-chevron-double-right-direction-navigation
+
+hello.svg, public domain (PD License):
+  "Hand Wave Simple" by Significa Labs, collection Simple App Development Icons.
+  Source: SVG Repo (www.svgrepo.com), https://www.svgrepo.com/svg/304508/hand-wave-simple
+
+Adapted: each file renamed from <name>-svgrepo-com.svg; only line endings and trailing spaces normalized.

@@ -17,6 +17,7 @@
 #include "boss_battle.h"
 #include "dcp_accent.h"
 #include "dcp_cheat_menu.h"
+#include "dcp_comms_wheel.h"
 #include "dcp_menu_input.h"
 #include "dcp_options_menu.h"
 #include "localization/ui_text.h"
@@ -957,6 +958,9 @@ void SetChoiceInput(uint32_t (*buttons)()) {
 }
 
 bool HandleEvent(const SDL_Event& event) {
+    if (DcpCommsWheel::HandleEvent(event)) {
+        return true;
+    }
     std::scoped_lock lock{imgui_mutex};
     if (!initialized) {
         return false;
@@ -1088,7 +1092,7 @@ void ShowNotice(const std::string& text) {
 bool Visible() {
     const auto& s = DcpSettings::Get();
     return initialized && (loading || background_total || cheat_open || options_open || text_entry_active || choice_active ||
-                           choice_retiring || s.show_fps || PingShown() || NoticeShown());
+                           choice_retiring || s.show_fps || PingShown() || NoticeShown() || DcpCommsWheel::Visible());
 }
 
 void SetDisplayScale(float scale) {
@@ -1172,6 +1176,7 @@ void BuildFrame(u32 width, u32 height, void (*new_frame)()) {
     }
 
     UpdateChoiceTextures();
+    DcpCommsWheel::PrepareTextures();
     new_frame();
     ImGui::NewFrame();
     if (loading) {
@@ -1201,6 +1206,7 @@ void BuildFrame(u32 width, u32 height, void (*new_frame)()) {
     if (choice_active) {
         ChoiceBox();
     }
+    DcpCommsWheel::Draw(io.DisplaySize.x, io.DisplaySize.y, base_scale);
     ImGui::Render();
 }
 

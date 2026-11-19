@@ -20,12 +20,17 @@ struct HostMemory {
     uint8_t U8(uint64_t address) const { return Load<uint8_t>(address); }
 };
 
+void (*g_listener)(uint64_t) = nullptr;
+
 void Record(uint64_t unit) {
     dcp::party::Observe(HostMemory{}, unit, dcp::party::NowMs(), dcp::party::SharedUnits());
+    if (g_listener) {
+        g_listener(unit);
+    }
 }
 
 void GUEST_HOOK_ABI PartyTickHook(GuestRegs* regs) {
-    dcp::party::Observe(HostMemory{}, regs->rdi, dcp::party::NowMs(), dcp::party::SharedUnits());
+    Record(regs->rdi);
 }
 
 // The entry of the player unit's per-tick update: the same site and prologue the cheats hook.
@@ -57,6 +62,10 @@ extern "C" size_t party_hook_stub_bytes(void) {
 
 extern "C" void party_hook_observe_unit(uint64_t unit) {
     Record(unit);
+}
+
+extern "C" void party_hook_set_unit_listener(void (*listener)(uint64_t unit)) {
+    g_listener = listener;
 }
 
 extern "C" int party_hook_install_located(uint8_t* image, uint64_t size, uint64_t entry, const DcpPartySites* sites,

@@ -2151,6 +2151,150 @@ struct RunRoot {
     }
 };
 
+// ---- Comms Wheel datagram (peer transport type 9) ----
+
+constexpr uint8_t kCommsBody[4] = {1, 1, 5, 9}; // version, slot, id, seq
+
+std::vector<PeerSocket::CommsPacket> TakeAfter(Network& net, Network::End& end, uint64_t ms) {
+    net.Run(ms);
+    return end.socket->take_comms();
+}
+
+void TestCommsDelivery() {
+    Network net(40, 0, 301);
+    net.traffic = false;
+    CHECK(net.Connect());
+    CHECK(net.a().socket->send_comms(net.b().account, kCommsBody, 4));
+    const auto first = TakeAfter(net, net.b(), 60);
+    CHECK(first.size() == 1 && first[0].account == net.a().account && std::memcmp(first[0].body.data(), kCommsBody, 4) == 0);
+    const auto second = TakeAfter(net, net.b(), 300);
+    CHECK(second.size() == 1 && std::memcmp(second[0].body.data(), kCommsBody, 4) == 0);
+    CHECK(TakeAfter(net, net.b(), 500).empty() && net.a().socket->take_comms().empty());
+    uint8_t invalid_id[4] = {1, 1, 8, 9}, invalid_slot[4] = {1, 4, 5, 9}, wrong_version[4] = {2, 1, 5, 9};
+    CHECK(!net.a().socket->send_comms(net.b().account, invalid_id, 4));
+    CHECK(!net.a().socket->send_comms(net.b().account, invalid_slot, 4));
+    CHECK(!net.a().socket->send_comms(net.b().account, wrong_version, 4));
+    CHECK(!net.a().socket->send_comms(net.b().account, kCommsBody, 3) && !net.a().socket->send_comms(net.b().account, nullptr, 4));
+    CHECK(!net.a().socket->send_comms(777, kCommsBody, 4));
+    CHECK(TakeAfter(net, net.b(), 500).empty());
+}
+
+void TestCommsQueueIsBounded() {
+    Network net(40, 0, 302);
+    net.traffic = false;
+    CHECK(net.Connect());
+    for (int i = 0; i < 100; ++i) {
+        const uint8_t body[4] = {1, 2, uint8_t(i % 8), uint8_t(i)};
+        net.a().socket->send_comms(net.b().account, body, 4);
+    }
+    CHECK(TakeAfter(net, net.b(), 1000).size() <= PeerSocket::kMaxCommsQueued);
+    CHECK(TakeAfter(net, net.b(), 1000).size() <= PeerSocket::kMaxCommsQueued);
+}
+
+void TestCommsOverTheRelay() {
+    Network net(250, 0, 303);
+    CHECK(net.Connect());
+    net.Run(10000);
+    net.outages.push_back({net.now(), net.now() + 40000});
+    net.Run(15000);
+    net.traffic = false;
+    CHECK(net.a().socket->path(net.a().link) == LinkPath::kRelay);
+    net.b().socket->take_comms();
+    const uint64_t frames = net.relay_frames;
+    CHECK(net.a().socket->send_comms(net.b().account, kCommsBody, 4));
+    const auto got = TakeAfter(net, net.b(), 1500);
+    CHECK(!got.empty() && got[0].account == net.a().account && std::memcmp(got[0].body.data(), kCommsBody, 4) == 0);
+    CHECK(net.relay_frames > frames);
+}
+
+// Two sockets whose datagrams are recorded, so a test can replay and damage them.
+struct TappedPair {
+    static constexpr uint64_t kAccount[2] = {1001, 2002};
+    std::unique_ptr<PeerSocket> socket[2];
+    Endpoint addr[2] = {{0x0a000001, 41000}, {0x0a000002, 42000}};
+    std::deque<std::pair<int, std::vector<uint8_t>>> flight;
+    std::vector<std::vector<uint8_t>> comms_sent[2];
+    uint64_t now = 2000000;
+
+    TappedPair() {
+        for (int i = 0; i < 2; ++i) {
+            PeerSocket::Options options;
+            options.port = addr[i].port;
+            options.simulated_network = [this, i](const Endpoint&, const uint8_t* data, size_t size) {
+                std::vector<uint8_t> bytes(data, data + size);
+                if (size > 3 && data[3] == 9) comms_sent[i].push_back(bytes);
+                flight.emplace_back(1 - i, std::move(bytes));
+            };
+            std::string error;
+            socket[i] = PeerSocket::open(options, &error);
+        }
+    }
+
+    void Step() {
+        now += 5;
+        for (auto& s : socket) s->simulated_clock(now);
+        std::deque<std::pair<int, std::vector<uint8_t>>> due;
+        due.swap(flight);
+        for (auto& [to, bytes] : due) socket[to]->simulated_datagram(bytes.data(), bytes.size(), addr[1 - to]);
+        for (auto& s : socket) s->simulated_tick();
+    }
+
+    bool Connect() {
+        RoomKey key{};
+        key[0] = 0x77;
+        for (int i = 0; i < 2; ++i) {
+            socket[i]->set_room(key, kAccount[i]);
+            socket[i]->set_peer(kAccount[1 - i], {addr[1 - i]});
+        }
+        for (auto& s : socket) s->simulated_clock(now);
+        int link[2];
+        for (int i = 0; i < 2; ++i) link[i] = socket[i]->connect(kAccount[1 - i]);
+        for (int n = 0; n < 4000; ++n) {
+            Step();
+            if (socket[0]->state(link[0]) == LinkState::kConnected && socket[1]->state(link[1]) == LinkState::kConnected) return true;
+        }
+        return false;
+    }
+
+    void Run(int steps) {
+        for (int i = 0; i < steps; ++i) Step();
+    }
+
+    void Inject(int to, const std::vector<uint8_t>& bytes) { socket[to]->simulated_datagram(bytes.data(), bytes.size(), addr[1 - to]); }
+};
+
+void TestCommsRejectsDamagedDatagrams() {
+    TappedPair pair;
+    CHECK(pair.Connect());
+    CHECK(pair.socket[0]->send_comms(TappedPair::kAccount[1], kCommsBody, 4));
+    pair.Run(10);
+    CHECK(pair.comms_sent[0].size() == 1 && pair.comms_sent[0][0].size() == 16);
+    CHECK(pair.socket[1]->take_comms().size() == 1);
+    const std::vector<uint8_t> good = pair.comms_sent[0][0];
+
+    std::vector<uint8_t> bad_id = good, bad_slot = good, bad_version = good, longer = good, shorter = good, bad_tag = good;
+    bad_id[14] = 8;
+    bad_slot[13] = 4;
+    bad_version[12] = 9;
+    longer.push_back(0);
+    shorter.pop_back();
+    bad_tag[4] ^= 0xff;
+    for (const auto& bytes : {bad_id, bad_slot, bad_version, longer, shorter, bad_tag}) pair.Inject(1, bytes);
+    CHECK(pair.socket[1]->take_comms().empty());
+    pair.Inject(1, good);
+    CHECK(pair.socket[1]->take_comms().size() == 1);
+}
+
+// An older client takes the same datagram as noise: its transport state does not change.
+void TestCommsIsIgnoredByTheLinkState() {
+    TappedPair pair;
+    CHECK(pair.Connect());
+    CHECK(pair.socket[0]->send_comms(TappedPair::kAccount[1], kCommsBody, 4));
+    pair.Run(100);
+    CHECK(pair.socket[0]->state(pair.socket[0]->connect(TappedPair::kAccount[1])) == LinkState::kConnected);
+    CHECK(pair.socket[1]->state(pair.socket[1]->connect(TappedPair::kAccount[0])) == LinkState::kConnected);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2232,6 +2376,13 @@ int main(int argc, char** argv) {
         TestTransportMatrix();
     });
     Group("protocol", [&] { TestRelayCompatibilityMatrix(); });
+    Group("comms", [&] {
+        TestCommsDelivery();
+        TestCommsQueueIsBounded();
+        TestCommsOverTheRelay();
+        TestCommsRejectsDamagedDatagrams();
+        TestCommsIsIgnoredByTheLinkState();
+    });
     Group("linux-parity", [&] {
         TestSystemCaBundle();
         TestLinuxParity();

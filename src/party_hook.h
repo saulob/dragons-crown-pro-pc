@@ -18,6 +18,10 @@ size_t party_hook_stub_bytes(void);
  * same entry offline. */
 void party_hook_observe_unit(uint64_t unit);
 
+/* Called with every observed player unit on the game thread, after it is recorded (Comms Wheel shows its balloons from
+ * the unit's own tick). NULL for none. */
+void party_hook_set_unit_listener(void (*listener)(uint64_t unit));
+
 /* 1 when the located site and the game's displacements are the handler's and the hook is in; 0 otherwise, the image
  * untouched. */
 int party_hook_install_located(uint8_t *image, uint64_t size, uint64_t entry, const DcpPartySites *sites, uint8_t *stubs,

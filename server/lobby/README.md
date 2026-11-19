@@ -159,7 +159,7 @@ Every protection below is invisible to a client that behaves, and none changes t
   `metrics_daily_dimensions` (no address, no account): `ws_upgrade_accepted`, `ws_upgrade_limited` (reported by the
   Worker on the next upgrade it forwards), `ws_upgrade_ip_cap`, `hello_accepted`, `hello_reconnect_deduped`,
   `hello_limited`, `room_create_accepted`, `room_create_limited`, `room_join_limited`, `relay_abuse_closed`,
-  `party_report_limited`, `public_lobby_limited`, `write_limited`, `lobby_abuse_closed`, `ws_text_messages`, `ws_binary_messages`,
+  `party_report_limited`, `comms_report_limited`, `public_lobby_limited`, `write_limited`, `lobby_abuse_closed`, `ws_text_messages`, `ws_binary_messages`,
   `ws_control_limited`, `ws_preauth_closed`, `relay_overrun`, `relay_invalid`, `relay_suspended`, and for reports `incident_filed`, `incident_limited`,
   `incident_hourly_limited`, `incident_daily_limited`. They
   are in `/admin/api/history` under `dimensions.abuse` and on the dashboard. Counts of the last interval are lost if
@@ -303,6 +303,29 @@ client treats as "not collected"). It carries only numbers:
   dashboard can tell "nothing reported yet" from "nothing in this range". Rooms from before the first snapshot have no
   character figures at all.
 - A failure to write the counts never fails the request.
+
+**Comms Wheel statistics.** `comms.report` is optional and needs a sign-in (any connection, not only a room's). It carries
+only numbers:
+
+```
+{"op": "comms.report", "seq": 8, "counts": [0, 2, 0, 0, 1, 7, 0, 3]}
+```
+
+- `counts`: exactly eight integers, index = the stable Comms Wheel message id (0 `hello`, 1 `thanks`, 2 `good_job`,
+  3 `follow_me`, 4 `group_up`, 5 `need_help`, 6 `ready`, 7 `lets_go`). Anything else is `bad_request`: another length, a
+  negative or non-integer value, all zeros, any other field, and any repeated key. A count above 50 is taken as 50, so one
+  report cannot move a total by more than 400. The answer is `{}`.
+- Limits, separate from every other request: the whole lobby (burst 30, then one per 30 s), one account (burst 3, then one
+  per 2 minutes) and one address group (burst 12, then one per 30 s); a refusal answers `limit`, spends none of them and is
+  counted as `comms_report_limited`.
+- Stored in `comms_usage` (`message` 0-7, `uses`), eight rows at most, with `comms_since` in `meta`. No account, name,
+  address, room, text, time or per-report record is kept. `/admin/api/summary` returns it as `comms`:
+  `{ since, total, most_used, messages: [{ id, key, name, uses, percent }] }` (messages in id order, `percent` to one decimal,
+  `most_used` the key of the highest count, the lowest id on a tie, `null` while the total is 0). The dashboard's "Comms
+  Wheel" section shows Total Uses, the most used message and a table of every message with its count and share. Counts begin
+  when the lobby first starts with this table; earlier use is not known.
+- The table is created with `CREATE TABLE IF NOT EXISTS` when the object starts, so no Wrangler migration is needed. The
+  Worker must be redeployed for the request to exist; until then clients get `bad_request` and drop their counts.
 
 The tables are created with `CREATE TABLE IF NOT EXISTS` when the Durable Object starts, after the existing schema and
 migrations; the four room columns are added to `metrics_daily` (and `peak_members`, `relayed` to `rooms` by migration

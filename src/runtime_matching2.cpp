@@ -110,7 +110,7 @@ struct Signal {
     bool delivered = false;
 };
 
-enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kBossRooms, kSearch, kCreateJoin, kWorlds, kStory, kBossBattle };
+enum class Kind { kGame, kInternal, kResume, kUdp, kPresence, kFriends, kBossRooms, kSearch, kCreateJoin, kWorlds, kStory, kBossBattle, kCommsReport };
 
 struct Pending {
     Kind kind = Kind::kInternal;
@@ -178,10 +178,13 @@ struct State {
     std::set<std::string> refused_friend_rooms;
     std::string notice;
     party::Reporter party;
+    int comms_result = 0; // 1 the lobby accepted the last comms.report, 2 it refused it
+    std::string comms_code;
 };
 
 std::mutex g_mutex;
 State g;
+void (*g_pump_hook)() = nullptr;
 
 uint64_t RtcTick(int64_t unix_ms) { return uint64_t(unix_ms) * 1000 + UINT64_C(62135596800000000); }
 
@@ -753,6 +756,10 @@ void OnResponse(const net::LobbyMessage& m) {
     int32_t error = ErrorOf(m.code);
     switch (p.kind) {
     case Kind::kInternal: return;
+    case Kind::kCommsReport:
+        g.comms_result = error ? 2 : 1;
+        g.comms_code = m.code;
+        return;
     case Kind::kStory:
         if (error && g.story_sent == p.story_step) g.story_sent = EARLY_STORY_NO_STEP;
         return;
@@ -1607,6 +1614,7 @@ void pump() {
         calls.swap(g.calls);
     }
     for (auto& call : calls) call();
+    if (void (*hook)() = g_pump_hook) hook();
 }
 
 uintptr_t matching2_export(const std::string& symbol) {
@@ -1643,6 +1651,54 @@ void friends_fetch() {
     const uint32_t seq = g.link->request("friends.list", Json::Object());
     g.pending[seq] = Pending{Kind::kFriends, 0, nullptr, nullptr, 0};
 }
+
+CommsRoom comms_room() {
+    CommsRoom out;
+    if (!settings().enabled) return out;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g.room) return out;
+    out.slot = party::MemberSlot(g.me);
+    out.members = int(g.members.size());
+    for (const auto& [id, member] : g.members) {
+        if (id == g.me) continue;
+        CommsPeer peer;
+        peer.account = member.account;
+        peer.slot = party::MemberSlot(id);
+        out.peers.push_back(peer);
+    }
+    return out;
+}
+
+bool comms_report_open() {
+    if (!settings().enabled) return false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return LinkUsable() && g.up && !g.lost;
+}
+
+bool comms_report_send(const std::array<uint64_t, 8>& counts) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!LinkUsable() || !g.up || g.lost) return false;
+    Json list = Json::Array();
+    for (const uint64_t count : counts) list.push(int64_t(std::min<uint64_t>(count, 1000000)));
+    Json body = Json::Object();
+    body.set("counts", std::move(list));
+    const uint32_t seq = g.link->request("comms.report", std::move(body));
+    g.pending[seq] = Pending{Kind::kCommsReport, 0, nullptr, nullptr, 0};
+    return true;
+}
+
+CommsReportResult comms_report_result() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    CommsReportResult out;
+    out.accepted = g.comms_result == 1;
+    out.failed = g.comms_result == 2;
+    out.code = std::move(g.comms_code);
+    g.comms_result = 0;
+    g.comms_code.clear();
+    return out;
+}
+
+void set_pump_hook(void (*hook)()) { g_pump_hook = hook; }
 
 RoomView room_view() {
     std::lock_guard<std::mutex> lock(g_mutex);

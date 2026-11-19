@@ -8,6 +8,7 @@
 #include <iterator>
 #include <optional>
 
+#include "dcp_comms.h"
 #include "net/crypto.h"
 #include "net/stun.h"
 
@@ -25,7 +26,7 @@ namespace {
 
 // Datagram: 'D' 'N' version type, u32 destination link tag, u32 source link tag (little endian), then the body.
 constexpr uint8_t kVersion = 1;
-enum : uint8_t { kHello = 1, kHelloAck = 2, kData = 3, kAck = 4, kPing = 5, kPong = 6, kClose = 7, kPunch = 8 };
+enum : uint8_t { kHello = 1, kHelloAck = 2, kData = 3, kAck = 4, kPing = 5, kPong = 6, kClose = 7, kPunch = 8, kComms = 9 };
 enum : uint8_t { kFirst = 1, kLast = 2 };
 constexpr size_t kHeader = 12;
 constexpr size_t kHelloSize = kHeader + 20 + 16; // accounts, nonce, MAC
@@ -42,6 +43,7 @@ constexpr uint32_t kRelayWindow = 64; // a moved link restarts below the relay b
 // A CLOSE may carry one reason byte; older clients send none and ignore it.
 enum : uint8_t { kCloseUnspecified = 0, kCloseByGame = 1, kCloseBySocket = 2, kCloseProtocol = 3 };
 constexpr uint64_t kPingEveryMs = 1000;
+constexpr uint64_t kCommsRepeatMs = 120;
 constexpr double kRtoMarginMs = 50; // a steady path drives rttvar to 0; without a floor every jitter is a timeout
 // Link quality: judged each second over the last five seconds of DATA (docs/ONLINE.md, "Link quality").
 constexpr uint64_t kQualityPeriodMs = 1000;
@@ -553,6 +555,33 @@ void PeerSocket::SendPing(Link& link, const Endpoint& to, uint32_t stamp) {
     link.last_tx_ms = Now();
 }
 
+void PeerSocket::SendComms(Link& link, const uint8_t* body) {
+    uint8_t packet[kHeader + kCommsBody];
+    Header(packet, kComms, link.peer_tag, link.tag);
+    std::memcpy(packet + kHeader, body, kCommsBody);
+    SendRaw(link.addr, packet, sizeof(packet));
+    link.last_tx_ms = Now();
+}
+
+bool PeerSocket::send_comms(uint64_t account, const uint8_t* body, size_t size) {
+    if (!body || size != kCommsBody || !dcp::comms::DecodeWire(body, size)) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    Link* link = ByAccount(account);
+    if (!link || link->state != LinkState::kConnected) return false;
+    SendComms(*link, body);
+    std::array<uint8_t, kCommsBody> copy{};
+    std::memcpy(copy.data(), body, kCommsBody);
+    if (link->comms_repeats.size() < kMaxCommsQueued) link->comms_repeats.emplace_back(Now() + kCommsRepeatMs, copy);
+    return true;
+}
+
+std::vector<PeerSocket::CommsPacket> PeerSocket::take_comms() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<CommsPacket> out(comms_inbox_.begin(), comms_inbox_.end());
+    comms_inbox_.clear();
+    return out;
+}
+
 std::string PeerSocket::Transport(const Link& link) const {
     if (!is_relay_endpoint(link.addr)) return "direct";
     return link.health.moved ? "relay (moved from direct)" : "relay";
@@ -801,6 +830,15 @@ void PeerSocket::Receive(const uint8_t* data, size_t size, const Endpoint& from,
     case kPong:
         if (size >= kHeader + 4) Pong(*link, Get32(data + kHeader), now);
         break;
+    case kComms:
+        if (size == kHeader + kCommsBody && dcp::comms::DecodeWire(data + kHeader, kCommsBody) &&
+            comms_inbox_.size() < kMaxCommsQueued) {
+            CommsPacket packet;
+            packet.account = link->account;
+            std::memcpy(packet.body.data(), data + kHeader, kCommsBody);
+            comms_inbox_.push_back(packet);
+        }
+        break;
     case kClose: Close(*link, PeerClosed(data, size), false); break;
     default: break;
     }
@@ -1015,6 +1053,10 @@ void PeerSocket::Timers(uint64_t now) {
             } else {
                 Flush(link, now);
                 if (link.state == LinkState::kConnected) {
+                    while (!link.comms_repeats.empty() && now >= link.comms_repeats.front().first) {
+                        SendComms(link, link.comms_repeats.front().second.data());
+                        link.comms_repeats.pop_front();
+                    }
                     if (link.ack_due) SendAck(link);
                     if (now >= link.next_ping_ms) {
                         SendPing(link, link.addr, uint32_t(now));

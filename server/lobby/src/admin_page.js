@@ -77,6 +77,12 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       <div class="cards" id="platform-cards"></div>
       <div id="d-mix"></div>
     </div>
+    <h2 class="section">Comms Wheel Usage</h2>
+    <div class="panel">
+      <p id="comms-note" class="muted"></p>
+      <div class="cards" id="comms-totals"></div>
+      <div class="scroll"><table id="comms-table"></table></div>
+    </div>
     <h2 class="section">Characters &amp; parties</h2>
     <div class="panel">
       <p class="muted">Anonymous aggregate party snapshots from compatible clients: the classes in an online party, never who played them. Game versions that do not report parties are not counted here, so a range without data means nothing was reported, not that nobody played.</p>
@@ -499,6 +505,7 @@ export const ADMIN_JS = String.raw`(function () {
     hello_reconnect_deduped: 'Reconnects not counted as new sessions', hello_limited: 'Sign-ins refused: too many',
     room_create_accepted: 'Rooms created', room_create_limited: 'Room creations refused', room_join_limited: 'Room joins refused',
     relay_abuse_closed: 'Relay connections closed for abuse', party_report_limited: 'Party snapshots refused: too many',
+    comms_report_limited: 'Comms Wheel reports refused: too many',
     public_endpoint_limited: 'Public IPv4 claims ignored: too many', incident_filed: 'Bug reports accepted',
     incident_limited: 'Bug reports refused: too many', incident_hourly_limited: 'Bug reports refused: hourly limit',
     incident_daily_limited: 'Bug reports refused: daily limit', public_lobby_limited: 'Public Lobby requests refused: too many',
@@ -977,6 +984,28 @@ export const ADMIN_JS = String.raw`(function () {
     table(node, ['Rank', 'Boss', 'Plays'], top.map(function (b) { return [String(b.rank), b.name, fmt(b.plays)]; }));
   }
 
+  function comms(data) {
+    var totals = $('comms-totals');
+    var note = $('comms-note');
+    clear(totals);
+    clear($('comms-table'));
+    if (!data) {
+      note.textContent = 'The service has not reported Comms Wheel yet.';
+      return;
+    }
+    var total = data.messages.reduce(function (a, m) { return a + m.uses; }, 0);
+    var pct = function (uses) { return (total ? 100 * uses / total : 0).toFixed(1) + '%'; };
+    var rows = data.messages.slice().sort(function (a, b) { return b.uses - a.uses || a.id - b.id; });
+    totals.appendChild(card('Total Uses', fmt(total)));
+    totals.appendChild(card('Most Used', total ? rows[0].name + ' · ' + fmt(rows[0].uses) + ' uses · ' + pct(rows[0].uses) : 'No data yet'));
+    note.textContent = 'Messages sent with the Comms Wheel since ' + timeLabel.format(data.since) + ' (Sao Paulo), when this was first started; ' +
+      'earlier use is not known. Each send is counted once, by the player who sent it. Nothing else is kept: no text, ' +
+      'player, room or history. Equal counts are listed in message order.';
+    table($('comms-table'), ['Phrase', 'Uses', 'Share'], rows.map(function (m) {
+      return [m.name, fmt(m.uses), pct(m.uses)];
+    }));
+  }
+
   function health(history) {
     var t = history.totals;
     var abuseCounts = history.dimensions.abuse;
@@ -1306,6 +1335,7 @@ export const ADMIN_JS = String.raw`(function () {
     parties(history);
     story(summary.story);
     boss(summary.boss);
+    comms(summary.comms);
     health(history);
     usageChart($('usage'), history);
     barChart($('h-sessions'), history.daily, 'sessions', 'Sessions');

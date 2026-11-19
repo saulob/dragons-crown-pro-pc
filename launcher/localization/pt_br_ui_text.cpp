@@ -333,6 +333,7 @@ Touchpad left (Back)	Touchpad esquerdo (Voltar)
 Touchpad right	Touchpad direito
 Cheats menu	Menu de trapaças
 Window mode	Modo janela
+Comms Wheel	Roda de comunicação
 This open source PC port is maintained and developed in my free time. If you enjoy the project and would like to support its continued development, you can sponsor my work on GitHub.	Este port para PC de código aberto é mantido e desenvolvido no meu tempo livre. Se você gosta do projeto e quer apoiar seu desenvolvimento contínuo, pode patrocinar meu trabalho pelo GitHub.
 Support is completely optional and helps support ongoing improvements and future projects.	O apoio é totalmente opcional e ajuda no desenvolvimento de melhorias e novos projetos.
 Dragon's Crown Pro for PlayStation 4, running natively on this PC. The game itself is not included; it runs from the user's own copy.	Dragon's Crown Pro para PlayStation 4, rodando nativamente neste PC. O jogo em si não está incluído; ele roda a partir da cópia do próprio usuário.

@@ -7,6 +7,7 @@ import { ipGroup } from './edge.js';
 import { INCIDENT, INCIDENT_LIMITED, IncidentDesk, readClaim, readClaims, readIncident } from './incidents.js';
 import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
+import { CommsUsage, commsSummary, parseCommsReport } from './comms_usage.js';
 import { Metrics, countryCode, platformBit, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
 import { BOSS_STATE_ATTR, BossUsage } from './boss_usage.js';
@@ -249,6 +250,8 @@ export class Lobby {
     if (!this.meta('story_since')) this.setMeta('story_since', host.now());
     this.boss = new BossUsage(host.sql);
     if (!this.meta('boss_since')) this.setMeta('boss_since', host.now());
+    this.comms = new CommsUsage(host.sql);
+    if (!this.meta('comms_since')) this.setMeta('comms_since', host.now());
     this.incidents = new IncidentDesk(host.sql, this.meta('salt'));
     this.alarmAt = options.alarmAt ?? null;
     this.guards = {
@@ -260,6 +263,9 @@ export class Lobby {
       partyReportAll: new RateLimiter(PROTECTION.partyReportAll),
       partyReportAccount: new RateLimiter(PROTECTION.partyReportAccount),
       partyReportAddress: new RateLimiter(PROTECTION.partyReportAddress),
+      commsReportAll: new RateLimiter(PROTECTION.commsReportAll),
+      commsReportAccount: new RateLimiter(PROTECTION.commsReportAccount),
+      commsReportAddress: new RateLimiter(PROTECTION.commsReportAddress),
       incidentAll: new RateLimiter(PROTECTION.incidentAll),
       incidentAccount: new RateLimiter(PROTECTION.incidentAccount),
       incidentAddress: new RateLimiter(PROTECTION.incidentAddress),
@@ -561,7 +567,8 @@ export class Lobby {
   }
 
   metricsSummary() {
-    return { ...this.metrics.summary(this.liveMetrics()), story: this.storySummary(), boss: this.bossSummary() };
+    return { ...this.metrics.summary(this.liveMetrics()), story: this.storySummary(), boss: this.bossSummary(),
+      comms: this.commsSummary() };
   }
 
   // Early Story Online as the dashboard shows it: rooms and seats from the live tables, history from the counters.
@@ -596,6 +603,10 @@ export class Lobby {
       users: this.story.users(active.keys()).map((u) => ({ name: u.name, account: u.account, role: storyRole(u),
         sessions: u.hosted + u.guested, last_used: u.last_used, active: active.get(u.account) ?? null })),
     };
+  }
+
+  commsSummary() {
+    return { since: Number(this.meta('comms_since')), ...commsSummary(this.comms.uses()) };
   }
 
   // Boss Battle Online as the dashboard shows it: a party is two or more connected players in a Boss Battle room.
@@ -985,6 +996,21 @@ export class Lobby {
     partyReportAll.take('all', now);
     partyReportAccount.take(att.account, now);
     partyReportAddress.take(address, now);
+  }
+
+  limitCommsReport(att) {
+    if (this.exempt(att)) return;
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    const { commsReportAll, commsReportAccount, commsReportAddress } = this.guards;
+    if (!commsReportAll.allows('all', now) || !commsReportAccount.allows(att.account, now) ||
+        !commsReportAddress.allows(address, now)) {
+      this.diagnose('comms_report_limited');
+      fail('limit', 'too many comms reports');
+    }
+    commsReportAll.take('all', now);
+    commsReportAccount.take(att.account, now);
+    commsReportAddress.take(address, now);
   }
 
   // In memory, so a flood of refused attempts costs no SQL; the quota is counted in SQL because it has to outlive the
@@ -1600,6 +1626,16 @@ const HANDLERS = {
     this.track(() => this.metrics.partyReport(party));
     att.party = signature;
     return { counted: true };
+  },
+
+  // Comms Wheel statistics (comms_usage.js): how many times each fixed message was sent since the client's last report.
+  // Aggregate counts by message id only; the sender is used to check the request and is not kept.
+  'comms.report'(att, msg, conn, text) {
+    const counts = parseCommsReport(msg, text);
+    if (!counts) fail('bad_request', 'counts');
+    this.limitCommsReport(att);
+    this.track(() => this.host.sql.transaction(() => this.comms.add(counts)));
+    return {};
   },
 
   // A report from the launcher's Bug Report page; only the /admin dashboard reads it back (incidents.js).
