@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -61,6 +62,9 @@ struct RelayStats {
 // How well a connected link delivers, judged once a second from sustained evidence (docs/ONLINE.md, "Link quality").
 enum class LinkQuality { kHealthy, kDegraded, kCritical, kRecovering };
 
+// Why a link closed. kPeer* came in a CLOSE from the peer; kIdleTimeout and kAckTimeout mean the peer went silent.
+enum class LinkEnd { kOpen, kLocal, kPeerGame, kPeerSocket, kPeerClosed, kPeerRefused, kIdleTimeout, kAckTimeout, kNoAnswer, kReplaced, kOversize };
+
 // Messages are the game's; packets are DATA datagrams (a message is one or more fragments). Resends count packets.
 struct LinkStats {
     uint64_t messages_in = 0, messages_out = 0, bytes_in = 0, bytes_out = 0;
@@ -69,6 +73,9 @@ struct LinkStats {
     bool rtt_sampled = false;
     LinkQuality quality = LinkQuality::kHealthy;
     bool moved_to_relay = false;
+    LinkEnd end = LinkEnd::kOpen;
+    uint32_t relay_probes = 0, relay_answers = 0;
+    uint64_t silence_ms = 0; // since anything arrived from the peer, when the stats were taken
 };
 
 struct LinkView {
@@ -162,6 +169,8 @@ public:
     StunState stun(Endpoint* mapped) const;
     // Opens our NAT towards an endpoint before the handshake (throwaway datagrams).
     void punch(const Endpoint& to);
+    // Advances on every pass of the socket's own loop: proof that this end keeps servicing its links.
+    uint64_t pump_generation() const { return pump_generation_.load(std::memory_order_relaxed); }
 
     // Options::simulated_network only: set the clock, hand in one datagram, run the timers one pass.
     void simulated_clock(uint64_t now);
@@ -264,7 +273,7 @@ private:
     void PrepareRelay(Link& link, uint64_t now);
     void MoveToRelay(Link& link, uint64_t now, const std::string& why);
     std::string Transport(const Link& link) const;
-    void Close(Link& link, const std::string& why, bool tell_peer, uint8_t code = 0);
+    void Close(Link& link, LinkEnd end, const std::string& why, bool tell_peer, uint8_t code = 0);
     uint64_t Now() const;
     void StunStep(uint64_t now);
     Link* Find(int id);
@@ -278,6 +287,7 @@ private:
     Options options_;
     mutable std::mutex mutex_;
     std::thread thread_;
+    std::atomic<uint64_t> pump_generation_{0};
     bool stopping_ = false;
     RoomKey room_key_{};
     uint64_t self_ = 0;

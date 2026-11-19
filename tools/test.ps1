@@ -7,6 +7,9 @@
 .PARAMETER BossBattleOnline
   Builds and runs only the Boss Battle Online focused suites (visitor lifecycle, handoff, Early Story handoff, Boss Battle Online, Boss Battle, Boss
   Battle menu, Early Story, feature locators, build parity) and reports their result alone.
+.PARAMETER EarlyStorySession
+  Builds and runs only the DCP-7G8RZV Early Story transition and session regression (the early-story-session group of
+  dcp-net-tests) and the Early Story Online tests, and reports their result alone.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -47,7 +50,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$BossBattleOnline)
+param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 $tc = Resolve-Toolchain 'auto'
@@ -263,9 +266,17 @@ $tests = @(
 
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
+$earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
+} elseif ($EarlyStorySession) {
+    $tests = @(
+        (Test-Step 'DCP-7G8RZV Early Story transition/session regression (dcp-net-tests early-story-session)' 'dcp-net-tests' -Capture `
+            -Key 'dcp-net-tests early-story-session' -Arguments @('early-story-session')),
+        (Test-Step 'Early Story Online tests (session rules, shadow record, writer blocks, atomic install, synthetic and local boot images)' 'dcp-early-story-tests')
+    )
+    $requiredSuites = $earlyStorySessionSuites
 } else {
     Sync-GpuDependencies
 }
@@ -273,7 +284,7 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } else {
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } else {
 & ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
@@ -378,6 +389,19 @@ if ($BossBattleOnline) {
     Write-Host 'Boss Battle Online tests passed.' -ForegroundColor Green
     exit 0
 }
+if ($EarlyStorySession) {
+    $sessionLine = @($captured['dcp-net-tests early-story-session']) | Where-Object { "$_" -like 'GROUP|early-story-session|*' } | Select-Object -First 1
+    $sessionState = if ($sessionLine) { "$sessionLine".Split('|')[2] } else { 'FAIL (no result)' }
+    if ($sessionState -ne 'PASS' -and -not $failed.Contains('dcp-net-tests early-story-session')) { $failed.Add('dcp-net-tests early-story-session') }
+    Write-Host ''
+    Write-Host "DCP-7G8RZV Early Story transition/session regression: $sessionState" -ForegroundColor Cyan
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Early Story session tests passed.' -ForegroundColor Green
+    exit 0
+}
 $parityOutput = @($captured['dcp-build-parity-tests'])
 
 Write-Host ''
@@ -449,7 +473,7 @@ function Read-Groups([string[]]$Lines) {
     return $table
 }
 $net = Read-Groups $captured['dcp-net-tests']
-$netGroups = 'foundations', 'address-classification', 'endpoint-selection', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'transport-quality', 'protocol', 'linux-parity', 'lobby-binary'
+$netGroups = 'foundations', 'address-classification', 'endpoint-selection', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'transport-quality', 'session-watch', 'early-story-session', 'protocol', 'linux-parity', 'lobby-binary'
 if ($captured.ContainsKey('dcp-net-tests')) {
     foreach ($group in $netGroups | Where-Object { -not $net.ContainsKey($_) }) { $net[$group] = 'FAIL' }
 }
@@ -525,6 +549,8 @@ $summary = [ordered]@{
     'Protocol compatibility' = $protocolSummary
     'Failure paths' = Group-Status $net @('failure-paths')
     'Link quality and relay migration' = Group-Status $net @('transport-quality')
+    'Early Story session telemetry' = Group-Status $net @('session-watch')
+    'Early Story transition/session regression (DCP-7G8RZV)' = Group-Status $net @('early-story-session')
     'Connection test' = Group-Status $net @('connection-test')
     'Address classification' = Group-Status $net @('address-classification')
     'Endpoint selection' = Group-Status $net @('endpoint-selection')

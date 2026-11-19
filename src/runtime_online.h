@@ -40,6 +40,7 @@ const char *runtime_online_system_type(const char *online_id);
 #include "net/identity.h"
 #include "net/online_config.h"
 #include "net/peer_socket.h"
+#include "net/session_watch.h"
 #include "online_view.h"
 
 namespace dcp::online {
@@ -62,6 +63,8 @@ uintptr_t rudp_export(const std::string& symbol);
 
 // The game's peer-to-peer socket (sceNetBind of the "RUDP_NetId" socket), when one is open.
 std::shared_ptr<net::PeerSocket> peer_socket();
+// The game's peer links now, after the last view of each link it released since the previous call.
+std::vector<net::WatchLink> peer_links();
 int peer_ping_ms();
 struct UpnpView {
     bool working = false;

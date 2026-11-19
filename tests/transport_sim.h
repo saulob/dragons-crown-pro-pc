@@ -76,6 +76,9 @@ public:
         bool reached_degraded = false, reached_critical = false;
         uint32_t degraded_srtt = 0; // the round trip when the link was first judged degraded
         uint64_t moved_at = 0;
+        bool frozen = false;      // the whole process stopped: nothing is received, sent or timed
+        bool game_paused = false; // the game neither reads nor writes; the socket's own loop keeps running
+        uint64_t closes_sent = 0; // CLOSE datagrams, direct or relayed
     };
 
     // Knobs a scenario may change while it runs.
@@ -181,7 +184,10 @@ private:
         bool operator()(const Datagram& x, const Datagram& y) const { return x.at != y.at ? x.at > y.at : x.order > y.order; }
     };
 
+    static bool IsClose(const uint8_t* data, size_t size) { return size >= 4 && data[0] == 'D' && data[1] == 'N' && data[3] == 7; }
+
     void Direct(int from, const Endpoint& to, const uint8_t* data, size_t size) {
+        if (IsClose(data, size)) ++ends_[from].closes_sent;
         if (!(to == ends_[1 - from].addr)) return;
         if (DirectDown(now_) || random_.Percent(loss_percent)) {
             ++direct_dropped;
@@ -199,6 +205,7 @@ private:
             return true;
         }
         const auto decoded = decode_relay_frame(frame.data(), frame.size());
+        if (decoded && IsClose(decoded->payload.data(), decoded->payload.size())) ++sender.closes_sent;
         if (!relay_forwarding || !decoded || decoded->token != kToken || decoded->member != ends_[1 - from].member) return true;
         ++relay_frames;
         std::vector<uint8_t> out =
@@ -218,14 +225,16 @@ private:
             const Datagram d = queue_.top();
             queue_.pop();
             End& to = ends_[d.to];
+            if (to.frozen) continue;
             if (d.relay) to.socket->deliver_relay(d.bytes.data(), d.bytes.size());
             else to.socket->simulated_datagram(d.bytes.data(), d.bytes.size(), d.from);
         }
         for (End& e : ends_) {
-            if (write) Write(e);
-            Flush(e);
+            if (e.frozen) continue;
+            if (write && !e.game_paused) Write(e);
+            if (!e.game_paused) Flush(e);
             e.socket->simulated_tick();
-            Read(e);
+            if (!e.game_paused) Read(e);
             Observe(e);
         }
     }

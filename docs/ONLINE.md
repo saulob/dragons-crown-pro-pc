@@ -693,6 +693,31 @@ On the peer that did not decide: `P2P: link 1 the peer moved this link to the re
 no fallback the close line says so: `closed: direct path timed out: no traffic from the peer for 10 s (no relay for this
 peer); transport direct, ...`.
 
+Each link runs on the socket's own thread, never on the game's: a game busy in a cutscene, a loading screen or a save
+still acknowledges and pings, so its peer sees no silence (`TestPausedGameKeepsTheLink`). Silence on both the direct
+path and the relay probe means the peer's whole process or network stopped (`TestStoppedPeerTimesOut`).
+
+### Early Story session telemetry
+
+While seated in an Early Story session (net/session_watch.h), the Matching2 pump writes rate-limited lines
+`Early Story Online telemetry: event=<name> role=<host|guest> step=<n> transition=<steady|after_step_change> ...
+count=<n>`, at most 8 per event per run. Fields hold enums, buckets and small counts only; never an address, account,
+name, room or save data.
+
+| Event | When |
+|---|---|
+| `early_story_transition_enter` / `_exit` | the session's step changed (`from=`); exit 60 s later or at session end (`result=session_kept`, `link_lost`, `session_ended`) |
+| `early_story_network_stall` | a link became critical (`silence=` bucket) |
+| `early_story_relay_fallback_attempt` | a stalled link probed or moved to the relay |
+| `early_story_session_recovered` | a stalled link is healthy again (`via=direct` or `relay`) |
+| `early_story_peer_timeout` | the peer went silent (`timeout=10s` or `ack`), with `relay=` and our own `local_lobby=` and `local_pump=` |
+| `early_story_relay_fallback_failed` | a timed-out link had used the relay (`reason=never_answered`, `relay_path_lost`, `not_proven_in_time`) |
+| `early_story_peer_closed` | the peer sent CLOSE (`reason=game`, `socket`, ...): a deliberate leave, not a crash |
+| `early_story_peer_left` | the lobby's member_left for that peer (`why=peer_left_room`, `peer_lobby_lost`, `peer_kicked`), `after_timeout=` when it followed a timeout |
+
+`peer_lobby_lost` about 30 s after a timeout (the lobby's seat grace) means the peer lost its lobby connection too: its
+process ended or its network failed.
+
 ## NAT traversal
 
 - STUN (RFC 5389 Binding) from the game's own socket: the mapped port is what peers will hit.

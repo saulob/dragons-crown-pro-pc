@@ -1671,6 +1671,42 @@ static void test_story_session_lifetime(void) {
     early_story_session_reset();
 }
 
+/* DCP-7G8RZV: a guest at its own step 1 follows a host at step 5 (first stage cleared). The host's Castle Gate event for
+ * step 5 writes step 6 as it starts; the guest's game, reading the shadowed 5, runs the same event and its write of 6 is
+ * refused. The guest then plays 6 from the host's live state, keeps its own 1, and gets it back when the link is lost. */
+static void test_step_five_transition(void) {
+    GuestRegs regs;
+    start(1, 0, 5);
+    capture_begin();
+    CHECK(selected(&regs, 0)[EARLY_STORY_RECORD_STEP] == 5 && early_story_visiting());
+    CHECK(early_story_session_role() == EARLY_STORY_ROLE_GUEST && early_story_session_host_step() == 5);
+    memset(&regs, 0, sizeof(regs));
+    regs.rax = 1;
+    early_story_advance_story_hook(&regs);
+    CHECK(regs.skip == 1 && regs.rax == 0);
+    CHECK(early_story_session_internal_update(6));
+    for (int frame = 0; frame < 120; ++frame) {
+        CHECK(selected(&regs, 0)[EARLY_STORY_RECORD_STEP] == 6 && regs.skip == 1);
+        if (frame == 60) game_refills_lead_record(6);
+    }
+    CHECK(record(0)[EARLY_STORY_RECORD_STEP] == 1 && early_story_own_step() == 1 && early_story_session_host_step() == 6);
+    early_story_session_reset(); /* the P2P link timed out and the game left the room */
+    CHECK(selected(&regs, 0) == record(0) && !regs.skip && record(0)[EARLY_STORY_RECORD_STEP] == 1);
+    CHECK(early_story_session_role() == EARLY_STORY_ROLE_NONE && !early_story_visiting());
+    early_story_online_set_selector(NULL);
+    char *log = capture_end();
+    CHECK(occurrences(log, kFollowing) == 1 && occurrences(log, kRestored) == 1);
+    free(log);
+
+    /* the host side of the same event keeps its own record and its write */
+    start(5, 1, 5);
+    CHECK(selected(&regs, 0) == record(0) && !regs.skip && early_story_session_role() == EARLY_STORY_ROLE_HOST);
+    memset(&regs, 0, sizeof(regs));
+    early_story_advance_story_hook(&regs);
+    CHECK(!regs.skip);
+    early_story_session_reset();
+}
+
 static void test_host_record_capture(void) {
     GuestRegs regs;
     start(45, 0, EARLY_STORY_NO_STEP);
@@ -1991,6 +2027,7 @@ int main(void) {
     test_host_room_wish();
     test_host_record_capture();
     test_story_session_lifetime();
+    test_step_five_transition();
     test_host_step_updates();
     test_boss_room_handed_back();
     test_state_attribute();

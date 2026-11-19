@@ -24,6 +24,9 @@ for pid in $pids; do wait "$pid" || failed=1; done
 cat "$work"/*.log
 [ "$failed" = 0 ] || { echo "LINUX-NET|compile|FAIL"; exit 1; }
 
+for file in $(sed -n '/^add_executable(dcp-net-tests/,/)/p' CMakeLists.txt | grep -o 'src/[a-z_]*\.c'); do
+    gcc -std=c11 -O1 -Wall -Wextra -Werror -Isrc -c "$file" -o "$work/$(basename "$file" .c).c.o" || { echo "LINUX-NET|compile|FAIL"; exit 1; }
+done
 g++ -std=c++20 -O1 -Wall -Wextra -DDCP_SOURCE_DIR="\"$root\"" -Isrc -c tests/net_tests.cpp -o "$work/net_tests.o" 2> "$work/net_tests.log" \
     || { cat "$work/net_tests.log"; echo "LINUX-NET|compile|FAIL"; exit 1; }
 cat "$work/net_tests.log"

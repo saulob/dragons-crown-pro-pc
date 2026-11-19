@@ -29,7 +29,7 @@ typedef uint8_t(GUEST_HOOK_ABI *OnlinePromptFn)(uint64_t owner, int slot);
 typedef uint8_t(GUEST_HOOK_ABI *OnlineNetQueryFn)(uint64_t net);
 
 typedef struct {
-    _Alignas(16) uint8_t owner[ONLINE_PROMPT_OWNER_SIZE];
+    uint8_t owner[ONLINE_PROMPT_OWNER_SIZE] __attribute__((aligned(16)));
     uint64_t system_object;
     int open, settled;
 } OnlinePrompt;

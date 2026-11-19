@@ -3,10 +3,13 @@
 // development lobby (server/lobby/local/server.js) the lobby link and two-player room flow are exercised too.
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <condition_variable>
 #include <deque>
 #include <map>
 #include <mutex>
+#include <set>
+#include <sstream>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +22,12 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "net/addr.h"
 #include "net/connection_test.h"
 #include "net/crypto.h"
@@ -28,8 +37,11 @@
 #include "net/online_config.h"
 #include "net/online_version.h"
 #include "net/peer_socket.h"
+#include "net/relay_ends.h"
 #include "net/relay_frame.h"
+#include "net/session_watch.h"
 #include "net/stun.h"
+#include "early_story_online.h"
 #include "fake_stun.h"
 #include "transport_sim.h"
 #include "net/websocket.h"
@@ -2038,6 +2050,8 @@ void TestDeadDirectMovesToRelay() {
         CHECK(net.a().moved_at && net.a().moved_at - died < 8000);
         CHECK(net.a().socket->path(net.a().link) == LinkPath::kRelay && net.b().socket->path(net.b().link) == LinkPath::kRelay);
         CHECK(net.a().socket->stats(net.a().link).moved_to_relay && net.b().socket->stats(net.b().link).moved_to_relay);
+        const LinkStats moved = net.a().socket->stats(net.a().link);
+        CHECK(moved.relay_probes > 0 && moved.relay_answers > 0 && moved.end == LinkEnd::kOpen);
         CHECK(Intact(net));
         CHECK(net.a().relay_overruns == 0 && net.b().relay_overruns == 0);
     }
@@ -2084,6 +2098,7 @@ void TestGameCloseReachesThePeer() {
     net.a().socket->close(net.a().link);
     net.Run(1000);
     CHECK(net.b().socket->state(net.b().link) == LinkState::kClosed);
+    CHECK(net.b().socket->stats(net.b().link).end == LinkEnd::kPeerGame);
 }
 
 // J: the lobby link drops (relay refused at the source) while direct is healthy: nothing changes for the game.
@@ -2295,6 +2310,642 @@ void TestCommsIsIgnoredByTheLinkState() {
     CHECK(pair.socket[1]->state(pair.socket[1]->connect(TappedPair::kAccount[0])) == LinkState::kConnected);
 }
 
+// A game busy in a cutscene, a loading screen or a save neither reads nor writes for 30 s: the socket's own loop keeps
+// acknowledging and pinging, so the other end never sees silence and nothing is lost.
+void TestPausedGameKeepsTheLink() {
+    Network net(120, 0, 141);
+    CHECK(net.Connect());
+    net.Run(5000);
+    const uint64_t generation = net.b().socket->pump_generation();
+    net.b().game_paused = true;
+    net.Run(30000);
+    CHECK(!net.Closed() && !net.a().reached_degraded && !net.b().reached_degraded);
+    CHECK(net.b().socket->pump_generation() > generation + 5000);
+    CHECK(net.a().socket->stats(net.a().link).silence_ms < 1500);
+    net.b().game_paused = false;
+    net.Drain();
+    PrintSim("game paused 30 s", net);
+    CHECK(!Moved(net) && Intact(net));
+}
+
+// The peer's process stops (crash, hang, killed): direct and relay both fall silent at once. The relay is probed, never
+// answers, and the link closes at the 10 s rule with its cause recorded; it is not kept alive.
+void TestStoppedPeerTimesOut() {
+    Network net(120, 0, 151);
+    CHECK(net.Connect());
+    net.Run(10000);
+    const uint64_t stopped = net.now();
+    net.b().frozen = true;
+    while (!net.Closed() && net.now() - stopped < 15000) net.Run(Network::kTick);
+    const LinkStats s = net.a().socket->stats(net.a().link);
+    CHECK(net.Closed() && net.a().reached_critical && !Moved(net));
+    CHECK(net.now() - stopped >= 9900 && net.now() - stopped <= 10500);
+    CHECK(s.end == LinkEnd::kIdleTimeout && s.relay_probes >= 3 && s.relay_answers == 0);
+    std::printf("SIM|%-22s|closed %llu ms after the peer stopped, %u relay probes unanswered\n", "peer process stopped",
+                (unsigned long long)(net.now() - stopped), s.relay_probes);
+}
+
+// ---- Early Story session telemetry (net/session_watch.h) ----
+
+constexpr uint64_t kGuestAccount = 7656119800001234ull, kHostAccount = 7656119800005678ull;
+
+WatchSession StorySession(WatchRole role, int step, uint64_t generation) {
+    WatchSession s;
+    s.role = role;
+    s.story = true;
+    s.step = step;
+    s.pump_generation = generation;
+    return s;
+}
+
+WatchLink PeerLink(int id, LinkState state, LinkQuality quality = LinkQuality::kHealthy) {
+    WatchLink link;
+    link.peer = kHostAccount;
+    link.link = id;
+    link.state = state;
+    link.stats.quality = quality;
+    return link;
+}
+
+size_t Lines(const std::vector<std::string>& lines, const std::string& event) {
+    return size_t(std::count_if(lines.begin(), lines.end(),
+                                [&](const std::string& l) { return l.find("event=" + event + " ") != std::string::npos; }));
+}
+
+bool Has(const std::vector<std::string>& lines, const std::string& event, const std::string& field) {
+    for (const std::string& l : lines)
+        if (l.find("event=" + event + " ") != std::string::npos && l.find(field) != std::string::npos) return true;
+    return false;
+}
+
+// Runs a healthy session frame by frame (16 ms) and collects every line.
+struct WatchRun {
+    SessionWatch watch;
+    uint64_t now = 5000000, generation = 1;
+    std::vector<std::string> lines;
+    void Frames(int frames, const WatchSession& session, const std::vector<WatchLink>& links) {
+        for (int i = 0; i < frames; ++i) {
+            now += 16;
+            WatchSession s = session;
+            s.pump_generation = generation += 3;
+            for (std::string& l : watch.Update(now, s, links)) lines.push_back(std::move(l));
+        }
+    }
+    void Left(uint64_t after_ms, const std::string& why) {
+        now += after_ms;
+        for (std::string& l : watch.PeerLeft(now, kHostAccount, why)) lines.push_back(std::move(l));
+    }
+};
+
+// A normal session through the step 5 -> 6 transition: one enter, one exit, nothing else; normal rooms say nothing.
+void TestWatchQuietSession() {
+    for (const WatchRole role : {WatchRole::kGuest, WatchRole::kHost}) {
+        WatchRun run;
+        const std::vector<WatchLink> links = {PeerLink(1, LinkState::kConnected)};
+        run.Frames(600, StorySession(role, 5, 0), links);
+        run.Frames(600, StorySession(role, 6, 0), links);
+        run.Frames(4000, StorySession(role, 6, 0), links);
+        CHECK(run.lines.size() == 2 && Lines(run.lines, "early_story_transition_enter") == 1);
+        CHECK(Has(run.lines, "early_story_transition_enter", "step=6 transition=after_step_change from=5"));
+        CHECK(Has(run.lines, "early_story_transition_exit", "result=session_kept"));
+        CHECK(Has(run.lines, "early_story_transition_enter", role == WatchRole::kHost ? "role=host" : "role=guest"));
+    }
+    WatchRun normal;
+    WatchSession room = StorySession(WatchRole::kGuest, 50, 0);
+    room.story = false;
+    WatchLink lost = PeerLink(1, LinkState::kClosed);
+    lost.stats.end = LinkEnd::kIdleTimeout;
+    normal.Frames(300, room, {PeerLink(1, LinkState::kConnected, LinkQuality::kCritical)});
+    normal.Frames(300, room, {lost});
+    CHECK(normal.lines.empty());
+}
+
+// The DCP-7G8RZV sequence on the guest: degraded, critical with the relay probed, closed at 10 s with the relay never
+// answering; the lobby reports the host's seat lost 31 s later. Each event once, however many frames repeat it.
+void TestWatchPeerStopped() {
+    WatchRun run;
+    const WatchSession session = StorySession(WatchRole::kGuest, 5, 0);
+    run.Frames(300, session, {PeerLink(1, LinkState::kConnected)});
+    WatchLink link = PeerLink(1, LinkState::kConnected, LinkQuality::kDegraded);
+    link.stats.relay_probes = 1;
+    link.stats.silence_ms = 2607;
+    run.Frames(60, session, {link});
+    link.stats.quality = LinkQuality::kCritical;
+    link.stats.relay_probes = 3;
+    link.stats.silence_ms = 3609;
+    run.Frames(400, session, {link});
+    link.state = LinkState::kClosed;
+    link.stats.end = LinkEnd::kIdleTimeout;
+    link.stats.relay_probes = 9;
+    run.Frames(300, session, {link});
+    CHECK(Lines(run.lines, "early_story_network_stall") == 1 && Has(run.lines, "early_story_network_stall", "silence=2-5s"));
+    CHECK(Lines(run.lines, "early_story_relay_fallback_attempt") == 1);
+    CHECK(Lines(run.lines, "early_story_peer_timeout") == 1);
+    CHECK(Has(run.lines, "early_story_peer_timeout",
+              "step=5 transition=steady transport=direct timeout=10s relay=never_answered local_lobby=up local_pump=alive"));
+    CHECK(Has(run.lines, "early_story_relay_fallback_failed", "reason=never_answered probes=9"));
+    CHECK(Lines(run.lines, "early_story_peer_closed") == 0 && Lines(run.lines, "early_story_session_recovered") == 0);
+    run.Left(31000, "disconnect");
+    CHECK(Has(run.lines, "early_story_peer_left", "why=peer_lobby_lost after_timeout=30-60s"));
+    run.Left(1000, "disconnect");
+    CHECK(Lines(run.lines, "early_story_peer_left") == 1);
+}
+
+// A stall that the relay rescues is reported as recovered; a later stall is a new episode.
+void TestWatchRecoveredStall() {
+    WatchRun run;
+    const WatchSession session = StorySession(WatchRole::kHost, 5, 0);
+    WatchLink link = PeerLink(1, LinkState::kConnected, LinkQuality::kCritical);
+    link.stats.relay_probes = 2;
+    link.stats.relay_answers = 1;
+    run.Frames(120, session, {link});
+    link.stats.moved_to_relay = true;
+    link.stats.quality = LinkQuality::kRecovering;
+    run.Frames(300, session, {link});
+    link.stats.quality = LinkQuality::kHealthy;
+    run.Frames(300, session, {link});
+    CHECK(Lines(run.lines, "early_story_network_stall") == 1 && Lines(run.lines, "early_story_relay_fallback_attempt") == 1);
+    CHECK(Has(run.lines, "early_story_session_recovered", "transport=relay via=relay"));
+    link.stats.quality = LinkQuality::kCritical;
+    run.Frames(60, session, {link});
+    link.stats.quality = LinkQuality::kHealthy;
+    run.Frames(60, session, {link});
+    CHECK(Lines(run.lines, "early_story_network_stall") == 2 && Lines(run.lines, "early_story_session_recovered") == 2);
+    CHECK(Lines(run.lines, "early_story_peer_timeout") == 0 && Lines(run.lines, "early_story_relay_fallback_failed") == 0);
+}
+
+// The host leaving on purpose closes with CLOSE from its game: reported as a close, never as a timeout.
+void TestWatchIntentionalLeave() {
+    WatchRun run;
+    const WatchSession session = StorySession(WatchRole::kGuest, 6, 0);
+    run.Frames(100, session, {PeerLink(1, LinkState::kConnected)});
+    WatchLink link = PeerLink(1, LinkState::kClosed);
+    link.stats.end = LinkEnd::kPeerGame;
+    run.Frames(100, session, {link});
+    run.Left(200, "leave");
+    CHECK(Has(run.lines, "early_story_peer_closed", "reason=game") && Lines(run.lines, "early_story_peer_closed") == 1);
+    CHECK(Lines(run.lines, "early_story_peer_timeout") == 0 && Lines(run.lines, "early_story_relay_fallback_failed") == 0);
+    CHECK(Has(run.lines, "early_story_peer_left", "why=peer_left_room"));
+    WatchLink socket_closed = PeerLink(2, LinkState::kClosed);
+    socket_closed.stats.end = LinkEnd::kPeerSocket;
+    run.Frames(10, session, {socket_closed});
+    CHECK(Has(run.lines, "early_story_peer_closed", "reason=socket"));
+}
+
+// A timeout seen while our own lobby link or socket loop is down names the local side.
+void TestWatchLocalCauses() {
+    WatchRun run;
+    WatchSession session = StorySession(WatchRole::kGuest, 5, 0);
+    run.Frames(100, session, {PeerLink(1, LinkState::kConnected)});
+    session.lobby_up = false;
+    WatchLink link = PeerLink(1, LinkState::kClosed);
+    link.stats.end = LinkEnd::kAckTimeout;
+    run.Frames(1, session, {link});
+    CHECK(Has(run.lines, "early_story_peer_timeout", "timeout=ack relay=none local_lobby=down local_pump=alive"));
+    CHECK(Lines(run.lines, "early_story_relay_fallback_failed") == 0);
+
+    SessionWatch watch;
+    const WatchSession frozen = StorySession(WatchRole::kGuest, 5, 42);
+    watch.Update(1000, frozen, {PeerLink(3, LinkState::kConnected)});
+    watch.Update(2000, frozen, {PeerLink(3, LinkState::kConnected)});
+    WatchLink stalled = PeerLink(3, LinkState::kClosed);
+    stalled.stats.end = LinkEnd::kIdleTimeout;
+    const std::vector<std::string> lines = watch.Update(3000, frozen, {stalled});
+    CHECK(Has(lines, "early_story_peer_timeout", "local_pump=stalled"));
+}
+
+// A step change, then the link lost and the session left inside the transition: the exit says so.
+void TestWatchTransitionLost() {
+    WatchRun run;
+    run.Frames(100, StorySession(WatchRole::kGuest, 5, 0), {PeerLink(1, LinkState::kConnected)});
+    run.Frames(100, StorySession(WatchRole::kGuest, 6, 0), {PeerLink(1, LinkState::kConnected)});
+    WatchLink link = PeerLink(1, LinkState::kClosed);
+    link.stats.end = LinkEnd::kIdleTimeout;
+    run.Frames(10, StorySession(WatchRole::kGuest, 6, 0), {link});
+    CHECK(Has(run.lines, "early_story_peer_timeout", "transition=after_step_change"));
+    WatchSession left = StorySession(WatchRole::kNone, -1, 0);
+    left.story = false;
+    run.Frames(10, left, {});
+    CHECK(Lines(run.lines, "early_story_transition_exit") == 1 && Has(run.lines, "early_story_transition_exit", "result=link_lost"));
+    // a reconnect of the same peer on a new link is watched afresh
+    run.Frames(10, StorySession(WatchRole::kGuest, 6, 0), {PeerLink(2, LinkState::kConnected)});
+    run.Frames(10, StorySession(WatchRole::kGuest, 6, 0), {PeerLink(2, LinkState::kConnected, LinkQuality::kCritical)});
+    CHECK(Lines(run.lines, "early_story_network_stall") == 1 && Lines(run.lines, "early_story_peer_timeout") == 1);
+}
+
+// However often a flaky link stalls, each event logs at most kLinesPerEvent lines; the count keeps going.
+void TestWatchRateLimit() {
+    WatchRun run;
+    const WatchSession session = StorySession(WatchRole::kGuest, 5, 0);
+    for (int i = 0; i < 50; ++i) {
+        run.Frames(3, session, {PeerLink(1, LinkState::kConnected, LinkQuality::kCritical)});
+        run.Frames(3, session, {PeerLink(1, LinkState::kConnected)});
+    }
+    CHECK(Lines(run.lines, "early_story_network_stall") == size_t(SessionWatch::kLinesPerEvent));
+    CHECK(run.watch.Count("early_story_network_stall") == 50);
+    CHECK(Has(run.lines, "early_story_network_stall", "count=8 limit=reached"));
+}
+
+// Every line is `Early Story Online telemetry:` and known key=value fields: no address, account, room or name.
+// Every line is `Early Story Online telemetry:` and known key=value fields: no address, account, room or name.
+void CheckPrivateTelemetry(const std::vector<std::string>& lines) {
+    static const std::set<std::string> kKeys = {"event", "role", "step", "transition", "transport", "silence", "timeout",
+                                                "relay", "local_lobby", "local_pump", "reason", "probes", "via", "from",
+                                                "result", "why", "after_timeout", "count", "limit"};
+    const std::string prefix = "Early Story Online telemetry: ";
+    for (const std::string& line : lines) {
+        CHECK(line.rfind(prefix, 0) == 0);
+        CHECK(line.find(std::to_string(kHostAccount)) == std::string::npos && line.find(std::to_string(kGuestAccount)) == std::string::npos);
+        size_t digits = 0, longest = 0;
+        for (const char c : line) {
+            digits = std::isdigit(static_cast<unsigned char>(c)) ? digits + 1 : 0;
+            longest = std::max(longest, digits);
+        }
+        CHECK(longest < 5);
+        std::istringstream fields(line.substr(prefix.size()));
+        for (std::string field; fields >> field;) {
+            const size_t eq = field.find('=');
+            CHECK(eq != std::string::npos && kKeys.count(field.substr(0, eq)));
+            CHECK(field.find('.') == std::string::npos && field.find(':') == std::string::npos);
+        }
+    }
+}
+
+void TestWatchPayloadIsPrivate() {
+    WatchRun run;
+    WatchSession session = StorySession(WatchRole::kGuest, 5, 0);
+    WatchLink link = PeerLink(1, LinkState::kConnected, LinkQuality::kCritical);
+    link.peer = kHostAccount;
+    link.stats.relay_probes = 4;
+    link.stats.silence_ms = 6000;
+    run.Frames(10, session, {link});
+    run.Frames(10, StorySession(WatchRole::kGuest, 6, 0), {link});
+    link.state = LinkState::kClosed;
+    link.stats.end = LinkEnd::kIdleTimeout;
+    run.Frames(10, StorySession(WatchRole::kGuest, 6, 0), {link});
+    run.Left(30000, "disconnect");
+    CHECK(run.lines.size() >= 6);
+    CheckPrivateTelemetry(run.lines);
+}
+
+// ---- DCP-7G8RZV step5-step6 transition survives game pause and handles dead peer ----
+
+// Redirects this process's stdout into a file until Take().
+class StdoutCapture {
+public:
+    explicit StdoutCapture(const fs::path& file) : path_(file) {
+        std::fflush(stdout);
+        saved_ = dup(fileno(stdout));
+        out_ = std::fopen(path_.string().c_str(), "w");
+        if (out_) dup2(fileno(out_), fileno(stdout));
+    }
+    ~StdoutCapture() { Take(); }
+    std::string Take() {
+        if (saved_ < 0) return text_;
+        std::fflush(stdout);
+        dup2(saved_, fileno(stdout));
+        ::close(saved_);
+        saved_ = -1;
+        if (out_) std::fclose(out_);
+        std::ifstream in(path_, std::ios::binary);
+        text_.assign(std::istreambuf_iterator<char>(in), {});
+        return text_;
+    }
+
+private:
+    fs::path path_;
+    int saved_ = -1;
+    FILE* out_ = nullptr;
+    std::string text_;
+};
+
+size_t Occurrences(const std::string& text, const std::string& what) {
+    size_t n = 0;
+    for (size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + what.size())) ++n;
+    return n;
+}
+
+size_t FirstLine(const std::vector<std::string>& lines, const std::string& event) {
+    for (size_t i = 0; i < lines.size(); ++i)
+        if (lines[i].find("event=" + event + " ") != std::string::npos) return i;
+    return std::string::npos;
+}
+
+// Both games in one process over the transport simulator (a: guest, b: host). The guest's game runs the real Early
+// Story session and shadow-record code every frame; each game feeds its own SessionWatch the way the Matching2 pump does.
+// The guest's game reacts to a closed link as the game does: it terminates the Rudp context and leaves the room, once.
+class StoryTransition {
+public:
+    static constexpr int kGuestOwnStep = 1, kHostStep = 5, kHostNextStep = 6;
+    static constexpr uint64_t kFrameMs = 15;
+
+    struct Timeline {
+        uint64_t degraded = 0, critical = 0, probed = 0, closed = 0, generation_at_close = 0;
+    };
+
+    Network net{120, 0, 171};
+    int host_step = kHostStep;
+    std::vector<std::string> guest_lines, host_lines;
+    bool in_room = true;
+    int room_leaves = 0, wrong_reads = 0, own_record_changes = 0, host_frames = 0;
+    uint64_t max_guest_silence = 0;
+    LinkStats final_stats;
+    Timeline timeline;
+
+    StoryTransition() : save_(0xa8 + EARLY_STORY_LOCAL_RECORDS * EARLY_STORY_RECORD_SIZE) {
+        for (size_t i = 0; i < save_.size(); ++i) save_[i] = uint8_t(i * 7 + 3);
+        Record()[EARLY_STORY_RECORD_STEP] = kGuestOwnStep;
+    }
+
+    // The guest has joined the host's story room at step 5 and the link is up and healthy.
+    bool Start() {
+        early_story_set_active(1);
+        early_story_set_hosting(0);
+        early_story_session_reset();
+        if (!net.Connect()) return false;
+        link_ = net.a().link;
+        early_story_session_joined(0, kHostStep + 1);
+        early_story_session_internal_update(kHostStep);
+        Run(5000);
+        return true;
+    }
+
+    // The host's step-5 Castle Gate event writes step 6 as it starts; the live state reaches the guest at once.
+    void BeginTransition() {
+        host_step = kHostNextStep;
+        HostFrame();
+        early_story_session_internal_update(kHostNextStep);
+    }
+
+    void Run(uint64_t ms) {
+        const uint64_t until = net.now() + ms;
+        while (net.now() < until) {
+            net.Run(Network::kTick);
+            Observe();
+            if (net.now() < next_frame_) continue;
+            next_frame_ = net.now() + kFrameMs;
+            GuestFrame();
+            if (!net.b().game_paused && !net.b().frozen) HostFrame();
+        }
+    }
+
+    void RunUntilLeft(uint64_t limit_ms) {
+        const uint64_t until = net.now() + limit_ms;
+        while (in_room && net.now() < until) Run(kFrameMs);
+    }
+
+    int GuestSeesStep() { return GuestRead()[EARLY_STORY_RECORD_STEP]; }
+    int GuestOwnRecordStep() { return Record()[EARLY_STORY_RECORD_STEP]; }
+    bool GuestReadsOwnRecord() { return GuestRead() == Record(); }
+    int link() const { return link_; }
+
+private:
+    uint8_t* Record() { return save_.data() + 0xa8; }
+
+    const uint8_t* GuestRead() {
+        GuestRegs regs;
+        std::memset(&regs, 0, sizeof(regs));
+        regs.rax = uint64_t(uintptr_t(save_.data()));
+        early_story_selector_hook(&regs);
+        return regs.skip ? reinterpret_cast<const uint8_t*>(uintptr_t(regs.rax)) : Record();
+    }
+
+    void Observe() {
+        if (!in_room) return;
+        const LinkStats s = net.a().socket->stats(link_);
+        const uint64_t now = net.now();
+        if (!timeline.degraded && s.quality != LinkQuality::kHealthy) timeline.degraded = now;
+        if (!timeline.critical && s.quality == LinkQuality::kCritical) timeline.critical = now;
+        if (!timeline.probed && s.relay_probes) timeline.probed = now;
+        if (!timeline.closed && net.a().socket->state(link_) == LinkState::kClosed) {
+            timeline.closed = now;
+            timeline.generation_at_close = net.a().socket->pump_generation();
+        }
+    }
+
+    void GuestFrame() {
+        const uint8_t* seen = GuestRead();
+        if (in_room && seen[EARLY_STORY_RECORD_STEP] != early_story_session_host_step()) ++wrong_reads;
+        if (Record()[EARLY_STORY_RECORD_STEP] != kGuestOwnStep) ++own_record_changes;
+        WatchSession session;
+        session.role = early_story_session_role() == EARLY_STORY_ROLE_GUEST ? WatchRole::kGuest : WatchRole::kNone;
+        session.story = in_room && early_story_story_room_guest();
+        session.step = early_story_session_host_step();
+        session.pump_generation = net.a().socket->pump_generation();
+        std::vector<WatchLink> links;
+        LinkState state = LinkState::kClosed;
+        if (in_room) {
+            state = net.a().socket->state(link_);
+            final_stats = net.a().socket->stats(link_);
+            max_guest_silence = std::max(max_guest_silence, final_stats.silence_ms);
+            links.push_back({net.b().account, link_, state, final_stats});
+        }
+        for (std::string& line : guest_watch_.Update(net.now(), session, links)) guest_lines.push_back(std::move(line));
+        if (in_room && state == LinkState::kClosed) Leave();
+    }
+
+    void Leave() {
+        ++room_leaves;
+        in_room = false;
+        net.a().socket->close(link_);
+        net.a().socket->forget_peer(net.b().account);
+        early_story_session_reset();
+    }
+
+    void HostFrame() {
+        ++host_frames;
+        WatchSession session;
+        session.role = WatchRole::kHost;
+        session.story = true;
+        session.step = host_step;
+        session.pump_generation = net.b().socket->pump_generation();
+        const WatchLink link{net.a().account, net.b().link, net.b().socket->state(net.b().link), net.b().socket->stats(net.b().link)};
+        for (std::string& line : host_watch_.Update(net.now(), session, {link})) host_lines.push_back(std::move(line));
+    }
+
+    std::vector<uint8_t> save_;
+    int link_ = -1;
+    uint64_t next_frame_ = 0;
+    SessionWatch guest_watch_, host_watch_;
+};
+
+const char kFollowingStepFive[] = "Early Story Online: following the host's story, step 5 (own step 1)";
+const char kOwnStoryRestored[] = "Early Story Online: own story restored";
+
+bool NetworkEventFree(const std::vector<std::string>& lines) {
+    for (const char* event : {"early_story_network_stall", "early_story_relay_fallback_attempt", "early_story_peer_timeout",
+                              "early_story_relay_fallback_failed", "early_story_peer_closed", "early_story_session_recovered",
+                              "early_story_peer_left"})
+        if (Lines(lines, event)) return false;
+    return true;
+}
+
+// Phase A: the host's game is held for 30 s right after the step 5 -> 6 transition starts (cutscene, loading, save).
+void TestStoryTransitionSurvivesHostGamePause(const fs::path& base) {
+    StoryTransition sc;
+    StdoutCapture capture(base / "dcp-7g8rzv-phase-a.log");
+    CHECK(sc.Start());
+    CHECK(sc.GuestSeesStep() == StoryTransition::kHostStep && sc.GuestOwnRecordStep() == StoryTransition::kGuestOwnStep);
+    sc.BeginTransition();
+    const uint64_t host_generation = sc.net.b().socket->pump_generation();
+    const int host_frames = sc.host_frames;
+    sc.net.b().game_paused = true;
+    sc.Run(30000);
+    CHECK(sc.host_frames == host_frames && sc.net.b().socket->pump_generation() > host_generation + 5000);
+    CHECK(sc.in_room && !sc.net.Closed() && sc.max_guest_silence < 1500);
+    CHECK(!sc.net.a().reached_degraded && !sc.net.b().reached_degraded);
+    CHECK(sc.final_stats.relay_probes == 0 && sc.final_stats.end == LinkEnd::kOpen && !sc.final_stats.moved_to_relay);
+    sc.net.b().game_paused = false;
+    sc.Run(40000);
+    CHECK(sc.in_room && sc.room_leaves == 0 && !sc.net.Closed() && !Moved(sc.net));
+    CHECK(sc.net.a().socket->connect(sc.net.b().account) == sc.link() && sc.net.b().socket->connect(sc.net.a().account) == sc.net.b().link);
+    CHECK(sc.host_step == StoryTransition::kHostNextStep && early_story_session_host_step() == StoryTransition::kHostNextStep);
+    CHECK(sc.GuestSeesStep() == StoryTransition::kHostNextStep && early_story_visiting());
+    CHECK(sc.GuestOwnRecordStep() == StoryTransition::kGuestOwnStep && sc.own_record_changes == 0 && sc.wrong_reads == 0);
+    CHECK(sc.net.a().closes_sent == 0 && sc.net.b().closes_sent == 0);
+    sc.net.Drain();
+    CHECK(Intact(sc.net));
+    const std::string log = capture.Take();
+    CHECK(Occurrences(log, kFollowingStepFive) == 1 && Occurrences(log, kOwnStoryRestored) == 0);
+    for (const std::vector<std::string>* lines : {&sc.guest_lines, &sc.host_lines}) {
+        CHECK(lines->size() == 2 && NetworkEventFree(*lines));
+        CHECK(Has(*lines, "early_story_transition_enter", "step=6 transition=after_step_change from=5"));
+        CHECK(Has(*lines, "early_story_transition_exit", "result=session_kept"));
+        CheckPrivateTelemetry(*lines);
+    }
+    CHECK(Has(sc.guest_lines, "early_story_transition_enter", "role=guest") && Has(sc.host_lines, "early_story_transition_enter", "role=host"));
+    early_story_session_reset();
+    sc.GuestSeesStep();
+    std::printf("SIM|%-22s|host game held 30 s in the step 5 -> 6 transition: link healthy, max guest rx silence %llu ms\n",
+                "DCP-7G8RZV phase A", (unsigned long long)sc.max_guest_silence);
+}
+
+// Phase B: from the same transition, the host's process stops (no CLOSE): the reporter's sequence on the guest.
+void TestStoryTransitionHandlesDeadHost(const fs::path& base) {
+    StoryTransition sc;
+    StdoutCapture capture(base / "dcp-7g8rzv-phase-b.log");
+    CHECK(sc.Start());
+    sc.BeginTransition();
+    sc.Run(2000);
+    const uint64_t stopped = sc.net.now();
+    const uint64_t guest_generation = sc.net.a().socket->pump_generation();
+    sc.net.b().frozen = true;
+    sc.RunUntilLeft(15000);
+    const StoryTransition::Timeline& t = sc.timeline;
+    CHECK(t.probed > stopped && t.degraded > stopped && t.critical >= t.degraded && t.closed > t.critical);
+    CHECK(t.probed <= t.critical);
+    CHECK(t.closed - t.critical >= 5000);
+    CHECK(t.closed - stopped >= 9900 && t.closed - stopped <= 10500);
+    CHECK(t.generation_at_close > guest_generation + 1500);
+    CHECK(sc.final_stats.end == LinkEnd::kIdleTimeout && sc.final_stats.relay_probes >= 3 && sc.final_stats.relay_answers == 0);
+    CHECK(!sc.final_stats.moved_to_relay);
+    CHECK(sc.room_leaves == 1 && !sc.in_room);
+    CHECK(sc.net.a().closes_sent == 0 && sc.net.b().closes_sent == 0);
+    // the game's teardown paths running again change nothing
+    sc.net.a().socket->close(sc.link());
+    early_story_session_reset();
+    sc.Run(2000);
+    CHECK(sc.room_leaves == 1 && sc.net.a().closes_sent == 0);
+    CHECK(sc.net.a().socket->state(sc.link()) == LinkState::kClosed && sc.net.a().socket->peer_at(sc.net.b().addr) == 0);
+    CHECK(sc.net.a().socket->connect(sc.net.b().account) == -1);
+    CHECK(sc.GuestReadsOwnRecord() && sc.GuestOwnRecordStep() == StoryTransition::kGuestOwnStep && sc.own_record_changes == 0);
+    CHECK(sc.wrong_reads == 0 && early_story_session_role() == EARLY_STORY_ROLE_NONE && !early_story_visiting());
+    const std::string log = capture.Take();
+    CHECK(Occurrences(log, kFollowingStepFive) == 1 && Occurrences(log, kOwnStoryRestored) == 1);
+    CHECK(Occurrences(log, "relay fallback failed: the relay never answered") == 1);
+
+    const std::vector<std::string>& g = sc.guest_lines;
+    const size_t enter = FirstLine(g, "early_story_transition_enter"), stall = FirstLine(g, "early_story_network_stall"),
+                 attempt = FirstLine(g, "early_story_relay_fallback_attempt"), timeout = FirstLine(g, "early_story_peer_timeout"),
+                 failed = FirstLine(g, "early_story_relay_fallback_failed"), exit = FirstLine(g, "early_story_transition_exit");
+    CHECK(enter < stall && stall < attempt && attempt < timeout && timeout < failed && failed < exit && exit != std::string::npos);
+    for (const char* event : {"early_story_transition_enter", "early_story_network_stall", "early_story_relay_fallback_attempt",
+                              "early_story_peer_timeout", "early_story_relay_fallback_failed", "early_story_transition_exit"})
+        CHECK(Lines(g, event) == 1);
+    CHECK(Has(g, "early_story_peer_timeout",
+              "role=guest step=6 transition=after_step_change transport=direct timeout=10s relay=never_answered local_lobby=up local_pump=alive"));
+    CHECK(Has(g, "early_story_relay_fallback_failed", "reason=never_answered"));
+    CHECK(Has(g, "early_story_transition_exit", "result=link_lost"));
+    CHECK(Lines(g, "early_story_peer_closed") == 0 && Lines(g, "early_story_session_recovered") == 0);
+    CHECK(Lines(sc.host_lines, "early_story_network_stall") == 0 && Lines(sc.host_lines, "early_story_peer_timeout") == 0);
+    CheckPrivateTelemetry(g);
+    CheckPrivateTelemetry(sc.host_lines);
+    std::printf("SIM|%-22s|host stopped: probe +%llu ms, degraded +%llu ms, critical +%llu ms, closed +%llu ms, %u probes "
+                "unanswered\n",
+                "DCP-7G8RZV phase B", (unsigned long long)(t.probed - stopped), (unsigned long long)(t.degraded - stopped),
+                (unsigned long long)(t.critical - stopped), (unsigned long long)(t.closed - stopped), sc.final_stats.relay_probes);
+}
+
+// A relay-backed socket whose last owner is the relay ends: replacing it sends its CLOSE through those same ends.
+void TestRelayEndsReleaseOutsideTheLock() {
+    constexpr uint32_t kToken = 0x5a5a1234;
+    constexpr uint64_t kUs = 1001, kPeer = 2002;
+    constexpr uint16_t kUsMember = 0x10, kPeerMember = 0x20;
+    PeerSocket::Options options;
+    options.simulated_network = [](const Endpoint&, const uint8_t*, size_t) {};
+    std::shared_ptr<PeerSocket> us(PeerSocket::open(options, nullptr));
+    std::shared_ptr<PeerSocket> peer(PeerSocket::open(options, nullptr));
+    auto* ends = new RelayEnds; // leaked if the release deadlocks: a blocked thread still uses it
+    std::deque<std::vector<uint8_t>> to_peer, to_us;
+    std::atomic<int> closes{0};
+    auto rewrite = [](const std::vector<uint8_t>& frame, uint16_t from) {
+        const auto decoded = decode_relay_frame(frame.data(), frame.size());
+        return decoded ? encode_relay_frame(decoded->token, from, decoded->seq, decoded->payload.data(), decoded->payload.size())
+                       : std::vector<uint8_t>{};
+    };
+    const RelayEnds::Forward forward = [&](std::vector<uint8_t>&& frame) {
+        const auto decoded = decode_relay_frame(frame.data(), frame.size());
+        if (decoded && decoded->payload.size() >= 4 && decoded->payload[3] == 7) ++closes;
+        to_peer.push_back(std::move(frame));
+        return true;
+    };
+    ends->Set(forward, us);
+    RoomKey key{};
+    key[0] = 0x5a;
+    us->set_room(key, kUs);
+    peer->set_room(key, kPeer);
+    us->set_peer(kPeer, {}, kPeerMember);
+    peer->set_peer(kUs, {}, kUsMember);
+    us->enable_relay(kToken, [ends](std::vector<uint8_t>&& frame) { return ends->Send(std::move(frame)); });
+    peer->enable_relay(kToken, [&](std::vector<uint8_t>&& frame) {
+        to_us.push_back(std::move(frame));
+        return true;
+    });
+    const int link = us->connect(kPeer);
+    for (uint64_t now = 1000; now < 6000 && us->state(link) != LinkState::kConnected; now += 5) {
+        us->simulated_clock(now);
+        peer->simulated_clock(now);
+        us->simulated_tick();
+        peer->simulated_tick();
+        while (!to_peer.empty()) {
+            const std::vector<uint8_t> frame = rewrite(to_peer.front(), kUsMember);
+            to_peer.pop_front();
+            peer->deliver_relay(frame.data(), frame.size());
+        }
+        while (!to_us.empty()) {
+            const std::vector<uint8_t> frame = rewrite(to_us.front(), kPeerMember);
+            to_us.pop_front();
+            ends->Deliver(frame.data(), frame.size());
+        }
+    }
+    CHECK(us->state(link) == LinkState::kConnected && us->path(link) == LinkPath::kRelay);
+    us.reset();
+    std::atomic<bool> released{false};
+    std::thread replace([&] {
+        ends->Set(forward, nullptr);
+        released = true;
+    });
+    for (int i = 0; i < 500 && !released; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK(released);
+    if (!released) {
+        replace.detach();
+        return;
+    }
+    replace.join();
+    CHECK(closes >= 1);
+    delete ends;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2373,7 +3024,29 @@ int main(int argc, char** argv) {
         TestLobbyDropLeavesDirectAlone();
         TestFallbackAfterLobbyResume();
         TestRelayStaysInsideTheLobbyBudget();
+        TestPausedGameKeepsTheLink();
+        TestStoppedPeerTimesOut();
         TestTransportMatrix();
+    });
+    Group("session-watch", [&] {
+        TestWatchQuietSession();
+        TestWatchPeerStopped();
+        TestWatchRecoveredStall();
+        TestWatchIntentionalLeave();
+        TestWatchLocalCauses();
+        TestWatchTransitionLost();
+        TestWatchRateLimit();
+        TestWatchPayloadIsPrivate();
+    });
+    // DCP-7G8RZV step5-step6 transition survives game pause and handles dead peer, with the neighbouring paths it must
+    // leave unchanged (relay rescue, deliberate close).
+    Group("early-story-session", [&] {
+        TestStoryTransitionSurvivesHostGamePause(base);
+        TestStoryTransitionHandlesDeadHost(base);
+        TestRelayEndsReleaseOutsideTheLock();
+        TestDeadDirectMovesToRelay();
+        TestGameCloseReachesThePeer();
+        TestWatchIntentionalLeave();
     });
     Group("protocol", [&] { TestRelayCompatibilityMatrix(); });
     Group("comms", [&] {

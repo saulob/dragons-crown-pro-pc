@@ -49,6 +49,7 @@ int early_story_online_unlocked(int step);
 void early_story_session_joined(int is_owner, int room_attr);
 /* A story session ends with its owner: everyone in the room gets their own story back. A normal room swaps the role. */
 void early_story_session_owner_changed(int is_owner);
+EarlyStoryRole early_story_session_role(void);
 /* A guest seated in a story session room. */
 int early_story_story_room_guest(void);
 /* Leave, kick, disconnect, room closed, failed join, host gone: the next story read sees the real record. */

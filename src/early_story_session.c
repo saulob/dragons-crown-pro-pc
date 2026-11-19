@@ -65,6 +65,10 @@ void early_story_session_owner_changed(int is_owner) {
     atomic_store(&role, is_owner ? EARLY_STORY_ROLE_HOST : EARLY_STORY_ROLE_GUEST);
 }
 
+EarlyStoryRole early_story_session_role(void) {
+    return (EarlyStoryRole)atomic_load(&role);
+}
+
 int early_story_story_room_guest(void) {
     return atomic_load(&active_flag) && atomic_load(&role) == EARLY_STORY_ROLE_GUEST &&
            atomic_load(&room_host_step) != EARLY_STORY_NO_STEP;

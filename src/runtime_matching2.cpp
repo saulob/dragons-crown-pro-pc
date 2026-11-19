@@ -24,7 +24,9 @@
 #include "appearance_session.h"
 #include "boss_battle_online.h"
 #include "dcp_party.h"
+#include "early_story_diag.h"
 #include "early_story_session.h"
+#include "net/relay_ends.h"
 #include "net/relay_frame.h"
 #include "runtime_online.h"
 
@@ -155,6 +157,7 @@ struct State {
     int story_sent = EARLY_STORY_NO_STEP;
     // we inherited a story room: our external updates clear its story attribute
     bool clear_story_attr = false;
+    net::SessionWatch story_watch;
     // Boss Battle: the lobby keeps its rooms to capable clients; the tag our room carries and the host state it has
     bool boss_capable = false;
     int boss_attr = BOSS_BATTLE_ROOM_NONE;
@@ -375,38 +378,20 @@ net::Endpoint GameEndpoint(uint16_t member, const Signal& s) {
     return s.account ? net::signaling_endpoint(s.address, member) : s.address;
 }
 
-// The relay's two ends live on other threads (the socket's, the lobby link's) and must not take g_mutex.
-std::mutex g_relay_mutex;
-net::LobbyLink* g_relay_link = nullptr;
-std::shared_ptr<net::PeerSocket> g_relay_socket;
-// While the lobby link reconnects, the seat is not ours again until room.resume answers: the lobby would count frames
-// sent before that as faults of a sender with no room. The link layer retransmits what is refused here.
-bool g_relay_paused = false;
+// The relay's two ends must not take g_mutex. While the lobby link reconnects, the seat is not ours again until
+// room.resume answers: the lobby would count frames sent before that as faults of a sender with no room.
+net::RelayEnds g_relay;
 
-bool SendRelayFrame(std::vector<uint8_t>&& frame) {
-    std::lock_guard<std::mutex> lock(g_relay_mutex);
-    return g_relay_link && !g_relay_paused && g_relay_link->send_binary(std::move(frame));
-}
+bool SendRelayFrame(std::vector<uint8_t>&& frame) { return g_relay.Send(std::move(frame)); }
 
-void PauseRelay(bool paused) {
-    std::lock_guard<std::mutex> lock(g_relay_mutex);
-    g_relay_paused = paused;
-}
+void PauseRelay(bool paused) { g_relay.Pause(paused); }
 
-void ReceiveRelayFrame(const uint8_t* data, size_t size) {
-    std::shared_ptr<net::PeerSocket> socket;
-    {
-        std::lock_guard<std::mutex> lock(g_relay_mutex);
-        socket = g_relay_socket;
-    }
-    if (socket) socket->deliver_relay(data, size);
-}
+void ReceiveRelayFrame(const uint8_t* data, size_t size) { g_relay.Deliver(data, size); }
 
 void SetRelayEnds(net::LobbyLink* link, const std::shared_ptr<net::PeerSocket>& socket) {
-    std::lock_guard<std::mutex> lock(g_relay_mutex);
-    g_relay_link = link;
-    g_relay_socket = socket;
-    g_relay_paused = false;
+    net::RelayEnds::Forward forward;
+    if (link) forward = [link](std::vector<uint8_t>&& frame) { return link->send_binary(std::move(frame)); };
+    g_relay.Set(std::move(forward), socket);
 }
 
 void ConfigureRelay() {
@@ -722,6 +707,28 @@ void ResumeStoryRoom() {
     PublishStoryState();
 }
 
+void WatchStorySession(uint64_t now) {
+    const EarlyStoryRole role = early_story_session_role();
+    net::WatchSession session;
+    session.role = role == EARLY_STORY_ROLE_HOST ? net::WatchRole::kHost
+                 : role == EARLY_STORY_ROLE_GUEST ? net::WatchRole::kGuest
+                                                  : net::WatchRole::kNone;
+    session.story = g.room && (role == EARLY_STORY_ROLE_HOST ? g.story_room_hosted : early_story_story_room_guest());
+    session.step = role == EARLY_STORY_ROLE_HOST ? early_story_own_step() : early_story_session_host_step();
+    session.lobby_up = g.up && !g.lost && !g.down;
+    session.pump_generation = g.socket ? g.socket->pump_generation() : 0;
+    const std::vector<net::WatchLink> links = peer_links();
+    for (const std::string& line : g.story_watch.Update(now, session, links)) std::printf("%s\n", line.c_str());
+    EarlyStoryDiagRoom room;
+    room.room = g.room != 0;
+    room.members = g.members.size();
+    room.lobby = g.down ? "down" : g.lost ? "lost" : g.up ? "up" : "connecting";
+    room.relay_on = g.socket && g.socket->relay_enabled();
+    room.relay = g.socket ? g.socket->relay_stats() : net::RelayStats{};
+    room.own_step = early_story_own_step();
+    early_story_diag(now, session, links, room);
+}
+
 void OnOwnStoryStep(int) {
     std::lock_guard<std::mutex> lock(g_mutex);
     PublishStoryState();
@@ -951,6 +958,8 @@ void OnEvent(const net::LobbyMessage& m) {
         Member left;
         left.id = id;
         if (g.members.count(id)) left = g.members[id];
+        for (const std::string& line : g.story_watch.PeerLeft(net::now_ms(), left.account, b["why"].as_string()))
+            std::printf("%s\n", line.c_str());
         g.members.erase(id);
         boss_battle_online_members_changed(int(g.members.size()));
         if (g.socket && g.signals.count(id)) g.socket->forget_peer(g.signals[id].account);
@@ -1634,6 +1643,7 @@ void pump() {
         PublishBossBattleTag();
         ResumeStoryRoom();
         PublishAppearance(now);
+        WatchStorySession(now);
         calls.swap(g.calls);
     }
     for (auto& call : calls) call();

@@ -102,8 +102,19 @@ uint32_t RtoFor(double srtt, double rttvar) {
     return uint32_t(std::clamp(srtt + std::max(4 * rttvar, kRtoMarginMs), 100.0, 2000.0));
 }
 
-std::string PeerClosed(const uint8_t* data, size_t size) {
-    switch (size > kHeader ? data[kHeader] : uint8_t(kCloseUnspecified)) {
+uint8_t CloseCode(const uint8_t* data, size_t size) { return size > kHeader ? data[kHeader] : uint8_t(kCloseUnspecified); }
+
+LinkEnd PeerEnd(uint8_t code) {
+    switch (code) {
+    case kCloseByGame: return LinkEnd::kPeerGame;
+    case kCloseBySocket: return LinkEnd::kPeerSocket;
+    case kCloseProtocol: return LinkEnd::kPeerRefused;
+    default: return LinkEnd::kPeerClosed;
+    }
+}
+
+std::string PeerClosed(uint8_t code) {
+    switch (code) {
     case kCloseByGame: return "the peer's game closed the connection";
     case kCloseBySocket: return "the peer's P2P socket closed";
     case kCloseProtocol: return "the peer refused our data (a message larger than the game accepts)";
@@ -227,7 +238,7 @@ PeerSocket::~PeerSocket() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& [id, link] : links_)
-            if (link.state != LinkState::kClosed) Close(link, "socket closed", true, kCloseBySocket);
+            if (link.state != LinkState::kClosed) Close(link, LinkEnd::kLocal, "socket closed", true, kCloseBySocket);
         stopping_ = true;
     }
     if (thread_.joinable()) thread_.join();
@@ -250,6 +261,7 @@ void PeerSocket::simulated_datagram(const uint8_t* data, size_t size, const Endp
 void PeerSocket::simulated_tick() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!simulated_) return;
+    pump_generation_.fetch_add(1, std::memory_order_relaxed);
     StunStep(simulated_now_);
     Timers(simulated_now_);
 }
@@ -395,14 +407,17 @@ void PeerSocket::close(int id) {
     std::lock_guard<std::mutex> lock(mutex_);
     Link* link = Find(id);
     if (!link) return;
-    if (link->state != LinkState::kClosed) Close(*link, "closed by the game", true, kCloseByGame);
+    if (link->state != LinkState::kClosed) Close(*link, LinkEnd::kLocal, "closed by the game", true, kCloseByGame);
     links_.erase(id);
 }
 
 LinkStats PeerSocket::stats(int id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     const Link* link = Find(id);
-    return link ? link->stats : LinkStats{};
+    if (!link) return LinkStats{};
+    LinkStats out = link->stats;
+    out.silence_ms = Now() - link->last_rx_ms;
+    return out;
 }
 
 StunState PeerSocket::stun(Endpoint* mapped) const {
@@ -587,8 +602,9 @@ std::string PeerSocket::Transport(const Link& link) const {
     return link.health.moved ? "relay (moved from direct)" : "relay";
 }
 
-void PeerSocket::Close(Link& link, const std::string& why, bool tell_peer, uint8_t code) {
+void PeerSocket::Close(Link& link, LinkEnd end, const std::string& why, bool tell_peer, uint8_t code) {
     if (link.state == LinkState::kClosed) return;
+    link.stats.end = end;
     if (tell_peer && link.state == LinkState::kConnected) {
         uint8_t packet[kHeader + 1];
         Header(packet, kClose, link.peer_tag, link.tag);
@@ -624,7 +640,7 @@ void PeerSocket::Handshake(const uint8_t* data, size_t size, const Endpoint& fro
     if (reply && (!link || link->account != sender || link->state == LinkState::kClosed)) return;
     if (link && link->state == LinkState::kConnected && link->peer_nonce && link->peer_nonce != nonce) {
         if (reply) return;
-        Close(*link, "the peer started a new connection", false);
+        Close(*link, LinkEnd::kReplaced, "the peer started a new connection", false);
         link = nullptr;
     }
     if (!link) link = &NewLink(sender, now);
@@ -665,6 +681,7 @@ void PeerSocket::Pong(Link& link, uint32_t echo, uint64_t now) {
         h.relay_ready_ms = now;
         h.relay_rtt_ms = uint32_t(now) - (echo ^ kProbeMark);
         h.probe_stamp = 0;
+        ++link.stats.relay_answers;
         if (first)
             std::printf("P2P: link %d relay answered in %u ms; ready if the direct path fails\n", link.id, h.relay_rtt_ms);
         return;
@@ -774,7 +791,7 @@ void PeerSocket::Data(Link& link, const uint8_t* body, size_t size, uint64_t now
         link.assembling.insert(link.assembling.end(), payload.begin(), payload.end());
         link.stats.bytes_in += payload.size();
         if (link.assembling.size() > kMaxMessage) {
-            Close(link, "the peer sent a message larger than the game accepts", true, kCloseProtocol);
+            Close(link, LinkEnd::kOversize, "the peer sent a message larger than the game accepts", true, kCloseProtocol);
             return;
         }
         if (fragment_flags & kLast) {
@@ -839,7 +856,11 @@ void PeerSocket::Receive(const uint8_t* data, size_t size, const Endpoint& from,
             comms_inbox_.push_back(packet);
         }
         break;
-    case kClose: Close(*link, PeerClosed(data, size), false); break;
+    case kClose: {
+        const uint8_t code = CloseCode(data, size);
+        Close(*link, PeerEnd(code), PeerClosed(code), false);
+        break;
+    }
     default: break;
     }
 }
@@ -858,7 +879,7 @@ void PeerSocket::Flush(Link& link, uint64_t now) {
         const uint64_t wait = uint64_t(link.rto_ms) << std::min(p.tries - 1, max_backoff);
         if (!p.due && now - p.sent_ms < wait) continue;
         if (p.tries >= 30) {
-            Close(link, Transport(link) + " path failed: the peer stopped acknowledging data", false);
+            Close(link, LinkEnd::kAckTimeout, Transport(link) + " path failed: the peer stopped acknowledging data", false);
             return;
         }
         Resend(link, p, now, sack);
@@ -984,6 +1005,7 @@ void PeerSocket::PrepareRelay(Link& link, uint64_t now) {
     if (now < h.probe_due_ms || (h.relay_ready_ms && now - h.relay_ready_ms < kRelayProofMs / 2)) return;
     h.probe_due_ms = now + kPingEveryMs;
     h.probe_stamp = uint32_t(now) ^ kProbeMark;
+    ++link.stats.relay_probes;
     SendPing(link, relay_endpoint(relay_members_[link.account]), h.probe_stamp);
 }
 
@@ -1023,7 +1045,7 @@ void PeerSocket::Timers(uint64_t now) {
         }
         if (link.state == LinkState::kConnecting) {
             if (now - link.started_ms > uint64_t(options_.connect_timeout_ms)) {
-                Close(link, "no answer from the peer (the networks could not be joined)", false);
+                Close(link, LinkEnd::kNoAnswer, "no answer from the peer (the networks could not be joined)", false);
             } else if (now >= link.next_hello_ms) {
                 const auto peer = peers_.find(link.account);
                 if (peer != peers_.end())
@@ -1049,7 +1071,7 @@ void PeerSocket::Timers(uint64_t now) {
                                   std::to_string(options_.idle_timeout_ms / 1000) + " s";
                 if (!is_relay_endpoint(link.addr) && link.health.state == LinkQuality::kCritical)
                     why += CanRelay(link) ? " (relay fallback failed: the relay never answered)" : " (no relay for this peer)";
-                Close(link, why, false);
+                Close(link, LinkEnd::kIdleTimeout, why, false);
             } else {
                 Flush(link, now);
                 if (link.state == LinkState::kConnected) {
@@ -1109,6 +1131,7 @@ void PeerSocket::Run() {
 #endif
         std::lock_guard<std::mutex> lock(mutex_);
         if (stopping_) return;
+        pump_generation_.fetch_add(1, std::memory_order_relaxed);
         const uint64_t now = now_ms();
         for (int i = 0; i < 512; ++i) {
             sockaddr_in from{};

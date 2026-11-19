@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "net/upnp.h"
@@ -59,6 +60,10 @@ std::map<int, Context> g_contexts;
 int g_next_context = 1;
 std::map<int, std::map<int, uint16_t>> g_polls;
 int g_next_poll = 1;
+// The last view of links the game released since peer_links() last ran: it often terminates a closed link before the
+// once-per-frame session watch sees it.
+std::vector<net::WatchLink> g_released;
+constexpr size_t kMaxReleased = 16;
 
 uint16_t Swap16(uint16_t v) { return uint16_t(v >> 8 | v << 8); }
 
@@ -77,6 +82,7 @@ void Release(int id, Context& c, const char* why) {
         std::printf("Rudp: context %d %s: in %llu msgs / %llu B, out %llu msgs / %llu B in %llu packets, %llu resends\n", id,
                     why, (unsigned long long)s.messages_in, (unsigned long long)s.bytes_in, (unsigned long long)s.messages_out,
                     (unsigned long long)s.bytes_out, (unsigned long long)s.packets_out, (unsigned long long)s.resends);
+        if (g_released.size() < kMaxReleased) g_released.push_back({c.account, c.link, g_peer->state(c.link), s});
         g_peer->close(c.link);
     }
     c.link = -1;
@@ -366,6 +372,15 @@ const Export kExports[] = {
 std::shared_ptr<net::PeerSocket> peer_socket() {
     std::lock_guard<std::mutex> lock(g_mutex);
     return g_peer;
+}
+
+std::vector<net::WatchLink> peer_links() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::vector<net::WatchLink> links = std::exchange(g_released, {});
+    if (!g_peer) return links;
+    for (const auto& [id, c] : g_contexts)
+        if (c.link >= 0) links.push_back({c.account, c.link, g_peer->state(c.link), g_peer->stats(c.link)});
+    return links;
 }
 
 int peer_ping_ms() {

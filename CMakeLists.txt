@@ -49,7 +49,8 @@ target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
 # launcher, the runtime and tests/net_tests.cpp share it.
 add_library(dcp_net STATIC src/net/addr.cpp src/net/connection_test.cpp src/net/crypto.cpp src/net/identity.cpp
     src/net/json.cpp src/net/lobby_link.cpp src/net/online_config.cpp src/net/online_version.cpp src/net/peer_socket.cpp
-    src/net/relay_frame.cpp src/net/stun.cpp src/net/upnp.cpp src/net/websocket.cpp
+    src/net/relay_ends.cpp src/net/relay_frame.cpp src/net/session_watch.cpp src/net/stun.cpp src/net/upnp.cpp
+    src/net/websocket.cpp
     $<IF:$<BOOL:${WIN32}>,src/net/websocket_win.cpp,src/net/websocket_posix.cpp>)
 target_include_directories(dcp_net PUBLIC src)
 target_compile_definitions(dcp_net PRIVATE DCP_PORT_VERSION="${DCP_PORT_VERSION}")
@@ -112,6 +113,7 @@ set(DCP_RUNTIME_SOURCES
     src/runtime_kernel.c
     src/runtime_memory.c
     src/runtime_matching2.cpp
+    src/early_story_diag.cpp
     src/runtime_mutex.c
     src/runtime_online.cpp
     src/runtime_pad.c
@@ -194,14 +196,16 @@ endif()
 
 # Focused tests of the online layer: JSON, identity, STUN, the lobby link against a local lobby and the peer transport
 # over loopback (tools/test.ps1); not part of the default build.
-add_executable(dcp-net-tests EXCLUDE_FROM_ALL tests/net_tests.cpp)
+# With the Early Story session code: the story session scenario runs it over the transport simulator.
+add_executable(dcp-net-tests EXCLUDE_FROM_ALL tests/net_tests.cpp src/early_story_online.c src/early_story_session.c
+    src/guest_hook.c src/hydeland_town.c src/network_access.c src/network_hint.c src/online_prompt.c)
 target_link_libraries(dcp-net-tests PRIVATE dcp_net)
 set_target_properties(dcp-net-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_definitions(dcp-net-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
 # The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
 # DCP_TEST_LOBBY names one. Not part of the default build.
-add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp
+add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/early_story_diag.cpp src/runtime_rudp.cpp
     src/early_story_session.c src/boss_battle_online.c launcher/online_view.cpp src/appearance_net.cpp src/appearance_session.cpp)
 target_include_directories(dcp-online-hle-tests PRIVATE launcher)
 target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
