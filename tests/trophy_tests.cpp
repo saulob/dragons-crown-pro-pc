@@ -905,10 +905,9 @@ void TestKeyManagementFlow(const fs::path& base) {
 }
 
 void TestLauncherPieces(const fs::path& base) {
-    CHECK(std::size(kPageOrder) >= 6 && kPageOrder[std::size(kPageOrder) - 4] == PageId::kTrophies &&
-          kPageOrder[std::size(kPageOrder) - 3] == PageId::kEditor &&
+    CHECK(std::size(kPageOrder) >= 6 && kPageOrder[std::size(kPageOrder) - 3] == PageId::kTrophies &&
           kPageOrder[std::size(kPageOrder) - 2] == PageId::kBugReport && kPageOrder[std::size(kPageOrder) - 1] == PageId::kAbout &&
-          kPageOrder[std::size(kPageOrder) - 5] == PageId::kControls && kPageOrder[std::size(kPageOrder) - 6] == PageId::kCheats);
+          kPageOrder[std::size(kPageOrder) - 4] == PageId::kControls && kPageOrder[std::size(kPageOrder) - 5] == PageId::kCheats);
     CHECK(std::string(PageName(PageId::kTrophies)) == "Trophies");
     CHECK(std::string(PageName(PageId::kEditor)) == "Editor");
     DcpPng::Image image;

@@ -22,6 +22,15 @@ sidebar's colours. The file's contents are unchanged.
 launcher: renamed from `bug-file-svgrepo-com.svg` and drawn scaled, in the sidebar's colours. The file's contents are
 unchanged.
 
+## Public domain
+
+| File | Title | Author | Collection | Source | License |
+|---|---|---|---|---|---|
+| `editor.svg` | Pencil SVG Vector 420 | Jackey Jia | Online Learning Bordered Vectors | https://www.svgrepo.com/svg/475303/pencil | PD License |
+
+Adapted for the launcher: renamed from `pencil-svgrepo-com.svg`, and its grey background circle was removed because it
+cannot be tinted. No other path was changed.
+
 ## CC0
 
 CC0 asks for no attribution; the sources are kept for provenance.
@@ -35,7 +44,6 @@ CC0 asks for no attribution; the sources are kept for provenance.
 | `cheats.svg` | Star Alt 1 | https://www.svgrepo.com/svg/532289/star-alt-1 | CC0 |
 | `controls.svg` | Keyboard | https://www.svgrepo.com/svg/524665/keyboard | CC0 |
 | `trophies.svg` | Achievements | https://www.svgrepo.com/svg/304482/achievements | CC0 |
-| `editor.svg` | Pencil Revision | https://www.svgrepo.com/svg/530379/pencil-revision | CC0 |
 | `about.svg` | About | https://www.svgrepo.com/svg/486929/about | CC0 |
 
 ## Changes from the downloaded files

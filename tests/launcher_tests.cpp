@@ -3891,9 +3891,8 @@ void TestOptions() {
         ++count;
     }
     CHECK(count == 11);
-    // Online sits between Gameplay and Cheats: it changes play and turns the cheats off.
-    const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Online",  "Cheats",
-                                 "Controls", "Trophies", "Editor",  "Bug Report", "About"};
+    const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Editor", "Online",
+                                 "Cheats", "Controls", "Trophies", "Bug Report", "About"};
     for (size_t i = 0; i < std::size(order); ++i) {
         CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
     }
@@ -3901,8 +3900,12 @@ void TestOptions() {
     for (size_t i = 0; i < std::size(kPageOrder); ++i) {
         if (kPageOrder[i] == PageId::kOnline) {
             ++online_entries;
-            CHECK(i > 0 && kPageOrder[i - 1] == PageId::kGameplay);
+            CHECK(i > 0 && kPageOrder[i - 1] == PageId::kEditor);
             CHECK(i + 1 < std::size(kPageOrder) && kPageOrder[i + 1] == PageId::kCheats);
+        }
+        if (kPageOrder[i] == PageId::kEditor) {
+            CHECK(i > 0 && kPageOrder[i - 1] == PageId::kGameplay);
+            CHECK(i + 1 < std::size(kPageOrder) && kPageOrder[i + 1] == PageId::kOnline);
         }
     }
     CHECK(online_entries == 1);
@@ -3913,6 +3916,8 @@ void TestOptions() {
     CHECK(launcher.find("for (const PageId page : kPageOrder) {\n            c.pages.push_back(MakePage(page));") !=
           std::string::npos);
     CHECK(launcher.find("start_page") == std::string::npos && kPageOrder[0] == PageId::kPlay);
+    const size_t editor_case = launcher.find("case PageId::kEditor:");
+    CHECK(editor_case != std::string::npos && launcher.find("PageEditor(ui)", editor_case) < launcher.find("case PageId::", editor_case + 1));
     const size_t online_case = launcher.find("case PageId::kOnline:");
     CHECK(online_case != std::string::npos &&
           launcher.find("online_page_->PendingRequests()", online_case) < launcher.find("case PageId::kTrophies:", online_case));
@@ -4726,6 +4731,10 @@ void TestIconLicenses() {
             CHECK(line.find("| Bug File | Vectopus | Atlas Variety Line Icons |") != std::string::npos);
             CHECK(line.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
             CHECK(line.find("| MIT License |") != std::string::npos);
+        } else if (asset.page == PageId::kEditor) {
+            CHECK(line.find("| Pencil SVG Vector 420 | Jackey Jia | Online Learning Bordered Vectors |") != std::string::npos);
+            CHECK(line.find("https://www.svgrepo.com/svg/475303/pencil") != std::string::npos);
+            CHECK(line.find("| PD License |") != std::string::npos);
         } else if (line.find("| CC0 |") != std::string::npos) {
             ++cc0_rows;
             const size_t url = line.find("https://www.svgrepo.com/svg/");
@@ -4733,12 +4742,14 @@ void TestIconLicenses() {
             CHECK(licenses.find(address) != std::string::npos);
         }
     }
-    CHECK(cc0_rows == 9);
+    CHECK(cc0_rows == 8);
     CHECK(licenses.find("CC0 (public domain dedication), all from SVG Repo") != std::string::npos);
     CHECK(licenses.find("\"Display Television Tv Screen Gadget\" by nickylimyeanfen, collection Inc Device Icons.") != std::string::npos);
     CHECK(licenses.find("License: CC Attribution License, https://creativecommons.org/licenses/by/") != std::string::npos);
     CHECK(licenses.find("\"Bug File\" by Vectopus, collection Atlas Variety Line Icons.") != std::string::npos);
     CHECK(licenses.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
+    CHECK(licenses.find("editor.svg, public domain (PD License):") != std::string::npos);
+    CHECK(licenses.find("https://www.svgrepo.com/svg/475303/pencil") != std::string::npos);
     CHECK(licenses.find("bug-report.svg, MIT License:") != std::string::npos);
     CHECK(licenses.find("Copyright (c) Vectopus\n\nPermission is hereby granted") != std::string::npos);
     for (const std::string& attribution : {licenses, sources}) {
