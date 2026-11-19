@@ -40,7 +40,7 @@ find_package(Freetype REQUIRED)
 find_package(Threads REQUIRED)
 
 # Keyboard and mouse bindings and the mouse and touch input state shared by the launcher, the runtime pad and the video core.
-add_library(dcp_keys STATIC src/dcp_keys.c src/dcp_mouse.c src/dcp_touchscreen.c src/dcp_pad_owner.c)
+add_library(dcp_keys STATIC src/dcp_keys.c src/dcp_mouse.c src/dcp_touchscreen.c src/dcp_pointer_motion.c src/dcp_pad_owner.c)
 target_include_directories(dcp_keys PUBLIC src)
 target_link_libraries(dcp_keys PUBLIC SDL3::SDL3)
 target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)

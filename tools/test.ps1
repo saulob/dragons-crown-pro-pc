@@ -199,7 +199,7 @@ $tests = @(
     (Test-Step 'MOVBE, BMI1 and LZCNT tests' 'dcp-isa-tests' -Parity),
     (Test-Step 'text tests (text dialog, system font set)' 'dcp-text-tests'),
     (Test-Step 'cursor visibility tests' 'dcp-cursor-tests'),
-    (Test-Step 'mouse input tests (bindings, Pointer Control touch finger, touchscreen touchpad, capture rules, settings, local controller ownership)' 'dcp-mouse-tests'),
+    (Test-Step 'mouse input tests (bindings, Pointer Control touch finger, Steam Deck trackpad responsiveness, touchscreen touchpad, capture rules, settings, local controller ownership)' 'dcp-mouse-tests'),
     (Test-Step 'window fit tests' 'dcp-window-tests'),
     (Test-Step 'SDL compat tests (Proton/Wine HIDAPI default)' 'dcp-sdl-compat-tests'),
     (Test-Step 'present tests (swapchain images, present mode, flip pacing)' 'dcp-present-tests'),

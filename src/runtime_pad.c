@@ -12,6 +12,7 @@
 #include "dcp_mouse.h"
 #include "dcp_pad_buttons.h"
 #include "dcp_pad_owner.h"
+#include "dcp_pointer_motion.h"
 #include "dcp_touchscreen.h"
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
@@ -340,6 +341,25 @@ static void log_touchscreen_sample(const DcpTouchSample *screen) { /* DEBUG_SAUL
     last=*screen; /* DEBUG_SAULO */
     printf("Touch diag: pad sample touch=%d x=%u y=%u id=%u touchpad_click=%d\n",screen->touch,(unsigned)screen->x,(unsigned)screen->y,(unsigned)screen->id,(screen->buttons&BTN_TOUCHPAD)!=0); /* DEBUG_SAULO */
 } /* DEBUG_SAULO */
+static void log_pointer_sample(const DcpMouseSample *mouse) { /* DEBUG_SAULO: DCP-2TG3WE game-facing finger per second */
+    static uint64_t window_start, last_read, max_gap; /* DEBUG_SAULO */
+    static int lines, reads, moving, lifted, had_touch, px, py; /* DEBUG_SAULO */
+    static long step; /* DEBUG_SAULO */
+    const uint64_t now=SDL_GetTicksNS(); /* DEBUG_SAULO */
+    if (last_read && now-last_read>max_gap) max_gap=now-last_read; /* DEBUG_SAULO */
+    last_read=now; /* DEBUG_SAULO */
+    if (mouse->pointer) { /* DEBUG_SAULO */
+        if (!window_start) { window_start=now; max_gap=0; } /* DEBUG_SAULO */
+        ++reads; /* DEBUG_SAULO */
+        if (!mouse->touch) ++lifted; /* DEBUG_SAULO */
+        else if (had_touch && (mouse->x!=px || mouse->y!=py)) { ++moving; step+=labs((long)mouse->x-px)+labs((long)mouse->y-py); } /* DEBUG_SAULO */
+    } /* DEBUG_SAULO */
+    had_touch=mouse->touch; px=mouse->x; py=mouse->y; /* DEBUG_SAULO */
+    if (lines>=120 || !window_start || now-window_start<1000000000ull) return; /* DEBUG_SAULO */
+    ++lines; /* DEBUG_SAULO */
+    printf("Pointer diag: pad 1s pointer_reads=%d moving_reads=%d lifted_reads=%d finger_step=%ld max_read_gap_ms=%.1f\n",reads,moving,lifted,step,max_gap/1e6); /* DEBUG_SAULO */
+    window_start=0; reads=moving=lifted=0; step=0; /* DEBUG_SAULO */
+} /* DEBUG_SAULO */
 static void key_axis(uint8_t *axis, bool negative, bool positive) {
     if (negative || positive) *axis=(uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0));
 }
@@ -368,6 +388,7 @@ static void sample_host(int slot, PadData *d) {
         dcp_mouse_sample(dcp_mouse_global(),&mouse);
         dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);
         log_touchscreen_sample(&screen); /* DEBUG_SAULO */
+        log_pointer_sample(&mouse); /* DEBUG_SAULO */
         if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);
         pointer_owns_touch=mouse.pointer || screen.touch;
     }
@@ -689,7 +710,10 @@ static ABI int32_t pad_read_state(int32_t handle, PadData *data) {
     if (!data) return ERR_INVALID_ARG;
     pthread_mutex_lock(&lock);
     sample(slot,data); ++reads;
-    if (slot==0) trace_read(data);
+    if (slot==0) {
+        trace_read(data);
+        dcp_motion_record_read(SDL_GetTicksNS());
+    }
     pthread_mutex_unlock(&lock);
     return 0;
 }

@@ -44,9 +44,12 @@ void dcp_mouse_wheel(DcpMouseState *state, float steps);
 void dcp_mouse_block(DcpMouseState *state, int blocked);
 /* Focus loss, a window mode switch, shutdown. */
 void dcp_mouse_release_all(DcpMouseState *state);
-/* A controller became the active device: Pointer Control ends and stays off until its button is released. */
-void dcp_mouse_controller_activity(DcpMouseState *state);
+/* A controller's own touch surface was touched: it takes the surface, so Pointer Control ends and stays off until its
+ * button is released. Controller buttons, sticks and triggers never end Pointer Control. */
+void dcp_mouse_controller_touch(DcpMouseState *state);
 int dcp_mouse_pointer_active(DcpMouseState *state);
+/* Any accepted mouse button is held. */
+int dcp_mouse_any_held(DcpMouseState *state);
 
 /* Pad sampler: one call per game read of player 1. */
 void dcp_mouse_sample(DcpMouseState *state, DcpMouseSample *out);

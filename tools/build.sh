@@ -139,7 +139,7 @@ if ((test)); then
     "$build_dir/bin/dcp-appearance-online-tests"
     step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
-    step 'Running the mouse input tests'
+    step 'Running the mouse input tests (Steam Deck trackpad responsiveness, touchscreen touchpad)'
     "$build_dir/bin/dcp-mouse-tests"
     step 'Running the window fit tests'
     "$build_dir/bin/dcp-window-tests"

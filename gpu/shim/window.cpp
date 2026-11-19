@@ -1,6 +1,7 @@
 // The game window (SDL3) the renderer presents to.
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +18,7 @@
 #include "dcp_latency_trace.h"
 #include "dcp_mouse.h"
 #include "dcp_ping.h"
+#include "dcp_pointer_motion.h"
 #include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
@@ -356,6 +358,30 @@ bool WindowSDL::TrackControllerEvent(const SDL_Event& event) {
     }
 }
 
+// Window thread. A DCP_MOTION_HELD_* mask of the mouse and opened-gamepad buttons held right now.
+unsigned WindowSDL::HeldButtons() const {
+    unsigned held = dcp_mouse_any_held(dcp_mouse_global()) ? DCP_MOTION_HELD_MOUSE : 0u;
+    for (const auto& [id, pad] : pad_activity) {
+        const auto& s = pad.state;
+        if (s.buttons || s.left_trigger / 128 >= DcpCursor::kTriggerThreshold ||
+            s.right_trigger / 128 >= DcpCursor::kTriggerThreshold) {
+            held |= DCP_MOTION_HELD_GAMEPAD;
+        }
+    }
+    return held;
+}
+
+// Window thread, after TrackControllerEvent recorded the axis.
+bool WindowSDL::RightStickMoved(const SDL_Event& event) const {
+    const SDL_GamepadAxisEvent& axis = event.gaxis;
+    if (axis.axis != SDL_GAMEPAD_AXIS_RIGHTX && axis.axis != SDL_GAMEPAD_AXIS_RIGHTY) {
+        return false;
+    }
+    const auto pad = pad_activity.find(axis.which);
+    return pad != pad_activity.end() && (std::abs(pad->second.state.right_x) >= DcpCursor::kStickDeadzone ||
+                                         std::abs(pad->second.state.right_y) >= DcpCursor::kStickDeadzone);
+}
+
 static DcpTouchArea GameTouchArea() {
     const auto& progress = DcpPresent::g_progress;
     const DcpPresent::Size origin = DcpPresent::Unpack(progress.destination_origin.load(std::memory_order_relaxed));
@@ -406,6 +432,38 @@ void Log(const SDL_Event& e, bool ui) {                                // DEBUG_
     }                                                                  // DEBUG_SAULO
 }                                                                      // DEBUG_SAULO
 } // namespace TouchDiag DEBUG_SAULO
+
+namespace PointerDiag { // DEBUG_SAULO: bounded pointer motion diagnostics for DCP-2TG3WE
+int lines = 0;                                                         // DEBUG_SAULO
+u64 window_start = 0, last_event = 0, max_gap = 0;                     // DEBUG_SAULO
+int events[3] = {};                                                    // DEBUG_SAULO
+float magnitude = 0.0f;                                                // DEBUG_SAULO
+unsigned last_held = 0;                                                // DEBUG_SAULO
+bool last_pointer = false, last_captured = false, last_relative = false, last_sdl_capture = false; // DEBUG_SAULO
+void Motion(int source, float amount) {                                // DEBUG_SAULO
+    const u64 now = SDL_GetTicksNS();                                  // DEBUG_SAULO
+    if (!window_start) window_start = now;                             // DEBUG_SAULO
+    if (last_event && now - last_event > max_gap && now - last_event < 1000000000ull) max_gap = now - last_event; // DEBUG_SAULO
+    last_event = now;                                                  // DEBUG_SAULO
+    ++events[source];                                                  // DEBUG_SAULO
+    magnitude += amount;                                               // DEBUG_SAULO
+}                                                                      // DEBUG_SAULO
+void Poll(unsigned held, bool pointer, bool captured, bool relative, bool sdl_capture) { // DEBUG_SAULO
+    if (lines >= 150) return;                                          // DEBUG_SAULO
+    const bool changed = held != last_held || pointer != last_pointer || captured != last_captured || relative != last_relative || sdl_capture != last_sdl_capture; // DEBUG_SAULO
+    last_held = held; last_pointer = pointer; last_captured = captured; last_relative = relative; last_sdl_capture = sdl_capture; // DEBUG_SAULO
+    if (changed && window_start) {                                     // DEBUG_SAULO
+        ++lines;                                                       // DEBUG_SAULO
+        std::printf("Pointer diag: state held_mouse=%d held_pad=%d pointer=%d dcp_relative=%d sdl_relative=%d sdl_capture=%d\n", int((held & DCP_MOTION_HELD_MOUSE) != 0), int((held & DCP_MOTION_HELD_GAMEPAD) != 0), int(pointer), int(captured), int(relative), int(sdl_capture)); // DEBUG_SAULO
+    }                                                                  // DEBUG_SAULO
+    const u64 now = SDL_GetTicksNS();                                  // DEBUG_SAULO
+    if (!window_start || now - window_start < 1000000000ull) return;   // DEBUG_SAULO
+    ++lines;                                                           // DEBUG_SAULO
+    std::printf("Pointer diag: 1s mouse=%d mouse_pointer=%d gamepad_axis=%d magnitude=%.0f max_event_gap_ms=%.1f held_mouse=%d held_pad=%d pointer=%d\n", events[0], events[1], events[2], magnitude, max_gap / 1e6, int((held & DCP_MOTION_HELD_MOUSE) != 0), int((held & DCP_MOTION_HELD_GAMEPAD) != 0), int(pointer)); // DEBUG_SAULO
+    window_start = 0; max_gap = 0; magnitude = 0.0f;                   // DEBUG_SAULO
+    events[0] = events[1] = events[2] = 0;                             // DEBUG_SAULO
+}                                                                      // DEBUG_SAULO
+} // namespace PointerDiag DEBUG_SAULO
 
 void WindowSDL::HandleTouch(const SDL_Event& event, bool ui) {
     const SDL_TouchFingerEvent& finger = event.tfinger;
@@ -498,7 +556,6 @@ bool WindowSDL::PollEvents() {
         }
         if (controller_activity && !ui) {
             cursor.ControllerActivity();
-            dcp_mouse_controller_activity(dcp_mouse_global());
         }
         if (DcpTouchRoute::IsFingerEvent(event)) {
             HandleTouch(event, ui);
@@ -514,6 +571,21 @@ bool WindowSDL::PollEvents() {
                 cursor.MouseMoved();
                 const float to_game = SDL_GetWindowPixelDensity(window) * dcp_mouse_game_scale(GetWidth(), GetHeight());
                 dcp_mouse_motion(dcp_mouse_global(), event.motion.xrel * to_game, event.motion.yrel * to_game);
+                const bool pointer = dcp_mouse_pointer_active(dcp_mouse_global()) != 0;
+                dcp_motion_record_host(pointer ? DCP_MOTION_SOURCE_MOUSE_POINTER : DCP_MOTION_SOURCE_MOUSE, HeldButtons(),
+                                       SDL_GetTicksNS());
+                PointerDiag::Motion(pointer ? 1 : 0, std::fabs(event.motion.xrel) + std::fabs(event.motion.yrel)); // DEBUG_SAULO
+            }
+            break;
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            if (!ui && RightStickMoved(event)) {
+                dcp_motion_record_host(DCP_MOTION_SOURCE_GAMEPAD_AXIS, HeldButtons(), SDL_GetTicksNS());
+                PointerDiag::Motion(2, 0.0f); // DEBUG_SAULO
+            }
+            break;
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+            if (!ui) {
+                dcp_mouse_controller_touch(dcp_mouse_global());
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -584,6 +656,8 @@ bool WindowSDL::PollEvents() {
     }
     UpdateMouseCapture();
     UpdateCursor();
+    PointerDiag::Poll(HeldButtons(), dcp_mouse_pointer_active(dcp_mouse_global()) != 0, mouse_capture.Captured(), // DEBUG_SAULO
+                      SDL_GetWindowRelativeMouseMode(window), (SDL_GetWindowFlags(window) & SDL_WINDOW_MOUSE_CAPTURE) != 0); // DEBUG_SAULO
     return is_open;
 }
 

@@ -19,6 +19,7 @@
 #include "dcp_mouse_capture.h"
 #include "dcp_pad_buttons.h"
 #include "dcp_pad_owner.h"
+#include "dcp_pointer_motion.h"
 #include "dcp_touch_route.h"
 #include "dcp_touchscreen.h"
 
@@ -652,11 +653,11 @@ void TestFocusLossAndBlocking() {
     CHECK(rig.Read().buttons == BTN_SQUARE);
 }
 
-void TestControllerActivityEndsPointer() {
+void TestControllerTouchEndsPointer() {
     Rig rig;
     rig.Down(DCP_MOUSE_MIDDLE);
     CHECK(rig.Read().touch);
-    dcp_mouse_controller_activity(rig.state);
+    dcp_mouse_controller_touch(rig.state);
     CHECK(!dcp_mouse_pointer_active(rig.state));
     DcpMouseSample sample = rig.Read();
     CHECK(!sample.touch && !sample.pointer);
@@ -670,9 +671,9 @@ void TestControllerActivityEndsPointer() {
     rig.Down(DCP_MOUSE_MIDDLE);
     CHECK(dcp_mouse_pointer_active(rig.state) && rig.Read().touch);
 
-    // Controller activity with no pointer held changes nothing.
+    // A controller touch with no pointer held changes nothing.
     Rig idle;
-    dcp_mouse_controller_activity(idle.state);
+    dcp_mouse_controller_touch(idle.state);
     idle.Down(DCP_MOUSE_MIDDLE);
     CHECK(dcp_mouse_pointer_active(idle.state));
 }
@@ -939,7 +940,18 @@ void TestSourceSafety() {
     CHECK(window.find("ReleaseMouse();", destructor) < window.find("SDL_DestroyWindow(window);", destructor));
     const std::size_t focus = window.find("case SDL_EVENT_WINDOW_FOCUS_LOST:");
     CHECK(focus != std::string::npos && window.find("ReleaseMouse();", focus) < window.find("break;", focus));
-    CHECK(Contains(window, "dcp_mouse_controller_activity(dcp_mouse_global());"));
+    // Only a touch on an opened controller's own touchpad ends Pointer Control; buttons, sticks and triggers do not.
+    CHECK(Count(window, "dcp_mouse_controller_touch(") == 1);
+    const std::size_t pad_touch = window.find("case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:");
+    CHECK(pad_touch != std::string::npos &&
+          window.find("dcp_mouse_controller_touch(dcp_mouse_global());", pad_touch) < window.find("break;", pad_touch));
+    const std::size_t activity = window.find("if (controller_activity && !ui) {");
+    CHECK(activity != std::string::npos);
+    const std::string activity_block = window.substr(activity, window.find("}", activity) - activity);
+    CHECK(Contains(activity_block, "cursor.ControllerActivity();") && !Contains(activity_block, "dcp_mouse_"));
+    for (const char* source : {"gpu/shim/window.cpp", "src/runtime_pad.c", "src/dcp_mouse.c", "src/dcp_mouse.h"}) {
+        CHECK(!Contains(ReadSource(source), "dcp_mouse_controller_activity"));
+    }
     CHECK(Contains(window, "mouse_capture.Captured()"));
     // Overlay input stays isolated: gameplay presses and motion are forwarded only when no overlay owns the mouse.
     const std::size_t motion = window.find("case SDL_EVENT_MOUSE_MOTION:");
@@ -1702,6 +1714,360 @@ void TestPadOwnershipSource() {
     CHECK(!Contains(pad, "XInput Controller #"));
 }
 
+// A Pointer Control stroke: the same motion before every read, with `other` held from read `press_at` up to read
+// `release_at`. The pointer is `pointer` and the click is `click`, as a Steam Deck layout may bind them.
+struct Stroke {
+    Game game;
+    std::vector<DcpMouseSample> samples;
+    double input_x = 0, input_y = 0;
+};
+
+Stroke RunStroke(int pointer, int click, int other, int press_at, int release_at, int reads = 300) {
+    Rig rig;
+    rig.map.button[DCP_MOUSE_POINTER_CONTROL] = pointer;
+    rig.map.button[DCP_MOUSE_POINTER_INTERACT] = click;
+    rig.Configure();
+    rig.Down(pointer);
+    Stroke stroke;
+    for (int read = 0; read < reads; ++read) {
+        if (other && read == press_at) {
+            rig.Down(other);
+        }
+        if (other && read == release_at) {
+            rig.Up(other);
+        }
+        rig.Move(7.0f, 3.0f);
+        float dx = 0, dy = 0;
+        dcp_mouse_to_touch_units(100, 7.0f, 3.0f, &dx, &dy);
+        stroke.input_x += dx;
+        stroke.input_y += dy;
+        stroke.samples.push_back(rig.Read());
+        stroke.game.Read(stroke.samples.back());
+    }
+    for (int read = 0; read < 20; ++read) {
+        stroke.samples.push_back(rig.Read());
+        stroke.game.Read(stroke.samples.back());
+    }
+    return stroke;
+}
+
+bool SameFinger(const Stroke& a, const Stroke& b) {
+    if (a.samples.size() != b.samples.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.samples.size(); ++i) {
+        const DcpMouseSample &x = a.samples[i], &y = b.samples[i];
+        if (x.touch != y.touch || x.pointer != y.pointer || x.x != y.x || x.y != y.y || x.id != y.id) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// DCP-2TG3WE: a held button never changes the finger the game reads.
+void TestMotionUnaffectedByHeldButtons() {
+    const Stroke base = RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, 0, 0, 0);
+    CHECK(std::fabs(base.game.pointer_x - base.input_x) <= 2.0 * base.game.segments);
+    CHECK(std::fabs(base.game.pointer_y - base.input_y) <= 2.0 * base.game.segments);
+    for (int other : {DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, DCP_MOUSE_X1}) {
+        CHECK(SameFinger(base, RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, other, 0, 1000))); // held throughout
+        CHECK(SameFinger(base, RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, other, 100, 200))); // pressed mid-stroke
+    }
+    // Pointer Control on the left button (a trackpad click) with the right button held.
+    const Stroke left = RunStroke(DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, 0, 0, 0);
+    CHECK(SameFinger(left, RunStroke(DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, DCP_MOUSE_RIGHT, 0, 1000)));
+    CHECK(SameFinger(left, RunStroke(DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, DCP_MOUSE_X2, 50, 250)));
+    CHECK(SameFinger(base, left));
+
+    // Sustained: the finger moves on every read but the recentres, whatever is held.
+    const Stroke held = RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, 0, 1000);
+    int still = 0, lifted = 0;
+    for (std::size_t i = 1; i < held.samples.size(); ++i) {
+        const DcpMouseSample &a = held.samples[i - 1], &b = held.samples[i];
+        lifted += !b.touch;
+        still += i < 300 && a.touch && b.touch && a.x == b.x && a.y == b.y;
+    }
+    CHECK(still == 0);
+    CHECK(lifted >= 3 && (lifted == held.game.segments - 1 || lifted == held.game.segments));
+    CHECK(std::fabs(held.game.pointer_x - held.input_x) <= 2.0 * held.game.segments);
+}
+
+double Travel(Rig& rig, Game& game, int reads) {
+    const double before = game.pointer_x;
+    for (int i = 0; i < reads; ++i) {
+        game.Read(rig.Read());
+    }
+    return game.pointer_x - before;
+}
+
+void TestMotionAndButtonOrdering() {
+    const double unit = 30.0 / 0.6; // 30 game pixels at 100% in touch units
+    // Pointer Control down and motion before the same read: delivered once the finger is down.
+    {
+        Rig rig;
+        Game game;
+        rig.Down(DCP_MOUSE_MIDDLE);
+        rig.Move(30.0f, 0.0f);
+        CHECK(std::fabs(Travel(rig, game, 3) - unit) < 1.0);
+    }
+    // Motion before Pointer Control is pressed is host cursor motion: the game never sees it (unchanged behaviour).
+    {
+        Rig rig;
+        Game game;
+        rig.Move(30.0f, 0.0f);
+        rig.Down(DCP_MOUSE_MIDDLE);
+        CHECK(std::fabs(Travel(rig, game, 3)) < 1.0);
+    }
+    // Another button around motion while the pointer is held: before down, after down, before up, right after up.
+    for (int other : {DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT}) {
+        Rig rig;
+        Game game;
+        rig.Down(DCP_MOUSE_MIDDLE);
+        Travel(rig, game, 2);
+        rig.Move(30.0f, 0.0f);
+        rig.Down(other);
+        CHECK(std::fabs(Travel(rig, game, 1) - unit) < 1.0);
+        rig.Down(other);
+        rig.Move(30.0f, 0.0f);
+        CHECK(std::fabs(Travel(rig, game, 1) - unit) < 1.0);
+        rig.Move(30.0f, 0.0f);
+        rig.Up(other);
+        CHECK(std::fabs(Travel(rig, game, 1) - unit) < 1.0);
+        rig.Up(other);
+        rig.Move(30.0f, 0.0f);
+        CHECK(std::fabs(Travel(rig, game, 1) - unit) < 1.0);
+        rig.Down(other);
+        rig.Move(15.0f, 0.0f);
+        rig.Up(other);
+        rig.Move(15.0f, 0.0f);
+        CHECK(std::fabs(Travel(rig, game, 1) - unit) < 1.0);
+    }
+    // Releasing Pointer Control itself ends the stroke: motion queued before the release is dropped (unchanged).
+    {
+        Rig rig;
+        Game game;
+        rig.Down(DCP_MOUSE_MIDDLE);
+        Travel(rig, game, 2);
+        rig.Move(30.0f, 0.0f);
+        rig.Up(DCP_MOUSE_MIDDLE);
+        CHECK(std::fabs(Travel(rig, game, 2)) < 1.0);
+    }
+}
+
+void TestCaptureModesWithHeldButtons() {
+    using DcpMouseCapture::Frame;
+    DcpMouseCapture::Tracker tracker;
+    // Absolute (host cursor) until Pointer Control; other held buttons never flip the mode.
+    CHECK(!tracker.Update(Frame{false, true, false, false}).has_value());
+    CHECK(tracker.Update(Frame{true, true, false, false}) == std::optional<bool>(true));
+    for (int i = 0; i < 100; ++i) {
+        CHECK(!tracker.Update(Frame{true, true, false, false}).has_value());
+    }
+    CHECK(tracker.Update(Frame{false, true, false, false}) == std::optional<bool>(false));
+
+    // A held button does not change what Pointer Control or capture sees.
+    Rig rig;
+    rig.Down(DCP_MOUSE_MIDDLE);
+    rig.Down(DCP_MOUSE_RIGHT);
+    CHECK(dcp_mouse_pointer_active(rig.state) && dcp_mouse_any_held(rig.state));
+    rig.Up(DCP_MOUSE_RIGHT);
+    rig.Up(DCP_MOUSE_MIDDLE);
+    CHECK(!dcp_mouse_any_held(rig.state));
+    rig.Down(DCP_MOUSE_LEFT);
+    CHECK(!dcp_mouse_pointer_active(rig.state) && dcp_mouse_any_held(rig.state));
+    dcp_mouse_block(rig.state, 1);
+    CHECK(!dcp_mouse_any_held(rig.state));
+
+    // The window forwards the same relative motion in either mode, once per event, with no button gate.
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    CHECK(Count(window, "dcp_mouse_motion(") == 1);
+    CHECK(Contains(window, "dcp_mouse_motion(dcp_mouse_global(), event.motion.xrel * to_game, event.motion.yrel * to_game);"));
+    const std::size_t motion = window.find("case SDL_EVENT_MOUSE_MOTION:");
+    const std::string motion_case = window.substr(motion, window.find("break;", motion) - motion);
+    CHECK(!Contains(motion_case, "button") && !Contains(motion_case, "SDL_GetMouseState"));
+    CHECK(!Contains(window, "SDL_CaptureMouse") && !Contains(window, "SDL_SetWindowMouseGrab"));
+}
+
+// Controller sticks and the Steam Input virtual pad keep their path: the sampler reads the axes directly on each read and
+// telemetry only observes.
+void TestControllerPathUnchanged() {
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    CHECK(Contains(pad, "d->right_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTX));"));
+    CHECK(Contains(pad, "d->left_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTX));"));
+    CHECK(Count(pad, "dcp_motion_record_read(") == 1);
+    const std::size_t read_state = pad.find("static ABI int32_t pad_read_state(");
+    CHECK(read_state != std::string::npos && pad.find("dcp_motion_record_read(SDL_GetTicksNS());", read_state) <
+                                                 pad.find("static ABI int32_t pad_read(", read_state));
+    CHECK(Count(window, "dcp_motion_record_host(") == 2);
+    const std::size_t axis = window.find("case SDL_EVENT_GAMEPAD_AXIS_MOTION:\n            if (!ui && RightStickMoved(event)) {");
+    CHECK(axis != std::string::npos);
+    const std::string header = ReadSource("src/dcp_pointer_motion.h");
+    CHECK(!Contains(header, "PadData") && !Contains(header, "DcpMouseSample"));
+    // The pointer keeps the touch surface over pad fingers, and a touchscreen finger over the pointer (unchanged).
+    const std::size_t host = pad.find("static void sample_host(int slot, PadData *d)");
+    CHECK(pad.find("merge_mouse(d,&mouse);", host) < pad.find("merge_touchscreen(d,&screen);", host));
+}
+
+struct Motion {
+    DcpMotionTelemetry* state = dcp_motion_telemetry_new();
+    std::vector<std::string> lines;
+    std::uint64_t now = 1000000000ull;
+
+    ~Motion() { dcp_motion_telemetry_free(state); }
+    Motion() = default;
+    Motion(const Motion&) = delete;
+    Motion& operator=(const Motion&) = delete;
+
+    void Collect(char out[][DCP_MOTION_LINE_SIZE], std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) {
+            lines.emplace_back(out[i]);
+        }
+    }
+    void Host(DcpMotionSource source, unsigned held) {
+        char out[DCP_MOTION_MAX_LINES][DCP_MOTION_LINE_SIZE];
+        Collect(out, dcp_motion_host(state, source, held, now, out));
+    }
+    void Read() {
+        char out[DCP_MOTION_MAX_LINES][DCP_MOTION_LINE_SIZE];
+        Collect(out, dcp_motion_read(state, now, out));
+    }
+    // Host motion every `event_ms` for `ms`, with a game read every 16 ms unless `reading` is false.
+    void Stroke(DcpMotionSource source, unsigned held, int ms, int event_ms = 4, bool reading = true) {
+        for (int t = 0; t < ms; ++t) {
+            now += 1000000ull;
+            if (t % event_ms == 0) {
+                Host(source, held);
+            }
+            if (reading && t % 16 == 0) {
+                Read();
+            }
+        }
+    }
+    void Idle(int ms) {
+        for (int t = 0; t < ms; ++t) {
+            now += 1000000ull;
+            if (t % 16 == 0) {
+                Read();
+            }
+        }
+    }
+    int With(const std::string& needle) const {
+        return static_cast<int>(std::count_if(lines.begin(), lines.end(),
+                                              [&](const std::string& line) { return Contains(line, needle); }));
+    }
+};
+
+void TestPointerMotionTelemetry() {
+    // Short or sparse motion is not sustained; idle reads say nothing.
+    {
+        Motion m;
+        m.Idle(2000);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 150);
+        m.Idle(500);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 2000, 200);
+        CHECK(m.lines.empty());
+    }
+    // Sustained motion with nothing held: active once, nothing else.
+    {
+        Motion m;
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE, 0, 3000);
+        CHECK(m.lines.size() == 1 && m.lines[0] == "Pointer telemetry: event=pointer_motion_active source=mouse count=1");
+    }
+    // Motion while a button is held: one line per stroke, naming the held class; no stall while the game reads.
+    {
+        Motion m;
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 3000);
+        CHECK(m.lines.size() == 2);
+        CHECK(m.lines[1] == "Pointer telemetry: event=pointer_motion_while_button_held source=mouse_pointer held=mouse_button count=1");
+        m.Idle(500);
+        m.Stroke(DCP_MOTION_SOURCE_GAMEPAD_AXIS, DCP_MOTION_HELD_GAMEPAD, 1000, 8);
+        CHECK(m.With("source=gamepad_axis held=gamepad_button count=1") == 1);
+        m.Idle(500);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE, DCP_MOTION_HELD_MOUSE | DCP_MOTION_HELD_GAMEPAD, 1000);
+        CHECK(m.With("source=mouse held=both count=1") == 1);
+        CHECK(m.With("stall") == 0 && m.With("recovered") == 0);
+    }
+    // A button pressed partway through the stroke is still reported for that stroke.
+    {
+        Motion m;
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, 0, 500);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 500);
+        CHECK(m.With("event=pointer_motion_active") == 1 && m.With("event=pointer_motion_while_button_held") == 1);
+    }
+    // A stall: the host keeps sending motion while a button is held but the game stops reading.
+    {
+        Motion m;
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 500);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 180, 4, false);
+        CHECK(m.With("event=pointer_motion_stall_while_button_held source=mouse_pointer held=mouse_button count=1") == 1);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 400);
+        CHECK(m.With("event=pointer_motion_recovered source=mouse_pointer stall=lt250ms count=1") == 1);
+        CHECK(m.With("stall_while_button_held") == 1); // one line per stall, not per event
+        m.Stroke(DCP_MOTION_SOURCE_GAMEPAD_AXIS, DCP_MOTION_HELD_GAMEPAD, 300, 8);
+        m.Stroke(DCP_MOTION_SOURCE_GAMEPAD_AXIS, DCP_MOTION_HELD_GAMEPAD, 1500, 8, false);
+        m.Read();
+        CHECK(m.With("event=pointer_motion_recovered source=gamepad_axis stall=ge1000ms count=1") == 1);
+    }
+    // Not a stall: ordinary reads with the Pointer Control recentre cadence, inactivity, no held button, host cursor
+    // motion the game does not use, or no read seen yet.
+    {
+        Motion m;
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 500);
+        m.now += 5000000000ull; // a long pause with nothing moving
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 90, 4, false);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, 0, 600, 4, false);
+        m.Stroke(DCP_MOTION_SOURCE_MOUSE, DCP_MOTION_HELD_MOUSE, 600, 4, false);
+        CHECK(m.With("stall") == 0);
+        Motion fresh;
+        fresh.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 1000, 4, false);
+        CHECK(fresh.With("stall") == 0);
+    }
+    // Rate limit: a long session logs only the first line and every power of ten.
+    {
+        Motion m;
+        for (int stroke = 0; stroke < 1000; ++stroke) {
+            m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 250);
+            m.Idle(200);
+        }
+        CHECK(m.With("event=pointer_motion_active") == 4 && m.With("event=pointer_motion_while_button_held") == 4);
+        CHECK(m.With("count=1000") == 2 && m.lines.size() == 8);
+    }
+    // Bad input logs nothing.
+    {
+        char out[DCP_MOTION_MAX_LINES][DCP_MOTION_LINE_SIZE];
+        CHECK(dcp_motion_host(nullptr, DCP_MOTION_SOURCE_MOUSE, 0, 1, out) == 0);
+        CHECK(dcp_motion_read(nullptr, 1, out) == 0);
+        Motion m;
+        m.Host(DCP_MOTION_SOURCE_COUNT, DCP_MOTION_HELD_MOUSE);
+        m.Host(static_cast<DcpMotionSource>(-1), DCP_MOTION_HELD_MOUSE);
+        CHECK(m.lines.empty());
+    }
+}
+
+void TestPointerMotionTelemetryPayload() {
+    Motion m;
+    m.Stroke(DCP_MOTION_SOURCE_MOUSE, DCP_MOTION_HELD_MOUSE, 500);
+    m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE | DCP_MOTION_HELD_GAMEPAD, 500);
+    m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_MOUSE, 300, 4, false);
+    m.Stroke(DCP_MOTION_SOURCE_GAMEPAD_AXIS, DCP_MOTION_HELD_GAMEPAD, 500, 8);
+    m.Stroke(DCP_MOTION_SOURCE_GAMEPAD_AXIS, DCP_MOTION_HELD_GAMEPAD, 600, 8, false);
+    m.Read();
+    CHECK(m.lines.size() == 10);
+    const std::regex safe("Pointer telemetry: event=pointer_motion_(active|while_button_held|stall_while_button_held|recovered) "
+                          "source=(mouse|mouse_pointer|gamepad_axis)( held=(mouse_button|gamepad_button|both))?"
+                          "( stall=(lt250ms|lt1000ms|ge1000ms))? count=[0-9]+");
+    for (const std::string& line : m.lines) {
+        CHECK(std::regex_match(line, safe));
+    }
+    // The module never sees a position, a delta, a device or an account.
+    const std::string source = ReadSource("src/dcp_pointer_motion.c") + ReadSource("src/dcp_pointer_motion.h");
+    for (const char* sensitive : {"%f", "%g", "SDL_", "name=", "vid", "pid", "steam", "account", "guid"}) {
+        CHECK(!Contains(source, sensitive));
+    }
+    CHECK(!Contains(source, "float") && !Contains(source, "double"));
+}
+
 } // namespace
 
 int main() {
@@ -1721,7 +2087,7 @@ int main() {
     TestStalledReadsAreBounded();
     TestFocusLossAndBlocking();
     TestMouseControlsSetting();
-    TestControllerActivityEndsPointer();
+    TestControllerTouchEndsPointer();
     TestWheel();
     TestOverlayAndTextEntryBlockGameplayMouse();
     TestCursorVisibilityIntegration();
@@ -1743,6 +2109,12 @@ int main() {
     TestPadOwnershipNoDuplicatesOrJumps();
     TestPadOwnershipTelemetry();
     TestPadOwnershipSource();
+    TestMotionUnaffectedByHeldButtons();
+    TestMotionAndButtonOrdering();
+    TestCaptureModesWithHeldButtons();
+    TestControllerPathUnchanged();
+    TestPointerMotionTelemetry();
+    TestPointerMotionTelemetryPayload();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

@@ -171,7 +171,7 @@ void dcp_mouse_release_all(DcpMouseState *s) {
     state_unlock(s);
 }
 
-void dcp_mouse_controller_activity(DcpMouseState *s) {
+void dcp_mouse_controller_touch(DcpMouseState *s) {
     state_lock(s);
     if (pointer_active(s)) {
         s->latched=1;
@@ -185,6 +185,14 @@ int dcp_mouse_pointer_active(DcpMouseState *s) {
     const int active=pointer_active(s);
     state_unlock(s);
     return active;
+}
+
+int dcp_mouse_any_held(DcpMouseState *s) {
+    state_lock(s);
+    int held=0;
+    for (int i=1;i<DCP_MOUSE_BUTTON_COUNT && !held;++i) held=s->down[i];
+    state_unlock(s);
+    return held;
 }
 
 static uint32_t wheel_bits(int target) {
