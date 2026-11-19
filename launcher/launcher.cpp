@@ -415,13 +415,9 @@ public:
         dcp_startup_phase("launcher running");
 
         while (outcome == Outcome::kRunning) {
-            if (!host_.PumpEvents()) {
+            if (!host_.WaitForFrame()) {
                 outcome = Outcome::kQuit;
                 break;
-            }
-            if (host_.Minimized()) {
-                SDL_Delay(30);
-                continue;
             }
             host_.BeginFrame();
             outcome = Frame();
@@ -1645,11 +1641,7 @@ DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const ch
     dialog.Draw(fonts, theme);
     host.EndFrame(theme.bg);
     host.Show();
-    while (dialog.open() && host.PumpEvents()) {
-        if (host.Minimized()) {
-            SDL_Delay(30);
-            continue;
-        }
+    while (dialog.open() && host.WaitForFrame()) {
         host.BeginFrame();
         dialog.Draw(fonts, theme);
         host.EndFrame(theme.bg);

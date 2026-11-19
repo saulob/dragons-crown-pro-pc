@@ -10,6 +10,10 @@
 .PARAMETER EarlyStorySession
   Builds and runs only the DCP-7G8RZV Early Story transition and session regression (the early-story-session group of
   dcp-net-tests) and the Early Story Online tests, and reports their result alone.
+.PARAMETER LauncherRenderer
+  Builds and runs only the DCP-RFWKVY launcher renderer regression (the renderer group of dcp-launcher-tests: Direct3D 11
+  with the issue #45 module pins, software fallback, present stall telemetry, frame cap) and reports its result alone. The
+  normal run includes the same group.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -37,7 +41,7 @@
 
   Launcher UI: dcp-launcher-tests is relinked on every run, so an executable from an older tree can never be the one that
   runs, and it reports each launcher group (SVG icons, icon and NanoSVG licenses, header art, DPI layout, scrollbar gutter,
-  separators and row spacing, sidebar in English and Portuguese, page navigation, shared source) as GROUP|launcher-*|PASS or
+  separators and row spacing, sidebar in English and Portuguese, page navigation, DCP-RFWKVY renderer, shared source) as GROUP|launcher-*|PASS or
   FAIL. tests\launcher_gate_tests.ps1 adds the static groups: source hygiene (with git diff --check), the TRG patch chain
   applied to a scratch clone of the pinned revision and compared with the checkout the tests read, a syntax-only compile of
   the launcher sources with the build's own warning flags (zero warnings), and the portable sources compiled with g++ in
@@ -50,7 +54,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession)
+param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 $tc = Resolve-Toolchain 'auto'
@@ -180,7 +184,7 @@ $blockedBuilds = 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
 
 $tests = @(
     (Test-Step 'Windows memory tests (sparse backing, commitment, aliases, release)' 'dcp-memory-windows-tests'),
-    (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings, and the launcher UI groups: icons, licenses, header art, DPI layout, scrollbar gutter, separators, sidebar, navigation)' 'dcp-launcher-tests' -Parity -Capture),
+    (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings, and the launcher UI groups: icons, licenses, header art, DPI layout, scrollbar gutter, separators, sidebar, navigation, renderer)' 'dcp-launcher-tests' -Parity -Capture),
     (Test-Step 'launcher static gate (source hygiene, TRG patch chain, compiler warnings, Windows and Linux syntax-only compiles)' -Script 'tests\launcher_gate_tests.ps1' -Capture `
         -Arguments (@('-BuildDir', $buildDir) + @(if ($SkipLinux) { '-SkipLinux' }))),
     (Test-Step 'unsupported-build diagnostics tests (direct package analysis, one-shot report, loader validators, edge cases)' 'dcp-build-diagnostics-tests' -Parity),
@@ -267,6 +271,7 @@ $tests = @(
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
+$launcherRendererSuites = 'dcp-launcher-tests'
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
@@ -277,6 +282,12 @@ if ($BossBattleOnline) {
         (Test-Step 'Early Story Online tests (session rules, shadow record, writer blocks, atomic install, synthetic and local boot images)' 'dcp-early-story-tests')
     )
     $requiredSuites = $earlyStorySessionSuites
+} elseif ($LauncherRenderer) {
+    $tests = @(
+        (Test-Step 'DCP-RFWKVY launcher renderer and presentation (dcp-launcher-tests renderer)' 'dcp-launcher-tests' -Capture `
+            -Key 'dcp-launcher-tests renderer' -Arguments @('renderer'))
+    )
+    $requiredSuites = $launcherRendererSuites
 } else {
     Sync-GpuDependencies
 }
@@ -284,7 +295,7 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } else {
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } else {
 & ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
@@ -400,6 +411,19 @@ if ($EarlyStorySession) {
         exit 1
     }
     Write-Host 'Early Story session tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($LauncherRenderer) {
+    $rendererLine = @($captured['dcp-launcher-tests renderer']) | Where-Object { "$_" -like 'GROUP|launcher-renderer|*' } | Select-Object -First 1
+    $rendererState = if ($rendererLine) { "$rendererLine".Split('|')[2] } else { 'FAIL (no result)' }
+    if ($rendererState -ne 'PASS' -and -not $failed.Contains('dcp-launcher-tests renderer')) { $failed.Add('dcp-launcher-tests renderer') }
+    Write-Host ''
+    Write-Host "DCP-RFWKVY launcher renderer and presentation: $rendererState" -ForegroundColor Cyan
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Launcher renderer tests passed.' -ForegroundColor Green
     exit 0
 }
 $parityOutput = @($captured['dcp-build-parity-tests'])
@@ -619,6 +643,7 @@ $launcherSummary = [ordered]@{
     'Separators/row spacing' = Get-LauncherRow @('launcher-separators')
     'Sidebar EN/PT-BR' = Get-LauncherRow @('launcher-sidebar')
     'Navigation coherence' = Get-LauncherRow @('launcher-navigation')
+    'DCP-RFWKVY renderer' = Get-LauncherRow @('launcher-renderer')
     'TRG patch chain' = Get-LauncherRow @('launcher-patches')
     'Compiler warnings' = Get-LauncherRow @('launcher-warnings')
     'Windows/Linux parity' = Get-LauncherRow @('launcher-parity', 'launcher-parity-windows', 'launcher-parity-linux')

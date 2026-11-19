@@ -9,6 +9,7 @@
 
 #include <imgui.h>
 
+#include "frame_pacer.h"
 #include "placement.h"
 
 struct SDL_Renderer;
@@ -40,9 +41,9 @@ public:
     void Show();
     void Close();
 
-    // Handles the window's events (F11 switches the launcher's own fullscreen). False once it was closed.
-    bool PumpEvents();
-    bool Minimized() const;
+    // Handles the window's events (F11 switches the launcher's own fullscreen) and sleeps until the next frame is due, at
+    // most 60 per second; a hidden window is not limited. False once the window was closed.
+    bool WaitForFrame();
 
     // Between these two the caller draws the launcher with ImGui. A capture path saves the frame as a PNG.
     void BeginFrame();
@@ -60,6 +61,11 @@ public:
     const std::optional<WindowPlacement>& Restored() const { return restored_; }
 
 private:
+    bool PumpEvents();
+    bool Minimized() const;
+    void ConfigureVsync();
+    void NoteFrameDrawn(int64_t now_ns, const FrameTimes& times);
+
     std::optional<WindowPlacement> restored_;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
@@ -69,6 +75,16 @@ private:
     bool gamepad_ = false;
     bool hidden_ = false;
     bool quit_ = false;
+    FramePacer pacer_;
+    LoopMonitor monitor_;
+    std::string renderer_name_;
+    int64_t frame_begin_ns_ = 0;
+
+    // DEBUG_SAULO: one aggregated line per second, for the first two minutes.
+    struct LoopDebug {
+        int64_t start_ns = 0, poll_ns = 0, build_ns = 0, submit_ns = 0, present_ns = 0, wait_ns = 0;
+        int frames = 0, minimized = 0, lines = 0;
+    } debug_;
 };
 
 } // namespace dcp

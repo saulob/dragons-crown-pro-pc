@@ -13,7 +13,7 @@ for unit in launcher/header_art.cpp launcher/page_icons.cpp launcher/incident_re
     [[ $output == *"warning:"* ]] && failed=1
     [[ -n $output ]] && printf '%s\n' "$output"
 done
-for header in trg/layout.h trg/page_navigation.h; do
+for header in trg/layout.h trg/page_navigation.h frame_pacer.h launcher_renderer.h; do
     output="$(printf '#include <%s>\n' "$header" | g++ "${flags[@]}" -x c++ - 2>&1)" || failed=1
     [[ $output == *"warning:"* ]] && failed=1
     [[ -n $output ]] && printf '%s\n' "$output"
