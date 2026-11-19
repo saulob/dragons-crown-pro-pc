@@ -158,6 +158,16 @@ struct ArchiveOverlay {
 std::optional<ArchiveOverlay> OverlayEntries(const CpkArchive& archive, uint64_t length,
                                              std::span<const std::pair<std::string, std::vector<uint8_t>>> entries,
                                              std::string* error = nullptr);
+// New entries, stored uncompressed past `length` and listed in a table of contents moved to the end; existing rows keep
+// their places and IDs. Nothing when a path is already in the archive; `error` says why.
+std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& archive, uint64_t length,
+                                                  std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
+                                                  std::string* error = nullptr);
+// The archive as a reader sees it with the overlay laid on: its listing, and the bytes of a range.
+bool OpenOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, CpkArchive& out,
+                  std::string* error = nullptr);
+std::vector<uint8_t> ReadOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, uint64_t offset,
+                                  size_t size);
 
 uint32_t Crc32(std::span<const uint8_t> bytes);
 

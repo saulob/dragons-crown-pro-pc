@@ -91,6 +91,7 @@ set(DCP_RUNTIME_SOURCES
     src/exit_game_hook.c
     src/exit_game_text.c
     src/gallery_unlock.c
+    src/appearance_hooks.c
     src/default_message_hook.c
     src/guest_hook.c
     src/inn_layout.c

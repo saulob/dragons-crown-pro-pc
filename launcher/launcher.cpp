@@ -29,6 +29,7 @@
 #include "controller_prompts.h"
 #include "game_patches.h"
 #include "dcp_accent.h"
+#include "editor_page.h"
 #include "dcp_png.h"
 #include "dcp_cheats.h"
 #include "dcp_displays.h"
@@ -386,6 +387,12 @@ public:
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         online_page_ = std::make_unique<OnlinePage>(UserDir());
+        editor_page_ = std::make_unique<EditorPage>(
+            host_, UserDir(), [this] { return EditorGame{RootsOf(paths_), build_}; },
+            [this] {
+                return std::string(
+                    ResolveTextLanguage(text_languages_, settings_.Get(kTextLanguageKey, text_languages_.front().key)).suffix);
+            });
         incident_page_ = std::make_unique<IncidentPage>(IncidentPlaces());
         {
             net::OnlineConfig online = ReadOnlineConfig(settings_.file());
@@ -505,6 +512,14 @@ private:
             break;
         case trg::Result::kQuit:
             if (!play_.starting() && LauncherQuitAllowed(ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
+                if (editor_page_ && editor_page_->dirty()) {
+                    launcher_->SetStatus(editor_page_->DirtyReason(), 6.0);
+                    const auto editor = std::find(std::begin(kPageOrder), std::end(kPageOrder), PageId::kEditor);
+                    if (editor != std::end(kPageOrder)) {
+                        launcher_->GoToPage(static_cast<int>(editor - std::begin(kPageOrder)));
+                    }
+                    break;
+                }
                 return Outcome::kQuit;
             }
             break;
@@ -707,7 +722,7 @@ private:
         c.branding.background = LauncherHeader([this](int width, int height) { return HeaderArtTexture(width, height); },
                                                header_art_aspect_);
         c.sponsor = {"Sponsor on GitHub", kSponsorUrl, sponsor_icon_};
-        c.note = "Play applies the changes. Save keeps them without starting.";
+        c.note = "Save keeps the launcher settings. Play saves them and starts the game.";
         for (const PageId page : kPageOrder) {
             c.pages.push_back(MakePage(page));
             c.pages.back().icon = [this, page](int pixels) { return PageIconTexture(page, pixels); };
@@ -726,6 +741,11 @@ private:
                 if (play_attempts_.Pressed(ImGui::GetFrameCount())) online_page_->PointToConnectionTest();
                 const auto online = std::find(std::begin(kPageOrder), std::end(kPageOrder), PageId::kOnline);
                 return trg::PlayCheck{false, kConnectionTestRequired, static_cast<int>(online - std::begin(kPageOrder))};
+            }
+            if (editor_page_ && editor_page_->dirty()) {
+                const auto editor = std::find(std::begin(kPageOrder), std::end(kPageOrder), PageId::kEditor);
+                return trg::PlayCheck{false, editor_page_->DirtyReason(),
+                                      static_cast<int>(editor - std::begin(kPageOrder))};
             }
             return trg::PlayCheck{};
         };
@@ -782,6 +802,9 @@ private:
                     [this] { return online_page_ ? static_cast<int>(online_page_->PendingRequests()) : 0; }};
         case PageId::kTrophies:
             return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr, nullptr};
+        case PageId::kEditor:
+            return {name, "Manage saves, characters and appearance.", [this](trg::Ui& ui) { PageEditor(ui); }, nullptr,
+                    nullptr};
         case PageId::kBugReport:
             return {name, "Report a problem and send it with one game log.", [this](trg::Ui& ui) { PageBugReport(ui); },
                     [this] { return incident_page_->HasReportUpdates(); }, nullptr};
@@ -1464,6 +1487,12 @@ private:
         trophy_page_->Draw(ui);
     }
 
+    void PageEditor(trg::Ui& ui) {
+        if (editor_page_) {
+            editor_page_->Draw(ui);
+        }
+    }
+
     IncidentPage::Places IncidentPlaces() const {
         const std::filesystem::path logs = PathFromUtf8(config_.logs_dir ? config_.logs_dir : "logs");
         const std::filesystem::path running = config_.log_file ? PathFromUtf8(config_.log_file) : std::filesystem::path();
@@ -1570,6 +1599,7 @@ private:
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
     std::unique_ptr<OnlinePage> online_page_;
+    std::unique_ptr<EditorPage> editor_page_;
     std::unique_ptr<IncidentPage> incident_page_;
     PlayAttemptDetector play_attempts_;
     PlayGate play_;

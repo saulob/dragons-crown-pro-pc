@@ -262,6 +262,7 @@ CC0 (public domain dedication), all from SVG Repo (www.svgrepo.com):
   cheats.svg     Star Alt 1    https://www.svgrepo.com/svg/532289/star-alt-1
   controls.svg   Keyboard      https://www.svgrepo.com/svg/524665/keyboard
   trophies.svg   Achievements  https://www.svgrepo.com/svg/304482/achievements
+  editor.svg     Pencil Revision https://www.svgrepo.com/svg/530379/pencil-revision
   about.svg      About         https://www.svgrepo.com/svg/486929/about
 
 bug-report.svg, MIT License:

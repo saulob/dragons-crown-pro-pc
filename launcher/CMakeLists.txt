@@ -34,11 +34,13 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp
     feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp npc_voice_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+    save_edit.cpp save_backup.cpp save_data.cpp save_discovery.cpp save_import.cpp game_texture.cpp game_mbs.cpp
+    sprite_render.cpp character_art.cpp editor_model.cpp appearance_custom.cpp appearance_runtime.cpp appearance_loader.cpp fighter_horns.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp
-    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/default_message_hook.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c
+    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/default_message_hook.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c ${PROJECT_SOURCE_DIR}/src/appearance_hooks.c
     ${PROJECT_SOURCE_DIR}/src/guest_hook.c)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_ui_text dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
@@ -170,6 +172,7 @@ add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
     COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
 
 add_library(dcp_launcher STATIC host.cpp incident_page.cpp launcher.cpp my_reports.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
+    editor_page.cpp
     updater/github_release.cpp updater/json.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
     updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
     updater/update_ui.cpp updater/update_zip.cpp updater/version.cpp
@@ -274,3 +277,11 @@ target_include_directories(dcp-trophy-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/sh
 target_compile_definitions(dcp-trophy-tests PRIVATE DCP_TROPHY_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src/trophies")
 set_target_properties(dcp-trophy-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-trophy-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Editor's SAVE0.DAT parsing, CRC32, validation, writing, backups and appearance sidecar; no window,
+# no game, and real saves are copied to a temporary folder before being read.
+add_executable(dcp-save-editor-tests EXCLUDE_FROM_ALL ../tests/save_editor_tests.cpp)
+target_link_libraries(dcp-save-editor-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-save-editor-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-save-editor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-save-editor-tests PRIVATE -Wall -Wextra)

@@ -929,9 +929,17 @@ RowKey KeyOf(std::string_view path) {
     return {Lower(std::string(path.substr(0, slash))), Lower(std::string(path.substr(slash + 1)))};
 }
 
+// The order CRI's packer writes and a Sorted table is searched in: the whole path, upper-cased.
+RowKey CriKeyOf(std::string_view path) {
+    std::string upper(path);
+    for (char& c : upper) c = char(std::toupper(static_cast<unsigned char>(c)));
+    return {{}, std::move(upper)};
+}
+
 // Puts `added` into the table's rows, in sorted place when the table is sorted, with their names added to the string
 // pool. Rows are numbered by position when the table's IDs are.
-bool InsertRows(UtfTable& toc, const std::vector<NewRow>& added, std::string* error) {
+bool InsertRows(UtfTable& toc, const std::vector<NewRow>& added, std::string* error, bool cri_order = false) {
+    const auto key_of = cri_order ? CriKeyOf : KeyOf;
     const auto fail = [&](const char* why) {
         if (error) *error = why;
         return false;
@@ -983,7 +991,7 @@ bool InsertRows(UtfTable& toc, const std::vector<NewRow>& added, std::string* er
     for (size_t r = 0; r < row_count; ++r) {
         const std::string dir = toc.String(r, "DirName"), name = toc.String(r, "FileName");
         const auto first = packet.begin() + std::ptrdiff_t(rows_off + r * row_len);
-        rows.push_back({KeyOf(dir.empty() ? name : dir + "/" + name), std::vector<uint8_t>(first, first + std::ptrdiff_t(row_len))});
+        rows.push_back({key_of(dir.empty() ? name : dir + "/" + name), std::vector<uint8_t>(first, first + std::ptrdiff_t(row_len))});
         const uint64_t id = toc.Number(r, "ID").value_or(r);
         sequential = sequential && id == r;
         next_id = std::max(next_id, id + 1);
@@ -991,7 +999,7 @@ bool InsertRows(UtfTable& toc, const std::vector<NewRow>& added, std::string* er
     const bool sorted = std::is_sorted(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.key < b.key; });
 
     for (const NewRow& row : added) {
-        Row made{KeyOf(row.path), rows.empty() ? std::vector<uint8_t>(row_len) : rows.front().bytes};
+        Row made{key_of(row.path), rows.empty() ? std::vector<uint8_t>(row_len) : rows.front().bytes};
         const size_t slash = row.path.rfind('/');
         const std::string dir = slash == std::string::npos ? std::string() : row.path.substr(0, slash);
         const auto put = [&](const char* column, uint64_t value) {
@@ -1202,6 +1210,129 @@ OverlayResult OverlayArchive(const std::filesystem::path& base, const std::files
     result.detail = base_name + ": " + std::to_string(result.replaced) + " replaced, " + std::to_string(result.added) +
                     " added, " + std::to_string(result.kept) + " left to the base";
     return result;
+}
+
+std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& archive_path, uint64_t length,
+                                                  std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
+                                                  std::string* error) {
+    const auto fail = [&](std::string why) -> std::optional<ArchiveOverlay> {
+        if (error) *error = std::move(why);
+        return std::nullopt;
+    };
+    CpkArchive archive;
+    UtfTable header, toc;
+    std::string reason;
+    if (!PatchWriter::Load(archive, archive_path, header, toc, &reason)) return fail(reason);
+    const uint64_t align = archive.align(), toc_base = archive.toc_base();
+    const auto aligned = [&](uint64_t position) { return (position + align - 1) / align * align; };
+    ArchiveOverlay overlay;
+    std::vector<NewRow> rows;
+    std::set<std::string> seen;
+    uint64_t pos = length;
+    for (const auto& [path, data] : added) {
+        if (archive.Find(path) || !seen.insert(Lower(path)).second) return fail(path + " is already in the archive");
+        if (data.empty() || data.size() > UINT32_MAX) return fail(path + " has an unsupported size");
+        const uint64_t at = aligned(pos);
+        rows.push_back({path, uint32_t(data.size()), uint32_t(data.size()), at - toc_base});
+        overlay.patches.emplace_back(at, data);
+        pos = at + data.size();
+    }
+    if (rows.empty()) return fail("nothing to add");
+    if (!InsertRows(toc, rows, &reason, true)) return fail(reason);
+    const std::vector<uint8_t> packet = toc.Stored();
+    std::vector<uint8_t> section(kTocMagic, kTocMagic + 8);
+    WriteLe64(section, packet.size());
+    section.insert(section.end(), packet.begin(), packet.end());
+    const uint64_t toc_at = aligned(pos);
+    if (!header.SetNumber(0, "TocOffset", toc_at) || !header.SetNumber(0, "TocSize", section.size()) ||
+        !header.SetNumber(0, "Files", archive.entries().size() + rows.size())) {
+        return fail("the header cannot be rewritten");
+    }
+    if (header.Number(0, "EnableTocCrc").value_or(0) || header.Number(0, "EnableFileCrc").value_or(0)) {
+        header.SetNumber(0, "EnableTocCrc", 0);
+        header.SetNumber(0, "EnableFileCrc", 0);
+    }
+    overlay.patches.emplace_back(toc_at, std::move(section));
+    overlay.patches.emplace_back(16, header.Stored());
+    overlay.length = toc_at + overlay.patches[overlay.patches.size() - 2].second.size();
+    return overlay;
+}
+
+namespace {
+
+// The file's bytes, zeros past its end, and the overlay's patches on top: what the runtime serves.
+class OverlaidBuffer : public std::streambuf {
+public:
+    OverlaidBuffer(const std::filesystem::path& file, const ArchiveOverlay& overlay)
+        : in_(file, std::ios::binary), overlay_(overlay) {
+        std::error_code ec;
+        file_length_ = std::filesystem::file_size(file, ec);
+        if (ec) file_length_ = 0;
+    }
+    bool ok() const { return bool(in_); }
+
+    void Fill(uint64_t offset, uint8_t* out, size_t size) {
+        std::fill(out, out + size, uint8_t(0));
+        if (offset < file_length_) {
+            const size_t from_file = size_t(std::min<uint64_t>(size, file_length_ - offset));
+            in_.clear();
+            in_.seekg(std::streamoff(offset));
+            in_.read(reinterpret_cast<char*>(out), std::streamsize(from_file));
+        }
+        for (const auto& [at, data] : overlay_.patches) {
+            const uint64_t begin = std::max(at, offset), end = std::min(at + data.size(), offset + size);
+            if (begin < end) std::memcpy(out + (begin - offset), data.data() + (begin - at), size_t(end - begin));
+        }
+    }
+
+protected:
+    int_type underflow() override {
+        if (position_ >= overlay_.length) return traits_type::eof();
+        const size_t size = size_t(std::min<uint64_t>(buffer_.size(), overlay_.length - position_));
+        Fill(position_, buffer_.data(), size);
+        char* begin = reinterpret_cast<char*>(buffer_.data());
+        setg(begin, begin, begin + size);
+        position_ += size;
+        return traits_type::to_int_type(*begin);
+    }
+    pos_type seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode) override {
+        const uint64_t current = position_ - uint64_t(egptr() - gptr());
+        const int64_t base = dir == std::ios_base::beg ? 0 : dir == std::ios_base::cur ? int64_t(current) : int64_t(overlay_.length);
+        return seekpos(pos_type(off_type(base + off)), std::ios_base::in);
+    }
+    pos_type seekpos(pos_type target, std::ios_base::openmode) override {
+        if (off_type(target) < 0 || uint64_t(off_type(target)) > overlay_.length) return pos_type(off_type(-1));
+        position_ = uint64_t(off_type(target));
+        setg(nullptr, nullptr, nullptr);
+        return target;
+    }
+
+private:
+    std::ifstream in_;
+    const ArchiveOverlay& overlay_;
+    uint64_t file_length_ = 0, position_ = 0;
+    std::vector<uint8_t> buffer_ = std::vector<uint8_t>(64 * 1024);
+};
+
+} // namespace
+
+bool OpenOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, CpkArchive& out, std::string* error) {
+    OverlaidBuffer buffer(archive, overlay);
+    std::istream in(&buffer);
+    if (!buffer.ok()) {
+        if (error) *error = "cannot open";
+        return false;
+    }
+    return out.OpenStream(in, error);
+}
+
+std::vector<uint8_t> ReadOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, uint64_t offset,
+                                  size_t size) {
+    OverlaidBuffer buffer(archive, overlay);
+    std::vector<uint8_t> bytes(size);
+    if (!buffer.ok() || offset > overlay.length || size > overlay.length - offset) return {};
+    buffer.Fill(offset, bytes.data(), size);
+    return bytes;
 }
 
 } // namespace dcp

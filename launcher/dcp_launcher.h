@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "appearance_hooks.h"
 #include "feature_sites.h"
 
 #include "cyrillic_glyphs.h"
@@ -88,6 +89,13 @@ typedef struct {
 const char *dcp_text_translation(const char *settings_file, const char *image_dir, const char *app0, uint64_t *length,
                                  DcpFilePatch **patches, size_t *count, char *message, size_t message_size,
                                  int glyph_table, int *glyphs_composed);
+
+/* The saved custom character looks of the build's title: DRACRO.CPK byte ranges that add one atlas per customized
+ * character, and the instances the appearance hooks name them by. The archive's file name, or NULL when no look applies.
+ * `message` lists what was applied or skipped. */
+const char *dcp_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, uint64_t *length,
+                                  DcpFilePatch **patches, size_t *count, const AppearanceInstance **instances,
+                                  size_t *instance_count, char *message, size_t message_size);
 
 /* After dcp_text_translation: the second archive to overlay when the build's stage files are not in the slot's archive;
  * NULL when there is none. */

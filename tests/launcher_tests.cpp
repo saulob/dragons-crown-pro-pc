@@ -3890,10 +3890,10 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 10);
+    CHECK(count == 11);
     // Online sits between Gameplay and Cheats: it changes play and turns the cheats off.
-    const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Online",
-                                 "Cheats", "Controls", "Trophies", "Bug Report", "About"};
+    const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Online",  "Cheats",
+                                 "Controls", "Trophies", "Editor",  "Bug Report", "About"};
     for (size_t i = 0; i < std::size(order); ++i) {
         CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
     }
@@ -4606,8 +4606,9 @@ void TestPageIcons() {
     const fs::path icons = source / "assets" / "launcher" / "icons";
 
     // The sidebar's pages and their icons, one to one.
-    const std::set<std::string> expected = {"play.svg",   "display.svg",  "graphics.svg", "gameplay.svg",   "online.svg",
-                                            "cheats.svg", "controls.svg", "trophies.svg", "bug-report.svg", "about.svg"};
+    const std::set<std::string> expected = {"play.svg",     "display.svg", "graphics.svg", "gameplay.svg",   "online.svg",
+                                            "cheats.svg",   "controls.svg", "trophies.svg", "editor.svg",     "bug-report.svg",
+                                            "about.svg"};
     std::set<std::string> mapped_files;
     std::set<int> mapped_pages, ordered_pages;
     for (const PageIconAsset& asset : PageIconAssets()) {
@@ -4617,7 +4618,7 @@ void TestPageIcons() {
     for (const PageId page : kPageOrder) {
         ordered_pages.insert(static_cast<int>(page));
     }
-    CHECK(expected.size() == 10 && PageIconAssets().size() == expected.size());
+    CHECK(expected.size() == 11 && PageIconAssets().size() == expected.size());
     CHECK(mapped_files == expected && mapped_pages.size() == expected.size());
     CHECK(ordered_pages.size() == std::size(kPageOrder) && mapped_pages == ordered_pages);
     for (const std::string& name : expected) {
@@ -4732,7 +4733,7 @@ void TestIconLicenses() {
             CHECK(licenses.find(address) != std::string::npos);
         }
     }
-    CHECK(cc0_rows == 8);
+    CHECK(cc0_rows == 9);
     CHECK(licenses.find("CC0 (public domain dedication), all from SVG Repo") != std::string::npos);
     CHECK(licenses.find("\"Display Television Tv Screen Gadget\" by nickylimyeanfen, collection Inc Device Icons.") != std::string::npos);
     CHECK(licenses.find("License: CC Attribution License, https://creativecommons.org/licenses/by/") != std::string::npos);

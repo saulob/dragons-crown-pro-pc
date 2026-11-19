@@ -16,6 +16,7 @@
 #include "skip_intro.h"
 #include "default_message_hook.h"
 #include "gallery_unlock.h"
+#include "appearance_hooks.h"
 #include "endgame_unlocks.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -533,6 +534,47 @@ static void install_text_translation(const char *settings_file, const char *imag
         printf("Menu & Subtitles: PT-BR visual skipped: %s could not be overlaid\n",stage);
     if (*message) printf("Menu & Subtitles: %s\n",message);
 }
+/* Custom character looks are local only: they are not served while Online Play is on. Each customized character gets
+ * its own atlas entry, and only the hooked atlas-name sites hand it out, for that character. */
+static void install_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, int online_play,
+                                      uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size) {
+    if (online_play) {
+        printf("Appearance runtime: custom looks are not used with Online Play\n"); /* DEBUG_SAULO */
+        return;
+    }
+    char message[4096]="";
+    uint64_t length=0;
+    DcpFilePatch *patches=NULL;
+    size_t count=0;
+    const AppearanceInstance *instances=NULL;
+    size_t instance_count=0;
+    const char *archive=dcp_custom_appearance(image_dir,app0,user_dir,&length,&patches,&count,&instances,&instance_count,
+                                              message,sizeof(message));
+    if (*message) printf("Appearance runtime: %s\n",message); /* DEBUG_SAULO */
+    if (!archive) return;
+    AppearanceSites sites;
+    if (!stubs_size || !appearance_hooks_locate(image,size,&sites)) {
+        printf("Appearance runtime: custom looks not used, the atlas sites of this build were not found\n");
+        return;
+    }
+    if (!overlay_archive(archive,length,patches,count)) {
+        printf("Appearance runtime: %s could not be overlaid (already overlaid by a translation)\n",archive);
+        return;
+    }
+    appearance_hooks_set_instances(instances,instance_count);
+    if (!appearance_hooks_install(image,size,entry,&sites,stubs,stubs_size)) {
+        appearance_hooks_set_instances(NULL,0);
+        return;
+    }
+    printf("Appearance runtime: %zu custom character(s); unit sites %#llx %#llx, select %#llx, effect %#llx/%#llx/%#llx, "
+           "weapon %#llx %#llx %#llx, shield %#llx %#llx %#llx\n",
+           instance_count,(unsigned long long)sites.unit_atlas[0],(unsigned long long)sites.unit_atlas[1],
+           (unsigned long long)sites.select_atlas,(unsigned long long)sites.effect_copy,(unsigned long long)sites.effect_set,
+           (unsigned long long)sites.effect_atlas,(unsigned long long)sites.unit_weapon[0][0],
+           (unsigned long long)sites.unit_weapon[0][1],(unsigned long long)sites.select_weapon[0],
+           (unsigned long long)sites.unit_weapon[1][0],(unsigned long long)sites.unit_weapon[1][1],
+           (unsigned long long)sites.select_weapon[1]); /* DEBUG_SAULO */
+}
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
     (void)argc; (void)argv;
@@ -870,7 +912,8 @@ int main(int argc, char **argv) {
     const size_t message_stub_offset = cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
                                        ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
                                        gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area + endgame_stub_area;
-    const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes());
+    const size_t appearance_stub_area = known_build && !online_play ? appearance_hooks_stub_bytes() : 0;
+    const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -1112,6 +1155,8 @@ int main(int argc, char **argv) {
                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes);
     if (app0) install_text_translation(settings_file,paths.image_dir,app0,image,size,entry,image+round_page(size)+message_stub_offset,
                                        default_message_stub_bytes());
+    if (app0) install_custom_appearance(paths.image_dir,app0,user_dir ? user_dir : "user",online_play,image,size,entry,
+                                        image+round_page(size)+message_stub_offset+default_message_stub_bytes(),appearance_stub_area);
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
                                        ultrawide_effective,skip_applied,skip_intro_applied,japanese_menu_buttons && menu_buttons_applied,gallery_unlock_applied,
