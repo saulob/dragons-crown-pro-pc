@@ -622,6 +622,8 @@ void Presenter::ReportPresentGeometry(const Frame* frame, vk::Extent2D extent, c
                                          u32(blit.dstOffsets[1].y - blit.dstOffsets[0].y)};
     progress.source_size = DcpPresent::Pack(source);
     progress.destination_size = DcpPresent::Pack({destination.width, destination.height});
+    progress.destination_origin = DcpPresent::Pack({u32(destination.x), u32(destination.y)});
+    progress.destination_surface = DcpPresent::Pack({extent.width, extent.height});
     if (!DcpPresent::GamescopeSession()) {
         return;
     }

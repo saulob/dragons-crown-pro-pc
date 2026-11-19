@@ -293,6 +293,8 @@ struct Progress {
     std::atomic<std::uint64_t> swapchain_size{0};
     std::atomic<std::uint64_t> source_size{0};
     std::atomic<std::uint64_t> destination_size{0};
+    std::atomic<std::uint64_t> destination_origin{0};
+    std::atomic<std::uint64_t> destination_surface{0}; ///< the image the destination is placed in
     std::atomic<bool> window_active{true};
 };
 

@@ -11,6 +11,7 @@
 #include "dcp_keys.h"
 #include "dcp_mouse.h"
 #include "dcp_pad_buttons.h"
+#include "dcp_touchscreen.h"
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
 #include "exit_game_hook.h"
@@ -280,6 +281,23 @@ static void merge_mouse(PadData *d, const DcpMouseSample *mouse) {
         d->touch_count=1;
     }
 }
+/* A finger on the screen owns the touch surface while it is down. */
+static void merge_touchscreen(PadData *d, const DcpTouchSample *screen) {
+    d->buttons|=screen->buttons;
+    if (screen->touch) {
+        memset(d->touches,0,sizeof(d->touches));
+        d->touches[0]=(PadTouch){.x=screen->x,.y=screen->y,.id=screen->id};
+        d->touch_count=1;
+    }
+}
+static void log_touchscreen_sample(const DcpTouchSample *screen) { /* DEBUG_SAULO */
+    static DcpTouchSample last; /* DEBUG_SAULO */
+    static int lines; /* DEBUG_SAULO */
+    if (lines>=80 || (screen->touch==last.touch && screen->buttons==last.buttons)) return; /* DEBUG_SAULO */
+    ++lines; /* DEBUG_SAULO */
+    last=*screen; /* DEBUG_SAULO */
+    printf("Touch diag: pad sample touch=%d x=%u y=%u id=%u touchpad_click=%d\n",screen->touch,(unsigned)screen->x,(unsigned)screen->y,(unsigned)screen->id,(screen->buttons&BTN_TOUCHPAD)!=0); /* DEBUG_SAULO */
+} /* DEBUG_SAULO */
 static void key_axis(uint8_t *axis, bool negative, bool positive) {
     if (negative || positive) *axis=(uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0));
 }
@@ -303,9 +321,13 @@ static void sample_host(int slot, PadData *d) {
     if (dcpgpu_overlay_captures_input()) return; /* settings menu open: neutral input */
     const bool *k=slot==0 && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
     DcpMouseSample mouse={0};
+    DcpTouchSample screen={0};
     if (slot==0) {
         dcp_mouse_sample(dcp_mouse_global(),&mouse);
-        pointer_owns_touch=mouse.pointer;
+        dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);
+        log_touchscreen_sample(&screen); /* DEBUG_SAULO */
+        if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);
+        pointer_owns_touch=mouse.pointer || screen.touch;
     }
     load_button_maps();
     if (g) {
@@ -339,7 +361,10 @@ static void sample_host(int slot, PadData *d) {
         if ((d->buttons & BTN_TOUCHPAD) && !d->touch_count) touch_click(d,0);
     }
     /* The mouse is player 1's too: buttons add to the pad's, and Pointer Control takes the touch surface. */
-    if (slot==0) merge_mouse(d,&mouse);
+    if (slot==0) {
+        merge_mouse(d,&mouse);
+        merge_touchscreen(d,&screen);
+    }
     /* The keyboard works with or without a gamepad: its buttons add to the pad's, and a stick
      * follows the keys only while one of them is held. */
     if (!k) return;

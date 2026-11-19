@@ -1,5 +1,6 @@
-// Focused tests of the mouse input: bindings and their settings, Pointer Control's synthetic touch finger, the capture rules
-// and the source-level safety of the SDL handoff. No window, no SDL video, no game.
+// Focused tests of the mouse and touchscreen input: bindings and their settings, Pointer Control's synthetic touch finger,
+// touchscreen contacts and mapping, the capture rules and the source-level safety of the SDL handoff. No window, no SDL
+// video, no game.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,8 @@
 #include "dcp_mouse.h"
 #include "dcp_mouse_capture.h"
 #include "dcp_pad_buttons.h"
+#include "dcp_touch_route.h"
+#include "dcp_touchscreen.h"
 
 namespace fs = std::filesystem;
 
@@ -940,9 +943,9 @@ void TestSourceSafety() {
     const std::size_t motion = window.find("case SDL_EVENT_MOUSE_MOTION:");
     const std::size_t down = window.find("case SDL_EVENT_MOUSE_BUTTON_DOWN:");
     const std::size_t wheel = window.find("case SDL_EVENT_MOUSE_WHEEL:");
-    CHECK(window.find("if (!ui) {", motion) < window.find("dcp_mouse_motion(", motion));
-    CHECK(window.find("if (!ui) {", down) < window.find("dcp_mouse_button(dcp_mouse_global(), event.button.button, 1)", down));
-    CHECK(window.find("if (!ui) {", wheel) < window.find("dcp_mouse_wheel(", wheel));
+    CHECK(window.find("if (!ui && !touch_mouse) {", motion) < window.find("dcp_mouse_motion(", motion));
+    CHECK(window.find("if (!ui && !touch_mouse) {", down) < window.find("dcp_mouse_button(dcp_mouse_global(), event.button.button, 1)", down));
+    CHECK(window.find("if (!ui && !touch_mouse) {", wheel) < window.find("dcp_mouse_wheel(", wheel));
     CHECK(Contains(window, "DcpOverlay::CapturesInput(),") && Contains(window, "text_active};"));
 
     // The pad sampler takes one mouse sample per read of player 1, before anything that could add a touch, and Pointer
@@ -966,6 +969,476 @@ void TestSourceSafety() {
                                "src/net/relay_frame.cpp"}) {
         const std::string text = ReadSource(online);
         CHECK(!Contains(text, "dcp_mouse") && !Contains(text, "mouse_"));
+    }
+}
+
+bool Near(int value, int expected) { return value >= expected - 1 && value <= expected + 1; }
+
+constexpr DcpTouchArea kWhole{0.0f, 0.0f, 1.0f, 1.0f};
+constexpr std::uint64_t kMs = 1000000;
+
+// Drives a touchscreen state as the window thread and the pad sampler do. Every read is checked to carry no button but
+// the touchpad click.
+struct Screen {
+    DcpTouchscreen* state = dcp_touchscreen_new();
+    DcpTouchArea area = kWhole;
+    std::uint64_t now = 0;
+
+    ~Screen() { dcp_touchscreen_free(state); }
+    Screen() = default;
+    Screen(const Screen&) = delete;
+    Screen& operator=(const Screen&) = delete;
+
+    void Down(std::uint64_t finger, float x, float y) { dcp_touchscreen_down(state, finger, area, x, y, now); }
+    void Move(std::uint64_t finger, float x, float y) { dcp_touchscreen_motion(state, finger, area, x, y); }
+    void Up(std::uint64_t finger, float x, float y) { dcp_touchscreen_up(state, finger, area, x, y, now); }
+    DcpTouchSample Read() {
+        DcpTouchSample sample;
+        dcp_touchscreen_sample(state, &sample);
+        CHECK((sample.buttons & ~static_cast<std::uint32_t>(BTN_TOUCHPAD)) == 0);
+        CHECK(sample.touch || sample.buttons == 0);
+        return sample;
+    }
+    bool Idle() {
+        const DcpTouchSample sample = Read();
+        return !sample.touch && sample.buttons == 0;
+    }
+};
+
+void TestTouchMapping() {
+    std::uint16_t x = 0, y = 0;
+    CHECK(dcp_touch_point(kWhole, 0.0f, 0.0f, &x, &y) && x == 0 && y == 0);
+    CHECK(dcp_touch_point(kWhole, 1.0f, 1.0f, &x, &y) && x == DCP_TOUCH_MAX_X && y == DCP_TOUCH_MAX_Y);
+    CHECK(dcp_touch_point(kWhole, 0.5f, 0.5f, &x, &y) && x == 960 && y == 471);
+
+    // Unknown geometry (nothing presented yet) is the whole window.
+    const DcpTouchArea unknown = dcp_touch_area_from_pixels(0, 0, 0, 0, 0, 0);
+    CHECK(unknown.x == 0.0f && unknown.y == 0.0f && unknown.width == 1.0f && unknown.height == 1.0f);
+    const DcpTouchArea stretch = dcp_touch_area_from_pixels(0, 0, 1920, 1080, 1920, 1080);
+    CHECK(stretch.x == 0.0f && stretch.y == 0.0f && stretch.width == 1.0f && stretch.height == 1.0f);
+
+    // A 16:9 picture letterboxed on a 1280x800 screen (FitRegion: 0,40 1280x720).
+    const DcpTouchArea letterbox = dcp_touch_area_from_pixels(0, 40, 1280, 720, 1280, 800);
+    CHECK(dcp_touch_point(letterbox, 0.5f, 0.5f, &x, &y) && x == 960 && Near(y, 471));
+    CHECK(dcp_touch_point(letterbox, 0.0f, 41.0f / 800.0f, &x, &y) && x == 0 && Near(y, 1));
+    CHECK(dcp_touch_point(letterbox, 1.0f, 759.0f / 800.0f, &x, &y) && x == DCP_TOUCH_MAX_X && Near(y, DCP_TOUCH_MAX_Y - 1));
+    CHECK(!dcp_touch_point(letterbox, 0.5f, 0.02f, &x, &y) && y == 0);
+    CHECK(!dcp_touch_point(letterbox, 0.5f, 0.98f, &x, &y) && y == DCP_TOUCH_MAX_Y);
+
+    // A 16:9 picture pillarboxed on a 2560x1080 screen.
+    const DcpTouchArea pillarbox = dcp_touch_area_from_pixels(320, 0, 1920, 1080, 2560, 1080);
+    CHECK(dcp_touch_point(pillarbox, 0.125f, 0.0f, &x, &y) && x == 0 && y == 0);
+    CHECK(dcp_touch_point(pillarbox, 0.875f, 1.0f, &x, &y) && x == DCP_TOUCH_MAX_X && y == DCP_TOUCH_MAX_Y);
+    CHECK(dcp_touch_point(pillarbox, 0.5f, 0.5f, &x, &y) && x == 960 && y == 471);
+    CHECK(!dcp_touch_point(pillarbox, 0.05f, 0.5f, &x, &y) && x == 0);
+    CHECK(!dcp_touch_point(pillarbox, 0.95f, 0.5f, &x, &y) && x == DCP_TOUCH_MAX_X);
+
+    // The same physical point maps the same way at any surface resolution of the same shape.
+    const DcpTouchArea deck = dcp_touch_area_from_pixels(0, 40, 1280, 720, 1280, 800);
+    const DcpTouchArea deck_scaled = dcp_touch_area_from_pixels(0, 60, 1920, 1080, 1920, 1200);
+    std::uint16_t x2 = 0, y2 = 0;
+    dcp_touch_point(deck, 0.3f, 0.7f, &x, &y);
+    dcp_touch_point(deck_scaled, 0.3f, 0.7f, &x2, &y2);
+    CHECK(Near(x, x2) && Near(y, y2));
+}
+
+void TestTouchContactLifetime() {
+    Screen screen;
+    CHECK(screen.Idle());
+
+    // Down creates contact 0 at the touched point; motion follows it; a drag lifts with no click.
+    screen.Down(1, 0.25f, 0.5f);
+    DcpTouchSample sample = screen.Read();
+    CHECK(sample.touch && sample.x == 480 && sample.y == 471 && sample.buttons == 0);
+    const std::uint8_t first_id = sample.id;
+    screen.Move(1, 0.75f, 0.25f);
+    sample = screen.Read();
+    CHECK(sample.touch && sample.x == 1439 && Near(sample.y, 236) && sample.id == first_id);
+    screen.now += 100 * kMs;
+    screen.Up(1, 0.75f, 0.25f);
+    CHECK(screen.Idle());
+    CHECK(screen.Idle());
+
+    // A tap clicks the touchpad at the touched point for a few reads, then lets go of both.
+    screen.now = 1000 * kMs;
+    screen.Down(2, 0.5f, 0.5f);
+    sample = screen.Read();
+    CHECK(sample.touch && sample.buttons == 0 && sample.id != first_id);
+    screen.now += 120 * kMs;
+    screen.Up(2, 0.5f, 0.5f);
+    int clicks = 0;
+    for (int read = 0; read < 3; ++read) {
+        sample = screen.Read();
+        clicks += sample.touch && sample.buttons == BTN_TOUCHPAD && sample.x == 960 && sample.y == 471;
+    }
+    CHECK(clicks == 3);
+    CHECK(screen.Idle());
+
+    // A tap between two reads still shows the contact once before the click.
+    screen.now = 2000 * kMs;
+    screen.Down(3, 0.1f, 0.1f);
+    screen.now += 10 * kMs;
+    screen.Up(3, 0.1f, 0.1f);
+    sample = screen.Read();
+    CHECK(sample.touch && sample.buttons == 0);
+    CHECK(screen.Read().buttons == BTN_TOUCHPAD);
+
+    // A long press does not click.
+    Screen held;
+    held.Down(1, 0.5f, 0.5f);
+    CHECK(held.Read().touch);
+    held.now += 800 * kMs;
+    held.Up(1, 0.5f, 0.5f);
+    CHECK(held.Idle());
+
+    // A finger dragged off the picture stays on its edge.
+    Screen edge;
+    edge.area = dcp_touch_area_from_pixels(0, 40, 1280, 720, 1280, 800);
+    edge.Down(1, 0.5f, 0.5f);
+    edge.Move(1, 0.5f, 0.99f);
+    sample = edge.Read();
+    CHECK(sample.touch && sample.y == DCP_TOUCH_MAX_Y);
+}
+
+void TestTouchOutsidePicture() {
+    Screen screen;
+    screen.area = dcp_touch_area_from_pixels(0, 40, 1280, 720, 1280, 800);
+    screen.Down(1, 0.5f, 0.02f); // on the black band
+    CHECK(screen.Idle());
+    screen.Move(1, 0.5f, 0.5f);
+    CHECK(screen.Idle());
+    screen.Up(1, 0.5f, 0.5f);
+    CHECK(screen.Idle());
+}
+
+void TestSecondFinger() {
+    Screen screen;
+    screen.Down(1, 0.25f, 0.5f);
+    screen.Down(2, 0.75f, 0.5f);
+    DcpTouchSample sample = screen.Read();
+    CHECK(sample.touch && sample.x == 480);
+    screen.Move(2, 0.9f, 0.9f);
+    screen.Up(2, 0.9f, 0.9f);
+    sample = screen.Read();
+    CHECK(sample.touch && sample.x == 480 && sample.buttons == 0);
+    screen.Up(1, 0.25f, 0.5f);
+    CHECK(screen.Read().buttons == BTN_TOUCHPAD);
+
+    // The second finger never takes over once the first one lifts.
+    Screen other;
+    other.Down(1, 0.25f, 0.5f);
+    other.Down(2, 0.75f, 0.5f);
+    CHECK(other.Read().x == 480);
+    other.now += 900 * kMs;
+    other.Up(1, 0.25f, 0.5f);
+    CHECK(other.Idle());
+    other.Move(2, 0.8f, 0.5f);
+    CHECK(other.Idle());
+    other.Up(2, 0.8f, 0.5f);
+    CHECK(other.Idle());
+}
+
+void TestTouchCancellation() {
+    Screen focus;
+    focus.Down(1, 0.5f, 0.5f);
+    CHECK(focus.Read().touch);
+    dcp_touchscreen_release_all(focus.state); // focus loss, window mode switch, shutdown
+    CHECK(focus.Idle());
+    focus.Up(1, 0.5f, 0.5f); // the stale lift changes nothing
+    CHECK(focus.Idle());
+
+    Screen click;
+    click.Down(1, 0.5f, 0.5f);
+    click.Read();
+    click.Up(1, 0.5f, 0.5f);
+    CHECK(click.Read().buttons == BTN_TOUCHPAD);
+    dcp_touchscreen_release_all(click.state);
+    CHECK(click.Idle());
+
+    Screen cancel;
+    cancel.Down(4, 0.5f, 0.5f);
+    dcp_touchscreen_cancel(cancel.state, 5);
+    CHECK(cancel.Read().touch);
+    dcp_touchscreen_cancel(cancel.state, 4);
+    CHECK(cancel.Idle());
+
+    // Overlay, text entry or focus away: no contact starts and a held one ends.
+    Screen blocked;
+    blocked.Down(1, 0.5f, 0.5f);
+    dcp_touchscreen_block(blocked.state, 1);
+    CHECK(blocked.Idle());
+    blocked.Down(2, 0.5f, 0.5f);
+    CHECK(blocked.Idle());
+    dcp_touchscreen_block(blocked.state, 0);
+    blocked.Up(2, 0.5f, 0.5f);
+    CHECK(blocked.Idle());
+    blocked.Down(3, 0.5f, 0.5f);
+    CHECK(blocked.Read().touch);
+}
+
+void TestTouchRouting() {
+    SDL_Event event{};
+    event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    event.button.which = SDL_TOUCH_MOUSEID;
+    event.button.button = SDL_BUTTON_LEFT;
+    CHECK(DcpTouchRoute::TouchGeneratedMouse(event));
+    event.button.which = 1; // a physical mouse
+    CHECK(!DcpTouchRoute::TouchGeneratedMouse(event));
+    event.button.which = 0; // the default mouse
+    CHECK(!DcpTouchRoute::TouchGeneratedMouse(event));
+    event.button.which = SDL_PEN_MOUSEID;
+    CHECK(!DcpTouchRoute::TouchGeneratedMouse(event));
+    event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.which = SDL_TOUCH_MOUSEID;
+    CHECK(DcpTouchRoute::TouchGeneratedMouse(event));
+
+    event = SDL_Event{};
+    event.type = SDL_EVENT_MOUSE_MOTION;
+    event.motion.which = SDL_TOUCH_MOUSEID;
+    CHECK(DcpTouchRoute::TouchGeneratedMouse(event));
+    event.motion.which = 2;
+    CHECK(!DcpTouchRoute::TouchGeneratedMouse(event));
+    event = SDL_Event{};
+    event.type = SDL_EVENT_MOUSE_WHEEL;
+    event.wheel.which = 2;
+    CHECK(!DcpTouchRoute::TouchGeneratedMouse(event));
+    event = SDL_Event{};
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    CHECK(!DcpTouchRoute::TouchGeneratedMouse(event) && !DcpTouchRoute::IsFingerEvent(event));
+
+    for (const Uint32 type : {SDL_EVENT_FINGER_DOWN, SDL_EVENT_FINGER_MOTION, SDL_EVENT_FINGER_UP, SDL_EVENT_FINGER_CANCELED}) {
+        event = SDL_Event{};
+        event.type = type;
+        CHECK(DcpTouchRoute::IsFingerEvent(event) && !DcpTouchRoute::TouchGeneratedMouse(event));
+    }
+
+    CHECK(DcpTouchRoute::AcceptedTouch(7, SDL_TOUCH_DEVICE_DIRECT));
+    CHECK(!DcpTouchRoute::AcceptedTouch(7, SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE));
+    CHECK(!DcpTouchRoute::AcceptedTouch(7, SDL_TOUCH_DEVICE_INDIRECT_RELATIVE));
+    CHECK(!DcpTouchRoute::AcceptedTouch(7, SDL_TOUCH_DEVICE_INVALID));
+    CHECK(!DcpTouchRoute::AcceptedTouch(SDL_MOUSE_TOUCHID, SDL_TOUCH_DEVICE_DIRECT));
+    CHECK(!DcpTouchRoute::AcceptedTouch(SDL_PEN_TOUCHID, SDL_TOUCH_DEVICE_DIRECT));
+
+    // A physical left click is still Square.
+    Rig rig;
+    rig.Down(DCP_MOUSE_LEFT);
+    CHECK(rig.Read().buttons == BTN_SQUARE);
+}
+
+void TestTouchSourceSafety() {
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    const std::string touch = ReadSource("src/dcp_touchscreen.c");
+
+    // Finger events go to the touchscreen and never reach the mouse handlers; touch-made mouse events skip the game.
+    const std::size_t overlay = window.find("if (DcpOverlay::HandleEvent(event)) {");
+    const std::size_t finger = window.find("if (DcpTouchRoute::IsFingerEvent(event)) {");
+    const std::size_t routed = window.find("const bool touch_mouse = DcpTouchRoute::TouchGeneratedMouse(event);");
+    const std::size_t sw = window.find("switch (event.type) {", routed);
+    CHECK(overlay < finger && finger < window.find("HandleTouch(event, ui);", finger) &&
+          window.find("continue;", finger) < routed && routed < sw);
+    const std::size_t up = window.find("case SDL_EVENT_MOUSE_BUTTON_UP:");
+    CHECK(window.find("if (!touch_mouse) {", up) < window.find("dcp_mouse_button(dcp_mouse_global(), event.button.button, 0)", up));
+    const std::size_t release = window.find("void WindowSDL::ReleaseMouse() {");
+    CHECK(window.find("dcp_touchscreen_release_all(dcp_touchscreen_global());", release) < window.find("}", release));
+    const std::size_t capture = window.find("void WindowSDL::UpdateMouseCapture() {");
+    CHECK(window.find("dcp_touchscreen_block(dcp_touchscreen_global(), blocked);", capture) < release);
+    CHECK(Contains(window, "AcceptedTouch(finger.touchID, SDL_GetTouchDeviceType(finger.touchID))"));
+
+    // The pad keeps the controller's and the mouse's buttons and adds the touchscreen's after both.
+    const std::size_t host = pad.find("static void sample_host(int slot, PadData *d)");
+    CHECK(Count(pad, "dcp_touchscreen_sample(") == 1);
+    CHECK(pad.find("if (dcpgpu_overlay_captures_input()) return;", host) < pad.find("dcp_touchscreen_sample(", host));
+    CHECK(pad.find("if (g) {", host) < pad.find("merge_mouse(d,&mouse);", host) &&
+          pad.find("merge_mouse(d,&mouse);", host) < pad.find("merge_touchscreen(d,&screen);", host));
+    const std::size_t merge = pad.find("static void merge_touchscreen(PadData *d, const DcpTouchSample *screen) {");
+    const std::string body = pad.substr(merge, pad.find("\n}\n", merge) - merge);
+    CHECK(Contains(body, "d->buttons|=screen->buttons;") && !Contains(body, "d->buttons=") && !Contains(body, "d->buttons&="));
+    CHECK(Contains(pad, "pointer_owns_touch=mouse.pointer || screen.touch;"));
+
+    CHECK(!Contains(touch, "#include <SDL3") && !Contains(touch, "SDL_"));
+    CHECK(Contains(ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp"), "progress.destination_origin ="));
+    CHECK(Contains(ReadSource("gpu/shadps4/video_core/renderer_opengl/gl_presenter.cpp"), "progress.destination_origin ="));
+}
+
+// Notes each event as the window and the pad do and collects the lines that would be logged.
+struct Telemetry {
+    DcpTouchTelemetry* state = dcp_touch_telemetry_new();
+    std::vector<std::string> lines;
+
+    ~Telemetry() { dcp_touch_telemetry_free(state); }
+    Telemetry() = default;
+    Telemetry(const Telemetry&) = delete;
+    Telemetry& operator=(const Telemetry&) = delete;
+
+    void Note(DcpTouchEvent event) {
+        char line[96];
+        if (dcp_touch_telemetry_note(state, event, line, sizeof(line))) {
+            lines.emplace_back(line);
+        }
+    }
+    void Window(const SDL_Event& event, bool accepted) {
+        switch (DcpTouchRoute::CountedEvent(event, accepted)) {
+        case DcpTouchRoute::Counted::Detected: Note(DCP_TOUCH_EVENT_DETECTED); break;
+        case DcpTouchRoute::Counted::MouseSuppressed: Note(DCP_TOUCH_EVENT_MOUSE_SUPPRESSED); break;
+        case DcpTouchRoute::Counted::None: break;
+        }
+    }
+    void Pad(const DcpTouchSample& sample) {
+        if (sample.new_contact) {
+            Note(DCP_TOUCH_EVENT_TOUCHPAD_USED);
+        }
+    }
+};
+
+SDL_Event FingerEvent(Uint32 type) {
+    SDL_Event event{};
+    event.type = type;
+    event.tfinger.touchID = 7;
+    event.tfinger.fingerID = 3;
+    event.tfinger.x = 0.25f;
+    event.tfinger.y = 0.75f;
+    return event;
+}
+
+SDL_Event MouseDown(SDL_MouseID which) {
+    SDL_Event event{};
+    event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    event.button.which = which;
+    event.button.button = SDL_BUTTON_LEFT;
+    return event;
+}
+
+bool OnlyNameAndCount(const std::string& line) {
+    const std::string prefix = "Touchscreen telemetry: event=";
+    if (line.rfind(prefix, 0) != 0) {
+        return false;
+    }
+    const std::size_t count = line.find(" count=");
+    if (count == std::string::npos) {
+        return false;
+    }
+    const std::string name = line.substr(prefix.size(), count - prefix.size());
+    const std::string number = line.substr(count + 7);
+    return name.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") == std::string::npos && !number.empty() &&
+           number.find_first_not_of("0123456789") == std::string::npos;
+}
+
+void TestTouchscreenTelemetry() {
+    Telemetry detected;
+    const SDL_Event down = FingerEvent(SDL_EVENT_FINGER_DOWN);
+    detected.Window(down, true);
+    detected.Window(down, true);
+    detected.Window(down, true);
+    CHECK(detected.lines.size() == 1 && detected.lines[0] == "Touchscreen telemetry: event=touchscreen_detected count=1");
+
+    Telemetry quiet;
+    quiet.Window(down, false);
+    for (const Uint32 type : {SDL_EVENT_FINGER_MOTION, SDL_EVENT_FINGER_UP, SDL_EVENT_FINGER_CANCELED}) {
+        quiet.Window(FingerEvent(type), true);
+    }
+    CHECK(quiet.lines.empty());
+
+    Screen screen;
+    Telemetry pad;
+    screen.Down(1, 0.5f, 0.5f);
+    pad.Pad(screen.Read());
+    CHECK(pad.lines.size() == 1 && pad.lines[0] == "Touchscreen telemetry: event=touchscreen_touchpad_used count=1");
+    for (int i = 0; i < 200; ++i) {
+        screen.Move(1, 0.5f + 0.001f * static_cast<float>(i % 50), 0.5f);
+        pad.Pad(screen.Read());
+    }
+    CHECK(pad.lines.size() == 1);
+    screen.now += 900 * kMs;
+    screen.Up(1, 0.5f, 0.5f);
+    pad.Pad(screen.Read());
+    CHECK(pad.lines.size() == 1);
+    screen.Down(2, 0.1f, 0.1f);
+    pad.Pad(screen.Read());
+    CHECK(pad.lines.size() == 1);
+    for (int contact = 3; contact <= 10; ++contact) {
+        screen.Up(static_cast<std::uint64_t>(contact - 1), 0.1f, 0.1f);
+        screen.Read();
+        screen.Read();
+        screen.Down(static_cast<std::uint64_t>(contact), 0.1f, 0.1f);
+        pad.Pad(screen.Read());
+    }
+    CHECK(pad.lines.size() == 2 && pad.lines[1] == "Touchscreen telemetry: event=touchscreen_touchpad_used count=10");
+
+    Telemetry suppressed;
+    for (int i = 0; i < 1000; ++i) {
+        suppressed.Window(MouseDown(SDL_TOUCH_MOUSEID), true);
+    }
+    CHECK(suppressed.lines.size() == 4);
+    CHECK(suppressed.lines[0] == "Touchscreen telemetry: event=touchscreen_synthetic_mouse_suppressed count=1");
+    CHECK(suppressed.lines[3] == "Touchscreen telemetry: event=touchscreen_synthetic_mouse_suppressed count=1000");
+
+    Telemetry other;
+    SDL_Event motion{};
+    motion.type = SDL_EVENT_MOUSE_MOTION;
+    motion.motion.which = SDL_TOUCH_MOUSEID;
+    SDL_Event release = MouseDown(SDL_TOUCH_MOUSEID);
+    release.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    other.Window(motion, true);
+    other.Window(release, true);
+    CHECK(other.lines.empty());
+
+    Telemetry physical;
+    physical.Window(MouseDown(1), true);
+    physical.Window(MouseDown(0), true);
+    physical.Window(MouseDown(SDL_PEN_MOUSEID), true);
+    motion.motion.which = 1;
+    physical.Window(motion, true);
+    SDL_Event wheel{};
+    wheel.type = SDL_EVENT_MOUSE_WHEEL;
+    wheel.wheel.which = 1;
+    physical.Window(wheel, true);
+    for (const Uint32 type : {SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP}) {
+        SDL_Event button{};
+        button.type = type;
+        button.gbutton.button = SDL_GAMEPAD_BUTTON_WEST;
+        physical.Window(button, true);
+        button.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+        physical.Window(button, true);
+    }
+    Rig rig;
+    rig.Down(DCP_MOUSE_LEFT);
+    const DcpMouseSample square = rig.Read();
+    physical.Pad(DcpTouchSample{square.buttons, 0, 0, 0, 0, 0});
+    CHECK(square.buttons == BTN_SQUARE && physical.lines.empty());
+
+    char line[96];
+    CHECK(!dcp_touch_telemetry_note(detected.state, DCP_TOUCH_EVENT_COUNT, line, sizeof(line)));
+    CHECK(!dcp_touch_telemetry_note(detected.state, static_cast<DcpTouchEvent>(-1), line, sizeof(line)));
+    for (const Telemetry* source : {&detected, &pad, &suppressed}) {
+        for (const std::string& text : source->lines) {
+            CHECK(OnlyNameAndCount(text));
+        }
+    }
+    CHECK(!OnlyNameAndCount("Touchscreen telemetry: event=touchscreen_detected count=1 x=480"));
+    CHECK(!OnlyNameAndCount("Touchscreen telemetry: event=touchscreen_detected finger=3 count=1"));
+
+    Screen contact;
+    contact.Down(1, 0.3f, 0.3f);
+    const DcpTouchSample first = contact.Read();
+    const DcpTouchSample second = contact.Read();
+    CHECK(first.new_contact && first.x == second.x && first.y == second.y && !second.new_contact);
+    CHECK(!Screen().Read().new_contact);
+}
+
+void TestTouchTelemetrySource() {
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    CHECK(Count(window, "dcp_touch_telemetry_record(") == 2 && Count(pad, "dcp_touch_telemetry_record(") == 1);
+    const std::size_t handle = window.find("void WindowSDL::HandleTouch(");
+    const std::size_t down = window.find("case SDL_EVENT_FINGER_DOWN:", handle);
+    const std::size_t record = window.find("dcp_touch_telemetry_record(DCP_TOUCH_EVENT_DETECTED)", handle);
+    CHECK(window.find("AcceptedTouch(", handle) < record && window.find("if (ui) {", down) < record);
+    const std::size_t counted = window.find("CountedEvent(event, false) == DcpTouchRoute::Counted::MouseSuppressed");
+    CHECK(counted != std::string::npos && counted < window.find("switch (event.type) {", counted));
+    CHECK(Contains(pad, "if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);"));
+    for (const char* other : {"src/runtime_online.cpp", "src/net/lobby_link.cpp", "src/comms_session.cpp"}) {
+        CHECK(!Contains(ReadSource(other), "dcp_touch"));
     }
 }
 
@@ -993,6 +1466,15 @@ int main() {
     TestOverlayAndTextEntryBlockGameplayMouse();
     TestCursorVisibilityIntegration();
     TestSourceSafety();
+    TestTouchMapping();
+    TestTouchContactLifetime();
+    TestTouchOutsidePicture();
+    TestSecondFinger();
+    TestTouchCancellation();
+    TestTouchRouting();
+    TestTouchSourceSafety();
+    TestTouchscreenTelemetry();
+    TestTouchTelemetrySource();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

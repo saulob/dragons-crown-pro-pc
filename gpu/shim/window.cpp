@@ -20,6 +20,8 @@
 #include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
+#include "dcp_touch_route.h"
+#include "dcp_touchscreen.h"
 #include "runtime_online_overlay.h"
 #ifdef _WIN32
 #include "video_core/renderer_opengl/gl_angle.h"
@@ -300,6 +302,7 @@ void WindowSDL::UpdateMouseCapture() {
     if (blocked != mouse_blocked) {
         mouse_blocked = blocked;
         dcp_mouse_block(mouse, blocked);
+        dcp_touchscreen_block(dcp_touchscreen_global(), blocked);
     }
     if (const auto relative = mouse_capture.Update(frame)) {
         if (!SDL_SetWindowRelativeMouseMode(window, *relative)) {
@@ -311,6 +314,7 @@ void WindowSDL::UpdateMouseCapture() {
 // Window thread. A window mode switch and closing the game must not leave the mouse captured or a button held.
 void WindowSDL::ReleaseMouse() {
     dcp_mouse_release_all(dcp_mouse_global());
+    dcp_touchscreen_release_all(dcp_touchscreen_global());
     if (mouse_capture.Release()) {
         SDL_SetWindowRelativeMouseMode(window, false);
     }
@@ -352,6 +356,85 @@ bool WindowSDL::TrackControllerEvent(const SDL_Event& event) {
     }
 }
 
+static DcpTouchArea GameTouchArea() {
+    const auto& progress = DcpPresent::g_progress;
+    const DcpPresent::Size origin = DcpPresent::Unpack(progress.destination_origin.load(std::memory_order_relaxed));
+    const DcpPresent::Size size = DcpPresent::Unpack(progress.destination_size.load(std::memory_order_relaxed));
+    const DcpPresent::Size surface = DcpPresent::Unpack(progress.destination_surface.load(std::memory_order_relaxed));
+    return dcp_touch_area_from_pixels(int(origin.width), int(origin.height), int(size.width), int(size.height),
+                                      int(surface.width), int(surface.height));
+}
+
+namespace TouchDiag { // DEBUG_SAULO: bounded touch path diagnostics for DCP-H5L2EG
+int event_lines = 0;                                                   // DEBUG_SAULO
+int motion_lines = 0;                                                  // DEBUG_SAULO
+u64 last_motion_ns = 0;                                                // DEBUG_SAULO
+bool header_done = false;                                              // DEBUG_SAULO
+void Header() {                                                        // DEBUG_SAULO
+    if (header_done) return;                                           // DEBUG_SAULO
+    header_done = true;                                                // DEBUG_SAULO
+    int count = 0;                                                     // DEBUG_SAULO
+    SDL_TouchID* devices = SDL_GetTouchDevices(&count);                // DEBUG_SAULO
+    std::printf("Touch diag: video=%s touch_devices=%d\n", SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "?", count); // DEBUG_SAULO
+    for (int i = 0; devices && i < count; ++i) {                       // DEBUG_SAULO
+        std::printf("Touch diag: device %llu type=%d name=%s\n", (unsigned long long)devices[i], int(SDL_GetTouchDeviceType(devices[i])), SDL_GetTouchDeviceName(devices[i]) ? SDL_GetTouchDeviceName(devices[i]) : "?"); // DEBUG_SAULO
+    }                                                                  // DEBUG_SAULO
+    SDL_free(devices);                                                 // DEBUG_SAULO
+}                                                                      // DEBUG_SAULO
+bool Motion(u64 timestamp) {                                           // DEBUG_SAULO
+    if (motion_lines >= 40 || timestamp - last_motion_ns < 250000000ull) return false; // DEBUG_SAULO
+    last_motion_ns = timestamp;                                        // DEBUG_SAULO
+    ++motion_lines;                                                    // DEBUG_SAULO
+    return true;                                                       // DEBUG_SAULO
+}                                                                      // DEBUG_SAULO
+void Log(const SDL_Event& e, bool ui) {                                // DEBUG_SAULO
+    const bool finger = DcpTouchRoute::IsFingerEvent(e);              // DEBUG_SAULO
+    const bool button = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP; // DEBUG_SAULO
+    if (!finger && !button && e.type != SDL_EVENT_MOUSE_MOTION) return; // DEBUG_SAULO
+    Header();                                                          // DEBUG_SAULO
+    const bool motion = e.type == SDL_EVENT_FINGER_MOTION || e.type == SDL_EVENT_MOUSE_MOTION; // DEBUG_SAULO
+    if (motion ? !Motion(e.common.timestamp) : event_lines++ >= 120) return; // DEBUG_SAULO
+    const DcpTouchArea area = GameTouchArea();                         // DEBUG_SAULO
+    if (finger) {                                                      // DEBUG_SAULO
+        u16 tx = 0, ty = 0;                                            // DEBUG_SAULO
+        const int inside = dcp_touch_point(area, e.tfinger.x, e.tfinger.y, &tx, &ty); // DEBUG_SAULO
+        std::printf("Touch diag: finger event=0x%x touch=%llu type=%d finger=%llu x=%.3f y=%.3f area=%.3f,%.3f %.3fx%.3f inside=%d pad=%u,%u ui=%d\n", unsigned(e.type), (unsigned long long)e.tfinger.touchID, int(SDL_GetTouchDeviceType(e.tfinger.touchID)), (unsigned long long)e.tfinger.fingerID, e.tfinger.x, e.tfinger.y, area.x, area.y, area.width, area.height, inside, unsigned(tx), unsigned(ty), int(ui)); // DEBUG_SAULO
+    } else if (button) {                                               // DEBUG_SAULO
+        std::printf("Touch diag: mouse button=%d %s which=%u touch_generated=%d name=%s x=%.0f y=%.0f ui=%d\n", int(e.button.button), e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "down" : "up", unsigned(e.button.which), int(DcpTouchRoute::TouchGeneratedMouse(e)), SDL_GetMouseNameForID(e.button.which) ? SDL_GetMouseNameForID(e.button.which) : "?", e.button.x, e.button.y, int(ui)); // DEBUG_SAULO
+    } else {                                                           // DEBUG_SAULO
+        std::printf("Touch diag: mouse motion which=%u touch_generated=%d x=%.0f y=%.0f\n", unsigned(e.motion.which), int(DcpTouchRoute::TouchGeneratedMouse(e)), e.motion.x, e.motion.y); // DEBUG_SAULO
+    }                                                                  // DEBUG_SAULO
+}                                                                      // DEBUG_SAULO
+} // namespace TouchDiag DEBUG_SAULO
+
+void WindowSDL::HandleTouch(const SDL_Event& event, bool ui) {
+    const SDL_TouchFingerEvent& finger = event.tfinger;
+    if (!DcpTouchRoute::AcceptedTouch(finger.touchID, SDL_GetTouchDeviceType(finger.touchID))) {
+        return;
+    }
+    DcpTouchscreen* const screen = dcp_touchscreen_global();
+    const DcpTouchArea area = GameTouchArea();
+    switch (event.type) {
+    case SDL_EVENT_FINGER_DOWN:
+        if (ui) {
+            return;
+        }
+        dcp_touch_telemetry_record(DCP_TOUCH_EVENT_DETECTED);
+        cursor.ControllerActivity();
+        dcp_touchscreen_down(screen, finger.fingerID, area, finger.x, finger.y, finger.timestamp);
+        break;
+    case SDL_EVENT_FINGER_MOTION:
+        dcp_touchscreen_motion(screen, finger.fingerID, area, finger.x, finger.y);
+        break;
+    case SDL_EVENT_FINGER_UP:
+        dcp_touchscreen_up(screen, finger.fingerID, area, finger.x, finger.y, finger.timestamp);
+        break;
+    default:
+        dcp_touchscreen_cancel(screen, finger.fingerID);
+        break;
+    }
+}
+
 bool WindowSDL::PollEvents() {
     if (close_requested.load(std::memory_order_relaxed)) {
         if (is_open.exchange(false)) {
@@ -381,6 +464,7 @@ bool WindowSDL::PollEvents() {
             TracePress(event);
         }
         const bool ui = DcpOverlay::CapturesInput();
+        TouchDiag::Log(event, ui); // DEBUG_SAULO
         const bool controller_activity = TrackControllerEvent(event);
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
@@ -416,25 +500,35 @@ bool WindowSDL::PollEvents() {
             cursor.ControllerActivity();
             dcp_mouse_controller_activity(dcp_mouse_global());
         }
+        if (DcpTouchRoute::IsFingerEvent(event)) {
+            HandleTouch(event, ui);
+            continue;
+        }
+        const bool touch_mouse = DcpTouchRoute::TouchGeneratedMouse(event);
+        if (DcpTouchRoute::CountedEvent(event, false) == DcpTouchRoute::Counted::MouseSuppressed) {
+            dcp_touch_telemetry_record(DCP_TOUCH_EVENT_MOUSE_SUPPRESSED);
+        }
         switch (event.type) {
         case SDL_EVENT_MOUSE_MOTION:
-            if (!ui) {
+            if (!ui && !touch_mouse) {
                 cursor.MouseMoved();
                 const float to_game = SDL_GetWindowPixelDensity(window) * dcp_mouse_game_scale(GetWidth(), GetHeight());
                 dcp_mouse_motion(dcp_mouse_global(), event.motion.xrel * to_game, event.motion.yrel * to_game);
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (!ui) {
+            if (!ui && !touch_mouse) {
                 cursor.MouseButtonPressed();
                 dcp_mouse_button(dcp_mouse_global(), event.button.button, 1);
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            dcp_mouse_button(dcp_mouse_global(), event.button.button, 0);
+            if (!touch_mouse) {
+                dcp_mouse_button(dcp_mouse_global(), event.button.button, 0);
+            }
             break;
         case SDL_EVENT_MOUSE_WHEEL:
-            if (!ui) {
+            if (!ui && !touch_mouse) {
                 cursor.MouseWheelMoved();
                 dcp_mouse_wheel(dcp_mouse_global(), event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y
                                                                                                    : event.wheel.y);

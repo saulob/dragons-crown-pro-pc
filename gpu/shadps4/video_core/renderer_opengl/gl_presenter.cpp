@@ -10,6 +10,7 @@
 #include "core/libraries/videoout/buffer.h"
 #include "dcp_graphics.h"
 #include "dcp_overlay.h"
+#include "dcp_present.h"
 #include "dcp_renderer.h"
 #include "dcp_settings.h"
 #include "dcp_ultrawide_sides.h"
@@ -393,6 +394,10 @@ void Presenter::Show(const Frame& frame, bool is_game_frame) {
                                       : FitInside(frame.width, frame.height, window_width,
                                                   window_height);
         state.Viewport(area.x, area.y, area.w, area.h);
+        auto& progress = DcpPresent::g_progress;
+        progress.destination_size = DcpPresent::Pack({u32(area.w), u32(area.h)});
+        progress.destination_origin = DcpPresent::Pack({u32(area.x), u32(area.y)});
+        progress.destination_surface = DcpPresent::Pack({u32(window_width), u32(window_height)});
         state.BindVertexArray(vertex_array);
         state.UseProgram(show_program);
         state.BindTexture(0, GL_TEXTURE_2D, frame.texture);

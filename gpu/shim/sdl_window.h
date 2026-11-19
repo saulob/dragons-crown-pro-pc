@@ -75,6 +75,7 @@ private:
     void UpdateMouseCapture();
     void ReleaseMouse();
     bool TrackControllerEvent(const SDL_Event& event);
+    void HandleTouch(const SDL_Event& event, bool ui);
     std::unordered_map<u32, PadActivity> pad_activity; ///< window thread
     DcpCursor::State cursor; ///< window thread
     DcpMouseCapture::Tracker mouse_capture; ///< window thread
