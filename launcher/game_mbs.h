@@ -92,6 +92,17 @@ struct Mbs {
 // a parsed model can be walked without further checks.
 std::optional<Mbs> ParseMbs(std::span<const uint8_t> bytes, std::string* error = nullptr);
 
+// A source quad appended as a copy of source `of`, moved by (du, dv) in texture coordinates.
+struct MbsSourceCopy {
+    uint16_t of = 0;
+    float du = 0.0f, dv = 0.0f;
+};
+// The model file with `copies` appended to its source quads and each (layer, copy) pair pointing that layer at the copy.
+// The source section moves to the end of the file; everything else keeps its place. Nothing when the file is not a model
+// ParseMbs reads or an index is out of range.
+std::optional<std::vector<uint8_t>> WithSourceCopies(std::span<const uint8_t> bytes, std::span<const MbsSourceCopy> copies,
+                                                     std::span<const std::pair<uint32_t, size_t>> layers, std::string* error = nullptr);
+
 std::optional<Mbs> LoadGameMbs(const std::filesystem::path& cpk, std::string_view entry, std::string* error = nullptr);
 
 } // namespace dcp

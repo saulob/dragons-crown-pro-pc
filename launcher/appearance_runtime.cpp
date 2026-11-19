@@ -10,6 +10,7 @@
 #include "character_art.h"
 #include "cpk_patch.h"
 #include "dcp_launcher.h"
+#include "fighter_bare_head.h"
 #include "game_files.h"
 #include "save_discovery.h"
 #include "utf8.h"
@@ -154,6 +155,41 @@ std::vector<CustomInstance> PlanCustomInstances(const CustomStore& store, const 
     return result;
 }
 
+namespace {
+
+bool HidesFighterHelmet(const CustomInstance& instance) {
+    const PartLook* helmet = instance.look.Find("helmet");
+    return instance.instance.klass == CharacterClass::kFighter && instance.look.active() && helmet && helmet->hidden;
+}
+
+// With a Fighter's helmet hidden, the off-head helmets of the shared model draw from copies in every Fighter atlas, so the
+// model and the native atlases are served with them; the hidden helmet's own atlas leaves its copies empty.
+std::optional<std::vector<std::pair<std::string, std::vector<uint8_t>>>> FighterHelmetFiles(const CpkArchive& archive,
+                                                                                            std::string* error) {
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
+    const std::string model_name = GameModelName(CharacterClass::kFighter);
+    const CpkEntry* model_entry = archive.Find(model_name);
+    std::optional<std::vector<uint8_t>> model = model_entry ? FighterModelWithHelmetCopies(archive.Read(*model_entry, error)) : std::nullopt;
+    if (!model) {
+        if (error && error->empty()) *error = model_name + " is not the model the helmet table was made for";
+        return std::nullopt;
+    }
+    files.emplace_back(model_name, std::move(*model));
+    for (int color = 0; color < kNativeColorCount; ++color) {
+        const std::string atlas = NativeColorAtlas(CharacterClass::kFighter, color);
+        const CpkEntry* entry = archive.Find(atlas);
+        std::vector<uint8_t> pack = entry ? archive.Read(*entry, error) : std::vector<uint8_t>{};
+        if (pack.empty() || !AddHelmetCopies(pack)) {
+            if (error && error->empty()) *error = atlas + " cannot take the helmet copies";
+            return std::nullopt;
+        }
+        files.emplace_back(atlas, std::move(pack));
+    }
+    return files;
+}
+
+} // namespace
+
 std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& archive_path,
                                                 const std::vector<CustomInstance>& instances, CharacterArt& art,
                                                 std::vector<std::string>& notes) {
@@ -163,7 +199,16 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
         if (!error.empty()) notes.push_back(error);
         return std::nullopt;
     }
-    std::vector<std::pair<std::string, std::vector<uint8_t>>> added;
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> added, replaced;
+    if (std::any_of(instances.begin(), instances.end(), HidesFighterHelmet)) {
+        if (auto files = FighterHelmetFiles(archive, &error)) {
+            replaced = std::move(*files);
+            notes.push_back("Fighter helmet copies served with " + GameModelName(CharacterClass::kFighter));
+        } else {
+            notes.push_back("Fighter helmet copies not served: " + error);
+            error.clear();
+        }
+    }
     std::vector<AppearanceInstance> runtime;
     std::map<std::string, std::vector<uint8_t>> base_atlases;
     for (const CustomInstance& instance : instances) {
@@ -180,6 +225,10 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
         if (!custom || instance.entry.empty()) {
             notes.push_back(instance.instance.Text() + ": " + atlas + " could not be customized" +
                             (error.empty() ? "" : ": " + error));
+            continue;
+        }
+        if (!replaced.empty() && klass == CharacterClass::kFighter && !HidesFighterHelmet(instance) && !AddHelmetCopies(*custom)) {
+            notes.push_back(instance.instance.Text() + ": the helmet copies could not be added");
             continue;
         }
         added.emplace_back(instance.entry, std::move(*custom));
@@ -229,7 +278,7 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
         notes.push_back("cannot read the size of " + Utf8(archive_path.filename()));
         return std::nullopt;
     }
-    std::optional<ArchiveOverlay> overlay = OverlayAddedEntries(archive_path, length, added, &error);
+    std::optional<ArchiveOverlay> overlay = OverlayChangedEntries(archive_path, length, replaced, added, &error);
     if (!overlay) {
         notes.push_back("overlay failed: " + error);
         return std::nullopt;
@@ -239,11 +288,13 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
         notes.push_back("the overlaid archive cannot be read back: " + error);
         return std::nullopt;
     }
-    for (const auto& [path, data] : added) {
-        const CpkEntry* entry = served.Find(path);
-        if (!entry || entry->size != data.size() || ReadOverlaid(archive_path, *overlay, entry->offset, entry->size) != data) {
-            notes.push_back("the overlaid archive does not hold " + path);
-            return std::nullopt;
+    for (const auto* files : {&added, &replaced}) {
+        for (const auto& [path, data] : *files) {
+            const CpkEntry* entry = served.Find(path);
+            if (!entry || entry->size != data.size() || ReadOverlaid(archive_path, *overlay, entry->offset, entry->size) != data) {
+                notes.push_back("the overlaid archive does not hold " + path);
+                return std::nullopt;
+            }
         }
     }
     return CustomOverlay{std::move(*overlay), std::move(runtime)};

@@ -130,6 +130,13 @@ bool ReadBytes(const fs::path& path, std::vector<uint8_t>& out) {
     return true;
 }
 
+// A texel of a Fighter helmet sprite: with the helmet hidden it is repainted, cleared or kept as TestFighterBareHead checks.
+bool InFighterHelmetSprite(CharacterClass klass, std::string_view key, int x, int y) {
+    if (klass != CharacterClass::kFighter || key != "helmet") return false;
+    const std::span<const HelmetSpriteRule> rules = FighterHelmetSprites();
+    return std::any_of(rules.begin(), rules.end(), [&](const HelmetSpriteRule& rule) { return rule.rect.Contains(x, y); });
+}
+
 void TestCrc32() {
     const std::vector<uint8_t> save = MakeSyntheticSave();
     const uint32_t stored = [&] {
@@ -2113,15 +2120,16 @@ void TestCustomBaseInvariant(const fs::path& base, const fs::path& source_dir) {
                             const uint16_t owned = map.Pieces(x, y) ;
                             const bool in_part = owned ? (piece_bit && (owned & piece_bit))
                                                        : (region && (part.regions >> (region - 1) & 1));
+                            const bool helmet_sprite = InFighterHelmetSprite(klass, part.key, x, y);
                             if (!in_part) {
-                                outside_changed += after != native || gone != native;
+                                outside_changed += after != native || (!helmet_sprite && gone != native);
                                 continue;
                             }
                             inside += native[3] > 0;
                             inside_changed += native[3] > 0 && after != native;
                             alpha_changed += after[3] != native[3];
                             // Hidden: its own texels cleared, nothing filled in; a part over a head shows the bare head.
-                            hidden_alpha_wrong += part.bare_underlay.empty() ? gone[3] != 0 : gone[3] != native[3];
+                            if (!helmet_sprite) hidden_alpha_wrong += part.bare_underlay.empty() ? gone[3] != 0 : gone[3] != native[3];
                         }
                     }
                 }
@@ -3457,7 +3465,7 @@ void TestPartMappingTables() {
 }
 
 void TestPartCacheVersion(const fs::path& base, const fs::path& source_dir) {
-    CHECK(kPieceCacheVersion == "pieces-21" && kRegionCacheVersion == "regions-2");
+    CHECK(kPieceCacheVersion == "pieces-22" && kRegionCacheVersion == "regions-2");
     const std::string part_source = ReadSource("launcher/appearance_custom.cpp") + ReadSource("launcher/appearance_custom.h");
     for (const char* old : {"pieces-3", "pieces-4", "pieces-5", "pieces-6", "pieces-7", "pieces-8", "pieces-9\"", "pieces-10", "pieces-11", "pieces-12", "pieces-13", "pieces-14", "pieces-15", "pieces-16", "pieces-17", "pieces-18", "pieces-19", "pieces-20", "regions-1"}) {
         CHECK(part_source.find(old) == std::string::npos);
@@ -3497,14 +3505,14 @@ void TestPartCacheVersion(const fs::path& base, const fs::path& source_dir) {
     };
     const fs::path pieces_file = sources.cache_dir / "pieces_Amazon_0.bin";
     const fs::path regions_file = sources.cache_dir / "regions_Amazon_0.bin";
-    age(pieces_file, "|Amazon|pieces-21", "|Amazon|pieces-20");
+    age(pieces_file, "|Amazon|pieces-22", "|Amazon|pieces-21");
     age(regions_file, "|Amazon|regions-2", "|Amazon|regions-1");
     {
         CharacterArt rebuilt(sources);
         const std::vector<RegionMap>* maps = rebuilt.Regions(CharacterClass::kAmazon);
         CHECK(maps != nullptr && maps->front().pieces == fresh && maps->front().region == fresh_regions);
     }
-    for (const auto& [file, key] : {std::pair{pieces_file, std::string("|Amazon|pieces-21")}, std::pair{regions_file, std::string("|Amazon|regions-2")}}) {
+    for (const auto& [file, key] : {std::pair{pieces_file, std::string("|Amazon|pieces-22")}, std::pair{regions_file, std::string("|Amazon|regions-2")}}) {
         std::vector<uint8_t> renewed;
         CHECK(ReadBytes(file, renewed));
         CHECK(std::search(renewed.begin(), renewed.end(), key.begin(), key.end()) != renewed.end());
@@ -4271,9 +4279,10 @@ void CheckServedLook(CharacterArt& art, CpkArchive& cpk, CharacterClass klass, c
     CHECK(difference / double(runtime.rgba.size()) < 1.0);
 }
 
-// A frame of a gameplay animation of the in-game model, drawn from the atlas with the look applied as the game's is.
+// A frame of a gameplay animation of the in-game model, drawn from the atlas with the look applied as the game's is. A
+// track, when given, is drawn alone: tracks run on their own clocks, so the same frame index of two is not one moment.
 SpriteImage RenderGamePose(CpkArchive& cpk, const std::vector<RegionMap>& maps, CharacterClass klass, const Mbs& game,
-                           std::string_view animation, size_t frame, const CustomLook& look) {
+                           std::string_view animation, size_t frame, const CustomLook& look, std::optional<size_t> track = std::nullopt) {
     const BodyAtlas atlas = ReadBodyAtlas(cpk, klass, look.base);
     const std::span<const BodySurface> bodies = BodySurfacesOf(klass);
     const std::span<const WeaponTexture> weapon_textures = WeaponTexturesOf(klass);
@@ -4285,6 +4294,14 @@ SpriteImage RenderGamePose(CpkArchive& cpk, const std::vector<RegionMap>& maps, 
         if (game.animations[a].name == animation) request.animation = a;
     }
     request.frame = frame;
+    std::set<uint32_t> drawn;
+    if (track) {
+        const MbsAnimation& anim = game.animations[request.animation];
+        const MbsTrack& run = game.tracks[anim.first_track + *track];
+        const MbsKey& key = game.keys[game.frames[run.first_frame + std::min<size_t>(frame, run.frame_count - 1)].key];
+        for (uint32_t i = 0; i < key.layer_count; ++i) drawn.insert(key.first_layer + i);
+        request.visible = [&drawn](uint32_t layer) { return drawn.count(layer) > 0; };
+    }
     for (size_t b = 0; b < bodies.size(); ++b) request.textures[bodies[b].texture] = &atlas.surfaces[b];
     for (size_t w = 0; w < weapons.size(); ++w) request.textures[weapon_textures[w].texture] = &weapons[w];
     std::vector<LookShader> shaders;
@@ -4374,7 +4391,8 @@ void TestEveryPartHides(CharacterArt& art, CpkArchive& cpk) {
                     // A part with a head under it is painted as that bare head instead; every other part goes transparent.
                     const AtlasChange change = ChangeOnAtlas(klass, *maps, atlas, hidden, {&part});
                     const size_t expected_cleared = part.bare_underlay.empty() ? change.inside : 0;
-                    CHECK(change.inside > 0 && change.inside_cleared == expected_cleared && change.outside_changed == 0);
+                    const bool repainted = klass == CharacterClass::kFighter && part.key == "helmet"; // TestFighterBareHead
+                    CHECK(change.inside > 0 && (repainted || (change.inside_cleared == expected_cleared && change.outside_changed == 0)));
                     const AtlasChange tint = ChangeOnAtlas(klass, *maps, atlas, Painted(color, {key.c_str()}, {255, 0, 128}), {&part});
                     CHECK(tint.inside_changed * 10 >= tint.inside * 9 && tint.inside_cleared == 0 && tint.outside_changed == 0);
                 }
@@ -4538,6 +4556,8 @@ void CheckHornOwnership(const std::string& build, const RegionMap& map, const st
     CHECK(horn_texels > 60000 && horn_patches == horn_cuts && horn_cuts == 34 && foreign == 0 && stray == 0 && fragments == 0 && anchors_wrong == 0 && skin_wrong == 0);
 }
 
+size_t HelmetRuleProblems(const Mbs& model);
+
 // The Helmet and Horns of every local build with the Fighter's art: atlases and models are compared by content, and each
 // build learns its own ownership. Builds without local files are named.
 void TestFighterHornBuilds(const fs::path& base, const fs::path& source_dir) {
@@ -4599,6 +4619,20 @@ void TestFighterHornBuilds(const fs::path& base, const fs::path& source_dir) {
         std::vector<FtxSurface> presets;
         for (int color = 0; color < kNativeColorCount; ++color) presets.push_back(*ReadFtxSurface(contents[size_t(2 + color)], 0));
         CheckHornOwnership(build.name, maps->front(), presets);
+        const std::optional<Mbs> model = ParseMbs(contents.front());
+        const size_t rule_problems = model ? HelmetRuleProblems(*model) : 1;
+        std::printf("%s: helmet sprite rules %s\n", build.name, rule_problems ? "DO NOT match the model" : "match the model");
+        CHECK(rule_problems == 0);
+        const std::optional<std::vector<uint8_t>> with_copies = FighterModelWithHelmetCopies(contents.front());
+        size_t copied_atlases = 0;
+        for (int color = 0; color < kNativeColorCount; ++color) {
+            std::vector<uint8_t> pack = contents[size_t(2 + color)];
+            copied_atlases += AddHelmetCopies(pack);
+        }
+        const size_t off_head = model ? OffHeadHelmetLayers(*model).size() : 0;
+        std::printf("%s: helmet copies %s, %zu off-head helmet records, %zu atlases copied\n", build.name, with_copies ? "made" : "NOT made",
+                    off_head, copied_atlases);
+        CHECK(with_copies && off_head == 65 && copied_atlases == size_t(kNativeColorCount));
         ++checked;
     }
     CHECK(checked >= 6);
@@ -4710,9 +4744,12 @@ void TestFighterHelmetAndHorns(CharacterArt& art, CpkArchive& cpk) {
             }
             std::printf("Fighter %s colour %d: %zu pixels, hidden %zu, painted %zu; hidden leaves %zu; outside the part: hide %zu, paint %zu, random %zu\n",
                         key.c_str(), color, own, own_hidden, own_painted, left, hide_only, paint_only, random_only);
-            CHECK(own > (part == face ? 40u : 1500u) && own_painted * 100 >= own * 90 && left == 0 && hide_only == 0 && paint_only == 0 &&
-                  random_only == 0);
+            // The hidden helmet's sprites show the bare head instead, which TestFighterBareHead checks.
+            const bool repainted = part == helmet;
+            CHECK(own > (part == face ? 40u : 1500u) && own_painted * 100 >= own * 90 && (repainted || (left == 0 && hide_only == 0)) &&
+                  paint_only == 0 && random_only == 0);
             for (const CustomLook& look : {Hidden(color, {key.c_str()}), Painted(color, {key.c_str()}, {230, 40, 200}), rolled}) {
+                if (repainted && look.parts.front().hidden) continue;
                 const AtlasChange change = ChangeOnAtlas(klass, maps, atlas, look, {part});
                 CHECK(change.inside > 0 && change.inside_changed * 100 >= change.inside * 90 && change.outside_changed == 0);
             }
@@ -4722,18 +4759,18 @@ void TestFighterHelmetAndHorns(CharacterArt& art, CpkArchive& cpk) {
             CHECK(art.CustomPreview(klass, color, reset)->rgba == native.rgba);
             CHECK(ChangeOnAtlas(klass, maps, atlas, reset, {}).outside_changed == 0);
         }
-        // On the atlas, Helmet hidden changes no texel of the face, eye or horns, and the face hidden none of the helmet's.
-        for (const char* key : {"helmet", "face", "horns"}) {
+        // On the atlas, the face hidden changes no texel of the helmet's, nor the horns hidden any of the helmet's or eye's.
+        for (const char* key : {"face", "horns"}) {
             const AtlasChange change = ChangeOnAtlas(klass, maps, atlas, Hidden(color, {key}), {FindCustomPart(klass, key)});
             CHECK(change.inside > 0 && change.inside_cleared == change.inside && change.outside_changed == 0);
         }
-        // Each hidden alone keeps the other one's exact pixels; both hidden take both and leave the eye.
-        const SpriteImage both = *art.CustomPreview(klass, color, Hidden(color, {"horns", "helmet"}));
+        // The horns hidden leave the eye; the helmet hidden repaints its visor with the bare head.
+        const SpriteImage hornless = *art.CustomPreview(klass, color, Hidden(color, {"horns"}));
         size_t kept_wrong = 0;
         for (size_t p = 0; p < native.layer.size(); ++p) {
             const CustomPart* owner = owner_at(native, p);
             if (owner && owner->key == "eye" && !reaches(native, p, horns) && !reaches(native, p, helmet)) {
-                kept_wrong += std::memcmp(&native.rgba[p * 4], &both.rgba[p * 4], 4) != 0;
+                kept_wrong += std::memcmp(&native.rgba[p * 4], &hornless.rgba[p * 4], 4) != 0;
             }
         }
         CHECK(kept_wrong == 0);
@@ -4741,6 +4778,605 @@ void TestFighterHelmetAndHorns(CharacterArt& art, CpkArchive& cpk) {
     for (const char* key : {"horns", "helmet"}) {
         CheckServedLook(art, cpk, klass, *select, Hidden(0, {key}));
         CheckServedLook(art, cpk, klass, *select, Painted(3, {key}, {40, 220, 90}));
+    }
+}
+
+AtlasRect SourceRectOf(const Mbs& model, const MbsLayer& layer, int width, int height) {
+    const MbsQuad& quad = model.sources[layer.source];
+    AtlasRect rect{1 << 30, 1 << 30, -(1 << 30), -(1 << 30)};
+    for (const MbsPoint& c : quad.corners) {
+        rect.x0 = std::min(rect.x0, int(std::lround(c.x * float(width))));
+        rect.x1 = std::max(rect.x1, int(std::lround(c.x * float(width))));
+        rect.y0 = std::min(rect.y0, int(std::lround(c.y * float(height))));
+        rect.y1 = std::max(rect.y1, int(std::lround(c.y * float(height))));
+    }
+    return rect;
+}
+
+// The helmet sprite table against a model: every helmet sprite has a rule over its exact atlas rectangle, every bare-head
+// layer is a bare-head sprite of the model, and no other sprite shares a rectangle the rules repaint or clear.
+size_t HelmetRuleProblems(const Mbs& model) {
+    constexpr int kAtlasSize = 4096;
+    std::map<uint32_t, std::set<std::tuple<int, int, int, int>>> rects;
+    for (const MbsLayer& layer : model.layers) {
+        if (layer.texture != 0) continue;
+        const AtlasRect r = SourceRectOf(model, layer, kAtlasSize, kAtlasSize);
+        rects[layer.id].insert({r.x0, r.y0, r.x1, r.y1});
+    }
+    const std::span<const HelmetSpriteRule> rules = FighterHelmetSprites();
+    const auto rule_of = [&](uint32_t id) {
+        return std::find_if(rules.begin(), rules.end(), [&](const HelmetSpriteRule& r) { return r.id == id; });
+    };
+    size_t problems = 0;
+    for (const auto& [id, shapes] : rects) {
+        if (id < 1100 || id >= 1200) continue;
+        problems += rule_of(id) == rules.end();
+    }
+    for (const HelmetSpriteRule& rule : rules) {
+        const auto found = rects.find(rule.id);
+        problems += found == rects.end() || found->second.size() != 1 ||
+                    *found->second.begin() != std::tuple{rule.rect.x0, rule.rect.y0, rule.rect.x1, rule.rect.y1};
+        problems += (rule.kind == HelmetSprite::kBareHead) == rule.layers.empty();
+        for (const BareHeadLayer& layer : rule.layers) {
+            bool bare_sprite = false;
+            for (const auto& [id, shapes] : rects) {
+                bare_sprite |= id >= 1200 && id < 1300 && shapes.count({layer.source.x0, layer.source.y0, layer.source.x1, layer.source.y1});
+            }
+            problems += !bare_sprite;
+        }
+        for (const auto& [id, shapes] : rects) {
+            if (id == rule.id) continue;
+            for (const auto& [x0, y0, x1, y1] : shapes) problems += x0 < rule.rect.x1 && rule.rect.x0 < x1 && y0 < rule.rect.y1 && rule.rect.y0 < y1;
+        }
+    }
+    return problems;
+}
+
+// The frame each track of an animation draws at every tick: tracks run on their own clocks.
+std::vector<std::vector<std::pair<size_t, size_t>>> AnimationTicks(const Mbs& model, size_t animation) {
+    const MbsAnimation& anim = model.animations[animation];
+    long length = 0;
+    for (size_t t = 0; t < anim.track_count; ++t) {
+        const MbsTrack& run = model.tracks[anim.first_track + t];
+        long sum = 0;
+        for (size_t f = 0; f < run.frame_count; ++f) sum += model.frames[run.first_frame + f].duration;
+        length = std::max(length, sum);
+    }
+    std::vector<std::vector<std::pair<size_t, size_t>>> ticks;
+    for (long tick = 0; tick < length; ++tick) {
+        std::vector<std::pair<size_t, size_t>> frames;
+        for (size_t t = 0; t < anim.track_count; ++t) {
+            const MbsTrack& run = model.tracks[anim.first_track + t];
+            if (!run.frame_count) continue;
+            long end = 0;
+            size_t f = 0;
+            while (f + 1 < run.frame_count && tick >= (end += model.frames[run.first_frame + f].duration)) ++f;
+            frames.emplace_back(t, f);
+        }
+        ticks.push_back(std::move(frames));
+    }
+    return ticks;
+}
+
+// One tick of an animation: every track at its own frame, drawn in track order.
+SpriteImage RenderTick(const Mbs& model, size_t animation, const std::vector<std::pair<size_t, size_t>>& frames,
+                       const std::array<const FtxSurface*, 16>& textures, float scale) {
+    SpriteImage out;
+    std::vector<float> color;
+    for (const auto& [t, f] : frames) {
+        const MbsTrack& run = model.tracks[model.animations[animation].first_track + t];
+        const MbsKey& key = model.keys[model.frames[run.first_frame + f].key];
+        SpriteRequest request;
+        request.mbs = &model;
+        request.animation = animation;
+        request.frame = f;
+        request.scale = scale;
+        request.textures = textures;
+        request.visible = [&](uint32_t layer) { return layer >= key.first_layer && layer < key.first_layer + key.layer_count; };
+        const SpriteImage image = RenderSprite(request);
+        if (out.rgba.empty()) {
+            out = image;
+            std::fill(out.layer.begin(), out.layer.end(), kNoLayer);
+            color.assign(image.rgba.size(), 0.0f);
+        }
+        for (size_t p = 0; p < image.layer.size(); ++p) {
+            const float alpha = image.rgba[p * 4 + 3] / 255.0f;
+            for (size_t c = 0; c < 3; ++c) color[p * 4 + c] = image.rgba[p * 4 + c] / 255.0f * alpha + color[p * 4 + c] * (1.0f - alpha);
+            color[p * 4 + 3] = alpha + color[p * 4 + 3] * (1.0f - alpha);
+            if (image.layer[p] != kNoLayer) out.layer[p] = image.layer[p];
+        }
+    }
+    for (size_t p = 0; p < out.layer.size(); ++p) {
+        const float alpha = std::clamp(color[p * 4 + 3], 0.0f, 1.0f);
+        out.rgba[p * 4 + 3] = uint8_t(std::lround(alpha * 255.0f));
+        for (size_t c = 0; c < 3; ++c) {
+            out.rgba[p * 4 + c] = uint8_t(alpha > 0 ? std::lround(std::clamp(color[p * 4 + c] / alpha, 0.0f, 1.0f) * 255.0f) : 0);
+        }
+    }
+    return out;
+}
+
+// Every tick of every animation with the helmet hidden, by what the drawn helmet records sample in the hidden atlas.
+struct HelmetTicks {
+    long total = 0, official_head = 0, game_head = 0, no_head = 0, off_head_hidden = 0, visor_cleared = 0, helmet_visible = 0,
+         duplicate = 0, conflicts = 0;
+};
+HelmetTicks CountHelmetTicks(const Mbs& model, const std::set<uint32_t>& off_head, const FtxSurface& hidden) {
+    std::map<uint16_t, bool> shows;
+    for (const MbsLayer& layer : model.layers) {
+        if (layer.id < 1100 || layer.id >= 1200 || shows.count(layer.source)) continue;
+        const AtlasRect r = SourceRectOf(model, layer, hidden.width(), hidden.height());
+        bool any = false;
+        for (int y = r.y0; y < r.y1 && !any; ++y) {
+            for (int x = r.x0; x < r.x1 && !any; ++x) any = hidden.Texel(x, y)[3] != 0;
+        }
+        shows[layer.source] = any;
+    }
+    std::map<uint32_t, HelmetSprite> kind;
+    for (const HelmetSpriteRule& rule : FighterHelmetSprites()) kind[rule.id] = rule.kind;
+    HelmetTicks ticks;
+    std::set<uint32_t> on_head;
+    for (size_t a = 0; a < model.animations.size(); ++a) {
+        for (const auto& frames : AnimationTicks(model, a)) {
+            ++ticks.total;
+            std::vector<const MbsKey*> keys;
+            for (const auto& [t, f] : frames) keys.push_back(&model.keys[model.frames[model.tracks[model.animations[a].first_track + t].first_frame + f].key]);
+            bool bare = false, off = false, visible = false, cleared = false, two_heads = false, any_head = false;
+            for (const MbsKey* key : keys) {
+                for (uint32_t i = 0; i < key->layer_count; ++i) {
+                    const uint32_t id = model.layers[key->first_layer + i].id;
+                    bare |= id >= 1200 && id < 1300;
+                }
+            }
+            for (const MbsKey* key : keys) {
+                std::set<uint32_t> heads;
+                bool body = false;
+                for (uint32_t i = 0; i < key->layer_count; ++i) {
+                    const uint32_t id = model.layers[key->first_layer + i].id;
+                    body |= id < 1100 || (id >= 1300 && id < 3000);
+                }
+                for (uint32_t i = 0; i < key->layer_count; ++i) {
+                    const uint32_t layer = key->first_layer + i;
+                    const MbsLayer& record = model.layers[layer];
+                    if (record.id < 1100 || record.id >= 1200) continue;
+                    const bool sampled = shows[record.source];
+                    if (body && !bare) on_head.insert(layer);
+                    if (off_head.count(layer)) {
+                        off = true;
+                        visible |= sampled;
+                    } else if (kind[record.id] == HelmetSprite::kBareHead) {
+                        if (sampled) heads.insert(record.id);
+                    } else {
+                        cleared = true;
+                        visible |= sampled;
+                    }
+                }
+                two_heads |= heads.size() > 1; // one body, one head; a second body drawn by another track has its own
+                any_head |= !heads.empty();
+            }
+            ticks.official_head += !bare && any_head;
+            ticks.game_head += bare;
+            ticks.no_head += !bare && !any_head;
+            ticks.off_head_hidden += off;
+            ticks.visor_cleared += cleared;
+            ticks.helmet_visible += visible;
+            ticks.duplicate += (bare && any_head) || two_heads;
+        }
+    }
+    for (const uint32_t layer : off_head) ticks.conflicts += on_head.count(layer);
+    return ticks;
+}
+
+// Helmet Hidden shows the Fighter's own bare head: the helmet sprites he wears are repainted with the game's bare-head
+// sprites of the same Base Color, under the horns and through the Face's own look, in the preview, the served atlas and
+// the gameplay poses alike. Visor pieces and helmets off the head go, nothing else of the atlas changes.
+void TestFighterBareHead(CharacterArt& art, CpkArchive& cpk) {
+    const CharacterClass klass = CharacterClass::kFighter;
+    const std::optional<Mbs> select = SelectModel(cpk, klass);
+    const std::optional<Mbs> game = ParseMbs(cpk.Read(*cpk.Find(GameModelName(klass))));
+    CHECK(select && game && art.Regions(klass));
+    if (!select || !game || !art.Regions(klass)) return;
+    const std::vector<RegionMap>& maps = *art.Regions(klass);
+    const RegionMap& map = maps.front();
+    const CustomPart* helmet = FindCustomPart(klass, "helmet");
+    const CustomPart* horns = FindCustomPart(klass, "horns");
+    const std::span<const HelmetSpriteRule> rules = FighterHelmetSprites();
+    CHECK(HelmetRuleProblems(*game) == 0);
+    const auto rule_of = [&](uint32_t id) -> const HelmetSpriteRule* {
+        for (const HelmetSpriteRule& rule : rules) {
+            if (rule.id == id) return &rule;
+        }
+        return nullptr;
+    };
+    const auto kinds = [&](HelmetSprite kind) {
+        std::set<uint32_t> ids;
+        for (const HelmetSpriteRule& rule : rules) {
+            if (rule.kind == kind) ids.insert(rule.id);
+        }
+        return ids;
+    };
+    CHECK((kinds(HelmetSprite::kBareHead) == std::set<uint32_t>{1100, 1101, 1102, 1103, 1105, 1107, 1110, 1113, 1115, 1120, 1122, 1127}));
+    CHECK((kinds(HelmetSprite::kClear) == std::set<uint32_t>{1104, 1106, 1111, 1116, 1117, 1118, 1130, 1132, 1134, 1135}));
+
+    const auto is_horn = [&](int x, int y) { return OwnerOfTexel(klass, map, x, y) == horns; };
+    std::array<std::array<double, 3>, kNativeColorCount> head_means{};
+    for (int color = 0; color < kNativeColorCount; ++color) {
+        const BodyAtlas atlas = ReadBodyAtlas(cpk, klass, color);
+        const FtxSurface& surface = atlas.surfaces.front();
+        const auto read = [&](int x, int y) { return surface.Texel(x, y); };
+        const LookShader bare(klass, Hidden(color, {"helmet"}), map, read);
+        const LookShader bald(klass, Hidden(color, {"helmet", "horns"}), map, read);
+        CustomLook dyed = Hidden(color, {"helmet"});
+        dyed.SetPartColor("face", {40, 220, 90});
+        dyed.SetPartColor("helmet", {230, 20, 20});
+        const LookShader green(klass, dyed, map, read);
+        size_t head = 0, green_head = 0, red_head = 0, metal_left = 0, horns_drawn = 0, horns_kept = 0, horns_gone = 0, cleared_wrong = 0,
+               outside_changed = 0;
+        double sum[3] = {}, weight = 0.0;
+        for (const HelmetSpriteRule& rule : rules) {
+            for (int y = rule.rect.y0; y < rule.rect.y1; ++y) {
+                for (int x = rule.rect.x0; x < rule.rect.x1; ++x) {
+                    const std::array<uint8_t, 4> before = surface.Texel(x, y);
+                    std::array<uint8_t, 4> shown = before, bald_texel = before, dyed_texel = before;
+                    bare.ApplyAt(x, y, shown);
+                    if (rule.kind == HelmetSprite::kClear) {
+                        cleared_wrong += shown[3] != 0;
+                        continue;
+                    }
+                    bald.ApplyAt(x, y, bald_texel);
+                    green.ApplyAt(x, y, dyed_texel);
+                    const bool horn = is_horn(x, y);
+                    if (horn && before[3] == 255) {
+                        ++horns_drawn;
+                        horns_kept += shown == before;
+                        horns_gone += bald_texel != before;
+                    }
+                    // Where the head is opaque its outline can match the metal's colour exactly; elsewhere the metal must be gone.
+                    metal_left += !horn && before[3] == 255 && bald_texel[3] != 255 && OwnerOfTexel(klass, map, x, y) == helmet && shown == before;
+                    if (horn || bald_texel[3] < 200) continue;
+                    ++head;
+                    green_head += dyed_texel[1] > dyed_texel[0] + 30 && dyed_texel[1] > dyed_texel[2] + 30;
+                    red_head += dyed_texel[0] > dyed_texel[1] + 60 && dyed_texel[0] > dyed_texel[2] + 60;
+                    if (rule.id == 1100) {
+                        for (int c = 0; c < 3; ++c) sum[c] += bald_texel[size_t(c)];
+                        weight += 1.0;
+                    }
+                }
+            }
+        }
+        for (int y = 1; y < map.height; y += 3) {
+            for (int x = 1; x < map.width; x += 3) {
+                if (std::any_of(rules.begin(), rules.end(), [&](const HelmetSpriteRule& r) { return r.rect.Contains(x, y); })) continue;
+                const std::array<uint8_t, 4> before = surface.Texel(x, y);
+                std::array<uint8_t, 4> after = before;
+                bare.ApplyAt(x, y, after);
+                // The helmet's own texels next to its sprites, which filtering reaches, are cleared as before.
+                outside_changed += after != before && OwnerOfTexel(klass, map, x, y) != helmet;
+            }
+        }
+        for (int c = 0; c < 3; ++c) head_means[size_t(color)][size_t(c)] = weight > 0.0 ? sum[c] / weight : 0.0;
+        // The colour of the game's own bare head in this Base Color, read from its face sprite.
+        double face_sum[3] = {}, face_weight = 0.0;
+        for (const BareHeadLayer& layer : rule_of(1100)->layers) {
+            for (int y = layer.source.y0; y < layer.source.y1; ++y) {
+                for (int x = layer.source.x0; x < layer.source.x1; ++x) {
+                    const std::array<uint8_t, 4> t = surface.Texel(x, y);
+                    if (t[3] < 200) continue;
+                    for (int c = 0; c < 3; ++c) face_sum[c] += t[size_t(c)];
+                    face_weight += 1.0;
+                }
+            }
+        }
+        double off = 0.0;
+        for (int c = 0; c < 3; ++c) off = std::max(off, std::abs(face_sum[c] / face_weight - head_means[size_t(color)][size_t(c)]));
+        std::printf("Fighter bare head colour %d: %zu head texels (green with Face dyed %zu, red %zu), metal left %zu, horns %zu kept %zu gone when "
+                    "hidden %zu, cleared wrong %zu, outside changed %zu, off the game's bare head by %.1f\n",
+                    color, head, green_head, red_head, metal_left, horns_drawn, horns_kept, horns_gone, cleared_wrong, outside_changed, off);
+        CHECK(head > 50000 && green_head * 100 >= head * 95 && red_head == 0 && metal_left == 0);
+        CHECK(horns_drawn > 50000 && horns_kept == horns_drawn && horns_gone == horns_drawn);
+        CHECK(cleared_wrong == 0 && outside_changed == 0 && off < 30.0);
+
+        // The preview's select pose wears helmet 1100: hidden, the head shows where it was; shown, the native preview is back.
+        const SpriteImage native = *art.Preview(klass, color);
+        const SpriteImage hidden = *art.CustomPreview(klass, color, Hidden(color, {"helmet"}));
+        CustomLook shown_again = Hidden(color, {"helmet"});
+        shown_again.SetPartHidden("helmet", false);
+        CHECK(art.CustomPreview(klass, color, shown_again)->rgba == native.rgba);
+        size_t helmet_pixels = 0, head_pixels = 0;
+        for (size_t p = 0; p < native.layer.size(); ++p) {
+            const bool on_1100 = native.layer[p] != kNoLayer && select->layers[native.layer[p]].id == 1100;
+            helmet_pixels += on_1100 && native.rgba[p * 4 + 3] != 0;
+            head_pixels += hidden.layer[p] != kNoLayer && select->layers[hidden.layer[p]].id == 1100 && hidden.rgba[p * 4 + 3] != 0;
+        }
+        std::printf("Fighter preview colour %d: helmet %zu pixels, bare head and horns %zu\n", color, helmet_pixels, head_pixels);
+        CHECK(helmet_pixels > 3000 && head_pixels * 100 >= helmet_pixels * 50);
+    }
+    double spread = 0.0;
+    for (int a = 0; a < kNativeColorCount; ++a) {
+        for (int b = 0; b < kNativeColorCount; ++b) {
+            for (int c = 0; c < 3; ++c) spread = std::max(spread, std::abs(head_means[size_t(a)][size_t(c)] - head_means[size_t(b)][size_t(c)]));
+        }
+    }
+    CHECK(spread > 20.0); // each Base Color draws its own head
+
+    // Gameplay poses, each track alone: the repainted sprite draws a head where the helmet was, it is the frame's only
+    // head, and none of the helmet's own texels is left in it.
+    struct Pose {
+        const char* animation;
+        size_t frame;
+    };
+    const Pose poses[] = {{"IDLE", 0}, {"MOVE_2", 0}, {"RUN_2", 0}, {"RUN_2", 1}, {"ATTACK_1", 0}, {"KNOCKBACK", 0}, {"BLOWDOWN_4", 0},
+                          {"DIE", 0},  {"JUMP_2", 0}, {"TURN_1", 1}, {"FT_UI_DRINK_1", 3}};
+    for (const int color : {0, 3}) {
+        const BodyAtlas atlas = ReadBodyAtlas(cpk, klass, color);
+        for (const Pose& pose : poses) {
+            const SpriteImage before = RenderGamePose(cpk, maps, klass, *game, pose.animation, pose.frame, CustomLook{true, uint8_t(color), {}}, 0);
+            const SpriteImage after = RenderGamePose(cpk, maps, klass, *game, pose.animation, pose.frame, Hidden(color, {"helmet"}), 0);
+            std::set<uint32_t> heads;
+            size_t bare_layers = 0;
+            double bx = 0, by = 0, ax = 0, ay = 0;
+            size_t helmet_pixels = 0, head_pixels = 0, residue = 0;
+            for (size_t p = 0; p < before.layer.size(); ++p) {
+                if (before.layer[p] != kNoLayer) {
+                    const uint32_t id = game->layers[before.layer[p]].id;
+                    const HelmetSpriteRule* rule = rule_of(id);
+                    if (rule && rule->kind == HelmetSprite::kBareHead) {
+                        heads.insert(id);
+                        if (before.rgba[p * 4 + 3]) {
+                            ++helmet_pixels;
+                            bx += double(p % size_t(before.width));
+                            by += double(p / size_t(before.width));
+                        }
+                    }
+                    bare_layers += id >= 1200 && id < 1300;
+                }
+                if (after.layer[p] == kNoLayer || !after.rgba[p * 4 + 3]) continue;
+                const HelmetSpriteRule* rule = rule_of(game->layers[after.layer[p]].id);
+                if (!rule || rule->kind != HelmetSprite::kBareHead) continue;
+                ++head_pixels;
+                ax += double(p % size_t(after.width));
+                ay += double(p / size_t(after.width));
+                const int tx = int(after.texel[p] % uint32_t(map.width)), ty = int(after.texel[p] / uint32_t(map.width));
+                const std::array<uint8_t, 4> drawn = atlas.surfaces.front().Texel(tx, ty);
+                residue += OwnerOfTexel(klass, map, tx, ty) == helmet && drawn[3] == 255 &&
+                           std::memcmp(&before.rgba[p * 4], &after.rgba[p * 4], 4) == 0 && before.layer[p] == after.layer[p];
+            }
+            const double distance = helmet_pixels && head_pixels ? std::hypot(ax / double(head_pixels) - bx / double(helmet_pixels),
+                                                                              ay / double(head_pixels) - by / double(helmet_pixels))
+                                                                 : 1e9;
+            std::printf("Fighter pose %s f%zu colour %d: helmet sprite %u, %zu helmet pixels, %zu head pixels, centres %.1f apart, residue %zu\n",
+                        pose.animation, pose.frame, color, heads.empty() ? 0u : *heads.begin(), helmet_pixels, head_pixels, distance, residue);
+            CHECK(heads.size() == 1 && bare_layers == 0 && head_pixels * 100 >= helmet_pixels * 30 && distance < 30.0 && residue * 100 <= head_pixels);
+        }
+    }
+    CheckServedLook(art, cpk, klass, *select, Hidden(0, {"helmet"}));
+    CheckServedLook(art, cpk, klass, *select, Hidden(2, {"helmet", "horns"}));
+    CustomLook dyed = Hidden(4, {"helmet"});
+    dyed.SetPartColor("face", {40, 220, 90});
+    CheckServedLook(art, cpk, klass, *select, dyed);
+}
+
+// Helmet Hidden in every animation: the helmets the model draws off the head (held, dropped, flying) sample copies that the
+// hidden atlas leaves empty, so the bare head shows once and no helmet shows anywhere; every other Fighter draws as before.
+void TestFighterHelmetContexts(CharacterArt& art, CpkArchive& cpk) {
+    const CharacterClass klass = CharacterClass::kFighter;
+    const std::vector<uint8_t> bytes = cpk.Read(*cpk.Find(GameModelName(klass)));
+    const std::optional<Mbs> original = ParseMbs(bytes);
+    const std::optional<std::vector<uint8_t>> patched_bytes = FighterModelWithHelmetCopies(bytes);
+    const std::optional<Mbs> patched = patched_bytes ? ParseMbs(*patched_bytes) : std::nullopt;
+    const std::optional<Mbs> select = SelectModel(cpk, klass);
+    CHECK(original && patched && select && art.Regions(klass));
+    if (!original || !patched || !select || !art.Regions(klass)) return;
+    const std::vector<RegionMap>& maps = *art.Regions(klass);
+    const std::vector<uint32_t> off_list = OffHeadHelmetLayers(*original);
+    const std::set<uint32_t> off_head(off_list.begin(), off_list.end());
+    const std::span<const HelmetCopy> copies = FighterHelmetCopies();
+    std::set<uint32_t> copied;
+    for (const HelmetCopy& copy : copies) copied.insert(copy.id);
+
+    // Only the off-head records of the copied sprites move, each to its sprite's copy, moved by whole blocks.
+    CHECK(patched->sources.size() == original->sources.size() + copies.size() && patched->layers.size() == original->layers.size() &&
+          patched->keys.size() == original->keys.size() && patched->frames.size() == original->frames.size());
+    size_t moved = 0, wrong_move = 0;
+    for (size_t i = 0; i < original->layers.size(); ++i) {
+        const MbsLayer& a = original->layers[i];
+        const MbsLayer& b = patched->layers[i];
+        const bool should = off_head.count(uint32_t(i)) && copied.count(a.id);
+        moved += a.source != b.source;
+        wrong_move += (a.source != b.source) != should || a.id != b.id || a.color != b.color || a.destination != b.destination || a.texture != b.texture;
+        if (!should) continue;
+        const HelmetCopy& copy = *std::find_if(copies.begin(), copies.end(), [&](const HelmetCopy& c) { return c.id == a.id; });
+        const AtlasRect from = SourceRectOf(*original, a, 4096, 4096), to = SourceRectOf(*patched, b, 4096, 4096);
+        wrong_move += to.x0 != from.x0 + copy.dx || to.y0 != from.y0 + copy.dy || to.x1 != from.x1 + copy.dx || to.y1 != from.y1 + copy.dy;
+    }
+    std::printf("Fighter helmet contexts: %zu off-head helmet records, %zu moved to copies, %zu wrong\n", off_head.size(), moved, wrong_move);
+    CHECK(off_head.size() == 65 && moved == 39 && wrong_move == 0);
+
+    // Each copy lands where neither model samples and no preset draws, and carries its sprite's texels exactly.
+    std::vector<AtlasRect> sampled;
+    for (const Mbs* model : {&*original, &*select}) {
+        for (const MbsLayer& layer : model->layers) {
+            if (layer.texture == 0) sampled.push_back(SourceRectOf(*model, layer, 4096, 4096));
+        }
+    }
+    for (int color = 0; color < kNativeColorCount; ++color) {
+        std::vector<uint8_t> pack = cpk.Read(*cpk.Find(AtlasName(klass, color)));
+        const FtxSurface before = *ReadFtxSurface(pack, 0);
+        CHECK(AddHelmetCopies(pack));
+        const FtxSurface after = *ReadFtxSurface(pack, 0);
+        size_t occupied = 0, differ = 0, outside = 0;
+        for (const HelmetCopy& copy : copies) {
+            const HelmetSpriteRule& rule = *std::find_if(FighterHelmetSprites().begin(), FighterHelmetSprites().end(),
+                                                         [&](const HelmetSpriteRule& r) { return r.id == copy.id; });
+            const AtlasRect from = HelmetCopySource(rule);
+            const AtlasRect to{from.x0 + copy.dx, from.y0 + copy.dy, from.x1 + copy.dx, from.y1 + copy.dy};
+            for (const AtlasRect& r : sampled) occupied += r.x0 < to.x1 && to.x0 < r.x1 && r.y0 < to.y1 && to.y0 < r.y1;
+            for (int y = from.y0; y < from.y1; ++y) {
+                for (int x = from.x0; x < from.x1; ++x) {
+                    occupied += before.Texel(x + copy.dx, y + copy.dy)[3] != 0;
+                    differ += after.Texel(x + copy.dx, y + copy.dy) != before.Texel(x, y);
+                }
+            }
+        }
+        for (int y = 0; y < 4096; y += 7) {
+            for (int x = 0; x < 4096; x += 7) {
+                const bool in_copy = std::any_of(copies.begin(), copies.end(), [&](const HelmetCopy& copy) {
+                    const HelmetSpriteRule& rule = *std::find_if(FighterHelmetSprites().begin(), FighterHelmetSprites().end(),
+                                                                 [&](const HelmetSpriteRule& r) { return r.id == copy.id; });
+                    const AtlasRect from = HelmetCopySource(rule);
+                    return AtlasRect{from.x0 + copy.dx, from.y0 + copy.dy, from.x1 + copy.dx, from.y1 + copy.dy}.Contains(x, y);
+                });
+                outside += !in_copy && after.Texel(x, y) != before.Texel(x, y);
+            }
+        }
+        CHECK(occupied == 0 && differ == 0 && outside == 0);
+    }
+
+    // Every tick of every animation, for several looks with the helmet hidden.
+    for (const int color : {0, 3}) {
+        for (const int variant : {0, 1, 2}) {
+            CustomLook look = Hidden(color, {"helmet"});
+            if (variant == 1) look.SetPartHidden("horns", true);
+            if (variant == 2) look.SetPartColor("face", {40, 220, 90});
+            const std::vector<uint8_t> native = cpk.Read(*cpk.Find(AtlasName(klass, color)));
+            const std::optional<std::vector<uint8_t>> pack = CustomizeAtlas(native, maps, klass, look);
+            CHECK(pack.has_value());
+            if (!pack) continue;
+            const HelmetTicks ticks = CountHelmetTicks(*patched, off_head, *ReadFtxSurface(*pack, 0));
+            std::printf("Fighter helmet hidden, colour %d look %d: %ld ticks, official bare head %ld, game's bare head %ld, no head %ld; "
+                        "off-head helmet transparent %ld, visor pieces cleared %ld; helmet visible %ld, duplicate heads %ld, conflicts %ld\n",
+                        color, variant, ticks.total, ticks.official_head, ticks.game_head, ticks.no_head, ticks.off_head_hidden, ticks.visor_cleared,
+                        ticks.helmet_visible, ticks.duplicate, ticks.conflicts);
+            CHECK(ticks.total == ticks.official_head + ticks.game_head + ticks.no_head);
+            CHECK(ticks.helmet_visible == 0 && ticks.duplicate == 0 && ticks.conflicts == 0 && ticks.official_head > ticks.game_head);
+        }
+    }
+
+    // Rendered tick by tick: every animation that draws 1101, on the head or off it, and the poses around it.
+    std::set<std::string> animations = {"IDLE_A", "IDLE_B", "WAKE_B", "BLOWDOWN_B_3", "BLOWDOWN_B_4", "BLOWDOWN_B_5", "BLOWDOWN_KNOCKBACK_B",
+                                        "DIE_B", "DIE", "BLOWDOWN_4", "MOVE_2", "RUN_2", "JUMP_3", "ATTACK_1", "ATTACK_5_END"};
+    for (const MbsAnimation& animation : original->animations) {
+        const bool variant = animation.name.size() > 2 && animation.name[1] == '_' &&
+                             (animation.name[0] == 'K' || animation.name[0] == 'T' || animation.name[0] == 'S');
+        if (variant) continue;
+        for (size_t t = 0; t < animation.track_count; ++t) {
+            const MbsTrack& run = original->tracks[animation.first_track + t];
+            for (size_t f = 0; f < run.frame_count; ++f) {
+                const MbsKey& key = original->keys[original->frames[run.first_frame + f].key];
+                for (uint32_t i = 0; i < key.layer_count; ++i) {
+                    if (original->layers[key.first_layer + i].id == 1101) animations.insert(animation.name);
+                }
+            }
+        }
+    }
+    std::map<uint32_t, HelmetSprite> kind;
+    for (const HelmetSpriteRule& rule : FighterHelmetSprites()) kind[rule.id] = rule.kind;
+    const std::vector<uint8_t> native_pack = cpk.Read(*cpk.Find(AtlasName(klass, 0)));
+    std::vector<uint8_t> copied_pack = native_pack;
+    CHECK(AddHelmetCopies(copied_pack));
+    const std::optional<std::vector<uint8_t>> hidden_pack = CustomizeAtlas(native_pack, maps, klass, Hidden(0, {"helmet"}));
+    CHECK(hidden_pack.has_value());
+    if (!hidden_pack) return;
+    const FtxSurface native = *ReadFtxSurface(native_pack, 0), with_copies = *ReadFtxSurface(copied_pack, 0),
+                     hidden = *ReadFtxSurface(*hidden_pack, 0);
+    std::vector<FtxSurface> weapons;
+    for (const WeaponTexture& weapon : WeaponTexturesOf(klass)) weapons.push_back(*ReadFtxSurface(cpk.Read(*cpk.Find(WeaponAtlasName(klass, weapon))), 0));
+    std::array<const FtxSurface*, 16> before{}, after{}, bare{};
+    before[0] = &native;
+    after[0] = &with_copies;
+    bare[0] = &hidden;
+    for (size_t w = 0; w < weapons.size(); ++w) before[WeaponTexturesOf(klass)[w].texture] = after[WeaponTexturesOf(klass)[w].texture] =
+        bare[WeaponTexturesOf(klass)[w].texture] = &weapons[w];
+    long rendered = 0, native_off = 0, helmet_pixels = 0, beside = 0, headless = 0;
+    for (const std::string& name : animations) {
+        size_t a = 0;
+        while (a < original->animations.size() && original->animations[a].name != name) ++a;
+        CHECK(a < original->animations.size());
+        if (a >= original->animations.size()) continue;
+        for (const auto& frames : AnimationTicks(*original, a)) {
+            ++rendered;
+            const SpriteImage o = RenderTick(*original, a, frames, before, 0.5f);
+            const SpriteImage c = RenderTick(*patched, a, frames, after, 0.5f);
+            const SpriteImage h = RenderTick(*patched, a, frames, bare, 0.5f);
+            int worst = 0;
+            for (size_t p = 0; p < o.rgba.size(); ++p) worst = std::max(worst, std::abs(int(o.rgba[p]) - int(c.rgba[p])));
+            native_off += worst > 1; // the same texels at other coordinates: float rounding moves a channel by one at most
+            size_t helmet = 0, head = 0, game_head = 0, native_head = 0;
+            for (size_t p = 0; p < h.layer.size(); ++p) {
+                if (o.layer[p] != kNoLayer && o.rgba[p * 4 + 3] >= 32) {
+                    const uint32_t layer = o.layer[p], id = original->layers[layer].id;
+                    native_head += id >= 1100 && id < 1200 && !off_head.count(layer) && kind[id] == HelmetSprite::kBareHead;
+                }
+                if (h.layer[p] == kNoLayer || h.rgba[p * 4 + 3] < 32) continue;
+                const uint32_t layer = h.layer[p], id = patched->layers[layer].id;
+                game_head += id >= 1200 && id < 1300;
+                if (id < 1100 || id >= 1200) continue;
+                if (off_head.count(layer) || kind[id] != HelmetSprite::kBareHead) ++helmet;
+                else ++head;
+            }
+            helmet_pixels += long(helmet);
+            beside += head && game_head;
+            headless += native_head > 20 && !head;
+        }
+    }
+    std::printf("Fighter helmet contexts rendered: %zu animations, %ld ticks; native drawn otherwise %ld, helmet pixels %ld, head beside the "
+                "game's head %ld, helmet on the head left without a head %ld\n",
+                animations.size(), rendered, native_off, helmet_pixels, beside, headless);
+    CHECK(animations.size() == 93 && native_off == 0 && helmet_pixels == 0 && beside == 0 && headless == 0);
+}
+
+// With a Fighter's helmet hidden the overlay serves the model with the helmet copies and every native Fighter atlas with
+// them; a Fighter that keeps its helmet gets them in its own atlas, the hidden one does not.
+void TestRealHelmetHiddenOverlay(const fs::path& base, const fs::path& source_dir) {
+    const fs::path app0 = source_dir / "game" / "prepared" / "v1.03";
+    const fs::path archive_path = app0 / "DRACRO.CPK";
+    std::error_code ec;
+    if (!fs::is_regular_file(archive_path, ec)) return;
+    const fs::path user = base / "helmet_overlay_user";
+    fs::remove_all(user);
+    WriteSaveFor(user, "CUSA10454", "SAVEDATA00", SaveWithCharacters({{0, 2}, {0, 2}, {1, 3}}));
+    CustomStore store(CustomStorePath(user));
+    store.Set({"CUSA10454", "SAVEDATA00", 0, 0, CharacterClass::kFighter}, Hidden(2, {"helmet"}));
+    store.Set({"CUSA10454", "SAVEDATA00", 0, 1, CharacterClass::kFighter}, Painted(2, {"helmet"}, {200, 40, 40}));
+    store.Set({"CUSA10454", "SAVEDATA00", 0, 2, CharacterClass::kAmazon}, HairLook({30, 90, 230}));
+    std::vector<std::string> notes;
+    const std::vector<CustomInstance> planned = PlanCustomInstances(store, DiscoverSaves(user, "CUSA10454"), "CUSA10454", notes);
+    CHECK(planned.size() == 3);
+    CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
+    sources.cache_dir = base / "region_cache";
+    CharacterArt art(sources);
+    const std::optional<CustomOverlay> built = BuildCustomOverlay(archive_path, planned, art, notes);
+    CHECK(built && built->runtime.size() == 3);
+    if (!built || built->runtime.size() != 3) return;
+    CpkArchive original, served;
+    CHECK(original.Open(archive_path) && OpenOverlaid(archive_path, built->overlay, served));
+    CHECK(served.entries().size() == original.entries().size() + 3);
+    const auto read_served = [&](const std::string& path) {
+        const CpkEntry* entry = served.Find(path);
+        return entry ? ReadOverlaid(archive_path, built->overlay, entry->offset, entry->size) : std::vector<uint8_t>{};
+    };
+    const std::vector<uint8_t> model = original.Read(*original.Find(GameModelName(CharacterClass::kFighter)));
+    CHECK(read_served(GameModelName(CharacterClass::kFighter)) == FighterModelWithHelmetCopies(model));
+    for (int color = 0; color < kNativeColorCount; ++color) {
+        std::vector<uint8_t> expected = original.Read(*original.Find(AtlasName(CharacterClass::kFighter, color)));
+        CHECK(AddHelmetCopies(expected) && read_served(AtlasName(CharacterClass::kFighter, color)) == expected);
+    }
+    size_t moved = 0;
+    for (const CpkEntry& entry : original.entries()) {
+        const CpkEntry* kept = served.Find(entry.path);
+        const bool replaced = entry.path.rfind("player/Fighter0", 0) == 0 && (entry.path.find(".ftx") == 16 || entry.path == "player/Fighter00.mbs");
+        moved += !kept || (!replaced && (kept->offset != entry.offset || kept->size != entry.size));
+    }
+    CHECK(moved == 0);
+    const std::vector<RegionMap>* maps = art.Regions(CharacterClass::kFighter);
+    const std::vector<uint8_t> source = original.Read(*original.Find(NativeColorAtlas(CharacterClass::kFighter, 2)));
+    for (size_t i = 0; i < 2; ++i) {
+        std::optional<std::vector<uint8_t>> expected = CustomizeAtlas(source, *maps, CharacterClass::kFighter, planned[i].look);
+        CHECK(expected.has_value());
+        if (!expected) continue;
+        const PartLook* helmet = planned[i].look.Find("helmet");
+        if (!(helmet && helmet->hidden)) CHECK(AddHelmetCopies(*expected));
+        CHECK(read_served(planned[i].entry) == *expected);
     }
 }
 
@@ -4915,6 +5551,7 @@ void TestFighterParts(CharacterArt& art, CpkArchive& cpk) {
         for (const CustomPart* each : body_parts) {
             const std::string key(each->key);
             for (const CustomLook& look : {Painted(color, {key.c_str()}, {200, 40, 160}), Hidden(color, {key.c_str()})}) {
+                if (each == helmet && look.parts.front().hidden) continue; // the bare head: TestFighterBareHead
                 const AtlasChange change = ChangeOnAtlas(klass, maps, atlas, look, {each});
                 CHECK(change.inside > 0 && change.inside_changed * 100 >= change.inside * 60 && change.outside_changed == 0);
             }
@@ -6281,6 +6918,8 @@ void TestPartMapping(const fs::path& base, const fs::path& source_dir) {
     TestSorceressSplit(art, cpk);
     TestFighterParts(art, cpk);
     TestFighterHelmetAndHorns(art, cpk);
+    TestFighterBareHead(art, cpk);
+    TestFighterHelmetContexts(art, cpk);
     TestDwarfParts(art, cpk);
     TestDwarfHeadAndGear(art, cpk);
     TestWizardParts(art, cpk);
@@ -6422,6 +7061,7 @@ int main(int argc, char** argv) {
     TestRealCustom(base, DCP_SOURCE_DIR);
     TestAppearanceSites(DCP_SOURCE_DIR);
     TestRealCustomOverlay(base, DCP_SOURCE_DIR);
+    TestRealHelmetHiddenOverlay(base, DCP_SOURCE_DIR);
     TestCustomBaseInvariant(base, DCP_SOURCE_DIR);
     TestFeather(base, DCP_SOURCE_DIR);
     TestNoHeadgear(base, DCP_SOURCE_DIR);

@@ -1215,6 +1215,13 @@ OverlayResult OverlayArchive(const std::filesystem::path& base, const std::files
 std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& archive_path, uint64_t length,
                                                   std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
                                                   std::string* error) {
+    return OverlayChangedEntries(archive_path, length, {}, added, error);
+}
+
+std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path& archive_path, uint64_t length,
+                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> replaced,
+                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
+                                                    std::string* error) {
     const auto fail = [&](std::string why) -> std::optional<ArchiveOverlay> {
         if (error) *error = std::move(why);
         return std::nullopt;
@@ -1229,6 +1236,18 @@ std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& a
     std::vector<NewRow> rows;
     std::set<std::string> seen;
     uint64_t pos = length;
+    for (const auto& [path, data] : replaced) {
+        const CpkEntry* entry = archive.Find(path);
+        if (!entry || !seen.insert(Lower(path)).second) return fail(path + " is not in the archive once");
+        if (data.empty() || data.size() > UINT32_MAX) return fail(path + " has an unsupported size");
+        const uint64_t at = aligned(pos);
+        if (!toc.SetNumber(entry->row, "FileOffset", at - toc_base) || !toc.SetNumber(entry->row, "FileSize", data.size()) ||
+            !toc.SetNumber(entry->row, "ExtractSize", data.size())) {
+            return fail(path + ": the table cannot be rewritten");
+        }
+        overlay.patches.emplace_back(at, data);
+        pos = at + data.size();
+    }
     for (const auto& [path, data] : added) {
         if (archive.Find(path) || !seen.insert(Lower(path)).second) return fail(path + " is already in the archive");
         if (data.empty() || data.size() > UINT32_MAX) return fail(path + " has an unsupported size");
@@ -1237,8 +1256,8 @@ std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& a
         overlay.patches.emplace_back(at, data);
         pos = at + data.size();
     }
-    if (rows.empty()) return fail("nothing to add");
-    if (!InsertRows(toc, rows, &reason, true)) return fail(reason);
+    if (rows.empty() && replaced.empty()) return fail("nothing to add");
+    if (!rows.empty() && !InsertRows(toc, rows, &reason, true)) return fail(reason);
     const std::vector<uint8_t> packet = toc.Stored();
     std::vector<uint8_t> section(kTocMagic, kTocMagic + 8);
     WriteLe64(section, packet.size());

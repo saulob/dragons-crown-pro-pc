@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "fighter_bare_head.h"
 #include "game_mbs.h"
 #include "save_data.h"
 
@@ -255,7 +256,7 @@ std::optional<std::vector<uint16_t>> ParsePiecePlane(std::span<const uint8_t> by
                                                      int height);
 // Cache keys: a change to the region learning or to any part table must change these.
 inline constexpr std::string_view kRegionCacheVersion = "regions-2";
-inline constexpr std::string_view kPieceCacheVersion = "pieces-21";
+inline constexpr std::string_view kPieceCacheVersion = "pieces-22";
 
 // How much of the hidden helmet's blurred shading the bare head keeps: metal is shinier than skin.
 inline constexpr float kBareContrast = 0.6f;
@@ -290,12 +291,23 @@ private:
         float luma = 128.0f;
         std::optional<Change> underlay;
     };
+    // A helmet sprite with the helmet hidden: repainted with the bare head, or cleared.
+    struct HelmetPatch {
+        AtlasRect rect;
+        HelmetSprite kind = HelmetSprite::kClear;
+        std::vector<std::array<uint8_t, 4>> texels;
+    };
     void PaintBareHead(CharacterClass klass, const CustomPart& part, uint16_t piece_bit, const CustomLook& look, const TexelReader& base);
     void PaintBare(size_t bit, size_t at, std::array<uint8_t, 4>& texel) const;
+    void PaintHelmetSprites(CharacterClass klass, const CustomLook& look, const TexelReader& base);
+    std::vector<std::array<uint8_t, 4>> ComposeBareHead(const HelmetSpriteRule& rule, uint16_t horn_bit, const TexelReader& base) const;
+    const HelmetPatch* PatchAt(int x, int y) const;
+    void ApplyOwned(int x, int y, std::array<uint8_t, 4>& texel) const;
     std::array<std::optional<Change>, kRegionCount + 1> by_region_{};
     std::array<std::optional<Change>, kPieceBits> by_piece_{}; // by piece bit
     std::array<std::optional<Bare>, kPieceBits> bare_{};        // by piece bit
     std::vector<uint8_t> shade_;                                // per texel, where a part is painted bare
+    std::vector<HelmetPatch> helmet_patches_;
     const RegionMap* map_ = nullptr;
     std::array<std::array<double, 4>, kPieceBits> piece_sums_{};
     std::array<double, kPieceBits> piece_weights_{};

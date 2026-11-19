@@ -163,6 +163,11 @@ std::optional<ArchiveOverlay> OverlayEntries(const CpkArchive& archive, uint64_t
 std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& archive, uint64_t length,
                                                   std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
                                                   std::string* error = nullptr);
+// The same with existing entries replaced too: their rows point at the new data, stored uncompressed past `length`.
+std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path& archive, uint64_t length,
+                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> replaced,
+                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
+                                                    std::string* error = nullptr);
 // The archive as a reader sees it with the overlay laid on: its listing, and the bytes of a range.
 bool OpenOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, CpkArchive& out,
                   std::string* error = nullptr);

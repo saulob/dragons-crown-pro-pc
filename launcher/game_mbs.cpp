@@ -172,6 +172,64 @@ std::optional<Mbs> ParseMbs(std::span<const uint8_t> bytes, std::string* error) 
     return mbs;
 }
 
+std::optional<std::vector<uint8_t>> WithSourceCopies(std::span<const uint8_t> bytes, std::span<const MbsSourceCopy> copies,
+                                                     std::span<const std::pair<uint32_t, size_t>> layers, std::string* error) {
+    constexpr size_t kPayloadSizeOffset = 0x04;
+    constexpr size_t kFooterSize = 0x10; // the FEOC chunk that ends the file
+    const auto fail = [&](std::string message) -> std::optional<std::vector<uint8_t>> {
+        if (error) *error = std::move(message);
+        return std::nullopt;
+    };
+    const std::optional<Mbs> model = ParseMbs(bytes, error);
+    if (!model) return std::nullopt;
+    const Reader r(bytes);
+    if (bytes.size() < kHeaderSize + kFooterSize || std::memcmp(bytes.data() + bytes.size() - kFooterSize, "FEOC", 4) != 0 ||
+        r.U32(kPayloadSizeOffset) != bytes.size() - kHeaderSize - kFooterSize) {
+        return fail("unexpected FMBS chunk layout");
+    }
+    const Section& sources = kSections[kSources];
+    const Section& layer_section = kSections[kLayers];
+    const size_t old_count = model->sources.size();
+    if (old_count + copies.size() > 0xFFFF) return fail("too many source quads");
+    for (const MbsSourceCopy& copy : copies) {
+        if (copy.of >= old_count) return fail("copy of a missing source quad");
+    }
+    for (const auto& [layer, copy] : layers) {
+        if (layer >= model->layers.size() || copy >= copies.size()) return fail("layer or copy out of range");
+    }
+
+    const size_t old_start = r.U32(sources.pointer);
+    std::vector<uint8_t> out(bytes.begin(), bytes.end() - std::ptrdiff_t(kFooterSize));
+    out.resize((out.size() + 15) / 16 * 16, 0);
+    const size_t new_start = out.size();
+    out.insert(out.end(), bytes.begin() + std::ptrdiff_t(old_start), bytes.begin() + std::ptrdiff_t(old_start + old_count * sources.stride));
+    for (const MbsSourceCopy& copy : copies) {
+        const size_t from = old_start + copy.of * sources.stride;
+        std::vector<uint8_t> record(bytes.begin() + std::ptrdiff_t(from), bytes.begin() + std::ptrdiff_t(from + sources.stride));
+        for (size_t point = 0; point < 5; ++point) { // the centre and four corners, x then y
+            for (size_t axis = 0; axis < 2; ++axis) {
+                float value;
+                std::memcpy(&value, record.data() + point * 8 + axis * 4, sizeof(value));
+                value += axis ? copy.dv : copy.du;
+                std::memcpy(record.data() + point * 8 + axis * 4, &value, sizeof(value));
+            }
+        }
+        out.insert(out.end(), record.begin(), record.end());
+    }
+    out.insert(out.end(), bytes.end() - std::ptrdiff_t(kFooterSize), bytes.end());
+
+    const auto put = [&](size_t at, uint32_t value, size_t width) {
+        for (size_t i = 0; i < width; ++i) out[at + i] = uint8_t(value >> (8 * i));
+    };
+    put(sources.pointer, uint32_t(new_start), 4);
+    put(sources.count, uint32_t(old_count + copies.size()), 2);
+    put(kPayloadSizeOffset, uint32_t(out.size() - kHeaderSize - kFooterSize), 4);
+    const size_t layer_start = r.U32(layer_section.pointer);
+    for (const auto& [layer, copy] : layers) put(layer_start + layer * layer_section.stride + 10, uint32_t(old_count + copy), 2);
+    if (!ParseMbs(out, error)) return std::nullopt;
+    return out;
+}
+
 std::optional<Mbs> LoadGameMbs(const std::filesystem::path& cpk, std::string_view entry, std::string* error) {
     CpkArchive archive;
     if (!archive.Open(cpk, error)) return std::nullopt;

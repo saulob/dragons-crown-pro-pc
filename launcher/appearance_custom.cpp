@@ -1968,6 +1968,128 @@ LookShader::LookShader(CharacterClass klass, const CustomLook& look, const Regio
             if (hidden && !part.bare_underlay.empty()) PaintBareHead(klass, part, piece_bit, look, base);
         }
     }
+    if (klass == CharacterClass::kFighter) PaintHelmetSprites(klass, look, base);
+}
+
+void LookShader::PaintHelmetSprites(CharacterClass klass, const CustomLook& look, const TexelReader& base) {
+    const CustomPart* helmet = FindCustomPart(klass, "helmet");
+    const PartLook* chosen = look.Find("helmet");
+    if (!helmet || !chosen || !chosen->hidden) return;
+    const CustomPart* horns = FindCustomPart(klass, "horns");
+    const uint16_t horn_bit = horns ? PieceBitOf(klass, *horns) : 0;
+    const auto fits = [&](const AtlasRect& r) { return r.x0 >= 0 && r.y0 >= 0 && r.x1 <= map_->width && r.y1 <= map_->height; };
+    std::vector<HelmetPatch> patches;
+    for (const HelmetSpriteRule& rule : FighterHelmetSprites()) {
+        if (!fits(rule.rect)) continue;
+        HelmetPatch patch{rule.rect, rule.kind, {}};
+        if (rule.kind == HelmetSprite::kBareHead) {
+            if (!std::all_of(rule.layers.begin(), rule.layers.end(), [&](const BareHeadLayer& l) { return fits(l.source); })) continue;
+            patch.texels = ComposeBareHead(rule, horn_bit, base);
+        }
+        patches.push_back(std::move(patch));
+    }
+    helmet_patches_ = std::move(patches);
+}
+
+// The bare-head sprites as the look paints them, in the helmet sprite's texels, with the horns drawn over them. The head
+// fades out next to the sprite's edge, where filtering would reach the next sprite of the atlas.
+std::vector<std::array<uint8_t, 4>> LookShader::ComposeBareHead(const HelmetSpriteRule& rule, uint16_t horn_bit,
+                                                                const TexelReader& base) const {
+    struct Premultiplied {
+        AtlasRect rect;
+        std::vector<std::array<float, 4>> texels;
+    };
+    std::vector<Premultiplied> sources;
+    for (const BareHeadLayer& layer : rule.layers) {
+        Premultiplied source{layer.source, {}};
+        const AtlasRect& r = layer.source;
+        source.texels.resize(size_t(r.x1 - r.x0) * size_t(r.y1 - r.y0));
+        for (int y = r.y0; y < r.y1; ++y) {
+            for (int x = r.x0; x < r.x1; ++x) {
+                std::array<uint8_t, 4> t = base(x, y);
+                ApplyOwned(x, y, t);
+                const float a = t[3] / 255.0f;
+                source.texels[size_t(y - r.y0) * size_t(r.x1 - r.x0) + size_t(x - r.x0)] = {t[0] / 255.0f * a, t[1] / 255.0f * a, t[2] / 255.0f * a, a};
+            }
+        }
+        sources.push_back(std::move(source));
+    }
+    const AtlasRect& rect = rule.rect;
+    const int w = rect.x1 - rect.x0, h = rect.y1 - rect.y0;
+    std::vector<std::array<uint8_t, 4>> out(size_t(w) * size_t(h), {0, 0, 0, 0});
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const double px = rect.x0 + x + 0.5, py = rect.y0 + y + 0.5;
+            std::array<float, 4> acc{};
+            for (size_t i = 0; i < rule.layers.size(); ++i) {
+                const BareHeadLayer& l = rule.layers[i];
+                const AtlasRect& r = l.source;
+                const double u = l.a * px + l.b * py + l.c, v = l.d * px + l.e * py + l.f;
+                if (u < r.x0 || v < r.y0 || u >= r.x1 || v >= r.y1) continue;
+                const double fx = u - 0.5, fy = v - 0.5;
+                const int ix = int(std::floor(fx)), iy = int(std::floor(fy));
+                const float tx = float(fx - ix), ty = float(fy - iy);
+                std::array<float, 4> s{};
+                for (int dy = 0; dy < 2; ++dy) {
+                    for (int dx = 0; dx < 2; ++dx) {
+                        const int sx = std::clamp(ix + dx, r.x0, r.x1 - 1), sy = std::clamp(iy + dy, r.y0, r.y1 - 1);
+                        const std::array<float, 4>& t = sources[i].texels[size_t(sy - r.y0) * size_t(r.x1 - r.x0) + size_t(sx - r.x0)];
+                        const float weight = (dx ? tx : 1.0f - tx) * (dy ? ty : 1.0f - ty);
+                        for (int c = 0; c < 4; ++c) s[size_t(c)] += weight * t[size_t(c)];
+                    }
+                }
+                for (int c = 0; c < 4; ++c) acc[size_t(c)] = s[size_t(c)] + acc[size_t(c)] * (1.0f - s[3]);
+            }
+            const int edge = std::min({x, y, w - 1 - x, h - 1 - y});
+            const float fade = std::clamp((float(edge) - 0.5f) / 2.0f, 0.0f, 1.0f);
+            for (float& c : acc) c *= fade;
+            if (horn_bit && (map_->Pieces(rect.x0 + x, rect.y0 + y) & horn_bit)) {
+                std::array<uint8_t, 4> horn = base(rect.x0 + x, rect.y0 + y);
+                ApplyOwned(rect.x0 + x, rect.y0 + y, horn);
+                const float a = horn[3] / 255.0f;
+                for (int c = 0; c < 3; ++c) acc[size_t(c)] = horn[size_t(c)] / 255.0f * a + acc[size_t(c)] * (1.0f - a);
+                acc[3] = a + acc[3] * (1.0f - a);
+            }
+            std::array<uint8_t, 4>& texel = out[size_t(y) * size_t(w) + size_t(x)];
+            const float alpha = std::clamp(acc[3], 0.0f, 1.0f);
+            texel[3] = uint8_t(std::lround(alpha * 255.0f));
+            if (!texel[3]) continue;
+            for (int c = 0; c < 3; ++c) texel[size_t(c)] = uint8_t(std::lround(std::clamp(acc[size_t(c)] / alpha, 0.0f, 1.0f) * 255.0f));
+        }
+    }
+    // The game filters straight alpha: transparent texels beside the head take its colour, so its edge does not darken.
+    for (int pass = 0; pass < 2; ++pass) {
+        std::vector<std::array<uint8_t, 4>> padded = out;
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                std::array<uint8_t, 4>& texel = padded[size_t(y) * size_t(w) + size_t(x)];
+                if (texel[3] || texel[0] || texel[1] || texel[2]) continue;
+                int sum[3] = {}, count = 0;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                        const std::array<uint8_t, 4>& n = out[size_t(ny) * size_t(w) + size_t(nx)];
+                        if (!n[3] && !n[0] && !n[1] && !n[2]) continue;
+                        for (int c = 0; c < 3; ++c) sum[c] += n[size_t(c)];
+                        ++count;
+                    }
+                }
+                if (count) {
+                    for (int c = 0; c < 3; ++c) texel[size_t(c)] = uint8_t(std::max(1, (sum[c] + count / 2) / count));
+                }
+            }
+        }
+        out = std::move(padded);
+    }
+    return out;
+}
+
+const LookShader::HelmetPatch* LookShader::PatchAt(int x, int y) const {
+    for (const HelmetPatch& patch : helmet_patches_) {
+        if (patch.rect.Contains(x, y)) return &patch;
+    }
+    return nullptr;
 }
 
 // The underlay's lit colour over the surface: the texels at least as bright as its mean, without its outlines and shade.
@@ -2124,6 +2246,7 @@ void LookShader::PaintBare(size_t bit, size_t at, std::array<uint8_t, 4>& texel)
 }
 
 bool LookShader::ChangesAt(int x, int y) const {
+    if (PatchAt(x, y)) return true;
     const uint16_t pieces = map_->Pieces(x, y);
     const uint16_t owned = pieces;
     if (!owned && Changes(map_->At(x, y))) return true;
@@ -2136,6 +2259,17 @@ bool LookShader::ChangesAt(int x, int y) const {
 // A texel a piece part owns follows that part alone; the region it was clustered into does not recolour it. Hiding a part
 // clears its own texels and nothing else.
 void LookShader::ApplyAt(int x, int y, std::array<uint8_t, 4>& texel) const {
+    const HelmetPatch* patch = PatchAt(x, y);
+    if (patch && patch->kind == HelmetSprite::kBareHead) {
+        texel = patch->texels[size_t(y - patch->rect.y0) * size_t(patch->rect.x1 - patch->rect.x0) + size_t(x - patch->rect.x0)];
+    } else if (patch) {
+        texel = {0, 0, 0, 0};
+    } else {
+        ApplyOwned(x, y, texel);
+    }
+}
+
+void LookShader::ApplyOwned(int x, int y, std::array<uint8_t, 4>& texel) const {
     const uint16_t pieces = map_->Pieces(x, y);
     const uint16_t owned = pieces;
     if (!owned) Apply(map_->At(x, y), texel);
