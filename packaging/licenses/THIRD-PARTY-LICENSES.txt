@@ -308,10 +308,11 @@ CC0 (public domain dedication), all from SVG Repo (www.svgrepo.com), uploaded by
   good-job.svg   "Thumb Up Outline Symbol", collection Essential Random               https://www.svgrepo.com/svg/76020/thumb-up-outline-symbol
   follow-me.svg  "Footsteps Silhouette Variant", collection Computer And Media 2      https://www.svgrepo.com/svg/814/footsteps-silhouette-variant
   group-up.svg   "Group People Profile User Person", collection User Action Line Vectors https://www.svgrepo.com/svg/392261/group-people-profile-user-person
-  need-help.svg  "Raise Your Hand To Ask SVG Vector 2", collection Study              https://www.svgrepo.com/svg/101551/raise-your-hand-to-ask
   ready.svg      "Check Mark In A Circle", collection Universalicons                  https://www.svgrepo.com/svg/96431/check-mark-in-a-circle
   lets-go.svg    "Arrow Chevron Double Right Direction Navigation", collection Arrow Interface Line Icons
                  https://www.svgrepo.com/svg/392602/arrow-chevron-double-right-direction-navigation
+
+need-help.svg is an original drawing for this project, dedicated to CC0; it is not from SVG Repo.
 
 hello.svg, public domain (PD License):
   "Hand Wave Simple" by Significa Labs, collection Simple App Development Icons.

@@ -311,6 +311,18 @@ void TestWiring() {
     CHECK(pad.find("out.hide_cross") != std::string::npos && pad.find("neutral_keyboard_axes") != std::string::npos);
 }
 
+void TestNeedHelpIcon() {
+    const std::string svg = ReadSource("assets/comms/need-help.svg");
+    CHECK(svg.find("<circle") != std::string::npos && svg.find("stroke-linecap=\"round\"") != std::string::npos);
+    CHECK(svg.find("svgrepo") == std::string::npos && svg.find("912.1") == std::string::npos);
+    const std::string sources = ReadSource("assets/comms/SOURCES.md");
+    CHECK(sources.find("Raise Your Hand To Ask") == std::string::npos && sources.find("101551") == std::string::npos);
+    CHECK(sources.find("| 5 Need help | `need-help.svg` |") != std::string::npos);
+    CHECK(ReadSource("scripts/comms_icon_atlas.py").find("\"need-help\"") != std::string::npos);
+    CHECK(ReadSource("gpu/CMakeLists.txt").find("assets/comms/icons.png") != std::string::npos);
+    CHECK(ReadSource("gpu/shim/dcp_comms_wheel.cpp").find("id % kAtlasColumns") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
@@ -327,6 +339,7 @@ int main() {
     TestHitMapping();
     TestKeyBinding();
     TestWiring();
+    TestNeedHelpIcon();
     std::printf("comms wheel ui tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }
