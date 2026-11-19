@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "dcp_mouse.h"
 #include "dcp_mouse_capture.h"
 #include "dcp_pad_buttons.h"
+#include "dcp_pad_owner.h"
 #include "dcp_touch_route.h"
 #include "dcp_touchscreen.h"
 
@@ -1442,6 +1444,264 @@ void TestTouchTelemetrySource() {
     }
 }
 
+DcpPadDevice Pad(uint32_t instance, uint64_t identity, int player_index = -1) {
+    return DcpPadDevice{instance, identity, player_index};
+}
+
+std::vector<DcpPadAssignment> Scan(DcpPadOwners& owners, std::vector<DcpPadDevice> devices) {
+    DcpPadAssignment out[DCP_PAD_OWNER_SLOTS];
+    const size_t n = dcp_pad_owners_assign(&owners, devices.data(), devices.size(), out, DCP_PAD_OWNER_SLOTS);
+    return std::vector<DcpPadAssignment>(out, out + n);
+}
+
+DcpPadOwners FreshOwners() {
+    DcpPadOwners owners;
+    dcp_pad_owners_init(&owners);
+    return owners;
+}
+
+constexpr uint64_t kIdA = 0xa11ce, kIdB = 0xb0b, kIdC = 0xc0ffee;
+
+void TestPadOwnershipStartupOrders() {
+    {   // one controller before pad 1 opens
+        DcpPadOwners owners = FreshOwners();
+        const auto a = Scan(owners, {Pad(3, kIdA, 0)});
+        CHECK(a.size() == 1 && a[0].slot == 0 && a[0].reason == DCP_PAD_ASSIGN_NEW);
+    }
+    {   // pad 1 opens before any controller is discovered
+        DcpPadOwners owners = FreshOwners();
+        CHECK(Scan(owners, {}).empty());
+        CHECK(dcp_pad_owners_free_slot(&owners) == 0);
+        const auto a = Scan(owners, {Pad(3, kIdA, 0)});
+        CHECK(a.size() == 1 && a[0].slot == 0);
+    }
+    {   // both discovered in one scan before pad 2 opens
+        DcpPadOwners owners = FreshOwners();
+        const auto a = Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)});
+        CHECK(a.size() == 2);
+        CHECK(dcp_pad_owners_slot_of(&owners, 3) == 0);
+        CHECK(dcp_pad_owners_slot_of(&owners, 4) == 1);
+    }
+    {   // A first, B in a later scan; pad 2 opening and later scans keep both
+        DcpPadOwners owners = FreshOwners();
+        Scan(owners, {Pad(3, kIdA, 0)});
+        const auto b = Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)});
+        CHECK(b.size() == 1 && b[0].slot == 1 && b[0].device.instance == 4);
+        for (int i = 0; i < 20; ++i) CHECK(Scan(owners, {Pad(4, kIdB, 1), Pad(3, kIdA, 0)}).empty());
+        CHECK(dcp_pad_owners_slot_of(&owners, 3) == 0);
+        CHECK(dcp_pad_owners_slot_of(&owners, 4) == 1);
+    }
+}
+
+void TestPadOwnershipEnumerationOrder() {
+    {   // one scan listing B before A: the player index decides, not the list position
+        DcpPadOwners owners = FreshOwners();
+        Scan(owners, {Pad(8, kIdB, 1), Pad(7, kIdA, 0)});
+        CHECK(dcp_pad_owners_slot_of(&owners, 7) == 0);
+        CHECK(dcp_pad_owners_slot_of(&owners, 8) == 1);
+    }
+    {   // without player indices the list order is kept, and devices with one come first
+        DcpPadOwners owners = FreshOwners();
+        Scan(owners, {Pad(5, kIdA), Pad(6, kIdB), Pad(9, kIdC, 2)});
+        CHECK(dcp_pad_owners_slot_of(&owners, 9) == 0);
+        CHECK(dcp_pad_owners_slot_of(&owners, 5) == 1);
+        CHECK(dcp_pad_owners_slot_of(&owners, 6) == 2);
+    }
+}
+
+void TestPadOwnershipHotplug() {
+    {   // B disconnects: A stays; B returns to P2
+        DcpPadOwners owners = FreshOwners();
+        Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)});
+        dcp_pad_owners_release(&owners, 1);
+        CHECK(dcp_pad_owners_slot_of(&owners, 3) == 0);
+        CHECK(Scan(owners, {Pad(3, kIdA, 0)}).empty());
+        const auto b = Scan(owners, {Pad(3, kIdA, 0), Pad(11, kIdB, 1)});
+        CHECK(b.size() == 1 && b[0].slot == 1 && b[0].reason == DCP_PAD_ASSIGN_RECLAIM);
+    }
+    {   // A disconnects and returns to P1; B never moves
+        DcpPadOwners owners = FreshOwners();
+        Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)});
+        dcp_pad_owners_release(&owners, 0);
+        CHECK(dcp_pad_owners_slot_of(&owners, 4) == 1);
+        const auto a = Scan(owners, {Pad(4, kIdB, 1), Pad(12, kIdA, 0)});
+        CHECK(a.size() == 1 && a[0].slot == 0 && a[0].reason == DCP_PAD_ASSIGN_RECLAIM);
+        CHECK(dcp_pad_owners_slot_of(&owners, 4) == 1);
+    }
+    {   // both drop (virtual pads recreated) and come back B first, in separate scans
+        DcpPadOwners owners = FreshOwners();
+        Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)});
+        dcp_pad_owners_release(&owners, 0);
+        dcp_pad_owners_release(&owners, 1);
+        const auto b = Scan(owners, {Pad(20, kIdB, 0)});
+        CHECK(b.size() == 1 && b[0].slot == 1 && b[0].reason == DCP_PAD_ASSIGN_RECLAIM);
+        const auto a = Scan(owners, {Pad(20, kIdB, 0), Pad(21, kIdA, 1)});
+        CHECK(a.size() == 1 && a[0].slot == 0 && a[0].reason == DCP_PAD_ASSIGN_RECLAIM);
+    }
+    {   // both drop and come back in one scan, listed in the other order
+        DcpPadOwners owners = FreshOwners();
+        Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)});
+        dcp_pad_owners_release(&owners, 0);
+        dcp_pad_owners_release(&owners, 1);
+        Scan(owners, {Pad(31, kIdB), Pad(30, kIdA)});
+        CHECK(dcp_pad_owners_slot_of(&owners, 30) == 0);
+        CHECK(dcp_pad_owners_slot_of(&owners, 31) == 1);
+    }
+}
+
+void TestPadOwnershipSteamVirtualPads() {
+    // Steam Input pads share VID/PID and GUID; only the per-device identity and player index tell them apart.
+    DcpPadOwners owners = FreshOwners();
+    const uint64_t steam0 = 0x5157ea0, steam1 = 0x5157ea1;
+    Scan(owners, {Pad(1, steam0, 0), Pad(2, steam1, 1)});
+    CHECK(dcp_pad_owners_slot_of(&owners, 1) == 0);
+    CHECK(dcp_pad_owners_slot_of(&owners, 2) == 1);
+    dcp_pad_owners_release(&owners, 0);
+    const auto back = Scan(owners, {Pad(2, steam1, 1), Pad(5, steam0, 0)});
+    CHECK(back.size() == 1 && back[0].slot == 0 && back[0].reason == DCP_PAD_ASSIGN_RECLAIM);
+
+    // Two devices with the same identity cannot claim a remembered player or report a move.
+    DcpPadOwners twins = FreshOwners();
+    Scan(twins, {Pad(1, 0x7, 0)});
+    dcp_pad_owners_release(&twins, 0);
+    const auto both = Scan(twins, {Pad(8, 0x7), Pad(9, 0x7)});
+    CHECK(both.size() == 2);
+    for (const auto& a : both) CHECK(a.reason == DCP_PAD_ASSIGN_NEW && a.swapped_with < 0);
+}
+
+void TestPadOwnershipSinglePlayer() {
+    DcpPadOwners owners = FreshOwners();
+    Scan(owners, {Pad(3, kIdA, 0)});
+    dcp_pad_owners_release(&owners, 0);
+    CHECK(Scan(owners, {Pad(4, kIdA, 0)})[0].slot == 0);
+    dcp_pad_owners_release(&owners, 0);
+    const auto other = Scan(owners, {Pad(5, kIdC, 0)});
+    CHECK(other.size() == 1 && other[0].slot == 0 && other[0].reason == DCP_PAD_ASSIGN_NEW);
+}
+
+void TestPadOwnershipNoDuplicatesOrJumps() {
+    DcpPadOwners owners = FreshOwners();
+    const auto a = Scan(owners, {Pad(3, kIdA, 0), Pad(3, kIdA, 0)});
+    CHECK(a.size() == 1);
+    Scan(owners, {Pad(4, kIdB, 1)});
+    for (int i = 0; i < 50; ++i) {
+        const auto again = i % 2 ? Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)})
+                                 : Scan(owners, {Pad(4, kIdB, 1), Pad(3, kIdA, 0)});
+        CHECK(again.empty());
+    }
+    CHECK(dcp_pad_owners_slot_of(&owners, 3) == 0);
+    CHECK(dcp_pad_owners_slot_of(&owners, 4) == 1);
+    int holders = 0;
+    for (int i = 0; i < DCP_PAD_OWNER_SLOTS; ++i) holders += owners.active[i].used && owners.active[i].device.instance == 3;
+    CHECK(holders == 1);
+
+    // A full table assigns nothing and keeps everyone.
+    Scan(owners, {Pad(5, 0x55, 2), Pad(6, 0x66, 3)});
+    CHECK(Scan(owners, {Pad(7, 0x77)}).empty());
+    CHECK(dcp_pad_owners_slot_of(&owners, 7) < 0);
+}
+
+bool TelemetryLineIsSafe(const std::string& line) {
+    static const std::regex shape(
+        "Local controller telemetry: event=local_controller_(assignment|reassignment|swap_detected) player=[1-4] count=[0-9]+");
+    return std::regex_match(line, shape);
+}
+
+std::vector<std::string> TelemetryFor(DcpPadTelemetry* t, const std::vector<DcpPadAssignment>& assignments) {
+    std::vector<std::string> out;
+    for (const auto& a : assignments) {
+        char lines[DCP_PAD_EVENT_COUNT][DCP_PAD_TELEMETRY_LINE];
+        const size_t n = dcp_pad_telemetry_lines(t, &a, lines);
+        for (size_t i = 0; i < n; ++i) out.emplace_back(lines[i]);
+    }
+    return out;
+}
+
+size_t CountEvent(const std::vector<std::string>& lines, const std::string& event) {
+    return static_cast<size_t>(std::count_if(lines.begin(), lines.end(),
+                                              [&](const std::string& l) { return Contains(l, "event=" + event + " "); }));
+}
+
+void TestPadOwnershipTelemetry() {
+    DcpPadTelemetry* t = dcp_pad_telemetry_new();
+    DcpPadOwners owners = FreshOwners();
+    std::vector<std::string> lines = TelemetryFor(t, Scan(owners, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)}));
+    CHECK(lines.size() == 2);
+    CHECK(Contains(lines[0], "event=local_controller_assignment player=1 count=1"));
+    CHECK(Contains(lines[1], "event=local_controller_assignment player=2 count=1"));
+
+    // Stable operation: rescans and reclaims give no reassignment or swap.
+    for (int i = 0; i < 30; ++i) {
+        dcp_pad_owners_release(&owners, i % 2);
+        const uint32_t instance = 100 + static_cast<uint32_t>(i);
+        auto more = TelemetryFor(t, Scan(owners, {Pad(instance, i % 2 ? kIdB : kIdA, i % 2)}));
+        lines.insert(lines.end(), more.begin(), more.end());
+    }
+    CHECK(CountEvent(lines, "local_controller_reassignment") == 0);
+    CHECK(CountEvent(lines, "local_controller_swap_detected") == 0);
+    CHECK(Contains(lines.back(), "count=10")); // player 1 and 2 have 16 assignments each: lines at 1 and 10 only
+    CHECK(lines.size() == 4);
+
+    // A genuine move, then a proven exchange: A 0->1 while C held P1, then B 1->0.
+    DcpPadOwners swap = FreshOwners();
+    DcpPadTelemetry* s = dcp_pad_telemetry_new();
+    TelemetryFor(s, Scan(swap, {Pad(3, kIdA, 0), Pad(4, kIdB, 1)}));
+    dcp_pad_owners_release(&swap, 0);
+    TelemetryFor(s, Scan(swap, {Pad(4, kIdB, 1), Pad(5, kIdC, 0)}));
+    dcp_pad_owners_release(&swap, 1);
+    const auto moved = Scan(swap, {Pad(5, kIdC, 0), Pad(6, kIdA, 1)});
+    CHECK(moved.size() == 1 && moved[0].slot == 1 && moved[0].reason == DCP_PAD_ASSIGN_MOVED && moved[0].previous_slot == 0);
+    CHECK(moved[0].swapped_with < 0);
+    const auto moved_lines = TelemetryFor(s, moved);
+    CHECK(CountEvent(moved_lines, "local_controller_reassignment") == 1);
+    CHECK(CountEvent(moved_lines, "local_controller_swap_detected") == 0);
+    dcp_pad_owners_release(&swap, 0);
+    const auto exchanged = Scan(swap, {Pad(6, kIdA, 1), Pad(7, kIdB, 0)});
+    CHECK(exchanged.size() == 1 && exchanged[0].slot == 0 && exchanged[0].previous_slot == 1 && exchanged[0].swapped_with == 1);
+    const auto swap_lines = TelemetryFor(s, exchanged);
+    CHECK(CountEvent(swap_lines, "local_controller_swap_detected") == 1);
+    CHECK(Contains(swap_lines.back(), "event=local_controller_swap_detected player=1 count=1"));
+
+    for (const auto& line : lines) CHECK(TelemetryLineIsSafe(line));
+    for (const auto& line : swap_lines) CHECK(TelemetryLineIsSafe(line));
+    dcp_pad_telemetry_free(t);
+    dcp_pad_telemetry_free(s);
+}
+
+std::string FunctionBody(const std::string& source, const std::string& signature) {
+    const size_t start = source.find(signature);
+    if (start == std::string::npos) return {};
+    const size_t end = source.find("\n}\n", start);
+    return source.substr(start, end == std::string::npos ? std::string::npos : end - start);
+}
+
+void TestPadOwnershipSource() {
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    const std::string owner = ReadSource("src/dcp_pad_owner.c");
+    const std::string refresh = FunctionBody(pad, "static void refresh_gamepads(void) {");
+    CHECK(Contains(refresh, "dcp_pad_owners_assign(&owners,"));
+    CHECK(Contains(refresh, "SDL_GetGamepadPlayerIndexForID"));
+    CHECK(!Contains(refresh, "SDL_OpenGamepad")); // opened only after a player is chosen
+    for (const char* online : {"online", "network", "comms", "early_story", "lobby"}) {
+        CHECK(!Contains(refresh, online));
+        CHECK(!Contains(owner, online));
+    }
+    // The keyboard, mouse and touchscreen stay player 1's.
+    CHECK(Contains(pad, "const bool *k=slot==0 && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;"));
+    CHECK(Contains(pad, "static bool slot_connected(int slot) { return slot==0 || slots[slot].gamepad; }"));
+    // Opening a pad handle never changes who owns it.
+    const std::string open = FunctionBody(pad, "static ABI int32_t pad_open(");
+    CHECK(!open.empty());
+    CHECK(!Contains(open, "dcp_pad_owners_assign") && !Contains(open, "dcp_pad_owners_release"));
+    // Telemetry carries no device names, VID/PID, GUID, path or serial.
+    const std::string telemetry = owner.substr(owner.find("static const char *const telemetry_names"));
+    for (const char* sensitive :
+         {"SDL_", "device", "vendor", "product", "guid", "path", "serial", "instance", "identity", "player_index"})
+        CHECK(!Contains(telemetry.substr(telemetry.find("struct DcpPadTelemetry")), sensitive));
+    CHECK(!Contains(owner, "#include <SDL3"));
+    CHECK(!Contains(pad, "XInput Controller #"));
+}
+
 } // namespace
 
 int main() {
@@ -1475,6 +1735,14 @@ int main() {
     TestTouchSourceSafety();
     TestTouchscreenTelemetry();
     TestTouchTelemetrySource();
+    TestPadOwnershipStartupOrders();
+    TestPadOwnershipEnumerationOrder();
+    TestPadOwnershipHotplug();
+    TestPadOwnershipSteamVirtualPads();
+    TestPadOwnershipSinglePlayer();
+    TestPadOwnershipNoDuplicatesOrJumps();
+    TestPadOwnershipTelemetry();
+    TestPadOwnershipSource();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

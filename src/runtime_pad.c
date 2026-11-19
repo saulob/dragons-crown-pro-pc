@@ -11,6 +11,7 @@
 #include "dcp_keys.h"
 #include "dcp_mouse.h"
 #include "dcp_pad_buttons.h"
+#include "dcp_pad_owner.h"
 #include "dcp_touchscreen.h"
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
@@ -94,14 +95,36 @@ static void touch_click(PadData *d, int right) {
     d->touches[0]=(PadTouch){.x=right ? 1440 : 480,.y=471,.id=0};
 }
 
-static bool gamepad_assigned(SDL_JoystickID id) {
-    for (int i=0;i<MAX_PADS;++i) if (slots[i].gamepad && SDL_GetGamepadID(slots[i].gamepad)==id) return true;
-    return false;
+static DcpPadOwners owners;
+static int owners_ready;
+static int free_slot(void) { return dcp_pad_owners_free_slot(&owners); }
+/* Never logged: the path can carry a device serial on some platforms. */
+static uint64_t device_identity(SDL_JoystickID id) {
+    uint64_t hash=1469598103934665603ull;
+    const SDL_GUID guid=SDL_GetGamepadGUIDForID(id);
+    for (size_t i=0;i<sizeof(guid.data);++i) hash=(hash^guid.data[i])*1099511628211ull;
+    const char *path=SDL_GetGamepadPathForID(id);
+    for (; path && *path; ++path) hash=(hash^(uint8_t)*path)*1099511628211ull;
+    hash=(hash^(uint32_t)(SDL_GetGamepadPlayerIndexForID(id)+1))*1099511628211ull;
+    return hash ? hash : 1;
 }
-static int free_slot(void) {
-    for (int i=0;i<MAX_PADS;++i) if (!slots[i].gamepad) return i;
-    return -1;
+static bool steam_virtual(uint16_t vendor, uint16_t product) { return vendor==0x28de && product==0x11ff; }
+/* DEBUG_SAULO: local controller ownership transitions until DCP-PLJSPF is confirmed in the field. */
+static uint32_t pressed_generation[MAX_PADS];
+static void log_owner_snapshot(const char *why) {
+    printf("Local controller diag: %s; generation %u",why,owners.generation);
+    for (int i=0;i<MAX_PADS;++i) {
+        if (!owners.active[i].used) { printf(", P%d=none",i+1); continue; }
+        printf(", P%d=instance %u player index %d",i+1,(unsigned)owners.active[i].device.instance,owners.active[i].device.player_index);
+    }
+    putchar('\n');
 }
+static void log_first_press(int slot, uint32_t buttons) {
+    if (!buttons || !owners.active[slot].used || pressed_generation[slot]==owners.generation) return;
+    pressed_generation[slot]=owners.generation;
+    printf("Local controller diag: first press on P%d (instance %u) since generation %u\n",slot+1,
+           (unsigned)owners.active[slot].device.instance,owners.generation);
+} /* DEBUG_SAULO */
 static char keys_file[4200];
 /* The player's own mappings. SDL_GAMECONTROLLERCONFIG, which SDL reads itself, keeps priority over them. */
 static void load_user_gamepad_mappings(void) {
@@ -130,8 +153,31 @@ static void log_unmapped_joysticks(void) {
     }
     SDL_free(ids);
 }
-/* Gives new gamepads, in SDL's order, the lowest slots without one; called under lock. A disconnected
- * gamepad frees its slot, but the player stays logged in, as on the PS4. */
+static void release_gamepad(int slot) {
+    SDL_CloseGamepad(slots[slot].gamepad);
+    slots[slot].gamepad=NULL;
+    dcp_pad_owners_release(&owners,slot);
+}
+static void open_assigned(const DcpPadAssignment *a) {
+    SDL_Gamepad *g=SDL_OpenGamepad(a->device.instance);
+    if (!g) {
+        dcp_pad_owners_release(&owners,a->slot);
+        return;
+    }
+    const int slot=a->slot;
+    slots[slot].gamepad=g;
+    ++slots[slot].connected_count;
+    const unsigned vendor=SDL_GetGamepadVendor(g), product=SDL_GetGamepadProduct(g);
+    printf("Runtime: gamepad %d connected: %s (%04x:%04x%s)\n",slot+1,SDL_GetGamepadName(g),vendor,product,
+           steam_virtual(vendor,product) ? ", Steam Input virtual gamepad" : "");
+    printf("Local controller diag: P%d <- instance %u, player index %d, reason %s, previous P%d, swapped with P%d, generation %u\n",
+           slot+1,(unsigned)a->device.instance,a->device.player_index,dcp_pad_assign_reason_name(a->reason),
+           a->previous_slot+1,a->swapped_with+1,a->generation); /* DEBUG_SAULO */
+    dcp_pad_telemetry_record(a);
+    runtime_user_login(slot+1);
+}
+/* Called under lock. Ownership rules: dcp_pad_owner.h. A disconnected gamepad frees its slot, but the player stays
+ * logged in, as on the PS4. */
 static void refresh_gamepads(void) {
     if (!sdl_ready) {
         if (!SDL_WasInit(SDL_INIT_GAMEPAD)) dcp_prepare_sdl_gamepad();
@@ -139,11 +185,12 @@ static void refresh_gamepads(void) {
         if (sdl_ready>0) load_user_gamepad_mappings();
     }
     if (sdl_ready<0) return;
+    if (!owners_ready) { dcp_pad_owners_init(&owners); owners_ready=1; }
     for (int i=0;i<MAX_PADS;++i) {
         if (!slots[i].gamepad || SDL_GamepadConnected(slots[i].gamepad)) continue;
         printf("Runtime: gamepad %d disconnected\n",i+1);
-        SDL_CloseGamepad(slots[i].gamepad);
-        slots[i].gamepad=NULL;
+        release_gamepad(i);
+        log_owner_snapshot("disconnect"); /* DEBUG_SAULO */
     }
     static uint64_t last_scan;
     const uint64_t now=now_us();
@@ -152,19 +199,14 @@ static void refresh_gamepads(void) {
     log_unmapped_joysticks();
     int count=0;
     SDL_JoystickID *ids=SDL_GetGamepads(&count);
-    for (int j=0;ids && j<count && free_slot()>=0;++j) {
-        if (gamepad_assigned(ids[j])) continue;
-        SDL_Gamepad *g=SDL_OpenGamepad(ids[j]);
-        if (!g) continue;
-        const int slot=free_slot();
-        slots[slot].gamepad=g;
-        ++slots[slot].connected_count;
-        const unsigned vendor=SDL_GetGamepadVendor(g), product=SDL_GetGamepadProduct(g);
-        printf("Runtime: gamepad %d connected: %s (%04x:%04x%s)\n",slot+1,SDL_GetGamepadName(g),vendor,product,
-               vendor==0x28de && product==0x11ff ? ", Steam Input virtual gamepad" : "");
-        runtime_user_login(slot+1);
-    }
+    DcpPadDevice devices[16];
+    size_t found=0;
+    for (int j=0;ids && j<count && found<sizeof(devices)/sizeof(*devices);++j)
+        devices[found++]=(DcpPadDevice){ids[j],device_identity(ids[j]),SDL_GetGamepadPlayerIndexForID(ids[j])};
     SDL_free(ids);
+    DcpPadAssignment assigned[MAX_PADS];
+    const size_t n=dcp_pad_owners_assign(&owners,devices,found,assigned,MAX_PADS);
+    for (size_t i=0;i<n;++i) open_assigned(&assigned[i]);
 }
 /* Button sources: a host button or key and the PS4 button it presses. The defaults below can be
  * changed per PS4 button with DCP_PAD_MAP (gamepad) and DCP_KEY_MAP (keyboard), e.g.
@@ -339,6 +381,7 @@ static void sample_host(int slot, PadData *d) {
             if (SDL_GetGamepadButton(g,(SDL_GamepadButton)source)) d->buttons|=pad_map.entries[i].ps;
         }
         const uint32_t mapped=d->buttons;
+        log_first_press(slot,mapped); /* DEBUG_SAULO */
         d->left_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTX)); d->left_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTY));
         d->right_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTX)); d->right_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTY));
         d->l2=trigger(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFT_TRIGGER)); d->r2=trigger(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
@@ -630,6 +673,9 @@ static ABI int32_t pad_open(int32_t user, int32_t type, int32_t index, const voi
     pthread_mutex_unlock(&lock);
     if (already) return ERR_ALREADY_OPENED;
     printf("Runtime: pad %d opened for user %d (%s)\n",player,user,player==1 ? "SDL gamepad or keyboard" : "SDL gamepad");
+    pthread_mutex_lock(&lock);
+    log_owner_snapshot("pad opened"); /* DEBUG_SAULO */
+    pthread_mutex_unlock(&lock);
     return player;
 }
 static ABI int32_t pad_close(int32_t handle) {
