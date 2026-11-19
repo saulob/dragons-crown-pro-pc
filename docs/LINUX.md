@@ -57,7 +57,7 @@ Run the second command from the repository folder. A Docker `ubuntu:20.04` conta
 | Logs | `runtime_log_posix.c`: stdout and stderr go to `logs/dragons_crown_pro_NNN.log` and are echoed to the console through a pipe. |
 | Data folders | Next to the AppImage file (`$APPIMAGE`), else next to the executable; `DCP_PORTABLE_DIR` overrides; a read-only AppImage folder falls back to `$XDG_DATA_HOME/DragonsCrownProPC` (`launcher/paths.cpp`). |
 | Launcher | The same TRG launcher and installer. File chooser: `zenity` or `kdialog` when installed, otherwise the launcher's own chooser (`launcher/package_browser.cpp`: mouse, keyboard and controller; it lists the program's folder, Downloads, Home and mounted drives such as the SD card). `DCP_FILE_CHOOSER=builtin` or `native` forces one. Open folder: `xdg-open`. Shift at start is read from the X11 server (`launcher/shift_key.cpp`); `--launcher` does the same in any session. |
-| Windowing | SDL3 on X11 or Wayland; Vulkan surface, F11, resize and VSync are the existing SDL code. |
+| Windowing | SDL3 on X11 or Wayland; Vulkan surface, F11, resize and VSync are the existing SDL code. When Steam starts the game (a non-Steam shortcut) on a Wayland desktop, outside Gamescope, the port asks SDL for XWayland first (`src/dcp_video_backend.h`), because Steam cannot tell which native Wayland window is the shortcut and leaves its Steam Input layout on Desktop. Without XWayland, with an `SDL_VIDEO_DRIVER` or `SDL_VIDEODRIVER` of your own, in Gaming Mode or outside Steam, the default backend is kept. |
 
 ## Windows parity
 

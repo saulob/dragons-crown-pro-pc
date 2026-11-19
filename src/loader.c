@@ -9,6 +9,7 @@
 #include <time.h>
 #include <inttypes.h>
 #include "dcp_sdl_compat.h"
+#include "dcp_video_backend.h"
 #include "runtime.h"
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
@@ -685,6 +686,9 @@ int main(int argc, char **argv) {
         module_diagnostics_report_startup();
 #endif
     } else log_cpu();
+#ifndef _WIN32
+    if (!cpu_only && !check_imports) dcp_video_backend_prepare(1);
+#endif
     if (!cpu_only && !check_imports && !game_child) {
         DcpGraphicsCheck check_graphics=cpu_usable;
         int game_process=0;

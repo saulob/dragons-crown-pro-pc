@@ -201,7 +201,7 @@ $tests = @(
     (Test-Step 'cursor visibility tests' 'dcp-cursor-tests'),
     (Test-Step 'mouse input tests (bindings, Pointer Control touch finger, Steam Deck trackpad responsiveness, touchscreen touchpad, capture rules, settings, local controller ownership)' 'dcp-mouse-tests'),
     (Test-Step 'window fit tests' 'dcp-window-tests'),
-    (Test-Step 'SDL compat tests (Proton/Wine HIDAPI default)' 'dcp-sdl-compat-tests'),
+    (Test-Step 'SDL compat tests (Proton/Wine HIDAPI default, Steam Wayland window backend)' 'dcp-sdl-compat-tests'),
     (Test-Step 'present tests (swapchain images, present mode, flip pacing)' 'dcp-present-tests'),
     (Test-Step 'frame pacing tests (Frame rate setting, repeat cadence, limiter)' 'dcp-frame-pacing-tests'),
     (Test-Step 'copy pool tests (epoch accounting, stale epoch report, callback order)' 'dcp-copy-pool-tests'),

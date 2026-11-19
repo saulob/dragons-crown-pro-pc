@@ -13,6 +13,7 @@
 #include "common/logging/log.h"
 #include "sdl_window.h"
 #include "dcp_sdl_compat.h"
+#include "dcp_video_backend.h"
 #include "dcp_overlay.h"
 #include "dcp_graphics.h"
 #include "dcp_latency_trace.h"
@@ -57,6 +58,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     dcp_prepare_sdl_gamepad();
+#ifndef _WIN32
+    dcp_video_backend_prepare(0);
+#endif
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         ExitNoWindow("Cannot initialize SDL video", SDL_GetError());
     }
@@ -153,6 +157,13 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+#ifndef _WIN32
+    // DEBUG_SAULO: remove after the reporter's next log
+    std::printf("DEBUG_SAULO: video backend actual=%s surface=%s\n", driver ? driver : "(none)",
+                window_info.type == WindowSystemType::Wayland ? "wayland"
+                : window_info.type == WindowSystemType::X11   ? "x11"
+                                                              : "other");
+#endif
     LogGamescopeWindow();
     const std::string display_name = display && !display->name.empty() ? " (" + display->name + ")" : "";
     std::printf("Window: display %d of %zu%s, size %dx%d, VSync %s, frame rate in title %s, "
