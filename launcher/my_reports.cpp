@@ -28,7 +28,6 @@ constexpr float kScrollRatio = 0.1f;
 constexpr float kMessagePadding = 12.0f, kMessageBar = 4.0f, kMessageRounding = 8.0f, kMessageGap = 6.0f;
 constexpr float kMessageTint = 0.12f, kMessageBorderQuiet = 0.45f, kBadgePadding = 8.0f;
 constexpr float kMarkerDot = 3.5f, kMarkerGap = 6.0f;
-constexpr auto kFreshCheck = std::chrono::seconds(30);
 constexpr char kDot[] = " \xC2\xB7 ";
 
 std::string DateText(int64_t milliseconds) {
@@ -145,6 +144,14 @@ void DrawDeveloperMessage(trg::Ui& ui, const std::string& message, bool fresh) {
     ImGui::Dummy(ImVec2(width, end.y - origin.y));
 }
 
+void QuestionLabel(trg::Ui& ui, const char* text) {
+    ImGui::PushFont(ui.fonts().semibold, trg::layout::kTextLabel);
+    ImGui::TextUnformatted(Tr(text));
+    ImGui::PopFont();
+}
+
+float ButtonWidth(const char* label) { return ImGui::CalcTextSize(Tr(label)).x + ImGui::GetStyle().FramePadding.x * 2.0f; }
+
 void DrawSummary(trg::Ui& ui, const TrackedReport& report, std::string& toggled) {
     const float scale = ui.scale();
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -170,7 +177,7 @@ void DrawSummary(trg::Ui& ui, const TrackedReport& report, std::string& toggled)
     ImGui::TableSetColumnIndex(1);
     const float spare = height - ImGui::GetFrameHeight();
     if (spare > 0.0f) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + spare * 0.5f);
-    if (ImGui::Button(Tr("Hide details"), ImVec2(-FLT_MIN, 0))) toggled = report.ticket;
+    if (ImGui::Button(Tr("Close details"), ImVec2(-FLT_MIN, 0))) toggled = report.ticket;
     ImGui::EndTable();
 }
 
@@ -221,16 +228,11 @@ void MyReports::Refresh(const net::OnlineConfig& config, bool asked_by_player) {
     if (reports.empty()) return;
     check_ = std::make_shared<StatusCheck>();
     for (const TrackedReport& report : reports) check_->asked.push_back(report.ticket);
-    last_check_ = std::chrono::steady_clock::now();
     asked_by_player_ = asked_by_player;
     std::thread([check = check_, config, reports = std::move(reports)] {
         check->statuses = FetchReportStatuses(config, reports);
         check->done = true;
     }).detach();
-}
-
-void MyReports::RefreshIfStale(const net::OnlineConfig& config) {
-    if (!last_check_ || std::chrono::steady_clock::now() - *last_check_ >= kFreshCheck) Refresh(config);
 }
 
 void MyReports::Collect() {
@@ -241,10 +243,49 @@ void MyReports::Collect() {
         }
         reading_.reset();
     }
+    CollectFeedback();
     if (!check_ || !check_->done) return;
     check_failed_ = asked_by_player_ && !check_->statuses;
     if (check_->statuses && history_.Apply(*check_->statuses, check_->asked)) SaveHistory();
     check_.reset();
+}
+
+void MyReports::CollectFeedback() {
+    if (!feedback_ || !feedback_->done) return;
+    const std::shared_ptr<FeedbackSend> sent = std::move(feedback_);
+    feedback_.reset();
+    const FeedbackAnswer& answer = sent->answer;
+    if (answer.outcome == FeedbackOutcome::kSaved) {
+        std::printf("Bug report feedback: accepted ticket=%s result=%s\n", sent->ticket.c_str(), sent->result.c_str());
+        feedback_error_ticket_.clear();
+        if (history_.RecordTestFeedback(sent->ticket, sent->revision, sent->result)) SaveHistory();
+        else refresh_wanted_ = true;
+    } else {
+        std::printf("Bug report feedback: failed ticket=%s result=%s stage=%s code=%s detail=%s\n", sent->ticket.c_str(),
+                    sent->result.c_str(), answer.stage.c_str(), answer.code.c_str(), answer.detail.c_str());
+        if (answer.outcome == FeedbackOutcome::kStale) {
+            feedback_error_ticket_.clear();
+            refresh_wanted_ = true;
+        } else {
+            feedback_error_ticket_ = sent->ticket;
+            feedback_error_ = answer.outcome;
+        }
+    }
+}
+
+void MyReports::SendFeedback(const TrackedReport& report, std::string_view result, const net::OnlineConfig& config) {
+    if (feedback_) return;
+    feedback_error_ticket_.clear();
+    feedback_ = std::make_shared<FeedbackSend>();
+    feedback_->ticket = report.ticket;
+    feedback_->revision = report.status_updated_at;
+    feedback_->result = std::string(result);
+    std::printf("Bug report feedback: ticket=%s result=%s revision=%lld\n", report.ticket.c_str(), feedback_->result.c_str(),
+                static_cast<long long>(report.status_updated_at));
+    std::thread([send = feedback_, config, report, facts = facts_] {
+        send->answer = SendTestFeedback(config, report, send->result, facts);
+        send->done = true;
+    }).detach();
 }
 
 void MyReports::SaveHistory() {
@@ -311,8 +352,13 @@ void MyReports::ReadSentReport(const TrackedReport& report, const net::OnlineCon
     }).detach();
 }
 
-void MyReports::Draw(trg::Ui& ui) {
+void MyReports::Draw(trg::Ui& ui, const ReportFacts& facts) {
+    facts_ = facts;
     Collect();
+    if (refresh_wanted_ && !check_) {
+        refresh_wanted_ = false;
+        Refresh(LobbyConfig(ui));
+    }
     DrawHeader(ui);
     if (history_.reports().empty()) {
         ui.Paragraph("No reports sent from this PC");
@@ -405,6 +451,7 @@ void MyReports::DrawExpanded(trg::Ui& ui, const TrackedReport& report, size_t in
         DrawDeveloperMessage(ui, report.player_message, fresh_reply_ == report.ticket);
         ImGui::Dummy(ImVec2(0, kDetailGap * scale));
     }
+    DrawPlayerTest(ui, report);
     DrawFacts(ui, report);
     ImGui::Dummy(ImVec2(0, kDetailGap * scale));
     DrawActions(ui, report, removed);
@@ -419,6 +466,35 @@ void MyReports::DrawExpanded(trg::Ui& ui, const TrackedReport& report, size_t in
     DrawFrame(ui, origin, ImVec2(origin.x + width, bottom));
     layers.Merge(draw);
     ImGui::PopID();
+}
+
+void MyReports::DrawPlayerTest(trg::Ui& ui, const TrackedReport& report) {
+    const PlayerTest state = PlayerTestOf(report);
+    if (state == PlayerTest::kNone) return;
+    const float scale = ui.scale();
+    if (state == PlayerTest::kConfirmedFixed) {
+        HelpLine(ui.theme().accent, Tr("You confirmed that this issue is fixed"), true);
+    } else if (state == PlayerTest::kStillHappening) {
+        QuestionLabel(ui, "The issue is still happening");
+        HelpLine(ui.theme().dim, Tr("Please send a new Bug Report so we can receive fresh logs"), true);
+        if (ImGui::Button(Tr("Send a new report"))) new_report_requested_ = true;
+    } else {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float yes = ButtonWidth("Yes, fixed"), no = ButtonWidth("No, still happening");
+        QuestionLabel(ui, "Did this fix the issue?");
+        ImGui::BeginDisabled(feedback_ != nullptr);
+        if (ImGui::Button(Tr("Yes, fixed"), ImVec2(yes, 0))) SendFeedback(report, kTestFixed, LobbyConfig(ui));
+        if (ImGui::GetContentRegionAvail().x >= no + style.ItemSpacing.x) ImGui::SameLine();
+        if (ImGui::Button(Tr("No, still happening"), ImVec2(no, 0))) SendFeedback(report, kTestNotFixed, LobbyConfig(ui));
+        ImGui::EndDisabled();
+        if (feedback_ && feedback_->ticket == report.ticket) {
+            HelpLine(ui.theme().dim, Tr("Sending..."));
+        } else if (feedback_error_ticket_ == report.ticket) {
+            const bool unreachable = feedback_error_ == FeedbackOutcome::kUnreachable;
+            HelpLine(ui.theme().warn_dot, Tr(unreachable ? "Could not reach the online service. Your answer was not sent." : "Your answer could not be sent. Try again later."), true);
+        }
+    }
+    ImGui::Dummy(ImVec2(0, kDetailGap * scale));
 }
 
 void MyReports::DrawActions(trg::Ui& ui, const TrackedReport& report, std::string& removed) {

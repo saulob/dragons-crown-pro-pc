@@ -3197,9 +3197,10 @@ void TestAppearanceUx() {
     CHECK(request.find("nav_.RequestAppearance()") != std::string::npos && request.find("appearance_loader_") == std::string::npos);
     CHECK(request.find("selected_character_") != std::string::npos && request.find("save->save0_path") != std::string::npos);
     const std::string loading = FunctionBody(page, "void EditorPage::DrawAppearanceLoading(");
-    CHECK(loading.find("Tr(\"Loading appearance...\")") < loading.find("PathArcTo(") &&
-          loading.find("PathArcTo(") < loading.find("AdvanceAppearanceLoad();"));
-    CHECK(loading.find("GetTime()") != std::string::npos && loading.find("OpenPopup") == std::string::npos);
+    CHECK(loading.find("DrawLoadingView(ui, \"Loading appearance...\");") < loading.find("AdvanceAppearanceLoad();"));
+    const std::string view = ReadSource("launcher/loading_view.h");
+    CHECK(view.find("Tr(english_text)") < view.find("PathArcTo(") && view.find("GetTime()") != std::string::npos &&
+          view.find("OpenPopup") == std::string::npos);
     CHECK(Count(page, "AdvanceAppearanceLoad();") == 1);
     const std::string advance = FunctionBody(page, "void EditorPage::AdvanceAppearanceLoad(");
     CHECK(advance.find("art_->Ready(") < advance.find("appearance_loader_.Start("));

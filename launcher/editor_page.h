@@ -172,6 +172,9 @@ private:
     PendingSwitch pending_switch_ = PendingSwitch::kNone;
     int pending_target_ = 0;
     int last_frame_ = -2;
+    bool loaded_ = false;
+    bool refresh_pending_ = false;
+    bool loading_shown_ = false;
     float header_pair_x_ = 0.0f;     // screen x and width of the Apply / Discard pair, the Save Data combo's span
     float header_pair_width_ = 0.0f;
     char name_buffer_[kCharNameBytes + 1] = {};

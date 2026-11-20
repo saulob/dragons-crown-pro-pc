@@ -4,7 +4,7 @@
 // (local/server.js).
 import { PROTECTION, RateLimiter } from './abuse.js';
 import { ipGroup } from './edge.js';
-import { INCIDENT, INCIDENT_LIMITED, IncidentDesk, readClaim, readClaims, readIncident } from './incidents.js';
+import { INCIDENT, INCIDENT_LIMITED, IncidentDesk, readClaim, readClaims, readFeedback, readIncident } from './incidents.js';
 import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
 import { CommsUsage, commsSummary, parseCommsReport } from './comms_usage.js';
@@ -57,7 +57,7 @@ const WRITE_BUDGETS = {
 };
 const ROOM_OPS = new Set(['room.create', 'room.join', 'room.leave', 'room.search', 'room.resume']);
 // A receipt is the whole proof for these, so looking up a report never involves an account.
-const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read']);
+const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read', 'incident.feedback']);
 // Operations after which the live counts can have grown.
 const GROWING_OPS = new Set(['hello', 'room.create', 'room.join', 'room.resume']);
 
@@ -285,6 +285,7 @@ export class Lobby {
       incidentLookupAll: new RateLimiter(PROTECTION.incidentLookupAll),
       incidentStatusAddress: new RateLimiter(PROTECTION.incidentStatusAddress),
       incidentReadAddress: new RateLimiter(PROTECTION.incidentReadAddress),
+      incidentFeedbackAddress: new RateLimiter(PROTECTION.incidentFeedbackAddress),
       lobbyPublishAccount: new RateLimiter(PROTECTION.lobbyPublishAccount),
       lobbyListAccount: new RateLimiter(PROTECTION.lobbyListAccount),
       lobbyListAddress: new RateLimiter(PROTECTION.lobbyListAddress),
@@ -1738,5 +1739,15 @@ const HANDLERS = {
     const report = this.incidents.report(claim);
     if (!report) fail('not_found');
     return { report };
+  },
+
+  // The receipt proves the report is the player's; the revision proves the answer is for the request still open.
+  'incident.feedback'(att, msg) {
+    this.limitIncidentLookup(att, 'incidentFeedbackAddress');
+    const { feedback, detail } = readFeedback(msg);
+    if (!feedback) fail('bad_request', detail, { detail });
+    const { state, code } = this.host.sql.transaction(() => this.incidents.answer(feedback, this.host.now()));
+    if (!state) fail(code);
+    return state;
   },
 };

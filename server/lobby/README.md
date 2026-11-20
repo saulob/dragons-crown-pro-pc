@@ -202,6 +202,12 @@ is no public or permanent link.
 500 characters, stored and shown as plain text. **Save status** posts to `/admin/api/incidents/<ticket>/status`; nothing is
 saved until then, and a save that changes nothing keeps `status_updated_at`. The list has a Status column and filter.
 
+**Awaiting player test** asks the player to confirm a fix; the message to the player is the one typed with the status. The player's
+answer (`pending`, `fixed`, `not_fixed`) is kept apart from the status and belongs to the request it answers, identified by
+`status_updated_at`, so a newer request starts as `pending`. The list has a Player feedback column beside the Status (Awaiting
+response, Player confirmed fixed, Still happening) and a filter on the same value; the detail has a Player feedback section with
+the time, launcher version and game build of the answer. The Bugs tab carries the count of reports whose status is New. The answer is written only by the owner's
+`incident.feedback` (receipt required); `/admin` cannot write it. See [docs/ONLINE.md](../../docs/ONLINE.md#player-test-feedback).
 The list reads Report ID, Status, Submitted, Launcher, Game build, Operating system, Description, so the status sits next to the
 ID; CUSA is only in the detail. The description takes the remaining width and wraps. On narrower windows Operating system hides
 below 1000 px and Launcher below 760 px; the detail still shows both.
@@ -215,7 +221,8 @@ alone, and the newest-500 limit is unchanged. The owner's `incident.status` then
 answers `not_found`.
 
 `incident_tracking` holds what a report's owner may read: the ticket, a salted SHA-256 of the receipt, the submission time, the
-status, its time, the fixed version and the message. It has no account and no address, and the newest 5000 rows are kept,
+status, its time, the fixed version, the message and the player's latest test answer with its request time, answer time, launcher
+version and game build (columns added in place when the object starts, with defaults that read as no answer). It has no account and no address, and the newest 5000 rows are kept,
 apart from the 500 logs, so a status outlives its log. A report from before this table has no row and counts as New; saving
 its status adds a row with an empty hash, which no receipt matches. See [docs/ONLINE.md](../../docs/ONLINE.md#report-status-and-my-reports).
 

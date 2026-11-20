@@ -6,7 +6,7 @@ import { startLobbyServer } from '../local/server.js';
 import { ADMIN_CSS, ADMIN_HTML, ADMIN_JS } from '../src/admin_page.js';
 import { handleAdmin, internalIncidentRoute } from '../src/admin.js';
 import { PROTECTION } from '../src/abuse.js';
-import { INCIDENT, INCIDENT_STATUSES, isTicket, logDownloadName, readIncident } from '../src/incidents.js';
+import { INCIDENT, INCIDENT_STATUSES, IncidentDesk, isTicket, logDownloadName, readIncident } from '../src/incidents.js';
 import { LIMITS, Lobby } from '../src/lobby.js';
 import { Client, makeLobby } from './harness.js';
 
@@ -639,7 +639,7 @@ test('the admin page has a Dashboard tab with every existing section and a Bugs 
   const bugs = ADMIN_HTML.indexOf('id="view-bugs"');
   assert.ok(dashboard > 0 && bugs > dashboard);
   assert.match(ADMIN_HTML, /<button id="tab-dashboard"[^>]*aria-selected="true"[^>]*>Dashboard<\/button>/);
-  assert.match(ADMIN_HTML, /<button id="tab-bugs"[^>]*aria-selected="false"[^>]*>Bugs<\/button>/);
+  assert.match(ADMIN_HTML, /<button id="tab-bugs"[^>]*aria-selected="false"[^>]*>Bugs <span id="bug-new-count"[^>]*>[^<]*<\/span><\/button>/);
   assert.match(ADMIN_HTML, /id="view-bugs"[^>]*hidden/);
   assert.ok(!/id="view-dashboard"[^>]*hidden/.test(ADMIN_HTML));
   for (const id of ['range', 'refresh', 'c-online', 'c-peak', 'compare', 'activity', 'party-cards', 'usage', 'h-sessions', 'daily',
@@ -653,15 +653,15 @@ test('the admin page has a Dashboard tab with every existing section and a Bugs 
   assert.ok(ADMIN_HTML.indexOf('id="signout"') < dashboard);
 });
 
-test('the Dashboard tab requests only its own data; the Bugs tab requests reports only when opened', async () => {
+test('sign-in loads the report list once for the Bugs count; opening the Bugs tab loads it again, and the Dashboard never polls it', async () => {
   const env = makeLobby();
   const page = await adminPage(env);
-  assert.deepEqual(paths(page), ['/admin/api/history?days=30', '/admin/api/summary']);
+  assert.deepEqual(paths(page), ['/admin/api/history?days=30', '/admin/api/incidents', '/admin/api/summary']);
   assert.equal(page.get('view-dashboard').hidden, false);
   assert.equal(page.get('c-online').textContent, '0');
 
   await openBugs(page);
-  assert.deepEqual(paths(page), ['/admin/api/history?days=30', '/admin/api/incidents', '/admin/api/summary']);
+  assert.deepEqual(paths(page), ['/admin/api/history?days=30', '/admin/api/incidents', '/admin/api/incidents', '/admin/api/summary']);
   assert.equal(page.get('view-dashboard').hidden, true);
   assert.equal(page.get('view-bugs').hidden, false);
   assert.equal(page.get('tab-bugs').attrs['aria-selected'], 'true');
@@ -686,9 +686,9 @@ test('the Bugs tab lists reports newest first, opens one and filters by version,
   assert.deepEqual(ticketButtons(page).map((b) => b.textContent), [newer.ticket, older.ticket]);
   assert.equal(page.get('bug-count').textContent, '2 reports');
   const rows = bugRows(page);
-  assert.deepEqual(rows[0], ['Report ID', 'Status', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description']);
-  assert.deepEqual([rows[2][0], rows[2][1], rows[2][3], rows[2][4], rows[2][5], rows[2][6]],
-    [older.ticket, 'New', '0.9.2', 'CUSA07001 1.03 Japan', report().operating_system, 'Older report']);
+  assert.deepEqual(rows[0], ['Report ID', 'Status', 'Player feedback', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description']);
+  assert.deepEqual([rows[2][0], rows[2][1], rows[2][2], rows[2][4], rows[2][5], rows[2][6], rows[2][7]],
+    [older.ticket, 'New', '–', '0.9.2', 'CUSA07001 1.03 Japan', report().operating_system, 'Older report']);
   assert.equal(page.get('bug-detail').hidden, true);
 
   ticketButtons(page)[1].fire('click');
@@ -1226,8 +1226,11 @@ for (const status of INCIDENT_STATUSES) {
   });
 }
 
-test('the status list is exactly the seven statuses', () => {
-  assert.deepEqual(INCIDENT_STATUSES, ['new', 'investigating', 'fixed', 'cannot_reproduce', 'duplicate', 'not_a_bug', 'closed']);
+test('the status list is the seven existing statuses plus Awaiting player test, and the existing ones keep their names', () => {
+  assert.deepEqual(INCIDENT_STATUSES, ['new', 'investigating', 'awaiting_player_test', 'fixed', 'cannot_reproduce', 'duplicate', 'not_a_bug',
+    'closed']);
+  assert.deepEqual(INCIDENT_STATUSES.filter((s) => s !== 'awaiting_player_test'),
+    ['new', 'investigating', 'fixed', 'cannot_reproduce', 'duplicate', 'not_a_bug', 'closed']);
 });
 
 test('a bad status, version or message is refused and changes nothing', async () => {
@@ -1314,7 +1317,8 @@ test('a filed report starts as New, and a stored report is unchanged by anything
   const env = makeLobby();
   const { ticket } = file(greeted(env));
   const before = JSON.stringify(env.lobby.incident(ticket));
-  assert.deepEqual(env.lobby.incidents.status(ticket), { status: 'new', status_updated_at: env.clock.now, fixed_version: '', player_message: '' });
+  assert.deepEqual(env.lobby.incidents.status(ticket),
+    { status: 'new', status_updated_at: env.clock.now, fixed_version: '', player_message: '', player_feedback: '' });
   await saveStatus(env, ticket, { status: 'fixed', fixed_version: '0.9.3', player_message: 'Done' });
   assert.equal(JSON.stringify(env.lobby.incident(ticket)), before);
   assert.equal(env.host.sql.get('SELECT COUNT(*) AS n FROM incidents').n, 1);
@@ -1622,16 +1626,16 @@ async function signedIn(env, options) {
   return page;
 }
 
-test('the Bugs table reads Report ID, Status, Submitted, Launcher, Game build, Operating system, Description', async () => {
+test('the Bugs table reads Report ID, Status, Player feedback, Submitted, Launcher, Game build, Operating system, Description', async () => {
   const env = makeLobby();
   const { ticket } = file(greeted(env), { game_build: 'CUSA10209 1.02 Asia/Hong Kong', cusa: 'CUSA10209' });
   const page = await adminPage(env);
   await openBugs(page);
   const [header, row] = bugRows(page);
-  assert.deepEqual(header, ['Report ID', 'Status', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description']);
+  assert.deepEqual(header, ['Report ID', 'Status', 'Player feedback', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description']);
   assert.ok(!header.includes('CUSA'));
   assert.equal(row[1], 'New');
-  assert.equal(row[4], 'CUSA10209 1.02 Asia/Hong Kong');
+  assert.equal(row[5], 'CUSA10209 1.02 Asia/Hong Kong');
   assert.ok(!row.includes('CUSA10209'));
   const detail = await (await adminGet(env, `/admin/api/incidents/${ticket}`)).json();
   assert.equal(detail.cusa, 'CUSA10209');
@@ -1639,14 +1643,14 @@ test('the Bugs table reads Report ID, Status, Submitted, Launcher, Game build, O
   assert.ok(page.get('bug-facts').textContent.includes('CUSACUSA10209'));
 });
 
-test('the Bugs table keeps its important columns in view: wrapping text, columns that give way, a status near the left', () => {
+test('the Bugs table keeps its important columns in view: wrapping text, columns that give way, a status and its player feedback near the left', () => {
   const columns = ADMIN_JS.match(/BUG_COLUMN_CLASSES = \[([^\]]+)\]/)[1];
-  assert.match(columns, /^'col-id', 'col-status', 'col-submitted'/);
+  assert.match(columns, /^'col-id', 'col-status', 'col-feedback', 'col-submitted'/);
   assert.match(ADMIN_CSS, /#bug-list td\.bug-summary \{[^}]*white-space: normal[^}]*width: 100%/);
   assert.match(ADMIN_CSS, /#bug-list td\.col-build, #bug-list td\.col-os \{ white-space: normal/);
   assert.match(ADMIN_CSS, /@media \(max-width: 1000px\) \{\s*#bug-list \.col-os \{ display: none; \}/);
   assert.match(ADMIN_CSS, /@media \(max-width: 760px\) \{\s*#bug-list \.col-launcher \{ display: none; \}/);
-  assert.ok(!/#bug-list \.col-(id|status|submitted|build)[^{]*\{[^}]*display: none/.test(ADMIN_CSS));
+  assert.ok(!/#bug-list \.col-(id|status|feedback|submitted|build)[^{]*\{[^}]*display: none/.test(ADMIN_CSS));
   assert.match(ADMIN_CSS, /\.bug-log \{[^}]*white-space: pre/);
   assert.match(cssRule('.bug-list'), /overflow-y: auto/);
 });
@@ -1803,7 +1807,7 @@ test('a reload in the same tab signs in again from the kept token, on the same t
   first.get('remember').checked = true;
   first.get('login').fire('submit');
   await first.settle();
-  assert.deepEqual(paths(first), ['/admin/api/history?days=30', '/admin/api/summary']);
+  assert.deepEqual(paths(first), ['/admin/api/history?days=30', '/admin/api/incidents', '/admin/api/summary']);
   await openBugs(first);
   assert.equal(first.store.get(VIEW_KEY), 'bugs');
 
@@ -1918,4 +1922,455 @@ test('the dashboard token never reaches a URL, cookie or localStorage, and only 
   assert.ok(page.requests.length > 0 && page.requests.every((r) => !r.path.includes(TOKEN) && r.authorization === `Bearer ${TOKEN}`));
   assert.deepEqual([...page.store.keys()].sort(), [TOKEN_KEY, VIEW_KEY].sort());
   assert.ok([...page.store.values()].every((value) => value === TOKEN || value === 'bugs'));
+});
+
+const TESTING = 'awaiting_player_test';
+const requestTest = (env, ticket, message = 'Please test the latest build.') => saveStatus(env, ticket, { status: TESTING, player_message: message });
+const readTestState = (env, report) => lookup(anonymous(env), [{ ticket: report.ticket, receipt: report.receipt }]).reports[0];
+const answerTest = (env, report, revision, result, extra = {}) => anonymous(env).call('incident.feedback',
+  { ticket: report.ticket, receipt: report.receipt, revision, result, launcher_version: '1.4.1', game_build: 'CUSA10454 1.03 USA', ...extra });
+
+async function testRequest(message) {
+  const env = makeLobby();
+  const filed = file(greeted(env));
+  env.advance(MINUTE_MS);
+  await requestTest(env, filed.ticket, message);
+  return { env, filed, revision: readTestState(env, filed).status_updated_at };
+}
+
+test('Awaiting player test asks the player and shows no answer yet, and the other statuses carry no test fields', async () => {
+  const { env, filed, revision } = await testRequest('Does it still freeze?');
+  assert.deepEqual(readTestState(env, filed), {
+    ticket: filed.ticket, status: TESTING, status_updated_at: revision, player_message: 'Does it still freeze?', test_feedback: 'pending',
+  });
+  assert.equal(env.lobby.incidentForAdmin(filed.ticket).player_feedback, 'pending');
+  for (const status of INCIDENT_STATUSES.filter((s) => s !== TESTING)) {
+    await saveStatus(env, filed.ticket, { status });
+    const read = readTestState(env, filed);
+    assert.ok(!('test_feedback' in read) && !('test_feedback_at' in read), status);
+    assert.equal(env.lobby.incidentForAdmin(filed.ticket).player_feedback, '', status);
+  }
+});
+
+test('the owner answers fixed or not fixed, and both the launcher lookup and the admin see it', async () => {
+  for (const result of ['fixed', 'not_fixed']) {
+    const { env, filed, revision } = await testRequest();
+    env.advance(MINUTE_MS);
+    const answer = answerTest(env, filed, revision, result);
+    assert.deepEqual([answer.code, answer.ticket, answer.revision, answer.test_feedback, answer.test_feedback_at], ['ok', filed.ticket, revision, result, env.clock.now]);
+    assert.deepEqual(Object.keys(answer).sort(), ['code', 're', 'revision', 'test_feedback', 'test_feedback_at', 'ticket']);
+    const read = readTestState(env, filed);
+    assert.deepEqual([read.test_feedback, read.test_feedback_at, read.status], [result, env.clock.now, TESTING]);
+    const detail = await (await adminGet(env, `/admin/api/incidents/${filed.ticket}`)).json();
+    assert.deepEqual([detail.player_feedback, detail.player_feedback_at, detail.player_feedback_launcher_version, detail.player_feedback_game_build],
+      [result, env.clock.now, '1.4.1', 'CUSA10454 1.03 USA']);
+    assert.equal(detail.status, TESTING);
+  }
+});
+
+test('an answer needs the report\'s own receipt: a ticket alone, a wrong receipt or another report\'s receipt change nothing', async () => {
+  const { env, filed, revision } = await testRequest();
+  const other = file(greeted(env));
+  const before = everyRow(env);
+  assert.equal(anonymous(env).call('incident.feedback', { ticket: filed.ticket, revision, result: 'fixed' }).code, 'bad_request');
+  assert.equal(anonymous(env).call('incident.feedback', { ticket: filed.ticket, receipt: '', revision, result: 'fixed' }).code, 'bad_request');
+  assert.equal(answerTest(env, { ticket: filed.ticket, receipt: OTHER_RECEIPT }, revision, 'fixed').code, 'not_found');
+  assert.equal(answerTest(env, { ticket: filed.ticket, receipt: other.receipt }, revision, 'fixed').code, 'not_found');
+  assert.equal(answerTest(env, { ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT }, revision, 'fixed').code, 'not_found');
+  assert.equal(everyRow(env), before);
+  assert.equal(env.lobby.incidentForAdmin(filed.ticket).player_feedback, 'pending');
+  const known = answerTest(env, { ticket: filed.ticket, receipt: OTHER_RECEIPT }, revision, 'fixed');
+  const unknown = answerTest(env, { ticket: 'DCP-ZZZZZZ', receipt: OTHER_RECEIPT }, revision, 'fixed');
+  assert.deepEqual({ ...known, re: 0 }, { ...unknown, re: 0 });
+  assert.equal(answerTest(env, filed, revision, 'fixed').code, 'ok');
+});
+
+test('a report from before receipts cannot be answered, whatever the receipt', async () => {
+  const env = makeLobby();
+  fileLegacyReport(env);
+  await requestTest(env, LEGACY_TICKET);
+  const revision = env.lobby.incidentForAdmin(LEGACY_TICKET).status_updated_at;
+  for (const receipt of [OTHER_RECEIPT, '0'.repeat(64)]) {
+    assert.equal(answerTest(env, { ticket: LEGACY_TICKET, receipt }, revision, 'fixed').code, 'not_found');
+  }
+  assert.equal(env.lobby.incidentForAdmin(LEGACY_TICKET).player_feedback, 'pending');
+});
+
+test('only the two results, a positive integer revision and plain metadata are accepted, and nothing else', async () => {
+  const { env, filed, revision } = await testRequest();
+  const tracking = () => JSON.stringify(env.host.sql.all('SELECT * FROM incident_tracking'));
+  const before = tracking();
+  const bad = [
+    { result: 'maybe' }, { result: 'pending' }, { result: 'Fixed' }, { result: '' }, { result: 7 }, { result: undefined },
+    { revision: 0 }, { revision: -1 }, { revision: 1.5 }, { revision: String(revision) }, { revision: undefined }, { revision: Number.MAX_VALUE },
+    { launcher_version: '<b>' }, { launcher_version: 'x'.repeat(33) }, { launcher_version: 3 },
+    { game_build: 'a\u0000b' }, { game_build: ' padded ' }, { game_build: 'x'.repeat(INCIDENT.metadataChars + 1) }, { game_build: 4 },
+    { comment: 'free text' }, { player_message: 'hello' },
+  ];
+  for (const fields of bad) {
+    assert.equal(answerTest(env, filed, revision, 'fixed', fields).code, 'bad_request', JSON.stringify(fields));
+    env.advance(HOUR_MS);
+  }
+  assert.equal(tracking(), before);
+  assert.equal(answerTest(env, filed, revision, 'fixed', { launcher_version: undefined, game_build: undefined }).code, 'ok');
+  const detail = env.lobby.incidentForAdmin(filed.ticket);
+  assert.deepEqual([detail.player_feedback_launcher_version, detail.player_feedback_game_build], ['', '']);
+});
+
+test('an answer for a request that is no longer the open one is refused and never touches the newer request', async () => {
+  const { env, filed, revision } = await testRequest('First request');
+  env.advance(MINUTE_MS);
+  await requestTest(env, filed.ticket, 'Second request');
+  const next = readTestState(env, filed).status_updated_at;
+  assert.ok(next > revision);
+  assert.equal(answerTest(env, filed, revision, 'not_fixed').code, 'stale_request');
+  assert.equal(answerTest(env, filed, next + 1, 'not_fixed').code, 'stale_request');
+  assert.equal(readTestState(env, filed).test_feedback, 'pending');
+  assert.equal(answerTest(env, filed, next, 'fixed').code, 'ok');
+  assert.equal(answerTest(env, filed, revision, 'not_fixed').code, 'stale_request');
+  assert.equal(readTestState(env, filed).test_feedback, 'fixed');
+
+  await saveStatus(env, filed.ticket, { status: 'investigating' });
+  assert.equal(answerTest(env, filed, next, 'fixed').code, 'stale_request');
+  assert.equal(env.lobby.incidentForAdmin(filed.ticket).player_feedback, '');
+});
+
+test('the same answer twice is idempotent and keeps the first time; a different answer to the same request is refused', async () => {
+  const { env, filed, revision } = await testRequest();
+  const first = answerTest(env, filed, revision, 'fixed');
+  const stored = env.host.sql.get('SELECT * FROM incident_tracking WHERE ticket = ?', filed.ticket);
+  env.advance(HOUR_MS);
+  const again = answerTest(env, filed, revision, 'fixed', { launcher_version: '9.9.9', game_build: 'Other' });
+  assert.deepEqual({ ...again, re: 0 }, { ...first, re: 0 });
+  assert.deepEqual(env.host.sql.get('SELECT * FROM incident_tracking WHERE ticket = ?', filed.ticket), stored);
+  assert.equal(answerTest(env, filed, revision, 'not_fixed').code, 'already_answered');
+  assert.deepEqual(env.host.sql.get('SELECT * FROM incident_tracking WHERE ticket = ?', filed.ticket), stored);
+  assert.equal(readTestState(env, filed).test_feedback, 'fixed');
+});
+
+test('a new Awaiting player test request resets the answer to pending, and the older answer is kept in storage', async () => {
+  const { env, filed, revision } = await testRequest('Round one');
+  assert.equal(answerTest(env, filed, revision, 'not_fixed').code, 'ok');
+
+  env.advance(MINUTE_MS);
+  await requestTest(env, filed.ticket, 'Round two');
+  const second = readTestState(env, filed);
+  assert.equal(second.test_feedback, 'pending');
+  assert.ok(!('test_feedback_at' in second));
+  assert.equal(env.lobby.incidentForAdmin(filed.ticket).player_feedback, 'pending');
+  assert.equal(env.lobby.incidentForAdmin(filed.ticket).player_feedback_at, undefined);
+  assert.equal(env.lobby.incidentList().incidents[0].player_feedback, 'pending');
+  assert.equal(env.host.sql.get('SELECT feedback FROM incident_tracking WHERE ticket = ?', filed.ticket).feedback, 'not_fixed');
+
+  assert.equal(answerTest(env, filed, second.status_updated_at, 'fixed').code, 'ok');
+  env.advance(MINUTE_MS);
+  await saveStatus(env, filed.ticket, { status: 'investigating' });
+  env.advance(MINUTE_MS);
+  await requestTest(env, filed.ticket, 'Round two');
+  assert.equal(readTestState(env, filed).test_feedback, 'pending');
+});
+
+test('a request saved within the millisecond of the previous change still gets a revision of its own', async () => {
+  const { env, filed, revision } = await testRequest('One');
+  assert.equal(answerTest(env, filed, revision, 'fixed').code, 'ok');
+  await requestTest(env, filed.ticket, 'Two, same millisecond');
+  const next = readTestState(env, filed);
+  assert.ok(next.status_updated_at > revision);
+  assert.equal(next.test_feedback, 'pending');
+  assert.equal(answerTest(env, filed, revision, 'fixed').code, 'stale_request');
+  await requestTest(env, filed.ticket, 'Two, same millisecond');
+  assert.equal(readTestState(env, filed).status_updated_at, next.status_updated_at);
+});
+
+test('saving an unchanged request keeps the answer, and a change to the message asks again', async () => {
+  const { env, filed, revision } = await testRequest('Same text');
+  answerTest(env, filed, revision, 'fixed');
+  env.advance(MINUTE_MS);
+  await requestTest(env, filed.ticket, 'Same text');
+  assert.equal(readTestState(env, filed).test_feedback, 'fixed');
+  await requestTest(env, filed.ticket, 'Other text');
+  assert.equal(readTestState(env, filed).test_feedback, 'pending');
+});
+
+test('rows from before this feature stay valid: the columns are added to the existing table without touching its rows', async () => {
+  const env = makeLobby();
+  const old = file(greeted(env));
+  const fixed = file(greeted(env));
+  await saveStatus(env, fixed.ticket, { status: 'fixed', fixed_version: '1.0.0', player_message: 'Done' });
+  const added = ['feedback', 'feedback_revision', 'feedback_ms', 'feedback_launcher_version', 'feedback_game_build'];
+  for (const column of added) env.host.sql.run(`ALTER TABLE incident_tracking DROP COLUMN ${column}`);
+  const rows = () => env.host.sql.all(`SELECT ticket, receipt_hash, submitted_ms, status, status_ms, fixed_version, player_message
+    FROM incident_tracking ORDER BY ticket`);
+  const before = JSON.stringify(rows());
+
+  const desk = new IncidentDesk(env.host.sql, env.lobby.meta('salt'));
+  new IncidentDesk(env.host.sql, env.lobby.meta('salt'));
+  const columns = env.host.sql.all('PRAGMA table_info(incident_tracking)').map((c) => c.name);
+  for (const column of added) assert.equal(columns.filter((name) => name === column).length, 1, column);
+  assert.equal(JSON.stringify(rows()), before);
+  assert.deepEqual(desk.status(old.ticket), { status: 'new', status_updated_at: old.submitted_at, fixed_version: '', player_message: '', player_feedback: '' });
+  assert.deepEqual(desk.statuses([claimOf(fixed)]), [{ ticket: fixed.ticket, status: 'fixed', status_updated_at: desk.status(fixed.ticket).status_updated_at,
+    fixed_version: '1.0.0', player_message: 'Done' }]);
+  assert.equal(desk.list().incidents.length, 2);
+  assert.ok(desk.list().incidents.every((r) => r.player_feedback === ''));
+
+  desk.setStatus(old.ticket, { status: TESTING, fixed_version: '', player_message: 'Test' }, env.clock.now + 1000);
+  const revision = desk.status(old.ticket).status_updated_at;
+  const answered = desk.answer({ claim: claimOf(old), revision, result: 'fixed', launcher_version: '1.4.1', game_build: '' }, env.clock.now + 2000);
+  assert.equal(answered.state.test_feedback, 'fixed');
+});
+
+test('the admin list tells pending, fixed and not fixed apart, and leaves other statuses without feedback', async () => {
+  const env = makeLobby();
+  const client = greeted(env);
+  const reports = [];
+  for (let i = 0; i < 4; i++) {
+    reports.push(file(client));
+    env.advance(HOUR_MS);
+  }
+  const [plain, waiting, confirmed, still] = reports;
+  for (const r of [waiting, confirmed, still]) await requestTest(env, r.ticket);
+  answerTest(env, confirmed, readTestState(env, confirmed).status_updated_at, 'fixed');
+  answerTest(env, still, readTestState(env, still).status_updated_at, 'not_fixed');
+  const list = (await (await adminGet(env, '/admin/api/incidents')).json()).incidents;
+  const byTicket = Object.fromEntries(list.map((r) => [r.ticket, r.player_feedback]));
+  assert.deepEqual(byTicket, { [plain.ticket]: '', [waiting.ticket]: 'pending', [confirmed.ticket]: 'fixed', [still.ticket]: 'not_fixed' });
+  assert.ok(list.every((r) => !('receipt' in r) && !('receipt_hash' in r)));
+});
+
+test('feedback has a budget of its own, needs no session and spends no report quota', () => {
+  const env = makeLobby();
+  const filed = file(greeted(env));
+  const quota = quotaRows(env);
+  const body = { ticket: filed.ticket, receipt: filed.receipt, revision: 1, result: 'fixed' };
+  const codes = [];
+  for (let i = 0; i < PROTECTION.incidentFeedbackAddress.burst + 1; i++) codes.push(askOnce(env, '198.51.100.77', 'incident.feedback', body).code);
+  assert.equal(codes.at(-1), 'limit');
+  assert.ok(codes.slice(0, -1).every((code) => code === 'stale_request'));
+  assert.equal(quotaRows(env), quota);
+  assert.equal(askOnce(env, '198.51.100.78', 'incident.feedback', body).code, 'stale_request');
+});
+
+test('the admin cannot write or forge player feedback, and the player cannot change a status', async () => {
+  const { env, filed, revision } = await testRequest();
+  for (const change of [{ status: TESTING, player_feedback: 'fixed' }, { status: TESTING, feedback: 'fixed' }, { status: 'new', test_feedback: 'fixed' }]) {
+    assert.equal((await saveStatus(env, filed.ticket, change)).status, 400, JSON.stringify(change));
+  }
+  assert.equal((await adminPost(env, `/admin/api/incidents/${filed.ticket}/feedback`, '{"result":"fixed"}')).status, 405);
+  assert.equal(anonymous(env).call('incident.status', { reports: [claimOf(filed)], status: 'fixed' }).code, 'bad_request');
+  answerTest(env, filed, revision, 'fixed');
+  assert.equal(env.lobby.incidentForAdmin(filed.ticket).status, TESTING);
+  assert.equal(readTestState(env, filed).status, TESTING);
+});
+
+test('the player answer never carries the receipt, and the admin responses never carry one either', async () => {
+  const { env, filed, revision } = await testRequest();
+  const answer = answerTest(env, filed, revision, 'fixed');
+  assert.ok(!JSON.stringify(answer).includes(filed.receipt));
+  const text = await (await adminGet(env, `/admin/api/incidents/${filed.ticket}`)).text();
+  assert.ok(!text.includes(filed.receipt) && !text.includes('receipt'));
+});
+
+test('the Bugs tab shows how many reports are New, from sign-in on, and counts neither Investigating nor player feedback', async () => {
+  const env = makeLobby();
+  const client = greeted(env);
+  const a = file(client);
+  env.advance(HOUR_MS);
+  const b = file(client);
+  env.advance(HOUR_MS);
+  const c = file(client);
+  env.advance(HOUR_MS);
+  const d = file(client);
+  await saveStatus(env, c.ticket, { status: 'investigating' });
+  await requestTest(env, d.ticket);
+  answerTest(env, d, readTestState(env, d).status_updated_at, 'not_fixed');
+
+  const page = await adminPage(env);
+  const badge = page.get('bug-new-count');
+  assert.equal(badge.textContent, '2');
+  assert.equal(badge.className, 'tab-count active');
+
+  await openBugs(page);
+  assert.equal(badge.textContent, '2');
+  await clickTicket(page, a.ticket);
+  page.get('bug-status').value = 'investigating';
+  page.get('bug-status').fire('change');
+  page.get('bug-status-save').fire('click');
+  await page.settle();
+  assert.equal(badge.textContent, '1');
+
+  await saveStatus(env, b.ticket, { status: 'closed' });
+  page.get('bug-refresh').fire('click');
+  await page.settle();
+  assert.equal(badge.textContent, '0');
+  assert.equal(badge.className, 'tab-count');
+
+  file(client, { description: 'Another one' });
+  assert.equal(badge.textContent, '0');
+  page.get('bug-refresh').fire('click');
+  await page.settle();
+  assert.equal(badge.textContent, '1');
+  assert.match(ADMIN_CSS, /\.tab-count \{[^}]*min-width/);
+});
+
+test('the Bugs list has a Player feedback column beside the Status, and the filter uses the same value, keeping the other filters', async () => {
+  const env = makeLobby();
+  const client = greeted(env);
+  const reports = [];
+  for (let i = 0; i < 4; i++) {
+    reports.push(file(client, { description: `Report ${i}` }));
+    env.advance(HOUR_MS);
+  }
+  const [plain, waiting, confirmed, still] = reports;
+  for (const r of [waiting, confirmed, still]) await requestTest(env, r.ticket);
+  answerTest(env, confirmed, readTestState(env, confirmed).status_updated_at, 'fixed');
+  answerTest(env, still, readTestState(env, still).status_updated_at, 'not_fixed');
+  const page = await adminPage(env);
+  await openBugs(page);
+
+  const cells = (ticket) => bugRows(page).find((row) => row[0] === ticket).slice(1, 3);
+  assert.deepEqual(cells(plain.ticket), ['New', '–']);
+  assert.deepEqual(cells(waiting.ticket), ['Awaiting player test', 'Awaiting response']);
+  assert.deepEqual(cells(confirmed.ticket), ['Awaiting player test', 'Player confirmed fixed']);
+  assert.deepEqual(cells(still.ticket), ['Awaiting player test', 'Still happening']);
+  assert.deepEqual(bugRows(page)[0].slice(0, 3), ['Report ID', 'Status', 'Player feedback']);
+  const badges = page.get('bug-list').find((n) => n.tag === 'span').map((n) => n.className);
+  assert.deepEqual(badges.sort(), ['feedback-badge fixed', 'feedback-badge not_fixed', 'feedback-badge pending']);
+
+  const filter = page.get('bug-feedback-filter');
+  for (const [value, expected] of [['pending', [waiting]], ['fixed', [confirmed]], ['not_fixed', [still]], ['', [still, confirmed, waiting, plain]]]) {
+    filter.value = value;
+    filter.fire('change');
+    assert.deepEqual(ticketButtons(page).map((b) => b.textContent), expected.map((r) => r.ticket), value);
+  }
+  filter.value = 'fixed';
+  filter.fire('change');
+  assert.equal(page.get('bug-count').textContent, '1 of 4 reports');
+  page.get('bug-status-filter').value = 'new';
+  page.get('bug-status-filter').fire('change');
+  assert.deepEqual(ticketButtons(page).map((b) => b.textContent), []);
+  for (const name of ['Awaiting player test', 'All', 'Awaiting response', 'Confirmed fixed', 'Still happening']) {
+    assert.ok(ADMIN_HTML.includes(`>${name}</option>`), name);
+  }
+  assert.ok(ADMIN_HTML.includes('for="bug-feedback-filter">Player feedback</label>'));
+});
+
+const FEEDBACK_TEXT = { pending: 'Awaiting response', fixed: 'Player confirmed fixed', not_fixed: 'Still happening' };
+const feedbackCell = (page, ticket) => bugRows(page).find((row) => row[0] === ticket)[2];
+const detailFeedback = (page) => ({
+  hidden: page.get('bug-feedback').hidden,
+  state: page.get('bug-feedback-state').textContent,
+  facts: page.get('bug-feedback-facts').textContent,
+});
+
+async function openedRequest(message) {
+  const { env, filed, revision } = await testRequest(message);
+  const page = await adminPage(env);
+  await openBugs(page);
+  await clickTicket(page, filed.ticket);
+  return { env, filed, revision, page };
+}
+
+const reopen = async (page, ticket) => {
+  page.get('bug-close').fire('click');
+  page.get('bug-refresh').fire('click');
+  await page.settle();
+  await clickTicket(page, ticket);
+};
+
+test('the detail has a Player feedback section: pending shows only Awaiting response', async () => {
+  const { filed, page } = await openedRequest('Please test.');
+  assert.ok(ADMIN_HTML.includes('<h3>Player feedback</h3>'));
+  assert.deepEqual(detailFeedback(page), { hidden: false, state: 'Awaiting response', facts: '' });
+  assert.equal(page.get('bug-status').value, TESTING);
+  assert.equal(page.get('bug-message').value, 'Please test.');
+  assert.ok(page.get('bug-status-meaning').textContent.includes('asked in the launcher whether this fixed the issue'));
+  assert.equal(feedbackCell(page, filed.ticket), 'Awaiting response');
+});
+
+for (const result of ['fixed', 'not_fixed']) {
+  test(`the detail shows the ${result} answer with its response time, launcher version and game build`, async () => {
+    const { env, filed, revision, page } = await openedRequest();
+    env.advance(MINUTE_MS);
+    answerTest(env, filed, revision, result, { launcher_version: '1.4.1', game_build: 'CUSA07001 1.03 Japan' });
+    await reopen(page, filed.ticket);
+    const shown = detailFeedback(page);
+    assert.equal(shown.hidden, false);
+    assert.equal(shown.state, FEEDBACK_TEXT[result]);
+    const facts = page.get('bug-feedback-facts').find((n) => n.tag === 'dt' || n.tag === 'dd').map((n) => n.textContent);
+    assert.deepEqual(facts.filter((_, i) => i % 2 === 0), ['Response time', 'Launcher version', 'Game build']);
+    const values = facts.filter((_, i) => i % 2 === 1);
+    assert.ok(values[0].includes('Sao Paulo'));
+    assert.deepEqual(values.slice(1), ['1.4.1', 'CUSA07001 1.03 Japan']);
+    assert.ok(!shown.facts.includes(filed.receipt) && !shown.facts.includes('receipt'));
+    assert.equal(feedbackCell(page, filed.ticket), FEEDBACK_TEXT[result]);
+  });
+}
+
+test('the detail leaves the section out once the report is no longer awaiting a test', async () => {
+  const { page, filed } = await openedRequest();
+  page.get('bug-status').value = 'fixed';
+  page.get('bug-status').fire('change');
+  page.get('bug-status-save').fire('click');
+  await page.settle();
+  assert.equal(page.get('bug-feedback').hidden, true);
+  assert.equal(bugRows(page).find((row) => row[0] === filed.ticket)[1], 'Fixed');
+  assert.equal(feedbackCell(page, filed.ticket), '–');
+});
+
+test('a new request shows Awaiting response in the table, the detail and the filter, never the older answer', async () => {
+  const { env, filed, revision, page } = await openedRequest('First');
+  answerTest(env, filed, revision, 'not_fixed');
+  await reopen(page, filed.ticket);
+  assert.equal(feedbackCell(page, filed.ticket), 'Still happening');
+  assert.equal(detailFeedback(page).state, 'Still happening');
+
+  env.advance(MINUTE_MS);
+  await requestTest(env, filed.ticket, 'Second');
+  await reopen(page, filed.ticket);
+  assert.equal(feedbackCell(page, filed.ticket), 'Awaiting response');
+  assert.deepEqual(detailFeedback(page), { hidden: false, state: 'Awaiting response', facts: '' });
+  const filter = page.get('bug-feedback-filter');
+  for (const [value, expected] of [['pending', [filed.ticket]], ['not_fixed', []], ['fixed', []]]) {
+    filter.value = value;
+    filter.fire('change');
+    assert.deepEqual(ticketButtons(page).map((b) => b.textContent), expected, value);
+  }
+});
+
+test('the Player feedback column and filter come from the one value the Worker computes', async () => {
+  const env = makeLobby();
+  const client = greeted(env);
+  const reports = [];
+  for (let i = 0; i < 5; i++) {
+    reports.push(file(client, { description: `Report ${i}` }));
+    env.advance(HOUR_MS);
+  }
+  const [, waiting, confirmed, still, left] = reports;
+  for (const r of [waiting, confirmed, still, left]) await requestTest(env, r.ticket);
+  answerTest(env, confirmed, readTestState(env, confirmed).status_updated_at, 'fixed');
+  answerTest(env, still, readTestState(env, still).status_updated_at, 'not_fixed');
+  await saveStatus(env, left.ticket, { status: 'investigating' });
+  const page = await adminPage(env);
+  await openBugs(page);
+  const listed = (await (await adminGet(env, '/admin/api/incidents')).json()).incidents;
+  const filter = page.get('bug-feedback-filter');
+  for (const value of ['pending', 'fixed', 'not_fixed']) {
+    filter.value = value;
+    filter.fire('change');
+    const shown = ticketButtons(page).map((b) => b.textContent).sort();
+    assert.deepEqual(shown, listed.filter((r) => r.player_feedback === value).map((r) => r.ticket).sort(), value);
+    for (const ticket of shown) assert.equal(feedbackCell(page, ticket), FEEDBACK_TEXT[value]);
+  }
+  filter.value = '';
+  filter.fire('change');
+  for (const r of listed) assert.equal(feedbackCell(page, r.ticket), FEEDBACK_TEXT[r.player_feedback] ?? '–', r.ticket);
+  assert.equal(feedbackCell(page, left.ticket), '–');
+  assert.ok(ADMIN_JS.includes('r.player_feedback === feedback') && ADMIN_JS.includes('FEEDBACK_LABELS[feedback]'));
+});
+
+test('the Player feedback column stays beside the Status and is the last to give way on narrow windows', () => {
+  assert.ok(!/#bug-list \.col-feedback[^{]*\{[^}]*display: none/.test(ADMIN_CSS));
+  assert.match(ADMIN_CSS, /#bug-list td\.col-feedback \{[^}]*white-space: normal/);
+  assert.ok(ADMIN_JS.indexOf("'col-status', 'col-feedback', 'col-submitted'") > 0);
 });

@@ -127,6 +127,26 @@ IncidentPackage SentReportOf(const net::Json& report);
 inline constexpr char kIncidentOperation[] = "incident.file";
 inline constexpr char kIncidentStatusOperation[] = "incident.status";
 inline constexpr char kIncidentReadOperation[] = "incident.read";
+inline constexpr char kIncidentFeedbackOperation[] = "incident.feedback";
+
+// kStale: the open request changed or the service no longer has the report, so the answer was not taken; check again.
+enum class FeedbackOutcome { kSaved, kStale, kUnreachable, kFailed };
+
+FeedbackOutcome FeedbackOutcomeOf(const std::string& code);
+
+// What happened to one answer, for the log. `stage` is "connect" or "call"; `code` is the lobby's or the transport's; `detail`
+// is what the lobby named, or the connect error.
+struct FeedbackAnswer {
+    FeedbackOutcome outcome = FeedbackOutcome::kFailed;
+    std::string stage;
+    std::string code;
+    std::string detail;
+};
+
+// `reply` is the lobby's answer to the request, null when none arrived. An accepted answer must confirm `requested`.
+FeedbackAnswer FeedbackAnswerOf(const std::string& code, const net::Json& reply, std::string_view requested);
+
+net::Json IncidentFeedbackRequest(const TrackedReport& report, std::string_view result, const ReportFacts& facts);
 
 // Signs in without showing the player online, sends the package and closes. Blocks: run it off the UI thread. Online Play
 // does not have to be on, and the online identity is made if this PC has none.
@@ -138,5 +158,8 @@ IncidentReceipt FileIncident(const net::OnlineConfig& config, const std::filesys
 // whose receipt the service does not know, which is how a report deleted there shows.
 std::optional<std::vector<ReportStatus>> FetchReportStatuses(const net::OnlineConfig& config, const std::vector<TrackedReport>& reports);
 std::optional<IncidentPackage> FetchSentReport(const net::OnlineConfig& config, const TrackedReport& report);
+// Blocks, takes no account: run it off the UI thread.
+FeedbackAnswer SendTestFeedback(const net::OnlineConfig& config, const TrackedReport& report, std::string_view result,
+                                const ReportFacts& facts);
 
 } // namespace dcp

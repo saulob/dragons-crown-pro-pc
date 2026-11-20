@@ -340,6 +340,7 @@ bool LobbySession::open(const std::string& url, const Json& hello, Json* hello_r
 }
 
 std::optional<Json> LobbySession::call(const std::string& op, Json body, std::string* code) {
+    last_reply_ = Json();
     if (!socket_) {
         if (code) *code = kUnreachable;
         return std::nullopt;
@@ -373,6 +374,7 @@ std::optional<Json> LobbySession::call(const std::string& op, Json body, std::st
         if (code) *code = kLinkLost;
         return std::nullopt;
     }
+    last_reply_ = *m;
     const std::string result = (*m)["code"].as_string();
     if (code) *code = result;
     if (result != "ok") return std::nullopt;

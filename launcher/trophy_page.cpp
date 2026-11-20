@@ -7,12 +7,14 @@
 #include <ctime>
 #include <fstream>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 #include "dcp_png.h"
 #include "localization/ui_text.h"
 #include "trg/platform.h"
 #include "host.h"
+#include "loading_view.h"
 #include "utf8.h"
 #include "trophies/trophy_store.h"
 
@@ -100,6 +102,12 @@ ImTextureID TrophyPage::Icon(int id) {
 void TrophyPage::Draw(trg::Ui& ui) {
     const int frame = ImGui::GetFrameCount();
     if (!content_ || frame > last_frame_ + 1) {
+        if (!loaded_once_ && !app0_.empty() && !std::exchange(loading_shown_, true)) {
+            last_frame_ = frame;
+            DrawLoadingView(ui, "Loading Trophies...");
+            return;
+        }
+        loaded_once_ = true;
         content_ = LoadTrophyPage(app0_, user_dir_);
         if (content_->state == TrophyPageState::kList) {
             std::printf("Launcher: trophies %s, %d/%d unlocked\n", content_->np_comm_id.c_str(), content_->view.unlocked,

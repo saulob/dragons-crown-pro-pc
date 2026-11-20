@@ -20,7 +20,10 @@ export const INCIDENT = {
   statusKept: 5000,
 };
 
-export const INCIDENT_STATUSES = ['new', 'investigating', 'fixed', 'cannot_reproduce', 'duplicate', 'not_a_bug', 'closed'];
+export const INCIDENT_STATUSES = ['new', 'investigating', 'awaiting_player_test', 'fixed', 'cannot_reproduce', 'duplicate', 'not_a_bug',
+  'closed'];
+export const AWAITING_TEST = 'awaiting_player_test';
+export const TEST_RESULTS = ['fixed', 'not_fixed'];
 
 // Answer code of a refused report, and the abuse counter it adds to.
 export const INCIDENT_LIMITED = {
@@ -38,6 +41,7 @@ const CUSA = /^(?:CUSA[0-9]{5})?$/;
 const TICKET = /^DCP-[A-HJ-NP-Z2-9]{6}$/;
 const RECEIPT = /^[0-9a-f]{64}$/;
 const STATUS_FIELDS = new Set(['status', 'fixed_version', 'player_message']);
+const FEEDBACK_FIELDS = new Set(['ticket', 'receipt', 'revision', 'result', 'launcher_version', 'game_build']);
 
 export const isTicket = (text) => typeof text === 'string' && TICKET.test(text);
 
@@ -154,16 +158,61 @@ export function readStatusChange(body) {
   return { change: { status, fixed_version: status === 'fixed' ? version : '', player_message: message.trim() } };
 }
 
+// { feedback } or { detail }. The revision is checked against the open request by IncidentDesk.answer.
+export function readFeedback(msg) {
+  if (Object.keys(msg).some((key) => !ENVELOPE.has(key) && !FEEDBACK_FIELDS.has(key))) return { detail: 'fields' };
+  const claim = readClaim(msg);
+  if (!claim) return { detail: 'receipt' };
+  if (!Number.isSafeInteger(msg.revision) || msg.revision <= 0) return { detail: 'revision' };
+  if (!TEST_RESULTS.includes(msg.result)) return { detail: 'result' };
+  const launcher = msg.launcher_version ?? '';
+  if (typeof launcher !== 'string' || (launcher && !VERSION.test(launcher))) return { detail: 'launcher_version' };
+  const build = msg.game_build ?? '';
+  if (typeof build !== 'string' || HAS_CONTROL.test(build) || build !== build.trim() || Array.from(build).length > INCIDENT.metadataChars) {
+    return { detail: 'game_build' };
+  }
+  return { feedback: { claim, revision: msg.revision, result: msg.result, launcher_version: launcher, game_build: build } };
+}
+
+// '' when no test request is open, else pending, fixed or not_fixed: the same value as feedbackOf.
 const LIST_COLUMNS = `incidents.ticket AS ticket, ms, launcher_version, game_build, game_version, cusa, operating_system, log_file,
   substr(description, 1, ${INCIDENT.previewChars}) AS preview, COALESCE(t.status, 'new') AS status,
-  COALESCE(t.status_ms, ms) AS status_updated_at`;
+  COALESCE(t.status_ms, ms) AS status_updated_at,
+  CASE WHEN t.status = '${AWAITING_TEST}' THEN CASE WHEN t.feedback_revision = t.status_ms THEN t.feedback ELSE 'pending' END
+  ELSE '' END AS player_feedback`;
+
+// An answer belongs to the status time it was given for, so a newer request reads as pending and the old answer stays stored.
+const feedbackOf = (row) => {
+  if (row.status !== AWAITING_TEST) return '';
+  return row.feedback_revision === row.status_ms ? row.feedback : 'pending';
+};
+
+const feedbackDetails = (row) => {
+  const answer = feedbackOf(row);
+  if (answer !== 'fixed' && answer !== 'not_fixed') return {};
+  return {
+    player_feedback_at: row.feedback_ms,
+    player_feedback_launcher_version: row.feedback_launcher_version,
+    player_feedback_game_build: row.feedback_game_build,
+  };
+};
 
 const statusOf = (row) => ({
   status: row.status,
   status_updated_at: row.status_ms,
   fixed_version: row.fixed_version,
   player_message: row.player_message,
+  player_feedback: feedbackOf(row),
+  ...feedbackDetails(row),
 });
+
+const FEEDBACK_COLUMNS = [
+  ['feedback', `TEXT NOT NULL DEFAULT 'pending'`],
+  ['feedback_revision', 'INTEGER NOT NULL DEFAULT 0'],
+  ['feedback_ms', 'INTEGER NOT NULL DEFAULT 0'],
+  ['feedback_launcher_version', `TEXT NOT NULL DEFAULT ''`],
+  ['feedback_game_build', `TEXT NOT NULL DEFAULT ''`],
+];
 
 // The report store. `sql` as in Lobby's host.
 export class IncidentDesk {
@@ -179,6 +228,10 @@ export class IncidentDesk {
     sql.run(`CREATE TABLE IF NOT EXISTS incident_tracking (ticket TEXT PRIMARY KEY, receipt_hash TEXT NOT NULL,
       submitted_ms INTEGER NOT NULL, status TEXT NOT NULL, status_ms INTEGER NOT NULL, fixed_version TEXT NOT NULL,
       player_message TEXT NOT NULL)`);
+    const have = new Set(sql.all('PRAGMA table_info(incident_tracking)').map((c) => c.name));
+    for (const [column, type] of FEEDBACK_COLUMNS) {
+      if (!have.has(column)) sql.run(`ALTER TABLE incident_tracking ADD COLUMN ${column} ${type}`);
+    }
   }
 
   key(kind, value) {
@@ -238,7 +291,29 @@ export class IncidentDesk {
       status_updated_at: row.status_ms,
       ...(row.fixed_version ? { fixed_version: row.fixed_version } : {}),
       ...(row.player_message ? { player_message: row.player_message } : {}),
+      ...this.testState(row),
     }));
+  }
+
+  testState(row) {
+    if (row.status !== AWAITING_TEST) return {};
+    const feedback = feedbackOf(row);
+    return { test_feedback: feedback, ...(feedback === 'pending' ? {} : { test_feedback_at: row.feedback_ms }) };
+  }
+
+  // The first answer to a request is final: the same answer again changes nothing, another one is refused.
+  answer({ claim, revision, result, launcher_version: launcher, game_build: build }, now) {
+    const row = this.claimed(claim);
+    if (!row) return { code: 'not_found' };
+    if (row.status !== AWAITING_TEST || row.status_ms !== revision) return { code: 'stale_request' };
+    const given = feedbackOf(row);
+    if (given !== result) {
+      if (given !== 'pending') return { code: 'already_answered' };
+      this.sql.run(`UPDATE incident_tracking SET feedback = ?, feedback_revision = ?, feedback_ms = ?, feedback_launcher_version = ?,
+        feedback_game_build = ? WHERE ticket = ?`, result, revision, now, launcher, build, row.ticket);
+    }
+    const stored = this.sql.get('SELECT * FROM incident_tracking WHERE ticket = ?', row.ticket);
+    return { state: { ticket: row.ticket, revision, ...this.testState(stored) } };
   }
 
   // The stored report for its owner, or null once its log is gone.
@@ -254,7 +329,7 @@ export class IncidentDesk {
     const row = this.sql.get('SELECT * FROM incident_tracking WHERE ticket = ?', ticket);
     if (row) return statusOf(row);
     const stored = this.sql.get('SELECT ms FROM incidents WHERE ticket = ?', ticket);
-    return stored ? { status: 'new', status_updated_at: stored.ms, fixed_version: '', player_message: '' } : null;
+    return stored ? { status: 'new', status_updated_at: stored.ms, fixed_version: '', player_message: '', player_feedback: '' } : null;
   }
 
   // The status after the change, or null for an unknown report. A save that changes nothing keeps its time.
@@ -263,9 +338,11 @@ export class IncidentDesk {
     if (!current) return null;
     if (Object.keys(change).every((field) => current[field] === change[field])) return current;
     const submitted = this.sql.get('SELECT ms FROM incidents WHERE ticket = ?', ticket)?.ms ?? current.status_updated_at;
+    // A test request is told apart by its time, so one saved in the same millisecond as the previous change still gets its own.
+    const changedAt = change.status === AWAITING_TEST ? Math.max(now, current.status_updated_at + 1) : now;
     this.sql.run(`INSERT INTO incident_tracking (ticket, receipt_hash, submitted_ms, status, status_ms, fixed_version, player_message)
       VALUES (?, '', ?, ?, ?, ?, ?) ON CONFLICT(ticket) DO UPDATE SET status = excluded.status, status_ms = excluded.status_ms,
-      fixed_version = excluded.fixed_version, player_message = excluded.player_message`, ticket, submitted, change.status, now,
+      fixed_version = excluded.fixed_version, player_message = excluded.player_message`, ticket, submitted, change.status, changedAt,
     change.fixed_version, change.player_message);
     return this.status(ticket);
   }

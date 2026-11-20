@@ -36,7 +36,7 @@ export const ADMIN_HTML = String.raw`<!doctype html>
   <section id="dash" hidden>
     <nav class="tabs" role="tablist" aria-label="Admin sections">
       <button id="tab-dashboard" type="button" role="tab" aria-selected="true" aria-controls="view-dashboard">Dashboard</button>
-      <button id="tab-bugs" type="button" role="tab" aria-selected="false" aria-controls="view-bugs">Bugs</button>
+      <button id="tab-bugs" type="button" role="tab" aria-selected="false" aria-controls="view-bugs">Bugs <span id="bug-new-count" class="tab-count" title="Reports with status New">–</span></button>
     </nav>
     <div id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
     <div class="toolbar">
@@ -186,11 +186,19 @@ export const ADMIN_HTML = String.raw`<!doctype html>
             <option value="">All statuses</option>
             <option value="new">New</option>
             <option value="investigating">Investigating</option>
+            <option value="awaiting_player_test">Awaiting player test</option>
             <option value="fixed">Fixed</option>
             <option value="cannot_reproduce">Cannot reproduce</option>
             <option value="duplicate">Duplicate</option>
             <option value="not_a_bug">Not a bug</option>
             <option value="closed">Closed</option>
+          </select>
+          <label for="bug-feedback-filter">Player feedback</label>
+          <select id="bug-feedback-filter">
+            <option value="">All</option>
+            <option value="pending">Awaiting response</option>
+            <option value="fixed">Confirmed fixed</option>
+            <option value="not_fixed">Still happening</option>
           </select>
           <button id="bug-refresh" type="button">Refresh</button>
           <span id="bug-count" class="muted" role="status"></span>
@@ -213,6 +221,7 @@ export const ADMIN_HTML = String.raw`<!doctype html>
           <select id="bug-status">
             <option value="new">New</option>
             <option value="investigating">Investigating</option>
+            <option value="awaiting_player_test">Awaiting player test</option>
             <option value="fixed">Fixed</option>
             <option value="cannot_reproduce">Cannot reproduce</option>
             <option value="duplicate">Duplicate</option>
@@ -220,6 +229,11 @@ export const ADMIN_HTML = String.raw`<!doctype html>
             <option value="closed">Closed</option>
           </select>
           <p id="bug-status-meaning" class="muted"></p>
+          <div id="bug-feedback" class="bug-feedback" hidden>
+            <h3>Player feedback</h3>
+            <p id="bug-feedback-state" class="bug-feedback-state"></p>
+            <dl id="bug-feedback-facts" class="bug-facts"></dl>
+          </div>
           <div id="bug-fixed-field" class="bug-status-field" hidden>
             <label for="bug-fixed">Fixed in version</label>
             <input id="bug-fixed" type="text" maxlength="32" autocomplete="off" placeholder="0.9.3">
@@ -423,6 +437,18 @@ details summary { cursor: pointer; font-weight: 600; }
 .tabs button[role="tab"] { background: transparent; color: var(--text-secondary); border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 14px; }
 .tabs button[role="tab"][aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--accent); font-weight: 600; }
 .tabs .quiet { margin-left: auto; }
+.bug-feedback { margin: 0 0 24px; }
+.bug-feedback-state { margin: 0 0 8px; font-weight: 600; }
+.bug-feedback .bug-facts { margin: 0; }
+#bug-list td.col-feedback { white-space: normal; min-width: 9em; }
+.tab-count { display: inline-block; min-width: 2.2em; margin-left: 4px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; line-height: 1.5; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.tab-count.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.feedback-badge { display: inline-block; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; white-space: nowrap; color: var(--text-primary); }
+.feedback-badge::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--text-muted); }
+.feedback-badge.fixed { border-color: var(--series-3); font-weight: 600; }
+.feedback-badge.fixed::before { background: var(--series-3); }
+.feedback-badge.not_fixed { border-color: var(--error); font-weight: 600; }
+.feedback-badge.not_fixed::before { background: var(--error); }
 .bug-detail h2 { margin: 0; }
 .bug-list { max-height: 420px; overflow-y: auto; }
 #bug-list th, #bug-list td { text-align: left; vertical-align: top; }
@@ -1074,6 +1100,7 @@ export const ADMIN_JS = String.raw`(function () {
   var BUG_STATUSES = {
     new: ['New', 'The report has not been reviewed yet.'],
     investigating: ['Investigating', 'The report is being investigated.'],
+    awaiting_player_test: ['Awaiting player test', 'The player is asked in the launcher whether this fixed the issue. The message below is what they see, and saving a change asks again.'],
     fixed: ['Fixed', 'The problem has been corrected.'],
     cannot_reproduce: ['Cannot reproduce', 'The problem could not be reproduced with the available information.'],
     duplicate: ['Duplicate', 'The same problem is already tracked by another report.'],
@@ -1103,10 +1130,37 @@ export const ADMIN_JS = String.raw`(function () {
     var build = $('bug-build').value;
     var day = $('bug-day').value;
     var status = $('bug-status-filter').value;
+    var feedback = $('bug-feedback-filter').value;
     return bugReports.filter(function (r) {
       return (!version || r.launcher_version === version) && (!build || r.game_build === build) &&
-        (!day || bugDayLabel.format(r.ms) === day) && (!status || r.status === status);
+        (!day || bugDayLabel.format(r.ms) === day) && (!status || r.status === status) && (!feedback || r.player_feedback === feedback);
     });
+  }
+
+  function showNewCount() {
+    var count = bugReports.filter(function (r) { return r.status === 'new'; }).length;
+    var badge = $('bug-new-count');
+    badge.textContent = fmt(count);
+    badge.className = count > 0 ? 'tab-count active' : 'tab-count';
+    badge.title = count + ' ' + (count === 1 ? 'report' : 'reports') + ' with status New';
+  }
+
+  var FEEDBACK_LABELS = { pending: 'Awaiting response', fixed: 'Player confirmed fixed', not_fixed: 'Still happening' };
+
+  function feedbackBadge(feedback) {
+    return FEEDBACK_LABELS[feedback] ? el('span', 'feedback-badge ' + feedback, FEEDBACK_LABELS[feedback]) : null;
+  }
+
+  function bugFeedbackFacts(r) {
+    var label = FEEDBACK_LABELS[r.player_feedback];
+    var list = $('bug-feedback-facts');
+    clear(list);
+    $('bug-feedback').hidden = !label;
+    $('bug-feedback-state').textContent = label || '';
+    if (!label || r.player_feedback === 'pending') return;
+    bugFact(list, 'Response time', stampLabel.format(r.player_feedback_at) + ' (Sao Paulo)');
+    bugFact(list, 'Launcher version', r.player_feedback_launcher_version);
+    bugFact(list, 'Game build', r.player_feedback_game_build);
   }
 
   function bugFact(list, name, value) {
@@ -1126,6 +1180,7 @@ export const ADMIN_JS = String.raw`(function () {
     $('bug-message').value = r.player_message;
     $('bug-status-note').textContent = '';
     showBugStatusMeaning();
+    bugFeedbackFacts(r);
   }
 
   function bugDetail(r) {
@@ -1217,7 +1272,7 @@ export const ADMIN_JS = String.raw`(function () {
       return r.json();
     }).then(function (saved) {
       bugReports.forEach(function (r) {
-        if (r.ticket === ticket) { r.status = saved.status; r.status_updated_at = saved.status_updated_at; }
+        if (r.ticket === ticket) { r.status = saved.status; r.status_updated_at = saved.status_updated_at; r.player_feedback = saved.player_feedback; }
       });
       renderBugList();
       if (ticket !== bugTicket) return;
@@ -1229,8 +1284,8 @@ export const ADMIN_JS = String.raw`(function () {
     });
   }
 
-  var BUG_COLUMNS = ['Report ID', 'Status', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description'];
-  var BUG_COLUMN_CLASSES = ['col-id', 'col-status', 'col-submitted', 'col-launcher', 'col-build', 'col-os', ''];
+  var BUG_COLUMNS = ['Report ID', 'Status', 'Player feedback', 'Submitted', 'Launcher', 'Game build', 'Operating system', 'Description'];
+  var BUG_COLUMN_CLASSES = ['col-id', 'col-status', 'col-feedback', 'col-submitted', 'col-launcher', 'col-build', 'col-os', ''];
 
   function removeBugReport(ticket) {
     bugReports = bugReports.filter(function (r) { return r.ticket !== ticket; });
@@ -1290,10 +1345,19 @@ export const ADMIN_JS = String.raw`(function () {
     return td;
   }
 
+  function bugFeedbackCell(r) {
+    var badge = feedbackBadge(r.player_feedback);
+    if (!badge) return el('td', 'muted', '–');
+    var td = el('td');
+    td.appendChild(badge);
+    return td;
+  }
+
   function renderBugList() {
     var shown = bugShown();
+    showNewCount();
     table($('bug-list'), BUG_COLUMNS, shown.map(function (r) {
-      return [bugTicketCell(r), BUG_STATUSES[r.status][0], stampLabel.format(r.ms), r.launcher_version, r.game_build || '–',
+      return [bugTicketCell(r), BUG_STATUSES[r.status][0], bugFeedbackCell(r), stampLabel.format(r.ms), r.launcher_version, r.game_build || '–',
         r.operating_system, el('td', 'bug-summary', r.preview)];
     }), function (i) { return shown[i].ticket === bugTicket ? 'selected' : ''; }, BUG_COLUMN_CLASSES);
     $('bug-count').textContent = !bugReports.length ? 'No reports yet.'
@@ -1384,8 +1448,8 @@ export const ADMIN_JS = String.raw`(function () {
     showSessionState();
     if (timer) clearInterval(timer);
     timer = setInterval(function () { if (!document.hidden && view === 'dashboard') load(); }, 60000);
-    if (view === 'bugs') loadBugReports();
-    else load();
+    loadBugReports();
+    if (view !== 'bugs') load();
   }
 
   function signOut(message) {
@@ -1395,6 +1459,8 @@ export const ADMIN_JS = String.raw`(function () {
     if (timer) clearInterval(timer);
     timer = null;
     bugReports = [];
+    $('bug-new-count').textContent = '–';
+    $('bug-new-count').className = 'tab-count';
     deleting = false;
     deleteTicket = '';
     $('delete-backdrop').hidden = true;
@@ -1429,7 +1495,7 @@ export const ADMIN_JS = String.raw`(function () {
   $('bug-status-save').addEventListener('click', saveBugStatus);
   $('refresh').addEventListener('click', load);
   $('range').addEventListener('change', load);
-  ['bug-version', 'bug-build', 'bug-day', 'bug-status-filter'].forEach(function (id) { $(id).addEventListener('change', renderBugList); });
+  ['bug-version', 'bug-build', 'bug-day', 'bug-status-filter', 'bug-feedback-filter'].forEach(function (id) { $(id).addEventListener('change', renderBugList); });
   $('signout').addEventListener('click', function () { signOut(''); });
   $('menu-button').addEventListener('click', function () {
     setMenu(!menuOpen);

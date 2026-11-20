@@ -9,6 +9,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "loading_view.h"
 #include "localization/ui_text.h"
 #include "net/online_version.h"
 #include "online_settings.h"
@@ -144,12 +145,17 @@ bool DrawLogFacts(trg::Ui& ui, const GameLog& log) {
 IncidentPage::IncidentPage(Places places) : places_(std::move(places)), my_reports_(places_.user_dir / kReportHistoryFile) {}
 
 void IncidentPage::Draw(trg::Ui& ui, const ReportFacts& facts) {
-    if (!logs_found_) FindLogs();
     CollectDelivery();
-    if (ImGui::GetFrameCount() != std::exchange(last_drawn_frame_, ImGui::GetFrameCount()) + 1) {
+    if (activation_.Entered(ImGui::GetFrameCount())) {
         net::OnlineConfig config = OnlineConfigOf(ui.settings());
         net::apply_environment(config);
-        my_reports_.RefreshIfStale(config);
+        my_reports_.Refresh(config);
+    }
+    CollectLogScan();
+    if (Loading()) {
+        StartLogScan();
+        DrawLoadingView(ui, "Loading Bug Report...");
+        return;
     }
     const bool sending = delivery_ != nullptr;
     if (CheckDraft(description_, !logs_.empty()) != problem_) problem_ = DraftProblem::kNone;
@@ -163,6 +169,7 @@ void IncidentPage::Draw(trg::Ui& ui, const ReportFacts& facts) {
             my_reports_.ShowUpdate();
         }
     }
+    form_top_ = ImGui::GetCursorPosY();
     ui.Heading("1. Report the problem");
     DrawDescription(ui, sending);
     ui.Heading("2. Choose one game log");
@@ -172,8 +179,26 @@ void IncidentPage::Draw(trg::Ui& ui, const ReportFacts& facts) {
     ui.Heading("4. Send");
     DrawSend(ui, facts, sending);
     ui.EndRows();
-    my_reports_.Draw(ui);
+    my_reports_.Draw(ui, facts);
     ui.EndRows();
+    if (my_reports_.TakeNewReportRequest()) ImGui::SetScrollY(form_top_);
+}
+
+void IncidentPage::StartLogScan() {
+    if (scan_) return;
+    scan_ = std::make_shared<LogScan>();
+    std::thread([scan = scan_, folder = places_.logs_dir, running_log = places_.running_log] {
+        scan->logs = FindGameLogs(folder, running_log);
+        scan->done = true;
+    }).detach();
+}
+
+void IncidentPage::CollectLogScan() {
+    if (!scan_ || !scan_->done) return;
+    logs_ = std::move(scan_->logs);
+    scan_.reset();
+    logs_found_ = true;
+    selected_ = DefaultGameLog(logs_);
 }
 
 void IncidentPage::FindLogs() {

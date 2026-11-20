@@ -742,10 +742,15 @@ scrollbar, and has four steps:
 5. **My reports** lists the reports this PC sent, newest first, from `user/bug_reports.json` (`launcher/report_history.cpp`, saved
    through a new file moved into place; a damaged file is set aside as `.damaged`). Each row shows the report ID, a preview, the
    status (with the fixed version on a Fixed report) and the date. **View details** expands that report in place, as one framed
-   item that holds its summary, the developer's message when there is one, its facts (status, fixed version), **What was sent**,
+   item that holds its summary, the developer's message when there is one, the player-test question while the report is Awaiting
+   player test (see Player test feedback in docs/ONLINE.md), its facts (status, fixed version), **What was sent**,
    which reads the stored report back, and **Remove from this PC**, which deletes only the local entry. Only one report is open at a
-   time, and **Hide details** closes it. **Refresh** sits at the top right of the section.
-   The statuses are checked at startup, when the page opens and on **Refresh**, off the UI thread and silently when offline. A
+   time, and **Close details** closes it. **Refresh** sits at the top right of the section.
+   The statuses are checked at startup, every time the page is entered and on **Refresh**, off the UI thread and silently when
+   offline; a check already running is not repeated, and the saved reports stay on screen meanwhile. The first time the page
+   opens it shows **Loading Bug Report...** (the Character Editor's centered text and spinner, shared in `loading_view.h`) while
+   the game logs are listed in the background. The Editor and Trophies pages show the same view, **Loading Editor...** and
+   **Loading Trophies...**, on their first open, when they read saves and the trophy pack. A
    change marks the report **Updated** and puts a dot on the sidebar entry, until that report is opened. Opening the page
    does not clear anything: each report clears when it is opened. If the list cannot be saved the report still counts as sent:
    the Report ID shows normally with a short note.

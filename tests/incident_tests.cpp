@@ -15,6 +15,7 @@
 #include "incident_report.h"
 #include "localization/ui_text.h"
 #include "log_scrubber.h"
+#include "page_activation.h"
 #include "net/lobby_link.h"
 #include "report_history.h"
 
@@ -611,7 +612,7 @@ TrackedReport Tracked(const std::string& ticket, int64_t submitted_at) {
 
 ReportStatus StatusOf(const std::string& ticket, const std::string& status, int64_t updated_at, const std::string& version = {},
                       const std::string& message = {}) {
-    return {ticket, status, updated_at, version, message};
+    return {ticket, status, updated_at, version, message, {}};
 }
 
 void TestSentReportIsRemembered() {
@@ -931,7 +932,7 @@ void TestStartupCheckNoticesAndShowWork() {
     CHECK(Has(draw, "reply ? \"A report has a new reply\" : \"A report has an update\""));
     CHECK(Has(draw, "reply ? \"The developer replied to one of your reports.\" : \"Its status changed since you last looked.\""));
     CHECK(Has(draw, "my_reports_.ShowUpdate();") && !Has(draw, "BringIntoView"));
-    CHECK(draw.find("my_reports_.RefreshIfStale(config);") < draw.find("my_reports_.HasUpdates()"));
+    CHECK(draw.find("my_reports_.Refresh(config);") < draw.find("my_reports_.HasUpdates()"));
     const std::string launcher = ReadAll(kSource / "launcher" / "launcher.cpp");
     CHECK(Has(launcher, "incident_page_->CheckReports(online);") && CountOf(launcher, "CheckReports(") == 1);
     CHECK(Has(ReadAll(kSource / "launcher" / "incident_page.h"), "bool HasReportUpdates() { return my_reports_.HasUpdates(); }"));
@@ -984,16 +985,21 @@ void TestStatusProtocol() {
 
     const std::string desk = ReadAll(kSource / "server" / "lobby" / "src" / "lobby.js");
     CHECK(Has(desk, std::string("'") + kIncidentStatusOperation + "'(att, msg)") && Has(desk, std::string("'") + kIncidentReadOperation + "'(att, msg)"));
+    CHECK(Has(desk, std::string("'") + kIncidentFeedbackOperation + "'(att, msg)"));
+    CHECK(Has(desk, std::string("'") + kIncidentReadOperation + "', '" + kIncidentFeedbackOperation + "'"));
 }
 
 void TestStatusTexts() {
-    for (const char* status : {"new", "investigating", "fixed", "cannot_reproduce", "duplicate", "not_a_bug", "closed"}) {
+    for (const char* status : {"new", "investigating", "awaiting_player_test", "fixed", "cannot_reproduce", "duplicate", "not_a_bug", "closed"}) {
         CHECK(ReportStatusText(status) != nullptr);
         CHECK(Has(ReadAll(kSource / "server" / "lobby" / "src" / "incidents.js"), std::string("'") + status + "'"));
     }
     CHECK(ReportStatusText("something_new") == nullptr);
     CHECK(std::string(ReportStatusText("cannot_reproduce")) == "Cannot reproduce");
+    CHECK(std::string(ReportStatusText(kAwaitingPlayerTest)) == "Awaiting player test");
     TrackedReport report = Tracked("DCP-AAAAAA", 1000);
+    report.status = kAwaitingPlayerTest;
+    CHECK(ReportStatusLine(report) == "Awaiting player test");
     report.status = "closed";
     report.fixed_version = "0.9.3";
     CHECK(ReportStatusLine(report) == "Closed");
@@ -1027,13 +1033,13 @@ void TestLookupsTakeNoAccountAndNeverBlock() {
     const size_t fetch = report.find("FetchReportStatuses(const");
     CHECK(fetch != std::string::npos);
     const std::string lookups = report.substr(fetch);
-    CHECK(CountOf(lookups, "session.connect(config.lobby, &error)") == 2);
+    CHECK(CountOf(lookups, "session.connect(config.lobby, &error)") == 3);
     CHECK(!Has(lookups, "load_identity") && !Has(lookups, "hello_body") && !Has(lookups, "session.open"));
     CHECK(!Has(lookups, "printf"));
 
     const std::string page = ReadAll(kSource / "launcher" / "my_reports.cpp");
-    CHECK(CountOf(page, "std::thread(") == 2 && CountOf(page, ".detach();") == 2);
-    CHECK(CountOf(page, "FetchReportStatuses(") == 1 && CountOf(page, "FetchSentReport(") == 1);
+    CHECK(CountOf(page, "std::thread(") == 3 && CountOf(page, ".detach();") == 3);
+    CHECK(CountOf(page, "FetchReportStatuses(") == 1 && CountOf(page, "FetchSentReport(") == 1 && CountOf(page, "SendTestFeedback(") == 1);
     const std::string launcher = ReadAll(kSource / "launcher" / "launcher.cpp");
     CHECK(Has(launcher, "incident_page_->CheckReports(online);"));
     CHECK(Has(launcher, "[this] { return incident_page_->HasReportUpdates(); }, nullptr};"));
@@ -1107,7 +1113,7 @@ void TestRefreshLivesInTheHeader() {
     CHECK(CountOf(page, "Refresh(LobbyConfig(ui), true)") == 1 && CountOf(page, "void MyReports::Refresh(") == 1);
     CHECK(CountOf(page, "std::make_shared<StatusCheck>()") == 1 && CountOf(page, "FetchReportStatuses(") == 1);
     CHECK(Has(ReadAll(kSource / "launcher" / "incident_page.h"), "my_reports_.Refresh(config);"));
-    CHECK(Has(ReadAll(kSource / "launcher" / "incident_page.cpp"), "my_reports_.RefreshIfStale(config);"));
+    CHECK(Has(ReadAll(kSource / "launcher" / "incident_page.cpp"), "my_reports_.Refresh(config);"));
     CHECK(Has(ReadAll(kSource / "launcher" / "launcher.cpp"), "incident_page_->CheckReports(online);"));
 }
 
@@ -1132,7 +1138,7 @@ void TestDetailsExpandInPlace() {
     const std::string collapse = Body(page, "void MyReports::Collapse(");
     CHECK(Has(collapse, "open_ticket_.clear();") && Has(collapse, "ForgetSentReport();"));
     const std::string summary = Body(page, "void DrawSummary(");
-    CHECK(Has(summary, "ImGui::Button(Tr(\"Hide details\")") && Has(summary, "toggled = report.ticket;"));
+    CHECK(Has(summary, "ImGui::Button(Tr(\"Close details\")") && Has(summary, "toggled = report.ticket;"));
     const std::string row = Body(page, "void MyReports::DrawRow(");
     CHECK(Has(row, "ImGui::Button(Tr(\"View details\")") && Has(row, "toggled = report.ticket;"));
     CHECK(Has(row, "ReportPreview(report.description)") && Has(row, "StatusText(report)") && Has(row, "DateText(report.submitted_at)"));
@@ -1259,6 +1265,432 @@ void TestProductionLobbyOnly() {
     CHECK(Has(settings, "std::string lobby = kDefaultLobbyUrl;"));
 }
 
+ReportStatus TestRequestOf(const std::string& ticket, int64_t updated_at, const std::string& feedback = {}) {
+    return {ticket, kAwaitingPlayerTest, updated_at, {}, "Please test the latest build.", feedback};
+}
+
+const TrackedReport& OnlyReport(const ReportHistory& history) { return history.reports().front(); }
+
+void TestPlayerTestIsOpenUntilAnswered() {
+    TempFolder temp;
+    ReportHistory history(temp.path / kReportHistoryFile);
+    history.Add(Tracked("DCP-AAAAAA", 1000));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kNone);
+    CHECK(history.Apply({StatusOf("DCP-AAAAAA", "investigating", 1500)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kNone);
+
+    CHECK(history.Apply({TestRequestOf("DCP-AAAAAA", 2000)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kAwaitingAnswer);
+    CHECK(OnlyReport(history).unseen && OnlyReport(history).message_unseen);
+    CHECK(OnlyReport(history).status == kAwaitingPlayerTest && OnlyReport(history).test_feedback.empty());
+
+    CHECK(!history.RecordTestFeedback("DCP-AAAAAA", 1999, kTestFixed));
+    CHECK(!history.RecordTestFeedback("DCP-AAAAAA", 2001, kTestFixed));
+    CHECK(!history.RecordTestFeedback("DCP-ZZZZZZ", 2000, kTestFixed));
+    CHECK(!history.RecordTestFeedback("DCP-AAAAAA", 2000, "pending"));
+    CHECK(!history.RecordTestFeedback("DCP-AAAAAA", 2000, ""));
+    CHECK(!history.RecordTestFeedback("DCP-AAAAAA", 2000, "Fixed"));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kAwaitingAnswer);
+
+    CHECK(history.RecordTestFeedback("DCP-AAAAAA", 2000, kTestFixed));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kConfirmedFixed);
+    CHECK(OnlyReport(history).test_feedback_revision == 2000);
+
+    CHECK(!history.Apply({TestRequestOf("DCP-AAAAAA", 2000)}));
+    CHECK(!history.Apply({TestRequestOf("DCP-AAAAAA", 2000, kTestFixed)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kConfirmedFixed);
+}
+
+void TestANewRequestCanBeAnsweredAgain() {
+    TempFolder temp;
+    ReportHistory history(temp.path / kReportHistoryFile);
+    history.Add(Tracked("DCP-AAAAAA", 1000));
+    history.Apply({TestRequestOf("DCP-AAAAAA", 2000)});
+    CHECK(history.RecordTestFeedback("DCP-AAAAAA", 2000, kTestNotFixed));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kStillHappening);
+
+    CHECK(history.Apply({TestRequestOf("DCP-AAAAAA", 3000)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kAwaitingAnswer);
+    CHECK(OnlyReport(history).test_feedback_revision == 2000);
+    CHECK(!history.RecordTestFeedback("DCP-AAAAAA", 2000, kTestFixed));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kAwaitingAnswer);
+    CHECK(history.RecordTestFeedback("DCP-AAAAAA", 3000, kTestFixed));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kConfirmedFixed);
+
+    CHECK(history.Apply({StatusOf("DCP-AAAAAA", "fixed", 4000, "1.4.1")}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kNone);
+    CHECK(!history.RecordTestFeedback("DCP-AAAAAA", 3000, kTestFixed));
+    CHECK(history.Apply({TestRequestOf("DCP-AAAAAA", 5000)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kAwaitingAnswer);
+}
+
+void TestTheServiceAnswerIsKept() {
+    TempFolder temp;
+    ReportHistory history(temp.path / kReportHistoryFile);
+    history.Add(Tracked("DCP-AAAAAA", 1000));
+    CHECK(history.Apply({TestRequestOf("DCP-AAAAAA", 2000, kTestNotFixed)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kStillHappening);
+    CHECK(!history.Apply({TestRequestOf("DCP-AAAAAA", 2000, kTestNotFixed)}));
+
+    CHECK(history.Apply({TestRequestOf("DCP-AAAAAA", 3000)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kAwaitingAnswer);
+    CHECK(history.Apply({TestRequestOf("DCP-AAAAAA", 3000, kTestFixed)}));
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kConfirmedFixed);
+    CHECK(history.Apply({TestRequestOf("DCP-AAAAAA", 3000, "something_else")}) == false);
+    CHECK(PlayerTestOf(OnlyReport(history)) == PlayerTest::kConfirmedFixed);
+}
+
+void TestThePlayerAnswerSurvivesARestart() {
+    TempFolder temp;
+    const fs::path file = temp.path / kReportHistoryFile;
+    ReportHistory history(file);
+    history.Add(Tracked("DCP-AAAAAA", 1000));
+    history.Apply({TestRequestOf("DCP-AAAAAA", 2000)});
+    history.RecordTestFeedback("DCP-AAAAAA", 2000, kTestNotFixed);
+    CHECK(history.Save());
+    CHECK(Has(ReadAll(file), "\"test_feedback\":\"not_fixed\"") && Has(ReadAll(file), "\"test_feedback_revision\":2000"));
+
+    ReportHistory restarted(file);
+    restarted.Load();
+    CHECK(restarted.reports().size() == 1 && PlayerTestOf(OnlyReport(restarted)) == PlayerTest::kStillHappening);
+    CHECK(restarted.Apply({TestRequestOf("DCP-AAAAAA", 3000)}));
+    CHECK(PlayerTestOf(OnlyReport(restarted)) == PlayerTest::kAwaitingAnswer);
+    CHECK(restarted.Save());
+    ReportHistory again(file);
+    again.Load();
+    CHECK(PlayerTestOf(OnlyReport(again)) == PlayerTest::kAwaitingAnswer && OnlyReport(again).test_feedback_revision == 2000);
+}
+
+void TestHistoryFilesWithoutAnswersStillLoad() {
+    TempFolder temp;
+    const fs::path file = temp.path / kReportHistoryFile;
+    const auto entry = [](const std::string& ticket, const std::string& status, int64_t updated, const std::string& extra) {
+        return "{\"ticket\":\"" + ticket + "\",\"receipt\":\"" + kReceipt + "\",\"submitted_at\":1000,\"description\":\"It froze\"," +
+               "\"log_file\":\"dragons_crown_pro_186.log\",\"launcher_version\":\"0.9.3\",\"game_build\":\"CUSA10454 1.03 USA\"," +
+               "\"cusa\":\"CUSA10454\",\"operating_system\":\"Windows 11\",\"status\":\"" + status + "\",\"status_updated_at\":" +
+               std::to_string(updated) + ",\"fixed_version\":\"\",\"player_message\":\"Please test\",\"unseen\":false" + extra + "}";
+    };
+    std::ofstream(file, std::ios::binary) << "{\"version\":1,\"reports\":[" +
+        entry("DCP-AAAAAA", "awaiting_player_test", 2000, "") + "," +
+        entry("DCP-BBBBBB", "awaiting_player_test", 2000, ",\"test_feedback\":\"maybe\",\"test_feedback_revision\":2000") + "," +
+        entry("DCP-CCCCCC", "awaiting_player_test", 2000, ",\"test_feedback\":\"fixed\",\"test_feedback_revision\":1500") + "," +
+        entry("DCP-DDDDDD", "awaiting_player_test", 2000, ",\"test_feedback\":\"not_fixed\",\"test_feedback_revision\":2000") + "," +
+        entry("DCP-EEEEEE", "fixed", 2000, "") + "]}";
+    ReportHistory history(file);
+    history.Load();
+    CHECK(history.reports().size() == 5);
+    if (history.reports().size() != 5) return;
+    const auto state = [&](const char* ticket) {
+        for (const TrackedReport& report : history.reports()) {
+            if (report.ticket == ticket) return PlayerTestOf(report);
+        }
+        return PlayerTest::kNone;
+    };
+    CHECK(state("DCP-AAAAAA") == PlayerTest::kAwaitingAnswer);
+    CHECK(state("DCP-BBBBBB") == PlayerTest::kAwaitingAnswer);
+    CHECK(state("DCP-CCCCCC") == PlayerTest::kAwaitingAnswer);
+    CHECK(state("DCP-DDDDDD") == PlayerTest::kStillHappening);
+    CHECK(state("DCP-EEEEEE") == PlayerTest::kNone);
+    CHECK(history.Save());
+    ReportHistory again(file);
+    again.Load();
+    CHECK(again.reports().size() == 5);
+}
+
+void TestFeedbackProtocol() {
+    TrackedReport report = Tracked("DCP-AAAAAA", 1000);
+    report.status = kAwaitingPlayerTest;
+    report.status_updated_at = 2000;
+    const net::Json body = IncidentFeedbackRequest(report, kTestNotFixed, SampleFacts());
+    CHECK(body.size() == 6);
+    CHECK(body["ticket"].as_string() == "DCP-AAAAAA" && body["receipt"].as_string() == kReceipt);
+    CHECK(body["revision"].as_int() == 2000 && body["result"].as_string() == "not_fixed");
+    CHECK(body["launcher_version"].as_string() == "0.9.3" && body["game_build"].as_string() == "CUSA10454 1.03 USA");
+    CHECK(std::string(kIncidentFeedbackOperation) == "incident.feedback");
+
+    const auto answer = net::Json::parse(R"({"reports":[
+        {"ticket":"DCP-AAAAAA","status":"awaiting_player_test","status_updated_at":2000,"test_feedback":"not_fixed","test_feedback_at":5},
+        {"ticket":"DCP-BBBBBB","status":"awaiting_player_test","status_updated_at":2000,"test_feedback":"pending"},
+        {"ticket":"DCP-CCCCCC","status":"awaiting_player_test","status_updated_at":2000,"test_feedback":"bogus"},
+        {"ticket":"DCP-DDDDDD","status":"awaiting_player_test","status_updated_at":2000},
+        {"ticket":"DCP-EEEEEE","status":"fixed","status_updated_at":2000,"fixed_version":"1.4.1"}]})");
+    CHECK(answer.has_value());
+    if (!answer) return;
+    const std::vector<ReportStatus> statuses = ReadReportStatuses(*answer);
+    CHECK(statuses.size() == 5);
+    if (statuses.size() != 5) return;
+    CHECK(statuses[0].test_feedback == kTestNotFixed);
+    for (size_t i = 1; i < statuses.size(); ++i) CHECK(statuses[i].test_feedback.empty());
+    CHECK(statuses[3].status == kAwaitingPlayerTest && statuses[3].player_message.empty());
+
+    CHECK(FeedbackOutcomeOf("ok") == FeedbackOutcome::kSaved);
+    for (const char* code : {"stale_request", "already_answered", "not_found"}) CHECK(FeedbackOutcomeOf(code) == FeedbackOutcome::kStale);
+    for (const std::string& code : {std::string(net::kLinkLost), std::string(net::kUnreachable), std::string("timeout")}) {
+        CHECK(FeedbackOutcomeOf(code) == FeedbackOutcome::kUnreachable);
+    }
+    for (const char* code : {"bad_request", "limit", "internal", "too_large", ""}) CHECK(FeedbackOutcomeOf(code) == FeedbackOutcome::kFailed);
+
+    const std::string incidents = ReadAll(kSource / "server" / "lobby" / "src" / "incidents.js");
+    for (const char* code : {"stale_request", "already_answered", "'not_found'"}) CHECK(Has(incidents, code));
+    CHECK(Has(incidents, "const TEST_RESULTS") || Has(incidents, "TEST_RESULTS = ['fixed', 'not_fixed']"));
+    CHECK(std::string(kTestFixed) == "fixed" && std::string(kTestNotFixed) == "not_fixed");
+}
+
+void TestAPageIsEnteredOnceNotOnEveryFrame() {
+    PageActivation page;
+    int entries = 0;
+    for (int frame = 40; frame < 160; ++frame) entries += page.Entered(frame);
+    CHECK(entries == 1);
+
+    CHECK(!page.Entered(160));
+    CHECK(page.Entered(300));
+    for (int frame = 301; frame < 400; ++frame) CHECK(!page.Entered(frame));
+    CHECK(page.Entered(500) && page.Entered(502) && !page.Entered(503));
+
+    PageActivation fresh;
+    CHECK(fresh.Entered(0) && !fresh.Entered(1));
+}
+
+void TestBugReportRefreshesOnStartupAndOnEveryEntry() {
+    const std::string incident = ReadAll(kSource / "launcher" / "incident_page.cpp");
+    const std::string draw = Body(incident, "void IncidentPage::Draw(");
+    const size_t entered = draw.find("if (activation_.Entered(ImGui::GetFrameCount())) {");
+    const size_t refresh = draw.find("my_reports_.Refresh(config);");
+    const size_t loading = draw.find("if (Loading()) {");
+    CHECK(entered != std::string::npos && entered < refresh && refresh < loading);
+    CHECK(CountOf(incident, "my_reports_.Refresh(") == 1 && CountOf(incident, "activation_.Entered(") == 1);
+    CHECK(!Has(incident, "RefreshIfStale") && !Has(ReadAll(kSource / "launcher" / "my_reports.cpp"), "RefreshIfStale"));
+    CHECK(!Has(ReadAll(kSource / "launcher" / "my_reports.h"), "RefreshIfStale"));
+
+    const std::string reports = ReadAll(kSource / "launcher" / "my_reports.cpp");
+    const std::string refresh_body = Body(reports, "void MyReports::Refresh(");
+    CHECK(refresh_body.find("Collect();") < refresh_body.find("if (check_) return;") &&
+          refresh_body.find("if (check_) return;") < refresh_body.find("std::make_shared<StatusCheck>()"));
+    CHECK(CountOf(reports, "std::make_shared<StatusCheck>()") == 1 && Has(refresh_body, ".detach();") && !Has(reports, ".join()"));
+    CHECK(Has(Body(reports, "void MyReports::DrawHeader("), "Refresh(LobbyConfig(ui), true)"));
+
+    const std::string launcher = ReadAll(kSource / "launcher" / "launcher.cpp");
+    const size_t made = launcher.find("incident_page_ = std::make_unique<IncidentPage>(IncidentPlaces());");
+    const size_t startup = launcher.find("incident_page_->CheckReports(online);");
+    const size_t first_frame = launcher.find("outcome = Frame();");
+    CHECK(made != std::string::npos && made < startup && startup < first_frame);
+    CHECK(CountOf(launcher, "CheckReports(") == 1);
+    CHECK(Has(ReadAll(kSource / "launcher" / "incident_page.h"),
+              "void CheckReports(const net::OnlineConfig& config) { my_reports_.Refresh(config); }"));
+}
+
+void TestBugReportShowsLoadingWhileItsLogsAreListed() {
+    const std::string incident = ReadAll(kSource / "launcher" / "incident_page.cpp");
+    const std::string draw = Body(incident, "void IncidentPage::Draw(");
+    const size_t collect = draw.find("CollectLogScan();"), loading = draw.find("if (Loading()) {");
+    const size_t start = draw.find("StartLogScan();"), view = draw.find("DrawLoadingView(ui, \"Loading Bug Report...\");");
+    const size_t leave = draw.find("return;", view), content = draw.find("my_reports_.Draw(ui, facts);");
+    CHECK(collect < loading && loading < start && start < view && view < leave && leave < content);
+    CHECK(Has(ReadAll(kSource / "launcher" / "incident_page.h"), "bool Loading() const { return !logs_found_; }"));
+
+    const std::string scan = Body(incident, "void IncidentPage::StartLogScan(");
+    CHECK(Has(scan, "if (scan_) return;") && Has(scan, "std::thread(") && Has(scan, "FindGameLogs(") && Has(scan, ".detach();"));
+    CHECK(CountOf(incident, "FindGameLogs(") == 2 && !Has(scan, "logs_ = "));
+    const std::string collect_body = Body(incident, "void IncidentPage::CollectLogScan(");
+    CHECK(Has(collect_body, "if (!scan_ || !scan_->done) return;") && Has(collect_body, "logs_found_ = true;"));
+    CHECK(collect_body.find("scan_.reset();") < collect_body.find("logs_found_ = true;"));
+    CHECK(!Has(draw, "FindLogs();"));
+}
+
+void TestLocalReportsStayVisibleWhileTheyAreChecked() {
+    const std::string reports = ReadAll(kSource / "launcher" / "my_reports.cpp");
+    const std::string draw = Body(reports, "void MyReports::Draw(");
+    const size_t header = draw.find("DrawHeader(ui);"), list = draw.find("DrawReports(ui);");
+    CHECK(header != std::string::npos && header < list);
+    const std::string between = draw.substr(header, list - header);
+    CHECK(!Has(between, "check_") && !Has(draw, "DrawLoadingView") && !Has(draw, "Loading"));
+    CHECK(Has(reports, "ImGui::BeginDisabled(check_ != nullptr);") && Has(reports, "\"Checking...\""));
+    const std::string collect = Body(reports, "void MyReports::Collect(");
+    CHECK(Has(collect, "history_.Apply(*check_->statuses, check_->asked)") && Has(collect, "check_.reset();"));
+    CHECK(!Has(collect, "reports_.clear") && !Has(Body(reports, "void MyReports::Refresh("), "history_.Load"));
+}
+
+void TestSlowPagesShowLoadingFirstAndReuseTheEditorView() {
+    const std::string view = ReadAll(kSource / "launcher" / "loading_view.h");
+    CHECK(Has(view, "inline void DrawLoadingView(trg::Ui& ui, const char* english_text)") && CountOf(view, "PathArcTo(") == 1);
+    CHECK(Has(view, "Tr(english_text)") && Has(view, "GetTime()") && !Has(view, "OpenPopup"));
+
+    size_t spinners = 0;
+    for (const auto& entry : fs::directory_iterator(kSource / "launcher")) {
+        if (entry.path().extension() == ".cpp") spinners += CountOf(ReadAll(entry.path()), "PathArcTo(");
+    }
+    CHECK(spinners == 0);
+
+    const std::string editor = ReadAll(kSource / "launcher" / "editor_page.cpp");
+    CHECK(Has(Body(editor, "void EditorPage::DrawAppearanceLoading("), "DrawLoadingView(ui, \"Loading appearance...\");"));
+    const std::string editor_draw = Body(editor, "void EditorPage::Draw(");
+    const size_t editor_view = editor_draw.find("DrawLoadingView(ui, \"Loading Editor...\");");
+    CHECK(editor_draw.find("if (!loaded_ && !std::exchange(loading_shown_, true)) {") < editor_view &&
+          editor_view < editor_draw.find("return;") && editor_draw.find("return;") < editor_draw.find("Refresh();"));
+
+    const std::string trophies = ReadAll(kSource / "launcher" / "trophy_page.cpp");
+    const std::string trophy_draw = Body(trophies, "void TrophyPage::Draw(");
+    const size_t trophy_view = trophy_draw.find("DrawLoadingView(ui, \"Loading Trophies...\");");
+    CHECK(trophy_view != std::string::npos && trophy_view < trophy_draw.find("LoadTrophyPage(") &&
+          Has(trophy_draw, "!loaded_once_ && !app0_.empty() && !std::exchange(loading_shown_, true)"));
+
+    CHECK(!Has(ReadAll(kSource / "launcher" / "launcher.cpp"), "DrawLoadingView"));
+    CHECK(!Has(ReadAll(kSource / "launcher" / "online_page.cpp"), "DrawLoadingView"));
+}
+
+std::vector<std::string> WorkerFeedbackFields() {
+    const std::string source = ReadAll(kSource / "server" / "lobby" / "src" / "incidents.js");
+    const size_t start = source.find("const FEEDBACK_FIELDS = new Set([");
+    const size_t end = source.find("]);", start);
+    std::vector<std::string> fields;
+    if (start == std::string::npos || end == std::string::npos) return fields;
+    for (size_t at = source.find('\'', start); at != std::string::npos && at < end; at = source.find('\'', at + 1)) {
+        const size_t close = source.find('\'', at + 1);
+        fields.push_back(source.substr(at + 1, close - at - 1));
+        at = close;
+    }
+    return fields;
+}
+
+TrackedReport AwaitingReport(int64_t revision) {
+    TrackedReport report = Tracked("DCP-AAAAAA", 1000);
+    report.status = kAwaitingPlayerTest;
+    report.status_updated_at = revision;
+    return report;
+}
+
+void TestFeedbackRequestIsExactlyWhatTheWorkerReads() {
+    const int64_t revision = 1795191393443;
+    const net::Json body = IncidentFeedbackRequest(AwaitingReport(revision), kTestFixed, SampleFacts());
+    const std::string expected = std::string("{\"ticket\":\"DCP-AAAAAA\",\"receipt\":\"") + kReceipt +
+                                 "\",\"revision\":1795191393443,\"result\":\"fixed\",\"launcher_version\":\"0.9.3\"," +
+                                 "\"game_build\":\"CUSA10454 1.03 USA\"}";
+    CHECK(body.dump() == expected);
+
+    const std::vector<std::string> allowed = WorkerFeedbackFields();
+    CHECK(allowed.size() == 6);
+    for (const auto& [key, value] : body.members()) {
+        CHECK(std::find(allowed.begin(), allowed.end(), key) != allowed.end());
+        (void)value;
+    }
+    for (const std::string& key : allowed) CHECK(body.has(key));
+    CHECK(body["revision"].as_int() == revision && body.dump().find("e+") == std::string::npos);
+    CHECK(body["result"].as_string() == "fixed" && IncidentFeedbackRequest(AwaitingReport(revision), kTestNotFixed, SampleFacts())["result"].as_string() == "not_fixed");
+
+    const std::string desk = ReadAll(kSource / "server" / "lobby" / "src" / "lobby.js");
+    CHECK(Has(desk, "const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read', 'incident.feedback']);"));
+    CHECK(Has(desk, "'incident.feedback'(att, msg) {") && Has(desk, "readFeedback(msg)"));
+    CHECK(Has(desk, "this.limitIncidentLookup(att, 'incidentFeedbackAddress');"));
+}
+
+void TestFeedbackAnswers() {
+    const auto reply = [](const std::string& json) { return *net::Json::parse(json); };
+    const net::Json accepted = reply(R"({"re":1,"code":"ok","ticket":"DCP-AAAAAA","revision":5,"test_feedback":"fixed","test_feedback_at":9})");
+    FeedbackAnswer answer = FeedbackAnswerOf("ok", accepted, kTestFixed);
+    CHECK(answer.outcome == FeedbackOutcome::kSaved && answer.stage == "call" && answer.code == "ok" && answer.detail.empty());
+
+    answer = FeedbackAnswerOf("stale_request", reply(R"({"re":1,"code":"stale_request"})"), kTestFixed);
+    CHECK(answer.outcome == FeedbackOutcome::kStale && answer.code == "stale_request");
+    answer = FeedbackAnswerOf("already_answered", reply(R"({"re":1,"code":"already_answered"})"), kTestFixed);
+    CHECK(answer.outcome == FeedbackOutcome::kStale && answer.code == "already_answered");
+
+    answer = FeedbackAnswerOf("bad_request", reply(R"({"re":1,"code":"bad_request","detail":"revision"})"), kTestFixed);
+    CHECK(answer.outcome == FeedbackOutcome::kFailed && answer.code == "bad_request" && answer.detail == "revision");
+    answer = FeedbackAnswerOf("bad_request", reply(R"({"re":1,"code":"bad_request"})"), kTestFixed);
+    CHECK(answer.outcome == FeedbackOutcome::kFailed && answer.detail.empty());
+    answer = FeedbackAnswerOf("bad_request", reply("{\"detail\":\"" + std::string(500, 'x') + "\"}"), kTestFixed);
+    CHECK(answer.detail.size() == 80);
+
+    for (const char* malformed : {R"({"re":1,"code":"ok"})", R"({"re":1,"code":"ok","test_feedback":"pending"})",
+                                  R"({"re":1,"code":"ok","test_feedback":"not_fixed"})", R"({"re":1,"code":"ok","test_feedback":7})"}) {
+        answer = FeedbackAnswerOf("ok", reply(malformed), kTestFixed);
+        CHECK(answer.outcome == FeedbackOutcome::kFailed && answer.code == "malformed_reply");
+    }
+    CHECK(FeedbackAnswerOf("ok", net::Json(), kTestFixed).outcome == FeedbackOutcome::kFailed);
+
+    for (const std::string& code : {std::string(net::kLinkLost), std::string(net::kUnreachable), std::string("timeout")}) {
+        answer = FeedbackAnswerOf(code, net::Json(), kTestFixed);
+        CHECK(answer.outcome == FeedbackOutcome::kUnreachable && answer.code == code && answer.detail.empty());
+    }
+    CHECK(FeedbackAnswerOf("", net::Json(), kTestFixed).outcome == FeedbackOutcome::kFailed);
+    CHECK(FeedbackAnswerOf("internal", reply(R"({"code":"internal"})"), kTestFixed).outcome == FeedbackOutcome::kFailed);
+}
+
+void TestFeedbackDiagnosticsNameTheStepAndNeverTheReceipt() {
+    const std::string page = ReadAll(kSource / "launcher" / "my_reports.cpp");
+    const std::string send = Body(page, "void MyReports::SendFeedback(");
+    const std::string collect = Body(page, "void MyReports::CollectFeedback(");
+    CHECK(Has(send, "\"Bug report feedback: ticket=%s result=%s revision=%lld\\n\""));
+    CHECK(Has(collect, "\"Bug report feedback: accepted ticket=%s result=%s\\n\""));
+    CHECK(Has(collect, "\"Bug report feedback: failed ticket=%s result=%s stage=%s code=%s detail=%s\\n\""));
+    CHECK(send.find("std::printf(") < send.find("std::thread("));
+    for (const std::string* text : {&send, &collect}) {
+        for (size_t at = text->find("printf("); at != std::string::npos; at = text->find("printf(", at + 1)) {
+            const size_t end = text->find(");", at);
+            const std::string statement = text->substr(at, end - at);
+            CHECK(!Has(statement, "receipt") && !Has(statement, "credential") && !Has(statement, "dump()"));
+        }
+    }
+    const std::string report = ReadAll(kSource / "launcher" / "incident_report.cpp");
+    const std::string sending = report.substr(report.find("FeedbackAnswer SendTestFeedback("));
+    CHECK(Has(sending, "\"connect\"") && Has(sending, "session.last_reply()") && !Has(sending, "printf"));
+}
+
+void TestPlayerTestPanel() {
+    const std::string page = ReadAll(kSource / "launcher" / "my_reports.cpp");
+    const std::string panel = Body(page, "void MyReports::DrawPlayerTest(");
+    CHECK(!panel.empty());
+    for (const char* text : {"Did this fix the issue?", "Yes, fixed", "No, still happening", "You confirmed that this issue is fixed",
+                             "The issue is still happening", "Please send a new Bug Report so we can receive fresh logs",
+                             "Send a new report"}) {
+        CHECK(Has(panel, std::string("\"") + text + "\""));
+    }
+    const std::string expanded = Body(page, "void MyReports::DrawExpanded(");
+    const size_t message = expanded.find("DrawDeveloperMessage("), test = expanded.find("DrawPlayerTest("), facts = expanded.find("DrawFacts(");
+    CHECK(message != std::string::npos && message < test && test < facts);
+
+    CHECK(Has(panel, "ImGui::BeginDisabled(feedback_ != nullptr);") && Has(panel, "ImGui::EndDisabled();"));
+    CHECK(Has(panel, "SendFeedback(report, kTestFixed,") && Has(panel, "SendFeedback(report, kTestNotFixed,"));
+    CHECK(!Has(panel, "SendTestFeedback(") && !Has(panel, "FileIncident(") && !Has(panel, "BuildIncidentPackage("));
+    CHECK(Has(panel, "new_report_requested_ = true;"));
+
+    const std::string send = Body(page, "void MyReports::SendFeedback(");
+    CHECK(Has(send, "if (feedback_) return;") && Has(send, "std::thread(") && Has(send, "SendTestFeedback(") && Has(send, ".detach();"));
+    CHECK(!Has(send, "history_"));
+
+    const std::string collect = Body(page, "void MyReports::CollectFeedback(");
+    CHECK(CountOf(collect, "history_.RecordTestFeedback(") == 1 && Has(collect, "SaveHistory();"));
+    CHECK(collect.find("FeedbackOutcome::kSaved") < collect.find("history_.RecordTestFeedback("));
+    CHECK(Has(collect, "feedback_error_ticket_ = sent->ticket;") && Has(collect, "refresh_wanted_ = true;"));
+
+    const std::string draw = Body(page, "void MyReports::Draw(");
+    CHECK(Has(draw, "if (refresh_wanted_ && !check_) {") && Has(draw, "Refresh(LobbyConfig(ui));"));
+    const std::string incident_page = ReadAll(kSource / "launcher" / "incident_page.cpp");
+    CHECK(Has(incident_page, "my_reports_.Draw(ui, facts);") && Has(incident_page, "my_reports_.TakeNewReportRequest()"));
+    CHECK(!Has(ReadAll(kSource / "launcher" / "incident_page.cpp"), "kTestFixed"));
+}
+
+std::vector<std::string> QuotedLiterals(const std::string& source) {
+    std::vector<std::string> found;
+    for (size_t i = source.find('"'); i != std::string::npos; i = source.find('"', i + 1)) {
+        const size_t end = source.find('"', i + 1);
+        if (end == std::string::npos) break;
+        found.push_back(source.substr(i + 1, end - i - 1));
+        i = end;
+    }
+    return found;
+}
+
+// What the player-test panel and its messages say, read from the source.
+std::vector<std::string> PlayerTestLiterals() {
+    const std::string page = ReadAll(kSource / "launcher" / "my_reports.cpp");
+    std::vector<std::string> literals;
+    for (const std::string& text : QuotedLiterals(Body(page, "void MyReports::DrawPlayerTest("))) {
+        if (text.find(' ') != std::string::npos) literals.push_back(text);
+    }
+    return literals;
+}
+
 // The page's own text, read from its source: every literal a player can see.
 std::vector<std::string> PageLiterals() {
     const std::string source = ReadAll(kSource / "launcher" / "incident_page.cpp");
@@ -1326,7 +1758,8 @@ void TestPortuguese() {
     CHECK(std::string(Tr(IncidentLimitTitle(IncidentOutcome::kRecentLimit))) == "Muitos relat\xC3\xB3rios foram enviados recentemente");
     CHECK(std::string(Tr(IncidentLimitTitle(IncidentOutcome::kDailyLimit))) == "Limite di\xC3\xA1rio de relat\xC3\xB3rios atingido");
     CHECK(std::string(Tr("Please try again later")) == "Tente novamente mais tarde");
-    const std::pair<const char*, const char*> statuses[] = {{"new", "Novo"}, {"investigating", "Investigando"}, {"fixed", "Corrigido"},
+    const std::pair<const char*, const char*> statuses[] = {{"new", "Novo"}, {"investigating", "Investigando"},
+        {"awaiting_player_test", "Aguardando teste do jogador"}, {"fixed", "Corrigido"},
         {"cannot_reproduce", "Não foi possível reproduzir"}, {"duplicate", "Duplicado"}, {"not_a_bug", "Não é um bug"}, {"closed", "Fechado"}};
     for (const auto& [status, text] : statuses) CHECK(std::string(Tr(ReportStatusText(status))) == text);
     const std::pair<const char*, const char*> reports[] = {{"My reports", "Meus relatórios"}, {"Fixed in version", "Corrigido na versão"},
@@ -1339,6 +1772,20 @@ void TestPortuguese() {
         {"No reports sent from this PC", "Nenhum relatório enviado por este PC"}, {"Remove from this PC", "Remover deste PC"},
         {"Only reports sent from this PC are listed here.", "Somente relatórios enviados por este PC aparecem aqui."}};
     for (const auto& [english, portuguese] : reports) CHECK(std::string(Tr(english)) == portuguese);
+    for (const std::string& english : PlayerTestLiterals()) {
+        if (Tr(english) == english) std::printf("no Portuguese text for: %s\n", english.c_str());
+        CHECK(Tr(english) != english);
+    }
+    const std::pair<const char*, const char*> loading[] = {
+        {"Close details", "Fechar detalhes"}, {"Loading Bug Report...", "Carregando Relat\xC3\xB3rio de bug..."},
+        {"Loading Editor...", "Carregando Editor..."}, {"Loading Trophies...", "Carregando Trof\xC3\xA9us..."},
+        {"Loading appearance...", "Carregando apar\xC3\xAAncia..."}};
+    for (const auto& [english, portuguese] : loading) CHECK(std::string(Tr(english)) == portuguese);
+    CHECK(std::string(Tr("Did this fix the issue?")) == "Isso resolveu o problema?");
+    CHECK(std::string(Tr("Yes, fixed")) == "Sim, resolvido");
+    CHECK(std::string(Tr("No, still happening")) == "N\xC3\xA3o, ainda acontece");
+    CHECK(std::string(Tr("You confirmed that this issue is fixed")) == "Voc\xC3\xAA confirmou que este problema foi resolvido");
+    CHECK(std::string(Tr("The issue is still happening")) == "O problema ainda est\xC3\xA1 acontecendo");
     TrackedReport fixed;
     fixed.status = "fixed";
     fixed.fixed_version = "0.9.3";
@@ -1395,6 +1842,21 @@ int main() {
     TestRemoveIsLocal();
     TestStatusProtocol();
     TestStatusTexts();
+    TestPlayerTestIsOpenUntilAnswered();
+    TestANewRequestCanBeAnsweredAgain();
+    TestTheServiceAnswerIsKept();
+    TestThePlayerAnswerSurvivesARestart();
+    TestHistoryFilesWithoutAnswersStillLoad();
+    TestFeedbackProtocol();
+    TestAPageIsEnteredOnceNotOnEveryFrame();
+    TestBugReportRefreshesOnStartupAndOnEveryEntry();
+    TestBugReportShowsLoadingWhileItsLogsAreListed();
+    TestLocalReportsStayVisibleWhileTheyAreChecked();
+    TestSlowPagesShowLoadingFirstAndReuseTheEditorView();
+    TestFeedbackRequestIsExactlyWhatTheWorkerReads();
+    TestFeedbackAnswers();
+    TestFeedbackDiagnosticsNameTheStepAndNeverTheReceipt();
+    TestPlayerTestPanel();
     TestReceiptsStayOutOfLogsAndSettings();
     TestLookupsTakeNoAccountAndNeverBlock();
     TestNewStatusesCollectOnTheUiThread();

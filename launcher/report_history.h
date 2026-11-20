@@ -14,12 +14,18 @@ namespace dcp {
 inline constexpr size_t kMostTrackedReports = 50;
 inline constexpr char kReportHistoryFile[] = "bug_reports.json";
 
+inline constexpr char kAwaitingPlayerTest[] = "awaiting_player_test";
+inline constexpr char kTestFixed[] = "fixed";
+inline constexpr char kTestNotFixed[] = "not_fixed";
+
 struct ReportStatus {
     std::string ticket;
     std::string status;
     int64_t updated_at = 0;
     std::string fixed_version;
     std::string player_message;
+    // Empty when there is no answer yet, or the service predates player tests.
+    std::string test_feedback;
 };
 
 struct TrackedReport {
@@ -36,12 +42,19 @@ struct TrackedReport {
     int64_t status_updated_at = 0;
     std::string fixed_version;
     std::string player_message;
+    // The answer belongs to the request whose status time is test_feedback_revision.
+    std::string test_feedback;
+    int64_t test_feedback_revision = 0;
     bool unseen = false;
     // The developer message appeared or changed and the report has not been opened since.
     bool message_unseen = false;
     // The service answered a check without this report, so it was deleted there. Its last known state stays.
     bool unavailable = false;
 };
+
+enum class PlayerTest { kNone, kAwaitingAnswer, kConfirmedFixed, kStillHappening };
+// An answer counts only for the request it was given to: a newer request (a later status time) is open again.
+PlayerTest PlayerTestOf(const TrackedReport& report);
 
 // English, for Tr; nullptr for a status this launcher does not know.
 const char* ReportStatusText(std::string_view status);
@@ -73,6 +86,8 @@ public:
     // nothing changed.
     bool Apply(const std::vector<ReportStatus>& statuses, const std::vector<std::string>& asked = {});
     bool MarkSeen(std::string_view ticket);
+    // False when the report is no longer at that open request.
+    bool RecordTestFeedback(std::string_view ticket, int64_t revision, std::string_view result);
     bool Remove(std::string_view ticket);
 
 private:

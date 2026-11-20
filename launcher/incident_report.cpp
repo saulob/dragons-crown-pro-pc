@@ -402,10 +402,45 @@ std::vector<ReportStatus> ReadReportStatuses(const net::Json& answer) {
     std::vector<ReportStatus> statuses;
     if (!answer["reports"].is_array()) return statuses;
     for (const net::Json& entry : answer["reports"].items()) {
+        const std::string& feedback = entry["test_feedback"].as_string();
         statuses.push_back({entry["ticket"].as_string(), entry["status"].as_string(), entry["status_updated_at"].as_int(),
-                            entry["fixed_version"].as_string(), entry["player_message"].as_string()});
+                            entry["fixed_version"].as_string(), entry["player_message"].as_string(),
+                            feedback == kTestFixed || feedback == kTestNotFixed ? feedback : std::string()});
     }
     return statuses;
+}
+
+FeedbackOutcome FeedbackOutcomeOf(const std::string& code) {
+    if (code == "ok") return FeedbackOutcome::kSaved;
+    if (code == "stale_request" || code == "already_answered" || code == "not_found") return FeedbackOutcome::kStale;
+    if (code == net::kLinkLost || code == net::kUnreachable || code == "timeout") return FeedbackOutcome::kUnreachable;
+    return FeedbackOutcome::kFailed;
+}
+
+FeedbackAnswer FeedbackAnswerOf(const std::string& code, const net::Json& reply, std::string_view requested) {
+    constexpr size_t kMostDetailBytes = 80;
+    FeedbackAnswer answer;
+    answer.stage = "call";
+    answer.code = code;
+    answer.detail = reply["detail"].as_string().substr(0, kMostDetailBytes);
+    answer.outcome = FeedbackOutcomeOf(code);
+    if (answer.outcome == FeedbackOutcome::kSaved && reply["test_feedback"].as_string() != requested) {
+        answer.outcome = FeedbackOutcome::kFailed;
+        answer.code = "malformed_reply";
+        answer.detail = "test_feedback";
+    }
+    return answer;
+}
+
+net::Json IncidentFeedbackRequest(const TrackedReport& report, std::string_view result, const ReportFacts& facts) {
+    net::Json body = net::Json::Object();
+    body.set("ticket", report.ticket);
+    body.set("receipt", report.receipt);
+    body.set("revision", report.status_updated_at);
+    body.set("result", std::string(result));
+    body.set("launcher_version", facts.launcher_version);
+    body.set("game_build", facts.game_build);
+    return body;
 }
 
 IncidentReceipt FileIncident(const net::OnlineConfig& config, const fs::path& user_dir, const std::string& game,
@@ -457,6 +492,17 @@ std::optional<IncidentPackage> FetchSentReport(const net::OnlineConfig& config, 
     session.close();
     if (!answer) return std::nullopt;
     return SentReportOf((*answer)["report"]);
+}
+
+FeedbackAnswer SendTestFeedback(const net::OnlineConfig& config, const TrackedReport& report, std::string_view result,
+                                const ReportFacts& facts) {
+    net::LobbySession session;
+    std::string error, code;
+    if (!session.connect(config.lobby, &error)) return {FeedbackOutcome::kUnreachable, "connect", net::kUnreachable, error};
+    session.call(kIncidentFeedbackOperation, IncidentFeedbackRequest(report, result, facts), &code);
+    const FeedbackAnswer answer = FeedbackAnswerOf(code, session.last_reply(), result);
+    session.close();
+    return answer;
 }
 
 } // namespace dcp

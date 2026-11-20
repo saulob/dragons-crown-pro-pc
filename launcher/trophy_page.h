@@ -42,6 +42,8 @@ private:
     std::filesystem::path app0_;
     std::optional<TrophyPageContent> content_;
     int last_frame_ = -10;
+    bool loaded_once_ = false;
+    bool loading_shown_ = false;
     int icons_budget_ = 0;
     std::map<std::filesystem::path, ImTextureID> icons_;
     Modal modal_ = Modal::kNone;

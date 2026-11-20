@@ -21,12 +21,17 @@ constexpr size_t kPreviewCharacters = 60;
 constexpr std::string_view kStatuses[][2] = {
     {"new", "New"},
     {"investigating", "Investigating"},
+    {kAwaitingPlayerTest, "Awaiting player test"},
     {"fixed", "Fixed"},
     {"cannot_reproduce", "Cannot reproduce"},
     {"duplicate", "Duplicate"},
     {"not_a_bug", "Not a bug"},
     {"closed", "Closed"},
 };
+
+std::string KnownFeedback(std::string_view feedback) {
+    return feedback == kTestFixed || feedback == kTestNotFixed ? std::string(feedback) : std::string();
+}
 
 net::Json EntryJson(const TrackedReport& report) {
     net::Json entry = net::Json::Object();
@@ -43,6 +48,8 @@ net::Json EntryJson(const TrackedReport& report) {
     entry.set("status_updated_at", report.status_updated_at);
     entry.set("fixed_version", report.fixed_version);
     entry.set("player_message", report.player_message);
+    entry.set("test_feedback", report.test_feedback);
+    entry.set("test_feedback_revision", report.test_feedback_revision);
     entry.set("unseen", report.unseen);
     entry.set("message_unseen", report.message_unseen);
     entry.set("unavailable", report.unavailable);
@@ -64,6 +71,8 @@ TrackedReport EntryOf(const net::Json& entry) {
     report.status_updated_at = entry["status_updated_at"].as_int();
     report.fixed_version = entry["fixed_version"].as_string();
     report.player_message = entry["player_message"].as_string();
+    report.test_feedback = KnownFeedback(entry["test_feedback"].as_string());
+    report.test_feedback_revision = report.test_feedback.empty() ? 0 : entry["test_feedback_revision"].as_int();
     report.unseen = entry["unseen"].as_bool();
     report.message_unseen = entry.has("message_unseen") ? entry["message_unseen"].as_bool() : report.unseen && !report.player_message.empty();
     report.message_unseen = report.message_unseen && !report.player_message.empty();
@@ -86,6 +95,13 @@ void SetAside(const fs::path& file) {
 }
 
 } // namespace
+
+PlayerTest PlayerTestOf(const TrackedReport& report) {
+    if (report.status != kAwaitingPlayerTest) return PlayerTest::kNone;
+    if (report.test_feedback_revision != report.status_updated_at) return PlayerTest::kAwaitingAnswer;
+    if (report.test_feedback == kTestFixed) return PlayerTest::kConfirmedFixed;
+    return report.test_feedback == kTestNotFixed ? PlayerTest::kStillHappening : PlayerTest::kAwaitingAnswer;
+}
 
 const char* ReportStatusText(std::string_view status) {
     const auto found = std::find_if(std::begin(kStatuses), std::end(kStatuses), [&](const auto& pair) { return pair[0] == status; });
@@ -188,6 +204,13 @@ bool ReportHistory::Apply(const std::vector<ReportStatus>& statuses, const std::
         const auto found = std::find_if(reports_.begin(), reports_.end(), [&](const TrackedReport& r) { return r.ticket == status.ticket; });
         if (found == reports_.end()) continue;
         if (std::exchange(found->unavailable, false)) changed = true;
+        const std::string feedback = KnownFeedback(status.test_feedback);
+        if (status.status == kAwaitingPlayerTest && !feedback.empty() &&
+            (found->test_feedback != feedback || found->test_feedback_revision != status.updated_at)) {
+            found->test_feedback = feedback;
+            found->test_feedback_revision = status.updated_at;
+            changed = true;
+        }
         if (found->status == status.status && found->status_updated_at == status.updated_at &&
             found->fixed_version == status.fixed_version && found->player_message == status.player_message) {
             continue;
@@ -215,6 +238,17 @@ bool ReportHistory::MarkSeen(std::string_view ticket) {
     if (found == reports_.end() || (!found->unseen && !found->message_unseen)) return false;
     found->unseen = false;
     found->message_unseen = false;
+    return true;
+}
+
+bool ReportHistory::RecordTestFeedback(std::string_view ticket, int64_t revision, std::string_view result) {
+    const std::string feedback = KnownFeedback(result);
+    const auto found = std::find_if(reports_.begin(), reports_.end(), [&](const TrackedReport& r) { return r.ticket == ticket; });
+    if (feedback.empty() || found == reports_.end() || found->status != kAwaitingPlayerTest || found->status_updated_at != revision) {
+        return false;
+    }
+    found->test_feedback = feedback;
+    found->test_feedback_revision = revision;
     return true;
 }
 

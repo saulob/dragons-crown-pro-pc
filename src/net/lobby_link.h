@@ -148,11 +148,14 @@ public:
               std::string* refusal = nullptr);
     // The answer, or nullopt with `code` set ("timeout" or the lobby's error code).
     std::optional<Json> call(const std::string& op, Json body, std::string* code);
+    // The last reply the lobby sent to call, refused or not; null when none arrived.
+    const Json& last_reply() const { return last_reply_; }
     void close();
 
 private:
     std::unique_ptr<WebSocket> socket_;
     uint32_t seq_ = 0;
+    Json last_reply_;
 };
 
 } // namespace dcp::net

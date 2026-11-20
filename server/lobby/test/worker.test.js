@@ -271,3 +271,66 @@ test('the first relay frames after the object was rebuilt are forwarded both way
     }
   }
 });
+
+const filedReport = (ws) => answers(ws).at(-1);
+
+async function reportAwaitingTest(state, object) {
+  const player = await signedIn(state, object);
+  state.deliver(object, player, call('incident.file', {
+    description: 'It froze', launcher_version: '1.4.0', game_build: 'CUSA10454 1.03 USA', game_version: '1.03', cusa: 'CUSA10454',
+    operating_system: 'Windows 11', log_file: 'dragons_crown_pro_042.log', log_clipped: 'no', log_text: 'Error\n' }));
+  const filed = filedReport(player);
+  assert.equal(filed.code, 'ok');
+  mock.timers.tick(60_000);
+  object.lobby.setIncidentStatus(filed.ticket, { status: 'awaiting_player_test', fixed_version: '', player_message: 'Please test' });
+  return filed;
+}
+
+test('a player test answer crosses the Durable Object model on a socket with no hello, after a wake', async () => {
+  const state = new DurableObjectState();
+  const first = await state.wake();
+  const filed = await reportAwaitingTest(state, first);
+  const woken = await state.wake();
+
+  const lookup = await state.connect(woken, '198.18.1.1');
+  state.deliver(woken, lookup, call('incident.status', { reports: [{ ticket: filed.ticket, receipt: filed.receipt }] }));
+  const [status] = answers(lookup).at(-1).reports;
+  assert.deepEqual([status.status, status.test_feedback], ['awaiting_player_test', 'pending']);
+
+  const send = async (body) => {
+    const ws = await state.connect(woken, '198.18.1.1');
+    state.deliver(woken, ws, call('incident.feedback', { ticket: filed.ticket, receipt: filed.receipt, ...body }));
+    assert.equal(ws.closedWith, null);
+    return answers(ws).at(-1);
+  };
+  const request = { revision: status.status_updated_at, result: 'fixed', launcher_version: '1.4.0', game_build: 'CUSA10454 1.03 USA' };
+  const accepted = await send(request);
+  assert.deepEqual([accepted.code, accepted.ticket, accepted.revision, accepted.test_feedback],
+    ['ok', filed.ticket, status.status_updated_at, 'fixed']);
+  assert.equal((await send(request)).code, 'ok');
+  assert.equal((await send({ ...request, result: 'not_fixed' })).code, 'already_answered');
+  assert.equal((await send({ ...request, revision: request.revision - 1 })).code, 'stale_request');
+  assert.equal(woken.lobby.incidentForAdmin(filed.ticket).player_feedback, 'fixed');
+});
+
+test('a refused answer names only the field that was wrong, never a value or a secret', async () => {
+  const state = new DurableObjectState();
+  const object = await state.wake();
+  const filed = await reportAwaitingTest(state, object);
+  const sent = [];
+  const send = async (body) => {
+    const ws = await state.connect(object, '198.18.1.2');
+    state.deliver(object, ws, call('incident.feedback', body));
+    sent.push(...answers(ws));
+    return answers(ws).at(-1);
+  };
+  const good = { ticket: filed.ticket, receipt: filed.receipt, revision: 1, result: 'fixed' };
+  const cases = [[{ ...good, result: 'maybe' }, 'result'], [{ ...good, revision: '1' }, 'revision'], [{ ...good, extra: 1 }, 'fields'],
+    [{ ...good, launcher_version: '<b>' }, 'launcher_version'], [{ ...good, receipt: 'zz' }, 'receipt']];
+  for (const [body, field] of cases) {
+    const refused = await send(body);
+    assert.deepEqual([refused.code, refused.detail], ['bad_request', field]);
+    mock.timers.tick(60_000);
+  }
+  assert.ok(!JSON.stringify(sent).includes(filed.receipt));
+});

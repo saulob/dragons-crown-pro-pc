@@ -734,6 +734,16 @@ Only reports sent from this PC are listed here.	Somente relatórios enviados por
 No reports sent from this PC	Nenhum relatório enviado por este PC
 New	Novo
 Investigating	Investigando
+Awaiting player test	Aguardando teste do jogador
+Did this fix the issue?	Isso resolveu o problema?
+Yes, fixed	Sim, resolvido
+No, still happening	Não, ainda acontece
+You confirmed that this issue is fixed	Você confirmou que este problema foi resolvido
+The issue is still happening	O problema ainda está acontecendo
+Please send a new Bug Report so we can receive fresh logs	Envie um novo relatório de bug para recebermos logs atualizados
+Send a new report	Enviar um novo relatório
+Could not reach the online service. Your answer was not sent.	Não foi possível acessar o serviço online. Sua resposta não foi enviada.
+Your answer could not be sent. Try again later.	Não foi possível enviar sua resposta. Tente novamente mais tarde.
 Fixed	Corrigido
 Cannot reproduce	Não foi possível reproduzir
 Duplicate	Duplicado
@@ -746,7 +756,7 @@ Refresh	Atualizar
 Checking...	Verificando...
 Could not check for updates. The last known status is shown.	Não foi possível verificar. O último status conhecido é mostrado.
 View details	Ver detalhes
-Hide details	Ocultar detalhes
+Close details	Fechar detalhes
 Report ID	ID do relatório
 Submitted	Enviado em
 Status	Status
@@ -946,6 +956,9 @@ Part Visibility	Visibilidade da parte
 Part Color	Cor da parte
 Edit Appearance	Editar aparência
 Loading appearance...	Carregando aparência...
+Loading Bug Report...	Carregando Relatório de bug...
+Loading Editor...	Carregando Editor...
+Loading Trophies...	Carregando Troféus...
 Installed game	Jogo instalado
 save found	save encontrado
 saves found	saves encontrados

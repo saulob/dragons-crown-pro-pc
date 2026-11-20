@@ -214,6 +214,7 @@ fixed version and a short message; the launcher checks later and My reports show
 | --- | --- | --- |
 | New | `new` | Not reviewed yet |
 | Investigating | `investigating` | Being investigated |
+| Awaiting player test | `awaiting_player_test` | A possible fix is ready: the launcher asks the player whether it worked (see Player test feedback) |
 | Fixed | `fixed` | The problem has been corrected; the only status that says so, and the only one with a fixed version |
 | Cannot reproduce | `cannot_reproduce` | Could not be reproduced with the available information |
 | Duplicate | `duplicate` | The same problem is already tracked by another report |
@@ -246,6 +247,47 @@ Logs and statuses have separate limits. `incidents` keeps the newest 500 reports
 newest 5000 statuses, a row of at most about 2 KB, so at most about 11 MB. A status therefore outlives its log: once the log is
 gone, **What was sent** says the report is no longer available, and the status still updates. Past both limits the launcher keeps
 showing the last status it knew.
+
+### Player test feedback
+
+**Awaiting player test** is a status the developer sets with a message for the player. It does not replace **Fixed**, which stays
+the developer's final status with its fixed version, and the player's answer never changes the status.
+
+While a report is Awaiting player test, My reports shows the message and **Did this fix the issue?** with **Yes, fixed** and
+**No, still happening**. The answer is a separate, small state of the open test request: `pending` (no answer), `fixed` or
+`not_fixed`, with the time it was given and the launcher version and game build it was given from. `incident.status` returns
+`test_feedback` (and `test_feedback_at` once answered) only on an Awaiting player test report; an older service that leaves it out
+reads as no answer.
+
+A request is identified by its `status_updated_at`, which the launcher sends back as `revision` in `incident.feedback`. The
+answer is taken only if that is still the report's open request: after any newer change (a new request, another status) the
+service answers `stale_request` and keeps the newer request untouched. Saving an Awaiting player test with a changed message, or
+returning to it from another status, is a new request and reads as `pending` again; an unchanged save keeps both time and answer.
+The first answer to a request is final: the same answer again is accepted and changes nothing, a different one is
+`already_answered`. A `bad_request` answer carries `detail`, the name of the refused field and never a value; an older service
+that does not know the operation answers `bad_request` without one.
+
+`incident.feedback` takes `ticket`, `receipt`, `revision`, `result` (`fixed` or `not_fixed`) and optional `launcher_version` and
+`game_build`, nothing else and no free text. It needs no `hello`, and like `incident.status` it proves ownership only with the
+ticket's receipt: a ticket alone, a wrong receipt and an unknown ticket all fail alike (`bad_request` for a malformed request,
+`not_found` otherwise). It has its own per-address limit, separate from report quota. `incident_tracking` gains five additive
+columns for the answer; existing rows are untouched and read as no answer, and an older answer stays stored when a new request
+makes it `pending`.
+
+The launcher sends the answer off the UI thread and shows the answer only once the service has it, so a failure keeps the buttons
+for a retry. After **Yes, fixed** it shows "You confirmed that this issue is fixed". After **No, still happening** it says the
+issue is still happening and asks the player to send a new Bug Report for fresh logs, with a **Send a new report** button that
+scrolls to the form. It never sends a report or attaches logs by itself. The launcher log shows each answer as
+`Bug report feedback: ticket=… result=… revision=…`, then `accepted`, or `failed` with `stage=connect|call`, the lobby's or the
+transport's `code` and the `detail`; never the receipt. The answer is kept in `bug_reports.json`
+(`test_feedback`, `test_feedback_revision`), so a restart does not offer it again; a newer request does.
+
+In `/admin` → Bugs the **Player feedback** column sits beside Status and reads **Awaiting response**, **Player confirmed fixed**,
+**Still happening**, or a dash when no test request is open. The **Player feedback** filter (All, Awaiting response, Confirmed
+fixed, Still happening) uses the same value, which the Worker computes once per report. The detail has a Player feedback section
+with the same label and, once answered, the response time and the launcher version and game build it came from. The answer
+shows only while the report is Awaiting player test; the **Bugs** tab shows a count of the reports whose status is New, read when
+the page signs in and each time the Bugs list is refreshed. Neither Investigating reports nor player feedback count.
 
 ### Privacy and usage statistics
 
@@ -533,8 +575,9 @@ lower-case hex.
 | `lobby.list` | optional `rev` (the one last received) | `rev`, `total`, and `players` (`player`, `name`, `version`, `state`), or `unchanged: true` |
 | `friends.accept` / `.decline` / `.remove` | `account` | `friend` / - / - |
 | `incident.file` | `description` (<= 500 characters), `launcher_version`, `game_build`, `game_version`, `cusa`, `operating_system`, `log_file`, `log_clipped` (`yes`/`no`), `log_text` (<= 64 KiB of UTF-8); see Bug reports | `ticket` (`DCP-XXXXXX`), `receipt` (64 hex digits), `submitted_at` |
-| `incident.status` | `reports: [{ticket, receipt}]` (<= 50); no `hello` needed | `reports: [{ticket, status, status_updated_at, fixed_version?, player_message?}]`, only the reports the receipts prove |
+| `incident.status` | `reports: [{ticket, receipt}]` (<= 50); no `hello` needed | `reports: [{ticket, status, status_updated_at, fixed_version?, player_message?, test_feedback?, test_feedback_at?}]`, only the reports the receipts prove |
 | `incident.read` | `ticket`, `receipt`; no `hello` needed | `report` (the stored fields, `ticket`, `submitted_at`), or `not_found` |
+| `incident.feedback` | `ticket`, `receipt`, `revision` (the report's `status_updated_at`), `result` (`fixed`/`not_fixed`), `launcher_version?`, `game_build?`; no `hello` needed; see Player test feedback | `ticket`, `revision`, `test_feedback`, `test_feedback_at`, or `not_found`, `stale_request`, `already_answered` |
 | `party.report` | `classes` (1-4 class numbers 0-5: Fighter, Amazon, Elf, Dwarf, Sorceress, Wizard), `host` (optional, one of `classes`); room owner only, optional (see Party statistics) | `counted` |
 | `comms.report` | `counts` (exactly 8 non-negative integers, index = Comms Wheel message id 0-7: Hello, Thanks, Good job, Follow me, Group up, Need help, Ready, Let's go); optional, see Comms Wheel statistics | - |
 

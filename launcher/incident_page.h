@@ -9,6 +9,7 @@
 
 #include "incident_report.h"
 #include "my_reports.h"
+#include "page_activation.h"
 #include "trg/launcher.h"
 
 namespace dcp {
@@ -29,6 +30,8 @@ public:
     // Starts a status check of My reports and returns at once.
     void CheckReports(const net::OnlineConfig& config) { my_reports_.Refresh(config); }
     bool HasReportUpdates() { return my_reports_.HasUpdates(); }
+    // True until the game logs have been listed, which is the page's first and slowest step.
+    bool Loading() const { return !logs_found_; }
 
 private:
     // Shared with the sending thread, which may outlive the launcher window.
@@ -38,7 +41,14 @@ private:
         std::shared_ptr<const IncidentPackage> package;
     };
 
+    struct LogScan {
+        std::atomic<bool> done{false};
+        std::vector<GameLog> logs;
+    };
+
     void FindLogs();
+    void StartLogScan();
+    void CollectLogScan();
     void CollectDelivery();
     void ForgetPreview();
     bool AcceptDraft();
@@ -67,7 +77,9 @@ private:
     bool bring_result_into_view_ = false;
     bool sent_report_remembered_ = true;
     MyReports my_reports_;
-    int last_drawn_frame_ = -2;
+    PageActivation activation_;
+    std::shared_ptr<LogScan> scan_;
+    float form_top_ = 0.0f;
 };
 
 } // namespace dcp
