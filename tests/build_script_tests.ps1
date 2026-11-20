@@ -114,6 +114,35 @@ foreach ($target in $selectorTargets) {
     }
 }
 
+$normalNinja = @($commands | Where-Object { $_.GetCommandName() -eq 'ninja' } |
+        Where-Object { @($_.CommandElements | Where-Object { $_ -is [Management.Automation.Language.VariableExpressionAst] -and $_.Splatted }).Count -eq 0 })
+$normalTargets = @($normalNinja | ForEach-Object { $_.CommandElements | Select-Object -Skip 1 } |
+        Where-Object { $_ -is [Management.Automation.Language.StringConstantExpressionAst] -and $_.Value -like 'dcp-*' } | ForEach-Object { $_.Value })
+if ($normalNinja.Count -ne 1 -or $normalTargets.Count -eq 0) {
+    Write-Host 'FAIL: test.ps1 must have exactly one normal ninja target list'
+    $failures++
+}
+foreach ($target in $normalTargets) {
+    if ($target -notmatch '^dcp-[a-z0-9]+(-[a-z0-9]+)*-tests$' -or ($target -split '-tests').Count -gt 2 -or $target -match 'tests-?dcp') {
+        Write-Host "FAIL: ninja target '$target' is not one test target; adjacent names were concatenated"
+        $failures++
+    }
+}
+if (@($normalTargets | Select-Object -Unique).Count -ne $normalTargets.Count) {
+    Write-Host 'FAIL: the normal ninja target list repeats a target'
+    $failures++
+}
+$stepExecutables = @($commands | Where-Object { $_.GetCommandName() -eq 'Test-Step' } | ForEach-Object {
+        $positional = @($_.CommandElements | Select-Object -Skip 1 | Where-Object { $_ -is [Management.Automation.Language.StringConstantExpressionAst] })
+        if ($positional.Count -ge 2 -and $positional[1].Value -like 'dcp-*') { $positional[1].Value }
+    } | Select-Object -Unique)
+foreach ($required in @('dcp-test-progress-tests', 'dcp-runtime-overlay-tests') + $stepExecutables) {
+    if ($normalTargets -notcontains $required) {
+        Write-Host "FAIL: the normal ninja target list lacks $required as its own target"
+        $failures++
+    }
+}
+
 if ($failures -gt 0) {
     exit 1
 }

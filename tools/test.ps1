@@ -68,6 +68,7 @@
 param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$EditorTranslation, [switch]$EditorRelease)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
+. (Join-Path $PSScriptRoot '_progress.ps1')
 $tc = Resolve-Toolchain 'auto'
 $env:PATH = "$($tc.Bin);$env:PATH"
 $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
@@ -93,7 +94,10 @@ function Format-ExitCode([long]$Code) {
     'exit code {0}, 0x{1:X8}' -f $Code, [uint32]($Code -band 0xFFFFFFFFL)
 }
 
+function Get-TestName($Test) { if ($Test.Key) { $Test.Key } elseif ($Test.Exe) { $Test.Exe } elseif ($Test.Script) { $Test.Script } else { $Test.Title } }
+
 function Skipped([string]$Reason) { [pscustomobject]@{ Code = 0; Skip = $Reason; Lines = @() } }
+
 
 $requiredEditorGroups = 'editor-save-parse', 'editor-save-write', 'editor-isolation', 'editor-apply-discard', 'editor-identity', 'editor-looks',
                         'editor-art', 'editor-ui-model', 'appearance-translation', 'editor-real-save', 'editor-real-art', 'editor-real-hooks',
@@ -234,12 +238,7 @@ function Start-DevLobby {
 function Invoke-WorkerTests {
     $node = Get-Node
     if (-not $node) { return Skipped 'Node.js 22.13 or later was not found' }
-    Push-Location (Join-Path $script:RepoRoot 'server\lobby')
-    try {
-        $lines = @(& $node --no-warnings --test --test-reporter=tap 'test/*.test.js' 2>&1 | ForEach-Object { "$_" })
-        $code = $LASTEXITCODE
-    } finally { Pop-Location }
-    [pscustomobject]@{ Code = $code; Skip = ''; Lines = $lines }
+    Invoke-Native $node @('--no-warnings', '--test', '--test-reporter=tap', 'test/*.test.js') $true (Join-Path $script:RepoRoot 'server\lobby')
 }
 
 # A log line the player's report depends on, missing or present where it must not be.
@@ -267,8 +266,7 @@ function Invoke-LinuxNetTests {
     $distro = Find-LinuxDistro
     if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
     $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    $lines = @(& wsl.exe -d $distro --exec bash "$root/tools/test-linux-net.sh" $root 2>&1 | ForEach-Object { "$_" })
-    [pscustomobject]@{ Code = $LASTEXITCODE; Skip = ''; Lines = $lines; Distro = $distro }
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', "$root/tools/test-linux-net.sh", $root) $true
 }
 
 function Invoke-LinuxGate {
@@ -277,8 +275,7 @@ function Invoke-LinuxGate {
     $distro = Find-LinuxDistro
     if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
     $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    $lines = @(& wsl.exe -d $distro --exec bash -c "cd '$root' && bash tools/build.sh --test 2>&1" 2>&1 | ForEach-Object { "$_" })
-    [pscustomobject]@{ Code = $LASTEXITCODE; Skip = ''; Lines = $lines; Distro = $distro }
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --test 2>&1") $true
 }
 
 function Invoke-LinuxEditorGate {
@@ -287,14 +284,59 @@ function Invoke-LinuxEditorGate {
     $distro = Find-LinuxDistro
     if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
     $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    $lines = @(& wsl.exe -d $distro --exec bash -c "cd '$root' && bash tools/build.sh --editor 2>&1" 2>&1 | ForEach-Object { "$_" })
-    [pscustomobject]@{ Code = $LASTEXITCODE; Skip = ''; Lines = $lines; Distro = $distro }
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --editor 2>&1") $true
 }
 
 $quietLines = '^(GROUP\||MATRIX\||APPEARANCE_TRANSLATION\||runtime overlay tests:|appearance online tests:|ONLINE-BUILD\||LINUX-NET\||FAIL|OK |FAILED|.*STATIC PARITY|.*RUNTIME DATA|.*skipped|# (tests|pass|fail|skipped))'
-function Show-Output([string[]]$Lines, [bool]$Failed) {
-    foreach ($line in $Lines) {
-        if ($Failed -or $line -cmatch $quietLines) { Write-Host $line }
+function ConvertTo-ArgumentString([string[]]$Arguments) {
+    ($Arguments | ForEach-Object { if ($_ -match '[\s"]' -or $_ -eq '') { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' } else { $_ } }) -join ' '
+}
+
+# Runs a program with stdout and stderr merged. Its lines are written as they arrive (with Quiet only result lines and a
+# timing table; the rest is returned in Hidden for a failure report), and while it runs the step's progress line is refreshed
+# on a timer. "@@dcp-progress" lines from instrumented suites feed the check count and are not part of Lines.
+function Invoke-Native([string]$File, [string[]]$Arguments = @(), [bool]$Quiet = $false, [string]$WorkingDirectory = '') {
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $File
+    if ($WorkingDirectory) { $info.WorkingDirectory = $WorkingDirectory }
+    $info.Arguments = ConvertTo-ArgumentString $Arguments
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.CreateNoWindow = $true
+    $info.EnvironmentVariables['DCP_TEST_PROGRESS'] = '1'
+    $lines = New-Object System.Collections.Generic.List[string]
+    $hidden = New-Object System.Collections.Generic.List[string]
+    try { $process = [System.Diagnostics.Process]::Start($info) }
+    catch { return [pscustomobject]@{ Code = -1; Skip = ''; Lines = @("could not start ${File}: $($_.Exception.Message)"); Hidden = @(); Streamed = $false } }
+    try {
+        $readers = @($process.StandardOutput, $process.StandardError)
+        $pending = @($readers[0].ReadLineAsync(), $readers[1].ReadLineAsync())
+        $inTable = $false
+        while ($pending[0] -or $pending[1]) {
+            $active = @($pending | Where-Object { $_ })
+            $index = [System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]$active, 500)
+            if ($index -ge 0) {
+                $slot = [Array]::IndexOf($pending, $active[$index])
+                $line = $pending[$slot].Result
+                if ($null -eq $line) { $pending[$slot] = $null }
+                else {
+                    $pending[$slot] = $readers[$slot].ReadLineAsync()
+                    $child = ConvertFrom-ChildProgress $line
+                    if ($child) { $null = Set-ProgressChecks $script:Progress $script:Clock.Elapsed.TotalSeconds $child.Checks $child.Expected $child.Estimate $child.Detail }
+                    else {
+                        $lines.Add($line)
+                        if ($line -cmatch '^.+ timing$') { $inTable = $true } elseif ($inTable -and -not $line.StartsWith('  ')) { $inTable = $false }
+                        if (-not $Quiet -or $inTable -or $line -cmatch $quietLines) { Clear-ProgressLine $script:Progress; Write-Host $line } else { $hidden.Add($line) }
+                    }
+                }
+            }
+            $null = Update-Progress $script:Progress $script:Clock.Elapsed.TotalSeconds
+        }
+        $process.WaitForExit()
+        return [pscustomobject]@{ Code = $process.ExitCode; Skip = ''; Lines = $lines.ToArray(); Hidden = $hidden.ToArray(); Streamed = $true }
+    } finally {
+        $process.Dispose()
     }
 }
 
@@ -347,6 +389,8 @@ $tests = @(
     (Test-Step 'online appearance tests (recipe, room session, remote textures, seat-aware hooks)' 'dcp-appearance-online-tests' -Capture -Quiet),
     (Test-Step 'Character Editor release groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model, composition with the translation overlay, real archives)' 'dcp-save-editor-tests' -Parity -Capture -Quiet `
         -Key 'dcp-save-editor-tests release' -Arguments @('release')),
+    (Test-Step 'test progress reporter tests (percentage, bar, ETA, check counts, timing table, redirected output, injected clock)' 'dcp-test-progress-tests'),
+    (Test-Step 'test progress runner tests (tools\_progress.ps1 on synthetic time: bar, percentage, ETA, spinner line, redirected output, timing)' -Script 'tests\progress_script_tests.ps1' -Capture),
     (Test-Step 'tiling tests (GPU tile layouts and addresses)' 'dcp-tiling-tests'),
     (Test-Step 'renderer selection tests (Auto, Vulkan, OpenGL, requirements)' 'dcp-renderer-selection-tests'),
     (Test-Step 'OpenGL backend tests (detiler, emitted GLSL through glslang, no context)' 'dcp-opengl-backend-tests'),
@@ -434,7 +478,7 @@ Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
 if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } else {
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
@@ -452,6 +496,14 @@ $exitCodes = @{}
 $lobby = $null
 $lobbyProblem = ''
 $lobbySkip = ''
+$finishedRun = $false
+$script:Clock = [Diagnostics.Stopwatch]::StartNew()
+$interactive = Test-InteractiveConsole
+$script:Progress = New-ProgressReporter @($tests | ForEach-Object { Get-TestName $_ }) 0 $interactive {
+    param([string]$Text, [bool]$NoNewline)
+    if ($NoNewline) { Write-Host $Text -NoNewline } else { Write-Host $Text }
+}
+Write-Host $(if ($interactive) { 'Progress: animated line (set DCP_TEST_ANIMATE=0 for plain lines)' } else { 'Progress: plain RUNNING lines every 15 s (set DCP_TEST_ANIMATE=1 to force the animated line)' }) -ForegroundColor DarkGray
 $previousLobbyUrl = $env:DCP_TEST_LOBBY
 Remove-Item Env:\DCP_TEST_LOBBY -ErrorAction SilentlyContinue
 try {
@@ -471,56 +523,57 @@ try {
             Write-Host "SKIPPED: the lobby-backed tests need a development lobby ($lobbySkip)." -ForegroundColor Yellow
         }
     }
+    $stepIndex = 0
     foreach ($test in $tests) {
-        Write-Step "Running the $($test.Title)"
-        $name = if ($test.Key) { $test.Key } elseif ($test.Exe) { $test.Exe } elseif ($test.Script) { $test.Script } else { $test.Title }
+        $stepIndex++
+        $name = Get-TestName $test
+        Start-ProgressGroup $script:Progress $name $script:Clock.Elapsed.TotalSeconds
+        Write-Step "[$stepIndex/$($tests.Count)] Running the $($test.Title)"
         $code = 0
+        $run = $null
         if ($test.Block) {
-            $result = & $test.Block
-            if ($result.Skip) {
-                $skipped[$name] = $result.Skip
-                Write-Host "SKIPPED: $($result.Skip)" -ForegroundColor Yellow
+            $run = & $test.Block
+            if ($run.Skip) {
+                $skipped[$name] = $run.Skip
+                Clear-ProgressLine $script:Progress
+                Write-Host "    SKIPPED: $($run.Skip)" -ForegroundColor Yellow
+                Complete-ProgressGroup $script:Progress 'SKIPPED' $script:Clock.Elapsed.TotalSeconds
                 continue
             }
-            $captured[$name] = $result.Lines
-            $code = $result.Code
-            Show-Output $result.Lines ($code -ne 0)
+            $captured[$name] = $run.Lines
+            $code = $run.Code
         } elseif ($test.Script) {
-            $scriptPath = Join-Path $script:RepoRoot $test.Script
-            $scriptArguments = $test.Arguments
-            if ($test.Capture) {
-                $lines = @(& powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath @scriptArguments 2>&1 | ForEach-Object { "$_" })
-                $code = $LASTEXITCODE
-                $captured[$name] = $lines
-                $lines | ForEach-Object { Write-Host $_ }
-            } else {
-                & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath @scriptArguments
-                $code = $LASTEXITCODE
-            }
+            $run = Invoke-Native 'powershell' (@('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $script:RepoRoot $test.Script)) + $test.Arguments) $false
+            $code = $run.Code
+            if ($test.Capture) { $captured[$name] = $run.Lines }
         } else {
-            $exe = Join-Path $buildDir "bin\$($test.Exe).exe"
+            $run = Invoke-Native (Join-Path $buildDir "bin\$($test.Exe).exe") $test.Arguments ($test.Capture -and $test.Quiet)
+            $code = $run.Code
             if ($test.Capture) {
-                $arguments = $test.Arguments
-                $lines = @(& $exe @arguments 2>&1 | ForEach-Object { "$_" })
-                $code = $LASTEXITCODE
-                $captured[$name] = $lines
-                $problems = @(if ($env:DCP_TEST_LOBBY) { Get-LogProblems $test $lines })
+                $captured[$name] = $run.Lines
+                $problems = @(if ($env:DCP_TEST_LOBBY) { Get-LogProblems $test $run.Lines })
                 if ($problems -and -not $code) { $code = 1 }
-                if ($test.Quiet) { Show-Output $lines ($code -ne 0) } else { $lines | ForEach-Object { Write-Host $_ } }
                 $problems | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-            } else {
-                & $exe
-                $code = $LASTEXITCODE
             }
         }
+        Clear-ProgressLine $script:Progress
         if ($code -ne 0) {
+            $run.Hidden | ForEach-Object { Write-Host $_ }
             $failed.Add($name)
             if ($test.Parity) { $parityFailed.Add($name) }
             $exitCodes[$name] = $code
-            Write-Host "FAILED: $name ($(Format-ExitCode $code))" -ForegroundColor Red
+            Write-Host "    FAIL: $name ($(Format-ExitCode $code))" -ForegroundColor Red
+        } else {
+            Write-Host '    PASS' -ForegroundColor Green
         }
+        Complete-ProgressGroup $script:Progress $(if ($code -ne 0) { 'FAIL' } else { 'PASS' }) $script:Clock.Elapsed.TotalSeconds (Get-FinalCheckCount @($run.Lines))
     }
+    $finishedRun = $true
 } finally {
+    Clear-ProgressLine $script:Progress
+    Write-Host ''
+    Format-TimingSummary $script:Progress $script:Clock.Elapsed.TotalSeconds | ForEach-Object { Write-Host $_ }
+    if (-not $finishedRun) { Write-Host 'Run interrupted before the last group finished.' -ForegroundColor Yellow }
     if ($lobby -and $lobby.Process) {
         Stop-Process -Id $lobby.Process.Id -Force -ErrorAction SilentlyContinue
         $lobby.Process.WaitForExit(5000) | Out-Null

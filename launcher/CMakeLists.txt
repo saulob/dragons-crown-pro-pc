@@ -287,6 +287,13 @@ target_compile_definitions(dcp-save-editor-tests PRIVATE DCP_SOURCE_DIR="${PROJE
 set_target_properties(dcp-save-editor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-save-editor-tests PRIVATE -Wall -Wextra)
 
+# Focused tests of the shared test progress reporter (tests/test_progress.h); header only, injected clock, no game.
+add_executable(dcp-test-progress-tests EXCLUDE_FROM_ALL ../tests/test_progress_tests.cpp)
+target_compile_definitions(dcp-test-progress-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-test-progress-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-test-progress-tests PRIVATE -Wall -Wextra)
+target_link_libraries(dcp-test-progress-tests PRIVATE Threads::Threads)
+
 # Online custom looks: the recipe codec, the room session, the remote textures and the seat-aware hooks; the real-archive
 # parity check runs when game/prepared/v1.03 is present. Not part of the default build.
 add_executable(dcp-appearance-online-tests EXCLUDE_FROM_ALL ../tests/appearance_online_tests.cpp

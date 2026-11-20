@@ -56,6 +56,7 @@
 #include "save_edit.h"
 #include "save_import.h"
 #include "sprite_render.h"
+#include "test_progress.h"
 #include "trg/layout.h"
 
 namespace fs = std::filesystem;
@@ -63,17 +64,22 @@ using namespace dcp;
 
 namespace {
 
-int g_checks = 0;
+std::atomic<int> g_checks{0};
 int g_failures = 0;
+testprogress::Reporter* g_progress = nullptr;
 
 void Check(bool condition, const char* what, int line) {
-    ++g_checks;
+    g_checks.fetch_add(1, std::memory_order_relaxed);
     if (!condition) {
         ++g_failures;
         std::printf("FAIL line %d: %s\n", line, what);
     }
 }
 #define CHECK(condition) Check((condition), #condition, __LINE__)
+
+void ProgressStep(const char* label) {
+    if (g_progress) g_progress->Step(label);
+}
 
 void PutU16(std::vector<uint8_t>& bytes, size_t offset, uint16_t value) {
     bytes[offset] = static_cast<uint8_t>(value);
@@ -7057,21 +7063,38 @@ void TestPartMapping(const fs::path& base, const fs::path& source_dir) {
     CharacterArt art(sources);
     CpkArchive cpk;
     CHECK(cpk.Open(app0 / "DRACRO.CPK"));
+    ProgressStep("Amazon parts");
     TestAmazonParts(art, cpk);
+    ProgressStep("Sorceress parts");
     TestSorceressParts(art, cpk);
+    ProgressStep("Sorceress split");
     TestSorceressSplit(art, cpk);
+    ProgressStep("Fighter parts");
     TestFighterParts(art, cpk);
+    ProgressStep("Fighter helmet and horns");
     TestFighterHelmetAndHorns(art, cpk);
+    ProgressStep("Fighter bare head");
     TestFighterBareHead(art, cpk);
+    ProgressStep("Fighter helmet contexts");
     TestFighterHelmetContexts(art, cpk);
+    ProgressStep("Dwarf parts");
     TestDwarfParts(art, cpk);
+    ProgressStep("Dwarf head and gear");
     TestDwarfHeadAndGear(art, cpk);
+    ProgressStep("Wizard parts");
     TestWizardParts(art, cpk);
+    ProgressStep("Elf parts");
     TestElfParts(art, cpk);
+    ProgressStep("Elf materials");
     TestElfMaterials(art, cpk);
+    ProgressStep("Class weapons");
     TestClassWeapons(art);
+    ProgressStep("Every part hides");
     TestEveryPartHides(art, cpk);
 }
+
+constexpr int kPartMappingSteps = 14;
+constexpr int kRealPartsSteps = 5 + kPartMappingSteps;
 
 void TestCompactSummary() {
     for (const float scale : {1.0f, 1.5f, 2.25f}) {
@@ -7683,29 +7706,54 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
          }},
         {"editor-real-parts", true,
          [&] {
+             if (g_progress) g_progress->SetSteps(kRealPartsSteps);
+             ProgressStep("Feather");
              TestFeather(base, source);
+             ProgressStep("No headgear");
              TestNoHeadgear(base, source);
+             ProgressStep("Fighter horns on every build");
              TestFighterHornBuilds(base, source);
+             ProgressStep("Appearance preparation");
              TestAppearancePrepare(base, source);
              TestPartMapping(base, source);
+             ProgressStep("Part cache version");
              TestPartCacheVersion(base, source);
          }},
     };
 }
 
 // Runs the named groups (all when `selected` is empty) and prints one GROUP line each; returns the failures.
-int RunEditorGroups(const fs::path& base, const fs::path& source, const std::set<std::string>& selected) {
+int RunEditorGroups(const fs::path& base, const fs::path& source, const std::set<std::string>& selected, const std::string& mode) {
     const bool data = GameDataPresent(source);
-    for (const EditorGroup& group : EditorGroups(base, source)) {
+    const std::vector<EditorGroup> groups = EditorGroups(base, source);
+    testprogress::Reporter::Options options;
+    options.suite = "Character Editor";
+    for (const EditorGroup& group : groups) {
+        if (selected.empty() || selected.count(group.name)) options.groups.push_back(group.name);
+    }
+    const fs::path history_path = fs::temp_directory_path() / "dcp_test_progress" / ("save-editor-" + mode + ".txt");
+    options.history = testprogress::LoadHistory(history_path);
+    options.runner = testprogress::RunnerProgressRequested();
+    options.interval_ms = testprogress::DefaultIntervalMs(options.runner, testprogress::StdoutInteractive());
+    options.checks = [] { return int64_t(g_checks.load(std::memory_order_relaxed)); };
+    testprogress::Reporter reporter(std::move(options));
+    g_progress = &reporter;
+    reporter.StartHeartbeat();
+    for (const EditorGroup& group : groups) {
         if (!selected.empty() && !selected.count(group.name)) continue;
         const int checks = g_checks, failures = g_failures;
+        reporter.BeginGroup(group.name);
         const auto started = std::chrono::steady_clock::now();
         group.run();
         const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-        const char* state = g_failures != failures ? "FAIL" : group.needs_game && !data ? "NO_DATA" : "PASS";
-        std::printf("GROUP|%s|%s|checks=%d|ms=%lld\n", group.name, state, g_checks - checks, ms);
+        const testprogress::State state = g_failures != failures ? testprogress::State::kFail
+                                          : group.needs_game && !data ? testprogress::State::kNoData : testprogress::State::kPass;
+        reporter.EndGroup(state, g_checks - checks, ms);
+        std::printf("%s\n", testprogress::FormatGroupLine(group.name, state, g_checks - checks, ms).c_str());
         std::fflush(stdout);
     }
+    reporter.Finish(history_path);
+    g_progress = nullptr;
     return g_failures;
 }
 
@@ -7736,9 +7784,9 @@ int main(int argc, char** argv) {
         std::printf("usage: dcp-save-editor-tests [all | release | quick | appearance-translation [synthetic]]\n");
         return 2;
     }
-    RunEditorGroups(base, source, selected);
+    RunEditorGroups(base, source, selected, mode);
     std::error_code cleanup;
     fs::remove_all(base, cleanup);
-    std::printf("%d checks, %d failed\n", g_checks, g_failures);
+    std::printf("%d checks, %d failed\n", g_checks.load(), g_failures);
     return g_failures ? 1 : 0;
 }
