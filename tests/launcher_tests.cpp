@@ -630,10 +630,13 @@ void TestLogRedirect(const fs::path& base) {
 // project's DCP_* names, and none of them can bring back an inherited setting that changes the rendering.
 void TestEnvironmentVariables() {
     const fs::path source(DCP_SOURCE_DIR);
-    // Unix/macOS branches of vendored shadPS4 code, the Linux AppImage's own path and desktop session, and the
-    // Gamescope session (gpu/shim/dcp_present.h, never read on Windows).
-    const std::vector<std::string> platform = {"HOME",     "XDG_DATA_HOME", "VK_DRIVER_FILES", "APPIMAGE",
-                                               "USER",     "DISPLAY",       "GAMESCOPE_WAYLAND_DISPLAY"};
+    // Unix/macOS branches of vendored shadPS4 code, the Linux AppImage's own path and desktop session, the Gamescope
+    // session (gpu/shim/dcp_present.h) and the Steam-on-Wayland window backend choice (src/dcp_video_backend.h); none is
+    // read on Windows.
+    const std::vector<std::string> platform = {"HOME",          "XDG_DATA_HOME",   "VK_DRIVER_FILES",
+                                               "APPIMAGE",      "USER",            "DISPLAY",
+                                               "GAMESCOPE_WAYLAND_DISPLAY",        "SteamGameId",
+                                               "SteamAppId",    "XDG_SESSION_TYPE", "WAYLAND_DISPLAY"};
     std::vector<std::string> names, inherited;
     int files = 0;
     for (const char* dir : {"src", "launcher", "gpu/shim", "gpu/shadps4"}) {

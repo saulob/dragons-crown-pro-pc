@@ -93,8 +93,11 @@ const char *dcp_text_translation(const char *settings_file, const char *image_di
 /* The saved custom character looks of the build's title: DRACRO.CPK byte ranges that add one atlas per customized
  * character, and the instances the appearance hooks name them by. `online` also reserves the textures other players'
  * looks are built into (dcp_remote_appearance_start). The archive's file name, or NULL when no look applies.
- * `message` lists what was applied or skipped. */
-const char *dcp_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, int online, uint64_t *length,
+ * `message` lists what was applied or skipped. With a nonzero `base_length`, the archive is built on the overlay already
+ * registered for it (its length and patches): `length` is the final length and `patches` only the new ones, to be added
+ * to that overlay (runtime_file_overlay_extend). */
+const char *dcp_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, int online,
+                                  uint64_t base_length, const DcpFilePatch *base_patches, size_t base_count, uint64_t *length,
                                   DcpFilePatch **patches, size_t *count, const AppearanceInstance **instances,
                                   size_t *instance_count, char *message, size_t message_size);
 

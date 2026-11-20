@@ -509,7 +509,7 @@ void TestPadSamplingUntouched() {
     // The trace only reads the sampled state, after sampling, and only when switched on.
     CHECK(Contains(pad, "static void trace_read(const PadData *d) {"));
     CHECK(Contains(pad, "    if (!dcpgpu_latency_trace_enabled()) return;"));
-    CHECK(Contains(pad, "    sample(slot,data); ++reads;\n    if (slot==0) trace_read(data);\n"));
+    CHECK(Contains(pad, "    sample(slot,data); ++reads;\n    if (slot==0) {\n        trace_read(data);\n"));
     CHECK(!Contains(pad, "DCP_INPUT_LATENCY_TRACE\")"));
 }
 

@@ -110,22 +110,6 @@ static uint64_t device_identity(SDL_JoystickID id) {
     return hash ? hash : 1;
 }
 static bool steam_virtual(uint16_t vendor, uint16_t product) { return vendor==0x28de && product==0x11ff; }
-/* DEBUG_SAULO: local controller ownership transitions until DCP-PLJSPF is confirmed in the field. */
-static uint32_t pressed_generation[MAX_PADS];
-static void log_owner_snapshot(const char *why) {
-    printf("Local controller diag: %s; generation %u",why,owners.generation);
-    for (int i=0;i<MAX_PADS;++i) {
-        if (!owners.active[i].used) { printf(", P%d=none",i+1); continue; }
-        printf(", P%d=instance %u player index %d",i+1,(unsigned)owners.active[i].device.instance,owners.active[i].device.player_index);
-    }
-    putchar('\n');
-}
-static void log_first_press(int slot, uint32_t buttons) {
-    if (!buttons || !owners.active[slot].used || pressed_generation[slot]==owners.generation) return;
-    pressed_generation[slot]=owners.generation;
-    printf("Local controller diag: first press on P%d (instance %u) since generation %u\n",slot+1,
-           (unsigned)owners.active[slot].device.instance,owners.generation);
-} /* DEBUG_SAULO */
 static char keys_file[4200];
 /* The player's own mappings. SDL_GAMECONTROLLERCONFIG, which SDL reads itself, keeps priority over them. */
 static void load_user_gamepad_mappings(void) {
@@ -171,9 +155,6 @@ static void open_assigned(const DcpPadAssignment *a) {
     const unsigned vendor=SDL_GetGamepadVendor(g), product=SDL_GetGamepadProduct(g);
     printf("Runtime: gamepad %d connected: %s (%04x:%04x%s)\n",slot+1,SDL_GetGamepadName(g),vendor,product,
            steam_virtual(vendor,product) ? ", Steam Input virtual gamepad" : "");
-    printf("Local controller diag: P%d <- instance %u, player index %d, reason %s, previous P%d, swapped with P%d, generation %u\n",
-           slot+1,(unsigned)a->device.instance,a->device.player_index,dcp_pad_assign_reason_name(a->reason),
-           a->previous_slot+1,a->swapped_with+1,a->generation); /* DEBUG_SAULO */
     dcp_pad_telemetry_record(a);
     runtime_user_login(slot+1);
 }
@@ -191,7 +172,6 @@ static void refresh_gamepads(void) {
         if (!slots[i].gamepad || SDL_GamepadConnected(slots[i].gamepad)) continue;
         printf("Runtime: gamepad %d disconnected\n",i+1);
         release_gamepad(i);
-        log_owner_snapshot("disconnect"); /* DEBUG_SAULO */
     }
     static uint64_t last_scan;
     const uint64_t now=now_us();
@@ -333,33 +313,6 @@ static void merge_touchscreen(PadData *d, const DcpTouchSample *screen) {
         d->touch_count=1;
     }
 }
-static void log_touchscreen_sample(const DcpTouchSample *screen) { /* DEBUG_SAULO */
-    static DcpTouchSample last; /* DEBUG_SAULO */
-    static int lines; /* DEBUG_SAULO */
-    if (lines>=80 || (screen->touch==last.touch && screen->buttons==last.buttons)) return; /* DEBUG_SAULO */
-    ++lines; /* DEBUG_SAULO */
-    last=*screen; /* DEBUG_SAULO */
-    printf("Touch diag: pad sample touch=%d x=%u y=%u id=%u touchpad_click=%d\n",screen->touch,(unsigned)screen->x,(unsigned)screen->y,(unsigned)screen->id,(screen->buttons&BTN_TOUCHPAD)!=0); /* DEBUG_SAULO */
-} /* DEBUG_SAULO */
-static void log_pointer_sample(const DcpMouseSample *mouse) { /* DEBUG_SAULO: DCP-2TG3WE game-facing finger per second */
-    static uint64_t window_start, last_read, max_gap; /* DEBUG_SAULO */
-    static int lines, reads, moving, lifted, had_touch, px, py; /* DEBUG_SAULO */
-    static long step; /* DEBUG_SAULO */
-    const uint64_t now=SDL_GetTicksNS(); /* DEBUG_SAULO */
-    if (last_read && now-last_read>max_gap) max_gap=now-last_read; /* DEBUG_SAULO */
-    last_read=now; /* DEBUG_SAULO */
-    if (mouse->pointer) { /* DEBUG_SAULO */
-        if (!window_start) { window_start=now; max_gap=0; } /* DEBUG_SAULO */
-        ++reads; /* DEBUG_SAULO */
-        if (!mouse->touch) ++lifted; /* DEBUG_SAULO */
-        else if (had_touch && (mouse->x!=px || mouse->y!=py)) { ++moving; step+=labs((long)mouse->x-px)+labs((long)mouse->y-py); } /* DEBUG_SAULO */
-    } /* DEBUG_SAULO */
-    had_touch=mouse->touch; px=mouse->x; py=mouse->y; /* DEBUG_SAULO */
-    if (lines>=120 || !window_start || now-window_start<1000000000ull) return; /* DEBUG_SAULO */
-    ++lines; /* DEBUG_SAULO */
-    printf("Pointer diag: pad 1s pointer_reads=%d moving_reads=%d lifted_reads=%d finger_step=%ld max_read_gap_ms=%.1f\n",reads,moving,lifted,step,max_gap/1e6); /* DEBUG_SAULO */
-    window_start=0; reads=moving=lifted=0; step=0; /* DEBUG_SAULO */
-} /* DEBUG_SAULO */
 static void key_axis(uint8_t *axis, bool negative, bool positive) {
     if (negative || positive) *axis=(uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0));
 }
@@ -387,8 +340,6 @@ static void sample_host(int slot, PadData *d) {
     if (slot==0) {
         dcp_mouse_sample(dcp_mouse_global(),&mouse);
         dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);
-        log_touchscreen_sample(&screen); /* DEBUG_SAULO */
-        log_pointer_sample(&mouse); /* DEBUG_SAULO */
         if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);
         pointer_owns_touch=mouse.pointer || screen.touch;
     }
@@ -402,7 +353,6 @@ static void sample_host(int slot, PadData *d) {
             if (SDL_GetGamepadButton(g,(SDL_GamepadButton)source)) d->buttons|=pad_map.entries[i].ps;
         }
         const uint32_t mapped=d->buttons;
-        log_first_press(slot,mapped); /* DEBUG_SAULO */
         d->left_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTX)); d->left_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTY));
         d->right_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTX)); d->right_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTY));
         d->l2=trigger(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFT_TRIGGER)); d->r2=trigger(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
@@ -695,7 +645,6 @@ static ABI int32_t pad_open(int32_t user, int32_t type, int32_t index, const voi
     if (already) return ERR_ALREADY_OPENED;
     printf("Runtime: pad %d opened for user %d (%s)\n",player,user,player==1 ? "SDL gamepad or keyboard" : "SDL gamepad");
     pthread_mutex_lock(&lock);
-    log_owner_snapshot("pad opened"); /* DEBUG_SAULO */
     pthread_mutex_unlock(&lock);
     return player;
 }

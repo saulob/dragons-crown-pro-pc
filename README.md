@@ -16,6 +16,8 @@
 
 ## Features
 
+- **Character Editor** (new, exclusive to this PC port): on the launcher's **Editor** page, pick a save and a character, then recolor individual parts of its appearance, hide supported parts, or edit its name, level, skill points and HP. Each saved character keeps its own look, and other players with a compatible version see it online. See [Editor](#editor)
+- **Comms Wheel (Quick Chat)** (new): eight quick messages for online rooms (Ready, Hello, Need help, Let's go, Group up, Follow me, Good job, Thanks), shown in the game's own greeting balloon, from a controller or the keyboard, with no typing or voice chat. See [Comms Wheel (Quick Chat)](#comms-wheel-quick-chat)
 - **Boss Battle** (new, exclusive to this PC port): fight any of the game's **20 bosses** straight from the Inn, or all of them in a row with **Fight All**, with your campaign protected and your own attempt statistics. See [Boss Battle](#boss-battle)
 - **Unlock Labyrinth of Chaos** and **Unlock Ultimate + Tower of Mirages**: two independent options that open the game's endgame content early, once the Stables are open
 - **Mouse Controls**: attack with the mouse buttons, and hold **Pointer Control** (Middle Mouse) to move the game's own red hand pointer with the mouse, with an adjustable **Mouse Sensitivity**
@@ -95,6 +97,13 @@ Both players need **Online play** On. With it Off, the game runs offline exactly
 - Real-world testing has so far focused on two-player sessions. Dragon's Crown supports up to four players in a room, but four-player online on the PC port has not been fully validated yet.
 - Online play on Linux and Steam Deck is experimental: it uses the same code as Windows, but it has not yet been tested on real Linux or Steam Deck hardware (see [Linux and Steam Deck](#linux-and-steam-deck)).
 
+### Comms Wheel (Quick Chat)
+
+- **Controller**: press **D-pad Up** to open the wheel, pick a message with the right stick, **Cross (A)** sends it and **Circle (B)** closes the wheel.
+- **Keyboard and mouse**: press **T** (rebindable on the Controls page), pick with the mouse or the direction keys, send with the left mouse button, cancel with Escape or the right mouse button.
+- It opens with Online Play on, in a room of at least two players. The message appears in the sender's greeting balloon, in each player's own Menu & Subtitles language. One message every 2 seconds per player.
+- Only a message number travels, never text. The online service counts how often each of the eight messages is used, with no player, room or time attached. See [docs/ONLINE.md](docs/ONLINE.md#comms-wheel).
+
 ### Ping and frame counter
 
 - **F2** shows or hides the frame counter (frames per second and frame time).
@@ -156,7 +165,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v1.3.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v1.4.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
 4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
@@ -287,6 +296,14 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 - **Japanese Menu Buttons** (Controls page, Off by default): Off, Cross (A) confirms and Circle (B) cancels in the menus on every game build, including the Japanese and Asia/Hong Kong builds; On swaps them, as in the Japanese release. Combat controls do not change. Applies at the next game start
 - **F1** (or **L3 + R3** on a controller) opens the Options menu: most of the launcher's Display, Graphics and Gameplay settings, a Controls page that lists the hotkeys, and the Cheats page of the F10 menu. Changes are saved to the same `dcp.ini` as the launcher. The Renderer, Render resolution, Aspect Ratio, True Ultrawide, Texture filtering, Frame rate and a few Gameplay options are saved and apply the next time the game starts (close it and start it again); the rest apply at once. See [docs/LAUNCHER.md](docs/LAUNCHER.md). **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F2** shows or hides the frame counter. **F3** shows or hides the Ping while Online Play is on (see [docs/ONLINE.md](docs/ONLINE.md)). An experimental AMD water workaround for black regions under characters standing in water is On on AMD graphics cards and Off elsewhere. Window size, monitor, graphics card, language and the online settings are set in the launcher.
 - **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged.
+
+### Editor
+- Finds the installed game's saves by itself. Choose the **Save Data** (DATA slot), then a character from the list.
+- **Character Editor**: the character's name, level, skill points and HP.
+- **Edit Appearance**: click a part on the preview (or choose it from the list), then set its **Part Color** or make it **Hidden** where the part supports it. **Random** and **Reset Part** act on one part, **All Colors Random** and **Reset Custom** on the whole character. With no custom change a character is drawn exactly as the game draws it. A Fighter whose helmet is hidden shows the game's own bare head.
+- Nothing is written until **Apply Changes**, which backs up the save first; **Discard Changes** restores what was there. Custom part colors and hidden parts are kept in `user\character_appearance.dat`; the save itself receives only the name, level, skill points, HP and the game's own base color.
+- Online, other players see your custom look when their port version supports it; older versions draw your character with its normal colors.
+- The in-game looks need the game's character drawing code, found on the USA, Japanese and Asia / Hong Kong 1.00 builds. The Asia / Hong Kong 1.02 and European 1.03 executables could not be checked yet; if that code is not found there, characters are drawn with their normal look.
 
 ### Trophies
 - The game's PlayStation 4 trophies are tracked locally and offline, on this PC only: no PSN connection, no account, no sync. The list and icons come from your own game package, and the **Trophies** launcher page shows your progress, the trophies and their grades.

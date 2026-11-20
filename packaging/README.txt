@@ -117,6 +117,14 @@ PLAYING
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start. The cheats apply to
   every local human player; the Ally cheats apply to AI allies only.
+- Character Editor (exclusive to this PC port): the launcher's Editor page
+  finds your saves; pick a DATA slot and a character to recolor or hide
+  individual parts of its appearance, or edit its name, level, skill points and
+  HP. Nothing is written until Apply Changes, which backs up the save first.
+  Players with a compatible version see your custom look online.
+- Comms Wheel (Quick Chat): in an online room, D-pad Up (keyboard: T) opens eight quick
+  messages (Ready, Hello, Need help, Let's go, Group up, Follow me, Good job,
+  Thanks), shown in the game's own greeting balloon.
 - Boss Battle: turn on Gameplay > Enable Boss Battle, then choose Boss Battle
   in the Inn menu to fight any of the 20 bosses, or all of them with Fight All.
   Your campaign save is protected during the fights.

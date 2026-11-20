@@ -345,8 +345,8 @@ reads "Need help" while a Brazilian Portuguese player reads "Preciso de ajuda".
 - **Network.** Peer datagram type 9 (see Peer transport). Builds without the Comms Wheel ignore it and show nothing.
 - **Native hook.** One hook at the text call inside the game's greeting balloon function, found by its bytes on every
   supported build (`src/comms_bridge.cpp`); the balloon is shown from the player unit's own per-tick update, the same
-  site as the party snapshot. Located on the five boot images that exist locally; the other builds rely on the same
-  structural search and are unproven.
+  site as the party snapshot. Located on the six builds with a local executable (the release matrix of
+  `tools/test.ps1`); Asia/Hong Kong 1.02 and Europe 1.03 rely on the same structural search and are unproven.
 
 ### Comms Wheel statistics
 

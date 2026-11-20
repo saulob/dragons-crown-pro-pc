@@ -5,6 +5,7 @@
 #   tools/build.sh            build build/cmake/linux/bin/dragons_crown_pro
 #   tools/build.sh --clean    delete build/cmake/linux first
 #   tools/build.sh --test     also build and run the focused tests
+#   tools/build.sh --editor   build and run only the Character Editor release tests (no game build)
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
 #
 # Missing tools or libraries are listed; packaging/linux/ci-deps.sh installs them on Ubuntu 20.04 (the release baseline).
@@ -12,14 +13,15 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=$root/build/cmake/linux
 config=RelWithDebInfo
-clean=0 test=0 run=0
+clean=0 test=0 editor=0 run=0
 loader_args=()
 while (($#)); do
     case $1 in
         --clean) clean=1 ;;
         --test) test=1 ;;
+        --editor) editor=1 ;;
         --run) run=1; shift; loader_args=("$@"); break ;;
-        -h|--help) sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -93,9 +95,20 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
     cmake -S "$root" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=$config \
         -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx"
 fi
+if ((editor)); then
+    step 'Building the Character Editor release tests'
+    ninja -C "$build_dir" dcp-save-editor-tests dcp-runtime-overlay-tests dcp-appearance-online-tests
+    step 'Running the runtime file overlay tests (borrowed patch data, read observer, swapped data, layered overlays)'
+    "$build_dir/bin/dcp-runtime-overlay-tests"
+    step 'Running the online appearance tests (recipe, room session, remote textures, seat-aware hooks)'
+    "$build_dir/bin/dcp-appearance-online-tests"
+    step 'Running the Character Editor release groups'
+    "$build_dir/bin/dcp-save-editor-tests" release
+    exit 0
+fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-runtime-tests dcp-sigpipe-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-save-editor-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-comms-wheel-ui-tests dcp-runtime-tests dcp-sigpipe-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -123,6 +136,12 @@ if ((test)); then
     "$build_dir/bin/dcp-party-tests"
     step 'Running the Comms Wheel tests'
     "$build_dir/bin/dcp-comms-tests"
+    step 'Running the Comms Wheel session tests (rules, telemetry batching, the real send entry point)'
+    "$build_dir/bin/dcp-comms-session-tests"
+    step 'Running the Comms Wheel production send tests (one accepted send, one count)'
+    "$build_dir/bin/dcp-comms-session-runtime-tests"
+    step 'Running the Comms Wheel UI tests (input glue, layout, key binding)'
+    "$build_dir/bin/dcp-comms-wheel-ui-tests"
     step 'Running the Discord Rich Presence tests'
     "$build_dir/bin/dcp-discord-tests"
     step 'Running the runtime tests (memory, fibers)'
@@ -137,6 +156,8 @@ if ((test)); then
     "$build_dir/bin/dcp-runtime-overlay-tests"
     step 'Running the online appearance tests (recipe, room session, remote textures, seat-aware hooks)'
     "$build_dir/bin/dcp-appearance-online-tests"
+    step 'Running the Character Editor release groups (saves, identity, looks, art, composition with the translation overlay)'
+    "$build_dir/bin/dcp-save-editor-tests" release
     step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the mouse input tests (Steam Deck trackpad responsiveness, touchscreen touchpad)'

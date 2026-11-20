@@ -73,6 +73,7 @@ struct CustomOverlay {
 // another player's hidden helmet can be drawn; an overlay is made even with no saved look.
 std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& archive, const std::vector<CustomInstance>& instances,
                                                 CharacterArt& art, std::vector<std::string>& notes,
-                                                const std::vector<RemoteTextureSet>* remote = nullptr);
+                                                const std::vector<RemoteTextureSet>* remote = nullptr,
+                                                const ArchiveOverlay* base = nullptr);
 
 } // namespace dcp

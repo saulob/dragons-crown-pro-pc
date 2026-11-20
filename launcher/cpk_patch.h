@@ -171,11 +171,19 @@ std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& a
                                                   std::string* error = nullptr);
 // The same with existing entries replaced too: their rows point at the new data, stored uncompressed past `length`.
 // `reserved` entries (path, size) are listed after the added ones with no bytes of their own (ArchiveOverlay::reserved).
+// With `base`, the archive is read as that overlay shows it and `length` is ignored: new bytes start at base->length and
+// the result holds only the new patches (the header rewrite supersedes the base's), to be composed with ComposeOverlays.
 std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path& archive, uint64_t length,
                                                     std::span<const std::pair<std::string, std::vector<uint8_t>>> replaced,
                                                     std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
                                                     std::string* error = nullptr,
-                                                    std::span<const std::pair<std::string, uint64_t>> reserved = {});
+                                                    std::span<const std::pair<std::string, uint64_t>> reserved = {},
+                                                    const ArchiveOverlay* base = nullptr);
+// The overlay a reader sees with `layer` (built on `base`) over `base`: later patches win where they overlap.
+ArchiveOverlay ComposeOverlays(const ArchiveOverlay& base, const ArchiveOverlay& layer);
+// Empty when every patch of `layer` lies at or after `base_length` or rewrites the header, and no two of its patches overlap;
+// else what is wrong.
+std::string LayerProblem(const ArchiveOverlay& layer, uint64_t base_length);
 // The archive as a reader sees it with the overlay laid on: its listing, and the bytes of a range.
 bool OpenOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, CpkArchive& out,
                   std::string* error = nullptr);

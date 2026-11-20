@@ -143,7 +143,6 @@ bool CharacterArt::LoadPortraits() {
         }
         portraits_[klass] = RenderSprite(request);
     }
-    std::printf("Editor: native portraits rendered from stage/Interface.mbs\n"); // DEBUG_SAULO
     return true;
 }
 
@@ -242,34 +241,13 @@ const SpriteImage* CharacterArt::Preview(CharacterClass klass, int color) {
     std::optional<SpriteImage>& slot = previews_[key];
     if (!LoadFigure(klass, color)) return nullptr;
     slot = RenderFigure(nullptr);
-    std::printf("Editor: native preview %s colour %d from %s, %dx%d\n", std::string(ClassName(klass)).c_str(), color,
-                NativeColorAtlas(klass, color).c_str(), slot->width, slot->height); // DEBUG_SAULO
     return &*slot;
-}
-
-void CharacterArt::LogCustomLook(CharacterClass klass, int color, const CustomLook& look) {
-    std::string line = "Editor: Custom " + std::string(ClassName(klass)) + " base " + std::to_string(color);
-    if (!look.active()) {
-        line += look.enabled ? " exact native passthrough" : " off";
-    } else {
-        line += " overrides";
-        for (const PartLook& part : look.parts) {
-            if (part.color || part.hidden) line += " " + part.key;
-        }
-    }
-    if (line == last_custom_log_) return;
-    last_custom_log_ = line;
-    std::printf("%s\n", line.c_str()); // DEBUG_SAULO
 }
 
 const SpriteImage* CharacterArt::CustomPreview(CharacterClass klass, int color, const CustomLook& look) {
     if (color < 0 || color >= kNativeColorCount) return nullptr;
-    if (!look.active()) {
-        LogCustomLook(klass, color, look);
-        return Preview(klass, color);
-    }
+    if (!look.active()) return Preview(klass, color);
     if (custom_ && custom_->klass == klass && custom_->color == color && custom_->look == look) return &custom_->image;
-    LogCustomLook(klass, color, look);
     if (!LoadFigure(klass, color)) return nullptr;
     custom_ = CustomRender{klass, color, look, RenderFigure(&look)};
     return &custom_->image;
@@ -353,7 +331,6 @@ const std::vector<RegionMap>* CharacterArt::Regions(CharacterClass klass) {
     }
     std::optional<std::vector<RegionMap>> maps =
         ClassRegions(klass, [this](const std::string& entry) { return Read(entry); }, sources_.cache_dir, identity);
-    if (maps) std::printf("Editor: custom regions ready for %s\n", std::string(ClassName(klass)).c_str()); // DEBUG_SAULO
     std::optional<std::vector<RegionMap>>& slot = regions_[klass];
     slot = std::move(maps);
     return slot ? &*slot : nullptr;

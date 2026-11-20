@@ -24,7 +24,6 @@
 #include "appearance_session.h"
 #include "boss_battle_online.h"
 #include "dcp_party.h"
-#include "early_story_diag.h"
 #include "early_story_session.h"
 #include "net/relay_ends.h"
 #include "net/relay_frame.h"
@@ -719,14 +718,6 @@ void WatchStorySession(uint64_t now) {
     session.pump_generation = g.socket ? g.socket->pump_generation() : 0;
     const std::vector<net::WatchLink> links = peer_links();
     for (const std::string& line : g.story_watch.Update(now, session, links)) std::printf("%s\n", line.c_str());
-    EarlyStoryDiagRoom room;
-    room.room = g.room != 0;
-    room.members = g.members.size();
-    room.lobby = g.down ? "down" : g.lost ? "lost" : g.up ? "up" : "connecting";
-    room.relay_on = g.socket && g.socket->relay_enabled();
-    room.relay = g.socket ? g.socket->relay_stats() : net::RelayStats{};
-    room.own_step = early_story_own_step();
-    early_story_diag(now, session, links, room);
 }
 
 void OnOwnStoryStep(int) {

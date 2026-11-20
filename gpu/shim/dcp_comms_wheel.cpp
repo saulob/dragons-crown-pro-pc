@@ -49,6 +49,8 @@ MouseAccumulator g_mouse;
 std::atomic<bool> g_left_click{false};
 std::atomic<bool> g_cancel_click{false};
 std::atomic<uint32_t> g_captured_buttons{0};
+
+uint32_t ButtonBit(uint8_t button) { return button < 32 ? 1u << button : 0u; }
 ImTextureData* g_atlas = nullptr;
 bool g_atlas_failed = false;
 
@@ -94,11 +96,11 @@ bool HandleEvent(const SDL_Event& event) {
         } else if (event.button.button == SDL_BUTTON_RIGHT) {
             g_cancel_click = true;
         }
-        g_captured_buttons |= 1u << event.button.button;
+        g_captured_buttons |= ButtonBit(event.button.button);
         return true;
     }
     case SDL_EVENT_MOUSE_BUTTON_UP: {
-        const uint32_t bit = 1u << event.button.button;
+        const uint32_t bit = ButtonBit(event.button.button);
         return (g_captured_buttons.fetch_and(~bit) & bit) != 0;
     }
     case SDL_EVENT_KEY_DOWN:

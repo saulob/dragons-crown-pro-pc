@@ -220,7 +220,6 @@ void LauncherHost::ConfigureVsync() {
         SDL_SetRenderVSync(renderer_, 0);
     }
     std::printf("%s\n", PacingModeLine(renderer_name_, state).c_str());
-    std::printf("Launcher: frame pacing set=%d get=%d surface_vsync=%d\n", set ? 1 : 0, value, surface_value); // DEBUG_SAULO
 }
 
 void LauncherHost::Show() {
@@ -319,16 +318,13 @@ bool LauncherHost::Minimized() const {
 
 bool LauncherHost::WaitForFrame() {
     for (;;) {
-        const int64_t polling = NowNs();
         if (!PumpEvents()) {
             return false;
         }
         const int64_t polled = NowNs();
-        debug_.poll_ns += polled - polling; // DEBUG_SAULO
         if (Minimized()) {
             pacer_.Reset();
             monitor_.Reset();
-            ++debug_.minimized; // DEBUG_SAULO
             SDL_Delay(kMinimizedSleepMs);
             continue;
         }
@@ -339,7 +335,6 @@ bool LauncherHost::WaitForFrame() {
         SDL_DelayNS(static_cast<Uint64>(next.wait_ns));
         const int64_t waited = NowNs() - polled;
         monitor_.Waited(waited);
-        debug_.wait_ns += waited; // DEBUG_SAULO
     }
 }
 
@@ -356,24 +351,6 @@ void LauncherHost::NoteFrameDrawn(int64_t now_ns, const FrameTimes& times) {
                 std::printf("%s\n", PresentStallLine(renderer_name_, *sample).c_str());
             }
         }
-    }
-    // DEBUG_SAULO
-    ++debug_.frames;
-    debug_.build_ns += times.build_ns;
-    debug_.submit_ns += times.submit_ns;
-    debug_.present_ns += times.present_ns;
-    if (debug_.start_ns == 0) {
-        debug_.start_ns = now_ns;
-    } else if (now_ns - debug_.start_ns >= kNsPerSecond && debug_.lines < 120) {
-        const auto ms = [](int64_t ns) { return static_cast<double>(ns) / 1e6; };
-        std::printf("Launcher: loop %s frames=%d total_ms=%.0f poll_ms=%.1f build_ms=%.1f submit_ms=%.1f present_ms=%.1f "
-                    "wait_ms=%.1f minimized_polls=%d\n",
-                    renderer_name_.c_str(), debug_.frames, ms(now_ns - debug_.start_ns), ms(debug_.poll_ns),
-                    ms(debug_.build_ns), ms(debug_.submit_ns), ms(debug_.present_ns), ms(debug_.wait_ns), debug_.minimized);
-        const int lines = debug_.lines + 1;
-        debug_ = {};
-        debug_.start_ns = now_ns;
-        debug_.lines = lines;
     }
 }
 

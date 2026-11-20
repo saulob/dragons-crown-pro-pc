@@ -230,7 +230,8 @@ std::optional<LookTextures> BuildLookTextures(std::span<const uint8_t> native_at
 
 std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& archive_path,
                                                 const std::vector<CustomInstance>& instances, CharacterArt& art,
-                                                std::vector<std::string>& notes, const std::vector<RemoteTextureSet>* remote) {
+                                                std::vector<std::string>& notes, const std::vector<RemoteTextureSet>* remote,
+                                                const ArchiveOverlay* base) {
     CpkArchive archive;
     std::string error;
     if ((instances.empty() && !remote) || !archive.Open(archive_path, &error)) {
@@ -297,12 +298,6 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
         runtime.push_back(served);
         notes.push_back("custom texture instance " + instance.entry + " created for " + instance.instance.Text() + " (" +
                         instance.name + ")");
-        std::string overridden;
-        for (const PartLook& part : instance.look.parts) {
-            if (!part.color && !part.hidden) continue;
-            overridden += (overridden.empty() ? "" : ", ") + PartLabel(klass, part.key);
-        }
-        notes.push_back("base " + std::to_string(instance.instance.base) + " + explicit overrides " + overridden); // DEBUG_SAULO
         for (const PartLook& part : instance.look.parts) {
             const std::string label = PartLabel(klass, part.key);
             if (part.hidden) notes.push_back("hidden " + label);
@@ -322,25 +317,43 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
     }
     if (added.empty() && reserved.empty()) return std::nullopt;
     std::error_code ec;
-    const uint64_t length = std::filesystem::file_size(archive_path, ec);
+    const uint64_t length = base ? base->length : std::filesystem::file_size(archive_path, ec);
     if (ec) {
         notes.push_back("cannot read the size of " + Utf8(archive_path.filename()));
         return std::nullopt;
     }
-    std::optional<ArchiveOverlay> overlay = OverlayChangedEntries(archive_path, length, replaced, added, &error, reserved);
+    if (base) {
+        CpkArchive translated;
+        if (OpenOverlaid(archive_path, *base, translated, &error)) {
+            for (const auto& [path, data] : replaced) {
+                const CpkEntry* before = archive.Find(path);
+                const CpkEntry* now = translated.Find(path);
+                if (before && now && before->offset != now->offset) notes.push_back(path + " is also changed by the translation; the Editor's version is served");
+            }
+        }
+        error.clear();
+    }
+    std::optional<ArchiveOverlay> overlay = OverlayChangedEntries(archive_path, length, replaced, added, &error, reserved, base);
     if (!overlay) {
         notes.push_back("overlay failed: " + error);
         return std::nullopt;
     }
+    if (const std::string problem = LayerProblem(*overlay, length); !problem.empty()) {
+        notes.push_back("overlay refused: " + problem);
+        return std::nullopt;
+    }
+    std::optional<ArchiveOverlay> stacked;
+    if (base) stacked = ComposeOverlays(*base, *overlay);
+    const ArchiveOverlay& composed = stacked ? *stacked : *overlay;
     CpkArchive served;
-    if (!OpenOverlaid(archive_path, *overlay, served, &error)) {
+    if (!OpenOverlaid(archive_path, composed, served, &error)) {
         notes.push_back("the overlaid archive cannot be read back: " + error);
         return std::nullopt;
     }
     for (const auto* files : {&added, &replaced}) {
         for (const auto& [path, data] : *files) {
             const CpkEntry* entry = served.Find(path);
-            if (!entry || entry->size != data.size() || ReadOverlaid(archive_path, *overlay, entry->offset, entry->size) != data) {
+            if (!entry || entry->size != data.size() || ReadOverlaid(archive_path, composed, entry->offset, entry->size) != data) {
                 notes.push_back("the overlaid archive does not hold " + path);
                 return std::nullopt;
             }
@@ -451,7 +464,19 @@ void PrepareRemote() {
 
 } // namespace
 
+namespace {
+
+dcp::ArchiveOverlay OverlayOfPatches(uint64_t length, const DcpFilePatch* patches, size_t count) {
+    dcp::ArchiveOverlay overlay;
+    overlay.length = length;
+    for (size_t i = 0; i < count; ++i) overlay.patches.emplace_back(patches[i].offset, std::vector<uint8_t>(patches[i].data, patches[i].data + patches[i].size));
+    return overlay;
+}
+
+} // namespace
+
 extern "C" const char* dcp_custom_appearance(const char* image_dir, const char* app0, const char* user_dir, int online,
+                                             uint64_t base_length, const DcpFilePatch* base_patches, size_t base_count,
                                              uint64_t* length, DcpFilePatch** patches, size_t* count,
                                              const AppearanceInstance** instances, size_t* instance_count, char* message,
                                              size_t message_size) {
@@ -479,9 +504,12 @@ extern "C" const char* dcp_custom_appearance(const char* image_dir, const char* 
         if (!remote_plan) notes.push_back("other players' looks unavailable: " + error);
     }
     CharacterArt art(sources);
-    std::optional<CustomOverlay> overlay = planned.empty() && !remote_plan
-                                               ? std::nullopt
-                                               : BuildCustomOverlay(archive, planned, art, notes, remote_plan ? &*remote_plan : nullptr);
+    std::optional<ArchiveOverlay> base;
+    if (base_length) base = OverlayOfPatches(base_length, base_patches, base_count);
+    std::optional<CustomOverlay> overlay =
+        planned.empty() && !remote_plan
+            ? std::nullopt
+            : BuildCustomOverlay(archive, planned, art, notes, remote_plan ? &*remote_plan : nullptr, base ? &*base : nullptr);
     std::string text;
     for (const std::string& note : notes) text += (text.empty() ? "" : "; ") + note;
     std::snprintf(message, message_size, "%s", text.c_str());

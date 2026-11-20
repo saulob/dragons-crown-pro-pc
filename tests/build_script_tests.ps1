@@ -86,7 +86,35 @@ if ($sync.Count -ne 1 -or $ninja.Count -eq 0 -or $sync[0].Extent.StartOffset -gt
     $failures++
 }
 
+$selectorTargets = @($commands | Where-Object { $_.GetCommandName() -eq 'ninja' } | ForEach-Object { $_.CommandElements } |
+        Where-Object { $_ -is [Management.Automation.Language.VariableExpressionAst] -and $_.Splatted })
+$expectedSelectors = 'bossBattleOnlineSuites', 'earlyStorySessionSuites', 'launcherRendererSuites', 'editorTranslationSuites', 'editorReleaseSuites'
+foreach ($name in $expectedSelectors) {
+    if (@($selectorTargets | Where-Object { $_.VariablePath.UserPath -eq $name }).Count -eq 0) {
+        Write-Host "FAIL: a focused selector no longer hands `$$name to ninja; update this test"
+        $failures++
+    }
+}
+foreach ($target in $selectorTargets) {
+    $name = $target.VariablePath.UserPath
+    $assignments = @($testAst.FindAll({
+                param($node)
+                $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+                $node.Left.VariablePath.UserPath -eq $name
+            }, $true))
+    $isList = $assignments.Count -gt 0
+    foreach ($assignment in $assignments) {
+        $value = $assignment.Right.Expression
+        $isList = $isList -and ($value -is [Management.Automation.Language.ArrayExpressionAst] -or $value -is [Management.Automation.Language.ArrayLiteralAst])
+    }
+    if (-not $isList) {
+        Write-Host "FAIL: `$$name is splatted into ninja but is not a list, so PowerShell passes it one character at a time"
+        $failures++
+    }
+}
+
 if ($failures -gt 0) {
     exit 1
 }
-Write-Host "build.ps1 waits for every loader run ($(@($calls).Count) call-operator run(s) checked); test.ps1 refreshes its dependencies first"
+Write-Host "build.ps1 waits for every loader run ($(@($calls).Count) call-operator run(s) checked); test.ps1 refreshes its dependencies first and gives ninja every focused selector's targets as a list ($(@($selectorTargets).Count) checked)"

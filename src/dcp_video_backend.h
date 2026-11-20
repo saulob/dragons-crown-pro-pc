@@ -52,16 +52,6 @@ static inline DcpVideoChoice dcp_video_choose(const DcpVideoEnvironment *e) {
     return DCP_VIDEO_USE_X11;
 }
 
-static inline const char *dcp_video_choice_name(DcpVideoChoice choice) {
-    switch (choice) {
-    case DCP_VIDEO_USE_X11: return "use_x11";
-    case DCP_VIDEO_X11_UNAVAILABLE: return "x11_unavailable";
-    case DCP_VIDEO_KEEP_GAMESCOPE: return "keep_gamescope";
-    case DCP_VIDEO_KEEP_USER_DRIVER: return "keep_user_driver";
-    default: return "unchanged";
-    }
-}
-
 /* Telemetry lines for one session: only event names, the session type, the requested backend and yes/no values. */
 static inline size_t dcp_video_telemetry(DcpVideoChoice choice, char lines[][DCP_VIDEO_LINE_SIZE]) {
     const char *gamescope = choice == DCP_VIDEO_KEEP_GAMESCOPE ? "yes" : "no";
@@ -113,12 +103,6 @@ static inline DcpVideoChoice dcp_video_backend_prepare(int report) {
         char lines[DCP_VIDEO_MAX_LINES][DCP_VIDEO_LINE_SIZE];
         const size_t n = dcp_video_telemetry(choice, lines);
         for (size_t i = 0; i < n; ++i) puts(lines[i]);
-        /* DEBUG_SAULO: remove after the reporter's next log */
-        printf("DEBUG_SAULO: video backend steam=%s session=%s gamescope=%s x11_listed=%s display=%s user_driver=%s choice=%s requested=%s\n",
-               dcp_video_steam_launch(&e) ? "yes" : "no", dcp_video_set(e.session_type) ? e.session_type : "unset",
-               dcp_video_set(e.gamescope_display) ? "yes" : "no", e.x11_driver_listed ? "yes" : "no",
-               dcp_video_set(e.display) ? "yes" : "no", dcp_video_set(e.video_driver) ? "yes" : "no",
-               dcp_video_choice_name(choice), choice == DCP_VIDEO_USE_X11 ? DCP_VIDEO_X11_FIRST : "default");
     }
     return choice;
 }

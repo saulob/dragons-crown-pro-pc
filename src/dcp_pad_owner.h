@@ -56,7 +56,6 @@ void dcp_pad_owners_release(DcpPadOwners *owners, int slot);
 /* Gives the devices of one scan that have no player yet a free player; returns how many assignments it wrote. */
 size_t dcp_pad_owners_assign(DcpPadOwners *owners, const DcpPadDevice *devices, size_t count, DcpPadAssignment *out,
                              size_t capacity);
-const char *dcp_pad_assign_reason_name(DcpPadAssignReason reason);
 
 typedef enum {
     DCP_PAD_EVENT_ASSIGNMENT,   /* local_controller_assignment */

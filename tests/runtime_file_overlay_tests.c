@@ -163,6 +163,30 @@ int main(void) {
 
     test_read_observer();
 
+    /* A later layer grows the overlay: its patches come after the registered ones and win where they overlap. */
+    uint64_t described = 0;
+    RuntimeFilePatch registered[4];
+    CHECK(runtime_file_overlay_describe("/app0/arch.cpk", &described, registered, 4) == 1 && described == 32);
+    CHECK(registered[0].offset == 4 && registered[0].size == 8);
+    CHECK(runtime_file_overlay_describe("/app0/plain.cpk", &described, registered, 4) == 0 && described == 0);
+    unsigned char *tail = malloc(8), *header = malloc(2);
+    memset(tail, 'T', 8);
+    memset(header, 'H', 2);
+    const RuntimeFilePatch layer[2] = {{32, 8, tail}, {4, 2, header}};
+    CHECK(runtime_file_overlay_extend("/app0/arch.cpk", 16, layer, 2) == -1);
+    CHECK(runtime_file_overlay_extend("/app0/plain.cpk", 48, layer, 2) == -1);
+    const RuntimeFilePatch past_end = {44, 8, tail};
+    CHECK(runtime_file_overlay_extend("/app0/arch.cpk", 48, &past_end, 1) == -1);
+    CHECK(runtime_file_overlay_describe("/app0/arch.cpk", &described, registered, 4) == 1 && described == 32);
+    CHECK(runtime_file_overlay_extend("/app0/arch.cpk", 48, layer, 2) == 0);
+    CHECK(runtime_file_overlay_describe("/app0/arch.cpk", &described, registered, 4) == 3 && described == 48);
+    CHECK(read_all("/app0/arch.cpk", seen, 40) == 40 && memcmp(seen, "0123HHQQQQQQCDEF", 16) == 0);
+    CHECK(memcmp(seen + 32, "TTTTTTTT", 8) == 0);
+    CHECK(runtime_file_overlay_replace("/app0/arch.cpk", 32, 8, patch) == 0);
+    CHECK(read_all("/app0/arch.cpk", seen, 40) == 40 && memcmp(seen + 32, "QQQQQQQQ", 8) == 0);
+    free(tail);
+    free(header);
+
     printf("runtime overlay tests: %d checks, %d failures\n", checks, failures);
     free(patch);
     return failures ? 1 : 0;

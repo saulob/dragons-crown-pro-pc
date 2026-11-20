@@ -634,6 +634,11 @@ test('game clients send the same sign-in fields and no analytics beyond the opti
   assert.ok(files.length > 10);
   for (const file of files) {
     const text = readFileSync(join(REPO, file), 'utf8');
+    // The Early Story session watch writes local log lines only: it must never talk to the lobby.
+    if (/session_watch\.(h|cpp)$/.test(file)) {
+      assert.ok(!/request\(|lobby_link|LobbyLink/.test(text), file);
+      continue;
+    }
     assert.ok(!/telemetry|analytics|\/admin|metrics/i.test(text), file);
   }
   const env = makeLobby();

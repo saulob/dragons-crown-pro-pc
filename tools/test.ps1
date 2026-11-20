@@ -14,6 +14,15 @@
   Builds and runs only the DCP-RFWKVY launcher renderer regression (the renderer group of dcp-launcher-tests: Direct3D 11
   with the issue #45 module pins, software fallback, present stall telemetry, frame cap) and reports its result alone. The
   normal run includes the same group.
+.PARAMETER EditorTranslation
+  Builds and runs only the Character Editor + translation overlay regression (the appearance-translation group of
+  dcp-save-editor-tests: custom looks composed on the translated DRACRO.CPK for every supported build and language) and
+  reports its result alone. The normal run includes the same group and folds it into the release matrix.
+.PARAMETER EditorRelease
+  Builds and runs only the Character Editor release gate on Windows (the release groups of dcp-save-editor-tests, the runtime file
+  overlay suite and the online appearance suite) and, through WSL, the same groups on Linux (tools/build.sh --editor, which
+  builds only those test targets, never the game), then prints the Windows/Linux Editor parity. The normal run includes the
+  same groups on both platforms.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -22,7 +31,9 @@
   Every test runs even after one fails; the exit code is non-zero when any of them failed. The tests that decide the
   supported-build parity contract (the profile and capability matrix, update archives and languages, render size, True
   Ultrawide, LZCNT, System type, Skip Offers, startup save and cheat mappings, Online Play structure, unknown builds) are
-  marked in the summary: if one fails, no build is reported as passing. Every supported build must offer every GLOBAL
+  marked in the summary: if one fails, no build is reported as passing. The release matrix prints one row per supported
+  build and platform (Character Editor hooks and save profile, Quick Chat balloon bridge, Online Play, patch fingerprints
+  and overlap) from the same executable on Windows and, through the Linux gate, on Linux, and fails when the two differ. Every supported build must offer every GLOBAL
   feature of CUSA10454 1.00; the global feature summary counts the builds that do.
 
   Local boot images (build\image, then build\research\image for a build the launcher has not prepared) and prepared
@@ -54,7 +65,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer)
+param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$EditorTranslation, [switch]$EditorRelease)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 $tc = Resolve-Toolchain 'auto'
@@ -83,6 +94,109 @@ function Format-ExitCode([long]$Code) {
 }
 
 function Skipped([string]$Reason) { [pscustomobject]@{ Code = 0; Skip = $Reason; Lines = @() } }
+
+$requiredEditorGroups = 'editor-save-parse', 'editor-save-write', 'editor-isolation', 'editor-apply-discard', 'editor-identity', 'editor-looks',
+                        'editor-art', 'editor-ui-model', 'appearance-translation', 'editor-real-save', 'editor-real-art', 'editor-real-hooks',
+                        'editor-real-overlay', 'editor-real-parts'
+
+# One platform's Character Editor output: the GROUP lines of dcp-save-editor-tests, the APPEARANCE_TRANSLATION rows
+# (title|version|language|mode|evidence|result) and the check counts of the two suites that run beside it.
+function Read-EditorRun([string[]]$Lines) {
+    $groups = [ordered]@{}
+    $rows = New-Object System.Collections.Generic.List[object]
+    $saves = [ordered]@{}
+    $counts = @{}
+    foreach ($line in $Lines) {
+        $parts = "$line".Trim().Split('|')
+        if ($parts.Count -ge 4 -and $parts[0] -eq 'GROUP' -and ($parts[1] -like 'editor-*' -or $parts[1] -eq 'appearance-translation')) {
+            $groups[$parts[1]] = [pscustomobject]@{ State = $parts[2]; Checks = ($parts[3] -replace '^checks=', ''); Detail = ($parts[3..($parts.Count - 1)] -join ' ') }
+        } elseif ($parts.Count -eq 5 -and $parts[0] -eq 'EDITOR_SAVE') {
+            $saves["$($parts[1]) $($parts[2])"] = [pscustomobject]@{ Evidence = $parts[3]; Result = $parts[4] }
+        } elseif ($parts.Count -eq 7 -and $parts[0] -eq 'APPEARANCE_TRANSLATION') {
+            $rows.Add([pscustomobject]@{ Build = "$($parts[1]) $($parts[2])"; Language = $parts[3]; Mode = $parts[4]; Evidence = $parts[5]; Result = $parts[6] })
+        } elseif ("$line" -match '^(runtime overlay tests|appearance online tests): (\d+) checks, (\d+) fail') {
+            $counts[$Matches[1]] = "$($Matches[2]) checks, $($Matches[3]) failures"
+        }
+    }
+    [pscustomobject]@{ Groups = $groups; Rows = $rows.ToArray(); Saves = $saves; Counts = $counts }
+}
+
+function Write-EditorRun([string]$Platform, $Run) {
+    foreach ($name in $requiredEditorGroups) {
+        $group = $Run.Groups[$name]
+        $state = if ($group) { $group.State } else { 'MISSING' }
+        Write-Host ('  EDITOR_GROUP|{0}|{1}|{2}' -f $Platform, $name, $(if ($group) { "$state|$($group.Detail)" } else { $state })) `
+            -ForegroundColor $(if ($state -eq 'PASS') { 'Green' } elseif ($state -eq 'NO_DATA') { 'Yellow' } else { 'Red' })
+    }
+    foreach ($key in $Run.Saves.Keys) { Write-Host ('  EDITOR_SAVE|{0}|{1}|{2}|{3}' -f $Platform, $key, $Run.Saves[$key].Evidence, $Run.Saves[$key].Result) -ForegroundColor $(if ($Run.Saves[$key].Result -eq 'PASS') { 'Green' } else { 'Red' }) }
+    foreach ($key in $Run.Counts.Keys) { Write-Host ('  EDITOR_SUITE|{0}|{1}|{2}' -f $Platform, $key, $Run.Counts[$key]) -ForegroundColor Green }
+}
+
+function Write-EditorTranslation($Run) {
+    foreach ($row in $Run.Rows) {
+        Write-Host ('  APPEARANCE_TRANSLATION|{0}|{1}|{2}|{3}|{4}' -f $row.Build, $row.Language, $row.Mode, $row.Evidence, $row.Result) `
+            -ForegroundColor $(if ($row.Result -eq 'PASS') { 'Green' } else { 'Red' })
+    }
+}
+
+# What makes one platform's run unusable on its own: a required group missing or not PASS (NO_DATA is shown, never passed
+# as PASS), or no composition rows.
+function Get-EditorProblems($Run) {
+    foreach ($name in $requiredEditorGroups) {
+        $group = $Run.Groups[$name]
+        if (-not $group) { "group $name missing" }
+        elseif ($group.State -eq 'FAIL') { "group $name FAIL" }
+    }
+    if ($Run.Rows.Count -eq 0) { 'no APPEARANCE_TRANSLATION rows' }
+    if ($Run.Saves.Count -eq 0) { 'no EDITOR_SAVE rows' }
+    foreach ($name in $Run.Saves.Keys | Where-Object { $Run.Saves[$_].Result -ne 'PASS' }) { "save profile $name FAIL" }
+    foreach ($row in $Run.Rows | Where-Object { $_.Result -ne 'PASS' }) { "$($row.Build) $($row.Language) $($row.Result)" }
+}
+
+# Windows against Linux: the same groups with the same states, and the same composition rows with the same evidence.
+function Get-EditorParity($Windows, $Linux) {
+    $differences = New-Object System.Collections.Generic.List[string]
+    foreach ($name in $requiredEditorGroups) {
+        $w = $Windows.Groups[$name]; $l = $Linux.Groups[$name]
+        if (-not $l) { $differences.Add("$name missing on Linux") }
+        elseif (-not $w) { $differences.Add("$name missing on Windows") }
+        elseif ($w.State -ne $l.State) { $differences.Add("$name $($w.State) on Windows, $($l.State) on Linux") }
+    }
+    $windowsRows = @($Windows.Rows | ForEach-Object { "$($_.Build)|$($_.Language)|$($_.Mode)|$($_.Evidence)|$($_.Result)" })
+    $linuxRows = @($Linux.Rows | ForEach-Object { "$($_.Build)|$($_.Language)|$($_.Mode)|$($_.Evidence)|$($_.Result)" })
+    if ($windowsRows.Count -ne $linuxRows.Count) { $differences.Add("APPEARANCE_TRANSLATION rows: $($windowsRows.Count) on Windows, $($linuxRows.Count) on Linux") }
+    foreach ($diff in @(Compare-Object $windowsRows $linuxRows)) { $differences.Add("row $($diff.InputObject) only on $(if ($diff.SideIndicator -eq '<=') { 'Windows' } else { 'Linux' })") }
+    $windowsSaves = @($Windows.Saves.Keys | ForEach-Object { "$_|$($Windows.Saves[$_].Evidence)|$($Windows.Saves[$_].Result)" })
+    $linuxSaves = @($Linux.Saves.Keys | ForEach-Object { "$_|$($Linux.Saves[$_].Evidence)|$($Linux.Saves[$_].Result)" })
+    foreach ($diff in @(Compare-Object $windowsSaves $linuxSaves)) { $differences.Add("save row $($diff.InputObject) only on $(if ($diff.SideIndicator -eq '<=') { 'Windows' } else { 'Linux' })") }
+    foreach ($key in $Windows.Counts.Keys) {
+        if ($Linux.Counts[$key] -ne $Windows.Counts[$key]) { $differences.Add("${key}: '$($Windows.Counts[$key])' on Windows, '$($Linux.Counts[$key])' on Linux") }
+    }
+    $differences.ToArray()
+}
+
+# Prints both platforms' Character Editor results, the composition rows and the parity line; returns the parity text.
+function Show-EditorValidation($Windows, $Linux, [string]$LinuxReason) {
+    Write-Host ''
+    Write-Host 'Character Editor release groups (the same dcp-save-editor-tests, runtime overlay and online appearance suites on both platforms):' -ForegroundColor Cyan
+    Write-EditorRun 'windows' $Windows
+    foreach ($problem in @(Get-EditorProblems $Windows)) { Write-Host "  windows: $problem" -ForegroundColor Red; $failed.Add("Character Editor (windows): $problem") }
+    $parity = "SKIPPED ($LinuxReason)"
+    if ($Linux) {
+        Write-EditorRun 'linux' $Linux
+        foreach ($problem in @(Get-EditorProblems $Linux)) { Write-Host "  linux: $problem" -ForegroundColor Red; $failed.Add("Character Editor (linux): $problem") }
+        $differences = @(Get-EditorParity $Windows $Linux)
+        $parity = if ($differences.Count) { "FAIL ($($differences -join '; '))" } else {
+            "PASS ($($Windows.Groups.Count) groups, $($Windows.Rows.Count) composition rows, $($Windows.Saves.Count) save rows, same states and evidence on both platforms)"
+        }
+        if ($differences.Count) { $failed.Add('Character Editor: Windows/Linux parity') }
+    }
+    Write-Host ''
+    Write-Host 'Character Editor + translation overlay (custom looks composed on the translated DRACRO.CPK; every supported build and language, Windows):' -ForegroundColor Cyan
+    Write-EditorTranslation $Windows
+    Write-Host "  EDITOR_PARITY|windows_vs_linux|$parity" -ForegroundColor $(if ($parity -like 'PASS*') { 'Green' } elseif ($parity -like 'FAIL*') { 'Red' } else { 'Yellow' })
+    $parity
+}
 
 # Loopback only: the repository's development lobby, in memory, on a free port. Ready means its HTTP health answer came back.
 function Start-DevLobby {
@@ -167,7 +281,17 @@ function Invoke-LinuxGate {
     [pscustomobject]@{ Code = $LASTEXITCODE; Skip = ''; Lines = $lines; Distro = $distro }
 }
 
-$quietLines = '^(GROUP\||ONLINE-BUILD\||LINUX-NET\||FAIL|OK |FAILED|.*STATIC PARITY|.*RUNTIME DATA|.*skipped|# (tests|pass|fail|skipped))'
+function Invoke-LinuxEditorGate {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    $lines = @(& wsl.exe -d $distro --exec bash -c "cd '$root' && bash tools/build.sh --editor 2>&1" 2>&1 | ForEach-Object { "$_" })
+    [pscustomobject]@{ Code = $LASTEXITCODE; Skip = ''; Lines = $lines; Distro = $distro }
+}
+
+$quietLines = '^(GROUP\||MATRIX\||APPEARANCE_TRANSLATION\||runtime overlay tests:|appearance online tests:|ONLINE-BUILD\||LINUX-NET\||FAIL|OK |FAILED|.*STATIC PARITY|.*RUNTIME DATA|.*skipped|# (tests|pass|fail|skipped))'
 function Show-Output([string[]]$Lines, [bool]$Failed) {
     foreach ($line in $Lines) {
         if ($Failed -or $line -cmatch $quietLines) { Write-Host $line }
@@ -177,7 +301,7 @@ function Show-Output([string[]]$Lines, [bool]$Failed) {
 $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
                   'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-gallery-unlock-tests', 'dcp-endgame-unlocks-tests',
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
-                  'dcp-launcher-tests'
+                  'dcp-launcher-tests', 'dcp-save-editor-tests'
 $requiredBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
                   'CUSA10209 1.00 Asia/Hong Kong'
 $blockedBuilds = 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
@@ -219,8 +343,10 @@ $tests = @(
     (Test-Step 'water diagnostics tests (AMD only, deduplication, cap)' 'dcp-water-diag-tests'),
     (Test-Step 'narrow water reader tests (16:10 skip, 16:9 and ultrawide untouched, signature)' 'dcp-narrow-water-reader-tests'),
     (Test-Step 'save-data tests (mounts, Japanese startup save hook)' 'dcp-savedata-tests' -Parity),
-    (Test-Step 'runtime file overlay tests (borrowed patch data, read observer, swapped data)' 'dcp-runtime-overlay-tests'),
-    (Test-Step 'online appearance tests (recipe, room session, remote textures, seat-aware hooks)' 'dcp-appearance-online-tests'),
+    (Test-Step 'runtime file overlay tests (borrowed patch data, read observer, swapped data, layered overlays)' 'dcp-runtime-overlay-tests' -Capture -Quiet),
+    (Test-Step 'online appearance tests (recipe, room session, remote textures, seat-aware hooks)' 'dcp-appearance-online-tests' -Capture -Quiet),
+    (Test-Step 'Character Editor release groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model, composition with the translation overlay, real archives)' 'dcp-save-editor-tests' -Parity -Capture -Quiet `
+        -Key 'dcp-save-editor-tests release' -Arguments @('release')),
     (Test-Step 'tiling tests (GPU tile layouts and addresses)' 'dcp-tiling-tests'),
     (Test-Step 'renderer selection tests (Auto, Vulkan, OpenGL, requirements)' 'dcp-renderer-selection-tests'),
     (Test-Step 'OpenGL backend tests (detiler, emitted GLSL through glslang, no context)' 'dcp-opengl-backend-tests'),
@@ -271,7 +397,9 @@ $tests = @(
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
-$launcherRendererSuites = 'dcp-launcher-tests'
+$launcherRendererSuites = @('dcp-launcher-tests')
+$editorTranslationSuites = @('dcp-save-editor-tests')
+$editorReleaseSuites = @('dcp-save-editor-tests', 'dcp-runtime-overlay-tests', 'dcp-appearance-online-tests')
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
@@ -288,6 +416,16 @@ if ($BossBattleOnline) {
             -Key 'dcp-launcher-tests renderer' -Arguments @('renderer'))
     )
     $requiredSuites = $launcherRendererSuites
+} elseif ($EditorTranslation) {
+    $tests = @(
+        (Test-Step 'Character Editor + translation overlay tests (custom looks composed on the translated DRACRO.CPK, every supported build and language)' 'dcp-save-editor-tests' -Parity -Capture -Quiet `
+            -Key 'dcp-save-editor-tests appearance-translation' -Arguments @('appearance-translation'))
+    )
+    $requiredSuites = $editorTranslationSuites
+} elseif ($EditorRelease) {
+    $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
+    $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Block { Invoke-LinuxEditorGate }
+    $requiredSuites = $editorReleaseSuites
 } else {
     Sync-GpuDependencies
 }
@@ -295,8 +433,8 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } else {
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } else {
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-cheats-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
@@ -426,6 +564,29 @@ if ($LauncherRenderer) {
     Write-Host 'Launcher renderer tests passed.' -ForegroundColor Green
     exit 0
 }
+if ($EditorTranslation -or $EditorRelease) {
+    $windowsLines = if ($EditorRelease) { @($captured['dcp-save-editor-tests release'] + $captured['dcp-runtime-overlay-tests'] + $captured['dcp-appearance-online-tests']) } else { @($captured['dcp-save-editor-tests appearance-translation']) }
+    $windowsEditor = Read-EditorRun $windowsLines
+    if ($EditorTranslation) {
+        Write-Host ''
+        Write-EditorTranslation $windowsEditor
+        $group = $windowsEditor.Groups['appearance-translation']
+        if (-not $group -or $group.State -ne 'PASS' -or $windowsEditor.Rows.Count -eq 0 -or ($windowsEditor.Rows | Where-Object { $_.Result -ne 'PASS' })) { $failed.Add('Character Editor + translation overlay') }
+        Write-Host "Character Editor + translation overlay: $(if ($group) { $group.State } else { 'FAIL (no result)' }), $($windowsEditor.Rows.Count) build/language rows" -ForegroundColor Cyan
+    } else {
+        $linuxName = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux Character Editor*' } | Select-Object -First 1
+        $linuxEditor = if ($linuxName -and $captured.ContainsKey($linuxName)) { Read-EditorRun @($captured[$linuxName]) } else { $null }
+        $linuxReason = if ($linuxName -and $skipped.ContainsKey($linuxName)) { $skipped[$linuxName] } else { 'the Linux editor gate did not run' }
+        $parity = Show-EditorValidation $windowsEditor $linuxEditor $linuxReason
+        Write-Host "Character Editor release gate: Windows $($windowsEditor.Groups.Count) groups, $($windowsEditor.Rows.Count) composition rows; parity $parity" -ForegroundColor Cyan
+    }
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Character Editor tests passed.' -ForegroundColor Green
+    exit 0
+}
 $parityOutput = @($captured['dcp-build-parity-tests'])
 
 Write-Host ''
@@ -455,6 +616,76 @@ foreach ($name in $requiredBuilds) {
 foreach ($name in $blockedNames) {
     if ($blockedBuilds -notcontains $name) { Write-Host "  $name lost its executable evidence" -ForegroundColor Red; $failed.Add("required build: $name") }
 }
+
+# One MATRIX line per supported build and platform from dcp-build-parity-tests; Linux comes from the WSL gate's run of
+# the same executable.
+function Read-Matrix([string[]]$Lines) {
+    $table = [ordered]@{}
+    foreach ($line in $Lines) {
+        $parts = "$line".Trim().Split('|')
+        if ($parts.Count -eq 8 -and $parts[0] -eq 'MATRIX') { $table[$parts[1]] = @($parts[1..7] | ForEach-Object { $_ -replace '^[A-Z_]+=', '' }) }
+    }
+    return $table
+}
+$matrixBuilds = @($requiredBuilds) + @($blockedBuilds)
+$linuxMatrixName = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux gate*' } | Select-Object -First 1
+$matrices = [ordered]@{ windows = Read-Matrix $parityOutput }
+if ($linuxMatrixName -and $captured.ContainsKey($linuxMatrixName)) { $matrices['linux'] = Read-Matrix $captured[$linuxMatrixName] }
+$windowsEditor = Read-EditorRun @($captured['dcp-save-editor-tests release'] + $captured['dcp-runtime-overlay-tests'] + $captured['dcp-appearance-online-tests'])
+$linuxEditor = if ($matrices.Contains('linux')) { Read-EditorRun @($captured[$linuxMatrixName]) } else { $null }
+$linuxReason = if ($linuxMatrixName -and $skipped.ContainsKey($linuxMatrixName)) { $skipped[$linuxMatrixName] } else { 'the Linux gate did not run' }
+$editorParity = Show-EditorValidation $windowsEditor $linuxEditor $linuxReason
+
+# Every supported build, with how deep its validation went: PASS_REAL needs the build's executable and archives, PASS_SYNTHETIC
+# is the shared code path on fixtures, BLOCKED_EXECUTABLE is a build whose executable is not here.
+$onlineStatic = @{}
+foreach ($line in @($captured['dcp-online-builds-tests'])) {
+    $parts = "$line".Trim().Split('|')
+    if ($parts.Count -ge 4 -and $parts[0] -eq 'ONLINE-BUILD') { $onlineStatic[$parts[2]] = ($parts[3] -replace '^structural=', '') -eq 'PASS' }
+}
+$commsSynthetic = -not @('dcp-comms-tests', 'dcp-comms-session-tests', 'dcp-comms-session-runtime-tests', 'dcp-comms-wheel-ui-tests' | Where-Object { $failed.Contains($_) })
+function Get-EditorState($Run, [string]$Name) {
+    if (-not $Run) { return 'SKIPPED' }
+    $own = @($Run.Rows | Where-Object { $Name.StartsWith("$($_.Build) ") })
+    if (@(Get-EditorProblems $Run).Count -or $own.Count -eq 0) { return 'FAIL' }
+    'PASS'
+}
+Write-Host ''
+Write-Host 'Validation matrix (every supported build; REAL = its executable was checked here, SYNTHETIC = fixtures and the shared code path only):' -ForegroundColor Cyan
+Write-Host '  BUILD|WINDOWS_EDITOR|LINUX_EDITOR|TRANSLATION_COMPOSITION|SAVE|QUICK_CHAT|ONLINE|HOOKS|VALIDATION_LEVEL|RESULT'
+foreach ($name in $matrixBuilds) {
+    $hookRow = $matrices['windows'][$name]
+    $hookStates = if ($hookRow) { @($hookRow[2..5]) } else { @('MISSING') }
+    $hooks = if (-not ($hookStates | Where-Object { $_ -ne 'PASS' })) { 'PASS_REAL' } elseif (-not ($hookStates | Where-Object { $_ -ne 'BLOCKED' })) { 'BLOCKED_EXECUTABLE' } else { 'FAIL' }
+    $quick = if ($hookRow -and $hookRow[3] -eq 'PASS') { 'PASS_REAL' } elseif ($hookRow -and $hookRow[3] -eq 'BLOCKED' -and $commsSynthetic -and $onlineStatic[$name]) { 'PASS_SYNTHETIC' } else { 'FAIL' }
+    $online = if ($hookRow -and $hookRow[4] -eq 'PASS') { 'PASS_REAL' } elseif ($hookRow -and $hookRow[4] -eq 'BLOCKED' -and $onlineStatic[$name]) { 'PASS_SYNTHETIC' } else { 'FAIL' }
+    $own = @($windowsEditor.Rows | Where-Object { $name.StartsWith("$($_.Build) ") })
+    $composition = if (-not $own.Count -or ($own | Where-Object { $_.Result -ne 'PASS' })) { 'FAIL' } elseif ($own | Where-Object { $_.Evidence -like 'real*' }) { 'PASS_REAL' } else { 'PASS_SYNTHETIC' }
+    $saveKey = @($windowsEditor.Saves.Keys | Where-Object { $name.StartsWith("$_ ") }) | Select-Object -First 1
+    $save = if (-not $saveKey -or $windowsEditor.Saves[$saveKey].Result -ne 'PASS') { 'FAIL' } elseif ($windowsEditor.Saves[$saveKey].Evidence -eq 'real') { 'PASS_REAL' } else { 'PASS_SYNTHETIC' }
+    $windowsState = Get-EditorState $windowsEditor $name
+    $linuxState = Get-EditorState $linuxEditor $name
+    $cells = @($windowsState, $linuxState, $composition, $save, $quick, $online, $hooks)
+    $level = if ($hooks -eq 'PASS_REAL') { 'REAL' } else { 'SYNTHETIC' }
+    $result = if ($cells -contains 'FAIL') { 'FAIL' } elseif ($hooks -eq 'BLOCKED_EXECUTABLE') { 'BLOCKED' } else { 'PASS' }
+    if ($result -eq 'FAIL' -or ($requiredBuilds -contains $name -and $result -ne 'PASS')) { $failed.Add("validation matrix: $name") }
+    Write-Host ('  ' + (@($name) + $cells + @($level, $result) -join '|')) -ForegroundColor $(if ($result -eq 'PASS') { 'Green' } elseif ($result -eq 'BLOCKED') { 'Yellow' } else { 'Red' })
+}
+foreach ($name in @($matrices['windows'].Keys | Where-Object { $matrixBuilds -notcontains $_ })) {
+    Write-Host "  $name|not in the required or blocked build lists" -ForegroundColor Red
+    $failed.Add("validation matrix: $name unexpected")
+}
+$matrixParity = if (-not $matrices.Contains('linux')) {
+    "SKIPPED ($linuxReason)"
+} else {
+    $differences = @($matrixBuilds | Where-Object {
+        $w = $matrices['windows'][$_]; $l = $matrices['linux'][$_]
+        -not $w -or -not $l -or (($w[2..6] -join '|') -ne ($l[2..6] -join '|'))
+    })
+    if ($differences.Count) { "FAIL (Windows and Linux differ for: $($differences -join ', '))" } else { "PASS ($($matrixBuilds.Count) builds, same hook states on Windows and Linux)" }
+}
+Write-Host "  Windows/Linux hook matrix parity: $matrixParity" -ForegroundColor $(if ($matrixParity -like 'PASS*') { 'Green' } elseif ($matrixParity -like 'FAIL*') { 'Red' } else { 'Yellow' })
+if ($matrixParity -like 'FAIL*') { $failed.Add('release matrix: Windows/Linux parity') }
 Write-Host ''
 Write-Host 'Global feature parity:' -ForegroundColor Cyan
 $features = @($parityOutput | Where-Object { $_ -like 'PARITY-FEATURE|*' } | ForEach-Object { ,$_.Split('|') })

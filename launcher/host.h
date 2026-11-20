@@ -79,12 +79,6 @@ private:
     LoopMonitor monitor_;
     std::string renderer_name_;
     int64_t frame_begin_ns_ = 0;
-
-    // DEBUG_SAULO: one aggregated line per second, for the first two minutes.
-    struct LoopDebug {
-        int64_t start_ns = 0, poll_ns = 0, build_ns = 0, submit_ns = 0, present_ns = 0, wait_ns = 0;
-        int frames = 0, minimized = 0, lines = 0;
-    } debug_;
 };
 
 } // namespace dcp

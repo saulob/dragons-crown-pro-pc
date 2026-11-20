@@ -2244,6 +2244,10 @@ struct TappedPair {
             socket[i] = PeerSocket::open(options, &error);
         }
     }
+    // The sockets send CLOSE into `flight` while they are destroyed.
+    ~TappedPair() {
+        for (auto& s : socket) s.reset();
+    }
 
     void Step() {
         now += 5;
@@ -2881,13 +2885,14 @@ void TestRelayEndsReleaseOutsideTheLock() {
     constexpr uint32_t kToken = 0x5a5a1234;
     constexpr uint64_t kUs = 1001, kPeer = 2002;
     constexpr uint16_t kUsMember = 0x10, kPeerMember = 0x20;
+    // Before the sockets: their destructors still send CLOSE into these.
+    std::deque<std::vector<uint8_t>> to_peer, to_us;
+    std::atomic<int> closes{0};
     PeerSocket::Options options;
     options.simulated_network = [](const Endpoint&, const uint8_t*, size_t) {};
     std::shared_ptr<PeerSocket> us(PeerSocket::open(options, nullptr));
     std::shared_ptr<PeerSocket> peer(PeerSocket::open(options, nullptr));
     auto* ends = new RelayEnds; // leaked if the release deadlocks: a blocked thread still uses it
-    std::deque<std::vector<uint8_t>> to_peer, to_us;
-    std::atomic<int> closes{0};
     auto rewrite = [](const std::vector<uint8_t>& frame, uint16_t from) {
         const auto decoded = decode_relay_frame(frame.data(), frame.size());
         return decoded ? encode_relay_frame(decoded->token, from, decoded->seq, decoded->payload.data(), decoded->payload.size())

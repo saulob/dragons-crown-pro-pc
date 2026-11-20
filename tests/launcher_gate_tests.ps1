@@ -90,7 +90,7 @@ foreach ($file in Get-GitLines @('ls-files', '--cached', '--others', '--exclude-
 }
 $expectedAssets = @('assets/launcher/README.md', 'assets/launcher/header-art.png', 'assets/launcher/header-art.svg',
     'assets/launcher/sponsor-heart.png', 'assets/launcher/sponsor-heart.svg', 'assets/launcher/icons/SOURCES.md') +
-    @('play', 'display', 'graphics', 'gameplay', 'online', 'cheats', 'controls', 'trophies', 'bug-report', 'about' | ForEach-Object { "assets/launcher/icons/$_.svg" })
+    @('play', 'display', 'graphics', 'gameplay', 'online', 'cheats', 'controls', 'trophies', 'editor', 'bug-report', 'about' | ForEach-Object { "assets/launcher/icons/$_.svg" })
 $assets = @(Get-GitLines @('ls-files', '--cached', '--others', '--exclude-standard', '--', 'assets/launcher') | Sort-Object -Unique |
     Where-Object { Test-Path -LiteralPath (Join-Path $root $_) })
 foreach ($file in $assets | Where-Object { $expectedAssets -notcontains $_ }) { Fail $hygiene "unexpected launcher asset: $file" }

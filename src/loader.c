@@ -548,6 +548,29 @@ static void appearance_local_seen(int slot, const AppearanceInstance *instance) 
     if (atomic_exchange(&drawn[slot],key)==key) return;
     appearance_session_set_local(slot,instance ? instance->recipe : NULL,instance ? instance->recipe_size : 0);
 }
+/* The overlay the translation registered for the archive, as patches the appearance builds on; empty when there is none. */
+static DcpFilePatch *registered_patches(const char *archive, uint64_t *length, size_t *count) {
+    char guest[256];
+    snprintf(guest,sizeof(guest),"/app0/%s",archive);
+    *count=runtime_file_overlay_describe(guest,length,NULL,0);
+    if (!*length) return NULL;
+    RuntimeFilePatch *view=calloc(*count ? *count : 1,sizeof(*view));
+    DcpFilePatch *patches=calloc(*count ? *count : 1,sizeof(*patches));
+    if (!view || !patches) { free(view); free(patches); *length=0; *count=0; return NULL; }
+    runtime_file_overlay_describe(guest,length,view,*count);
+    for (size_t i=0;i<*count;++i) patches[i]=(DcpFilePatch){view[i].offset,view[i].size,view[i].data};
+    free(view);
+    return patches;
+}
+static int extend_archive(const char *archive, uint64_t length, const DcpFilePatch *patches, size_t count) {
+    char guest[256];
+    snprintf(guest,sizeof(guest),"/app0/%s",archive);
+    RuntimeFilePatch *table=calloc(count ? count : 1,sizeof(*table));
+    for (size_t i=0;table && i<count;++i) table[i]=(RuntimeFilePatch){patches[i].offset,patches[i].size,patches[i].data};
+    const int extended=table && !runtime_file_overlay_extend(guest,length,table,count);
+    free(table);
+    return extended;
+}
 /* Each customized character gets its own atlas entry, and only the hooked atlas-name sites hand it out, for that
  * character. Online, other players' looks arrive as recipes and are built into textures reserved here. */
 static void install_custom_appearance(const char *image_dir, const char *app0, const char *user_dir, int online,
@@ -558,17 +581,21 @@ static void install_custom_appearance(const char *image_dir, const char *app0, c
     size_t count=0;
     const AppearanceInstance *instances=NULL;
     size_t instance_count=0;
-    const char *archive=dcp_custom_appearance(image_dir,app0,user_dir,online,&length,&patches,&count,&instances,&instance_count,
-                                              message,sizeof(message));
-    if (*message) printf("Appearance runtime: %s\n",message); /* DEBUG_SAULO */
+    uint64_t base_length=0;
+    size_t base_count=0;
+    DcpFilePatch *base=registered_patches("DRACRO.CPK",&base_length,&base_count);
+    const char *archive=dcp_custom_appearance(image_dir,app0,user_dir,online,base_length,base,base_count,&length,&patches,&count,
+                                              &instances,&instance_count,message,sizeof(message));
+    free(base);
+    if (*message) printf("Appearance runtime: %s\n",message);
     if (!archive) return;
     AppearanceSites sites;
     if (!stubs_size || !appearance_hooks_locate(image,size,&sites)) {
         printf("Appearance runtime: custom looks not used, the atlas sites of this build were not found\n");
         return;
     }
-    if (!overlay_archive(archive,length,patches,count)) {
-        printf("Appearance runtime: %s could not be overlaid (already overlaid by a translation)\n",archive);
+    if (!(base_length ? extend_archive(archive,length,patches,count) : overlay_archive(archive,length,patches,count))) {
+        printf("Appearance runtime: custom looks not used, %s could not be overlaid\n",archive);
         return;
     }
     appearance_hooks_set_instances(instances,instance_count);
@@ -581,14 +608,7 @@ static void install_custom_appearance(const char *image_dir, const char *app0, c
         appearance_session_enable(dcp_remote_appearance_set,dcp_remote_appearance_clear);
         printf("Appearance runtime: other players' looks enabled for Online Play\n");
     }
-    printf("Appearance runtime: %zu custom character(s); unit sites %#llx %#llx, select %#llx, effect %#llx/%#llx/%#llx, "
-           "weapon %#llx %#llx %#llx, shield %#llx %#llx %#llx\n",
-           instance_count,(unsigned long long)sites.unit_atlas[0],(unsigned long long)sites.unit_atlas[1],
-           (unsigned long long)sites.select_atlas,(unsigned long long)sites.effect_copy,(unsigned long long)sites.effect_set,
-           (unsigned long long)sites.effect_atlas,(unsigned long long)sites.unit_weapon[0][0],
-           (unsigned long long)sites.unit_weapon[0][1],(unsigned long long)sites.select_weapon[0],
-           (unsigned long long)sites.unit_weapon[1][0],(unsigned long long)sites.unit_weapon[1][1],
-           (unsigned long long)sites.select_weapon[1]); /* DEBUG_SAULO */
+    printf("Appearance runtime: %zu custom character(s)\n",instance_count);
 }
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32

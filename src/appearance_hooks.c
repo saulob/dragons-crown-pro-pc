@@ -307,29 +307,6 @@ const AppearanceInstance *appearance_instance_of_record(uint64_t record, int kla
     return NULL;
 }
 
-/* DEBUG_SAULO: one line per drawn unit and look. */
-static const char *class_name(int klass) {
-    static const char *const names[] = {"Fighter", "Amazon", "Elf", "Dwarf", "Sorceress", "Wizard"};
-    return klass >= 0 && klass < 6 ? names[klass] : "class?";
-}
-
-static void note_binding(const char *what, uint64_t holder, const AppearanceInstance *instance, int klass, int color) {
-    enum { kSeen = 64 };
-    static _Atomic uint64_t seen[kSeen];
-    const uint64_t key = holder ^ instance_number(instance) << 44 ^ ((uint64_t)color << 60);
-    for (int i = 0; i < kSeen; ++i) {
-        uint64_t expected = 0;
-        if (atomic_load(&seen[i]) == key) return;
-        if (atomic_compare_exchange_strong(&seen[i], &expected, key)) break;
-    }
-    if (instance)
-        printf("Appearance runtime: %s 0x%llx -> %s, bound custom texture %s\n", what, (unsigned long long)holder,
-               instance->label, instance->entry);
-    else
-        printf("Appearance runtime: %s 0x%llx native texture (%s colour %d)\n", what, (unsigned long long)holder,
-               class_name(klass), color);
-}
-
 static void answer(GuestRegs *regs, const AppearanceInstance *instance) {
     regs->rax = (uint64_t)(uintptr_t)instance->entry;
     regs->skip = 1;
@@ -340,7 +317,6 @@ void GUEST_HOOK_ABI appearance_unit_atlas(GuestRegs *regs) {
     const int klass = (int)(int32_t)regs->rdi, color = (int)(uint32_t)regs->rsi;
     if (!unit || !hooks_active()) return;
     const AppearanceInstance *instance = instance_of_unit(unit, klass, color);
-    note_binding("unit", unit, instance, klass, color);
     if (instance) answer(regs, instance);
 }
 
@@ -348,7 +324,6 @@ void GUEST_HOOK_ABI appearance_select_atlas(GuestRegs *regs) {
     const uint64_t record = regs->rax;
     const int klass = (int)(int32_t)regs->rdi, color = (int)(uint32_t)regs->rsi;
     const AppearanceInstance *instance = appearance_instance_of_record(record, klass, color);
-    if (instance_count) note_binding("record", record, instance, klass, color);
     if (instance) answer(regs, instance);
 }
 
@@ -357,7 +332,6 @@ static void answer_weapon(GuestRegs *regs, const AppearanceInstance *instance, i
     if (!instance || !instance->weapons[weapon].entry[0] || !weapon_names[weapon]) return;
     const char *native = weapon_names[weapon]((int)(int32_t)regs->rdi, (uint32_t)regs->rsi);
     if (!native || strcmp(native, instance->weapons[weapon].native) != 0) return;
-    note_binding(weapon ? "shield" : "weapon", (uint64_t)(uintptr_t)instance, instance, instance->klass, instance->color);
     regs->rax = (uint64_t)(uintptr_t)instance->weapons[weapon].entry;
     regs->skip = 1;
 }
@@ -446,7 +420,6 @@ void GUEST_HOOK_ABI appearance_effect_atlas(GuestRegs *regs) {
     const AppearanceInstance *instance = effect_instance(effect);
     if (!instance || instance->klass != guest_i16(effect + EFFECT_CLASS) || instance->color != guest_i16(effect + EFFECT_COLOR))
         return;
-    note_binding("effect", effect, instance, instance->klass, instance->color);
     answer(regs, instance);
 }
 

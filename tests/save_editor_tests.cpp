@@ -41,10 +41,15 @@
 #include "appearance_loader.h"
 #include "appearance_runtime.h"
 #include "character_art.h"
+#include "cpk_fixture.h"
+#include "cpk_patch.h"
+#include "dcp_launcher.h"
 #include "editor_model.h"
 #include "fighter_horns.h"
 #include "game_mbs.h"
+#include "game_profile.h"
 #include "game_texture.h"
+#include "localization/ui_text.h"
 #include "save_backup.h"
 #include "save_data.h"
 #include "save_discovery.h"
@@ -3570,9 +3575,7 @@ void TestAmazonParts(CharacterArt& art, CpkArchive& cpk) {
     const auto hair_painted_on = [&](uint32_t id) {
         return id == 320 || std::find(hair->tone_pieces.begin(), hair->tone_pieces.end(), id) != hair->tone_pieces.end();
     };
-    const auto is_armor = [&](uint32_t id, size_t) { return armor->OwnsPiece(id); };
     const auto is_feather = [&](uint32_t id, size_t) { return id == 362; };
-    const auto is_skin_piece = [&](uint32_t id, size_t) { return skin->OwnsPiece(id); };
     for (int color = 0; color < kNativeColorCount; ++color) {
         const SpriteImage native = *art.Preview(klass, color);
         const auto part_pixels = [&](const CustomPart* part) {
@@ -4350,7 +4353,7 @@ void TestEveryPartHides(CharacterArt& art, CpkArchive& cpk) {
                     const WeaponShader shader(klass, hidden, size_t(part.weapon), [&](int x, int y) { return surface.Texel(x, y); },
                                               surface.width(), surface.height());
                     const bool split = WeaponAccentOf(klass, size_t(part.weapon)) != nullptr;
-                    size_t mine = 0, cleared = 0, others = 0, others_changed = 0;
+                    size_t mine = 0, cleared = 0, others_changed = 0;
                     for (int y = 0; y < surface.height(); y += 3) {
                         for (int x = 0; x < surface.width(); x += 3) {
                             const std::array<uint8_t, 4> before = surface.Texel(x, y);
@@ -4362,7 +4365,6 @@ void TestEveryPartHides(CharacterArt& art, CpkArchive& cpk) {
                                 ++mine;
                                 cleared += after[3] == 0;
                             } else if (band == (part.accent ? 0.0f : 1.0f)) {
-                                ++others;
                                 others_changed += after != before;
                             }
                         }
@@ -7130,92 +7132,613 @@ void TestCompactSummary() {
 #endif
 }
 
+// ---- Custom looks composed with the port's translation on one DRACRO.CPK ----
+
+using FileList = std::vector<std::pair<std::string, std::vector<uint8_t>>>;
+
+std::vector<uint8_t> Pattern(size_t size, uint8_t seed) {
+    std::vector<uint8_t> bytes(size);
+    for (size_t i = 0; i < size; ++i) bytes[i] = uint8_t(seed + i * 7);
+    return bytes;
+}
+
+struct SyntheticArchive {
+    fs::path path;
+    uint64_t length = 0;
+    FileList files;
+};
+
+SyntheticArchive MakeSyntheticArchive(const fs::path& dir) {
+    SyntheticArchive archive;
+    fs::create_directories(dir);
+    archive.path = dir / "DRACRO.CPK";
+    archive.files = {{"msgsheet/Menu.fms", Pattern(300, 1)},
+                     {"PLAYER/AMAZON03.FTX", Pattern(5000, 2)},
+                     {"PLAYER/FIGHTER00.MBS", Pattern(1500, 3)},
+                     {"stage/Interface00.ftx", Pattern(2600, 4)},
+                     {"stage/Opening.ftx", Pattern(900, 5)}};
+    std::vector<std::pair<std::string, std::string>> text;
+    for (const auto& [path, data] : archive.files) text.emplace_back(path, std::string(data.begin(), data.end()));
+    const std::string blob = cpk_build::BuildCpkWith(text);
+    WriteBytes(archive.path, std::vector<uint8_t>(blob.begin(), blob.end()));
+    archive.length = blob.size();
+    return archive;
+}
+
+FileList TranslatedFiles() {
+    return {{"msgsheet/Menu.fms", Pattern(420, 11)}, {"stage/Interface00.ftx", Pattern(3100, 12)}};
+}
+FileList LookReplaced() {
+    return {{"PLAYER/FIGHTER00.MBS", Pattern(1700, 21)}};
+}
+FileList LookAdded() {
+    return {{"PLAYER/AMAZON03_X1.FTX", Pattern(6000, 22)}, {"PLAYER/AMAZON03_X2.FTX", Pattern(6001, 23)}};
+}
+const std::vector<std::pair<std::string, uint64_t>>& LookReserved() {
+    static const std::vector<std::pair<std::string, uint64_t>> reserved = {{"PLAYER/AMAZON03_NET0.FTX", 6000},
+                                                                           {"PLAYER/AMAZON03_NET1.FTX", 6000}};
+    return reserved;
+}
+
+struct Composed {
+    std::optional<ArchiveOverlay> translation, layer;
+    ArchiveOverlay overlay; // what the guest reads
+    std::string error;
+};
+
+Composed ComposeSynthetic(const SyntheticArchive& archive, const FileList& translated, bool custom, const FileList& replaced,
+                          const FileList& added, const std::vector<std::pair<std::string, uint64_t>>& reserved) {
+    Composed result;
+    if (!translated.empty()) {
+        CpkArchive cpk;
+        if (cpk.Open(archive.path)) result.translation = OverlayEntries(cpk, archive.length, translated, &result.error);
+    }
+    if (custom) {
+        result.layer = OverlayChangedEntries(archive.path, archive.length, replaced, added, &result.error, reserved,
+                                             result.translation ? &*result.translation : nullptr);
+    }
+    if (!result.error.empty()) std::printf("overlay error: %s\n", result.error.c_str());
+    if (result.translation && result.layer) result.overlay = ComposeOverlays(*result.translation, *result.layer);
+    else if (result.layer) result.overlay = *result.layer;
+    else if (result.translation) result.overlay = *result.translation;
+    return result;
+}
+
+std::optional<std::vector<uint8_t>> EntryBytes(const SyntheticArchive& archive, const ArchiveOverlay& overlay, const std::string& path) {
+    CpkArchive served;
+    if (!OpenOverlaid(archive.path, overlay, served)) return std::nullopt;
+    const CpkEntry* entry = served.Find(path);
+    if (!entry) return std::nullopt;
+    return ReadOverlaid(archive.path, overlay, entry->offset, entry->size);
+}
+
+bool Serves(const SyntheticArchive& archive, const ArchiveOverlay& overlay, const FileList& files) {
+    for (const auto& [path, data] : files) {
+        const auto bytes = EntryBytes(archive, overlay, path);
+        if (!bytes || *bytes != data) return false;
+    }
+    return true;
+}
+
+// Entries nobody changed keep their place, size and id, so the native look is read exactly as before.
+bool KeepsNative(const SyntheticArchive& archive, const ArchiveOverlay& overlay, const std::set<std::string>& changed) {
+    CpkArchive original, served;
+    if (!original.Open(archive.path) || !OpenOverlaid(archive.path, overlay, served)) return false;
+    for (const CpkEntry& entry : original.entries()) {
+        if (changed.count(entry.path)) continue;
+        const CpkEntry* now = served.Find(entry.path);
+        if (!now || now->offset != entry.offset || now->size != entry.size) return false;
+    }
+    return true;
+}
+
+bool NoDuplicateEntries(const ArchiveOverlay& overlay, const SyntheticArchive& archive, size_t expected) {
+    CpkArchive served;
+    if (!OpenOverlaid(archive.path, overlay, served) || served.entries().size() != expected) return false;
+    std::set<std::string> names;
+    std::set<uint32_t> ids;
+    for (const CpkEntry& entry : served.entries()) {
+        std::string upper = entry.path;
+        for (char& c : upper) c = char(std::toupper(static_cast<unsigned char>(c)));
+        if (!names.insert(upper).second || !ids.insert(entry.id).second) return false;
+    }
+    return true;
+}
+
+bool PatchesEqual(const ArchiveOverlay& a, const ArchiveOverlay& b) {
+    return a.length == b.length && a.patches == b.patches;
+}
+
+// The appended ranges of the look layer start after every translated byte, aligned, and meet nothing of the translation.
+bool AppendedAfterTranslation(const SyntheticArchive& archive, const Composed& built, uint64_t align) {
+    if (!built.translation || !built.layer) return false;
+    const uint64_t floor = built.translation->length;
+    if (!LayerProblem(*built.layer, floor).empty()) return false;
+    CpkArchive served;
+    if (!OpenOverlaid(archive.path, built.overlay, served)) return false;
+    for (const auto& [path, size] : LookReserved()) {
+        const CpkEntry* entry = served.Find(path);
+        if (!entry || entry->offset < floor || entry->offset % align != 0 || entry->size != size) return false;
+        const auto at = std::find_if(built.layer->reserved.begin(), built.layer->reserved.end(),
+                                     [&](const ReservedEntry& r) { return r.path == path; });
+        if (at == built.layer->reserved.end() || at->offset != entry->offset) return false;
+    }
+    for (const auto& [path, data] : LookAdded()) {
+        const CpkEntry* entry = served.Find(path);
+        if (!entry || entry->offset < floor || entry->offset % align != 0) return false;
+    }
+    for (const auto& [at, data] : built.layer->patches) {
+        if (at != 16 && at % align != 0) return false;
+        for (const auto& [other, bytes] : built.translation->patches) {
+            if (other == 16) continue;
+            if (at < other + bytes.size() && other < at + data.size()) return false;
+        }
+    }
+    return built.layer->length >= floor;
+}
+
+void TestCompositionAppearanceOnly(const fs::path& dir) {
+    const SyntheticArchive archive = MakeSyntheticArchive(dir / "only_look");
+    const Composed built = ComposeSynthetic(archive, {}, true, LookReplaced(), LookAdded(), LookReserved());
+    CHECK(built.layer && !built.translation);
+    if (!built.layer) return;
+    for (const auto& [offset, data] : built.layer->patches) CHECK(offset == 16 || offset >= archive.length);
+    CHECK(built.layer->length > archive.length);
+    CHECK(Serves(archive, built.overlay, LookReplaced()) && Serves(archive, built.overlay, LookAdded()));
+    CHECK(KeepsNative(archive, built.overlay, {"PLAYER/FIGHTER00.MBS"}));
+    CHECK(NoDuplicateEntries(built.overlay, archive, archive.files.size() + LookAdded().size() + LookReserved().size()));
+    const Composed again = ComposeSynthetic(archive, {}, true, LookReplaced(), LookAdded(), LookReserved());
+    CHECK(again.layer && PatchesEqual(*again.layer, *built.layer));
+}
+
+void TestCompositionTranslationOnly(const fs::path& dir) {
+    const SyntheticArchive archive = MakeSyntheticArchive(dir / "only_translation");
+    const Composed built = ComposeSynthetic(archive, TranslatedFiles(), false, {}, {}, {});
+    CHECK(built.translation && !built.layer);
+    if (!built.translation) return;
+    CHECK(Serves(archive, built.overlay, TranslatedFiles()));
+    CHECK(KeepsNative(archive, built.overlay, {"msgsheet/Menu.fms", "stage/Interface00.ftx"}));
+    CHECK(NoDuplicateEntries(built.overlay, archive, archive.files.size()));
+}
+
+void TestCompositionBothLayers(const fs::path& dir) {
+    const SyntheticArchive archive = MakeSyntheticArchive(dir / "both");
+    const Composed built = ComposeSynthetic(archive, TranslatedFiles(), true, LookReplaced(), LookAdded(), LookReserved());
+    CHECK(built.translation && built.layer);
+    if (!built.translation || !built.layer) return;
+    CHECK(Serves(archive, built.overlay, TranslatedFiles()));
+    CHECK(Serves(archive, built.overlay, LookReplaced()) && Serves(archive, built.overlay, LookAdded()));
+    CHECK(AppendedAfterTranslation(archive, built, 0x800));
+    CHECK(built.overlay.length == built.layer->length && built.overlay.length > built.translation->length);
+    CHECK(KeepsNative(archive, built.overlay, {"msgsheet/Menu.fms", "stage/Interface00.ftx", "PLAYER/FIGHTER00.MBS"}));
+    CHECK(NoDuplicateEntries(built.overlay, archive, archive.files.size() + LookAdded().size() + LookReserved().size()));
+
+    const Composed again = ComposeSynthetic(archive, TranslatedFiles(), true, LookReplaced(), LookAdded(), LookReserved());
+    CHECK(again.layer && again.translation && PatchesEqual(again.overlay, built.overlay));
+
+    // Layering the same look again is refused, not grown.
+    std::string error;
+    CHECK(!OverlayChangedEntries(archive.path, archive.length, {}, LookAdded(), &error, {}, &built.overlay) && !error.empty());
+
+    // The translation alone, with no look, is the registered overlay: nothing to add is an error, not a rewrite.
+    CHECK(!OverlayChangedEntries(archive.path, archive.length, {}, {}, &error, {}, &*built.translation));
+}
+
+// Both change one entry: the look's version is served, deterministically, and the translation's other entries survive.
+void TestCompositionSameEntry(const fs::path& dir) {
+    const SyntheticArchive archive = MakeSyntheticArchive(dir / "same_entry");
+    FileList translated = TranslatedFiles();
+    translated.emplace_back("PLAYER/FIGHTER00.MBS", Pattern(1600, 31));
+    std::sort(translated.begin(), translated.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    const Composed built = ComposeSynthetic(archive, translated, true, LookReplaced(), LookAdded(), LookReserved());
+    CHECK(built.translation && built.layer);
+    if (!built.translation || !built.layer) return;
+    const auto fighter = EntryBytes(archive, built.overlay, "PLAYER/FIGHTER00.MBS");
+    CHECK(fighter && *fighter == LookReplaced()[0].second);
+    FileList others = translated;
+    others.erase(std::remove_if(others.begin(), others.end(), [](const auto& f) { return f.first == "PLAYER/FIGHTER00.MBS"; }), others.end());
+    CHECK(Serves(archive, built.overlay, others));
+    CHECK(Serves(archive, *built.translation, translated)); // the translation-only archive is untouched
+    const Composed again = ComposeSynthetic(archive, translated, true, LookReplaced(), LookAdded(), LookReserved());
+    CHECK(again.layer && PatchesEqual(again.overlay, built.overlay));
+}
+
+// A look that cannot be composed leaves the translation-only archive valid and reports no layer.
+void TestCompositionFailure(const fs::path& dir) {
+    const SyntheticArchive archive = MakeSyntheticArchive(dir / "failure");
+    Composed base = ComposeSynthetic(archive, TranslatedFiles(), false, {}, {}, {});
+    CHECK(base.translation.has_value());
+    if (!base.translation) return;
+    const FileList duplicate = {{"PLAYER/AMAZON03.FTX", Pattern(10, 1)}};
+    std::string error;
+    CHECK(!OverlayChangedEntries(archive.path, archive.length, {}, duplicate, &error, {}, &*base.translation) && !error.empty());
+    const std::vector<std::pair<std::string, uint64_t>> taken = {{"stage/Opening.ftx", 100}};
+    CHECK(!OverlayChangedEntries(archive.path, archive.length, {}, {}, &error, taken, &*base.translation) && !error.empty());
+    const FileList missing = {{"PLAYER/NOWHERE.MBS", Pattern(10, 1)}};
+    CHECK(!OverlayChangedEntries(archive.path, archive.length, missing, {}, &error, {}, &*base.translation) && !error.empty());
+    CHECK(Serves(archive, *base.translation, TranslatedFiles()));
+    CHECK(NoDuplicateEntries(*base.translation, archive, archive.files.size()));
+    ArchiveOverlay broken = *base.translation;
+    broken.length += 0x800;
+    ArchiveOverlay layer = broken;
+    layer.patches = {{broken.length - 0x1000, std::vector<uint8_t>(16, 1)}};
+    CHECK(!LayerProblem(layer, broken.length).empty());
+}
+
+// The loader composes on the registered overlay and never reports a look that was not composed.
+void TestCompositionLoader(const fs::path& source_dir) {
+    (void)source_dir;
+    const std::string loader = ReadSource("src/loader.c");
+    CHECK(loader.find("registered_patches(\"DRACRO.CPK\"") != std::string::npos);
+    CHECK(loader.find("base_length ? extend_archive(archive,length,patches,count) : overlay_archive(archive,length,patches,count)") != std::string::npos);
+    CHECK(loader.find("already overlaid by a translation") == std::string::npos);
+    const size_t composed = loader.find("custom looks not used, %s could not be overlaid");
+    const size_t enabled = loader.find("appearance_session_enable(");
+    CHECK(composed != std::string::npos && enabled != std::string::npos && composed < enabled);
+}
+
+// What one language of a build does to DRACRO.CPK, from the production profile.
+bool TranslationTouchesSharedArchive(const GameBuild& build, const TextLanguage& language) {
+    if (language.translation.empty()) return false;
+    const TranslationProfile& profile = *build.translation;
+    const std::string_view shared = "DRACRO.CPK";
+    return shared == profile.archive || (language.translation == "pt-BR" && shared == profile.visual_archive);
+}
+
+ArchiveOverlay OverlayOfRegistered(uint64_t length, const DcpFilePatch* patches, size_t count) {
+    ArchiveOverlay overlay;
+    overlay.length = length;
+    for (size_t i = 0; i < count; ++i) overlay.patches.emplace_back(patches[i].offset, std::vector<uint8_t>(patches[i].data, patches[i].data + patches[i].size));
+    return overlay;
+}
+
+// The production entry points on the build's real archive: the translation the loader registers, then the look built on it.
+bool g_synthetic_only = false;
+
+std::string RealCombination(const fs::path& base, const fs::path& source_dir, const GameBuild& build, const TextLanguage& language,
+                            bool touches) {
+    if (g_synthetic_only) return "NO_DATA";
+    const fs::path app0 = source_dir / "game" / "prepared" / build.folder;
+    const fs::path image = source_dir / "build" / "image" / build.folder;
+    const fs::path archive_path = app0 / "DRACRO.CPK";
+    if (!fs::is_regular_file(archive_path) || !fs::is_regular_file(image / "image.json")) return "NO_DATA";
+    const int failures_before = g_failures;
+    const fs::path root = base / "real_composition" / (std::string(build.folder) + "_" + std::string(language.key));
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const fs::path ini = root / "dcp.ini";
+    std::ofstream(ini) << "text_language=" << language.key << "\n";
+
+    uint64_t length = 0;
+    DcpFilePatch* patches = nullptr;
+    size_t count = 0;
+    char text[1024];
+    const char* translated = dcp_text_translation(ini.string().c_str(), image.string().c_str(), app0.string().c_str(), &length, &patches,
+                                                  &count, text, sizeof(text), language.translation == kPortRussian ? 1 : 0, nullptr);
+    std::optional<ArchiveOverlay> translation;
+    if (translated && std::string_view(translated) == "DRACRO.CPK") {
+        translation = OverlayOfRegistered(length, patches, count);
+    } else {
+        uint64_t stage_length = 0;
+        DcpFilePatch* stage_patches = nullptr;
+        size_t stage_count = 0;
+        const char* stage = dcp_text_stage_overlay(&stage_length, &stage_patches, &stage_count);
+        if (stage && std::string_view(stage) == "DRACRO.CPK") translation = OverlayOfRegistered(stage_length, stage_patches, stage_count);
+    }
+    localization::SetActiveLanguage("english");
+    CHECK(translation.has_value() == touches);
+
+    const fs::path user = root / "user";
+    WriteSaveFor(user, build.title_id, "SAVEDATA00", SaveWithCharacters({{1, 3}, {1, 3}}));
+    CustomStore store(CustomStorePath(user));
+    store.Set({build.title_id, "SAVEDATA00", 0, 0, CharacterClass::kAmazon}, HairLook({30, 90, 230}));
+    store.Set({build.title_id, "SAVEDATA00", 0, 1, CharacterClass::kAmazon}, HairLook({200, 0, 0}));
+    CHECK(store.Save());
+
+    struct Built {
+        ArchiveOverlay layer;
+        std::vector<AppearanceInstance> instances;
+        std::string message;
+        bool ok = false;
+    };
+    const auto build_look = [&](const ArchiveOverlay* under) {
+        Built built;
+        uint64_t look_length = 0;
+        DcpFilePatch* look_patches = nullptr;
+        size_t look_count = 0;
+        const AppearanceInstance* instances = nullptr;
+        size_t instance_count = 0;
+        std::vector<DcpFilePatch> base_patches;
+        if (under) {
+            for (const auto& [offset, data] : under->patches) base_patches.push_back({offset, data.size(), data.data()});
+        }
+        char message[4096];
+        const char* name = dcp_custom_appearance(image.string().c_str(), app0.string().c_str(), user.string().c_str(), 1,
+                                                 under ? under->length : 0, base_patches.data(), base_patches.size(), &look_length,
+                                                 &look_patches, &look_count, &instances, &instance_count, message, sizeof(message));
+        built.message = message;
+        built.ok = name && std::string_view(name) == "DRACRO.CPK";
+        if (!built.ok) return built;
+        built.layer = OverlayOfRegistered(look_length, look_patches, look_count);
+        built.instances.assign(instances, instances + instance_count);
+        return built;
+    };
+    const Built look = build_look(translation ? &*translation : nullptr);
+    CHECK(look.ok && look.instances.size() == 2);
+    CHECK(look.message.find("texture sets reserved for other players' looks") != std::string::npos);
+    if (!look.ok) return "FAIL";
+
+    const uint64_t floor = translation ? translation->length : fs::file_size(archive_path);
+    CHECK(LayerProblem(look.layer, floor).empty());
+    CHECK(look.layer.length > floor);
+    const ArchiveOverlay composed = translation ? ComposeOverlays(*translation, look.layer) : look.layer;
+
+    CpkArchive original, translated_view, served;
+    CHECK(original.Open(archive_path) && OpenOverlaid(archive_path, composed, served));
+    if (translation) CHECK(OpenOverlaid(archive_path, *translation, translated_view));
+    const CpkArchive& before = translation ? translated_view : original;
+    CHECK(served.entries().size() > before.entries().size());
+    size_t translated_entries = 0;
+    for (const CpkEntry& entry : original.entries()) {
+        const CpkEntry* kept = before.Find(entry.path);
+        if (!translation || !kept || kept->offset == entry.offset) continue;
+        const CpkEntry* now = served.Find(entry.path);
+        const bool replaced_by_look = look.message.find(entry.path + " is also changed") != std::string::npos;
+        if (!now) { CHECK(false); continue; }
+        ++translated_entries;
+        if (!replaced_by_look) {
+            CHECK(now->size == kept->size && ReadOverlaid(archive_path, composed, now->offset, now->size) ==
+                                                 ReadOverlaid(archive_path, *translation, kept->offset, kept->size));
+        }
+    }
+    CHECK(!translation || translated_entries > 0);
+    for (const AppearanceInstance& instance : look.instances) {
+        const CpkEntry* entry = served.Find(instance.entry);
+        CHECK(entry && entry->offset >= floor && entry->offset % served.align() == 0);
+        CHECK(instance.recipe_size > 0);
+    }
+
+    // The same looks on the untranslated archive: identical recipes and identical textures (once per build).
+    static std::set<std::string> compared;
+    const bool compare_plain = translation && compared.insert(build.folder).second;
+    const Built plain = compare_plain ? build_look(nullptr) : Built{};
+    CHECK(!compare_plain || (plain.ok && plain.instances.size() == look.instances.size()));
+    if (compare_plain && plain.ok && plain.instances.size() == look.instances.size()) {
+        CpkArchive plain_served;
+        CHECK(OpenOverlaid(archive_path, plain.layer, plain_served));
+        for (size_t i = 0; i < look.instances.size(); ++i) {
+            CHECK(look.instances[i].recipe_size == plain.instances[i].recipe_size &&
+                  std::memcmp(look.instances[i].recipe, plain.instances[i].recipe, look.instances[i].recipe_size) == 0);
+            const CpkEntry* a = served.Find(look.instances[i].entry);
+            const CpkEntry* b = plain_served.Find(plain.instances[i].entry);
+            CHECK(a && b && a->size == b->size);
+            if (a && b && a->size == b->size) {
+                CHECK(ReadOverlaid(archive_path, composed, a->offset, a->size) == ReadOverlaid(archive_path, plain.layer, b->offset, b->size));
+            }
+        }
+    }
+    return g_failures == failures_before ? "PASS" : "FAIL";
+}
+
+// One row per supported build and language: the combination is composed on a synthetic archive, and on the real one when
+// the game is installed here. An omitted build or language cannot pass unnoticed.
+void TestCompositionMatrix(const fs::path& base, const fs::path& source_dir) {
+    const SyntheticArchive archive = MakeSyntheticArchive(base / "matrix");
+    size_t rows = 0;
+    for (const GameBuild& build : SupportedBuilds()) {
+        bool baseline = false;
+        for (const TextLanguage& language : TextLanguagesOf(&build)) {
+            const bool touches = TranslationTouchesSharedArchive(build, language);
+            const int before = g_failures;
+            const Composed built = ComposeSynthetic(archive, touches ? TranslatedFiles() : FileList{}, true, LookReplaced(), LookAdded(), LookReserved());
+            CHECK(built.layer.has_value() && built.translation.has_value() == touches);
+            CHECK(Serves(archive, built.overlay, LookAdded()) && Serves(archive, built.overlay, LookReplaced()));
+            if (touches) {
+                CHECK(Serves(archive, built.overlay, TranslatedFiles()));
+                CHECK(AppendedAfterTranslation(archive, built, 0x800));
+            }
+            const bool run_real = touches || !baseline;
+            baseline = baseline || !touches;
+            const std::string real = run_real ? RealCombination(base, source_dir, build, language, touches) : "NO_DATA";
+            const bool passed = g_failures == before && real != "FAIL";
+            std::printf("APPEARANCE_TRANSLATION|%s|%s|%s|%s|%s|%s\n", build.title_id, build.version, std::string(language.name).c_str(),
+                        touches ? "translation+appearance" : "appearance only", real == "PASS" ? "real+synthetic" : "synthetic",
+                        passed ? "PASS" : "FAIL");
+            ++rows;
+        }
+    }
+    CHECK(rows >= SupportedBuilds().size());
+}
+
+void RunAppearanceTranslation(const fs::path& base, const char* source_dir) {
+    const fs::path dir = base / "composition";
+    TestCompositionAppearanceOnly(dir);
+    TestCompositionTranslationOnly(dir);
+    TestCompositionBothLayers(dir);
+    TestCompositionSameEntry(dir);
+    TestCompositionFailure(dir);
+    TestCompositionLoader(source_dir ? fs::path(source_dir) : fs::path());
+    TestCompositionMatrix(base, source_dir ? fs::path(source_dir) : fs::path());
+}
+
+// One row per supported build: the Editor finds, parses and attributes a save under the build's title id.
+void TestSaveProfiles(const fs::path& base, const fs::path& source) {
+    for (const GameBuild& build : SupportedBuilds()) {
+        const int before = g_failures;
+        const fs::path user = base / "save_profiles" / build.folder;
+        WriteSaveFor(user, build.title_id, "SAVEDATA00", SaveWithCharacters({{1, 3}, {0, 2}}));
+        const std::vector<DiscoveredSave> saves = DiscoverSaves(user, build.title_id);
+        CHECK(saves.size() == 1);
+        CHECK(!saves.empty() && saves[0].title_id == build.title_id && saves[0].current && saves[0].model.valid() && !saves[0].region.empty());
+        bool real = false;
+        std::error_code ec;
+        std::vector<fs::path> candidates = {source / "user"};
+        for (const auto& entry : fs::directory_iterator(source / "user", ec)) {
+            if (entry.is_directory(ec)) candidates.push_back(entry.path());
+        }
+        for (const fs::path& candidate : candidates) {
+            for (const DiscoveredSave& found : DiscoverSaves(candidate, build.title_id)) real = real || (found.title_id == build.title_id && found.model.valid());
+        }
+        std::printf("EDITOR_SAVE|%s|%s|%s|%s\n", build.title_id, build.version, real ? "real" : "synthetic", g_failures == before ? "PASS" : "FAIL");
+    }
+}
+
+struct EditorGroup {
+    const char* name;
+    bool needs_game;
+    std::function<void()> run;
+};
+
+bool GameDataPresent(const fs::path& source) {
+    return !source.empty() && fs::is_regular_file(source / "game" / "prepared" / "v1.03" / "DRACRO.CPK") &&
+           fs::is_regular_file(source / "build" / "image" / "v1.03" / "image.json");
+}
+
+std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& source) {
+    return {
+        {"editor-save-parse", false, [&] { TestCrc32(); TestParseValid(); TestInvalidCrc(); TestTruncated(); TestSlots(); TestCharacters(); TestSaveProfiles(base, source); }},
+        {"editor-save-write", false,
+         [&] {
+             TestEdits();
+             TestSerializeRecomputesCrc();
+             TestAtomicWrite(base);
+             TestBackupRestore(base);
+             TestImport(base);
+             TestSaveEdit(base);
+             TestInvalidAppearance(base);
+             TestNoChangeGuarantee();
+         }},
+        {"editor-isolation", false,
+         [&] {
+             TestDiscovery(base);
+             TestEditorModel(base);
+             TestEditorCharacterNavigation(base);
+             TestEditorNavigationModel();
+         }},
+        {"editor-apply-discard", false,
+         [&] {
+             TestApplyAll(base);
+             TestEditorDirtyFields();
+             TestEditorBuildChoice();
+             TestEditorNumbers();
+         }},
+        {"editor-identity", false,
+         [&] {
+             TestInstanceKeys();
+             TestRuntimeInstances(base);
+             TestCustomStore(base);
+             TestAppearanceHandlers();
+             TestAppearanceStubs();
+         }},
+        {"editor-looks", false,
+         [&] {
+             TestCustomOverrideModel(base);
+             TestAppearanceLooks();
+             TestAppearanceLoader();
+             TestPartMappingTables();
+             TestPartCapabilities();
+             TestRandomColors();
+             TestCustomParts();
+             TestRecolor();
+             TestWeaponEntries();
+             TestColorPickerModel();
+             TestRegionMapFile();
+         }},
+        {"editor-art", false,
+         [] {
+             TestBc7Decode();
+             TestFtxDecode();
+             TestMbsParse();
+             TestSpriteRender();
+             TestNativeColor();
+             TestBc7Encode();
+         }},
+        {"editor-ui-model", false,
+         [] {
+             TestAppearanceUx();
+             TestEditorSections();
+             TestEditorLayoutAudit();
+             TestActionRow();
+             TestEditorHeaderLayout();
+             TestEditorResponsiveLayout();
+             TestEditorNumberControlLook();
+             TestEditorSummary();
+             TestEditorHeaderRow();
+             TestEditorCompactLayout();
+             TestEditorFixedLayout();
+             TestSaveDataText();
+             TestIdentityHeaderLayout();
+             TestCompactSummary();
+         }},
+        {"appearance-translation", false, [&] { RunAppearanceTranslation(base, source.empty() ? nullptr : source.string().c_str()); }},
+        {"editor-real-save", true, [&] { TestRealSave(source); }},
+        {"editor-real-art", true, [&] { TestRealArt(source); TestRealCustom(base, source); }},
+        {"editor-real-hooks", true, [&] { TestAppearanceSites(source); }},
+        {"editor-real-overlay", true,
+         [&] {
+             TestRealCustomOverlay(base, source);
+             TestRealHelmetHiddenOverlay(base, source);
+             TestRemoteLookParity(base, source);
+             TestCustomBaseInvariant(base, source);
+         }},
+        {"editor-real-parts", true,
+         [&] {
+             TestFeather(base, source);
+             TestNoHeadgear(base, source);
+             TestFighterHornBuilds(base, source);
+             TestAppearancePrepare(base, source);
+             TestPartMapping(base, source);
+             TestPartCacheVersion(base, source);
+         }},
+    };
+}
+
+// Runs the named groups (all when `selected` is empty) and prints one GROUP line each; returns the failures.
+int RunEditorGroups(const fs::path& base, const fs::path& source, const std::set<std::string>& selected) {
+    const bool data = GameDataPresent(source);
+    for (const EditorGroup& group : EditorGroups(base, source)) {
+        if (!selected.empty() && !selected.count(group.name)) continue;
+        const int checks = g_checks, failures = g_failures;
+        const auto started = std::chrono::steady_clock::now();
+        group.run();
+        const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+        const char* state = g_failures != failures ? "FAIL" : group.needs_game && !data ? "NO_DATA" : "PASS";
+        std::printf("GROUP|%s|%s|checks=%d|ms=%lld\n", group.name, state, g_checks - checks, ms);
+        std::fflush(stdout);
+    }
+    return g_failures;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
     const fs::path base = fs::temp_directory_path() / "dcp_save_editor_tests";
     fs::remove_all(base);
     fs::create_directories(base);
-
-    TestCrc32();
-    TestParseValid();
-    TestInvalidCrc();
-    TestTruncated();
-    TestSlots();
-    TestCharacters();
-    TestEdits();
-    TestSerializeRecomputesCrc();
-    TestAtomicWrite(base);
-    TestBackupRestore(base);
-    TestImport(base);
-    TestSaveEdit(base);
-    TestInvalidAppearance(base);
-    TestNoChangeGuarantee();
-    TestDiscovery(base);
-    TestBc7Decode();
-    TestFtxDecode();
-    TestMbsParse();
-    TestSpriteRender();
-    TestNativeColor();
-    TestEditorModel(base);
-    TestEditorSections();
-    TestEditorLayoutAudit();
-    TestActionRow();
-    TestEditorBuildChoice();
-    TestEditorNumbers();
-    TestEditorCharacterNavigation(base);
-    TestEditorHeaderLayout();
-    TestEditorResponsiveLayout();
-    TestEditorNumberControlLook();
-    TestEditorDirtyFields();
-    TestEditorSummary();
-    TestEditorHeaderRow();
-    TestEditorCompactLayout();
-    TestEditorFixedLayout();
-    TestSaveDataText();
-    TestCustomStore(base);
-    TestCustomOverrideModel(base);
-    TestColorPickerModel();
-    TestEditorNavigationModel();
-    TestAppearanceLooks();
-    TestAppearanceLoader();
-    TestAppearanceUx();
-    TestPartMappingTables();
-    TestPartCapabilities();
-    TestRandomColors();
-    TestIdentityHeaderLayout();
-    TestWeaponEntries();
-    TestCompactSummary();
-    TestApplyAll(base);
-    TestRecolor();
-    TestBc7Encode();
-    TestCustomParts();
-    TestRegionMapFile();
-    TestInstanceKeys();
-    TestRuntimeInstances(base);
-    TestAppearanceHandlers();
-    TestAppearanceStubs();
 #ifdef DCP_SOURCE_DIR
-    TestRealSave(DCP_SOURCE_DIR);
-    TestRealArt(DCP_SOURCE_DIR);
-    TestRealCustom(base, DCP_SOURCE_DIR);
-    TestAppearanceSites(DCP_SOURCE_DIR);
-    TestRealCustomOverlay(base, DCP_SOURCE_DIR);
-    TestRealHelmetHiddenOverlay(base, DCP_SOURCE_DIR);
-    TestRemoteLookParity(base, DCP_SOURCE_DIR);
-    TestCustomBaseInvariant(base, DCP_SOURCE_DIR);
-    TestFeather(base, DCP_SOURCE_DIR);
-    TestNoHeadgear(base, DCP_SOURCE_DIR);
-    TestFighterHornBuilds(base, DCP_SOURCE_DIR);
-    TestAppearancePrepare(base, DCP_SOURCE_DIR);
-    TestPartMapping(base, DCP_SOURCE_DIR);
-    TestPartCacheVersion(base, DCP_SOURCE_DIR);
+    const fs::path source = DCP_SOURCE_DIR;
+#else
+    const fs::path source;
 #endif
-
-    std::error_code ec;
-    fs::remove_all(base, ec);
+    const std::string mode = argc > 1 ? argv[1] : "all";
+    g_synthetic_only = argc > 2 && std::strcmp(argv[2], "synthetic") == 0;
+    std::set<std::string> selected;
+    if (mode == "appearance-translation") {
+        selected = {"appearance-translation"};
+    } else if (mode == "release") {
+        for (const EditorGroup& group : EditorGroups(base, source)) selected.insert(group.name);
+    } else if (mode == "quick") {
+        g_synthetic_only = true;
+        for (const EditorGroup& group : EditorGroups(base, source)) {
+            if (!group.needs_game) selected.insert(group.name);
+        }
+    } else if (mode != "all") {
+        std::printf("usage: dcp-save-editor-tests [all | release | quick | appearance-translation [synthetic]]\n");
+        return 2;
+    }
+    RunEditorGroups(base, source, selected);
+    std::error_code cleanup;
+    fs::remove_all(base, cleanup);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

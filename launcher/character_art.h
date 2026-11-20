@@ -77,7 +77,6 @@ private:
     const Mbs* Model(CharacterClass klass);
     bool LoadFigure(CharacterClass klass, int color);
     SpriteImage RenderFigure(const CustomLook* look);
-    void LogCustomLook(CharacterClass klass, int color, const CustomLook& look);
     const FtxSurface* WeaponSurface(uint8_t texture) const; // of the loaded figure, by model texture id
 
     struct Figure {
@@ -103,7 +102,6 @@ private:
     std::optional<Figure> figure_;
     std::map<CharacterClass, std::optional<std::vector<RegionMap>>> regions_;
     std::optional<CustomRender> custom_;
-    std::string last_custom_log_;
     std::map<std::string, std::vector<std::string>> system_messages_;
     std::string error_;
 };

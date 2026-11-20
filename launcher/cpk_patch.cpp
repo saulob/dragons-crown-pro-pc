@@ -1212,80 +1212,6 @@ OverlayResult OverlayArchive(const std::filesystem::path& base, const std::files
     return result;
 }
 
-std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& archive_path, uint64_t length,
-                                                  std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
-                                                  std::string* error) {
-    return OverlayChangedEntries(archive_path, length, {}, added, error);
-}
-
-std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path& archive_path, uint64_t length,
-                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> replaced,
-                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
-                                                    std::string* error,
-                                                    std::span<const std::pair<std::string, uint64_t>> reserved) {
-    const auto fail = [&](std::string why) -> std::optional<ArchiveOverlay> {
-        if (error) *error = std::move(why);
-        return std::nullopt;
-    };
-    CpkArchive archive;
-    UtfTable header, toc;
-    std::string reason;
-    if (!PatchWriter::Load(archive, archive_path, header, toc, &reason)) return fail(reason);
-    const uint64_t align = archive.align(), toc_base = archive.toc_base();
-    const auto aligned = [&](uint64_t position) { return (position + align - 1) / align * align; };
-    ArchiveOverlay overlay;
-    std::vector<NewRow> rows;
-    std::set<std::string> seen;
-    uint64_t pos = length;
-    for (const auto& [path, data] : replaced) {
-        const CpkEntry* entry = archive.Find(path);
-        if (!entry || !seen.insert(Lower(path)).second) return fail(path + " is not in the archive once");
-        if (data.empty() || data.size() > UINT32_MAX) return fail(path + " has an unsupported size");
-        const uint64_t at = aligned(pos);
-        if (!toc.SetNumber(entry->row, "FileOffset", at - toc_base) || !toc.SetNumber(entry->row, "FileSize", data.size()) ||
-            !toc.SetNumber(entry->row, "ExtractSize", data.size())) {
-            return fail(path + ": the table cannot be rewritten");
-        }
-        overlay.patches.emplace_back(at, data);
-        pos = at + data.size();
-    }
-    for (const auto& [path, data] : added) {
-        if (archive.Find(path) || !seen.insert(Lower(path)).second) return fail(path + " is already in the archive");
-        if (data.empty() || data.size() > UINT32_MAX) return fail(path + " has an unsupported size");
-        const uint64_t at = aligned(pos);
-        rows.push_back({path, uint32_t(data.size()), uint32_t(data.size()), at - toc_base});
-        overlay.patches.emplace_back(at, data);
-        pos = at + data.size();
-    }
-    for (const auto& [path, size] : reserved) {
-        if (archive.Find(path) || !seen.insert(Lower(path)).second) return fail(path + " is already in the archive");
-        if (!size || size > UINT32_MAX) return fail(path + " has an unsupported size");
-        const uint64_t at = aligned(pos);
-        rows.push_back({path, uint32_t(size), uint32_t(size), at - toc_base});
-        overlay.reserved.push_back({path, at, size});
-        pos = at + size;
-    }
-    if (rows.empty() && replaced.empty()) return fail("nothing to add");
-    if (!rows.empty() && !InsertRows(toc, rows, &reason, true)) return fail(reason);
-    const std::vector<uint8_t> packet = toc.Stored();
-    std::vector<uint8_t> section(kTocMagic, kTocMagic + 8);
-    WriteLe64(section, packet.size());
-    section.insert(section.end(), packet.begin(), packet.end());
-    const uint64_t toc_at = aligned(pos);
-    if (!header.SetNumber(0, "TocOffset", toc_at) || !header.SetNumber(0, "TocSize", section.size()) ||
-        !header.SetNumber(0, "Files", archive.entries().size() + rows.size())) {
-        return fail("the header cannot be rewritten");
-    }
-    if (header.Number(0, "EnableTocCrc").value_or(0) || header.Number(0, "EnableFileCrc").value_or(0)) {
-        header.SetNumber(0, "EnableTocCrc", 0);
-        header.SetNumber(0, "EnableFileCrc", 0);
-    }
-    overlay.patches.emplace_back(toc_at, std::move(section));
-    overlay.patches.emplace_back(16, header.Stored());
-    overlay.length = toc_at + overlay.patches[overlay.patches.size() - 2].second.size();
-    return overlay;
-}
-
 namespace {
 
 // The file's bytes, zeros past its end, and the overlay's patches on top: what the runtime serves.
@@ -1344,6 +1270,89 @@ private:
 
 } // namespace
 
+std::optional<ArchiveOverlay> OverlayAddedEntries(const std::filesystem::path& archive_path, uint64_t length,
+                                                  std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
+                                                  std::string* error) {
+    return OverlayChangedEntries(archive_path, length, {}, added, error);
+}
+
+std::optional<ArchiveOverlay> OverlayChangedEntries(const std::filesystem::path& archive_path, uint64_t length,
+                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> replaced,
+                                                    std::span<const std::pair<std::string, std::vector<uint8_t>>> added,
+                                                    std::string* error,
+                                                    std::span<const std::pair<std::string, uint64_t>> reserved,
+                                                    const ArchiveOverlay* base) {
+    const auto fail = [&](std::string why) -> std::optional<ArchiveOverlay> {
+        if (error) *error = std::move(why);
+        return std::nullopt;
+    };
+    CpkArchive archive;
+    UtfTable header, toc;
+    std::string reason;
+    if (base) {
+        OverlaidBuffer buffer(archive_path, *base);
+        std::istream in(&buffer);
+        if (!buffer.ok()) return fail("cannot open");
+        if (!PatchWriter::Load(archive, in, header, toc, &reason)) return fail(reason);
+        length = base->length;
+    } else if (!PatchWriter::Load(archive, archive_path, header, toc, &reason)) {
+        return fail(reason);
+    }
+    const uint64_t align = archive.align(), toc_base = archive.toc_base();
+    const auto aligned = [&](uint64_t position) { return (position + align - 1) / align * align; };
+    ArchiveOverlay overlay;
+    std::vector<NewRow> rows;
+    std::set<std::string> seen;
+    uint64_t pos = length;
+    for (const auto& [path, data] : replaced) {
+        const CpkEntry* entry = archive.Find(path);
+        if (!entry || !seen.insert(Lower(path)).second) return fail(path + " is not in the archive once");
+        if (data.empty() || data.size() > UINT32_MAX) return fail(path + " has an unsupported size");
+        const uint64_t at = aligned(pos);
+        if (!toc.SetNumber(entry->row, "FileOffset", at - toc_base) || !toc.SetNumber(entry->row, "FileSize", data.size()) ||
+            !toc.SetNumber(entry->row, "ExtractSize", data.size())) {
+            return fail(path + ": the table cannot be rewritten");
+        }
+        overlay.patches.emplace_back(at, data);
+        pos = at + data.size();
+    }
+    for (const auto& [path, data] : added) {
+        if (archive.Find(path) || !seen.insert(Lower(path)).second) return fail(path + " is already in the archive");
+        if (data.empty() || data.size() > UINT32_MAX) return fail(path + " has an unsupported size");
+        const uint64_t at = aligned(pos);
+        rows.push_back({path, uint32_t(data.size()), uint32_t(data.size()), at - toc_base});
+        overlay.patches.emplace_back(at, data);
+        pos = at + data.size();
+    }
+    for (const auto& [path, size] : reserved) {
+        if (archive.Find(path) || !seen.insert(Lower(path)).second) return fail(path + " is already in the archive");
+        if (!size || size > UINT32_MAX) return fail(path + " has an unsupported size");
+        const uint64_t at = aligned(pos);
+        rows.push_back({path, uint32_t(size), uint32_t(size), at - toc_base});
+        overlay.reserved.push_back({path, at, size});
+        pos = at + size;
+    }
+    if (rows.empty() && replaced.empty()) return fail("nothing to add");
+    if (!rows.empty() && !InsertRows(toc, rows, &reason, true)) return fail(reason);
+    const std::vector<uint8_t> packet = toc.Stored();
+    std::vector<uint8_t> section(kTocMagic, kTocMagic + 8);
+    WriteLe64(section, packet.size());
+    section.insert(section.end(), packet.begin(), packet.end());
+    const uint64_t toc_at = aligned(pos);
+    if (!header.SetNumber(0, "TocOffset", toc_at) || !header.SetNumber(0, "TocSize", section.size()) ||
+        !header.SetNumber(0, "Files", archive.entries().size() + rows.size())) {
+        return fail("the header cannot be rewritten");
+    }
+    if (header.Number(0, "EnableTocCrc").value_or(0) || header.Number(0, "EnableFileCrc").value_or(0)) {
+        header.SetNumber(0, "EnableTocCrc", 0);
+        header.SetNumber(0, "EnableFileCrc", 0);
+    }
+    overlay.patches.emplace_back(toc_at, std::move(section));
+    overlay.patches.emplace_back(16, header.Stored());
+    overlay.length = toc_at + overlay.patches[overlay.patches.size() - 2].second.size();
+    return overlay;
+}
+
 bool OpenOverlaid(const std::filesystem::path& archive, const ArchiveOverlay& overlay, CpkArchive& out, std::string* error) {
     OverlaidBuffer buffer(archive, overlay);
     std::istream in(&buffer);
@@ -1361,6 +1370,31 @@ std::vector<uint8_t> ReadOverlaid(const std::filesystem::path& archive, const Ar
     if (!buffer.ok() || offset > overlay.length || size > overlay.length - offset) return {};
     buffer.Fill(offset, bytes.data(), size);
     return bytes;
+}
+
+ArchiveOverlay ComposeOverlays(const ArchiveOverlay& base, const ArchiveOverlay& layer) {
+    ArchiveOverlay composed = base;
+    composed.patches.insert(composed.patches.end(), layer.patches.begin(), layer.patches.end());
+    composed.reserved.insert(composed.reserved.end(), layer.reserved.begin(), layer.reserved.end());
+    composed.length = layer.length;
+    return composed;
+}
+
+std::string LayerProblem(const ArchiveOverlay& layer, uint64_t base_length) {
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;
+    for (const auto& [offset, data] : layer.patches) {
+        if (offset < base_length && offset != 16) return "a patch at " + std::to_string(offset) + " rewrites the base below " + std::to_string(base_length);
+        if (offset + data.size() > layer.length) return "a patch at " + std::to_string(offset) + " ends past the archive";
+        ranges.emplace_back(offset, offset + data.size());
+    }
+    std::sort(ranges.begin(), ranges.end());
+    for (size_t i = 1; i < ranges.size(); ++i) {
+        if (ranges[i].first < ranges[i - 1].second) return "patches overlap at " + std::to_string(ranges[i].first);
+    }
+    for (const ReservedEntry& entry : layer.reserved) {
+        if (entry.offset < base_length || entry.offset + entry.size > layer.length) return entry.path + " is reserved outside the new bytes";
+    }
+    return {};
 }
 
 } // namespace dcp

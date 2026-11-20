@@ -153,14 +153,8 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     if (!dirty()) {
         return;
     }
-    std::vector<std::string> changes;
-    if (edit_) changes = DescribeColorChanges(edit_->save(), edit_->persisted(), edit_->working());
-    for (const std::string& line : DescribeCustomChanges(custom_saved_, custom_working_)) changes.push_back(line);
     const ApplyOutcome outcome = ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_);
     if (outcome.ok()) {
-        for (const std::string& line : changes) {
-            std::printf("Editor: %s\n", line.c_str()); // DEBUG_SAULO
-        }
         if (edit_ && selected_save_ >= 0) saves_[selected_save_].model = edit_->persisted();
         custom_working_ = custom_saved_;
         confirm_reset_custom_ = false;
@@ -865,9 +859,6 @@ void EditorPage::DrawAppearance(trg::Ui& ui) {
             ImGui::SetTooltip("%s", Tr(std::string(pointed->label).c_str()));
         }
         if (pointed && ImGui::IsItemClicked()) {
-            if (selected_part_ != pointed->key) {
-                std::printf("Editor: selected part %s\n", std::string(pointed->label).c_str()); // DEBUG_SAULO
-            }
             selected_part_ = std::string(pointed->key);
         }
     }

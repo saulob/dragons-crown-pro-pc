@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #include "comms_session_logic.h"

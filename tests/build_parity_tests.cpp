@@ -21,9 +21,11 @@
 #include <string_view>
 #include <vector>
 
+#include "appearance_hooks.h"
 #include "boss_battle.h"
 #include "boss_battle_online.h"
 #include "cheat_hooks.h"
+#include "comms_bridge.h"
 #include "controller_prompts.h"
 #include "cpk_patch.h"
 #include "cyrillic_font.h"
@@ -49,6 +51,8 @@
 #include "runtime_cheats.h"
 #include "menu_buttons.h"
 #include "network_access.h"
+#include "party_hook.h"
+#include "save_discovery.h"
 #include "skip_intro.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -850,7 +854,8 @@ void TestGateConsistency() {
                                    "const GameBuild* build_",              "|| !build_)",
                                    "build_(check.build)",                  "build = *build_",
                                    "const bool known = build_ && files_ == GameFileState::kValid;",
-                                   "known ? build_->title_id : \"\""};
+                                   "known ? build_->title_id : \"\"",
+                                   "EditorGame{RootsOf(paths_), build_}"};
     std::map<std::string, int> seen;
     size_t line_start = 0, unknown = 0;
     const std::regex word("\\bbuild_\\b");
@@ -1252,6 +1257,42 @@ struct Patched {
     std::string what;
 };
 
+// Character Editor and Quick Chat sites as tests/save_editor_tests.cpp and tests/comms_tests.cpp pin them, by the build
+// whose executable it is (ImageOwner).
+struct NativeSitePin {
+    const char* owner;
+    uint64_t unit_atlas[2], select_atlas;
+    uint32_t comms_show, comms_text_call;
+};
+const NativeSitePin kNativeSitePins[] = {
+    {"CUSA10454 1.00 USA", {0x10899d, 0x2dfc8d}, 0x39f511, 0x2e8130, 0x2e8527},
+    {"CUSA07001 1.00 Japan", {0x107f8d, 0x2df19d}, 0x39e991, 0x2e7640, 0x2e7a37},
+    {"CUSA07001 1.02 Japan", {0x10826d, 0x2df56d}, 0x39edd1, 0x2e7a10, 0x2e7e07},
+    {"CUSA07001 1.03 Japan", {0x1082bd, 0x2df5bd}, 0x39ee21, 0x2e7a60, 0x2e7e57},
+    {"CUSA10209 1.00 Asia/Hong Kong", {0x10811d, 0x2df32d}, 0x39eb01, 0x2e77d0, 0x2e7bc7},
+};
+
+const NativeSitePin* PinOf(const GameBuild& owner) {
+    for (const NativeSitePin& pin : kNativeSitePins) {
+        if (std::string_view(pin.owner) == owner.label) return &pin;
+    }
+    return nullptr;
+}
+
+// Every byte of [0, size) a hook installation changed, as ranges.
+void AddChangedRanges(const uint8_t* before, const uint8_t* after, uint64_t size, const std::string& what,
+                      std::vector<Patched>& out) {
+    for (uint64_t at = 0; at < size;) {
+        if (before[at] == after[at]) {
+            ++at;
+            continue;
+        }
+        const uint64_t begin = at;
+        while (at < size && before[at] != after[at]) ++at;
+        out.push_back({begin, at, what});
+    }
+}
+
 // Every range the loader may write in this build's image when every feature is on; `located` holds the sites the
 // loader's locators found when the build's profile asks for them.
 std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& image, const DcpFeatureSites& located) {
@@ -1293,6 +1334,25 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     for (const LzcntBuild& record : lzcnt_builds) {
         if (std::string_view(record.build) != build.label) continue;
         for (size_t i = 0; i < LZCNT_SITE_COUNT; ++i) add(record.offsets[i], lzcnt_shapes[i].length, "lzcnt");
+    }
+    {
+        const size_t base = (size_t(size) + 0xfff) / 0x1000 * 0x1000;
+        AppearanceSites appearance{};
+        if (appearance_hooks_locate(image.bytes.data(), size, &appearance)) {
+            std::vector<uint8_t> copy(base + appearance_hooks_stub_bytes(), 0);
+            std::memcpy(copy.data(), image.bytes.data(), size);
+            if (appearance_hooks_install(copy.data(), size, image.entry, &appearance, copy.data() + base, appearance_hooks_stub_bytes()))
+                AddChangedRanges(image.bytes.data(), copy.data(), size, "character editor appearance hook", out);
+            appearance_hooks_set_weapon_names(nullptr, nullptr);
+        }
+        CommsBridgeSites comms{};
+        if (comms_bridge_locate(image.bytes.data(), size, &comms)) {
+            std::vector<uint8_t> copy(base + comms_bridge_stub_bytes(), 0);
+            std::memcpy(copy.data(), image.bytes.data(), size);
+            if (comms_bridge_install(copy.data(), size, image.entry, &comms, copy.data() + base, comms_bridge_stub_bytes()))
+                AddChangedRanges(image.bytes.data(), copy.data(), size, "quick chat text hook", out);
+            comms_bridge_attach(nullptr, nullptr);
+        }
     }
     {
         const DcpExecRange executable{0, size};
@@ -1362,10 +1422,33 @@ const char* SystemTypeText(const char*) {
     return "text";
 }
 
+struct NativeInstall {
+    bool character_editor = false, quick_chat = false, online = false;
+};
+
+// The Character Editor's atlas hooks go in after every other patch, as the loader installs them; their sites must be
+// the pinned ones of this executable.
+bool InstallAppearance(const GameBuild& build, uint8_t* image_bytes, uint64_t size, uint64_t entry, uint8_t* stubs) {
+    const int before = g_failures;
+    AppearanceSites sites{};
+    CHECK(appearance_hooks_locate(image_bytes, size, &sites) == 1);
+    const NativeSitePin* pin = PinOf(ImageOwner(build, size, entry));
+    CHECK(pin != nullptr);
+    if (pin) {
+        CHECK(sites.unit_atlas[0] == pin->unit_atlas[0] && sites.unit_atlas[1] == pin->unit_atlas[1] &&
+              sites.select_atlas == pin->select_atlas);
+    }
+    CHECK(appearance_hooks_install(image_bytes, size, entry, &sites, stubs, appearance_hooks_stub_bytes()) == 1);
+    CHECK(image_bytes[sites.select_atlas] == 0xe9 && image_bytes[sites.unit_atlas[0]] == 0xe9);
+    appearance_hooks_set_weapon_names(nullptr, nullptr);
+    return g_failures == before;
+}
+
 // Installs every feature the build has on a private copy of its image, in the loader's order and through the loader's
 // path (tables for CUSA10454 1.00, the located sites otherwise). Each fingerprint must hold and no installed patch may
 // meet another's bytes; a feature the build does not have must refuse.
-void InstallEverything(const GameBuild& build, const BootImage& image, const DcpFeatureSites& located) {
+NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, const DcpFeatureSites& located) {
+    NativeInstall result;
     const Capabilities caps = CapabilitiesOf(build);
     const uint64_t size = image.bytes.size(), entry = image.entry;
     const size_t page = 0x1000, base = (size_t(size) + page - 1) / page * page;
@@ -1373,7 +1456,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     const size_t room = cheat_stubs + startup_save_hook_stub_bytes() + voice_hooks_stub_bytes() +
                         system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes() +
                         exit_game_hook_stub_bytes() + skip_intro_stub_bytes() + gallery_unlock_stub_bytes() +
-                        boss_battle_stub_bytes() + endgame_unlocks_stub_bytes();
+                        boss_battle_stub_bytes() + endgame_unlocks_stub_bytes() + appearance_hooks_stub_bytes();
     std::vector<uint8_t> memory(base + room + page, 0);
     std::memcpy(memory.data(), image.bytes.data(), size);
     uint8_t* area = memory.data() + base;
@@ -1393,6 +1476,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     uint8_t* gallery_area = take(gallery_unlock_stub_bytes());
     uint8_t* boss_battle_area = take(boss_battle_stub_bytes());
     uint8_t* endgame_area = take(endgame_unlocks_stub_bytes());
+    uint8_t* appearance_area = take(appearance_hooks_stub_bytes());
     uint8_t* image_bytes = memory.data();
 
     const char* name = nullptr;
@@ -1542,6 +1626,44 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
                                       endgame_unlocks_stub_bytes()) == both);
         endgame_unlocks_set(0);
     }
+    const bool offline_appearance = InstallAppearance(build, image_bytes, size, entry, appearance_area);
+
+    // Online Play as the loader patches it: no cheats, the party observer on the player tick, the Character Editor's
+    // hooks, then the Quick Chat balloon bridge, which needs the party observer's unit tick.
+    {
+        const int before = g_failures;
+        const size_t online_room = system_type_hook_stub_bytes() + party_hook_stub_bytes() + appearance_hooks_stub_bytes() +
+                                   comms_bridge_stub_bytes();
+        std::vector<uint8_t> online(base + online_room + page, 0);
+        std::memcpy(online.data(), image.bytes.data(), size);
+        uint8_t* stubs = online.data() + base;
+        const DcpExecRange executable{0, size};
+        const DcpImageView original{image.bytes.data(), size, &executable, 1};
+        const DcpGameBuild game = LoaderView(build);
+        CHECK(system_type_hook_install(online.data(), size, entry, stubs, system_type_hook_stub_bytes(), SystemTypeText) == 1);
+        stubs += system_type_hook_stub_bytes();
+        DcpPartySites party{};
+        char failure[192];
+        const bool party_found = dcp_resolve_party(&game, &original, &party, failure, sizeof(failure)) == 1;
+        if (!party_found) std::printf("  %s: party tick: %s\n", build.label, failure);
+        CHECK(party_found);
+        CHECK(party_found && party_hook_install_located(online.data(), size, entry, &party, stubs, party_hook_stub_bytes()) == 1);
+        stubs += party_hook_stub_bytes();
+        result.online = g_failures == before;
+        result.character_editor = InstallAppearance(build, online.data(), size, entry, stubs) && offline_appearance;
+        stubs += appearance_hooks_stub_bytes();
+
+        const int comms_before = g_failures;
+        CommsBridgeSites comms{};
+        CHECK(comms_bridge_locate(online.data(), size, &comms) == 1);
+        const NativeSitePin* pin = PinOf(ImageOwner(build, size, entry));
+        CHECK(pin && comms.show == pin->comms_show && comms.text_call == pin->comms_text_call);
+        CHECK(comms_bridge_install(online.data(), size, entry, &comms, stubs, comms_bridge_stub_bytes()) == 1);
+        CHECK(comms_bridge_active() == 1 && online[comms.text_call] == 0xe9 && online[party.tick] == 0xe9);
+        comms_bridge_attach(nullptr, nullptr);
+        party_hook_set_unit_listener(nullptr);
+        result.quick_chat = party_found && g_failures == comms_before;
+    }
 
     // Online Play: the Early Story hooks go in first and own the director's Start check; Boss Battle goes in beside them.
     if (build.boss_battle) {
@@ -1586,6 +1708,7 @@ void InstallEverything(const GameBuild& build, const BootImage& image, const Dcp
     }
     CHECK(!ultrawide_hooks_install(near.data(), size - 0x10, entry, near.data() + base, room, 1.3125, detail, sizeof(detail)));
     CHECK(std::equal(near.begin(), near.begin() + std::ptrdiff_t(size), image.bytes.begin()));
+    return result;
 }
 
 struct FixtureReport {
@@ -1593,6 +1716,8 @@ struct FixtureReport {
     bool prepared = false;
     bool image_identity = false;
     std::string note;
+    bool patches = false;
+    NativeInstall native;
 };
 
 // What stands behind a feature on a build. A fallback path or a profile flag is not evidence.
@@ -1643,7 +1768,7 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
 // Nothing counts as proven by being offered: without an image, a log or a game folder a site-dependent feature has no proof.
 void TestProofNeedsEvidence() {
     g_scope = "contract";
-    const FixtureReport none, real{true, true, true, ""};
+    const FixtureReport none, real{true, true, true, "", false, {}};
     for (const GameBuild& build : SupportedBuilds()) {
         const Contract* row = FindContract(build.label);
         if (!row) continue;
@@ -1911,6 +2036,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         const GameBuild& owner = ImageOwner(build, size, image.entry);
         const GuestImageId* id = ImageOf(owner);
         CHECK(id && id->size == size && id->entry == image.entry);
+        report.patches = overlaps == 0 && outside == 0 && id && id->size == size && id->entry == image.entry;
 
         uint64_t story = 0, tutorial = 0, found_story = 0, found_tutorial = 0;
         CHECK(skip_offers_locate(bytes, size, Key(build).c_str(), &story, &tutorial) == 1 && story && tutorial);
@@ -1961,7 +2087,9 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         for (const DcpResolutionSite& site : sites) recovered.insert(site.offset);
         CHECK(expected == recovered);
 
-        InstallEverything(build, image, located);
+        const int install_failures = g_failures;
+        report.native = InstallEverything(build, image, located);
+        report.patches = report.patches && g_failures == install_failures;
         report.note = std::to_string(ranges.size()) + " patched ranges, no overlap";
         if (build.features_by_signature) {
             report.note += "; cheats " + std::to_string(DCP_CHEAT_HOOKS) + " hooks, " + std::to_string(DCP_CHEAT_FUNCTIONS) +
@@ -2049,6 +2177,12 @@ int main() {
         std::string missing;
     };
     Evidence evidence[kFeatureCount];
+#ifdef _WIN32
+    const char* const kPlatform = "windows";
+#else
+    const char* const kPlatform = "linux";
+#endif
+    int matrix_failures = 0;
     for (const GameBuild& build : SupportedBuilds()) {
         const FixtureReport& report = reports[build.label];
         const Contract* row = FindContract(build.label);
@@ -2083,6 +2217,23 @@ int main() {
                                 : report.prepared        ? "ready: built-in (served on real data)"
                                                          : "ready: built-in (static)";
         std::printf("PARITY-ENGLISH|%s|ready|%s\n", build.label, readiness);
+
+        const bool save_profile = ProTitleInfo(build.title_id) != nullptr &&
+                                  std::find(std::begin(kProTitleIds), std::end(kProTitleIds), build.title_id) != std::end(kProTitleIds);
+        const bool online_feature = row && ProofOf(build, *row, kOnlinePlay, report) == Proof::kRealExecutable &&
+                                    g_tally[kOnlinePlay].failures.find(build.label) == std::string::npos;
+        const auto state = [&](bool proven) { return !report.executable ? "BLOCKED" : proven ? "PASS" : "FAIL"; };
+        const char* editor = save_profile ? state(report.native.character_editor) : "FAIL";
+        const char* chat = state(report.native.quick_chat);
+        const char* online = state(online_feature && report.native.online);
+        const char* patches = state(report.patches && report.image_identity);
+        const bool all = std::string_view(editor) == "PASS" && std::string_view(chat) == "PASS" &&
+                         std::string_view(online) == "PASS" && std::string_view(patches) == "PASS";
+        const bool blocked = !report.executable && save_profile;
+        const char* verdict = failed ? "FAIL" : blocked ? "BLOCKED" : all ? "PASS" : "FAIL";
+        matrix_failures += std::string_view(verdict) == "FAIL";
+        std::printf("MATRIX|%s|%s|CHAR_EDITOR=%s|QUICK_CHAT=%s|ONLINE=%s|PATCHES=%s|%s\n", build.label, kPlatform, editor, chat,
+                    online, patches, verdict);
     }
     const size_t builds = SupportedBuilds().size();
     for (size_t f = 0; f < kFeatureCount; ++f) {
@@ -2104,6 +2255,6 @@ int main() {
         if (!tally.failures.empty()) status += " (" + tally.failures + ")";
         std::printf("PARITY-FEATURE|%s|%s\n", kFeatureNames[f], status.c_str());
     }
-    std::printf("%d checks, %d failed\n", g_checks, g_failures);
-    return g_failures ? 1 : 0;
+    std::printf("%d checks, %d failed, %d release matrix build(s) failed\n", g_checks, g_failures, matrix_failures);
+    return g_failures || matrix_failures ? 1 : 0;
 }

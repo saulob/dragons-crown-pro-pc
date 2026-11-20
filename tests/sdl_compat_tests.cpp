@@ -353,7 +353,7 @@ void TestVideoBackendOrderAndScope() {
     const std::string window = ReadSource("gpu/shim/window.cpp");
     CHECK(Pos(window, "#ifndef _WIN32\n    dcp_video_backend_prepare(0);\n#endif") != std::string::npos);
     CHECK(Pos(window, "dcp_video_backend_prepare(0)") < Pos(window, "SDL_InitSubSystem(SDL_INIT_VIDEO"));
-    CHECK(Pos(window, "DEBUG_SAULO: video backend actual=") != std::string::npos);
+    CHECK(window.find("DEBUG_SAULO") == std::string::npos);
 
     const std::string header = ReadSource("src/dcp_video_backend.h");
     for (const char* forbidden : {"Vulkan", "VULKAN", "OPENGL", "SDL_GL", "touch", "Touch", "pointer", "Pointer", "GAMEPAD",

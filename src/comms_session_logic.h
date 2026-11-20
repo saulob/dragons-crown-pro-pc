@@ -31,10 +31,11 @@ struct Received {
     std::array<uint8_t, kWireBytes> body{};
 };
 
-// The first use is reported after a few seconds so the lobby shows it early; later uses are batched, at most one report a
-// minute. Counts stay pending until the lobby accepts them, and return to pending when it does not.
+// The first use is reported after a few seconds so the lobby shows it early; later uses are batched, at most one report
+// every two minutes, the lobby's per-account refill (commsReportAccount). Counts stay pending until the lobby accepts
+// them, and return to pending when it does not.
 inline constexpr uint64_t kFirstReportDelayMs = 5000;
-inline constexpr uint64_t kReportGapMs = 60000;
+inline constexpr uint64_t kReportGapMs = 120000;
 inline constexpr uint64_t kReportRetryMs = 120000;
 inline constexpr uint64_t kReportReplyMs = 30000;
 

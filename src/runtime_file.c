@@ -156,6 +156,28 @@ int runtime_file_overlay(const char *guest,uint64_t length,const RuntimeFilePatc
     overlays[overlay_count++]=o;
     return 0;
 }
+size_t runtime_file_overlay_describe(const char *guest,uint64_t *length,RuntimeFilePatch *out,size_t capacity) {
+    const Overlay *o=overlay_of(guest);
+    if (length) *length=o ? o->length : 0;
+    if (!o) return 0;
+    for (size_t i=0;out && i<o->count && i<capacity;++i) out[i]=(RuntimeFilePatch){o->patches[i].offset,o->patches[i].size,o->patches[i].data};
+    return o->count;
+}
+int runtime_file_overlay_extend(const char *guest,uint64_t length,const RuntimeFilePatch *patches,size_t count) {
+    Overlay *o=(Overlay *)overlay_of(guest);
+    if (!o || length<o->length || (count && !patches)) return -1;
+    for (size_t i=0;i<count;++i)
+        if (patches[i].offset>length || patches[i].size>length-patches[i].offset) return -1;
+    OverlayPatch *grown=calloc(o->count+count ? o->count+count : 1,sizeof(OverlayPatch));
+    if (!grown) return -1;
+    if (o->count) memcpy(grown,o->patches,o->count*sizeof(OverlayPatch));
+    for (size_t i=0;i<count;++i) grown[o->count+i]=(OverlayPatch){patches[i].offset,patches[i].size,patches[i].data};
+    free(o->patches);
+    o->patches=grown;
+    o->count+=count;
+    o->length=length;
+    return 0;
+}
 int runtime_file_overlay_replace(const char *guest,uint64_t offset,uint64_t size,const void *data) {
     const Overlay *o=overlay_of(guest);
     if (!o || !data) return -1;

@@ -317,8 +317,8 @@ void TestSources() {
     CHECK(cmake.find("add_executable(dcp-party-tests EXCLUDE_FROM_ALL tests/party_tests.cpp src/guest_hook.c src/party_hook.cpp)") !=
           std::string::npos);
 
-    // The hook only observes: its handler is one Observe call and nothing writes through the registers.
-    const std::string handler = Between(hook, "void GUEST_HOOK_ABI PartyTickHook", "// The entry");
+    // The hook only observes: one Observe call (then the Comms Wheel listener) and nothing writes through the registers.
+    const std::string handler = Between(hook, "void Record(uint64_t unit) {", "// The entry");
     CHECK(!handler.empty() && Count(handler, "Observe(") == 1 && handler.find("regs->skip") == std::string::npos &&
           handler.find("regs->r") == handler.rfind("regs->r") && handler.find("= ") == std::string::npos);
 

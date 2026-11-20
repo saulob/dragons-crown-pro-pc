@@ -105,15 +105,6 @@ size_t dcp_pad_owners_assign(DcpPadOwners *o, const DcpPadDevice *devices, size_
     return written;
 }
 
-const char *dcp_pad_assign_reason_name(DcpPadAssignReason reason) {
-    switch (reason) {
-    case DCP_PAD_ASSIGN_NEW: return "new";
-    case DCP_PAD_ASSIGN_RECLAIM: return "reclaim";
-    case DCP_PAD_ASSIGN_MOVED: return "moved";
-    }
-    return "unknown";
-}
-
 static const char *const telemetry_names[DCP_PAD_EVENT_COUNT]={
     "local_controller_assignment","local_controller_reassignment","local_controller_swap_detected"};
 

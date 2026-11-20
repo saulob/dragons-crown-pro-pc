@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 1.3.0 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 1.4.0 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -113,7 +113,6 @@ set(DCP_RUNTIME_SOURCES
     src/runtime_kernel.c
     src/runtime_memory.c
     src/runtime_matching2.cpp
-    src/early_story_diag.cpp
     src/runtime_mutex.c
     src/runtime_online.cpp
     src/runtime_pad.c
@@ -205,7 +204,7 @@ target_compile_definitions(dcp-net-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_
 target_compile_options(dcp-net-tests PRIVATE -Wall -Wextra)
 # The game's side of online play (Matching2, libSceNet, Rudp entry points) against a development lobby; skipped unless
 # DCP_TEST_LOBBY names one. Not part of the default build.
-add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/early_story_diag.cpp src/runtime_rudp.cpp
+add_executable(dcp-online-hle-tests EXCLUDE_FROM_ALL tests/online_hle_tests.cpp src/runtime_matching2.cpp src/runtime_rudp.cpp
     src/early_story_session.c src/boss_battle_online.c launcher/online_view.cpp src/appearance_net.cpp src/appearance_session.cpp)
 target_include_directories(dcp-online-hle-tests PRIVATE launcher)
 target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
@@ -393,7 +392,8 @@ add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.
     src/gallery_unlock.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c src/system_type_hook.c src/ultrawide_hooks.c
     src/voice_hooks.c src/boss_battle.c src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp
     src/boss_battle_text.c src/hydeland_town.c src/inn_layout.c src/endgame_unlocks.c src/boss_battle_online.c
-    src/network_access.c src/network_hint.c src/online_prompt.c src/early_story_online.c src/early_story_session.c)
+    src/network_access.c src/network_hint.c src/online_prompt.c src/early_story_online.c src/early_story_session.c
+    src/party_hook.cpp src/comms_bridge.cpp src/comms_text.c)
 set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-build-parity-tests PRIVATE src launcher)
 target_compile_definitions(dcp-build-parity-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

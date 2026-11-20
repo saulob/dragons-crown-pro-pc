@@ -678,7 +678,7 @@ std::vector<RegionMap> BuildRegionMaps(std::span<const SurfaceTexels> surfaces, 
     std::vector<std::vector<uint8_t>> covered;
     for (const SurfaceTexels& surface : surfaces) {
         maps.push_back(RegionMap{surface.width, surface.height,
-                                 std::vector<uint8_t>(size_t(surface.width) * size_t(surface.height), 0)});
+                                 std::vector<uint8_t>(size_t(surface.width) * size_t(surface.height), 0), {}});
         std::vector<uint8_t>& mask = covered.emplace_back(maps.back().region.size(), 0);
         for (const MbsLayer& layer : model.layers) {
             if (layer.texture != surface.texture) continue;
@@ -1858,7 +1858,7 @@ std::optional<RegionMap> ParseRegionMap(std::span<const uint8_t> bytes, std::str
         stored != identity || width == 0 || height == 0 || width > 16384 || height > 16384) {
         return std::nullopt;
     }
-    RegionMap map{int(width), int(height), {}};
+    RegionMap map{int(width), int(height), {}, {}};
     map.region.reserve(size_t(width) * size_t(height));
     while (!in.done()) {
         uint8_t region = 0, lo = 0, hi = 0;
