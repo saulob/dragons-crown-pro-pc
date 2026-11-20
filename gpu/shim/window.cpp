@@ -14,6 +14,7 @@
 #include "dcp_sdl_compat.h"
 #include "dcp_video_backend.h"
 #include "dcp_overlay.h"
+#include "dcp_comms_wheel.h"
 #include "dcp_graphics.h"
 #include "dcp_latency_trace.h"
 #include "dcp_mouse.h"
@@ -204,6 +205,7 @@ void WindowSDL::ApplyDisplayMode(int mode) {
     ReleaseMouse();
     SDL_SetWindowFullscreen(window, borderless);
     SDL_SyncWindow(window);
+    mouse_settle_until = SDL_GetTicks() + kModeSettleMs;
     std::printf("Window: %s\n", DcpGraphics::DisplayModeNames[borderless ? DcpGraphics::Borderless : DcpGraphics::Windowed]);
 }
 
@@ -296,12 +298,15 @@ void WindowSDL::UpdateCursor() {
     }
 }
 
-// Window thread. Relative mouse mode is on only while Pointer Control is held and nothing else needs the mouse; whenever
-// the game stops taking mouse input, held buttons and the pointer are dropped.
+// Window thread. Relative mouse mode is on only while Pointer Control wants the mouse (held in Hold, always in Always On)
+// and nothing else needs it; whenever the game stops taking mouse input, held buttons and the pointer are dropped.
 void WindowSDL::UpdateMouseCapture() {
     DcpMouseState* const mouse = dcp_mouse_global();
     const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    const DcpMouseCapture::Frame frame{dcp_mouse_pointer_active(mouse) != 0, focused, DcpOverlay::CapturesInput(),
+    const bool settling = DcpSettings::Get().mouse_pointer_mode == DCP_POINTER_MODE_ALWAYS_ON &&
+                          SDL_GetTicks() < mouse_settle_until;
+    const DcpMouseCapture::Frame frame{dcp_mouse_capture_wanted(mouse) != 0, focused,
+                                       DcpOverlay::CapturesInput() || settling || DcpCommsWheel::MouseEngaged(),
                                        text_active};
     const bool blocked = DcpMouseCapture::Blocked(frame);
     if (blocked != mouse_blocked) {

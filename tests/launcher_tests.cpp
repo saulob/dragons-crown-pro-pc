@@ -5367,6 +5367,52 @@ void TestMouseSettings(const fs::path& base) {
     }
     CHECK(WrittenValue(ReadAll(file), "mouse_square", "left") && WrittenValue(ReadAll(file), "vsync", "0"));
 
+    // Full mouse rebinding and Pointer Control Mode: one line per control, the same names in the launcher and the runtime.
+    {
+        LauncherSettings settings(file);
+        CHECK(IsValidSetting("mouse_cross", "x1") && IsValidSetting("mouse_touchpad_right", "none") && IsValidSetting("mouse_dpad_up", "mouse5"));
+        CHECK(!IsValidSetting("mouse_cross", "button9") && !IsValidSetting("mouse_l1", ""));
+        CHECK(IsValidSetting("mouse_pointer_mode", "hold") && IsValidSetting("mouse_pointer_mode", "always_on"));
+        CHECK(!IsValidSetting("mouse_pointer_mode", "on") && !IsValidSetting("mouse_pointer_mode", ""));
+        CHECK(IsValidSetting("mouse_wheel_up", "dpad_up") && IsValidSetting("mouse_wheel_down", "touchpad_right"));
+        int managed = 0;
+        for (const ManagedSetting& setting : ManagedSettings()) {
+            managed += dcp_mouse_setting_key(std::string(setting.key).c_str());
+        }
+        CHECK(managed == DCP_MOUSE_ACTION_COUNT + 5); // every action, then controls, sensitivity, mode and both wheel steps
+
+        const MouseTargetResult first = SetMouseTarget(settings, DCP_MOUSE_X1, DCP_PAD_TARGET_CROSS);
+        CHECK(first.applied && first.moved_from == DCP_MOUSE_NONE);
+        CHECK(SetMouseTarget(settings, DCP_MOUSE_X2, DCP_PAD_TARGET_R1).applied);
+        const MouseTargetResult taken = SetMouseTarget(settings, DCP_MOUSE_X2, DCP_PAD_TARGET_CROSS);
+        CHECK(taken.applied && taken.moved_from == DCP_MOUSE_X1);
+        DcpMouseMap saved = SavedMouse(settings);
+        CHECK(saved.button[DCP_MOUSE_CROSS] == DCP_MOUSE_X2 && saved.button[DCP_MOUSE_R1] == DCP_MOUSE_NONE);
+        CHECK(SetMouseTarget(settings, DCP_MOUSE_LEFT, -1).applied);
+        saved = SavedMouse(settings);
+        CHECK(saved.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_NONE && saved.button[DCP_MOUSE_CIRCLE] == DCP_MOUSE_RIGHT);
+        CHECK(!SetMouseTarget(settings, DCP_MOUSE_MIDDLE, DCP_PAD_TARGET_L2).applied); // Pointer Control's button in Hold
+        SetPointerMode(settings, DCP_POINTER_MODE_ALWAYS_ON);
+        CHECK(SavedMouse(settings).pointer_mode == DCP_POINTER_MODE_ALWAYS_ON);
+        CHECK(SetMouseTarget(settings, DCP_MOUSE_MIDDLE, DCP_PAD_TARGET_L2).applied);
+        CHECK(!SetMouseTarget(settings, DCP_MOUSE_LEFT, DCP_PAD_TARGET_L3).applied); // Pointer Interaction's button in Always On
+        CHECK(SavedMouse(settings).button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_MIDDLE); // kept for Hold
+        CHECK(settings.Save());
+        const std::string text = ReadAll(file);
+        CHECK(WrittenValue(text, "mouse_cross", "x2") && WrittenValue(text, "mouse_square", "none"));
+        CHECK(WrittenValue(text, "mouse_pointer_mode", "always_on") && WrittenValue(text, "mouse_pointer_control", "middle"));
+        DcpMouseMap reloaded;
+        dcp_mouse_load(file.string().c_str(), &reloaded);
+        CHECK(reloaded.button[DCP_MOUSE_CROSS] == DCP_MOUSE_X2 && reloaded.pointer_mode == DCP_POINTER_MODE_ALWAYS_ON);
+        CHECK(reloaded.button[DCP_MOUSE_L2] == DCP_MOUSE_MIDDLE && reloaded.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_MIDDLE);
+        ResetMouse(settings);
+        saved = SavedMouse(settings);
+        CHECK(saved.pointer_mode == DCP_POINTER_MODE_HOLD && saved.button[DCP_MOUSE_CROSS] == DCP_MOUSE_NONE);
+        CHECK(saved.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_LEFT && saved.button[DCP_MOUSE_L2] == DCP_MOUSE_NONE);
+        settings.Set("mouse_pointer_mode", "sideways");
+        CHECK(SavedMouse(settings).pointer_mode == DCP_POINTER_MODE_HOLD);
+    }
+
     // Mouse Sensitivity: slider steps, the Default button and Mouse Controls Off.
     {
         LauncherSettings settings(file);
@@ -5416,14 +5462,18 @@ void TestMouseSettings(const fs::path& base) {
     const size_t mouse = launcher.find("ui.Section(\"Mouse\", true)", controls);
     const size_t hotkeys = launcher.find("ui.Section(\"Port hotkeys\", true)", controls);
     CHECK(controls != std::string::npos && keyboard < mouse && mouse < hotkeys);
-    CHECK(launcher.find("MouseBindRow(ui, dcp_mouse_actions[index].ini_key") != std::string::npos);
+    CHECK(launcher.find("MouseButtonRow(ui, mouse, button);") != std::string::npos);
+    CHECK(launcher.find("MouseBindRow(ui, dcp_mouse_actions[action].ini_key") != std::string::npos);
+    const size_t mode_row = launcher.find("ui.Choice(\"Pointer Control Mode\"", mouse);
+    CHECK(mode_row != std::string::npos && mode_row > launcher.find("MouseButtonRow(ui, mouse, button);", mouse) &&
+          mode_row < launcher.find("SensitivityRow(ui, mouse.sensitivity);", mouse));
     const size_t slider = launcher.find("SensitivityRow(ui, mouse.sensitivity);", mouse);
     CHECK(slider != std::string::npos && slider < launcher.find("ui.Combo(\"Wheel up\""));
     CHECK(launcher.find("ImGui::SliderInt(\"##sensitivity\"") != std::string::npos);
     CHECK(launcher.find("ImGui::Button(Tr(\"Default\")") != std::string::npos);
     CHECK(launcher.find("ui.Combo(\"Pointer sensitivity\"") == std::string::npos);
     const size_t toggle = launcher.find("ui.Toggle(\"Mouse Controls\"", controls);
-    const size_t first_row = launcher.find("MouseBindRow(ui, dcp_mouse_actions[index].ini_key", controls);
+    const size_t first_row = launcher.find("MouseButtonRow(ui, mouse, button);", controls);
     CHECK(toggle != std::string::npos && toggle < first_row && toggle > mouse);
     CHECK(launcher.find("ImGui::BeginDisabled(!SavedMouse(settings_).controls);", toggle) < first_row);
     CHECK(launcher.find("ImGui::EndDisabled();", first_row) < launcher.find("std::optional<int> MouseBindRow("));
@@ -5431,7 +5481,7 @@ void TestMouseSettings(const fs::path& base) {
     const std::string portuguese = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "localization" / "pt_br_ui_text.cpp");
     for (const char* text : {"Mouse Controls\tControles do mouse\n",
                              "Enables mouse buttons, wheel and pointer controls during gameplay.\tAtiva os botões do mouse, roda e controle do ponteiro durante o jogo\n",
-                             "Primary action\t", "Secondary action\t", "Pointer Control\t", "Pointer Interaction\t",
+                             "Pointer Control Mode\t", "Hold\t", "Always On\t", "Pointer Control\t", "Pointer Interaction\t",
                              "Mouse Sensitivity\tSensibilidade do mouse\n",
                              "Controls how fast mouse movement moves the game's pointer.\tControla a velocidade com que o movimento do mouse move o ponteiro do jogo\n",
                              "Default\t", "Left Mouse\t", "Mouse 4\t", "Mouse 5\t", "Mouse defaults\t"}) {

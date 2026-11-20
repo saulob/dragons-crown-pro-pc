@@ -224,9 +224,12 @@ void runtime_pad_set_rumble(int enabled) {
 void runtime_pad_set_settings(const char *settings_file) {
     snprintf(keys_file,sizeof(keys_file),"%s",settings_file ? settings_file : "");
     DcpMouseMap mouse;
-    dcp_mouse_load(keys_file,&mouse);
+    DcpMouseLoadInfo loaded;
+    dcp_mouse_load_info(keys_file,&mouse,&loaded);
     dcp_mouse_configure(dcp_mouse_global(),&mouse);
-    if (mouse.controls) printf("Mouse controls: on, sensitivity %d%%\n",mouse.sensitivity);
+    dcp_mouse_note_invalid(dcp_mouse_global(),loaded.rejected);
+    if (mouse.controls) printf("Mouse controls: on, sensitivity %d%%, pointer control %s, %d extra buttons\n",mouse.sensitivity,
+                               dcp_pointer_mode_name(mouse.pointer_mode),loaded.extended_bound);
     else puts("Mouse controls: off");
 }
 
@@ -303,6 +306,16 @@ static void merge_mouse(PadData *d, const DcpMouseSample *mouse) {
         d->touches[0]=(PadTouch){.x=mouse->x,.y=mouse->y,.id=mouse->id};
         d->touch_count=1;
     }
+    if (mouse->touchpad_side) touch_click(d,mouse->touchpad_side==2);
+}
+static bool pad_surface_touched(SDL_Gamepad *g) {
+    if (!g || SDL_GetNumGamepadTouchpads(g)<1) return false;
+    const int fingers=SDL_GetNumGamepadTouchpadFingers(g,0);
+    for (int finger=0;finger<fingers;++finger) {
+        bool down=false;
+        if (SDL_GetGamepadTouchpadFinger(g,0,finger,&down,NULL,NULL,NULL) && down) return true;
+    }
+    return false;
 }
 /* A finger on the screen owns the touch surface while it is down. */
 static void merge_touchscreen(PadData *d, const DcpTouchSample *screen) {
@@ -338,10 +351,12 @@ static void sample_host(int slot, PadData *d) {
     DcpMouseSample mouse={0};
     DcpTouchSample screen={0};
     if (slot==0) {
+        dcp_mouse_controller_surface(dcp_mouse_global(),pad_surface_touched(g));
         dcp_mouse_sample(dcp_mouse_global(),&mouse);
         dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);
         if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);
         pointer_owns_touch=mouse.pointer || screen.touch;
+        dcp_mouse_screen_surface(dcp_mouse_global(),screen.touch);
     }
     load_button_maps();
     if (g) {

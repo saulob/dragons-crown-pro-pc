@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -62,14 +63,28 @@ int Count(const std::string& text, const std::string& needle) {
 struct Rig {
     DcpMouseState* state = dcp_mouse_state_new();
     DcpMouseMap map{};
+    std::vector<std::string> lines; // the telemetry lines the state sent
 
-    Rig() {
+    explicit Rig(int mode = DCP_POINTER_MODE_HOLD) {
         dcp_mouse_defaults(&map);
+        map.pointer_mode = mode;
         dcp_mouse_configure(state, &map);
+        dcp_mouse_set_log_sink(state, &Rig::Log, this);
     }
     ~Rig() { dcp_mouse_state_free(state); }
     Rig(const Rig&) = delete;
     Rig& operator=(const Rig&) = delete;
+
+    static void Log(const char* line, void* user) { static_cast<Rig*>(user)->lines.emplace_back(line); }
+    // The lines that are exactly "Mouse telemetry: <text>".
+    int Lines(const std::string& text) const {
+        return static_cast<int>(std::count(lines.begin(), lines.end(), "Mouse telemetry: " + text));
+    }
+    // The lines of one event, whatever the count.
+    int Events(const std::string& event) const {
+        return static_cast<int>(std::count_if(lines.begin(), lines.end(),
+                                              [&](const std::string& line) { return Contains(line, "event=" + event + " "); }));
+    }
 
     void Configure() { dcp_mouse_configure(state, &map); }
     void Down(int button) { dcp_mouse_button(state, button, 1); }
@@ -1722,12 +1737,14 @@ struct Stroke {
     double input_x = 0, input_y = 0;
 };
 
-Stroke RunStroke(int pointer, int click, int other, int press_at, int release_at, int reads = 300) {
-    Rig rig;
+Stroke RunStroke(int pointer, int click, int other, int press_at, int release_at, int reads = 300, bool always_on = false) {
+    Rig rig(always_on ? DCP_POINTER_MODE_ALWAYS_ON : DCP_POINTER_MODE_HOLD);
     rig.map.button[DCP_MOUSE_POINTER_CONTROL] = pointer;
     rig.map.button[DCP_MOUSE_POINTER_INTERACT] = click;
     rig.Configure();
-    rig.Down(pointer);
+    if (!always_on) {
+        rig.Down(pointer);
+    }
     Stroke stroke;
     for (int read = 0; read < reads; ++read) {
         if (other && read == press_at) {
@@ -2068,6 +2085,1062 @@ void TestPointerMotionTelemetryPayload() {
     CHECK(!Contains(source, "float") && !Contains(source, "double"));
 }
 
+// ---- Full mouse rebinding and Pointer Control Mode ----
+
+constexpr int kButtons[] = {DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, DCP_MOUSE_MIDDLE, DCP_MOUSE_X1, DCP_MOUSE_X2};
+
+struct TargetExpectation {
+    int target;
+    const char* name;
+    std::uint32_t buttons;
+    int side; // the touchpad click side, 0 for none
+};
+
+// Written out independently of the tables under test.
+constexpr TargetExpectation kTargets[] = {
+    {DCP_PAD_TARGET_CROSS, "cross", BTN_CROSS, 0},
+    {DCP_PAD_TARGET_CIRCLE, "circle", BTN_CIRCLE, 0},
+    {DCP_PAD_TARGET_SQUARE, "square", BTN_SQUARE, 0},
+    {DCP_PAD_TARGET_TRIANGLE, "triangle", BTN_TRIANGLE, 0},
+    {DCP_PAD_TARGET_L1, "l1", BTN_L1, 0},
+    {DCP_PAD_TARGET_R1, "r1", BTN_R1, 0},
+    {DCP_PAD_TARGET_L2, "l2", BTN_L2, 0},
+    {DCP_PAD_TARGET_R2, "r2", BTN_R2, 0},
+    {DCP_PAD_TARGET_L3, "l3", BTN_L3, 0},
+    {DCP_PAD_TARGET_R3, "r3", BTN_R3, 0},
+    {DCP_PAD_TARGET_DPAD_UP, "dpad_up", BTN_UP, 0},
+    {DCP_PAD_TARGET_DPAD_DOWN, "dpad_down", BTN_DOWN, 0},
+    {DCP_PAD_TARGET_DPAD_LEFT, "dpad_left", BTN_LEFT, 0},
+    {DCP_PAD_TARGET_DPAD_RIGHT, "dpad_right", BTN_RIGHT, 0},
+    {DCP_PAD_TARGET_OPTIONS, "options", BTN_OPTIONS, 0},
+    {DCP_PAD_TARGET_TOUCHPAD_LEFT, "touchpad_left", BTN_TOUCHPAD, 1},
+    {DCP_PAD_TARGET_TOUCHPAD_RIGHT, "touchpad_right", BTN_TOUCHPAD, 2},
+};
+constexpr int kTargetCount = static_cast<int>(sizeof(kTargets) / sizeof(kTargets[0]));
+
+int ActionOf(int target) {
+    for (int action = 0; action < DCP_MOUSE_ACTION_COUNT; ++action) {
+        if (dcp_mouse_actions[action].target == target) {
+            return action;
+        }
+    }
+    return -1;
+}
+
+bool SameMap(const DcpMouseMap& a, const DcpMouseMap& b) {
+    return std::memcmp(&a, &b, sizeof(a)) == 0;
+}
+
+void TestTargetTable() {
+    CHECK(DCP_PAD_TARGET_COUNT == 17 && DCP_MOUSE_ACTION_COUNT == 19 && DCP_WHEEL_TARGET_COUNT == 18 && kTargetCount == 17);
+    CHECK(DCP_MOUSE_SQUARE == 0 && DCP_MOUSE_CIRCLE == 1 && DCP_MOUSE_POINTER_CONTROL == 2 && DCP_MOUSE_POINTER_INTERACT == 3);
+    CHECK(DCP_MOUSE_FIRST_EXTENDED == DCP_MOUSE_CROSS && DCP_WHEEL_CROSS == 1 && DCP_WHEEL_R2 == 8);
+    unsigned seen = 0;
+    for (const TargetExpectation& t : kTargets) {
+        CHECK(std::string(dcp_pad_target_name(t.target)) == t.name && dcp_pad_target_from_name(t.name) == t.target);
+        CHECK(dcp_pad_target_from_name(dcp_pad_target_name(t.target)) == t.target);
+        // One list: the keyboard's action, the mouse's and the wheel's use the same name and label.
+        CHECK(std::string(dcp_key_actions[DCP_KEY_CROSS + t.target].ini_key) == std::string("key_") + t.name);
+        CHECK(std::string(dcp_pad_target_label(t.target)) == dcp_key_actions[DCP_KEY_CROSS + t.target].label);
+        const int action = ActionOf(t.target);
+        CHECK(action >= 0 && std::string(dcp_mouse_actions[action].ini_key) == std::string("mouse_") + t.name);
+        CHECK(dcp_wheel_target_from_name(t.name) == t.target + 1 && std::string(dcp_wheel_target_name(t.target + 1)) == t.name);
+        CHECK(std::string(dcp_wheel_target_label(t.target + 1)) == dcp_pad_target_label(t.target));
+        CHECK(!(seen & (1u << t.target)));
+        seen |= 1u << t.target;
+    }
+    CHECK(seen == (1u << DCP_PAD_TARGET_COUNT) - 1);
+    CHECK(dcp_mouse_actions[DCP_MOUSE_POINTER_CONTROL].target == -1 && dcp_mouse_actions[DCP_MOUSE_POINTER_INTERACT].target == -1);
+    CHECK(dcp_mouse_actions[DCP_MOUSE_SQUARE].target == DCP_PAD_TARGET_SQUARE && dcp_mouse_actions[DCP_MOUSE_CIRCLE].target == DCP_PAD_TARGET_CIRCLE);
+    for (const char* bad : {"start", "", "none", "jump", "dodge", "f1", "comms_wheel", "hotkey_cheats_menu", "cheats", "touchpad"}) {
+        CHECK(dcp_pad_target_from_name(bad) == -1);
+    }
+    CHECK(dcp_pad_target_from_name(nullptr) == -1);
+    CHECK(std::string(dcp_pad_target_name(-1)).empty() && std::string(dcp_pad_target_name(DCP_PAD_TARGET_COUNT)).empty());
+    CHECK(std::string(dcp_pad_target_label(-1)).empty() && std::string(dcp_wheel_target_name(0)) == "none");
+    CHECK(std::string(dcp_wheel_target_name(DCP_WHEEL_TARGET_COUNT)) == "none" && std::string(dcp_wheel_target_label(0)) == "(none)");
+    // The port's own hotkeys are not PS4 controls and are not offered.
+    for (int action = 0; action < DCP_MOUSE_ACTION_COUNT; ++action) {
+        const std::string key = dcp_mouse_actions[action].ini_key;
+        CHECK(key.find("hotkey") == std::string::npos && key.find("comms") == std::string::npos && key.find("cheats") == std::string::npos);
+    }
+
+    // Defaults are the 1.4.0 ones; every added control is unbound and Pointer Control Mode is Hold.
+    DcpMouseMap map;
+    dcp_mouse_defaults(&map);
+    for (int action = 0; action < DCP_MOUSE_ACTION_COUNT; ++action) {
+        const int expected = action == DCP_MOUSE_SQUARE ? DCP_MOUSE_LEFT
+                             : action == DCP_MOUSE_CIRCLE ? DCP_MOUSE_RIGHT
+                             : action == DCP_MOUSE_POINTER_CONTROL ? DCP_MOUSE_MIDDLE
+                             : action == DCP_MOUSE_POINTER_INTERACT ? DCP_MOUSE_LEFT
+                                                                    : DCP_MOUSE_NONE;
+        CHECK(map.button[action] == expected && dcp_mouse_actions[action].default_button == expected);
+    }
+    CHECK(map.pointer_mode == DCP_POINTER_MODE_HOLD && map.controls == 1 && map.sensitivity == 100);
+    CHECK(map.wheel_up == DCP_WHEEL_NONE && map.wheel_down == DCP_WHEEL_NONE);
+    CHECK(dcp_mouse_button_targets(&map, DCP_MOUSE_LEFT) == 1u << DCP_PAD_TARGET_SQUARE);
+    CHECK(dcp_mouse_button_targets(&map, DCP_MOUSE_RIGHT) == 1u << DCP_PAD_TARGET_CIRCLE);
+    CHECK(dcp_mouse_button_targets(&map, DCP_MOUSE_MIDDLE) == 0 && dcp_mouse_button_targets(&map, DCP_MOUSE_X1) == 0);
+    CHECK(dcp_mouse_button_targets(&map, DCP_MOUSE_NONE) == 0 && dcp_mouse_button_targets(&map, 17) == 0);
+
+    // One model on both platforms: the tables live in portable sources with no platform branch.
+    for (const char* source : {"src/dcp_keys.c", "src/dcp_keys.h", "src/dcp_mouse.c", "src/dcp_mouse.h", "launcher/options.cpp",
+                               "launcher/options.h"}) {
+        const std::string text = ReadSource(source);
+        CHECK(!text.empty() && !Contains(text, "_WIN32") && !Contains(text, "__linux__") && !Contains(text, "__unix__") &&
+              !Contains(text, "_MSC_VER") && !Contains(text, "__APPLE__"));
+    }
+}
+
+// A dcp.ini written by 1.4.0 or earlier loads to the same bindings and behaves the same.
+void TestLegacyFilesStayIdentical() {
+    const fs::path directory = fs::temp_directory_path() / "dcp_mouse_tests_legacy";
+    fs::create_directories(directory);
+    const std::string file = (directory / "dcp.ini").string();
+    DcpMouseMap defaults;
+    dcp_mouse_defaults(&defaults);
+    DcpMouseMap map;
+    DcpMouseLoadInfo info;
+    {
+        std::ofstream(file) << "# Dragon's Crown Pro user settings\nvsync = 1\nkey_cross = q\nmouse_controls = 1\nmouse_square = left\n"
+                               "mouse_circle = right\nmouse_pointer_control = middle\nmouse_pointer_interact = left\n"
+                               "mouse_pointer_sensitivity = 100\nmouse_wheel_up = none\nmouse_wheel_down = none\n";
+    }
+    dcp_mouse_load_info(file.c_str(), &map, &info);
+    CHECK(SameMap(map, defaults) && info.rejected == 0 && info.extended_bound == 0);
+
+    {
+        std::ofstream(file) << "mouse_controls = 1\nmouse_square = x1\nmouse_circle = Mouse5\nmouse_pointer_control = right\n"
+                               "mouse_pointer_interact = middle\nmouse_pointer_sensitivity = 150\nmouse_wheel_up = l1\nmouse_wheel_down = cross\n";
+    }
+    dcp_mouse_load_info(file.c_str(), &map, &info);
+    CHECK(info.rejected == 0 && info.extended_bound == 0 && map.pointer_mode == DCP_POINTER_MODE_HOLD);
+    CHECK(map.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_X1 && map.button[DCP_MOUSE_CIRCLE] == DCP_MOUSE_X2);
+    CHECK(map.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_RIGHT && map.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_MIDDLE);
+    CHECK(map.sensitivity == 150 && map.wheel_up == DCP_WHEEL_L1 && map.wheel_down == DCP_WHEEL_CROSS);
+    for (int action = DCP_MOUSE_FIRST_EXTENDED; action < DCP_MOUSE_ACTION_COUNT; ++action) {
+        CHECK(map.button[action] == DCP_MOUSE_NONE); // an old file never gains a binding
+    }
+    Rig rig;
+    rig.map = map;
+    rig.Configure();
+    rig.Down(DCP_MOUSE_X1);
+    CHECK(rig.Read().buttons == BTN_SQUARE);
+    rig.Down(DCP_MOUSE_X2);
+    CHECK(rig.Read().buttons == (BTN_SQUARE | BTN_CIRCLE));
+    rig.Up(DCP_MOUSE_X1);
+    rig.Up(DCP_MOUSE_X2);
+    rig.Down(DCP_MOUSE_LEFT);
+    CHECK(rig.Read().buttons == 0);
+    rig.Up(DCP_MOUSE_LEFT);
+    rig.Down(DCP_MOUSE_RIGHT); // Pointer Control moved to the right button
+    CHECK(rig.Read().touch && dcp_mouse_pointer_active(rig.state));
+    rig.Down(DCP_MOUSE_MIDDLE); // and its click to the middle one
+    CHECK(rig.Read().buttons == BTN_TOUCHPAD);
+    CHECK(rig.lines.empty()); // nothing was migrated, so nothing is reported
+
+    // The default map: every button does what it did.
+    Rig fresh;
+    for (const int button : kButtons) {
+        fresh.Down(button);
+        const DcpMouseSample sample = fresh.Read();
+        const std::uint32_t expected = button == DCP_MOUSE_LEFT ? BTN_SQUARE : button == DCP_MOUSE_RIGHT ? BTN_CIRCLE : 0;
+        CHECK(sample.buttons == expected && sample.touch == (button == DCP_MOUSE_MIDDLE) && sample.pointer == (button == DCP_MOUSE_MIDDLE));
+        fresh.Up(button);
+        CHECK(fresh.Read().buttons == 0);
+    }
+    fs::remove_all(directory);
+}
+
+void TestEveryButtonEveryTarget() {
+    for (const int button : kButtons) {
+        for (const TargetExpectation& t : kTargets) {
+            Rig rig;
+            // The default buttons are cleared so that the one under test is the only binding.
+            rig.map.button[DCP_MOUSE_SQUARE] = DCP_MOUSE_NONE;
+            rig.map.button[DCP_MOUSE_CIRCLE] = DCP_MOUSE_NONE;
+            rig.map.button[DCP_MOUSE_POINTER_CONTROL] = DCP_MOUSE_NONE;
+            rig.map.button[ActionOf(t.target)] = button;
+            rig.Configure();
+            CHECK(rig.Read().buttons == 0);
+            rig.Down(button);
+            const DcpMouseSample pressed = rig.Read();
+            CHECK(pressed.buttons == t.buttons && pressed.touchpad_side == t.side && !pressed.touch && !pressed.pointer);
+            CHECK(rig.Read().buttons == t.buttons); // held across reads
+            rig.Up(button);
+            const DcpMouseSample released = rig.Read();
+            CHECK(released.buttons == 0 && released.touchpad_side == 0 && !released.touch); // nothing stays held
+            for (const int other : kButtons) {
+                if (other == button) {
+                    continue;
+                }
+                rig.Down(other);
+                CHECK(rig.Read().buttons == 0); // the other buttons stay unbound
+                rig.Up(other);
+            }
+        }
+    }
+}
+
+void TestRepresentativeBindings() {
+    // Mouse 4 -> Cross and Mouse 5 -> R1, with every default kept.
+    Rig rig;
+    rig.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+    rig.map.button[DCP_MOUSE_R1] = DCP_MOUSE_X2;
+    rig.Configure();
+    rig.Down(DCP_MOUSE_X1);
+    CHECK(rig.Read().buttons == BTN_CROSS);
+    rig.Down(DCP_MOUSE_X2); // two buttons held together
+    CHECK(rig.Read().buttons == (BTN_CROSS | BTN_R1));
+    rig.Down(DCP_MOUSE_LEFT);
+    CHECK(rig.Read().buttons == (BTN_CROSS | BTN_R1 | BTN_SQUARE));
+    rig.Up(DCP_MOUSE_X1);
+    CHECK(rig.Read().buttons == (BTN_R1 | BTN_SQUARE)); // releasing one leaves the other
+    rig.Up(DCP_MOUSE_X2);
+    rig.Up(DCP_MOUSE_LEFT);
+    for (int i = 0; i < 100; ++i) {
+        CHECK(rig.Read().buttons == 0);
+    }
+    for (int i = 0; i < 100; ++i) {
+        rig.Down(DCP_MOUSE_X2);
+        CHECK(rig.Read().buttons == BTN_R1);
+        rig.Up(DCP_MOUSE_X2);
+        CHECK(rig.Read().buttons == 0);
+    }
+
+    // A mouse button to a shoulder button, replacing the Circle it had.
+    Rig shoulder;
+    shoulder.map.button[DCP_MOUSE_CIRCLE] = DCP_MOUSE_NONE;
+    shoulder.map.button[DCP_MOUSE_L1] = DCP_MOUSE_RIGHT;
+    shoulder.Configure();
+    shoulder.Down(DCP_MOUSE_RIGHT);
+    CHECK(shoulder.Read().buttons == BTN_L1);
+
+    // Changing one binding leaves the others as they were.
+    DcpMouseMap before;
+    dcp_mouse_defaults(&before);
+    before.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+    before.button[DCP_MOUSE_R1] = DCP_MOUSE_X2;
+    DcpMouseMap after = before;
+    after.button[DCP_MOUSE_L2] = DCP_MOUSE_MIDDLE;
+    for (int action = 0; action < DCP_MOUSE_ACTION_COUNT; ++action) {
+        CHECK((before.button[action] == after.button[action]) == (action != DCP_MOUSE_L2));
+    }
+    Rig other;
+    other.map = after;
+    other.map.button[DCP_MOUSE_POINTER_CONTROL] = DCP_MOUSE_NONE;
+    other.Configure();
+    other.Down(DCP_MOUSE_X1);
+    other.Down(DCP_MOUSE_X2);
+    other.Down(DCP_MOUSE_MIDDLE);
+    CHECK(other.Read().buttons == (BTN_CROSS | BTN_R1 | BTN_L2));
+
+    // Touchpad left and right are clicks on that side of the pad.
+    Rig pad;
+    pad.map.button[DCP_MOUSE_TOUCHPAD_LEFT] = DCP_MOUSE_X1;
+    pad.map.button[DCP_MOUSE_TOUCHPAD_RIGHT] = DCP_MOUSE_X2;
+    pad.Configure();
+    pad.Down(DCP_MOUSE_X1);
+    DcpMouseSample click = pad.Read();
+    CHECK(click.buttons == BTN_TOUCHPAD && click.touchpad_side == 1 && !click.touch);
+    pad.Up(DCP_MOUSE_X1);
+    pad.Down(DCP_MOUSE_X2);
+    click = pad.Read();
+    CHECK(click.buttons == BTN_TOUCHPAD && click.touchpad_side == 2);
+    pad.Down(DCP_MOUSE_X1);
+    CHECK(pad.Read().touchpad_side == 2); // both together: the right side
+
+    // The wheel offers the same controls.
+    Rig wheel;
+    wheel.map.wheel_up = DCP_WHEEL_NONE + 1 + DCP_PAD_TARGET_DPAD_UP;
+    wheel.map.wheel_down = DCP_WHEEL_NONE + 1 + DCP_PAD_TARGET_TOUCHPAD_RIGHT;
+    wheel.Configure();
+    dcp_mouse_wheel(wheel.state, 1.0f);
+    dcp_mouse_wheel(wheel.state, -1.0f);
+    const DcpMouseSample step = wheel.Read();
+    CHECK(step.buttons == (BTN_UP | BTN_TOUCHPAD) && step.touchpad_side == 2);
+    for (int i = 0; i < 3; ++i) {
+        wheel.Read();
+    }
+    CHECK(wheel.Read().buttons == 0);
+}
+
+void TestDuplicateAndConflictPolicy() {
+    // A hand-edited file may give one button several controls: every one of them presses, and nothing else.
+    Rig multi;
+    multi.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+    multi.map.button[DCP_MOUSE_R1] = DCP_MOUSE_X1;
+    multi.Configure();
+    multi.Down(DCP_MOUSE_X1);
+    CHECK(multi.Read().buttons == (BTN_CROSS | BTN_R1));
+
+    // The launcher's rule gives a button exactly one control, taking it from the button that had it.
+    DcpMouseMap map;
+    dcp_mouse_defaults(&map);
+    map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+    map.button[DCP_MOUSE_R1] = DCP_MOUSE_X1;
+    CHECK(dcp_mouse_button_targets(&map, DCP_MOUSE_X1) == ((1u << DCP_PAD_TARGET_CROSS) | (1u << DCP_PAD_TARGET_R1)));
+    int moved = -1;
+    CHECK(dcp_mouse_assign_target(&map, DCP_MOUSE_X1, DCP_PAD_TARGET_TRIANGLE, &moved) && moved == DCP_MOUSE_NONE);
+    CHECK(dcp_mouse_button_targets(&map, DCP_MOUSE_X1) == 1u << DCP_PAD_TARGET_TRIANGLE);
+    CHECK(map.button[DCP_MOUSE_CROSS] == DCP_MOUSE_NONE && map.button[DCP_MOUSE_R1] == DCP_MOUSE_NONE);
+    CHECK(dcp_mouse_assign_target(&map, DCP_MOUSE_X2, DCP_PAD_TARGET_TRIANGLE, &moved) && moved == DCP_MOUSE_X1);
+    CHECK(dcp_mouse_button_targets(&map, DCP_MOUSE_X1) == 0 && dcp_mouse_button_targets(&map, DCP_MOUSE_X2) == 1u << DCP_PAD_TARGET_TRIANGLE);
+    CHECK(dcp_mouse_assign_target(&map, DCP_MOUSE_X2, DCP_PAD_TARGET_TRIANGLE, &moved) && moved == DCP_MOUSE_NONE); // already there
+    CHECK(dcp_mouse_assign_target(&map, DCP_MOUSE_LEFT, -1, nullptr) && dcp_mouse_button_targets(&map, DCP_MOUSE_LEFT) == 0);
+    CHECK(map.button[DCP_MOUSE_SQUARE] == DCP_MOUSE_NONE && map.button[DCP_MOUSE_CIRCLE] == DCP_MOUSE_RIGHT); // only Left's control went
+    CHECK(map.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_LEFT && map.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_MIDDLE);
+
+    // Pointer Control owns its button in Hold and Pointer Interaction owns its button in Always On.
+    DcpMouseMap hold;
+    dcp_mouse_defaults(&hold);
+    DcpMouseMap kept = hold;
+    CHECK(dcp_mouse_button_locked(&hold, DCP_MOUSE_MIDDLE) && !dcp_mouse_button_locked(&hold, DCP_MOUSE_LEFT));
+    CHECK(!dcp_mouse_assign_target(&hold, DCP_MOUSE_MIDDLE, DCP_PAD_TARGET_CROSS, &moved) && SameMap(hold, kept));
+    CHECK(dcp_mouse_assign_target(&hold, DCP_MOUSE_LEFT, DCP_PAD_TARGET_CROSS, &moved) && moved == DCP_MOUSE_NONE);
+    DcpMouseMap always = kept;
+    always.pointer_mode = DCP_POINTER_MODE_ALWAYS_ON;
+    kept = always;
+    CHECK(dcp_mouse_button_locked(&always, DCP_MOUSE_LEFT) && !dcp_mouse_button_locked(&always, DCP_MOUSE_MIDDLE));
+    CHECK(!dcp_mouse_assign_target(&always, DCP_MOUSE_LEFT, DCP_PAD_TARGET_CROSS, &moved) && SameMap(always, kept));
+    CHECK(dcp_mouse_assign_target(&always, DCP_MOUSE_MIDDLE, DCP_PAD_TARGET_CROSS, &moved));
+    CHECK(always.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_MIDDLE); // the saved Pointer Control button stays
+    CHECK(!dcp_mouse_assign_target(&always, DCP_MOUSE_NONE, DCP_PAD_TARGET_CROSS, &moved));
+    CHECK(!dcp_mouse_assign_target(&always, 17, DCP_PAD_TARGET_CROSS, &moved));
+    CHECK(!dcp_mouse_assign_target(&always, DCP_MOUSE_X1, DCP_PAD_TARGET_COUNT, &moved));
+    CHECK(!dcp_mouse_assign_target(&always, DCP_MOUSE_X1, -2, &moved) && !dcp_mouse_button_locked(&always, DCP_MOUSE_NONE));
+
+    // Pointer Control's own button never presses a control in Hold, even when a file binds one to it.
+    Rig control;
+    control.map.button[DCP_MOUSE_POINTER_CONTROL] = DCP_MOUSE_X1;
+    control.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+    control.Configure();
+    control.Down(DCP_MOUSE_X1);
+    DcpMouseSample sample = control.Read();
+    CHECK(sample.pointer && sample.touch && sample.buttons == 0);
+    control.Up(DCP_MOUSE_X1);
+    CHECK(control.Read().buttons == 0);
+
+    // Pointer Interaction owns its click: no control bound to that button leaks out of it.
+    for (const int mode : {DCP_POINTER_MODE_HOLD, DCP_POINTER_MODE_ALWAYS_ON}) {
+        Rig click(mode);
+        click.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_LEFT; // Left also performs Square, and now Cross
+        click.Configure();
+        if (mode == DCP_POINTER_MODE_HOLD) {
+            click.Down(DCP_MOUSE_LEFT);
+            CHECK(click.Read().buttons == (BTN_SQUARE | BTN_CROSS)); // outside Pointer Control it is an ordinary button
+            click.Up(DCP_MOUSE_LEFT);
+            CHECK(click.Read().buttons == 0);
+            click.Down(DCP_MOUSE_MIDDLE);
+        }
+        click.Read();
+        click.Read();
+        click.Down(DCP_MOUSE_LEFT);
+        sample = click.Read();
+        CHECK(sample.buttons == BTN_TOUCHPAD && sample.pointer);
+        click.Down(DCP_MOUSE_RIGHT);
+        CHECK(click.Read().buttons == (BTN_TOUCHPAD | BTN_CIRCLE)); // the other buttons keep their controls
+        click.Up(DCP_MOUSE_LEFT);
+        CHECK(click.Read().buttons == BTN_CIRCLE); // and the release leaks nothing
+        click.Up(DCP_MOUSE_RIGHT);
+        click.Down(DCP_MOUSE_LEFT);
+        CHECK(click.Read().buttons == BTN_TOUCHPAD);
+    }
+}
+
+void TestInvalidConfigurationFallsBack() {
+    const fs::path directory = fs::temp_directory_path() / "dcp_mouse_tests_invalid";
+    fs::create_directories(directory);
+    const std::string file = (directory / "dcp.ini").string();
+    DcpMouseMap map;
+    DcpMouseLoadInfo info;
+    {
+        std::ofstream(file) << "mouse_cross = bogus\nmouse_l1 = mouse9\nmouse_pointer_mode = sideways\nmouse_r1 = x2\n"
+                               "mouse_dpad_up =\nmouse_jump = left\nmouse_pointer_interact = none\nmouse_l2 = LEFT\n";
+    }
+    dcp_mouse_load_info(file.c_str(), &map, &info);
+    CHECK(info.rejected == 4); // cross, l1, the mode and the unbound click; an empty value and an unknown key are not counted
+    CHECK(map.button[DCP_MOUSE_CROSS] == DCP_MOUSE_NONE && map.button[DCP_MOUSE_L1] == DCP_MOUSE_NONE);
+    CHECK(map.button[DCP_MOUSE_R1] == DCP_MOUSE_X2 && map.button[DCP_MOUSE_L2] == DCP_MOUSE_LEFT && map.button[DCP_MOUSE_DPAD_UP] == DCP_MOUSE_NONE);
+    CHECK(map.pointer_mode == DCP_POINTER_MODE_HOLD && map.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_LEFT);
+    CHECK(info.extended_bound == 2);
+
+    // Pointer Control and its click on one button: both go back to their defaults, and nothing else is touched.
+    {
+        std::ofstream(file) << "mouse_pointer_control = x1\nmouse_pointer_interact = x1\nmouse_cross = x1\nmouse_pointer_mode = always_on\n";
+    }
+    dcp_mouse_load_info(file.c_str(), &map, &info);
+    CHECK(info.rejected == 1 && map.button[DCP_MOUSE_POINTER_CONTROL] == DCP_MOUSE_MIDDLE && map.button[DCP_MOUSE_POINTER_INTERACT] == DCP_MOUSE_LEFT);
+    CHECK(map.button[DCP_MOUSE_CROSS] == DCP_MOUSE_X1 && map.pointer_mode == DCP_POINTER_MODE_ALWAYS_ON);
+
+    // A clean file reports nothing.
+    {
+        std::ofstream(file) << "mouse_cross = x1\nmouse_pointer_mode = hold\n";
+    }
+    dcp_mouse_load_info(file.c_str(), &map, &info);
+    CHECK(info.rejected == 0 && info.extended_bound == 1);
+    dcp_mouse_load_info((directory / "missing.ini").string().c_str(), &map, &info);
+    CHECK(info.rejected == 0 && info.extended_bound == 0);
+
+    // A value that is not usable changes nothing and is never read as another action.
+    DcpMouseMap base;
+    dcp_mouse_defaults(&base);
+    map = base;
+    for (int action = 0; action < DCP_MOUSE_ACTION_COUNT; ++action) {
+        const char* key = dcp_mouse_actions[action].ini_key;
+        CHECK(dcp_mouse_setting_key(key) && dcp_mouse_setting_value_valid(key, "x2") && dcp_mouse_setting_value_valid(key, "Mouse4"));
+        CHECK(!dcp_mouse_setting_value_valid(key, "bogus") && !dcp_mouse_setting_value_valid(key, "") && !dcp_mouse_setting_value_valid(key, "cross"));
+        CHECK(dcp_mouse_setting_value_valid(key, "none") == (action != DCP_MOUSE_POINTER_INTERACT));
+        CHECK(!dcp_mouse_apply(&map, key, "bogus") && SameMap(map, base));
+    }
+    fs::remove_all(directory);
+
+    // Telemetry for a rejected configuration: one line with a bounded count.
+    Rig rig;
+    dcp_mouse_note_invalid(rig.state, 0);
+    dcp_mouse_note_invalid(rig.state, -3);
+    CHECK(rig.lines.empty());
+    dcp_mouse_note_invalid(rig.state, 3);
+    CHECK(rig.lines.size() == 1 && rig.lines[0] == "Mouse telemetry: event=mouse_binding_invalid_fallback count=3");
+    dcp_mouse_note_invalid(rig.state, 5000);
+    CHECK(rig.lines.size() == 2 && rig.lines[1] == "Mouse telemetry: event=mouse_binding_invalid_fallback count=99");
+}
+
+void TestPointerModeSetting() {
+    CHECK(std::string(dcp_pointer_mode_key) == "mouse_pointer_mode" && dcp_mouse_setting_key("mouse_pointer_mode"));
+    CHECK(DCP_POINTER_MODE_HOLD == 0 && DCP_POINTER_MODE_ALWAYS_ON == 1 && DCP_POINTER_MODE_COUNT == 2);
+    CHECK(dcp_pointer_mode_from_name("hold") == DCP_POINTER_MODE_HOLD && dcp_pointer_mode_from_name("ALWAYS_ON") == DCP_POINTER_MODE_ALWAYS_ON);
+    for (const char* bad : {"", "always", "on", "always on", "toggle", "0", "1"}) {
+        CHECK(dcp_pointer_mode_from_name(bad) == -1 && !dcp_mouse_setting_value_valid("mouse_pointer_mode", bad));
+    }
+    CHECK(dcp_pointer_mode_from_name(nullptr) == -1);
+    for (int mode = 0; mode < DCP_POINTER_MODE_COUNT; ++mode) {
+        CHECK(dcp_pointer_mode_from_name(dcp_pointer_mode_name(mode)) == mode);
+    }
+    CHECK(std::string(dcp_pointer_mode_label(DCP_POINTER_MODE_HOLD)) == "Hold" && std::string(dcp_pointer_mode_label(DCP_POINTER_MODE_ALWAYS_ON)) == "Always On");
+    CHECK(std::string(dcp_pointer_mode_name(7)) == "hold" && std::string(dcp_pointer_mode_label(-1)) == "Hold");
+
+    DcpMouseMap map;
+    dcp_mouse_defaults(&map);
+    CHECK(!dcp_mouse_apply(&map, "mouse_pointer_mode", "sideways") && map.pointer_mode == DCP_POINTER_MODE_HOLD);
+    CHECK(dcp_mouse_apply(&map, "mouse_pointer_mode", "always_on") && map.pointer_mode == DCP_POINTER_MODE_ALWAYS_ON);
+    CHECK(!dcp_mouse_apply(&map, "mouse_pointer_mode", "") && map.pointer_mode == DCP_POINTER_MODE_ALWAYS_ON);
+    CHECK(dcp_mouse_apply(&map, "mouse_pointer_mode", "Hold") && map.pointer_mode == DCP_POINTER_MODE_HOLD);
+
+    // A state given an impossible mode behaves as Hold.
+    Rig rig;
+    rig.map.pointer_mode = 7;
+    rig.Configure();
+    rig.Move(30, 0);
+    DcpMouseSample sample = rig.Read();
+    CHECK(!sample.touch && !sample.pointer && !dcp_mouse_pointer_active(rig.state));
+    dcp_mouse_set_pointer_mode(rig.state, 9);
+    dcp_mouse_set_pointer_mode(rig.state, -1);
+    CHECK(!dcp_mouse_pointer_active(rig.state));
+
+    // Hold -> Always On -> Hold with a custom Pointer Control button: the button comes back and works as before.
+    Rig live;
+    live.map.button[DCP_MOUSE_POINTER_CONTROL] = DCP_MOUSE_X1;
+    live.Configure();
+    live.Down(DCP_MOUSE_X1);
+    CHECK(dcp_mouse_pointer_active(live.state));
+    live.Up(DCP_MOUSE_X1);
+    CHECK(!dcp_mouse_pointer_active(live.state) && !live.Read().touch);
+    dcp_mouse_set_pointer_mode(live.state, DCP_POINTER_MODE_ALWAYS_ON);
+    CHECK(dcp_mouse_pointer_active(live.state));
+    live.Read();
+    CHECK(live.Read().touch);
+    dcp_mouse_set_pointer_mode(live.state, DCP_POINTER_MODE_HOLD);
+    CHECK(!dcp_mouse_pointer_active(live.state));
+    sample = live.Read();
+    CHECK(!sample.touch && !sample.pointer);
+    live.Down(DCP_MOUSE_X1);
+    CHECK(dcp_mouse_pointer_active(live.state) && live.Read().touch);
+}
+
+// The finger Always On makes is the finger Hold makes once it has landed.
+std::vector<DcpMouseSample> StrokeSamples(Rig& rig, int reads) {
+    std::vector<DcpMouseSample> samples;
+    for (int read = 0; read < reads; ++read) {
+        rig.Move(7.0f, 3.0f);
+        samples.push_back(rig.Read());
+    }
+    return samples;
+}
+
+void TestAlwaysOnMovesThePointer() {
+    Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
+    CHECK(dcp_mouse_pointer_active(rig.state) && dcp_mouse_capture_wanted(rig.state));
+    // It lands without any button: one read with no finger, so the game sees a landing and not a jump.
+    DcpMouseSample sample = rig.Read();
+    CHECK(sample.pointer && !sample.touch && sample.buttons == 0);
+    sample = rig.Read();
+    CHECK(sample.pointer && sample.touch && sample.x == kCenterX && sample.y == kCenterY && sample.buttons == 0);
+
+    // Hold needs its button for the same thing.
+    Rig hold;
+    CHECK(!dcp_mouse_pointer_active(hold.state) && !dcp_mouse_capture_wanted(hold.state));
+    hold.Move(30, 0);
+    CHECK(!hold.Read().touch);
+
+    // Motion moves the pointer by the same amount as Hold does, sensitivity included.
+    const double unit = 30.0 / 0.6;
+    {
+        Game game;
+        game.Read(rig.Read());
+        rig.Move(30.0f, 0.0f);
+        CHECK(std::fabs(Travel(rig, game, 3) - unit) < 1.0);
+        dcp_mouse_set_sensitivity(rig.state, 50);
+        rig.Move(30.0f, 0.0f);
+        CHECK(std::fabs(Travel(rig, game, 3) - unit / 2) < 1.0);
+        dcp_mouse_set_sensitivity(rig.state, 200);
+        rig.Move(30.0f, 0.0f);
+        CHECK(std::fabs(Travel(rig, game, 3) - unit * 2) < 1.0);
+        dcp_mouse_set_sensitivity(rig.state, 100);
+    }
+
+    // The same finger as Hold, read for read, once both have landed.
+    Rig always(DCP_POINTER_MODE_ALWAYS_ON);
+    Rig held;
+    held.Down(DCP_MOUSE_MIDDLE);
+    for (int i = 0; i < 2; ++i) {
+        always.Read();
+        held.Read();
+    }
+    const std::vector<DcpMouseSample> a = StrokeSamples(always, 400);
+    const std::vector<DcpMouseSample> h = StrokeSamples(held, 400);
+    int differences = 0, lifted = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        differences += a[i].touch != h[i].touch || a[i].pointer != h[i].pointer || a[i].x != h[i].x || a[i].y != h[i].y || a[i].id != h[i].id;
+        lifted += !a[i].touch;
+    }
+    CHECK(differences == 0 && lifted >= 3);
+
+    // Movement has no end: the host cursor never reaches an edge because the window holds it in relative mode, so a long
+    // stroke in one direction keeps arriving in full.
+    Rig far(DCP_POINTER_MODE_ALWAYS_ON);
+    Game game;
+    game.Read(far.Read());
+    double input = 0;
+    for (int read = 0; read < 2000; ++read) {
+        far.Move(12.0f, 0.0f);
+        float dx = 0, dy = 0;
+        dcp_mouse_to_touch_units(100, 12.0f, 0.0f, &dx, &dy);
+        input += dx;
+        game.Read(far.Read());
+    }
+    CHECK(std::fabs(game.pointer_x - input) <= 2.0 * game.segments && game.pointer_x > 10.0 * DCP_TOUCH_RES_X);
+
+    // The window keeps relative mode on without a button while gameplay owns the mouse, and drops it for everything else.
+    using DcpMouseCapture::Frame;
+    DcpMouseCapture::Tracker tracker;
+    CHECK(tracker.Update(Frame{dcp_mouse_capture_wanted(rig.state) != 0, true, false, false}) == std::optional<bool>(true));
+    CHECK(!tracker.Update(Frame{dcp_mouse_capture_wanted(rig.state) != 0, true, false, false}).has_value());
+    CHECK(tracker.Update(Frame{dcp_mouse_capture_wanted(rig.state) != 0, true, true, false}) == std::optional<bool>(false));
+}
+
+void TestAlwaysOnInteractionAndButtons() {
+    Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
+    rig.Read();
+    rig.Read();
+    // Left is the Pointer Interaction: it never becomes Square while Always On owns the mouse.
+    rig.Down(DCP_MOUSE_LEFT);
+    DcpMouseSample sample = rig.Read();
+    CHECK(sample.buttons == BTN_TOUCHPAD && sample.touch);
+    rig.Up(DCP_MOUSE_LEFT);
+    CHECK(rig.Read().buttons == 0);
+    rig.Down(DCP_MOUSE_LEFT);
+    CHECK(rig.Read().buttons == BTN_TOUCHPAD);
+    // Other configured buttons keep working at the same time.
+    rig.Down(DCP_MOUSE_RIGHT);
+    CHECK(rig.Read().buttons == (BTN_TOUCHPAD | BTN_CIRCLE));
+    rig.Up(DCP_MOUSE_LEFT);
+    rig.Up(DCP_MOUSE_RIGHT);
+
+    // Pointer Control's own button is not needed and is an ordinary button: unbound it does nothing, bound it presses.
+    rig.Down(DCP_MOUSE_MIDDLE);
+    sample = rig.Read();
+    CHECK(sample.buttons == 0 && sample.touch && dcp_mouse_pointer_active(rig.state));
+    rig.Up(DCP_MOUSE_MIDDLE);
+    Rig bound(DCP_POINTER_MODE_ALWAYS_ON);
+    bound.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_MIDDLE;
+    bound.map.button[DCP_MOUSE_SQUARE] = DCP_MOUSE_X1;
+    bound.Configure();
+    bound.Read();
+    bound.Down(DCP_MOUSE_MIDDLE);
+    bound.Down(DCP_MOUSE_X1);
+    sample = bound.Read();
+    CHECK(sample.buttons == (BTN_CROSS | BTN_SQUARE) && sample.touch);
+
+    // The saved Pointer Control button can be anything, even nothing, in Always On.
+    Rig none(DCP_POINTER_MODE_ALWAYS_ON);
+    none.map.button[DCP_MOUSE_POINTER_CONTROL] = DCP_MOUSE_NONE;
+    none.Configure();
+    none.Read();
+    CHECK(none.Read().touch);
+
+    // A remapped Pointer Interaction owns the new button, and Left is ordinary again.
+    Rig moved(DCP_POINTER_MODE_ALWAYS_ON);
+    moved.map.button[DCP_MOUSE_POINTER_INTERACT] = DCP_MOUSE_X2;
+    moved.Configure();
+    moved.Read();
+    moved.Down(DCP_MOUSE_LEFT);
+    CHECK(moved.Read().buttons == BTN_SQUARE);
+    moved.Down(DCP_MOUSE_X2);
+    CHECK(moved.Read().buttons == (BTN_SQUARE | BTN_TOUCHPAD));
+}
+
+void TestAlwaysOnSuspendsAndResumes() {
+    using DcpMouseCapture::Blocked;
+    using DcpMouseCapture::Frame;
+    struct Case {
+        const char* name;
+        bool focused, overlay, text;
+    };
+    // focus away, Options/Cheats/a game dialog (and the Comms Wheel's mouse session), text entry
+    for (const Case& c : {Case{"focus", false, false, false}, Case{"overlay", true, true, false}, Case{"text", true, false, true}}) {
+        Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
+        DcpMouseCapture::Tracker tracker;
+        rig.Read();
+        rig.Read();
+        const Frame open_frame{dcp_mouse_capture_wanted(rig.state) != 0, true, false, false};
+        CHECK(tracker.Update(open_frame) == std::optional<bool>(true));
+        const Frame busy{dcp_mouse_capture_wanted(rig.state) != 0, c.focused, c.overlay, c.text};
+        CHECK(Blocked(busy));
+        dcp_mouse_block(rig.state, 1);
+        CHECK(tracker.Update(busy) == std::optional<bool>(false)); // capture released
+        CHECK(!dcp_mouse_pointer_active(rig.state));
+        rig.Move(100, 100);
+        rig.Down(DCP_MOUSE_LEFT);
+        rig.Down(DCP_MOUSE_RIGHT);
+        dcp_mouse_wheel(rig.state, 1.0f);
+        for (int i = 0; i < 3; ++i) {
+            const DcpMouseSample sample = rig.Read();
+            CHECK(sample.buttons == 0 && !sample.touch && !sample.pointer); // nothing reaches the game, no finger stays
+        }
+        dcp_mouse_block(rig.state, 0); // gameplay owns the mouse again
+        CHECK(tracker.Update(open_frame) == std::optional<bool>(true));
+        CHECK(dcp_mouse_pointer_active(rig.state));
+        DcpMouseSample sample = rig.Read();
+        CHECK(sample.pointer && !sample.touch && sample.buttons == 0); // buttons held through the block are not pressed
+        rig.Up(DCP_MOUSE_LEFT);
+        rig.Up(DCP_MOUSE_RIGHT);
+        rig.Move(30, 0);
+        sample = rig.Read();
+        CHECK(sample.touch && sample.pointer); // resumed by itself, with no toggling
+        CHECK(rig.Lines("event=pointer_control_suspended reason=blocked count=1") == 1);
+        CHECK(rig.Lines("event=pointer_control_resumed count=1") == 1);
+    }
+
+    // A window mode switch: capture and the finger are dropped at once, nothing is taken while the window settles, and the
+    // pointer lands again afterwards.
+    Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
+    DcpMouseCapture::Tracker tracker;
+    rig.Read();
+    rig.Read();
+    CHECK(tracker.Update(Frame{true, true, false, false}) == std::optional<bool>(true));
+    dcp_mouse_release_all(rig.state);
+    CHECK(tracker.Release() == std::optional<bool>(false) && !tracker.Captured());
+    const Frame settling{true, true, true, false};
+    CHECK(Blocked(settling));
+    dcp_mouse_block(rig.state, 1);
+    CHECK(!tracker.Update(settling).has_value() && !tracker.Captured());
+    CHECK(!rig.Read().touch && !rig.Read().pointer);
+    dcp_mouse_block(rig.state, 0);
+    CHECK(tracker.Update(Frame{true, true, false, false}) == std::optional<bool>(true));
+    CHECK(!rig.Read().touch);
+    CHECK(rig.Read().touch);
+
+    // A release with nothing blocking (closing, a mode switch before the settle starts) lands the finger again, not as a jump.
+    Rig again(DCP_POINTER_MODE_ALWAYS_ON);
+    again.Read();
+    again.Read();
+    again.Move(200, 0);
+    CHECK(again.Read().touch);
+    dcp_mouse_release_all(again.state);
+    DcpMouseSample sample = again.Read();
+    CHECK(sample.pointer && !sample.touch);
+    CHECK(again.Read().touch && again.Read().x == kCenterX);
+}
+
+void TestAlwaysOnWithMouseControlsOff() {
+    for (const int mode : {DCP_POINTER_MODE_HOLD, DCP_POINTER_MODE_ALWAYS_ON}) {
+        Rig off(mode);
+        off.map.controls = 0;
+        off.map.wheel_up = DCP_WHEEL_L1;
+        off.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+        off.Configure();
+        CHECK(!dcp_mouse_enabled(off.state) && !dcp_mouse_pointer_active(off.state) && !dcp_mouse_capture_wanted(off.state));
+        for (const int button : kButtons) {
+            off.Down(button);
+            const DcpMouseSample sample = off.Read();
+            CHECK(sample.buttons == 0 && !sample.touch && !sample.pointer);
+            off.Up(button);
+        }
+        dcp_mouse_wheel(off.state, 1.0f);
+        off.Move(400, 400);
+        for (int i = 0; i < 5; ++i) {
+            const DcpMouseSample sample = off.Read();
+            CHECK(sample.buttons == 0 && !sample.touch && !sample.pointer);
+        }
+    }
+
+    // Turning it Off while Always On is moving the pointer releases everything at once, and On starts clean.
+    Rig live(DCP_POINTER_MODE_ALWAYS_ON);
+    live.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+    live.map.wheel_up = DCP_WHEEL_R1;
+    live.Configure();
+    DcpMouseCapture::Tracker tracker;
+    live.Read();
+    live.Down(DCP_MOUSE_X1);
+    live.Down(DCP_MOUSE_LEFT);
+    dcp_mouse_wheel(live.state, 1.0f);
+    live.Move(50, 50);
+    DcpMouseSample sample = live.Read();
+    CHECK(sample.touch && (sample.buttons & BTN_TOUCHPAD) && (sample.buttons & BTN_CROSS) && (sample.buttons & BTN_R1));
+    CHECK(tracker.Update({dcp_mouse_capture_wanted(live.state) != 0, true, false, false}) == std::optional<bool>(true));
+    dcp_mouse_set_enabled(live.state, 0);
+    CHECK(!dcp_mouse_pointer_active(live.state) && !dcp_mouse_capture_wanted(live.state) && !dcp_mouse_any_held(live.state));
+    CHECK(tracker.Update({dcp_mouse_capture_wanted(live.state) != 0, true, false, false}) == std::optional<bool>(false));
+    for (int i = 0; i < 5; ++i) {
+        sample = live.Read();
+        CHECK(sample.buttons == 0 && !sample.touch && !sample.pointer);
+    }
+    live.Up(DCP_MOUSE_LEFT);
+    live.Down(DCP_MOUSE_X1);
+    dcp_mouse_set_enabled(live.state, 1);
+    CHECK(live.Read().buttons == 0); // the press during Off is not a press now
+    live.Up(DCP_MOUSE_X1);
+    live.Read();
+    live.Move(30, 0);
+    CHECK(live.Read().touch && dcp_mouse_pointer_active(live.state));
+    live.Down(DCP_MOUSE_X1);
+    CHECK((live.Read().buttons & BTN_CROSS) != 0);
+    CHECK(live.Lines("event=pointer_control_suspended reason=disabled count=1") == 1);
+    CHECK(live.Lines("event=pointer_control_resumed count=1") == 1);
+}
+
+struct PadView {
+    bool touch;
+    int x, y;
+};
+
+// What the pad sampler hands the game: Pointer Control's finger replaces the controller's while it owns the surface.
+PadView Merge(const DcpMouseSample& mouse, bool controller_touching, int controller_x, int controller_y) {
+    if (mouse.pointer) {
+        return {mouse.touch != 0, mouse.x, mouse.y};
+    }
+    return {controller_touching, controller_x, controller_y};
+}
+
+struct PadGame {
+    bool previous = false;
+    int x = 0, y = 0;
+    double travelled = 0, biggest_step = 0;
+    void Read(const PadView& view) {
+        if (view.touch && previous) {
+            const double step = std::fabs(static_cast<double>(view.x - x)) + std::fabs(static_cast<double>(view.y - y));
+            travelled += step;
+            biggest_step = std::max(biggest_step, step);
+        }
+        previous = view.touch;
+        if (view.touch) {
+            x = view.x;
+            y = view.y;
+        }
+    }
+};
+
+void TestControllerTouchpadCoexistence() {
+    // Hold: unchanged. A controller touch ends the pointer until its button is released; the surface reports do not matter.
+    {
+        Rig rig;
+        rig.Down(DCP_MOUSE_MIDDLE);
+        dcp_mouse_controller_surface(rig.state, 1);
+        dcp_mouse_screen_surface(rig.state, 1);
+        rig.Move(30, 0);
+        CHECK(dcp_mouse_pointer_active(rig.state) && rig.Read().touch);
+        dcp_mouse_controller_touch(rig.state);
+        CHECK(!dcp_mouse_pointer_active(rig.state));
+        dcp_mouse_controller_surface(rig.state, 0);
+        CHECK(!dcp_mouse_pointer_active(rig.state)); // still off until the button is released
+        rig.Up(DCP_MOUSE_MIDDLE);
+        rig.Down(DCP_MOUSE_MIDDLE);
+        CHECK(dcp_mouse_pointer_active(rig.state));
+        CHECK(rig.lines.empty()); // Hold has no Always On telemetry
+    }
+
+    // Always On: the controller wins while it touches, and the pointer comes back by itself, without a hand-over jump.
+    Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
+    PadGame game;
+    for (int read = 0; read < 30; ++read) {
+        rig.Move(7, 0);
+        game.Read(Merge(rig.Read(), false, 0, 0));
+    }
+    CHECK(game.travelled > 100.0);
+    game.biggest_step = 0;
+    dcp_mouse_controller_touch(rig.state); // the window's event
+    CHECK(!dcp_mouse_pointer_active(rig.state));
+    const int controller_x = 150, controller_y = 80; // far from the pointer's finger in the middle of the surface
+    for (int read = 0; read < 10; ++read) {
+        dcp_mouse_controller_surface(rig.state, 1); // the sampler's poll
+        rig.Move(7, 0);                              // dropped: the controller has the surface
+        const DcpMouseSample sample = rig.Read();
+        CHECK(sample.buttons == 0);
+        game.Read(Merge(sample, true, controller_x + 5 * read, controller_y));
+        if (read > 0) {
+            CHECK(!sample.pointer); // after the one finger-less read, the controller's finger is the game's
+        }
+        CHECK(!dcp_mouse_pointer_active(rig.state));
+    }
+    CHECK(game.biggest_step <= 5.5); // the controller's own movement only: no jump from the pointer's finger to the controller's
+    game.biggest_step = 0;
+    for (int read = 0; read < 30; ++read) {
+        dcp_mouse_controller_surface(rig.state, 0);
+        rig.Move(7, 0);
+        game.Read(Merge(rig.Read(), false, controller_x, controller_y));
+        CHECK(dcp_mouse_pointer_active(rig.state));
+    }
+    CHECK(game.biggest_step < 40.0); // and none back
+    CHECK(rig.Lines("event=pointer_control_suspended reason=controller_touch count=1") == 1);
+    CHECK(rig.Lines("event=pointer_control_resumed count=1") == 1);
+
+    // The player does not have to touch a setting again: a second touch does the same.
+    dcp_mouse_controller_surface(rig.state, 1);
+    CHECK(!dcp_mouse_pointer_active(rig.state));
+    dcp_mouse_controller_surface(rig.state, 0);
+    rig.Read();
+    CHECK(dcp_mouse_pointer_active(rig.state) && rig.Read().touch);
+
+    // The controller's buttons, sticks and triggers never reach the pointer: it only hears about touches. A touchscreen
+    // contact takes the surface the same way, and gives it back.
+    Rig screen(DCP_POINTER_MODE_ALWAYS_ON);
+    screen.Read();
+    CHECK(screen.Read().touch);
+    dcp_mouse_screen_surface(screen.state, 1);
+    CHECK(!dcp_mouse_pointer_active(screen.state));
+    screen.Move(40, 0);
+    CHECK(!screen.Read().touch);
+    dcp_mouse_controller_surface(screen.state, 1); // both at once
+    dcp_mouse_screen_surface(screen.state, 0);
+    CHECK(!dcp_mouse_pointer_active(screen.state)); // the controller still holds it
+    dcp_mouse_controller_surface(screen.state, 0);
+    CHECK(dcp_mouse_pointer_active(screen.state));
+}
+
+void TestSteamDeckTrackpadWithAlwaysOn() {
+    // The trackpad is mouse motion; Pointer Control Mode is Always On; buttons held on the controller or the mouse at any
+    // moment change nothing about the finger the game reads.
+    const Stroke base = RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, 0, 0, 0, 300, true);
+    CHECK(std::fabs(base.game.pointer_x - base.input_x) <= 2.0 * base.game.segments);
+    CHECK(std::fabs(base.game.pointer_y - base.input_y) <= 2.0 * base.game.segments);
+    CHECK(base.game.pointer_x > 300.0);
+    for (const int other : {DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, DCP_MOUSE_X1}) {
+        CHECK(SameFinger(base, RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, other, 0, 1000, 300, true)));
+        CHECK(SameFinger(base, RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, other, 100, 200, 300, true)));
+    }
+    // The trackpad click bound to Pointer Interaction while its other button is the secondary action.
+    const Stroke click = RunStroke(DCP_MOUSE_X2, DCP_MOUSE_LEFT, DCP_MOUSE_LEFT, 20, 280, 300, true);
+    CHECK(SameFinger(base, click));
+    const Stroke held = RunStroke(DCP_MOUSE_MIDDLE, DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, 0, 1000, 300, true);
+    int still = 0, lifted = 0;
+    for (std::size_t i = 1; i < held.samples.size(); ++i) {
+        const DcpMouseSample &a = held.samples[i - 1], &b = held.samples[i];
+        lifted += !b.touch;
+        still += i < 300 && a.touch && b.touch && a.x == b.x && a.y == b.y;
+    }
+    CHECK(still == 0 && lifted >= 3 && std::fabs(held.game.pointer_x - held.input_x) <= 2.0 * held.game.segments);
+
+    // The window reports Always On motion as pointer motion, with the buttons held on the controller or the mouse.
+    Motion m;
+    m.Stroke(DCP_MOTION_SOURCE_MOUSE_POINTER, DCP_MOTION_HELD_GAMEPAD, 3000);
+    CHECK(m.With("event=pointer_motion_while_button_held source=mouse_pointer held=gamepad_button count=1") == 1 && m.With("stall") == 0);
+}
+
+int CountLines(const std::vector<std::string>& lines, const std::string& needle) {
+    return static_cast<int>(std::count_if(lines.begin(), lines.end(), [&](const std::string& line) { return Contains(line, needle); }));
+}
+
+void TestMouseTelemetry() {
+    // Extended bindings: counted per press, logged on the first and each power of ten, never for Square and Circle.
+    {
+        Rig rig;
+        rig.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_X1;
+        rig.Configure();
+        for (int press = 1; press <= 1000; ++press) {
+            rig.Down(DCP_MOUSE_X1);
+            rig.Read();
+            rig.Read(); // held: not a second press
+            rig.Up(DCP_MOUSE_X1);
+            rig.Read();
+        }
+        CHECK(rig.lines == (std::vector<std::string>{"Mouse telemetry: event=mouse_extended_binding_used count=1",
+                                                      "Mouse telemetry: event=mouse_extended_binding_used count=10",
+                                                      "Mouse telemetry: event=mouse_extended_binding_used count=100",
+                                                      "Mouse telemetry: event=mouse_extended_binding_used count=1000"}));
+    }
+    {
+        Rig rig;
+        for (int press = 0; press < 50; ++press) {
+            rig.Down(DCP_MOUSE_LEFT);
+            rig.Down(DCP_MOUSE_RIGHT);
+            rig.Read();
+            rig.Up(DCP_MOUSE_LEFT);
+            rig.Up(DCP_MOUSE_RIGHT);
+            rig.Read();
+        }
+        CHECK(rig.lines.empty()); // the 1.4.0 buttons are not the new path
+    }
+
+    // Always On: used once per start, suspended with its reason, resumed.
+    {
+        Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
+        rig.Read();
+        CHECK(rig.lines.empty()); // active, but nothing has used it
+        rig.Move(5, 0);
+        CHECK(rig.lines.size() == 1 && rig.lines[0] == "Mouse telemetry: event=pointer_control_always_on_used count=1");
+        rig.Move(5, 5);
+        rig.Move(5, 0);
+        CHECK(rig.lines.size() == 1); // not per movement
+        rig.Move(0, 0);
+        dcp_mouse_block(rig.state, 1);
+        CHECK(rig.lines.size() == 2 && rig.lines[1] == "Mouse telemetry: event=pointer_control_suspended reason=blocked count=1");
+        dcp_mouse_block(rig.state, 1);
+        CHECK(rig.lines.size() == 2); // a repeated block is no new suspension
+        dcp_mouse_block(rig.state, 0);
+        CHECK(rig.lines.size() == 3 && rig.lines[2] == "Mouse telemetry: event=pointer_control_resumed count=1");
+        rig.Move(5, 0);
+        CHECK(rig.Events("pointer_control_always_on_used") == 1); // the second start: counted, not logged
+        for (int cycle = 0; cycle < 9; ++cycle) {
+            dcp_mouse_block(rig.state, 1);
+            dcp_mouse_block(rig.state, 0);
+            rig.Move(5, 0);
+        }
+        CHECK(rig.Lines("event=pointer_control_always_on_used count=10") == 1);
+        CHECK(rig.Lines("event=pointer_control_suspended reason=blocked count=10") == 1);
+        CHECK(rig.Lines("event=pointer_control_resumed count=10") == 1);
+    }
+    {
+        Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
+        rig.Read();
+        dcp_mouse_controller_surface(rig.state, 1);
+        dcp_mouse_controller_surface(rig.state, 1);
+        dcp_mouse_controller_surface(rig.state, 0);
+        dcp_mouse_set_enabled(rig.state, 0);
+        dcp_mouse_set_enabled(rig.state, 1);
+        CHECK(rig.lines.size() == 3);
+        CHECK(rig.Lines("event=pointer_control_suspended reason=controller_touch count=1") == 1);
+        CHECK(rig.Lines("event=pointer_control_suspended reason=disabled count=1") == 1);
+        CHECK(rig.Lines("event=pointer_control_resumed count=1") == 1 && rig.Lines("event=pointer_control_resumed count=2") == 0);
+    }
+    // Hold never reports any of the Always On events, however Pointer Control is used.
+    {
+        Rig rig;
+        for (int use = 0; use < 20; ++use) {
+            rig.Down(DCP_MOUSE_MIDDLE);
+            rig.Move(30, 30);
+            rig.Read();
+            dcp_mouse_controller_touch(rig.state);
+            rig.Up(DCP_MOUSE_MIDDLE);
+            dcp_mouse_block(rig.state, 1);
+            dcp_mouse_block(rig.state, 0);
+            dcp_mouse_release_all(rig.state);
+        }
+        dcp_mouse_set_enabled(rig.state, 0);
+        dcp_mouse_set_enabled(rig.state, 1);
+        CHECK(rig.lines.empty());
+    }
+
+    // Nothing sensitive and nothing frequent: every line is a name, a reason class and a count; motion and presses by the
+    // thousand log a handful of lines.
+    Rig busy(DCP_POINTER_MODE_ALWAYS_ON);
+    busy.map.button[DCP_MOUSE_R1] = DCP_MOUSE_X2;
+    busy.Configure();
+    for (int i = 0; i < 20000; ++i) {
+        busy.Move(static_cast<float>(i % 17), static_cast<float>(i % 5));
+        if (i % 4 == 0) {
+            busy.Read();
+        }
+        if (i % 50 == 0) {
+            busy.Down(DCP_MOUSE_X2);
+        } else if (i % 50 == 25) {
+            busy.Up(DCP_MOUSE_X2);
+        }
+        if (i % 2000 == 0) {
+            dcp_mouse_block(busy.state, 1);
+            dcp_mouse_block(busy.state, 0);
+        }
+    }
+    CHECK(busy.lines.size() <= 16);
+    dcp_mouse_note_invalid(busy.state, 2);
+    const std::regex safe("Mouse telemetry: event=(mouse_extended_binding_used|pointer_control_always_on_used|pointer_control_suspended|"
+                          "pointer_control_resumed|mouse_binding_invalid_fallback)( reason=(blocked|controller_touch|disabled))? count=[0-9]+");
+    for (const std::string& line : busy.lines) {
+        CHECK(std::regex_match(line, safe));
+    }
+    const std::string source = ReadSource("src/dcp_mouse.c");
+    CHECK(Count(source, "snprintf(") == 2 && Count(source, "Mouse telemetry: event=") == 2);
+    for (const char* sensitive : {"%f", "%g", "%s,%s", "name=", "path", "account", "guid", "SDL_"}) {
+        const std::size_t at = source.find("Mouse telemetry: event=");
+        CHECK(source.substr(at, 200).find(sensitive) == std::string::npos);
+    }
+    CHECK(CountLines(busy.lines, "x=") == 0 && CountLines(busy.lines, "dx") == 0 && CountLines(busy.lines, "Left") == 0);
+    CHECK(!Contains(source, "migrated")); // no legacy setting is rewritten, so there is nothing to report
+}
+
+void TestWindowAndRuntimeWiring() {
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    const std::string capture = ReadSource("gpu/shim/dcp_mouse_capture.h");
+
+    // The window holds relative mode for what the mouse input wants, so an edge never stops Always On, and everything that
+    // needs the mouse (dialogs, Options, text entry, the Comms Wheel, focus, a mode switch) blocks it.
+    const std::size_t update = window.find("void WindowSDL::UpdateMouseCapture() {");
+    CHECK(update != std::string::npos);
+    const std::string body = window.substr(update, window.find("\n}\n", update) - update);
+    CHECK(Contains(body, "dcp_mouse_capture_wanted(mouse)") && !Contains(body, "dcp_mouse_pointer_active("));
+    CHECK(Contains(body, "DcpCommsWheel::MouseEngaged()") && Contains(body, "settling") && Contains(body, "DcpOverlay::CapturesInput()"));
+    CHECK(Contains(body, "mouse_pointer_mode == DCP_POINTER_MODE_ALWAYS_ON") && Contains(body, "mouse_settle_until"));
+    CHECK(Contains(body, "dcp_mouse_block(mouse, blocked);") && Contains(body, "dcp_touchscreen_block(dcp_touchscreen_global(), blocked);"));
+    const std::size_t apply = window.find("void WindowSDL::ApplyDisplayMode(int mode)");
+    CHECK(window.find("ReleaseMouse();", apply) < window.find("SDL_SetWindowFullscreen(window, borderless);", apply));
+    CHECK(window.find("SDL_SyncWindow(window);", apply) < window.find("mouse_settle_until = SDL_GetTicks() + kModeSettleMs;", apply));
+    CHECK(Contains(ReadSource("gpu/shim/sdl_window.h"), "u64 mouse_settle_until"));
+    CHECK(Contains(ReadSource("gpu/shim/dcp_comms_wheel.cpp"), "bool MouseEngaged() {\n    return g_driver.KeyboardEngaged();"));
+    CHECK(Contains(capture, "the mouse input wants the pointer captured"));
+    CHECK(Contains(window, "const bool pointer = dcp_mouse_pointer_active(dcp_mouse_global()) != 0;")); // Always On motion is pointer motion
+    // A controller's touchpad event still reaches the mouse state, once, and the other controller events do not.
+    CHECK(Count(window, "dcp_mouse_controller_touch(") == 1 && Count(window, "dcp_mouse_controller_surface(") == 0);
+
+    // The sampler tells the mouse about the touch surface before the mouse takes its sample and the touchscreen after its own.
+    const std::size_t host = pad.find("static void sample_host(int slot, PadData *d)");
+    const std::size_t surface = pad.find("dcp_mouse_controller_surface(dcp_mouse_global(),pad_surface_touched(g));", host);
+    const std::size_t sampled = pad.find("dcp_mouse_sample(dcp_mouse_global(),&mouse);", host);
+    const std::size_t screen_sample = pad.find("dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);", host);
+    const std::size_t screen_surface = pad.find("dcp_mouse_screen_surface(dcp_mouse_global(),screen.touch);", host);
+    CHECK(surface != std::string::npos && surface < sampled && sampled < screen_sample && screen_sample < screen_surface);
+    CHECK(Count(pad, "dcp_mouse_controller_surface(") == 1 && Count(pad, "dcp_mouse_screen_surface(") == 1);
+    CHECK(Contains(pad, "if (mouse->touchpad_side) touch_click(d,mouse->touchpad_side==2);"));
+    CHECK(Contains(pad, "dcp_mouse_load_info(keys_file,&mouse,&loaded);") && Contains(pad, "dcp_mouse_note_invalid(dcp_mouse_global(),loaded.rejected);"));
+    CHECK(Contains(pad, "pointer control %s, %d extra buttons"));
+
+    // F1 offers Pointer Control Mode live, and applies it to the running mouse input.
+    const std::string menu = ReadSource("gpu/shim/dcp_options_menu.h");
+    CHECK(Contains(menu, "\"mouse_pointer_mode\", \"Pointer Control Mode\"") && Contains(menu, "Apply::Live, kPointerModes}"));
+    CHECK(Contains(ReadSource("gpu/shim/dcp_options_menu.cpp"), "dcp_mouse_set_pointer_mode(dcp_mouse_global(), DcpSettings::Get().mouse_pointer_mode);"));
+    CHECK(Contains(ReadSource("gpu/shim/dcp_settings.cpp"), "key == \"mouse_pointer_mode\""));
+    CHECK(Contains(ReadSource("launcher/settings.h"), "kMousePointerModeKey[] = \"mouse_pointer_mode\""));
+
+    // The gate names what this suite covers, and both platforms run it.
+    const std::string gate = ReadSource("tools/test.ps1");
+    for (const char* topic : {"full mouse rebinding", "Pointer Control Hold / Always On", "Steam Deck trackpad", "touchscreen", "controller ownership"}) {
+        CHECK(Contains(gate, topic));
+    }
+    CHECK(Contains(gate, "'dcp-mouse-tests'"));
+    const std::string build = ReadSource("tools/build.sh");
+    CHECK(Contains(build, "\"$build_dir/bin/dcp-mouse-tests\"") && Contains(build, "full mouse rebinding"));
+}
+
 } // namespace
 
 int main() {
@@ -2115,6 +3188,21 @@ int main() {
     TestControllerPathUnchanged();
     TestPointerMotionTelemetry();
     TestPointerMotionTelemetryPayload();
+    TestTargetTable();
+    TestLegacyFilesStayIdentical();
+    TestEveryButtonEveryTarget();
+    TestRepresentativeBindings();
+    TestDuplicateAndConflictPolicy();
+    TestInvalidConfigurationFallsBack();
+    TestPointerModeSetting();
+    TestAlwaysOnMovesThePointer();
+    TestAlwaysOnInteractionAndButtons();
+    TestAlwaysOnSuspendsAndResumes();
+    TestAlwaysOnWithMouseControlsOff();
+    TestControllerTouchpadCoexistence();
+    TestSteamDeckTrackpadWithAlwaysOn();
+    TestMouseTelemetry();
+    TestWindowAndRuntimeWiring();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

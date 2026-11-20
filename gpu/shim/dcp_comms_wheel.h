@@ -236,5 +236,7 @@ bool HandleEvent(const SDL_Event& event);
 void PrepareTextures();
 void Draw(float display_width, float display_height, float ui_scale);
 bool Visible();
+// A keyboard session is open: the wheel takes the mouse for navigation.
+bool MouseEngaged();
 
 } // namespace DcpCommsWheel

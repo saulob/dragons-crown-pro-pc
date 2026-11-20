@@ -217,6 +217,9 @@ void Change(const RowRef& row, int direction, const CheatRows& cheats) {
         if (outcome.changed && id == DcpOptions::Id::MouseControls) {
             dcp_mouse_set_enabled(dcp_mouse_global(), DcpSettings::Get().mouse_controls ? 1 : 0);
         }
+        if (outcome.changed && id == DcpOptions::Id::MousePointerMode) {
+            dcp_mouse_set_pointer_mode(dcp_mouse_global(), DcpSettings::Get().mouse_pointer_mode);
+        }
         if (outcome.changed && id == DcpOptions::Id::MouseSensitivity) {
             dcp_mouse_set_sensitivity(dcp_mouse_global(), DcpSettings::Get().mouse_sensitivity);
         }

@@ -162,7 +162,7 @@ if ((test)); then
     "$build_dir/bin/dcp-save-editor-tests" release
     step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
-    step 'Running the mouse input tests (Steam Deck trackpad responsiveness, touchscreen touchpad)'
+    step 'Running the mouse input tests (full mouse rebinding, Pointer Control Hold / Always On, Steam Deck trackpad behavior, touchscreen behavior, controller ownership)'
     "$build_dir/bin/dcp-mouse-tests"
     step 'Running the window fit tests'
     "$build_dir/bin/dcp-window-tests"

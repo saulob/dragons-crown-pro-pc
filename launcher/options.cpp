@@ -116,6 +116,7 @@ DcpMouseMap SavedMouse(const trg::SettingsStore& settings) {
     dcp_mouse_apply(&map, dcp_wheel_up_key, settings.Get(dcp_wheel_up_key).c_str());
     dcp_mouse_apply(&map, dcp_wheel_down_key, settings.Get(dcp_wheel_down_key).c_str());
     dcp_mouse_apply(&map, dcp_pointer_sensitivity_key, settings.Get(dcp_pointer_sensitivity_key).c_str());
+    dcp_mouse_apply(&map, dcp_pointer_mode_key, settings.Get(dcp_pointer_mode_key).c_str());
     dcp_mouse_normalize(&map);
     return map;
 }
@@ -127,6 +128,27 @@ bool SetMouseButton(trg::SettingsStore& settings, DcpMouseAction action, int but
     }
     settings.Set(dcp_mouse_actions[action].ini_key, dcp_mouse_button_name(button));
     return true;
+}
+
+MouseTargetResult SetMouseTarget(trg::SettingsStore& settings, int button, int target) {
+    const DcpMouseMap saved = SavedMouse(settings);
+    DcpMouseMap changed = saved;
+    MouseTargetResult result;
+    result.applied = dcp_mouse_assign_target(&changed, button, target, &result.moved_from) != 0;
+    if (!result.applied) {
+        return result;
+    }
+    for (const DcpMouseActionInfo& action : dcp_mouse_actions) {
+        const int index = static_cast<int>(&action - dcp_mouse_actions);
+        if (action.target >= 0 && changed.button[index] != saved.button[index]) {
+            settings.Set(action.ini_key, dcp_mouse_button_name(changed.button[index]));
+        }
+    }
+    return result;
+}
+
+void SetPointerMode(trg::SettingsStore& settings, int mode) {
+    settings.Set(dcp_pointer_mode_key, dcp_pointer_mode_name(mode));
 }
 
 void SetWheelTarget(trg::SettingsStore& settings, bool up, int target) {
@@ -152,6 +174,7 @@ void ResetMouse(trg::SettingsStore& settings) {
     settings.Set(dcp_wheel_up_key, dcp_wheel_target_name(DCP_WHEEL_NONE));
     settings.Set(dcp_wheel_down_key, dcp_wheel_target_name(DCP_WHEEL_NONE));
     settings.Set(dcp_pointer_sensitivity_key, std::to_string(DCP_POINTER_SENSITIVITY_DEFAULT));
+    settings.Set(dcp_pointer_mode_key, dcp_pointer_mode_name(DCP_POINTER_MODE_HOLD));
 }
 
 } // namespace dcp

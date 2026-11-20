@@ -82,6 +82,8 @@ private:
     DcpCursor::State cursor; ///< window thread
     DcpMouseCapture::Tracker mouse_capture; ///< window thread
     bool mouse_blocked = false; ///< window thread: the last state given to the mouse input
+    static constexpr u64 kModeSettleMs = 300;
+    u64 mouse_settle_until = 0; ///< window thread: SDL ticks until which Always On waits after a window mode switch
     void RefreshTitle();
     std::chrono::steady_clock::time_point fps_started{};
     u64 fps_frames = 0;

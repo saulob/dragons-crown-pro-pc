@@ -57,6 +57,14 @@ DcpMouseMap SavedMouse(const trg::SettingsStore& settings);
 // Binds a mouse button (DCP_MOUSE_NONE clears the binding). False, and nothing saved, when the binding would leave Pointer
 // Control and its click on one button or the click without a button.
 bool SetMouseButton(trg::SettingsStore& settings, DcpMouseAction action, int button);
+// Gives a mouse button the one PS4 control `target` (-1: none), taking it from the button that had it. `moved_from` is that
+// button (DCP_MOUSE_NONE when the control had none). False, and nothing saved, for a button Pointer Control owns.
+struct MouseTargetResult {
+    bool applied = false;
+    int moved_from = DCP_MOUSE_NONE;
+};
+MouseTargetResult SetMouseTarget(trg::SettingsStore& settings, int button, int target);
+void SetPointerMode(trg::SettingsStore& settings, int mode);
 void SetWheelTarget(trg::SettingsStore& settings, bool up, int target);
 void SetPointerSensitivity(trg::SettingsStore& settings, int percent);
 // The Mouse Sensitivity slider moves in steps: index 0 is the minimum.

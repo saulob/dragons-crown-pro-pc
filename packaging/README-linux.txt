@@ -162,8 +162,10 @@ PLAYING
 - Gameplay > Unlock Labyrinth of Chaos and Unlock Ultimate + Tower of Mirages
   open that endgame content once the Stables are open; they are independent.
 - Mouse: Left and Right Mouse attack; hold Middle Mouse (Pointer Control) to
-  move the game's red hand pointer. Mouse Controls and Mouse Sensitivity are
-  on the launcher's Controls page.
+  move the game's red hand pointer. Any mouse button can press any controller
+  control. Pointer Control Mode (Hold by default; Always On suits a trackpad
+  such as the Steam Deck's), Mouse Controls and Mouse Sensitivity are on the
+  launcher's Controls page.
 - An experimental AMD water workaround (black areas under characters standing
   in water) is on with AMD graphics cards and off elsewhere.
 - To open the launcher again after turning it off, hold Shift while starting

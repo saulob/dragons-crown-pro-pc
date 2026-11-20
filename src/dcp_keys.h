@@ -57,30 +57,57 @@ typedef enum {
     DCP_MOUSE_BUTTON_COUNT
 } DcpMouseButton;
 
+/* The PS4 digital controls a mouse button or a wheel step can press: the keyboard's list from Cross to Touchpad right, in
+ * the same order and under the same names. */
+typedef enum {
+    DCP_PAD_TARGET_CROSS, DCP_PAD_TARGET_CIRCLE, DCP_PAD_TARGET_SQUARE, DCP_PAD_TARGET_TRIANGLE,
+    DCP_PAD_TARGET_L1, DCP_PAD_TARGET_R1, DCP_PAD_TARGET_L2, DCP_PAD_TARGET_R2, DCP_PAD_TARGET_L3, DCP_PAD_TARGET_R3,
+    DCP_PAD_TARGET_DPAD_UP, DCP_PAD_TARGET_DPAD_DOWN, DCP_PAD_TARGET_DPAD_LEFT, DCP_PAD_TARGET_DPAD_RIGHT,
+    DCP_PAD_TARGET_OPTIONS, DCP_PAD_TARGET_TOUCHPAD_LEFT, DCP_PAD_TARGET_TOUCHPAD_RIGHT,
+    DCP_PAD_TARGET_COUNT
+} DcpPadTarget;
+
+/* "cross", "l1", "dpad_up", "touchpad_left"...; empty for a number that is no target. */
+const char *dcp_pad_target_name(int target);
+/* "Cross (A)", "L1", "D-pad up"... */
+const char *dcp_pad_target_label(int target);
+int dcp_pad_target_from_name(const char *name); /* -1 when unknown */
+
+/* A mouse action is either a PS4 control (its `target`) or one of the two Pointer Control actions. The first four keep
+ * their saved names from before the others existed. */
 typedef enum {
     DCP_MOUSE_SQUARE,           /* primary action */
     DCP_MOUSE_CIRCLE,           /* secondary action */
-    DCP_MOUSE_POINTER_CONTROL,    /* hold: mouse movement drives the pointer */
-    DCP_MOUSE_POINTER_INTERACT, /* while the pointer is held: the pointer interaction */
+    DCP_MOUSE_POINTER_CONTROL,  /* Hold: mouse movement drives the pointer while held */
+    DCP_MOUSE_POINTER_INTERACT, /* while the pointer is active: the pointer interaction */
+    DCP_MOUSE_CROSS, DCP_MOUSE_TRIANGLE, DCP_MOUSE_L1, DCP_MOUSE_R1, DCP_MOUSE_L2, DCP_MOUSE_R2, DCP_MOUSE_L3, DCP_MOUSE_R3,
+    DCP_MOUSE_DPAD_UP, DCP_MOUSE_DPAD_DOWN, DCP_MOUSE_DPAD_LEFT, DCP_MOUSE_DPAD_RIGHT,
+    DCP_MOUSE_OPTIONS, DCP_MOUSE_TOUCHPAD_LEFT, DCP_MOUSE_TOUCHPAD_RIGHT,
     DCP_MOUSE_ACTION_COUNT
 } DcpMouseAction;
 
-/* What a wheel step presses: a PS4 button held for a few game reads, or nothing. */
+#define DCP_MOUSE_FIRST_EXTENDED DCP_MOUSE_CROSS
+
+/* What a wheel step presses: a PS4 control held for a few game reads, or nothing. The values after NONE follow DcpPadTarget. */
 typedef enum {
     DCP_WHEEL_NONE, DCP_WHEEL_CROSS, DCP_WHEEL_CIRCLE, DCP_WHEEL_SQUARE, DCP_WHEEL_TRIANGLE,
     DCP_WHEEL_L1, DCP_WHEEL_R1, DCP_WHEEL_L2, DCP_WHEEL_R2,
-    DCP_WHEEL_TARGET_COUNT
+    DCP_WHEEL_TARGET_COUNT=DCP_PAD_TARGET_COUNT+1
 } DcpWheelTarget;
+
+/* Pointer Control Mode: Hold drives the pointer only while its button is held; Always On whenever gameplay owns the mouse. */
+typedef enum { DCP_POINTER_MODE_HOLD, DCP_POINTER_MODE_ALWAYS_ON, DCP_POINTER_MODE_COUNT } DcpPointerMode;
 
 typedef struct {
     const char *ini_key;
     const char *label;
     int default_button;
+    int target; /* DcpPadTarget, or -1 for the Pointer Control actions */
 } DcpMouseActionInfo;
 
 extern const DcpMouseActionInfo dcp_mouse_actions[DCP_MOUSE_ACTION_COUNT];
 extern const char *const dcp_wheel_up_key, *const dcp_wheel_down_key, *const dcp_pointer_sensitivity_key,
-    *const dcp_mouse_controls_key;
+    *const dcp_mouse_controls_key, *const dcp_pointer_mode_key;
 
 #define DCP_POINTER_SENSITIVITY_MIN 25
 #define DCP_POINTER_SENSITIVITY_MAX 200
@@ -92,6 +119,7 @@ typedef struct {
     int wheel_up, wheel_down; /* DcpWheelTarget */
     int sensitivity;          /* percent, DCP_POINTER_SENSITIVITY_MIN..MAX in steps of 5 */
     int controls;             /* Mouse Controls: 0 ignores the mouse in gameplay */
+    int pointer_mode;         /* DcpPointerMode */
 } DcpMouseMap;
 
 void dcp_mouse_defaults(DcpMouseMap *map);
@@ -102,6 +130,9 @@ int dcp_mouse_button_from_name(const char *name);
 const char *dcp_mouse_button_name(int button);
 /* "Left Mouse", "Right Mouse", "Middle Mouse", "Mouse 4", "Mouse 5"; "(none)" for no button. */
 const char *dcp_mouse_button_label(int button);
+int dcp_pointer_mode_from_name(const char *name); /* "hold", "always_on"; -1 when unknown */
+const char *dcp_pointer_mode_name(int mode);
+const char *dcp_pointer_mode_label(int mode); /* "Hold", "Always On" */
 int dcp_wheel_target_from_name(const char *name); /* -1 when unknown */
 const char *dcp_wheel_target_name(int target);
 const char *dcp_wheel_target_label(int target);
@@ -121,6 +152,23 @@ int dcp_mouse_apply(DcpMouseMap *map, const char *ini_key, const char *value);
 void dcp_mouse_normalize(DcpMouseMap *map);
 /* Defaults, then every valid mouse line of the dcp.ini at `path`, then dcp_mouse_normalize. */
 void dcp_mouse_load(const char *path, DcpMouseMap *map);
+
+typedef struct {
+    int rejected;       /* mouse lines with a value that was not usable, and a Pointer Control pair put back to its defaults */
+    int extended_bound; /* PS4 controls beyond Square and Circle that a mouse button performs */
+} DcpMouseLoadInfo;
+void dcp_mouse_load_info(const char *path, DcpMouseMap *map, DcpMouseLoadInfo *info);
+
+/* The PS4 controls (bit 1<<DcpPadTarget) that pressing `button` performs. A file can bind several to one button; the
+ * launcher binds one. */
+unsigned dcp_mouse_button_targets(const DcpMouseMap *map, int button);
+/* The Pointer Control actions own the button: Pointer Control while Hold is selected, Pointer Interaction while Always On is,
+ * so a PS4 control on it would never press. */
+int dcp_mouse_button_locked(const DcpMouseMap *map, int button);
+/* The launcher's rule: `button` performs only `target` (-1: nothing). The target leaves the button that had it; its previous
+ * button is written to `moved_from` (DCP_MOUSE_NONE when it had none). False, and nothing changed, for a button that is no
+ * button, a target out of range or a locked button. */
+int dcp_mouse_assign_target(DcpMouseMap *map, int button, int target, int *moved_from);
 /* False when giving `button` to `action` would make the pointer control and its click share a button, or leave the click
  * unbound. */
 int dcp_mouse_binding_allowed(const DcpMouseMap *map, DcpMouseAction action, int button);

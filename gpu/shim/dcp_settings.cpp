@@ -107,6 +107,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.mouse_sensitivity = dcp_mouse_setting_value_valid(key.c_str(), value.c_str())
                                   ? dcp_pointer_sensitivity_normalize(ParseInt(value, 100))
                                   : 100;
+    } else if (key == "mouse_pointer_mode") {
+        v.mouse_pointer_mode = std::max(dcp_pointer_mode_from_name(value.c_str()), 0);
     } else if (key == "mouse_controls") {
         v.mouse_controls = ParseBool(value, v.mouse_controls);
     } else if (key == "enable_boss_battle") {

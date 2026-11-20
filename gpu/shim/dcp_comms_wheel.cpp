@@ -114,6 +114,10 @@ bool HandleEvent(const SDL_Event& event) {
     }
 }
 
+bool MouseEngaged() {
+    return g_driver.KeyboardEngaged();
+}
+
 bool Visible() {
     const View view = g_driver.Latest();
     return view.open && NowMs() - view.stamp_ms < kVisibleMs;

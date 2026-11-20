@@ -104,6 +104,7 @@ struct Choice {
 };
 
 inline constexpr Choice kOffOn[] = {{"0", "Off"}, {"1", "On"}};
+inline constexpr Choice kPointerModes[] = {{"hold", "Hold"}, {"always_on", "Always On"}};
 inline constexpr Choice kHiddenShown[] = {{"0", "Hidden"}, {"1", "Shown"}};
 inline constexpr Choice kRenderers[] = {
     {"auto", "Auto"},
@@ -162,6 +163,7 @@ enum class Id {
     JapaneseMenuButtons,
     ControllerRumble,
     MouseControls,
+    MousePointerMode,
     MouseSensitivity,
     FrameRate,
     FrameRateInTitle,
@@ -227,6 +229,10 @@ inline constexpr Setting kSettings[] = {
      "Off disables controller vibration.", Apply::Live, kOffOn},
     {Id::MouseControls, Page::Controls, "mouse_controls", "Mouse Controls",
      "Enables mouse buttons, wheel and pointer controls during gameplay.", Apply::Live, kOffOn},
+    {Id::MousePointerMode, Page::Controls, "mouse_pointer_mode", "Pointer Control Mode",
+     "Hold moves the game's pointer while the Pointer Control button is held. Always On moves it whenever the mouse is "
+     "free for gameplay, which suits a trackpad.",
+     Apply::Live, kPointerModes},
     {Id::MouseSensitivity, Page::Controls, "mouse_pointer_sensitivity", "Mouse Sensitivity",
      "Controls how fast mouse movement moves the game's pointer.", Apply::Live, kMouseSensitivities},
     {Id::FrameRate, Page::Gameplay, "frame_rate", "Frame rate",
@@ -308,6 +314,7 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::JapaneseMenuButtons: return flag(v.japanese_menu_buttons);
     case Id::ControllerRumble: return flag(v.controller_rumble);
     case Id::MouseControls: return flag(v.mouse_controls);
+    case Id::MousePointerMode: return std::string(dcp_pointer_mode_name(v.mouse_pointer_mode.load()));
     case Id::MouseSensitivity: return std::to_string(v.mouse_sensitivity.load());
     case Id::FrameRate: return std::to_string(v.frame_rate.load());
     case Id::FrameRateInTitle: return flag(v.show_fps_title);
@@ -344,6 +351,7 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::FrameCounter: v.show_fps = on; break;
     case Id::ControllerRumble: v.controller_rumble = on; break;
     case Id::MouseControls: v.mouse_controls = on; break;
+    case Id::MousePointerMode: v.mouse_pointer_mode = std::max(dcp_pointer_mode_from_name(std::string(value).c_str()), 0); break;
     case Id::MouseSensitivity: v.mouse_sensitivity = dcp_pointer_sensitivity_normalize(std::atoi(std::string(value).c_str())); break;
     case Id::EnableBossBattle: v.enable_boss_battle = on; break;
     case Id::AspectRatio:

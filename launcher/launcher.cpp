@@ -169,16 +169,25 @@ constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPCs, enemies
 constexpr char kControllerRumbleHelp[] = "Off disables controller vibration. Applies at the next game start.";
 constexpr char kMouseControlsEnabledHelp[] = "Enables mouse buttons, wheel and pointer controls during gameplay.";
 constexpr char kMouseControlsHelp[] =
-    "Used together with the keyboard and the controller while Mouse Controls is On. Click a row, then press the mouse button to use. Esc "
-    "cancels. Holding the Pointer Control button hides the cursor and moves the game's pointer with the mouse; the "
-    "interaction button then performs the pointer interaction.";
-constexpr const char* kMouseHelp[DCP_MOUSE_ACTION_COUNT] = {
-    "The button for the Square (X) action, the main attack.",
-    "The button for the Circle (B) action.",
-    "Hold this button and move the mouse to control the game's pointer. Releasing it goes back to normal play.",
-    ("While Pointer Control is active, this button performs the pointer interaction. It cannot be the same "
-     "button as Pointer Control."),
-};
+    "Used together with the keyboard and the controller while Mouse Controls is On. Each mouse button presses one "
+    "control; choosing a control another button has moves it. Pointer Control hides the cursor and moves the game's "
+    "pointer with the mouse; the interaction button then performs the pointer interaction.";
+constexpr char kMouseButtonHelp[] = "Choose the control this mouse button presses.";
+constexpr char kMouseButtonPointerControlHelp[] =
+    "This button is Pointer Control. Pick another Pointer Control button below to use it for a control.";
+constexpr char kMouseButtonInteractionHelp[] = "Also performs the pointer interaction while Pointer Control is active.";
+constexpr char kMouseButtonInteractionAlwaysOnHelp[] =
+    "This button is Pointer Interaction while Always On is selected. Pick another Pointer Interaction button below to use it "
+    "for a control.";
+constexpr char kPointerModeHelp[] =
+    "Hold moves the game's pointer while the Pointer Control button is held. Always On moves it whenever the mouse is free "
+    "for gameplay, which suits a trackpad.";
+constexpr char kPointerControlHelp[] =
+    "Hold this button and move the mouse to control the game's pointer. Releasing it goes back to normal play.";
+constexpr char kPointerControlAlwaysOnHelp[] = "Not used while Always On is selected. The button is kept for Hold.";
+constexpr char kPointerInteractionHelp[] =
+    "While Pointer Control is active, this button performs the pointer interaction. It cannot be the same button as "
+    "Pointer Control.";
 constexpr char kPointerSensitivityHelp[] = "Controls how fast mouse movement moves the game's pointer.";
 constexpr char kWheelHelp[] = "The button a wheel step presses. Off by default.";
 constexpr char kSkipIntroHelp[] = "Skip the startup logo and go straight to the title screen";
@@ -1199,23 +1208,35 @@ private:
         ui.Toggle("Mouse Controls", kMouseControlsEnabledHelp, dcp_mouse_controls_key, true, "Off", "On");
         ui.Help(kMouseControlsHelp);
         ImGui::BeginDisabled(!SavedMouse(settings_).controls);
-        if (ui.ConfirmRow("Mouse defaults", "Puts the mouse buttons, wheel and pointer sensitivity back to their defaults.",
+        if (ui.ConfirmRow("Mouse defaults", "Puts the mouse buttons, wheel, Pointer Control Mode and pointer sensitivity back to their defaults.",
                           "Reset to defaults", "Put every mouse control back to its default?", "Reset")) {
             ResetMouse(settings_);
             mouse_capture_.clear();
             ui.SetStatus("Mouse controls reset to defaults.");
         }
         const DcpMouseMap mouse = SavedMouse(settings_);
-        for (int index = 0; index < DCP_MOUSE_ACTION_COUNT; ++index) {
-            const auto action = static_cast<DcpMouseAction>(index);
-            const bool optional = action != DCP_MOUSE_POINTER_INTERACT;
-            if (const std::optional<int> button = MouseBindRow(ui, dcp_mouse_actions[index].ini_key,
-                                                               dcp_mouse_actions[index].label, kMouseHelp[index],
-                                                               mouse.button[index], optional)) {
+        for (const int button : {DCP_MOUSE_LEFT, DCP_MOUSE_RIGHT, DCP_MOUSE_MIDDLE, DCP_MOUSE_X1, DCP_MOUSE_X2}) {
+            MouseButtonRow(ui, mouse, button);
+        }
+        std::vector<trg::Option> modes;
+        for (int mode = 0; mode < DCP_POINTER_MODE_COUNT; ++mode) {
+            modes.push_back({dcp_pointer_mode_name(mode), dcp_pointer_mode_label(mode)});
+        }
+        ui.Choice("Pointer Control Mode", kPointerModeHelp, dcp_pointer_mode_key, dcp_pointer_mode_name(DCP_POINTER_MODE_HOLD),
+                  modes);
+        const bool always_on = mouse.pointer_mode == DCP_POINTER_MODE_ALWAYS_ON;
+        for (const DcpMouseAction action : {DCP_MOUSE_POINTER_CONTROL, DCP_MOUSE_POINTER_INTERACT}) {
+            const bool control = action == DCP_MOUSE_POINTER_CONTROL;
+            const char* help = control ? (always_on ? kPointerControlAlwaysOnHelp : kPointerControlHelp) : kPointerInteractionHelp;
+            ImGui::BeginDisabled(control && always_on);
+            if (const std::optional<int> button = MouseBindRow(ui, dcp_mouse_actions[action].ini_key,
+                                                               dcp_mouse_actions[action].label, help, mouse.button[action],
+                                                               control)) {
                 if (!SetMouseButton(settings_, action, *button)) {
                     ui.SetStatus("Pointer Control and Pointer Interaction need two different mouse buttons.");
                 }
             }
+            ImGui::EndDisabled();
         }
         SensitivityRow(ui, mouse.sensitivity);
         std::vector<trg::Option> wheel;
@@ -1225,6 +1246,59 @@ private:
         ui.Combo("Wheel up", kWheelHelp, dcp_wheel_up_key, dcp_wheel_target_name(DCP_WHEEL_NONE), wheel);
         ui.Combo("Wheel down", kWheelHelp, dcp_wheel_down_key, dcp_wheel_target_name(DCP_WHEEL_NONE), wheel);
         ImGui::EndDisabled();
+    }
+
+    // What a mouse button presses: the one control it was given, "A + B" for a hand-edited file that gave it several.
+    static std::string MouseTargetsText(unsigned targets) {
+        std::string text;
+        for (int target = 0; target < DCP_PAD_TARGET_COUNT; ++target) {
+            if (targets & (1u << target)) {
+                text += (text.empty() ? "" : " + ") + std::string(Tr(dcp_pad_target_label(target)));
+            }
+        }
+        return text.empty() ? std::string(Tr("(none)")) : text;
+    }
+
+    // One row per mouse button: the control it presses. Pointer Control's own button shows its role instead.
+    void MouseButtonRow(trg::Ui& ui, const DcpMouseMap& mouse, int button) {
+        const bool locked = dcp_mouse_button_locked(&mouse, button);
+        const bool always_on = mouse.pointer_mode == DCP_POINTER_MODE_ALWAYS_ON;
+        const char* help = kMouseButtonHelp;
+        if (locked) {
+            help = always_on ? kMouseButtonInteractionAlwaysOnHelp : kMouseButtonPointerControlHelp;
+        } else if (button == mouse.button[DCP_MOUSE_POINTER_INTERACT]) {
+            help = kMouseButtonInteractionHelp;
+        }
+        ui.Row(dcp_mouse_button_label(button), help);
+        const unsigned targets = dcp_mouse_button_targets(&mouse, button);
+        const std::string shown =
+            locked ? std::string(Tr(dcp_mouse_actions[always_on ? DCP_MOUSE_POINTER_INTERACT : DCP_MOUSE_POINTER_CONTROL].label))
+                   : MouseTargetsText(targets);
+        std::optional<int> chosen;
+        ImGui::PushID(button);
+        ImGui::BeginDisabled(locked);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::BeginCombo("##control", shown.c_str())) {
+            if (ImGui::Selectable(Tr("(none)"), targets == 0)) {
+                chosen = -1;
+            }
+            for (int target = 0; target < DCP_PAD_TARGET_COUNT; ++target) {
+                if (ImGui::Selectable(Tr(dcp_pad_target_label(target)), targets == (1u << target))) {
+                    chosen = target;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::EndDisabled();
+        ImGui::PopID();
+        if (!chosen) {
+            return;
+        }
+        const MouseTargetResult result = SetMouseTarget(settings_, button, *chosen);
+        if (result.applied && result.moved_from != DCP_MOUSE_NONE) {
+            ui.SetStatus(std::string(Tr(dcp_pad_target_label(*chosen))) + " " + Tr("moved from") + " " +
+                         Tr(dcp_mouse_button_label(result.moved_from)) + ".");
+        }
     }
 
     // The slider runs over steps so that Left and Right move it by one step; its text is the percentage.

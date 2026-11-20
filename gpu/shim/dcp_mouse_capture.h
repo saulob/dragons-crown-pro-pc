@@ -7,7 +7,7 @@
 namespace DcpMouseCapture {
 
 struct Frame {
-    bool pointer_active; // Pointer Control is held and allowed
+    bool pointer_active; // the mouse input wants the pointer captured: Pointer Control is held (Hold) or on (Always On)
     bool focused;        // the game window has input focus
     bool overlay;        // Options or Cheats menu, or a game dialog, owns the mouse
     bool text_entry;     // the game's text dialog is taking keys

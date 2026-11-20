@@ -59,6 +59,7 @@ struct Values {
     // Mouse Controls: the Options menu mirrors it for the running mouse input (dcp_mouse.h).
     std::atomic<bool> mouse_controls{true};
     std::atomic<int> mouse_sensitivity{100};
+    std::atomic<int> mouse_pointer_mode{0}; // DcpPointerMode
     // Whether the Inn menu offers Boss Battle; read each time the Inn builds its menu.
     std::atomic<bool> enable_boss_battle{false};
     // What the running game build supports (Feature bits), set by the loader.
