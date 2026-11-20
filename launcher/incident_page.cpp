@@ -26,6 +26,11 @@ constexpr float kAlertTint = 0.16f, kAlertFlashTint = 0.5f;
 constexpr float kAlertFlashSeconds = 0.9f;
 constexpr char kDot[] = " \xC2\xB7 ";
 
+const char* kCrashDumpHelp =
+    "Includes the crash dump to help diagnose the problem. A crash dump may contain process memory used for diagnostics, "
+    "and it is not filtered like the log.";
+const char* kCrashDumpUnavailable = "The crash dump of this session cannot be sent, so only the log is.";
+
 const char* kPrivacyHeadline = "No personal user data is intentionally included.";
 const char* kPrivacyNote =
     "Before anything is sent, the launcher takes addresses, user and "
@@ -48,11 +53,18 @@ void AccentText(trg::Ui& ui, const char* text) {
     ImGui::PopStyleColor();
 }
 
-void LogRoleLine(trg::Ui& ui, LogRole role) {
-    const char* text = LogRoleText(role);
-    if (!text) return;
+// The session's role, and beside it the crash label when its own dump exists. Both are small status text under the metadata.
+void LogStatusLine(trg::Ui& ui, const GameLog& log) {
+    const char* role = LogRoleText(log.role);
+    if (!role && !log.Crashed()) return;
     ImGui::PushFont(nullptr, trg::layout::kTextHelp);
-    AccentText(ui, text);
+    if (role) AccentText(ui, role);
+    if (log.Crashed()) {
+        if (role) ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ui.theme().warn_dot);
+        ImGui::TextUnformatted(Tr("Crash detected"));
+        ImGui::PopStyleColor();
+    }
     ImGui::PopFont();
 }
 
@@ -146,6 +158,7 @@ IncidentPage::IncidentPage(Places places) : places_(std::move(places)), my_repor
 
 void IncidentPage::Draw(trg::Ui& ui, const ReportFacts& facts) {
     CollectDelivery();
+    CollectDumpRetry();
     if (activation_.Entered(ImGui::GetFrameCount())) {
         net::OnlineConfig config = OnlineConfigOf(ui.settings());
         net::apply_environment(config);
@@ -157,7 +170,7 @@ void IncidentPage::Draw(trg::Ui& ui, const ReportFacts& facts) {
         DrawLoadingView(ui, "Loading Bug Report...");
         return;
     }
-    const bool sending = delivery_ != nullptr;
+    const bool sending = delivery_ != nullptr || dump_retry_ != nullptr;
     if (CheckDraft(description_, !logs_.empty()) != problem_) problem_ = DraftProblem::kNone;
     KeepClearOfScrollbar(std::floor(trg::layout::kContentPadding * ui.scale()));
     AccentText(ui, kPrivacyHeadline);
@@ -198,13 +211,19 @@ void IncidentPage::CollectLogScan() {
     logs_ = std::move(scan_->logs);
     scan_.reset();
     logs_found_ = true;
-    selected_ = DefaultGameLog(logs_);
+    SelectLog(DefaultGameLog(logs_));
 }
 
 void IncidentPage::FindLogs() {
     logs_ = FindGameLogs(places_.logs_dir, places_.running_log);
     logs_found_ = true;
-    selected_ = DefaultGameLog(logs_);
+    SelectLog(DefaultGameLog(logs_));
+}
+
+// Choosing a log chooses its crash report too: attached unless the player says otherwise, and only when it can be sent.
+void IncidentPage::SelectLog(size_t index) {
+    selected_ = index;
+    attach_crash_report_ = !logs_.empty() && DefaultAttachCrashReport(logs_[selected_]);
 }
 
 void IncidentPage::CollectDelivery() {
@@ -235,7 +254,8 @@ bool IncidentPage::AcceptDraft() {
 std::shared_ptr<const IncidentPackage> IncidentPage::BuildPackage(const ReportFacts& facts) {
     log_failed_ = false;
     const PrivateFacts private_facts = GatherPrivateFacts(places_.install_folders, places_.user_dir);
-    std::optional<IncidentPackage> package = BuildIncidentPackage(description_, logs_[selected_], facts, private_facts);
+    std::optional<IncidentPackage> package =
+        BuildIncidentPackage(description_, logs_[selected_], facts, private_facts, attach_crash_report_ && logs_[selected_].CanAttachCrash());
     if (!package) {
         log_failed_ = true;
         bring_problem_into_view_ = true;
@@ -264,10 +284,31 @@ void IncidentPage::Send(trg::Ui& ui, const ReportFacts& facts) {
     result_.reset();
     delivery_ = std::make_shared<Delivery>();
     delivery_->package = package;
+    sent_dump_ = package->crash_dump;
     bring_result_into_view_ = true;
     std::thread([delivery = delivery_, package = std::move(package), config = std::move(config), user_dir = places_.user_dir] {
         delivery->receipt = FileIncident(config, user_dir, net::kOnlineGame, *package);
         delivery->done = true;
+    }).detach();
+}
+
+void IncidentPage::CollectDumpRetry() {
+    if (!dump_retry_ || !dump_retry_->done) return;
+    if (result_) result_->crash = dump_retry_->outcome;
+    dump_retry_.reset();
+    bring_result_into_view_ = true;
+}
+
+void IncidentPage::RetryDump(trg::Ui& ui) {
+    if (!result_ || !sent_dump_ || result_->ticket.empty() || result_->credential.empty() || dump_retry_) return;
+    net::OnlineConfig config = OnlineConfigOf(ui.settings());
+    net::apply_environment(config);
+    dump_retry_ = std::make_shared<DumpRetry>();
+    bring_result_into_view_ = true;
+    std::thread([retry = dump_retry_, config = std::move(config), ticket = result_->ticket, receipt = result_->credential,
+                 dump = *sent_dump_] {
+        retry->outcome = UploadCrashDump(config, ticket, receipt, dump);
+        retry->done = true;
     }).detach();
 }
 
@@ -310,13 +351,13 @@ void IncidentPage::DrawLogs(trg::Ui& ui, bool sending) {
     for (size_t i = 0; i < logs_.size(); ++i) {
         const std::string details = LogDetails(logs_[i]);
         ui.RowLeft(logs_[i].name.c_str(), details.c_str());
-        LogRoleLine(ui, logs_[i].role);
+        LogStatusLine(ui, logs_[i]);
         ui.RowControl();
         ImGui::PushID(int(i));
         ImGui::BeginDisabled(sending);
         ImGui::AlignTextToFramePadding();
         if (ImGui::RadioButton(Tr("Send this log"), selected_ == i) && selected_ != i) {
-            selected_ = i;
+            SelectLog(i);
             ForgetPreview();
         }
         ImGui::EndDisabled();
@@ -329,6 +370,17 @@ void IncidentPage::DrawLogs(trg::Ui& ui, bool sending) {
     }
     const GameLog& log = logs_[selected_];
     if (DrawLogFacts(ui, log)) trg::OpenUrl(Utf8(log.path));
+    DrawCrashReport(ui, sending);
+}
+
+void IncidentPage::DrawCrashReport(trg::Ui& ui, bool sending) {
+    const GameLog& log = logs_[selected_];
+    if (!log.Crashed()) return;
+    const bool attachable = log.CanAttachCrash();
+    ImGui::BeginDisabled(sending || !attachable);
+    if (ImGui::Checkbox(Tr("Attach crash report"), &attach_crash_report_)) ForgetPreview();
+    ImGui::EndDisabled();
+    ui.Help(attachable ? kCrashDumpHelp : kCrashDumpUnavailable);
 }
 
 void IncidentPage::DrawPreview(trg::Ui& ui, const ReportFacts& facts, bool sending) {
@@ -363,6 +415,11 @@ void IncidentPage::DrawResult(trg::Ui& ui) {
         ui.StatusCard(trg::Status::kBusy, "Sending your report...", "This takes a few seconds.");
         return;
     }
+    if (dump_retry_) {
+        ui.Spacer(4);
+        ui.StatusCard(trg::Status::kBusy, "Uploading the crash report...", "This can take a little longer than the report itself.");
+        return;
+    }
     if (!result_) return;
     ui.Spacer(4);
     switch (result_->outcome) {
@@ -375,6 +432,11 @@ void IncidentPage::DrawResult(trg::Ui& ui) {
             ui.SetStatus("Report ID copied.");
         }
         if (!sent_report_remembered_) ui.Help("The report was sent, but it could not be added to My reports on this PC.");
+        if (result_->crash == CrashUpload::kUploaded) ui.Help("The crash report was uploaded with it.");
+        if (result_->crash == CrashUpload::kFailed) {
+            WarningText(ui, "The report was sent, but its crash report could not be uploaded.");
+            if (sent_dump_ && !result_->credential.empty() && ImGui::Button(Tr("Retry crash report upload"))) RetryDump(ui);
+        }
         break;
     }
     case IncidentOutcome::kRecentLimit:

@@ -91,7 +91,9 @@ Environment variables keep the runtime's names with the `DCP_` prefix (`DCP_USER
 
 `build\logs\dragons_crown_pro_NNN.log` starts with the command line, prepared root, CUSA, `APP_VER`, eboot hash prefix, entry, image size,
 SDK, module list and import counts, then everything the loader prints and `[run] exit code N`. The Windows loader already
-carries a fault reporter (registers, stack words, rbp chain with guest offsets); no minidumps.
+carries a fault reporter (registers, stack words, rbp chain with guest offsets), and after that report writes a minidump beside the log
+(`dragons_crown_pro_NNN.dmp`, `src/crash_dump.c`; thread stacks and module lists, not the heap). Linux has the textual report only.
+The Bug Report page can attach the dump; see Crash dumps in bug reports in ONLINE.md.
 
 ## Import inventory (`scripts\import_inventory.py`, planning only)
 

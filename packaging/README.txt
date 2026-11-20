@@ -161,6 +161,11 @@ Bug Report page (Open preview shows exactly what goes out), or attach the newest
 dragons_crown_pro_*.log file from the "logs" folder to a report at
 https://github.com/saulob/dragons-crown-pro-pc/issues
 
+If the game crashes on Windows, it also leaves a dragons_crown_pro_*.dmp crash
+file next to that log. The Bug Report page offers it as "Attach crash report"
+for that log; it can contain process memory used for diagnostics and is not
+filtered like the log. Nothing is sent unless you press Send report.
+
 
 LICENSE
 -------

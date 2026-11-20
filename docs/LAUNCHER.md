@@ -729,6 +729,11 @@ scrollbar, and has four steps:
    Every other log that reached the game's code reads **Gameplay session**, and every other launcher-only log reads
    **Launcher only**; a session that started the game without reaching its code has no label. Every label is
    drawn in the theme's accent colour.
+   A log whose own minidump sits beside it (`dragons_crown_pro_NNN.dmp`, Windows only, see Crash dumps in
+   [ONLINE.md](ONLINE.md#crash-dumps-in-bug-reports)) also reads **Crash detected**, and an **Attach crash report** box appears under the
+   log's details, on by default when the dump can be sent. The page has no file chooser: only that paired dump can go, it
+   explains that the dump may contain process memory used for diagnostics, and a dump that cannot be sent (over 8 MiB, not a
+   minidump) turns the box off and sends the log alone. A Linux session, or any log without a matching dump, shows neither.
    The newest log that started the game is selected by default (`DefaultGameLog`), so a game that failed before its code ran is
    chosen over an older session that played. Without one, the newest log other than the launcher's own; failing that, its own.
 3. **Preview** (optional): **Open preview** builds the report (`BuildIncidentPackage`, `launcher/incident_report.cpp`) and shows
@@ -737,7 +742,11 @@ scrollbar, and has four steps:
 4. **Send report**: sends the open preview, or builds the same report through the same path when none is open. A description that
    is too short does not send: the field takes the focus, flashes, and "Please describe the problem, minimum 10 characters" appears beside the
    count. The page scrolls down to the sending message and again to the result, which stays on the page: the Report ID, or a rate limit, connection, refused or service message; after a failure
-   the text stays and Send report tries again.
+   the text stays and Send report tries again. With **Attach crash report** on, the preview adds `Crash report: <name> (<size>,
+   sent as a file, not shown here)` and never the bytes, and the box closes an open preview when it changes. The dump follows
+   the report under the same Report ID, read from disk in 64 KiB chunks. If it fails after the report was filed, the result says
+   so and **Retry crash report upload** sends it again with the same Report ID and receipt, resuming where the service stopped;
+   it never files the report a second time.
 
 5. **My reports** lists the reports this PC sent, newest first, from `user/bug_reports.json` (`launcher/report_history.cpp`, saved
    through a new file moved into place; a damaged file is set aside as `.damaged`). Each row shows the report ID, a preview, the
@@ -820,7 +829,8 @@ settings file.
 
 **Detailed logging** (About, Diagnostics) is on by default and keeps that log after every session. Turned off, a run
 still writes its log while it runs, but a normal exit discards it, so normal sessions do not accumulate files. A crash
-or abnormal exit keeps the log. Crash diagnostics are never discarded. **Open logs folder** opens the folder that holds
+or abnormal exit keeps the log. Crash diagnostics are never discarded, and neither is a crash's `.dmp`, which keeps its log's
+number for good and is never part of a release package or an update. **Open logs folder** opens the folder that holds
 these logs, creating it first when it does not exist yet.
 
 ## Diagnostics

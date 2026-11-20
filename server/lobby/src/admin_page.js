@@ -209,6 +209,7 @@ export const ADMIN_HTML = String.raw`<!doctype html>
         <div class="toolbar bug-header">
           <h2 id="bug-title"></h2>
           <button id="bug-download" type="button">Download log</button>
+          <button id="bug-download-dump" type="button" hidden>Download minidump</button>
           <button id="bug-copy" type="button" class="quiet">Copy log</button>
           <span id="bug-note" class="muted" role="status"></span>
           <button id="bug-close" type="button" class="quiet bug-close">Close report</button>
@@ -532,7 +533,7 @@ export const ADMIN_JS = String.raw`(function () {
     room_create_accepted: 'Rooms created', room_create_limited: 'Room creations refused', room_join_limited: 'Room joins refused',
     relay_abuse_closed: 'Relay connections closed for abuse', party_report_limited: 'Party snapshots refused: too many',
     comms_report_limited: 'Comms Wheel reports refused: too many',
-    public_endpoint_limited: 'Public IPv4 claims ignored: too many', incident_filed: 'Bug reports accepted',
+    public_endpoint_limited: 'Public IPv4 claims ignored: too many', incident_filed: 'Bug reports accepted', incident_dump_stored: 'Crash dumps stored',
     incident_limited: 'Bug reports refused: too many', incident_hourly_limited: 'Bug reports refused: hourly limit',
     incident_daily_limited: 'Bug reports refused: daily limit', public_lobby_limited: 'Public Lobby requests refused: too many',
     write_limited: 'Room and friend changes refused: too many', lobby_abuse_closed: 'Lobby connections closed for repeated refusals',
@@ -1183,6 +1184,12 @@ export const ADMIN_JS = String.raw`(function () {
     bugFeedbackFacts(r);
   }
 
+  function bugDumpLabel(r) {
+    if (r.dump_status === 'stored') return 'Stored, ' + r.dump_file + ' (' + fmt(r.dump_bytes) + ' bytes)';
+    if (r.dump_status === 'uploading') return 'Announced, upload not finished (' + r.dump_file + ')';
+    return 'No crash report';
+  }
+
   function bugDetail(r) {
     bugTicket = r.ticket;
     bugLoadingTicket = '';
@@ -1200,6 +1207,8 @@ export const ADMIN_JS = String.raw`(function () {
     bugFact(facts, 'Operating system', r.operating_system);
     bugFact(facts, 'Original log file', r.log_file);
     bugFact(facts, 'Log clipped', r.log_clipped === 'yes' ? 'Yes, only its end was sent' : 'No');
+    bugFact(facts, 'Crash report', bugDumpLabel(r));
+    $('bug-download-dump').hidden = r.dump_status !== 'stored';
     $('bug-log-name').textContent = 'Sanitized log';
     $('bug-log').textContent = bugLogText;
     $('bug-note').textContent = '';
@@ -1238,21 +1247,29 @@ export const ADMIN_JS = String.raw`(function () {
   }
 
   function downloadBugLog() {
+    return downloadBugFile('log', '.log', 'the log');
+  }
+
+  function downloadBugDump() {
+    return downloadBugFile('dump', '.dmp', 'the minidump');
+  }
+
+  function downloadBugFile(path, extension, what) {
     var ticket = bugTicket;
     if (!ticket) return Promise.resolve();
-    return request('/admin/api/incidents/' + encodeURIComponent(ticket) + '/log').then(function (r) {
+    return request('/admin/api/incidents/' + encodeURIComponent(ticket) + '/' + path).then(function (r) {
       var named = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '');
       return r.blob().then(function (blob) {
         var url = URL.createObjectURL(blob);
         var link = el('a');
         link.href = url;
-        link.download = named ? named[1] : ticket + '.log';
+        link.download = named ? named[1] : ticket + extension;
         link.click();
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       });
     }).catch(function (error) {
       if (error instanceof AuthError) { signOut('The token was not accepted.'); return; }
-      $('bug-note').textContent = 'Could not download the log.';
+      $('bug-note').textContent = 'Could not download ' + what + '.';
     });
   }
 
@@ -1489,6 +1506,7 @@ export const ADMIN_JS = String.raw`(function () {
   $('tab-bugs').addEventListener('click', function () { showView('bugs'); loadBugReports(); });
   $('bug-refresh').addEventListener('click', loadBugReports);
   $('bug-download').addEventListener('click', downloadBugLog);
+  $('bug-download-dump').addEventListener('click', downloadBugDump);
   $('bug-copy').addEventListener('click', copyBugLog);
   $('bug-close').addEventListener('click', closeBugReport);
   $('bug-status').addEventListener('change', showBugStatusMeaning);

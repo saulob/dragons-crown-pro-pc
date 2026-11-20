@@ -381,6 +381,10 @@ std::optional<Json> LobbySession::call(const std::string& op, Json body, std::st
     return m;
 }
 
+bool LobbySession::send_binary(const uint8_t* data, size_t size) {
+    return socket_ && socket_->send_binary(data, size);
+}
+
 void LobbySession::close() {
     if (socket_) socket_->close();
     socket_.reset();

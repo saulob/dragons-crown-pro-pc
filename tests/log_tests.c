@@ -24,11 +24,23 @@ int main(void) {
     snprintf(dir, sizeof(dir), "%sdcp_log_tests_%lu", temp, GetCurrentProcessId());
     CreateDirectoryA(dir, NULL);
 
+    /* A crash dump keeps its session's number taken, so the next log is never paired with it. */
+    char dump[4200], second[4200];
+    snprintf(dump, sizeof(dump), "%s\\dragons_crown_pro_041.dmp", dir);
+    HANDLE stale = CreateFileA(dump, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (stale == INVALID_HANDLE_VALUE) return 11;
+    CloseHandle(stale);
+    snprintf(second, sizeof(second), "%s\\dragons_crown_pro_050_2.dmp", dir);
+    stale = CreateFileA(second, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (stale == INVALID_HANDLE_VALUE) return 11;
+    CloseHandle(stale);
+
     fflush(NULL);
     _close(0);
     _close(1);
     _close(2);
     if (!runtime_log_start(dir, NULL, log, sizeof(log))) return 2;
+    if (!strstr(log, "dragons_crown_pro_051.log") || strcmp(runtime_log_session_path(), log)) return 12;
     if (_fileno(stdin) < 0 || _fileno(stdout) < 0 || _fileno(stderr) < 0) return 3;
 
     printf("stdout line\n");
@@ -64,6 +76,8 @@ int main(void) {
     fclose(stdout);
     fclose(stderr);
     DeleteFileA(log);
+    DeleteFileA(dump);
+    DeleteFileA(second);
     RemoveDirectoryA(dir);
     return 0;
 }

@@ -144,11 +144,11 @@ if (WIN32)
     # Relink when the application icon, the manifest or the version changes.
     set_source_files_properties(src/dragons_crown_pro.rc PROPERTIES OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/packaging/icons/app-icon.ico;${CMAKE_SOURCE_DIR}/src/dragons_crown_pro.manifest;${CMAKE_BINARY_DIR}/generated/dcp_version.h")
-    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/module_history.c src/call_site.c src/runtime_log.c src/dragons_crown_pro.rc)
+    set(DCP_PLATFORM_SOURCES src/compat_win.c src/module_diagnostics.c src/module_history.c src/call_site.c src/runtime_log.c src/crash_dump.c src/dragons_crown_pro.rc)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/simulate_crash.c src/cheat_hooks.cpp src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -191,6 +191,11 @@ if (WIN32)
     add_executable(dcp-log-tests EXCLUDE_FROM_ALL tests/log_tests.c src/runtime_log.c src/runtime_session_log.c)
     target_include_directories(dcp-log-tests PRIVATE src)
     target_compile_options(dcp-log-tests PRIVATE -Wall -Wextra -Werror)
+
+    # The minidump written beside the session log, for a synthetic exception on the test's own thread: nothing crashes.
+    add_executable(dcp-crash-dump-tests EXCLUDE_FROM_ALL tests/crash_dump_tests.c src/crash_dump.c src/runtime_log.c src/runtime_session_log.c)
+    target_include_directories(dcp-crash-dump-tests PRIVATE src)
+    target_compile_options(dcp-crash-dump-tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
 # Focused tests of the online layer: JSON, identity, STUN, the lobby link against a local lobby and the peer transport
@@ -217,6 +222,11 @@ add_executable(dcp-skip-offers-tests EXCLUDE_FROM_ALL tests/skip_offers_tests.c 
 target_include_directories(dcp-skip-offers-tests PRIVATE src)
 target_compile_definitions(dcp-skip-offers-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-skip-offers-tests PRIVATE -Wall -Wextra -Werror)
+add_executable(dcp-simulate-crash-tests EXCLUDE_FROM_ALL tests/simulate_crash_tests.c src/simulate_crash.c)
+target_include_directories(dcp-simulate-crash-tests PRIVATE src)
+target_compile_definitions(dcp-simulate-crash-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-simulate-crash-tests PRIVATE -Wall -Wextra -Werror)
+
 add_executable(dcp-skip-intro-tests EXCLUDE_FROM_ALL tests/skip_intro_tests.c src/skip_intro.c src/guest_hook.c)
 target_include_directories(dcp-skip-intro-tests PRIVATE src)
 target_compile_definitions(dcp-skip-intro-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

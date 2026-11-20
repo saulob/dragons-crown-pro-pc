@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <system_error>
+#include <thread>
 
 #include "localization/ui_text.h"
 #include "net/identity.h"
@@ -26,6 +28,11 @@ namespace {
 
 constexpr std::string_view kLogPrefix = "dragons_crown_pro_";
 constexpr std::string_view kLogSuffix = ".log";
+constexpr std::string_view kDumpSuffix = ".dmp";
+constexpr char kMinidumpSignature[] = {'M', 'D', 'M', 'P'};
+// "DI", version 1, crash dump bytes: server/lobby/src/incidents.js DUMP_FRAME.
+constexpr uint8_t kDumpFrameHeader[] = {0x44, 0x49, 1, 1};
+constexpr int kDumpRetryPauseMs = 250;
 constexpr size_t kFewestLogDigits = 3, kMostLogDigits = 10;
 constexpr size_t kLogsLookedAt = 200;
 constexpr size_t kSessionHeadBytes = 128 * 1024;
@@ -76,6 +83,13 @@ bool IsGameLogName(std::string_view name) {
     name.remove_suffix(kLogSuffix.size());
     return name.size() >= kFewestLogDigits && name.size() <= kMostLogDigits &&
            std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; });
+}
+
+bool StartsLikeMinidump(const fs::path& file) {
+    char head[sizeof(kMinidumpSignature)] = {};
+    std::ifstream in(file, std::ios::binary);
+    in.read(head, sizeof(head));
+    return size_t(in.gcount()) == sizeof(head) && std::equal(std::begin(head), std::end(head), std::begin(kMinidumpSignature));
 }
 
 std::string ReadPart(const fs::path& file, uintmax_t offset, size_t size) {
@@ -151,6 +165,18 @@ void MarkLastGameplay(std::vector<GameLog>& logs) {
     }
 }
 
+// A dump that exists and belongs to the log is a crash; whether it can be sent is a separate question.
+void NoteCrash(GameLog& log) {
+    const std::string name = DumpNameOf(log.name);
+    if (name.empty()) return;
+    const fs::path path = log.path.parent_path() / name;
+    const DumpProblem problem = CheckCrashDump(log, path);
+    if (problem != DumpProblem::kNone && problem != DumpProblem::kTooLarge && problem != DumpProblem::kNotADump) return;
+    std::error_code ec;
+    log.crash = CrashDump{path, name, fs::file_size(path, ec)};
+    log.crash_problem = problem;
+}
+
 std::string TrimmedDescription(std::string_view text) {
     constexpr std::string_view kSpace = " \t\r\n";
     const size_t first = text.find_first_not_of(kSpace);
@@ -201,11 +227,39 @@ std::vector<GameLog> FindGameLogs(const fs::path& folder, const fs::path& runnin
         if (candidate.running) {
             role = session.activity == LogActivity::kGameplay ? LogRole::kCurrentGameplay : LogRole::kCurrentLauncher;
         }
-        logs.push_back({candidate.path, candidate.name, SystemTimeOf(candidate.written), candidate.bytes, session.activity, role});
+        GameLog log{candidate.path, candidate.name, SystemTimeOf(candidate.written), candidate.bytes, session.activity, role, std::nullopt,
+                    DumpProblem::kMissing};
+        NoteCrash(log);
+        logs.push_back(std::move(log));
     }
     MarkLastGameplay(logs);
     return logs;
 }
+
+std::string DumpNameOf(std::string_view log_name) {
+    if (!IsGameLogName(log_name)) return {};
+    return std::string(log_name.substr(0, log_name.size() - kLogSuffix.size())) + std::string(kDumpSuffix);
+}
+
+DumpProblem CheckCrashDump(const GameLog& log, const fs::path& dump) {
+    const std::string expected = DumpNameOf(log.name);
+    if (expected.empty() || Utf8(dump.filename()) != expected) return DumpProblem::kNotThisLog;
+    if (dump.lexically_normal().parent_path() != log.path.lexically_normal().parent_path()) return DumpProblem::kNotThisLog;
+    std::error_code ec;
+    const fs::file_status status = fs::symlink_status(dump, ec);
+    if (ec || !fs::exists(status)) return DumpProblem::kMissing;
+    if (!fs::is_regular_file(status)) return DumpProblem::kNotAFile;
+    const fs::file_time_type written = fs::last_write_time(dump, ec);
+    if (ec) return DumpProblem::kMissing;
+    if (std::abs(std::difftime(SystemTimeOf(written), log.written)) > kDumpPairingSeconds) return DumpProblem::kNotThisLog;
+    const uintmax_t size = fs::file_size(dump, ec);
+    if (ec || size == 0) return DumpProblem::kEmpty;
+    if (size > kMostDumpBytes) return DumpProblem::kTooLarge;
+    if (size < kFewestDumpBytes || !StartsLikeMinidump(dump)) return DumpProblem::kNotADump;
+    return DumpProblem::kNone;
+}
+
+bool DefaultAttachCrashReport(const GameLog& log) { return log.CanAttachCrash(); }
 
 size_t DefaultGameLog(const std::vector<GameLog>& logs) {
     const auto started = std::find_if(logs.begin(), logs.end(), [](const GameLog& log) { return log.activity != LogActivity::kLauncher; });
@@ -302,7 +356,7 @@ std::string LastBytes(std::string_view text, size_t most) {
 }
 
 std::optional<IncidentPackage> BuildIncidentPackage(std::string_view description, const GameLog& log, const ReportFacts& facts,
-                                                    const PrivateFacts& private_facts) {
+                                                    const PrivateFacts& private_facts, bool attach_crash_dump) {
     std::error_code ec;
     const uintmax_t size = fs::file_size(log.path, ec);
     if (ec || size == 0) return std::nullopt;
@@ -326,6 +380,11 @@ std::optional<IncidentPackage> BuildIncidentPackage(std::string_view description
                             facts.operating_system, log.name, clipped ? "yes" : "no", std::move(text)};
     IncidentPackage package;
     for (size_t i = 0; i < std::size(kFieldNames); ++i) package.fields.push_back({kFieldNames[i].key, kFieldNames[i].label, std::move(values[i])});
+    package.crash_dump_requested = attach_crash_dump;
+    if (attach_crash_dump && log.crash && CheckCrashDump(log, log.crash->path) == DumpProblem::kNone) {
+        std::error_code size_error;
+        package.crash_dump = CrashDump{log.crash->path, log.crash->name, fs::file_size(log.crash->path, size_error)};
+    }
     return package;
 }
 
@@ -346,12 +405,20 @@ std::string IncidentPreviewText(const IncidentPackage& package) {
             out += label + ": " + (field.value.empty() ? "-" : field.value) + "\n";
         }
     }
+    if (package.crash_dump) {
+        out += "\n" + std::string(Tr("Crash report")) + ": " + package.crash_dump->name + " (" + LogSizeText(package.crash_dump->bytes) +
+               ", " + Tr("sent as a file, not shown here") + ")\n";
+    }
     return out;
 }
 
 net::Json IncidentRequestBody(const IncidentPackage& package) {
     net::Json body = net::Json::Object();
     for (const IncidentField& field : package.fields) body.set(field.key, field.value);
+    if (package.crash_dump) {
+        body.set("dump_file", package.crash_dump->name);
+        body.set("dump_bytes", int64_t(package.crash_dump->bytes));
+    }
     return body;
 }
 
@@ -443,6 +510,78 @@ net::Json IncidentFeedbackRequest(const TrackedReport& report, std::string_view 
     return body;
 }
 
+namespace {
+
+enum class DumpStep { kDone, kRetry, kStop };
+
+net::Json ReceiptClaim(const std::string& ticket, const std::string& receipt) {
+    net::Json claim = net::Json::Object();
+    claim.set("ticket", ticket);
+    claim.set("receipt", receipt);
+    return claim;
+}
+
+// One pass on an open connection: ask where the service's copy ends, send the rest in chunks read from the file, close the
+// upload. kRetry for a connection that failed, kStop for anything another try cannot mend.
+DumpStep SendDumpOnce(net::LobbySession& session, const net::Json& claim, const CrashDump& dump) {
+    std::error_code ec;
+    if (fs::file_size(dump.path, ec) != dump.bytes || ec) return DumpStep::kStop;
+    std::string code;
+    const std::optional<net::Json> begun = session.call(kIncidentDumpOperation, claim, &code);
+    if (!begun) return code == "not_found" || code == "bad_request" || code == "too_large" ? DumpStep::kStop : DumpStep::kRetry;
+    if ((*begun)["bytes"].as_u64() != dump.bytes) return DumpStep::kStop;
+    if ((*begun)["complete"].as_bool()) return DumpStep::kDone;
+    uint64_t at = (*begun)["stored"].as_u64();
+    if (at > dump.bytes) return DumpStep::kStop;
+    std::ifstream in(dump.path, std::ios::binary);
+    if (!in) return DumpStep::kStop;
+    in.seekg(std::streamoff(at));
+    constexpr size_t kHeader = sizeof(kDumpFrameHeader);
+    std::vector<uint8_t> frame(kHeader + kDumpChunkBytes);
+    std::copy(std::begin(kDumpFrameHeader), std::end(kDumpFrameHeader), frame.begin());
+    while (at < dump.bytes) {
+        const size_t want = size_t(std::min<uint64_t>(kDumpChunkBytes, dump.bytes - at));
+        in.read(reinterpret_cast<char*>(frame.data() + kHeader), std::streamsize(want));
+        if (size_t(in.gcount()) != want) return DumpStep::kStop;
+        if (!session.send_binary(frame.data(), kHeader + want)) return DumpStep::kRetry;
+        at += want;
+    }
+    if (session.call(kIncidentDumpEndOperation, claim, &code)) return DumpStep::kDone;
+    return code == "bad_request" || code == "not_found" ? DumpStep::kStop : DumpStep::kRetry;
+}
+
+// `open` is the connection that filed the report, when there is one; later tries open their own, which need no sign-in.
+CrashUpload UploadCrashDumpOn(const net::OnlineConfig& config, net::LobbySession* open, const std::string& ticket,
+                              const std::string& receipt, const CrashDump& dump) {
+    const net::Json claim = ReceiptClaim(ticket, receipt);
+    net::LobbySession own;
+    net::LobbySession* session = open;
+    for (int attempt = 0; attempt < kDumpUploadAttempts; ++attempt) {
+        if (!session || !session->connected()) {
+            if (attempt > 0) std::this_thread::sleep_for(std::chrono::milliseconds(kDumpRetryPauseMs * attempt));
+            std::string error;
+            if (config.lobby.empty() || !own.connect(config.lobby, &error)) continue;
+            session = &own;
+        }
+        const DumpStep step = SendDumpOnce(*session, claim, dump);
+        if (step == DumpStep::kDone) {
+            std::printf("Bug report: crash report %s uploaded for %s\n", dump.name.c_str(), ticket.c_str());
+            return CrashUpload::kUploaded;
+        }
+        session->close();
+        if (step == DumpStep::kStop) break;
+    }
+    std::printf("Bug report: crash report %s was not uploaded for %s\n", dump.name.c_str(), ticket.c_str());
+    return CrashUpload::kFailed;
+}
+
+} // namespace
+
+CrashUpload UploadCrashDump(const net::OnlineConfig& config, const std::string& ticket, const std::string& receipt,
+                            const CrashDump& dump) {
+    return UploadCrashDumpOn(config, nullptr, ticket, receipt, dump);
+}
+
 IncidentReceipt FileIncident(const net::OnlineConfig& config, const fs::path& user_dir, const std::string& game,
                              const IncidentPackage& package) {
     const net::Identity identity = net::load_identity(user_dir);
@@ -459,16 +598,28 @@ IncidentReceipt FileIncident(const net::OnlineConfig& config, const fs::path& us
     }
     std::string code;
     const std::optional<net::Json> answer = session.call(kIncidentOperation, IncidentRequestBody(package), &code);
-    session.close();
     if (!answer) {
+        session.close();
         std::printf("Bug report: not accepted (%s)\n", code.c_str());
         return NotSent(IncidentOutcomeOf(code));
     }
     const std::string ticket = (*answer)["ticket"].as_string();
-    if (ticket.empty()) return {};
+    if (ticket.empty()) {
+        session.close();
+        return {};
+    }
     std::printf("Bug report: sent as %s\n", ticket.c_str());
     const std::string& credential = (*answer)["receipt"].as_string();
-    return {IncidentOutcome::kSent, ticket, IsReceipt(credential) ? credential : std::string(), (*answer)["submitted_at"].as_int()};
+    IncidentReceipt receipt{IncidentOutcome::kSent, ticket, IsReceipt(credential) ? credential : std::string(), (*answer)["submitted_at"].as_int()};
+    if (package.crash_dump) {
+        receipt.crash = receipt.credential.empty() || (*answer)["dump"].as_string() != "expected"
+                            ? CrashUpload::kFailed
+                            : UploadCrashDumpOn(config, &session, ticket, receipt.credential, *package.crash_dump);
+    } else if (package.crash_dump_requested) {
+        receipt.crash = CrashUpload::kFailed;
+    }
+    session.close();
+    return receipt;
 }
 
 std::optional<std::vector<ReportStatus>> FetchReportStatuses(const net::OnlineConfig& config, const std::vector<TrackedReport>& reports) {

@@ -1854,7 +1854,8 @@ void TestLinuxParity() {
     for (size_t at = line.find(" dcp-"); at != std::string::npos; at = line.find(" dcp-", at + 1)) {
         const std::string target = line.substr(at + 1, line.find_first_of(" \r", at + 1) - at - 1);
         ++targets;
-        if (target == "dcp-memory-windows-tests" || target == "dcp-update-helper-tests" || target == "dcp-log-tests")
+        if (target == "dcp-memory-windows-tests" || target == "dcp-update-helper-tests" || target == "dcp-log-tests" ||
+            target == "dcp-crash-dump-tests" || target == "dcp-incident-upload-tests")
             continue;
         const bool runs = build_sh.find("\"$build_dir/bin/" + target + "\"") != std::string::npos;
         if (!runs) std::printf("tools/build.sh --test does not run %s\n", target.c_str());

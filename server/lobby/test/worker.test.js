@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mock, test as nodeTest } from 'node:test';
 
 import { PROTECTION } from '../src/abuse.js';
+import { DUMP_FRAME, INCIDENT } from '../src/incidents.js';
 import { RELAY, encodeRelayFrame, roomToken } from '../src/relay.js';
 import { ROOM } from './harness.js';
 import { DurableObjectState, available } from './support/hibernation.js';
@@ -333,4 +334,41 @@ test('a refused answer names only the field that was wrong, never a value or a s
     mock.timers.tick(60_000);
   }
   assert.ok(!JSON.stringify(sent).includes(filed.receipt));
+});
+
+function dumpFrame(bytes) {
+  const frame = new Uint8Array(DUMP_FRAME.headerBytes + bytes.length);
+  frame.set([...DUMP_FRAME.magic, DUMP_FRAME.version, DUMP_FRAME.chunk]);
+  frame.set(bytes, DUMP_FRAME.headerBytes);
+  return frame.buffer;
+}
+
+test('C7D4M: a crash dump upload resumes across a Durable Object wake on a socket with no hello', async () => {
+  const state = new DurableObjectState();
+  const first = await state.wake();
+  const chunk = INCIDENT.dumpChunkBytes;
+  const bytes = new Uint8Array(3 * chunk + 10).map((_, i) => (i * 31 + 7) & 0xff);
+  bytes.set([0x4d, 0x44, 0x4d, 0x50]);
+  const player = await signedIn(state, first);
+  state.deliver(first, player, call('incident.file', {
+    description: 'It crashed', launcher_version: '1.4.1', game_build: 'CUSA10454 1.03 USA', game_version: '1.03', cusa: 'CUSA10454',
+    operating_system: 'Windows 11', log_file: 'dragons_crown_pro_042.log', log_clipped: 'no', log_text: 'CRASH\n',
+    dump_file: 'dragons_crown_pro_042.dmp', dump_bytes: bytes.length }));
+  const filed = filedReport(player);
+  assert.equal(filed.dump, 'expected');
+  const claim = { ticket: filed.ticket, receipt: filed.receipt };
+
+  const uploader = await state.connect(first, '198.18.2.1');
+  state.deliver(first, uploader, call('incident.dump', claim));
+  assert.equal(answers(uploader).at(-1).stored, 0);
+  state.deliver(first, uploader, dumpFrame(bytes.subarray(0, chunk)));
+  const woken = await state.wake();
+  state.deliver(woken, uploader, dumpFrame(bytes.subarray(chunk, 2 * chunk)));
+  state.deliver(woken, uploader, dumpFrame(bytes.subarray(2 * chunk, 3 * chunk)));
+  state.deliver(woken, uploader, dumpFrame(bytes.subarray(3 * chunk)));
+  assert.equal(uploader.closedWith, null);
+  state.deliver(woken, uploader, call('incident.dump_end', claim));
+  assert.deepEqual([answers(uploader).at(-1).code, answers(uploader).at(-1).complete], ['ok', true]);
+  assert.deepEqual(woken.lobby.incidentDump(filed.ticket).bytes, bytes);
+  assert.equal(woken.lobby.incidentForAdmin(filed.ticket).dump_status, 'stored');
 });

@@ -59,7 +59,8 @@ export class LobbyObject extends DurableObject {
           all: (query, ...args) => sql.exec(query, ...args).toArray(),
           get: (query, ...args) => sql.exec(query, ...args).toArray()[0],
           run: (query, ...args) => {
-            sql.exec(query, ...args);
+            // Crash dump chunks are bytes; the runtime binds an ArrayBuffer, not a view.
+            sql.exec(query, ...args.map((arg) => (arg instanceof Uint8Array ? arg.buffer.slice(arg.byteOffset, arg.byteOffset + arg.byteLength) : arg)));
           },
           transaction: (work) => ctx.storage.transactionSync(work),
         },
@@ -80,6 +81,10 @@ export class LobbyObject extends DurableObject {
     if (incident?.kind === 'one') {
       const found = this.lobby.incidentForAdmin(incident.ticket);
       return found ? Response.json(found) : new Response('Not found', { status: 404 });
+    }
+    if (incident?.kind === 'dump') {
+      const dump = this.lobby.incidentDump(incident.ticket);
+      return dump ? new Response(dump.bytes, { headers: { 'Content-Type': 'application/octet-stream' } }) : new Response('Not found', { status: 404 });
     }
     if (incident?.kind === 'status') {
       const saved = this.lobby.setIncidentStatus(incident.ticket, await request.json());
@@ -102,7 +107,7 @@ export class LobbyObject extends DurableObject {
 
   webSocketMessage(ws, message) {
     if (message instanceof ArrayBuffer) {
-      this.lobby.relay(new WorkerConn(ws, this.ctx), new Uint8Array(message));
+      this.lobby.binary(new WorkerConn(ws, this.ctx), new Uint8Array(message));
       return;
     }
     if (typeof message !== 'string' || message.length > INCIDENT.frameChars) {
@@ -139,10 +144,10 @@ export default {
         if (!r.ok) throw new Error(`lobby answered ${r.status}`);
         return r.json();
       });
-      const report = (path, init) => stub.fetch(`https://lobby.internal${path}`, init).then((r) => {
+      const report = (path, init, read = (r) => r.json()) => stub.fetch(`https://lobby.internal${path}`, init).then((r) => {
         if (r.status === 404) return null;
         if (!r.ok) throw new Error(`lobby answered ${r.status}`);
-        return r.json();
+        return read(r);
       });
       return handleAdmin(request, env, {
         summary: () => internal('/metrics/summary'),
@@ -151,6 +156,7 @@ export default {
         incident: (ticket) => report(`/incidents/${ticket}`),
         setIncidentStatus: (ticket, change) => report(`/incidents/${ticket}/status`, { method: 'POST', body: JSON.stringify(change) }),
         deleteIncident: (ticket) => report(`/incidents/${ticket}`, { method: 'DELETE' }),
+        incidentDump:(ticket) => report(`/incidents/${ticket}/dump`, undefined, async (r) => ({ bytes: new Uint8Array(await r.arrayBuffer()) })),
       }, (text) => console.log(text));
     }
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') return handleUpgrade(request, env, stub);

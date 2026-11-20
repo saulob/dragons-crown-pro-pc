@@ -58,7 +58,8 @@ Nothing in the repository deploys or logs in. To publish a lobby:
 Updating the deployed Worker is `.\tools\worker.ps1` from the repository root (`.\tools\worker.ps1 -DryRun` bundles without
 uploading). It runs `npx wrangler deploy` in this folder, the same as `wrangler deploy` here or `npm run deploy`; run
 `wrangler deploy --dry-run` first to bundle it without uploading. Reports are read in `/admin`, tab Bugs, or with the same
-token from `/admin/api/incidents`, `/admin/api/incidents/<ticket>` and `/admin/api/incidents/<ticket>/log`. An older
+token from `/admin/api/incidents`, `/admin/api/incidents/<ticket>`, `/admin/api/incidents/<ticket>/log` and
+`/admin/api/incidents/<ticket>/dump`. An older
 deployment may still hold an empty `reports` table from before the Bug Report page; nothing reads, writes or deletes it.
 
 The Worker uses `CF-Connecting-IP` as each player's address.
@@ -197,6 +198,18 @@ when the report was built, so it can hold earlier report IDs but never its own. 
 that stored text as `<ticket>-<log file>.log` (`text/plain; charset=utf-8`, `Content-Disposition: attachment`; the name is
 built from the validated ticket and log file name only). **Copy log** copies the same text. Both go through the token; there
 is no public or permanent link.
+
+A Windows crash dump travels with its report (docs/ONLINE.md, Crash dumps in bug reports). `incident.file` may announce
+`dump_file` (the Worker derives the name from the log's and refuses any other) and `dump_bytes` (32 bytes to 8 MiB); `incident_dumps`
+holds the announcement and `incident_dump_chunks` the 64 KiB BLOB rows, both created with `CREATE TABLE IF NOT EXISTS`, so a
+deployment from before them keeps every report and shows `No crash report` for it. `incident.dump` and `incident.dump_end` need the
+report's receipt and no `hello`; the bytes arrive as `DI` binary frames that go only to the report the same socket's
+`incident.dump` opened, at the offset the Worker already holds, and the first must begin with `MDMP`. A finished dump is complete
+only when exactly the announced size arrived. The worker binds BLOBs as an `ArrayBuffer` (`worker.js`). Uploads have an address limit
+of their own (`incidentDumpAddress`) and cost no report quota. The newest 100 dumps are kept, an unfinished one is dropped a day
+after its report, and deleting a report deletes its dump and chunks. In `/admin`, a report's detail shows **Crash report** as
+`Stored` (name and size), `Announced, upload not finished` or `No crash report`, separate from its status and player
+feedback, and **Download minidump** (stored dumps only) saves it as `<ticket>-<dump name>` through the token.
 
 **Report status** is set in the detail: a status, a fixed version (Fixed only; leaving Fixed clears it) and an optional message of
 500 characters, stored and shown as plain text. **Save status** posts to `/admin/api/incidents/<ticket>/status`; nothing is

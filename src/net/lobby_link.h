@@ -150,6 +150,9 @@ public:
     std::optional<Json> call(const std::string& op, Json body, std::string* code);
     // The last reply the lobby sent to call, refused or not; null when none arrived.
     const Json& last_reply() const { return last_reply_; }
+    // One binary message, in order with the calls; false once the socket is gone.
+    bool send_binary(const uint8_t* data, size_t size);
+    bool connected() const { return socket_ != nullptr; }
     void close();
 
 private:

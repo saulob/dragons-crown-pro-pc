@@ -18,7 +18,17 @@ export const INCIDENT = {
   messageChars: 500,
   statusBatch: 50,
   statusKept: 5000,
+  // Real crash dumps are thread stacks and module lists without the heap; this leaves room for more threads.
+  dumpBytes: 8 * 1024 * 1024,
+  dumpMinBytes: 32,
+  dumpChunkBytes: 64 * 1024,
+  dumpsKept: 100,
+  dumpPendingMs: 24 * 3600 * 1000,
 };
+
+// A binary message that carries crash dump bytes: "DI", version, type, then the bytes themselves.
+export const DUMP_FRAME = { magic: [0x44, 0x49], version: 1, chunk: 1, headerBytes: 4 };
+const MINIDUMP_MAGIC = [0x4d, 0x44, 0x4d, 0x50];
 
 export const INCIDENT_STATUSES = ['new', 'investigating', 'awaiting_player_test', 'fixed', 'cannot_reproduce', 'duplicate', 'not_a_bug',
   'closed'];
@@ -36,6 +46,7 @@ const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const ENVELOPE = new Set(['op', 'seq']);
 const LOG_FILE = /^dragons_crown_pro_[0-9]{3,10}\.log$/;
+const DUMP_KEYS = new Set(['dump_file', 'dump_bytes']);
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/;
 const CUSA = /^(?:CUSA[0-9]{5})?$/;
 const TICKET = /^DCP-[A-HJ-NP-Z2-9]{6}$/;
@@ -50,6 +61,15 @@ export function logDownloadName(incident) {
   if (!isTicket(incident.ticket)) return 'dragons-crown-pro-report.log';
   return LOG_FILE.test(incident.log_file) ? `${incident.ticket}-${incident.log_file}` : `${incident.ticket}.log`;
 }
+
+// The dump of a log is named after it; the server never takes the launcher's word for the name.
+export const dumpNameOf = (logFile) => `${logFile.slice(0, -4)}.dmp`;
+
+export function dumpDownloadName(incident) {
+  return isTicket(incident.ticket) && LOG_FILE.test(incident.log_file) ? `${incident.ticket}-${dumpNameOf(incident.log_file)}` : `${incident.ticket}.dmp`;
+}
+
+export const isMinidump = (bytes) => bytes.length >= MINIDUMP_MAGIC.length && MINIDUMP_MAGIC.every((b, i) => bytes[i] === b);
 
 const utf8Bytes = (text) => new TextEncoder().encode(text).length;
 
@@ -114,16 +134,29 @@ const READERS = {
   log_text: logText,
 };
 
+// The announced crash dump of a report, or null for a report without one. Its name must be the selected log's.
+function readDump(msg, logFile) {
+  const named = Object.hasOwn(msg, 'dump_file');
+  const sized = Object.hasOwn(msg, 'dump_bytes');
+  if (!named && !sized) return null;
+  if (!named || !sized) throw new Refusal('bad_request', 'dump_file and dump_bytes go together');
+  if (msg.dump_file !== dumpNameOf(logFile)) throw new Refusal('bad_request', 'dump_file');
+  const bytes = msg.dump_bytes;
+  if (!Number.isInteger(bytes) || bytes < INCIDENT.dumpMinBytes) throw new Refusal('bad_request', 'dump_bytes');
+  if (bytes > INCIDENT.dumpBytes) throw new Refusal('too_large', 'dump_bytes');
+  return { file: msg.dump_file, bytes };
+}
+
 // The stored fields of a request, or { code, detail } for the answer. Nothing here trusts a size the client states, and
 // a field the page could not have shown is refused rather than dropped.
 export function readIncident(msg) {
   for (const key of Object.keys(msg)) {
-    if (!ENVELOPE.has(key) && !Object.hasOwn(READERS, key)) return { code: 'bad_request', detail: key };
+    if (!ENVELOPE.has(key) && !DUMP_KEYS.has(key) && !Object.hasOwn(READERS, key)) return { code: 'bad_request', detail: key };
   }
   try {
     const incident = {};
     for (const [field, read] of Object.entries(READERS)) incident[field] = read(msg);
-    return { incident };
+    return { incident, dump: readDump(msg, incident.log_file) };
   } catch (error) {
     if (error instanceof Refusal) return { code: error.code, detail: error.message };
     throw error;
@@ -179,7 +212,9 @@ const LIST_COLUMNS = `incidents.ticket AS ticket, ms, launcher_version, game_bui
   substr(description, 1, ${INCIDENT.previewChars}) AS preview, COALESCE(t.status, 'new') AS status,
   COALESCE(t.status_ms, ms) AS status_updated_at,
   CASE WHEN t.status = '${AWAITING_TEST}' THEN CASE WHEN t.feedback_revision = t.status_ms THEN t.feedback ELSE 'pending' END
-  ELSE '' END AS player_feedback`;
+  ELSE '' END AS player_feedback,
+  COALESCE((SELECT CASE complete WHEN 1 THEN 'stored' ELSE 'uploading' END FROM incident_dumps d
+    WHERE d.ticket = incidents.ticket), 'none') AS dump_status`;
 
 // An answer belongs to the status time it was given for, so a newer request reads as pending and the old answer stays stored.
 const feedbackOf = (row) => {
@@ -228,6 +263,10 @@ export class IncidentDesk {
     sql.run(`CREATE TABLE IF NOT EXISTS incident_tracking (ticket TEXT PRIMARY KEY, receipt_hash TEXT NOT NULL,
       submitted_ms INTEGER NOT NULL, status TEXT NOT NULL, status_ms INTEGER NOT NULL, fixed_version TEXT NOT NULL,
       player_message TEXT NOT NULL)`);
+    sql.run(`CREATE TABLE IF NOT EXISTS incident_dumps (ticket TEXT PRIMARY KEY, file TEXT NOT NULL, bytes INTEGER NOT NULL,
+      complete INTEGER NOT NULL, ms INTEGER NOT NULL)`);
+    sql.run(`CREATE TABLE IF NOT EXISTS incident_dump_chunks (ticket TEXT NOT NULL, pos INTEGER NOT NULL, data BLOB NOT NULL,
+      PRIMARY KEY (ticket, pos))`);
     const have = new Set(sql.all('PRAGMA table_info(incident_tracking)').map((c) => c.name));
     for (const [column, type] of FEEDBACK_COLUMNS) {
       if (!have.has(column)) sql.run(`ALTER TABLE incident_tracking ADD COLUMN ${column} ${type}`);
@@ -252,7 +291,7 @@ export class IncidentDesk {
     return null;
   }
 
-  file(incident, ticket, account, address, now) {
+  file(incident, ticket, account, address, now, dump = null) {
     this.sql.run(`INSERT INTO incidents (ticket, ms, launcher_version, game_build, game_version, cusa, operating_system,
       description, log_file, log_clipped, log_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ticket, now, incident.launcher_version,
     incident.game_build, incident.game_version, incident.cusa, incident.operating_system, incident.description, incident.log_file,
@@ -261,6 +300,61 @@ export class IncidentDesk {
       this.key('address', address), now);
     this.sql.run(`DELETE FROM incidents WHERE rowid IN
       (SELECT rowid FROM incidents ORDER BY ms DESC, rowid DESC LIMIT -1 OFFSET ?)`, INCIDENT.kept);
+    if (dump) this.sql.run('INSERT INTO incident_dumps (ticket, file, bytes, complete, ms) VALUES (?, ?, ?, 0, ?)', ticket, dump.file, dump.bytes, now);
+    this.trimDumps(now);
+  }
+
+  // A dump lives with its report, only the newest ones are kept, and an upload nobody finished does not stay for ever.
+  trimDumps(now) {
+    this.sql.run('DELETE FROM incident_dumps WHERE complete = 0 AND ms <= ?', now - INCIDENT.dumpPendingMs);
+    this.sql.run('DELETE FROM incident_dumps WHERE ticket NOT IN (SELECT ticket FROM incidents)');
+    this.sql.run(`DELETE FROM incident_dumps WHERE rowid IN
+      (SELECT rowid FROM incident_dumps ORDER BY ms DESC, rowid DESC LIMIT -1 OFFSET ?)`, INCIDENT.dumpsKept);
+    this.sql.run('DELETE FROM incident_dump_chunks WHERE ticket NOT IN (SELECT ticket FROM incident_dumps)');
+  }
+
+  dump(ticket) {
+    return this.sql.get('SELECT * FROM incident_dumps WHERE ticket = ?', ticket) ?? null;
+  }
+
+  dumpStored(ticket) {
+    return this.sql.get('SELECT COALESCE(MAX(pos + LENGTH(data)), 0) AS n FROM incident_dump_chunks WHERE ticket = ?', ticket).n;
+  }
+
+  // A chunk goes at the end of what is stored; a second writer to the same place fails on the key.
+  appendDump(ticket, pos, bytes) {
+    this.sql.run('INSERT INTO incident_dump_chunks (ticket, pos, data) VALUES (?, ?, ?)', ticket, pos, bytes);
+  }
+
+  // False unless the announced number of bytes arrived and they begin like a minidump.
+  completeDump(ticket) {
+    const dump = this.dump(ticket);
+    if (!dump) return false;
+    if (dump.complete) return true;
+    if (this.dumpStored(ticket) !== dump.bytes) return false;
+    const first = this.sql.get('SELECT data FROM incident_dump_chunks WHERE ticket = ? AND pos = 0', ticket);
+    if (!first || !isMinidump(new Uint8Array(first.data))) return false;
+    this.sql.run('UPDATE incident_dumps SET complete = 1 WHERE ticket = ?', ticket);
+    return true;
+  }
+
+  // The stored bytes of a finished upload, or null.
+  dumpContent(ticket) {
+    const dump = this.dump(ticket);
+    if (!dump?.complete) return null;
+    const out = new Uint8Array(dump.bytes);
+    let at = 0;
+    for (const chunk of this.sql.all('SELECT data FROM incident_dump_chunks WHERE ticket = ? ORDER BY pos', ticket)) {
+      const data = new Uint8Array(chunk.data);
+      out.set(data, at);
+      at += data.length;
+    }
+    return at === dump.bytes ? out : null;
+  }
+
+  dumpSummary(ticket) {
+    const dump = this.dump(ticket);
+    return { dump_status: dump ? (dump.complete ? 'stored' : 'uploading') : 'none', dump_file: dump?.file ?? '', dump_bytes: dump?.bytes ?? 0 };
   }
 
   receiptHash(receipt) {
@@ -354,6 +448,8 @@ export class IncidentDesk {
       const existed = this.taken(ticket);
       this.sql.run('DELETE FROM incidents WHERE ticket = ?', ticket);
       this.sql.run('DELETE FROM incident_tracking WHERE ticket = ?', ticket);
+      this.sql.run('DELETE FROM incident_dumps WHERE ticket = ?', ticket);
+      this.sql.run('DELETE FROM incident_dump_chunks WHERE ticket = ?', ticket);
       return existed;
     });
   }

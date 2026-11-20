@@ -35,18 +35,27 @@ static void make_directories(const char *dir) {
     CreateDirectoryA(path, NULL);
 }
 
+/* The number of dragons_crown_pro_N.log, dragons_crown_pro_N.dmp or dragons_crown_pro_N_K.dmp (a second dump of one session), else 0. */
+static unsigned session_file_number(const char *name) {
+    unsigned number = 0, attempt = 0;
+    int used = 0, tail = 0;
+    if (sscanf(name, "dragons_crown_pro_%u%n", &number, &used) != 1 || used <= 0) return 0;
+    const char *rest = name + used;
+    if (!strcmp(rest, ".log") || !strcmp(rest, ".dmp")) return number;
+    if (sscanf(rest, "_%u.dmp%n", &attempt, &tail) == 1 && tail > 0 && !rest[tail]) return number;
+    return 0;
+}
+
 static unsigned last_number(const char *dir) {
     char pattern[4200];
-    snprintf(pattern, sizeof(pattern), "%s\\dragons_crown_pro_*.log", dir);
+    snprintf(pattern, sizeof(pattern), "%s\\dragons_crown_pro_*", dir);
     WIN32_FIND_DATAA found;
     HANDLE find = FindFirstFileA(pattern, &found);
     unsigned last = 0;
     if (find == INVALID_HANDLE_VALUE) return 0;
     do {
-        unsigned number = 0;
-        int used = 0;
-        if (sscanf(found.cFileName, "dragons_crown_pro_%u.log%n", &number, &used) == 1 && used > 0 && !found.cFileName[used] && number > last)
-            last = number;
+        const unsigned number = session_file_number(found.cFileName);
+        if (number > last) last = number;
     } while (FindNextFileA(find, &found));
     FindClose(find);
     return last;

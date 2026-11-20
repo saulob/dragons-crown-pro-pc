@@ -25,12 +25,30 @@ inline constexpr size_t kMostDescriptionCharacters = 500;
 // Twice the largest log of 79 real sessions (33 KB). A log with 64 KiB of line breaks still fits the lobby's frame once
 // JSON has escaped them (server/lobby/src/incidents.js).
 inline constexpr size_t kMostLogBytes = 64 * 1024;
+// A real crash dump holds thread stacks and module lists without the heap, far below this. server/lobby/src/incidents.js
+// refuses more.
+inline constexpr size_t kMostDumpBytes = 8 * 1024 * 1024;
+inline constexpr size_t kFewestDumpBytes = 32;
+inline constexpr size_t kDumpChunkBytes = 64 * 1024;
+// The runtime writes the dump, then the last lines of its log: the two files end within this of each other. A dump of another
+// session that reused the log's number is older than that.
+inline constexpr int kDumpPairingSeconds = 120;
+inline constexpr int kDumpUploadAttempts = 3;
 
 // How far a session got: kGameStarted left the launcher for the game, kGameplay reached the game's own code.
 enum class LogActivity { kLauncher, kGameStarted, kGameplay };
 
 // kNone is a session that started the game without reaching its own code.
 enum class LogRole { kNone, kCurrentLauncher, kCurrentGameplay, kLastGameplay, kOtherGameplay, kOtherLauncher };
+
+// kNone: the dump can be sent. The others say why not: kMissing and kNotThisLog mean no dump belongs to the log at all.
+enum class DumpProblem { kNone, kMissing, kNotThisLog, kNotAFile, kEmpty, kTooLarge, kNotADump };
+
+struct CrashDump {
+    std::filesystem::path path;
+    std::string name;
+    uintmax_t bytes = 0;
+};
 
 struct GameLog {
     std::filesystem::path path;
@@ -39,12 +57,28 @@ struct GameLog {
     uintmax_t bytes = 0;
     LogActivity activity = LogActivity::kLauncher;
     LogRole role = LogRole::kNone;
+    // The session ended in a crash: its own dump exists beside it. `crash_problem` is whether that dump can be sent.
+    std::optional<CrashDump> crash;
+    DumpProblem crash_problem = DumpProblem::kMissing;
+
+    bool Crashed() const { return crash.has_value(); }
+    bool CanAttachCrash() const { return crash.has_value() && crash_problem == DumpProblem::kNone; }
 };
 
 // The logs in `folder`: `running_log` (this launcher's own session) first, then newest first. Left out: other files and
 // sessions that closed in the launcher without starting the game.
 std::vector<GameLog> FindGameLogs(const std::filesystem::path& folder, const std::filesystem::path& running_log,
                                   size_t most = kMostGameLogs);
+
+// "dragons_crown_pro_003.dmp" for "dragons_crown_pro_003.log"; empty for any other name.
+std::string DumpNameOf(std::string_view log_name);
+
+// Whether `dump` may go with `log`: the log's own name with .dmp, beside it, a regular file written in the log's session, of a
+// size and kind a minidump has. A dump of another run, a path with folders in it and a link are never sent.
+DumpProblem CheckCrashDump(const GameLog& log, const std::filesystem::path& dump);
+
+// The default of the "Attach crash report" box for a selected log.
+bool DefaultAttachCrashReport(const GameLog& log);
 
 // The log a report is most likely about: the newest that started the game, not this launcher's own session.
 size_t DefaultGameLog(const std::vector<GameLog>& logs);
@@ -86,15 +120,19 @@ struct IncidentField {
 
 struct IncidentPackage {
     std::vector<IncidentField> fields;
+    // Announced in the request and sent as a file after it, when the player asked for it and it still passed the check.
+    std::optional<CrashDump> crash_dump;
+    bool crash_dump_requested = false;
     const std::string& Value(std::string_view key) const;
 };
 
 // The end of `text`, at most `most` bytes, starting on a whole line.
 std::string LastBytes(std::string_view text, size_t most);
 
-// Scrubs the log's text and bounds it. nullopt when the log cannot be read or holds nothing.
+// Scrubs the log's text and bounds it. nullopt when the log cannot be read or holds nothing. With `attach_crash_dump` the log's
+// own dump goes along when it can; the dump is read from the file again when it is sent, never kept in memory.
 std::optional<IncidentPackage> BuildIncidentPackage(std::string_view description, const GameLog& log, const ReportFacts& facts,
-                                                    const PrivateFacts& private_facts);
+                                                    const PrivateFacts& private_facts, bool attach_crash_dump = false);
 
 std::string IncidentPreviewText(const IncidentPackage& package);
 net::Json IncidentRequestBody(const IncidentPackage& package);
@@ -107,12 +145,16 @@ IncidentOutcome IncidentOutcomeOf(const std::string& code);
 // English, for Tr; nullptr unless `outcome` is one of the two limits.
 const char* IncidentLimitTitle(IncidentOutcome outcome);
 
+// kFailed: the report was filed, its crash dump did not arrive; the player can try again with the same Report ID.
+enum class CrashUpload { kNotRequested, kUploaded, kFailed };
+
 struct IncidentReceipt {
     IncidentOutcome outcome = IncidentOutcome::kServiceError;
     std::string ticket;
     // Proves ownership of this one report. Empty from a service without receipts. Never logged.
     std::string credential;
     int64_t submitted_at = 0;
+    CrashUpload crash = CrashUpload::kNotRequested;
 };
 
 // What My reports keeps of a sent report.
@@ -128,6 +170,8 @@ inline constexpr char kIncidentOperation[] = "incident.file";
 inline constexpr char kIncidentStatusOperation[] = "incident.status";
 inline constexpr char kIncidentReadOperation[] = "incident.read";
 inline constexpr char kIncidentFeedbackOperation[] = "incident.feedback";
+inline constexpr char kIncidentDumpOperation[] = "incident.dump";
+inline constexpr char kIncidentDumpEndOperation[] = "incident.dump_end";
 
 // kStale: the open request changed or the service no longer has the report, so the answer was not taken; check again.
 enum class FeedbackOutcome { kSaved, kStale, kUnreachable, kFailed };
@@ -152,6 +196,11 @@ net::Json IncidentFeedbackRequest(const TrackedReport& report, std::string_view 
 // does not have to be on, and the online identity is made if this PC has none.
 IncidentReceipt FileIncident(const net::OnlineConfig& config, const std::filesystem::path& user_dir, const std::string& game,
                              const IncidentPackage& package);
+
+// Sends the dump of an already filed report, in chunks read from the file, resuming from what the service already holds. Blocks.
+// Uses the receipt as proof, so it needs no account and never files a second report.
+CrashUpload UploadCrashDump(const net::OnlineConfig& config, const std::string& ticket, const std::string& receipt,
+                            const CrashDump& dump);
 
 // Both block, take no account and need no Online Play: the receipts are the only proof sent. nullopt when the service could
 // not answer, or for FetchSentReport when it no longer has the report. An answer to FetchReportStatuses leaves out each report

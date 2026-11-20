@@ -25,6 +25,8 @@ void runtime_log_set_session_path(const char *path) {
     finalized = 0;
 }
 
+const char *runtime_log_session_path(void) { return session_log_path; }
+
 void runtime_log_finalize(void) {
     if (finalized) return;
     finalized = 1;

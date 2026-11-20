@@ -314,7 +314,7 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 - There is no in-game "Trophy unlocked" notification yet. See [docs/TROPHIES.md](docs/TROPHIES.md).
 
 ### Bug Report
-- Describe the problem, choose a game log and press **Send report**. **Open preview** shows exactly what goes out, after the privacy filter. **My reports** shows the status of what you sent. See [Reporting problems](#reporting-problems)
+- Describe the problem, choose a game log and press **Send report**. **Open preview** shows exactly what goes out, after the privacy filter. **My reports** shows the status of what you sent. After a Windows crash the log also offers **Attach crash report**. See [Reporting problems](#reporting-problems)
 
 ### About
 - The port version, game version, renderer and library versions
@@ -332,6 +332,8 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 The easiest way is the launcher's **Bug Report** page: describe the problem, choose the log of that session and press **Send report**. It filters the log first, and **Open preview** shows exactly what goes out. You get a report ID, and **My reports** shows its status.
 
 You can also open an [issue](https://github.com/saulob/dragons-crown-pro-pc/issues). Attach the newest `dragons_crown_pro_*.log` file from the `logs` folder next to the program, and say what you were doing when the problem happened.
+
+On Windows, a game crash also writes a `.dmp` crash file next to the log (`dragons_crown_pro_NNN.dmp`, up to 8 MiB can be sent). The Bug Report page marks that log **Crash detected** and offers **Attach crash report**, on by default. A crash file may contain process memory used for diagnostics and is not filtered like the log, so untick the box if you would rather not send it. Linux keeps the text log only.
 
 If the launcher says your Dragon's Crown Pro version is not supported yet, it has already written technical diagnostic information about that version to the latest log. Attach that log when you open the issue.
 

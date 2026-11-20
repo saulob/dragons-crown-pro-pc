@@ -46,6 +46,7 @@
 #include "feature_sites.h"
 #include "runtime_log.h"
 #include "isa_emulate.h"
+#include "simulate_crash.h"
 #include "lzcnt_compat.h"
 #include "discord_presence.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
@@ -53,6 +54,7 @@
 #endif
 #ifdef _WIN32
 #include <windows.h>
+#include "crash_dump.h"
 #include "module_diagnostics.h"
 #else
 #include <sys/mman.h>
@@ -175,16 +177,19 @@ static void describe_address(char *out, size_t size, uintptr_t address) {
 }
 static int fatal_reported;
 static DWORD fatal_thread;
+static EXCEPTION_POINTERS *fatal_info;
 static char fatal_line[768];
 static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) {
-        /* A fault inside the report itself ends the process instead of waiting for itself. */
+        /* A fault inside the report itself ends the process instead of waiting for itself; the dump is still the first fault's. */
         if (__atomic_load_n(&fatal_thread,__ATOMIC_ACQUIRE)==GetCurrentThreadId()) {
             if (fatal_line[0]) runtime_log_write_direct(fatal_line);
+            dcp_crash_dump_write(fatal_info,fatal_thread);
             TerminateProcess(GetCurrentProcess(),3);
         }
         Sleep(INFINITE);
     }
+    fatal_info=info;
     __atomic_store_n(&fatal_thread,GetCurrentThreadId(),__ATOMIC_RELEASE);
     runtime_log_mark_crash();
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
@@ -226,6 +231,7 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     }
     runtime_log_flush();
     runtime_log_write_direct(fatal_line);
+    dcp_crash_dump_write(info,fatal_thread);
     TerminateProcess(GetCurrentProcess(),3);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -697,6 +703,7 @@ int main(int argc, char **argv) {
             snprintf(log_folder,sizeof(log_folder),"%s",paths.logs_dir);
     } else fprintf(stderr,"Cannot create the log %s\n",log_file ? log_file : paths.logs_dir);
 #ifdef _WIN32
+    dcp_crash_dump_install();
     AddVectoredExceptionHandler(1, vectored_fault);
     SetUnhandledExceptionFilter(unhandled_fault);
 #endif
@@ -749,6 +756,7 @@ int main(int argc, char **argv) {
     }
     if (!dcp_resolve_paths(&request,&paths)) fail(paths.error[0] ? paths.error : "cannot locate the game folders");
     boot=paths.boot; content_profile=paths.content_profile; app0=paths.app0;
+    if (!check_imports) dcp_simulate_crash_from_environment();
     dcp_prepare_sdl_gamepad();
     DcpGameBuild game_build;
     const int known_build=dcp_game_build(paths.image_dir,&game_build);

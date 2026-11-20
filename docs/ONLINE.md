@@ -205,6 +205,52 @@ Reports are readable only in the private `/admin` (`DCP_DASHBOARD_TOKEN`), tab B
 downloaded as a `.log` file through the same token. The service keeps the newest 500; removing the local log does not remove
 a sent report.
 
+### Crash dumps in bug reports
+
+On Windows a fatal exception in the game ends the process after the loader's textual crash report, and a minidump is written
+beside the session log with the log's own name: `dragons_crown_pro_433.log` gets `dragons_crown_pro_433.dmp`
+(`src/crash_dump.c`). A dedicated thread writes it, because `MiniDumpWriteDump` suspends the other threads, and the crashing thread
+waits at most a minute, so a dump that cannot be written never keeps the process from ending; the log says what became of it. A dump is
+never overwritten: when the name is taken the next one is `dragons_crown_pro_433_2.dmp`, which the launcher does not offer. A
+log number whose `.dmp` still exists is never reused for a new session. The dump holds thread stacks, thread and module lists and
+the exception, not the heap, and its comment names only the log file. It can still contain process memory used for diagnostics,
+and unlike the log it is not filtered for privacy. Linux writes no minidump: it keeps the textual crash report and sends the log only.
+
+The Bug Report page marks a log **Crash detected** only when its own dump exists, never because the word CRASH is in the text.
+The dump belongs to the log when all of these hold: the file is named exactly after the log, in the same folder, and is a
+regular file (a link is refused); it was written within 120 seconds of the log; it is 32 bytes to 8 MiB and begins with `MDMP`.
+Then **Attach crash report** is on by default for that log, with a note that the dump may contain process memory. There is no file
+chooser: only the log's own dump can go. A dump that exists but cannot be sent (too large, not a minidump) turns the box off and
+the log is sent alone. The preview lists `Crash report: <name> (<size>, sent as a file, not shown here)` and never the bytes;
+changing the box closes the preview.
+
+The dump travels with the same report, never as a second one. `incident.file` carries `dump_file` (the log's name with `.dmp`;
+the Worker checks it) and `dump_bytes` (32 to 8 MiB), together or not at all, and its answer adds `dump: "expected"`. The
+launcher then sends the file on the same connection:
+
+1. `incident.dump` with `ticket` and `receipt` answers `stored`, `bytes` and `complete`: where the Worker's copy ends.
+2. Binary messages follow, each the four bytes `44 49 01 01` ("DI", version 1, chunk) and up to 64 KiB of the file, read from
+   disk in chunks and sent in order from `stored`. A first chunk that does not begin with `MDMP` is not stored and
+   `incident.dump_end` answers `bad_request`; a frame that is not valid for the announced size, or that this socket did not
+   announce, closes the socket with 1008. No report is named in a frame, so a frame cannot reach another report.
+3. `incident.dump_end` with `ticket` and `receipt` answers `complete: true` once exactly `dump_bytes` arrived and begin like a
+   minidump, else `dump_incomplete` with `stored`; asking again for a finished dump changes nothing.
+
+`incident.dump` and `incident.dump_end` take no `hello`; the receipt is the only proof, like `incident.status`, and a ticket
+alone, a wrong receipt or a report that announced no dump answers `not_found` or `bad_request`. The launcher makes up to 3
+attempts, each on a new connection when needed and resuming from what the Worker holds. When the report was filed but the
+dump did not arrive, the page says so, shows **Retry crash report upload**, and the retry uses the same Report ID and receipt:
+it never files again. Neither the receipt nor the dump's contents are logged.
+
+A dump is not a report for the quota. `incident.file` counts as before, and `incident.dump` has a limit of its own per address
+(12 burst then 1 per 20 s, `limit` beyond it) that also draws from the lookup budget; chunks cost nothing. The Worker keeps the newest
+100 dumps in `incident_dumps` and `incident_dump_chunks` (64 KiB BLOB rows), two additive tables created when the object starts, so
+reports from before crash dumps are unchanged and show no dump. An upload that never finishes is dropped a day after its report,
+a dump leaves with its report when `/admin` deletes it or the 500-report limit drops it, and `/admin` → Bugs shows **Crash report**:
+`Stored` with name and size, `Announced, upload not finished`, or `No crash report`, independent of the report's status and
+player feedback. **Download minidump** appears only for a stored dump and is served through the dashboard token as the report's
+`<Report ID>-<name>.dmp`, with no public link.
+
 ### Report status and My reports
 
 A report's life: the player sends it and it starts as **New**; the developer sets a status in `/admin` → Bugs, with an optional
@@ -574,7 +620,9 @@ lower-case hex.
 | `lobby.publish` | `visible` (bool) | `visible` |
 | `lobby.list` | optional `rev` (the one last received) | `rev`, `total`, and `players` (`player`, `name`, `version`, `state`), or `unchanged: true` |
 | `friends.accept` / `.decline` / `.remove` | `account` | `friend` / - / - |
-| `incident.file` | `description` (<= 500 characters), `launcher_version`, `game_build`, `game_version`, `cusa`, `operating_system`, `log_file`, `log_clipped` (`yes`/`no`), `log_text` (<= 64 KiB of UTF-8); see Bug reports | `ticket` (`DCP-XXXXXX`), `receipt` (64 hex digits), `submitted_at` |
+| `incident.file` | `description` (<= 500 characters), `launcher_version`, `game_build`, `game_version`, `cusa`, `operating_system`, `log_file`, `log_clipped` (`yes`/`no`), `log_text` (<= 64 KiB of UTF-8), optional `dump_file` and `dump_bytes` (together); see Bug reports | `ticket` (`DCP-XXXXXX`), `receipt` (64 hex digits), `submitted_at`, and `dump: "expected"`, `dump_chunk_bytes` when a dump was announced |
+| `incident.dump` | `ticket`, `receipt`; no `hello` needed; binary `DI` frames follow; see Crash dumps in bug reports | `stored`, `bytes`, `complete`, or `not_found`, `bad_request`, `limit` |
+| `incident.dump_end` | `ticket`, `receipt`; no `hello` needed | `stored`, `bytes`, `complete: true`, or `dump_incomplete` with `stored` |
 | `incident.status` | `reports: [{ticket, receipt}]` (<= 50); no `hello` needed | `reports: [{ticket, status, status_updated_at, fixed_version?, player_message?, test_feedback?, test_feedback_at?}]`, only the reports the receipts prove |
 | `incident.read` | `ticket`, `receipt`; no `hello` needed | `report` (the stored fields, `ticket`, `submitted_at`), or `not_found` |
 | `incident.feedback` | `ticket`, `receipt`, `revision` (the report's `status_updated_at`), `result` (`fixed`/`not_fixed`), `launcher_version?`, `game_build?`; no `hello` needed; see Player test feedback | `ticket`, `revision`, `test_feedback`, `test_feedback_at`, or `not_found`, `stale_request`, `already_answered` |
@@ -609,7 +657,7 @@ Rules the lobby enforces:
   events after the answer, then the current endpoint of every other member, including one who joined meanwhile. The
   seat starts without an endpoint until the client reports one. Afterwards it is a disconnect (owner migration,
   `peer.gone`, `member_left`). Chat is never held or stored.
-- Limits: frames 32 KB (160 KB for `incident.file`); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
+- Limits: frames 32 KB (160 KB for `incident.file`; crash dump chunks are binary, 64 KiB each, 8 MiB per dump); names 16 characters; 16 bin attrs of <= 0x100 bytes per array;
   32 int attrs; 16 filters; 200 friends; 50 pending requests each way (expire after 14 days); chat 120 characters, 5
   burst then 1/s; 60 messages burst then 20/s per socket, room operations 30 burst then 1/s; requests that change a stored
   row, per socket and account: room data and endpoints in a room 40 burst then 1/s (160 then 4/s per address), friend

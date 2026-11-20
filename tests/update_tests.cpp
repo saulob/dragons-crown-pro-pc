@@ -541,6 +541,10 @@ void TestPaths() {
   CHECK(IsProtectedRelativePath("user/dcp.ini"));
   CHECK(IsProtectedRelativePath("user/savedata/1/CUSA10454/SAVE0.DAT"));
   CHECK(IsProtectedRelativePath("logs/a.log"));
+  CHECK(IsProtectedRelativePath("logs/dragons_crown_pro_433.dmp"));
+  CHECK(IsProtectedRelativePath("logs/dragons_crown_pro_433_2.dmp"));
+  CHECK(IsProtectedRelativePath("dragons_crown_pro_433.dmp"));
+  CHECK(IsProtectedRelativePath("Crash.DMP"));
   CHECK(IsProtectedRelativePath("cache/CUSA10454/a.spv"));
   CHECK(IsProtectedRelativePath("user/cache/CUSA10454/pipeline.bin"));
   CHECK(IsProtectedRelativePath("content/foo"));

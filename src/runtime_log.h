@@ -5,7 +5,8 @@
 extern "C" {
 #endif
 
-/* Creates the next free dragons_crown_pro_NNN.log in dir, or exactly file when it is given. 0 on failure. */
+/* Creates the next free dragons_crown_pro_NNN.log in dir, or exactly file when it is given. 0 on failure. On Windows a
+ * number whose crash dump (.dmp) still exists is taken too, so a new log never lands beside the dump of another session. */
 int runtime_log_create(const char *dir, const char *file, char *path, size_t size, void **handle);
 
 /* Sends stdout and stderr to that log and echoes them to the standard output the process started with, if any. */
@@ -41,6 +42,7 @@ void runtime_log_mark_crash(void);
 
 /* Records the file this run writes; called by runtime_log_start. */
 void runtime_log_set_session_path(const char *path);
+const char *runtime_log_session_path(void);
 
 /* Idempotent: discards this run's log when the decision above says so. Registered by
  * runtime_log_install_cleanup for normal exits and called explicitly before hard exits. */

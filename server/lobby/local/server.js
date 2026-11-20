@@ -88,7 +88,7 @@ export function startLobbyServer({ host: address = '127.0.0.1', port = 8790, db 
         lobby.message(conn, text);
       },
       onBinary(bytes) {
-        lobby.relay(conn, new Uint8Array(bytes));
+        lobby.binary(conn, new Uint8Array(bytes));
       },
       onClose() {
         if (!conn) return;

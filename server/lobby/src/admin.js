@@ -1,7 +1,7 @@
 // The Worker's edge: the private dashboard under /admin (DCP_DASHBOARD_TOKEN as a Bearer header) and the country the
 // lobby may count, which only the edge sets. No Cloudflare import, so Node runs it in the tests.
 import { ADMIN_CSS, ADMIN_HTML, ADMIN_JS } from './admin_page.js';
-import { isTicket, logDownloadName, readStatusChange } from './incidents.js';
+import { dumpDownloadName, isTicket, logDownloadName, readStatusChange } from './incidents.js';
 import { HISTORY_MAX_DAYS, countryCode } from './metrics.js';
 import { sha256Hex } from './sha256.js';
 
@@ -70,6 +70,7 @@ function adminApi(pathname) {
     const [ticket, rest, ...more] = pathname.slice(INCIDENTS_PATH.length + 1).split('/');
     if (more.length === 0 && rest === undefined) return { name: 'incident', ticket };
     if (more.length === 0 && rest === 'log') return { name: 'incident_log', ticket };
+    if (more.length === 0 && rest === 'dump') return { name: 'incident_dump', ticket };
     if (more.length === 0 && rest === 'status') return { name: 'incident_status', ticket };
   }
   return null;
@@ -90,7 +91,7 @@ async function saveIncidentStatus(request, ticket, metrics) {
   return saved ? json(saved) : json({ error: 'not_found' }, 404);
 }
 
-// metrics: { summary(), history(days), incidents(), incident(ticket), setIncidentStatus(ticket, change),
+// metrics: { summary(), history(days), incidents(), incident(ticket), incidentDump(ticket), setIncidentStatus(ticket, change),
 // deleteIncident(ticket) } as promises, used only after the token matched.
 export async function handleAdmin(request, env, metrics, log = () => {}) {
   const url = new URL(request.url);
@@ -123,6 +124,12 @@ export async function handleAdmin(request, env, metrics, log = () => {}) {
     const incident = await metrics.incident(api.ticket);
     if (!incident) return json({ error: 'not_found' }, 404);
     if (api.name === 'incident') return json(incident);
+    if (api.name === 'incident_dump') {
+      const dump = await metrics.incidentDump(api.ticket);
+      if (!dump) return json({ error: 'not_found' }, 404);
+      return reply(dump.bytes, 200, 'application/octet-stream',
+        { 'Content-Disposition': `attachment; filename="${dumpDownloadName(incident)}"` });
+    }
     return reply(incident.log_text, 200, 'text/plain; charset=utf-8',
       { 'Content-Disposition': `attachment; filename="${logDownloadName(incident)}"` });
   } catch (error) {
@@ -151,6 +158,7 @@ export function internalIncidentRoute(request) {
   const [ticket, rest, ...more] = pathname.startsWith('/incidents/') ? pathname.slice('/incidents/'.length).split('/') : [];
   if (!isTicket(ticket) || more.length > 0) return null;
   if (rest === undefined) return { kind: request.method === 'DELETE' ? 'delete' : 'one', ticket };
+  if (rest === 'dump' && request.method === 'GET') return { kind: 'dump', ticket };
   return rest === 'status' && request.method === 'POST' ? { kind: 'status', ticket } : null;
 }
 

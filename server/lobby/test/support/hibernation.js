@@ -77,8 +77,10 @@ export class DurableObjectState {
     this.alarmAt = null;
     this.storage = {
       sql: {
+        // The runtime binds an ArrayBuffer for a BLOB and refuses a view of one; node:sqlite is the other way round.
         exec: (query, ...args) => {
-          const rows = this.store.all(query, ...args);
+          if (args.some((arg) => ArrayBuffer.isView(arg))) throw new TypeError('a BLOB is bound as an ArrayBuffer, not a view');
+          const rows = this.store.all(query, ...args.map((arg) => (arg instanceof ArrayBuffer ? new Uint8Array(arg) : arg)));
           return { toArray: () => rows };
         },
       },

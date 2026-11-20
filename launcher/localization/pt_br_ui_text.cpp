@@ -957,6 +957,17 @@ Part Color	Cor da parte
 Edit Appearance	Editar aparência
 Loading appearance...	Carregando aparência...
 Loading Bug Report...	Carregando Relatório de bug...
+Crash detected	Travamento detectado
+Attach crash report	Anexar relatório de travamento
+Includes the crash dump to help diagnose the problem. A crash dump may contain process memory used for diagnostics, and it is not filtered like the log.	Inclui o dump de travamento para ajudar a diagnosticar o problema. Um dump de travamento pode conter memória do processo usada para diagnóstico e não é filtrado como o log.
+The crash dump of this session cannot be sent, so only the log is.	O dump de travamento desta sessão não pode ser enviado, então apenas o log será enviado.
+Crash report	Relatório de travamento
+sent as a file, not shown here	enviado como arquivo, não exibido aqui
+Uploading the crash report...	Enviando o relatório de travamento...
+This can take a little longer than the report itself.	Isso pode levar um pouco mais que o relatório em si.
+The crash report was uploaded with it.	O relatório de travamento foi enviado junto.
+The report was sent, but its crash report could not be uploaded.	O relatório foi enviado, mas o relatório de travamento não pôde ser enviado.
+Retry crash report upload	Tentar enviar o relatório de travamento de novo
 Loading Editor...	Carregando Editor...
 Loading Trophies...	Carregando Troféus...
 Installed game	Jogo instalado

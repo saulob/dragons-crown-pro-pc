@@ -271,6 +271,12 @@ target_link_libraries(dcp-incident-tests PRIVATE dcp_launcher_core)
 set_target_properties(dcp-incident-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-incident-tests PRIVATE -Wall -Wextra)
 
+# The launcher's crash dump upload against a loopback development lobby (tools/test.ps1 starts one): no window.
+add_executable(dcp-incident-upload-tests EXCLUDE_FROM_ALL ../tests/incident_upload_tests.cpp)
+target_link_libraries(dcp-incident-upload-tests PRIVATE dcp_launcher_core)
+set_target_properties(dcp-incident-upload-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-incident-upload-tests PRIVATE -Wall -Wextra)
+
 # Focused tests of the local trophies (tools/test.ps1); not part of the default build.
 add_executable(dcp-trophy-tests EXCLUDE_FROM_ALL ../tests/trophy_tests.cpp ${DCP_LOG_SOURCES} ../gpu/shim/dcp_png.cpp)
 target_link_libraries(dcp-trophy-tests PRIVATE dcp_launcher_core PNG::PNG)

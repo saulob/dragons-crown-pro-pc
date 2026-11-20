@@ -4,7 +4,7 @@
 // (local/server.js).
 import { PROTECTION, RateLimiter } from './abuse.js';
 import { ipGroup } from './edge.js';
-import { INCIDENT, INCIDENT_LIMITED, IncidentDesk, readClaim, readClaims, readFeedback, readIncident } from './incidents.js';
+import { DUMP_FRAME, INCIDENT, INCIDENT_LIMITED, IncidentDesk, isMinidump, readClaim, readClaims, readFeedback, readIncident } from './incidents.js';
 import { CAPABILITIES, Relay } from './relay.js';
 import { parsePartyReport } from './party.js';
 import { CommsUsage, commsSummary, parseCommsReport } from './comms_usage.js';
@@ -57,7 +57,7 @@ const WRITE_BUDGETS = {
 };
 const ROOM_OPS = new Set(['room.create', 'room.join', 'room.leave', 'room.search', 'room.resume']);
 // A receipt is the whole proof for these, so looking up a report never involves an account.
-const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read', 'incident.feedback']);
+const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read', 'incident.feedback', 'incident.dump', 'incident.dump_end']);
 // Operations after which the live counts can have grown.
 const GROWING_OPS = new Set(['hello', 'room.create', 'room.join', 'room.resume']);
 
@@ -286,6 +286,7 @@ export class Lobby {
       incidentStatusAddress: new RateLimiter(PROTECTION.incidentStatusAddress),
       incidentReadAddress: new RateLimiter(PROTECTION.incidentReadAddress),
       incidentFeedbackAddress: new RateLimiter(PROTECTION.incidentFeedbackAddress),
+      incidentDumpAddress: new RateLimiter(PROTECTION.incidentDumpAddress),
       lobbyPublishAccount: new RateLimiter(PROTECTION.lobbyPublishAccount),
       lobbyListAccount: new RateLimiter(PROTECTION.lobbyListAccount),
       lobbyListAddress: new RateLimiter(PROTECTION.lobbyListAddress),
@@ -426,9 +427,45 @@ export class Lobby {
     }
   }
 
+  // One binary message: crash dump bytes of the report this socket announced, else a relay frame (relay.js).
+  binary(conn, bytes) {
+    if (bytes.length >= 2 && bytes[0] === DUMP_FRAME.magic[0] && bytes[1] === DUMP_FRAME.magic[1]) this.dumpFrame(conn, bytes);
+    else this.relay(conn, bytes);
+  }
+
   // One binary message: a relay frame, forwarded to a member of the sender's own room (relay.js).
   relay(conn, bytes) {
     this.relays.frame(conn, bytes);
+  }
+
+  // A dump chunk goes only where the socket's own `incident.dump` said it would: no report is named in the frame, so a
+  // frame cannot reach another report. Anything else is a client that is not ours.
+  dumpFrame(conn, bytes) {
+    const att = conn.attachment();
+    if (!att || att.abusive) return;
+    const up = att.up;
+    const payload = bytes.length - DUMP_FRAME.headerBytes;
+    const valid = up && !up.refused && bytes[2] === DUMP_FRAME.version && bytes[3] === DUMP_FRAME.chunk && payload > 0
+      && payload <= INCIDENT.dumpChunkBytes && up.at + payload <= up.total;
+    if (!valid) {
+      if (up?.refused) return;
+      this.closeAbusive(conn, att);
+      return;
+    }
+    const data = bytes.subarray(DUMP_FRAME.headerBytes);
+    if (up.at === 0 && !isMinidump(data)) {
+      up.refused = 'not_minidump';
+    } else {
+      try {
+        this.incidents.appendDump(up.ticket, up.at, data);
+        up.at += payload;
+      } catch {
+        att.up = null;
+        this.closeAbusive(conn, att);
+        return;
+      }
+    }
+    conn.setAttachment(att);
   }
 
   slowDown() {
@@ -1083,6 +1120,15 @@ export class Lobby {
     this.guards[guard].take(address, now);
   }
 
+  // Its own budget as well: a dump upload is no report, and no report's quota pays for it or for a resumed chunk.
+  limitIncidentDump(att) {
+    const now = this.host.now();
+    const address = ipGroup(att.ip);
+    if (!this.guards.incidentLookupAll.allows('all', now) || !this.guards.incidentDumpAddress.allows(address, now)) fail('limit', 'too many uploads');
+    this.guards.incidentLookupAll.take('all', now);
+    this.guards.incidentDumpAddress.take(address, now);
+  }
+
   newTicket() {
     let ticket;
     do ticket = `DCP-${this.randomCode(6)}`;
@@ -1100,7 +1146,12 @@ export class Lobby {
 
   incidentForAdmin(ticket) {
     const found = this.incident(ticket);
-    return found ? { ...found, ...this.incidents.status(ticket) } : null;
+    return found ? { ...found, ...this.incidents.status(ticket), ...this.incidents.dumpSummary(ticket) } : null;
+  }
+
+  incidentDump(ticket) {
+    const content = this.incidents.dumpContent(ticket);
+    return content ? { file: this.incidents.dump(ticket).file, bytes: content } : null;
   }
 
   setIncidentStatus(ticket, change) {
@@ -1704,7 +1755,7 @@ const HANDLERS = {
   // A report from the launcher's Bug Report page; only the /admin dashboard reads it back (incidents.js).
   'incident.file'(att, msg) {
     this.limitIncidentAttempt(att);
-    const { incident, code, detail } = readIncident(msg);
+    const { incident, dump, code, detail } = readIncident(msg);
     if (!incident) fail(code, detail);
     const now = this.host.now();
     const address = ipGroup(att.ip);
@@ -1712,7 +1763,7 @@ const HANDLERS = {
       const limited = this.incidents.refusal(att.account, address, now);
       if (limited) return { refusal: limited };
       const filed = { ticket: this.newTicket(), receipt: this.randomHex(32) };
-      this.incidents.file(incident, filed.ticket, att.account, address, now);
+      this.incidents.file(incident, filed.ticket, att.account, address, now, dump);
       this.incidents.track(filed.ticket, filed.receipt, now);
       return filed;
     });
@@ -1721,7 +1772,37 @@ const HANDLERS = {
       fail(refusal, 'report limit');
     }
     this.diagnose('incident_filed');
-    return { ticket, receipt, submitted_at: now };
+    return { ticket, receipt, submitted_at: now, ...(dump && { dump: 'expected', dump_chunk_bytes: INCIDENT.dumpChunkBytes }) };
+  },
+
+  // Starts or resumes the upload of the dump a report announced. The receipt proves the report is the caller's; the
+  // bytes follow as binary messages on this socket, from the first byte not yet stored.
+  'incident.dump'(att, msg) {
+    this.limitIncidentDump(att);
+    const claim = readClaim(msg);
+    if (!claim || this.incidents.claimed(claim) === null) fail('not_found');
+    const dump = this.incidents.dump(claim.ticket);
+    if (!dump) fail('bad_request', 'no crash dump was announced for this report');
+    if (dump.complete) {
+      att.up = null;
+      return { stored: dump.bytes, bytes: dump.bytes, complete: true };
+    }
+    const stored = this.incidents.dumpStored(claim.ticket);
+    att.up = { ticket: claim.ticket, at: stored, total: dump.bytes };
+    return { stored, bytes: dump.bytes, complete: false };
+  },
+
+  'incident.dump_end'(att, msg) {
+    const claim = readClaim(msg);
+    if (!claim || this.incidents.claimed(claim) === null) fail('not_found');
+    const dump = this.incidents.dump(claim.ticket);
+    if (!dump) fail('bad_request', 'no crash dump was announced for this report');
+    const up = att.up?.ticket === claim.ticket ? att.up : null;
+    att.up = null;
+    if (up?.refused) fail('bad_request', 'not a minidump');
+    if (!this.incidents.completeDump(claim.ticket)) fail('dump_incomplete', 'the dump is not complete', { stored: this.incidents.dumpStored(claim.ticket) });
+    this.diagnose('incident_dump_stored');
+    return { stored: dump.bytes, bytes: dump.bytes, complete: true };
   },
 
   // The launcher's My reports: what became of the reports it holds receipts for.

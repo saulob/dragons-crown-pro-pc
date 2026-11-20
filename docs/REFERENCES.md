@@ -27,7 +27,7 @@ Every `gpu/VENDOR.txt` pins the same shadPS4 commit `b4e7ae7`.
 | Game-specific runtime file | medievil `runtime_extra.c`; gr2_pc `runtime_gr2_font.c`/`runtime_gr2_np.c`; tlg_pc `runtime_tlg.c` | Pattern for isolating per-title imports. See the inventory below for what maps onto Dragon's Crown. |
 | PowerShell workflow | uncharted `tools\*.ps1` | The others only ship `build.sh`/`run.sh`/`run.py`. |
 | Windows build | CMake + Ninja on CLANG64, `--disable-high-entropy-va`, 16 MiB committed stack, Win10 1903 API level | Same flags as medievil/gow3 `packaging/windows`, wrapped by `tools\build.ps1` (no bash driver needed). |
-| Logging | uncharted `run_game.py` tee, numbered logs as in hard-corps-uprising-recompiled and the loader's Windows fault reporter | gow3/medievil `run.py` write no log file. No minidump support anywhere; none added. |
+| Logging | uncharted `run_game.py` tee, numbered logs as in hard-corps-uprising-recompiled and the loader's Windows fault reporter | gow3/medievil `run.py` write no log file. The Windows loader also writes a minidump beside the session log after a fatal exception (the dump thread and the pairing of a dump with its log follow alienation-pc's crash guard); Linux has none. |
 | Import discovery | uncharted/medievil `gen_import_names.py` + `prepare_image.py` `image.json` + loader `--check-imports` | Extended here by `scripts/import_inventory.py`. |
 | GPU / video core | **uncharted `gpu/`** (decision below) | |
 

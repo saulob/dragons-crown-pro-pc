@@ -69,6 +69,10 @@ export class Client {
     this.lobby.relay(this.conn, bytes);
   }
 
+  sendBinary(bytes) {
+    this.lobby.binary(this.conn, bytes);
+  }
+
   ping() {
     this.conn.notePing();
   }

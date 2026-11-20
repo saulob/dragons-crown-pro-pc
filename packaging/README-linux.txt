@@ -193,6 +193,7 @@ If the game does not start or crashes, please send a report from the launcher's
 Bug Report page (Open preview shows exactly what goes out), or attach the newest
 dragons_crown_pro_*.log file from the "logs" folder to a report at
 https://github.com/saulob/dragons-crown-pro-pc/issues
+The Linux build writes the text log only; it does not make crash dump files.
 
 
 LICENSE
