@@ -43,7 +43,8 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& windo
     FindPresentFormat();
     FindPresentMode();
 
-    Create(window.GetWidth(), window.GetHeight());
+    const bool created = Create(window.GetWidth(), window.GetHeight());
+    ASSERT_MSG(created, "The window surface has no area at start-up");
     std::printf("Swapchain: %s %s, %u images, %ux%u\n", vk::to_string(surface_format.format).c_str(),
                 vk::to_string(surface_format.colorSpace).c_str(), image_count, extent.width, extent.height);
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
@@ -54,7 +55,21 @@ Swapchain::~Swapchain() {
     instance.GetInstance().destroySurfaceKHR(surface);
 }
 
-void Swapchain::Create(u32 width_, u32 height_) {
+bool Swapchain::SurfaceHasArea() const {
+    const auto [result, capabilities] = instance.GetPhysicalDevice().getSurfaceCapabilitiesKHR(surface);
+    if (result != vk::Result::eSuccess) {
+        return true; // not a zero extent: the creation below reports the real error
+    }
+    return DcpPresent::SurfaceHasArea(capabilities.currentExtent.width, capabilities.currentExtent.height,
+                                      capabilities.maxImageExtent.width, capabilities.maxImageExtent.height);
+}
+
+bool Swapchain::Create(u32 width_, u32 height_) {
+    if (!SurfaceHasArea()) {
+        health.RequestRecreation();
+        PublishHealth();
+        return false;
+    }
     width = width_;
     height = height_;
     health.Recreated();
@@ -100,8 +115,15 @@ void Swapchain::Create(u32 width_, u32 height_) {
     SetupImages();
     RefreshSemaphores();
     frame_index = 0; // the semaphores are new and sized for the returned image count
+    DcpPresent::g_progress.swapchain_generation = ++generation;
+    PublishHealth();
     LogImages();
     LogCreation();
+    return true;
+}
+
+void Swapchain::PublishHealth() {
+    DcpPresent::g_progress.recreation_pending = health.NeedsRecreation();
 }
 
 // Once per change of the image counts or the present mode: a window resize alone is not logged again.
@@ -117,10 +139,15 @@ void Swapchain::LogImages() {
     std::printf("Swapchain: images %s, extent %ux%u\n", counts, extent.width, extent.height);
 }
 
-void Swapchain::Recreate(u32 width_, u32 height_) {
+bool Swapchain::Recreate(u32 width_, u32 height_) {
     LOG_DEBUG(Render_Vulkan, "Recreate the swapchain: width={} height={} HDR={}", width_, height_,
               needs_hdr);
-    Create(width_, height_);
+    return Create(width_, height_);
+}
+
+void Swapchain::RequestRecreation() {
+    health.RequestRecreation();
+    PublishHealth();
 }
 
 void Swapchain::SetHDR(bool hdr) {
@@ -144,11 +171,13 @@ bool Swapchain::AcquireNextImage() {
     ReportResult(false, result);
     const DcpPresent::SwapResult kind = AcquireResult(result);
     if (kind == DcpPresent::SwapResult::Failure) {
+        ReportFatalResult(result);
         LOG_CRITICAL(Render_Vulkan, "Swapchain acquire returned unknown result {}",
                      vk::to_string(result));
         UNREACHABLE();
     }
     const DcpPresent::SwapStep step = health.Acquire(kind);
+    PublishHealth();
     LogKeptSuboptimal(kind, step);
     return step.usable;
 }
@@ -165,9 +194,13 @@ bool Swapchain::Present() {
     auto result = instance.GetPresentQueue().presentKHR(present_info);
     ReportResult(true, result);
     const DcpPresent::SwapResult kind = PresentResult(result);
+    if (kind == DcpPresent::SwapResult::Failure) {
+        ReportFatalResult(result);
+    }
     ASSERT_MSG(kind != DcpPresent::SwapResult::Failure, "Swapchain presentation failed: {}",
                vk::to_string(result));
     LogKeptSuboptimal(kind, health.Present(kind));
+    PublishHealth();
 
     frame_index = (frame_index + 1) % image_count;
 
@@ -195,10 +228,17 @@ DcpPresent::SwapResult Swapchain::PresentResult(vk::Result result) {
         return DcpPresent::SwapResult::Success;
     case vk::Result::eSuboptimalKHR:
         return DcpPresent::SwapResult::Suboptimal;
+    case vk::Result::eErrorSurfaceLostKHR:
     case vk::Result::eErrorOutOfDateKHR:
         return DcpPresent::SwapResult::OutOfDate;
     default:
         return DcpPresent::SwapResult::Failure;
+    }
+}
+
+void Swapchain::ReportFatalResult(vk::Result result) {
+    if (result == vk::Result::eErrorDeviceLost) {
+        DcpPresent::ReportDeviceLost("swapchain acquire/present");
     }
 }
 

@@ -138,6 +138,9 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
       swapchain{instance, window}, runtime{instance, draw_scheduler},
       rasterizer{std::make_unique<Rasterizer>(instance, draw_scheduler, runtime, liverpool)},
       texture_cache{rasterizer->GetTextureCache()} {
+    draw_scheduler.SetRole("draw");
+    present_scheduler.SetRole("present");
+    flip_scheduler.SetRole("flip");
     const u32 num_images = swapchain.GetImageCount();
     const vk::Device device = instance.GetDevice();
 
@@ -292,6 +295,9 @@ Frame* Presenter::PrepareLastFrame() {
         }
         if (result == vk::Result::eTimeout) {
             continue;
+        }
+        if (result == vk::Result::eErrorDeviceLost) {
+            DcpPresent::ReportDeviceLost("wait last-frame fence");
         }
         ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
                    "Device lost during waiting for a frame");
@@ -515,13 +521,16 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
 }
 
 void Presenter::PresentLoadingFrame() {
-    if (window.GetWidth() == 0 || window.GetHeight() == 0) {
+    const DcpPresent::WindowVisibility visibility = GateVisibility();
+    if (visibility.minimized || visibility.hidden || window.GetWidth() == 0 || window.GetHeight() == 0) {
         return;
     }
     swapchain.UpdateVsync();
     if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight() ||
         swapchain.NeedsRecreation()) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        if (!swapchain.Recreate(window.GetWidth(), window.GetHeight())) {
+            return;
+        }
     }
     if (!swapchain.AcquireNextImage()) {
         return;
@@ -660,17 +669,21 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         CheckFreeQueueFrame(frame, "Present");
     }
 
-    // A minimized window has no pixels on Windows (0x0): keep the swapchain and skip presenting
-    // until the window is restored.
-    if (window.GetWidth() == 0 || window.GetHeight() == 0) {
+    // A minimized or hidden window, or a surface without area, gets no acquire, no commands and no present; the
+    // frame goes back to the free queue and the guest keeps running.
+    if (!CanPresent()) {
         free_frame();
         return;
     }
 
-    // Recreate the swapchain if the window was resized.
+    // Recreate the swapchain if the window was resized or presentation just resumed.
     swapchain.UpdateVsync();
-    if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight()) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+    if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight() ||
+        swapchain.NeedsRecreation()) {
+        if (!RecreateSwapchain()) {
+            free_frame();
+            return;
+        }
     }
 
     bool acquired;
@@ -679,7 +692,10 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         acquired = swapchain.AcquireNextImage();
     }
     if (!acquired) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        if (!RecreateSwapchain()) {
+            free_frame();
+            return;
+        }
         if (!swapchain.AcquireNextImage()) {
             // User resizes the window too fast and GPU can't keep up. Skip this frame.
             LOG_WARNING(Render_Vulkan, "Skipping frame!");
@@ -826,14 +842,67 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         DcpStartupWatch::WaitScope wait{DcpStartupWatch::QueuePresent};
         presented = swapchain.Present();
     }
-    if (!presented && window.GetWidth() != 0 && window.GetHeight() != 0) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+    if (presented) {
+        if (gate.Presented()) {
+            DcpPresent::g_progress.lifecycle = static_cast<int>(gate.Current());
+            std::printf("Swapchain lifecycle: presenting resumed\n");
+        }
+    } else {
+        RecreateSwapchain();
     }
 
     free_frame();
     if (!is_reusing_frame && is_game_frame) {
         DebugState.IncFlipFrameNum();
         DcpWaterDiag::CountFrame();
+    }
+}
+
+DcpPresent::WindowVisibility Presenter::GateVisibility() const {
+    // Gamescope has no minimize of its own to follow.
+    return DcpPresent::GamescopeSession() ? DcpPresent::WindowVisibility{} : window.Visibility();
+}
+
+bool Presenter::CanPresent() {
+    const bool check_surface = gate.Suspended() || swapchain.NeedsRecreation();
+    const auto step = gate.Update({GateVisibility(), u32(window.GetWidth()), u32(window.GetHeight()),
+                                   check_surface && !swapchain.SurfaceHasArea()});
+    LogLifecycle(step);
+    if (step.recreate) {
+        swapchain.RequestRecreation();
+    }
+    return step.present;
+}
+
+bool Presenter::RecreateSwapchain() {
+    if (window.GetWidth() == 0 || window.GetHeight() == 0) {
+        swapchain.RequestRecreation();
+        return false;
+    }
+    if (!swapchain.Recreate(window.GetWidth(), window.GetHeight())) {
+        LogLifecycle(gate.SurfaceUnavailable());
+        return false;
+    }
+    if (gate.Current() == DcpPresent::Lifecycle::Restoring && !restore_recreation_logged) {
+        restore_recreation_logged = true;
+        const vk::Extent2D extent = swapchain.GetExtent();
+        std::printf("Swapchain lifecycle: recreated after restore generation=%u size=%ux%u\n",
+                    swapchain.GetGeneration(), extent.width, extent.height);
+    }
+    return true;
+}
+
+void Presenter::LogLifecycle(const DcpPresent::PresentGate::Step& step) {
+    if (!step.transition) {
+        return;
+    }
+    DcpPresent::g_progress.lifecycle = static_cast<int>(step.lifecycle);
+    if (step.recreate) {
+        restore_recreation_logged = false;
+        std::printf("Swapchain lifecycle: restore requested size=%dx%d\n", window.GetWidth(), window.GetHeight());
+    } else {
+        std::printf("Swapchain lifecycle: suspended reason=%s size=%dx%d\n",
+                    DcpPresent::LifecycleName(static_cast<int>(step.lifecycle)), window.GetWidth(), window.GetHeight());
     }
 }
 
@@ -917,6 +986,9 @@ Frame* Presenter::GetRenderFrame() {
     {
         DcpStartupWatch::WaitScope fence_wait{DcpStartupWatch::FrameFence};
         while (wait() != vk::Result::eSuccess) {
+            if (result == vk::Result::eErrorDeviceLost) {
+                DcpPresent::ReportDeviceLost("wait frame fence");
+            }
             ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
                        "Device lost during waiting for a frame");
             // Retry if the waiting times out

@@ -24,11 +24,18 @@ public:
     explicit Swapchain(const Instance& instance, const Frontend::WindowSDL& window);
     ~Swapchain();
 
-    /// Creates (or recreates) the swapchain with a given size.
-    void Create(u32 width, u32 height);
+    /// Creates (or recreates) the swapchain with a given size. False, with the old swapchain kept and a recreation
+    /// pending, while the surface has no area (minimized window).
+    bool Create(u32 width, u32 height);
 
-    /// Recreates the swapchain with a given size and current surface.
-    void Recreate(u32 width, u32 height);
+    /// Recreates the swapchain with a given size and current surface; false as Create.
+    bool Recreate(u32 width, u32 height);
+
+    /// The swapchain is stale although Vulkan has not said so yet: recreate before the next acquire.
+    void RequestRecreation();
+
+    /// The surface can hold a swapchain (a minimized window on Windows has a 0x0 surface).
+    bool SurfaceHasArea() const;
 
     /// Acquires the next image in the swapchain.
     bool AcquireNextImage();
@@ -66,6 +73,10 @@ public:
 
     u32 GetImageCount() const {
         return image_count;
+    }
+
+    u32 GetGeneration() const {
+        return generation;
     }
 
     u32 GetFrameIndex() const {
@@ -123,6 +134,8 @@ private:
 
     void LogImages();
     void LogCreation();
+    void PublishHealth();
+    static void ReportFatalResult(vk::Result result);
 
     void DescribeSurface(const vk::SurfaceCapabilitiesKHR& capabilities);
     void ReportResult(bool presenting, vk::Result result);
@@ -158,6 +171,7 @@ private:
     std::string logged_images;
     u32 image_index = 0;
     u32 frame_index = 0;
+    u32 generation = 0; ///< swapchains created so far, for diagnostics
     DcpPresent::SwapchainHealth health;
     bool logged_kept_suboptimal = false;
     std::string surface_summary;

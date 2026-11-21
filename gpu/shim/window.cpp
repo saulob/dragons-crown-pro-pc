@@ -225,8 +225,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     }
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
-    width = w;
-    height = h;
+    PublishSize(w, h);
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
     LogGamescopeWindow();
     ClaimGamescopeTouch();
@@ -244,6 +243,19 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
 #ifndef _WIN32
     std::printf("Session: %s\n", DcpPresent::DescribeSession(DcpPresent::GamescopeSession(), std::getenv).c_str());
 #endif
+}
+
+void WindowSDL::PublishSize(int w, int h) {
+    width = w;
+    height = h;
+    DcpPresent::g_progress.window_size = DcpPresent::Pack({u32(w), u32(h)});
+}
+
+// Window thread. window_active stays the start-up watch's flag; the presenter reads the visibility itself.
+void WindowSDL::ApplyWindowEvent(DcpPresent::WindowEvent event) {
+    visibility.Apply(event);
+    visibility_bits.store(visibility.Pack(), std::memory_order_relaxed);
+    DcpPresent::g_progress.window_active = !visibility.minimized && !visibility.hidden;
 }
 
 void WindowSDL::LogGamescopeWindow() {
@@ -706,18 +718,21 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_WINDOW_RESIZED: {
             int w = 0, h = 0;
             SDL_GetWindowSizeInPixels(window, &w, &h);
-            width = w;
-            height = h;
+            PublishSize(w, h);
             LogGamescopeWindow();
             break;
         }
         case SDL_EVENT_WINDOW_MINIMIZED:
+            ApplyWindowEvent(DcpPresent::WindowEvent::Minimized);
+            break;
         case SDL_EVENT_WINDOW_HIDDEN:
-            DcpPresent::g_progress.window_active = false;
+            ApplyWindowEvent(DcpPresent::WindowEvent::Hidden);
             break;
         case SDL_EVENT_WINDOW_RESTORED:
+            ApplyWindowEvent(DcpPresent::WindowEvent::Restored);
+            break;
         case SDL_EVENT_WINDOW_SHOWN:
-            DcpPresent::g_progress.window_active = true;
+            ApplyWindowEvent(DcpPresent::WindowEvent::Shown);
             break;
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:

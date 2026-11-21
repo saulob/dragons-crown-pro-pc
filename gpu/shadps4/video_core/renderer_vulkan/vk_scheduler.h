@@ -711,6 +711,11 @@ public:
     /// Ends current rendering scope.
     void EndRendering();
 
+    /// Names this scheduler in the device-lost report.
+    void SetRole(const char* name) {
+        role = name;
+    }
+
     /// Sets a function to be called on every scheduler submission.
     void SetSubmitCallback(SubmitFunc&& on_submit) {
         this->on_submit = std::move(on_submit);
@@ -910,6 +915,7 @@ private:
     void PriorityPendingOpsThread(std::stop_token stoken);
 
 private:
+    const char* role = "scheduler";
     const Instance& instance;
     Semaphore work_semaphore;
     CommandPool command_pool;

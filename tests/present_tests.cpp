@@ -219,7 +219,7 @@ void TestSwapchainRecreation() {
     // VSync and HDR changes go through the same recreation.
     CHECK(InOrder(swapchain, "void Swapchain::UpdateVsync() {", "    FindPresentMode();\n    Recreate(width, height);"));
     CHECK(InOrder(swapchain, "void Swapchain::SetHDR(bool hdr) {", "    Recreate(width, height);"));
-    CHECK(InOrder(swapchain, "void Swapchain::Recreate(u32 width_, u32 height_) {", "    Create(width_, height_);"));
+    CHECK(InOrder(swapchain, "bool Swapchain::Recreate(u32 width_, u32 height_) {", "    return Create(width_, height_);"));
 }
 
 using DcpPresent::SwapResult;
@@ -346,7 +346,7 @@ void TestSwapchainUsesResultPolicy() {
     CHECK(InOrder(swapchain, "bool Swapchain::AcquireNextImage() {", "    const DcpPresent::SwapStep step = health.Acquire(kind);"));
     CHECK(InOrder(swapchain, "bool Swapchain::AcquireNextImage() {", "    return step.usable;\n}"));
     CHECK(InOrder(swapchain, "bool Swapchain::Present() {", "health.Present(kind)"));
-    CHECK(InOrder(swapchain, "void Swapchain::Create(u32 width_, u32 height_) {", "    health.Recreated();"));
+    CHECK(InOrder(swapchain, "bool Swapchain::Create(u32 width_, u32 height_) {", "    health.Recreated();"));
     CHECK(!Contains(swapchain, "needs_recreation"));
     const std::string presenter = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp");
     CHECK(InOrder(presenter, "void Presenter::PresentLoadingFrame() {", "        swapchain.NeedsRecreation()) {"));
@@ -416,6 +416,382 @@ void TestPresenterUsesSwapchainExtent() {
     const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
     CHECK(Contains(swapchain, "    extent = capabilities.currentExtent;\n    if (capabilities.currentExtent.width == std::numeric_limits<u32>::max()) {"));
     CHECK(Contains(swapchain, ".imageExtent = extent,"));
+}
+
+using DcpPresent::Lifecycle;
+using DcpPresent::PresentGate;
+using DcpPresent::SwapchainHealth;
+using DcpPresent::WindowEvent;
+using DcpPresent::WindowVisibility;
+
+// Presenter::Present's lifecycle control flow, one call per swap-thread frame: gate, recreate when the window size
+// changed or a recreation is pending (never against a surface without area), acquire, present.
+struct LifecycleModel {
+    WindowVisibility visibility;
+    std::uint32_t window_width = 1920;
+    std::uint32_t window_height = 1080;
+    bool surface_zero = false;
+    bool vsync_changed = false;
+
+    PresentGate gate;
+    SwapchainHealth health;
+    std::uint32_t swapchain_width = 1920;
+    std::uint32_t swapchain_height = 1080;
+    int acquires = 0;
+    int presents = 0;
+    int recreations = 0;
+    int zero_surface_recreations = 0;
+    int acquires_while_unpresentable = 0;
+    int resumed = 0;
+
+    void Apply(WindowEvent event) {
+        visibility.Apply(event);
+    }
+
+    bool Recreate() {
+        if (surface_zero) {
+            ++zero_surface_recreations;
+        }
+        health.Recreated();
+        swapchain_width = window_width;
+        swapchain_height = window_height;
+        ++recreations;
+        return true;
+    }
+
+    // Swapchain::Create refuses a surface without area and keeps a recreation pending.
+    bool TryRecreate() {
+        if (surface_zero) {
+            gate.SurfaceUnavailable();
+            health.RequestRecreation();
+            return false;
+        }
+        return Recreate();
+    }
+
+    void Frame(SwapResult acquire = SwapResult::Success, SwapResult present = SwapResult::Success) {
+        const bool check_surface = gate.Suspended() || health.NeedsRecreation();
+        const auto step = gate.Update({visibility, window_width, window_height, check_surface && surface_zero});
+        if (step.recreate) {
+            health.RequestRecreation();
+        }
+        if (!step.present) {
+            return;
+        }
+        if (vsync_changed) {
+            vsync_changed = false;
+            if (!TryRecreate()) {
+                return;
+            }
+        }
+        if (window_width != swapchain_width || window_height != swapchain_height || health.NeedsRecreation()) {
+            if (!TryRecreate()) {
+                return;
+            }
+        }
+        ++acquires;
+        if (visibility.minimized || visibility.hidden || surface_zero) {
+            ++acquires_while_unpresentable;
+        }
+        if (!health.Acquire(acquire).usable) {
+            if (!TryRecreate()) {
+                return;
+            }
+            health.Acquire(SwapResult::Success);
+        }
+        const bool shown = health.Present(present).usable;
+        presents += shown;
+        if (health.NeedsRecreation()) {
+            TryRecreate();
+        }
+        if (shown && gate.Presented()) {
+            ++resumed;
+        }
+    }
+
+    void Frames(int count) {
+        for (int i = 0; i < count; ++i) {
+            Frame();
+        }
+    }
+};
+
+void TestWindowVisibilityEvents() {
+    WindowVisibility v;
+    v.Apply(WindowEvent::Minimized);
+    CHECK(v.minimized && !v.hidden);
+    v.Apply(WindowEvent::Restored);
+    CHECK(!v.minimized);
+    v.Apply(WindowEvent::Hidden);
+    CHECK(v.hidden && !v.minimized);
+    v.Apply(WindowEvent::Shown);
+    CHECK(!v.hidden);
+    v.Apply(WindowEvent::Minimized);
+    v.Apply(WindowEvent::Hidden);
+    v.Apply(WindowEvent::Restored);
+    v.Apply(WindowEvent::Shown);
+    CHECK(!v.minimized && !v.hidden);
+    for (int bits = 0; bits < 4; ++bits) {
+        CHECK(WindowVisibility::Unpack(std::uint8_t(bits)).Pack() == bits);
+    }
+}
+
+// Alt+Tab without a minimize is FOCUS_LOST / FOCUS_GAINED only: focus is not an input of the gate.
+void TestFocusAloneKeepsPresenting() {
+    LifecycleModel m;
+    m.Frames(305);
+    CHECK(m.presents == 305 && m.recreations == 0);
+    CHECK(m.gate.Current() == Lifecycle::Presentable);
+}
+
+void TestMinimizeRestore() {
+    LifecycleModel m;
+    m.Frames(10);
+    m.Apply(WindowEvent::Minimized);
+    m.surface_zero = true;
+    m.Frames(120);
+    CHECK(m.presents == 10 && m.acquires == 10 && m.acquires_while_unpresentable == 0);
+    CHECK(m.recreations == 0 && m.gate.Current() == Lifecycle::Minimized);
+    m.Apply(WindowEvent::Restored);
+    m.Apply(WindowEvent::Shown);
+    m.surface_zero = false;
+    m.Frames(120);
+    CHECK(m.presents == 130 && m.recreations == 1 && m.resumed == 1 && m.zero_surface_recreations == 0);
+    CHECK(m.gate.Current() == Lifecycle::Presentable);
+}
+
+void TestHiddenShown() {
+    LifecycleModel m;
+    m.Frames(5);
+    m.Apply(WindowEvent::Hidden);
+    m.Frames(50);
+    CHECK(m.presents == 5 && m.gate.Current() == Lifecycle::Hidden);
+    m.Apply(WindowEvent::Shown);
+    m.Frames(50);
+    CHECK(m.presents == 55 && m.recreations == 1);
+}
+
+// SDL keeps the last pixel size while minimized on Windows, so a window size check alone never fires: the Vulkan
+// surface decides, even before the window thread has pumped the minimize.
+void TestSurfaceZeroBeforeMinimizeEvent() {
+    LifecycleModel m;
+    m.Frames(3);
+    m.surface_zero = true;
+    m.Frame(SwapResult::OutOfDate);
+    CHECK(m.recreations == 0 && m.zero_surface_recreations == 0 && m.gate.Current() == Lifecycle::SurfaceSizeZero);
+    m.Frames(100);
+    CHECK(m.presents == 3 && m.recreations == 0);
+    m.surface_zero = false;
+    m.Frames(10);
+    CHECK(m.presents == 13 && m.recreations == 1);
+}
+
+void TestZeroWindowSizeThenValid() {
+    LifecycleModel m;
+    m.Frames(5);
+    m.window_width = 0;
+    m.window_height = 0;
+    m.Frames(30);
+    CHECK(m.presents == 5 && m.recreations == 0 && m.gate.Current() == Lifecycle::WindowSizeZero);
+    m.window_width = 1280;
+    m.window_height = 720;
+    m.Frames(30);
+    CHECK(m.presents == 35 && m.recreations == 1 && m.swapchain_width == 1280);
+}
+
+void TestRestoreEventsBeforeValidSize() {
+    LifecycleModel m;
+    m.Frames(5);
+    m.Apply(WindowEvent::Minimized);
+    m.surface_zero = true;
+    m.Frames(10);
+    for (int i = 0; i < 5; ++i) {
+        m.Apply(WindowEvent::Restored);
+        m.Apply(WindowEvent::Shown);
+        m.Frames(5);
+    }
+    CHECK(m.recreations == 0 && m.zero_surface_recreations == 0 && m.presents == 5);
+    CHECK(m.acquires_while_unpresentable == 0 && m.gate.Current() == Lifecycle::SurfaceSizeZero);
+    m.surface_zero = false;
+    m.Frames(20);
+    CHECK(m.recreations == 1 && m.presents == 25 && m.resumed == 1);
+}
+
+void TestRestoreClusterRecreatesOnce() {
+    LifecycleModel m;
+    m.Frames(5);
+    m.Apply(WindowEvent::Minimized);
+    m.Frames(5);
+    // RESTORED + SHOWN + RESIZED + PIXEL_SIZE_CHANGED between two frames: one recreation, not four.
+    m.Apply(WindowEvent::Restored);
+    m.Apply(WindowEvent::Shown);
+    m.window_width = 1920;
+    m.window_height = 1080;
+    m.Frames(60);
+    CHECK(m.recreations == 1 && m.presents == 65);
+}
+
+void TestMinimizeWithPendingRecreation() {
+    LifecycleModel m;
+    m.Frames(5);
+    m.Frame(SwapResult::Suboptimal, SwapResult::Suboptimal);
+    CHECK(m.recreations == 1);
+    m.Apply(WindowEvent::Minimized);
+    m.surface_zero = true;
+    m.health.RequestRecreation();
+    m.Frames(40);
+    CHECK(m.recreations == 1 && m.acquires_while_unpresentable == 0);
+    m.Apply(WindowEvent::Restored);
+    m.surface_zero = false;
+    m.Frames(40);
+    CHECK(m.recreations == 2 && m.presents == 5 + 1 + 40);
+}
+
+void TestRestoreAfterOutOfDate() {
+    LifecycleModel m;
+    m.Frames(5);
+    m.Frame(SwapResult::Success, SwapResult::OutOfDate);
+    CHECK(m.recreations == 1);
+    m.Apply(WindowEvent::Minimized);
+    m.surface_zero = true;
+    m.Frame(SwapResult::OutOfDate);
+    m.Frames(20);
+    m.Apply(WindowEvent::Restored);
+    m.surface_zero = false;
+    m.Frames(20);
+    CHECK(m.recreations == 2 && m.presents == 5 + 20 && m.zero_surface_recreations == 0);
+}
+
+void TestRestoreWithVsyncChange() {
+    LifecycleModel m;
+    m.Frames(5);
+    m.Apply(WindowEvent::Minimized);
+    m.surface_zero = true;
+    m.vsync_changed = true;
+    m.Frames(10);
+    m.Apply(WindowEvent::Restored);
+    m.surface_zero = false;
+    m.Frames(20);
+    CHECK(m.presents == 25 && m.zero_surface_recreations == 0);
+    CHECK(m.recreations <= 2); // the vsync change and the restore may each ask once, never a storm
+}
+
+// F11 changes the window size; Mailbox, Immediate and FIFO all follow the same lifecycle.
+void TestDisplayModeChangeAndModes() {
+    for (const bool vsync : {true, false}) {
+        for (const bool has_mailbox : {true, false}) {
+            const Mode mode = DcpPresent::ChooseMode(vsync, has_mailbox, true);
+            CHECK(vsync ? mode == Mode::Fifo : mode == (has_mailbox ? Mode::Mailbox : Mode::Immediate));
+            LifecycleModel m;
+            m.Frames(10);
+            m.window_width = 2560;
+            m.window_height = 1440;
+            m.Frames(10);
+            m.Apply(WindowEvent::Minimized);
+            m.surface_zero = true;
+            m.Frames(10);
+            m.Apply(WindowEvent::Restored);
+            m.surface_zero = false;
+            m.Frames(10);
+            CHECK(m.recreations == 2 && m.presents == 30);
+        }
+    }
+}
+
+void TestRepeatedMinimizeRestoreNoStorm() {
+    LifecycleModel m;
+    for (int cycle = 0; cycle < 25; ++cycle) {
+        m.Frames(5);
+        m.Apply(WindowEvent::Minimized);
+        m.surface_zero = true;
+        m.Frames(30);
+        m.Apply(WindowEvent::Restored);
+        m.Apply(WindowEvent::Shown);
+        m.surface_zero = false;
+        m.Frames(5);
+    }
+    CHECK(m.recreations == 25 && m.resumed == 25 && m.acquires_while_unpresentable == 0);
+}
+
+void TestSurfaceArea() {
+    using DcpPresent::SurfaceHasArea;
+    CHECK(SurfaceHasArea(1920, 1080, 16384, 16384));
+    CHECK(!SurfaceHasArea(0, 0, 16384, 16384));
+    CHECK(!SurfaceHasArea(1920, 0, 16384, 16384));
+    CHECK(!SurfaceHasArea(1920, 1080, 0, 0));
+    CHECK(SurfaceHasArea(UINT32_MAX, UINT32_MAX, 4096, 4096));
+    CHECK(!SurfaceHasArea(UINT32_MAX, UINT32_MAX, 0, 0));
+}
+
+void TestSwapchainRefusesZeroSurface() {
+    const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
+    CHECK(InOrder(swapchain, "bool Swapchain::Create(u32 width_, u32 height_) {", "if (!SurfaceHasArea()) {"));
+    CHECK(InOrder(swapchain, "if (!SurfaceHasArea()) {", "        return false;"));
+    CHECK(InOrder(swapchain, "        return false;", "    Destroy();\n"));
+    CHECK(Contains(swapchain, "health.RequestRecreation();\n        PublishHealth();\n        return false;"));
+}
+
+void TestPresentOrdering() {
+    const std::string presenter = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp");
+    const std::size_t at = presenter.find("void Presenter::Present(Frame* frame");
+    CHECK(at != std::string::npos);
+    const std::string body = presenter.substr(at, presenter.find("DcpPresent::WindowVisibility Presenter::GateVisibility") - at);
+    // Suspend, then recreate, then acquire; nothing is acquired while suspended.
+    CHECK(InOrder(body, "if (!CanPresent()) {", "swapchain.UpdateVsync();"));
+    CHECK(InOrder(body, "swapchain.UpdateVsync();", "if (!RecreateSwapchain()) {"));
+    CHECK(InOrder(body, "if (!RecreateSwapchain()) {", "acquired = swapchain.AcquireNextImage();"));
+    CHECK(InOrder(body, "acquired = swapchain.AcquireNextImage();", "presented = swapchain.Present();"));
+    // After the acquire retry, up to the present, one frame never recreates the swapchain: no frame meets a newer
+    // swapchain generation than the one it acquired from.
+    const std::size_t reset = body.find("const auto reset_result");
+    const std::size_t present = body.find("presented = swapchain.Present();");
+    CHECK(reset != std::string::npos && present != std::string::npos && reset < present);
+    CHECK(body.substr(reset, present - reset).find("Recreate") == std::string::npos);
+    CHECK(!Contains(body, "swapchain.Recreate("));
+    CHECK(InOrder(body, "std::scoped_lock submit_lock{Scheduler::submit_mutex};", "presented = swapchain.Present();"));
+    const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
+    CHECK(InOrder(swapchain, "static void WaitDeviceIdle(", "std::scoped_lock lock{Scheduler::submit_mutex};"));
+    CHECK(InOrder(swapchain, "void Swapchain::Destroy() {", "WaitDeviceIdle(instance, \"before destroying the swapchain\");"));
+    CHECK(InOrder(swapchain, "WaitDeviceIdle(instance, \"before destroying the swapchain\");", "device.destroySwapchainKHR(swapchain);"));
+    const std::size_t loading = presenter.find("void Presenter::PresentLoadingFrame() {");
+    CHECK(loading != std::string::npos);
+    CHECK(InOrder(presenter.substr(loading), "if (!swapchain.Recreate(window.GetWidth(), window.GetHeight())) {",
+                  "if (!swapchain.AcquireNextImage()) {"));
+}
+
+void TestPresentResultMapping() {
+    const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
+    const std::size_t at = swapchain.find("DcpPresent::SwapResult Swapchain::PresentResult(vk::Result result) {");
+    CHECK(at != std::string::npos);
+    const std::string body = swapchain.substr(at, swapchain.find("void Swapchain::ReportFatalResult") - at);
+    CHECK(Contains(body, "    case vk::Result::eErrorSurfaceLostKHR:\n    case vk::Result::eErrorOutOfDateKHR:\n        return DcpPresent::SwapResult::OutOfDate;"));
+    CHECK(!Contains(body, "eErrorDeviceLost"));
+    CHECK(InOrder(swapchain, "if (kind == DcpPresent::SwapResult::Failure) {\n        ReportFatalResult(result);",
+                  "ASSERT_MSG(kind != DcpPresent::SwapResult::Failure, \"Swapchain presentation failed"));
+}
+
+void TestDeviceLostReport() {
+    DcpPresent::Progress progress;
+    progress.lifecycle = int(Lifecycle::Restoring);
+    progress.window_size = DcpPresent::Pack({1920, 1080});
+    progress.swapchain_size = DcpPresent::Pack({1920, 1080});
+    progress.swapchain_generation = 3;
+    progress.recreation_pending = false;
+    progress.last_acquire = 0;
+    progress.last_present = 1000001003;
+    const std::string line = DcpPresent::DescribeDeviceLost("submit role=present", progress);
+    CHECK(line == "GPU device lost: submit role=present lifecycle=restoring window=1920x1080 swapchain=1920x1080 "
+                  "generation=3 recreation_pending=no acquire=VK_SUCCESS present=VK_SUBOPTIMAL_KHR");
+    const std::string scheduler = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_scheduler.cpp");
+    CHECK(InOrder(scheduler, "if (submit_result == vk::Result::eErrorDeviceLost) {",
+                  "ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, \"Device lost during submit\");"));
+}
+
+void TestWindowActiveUntouched() {
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    CHECK(Contains(window, "DcpPresent::g_progress.window_active = !visibility.minimized && !visibility.hidden;"));
+    CHECK(Contains(ReadSource("gpu/shim/dcp_startup_watch.cpp"), "progress.window_active.load()"));
+    CHECK(Contains(ReadSource("gpu/shim/sdl_window.h"), "DcpPresent::WindowVisibility Visibility() const {"));
 }
 
 DcpPresent::PresentGeometry GamescopeGeometry() {
@@ -540,6 +916,25 @@ int main() {
     TestStallReporter();
     TestProgressPacking();
     TestTelemetryIsGamescopeOnlyAndShippable();
+    TestWindowVisibilityEvents();
+    TestFocusAloneKeepsPresenting();
+    TestMinimizeRestore();
+    TestHiddenShown();
+    TestSurfaceZeroBeforeMinimizeEvent();
+    TestZeroWindowSizeThenValid();
+    TestRestoreEventsBeforeValidSize();
+    TestRestoreClusterRecreatesOnce();
+    TestMinimizeWithPendingRecreation();
+    TestRestoreAfterOutOfDate();
+    TestRestoreWithVsyncChange();
+    TestDisplayModeChangeAndModes();
+    TestRepeatedMinimizeRestoreNoStorm();
+    TestSurfaceArea();
+    TestSwapchainRefusesZeroSurface();
+    TestPresentOrdering();
+    TestPresentResultMapping();
+    TestDeviceLostReport();
+    TestWindowActiveUntouched();
     if (g_failures) {
         std::printf("%d present test(s) failed\n", g_failures);
         return 1;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -113,6 +114,11 @@ public:
         return recreate;
     }
 
+    /// The swapchain is stale for a reason Vulkan has not reported yet (the window came back from minimized).
+    void RequestRecreation() {
+        RequestRequired();
+    }
+
 private:
     void RequestForSuboptimal() {
         if (!replaced_suboptimal && !recreate) {
@@ -130,6 +136,150 @@ private:
     bool suboptimal_only = false;     ///< only a suboptimal result asked for the pending recreation
     bool replaced_suboptimal = false; ///< this swapchain replaced a suboptimal one and stays even if suboptimal
     bool clean_acquire = false;
+};
+
+/// What the window thread learns from SDL. Focus is not part of it: an unfocused window still has a surface.
+enum class WindowEvent { Minimized, Restored, Hidden, Shown };
+
+struct WindowVisibility {
+    bool minimized = false;
+    bool hidden = false;
+
+    void Apply(WindowEvent event) {
+        switch (event) {
+        case WindowEvent::Minimized:
+            minimized = true;
+            break;
+        case WindowEvent::Restored:
+            minimized = false;
+            break;
+        case WindowEvent::Hidden:
+            hidden = true;
+            break;
+        case WindowEvent::Shown:
+            hidden = false;
+            break;
+        }
+    }
+
+    std::uint8_t Pack() const {
+        return std::uint8_t((minimized ? 1 : 0) | (hidden ? 2 : 0));
+    }
+
+    static WindowVisibility Unpack(std::uint8_t bits) {
+        return {(bits & 1) != 0, (bits & 2) != 0};
+    }
+};
+
+enum class Lifecycle : int { Presentable, Minimized, Hidden, WindowSizeZero, SurfaceSizeZero, Restoring };
+
+inline const char* LifecycleName(int lifecycle) {
+    switch (static_cast<Lifecycle>(lifecycle)) {
+    case Lifecycle::Presentable:
+        return "presentable";
+    case Lifecycle::Minimized:
+        return "minimized";
+    case Lifecycle::Hidden:
+        return "hidden";
+    case Lifecycle::WindowSizeZero:
+        return "window size zero";
+    case Lifecycle::SurfaceSizeZero:
+        return "surface size zero";
+    case Lifecycle::Restoring:
+        return "restoring";
+    }
+    return "unknown";
+}
+
+/// A surface can hold a swapchain only with a non-zero extent. Windows reports 0x0 for a minimized window while SDL
+/// keeps the last pixel size; a surface that follows the swapchain (width UINT32_MAX) is judged by the maximum.
+inline bool SurfaceHasArea(std::uint32_t current_width, std::uint32_t current_height, std::uint32_t max_width,
+                           std::uint32_t max_height) {
+    if (max_width == 0 || max_height == 0) {
+        return false;
+    }
+    return current_width == UINT32_MAX || (current_width > 0 && current_height > 0);
+}
+
+/// Whether the presenter may acquire, record and queue a present. Swap thread only.
+class PresentGate {
+public:
+    struct Inputs {
+        WindowVisibility visibility;
+        std::uint32_t window_width;
+        std::uint32_t window_height;
+        bool surface_zero; ///< only consulted while suspended or a recreation is pending
+    };
+
+    struct Step {
+        bool present;     ///< acquire and present may go on
+        bool recreate;    ///< presentation just became possible again: one recreation before the next acquire
+        bool transition;  ///< the lifecycle changed: log it
+        Lifecycle lifecycle;
+    };
+
+    bool Suspended() const {
+        return suspended;
+    }
+
+    Step Update(const Inputs& in) {
+        const Lifecycle reason = ReasonFor(in);
+        if (reason != Lifecycle::Presentable) {
+            return Suspend(reason);
+        }
+        if (suspended) {
+            suspended = false;
+            restoring = true;
+            current = Lifecycle::Restoring;
+            return {true, true, true, current};
+        }
+        return {true, false, false, current};
+    }
+
+    /// A recreation found no usable surface.
+    Step SurfaceUnavailable() {
+        return Suspend(Lifecycle::SurfaceSizeZero);
+    }
+
+    /// A frame was presented: the restore is over.
+    bool Presented() {
+        if (!restoring) {
+            return false;
+        }
+        restoring = false;
+        current = Lifecycle::Presentable;
+        return true;
+    }
+
+    Lifecycle Current() const {
+        return current;
+    }
+
+private:
+    static Lifecycle ReasonFor(const Inputs& in) {
+        if (in.visibility.minimized) {
+            return Lifecycle::Minimized;
+        }
+        if (in.visibility.hidden) {
+            return Lifecycle::Hidden;
+        }
+        if (in.window_width == 0 || in.window_height == 0) {
+            return Lifecycle::WindowSizeZero;
+        }
+        return in.surface_zero ? Lifecycle::SurfaceSizeZero : Lifecycle::Presentable;
+    }
+
+    Step Suspend(Lifecycle reason) {
+        const bool changed = !suspended || current != reason;
+        suspended = true;
+        restoring = false;
+        current = reason;
+        return {false, false, changed, reason};
+    }
+
+    bool suspended = false;
+    bool restoring = false;
+    Lifecycle current = Lifecycle::Presentable;
 };
 
 struct Size {
@@ -296,9 +446,36 @@ struct Progress {
     std::atomic<std::uint64_t> destination_origin{0};
     std::atomic<std::uint64_t> destination_surface{0}; ///< the image the destination is placed in
     std::atomic<bool> window_active{true};
+    std::atomic<int> lifecycle{static_cast<int>(Lifecycle::Presentable)};
+    std::atomic<std::uint64_t> window_size{0};
+    std::atomic<std::uint32_t> swapchain_generation{0};
+    std::atomic<bool> recreation_pending{false};
 };
 
 inline Progress g_progress;
+
+/// One line for the log before the process stops on VK_ERROR_DEVICE_LOST.
+inline std::string DescribeDeviceLost(const char* where, const Progress& progress) {
+    const Size window = Unpack(progress.window_size.load());
+    const Size swapchain = Unpack(progress.swapchain_size.load());
+    char text[320];
+    std::snprintf(text, sizeof(text),
+                  "GPU device lost: %s lifecycle=%s window=%ux%u swapchain=%ux%u generation=%u "
+                  "recreation_pending=%s acquire=%s present=%s",
+                  where, LifecycleName(progress.lifecycle.load()), window.width, window.height, swapchain.width,
+                  swapchain.height, progress.swapchain_generation.load(),
+                  progress.recreation_pending.load() ? "yes" : "no", ResultName(progress.last_acquire.load()),
+                  ResultName(progress.last_present.load()));
+    return text;
+}
+
+inline void ReportDeviceLost(const char* where) {
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true)) {
+        std::printf("%s\n", DescribeDeviceLost(where, g_progress).c_str());
+        std::fflush(stdout);
+    }
+}
 
 /// Linux session facts that change presentation; values that look like paths are not shown.
 template <typename GetEnv>
