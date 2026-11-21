@@ -181,7 +181,7 @@ void TestSettingsTable() {
     Check(restart == 14 && SettingOf(Id::TextureFiltering).apply == Apply::Restart &&
               SettingOf(Id::Renderer).apply == Apply::Restart && SettingOf(Id::RenderResolution).apply == Apply::Restart &&
               SettingOf(Id::AspectRatio).apply == Apply::Restart && SettingOf(Id::TrueUltrawide).apply == Apply::Restart &&
-              SettingOf(Id::JapaneseNpcVoices).apply == Apply::Restart &&
+              SettingOf(Id::VoiceLanguage).apply == Apply::Restart &&
               SettingOf(Id::FrameRate).apply == Apply::Restart && SettingOf(Id::SkipIntro).apply == Apply::Restart &&
               SettingOf(Id::JapaneseMenuButtons).apply == Apply::Restart &&
               SettingOf(Id::StorySkipOffer).apply == Apply::Restart &&
@@ -189,7 +189,7 @@ void TestSettingsTable() {
               SettingOf(Id::UnlockGallery).apply == Apply::Restart &&
               SettingOf(Id::UnlockLabyrinth).apply == Apply::Restart &&
               SettingOf(Id::UnlockUltimateTower).apply == Apply::Restart,
-          "the renderer, the render shape, texture filtering, the frame rate, Japanese NPC Voices, Skip Intro, the menu "
+          "the renderer, the render shape, texture filtering, the frame rate, Voice Language, Skip Intro, the menu "
           "buttons, the skip offers, Unlock Gallery and the endgame unlocks are the settings read once");
     for (const Id live : {Id::DisplayMode, Id::VSync, Id::Presentation, Id::Upscaling, Id::Sharpening,
                           Id::SharpeningStrength, Id::AntiAliasing, Id::FrameRateInTitle, Id::ResolutionInTitle,
@@ -750,7 +750,8 @@ void TestLauncherParity() {
         "online_stun",
         "online_connection_test_port",
         "show_ping",
-        "show_in_lobby", "early_story_online"};
+        "show_in_lobby", "early_story_online",
+        "dcp_japanese_npc_voices"};
     const auto has = [](const std::vector<std::string>& list, const std::string& key) {
         return std::find(list.begin(), list.end(), key) != list.end();
     };
@@ -871,7 +872,7 @@ void TestRenderShapeRows(const fs::path& folder) {
     DcpSettings::Values& live = DcpSettings::Get();
     Options options(live);
     Check(options.Shown(Id::AspectRatio) == "16:9" && options.Shown(Id::RenderResolution) == "native" &&
-              options.Shown(Id::TrueUltrawide) == "0" && options.Shown(Id::JapaneseNpcVoices) == "0",
+              options.Shown(Id::TrueUltrawide) == "0" && options.Shown(Id::VoiceLanguage) == "default",
           "the new rows start at the launcher's defaults");
 
     const Outcome outcome = options.Choose(Id::AspectRatio, "21:9");
@@ -879,19 +880,21 @@ void TestRenderShapeRows(const fs::path& folder) {
           "an aspect ratio waits for the restart");
     options.Choose(Id::RenderResolution, "1440p");
     options.Choose(Id::TrueUltrawide, "1");
-    options.Choose(Id::JapaneseNpcVoices, "1");
+    options.Choose(Id::VoiceLanguage, "japanese");
     std::string text = ReadAll(file);
     Check(Contains(text, "aspect_ratio = 21:9\n") && Contains(text, "window_width = 2520\n") &&
               Contains(text, "render_resolution = 1440p\n") && Contains(text, "true_ultrawide = 1\n") &&
-              Contains(text, "dcp_japanese_npc_voices = 1\n") && Contains(text, "# keep\n") &&
+              Contains(text, "voice_language = japanese\n") && !Contains(text, "dcp_japanese_npc_voices") &&
+              Contains(text, "# keep\n") &&
               Contains(text, "window_height = 1080\n") && Contains(text, "future_setting = 1\n"),
           "the choices are saved under the launcher's keys with the window width that follows the shape");
     DcpSettings::Values restarted;
     Check(DcpSettings::Read(file.string(), restarted) && restarted.aspect_ratio == "21:9" &&
-              restarted.render_resolution == "1440p" && restarted.true_ultrawide && restarted.japanese_npc_voices &&
+              restarted.render_resolution == "1440p" && restarted.true_ultrawide &&
+              restarted.voice_language == DCP_VOICE_JAPANESE &&
               restarted.requested_width == 2520,
           "a restart reads what the menu saved");
-    Check(live.render_resolution == "native" && !live.true_ultrawide && !live.japanese_npc_voices,
+    Check(live.render_resolution == "native" && !live.true_ultrawide && live.voice_language == -1,
           "the running session keeps its values");
 
     options.Choose(Id::AspectRatio, "16:9");
@@ -900,12 +903,36 @@ void TestRenderShapeRows(const fs::path& folder) {
           "going back to the running shape clears the wait and restores the width");
 
     DcpSettings::Values untouched;
-    for (const Id id : {Id::AspectRatio, Id::RenderResolution, Id::TrueUltrawide, Id::JapaneseNpcVoices}) {
-        ApplyLive(untouched, id, id == Id::AspectRatio ? "21:9" : id == Id::RenderResolution ? "4K" : "1");
+    for (const Id id : {Id::AspectRatio, Id::RenderResolution, Id::TrueUltrawide, Id::VoiceLanguage}) {
+        ApplyLive(untouched, id, id == Id::AspectRatio ? "21:9" : id == Id::RenderResolution ? "4K" : id == Id::VoiceLanguage ? "english" : "1");
     }
     Check(untouched.aspect_ratio == "16:9" && untouched.render_resolution == "native" && !untouched.true_ultrawide &&
-              !untouched.japanese_npc_voices,
+              untouched.voice_language == -1,
           "nothing applies them live");
+
+    // The replaced Japanese NPC Voices: while voice_language is absent, its On shows as Japanese and its Off as Game
+    // Default; a saved voice_language wins over it.
+    const fs::path legacy = folder / "legacy_voices.ini";
+    const std::pair<const char*, const char*> migrations[] = {
+        {"dcp_japanese_npc_voices = 1\n", "japanese"},
+        {"dcp_japanese_npc_voices = on\n", "japanese"},
+        {"dcp_japanese_npc_voices = 0\n", "default"},
+        {"", "default"},
+        {"dcp_japanese_npc_voices = 1\nvoice_language = english\n", "english"},
+        {"voice_language = default\ndcp_japanese_npc_voices = 1\n", "default"},
+        {"voice_language = klingon\ndcp_japanese_npc_voices = 1\n", "japanese"},
+    };
+    for (const auto& [ini, shown] : migrations) {
+        WriteFile(legacy, ini);
+        DcpSettings::Values read;
+        Check(DcpSettings::Read(legacy.string(), read) && Current(read, Id::VoiceLanguage) == shown,
+              "the legacy voice setting resolves as the launcher resolves it");
+    }
+    Check(ChoiceIndex(SettingOf(Id::VoiceLanguage), "default") == 0 && ChoiceIndex(SettingOf(Id::VoiceLanguage), "english") == 1 &&
+              ChoiceIndex(SettingOf(Id::VoiceLanguage), "japanese") == 2 && ChoiceIndex(SettingOf(Id::VoiceLanguage), "1") < 0 &&
+              std::string_view(SettingOf(Id::VoiceLanguage).label) == "Voice Language" &&
+              std::string_view(SettingOf(Id::VoiceLanguage).key) == "voice_language",
+          "Voice Language offers Game Default, English and Japanese under voice_language");
 }
 
 void TestBuildFeatureRows() {
@@ -913,7 +940,7 @@ void TestBuildFeatureRows() {
     DcpSettings::Values none;
     none.features = 0;
     DcpSettings::Values all;
-    const Id gated[] = {Id::AspectRatio,  Id::RenderResolution, Id::TrueUltrawide, Id::JapaneseNpcVoices, Id::UnlockGallery,
+    const Id gated[] = {Id::AspectRatio,  Id::RenderResolution, Id::TrueUltrawide, Id::VoiceLanguage, Id::UnlockGallery,
                         Id::EnableBossBattle};
     for (const Setting& setting : kSettings) {
         const bool is_gated = std::find(std::begin(gated), std::end(gated), setting.id) != std::end(gated);
@@ -924,16 +951,16 @@ void TestBuildFeatureRows() {
     resolution_only.features = DcpSettings::RenderResolution;
     Check(Available(SettingOf(Id::RenderResolution), resolution_only) && Available(SettingOf(Id::AspectRatio), resolution_only) &&
               !Available(SettingOf(Id::TrueUltrawide), resolution_only) &&
-              !Available(SettingOf(Id::JapaneseNpcVoices), resolution_only),
+              !Available(SettingOf(Id::VoiceLanguage), resolution_only),
           "each feature opens its own rows");
 
     const std::string loader = Source("src/loader.c");
     for (const char* feature : {"DCP_GPU_FEATURE_RENDER_RESOLUTION", "DCP_GPU_FEATURE_TRUE_ULTRAWIDE",
-                                "DCP_GPU_FEATURE_JAPANESE_NPC_VOICES", "DCP_GPU_FEATURE_UNLOCK_GALLERY",
+                                "DCP_GPU_FEATURE_VOICE_LANGUAGE", "DCP_GPU_FEATURE_UNLOCK_GALLERY",
                                 "DCP_GPU_FEATURE_BOSS_BATTLE"}) {
         Check(Contains(loader, feature) && Contains(Source("src/dcpgpu.h"), feature), "the loader reports every feature");
     }
-    Check(Contains(loader, "game_build.japanese_npc_voices && (!game_build.features_by_signature || dcp_npc_voice_resources(app0))"),
+    Check(Contains(loader, "dcp_voice_language_resources(app0,DCP_VOICE_ENGLISH) || dcp_voice_language_resources(app0,DCP_VOICE_JAPANESE)"),
           "the voices row follows the launcher's rule for offering them");
     Check(Contains(Source("gpu/shim/dcpgpu.cpp"), "DcpSettings::Get().features = config->features;"),
           "the video core keeps what the loader reported");

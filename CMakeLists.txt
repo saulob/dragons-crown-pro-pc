@@ -422,7 +422,7 @@ if(NOT WIN32)
     target_link_libraries(dcp-build-parity-tests PRIVATE m)
 endif()
 
-# The structural locators for Cheats, Japanese NPC Voices and True Ultrawide: the local boot images against the static
+# The structural locators for Cheats, Voice Language and True Ultrawide: the local boot images against the static
 # tables, synthetic images with every refusal case, and the known-build-only rule (tools/test.ps1); not part of the
 # default build.
 add_executable(dcp-feature-sites-tests EXCLUDE_FROM_ALL tests/feature_sites_tests.cpp src/cheat_hooks.cpp
@@ -589,7 +589,7 @@ target_link_libraries(dcp-comms-wheel-ui-tests PRIVATE dcp_keys)
 target_compile_definitions(dcp-comms-wheel-ui-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-comms-wheel-ui-tests PRIVATE -Wall -Wextra)
 
-# Focused tests of the Japanese NPC voice routing (tools/test.ps1); not part of the default build.
+# Focused tests of Voice Language (issue #69; tools/test.ps1); not part of the default build.
 add_executable(dcp-voice-tests EXCLUDE_FROM_ALL tests/voice_tests.c src/guest_hook.c src/voice_hooks.c)
 target_include_directories(dcp-voice-tests PRIVATE src)
 target_compile_options(dcp-voice-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)

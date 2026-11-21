@@ -657,8 +657,8 @@ std::string ScopeText(const std::string& feature) {
     if (feature == "Cheats") {
         return ProfileScope(&GameBuild::cheats);
     }
-    if (feature == "Japanese NPC voices") {
-        return ProfileScope(&GameBuild::japanese_npc_voices);
+    if (feature == "Voice language") {
+        return ProfileScope(&GameBuild::voice_language);
     }
     for (const FeatureScope& item : kScopes) {
         if (feature == item.feature) {
@@ -859,8 +859,10 @@ size_t DescribeValidators(Lines& out, const scan::MappedImage& image) {
     report = {};
     DcpVoiceSites voices{};
     const bool voices_ok = dcp_locate_voice_sites(&view, &voices, &report) != 0;
-    verdict("Japanese NPC voices", voices_ok, report,
-            ", cue " + Hex(voices.npc_cue) + ", resource acquire " + Hex(voices.resource_acquire));
+    verdict("Voice language", voices_ok, report,
+            ", cue mapper " + Hex(voices.cue_mapper) + " with " + std::to_string(DCP_VOICE_CUE_CALLS) +
+                " callers, resource acquire " + Hex(voices.resource_acquire) + ", narrator " +
+                Hex(voices.narrator_bank_select));
 
     report = {};
     DcpUltrawideSites ultrawide{};

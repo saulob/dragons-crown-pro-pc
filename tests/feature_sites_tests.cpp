@@ -1,4 +1,4 @@
-// The structural locators for Cheats, Japanese NPC Voices and True Ultrawide (src/feature_sites.h), without the game:
+// The structural locators for Cheats, Voice Language and True Ultrawide (src/feature_sites.h), without the game:
 // on the local boot images they must find the sites of the static tables and install to the same bytes; on synthetic
 // images built from the signatures at shifted places, with look-alike decoys, they must find the complete set and refuse
 // every incomplete, ambiguous, altered or truncated one; and nothing resolves for a build that is not a supported
@@ -45,9 +45,14 @@ int g_checks = 0, g_failures = 0;
         }                                                                \
     } while (0)
 
+struct Reloc {
+    uint64_t target, kind, value;
+};
+
 struct Image {
     std::vector<uint8_t> bytes;
     uint64_t entry = 0;
+    std::vector<Reloc> relocs;
 };
 
 uint64_t Read64(std::ifstream& in) {
@@ -70,13 +75,21 @@ bool LoadBootImage(const GameBuild& build, Image& out) {
     const uint64_t modules = Read64(in);
     in.seekg(std::streamoff(modules * 56), std::ios::cur);
     const uint64_t bindings = Read64(in);
-    in.seekg(std::streamoff(bindings * 24 + segments * 24 + names * 128 + relocs * 32), std::ios::cur);
+    in.seekg(std::streamoff(bindings * 24 + segments * 24 + names * 128), std::ios::cur);
+    out.relocs.resize(relocs);
+    for (Reloc& reloc : out.relocs) {
+        reloc.target = Read64(in);
+        reloc.kind = Read64(in);
+        reloc.value = Read64(in);
+        Read64(in);
+    }
     out.bytes.resize(size);
     return size && in.read(reinterpret_cast<char*>(out.bytes.data()), std::streamsize(size)).good();
 }
 
 struct Located {
     DcpFeatureSites sites;
+    DcpVoiceSites voice_sites{};
     DcpLocateReport cheat_report{}, voice_report{}, ultrawide_report{};
     bool cheats = false, voices = false, ultrawide = false;
 };
@@ -86,7 +99,7 @@ Located LocateAll(const std::vector<uint8_t>& bytes) {
     const DcpImageView view{bytes.data(), bytes.size(), &range, 1};
     Located result{};
     result.cheats = dcp_locate_cheat_sites(&view, &result.sites.cheat_sites, &result.cheat_report) != 0;
-    result.voices = dcp_locate_voice_sites(&view, &result.sites.voice_sites, &result.voice_report) != 0;
+    result.voices = dcp_locate_voice_sites(&view, &result.voice_sites, &result.voice_report) != 0;
     result.ultrawide = dcp_locate_ultrawide_sites(&view, &result.sites.ultrawide_sites, &result.ultrawide_report) != 0;
     return result;
 }
@@ -101,7 +114,7 @@ bool SameRecord(const UltrawideRecord& a, const UltrawideRecord& b) {
 }
 
 // Installs with the static tables and with the locator's sites on two copies of a real image placed alike: the patched
-// image bytes must be identical. The cheat and NPC voice hooks install at the located sites on every build's image.
+// image bytes must be identical. The cheat and Voice Language hooks install at the located sites on every build's image.
 void CompareInstalls(const GameBuild& build, const Image& image, const Located& located) {
     const uint64_t size = image.bytes.size();
     const size_t base = (size + 0xfff) / 0x1000 * 0x1000, room = 0x20000;
@@ -121,19 +134,13 @@ void CompareInstalls(const GameBuild& build, const Image& image, const Located& 
                                               located_cheats.data() + base, room) == 1);
     std::vector<uint8_t> located_voices(base + room, 0);
     std::memcpy(located_voices.data(), image.bytes.data(), size);
-    CHECK(voice_hooks_install_located(located_voices.data(), size, image.entry, &located.sites.voice_sites,
-                                      located_voices.data() + base, room) == 1);
+    CHECK(voice_hooks_install(located_voices.data(), size, image.entry, &located.voice_sites, located_voices.data() + base,
+                              room) == 1);
     if (std::string_view(build.label) == "CUSA10454 1.00 USA") {
         std::vector<uint8_t> c(base + room, 0);
         std::memcpy(c.data(), image.bytes.data(), size);
         CHECK(runtime_cheat_hooks_install(c.data(), size, image.entry, c.data() + base, room) == 1);
         CHECK(std::memcmp(c.data(), located_cheats.data(), size) == 0);
-        std::vector<uint8_t> e(base + room, 0), f(base + room, 0);
-        std::memcpy(e.data(), image.bytes.data(), size);
-        std::memcpy(f.data(), image.bytes.data(), size);
-        CHECK(voice_hooks_install(e.data(), size, image.entry, e.data() + base, room) == 1);
-        CHECK(voice_hooks_install_located(f.data(), size, image.entry, &located.sites.voice_sites, f.data() + base, room) == 1);
-        CHECK(std::memcmp(e.data(), f.data(), size) == 0);
     }
 }
 
@@ -190,6 +197,118 @@ void CheckPartyOnRealImage(const GameBuild& build, const Image& image, const Loc
     std::printf("%s: party observer site 0x%x\n", build.label, party.tick);
 }
 
+size_t HexCount(const uint8_t* data, size_t size, std::string_view hex, std::vector<uint64_t>* first = nullptr) {
+    const scan::Range range{0, size};
+    size_t total = 0;
+    const std::vector<uint64_t> hits = scan::FindPattern(data, size, std::span<const scan::Range>(&range, 1), hex, 4, total);
+    if (first) *first = hits;
+    return total;
+}
+
+// Issue #69 on the real executable: every actor, player-class ones included, speaks through a mapper caller whose mode
+// is the actor's own virtual getter; the mapper gives the six player classes and the camp voices their English twins;
+// and the one function that turns a character record into that mode ignores the record: the USA builds answer 1
+// (English) for every character, resurrected ones included, the Japanese and Asian builds read the game's language
+// byte through a table.
+void CheckVoicePathOnRealImage(const GameBuild& build, const Image& image, const Located& located) {
+    const std::vector<uint8_t>& b = image.bytes;
+    const DcpVoiceSites& v = located.voice_sites;
+    for (const uint32_t call : {v.cue_calls[0], v.cue_calls[1]}) {
+        CHECK(call >= 8 && HexCount(b.data() + call - 8, 8, "ff 50 68 44 89 ef 89 c6") == 1);
+    }
+    const size_t window = std::min<size_t>(0x500, b.size() - v.cue_mapper);
+    for (const uint32_t family : kDcpPlayerVoiceFamilies) {
+        const uint32_t minus = uint32_t(-int32_t(family));
+        char hex[64];
+        std::snprintf(hex, sizeof(hex), "8d 87 %02x %02x %02x %02x 83 f8 12", minus & 0xff, (minus >> 8) & 0xff,
+                      (minus >> 16) & 0xff, (minus >> 24) & 0xff);
+        CHECK(HexCount(b.data() + v.cue_mapper, window, hex) == 1);
+    }
+    CHECK(HexCount(b.data() + v.cue_mapper, window, "3d 54 0b 00 00") == 1 &&
+          HexCount(b.data() + v.cue_mapper, window, "81 c7 a0 86 01 00") == 1);
+
+    std::vector<uint64_t> source;
+    CHECK(HexCount(b.data(), b.size(), "48 8b 47 70 48 89 f3 48 8b b8 e8 00 00 00", &source) == 1);
+    if (source.size() != 1 || source.front() + 0x50 > b.size()) return;
+    const bool usa = std::string_view(build.title_id) == "CUSA10454";
+    CHECK(HexCount(b.data() + source.front(), 0x50, usa ? "c7 03 01 00 00 00" : "ff c8 83 f8 0c") == 1);
+    std::printf("%s: voice mapper 0x%x, %d callers, character voice mode %s\n", build.label, v.cue_mapper,
+                DCP_VOICE_CUE_CALLS, usa ? "always English" : "from the language byte");
+}
+
+// The narrator name parser as it was when Voice Language first shipped: it read a table entry as an image offset.
+uint32_t PreFixNarratorName(const uint8_t* bytes, uint64_t size, uint64_t at, std::string_view extension) {
+    constexpr std::string_view kPrefix = "SND/NARRATION_GM";
+    if (at >= size || size - at < kPrefix.size() + 12) return 0;
+    const char* text = reinterpret_cast<const char*>(bytes + at);
+    if (std::string_view(text, kPrefix.size()) != kPrefix) return 0;
+    uint32_t number = 0;
+    size_t i = kPrefix.size();
+    for (; i < kPrefix.size() + 7 && text[i] >= '0' && text[i] <= '9'; ++i) number = number * 10 + uint32_t(text[i] - '0');
+    if (i == kPrefix.size() || text[i] != '.' || std::string_view(text + i + 1, 3) != extension || text[i + 4] != 0) return 0;
+    return number;
+}
+
+// The image as the loader hands it to the locators: placed at `memory` with every relocation applied. Imports point
+// outside the image, as the loader's traps do.
+void LoadLikeTheLoader(const Image& image, std::vector<uint8_t>& memory) {
+    std::memcpy(memory.data(), image.bytes.data(), image.bytes.size());
+    for (const Reloc& reloc : image.relocs) {
+        const uint64_t value = reloc.kind == 0 ? uint64_t(uintptr_t(memory.data())) + reloc.value
+                                               : UINT64_C(0x7ff000000000) + 32 * reloc.value;
+        if (reloc.target + 8 <= image.bytes.size()) std::memcpy(&memory[reloc.target], &value, 8);
+    }
+}
+
+// Issue #69 Q7V2N runtime failure: the loader resolves Voice Language after relocating the image, when the narrator
+// table holds loaded addresses. The locator must find the same sites, the narrator route included, and every route
+// must install for a Japanese request.
+void CheckVoiceOnLoadedImage(const GameBuild& build, const Image& image, const Located& raw) {
+    const uint64_t size = image.bytes.size();
+    const size_t base = (size + 0xfff) / 0x1000 * 0x1000, room = voice_hooks_stub_bytes();
+    std::vector<uint8_t> memory(base + room, 0);
+    LoadLikeTheLoader(image, memory);
+    CHECK(!image.relocs.empty());
+
+    const uint64_t table = raw.voice_sites.narrator_banks;
+    uint64_t acb = 0, awb = 0;
+    std::memcpy(&acb, &memory[table], 8);
+    std::memcpy(&awb, &memory[table + 8], 8);
+    const uint64_t loaded = uint64_t(uintptr_t(memory.data()));
+    CHECK(acb > loaded && acb - loaded < size && awb > loaded && awb - loaded < size);
+    const uint32_t before = PreFixNarratorName(memory.data(), size, acb, "ACB");
+    const uint32_t after = PreFixNarratorName(memory.data(), size, acb - loaded, "ACB");
+    CHECK(before == 0 && after == PreFixNarratorName(memory.data(), size, awb - loaded, "AWB") &&
+          dcp_narrator_base_valid(after));
+    std::printf("%s: loaded narrator entry 0 = %s / %s; read as an image offset: %u, as a loaded address: %u\n",
+                build.label, reinterpret_cast<const char*>(&memory[acb - loaded]),
+                reinterpret_cast<const char*>(&memory[awb - loaded]), unsigned(before), unsigned(after));
+
+    const DcpExecRange range{0, size};
+    const DcpImageView view{memory.data(), size, &range, 1};
+    DcpVoiceSites sites{};
+    DcpLocateReport report{};
+    CHECK(dcp_locate_voice_sites(&view, &sites, &report) == 1);
+    if (sites.narrator_route != DCP_NARRATOR_ROUTE_OK) std::printf("  %s: narrator %s\n", build.label, sites.narrator_failure);
+    const DcpVoiceSites& r = raw.voice_sites;
+    CHECK(sites.narrator_route == DCP_NARRATOR_ROUTE_OK && r.narrator_route == DCP_NARRATOR_ROUTE_OK);
+    CHECK(sites.cue_mapper == r.cue_mapper && std::equal(std::begin(sites.cue_calls), std::end(sites.cue_calls), r.cue_calls) &&
+          sites.resource_acquire == r.resource_acquire && sites.narrator_bank_select == r.narrator_bank_select &&
+          sites.narrator_cue_base == r.narrator_cue_base && sites.narrator_cue_helper == r.narrator_cue_helper &&
+          sites.narrator_banks == r.narrator_banks && sites.narrator_bases == r.narrator_bases);
+    DcpGameBuild profile = ProfileOf(build);
+    char failure[192];
+    DcpVoiceSites resolved{};
+    CHECK(dcp_resolve_voice_language(&profile, &view, &resolved, failure, sizeof(failure)) == 1 &&
+          resolved.narrator_route == DCP_NARRATOR_ROUTE_OK);
+
+    voice_hooks_configure(DCP_VOICE_JAPANESE, DCP_VOICE_ALL_CATEGORIES);
+    CHECK(voice_hooks_install(memory.data(), size, image.entry, &resolved, memory.data() + base, room) == 1);
+    CHECK(voice_hooks_routed() == DCP_VOICE_ALL_CATEGORIES);
+    voice_hooks_log_ready((std::string(build.title_id) + "-" + build.version).c_str(), DCP_VOICE_JAPANESE);
+    voice_hooks_configure(DCP_VOICE_DEFAULT, 0);
+}
+
 void TestRealImages() {
     size_t found = 0;
     for (const GameBuild& build : SupportedBuilds()) {
@@ -223,10 +342,16 @@ void TestRealImages() {
             for (size_t i = 0; i < hooks.size(); ++i) CHECK(located.sites.cheat_sites.hooks[i] == hooks[i].offset);
             const cheats::FunctionOffsets functions = cheats::StaticFunctionOffsets();
             for (size_t i = 0; i < DCP_CHEAT_FUNCTIONS; ++i) CHECK(located.sites.cheat_sites.functions[i] == functions.at[i]);
-            CHECK(located.sites.voice_sites.npc_cue == VOICE_NPC_SITE_OFFSET);
-            CHECK(located.sites.voice_sites.resource_acquire == VOICE_RES_ACQUIRE_SITE_OFFSET);
+            const uint32_t calls[DCP_VOICE_CUE_CALLS] = {0x52e98, 0x52f03, 0x68276, 0x68687, 0x68703, 0x6878c, 0x6908b};
+            CHECK(located.voice_sites.cue_mapper == 0x68bc0 && located.voice_sites.resource_acquire == 0x57cbb0);
+            CHECK(std::equal(std::begin(calls), std::end(calls), std::begin(located.voice_sites.cue_calls)));
+            CHECK(located.voice_sites.narrator_bank_select == 0x5bc14 && located.voice_sites.narrator_cue_base == 0x5c09e &&
+                  located.voice_sites.narrator_cue_helper == 0x5c5ea);
+            CHECK(located.voice_sites.narrator_banks == 0x8c4020 && located.voice_sites.narrator_bases == 0x6ac450);
         }
         CheckPartyOnRealImage(build, image, located);
+        CheckVoicePathOnRealImage(build, image, located);
+        CheckVoiceOnLoadedImage(build, image, located);
         std::string mismatch;
         CHECK(cheats::LayoutMatches(located.sites.cheat_sites.layout, &mismatch));
         std::printf("%s: locators equal the tables (%zu/%zu cheat sites, %zu/%zu ultrawide sites)\n", build.label,
@@ -292,7 +417,7 @@ std::vector<Plan> Plans() {
     std::vector<Plan> plans;
     for (const scan::SiteSpec& spec : scan::Sites()) {
         const std::string_view feature = spec.feature;
-        if (feature == "Cheats" || feature == "True ultrawide" || feature == "Japanese NPC voices") {
+        if (feature == "Cheats" || feature == "True ultrawide") {
             plans.push_back({spec.pattern, spec.expected, spec.feature, spec.name});
         }
     }
@@ -420,17 +545,14 @@ std::set<uint32_t> AllOffsets(const Located& located) {
                           u.map_draw_call, u.facility_draw_call, u.worldmap_draw, u.camera_view_call, u.view_build}) {
         offsets.insert(site);
     }
-    offsets.insert(located.sites.voice_sites.npc_cue);
-    offsets.insert(located.sites.voice_sites.resource_acquire);
     return offsets;
 }
 
 void ExpectAll(const Located& located, const char* what) {
-    if (!located.cheats || !located.voices || !located.ultrawide) {
-        std::printf("  %s: %s | %s | %s\n", what, located.cheat_report.failure, located.voice_report.failure,
-                    located.ultrawide_report.failure);
+    if (!located.cheats || !located.ultrawide) {
+        std::printf("  %s: %s | %s\n", what, located.cheat_report.failure, located.ultrawide_report.failure);
     }
-    CHECK(located.cheats && located.voices && located.ultrawide);
+    CHECK(located.cheats && located.ultrawide);
 }
 
 void TestSyntheticLocators() {
@@ -443,7 +565,6 @@ void TestSyntheticLocators() {
     std::set<uint32_t> real;
     for (const GuestHook& hook : cheats::Hooks()) real.insert(hook.offset);
     for (const UltrawideRecord& record : ultrawide_records) real.insert(record.submit);
-    real.insert(VOICE_NPC_SITE_OFFSET);
     const std::set<uint32_t> found_a = AllOffsets(a), found_b = AllOffsets(b);
     CHECK(found_a != found_b);
     for (uint32_t site : found_a) CHECK(!real.contains(site));
@@ -510,9 +631,9 @@ void TestSyntheticLocators() {
     for (const size_t cut : {size_t(0), size_t(16), size_t(0x1000), first.size() / 4, first.size() / 2, size_t(kConstants + 0x20)}) {
         const std::vector<uint8_t> shorter(first.begin(), first.begin() + std::ptrdiff_t(cut));
         const Located result = LocateAll(shorter);
-        CHECK(!(result.cheats && result.voices && result.ultrawide));
+        CHECK(!(result.cheats && result.ultrawide));
         for (const uint32_t site : AllOffsets(result)) CHECK(site == 0 || site < shorter.size());
-        if (cut == kConstants + 0x20) CHECK(result.cheats && result.voices && !result.ultrawide); // the constants are cut
+        if (cut == kConstants + 0x20) CHECK(result.cheats && !result.ultrawide); // the constants are cut
     }
     {
         const DcpExecRange range{0, 0};
@@ -538,7 +659,7 @@ void TestSyntheticLocators() {
             const Located result = LocateAll(wrong);
             if (result.ultrawide) std::printf("  %s was not refused when it calls elsewhere\n", relation.from);
             CHECK(!result.ultrawide && std::string_view(result.ultrawide_report.failure).find("relation") != std::string_view::npos);
-            CHECK(result.cheats && result.voices);
+            CHECK(result.cheats);
         }
     }
     for (size_t i = 0; i < DCP_ORTHO_LOADS; ++i) {
@@ -853,8 +974,8 @@ const std::vector<MappedSite> kEuropeSites = {
     {"Startup save", "step tail", {0x4ddbb0}},
     {"Startup save", "block owner", {0x81a20}},
     {"Startup save", "accept", {0x8bb50}},
-    {"Japanese NPC voices", "NPC cue site", {0x68bc9}},
-    {"Japanese NPC voices", "resource acquire", {0x57cbc0}},
+    {"Voice language", "cue mapper", {0x68bc0}},
+    {"Voice language", "resource acquire", {0x57cbc0}},
     {"Cheats", "hook: damage", {0xd8713}},
     {"Cheats", "hook: use mana", {0xd6d80}},
     {"Cheats", "hook: mana drain", {0x345390}},
@@ -970,11 +1091,11 @@ void TestEuropeanSites() {
     const DcpGameBuild profile = ProfileOf(*europe);
 
     DcpFeatureSites located{};
-    CHECK(dcp_resolve_features(&profile, &view, 1, 1, 1, &located) == 1);
-    if (!located.cheats || !located.voices || !located.ultrawide) {
-        std::printf("  CUSA10487: %s | %s | %s\n", located.cheat_failure, located.voice_failure, located.ultrawide_failure);
+    CHECK(dcp_resolve_features(&profile, &view, 1, 1, &located) == 1);
+    if (!located.cheats || !located.ultrawide) {
+        std::printf("  CUSA10487: %s | %s\n", located.cheat_failure, located.ultrawide_failure);
     }
-    CHECK(located.cheats && located.voices && located.ultrawide);
+    CHECK(located.cheats && located.ultrawide);
 
     size_t hook = 0, function = 0;
     for (const scan::SiteSpec& spec : scan::Sites()) {
@@ -989,8 +1110,6 @@ void TestEuropeanSites() {
     CHECK(hook == DCP_CHEAT_HOOKS && function == DCP_CHEAT_FUNCTIONS);
     std::string mismatch;
     CHECK(cheats::LayoutMatches(located.cheat_sites.layout, &mismatch));
-
-    CHECK(located.voice_sites.npc_cue == 0x68bc9 && located.voice_sites.resource_acquire == 0x57cbc0);
 
     const auto ultrawide = [](const char* name, size_t index = 0) { return EuropeSite("True ultrawide", name, index); };
     const DcpUltrawideSites& u = located.ultrawide_sites;
@@ -1020,6 +1139,12 @@ void TestEuropeanSites() {
 
     DcpPartySites party{};
     CHECK(dcp_resolve_party(&profile, &view, &party, failure, sizeof(failure)) == 1 && party.tick == 0x2ea430);
+
+    // The reporter's scan covers the cue mapper and the acquire, not the mapper's callers or the narrator sites: Voice
+    // Language on this build rests on the synthetic locator test until its executable is read.
+    DcpVoiceSites voice{};
+    CHECK(dcp_resolve_voice_language(&profile, &view, &voice, failure, sizeof(failure)) == 0 &&
+          std::string_view(failure).find("cue mapper callers") != std::string_view::npos);
 
     scan::MappedImage image;
     image.bytes = bytes;
@@ -1065,47 +1190,44 @@ void TestKnownBuildsOnly() {
     DcpFeatureSites out;
 
     // An executable that holds every signature is still nothing to the loader without a supported locator profile.
-    CHECK(dcp_resolve_features(nullptr, &view, 1, 1, 1, &out) == 0 && !out.cheats && !out.voices && !out.ultrawide);
+    CHECK(dcp_resolve_features(nullptr, &view, 1, 1, &out) == 0 && !out.cheats && !out.ultrawide);
     CHECK(std::string_view(out.cheat_failure).find("not a supported build") != std::string_view::npos);
     const DcpFeatureSites untouched = out;
-    CHECK(dcp_resolve_features(nullptr, nullptr, 1, 1, 1, &out) == 0);
+    CHECK(dcp_resolve_features(nullptr, nullptr, 1, 1, &out) == 0);
     (void)untouched;
 
     for (const GameBuild& build : SupportedBuilds()) {
         const DcpGameBuild game = ProfileOf(build);
-        const int resolved = dcp_resolve_features(&game, &view, 1, 1, 1, &out);
+        const int resolved = dcp_resolve_features(&game, &view, 1, 1, &out);
         if (build.features_by_signature) {
             CHECK(resolved == 1);
-            CHECK(out.cheats == (build.cheats ? 1 : 0) && out.voices == (build.japanese_npc_voices ? 1 : 0) &&
-                  out.ultrawide == (build.true_ultrawide ? 1 : 0));
+            CHECK(out.cheats == (build.cheats ? 1 : 0) && out.ultrawide == (build.true_ultrawide ? 1 : 0));
         } else {
-            CHECK(resolved == 0 && !out.cheats && !out.voices && !out.ultrawide);
+            CHECK(resolved == 0 && !out.cheats && !out.ultrawide);
         }
         // A feature the profile does not offer, or the caller did not ask for, is not resolved either.
-        CHECK(dcp_resolve_features(&game, &view, 0, 0, 0, &out) == 0);
+        CHECK(dcp_resolve_features(&game, &view, 0, 0, &out) == 0);
         DcpGameBuild only_ultrawide = game;
         only_ultrawide.features_by_signature = 1;
         only_ultrawide.cheats = 0;
-        only_ultrawide.japanese_npc_voices = 0;
-        dcp_resolve_features(&only_ultrawide, &view, 1, 1, 1, &out);
-        CHECK(!out.cheats && !out.voices && out.ultrawide == (build.true_ultrawide ? 1 : 0));
+        dcp_resolve_features(&only_ultrawide, &view, 1, 1, &out);
+        CHECK(!out.cheats && out.ultrawide == (build.true_ultrawide ? 1 : 0));
     }
 
     // Every build but CUSA10454 1.00, whose tables are the reference, uses the locators, with cheats and True Ultrawide;
-    // the Japanese builds have no NPC voice toggle because they already speak Japanese.
+    // Voice Language is located on every build, the Japanese ones included.
     for (const GameBuild& build : SupportedBuilds()) {
         const bool reference = std::string_view(build.label) == "CUSA10454 1.00 USA";
         CHECK(build.features_by_signature == !reference);
-        CHECK(build.cheats && build.true_ultrawide);
-        CHECK(build.japanese_npc_voices == !NativeJapaneseNpcVoices(&build));
+        CHECK(build.cheats && build.true_ultrawide && build.voice_language);
     }
 
-    // Without the files the voices need, a profile asking for them resolves nothing for them.
     const std::string loader = [] {
         std::ifstream in(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c", std::ios::binary);
         return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }();
     CHECK(loader.find("dcp_resolve_features(known_build ? &game_build : NULL,") != std::string::npos);
+    CHECK(loader.find("dcp_resolve_voice_language(&game_build,") != std::string::npos);
     CHECK(loader.find("dcp_locate_") == std::string::npos);
     const std::string voices = [] {
         std::ifstream in(fs::path(DCP_SOURCE_DIR) / "src" / "voice_hooks.c", std::ios::binary);
@@ -1113,6 +1235,284 @@ void TestKnownBuildsOnly() {
     }();
     CHECK(voices.find("runtime_set_language") == std::string::npos && voices.find("text_language") == std::string::npos &&
           voices.find("settings_file") == std::string::npos);
+}
+
+
+// Voice Language on a synthetic executable laid out unlike any build: the seven mapper callers, the narrator tables and
+// the five signatures planted where no build has them. CUSA10209 1.02 and CUSA10487 1.03 have no local image; this is
+// what their locator is checked against.
+struct VoiceMap {
+    std::vector<uint8_t> bytes;
+    uint64_t calls[DCP_VOICE_CUE_CALLS];
+};
+
+constexpr uint64_t kVoiceMapper = 0x10000, kVoiceAcquire = 0x30000, kVoiceBank = 0x31000, kVoiceBase = 0x32000,
+                   kVoiceHelper = 0x33000, kVoiceTable = 0x60000, kVoiceBases = 0x61000, kVoiceNames = 0x62000,
+                   kVoiceSize = 0x70000;
+
+const char* VoicePattern(const char* name) {
+    for (const scan::SiteSpec& spec : scan::Sites()) {
+        if (std::string_view(spec.feature) == "Voice language" && std::string_view(spec.name) == name) return spec.pattern;
+    }
+    return "";
+}
+
+void PutRip(std::vector<uint8_t>& bytes, uint64_t displacement, uint64_t end, uint64_t target) {
+    const int32_t value = int32_t(int64_t(target) - int64_t(end));
+    std::memcpy(&bytes[displacement], &value, 4);
+}
+
+void PutBranch(std::vector<uint8_t>& bytes, uint64_t at, uint8_t opcode, uint64_t target) {
+    bytes[at] = opcode;
+    PutRip(bytes, at + 1, at + 5, target);
+}
+
+VoiceMap BuildVoiceMap(const uint32_t numbers[DCP_NARRATOR_BANKS]) {
+    VoiceMap map;
+    map.bytes.assign(kVoiceSize, 0);
+    Plant(map.bytes, VoicePattern("cue mapper"), kVoiceMapper - 1);
+    for (int i = 0; i < DCP_VOICE_CUE_CALLS; ++i) {
+        map.calls[i] = 0x20000 + 0x180 * uint64_t(i);
+        PutBranch(map.bytes, map.calls[i], i == DCP_VOICE_CUE_TAIL_JUMP ? 0xe9 : 0xe8, kVoiceMapper);
+    }
+    Plant(map.bytes, VoicePattern("resource acquire"), kVoiceAcquire);
+    Plant(map.bytes, VoicePattern("narrator bank select"), kVoiceBank - 11);
+    PutRip(map.bytes, kVoiceBank - 4, kVoiceBank, kVoiceTable);
+    Plant(map.bytes, VoicePattern("narrator cue base"), kVoiceBase - 30);
+    PutRip(map.bytes, kVoiceBase - 27, kVoiceBase - 23, kVoiceBases);
+    Plant(map.bytes, VoicePattern("narrator cue helper"), kVoiceHelper - 26);
+    PutRip(map.bytes, kVoiceHelper - 13, kVoiceHelper - 9, kVoiceBases);
+    for (int i = 0; i < DCP_NARRATOR_BANKS; ++i) {
+        const uint64_t acb = kVoiceNames + 64 * uint64_t(i), awb = acb + 32;
+        std::snprintf(reinterpret_cast<char*>(&map.bytes[acb]), 32, "SND/NARRATION_GM%u.ACB", unsigned(numbers[i]));
+        std::snprintf(reinterpret_cast<char*>(&map.bytes[awb]), 32, "SND/NARRATION_GM%u.AWB", unsigned(numbers[i]));
+        std::memcpy(&map.bytes[kVoiceTable + 16 * uint64_t(i)], &acb, 8);
+        std::memcpy(&map.bytes[kVoiceTable + 16 * uint64_t(i) + 8], &awb, 8);
+        if (i < 8) std::memcpy(&map.bytes[kVoiceBases + 4 * uint64_t(i)], &numbers[i], 4);
+    }
+    return map;
+}
+
+bool LocateVoices(const std::vector<uint8_t>& bytes, DcpVoiceSites& out, DcpLocateReport& report) {
+    const DcpExecRange range{0, kVoiceTable};
+    const DcpImageView view{bytes.data(), bytes.size(), &range, 1};
+    out = {};
+    report = {};
+    return dcp_locate_voice_sites(&view, &out, &report) != 0;
+}
+
+void TestVoiceLocatorSynthetic() {
+    static const uint32_t us[DCP_NARRATOR_BANKS] = {120000, 20000, 130000, 140000, 150000, 160000, 170000,
+                                                   180000, 30000,  40000,  50000,  60000,  70000,  80000};
+    static const uint32_t japan[DCP_NARRATOR_BANKS] = {20000, 120000, 30000, 40000, 50000, 60000, 70000,
+                                                      80000, 130000, 140000, 150000, 160000, 170000, 180000};
+    for (const uint32_t* numbers : {us, japan}) {
+        const VoiceMap map = BuildVoiceMap(numbers);
+        DcpVoiceSites sites;
+        DcpLocateReport report;
+        CHECK(LocateVoices(map.bytes, sites, report));
+        CHECK(sites.cue_mapper == kVoiceMapper && sites.resource_acquire == kVoiceAcquire &&
+              sites.narrator_bank_select == kVoiceBank && sites.narrator_cue_base == kVoiceBase &&
+              sites.narrator_cue_helper == kVoiceHelper && sites.narrator_banks == kVoiceTable &&
+              sites.narrator_bases == kVoiceBases);
+        for (int i = 0; i < DCP_VOICE_CUE_CALLS; ++i) CHECK(sites.cue_calls[i] == map.calls[i]);
+
+        std::vector<uint8_t> memory(map.bytes);
+        const size_t room = voice_hooks_stub_bytes();
+        memory.resize(kVoiceSize + room);
+        CHECK(voice_hooks_install(memory.data(), kVoiceSize, 0x1000, &sites, memory.data() + kVoiceSize, room) == 1);
+        for (const uint64_t call : map.calls) CHECK(memory[call] == 0xe9);
+
+        // Every supported profile resolves through the same gate; none without a profile or with the feature off.
+        const DcpExecRange range{0, kVoiceTable};
+        const DcpImageView view{map.bytes.data(), map.bytes.size(), &range, 1};
+        char failure[192];
+        for (const GameBuild& build : SupportedBuilds()) {
+            DcpGameBuild profile = ProfileOf(build);
+            DcpVoiceSites resolved{};
+            CHECK(dcp_resolve_voice_language(&profile, &view, &resolved, failure, sizeof(failure)) == 1 &&
+                  resolved.cue_mapper == kVoiceMapper);
+            profile.voice_language = 0;
+            CHECK(dcp_resolve_voice_language(&profile, &view, &resolved, failure, sizeof(failure)) == 0 &&
+                  std::string_view(failure).find("not a supported game build") != std::string_view::npos);
+        }
+        DcpVoiceSites none{};
+        CHECK(dcp_resolve_voice_language(nullptr, &view, &none, failure, sizeof(failure)) == 0);
+    }
+
+    const auto refused = [](std::vector<uint8_t> bytes, std::string_view why) {
+        DcpVoiceSites sites;
+        DcpLocateReport report;
+        const bool located = LocateVoices(bytes, sites, report);
+        if (located || std::string_view(report.failure).find(why) == std::string_view::npos) {
+            std::printf("  voice locator: expected \"%.*s\", got \"%s\"\n", int(why.size()), why.data(), report.failure);
+        }
+        return !located && std::string_view(report.failure).find(why) != std::string_view::npos;
+    };
+    const VoiceMap good = BuildVoiceMap(us);
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        bytes[good.calls[3]] = 0x90;
+        CHECK(refused(bytes, "cue mapper callers"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        PutBranch(bytes, 0x28000, 0xe8, kVoiceMapper);
+        CHECK(refused(bytes, "cue mapper callers"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        bytes[good.calls[DCP_VOICE_CUE_TAIL_JUMP]] = 0xe8;
+        bytes[good.calls[2]] = 0xe9;
+        CHECK(refused(bytes, "not the verified calls and tail jump"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        Plant(bytes, VoicePattern("cue mapper"), 0x40000);
+        CHECK(refused(bytes, "cue mapper"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        Plant(bytes, VoicePattern("resource acquire"), 0x48000);
+        CHECK(refused(bytes, "resource acquire"));
+    }
+
+    // A narrator that does not validate turns off the narrator route only: the mapper callers and the bank pin are
+    // still located, and the hooks install without the narrator's.
+    const auto narrator_off = [&](const std::vector<uint8_t>& bytes, DcpNarratorRoute route, std::string_view why) {
+        DcpVoiceSites sites;
+        DcpLocateReport report;
+        const bool located = LocateVoices(bytes, sites, report);
+        const bool ok = located && sites.narrator_route == route &&
+                        std::string_view(sites.narrator_failure).find(why) != std::string_view::npos &&
+                        sites.cue_mapper == kVoiceMapper && sites.resource_acquire == kVoiceAcquire &&
+                        std::equal(std::begin(sites.cue_calls), std::end(sites.cue_calls), std::begin(good.calls)) &&
+                        !sites.narrator_bank_select && !sites.narrator_cue_base && !sites.narrator_cue_helper &&
+                        !sites.narrator_banks && !sites.narrator_bases;
+        if (!ok) {
+            std::printf("  voice locator: expected narrator %s \"%.*s\", got %d %s \"%s\" \"%s\"\n",
+                        dcp_narrator_route_reason(route), int(why.size()), why.data(), sites.narrator_route,
+                        located ? "located" : "refused", sites.narrator_failure, report.failure);
+            return false;
+        }
+        std::vector<uint8_t> memory(bytes);
+        const size_t room = voice_hooks_stub_bytes();
+        memory.resize(kVoiceSize + room);
+        voice_hooks_configure(DCP_VOICE_JAPANESE, DCP_VOICE_ALL_CATEGORIES);
+        const bool installed = voice_hooks_install(memory.data(), kVoiceSize, 0x1000, &sites, memory.data() + kVoiceSize, room) == 1;
+        const unsigned routed = voice_hooks_routed();
+        voice_hooks_configure(DCP_VOICE_DEFAULT, 0);
+        bool cue_hooks = true;
+        for (const uint64_t call : good.calls) cue_hooks = cue_hooks && memory[call] == 0xe9;
+        return installed && cue_hooks && memory[kVoiceAcquire] == 0xe9 &&
+               std::memcmp(&memory[kVoiceBank], &bytes[kVoiceBank], 9) == 0 &&
+               std::memcmp(&memory[kVoiceBase], &bytes[kVoiceBase], 8) == 0 &&
+               std::memcmp(&memory[kVoiceHelper], &bytes[kVoiceHelper], 7) == 0 &&
+               routed == (DCP_VOICE_ALL_CATEGORIES & ~DCP_VOICE_CATEGORY_BIT(DCP_VOICE_NARRATOR));
+    };
+    const auto with_numbers = [&](int index, uint32_t number) {
+        uint32_t numbers[DCP_NARRATOR_BANKS];
+        std::memcpy(numbers, us, sizeof(numbers));
+        numbers[index] = number;
+        return BuildVoiceMap(numbers).bytes;
+    };
+    const auto put_pointer = [](std::vector<uint8_t>& bytes, int index, int awb, uint64_t value) {
+        std::memcpy(&bytes[kVoiceTable + 16 * uint64_t(index) + 8 * uint64_t(awb)], &value, 8);
+    };
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        PutRip(bytes, kVoiceHelper - 13, kVoiceHelper - 9, kVoiceBases + 4);
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_TABLES, "read different tables"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        PutRip(bytes, kVoiceBank - 4, kVoiceBank, kVoiceSize - 16);
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_TABLES, "narrator tables"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        bytes[kVoiceBase - 30 + 31] ^= 0xff;
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_SITES, "narrator cue base"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        Plant(bytes, VoicePattern("narrator cue helper"), 0x48000);
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_SITES, "narrator cue helper: 2 matches"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        bytes[kVoiceNames + 64 * 4 + 2] = 'X'; /* the fifth narrator's ACB is not a narrator name */
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        bytes[kVoiceNames + 64 * 4 + 32 + 17] = '9'; /* the fifth narrator's AWB names another bank */
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        std::memcpy(&bytes[kVoiceNames + 64 * 6 + 32 + 23], "AWX", 3); /* an ACB paired with a non-AWB file */
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        put_pointer(bytes, 3, 1, 0); /* no AWB */
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+        bytes = good.bytes;
+        put_pointer(bytes, 3, 0, kVoiceSize + 0x100); /* an entry outside the image */
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+        bytes = good.bytes;
+        put_pointer(bytes, 3, 0, kVoiceNames + 64 * 4 + 32); /* an ACB entry pointing to another narrator's AWB */
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    }
+    CHECK(narrator_off(with_numbers(13, 90000), DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    CHECK(narrator_off(with_numbers(13, 15000), DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    CHECK(narrator_off(with_numbers(13, 1080000), DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    CHECK(narrator_off(with_numbers(13, 70000), DCP_NARRATOR_ROUTE_TWINS, "a narrator without its other language"));
+    CHECK(narrator_off(with_numbers(7, 120000), DCP_NARRATOR_ROUTE_TWINS, "a narrator listed twice"));
+    {
+        std::vector<uint8_t> bytes = good.bytes; /* 180000 -> 190000 in both names: 80000 loses its English twin */
+        bytes[kVoiceNames + 64 * 7 + 17] = '9';
+        bytes[kVoiceNames + 64 * 7 + 32 + 17] = '9';
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    }
+    {
+        std::vector<uint8_t> bytes = good.bytes;
+        const uint32_t other = 50000;
+        std::memcpy(&bytes[kVoiceBases + 4 * 2], &other, 4);
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_BASES, "differ from the bank table"));
+    }
+    {
+        // The Japanese builds' order with the USA builds' cue bases: same 14 names, different table order.
+        uint32_t bases[8];
+        std::memcpy(bases, us, sizeof(bases));
+        std::vector<uint8_t> bytes = BuildVoiceMap(japan).bytes;
+        std::memcpy(&bytes[kVoiceBases], bases, sizeof(bases));
+        CHECK(narrator_off(bytes, DCP_NARRATOR_ROUTE_BASES, "differ from the bank table"));
+    }
+
+    // The table as the loader leaves it: every entry relocated to its loaded address. Before Q7V2N's fix this refused
+    // the whole feature ("not a narrator ACB/AWB name pair") and turned every route off.
+    for (const uint32_t* numbers : {us, japan}) {
+        const VoiceMap map = BuildVoiceMap(numbers);
+        std::vector<uint8_t> memory(map.bytes);
+        const uint64_t loaded = uint64_t(uintptr_t(memory.data()));
+        for (int i = 0; i < 2 * DCP_NARRATOR_BANKS; ++i) {
+            uint64_t entry = 0;
+            std::memcpy(&entry, &memory[kVoiceTable + 8 * uint64_t(i)], 8);
+            entry += loaded;
+            std::memcpy(&memory[kVoiceTable + 8 * uint64_t(i)], &entry, 8);
+        }
+        uint64_t first = 0;
+        std::memcpy(&first, &memory[kVoiceTable], 8);
+        CHECK(PreFixNarratorName(memory.data(), kVoiceSize, first, "ACB") == 0);
+        DcpVoiceSites sites;
+        DcpLocateReport report;
+        CHECK(LocateVoices(memory, sites, report) && sites.narrator_route == DCP_NARRATOR_ROUTE_OK &&
+              sites.narrator_banks == kVoiceTable && sites.narrator_bases == kVoiceBases);
+        put_pointer(memory, 2, 1, loaded + kVoiceSize + 0x100); /* a loaded address past the image */
+        CHECK(narrator_off(memory, DCP_NARRATOR_ROUTE_NAMES, "not a narrator ACB/AWB name pair"));
+    }
 }
 
 
@@ -1613,6 +2013,7 @@ int main() {
     TestEuropeanSites();
     TestSkillUseMirrorSite();
     TestKnownBuildsOnly();
+    TestVoiceLocatorSynthetic();
     TestEarlyStory();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

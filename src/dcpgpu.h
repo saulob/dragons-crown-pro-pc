@@ -17,7 +17,7 @@ typedef struct {
 } DcpGpuConfig;
 #define DCP_GPU_FEATURE_RENDER_RESOLUTION (1u << 0)
 #define DCP_GPU_FEATURE_TRUE_ULTRAWIDE (1u << 1)
-#define DCP_GPU_FEATURE_JAPANESE_NPC_VOICES (1u << 2)
+#define DCP_GPU_FEATURE_VOICE_LANGUAGE (1u << 2)
 #define DCP_GPU_FEATURE_UNLOCK_GALLERY (1u << 3)
 #define DCP_GPU_FEATURE_BOSS_BATTLE (1u << 4)
 /* 1 when a video core is linked in, 0 for the stub. */

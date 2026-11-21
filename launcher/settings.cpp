@@ -14,6 +14,7 @@
 #include "dcp_keys.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "dcp_voice.h"
 #include "game_files.h"
 #include "game_process.h"
 #include "net/online_version.h"
@@ -50,7 +51,8 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kDetailedLoggingKey, "1"},
     {kControllerPromptsKey, "playstation"},
     {kArachnophobiaSafeModeKey, "0"},
-    {kJapaneseNpcVoicesKey, "0"},
+    {kVoiceLanguageKey, "default"},
+    {kLegacyJapaneseNpcVoicesKey, "0"},
     {kAllowOverlayProgramsKey, "0"},
     {kSkipIntroKey, "0"},
     {kJapaneseMenuButtonsKey, "0"},
@@ -167,6 +169,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (key == kControllerPromptsKey) {
         return one_of({"playstation", "xbox"});
     }
+    if (key == kVoiceLanguageKey) {
+        return dcp_voice_language_parse(std::string(value).c_str()) >= 0;
+    }
     if (key == cheats::kDamageTakenKey) {
         return std::any_of(std::begin(cheats::kDamageTakenChoices), std::end(cheats::kDamageTakenChoices),
                            [&](const cheats::Choice& choice) { return value == choice.saved; });
@@ -263,7 +268,8 @@ bool LauncherSettings::SaveNow(const Values& values) {
 
 void LauncherSettings::ResetToDefaults() {
     for (const ManagedSetting& setting : ManagedSettings()) {
-        if (!IsLauncherPlacementSetting(setting.key) && !IsOnlineSetting(setting.key)) {
+        if (!IsLauncherPlacementSetting(setting.key) && !IsOnlineSetting(setting.key) &&
+            setting.key != kLegacyJapaneseNpcVoicesKey) {
             pending_[std::string(setting.key)] = std::string(setting.default_value);
         }
     }
@@ -393,13 +399,25 @@ extern "C" int dcp_saved_movement_speed(const char* settings_file) {
     return cheats::MovementSpeedFromLegacy(settings.Get(cheats::kLegacyMovementSpeedKey));
 }
 
-extern "C" int dcp_japanese_npc_voices(const char* settings_file) {
+namespace dcp {
+
+std::string VoiceLanguageSetting(const LauncherSettings& settings) {
+    const int saved = settings.Has(kVoiceLanguageKey)
+                          ? dcp_voice_language_parse(settings.Get(kVoiceLanguageKey, "").c_str())
+                          : -1;
+    const int legacy = settings.Has(kLegacyJapaneseNpcVoicesKey) && settings.GetBool(kLegacyJapaneseNpcVoicesKey, false);
+    return dcp_voice_language_key(dcp_voice_language_resolve(saved, legacy));
+}
+
+} // namespace dcp
+
+extern "C" int dcp_voice_language(const char* settings_file) {
     using namespace dcp;
     if (!settings_file || !*settings_file) {
-        return 0;
+        return DCP_VOICE_DEFAULT;
     }
     const LauncherSettings settings(PathFromUtf8(settings_file));
-    return settings.GetBool(kJapaneseNpcVoicesKey, false) ? 1 : 0;
+    return dcp_voice_language_parse(VoiceLanguageSetting(settings).c_str());
 }
 
 extern "C" int dcp_true_ultrawide(const char* settings_file) {
@@ -524,9 +542,10 @@ std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* b
              settings.Get(kAspectRatioKey, kDefaultAspectRatio) + ", True Ultrawide requested " + OnOff(ultrawide));
     }
 
-    const bool voices_supported = SupportsJapaneseNpcVoices(build);
-    line(std::string("Menu & Subtitles ") + std::string(language.name) + ", Japanese NPC Voices " +
-         (voices_supported ? OnOff(settings.GetBool(kJapaneseNpcVoicesKey, false)) : "unsupported") +
+    const bool voices_supported = SupportsVoiceLanguage(build);
+    line(std::string("Menu & Subtitles ") + std::string(language.name) + ", Voice Language " +
+         (voices_supported ? dcp_voice_language_name(dcp_voice_language_parse(VoiceLanguageSetting(settings).c_str()))
+                           : "unsupported") +
          ", Arachnophobia Safe Mode " + OnOff(settings.GetBool(kArachnophobiaSafeModeKey, false)));
 
     const bool story = run ? (run->skip_offers & 1u) != 0 : settings.GetBool(kStorySkipOfferKey, false);

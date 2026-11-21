@@ -809,7 +809,7 @@ int main(int argc, char **argv) {
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file), dcp_saved_damage_taken(settings_file),
                          dcp_saved_damage_multiplier(settings_file));
-    voice_hooks_set_enabled(dcp_japanese_npc_voices(settings_file));
+    const int voice_language=dcp_voice_language(settings_file);
     printf("Overlay compatibility: %s game process\n",game_child ? "separate" : "original");
     runtime_cheats_log_state(known_build && game_build.cheats);
     if (content_profile) {
@@ -1001,8 +1001,9 @@ int main(int argc, char **argv) {
         if (known_build) {
             if (game_build.resolution_site_count || game_build.resolution_by_signature) features|=DCP_GPU_FEATURE_RENDER_RESOLUTION;
             if (game_build.true_ultrawide) features|=DCP_GPU_FEATURE_TRUE_ULTRAWIDE;
-            if (game_build.japanese_npc_voices && (!game_build.features_by_signature || dcp_npc_voice_resources(app0)))
-                features|=DCP_GPU_FEATURE_JAPANESE_NPC_VOICES;
+            if (game_build.voice_language &&
+                (dcp_voice_language_resources(app0,DCP_VOICE_ENGLISH) || dcp_voice_language_resources(app0,DCP_VOICE_JAPANESE)))
+                features|=DCP_GPU_FEATURE_VOICE_LANGUAGE;
             if (game_build.unlock_gallery) features|=DCP_GPU_FEATURE_UNLOCK_GALLERY;
             if (boss_battle_build_listed(build_key)) features|=DCP_GPU_FEATURE_BOSS_BATTLE;
         }
@@ -1065,14 +1066,18 @@ int main(int argc, char **argv) {
     DcpEarlyStorySites early_story_sites;
     int early_story_located=0;
     char early_story_failure[192]="";
+    DcpVoiceSites voice_sites;
+    int voice_located=0;
+    char voice_failure[192]="";
     {
         DcpExecRange ranges[64];
         size_t range_count=0;
         for (uint64_t i=0;i<ns && range_count<64;++i)
             if (segments[i].flags&1) { ranges[range_count].begin=segments[i].address; ranges[range_count].end=segments[i].address+segments[i].size; ++range_count; }
         const DcpImageView view={image,size,ranges,range_count};
-        dcp_resolve_features(known_build ? &game_build : NULL,&view,runtime_cheats_hooks_wanted(1),
-                             voice_hooks_enabled() && dcp_npc_voice_resources(app0),ultrawide_wanted,&located);
+        dcp_resolve_features(known_build ? &game_build : NULL,&view,runtime_cheats_hooks_wanted(1),ultrawide_wanted,&located);
+        if (known_build && voice_language!=DCP_VOICE_DEFAULT)
+            voice_located=dcp_resolve_voice_language(&game_build,&view,&voice_sites,voice_failure,sizeof(voice_failure));
         if (known_build && runtime_online_active()) {
             party_located=dcp_resolve_party(&game_build,&view,&party_sites,party_failure,sizeof(party_failure));
         }
@@ -1151,16 +1156,16 @@ int main(int argc, char **argv) {
         else printf("Cheats: unavailable, %s\n",located.cheat_failure);
     }
     if (known_build) startup_save_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes,hook_bytes-cheat_stub_bytes);
-    if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled() &&
-        (!game_build.features_by_signature || dcp_npc_voice_resources(app0))) {
-        uint8_t *voice_stubs=image+round_page(size)+cheat_stub_bytes+save_stub_bytes;
-        const int enemy_banks=dcp_enemy_voice_resources(app0);
-        voice_hooks_set_enemy_banks(enemy_banks);
-        printf("Japanese NPC Voices: enemy and AI ally banks %s\n",enemy_banks ? "found, those voices follow" : "not in this archive, NPCs only");
-        if (!game_build.features_by_signature) voice_hooks_install(image,size,entry,voice_stubs,voice_stub_bytes);
-        else if (located.voices) voice_hooks_install_located(image,size,entry,&located.voice_sites,voice_stubs,voice_stub_bytes);
-        else printf("Japanese NPC Voices: unavailable, %s\n",located.voice_failure);
+    if (known_build && game_build.voice_language && voice_language!=DCP_VOICE_DEFAULT) {
+        const unsigned voice_banks=dcp_voice_language_resources(app0,voice_language);
+        voice_hooks_configure(voice_language,voice_banks);
+        if (!voice_banks) printf("Voice Language: no %s voice banks in this game's DRACRO.CPK, the game's own voices play\n",
+                                 dcp_voice_language_key(voice_language));
+        else if (!voice_located) printf("Voice Language: unavailable, %s\n",voice_failure);
+        else voice_hooks_install(image,size,entry,&voice_sites,image+round_page(size)+cheat_stub_bytes+save_stub_bytes,
+                                 voice_stub_bytes);
     }
+    voice_hooks_log_ready(known_build ? build_key : NULL,voice_language);
     if (known_build && runtime_online_active())
         system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
                                  system_type_stub_bytes,runtime_online_system_type);

@@ -4,6 +4,7 @@
 #include "dcp_graphics.h"
 #include "dcp_keys.h"
 #include "dcp_renderer.h"
+#include "dcp_voice.h"
 
 #include <algorithm>
 #include <climits>
@@ -83,8 +84,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.aspect_ratio = DcpGraphics::ParseAspectRatio(value).key;
     } else if (key == "true_ultrawide") {
         v.true_ultrawide = ParseBool(value, v.true_ultrawide);
+    } else if (key == "voice_language") {
+        v.voice_language = dcp_voice_language_parse(value.c_str());
     } else if (key == "dcp_japanese_npc_voices") {
-        v.japanese_npc_voices = ParseBool(value, v.japanese_npc_voices);
+        v.legacy_japanese_npc_voices = ParseBool(value, false) ? 1 : 0;
     } else if (key == "anisotropy") {
         v.anisotropy = DcpGraphics::ParseAnisotropy(ParseInt(value, 0));
     } else if (key == "window_width") {

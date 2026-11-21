@@ -154,8 +154,9 @@ int dcp_saved_damage_multiplier(const char *settings_file);
  * old 2x setting is off. The old boolean setting is read only when the newer setting is absent. */
 int dcp_saved_movement_speed(const char *settings_file);
 
-/* 1 when the settings file routes the NPC voice cues to the Japanese banks (dcp_japanese_npc_voices; 0 by default). */
-int dcp_japanese_npc_voices(const char *settings_file);
+/* The Voice Language the settings file asks for (DcpVoiceLanguage, dcp_voice.h): voice_language when valid, otherwise
+ * Japanese for a true legacy dcp_japanese_npc_voices, otherwise Game Default. */
+int dcp_voice_language(const char *settings_file);
 
 /* 1 when the settings file asks for True Ultrawide (true_ultrawide; 0 by default, and for a missing or unknown value). */
 int dcp_true_ultrawide(const char *settings_file);
@@ -231,12 +232,12 @@ int dcp_build_boot_image(const char *app0, const char *out, char *error, size_t 
 typedef struct {
     const char *label;
     int cheats;                  /* the native cheat hooks are validated for this build */
-    int japanese_npc_voices;     /* the NPC voice routing hook is validated for this build */
+    int voice_language;          /* the Voice Language sites are located and verified for this build */
     int true_ultrawide;          /* dcp_pass_ortho_sites are verified for this build */
     const DcpResolutionSite *resolution_sites;
     size_t resolution_site_count;
     int resolution_by_signature; /* the render size sites are found by signature in the loaded image */
-    int features_by_signature;   /* the cheat, NPC voice and True Ultrawide sites are found by signature, not by table */
+    int features_by_signature;   /* the cheat and True Ultrawide sites are found by signature, not by table */
     int exit_game;               /* the title menu's Exit Game row is installed from signature-located sites */
     int unlock_gallery;          /* the Gallery list builder is validated for this build */
     const char *title_id;
@@ -249,8 +250,13 @@ int dcp_game_build(const char *image_dir, DcpGameBuild *build);
 /* The only way the loader reaches the structural locators (feature_sites.h): resolves the wanted features for a supported
  * build whose profile sets features_by_signature. For any other build, or none, nothing resolves, whatever the image
  * holds, and every failure says so. Returns 1 when something was asked for and resolved. */
-int dcp_resolve_features(const DcpGameBuild *build, const DcpImageView *image, int cheats, int voices, int ultrawide,
+int dcp_resolve_features(const DcpGameBuild *build, const DcpImageView *image, int cheats, int ultrawide,
                          DcpFeatureSites *out);
+
+/* The same gate for Voice Language: every supported build with voice_language set, tables or not. `failure` says why
+ * nothing resolved. Returns 1 when resolved. */
+int dcp_resolve_voice_language(const DcpGameBuild *build, const DcpImageView *image, DcpVoiceSites *out, char *failure,
+                               size_t failure_size);
 
 /* The same gate for the online party snapshot, which every supported build uses, tables or not: the player-tick site and
  * the four displacements it observes. `failure` says why nothing resolved. Returns 1 when resolved. */
@@ -267,10 +273,9 @@ int dcp_resolve_exit_game(const DcpGameBuild *build, const DcpImageView *image, 
 int dcp_resolve_early_story(const DcpGameBuild *build, const DcpImageView *image, DcpEarlyStorySites *out, char *failure,
                             size_t failure_size);
 
-/* 1 when the game folder holds the files Japanese NPC Voices needs (npc_voice_resources.h). */
-int dcp_npc_voice_resources(const char *app0);
-/* 1 when DRACRO.CPK of the game folder holds every Japanese enemy and AI ally voice bank. */
-int dcp_enemy_voice_resources(const char *app0);
+/* The voice categories (DCP_VOICE_CATEGORY_BIT) whose banks in `language` the game folder holds
+ * (voice_language_resources.h). */
+unsigned dcp_voice_language_resources(const char *app0, int language);
 
 typedef enum {
     DCP_LAUNCHER_PLAY = 0,

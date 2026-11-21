@@ -47,7 +47,7 @@
 #include "game_patches.h"
 #include "game_profile.h"
 #include "lzcnt_compat.h"
-#include "npc_voice_resources.h"
+#include "voice_language_resources.h"
 #include "net/online_version.h"
 #include "runtime_cheats.h"
 #include "menu_buttons.h"
@@ -159,7 +159,7 @@ bool IsUs100(const GameBuild& build) {
 
 // What the profile and the runtime tables provide, feature by feature.
 struct Capabilities {
-    bool cheats = false, xbox_prompts = false, npc_voices = false, true_ultrawide = false, custom_resolution = false;
+    bool cheats = false, xbox_prompts = false, voice_language = false, true_ultrawide = false, custom_resolution = false;
     Mapping resolution = Mapping::kNone, skip_offers = Mapping::kNone, skip_intro = Mapping::kNone, menu_buttons = Mapping::kNone, unlock_gallery = Mapping::kNone, system_type = Mapping::kNone,
             lzcnt = Mapping::kNone, startup_save = Mapping::kNone, endgame = Mapping::kNone, boss_battle = Mapping::kNone;
     std::string languages, translations;
@@ -169,7 +169,7 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     Capabilities caps;
     caps.cheats = build.cheats;
     caps.xbox_prompts = build.xbox_prompts;
-    caps.npc_voices = SupportsJapaneseNpcVoices(&build);
+    caps.voice_language = SupportsVoiceLanguage(&build);
     caps.true_ultrawide = TrueUltrawideAvailable(&build);
     caps.custom_resolution = !RestrictedToNativeResolution(&build);
     caps.resolution = !build.resolution_sites.empty() ? Mapping::kTable
@@ -192,8 +192,7 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     return caps;
 }
 
-// The PC-port features CUSA10454 1.00 defines. GLOBAL: every supported build must offer it. Japanese NPC Voices is
-// REGION-SPECIFIC: a toggle where the game speaks English to NPCs, NOT APPLICABLE where it already speaks Japanese.
+// The PC-port features CUSA10454 1.00 defines. GLOBAL: every supported build must offer it, Voice Language included.
 enum Feature : size_t {
     kCheats,
     kOnlinePlay,
@@ -211,7 +210,7 @@ enum Feature : size_t {
     kGraphics,
     kSaveLoad,
     kXboxPrompts,
-    kJapaneseNpcVoices,
+    kVoiceLanguage,
     kExitGame,
     kUnlockGallery,
     kBrazilianPortuguese,
@@ -227,14 +226,13 @@ enum Feature : size_t {
 const char* const kFeatureNames[kFeatureCount] = {
     "Cheats",     "Online Play", "True Ultrawide", "Render resolution",       "Aspect Ratio",
     "Story Skip", "Tutorial Skip", "Skip Intro", "Japanese Menu Buttons", "LZCNT compatibility", "Arachnophobia Safe Mode", "Controller",
-    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Japanese NPC Voices", "Exit Game", "Unlock Gallery",
+    "Keyboard",   "Graphics",    "Save/load",      "Xbox prompts",            "Voice Language", "Exit Game", "Unlock Gallery",
     "Brazilian Portuguese", "English available", "English ready", "Port English supported", "Russian", "Boss Battle",
     "Unlock Labyrinth + Ultimate/Tower"};
 
 // One row per supported build: only what may differ by region. Every other feature is GLOBAL and has no column.
 struct Contract {
     const char* label;
-    bool native_japanese_voices; // Japanese NPC Voices NOT APPLICABLE: the build already speaks Japanese
     Mapping startup_save;        // the startup save step, on the builds that list its exact sites
     const char* languages;       // the regional base's languages; an update keeps all of them
 };
@@ -244,14 +242,14 @@ const char* const kWestern = "english french german italian spanish";
 const char* const kAsia = "traditional_chinese korean";
 
 const Contract kContracts[] = {
-    {"CUSA10454 1.00 USA", false, N, kWestern},
-    {"CUSA10454 1.01 USA", false, N, kWestern},
-    {"CUSA07001 1.00 Japan", true, T, "japanese"},
-    {"CUSA07001 1.02 Japan", true, T, "japanese"},
-    {"CUSA07001 1.03 Japan", true, T, "japanese"},
-    {"CUSA10209 1.00 Asia/Hong Kong", false, N, kAsia},
-    {"CUSA10209 1.02 Asia/Hong Kong", false, N, kAsia},
-    {"CUSA10487 1.03 Europe", false, T, kWestern},
+    {"CUSA10454 1.00 USA", N, kWestern},
+    {"CUSA10454 1.01 USA", N, kWestern},
+    {"CUSA07001 1.00 Japan", T, "japanese"},
+    {"CUSA07001 1.02 Japan", T, "japanese"},
+    {"CUSA07001 1.03 Japan", T, "japanese"},
+    {"CUSA10209 1.00 Asia/Hong Kong", N, kAsia},
+    {"CUSA10209 1.02 Asia/Hong Kong", N, kAsia},
+    {"CUSA10487 1.03 Europe", T, kWestern},
 };
 
 // Each update's chain: the base it must match, then the siblings that must match each other.
@@ -294,7 +292,7 @@ DcpGameBuild LoaderView(const GameBuild& build) {
     DcpGameBuild game{};
     game.label = build.label;
     game.cheats = build.cheats;
-    game.japanese_npc_voices = build.japanese_npc_voices;
+    game.voice_language = build.voice_language;
     game.true_ultrawide = build.true_ultrawide;
     game.resolution_sites = build.resolution_sites.data();
     game.resolution_site_count = build.resolution_sites.size();
@@ -321,7 +319,7 @@ bool LoaderBuild(const GameBuild& build, DcpGameBuild& game) {
 }
 
 bool SameView(const DcpGameBuild& a, const DcpGameBuild& b) {
-    return std::string_view(a.label) == b.label && a.cheats == b.cheats && a.japanese_npc_voices == b.japanese_npc_voices &&
+    return std::string_view(a.label) == b.label && a.cheats == b.cheats && a.voice_language == b.voice_language &&
            a.true_ultrawide == b.true_ultrawide && a.resolution_sites == b.resolution_sites &&
            a.resolution_site_count == b.resolution_site_count && a.resolution_by_signature == b.resolution_by_signature &&
            a.features_by_signature == b.features_by_signature && a.exit_game == b.exit_game &&
@@ -343,8 +341,8 @@ bool LauncherOffers(const GameBuild& build, Feature feature) {
         return !RestrictedToNativeResolution(&build);
     case kXboxPrompts:
         return build.xbox_prompts;
-    case kJapaneseNpcVoices:
-        return SupportsJapaneseNpcVoices(&build);
+    case kVoiceLanguage:
+        return SupportsVoiceLanguage(&build);
     case kUnlockGallery:
         return UnlockGalleryAvailable(&build);
     case kBossBattle:
@@ -462,8 +460,8 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
         return known && CapabilitiesOf(build).startup_save == row.startup_save;
     case kXboxPrompts:
         return build.xbox_prompts;
-    case kJapaneseNpcVoices:
-        return known && game.japanese_npc_voices && (IsUs100(build) || game.features_by_signature);
+    case kVoiceLanguage:
+        return known && game.voice_language;
     case kExitGame:
         return known && game.exit_game;
     case kUnlockGallery:
@@ -491,15 +489,14 @@ bool BlockedHere(const GameBuild& build, Feature feature) {
     return feature == kBossBattle && !build.boss_battle;
 }
 
-// A GLOBAL feature passes only when the launcher offers it and the runtime implements it; Japanese NPC Voices passes as
-// NOT APPLICABLE only on a build the contract says already speaks Japanese, which then offers no toggle.
+// A GLOBAL feature passes only when the launcher offers it and the runtime implements it; Port English passes as NOT
+// APPLICABLE only on a build with an English slot of its own.
 bool FeaturePasses(const GameBuild& build, const DcpGameBuild& game, const Contract& row, Feature feature,
                    std::string* why) {
     const bool offered = LauncherOffers(build, feature);
     const bool implemented = RuntimeImplements(build, game, row, feature);
-    const bool native = (feature == kJapaneseNpcVoices && row.native_japanese_voices) ||
-                        (feature == kEnglishPort && NativeEnglish(row));
-    const bool native_ok = feature == kEnglishPort ? NativeEnglishSlot(build) : NativeJapaneseNpcVoices(&build);
+    const bool native = feature == kEnglishPort && NativeEnglish(row);
+    const bool native_ok = NativeEnglishSlot(build);
     if (BlockedHere(build, feature)) {
         if ((offered || implemented) && why) *why = "BLOCKED without its executable, yet offered or implemented";
         return !offered && !implemented;
@@ -534,7 +531,6 @@ void TestContract() {
         CHECK(caps.languages == row->languages);
         CHECK(caps.translations ==
               (NativeEnglish(*row) ? "brazilian_portuguese russian" : "english brazilian_portuguese russian"));
-        CHECK(NativeJapaneseNpcVoices(&build) == row->native_japanese_voices);
         g_scope = "contract";
     }
     for (const Contract& row : kContracts) {
@@ -633,8 +629,7 @@ void TestGlobalFeatures() {
             CHECK(pass);
             if (pass) {
                 ++g_tally[f].passed;
-                g_tally[f].native += (f == kJapaneseNpcVoices && row->native_japanese_voices) ||
-                                     (f == kEnglishPort && NativeEnglish(*row));
+                g_tally[f].native += f == kEnglishPort && NativeEnglish(*row);
             } else {
                 std::printf("  %s: %s %s\n", build.label, kFeatureNames[f], why.c_str());
                 g_tally[f].failures += std::string(g_tally[f].failures.empty() ? "" : ", ") + build.label;
@@ -696,8 +691,8 @@ void TestDisabledFeatureCannotPass() {
         copy.features_by_signature = false;
         CHECK(IsUs100(build) || refuses(copy, kCheats));
         copy = build;
-        copy.japanese_npc_voices = !build.japanese_npc_voices;
-        CHECK(refuses(copy, kJapaneseNpcVoices));
+        copy.voice_language = !build.voice_language;
+        CHECK(refuses(copy, kVoiceLanguage));
         copy = build;
         copy.exit_game = false;
         CHECK(refuses(copy, kExitGame));
@@ -769,7 +764,7 @@ void TestUpdateParity() {
         };
         lost("cheats", b.cheats, u.cheats);
         lost("xbox prompts", b.xbox_prompts, u.xbox_prompts);
-        lost("japanese npc voices", b.npc_voices, u.npc_voices);
+        lost("voice language", b.voice_language, u.voice_language);
         lost("true ultrawide", b.true_ultrawide, u.true_ultrawide);
         lost("render resolution and aspect ratio", b.custom_resolution, u.custom_resolution);
         lost("skip offers", b.skip_offers != Mapping::kNone, u.skip_offers != Mapping::kNone);
@@ -785,7 +780,7 @@ void TestUpdateParity() {
         CHECK(u.languages == b.languages);
         CHECK(u.translations == b.translations);
         CHECK(update->features_by_signature && base->features_by_signature == !IsUs100(*base));
-        CHECK(update->cheats == base->cheats && update->japanese_npc_voices == base->japanese_npc_voices &&
+        CHECK(update->cheats == base->cheats && update->voice_language == base->voice_language &&
               update->true_ultrawide == base->true_ultrawide);
     }
     g_scope = "contract";
@@ -808,12 +803,13 @@ void TestGateConsistency() {
         const Capabilities caps = CapabilitiesOf(build);
         const GuestImageId* image = ImageOf(build);
         CHECK(caps.custom_resolution == (caps.resolution != Mapping::kNone));
-        // US 1.00 has the static cheat and voice tables; every other build finds its sites by signature.
+        // US 1.00 has the static cheat tables; every other build finds its sites by signature. Voice Language is
+        // located on every build.
         CHECK(build.features_by_signature == !IsUs100(build));
         CHECK(caps.true_ultrawide == (Listed(ultrawide_records, build) || build.features_by_signature));
         CHECK(!Listed(ultrawide_records, build) || caps.true_ultrawide);
         CHECK(caps.cheats && (IsUs100(build) || build.features_by_signature));
-        CHECK(caps.npc_voices == !NativeJapaneseNpcVoices(&build));
+        CHECK(caps.voice_language);
         const std::string_view title = build.title_id;
         CHECK(caps.startup_save == (title == "CUSA07001" || title == "CUSA10487" ? Mapping::kTable : Mapping::kNone));
         CHECK(caps.xbox_prompts);
@@ -845,7 +841,7 @@ void TestGateConsistency() {
     // the contract does not know.
     const std::string launcher = ReadText("launcher/launcher.cpp");
     const char* const allowed[] = {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
-                                   "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
+                                   "VoiceLanguagesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
                                    "UnlockGalleryAvailable(build_)",       "BossBattleAvailable(build_)",
                                    "xbox_available_",                      "XboxPromptsAvailable",
                                    "build_->xbox_prompts",                 "InstalledTextLanguages(paths_.app0, build_)",
@@ -880,7 +876,7 @@ void TestGateConsistency() {
     }
     CHECK(unknown == 0);
     for (const char* required : {"RestrictedToNativeResolution(build_)", "TrueUltrawideAvailable(build_)",
-                                 "JapaneseNpcVoicesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
+                                 "VoiceLanguagesOffered(paths_.app0, build_)", "CheatsAvailable(build_)",
                                  "UnlockGalleryAvailable(build_)", "BossBattleAvailable(build_)", "xbox_available_"}) {
         CHECK(seen[required] > 0);
     }
@@ -1012,7 +1008,7 @@ void TestEuropeBuild() {
     CHECK(europe == &SupportedBuilds().back() && BaseBuildOf(*europe) == nullptr);
     CHECK(Key(*europe) == "CUSA10487-1.03" && std::string_view(europe->folder) == "CUSA10487-1.03");
     const Capabilities caps = CapabilitiesOf(*europe);
-    CHECK(caps.cheats && caps.xbox_prompts && caps.npc_voices && caps.true_ultrawide && caps.custom_resolution);
+    CHECK(caps.cheats && caps.xbox_prompts && caps.voice_language && caps.true_ultrawide && caps.custom_resolution);
     CHECK(caps.resolution == Mapping::kSignature && caps.skip_offers == Mapping::kSignature &&
           caps.skip_intro == Mapping::kSignature && caps.menu_buttons == Mapping::kSignature &&
           caps.unlock_gallery == Mapping::kSignature && caps.system_type == Mapping::kSignature &&
@@ -1031,7 +1027,7 @@ void TestEuropeBuild() {
     std::vector<uint8_t> memory(0x20000, 0x90), stubs(1 << 16);
     CHECK(lzcnt_compat_install(memory.data(), image->size, image->entry, stubs.data(), stubs.size(), nullptr) ==
           LZCNT_COMPAT_UNKNOWN_IMAGE);
-    CHECK(!voice_hooks_install(memory.data(), image->size, image->entry, stubs.data(), stubs.size()));
+    CHECK(!voice_hooks_install(memory.data(), image->size, image->entry, nullptr, stubs.data(), stubs.size()));
     char detail[200];
     CHECK(!ultrawide_hooks_install(memory.data(), image->size, image->entry, stubs.data(), stubs.size(), 1.3125, detail,
                                    sizeof(detail)));
@@ -1126,7 +1122,7 @@ void TestUnknownBuilds() {
               menu_buttons_install(image.data(), size, "CUSA00000-1.00", 0) == 0 && image == untouched);
     }
     CHECK(!startup_save_hook_install(image.data(), size, entry, stubs.data(), stubs.size()));
-    CHECK(!voice_hooks_install(image.data(), size, entry, stubs.data(), stubs.size()));
+    CHECK(!voice_hooks_install(image.data(), size, entry, nullptr, stubs.data(), stubs.size()));
     char detail[200];
     CHECK(!ultrawide_hooks_install(image.data(), size, entry, stubs.data(), stubs.size(), 1.3125, detail, sizeof(detail)));
     CHECK(lzcnt_compat_install(image.data(), size, entry, stubs.data(), stubs.size(), nullptr) == LZCNT_COMPAT_UNKNOWN_IMAGE);
@@ -1178,7 +1174,8 @@ void TestUnknownBuilds() {
                              "menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons);",
                              "exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied);",
                              "if (known_build) startup_save_hook_install(",
-                             "if (known_build && game_build.japanese_npc_voices && voice_hooks_enabled() &&",
+                             "if (known_build && game_build.voice_language && voice_language!=DCP_VOICE_DEFAULT) {",
+                             "voice_located=dcp_resolve_voice_language(&game_build,&view,&voice_sites,",
                              "dcp_resolve_features(known_build ? &game_build : NULL,",
                              "runtime_cheats_hooks_wanted(known_build && game_build.cheats)",
                              "known_build && game_build.true_ultrawide",
@@ -1204,7 +1201,7 @@ void TestLauncherAgreesWithLoader() {
         DcpGameBuild game{};
         CHECK(dcp_game_build(dir.string().c_str(), &game) == 1);
         CHECK(std::string_view(game.label) == build.label);
-        CHECK(game.cheats == build.cheats && game.japanese_npc_voices == build.japanese_npc_voices);
+        CHECK(game.cheats == build.cheats && game.voice_language == build.voice_language);
         CHECK(game.true_ultrawide == build.true_ultrawide && game.resolution_by_signature == build.resolution_by_signature);
         CHECK(game.resolution_site_count == build.resolution_sites.size());
         CHECK(!RestrictedToNativeResolution(&build) == (game.resolution_site_count > 0 || game.resolution_by_signature));
@@ -1216,6 +1213,7 @@ void TestLauncherAgreesWithLoader() {
 struct BootImage {
     std::vector<uint8_t> bytes;
     uint64_t entry = 0;
+    std::vector<std::pair<uint64_t, uint64_t>> relative; // target, image offset: the loader stores the loaded address
 };
 
 uint64_t Read64(std::ifstream& in) {
@@ -1248,7 +1246,13 @@ bool LoadBootImage(const GameBuild& build, BootImage& out) {
     const uint64_t modules = Read64(in);
     in.seekg(std::streamoff(modules * 56), std::ios::cur);
     const uint64_t bindings = Read64(in);
-    in.seekg(std::streamoff(bindings * 24 + segments * 24 + names * 128 + relocs * 32), std::ios::cur);
+    in.seekg(std::streamoff(bindings * 24 + segments * 24 + names * 128), std::ios::cur);
+    out.relative.clear();
+    for (uint64_t i = 0; i < relocs; ++i) {
+        const uint64_t target = Read64(in), kind = Read64(in), value = Read64(in);
+        Read64(in);
+        if (kind == 0) out.relative.push_back({target, value});
+    }
     out.bytes.resize(size);
     return size && in.read(reinterpret_cast<char*>(out.bytes.data()), std::streamsize(size)).good();
 }
@@ -1296,6 +1300,27 @@ void AddChangedRanges(const uint8_t* before, const uint8_t* after, uint64_t size
 
 // Every range the loader may write in this build's image when every feature is on; `located` holds the sites the
 // loader's locators found when the build's profile asks for them.
+// The Voice Language sites the loader resolves for the build's own image, which it relocates first. Every route, the
+// narrator's included, must resolve on a build with a real image.
+bool VoiceSitesOf(const GameBuild& build, const BootImage& image, DcpVoiceSites& sites) {
+    DcpGameBuild game{};
+    if (!LoaderBuild(build, game)) return false;
+    std::vector<uint8_t> loaded(image.bytes);
+    for (const auto& [target, value] : image.relative) {
+        const uint64_t address = uint64_t(uintptr_t(loaded.data())) + value;
+        if (target + 8 <= loaded.size()) std::memcpy(&loaded[target], &address, 8);
+    }
+    const DcpExecRange executable{0, loaded.size()};
+    const DcpImageView view{loaded.data(), loaded.size(), &executable, 1};
+    char failure[192];
+    sites = {};
+    const bool found = dcp_resolve_voice_language(&game, &view, &sites, failure, sizeof(failure)) == 1;
+    if (!found) std::printf("  %s: Voice Language: %s\n", build.label, failure);
+    else if (sites.narrator_route != DCP_NARRATOR_ROUTE_OK)
+        std::printf("  %s: Voice Language narrator: %s\n", build.label, sites.narrator_failure);
+    return found && sites.narrator_route == DCP_NARRATOR_ROUTE_OK && !image.relative.empty();
+}
+
 std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& image, const DcpFeatureSites& located) {
     std::vector<Patched> out;
     const auto add = [&](uint64_t at, uint64_t length, std::string what) { out.push_back({at, at + length, std::move(what)}); };
@@ -1378,6 +1403,14 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
             for (const uint32_t part : exit_game.transition_parts) add(part, 1, "exit game transition part");
         }
     }
+    DcpVoiceSites voice{};
+    if (build.voice_language && VoiceSitesOf(build, image, voice)) {
+        for (const uint32_t call : voice.cue_calls) add(call, 5, "voice language cue call");
+        add(voice.resource_acquire, VOICE_RES_ACQUIRE_SITE_LENGTH, "voice language bank pin");
+        add(voice.narrator_bank_select, VOICE_NARRATOR_BANK_SITE_LENGTH, "voice language narrator bank");
+        add(voice.narrator_cue_base, VOICE_NARRATOR_BASE_SITE_LENGTH, "voice language narrator cue");
+        add(voice.narrator_cue_helper, VOICE_NARRATOR_HELPER_SITE_LENGTH, "voice language narrator preview cue");
+    }
     const auto add_ultrawide = [&](const UltrawideRecord& record, const uint32_t* loads) {
         GuestHook hooks[ULTRAWIDE_HOOK_COUNT];
         ultrawide_record_hooks(&record, hooks);
@@ -1387,10 +1420,6 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     if (build.features_by_signature) {
         if (located.ultrawide) {
             add_ultrawide(ultrawide_record_from_sites(&located.ultrawide_sites, size, image.entry), located.ultrawide_sites.ortho_loads);
-        }
-        if (build.japanese_npc_voices && located.voices) {
-            add(located.voice_sites.npc_cue, VOICE_NPC_SITE_LENGTH, "npc voice cue");
-            add(located.voice_sites.resource_acquire, VOICE_RES_ACQUIRE_SITE_LENGTH, "npc voice acquire");
         }
         if (build.cheats && located.cheats) {
             for (const GuestHook& hook : cheats::HooksAt(located.cheat_sites.hooks, image.bytes.data(), size)) {
@@ -1404,10 +1433,6 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
         uint32_t loads[DCP_ORTHO_LOADS];
         for (size_t i = 0; i < DCP_ORTHO_LOADS; ++i) loads[i] = uint32_t(dcp_pass_ortho_sites[i].offset);
         add_ultrawide(record, loads);
-    }
-    if (build.japanese_npc_voices) {
-        add(VOICE_NPC_SITE_OFFSET, VOICE_NPC_SITE_LENGTH, "npc voice cue");
-        add(VOICE_RES_ACQUIRE_SITE_OFFSET, VOICE_RES_ACQUIRE_SITE_LENGTH, "npc voice acquire");
     }
     if (build.cheats) {
         for (const GuestHook& hook : cheats::Hooks()) add(hook.offset, hook.length, std::string("cheat ") + hook.name);
@@ -1507,13 +1532,9 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
 
     CHECK((startup_save_hook_install(image_bytes, size, entry, save_area, startup_save_hook_stub_bytes()) != 0) ==
           (caps.startup_save != Mapping::kNone));
-    if (build.features_by_signature) {
-        CHECK(located.voices == caps.npc_voices);
-        CHECK(!caps.npc_voices || voice_hooks_install_located(image_bytes, size, entry, &located.voice_sites, voice_area,
-                                                             voice_hooks_stub_bytes()) == 1);
-    } else {
-        CHECK((voice_hooks_install(image_bytes, size, entry, voice_area, voice_hooks_stub_bytes()) != 0) == caps.npc_voices);
-    }
+    DcpVoiceSites voice{};
+    CHECK(VoiceSitesOf(build, image, voice) == caps.voice_language);
+    CHECK(!caps.voice_language || voice_hooks_install(image_bytes, size, entry, &voice, voice_area, voice_hooks_stub_bytes()) == 1);
     CHECK(system_type_hook_install(image_bytes, size, entry, system_area, system_type_hook_stub_bytes(), SystemTypeText) == 1);
     CHECK(skip_offers_install(image_bytes, size, Key(build).c_str(), SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL) ==
           (SKIP_OFFER_STORY | SKIP_OFFER_TUTORIAL));
@@ -1709,7 +1730,7 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
     for (const uint64_t other_entry : {entry + 0x10, entry ^ 0x1000}) {
         CHECK(lzcnt_compat_install(near.data(), size, other_entry, near.data() + base, room, nullptr) == LZCNT_COMPAT_UNKNOWN_IMAGE);
         CHECK(!startup_save_hook_install(near.data(), size, other_entry, near.data() + base, room));
-        CHECK(!voice_hooks_install(near.data(), size, other_entry, near.data() + base, room));
+        CHECK(!voice_hooks_install(near.data(), size, other_entry, nullptr, near.data() + base, room));
         CHECK(!ultrawide_hooks_install(near.data(), size, other_entry, near.data() + base, room, 1.3125, detail, sizeof(detail)));
         CHECK(guest_hooks_verify(near.data(), size, other_entry, &cheats::kSupportedImage, nullptr, 0, nullptr) != GUEST_HOOK_OK);
     }
@@ -1734,7 +1755,7 @@ enum class Proof { kNotNeeded, kRealExecutable, kReporterLog, kStatic, kDataUnav
 // What a reporter's read-only scan of the real CUSA10487 1.03 executable proved; tests/feature_sites_tests.cpp pins the
 // sites. The scan had no Skip Intro, Unlock Gallery or Japanese Menu Buttons signatures, and its signatures for the Skip
 // offers, Exit Game, Online Play and the startup save do not cover what those features check when they install.
-constexpr Feature kEuropeScanned[] = {kCheats, kTrueUltrawide, kRenderResolution, kAspectRatio, kLzcnt, kJapaneseNpcVoices};
+constexpr Feature kEuropeScanned[] = {kCheats, kTrueUltrawide, kRenderResolution, kAspectRatio, kLzcnt};
 
 Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, const FixtureReport& report) {
     switch (feature) {
@@ -1756,9 +1777,6 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
         return report.prepared ? Proof::kRealExecutable : Proof::kStatic;
     case kSaveLoad:
         if (row.startup_save == Mapping::kNone) return Proof::kNotNeeded;
-        break;
-    case kJapaneseNpcVoices:
-        if (row.native_japanese_voices) return Proof::kNotNeeded;
         break;
     case kBossBattle:
         if (!build.boss_battle) return Proof::kDataUnavailable;
@@ -1962,13 +1980,14 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         const DcpExecRange executable{0, size};
         const DcpImageView view{bytes, size, &executable, 1};
         DcpFeatureSites located{};
-        const int resolved = dcp_resolve_features(&game, &view, 1, 1, 1, &located);
+        const int resolved = dcp_resolve_features(&game, &view, 1, 1, &located);
+        DcpVoiceSites voice{};
+        CHECK(VoiceSitesOf(build, image, voice) == build.voice_language);
         if (build.features_by_signature) {
-            if (!located.cheats || !located.ultrawide || located.voices != build.japanese_npc_voices) {
-                std::printf("  %s: cheats %s | voices %s | ultrawide %s\n", build.label, located.cheat_failure,
-                            located.voice_failure, located.ultrawide_failure);
+            if (!located.cheats || !located.ultrawide) {
+                std::printf("  %s: cheats %s | ultrawide %s\n", build.label, located.cheat_failure, located.ultrawide_failure);
             }
-            CHECK(resolved == 1 && located.cheats && located.ultrawide && located.voices == build.japanese_npc_voices);
+            CHECK(resolved == 1 && located.cheats && located.ultrawide);
             std::string mismatch;
             CHECK(cheats::LayoutMatches(located.cheat_sites.layout, &mismatch));
             std::vector<DcpExecRange> hooks;
@@ -1979,7 +1998,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
             std::set<uint32_t> functions(std::begin(located.cheat_sites.functions), std::end(located.cheat_sites.functions));
             CHECK(functions.size() == DCP_CHEAT_FUNCTIONS && !functions.count(0));
         } else {
-            CHECK(resolved == 0 && !located.cheats && !located.voices && !located.ultrawide);
+            CHECK(resolved == 0 && !located.cheats && !located.ultrawide);
         }
 
         DcpExitGameSites exit_game{};
@@ -2123,8 +2142,14 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CheckPreparedEnglish(build, prepared);
         CheckPreparedRussian(build, prepared);
         CHECK(build.regional_archive == nullptr || fs::is_regular_file(prepared / build.regional_archive));
-        CHECK(!build.japanese_npc_voices || NpcVoiceResourcesPresent(prepared));
-        CHECK(JapaneseNpcVoicesOffered(prepared, &build) == build.japanese_npc_voices);
+        for (const int language : {int(DCP_VOICE_ENGLISH), int(DCP_VOICE_JAPANESE)}) {
+            const unsigned banks = VoiceLanguageCategories(prepared, language);
+            if (banks != DCP_VOICE_ALL_CATEGORIES) {
+                std::printf("  %s: Voice Language %s banks 0x%x\n", build.label, dcp_voice_language_key(language), banks);
+            }
+            CHECK(banks == DCP_VOICE_ALL_CATEGORIES);
+        }
+        CHECK(VoiceLanguagesOffered(prepared, &build).size() == (build.voice_language ? 2u : 0u));
 
         const std::string xbox = ReadText("launcher/prompts/xbox-prompts.dcpx");
         const std::optional<BlockPatch> prompts = ParseBlockPatch(AsBytes(xbox));

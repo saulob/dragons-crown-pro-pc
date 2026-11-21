@@ -19,6 +19,7 @@
 #include "dcp_menu_input.h"
 #include "dcp_renderer.h"
 #include "dcp_settings.h"
+#include "dcp_voice.h"
 
 namespace DcpOptions {
 
@@ -105,6 +106,7 @@ struct Choice {
 
 inline constexpr Choice kOffOn[] = {{"0", "Off"}, {"1", "On"}};
 inline constexpr Choice kPointerModes[] = {{"hold", "Hold"}, {"always_on", "Always On"}};
+inline constexpr Choice kVoiceLanguages[] = {{"default", "Game Default"}, {"english", "English"}, {"japanese", "Japanese"}};
 inline constexpr Choice kHiddenShown[] = {{"0", "Hidden"}, {"1", "Shown"}};
 inline constexpr Choice kRenderers[] = {
     {"auto", "Auto"},
@@ -159,7 +161,7 @@ enum class Id {
     AntiAliasing,
     TextureFiltering,
     SkipIntro,
-    JapaneseNpcVoices,
+    VoiceLanguage,
     JapaneseMenuButtons,
     ControllerRumble,
     MouseControls,
@@ -221,8 +223,10 @@ inline constexpr Setting kSettings[] = {
      "Sharper textures seen at an angle. Game uses the game's own filtering.", Apply::Restart, kAnisotropy},
     {Id::SkipIntro, Page::Gameplay, "skip_intro", "Skip Intro",
      "Skips the startup logo and starts at the title screen.", Apply::Restart, kOffOn},
-    {Id::JapaneseNpcVoices, Page::Gameplay, "dcp_japanese_npc_voices", "Japanese NPC Voices",
-     "Use Japanese voices for NPCs, enemies and AI allies", Apply::Restart, kOffOn, DcpSettings::JapaneseNpcVoices},
+    {Id::VoiceLanguage, Page::Gameplay, "voice_language", "Voice Language",
+     "The language of every spoken voice: characters, NPCs, enemies and the narrator. Each keeps its own voice. Menu & "
+     "Subtitles do not change.",
+     Apply::Restart, kVoiceLanguages, DcpSettings::VoiceLanguage},
     {Id::JapaneseMenuButtons, Page::Controls, "japanese_menu_buttons", "Japanese Menu Buttons",
      "Swaps Confirm and Cancel in the menus, as in the Japanese release. Combat controls do not change.", Apply::Restart, kOffOn},
     {Id::ControllerRumble, Page::Controls, "controller_rumble", "Controller Rumble",
@@ -310,7 +314,8 @@ inline std::string Current(const DcpSettings::Values& v, Id id) {
     case Id::AntiAliasing: return flag(v.smaa);
     case Id::TextureFiltering: return std::to_string(v.anisotropy.load());
     case Id::SkipIntro: return flag(v.skip_intro);
-    case Id::JapaneseNpcVoices: return flag(v.japanese_npc_voices);
+    case Id::VoiceLanguage:
+        return dcp_voice_language_key(dcp_voice_language_resolve(v.voice_language, v.legacy_japanese_npc_voices));
     case Id::JapaneseMenuButtons: return flag(v.japanese_menu_buttons);
     case Id::ControllerRumble: return flag(v.controller_rumble);
     case Id::MouseControls: return flag(v.mouse_controls);
@@ -360,7 +365,7 @@ inline void ApplyLive(DcpSettings::Values& v, Id id, std::string_view value) {
     case Id::RenderResolution:
     case Id::TextureFiltering:
     case Id::SkipIntro:
-    case Id::JapaneseNpcVoices:
+    case Id::VoiceLanguage:
     case Id::JapaneseMenuButtons:
     case Id::FrameRate:
     case Id::StorySkipOffer:

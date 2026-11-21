@@ -16,7 +16,7 @@ namespace DcpSettings {
 enum Feature : unsigned {
     RenderResolution = 1u << 0,
     TrueUltrawide = 1u << 1,
-    JapaneseNpcVoices = 1u << 2,
+    VoiceLanguage = 1u << 2,
     UnlockGallery = 1u << 3,
     BossBattle = 1u << 4,
     AllFeatures = (1u << 5) - 1,
@@ -51,9 +51,10 @@ struct Values {
     std::atomic<bool> skip_intro{false}, japanese_menu_buttons{false}, unlock_gallery{false}, story_skip_offer{false},
         tutorial_skip_offer{false}, unlock_labyrinth{false}, unlock_ultimate_tower{false};
     // Read once at start: render_resolution and aspect_ratio as dcp.ini names them (Load() only), True Ultrawide and
-    // Japanese NPC Voices.
+    // Voice Language: voice_language as saved (-1 when absent or invalid) and the legacy dcp_japanese_npc_voices (1 on).
     std::string render_resolution{"native"}, aspect_ratio{"16:9"};
-    std::atomic<bool> true_ultrawide{false}, japanese_npc_voices{false};
+    std::atomic<bool> true_ultrawide{false};
+    std::atomic<int> voice_language{-1}, legacy_japanese_npc_voices{0};
     // Whether the game's vibration requests reach the controllers; the pad reads it on every request.
     std::atomic<bool> controller_rumble{true};
     // Mouse Controls: the Options menu mirrors it for the running mouse input (dcp_mouse.h).

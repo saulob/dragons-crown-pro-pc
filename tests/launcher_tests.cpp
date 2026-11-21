@@ -45,6 +45,7 @@
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
+#include "dcp_voice.h"
 #include "default_message_hook.h"
 #include "exit_game_text.h"
 #include "file_browser.h"
@@ -55,7 +56,7 @@
 #include "game_install.h"
 #include "game_process.h"
 #include "net/connection_test.h"
-#include "npc_voice_resources.h"
+#include "voice_language_resources.h"
 #include "game_translation.h"
 #include "header_art.h"
 #include "localization/ui_text.h"
@@ -1186,8 +1187,8 @@ void TestLogRetention(const fs::path& base) {
     CHECK(ReadAll(source / "gpu" / "shim" / "dcpgpu.cpp").find("runtime_log_finalize()") != std::string::npos);
 }
 
-void TestJapaneseNpcVoiceSetting(const fs::path& base) {
-    const fs::path file = base / "npc_voices" / "dcp.ini";
+void TestVoiceLanguageSetting(const fs::path& base) {
+    const fs::path file = base / "voice_language" / "dcp.ini";
     fs::remove_all(file.parent_path());
     const auto launcher_default = [](std::string_view key) {
         for (const ManagedSetting& setting : ManagedSettings()) {
@@ -1197,40 +1198,71 @@ void TestJapaneseNpcVoiceSetting(const fs::path& base) {
         }
         return std::string("<missing>");
     };
-    CHECK(launcher_default(kJapaneseNpcVoicesKey) == "0");
-    CHECK(dcp_japanese_npc_voices(nullptr) == 0);
-    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+    CHECK(launcher_default(kVoiceLanguageKey) == "default" && launcher_default(kLegacyJapaneseNpcVoicesKey) == "0");
+    CHECK(dcp_voice_language(nullptr) == DCP_VOICE_DEFAULT && dcp_voice_language("") == DCP_VOICE_DEFAULT);
+    CHECK(dcp_voice_language(file.string().c_str()) == DCP_VOICE_DEFAULT);
+    CHECK(IsValidSetting(kVoiceLanguageKey, "default") && IsValidSetting(kVoiceLanguageKey, "english") &&
+          IsValidSetting(kVoiceLanguageKey, "japanese") && !IsValidSetting(kVoiceLanguageKey, "1") &&
+          !IsValidSetting(kVoiceLanguageKey, "Japanese"));
 
     {
         LauncherSettings settings(file);
-        settings.SetBool(kJapaneseNpcVoicesKey, true);
-        CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0); // pending until Save
+        settings.Set(kVoiceLanguageKey, "japanese");
+        CHECK(dcp_voice_language(file.string().c_str()) == DCP_VOICE_DEFAULT); // pending until Save
         CHECK(settings.Save());
     }
-    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 1);
-    CHECK(WrittenValue(ReadAll(file), kJapaneseNpcVoicesKey, "1"));
+    CHECK(dcp_voice_language(file.string().c_str()) == DCP_VOICE_JAPANESE);
+    CHECK(WrittenValue(ReadAll(file), kVoiceLanguageKey, "japanese"));
+    CHECK(ReadAll(file).find(kLegacyJapaneseNpcVoicesKey) == std::string::npos);
     {
         LauncherSettings settings(file);
-        CHECK(settings.GetBool(kJapaneseNpcVoicesKey, false));
-        settings.SetBool(kJapaneseNpcVoicesKey, false);
+        CHECK(VoiceLanguageSetting(settings) == "japanese");
+        settings.Set(kVoiceLanguageKey, "english");
         CHECK(settings.Save());
     }
-    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
-    CHECK(WrittenValue(ReadAll(file), kJapaneseNpcVoicesKey, "0"));
-    WriteAll(file, "dcp_japanese_npc_voices = on\n");
-    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 1);
-    WriteAll(file, "dcp_japanese_npc_voices = garbage\n");
-    CHECK(dcp_japanese_npc_voices(file.string().c_str()) == 0);
+    CHECK(dcp_voice_language(file.string().c_str()) == DCP_VOICE_ENGLISH);
 
-    // The Japanese builds already speak Japanese; every other build has the toggle, by table or by signature.
-    CHECK(SupportsJapaneseNpcVoices(&kUs101));
-    CHECK(SupportsJapaneseNpcVoices(&kCk100));
-    CHECK(SupportsJapaneseNpcVoices(&kCk));
-    for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
-        CHECK(!SupportsJapaneseNpcVoices(japan) && NativeJapaneseNpcVoices(japan));
+    // The replaced Japanese NPC Voices toggle: read only while voice_language is absent or invalid. Saving another
+    // setting leaves both lines alone.
+    const std::pair<const char*, int> migrations[] = {
+        {"dcp_japanese_npc_voices = 1\n", DCP_VOICE_JAPANESE},
+        {"dcp_japanese_npc_voices = on\n", DCP_VOICE_JAPANESE},
+        {"dcp_japanese_npc_voices = 0\n", DCP_VOICE_DEFAULT},
+        {"dcp_japanese_npc_voices = garbage\n", DCP_VOICE_DEFAULT},
+        {"dcp_japanese_npc_voices = 1\nvoice_language = english\n", DCP_VOICE_ENGLISH},
+        {"voice_language = default\ndcp_japanese_npc_voices = 1\n", DCP_VOICE_DEFAULT},
+        {"voice_language = klingon\ndcp_japanese_npc_voices = 1\n", DCP_VOICE_JAPANESE},
+        {"voice_language = japanese\n", DCP_VOICE_JAPANESE},
+    };
+    for (const auto& [ini, expected] : migrations) {
+        WriteAll(file, ini);
+        CHECK(dcp_voice_language(file.string().c_str()) == expected);
+        const LauncherSettings settings(file);
+        CHECK(VoiceLanguageSetting(settings) == dcp_voice_language_key(expected));
     }
-    CHECK(!NativeJapaneseNpcVoices(&kUs) && !NativeJapaneseNpcVoices(&kCk100) && !NativeJapaneseNpcVoices(nullptr));
-    CHECK(!SupportsJapaneseNpcVoices(nullptr));
+    WriteAll(file, "dcp_japanese_npc_voices = 1\nskip_intro = 0\n");
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kSkipIntroKey, true);
+        CHECK(settings.Save());
+    }
+    const std::string kept = ReadAll(file);
+    CHECK(WrittenValue(kept, kLegacyJapaneseNpcVoicesKey, "1") && kept.find(std::string(kVoiceLanguageKey) + " =") == std::string::npos);
+    CHECK(dcp_voice_language(file.string().c_str()) == DCP_VOICE_JAPANESE);
+    {
+        LauncherSettings settings(file);
+        settings.ResetToDefaults();
+        CHECK(settings.Save());
+    }
+    const std::string reset = ReadAll(file);
+    CHECK(WrittenValue(reset, kVoiceLanguageKey, "default") && WrittenValue(reset, kLegacyJapaneseNpcVoicesKey, "1"));
+    CHECK(dcp_voice_language(file.string().c_str()) == DCP_VOICE_DEFAULT);
+
+    // Every supported build offers it, the Japanese ones included.
+    for (const GameBuild& build : SupportedBuilds()) {
+        CHECK(SupportsVoiceLanguage(&build));
+    }
+    CHECK(!SupportsVoiceLanguage(nullptr));
 }
 
 // Online play: managed keys with their defaults, the reader the game uses, validation, kept by Reset, and only the
@@ -2124,7 +2156,7 @@ void TestSkipIntroSettings(const fs::path& base) {
     const std::string toggle = "ui.Toggle(\"Skip Intro\", kSkipIntroHelp, kSkipIntroKey, false, \"Off\", \"On\");";
     const size_t row = launcher.find(toggle);
     CHECK(row != std::string::npos && launcher.find(toggle, row + 1) == std::string::npos);
-    CHECK(row < launcher.find("ui.Combo(\"Frame rate\"") && row > launcher.find("ui.Toggle(\"Japanese NPC Voices\""));
+    CHECK(row < launcher.find("ui.Combo(\"Frame rate\"") && row > launcher.find("ui.Combo(\"Voice Language\""));
     const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
     CHECK(loader.find("skip_intro_install(image,size,entry,known_build ? build_key : NULL,skip_intro_requested,") != std::string::npos);
     CHECK(loader.find("skip_intro_wanted(dcp_skip_intro(settings_file))") != std::string::npos);
@@ -3159,7 +3191,7 @@ void TestSettingsSummary(const fs::path& base) {
     CHECK(has("Settings: Online Play on, Ping display on, cheats locked for Online Play\n"));
     CHECK(has("Settings: Window Borderless Fullscreen, frame rate 120 FPS, frame counter on,"));
     CHECK(has("Settings: Render resolution 2560x1080 (native), aspect ratio 21:9 Ultrawide, True Ultrawide off (requested on)\n"));
-    CHECK(has("Settings: Menu & Subtitles English, Japanese NPC Voices on, Arachnophobia Safe Mode on\n"));
+    CHECK(has("Settings: Menu & Subtitles English, Voice Language Japanese, Arachnophobia Safe Mode on\n"));
     CHECK(has("Settings: Skip Intro off, Japanese Menu Buttons off, Story Skip Offer on, Tutorial Skip Offer off, Unlock Gallery on,"));
     CHECK(has(", Boss Battle off, Unlock Labyrinth of Chaos off, Unlock Ultimate + Tower of Mirages on, overlay programs "));
     for (const char* secret : {"SecretName", "friend", "Friend", "account", "secret", "token", "DCP_DASHBOARD_TOKEN", "lobby"}) {
@@ -3173,7 +3205,7 @@ void TestSettingsSummary(const fs::path& base) {
     CHECK(offline.find("Settings: Window Windowed, frame rate 60 FPS (Original), frame counter off,") != std::string::npos);
     CHECK(offline.find("True Ultrawide requested off\n") != std::string::npos);
     CHECK(offline.find("Unlock Labyrinth of Chaos off, Unlock Ultimate + Tower of Mirages off") != std::string::npos);
-    CHECK(offline.find("Japanese NPC Voices unsupported") != std::string::npos);
+    CHECK(offline.find("Voice Language unsupported") != std::string::npos);
     if (!std::getenv("DCP_ONLINE")) CHECK(offline.find("Settings: Online Play off\n") != std::string::npos);
 }
 
@@ -6442,7 +6474,7 @@ void TestTextLanguageSwitching(const fs::path& base) {
         CHECK(languages.size() == 4 && languages[0].key == "japanese" && languages[0].name == "Japanese");
         CHECK(languages[1].key == kEnglishKey && languages[2].key == kPortugueseBrazilKey && languages[2].ps4_id == 0);
         CHECK(languages.size() == 4 && languages[3].key == kRussianKey && languages[3].ps4_id == 0);
-        CHECK(NativeJapaneseNpcVoices(japan) && languages[0].ps4_id == 0 && SameLanguages(languages, TextLanguagesOf(japan)));
+        CHECK(SupportsVoiceLanguage(japan) && languages[0].ps4_id == 0 && SameLanguages(languages, TextLanguagesOf(japan)));
         for (const char* saved : {"japanese", "english", "french", "korean", "traditional_chinese", "russian", "", "x"}) {
             CHECK(told(*japan, saved) == 0);
         }
@@ -6538,23 +6570,36 @@ size_t CpkCount(const fs::path& file) {
     return archive.Open(file) ? archive.entries().size() : 0;
 }
 
-// Japanese NPC Voices on an update: the launcher offers them only when the finished game folder holds the sound table and
-// the Japanese voice banks, an update that replaces other entries of DRACRO.CPK keeps them, and the voices do not touch
-// the Menu & Subtitles language.
-void TestNpcVoiceResources(const fs::path& base) {
+// Voice Language on an update: a language is offered only when the finished game folder holds the sound table and that
+// language's banks of every category; an update that replaces other entries of DRACRO.CPK keeps them; a category whose
+// bank is missing is the only one refused; and the voices do not touch the Menu & Subtitles language.
+void TestVoiceLanguageResources(const fs::path& base) {
     using namespace cpk_test;
     using namespace language_test;
-    const fs::path root = base / "npc_voices";
+    const fs::path root = base / "voice_language";
     fs::remove_all(root);
-    CHECK(NpcVoiceResourceNames().size() == 10);
-
-    std::vector<Entry> voices;
-    for (const std::string_view name : NpcVoiceResourceNames()) {
-        voices.push_back({std::string(name), "voice " + std::string(name), false});
+    std::vector<std::string> names{"snd/dc_sound.acf"};
+    size_t per_language = 0;
+    for (const int language : {int(DCP_VOICE_ENGLISH), int(DCP_VOICE_JAPANESE)}) {
+        for (int category = DCP_VOICE_PLAYER; category < DCP_VOICE_CATEGORY_COUNT; ++category) {
+            const std::vector<std::string> banks = VoiceLanguageBankNames(category, language);
+            CHECK(!banks.empty());
+            names.insert(names.end(), banks.begin(), banks.end());
+            if (language == DCP_VOICE_ENGLISH) per_language += banks.size();
+        }
     }
-    std::vector<Entry> game = voices;
+    CHECK(per_language == 12 + 9 + 40 + 14);
+    CHECK(VoiceLanguageBankNames(DCP_VOICE_PLAYER, DCP_VOICE_JAPANESE).front() == "snd/se_player1000_v.acb");
+    CHECK(VoiceLanguageBankNames(DCP_VOICE_PLAYER, DCP_VOICE_ENGLISH).front() == "snd/se_player101000_v.acb");
+    CHECK(VoiceLanguageBankNames(DCP_VOICE_PLAYER, DCP_VOICE_ENGLISH).back() == "snd/se_voice102950.acb");
+    CHECK(VoiceLanguageBankNames(DCP_VOICE_NARRATOR, DCP_VOICE_JAPANESE).front() == "snd/narration_gm20000.acb");
+    CHECK(VoiceLanguageBankNames(DCP_VOICE_NARRATOR, DCP_VOICE_ENGLISH).back() == "snd/narration_gm180000.awb");
+    CHECK(VoiceLanguageBankNames(DCP_VOICE_NONE, DCP_VOICE_ENGLISH).empty() &&
+          VoiceLanguageBankNames(DCP_VOICE_PLAYER, DCP_VOICE_DEFAULT).empty());
+
+    std::vector<Entry> game;
+    for (const std::string& name : names) game.push_back({name, "voice " + name, false});
     game.push_back({"stage/Menu.ftx", "menu base", false});
-    game.push_back({"snd/narration_gm20000.acb", "narration", false});
     const auto sorted = [](std::vector<Entry> entries) {
         std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
             std::string x = a.path, y = b.path;
@@ -6568,33 +6613,78 @@ void TestNpcVoiceResources(const fs::path& base) {
     const std::string base_archive = BuildCpk(sorted(game), true);
     const fs::path base_app0 = root / "base";
     WriteAll(base_app0 / "DRACRO.CPK", base_archive);
-    CHECK(NpcVoiceResourcesPresent(base_app0) && dcp_npc_voice_resources(base_app0.string().c_str()) == 1);
-    CHECK(dcp_npc_voice_resources(nullptr) == 0 && !NpcVoiceResourcesPresent(root / "nowhere"));
+    for (const int language : {int(DCP_VOICE_ENGLISH), int(DCP_VOICE_JAPANESE)}) {
+        CHECK(VoiceLanguageCategories(base_app0, language) == DCP_VOICE_ALL_CATEGORIES);
+        CHECK(dcp_voice_language_resources(base_app0.string().c_str(), language) == DCP_VOICE_ALL_CATEGORIES);
+    }
+    CHECK(VoiceLanguageCategories(base_app0, DCP_VOICE_DEFAULT) == 0);
+    CHECK(dcp_voice_language_resources(nullptr, DCP_VOICE_JAPANESE) == 0 && VoiceLanguageCategories(root / "nowhere", DCP_VOICE_JAPANESE) == 0);
+    CHECK(VoiceLanguagesOffered(base_app0, &kUs) == std::vector<int>({DCP_VOICE_ENGLISH, DCP_VOICE_JAPANESE}));
+    CHECK(VoiceLanguagesOffered(base_app0, &kJp103) == std::vector<int>({DCP_VOICE_ENGLISH, DCP_VOICE_JAPANESE}));
+    CHECK(VoiceLanguagesOffered(base_app0, nullptr).empty());
 
-    // The game's own archive (read only), when a prepared US folder is there.
+    // The game's own archive (read only), when a prepared US folder is there: every bank of both languages.
     if (const fs::path real = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / "v1.03"; fs::exists(real / "DRACRO.CPK")) {
-        CHECK(NpcVoiceResourcesPresent(real));
+        CHECK(VoiceLanguageCategories(real, DCP_VOICE_ENGLISH) == DCP_VOICE_ALL_CATEGORIES &&
+              VoiceLanguageCategories(real, DCP_VOICE_JAPANESE) == DCP_VOICE_ALL_CATEGORIES);
     }
 
-    // One bank missing, or the sound table, refuses; so does an archive that is not one.
-    for (const std::string_view missing : NpcVoiceResourceNames()) {
+    // One bank missing refuses its category in its language only; no sound table, or no archive, refuses everything.
+    const std::pair<const char*, int> missing_banks[] = {
+        {"snd/se_player1000_v.acb", DCP_VOICE_JAPANESE},   {"snd/se_voice102920.acb", DCP_VOICE_ENGLISH},
+        {"snd/se_gimmick10500_v.acb", DCP_VOICE_JAPANESE}, {"snd/se_enemy191400_v.acb", DCP_VOICE_ENGLISH},
+        {"snd/narration_gm130000.awb", DCP_VOICE_ENGLISH},
+    };
+    for (const auto& [missing, language] : missing_banks) {
         std::vector<Entry> without;
         for (const Entry& entry : game) {
             if (entry.path != missing) without.push_back(entry);
         }
         const fs::path app0 = root / ("without " + std::string(missing).substr(4));
         WriteAll(app0 / "DRACRO.CPK", BuildCpk(sorted(without), true));
-        CHECK(!NpcVoiceResourcesPresent(app0));
+        const std::string name = missing;
+        int category = DCP_VOICE_NONE;
+        for (int c = DCP_VOICE_PLAYER; c < DCP_VOICE_CATEGORY_COUNT; ++c) {
+            const std::vector<std::string> banks = VoiceLanguageBankNames(c, language);
+            if (std::find(banks.begin(), banks.end(), name) != banks.end()) category = c;
+        }
+        CHECK(category != DCP_VOICE_NONE);
+        CHECK(VoiceLanguageCategories(app0, language) == (DCP_VOICE_ALL_CATEGORIES & ~DCP_VOICE_CATEGORY_BIT(category)));
+        CHECK(VoiceLanguageCategories(app0, language == DCP_VOICE_ENGLISH ? DCP_VOICE_JAPANESE : DCP_VOICE_ENGLISH) ==
+              DCP_VOICE_ALL_CATEGORIES);
+    }
+    {
+        std::vector<Entry> without;
+        for (const Entry& entry : game) {
+            if (entry.path != "snd/dc_sound.acf") without.push_back(entry);
+        }
+        WriteAll(root / "no_table" / "DRACRO.CPK", BuildCpk(sorted(without), true));
+        CHECK(VoiceLanguageCategories(root / "no_table", DCP_VOICE_JAPANESE) == 0);
+        CHECK(VoiceLanguagesOffered(root / "no_table", &kUs).empty());
+    }
+    {
+        std::vector<Entry> english_only;
+        for (const Entry& entry : game) {
+            const std::string& path = entry.path;
+            bool japanese = false;
+            for (int c = DCP_VOICE_PLAYER; c < DCP_VOICE_CATEGORY_COUNT; ++c) {
+                const std::vector<std::string> banks = VoiceLanguageBankNames(c, DCP_VOICE_JAPANESE);
+                japanese = japanese || std::find(banks.begin(), banks.end(), path) != banks.end();
+            }
+            if (!japanese) english_only.push_back(entry);
+        }
+        WriteAll(root / "english_only" / "DRACRO.CPK", BuildCpk(sorted(english_only), true));
+        CHECK(VoiceLanguagesOffered(root / "english_only", &kUs) == std::vector<int>({DCP_VOICE_ENGLISH}));
     }
     WriteAll(root / "broken" / "DRACRO.CPK", "not an archive");
-    CHECK(!NpcVoiceResourcesPresent(root / "broken"));
+    CHECK(VoiceLanguageCategories(root / "broken", DCP_VOICE_JAPANESE) == 0);
 
     // An update with a partial DRACRO.CPK is laid over the base's: the voices stay, and the update's own entries win.
     const fs::path update = root / "update", staged = root / "staged";
     WriteAll(update / "DRACRO.CPK", BuildCpk(sorted({{"stage/Menu.ftx", "menu update", false}, {"stage/New.ftx", "new", false}}), true));
     WriteAll(update / "eboot.bin", "eboot 1.01");
     CHECK(StageUpdate(base_app0, update, staged, &kUs101).ok());
-    CHECK(NpcVoiceResourcesPresent(staged));
+    CHECK(VoiceLanguageCategories(staged, DCP_VOICE_JAPANESE) == DCP_VOICE_ALL_CATEGORIES);
     CpkArchive composed;
     CHECK(composed.Open(staged / "DRACRO.CPK"));
     const CpkEntry* menu = composed.Find("stage/Menu.ftx");
@@ -6610,14 +6700,14 @@ void TestNpcVoiceResources(const fs::path& base) {
     WriteAll(stripped / "DRACRO.CPK", BuildCpk(sorted(replacement), true));
     WriteAll(stripped / "eboot.bin", "eboot 1.01");
     CHECK(StageUpdate(base_app0, stripped, stripped_staged, &kUs101).ok());
-    CHECK(NpcVoiceResourcesPresent(stripped_staged));
+    CHECK(VoiceLanguageCategories(stripped_staged, DCP_VOICE_ENGLISH) == DCP_VOICE_ALL_CATEGORIES);
 
     // The voices are not a language: the Menu & Subtitles list comes from the regional archive alone.
     WriteAll(staged / "DRACRO_US.CPK", LanguageArchive({Slot("US", kEnglishSheet), Slot("FR", kEnglishSheet), Slot("DE", kEnglishSheet),
                                                        Slot("IT", kEnglishSheet), Slot("ES", kEnglishSheet), Slot("UK", kEnglishSheet)}));
     const std::vector<TextLanguage> with_voices = InstalledTextLanguages(staged, &kUs101);
     fs::remove(staged / "DRACRO.CPK");
-    CHECK(!NpcVoiceResourcesPresent(staged));
+    CHECK(VoiceLanguageCategories(staged, DCP_VOICE_JAPANESE) == 0);
     CHECK(SameLanguages(with_voices, InstalledTextLanguages(staged, &kUs101)) && with_voices.size() == 7);
 }
 
@@ -7951,7 +8041,7 @@ void TestLayers(const fs::path& base) {
     CHECK(std::string(kJp103.eboot_sha256) == "dccfd331b02d462f6586330664b230a887928ed1b3909f8625b49623630d1a64");
     for (const GameBuild* japan : {&kJp100, &kJp102, &kJp103}) {
         CHECK(japan->cheats && japan->xbox_prompts && japan->true_ultrawide && japan->features_by_signature);
-        CHECK(!japan->japanese_npc_voices && CheatsAvailable(japan));
+        CHECK(japan->voice_language && CheatsAvailable(japan));
     }
     CheckSites(kJp100);
     CheckSites(kJp102);
@@ -8184,9 +8274,9 @@ void TestUsBuild() {
           std::string(FinishedLayer(kUs).sfo_version) == "01.03");
     CHECK(std::string(kUs.eboot_sha256) == "f9bff150c4c28507096e7e143a07492063ed89bf05ac6cb995a55a0946e3508a");
     CHECK(kUs.cheats && kUs.xbox_prompts && kUs.resolution_sites.size() == 23 && BaseBuildOf(kUs) == nullptr);
-    CHECK(kUs.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs));
-    CHECK(kUs101.japanese_npc_voices && SupportsJapaneseNpcVoices(&kUs101));
-    CHECK(!SupportsJapaneseNpcVoices(nullptr));
+    CHECK(kUs.voice_language && SupportsVoiceLanguage(&kUs));
+    CHECK(kUs101.voice_language && SupportsVoiceLanguage(&kUs101));
+    CHECK(!SupportsVoiceLanguage(nullptr));
 
     CHECK(std::string(kUs101.label) == "CUSA10454 1.01 USA" && std::string(kUs101.version) == "1.01");
     CHECK(std::string(kUs101.folder) == "CUSA10454-1.01" && std::string(kUs101.folder) != kUs.folder);
@@ -8195,12 +8285,11 @@ void TestUsBuild() {
           std::string(FinishedLayer(kUs101).sfo_version) == "01.03");
     CHECK(std::string(kUs101.eboot_sha256) == "434b3bb43f407990f7b861ed57b8007ba459d63af25b1511ce7489be94c908c0");
     CHECK(std::string(kUs101.eboot_sha256) != kUs.eboot_sha256);
-    CHECK(kUs101.cheats && kUs101.xbox_prompts && kUs101.japanese_npc_voices && kUs101.resolution_sites.empty());
+    CHECK(kUs101.cheats && kUs101.xbox_prompts && kUs101.voice_language && kUs101.resolution_sites.empty());
     CHECK(kUs101.features_by_signature && !kUs.features_by_signature);
     CHECK(kUs101.resolution_by_signature && !RestrictedToNativeResolution(&kUs101));
     for (const GameBuild& build : SupportedBuilds()) {
-        CHECK(build.japanese_npc_voices == !NativeJapaneseNpcVoices(&build));
-        CHECK(SupportsJapaneseNpcVoices(&build) == build.japanese_npc_voices);
+        CHECK(build.voice_language && SupportsVoiceLanguage(&build));
     }
     CHECK(BaseBuildOf(kUs101) == &kUs && BaseBuildOf(kUs) == nullptr);
     for (const GameBuild& build : SupportedBuilds()) {
@@ -8608,7 +8697,7 @@ void TestBuilds(const fs::path& base) {
     CHECK(std::string(FinishedLayer(kCk100).app_ver) == "01.00" && std::string(FinishedLayer(kCk100).sfo_version) == "01.02");
     CHECK(std::string(kCk100.eboot_sha256) == "d37cbc39d84524dd38b818a18bba26ec556bb13e075c493fc927163fec8d039b");
     CHECK(std::string(kCk100.eboot_sha256) != kCk.eboot_sha256 && std::string(kCk100.regional_archive) == "DRACRO_CK.CPK");
-    CHECK(kCk100.cheats && kCk100.xbox_prompts && kCk100.japanese_npc_voices && kCk100.features_by_signature);
+    CHECK(kCk100.cheats && kCk100.xbox_prompts && kCk100.voice_language && kCk100.features_by_signature);
     CHECK(std::string(kCk100.folder) != kCk.folder);
     CHECK(kCk100.layers.size() == 1 && BaseBuildOf(kCk) == &kCk100 && BaseBuildOf(kCk100) == nullptr);
     CHECK(kCk.layers.size() == 2 && kCk.layers[1].update);
@@ -9138,7 +9227,7 @@ int main(int argc, char** argv) {
     TestTextLanguage(base);
     TestCheatSettings(base);
     TestOnlineCheatLockout(base);
-    TestJapaneseNpcVoiceSetting(base);
+    TestVoiceLanguageSetting(base);
     TestOnlineSettings(base);
     TestOnlinePage();
     TestConnectionTestGate(base);
@@ -9196,7 +9285,7 @@ int main(int argc, char** argv) {
     TestBuiltInEnglish(base);
     TestBuiltInRussian(base);
     TestKeepBaseLanguages(base);
-    TestNpcVoiceResources(base);
+    TestVoiceLanguageResources(base);
     TestGameTranslation(base);
     TestLatinGlyphs();
     TestComposedGlyphGeometry();

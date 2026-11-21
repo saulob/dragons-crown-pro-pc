@@ -126,8 +126,7 @@ base's archive with every entry of the update's laid over it (the USA 1.01 regio
 sets, as above). A complete archive, or one the reader cannot open, replaces the base's as a whole. The base folder is
 only read, and a failed step leaves the active build as it was.
 
-**Features by build.** Every build offers every feature of USA 1.00; Japanese NPC Voices is not applicable to the
-Japanese builds, whose NPCs already speak Japanese:
+**Features by build.** Every build offers every feature of USA 1.00:
 
 | Feature | USA 1.00 | USA 1.01 | Japan 1.00, 1.02, 1.03 | Asia/HK 1.00 | Asia/HK 1.02 | Europe 1.03 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -138,7 +137,7 @@ Japanese builds, whose NPCs already speak Japanese:
 | Online Play, System type | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
 | Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
 | Cheats | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
-| Japanese NPC Voices | yes | yes (found by signature) | not applicable | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Voice Language | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
 | Xbox prompts | yes | yes, when its archives hold the patch's files | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK`, when it holds the patch's file | yes, when its archives hold the patch's files |
 | Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes | yes |
 
@@ -150,8 +149,8 @@ build and prints DATA UNAVAILABLE where nothing does. Installing or selecting on
 "Found by signature" means the loader does not use a table: it finds each site in the build's own image from
 the byte patterns that give exactly the tables of the five builds checked locally, uses them only when every pattern
 matches the expected number of times, and otherwise leaves the feature off (Render resolution: the game does not start
-with a custom size). Cheats, Japanese NPC Voices and True Ultrawide need all of their sites (25 hooks and 15 functions,
-2 sites, 22 sites) to resolve with the verified bytes and their relations, and, for the cheats, every struct displacement
+with a custom size). Cheats, Voice Language and True Ultrawide need all of their sites (25 hooks and 15 functions,
+11 sites and 2 tables, 22 sites) to resolve with the verified bytes and their relations, and, for the cheats, every struct displacement
 the handlers use to be read back from the game's own instructions; one that does not resolve turns the whole feature
 off and the log names it (`Cheats: unavailable, ...`). A successful start logs one line per feature, for example
 `Cheats: 25/25 hooks, 15/15 functions, layout verified by signature`. The patterns are used only for the supported
@@ -219,7 +218,7 @@ does. Both write byte-identical files from the game's package.
 | Graphics | Renderer, Render resolution (builds that support it), Texture filtering | saved now, applies at the next start |
 | Gameplay | Frame rate in title, Render resolution in title, Frame counter | at once |
 | Gameplay | Enable Boss Battle (builds that support it; the host's side of Boss Battle Online) | the next time the Inn menu opens |
-| Gameplay | Skip Intro, Japanese NPC Voices (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery, Unlock Labyrinth of Chaos, Unlock Ultimate + Tower of Mirages | saved now, applies at the next start |
+| Gameplay | Skip Intro, Voice Language (builds and game folders that offer it), Frame rate, Story Skip Offer, Tutorial Skip Offer, Unlock Gallery, Unlock Labyrinth of Chaos, Unlock Ultimate + Tower of Mirages | saved now, applies at the next start |
 | Online (Online Play on) | your Online name and friend code (copy with A or Enter), the Connection test, your friends and their status | read only; the test runs on request |
 | Controls | Controller Rumble, Mouse Controls, Pointer Control Mode, Mouse Sensitivity | at once |
 | Controls | Japanese Menu Buttons, the hotkeys (read only) | saved now, applies at the next start |
@@ -261,7 +260,8 @@ use the same defaults).
 | `detailed_logging` | 1, 0 | 1 | at exit |
 | `key_*`, `hotkey_cheats_menu`, `hotkey_window_mode` | a key name (below) | the default layout | at game start |
 | `arachnophobia_safe_mode` | 1, 0 | 0 | when toggled in the launcher |
-| `dcp_japanese_npc_voices` | 1, 0 | 0 | at game start (the USA and Asia and Hong Kong builds; the Japanese builds always use them) |
+| `voice_language` | default, english, japanese | default | at game start (every build; a language whose banks the installed `DRACRO.CPK` lacks is not offered) |
+| `dcp_japanese_npc_voices` | 1, 0 | 0 | legacy, read only while `voice_language` is absent or invalid: 1 resolves to japanese, anything else to default; never written |
 | `skip_intro` | 1, 0 | 0 | at game start |
 | `japanese_menu_buttons` | 1, 0 | 0 | at game start |
 | `controller_rumble` | 1, 0 | 1 | at game start; F1 changes it at once |
@@ -479,14 +479,29 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language Korean unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
-  environment variable (a PS4 language number) overrides it. Voices are chosen inside the game.
-- **Japanese NPC Voices**: Off by default (`dcp_japanese_npc_voices`). USA, Asia and Hong Kong and European builds; on the builds
-  whose hooks are found by signature the option appears only while the installed `DRACRO.CPK` holds the sound table and
-  the Japanese banks (`launcher/npc_voice_resources.h`), and it never changes the Menu & Subtitles language. It is hidden
-  for the Japanese builds, which already use the Japanese NPC voices. The Japanese and English NPC voice banks are both in the shared `DRACRO.CPK`; this routes the six
-  town/event NPC voice cue families to the Japanese cue IDs at run time, and, when `DRACRO.CPK` holds all 40 of their
-  banks, the enemy and AI ally families too (`src/dcp_voice.h`). The narrator and player-character voice choices are
-  untouched.
+  environment variable (a PS4 language number) overrides it. It never changes the spoken voices: Voice Language does.
+- **Voice Language**: Game Default by default (`voice_language`: `default`, `english`, `japanese`). Every supported
+  build. The game gives every voice cue a Japanese ID and an English twin 100000 above it, in banks that are all in the
+  shared `DRACRO.CPK` (player classes `se_player1000_v` to `se_player1500_v` and `se_player101000_v` to
+  `se_player101500_v`, camp voices `se_voice2900` to `se_voice2950` and `se_voice102900` to `se_voice102950`, NPCs,
+  enemies, and the seven narrators `narration_gm20000` to `narration_gm80000` and `narration_gm120000` to
+  `narration_gm180000`). Its cue mapper picks the twin by a mode the speaker passes: the USA and European executables
+  pass English for every character, resurrected ones included, and the Japanese and Asian ones derive it from the
+  game's language setting; no character record stores a language. English or Japanese sets that mode at the mapper's
+  seven callers, which covers your characters, other players, resurrected characters and AI party members, NPCs,
+  enemies and the camp voices, and points the narrator manager at the same narrator's bank in that language, so the
+  narrator chosen in the game stays the same person. Each class keeps its own voice. Game Default installs nothing. The
+  launcher offers a language only when the installed `DRACRO.CPK` holds the sound table and that language's banks
+  (`launcher/voice_language_resources.h`); at game start a category whose banks are missing keeps the game's own voice.
+  The narrator sites and tables are checked on their own: when they do not validate, only the narrator keeps the game's
+  own voice and the other routes still apply. An extra reference on the chosen language's NPC and enemy banks keeps them loaded, as the game's own lifetime can drop
+  the bank it does not expect. Nothing in the game files, the saves or online play changes; other players hear their
+  own setting. It never changes the Menu & Subtitles language. The log names the result with `Voice telemetry:` lines:
+  `route_ready` at start, one `capability_unavailable` line with a short reason for each category left off, then the
+  first and every tenfold `route_used` count of each category and one `bank_route`
+  line per voice family that changed language. The former `dcp_japanese_npc_voices` is read only while
+  `voice_language` is absent: 1 resolves to Japanese, anything else to Game Default; the launcher and the F1 Options
+  write only `voice_language`.
 - **Frame rate** (30 FPS, 60 FPS (Original), 90, 120, 144, 165, 240 FPS, Unlimited; `frame_rate`, 60 FPS (Original) by
   default; applied at start, every build) sets how often frames reach the window. 60 is the game's own rate. 30 FPS
   shows every second frame. The game makes one frame per logic tick at 59.94 Hz, builds that frame's draw lists inside
@@ -826,7 +841,7 @@ first frame (`Modules: ...`), and the Vulkan layers that are installed. The game
 
 Before the game starts, a short `Settings:` block sums up the run for support: port version, platform, online protocol
 and game build; Online Play (with the Ping display and the cheat lock); window mode, frame rate and frame counter; the
-render resolution, aspect ratio and effective True Ultrawide; the Menu & Subtitles language, Japanese NPC Voices and
+render resolution, aspect ratio and effective True Ultrawide; the Menu & Subtitles language, Voice Language and
 Arachnophobia Safe Mode; and the Story and Tutorial Skip Offers. The values are the ones in effect for this run (after
 build gating and `DCP_ONLINE`). It never shows the Online name, Friend Code or account; the `Online: on as ...` line
 keeps those details. `dcp-launcher-tests --log-settings <dcp.ini> <image dir> [<app0>]` prints the same lines from a

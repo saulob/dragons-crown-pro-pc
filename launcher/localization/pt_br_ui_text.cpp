@@ -183,8 +183,10 @@ Spanish	Espanhol
 Traditional Chinese	Chinês tradicional
 Korean	Coreano
 Japanese	Japonês
-Japanese NPC Voices	Vozes de NPC em japonês
-Use Japanese voices for NPCs, enemies and AI allies	Usa vozes em japonês para NPCs, inimigos e aliados de IA
+Voice Language	Idioma das vozes
+Game Default	Padrão do jogo
+The language of every spoken voice: your characters, resurrected and AI party members, NPCs, enemies and the narrator. Each keeps its own voice; only the language changes. Menu & Subtitles do not change. Game Default leaves the game's own choice. Applies at the next game start.	O idioma de todas as vozes faladas: seus personagens, os membros do grupo ressuscitados e controlados pela IA, NPCs, inimigos e o narrador. Cada um mantém a própria voz; só o idioma muda. Menu e legendas não mudam. Padrão do jogo mantém a escolha do próprio jogo. Vale a partir do próximo início do jogo.
+The language of every spoken voice: characters, NPCs, enemies and the narrator. Each keeps its own voice. Menu & Subtitles do not change.	O idioma de todas as vozes faladas: personagens, NPCs, inimigos e o narrador. Cada um mantém a própria voz. Menu e legendas não mudam.
 Frame rate	Taxa de quadros
 60 FPS is the original game rate. 30 shows every second frame. Faster targets show the last frame again until the next one: the game still makes 60 new frames a second, so game speed and motion are unchanged. Unlimited repeats as often as the display allows, up to 480 a second.	60 FPS é a taxa original do jogo. 30 mostra um quadro sim e outro não. Taxas mais altas mostram o último quadro novamente até o próximo: o jogo continua criando 60 quadros novos por segundo, então a velocidade e o movimento do jogo não mudam. Ilimitado repete o quadro o máximo que a tela permitir, até 480 vezes por segundo.
 Unlimited	Ilimitado

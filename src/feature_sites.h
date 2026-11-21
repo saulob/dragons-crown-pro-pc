@@ -1,5 +1,5 @@
 /* Structural locators for the executable-dependent features of every supported build but CUSA10454 1.00, whose tables
- * are the reference: Cheats, Japanese NPC Voices and True Ultrawide. The Exit Game and party sites are located on every
+ * are the reference: Cheats and True Ultrawide. The Exit Game, party and Voice Language sites are located on every
  * supported build. A feature resolves only when every one of its sites is found the expected
  * number of times with the verified bytes, the sites keep their relations and none overlaps another; otherwise nothing
  * is returned and `failure` names the first site that did not resolve. Reads the image only. The loader calls these for
@@ -121,9 +121,41 @@ typedef struct {
     uint32_t room_wish_function, room_wish_location, room_info_location;
 } DcpEarlyStorySites;
 
+#define DCP_VOICE_CUE_CALLS 7
+#define DCP_VOICE_CUE_TAIL_JUMP 5 /* the one tail jump among the mapper's callers, in image order */
+#define DCP_NARRATOR_BANKS 14
+
+/* Why the narrator route of a located Voice Language is off; the other routes do not depend on it. */
+typedef enum {
+    DCP_NARRATOR_ROUTE_OK = 0,
+    DCP_NARRATOR_ROUTE_SITES,
+    DCP_NARRATOR_ROUTE_TABLES,
+    DCP_NARRATOR_ROUTE_NAMES,
+    DCP_NARRATOR_ROUTE_TWINS,
+    DCP_NARRATOR_ROUTE_BASES,
+    DCP_NARRATOR_ROUTE_OVERLAP,
+    DCP_NARRATOR_ROUTE_COUNT
+} DcpNarratorRoute;
+
+static inline const char *dcp_narrator_route_reason(int route) {
+    static const char *const names[DCP_NARRATOR_ROUTE_COUNT] = {"ok", "sites", "tables", "names", "twins", "bases", "overlap"};
+    return route >= 0 && route < DCP_NARRATOR_ROUTE_COUNT ? names[route] : "unknown";
+}
+
+/* Voice Language sites. Every voice reaches the cue mapper through one of its seven callers, each a call or jump rel32
+ * that a hook replaces. The narrator's bank and cue base come from two tables the narrator manager indexes by its
+ * narrator choice: `narrator_banks` holds ACB/AWB name pointer pairs, `narrator_bases` the first eight cue bases.
+ * The narrator sites are valid only when `narrator_route` is DCP_NARRATOR_ROUTE_OK. */
 typedef struct {
-    uint32_t npc_cue;          /* the cue mapper's `mov eax, 0x1971b` */
-    uint32_t resource_acquire; /* the resource manager's acquire */
+    uint32_t cue_mapper;
+    uint32_t cue_calls[DCP_VOICE_CUE_CALLS];
+    uint32_t resource_acquire;
+    uint32_t narrator_bank_select; /* mov rsi,[rbx+rax]; mov r14,[rbx+rax+8] */
+    uint32_t narrator_cue_base;    /* lea r14d,[rax+rcx-0x4e20] */
+    uint32_t narrator_cue_helper;  /* lea eax,[rax+rcx-0x4e20] */
+    uint32_t narrator_banks, narrator_bases;
+    int narrator_route;
+    char narrator_failure[96];
 } DcpVoiceSites;
 
 #define DCP_TRANSITION_PART_COUNT 7
@@ -164,11 +196,10 @@ typedef struct {
 
 /* What a supported build's profile asked the loader to resolve, resolved once per process. */
 typedef struct {
-    int cheats, voices, ultrawide;
+    int cheats, ultrawide;
     DcpCheatSites cheat_sites;
-    DcpVoiceSites voice_sites;
     DcpUltrawideSites ultrawide_sites;
-    char cheat_failure[192], voice_failure[192], ultrawide_failure[192];
+    char cheat_failure[192], ultrawide_failure[192];
 } DcpFeatureSites;
 
 /* 1 when any two of the `count` ranges share a byte. */

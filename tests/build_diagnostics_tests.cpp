@@ -978,7 +978,7 @@ void TestPackageEdgeCases() {
         CHECK(Contains(report.lines, "[unique] submit") && Contains(report.lines, "[unique] fill call 1"));
         CHECK(Contains(report.lines, "[missing] queue: no match"));
         CHECK(Contains(report.lines, "True ultrawide: queue"));
-        CHECK(Contains(report.lines, "Cheats: REJECTED") && Contains(report.lines, "Japanese NPC voices: REJECTED"));
+        CHECK(Contains(report.lines, "Cheats: REJECTED") && Contains(report.lines, "Voice language: REJECTED"));
         CHECK(Contains(report.lines, "Runtime validators: 0/3 accepted"));
     }
 
@@ -1195,8 +1195,11 @@ Expected ProductionTables(const Fixture& fixture) {
                 expected[{"Cheats", "function: " + name}] = Hex((*it)[2].str());
             }
         }
-        expected[{"Japanese NPC voices", "NPC cue site"}] = 0x68bc9;
-        expected[{"Japanese NPC voices", "resource acquire"}] = 0x57cbb0;
+        expected[{"Voice language", "cue mapper"}] = 0x68bc0;
+        expected[{"Voice language", "resource acquire"}] = 0x57cbb0;
+        expected[{"Voice language", "narrator bank select"}] = 0x5bc14;
+        expected[{"Voice language", "narrator cue base"}] = 0x5c09e;
+        expected[{"Voice language", "narrator cue helper"}] = 0x5c5ea;
     }
     return expected;
 }
@@ -1291,7 +1294,7 @@ void TestKnownBuilds() {
         CHECK(Contains(known_report.lines, "Skip intro: resolved") && Contains(known_report.lines, "Unlock Gallery: resolved") &&
               Contains(known_report.lines, "Japanese Menu Buttons: resolved"));
         CHECK(Contains(known_report.lines, "Cheats: accepted") && Contains(known_report.lines, "True ultrawide: accepted"));
-        CHECK(Contains(known_report.lines, "Japanese NPC voices: accepted"));
+        CHECK(Contains(known_report.lines, "Voice language: accepted"));
         std::printf("%s: expected %zu build-dependent sites (+%zu render sites, 61 LZCNT sites), recovered %zu, unique %zu, "
                     "ambiguous %zu, missing %zu, mismatches %zu; render sites %zu/%zu; relations %zu/%zu hold; LZCNT %zu\n",
                     fixture.label_prefix, expected.size(), resolution_expected, recovered, unique, ambiguous, missing, mismatches,

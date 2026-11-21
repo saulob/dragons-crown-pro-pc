@@ -120,7 +120,7 @@ if ((test)); then
     "$build_dir/bin/dcp-build-diagnostics-tests"
     step 'Running the build feature parity tests (contract, update parity, mappings, unknown builds)'
     "$build_dir/bin/dcp-build-parity-tests"
-    step 'Running the feature locator tests (Cheats, Japanese NPC Voices, True Ultrawide)'
+    step 'Running the feature locator tests (Cheats, Voice Language, True Ultrawide)'
     "$build_dir/bin/dcp-feature-sites-tests"
     step 'Running the trophy tests'
     "$build_dir/bin/dcp-trophy-tests"
@@ -130,7 +130,7 @@ if ((test)); then
     "$build_dir/bin/dcp-cheats-tests"
     step 'Running the Kraken crash fix tests'
     "$build_dir/bin/dcp-kraken-fix-tests"
-    step 'Running the Japanese NPC voice tests'
+    step 'Running the Voice Language tests (player, resurrected characters, narrator, NPCs, enemies, allies)'
     "$build_dir/bin/dcp-voice-tests"
     step 'Running the online System type hook tests'
     "$build_dir/bin/dcp-system-type-tests"

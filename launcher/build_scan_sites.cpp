@@ -150,15 +150,29 @@ constexpr SiteSpec kSiteTable[] = {
         "?? ?? 48 8b b8 b0 00 00 00 48 85 ff 74 ?? 0f b6 "
         "43 05",
         0, 1, {0x8bb50, 0x8b230, 0x8b4d0, 0x8b4d0, 0x8b3a0}},
-    {"Japanese NPC voices", "NPC cue site", SiteKind::kHook,
+    {"Voice language", "cue mapper", SiteKind::kFunction,
         "90 83 fe 01 0f 85 ?? ?? ?? ?? b8 1b 97 01 00 81 "
         "ff 6b 10 00 00 0f 84 ?? ?? ?? ?? 8d 87 48 f4 ff "
         "ff",
-        10, 1, {0x68bc9, 0x685a9, 0x68609, 0x68609, 0x68669}},
-    {"Japanese NPC voices", "resource acquire", SiteKind::kFunction,
+        1, 1, {0x68bc0, 0x685a0, 0x68600, 0x68600, 0x68660}},
+    {"Voice language", "resource acquire", SiteKind::kFunction,
         "55 48 89 e5 41 57 41 56 41 55 41 54 53 48 83 ec "
         "58 48 8b 05 ?? ?? ?? ?? 49 89 f4 31 db 49 89 fe",
         0, 1, {0x57cbb0, 0x57ac50, 0x57ab80, 0x57ac40, 0x57acb0}},
+    {"Voice language", "narrator bank select", SiteKind::kHook,
+        "48 c1 e3 04 48 8d 05 ?? ?? ?? ?? 48 8b 34 03 4c "
+        "8b 74 03 08 e8",
+        11, 1, {0x5bc14, 0x5b574, 0x5b5f4, 0x5b5f4, 0x5b634}},
+    {"Voice language", "narrator cue base", SiteKind::kHook,
+        "48 8d 15 ?? ?? ?? ?? 41 80 bc 24 ?? ?? ?? ?? 00 "
+        "8b 04 81 49 63 8c 24 ?? ?? ?? ?? 8b 0c 8a 44 8d "
+        "b4 08 e0 b1 ff ff",
+        30, 1, {0x5c09e, 0x5b9fe, 0x5ba7e, 0x5ba7e, 0x5babe}},
+    {"Voice language", "narrator cue helper", SiteKind::kHook,
+        "48 8d 0d ?? ?? ?? ?? 48 63 c7 48 8d 15 ?? ?? ?? "
+        "?? 8b 04 81 48 63 ce 8b 0c 8a 8d 84 08 e0 b1 ff "
+        "ff c3",
+        26, 1, {0x5c5ea, 0x5bf4a, 0x5bfca, 0x5bfca, 0x5c00a}},
     {"Cheats", "hook: damage", SiteKind::kHook,
         "41 0f 44 cd 45 85 ed 41 0f 4e cd 89 8d dc fd ff "
         "ff e8 ?? ?? ?? ?? 89 c3 c5 fa 2c 85 a8 fe ff ff",

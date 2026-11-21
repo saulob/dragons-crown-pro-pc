@@ -14,6 +14,7 @@
 #include "build_scan.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "dcp_voice.h"
 
 namespace {
 
@@ -283,6 +284,13 @@ bool ValidView(const DcpImageView* image, DcpLocateReport* report) {
     return image && image->bytes && report && (image->executable_count == 0 || image->executable);
 }
 
+// The image offset a stored pointer names. The loader relocates the image before the sites are resolved, so a
+// stored pointer is the loaded address there and an image offset in the file as shipped.
+uint64_t StoredOffset(const uint8_t* bytes, uint64_t size, uint64_t stored) {
+    const uint64_t base = uint64_t(uintptr_t(bytes));
+    return stored >= base && stored - base < size ? stored - base : stored;
+}
+
 } // namespace
 
 size_t dcp_layout_probe_count(void) {
@@ -321,7 +329,7 @@ int dcp_ranges_overlap(const DcpExecRange* ranges, size_t count) {
     return 0;
 }
 
-int dcp_resolve_features(const DcpGameBuild* build, const DcpImageView* image, int cheats, int voices, int ultrawide,
+int dcp_resolve_features(const DcpGameBuild* build, const DcpImageView* image, int cheats, int ultrawide,
                          DcpFeatureSites* out) {
     if (!out) {
         return 0;
@@ -329,7 +337,6 @@ int dcp_resolve_features(const DcpGameBuild* build, const DcpImageView* image, i
     *out = {};
     const char* denied = "not a supported build that uses signature locators";
     std::snprintf(out->cheat_failure, sizeof(out->cheat_failure), "%s", denied);
-    std::snprintf(out->voice_failure, sizeof(out->voice_failure), "%s", denied);
     std::snprintf(out->ultrawide_failure, sizeof(out->ultrawide_failure), "%s", denied);
     if (!build || !build->features_by_signature || !image) {
         return 0;
@@ -339,15 +346,22 @@ int dcp_resolve_features(const DcpGameBuild* build, const DcpImageView* image, i
         out->cheats = dcp_locate_cheat_sites(image, &out->cheat_sites, &report);
         std::snprintf(out->cheat_failure, sizeof(out->cheat_failure), "%s", report.failure);
     }
-    if (voices && build->japanese_npc_voices) {
-        out->voices = dcp_locate_voice_sites(image, &out->voice_sites, &report);
-        std::snprintf(out->voice_failure, sizeof(out->voice_failure), "%s", report.failure);
-    }
     if (ultrawide && build->true_ultrawide) {
         out->ultrawide = dcp_locate_ultrawide_sites(image, &out->ultrawide_sites, &report);
         std::snprintf(out->ultrawide_failure, sizeof(out->ultrawide_failure), "%s", report.failure);
     }
-    return out->cheats || out->voices || out->ultrawide;
+    return out->cheats || out->ultrawide;
+}
+
+int dcp_resolve_voice_language(const DcpGameBuild* build, const DcpImageView* image, DcpVoiceSites* out, char* failure,
+                               size_t failure_size) {
+    DcpLocateReport report{};
+    std::snprintf(report.failure, sizeof(report.failure), "not a supported game build");
+    const int resolved = build && build->voice_language && image && out && dcp_locate_voice_sites(image, out, &report);
+    if (failure && failure_size) {
+        std::snprintf(failure, failure_size, "%s", report.failure);
+    }
+    return resolved;
 }
 
 
@@ -511,11 +525,7 @@ bool MethodIs(const Locator& locator, uint64_t table, uint64_t slot, std::initia
     }
     uint64_t target = 0;
     std::memcpy(&target, locator.bytes() + table + slot, sizeof(target));
-    // The loader relocates the image before the sites are resolved: a stored pointer is then the loaded address.
-    const uint64_t base = uint64_t(uintptr_t(locator.bytes()));
-    if (target >= base && target - base < locator.size()) {
-        target -= base;
-    }
+    target = StoredOffset(locator.bytes(), locator.size(), target);
     return target < locator.size() && BytesAre(locator, target, body);
 }
 
@@ -725,25 +735,189 @@ int dcp_locate_early_story_sites(const DcpImageView* image, DcpEarlyStorySites* 
     return 1;
 }
 
+namespace {
+
+int32_t ReadDisplacement(const uint8_t* bytes, uint64_t at) {
+    int32_t value = 0;
+    std::memcpy(&value, bytes + at, sizeof(value));
+    return value;
+}
+
+// The target of a rip-relative operand: its displacement is at `displacement`, its instruction ends at `end`.
+uint64_t RipTarget(const uint8_t* bytes, uint64_t displacement, uint64_t end) {
+    return uint64_t(int64_t(end) + ReadDisplacement(bytes, displacement));
+}
+
+// The bank number of the "SND/NARRATION_GM<n>.<extension>" name a table entry points to; 0 when it is not one.
+uint32_t NarratorName(const uint8_t* bytes, uint64_t size, uint64_t stored, std::string_view extension) {
+    constexpr std::string_view kPrefix = "SND/NARRATION_GM";
+    const uint64_t at = StoredOffset(bytes, size, stored);
+    if (at >= size || size - at < kPrefix.size() + 12) {
+        return 0;
+    }
+    const char* text = reinterpret_cast<const char*>(bytes + at);
+    if (std::string_view(text, kPrefix.size()) != kPrefix) {
+        return 0;
+    }
+    uint32_t number = 0;
+    size_t i = kPrefix.size();
+    for (; i < kPrefix.size() + 7 && text[i] >= '0' && text[i] <= '9'; ++i) {
+        number = number * 10 + uint32_t(text[i] - '0');
+    }
+    if (i == kPrefix.size() || text[i] != '.' || std::string_view(text + i + 1, 3) != extension || text[i + 4] != 0) {
+        return 0;
+    }
+    return number;
+}
+
+// Every call or jump rel32 in executable code that reaches `target`, in image order, with its opcode.
+std::vector<std::pair<uint64_t, uint8_t>> BranchesTo(const DcpImageView& image, uint64_t target) {
+    std::vector<std::pair<uint64_t, uint8_t>> found;
+    const auto scan = [&](uint64_t begin, uint64_t end) {
+        for (uint64_t at = begin; at + 5 <= end && at + 5 <= image.size; ++at) {
+            const uint8_t opcode = image.bytes[at];
+            if ((opcode == 0xe8 || opcode == 0xe9) && RipTarget(image.bytes, at + 1, at + 5) == target) {
+                found.push_back({at, opcode});
+            }
+        }
+    };
+    if (image.executable_count == 0) {
+        scan(0, image.size);
+    }
+    for (size_t i = 0; i < image.executable_count; ++i) {
+        scan(image.executable[i].begin, image.executable[i].end);
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
+} // namespace
+
+namespace {
+
+// Fills the narrator sites and tables of `sites`; the route that is off and why, when they do not validate.
+DcpNarratorRoute LocateNarrator(const DcpImageView& image, DcpVoiceSites& sites, DcpExecRange* ranges, size_t count) {
+    DcpLocateReport report{};
+    Locator locator(image, report);
+    const auto off = [&](DcpNarratorRoute route, const char* what, const char* why) {
+        if (what) {
+            locator.Fail("relation", what, why);
+        }
+        std::snprintf(sites.narrator_failure, sizeof(sites.narrator_failure), "%s", report.failure);
+        return route;
+    };
+    constexpr std::string_view kFeature = "Voice language";
+    const SiteSpec* bank = SpecNamed(kFeature, "narrator bank select");
+    const SiteSpec* base = SpecNamed(kFeature, "narrator cue base");
+    const SiteSpec* helper = SpecNamed(kFeature, "narrator cue helper");
+    std::vector<uint64_t> bank_sites, base_sites, helper_sites;
+    if (!bank || !base || !helper) {
+        return off(DCP_NARRATOR_ROUTE_SITES, "narrator sites", "not defined");
+    }
+    if (!locator.Site(*bank, bank_sites) || !locator.Site(*base, base_sites) || !locator.Site(*helper, helper_sites)) {
+        return off(DCP_NARRATOR_ROUTE_SITES, nullptr, nullptr);
+    }
+    sites.narrator_bank_select = uint32_t(bank_sites.front());
+    sites.narrator_cue_base = uint32_t(base_sites.front());
+    sites.narrator_cue_helper = uint32_t(helper_sites.front());
+
+    const uint8_t* bytes = locator.bytes();
+    const uint64_t size = locator.size();
+    const uint64_t banks = RipTarget(bytes, sites.narrator_bank_select - 4, sites.narrator_bank_select);
+    const uint64_t bases = RipTarget(bytes, sites.narrator_cue_base - 27, sites.narrator_cue_base - 23);
+    const uint64_t helper_bases = RipTarget(bytes, sites.narrator_cue_helper - 13, sites.narrator_cue_helper - 9);
+    if (bases != helper_bases) {
+        return off(DCP_NARRATOR_ROUTE_TABLES, "narrator cue bases", "the two cue sites read different tables");
+    }
+    if (banks > UINT32_MAX || bases > UINT32_MAX || banks + DCP_NARRATOR_BANKS * 16 > size || bases + 8 * 4 > size) {
+        return off(DCP_NARRATOR_ROUTE_TABLES, "narrator tables", "beyond the image");
+    }
+    uint32_t numbers[DCP_NARRATOR_BANKS] = {};
+    for (size_t i = 0; i < DCP_NARRATOR_BANKS; ++i) {
+        uint64_t acb = 0, awb = 0;
+        std::memcpy(&acb, bytes + banks + 16 * i, sizeof(acb));
+        std::memcpy(&awb, bytes + banks + 16 * i + 8, sizeof(awb));
+        numbers[i] = NarratorName(bytes, size, acb, "ACB");
+        if (!numbers[i] || numbers[i] != NarratorName(bytes, size, awb, "AWB") || !dcp_narrator_base_valid(numbers[i])) {
+            return off(DCP_NARRATOR_ROUTE_NAMES, "narrator banks", "not a narrator ACB/AWB name pair");
+        }
+    }
+    for (size_t i = 0; i < DCP_NARRATOR_BANKS; ++i) {
+        if (std::count(std::begin(numbers), std::end(numbers), numbers[i]) != 1) {
+            return off(DCP_NARRATOR_ROUTE_TWINS, "narrator banks", "a narrator listed twice");
+        }
+        for (const int language : {int(DCP_VOICE_ENGLISH), int(DCP_VOICE_JAPANESE)}) {
+            if (std::find(std::begin(numbers), std::end(numbers), dcp_narrator_base_for(numbers[i], language)) ==
+                std::end(numbers)) {
+                return off(DCP_NARRATOR_ROUTE_TWINS, "narrator banks", "a narrator without its other language");
+            }
+        }
+    }
+    for (size_t i = 0; i < 8; ++i) {
+        uint32_t value = 0;
+        std::memcpy(&value, bytes + bases + 4 * i, sizeof(value));
+        if (value != numbers[i]) {
+            return off(DCP_NARRATOR_ROUTE_BASES, "narrator cue bases", "differ from the bank table");
+        }
+    }
+    sites.narrator_banks = uint32_t(banks);
+    sites.narrator_bases = uint32_t(bases);
+    ranges[count++] = {sites.narrator_bank_select, sites.narrator_bank_select + 9u};
+    ranges[count++] = {sites.narrator_cue_base, sites.narrator_cue_base + 8u};
+    ranges[count++] = {sites.narrator_cue_helper, sites.narrator_cue_helper + 7u};
+    if (dcp_ranges_overlap(ranges, count)) {
+        locator.Fail("patch", "ranges", "a narrator patch overlaps another");
+        return off(DCP_NARRATOR_ROUTE_OVERLAP, nullptr, nullptr);
+    }
+    return DCP_NARRATOR_ROUTE_OK;
+}
+
+} // namespace
+
 int dcp_locate_voice_sites(const DcpImageView* image, DcpVoiceSites* out, DcpLocateReport* report) {
     if (!ValidView(image, report) || !out) {
         return 0;
     }
     Locator locator(*image, *report);
-    const SiteSpec* cue = SpecNamed("Japanese NPC voices", "NPC cue site");
-    const SiteSpec* acquire = SpecNamed("Japanese NPC voices", "resource acquire");
-    std::vector<uint64_t> cue_sites, acquire_sites;
-    if (!cue || !acquire || !locator.Site(*cue, cue_sites) || !locator.Site(*acquire, acquire_sites)) {
+    constexpr std::string_view kFeature = "Voice language";
+    const SiteSpec* mapper = SpecNamed(kFeature, "cue mapper");
+    const SiteSpec* acquire = SpecNamed(kFeature, "resource acquire");
+    std::vector<uint64_t> mapper_sites, acquire_sites;
+    if (!mapper || !acquire || !locator.Site(*mapper, mapper_sites) || !locator.Site(*acquire, acquire_sites)) {
         return 0;
     }
-    out->npc_cue = uint32_t(cue_sites.front());
-    out->resource_acquire = uint32_t(acquire_sites.front());
+    DcpVoiceSites sites{};
+    sites.cue_mapper = uint32_t(mapper_sites.front());
+    sites.resource_acquire = uint32_t(acquire_sites.front());
+
+    const auto calls = BranchesTo(*image, sites.cue_mapper);
+    if (calls.size() != DCP_VOICE_CUE_CALLS) {
+        return locator.Fail("relation", "cue mapper callers", calls.empty() ? "missing" : "unexpected count");
+    }
+    for (size_t i = 0; i < calls.size(); ++i) {
+        if ((calls[i].second == 0xe9) != (i == DCP_VOICE_CUE_TAIL_JUMP)) {
+            return locator.Fail("relation", "cue mapper callers", "not the verified calls and tail jump");
+        }
+        sites.cue_calls[i] = uint32_t(calls[i].first);
+    }
+
+    DcpExecRange ranges[DCP_VOICE_CUE_CALLS + 4];
+    size_t count = 0;
+    for (const uint32_t call : sites.cue_calls) {
+        ranges[count++] = {call, call + 5u};
+    }
+    ranges[count++] = {sites.resource_acquire, sites.resource_acquire + 6u};
+    if (dcp_ranges_overlap(ranges, count)) {
+        return locator.Fail("patch", "ranges", "two patches overlap");
+    }
+    sites.narrator_route = LocateNarrator(*image, sites, ranges, count);
+    if (sites.narrator_route != DCP_NARRATOR_ROUTE_OK) {
+        sites.narrator_bank_select = sites.narrator_cue_base = sites.narrator_cue_helper = 0;
+        sites.narrator_banks = sites.narrator_bases = 0;
+    }
+    *out = sites;
     return 1;
 }
-
-namespace {
-
-} // namespace
 
 int dcp_locate_ultrawide_sites(const DcpImageView* image, DcpUltrawideSites* out, DcpLocateReport* report) {
     if (!ValidView(image, report) || !out) {

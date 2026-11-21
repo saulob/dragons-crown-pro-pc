@@ -73,7 +73,7 @@ struct GameBuild {
     const char* region;
     bool cheats;                  // the native cheat hooks are validated for this build
     bool xbox_prompts;            // the Xbox prompt patch fits this build's button atlases; an update's are checked too
-    bool japanese_npc_voices;     // the NPC voice routing hook is validated for this build
+    bool voice_language;          // the Voice Language sites are located and verified in this build's executable
     bool true_ultrawide;          // dcp_pass_ortho_sites are verified in this build's executable
     std::span<const PackageLayer> layers; // base package first; the last layer is the finished game
     std::span<const DcpResolutionSite> resolution_sites;
@@ -81,7 +81,7 @@ struct GameBuild {
     const TranslationProfile* translation;
     bool resolution_by_signature = false;
     bool keep_base_languages = false; // an update's regional archive is laid over the base's, which keeps its language slots
-    bool features_by_signature = false; // cheats, NPC voices and True Ultrawide are found by structural locators, not tables
+    bool features_by_signature = false; // cheats and True Ultrawide are found by structural locators, not tables
     bool exit_game = true;            // the title menu's Exit Game row is installed from structural locators
     bool unlock_gallery = true;       // the Gallery list builder is found by signature (src/gallery_unlock.h)
     bool check_prompt_fit = false;    // no copy of this base's atlases was read: Xbox is offered only while they fit the patch
@@ -126,22 +126,9 @@ inline bool OffersPortEnglish(const GameBuild* build) {
     return false;
 }
 
-// True when the build offers the Japanese NPC Voices toggle.
-inline bool SupportsJapaneseNpcVoices(const GameBuild* build) {
-    return build != nullptr && build->japanese_npc_voices;
-}
-
-// The cue mapper picks the Japanese NPC voices for system language 0, the only language a Japanese build runs with.
-inline bool NativeJapaneseNpcVoices(const GameBuild* build) {
-    if (build == nullptr) {
-        return false;
-    }
-    for (const TextLanguage& language : build->text_languages) {
-        if (language.ps4_id != 0) {
-            return false;
-        }
-    }
-    return !build->text_languages.empty();
+// True when the build offers Voice Language.
+inline bool SupportsVoiceLanguage(const GameBuild* build) {
+    return build != nullptr && build->voice_language;
 }
 
 // False only for a known build without the cheat hooks; the unknown build is not restricted here, and the loader

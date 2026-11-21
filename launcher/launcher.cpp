@@ -35,6 +35,7 @@
 #include "dcp_displays.h"
 #include "dcp_graphics.h"
 #include "dcp_resolution.h"
+#include "dcp_voice.h"
 #include "game_files.h"
 #include "game_install.h"
 #include "game_process.h"
@@ -50,7 +51,7 @@
 #include "play_gate.h"
 #include "online_page.h"
 #include "online_settings.h"
-#include "npc_voice_resources.h"
+#include "voice_language_resources.h"
 #include "online_view.h"
 #include "problem_dialog.h"
 #include "prompts_patch.h"
@@ -165,7 +166,10 @@ constexpr char kArachnophobiaHelp[] =
 constexpr char kControllerPromptsHelp[] =
     "The buttons the game's prompts show. Xbox rewrites the button pictures in the installed game archives (a few "
     "seconds, reversible); the change is kept across reinstalls.";
-constexpr char kJapaneseNpcVoicesHelp[] = "Use Japanese voices for NPCs, enemies and AI allies";
+constexpr char kVoiceLanguageHelp[] =
+    "The language of every spoken voice: your characters, resurrected and AI party members, NPCs, enemies and the "
+    "narrator. Each keeps its own voice; only the language changes. Menu & Subtitles do not change. Game Default "
+    "leaves the game's own choice. Applies at the next game start.";
 constexpr char kControllerRumbleHelp[] = "Off disables controller vibration. Applies at the next game start.";
 constexpr char kMouseControlsEnabledHelp[] = "Enables mouse buttons, wheel and pointer controls during gameplay.";
 constexpr char kMouseControlsHelp[] =
@@ -387,7 +391,7 @@ public:
         gpu_names_ = DcpGraphics::GpuChoices(ListGpuNames());
         prompts_installed_ = InstalledPrompts();
         xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
-        npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
+        voice_languages_ = VoiceLanguagesOffered(paths_.app0, build_);
         Log("controller prompts: %s installed", PromptStyleKey(prompts_installed_));
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         Log("arachnophobia safe mode: %s installed", safe_mode_installed_ ? "on" : "off");
@@ -956,7 +960,7 @@ private:
             launcher_->SetStatus(std::string(message.title) + ". " + message.text, 6.0);
             prompts_installed_ = InstalledPrompts();
             xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
-            npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
+            voice_languages_ = VoiceLanguagesOffered(paths_.app0, build_);
             safe_mode_installed_ = InstalledSafeMode(paths_.app0);
             ApplySavedPatches();
             return;
@@ -1097,8 +1101,13 @@ private:
             languages.push_back({std::string(language.key), std::string(language.name)});
         }
         ui.Combo("Menu & Subtitles", kTextLanguageHelp, kTextLanguageKey, text_languages_.front().key.data(), languages);
-        if (npc_voices_available_) {
-            ui.Toggle("Japanese NPC Voices", kJapaneseNpcVoicesHelp, kJapaneseNpcVoicesKey, false, "Off", "On");
+        if (!voice_languages_.empty()) {
+            std::vector<trg::Option> voices{{dcp_voice_language_key(DCP_VOICE_DEFAULT), dcp_voice_language_name(DCP_VOICE_DEFAULT)}};
+            for (const int language : voice_languages_) {
+                voices.push_back({dcp_voice_language_key(language), dcp_voice_language_name(language)});
+            }
+            ui.Combo("Voice Language", kVoiceLanguageHelp, kVoiceLanguageKey, VoiceLanguageSetting(settings_).c_str(),
+                     voices);
         }
         ui.Toggle("Skip Intro", kSkipIntroHelp, kSkipIntroKey, false, "Off", "On");
         std::vector<trg::Option> frame_rates;
@@ -1515,7 +1524,7 @@ private:
         }
         prompts_installed_ = InstalledPrompts();
         xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
-        npc_voices_available_ = JapaneseNpcVoicesOffered(paths_.app0, build_);
+        voice_languages_ = VoiceLanguagesOffered(paths_.app0, build_);
         safe_mode_installed_ = InstalledSafeMode(paths_.app0);
         if (outcome->ok) {
             Log("game patches: prompts %s, arachnophobia safe mode %s (%s)", PromptStyleKey(prompts_installed_),
@@ -1697,7 +1706,7 @@ private:
     std::string mouse_capture_;  // the mouse binding row waiting for a button
     int mouse_capture_frame_ = 0;
     bool xbox_available_ = false;
-    bool npc_voices_available_ = false;
+    std::vector<int> voice_languages_;
     bool safe_mode_installed_ = false;
     PatchAction patch_action_ = PatchAction::kPrompts;
     std::shared_ptr<PromptsResult> prompts_outcome_;

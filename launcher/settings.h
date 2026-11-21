@@ -50,8 +50,10 @@ inline constexpr char kDetailedLoggingKey[] = "detailed_logging";
 inline constexpr char kControllerPromptsKey[] = "controller_prompts";
 // Replaces the Giant Spider's pictures with a simplified creature; the launcher keeps the installed archive in step with it.
 inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
-// Routes NPC voice cues to the Japanese banks already present in the USA installation.
-inline constexpr char kJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
+// The language of the game's spoken voices (default, english, japanese; dcp_voice.h); read when the game starts.
+inline constexpr char kVoiceLanguageKey[] = "voice_language";
+// The setting Voice Language replaced, read only while voice_language is absent: 1 resolves to Japanese.
+inline constexpr char kLegacyJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
 // Skips the startup logo; the title screen follows (src/skip_intro.h).
 inline constexpr char kSkipIntroKey[] = "skip_intro";
 // Circle confirms and Cross cancels in the menus (src/menu_buttons.h).
@@ -165,6 +167,9 @@ bool NormalizeTextLanguage(trg::SettingsStore& settings, std::span<const TextLan
 // The launcher opens when the game files are not ready, or when the setting is On or Shift is held, unless it was
 // skipped once. A game that is not ready always shows it: it is where the files are installed.
 bool LauncherWanted(bool game_ready, bool show_setting, bool shift_held, bool skip_once);
+
+// The saved Voice Language key with the legacy rule applied (dcp_voice_language_resolve).
+std::string VoiceLanguageSetting(const LauncherSettings& settings);
 
 // The "Settings:" lines of the run log (dcp_log_settings_summary).
 std::string SettingsSummary(const LauncherSettings& settings, const GameBuild* build,
