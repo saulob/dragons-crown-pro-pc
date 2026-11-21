@@ -1,5 +1,9 @@
 #include "game_install.h"
 
+#include <cstdio>
+
+#include "dcp_launcher.h"
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -971,3 +975,50 @@ InstallMessage DescribeInstall(InstallStatus status) {
 }
 
 } // namespace dcp
+
+// Headless installation from the player's package or extracted game folder (dcp --install), with progress on stdout:
+// the launcher's installer, for front ends that install the game without opening the launcher window.
+extern "C" int dcp_install_game(const char* source, const char* app0, const char* image_dir, char* detail,
+                                size_t detail_size) {
+    dcp::InstallHooks hooks;
+    hooks.phase = [](const char* phase) {
+        std::printf("Installing: %s\n", phase);
+        std::fflush(stdout);
+    };
+    hooks.progress = [](uint64_t done, uint64_t total) {
+        static int last = -1;
+        const int percent = total ? static_cast<int>(done * 100 / total) : 0;
+        if (percent / 5 != last) {
+            last = percent / 5;
+            std::printf("  %3d%%  %llu / %llu MB\n", percent, static_cast<unsigned long long>(done >> 20),
+                        static_cast<unsigned long long>(total >> 20));
+            std::fflush(stdout);
+        }
+        return true;
+    };
+    const dcp::GamePaths paths{dcp::PathFromUtf8(app0 ? app0 : ""), dcp::PathFromUtf8(image_dir ? image_dir : "")};
+    const dcp::InstallResult result = dcp::InstallGame(dcp::PathFromUtf8(source ? source : ""), dcp::RootsOf(paths), hooks);
+    const dcp::InstallMessage message = dcp::DescribeInstall(result.status);
+    std::printf("%s: %s. %s\n", result.ok() ? "Installed" : "Install failed", message.title.c_str(), message.text.c_str());
+    if (!result.detail.empty()) {
+        std::printf("  %s\n", result.detail.c_str());
+    }
+    for (const std::string& line : result.ok() ? result.site_report : result.diagnostics) {
+        std::printf("%s\n", line.c_str());
+    }
+    if (detail && detail_size) {
+        std::snprintf(detail, detail_size, "%s", message.title.c_str());
+    }
+    return result.ok() ? 0 : 1;
+}
+
+// Headless readiness check (dcp --check-game): 1 when the active build's files are ready to play.
+extern "C" int dcp_check_game(const char* app0, const char* image_dir, char* detail, size_t detail_size) {
+    const dcp::GamePaths paths{dcp::PathFromUtf8(app0 ? app0 : ""), dcp::PathFromUtf8(image_dir ? image_dir : "")};
+    const dcp::GameCheck check = dcp::CheckGameFiles(paths);
+    if (detail && detail_size) {
+        std::snprintf(detail, detail_size, "%s%s%s", check.build ? check.build->label : "",
+                      check.build && !check.detail.empty() ? ": " : "", check.detail.c_str());
+    }
+    return check.state == dcp::GameFileState::kValid ? 1 : 0;
+}
