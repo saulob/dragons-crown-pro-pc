@@ -47,7 +47,7 @@ struct Profile {
     bool has_broken_spirv_clamp{};
     bool lower_left_origin_mode{};
     bool needs_manual_interpolation{};
-    /// dcp: NVIDIA without fragment shader barycentrics (Pascal and older).
+    /// dcp: driver-interpolated varyings that are not exact for equal vertex values.
     bool needs_integer_interpolation_fix{};
     bool needs_lds_barriers{};
     bool needs_buffer_offsets{};

@@ -549,6 +549,14 @@ target_include_directories(dcp-pipeline-cache-tests PRIVATE gpu/shadps4)
 target_compile_options(dcp-pipeline-cache-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-pipeline-cache-tests PRIVATE Threads::Threads)
 
+# Focused tests of the renderer capability routes (issue #84: interpolation, integer fix, pipeline state fallbacks);
+# not part of the default build.
+add_executable(dcp-gpu-compat-tests EXCLUDE_FROM_ALL tests/gpu_compat_tests.cpp)
+set_target_properties(dcp-gpu-compat-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-gpu-compat-tests PRIVATE gpu/shadps4)
+target_compile_definitions(dcp-gpu-compat-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-gpu-compat-tests PRIVATE -Wall -Wextra -Werror)
+
 # Focused tests of the issue #32 water diagnostics (classification, deduplication, the cap); not part of the default build.
 add_executable(dcp-water-diag-tests EXCLUDE_FROM_ALL tests/water_diag_tests.cpp)
 set_target_properties(dcp-water-diag-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)

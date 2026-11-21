@@ -325,6 +325,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       desc_heap{instance, scheduler.GetWorkSemaphore(), DescriptorHeapSizes} {
     sel.regs = &liverpool->regs;
     const auto& vk12_props = instance.GetVk12Properties();
+    gpu_caps = instance.GetGpuCapabilities();
+    const auto interpolation = GpuCompat::ChooseInterpolation(gpu_caps);
+    std::printf("%s\n", GpuCompat::Summary(gpu_caps).c_str());
     profile = Shader::Profile{
         .max_viewport_width = instance.GetMaxViewportWidth(),
         .max_viewport_height = instance.GetMaxViewportHeight(),
@@ -370,11 +373,8 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
             instance_.IsAmdShaderExplicitVertexParameterSupported(),
         .supports_fragment_shader_barycentric = instance_.IsFragmentShaderBarycentricSupported(),
         .supports_shader_subgroup_clock = instance_.IsShaderSubgroupClockSupported(),
-        .needs_manual_interpolation = instance.IsFragmentShaderBarycentricSupported() &&
-                                      instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
-        // dcp: older NVIDIA GPUs (Pascal) have no barycentrics.
-        .needs_integer_interpolation_fix = !instance.IsFragmentShaderBarycentricSupported() &&
-                                           instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
+        .needs_manual_interpolation = interpolation.manual_interpolation,
+        .needs_integer_interpolation_fix = interpolation.integer_fix,
         .needs_lds_barriers = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary ||
                               instance.GetDriverID() == vk::DriverId::eMesaKosmickrisp,
         .needs_buffer_offsets = instance.StorageMinAlignment() > 4,
@@ -914,8 +914,7 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     // Force all color samples to match depth samples to avoid unsupported MSAA configuration
     if (color_samples != 0) {
         const bool depth_mismatch = db_enabled && color_samples != key.depth_samples;
-        if (!all_color_samples_same && !instance.IsMixedAnySamplesSupported() ||
-            all_color_samples_same && depth_mismatch && !instance.IsMixedDepthSamplesSupported()) {
+        if (GpuCompat::ForceColorSamplesToDepth(gpu_caps, all_color_samples_same, depth_mismatch)) {
             key.color_samples.fill(key.depth_samples);
             key.num_samples = key.depth_samples;
         }

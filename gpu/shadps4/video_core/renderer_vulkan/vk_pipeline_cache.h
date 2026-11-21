@@ -13,6 +13,7 @@
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/specialization.h"
+#include "video_core/renderer_vulkan/vk_gpu_compat.h"
 #include "video_core/pipeline_cache_policy.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -225,6 +226,7 @@ private:
     vk::UniquePipelineCache pipeline_cache;
     vk::UniquePipelineLayout pipeline_layout;
     Shader::Profile profile{};
+    GpuCompat::Capabilities gpu_caps{};
     Shader::Pools pools;
     CompilerPool<Shader::Pools> compiler_pools{8};
     std::unique_ptr<AsyncCompiler> compiler, capture_compiler;

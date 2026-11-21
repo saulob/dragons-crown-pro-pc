@@ -68,6 +68,7 @@ GraphicsPipeline::GraphicsPipeline(
       fetch_shader{std::move(fetch_shader_)} {
     const auto started = Clock::now();
     const vk::Device device = instance.GetDevice();
+    const auto state_route = GpuCompat::ChoosePipelineState(instance.GetGpuCapabilities());
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout(preloading);
     const auto debug_str = GetDebugString();
@@ -93,7 +94,7 @@ GraphicsPipeline::GraphicsPipeline(
 
     if (!preloading) {
         VertexInputs<AmdGpu::Buffer> guest_buffers;
-        if (!instance.IsVertexInputDynamicState()) {
+        if (!state_route.dynamic_vertex_input) {
             const auto& vs_info = runtime_infos[u32(Shader::SwStage::Vertex)].sw.vs;
             GetVertexInputs(sdata.vertex_attributes, sdata.vertex_bindings, sdata.divisors,
                             guest_buffers, vs_info.step_rate_0, vs_info.step_rate_1);
@@ -142,7 +143,7 @@ GraphicsPipeline::GraphicsPipeline(
         },
     };
 
-    if (!instance.IsProvokingVertexSupported()) {
+    if (!state_route.provoking_vertex_state) {
         raster_chain.unlink<vk::PipelineRasterizationProvokingVertexStateCreateInfoEXT>();
     }
     if (!instance.IsDepthClipEnableSupported()) {
@@ -179,14 +180,14 @@ GraphicsPipeline::GraphicsPipeline(
         vk::DynamicState::eLineWidth,          vk::DynamicState::ePrimitiveRestartEnable,
     };
 
-    if (instance.IsDepthBoundsSupported()) {
+    if (state_route.dynamic_depth_bounds) {
         dynamic_states.push_back(vk::DynamicState::eDepthBoundsTestEnable);
         dynamic_states.push_back(vk::DynamicState::eDepthBounds);
     }
-    if (instance.IsDynamicColorWriteMaskSupported()) {
+    if (state_route.dynamic_color_write_mask) {
         dynamic_states.push_back(vk::DynamicState::eColorWriteMaskEXT);
     }
-    if (instance.IsVertexInputDynamicState()) {
+    if (state_route.dynamic_vertex_input) {
         dynamic_states.push_back(vk::DynamicState::eVertexInputEXT);
     } else if (!sdata.vertex_bindings.empty()) {
         dynamic_states.push_back(vk::DynamicState::eVertexInputBindingStride);
@@ -311,7 +312,7 @@ GraphicsPipeline::GraphicsPipeline(
     };
 
     const vk::PipelineRenderingCreateInfo pipeline_rendering_ci = {
-        .pNext = instance.IsMixedDepthSamplesSupported() ? &mixed_samples : nullptr,
+        .pNext = state_route.mixed_samples_info ? &mixed_samples : nullptr,
         .colorAttachmentCount = key.num_color_attachments,
         .pColorAttachmentFormats = color_formats.data(),
         .depthAttachmentFormat = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid
@@ -373,7 +374,7 @@ GraphicsPipeline::GraphicsPipeline(
             .dstAlphaBlendFactor = LiverpoolToVK::BlendFactor(alpha_equation.dst_factor),
             .alphaBlendOp = LiverpoolToVK::BlendOp(alpha_equation.function),
             .colorWriteMask =
-                instance.IsDynamicColorWriteMaskSupported()
+                state_route.dynamic_color_write_mask
                     ? vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
                           vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
                     : key.write_masks[i],
@@ -430,14 +431,13 @@ GraphicsPipeline::GraphicsPipeline(
         .pNext = &pipeline_rendering_ci,
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
-        .pVertexInputState = !instance.IsVertexInputDynamicState() ? &vertex_input_info : nullptr,
+        .pVertexInputState = !state_route.dynamic_vertex_input ? &vertex_input_info : nullptr,
         .pInputAssemblyState = &input_assembly,
         .pTessellationState = &tessellation_state,
         .pViewportState = &viewport_info,
         .pRasterizationState = &raster_chain.get(),
         .pMultisampleState = &sdata.multisampling,
-        .pDepthStencilState =
-            !instance.IsExtendedDynamicState3Supported() ? &depth_stencil_info : nullptr,
+        .pDepthStencilState = state_route.static_depth_stencil_state ? &depth_stencil_info : nullptr,
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
         .layout = *pipeline_layout,

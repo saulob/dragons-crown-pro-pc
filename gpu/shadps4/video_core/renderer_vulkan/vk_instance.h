@@ -6,6 +6,7 @@
 #include <span>
 #include <unordered_map>
 
+#include "video_core/renderer_vulkan/vk_gpu_compat.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 #define TRACY_VK_USE_SYMBOL_TABLE
@@ -203,6 +204,23 @@ public:
     /// Returns true when VK_EXT_provoking_vertex is supported.
     bool IsProvokingVertexSupported() const {
         return provoking_vertex;
+    }
+
+    GpuCompat::Capabilities GetGpuCapabilities() const {
+        return {
+            .vendor_id = GetVendorID(),
+            .nvidia_proprietary = driver_id == vk::DriverId::eNvidiaProprietary,
+            .amd_explicit_vertex_parameter = amd_shader_explicit_vertex_parameter,
+            .fragment_shader_barycentric = fragment_shader_barycentric,
+            .dynamic_state3 = dynamic_state_3,
+            .dynamic_state3_color_write_mask = IsDynamicColorWriteMaskSupported(),
+            .depth_bounds = IsDepthBoundsSupported(),
+            .vertex_input_dynamic_state = vertex_input_dynamic_state,
+            .feedback_loop = attachment_feedback_loop,
+            .mixed_depth_samples = IsMixedDepthSamplesSupported(),
+            .mixed_any_samples = IsMixedAnySamplesSupported(),
+            .provoking_vertex = provoking_vertex,
+        };
     }
 
     /// Returns true when VK_AMD_shader_image_load_store_lod is supported.
