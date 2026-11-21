@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include "dcp_keys.h"
+#include "dcp_trackpad.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +39,16 @@ void dcp_mouse_set_sensitivity(DcpMouseState *state, int percent);
 /* Live change of the Pointer Control Mode (DcpPointerMode); anything else is ignored. */
 void dcp_mouse_set_pointer_mode(DcpMouseState *state, int mode);
 int dcp_mouse_enabled(DcpMouseState *state);
+
+/* Steam Deck trackpad. The window thread reports the session once (`mice` is the mouse device count); the pad sampler reports
+ * the Valve touchpads of the open gamepads on every read. On a Steam Deck in Gaming Mode with the setting Auto and no native
+ * touchpad, the pointer behaves as Always On whatever the Pointer Control Mode says: Pointer Control needs no button and the
+ * interaction button is the trackpad click. Everywhere else nothing changes. */
+void dcp_mouse_set_trackpad_env(DcpMouseState *state, const DcpTrackpadEnv *env, int mice);
+void dcp_mouse_trackpad_pads(DcpMouseState *state, int native_touchpads, int native_touching);
+int dcp_mouse_trackpad_mode(DcpMouseState *state);
+/* Always On by setting or by the Steam Deck trackpad route. */
+int dcp_mouse_always_on(DcpMouseState *state);
 
 /* Window thread. Movement is in game pixels (see dcp_mouse_game_scale). */
 void dcp_mouse_button(DcpMouseState *state, int button, int down);

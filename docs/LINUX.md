@@ -58,7 +58,7 @@ Run the second command from the repository folder. A Docker `ubuntu:20.04` conta
 | Data folders | Next to the AppImage file (`$APPIMAGE`), else next to the executable; `DCP_PORTABLE_DIR` overrides; a read-only AppImage folder falls back to `$XDG_DATA_HOME/DragonsCrownProPC` (`launcher/paths.cpp`). |
 | Launcher | The same TRG launcher and installer. File chooser: `zenity` or `kdialog` when installed, otherwise the launcher's own chooser (`launcher/package_browser.cpp`: mouse, keyboard and controller; it lists the program's folder, Downloads, Home and mounted drives such as the SD card). `DCP_FILE_CHOOSER=builtin` or `native` forces one. Open folder: `xdg-open`. Shift at start is read from the X11 server (`launcher/shift_key.cpp`); `--launcher` does the same in any session. |
 | Windowing | SDL3 on X11 or Wayland; Vulkan surface, F11, resize and VSync are the existing SDL code. When Steam starts the game (a non-Steam shortcut) on a Wayland desktop, outside Gamescope, the port asks SDL for XWayland first (`src/dcp_video_backend.h`), because Steam cannot tell which native Wayland window is the shortcut and leaves its Steam Input layout on Desktop. Without XWayland, with an `SDL_VIDEO_DRIVER` or `SDL_VIDEODRIVER` of your own, in Gaming Mode or outside Steam, the default backend is kept. |
-| Mouse and trackpad | The same code and the same `dcp.ini` lines as Windows (`src/dcp_keys.c`, `src/dcp_mouse.c`): any mouse button can press any PS4 control, and Pointer Control Mode is `hold` or `always_on`. A Steam Deck trackpad that Steam Input or SDL exposes as mouse motion moves the game's pointer without a held button when Pointer Control Mode is Always On; no Deck-specific check is involved. |
+| Mouse and trackpad | The same code and the same `dcp.ini` lines as Windows (`src/dcp_keys.c`, `src/dcp_mouse.c`): any mouse button can press any PS4 control, and Pointer Control Mode is `hold` or `always_on`. On a Steam Deck in Gaming Mode the trackpad moves the game's pointer without a held button (see Steam Deck trackpad below). |
 
 ## Windows parity
 
@@ -90,11 +90,25 @@ touch into a mouse pointer and a left click, which the game would read as a mous
 Square). While the game window has focus the game asks Gamescope for its Passthrough touch mode (the root property
 `STEAM_TOUCH_CLICK_MODE` on the game's X server, written through libX11) and puts the previous value back when the window
 loses focus or closes. A physical touchscreen is then the DualShock 4 touch surface: a contact is a touchpad contact and a
-short tap is a touchpad click; it moves no host cursor and presses no mouse button. Mice, the Steam Deck trackpads and Steam
-Virtual Gamepads are unchanged. `DCP_TOUCH_GAMESCOPE=0` in the environment keeps Gamescope's own touch handling. The log
+short tap is a touchpad click; it moves no host cursor and presses no mouse button. Mice and Steam Virtual Gamepads are
+unchanged. `DCP_TOUCH_GAMESCOPE=0` in the environment keeps Gamescope's own touch handling. The log
 shows `Touchscreen telemetry: event=touch_route_ready video=<wayland|x11> gamescope=<yes|no> direct_devices=<n>`, and
 `touchscreen_fallback_used` when the mode was changed (`touchscreen_fallback_unavailable` when libX11 or the X server could
 not be reached); bug report DCP-8G6HDU.
+
+**Steam Deck trackpad** (Gaming Mode, `SteamDeck=1` under Gamescope): Steam Input presents the trackpads to the game as a
+mouse, and the Steam Virtual Gamepad (28de:11ff) has no touchpad, so the game cannot read them as a controller touchpad. With
+`mouse_steam_deck_trackpad = auto` (the default, a row on the launcher's Controls page on a Steam Deck) the pointer follows
+the Always On rules whatever Pointer Control Mode says: moving the trackpad moves the game's red hand pointer without holding
+Pointer Control, the click (Left Mouse by default) is the Pointer Interaction instead of Square, and the right-pad click stays
+Circle. The touchscreen keeps priority while a finger is down, and sticks and buttons are unaffected. Gamescope gives the game
+one pointer, so a mouse plugged into the Steam Deck is handled the same way; set `mouse_steam_deck_trackpad = off` to keep
+ordinary mouse behavior. Steam Deck desktop mode and other systems are unchanged. When Steam Input is off for the game and
+SDL opens the Steam Deck itself, its trackpads are controller touchpads: the pad in use becomes the touch surface and the
+mouse fallback stays off. The log shows `Trackpad telemetry: event=trackpad_route_ready ... mode=<native|mouse_fallback|none>`,
+then `trackpad_mouse_fallback_used`, `trackpad_pointer_interaction`, `trackpad_native_used` or `trackpad_unavailable`.
+A trackpad Steam Input maps as a joystick is a gamepad stick like any other and keeps the right stick's speed; use the mouse
+configuration.
 
 ## AppImage
 

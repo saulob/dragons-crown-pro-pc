@@ -117,6 +117,7 @@ DcpMouseMap SavedMouse(const trg::SettingsStore& settings) {
     dcp_mouse_apply(&map, dcp_wheel_down_key, settings.Get(dcp_wheel_down_key).c_str());
     dcp_mouse_apply(&map, dcp_pointer_sensitivity_key, settings.Get(dcp_pointer_sensitivity_key).c_str());
     dcp_mouse_apply(&map, dcp_pointer_mode_key, settings.Get(dcp_pointer_mode_key).c_str());
+    dcp_mouse_apply(&map, dcp_trackpad_key, settings.Get(dcp_trackpad_key).c_str());
     dcp_mouse_normalize(&map);
     return map;
 }
@@ -175,6 +176,7 @@ void ResetMouse(trg::SettingsStore& settings) {
     settings.Set(dcp_wheel_down_key, dcp_wheel_target_name(DCP_WHEEL_NONE));
     settings.Set(dcp_pointer_sensitivity_key, std::to_string(DCP_POINTER_SENSITIVITY_DEFAULT));
     settings.Set(dcp_pointer_mode_key, dcp_pointer_mode_name(DCP_POINTER_MODE_HOLD));
+    settings.Set(dcp_trackpad_key, dcp_trackpad_setting_name(DCP_TRACKPAD_AUTO));
 }
 
 } // namespace dcp

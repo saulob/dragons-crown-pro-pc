@@ -182,6 +182,9 @@ constexpr char kMouseButtonInteractionAlwaysOnHelp[] =
 constexpr char kPointerModeHelp[] =
     "Hold moves the game's pointer while the Pointer Control button is held. Always On moves it whenever the mouse is free "
     "for gameplay, which suits a trackpad.";
+constexpr char kSteamDeckTrackpadHelp[] =
+    "Auto moves the game's pointer with the Steam Deck trackpad in Gaming Mode without holding Pointer Control, and the "
+    "trackpad click is the Pointer Interaction. Off keeps ordinary mouse behavior, for a mouse plugged into the Steam Deck.";
 constexpr char kPointerControlHelp[] =
     "Hold this button and move the mouse to control the game's pointer. Releasing it goes back to normal play.";
 constexpr char kPointerControlAlwaysOnHelp[] = "Not used while Always On is selected. The button is kept for Hold.";
@@ -1224,6 +1227,14 @@ private:
         }
         ui.Choice("Pointer Control Mode", kPointerModeHelp, dcp_pointer_mode_key, dcp_pointer_mode_name(DCP_POINTER_MODE_HOLD),
                   modes);
+        if (dcp_trackpad_steam_deck_value(std::getenv("SteamDeck"))) {
+            std::vector<trg::Option> trackpad;
+            for (int setting = 0; setting < DCP_TRACKPAD_SETTING_COUNT; ++setting) {
+                trackpad.push_back({dcp_trackpad_setting_name(setting), dcp_trackpad_setting_label(setting)});
+            }
+            ui.Choice("Steam Deck Trackpad", kSteamDeckTrackpadHelp, dcp_trackpad_key,
+                      dcp_trackpad_setting_name(DCP_TRACKPAD_AUTO), trackpad);
+        }
         const bool always_on = mouse.pointer_mode == DCP_POINTER_MODE_ALWAYS_ON;
         for (const DcpMouseAction action : {DCP_MOUSE_POINTER_CONTROL, DCP_MOUSE_POINTER_INTERACT}) {
             const bool control = action == DCP_MOUSE_POINTER_CONTROL;

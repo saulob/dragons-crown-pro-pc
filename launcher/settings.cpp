@@ -58,6 +58,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kMouseControlsKey, "1"},
     {kMouseSensitivityKey, "100"},
     {kMousePointerModeKey, "hold"},
+    {kMouseSteamDeckTrackpadKey, "auto"},
     {kStorySkipOfferKey, "0"},
     {kTutorialSkipOfferKey, "0"},
     {kUnlockGalleryKey, "0"},

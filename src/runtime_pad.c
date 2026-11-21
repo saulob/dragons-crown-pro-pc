@@ -13,6 +13,7 @@
 #include "dcp_pad_buttons.h"
 #include "dcp_pad_owner.h"
 #include "dcp_pointer_motion.h"
+#include "dcp_trackpad.h"
 #include "dcp_touchscreen.h"
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
@@ -308,14 +309,33 @@ static void merge_mouse(PadData *d, const DcpMouseSample *mouse) {
     }
     if (mouse->touchpad_side) touch_click(d,mouse->touchpad_side==2);
 }
-static bool pad_surface_touched(SDL_Gamepad *g) {
-    if (!g || SDL_GetNumGamepadTouchpads(g)<1) return false;
-    const int fingers=SDL_GetNumGamepadTouchpadFingers(g,0);
+static bool touchpad_touched(SDL_Gamepad *g, int touchpad) {
+    const int fingers=SDL_GetNumGamepadTouchpadFingers(g,touchpad);
     for (int finger=0;finger<fingers;++finger) {
         bool down=false;
-        if (SDL_GetGamepadTouchpadFinger(g,0,finger,&down,NULL,NULL,NULL) && down) return true;
+        if (SDL_GetGamepadTouchpadFinger(g,touchpad,finger,&down,NULL,NULL,NULL) && down) return true;
     }
     return false;
+}
+static int valve_touchpads(SDL_Gamepad *g) {
+    return g ? dcp_trackpad_native_touchpads(SDL_GetGamepadVendor(g),SDL_GetNumGamepadTouchpads(g)) : 0;
+}
+/* The touchpad that feeds the game's touch surface: the first one, or on a Steam Deck the trackpad in use. -1 without any. */
+static int surface_touchpad(SDL_Gamepad *g) {
+    static int deck_pad=1;
+    if (!g || SDL_GetNumGamepadTouchpads(g)<1) return -1;
+    if (valve_touchpads(g)<2) return 0;
+    deck_pad=dcp_trackpad_pick(touchpad_touched(g,0),touchpad_touched(g,1),deck_pad);
+    return deck_pad;
+}
+static bool pad_surface_touched(SDL_Gamepad *g) {
+    const int touchpad=surface_touchpad(g);
+    return touchpad>=0 && touchpad_touched(g,touchpad);
+}
+static int native_trackpads(void) {
+    int total=0;
+    for (int slot=0;slot<MAX_PADS;++slot) total+=valve_touchpads(slots[slot].gamepad);
+    return total;
 }
 /* A finger on the screen owns the touch surface while it is down. */
 static void merge_touchscreen(PadData *d, const DcpTouchSample *screen) {
@@ -352,6 +372,7 @@ static void sample_host(int slot, PadData *d) {
     DcpTouchSample screen={0};
     if (slot==0) {
         dcp_mouse_controller_surface(dcp_mouse_global(),pad_surface_touched(g));
+        dcp_mouse_trackpad_pads(dcp_mouse_global(),native_trackpads(),valve_touchpads(g)>1 && pad_surface_touched(g));
         dcp_mouse_sample(dcp_mouse_global(),&mouse);
         dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);
         if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);
@@ -375,12 +396,13 @@ static void sample_host(int slot, PadData *d) {
         if (d->r2>30) d->buttons|=BTN_R2;
         if (mapped & BTN_L2) d->l2=255;
         if (mapped & BTN_R2) d->r2=255;
-        if (SDL_GetNumGamepadTouchpads(g)>0) {
-            const int fingers=SDL_GetNumGamepadTouchpadFingers(g,0);
+        const int touchpad=surface_touchpad(g);
+        if (touchpad>=0) {
+            const int fingers=SDL_GetNumGamepadTouchpadFingers(g,touchpad);
             for (int finger=0;finger<fingers && d->touch_count<2;++finger) {
                 bool down=false;
                 float x=0, y=0;
-                if (SDL_GetGamepadTouchpadFinger(g,0,finger,&down,&x,&y,NULL) && down) {
+                if (SDL_GetGamepadTouchpadFinger(g,touchpad,finger,&down,&x,&y,NULL) && down) {
                     d->touches[d->touch_count++]=(PadTouch){.x=touch_axis(x,1919),
                         .y=touch_axis(y,942),.id=(uint8_t)finger};
                 }

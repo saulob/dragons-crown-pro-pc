@@ -510,6 +510,15 @@ target_compile_definitions(dcp-touchscreen-steamos-tests PRIVATE DCP_SOURCE_DIR=
 target_compile_options(dcp-touchscreen-steamos-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-touchscreen-steamos-tests PRIVATE dcp_keys)
 
+# Focused tests of the Steam Deck trackpad (DCP-FHYNJM): native touchpad route, automatic pointer in Gaming Mode, click
+# routing, opt-out, cursor ownership, telemetry, touchscreen/controller/mouse regression; not part of the default build.
+add_executable(dcp-steam-deck-trackpad-tests EXCLUDE_FROM_ALL tests/steam_deck_trackpad_tests.cpp)
+set_target_properties(dcp-steam-deck-trackpad-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-steam-deck-trackpad-tests PRIVATE src gpu/shim)
+target_compile_definitions(dcp-steam-deck-trackpad-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-steam-deck-trackpad-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-steam-deck-trackpad-tests PRIVATE dcp_keys)
+
 # Focused tests of the windowed-mode size and centring arithmetic; not part of the default build.
 add_executable(dcp-window-tests EXCLUDE_FROM_ALL tests/window_fit_tests.cpp)
 set_target_properties(dcp-window-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)

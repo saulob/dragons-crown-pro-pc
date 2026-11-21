@@ -15,8 +15,8 @@
 #define MARGIN_X (DCP_TOUCH_RES_X/5)
 #define MARGIN_Y (DCP_TOUCH_RES_Y/5)
 #define PENDING_LIMIT 4.0f
-#define MAX_LINES 3
-#define LINE_SIZE 112
+#define MAX_LINES 4
+#define LINE_SIZE DCP_TRACKPAD_LINE_SIZE
 
 typedef enum { PHASE_IDLE, PHASE_DOWN, PHASE_LIFTED } Phase;
 
@@ -47,6 +47,10 @@ struct DcpMouseState {
     int gap;        /* the next pointer read has no finger, so the game sees a landing and not a jump */
     int yield_gap;  /* the next read hides the controller's finger for the same reason */
     unsigned extended_down;
+    /* Steam Deck trackpad */
+    DcpTrackpadEnv tp_env;
+    int tp_env_set, tp_mice, tp_native, tp_native_touching, tp_pads_seen, tp_mode, tp_reason, tp_click_noted;
+    DcpTrackpadLog tp_log;
     uint64_t count[DCP_MOUSE_EVENT_COUNT][DCP_MOUSE_REASON_COUNT];
     DcpMouseLogSink sink;
     void *sink_user;
@@ -68,9 +72,11 @@ static int line_due(uint64_t count) {
     return count==1;
 }
 
+static char *next_line(DcpMouseState *s) { return s->line_count>=MAX_LINES ? NULL : s->lines[s->line_count++]; }
+
 static void queue_line(DcpMouseState *s, DcpMouseEvent event, DcpMouseReason reason, unsigned long long count) {
-    if (s->line_count>=MAX_LINES) return;
-    char *line=s->lines[s->line_count++];
+    char *line=next_line(s);
+    if (!line) return;
     if (reason==DCP_MOUSE_REASON_NONE) snprintf(line,LINE_SIZE,"Mouse telemetry: event=%s count=%llu",event_names[event],count);
     else snprintf(line,LINE_SIZE,"Mouse telemetry: event=%s reason=%s count=%llu",event_names[event],reason_names[reason],count);
 }
@@ -138,7 +144,9 @@ void dcp_mouse_note_invalid(DcpMouseState *s, int count) {
 static int valid_button(int button) { return button>0 && button<DCP_MOUSE_BUTTON_COUNT; }
 static int pointer_button(const DcpMouseState *s) { return s->map.button[DCP_MOUSE_POINTER_CONTROL]; }
 static int click_button(const DcpMouseState *s) { return s->map.button[DCP_MOUSE_POINTER_INTERACT]; }
-static int always_on(const DcpMouseState *s) { return s->map.pointer_mode==DCP_POINTER_MODE_ALWAYS_ON; }
+static int always_on(const DcpMouseState *s) {
+    return s->map.pointer_mode==DCP_POINTER_MODE_ALWAYS_ON || s->tp_mode==DCP_TRACKPAD_MODE_MOUSE_FALLBACK;
+}
 
 static int pointer_active(const DcpMouseState *s) {
     if (!s->enabled || s->blocked) return 0;
@@ -186,6 +194,39 @@ static void update_consumed(DcpMouseState *s) {
     if (valid_button(click) && s->down[click]) s->consumed[click]=1;
 }
 
+static void note_trackpad(DcpMouseState *s, DcpTrackpadEvent event, DcpTrackpadReason reason) {
+    char line[LINE_SIZE];
+    if (!dcp_trackpad_note(&s->tp_log,event,reason,line,sizeof(line))) return;
+    char *slot=next_line(s);
+    if (slot) memcpy(slot,line,LINE_SIZE);
+}
+
+/* Recomputes the route; a change of mode is a change of Pointer Control Mode as far as the pointer is concerned. */
+static void refresh_trackpad(DcpMouseState *s) {
+    DcpTrackpadRoute route={DCP_TRACKPAD_MODE_NONE,DCP_TRACKPAD_REASON_NONE};
+    if (s->tp_env_set) {
+        const DcpTrackpadInput input={s->tp_env,s->map.trackpad,s->enabled,s->tp_native};
+        route=dcp_trackpad_route(&input);
+    }
+    if (route.mode!=s->tp_mode) {
+        s->tp_mode=route.mode;
+        s->latched=0;
+        s->pending_x=s->pending_y=0;
+        update_consumed(s);
+        observe(s);
+    }
+    if (!s->tp_pads_seen || !s->tp_env.linux_host || !s->tp_env.steam_deck) return;
+    char line[LINE_SIZE];
+    if (dcp_trackpad_route_note(&s->tp_log,&s->tp_env,s->tp_native,s->tp_mice,s->tp_mode,line,sizeof(line))) {
+        char *slot=next_line(s);
+        if (slot) memcpy(slot,line,LINE_SIZE);
+    }
+    if (route.mode==DCP_TRACKPAD_MODE_NONE && route.reason!=DCP_TRACKPAD_REASON_NONE && route.reason!=s->tp_reason) {
+        note_trackpad(s,DCP_TRACKPAD_EVENT_UNAVAILABLE,(DcpTrackpadReason)route.reason);
+    }
+    s->tp_reason=route.reason;
+}
+
 static void clear_held(DcpMouseState *s) {
     memset(s->down,0,sizeof(s->down));
     memset(s->consumed,0,sizeof(s->consumed));
@@ -195,6 +236,7 @@ static void clear_held(DcpMouseState *s) {
     s->phase=PHASE_IDLE;
     s->recenter_due=0;
     s->extended_down=0;
+    s->tp_click_noted=0;
 }
 
 void dcp_mouse_configure(DcpMouseState *s, const DcpMouseMap *map) {
@@ -206,7 +248,8 @@ void dcp_mouse_configure(DcpMouseState *s, const DcpMouseMap *map) {
     if (s->map.pointer_mode<0 || s->map.pointer_mode>=DCP_POINTER_MODE_COUNT) s->map.pointer_mode=DCP_POINTER_MODE_HOLD;
     clear_held(s);
     s->live=s->suspended=s->used=s->gap=s->yield_gap=0;
-    state_unlock(s);
+    refresh_trackpad(s);
+    leave(s);
 }
 
 void dcp_mouse_button(DcpMouseState *s, int button, int down) {
@@ -245,6 +288,7 @@ void dcp_mouse_motion(DcpMouseState *s, float game_dx, float game_dy) {
         if (always_on(s) && !s->used && (game_dx!=0.0f || game_dy!=0.0f)) {
             s->used=1;
             note(s,DCP_MOUSE_EVENT_ALWAYS_ON_USED,DCP_MOUSE_REASON_NONE);
+            if (s->tp_mode==DCP_TRACKPAD_MODE_MOUSE_FALLBACK) note_trackpad(s,DCP_TRACKPAD_EVENT_MOUSE_FALLBACK_USED,DCP_TRACKPAD_REASON_NONE);
         }
     }
     leave(s);
@@ -264,6 +308,7 @@ void dcp_mouse_set_enabled(DcpMouseState *s, int enabled) {
     state_lock(s);
     s->enabled=enabled!=0;
     if (!s->enabled) clear_held(s);
+    refresh_trackpad(s);
     observe(s);
     leave(s);
 }
@@ -292,6 +337,41 @@ int dcp_mouse_enabled(DcpMouseState *s) {
     const int enabled=s->enabled;
     state_unlock(s);
     return enabled;
+}
+
+void dcp_mouse_set_trackpad_env(DcpMouseState *s, const DcpTrackpadEnv *env, int mice) {
+    state_lock(s);
+    s->tp_env=*env;
+    s->tp_env_set=1;
+    s->tp_mice=mice;
+    refresh_trackpad(s);
+    leave(s);
+}
+
+void dcp_mouse_trackpad_pads(DcpMouseState *s, int native_touchpads, int native_touching) {
+    state_lock(s);
+    s->tp_pads_seen=1;
+    s->tp_native=native_touchpads<0 ? 0 : native_touchpads;
+    refresh_trackpad(s);
+    if (native_touching && !s->tp_native_touching && s->tp_mode==DCP_TRACKPAD_MODE_NATIVE) {
+        note_trackpad(s,DCP_TRACKPAD_EVENT_NATIVE_USED,DCP_TRACKPAD_REASON_NONE);
+    }
+    s->tp_native_touching=native_touching!=0;
+    leave(s);
+}
+
+int dcp_mouse_trackpad_mode(DcpMouseState *s) {
+    state_lock(s);
+    const int mode=s->tp_mode;
+    state_unlock(s);
+    return mode;
+}
+
+int dcp_mouse_always_on(DcpMouseState *s) {
+    state_lock(s);
+    const int on=always_on(s);
+    state_unlock(s);
+    return on;
 }
 
 void dcp_mouse_block(DcpMouseState *s, int blocked) {
@@ -414,14 +494,19 @@ void dcp_mouse_sample(DcpMouseState *s, DcpMouseSample *out) {
     if (!active) {
         s->phase=PHASE_IDLE;
         s->pending_x=s->pending_y=0;
+        s->tp_click_noted=0;
         if (s->yield_gap) {
             s->yield_gap=0;
             out->pointer=1;
         }
     } else {
         out->pointer=1;
-        const int click=click_button(s);
-        if (valid_button(click) && s->down[click]) out->buttons|=BTN_TOUCHPAD;
+        const int click=click_button(s), click_down=valid_button(click) && s->down[click];
+        if (click_down) out->buttons|=BTN_TOUCHPAD;
+        if (click_down && !s->tp_click_noted && s->tp_mode==DCP_TRACKPAD_MODE_MOUSE_FALLBACK) {
+            note_trackpad(s,DCP_TRACKPAD_EVENT_POINTER_INTERACTION,DCP_TRACKPAD_REASON_NONE);
+        }
+        s->tp_click_noted=click_down;
         if (s->gap) {
             s->gap=0;
             s->phase=PHASE_LIFTED;

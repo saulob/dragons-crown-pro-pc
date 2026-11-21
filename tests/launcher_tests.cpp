@@ -631,12 +631,13 @@ void TestLogRedirect(const fs::path& base) {
 void TestEnvironmentVariables() {
     const fs::path source(DCP_SOURCE_DIR);
     // Unix/macOS branches of vendored shadPS4 code, the Linux AppImage's own path and desktop session, the Gamescope
-    // session (gpu/shim/dcp_present.h) and the Steam-on-Wayland window backend choice (src/dcp_video_backend.h); none is
-    // read on Windows.
+    // session (gpu/shim/dcp_present.h), the Steam Deck marker (src/dcp_trackpad.h) and the Steam-on-Wayland window backend
+    // choice (src/dcp_video_backend.h); none is read on Windows.
     const std::vector<std::string> platform = {"HOME",          "XDG_DATA_HOME",   "VK_DRIVER_FILES",
                                                "APPIMAGE",      "USER",            "DISPLAY",
                                                "GAMESCOPE_WAYLAND_DISPLAY",        "SteamGameId",
-                                               "SteamAppId",    "XDG_SESSION_TYPE", "WAYLAND_DISPLAY"};
+                                               "SteamAppId",    "XDG_SESSION_TYPE", "WAYLAND_DISPLAY",
+                                               "SteamDeck"};
     std::vector<std::string> names, inherited;
     int files = 0;
     for (const char* dir : {"src", "launcher", "gpu/shim", "gpu/shadps4"}) {
@@ -5379,7 +5380,7 @@ void TestMouseSettings(const fs::path& base) {
         for (const ManagedSetting& setting : ManagedSettings()) {
             managed += dcp_mouse_setting_key(std::string(setting.key).c_str());
         }
-        CHECK(managed == DCP_MOUSE_ACTION_COUNT + 5); // every action, then controls, sensitivity, mode and both wheel steps
+        CHECK(managed == DCP_MOUSE_ACTION_COUNT + 6); // every action, then controls, sensitivity, mode, trackpad and both wheel steps
 
         const MouseTargetResult first = SetMouseTarget(settings, DCP_MOUSE_X1, DCP_PAD_TARGET_CROSS);
         CHECK(first.applied && first.moved_from == DCP_MOUSE_NONE);

@@ -5,6 +5,7 @@
 #define DCP_KEYS_H
 
 #include <stddef.h>
+#include "dcp_trackpad.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,7 +108,7 @@ typedef struct {
 
 extern const DcpMouseActionInfo dcp_mouse_actions[DCP_MOUSE_ACTION_COUNT];
 extern const char *const dcp_wheel_up_key, *const dcp_wheel_down_key, *const dcp_pointer_sensitivity_key,
-    *const dcp_mouse_controls_key, *const dcp_pointer_mode_key;
+    *const dcp_mouse_controls_key, *const dcp_pointer_mode_key, *const dcp_trackpad_key;
 
 #define DCP_POINTER_SENSITIVITY_MIN 25
 #define DCP_POINTER_SENSITIVITY_MAX 200
@@ -120,6 +121,7 @@ typedef struct {
     int sensitivity;          /* percent, DCP_POINTER_SENSITIVITY_MIN..MAX in steps of 5 */
     int controls;             /* Mouse Controls: 0 ignores the mouse in gameplay */
     int pointer_mode;         /* DcpPointerMode */
+    int trackpad;             /* DcpTrackpadSetting: Auto drives the pointer from the Steam Deck trackpad in Gaming Mode */
 } DcpMouseMap;
 
 void dcp_mouse_defaults(DcpMouseMap *map);
@@ -133,6 +135,9 @@ const char *dcp_mouse_button_label(int button);
 int dcp_pointer_mode_from_name(const char *name); /* "hold", "always_on"; -1 when unknown */
 const char *dcp_pointer_mode_name(int mode);
 const char *dcp_pointer_mode_label(int mode); /* "Hold", "Always On" */
+int dcp_trackpad_setting_from_name(const char *name); /* "auto", "off"; -1 when unknown */
+const char *dcp_trackpad_setting_name(int setting);
+const char *dcp_trackpad_setting_label(int setting); /* "Auto", "Off" */
 int dcp_wheel_target_from_name(const char *name); /* -1 when unknown */
 const char *dcp_wheel_target_name(int target);
 const char *dcp_wheel_target_label(int target);

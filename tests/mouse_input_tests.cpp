@@ -3100,7 +3100,7 @@ void TestWindowAndRuntimeWiring() {
     const std::string body = window.substr(update, window.find("\n}\n", update) - update);
     CHECK(Contains(body, "dcp_mouse_capture_wanted(mouse)") && !Contains(body, "dcp_mouse_pointer_active("));
     CHECK(Contains(body, "DcpCommsWheel::MouseEngaged()") && Contains(body, "settling") && Contains(body, "DcpOverlay::CapturesInput()"));
-    CHECK(Contains(body, "mouse_pointer_mode == DCP_POINTER_MODE_ALWAYS_ON") && Contains(body, "mouse_settle_until"));
+    CHECK(Contains(body, "dcp_mouse_always_on(mouse)") && Contains(body, "mouse_settle_until"));
     CHECK(Contains(body, "dcp_mouse_block(mouse, blocked);") && Contains(body, "dcp_touchscreen_block(dcp_touchscreen_global(), blocked);"));
     const std::size_t apply = window.find("void WindowSDL::ApplyDisplayMode(int mode)");
     CHECK(window.find("ReleaseMouse();", apply) < window.find("SDL_SetWindowFullscreen(window, borderless);", apply));

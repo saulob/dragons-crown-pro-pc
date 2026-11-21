@@ -25,6 +25,7 @@
 #include "dcp_title.h"
 #include "dcp_gamescope_touch.h"
 #include "dcp_touch_route.h"
+#include "dcp_trackpad.h"
 #include "dcp_touchscreen.h"
 #include "runtime_online_overlay.h"
 #ifdef _WIN32
@@ -99,6 +100,18 @@ void ClaimGamescopeTouch() {
     case DcpGamescopeTouch::Result::Unchanged:
         break;
     }
+}
+
+void PublishTrackpadEnv() {
+    DcpTrackpadEnv env{};
+#ifdef __linux__
+    env.linux_host = 1;
+#endif
+    env.steam_deck = dcp_trackpad_steam_deck_value(std::getenv("SteamDeck")) ? 1 : 0;
+    env.gamescope = DcpPresent::GamescopeSession() ? 1 : 0;
+    int mice = 0;
+    SDL_free(SDL_GetMice(&mice));
+    dcp_mouse_set_trackpad_env(dcp_mouse_global(), &env, mice);
 }
 
 } // namespace
@@ -209,6 +222,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     LogGamescopeWindow();
     ClaimGamescopeTouch();
     LogTouchRoute(DCP_TOUCH_ROUTE_READY);
+    PublishTrackpadEnv();
     const std::string display_name = display && !display->name.empty() ? " (" + display->name + ")" : "";
     std::printf("Window: display %d of %zu%s, size %dx%d, VSync %s, frame rate in title %s, "
                 "resolution in title %s\n",
@@ -355,8 +369,7 @@ void WindowSDL::UpdateCursor() {
 void WindowSDL::UpdateMouseCapture() {
     DcpMouseState* const mouse = dcp_mouse_global();
     const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    const bool settling = DcpSettings::Get().mouse_pointer_mode == DCP_POINTER_MODE_ALWAYS_ON &&
-                          SDL_GetTicks() < mouse_settle_until;
+    const bool settling = dcp_mouse_always_on(mouse) && SDL_GetTicks() < mouse_settle_until;
     const DcpMouseCapture::Frame frame{dcp_mouse_capture_wanted(mouse) != 0, focused,
                                        DcpOverlay::CapturesInput() || settling || DcpCommsWheel::MouseEngaged(),
                                        text_active};

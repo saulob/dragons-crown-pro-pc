@@ -166,7 +166,7 @@ const DcpMouseActionInfo dcp_mouse_actions[DCP_MOUSE_ACTION_COUNT] = {
 };
 const char *const dcp_wheel_up_key="mouse_wheel_up", *const dcp_wheel_down_key="mouse_wheel_down";
 const char *const dcp_pointer_sensitivity_key="mouse_pointer_sensitivity", *const dcp_mouse_controls_key="mouse_controls";
-const char *const dcp_pointer_mode_key="mouse_pointer_mode";
+const char *const dcp_pointer_mode_key="mouse_pointer_mode", *const dcp_trackpad_key="mouse_steam_deck_trackpad";
 
 static const struct { const char *name; const char *label; int button; } mouse_buttons[]={
     {"left","Left Mouse",DCP_MOUSE_LEFT}, {"right","Right Mouse",DCP_MOUSE_RIGHT}, {"middle","Middle Mouse",DCP_MOUSE_MIDDLE},
@@ -175,6 +175,9 @@ static const struct { const char *name; const char *label; int button; } mouse_b
 static const struct { const char *name; const char *label; } pointer_modes[DCP_POINTER_MODE_COUNT]={
     {"hold","Hold"}, {"always_on","Always On"},
 };
+static const struct { const char *name; const char *label; } trackpad_settings[DCP_TRACKPAD_SETTING_COUNT]={
+    {"auto","Auto"}, {"off","Off"},
+};
 
 void dcp_mouse_defaults(DcpMouseMap *map) {
     for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) map->button[i]=dcp_mouse_actions[i].default_button;
@@ -182,6 +185,7 @@ void dcp_mouse_defaults(DcpMouseMap *map) {
     map->sensitivity=DCP_POINTER_SENSITIVITY_DEFAULT;
     map->controls=1;
     map->pointer_mode=DCP_POINTER_MODE_HOLD;
+    map->trackpad=DCP_TRACKPAD_AUTO;
 }
 
 int dcp_mouse_button_from_name(const char *name) {
@@ -214,6 +218,14 @@ int dcp_pointer_mode_from_name(const char *name) {
 }
 const char *dcp_pointer_mode_name(int mode) { return mode>=0 && mode<DCP_POINTER_MODE_COUNT ? pointer_modes[mode].name : pointer_modes[DCP_POINTER_MODE_HOLD].name; }
 const char *dcp_pointer_mode_label(int mode) { return mode>=0 && mode<DCP_POINTER_MODE_COUNT ? pointer_modes[mode].label : pointer_modes[DCP_POINTER_MODE_HOLD].label; }
+
+int dcp_trackpad_setting_from_name(const char *name) {
+    if (!name || !*name) return -1;
+    for (int i=0;i<DCP_TRACKPAD_SETTING_COUNT;++i) if (!SDL_strcasecmp(name,trackpad_settings[i].name)) return i;
+    return -1;
+}
+const char *dcp_trackpad_setting_name(int setting) { return setting>=0 && setting<DCP_TRACKPAD_SETTING_COUNT ? trackpad_settings[setting].name : trackpad_settings[DCP_TRACKPAD_AUTO].name; }
+const char *dcp_trackpad_setting_label(int setting) { return setting>=0 && setting<DCP_TRACKPAD_SETTING_COUNT ? trackpad_settings[setting].label : trackpad_settings[DCP_TRACKPAD_AUTO].label; }
 
 int dcp_wheel_target_from_name(const char *name) {
     if (!name || !*name) return -1;
@@ -256,7 +268,7 @@ static int parse_flag(const char *value) {
 int dcp_mouse_setting_key(const char *ini_key) {
     if (!strcmp(ini_key,dcp_mouse_controls_key)) return 1;
     if (!strcmp(ini_key,dcp_wheel_up_key) || !strcmp(ini_key,dcp_wheel_down_key) || !strcmp(ini_key,dcp_pointer_sensitivity_key) ||
-        !strcmp(ini_key,dcp_pointer_mode_key)) return 1;
+        !strcmp(ini_key,dcp_pointer_mode_key) || !strcmp(ini_key,dcp_trackpad_key)) return 1;
     for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) if (!strcmp(ini_key,dcp_mouse_actions[i].ini_key)) return 1;
     return 0;
 }
@@ -265,6 +277,7 @@ int dcp_mouse_setting_value_valid(const char *ini_key, const char *value) {
     if (!strcmp(ini_key,dcp_mouse_controls_key)) return parse_flag(value)>=0;
     if (!strcmp(ini_key,dcp_pointer_sensitivity_key)) return parse_percent(value)>=0;
     if (!strcmp(ini_key,dcp_pointer_mode_key)) return dcp_pointer_mode_from_name(value)>=0;
+    if (!strcmp(ini_key,dcp_trackpad_key)) return dcp_trackpad_setting_from_name(value)>=0;
     if (!strcmp(ini_key,dcp_wheel_up_key) || !strcmp(ini_key,dcp_wheel_down_key)) return dcp_wheel_target_from_name(value)>=0;
     for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) {
         if (strcmp(ini_key,dcp_mouse_actions[i].ini_key)) continue;
@@ -279,6 +292,7 @@ int dcp_mouse_apply(DcpMouseMap *map, const char *ini_key, const char *value) {
     if (!strcmp(ini_key,dcp_mouse_controls_key)) map->controls=parse_flag(value);
     else if (!strcmp(ini_key,dcp_pointer_sensitivity_key)) map->sensitivity=dcp_pointer_sensitivity_normalize(parse_percent(value));
     else if (!strcmp(ini_key,dcp_pointer_mode_key)) map->pointer_mode=dcp_pointer_mode_from_name(value);
+    else if (!strcmp(ini_key,dcp_trackpad_key)) map->trackpad=dcp_trackpad_setting_from_name(value);
     else if (!strcmp(ini_key,dcp_wheel_up_key)) map->wheel_up=dcp_wheel_target_from_name(value);
     else if (!strcmp(ini_key,dcp_wheel_down_key)) map->wheel_down=dcp_wheel_target_from_name(value);
     else for (int i=0;i<DCP_MOUSE_ACTION_COUNT;++i) if (!strcmp(ini_key,dcp_mouse_actions[i].ini_key)) map->button[i]=dcp_mouse_button_from_name(value);

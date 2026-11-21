@@ -292,6 +292,9 @@ Pointer Control Mode	Modo do controle do ponteiro
 Hold moves the game's pointer while the Pointer Control button is held. Always On moves it whenever the mouse is free for gameplay, which suits a trackpad.	Segurar move o ponteiro do jogo enquanto o botão do Controle do ponteiro estiver pressionado. Sempre ativo o move sempre que o mouse estiver livre para o jogo, o que combina com um trackpad.
 Hold	Segurar
 Always On	Sempre ativo
+Steam Deck Trackpad	Trackpad do Steam Deck
+Auto moves the game's pointer with the Steam Deck trackpad in Gaming Mode without holding Pointer Control, and the trackpad click is the Pointer Interaction. Off keeps ordinary mouse behavior, for a mouse plugged into the Steam Deck.	Automático move o ponteiro do jogo com o trackpad do Steam Deck no Modo Jogo sem segurar o Controle do ponteiro, e o clique do trackpad é a Interação do ponteiro. Desligado mantém o comportamento normal do mouse, para um mouse ligado ao Steam Deck.
+Auto	Automático
 Not used while Always On is selected. The button is kept for Hold.	Não é usado enquanto Sempre ativo estiver selecionado. O botão é mantido para Segurar.
 moved from	movido de
 Hold this button and move the mouse to control the game's pointer. Releasing it goes back to normal play.	Segure este botão e mova o mouse para controlar o ponteiro do jogo. Soltá-lo volta ao jogo normal.

@@ -61,6 +61,8 @@ inline constexpr char kControllerRumbleKey[] = "controller_rumble";
 inline constexpr char kMouseControlsKey[] = "mouse_controls";
 inline constexpr char kMouseSensitivityKey[] = "mouse_pointer_sensitivity";
 inline constexpr char kMousePointerModeKey[] = "mouse_pointer_mode";
+// Steam Deck Gaming Mode: Auto drives the game's pointer from the trackpad without holding Pointer Control (src/dcp_trackpad.h).
+inline constexpr char kMouseSteamDeckTrackpadKey[] = "mouse_steam_deck_trackpad";
 // The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
 inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
 inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";

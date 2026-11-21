@@ -165,7 +165,9 @@ PLAYING
   move the game's red hand pointer. Any mouse button can press any controller
   control. Pointer Control Mode (Hold by default; Always On suits a trackpad
   such as the Steam Deck's), Mouse Controls and Mouse Sensitivity are on the
-  launcher's Controls page.
+  launcher's Controls page. On a Steam Deck in Gaming Mode the trackpad moves
+  the pointer without holding a button and its click is the pointer
+  interaction; Steam Deck Trackpad = Off keeps ordinary mouse behavior.
 - An experimental AMD water workaround (black areas under characters standing
   in water) is on with AMD graphics cards and off elsewhere.
 - To open the launcher again after turning it off, hold Shift while starting
