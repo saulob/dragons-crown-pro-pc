@@ -170,9 +170,19 @@ function Get-DllClosure([string]$Exe, [string]$Dir, [string]$Objdump) {
     return $found
 }
 
+function Get-FileSha256([string]$Path) {
+    if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try { return ([BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLowerInvariant() }
+    finally { $stream.Dispose(); $sha.Dispose() }
+}
+
 function Test-Sha256([string]$Path, [string]$Expected) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ieq $Expected
+    return (Get-FileSha256 $Path) -ieq $Expected
 }
 
 function Read-AnglePin([string]$Descriptor = (Join-Path $script:RepoRoot 'gpu\angle-runtime.txt')) {
@@ -212,7 +222,7 @@ function Get-AngleArchive($Pin, [string]$Dir) {
     catch { throw "ANGLE could not be downloaded from $($Pin.url): $($_.Exception.Message)" }
     finally { $client.Dispose() }
     if (-not (Test-Sha256 $part $Pin.sha256)) {
-        $actual = (Get-FileHash -LiteralPath $part -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actual = Get-FileSha256 $part
         Remove-Item -LiteralPath $part -Force
         throw "$($Pin.package) does not match its pinned SHA-256: expected $($Pin.sha256), got $actual"
     }
@@ -264,7 +274,7 @@ function Sync-AngleRuntime([string]$ToolBin) {
 function Copy-IfChanged([string]$Source, [string]$TargetDir) {
     $target = Join-Path $TargetDir (Split-Path $Source -Leaf)
     if ((Test-Path -LiteralPath $target) -and
-        (Get-FileHash -LiteralPath $target).Hash -eq (Get-FileHash -LiteralPath $Source).Hash) { return }
+        (Get-FileSha256 $target) -eq (Get-FileSha256 $Source)) { return }
     Copy-Item -LiteralPath $Source $target -Force
 }
 

@@ -1941,7 +1941,11 @@ void TestFeedbackRequestIsExactlyWhatTheWorkerReads() {
     CHECK(body["result"].as_string() == "fixed" && IncidentFeedbackRequest(AwaitingReport(revision), kTestNotFixed, SampleFacts())["result"].as_string() == "not_fixed");
 
     const std::string desk = ReadAll(kSource / "server" / "lobby" / "src" / "lobby.js");
-    CHECK(Has(desk, "const NO_SESSION_OPS = new Set(['hello', 'incident.status', 'incident.read', 'incident.feedback']);"));
+    const std::size_t set_at = desk.find("const NO_SESSION_OPS = new Set([");
+    const std::string no_session = set_at == std::string::npos ? "" : desk.substr(set_at, desk.find(']', set_at) - set_at);
+    for (const char* op : {"'hello'", "'incident.status'", "'incident.read'", "'incident.feedback'"}) CHECK(Has(no_session, op));
+    CHECK(!Has(no_session, "'incident.file'") && !Has(no_session, "admin") && !Has(no_session, "incident.list"));
+    CHECK(Has(desk, "'incident.dump'(att, msg) {") && Has(desk, "'incident.dump_end'(att, msg) {") && Has(desk, "this.incidents.claimed(claim) === null"));
     CHECK(Has(desk, "'incident.feedback'(att, msg) {") && Has(desk, "readFeedback(msg)"));
     CHECK(Has(desk, "this.limitIncidentLookup(att, 'incidentFeedbackAddress');"));
 }

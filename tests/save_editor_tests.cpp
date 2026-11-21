@@ -3198,9 +3198,9 @@ void TestAppearanceUx() {
     CHECK(request.find("selected_character_") != std::string::npos && request.find("save->save0_path") != std::string::npos);
     const std::string loading = FunctionBody(page, "void EditorPage::DrawAppearanceLoading(");
     CHECK(loading.find("DrawLoadingView(ui, \"Loading appearance...\");") < loading.find("AdvanceAppearanceLoad();"));
-    const std::string view = ReadSource("launcher/loading_view.h");
-    CHECK(view.find("Tr(english_text)") < view.find("PathArcTo(") && view.find("GetTime()") != std::string::npos &&
-          view.find("OpenPopup") == std::string::npos);
+    const std::string loading_view_source = ReadSource("launcher/loading_view.h");
+    CHECK(loading_view_source.find("Tr(english_text)") < loading_view_source.find("PathArcTo(") && loading_view_source.find("GetTime()") != std::string::npos &&
+          loading_view_source.find("OpenPopup") == std::string::npos);
     CHECK(Count(page, "AdvanceAppearanceLoad();") == 1);
     const std::string advance = FunctionBody(page, "void EditorPage::AdvanceAppearanceLoad(");
     CHECK(advance.find("art_->Ready(") < advance.find("appearance_loader_.Start("));
@@ -3226,13 +3226,13 @@ void TestAppearanceUx() {
     CHECK(art.find("imgui") == std::string::npos && art.find("ImGui") == std::string::npos);
 
     // Appearance: one custom editor; identity on top of the controls; fixed control order.
-    const std::string view = FunctionBody(page, "void EditorPage::DrawAppearance(");
+    const std::string appearance_view = FunctionBody(page, "void EditorPage::DrawAppearance(");
     for (const char* dead : {"Current Color", "Saved Color", "is_custom", "Tr(\"Custom\")", "Choose Custom", "kNativeColorCount",
                              "TextUnformatted(character.name", "TextUnformatted(Tr(ClassName("}) {
-        CHECK(view.find(dead) == std::string::npos);
+        CHECK(appearance_view.find(dead) == std::string::npos);
     }
     CHECK(page.find("Tr(\"Color\")") == std::string::npos && page.find("Current Color") == std::string::npos);
-    CHECK(view.find("DrawIdentity(ui, ImGui::GetCursorScreenPos(), identity, identity_size.y);") < view.find("DrawCustom(ui, character, look);"));
+    CHECK(appearance_view.find("DrawIdentity(ui, ImGui::GetCursorScreenPos(), identity, identity_size.y);") < appearance_view.find("DrawCustom(ui, character, look);"));
     const std::string identity = FunctionBody(page, "void EditorPage::DrawIdentity(");
     CHECK(identity.find("ui.fonts().semibold") < identity.find("identity.name") && identity.find("identity.parts") != std::string::npos);
     const std::string custom = FunctionBody(page, "void EditorPage::DrawCustom(");

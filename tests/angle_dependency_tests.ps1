@@ -17,7 +17,7 @@ function Check([bool]$Passed, [string]$Name) {
     }
 }
 function Read-Source([string]$Relative) { Get-Content -LiteralPath (Join-Path $root $Relative) -Raw }
-function Get-Sha256([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Get-Sha256([string]$Path) { Get-FileSha256 $Path }
 function Get-Failure([scriptblock]$Block) {
     try { & $Block | Out-Null; return '' } catch { return $_.Exception.Message }
 }
