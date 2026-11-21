@@ -94,7 +94,7 @@ check_appdir() { # dir [the AppImage file, whose runtime is an ELF too]
     for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dragons_crown_pro \
                 usr/bin/assets/launcher/header-art.png usr/bin/assets/launcher/sponsor-heart.png \
                 usr/share/licenses/DragonsCrownProPC/THIRD-PARTY-LICENSES.txt \
-                usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/doc/DragonsCrownProPC/README.txt; do
+                usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/licenses/DragonsCrownProPC/NotoSansKR/LICENSE-NotoSansKR.txt usr/share/doc/DragonsCrownProPC/README.txt; do
         [[ -e $dir/$leaf ]] || problem "missing: $leaf"
     done
     local missing
@@ -204,7 +204,7 @@ declare -A built_in=(
     [shadPS4]=gpu/shadps4/LICENSE [sirit]=gpu/third_party/sirit/LICENSE.txt
     [SPIRV-Headers]=gpu/third_party/sirit/externals/SPIRV-Headers/LICENSE [half]=gpu/third_party/half/LICENSE.txt
     [SMAA]=gpu/shadps4/video_core/host_shaders/smaa/LICENSE.txt [DejaVu]=gpu/third_party/fonts/LICENSE-DejaVu.txt
-    [NotoSans]=third_party/fonts/LICENSE-NotoSans.txt [NotoSansTC]=third_party/fonts/LICENSE-NotoSansTC.txt
+    [NotoSans]=third_party/fonts/LICENSE-NotoSans.txt [NotoSansTC]=third_party/fonts/LICENSE-NotoSansTC.txt [NotoSansKR]=third_party/fonts/LICENSE-NotoSansKR.txt
     [imgui]=gpu/third_party/imgui/LICENSE.txt [magic_enum]=gpu/third_party/magic_enum/LICENSE
     [miniz]=gpu/third_party/miniz/LICENSE [nanosvg]=launcher/third_party/nanosvg/LICENSE.txt
     [xbyak]=gpu/third_party/xbyak/COPYRIGHT)

@@ -128,9 +128,10 @@ set(DCP_RUNTIME_SOURCES
 # The built-in system fonts are assembled into runtime_font.c (.incbin): rebuild it when a font changes.
 set(DCP_NOTO_SANS ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSans-Regular.ttf)
 set(DCP_NOTO_SANS_TC ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSansTC-Regular.otf)
+set(DCP_NOTO_SANS_KR ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSansKR-Regular.otf)
 set_source_files_properties(src/runtime_font.c PROPERTIES
-    COMPILE_DEFINITIONS "DCP_NOTO_SANS_PATH=\"${DCP_NOTO_SANS}\";DCP_NOTO_SANS_TC_PATH=\"${DCP_NOTO_SANS_TC}\""
-    OBJECT_DEPENDS "${DCP_NOTO_SANS};${DCP_NOTO_SANS_TC}")
+    COMPILE_DEFINITIONS "DCP_NOTO_SANS_PATH=\"${DCP_NOTO_SANS}\";DCP_NOTO_SANS_TC_PATH=\"${DCP_NOTO_SANS_TC}\";DCP_NOTO_SANS_KR_PATH=\"${DCP_NOTO_SANS_KR}\""
+    OBJECT_DEPENDS "${DCP_NOTO_SANS};${DCP_NOTO_SANS_TC};${DCP_NOTO_SANS_KR}")
 
 if (WIN32)
     enable_language(RC)
@@ -230,7 +231,7 @@ target_include_directories(dcp-endgame-unlocks-tests PRIVATE src)
 target_compile_definitions(dcp-endgame-unlocks-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-endgame-unlocks-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c src/boss_battle_campaign.c
-    src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/latin_glyphs.c
+    src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/hangul_glyphs.c src/latin_glyphs.c
     src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
     src/network_access.c src/network_hint.c src/online_prompt.c)
 set_target_properties(dcp-boss-battle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -240,7 +241,7 @@ target_compile_options(dcp-boss-battle-tests PRIVATE -Wall -Wextra -Werror)
 # The Boss Battle visitor lifecycle alone, on the same fixture: own page, Network Menu, join, Inn rebuild, page back,
 # guest seat, host 2 of 2, first start followed (tools/test.ps1).
 add_executable(dcp-boss-battle-visitor-lifecycle-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c
-    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c
+    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/hangul_glyphs.c
     src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
     src/network_access.c src/network_hint.c src/online_prompt.c)
 set_target_properties(dcp-boss-battle-visitor-lifecycle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -250,7 +251,7 @@ target_compile_definitions(dcp-boss-battle-visitor-lifecycle-tests PRIVATE DCP_S
 target_compile_options(dcp-boss-battle-visitor-lifecycle-tests PRIVATE -Wall -Wextra -Werror)
 # The handoff from a Boss Battle visit back to normal online play on the same fixture: page closed, room kept, seats.
 add_executable(dcp-boss-battle-handoff-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c
-    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c
+    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/hangul_glyphs.c
     src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
     src/network_access.c src/network_hint.c src/online_prompt.c)
 set_target_properties(dcp-boss-battle-handoff-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -259,7 +260,7 @@ target_compile_definitions(dcp-boss-battle-handoff-tests PRIVATE DCP_SOURCE_DIR=
 target_compile_options(dcp-boss-battle-handoff-tests PRIVATE -Wall -Wextra -Werror)
 # The same handoff with the real Early Story session and room-wish code: who keeps the shared room after the visit.
 add_executable(dcp-boss-battle-early-story-handoff-tests EXCLUDE_FROM_ALL tests/boss_battle_tests.c src/boss_battle.c
-    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c
+    src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/hangul_glyphs.c
     src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
     src/network_access.c src/network_hint.c src/online_prompt.c src/early_story_online.c src/early_story_session.c)
 set_target_properties(dcp-boss-battle-early-story-handoff-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -268,7 +269,7 @@ target_compile_definitions(dcp-boss-battle-early-story-handoff-tests PRIVATE DCP
     BOSS_BATTLE_EARLY_STORY_HANDOFF)
 target_compile_options(dcp-boss-battle-early-story-handoff-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-text-tests EXCLUDE_FROM_ALL tests/boss_battle_text_tests.c src/boss_battle_text.c
-    src/exit_game_text.c src/cyrillic_glyphs.c src/latin_glyphs.c)
+    src/exit_game_text.c src/cyrillic_glyphs.c src/hangul_glyphs.c src/latin_glyphs.c)
 target_include_directories(dcp-boss-battle-text-tests PRIVATE src)
 target_compile_options(dcp-boss-battle-text-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-record-tests EXCLUDE_FROM_ALL tests/boss_battle_record_tests.cpp src/boss_battle_record.cpp)
@@ -276,7 +277,7 @@ set_target_properties(dcp-boss-battle-record-tests PROPERTIES CXX_STANDARD 20 CX
 target_include_directories(dcp-boss-battle-record-tests PRIVATE src launcher)
 target_compile_options(dcp-boss-battle-record-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-boss-battle-menu-tests EXCLUDE_FROM_ALL tests/boss_battle_menu_tests.cpp src/boss_battle.c
-    src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/latin_glyphs.c)
+    src/boss_battle_record.cpp src/boss_battle_text.c src/cyrillic_glyphs.c src/hangul_glyphs.c src/latin_glyphs.c)
 set_target_properties(dcp-boss-battle-menu-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-boss-battle-menu-tests PRIVATE gpu/shim src launcher)
 target_compile_definitions(dcp-boss-battle-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -290,7 +291,7 @@ target_compile_options(dcp-default-message-tests PRIVATE -Wall -Wextra -Werror)
 # (tools/test.ps1); not part of the default build.
 add_executable(dcp-boss-battle-online-tests EXCLUDE_FROM_ALL tests/boss_battle_online_tests.c src/boss_battle_online.c
     src/boss_battle.c src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp src/boss_battle_text.c
-    src/cyrillic_glyphs.c src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/network_access.c src/network_hint.c
+    src/cyrillic_glyphs.c src/hangul_glyphs.c src/latin_glyphs.c src/guest_hook.c src/hydeland_town.c src/inn_layout.c src/network_access.c src/network_hint.c
     src/online_prompt.c src/early_story_online.c src/early_story_session.c)
 set_target_properties(dcp-boss-battle-online-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-boss-battle-online-tests PRIVATE src launcher)
@@ -544,7 +545,7 @@ target_compile_definitions(dcp-options-menu-tests PRIVATE DCP_SOURCE_DIR="${CMAK
 target_compile_options(dcp-options-menu-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the Comms Wheel's input glue, layout and key binding (tools/test.ps1); not part of the default build.
-add_executable(dcp-comms-wheel-ui-tests EXCLUDE_FROM_ALL tests/comms_wheel_ui_tests.cpp src/comms_text.c src/cyrillic_glyphs.c
+add_executable(dcp-comms-wheel-ui-tests EXCLUDE_FROM_ALL tests/comms_wheel_ui_tests.cpp src/comms_text.c src/cyrillic_glyphs.c src/hangul_glyphs.c
     src/latin_glyphs.c)
 set_target_properties(dcp-comms-wheel-ui-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-comms-wheel-ui-tests PRIVATE gpu/shim src)
@@ -592,7 +593,7 @@ target_compile_definitions(dcp-party-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURC
 target_compile_options(dcp-party-tests PRIVATE -Wall -Wextra)
 
 add_executable(dcp-comms-tests EXCLUDE_FROM_ALL tests/comms_tests.cpp src/comms_bridge.cpp src/comms_text.c src/guest_hook.c
-    src/cyrillic_glyphs.c src/latin_glyphs.c)
+    src/cyrillic_glyphs.c src/hangul_glyphs.c src/latin_glyphs.c)
 set_target_properties(dcp-comms-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-comms-tests PRIVATE src)
 target_compile_definitions(dcp-comms-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -615,7 +616,7 @@ target_compile_options(dcp-ultrawide-sides-tests PRIVATE -Wall -Wextra -Werror)
 # Focused tests of the title's four-row menu with Exit Game: text, hooks and install checks on synthetic images
 # (tools/test.ps1); not part of the default build.
 add_executable(dcp-exit-game-tests EXCLUDE_FROM_ALL tests/exit_game_tests.c src/guest_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c
-    src/cyrillic_glyphs.c src/latin_glyphs.c)
+    src/cyrillic_glyphs.c src/hangul_glyphs.c src/latin_glyphs.c)
 target_include_directories(dcp-exit-game-tests PRIVATE src)
 target_compile_definitions(dcp-exit-game-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-exit-game-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)

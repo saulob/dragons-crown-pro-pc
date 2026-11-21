@@ -399,10 +399,10 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   | Build | Languages |
   | --- | --- |
-  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
+  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `korean`, `brazilian_portuguese`, `russian`, `spanish`) |
   | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, English, Portuguese (Brazil), Russian (`japanese`, `english`, `brazilian_portuguese`, `russian`): the executable does not read the system language |
   | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, English, Portuguese (Brazil), Russian (`traditional_chinese`, `korean`, `english`, `brazilian_portuguese`, `russian`) |
-  | CUSA10487 1.03 Europe | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
+  | CUSA10487 1.03 Europe | English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `korean`, `brazilian_portuguese`, `russian`, `spanish`) |
 
   Portuguese (Brazil) is the port's own translation, not a language of the game, so it is offered on every supported
   build and a saved choice survives switching builds. The game runs in a native slot and the port serves translated
@@ -471,6 +471,18 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   (`Menu & Subtitles: Russian unavailable (...)`). The character messages are drawn by the system font, whose OpenType
   fonts have Cyrillic in every region. The launcher, the F1 options, the F10 overlay and the online screens stay in
   English: the fan translation has no text for them. Exit Game shows `Выйти`. See `localization/ru/README.md`.
+
+  Korean on the USA and European builds is the official Korean translation, built into the port from `localization/ko`:
+  its message sheets are the USA ones record for record, so each USA record takes the Korean record at its index (11,953
+  records; 39 challenge quests have none). It is served over
+  the English slot like Portuguese (Brazil); as for Russian, a record must share only the slot's printf conversions and
+  buttons. The USA font has no Hangul: `launcher/hangul_font.cpp` draws the syllables the text uses (drawn with Noto Sans
+  CJK KR, `localization/ko/font/hangul.glyphs.z`) into atlas cells only a kanji uses, as the official Korean font puts
+  its Hangul where the Japanese font has kanji, and `src/hangul_glyphs.c` adds their code pages (U+AC00–U+D7A3) to the
+  executable's glyph table after checking that every such cell is listed by kanji only. When it cannot, Korean is not
+  served and the log says why. The character messages are drawn by the system font: while Korean is selected the European
+  set opens the embedded Noto Sans KR. The launcher, the F1 options, the F10 overlay and the online screens stay in
+  English. See `localization/ko/README.md`.
 
   For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian

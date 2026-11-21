@@ -30,6 +30,7 @@
 #include "boss_battle_text.h"
 #include "boss_battle_record.h"
 #include "cyrillic_glyphs.h"
+#include "hangul_glyphs.h"
 #include "latin_glyphs.h"
 #include "system_type_hook.h"
 #include "party_hook.h"
@@ -502,6 +503,11 @@ static void share_composed_glyphs(void) {
     for (size_t i=0;i<count;++i) shared[i]=(RuntimeComposedGlyph){glyphs[i].code,glyphs[i].base,glyphs[i].alpha,glyphs[i].base_alpha};
     runtime_font_set_composed_glyphs(shared,count,cell);
 }
+static int install_hangul_glyphs(uint8_t *image, size_t size, const uint8_t *pages) {
+    size_t count=0;
+    const HangulGlyph *glyphs=dcp_text_hangul_glyphs(&count);
+    return glyphs && hangul_glyphs_install(image,size,pages,glyphs,count);
+}
 static int install_cyrillic_glyphs(uint8_t *image, size_t size, const uint8_t *pages, CyrillicCells cells) {
     size_t count=0;
     const CyrillicMetrics *metrics=dcp_text_cyrillic_metrics(&count);
@@ -518,10 +524,17 @@ static void install_text_translation(const char *settings_file, const char *imag
     size_t count=0;
     unsigned cyrillic_probe=0;
     const CyrillicCells cyrillic=(CyrillicCells)dcp_text_cyrillic_cells(settings_file,image_dir,app0,&cyrillic_probe);
-    const unsigned probe=cyrillic ? cyrillic_probe : dcp_text_font_probe(settings_file,image_dir,app0);
+    const unsigned hangul=cyrillic ? 0 : dcp_text_hangul_probe(settings_file,image_dir,app0);
+    const unsigned probe=cyrillic ? cyrillic_probe : hangul ? hangul : dcp_text_font_probe(settings_file,image_dir,app0);
     const uint8_t *glyph_pages=probe ? font_glyph_pages(image,size,(uint16_t)probe) : NULL;
     const uint8_t *glyph_page=font_glyph_page(image,size,glyph_pages,0);
-    const int glyph_table=cyrillic ? cyrillic_glyphs_fit(image,size,glyph_pages,cyrillic) : latin_glyphs_fit(image,size,glyph_page);
+    /* Korean: the table must be found and list no Hangul yet; hangul_glyphs_install checks the cells once they are known. */
+    int glyph_table=cyrillic ? cyrillic_glyphs_fit(image,size,glyph_pages,cyrillic) : latin_glyphs_fit(image,size,glyph_page);
+    if (hangul) {
+        glyph_table=glyph_pages!=NULL;
+        for (unsigned high=HANGUL_FIRST_PAGE;glyph_table && high<=HANGUL_LAST_PAGE;++high)
+            if (font_glyph_page(image,size,glyph_pages,high)) glyph_table=0;
+    }
     int glyphs_composed=0;
     const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message),
                                              glyph_table,&glyphs_composed);
@@ -531,7 +544,10 @@ static void install_text_translation(const char *settings_file, const char *imag
         else {
             if (glyphs_composed && cyrillic && !install_cyrillic_glyphs(image,size,glyph_pages,cyrillic))
                 printf("Menu & Subtitles: the Cyrillic letters could not be added to the glyph table\n");
-            if (glyphs_composed && !cyrillic && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
+            if (glyphs_composed && hangul && !install_hangul_glyphs(image,size,glyph_pages))
+                printf("Menu & Subtitles: the Hangul syllables could not be added to the glyph table\n");
+            if (glyphs_composed && hangul) runtime_font_set_korean(1);
+            if (glyphs_composed && !cyrillic && !hangul && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
             default_message_install(image,size,entry,dcp_text_default_bone,dcp_text_native_default_bone,message_stubs,message_stub_bytes);
         }
     }

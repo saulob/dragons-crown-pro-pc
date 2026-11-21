@@ -3021,10 +3021,12 @@ void TestTextLanguage(const fs::path& base) {
     struct Expected { const char* key; const char* name; int id; };
     const Expected western[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
                                 {"italian", "Italian", 5}, {"spanish", "Spanish", 3}};
-    // Every build adds Brazilian Portuguese and Russian, the port's translations played in one of its own slots.
+    // Every build adds Brazilian Portuguese and Russian, the port's translations played in one of its own slots; the
+    // USA and European builds also the port's Korean.
     const Expected us_languages[] = {{"english", "English", 1}, {"french", "French", 2}, {"german", "German", 4},
-                                     {"italian", "Italian", 5}, {"brazilian_portuguese", "Portuguese (Brazil)", 1},
-                                     {"russian", "Russian", 1}, {"spanish", "Spanish", 3}};
+                                     {"italian", "Italian", 5}, {"korean", "Korean", 1},
+                                     {"brazilian_portuguese", "Portuguese (Brazil)", 1}, {"russian", "Russian", 1},
+                                     {"spanish", "Spanish", 3}};
     // Japan and Asia/Hong Kong add the port's built-in English, played in the same slot as the other translations.
     const Expected asian[] = {{"traditional_chinese", "Traditional Chinese", 10}, {"korean", "Korean", 9},
                               {"english", "English", 10}, {"brazilian_portuguese", "Portuguese (Brazil)", 10},
@@ -3046,7 +3048,8 @@ void TestTextLanguage(const fs::path& base) {
                            : title == "CUSA07001" ? std::span<const Expected>(japanese)
                                                   : std::span<const Expected>(us_languages));
     }
-    CHECK(TextLanguagesOf(&kUs)[4].translation == "pt-BR" && TextLanguagesOf(&kUs)[4].suffix == "US");
+    CHECK(TextLanguagesOf(&kUs)[4].translation == kPortKorean && TextLanguagesOf(&kUs)[4].suffix == "US");
+    CHECK(TextLanguagesOf(&kUs)[5].translation == "pt-BR" && TextLanguagesOf(&kUs)[5].suffix == "US");
     for (const GameBuild& build : SupportedBuilds()) {
         const bool native_english = std::any_of(build.text_languages.begin(), build.text_languages.end(),
                                                 [](const TextLanguage& language) { return language.key == "english"; });
@@ -3054,6 +3057,7 @@ void TestTextLanguage(const fs::path& base) {
         for (const TextLanguage& language : TextLanguagesOf(&build)) {
             const std::string_view expected = language.key == "brazilian_portuguese" ? "pt-BR"
                                               : language.key == "russian"                  ? kPortRussian
+                                              : language.key == "korean" && native_english ? kPortKorean
                                               : language.key == "english" && !native_english ? kPortEnglish
                                                                                               : "";
             CHECK(language.translation == expected);
@@ -3102,7 +3106,7 @@ void TestTextLanguage(const fs::path& base) {
     }
     CHECK(ResolveTextLanguage(&kCk, "english").key == "english" && ResolveTextLanguage(&kCk, "english").ps4_id == 10);
     CHECK(ResolveTextLanguage(&kCk, "korean").key == "korean");
-    CHECK(ResolveTextLanguage(&kUs, "korean").key == "english");
+    CHECK(ResolveTextLanguage(&kUs, "korean").key == "korean" && ResolveTextLanguage(&kUs, "korean").ps4_id == 1);
     CHECK(ResolveTextLanguage(&kUs, "traditional_chinese").key == "english");
     CHECK(ResolveTextLanguage(&kJp100, "korean").key == "japanese");
     CHECK(ResolveTextLanguage(&kUs, "japanese").key == "english");
@@ -6024,8 +6028,9 @@ void TestInstalledTextLanguages(const fs::path& base) {
     WriteAll(regional, LanguageArchive({Slot("US", russian), uk}));
     const std::vector<TextLanguage> russian_slot = InstalledTextLanguages(app0, &kUs101);
     CHECK(keys(&kUs101) == "english=1" && russian_slot[0].name == "English" && russian_slot[0].suffix == "US");
-    CHECK(russian_slot.size() == 3 && russian_slot[1].key == kPortugueseBrazilKey && russian_slot[2].key == kRussianKey);
-    CHECK(russian_slot.size() == 3 && russian_slot[2].suffix == "US" && russian_slot[2].translation == kPortRussian);
+    CHECK(russian_slot.size() == 4 && russian_slot[1].key == kKoreanKey && russian_slot[2].key == kPortugueseBrazilKey);
+    CHECK(russian_slot.size() == 4 && russian_slot[3].key == kRussianKey && russian_slot[3].suffix == "US" &&
+          russian_slot[3].translation == kPortRussian);
     for (const char* saved : {"english", "french", "german", "italian", "spanish"}) {
         CHECK(ResolveTextLanguage(russian_slot, saved).key == "english");
     }
@@ -6072,10 +6077,10 @@ void TestInstalledTextLanguages(const fs::path& base) {
     const std::string described = DescribeLanguageResources(app0, &kUs101);
     CHECK(described.starts_with("DRACRO_US.CPK: 22 entries") && contains(described, "; US 4 files, SystemMsg crc "));
     CHECK(contains(described, "; FR 4 files, SystemMsg crc ") && contains(described, "; DE 4 files, SystemMsg crc "));
-    CHECK(described.ends_with("; offered English, French, German, Italian, Portuguese (Brazil), Russian, Spanish"));
+    CHECK(described.ends_with("; offered English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish"));
     CHECK(!contains(described, "Новая") && DescribeLanguageResources(app0, &kUs101) == described);
     WriteAll(regional, LanguageArchive({us}));
-    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English, Portuguese (Brazil), Russian"));
+    CHECK(DescribeLanguageResources(app0, &kUs101).ends_with("; offered English, Korean, Portuguese (Brazil), Russian"));
     WriteAll(regional, "not an archive");
     CHECK(DescribeLanguageResources(app0, &kUs101) == "DRACRO_US.CPK unreadable");
     fs::remove(regional);
@@ -6104,7 +6109,7 @@ void TestInstalledTextLanguages(const fs::path& base) {
     CHECK(keys(&kUs101) == western);
     fs::remove(regional);
     CHECK(keys(&kUs) == us_languages && keys(&kUs101) == western && keys(nullptr) == western);
-    CHECK(InstalledTextLanguages({}, &kUs101).size() == 7);
+    CHECK(InstalledTextLanguages({}, &kUs101).size() == 8);
 
     // Asia/Hong Kong: Traditional Chinese and Korean from DRACRO_CK.CPK, unchanged.
     WriteAll(app0 / "DRACRO_CK.CPK", LanguageArchive({Slot("CT", Sheet("繁體中文")), Slot("KR", Sheet("한국어"))}));
@@ -6418,9 +6423,9 @@ void TestTextLanguageSwitching(const fs::path& base) {
     WriteAll(ini, "text_language=korean\n");
     CHECK(switch_to(kJp102) == "japanese");         // Asia -> Japan
     WriteAll(ini, "text_language=korean\n");
-    CHECK(switch_to(kUs) == "english");             // Asia -> USA
-    CHECK(switch_to(kUs101) == "english");          // USA -> 1.01
-    CHECK(switch_to(kJp103) == "english");          // 1.01 -> Japan
+    CHECK(switch_to(kUs) == "korean");              // Asia -> USA: the port's Korean
+    CHECK(switch_to(kUs101) == "korean");           // USA -> 1.01
+    CHECK(switch_to(kJp103) == "japanese");         // 1.01 -> Japan: no Korean there
     WriteAll(ini, "text_language=russian\n");
     CHECK(switch_to(kUs) == "russian" && switch_to(kUs101) == "russian" && switch_to(kJp100) == "russian");
     CHECK(switch_to(kCk) == "russian");
@@ -6567,7 +6572,7 @@ void TestNpcVoiceResources(const fs::path& base) {
     const std::vector<TextLanguage> with_voices = InstalledTextLanguages(staged, &kUs101);
     fs::remove(staged / "DRACRO.CPK");
     CHECK(!NpcVoiceResourcesPresent(staged));
-    CHECK(SameLanguages(with_voices, InstalledTextLanguages(staged, &kUs101)) && with_voices.size() == 7);
+    CHECK(SameLanguages(with_voices, InstalledTextLanguages(staged, &kUs101)) && with_voices.size() == 8);
 }
 
 void TestKeepBaseLanguages(const fs::path& base) {
@@ -6674,7 +6679,7 @@ void TestKeepBaseLanguages(const fs::path& base) {
     CHECK(keys(merged_app0, kUs101) == us_languages && keys(merged_app0, kUs) == us_languages);
     for (const GameBuild* us_build : {&kUs, &kUs101}) {
         const std::vector<TextLanguage> offered = InstalledTextLanguages(merged_app0, us_build);
-        CHECK(LanguageNames(offered) == "English, French, German, Italian, Portuguese (Brazil), Russian, Spanish");
+        CHECK(LanguageNames(offered) == "English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish");
         CHECK(offered[0].key == "english" && offered[0].ps4_id == 1 && offered[0].suffix == "US");
         CHECK(std::none_of(offered.begin(), offered.end(), [](const TextLanguage& language) {
             return language.suffix == "UK" || (language.key == "russian" && language.translation != kPortRussian);
@@ -8220,7 +8225,7 @@ void TestEuropeBuild(const fs::path& base) {
     }
     WriteAll(app0 / "DRACRO_EU.CPK", BuildCpk(sheets, true));
     CHECK(LanguageNames(InstalledTextLanguages(app0, &kEu)) ==
-          "English, French, German, Italian, Portuguese (Brazil), Russian, Spanish");
+          "English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish");
     CHECK(ResolveTextLanguage(&kEu, {}).key == "english" && ResolveTextLanguage(&kEu, "french").suffix == "FR");
     CHECK(ResolveTextLanguage(&kEu, kPortugueseBrazilKey).key == kPortugueseBrazilKey);
     CHECK(ResolveTextLanguage(&kEu, kRussianKey).suffix == "US" && ResolveTextLanguage(&kEu, kRussianKey).translation == kPortRussian);

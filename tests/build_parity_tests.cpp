@@ -532,7 +532,7 @@ void TestContract() {
         CHECK(caps.startup_save == row->startup_save);
         CHECK(caps.languages == row->languages);
         CHECK(caps.translations ==
-              (NativeEnglish(*row) ? "brazilian_portuguese russian" : "english brazilian_portuguese russian"));
+              (NativeEnglish(*row) ? "korean brazilian_portuguese russian" : "english brazilian_portuguese russian"));
         CHECK(NativeJapaneseNpcVoices(&build) == row->native_japanese_voices);
         g_scope = "contract";
     }
@@ -1016,7 +1016,7 @@ void TestEuropeBuild() {
           caps.skip_intro == Mapping::kSignature && caps.menu_buttons == Mapping::kSignature &&
           caps.unlock_gallery == Mapping::kSignature && caps.system_type == Mapping::kSignature &&
           caps.lzcnt == Mapping::kSignature && caps.startup_save == Mapping::kTable);
-    CHECK(caps.languages == kWestern && caps.translations == "brazilian_portuguese russian");
+    CHECK(caps.languages == kWestern && caps.translations == "korean brazilian_portuguese russian");
     CHECK(europe->features_by_signature && europe->resolution_by_signature && europe->check_prompt_fit);
     CHECK(!Listed(ultrawide_records, *europe));
 

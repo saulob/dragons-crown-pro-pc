@@ -50,6 +50,7 @@ $BuiltInLicenses = [ordered]@{
     'DejaVu'        = 'gpu\third_party\fonts\LICENSE-DejaVu.txt'
     'NotoSans'      = 'third_party\fonts\LICENSE-NotoSans.txt'
     'NotoSansTC'    = 'third_party\fonts\LICENSE-NotoSansTC.txt'
+    'NotoSansKR'    = 'third_party\fonts\LICENSE-NotoSansKR.txt'
     'imgui'         = 'gpu\third_party\imgui\LICENSE.txt'
     'magic_enum'    = 'gpu\third_party\magic_enum\LICENSE'
     'miniz'         = 'gpu\third_party\miniz\LICENSE'
@@ -188,7 +189,7 @@ function Test-ReleaseFolder([string]$Dir) {
             }
         }
     }
-    foreach ($leaf in $RootFiles + @('licenses\THIRD-PARTY-LICENSES.txt', 'licenses\MSYS2-PACKAGES.txt', 'licenses\NotoSansTC\LICENSE-NotoSansTC.txt')) {
+    foreach ($leaf in $RootFiles + @('licenses\THIRD-PARTY-LICENSES.txt', 'licenses\MSYS2-PACKAGES.txt', 'licenses\NotoSansTC\LICENSE-NotoSansTC.txt', 'licenses\NotoSansKR\LICENSE-NotoSansKR.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $base $leaf) -PathType Leaf)) { $problems.Add("missing: $leaf") }
     }
     foreach ($asset in $AssetFiles) {

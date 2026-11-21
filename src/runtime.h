@@ -50,6 +50,9 @@ uintptr_t runtime_font_resolve(const char *name);
 /* The accented letters composed into the font atlas, `cell` pixels square; the data must outlive the process's fonts. */
 typedef struct { uint32_t code, base; const uint8_t *alpha, *base_alpha; } RuntimeComposedGlyph;
 void runtime_font_set_composed_glyphs(const RuntimeComposedGlyph *glyphs, size_t count, int cell);
+/* The text is the port's Korean: the European system font set opens Noto Sans KR, so the character messages, which the
+ * system font draws, have the Hangul the game's own font lacks. */
+void runtime_font_set_korean(int korean);
 uintptr_t runtime_eventflag_resolve(const char *name);
 /* The dcp.ini whose keyboard bindings the pad reads, once, at the first sample. */
 void runtime_pad_set_settings(const char *settings_file);

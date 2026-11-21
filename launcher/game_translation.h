@@ -17,6 +17,7 @@
 
 #include "cpk_patch.h"
 #include "cyrillic_glyphs.h"
+#include "hangul_glyphs.h"
 #include "game_profile.h"
 #include "latin_font.h"
 
@@ -34,6 +35,9 @@ std::span<const TranslationFile> EnglishTranslationFiles();
 std::span<const TranslationFile> RussianTranslationFiles();
 // localization/ru/font/cyrillic.glyphs.z; nullptr when it was not embedded.
 const TranslationFile* RussianGlyphs();
+std::span<const TranslationFile> KoreanTranslationFiles();
+// localization/ko/font/hangul.glyphs.z; nullptr when it was not embedded.
+const TranslationFile* KoreanGlyphs();
 // localization/pt-BR/visual/*.dcpx.z: compressed DCPX patches against the English slot's archive entries.
 std::span<const TranslationFile> PtBrVisualPatches();
 // The patches of one set: localization/pt-BR/visual/base-*.dcpx.z target the base stage files, the others the USA packs.
@@ -60,6 +64,7 @@ struct ArchiveTranslation {
     std::vector<std::string> native_default_bone; // the same records as the slot's own sheet holds them
     std::vector<LatinCell> latin_cells;    // the letters as the completed font holds them
     std::vector<CyrillicMetrics> cyrillic_metrics; // the Russian letters drawn into the font: their glyph table metrics
+    std::vector<HangulGlyph> hangul_glyphs;        // the Korean syllables drawn into the font: their glyph table entries
     uint32_t sheets_ms = 0, visual_ms = 0, mirror_ms = 0, overlay_ms = 0; // time spent per phase
     uint32_t inflate_ms = 0, read_ms = 0;                                     // within visual_ms
 };
@@ -82,6 +87,8 @@ struct TranslationRecipe {
     bool same_arguments = false;                      // only printf conversions and buttons must match the English
     const CyrillicFont* cyrillic = nullptr;           // the main font to draw the Russian letters into
     const TranslationFile* cyrillic_glyphs = nullptr; // and the letters
+    const HangulFont* hangul = nullptr;               // the main font to draw the Korean syllables into
+    const TranslationFile* hangul_glyphs = nullptr;   // and the syllables
 };
 
 ArchiveTranslation TranslateArchive(const std::filesystem::path& archive, const TranslationRecipe& recipe);
