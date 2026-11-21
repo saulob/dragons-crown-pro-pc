@@ -94,8 +94,8 @@ Install the game from your own .pkg file.	Instale o jogo a partir do seu própri
 Install a supported build from your own .pkg file.	Instale uma versão compatível a partir do seu próprio arquivo .pkg.
 Check that the game folder can be read, then install again.	Verifique se a pasta do jogo pode ser lida e instale novamente.
 Game files	Arquivos do jogo
-Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported:\s	Selecione o seu próprio pacote de Dragon's Crown Pro obtido legalmente (.pkg). Compatível com:\s
-. The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages. The game is unpacked into the game folder next to the program (about 6 GB). The game itself is not included. Reinstalling keeps your saves and settings.	. As atualizações 1.01 dos EUA, 1.02 e 1.03 do Japão e 1.02 da Ásia/Hong Kong são instaladas sobre os respectivos pacotes base 1.00. O jogo é descompactado na pasta de jogo ao lado do programa (cerca de 6 GB). O jogo em si não está incluído. Reinstalar mantém seus jogos salvos e configurações.
+Select your own legally obtained Dragon's Crown Pro PKG, or an already extracted game folder (the one with eboot.bin, sce_module and sce_sys). Supported:\s	Selecione o seu próprio PKG de Dragon's Crown Pro obtido legalmente, ou uma pasta de jogo já extraída (a que contém eboot.bin, sce_module e sce_sys). Compatível com:\s
+. The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their respective 1.00 base packages. The game is prepared in the game folder next to the program (about 6 GB). The game itself is not included. Reinstalling keeps your saves and settings.	. As atualizações 1.01 dos EUA, 1.02 e 1.03 do Japão e 1.02 da Ásia/Hong Kong são instaladas sobre os respectivos pacotes base 1.00. O jogo é preparado na pasta de jogo ao lado do programa (cerca de 6 GB). O jogo em si não está incluído. Reinstalar mantém seus jogos salvos e configurações.
 The game files are not ready: see the Play page.	Os arquivos do jogo não estão prontos: veja a página Jogar.
 Wait for the installation to finish.	Aguarde a instalação terminar.
 Wait for the game file changes to finish.	Aguarde as alterações dos arquivos do jogo terminarem.
@@ -111,6 +111,9 @@ Could not start the game.	Não foi possível iniciar o jogo.
 Install failed:\s	Falha na instalação:\s
 No graphics card found	Nenhuma placa de vídeo encontrada
 Select your Dragon's Crown Pro package	Selecione o pacote de Dragon's Crown Pro
+Select your Dragon's Crown Pro extracted game folder	Selecione a pasta extraída de Dragon's Crown Pro
+From PKG...	De um PKG...
+From extracted folder...	De uma pasta extraída...
 PS4 packages (*.pkg)	Pacotes de PS4 (*.pkg)
 Display mode	Modo de tela
 Borderless Fullscreen fills the monitor. F11 switches while playing.	Tela cheia sem bordas ocupa todo o monitor. F11 alterna durante o jogo.
@@ -409,10 +412,10 @@ Wrong game	Jogo errado
 This is not Dragon's Crown Pro.	Este não é Dragon's Crown Pro.
 This port supports\s	Este port é compatível com\s
  and\s	 e\s
-The package is incomplete or some of the game's files are missing. Copy or download it again.	O pacote está incompleto ou faltam alguns arquivos do jogo. Copie ou baixe novamente.
-The package could not be read or is damaged. Check the file, then try again.	Não foi possível ler o pacote ou ele está danificado. Verifique o arquivo e tente novamente.
-Choose another file	Escolha outro arquivo
-Select your game package, not a file inside the port's own game folder.	Selecione o pacote do jogo, não um arquivo dentro da pasta de jogo do próprio port.
+The package or folder is incomplete or some of the game's files are missing. Copy or download it again.	O pacote ou a pasta está incompleto(a) ou faltam alguns arquivos do jogo. Copie ou baixe novamente.
+The package or folder could not be read or is damaged. Check it, then try again.	Não foi possível ler o pacote ou a pasta, ou ele(a) está danificado(a). Verifique e tente novamente.
+Choose another source	Escolha outra origem
+Select your game package or extracted game folder, not something inside the port's own game folder.	Selecione o pacote do jogo ou a pasta extraída do jogo, não algo dentro da pasta de jogo do próprio port.
 Could not install the game	Não foi possível instalar o jogo
 The port's game folder holds other files. Move them out and try again.	A pasta de jogo do port contém outros arquivos. Mova-os para fora e tente novamente.
 Not enough free space	Espaço em disco insuficiente
@@ -545,6 +548,8 @@ This folder is empty.	Esta pasta está vazia.
 No .pkg files or folders here.	Nenhum arquivo .pkg ou pasta aqui.
 ../  (parent folder)	../  (pasta superior)
 Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel.	Escolha o arquivo .pkg. Controle: direcional para mover, A para escolher, B para cancelar.
+Select this folder	Selecionar esta pasta
+Open the folder with eboot.bin, sce_module and sce_sys, then select it. Controller: D-pad to move, A to open, B to cancel.	Abra a pasta com eboot.bin, sce_module e sce_sys e selecione-a. Controle: direcional para mover, A para escolher, B para cancelar.
 Program folder	Pasta do programa
 Home	Pasta pessoal
 Downloads	Downloads

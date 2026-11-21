@@ -167,13 +167,13 @@ The Linux package is the same game and launcher, so the package requirements are
 
 1. Download **DragonsCrownProPC-v1.4.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
-3. On the **Play** page click **Install game...** and select your own Dragon's Crown Pro `.pkg` file.
-4. Wait until **Ready to play** appears. The package is unpacked on your PC into the `game` folder next to the program (about 6 GB). The `.pkg` file is only read, and you can delete it afterwards.
+3. On the **Play** page click **Install game...** and choose **From PKG...** to select your own Dragon's Crown Pro `.pkg` file, or **From extracted folder...** to select a game folder you already extracted (the one with `eboot.bin`, `sce_module` and `sce_sys`).
+4. Wait until **Ready to play** appears. The game is prepared on your PC in the `game` folder next to the program (about 6 GB). The `.pkg` file or the extracted folder is only read, and you can delete it afterwards.
 5. Press **PLAY**.
 
 **The game itself is not included**: the release contains no game package or executable, and the port does not download the game. It does include the localization resources used for its additional languages (see [Credits](#credits)).
 
-**Reinstall game...** replaces only the installed game files and keeps your settings, saves, shader cache and logs. If an installation fails or is cancelled, the previous one is left as it was.
+**Reinstall game...** offers the same two sources and replaces only the installed game files; it keeps your settings, saves, shader cache and logs. If an installation fails or is cancelled, the previous one is left as it was.
 
 ### Saves and settings
 
@@ -218,7 +218,7 @@ Windows may warn the first time you run the program, because the release is not 
 The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
 
 ### Play
-- **Install game...** from your `.pkg` file, with the Title ID, version and `eboot.bin` checks, and **Reinstall game...**
+- **Install game...** from your `.pkg` file or an already extracted game folder, with the Title ID, version and `eboot.bin` checks, and **Reinstall game...**
 - The **Ready to play** status, and the **Show this launcher** setting
 
 ### Display

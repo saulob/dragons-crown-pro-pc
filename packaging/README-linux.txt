@@ -13,7 +13,8 @@ https://github.com/saulob/dragons-crown-pro-pc
 THE GAME ITSELF IS NOT INCLUDED
 -------------------------------
 No game package or executable is included. You need your own legally obtained
-copy of the game: a decrypted Dragon's Crown Pro PS4 package (.pkg). The port
+copy of the game: a decrypted Dragon's Crown Pro PS4 package (.pkg) or an
+already extracted, complete game folder. The port
 does include the localization resources for its additional languages
 (credited under PLAYING below). This port runs these releases:
 
@@ -46,7 +47,7 @@ REQUIREMENTS
   not possible it unpacks itself into a temporary folder and runs from there
   automatically, with no special option. Setting APPIMAGE_EXTRACT_AND_RUN=1
   (or starting with --appimage-extract-and-run) forces that mode
-- Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next
+- Your own Dragon's Crown Pro package or extracted game folder, plus about 6 GB of free disk space next
   to the AppImage for the installed game
 - Nothing else: no Python or other tools are needed; the AppImage carries its
   libraries (SDL3, FreeType, libpng, OpenSSL and others). GPU drivers and the
@@ -61,15 +62,19 @@ INSTALL
      chmod +x DragonsCrownProPC-v@VERSION@-x86_64.AppImage
 
 2. Run it (double-click, or from a terminal). The launcher opens.
-3. On the Play page, click "Install game..." and select your .pkg file. The
-   launcher uses the desktop's file chooser (zenity or kdialog) when there is
-   one, and its own file chooser otherwise (mouse, keyboard or controller).
-4. Wait while the launcher checks the package and unpacks it into the "game"
-   folder next to the AppImage. The .pkg file is only read and can be deleted
-   afterwards.
+3. On the Play page, click "Install game...", then choose "From PKG..." and
+   select your .pkg file, or "From extracted folder..." and select the game
+   folder you already extracted (the one that contains eboot.bin, sce_module
+   and sce_sys). The launcher uses the desktop's chooser (zenity or kdialog)
+   when there is one, and its own chooser otherwise (mouse, keyboard or
+   controller).
+4. Wait while the launcher checks the game files and prepares them in the "game"
+   folder next to the AppImage. The .pkg file or the extracted folder is only
+   read and can be deleted afterwards.
 5. When the Play page says "Ready to play", press PLAY.
 
-To repair the game files, use "Reinstall game..." on the Play page. Your
+To repair the game files, use "Reinstall game..." on the Play page (same two
+sources). Your
 settings and saves are kept. If an installation fails or is cancelled, the
 previous one is left as it was.
 

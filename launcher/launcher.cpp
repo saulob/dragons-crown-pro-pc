@@ -38,6 +38,7 @@
 #include "dcp_voice.h"
 #include "game_files.h"
 #include "game_install.h"
+#include "install_source.h"
 #include "game_process.h"
 #include "header_art.h"
 #include "host.h"
@@ -97,10 +98,11 @@ int ScancodeOf(ImGuiKey key) {
     return 0;
 }
 std::string GameFilesHelp() {
-    return Tr("Select your own legally obtained Dragon's Crown Pro package (.pkg). Supported: ") +
+    return Tr("Select your own legally obtained Dragon's Crown Pro PKG, or an already extracted game folder (the one "
+              "with eboot.bin, sce_module and sce_sys). Supported: ") +
            SupportedBuildsText() +
            Tr(". The USA 1.01, Japanese 1.02 and 1.03 and Asia/Hong Kong 1.02 updates are installed over their "
-              "respective 1.00 base packages. The game is unpacked into the game folder next to the program (about 6 "
+              "respective 1.00 base packages. The game is prepared in the game folder next to the program (about 6 "
               "GB). The game itself is not included. Reinstalling keeps your saves and settings.");
 }
 #ifdef _WIN32
@@ -854,9 +856,7 @@ private:
         if (!ui.TaskProgress(install_)) {
             const bool clicked = ready ? ImGui::Button(Tr("Reinstall game..."), ImVec2(-FLT_MIN, 0))
                                        : ui.AccentButton("Install game...");
-            if (clicked) {
-                BrowseAndInstall();
-            }
+            InstallSourceMenu(clicked);
         }
         ui.EndRows();
         ui.Help(GameFilesHelp().c_str());
@@ -877,16 +877,47 @@ private:
 #endif
     }
 
-    void BrowseAndInstall() {
+    // Drawn right after the Install/Reinstall button: a click on it offers the two sources.
+    void InstallSourceMenu(bool open) {
+        constexpr char kPopup[] = "install_source";
+        const ImVec2 button_min = ImGui::GetItemRectMin(), button_max = ImGui::GetItemRectMax();
+        if (open) {
+            ImGui::OpenPopup(kPopup);
+        }
+        ImGui::SetNextWindowPos(ImVec2(button_min.x, button_max.y + 4.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(button_max.x - button_min.x, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+        if (!ImGui::BeginPopup(kPopup)) {
+            return;
+        }
+        std::optional<InstallSource> chosen;
+        for (const InstallSource source : {InstallSource::kPackage, InstallSource::kFolder}) {
+            if (ImGui::Selectable(InstallSourceLabel(source))) {
+                chosen = source;
+            }
+            if (source == InstallSource::kPackage) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndPopup();
+        if (chosen) {
+            BrowseAndInstall(*chosen);
+        }
+    }
+
+    void BrowseAndInstall(InstallSource source) {
         if (install_.running() || browser_.active() || prompts_.running() || BuildPinned()) {
             return;
         }
         if (UseBuiltInChooser()) {
-            browser_.Open(paths_.app0.parent_path().parent_path().parent_path());
+            browser_.Open(paths_.app0.parent_path().parent_path().parent_path(), source);
             return;
         }
-        StartInstall(trg::BrowseForFile(Tr("Select your Dragon's Crown Pro package"),
-                                        {{Tr("PS4 packages (*.pkg)"), "*.pkg"}}));
+        SourceChoosers choosers;
+        choosers.file = [](const std::string& title, const std::vector<trg::FileFilter>& filters) {
+            return trg::BrowseForFile(title, filters);
+        };
+        choosers.folder = [](const std::string& title) { return trg::BrowseForFolder(title); };
+        StartInstall(ChooseInstallSource(source, choosers));
     }
 
     // A test instance keeps its DCP_GAME_BUILD: installing or activating another build would move the active build
@@ -908,7 +939,7 @@ private:
         install_failure_text_.clear();
         outcome_ = std::make_shared<InstallResult>();
         const bool started = install_.Start(
-            "Checking the package...",
+            kInstallStartLabel,
             [outcome = outcome_, source = PathFromUtf8(picked), roots = RootsOf(paths_),
              replace = files_ == GameFileState::kValid](trg::Task& task) {
                 InstallHooks hooks;

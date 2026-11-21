@@ -936,13 +936,13 @@ InstallMessage DescribeInstall(InstallStatus status) {
                 Tr("This port supports ") + SupportedBuildsText() + "."};
     case InstallStatus::kIncomplete:
         return {Tr("Game files missing"),
-                Tr("The package is incomplete or some of the game's files are missing. Copy or download it again.")};
+                Tr("The package or folder is incomplete or some of the game's files are missing. Copy or download it again.")};
     case InstallStatus::kReadFailed:
         return {Tr("Could not read the game files"),
-                Tr("The package could not be read or is damaged. Check the file, then try again.")};
+                Tr("The package or folder could not be read or is damaged. Check it, then try again.")};
     case InstallStatus::kOverlapping:
-        return {Tr("Choose another file"),
-                Tr("Select your game package, not a file inside the port's own game folder.")};
+        return {Tr("Choose another source"),
+                Tr("Select your game package or extracted game folder, not something inside the port's own game folder.")};
     case InstallStatus::kForeignFolder:
         return {Tr("Could not install the game"),
                 Tr("The port's game folder holds other files. Move them out and try again.")};

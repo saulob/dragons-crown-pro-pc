@@ -13,25 +13,40 @@ namespace fs = std::filesystem;
 namespace dcp {
 namespace {
 
-constexpr char kTitle[] = "Select your Dragon's Crown Pro package (.pkg)";
+constexpr char kPackageTitle[] = "Select your Dragon's Crown Pro package (.pkg)";
+constexpr char kFolderTitle[] = "Select your Dragon's Crown Pro extracted game folder";
 constexpr char kExtension[] = ".pkg";
+
+fs::path HomePlace(const std::vector<Place>& places) {
+    for (const Place& place : places) {
+        if (place.label == "Home") {
+            return place.path;
+        }
+    }
+    return places.empty() ? fs::current_path() : places.front().path;
+}
 
 } // namespace
 
-void PackageBrowser::Open(const fs::path& program_folder) {
+void PackageBrowser::Open(const fs::path& program_folder, InstallSource source) {
     places_ = StandardPlaces(program_folder);
     std::error_code ec;
+    source_ = source;
     show_all_ = false;
     active_ = true;
     popup_open_ = false;
-    Go(!folder_.empty() && fs::is_directory(folder_, ec) ? folder_ : StartingFolder(places_, kExtension));
+    const bool folders = source == InstallSource::kFolder;
+    Go(!folder_.empty() && fs::is_directory(folder_, ec) ? folder_
+       : folders                                        ? HomePlace(places_)
+                                                        : StartingFolder(places_, kExtension));
 }
 
 void PackageBrowser::Go(const fs::path& folder) {
     std::error_code ec;
     const fs::path resolved = fs::weakly_canonical(folder, ec);
     folder_ = ec ? folder : resolved;
-    listing_ = ListFolder(folder_, show_all_ ? std::string_view() : std::string_view(kExtension), false);
+    const bool every_file = show_all_ || source_ == InstallSource::kFolder;
+    listing_ = ListFolder(folder_, every_file ? std::string_view() : std::string_view(kExtension), false);
     focus_list_ = true;
 }
 
@@ -39,7 +54,8 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
     if (!active_) {
         return std::nullopt;
     }
-    const char* title = Tr(kTitle);
+    const bool folders = source_ == InstallSource::kFolder;
+    const char* title = Tr(folders ? kFolderTitle : kPackageTitle);
     if (!popup_open_) {
         ImGui::OpenPopup(title);
         popup_open_ = true;
@@ -79,9 +95,11 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
         Go(parent);
     }
     ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Checkbox(Tr("Show all files"), &show_all_)) {
-        Go(folder_);
+    if (!folders) {
+        ImGui::SameLine();
+        if (ImGui::Checkbox(Tr("Show all files"), &show_all_)) {
+            Go(folder_);
+        }
     }
     ImGui::SameLine();
     ImGui::TextDisabled("%s", Utf8(folder_).c_str());
@@ -104,7 +122,7 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
         if (!listing_.readable) {
             ImGui::TextDisabled("%s", Tr("This folder cannot be read."));
         } else if (listing_.entries.empty()) {
-            ImGui::TextDisabled("%s", Tr(show_all_ ? "This folder is empty." : "No .pkg files or folders here."));
+            ImGui::TextDisabled("%s", Tr(show_all_ || folders ? "This folder is empty." : "No .pkg files or folders here."));
         }
         const float right_edge = ImGui::GetContentRegionAvail().x;
         if (!parent.empty() && parent != folder_ && ImGui::Selectable(Tr("../  (parent folder)"))) {
@@ -118,14 +136,16 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
             }
             ImGui::PushID(static_cast<int>(i));
             const std::string label = entry.directory ? entry.name + "/" : entry.name;
-            if (ImGui::Selectable(label.c_str())) {
+            if (folders && !entry.directory) {
+                ImGui::TextDisabled("%s", label.c_str());
+            } else if (ImGui::Selectable(label.c_str())) {
                 if (entry.directory) {
                     enter = folder_ / PathFromUtf8(entry.name);
                 } else {
                     picked = folder_ / PathFromUtf8(entry.name);
                 }
             }
-            if (!entry.directory) {
+            if (!entry.directory && !folders) {
                 const std::string size = FormatSize(entry.size);
                 ImGui::SameLine(right_edge - ImGui::CalcTextSize(size.c_str()).x);
                 ImGui::TextDisabled("%s", size.c_str());
@@ -139,8 +159,17 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
         keep = false;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("%s",
-                        Tr("Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel."));
+    if (folders) {
+        if (ImGui::Button(Tr("Select this folder"))) {
+            picked = folder_;
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", Tr("Open the folder with eboot.bin, sce_module and sce_sys, then select it. "
+                                     "Controller: D-pad to move, A to open, B to cancel."));
+    } else {
+        ImGui::TextDisabled("%s",
+                            Tr("Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel."));
+    }
 
     if (!enter.empty()) {
         Go(enter);

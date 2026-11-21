@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -54,6 +55,7 @@
 #include "fms_sheet.h"
 #include "game_files.h"
 #include "game_install.h"
+#include "install_source.h"
 #include "game_process.h"
 #include "net/connection_test.h"
 #include "voice_language_resources.h"
@@ -8068,6 +8070,231 @@ std::string SfoFor(const GameBuild& build, const char* app_ver = nullptr, const 
                     {"VERSION", version ? version : FinishedLayer(build).sfo_version}});
 }
 
+std::map<std::string, std::string> TreeContents(const fs::path& root) {
+    std::map<std::string, std::string> files;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec)) {
+            files[it->path().lexically_relative(root).generic_string()] = ReadAll(it->path());
+        }
+    }
+    return files;
+}
+
+// An extracted game folder takes the same installer as a package and is checked as strictly: the previous installation,
+// the player's own folders and the selected folder are never changed.
+void TestFolderInstall(const fs::path& base) {
+    Fixture source(base, "folder-source");
+    const fs::path home = base / "folder-target";
+    fs::remove_all(home);
+    const GameRoots roots{home / "prepared", home / "image"};
+    const GamePaths target = BuildPaths(roots, kUs);
+    WriteAll(target.app0 / kPreparedMarker, "previous");
+    WriteAll(target.image_dir / "boot.bin", "previous boot");
+    WriteAll(home / "user" / "settings.ini", "mine");
+    WriteAll(home / "logs" / "latest.log", "log");
+    WriteAll(home / "cache" / "shaders.bin", "shaders");
+    const auto owned = [&](const char* suffix) {
+        return target.app0.parent_path() / (target.app0.filename().string() + suffix);
+    };
+    const auto untouched = [&] {
+        return ReadAll(target.app0 / kPreparedMarker) == "previous" &&
+               ReadAll(target.image_dir / "boot.bin") == "previous boot" &&
+               ReadAll(home / "user" / "settings.ini") == "mine" && ReadAll(home / "logs" / "latest.log") == "log" &&
+               ReadAll(home / "cache" / "shaders.bin") == "shaders" && !fs::exists(owned(".install-temp")) &&
+               !fs::exists(target.image_dir.parent_path() / (target.image_dir.filename().string() + ".install-temp"));
+    };
+    const auto folder = [&](const fs::path& from, const InstallHooks& hooks = {}) {
+        return InstallGame(from, roots, hooks, source.builds).status;
+    };
+    const auto source_before = TreeContents(source.paths.app0);
+
+    // A directory goes to InstallFromFolder, a file to InstallFromPackage.
+    CHECK(folder(source.paths.app0) == InstallFromFolder(source.paths.app0, roots, {}, source.builds).status);
+    fs::create_directories(base / "folder-empty");
+    CHECK(folder(base / "folder-empty") == InstallStatus::kNotGameFolder);
+    WriteAll(base / "folder-notes.pkg", "not a package");
+    CHECK(folder(base / "folder-notes.pkg") == InstallStatus::kNotPackage);
+    CHECK(folder(base / "folder-notes.pkg") == InstallFromPackage(base / "folder-notes.pkg", roots, {}, source.builds).status);
+
+    // A valid folder is checked, then laid out: the synthetic eboot.bin is accepted and only the boot image fails.
+    std::vector<std::string> phases;
+    uintmax_t most_links = 0;
+    InstallHooks watch;
+    watch.phase = [&](const char* text) { phases.emplace_back(text); };
+    watch.progress = [&](uint64_t, uint64_t) {
+        std::error_code ec;
+        most_links = std::max(most_links, fs::hard_link_count(source.paths.app0 / "DRACRO.CPK", ec));
+        return true;
+    };
+    CHECK(folder(source.paths.app0, watch) == InstallStatus::kPrepareFailed);
+    CHECK(phases.size() >= 2 && phases[0] == "Checking the game folder..." && phases[1] == "Copying the game files...");
+    CHECK(untouched());
+    CHECK(TreeContents(source.paths.app0) == source_before);
+
+    // The same drive gets hard links, not copies, and none remains once the staging folder is gone.
+    WriteAll(base / "folder-link-probe", "x");
+    std::error_code link_ec;
+    fs::create_hard_link(base / "folder-link-probe", base / "folder-link-probe-2", link_ec);
+    if (!link_ec) {
+        CHECK(most_links == 2);
+        CHECK(fs::hard_link_count(source.paths.app0 / "DRACRO.CPK") == 1);
+    }
+
+    InstallHooks cancel;
+    cancel.progress = [](uint64_t, uint64_t) { return false; };
+    CHECK(folder(source.paths.app0, cancel) == InstallStatus::kCancelled);
+    CHECK(untouched());
+
+    // Missing or wrong files are refused before anything is copied.
+    const std::string eboot = ReadAll(source.paths.app0 / "eboot.bin");
+    const std::string sfo = ReadAll(source.paths.app0 / "sce_sys" / "param.sfo");
+    fs::remove(source.paths.app0 / "eboot.bin");
+    CHECK(folder(source.paths.app0) == InstallStatus::kNotGameFolder);
+    WriteAll(source.paths.app0 / "eboot.bin", eboot);
+    fs::remove(source.paths.app0 / "sce_sys" / "param.sfo");
+    CHECK(folder(source.paths.app0) == InstallStatus::kNotGameFolder);
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo);
+    fs::remove_all(source.paths.app0 / "sce_module");
+    CHECK(folder(source.paths.app0) == InstallStatus::kIncomplete);
+    source.Rebuild();
+    fs::remove(source.paths.app0 / "sce_module" / "libc.prx");
+    CHECK(folder(source.paths.app0) == InstallStatus::kIncomplete);
+    source.Rebuild();
+    WriteAll(source.paths.app0 / "eboot.bin", "patched by another tool");
+    const InstallStatus foreign = folder(source.paths.app0);
+    CHECK(foreign == InstallStatus::kUnsupportedBuild || foreign == InstallStatus::kWrongVersion);
+    WriteAll(source.paths.app0 / "eboot.bin", eboot);
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", MakeSfo({{"TITLE_ID", "CUSA00001"},
+                                                                 {"CONTENT_ID", std::string(kUs.content_id)},
+                                                                 {"APP_VER", "01.00"},
+                                                                 {"VERSION", "01.00"}}));
+    CHECK(folder(source.paths.app0) == InstallStatus::kWrongGame);
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", SfoFor(kUs, "01.04"));
+    CHECK(folder(source.paths.app0) == InstallStatus::kWrongVersion);
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo);
+    CHECK(untouched());
+    CHECK(TreeContents(source.paths.app0) == source_before);
+
+    // A folder the installer manages, or one that holds it, is refused: the installed game itself, its staging and backup
+    // folders and the folder the builds sit in.
+    for (const fs::path& managed : {target.app0, owned(".install-temp"), owned(".install-backup"), roots.prepared}) {
+        WriteAll(managed / "eboot.bin", eboot);
+        WriteAll(managed / "sce_sys" / "param.sfo", sfo);
+        CHECK(folder(managed) == InstallStatus::kOverlapping);
+        fs::remove(managed / "eboot.bin");
+        fs::remove_all(managed / "sce_sys");
+    }
+    fs::remove_all(owned(".install-temp"));
+    fs::remove_all(owned(".install-backup"));
+    CHECK(DescribeInstall(InstallStatus::kOverlapping).text.find("extracted game folder") != std::string::npos);
+    CHECK(untouched());
+
+    // A folder holds the finished game. An update alone lacks the base's files, and a base alone is another version of a
+    // build that has updates.
+    Fixture update(base, "folder-update", kUs101);
+    fs::remove(update.paths.app0 / "DRACRO.CPK");
+    fs::remove(update.paths.app0 / "sce_discmap.plt");
+    fs::remove_all(update.paths.app0 / "sce_module");
+    const auto update_status = [&] { return InstallGame(update.paths.app0, roots, {}, update.builds).status; };
+    CHECK(update_status() == InstallStatus::kIncomplete);
+    WriteAll(update.paths.app0 / "sce_sys" / "param.sfo", SfoFor(kUs101, "01.00", "01.03"));
+    CHECK(update_status() == InstallStatus::kWrongVersion);
+
+    // Reinstalling from a folder starts over only on the player's request, and leaves the installed game as it was when
+    // that fails.
+    Fixture installed(base, "folder-installed");
+    const GameRoots present{home / "present" / "prepared", home / "present" / "image"};
+    const GamePaths present_paths = BuildPaths(present, kUs);
+    fs::create_directories(present_paths.app0.parent_path());
+    fs::create_directories(present_paths.image_dir.parent_path());
+    fs::copy(installed.paths.app0, present_paths.app0, fs::copy_options::recursive);
+    fs::copy(installed.paths.image_dir, present_paths.image_dir, fs::copy_options::recursive);
+    const auto game_before = TreeContents(present_paths.app0);
+    const auto image_before = TreeContents(present_paths.image_dir);
+    CHECK(InstallGame(installed.paths.app0, present, {}, installed.builds).status == InstallStatus::kUpToDate);
+    InstallHooks reinstall;
+    reinstall.replace_active = true;
+    CHECK(InstallGame(installed.paths.app0, present, reinstall, installed.builds).status == InstallStatus::kPrepareFailed);
+    CHECK(TreeContents(present_paths.app0) == game_before && TreeContents(present_paths.image_dir) == image_before);
+    CHECK(ReadAll(home / "user" / "settings.ini") == "mine" && ReadAll(home / "cache" / "shaders.bin") == "shaders");
+}
+
+// Install and Reinstall are one button on the Play page that offers the two sources; each source opens its own chooser.
+void TestInstallSource() {
+    using namespace localization;
+    int files = 0, folders = 0;
+    std::string file_title, folder_title, patterns;
+    SourceChoosers choosers;
+    choosers.file = [&](const std::string& title, const std::vector<trg::FileFilter>& filters) {
+        ++files;
+        file_title = title;
+        patterns = filters.empty() ? std::string() : filters.front().patterns;
+        return std::string("C:/games/dcp.pkg");
+    };
+    choosers.folder = [&](const std::string& title) {
+        ++folders;
+        folder_title = title;
+        return std::string("E:/DCP-extracted");
+    };
+    SetActiveLanguage("english");
+    CHECK(ChooseInstallSource(InstallSource::kPackage, choosers) == "C:/games/dcp.pkg");
+    CHECK(files == 1 && folders == 0 && patterns == "*.pkg");
+    CHECK(file_title == "Select your Dragon's Crown Pro package");
+    CHECK(ChooseInstallSource(InstallSource::kFolder, choosers) == "E:/DCP-extracted");
+    CHECK(files == 1 && folders == 1);
+    CHECK(folder_title == "Select your Dragon's Crown Pro extracted game folder");
+    choosers.file = [&](const std::string&, const std::vector<trg::FileFilter>&) { return std::string(); };
+    choosers.folder = [&](const std::string&) { return std::string(); };
+    CHECK(ChooseInstallSource(InstallSource::kPackage, choosers).empty());
+    CHECK(ChooseInstallSource(InstallSource::kFolder, choosers).empty());
+    CHECK(ChooseInstallSource(InstallSource::kFolder, {}).empty() && ChooseInstallSource(InstallSource::kPackage, {}).empty());
+    CHECK(std::string(InstallSourceLabel(InstallSource::kPackage)) == "From PKG...");
+    CHECK(std::string(InstallSourceLabel(InstallSource::kFolder)) == "From extracted folder...");
+    CHECK(std::string(kInstallStartLabel) == "Checking the game files...");
+
+    const fs::path source = fs::path(DCP_SOURCE_DIR) / "launcher";
+    const std::string launcher = ReadAll(source / "launcher.cpp");
+    const auto count = [](const std::string& text, const std::string& part) {
+        size_t found = 0;
+        for (size_t at = text.find(part); at != std::string::npos; at = text.find(part, at + 1)) ++found;
+        return found;
+    };
+    CHECK(count(launcher, "Tr(\"Reinstall game...\")") == 1 && count(launcher, "ui.AccentButton(\"Install game...\")") == 1);
+    CHECK(count(launcher, "InstallSourceMenu(clicked);") == 1);
+    CHECK(launcher.find("for (const InstallSource source : {InstallSource::kPackage, InstallSource::kFolder})") !=
+          std::string::npos);
+    CHECK(launcher.find("BrowseAndInstall(*chosen);") != std::string::npos);
+    CHECK(launcher.find("trg::BrowseForFile(title, filters)") != std::string::npos);
+    CHECK(launcher.find("trg::BrowseForFolder(title)") != std::string::npos);
+    CHECK(launcher.find("browser_.Open(paths_.app0.parent_path().parent_path().parent_path(), source);") != std::string::npos);
+    CHECK(launcher.find("StartInstall(ChooseInstallSource(source, choosers));") != std::string::npos);
+    CHECK(launcher.find("if (picked.empty() || prompts_.running() || BuildPinned()) {") != std::string::npos);
+    CHECK(launcher.find("kInstallStartLabel,") != std::string::npos && launcher.find("Checking the package...") == std::string::npos);
+    CHECK(count(launcher, "InstallGame(source, roots, hooks)") == 1);
+    for (const char* extra : {"StartFolderInstall", "InstallExtractedGame", "InstallFromShadPS4"}) {
+        CHECK(launcher.find(extra) == std::string::npos);
+    }
+
+    const std::string browser = ReadAll(source / "package_browser.cpp");
+    CHECK(browser.find("Select this folder") != std::string::npos && browser.find("kFolderTitle") != std::string::npos);
+    const size_t help_at = launcher.find("std::string GameFilesHelp()");
+    CHECK(help_at != std::string::npos);
+    const std::string help = launcher.substr(help_at, 900);
+    for (const char* part : {"PKG", "extracted game folder", "eboot.bin, sce_module and sce_sys", "about 6 ",
+                             "Reinstalling keeps your saves and settings"}) {
+        CHECK(help.find(part) != std::string::npos);
+    }
+
+    SetActiveLanguage(kPortugueseBrazilKey);
+    for (const char* text : {"From PKG...", "From extracted folder...", "Select your Dragon's Crown Pro extracted game folder",
+                             "Select this folder", "Choose another source"}) {
+        CHECK(std::string(Tr(text)) != text);
+    }
+    CHECK(std::string(Tr(kInstallStartLabel)) != kInstallStartLabel);
+    SetActiveLanguage("english");
+}
+
 // A package's param.sfo: the identity of a base package ('gd') or an update ('gp') of a build.
 std::string PackageSfo(const GameBuild& build, const char* app_ver, const char* version, const char* category) {
     return MakeSfo({{"TITLE_ID", build.title_id},
@@ -9297,6 +9524,8 @@ int main(int argc, char** argv) {
     TestCorrectnessStaysFixed();
     TestPngDecoder();
     TestInstaller(base);
+    TestFolderInstall(base);
+    InGroup("install-source", TestInstallSource);
     TestVideoCoreSettings(base);
     TestDefaultsAgree();
     TestDetailedLogging(base);

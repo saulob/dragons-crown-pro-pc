@@ -12,7 +12,8 @@ https://github.com/saulob/dragons-crown-pro-pc
 THE GAME ITSELF IS NOT INCLUDED
 -------------------------------
 No game package or executable is included. You need your own legally obtained
-copy of the game: a decrypted Dragon's Crown Pro PS4 package (.pkg). The port
+copy of the game: a decrypted Dragon's Crown Pro PS4 package (.pkg) or an
+already extracted, complete game folder. The port
 does include the localization resources for its additional languages
 (credited under PLAYING below). This port runs these releases:
 
@@ -36,7 +37,7 @@ REQUIREMENTS
   start only when the check of their LZCNT instructions at start passes)
 - A graphics card and driver with Vulkan 1.3, VK_EXT_robustness2,
   VK_KHR_push_descriptor and VK_EXT_vertex_attribute_divisor
-- Your own Dragon's Crown Pro package, plus about 6 GB of free disk space next
+- Your own Dragon's Crown Pro package or extracted game folder, plus about 6 GB of free disk space next
   to the program for the installed game
 - Nothing else: no Python or other tools are needed
 
@@ -46,13 +47,16 @@ INSTALL
 1. Extract the ZIP anywhere you can write to (not "Program Files").
 2. Run dragons_crown_pro.exe. The launcher opens.
 3. On the Play page, click "Install game...".
-4. Select your Dragon's Crown Pro .pkg file.
-5. Wait while the launcher checks the package and unpacks it into the "game"
-   folder next to the program. The .pkg file is only read and can be deleted
-   afterwards.
+4. Choose "From PKG..." and select your Dragon's Crown Pro .pkg file, or
+   choose "From extracted folder..." and select the folder you already
+   extracted (the one that contains eboot.bin, sce_module and sce_sys).
+5. Wait while the launcher checks the game files and prepares them in the "game"
+   folder next to the program. The .pkg file or the extracted folder is only
+   read and can be deleted afterwards.
 6. When the Play page says "Ready to play", press PLAY.
 
-To repair the game files, use "Reinstall game..." on the Play page. Your
+To repair the game files, use "Reinstall game..." on the Play page (same two
+sources). Your
 settings and saves are kept. If an installation fails or is cancelled, the
 previous one is left as it was.
 

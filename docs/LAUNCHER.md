@@ -166,8 +166,10 @@ the same label.
 
 ## Install
 
-**Install game...** (or **Reinstall game...**) on the Play page takes the player's own fake PKG
-(`launcher/game_install.cpp`, on a background task with progress and Cancel):
+**Install game...** (or **Reinstall game...**) on the Play page is one button. It opens a small menu with **From PKG...** and
+**From extracted folder...** (`launcher/install_source.cpp`): the first opens the file chooser (`*.pkg`), the second a folder
+chooser, and the chosen path goes to the same `InstallGame` on a background task with progress and Cancel
+(`launcher/game_install.cpp`). A cancelled chooser does nothing. The package flow:
 
 1. `Package::Open` (`launcher/pkg_extract.cpp`) reads the header, the entry table and `param.sfo`; `CheckSfoIdentity`
    refuses another game or version before anything is unpacked. A package inside the port's own game folders is
@@ -188,8 +190,19 @@ the same label.
 Crypto++, 64-bit file sizes (`DRACRO.CPK` is 5 GB) and a directory walk from the super-root, as `scripts/pkg_extract.py`
 does. Both write byte-identical files from the game's package.
 
-`InstallGame` also takes an already extracted game folder (the one with `eboot.bin`, `sce_module` and `sce_sys`):
-`CheckGameTree` checks it, and its files are hard-linked into staging on the same drive and copied otherwise.
+`InstallGame` takes the extracted game folder the same way: a directory goes to `InstallFromFolder`, a file to
+`InstallFromPackage`. The folder is the game's root, the one with `eboot.bin`, `sce_module` and `sce_sys`, never `eboot.bin`
+itself. `eboot.bin` and `sce_sys\param.sfo` must exist, a folder inside or holding the port's own game, image, staging or
+backup folders is refused (`kOverlapping`), and `CheckGameTree` then applies the same checks as to an unpacked package: build identity,
+the required files (including the three `sce_module` libraries) and the `eboot.bin` SHA-256, so a folder patched by another tool is
+refused as an unsupported version. Files are hard-linked into staging on the same drive and copied otherwise; the selected folder is
+only read (the later patches write a file of their own first). Staging, the boot image, the verification and the swap are the
+package's, so a failure or Cancel leaves the installed game, `user\`, `logs\` and the shader cache as they were.
+
+A folder must be the finished game. An extracted update alone is refused as incomplete when it lacks the base game's files (the
+check cannot tell a partial archive from a complete one), and an extracted base of a build that has updates is another version; composing an extracted update over a base is not
+supported, only package updates are. Without a desktop chooser (Linux without zenity or kdialog, or `DCP_FILE_CHOOSER=builtin`)
+the launcher's own chooser lists the folders and **Select this folder** takes the one that is open.
 
 ## Save and Play
 
