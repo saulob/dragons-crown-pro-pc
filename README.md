@@ -175,6 +175,18 @@ The Linux package is the same game and launcher, so the package requirements are
 
 **Reinstall game...** offers the same two sources and replaces only the installed game files; it keeps your settings, saves, shader cache and logs. If an installation fails or is cancelled, the previous one is left as it was.
 
+### Command line
+
+For front ends and scripts, two commands run without opening the launcher or the game, with progress on the console:
+
+```
+dragons_crown_pro.exe --install "D:\Games\DragonsCrown.pkg"
+dragons_crown_pro.exe --install "S:\DCP-extracted"
+dragons_crown_pro.exe --check-game
+```
+
+`--install` takes one source: a decrypted PKG, or an already extracted complete game folder (`eboot.bin`, `sce_module`, `sce_sys` and the rest of the game). It is the launcher's installer: the same checks, the same staging and rollback, and a failed install leaves the previous one as it was; your saves, settings, shader cache and logs are never touched. An extracted update alone is not accepted. `--check-game` only reports whether the active build is ready to play, with its build, Title ID and version; it writes nothing. Both exit with `0` when the game is installed or ready, `1` when it is not or the install failed, and `2` for invalid arguments, and neither opens a window, a dialog or the game. On Linux use `./dragons_crown_pro` (or the AppImage) with the same arguments; see [docs/LAUNCHER.md](docs/LAUNCHER.md#headless-commands).
+
 ### Saves and settings
 
 Everything is kept next to the program, so copying the whole folder to another PC takes your data with it:

@@ -178,7 +178,7 @@ $warnings = 'launcher-warnings'
 $windows = 'launcher-parity-windows'
 $units = @('launcher/page_icons.cpp', 'launcher/header_art.cpp', 'launcher/launcher.cpp', 'launcher/online_page.cpp', 'launcher/trophy_page.cpp',
            'launcher/incident_page.cpp', 'launcher/incident_report.cpp', 'launcher/log_scrubber.cpp', 'launcher/my_reports.cpp',
-           'launcher/report_history.cpp',
+           'launcher/report_history.cpp', 'launcher/headless.cpp', 'launcher/game_patches.cpp',
            'launcher/host.cpp', 'launcher/updater/update_ui.cpp', 'tests/launcher_tests.cpp')
 $compile = @()
 if (-not $BuildDir -or -not (Test-Path -LiteralPath (Join-Path $BuildDir 'build.ninja'))) {

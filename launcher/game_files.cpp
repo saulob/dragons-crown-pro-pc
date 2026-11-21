@@ -139,12 +139,15 @@ const GameBuild* BuildOfImageReport(const std::string& report, std::span<const G
 
 // v0.5.0 markers say version 1.03: only a tree already verified as the US build is renamed, keeping the marker's time.
 bool MigrateLegacyMarker(const std::filesystem::path& marker_file, const std::string& marker, const GameBuild& build,
-                         const std::string& version) {
+                         const std::string& version, bool read_only) {
     constexpr std::string_view kLegacy = "\"version\": \"1.03\"";
     const size_t at = marker.find(kLegacy);
     if (std::string_view(build.title_id) != "CUSA10454" || std::string_view(build.version) != "1.00" ||
         version != "1.03" || at == std::string::npos) {
         return false;
+    }
+    if (read_only) {
+        return true;
     }
     std::error_code ec;
     const auto time = std::filesystem::last_write_time(marker_file, ec);
@@ -441,7 +444,7 @@ GameCheck CheckGameTree(const std::filesystem::path& app0, std::span<const GameB
     return Result(GameFileState::kValid, {}, sha, &build);
 }
 
-GameCheck CheckGameFiles(const GamePaths& paths, std::span<const GameBuild> builds) {
+GameCheck CheckGameFiles(const GamePaths& paths, std::span<const GameBuild> builds, bool read_only) {
     std::error_code ec;
     if (!std::filesystem::is_directory(paths.app0, ec)) {
         return Result(GameFileState::kMissing, "game folder not found");
@@ -470,7 +473,7 @@ GameCheck CheckGameFiles(const GamePaths& paths, std::span<const GameBuild> buil
     }
     const GameBuild& build = *tree.build;
     const std::string& sha = tree.eboot_sha256;
-    if (version != build.version && !MigrateLegacyMarker(marker_file, marker, build, version)) {
+    if (version != build.version && !MigrateLegacyMarker(marker_file, marker, build, version, read_only)) {
         return Result(GameFileState::kDifferentVersion, "prepared version " + version, sha, &build);
     }
     for (const char* name : kImageFiles) {

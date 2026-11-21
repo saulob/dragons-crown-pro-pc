@@ -61,7 +61,9 @@ PinnedBuild PinnedBuildFromEnvironment(const GameRoots& roots);
 
 // Reads the build from param.sfo, then the preparation marker, the boot image report and eboot.bin (about 21 MB). The
 // game data archives are only checked for presence: the marker records that their extraction finished.
-GameCheck CheckGameFiles(const GamePaths& paths, std::span<const GameBuild> builds = SupportedBuilds());
+// An older port's marker is brought up to date unless `read_only`, which only judges it as updated.
+GameCheck CheckGameFiles(const GamePaths& paths, std::span<const GameBuild> builds = SupportedBuilds(),
+                         bool read_only = false);
 
 // The game itself, without a preparation marker or boot image: param.sfo, the required files and eboot.bin. The
 // installer checks what it unpacked or the folder the player chose with it.

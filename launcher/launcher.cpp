@@ -674,25 +674,6 @@ private:
         return build_ ? InstalledPromptStyle(paths_.app0, *build_, XboxPromptsPatch()) : PromptStyle::kPlayStation;
     }
 
-    bool PromptPatchInstalled() const {
-        if (!build_ || !build_->xbox_prompts) {
-            return false;
-        }
-        const std::optional<BlockPatch> patch = ParseBlockPatch(XboxPromptsPatch());
-        if (!patch) {
-            return false;
-        }
-        for (const std::filesystem::path& archive : PromptArchives(paths_.app0, *build_)) {
-            for (const std::string& entry : PatchedEntries(archive)) {
-                if (std::any_of(patch->targets.begin(), patch->targets.end(),
-                                [&](const BlockPatchTarget& target) { return target.name == entry; })) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     void TrackPlacement() {
         const auto state = host_.State();
         if (!state) {
@@ -1484,22 +1465,14 @@ private:
         ImGui::EndDisabled();
     }
 
-    PromptStyle SavedPromptStyle() const {
-        const std::string saved = settings_.Get(kControllerPromptsKey, kPromptsPlayStation);
-        return ParsePromptStyle(saved).value_or(PromptStyle::kPlayStation);
-    }
-
-    // A patch left by an earlier version is removed even when PlayStation is selected, so the archives follow the setting.
     void ApplySavedPatches() {
-        if (files_ != GameFileState::kValid) {
+        if (files_ != GameFileState::kValid || !build_) {
             return;
         }
-        const PromptStyle style = xbox_available_ ? SavedPromptStyle() : PromptStyle::kPlayStation;
-        const bool safe_mode = settings_.GetBool(kArachnophobiaSafeModeKey, false);
-        if (style != prompts_installed_ || safe_mode != safe_mode_installed_ ||
-            (style == PromptStyle::kPlayStation && PromptPatchInstalled())) {
+        const SavedPatchPlan plan = PlanSavedPatches(settings_, paths_.app0, *build_, XboxPromptsPatch());
+        if (plan.apply) {
             Log("game patches: applying the saved settings");
-            StartPatches(style, safe_mode, PatchAction::kRestore);
+            StartPatches(plan.prompts, plan.safe_mode, PatchAction::kRestore);
         }
     }
 
@@ -1797,6 +1770,28 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherS
     return ExplainInWindow("Launcher", "Could not start the game.", TrValue(error).c_str());
 }
 
+constexpr char kSavedPatchesFailed[] =
+    "The saved Controller prompts or Arachnophobia Safe Mode could not be applied to the game files.";
+constexpr char kSavedPatchesAdvice[] = "Open the launcher to change them, or see the log.";
+
+// The saved patches are applied by the launcher when it opens; a run that does not open it applies them here.
+DcpLauncherResult PlayWithSavedPatches(const DcpLauncherConfig& config, const LauncherSettings& settings,
+                                       const GamePaths& paths, const GameCheck& check) {
+    if (check.state == GameFileState::kValid && check.build) {
+        const SavedPatchRun run =
+            SyncSavedPatches(settings, paths.app0, *check.build, XboxPromptsPatch(), SpiderSafeModePatch());
+        if (run.plan.apply) {
+            Log("game patches (launcher not shown): prompts %s, arachnophobia safe mode %s, %s%s%s",
+                PromptStyleKey(run.plan.prompts), run.plan.safe_mode ? "on" : "off", run.result.ok ? "applied" : "failed",
+                run.result.detail.empty() ? "" : ": ", run.result.detail.c_str());
+        }
+        if (!run.result.ok) {
+            return ExplainInWindow("Launcher", kSavedPatchesFailed, kSavedPatchesAdvice);
+        }
+    }
+    return PlayOrExplain(config, settings);
+}
+
 } // namespace
 } // namespace dcp
 
@@ -1810,7 +1805,7 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     const bool shift = ShiftHeldAtStart() || config->force_show != 0;
     if (!LauncherWanted(ready, show_setting, shift, config->skip_once != 0)) {
         Log("skipped (show_launcher %s%s)", show_setting ? "on" : "off", config->skip_once ? ", skip requested" : "");
-        return PlayOrExplain(*config, settings);
+        return PlayWithSavedPatches(*config, settings, paths, check);
     }
     Log("settings file %s", Utf8(settings.file()).c_str());
     Log("opening: %s%s%s", ready ? "game ready" : "game files not ready", show_setting ? ", show_launcher on" : "",
@@ -1820,7 +1815,7 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     Outcome outcome = Outcome::kRunning;
     if (!app.Run(outcome)) {
         std::fprintf(stderr, "Launcher: could not open its window; %s\n", ready ? "starting the game" : "game files are not ready");
-        return ready ? PlayOrExplain(*config, settings) : DCP_LAUNCHER_QUIT;
+        return ready ? PlayWithSavedPatches(*config, settings, paths, check) : DCP_LAUNCHER_QUIT;
     }
     if (app.game_process_started()) {
         return DCP_LAUNCHER_GAME_STARTED;

@@ -194,6 +194,25 @@ PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBu
     return PromptStyle::kXbox;
 }
 
+bool PromptPatchPresent(const std::filesystem::path& app0, const GameBuild& build, std::span<const uint8_t> xbox_patch) {
+    if (!build.xbox_prompts) {
+        return false;
+    }
+    const std::optional<BlockPatch> patch = ParseBlockPatch(xbox_patch);
+    if (!patch) {
+        return false;
+    }
+    for (const std::filesystem::path& archive : PromptArchives(app0, build)) {
+        for (const std::string& entry : PatchedEntries(archive)) {
+            if (std::any_of(patch->targets.begin(), patch->targets.end(),
+                            [&](const BlockPatchTarget& target) { return target.name == entry; })) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 PromptsResult SetPromptStyle(const std::filesystem::path& app0, const GameBuild& build, PromptStyle style,
                              std::span<const uint8_t> xbox_patch, const PatchHooks& hooks) {
     PromptsResult result;

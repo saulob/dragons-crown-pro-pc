@@ -14,6 +14,11 @@
   Builds and runs only the DCP-RFWKVY launcher renderer regression (the renderer group of dcp-launcher-tests: Direct3D 11
   with the issue #45 module pins, software fallback, present stall telemetry, frame cap) and reports its result alone. The
   normal run includes the same group.
+.PARAMETER HeadlessCli
+  Builds and runs only the headless command interface (the headless-cli group of dcp-launcher-tests: --install and --check-game
+  parsing, reports and read-only guarantees on synthetic folders, the no-window contract, and the saved Controller prompts and
+  Arachnophobia Safe Mode of a skipped launcher) and, through WSL, the syntax-only Linux compile of the portable launcher
+  sources. No game, no window and no real game data. The normal run includes the same group.
 .PARAMETER EditorTranslation
   Builds and runs only the Character Editor + translation overlay regression (the appearance-translation group of
   dcp-save-editor-tests: custom looks composed on the translated DRACRO.CPK for every supported build and language) and
@@ -65,7 +70,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$EditorTranslation, [switch]$EditorRelease)
+param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 . (Join-Path $PSScriptRoot '_progress.ps1')
@@ -278,6 +283,15 @@ function Invoke-LinuxGate {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --test 2>&1") $true
 }
 
+function Invoke-LinuxLauncherSyntax {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', "$root/tools/test-linux-launcher.sh", $root) $true
+}
+
 function Invoke-LinuxEditorGate {
     if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
@@ -449,6 +463,7 @@ $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-b
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
 $launcherRendererSuites = @('dcp-launcher-tests')
+$headlessCliSuites = @('dcp-launcher-tests')
 $editorTranslationSuites = @('dcp-save-editor-tests')
 $editorReleaseSuites = @('dcp-save-editor-tests', 'dcp-runtime-overlay-tests', 'dcp-appearance-online-tests')
 if ($BossBattleOnline) {
@@ -467,6 +482,13 @@ if ($BossBattleOnline) {
             -Key 'dcp-launcher-tests renderer' -Arguments @('renderer'))
     )
     $requiredSuites = $launcherRendererSuites
+} elseif ($HeadlessCli) {
+    $tests = @(
+        (Test-Step 'headless command interface (dcp-launcher-tests headless: --install, --check-game, skipped-launcher patches)' 'dcp-launcher-tests' -Capture `
+            -Key 'dcp-launcher-tests headless' -Arguments @('headless')),
+        (Test-Step 'Linux launcher syntax (WSL: g++ -fsyntax-only on the portable launcher sources; skipped without WSL)' -Block { Invoke-LinuxLauncherSyntax })
+    )
+    $requiredSuites = $headlessCliSuites
 } elseif ($EditorTranslation) {
     $tests = @(
         (Test-Step 'Character Editor + translation overlay tests (custom looks composed on the translated DRACRO.CPK, every supported build and language)' 'dcp-save-editor-tests' -Parity -Capture -Quiet `
@@ -484,7 +506,7 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } else {
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } else {
 & ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
@@ -622,6 +644,21 @@ if ($LauncherRenderer) {
         exit 1
     }
     Write-Host 'Launcher renderer tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($HeadlessCli) {
+    $headlessLine = @($captured['dcp-launcher-tests headless']) | Where-Object { "$_" -like 'GROUP|launcher-headless-cli|*' } | Select-Object -First 1
+    $headlessState = if ($headlessLine) { "$headlessLine".Split('|')[2] } else { 'FAIL (no result)' }
+    if ($headlessState -ne 'PASS' -and -not $failed.Contains('dcp-launcher-tests headless')) { $failed.Add('dcp-launcher-tests headless') }
+    Write-Host ''
+    Write-Host "Headless command interface: $headlessState" -ForegroundColor Cyan
+    $linuxSyntax = $skipped.Keys | Where-Object { $_ -like 'Linux launcher syntax*' } | Select-Object -First 1
+    if ($linuxSyntax) { Write-Host "Linux launcher syntax: SKIPPED ($($skipped[$linuxSyntax]))" -ForegroundColor Yellow }
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Headless command interface tests passed.' -ForegroundColor Green
     exit 0
 }
 if ($EditorTranslation -or $EditorRelease) {
@@ -935,6 +972,7 @@ $launcherSummary = [ordered]@{
     'Sidebar EN/PT-BR' = Get-LauncherRow @('launcher-sidebar')
     'Navigation coherence' = Get-LauncherRow @('launcher-navigation')
     'DCP-RFWKVY renderer' = Get-LauncherRow @('launcher-renderer')
+    'Headless CLI' = Get-LauncherRow @('launcher-headless-cli')
     'TRG patch chain' = Get-LauncherRow @('launcher-patches')
     'Compiler warnings' = Get-LauncherRow @('launcher-warnings')
     'Windows/Linux parity' = Get-LauncherRow @('launcher-parity', 'launcher-parity-windows', 'launcher-parity-linux')

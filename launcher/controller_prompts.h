@@ -45,6 +45,9 @@ bool XboxPromptsAvailable(const std::filesystem::path& app0, const GameBuild& bu
 PromptStyle InstalledPromptStyle(const std::filesystem::path& app0, const GameBuild& build,
                                  std::span<const uint8_t> xbox_patch);
 
+// Whether an archive still holds an entry of the Xbox patch, whole or not.
+bool PromptPatchPresent(const std::filesystem::path& app0, const GameBuild& build, std::span<const uint8_t> xbox_patch);
+
 struct PromptsResult {
     bool ok = false;
     bool cancelled = false;

@@ -55,6 +55,7 @@
 #include "fms_sheet.h"
 #include "game_files.h"
 #include "game_install.h"
+#include "headless.h"
 #include "install_source.h"
 #include "game_process.h"
 #include "net/connection_test.h"
@@ -8984,6 +8985,528 @@ void TestSafeMode(const fs::path& base) {
     CHECK(SetGamePatches(app0, kJp103, PromptStyle::kPlayStation, false, {}, {}).ok && ReadAll(app0 / "DRACRO.CPK") == original);
 }
 
+// --install and --check-game: the parser, the reports, and the contract that nothing opens a window or starts the game.
+struct HeadlessRun {
+    int code = -2;
+    std::vector<std::string> out, err;
+    bool Printed(const std::string& part) const {
+        const auto has = [&](const std::vector<std::string>& lines) {
+            return std::any_of(lines.begin(), lines.end(), [&](const std::string& line) { return line.find(part) != std::string::npos; });
+        };
+        return has(out) || has(err);
+    }
+};
+
+HeadlessRun RunHeadlessCommand(const std::vector<std::string>& args, const GamePaths& paths, std::span<const GameBuild> builds) {
+    HeadlessRun run;
+    const HeadlessOutput output{[&](std::string_view line) { run.out.emplace_back(line); },
+                                [&](std::string_view line) { run.err.emplace_back(line); }};
+    run.code = RunHeadless(args, output, [&](GamePaths& found, std::string&) {
+        found = paths;
+        return true;
+    }, builds);
+    return run;
+}
+
+void SetHeadlessEnvironment(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value ? value : "");
+#else
+    if (value) setenv(name, value, 1);
+    else unsetenv(name);
+#endif
+}
+
+std::map<std::string, fs::file_time_type> Stamps(const fs::path& root) {
+    std::map<std::string, fs::file_time_type> stamps;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec)) {
+            stamps[it->path().lexically_relative(root).generic_string()] = fs::last_write_time(it->path(), ec);
+        }
+    }
+    return stamps;
+}
+
+void TestHeadlessParsing() {
+    const auto parse = [](const std::vector<std::string>& args) { return ParseHeadlessArguments(args); };
+    for (const std::vector<std::string>& game : std::vector<std::vector<std::string>>{
+             {}, {"--launcher"}, {"--dcp-skip-launcher"}, {"D:/DragonsCrown.pkg"}, {"boot.bin", "--cpu-only"},
+             {"--app0", "D:/game", "--user", "D:/user"}, {"--check-imports"}, {"--timeout", "5"}}) {
+        CHECK(parse(game).kind == HeadlessKind::kNone);
+    }
+
+    const HeadlessCommand install = parse({"--install", "D:/Games/DragonsCrown.pkg"});
+    CHECK(install.kind == HeadlessKind::kInstall && install.source == "D:/Games/DragonsCrown.pkg" && install.error.empty());
+    const HeadlessCommand folder = parse({"--install", "S:/DCP extracted"});
+    CHECK(folder.kind == HeadlessKind::kInstall && folder.source == "S:/DCP extracted");
+    CHECK(parse({"--check-game"}).kind == HeadlessKind::kCheckGame);
+
+    for (const std::vector<std::string>& bad : std::vector<std::vector<std::string>>{
+             {"--install"}, {"--install", ""}, {"--install", "a.pkg", "b.pkg"}, {"--install", "a.pkg", "--cpu-only"},
+             {"--install", "--check-game"}, {"--install", "--launcher"}, {"--check-game", "x"}, {"--check-game", "--install", "x"},
+             {"--check-game", "--check-game"}, {"--cpu-only", "--install", "a.pkg"}, {"boot.bin", "--check-game"},
+             {"--launcher", "--check-game"}}) {
+        const HeadlessCommand command = parse(bad);
+        CHECK(command.kind == HeadlessKind::kInvalid && !command.error.empty() && command.source.empty());
+    }
+    CHECK(parse({"--install"}).error.find("PKG or the extracted game folder") != std::string::npos);
+    CHECK(parse({"--install", "a", "b"}).error.find("extra argument b") != std::string::npos);
+    CHECK(parse({"--check-game", "x"}).error.find("takes no other arguments") != std::string::npos);
+
+    const GamePaths nowhere{"nowhere/app0", "nowhere/image"};
+    for (const std::vector<std::string>& bad : std::vector<std::vector<std::string>>{{"--install"}, {"--check-game", "x"}}) {
+        const HeadlessRun run = RunHeadlessCommand(bad, nowhere, SupportedBuilds());
+        CHECK(run.code == kHeadlessUsage && run.out.empty() && run.err.size() == 2 && run.err[1].starts_with("Usage: "));
+    }
+    const HeadlessRun game = RunHeadlessCommand({"--launcher"}, nowhere, SupportedBuilds());
+    CHECK(game.code == -1 && game.out.empty() && game.err.empty());
+    CHECK(kHeadlessOk == 0 && kHeadlessFailed == 1 && kHeadlessUsage == 2);
+
+    HeadlessRun unlocated;
+    const HeadlessOutput output{[&](std::string_view line) { unlocated.out.emplace_back(line); },
+                                [&](std::string_view line) { unlocated.err.emplace_back(line); }};
+    const HeadlessPaths none = [](GamePaths&, std::string& error) {
+        error = "no folder";
+        return false;
+    };
+    CHECK(RunHeadless(std::vector<std::string>{"--check-game"}, output, none) == kHeadlessFailed);
+    CHECK(RunHeadless(std::vector<std::string>{"--install", "x"}, output, none) == kHeadlessFailed);
+    CHECK(unlocated.out.size() == 1 && unlocated.out[0] == "Game files: not ready: cannot locate the game folders: no folder");
+    CHECK(unlocated.err.size() == 1 && unlocated.err[0] == "Install: failed: cannot locate the game folders: no folder");
+}
+
+void TestHeadlessCheckGame(const fs::path& base) {
+    Fixture game(base, "headless-check");
+    const std::string label = game.build.label;
+    const auto check = [&](const std::vector<std::string>& args = {"--check-game"}) {
+        return RunHeadlessCommand(args, game.paths, game.builds);
+    };
+
+    const auto before = TreeContents(game.root);
+    const auto stamps = Stamps(game.root);
+    HeadlessRun ready = check();
+    CHECK(ready.code == kHeadlessOk && ready.err.empty());
+    CHECK((ready.out == std::vector<std::string>{"Game files: ready", "Build: " + label, std::string("Title ID: ") + game.build.title_id,
+                                                 std::string("Version: ") + game.build.version}));
+    CHECK(TreeContents(game.root) == before && Stamps(game.root) == stamps);
+
+    // An older port's marker is judged as updated, not rewritten.
+    std::string marker = ReadAll(game.paths.app0 / kPreparedMarker);
+    const std::string current = "\"version\": \"" + std::string(game.build.version) + "\"";
+    const size_t at = marker.find(current);
+    CHECK(at != std::string::npos);
+    if (at != std::string::npos) {
+        marker.replace(at, current.size(), "\"version\": \"1.03\"");
+        WriteAll(game.paths.app0 / kPreparedMarker, marker);
+        const auto legacy_before = TreeContents(game.root);
+        const auto legacy_stamps = Stamps(game.root);
+        CHECK(check().code == kHeadlessOk);
+        CHECK(TreeContents(game.root) == legacy_before && Stamps(game.root) == legacy_stamps);
+        CHECK(CheckGameFiles(game.paths, game.builds, true).state == GameFileState::kValid);
+        CHECK(ReadAll(game.paths.app0 / kPreparedMarker) == marker);
+        CHECK(CheckGameFiles(game.paths, game.builds).state == GameFileState::kValid);
+        CHECK(ReadAll(game.paths.app0 / kPreparedMarker) != marker);
+        game.Rebuild();
+    }
+
+    const auto not_ready = [&](const char* what, const char* state, const char* reason) {
+        const auto snapshot = TreeContents(game.root);
+        const auto times = Stamps(game.root);
+        const HeadlessRun run = check();
+        CHECK(run.code == kHeadlessFailed);
+        CHECK(run.out.size() >= 3 && run.out[0] == "Game files: not ready");
+        CHECK(run.Printed(std::string("State: ") + state));
+        CHECK(run.Printed(std::string("Reason: ") + reason));
+        CHECK(!run.Printed("Game files: ready"));
+        if (run.code != kHeadlessFailed || !run.Printed(reason)) {
+            std::printf("  case: %s\n", what);
+        }
+        CHECK(TreeContents(game.root) == snapshot && Stamps(game.root) == times);
+    };
+
+    const std::string eboot = ReadAll(game.paths.app0 / "eboot.bin");
+    fs::remove(game.paths.image_dir / "boot.bin");
+    not_ready("boot image missing", "missing", "boot image: missing boot.bin");
+    game.Rebuild();
+    WriteAll(game.paths.image_dir / "image.json", "{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"" + std::string(64, '0') + "\"\n}");
+    not_ready("boot image from another eboot", "different version", "the boot image was built from another eboot.bin");
+    game.Rebuild();
+    fs::remove(game.paths.app0 / "sce_module" / "libc.prx");
+    not_ready("incomplete installation", "missing", "");
+    game.Rebuild();
+    WriteAll(game.paths.app0 / "eboot.bin", "another executable");
+    CHECK(check().code == kHeadlessFailed && check().out[0] == "Game files: not ready");
+    WriteAll(game.paths.app0 / "eboot.bin", eboot);
+    WriteAll(game.paths.app0 / "sce_sys" / "param.sfo", MakeSfo({{"TITLE_ID", "CUSA00001"}}));
+    CHECK(check().code == kHeadlessFailed && check().out[0] == "Game files: not ready");
+    game.Rebuild();
+    WriteAll(game.paths.app0 / kPreparedMarker, "{\n  \"version\": \"" + std::string(game.build.version) + "\",\n  \"scope\": \"core\"\n}");
+    not_ready("development files only", "missing", "only the core files were prepared");
+    game.Rebuild();
+    CHECK(check().code == kHeadlessOk);
+
+    const fs::path missing = base / "headless-missing";
+    fs::remove_all(missing);
+    const HeadlessRun absent = RunHeadlessCommand({"--check-game"}, {missing / "app0", missing / "image"}, game.builds);
+    CHECK(absent.code == kHeadlessFailed && absent.Printed("Reason: game folder not found"));
+    CHECK(!fs::exists(missing));
+}
+
+void TestHeadlessInstall(const fs::path& base) {
+    Fixture source(base, "headless-source");
+    const fs::path home = base / "headless-target";
+    fs::remove_all(home);
+    const GameRoots roots{home / "prepared", home / "image"};
+    const GamePaths target = BuildPaths(roots, source.build);
+    WriteAll(target.app0 / kPreparedMarker, "previous");
+    WriteAll(target.image_dir / "boot.bin", "previous boot");
+    WriteAll(home / "user" / "dcp.ini", "mine");
+    WriteAll(home / "logs" / "latest.log", "log");
+    WriteAll(home / "cache" / "shaders.bin", "shaders");
+    const auto owned = [&](const char* suffix) {
+        return target.app0.parent_path() / (target.app0.filename().string() + suffix);
+    };
+    const auto home_before = TreeContents(home);
+    const auto untouched = [&] { return TreeContents(home) == home_before; };
+    const auto install = [&](const fs::path& from) {
+        return RunHeadlessCommand({"--install", Utf8(from)}, target, source.builds);
+    };
+    const auto source_before = TreeContents(source.paths.app0);
+
+    // A synthetic executable is accepted, so only the boot image fails: the previous installation stays.
+    const HeadlessRun folder = install(source.paths.app0);
+    CHECK(folder.code == kHeadlessFailed && folder.err.size() >= 1 && folder.err[0].starts_with("Install: failed: Could not prepare the game"));
+    CHECK(folder.Printed("Install: Checking the game folder") && folder.Printed("Install: Copying the game files"));
+    CHECK(!folder.Printed("Install: ready"));
+    CHECK(untouched() && TreeContents(source.paths.app0) == source_before);
+    size_t steps = 0;
+    for (const std::string& line : folder.out) {
+        steps += line.size() > 10 && std::isdigit(static_cast<unsigned char>(line[9])) ? 1 : 0;
+    }
+    CHECK(steps <= 10 && folder.out.size() < 20);
+    CHECK(!folder.Printed("DRACRO.CPK") && !folder.Printed("sce_module"));
+    const HeadlessRun again = install(source.paths.app0);
+    CHECK(again.out == folder.out && again.err == folder.err);
+
+    // The source decides the installer: a file is a package, a directory a game folder.
+    WriteAll(base / "headless-notes.pkg", "not a package");
+    CHECK(install(base / "headless-notes.pkg").Printed("Not a PS4 package"));
+    fs::create_directories(base / "headless-empty");
+    CHECK(install(base / "headless-empty").Printed("Not a game folder"));
+    CHECK(install(base / "headless-notes.pkg").code == kHeadlessFailed && install(base / "headless-empty").code == kHeadlessFailed);
+    const HeadlessRun nothing = install(base / "headless-nothing.pkg");
+    CHECK(nothing.code == kHeadlessFailed && nothing.Printed("does not exist"));
+
+    // Missing or wrong files are refused before anything is copied.
+    const std::string eboot = ReadAll(source.paths.app0 / "eboot.bin");
+    const std::string sfo = ReadAll(source.paths.app0 / "sce_sys" / "param.sfo");
+    fs::remove(source.paths.app0 / "eboot.bin");
+    CHECK(install(source.paths.app0).Printed("Not a game folder"));
+    WriteAll(source.paths.app0 / "eboot.bin", eboot);
+    fs::remove(source.paths.app0 / "sce_sys" / "param.sfo");
+    CHECK(install(source.paths.app0).Printed("Not a game folder"));
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo);
+    fs::remove_all(source.paths.app0 / "sce_module");
+    CHECK(install(source.paths.app0).Printed("Game files missing"));
+    source.Rebuild();
+    WriteAll(source.paths.app0 / "eboot.bin", "patched by another tool");
+    const HeadlessRun foreign = install(source.paths.app0);
+    CHECK(foreign.code == kHeadlessFailed && foreign.out.empty() == false && foreign.err.size() >= 1);
+    CHECK(!foreign.Printed("latest log"));
+    WriteAll(source.paths.app0 / "eboot.bin", eboot);
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", MakeSfo({{"TITLE_ID", "CUSA00001"}, {"CONTENT_ID", std::string(source.build.content_id)}, {"APP_VER", "01.00"}, {"VERSION", "01.00"}}));
+    CHECK(install(source.paths.app0).Printed("Wrong game"));
+    WriteAll(source.paths.app0 / "sce_sys" / "param.sfo", sfo);
+    CHECK(untouched() && TreeContents(source.paths.app0) == source_before);
+
+    // The folders the installer manages are not sources.
+    for (const fs::path& managed : {target.app0, owned(".install-temp"), owned(".install-backup"), roots.prepared}) {
+        WriteAll(managed / "eboot.bin", eboot);
+        WriteAll(managed / "sce_sys" / "param.sfo", sfo);
+        const HeadlessRun overlap = install(managed);
+        CHECK(overlap.code == kHeadlessFailed && overlap.Printed("Choose another source"));
+        fs::remove(managed / "eboot.bin");
+        fs::remove_all(managed / "sce_sys");
+    }
+    fs::remove_all(owned(".install-temp"));
+    fs::remove_all(owned(".install-backup"));
+    CHECK(untouched() && TreeContents(source.paths.app0) == source_before);
+
+    // An installed build that is already the active one is a success and writes nothing.
+    Fixture installed(base, "headless-installed");
+    const fs::path kept = base / "headless-present";
+    fs::remove_all(kept);
+    const GameRoots present{kept / "prepared", kept / "image"};
+    const GamePaths present_paths = BuildPaths(present, installed.build);
+    fs::create_directories(present_paths.app0.parent_path());
+    fs::create_directories(present_paths.image_dir.parent_path());
+    fs::copy(installed.paths.app0, present_paths.app0, fs::copy_options::recursive);
+    fs::copy(installed.paths.image_dir, present_paths.image_dir, fs::copy_options::recursive);
+    const auto present_before = TreeContents(kept);
+    const HeadlessRun ready = RunHeadlessCommand({"--install", Utf8(installed.paths.app0)}, present_paths, installed.builds);
+    CHECK(ready.code == kHeadlessOk && ready.err.empty());
+    CHECK(!ready.out.empty() && ready.out.back() == "Install: ready " + std::string(installed.build.label) + " (already installed)");
+    CHECK(TreeContents(kept) == present_before);
+
+    // A pinned build selects the game by hand: installing is off, checking is not.
+    SetHeadlessEnvironment(kPinnedBuildVariable, "CUSA10454-1.00");
+    const HeadlessRun pinned = install(source.paths.app0);
+    CHECK(pinned.code == kHeadlessFailed && pinned.out.empty() && pinned.Printed(kPinnedBuildVariable));
+    CHECK(RunHeadlessCommand({"--check-game"}, installed.paths, installed.builds).code == kHeadlessOk);
+    SetHeadlessEnvironment(kPinnedBuildVariable, nullptr);
+    CHECK(untouched());
+}
+
+// Neither command can reach the launcher window, the game or a dialog: what they link, include and call says so.
+void TestHeadlessContract() {
+    const fs::path root = fs::path(DCP_SOURCE_DIR);
+    const std::string cpp = ReadAll(root / "launcher" / "headless.cpp");
+    const std::string header = ReadAll(root / "launcher" / "headless.h");
+    const std::string loader = ReadAll(root / "src" / "loader.c");
+    const std::string cmake = ReadAll(root / "launcher" / "CMakeLists.txt");
+    const std::string launcher_header = ReadAll(root / "launcher" / "dcp_launcher.h");
+
+    const auto includes = [](const std::string& text) {
+        std::set<std::string> names;
+        for (size_t at = text.find("#include \""); at != std::string::npos; at = text.find("#include \"", at + 1)) {
+            const size_t end = text.find('"', at + 10);
+            names.insert(text.substr(at + 10, end - at - 10));
+        }
+        return names;
+    };
+    const std::set<std::string> allowed{"headless.h", "dcp_launcher.h", "game_files.h", "game_install.h", "utf8.h"};
+    for (const std::string& name : includes(cpp)) CHECK(allowed.count(name) == 1);
+    for (const std::string& name : includes(header)) CHECK(allowed.count(name) == 1);
+    for (const char* forbidden : {"SDL", "imgui", "ImGui", "LauncherHost", "dcp_launcher_run", "PlayOrExplain", "ExplainInWindow",
+                                  "StartGameProcess", "dcp_resume_game_process", "BrowseFor", "ChooseInstallSource", "MessageBox",
+                                  "ShellExecute", "ProblemDialog", "runtime_log", "Log(", "CreateProcess", "execv", "system("}) {
+        CHECK(cpp.find(forbidden) == std::string::npos);
+    }
+
+    const size_t core = cmake.find("add_library(dcp_launcher_core");
+    const size_t window = cmake.find("add_library(dcp_launcher STATIC");
+    const size_t listed = cmake.find("headless.cpp");
+    CHECK(core != std::string::npos && window != std::string::npos && listed > core && listed < window);
+    CHECK(cmake.find("headless.cpp", window) == std::string::npos);
+
+    const size_t entry = loader.find("int main(int argc");
+    const size_t dispatch = loader.find("dcp_headless_run(argc, argv)", entry);
+    CHECK(entry != std::string::npos && dispatch != std::string::npos);
+    for (const char* later : {"runtime_memory_reserve();", "runtime_log_start(", "dcp_launcher_run(", "dcp_resolve_paths(&request,&paths)",
+                              "dcp_crash_dump_install();", "runtime_thread_tcb_offset();"}) {
+        const size_t at = loader.find(later, entry);
+        CHECK(at != std::string::npos && dispatch < at);
+    }
+    CHECK(loader.find("dcp_headless_run", dispatch + 1) == std::string::npos);
+
+    for (const char* internal : {"install_game", "check_game", "headless", "Headless"}) {
+        CHECK(launcher_header.find(internal) == std::string::npos);
+    }
+    CHECK(header.find("int dcp_headless_run(int argc, char **argv);") != std::string::npos);
+
+    for (const char* document : {"README.md", "docs/LAUNCHER.md", "docs/LINUX.md"}) {
+        const std::string text = ReadAll(root / document);
+        CHECK(text.find("--install") != std::string::npos && text.find("--check-game") != std::string::npos);
+    }
+    const std::string launcher_doc = ReadAll(root / "docs" / "LAUNCHER.md");
+    for (const char* part : {"## Headless commands", "eboot.bin", "sce_module", "sce_sys", "| `0` |", "| `1` |", "| `2` |",
+                             "never open a window", "an extracted update alone"}) {
+        CHECK(launcher_doc.find(part) != std::string::npos);
+    }
+    CHECK(loader.find("--install <PKG or extracted game folder>") != std::string::npos);
+}
+
+void TestHeadlessCli() {
+    const fs::path base = fs::temp_directory_path() / ("dcp_headless_tests_" + std::to_string(getpid()));
+    fs::remove_all(base);
+    fs::create_directories(base);
+    TestHeadlessParsing();
+    TestHeadlessCheckGame(base);
+    TestHeadlessInstall(base);
+    TestHeadlessContract();
+    std::error_code ec;
+    fs::remove_all(base, ec);
+}
+
+// The saved controller prompts and Arachnophobia Safe Mode follow the settings file when the launcher is not shown.
+void TestSkippedLauncherPatches() {
+    using namespace cpk_test;
+    const fs::path base = fs::temp_directory_path() / ("dcp_skipped_patches_" + std::to_string(getpid()));
+    fs::remove_all(base);
+    fs::create_directories(base);
+
+    std::string iface(20480, '\0'), iface_us(24576, '\0'), spider(16384, '\0');
+    for (size_t i = 0; i < iface.size(); ++i) iface[i] = char((i * 7 + i / 64) & 255);
+    for (size_t i = 0; i < iface_us.size(); ++i) iface_us[i] = char((i * 13 + i / 32) & 255);
+    for (size_t i = 0; i < spider.size(); ++i) spider[i] = char((i * 5 + i / 16) & 255);
+    std::string want = iface, want_us = iface_us, want_spider = spider, other = iface;
+    for (size_t off : {0x340u, 0x1000u}) want.replace(off, 16, 16, 'X');
+    for (size_t off : {0x340u, 0x1000u}) other.replace(off, 16, 16, 'Z');
+    for (size_t off : {0x380u, 0x2000u}) want_us.replace(off, 16, 16, 'Y');
+    for (size_t off : {0x100u, 0x2000u, 0x3ff0u}) want_spider.replace(off, 16, 16, 'W');
+    const std::string xbox = MakePatch({{"stage/Interface.ftx", {iface, want}}, {"stage/Interface_US.ftx", {iface_us, want_us}}});
+    const std::string xbox_later = MakePatch({{"stage/Interface.ftx", {iface, other}}, {"stage/Interface_US.ftx", {iface_us, want_us}}});
+    const std::string safe = MakePatch({{kSpiderEntry, {spider, want_spider}}});
+
+    const fs::path app0 = base / "app0";
+    const std::string original_us = BuildCpk({{"stage/Interface_US.ftx", iface_us, true}}, true);
+    const std::string original = BuildCpk({{"stage/Interface.ftx", iface, true}, {kSpiderEntry, spider, true}}, false);
+    const auto reset = [&] {
+        fs::remove_all(app0);
+        WriteAll(app0 / "DRACRO_US.CPK", original_us);
+        WriteAll(app0 / "DRACRO.CPK", original);
+        for (const char* name : {"DRACRO_US.CPK", "DRACRO.CPK"}) {
+            fs::last_write_time(app0 / name, fs::file_time_type::clock::now() - std::chrono::hours(48));
+        }
+    };
+    const auto read = [&](const char* archive, const char* entry) {
+        CpkArchive a;
+        const CpkEntry* e = a.Open(app0 / archive) ? a.Find(entry) : nullptr;
+        return e ? Bytes(a.Read(*e)) : std::string("<missing>");
+    };
+    LauncherSettings settings(base / "dcp.ini");
+    const auto choose = [&](const char* prompts, bool safe_mode) {
+        settings.Set(kControllerPromptsKey, prompts);
+        settings.Set(kArachnophobiaSafeModeKey, safe_mode ? "1" : "0");
+    };
+    const auto sync = [&](const GameBuild& build = kUs) { return SyncSavedPatches(settings, app0, build, Span(xbox), Span(safe)); };
+    const auto nothing_written = [&](const SavedPatchRun& run, const std::map<std::string, std::string>& files,
+                                     const std::map<std::string, fs::file_time_type>& times) {
+        return !run.plan.apply && run.result.ok && TreeContents(app0) == files && Stamps(app0) == times &&
+               !fs::exists(UndoPath(app0 / "DRACRO.CPK")) && !fs::exists(UndoPath(app0 / "DRACRO_US.CPK"));
+    };
+
+    reset();
+    choose("playstation", false);
+    {
+        const auto files = TreeContents(app0);
+        const auto times = Stamps(app0);
+        CHECK(nothing_written(sync(), files, times));
+    }
+
+    choose("xbox", false);
+    SavedPatchRun run = sync();
+    CHECK(run.plan.apply && run.plan.prompts == PromptStyle::kXbox && !run.plan.safe_mode && run.result.ok);
+    CHECK(InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox && !InstalledSafeMode(app0));
+    CHECK(read("DRACRO.CPK", "stage/Interface.ftx") == want && read("DRACRO_US.CPK", "stage/Interface_US.ftx") == want_us);
+    {
+        const auto files = TreeContents(app0);
+        const auto times = Stamps(app0);
+        CHECK(!PlanSavedPatches(settings, app0, kUs, Span(xbox)).apply);
+        run = sync();
+        CHECK(!run.plan.apply && run.result.ok && TreeContents(app0) == files && Stamps(app0) == times);
+    }
+
+    choose("playstation", false);
+    run = sync();
+    CHECK(run.plan.apply && run.plan.prompts == PromptStyle::kPlayStation && run.result.ok);
+    CHECK(InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kPlayStation);
+    CHECK(ReadAll(app0 / "DRACRO.CPK") == original && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+    CHECK(!fs::exists(UndoPath(app0 / "DRACRO.CPK")));
+
+    choose("playstation", true);
+    run = sync();
+    CHECK(run.plan.apply && run.plan.safe_mode && run.result.ok && InstalledSafeMode(app0));
+    CHECK(read("DRACRO.CPK", kSpiderEntry) == want_spider && read("DRACRO.CPK", "stage/Interface.ftx") == iface);
+    {
+        const auto files = TreeContents(app0);
+        const auto times = Stamps(app0);
+        CHECK(!PlanSavedPatches(settings, app0, kUs, Span(xbox)).apply);
+        run = sync();
+        CHECK(!run.plan.apply && run.result.ok && TreeContents(app0) == files && Stamps(app0) == times);
+    }
+
+    choose("playstation", false);
+    run = sync();
+    CHECK(run.plan.apply && !run.plan.safe_mode && run.result.ok && !InstalledSafeMode(app0));
+    CHECK(ReadAll(app0 / "DRACRO.CPK") == original && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+
+    choose("xbox", true);
+    run = sync();
+    CHECK(run.plan.apply && run.result.ok && InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
+    {
+        const auto files = TreeContents(app0);
+        const auto times = Stamps(app0);
+        run = sync();
+        CHECK(!run.plan.apply && run.result.ok && TreeContents(app0) == files && Stamps(app0) == times);
+    }
+    choose("playstation", false);
+    CHECK(sync().result.ok && ReadAll(app0 / "DRACRO.CPK") == original && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+
+    // An unknown saved value is PlayStation.
+    reset();
+    choose("gamecube", false);
+    CHECK(!sync().plan.apply && sync().plan.prompts == PromptStyle::kPlayStation);
+
+    // A build without the Xbox patch stays on the game's own prompts, whatever is saved, and still follows Safe Mode.
+    GameBuild without = kUs;
+    without.xbox_prompts = false;
+    reset();
+    choose("xbox", false);
+    {
+        const auto files = TreeContents(app0);
+        const auto times = Stamps(app0);
+        run = sync(without);
+        CHECK(run.plan.prompts == PromptStyle::kPlayStation && nothing_written(run, files, times));
+    }
+    choose("xbox", true);
+    run = sync(without);
+    CHECK(run.plan.apply && run.plan.prompts == PromptStyle::kPlayStation && run.result.ok && InstalledSafeMode(app0));
+    CHECK(read("DRACRO.CPK", "stage/Interface.ftx") == iface && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+
+    // A patch that cannot be applied is reported, not skipped: the archives stay as they were.
+    reset();
+    choose("playstation", true);
+    const std::string before_failure = ReadAll(app0 / "DRACRO.CPK");
+    const SavedPatchRun failed = SyncSavedPatches(settings, app0, kUs, Span(xbox), Span(std::string("DCPX1")));
+    CHECK(failed.plan.apply && !failed.result.ok && !failed.result.detail.empty());
+    CHECK(ReadAll(app0 / "DRACRO.CPK") == before_failure && !InstalledSafeMode(app0));
+    choose("xbox", false);
+    const SavedPatchRun missing = SyncSavedPatches(settings, base / "nowhere", kUs, Span(xbox), Span(safe));
+    CHECK(missing.plan.apply && !missing.result.ok);
+
+    // The settings come from the saved file as the launcher reads them.
+    reset();
+    WriteAll(base / "saved.ini", "controller_prompts = xbox\narachnophobia_safe_mode = 1\n");
+    {
+        const LauncherSettings saved(base / "saved.ini");
+        run = SyncSavedPatches(saved, app0, kUs, Span(xbox), Span(safe));
+        CHECK(run.plan.apply && run.result.ok && InstalledSafeMode(app0) && InstalledPromptStyle(app0, kUs, Span(xbox)) == PromptStyle::kXbox);
+    }
+
+    // A patch left by an earlier version is removed even when PlayStation is saved.
+    reset();
+    choose("xbox", false);
+    CHECK(sync().result.ok);
+    choose("playstation", false);
+    CHECK(PlanSavedPatches(settings, app0, kUs, Span(xbox_later)).apply);
+    CHECK(SyncSavedPatches(settings, app0, kUs, Span(xbox_later), Span(safe)).result.ok);
+    CHECK(ReadAll(app0 / "DRACRO.CPK") == original && ReadAll(app0 / "DRACRO_US.CPK") == original_us);
+
+    // The visible launcher and the skipped path share the plan and the one function that writes the archives.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const auto count = [&](const std::string& part) {
+        size_t found = 0;
+        for (size_t at = launcher.find(part); at != std::string::npos; at = launcher.find(part, at + 1)) ++found;
+        return found;
+    };
+    CHECK(count("SetGamePatches(") == 1 && count("PlanSavedPatches(") == 1 && count("SyncSavedPatches(") == 1);
+    CHECK(count("PlanSavedPatches(settings_, paths_.app0, *build_, XboxPromptsPatch())") == 1);
+    CHECK(count("StartPatches(plan.prompts, plan.safe_mode, PatchAction::kRestore)") == 1);
+    CHECK(count("PromptPatchInstalled") == 0 && count("SavedPromptStyle") == 0);
+    CHECK(count("PlayWithSavedPatches(*config, settings, paths, check)") == 2);
+    CHECK(count("return PlayOrExplain(*config, settings);") == 0);
+    const size_t play = launcher.find("DcpLauncherResult PlayWithSavedPatches(");
+    const size_t fail = launcher.find("if (!run.result.ok) {", play);
+    const size_t go = launcher.find("return PlayOrExplain(config, settings);", play);
+    CHECK(play != std::string::npos && fail != std::string::npos && go != std::string::npos && fail < go);
+    CHECK(launcher.find("return ExplainInWindow(\"Launcher\", kSavedPatchesFailed, kSavedPatchesAdvice);", fail) < go);
+
+    std::error_code ec;
+    fs::remove_all(base, ec);
+}
+
 void TestBuilds(const fs::path& base) {
     CHECK(SupportedBuilds().size() == 8);
     CHECK(std::string(kUs.title_id) == "CUSA10454" && std::string(kCk.title_id) == "CUSA10209");
@@ -9500,6 +10023,15 @@ int main(int argc, char** argv) {
         return result.ok() ? 0 : 1;
     }
 
+    // dcp-launcher-tests headless: only --install, --check-game and the saved patches of a skipped launcher.
+    if (argc == 2 && std::string(argv[1]) == "headless") {
+        InGroup("headless-cli", TestHeadlessCli);
+        InGroup("headless-cli", TestSkippedLauncherPatches);
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-headless-cli|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
+
     // dcp-launcher-tests renderer: only the DCP-RFWKVY launcher renderer and frame presentation group.
     if (argc == 2 && std::string(argv[1]) == "renderer") {
         InGroup("renderer", TestLauncherRenderer);
@@ -9588,6 +10120,8 @@ int main(int argc, char** argv) {
     InGroup("parity", TestSharedLauncherSource);
     InGroup("renderer", TestLauncherRenderer);
     InGroup("renderer", TestLauncherPresentation);
+    InGroup("headless-cli", TestHeadlessCli);
+    InGroup("headless-cli", TestSkippedLauncherPatches);
     TestKeyBindings(base);
     TestMouseSettings(base);
     TestFileBrowser(base);

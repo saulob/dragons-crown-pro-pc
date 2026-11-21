@@ -107,6 +107,8 @@ Install game...	Instalar jogo...
 Install the game first	Instale o jogo primeiro
 Could not start the game.\s	Não foi possível iniciar o jogo.\s
 Could not start the game.	Não foi possível iniciar o jogo.
+The saved Controller prompts or Arachnophobia Safe Mode could not be applied to the game files.	Os Ícones do controle ou o Modo seguro para aracnofobia salvos não puderam ser aplicados aos arquivos do jogo.
+Open the launcher to change them, or see the log.	Abra o launcher para alterá-los ou veja o log.
 . Install the game files first.	. Instale os arquivos do jogo primeiro.
 Install failed:\s	Falha na instalação:\s
 No graphics card found	Nenhuma placa de vídeo encontrada

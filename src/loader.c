@@ -41,6 +41,7 @@
 #include "voice_hooks.h"
 #include "dcpgpu.h"
 #include "dcp_launcher.h"
+#include "headless.h"
 #include "startup_phase.h"
 #include "fault_origin.h"
 #include "dcp_resolution.h"
@@ -650,6 +651,11 @@ int main(int argc, char **argv) {
         printf("Boot image written to %s\n", argv[3]);
         return 0;
     }
+    /* --install and --check-game: headless, before the runtime, the launcher or any window exists. */
+    {
+        const int headless = dcp_headless_run(argc, argv);
+        if (headless >= 0) return headless;
+    }
 #ifndef _WIN32
     /* Keep host heap objects handed to the guest (thread handles, TLS) in the
        non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
@@ -683,7 +689,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--dcp-game")) game_child = 1;
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
         else {
-            fprintf(stderr, "Unknown option: %s\nUsage: %s [boot.bin] [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--logs dir] [--log file] [--dcp-skip-launcher] [--launcher] [--timeout seconds]\n", argv[i], argv[0]);
+            fprintf(stderr, "Unknown option: %s\nUsage: %s [boot.bin] [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--logs dir] [--log file] [--dcp-skip-launcher] [--launcher] [--timeout seconds]\n       %s --install <PKG or extracted game folder>\n       %s --check-game\n", argv[i], argv[0], argv[0], argv[0]);
             return 1;
         }
     }

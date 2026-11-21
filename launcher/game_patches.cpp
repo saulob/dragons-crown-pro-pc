@@ -5,6 +5,7 @@
 
 #include "localization/ui_text.h"
 
+#include "settings.h"
 #include "utf8.h"
 
 namespace dcp {
@@ -35,6 +36,19 @@ bool Holds(const std::vector<std::string>& names, std::string_view name) {
 
 bool InstalledSafeMode(const std::filesystem::path& app0) {
     return Holds(PatchedEntries(app0 / kSharedArchive), kSpiderEntry);
+}
+
+SavedPatchPlan PlanSavedPatches(const trg::SettingsStore& settings, const std::filesystem::path& app0,
+                                const GameBuild& build, std::span<const uint8_t> xbox_patch) {
+    SavedPatchPlan plan;
+    if (XboxPromptsAvailable(app0, build, xbox_patch)) {
+        plan.prompts =
+            ParsePromptStyle(settings.Get(kControllerPromptsKey, kPromptsPlayStation)).value_or(PromptStyle::kPlayStation);
+    }
+    plan.safe_mode = settings.GetBool(kArachnophobiaSafeModeKey, false);
+    plan.apply = plan.prompts != InstalledPromptStyle(app0, build, xbox_patch) || plan.safe_mode != InstalledSafeMode(app0) ||
+                 (plan.prompts == PromptStyle::kPlayStation && PromptPatchPresent(app0, build, xbox_patch));
+    return plan;
 }
 
 PromptsResult SetGamePatches(const std::filesystem::path& app0, const GameBuild& build, PromptStyle style,
@@ -97,6 +111,19 @@ PromptsResult SetGamePatches(const std::filesystem::path& app0, const GameBuild&
     }
     result.ok = true;
     return result;
+}
+
+SavedPatchRun SyncSavedPatches(const trg::SettingsStore& settings, const std::filesystem::path& app0,
+                                const GameBuild& build, std::span<const uint8_t> xbox_patch,
+                                std::span<const uint8_t> spider_patch) {
+    SavedPatchRun run;
+    run.plan = PlanSavedPatches(settings, app0, build, xbox_patch);
+    if (!run.plan.apply) {
+        run.result.ok = true;
+        return run;
+    }
+    run.result = SetGamePatches(app0, build, run.plan.prompts, run.plan.safe_mode, xbox_patch, spider_patch);
+    return run;
 }
 
 } // namespace dcp

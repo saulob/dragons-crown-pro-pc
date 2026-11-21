@@ -69,10 +69,14 @@ existing file) in the folder above, and echoes it to the standard output the pro
 |---|---|---|
 | Missing, different version or unreadable | any | the launcher opens |
 | Valid | On | the launcher opens, then PLAY starts the game |
-| Valid | Off | the game starts directly |
+| Valid | Off | the saved Controller prompts and Arachnophobia Safe Mode are applied to the game archives if they differ, then the game starts directly |
 | Any | any, with Shift held or `--launcher` | the launcher opens |
 
-On Linux Shift is read from the X11 server; in a Wayland session start with `--launcher` instead (see [Linux port](LINUX.md)). `--dcp-skip-launcher` skips it once for valid game files. `--check-imports` and `--cpu-only` never open it. The launcher is the only recovery path, so it cannot be hidden
+On Linux Shift is read from the X11 server; in a Wayland session start with `--launcher` instead (see [Linux port](LINUX.md)). `--dcp-skip-launcher` skips it once for valid game files.
+The two settings that live in the game archives, Controller prompts and Arachnophobia Safe Mode, are applied the same way whether the
+launcher opens or not (`PlanSavedPatches` and `SetGamePatches`, `launcher/game_patches.cpp`): a run that skips the launcher applies them
+before it starts the game, and stops with an explanation, without starting the game, if they cannot be applied. Everything else that
+`dcp.ini` chooses is read by the loader on every run and changes no game file. `--check-imports` and `--cpu-only` never open it. The launcher is the only recovery path, so it cannot be hidden
 while the game files are not valid. If its window cannot be opened, the game starts when the files are valid.
 
 ## Game files
@@ -203,6 +207,30 @@ A folder must be the finished game. An extracted update alone is refused as inco
 check cannot tell a partial archive from a complete one), and an extracted base of a build that has updates is another version; composing an extracted update over a base is not
 supported, only package updates are. Without a desktop chooser (Linux without zenity or kdialog, or `DCP_FILE_CHOOSER=builtin`)
 the launcher's own chooser lists the folders and **Select this folder** takes the one that is open.
+
+## Headless commands
+
+`dragons_crown_pro.exe` (`./dragons_crown_pro` or the AppImage on Linux) has two commands for front ends and scripts
+(`launcher/headless.cpp`). `main` handles them first, before the runtime, the log, the launcher or any window exists, and they
+never open a window, a dialog, a chooser or the game. The command must be the only argument.
+
+| Command | What it does |
+|---|---|
+| `--install <source>` | `InstallGame` on the active build's folders (`dcp_resolve_paths`), exactly as **Install game...** does: a decrypted PKG file, or an already extracted complete game folder (`eboot.bin`, `sce_module`, `sce_sys` and the rest of the game). The same checks, hard links on the same drive, staging, boot image, verification and rollback; an extracted update alone or a folder that holds or sits inside the port's own folders is refused. It does not start the game and, like **Install game...**, does not replace a build that is already the active, ready one (it reports `ready ... (already installed)`). With `DCP_GAME_BUILD` set it refuses, as the launcher's package selection is off then. |
+| `--check-game` | `CheckGameFiles` on the active build, read-only: nothing is written, built or repaired (an older port's preparation marker is judged as updated, not rewritten). |
+
+| Exit code | Meaning |
+|---|---|
+| `0` | installed, activated or already installed; or the game files are ready |
+| `1` | the install failed, or the game files are not ready |
+| `2` | invalid arguments: no source, an extra argument, or another option next to the command |
+
+Progress and results go to the standard output, in a few lines: `Install: <phase>`, `Install: 50% 3227 / 6455 MB` in steps of
+10 %, then `Install: ready <build label>`; failures go to the standard error as `Install: failed: <title>. <text>`. `--check-game`
+prints `Game files: ready` with `Build:`, `Title ID:` and `Version:` lines, or `Game files: not ready` with `State:` and `Reason:` (not
+installed, incomplete files, a boot image that is missing or built from another `eboot.bin`, another executable). No log file is written.
+The executable has no console of its own on Windows: a front end reads a pipe, and a terminal shows the output when it is
+piped (`dragons_crown_pro.exe --check-game | Out-Host`) or, otherwise, the parent console it attaches to.
 
 ## Save and Play
 
@@ -908,6 +936,10 @@ Saulo checks by eye what the gate cannot: the header artwork, sidebar proportion
 appearance, the About heart, the footer and the overall balance. The gate complements that check and does not replace it.
 
 ## Manual test
+
+Headless commands, on a console: `--check-game` prints the build and exits `0`; `--install` with an extracted folder or a PKG shows
+its progress, opens no window and does not start the game; Show this launcher Off with Xbox prompts saved starts the game with Xbox
+prompts, and with PlayStation (original) saved starts it with the original ones.
 
 1. Build with `tools\build.ps1` and start the game yourself: the launcher opens on Play with "Ready to play", the gold accent and the controller icon.
 2. Change Display mode and Window size, press Save, quit, start again: the values are kept.
