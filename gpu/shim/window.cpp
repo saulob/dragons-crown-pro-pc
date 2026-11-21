@@ -23,6 +23,7 @@
 #include "dcp_present.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
+#include "dcp_gamescope_touch.h"
 #include "dcp_touch_route.h"
 #include "dcp_touchscreen.h"
 #include "runtime_online_overlay.h"
@@ -49,6 +50,54 @@ namespace {
 void TracePress(const SDL_Event& event) {
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)) {
         DcpLatencyTrace::press_ns.store(event.common.timestamp, std::memory_order_relaxed);
+    }
+}
+
+DcpTouchRouteLog g_touch_route_log;
+DcpGamescopeTouch::Claim g_gamescope_touch;
+
+int DirectTouchDevices() {
+    int total = 0, direct = 0;
+    SDL_TouchID* devices = SDL_GetTouchDevices(&total);
+    for (int i = 0; devices && i < total; ++i) {
+        direct += DcpTouchRoute::AcceptedTouch(devices[i], SDL_GetTouchDeviceType(devices[i])) ? 1 : 0;
+    }
+    SDL_free(devices);
+    return direct;
+}
+
+void LogTouchRoute(DcpTouchRouteEvent event) {
+    const DcpTouchRouteInfo route{SDL_GetCurrentVideoDriver(), DcpPresent::GamescopeSession() ? 1 : 0, DirectTouchDevices()};
+    char line[DCP_TOUCH_ROUTE_LINE_SIZE];
+    if (dcp_touch_route_note(&g_touch_route_log, event, &route, line, sizeof(line))) {
+        std::puts(line);
+    }
+}
+
+bool GamescopeTouchWanted() {
+    DcpTouchGamescopeEnv env{};
+#ifdef __linux__
+    env.linux_host = 1;
+#endif
+    env.gamescope = DcpPresent::GamescopeSession() ? 1 : 0;
+    env.display = std::getenv("DISPLAY");
+    env.opt_out = std::getenv("DCP_TOUCH_GAMESCOPE");
+    return dcp_touch_gamescope_wanted(&env) != 0;
+}
+
+void ClaimGamescopeTouch() {
+    if (!GamescopeTouchWanted()) {
+        return;
+    }
+    switch (g_gamescope_touch.Acquire()) {
+    case DcpGamescopeTouch::Result::Applied:
+        LogTouchRoute(DCP_TOUCH_ROUTE_FALLBACK_USED);
+        break;
+    case DcpGamescopeTouch::Result::Unavailable:
+        LogTouchRoute(DCP_TOUCH_ROUTE_FALLBACK_FAILED);
+        break;
+    case DcpGamescopeTouch::Result::Unchanged:
+        break;
     }
 }
 
@@ -158,6 +207,8 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
     LogGamescopeWindow();
+    ClaimGamescopeTouch();
+    LogTouchRoute(DCP_TOUCH_ROUTE_READY);
     const std::string display_name = display && !display->name.empty() ? " (" + display->name + ")" : "";
     std::printf("Window: display %d of %zu%s, size %dx%d, VSync %s, frame rate in title %s, "
                 "resolution in title %s\n",
@@ -211,6 +262,7 @@ void WindowSDL::ApplyDisplayMode(int mode) {
 
 WindowSDL::~WindowSDL() {
     ReleaseMouse();
+    g_gamescope_touch.Release();
     SDL_ShowCursor();
     SDL_DestroyWindow(window);
 }
@@ -411,6 +463,7 @@ void WindowSDL::HandleTouch(const SDL_Event& event, bool ui) {
         if (ui) {
             return;
         }
+        LogTouchRoute(DCP_TOUCH_ROUTE_UPDATED);
         dcp_touch_telemetry_record(DCP_TOUCH_EVENT_DETECTED);
         cursor.ControllerActivity();
         dcp_touchscreen_down(screen, finger.fingerID, area, finger.x, finger.y, finger.timestamp);
@@ -450,6 +503,9 @@ bool WindowSDL::PollEvents() {
     RefreshTitle();
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     cursor.SetMouseControls(dcp_mouse_enabled(dcp_mouse_global()) != 0);
+    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0) {
+        g_gamescope_touch.Maintain(SDL_GetTicks());
+    }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (DcpLatencyTrace::enabled) {
@@ -496,6 +552,7 @@ bool WindowSDL::PollEvents() {
         }
         const bool touch_mouse = DcpTouchRoute::TouchGeneratedMouse(event);
         if (DcpTouchRoute::CountedEvent(event, false) == DcpTouchRoute::Counted::MouseSuppressed) {
+            LogTouchRoute(DCP_TOUCH_ROUTE_UPDATED);
             dcp_touch_telemetry_record(DCP_TOUCH_EVENT_MOUSE_SUPPRESSED);
         }
         switch (event.type) {
@@ -539,6 +596,10 @@ bool WindowSDL::PollEvents() {
             break;
         case SDL_EVENT_WINDOW_FOCUS_LOST:
             ReleaseMouse();
+            g_gamescope_touch.Release();
+            break;
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            ClaimGamescopeTouch();
             break;
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;

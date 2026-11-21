@@ -70,12 +70,6 @@ size_t Count(const std::string& text, const char* needle) {
     return count;
 }
 
-std::string LineBefore(const std::string& text, size_t at) {
-    const size_t end = text.rfind('\n', at);
-    const size_t start = text.rfind('\n', end - 1);
-    return text.substr(start + 1, end - start - 1);
-}
-
 void TestNativeAndWineMatrix() {
     CHECK(dcp_hidapi_action(0, nullptr) == DCP_HIDAPI_LEAVE);
     CHECK(dcp_hidapi_action(1, nullptr) == DCP_HIDAPI_DISABLE);
@@ -98,11 +92,23 @@ void TestPolicyIsHostOnly() {
     CHECK(Pos(header, "#ifdef _WIN32") < Pos(header, "wine_get_version"));
 }
 
+// The call at `at` starts its own line at function level and follows a finished statement, so no if/else/loop header
+// guards it.
+bool IsUnguardedStatement(const std::string& text, size_t at) {
+    const size_t line = text.rfind('\n', at);
+    if (line == std::string::npos || text.compare(line + 1, at - line - 1, "    ") != 0 || line == 0) {
+        return false;
+    }
+    const size_t previous = text.find_last_not_of(" \t\r\n", line);
+    return previous != std::string::npos && (text[previous] == ';' || text[previous] == '}' || text[previous] == '{');
+}
+
 void TestGameProcessOrder() {
     const std::string loader = ReadSource("src/loader.c");
     const size_t prepare = Pos(loader, "dcp_prepare_sdl_gamepad();");
     CHECK(Count(loader, "dcp_prepare_sdl_gamepad();") == 1);
-    CHECK(LineBefore(loader, prepare).find("if") == std::string::npos);
+    CHECK(IsUnguardedStatement(loader, prepare));
+    CHECK(Pos(loader, "dcp_simulate_crash_from_environment();") < prepare);
     CHECK(Pos(loader, "dcp_launcher_run(&launcher)") < prepare);
     for (const char* later : {"dcp_game_build(paths.image_dir", "runtime_online_configure(", "dcp_render_resolution(",
                               "runtime_set_language(", "runtime_pad_set_settings(", "runtime_cheats_start(", "dcpgpu_init("}) {

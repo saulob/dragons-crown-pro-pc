@@ -85,6 +85,17 @@ a guest flip until the presenter has taken the previous frame and asks for the s
 a Steam frame limit from queueing frames. Gamescope paces presentation itself, so VSync Off and Frame rate settings above
 the display's refresh may not show there.
 
+**Touchscreens under Gamescope** (SteamOS, Steam Deck, Xbox Ally X and similar handhelds): by default Gamescope turns a
+touch into a mouse pointer and a left click, which the game would read as a mouse (and, with the default bindings, as
+Square). While the game window has focus the game asks Gamescope for its Passthrough touch mode (the root property
+`STEAM_TOUCH_CLICK_MODE` on the game's X server, written through libX11) and puts the previous value back when the window
+loses focus or closes. A physical touchscreen is then the DualShock 4 touch surface: a contact is a touchpad contact and a
+short tap is a touchpad click; it moves no host cursor and presses no mouse button. Mice, the Steam Deck trackpads and Steam
+Virtual Gamepads are unchanged. `DCP_TOUCH_GAMESCOPE=0` in the environment keeps Gamescope's own touch handling. The log
+shows `Touchscreen telemetry: event=touch_route_ready video=<wayland|x11> gamescope=<yes|no> direct_devices=<n>`, and
+`touchscreen_fallback_used` when the mode was changed (`touchscreen_fallback_unavailable` when libX11 or the X server could
+not be reached); bug report DCP-8G6HDU.
+
 ## AppImage
 
 `usr/bin/dragons_crown_pro` with `DT_RPATH=$ORIGIN/../lib` finds the bundled libraries (SDL3, FreeType, libpng, OpenSSL's

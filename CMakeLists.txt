@@ -501,6 +501,15 @@ target_compile_definitions(dcp-mouse-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURC
 target_compile_options(dcp-mouse-tests PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(dcp-mouse-tests PRIVATE dcp_keys)
 
+# Focused tests of the SteamOS / Gamescope touchscreen route (DCP-8G6HDU): Passthrough ownership, touchpad mapping,
+# synthetic mouse suppression, mouse/trackpad/controller regression, route telemetry; not part of the default build.
+add_executable(dcp-touchscreen-steamos-tests EXCLUDE_FROM_ALL tests/touchscreen_steamos_tests.cpp)
+set_target_properties(dcp-touchscreen-steamos-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-touchscreen-steamos-tests PRIVATE src gpu/shim)
+target_compile_definitions(dcp-touchscreen-steamos-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-touchscreen-steamos-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-touchscreen-steamos-tests PRIVATE dcp_keys)
+
 # Focused tests of the windowed-mode size and centring arithmetic; not part of the default build.
 add_executable(dcp-window-tests EXCLUDE_FROM_ALL tests/window_fit_tests.cpp)
 set_target_properties(dcp-window-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
