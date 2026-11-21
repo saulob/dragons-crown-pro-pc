@@ -7792,7 +7792,7 @@ void TestInGameUiText() {
                                 "Fill Health", "Add 1,000 Gold", "Level Up (+1 Level)", "Movement Speed", "Experience Multiplier",
                                 "Display mode", "VSync", "Windowed", "Cheats are disabled while Online Play is enabled",
                                 "Cheats are not available for this game build.", "Applies after a restart.", "Cross", "Circle",
-                                "Skip the startup logo and go straight to the title screen",
+                                "Skip startup logos and the opening movie and go straight to the title screen",
                                 "Unlocks all Gallery content while enabled without changing save progress"}) {
         CHECK(has(english));
     }

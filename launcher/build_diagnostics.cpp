@@ -70,8 +70,8 @@ struct SearchShape {
 
 // What each search below is built from, so a log shows which part moved when a search finds nothing.
 constexpr SearchShape kSearchShapes[] = {
-    {"Skip intro", "opening poll", "49 8b 04 24 4c 89 e7 48 8b 98 38 01 00 00 e8 ?? ?? ?? ?? 4c 89 e7 89 c6 ff d3 84 c0 0f 84"},
-    {"Skip intro", "startup notice", "be cb 01 00 00 48 89 df 49 89 9d d8 00 00 00"},
+    {"Skip Intro", "opening step", "4c 89 f7 e8 ?? ?? ?? ?? 49 8b bc 24 10 69 01 00 48 89 c3 48 8b 07 ff 90 60 02 00 00 84 c0 75 6b"},
+    {"Skip Intro", "startup notice", "be cb 01 00 00 48 89 df 49 89 9d d8 00 00 00"},
     {"Unlock Gallery", "list builder", "e8 ?? ?? ?? ?? 41 89 c4 45 85 e4 78 ?? 49 8b 45 28 48 8b b8 e8 00 00 00 e8"},
     {"Unlock Gallery", "art array getter", "48 8d 87 cc ea 20 00 c3"},
     {"Unlock Gallery", "entry key", "b8 ff ff ff ff 83 ff 38 77 12 48 63 c7 48 8d 0d"},
@@ -929,13 +929,15 @@ size_t DescribeSearchOnly(Lines& out, const scan::MappedImage& image) {
     const uint64_t size = image.bytes.size();
     size_t resolved = 0;
 
-    uint64_t poll = 0, notice_site = 0;
-    skip_intro_locate(bytes, size, kUnlistedBuild, &poll);
+    SkipIntroSites intro{};
+    uint64_t notice_site = 0;
+    skip_intro_locate(bytes, size, kUnlistedBuild, &intro);
     const SkipIntroNotice notice = skip_intro_locate_notice(bytes, size, kUnlistedBuild, &notice_site);
-    const bool intro_ok = poll && notice != SKIP_INTRO_NOTICE_UNMATCHED;
+    const bool intro_ok = intro.redirect && notice != SKIP_INTRO_NOTICE_UNMATCHED;
     resolved += intro_ok ? 1 : 0;
-    out.Add("  Skip intro: %s, opening poll %s, startup notice %s%s", intro_ok ? "resolved" : "UNRESOLVED",
-            SearchedSite(poll).c_str(), NoticeText(notice), notice_site ? (" at " + Hex(notice_site)).c_str() : "");
+    out.Add("  Skip Intro: %s, opening step %s, title step %s, startup notice %s%s", intro_ok ? "resolved" : "UNRESOLVED",
+            SearchedSite(intro.redirect).c_str(), SearchedSite(intro.title).c_str(), NoticeText(notice),
+            notice_site ? (" at " + Hex(notice_site)).c_str() : "");
 
     uint64_t gallery = 0;
     gallery_unlock_locate(bytes, size, kUnlistedBuild, &gallery);

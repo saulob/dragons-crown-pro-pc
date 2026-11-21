@@ -161,7 +161,7 @@ int dcp_voice_language(const char *settings_file);
 /* 1 when the settings file asks for True Ultrawide (true_ultrawide; 0 by default, and for a missing or unknown value). */
 int dcp_true_ultrawide(const char *settings_file);
 
-/* 1 when the settings file skips the startup logo (skip_intro; 0 by default). */
+/* 1 when the settings file skips the startup logos and the opening (skip_intro; 0 by default). */
 int dcp_skip_intro(const char *settings_file);
 
 /* 1 when the settings file asks for Circle to confirm in the menus (japanese_menu_buttons; 0 by default). */
@@ -198,7 +198,7 @@ typedef struct DcpRunSettings {
     const char *aspect_ratio;      /* dcp_aspect_ratios name */
     int true_ultrawide_effective;
     unsigned skip_offers;          /* the skip_offers.h bits applied */
-    int skip_intro;                /* the startup logo skip was applied */
+    int skip_intro;                /* the startup logos and opening skip was applied */
     int japanese_menu_buttons;     /* the Circle-confirms layout is in effect */
     int unlock_gallery;            /* the Gallery shows every picture */
     unsigned endgame_unlocks;      /* the endgame_unlocks.h bits installed */

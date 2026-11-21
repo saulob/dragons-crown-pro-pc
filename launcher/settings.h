@@ -54,7 +54,7 @@ inline constexpr char kArachnophobiaSafeModeKey[] = "arachnophobia_safe_mode";
 inline constexpr char kVoiceLanguageKey[] = "voice_language";
 // The setting Voice Language replaced, read only while voice_language is absent: 1 resolves to Japanese.
 inline constexpr char kLegacyJapaneseNpcVoicesKey[] = "dcp_japanese_npc_voices";
-// Skips the startup logo; the title screen follows (src/skip_intro.h).
+// Skips the startup logos and the opening; the title screen follows (src/skip_intro.h).
 inline constexpr char kSkipIntroKey[] = "skip_intro";
 // Circle confirms and Cross cancels in the menus (src/menu_buttons.h).
 inline constexpr char kJapaneseMenuButtonsKey[] = "japanese_menu_buttons";

@@ -197,7 +197,7 @@ constexpr char kPointerInteractionHelp[] =
     "Pointer Control.";
 constexpr char kPointerSensitivityHelp[] = "Controls how fast mouse movement moves the game's pointer.";
 constexpr char kWheelHelp[] = "The button a wheel step presses. Off by default.";
-constexpr char kSkipIntroHelp[] = "Skip the startup logo and go straight to the title screen";
+constexpr char kSkipIntroHelp[] = "Skip startup logos and the opening movie and go straight to the title screen";
 constexpr char kJapaneseMenuButtonsHelp[] =
     "Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat "
     "controls do not change. Applies at the next game start.";

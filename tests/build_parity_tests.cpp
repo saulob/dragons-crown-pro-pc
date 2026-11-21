@@ -119,9 +119,9 @@ bool HasSkipTable(const GameBuild& build) {
 }
 
 bool HasIntroTable(const GameBuild& build) {
-    uint64_t site = 0;
+    SkipIntroSites sites{};
     const unsigned char none[1] = {0};
-    return skip_intro_locate(none, 0, Key(build).c_str(), &site) == 1;
+    return skip_intro_locate(none, 0, Key(build).c_str(), &sites) == 1;
 }
 
 bool HasGalleryTable(const GameBuild& build) {
@@ -554,9 +554,9 @@ void TestSkipIntroLanguages() {
             std::ofstream(ini, std::ios::trunc) << "text_language = " << language.key << "\nskip_intro = 1\n";
             CHECK(dcp_skip_intro(ini.string().c_str()) == 1);
             CHECK(CapabilitiesOf(build).skip_intro == caps.skip_intro);
-            uint64_t site = 0;
+            SkipIntroSites sites{};
             const unsigned char none[1] = {0};
-            CHECK(skip_intro_locate(none, 0, Key(build).c_str(), &site) == (caps.skip_intro == Mapping::kTable));
+            CHECK(skip_intro_locate(none, 0, Key(build).c_str(), &sites) == (caps.skip_intro == Mapping::kTable));
         }
     }
     fs::remove_all(dir);
@@ -1332,9 +1332,10 @@ std::vector<Patched> PatchedRanges(const GameBuild& build, const BootImage& imag
     skip_offers_locate(image.bytes.data(), size, Key(build).c_str(), &story, &tutorial);
     if (story) add(story, 47, "story skip window");
     if (tutorial) add(tutorial, 12, "tutorial skip window");
-    uint64_t intro = 0;
+    SkipIntroSites intro{};
     skip_intro_locate(image.bytes.data(), size, Key(build).c_str(), &intro);
-    if (intro) add(intro, 7, "skip intro poll");
+    if (intro.redirect) add(intro.redirect, SKIP_INTRO_REDIRECT_BYTES, "skip intro opening step");
+    if (intro.title) add(intro.title, SKIP_INTRO_TITLE_CALL_BYTES, "skip intro title step");
     uint64_t notice = 0;
     if (skip_intro_locate_notice(image.bytes.data(), size, Key(build).c_str(), &notice) == SKIP_INTRO_NOTICE_FOUND) {
         add(notice, SKIP_INTRO_BYPASS_BYTES, "skip intro regional notice");
@@ -2073,9 +2074,10 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(gallery_unlock_locate(bytes, size, Key(build).c_str(), &gallery) == 1 && gallery);
         CHECK(gallery_unlock_locate(bytes, size, "unlisted", &found_gallery) == 0 && found_gallery == gallery);
 
-        uint64_t intro = 0, found_intro = 0;
-        CHECK(skip_intro_locate(bytes, size, Key(build).c_str(), &intro) == 1 && intro);
-        CHECK(skip_intro_locate(bytes, size, "unlisted", &found_intro) == 0 && found_intro == intro);
+        SkipIntroSites intro{}, found_intro{};
+        CHECK(skip_intro_locate(bytes, size, Key(build).c_str(), &intro) == 1 && intro.redirect && intro.title);
+        CHECK(skip_intro_locate(bytes, size, "unlisted", &found_intro) == 0 && found_intro.redirect == intro.redirect &&
+              found_intro.title == intro.title);
 
         // Only the Japanese builds open with the legal notice; the others have no construction of it to find.
         const bool japan = build.title_id == std::string_view("CUSA07001");

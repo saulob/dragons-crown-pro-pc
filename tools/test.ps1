@@ -406,7 +406,7 @@ $tests = @(
     (Test-Step 'updater helper tests' 'dcp-update-helper-tests'),
     (Test-Step 'RTC tests (Win32 file time)' 'dcp-rtc-tests'),
     (Test-Step 'Skip Offer tests (synthetic and local boot images)' 'dcp-skip-offers-tests' -Parity),
-    (Test-Step 'Skip Intro tests (synthetic and local boot images)' 'dcp-skip-intro-tests' -Parity),
+    (Test-Step 'Skip Intro tests (startup logos, opening movie, first boot, title transition, all builds)' 'dcp-skip-intro-tests' -Parity),
     (Test-Step 'Unlock Gallery tests (view, save safety, synthetic and local boot images)' 'dcp-gallery-unlock-tests' -Parity),
     (Test-Step 'Endgame unlock tests (Stables rule, independent settings, hooks, synthetic and local boot images)' 'dcp-endgame-unlocks-tests' -Parity),
     (Test-Step 'Boss Battle tests (Boss Battle screen on the native Options page, session milestones, native Win signals, Attempt/Win/Death/Quit, result bypass, Inn return and campaign restore, statistics, telemetry caps, local boot images)' 'dcp-boss-battle-tests' -Parity),

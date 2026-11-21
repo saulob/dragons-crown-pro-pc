@@ -1040,9 +1040,9 @@ void TestSiteReport() {
     const std::vector<std::string> lines = DescribeBuildSites(source, "CUSA10487 1.03 Europe");
     CHECK(!lines.empty() && lines.front() == kSiteReportBegin && lines.back() == kSiteReportEnd);
     CHECK(Contains(lines, "Build: CUSA10487 1.03 Europe; read-only"));
-    CHECK(Contains(lines, "Skip intro: UNRESOLVED") && Contains(lines, "Unlock Gallery: UNRESOLVED") &&
+    CHECK(Contains(lines, "Skip Intro: UNRESOLVED") && Contains(lines, "Unlock Gallery: UNRESOLVED") &&
           Contains(lines, "Japanese Menu Buttons: UNRESOLVED"));
-    CHECK(Contains(lines, "Skip intro, opening poll: 0 matches"));
+    CHECK(Contains(lines, "Skip Intro, opening step: 0 matches"));
     CHECK(Contains(lines, "Search-only features: 0/3 resolved"));
     for (const GameBuild& build : SupportedBuilds()) {
         const bool tables = !build.resolution_sites.empty();
@@ -1291,7 +1291,7 @@ void TestKnownBuilds() {
         CHECK(Reported(known_report));
         CHECK(Contains(known_report.lines, "Runtime validators: 3/3 accepted"));
         CHECK(Contains(known_report.lines, "Search-only features: 3/3 resolved"));
-        CHECK(Contains(known_report.lines, "Skip intro: resolved") && Contains(known_report.lines, "Unlock Gallery: resolved") &&
+        CHECK(Contains(known_report.lines, "Skip Intro: resolved") && Contains(known_report.lines, "Unlock Gallery: resolved") &&
               Contains(known_report.lines, "Japanese Menu Buttons: resolved"));
         CHECK(Contains(known_report.lines, "Cheats: accepted") && Contains(known_report.lines, "True ultrawide: accepted"));
         CHECK(Contains(known_report.lines, "Voice language: accepted"));

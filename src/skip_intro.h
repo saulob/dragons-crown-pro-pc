@@ -1,6 +1,7 @@
-/* Skip Intro: the opening scene polls "did any player press a button" every frame and ends itself, with a fade, when one
- * did. With the setting on, the first poll is answered "pressed" and the game takes that skip by itself. Only the
- * poll's call is redirected, where the code around it is verified. Builds that open with a legal notice skip it too. */
+/* Skip Intro: the title flow plays the opening scene (the ATLUS, Basiscape and CRIWARE logos, then the opening) between
+ * the save data check and the title. That step asks the game whether the opening is needed and, when it is not, goes on
+ * to the title without creating the scene. With the setting on, the first such question at startup is answered "not
+ * needed"; the save data check before it is untouched. Builds that open with a legal notice skip it too. */
 #ifndef DCP_SKIP_INTRO_H
 #define DCP_SKIP_INTRO_H
 
@@ -16,8 +17,17 @@ extern "C" {
 /* The saved choice (0/1) with DCP_SKIP_INTRO (0/1, off/on) taking precedence. */
 int skip_intro_wanted(int saved);
 
-/* The hooked poll for a build ("CUSA10454-1.00"), 0 when its code does not match. Returns 1 when the build is listed. */
-int skip_intro_locate(const unsigned char *image, uint64_t size, const char *game, uint64_t *site);
+#define SKIP_INTRO_REDIRECT_BYTES 6
+#define SKIP_INTRO_TITLE_CALL_BYTES 5
+
+typedef struct {
+    uint64_t redirect; /* the opening step's `call [rax+0x260]`, the "opening not needed" question */
+    uint64_t title;    /* the title step's call that creates the title scene */
+} SkipIntroSites;
+
+/* Both sites for a build ("CUSA10454-1.00"), zero when its title flow does not match. Returns 1 when the build is
+ * listed; an unlisted build is searched for exactly one title flow. */
+int skip_intro_locate(const unsigned char *image, uint64_t size, const char *game, SkipIntroSites *sites);
 
 typedef enum {
     SKIP_INTRO_NOTICE_ABSENT,   /* the build never constructs the regional startup notice */
@@ -32,20 +42,24 @@ SkipIntroNotice skip_intro_locate_notice(const unsigned char *image, uint64_t si
 
 size_t skip_intro_stub_bytes(void);
 
-/* Hooks the poll for a listed build (NULL: unknown) and arms the one-shot press; where the build shows the regional
- * notice, replaces its construction with the step the other builds take. Returns 1 when installed. Writes nothing and
- * says why when the code or the stub space does not fit, or the notice is not the verified one. */
+/* Redirects the opening step for a listed build (NULL: unknown) and, where the build shows the regional notice, replaces
+ * its construction with the step the other builds take. Returns 1 when installed. Writes nothing and says why when the
+ * code or the stub space does not fit, or the notice is not the verified one. */
 int skip_intro_install(unsigned char *image, uint64_t size, uint64_t entry, const char *game, int wanted,
                        unsigned char *stubs, size_t stubs_size);
 
-/* The stub for the poll's seven bytes: asks `claim` (System V, no arguments, 1 once) and, when it says 1, calls
- * `delivered` and returns 1 to `resume` without making the call. Returns its length. */
-size_t skip_intro_build_stub(unsigned char *out, uint64_t claim, uint64_t delivered, uint64_t resume);
+/* The stub called in place of the question: when `claim` (System V, no arguments) says 1 it calls `redirected` and
+ * answers 1, otherwise it asks the game's own question with the original rdi. Returns its length. */
+size_t skip_intro_build_redirect_stub(unsigned char *out, uint64_t claim, uint64_t redirected);
 
-/* The one-shot press: 1 the first time after skip_intro_arm, then 0. */
+/* The stub called in place of the title scene's creation: calls `reached`, then the original `create` with rdi. */
+size_t skip_intro_build_title_stub(unsigned char *out, uint64_t reached, uint64_t create);
+
+/* The one-shot redirect: 1 the first time after skip_intro_arm, then 0. */
 void skip_intro_arm(void);
 int GUEST_HOOK_ABI skip_intro_claim(void);
-void GUEST_HOOK_ABI skip_intro_delivered(void);
+void GUEST_HOOK_ABI skip_intro_redirected(void);
+void GUEST_HOOK_ABI skip_intro_title_reached(void);
 
 #ifdef __cplusplus
 }

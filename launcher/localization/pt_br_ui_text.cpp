@@ -605,8 +605,8 @@ Skip Intro	Pular introdução
 Controller Rumble	Vibração do controle
 Off disables controller vibration.	Desligado desativa a vibração do controle.
 Off disables controller vibration. Applies at the next game start.	Desligado desativa a vibração do controle. Vale a partir do próximo início do jogo.
-Skip the startup logo and go straight to the title screen	Pula o logo de abertura e vai direto para a tela de título
-Skips the startup logo and starts at the title screen.	Pula o logo de abertura e começa na tela de título.
+Skip startup logos and the opening movie and go straight to the title screen	Pula os logos iniciais e o vídeo de abertura e vai direto para a tela de título
+Skips startup logos and the opening movie, then starts at the title screen.	Pula os logos iniciais e o vídeo de abertura, depois começa na tela de título.
 Unlock Gallery	Desbloquear Galeria
 Unlocks all Gallery content while enabled without changing save progress	Desbloqueia todo o conteúdo da Galeria enquanto estiver ligado, sem alterar o progresso salvo
 Unlocks all Gallery content while enabled without changing save progress.	Desbloqueia todo o conteúdo da Galeria enquanto estiver ligado, sem alterar o progresso salvo.

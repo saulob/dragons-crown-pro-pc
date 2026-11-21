@@ -213,6 +213,7 @@ if ((test)); then
     "$build_dir/bin/dcp-rtc-tests"
     step 'Running the Skip Offer tests (synthetic and local boot images)'
     "$build_dir/bin/dcp-skip-offers-tests"
+    step 'Running the Skip Intro tests (startup logos, opening movie, first boot, title transition, all builds)'
     "$build_dir/bin/dcp-skip-intro-tests"
     "$build_dir/bin/dcp-gallery-unlock-tests"
     "$build_dir/bin/dcp-endgame-unlocks-tests"

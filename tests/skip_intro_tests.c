@@ -1,5 +1,5 @@
-/* Focused tests of Skip Intro: the one-shot press and the poll hook, with the real USA boot image under
- * build/image when it is there (read only). */
+/* Focused tests of Skip Intro: the startup redirect and its stubs, the regional notice, and the Issue #79 state model,
+ * with the real boot images under build/image when they are there (read only). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,34 +81,255 @@ static void test_claim(void) {
     CHECK(skip_intro_claim() == 1 && skip_intro_claim() == 0);
 }
 
-enum { kWindowLength = 77, kHookInWindow = 19, kHookLength = 7 };
-/* Displacements the code does not check: the stack-check load and the jump taken when the poll is false. */
-static int is_unchecked(int i) {
-    return (i >= 40 && i < 44) || (i >= 60 && i < 64);
+static int32_t rel32_at(const unsigned char *at) {
+    int32_t value;
+    memcpy(&value, at, sizeof(value));
+    return value;
 }
 
-static unsigned char *memmem_bytes(unsigned char *image, uint64_t size, const char *text) {
-    const size_t length = strlen(text) + 1;
-    for (uint64_t at = 0; at + length <= size; ++at)
-        if (!memcmp(image + at, text, length)) return image + at;
-    return NULL;
+static int64_t call_target(const unsigned char *image, int64_t at) {
+    return at + 5 + rel32_at(image + at + 1);
 }
+
+/* ---- the stubs, executed ---- */
+
+#ifdef _WIN32
+#include <windows.h>
+static unsigned char *executable_memory(size_t size) {
+    return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+}
+#else
+#include <sys/mman.h>
+static unsigned char *executable_memory(size_t size) {
+    void *memory = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return memory == MAP_FAILED ? NULL : memory;
+}
+#endif
+
+typedef int(GUEST_HOOK_ABI *Question)(void *self);
+typedef void *(GUEST_HOOK_ABI *Create)(void *manager);
+
+/* The object the opening step asks: its vtable's 0x260 slot is the question. */
+typedef struct {
+    void **vtable;
+} Asked;
+
+static int g_claim_value, g_questions, g_redirects, g_reached, g_creates, g_misaligned, g_answer;
+static void *g_asked_self, *g_created_for;
+
+static void note_alignment(void) {
+    g_misaligned += ((uintptr_t)__builtin_frame_address(0) & 15) != 0;
+}
+static int GUEST_HOOK_ABI fake_claim(void) {
+    note_alignment();
+    return g_claim_value;
+}
+static void GUEST_HOOK_ABI fake_redirected(void) {
+    note_alignment();
+    ++g_redirects;
+}
+static int GUEST_HOOK_ABI fake_question(void *self) {
+    note_alignment();
+    ++g_questions;
+    g_asked_self = self;
+    return g_answer;
+}
+static void GUEST_HOOK_ABI fake_reached(void) {
+    note_alignment();
+    g_reached += 1 + g_creates;
+}
+static void *GUEST_HOOK_ABI fake_create(void *manager) {
+    note_alignment();
+    ++g_creates;
+    g_created_for = manager;
+    return (char *)manager + 1;
+}
+
+static void *g_vtable[0x270 / sizeof(void *)];
+static Asked g_asked = {g_vtable};
+
+static void reset_counts(void) {
+    g_questions = g_redirects = g_reached = g_creates = g_misaligned = 0;
+    g_asked_self = g_created_for = NULL;
+}
+
+static void test_stub_execution(void) {
+    unsigned char *memory = executable_memory(4096);
+    if (!memory) {
+        printf("no executable memory: stub execution skipped\n");
+        return;
+    }
+    g_vtable[0x260 / sizeof(void *)] = (void *)(uintptr_t)fake_question;
+    memset(memory, 0xcc, 4096);
+    const size_t redirect_length = skip_intro_build_redirect_stub(memory, (uint64_t)(uintptr_t)fake_claim,
+                                                                  (uint64_t)(uintptr_t)fake_redirected);
+    CHECK(redirect_length <= 56);
+    const Question redirect = (Question)(uintptr_t)memory;
+
+    /* Not claimed: the game's own question, with its own object and answer. */
+    for (g_answer = 0; g_answer <= 1; ++g_answer) {
+        reset_counts();
+        g_claim_value = 0;
+        CHECK(redirect(&g_asked) == g_answer && g_questions == 1 && g_redirects == 0 && g_asked_self == &g_asked);
+        CHECK(g_misaligned == 0);
+    }
+    /* Claimed: "not needed" without asking. */
+    reset_counts();
+    g_claim_value = 1, g_answer = 0;
+    CHECK(redirect(&g_asked) == 1 && g_questions == 0 && g_redirects == 1 && g_misaligned == 0);
+
+    /* The real one-shot: the first question at startup is answered, the later ones are the game's. */
+    skip_intro_build_redirect_stub(memory, (uint64_t)(uintptr_t)skip_intro_claim, (uint64_t)(uintptr_t)fake_redirected);
+    reset_counts();
+    skip_intro_arm();
+    g_answer = 0;
+    CHECK(redirect(&g_asked) == 1 && g_questions == 0 && g_redirects == 1);
+    CHECK(redirect(&g_asked) == 0 && g_questions == 1 && g_redirects == 1);
+    CHECK(g_misaligned == 0);
+
+    unsigned char *title_at = memory + 1024;
+    const size_t title_length = skip_intro_build_title_stub(title_at, (uint64_t)(uintptr_t)fake_reached,
+                                                            (uint64_t)(uintptr_t)fake_create);
+    CHECK(title_length <= 96 - 56);
+    const Create title = (Create)(uintptr_t)title_at;
+    reset_counts();
+    char manager[4];
+    CHECK(title(manager) == manager + 1 && g_creates == 1 && g_created_for == manager);
+    CHECK(g_reached == 1 && g_misaligned == 0); /* reported before the scene is created */
+}
+
+/* ---- the title flow in the real images ---- */
+
+enum {
+    kOpeningLength = 0x56,
+    kTitleLength = 0x35,
+    kDoneLength = 0x42,
+    kTitleCreateLength = 0x36,
+    kSaveLength = 0x3a,
+    kDecisionLength = 0x44,
+    kDispatchLength = 0x1f,
+    kRedirectInStep = 0x16,
+    kTitleCallInCreate = 0x27,
+    kFactoryHeadLength = 23,
+    kFactoryDispatchLength = 27,
+    kFactoryCaseLength = 24
+};
 
 static const struct {
     const char *folder, *game;
-    uint64_t window, entry, notice;
+    uint64_t entry, opening, save, dispatch, decision, title_create, factory, notice, old_poll;
 } kRealBuilds[] = {
-    {"v1.03", "CUSA10454-1.00", 0x502076, 0x54c690, 0},
-    {"CUSA10454-1.01", "CUSA10454-1.01", 0x502076, 0x54c690, 0},
-    {"CUSA07001-1.00", "CUSA07001-1.00", 0x4ffdc6, 0x54a800, 0x174b0},
-    {"CUSA07001-1.02", "CUSA07001-1.02", 0x500356, 0x54a660, 0x174d0},
-    {"CUSA07001-1.03", "CUSA07001-1.03", 0x500416, 0x54a720, 0x174d0},
-    {"CUSA10209-1.00", "CUSA10209-1.00", 0x4ffdd6, 0x54a790, 0},
+    {"v1.03", "CUSA10454-1.00", 0x54c690, 0x428b3f, 0x428b05, 0x428a28, 0x428ac1, 0x428c7a, 0x4af4b0, 0, 0x502076},
+    {"CUSA10454-1.01", "CUSA10454-1.01", 0x54c690, 0x428b3f, 0x428b05, 0x428a28, 0x428ac1, 0x428c7a, 0x4af4b0, 0, 0x502076},
+    {"CUSA07001-1.00", "CUSA07001-1.00", 0x54a800, 0x427d9f, 0x427d65, 0x427c88, 0x427d21, 0x427eda, 0x4ad7c0, 0x174b0, 0x4ffdc6},
+    {"CUSA07001-1.02", "CUSA07001-1.02", 0x54a660, 0x4281bf, 0x428185, 0x4280a8, 0x428141, 0x4282fa, 0x4adc40, 0x174d0, 0x500356},
+    {"CUSA07001-1.03", "CUSA07001-1.03", 0x54a720, 0x42820f, 0x4281d5, 0x4280f8, 0x428191, 0x42834a, 0x4add00, 0x174d0, 0x500416},
+    {"CUSA10209-1.00", "CUSA10209-1.00", 0x54a790, 0x427f0f, 0x427ed5, 0x427df8, 0x427e91, 0x42804a, 0x4ad930, 0, 0x4ffdd6},
 };
 enum { kRealCount = sizeof(kRealBuilds) / sizeof(*kRealBuilds) };
 
-/* Offsets in the notice step (from its first-frame test): the 27 displacements the code does not read back, the
- * construction the bypass replaces, and the object it keeps. */
+typedef struct {
+    const char *name;
+    uint64_t at, length;
+    const unsigned unchecked[5]; /* 4-byte fields nothing reads back; 0 ends the list */
+} Window;
+
+static int unchecked_byte(const Window *w, unsigned b) {
+    for (int i = 0; i < 5 && w->unchecked[i]; ++i)
+        if (b >= w->unchecked[i] && b < w->unchecked[i] + 4) return 1;
+    return 0;
+}
+
+static uint64_t factory_case(const unsigned char *image, uint64_t factory, unsigned scene) {
+    const int64_t table = (int64_t)factory + 0x60 + 0x12 + rel32_at(image + factory + 0x60 + 0x0e);
+    return (uint64_t)(table + rel32_at(image + table + 4 * (scene - 1)));
+}
+
+static uint64_t step_table(const unsigned char *image, uint64_t dispatch) {
+    return dispatch + 0x16 + rel32_at(image + dispatch + 0x12);
+}
+
+static int sites_are(const SkipIntroSites *sites, uint64_t redirect, uint64_t title) {
+    return sites->redirect == redirect && sites->title == title;
+}
+
+static int listed_rejects(const unsigned char *image, uint64_t size, const char *game) {
+    SkipIntroSites sites = {1, 1};
+    return skip_intro_locate(image, size, game, &sites) == 1 && sites.redirect == 0 && sites.title == 0;
+}
+
+static void test_title_flow_mutations(unsigned char *image, uint64_t size, int index) {
+    const char *game = kRealBuilds[index].game;
+    const uint64_t opening = kRealBuilds[index].opening, factory = kRealBuilds[index].factory;
+    const uint64_t decision_save = kRealBuilds[index].decision + 0x28 + rel32_at(image + kRealBuilds[index].decision + 0x24);
+    const Window windows[] = {
+        {"opening step", opening, kOpeningLength, {0x49}},
+        {"title step", opening + kOpeningLength, kTitleLength, {0x15}},
+        {"end of step", opening + kOpeningLength + kTitleLength, kDoneLength, {0x0d, 0x17, 0x2f, 0x3e}},
+        {"title creation", kRealBuilds[index].title_create, kTitleCreateLength, {0x14}},
+        {"save step", kRealBuilds[index].save, kSaveLength, {0x34}},
+        {"decision", kRealBuilds[index].decision, kDecisionLength, {0x03, 0x1e, 0x31, 0x40}},
+        {"decision to save", decision_save, 19, {0}},
+        {"dispatch", kRealBuilds[index].dispatch, kDispatchLength, {0}},
+        {"factory", factory, kFactoryHeadLength, {0}},
+        {"factory dispatch", factory + 0x60, kFactoryDispatchLength, {0x07}},
+        {"save scene case", factory_case(image, factory, 1), kFactoryCaseLength, {0x01, 0x06}},
+        {"opening scene case", factory_case(image, factory, 2), kFactoryCaseLength, {0x01, 0x06}},
+        {"title scene case", factory_case(image, factory, 7), kFactoryCaseLength, {0x01, 0x06}},
+    };
+    int wrong = 0;
+    for (size_t w = 0; w < sizeof(windows) / sizeof(*windows); ++w) {
+        for (unsigned b = 0; b < windows[w].length; ++b) {
+            /* the one-byte branch distance from step 2 to the save data step is not read back */
+            if (w == 6 && b == 8) continue;
+            image[windows[w].at + b] ^= 1;
+            const int rejected = listed_rejects(image, size, game);
+            if (rejected == unchecked_byte(&windows[w], b)) {
+                if (!wrong++) printf("%s: %s byte 0x%x %s\n", game, windows[w].name, b, rejected ? "rejected" : "accepted");
+            }
+            image[windows[w].at + b] ^= 1;
+        }
+    }
+    CHECK(wrong == 0);
+
+    /* The step table: the decision, save, opening and title entries are verified; the others are not read. */
+    const uint64_t table = step_table(image, kRealBuilds[index].dispatch);
+    for (int e = 0; e < 7; ++e) {
+        image[table + 4 * e] ^= 1;
+        CHECK(listed_rejects(image, size, game) == (e >= 2 && e <= 5));
+        image[table + 4 * e] ^= 1;
+    }
+    /* Scene identity: the id each constructor gives its base, and that base. */
+    for (unsigned scene = 1; scene <= 7; scene += scene == 2 ? 5 : 1) {
+        const uint64_t ctor = (uint64_t)call_target(image, (int64_t)factory_case(image, factory, scene) + 0x13);
+        const unsigned char pass_id[] = {0xba, (unsigned char)scene, 0, 0, 0, 0x48, 0x89, 0xfb, 0xe8};
+        uint64_t at = 0;
+        for (uint64_t k = ctor; k < ctor + 0x20 && !at; ++k)
+            if (!memcmp(image + k, pass_id, sizeof(pass_id))) at = k;
+        CHECK(at != 0);
+        image[at + 1] ^= 4;
+        CHECK(listed_rejects(image, size, game));
+        image[at + 1] ^= 4;
+        image[at + 9] ^= 1;
+        CHECK(listed_rejects(image, size, game));
+        image[at + 9] ^= 1;
+    }
+    /* The scene getters each step uses: the opening step must read the opening scene's slot. */
+    const uint64_t getter = (uint64_t)call_target(image, (int64_t)opening + 3);
+    image[getter + 3] ^= 0x40;
+    CHECK(listed_rejects(image, size, game));
+    image[getter + 3] ^= 0x40;
+    /* The create thunk's scene id. */
+    const uint64_t create = (uint64_t)call_target(image, (int64_t)opening + 0x34);
+    image[create + 1] ^= 1;
+    CHECK(listed_rejects(image, size, game));
+    image[create + 1] ^= 1;
+    SkipIntroSites sites;
+    CHECK(skip_intro_locate(image, size, game, &sites) == 1 && sites.redirect);
+}
+
+/* ---- the regional notice (Japanese builds) ---- */
+
 static const unsigned kNoticeFields[] = {0xf,   0x17,  0x24,  0x31,  0x3c,  0x50,  0x5c,  0xac,  0xc0,
                                          0xcc,  0xdd,  0xec,  0xf6,  0x101, 0x10c, 0x114, 0x11c, 0x127,
                                          0x138, 0x153, 0x169, 0x177, 0x188, 0x198, 0x1aa, 0x1c6, 0x1d2};
@@ -127,12 +348,6 @@ static int in_notice_field(unsigned offset) {
     for (size_t i = 0; i < sizeof(kNoticeFields) / sizeof(*kNoticeFields); ++i)
         if (offset >= kNoticeFields[i] && offset < kNoticeFields[i] + 4) return 1;
     return 0;
-}
-
-static int32_t rel32_at(const unsigned char *at) {
-    int32_t value;
-    memcpy(&value, at, sizeof(value));
-    return value;
 }
 
 static unsigned char *with_stub_room(const unsigned char *loaded, uint64_t size, size_t room) {
@@ -167,32 +382,46 @@ static void check_bypass(const unsigned char *image, const unsigned char *before
     CHECK(!memcmp(before + advance, "\x49\x8b\x45\x00\x41\x8a\x4d\x5c", 8));
 }
 
-/* The patch of one image: only the hooked bytes, the notice's construction and the stub change, and the stub returns
- * after the hooked bytes. */
+/* The patch of one image: only the question call, the title call, the notice's construction and the stub area change;
+ * both calls reach the stubs, and the title stub goes on to the original creation. */
 static void check_install(unsigned char *image, const unsigned char *before, uint64_t size, const char *game,
-                          uint64_t entry, uint64_t hook, uint64_t notice) {
+                          uint64_t entry, const SkipIntroSites *sites, uint64_t notice) {
     const size_t stub_bytes = skip_intro_stub_bytes();
     CHECK(skip_intro_install(image, size, entry, game, 1, image + size, stub_bytes) == 1);
     const uint64_t cave = notice ? notice + kNoticeBegins : 0;
     size_t outside = 0;
     for (uint64_t k = 0; k < size; ++k) {
-        const int hooked = k >= hook && k < hook + kHookLength, bypassed = cave && k >= cave && k < cave + kBypassLength;
-        outside += image[k] != before[k] && !hooked && !bypassed;
+        const int redirected = k >= sites->redirect && k < sites->redirect + SKIP_INTRO_REDIRECT_BYTES;
+        const int title = k >= sites->title && k < sites->title + SKIP_INTRO_TITLE_CALL_BYTES;
+        const int bypassed = cave && k >= cave && k < cave + kBypassLength;
+        outside += image[k] != before[k] && !redirected && !title && !bypassed;
     }
-    CHECK(outside == 0 && image[hook] == 0xe9);
+    CHECK(outside == 0);
+    CHECK(!memcmp(before + sites->redirect, "\xff\x90\x60\x02\x00\x00", 6) && before[sites->title] == 0xe8);
+    CHECK(image[sites->redirect] == 0xe8 && image[sites->redirect + 5] == 0x90 && image[sites->title] == 0xe8);
+    CHECK(call_target(image, (int64_t)sites->redirect) == (int64_t)size);
+    CHECK(call_target(image, (int64_t)sites->title) == (int64_t)size + 56);
     if (notice) {
         check_bypass(image, before, size, notice);
         CHECK(memcmp(image + cave, before + cave, kBypassLength) != 0);
     }
-    int32_t rel;
-    memcpy(&rel, image + hook + 1, sizeof(rel));
-    const long long stub = (long long)hook + 5 + rel;
-    CHECK(stub == (long long)size);
-    int returns_after = 0;
-    const uint64_t resume = (uint64_t)(uintptr_t)(image + hook + kHookLength);
-    for (long long p = stub; p + 8 <= (long long)(size + stub_bytes); ++p) returns_after += !memcmp(image + p, &resume, 8);
-    CHECK(returns_after == 2);
+    const uint64_t create = (uint64_t)(uintptr_t)(image + call_target(before, (int64_t)sites->title));
+    int creates = 0;
+    for (uint64_t p = size + 56; p + 8 <= size + stub_bytes; ++p) creates += !memcmp(image + p, &create, 8);
+    CHECK(creates == 1);
+    int vtable_jumps = 0;
+    for (uint64_t p = size; p + 6 <= size + 56; ++p) vtable_jumps += !memcmp(image + p, "\xff\xa0\x60\x02\x00\x00", 6);
+    CHECK(vtable_jumps == 1);
     CHECK(skip_intro_claim() == 1 && skip_intro_claim() == 0);
+}
+
+/* Off writes nothing anywhere, and so do the refusals. */
+static void check_untouched(unsigned char *image, const unsigned char *before, uint64_t size, const char *game, uint64_t entry) {
+    const size_t stub_bytes = skip_intro_stub_bytes();
+    CHECK(skip_intro_install(image, size, entry, game, 0, image + size, stub_bytes) == 0);
+    CHECK(skip_intro_install(image, size, entry, NULL, 1, image + size, stub_bytes) == 0);
+    CHECK(skip_intro_install(image, size, entry, game, 1, image + size, stub_bytes - 1) == 0);
+    CHECK(!memcmp(image, before, size + stub_bytes) && skip_intro_claim() == 0);
 }
 
 enum { kAdvanceLength = 0x23, kTailLength = 10 };
@@ -259,6 +488,158 @@ static void test_second_notice(const unsigned char *loaded, uint64_t size, int i
     free(twice);
 }
 
+/* ---- Issue #79: the old poll came after the logos ---- */
+
+static int64_t find_bytes(const unsigned char *image, int64_t from, int64_t to, const void *bytes, size_t count) {
+    for (int64_t at = from; at + (int64_t)count <= to; ++at)
+        if (!memcmp(image + at, bytes, count)) return at;
+    return -1;
+}
+
+static int lea_to_text(const unsigned char *image, uint64_t size, int64_t from, int64_t to, const char *text) {
+    for (int64_t at = from; at + 7 <= to; ++at) {
+        if (image[at + 1] != 0x8d || (image[at] != 0x48 && image[at] != 0x4c) || (image[at + 2] & 0xc7) != 0x05) continue;
+        const int64_t target = at + 7 + rel32_at(image + at + 3);
+        if (target > 0 && (uint64_t)target + strlen(text) + 1 <= size && !memcmp(image + target, text, strlen(text) + 1)) return 1;
+    }
+    return 0;
+}
+
+/* The opening scene (scene 2) begins at part 0, loads STAGE/OPENING%02d (part 0 is OPENING00, the ATLUS, Basiscape and
+ * CRIWARE logos) in its state 0 and only polls for a press in state 1, once that part plays; a press then starts a
+ * 60-frame fade with the part still drawn. The old hook answered that poll, so the logos always began first. */
+static void test_issue79_evidence(const unsigned char *image, uint64_t size, int index) {
+    const uint64_t factory = kRealBuilds[index].factory, poll = kRealBuilds[index].old_poll;
+    const int64_t ctor = call_target(image, (int64_t)factory_case(image, factory, 2) + 0x13);
+    CHECK(find_bytes(image, ctor, ctor + 0x90, "\xc7\x83\x7c\x09\x00\x00\x00\x00\x00\x00", 10) > 0);
+
+    CHECK(!memcmp(image + poll + 19, "\x4c\x89\xe7\x89\xc6\xff\xd3\x84\xc0\x0f\x84", 11));
+    const int64_t state2 = find_bytes(image, (int64_t)poll - 0x300, (int64_t)poll, "\x80\xfb\x02\x0f\x84", 5);
+    const int64_t state1 = find_bytes(image, (int64_t)poll - 0x300, (int64_t)poll, "\x80\xfb\x01\x0f\x84", 5);
+    CHECK(state2 > 0 && state1 > state2);
+    if (state1 < 0 || state2 < 0) return;
+    const int64_t state1_code = state1 + 9 + rel32_at(image + state1 + 5), state2_code = state2 + 9 + rel32_at(image + state2 + 5);
+    CHECK(state1_code < (int64_t)poll && (int64_t)poll < state2_code);
+
+    const int64_t load = find_bytes(image, state1 + 9, state1_code, "\x41\x8b\xb4\x24\x7c\x09\x00\x00\xe8", 9);
+    CHECK(load > 0);
+    if (load < 0) return;
+    const int64_t probe = call_target(image, load + 8);
+    CHECK(lea_to_text(image, size, probe, probe + 0x80, "STAGE/OPENING%02d.MBS"));
+    CHECK(lea_to_text(image, size, state1 + 9, state1_code, "STAGE/OPENING01.MBS"));
+    CHECK(find_bytes(image, state2_code, state2_code + 0x60, "\xb8\x3c\x00\x00\x00", 5) > 0);
+}
+
+typedef struct {
+    int returning;   /* step 2's flag: back to the title from the game */
+    int save_frames; /* frames the save data scene is up: 1 with a save, more with the first-boot prompt */
+    int old_hook;    /* the poll answered "pressed" once */
+    Question opening_question;
+    /* observed */
+    int frame, save_last, redirect_frame, title_frame, opening_created, logo_frames, opening_frames, titles;
+} Flow;
+
+enum { kLogoPartFrames = 600, kOpeningPartFrames = 2400, kFadeFrames = 60, kTitleIdleFrames = 1800 };
+
+/* Steps 2 to 5 of the title flow and the opening scene, as the images verify them, until `rounds` titles were shown;
+ * every title before the last times out back to step 4 as the idle title does. */
+static void run_flow(Flow *flow, int rounds) {
+    int step = 2, opening_state = -1, part = 0, part_frame = 0, fade = 0, save_left = flow->save_frames, title_left = 0;
+    flow->save_last = flow->redirect_frame = flow->title_frame = -1;
+    flow->opening_created = flow->logo_frames = flow->opening_frames = flow->titles = 0;
+    for (flow->frame = 0; flow->frame < 20000 && flow->titles < rounds; ++flow->frame) {
+        switch (step) {
+        case 2: step = flow->returning ? 5 : 3; break;
+        case 3:
+            flow->save_last = flow->frame;
+            if (--save_left <= 0) step = 4;
+            break;
+        case 4:
+            if (opening_state < 0) {
+                if (flow->opening_question(&g_asked)) {
+                    flow->redirect_frame = flow->frame;
+                    step = 5;
+                    break;
+                }
+                opening_state = 0, part = 0, part_frame = 0, ++flow->opening_created;
+                break;
+            }
+            if (opening_state == 0) {
+                opening_state = 1;
+                break;
+            }
+            if (opening_state == 1 && flow->old_hook && skip_intro_claim()) opening_state = 2, fade = kFadeFrames;
+            if (part == 0) ++flow->logo_frames;
+            else ++flow->opening_frames;
+            if (opening_state == 2 && --fade <= 0) opening_state = 3;
+            if (opening_state == 1 && ++part_frame >= (part == 0 ? kLogoPartFrames : kOpeningPartFrames)) {
+                part_frame = 0;
+                if (++part == 2) opening_state = 3;
+            }
+            if (opening_state == 3) opening_state = -1, step = 5;
+            break;
+        case 5:
+            if (!title_left) {
+                ++flow->titles;
+                if (flow->title_frame < 0) flow->title_frame = flow->frame;
+                title_left = kTitleIdleFrames;
+            } else if (--title_left == 0) {
+                step = 4;
+            }
+            break;
+        }
+    }
+}
+
+static void test_issue79_model(void) {
+    g_vtable[0x260 / sizeof(void *)] = (void *)(uintptr_t)fake_question;
+    g_answer = 0; /* the game's own answer on PS4: the opening is always needed */
+    unsigned char *memory = executable_memory(4096);
+    if (!memory) {
+        printf("no executable memory: Issue #79 model skipped\n");
+        return;
+    }
+    skip_intro_build_redirect_stub(memory, (uint64_t)(uintptr_t)skip_intro_claim, (uint64_t)(uintptr_t)fake_redirected);
+    const Question stub = (Question)(uintptr_t)memory;
+
+    /* Off, and the old hook: the logos begin before anything is pressed. */
+    while (skip_intro_claim()) {}
+    Flow vanilla = {.save_frames = 1, .opening_question = fake_question};
+    run_flow(&vanilla, 1);
+    CHECK(vanilla.opening_created == 1 && vanilla.logo_frames == kLogoPartFrames && vanilla.opening_frames == kOpeningPartFrames);
+    skip_intro_arm();
+    Flow old = {.save_frames = 1, .old_hook = 1, .opening_question = fake_question};
+    run_flow(&old, 1);
+    CHECK(old.opening_created == 1 && old.logo_frames == kFadeFrames && old.opening_frames == 0);
+    CHECK(old.title_frame > old.save_last);
+
+    /* The redirect: existing save, first-boot prompt; the save data step always runs first and the logos never start. */
+    const int save_frames[] = {1, 240};
+    for (size_t i = 0; i < sizeof(save_frames) / sizeof(*save_frames); ++i) {
+        skip_intro_arm();
+        Flow redirect = {.save_frames = save_frames[i], .opening_question = stub};
+        run_flow(&redirect, 1);
+        CHECK(redirect.opening_created == 0 && redirect.logo_frames == 0 && redirect.opening_frames == 0);
+        CHECK(redirect.save_last >= save_frames[i] && redirect.redirect_frame > redirect.save_last);
+        CHECK(redirect.title_frame == redirect.redirect_frame + 1 && redirect.titles == 1);
+        CHECK(skip_intro_claim() == 0);
+    }
+
+    /* The idle title replays the opening as the game does; only the startup is redirected. */
+    skip_intro_arm();
+    Flow idle = {.save_frames = 1, .opening_question = stub};
+    run_flow(&idle, 3);
+    CHECK(idle.titles == 3 && idle.opening_created == 2 && idle.logo_frames == 2 * kLogoPartFrames);
+    CHECK(idle.redirect_frame >= 0 && idle.redirect_frame < idle.title_frame);
+
+    /* Back to the title from the game: step 2 already skips the save data and opening steps, and the claim stays. */
+    skip_intro_arm();
+    Flow back = {.returning = 1, .save_frames = 1, .opening_question = stub};
+    run_flow(&back, 1);
+    CHECK(back.save_last < 0 && back.opening_created == 0 && back.redirect_frame < 0);
+    CHECK(skip_intro_claim() == 1);
+}
+
 static void test_real_images(void) {
     const size_t stub_bytes = skip_intro_stub_bytes();
     unsigned char *loaded[kRealCount] = {0};
@@ -269,51 +650,36 @@ static void test_real_images(void) {
             printf("no boot image for %s: skipped\n", kRealBuilds[i].folder);
             continue;
         }
-        const uint64_t size = sizes[i], hook = kRealBuilds[i].window + kHookInWindow;
+        const uint64_t size = sizes[i];
+        const SkipIntroSites expected = {kRealBuilds[i].opening + kRedirectInStep, kRealBuilds[i].title_create + kTitleCallInCreate};
         unsigned char *image = with_stub_room(loaded[i], size, stub_bytes), *before = with_stub_room(loaded[i], size, stub_bytes);
-        uint64_t site = 0;
-        CHECK(skip_intro_locate(image, size, kRealBuilds[i].game, &site) == 1 && site == hook);
-        CHECK(memcmp(image + hook, "\x4c\x89\xe7\x89\xc6\xff\xd3", kHookLength) == 0);
-        site = 0;
-        CHECK(skip_intro_locate(image, size, "CUSA00000-9.99", &site) == 0 && site == hook);
+        SkipIntroSites sites;
+        CHECK(skip_intro_locate(image, size, kRealBuilds[i].game, &sites) == 1 && sites_are(&sites, expected.redirect, expected.title));
+        CHECK(skip_intro_locate(image, size, "CUSA00000-9.99", &sites) == 0 && sites_are(&sites, expected.redirect, expected.title));
+        CHECK(skip_intro_locate(image, size, NULL, &sites) == 0 && sites_are(&sites, 0, 0));
         for (int j = 0; j < kRealCount; ++j) {
             if (j == i) continue;
-            const int same_code = kRealBuilds[j].window == kRealBuilds[i].window && kRealBuilds[j].entry == kRealBuilds[i].entry;
-            CHECK(skip_intro_locate(image, size, kRealBuilds[j].game, &site) == 1 && site == (same_code ? hook : 0));
+            const int same_code = kRealBuilds[j].opening == kRealBuilds[i].opening && kRealBuilds[j].entry == kRealBuilds[i].entry;
+            CHECK(skip_intro_locate(image, size, kRealBuilds[j].game, &sites) == 1 &&
+                  sites_are(&sites, same_code ? expected.redirect : 0, same_code ? expected.title : 0));
         }
-
-        /* Every byte of the window is verified except two displacements the code does not read back. */
-        for (int b = 0; b < kWindowLength; ++b) {
-            image[kRealBuilds[i].window + b] ^= 1;
-            const int rejected = skip_intro_locate(image, size, kRealBuilds[i].game, &site) == 1 && site == 0;
-            CHECK(rejected == !is_unchecked(b));
-            image[kRealBuilds[i].window + b] ^= 1;
-        }
-        /* The opening context is verified too: the layout path and the state dispatch. */
-        unsigned char *layout = memmem_bytes(image, size, "STAGE/OPENING01.MBS");
-        CHECK(layout != NULL);
-        if (layout) {
-            *layout ^= 1;
-            CHECK(skip_intro_locate(image, size, kRealBuilds[i].game, &site) == 1 && site == 0);
-            *layout ^= 1;
-        }
+        test_title_flow_mutations(image, size, i);
         CHECK(!memcmp(image, before, size));
+        test_issue79_evidence(image, size, i);
 
         test_notice_of_build(image, size, i);
         CHECK(!memcmp(image, before, size));
         if (kRealBuilds[i].notice) test_second_notice(loaded[i], size, i);
 
-        CHECK(skip_intro_install(image, size, kRealBuilds[i].entry, NULL, 1, image + size, stub_bytes) == 0);
-        CHECK(skip_intro_install(image, size, kRealBuilds[i].entry, kRealBuilds[i].game, 0, image + size, stub_bytes) == 0);
-        CHECK(skip_intro_install(image, size, kRealBuilds[i].entry, kRealBuilds[i].game, 1, image + size, stub_bytes - 1) == 0);
-        CHECK(!memcmp(image, before, size + stub_bytes) && skip_intro_claim() == 0);
-        check_install(image, before, size, kRealBuilds[i].game, kRealBuilds[i].entry, hook, kRealBuilds[i].notice);
-        printf("%s: opening poll hook at 0x%llx, %s\n", kRealBuilds[i].folder, (unsigned long long)hook,
+        check_untouched(image, before, size, kRealBuilds[i].game, kRealBuilds[i].entry);
+        check_install(image, before, size, kRealBuilds[i].game, kRealBuilds[i].entry, &expected, kRealBuilds[i].notice);
+        printf("%s: startup redirect at 0x%llx, title report at 0x%llx, %s\n", kRealBuilds[i].folder,
+               (unsigned long long)expected.redirect, (unsigned long long)expected.title,
                kRealBuilds[i].notice ? "regional notice bypassed" : "no regional notice");
 
-        /* A name nothing lists is searched for both sites and gets the same patch. */
+        /* A name nothing lists is searched for every site and gets the same patch. */
         unsigned char *searched = with_stub_room(loaded[i], size, stub_bytes), *searched_before = with_stub_room(loaded[i], size, stub_bytes);
-        check_install(searched, searched_before, size, "CUSA00000-9.99", kRealBuilds[i].entry, hook, kRealBuilds[i].notice);
+        check_install(searched, searched_before, size, "CUSA00000-9.99", kRealBuilds[i].entry, &expected, kRealBuilds[i].notice);
         CHECK(!memcmp(searched, image, size));
         free(searched), free(searched_before);
         free(image), free(before);
@@ -327,157 +693,44 @@ static void test_real_images(void) {
     for (size_t k = 0; k < sizeof(kSynthetic) / sizeof(*kSynthetic); ++k) {
         const int base = kSynthetic[k].base;
         if (!loaded[base]) continue;
-        const uint64_t size = sizes[base], hook = kRealBuilds[base].window + kHookInWindow;
+        const uint64_t size = sizes[base];
+        const SkipIntroSites expected = {kRealBuilds[base].opening + kRedirectInStep, kRealBuilds[base].title_create + kTitleCallInCreate};
         unsigned char *image = with_stub_room(loaded[base], size, stub_bytes), *before = with_stub_room(loaded[base], size, stub_bytes);
-        uint64_t site = 0;
-        CHECK(skip_intro_locate(image, size, kSynthetic[k].game, &site) == 0 && site == hook);
-        CHECK(skip_intro_locate_notice(image, size, kSynthetic[k].game, &site) == SKIP_INTRO_NOTICE_ABSENT && site == 0);
-        check_install(image, before, size, kSynthetic[k].game, kRealBuilds[base].entry, hook, 0);
+        SkipIntroSites sites;
+        uint64_t notice = 1;
+        CHECK(skip_intro_locate(image, size, kSynthetic[k].game, &sites) == 0 && sites_are(&sites, expected.redirect, expected.title));
+        CHECK(skip_intro_locate_notice(image, size, kSynthetic[k].game, &notice) == SKIP_INTRO_NOTICE_ABSENT && notice == 0);
+        check_untouched(image, before, size, kSynthetic[k].game, kRealBuilds[base].entry);
+        check_install(image, before, size, kSynthetic[k].game, kRealBuilds[base].entry, &expected, 0);
         free(image), free(before);
 
-        /* Zero matches and two matches fail closed. */
+        /* No title flow, and two complete title flows (the whole code twice), fail closed. */
         unsigned char *none = with_stub_room(loaded[base], size, stub_bytes);
-        none[kRealBuilds[base].window + 4] ^= 1;
-        CHECK(skip_intro_locate(none, size, kSynthetic[k].game, &site) == 0 && site == 0);
+        none[kRealBuilds[base].opening + kRedirectInStep + 2] ^= 1;
+        CHECK(skip_intro_locate(none, size, kSynthetic[k].game, &sites) == 0 && sites_are(&sites, 0, 0));
         CHECK(skip_intro_install(none, size, kRealBuilds[base].entry, kSynthetic[k].game, 1, none + size, stub_bytes) == 0);
+        CHECK(skip_intro_claim() == 0);
         free(none);
-        const size_t region = 0x700, from = kRealBuilds[base].window - 0x300;
-        unsigned char *twice = with_stub_room(loaded[base], size, region);
-        memcpy(twice + size, loaded[base] + from, region);
-        const long long lea = (long long)size + 0x300 - 0x107, text = memmem_bytes(twice, size, "STAGE/OPENING01.MBS") - twice;
-        const int32_t to_text = (int32_t)(text - (lea + 7));
-        memcpy(twice + lea + 3, &to_text, sizeof(to_text));
-        CHECK(skip_intro_locate(twice, size + region, kSynthetic[k].game, &site) == 0 && site == 0);
+        unsigned char *twice = calloc(1, 2 * size + stub_bytes);
+        memcpy(twice, loaded[base], size);
+        memcpy(twice + size, loaded[base], size);
+        CHECK(skip_intro_locate(twice, 2 * size, kSynthetic[k].game, &sites) == 0 && sites_are(&sites, 0, 0));
+        CHECK(skip_intro_install(twice, 2 * size, kRealBuilds[base].entry, kSynthetic[k].game, 1, twice + 2 * size, stub_bytes) == 0);
+        CHECK(skip_intro_locate(twice, 2 * size, kRealBuilds[base].game, &sites) == 1 && sites_are(&sites, expected.redirect, expected.title));
+        CHECK(skip_intro_claim() == 0);
         free(twice);
     }
     for (int i = 0; i < kRealCount; ++i) free(loaded[i]);
 }
 
-#ifdef _WIN32
-#include <windows.h>
-static unsigned char *executable_memory(size_t size) {
-    return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-}
-#else
-#include <sys/mman.h>
-static unsigned char *executable_memory(size_t size) {
-    void *memory = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return memory == MAP_FAILED ? NULL : memory;
-}
-#endif
-
-static int g_claim_value, g_original_calls, g_delivered_calls;
-static uint64_t g_original_rdi, g_original_rsi;
-static int g_original_result;
-
-static int GUEST_HOOK_ABI fake_claim(void) {
-    return g_claim_value;
-}
-static void GUEST_HOOK_ABI fake_delivered(void) {
-    ++g_delivered_calls;
-}
-static int GUEST_HOOK_ABI fake_input(uint64_t self, uint64_t player) {
-    ++g_original_calls;
-    g_original_rdi = self;
-    g_original_rsi = player;
-    return g_original_result;
-}
-
-typedef struct {
-    uint64_t rsp_before, rax, rsp_after, rbx, r12, rbp, r14, r15;
-} Landing;
-typedef uint64_t (GUEST_HOOK_ABI *Wrapper)(uint64_t r12, uint64_t eax, uint64_t rbx, Landing *out);
-
-enum { kStubAt = 512, kSentinel = 0x5151515151515151ull };
-
-static void emit(unsigned char **at, const void *bytes, size_t count) {
-    memcpy(*at, bytes, count);
-    *at += count;
-}
-static void emit64(unsigned char **at, const unsigned char *prefix, size_t count, uint64_t value) {
-    emit(at, prefix, count);
-    emit(at, &value, 8);
-}
-
-/* Enters the stub by a jump with rsp 16-aligned, r12/rbx/eax set, and records the registers where it resumes. */
-static Wrapper build_wrapper(unsigned char *memory, uint64_t claim, uint64_t delivered) {
-    unsigned char *at = memory;
-    static const unsigned char kEnter[] = {0x53, 0x41, 0x54, 0x55, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xec, 0x08,
-                                           0x49, 0x89, 0xcd, 0x49, 0x89, 0xfc, 0x89, 0xf0, 0x48, 0x89, 0xd3};
-    emit(&at, kEnter, sizeof(kEnter));
-    emit64(&at, (const unsigned char[]){0x48, 0xbd}, 2, kSentinel);
-    emit64(&at, (const unsigned char[]){0x49, 0xbe}, 2, kSentinel + 1);
-    emit64(&at, (const unsigned char[]){0x49, 0xbf}, 2, kSentinel + 2);
-    emit(&at, (const unsigned char[]){0x49, 0x89, 0x65, 0x00}, 4);
-    unsigned char stub[96];
-    memset(stub, 0xcc, sizeof(stub));
-    const size_t wrapper_tail = 64;
-    unsigned char *landing = memory + kStubAt - wrapper_tail;
-    skip_intro_build_stub(stub, claim, delivered, (uint64_t)(uintptr_t)landing);
-    memcpy(memory + kStubAt, stub, sizeof(stub));
-    emit64(&at, (const unsigned char[]){0x49, 0xbb}, 2, (uint64_t)(uintptr_t)(memory + kStubAt));
-    emit(&at, (const unsigned char[]){0x41, 0xff, 0xe3}, 3);
-    at = landing;
-    static const unsigned char kLand[] = {0x49, 0x89, 0x45, 0x08, 0x49, 0x89, 0x65, 0x10, 0x49, 0x89, 0x5d, 0x18,
-                                          0x4d, 0x89, 0x65, 0x20, 0x49, 0x89, 0x6d, 0x28, 0x4d, 0x89, 0x75, 0x30,
-                                          0x4d, 0x89, 0x7d, 0x38, 0x48, 0x83, 0xc4, 0x08, 0x41, 0x5f, 0x41, 0x5e,
-                                          0x41, 0x5d, 0x5d, 0x41, 0x5c, 0x5b, 0xc3};
-    emit(&at, kLand, sizeof(kLand));
-    return (Wrapper)(uintptr_t)memory;
-}
-
-static uint64_t run_stub(Wrapper wrapper, uint64_t r12, uint32_t eax, Landing *landing) {
-    memset(landing, 0, sizeof(*landing));
-    g_original_calls = g_delivered_calls = 0;
-    wrapper(r12, eax, (uint64_t)(uintptr_t)fake_input, landing);
-    return landing->rax;
-}
-
-static void check_landing(const Landing *landing, uint64_t r12) {
-    CHECK(landing->rsp_after == landing->rsp_before);
-    CHECK(landing->rbx == (uint64_t)(uintptr_t)fake_input && landing->r12 == r12);
-    CHECK(landing->rbp == kSentinel && landing->r14 == kSentinel + 1 && landing->r15 == kSentinel + 2);
-}
-
-static void test_stub_execution(void) {
-    unsigned char *memory = executable_memory(4096);
-    if (!memory) {
-        printf("no executable memory: stub execution skipped\n");
-        return;
-    }
-    Landing landing;
-    const uint64_t r12 = 0xA1B2C3D4E5F60708ull;
-    Wrapper wrapper = build_wrapper(memory, (uint64_t)(uintptr_t)fake_claim, (uint64_t)(uintptr_t)fake_delivered);
-
-    g_claim_value = 0, g_original_result = 0;
-    CHECK((uint32_t)run_stub(wrapper, r12, 7, &landing) == 0 && g_original_calls == 1 && g_delivered_calls == 0);
-    CHECK(g_original_rdi == r12 && g_original_rsi == 7);
-    check_landing(&landing, r12);
-    g_original_result = 1;
-    CHECK((uint32_t)run_stub(wrapper, r12, 9, &landing) == 1 && g_original_calls == 1 && g_original_rsi == 9);
-    check_landing(&landing, r12);
-
-    g_claim_value = 1, g_original_result = 0;
-    CHECK((uint32_t)run_stub(wrapper, r12, 7, &landing) == 1 && g_original_calls == 0 && g_delivered_calls == 1);
-    check_landing(&landing, r12);
-
-    /* The real one-shot: the first poll is a press that never reaches the original, the next ones are the original. */
-    wrapper = build_wrapper(memory, (uint64_t)(uintptr_t)skip_intro_claim, (uint64_t)(uintptr_t)fake_delivered);
-    skip_intro_arm();
-    g_original_result = 0;
-    CHECK((uint32_t)run_stub(wrapper, r12, 3, &landing) == 1 && g_original_calls == 0 && g_delivered_calls == 1);
-    check_landing(&landing, r12);
-    CHECK((uint32_t)run_stub(wrapper, r12, 3, &landing) == 0 && g_original_calls == 1 && g_delivered_calls == 0);
-    g_original_result = 1;
-    CHECK((uint32_t)run_stub(wrapper, r12, 3, &landing) == 1 && g_original_calls == 1);
-    check_landing(&landing, r12);
-}
-
 int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     set_env("DCP_SKIP_INTRO", NULL);
+    printf("Skip Intro tests (startup logos, opening movie, first boot, title transition, all builds)\n");
     test_environment();
     test_claim();
     test_stub_execution();
+    test_issue79_model();
     test_real_images();
     if (failures) {
         printf("%d check(s) failed\n", failures);

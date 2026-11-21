@@ -7,29 +7,8 @@
 #include <string.h>
 
 #define ANY (-1)
-#define HOOK_LENGTH 7
 #define SKIP_INTRO_STUB_BYTES 96
-
-/* The opening scene's frame: the poll `mov rdi,r12; mov esi,eax; call rbx`, its result test, and the call that ends the
- * scene when it is true. */
-static const short kPoll[] = {
-    0x49, 0x8b, 0x04, 0x24, 0x4c, 0x89, 0xe7, 0x48, 0x8b, 0x98, 0x38, 0x01, 0x00, 0x00, 0xe8, ANY, ANY, ANY, ANY,
-    0x4c, 0x89, 0xe7, 0x89, 0xc6, 0xff, 0xd3, 0x84, 0xc0, 0x0f, 0x84, ANY, ANY, ANY, ANY, 0x49, 0x8b, 0x06,
-    0x48, 0x8b, 0x0d, ANY, ANY, ANY, ANY, 0x48, 0x8b, 0x80, 0xa8, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x09, 0x48, 0x3b,
-    0x4d, 0xd0, 0x0f, 0x85, ANY, ANY, ANY, ANY, 0xbe, 0x02, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xf7, 0xe9, ANY, ANY,
-    ANY, ANY,
-};
-enum {
-    kPollCount = sizeof(kPoll) / sizeof(*kPoll),
-    kCallInWindow = 14,
-    kHookInWindow = 19,
-    kBranchInWindow = 30,
-    kEndJumpInWindow = kPollCount - 4
-};
-
-/* Where the window's branches must land: the scene's stack-check exit and its tail call that ends the scene. */
-static const uint8_t kExit[] = {0x48, 0x8b, 0x05};
-static const uint8_t kEnd[] = {0x48, 0x83, 0xc4, 0x68, 0x5b, 0x41, 0x5c, 0x41, 0x5d, 0x41, 0x5e, 0x41, 0x5f, 0x5d, 0xff, 0xe0};
+#define SKIP_INTRO_TITLE_STUB_AT 56
 
 /* Step 5 of the boot object in the Japanese builds, from the first-frame test to the jump at its end: the first frame
  * builds the legal notice (message 459) and the object every build creates here, later frames wait for a press or the
@@ -90,26 +69,122 @@ enum {
     kBypassBytes = SKIP_INTRO_BYPASS_BYTES
 };
 
+
+/* The title flow's step switch: the step byte, then a seven-entry jump table. */
+static const short kDispatch[] = {
+    0x41, 0x0f, 0xb6, 0x47, 0x5c, 0x48, 0x83, 0xf8, 0x06, 0x0f, 0x87, ANY, ANY, ANY, ANY, 0x48,
+    0x8d, 0x0d, ANY, ANY, ANY, ANY, 0x48, 0x63, 0x04, 0x81, 0x48, 0x01, 0xc8, 0xff, 0xe0,
+};
+/* Step 2: the "back to the title" flag goes to the title step, its absence to the save data step. */
+static const short kDecision[] = {
+    0x48, 0x8d, 0x05, ANY, ANY, ANY, ANY, 0x49, 0x8b, 0x0f, 0x8b, 0x40, 0x04, 0x41, 0x85, 0x87, 0xec,
+    0x00, 0x00, 0x00, 0x48, 0x8b, 0x81, 0xa0, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x0d, ANY, ANY, ANY, ANY,
+    0x0f, 0x84, ANY, ANY, ANY, ANY, 0x48, 0x8b, 0x09, 0x48, 0x3b, 0x4d, 0xd0, 0x0f, 0x85, ANY, ANY, ANY,
+    ANY, 0xbe, 0x01, 0x00, 0x00, 0x00, 0xba, 0x05, 0x00, 0x00, 0x00, 0xe9, ANY, ANY, ANY, ANY,
+};
+static const short kDecisionSave[] = {
+    0x48, 0x8b, 0x09, 0x48, 0x3b, 0x4d, 0xd0, 0x75, ANY, 0xbe, 0x01, 0x00, 0x00, 0x00, 0xba, 0x03, 0x00, 0x00, 0x00,
+};
+/* Step 3: the save data scene, created on the first frame and waited for. */
+static const short kSaveStep[] = {
+    0x4c, 0x89, 0xf7, 0xe8, ANY, ANY, ANY, ANY, 0xbe, 0x01, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xff, 0x48, 0x89, 0xc3,
+    0xe8, ANY, ANY, ANY, ANY, 0x84, 0xc0, 0x74, 0x0b, 0x4c, 0x89, 0xf7, 0xe8, ANY, ANY, ANY, ANY, 0x48, 0x89,
+    0xc3, 0x48, 0x85, 0xdb, 0x0f, 0x84, ANY, ANY, ANY, ANY, 0x48, 0x89, 0xdf, 0xe8, ANY, ANY, ANY, ANY, 0xeb, 0x4d,
+};
+/* Step 4: the opening scene. When the game says the opening is not needed (`call [rax+0x260]`, true), the step goes
+ * to the shared end of step without creating the scene. Step 5, the title, follows it directly. */
+static const short kOpeningStep[] = {
+    0x4c, 0x89, 0xf7, 0xe8, ANY, ANY, ANY, ANY, 0x49, 0x8b, 0xbc, 0x24, 0x10, 0x69, 0x01, 0x00, 0x48, 0x89, 0xc3,
+    0x48, 0x8b, 0x07, 0xff, 0x90, 0x60, 0x02, 0x00, 0x00, 0x84, 0xc0, 0x75, 0x6b, 0xbe, 0x01, 0x00, 0x00, 0x00,
+    0x4c, 0x89, 0xff, 0xe8, ANY, ANY, ANY, ANY, 0x84, 0xc0, 0x74, 0x0b, 0x4c, 0x89, 0xf7, 0xe8, ANY, ANY, ANY,
+    ANY, 0x48, 0x89, 0xc3, 0x48, 0x85, 0xdb, 0x0f, 0x84, ANY, ANY, ANY, ANY, 0x48, 0x89, 0xdf, 0xe8, ANY, ANY,
+    ANY, ANY, 0x84, 0xc0, 0x75, 0x3f, 0xe9, ANY, ANY, ANY, ANY,
+};
+static const short kTitleStep[] = {
+    0x4c, 0x89, 0xf7, 0xe8, ANY, ANY, ANY, ANY, 0x49, 0x8b, 0xbd, 0x90, 0x00, 0x00, 0x00, 0x31, 0xf6, 0x48,
+    0x89, 0xc3, 0xe8, ANY, ANY, ANY, ANY, 0x49, 0x8b, 0xbc, 0x24, 0x10, 0x69, 0x01, 0x00, 0x49, 0x89, 0xc5,
+    0x48, 0x8b, 0x07, 0xff, 0x90, 0x60, 0x02, 0x00, 0x00, 0x84, 0xc0, 0x0f, 0x84, ANY, ANY, ANY, ANY,
+};
+/* The end of step both reach: finish the scene when there is one, then SetStep(1, step + 1). */
+static const short kStepDone[] = {
+    0x48, 0x85, 0xdb, 0x74, 0x0c, 0x48, 0x83, 0xc3, 0x50, 0x48, 0x89, 0xdf, 0xe8, ANY, ANY, ANY, ANY, 0x49,
+    0x8b, 0x07, 0x48, 0x8b, 0x15, ANY, ANY, ANY, ANY, 0x41, 0x8a, 0x4f, 0x5c, 0x48, 0x8b, 0x80, 0xa0, 0x00,
+    0x00, 0x00, 0x48, 0x8b, 0x12, 0x48, 0x3b, 0x55, 0xd0, 0x0f, 0x85, ANY, ANY, ANY, ANY, 0xfe, 0xc1, 0xbe,
+    0x01, 0x00, 0x00, 0x00, 0x0f, 0xb6, 0xd1, 0xe9, ANY, ANY, ANY, ANY,
+};
+/* The title step's first frame: clear the flag, create the title scene. */
+static const short kTitleCreate[] = {
+    0xbe, 0x01, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xff, 0xe8, ANY, ANY, ANY, ANY, 0x84, 0xc0, 0x74, 0x25, 0x48,
+    0x8d, 0x05, ANY, ANY, ANY, ANY, 0x4c, 0x89, 0xf7, 0x8b, 0x40, 0x04, 0xf7, 0xd0, 0x41, 0x21, 0x87, 0xec,
+    0x00, 0x00, 0x00, 0xe8, ANY, ANY, ANY, ANY, 0x48, 0x89, 0xc3, 0x4c, 0x89, 0xab, 0xa8, 0x06, 0x00, 0x00,
+};
+/* The scene factory: id range check, then its case table. */
+static const short kFactoryHead[] = {
+    0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x53, 0x50, 0x41, 0x89,
+    0xf6, 0x49, 0x89, 0xff, 0x41, 0x8d, 0x5e, 0xff, 0x83, 0xfb, 0x42,
+};
+static const short kFactoryDispatch[] = {
+    0x31, 0xc0, 0x83, 0xfb, 0x42, 0x0f, 0x87, ANY, ANY, ANY, ANY, 0x48, 0x8d, 0x05,
+    ANY, ANY, ANY, ANY, 0x48, 0x63, 0x0c, 0x98, 0x48, 0x01, 0xc1, 0xff, 0xe1,
+};
+static const short kFactoryCase[] = {
+    0xbf, ANY, ANY, ANY, ANY, 0xe8, ANY, ANY, ANY, ANY, 0x48, 0x89, 0xc3, 0x4c, 0x89, 0xfe, 0x48, 0x89, 0xdf, 0xe8, ANY, ANY, ANY, ANY,
+};
+enum {
+    kDispatchCount = sizeof(kDispatch) / sizeof(*kDispatch),
+    kDecisionCount = sizeof(kDecision) / sizeof(*kDecision),
+    kDecisionSaveCount = sizeof(kDecisionSave) / sizeof(*kDecisionSave),
+    kSaveStepCount = sizeof(kSaveStep) / sizeof(*kSaveStep),
+    kOpeningStepCount = sizeof(kOpeningStep) / sizeof(*kOpeningStep),
+    kTitleStepCount = sizeof(kTitleStep) / sizeof(*kTitleStep),
+    kStepDoneCount = sizeof(kStepDone) / sizeof(*kStepDone),
+    kTitleCreateCount = sizeof(kTitleCreate) / sizeof(*kTitleCreate),
+    kFactoryHeadCount = sizeof(kFactoryHead) / sizeof(*kFactoryHead),
+    kFactoryDispatchCount = sizeof(kFactoryDispatch) / sizeof(*kFactoryDispatch),
+    kFactoryCaseCount = sizeof(kFactoryCase) / sizeof(*kFactoryCase),
+    kDispatchReach = 0x400,
+    kDispatchDefault = 0x09,
+    kDispatchTable = 0x0f,
+    kStepEntries = 7,
+    kSaveStepIndex = 3,
+    kOpeningStepIndex = 4,
+    kTitleStepIndex = 5,
+    kDecisionIndex = 2,
+    kDecisionBranch = 0x22,
+    kGetterCall = 0x03,
+    kSaveFirstFrame = 0x13,
+    kSaveCreate = 0x1f,
+    kSaveExit = 0x2a,
+    kRedirectInStep = 0x16,
+    kOpeningFirstFrame = 0x28,
+    kOpeningCreate = 0x34,
+    kOpeningExit = 0x3f,
+    kOpeningExitJump = 0x51,
+    kTitleCreateBranch = 0x2f,
+    kTitleFirstFrame = 0x08,
+    kTitleCall = 0x27,
+    kFactoryCaseTable = 0x60,
+    kCtorCall = 0x13,
+    kCtorReach = 0x20,
+    kSceneSave = 1,
+    kSceneOpening = 2,
+    kSceneTitle = 7
+};
+
 typedef struct {
     const char *game;
-    uint64_t window;      /* start of the code above */
-    uint64_t player_call; /* what the first call must reach: the player index of the scene */
-    uint64_t notice;      /* start of kNotice; 0 when the build never shows the notice */
+    uint64_t opening_step; /* step 4 of the title flow */
+    uint64_t notice;       /* start of kNotice; 0 when the build never shows the notice */
 } BuildSite;
 
 static const BuildSite kBuilds[] = {
-    {"CUSA10454-1.00", 0x502076, 0x4ae190, 0},
-    {"CUSA10454-1.01", 0x502076, 0x4ae190, 0},
-    {"CUSA07001-1.00", 0x4ffdc6, 0x4ac4a0, 0x174b0},
-    {"CUSA07001-1.02", 0x500356, 0x4ac920, 0x174d0},
-    {"CUSA07001-1.03", 0x500416, 0x4ac9e0, 0x174d0},
-    {"CUSA10209-1.00", 0x4ffdd6, 0x4ac610, 0},
+    {"CUSA10454-1.00", 0x428b3f, 0},
+    {"CUSA10454-1.01", 0x428b3f, 0},
+    {"CUSA07001-1.00", 0x427d9f, 0x174b0},
+    {"CUSA07001-1.02", 0x4281bf, 0x174d0},
+    {"CUSA07001-1.03", 0x42820f, 0x174d0},
+    {"CUSA10209-1.00", 0x427f0f, 0},
 };
-
-static const char kOpeningLayout[] = "STAGE/OPENING01.MBS";
-static const uint8_t kStateDispatch[2][5] = {{0x80, 0xfb, 0x02, 0x0f, 0x84}, {0x80, 0xfb, 0x01, 0x0f, 0x84}};
-static const uint8_t kLoadAddress[] = {0x48, 0x8d, 0x35};
-enum { kContextReach = 0x300 };
 
 static int enabled_by_name(const char *value, int fallback) {
     if (!value || !*value) return fallback;
@@ -131,58 +206,6 @@ static int32_t load_rel32(const unsigned char *at) {
 static int bytes_at(const unsigned char *image, uint64_t size, int64_t at, const uint8_t *bytes, size_t count) {
     return at >= 0 && (uint64_t)at <= size && size - (uint64_t)at >= count && !memcmp(image + at, bytes, count);
 }
-
-/* The scene's layout path is loaded and its state dispatch is switched on shortly before the poll. */
-static int opening_context(const unsigned char *image, uint64_t size, uint64_t window) {
-    if (window < kContextReach) return 0;
-    int layout = 0, dispatch[2] = {0, 0};
-    for (uint64_t at = window - kContextReach; at < window; ++at) {
-        if (!memcmp(image + at, kLoadAddress, sizeof(kLoadAddress))) {
-            const int64_t target = (int64_t)at + 7 + load_rel32(image + at + 3);
-            layout |= bytes_at(image, size, target, (const uint8_t *)kOpeningLayout, sizeof(kOpeningLayout));
-        }
-        for (int d = 0; d < 2; ++d) dispatch[d] |= !memcmp(image + at, kStateDispatch[d], sizeof(kStateDispatch[d]));
-    }
-    return layout && dispatch[0] && dispatch[1];
-}
-
-/* `player_call` 0: any call target, for a build searched without a table. */
-static int window_matches(const unsigned char *image, uint64_t size, uint64_t at, uint64_t player_call) {
-    if (at > size || size - at < kPollCount) return 0;
-    for (size_t i = 0; i < kPollCount; ++i)
-        if (kPoll[i] != ANY && image[at + i] != (unsigned char)kPoll[i]) return 0;
-    const int64_t player = (int64_t)at + kCallInWindow + 5 + load_rel32(image + at + kCallInWindow + 1);
-    const int64_t exit = (int64_t)at + kBranchInWindow + 4 + load_rel32(image + at + kBranchInWindow);
-    const int64_t end = (int64_t)at + kPollCount + load_rel32(image + at + kEndJumpInWindow);
-    return (!player_call || player == (int64_t)player_call) && bytes_at(image, size, exit, kExit, sizeof(kExit)) &&
-           bytes_at(image, size, end, kEnd, sizeof(kEnd)) && opening_context(image, size, at);
-}
-
-/* The one place in the image the poll appears; 0 when it appears nowhere or more than once. */
-static uint64_t find_window(const unsigned char *image, uint64_t size) {
-    uint64_t found = 0;
-    int matches = 0;
-    for (uint64_t at = 0; at + kPollCount <= size; ++at) {
-        if (image[at] != kPoll[0] || !window_matches(image, size, at, 0)) continue;
-        if (matches++) return 0;
-        found = at;
-    }
-    return found;
-}
-
-int skip_intro_locate(const unsigned char *image, uint64_t size, const char *game, uint64_t *site) {
-    uint64_t window = 0;
-    int listed = 0;
-    for (size_t i = 0; game && i < sizeof(kBuilds) / sizeof(*kBuilds); ++i) {
-        if (strcmp(game, kBuilds[i].game)) continue;
-        listed = 1;
-        window = window_matches(image, size, kBuilds[i].window, kBuilds[i].player_call) ? kBuilds[i].window : 0;
-    }
-    if (!listed && game) window = find_window(image, size);
-    *site = window ? window + kHookInWindow : 0;
-    return listed;
-}
-
 static int pattern_at(const short *pattern, size_t count, const unsigned char *image, uint64_t size, int64_t at) {
     if (at < 0 || (uint64_t)at > size || size - (uint64_t)at < count) return 0;
     for (size_t i = 0; i < count; ++i)
@@ -266,7 +289,137 @@ static void build_notice_bypass(unsigned char *out, const unsigned char *image, 
     memcpy(out + 29, &advance, 4);
 }
 
-static atomic_int g_armed;
+static int in_image(uint64_t size, int64_t at, uint64_t count) {
+    return at >= 0 && (uint64_t)at <= size && size - (uint64_t)at >= count;
+}
+
+/* Where the call or jump (e8/e9 rel32) at `at` goes. */
+static int64_t call_target(const unsigned char *image, int64_t at) {
+    return rel32_target(image, at + 5, at + 1);
+}
+
+/* Where the conditional jump (0f 8x rel32) at `at` goes. */
+static int64_t branch_target(const unsigned char *image, int64_t at) {
+    return rel32_target(image, at + 6, at + 2);
+}
+
+/* `mov rax,[rdi+slot]; ret`: the scene manager's pointer to the scene. */
+static int scene_getter(const unsigned char *image, uint64_t size, int64_t at, unsigned scene) {
+    uint8_t getter[8] = {0x48, 0x8b, 0x87, 0, 0, 0, 0, 0xc3};
+    const uint32_t slot = 0x78 + 0x20 * scene;
+    memcpy(getter + 3, &slot, sizeof(slot));
+    return bytes_at(image, size, at, getter, sizeof(getter));
+}
+
+/* `mov esi,scene; jmp factory`: the factory, or -1. */
+static int64_t scene_factory(const unsigned char *image, uint64_t size, int64_t at, unsigned scene) {
+    const uint8_t thunk[6] = {0xbe, (uint8_t)scene, 0x00, 0x00, 0x00, 0xe9};
+    if (!bytes_at(image, size, at, thunk, sizeof(thunk)) || !in_image(size, at + 6, 4)) return -1;
+    return call_target(image, at + 5);
+}
+
+/* The base constructor the factory's case for `scene` reaches with that scene id, or -1. */
+static int64_t scene_base_constructor(const unsigned char *image, uint64_t size, int64_t factory, unsigned scene) {
+    const int64_t dispatch = factory + kFactoryCaseTable;
+    const int64_t table = rel32_target(image, dispatch + 0x12, dispatch + 0x0e);
+    if (!in_image(size, table, 4u * scene)) return -1;
+    const int64_t entry = table + load_rel32(image + table + 4 * (scene - 1));
+    if (!pattern_at(kFactoryCase, kFactoryCaseCount, image, size, entry)) return -1;
+    const int64_t ctor = call_target(image, entry + kCtorCall);
+    const uint8_t pass_id[9] = {0xba, (uint8_t)scene, 0x00, 0x00, 0x00, 0x48, 0x89, 0xfb, 0xe8};
+    if (!in_image(size, ctor, kCtorReach + sizeof(pass_id) + 4) || image[ctor] != 0x55) return -1;
+    for (int64_t at = ctor; at < ctor + kCtorReach; ++at)
+        if (!memcmp(image + at, pass_id, sizeof(pass_id))) return call_target(image, at + 8);
+    return -1;
+}
+
+/* The save data, opening and title scenes are the factory's scenes 1, 2 and 7, built on the same base. */
+static int scenes_match(const unsigned char *image, uint64_t size, int64_t factory) {
+    if (!pattern_at(kFactoryHead, kFactoryHeadCount, image, size, factory) ||
+        !pattern_at(kFactoryDispatch, kFactoryDispatchCount, image, size, factory + kFactoryCaseTable))
+        return 0;
+    const int64_t base = scene_base_constructor(image, size, factory, kSceneSave);
+    return base >= 0 && scene_base_constructor(image, size, factory, kSceneOpening) == base &&
+           scene_base_constructor(image, size, factory, kSceneTitle) == base;
+}
+
+/* The switch above the opening step: its default exits the step, entry 3 is the save data step, entry 4 the opening,
+ * entry 5 the title, and entry 2 chooses the title when returning to it and the save data step otherwise. */
+static int steps_match(const unsigned char *image, uint64_t size, int64_t opening, int64_t exit, int64_t first_frame,
+                       int64_t factory) {
+    int64_t dispatch = -1;
+    int found = 0;
+    for (int64_t at = opening > kDispatchReach ? opening - kDispatchReach : 0; at < opening; ++at)
+        if (pattern_at(kDispatch, kDispatchCount, image, size, at)) ++found, dispatch = at;
+    if (found != 1 || branch_target(image, dispatch + kDispatchDefault) != exit) return 0;
+    const int64_t table = rel32_target(image, dispatch + kDispatchTable + 7, dispatch + kDispatchTable + 3);
+    if (!in_image(size, table, 4 * kStepEntries)) return 0;
+    int64_t entry[kStepEntries];
+    for (int i = 0; i < kStepEntries; ++i) entry[i] = table + load_rel32(image + table + 4 * i);
+    if (entry[kOpeningStepIndex] != opening || entry[kTitleStepIndex] != opening + kOpeningStepCount) return 0;
+
+    const int64_t save = entry[kSaveStepIndex], decision = entry[kDecisionIndex];
+    return pattern_at(kSaveStep, kSaveStepCount, image, size, save) &&
+           scene_getter(image, size, call_target(image, save + kGetterCall), kSceneSave) &&
+           call_target(image, save + kSaveFirstFrame) == first_frame &&
+           scene_factory(image, size, call_target(image, save + kSaveCreate), kSceneSave) == factory &&
+           branch_target(image, save + kSaveExit) == exit && save + kSaveStepCount == opening &&
+           pattern_at(kDecision, kDecisionCount, image, size, decision) &&
+           pattern_at(kDecisionSave, kDecisionSaveCount, image, size, branch_target(image, decision + kDecisionBranch));
+}
+
+static int title_flow_matches(const unsigned char *image, uint64_t size, uint64_t step, SkipIntroSites *sites) {
+    const int64_t opening = (int64_t)step, title = opening + kOpeningStepCount, done = title + kTitleStepCount;
+    if (!pattern_at(kOpeningStep, kOpeningStepCount, image, size, opening) ||
+        !pattern_at(kTitleStep, kTitleStepCount, image, size, title) || !pattern_at(kStepDone, kStepDoneCount, image, size, done))
+        return 0;
+    const int64_t exit = branch_target(image, opening + kOpeningExit);
+    const int64_t create = branch_target(image, title + kTitleCreateBranch);
+    const int64_t first_frame = call_target(image, opening + kOpeningFirstFrame);
+    if (call_target(image, opening + kOpeningExitJump) != exit ||
+        !scene_getter(image, size, call_target(image, opening + kGetterCall), kSceneOpening) ||
+        !scene_getter(image, size, call_target(image, title + kGetterCall), kSceneTitle) ||
+        !pattern_at(kTitleCreate, kTitleCreateCount, image, size, create) ||
+        call_target(image, create + kTitleFirstFrame) != first_frame)
+        return 0;
+    const int64_t factory = scene_factory(image, size, call_target(image, opening + kOpeningCreate), kSceneOpening);
+    if (factory < 0 || scene_factory(image, size, call_target(image, create + kTitleCall), kSceneTitle) != factory ||
+        !steps_match(image, size, opening, exit, first_frame, factory) || !scenes_match(image, size, factory))
+        return 0;
+    sites->redirect = step + kRedirectInStep;
+    sites->title = (uint64_t)create + kTitleCall;
+    return 1;
+}
+
+/* The one title flow in the image; none when there is none or more than one. */
+static void find_title_flow(const unsigned char *image, uint64_t size, SkipIntroSites *sites) {
+    SkipIntroSites found = {0, 0}, one;
+    int matches = 0;
+    for (uint64_t at = 0; at + kOpeningStepCount <= size; ++at) {
+        if (image[at] != 0x4c || !title_flow_matches(image, size, at, &one)) continue;
+        if (matches++) {
+            found.redirect = found.title = 0;
+            break;
+        }
+        found = one;
+    }
+    *sites = found;
+}
+
+int skip_intro_locate(const unsigned char *image, uint64_t size, const char *game, SkipIntroSites *sites) {
+    const SkipIntroSites none = {0, 0};
+    int listed = 0;
+    *sites = none;
+    for (size_t i = 0; game && i < sizeof(kBuilds) / sizeof(*kBuilds); ++i) {
+        if (strcmp(game, kBuilds[i].game)) continue;
+        listed = 1;
+        if (!title_flow_matches(image, size, kBuilds[i].opening_step, sites)) *sites = none;
+    }
+    if (!listed && game) find_title_flow(image, size, sites);
+    return listed;
+}
+
+static atomic_int g_armed, g_redirects, g_title_reported;
 
 void skip_intro_arm(void) {
     atomic_store(&g_armed, 1);
@@ -276,33 +429,50 @@ int GUEST_HOOK_ABI skip_intro_claim(void) {
     return atomic_exchange(&g_armed, 0);
 }
 
-void GUEST_HOOK_ABI skip_intro_delivered(void) {
-    puts("Skip intro: startup sequence skipped");
+void GUEST_HOOK_ABI skip_intro_redirected(void) {
+    const int count = atomic_fetch_add(&g_redirects, 1) + 1;
+    printf("Skip Intro telemetry: event=startup_redirect from=opening_logos to=title count=%d\n", count);
 }
 
-/* Runs where `mov rdi,r12; mov esi,eax; call rbx` was, entered by a jump. A claimed press returns 1 to the code after
- * it without making the call; otherwise the call is made with the original rbx, r12 and eax. */
-size_t skip_intro_build_stub(unsigned char *out, uint64_t claim, uint64_t delivered, uint64_t resume) {
-    static const unsigned char kSave[] = {0x50, 0x50, 0x48, 0xb8};
-    static const unsigned char kTest[] = {0xff, 0xd0, 0x85, 0xc0, 0x74};
-    static const unsigned char kPressed[] = {0x48, 0xb8};
-    static const unsigned char kReturnPressed[] = {0xff, 0xd0, 0x48, 0x83, 0xc4, 0x10, 0xb8, 0x01, 0x00, 0x00, 0x00};
-    static const unsigned char kJump[] = {0xff, 0x25, 0x00, 0x00, 0x00, 0x00};
-    static const unsigned char kOriginal[] = {0x48, 0x83, 0xc4, 0x08, 0x58, 0x4c, 0x89, 0xe7, 0x89, 0xc6, 0xff, 0xd3};
-    unsigned char *at = out;
-    memcpy(at, kSave, sizeof(kSave)), at += sizeof(kSave);
-    memcpy(at, &claim, 8), at += 8;
-    memcpy(at, kTest, sizeof(kTest)), at += sizeof(kTest);
+void GUEST_HOOK_ABI skip_intro_title_reached(void) {
+    if (!atomic_load(&g_redirects) || atomic_exchange(&g_title_reported, 1)) return;
+    puts("Skip Intro telemetry: event=title_reached count=1");
+}
+
+static unsigned char *put(unsigned char *at, const unsigned char *bytes, size_t count) {
+    memcpy(at, bytes, count);
+    return at + count;
+}
+
+/* Called in place of `call [rax+0x260]` with rdi the object asked. */
+size_t skip_intro_build_redirect_stub(unsigned char *out, uint64_t claim, uint64_t redirected) {
+    static const unsigned char kSaveAndLoad[] = {0x57, 0x48, 0xb8};
+    static const unsigned char kAsk[] = {0xff, 0xd0, 0x85, 0xc0, 0x74};
+    static const unsigned char kLoad[] = {0x48, 0xb8};
+    static const unsigned char kNotNeeded[] = {0xff, 0xd0, 0x5f, 0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};
+    static const unsigned char kOriginal[] = {0x5f, 0x48, 0x8b, 0x07, 0xff, 0xa0, 0x60, 0x02, 0x00, 0x00};
+    unsigned char *at = put(out, kSaveAndLoad, sizeof(kSaveAndLoad));
+    at = put(at, (const unsigned char *)&claim, 8);
+    at = put(at, kAsk, sizeof(kAsk));
     unsigned char *skip = at++;
-    memcpy(at, kPressed, sizeof(kPressed)), at += sizeof(kPressed);
-    memcpy(at, &delivered, 8), at += 8;
-    memcpy(at, kReturnPressed, sizeof(kReturnPressed)), at += sizeof(kReturnPressed);
-    memcpy(at, kJump, sizeof(kJump)), at += sizeof(kJump);
-    memcpy(at, &resume, 8), at += 8;
+    at = put(at, kLoad, sizeof(kLoad));
+    at = put(at, (const unsigned char *)&redirected, 8);
+    at = put(at, kNotNeeded, sizeof(kNotNeeded));
     *skip = (unsigned char)(at - skip - 1);
-    memcpy(at, kOriginal, sizeof(kOriginal)), at += sizeof(kOriginal);
-    memcpy(at, kJump, sizeof(kJump)), at += sizeof(kJump);
-    memcpy(at, &resume, 8), at += 8;
+    at = put(at, kOriginal, sizeof(kOriginal));
+    return (size_t)(at - out);
+}
+
+/* Called in place of the title scene's creation with rdi the scene manager. */
+size_t skip_intro_build_title_stub(unsigned char *out, uint64_t reached, uint64_t create) {
+    static const unsigned char kSaveAndLoad[] = {0x57, 0x48, 0xb8};
+    static const unsigned char kCallAndLoad[] = {0xff, 0xd0, 0x5f, 0x48, 0xb8};
+    static const unsigned char kJump[] = {0xff, 0xe0};
+    unsigned char *at = put(out, kSaveAndLoad, sizeof(kSaveAndLoad));
+    at = put(at, (const unsigned char *)&reached, 8);
+    at = put(at, kCallAndLoad, sizeof(kCallAndLoad));
+    at = put(at, (const unsigned char *)&create, 8);
+    at = put(at, kJump, sizeof(kJump));
     return (size_t)(at - out);
 }
 
@@ -311,44 +481,61 @@ size_t skip_intro_stub_bytes(void) {
 }
 
 static int unavailable(const char *game, const char *reason) {
-    printf("Skip intro: requested but unavailable for %s: %s\n", game ? game : "an unknown game build", reason);
+    printf("Skip Intro: requested but unavailable for %s: %s\n", game ? game : "an unknown game build", reason);
     return 0;
+}
+
+static int reachable(const unsigned char *from_next, const unsigned char *to, int32_t *rel) {
+    const int64_t distance = (int64_t)(intptr_t)to - (int64_t)(intptr_t)from_next;
+    if (distance > INT32_MAX || distance < INT32_MIN) return 0;
+    *rel = (int32_t)distance;
+    return 1;
+}
+
+static void write_call(unsigned char *at, int32_t rel, size_t length) {
+    at[0] = 0xe8;
+    memcpy(at + 1, &rel, sizeof(rel));
+    memset(at + 5, 0x90, length - 5);
 }
 
 int skip_intro_install(unsigned char *image, uint64_t size, uint64_t entry, const char *game, int wanted,
                        unsigned char *stubs, size_t stubs_size) {
     (void)entry;
     if (!wanted) {
-        puts("Skip intro: off");
+        puts("Skip Intro: off");
         return 0;
     }
     if (!game) return unavailable(game, "not a supported build");
-    uint64_t site = 0;
-    const int listed = skip_intro_locate(image, size, game, &site);
-    if (!site) return unavailable(game, listed ? "the verified site does not match" : "opening input poll not found exactly once");
+    SkipIntroSites sites;
+    const int listed = skip_intro_locate(image, size, game, &sites);
+    if (!sites.redirect) return unavailable(game, listed ? "the verified title flow does not match" : "the title flow was not found exactly once");
     uint64_t notice = 0;
     if (skip_intro_locate_notice(image, size, game, &notice) == SKIP_INTRO_NOTICE_UNMATCHED)
         return unavailable(game, "the regional startup notice does not match");
     if (stubs_size < SKIP_INTRO_STUB_BYTES) return unavailable(game, "no room for the stub");
-    const int64_t distance = (int64_t)(intptr_t)stubs - (int64_t)(intptr_t)(image + site + 5);
-    if (distance > INT32_MAX || distance < INT32_MIN) return unavailable(game, "stub too far from the code");
-    unsigned char stub[SKIP_INTRO_STUB_BYTES] = {0};
-    const size_t length = skip_intro_build_stub(stub, (uint64_t)(uintptr_t)skip_intro_claim,
-                                                (uint64_t)(uintptr_t)skip_intro_delivered,
-                                                (uint64_t)(uintptr_t)(image + site + HOOK_LENGTH));
-    if (length > SKIP_INTRO_STUB_BYTES) return unavailable(game, "stub too large");
-    memcpy(stubs, stub, SKIP_INTRO_STUB_BYTES);
-    const int32_t rel = (int32_t)distance;
-    image[site] = 0xe9;
-    memcpy(image + site + 1, &rel, sizeof(rel));
-    memset(image + site + 5, 0x90, HOOK_LENGTH - 5);
+    unsigned char *redirect = image + sites.redirect, *title = image + sites.title;
+    int32_t to_redirect, to_title;
+    if (!reachable(redirect + 5, stubs, &to_redirect) || !reachable(title + 5, stubs + SKIP_INTRO_TITLE_STUB_AT, &to_title))
+        return unavailable(game, "stub too far from the code");
+    const uint64_t create = (uint64_t)(uintptr_t)(title + 5 + load_rel32(title + 1));
+    unsigned char stub[SKIP_INTRO_STUB_BYTES];
+    memset(stub, 0xcc, sizeof(stub));
+    const size_t redirect_length = skip_intro_build_redirect_stub(stub, (uint64_t)(uintptr_t)skip_intro_claim,
+                                                                  (uint64_t)(uintptr_t)skip_intro_redirected);
+    const size_t title_length = skip_intro_build_title_stub(stub + SKIP_INTRO_TITLE_STUB_AT,
+                                                            (uint64_t)(uintptr_t)skip_intro_title_reached, create);
+    if (redirect_length > SKIP_INTRO_TITLE_STUB_AT || SKIP_INTRO_TITLE_STUB_AT + title_length > SKIP_INTRO_STUB_BYTES)
+        return unavailable(game, "stub too large");
+    memcpy(stubs, stub, sizeof(stub));
+    write_call(redirect, to_redirect, SKIP_INTRO_REDIRECT_BYTES);
+    write_call(title, to_title, SKIP_INTRO_TITLE_CALL_BYTES);
     if (notice) {
         unsigned char bypass[kBypassBytes];
         build_notice_bypass(bypass, image, notice - kNoticeBegins);
         memcpy(image + notice, bypass, sizeof(bypass));
-        printf("Skip intro: regional notice bypass installed (%s)\n", game);
+        printf("Skip Intro: regional notice bypass installed (%s)\n", game);
     }
     skip_intro_arm();
-    puts("Skip intro: on, native skip armed");
+    printf("Skip Intro: installed build=%s route=save_check->title (opening scene not created)\n", game);
     return 1;
 }

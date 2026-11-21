@@ -222,7 +222,7 @@ inline constexpr Setting kSettings[] = {
     {Id::TextureFiltering, Page::Graphics, "anisotropy", "Texture filtering",
      "Sharper textures seen at an angle. Game uses the game's own filtering.", Apply::Restart, kAnisotropy},
     {Id::SkipIntro, Page::Gameplay, "skip_intro", "Skip Intro",
-     "Skips the startup logo and starts at the title screen.", Apply::Restart, kOffOn},
+     "Skips startup logos and the opening movie, then starts at the title screen.", Apply::Restart, kOffOn},
     {Id::VoiceLanguage, Page::Gameplay, "voice_language", "Voice Language",
      "The language of every spoken voice: characters, NPCs, enemies and the narrator. Each keeps its own voice. Menu & "
      "Subtitles do not change.",

@@ -6,7 +6,9 @@ On this machine (RTX 4070, Vulkan 1.4, Xbox controller) the development build ru
 loader and the shadPS4-derived video core at a steady 60 FPS. Observed, with one scripted Cross press:
 
 1. `Create save data? / This game handles autosave.` (game-drawn prompt; press Cross / Xbox A)
-2. CRIWARE logo, the opening movie, then the **title screen** (`Press ✕ button`, `©ATLUS ©SEGA`), stable.
+2. The ATLUS, Basiscape and CRIWARE logos, the opening movie, then the **title screen** (`Press ✕ button`,
+   `©ATLUS ©SEGA`), stable. The logos and the opening are one scene (`STAGE/OPENING00` first); Skip Intro leaves it
+   out and keeps the save data prompt.
 
 Not verified: anything past the title screen. The visual defects seen here (flicker, stale rectangles, a missing glyph) were
 fixed in `feature/graphics-correctness`, see [GRAPHICS.md](GRAPHICS.md).
