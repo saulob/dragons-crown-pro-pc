@@ -21,6 +21,7 @@
 #include "appearance_hooks.h"
 #include "appearance_session.h"
 #include "endgame_unlocks.h"
+#include "kraken_fix.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "exit_game_hook.h"
@@ -210,6 +211,10 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     module_diagnostics_report_backtrace(c,(uintptr_t)image,0x20000000);
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
+    fprintf(stderr,"  r8 =%016llx r9 =%016llx r10=%016llx r11=%016llx\n  r12=%016llx r13=%016llx r14=%016llx r15=%016llx\n",
+            c->R8,c->R9,c->R10,c->R11,c->R12,c->R13,c->R14,c->R15);
+    char game_context[192];
+    if (runtime_kraken_crash_context(game_context,sizeof(game_context))) fprintf(stderr,"Crash context: %s\n",game_context);
     if (gpu_enabled) dcpgpu_dump_guest_writes(info);
     /* Top stack words: after a call through a null pointer [rsp] is the caller's return address. */
     uintptr_t words[8];
@@ -355,6 +360,11 @@ static void fault(int sig, siginfo_t *info, void *context) {
     else
         snprintf(line, sizeof(line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, info->si_addr);
     { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
+    char game_context[192];
+    if (runtime_kraken_crash_context(game_context, sizeof(game_context))) {
+        snprintf(line, sizeof(line), "Crash context: %s\n", game_context);
+        ssize_t written_=write(2, line, strlen(line)); (void)written_;
+    }
     if (gpu_enabled) dcpgpu_dump_guest_writes(context);
     /* Host call chain (frames with unwind info; guest frames end it). */
     void *frames[32];
@@ -955,11 +965,13 @@ int main(int argc, char **argv) {
     const size_t boss_battle_stub_area = known_build ? boss_battle_stub_bytes() : 0;
     const unsigned endgame_requested=endgame_unlocks_wanted(dcp_endgame_unlocks(settings_file));
     const size_t endgame_stub_area = known_build && endgame_requested ? endgame_unlocks_stub_bytes() : 0;
+    const size_t kraken_fix_stub_area = known_build ? kraken_fix_stub_bytes() : 0;
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t message_stub_offset = cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
                                        ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
-                                       gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area + endgame_stub_area;
+                                       gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area + endgame_stub_area +
+                                       kraken_fix_stub_area;
     const size_t appearance_stub_area = known_build ? appearance_hooks_stub_bytes() : 0;
     const size_t comms_stub_area = known_build && runtime_online_active() ? comms_bridge_stub_bytes() : 0;
     const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area + comms_stub_area);
@@ -1196,6 +1208,10 @@ int main(int argc, char **argv) {
     const unsigned endgame_applied=endgame_unlocks_install(image,size,entry,known_build ? build_key : NULL,endgame_requested,
                                                            image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area+boss_battle_stub_area,
                                                            endgame_stub_area);
+    kraken_fix_set_observer(runtime_kraken_null_mast);
+    kraken_fix_install(image,size,entry,known_build ? build_key : NULL,
+                       image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area+boss_battle_stub_area+endgame_stub_area,
+                       kraken_fix_stub_area);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);

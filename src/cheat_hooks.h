@@ -11,6 +11,7 @@
 #include "boss_trace.h"
 #include "feature_sites.h"
 #include "guest_hook.h"
+#include "kraken_trace.h"
 
 namespace dcp::cheats {
 
@@ -63,6 +64,16 @@ void SetGuestFunctions(const GuestFunctions& functions);
 // The Chimera fight trace: the image the class names lie in and where its lines go. Setting it clears the trace.
 void ConfigureBossTrace(uint64_t image_begin, uint64_t image_end, bosstrace::ChimeraTrace::Sink sink);
 void PrintBossTraceLine(const char* line);
+
+// The Kraken fight trace (DCP-8LX692): the same image bounds, whether the image's tentacle layout is the one the trace
+// reads (the reference build's), and where its lines go. Setting it clears the trace.
+void ConfigureKrakenTrace(uint64_t image_begin, uint64_t image_end, bool mast_layout, krakentrace::KrakenTrace::Sink sink);
+
+// A tentacle's null mast handle was answered by the Kraken fix (kraken_fix.h); at most a few lines per fight.
+void NoteKrakenNullMast(uint64_t tentacle);
+
+// The latest Kraken fight state for the crash report; false when no fight was seen. Lock-free.
+bool KrakenCrashContext(char* out, size_t size);
 
 std::span<const GuestHook> Hooks();
 

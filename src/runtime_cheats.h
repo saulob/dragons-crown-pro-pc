@@ -58,6 +58,13 @@ int runtime_cheat_slot_human(int slot);
 /* The game's own party seat: owned locally and controlled by a player (known after Player 1's first tick). */
 int runtime_cheat_seat_human(int slot);
 
+/* The Kraken fix answered a tentacle's null mast handle: the trace says so a few times per fight. */
+void runtime_kraken_null_mast(uint64_t tentacle);
+
+/* Writes the latest Kraken fight state into `out` for the crash report and returns 1, or returns 0 when no Kraken fight
+ * was seen. Reads atomics only. */
+int runtime_kraken_crash_context(char *out, size_t size);
+
 /* Called with each player unit on its per-tick update while the cheat hooks are in (offline); observe only. The loader
  * sets this (Discord presence reads class and level through it). */
 void runtime_cheats_set_player_observer(void (*observe)(uint64_t unit));

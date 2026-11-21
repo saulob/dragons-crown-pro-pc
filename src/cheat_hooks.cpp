@@ -1,5 +1,6 @@
 #include "cheat_hooks.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -10,6 +11,7 @@
 
 #include "boss_trace.h"
 #include "dcp_cheats.h"
+#include "kraken_trace.h"
 #include "runtime_cheats.h"
 
 namespace dcp::cheats {
@@ -93,6 +95,7 @@ constexpr uint64_t kGameGoldContextOffset = 0x88;  // the object AddGold and Get
 GuestFunctions g_guest{};
 FrozenHealth g_frozen;
 bosstrace::ChimeraTrace g_boss_trace;
+krakentrace::KrakenTrace g_kraken_trace;
 
 // Each save record is also a party seat. The game's own controllable-seat test: a local owner (-1 empty, 0 local,
 // 1 remote) whose flag bit 0 is clear; an AI ally's seat or a pad that never joined does not pass it.
@@ -199,13 +202,21 @@ void TraceBossHit(const HostMemory& memory, uint64_t owner, uint64_t unit, int32
         g_boss_trace.Observe(memory, part, owner, unit, amount, runtime_cheat_damage_multiplier(), lethal_check,
                              BossContext(memory, unit), NowMs());
     }
+    const krakentrace::Part kraken = g_kraken_trace.Identify(memory, owner);
+    if (kraken != krakentrace::Part::None) {
+        g_kraken_trace.Observe(memory, kraken, owner, unit, amount, runtime_cheat_damage_multiplier(), lethal_check,
+                               BossContext(memory, unit), NowMs());
+    }
 }
 
 void SampleBossTrace(uint64_t player) {
     const int64_t now = NowMs();
+    const HostMemory memory;
     if (g_boss_trace.SampleDue(now)) {
-        const HostMemory memory;
         g_boss_trace.Sample(memory, BossContext(memory, player), runtime_cheat_damage_multiplier(), now);
+    }
+    if (g_kraken_trace.SampleDue(now)) {
+        g_kraken_trace.Sample(memory, BossContext(memory, player), runtime_cheat_damage_multiplier(), now);
     }
 }
 
@@ -213,6 +224,24 @@ void SampleBossTrace(uint64_t player) {
 
 void ConfigureBossTrace(uint64_t image_begin, uint64_t image_end, bosstrace::ChimeraTrace::Sink sink) {
     g_boss_trace.Configure(image_begin, image_end, sink);
+}
+
+void ConfigureKrakenTrace(uint64_t image_begin, uint64_t image_end, bool mast_layout, krakentrace::KrakenTrace::Sink sink) {
+    g_kraken_trace.Configure(image_begin, image_end, mast_layout, sink);
+}
+
+void NoteKrakenNullMast(uint64_t tentacle) {
+    if (!g_kraken_trace.GuardDue(tentacle)) {
+        return;
+    }
+    const HostMemory memory;
+    const uint64_t unit = memory.U64(tentacle + kOwnerUnitOffset);
+    const bool owned = unit != 0 && memory.U64(unit + kUnitOwnerOffset) == tentacle;
+    g_kraken_trace.NullMastGuard(tentacle, BossContext(memory, owned ? unit : 0), runtime_cheat_damage_multiplier(), NowMs());
+}
+
+bool KrakenCrashContext(char* out, size_t size) {
+    return g_kraken_trace.CrashContext(out, size);
 }
 
 void PrintBossTraceLine(const char* line) {
@@ -933,6 +962,24 @@ constexpr uint8_t kEquipmentItemPrologue[] = {0x85, 0xf6, 0x78, 0x3b};
 constexpr uint8_t kIsGearPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x56, 0x53, 0x48, 0x89, 0xfb};
 constexpr uint8_t kSetDurabilityPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53};
 
+// The tentacle update reads its mast handle and the mast's broken flag in one place; the trace follows the handle only
+// in an image that holds that sequence once.
+bool KrakenLayoutVerified(const uint8_t* image, uint64_t size) {
+    constexpr uint8_t kSequence[] = {0x49, 0x8b, 0x87, 0xd8, 0x38, 0x00, 0x00, 0x80, 0xb8, 0xc1, 0x38, 0x00, 0x00, 0x00};
+    static_assert(dcp::krakentrace::kTentacleMastOffset == 0x38d8 && dcp::krakentrace::kMastBrokenOffset == 0x38c1);
+    const uint64_t end = std::min<uint64_t>(size, 0x800000);
+    int found = 0;
+    for (uint64_t at = 0; at + sizeof(kSequence) <= end && found < 2; ++at) {
+        const void* hit = std::memchr(image + at, kSequence[0], end - sizeof(kSequence) + 1 - at);
+        if (hit == nullptr) {
+            break;
+        }
+        at = static_cast<const uint8_t*>(hit) - image;
+        found += std::memcmp(image + at, kSequence, sizeof(kSequence)) == 0 ? 1 : 0;
+    }
+    return found == 1;
+}
+
 template <size_t N>
 bool PrologueMatches(const uint8_t* image, uint64_t offset, const uint8_t (&bytes)[N]) {
     return std::memcmp(image + offset, bytes, N) == 0;
@@ -975,6 +1022,14 @@ extern "C" int runtime_cheat_seat_human(int slot) {
     return slot == dcp::cheats::kPlayerOneSlot || dcp::cheats::SeatLocalHuman(slot) ? 1 : 0;
 }
 
+extern "C" void runtime_kraken_null_mast(uint64_t tentacle) {
+    dcp::cheats::NoteKrakenNullMast(tentacle);
+}
+
+extern "C" int runtime_kraken_crash_context(char* out, size_t size) {
+    return dcp::cheats::KrakenCrashContext(out, size) ? 1 : 0;
+}
+
 extern "C" size_t runtime_cheat_hooks_stub_bytes(void) {
     return dcp::cheats::Hooks().size() * guest_hook_stub_size();
 }
@@ -1006,11 +1061,14 @@ FunctionOffsets StaticOffsets() {
 // The game functions the actions call. The static image's are checked by prologue; a located set was matched by the
 // locator's signatures already.
 void BindFunctions(uint8_t* image, uint64_t size, const FunctionOffsets& f, bool check_prologues) {
+
     dcp::cheats::GuestFunctions functions;
     functions.save_record = GameSaveRecord;
     functions.game_context = GameContextOf;
     dcp::cheats::ConfigureBossTrace(reinterpret_cast<uint64_t>(image), reinterpret_cast<uint64_t>(image) + size,
                                     dcp::cheats::PrintBossTraceLine);
+    dcp::cheats::ConfigureKrakenTrace(reinterpret_cast<uint64_t>(image), reinterpret_cast<uint64_t>(image) + size,
+                                      KrakenLayoutVerified(image, size), dcp::cheats::PrintBossTraceLine);
     const auto at = [&](DcpCheatFunction function) { return image + f.at[function]; };
     const auto fits = [&](bool matches) { return !check_prologues || matches; };
     if (fits(PrologueMatches(image, kRecordModeOffset, kRecordModePrologue) &&

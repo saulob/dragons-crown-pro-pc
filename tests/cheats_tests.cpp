@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <span>
 #include <vector>
@@ -4286,6 +4287,346 @@ void TestBossTraceImages() {
     std::printf("boss trace: %d local boot images checked\n", checked);
 }
 
+// The Kraken fight trace (DCP-8LX692): the class names the hooks recognize, the lifecycle lines of the parts and of a
+// tentacle's mast, the crash-report snapshot, and the bounds on both.
+struct KrakenWorld {
+    TraceWorld world;
+    static constexpr uint32_t kBody = 0x200, kMouth = 0x220, kDefense = 0x240, kAttack = 0x260, kRock = 0x280,
+                              kTentacle = 0x2a0, kMast = 0x2c0;
+    KrakenWorld() {
+        const char names[][24] = {"DcKraken_Body", "DcKraken_Mouth",   "DcKraken_DefenseArm", "DcKraken_AttackArm",
+                                  "DcKraken_Rock", "DcKrakenTentacle", "DcKrakenTentacleMast"};
+        const uint32_t at[] = {kBody, kMouth, kDefense, kAttack, kRock, kTentacle, kMast};
+        for (size_t i = 0; i < 7; ++i) {
+            std::memcpy(world.image + at[i], names[i], sizeof(names[i]));
+        }
+        world.Place(0, 0, 17, false);
+    }
+};
+
+void KrakenStart(const KrakenWorld& kraken, bool mast_layout) {
+    TraceStart(kraken.world);
+    ConfigureKrakenTrace(kraken.world.Begin(), kraken.world.End(), mast_layout, CollectTraceLine);
+}
+
+std::string KrakenContext() {
+    char text[256];
+    return KrakenCrashContext(text, sizeof(text)) ? std::string(text) : std::string();
+}
+
+void TestKrakenTrace() {
+    using dcp::krakentrace::Part;
+    KrakenWorld kraken;
+    TraceWorld& world = kraken.world;
+    FakeGame player1(true, 0), body(false, 0), tentacle(false, 0), tentacle2(false, 0), mast(false, 0), goblin(false, 0);
+    world.Name(body, KrakenWorld::kBody);
+    world.Name(tentacle, KrakenWorld::kTentacle);
+    world.Name(tentacle2, KrakenWorld::kTentacle);
+    world.Name(mast, KrakenWorld::kMast);
+    world.Name(goblin, TraceWorld::kGoblin);
+    const auto set_hp = [](FakeGame& unit, int32_t hp) { FakeGame::Store<int32_t>(unit.unit + kUnitHpOffset, hp); };
+    const auto hit = [&](FakeGame& unit, int32_t amount) {
+        GuestRegs regs = unit.DamageRegs(amount);
+        HealthDamageHook(&regs);
+        return static_cast<int32_t>(regs.rcx);
+    };
+    const auto lethal_check = [&](FakeGame& unit, int32_t amount) {
+        GuestRegs regs{};
+        regs.rax = static_cast<uint32_t>(amount);
+        regs.r15 = unit.Owner();
+        LethalCheckHook(&regs);
+        return static_cast<int32_t>(regs.rax);
+    };
+    const auto tick = [&](int64_t advance_ms) {
+        g_trace_now += advance_ms;
+        GuestRegs regs{};
+        regs.rdi = player1.Unit();
+        PlayerTickHook(&regs);
+    };
+    const auto hold_mast = [](FakeGame& holder, FakeGame* held) {
+        FakeGame::Store<uint64_t>(holder.owner + dcp::krakentrace::kTentacleMastOffset, held ? held->Owner() : 0);
+    };
+    const auto set_broken = [](FakeGame& held, uint8_t value) {
+        FakeGame::Store<uint8_t>(held.owner + dcp::krakentrace::kMastBrokenOffset, value);
+    };
+
+    // The class names: the seven Kraken classes and nothing else, nothing outside the image.
+    dcp::krakentrace::KrakenTrace names;
+    names.Configure(world.Begin(), world.End(), true, CollectTraceLine);
+    CHECK(names.Identify(TraceMemory{}, body.Owner()) == Part::Body && names.Identify(TraceMemory{}, tentacle.Owner()) == Part::Tentacle &&
+          names.Identify(TraceMemory{}, mast.Owner()) == Part::Mast);
+    FakeGame mouth(false, 0), defense(false, 0), attack(false, 0), rock(false, 0), outside(false, 0), chimera(false, 0);
+    world.Name(mouth, KrakenWorld::kMouth);
+    world.Name(defense, KrakenWorld::kDefense);
+    world.Name(attack, KrakenWorld::kAttack);
+    world.Name(rock, KrakenWorld::kRock);
+    world.Name(chimera, TraceWorld::kChimera);
+    CHECK(names.Identify(TraceMemory{}, mouth.Owner()) == Part::Mouth && names.Identify(TraceMemory{}, defense.Owner()) == Part::DefenseArm &&
+          names.Identify(TraceMemory{}, attack.Owner()) == Part::AttackArm && names.Identify(TraceMemory{}, rock.Owner()) == Part::Rock);
+    CHECK(names.Identify(TraceMemory{}, goblin.Owner()) == Part::None && names.Identify(TraceMemory{}, chimera.Owner()) == Part::None &&
+          names.Identify(TraceMemory{}, 0) == Part::None);
+    FakeGame::Store<uint64_t>(outside.owner + 0xb8, world.End() - 8);
+    CHECK(names.Identify(TraceMemory{}, outside.Owner()) == Part::None);
+    FakeGame::Store<uint64_t>(outside.owner + 0xb8, 0x10);
+    CHECK(names.Identify(TraceMemory{}, outside.Owner()) == Part::None);
+    CHECK(!names.CrashContext(nullptr, 0) && !names.Tracking());
+
+    // Nothing seen yet: no lines, no crash context, and other monsters, and the Chimera, stay out of the trace.
+    runtime_cheats_start(0, 1, 1, 100, 1);
+    KrakenStart(kraken, true);
+    CHECK(KrakenContext().empty());
+    set_hp(goblin, 500);
+    set_hp(chimera, 9000);
+    CHECK(hit(goblin, 50) == 50 && hit(chimera, 50) == 50);
+    tick(300);
+    CHECK(g_trace_lines.empty() && KrakenContext().empty());
+
+    // A fight: the first hit starts it, the parts are seen once, the hooks' results are the game's own.
+    set_hp(body, 20000);
+    set_hp(tentacle, 3000);
+    set_hp(tentacle2, 3000);
+    set_hp(mast, 800);
+    CHECK(hit(body, 400) == 400 && FakeGame::Load<int32_t>(body.unit + kUnitHpOffset) == 20000);
+    CHECK(TraceCount("event=fight_start") == 1 && TraceHas("event=fight_start phase=fight round=0 room=17 dmgx=1"));
+    CHECK(TraceHas("event=part_seen part=Body id=0 phase=fight hp=20000 hit=400 tentacles=0 masts=0"));
+    CHECK(hit(tentacle, 100) == 100 && hit(tentacle2, 100) == 100);
+    CHECK(TraceCount("event=part_seen part=Tentacle") == 2 && TraceHas("part=Tentacle id=1 phase=fight hp=3000 hit=100 tentacles=1"));
+    CHECK(hit(tentacle, 100) == 100);
+    CHECK(TraceCount("event=part_seen part=Tentacle") == 2 && TraceCount("event=fight_start") == 1);
+    CHECK(KrakenContext() == "Kraken phase=fight event=part_seen part=Tentacle link=unknown tentacles=2 masts=0 without_mast=0 body_hp=100% dmgx=1 t=0s");
+
+    // The first sample: neither tentacle holds a mast. Later samples change nothing, however many.
+    tick(300);
+    CHECK(TraceCount("event=mast_link part=Tentacle") == 2 && TraceHas("event=mast_link part=Tentacle id=1 phase=fight mast=none"));
+    CHECK(KrakenContext().find("tentacles=2 masts=0 without_mast=2") != std::string::npos);
+    const size_t settled = g_trace_lines.size();
+    for (int frame = 0; frame < 600; ++frame) {
+        tick(16);
+    }
+    CHECK(g_trace_lines.size() == settled);
+
+    // A tentacle holds a mast: the mast is followed, then its broken flag, then its loss.
+    hold_mast(tentacle, &mast);
+    tick(300);
+    CHECK(TraceHas("event=mast_link part=Tentacle id=1 phase=fight mast=present"));
+    CHECK(TraceHas("event=part_seen part=Mast id=3 phase=fight hp=800 via=tentacle tentacles=2 masts=1"));
+    CHECK(TraceHas("event=mast_link part=Mast id=3 phase=fight mast=present"));
+    CHECK(KrakenContext().find("tentacles=2 masts=1 without_mast=1") != std::string::npos);
+    set_broken(mast, 1);
+    tick(300);
+    CHECK(TraceHas("event=mast_link part=Tentacle id=1 phase=fight mast=broken") && TraceHas("event=mast_link part=Mast id=3 phase=fight mast=broken"));
+    set_hp(mast, 0);
+    hold_mast(tentacle, nullptr);
+    tick(300);
+    CHECK(TraceHas("event=part_defeated part=Mast id=3"));
+    CHECK(TraceCount("event=mast_link part=Tentacle id=1") == 4 && TraceHas("event=mast_link part=Tentacle id=1 phase=fight mast=none"));
+    CHECK(KrakenContext().find("event=part_defeated part=Mast link=broken tentacles=2 masts=0 without_mast=2") != std::string::npos);
+    FakeGame::Store<uint64_t>(mast.unit + kUnitOwnerOffset, 0);
+    tick(300);
+    CHECK(TraceHas("event=part_removed part=Mast id=3"));
+    const size_t after_mast = g_trace_lines.size();
+    tick(300);
+    CHECK(g_trace_lines.size() == after_mast);
+
+    // The body's HP is traced at each tenth; a tentacle's is not, and a defeat is said once.
+    set_hp(body, 9000);
+    tick(300);
+    CHECK(TraceHas("event=part_hp part=Body id=0 phase=fight hp=9000/20000 pct=40"));
+    set_hp(tentacle, 1500);
+    tick(300);
+    CHECK(TraceCount("event=part_hp part=Tentacle") == 0);
+    set_hp(body, 0);
+    tick(300);
+    CHECK(TraceCount("event=part_defeated part=Body") == 1 && KrakenContext().find("phase=body_down") != std::string::npos);
+    tick(300);
+    CHECK(TraceCount("event=part_defeated part=Body") == 1);
+
+    // A different round ends the fight once and keeps the last state for the report.
+    set_hp(tentacle, 0);
+    set_hp(tentacle2, 0);
+    tick(300);
+    CHECK(TraceCount("event=all_down") == 1 && KrakenContext().find("phase=all_down") != std::string::npos);
+    world.Place(9, 0, 3, false);
+    tick(300);
+    CHECK(TraceCount("event=fight_end") == 1 && TraceHas("event=fight_end phase=ended round=0 room=17 parts_seen=4 down_or_gone=4 dropped=0"));
+    const size_t ended = g_trace_lines.size();
+    tick(300);
+    tick(300);
+    CHECK(g_trace_lines.size() == ended && KrakenContext().find("Kraken phase=ended event=fight_end") == 0);
+    CHECK(TraceCount("Boss trace") == 0);
+
+    // The next fight starts clean: a new fight line and ids from zero.
+    world.Place(0, 0, 17, false);
+    set_hp(rock, 200);
+    CHECK(hit(rock, 10) == 10 && hit(rock, 10) == 10);
+    CHECK(TraceCount("event=fight_start") == 2 && TraceHas("event=part_seen part=Rock id=0 phase=fight hp=200 hit=10"));
+
+    // Damage Multiplier: the lethal check is traced where the game decides, once until it settles, and the hooks'
+    // results are the cheat's own.
+    runtime_cheats_start(0, 1, 1, 100, 5);
+    KrakenStart(kraken, true);
+    set_hp(mast, 100);
+    FakeGame::Store<uint64_t>(mast.unit + kUnitOwnerOffset, mast.Owner());
+    CHECK(lethal_check(mast, 30) == 150 && lethal_check(mast, 30) == 150 && hit(mast, 30) == 30);
+    CHECK(TraceHas("event=fight_start phase=fight round=0 room=17 dmgx=5"));
+    CHECK(TraceCount("event=lethal_check part=Mast") == 1 && TraceHas("hp=100 hit=30 dmgx=5 native_lethal=0"));
+    tick(300);
+    CHECK(TraceCount("event=part_defeated") == 0);
+    tick(1200);
+    CHECK(TraceCount("event=lethal_left part=Mast") == 1 && TraceHas("event=lethal_left part=Mast id=0 phase=fight hp=30/100"));
+    runtime_cheats_start(0, 1, 1, 100, 10);
+    tick(300);
+    CHECK(TraceCount("event=multiplier") == 1 && TraceHas("event=multiplier phase=fight dmgx=10"));
+    tick(300);
+    CHECK(TraceCount("event=multiplier") == 1);
+
+    // An image whose tentacle layout was not verified: hits are traced, the handle is never read.
+    runtime_cheats_start(0, 1, 1, 100, 1);
+    KrakenStart(kraken, false);
+    FakeGame::Store<uint64_t>(tentacle.owner + dcp::krakentrace::kTentacleMastOffset, 0x10);
+    set_hp(tentacle, 3000);
+    CHECK(hit(tentacle, 100) == 100);
+    tick(300);
+    tick(300);
+    CHECK(TraceHas("event=part_seen part=Tentacle") && TraceCount("event=mast_link") == 0);
+    hold_mast(tentacle, nullptr);
+
+    // A handle that does not point at a mast is reported as another object and is not followed.
+    KrakenStart(kraken, true);
+    hold_mast(tentacle, &goblin);
+    CHECK(hit(tentacle, 100) == 100);
+    tick(300);
+    CHECK(TraceHas("event=mast_link part=Tentacle id=0 phase=fight mast=other") && TraceCount("part=Mast") == 0);
+    hold_mast(tentacle, nullptr);
+
+    // The fix answering a null mast handle: one line per tentacle, a few per fight, and none without a trace.
+    runtime_cheats_start(0, 1, 1, 100, 5);
+    KrakenStart(kraken, true);
+    set_hp(tentacle, 3000);
+    CHECK(hit(tentacle, 10) == 10);
+    for (int call = 0; call < 100; ++call) {
+        runtime_kraken_null_mast(tentacle.Owner());
+    }
+    CHECK(TraceCount("event=null_mast_guard") == 1 &&
+          TraceHas("event=null_mast_guard part=Tentacle id=0 phase=fight mast=none action=not_broken"));
+    CHECK(KrakenContext().find("event=null_mast_guard part=Tentacle link=none") != std::string::npos);
+    runtime_kraken_null_mast(tentacle2.Owner());
+    CHECK(TraceCount("event=null_mast_guard") == 2 && TraceHas("event=null_mast_guard phase=fight part=Tentacle mast=none action=not_broken"));
+    std::vector<std::unique_ptr<FakeGame>> others;
+    for (size_t i = 0; i < 8; ++i) {
+        others.push_back(std::make_unique<FakeGame>(false, 0));
+        runtime_kraken_null_mast(others.back()->Owner());
+    }
+    CHECK(TraceCount("event=null_mast_guard") == dcp::krakentrace::kMaxGuardLines);
+    const size_t guarded = g_trace_lines.size();
+    for (const auto& other : others) {
+        runtime_kraken_null_mast(other->Owner());
+    }
+    CHECK(g_trace_lines.size() == guarded);
+    KrakenStart(kraken, true);
+    runtime_kraken_null_mast(tentacle2.Owner());
+    CHECK(TraceHas("event=fight_start phase=fight round=0 room=17 dmgx=5") && TraceCount("event=null_mast_guard") == 1);
+    runtime_cheats_start(0, 1, 1, 100, 1);
+
+    // The trace is bounded: a run of changes ends in one notice and then nothing.
+    KrakenStart(kraken, true);
+    set_hp(body, 100000);
+    CHECK(hit(body, 1) == 1);
+    for (int step = 0; step < 400; ++step) {
+        set_hp(body, step % 2 == 0 ? 20000 : 90000);
+        tick(300);
+    }
+    CHECK(g_trace_lines.size() == dcp::krakentrace::kMaxLines + 1 && g_trace_lines.back().find("line limit reached") != std::string::npos);
+
+    // The parts table is bounded too: more parts than it holds are counted and the rest ignored.
+    KrakenStart(kraken, true);
+    std::vector<std::unique_ptr<FakeGame>> crowd;
+    for (size_t i = 0; i < dcp::krakentrace::kMaxParts + 4; ++i) {
+        crowd.push_back(std::make_unique<FakeGame>(false, 0));
+        world.Name(*crowd.back(), KrakenWorld::kRock);
+        set_hp(*crowd.back(), 100);
+        CHECK(hit(*crowd.back(), 1) == 1);
+    }
+    world.Place(1, 0, 0, false);
+    tick(300);
+    CHECK(TraceHas("event=fight_end phase=ended round=0 room=17 parts_seen=32 down_or_gone=0 dropped=4"));
+
+    // The crash report text is cut to the buffer it is given and always ends the string.
+    world.Place(0, 0, 17, false);
+    KrakenStart(kraken, true);
+    CHECK(hit(body, 10) == 10);
+    char small[16];
+    std::memset(small, 'x', sizeof(small));
+    CHECK(KrakenCrashContext(small, sizeof(small) - 4) && std::memchr(small, '\0', sizeof(small) - 4) != nullptr &&
+          small[sizeof(small) - 4] == 'x' && std::strncmp(small, "Kraken phase=fight", 11) == 0);
+
+    // Without a game context function or an image, the hooks trace nothing and read nothing extra.
+    SetGuestFunctions({nullptr, nullptr});
+    g_trace_lines.clear();
+    CHECK(hit(body, 5) == 5);
+    tick(300);
+    ConfigureKrakenTrace(0, 0, false, nullptr);
+    CHECK(hit(body, 5) == 5 && !KrakenCrashContext(small, sizeof(small)));
+    g_trace_lines.clear();
+    runtime_kraken_null_mast(tentacle.Owner());
+    CHECK(g_trace_lines.empty());
+    runtime_cheats_start(0, 1, 1, 100, 1);
+    ConfigureBossTrace(0, 0, nullptr);
+    SetGuestFunctions({nullptr, nullptr});
+}
+
+// The sites the trace and the report stand on, in every local boot image: the tentacle's unguarded read of its mast
+// handle, and the class names the constructors store.
+void CheckKrakenImage(const std::string& label, const std::vector<uint8_t>& image) {
+    const std::vector<int> unguarded_read = {0x49, 0x8b, 0x87, 0xd8, 0x38, 0x00, 0x00, 0x80, 0xb8, 0xc1, 0x38, 0x00, 0x00, 0x00};
+    CHECK(FindPattern(image, unguarded_read).size() == 1);
+    const char* const classes[] = {"DcKraken_Body", "DcKraken_Mouth",   "DcKraken_DefenseArm", "DcKraken_AttackArm",
+                                   "DcKraken_Rock", "DcKrakenTentacle", "DcKrakenTentacleMast"};
+    for (const char* name : classes) {
+        const std::vector<int> bytes(name, name + std::strlen(name) + 1);
+        const std::vector<size_t> found = FindPattern(image, bytes);
+        CHECK(found.size() == 1);
+        if (found.size() != 1) {
+            std::printf("kraken trace image %s: %s missing\n", label.c_str(), name);
+            continue;
+        }
+        size_t stored = 0;
+        for (size_t at = 3; at + 160 < 0x800000 && at + 160 < image.size(); ++at) {
+            int32_t disp;
+            std::memcpy(&disp, image.data() + at + 3, 4);
+            if ((image[at] == 0x48 || image[at] == 0x4c) && image[at + 1] == 0x8d && (image[at + 2] & 0xc7) == 0x05 &&
+                at + 7 + disp == found[0]) {
+                for (size_t k = at + 7; k < at + 160; ++k) {
+                    if ((image[k] == 0x48 || image[k] == 0x49 || image[k] == 0x4c || image[k] == 0x4d) && image[k + 1] == 0x89 &&
+                        (image[k + 2] & 0xc0) == 0x80 && image[k + 3] == 0xb8 && image[k + 4] == 0 && image[k + 5] == 0 && image[k + 6] == 0) {
+                        ++stored;
+                        break;
+                    }
+                }
+            }
+        }
+        CHECK(stored == 1);
+    }
+}
+
+void TestKrakenImages() {
+    const char* const folders[] = {"v1.03", "CUSA07001-1.00", "CUSA07001-1.02", "CUSA07001-1.03", "CUSA10209-1.00"};
+    int checked = 0;
+    for (const char* folder : folders) {
+        std::vector<uint8_t> image;
+        if (ReadBootImage(fs::path(DCP_SOURCE_DIR) / "build" / "image" / folder / "boot.bin", &image)) {
+            CheckKrakenImage(folder, image);
+            ++checked;
+        }
+    }
+    std::vector<uint8_t> update;
+    if (ReadBootImage(fs::path(DCP_SOURCE_DIR) / "build" / "research" / "image" / "CUSA10454-1.01" / "boot.bin", &update)) {
+        CheckKrakenImage("CUSA10454-1.01", update);
+        ++checked;
+    }
+    std::printf("kraken trace: %d local boot images checked\n", checked);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -4315,6 +4656,8 @@ int main(int argc, char** argv) {
     TestDamageMultiplier();
     TestBossTrace();
     TestBossTraceImages();
+    TestKrakenTrace();
+    TestKrakenImages();
     TestDurability();
     TestLocalMultiplayer();
     TestSeatOwnership();

@@ -41,6 +41,7 @@
 #include "game_translation.h"
 #include "latin_glyphs.h"
 #include "gallery_unlock.h"
+#include "kraken_fix.h"
 #include "feature_sites.h"
 #include "game_files.h"
 #include "game_patches.h"
@@ -1456,7 +1457,8 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
     const size_t room = cheat_stubs + startup_save_hook_stub_bytes() + voice_hooks_stub_bytes() +
                         system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes() +
                         exit_game_hook_stub_bytes() + skip_intro_stub_bytes() + gallery_unlock_stub_bytes() +
-                        boss_battle_stub_bytes() + endgame_unlocks_stub_bytes() + appearance_hooks_stub_bytes();
+                        boss_battle_stub_bytes() + endgame_unlocks_stub_bytes() + kraken_fix_stub_bytes() +
+                        appearance_hooks_stub_bytes();
     std::vector<uint8_t> memory(base + room + page, 0);
     std::memcpy(memory.data(), image.bytes.data(), size);
     uint8_t* area = memory.data() + base;
@@ -1476,6 +1478,7 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
     uint8_t* gallery_area = take(gallery_unlock_stub_bytes());
     uint8_t* boss_battle_area = take(boss_battle_stub_bytes());
     uint8_t* endgame_area = take(endgame_unlocks_stub_bytes());
+    uint8_t* kraken_area = take(kraken_fix_stub_bytes());
     uint8_t* appearance_area = take(appearance_hooks_stub_bytes());
     uint8_t* image_bytes = memory.data();
 
@@ -1625,6 +1628,10 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
         CHECK(endgame_unlocks_install(image_bytes, size, entry, Key(build).c_str(), both, endgame_area,
                                       endgame_unlocks_stub_bytes()) == both);
         endgame_unlocks_set(0);
+        uint64_t kraken_site = 0;
+        CHECK(kraken_fix_locate(image.bytes.data(), size, Key(build).c_str(), &kraken_site) == 1 && kraken_site != 0);
+        CHECK(kraken_fix_install(image_bytes, size, entry, Key(build).c_str(), kraken_area, kraken_fix_stub_bytes()) == 1);
+        CHECK(kraken_site != 0 && image_bytes[kraken_site] == 0xe9);
     }
     const bool offline_appearance = InstallAppearance(build, image_bytes, size, entry, appearance_area);
 
