@@ -84,6 +84,7 @@ std::vector<Info> Hotkeys() {
             {dcp::Tr("Cheats menu"), KeyName(settings.menu_key)},
             {dcp::Tr("Display mode"), KeyName(settings.window_mode_key)},
             {dcp::Tr("Comms Wheel"), KeyName(settings.comms_key)},
+            {dcp::Tr("Exit Game"), DcpOptions::ExitGameHotkeyText(KeyName(settings.exit_key), settings.controller_exit_shortcut)},
             {dcp::Tr("Frame counter"), KeyName(DcpPing::kFpsKey)},
             {dcp::Tr("Ping (Online Play)"), KeyName(DcpPing::kPingKey)}};
 }

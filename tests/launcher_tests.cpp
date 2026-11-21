@@ -2510,6 +2510,88 @@ void TestControllerRumbleSettings(const fs::path& base) {
     CHECK(portuguese.find("Controller Rumble\tVibração do controle\n") != std::string::npos);
 }
 
+void TestControllerExitShortcutSettings(const fs::path& base) {
+    const fs::path file = base / "controller_exit_shortcut" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int shortcut = 0, hotkey = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        shortcut += setting.key == kControllerExitShortcutKey && setting.default_value == "1";
+        hotkey += setting.key == "hotkey_exit_game" && setting.default_value == "f9";
+    }
+    CHECK(shortcut == 1 && hotkey == 1 && std::string(kControllerExitShortcutKey) == "controller_exit_shortcut");
+    CHECK(std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].ini_key) == "hotkey_exit_game" &&
+          std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].label) == "Exit Game" &&
+          dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].default_scancode == SDL_SCANCODE_F9 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 1);
+
+    // Default F9, rebind, reset; the key is a saved name the runtime reads at start.
+    {
+        const LauncherSettings fresh(file);
+        CHECK(SavedKey(fresh, DCP_KEY_HOTKEY_EXIT_GAME) == SDL_SCANCODE_F9 && fresh.GetBool(kControllerExitShortcutKey, true));
+        CHECK(KeyDisplayName(SavedKey(fresh, DCP_KEY_HOTKEY_EXIT_GAME)) == "F9");
+    }
+    {
+        LauncherSettings settings(file);
+        SetKey(settings, DCP_KEY_HOTKEY_EXIT_GAME, SDL_SCANCODE_F8);
+        settings.SetBool(kControllerExitShortcutKey, false);
+        CHECK(settings.Save());
+    }
+    const std::string written = ReadAll(file);
+    CHECK(WrittenValue(written, "hotkey_exit_game", "f8") && WrittenValue(written, kControllerExitShortcutKey, "0"));
+    {
+        const LauncherSettings reloaded(file);
+        CHECK(SavedKey(reloaded, DCP_KEY_HOTKEY_EXIT_GAME) == SDL_SCANCODE_F8 && !reloaded.GetBool(kControllerExitShortcutKey, true));
+    }
+    DcpSettings::Values values;
+    CHECK(DcpSettings::Read(file.string(), values) && values.exit_key == SDL_SCANCODE_F8 && !values.controller_exit_shortcut);
+    DcpKeyMap map;
+    dcp_keys_load(file.string().c_str(), &map);
+    CHECK(map.scancode[DCP_KEY_HOTKEY_EXIT_GAME] == SDL_SCANCODE_F8);
+    {
+        LauncherSettings settings(file);
+        ResetKeys(settings);
+        CHECK(SavedKey(settings, DCP_KEY_HOTKEY_EXIT_GAME) == SDL_SCANCODE_F9);
+        CHECK(!settings.GetBool(kControllerExitShortcutKey, true)); // the key reset changes no other setting
+        settings.ResetToDefaults();
+        CHECK(settings.GetBool(kControllerExitShortcutKey, false) && SavedKey(settings, DCP_KEY_HOTKEY_EXIT_GAME) == SDL_SCANCODE_F9);
+    }
+
+    // Bad saved values: the defaults.
+    WriteAll(file, "hotkey_exit_game = escape\ncontroller_exit_shortcut = banana\n");
+    {
+        const LauncherSettings bad(file);
+        CHECK(SavedKey(bad, DCP_KEY_HOTKEY_EXIT_GAME) == SDL_SCANCODE_F9 && bad.GetBool(kControllerExitShortcutKey, true));
+    }
+    DcpSettings::Values fallback;
+    CHECK(DcpSettings::Read(file.string(), fallback) && fallback.exit_key == SDL_SCANCODE_F9 && fallback.controller_exit_shortcut);
+
+    // The Controls page: the key row in Port hotkeys, then Controller shortcuts with the fixed Options chord and the toggle.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t controls = launcher.find("void PageControls(trg::Ui& ui) {");
+    const size_t hotkeys = launcher.find("ui.Section(\"Port hotkeys\", true)", controls);
+    const size_t section = launcher.find("ui.Section(\"Controller shortcuts\", true)", controls);
+    const std::string toggle =
+        "ui.Toggle(\"Controller Exit Shortcut\", kControllerExitShortcutHelp, kControllerExitShortcutKey, true, \"Off\", \"On\");";
+    const size_t row = launcher.find(toggle, section);
+    CHECK(controls != std::string::npos && hotkeys < section && section < row && launcher.find(toggle, row + 1) == std::string::npos);
+    const size_t options_chord = launcher.find("ui.Info(\"Options menu\", \"L3 + R3\");", section);
+    CHECK(options_chord != std::string::npos && options_chord < row && launcher.find("ui.Info(\"Options menu\"", options_chord + 1) == std::string::npos);
+    CHECK(launcher.find("for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {", hotkeys) < section);
+    CHECK(launcher.find("\"Hold L1 + R1 + Options for 2 seconds to close the game. Applies at the next game start.\"") != std::string::npos);
+    CHECK(launcher.find("ui.Toggle(\"Controller Exit Shortcut\"", row + 1) == std::string::npos);
+
+    const std::string portuguese = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    for (const char* line : {"Exit Game\tSair do jogo\n", "Controller shortcuts\tAtalhos do controle\n",
+                             "Controller Exit Shortcut\tAtalho de saída pelo controle\n",
+                             "Hold L1 + R1 + Options for 2 seconds to close the game. Applies at the next game start.\t"
+                             "Segure L1 + R1 + Options por 2 segundos para fechar o jogo. Vale a partir do próximo início do jogo.\n"}) {
+        CHECK(portuguese.find(line) != std::string::npos);
+    }
+
+    // The runtime side is host-level: the setting comes from the video core's settings, no build, hook or locator.
+    const std::string pad = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "runtime_pad.c");
+    CHECK(pad.find("dcp_exit_chord_down(dcpgpu_controller_exit_shortcut(),") != std::string::npos);
+}
+
 void TestSkipOfferSettings(const fs::path& base) {
     const fs::path file = base / "skip_offers" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -9239,6 +9321,7 @@ int main(int argc, char** argv) {
     TestSkipOfferSettings(base);
     TestSkipIntroSettings(base);
     TestControllerRumbleSettings(base);
+    TestControllerExitShortcutSettings(base);
     TestUnlockGallerySettings(base);
     TestEnableBossBattleSettings(base);
     TestEndgameUnlockSettings(base);

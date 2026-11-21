@@ -74,7 +74,7 @@ Linux offers every Windows feature except **Allow overlay programs**. Where the 
 | `tools\package-release.ps1` | builds the AppImage in WSL2 with `tools/package-release-linux.sh`, or run `tools/package-linux.sh` on Linux |
 | **Allow overlay programs** starts the game as a process of its own so overlay DLLs attach to a clean process | not offered: Linux overlays are Vulkan layers and `LD_PRELOAD` libraries that attach to every process the same way, and no Linux overlay crash has been reported |
 
-Everything else (display mode, F11, window size, monitor and graphics card selection, VSync, render resolutions,
+Everything else (display mode, F11, the Exit Game shortcuts F9 and L1 + R1 + Options, window size, monitor and graphics card selection, VSync, render resolutions,
 the Frame rate option, Experimental True Ultrawide, SMAA, texture filtering, FSR 1 and RCAS, the experimental AMD water workaround,
 the processor check, BMI1 emulation and the LZCNT rewrite, Online Play (Friends, rooms, the connection test, the cheat
 lock, the System type on player cards), the Story and Tutorial Skip Offers, the Menu & Subtitles languages, F2 frame

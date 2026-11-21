@@ -106,6 +106,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.japanese_menu_buttons = ParseBool(value, v.japanese_menu_buttons);
     } else if (key == "controller_rumble") {
         v.controller_rumble = ParseBool(value, v.controller_rumble);
+    } else if (key == "controller_exit_shortcut") {
+        v.controller_exit_shortcut = ParseBool(value, v.controller_exit_shortcut);
     } else if (key == "mouse_pointer_sensitivity") {
         v.mouse_sensitivity = dcp_mouse_setting_value_valid(key.c_str(), value.c_str())
                                   ? dcp_pointer_sensitivity_normalize(ParseInt(value, 100))
@@ -129,7 +131,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "frame_rate") {
         v.frame_rate = DcpFramePacing::ParseFrameRate(value);
     } else if (const int scancode = dcp_key_from_name(value.c_str()); scancode != 0) {
-        std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key, &v.comms_key};
+        std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key, &v.comms_key, &v.exit_key};
+        static_assert(std::size(hotkeys) == DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY, "one setting per port hotkey");
         for (int i = 0; i < DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY; ++i) {
             if (key == dcp_key_actions[DCP_KEY_FIRST_HOTKEY + i].ini_key) {
                 *hotkeys[i] = scancode;

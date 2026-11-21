@@ -265,7 +265,8 @@ void TestHitMapping() {
 }
 
 void TestKeyBinding() {
-    CHECK(DCP_KEY_HOTKEY_COMMS_WHEEL == DCP_KEY_COUNT - 1 && DCP_KEY_HOTKEY_COMMS_WHEEL >= DCP_KEY_FIRST_HOTKEY);
+    CHECK(DCP_KEY_HOTKEY_COMMS_WHEEL == DCP_KEY_HOTKEY_EXIT_GAME - 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 1 &&
+          DCP_KEY_HOTKEY_COMMS_WHEEL >= DCP_KEY_FIRST_HOTKEY);
     CHECK(!std::strcmp(dcp_key_actions[DCP_KEY_HOTKEY_COMMS_WHEEL].ini_key, "hotkey_comms_wheel"));
     CHECK(!std::strcmp(dcp_key_actions[DCP_KEY_HOTKEY_COMMS_WHEEL].label, "Comms Wheel"));
     DcpKeyMap map;
@@ -280,7 +281,7 @@ void TestKeyBinding() {
     const std::string settings = ReadSource("gpu/shim/dcp_settings.h");
     CHECK(settings.find("comms_key{SDL_SCANCODE_T}") != std::string::npos);
     const std::string settings_cpp = ReadSource("gpu/shim/dcp_settings.cpp");
-    CHECK(settings_cpp.find("&v.window_mode_key, &v.comms_key}") != std::string::npos);
+    CHECK(settings_cpp.find("&v.window_mode_key, &v.comms_key, &v.exit_key}") != std::string::npos);
     for (const char* file : {"gpu/shim/dcp_comms_wheel.cpp", "gpu/shim/dcp_comms_wheel.h", "src/runtime_pad.c", "gpu/shim/dcp_overlay.cpp"}) {
         CHECK(ReadSource(file).find("SDL_SCANCODE_T") == std::string::npos);
     }

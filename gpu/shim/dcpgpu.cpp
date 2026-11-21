@@ -346,6 +346,10 @@ extern "C" void dcpgpu_set_controller_rumble(int enabled) {
     DcpSettings::Get().controller_rumble = enabled != 0;
 }
 
+extern "C" int dcpgpu_controller_exit_shortcut(void) {
+    return DcpSettings::Get().controller_exit_shortcut ? 1 : 0;
+}
+
 extern "C" int dcpgpu_latency_trace_enabled(void) {
     return DcpLatencyTrace::enabled ? 1 : 0;
 }

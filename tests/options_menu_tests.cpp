@@ -751,7 +751,8 @@ void TestLauncherParity() {
         "online_connection_test_port",
         "show_ping",
         "show_in_lobby", "early_story_online",
-        "dcp_japanese_npc_voices"};
+        "dcp_japanese_npc_voices",
+        "controller_exit_shortcut"};
     const auto has = [](const std::vector<std::string>& list, const std::string& key) {
         return std::find(list.begin(), list.end(), key) != list.end();
     };
@@ -1409,6 +1410,57 @@ void TestConnectionLinesAreTranslated() {
     dcp::localization::SetActiveLanguage("english");
 }
 
+void TestExitGameHotkeyInfo(const fs::path& folder) {
+    const std::string chord = "L1 + R1 + Options";
+    DcpSettings::Values defaults;
+    Check(defaults.exit_key == SDL_SCANCODE_F9 && defaults.controller_exit_shortcut,
+          "Exit Game is F9 with the controller shortcut on by default");
+    Check(DcpOptions::ExitGameHotkeyText("F9", defaults.controller_exit_shortcut) == "F9  /  " + chord,
+          "F1 lists the key and the controller chord while the shortcut is on");
+    Check(DcpOptions::ExitGameHotkeyText("F9", false) == "F9" && !Contains(DcpOptions::ExitGameHotkeyText("F9", false), "L1"),
+          "F1 lists only the key while the controller shortcut is Off");
+
+    const fs::path file = folder / "exit_game.ini";
+    WriteFile(file, "hotkey_exit_game = pause\ncontroller_exit_shortcut = 0\n");
+    DcpSettings::Values saved;
+    Check(DcpSettings::Read(file.string(), saved) && saved.exit_key == SDL_SCANCODE_PAUSE && !saved.controller_exit_shortcut,
+          "a saved key and an Off shortcut are read");
+    Check(DcpOptions::ExitGameHotkeyText("Pause", saved.controller_exit_shortcut) == "Pause",
+          "a rebound key is shown instead of F9");
+    WriteFile(file, "hotkey_exit_game = notakey\ncontroller_exit_shortcut = banana\n");
+    DcpSettings::Values bad;
+    Check(DcpSettings::Read(file.string(), bad) && bad.exit_key == SDL_SCANCODE_F9 && bad.controller_exit_shortcut,
+          "an invalid key and an invalid flag keep the defaults");
+    WriteFile(file, "hotkey_exit_game = escape\n");
+    DcpSettings::Values escape;
+    Check(DcpSettings::Read(file.string(), escape) && escape.exit_key == SDL_SCANCODE_F9, "Escape is never bound");
+    WriteFile(file, "controller_exit_shortcut = 1\nhotkey_cheats_menu = f8\n");
+    DcpSettings::Values other;
+    Check(DcpSettings::Read(file.string(), other) && other.exit_key == SDL_SCANCODE_F9 && other.menu_key == SDL_SCANCODE_F8,
+          "another hotkey never moves Exit Game");
+
+    constexpr uint32_t kL1 = 1u << 9, kR1 = 1u << 10, kStart = 1u << 6; // SDL_GamepadButton values
+    dcp::menu::Chord options_chord(kL3 | kR3);
+    Check(!options_chord.Poll(kL1 | kR1 | kStart) && !options_chord.Poll(kL1 | kR1 | kStart | kL3) &&
+              options_chord.Poll(kL1 | kR1 | kStart | kL3 | kR3),
+          "the exit chord never opens the Options menu, and L3 + R3 still does with it held");
+
+    const std::string menu = Source("gpu/shim/dcp_options_menu.cpp");
+    Check(Contains(menu, "{dcp::Tr(\"Exit Game\"), DcpOptions::ExitGameHotkeyText(KeyName(settings.exit_key), settings.controller_exit_shortcut)}"),
+          "the Hotkeys list shows Exit Game from the saved key and the setting");
+    Check(Contains(menu, "{dcp::Tr(\"Options menu\"), KeyName(DcpOptions::kKey) + \"  /  L3 + R3\"}"),
+          "the Options menu chord line is unchanged");
+    Check(Contains(menu, "constexpr uint32_t kChordButtons = (1u << SDL_GAMEPAD_BUTTON_LEFT_STICK) | (1u << SDL_GAMEPAD_BUTTON_RIGHT_STICK);"),
+          "the Options menu chord is still L3 + R3");
+    // The chord is fixed text: no setting row lets F1 edit it, and F1 has no row for the controller shortcut.
+    for (const DcpOptions::Setting& setting : DcpOptions::kSettings) {
+        Check(std::string(setting.key) != "controller_exit_shortcut" && std::string(setting.key) != "hotkey_exit_game",
+              "F1 does not edit the Exit Game shortcuts");
+    }
+    const std::string portuguese = Source("launcher/localization/pt_br_ui_text.cpp");
+    Check(Contains(portuguese, "Exit Game\tSair do jogo\n"), "the Exit Game label is translated");
+}
+
 void TestNoBuildIdentity() {
     const char* const files[] = {"gpu/shim/dcp_options_menu.h", "gpu/shim/dcp_options_menu.cpp",
                                  "gpu/shim/dcp_options_ui.h",   "gpu/shim/dcp_options_online.h",
@@ -1445,6 +1497,7 @@ int main() {
     TestUnlockGallery(folder);
     TestJapaneseMenuButtons(folder);
     TestControllerRumble(folder);
+    TestExitGameHotkeyInfo(folder);
     TestMouseControls(folder);
     TestEnableBossBattle(folder);
     TestEndgameUnlocks(folder);

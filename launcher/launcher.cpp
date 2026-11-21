@@ -171,6 +171,8 @@ constexpr char kVoiceLanguageHelp[] =
     "narrator. Each keeps its own voice; only the language changes. Menu & Subtitles do not change. Game Default "
     "leaves the game's own choice. Applies at the next game start.";
 constexpr char kControllerRumbleHelp[] = "Off disables controller vibration. Applies at the next game start.";
+constexpr char kControllerExitShortcutHelp[] =
+    "Hold L1 + R1 + Options for 2 seconds to close the game. Applies at the next game start.";
 constexpr char kMouseControlsEnabledHelp[] = "Enables mouse buttons, wheel and pointer controls during gameplay.";
 constexpr char kMouseControlsHelp[] =
     "Used together with the keyboard and the controller while Mouse Controls is On. Each mouse button presses one "
@@ -1213,6 +1215,10 @@ private:
             for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {
                 KeyRow(ui, static_cast<DcpKeyAction>(action));
             }
+        }
+        if (ui.Section("Controller shortcuts", true)) {
+            ui.Info("Options menu", "L3 + R3");
+            ui.Toggle("Controller Exit Shortcut", kControllerExitShortcutHelp, kControllerExitShortcutKey, true, "Off", "On");
         }
     }
 

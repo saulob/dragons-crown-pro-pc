@@ -292,7 +292,7 @@ void TestConfigFile() {
 
 void TestKeyboardMappingsUnchanged() {
     // The keyboard layout and the saved key names are what they were before the mouse bindings existed.
-    CHECK(DCP_KEY_COUNT == 28 && DCP_KEY_FIRST_HOTKEY == 25);
+    CHECK(DCP_KEY_COUNT == 29 && DCP_KEY_FIRST_HOTKEY == 25 && DCP_KEY_HOTKEY_EXIT_GAME == 28);
     DcpKeyMap keys;
     dcp_keys_defaults(&keys);
     CHECK(keys.scancode[DCP_KEY_LEFT_STICK_UP] == dcp_key_from_name("w") && keys.scancode[DCP_KEY_LEFT_STICK_LEFT] == dcp_key_from_name("a"));
@@ -300,6 +300,7 @@ void TestKeyboardMappingsUnchanged() {
     CHECK(keys.scancode[DCP_KEY_SQUARE] == dcp_key_from_name("e") && keys.scancode[DCP_KEY_TRIANGLE] == dcp_key_from_name("q"));
     CHECK(keys.scancode[DCP_KEY_TOUCHPAD_LEFT] == dcp_key_from_name("tab") && keys.scancode[DCP_KEY_TOUCHPAD_RIGHT] == dcp_key_from_name("backspace"));
     CHECK(keys.scancode[DCP_KEY_HOTKEY_CHEATS] == dcp_key_from_name("f10") && keys.scancode[DCP_KEY_HOTKEY_WINDOW_MODE] == dcp_key_from_name("f11"));
+    CHECK(keys.scancode[DCP_KEY_HOTKEY_COMMS_WHEEL] == dcp_key_from_name("t") && keys.scancode[DCP_KEY_HOTKEY_EXIT_GAME] == dcp_key_from_name("f9"));
 
     // Mouse lines, whose values (left, right...) are also arrow key names, never touch the keyboard map, and keyboard
     // lines never touch the mouse map.
@@ -324,6 +325,38 @@ void TestKeyboardMappingsUnchanged() {
     for (const DcpKeyInfo& action : dcp_key_actions) {
         CHECK(!dcp_mouse_setting_key(action.ini_key));
     }
+    fs::remove_all(directory);
+}
+
+void TestExitGameHotkey() {
+    CHECK(DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_HOTKEY_COMMS_WHEEL + 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 1);
+    CHECK(std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].ini_key) == "hotkey_exit_game" &&
+          std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].label) == "Exit Game");
+    DcpKeyMap keys;
+    dcp_keys_defaults(&keys);
+    CHECK(keys.scancode[DCP_KEY_HOTKEY_EXIT_GAME] == dcp_key_from_name("f9") && keys.scancode[DCP_KEY_HOTKEY_EXIT_GAME] != dcp_key_from_name("f12"));
+    for (int i = 0; i < DCP_KEY_HOTKEY_EXIT_GAME; ++i) {
+        CHECK(keys.scancode[i] != keys.scancode[DCP_KEY_HOTKEY_EXIT_GAME]);
+    }
+
+    const fs::path directory = fs::temp_directory_path() / "dcp_mouse_tests_exit_key";
+    fs::create_directories(directory);
+    const std::string file = (directory / "dcp.ini").string();
+    DcpKeyMap loaded;
+    std::ofstream(file) << "hotkey_exit_game = Pause # custom\n";
+    dcp_keys_load(file.c_str(), &loaded);
+    CHECK(loaded.scancode[DCP_KEY_HOTKEY_EXIT_GAME] == dcp_key_from_name("pause"));
+    CHECK(loaded.scancode[DCP_KEY_HOTKEY_CHEATS] == keys.scancode[DCP_KEY_HOTKEY_CHEATS]);
+    for (const char* bad : {"notakey", "escape", "", "none"}) {
+        std::ofstream(file) << "hotkey_exit_game = " << bad << "\n";
+        dcp_keys_load(file.c_str(), &loaded);
+        CHECK(loaded.scancode[DCP_KEY_HOTKEY_EXIT_GAME] == dcp_key_from_name("f9"));
+        CHECK(!dcp_keys_apply(&loaded, "hotkey_exit_game", bad));
+    }
+    CHECK(dcp_keys_apply(&loaded, "hotkey_exit_game", "x") && loaded.scancode[DCP_KEY_HOTKEY_EXIT_GAME] == dcp_key_from_name("x"));
+    dcp_keys_load((directory / "missing.ini").string().c_str(), &loaded);
+    CHECK(loaded.scancode[DCP_KEY_HOTKEY_EXIT_GAME] == dcp_key_from_name("f9"));
+    CHECK(!dcp_mouse_setting_key("hotkey_exit_game") && !dcp_mouse_setting_key("controller_exit_shortcut"));
     fs::remove_all(directory);
 }
 
@@ -3149,6 +3182,7 @@ int main() {
     TestSensitivityMultipliers();
     TestConfigFile();
     TestKeyboardMappingsUnchanged();
+    TestExitGameHotkey();
     TestNormalMouseButtons();
     TestPointerActivationAndConsumption();
     TestPointerClickButtonCanBeRemapped();

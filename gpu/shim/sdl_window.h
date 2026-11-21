@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "common/types.h"
 #include "dcp_cursor.h"
+#include "dcp_exit_shortcut.h"
 #include "dcp_mouse_capture.h"
 #include "dcp_renderer.h"
 
@@ -75,12 +76,16 @@ private:
     void UpdateMouseCapture();
     void ReleaseMouse();
     bool TrackControllerEvent(const SDL_Event& event);
+    void RequestExitShortcut(DcpExitEvent route, u32 held_ms);
+    void UpdateExitChord();
     unsigned HeldButtons() const;
     bool RightStickMoved(const SDL_Event& event) const;
     void HandleTouch(const SDL_Event& event, bool ui);
     std::unordered_map<u32, PadActivity> pad_activity; ///< window thread
     DcpCursor::State cursor; ///< window thread
     DcpMouseCapture::Tracker mouse_capture; ///< window thread
+    DcpExitChord exit_chord{}; ///< window thread: the L1 + R1 + Options hold of each controller
+    DcpExitTelemetry exit_telemetry{}; ///< window thread
     bool mouse_blocked = false; ///< window thread: the last state given to the mouse input
     static constexpr u64 kModeSettleMs = 300;
     u64 mouse_settle_until = 0; ///< window thread: SDL ticks until which Always On waits after a window mode switch

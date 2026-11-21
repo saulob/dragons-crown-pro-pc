@@ -8,6 +8,8 @@
 #include <SDL3/SDL.h>
 #include "common/assert.h"
 #include "dcp_displays.h"
+#include "dcp_exit_shortcut.h"
+#include "dcpgpu.h"
 #include "dcp_window_fit.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
@@ -100,6 +102,13 @@ void ClaimGamescopeTouch() {
     case DcpGamescopeTouch::Result::Unchanged:
         break;
     }
+}
+
+void LogExitShortcut() {
+    const char* key = SDL_GetScancodeName(SDL_Scancode(DcpSettings::Get().exit_key.load()));
+    char line[DCP_EXIT_LINE_SIZE];
+    dcp_exit_shortcut_ready_line(line, sizeof(line), key, DcpSettings::Get().controller_exit_shortcut);
+    std::puts(line);
 }
 
 void PublishTrackpadEnv() {
@@ -223,6 +232,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api
     ClaimGamescopeTouch();
     LogTouchRoute(DCP_TOUCH_ROUTE_READY);
     PublishTrackpadEnv();
+    LogExitShortcut();
     const std::string display_name = display && !display->name.empty() ? " (" + display->name + ")" : "";
     std::printf("Window: display %d of %zu%s, size %dx%d, VSync %s, frame rate in title %s, "
                 "resolution in title %s\n",
@@ -401,6 +411,7 @@ bool WindowSDL::TrackControllerEvent(const SDL_Event& event) {
     case SDL_EVENT_GAMEPAD_ADDED:
     case SDL_EVENT_GAMEPAD_REMOVED:
         pad_activity.erase(event.gdevice.which);
+        dcp_exit_chord_forget(&exit_chord, event.gdevice.which);
         return false;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP: {
@@ -428,6 +439,55 @@ bool WindowSDL::TrackControllerEvent(const SDL_Event& event) {
     }
     default:
         return false;
+    }
+}
+
+// Window thread. Keyboard and controller close the game through dcpgpu_request_close(), as the title's Exit Game row does.
+void WindowSDL::RequestExitShortcut(DcpExitEvent route, u32 held_ms) {
+    if (!dcpgpu_request_close()) {
+        return;
+    }
+    char line[DCP_EXIT_LINE_SIZE];
+    if (dcp_exit_telemetry_note(&exit_telemetry, route, held_ms, line, sizeof(line))) {
+        std::puts(line);
+    }
+}
+
+// Window thread, once per pump. Each opened controller is judged alone from its own buttons; the hold survives overlays and
+// dialogs opening, and ends with focus, the setting being off, or a button released.
+void WindowSDL::UpdateExitChord() {
+    if (!DcpSettings::Get().controller_exit_shortcut) {
+        dcp_exit_chord_clear(&exit_chord);
+        return;
+    }
+    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) == 0) {
+        dcp_exit_chord_cancel(&exit_chord);
+        return;
+    }
+    const u64 now_ms = SDL_GetTicks();
+    for (const auto& entry : pad_activity) {
+        SDL_Gamepad* const gamepad = SDL_GetGamepadFromID(entry.first);
+        if (!gamepad) {
+            dcp_exit_chord_forget(&exit_chord, entry.first);
+            continue;
+        }
+        u32 held_ms = 0;
+        switch (dcp_exit_chord_update(&exit_chord, entry.first, true, SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER),
+                                      SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER),
+                                      SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START), now_ms, &held_ms)) {
+        case DCP_EXIT_CHORD_STARTED: {
+            char line[DCP_EXIT_LINE_SIZE];
+            if (dcp_exit_telemetry_note(&exit_telemetry, DCP_EXIT_EVENT_CONTROLLER_HOLD_STARTED, 0, line, sizeof(line))) {
+                std::puts(line);
+            }
+            break;
+        }
+        case DCP_EXIT_CHORD_COMPLETED:
+            RequestExitShortcut(DCP_EXIT_EVENT_CONTROLLER_USED, held_ms);
+            break;
+        default:
+            break;
+        }
     }
 }
 
@@ -526,6 +586,9 @@ bool WindowSDL::PollEvents() {
         }
         const bool ui = DcpOverlay::CapturesInput();
         const bool controller_activity = TrackControllerEvent(event);
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+            dcp_exit_chord_cancel(&exit_chord);
+        }
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
@@ -551,6 +614,12 @@ bool WindowSDL::PollEvents() {
             text_active = false;
             SDL_StopTextInput(window);
             UpdateTextTitle();
+            continue;
+        }
+        // The keyboard route also works with the F1 and F10 menus and the game's dialogs open; typing never reaches it.
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            dcp_exit_key_pressed(event.key.scancode, event.key.repeat, DcpSettings::Get().exit_key)) {
+            RequestExitShortcut(DCP_EXIT_EVENT_KEYBOARD_USED, 0);
             continue;
         }
         if (DcpOverlay::HandleEvent(event)) {
@@ -659,6 +728,7 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
+    UpdateExitChord();
     UpdateMouseCapture();
     UpdateCursor();
     return is_open;

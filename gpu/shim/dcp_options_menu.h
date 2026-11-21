@@ -26,6 +26,11 @@ namespace DcpOptions {
 inline constexpr int kKey = SDL_SCANCODE_F1;
 inline constexpr char kTitle[] = "OPTIONS";
 
+// The Controls page's Exit Game line: the saved key, and the controller chord while that shortcut is on. Read only.
+inline std::string ExitGameHotkeyText(const std::string& key, bool controller_shortcut) {
+    return controller_shortcut ? key + "  /  L1 + R1 + Options" : key;
+}
+
 enum class Page { Display, Graphics, Gameplay, Online, Controls, Cheats };
 inline constexpr std::array kPages{Page::Display, Page::Graphics, Page::Gameplay,
                                    Page::Online,  Page::Controls, Page::Cheats};

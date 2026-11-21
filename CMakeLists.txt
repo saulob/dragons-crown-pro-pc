@@ -523,6 +523,7 @@ target_link_libraries(dcp-steam-deck-trackpad-tests PRIVATE dcp_keys)
 add_executable(dcp-window-tests EXCLUDE_FROM_ALL tests/window_fit_tests.cpp)
 set_target_properties(dcp-window-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp-window-tests PRIVATE src)
+target_compile_definitions(dcp-window-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-window-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the swapchain image count, present mode, Gamescope detection and the Gamescope-only flip pacing;

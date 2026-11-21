@@ -57,6 +57,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kSkipIntroKey, "0"},
     {kJapaneseMenuButtonsKey, "0"},
     {kControllerRumbleKey, "1"},
+    {kControllerExitShortcutKey, "1"},
     {kMouseControlsKey, "1"},
     {kMouseSensitivityKey, "100"},
     {kMousePointerModeKey, "hold"},

@@ -32,6 +32,7 @@ const DcpKeyInfo dcp_key_actions[DCP_KEY_COUNT] = {
     {"hotkey_cheats_menu", "Cheats menu", SDL_SCANCODE_F10},
     {"hotkey_window_mode", "Window mode", SDL_SCANCODE_F11},
     {"hotkey_comms_wheel", "Comms Wheel", SDL_SCANCODE_T},
+    {"hotkey_exit_game", "Exit Game", SDL_SCANCODE_F9},
 };
 
 static const struct { const char *name; int scancode; } aliases[] = {

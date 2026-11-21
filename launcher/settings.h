@@ -60,6 +60,8 @@ inline constexpr char kSkipIntroKey[] = "skip_intro";
 inline constexpr char kJapaneseMenuButtonsKey[] = "japanese_menu_buttons";
 // Forwards the game's vibration requests to the controllers (src/runtime_pad.c); On by default.
 inline constexpr char kControllerRumbleKey[] = "controller_rumble";
+// L1 + R1 + Options held for two seconds closes the game (src/dcp_exit_shortcut.h); On by default.
+inline constexpr char kControllerExitShortcutKey[] = "controller_exit_shortcut";
 inline constexpr char kMouseControlsKey[] = "mouse_controls";
 inline constexpr char kMouseSensitivityKey[] = "mouse_pointer_sensitivity";
 inline constexpr char kMousePointerModeKey[] = "mouse_pointer_mode";

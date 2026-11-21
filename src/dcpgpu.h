@@ -47,6 +47,8 @@ void dcpgpu_choice_set_input(uint32_t (*buttons)(void));
 /* Whether the game's vibration reaches the controllers (the Options menu changes it live). */
 int dcpgpu_controller_rumble(void);
 void dcpgpu_set_controller_rumble(int enabled);
+/* Whether L1 + R1 + Options held for two seconds closes the game; the pad hides the chord from the game while it is on. */
+int dcpgpu_controller_exit_shortcut(void);
 /* 1 while the settings menu is open: the game's pad input should be held neutral. */
 int dcpgpu_overlay_captures_input(void);
 /* The Comms Wheel's input, stepped by player 1's pad read: what the pad shows in, what to hide from the game out. `send` is a message id to send now (-1 none). */

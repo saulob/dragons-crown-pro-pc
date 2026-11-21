@@ -69,8 +69,11 @@ struct Values {
     std::atomic<double> display_refresh_hz{0.0};
     // Presentation pacing (driver.cpp). 0: Unlimited.
     std::atomic<int> frame_rate{60};
-    // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu, the window mode switch and the Comms Wheel.
-    std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11}, comms_key{SDL_SCANCODE_T};
+    // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu, the window mode switch, the Comms Wheel and Exit Game.
+    std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11}, comms_key{SDL_SCANCODE_T},
+        exit_key{SDL_SCANCODE_F9};
+    // Whether L1 + R1 + Options held for two seconds closes the game (src/dcp_exit_shortcut.h); read at start.
+    std::atomic<bool> controller_exit_shortcut{true};
 };
 
 Values& Get();

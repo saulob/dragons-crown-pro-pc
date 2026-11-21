@@ -78,6 +78,9 @@ PLAYING
 -------
 - F1 (or L3 + R3 on a controller) opens the Options menu.
 - F11 switches between Windowed and Borderless Fullscreen.
+- F9 closes the game (Alt+F4 still works); the Controls page can rebind it. Holding
+  L1 + R1 + Options on one controller for 2 seconds closes it too, and the
+  Controller Exit Shortcut setting turns that off. Neither needs Steam.
 - Xbox controllers work without setup.
 - The keyboard works too; the launcher's Controls page lists the keys.
 - The Controls page also chooses the button prompts the game shows: PlayStation

@@ -265,6 +265,8 @@ use the same defaults).
 | `skip_intro` | 1, 0 | 0 | at game start |
 | `japanese_menu_buttons` | 1, 0 | 0 | at game start |
 | `controller_rumble` | 1, 0 | 1 | at game start; F1 changes it at once |
+| `controller_exit_shortcut` | 1, 0 | 1 | at game start; L1 + R1 + Options held 2 seconds on one controller closes the game |
+| `hotkey_exit_game` | a key name | `f9` | at game start; closes the game like the title's Exit Game row |
 | `mouse_controls` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `unlock_gallery` | 1, 0 | 0 | at game start |
@@ -660,7 +662,9 @@ Xbox controllers work without setup; the keyboard is always on. SDL offers a dev
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 
-The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu and Window mode keys. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu, Window mode, Comms Wheel and Exit Game keys (F9 by default). A third section, **Controller shortcuts**, lists the fixed L3 + R3 Options menu chord and has the **Controller Exit Shortcut** setting (On by default): hold L1 + R1 + Options on one controller for 2 seconds to close the game. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+
+Exit Game shortcuts (`gpu/shim/window.cpp`, policy in `src/dcp_exit_shortcut.h`): the key closes on its press, never on a held key's repeats, and also works with the F1 and F10 menus and the game's dialogs open; typing a name never reaches it. The controller chord is judged for each controller alone, with a monotonic clock: all three buttons must stay down 2 seconds, releasing one restarts the count, and losing focus, unplugging the controller or turning the setting Off ends it; one hold gives one request. While the three are down the game sees none of them, and buttons still held afterwards stay hidden until released. Both routes call `dcpgpu_request_close()`, the function behind the title's Exit Game row, so the log shows `Exit Game: host exit scheduled` then `Exit Game: hard exit`. Neither depends on the game build, language, Online Play or Steam.
 
 Each binding is one line in `dcp.ini`: `key_cross = space`, `key_left_stick_up = w`, `hotkey_cheats_menu = f10`, `hotkey_window_mode = f11` (the full list is `src/dcp_keys.c`). The value is a key name, case-insensitive: the shadPS4 names for common keys (`space`, `enter`, `lshift`, `rctrl`, `pgup`, `kp5`, ...) or SDL's own key names (`F10`, `Left Shift`, `Keypad 5`); the launcher writes lowercase. A missing or invalid line is the default, so a config from an older build keeps the old layout. The same key may be bound to several controls and all of them follow it; a port hotkey is not exclusive of a game control either. The bindings are read when the game starts (`dcp_keys.c`, shared by the launcher, `runtime_pad.c` and the video core); the controller mapping and `DCP_PAD_MAP` are unchanged, and `DCP_KEY_MAP` still overrides the buttons it names.
 

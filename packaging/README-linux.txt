@@ -105,6 +105,9 @@ PLAYING
 -------
 - F1 (or L3 + R3 on a controller) opens the Options menu.
 - F11 switches between Windowed and Borderless Fullscreen.
+- F9 closes the game; the Controls page can rebind it. Holding L1 + R1 + Options
+  on one controller for 2 seconds closes it too, and the Controller Exit Shortcut
+  setting turns that off. It works the same under Steam, SteamOS and Gamescope.
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
   Steam Deck's own controls. The Windows build run through Proton (Bazzite Gaming
   Mode) turns SDL's HIDAPI drivers off by itself; an SDL_JOYSTICK_HIDAPI value you

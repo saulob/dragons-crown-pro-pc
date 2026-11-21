@@ -8,6 +8,7 @@
 #include "runtime_pad_rumble.h"
 #include "comms_session.h"
 #include "dcpgpu.h"
+#include "dcp_exit_shortcut.h"
 #include "dcp_keys.h"
 #include "dcp_mouse.h"
 #include "dcp_pad_buttons.h"
@@ -383,9 +384,16 @@ static void sample_host(int slot, PadData *d) {
     if (g) {
         /* L3 and R3 together belong to the Options menu: the game never sees the pair. */
         const bool chord=SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_LEFT_STICK) && SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        /* L1 + R1 + Options on one controller is the Exit Game chord: while it is down the game sees none of the three,
+         * and what is still held after it ends stays hidden until released (hold_after_capture). */
+        const bool exit_chord=dcp_exit_chord_down(dcpgpu_controller_exit_shortcut(),SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER),
+                                                  SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER),SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_START));
+        if (exit_chord) slots[slot].hold_after_capture=1;
         for (size_t i=0;i<pad_map.count;++i) {
             const int source=pad_map.entries[i].source;
             if (chord && (source==SDL_GAMEPAD_BUTTON_LEFT_STICK || source==SDL_GAMEPAD_BUTTON_RIGHT_STICK)) continue;
+            if (exit_chord && (source==SDL_GAMEPAD_BUTTON_LEFT_SHOULDER || source==SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER ||
+                               source==SDL_GAMEPAD_BUTTON_START)) continue;
             if (SDL_GetGamepadButton(g,(SDL_GamepadButton)source)) d->buttons|=pad_map.entries[i].ps;
         }
         const uint32_t mapped=d->buttons;
