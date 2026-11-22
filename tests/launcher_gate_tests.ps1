@@ -161,7 +161,7 @@ if (-not $trgLine) {
                     $same = (Test-Path -LiteralPath $theirs) -eq (Test-Path -LiteralPath $mine)
                     if ($same -and (Test-Path -LiteralPath $mine)) {
                         $same = [IO.File]::ReadAllBytes($mine).Length -eq [IO.File]::ReadAllBytes($theirs).Length -and
-                                (Get-FileHash -LiteralPath $mine).Hash -eq (Get-FileHash -LiteralPath $theirs).Hash
+                                (Get-FileSha256 $mine) -eq (Get-FileSha256 $theirs)
                     }
                     if (-not $same) { Fail $patches "third_party\trg-launcher\$file differs from the patch chain (edited by hand?)" }
                 }

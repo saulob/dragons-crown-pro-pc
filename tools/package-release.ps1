@@ -42,7 +42,7 @@ function Test-Checksum([string]$Artifact, [string]$Checksum) {
     $line = (Get-Content -LiteralPath $Checksum -TotalCount 1)
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { return "$(Split-Path $Checksum -Leaf) is not '<sha256>  <file name>'" }
     if ($Matches[2] -ne (Split-Path $Artifact -Leaf)) { return "$(Split-Path $Checksum -Leaf) names $($Matches[2])" }
-    $actual = (Get-FileHash -LiteralPath $Artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-FileSha256 $Artifact
     if ($actual -ne $Matches[1]) { return "$(Split-Path $Checksum -Leaf) does not match the file" }
     return $null
 }

@@ -29,7 +29,8 @@ static inline int dcp_touch_gamescope_wanted(const DcpTouchGamescopeEnv *e) {
     return !(e->opt_out && !strcmp(e->opt_out, "0"));
 }
 
-/* The game owns the mode from its first write until its release; Steam or the player changing it meanwhile wins. */
+/* The game owns the mode from its first write until its release; a change by Steam meanwhile is taken back and becomes the
+ * value the release restores. */
 typedef struct {
     int applied;
     uint32_t saved;

@@ -846,6 +846,7 @@ void TestGateConsistency() {
                                    "xbox_available_",                      "XboxPromptsAvailable",
                                    "build_->xbox_prompts",                 "InstalledTextLanguages(paths_.app0, build_)",
                                    "InstalledPromptStyle(paths_.app0, *build_", "PromptArchives(paths_.app0, *build_",
+                                   "PlanSavedPatches(settings_, paths_.app0, *build_",
                                    "build_->label",                        "BuildMetadataText(*build_)",
                                    "InstalledGameName(files_, build_)",    "build_ = check.build",
                                    "const GameBuild* build_",              "|| !build_)",

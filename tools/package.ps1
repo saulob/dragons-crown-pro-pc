@@ -347,7 +347,7 @@ try { $entries = @($archive.Entries | ForEach-Object { $_.FullName }) } finally 
 $expected = @($files | ForEach-Object { "$name/" + $_.FullName.Substring($stage.Length + 1).Replace('\', '/') })
 if (Compare-Object $expected $entries) { Stop-Tool 'The ZIP does not hold exactly the staged files' }
 if ($entries | Where-Object { $_ -match '^[\\/]|\.\.|:|\\' }) { Stop-Tool 'The ZIP holds an unsafe entry name' }
-$hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+$hash = Get-FileSha256 $zip
 Write-Text $shaFile "$hash  $name.zip`n"
 
 function Format-Size([long]$Bytes) { '{0:N1} MB' -f ($Bytes / 1MB) }

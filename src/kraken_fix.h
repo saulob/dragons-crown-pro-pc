@@ -1,6 +1,5 @@
-/* Kraken tentacle null mast fix (DCP-8LX692): the tentacle's update reads its mast's broken flag through a weak handle
- * that is null while no mast exists. The hook answers a null handle with a mast whose flag is clear, which takes the
- * game's own "not broken" branch; a mast that exists is read as before. */
+/* Kraken tentacle fix: the update reads its mast's broken flag through a handle that is null while no mast exists. The hook
+ * answers a null handle with a mast whose flag is clear; a mast that exists is read as before. */
 #ifndef DCP_KRAKEN_FIX_H
 #define DCP_KRAKEN_FIX_H
 

@@ -216,7 +216,7 @@ never open a window, a dialog, a chooser or the game. The command must be the on
 
 | Command | What it does |
 |---|---|
-| `--install <source>` | `InstallGame` on the active build's folders (`dcp_resolve_paths`), exactly as **Install game...** does: a decrypted PKG file, or an already extracted complete game folder (`eboot.bin`, `sce_module`, `sce_sys` and the rest of the game). The same checks, hard links on the same drive, staging, boot image, verification and rollback; an extracted update alone or a folder that holds or sits inside the port's own folders is refused. It does not start the game and, like **Install game...**, does not replace a build that is already the active, ready one (it reports `ready ... (already installed)`). With `DCP_GAME_BUILD` set it refuses, as the launcher's package selection is off then. |
+| `--install <source>` | `InstallGame` on the active build's folders (`dcp_resolve_paths`), exactly as **Install game...** does: a decrypted PKG file, or an already extracted complete game folder (`eboot.bin`, `sce_module`, `sce_sys` and the rest of the game). The same checks, hard links on the same drive, staging, boot image, verification and rollback; an extracted update alone or a folder that holds or sits inside the port's own folders is refused. It does not start the game and, unlike **Reinstall game...**, does not replace a build that is already the active, ready one (it reports `ready ... (already installed)`). With `DCP_GAME_BUILD` set it refuses, as the launcher's package selection is off then. |
 | `--check-game` | `CheckGameFiles` on the active build, read-only: nothing is written, built or repaired (an older port's preparation marker is judged as updated, not rewritten). |
 
 | Exit code | Meaning |
@@ -230,7 +230,9 @@ Progress and results go to the standard output, in a few lines: `Install: <phase
 prints `Game files: ready` with `Build:`, `Title ID:` and `Version:` lines, or `Game files: not ready` with `State:` and `Reason:` (not
 installed, incomplete files, a boot image that is missing or built from another `eboot.bin`, another executable). No log file is written.
 The executable has no console of its own on Windows: a front end reads a pipe, and a terminal shows the output when it is
-piped (`dragons_crown_pro.exe --check-game | Out-Host`) or, otherwise, the parent console it attaches to.
+piped (`dragons_crown_pro.exe --check-game | Out-Host`) or, otherwise, the parent console it attaches to. Because the program is a
+Windows GUI executable, a shell does not wait for it: to read the exit code use `Start-Process -Wait -PassThru` (PowerShell) or
+`start /wait` (cmd).
 
 ## Save and Play
 

@@ -1,6 +1,5 @@
-// A state-change trace of the Kraken fight in Ghost Ship Cove (DCP-8LX692), written to the runtime log with the cheat
-// hooks' own observations, and a snapshot of its latest state for the crash report. It only reads; every value it
-// prints is the game's.
+// A state-change trace of the Kraken fight in Ghost Ship Cove, written to the runtime log, and a snapshot of its latest
+// state for the crash report. It only reads.
 #pragma once
 
 #include <array>

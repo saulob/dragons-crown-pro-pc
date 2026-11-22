@@ -65,8 +65,8 @@ void SetGuestFunctions(const GuestFunctions& functions);
 void ConfigureBossTrace(uint64_t image_begin, uint64_t image_end, bosstrace::ChimeraTrace::Sink sink);
 void PrintBossTraceLine(const char* line);
 
-// The Kraken fight trace (DCP-8LX692): the same image bounds, whether the image's tentacle layout is the one the trace
-// reads (the reference build's), and where its lines go. Setting it clears the trace.
+// The Kraken fight trace: the image bounds, whether the tentacle layout is the one the trace reads, and where its lines
+// go. Setting it clears the trace.
 void ConfigureKrakenTrace(uint64_t image_begin, uint64_t image_end, bool mast_layout, krakentrace::KrakenTrace::Sink sink);
 
 // A tentacle's null mast handle was answered by the Kraken fix (kraken_fix.h); at most a few lines per fight.
