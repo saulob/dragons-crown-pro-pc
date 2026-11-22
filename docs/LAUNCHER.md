@@ -776,6 +776,70 @@ An archive that is a hard link to the game folder the install was made from (sam
 so that folder is never changed. If a step fails, the archive is put back as it was; an undo record that does not belong
 to the archive, or an interrupted earlier run, is detected before anything is written.
 
+## Saves
+
+Subtitle "Your SAVE0.DAT files: overview, backups, export, import and restore.". The page sits between Gameplay and Editor and
+manages whole SAVE0.DAT files; the Editor keeps characters and their appearance. `launcher/save_page_model.cpp` holds what
+the page shows and does, without ImGui; `launcher/save_page.cpp` draws it with the TRG rows.
+
+- **Installed game** names the configured build (the one the Editor uses). Only the saves of that build's Title ID are shown
+  (`SavesOfTitle`, shared with the Editor); there is no way to pick another Title ID, and without an installed game the page
+  says so. **Selected save** appears only when that Title ID has more than one save folder (SAVEDATA00, SAVEDATA01...) and
+  chooses among those; choosing only reads. The first open shows **Loading saves...**; every later entry reads the saves and
+  backups again.
+- **Overview**: Platform, Save folder, Status, CRC, DATA slots, Characters, Modified and File size. Status is Valid,
+  Unreadable, Invalid (size or magic) or Corrupt (CRC); the full path is under **Details**.
+- **DATA Slots**: read-only; each slot's characters (name, class, level) and gold, or Empty. **Open Editor** goes to the
+  Editor page, where characters are edited, when the selected save belongs to the installed game.
+- **Create backup** validates the save and copies it to `user/save_backups` as `SAVE0_<timestamp>_<title>_<folder>.DAT` with
+  a `.meta` beside it; a name that is taken gets a numbered suffix, so nothing is overwritten. The list under **Backups** shows
+  the selected save's backups, newest first.
+- **Restore...** and **Import and replace...** ask through `Ui::ConfirmRow`, naming the backup or source and the save they
+  replace. They validate the new bytes, back the current save up, write through a validated temporary file renamed over the
+  save, and read it back; any failure leaves the old save as it was. Afterwards the page reloads and the shared
+  `SaveSelection` generation changes, so the Editor reloads before it can write again.
+- **Export PS4 save...** chooses a folder (TRG has no Save File dialog) and writes `SAVE0.DAT` there byte for byte, then reads it
+  back and validates it. A file already there is replaced only after a confirmation; the save's own folder and the
+  launcher's `savedata` folder are refused, because a copy there would replace a save without its backup.
+- **Import PS4 save...** and **Import PS3 save...** are two entry points (`ImportMode::kPs4`, `ImportMode::kPs3`) into one
+  inspection and commit (`PlanImport`, `CommitImportPlan`). The PS4 mode takes a SAVE0.DAT, a folder (up to four levels
+  down) or a ZIP archive and refuses a PS3 source with "This is a PS3 save. Use Import PS3 save."; the PS3 mode takes a PS3
+  save folder or ZIP and refuses a native one with "This is a Dragon's Crown Pro save. Use Import PS4 save." The mode never
+  switches by itself. The preview (`InspectImport`) shows:
+  source and type, platform, region, Title ID, format, SAVE0.DAT status, whether a conversion is required, DATA slots,
+  characters, the save it replaces and that a backup is made first. The Title ID comes from PARAM.SFO (`SAVEDATA_DIRECTORY`
+  on PS3, `PARENT_DIRECTORY` on Vita), else from the folder names. A file is accepted only when it passes `ValidateSave`
+  (size, magic, CRC); its name alone is not enough, and several different SAVE0.DAT files in one folder or archive are
+  refused as ambiguous. A source that cannot be imported still gets its preview, with the exact reason.
+  - **PS3**: imported after an in-memory conversion. `save_ps3.cpp` reads PARAM.PFD (version 4; a 64-byte-aligned entry table whose
+    entry holds the file's logical size, an encrypted file key and an HMAC-SHA-1 of the stored bytes), checks the entry hash,
+    unwraps `SAVE0.DAT` in memory with Dragon's Crown's per-game key (the eight save-directory IDs it knows: `BLUS30767`,
+    `BLES01950`, `NPEB01836`, `NPUB31235`, `BLJM61041`, `BCAS20298`, `BCAS20290`, `BCAS20288`) and checks the result: 2,157,336
+    bytes, `DCSD` at offset 4, and a big-endian CRC-32 at offset 0. No console ID is needed. A save somebody already decrypted is
+    converted the same way. A `SAVE0.DAT` alone cannot be read (`kPs3NeedsPfd`); a PFD that is truncated, unsupported or
+    inconsistent (`kPs3PfdInvalid`), a mismatching hash (`kPs3HashMismatch`), another game's save (`kPs3UnknownTitle`) and a result
+    that is not a save (`kPs3Undecryptable`) are each reported.
+    `ConvertPs3ToPro` (`save_ps3_layout.cpp`) accepts layout version 36 only (header counts 490 and 532); any other version is
+    refused as `kPs3UnsupportedLayout`. The PS3 file is a big-endian image of the same structures the Pro game keeps, so the
+    conversion rebuilds the Pro file field by field instead of reversing the whole file: a 127-node program of leaves and
+    nested repeats describes one DATA slot (264,641 fields of one, two or four bytes), applied to the three slots; the 59 trailer
+    bytes, the six-byte struct and the play-time dword after the slots are converted by a small table; the header is the Pro
+    header (version 38, counts 660 and 979); the CRC-32 is the Pro one, little-endian. An item record's packed 32-bit word
+    (25, 4, 1, 1 and 1 bits) is re-packed because the PS3 compiler allocates bitfields from the most significant bit and Pro from
+    the least. Padding is zero: every byte the program does not name is alignment padding or a constant `0xCC` fill, and the
+    original game's own cross-save does the same. The result must pass `ValidateSave` before it is kept; the PS3 plaintext
+    and the converted save live in memory only until the import commit writes the Pro save, after the usual backup, atomically.
+  - **Vita**: accepted only when SAVE0.DAT is decrypted and passes `ValidateSave`; the preview warns that no Dragon's
+    Crown Vita save has been verified. An encrypted one is refused.
+  - **ZIP** (`save_zip.cpp`): read in memory, nothing is extracted to disk. Absolute paths, `..`, drive letters, control
+    characters, ZIP64, encryption and methods other than stored and deflate are refused; entry count, per-file and total
+    sizes, and the archive size are limited, and each entry is checked against its declared size and CRC-32.
+  - **RAR**: recognized by its signature and refused with "extract it first"; import the extracted folder instead.
+- The Saves page has no editing controls: characters are edited on the Editor page (`SaveEdit` stays the Editor's model).
+- Mutations follow `ActionStateFor`: nothing for an invalid save; Restore and Import wait while the Editor has unapplied
+  changes; nothing while Play is starting. The launcher closes when the game starts, so the page never runs beside the game
+  it started.
+
 ## Trophies
 
 Subtitle "Your trophies on this PC.". Shows the installed game's PlayStation trophies: "12 / 49 unlocked  24%", a progress bar,
@@ -855,8 +919,9 @@ Play). The launcher closes before the game starts, so its input cannot reach the
 
 ## Window and display scaling
 
-SDL3 runs the process per-monitor-v2 DPI aware (also declared in the manifest). The launcher is 1280 × 720 logical,
-scaled by the display's content scale and capped to 90% of the usable area, so at 225% it is 2880 × 1620 pixels on a
+SDL3 runs the process per-monitor-v2 DPI aware (also declared in the manifest). The launcher is 1280 × 720 logical (at
+least 900 × 580, the height at which all twelve sidebar pages fit at the compact row), scaled by the display's content
+scale and capped to 90% of the usable area, so at 225% it is 2880 × 1620 pixels on a
 4K display. Window sizes are real pixels. A saved launcher position that no display shows any more is ignored and the
 window is centred on the primary display.
 

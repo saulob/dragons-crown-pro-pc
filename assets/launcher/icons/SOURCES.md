@@ -31,6 +31,14 @@ unchanged.
 Adapted for the launcher: renamed from `pencil-svgrepo-com.svg`, and its grey background circle was removed because it
 cannot be tinted. No other path was changed.
 
+## Original
+
+| File | Title | Source | License |
+|---|---|---|---|
+| `save.svg` | Save (floppy disk) | Drawn for this project | Original |
+
+Drawn by hand for the launcher from basic shapes; no third-party artwork.
+
 ## CC0
 
 CC0 asks for no attribution; the sources are kept for provenance.

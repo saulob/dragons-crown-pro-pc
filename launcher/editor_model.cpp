@@ -48,11 +48,7 @@ size_t DefaultBuildIndex(std::span<const EditorBuild> builds) {
 }
 
 std::vector<size_t> SavesOfBuild(std::span<const DiscoveredSave> saves, const EditorBuild& build) {
-    std::vector<size_t> indexes;
-    for (size_t i = 0; i < saves.size(); ++i) {
-        if (build.build && saves[i].title_id == build.build->title_id) indexes.push_back(i);
-    }
-    return indexes;
+    return build.build ? SavesOfTitle(saves, build.build->title_id) : std::vector<size_t>();
 }
 
 std::string ShortFingerprint(std::string_view sha256) {

@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,6 +42,14 @@ struct DiscoveredSave {
 // Enumerates every SAVE0.DAT under <user_dir>/savedata, parsing each. The save matching `active_title_id` (when given)
 // is marked current. Fails to parse are still listed with their error. Sorted by title id then folder name.
 std::vector<DiscoveredSave> DiscoverSaves(const std::filesystem::path& user_dir, std::string_view active_title_id);
+
+// The indexes of the saves that belong to `title_id`: the one definition of which saves a game build owns.
+std::vector<size_t> SavesOfTitle(std::span<const DiscoveredSave> saves, std::string_view title_id);
+
+// The index in `saves` to start on, among `visible`: the first of `preferred` that is visible, else the first valid
+// visible save, else the first visible one, else -1.
+int ChooseSave(std::span<const DiscoveredSave> saves, std::span<const size_t> visible,
+               std::span<const std::filesystem::path> preferred);
 
 // The folder the launcher writes its backups to.
 std::filesystem::path BackupFolder(const std::filesystem::path& user_dir);

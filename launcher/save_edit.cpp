@@ -60,6 +60,11 @@ SaveEdit::Result SaveEdit::Apply() {
         detail_ = problems.empty() ? std::string("invalid save") : problems.front();
         return Result::kInvalidSave;
     }
+    const SaveModel on_disk = SaveModel::FromFile(save_.save0_path);
+    if (!std::ranges::equal(on_disk.bytes(), save_.model.bytes())) {
+        detail_ = "the save changed on disk since it was loaded";
+        return Result::kStale;
+    }
     if (!CreateBackup(backup_folder_, save_.save0_path, save_.title_id, save_.dir_name)) {
         return Result::kBackupFailed;
     }

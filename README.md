@@ -16,6 +16,7 @@
 
 ## Features
 
+- **Saves page**: manage the installed game's saves: see each SAVE0.DAT at a glance (status, CRC, DATA slots, characters), make backups, restore one, export it, and import a PS4 or a PS3 save, always with a backup of the save being replaced. Characters are edited on the Editor page. See [Saves](#saves)
 - **Character Editor** (new, exclusive to this PC port): on the launcher's **Editor** page, pick a save and a character, then recolor individual parts of its appearance, hide supported parts, or edit its name, level, skill points and HP. Each saved character keeps its own look, and other players with a compatible version see it online. See [Editor](#editor)
 - **Comms Wheel (Quick Chat)** (new): eight quick messages for online rooms (Ready, Hello, Need help, Let's go, Group up, Follow me, Good job, Thanks), shown in the game's own greeting balloon, from a controller or the keyboard, with no typing or voice chat. See [Comms Wheel (Quick Chat)](#comms-wheel-quick-chat)
 - **Boss Battle** (new, exclusive to this PC port): fight any of the game's **20 bosses** straight from the Inn, or all of them in a row with **Fight All**, with your campaign protected and your own attempt statistics. See [Boss Battle](#boss-battle)
@@ -195,6 +196,7 @@ Everything is kept next to the program, so copying the whole folder to another P
 | --- | --- |
 | `user\dcp.ini` | Launcher and game settings |
 | `user\savedata\` | Your saves |
+| `user\save_backups\` | Backups of your saves, made by the Saves page and before every change the launcher writes |
 | `user\boss_battle.dat` | Your Boss Battle statistics |
 | `user\trophy\` | Your trophy progress and the trophy list and icons unpacked from your game |
 | `user\keys.json` | Your Trophy Key, if you configure one |
@@ -313,6 +315,19 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 - **F1** (or **L3 + R3** on a controller) opens the Options menu: most of the launcher's Display, Graphics and Gameplay settings, a Controls page that lists the hotkeys, and the Cheats page of the F10 menu. Changes are saved to the same `dcp.ini` as the launcher. The Renderer, Render resolution, Aspect Ratio, True Ultrawide, Texture filtering, Frame rate and a few Gameplay options are saved and apply the next time the game starts (close it and start it again); the rest apply at once. See [docs/LAUNCHER.md](docs/LAUNCHER.md). **F11** switches Windowed and Borderless Fullscreen. **F10** opens the Cheats menu (both can be changed under **Port hotkeys** on the Controls page). **F2** shows or hides the frame counter. **F3** shows or hides the Ping while Online Play is on (see [docs/ONLINE.md](docs/ONLINE.md)). An experimental AMD water workaround for black regions under characters standing in water is On on AMD graphics cards and Off elsewhere. Window size, monitor, graphics card, language and the online settings are set in the launcher.
 - **Local multiplayer**: up to four players, one controller each (Player 1 is the first controller found, and the keyboard is always Player 1's). A controller connected later takes the lowest free player slot; a player stays logged in when their controller is unplugged.
 
+### Saves
+- The **Saves** page shows the SAVE0.DAT of the installed game under `user\savedata` (saves of other builds are not offered): platform, region, Title ID, save folder, status, CRC, modified time, size, and the characters and gold of its three DATA slots, read-only. Choosing a save never changes it. An invalid or corrupt save is shown, but nothing on the page will back it up or replace it. The page manages saves; characters are edited on the **Editor** page.
+- **Create backup** copies the save into `user\save_backups`; a backup is never overwritten. **Open backup folder** shows that folder.
+- **Restore** replaces the save with one of its backups, after a confirmation that names both.
+- **Export PS4 save...** copies the Dragon's Crown Pro save, byte for byte, into a folder you choose; it is never moved or changed.
+- **Import PS4 save...** replaces the save with a Dragon's Crown Pro save: a SAVE0.DAT, a folder that holds one (also a save folder with its PARAM.SFO, any level down to four folders), or a ZIP archive with a single save in it. It shows what it found (source, platform, region, Title ID, DATA slots, characters, destination and that a backup is made first) and asks for confirmation. A PS3 save chosen here is refused with "This is a PS3 save. Use Import PS3 save."
+- **Import PS3 save...** replaces the save with a Dragon's Crown PS3 save: its save folder, or a ZIP archive of it, with `SAVE0.DAT` and `PARAM.PFD`. A Dragon's Crown Pro save chosen here is refused with "This is a Dragon's Crown Pro save. Use Import PS4 save." The save being replaced is always the installed game's.
+- Before Restore or Import replaces a save, the launcher backs it up and only then writes the new one, so a failure leaves the old save as it was. Both wait while the Editor has unapplied changes, and nothing can be changed while the game is starting.
+- **PS3 saves are converted and imported** with **Import PS3 save...**. Give it a Dragon's Crown PS3 save folder (or a ZIP of it) with its `PARAM.PFD`: the launcher checks `PARAM.PFD`, decrypts the encrypted `SAVE0.DAT` in memory without a console ID, verifies the save, converts it to the Pro layout in memory, validates the result and previews the encrypted save, `PARAM.PFD`, decryption, conversion and source layout, plus its DATA slots and characters. Importing it backs up the save it replaces, then writes the converted save. Only saves of the PS3 layout version 36 are converted; a `SAVE0.DAT` without its `PARAM.PFD`, a damaged one, another layout version and saves of other games are each refused with their own reason, and the confirmation is not offered. Nothing is written until you confirm.
+- **PS Vita saves** are accepted only when SAVE0.DAT is already decrypted and passes the same checks as a Pro save (size, magic, CRC). No Dragon's Crown Vita save has been verified yet, so the page warns before importing one; an encrypted Vita save is refused with its reason.
+- **ZIP archives** are read in memory and never unpacked to disk. Paths that leave the archive, password-protected archives, very large archives and archives with several different saves are refused. **RAR archives** are recognized but not opened: extract one first, then import the extracted folder.
+- Characters and their values (names, levels, skill points, HP, appearance) are edited on the **Editor** page, not on Saves.
+
 ### Editor
 - Finds the installed game's saves by itself. Choose the **Save Data** (DATA slot), then a character from the list.
 - **Character Editor**: the character's name, level, skill points and HP.
@@ -399,6 +414,7 @@ Dragon's Crown Pro PC is maintained and developed in my free time. If you enjoy 
 - [ANGLE](https://chromium.googlesource.com/angle/angle) runs the experimental Direct3D 11 renderer on Windows (BSD-3-Clause); see [docs/d3d11-renderer.md](docs/d3d11-renderer.md)
 - Brazilian Portuguese translation, images and manual based on the work of [Marcelo - Uma Ficha](https://www.youtube.com/@umaficha1), used with permission
 - Russian localization based on the fan translation by [Exclusive Studio](https://ex-s.ru/dc.html), with PS4 porting work by AlchemistLab ([Zone of Games](https://www.zoneofgames.ru/games/dragons_crown/files/13583.html)). It is a fan translation, not an official one; the full credits are in [localization/ru/README.md](localization/ru/README.md)
+- PS3 save reading (the `PARAM.PFD` format and the decryption of Dragon's Crown PS3 saves) was made possible by public research into that format, notably flatz's pfdtool (continued as [pfd_sfo_tools](https://github.com/bucanero/pfd_sfo_tools) by Bucanero) and the [Apollo Save Tool](https://github.com/bucanero/apollo-ps3) projects by Bucanero. They were research and reference sources only; the implementation in this project is independent and contains none of their code
 - Discord Rich Presence started from the contribution in [PR #55](https://github.com/saulob/dragons-crown-pro-pc/pull/55) by [Shmubbier](https://github.com/Shmubbier), with commits by na-om
 - [bloodborne_pc_windows](https://github.com/Phroster/bloodborne_pc_windows) for the anisotropic filtering approach
 - [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al., and AMD FidelityFX Super Resolution 1

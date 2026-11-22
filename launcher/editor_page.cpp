@@ -22,9 +22,9 @@ constexpr const char* kMiddleDot = " \xC2\xB7 ";
 } // namespace
 
 EditorPage::EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
-                       std::function<std::string()> message_suffix)
+                       std::function<std::string()> message_suffix, const SaveSelection* selection)
     : host_(host), user_dir_(std::move(user_dir)), game_(std::move(game)), message_suffix_(std::move(message_suffix)),
-      custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)) {}
+      selection_(selection), custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)) {}
 
 const EditorBuild* EditorPage::SelectedBuild() const {
     return selected_build_ < builds_.size() ? &builds_[selected_build_] : nullptr;
@@ -35,13 +35,6 @@ std::vector<size_t> EditorPage::VisibleSaves() const {
         return SavesOfBuild(saves_, *build);
     }
     return {};
-}
-
-int EditorPage::FirstSaveOf(const std::vector<size_t>& visible) const {
-    for (const size_t index : visible) {
-        if (saves_[index].model.valid()) return int(index);
-    }
-    return visible.empty() ? -1 : int(visible.front());
 }
 
 void EditorPage::UseArtOf(const EditorBuild* build) {
@@ -67,7 +60,9 @@ void EditorPage::UseArtOf(const EditorBuild* build) {
 }
 
 void EditorPage::Refresh() {
+    const std::filesystem::path selected = selection_ ? selection_->save0 : std::filesystem::path();
     const std::filesystem::path kept_save = SelectedSave() ? SelectedSave()->save0_path : std::filesystem::path();
+    if (selection_) seen_generation_ = selection_->generation;
     current_game_ = game_ ? game_() : EditorGame{};
     builds_ = ListEditorBuilds(current_game_.roots, current_game_.configured);
     selected_build_ = DefaultBuildIndex(builds_);
@@ -75,13 +70,10 @@ void EditorPage::Refresh() {
 
     saves_ = DiscoverSaves(user_dir_, current_game_.configured ? current_game_.configured->title_id : "");
     const std::vector<size_t> visible = VisibleSaves();
-    int chosen = -1;
-    for (const size_t index : visible) {
-        if (saves_[index].save0_path == kept_save) chosen = int(index);
-    }
-    const bool kept = chosen >= 0;
+    const std::filesystem::path preferred[] = {selected, kept_save};
+    int chosen = ChooseSave(saves_, visible, preferred);
+    const bool kept = chosen >= 0 && saves_[chosen].save0_path == kept_save;
     if (!kept) {
-        chosen = FirstSaveOf(visible);
         selected_slot_ = 0;
         selected_character_ = -1;
         nav_.Back();
@@ -177,6 +169,12 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
         break;
     case SaveEdit::Result::kBackupFailed:
         ui.SetStatus(Tr("Could not create a backup; the save was not changed."), 6.0);
+        break;
+    case SaveEdit::Result::kStale:
+        Refresh();
+        ui.SetStatus(Tr("The save changed on disk since the Editor loaded it, so the changes were not written. The Editor "
+                        "reloaded the save."),
+                     10.0);
         break;
     default:
         ui.SetStatus(Tr("Could not write the save; the original was left untouched."), 6.0);
@@ -313,7 +311,8 @@ void EditorPage::DrawChanges(trg::Ui& ui) {
 
 void EditorPage::Draw(trg::Ui& ui) {
     const int frame = ImGui::GetFrameCount();
-    if (frame > last_frame_ + 1 && !dirty()) refresh_pending_ = true;
+    const bool replaced = selection_ && selection_->generation != seen_generation_;
+    if ((frame > last_frame_ + 1 || replaced) && !dirty()) refresh_pending_ = true;
     last_frame_ = frame;
     if (refresh_pending_) {
         if (!loaded_ && !std::exchange(loading_shown_, true)) {

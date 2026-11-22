@@ -284,7 +284,7 @@ void TestBackupRestore(const fs::path& base) {
     SaveModel model = SaveModel::FromFile(save0);
     model.SetGold(0, 55555);
     WriteSaveAtomically(save0, model.Serialize(), ValidateSave);
-    const auto restore_error = RestoreBackup(*backup, save0, backup_folder);
+    const auto restore_error = RestoreBackup(*backup, save0, backup_folder, "CUSA10454", "SAVEDATA00");
     CHECK(!restore_error.has_value());
     const SaveModel restored = SaveModel::FromFile(save0);
     CHECK(restored.valid());
@@ -1023,11 +1023,22 @@ void TestSaveDataText() {
     CHECK(Count(page, "Tr(\"Game Build\")") == 0);
     CHECK(page.find("Tr(\"Compatible with PS4, PS3 and PS Vita saves.\")") == std::string::npos);
     const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
-    for (const std::string& text : {page, portuguese, ReadSource("README.md"), ReadSource("launcher/save_import.cpp"),
-                                    ReadSource("launcher/save_import.h")}) {
+    for (const std::string& text : {page, portuguese, ReadSource("launcher/save_import.cpp"), ReadSource("launcher/save_import.h")}) {
         std::string lower = text;
         for (char& c : lower) c = char(std::tolower(static_cast<unsigned char>(c)));
         CHECK(lower.find("apollo") == std::string::npos);
+    }
+    {
+        std::string readme = ReadSource("README.md");
+        for (char& c : readme) c = char(std::tolower(static_cast<unsigned char>(c)));
+        size_t mentions = 0, credited = 0;
+        for (size_t at = readme.find("apollo"); at != std::string::npos; at = readme.find("apollo", at + 1)) ++mentions;
+        for (size_t at = readme.find("- ps3 save reading"); at != std::string::npos; at = readme.find("- ps3 save reading", at + 1)) {
+            const size_t end = readme.find('\n', at);
+            const std::string line = readme.substr(at, end - at);
+            credited += line.find("apollo") != std::string::npos && line.find("none of their code") != std::string::npos;
+        }
+        CHECK(credited == 1 && mentions <= 2);
     }
     CHECK(portuguese.find("Compatible with PS4, PS3 and PS Vita saves.\t") != std::string::npos);
 #endif
@@ -1126,7 +1137,7 @@ void TestApplyAll(const fs::path& base) {
     CHECK(edit.working().SetColor(0, 0, 4));
     fs::remove(file);
     outcome = ApplyAll(&edit, working, saved);
-    CHECK(!outcome.ok() && outcome.save == SaveEdit::Result::kBackupFailed && outcome.rolled_back && !outcome.custom_written);
+    CHECK(!outcome.ok() && outcome.save == SaveEdit::Result::kStale && outcome.rolled_back && !outcome.custom_written);
     CHECK(saved == committed);
     CustomStore restored(CustomStorePath(user));
     CHECK(restored.Load() && restored == committed);

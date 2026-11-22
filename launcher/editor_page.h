@@ -19,6 +19,7 @@
 #include "save_data.h"
 #include "save_discovery.h"
 #include "save_edit.h"
+#include "save_page_model.h"
 
 namespace trg {
 class Ui;
@@ -36,9 +37,10 @@ struct EditorGame {
 class EditorPage {
 public:
     // `game` says where the builds are and which one the launcher runs; `message_suffix` names the SystemMsg language
-    // the game uses (msgsheet/SystemMsg_<suffix>.fms).
+    // the game uses (msgsheet/SystemMsg_<suffix>.fms). `selection` is the save the Save page chose; when that page
+    // replaces a save, the Editor reloads before it can write again.
     EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
-               std::function<std::string()> message_suffix);
+               std::function<std::string()> message_suffix, const SaveSelection* selection = nullptr);
 
     void Refresh();
 
@@ -58,7 +60,6 @@ private:
 
     const EditorBuild* SelectedBuild() const;
     std::vector<size_t> VisibleSaves() const;
-    int FirstSaveOf(const std::vector<size_t>& visible) const;
     void UseArtOf(const EditorBuild* build);
 
     const DiscoveredSave* SelectedSave() const;
@@ -114,6 +115,8 @@ private:
     std::filesystem::path user_dir_;
     std::function<EditorGame()> game_;
     std::function<std::string()> message_suffix_;
+    const SaveSelection* selection_ = nullptr;
+    uint64_t seen_generation_ = 0;
 
     EditorGame current_game_;
     std::vector<EditorBuild> builds_;

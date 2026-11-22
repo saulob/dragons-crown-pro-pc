@@ -28,10 +28,12 @@ fs::path HomePlace(const std::vector<Place>& places) {
 
 } // namespace
 
-void PackageBrowser::Open(const fs::path& program_folder, InstallSource source) {
+void PackageBrowser::Open(const fs::path& program_folder, InstallSource source, std::string title, std::string hint) {
     places_ = StandardPlaces(program_folder);
     std::error_code ec;
     source_ = source;
+    title_ = std::move(title);
+    hint_ = std::move(hint);
     show_all_ = false;
     active_ = true;
     popup_open_ = false;
@@ -55,7 +57,7 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
         return std::nullopt;
     }
     const bool folders = source_ == InstallSource::kFolder;
-    const char* title = Tr(folders ? kFolderTitle : kPackageTitle);
+    const char* title = Tr(!title_.empty() ? title_.c_str() : folders ? kFolderTitle : kPackageTitle);
     if (!popup_open_) {
         ImGui::OpenPopup(title);
         popup_open_ = true;
@@ -164,8 +166,9 @@ std::optional<fs::path> PackageBrowser::Draw(ImFont* font, float font_size, cons
             picked = folder_;
         }
         ImGui::SameLine();
-        ImGui::TextDisabled("%s", Tr("Open the folder with eboot.bin, sce_module and sce_sys, then select it. "
-                                     "Controller: D-pad to move, A to open, B to cancel."));
+        ImGui::TextDisabled("%s", Tr(!hint_.empty() ? hint_.c_str()
+                                                    : "Open the folder with eboot.bin, sce_module and sce_sys, then select it. "
+                                                      "Controller: D-pad to move, A to open, B to cancel."));
     } else {
         ImGui::TextDisabled("%s",
                             Tr("Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel."));

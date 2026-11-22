@@ -8,14 +8,16 @@ cd "$root" || exit 2
 
 flags=(-std=c++20 -fsyntax-only -Wall -Wextra -Ilauncher -Isrc -Igpu/shim -Ithird_party/trg-launcher/include)
 failed=0
-for unit in launcher/header_art.cpp launcher/page_icons.cpp launcher/incident_report.cpp launcher/log_scrubber.cpp launcher/report_history.cpp launcher/cpk_patch.cpp launcher/appearance_runtime.cpp launcher/headless.cpp launcher/game_patches.cpp; do
+for unit in launcher/header_art.cpp launcher/page_icons.cpp launcher/incident_report.cpp launcher/log_scrubber.cpp launcher/report_history.cpp launcher/cpk_patch.cpp launcher/appearance_runtime.cpp launcher/headless.cpp launcher/game_patches.cpp launcher/save_page_model.cpp launcher/save_import.cpp launcher/save_sfo.cpp launcher/save_zip.cpp launcher/save_ps3.cpp launcher/save_ps3_layout.cpp launcher/crypto_hmac.cpp; do
     output="$(g++ "${flags[@]}" "$unit" 2>&1)" || failed=1
     [[ $output == *"warning:"* ]] && failed=1
     [[ -n $output ]] && printf '%s\n' "$output"
 done
-output="$(g++ "${flags[@]}" -DDCP_SOURCE_DIR="\"$root\"" tests/save_editor_tests.cpp 2>&1)" || failed=1
-[[ $output == *"warning:"* ]] && failed=1
-[[ -n $output ]] && printf '%s\n' "$output"
+for unit in tests/save_editor_tests.cpp tests/save_page_tests.cpp; do
+    output="$(g++ "${flags[@]}" -DDCP_SOURCE_DIR="\"$root\"" "$unit" 2>&1)" || failed=1
+    [[ $output == *"warning:"* ]] && failed=1
+    [[ -n $output ]] && printf '%s\n' "$output"
+done
 for header in trg/layout.h trg/page_navigation.h frame_pacer.h launcher_renderer.h; do
     output="$(printf '#include <%s>\n' "$header" | g++ "${flags[@]}" -x c++ - 2>&1)" || failed=1
     [[ $output == *"warning:"* ]] && failed=1

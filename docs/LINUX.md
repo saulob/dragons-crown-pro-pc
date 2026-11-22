@@ -67,6 +67,7 @@ Linux offers every Windows feature except **Allow overlay programs**. Where the 
 | Windows | Linux |
 | --- | --- |
 | Native file dialog for **Install game...** | `zenity` or `kdialog` when installed, else the launcher's own chooser |
+| **Export PS4 save...** / **Import PS4 save...** / **Import PS3 save...** on the Saves page | The same choosers; the launcher's own one picks folders only (a folder holding SAVE0.DAT, a PS3 save folder, or the folder to export to), so a ZIP is imported through `zenity` or `kdialog`. ZIP reading uses the zlib the launcher already links |
 | Hold Shift while starting | Shift is read from the X server in an X11 session; a Wayland desktop shows X11 programs no keys while another window has focus, so there, and in Gaming Mode, use `--launcher` (the Steam Deck's Launch Options) or the desktop entry's **Show launcher** action |
 | **Show settings file** selects the file in Explorer | opens the settings folder with `xdg-open` |
 | Launcher and game window positions are restored | restored on X11; a Wayland compositor decides where windows go, so the position may not be restored there |

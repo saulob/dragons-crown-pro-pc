@@ -23,7 +23,7 @@ struct HostOptions {
     int width = 1280;  // logical, scaled by the display's content scale
     int height = 720;
     int min_width = 900;
-    int min_height = 560;
+    int min_height = 580; // every sidebar page fits at the compact row height
     std::optional<WindowPlacement> restore;  // used when it lies on a display
     bool hidden = false;                     // page screenshots without showing the window
 };

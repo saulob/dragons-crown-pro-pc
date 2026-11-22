@@ -4045,9 +4045,9 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 11);
-    const char* const order[] = {"Play",   "Display",  "Graphics", "Gameplay", "Editor", "Online",
-                                 "Cheats", "Controls", "Trophies", "Bug Report", "About"};
+    CHECK(count == 12);
+    const char* const order[] = {"Play",   "Display", "Graphics", "Gameplay", "Saves",      "Editor",
+                                 "Online", "Cheats",  "Controls", "Trophies", "Bug Report", "About"};
     for (size_t i = 0; i < std::size(order); ++i) {
         CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
     }
@@ -4058,8 +4058,12 @@ void TestOptions() {
             CHECK(i > 0 && kPageOrder[i - 1] == PageId::kEditor);
             CHECK(i + 1 < std::size(kPageOrder) && kPageOrder[i + 1] == PageId::kCheats);
         }
-        if (kPageOrder[i] == PageId::kEditor) {
+        if (kPageOrder[i] == PageId::kSave) {
             CHECK(i > 0 && kPageOrder[i - 1] == PageId::kGameplay);
+            CHECK(i + 1 < std::size(kPageOrder) && kPageOrder[i + 1] == PageId::kEditor);
+        }
+        if (kPageOrder[i] == PageId::kEditor) {
+            CHECK(i > 0 && kPageOrder[i - 1] == PageId::kSave);
             CHECK(i + 1 < std::size(kPageOrder) && kPageOrder[i + 1] == PageId::kOnline);
         }
     }
@@ -4071,6 +4075,8 @@ void TestOptions() {
     CHECK(launcher.find("for (const PageId page : kPageOrder) {\n            c.pages.push_back(MakePage(page));") !=
           std::string::npos);
     CHECK(launcher.find("start_page") == std::string::npos && kPageOrder[0] == PageId::kPlay);
+    const size_t save_case = launcher.find("case PageId::kSave:");
+    CHECK(save_case != std::string::npos && launcher.find("PageSave(ui)", save_case) < launcher.find("case PageId::", save_case + 1));
     const size_t editor_case = launcher.find("case PageId::kEditor:");
     CHECK(editor_case != std::string::npos && launcher.find("PageEditor(ui)", editor_case) < launcher.find("case PageId::", editor_case + 1));
     const size_t online_case = launcher.find("case PageId::kOnline:");
@@ -4102,7 +4108,8 @@ void TestChromeLayout() {
     CHECK(kPanelBorder[0] < kPanelBorder[1] && kPanelBorder[1] < kPanelBorder[2]);
     CHECK(kRowBorder[0] < kRowBorder[1] && kRowBorder[1] < kRowBorder[2]);
     CHECK(SidebarLabelX() == kSidebarIconInset + kSidebarIcon + kSidebarIconGap);
-    constexpr float kMinimumHeight = 560.0f;
+    constexpr float kMinimumHeight = 580.0f;
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "host.h").find("int min_height = 580;") != std::string::npos);
     const int pages = int(std::size(dcp::kPageOrder));
     const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
     CHECK(SidebarHeight(pages, SidebarRowFor(pages, shortest_body)) <= shortest_body);
@@ -4331,7 +4338,7 @@ void TestSidebarProportions() {
 
     // The longest labels at the sidebar's size, measured: English and Portuguese in Segoe UI Semibold, then DejaVu Sans Bold.
     constexpr float kLongestLabels[] = {57.9f, 73.7f, 81.8f, 101.9f};
-    constexpr float kMinimumHeight = 560.0f;
+    constexpr float kMinimumHeight = 580.0f;
     const int pages = int(std::size(dcp::kPageOrder));
     const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
     const float compact_row = SidebarRowFor(pages, shortest_body);
@@ -4420,7 +4427,7 @@ struct LogicalWindow {
     float width, height;
 };
 
-constexpr LogicalWindow kLauncherWindows[] = {{900, 560}, {1126, 560}, {1280, 720}, {1920, 1080}, {3840, 2160}};
+constexpr LogicalWindow kLauncherWindows[] = {{900, 580}, {1126, 580}, {1280, 720}, {1920, 1080}, {3840, 2160}};
 constexpr float kDisplayScales[] = {1.0f, 1.5f, 2.25f};
 constexpr float kTolerance = 0.01f;
 
@@ -4987,7 +4994,7 @@ void TestPageIcons() {
     // The sidebar's pages and their icons, one to one.
     const std::set<std::string> expected = {"play.svg",     "display.svg", "graphics.svg", "gameplay.svg",   "online.svg",
                                             "cheats.svg",   "controls.svg", "trophies.svg", "editor.svg",     "bug-report.svg",
-                                            "about.svg"};
+                                            "about.svg",    "save.svg"};
     std::set<std::string> mapped_files;
     std::set<int> mapped_pages, ordered_pages;
     for (const PageIconAsset& asset : PageIconAssets()) {
@@ -4997,7 +5004,7 @@ void TestPageIcons() {
     for (const PageId page : kPageOrder) {
         ordered_pages.insert(static_cast<int>(page));
     }
-    CHECK(expected.size() == 11 && PageIconAssets().size() == expected.size());
+    CHECK(expected.size() == 12 && PageIconAssets().size() == expected.size());
     CHECK(mapped_files == expected && mapped_pages.size() == expected.size());
     CHECK(ordered_pages.size() == std::size(kPageOrder) && mapped_pages == ordered_pages);
     for (const std::string& name : expected) {
@@ -5095,6 +5102,12 @@ void TestIconLicenses() {
         const size_t row = sources.find(std::string("| `") + asset.file + "` | ");
         CHECK(row != std::string::npos);
         const std::string line = sources.substr(row, sources.find('\n', row) - row);
+        if (asset.page == PageId::kSave) {
+            // Drawn for the project: no third-party source, so no third-party license entry.
+            CHECK(line.find("| Drawn for this project | Original |") != std::string::npos);
+            CHECK(line.find("svgrepo") == std::string::npos && licenses.find(asset.file) == std::string::npos);
+            continue;
+        }
         CHECK(line.find("https://www.svgrepo.com/svg/") != std::string::npos);
         CHECK(licenses.find(asset.file) != std::string::npos);
         if (asset.page == PageId::kDisplay) {

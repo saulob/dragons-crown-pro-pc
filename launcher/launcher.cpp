@@ -48,6 +48,7 @@
 #include "options.h"
 #include "package_browser.h"
 #include "page_icons.h"
+#include "save_page.h"
 #include "placement.h"
 #include "play_gate.h"
 #include "online_page.h"
@@ -412,7 +413,17 @@ public:
             [this] {
                 return std::string(
                     ResolveTextLanguage(text_languages_, settings_.Get(kTextLanguageKey, text_languages_.front().key)).suffix);
-            });
+            },
+            &save_selection_);
+        save_page_ = std::make_unique<SavePage>(UserDir(), save_selection_, SavePageHooks{
+            [this](SavePick pick) { ChooseForSavePage(pick); },
+            [] { return UseBuiltInChooser(); },
+            [](const std::filesystem::path& folder) { trg::OpenInFileManager(Utf8(folder)); },
+            [this] { GoTo(PageId::kEditor); },
+            [this] { return editor_page_ && editor_page_->dirty(); },
+            [this] { return play_.starting(); },
+            [this] { return build_; },
+        });
         incident_page_ = std::make_unique<IncidentPage>(IncidentPlaces());
         {
             net::OnlineConfig online = ReadOnlineConfig(settings_.file());
@@ -516,8 +527,13 @@ private:
             }
         }
         if (const std::optional<std::filesystem::path> picked = browser_.Draw(fonts_.regular, fonts_.size, LauncherTheme())) {
-            StartInstall(Utf8(*picked));
+            if (browser_save_pick_) {
+                save_page_->Picked(*browser_save_pick_, *picked);
+            } else {
+                StartInstall(Utf8(*picked));
+            }
         }
+        if (!browser_.active()) browser_save_pick_.reset();
         if (play_.starting()) {
             DrawStartingMessage();
         }
@@ -530,10 +546,7 @@ private:
             if (!play_.starting() && LauncherQuitAllowed(ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
                 if (editor_page_ && editor_page_->dirty()) {
                     launcher_->SetStatus(editor_page_->DirtyReason(), 6.0);
-                    const auto editor = std::find(std::begin(kPageOrder), std::end(kPageOrder), PageId::kEditor);
-                    if (editor != std::end(kPageOrder)) {
-                        launcher_->GoToPage(static_cast<int>(editor - std::begin(kPageOrder)));
-                    }
+                    GoTo(PageId::kEditor);
                     break;
                 }
                 return Outcome::kQuit;
@@ -799,8 +812,11 @@ private:
                     [this] { return online_page_ ? static_cast<int>(online_page_->PendingRequests()) : 0; }};
         case PageId::kTrophies:
             return {name, "Your trophies on this PC.", [this](trg::Ui& ui) { PageTrophies(ui); }, nullptr, nullptr};
+        case PageId::kSave:
+            return {name, "Your SAVE0.DAT files: overview, backups, export, import and restore.",
+                    [this](trg::Ui& ui) { PageSave(ui); }, nullptr, nullptr};
         case PageId::kEditor:
-            return {name, "Manage saves, characters and appearance.", [this](trg::Ui& ui) { PageEditor(ui); }, nullptr,
+            return {name, "Characters and their appearance.", [this](trg::Ui& ui) { PageEditor(ui); }, nullptr,
                     nullptr};
         case PageId::kBugReport:
             return {name, "Report a problem and send it with one game log.", [this](trg::Ui& ui) { PageBugReport(ui); },
@@ -890,6 +906,7 @@ private:
             return;
         }
         if (UseBuiltInChooser()) {
+            browser_save_pick_.reset();
             browser_.Open(paths_.app0.parent_path().parent_path().parent_path(), source);
             return;
         }
@@ -899,6 +916,44 @@ private:
         };
         choosers.folder = [](const std::string& title) { return trg::BrowseForFolder(title); };
         StartInstall(ChooseInstallSource(source, choosers));
+    }
+
+    // The PS4 import takes a SAVE0.DAT, a folder or an archive, the PS3 import a save folder or an archive, and the export a
+    // folder; the launcher's own chooser picks folders only.
+    void ChooseForSavePage(SavePick pick) {
+        if (browser_.active() || install_.running() || !save_page_) {
+            return;
+        }
+        const bool exporting = pick == SavePick::kExportFolder;
+        const bool ps3 = pick == SavePick::kImportPs3File || pick == SavePick::kImportPs3Folder;
+        const char* folder_title = exporting ? "Choose the folder to export SAVE0.DAT to"
+                                   : ps3     ? "Choose the PS3 save folder (SAVE0.DAT and PARAM.PFD)"
+                                             : "Choose the folder holding SAVE0.DAT";
+        if (UseBuiltInChooser()) {
+            browser_save_pick_ = exporting ? SavePick::kExportFolder : ps3 ? SavePick::kImportPs3Folder : SavePick::kImportPs4Folder;
+            browser_.Open(UserDir(), InstallSource::kFolder, folder_title,
+                          "Open the folder, then select it. Controller: D-pad to move, A to open, B to cancel.");
+            return;
+        }
+        std::string picked;
+        if (pick == SavePick::kImportPs4File) {
+            picked = trg::BrowseForFile(Tr("Choose a SAVE0.DAT or an archive of a PS4 save"),
+                                        {{"Dragon's Crown save (SAVE0.DAT)", "SAVE0.DAT"}, {"Save archive (ZIP, RAR)", "*.zip;*.rar"}});
+        } else if (pick == SavePick::kImportPs3File) {
+            picked = trg::BrowseForFile(Tr("Choose an archive of a PS3 save"), {{"Save archive (ZIP, RAR)", "*.zip;*.rar"}});
+        } else {
+            picked = trg::BrowseForFolder(Tr(folder_title));
+        }
+        if (!picked.empty()) {
+            save_page_->Picked(pick, PathFromUtf8(picked));
+        }
+    }
+
+    void GoTo(PageId page) {
+        const auto found = std::find(std::begin(kPageOrder), std::end(kPageOrder), page);
+        if (found != std::end(kPageOrder)) {
+            launcher_->GoToPage(static_cast<int>(found - std::begin(kPageOrder)));
+        }
     }
 
     // A test instance keeps its DCP_GAME_BUILD: installing or activating another build would move the active build
@@ -1587,6 +1642,12 @@ private:
         trophy_page_->Draw(ui);
     }
 
+    void PageSave(trg::Ui& ui) {
+        if (save_page_) {
+            save_page_->Draw(ui);
+        }
+    }
+
     void PageEditor(trg::Ui& ui) {
         if (editor_page_) {
             editor_page_->Draw(ui);
@@ -1699,7 +1760,10 @@ private:
     std::unique_ptr<trg::update::UpdateController> updater_;
     std::unique_ptr<TrophyPage> trophy_page_;
     std::unique_ptr<OnlinePage> online_page_;
+    SaveSelection save_selection_;
     std::unique_ptr<EditorPage> editor_page_;
+    std::unique_ptr<SavePage> save_page_;
+    std::optional<SavePick> browser_save_pick_;
     std::unique_ptr<IncidentPage> incident_page_;
     PlayAttemptDetector play_attempts_;
     PlayGate play_;

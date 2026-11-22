@@ -24,7 +24,7 @@ std::vector<std::string> DescribeColorChanges(const DiscoveredSave& save, const 
 
 class SaveEdit {
 public:
-    enum class Result { kApplied, kNothingToApply, kInvalidAppearance, kInvalidSave, kBackupFailed, kWriteFailed };
+    enum class Result { kApplied, kNothingToApply, kInvalidAppearance, kInvalidSave, kStale, kBackupFailed, kWriteFailed };
 
     SaveEdit(DiscoveredSave save, std::filesystem::path backup_folder);
 
@@ -38,7 +38,8 @@ public:
     std::optional<InvalidAppearance> FirstInvalidAppearance() const;
 
     // Validates, backs up, writes through a validated temporary file, replaces atomically and reads the result back.
-    // Nothing on disk changes unless every step succeeds.
+    // Nothing on disk changes unless every step succeeds. kStale: the file no longer holds the bytes this edit was opened
+    // on (a restore, an import or the game wrote it), so the working copy is never written over it.
     Result Apply();
     const std::string& detail() const { return detail_; }
 

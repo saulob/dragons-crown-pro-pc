@@ -1,5 +1,6 @@
 #include "save_backup.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -76,6 +77,29 @@ std::string ValueOf(const std::string& line) {
     return at == std::string::npos ? std::string() : line.substr(at + 1);
 }
 
+constexpr size_t kMaxNameField = 32;
+constexpr uintmax_t kMaxMetaBytes = 4096;
+constexpr int kMaxNameAttempts = 100;
+
+// Title ids and savedata folder names become part of a file name, so only a plain token is kept.
+std::string NameToken(std::string_view text) {
+    std::string token;
+    for (const char ch : text.substr(0, std::min(text.size(), kMaxNameField))) {
+        const bool plain = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
+        token += plain ? ch : '_';
+    }
+    return token.empty() ? std::string("unknown") : token;
+}
+
+bool SamePath(const std::filesystem::path& a, const std::filesystem::path& b) {
+    std::error_code first, second;
+    const std::filesystem::path left = std::filesystem::weakly_canonical(a, first);
+    const std::filesystem::path right = std::filesystem::weakly_canonical(b, second);
+    return !first && !second && left == right;
+}
+
+bool PlainToken(const std::string& text) { return !text.empty() && text.size() <= kMaxNameField && NameToken(text) == text; }
+
 } // namespace
 
 std::optional<std::string> WriteSaveAtomically(const std::filesystem::path& target, std::span<const uint8_t> bytes,
@@ -124,21 +148,29 @@ std::optional<BackupInfo> CreateBackup(const std::filesystem::path& backup_folde
     std::error_code ec;
     std::filesystem::create_directories(backup_folder, ec);
     const std::string stamp = Timestamp();
-    std::string base = "SAVE0_" + stamp + "_" + std::string(title_id) + "_" + std::string(dir_name);
     BackupInfo info;
-    info.title_id = std::string(title_id);
-    info.dir_name = std::string(dir_name);
+    info.title_id = NameToken(title_id);
+    info.dir_name = NameToken(dir_name);
     info.original_path = save0_path.string();
-    info.timestamp = stamp;
-    info.file = backup_folder / (base + ".DAT");
-    info.meta = backup_folder / (base + ".meta");
-    if (std::filesystem::exists(info.file, ec) || std::filesystem::exists(info.meta, ec)) {
-        return std::nullopt; // never overwrite
+    const std::string base = "SAVE0_" + stamp + "_" + info.title_id + "_" + info.dir_name;
+    for (int attempt = 0; attempt < kMaxNameAttempts; ++attempt) {
+        const std::string suffix = attempt == 0 ? std::string() : "_" + std::to_string(attempt);
+        info.timestamp = stamp + suffix;
+        info.file = backup_folder / (base + suffix + ".DAT");
+        info.meta = backup_folder / (base + suffix + ".meta");
+        if (std::filesystem::exists(info.file, ec) || std::filesystem::exists(info.meta, ec)) {
+            continue; // never overwrite
+        }
+        std::vector<uint8_t> written;
+        if (!WriteAllBytes(info.file, bytes) || !ReadAllBytes(info.file, written) || written != bytes ||
+            !WriteText(info.meta, MetaText(info))) {
+            std::filesystem::remove(info.file, ec);
+            std::filesystem::remove(info.meta, ec);
+            return std::nullopt;
+        }
+        return info;
     }
-    if (!WriteAllBytes(info.file, bytes) || !WriteText(info.meta, MetaText(info))) {
-        return std::nullopt;
-    }
-    return info;
+    return std::nullopt;
 }
 
 std::vector<BackupInfo> ListBackups(const std::filesystem::path& backup_folder) {
@@ -149,16 +181,25 @@ std::vector<BackupInfo> ListBackups(const std::filesystem::path& backup_folder) 
     }
     for (std::filesystem::directory_iterator it(backup_folder, ec); !ec && it != std::filesystem::directory_iterator();
          it.increment(ec)) {
-        if (it->path().extension() != ".meta") {
+        if (it->path().extension() != ".meta" || !it->is_regular_file(ec)) {
             continue;
         }
         BackupInfo info;
         info.meta = it->path();
         info.file = it->path();
         info.file.replace_extension(".DAT");
-        std::ifstream in(info.meta);
+        const uintmax_t meta_size = std::filesystem::file_size(info.meta, ec);
+        if (ec || meta_size > kMaxMetaBytes || !std::filesystem::is_regular_file(info.file, ec)) {
+            continue;
+        }
+        std::ifstream in(info.meta, std::ios::binary);
+        std::string text(static_cast<size_t>(meta_size), '\0');
+        in.read(text.data(), static_cast<std::streamsize>(text.size()));
+        text.resize(static_cast<size_t>(std::max<std::streamsize>(in.gcount(), 0)));
+        std::istringstream lines(text);
         std::string line;
-        while (std::getline(in, line)) {
+        while (std::getline(lines, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
             if (line.rfind("title_id=", 0) == 0) {
                 info.title_id = ValueOf(line);
             } else if (line.rfind("data_slot=", 0) == 0) {
@@ -169,6 +210,9 @@ std::vector<BackupInfo> ListBackups(const std::filesystem::path& backup_folder) 
                 info.timestamp = ValueOf(line);
             }
         }
+        if (!PlainToken(info.title_id)) info.title_id.clear();
+        if (!PlainToken(info.dir_name)) info.dir_name.clear();
+        if (info.timestamp.size() > kMaxNameField) info.timestamp.clear();
         backups.push_back(std::move(info));
     }
     std::sort(backups.begin(), backups.end(), [](const BackupInfo& a, const BackupInfo& b) {
@@ -177,8 +221,32 @@ std::vector<BackupInfo> ListBackups(const std::filesystem::path& backup_folder) 
     return backups;
 }
 
+std::optional<std::string> DeleteBackup(const BackupInfo& backup, const std::filesystem::path& backup_folder,
+                                        std::string_view title_id, std::string_view dir_name) {
+    const auto named_like_a_backup = [](const BackupInfo& info) {
+        return info.file.extension() == ".DAT" && info.meta.extension() == ".meta" && info.file.stem() == info.meta.stem();
+    };
+    if (!named_like_a_backup(backup) || !SamePath(backup.file.parent_path(), backup_folder) ||
+        !SamePath(backup.meta.parent_path(), backup_folder)) {
+        return "this is not a backup in the backup folder";
+    }
+    for (const BackupInfo& listed : ListBackups(backup_folder)) {
+        if (!SamePath(listed.file, backup.file) || !SamePath(listed.meta, backup.meta)) continue;
+        if (listed.title_id != title_id || listed.dir_name != dir_name) return "this backup belongs to another save";
+        std::error_code ec;
+        if (std::filesystem::is_symlink(listed.file, ec) || std::filesystem::is_symlink(listed.meta, ec)) {
+            return "this backup is a link, not a file";
+        }
+        if (!std::filesystem::remove(listed.file, ec) || ec) return "could not delete the backup file";
+        std::filesystem::remove(listed.meta, ec);
+        return ec ? std::optional<std::string>("the backup was deleted but its information file was not") : std::nullopt;
+    }
+    return "the backup no longer exists";
+}
+
 std::optional<std::string> RestoreBackup(const BackupInfo& backup, const std::filesystem::path& save0_path,
-                                         const std::filesystem::path& backup_folder) {
+                                         const std::filesystem::path& backup_folder, std::string_view title_id,
+                                         std::string_view dir_name) {
     std::vector<uint8_t> bytes;
     if (!ReadAllBytes(backup.file, bytes)) {
         return "could not read the backup";
@@ -187,12 +255,20 @@ std::optional<std::string> RestoreBackup(const BackupInfo& backup, const std::fi
     if (!ValidateSave(bytes, problems)) {
         return "the backup is not a valid save: " + (problems.empty() ? std::string("unknown") : problems.front());
     }
-    if (std::filesystem::exists(save0_path)) {
-        if (!CreateBackup(backup_folder, save0_path, backup.title_id, backup.dir_name)) {
+    std::error_code ec;
+    if (std::filesystem::exists(save0_path, ec)) {
+        if (!CreateBackup(backup_folder, save0_path, title_id, dir_name)) {
             return "could not back up the current save before restoring";
         }
     }
-    return WriteSaveAtomically(save0_path, bytes, ValidateSave);
+    if (std::optional<std::string> error = WriteSaveAtomically(save0_path, bytes, ValidateSave)) {
+        return error;
+    }
+    std::vector<uint8_t> written;
+    if (!ReadAllBytes(save0_path, written) || written != bytes) {
+        return "the restored save did not read back identically";
+    }
+    return std::nullopt;
 }
 
 } // namespace dcp
