@@ -97,6 +97,7 @@ private:
     void DrawIdentity(trg::Ui& ui, ImVec2 at, const CharacterIdentity& identity, float row_height);
     std::optional<PixelBox> PreviewCrop(CharacterClass klass, int color);
     void DrawBaseColor(trg::Ui& ui, const CharacterView& character, CustomLook look);
+    void DrawDifficulty(trg::Ui& ui, const CharacterView& character, bool changed);
     void DrawCustom(trg::Ui& ui, const CharacterView& character, CustomLook look);
     void DrawAllColorsRandom(trg::Ui& ui, CharacterClass klass, CustomLook look);
     void DrawResetCustom(trg::Ui& ui, CustomLook look);

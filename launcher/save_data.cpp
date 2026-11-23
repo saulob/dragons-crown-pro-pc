@@ -82,6 +82,22 @@ std::string_view ClassName(CharacterClass klass) {
     return "Unknown";
 }
 
+std::string_view DifficultyName(uint8_t value) {
+    switch (value) {
+    case 0: return "Normal";
+    case 1:
+    case 2: return "Hard";
+    case 3:
+    case 4: return "Infernal";
+    case kDifficultyUltimate: return "Ultimate";
+    default: return {};
+    }
+}
+
+bool IsEditableDifficulty(int value) {
+    return std::ranges::find(kEditableDifficulties, value) != kEditableDifficulties.end();
+}
+
 CharacterClass ClassFromId(uint8_t id) {
     switch (id) {
     case 0: return CharacterClass::kFighter;
@@ -142,6 +158,7 @@ SaveModel SaveModel::FromBytes(std::span<const uint8_t> bytes) {
             record.hp_max = ReadU16(model.bytes_, record.record_offset + kCharHpMax);
             record.klass = ClassFromId(model.bytes_[record.record_offset + kCharClass]);
             record.color = model.bytes_[record.record_offset + kCharColor];
+            record.difficulty = model.bytes_[record.record_offset + kCharDifficulty];
             const size_t name_offset = record.record_offset + kCharName;
             size_t length = 0;
             while (length < kCharNameBytes && model.bytes_[name_offset + length] != 0) {
@@ -264,6 +281,17 @@ bool SaveModel::SetColor(int slot, int character, int color) {
     }
     bytes_[data->characters[character].record_offset + kCharColor] = static_cast<uint8_t>(color);
     slots_[slot].characters[character].color = static_cast<uint8_t>(color);
+    return true;
+}
+
+bool SaveModel::SetDifficulty(int slot, int character, int difficulty) {
+    const DataSlotView* data = Slot(slot);
+    if (!IsEditableDifficulty(difficulty) || !data || character < 0 || character >= static_cast<int>(kCharacterCount) ||
+        !data->characters[character].present) {
+        return false;
+    }
+    bytes_[data->characters[character].record_offset + kCharDifficulty] = static_cast<uint8_t>(difficulty);
+    slots_[slot].characters[character].difficulty = static_cast<uint8_t>(difficulty);
     return true;
 }
 

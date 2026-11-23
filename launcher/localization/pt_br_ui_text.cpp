@@ -886,6 +886,12 @@ Skill points available to spend.	Pontos de habilidade disponiveis para gastar.
 Current HP	HP atual
 Current hit points; at most the maximum.	Pontos de vida atuais; no maximo o maximo.
 Maximum hit points.	Pontos de vida maximos.
+Difficulty	Dificuldade
+Difficulty belongs to this character and can be changed here	A dificuldade pertence a este personagem e pode ser alterada aqui
+Normal	Normal
+Hard	Difícil
+Infernal	Infernal
+Ultimate	Supremo
 Select a character first.	Selecione um personagem primeiro.
 Owned by	Pertence a
 Difficulty, story progress, the Labyrinth of Chaos and the Tower of Mirages are shown as they become proven. Gold is edited under Save; it belongs to the DATA slot.	Dificuldade, progresso da historia, o Labirinto do Caos e a Torre de Miragens aparecem quando forem comprovados. O ouro e editado em Save; pertence ao slot DATA.

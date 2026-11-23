@@ -757,7 +757,33 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
         const HpValues next = WithMaxHp(hp, hp_max);
         edit_->working().SetHp(selected_slot_, selected_character_, uint16_t(next.current), uint16_t(next.max));
     }
+
+    DrawDifficulty(ui, character, saved && saved->difficulty != character.difficulty);
     ui.EndRows();
+}
+
+void EditorPage::DrawDifficulty(trg::Ui& ui, const CharacterView& character, bool changed) {
+    ui.Row(Tr("Difficulty"), Tr("Difficulty belongs to this character and can be changed here"));
+    const std::string_view name = DifficultyName(character.difficulty);
+    const std::string current = name.empty() ? std::string(Tr("Unknown")) : std::string(Tr(std::string(name).c_str()));
+    if (changed) {
+        ImGui::PushStyleColor(ImGuiCol_Border, ui.theme().accent);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    }
+    if (ImGui::BeginCombo("##difficulty", current.c_str())) {
+        for (const uint8_t value : kEditableDifficulties) {
+            const bool selected = value == character.difficulty;
+            const std::string label = std::string(Tr(std::string(DifficultyName(value)).c_str())) + "##difficulty" + std::to_string(value);
+            if (ImGui::Selectable(label.c_str(), selected) && !selected) {
+                edit_->working().SetDifficulty(selected_slot_, selected_character_, value);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (changed) {
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+    }
 }
 
 void EditorPage::DrawCharacter(trg::Ui& ui) {
