@@ -796,11 +796,15 @@ void TestDifficultyModel() {
     CHECK(DifficultyName(0) == "Normal" && DifficultyName(1) == "Hard" && DifficultyName(2) == "Hard");
     CHECK(DifficultyName(3) == "Infernal" && DifficultyName(4) == "Infernal" && DifficultyName(kDifficultyUltimate) == "Ultimate");
     CHECK(DifficultyName(5).empty() && DifficultyName(0xCC).empty());
-    CHECK(IsEditableDifficulty(0) && IsEditableDifficulty(2) && IsEditableDifficulty(4));
-    for (const int refused : {1, 3, 5, 99, 0xCC, -1, 256}) CHECK(!IsEditableDifficulty(refused));
+    for (int raw = 0; raw < 256; ++raw) {
+        const DcpDifficulty category = dcp_difficulty_of(raw);
+        CHECK(DifficultyName(uint8_t(raw)) == (category == DCP_DIFFICULTY_UNKNOWN ? std::string_view() : std::string_view(dcp_difficulty_name(category))));
+    }
+    CHECK(IsEditableDifficulty(0) && IsEditableDifficulty(2) && IsEditableDifficulty(4) && IsEditableDifficulty(99));
+    for (const int refused : {1, 3, 5, 98, 100, 0xCC, -1, 256}) CHECK(!IsEditableDifficulty(refused));
 
     SaveModel edited = model;
-    for (const int refused : {1, 3, 5, 99, -1}) CHECK(!edited.SetDifficulty(0, 0, refused));
+    for (const int refused : {1, 3, 5, 98, 100, -1}) CHECK(!edited.SetDifficulty(0, 0, refused));
     CHECK(!edited.SetDifficulty(0, 5, 2) && !edited.SetDifficulty(3, 0, 2) && !edited.SetDifficulty(0, 16, 2));
     CHECK(std::ranges::equal(edited.bytes(), model.bytes()));
 
@@ -821,6 +825,50 @@ void TestDifficultyModel() {
     const std::vector<uint8_t> truncated(save.begin(), save.begin() + 4096);
     SaveModel broken = SaveModel::FromBytes(truncated);
     CHECK(!broken.valid() && !broken.SetDifficulty(0, 0, 2));
+}
+
+void TestDifficultyUltimate(const fs::path& base) {
+    CHECK(kEditableDifficulties.size() == 4 && kEditableDifficulties[3] == 0x63 && kDifficultyUltimate == 0x63);
+    for (const auto& [value, expected] : {std::pair{0, uint8_t(0)}, {2, uint8_t(2)}, {4, uint8_t(4)}, {99, uint8_t(0x63)}}) {
+        SaveModel model = SaveModel::FromBytes(SaveWithDifficulties(0, {1, 3, 0xCC}));
+        CHECK(model.SetDifficulty(0, 0, value));
+        CHECK(model.Serialize()[RecordOffset(0, 0) + kCharDifficulty] == expected);
+    }
+
+    const std::vector<uint8_t> original = SaveWithDifficulties(0, {0, 2, 4, 1});
+    for (const int from : {0, 2, 4}) {
+        std::vector<uint8_t> bytes = original;
+        bytes[RecordOffset(0, 0) + kCharDifficulty] = uint8_t(from);
+        PutU32(bytes, kSaveCrcOffset, SaveCrc32(bytes));
+        SaveModel model = SaveModel::FromBytes(bytes);
+        CHECK(model.SetDifficulty(0, 0, 99) && model.Character(0, 0)->difficulty == 99);
+        const SaveModel reread = SaveModel::FromBytes(model.Serialize());
+        CHECK(reread.valid() && reread.crc_valid() && reread.Character(0, 0)->difficulty == 99);
+        CHECK(reread.Character(0, 1)->difficulty == 2 && reread.Character(0, 2)->difficulty == 4 && reread.Character(0, 3)->difficulty == 1);
+    }
+
+    const fs::path user = base / "difficulty_ultimate_user";
+    const fs::path file = WriteEditableSave(user, original);
+    std::vector<uint8_t> on_disk;
+    SaveEdit edit = OpenEdit(user);
+    CHECK(edit.working().SetDifficulty(0, 0, 99) && edit.dirty());
+    edit.Discard();
+    CHECK(!edit.dirty() && ReadBytes(file, on_disk) && on_disk == original && ListBackups(BackupFolder(user)).empty());
+
+    CHECK(edit.working().SetDifficulty(0, 0, 99));
+    CHECK(edit.Apply() == SaveEdit::Result::kApplied);
+    CHECK(ReadBytes(file, on_disk));
+    size_t differing = 0;
+    for (size_t i = 4; i < on_disk.size(); ++i) differing += on_disk[i] != original[i];
+    CHECK(differing == 1 && on_disk[RecordOffset(0, 0) + kCharDifficulty] == 0x63);
+    const SaveModel reloaded = SaveModel::FromBytes(on_disk);
+    CHECK(reloaded.valid() && reloaded.crc_valid() && reloaded.Character(0, 0)->difficulty == 99);
+    CHECK(reloaded.Character(0, 3)->difficulty == 1 && reloaded.Character(1, 0) && !reloaded.Character(1, 0)->present);
+    CHECK(ListBackups(BackupFolder(user)).size() == 1);
+
+    CHECK(edit.working().SetDifficulty(0, 0, 0) && edit.Apply() == SaveEdit::Result::kApplied);
+    CHECK(SaveModel::FromFile(file).Character(0, 0)->difficulty == 0);
+    CHECK(!ListBackups(BackupFolder(user)).empty());
 }
 
 void TestDifficultySlots() {
@@ -887,15 +935,10 @@ void TestDifficultyRealSave(const fs::path& source_dir) {
     const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     const SaveModel model = SaveModel::FromBytes(bytes);
     if (!model.valid() || model.Character(0, 0)->name != "George") return;
-    CHECK(model.Character(0, 0)->klass == CharacterClass::kDwarf && model.Character(0, 0)->difficulty == 4);
-    CHECK(DifficultyName(model.Character(0, 0)->difficulty) == "Infernal");
-    bool differs = false;
+    CHECK(model.Character(0, 0)->klass == CharacterClass::kDwarf);
     for (const CharacterView& character : model.slots()[0].characters) {
-        if (!character.present) continue;
-        CHECK(!DifficultyName(character.difficulty).empty());
-        differs |= character.difficulty != model.Character(0, 0)->difficulty;
+        if (character.present) CHECK(!DifficultyName(character.difficulty).empty());
     }
-    CHECK(differs);
 }
 
 void TestDifficultyPage() {
@@ -905,7 +948,12 @@ void TestDifficultyPage() {
     const size_t difficulty = page.find("void EditorPage::DrawDifficulty(");
     const size_t next = page.find("void EditorPage::DrawCharacter(");
     CHECK(editor != std::string::npos && difficulty != std::string::npos && editor < difficulty && difficulty < next);
-    CHECK(page.substr(editor, difficulty - editor).find("DrawDifficulty(") != std::string::npos);
+    const std::string editor_body = page.substr(editor, difficulty - editor);
+    const size_t name_row = editor_body.find("ui.Row(Tr(\"Name\")");
+    const size_t difficulty_row = editor_body.find("DrawDifficulty(");
+    const size_t level_row = editor_body.find("ui.Row(Tr(\"Level\")");
+    CHECK(name_row != std::string::npos && name_row < difficulty_row && difficulty_row < level_row);
+    CHECK(editor_body.find("DrawDifficulty(", difficulty_row + 1) == std::string::npos);
     const size_t data_select = page.find("##select_slot");
     CHECK(data_select != std::string::npos && (data_select < editor || data_select > next));
     const std::string body = page.substr(difficulty, next - difficulty);
@@ -7789,6 +7837,7 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestNoChangeGuarantee();
              TestDifficultyModel();
              TestDifficultySlots();
+             TestDifficultyUltimate(base);
              TestDifficultyEdit(base);
              TestDifficultyRealSave(source);
              TestDifficultyPage();

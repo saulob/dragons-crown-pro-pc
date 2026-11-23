@@ -247,6 +247,7 @@ test('the admin endpoint returns the story section to the token only', async () 
 test('a database from before this metric gains its columns and table and keeps its history', () => {
   const env = makeLobby();
   host(env);
+  env.host.sql.run('ALTER TABLE rooms DROP COLUMN difficulty');
   env.host.sql.run('ALTER TABLE rooms DROP COLUMN story_seen');
   env.host.sql.run('ALTER TABLE members DROP COLUMN appearance');
   env.host.sql.run('DROP TABLE story_users');

@@ -15,6 +15,7 @@
 #include <unistd.h>
 #endif
 
+#include "difficulty.h"
 #include "early_story_online.h"
 #include "network_access.h"
 
@@ -2012,6 +2013,81 @@ static void test_room_info_observer(void) {
     network_access_set_room_info_observer(NULL);
 }
 
+static void set_record_difficulty(int slot, int raw, int32_t state) {
+    record(slot)[DCP_DIFFICULTY_RECORD_OFFSET] = (uint8_t)raw;
+    memcpy(record(slot) + DCP_RECORD_STATE_OFFSET, &state, sizeof(state));
+}
+
+static void test_difficulty_names(void) {
+    static const struct {
+        int raw;
+        DcpDifficulty category;
+        const char *name, *wire;
+    } kCases[] = {
+        {0, DCP_DIFFICULTY_NORMAL, "Normal", "normal"},   {1, DCP_DIFFICULTY_HARD, "Hard", "hard"},
+        {2, DCP_DIFFICULTY_HARD, "Hard", "hard"},         {3, DCP_DIFFICULTY_INFERNAL, "Infernal", "infernal"},
+        {4, DCP_DIFFICULTY_INFERNAL, "Infernal", "infernal"}, {99, DCP_DIFFICULTY_ULTIMATE, "Ultimate", "ultimate"},
+        {5, DCP_DIFFICULTY_UNKNOWN, "Unknown", "unknown"}, {98, DCP_DIFFICULTY_UNKNOWN, "Unknown", "unknown"},
+        {100, DCP_DIFFICULTY_UNKNOWN, "Unknown", "unknown"}, {0xcc, DCP_DIFFICULTY_UNKNOWN, "Unknown", "unknown"},
+        {-1, DCP_DIFFICULTY_UNKNOWN, "Unknown", "unknown"},
+    };
+    for (size_t i = 0; i < sizeof(kCases) / sizeof(*kCases); ++i) {
+        const DcpDifficulty category = dcp_difficulty_of(kCases[i].raw);
+        CHECK(category == kCases[i].category);
+        CHECK(!strcmp(dcp_difficulty_name(category), kCases[i].name));
+        CHECK(!strcmp(dcp_difficulty_wire(category), kCases[i].wire));
+    }
+    CHECK(DCP_DIFFICULTY_ULTIMATE_RAW == 99 && DCP_DIFFICULTY_RECORD_OFFSET == 0x21a9);
+}
+
+/* The selector reads the lead player's difficulty byte, logs a change once and ignores an empty record. */
+static void test_own_difficulty(void) {
+    GuestRegs regs;
+    start(5, 1, 0);
+    early_story_note_own_difficulty(0, EARLY_STORY_NO_DIFFICULTY);
+    CHECK(early_story_own_difficulty() == EARLY_STORY_NO_DIFFICULTY);
+
+    set_record_difficulty(0, 2, -1);
+    capture_begin();
+    selected(&regs, 0);
+    char *log = capture_end();
+    CHECK(early_story_own_difficulty() == EARLY_STORY_NO_DIFFICULTY && occurrences(log, "Character difficulty") == 0);
+    free(log);
+
+    set_record_difficulty(0, 2, 0);
+    capture_begin();
+    for (int frame = 0; frame < 4; ++frame) selected(&regs, 0);
+    log = capture_end();
+    CHECK(early_story_own_difficulty() == 2 && early_story_own_player() == 1);
+    CHECK(occurrences(log, "Character difficulty: player=1 difficulty=Hard raw=2") == 1 && occurrences(log, "Character difficulty") == 1);
+    free(log);
+
+    static const struct {
+        int raw;
+        const char *line;
+    } kChanges[] = {
+        {0, "difficulty=Normal raw=0"}, {1, "difficulty=Hard raw=1"}, {3, "difficulty=Infernal raw=3"},
+        {4, "difficulty=Infernal raw=4"}, {99, "difficulty=Ultimate raw=99"}, {7, "difficulty=Unknown raw=7"},
+    };
+    for (size_t i = 0; i < sizeof(kChanges) / sizeof(*kChanges); ++i) {
+        set_record_difficulty(0, kChanges[i].raw, 0);
+        capture_begin();
+        selected(&regs, 0);
+        selected(&regs, 0);
+        log = capture_end();
+        CHECK(early_story_own_difficulty() == kChanges[i].raw && occurrences(log, kChanges[i].line) == 1);
+        free(log);
+    }
+
+    set_record_difficulty(2, 4, 0);
+    capture_begin();
+    selected(&regs, 2);
+    log = capture_end();
+    CHECK(early_story_own_player() == 3 && early_story_own_difficulty() == 4 && occurrences(log, "player=3 difficulty=Infernal raw=4") == 1);
+    free(log);
+    early_story_session_reset();
+}
+
 int main(void) {
     test_context_rules();
     test_threshold_and_rooms();
@@ -2039,6 +2115,8 @@ int main(void) {
     test_join_policy();
     test_source_wiring();
     test_room_info_observer();
+    test_difficulty_names();
+    test_own_difficulty();
     if (failures) {
         printf("%d check(s) failed\n", failures);
         return 1;

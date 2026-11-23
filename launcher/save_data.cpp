@@ -83,15 +83,8 @@ std::string_view ClassName(CharacterClass klass) {
 }
 
 std::string_view DifficultyName(uint8_t value) {
-    switch (value) {
-    case 0: return "Normal";
-    case 1:
-    case 2: return "Hard";
-    case 3:
-    case 4: return "Infernal";
-    case kDifficultyUltimate: return "Ultimate";
-    default: return {};
-    }
+    const DcpDifficulty difficulty = dcp_difficulty_of(value);
+    return difficulty == DCP_DIFFICULTY_UNKNOWN ? std::string_view() : std::string_view(dcp_difficulty_name(difficulty));
 }
 
 bool IsEditableDifficulty(int value) {

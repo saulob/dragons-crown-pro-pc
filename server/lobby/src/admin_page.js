@@ -76,6 +76,10 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       <p id="platform-note" class="muted"></p>
       <div class="cards" id="platform-cards"></div>
       <div id="d-mix"></div>
+      <h2 class="sub">Difficulty in multiplayer rooms</h2>
+      <p id="difficulty-note" class="muted"></p>
+      <p id="difficulty-unknown" class="muted"></p>
+      <div id="d-difficulty"></div>
     </div>
     <h2 class="section">Comms Wheel Usage</h2>
     <div class="panel">
@@ -351,6 +355,7 @@ h1 { font-size: 22px; margin: 0 0 4px; min-width: 0; }
 .menu button { width: 100%; }
 h2 { font-size: 15px; margin: 0 0 8px; }
 h2.section { font-size: 17px; margin: 24px 0 10px; }
+h2.sub { margin-top: 24px; }
 .up { color: var(--series-3); }
 .down { color: var(--error); }
 .muted { color: var(--text-muted); margin: 0 0 12px; font-size: 13px; }
@@ -869,6 +874,7 @@ export const ADMIN_JS = String.raw`(function () {
     rows(occ, 'Largest party reached', ordered(history.dimensions.occupancy, OCCUPANCY), function (v) { return OCCUPANCY[v]; });
     rows(life, 'Room lifetime', ordered(history.dimensions.lifetime, LIFETIME), function (v) { return LIFETIME[v]; });
     platformRooms(history);
+    difficultyRooms(history);
   }
 
   function platformRooms(history) {
@@ -896,6 +902,25 @@ export const ADMIN_JS = String.raw`(function () {
     cards.appendChild(card('Android cross-platform rooms that used relay',
       fmt(t.rooms_android_cross_relayed) + ' · ' + share(t.rooms_android_cross_relayed, t.rooms_android_cross)));
     rows(mix, 'Platforms in a room', mixes, function (v) { return v.split('+').join(' + '); });
+  }
+
+  var DIFFICULTY = { normal: 'Normal', hard: 'Hard', infernal: 'Infernal', ultimate: 'Ultimate' };
+
+  function difficultyRooms(history) {
+    var known = history.dimensions.difficulty || [];
+    var counted = total(known);
+    var eligible = Math.max(history.totals.rooms_with_guest, counted);
+    var unknown = eligible - counted;
+    var since = history.difficulty_first_day || null;
+    var node = $('d-difficulty');
+    clear(node);
+    var began = since ? ' Difficulty reporting began on ' + since + '; earlier rooms and older game versions appear as unknown.' : '';
+    $('difficulty-note').textContent = 'Last ' + history.days + ' days, multiplayer rooms that ended and reported the host character difficulty' +
+      (counted > 0 ? ' (' + fmt(counted) + '). Percentages are of these rooms.' : '.') + began;
+    $('difficulty-unknown').textContent = unknown > 0
+      ? 'Unknown: ' + fmt(unknown) + ' of ' + fmt(eligible) + ' multiplayer rooms did not report a difficulty.' : '';
+    $('difficulty-unknown').hidden = unknown <= 0;
+    rows(node, 'Room difficulty', ordered(known, DIFFICULTY), function (v) { return DIFFICULTY[v]; });
   }
 
   var CHARACTERS = { Fighter: 'Fighter', Amazon: 'Amazon', Dwarf: 'Dwarf', Elf: 'Elf', Wizard: 'Wizard', Sorceress: 'Sorceress' };

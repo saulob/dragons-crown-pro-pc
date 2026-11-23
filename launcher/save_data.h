@@ -11,6 +11,8 @@
 #include <string_view>
 #include <vector>
 
+#include "difficulty.h"
+
 namespace dcp {
 
 inline constexpr size_t kSaveFileSize = 0x20EB18;      // 2,157,336 bytes
@@ -51,10 +53,10 @@ inline constexpr int kNativeColorCount = 5;
 // The game's class ids (its texture and name tables are indexed by them); never written.
 enum class CharacterClass : uint8_t { kFighter = 0, kAmazon = 1, kElf = 2, kDwarf = 3, kSorceress = 4, kWizard = 5 };
 
-// The difficulty ids the game's Temple prayers write. Hard 1 and Infernal 3 are the reincarnation variants and 99 is
-// Ultimate; they are shown but never written.
-inline constexpr std::array<uint8_t, 3> kEditableDifficulties = {0, 2, 4};
-inline constexpr uint8_t kDifficultyUltimate = 99;
+// The ids the game's Temple prayers write. Hard 1 and Infernal 3 are never offered (their prayers need tier 100); they
+// are shown but never written.
+inline constexpr uint8_t kDifficultyUltimate = DCP_DIFFICULTY_ULTIMATE_RAW;
+inline constexpr std::array<uint8_t, 4> kEditableDifficulties = {0, 2, 4, kDifficultyUltimate};
 
 // The game's own name for a difficulty id, or an empty view when the id is not a known one.
 std::string_view DifficultyName(uint8_t value);

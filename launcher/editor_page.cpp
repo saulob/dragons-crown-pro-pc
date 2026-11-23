@@ -727,6 +727,8 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
         ImGui::PopStyleColor();
     }
 
+    DrawDifficulty(ui, character, saved && saved->difficulty != character.difficulty);
+
     ui.Row(Tr("Level"));
     int level = SaveModel::DisplayedLevel(character.level_stored);
     const bool level_changed = saved && saved->level_stored != character.level_stored;
@@ -757,8 +759,6 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
         const HpValues next = WithMaxHp(hp, hp_max);
         edit_->working().SetHp(selected_slot_, selected_character_, uint16_t(next.current), uint16_t(next.max));
     }
-
-    DrawDifficulty(ui, character, saved && saved->difficulty != character.difficulty);
     ui.EndRows();
 }
 

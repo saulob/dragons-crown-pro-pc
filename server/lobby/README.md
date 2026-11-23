@@ -248,7 +248,7 @@ nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
 | Table | Row | Columns |
 |---|---|---|
 | `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms`, `rooms_closed`, `rooms_with_guest`, `rooms_relayed`, `party_total` and the six platform room counters below |
-| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
+| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `difficulty` (`normal`, `hard`, `infernal`, `ultimate`) counts ended rooms with a guest once each by the difficulty the host reported at `room.create` (raw 1 and 2 are `hard`, 3 and 4 `infernal`, 99 `ultimate`; a missing or unknown value adds no row, so the dashboard's unknown is the rooms with a guest minus these); `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
 | `metrics_samples` | one per 15 minutes (UTC ms) | the highest `online`, `in_rooms` and `rooms` in the interval; 90 days kept |
 
 - Days are America/Sao_Paulo calendar days (`YYYY-MM-DD`); samples are UTC timestamps.
