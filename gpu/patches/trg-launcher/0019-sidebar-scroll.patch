@@ -1,0 +1,98 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+index 49bb224..41a4848 100644
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -359,6 +359,9 @@ class Launcher {
+   Ui ui_;
+   float s_ = 1.0f;
+   PageNavigation navigation_;
++  float sidebar_scroll_ = 0.0f;  // logical pixels
++  int sidebar_shown_ = -1;
++  float sidebar_shown_height_ = 0.0f;
+   bool want_play_ = false, want_quit_ = false;
+   std::string status_;
+   double status_until_ = 0.0;
+diff --git a/include/trg/layout.h b/include/trg/layout.h
+index 3c61359..d87a72b 100644
+--- a/include/trg/layout.h
++++ b/include/trg/layout.h
+@@ -83,6 +83,25 @@ inline float SidebarRowFor(int pages, float body_height) {
+   return std::clamp(std::floor(rows / float(pages)), kSidebarRowMin, kSidebarRow);
+ }
+ 
++// A scrollbar takes the place of the right padding.
++inline float SidebarRowWidth(float sidebar_width, float scrollbar) {
++  return sidebar_width - kSidebarPadding - std::max(kSidebarPadding, scrollbar);
++}
++
++inline float SidebarRowTop(int index, float row) { return kSidebarPadding + float(index) * (row + kSidebarGap); }
++
++inline float SidebarScrollMax(int pages, float row, float body_height) {
++  return std::max(0.0f, SidebarHeight(pages, row) - body_height);
++}
++
++// The scroll nearest to `scroll` that shows the row and its padding whole.
++inline float SidebarScrollToShow(int index, int pages, float row, float body_height, float scroll) {
++  const float top = SidebarRowTop(index, row) - kSidebarPadding, bottom = top + row + kSidebarPadding * 2.0f;
++  if (bottom - scroll > body_height) scroll = bottom - body_height;
++  if (top < scroll) scroll = top;
++  return std::clamp(scroll, 0.0f, SidebarScrollMax(pages, row, body_height));
++}
++
+ inline float ControlColumnWidth(float row_width, float scale) {
+   return std::clamp(row_width * 0.34f, 280.0f * scale, 360.0f * scale);
+ }
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+index f661eb0..20edf67 100644
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -1214,23 +1214,36 @@ void Launcher::DrawHeader(ImVec2 origin, float w, float h) {
+ void Launcher::DrawSidebar(ImVec2 size) {
+   const Theme& t = config_.theme;
+   OutlinePanel(size);
+-  ImGui::BeginChild("##sidebar", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
++  const int pages = int(config_.pages.size());
++  const float body_h = size.y / s_;
++  const float row = layout::SidebarRowFor(pages, body_h);
++  // Brings the current page into view when it changes or the sidebar is resized, and leaves the scroll alone otherwise.
++  if (navigation_.current() != sidebar_shown_ || body_h != sidebar_shown_height_) {
++    sidebar_shown_ = navigation_.current();
++    sidebar_shown_height_ = body_h;
++    const float scroll = layout::SidebarScrollToShow(sidebar_shown_, pages, row, body_h, sidebar_scroll_);
++    ImGui::SetNextWindowScroll(ImVec2(-1.0f, scroll * s_));
++  }
++  ImGui::SetNextWindowContentSize(ImVec2(0.0f, layout::SidebarHeight(pages, row) * s_));
++  ImGui::BeginChild("##sidebar", size, ImGuiChildFlags_None);
+   const float pad = layout::kSidebarPadding * s_;
+-  const float item_h = layout::SidebarRowFor(int(config_.pages.size()), size.y / s_) * s_;
++  const float item_h = row * s_;
+   const float framebuffer = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
+   const int icon_pixels = int(layout::kSidebarIcon * s_ * framebuffer + 0.5f);
+   const float icon_size = float(icon_pixels) / framebuffer;
+   ImGui::SetCursorPos(ImVec2(pad, pad));
++  const float scrollbar = layout::SidebarScrollMax(pages, row, body_h) > 0.0f ? ImGui::GetStyle().ScrollbarSize : 0.0f;
++  const float item_w = layout::SidebarRowWidth(size.x / s_, scrollbar / s_) * s_;
+   ImGui::PushFont(config_.fonts.semibold, layout::kTextSidebar);
+   const float cap_center = CapCenter(config_.fonts.semibold, ImGui::GetFontSize());
+-  for (int i = 0; i < int(config_.pages.size()); ++i) {
++  for (int i = 0; i < pages; ++i) {
+     const Page& page = config_.pages[size_t(i)];
+     const bool selected = navigation_.current() == i;
+     ImGui::SetCursorPosX(pad);
+     ImGui::PushID(i);
+     const ImVec2 pos = ImGui::GetCursorScreenPos();
+-    const ImVec2 item(size.x - pad * 2, item_h);
+-    if (ImGui::InvisibleButton("##page", item)) GoToPage(i);
++    const ImVec2 item(item_w, item_h);
++    if (ImGui::InvisibleButton("##page", item, ImGuiButtonFlags_EnableNav)) GoToPage(i);
+     const bool hot = ImGui::IsItemHovered();
+     const float center_y = std::floor(pos.y + item_h * 0.5f);
+     ImDrawList* dl = ImGui::GetWindowDrawList();
+@@ -1264,6 +1277,7 @@ void Launcher::DrawSidebar(ImVec2 size) {
+   }
+   ImGui::Dummy(ImVec2(0, 0));
+   ImGui::PopFont();
++  sidebar_scroll_ = ImGui::GetScrollY() / s_;
+   ImGui::EndChild();
+ }
+ 

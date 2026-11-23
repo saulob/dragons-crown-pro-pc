@@ -993,6 +993,11 @@ shortcuts, and its helper text from `note`, one sentence per line. The metrics a
 (`gpu/patches/trg-launcher/0008-sidebar-footer-alignment.patch`), with `Theme::border_row` and `Theme::border_panel` for
 passive lines (`0009-visual-polish.patch`); interactive controls keep their stronger colours.
 
+In a window too short for every page, even at the compact row, only the sidebar's page list scrolls, with the launcher's
+usual scrollbar in place of its right padding (`0019-sidebar-scroll.patch`). The wheel over the sidebar scrolls it, the
+rows are keyboard and controller targets that ImGui keeps in view, and the current page is brought into view when it
+changes or the window is resized; otherwise the scroll stays where the player left it.
+
 A frame draws one page: `GoToPage` only records the request and `Launcher::Frame` applies it before anything is drawn
 (`gpu/patches/trg-launcher/0007-coherent-page-frames.patch`). Each page has its own scroll window, so it keeps its scroll
 position.
@@ -1043,6 +1048,7 @@ pixel by pixel. Its "Launcher UI" summary has one row per group:
 | Scrollbar stability | `TestStablePageWidth`, `TestScrollbarSettling` | width, control column, wrap width and separator end identical before and after the scrollbar shows, and after a resize |
 | Separators/row spacing | `TestRowSeparators`, `TestSeparatorPages`, `TestRowRhythm`, `TestRowKinds` | full-width lines independent of the column clip, theme-only border colours, short, wrapped and control rows |
 | Sidebar EN/PT-BR | `TestSidebarProportions`, `TestSidebarLabels` | labels (longest: Jogabilidade), clamp, nine rows without a scrollbar, width handed to the page |
+| Sidebar scrolling | `TestSidebarScrollRange`, `TestSidebarScrollFrames` | scroll range and clamps, reveal of the current page, then real headless frames at 100, 150 and 225 percent: wheel ownership, clicks on scrolled rows, arrows, Tab and D-pad keeping focus in view, badge on its row, clipping, no scrollbar when every page fits |
 | Navigation coherence | `TestPageNavigation` | one commit per frame, no mixed frames under rapid requests, one scroll window per page |
 | TRG patch chain | `tests\launcher_gate_tests.ps1` | the series applies to the pinned revision in a scratch clone, and equals the checkout the tests read |
 | Compiler warnings | `tests\launcher_gate_tests.ps1` | the launcher sources and `launcher_tests.cpp`, syntax-only with the build's own `-Wall -Wextra`: zero warnings |

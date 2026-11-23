@@ -219,12 +219,21 @@ add_executable(dcp-launcher-shots EXCLUDE_FROM_ALL ../tests/launcher_shots.cpp)
 target_link_libraries(dcp-launcher-shots PRIVATE dcp_launcher)
 set_target_properties(dcp-launcher-shots PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 
+# TRG's launcher on Dear ImGui alone, so that the tests draw real frames with no window or renderer.
+set(DCP_LAUNCHER_TEST_IMGUI ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+set_source_files_properties(${DCP_LAUNCHER_TEST_IMGUI} PROPERTIES COMPILE_OPTIONS -w)
+add_library(trg_launcher_headless STATIC EXCLUDE_FROM_ALL ${TRG_DIR}/src/launcher.cpp ${DCP_LAUNCHER_TEST_IMGUI})
+target_include_directories(trg_launcher_headless PUBLIC ${IMGUI_DIR})
+target_compile_definitions(trg_launcher_headless PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(trg_launcher_headless PUBLIC trg_core)
+set_target_properties(trg_launcher_headless PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+
 # Focused tests with synthetic data and temporary folders (tools\test.ps1); not part of the default build.
 find_package(PNG REQUIRED)
 add_executable(dcp-launcher-tests EXCLUDE_FROM_ALL ../tests/launcher_tests.cpp ${DCP_LOG_SOURCES}
     ../gpu/shim/dcp_settings.cpp ../gpu/shim/dcp_png.cpp ${PROJECT_SOURCE_DIR}/src/exit_game_text.c)
 target_compile_definitions(dcp-launcher-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core PNG::PNG)
+target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core trg_launcher_headless PNG::PNG)
 target_include_directories(dcp-launcher-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 set_target_properties(dcp-launcher-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-launcher-tests PRIVATE -Wall -Wextra)
