@@ -13,8 +13,6 @@
 </div>
 
 <img width="1080" height="644" alt="image" src="https://github.com/user-attachments/assets/984433e5-1bd8-498a-949c-68815e73b901" />
-<img width="1080" height="644" alt="image" src="https://github.com/user-attachments/assets/445e75dc-4c10-41d0-afe2-dba49a77f6aa" />
-
 
 ## Features
 
@@ -46,6 +44,9 @@
 - Portable `user` and `logs` folders next to the program for settings, saves, the shader cache and logs
 - **A PC title menu**: Start Game, Options, Gallery and **Exit Game**, with the game's own menu art and animations. Exit Game is in the game's language and closes the game through the same clean shutdown as closing the window (Alt+F4 still works). The PlayStation Network **Upload Save Data** and **Download Save Data** rows are not shown, because the PlayStation Network save transfer is not available in the PC port.
 - **Brazilian Portuguese**: game text, menus, subtitles, launcher and F1 options on every supported build. New characters get Portuguese default messages, previewed while they are created; characters already in a save keep their stored data, but their native default messages are shown in Portuguese and any message you wrote yourself stays untouched. Credits, trophies and some baked labels stay in the build's own language, and the translated manual pages are shown on the USA and European builds only
+
+<img width="1080" height="644" alt="image" src="https://github.com/user-attachments/assets/445e75dc-4c10-41d0-afe2-dba49a77f6aa" />
+  
 - **Russian**: game text, menus, subtitles and character messages on every supported build, from the fan translation by [Exclusive Studio](https://ex-s.ru/dc.html) with PS4 porting work by AlchemistLab. No fan package is needed. The launcher, F1 options, F10 overlay and online screens stay in English; random adventurer names, credits, trophies and the gold counter stay in the build's own language. See [localization/ru/README.md](localization/ru/README.md)
 - **Discord Rich Presence**: your class, level, current place and party in your Discord status, through the Discord desktop app. On by default; `discord_presence = off` in `user\dcp.ini` turns it off. See [docs/DISCORD.md](docs/DISCORD.md)
 - **Bug Report page**: send a report with a filtered log from the launcher and follow its status under **My reports**. See [Reporting problems](#reporting-problems)
