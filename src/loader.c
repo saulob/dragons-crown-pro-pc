@@ -18,6 +18,7 @@
 #include "skip_intro.h"
 #include "default_message_hook.h"
 #include "gallery_unlock.h"
+#include "item_attack_cap.h"
 #include "appearance_hooks.h"
 #include "appearance_session.h"
 #include "endgame_unlocks.h"
@@ -1189,6 +1190,7 @@ int main(int argc, char **argv) {
                                                             gallery_unlock_requested,
                                                             image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area,
                                                             gallery_unlock_stub_area);
+    item_attack_cap_install(image,size,known_build ? build_key : NULL);
     const int japanese_menu_buttons=menu_buttons_wanted(dcp_japanese_menu_buttons(settings_file));
     const int menu_buttons_applied=menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons);
     exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied);

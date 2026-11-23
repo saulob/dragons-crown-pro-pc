@@ -2315,11 +2315,11 @@ void TestEditorNavigationModel() {
     CHECK(flow.find("DrawCharacterList(ui)") != std::string::npos && flow.find("DrawAppearanceLoading(ui)") != std::string::npos);
     const size_t editor_start = page.find("void EditorPage::DrawCharacterEditor(");
     const std::string editor = page.substr(editor_start, page.find("\n}\n", editor_start) - editor_start);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") != std::string::npos);
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(editor.find("Tr(\"Appearance\")") == std::string::npos && editor.find("RequestAppearance()") != std::string::npos);
     const size_t appearance_start = page.find("void EditorPage::DrawAppearance(");
     const std::string view = page.substr(appearance_start, page.find("\n}\n", appearance_start) - appearance_start);
-    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"))") != std::string::npos);
+    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(view.find("nav_.BackToCharacter();") != std::string::npos && view.find("SetLook(") == std::string::npos);
     CHECK(view.find("nav_.BackToCharacter()") != std::string::npos && view.find("nav_.Back()") == std::string::npos);
     // Navigating writes nothing and discards nothing.
@@ -2514,7 +2514,7 @@ void TestEditorNumbers() {
     const size_t start = page.find("bool EditorPage::NumberControl(");
     const std::string control = page.substr(start, page.find("\n}\n", start) - start);
     CHECK(control.find("StepNumber(*value, -1, range)") != std::string::npos && control.find("StepNumber(*value, 1, range)") != std::string::npos);
-    CHECK(control.find("ParseNumber(") != std::string::npos);
+    CHECK(control.find("CommitTypedNumber(") != std::string::npos);
     for (const char* field : {"NumberControl(ui, \"level\", &level, kLevelRange",
                               "NumberControl(ui, \"skill_points\"", "NumberControl(ui, \"hp_current\"", "NumberControl(ui, \"hp_max\""}) {
         CHECK(page.find(field) != std::string::npos);
@@ -2690,15 +2690,15 @@ void TestEditorNumberControlLook() {
     CHECK(control.find("StepNumber(*value, -1, range)") != std::string::npos && control.find("StepNumber(*value, 1, range)") != std::string::npos);
     CHECK(control.find("##minus") < control.find("SliderInt(\"##value\"") && control.find("SliderInt(\"##value\"") < control.find("##plus"));
     CHECK(control.find("DragInt(\"##value\", &shown, drag_speed") != std::string::npos);
-    CHECK(control.find("ImGuiStyleVar_GrabMinSize, kNumberThumbMinWidth * scale") != std::string::npos);
+    CHECK(control.find("ImGuiStyleVar_GrabMinSize, grab_min") != std::string::npos && control.find("grab_min = kNumberThumbMinWidth * scale") != std::string::npos);
     CHECK(control.find("ProgressFraction") == std::string::npos && control.find("AddRectFilled") == std::string::npos);
     CHECK(control.find("InvisibleButton") == std::string::npos && control.find("drag_remainder_") == std::string::npos);
-    CHECK(control.find("ImGuiCol_Text, accent") != std::string::npos && control.find("NoInput") != std::string::npos);
-    CHECK(control.find("FormatThousands") != std::string::npos && control.find("ParseNumber(") != std::string::npos);
+    CHECK(control.find("color = IM_COL32_WHITE;") != std::string::npos && control.find("GetColorU32(accent)") != std::string::npos && control.find("NoInput") != std::string::npos);
+    CHECK(control.find("FormatThousands") != std::string::npos && control.find("CommitTypedNumber(") != std::string::npos);
     CHECK(control.find("SetTooltip") == std::string::npos);
     CHECK(page.find("Drag to adjust") == std::string::npos);
     CHECK(ReadSource("launcher/localization/pt_br_ui_text.cpp").find("Drag to adjust") == std::string::npos);
-    CHECK(Count(page, "NumberControl(ui, ") == 4); // Level, Skill Points, Current HP, Max HP share it; there is no Gold
+    CHECK(Count(page, "NumberControl(ui, ") == 5); // Level, Skill Points, Current HP, Max HP share it; there is no Gold
 #endif
 }
 
@@ -2918,7 +2918,7 @@ void TestEditorCompactLayout() {
     // Character Editor header: title on the left, Back to Characters right after it on the same row.
     const size_t editor_start = page.find("void EditorPage::DrawCharacterEditor(");
     const std::string editor = page.substr(editor_start, page.find("\n}\n", editor_start) - editor_start);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") != std::string::npos);
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(Count(editor, "Tr(\"Character Editor\")") == 1);
     // Back to Characters sits right after the title: no width sums, no right alignment.
     const std::string title_row = FunctionBody(page, "bool EditorPage::TitleWithButton(");
@@ -3021,7 +3021,7 @@ void TestEditorFixedLayout() {
     CHECK(editor.find("ui.Row(Tr(\"Level\"));") != std::string::npos);
     CHECK(editor.find("stored value is level minus one") == std::string::npos);
     CHECK(ReadSource("launcher/localization/pt_br_ui_text.cpp").find("stored value is level minus one") == std::string::npos);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") != std::string::npos);
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(editor.find("Button(Tr(\"Back to Characters\"), ") == std::string::npos);
     CHECK(page.find("1.35f") == std::string::npos && page.find("* 1.2f") == std::string::npos);
     CHECK(page.find("GridColumns(available, kCardMinWidth * scale") != std::string::npos);
@@ -3035,7 +3035,7 @@ void TestEditorFixedLayout() {
     CHECK(control.find("LayoutNumberControl(") != std::string::npos);
     CHECK(control.find("ImGui::SetNextItemWidth(field)") != std::string::npos && control.find("ImVec2(button, height)") != std::string::npos);
     CHECK(control.find("StepNumber(*value, -1, range)") != std::string::npos && control.find("StepNumber(*value, 1, range)") != std::string::npos);
-    CHECK(control.find("ParseNumber(") != std::string::npos && control.find("FormatThousands") != std::string::npos);
+    CHECK(control.find("CommitTypedNumber(") != std::string::npos && control.find("FormatThousands") != std::string::npos);
     CHECK(control.find("SetTooltip") == std::string::npos && control.find("FieldStyle::kChanged") != std::string::npos);
     CHECK(page.find("full_frame_height_") == std::string::npos);
 
@@ -3197,7 +3197,7 @@ void TestAppearanceUx() {
     // Character Editor: one way into Appearance, in the summary row at the right, after the portrait and text.
     const std::string editor = FunctionBody(page, "void EditorPage::DrawCharacterEditor(");
     CHECK(Count(page, "Tr(\"Edit Appearance\")") == 1 && Count(page, "RequestAppearance();") == 1);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") < editor.find("DrawArt("));
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") < editor.find("DrawArt("));
     CHECK(editor.find("DrawArt(") < editor.find("Tr(\"Edit Appearance\")"));
     CHECK(editor.find("LayoutCharacterSummary(") < editor.find("Tr(\"Edit Appearance\")"));
     CHECK(editor.find("Tr(\"Appearance\")") == std::string::npos && editor.find("nav_.RequestAppearance") == std::string::npos);
@@ -7147,7 +7147,7 @@ void TestCompactSummary() {
     const std::string editor = FunctionBody(page, "void EditorPage::DrawCharacterEditor(");
     CHECK(editor.find("LayoutCharacterSummary(row_width") != std::string::npos);
     CHECK(editor.find("trg::layout::ControlColumnWidth(row_width, scale)") != std::string::npos);
-    CHECK(editor.find("ImGui::Button(Tr(\"Edit Appearance\"), ImVec2(layout.button_width, layout.button_height))") != std::string::npos);
+    CHECK(editor.find("IconButton(Tr(\"Edit Appearance\"), [this](int pixels) { return ButtonIconTexture(ButtonIcon::kAppearance, pixels); }, ImVec2(buttons.width, layout.button_height))") != std::string::npos);
     CHECK(editor.find("ImGui::SameLine(row_start + layout.button_x)") < editor.find("Tr(\"Edit Appearance\")"));
     CHECK(editor.find("DrawIdentity(ui, ") != std::string::npos && editor.find("Tr(\"Lv\")") != std::string::npos);
     CHECK(editor.find("72.0f") == std::string::npos && editor.find("class_text") == std::string::npos);
@@ -7159,7 +7159,7 @@ void TestCompactSummary() {
     CHECK(view.find("InvisibleButton(\"##figure\", ImVec2(avail.x, figure_height))") != std::string::npos);
     CHECK(view.find("fit.x - float(crop->x0) * fit.scale") != std::string::npos); // hit testing follows the crop
     CHECK(view.find("DrawIdentity(ui, ImGui::GetCursorScreenPos(), identity, identity_size.y)") < view.find("DrawCustom(ui, character, look);"));
-    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"))") < view.find("BeginTable("));
+    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"), ButtonIcon::kBack)") < view.find("BeginTable("));
     const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
     for (const char* text : {"\nTattoo\tTatuagem\n", "\nBodice\t", "\nBoots\t"}) CHECK(portuguese.find(text) != std::string::npos);
     CHECK(portuguese.find("\nBack to Character Editor\tVoltar ao editor de personagem\n") != std::string::npos);

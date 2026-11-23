@@ -174,10 +174,95 @@ std::optional<int> ParseNumber(std::string_view text, NumberRange range) {
     return ClampNumber(int(value), range);
 }
 
+void TypedNumberEdit::Begin(uint32_t id, std::string_view previous_text) {
+    if (owner_ != 0 && owner_ != id) handed_.emplace_back(owner_, std::string(previous_text));
+    owner_ = id;
+}
+
+std::optional<std::string> TypedNumberEdit::TakeHanded(uint32_t id) {
+    for (auto it = handed_.begin(); it != handed_.end(); ++it) {
+        if (it->first != id) continue;
+        std::string text = std::move(it->second);
+        handed_.erase(it);
+        return text;
+    }
+    return std::nullopt;
+}
+
+void TypedNumberEdit::Clear() {
+    owner_ = 0;
+    handed_.clear();
+}
+
+void TypedFieldEdit::Begin(const ItemRef& ref, std::string key, NumberRange range, std::vector<uint8_t> snapshot) {
+    active_ = true;
+    ref_ = ref;
+    key_ = std::move(key);
+    range_ = range;
+    snapshot_ = std::move(snapshot);
+}
+
+void TypedFieldEdit::Update(SaveModel& edited, std::string_view text) {
+    if (!active_) return;
+    RestoreItemBytes(edited, ref_, snapshot_);
+    if (const std::optional<int> exact = ExactTypedNumber(text, range_)) SetItemField(edited, ref_, key_, *exact);
+}
+
+void TypedFieldEdit::Finish(SaveModel& edited, std::string_view text) {
+    if (!active_) return;
+    RestoreItemBytes(edited, ref_, snapshot_);
+    if (const std::optional<int> typed = ParseNumber(text, range_)) SetItemField(edited, ref_, key_, *typed);
+    active_ = false;
+}
+
+void TypedFieldEdit::Cancel(SaveModel& edited) {
+    if (active_) RestoreItemBytes(edited, ref_, snapshot_);
+    active_ = false;
+}
+
+std::optional<int> ExactTypedNumber(std::string_view text, NumberRange range) {
+    int64_t value = 0;
+    bool any = false;
+    for (const char c : text) {
+        if (c == ',' || c == ' ') continue;
+        if (c < '0' || c > '9') return std::nullopt;
+        value = value * 10 + (c - '0');
+        any = true;
+        if (value > INT32_MAX) return std::nullopt;
+    }
+    return any && value >= range.min && value <= range.max ? std::optional<int>(int(value)) : std::nullopt;
+}
+
+std::optional<int> CommitTypedNumber(std::string_view text, NumberRange range, int current) {
+    const std::optional<int> typed = ParseNumber(text, range);
+    return typed && *typed != current ? typed : std::nullopt;
+}
+
 std::string FormatThousands(int64_t value) {
     std::string digits = std::to_string(value < 0 ? -value : value);
     for (int at = int(digits.size()) - 3; at > 0; at -= 3) digits.insert(size_t(at), ",");
     return value < 0 ? "-" + digits : digits;
+}
+
+int FineDragValue(int anchor, float pixels, NumberRange range) {
+    return ClampNumber(int(std::clamp<int64_t>(int64_t(anchor) + int64_t(std::lround(pixels)), INT32_MIN, INT32_MAX)), range);
+}
+
+Span SliderGrabSpan(float frame_min, float frame_max, NumberRange range, int value, float grab_min_width) {
+    constexpr float kPadding = 2.0f;
+    const float slider = (frame_max - frame_min) - kPadding * 2.0f;
+    const float units = float(std::max<int64_t>(int64_t(range.max) - int64_t(range.min), 0));
+    const float grab = std::min(std::max(slider / (units + 1.0f), grab_min_width), slider);
+    const float t = units > 0.0f ? float(std::clamp(value, range.min, range.max) - range.min) / units : 0.0f;
+    const float center = frame_min + kPadding + grab * 0.5f + t * (slider - grab);
+    return {center - grab * 0.5f, center + grab * 0.5f};
+}
+
+bool TextOverSpan(Span text, Span covered) {
+    const float width = text.max - text.min;
+    if (width <= 0.0f) return false;
+    const float overlap = std::min(text.max, covered.max) - std::max(text.min, covered.min);
+    return overlap * 2.0f >= width;
 }
 
 HpValues WithMaxHp(HpValues hp, int max) {
@@ -312,6 +397,25 @@ SummaryLayout LayoutCharacterSummary(float row_width, float info_width, float co
     layout.button_x = std::max(info_width + spacing, row_width - control_width);
     layout.button_width = std::max(0.0f, row_width - layout.button_x);
     layout.button_y = std::floor((layout.height - layout.button_height) * 0.5f);
+    return layout;
+}
+
+SummaryButtons SplitSummaryButtons(const SummaryLayout& layout, float spacing) {
+    SummaryButtons buttons;
+    buttons.width = std::max(0.0f, std::floor((layout.button_width - spacing) * 0.5f));
+    buttons.second_x = buttons.width + spacing;
+    return buttons;
+}
+
+InventoryLayout LayoutInventory(float width, float gap, float scale) {
+    InventoryLayout layout;
+    layout.stacked = width < kInventoryWideWidth * scale;
+    if (layout.stacked) {
+        layout.list_width = layout.detail_width = std::max(0.0f, width);
+        return layout;
+    }
+    layout.list_width = std::floor((width - gap) * kInventoryListWeight);
+    layout.detail_width = std::max(0.0f, width - gap - layout.list_width);
     return layout;
 }
 

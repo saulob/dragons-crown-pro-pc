@@ -24,7 +24,7 @@ std::vector<std::string> DescribeColorChanges(const DiscoveredSave& save, const 
 
 class SaveEdit {
 public:
-    enum class Result { kApplied, kNothingToApply, kInvalidAppearance, kInvalidSave, kStale, kBackupFailed, kWriteFailed };
+    enum class Result { kApplied, kNothingToApply, kInvalidAppearance, kInvalidHp, kInvalidInventory, kInvalidSave, kStale, kBackupFailed, kWriteFailed };
 
     SaveEdit(DiscoveredSave save, std::filesystem::path backup_folder);
 

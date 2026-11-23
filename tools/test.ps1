@@ -32,6 +32,11 @@
   Builds and runs only the Save page tests (dcp-save-page-tests: discovery and overview, DATA slots, backups, export, import,
   restore, the Editor invalidation contract and the page's source routing, on synthetic saves) and the quick groups of
   dcp-save-editor-tests, and reports their result alone. No game, no window, no file chooser. The normal run includes both.
+.PARAMETER InventoryEditor
+  Builds and runs only the Inventory Editor tests (dcp-inventory-editor-tests: item records, catalog, edits and their safety
+  checks, Apply / Discard, navigation, page structure and Portuguese text, on synthetic saves and read-only copies of local
+  saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
+  The normal run includes both.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -74,7 +79,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage)
+param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 . (Join-Path $PSScriptRoot '_progress.ps1')
@@ -361,7 +366,7 @@ function Invoke-Native([string]$File, [string[]]$Arguments = @(), [bool]$Quiet =
 $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
                   'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-gallery-unlock-tests', 'dcp-kraken-fix-tests', 'dcp-endgame-unlocks-tests',
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
-                  'dcp-launcher-tests', 'dcp-save-editor-tests', 'dcp-save-page-tests'
+                  'dcp-launcher-tests', 'dcp-save-editor-tests', 'dcp-save-page-tests', 'dcp-inventory-editor-tests'
 $requiredBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
                   'CUSA10209 1.00 Asia/Hong Kong'
 $blockedBuilds = 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
@@ -414,6 +419,7 @@ $tests = @(
     (Test-Step 'Character Editor release groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model, composition with the translation overlay, real archives)' 'dcp-save-editor-tests' -Parity -Capture -Quiet `
         -Key 'dcp-save-editor-tests release' -Arguments @('release')),
     (Test-Step 'Save page tests (overview, DATA slots, backups, export, import, restore, PS3/Vita detection, Editor invalidation, page routing)' 'dcp-save-page-tests'),
+    (Test-Step 'Inventory Editor tests (item records, catalog, edits, safety, Apply and Discard, navigation, page structure, Portuguese text)' 'dcp-inventory-editor-tests'),
     (Test-Step 'test progress reporter tests (percentage, bar, ETA, check counts, timing table, redirected output, injected clock)' 'dcp-test-progress-tests'),
     (Test-Step 'test progress runner tests (tools\_progress.ps1 on synthetic time: bar, percentage, ETA, spinner line, redirected output, timing)' -Script 'tests\progress_script_tests.ps1' -Capture),
     (Test-Step 'tiling tests (GPU tile layouts and addresses)' 'dcp-tiling-tests'),
@@ -426,6 +432,7 @@ $tests = @(
     (Test-Step 'updater helper tests' 'dcp-update-helper-tests'),
     (Test-Step 'RTC tests (Win32 file time)' 'dcp-rtc-tests'),
     (Test-Step 'Skip Offer tests (synthetic and local boot images)' 'dcp-skip-offers-tests' -Parity),
+    (Test-Step 'Item Attack Cap tests (weapon clamp patch: synthetic and local boot images)' 'dcp-item-attack-cap-tests' -Parity),
     (Test-Step 'Skip Intro tests (startup logos, opening movie, first boot, title transition, all builds)' 'dcp-skip-intro-tests' -Parity),
     (Test-Step 'Unlock Gallery tests (view, save safety, synthetic and local boot images)' 'dcp-gallery-unlock-tests' -Parity),
     (Test-Step 'Endgame unlock tests (Stables rule, independent settings, hooks, synthetic and local boot images)' 'dcp-endgame-unlocks-tests' -Parity),
@@ -472,6 +479,7 @@ $headlessCliSuites = @('dcp-launcher-tests')
 $editorTranslationSuites = @('dcp-save-editor-tests')
 $editorReleaseSuites = @('dcp-save-editor-tests', 'dcp-runtime-overlay-tests', 'dcp-appearance-online-tests')
 $savePageSuites = @('dcp-save-page-tests', 'dcp-save-editor-tests')
+$inventoryEditorSuites = @('dcp-inventory-editor-tests', 'dcp-save-editor-tests')
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
@@ -508,6 +516,13 @@ if ($BossBattleOnline) {
             -Key 'dcp-save-editor-tests quick' -Arguments @('quick'))
     )
     $requiredSuites = $savePageSuites
+} elseif ($InventoryEditor) {
+    $tests = @(
+        (Test-Step 'Inventory Editor tests (item records, catalog, edits, safety, Apply and Discard, navigation, page structure, Portuguese text)' 'dcp-inventory-editor-tests'),
+        (Test-Step 'Character Editor quick groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model)' 'dcp-save-editor-tests' `
+            -Key 'dcp-save-editor-tests quick' -Arguments @('quick'))
+    )
+    $requiredSuites = $inventoryEditorSuites
 } elseif ($EditorRelease) {
     $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
     $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Block { Invoke-LinuxEditorGate }
@@ -519,8 +534,8 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } else {
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-save-page-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } else {
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
@@ -681,6 +696,15 @@ if ($SavePage) {
         exit 1
     }
     Write-Host 'Save page tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($InventoryEditor) {
+    Write-Host ''
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Inventory Editor tests passed.' -ForegroundColor Green
     exit 0
 }
 if ($EditorTranslation -or $EditorRelease) {

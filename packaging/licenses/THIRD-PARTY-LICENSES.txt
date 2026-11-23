@@ -244,8 +244,8 @@ License: CC0 (public domain dedication).
 Launcher page icons
 ========================================================================
 
-The ten sidebar icons, compiled into dragons_crown_pro.exe from assets/launcher/icons of the source. Each one is
-drawn in the sidebar's colours; assets/launcher/icons/SOURCES.md records the source and every change made.
+The sidebar icons and the two Editor button icons, compiled into dragons_crown_pro.exe from assets/launcher/icons of the
+source. Each one is drawn in the sidebar's or the button's colours; assets/launcher/icons/SOURCES.md records the source and every change made.
 
 display.svg, attribution required:
   "Display Television Tv Screen Gadget" by nickylimyeanfen, collection Inc Device Icons.
@@ -263,11 +263,46 @@ CC0 (public domain dedication), all from SVG Repo (www.svgrepo.com):
   controls.svg   Keyboard      https://www.svgrepo.com/svg/524665/keyboard
   trophies.svg   Achievements  https://www.svgrepo.com/svg/304482/achievements
   about.svg      About         https://www.svgrepo.com/svg/486929/about
+  appearance.svg Skin          https://www.svgrepo.com/svg/543855/skin
+  inventory.svg  Chest Games Gaming  https://www.svgrepo.com/svg/420925/chest-games-gaming
 
-editor.svg, public domain (PD License):
-  "Pencil SVG Vector 420" by Jackey Jia, collection Online Learning Bordered Vectors.
-  Source: SVG Repo (www.svgrepo.com), https://www.svgrepo.com/svg/475303/pencil
-  Adapted: renamed from pencil-svgrepo-com.svg; the grey background circle was removed.
+save.svg, attribution required:
+  "Save" by Konstantin Filatov, collection Gentlecons Interface Icons.
+  Source: SVG Repo (www.svgrepo.com), https://www.svgrepo.com/svg/521819/save
+  License: CC Attribution License, https://creativecommons.org/licenses/by/ Not CC0.
+  Adapted: renamed from save-svgrepo-com.svg and drawn scaled, in the sidebar's colours.
+
+back.svg, Apache License:
+  "Back Light" by topcoat, collection Topcoat Icons.
+  Source: SVG Repo (www.svgrepo.com), https://www.svgrepo.com/svg/370957/back-light
+  License: Apache License, https://www.apache.org/licenses/LICENSE-2.0
+  Adapted: renamed from back-light-svgrepo-com.svg and drawn scaled, in the Editor button's text colour.
+  The Apache License asks that recipients receive a copy of it; the link above is that copy.
+
+editor.svg, MIT License:
+  "Edit 4" by Software Mansion, collection Software Mansion Duotone Icons.
+  Source: SVG Repo (www.svgrepo.com), https://www.svgrepo.com/svg/505875/edit-4
+  Adapted: renamed from edit-4-svgrepo-com.svg and drawn scaled, in the sidebar's colours.
+
+Copyright (c) Software Mansion
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 bug-report.svg, MIT License:
   "Bug File" by Vectopus, collection Atlas Variety Line Icons.

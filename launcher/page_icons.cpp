@@ -94,17 +94,18 @@ std::vector<uint8_t> RasterizeIcon(const uint8_t* svg, size_t size, float optica
     return rgba;
 }
 
-std::vector<uint8_t> RenderPageIcon(PageId page, int pixels) {
-    const PageIconAsset* asset = FindPageIcon(page);
-    if (!asset) {
-        return {};
-    }
+std::vector<uint8_t> RenderFileIcon(const FileIconAsset& asset, int pixels) {
     for (const TranslationFile* file = kPageIconFiles; file->name; ++file) {
-        if (std::strcmp(file->name, asset->file) == 0) {
-            return RasterizeIcon(file->data, file->size, asset->optical_scale, pixels);
+        if (std::strcmp(file->name, asset.file) == 0) {
+            return RasterizeIcon(file->data, file->size, asset.optical_scale, pixels);
         }
     }
     return {};
+}
+
+std::vector<uint8_t> RenderPageIcon(PageId page, int pixels) {
+    const PageIconAsset* asset = FindPageIcon(page);
+    return asset ? RenderFileIcon({asset->file, asset->optical_scale}, pixels) : std::vector<uint8_t>{};
 }
 
 } // namespace dcp

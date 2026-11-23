@@ -3,7 +3,7 @@
 The canonical navigation icon set for the launchers. Filenames are semantic, so the folder can be copied to another
 project as it is.
 
-**Copy `SOURCES.md` with the icons.** `display.svg` and `bug-report.svg` require attribution, and that attribution has to
+**Copy `SOURCES.md` with the icons.** `display.svg`, `save.svg` and `bug-report.svg` require attribution, `editor.svg` is MIT, and that attribution has to
 go wherever the icon goes.
 
 ## Attribution required
@@ -12,6 +12,9 @@ go wherever the icon goes.
 |---|---|---|---|---|---|
 | `display.svg` | Display Television Tv Screen Gadget | nickylimyeanfen | Inc Device Icons | https://www.svgrepo.com/svg/381247/display-television-tv-screen-gadget | CC Attribution License |
 | `bug-report.svg` | Bug File | Vectopus | Atlas Variety Line Icons | https://www.svgrepo.com/svg/456346/bug-file | MIT License |
+| `editor.svg` | Edit 4 | Software Mansion | Software Mansion Duotone Icons | https://www.svgrepo.com/svg/505875/edit-4 | MIT License |
+| `save.svg` | Save | Konstantin Filatov | Gentlecons Interface Icons | https://www.svgrepo.com/svg/521819/save | CC Attribution License |
+| `back.svg` | Back Light | topcoat | Topcoat Icons | https://www.svgrepo.com/svg/370957/back-light | Apache License |
 
 `display.svg` is not CC0 and not public domain. License: https://creativecommons.org/licenses/by/
 
@@ -22,29 +25,25 @@ sidebar's colours. The file's contents are unchanged.
 launcher: renamed from `bug-file-svgrepo-com.svg` and drawn scaled, in the sidebar's colours. The file's contents are
 unchanged.
 
-## Public domain
+`save.svg` is not CC0 and not public domain. License: https://creativecommons.org/licenses/by/
 
-| File | Title | Author | Collection | Source | License |
-|---|---|---|---|---|---|
-| `editor.svg` | Pencil SVG Vector 420 | Jackey Jia | Online Learning Bordered Vectors | https://www.svgrepo.com/svg/475303/pencil | PD License |
+`back.svg` is under the Apache License (https://www.apache.org/licenses/LICENSE-2.0); the page asks for no further attribution
+text, and the notice is in `packaging/licenses/THIRD-PARTY-LICENSES.txt`. It is the arrow of the Back buttons of the Editor.
 
-Adapted for the launcher: renamed from `pencil-svgrepo-com.svg`, and its grey background circle was removed because it
-cannot be tinted. No other path was changed.
+`editor.svg` is under the MIT License; its notice is in `packaging/licenses/THIRD-PARTY-LICENSES.txt`.
 
-## Original
-
-| File | Title | Source | License |
-|---|---|---|---|
-| `save.svg` | Save (floppy disk) | Drawn for this project | Original |
-
-Drawn by hand for the launcher from basic shapes; no third-party artwork.
+`save.svg` and `editor.svg` were renamed from `save-svgrepo-com.svg` and `edit-4-svgrepo-com.svg`, and are drawn scaled, in the sidebar's
+colours. The files' contents are unchanged.
 
 ## CC0
 
-CC0 asks for no attribution; the sources are kept for provenance.
+CC0 asks for no attribution; the sources are kept for provenance. `appearance.svg` and `inventory.svg` are the artwork of
+the Editor's Edit Appearance and Edit Inventory buttons, and are drawn in the button's text colour.
 
 | File | Title | Source | License |
 |---|---|---|---|
+| `appearance.svg` | Skin | https://www.svgrepo.com/svg/543855/skin | CC0 |
+| `inventory.svg` | Chest Games Gaming | https://www.svgrepo.com/svg/420925/chest-games-gaming | CC0 |
 | `play.svg` | Play | https://www.svgrepo.com/svg/522228/play | CC0 |
 | `graphics.svg` | Controls Alt | https://www.svgrepo.com/svg/348105/controls-alt | CC0 |
 | `gameplay.svg` | Gamepad | https://www.svgrepo.com/svg/523439/gamepad | CC0 |
@@ -56,6 +55,6 @@ CC0 asks for no attribution; the sources are kept for provenance.
 
 ## Changes from the downloaded files
 
-All files have LF line endings and their canonical names. `online.svg` also lost its white background rectangle and
+All files have LF line endings and their canonical names. License pages checked on 2026-11-22. `online.svg` also lost its white background rectangle and
 the drop-shadow filter on its lower line, because neither can be tinted. No path was changed, and each file keeps the
 colours it was published with: the launcher uses only their shape.

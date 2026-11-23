@@ -10,6 +10,7 @@
 
 #include "host.h"
 #include "loading_view.h"
+#include "page_icons.h"
 #include "localization/ui_text.h"
 #include "trg/launcher.h"
 #include "trg/layout.h"
@@ -20,6 +21,18 @@ namespace {
 constexpr const char* kMiddleDot = " \xC2\xB7 ";
 
 } // namespace
+
+ImTextureID EditorPage::ButtonIconTexture(ButtonIcon icon, int pixels) {
+    const auto [entry, is_new] = button_icons_.try_emplace({icon, pixels});
+    if (is_new) {
+        const FileIconAsset& asset = icon == ButtonIcon::kAppearance ? kAppearanceIcon : icon == ButtonIcon::kInventory ? kInventoryIcon : kBackIcon;
+        const std::vector<uint8_t> rgba = RenderFileIcon(asset, pixels);
+        if (!rgba.empty()) {
+            entry->second = host_.CreateTexture(rgba.data(), pixels, pixels);
+        }
+    }
+    return entry->second;
+}
 
 EditorPage::EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
                        std::function<std::string()> message_suffix, const SaveSelection* selection)
@@ -57,6 +70,12 @@ void EditorPage::UseArtOf(const EditorBuild* build) {
     sources.cache_dir = EditorCacheDir(user_dir_);
     art_.emplace(std::move(sources));
     art_root_ = root;
+    catalog_key_.clear();
+    for (const auto& [key, texture] : icon_textures_) host_.DestroyTexture(texture);
+    icon_textures_.clear();
+    for (const auto& [letter, texture] : rank_textures_) host_.DestroyTexture(texture);
+    rank_textures_.clear();
+    icons_ = {};
 }
 
 void EditorPage::Refresh() {
@@ -77,6 +96,7 @@ void EditorPage::Refresh() {
         selected_slot_ = 0;
         selected_character_ = -1;
         nav_.Back();
+        ResetInventoryView();
     }
     selected_save_ = chosen;
     edit_.reset();
@@ -133,22 +153,30 @@ void EditorPage::SelectSlot(int slot, trg::Ui& ui) {
     selected_slot_ = slot;
     selected_character_ = -1;
     nav_.Back();
+    ResetInventoryView();
     SyncNameBuffer();
 }
 
 void EditorPage::SelectCharacter(int character) {
     selected_character_ = character;
     nav_.Open(character);
+    ResetInventoryView();
     appearance_failed_ = false;
     SyncNameBuffer();
 }
 
 void EditorPage::ApplyChanges(trg::Ui& ui) {
+    if (!PrepareInventorySave(ui)) {
+        return;
+    }
     if (!dirty()) {
         return;
     }
     const ApplyOutcome outcome = ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_);
     if (outcome.ok()) {
+        typed_.Clear();
+        typing_.End();
+        KeepSearchMatchingSavedItem();
         if (edit_ && selected_save_ >= 0) saves_[selected_save_].model = edit_->persisted();
         custom_working_ = custom_saved_;
         confirm_reset_custom_ = false;
@@ -163,6 +191,12 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     switch (outcome.save) {
     case SaveEdit::Result::kInvalidAppearance:
         ui.SetStatus(Tr("A character has an invalid appearance value. Pick a color for it, then Apply Changes."), 8.0);
+        break;
+    case SaveEdit::Result::kInvalidHp:
+        ui.SetStatus(Tr("The current HP cannot be higher than the maximum HP."), 8.0);
+        break;
+    case SaveEdit::Result::kInvalidInventory:
+        ui.SetStatus(InventoryProblemText(edit_ ? edit_->detail() : std::string()), 8.0);
         break;
     case SaveEdit::Result::kInvalidSave:
         ui.SetStatus(Tr("The changes are not valid and were not saved."), 6.0);
@@ -182,10 +216,20 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     }
 }
 
+const char* EditorPage::InventoryProblemText(const std::string& problem) const {
+    if (problem == kProblemMaxDurability) return Tr("Max durability exceeds the limit the game keeps.");
+    if (problem == kProblemLevel) return Tr("Required level is invalid.");
+    if (problem == kProblemModifier) return Tr("Modifier value is outside the supported range.");
+    if (problem == kProblemItem) return Tr("This item cannot be changed.");
+    return Tr("An inventory change is not valid and was not saved.");
+}
+
 void EditorPage::DiscardChanges(trg::Ui& ui) {
     if (edit_) {
         edit_->Discard();
     }
+    typed_.Clear();
+    typing_.End();
     custom_working_ = custom_saved_;
     confirm_reset_custom_ = false;
     SyncNameBuffer();
@@ -421,14 +465,19 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
         draw->AddLine(ImVec2(mid.x - arm, mid.y), ImVec2(mid.x + arm, mid.y), glyph_color, kNumberGlyphThickness * scale);
         if (plus) draw->AddLine(ImVec2(mid.x, mid.y - arm), ImVec2(mid.x, mid.y + arm), glyph_color, kNumberGlyphThickness * scale);
     };
+    ImGui::PushItemFlag(ImGuiItemFlags_ButtonRepeat, true);
     if (ImGui::Button("##minus", ImVec2(button, height))) {
         *value = StepNumber(*value, -1, range);
     }
+    ImGui::PopItemFlag();
     glyph(false);
     ImGui::SameLine();
     const ImGuiID field_id = ImGui::GetID("##value");
     const ImVec4 accent = ui.theme().accent;
-    if (editing_number_ == field_id) {
+    if (const std::optional<std::string> handed = typed_.TakeHanded(field_id)) {
+        if (const std::optional<int> typed = CommitTypedNumber(*handed, range, *value)) *value = *typed;
+    }
+    if (typed_.Editing(field_id)) {
         ImGui::SetNextItemWidth(field);
         if (focus_number_) {
             ImGui::SetKeyboardFocusHere();
@@ -437,35 +486,68 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
         const bool entered = ImGui::InputText("##value", number_buffer_, sizeof(number_buffer_),
                                               ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_EnterReturnsTrue |
                                                   ImGuiInputTextFlags_AutoSelectAll);
-        if (entered) {
-            if (const std::optional<int> typed = ParseNumber(number_buffer_, range)) {
-                *value = *typed;
-            }
-        }
-        if (entered || ImGui::IsItemDeactivated()) {
-            editing_number_ = 0;
+        typing_now_ = true;
+        const bool finished = entered || ImGui::IsItemDeactivated();
+        typed_finished_ = finished;
+        if (const std::optional<int> exact = ExactTypedNumber(number_buffer_, range); exact && *exact != *value) *value = *exact;
+        if (finished) {
+            if (const std::optional<int> typed = CommitTypedNumber(number_buffer_, range, *value)) *value = *typed;
+            typed_.End();
         }
     } else {
         const int before = *value;
         int shown = before;
         const std::string text = FormatThousands(before);
         ImGui::SetNextItemWidth(field);
-        ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, kNumberThumbMinWidth * scale);
-        if (style == FieldStyle::kChanged) ImGui::PushStyleColor(ImGuiCol_Text, accent);
+        const float grab_min = kNumberThumbMinWidth * scale;
+        ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, grab_min);
         constexpr ImGuiSliderFlags flags = ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput;
-        if (NumberHasThumb(range)) {
-            ImGui::SliderInt("##value", &shown, range.min, range.max, text.c_str(), flags);
+        const bool thumb = NumberHasThumb(range);
+        if (thumb) {
+            ImGui::SliderInt("##value", &shown, range.min, range.max, "", flags);
         } else {
-            ImGui::DragInt("##value", &shown, drag_speed, range.min, range.max, text.c_str(), flags);
+            ImGui::DragInt("##value", &shown, drag_speed, range.min, range.max, "", flags);
         }
-        if (style == FieldStyle::kChanged) ImGui::PopStyleColor();
         ImGui::PopStyleVar();
+        if (ImGui::IsItemActivated()) {
+            drag_id_ = field_id;
+            drag_press_x_ = ImGui::GetIO().MousePos.x;
+            drag_started_ = false;
+        }
+        if (ImGui::IsItemActive() && drag_id_ == field_id && !drag_started_) {
+            drag_started_ = SliderDragStarted(drag_press_x_, ImGui::GetIO().MousePos.x, scale);
+            if (!drag_started_) shown = before;
+        }
+        // One unit per pixel while Shift is held: a track over thousands of values cannot reach each value otherwise.
+        if (ImGui::IsItemActive() && ImGui::GetIO().KeyShift) {
+            if (!fine_drag_) {
+                fine_drag_ = true;
+                fine_anchor_value_ = before;
+                fine_anchor_x_ = ImGui::GetIO().MousePos.x;
+            }
+            shown = FineDragValue(fine_anchor_value_, ImGui::GetIO().MousePos.x - fine_anchor_x_, range);
+        } else {
+            fine_drag_ = false;
+        }
+        const ImVec2 frame_min = ImGui::GetItemRectMin(), frame_max = ImGui::GetItemRectMax();
+        const float text_width = ImGui::CalcTextSize(text.c_str()).x;
+        const float text_x = (frame_min.x + frame_max.x - text_width) * 0.5f;
+        ImU32 color = style == FieldStyle::kChanged ? ImGui::GetColorU32(accent) : ImGui::GetColorU32(ImGuiCol_Text);
+        if (thumb) {
+            const Span grab = SliderGrabSpan(frame_min.x, frame_max.x, range, ClampNumber(shown, range), grab_min);
+            if (TextOverSpan({text_x, text_x + text_width}, grab)) color = IM_COL32_WHITE;
+        }
+        ImGui::GetWindowDrawList()->AddText(ImVec2(text_x, frame_min.y + (frame_max.y - frame_min.y - ImGui::GetTextLineHeight()) * 0.5f), color,
+                                            text.c_str());
         const bool activated = ImGui::IsItemActivated();
         const bool double_click = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-        if (activated && !double_click) press_value_ = before;
+        if (activated && !double_click) {
+            press_id_ = field_id;
+            press_value_ = before;
+        }
         if (double_click || (activated && ImGui::GetIO().KeyCtrl)) {
-            *value = activated && !double_click ? before : press_value_;
-            editing_number_ = field_id;
+            *value = (activated && !double_click) || press_id_ != field_id ? before : press_value_;
+            typed_.Begin(field_id, number_buffer_);
             focus_number_ = true;
             std::snprintf(number_buffer_, sizeof(number_buffer_), "%d", *value);
         } else {
@@ -473,12 +555,55 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
         }
     }
     ImGui::SameLine();
+    ImGui::PushItemFlag(ImGuiItemFlags_ButtonRepeat, true);
     if (ImGui::Button("##plus", ImVec2(button, height))) {
         *value = StepNumber(*value, 1, range);
     }
+    ImGui::PopItemFlag();
     glyph(true);
     ImGui::PopID();
     return *value != initial;
+}
+
+void EditorPage::ItemField(trg::Ui& ui, const ItemRef& ref, const std::string& key, NumberRange range, float drag_speed, bool changed) {
+    SaveModel& edited = edit_->working();
+    const std::optional<int> current = ItemFieldValue(edited, ref, key);
+    if (!current) return;
+    int value = *current;
+    const std::vector<uint8_t> start = ItemBytes(edited, ref);
+    typing_now_ = false;
+    typed_finished_ = false;
+    const bool proposed = NumberControl(ui, key.c_str(), &value, range, drag_speed, changed ? FieldStyle::kChanged : FieldStyle::kClean);
+    if (typing_now_) {
+        if (!typing_.Is(ref, key)) typing_.Begin(ref, key, range, start);
+        if (typed_finished_) {
+            typing_.Finish(edited, number_buffer_);
+        } else {
+            typing_.Update(edited, number_buffer_);
+        }
+    } else if (proposed) {
+        SetItemField(edited, ref, key, value);
+    }
+    if (const std::optional<int> after = ItemFieldValue(edited, ref, key)) visible_.push_back({ref, key, *after});
+}
+
+bool EditorPage::PrepareInventorySave(trg::Ui& ui) {
+    if (!edit_) return true;
+    if (typing_.Active()) {
+        if (!ExactTypedNumber(number_buffer_, typing_.range())) {
+            ui.SetStatus(Tr("Finish or correct the number you are typing before applying."), 6.0);
+            return false;
+        }
+        typing_.Finish(edit_->working(), number_buffer_);
+        typed_.Clear();
+    }
+    if (ImGui::GetFrameCount() - visible_frame_ > 2) return true;
+    const std::optional<UiMismatch> mismatch = FindUiMismatch(edit_->working(), visible_);
+    if (mismatch) {
+        ui.SetStatus(Tr("The editor values and the item are out of sync; nothing was saved."), 8.0);
+        return false;
+    }
+    return true;
 }
 
 void EditorPage::DrawCharacterList(trg::Ui& ui) {
@@ -540,7 +665,7 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
     const CharacterView& character = *SelectedCharacter();
     const CharacterView* saved = PersistedCharacter();
     const float scale = ui.scale();
-    if (TitleWithButton(ui, Tr("Character Editor"), Tr("Back to Characters"))) {
+    if (TitleWithButton(ui, Tr("Character Editor"), Tr("Back to Characters"), ButtonIcon::kBack)) {
         nav_.Back();
         return;
     }
@@ -563,13 +688,20 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
             ImVec2(portrait_min.x + layout.portrait, portrait_min.y + layout.portrait));
     DrawIdentity(ui, ImVec2(origin.x + layout.portrait + gap, origin.y), identity, layout.height);
     ImGui::Dummy(ImVec2(layout.portrait + gap + text_size.x, layout.height));
+    const SummaryButtons buttons = SplitSummaryButtons(layout, spacing);
     ImGui::SameLine(row_start + layout.button_x);
     ImGui::BeginGroup();
     ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, layout.button_y - ImGui::GetStyle().ItemSpacing.y)));
-    const bool edit_appearance = ImGui::Button(Tr("Edit Appearance"), ImVec2(layout.button_width, layout.button_height));
+    const bool edit_appearance = IconButton(Tr("Edit Appearance"), [this](int pixels) { return ButtonIconTexture(ButtonIcon::kAppearance, pixels); }, ImVec2(buttons.width, layout.button_height));
+    ImGui::SameLine(0.0f, spacing);
+    const bool edit_inventory = IconButton(Tr("Edit Inventory"), [this](int pixels) { return ButtonIconTexture(ButtonIcon::kInventory, pixels); }, ImVec2(buttons.width, layout.button_height));
     ImGui::EndGroup();
     if (edit_appearance) {
         RequestAppearance();
+        return;
+    }
+    if (edit_inventory) {
+        RequestInventory();
         return;
     }
     if (appearance_failed_) {
@@ -644,6 +776,10 @@ void EditorPage::DrawCharacter(trg::Ui& ui) {
         DrawAppearance(ui);
         return;
     }
+    if (nav_.inventory()) {
+        DrawInventory(ui);
+        return;
+    }
     if (nav_.editing()) {
         DrawCharacterEditor(ui);
         return;
@@ -665,13 +801,17 @@ void EditorPage::DrawCharacter(trg::Ui& ui) {
 }
 
 // The title, then its button right after it on the same line.
-bool EditorPage::TitleWithButton(trg::Ui& ui, const char* title, const char* button) {
+bool EditorPage::TitleWithButton(trg::Ui& ui, const char* title, const char* button, ButtonIcon icon) {
     ImGui::AlignTextToFramePadding();
     ImGui::PushFont(ui.fonts().semibold, ImGui::GetFontSize());
     ImGui::TextUnformatted(title);
     ImGui::PopFont();
     ImGui::SameLine();
-    return ImGui::Button(button);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float height = ImGui::GetFrameHeight();
+    const float glyph = float(std::max(1, int(std::lround(height * 0.5f))));
+    const ImVec2 size(ImGui::CalcTextSize(button).x + glyph + style.ItemInnerSpacing.x + style.FramePadding.x * 2.0f, height);
+    return IconButton(button, [this, icon](int pixels) { return ButtonIconTexture(icon, pixels); }, size);
 }
 
 void EditorPage::RequestAppearance() {
@@ -789,7 +929,7 @@ void EditorPage::DrawAppearance(trg::Ui& ui) {
         ui.Help(Tr("Select a character first."));
         return;
     }
-    if (TitleWithButton(ui, Tr("Appearance"), Tr("Back to Character Editor"))) {
+    if (TitleWithButton(ui, Tr("Appearance"), Tr("Back to Character Editor"), ButtonIcon::kBack)) {
         nav_.BackToCharacter();
         return;
     }

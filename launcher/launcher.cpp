@@ -816,7 +816,7 @@ private:
             return {name, "Your SAVE0.DAT files: overview, backups, export, import and restore.",
                     [this](trg::Ui& ui) { PageSave(ui); }, nullptr, nullptr};
         case PageId::kEditor:
-            return {name, "Characters and their appearance.", [this](trg::Ui& ui) { PageEditor(ui); }, nullptr,
+            return {name, "Characters, appearance and inventory.", [this](trg::Ui& ui) { PageEditor(ui); }, nullptr,
                     nullptr};
         case PageId::kBugReport:
             return {name, "Report a problem and send it with one game log.", [this](trg::Ui& ui) { PageBugReport(ui); },

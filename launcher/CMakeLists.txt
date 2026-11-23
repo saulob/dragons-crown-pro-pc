@@ -34,7 +34,7 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp headless.cpp install_source.cpp
     feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp voice_language_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
-    save_edit.cpp save_backup.cpp save_data.cpp save_discovery.cpp save_import.cpp save_page_model.cpp save_sfo.cpp save_zip.cpp save_ps3.cpp save_ps3_layout.cpp crypto_hmac.cpp game_texture.cpp game_mbs.cpp
+    save_edit.cpp save_backup.cpp save_data.cpp inventory_data.cpp modifier_values.cpp item_catalog.cpp inventory_model.cpp save_discovery.cpp save_import.cpp save_page_model.cpp save_sfo.cpp save_zip.cpp save_ps3.cpp save_ps3_layout.cpp crypto_hmac.cpp game_texture.cpp game_mbs.cpp
     sprite_render.cpp character_art.cpp editor_model.cpp appearance_custom.cpp appearance_runtime.cpp appearance_loader.cpp fighter_horns.cpp fighter_bare_head.cpp
     appearance_remote.cpp ${PROJECT_SOURCE_DIR}/src/appearance_net.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
@@ -173,7 +173,7 @@ add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
     COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
 
 add_library(dcp_launcher STATIC host.cpp incident_page.cpp launcher.cpp my_reports.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
-    editor_page.cpp save_page.cpp
+    editor_page.cpp editor_inventory.cpp save_page.cpp
     updater/github_release.cpp updater/json.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
     updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
     updater/update_ui.cpp updater/update_zip.cpp updater/version.cpp
@@ -300,6 +300,14 @@ target_link_libraries(dcp-save-page-tests PRIVATE dcp_launcher_core)
 target_compile_definitions(dcp-save-page-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 set_target_properties(dcp-save-page-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-save-page-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Inventory Editor: item records, catalog, edits, safety and the editor page's structure on
+# synthetic saves; no window, no game.
+add_executable(dcp-inventory-editor-tests EXCLUDE_FROM_ALL ../tests/inventory_editor_tests.cpp)
+target_link_libraries(dcp-inventory-editor-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-inventory-editor-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-inventory-editor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-inventory-editor-tests PRIVATE -Wall -Wextra)
 
 # Focused tests of the shared test progress reporter (tests/test_progress.h); header only, injected clock, no game.
 add_executable(dcp-test-progress-tests EXCLUDE_FROM_ALL ../tests/test_progress_tests.cpp)

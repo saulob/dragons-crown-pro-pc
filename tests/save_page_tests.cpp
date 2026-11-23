@@ -914,7 +914,7 @@ void TestPageSource() {
     }
     CHECK(strings > 60);
     const std::string launcher = Source("launcher/launcher.cpp");
-    for (const char* text : {"Saves", "Your SAVE0.DAT files: overview, backups, export, import and restore.", "Characters and their appearance.",
+    for (const char* text : {"Saves", "Your SAVE0.DAT files: overview, backups, export, import and restore.", "Characters, appearance and inventory.",
                              "Choose the folder to export SAVE0.DAT to", "Choose a SAVE0.DAT or an archive of a PS4 save",
                              "Choose an archive of a PS3 save", "Choose the PS3 save folder (SAVE0.DAT and PARAM.PFD)",
                              "Choose the folder holding SAVE0.DAT", "Dragon's Crown save (SAVE0.DAT)",
@@ -1450,8 +1450,9 @@ void TestEditSaveFields(const fs::path& base) {
     // Several edits at once, one backup, one atomic write, a CRC that validates, unknown bytes untouched.
     fs::remove_all(folder);
     SaveEdit edit(Only(user), folder);
+    const uint16_t kept_max = edit.working().Character(0, 1)->hp_max;
     CHECK(edit.working().SetGold(2, 4242) && edit.working().SetLevel(0, 1, 77) && edit.working().SetSkillPoints(0, 1, 5) &&
-          edit.working().SetHp(0, 1, 120, 480));
+          edit.working().SetHp(0, 1, 1, kept_max));
     CHECK(edit.Apply() == SaveEdit::Result::kApplied && ListBackups(folder).size() == 1);
     CHECK(ReadBytes(ListBackups(folder)[0].file) == original);
     const Bytes after = ReadBytes(file);
@@ -1469,7 +1470,7 @@ void TestEditSaveFields(const fs::path& base) {
     for (size_t i = 0x100; i < 0x100 + 64; ++i) CHECK(after[i] == original[i]);
     const SaveModel reread = SaveModel::FromBytes(after);
     CHECK(reread.slots()[2].gold == 4242 && SaveModel::DisplayedLevel(reread.Character(0, 1)->level_stored) == 77 &&
-          reread.Character(0, 1)->skill_points == 5 && reread.Character(0, 1)->hp_current == 120 && reread.Character(0, 1)->hp_max == 480);
+          reread.Character(0, 1)->skill_points == 5 && reread.Character(0, 1)->hp_current == 1 && reread.Character(0, 1)->hp_max == kept_max);
     CHECK(reread.Character(0, 0)->name == "Eppie" && reread.Character(0, 1)->name == "Allie");
 
     // Discard restores; nothing is written for an unchanged edit; a second apply has nothing to do.

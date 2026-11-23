@@ -5053,7 +5053,29 @@ void TestPageIcons() {
         svg_files += entry.path().extension() == ".svg";
     }
     CHECK(!fs::exists(icons / "bug-file-svgrepo-com.svg"));
-    CHECK(svg_files == PageIconAssets().size());
+    CHECK(svg_files == PageIconAssets().size() + 3);
+    for (const char* loose : {"edit-4-svgrepo-com.svg", "save-svgrepo-com.svg", "skin-svgrepo-com.svg", "chest-svgrepo-com.svg",
+                                "chest-games-gaming-svgrepo-com.svg", "back-light-svgrepo-com.svg"}) {
+        CHECK(!fs::exists(source / loose));
+    }
+    for (const FileIconAsset* button : {&kAppearanceIcon, &kInventoryIcon, &kBackIcon}) {
+        const std::string svg = ReadAll(icons / button->file);
+        CHECK(svg.find("<svg") != std::string::npos && svg.find(":\\") == std::string::npos && svg.find("/Users/") == std::string::npos);
+        for (const int pixels : {20, 30, 45}) {
+            const std::vector<uint8_t> image = RenderFileIcon(*button, pixels);
+            CHECK(image.size() == size_t(pixels) * size_t(pixels) * 4);
+            size_t covered = 0;
+            bool edge = false;
+            for (size_t i = 0; i + 3 < image.size(); i += 4) {
+                const size_t x = (i / 4) % size_t(pixels), y = (i / 4) / size_t(pixels);
+                const bool ink = image[i + 3] > 128;
+                covered += ink;
+                edge = edge || (ink && (x == 0 || y == 0 || x + 1 == size_t(pixels) || y + 1 == size_t(pixels)));
+            }
+            CHECK(covered > image.size() / 4 / 20 && !edge);
+        }
+    }
+    CHECK(RenderFileIcon({"missing.svg", 0.9f}, 20).empty());
 
     // A bad resource gives no image instead of a crash.
     const std::string broken = "<svg viewBox=\"0 0 24 24\"><path d=\"M";
@@ -5102,12 +5124,6 @@ void TestIconLicenses() {
         const size_t row = sources.find(std::string("| `") + asset.file + "` | ");
         CHECK(row != std::string::npos);
         const std::string line = sources.substr(row, sources.find('\n', row) - row);
-        if (asset.page == PageId::kSave) {
-            // Drawn for the project: no third-party source, so no third-party license entry.
-            CHECK(line.find("| Drawn for this project | Original |") != std::string::npos);
-            CHECK(line.find("svgrepo") == std::string::npos && licenses.find(asset.file) == std::string::npos);
-            continue;
-        }
         CHECK(line.find("https://www.svgrepo.com/svg/") != std::string::npos);
         CHECK(licenses.find(asset.file) != std::string::npos);
         if (asset.page == PageId::kDisplay) {
@@ -5118,10 +5134,14 @@ void TestIconLicenses() {
             CHECK(line.find("| Bug File | Vectopus | Atlas Variety Line Icons |") != std::string::npos);
             CHECK(line.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
             CHECK(line.find("| MIT License |") != std::string::npos);
+        } else if (asset.page == PageId::kSave) {
+            CHECK(line.find("| Save | Konstantin Filatov | Gentlecons Interface Icons |") != std::string::npos);
+            CHECK(line.find("https://www.svgrepo.com/svg/521819/save") != std::string::npos);
+            CHECK(line.find("| CC Attribution License |") != std::string::npos && line.find("CC0") == std::string::npos);
         } else if (asset.page == PageId::kEditor) {
-            CHECK(line.find("| Pencil SVG Vector 420 | Jackey Jia | Online Learning Bordered Vectors |") != std::string::npos);
-            CHECK(line.find("https://www.svgrepo.com/svg/475303/pencil") != std::string::npos);
-            CHECK(line.find("| PD License |") != std::string::npos);
+            CHECK(line.find("| Edit 4 | Software Mansion | Software Mansion Duotone Icons |") != std::string::npos);
+            CHECK(line.find("https://www.svgrepo.com/svg/505875/edit-4") != std::string::npos);
+            CHECK(line.find("| MIT License |") != std::string::npos);
         } else if (line.find("| CC0 |") != std::string::npos) {
             ++cc0_rows;
             const size_t url = line.find("https://www.svgrepo.com/svg/");
@@ -5135,8 +5155,23 @@ void TestIconLicenses() {
     CHECK(licenses.find("License: CC Attribution License, https://creativecommons.org/licenses/by/") != std::string::npos);
     CHECK(licenses.find("\"Bug File\" by Vectopus, collection Atlas Variety Line Icons.") != std::string::npos);
     CHECK(licenses.find("https://www.svgrepo.com/svg/456346/bug-file") != std::string::npos);
-    CHECK(licenses.find("editor.svg, public domain (PD License):") != std::string::npos);
-    CHECK(licenses.find("https://www.svgrepo.com/svg/475303/pencil") != std::string::npos);
+    CHECK(licenses.find("editor.svg, MIT License:") != std::string::npos);
+    CHECK(licenses.find("\"Edit 4\" by Software Mansion, collection Software Mansion Duotone Icons.") != std::string::npos);
+    CHECK(licenses.find("https://www.svgrepo.com/svg/505875/edit-4") != std::string::npos);
+    CHECK(licenses.find("Copyright (c) Software Mansion\n\nPermission is hereby granted") != std::string::npos);
+    CHECK(licenses.find("save.svg, attribution required:") != std::string::npos);
+    CHECK(licenses.find("\"Save\" by Konstantin Filatov, collection Gentlecons Interface Icons.") != std::string::npos);
+    CHECK(licenses.find("https://www.svgrepo.com/svg/521819/save") != std::string::npos);
+    for (const char* row : {"| `appearance.svg` | Skin | https://www.svgrepo.com/svg/543855/skin | CC0 |",
+                            "| `inventory.svg` | Chest Games Gaming | https://www.svgrepo.com/svg/420925/chest-games-gaming | CC0 |",
+                            "| `back.svg` | Back Light | topcoat | Topcoat Icons | https://www.svgrepo.com/svg/370957/back-light | Apache License |"}) {
+        CHECK(sources.find(row) != std::string::npos);
+    }
+    CHECK(licenses.find("appearance.svg Skin          https://www.svgrepo.com/svg/543855/skin") != std::string::npos);
+    CHECK(licenses.find("inventory.svg  Chest Games Gaming  https://www.svgrepo.com/svg/420925/chest-games-gaming") != std::string::npos);
+    CHECK(licenses.find("back.svg, Apache License:") != std::string::npos);
+    CHECK(licenses.find("\"Back Light\" by topcoat, collection Topcoat Icons.") != std::string::npos);
+    CHECK(licenses.find("https://www.svgrepo.com/svg/370957/back-light") != std::string::npos);
     CHECK(licenses.find("bug-report.svg, MIT License:") != std::string::npos);
     CHECK(licenses.find("Copyright (c) Vectopus\n\nPermission is hereby granted") != std::string::npos);
     for (const std::string& attribution : {licenses, sources}) {

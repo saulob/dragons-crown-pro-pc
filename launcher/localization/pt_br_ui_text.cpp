@@ -791,7 +791,6 @@ The developer replied to one of your reports.	O desenvolvedor respondeu a um dos
 New reply	Nova resposta
 No longer available	Não está mais disponível
 This report was removed from the online service. The last known status is shown.	Este relatório foi removido do serviço online. O último status conhecido é mostrado.
-Show	Mostrar
 The report was sent, but it could not be added to My reports on this PC.	O relatório foi enviado, mas não pôde ser adicionado a Meus relatórios neste PC.
 Last gameplay	Última partida
 Gameplay session	Sessão de jogo
@@ -886,7 +885,6 @@ Skill Points	Pontos de habilidade
 Skill points available to spend.	Pontos de habilidade disponiveis para gastar.
 Current HP	HP atual
 Current hit points; at most the maximum.	Pontos de vida atuais; no maximo o maximo.
-Max HP	HP maximo
 Maximum hit points.	Pontos de vida maximos.
 Select a character first.	Selecione um personagem primeiro.
 Owned by	Pertence a
@@ -1035,7 +1033,7 @@ Each class is painted in five colors. A color changes hair, skin, clothing and a
 Character art unavailable	Arte do personagem indisponivel
 Saves	Saves
 Your SAVE0.DAT files: overview, backups, export, import and restore.	Seus arquivos SAVE0.DAT: visão geral, backups, exportação, importação e restauração.
-Characters and their appearance.	Personagens e sua aparência.
+Characters, appearance and inventory.	Personagens, aparência e inventário.
 Loading saves...	Carregando saves...
 Selected save	Save selecionado
 No saves found	Nenhum save encontrado
@@ -1173,6 +1171,55 @@ Delete...	Excluir...
 Delete backup	Excluir backup
 This permanently deletes this backup	Isto exclui este backup permanentemente
 Delete failed	Falha ao excluir
-Backup deleted.	Backup excluído.)PTBR";
+Backup deleted.	Backup excluído.
+Max HP	HP máximo
+Edit Inventory	Editar inventário
+Inventory Editor	Editor de inventário
+Attack, durability, required level and the modifier values can be changed. Nothing is written until Apply Changes.	Ataque, durabilidade, nível necessário e os valores dos modificadores podem ser alterados. Nada é gravado até Aplicar alterações.
+Item names are unavailable because the game files could not be read.	Os nomes dos itens estão indisponíveis porque os arquivos do jogo não puderam ser lidos.
+Weapon	Arma
+Accessory	Acessório
+Item	Item
+Items	Itens
+Items are shown as the game names them; the editor does not change them.	Itens são mostrados como o jogo os nomeia; o editor não os altera.
+Other	Outros
+Shared storage	Armazenamento compartilhado
+Not understood	Não compreendido
+Select an item to see its details.	Selecione um item para ver os detalhes.
+Shared by every character in this DATA slot.	Compartilhado por todos os personagens deste slot DATA.
+This item is not understood by the editor and is kept unchanged.	Este item não é compreendido pelo editor e é mantido sem alterações.
+Durability	Durabilidade
+All	Todos
+Attack min	Ataque mín.
+Attack max	Ataque máx.
+Rank	Rank
+Loading inventory...	Carregando inventário...
+This character and DATA slot have no items.	Este personagem e este slot DATA não têm itens.
+Required level	Nível necessário
+Modifiers	Modificadores
+This item has no modifiers.	Este item não tem modificadores.
+Name will change to	O nome mudará para
+Changing modifier values can also change the item's generated name.	Alterar os valores dos modificadores também pode mudar o nome gerado do item.
+Finish or correct the number you are typing before applying.	Termine ou corrija o número que está digitando antes de aplicar.
+The editor values and the item are out of sync; nothing was saved.	Os valores do editor e o item estão dessincronizados; nada foi salvo.
+Game limit:	Limite do jogo:
+Max durability exceeds the limit the game keeps.	A Durabilidade máxima excede o limite que o jogo mantém.
+Required level is invalid.	O Nível necessário não é válido.
+Modifier value is outside the supported range.	O valor do modificador está fora do intervalo suportado.
+This item cannot be changed.	Este item não pode ser alterado.
+An inventory change is not valid and was not saved.	Uma alteração de inventário não é válida e não foi salva.
+Unknown item %s	Item desconhecido %s
+Unknown modifier %s	Modificador desconhecido %s
+The current HP cannot be higher than the maximum HP.	O HP atual não pode ser maior que o HP máximo.
+Max durability	Durabilidade máxima
+Category	Categoria
+Weapons / Shields	Armas / Escudos
+Search items...	Pesquisar itens...
+Search	Pesquisar
+Sort	Ordenar
+Equipment level	Nível do equipamento
+Bag	Bolsa
+This category has no items.	Esta categoria não tem itens.
+No items match the search.	Nenhum item corresponde à pesquisa.)PTBR";
 
 } // namespace dcp::localization

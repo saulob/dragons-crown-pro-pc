@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "inventory_data.h"
 #include "save_backup.h"
 
 namespace dcp {
@@ -53,6 +54,21 @@ SaveEdit::Result SaveEdit::Apply() {
     }
     if (FirstInvalidAppearance()) {
         return Result::kInvalidAppearance;
+    }
+    for (size_t slot = 0; slot < kDataSlotCount; ++slot) {
+        for (size_t index = 0; index < kCharacterCount; ++index) {
+            const CharacterView& before = save_.model.slots()[slot].characters[index];
+            const CharacterView& after = working_.slots()[slot].characters[index];
+            const bool hp_edited = before.hp_current != after.hp_current || before.hp_max != after.hp_max;
+            if (after.present && hp_edited && after.hp_current > after.hp_max) {
+                detail_ = "the current HP of a character is above its maximum HP";
+                return Result::kInvalidHp;
+            }
+        }
+    }
+    if (std::string error; !ValidateItemChanges(save_.model.bytes(), working_.bytes(), error)) {
+        detail_ = std::move(error);
+        return Result::kInvalidInventory;
     }
     const std::vector<uint8_t> serialized = working_.Serialize();
     std::vector<std::string> problems;
