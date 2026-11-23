@@ -19,7 +19,7 @@ constexpr char kExtension[] = ".pkg";
 
 fs::path HomePlace(const std::vector<Place>& places) {
     for (const Place& place : places) {
-        if (place.label == "Home") {
+        if (place.label == "Home folder") {
             return place.path;
         }
     }

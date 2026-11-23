@@ -143,6 +143,7 @@ export function internalMetricsRoute(request) {
   if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') return null;
   const url = new URL(request.url);
   if (url.pathname === '/metrics/summary') return { kind: 'summary' };
+  if (url.pathname === '/metrics/showcase') return { kind: 'showcase' };
   if (url.pathname === '/metrics/history') {
     const days = historyDays(url.searchParams);
     return days === null ? { kind: 'bad_request' } : { kind: 'history', days };

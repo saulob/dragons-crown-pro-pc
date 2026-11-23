@@ -182,6 +182,9 @@ add_custom_command(TARGET dragons_crown_pro POST_BUILD
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/header-art.png"
         "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/header-art.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/home_background.png"
+        "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/home_background.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/sponsor-heart.png"
         "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/sponsor-heart.png"
     VERBATIM)

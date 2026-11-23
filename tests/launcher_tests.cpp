@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -23,6 +24,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <span>
@@ -62,9 +64,14 @@
 #include "voice_language_resources.h"
 #include "game_translation.h"
 #include "header_art.h"
+#include "home_art.h"
+#include "home_community.h"
+#include "home_portraits.h"
+#include "home_stats.h"
 #include "localization/ui_text.h"
 #include <zlib.h>
 #include "net/identity.h"
+#include "net/online_config.h"
 #include "net/online_version.h"
 #include "online_client.h"
 #include "online_settings.h"
@@ -4045,9 +4052,9 @@ void TestOptions() {
         CHECK(std::string(PageName(page)).size() > 0);
         ++count;
     }
-    CHECK(count == 12);
-    const char* const order[] = {"Play",   "Display", "Graphics", "Gameplay", "Saves",      "Editor",
-                                 "Online", "Cheats",  "Controls", "Trophies", "Bug Report", "About"};
+    CHECK(count == 13);
+    const char* const order[] = {"Home",   "Play",   "Display",  "Graphics", "Gameplay",   "Saves", "Editor",
+                                 "Online", "Cheats", "Controls", "Trophies", "Bug Report", "About"};
     for (size_t i = 0; i < std::size(order); ++i) {
         CHECK(std::string(PageName(kPageOrder[i])) == order[i]);
     }
@@ -4074,7 +4081,7 @@ void TestOptions() {
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
     CHECK(launcher.find("for (const PageId page : kPageOrder) {\n            c.pages.push_back(MakePage(page));") !=
           std::string::npos);
-    CHECK(launcher.find("start_page") == std::string::npos && kPageOrder[0] == PageId::kPlay);
+    CHECK(launcher.find("start_page") == std::string::npos && kPageOrder[0] == PageId::kHome && kPageOrder[1] == PageId::kPlay);
     const size_t save_case = launcher.find("case PageId::kSave:");
     CHECK(save_case != std::string::npos && launcher.find("PageSave(ui)", save_case) < launcher.find("case PageId::", save_case + 1));
     const size_t editor_case = launcher.find("case PageId::kEditor:");
@@ -4108,8 +4115,8 @@ void TestChromeLayout() {
     CHECK(kPanelBorder[0] < kPanelBorder[1] && kPanelBorder[1] < kPanelBorder[2]);
     CHECK(kRowBorder[0] < kRowBorder[1] && kRowBorder[1] < kRowBorder[2]);
     CHECK(SidebarLabelX() == kSidebarIconInset + kSidebarIcon + kSidebarIconGap);
-    constexpr float kMinimumHeight = 580.0f;
-    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "host.h").find("int min_height = 580;") != std::string::npos);
+    constexpr float kMinimumHeight = 610.0f;
+    CHECK(ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "host.h").find("int min_height = 610;") != std::string::npos);
     const int pages = int(std::size(dcp::kPageOrder));
     const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
     CHECK(SidebarHeight(pages, SidebarRowFor(pages, shortest_body)) <= shortest_body);
@@ -4338,7 +4345,7 @@ void TestSidebarProportions() {
 
     // The longest labels at the sidebar's size, measured: English and Portuguese in Segoe UI Semibold, then DejaVu Sans Bold.
     constexpr float kLongestLabels[] = {57.9f, 73.7f, 81.8f, 101.9f};
-    constexpr float kMinimumHeight = 580.0f;
+    constexpr float kMinimumHeight = 610.0f;
     const int pages = int(std::size(dcp::kPageOrder));
     const float shortest_body = kMinimumHeight - HeaderHeight(kMinimumHeight, 1.0f) - kBodyGap - kFooterHeight;
     const float compact_row = SidebarRowFor(pages, shortest_body);
@@ -4427,7 +4434,7 @@ struct LogicalWindow {
     float width, height;
 };
 
-constexpr LogicalWindow kLauncherWindows[] = {{900, 580}, {1126, 580}, {1280, 720}, {1920, 1080}, {3840, 2160}};
+constexpr LogicalWindow kLauncherWindows[] = {{900, 610}, {1126, 610}, {1280, 720}, {1920, 1080}, {3840, 2160}};
 constexpr float kDisplayScales[] = {1.0f, 1.5f, 2.25f};
 constexpr float kTolerance = 0.01f;
 
@@ -4985,6 +4992,767 @@ void TestLauncherPresentation() {
 }
 
 
+// ---- Home page ----
+
+std::string ReleaseJson(bool draft, const std::vector<std::pair<std::string, long long>>& assets) {
+    std::string json = std::string("{\"tag_name\":\"v1\",\"draft\":") + (draft ? "true" : "false") + ",\"assets\":[";
+    for (size_t i = 0; i < assets.size(); ++i) {
+        json += (i ? "," : "") + std::string("{\"name\":\"") + assets[i].first + "\",\"download_count\":" +
+                std::to_string(assets[i].second) + "}";
+    }
+    return json + "]}";
+}
+
+constexpr char kStatsJson[] =
+    R"({"generated":"2026-11-23T03:00:00.000Z","live":{"online":14,"lobby":7,"in_rooms":5,"open_rooms":3,"peak_today":22},)"
+    R"("today":{"sessions":23,"rooms_created":44,"joins":19},"last_30_days":{"rooms_created":10860,"successful_joins":4060,)"
+    R"("parties_reported":2364,"average_party_size":2.24,"rooms_with_guest":1961,)"
+    R"("classes":[{"class":"Wizard","count":50},{"class":"Fighter","count":30},{"class":"Elf","count":20}]}})";
+
+void TestHomeDownloads() {
+    using namespace home;
+    for (const char* asset : {"DragonsCrownProPC-1.4.1-windows-x64.zip", "DragonsCrownProPC-1.4.1-x86_64.AppImage",
+                              "dcp-android.apk", "notes.txt"}) {
+        CHECK(CountsAsDownload(asset));
+    }
+    for (const char* asset : {"DragonsCrownProPC-1.4.1-windows-x64.zip.sha256", "game.AppImage.SHA512", "a.zip.sha1",
+                              "a.zip.md5", "a.zip.sig", "a.zip.asc", "a.zip.minisig", "SHA256SUMS", "sha256sums.txt",
+                              "SHA256SUM", "CHECKSUMS", "checksums.txt", ""}) {
+        CHECK(!CountsAsDownload(asset));
+    }
+
+    const std::string page = "[" +
+        ReleaseJson(false, {{"DragonsCrownProPC-1.4.1-windows-x64.zip", 50000}, {"DragonsCrownProPC-1.4.1-windows-x64.zip.sha256", 900},
+                            {"SHA256SUMS", 300}, {"DragonsCrownProPC-1.4.1-x86_64.AppImage", 21993}}) + "," +
+        ReleaseJson(true, {{"DragonsCrownProPC-1.5.0-windows-x64.zip", 777}}) + "," +
+        ReleaseJson(false, {{"DragonsCrownProPC-1.0.0-windows-x64.zip", 100}, {"a.zip.minisig", 5}, {"bad", -4}}) + "," +
+        R"({"tag_name":"v0","assets":[{"name":"old.zip","download_count":7},{"name":12,"download_count":5},{"download_count":3}]})" +
+        "," + R"({"tag_name":"vx","draft":"yes","assets":[{"name":"odd.zip","download_count":9}]})" + "]";
+    const std::optional<ReleasePage> counted = SumReleaseDownloads(page);
+    CHECK(counted && counted->downloads == 50000 + 21993 + 100 + 7 && counted->releases == 5);
+    CHECK(SumReleaseDownloads("[]") && SumReleaseDownloads("[]")->downloads == 0 && SumReleaseDownloads("[]")->releases == 0);
+    for (const char* bad : {"", "not json", "{\"message\":\"API rate limit exceeded\"}", "[1,2]", "[{\"assets\":[]}", "null"}) {
+        CHECK(!SumReleaseDownloads(bad));
+    }
+    CHECK(ReleasesPageUrl(kReleasesUrl, 2) ==
+          "https://api.github.com/repos/saulob/dragons-crown-pro-pc/releases?per_page=100&page=2");
+}
+
+void TestHomeServiceStats() {
+    using namespace home;
+    const std::optional<ServiceStats> stats = ParseServiceStats(kStatsJson);
+    CHECK(stats && stats->complete());
+    CHECK(stats && stats->live && stats->live->online_now == 14 && stats->live->playing_online == 5 && stats->live->open_games == 3 &&
+          stats->live->peak_today == 22);
+    CHECK(stats && stats->today && stats->today->online_sessions == 23 && stats->today->games_created == 44 &&
+          stats->today->players_joined == 19);
+    CHECK(stats && stats->month && stats->month->multiplayer_sessions == 1961);
+    CHECK(stats && stats->month && stats->month->classes && stats->month->classes->size() == 3 &&
+          stats->month->classes->front().name == "Wizard" && stats->month->classes->front().count == 50);
+
+    const auto without = [](const std::string& piece) {
+        std::string text = kStatsJson;
+        text.replace(text.find(piece), piece.size(), "");
+        return text;
+    };
+    const auto changed = [](const std::string& from, const std::string& to) {
+        std::string text = kStatsJson;
+        text.replace(text.find(from), from.size(), to);
+        return text;
+    };
+
+    // Classes: an empty list is "nobody yet"; anything that is not a valid list is unavailable and costs nothing else.
+    const std::string class_list =
+        ",\"classes\":[{\"class\":\"Wizard\",\"count\":50},{\"class\":\"Fighter\",\"count\":30},{\"class\":\"Elf\",\"count\":20}]";
+    const std::optional<ServiceStats> quiet = ParseServiceStats(changed(class_list, ",\"classes\":[]"));
+    CHECK(quiet && quiet->month && quiet->month->classes && quiet->month->classes->empty() && quiet->complete());
+    const std::optional<ServiceStats> no_classes = ParseServiceStats(without(class_list));
+    CHECK(no_classes && no_classes->month && !no_classes->month->classes && no_classes->month->multiplayer_sessions == 1961);
+    for (const char* bad : {"\"Paladin\"", "\"fighter\"", "7"}) {
+        const std::optional<ServiceStats> invalid = ParseServiceStats(changed("\"Wizard\"", bad));
+        CHECK(invalid && invalid->month && !invalid->month->classes && invalid->live && invalid->today);
+    }
+    CHECK(!ParseServiceStats(changed("\"count\":50", "\"count\":-1"))->month->classes);
+    CHECK(!ParseServiceStats(changed("\"count\":50", "\"count\":0"))->month->classes);
+    CHECK(!ParseServiceStats(changed("\"count\":50", "\"count\":\"50\""))->month->classes);
+
+    // A section that is missing, null or invalid is unavailable; the others stay usable, and nothing becomes zero.
+    const std::optional<ServiceStats> no_peak = ParseServiceStats(without(",\"peak_today\":22"));
+    CHECK(no_peak && no_peak->live && !no_peak->live->peak_today && no_peak->live->online_now == 14 && no_peak->today && no_peak->month &&
+          !no_peak->complete());
+    const std::optional<ServiceStats> no_live = ParseServiceStats(changed("\"live\":{", "\"liv\":{"));
+    CHECK(no_live && !no_live->live && no_live->today && no_live->today->games_created == 44 && no_live->month);
+    const std::optional<ServiceStats> no_today = ParseServiceStats(changed("\"today\":{\"sessions\":23,", "\"today\":{"));
+    CHECK(no_today && no_today->live && no_today->today && !no_today->today->online_sessions && no_today->today->games_created == 44);
+    const std::optional<ServiceStats> no_month = ParseServiceStats(changed("\"rooms_with_guest\":1961,", ""));
+    CHECK(no_month && no_month->month && !no_month->month->multiplayer_sessions && no_month->month->classes && !no_month->complete());
+    const std::optional<ServiceStats> nothing_open = ParseServiceStats(changed("\"open_rooms\":3", "\"open_rooms\":0"));
+    CHECK(nothing_open && nothing_open->live && nothing_open->live->open_games == 0 && nothing_open->complete());
+    for (const char* bad : {"-1", "\"14\"", "14.5", "null"}) {
+        const std::optional<ServiceStats> invalid = ParseServiceStats(changed("\"online\":14", std::string("\"online\":") + bad));
+        CHECK(invalid && invalid->live && !invalid->live->online_now && invalid->live->playing_online == 5 && invalid->today);
+    }
+
+    const char* const bad_answers[] = {"", "{", "[]", "null", "{\"error\":\"unavailable\"}", "<html>502</html>",
+                                       R"({"live":null,"today":null,"last_30_days":null})", R"({"live":[],"today":3})"};
+    for (const char* bad : bad_answers) {
+        CHECK(!ParseServiceStats(bad));
+    }
+    // The earlier schema used other names for these numbers; none of it reads as the final one.
+    // The answer production gave before the newer values existed: the old numbers read, the new ones are empty.
+    const std::optional<ServiceStats> earlier = ParseServiceStats(
+        R"({"live":{"online":19,"lobby":8,"open_rooms":4},"today":{"rooms_created":28},"last_30_days":{"rooms_created":10860,"successful_joins":4060,"parties_reported":2364,"average_party_size":2.24}})");
+    CHECK(earlier && earlier->live && earlier->live->online_now == 19 && earlier->live->open_games == 4 && !earlier->live->playing_online &&
+          !earlier->live->peak_today && earlier->today && earlier->today->games_created == 28 && !earlier->today->online_sessions &&
+          !earlier->month && !earlier->complete());
+    CHECK(StatsUrlForLobby("wss://dcp-lobby.saulobenigno.workers.dev") == "https://dcp-lobby.saulobenigno.workers.dev/stats");
+    CHECK(StatsUrlForLobby(net::kDefaultLobbyUrl) == "https://dcp-lobby.saulobenigno.workers.dev/stats");
+    CHECK(StatsUrlForLobby("ws://127.0.0.1:8790/") == "http://127.0.0.1:8790/stats");
+    CHECK(StatsUrlForLobby("wss://lobby.example/path?x=1") == "https://lobby.example/stats");
+    for (const char* bad : {"", "https://lobby.example", "wss://", "wss://user@lobby.example", "lobby.example"}) {
+        CHECK(StatsUrlForLobby(bad).empty());
+    }
+
+    CHECK(FormatCount(71993, false) == "71,993" && FormatCount(71993, true) == "71.993");
+    CHECK(FormatCount(0, false) == "0" && FormatCount(999, false) == "999" && FormatCount(1000, false) == "1,000");
+    CHECK(FormatCount(1234567, false) == "1,234,567" && FormatCount(1234567, true) == "1.234.567");
+    CHECK(FormatCount(1961, false) == "1,961" && FormatCount(1961, true) == "1.961");
+    CHECK(PrimaryActionFor(true) == PrimaryAction::kPlay && PrimaryActionFor(false) == PrimaryAction::kInstallGame);
+}
+
+// A fetch served from memory: calls are counted and the URLs kept.
+struct FakeHomeNetwork {
+    std::shared_ptr<std::atomic<int>> calls = std::make_shared<std::atomic<int>>(0);
+    std::shared_ptr<std::atomic<bool>> fail = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::vector<std::string>> urls = std::make_shared<std::vector<std::string>>();
+    std::shared_ptr<std::mutex> lock = std::make_shared<std::mutex>();
+    std::string releases_page = "[" + ReleaseJson(false, {{"game.zip", 71000}, {"game.zip.sha256", 50}}) + "," +
+                                ReleaseJson(false, {{"game.AppImage", 993}}) + "]";
+
+    home::Fetch fetch() const {
+        return [calls = calls, fail = fail, urls = urls, lock = lock, page = releases_page](
+                   const std::string& url, std::string& body, trg::Task&) {
+            ++*calls;
+            {
+                std::lock_guard<std::mutex> guard(*lock);
+                urls->push_back(url);
+            }
+            if (*fail) return std::string("The server answered 503.");
+            body = url.find("/stats") != std::string::npos ? std::string(kStatsJson) : page;
+            return std::string();
+        };
+    }
+};
+
+// Ticks until the requests started at `now` have been collected.
+void SettleHome(home::HomeStats& stats, double now, int64_t unix_now, bool visible) {
+    stats.Tick(now, unix_now, visible);
+    for (int i = 0; i < 2000 && (stats.view().downloads_loading || stats.view().service_loading || i < 3); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        stats.Tick(now, unix_now, visible);
+    }
+    for (int i = 0; i < 50; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        stats.Tick(now, unix_now, false);
+    }
+}
+
+void TestHomeCacheAndRefresh() {
+    using namespace home;
+    const fs::path base = fs::temp_directory_path() / ("dcp_home_tests_" + std::to_string(getpid()));
+    fs::remove_all(base);
+    fs::create_directories(base);
+
+    CHECK(RefreshDue({}, 0, 60));
+    CHECK(!RefreshDue({10.0, std::nullopt}, 69, 60) && RefreshDue({10.0, std::nullopt}, 70, 60));
+    CHECK(!RefreshDue({std::nullopt, 10.0}, 10 + kRetryAfterFailureSeconds - 1, 60));
+    CHECK(RefreshDue({std::nullopt, 10.0}, 10 + kRetryAfterFailureSeconds, 60));
+    CHECK(!RefreshDue({5.0, 100.0}, 200, 60) && RefreshDue({200.0, 100.0}, 260, 60));
+
+    const fs::path cache = base / "user" / "home_stats.cache";
+    CHECK(!ReadDownloadsCache(cache));
+    CHECK(WriteDownloadsCache(cache, {71993, 1700000000}));
+    CHECK(ReadDownloadsCache(cache) && ReadDownloadsCache(cache)->downloads == 71993 &&
+          ReadDownloadsCache(cache)->fetched_unix == 1700000000);
+    CHECK(!fs::exists(base / "user" / "home_stats.cache.part"));
+    for (const char* garbage : {"", "downloads=12\n", "downloads=-5\nfetched=1\n", "downloads=abc\nfetched=1\n"}) {
+        WriteAll(base / "garbage.cache", garbage);
+        CHECK(!ReadDownloadsCache(base / "garbage.cache"));
+    }
+    fs::remove(cache);
+
+    const HomeSources sources{kReleasesUrl, "https://lobby.example/stats", cache};
+    FakeHomeNetwork network;
+    {
+        HomeStats stats(sources, network.fetch());
+        CHECK(!stats.view().downloads && !stats.view().service);
+        SettleHome(stats, 1000, 1700000000, false);
+        CHECK(*network.calls == 0 && !stats.view().downloads && !stats.view().downloads_loading);
+
+        SettleHome(stats, 1000, 1700000000, true);
+        CHECK(*network.calls == 2);
+        CHECK(stats.view().downloads && *stats.view().downloads == 71993);
+        CHECK(stats.view().service && stats.view().service->live && stats.view().service->live->online_now == 14 && !stats.view().service_failed);
+        CHECK(ReadDownloadsCache(cache) && ReadDownloadsCache(cache)->downloads == 71993 &&
+              ReadDownloadsCache(cache)->fetched_unix == 1700000000);
+
+        SettleHome(stats, 1000 + kServiceTtlSeconds - 1, 1700000059, true);
+        CHECK(*network.calls == 2);
+
+        *network.fail = true;
+        SettleHome(stats, 1000 + kServiceTtlSeconds, 1700000060, true);
+        CHECK(*network.calls == 3 && stats.view().service_failed);
+        CHECK(stats.view().service && stats.view().service->live && stats.view().service->live->online_now == 14 && *stats.view().downloads == 71993);
+        SettleHome(stats, 1000 + kServiceTtlSeconds + 10, 1700000070, true);
+        CHECK(*network.calls == 3);
+
+        *network.fail = false;
+        SettleHome(stats, 1000 + kServiceTtlSeconds + kRetryAfterFailureSeconds, 1700000400, true);
+        CHECK(*network.calls == 4 && !stats.view().service_failed);
+    }
+
+    // A fresh cache is shown at once and not fetched again; a stale one stays shown while GitHub fails.
+    {
+        FakeHomeNetwork fresh;
+        HomeStats stats(sources, fresh.fetch());
+        CHECK(stats.view().downloads && *stats.view().downloads == 71993);
+        SettleHome(stats, 5, 1700000000 + 60, true);
+        CHECK(*fresh.calls == 1 && fresh.urls->front() == "https://lobby.example/stats");
+    }
+    {
+        FakeHomeNetwork offline;
+        *offline.fail = true;
+        HomeStats stats({kReleasesUrl, "", cache}, offline.fetch());
+        SettleHome(stats, 5, 1700000000 + int64_t(kDownloadsTtlSeconds), true);
+        CHECK(*offline.calls == 1 && offline.urls->front().find("api.github.com") != std::string::npos);
+        CHECK(stats.view().downloads && *stats.view().downloads == 71993 && !stats.view().service);
+        CHECK(!stats.view().service_loading && !stats.view().service_failed);
+        CHECK(ReadDownloadsCache(cache) && ReadDownloadsCache(cache)->fetched_unix == 1700000000);
+    }
+
+    // Every page is fetched until one holds fewer than a full page, and the pages are summed.
+    {
+        std::string full = "[";
+        for (int i = 0; i < kReleasesPerPage; ++i) {
+            full += (i ? "," : "") + ReleaseJson(false, {{"a.zip", 2}, {"a.zip.sha256", 1}});
+        }
+        full += "]";
+        auto calls = std::make_shared<std::vector<std::string>>();
+        auto lock = std::make_shared<std::mutex>();
+        const Fetch paged = [calls, lock, full](const std::string& url, std::string& body, trg::Task&) {
+            std::lock_guard<std::mutex> guard(*lock);
+            calls->push_back(url);
+            body = url.find("&page=1") != std::string::npos ? full : "[" + ReleaseJson(false, {{"b.zip", 5}}) + "]";
+            return std::string();
+        };
+        HomeStats stats({kReleasesUrl, "", base / "paged.cache"}, paged);
+        SettleHome(stats, 0, 1, true);
+        CHECK(calls->size() == 2 && calls->at(0).find("&page=1") != std::string::npos &&
+              calls->at(1).find("&page=2") != std::string::npos);
+        CHECK(stats.view().downloads && *stats.view().downloads == uint64_t(kReleasesPerPage) * 2 + 5);
+    }
+
+    // Closing the launcher never waits for a request in flight.
+    {
+        auto release = std::make_shared<std::atomic<bool>>(false);
+        auto started = std::make_shared<std::atomic<int>>(0);
+        const Fetch stuck = [release, started](const std::string&, std::string&, trg::Task&) {
+            ++*started;
+            while (!*release) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            return std::string("cancelled");
+        };
+        const auto begin = std::chrono::steady_clock::now();
+        {
+            HomeStats stats({kReleasesUrl, "https://lobby.example/stats", base / "stuck.cache"}, stuck);
+            stats.Tick(0, 1, true);
+            for (int i = 0; i < 500 && *started < 2; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            CHECK(stats.view().downloads_loading && stats.view().service_loading);
+        }
+        CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+        *release = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        CHECK(!fs::exists(base / "stuck.cache"));
+    }
+    std::error_code ec;
+    fs::remove_all(base, ec);
+}
+
+void TestHomePageWiring() {
+    using namespace localization;
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string launcher = ReadAll(source / "launcher" / "launcher.cpp");
+    const size_t home_case = launcher.find("case PageId::kHome:");
+    CHECK(home_case != std::string::npos &&
+          launcher.find("home_page_->Draw(ui)", home_case) < launcher.find("case PageId::", home_case + 1));
+    // Home's PLAY is the footer's request; INSTALL GAME and MANAGE GAME open Play, which stays the install page.
+    CHECK(launcher.find("[this] { launcher_->RequestPlay(); }") != std::string::npos);
+    CHECK(launcher.find("[this] { GoTo(PageId::kPlay); }") != std::string::npos);
+    CHECK(launcher.find("\"The game files are not ready: see the Play page.\", PageIndex(PageId::kPlay)") != std::string::npos);
+    CHECK(launcher.find("PlayCheck{false, \"Wait for the installation to finish.\", 0}") == std::string::npos);
+    CHECK(launcher.find("home_page_->Tick(launcher_->page() == PageIndex(PageId::kHome));") != std::string::npos);
+    const size_t reset = launcher.find("home_page_.reset();");
+    CHECK(reset != std::string::npos && reset < launcher.find("host_.Close();", reset));
+    CHECK(launcher.find("ui.AccentButton(\"Install game...\")") != std::string::npos);
+    CHECK(launcher.find("ui.Toggle(\"Show this launcher\"") != std::string::npos);
+
+    // Reading public totals never touches the settings, the online identity, presence or telemetry.
+    const std::string page = ReadAll(source / "launcher" / "home_page.cpp");
+    const std::string stats = ReadAll(source / "launcher" / "home_stats.cpp");
+    const std::string header = ReadAll(source / "launcher" / "home_stats.h");
+    for (const std::string* text : {&page, &stats}) {
+        for (const char* forbidden : {"StartGameProcess", "InstallGame(", "BrowseAndInstall", "InstallSourceMenu", "Settings",
+                                      "settings_", "SaveNow", "kOnlineEnabledKey", "online_enabled", "identity", "OnlineClient",
+                                      "websocket", "WebSocket", "hello", "presence", "party.report", "/admin",
+                                      "Authorization", "DCP_DASHBOARD_TOKEN"}) {
+            CHECK(text->find(forbidden) == std::string::npos);
+        }
+    }
+    CHECK(header.find("#include") != std::string::npos && header.find("settings.h") == std::string::npos &&
+          header.find("online_settings") == std::string::npos);
+    CHECK(stats.find("std::thread") == std::string::npos && stats.find("detach") == std::string::npos);
+    CHECK(page.find("\"PLAY\"") != std::string::npos && page.find("\"INSTALL GAME\"") != std::string::npos &&
+          page.find("\"MANAGE GAME\"") != std::string::npos);
+
+    const UiTextTable& table = PortugueseBrazilUiText();
+    const auto portuguese = [&table](const std::string& english) -> std::string {
+        for (const UiTextRow& row : table.rows) {
+            if (row.english == english) return row.text;
+        }
+        return "";
+    };
+    CHECK(!portuguese("Dragon's Crown Pro PC in numbers").empty() &&
+          launcher.find("\"Dragon's Crown Pro PC in numbers\"") != std::string::npos);
+    CHECK(portuguese("Downloads come from GitHub releases. Multiplayer numbers are anonymous aggregate statistics from the "
+                     "online service.") ==
+          "Os downloads vêm das releases do GitHub. Os números do multiplayer são estatísticas agregadas e anônimas do "
+          "serviço online.");
+    CHECK(portuguese(PageName(PageId::kHome)) == "Início" && portuguese("Home folder") == "Pasta pessoal");
+    CHECK(portuguese("THE KINGDOM SO FAR") == "O REINO ATÉ AGORA" && portuguese("THE KINGDOM SO FAR.").empty());
+    const char* const now_labels[] = {"Players online now", "Players playing online", "Open online games", "Peak players today"};
+    const char* const today_labels[] = {"Online sessions today", "Online games created today", "Players joined today"};
+    const char* const portuguese_now[] = {"Jogadores online agora", "Jogadores jogando online", "Partidas online abertas", "Pico de jogadores hoje"};
+    const char* const portuguese_today[] = {"Sessões online hoje", "Partidas online criadas hoje", "Jogadores que entraram hoje"};
+    std::vector<std::string> visible = {"THE KINGDOM SO FAR", "Downloads", "RIGHT NOW", "TODAY", "LAST 30 DAYS", "Multiplayer sessions",
+                                        "MOST PLAYED CLASSES", "ONLINE LOBBY", "PLAY", "INSTALL GAME", "MANAGE GAME",
+                                        "Live statistics unavailable", "Updated just now", "Online sessions since launch", "Players since launch"};
+    visible.insert(visible.end(), std::begin(now_labels), std::end(now_labels));
+    visible.insert(visible.end(), std::begin(today_labels), std::end(today_labels));
+    for (const std::string& english : visible) {
+        CHECK(!portuguese(english).empty() && page.find("\"" + english + "\"") != std::string::npos);
+    }
+    for (size_t i = 0; i < 4; ++i) CHECK(portuguese(now_labels[i]) == portuguese_now[i]);
+    for (size_t i = 0; i < 3; ++i) CHECK(portuguese(today_labels[i]) == portuguese_today[i]);
+    CHECK(portuguese("TODAY") == "HOJE" && portuguese("Multiplayer sessions") == "Sessões multiplayer" &&
+          portuguese("MOST PLAYED CLASSES") == "CLASSES MAIS JOGADAS" && portuguese("ONLINE LOBBY") == "LOBBY ONLINE");
+    CHECK(page.find("kNowLabels[4] = {\"Players online now\", \"Players playing online\", \"Open online games\", \"Peak players today\"}") !=
+          std::string::npos);
+    CHECK(page.find("kTodayLabels[3] = {\"Online sessions today\", \"Online games created today\", \"Players joined today\"}") != std::string::npos);
+    CHECK(page.find("kMonthLabels[1] = {\"Multiplayer sessions\"}") != std::string::npos);
+
+    // Players never read the technical words: not in the English text, not in what the page draws.
+    for (const std::string& text : visible) {
+        std::string lower = text;
+        for (char& c : lower) c = char(std::tolower(static_cast<unsigned char>(c)));
+        for (const char* banned : {"room", "report", "snapshot", "party", "parties"}) CHECK(lower.find(banned) == std::string::npos);
+        const size_t join = lower.find("join");
+        CHECK(join == std::string::npos || lower.substr(join, 6) == "joined");
+    }
+    for (const char* removed : {"Online now", "Players in lobby", "Open rooms", "Rooms today", "Rooms created", "Successful joins",
+                                "Parties reported", "Average party size", "In rooms", "ONLINE COUNTRIES", "THE KINGDOM SO FAR."}) {
+        CHECK(portuguese(removed).empty() && page.find(std::string("\"") + removed + "\"") == std::string::npos);
+    }
+
+    // The sections come in this order.
+    const size_t draw = page.find("void HomePage::Draw(trg::Ui& ui) {");
+    const size_t now_at = page.find("\"RIGHT NOW\"", draw), today_at = page.find("\"TODAY\"", draw), month_at = page.find("DrawMonth(ui", draw);
+    CHECK(draw != std::string::npos && draw < now_at && now_at < today_at && today_at < month_at);
+    const size_t month = page.find("void HomePage::DrawMonth(");
+    CHECK(page.find("\"LAST 30 DAYS\"", month) < page.find("\"MOST PLAYED CLASSES\"", month));
+
+    // Countries are not part of Home any more: no data, no text, no flags, no assets.
+    for (const std::string* text : {&page, &stats, &header}) {
+        for (const char* gone : {"countr", "Countr", "flag", "Flag", "\xF0\x9F\x87"}) CHECK(text->find(gone) == std::string::npos);
+    }
+    const std::string community = ReadAll(source / "launcher" / "home_community.cpp") + ReadAll(source / "launcher" / "home_community.h");
+    for (const char* gone : {"countr", "Countr", "flag", "Flag", "\xF0\x9F\x87"}) CHECK(community.find(gone) == std::string::npos);
+    for (const UiTextRow& row : table.rows) {
+        CHECK(row.english.find("COUNTR") == std::string::npos && row.text.find("PAÍSES") == std::string::npos);
+    }
+    for (const fs::directory_entry& entry : fs::recursive_directory_iterator(source / "assets" / "launcher")) {
+        std::string name = entry.path().filename().string();
+        for (char& c : name) c = char(std::tolower(static_cast<unsigned char>(c)));
+        CHECK(name.find("flag") == std::string::npos && name.find("countr") == std::string::npos);
+    }
+    CHECK(launcher.find("[this] { GoTo(PageId::kOnline); }") != std::string::npos);
+    CHECK(launcher.find("ArtSourcesOf(paths_.app0, build_ ? build_->regional_archive : nullptr)") != std::string::npos);
+    CHECK(page.find("hooks_.open_online_page()") != std::string::npos && page.find("hooks_.open_play_page()") != std::string::npos &&
+          page.find("hooks_.play()") != std::string::npos);
+    CHECK(page.find("Average party size") == std::string::npos);
+
+    // Only Home has a backdrop, drawn by the TRG hook; the header, sidebar and footer never get one.
+    const std::string trg_patch = ReadAll(source / "gpu" / "patches" / "trg-launcher" / "0018-page-backdrop.patch");
+    CHECK(trg_patch.find("backdrop") != std::string::npos && trg_patch.find("page.backdrop(") != std::string::npos);
+    CHECK(launcher.find(".backdrop = ") != std::string::npos &&
+          launcher.find(".backdrop = ", launcher.find(".backdrop = ") + 1) == std::string::npos);
+    const size_t backdrop = launcher.find("home.backdrop");
+    CHECK(backdrop != std::string::npos && backdrop > home_case && backdrop < launcher.find("case PageId::", home_case + 1));
+    const std::string trg = ReadAll(source / "third_party" / "trg-launcher" / "src" / "launcher.cpp");
+    const std::string content = Between(trg, "void Launcher::DrawContent(", "void Launcher::OutlinePanel(");
+    CHECK(content.find("page.backdrop(") != std::string::npos && trg.find("page.backdrop(") == trg.rfind("page.backdrop("));
+    CHECK(content.find("page.backdrop(") < content.find("TextUnformatted(T(page.name.c_str()))"));
+    CHECK(launcher.find("LoadLauncherImage(\"home_background.png\", home_art_image_)") != std::string::npos);
+
+    // The artwork and the icon: in the launcher's asset folders, documented, shipped, and no copy left in the root.
+    const fs::path art = source / "assets" / "launcher" / "home_background.png";
+    CHECK(fs::is_regular_file(art) && fs::file_size(art) > 100000);
+    DcpPng::Image picture;
+    CHECK(DcpPng::LoadRgba(art.string().c_str(), picture) && picture.width == 1672 && picture.height == 941);
+    const std::string readme = ReadAll(source / "assets" / "launcher" / "README.md");
+    CHECK(readme.find("# Home background") != std::string::npos && readme.find("AI-generated for the Dragon's Crown Pro PC launcher") != std::string::npos &&
+          readme.find("official Dragon's Crown artwork") != std::string::npos);
+    const std::string icon_sources = ReadAll(source / "assets" / "launcher" / "icons" / "SOURCES.md");
+    CHECK(icon_sources.find("| `home.svg` | Home 4 | https://www.svgrepo.com/svg/521156/home-4 | CC0 |") != std::string::npos);
+    CHECK(ReadAll(source / "packaging" / "licenses" / "THIRD-PARTY-LICENSES.txt").find("https://www.svgrepo.com/svg/521156/home-4") != std::string::npos);
+    const std::string icon = ReadAll(source / "assets" / "launcher" / "icons" / "home.svg");
+    CHECK(icon.find("M21.4498 10.275L11.9998 3.1875L2.5498 10.275") != std::string::npos && icon.find('\r') == std::string::npos);
+    for (const char* leftover : {"home-4-svgrepo-com.svg", "Ru\xC3\xADnas ancestrais diante do reino dourado.png", "home_background.png", "home.svg"}) {
+        CHECK(!fs::exists(source / leftover));
+    }
+    for (const char* shipped : {"tools/package.ps1", "tools/package-linux.sh", "CMakeLists.txt"}) {
+        CHECK(ReadAll(source / shipped).find("home_background.png") != std::string::npos);
+    }
+    for (const char* text : {"AI-generated", "ChatGPT", "DALL", "OpenAI", "Claude"}) {
+        CHECK(page.find(text) == std::string::npos && launcher.find(std::string("\"") + text) == std::string::npos);
+    }
+    for (const UiTextRow& row : table.rows) {
+        CHECK(row.text.find("ChatGPT") == std::string::npos && row.text.find("OpenAI") == std::string::npos);
+    }
+    CHECK(ReadAll(source / "launcher" / "file_browser.cpp").find("AddIfFolder(places, \"Home folder\", home);") != std::string::npos);
+}
+
+void TestHomeArt() {
+    using namespace home;
+    const auto aspect_kept = [](const ArtCrop& crop, int width, int height) {
+        return std::abs(double(crop.width) / double(crop.height) - double(width) / double(height)) < 0.01;
+    };
+    const ArtCrop even = CoverCrop(1672, 941, 1000, 560);
+    CHECK(aspect_kept(even, 1000, 560) && even.width == 1672 && even.x == 0 && even.y > 0 && even.y + even.height < 941);
+    const ArtCrop narrow = CoverCrop(1672, 941, 600, 560);
+    CHECK(aspect_kept(narrow, 600, 560) && narrow.height == 941 && narrow.x + narrow.width == 1672 && narrow.width < 1672);
+    const ArtCrop tall = CoverCrop(1672, 941, 400, 800);
+    CHECK(aspect_kept(tall, 400, 800) && tall.x + tall.width == 1672 && tall.width == 470);
+    const ArtCrop left = CoverCrop(1672, 941, 600, 560, 0.0f, 0.5f);
+    CHECK(left.x == 0 && left.width == narrow.width);
+    for (const int width : {300, 900, 1200, 1680, 2900, 5000}) {
+        for (const int height : {200, 450, 560, 1100, 1600}) {
+            const ArtCrop crop = CoverCrop(1672, 941, width, height);
+            CHECK(crop.x >= 0 && crop.y >= 0 && crop.width >= 1 && crop.height >= 1 && crop.x + crop.width <= 1672 &&
+                  crop.y + crop.height <= 941);
+            CHECK(crop.width == 1672 || crop.height == 941);
+        }
+    }
+    CHECK(CoverCrop(0, 941, 100, 100).width == 0 && CoverCrop(1672, 941, 0, 100).width == 0 && CoverCrop(1672, 941, 100, -1).height == 0);
+
+    for (float down = 0.0f; down <= 1.0f; down += 0.25f) {
+        float previous = 1.0f;
+        for (float across = 0.0f; across <= 1.0f; across += 0.05f) {
+            const float shade = ShadeAt(across, down);
+            CHECK(shade >= 0.0f && shade <= 0.95f && shade <= previous + 1e-6f);
+            previous = shade;
+        }
+        CHECK(ShadeAt(0.0f, down) >= 0.7f);
+        CHECK(ShadeAt(1.0f, down) <= 0.4f);
+    }
+
+    std::vector<uint8_t> gray(64 * 36 * 4, 200);
+    for (size_t i = 3; i < gray.size(); i += 4) gray[i] = 255;
+    for (const auto size : {std::pair<int, int>{40, 20}, {64, 36}, {200, 90}, {97, 301}}) {
+        const std::vector<uint8_t> out = RenderHomeBackground(gray.data(), 64, 36, size.first, size.second);
+        CHECK(out.size() == size_t(size.first) * size_t(size.second) * 4);
+        const auto at = [&](int x, int y) { return out.data() + (size_t(y) * size_t(size.first) + size_t(x)) * 4; };
+        CHECK(at(0, size.second / 2)[0] < at(size.first - 1, size.second / 2)[0]);
+        CHECK(at(size.first - 1, size.second / 2)[0] > 100);
+        bool opaque = true;
+        for (size_t i = 3; i < out.size(); i += 4) opaque = opaque && out[i] == 255;
+        CHECK(opaque);
+    }
+    CHECK(RenderHomeBackground(nullptr, 64, 36, 10, 10).empty() && RenderHomeBackground(gray.data(), 64, 36, 0, 10).empty() &&
+          RenderHomeBackground(gray.data(), 0, 36, 10, 10).empty());
+
+    DcpPng::Image picture;
+    const fs::path art = fs::path(DCP_SOURCE_DIR) / "assets" / "launcher" / "home_background.png";
+    CHECK(DcpPng::LoadRgba(art.string().c_str(), picture));
+    for (const auto size : {std::pair<int, int>{900, 480}, {2400, 1300}}) {
+        const std::vector<uint8_t> out = RenderHomeBackground(picture.rgba.data(), picture.width, picture.height, size.first, size.second);
+        CHECK(out.size() == size_t(size.first) * size_t(size.second) * 4 && out[3] == 255 && out[out.size() - 1] == 255);
+    }
+}
+
+void TestHomeCommunity() {
+    using namespace home;
+    const std::vector<ClassCount> played = {{"Elf", 20}, {"Wizard", 50}, {"Dwarf", 0}, {"Paladin", 5}, {"Fighter", 30}};
+    const std::vector<RankedClass> ranked = RankClasses(played);
+    CHECK(ranked.size() == 3 && ranked[0].name == "Wizard" && ranked[1].name == "Fighter" && ranked[2].name == "Elf");
+    CHECK(ranked[0].share == "50%" && ranked[1].share == "30%" && ranked[2].share == "20%");
+    CHECK(ranked[0].count == 50 && ranked[2].count == 20);
+
+    const std::vector<RankedClass> tied = RankClasses({{"Wizard", 10}, {"Amazon", 10}, {"Fighter", 10}});
+    CHECK(tied.size() == 3 && tied[0].name == "Fighter" && tied[1].name == "Amazon" && tied[2].name == "Wizard" && tied[0].share == "33%");
+    const std::vector<RankedClass> limited = RankClasses({{"Fighter", 60}, {"Elf", 30}, {"Wizard", 10}}, 2);
+    CHECK(limited.size() == 2 && limited[0].share == "60%" && limited[1].share == "30%");
+    CHECK(RankClasses({{"Fighter", 1}, {"Wizard", 1000}}).back().share == "<1%");
+    CHECK(RankClasses({}).empty() && RankClasses({{"Elf", 0}, {"Paladin", 4}}).empty());
+    for (const RankedClass& row : ranked) CHECK(row.share.find("nan") == std::string::npos && !row.share.empty());
+
+    // All six classes, most played first: the order of the game's own list only breaks ties.
+    const std::vector<RankedClass> six = RankClasses({{"Sorceress", 1397}, {"Elf", 1178}, {"Amazon", 1112}, {"Fighter", 626},
+                                                      {"Dwarf", 518}, {"Wizard", 470}});
+    CHECK(kClassesShown == 6 && six.size() == 6 && six[0].name == "Sorceress" && six[1].name == "Elf" && six[2].name == "Amazon" &&
+          six[3].name == "Fighter" && six[4].name == "Dwarf" && six[5].name == "Wizard");
+    int64_t percent = 0;
+    for (const RankedClass& row : six) {
+        CHECK(row.share.size() >= 2 && row.share.back() == '%');
+        percent += std::stoll(row.share);
+    }
+    CHECK(percent >= 98 && percent <= 102);
+    CHECK(six[0].share == "26%" && six[5].share == "9%");
+
+    // Partial answers: each part is optional and nothing else depends on it.
+    const std::optional<ServiceStats> live_only = ParseServiceStats(R"({"live":{"online":4,"in_rooms":1,"open_rooms":0,"peak_today":6}})");
+    CHECK(live_only && live_only->live && !live_only->today && !live_only->month && !live_only->complete());
+    const std::optional<ServiceStats> month_only = ParseServiceStats(
+        R"({"last_30_days":{"rooms_with_guest":3,"classes":[{"class":"Elf","count":1}]}})");
+    CHECK(month_only && month_only->month && month_only->month->classes && !month_only->live && !month_only->today);
+    const std::optional<ServiceStats> today_only = ParseServiceStats(R"({"today":{"sessions":0,"rooms_created":0,"joins":0}})");
+    CHECK(today_only && today_only->today && today_only->today->online_sessions == 0 && !today_only->live && !today_only->month);
+    const std::optional<ServiceStats> counts_only = ParseServiceStats(
+        R"({"live":{"online":4,"in_rooms":1,"open_rooms":0,"peak_today":6},"last_30_days":{"rooms_with_guest":0}})");
+    CHECK(counts_only && counts_only->live && counts_only->month && !counts_only->month->classes && counts_only->month->multiplayer_sessions == 0);
+}
+
+SpriteImage FakeFace(int size) {
+    SpriteImage face;
+    face.width = face.height = size;
+    face.rgba.assign(size_t(size) * size_t(size) * 4, 200);
+    return face;
+}
+
+home::PortraitImages FakeFaces(int size) {
+    home::PortraitImages faces;
+    for (auto& face : faces) face = FakeFace(size);
+    return faces;
+}
+
+void WaitForPortraits(home::ClassPortraits& portraits) {
+    for (int i = 0; i < 3000 && (portraits.loading() || i < 2); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        portraits.Poll();
+    }
+}
+
+void TestHomePortraits() {
+    using namespace home;
+    const CharacterArtSources game{{fs::path("game") / "DRACRO.CPK"}, {}};
+    const CharacterArtSources other{{fs::path("other") / "DRACRO.CPK"}, {}};
+    auto calls = std::make_shared<std::atomic<int>>(0);
+    auto readable = std::make_shared<std::atomic<bool>>(true);
+    const PortraitLoader loader = [calls, readable](const CharacterArtSources& sources) {
+        ++*calls;
+        if (!*readable || sources.archives.empty()) return PortraitImages{};
+        return FakeFaces(sources.archives.front().parent_path() == "game" ? 4 : 8);
+    };
+
+    ClassPortraits portraits(loader);
+    CHECK(!portraits.loading() && portraits.generation() == 0);
+    for (const CharacterClass klass : kCharacterClasses) CHECK(portraits.Image(klass) == nullptr);
+    portraits.Use({});
+    CHECK(*calls == 0 && !portraits.loading() && portraits.generation() == 0);
+
+    portraits.Use(game);
+    CHECK(portraits.loading());
+    WaitForPortraits(portraits);
+    CHECK(!portraits.loading() && *calls == 1);
+    for (const CharacterClass klass : kCharacterClasses) {
+        CHECK(portraits.Image(klass) && portraits.Image(klass)->width == 4 && !portraits.Image(klass)->rgba.empty());
+    }
+    const unsigned generation = portraits.generation();
+    portraits.Use(game);
+    portraits.Poll();
+    CHECK(*calls == 1 && portraits.generation() == generation);
+
+    portraits.Use(other);
+    WaitForPortraits(portraits);
+    CHECK(*calls == 2 && portraits.Image(CharacterClass::kWizard) && portraits.Image(CharacterClass::kWizard)->width == 8);
+    CHECK(portraits.generation() > generation);
+
+    portraits.Use({});
+    CHECK(!portraits.loading() && portraits.Image(CharacterClass::kFighter) == nullptr && *calls == 2);
+
+    // Unreadable game files: no faces, no loading left behind, and the page keeps its text.
+    *readable = false;
+    portraits.Use(game);
+    WaitForPortraits(portraits);
+    CHECK(!portraits.loading() && *calls == 3);
+    for (const CharacterClass klass : kCharacterClasses) CHECK(portraits.Image(klass) == nullptr);
+    *readable = true;
+    portraits.Use({});
+    portraits.Use(game);
+    WaitForPortraits(portraits);
+    CHECK(portraits.Image(CharacterClass::kElf) != nullptr);
+
+    // A load that finishes after the sources changed is dropped.
+    auto release = std::make_shared<std::atomic<bool>>(false);
+    const PortraitLoader slow = [release](const CharacterArtSources& sources) {
+        if (sources.archives.front().parent_path() == "game") {
+            while (!*release) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            return FakeFaces(4);
+        }
+        return FakeFaces(8);
+    };
+    {
+        ClassPortraits racing(slow);
+        racing.Use(game);
+        racing.Use(other);
+        WaitForPortraits(racing);
+        CHECK(racing.Image(CharacterClass::kFighter) && racing.Image(CharacterClass::kFighter)->width == 8);
+        *release = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        racing.Poll();
+        CHECK(racing.Image(CharacterClass::kFighter) && racing.Image(CharacterClass::kFighter)->width == 8);
+    }
+    {
+        auto blocked = std::make_shared<std::atomic<bool>>(false);
+        const auto begin = std::chrono::steady_clock::now();
+        {
+            ClassPortraits leaving([blocked](const CharacterArtSources&) {
+                while (!*blocked) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                return PortraitImages{};
+            });
+            leaving.Use(game);
+        }
+        CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+        *blocked = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    // The real loader is the Editor's CharacterArt: nothing for no game, nothing for archives that cannot be read.
+    CHECK(!LoadClassPortraits({})[0]);
+    const fs::path base = fs::temp_directory_path() / ("dcp_home_faces_" + std::to_string(getpid()));
+    fs::remove_all(base);
+    fs::create_directories(base);
+    WriteAll(base / "DRACRO.CPK", "not an archive");
+    const PortraitImages unreadable = LoadClassPortraits({{base / "DRACRO.CPK"}, {}});
+    for (const auto& face : unreadable) CHECK(!face);
+    std::error_code ec;
+    fs::remove_all(base, ec);
+
+    const std::string source = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "home_portraits.cpp");
+    CHECK(source.find("CharacterArt art(sources)") != std::string::npos && source.find("art.Portrait(klass)") != std::string::npos);
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "home_page.cpp");
+    CHECK(page.find("if (const FaceTexture* face = Face(klass, pixels))") != std::string::npos);
+    CHECK(page.find("portraits_.loading() || portraits_.Image(CharacterClass::kFighter)") != std::string::npos);
+    CHECK(page.find("Asset unavailable") == std::string::npos);
+}
+
+void TestHomeLifetime() {
+    using namespace localization;
+    using namespace home;
+    const std::string with_lifetime = std::string(kStatsJson).substr(0, std::string(kStatsJson).size() - 1) +
+                                      R"(,"lifetime":{"sessions":11349,"players":3842,"since":"2026-09-01"}})";
+    const std::optional<ServiceStats> stats = ParseServiceStats(with_lifetime);
+    CHECK(stats && stats->lifetime && stats->lifetime->sessions == 11349 && stats->lifetime->players == 3842);
+    CHECK(stats && stats->complete() && stats->live && stats->live->online_now == 14 && stats->today && stats->month);
+
+    // An older service has no lifetime section: everything else reads as before.
+    const std::optional<ServiceStats> older = ParseServiceStats(kStatsJson);
+    CHECK(older && !older->lifetime && older->complete() && older->live && older->month);
+
+    const auto lifetime_of = [](const char* body) {
+        return ParseServiceStats(std::string(R"({"live":{"online":1,"lobby":0,"open_rooms":0},"lifetime":)") + body + "}");
+    };
+    CHECK(lifetime_of(R"({"sessions":5,"players":null})")->lifetime->sessions == 5 && !lifetime_of(R"({"sessions":5,"players":null})")->lifetime->players);
+    CHECK(!lifetime_of(R"({"sessions":null,"players":2})")->lifetime->sessions && lifetime_of(R"({"sessions":null,"players":2})")->lifetime->players == 2);
+    CHECK(lifetime_of(R"({"sessions":0,"players":0})")->lifetime->sessions == 0);
+    for (const char* bad : {"{}", "null", "[]", "7", R"({"sessions":"x","players":-1})", R"({"sessions":1.5})", R"({"sessions":null,"players":null})"}) {
+        const std::optional<ServiceStats> parsed = lifetime_of(bad);
+        CHECK(parsed && parsed->live && !parsed->lifetime);
+    }
+    CHECK(!ParseServiceStats(R"({"lifetime":{"sessions":5,"players":2}})") || ParseServiceStats(R"({"lifetime":{"sessions":5,"players":2}})")->lifetime);
+
+    // The incomplete lifetime never turns the status line to unavailable, and Downloads never waits for it.
+    CHECK(stats && ParseServiceStats(R"({"live":{"online":1,"lobby":0,"open_rooms":0,"in_rooms":0,"peak_today":1},"today":{"sessions":1,"rooms_created":0,"joins":0},)"
+                                     R"("last_30_days":{"rooms_created":0,"successful_joins":0,"parties_reported":0,"rooms_with_guest":0,"classes":[]}})")->complete());
+    const fs::path base = fs::temp_directory_path() / ("dcp_home_lifetime_" + std::to_string(getpid()));
+    fs::remove_all(base);
+    fs::create_directories(base);
+    FakeHomeNetwork network;
+    {
+        HomeStats downloads({kReleasesUrl, "https://lobby.example/stats", base / "cache"}, network.fetch());
+        SettleHome(downloads, 1000, 1700000000, true);
+        CHECK(downloads.view().downloads && *downloads.view().downloads == 71993);
+        CHECK(downloads.view().service && !downloads.view().service->lifetime && !downloads.view().service_failed);
+    }
+    {
+        FakeHomeNetwork offline;
+        *offline.fail = true;
+        std::error_code ec;
+        fs::remove_all(base, ec);
+        HomeStats stats_only({kReleasesUrl, "", base / "cache2"}, offline.fetch());
+        SettleHome(stats_only, 1000, 1700000000, true);
+        CHECK(*offline.calls == 1 && !stats_only.view().downloads);
+    }
+    std::error_code ec;
+    fs::remove_all(base, ec);
+
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string page = ReadAll(source / "launcher" / "home_page.cpp");
+    CHECK(page.find("kHeroLabels[3] = {\"Downloads\", \"Online sessions since launch\", \"Players since launch\"}") != std::string::npos);
+    CHECK(page.find("kHeroIcons[3] = {&kDownloadIcon, &kWifiIcon, &kAvatarIcon}") != std::string::npos);
+    CHECK(page.find("all_time") == std::string::npos && page.find("peak_online") == std::string::npos && page.find("All-time") == std::string::npos);
+    const size_t draw = page.find("void HomePage::Draw(trg::Ui& ui) {");
+    CHECK(page.find("hero_values", draw) != std::string::npos && page.find("DrawHero(ui, width, density, ready, hero_values)", draw) <
+          page.find("\"RIGHT NOW\"", draw));
+
+    // The three icons: CC0 SVG Repo files in the launcher's icon folder, recorded, and nothing else left over.
+    const std::string sources = ReadAll(source / "assets" / "launcher" / "icons" / "SOURCES.md");
+    const std::string licenses = ReadAll(source / "packaging" / "licenses" / "THIRD-PARTY-LICENSES.txt");
+    for (const char* row : {"| `download.svg` | Download Minimalistic | https://www.svgrepo.com/svg/525324/download-minimalistic | CC0 |",
+                            "| `wifi.svg` | Wifi Medium | https://www.svgrepo.com/svg/511213/wifi-medium | CC0 |",
+                            "| `avatar.svg` | Avatar | https://www.svgrepo.com/svg/374551/avatar | CC0 |"}) {
+        CHECK(sources.find(row) != std::string::npos);
+    }
+    for (const char* address : {"https://www.svgrepo.com/svg/525324/download-minimalistic", "https://www.svgrepo.com/svg/511213/wifi-medium",
+                                "https://www.svgrepo.com/svg/374551/avatar"}) {
+        CHECK(licenses.find(address) != std::string::npos);
+    }
+    for (const char* icon : {"download.svg", "wifi.svg", "avatar.svg"}) {
+        const std::string svg = ReadAll(source / "assets" / "launcher" / "icons" / icon);
+        CHECK(svg.find("<svg") != std::string::npos && svg.find('\r') == std::string::npos && svg.find("filter") == std::string::npos);
+        CHECK(!RenderFileIcon({icon, 0.88f}, 24).empty());
+    }
+    for (const char* leftover : {"download-minimalistic-svgrepo-com.svg", "wifi-medium-svgrepo-com.svg", "avatar-svgrepo-com.svg",
+                                 "avatar-default-svgrepo-com.svg", "download.svg", "wifi.svg", "avatar.svg"}) {
+        CHECK(!fs::exists(source / leftover));
+    }
+    for (const fs::directory_entry& entry : fs::recursive_directory_iterator(source / "assets" / "launcher")) {
+        CHECK(entry.path().filename().string().find("avatar-default") == std::string::npos);
+    }
+    CHECK(licenses.find("avatar-default") == std::string::npos && sources.find("avatar-default") == std::string::npos &&
+          licenses.find("GPL avatar") == std::string::npos);
+    const std::string build = ReadAll(source / "launcher" / "CMakeLists.txt");
+    CHECK(build.find("assets/launcher/icons/*.svg") != std::string::npos);
+
+    const UiTextTable& table = PortugueseBrazilUiText();
+    const auto portuguese = [&table](const std::string& english) -> std::string {
+        for (const UiTextRow& row : table.rows) {
+            if (row.english == english) return row.text;
+        }
+        return "";
+    };
+    CHECK(portuguese("Online sessions since launch") == "Sessões online desde o lançamento" &&
+          portuguese("Players since launch") == "Jogadores desde o lançamento" && portuguese("Downloads") == "Downloads");
+}
+
 // ---- Launcher page icons ----
 
 void TestPageIcons() {
@@ -4992,9 +5760,9 @@ void TestPageIcons() {
     const fs::path icons = source / "assets" / "launcher" / "icons";
 
     // The sidebar's pages and their icons, one to one.
-    const std::set<std::string> expected = {"play.svg",     "display.svg", "graphics.svg", "gameplay.svg",   "online.svg",
-                                            "cheats.svg",   "controls.svg", "trophies.svg", "editor.svg",     "bug-report.svg",
-                                            "about.svg",    "save.svg"};
+    const std::set<std::string> expected = {"home.svg",     "play.svg",     "display.svg",  "graphics.svg", "gameplay.svg",
+                                            "online.svg",   "cheats.svg",   "controls.svg", "trophies.svg", "editor.svg",
+                                            "bug-report.svg", "about.svg",  "save.svg"};
     std::set<std::string> mapped_files;
     std::set<int> mapped_pages, ordered_pages;
     for (const PageIconAsset& asset : PageIconAssets()) {
@@ -5004,7 +5772,7 @@ void TestPageIcons() {
     for (const PageId page : kPageOrder) {
         ordered_pages.insert(static_cast<int>(page));
     }
-    CHECK(expected.size() == 12 && PageIconAssets().size() == expected.size());
+    CHECK(expected.size() == 13 && PageIconAssets().size() == expected.size());
     CHECK(mapped_files == expected && mapped_pages.size() == expected.size());
     CHECK(ordered_pages.size() == std::size(kPageOrder) && mapped_pages == ordered_pages);
     for (const std::string& name : expected) {
@@ -5053,12 +5821,12 @@ void TestPageIcons() {
         svg_files += entry.path().extension() == ".svg";
     }
     CHECK(!fs::exists(icons / "bug-file-svgrepo-com.svg"));
-    CHECK(svg_files == PageIconAssets().size() + 3);
+    CHECK(svg_files == PageIconAssets().size() + 6);
     for (const char* loose : {"edit-4-svgrepo-com.svg", "save-svgrepo-com.svg", "skin-svgrepo-com.svg", "chest-svgrepo-com.svg",
                                 "chest-games-gaming-svgrepo-com.svg", "back-light-svgrepo-com.svg"}) {
         CHECK(!fs::exists(source / loose));
     }
-    for (const FileIconAsset* button : {&kAppearanceIcon, &kInventoryIcon, &kBackIcon}) {
+    for (const FileIconAsset* button : {&kAppearanceIcon, &kInventoryIcon, &kBackIcon, &kDownloadIcon, &kWifiIcon, &kAvatarIcon}) {
         const std::string svg = ReadAll(icons / button->file);
         CHECK(svg.find("<svg") != std::string::npos && svg.find(":\\") == std::string::npos && svg.find("/Users/") == std::string::npos);
         for (const int pixels : {20, 30, 45}) {
@@ -5149,7 +5917,7 @@ void TestIconLicenses() {
             CHECK(licenses.find(address) != std::string::npos);
         }
     }
-    CHECK(cc0_rows == 8);
+    CHECK(cc0_rows == 9);
     CHECK(licenses.find("CC0 (public domain dedication), all from SVG Repo") != std::string::npos);
     CHECK(licenses.find("\"Display Television Tv Screen Gadget\" by nickylimyeanfen, collection Inc Device Icons.") != std::string::npos);
     CHECK(licenses.find("License: CC Attribution License, https://creativecommons.org/licenses/by/") != std::string::npos);
@@ -10081,6 +10849,26 @@ int main(int argc, char** argv) {
     }
 
     // dcp-launcher-tests renderer: only the DCP-RFWKVY launcher renderer and frame presentation group.
+    if (argc == 2 && std::string(argv[1]) == "home") {
+        InGroup("home", TestHomeDownloads);
+        InGroup("home", TestHomeServiceStats);
+        InGroup("home", TestHomeCacheAndRefresh);
+        InGroup("home", TestHomePageWiring);
+        InGroup("home", TestHomeArt);
+        InGroup("home", TestHomeCommunity);
+        InGroup("home", TestHomePortraits);
+        InGroup("home", TestHomeLifetime);
+        InGroup("home", TestOptions);
+        InGroup("home", TestPageIcons);
+        InGroup("home", TestIconLicenses);
+        InGroup("home", TestSidebarProportions);
+        InGroup("home", TestSidebarLabels);
+        InGroup("home", TestChromeLayout);
+        InGroup("home", TestLauncherDpiLayout);
+        InGroup("home", TestLauncherLocalization);
+        std::printf("GROUP|launcher-home|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "renderer") {
         InGroup("renderer", TestLauncherRenderer);
         InGroup("renderer", TestLauncherPresentation);
@@ -10151,6 +10939,14 @@ int main(int argc, char** argv) {
     TestPlacement();
     TestOptions();
     InGroup("navigation", TestPageNavigation);
+    InGroup("home", TestHomeDownloads);
+    InGroup("home", TestHomeServiceStats);
+    InGroup("home", TestHomeCacheAndRefresh);
+    InGroup("home", TestHomePageWiring);
+    InGroup("home", TestHomeArt);
+    InGroup("home", TestHomeCommunity);
+    InGroup("home", TestHomePortraits);
+    InGroup("home", TestHomeLifetime);
     InGroup("icons", TestPageIcons);
     InGroup("licenses", TestIconLicenses);
     InGroup("scrollbar", TestStablePageWidth);

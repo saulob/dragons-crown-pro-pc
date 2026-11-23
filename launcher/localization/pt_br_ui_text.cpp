@@ -553,7 +553,7 @@ Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel.	Escol
 Select this folder	Selecionar esta pasta
 Open the folder with eboot.bin, sce_module and sce_sys, then select it. Controller: D-pad to move, A to open, B to cancel.	Abra a pasta com eboot.bin, sce_module e sce_sys e selecione-a. Controle: direcional para mover, A para escolher, B para cancelar.
 Program folder	Pasta do programa
-Home	Pasta pessoal
+Home folder	Pasta pessoal
 Downloads	Downloads
 Desktop	Área de trabalho
 Documents	Documentos
@@ -1226,6 +1226,28 @@ Sort	Ordenar
 Equipment level	Nível do equipamento
 Bag	Bolsa
 This category has no items.	Esta categoria não tem itens.
-No items match the search.	Nenhum item corresponde à pesquisa.)PTBR";
+No items match the search.	Nenhum item corresponde à pesquisa.
+Home	Início
+Dragon's Crown Pro PC in numbers	Dragon's Crown Pro PC em números
+THE KINGDOM SO FAR	O REINO ATÉ AGORA
+RIGHT NOW	AGORA
+LAST 30 DAYS	ÚLTIMOS 30 DIAS
+Players online now	Jogadores online agora
+Players playing online	Jogadores jogando online
+Open online games	Partidas online abertas
+Peak players today	Pico de jogadores hoje
+TODAY	HOJE
+Online sessions today	Sessões online hoje
+Online games created today	Partidas online criadas hoje
+Players joined today	Jogadores que entraram hoje
+Multiplayer sessions	Sessões multiplayer
+Online sessions since launch	Sessões online desde o lançamento
+Players since launch	Jogadores desde o lançamento
+MOST PLAYED CLASSES	CLASSES MAIS JOGADAS
+ONLINE LOBBY	LOBBY ONLINE
+INSTALL GAME	INSTALAR JOGO
+MANAGE GAME	GERENCIAR JOGO
+Live statistics unavailable	Estatísticas ao vivo indisponíveis
+Downloads come from GitHub releases. Multiplayer numbers are anonymous aggregate statistics from the online service.	Os downloads vêm das releases do GitHub. Os números do multiplayer são estatísticas agregadas e anônimas do serviço online.)PTBR";
 
 } // namespace dcp::localization

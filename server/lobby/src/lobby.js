@@ -16,6 +16,8 @@ import { STORY_ROLES, STORY_SEEN_PER_ROOM, StoryUsage, storyRole } from './story
 
 export const PROTOCOL = 1;
 
+const LIFETIME_TTL_MS = 10 * 60_000;
+
 export const LIMITS = {
   frameBytes: 32 * 1024,
   nameChars: 16,
@@ -624,6 +626,44 @@ export class Lobby {
   metricsSummary() {
     return { ...this.metrics.summary(this.liveMetrics()), story: this.storySummary(), boss: this.bossSummary(),
       comms: this.commsSummary() };
+  }
+
+  attempt(read) {
+    try {
+      return read();
+    } catch (error) {
+      this.host.log(`lobby: statistics read failed: ${error?.stack ?? error}`);
+      return null;
+    }
+  }
+
+  // Totals since tracking began; they change slowly, so a complete answer is kept for LIFETIME_TTL_MS.
+  lifetime() {
+    const now = this.host.now();
+    if (this.lifetimeMemo && now - this.lifetimeMemo.at < LIFETIME_TTL_MS) return this.lifetimeMemo.value;
+    const history = this.attempt(() => this.metrics.showcaseLifetime());
+    const value = { sessions: history?.sessions ?? null, since: history?.since ?? null,
+      players: this.attempt(() => this.host.sql.get('SELECT COUNT(*) AS n FROM accounts').n) };
+    if (value.sessions !== null && value.players !== null) this.lifetimeMemo = { at: now, value };
+    return value;
+  }
+
+  // The public statistics: a section, or an optional value in one, that cannot be read is null, never zero.
+  showcase() {
+    return {
+      generated: this.host.now(),
+      live: this.attempt(() => {
+        const live = this.liveMetrics();
+        return { online: live.online, lobby: this.lobbyEntries().length, in_rooms: live.in_rooms, open_rooms: live.rooms,
+          peak_today: this.attempt(() => Math.max(this.metrics.todayRow().peak_online, live.online)) };
+      }),
+      today: this.attempt(() => this.metrics.showcaseToday()),
+      last_30_days: this.attempt(() => {
+        const month = this.metrics.showcaseMonth();
+        return { ...month, classes: this.attempt(() => this.metrics.classUsage(month.first, month.last)) };
+      }),
+      lifetime: this.lifetime(),
+    };
   }
 
   // Early Story Online as the dashboard shows it: rooms and seats from the live tables, history from the counters.

@@ -1,0 +1,27 @@
+diff --git a/include/trg/launcher.h b/include/trg/launcher.h
+--- a/include/trg/launcher.h
++++ b/include/trg/launcher.h
+@@ -129,6 +129,8 @@
+   std::function<int()> badge;             // a count in the sidebar instead of the dot; 0 hides it
+   // White image of that many pixels square for the sidebar to tint; none hides the icon.
+   std::function<ImTextureID(int pixels)> icon = nullptr;
++  // Drawn over the page's panel (min to max, whole pixels), under its title and widgets; scale is the UI scale.
++  std::function<void(ImDrawList* draw, ImVec2 min, ImVec2 max, float scale)> backdrop = nullptr;
+ };
+ 
+ struct Option {
+diff --git a/src/launcher.cpp b/src/launcher.cpp
+--- a/src/launcher.cpp
++++ b/src/launcher.cpp
+@@ -1276,6 +1276,11 @@
+   }
+   const int current_page = navigation_.current();
+   const Page& page = config_.pages[size_t(current_page)];
++  if (page.backdrop) {
++    const ImVec2 min = ImGui::GetWindowPos();
++    page.backdrop(ImGui::GetWindowDrawList(), ImVec2(std::floor(min.x), std::floor(min.y)),
++                  ImVec2(std::floor(min.x) + std::floor(size.x), std::floor(min.y) + std::floor(size.y)), s_);
++  }
+   const float pad = layout::kContentPadding * s_;
+   const float title_y = layout::kContentTop * s_;
+   ImGui::SetCursorPos(ImVec2(pad, title_y));

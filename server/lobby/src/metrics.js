@@ -10,6 +10,7 @@ export const METRICS_TIME_ZONE = 'America/Sao_Paulo';
 export const SAMPLE_MS = 15 * 60 * 1000;
 export const SAMPLE_DAYS = 90;
 export const HISTORY_MAX_DAYS = 365;
+export const SHOWCASE_DAYS = 30;
 export const DIMENSIONS = ['platform', 'platform_mix', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime',
   'difficulty', ...PARTY_DIMENSIONS];
 export const LIFETIMES = [['under_1m', 60e3], ['1_5m', 5 * 60e3], ['5_15m', 15 * 60e3], ['15_60m', 60 * 60e3], ['over_1h', Infinity]];
@@ -223,7 +224,7 @@ export class Metrics {
   summary(live) {
     const now = this.now();
     const day = metricsDay(now);
-    const today = this.sql.get(`SELECT ${DAY_COLUMNS.join(', ')} FROM metrics_daily WHERE day = ?`, day) ?? emptyDay();
+    const today = this.todayRow();
     return {
       generated: now,
       time_zone: METRICS_TIME_ZONE,
@@ -263,6 +264,37 @@ export class Metrics {
     const previous = this.totals(daysBefore(first, days), daysBefore(first, 1));
     return { generated: now, time_zone: METRICS_TIME_ZONE, days, first, last, sample_ms: SAMPLE_MS, daily, dimensions,
       party_first_day: partyFirst ?? null, platform_mix_first_day: mixFirst ?? null, difficulty_first_day: difficultyFirst ?? null, samples, totals, previous, comparison: compare(totals, previous) };
+  }
+
+  todayRow() {
+    return this.sql.get(`SELECT ${DAY_COLUMNS.join(', ')} FROM metrics_daily WHERE day = ?`, metricsDay(this.now())) ?? emptyDay();
+  }
+
+  showcaseToday() {
+    const today = this.todayRow();
+    return { sessions: today.sessions, rooms_created: today.rooms_created, joins: today.room_joins };
+  }
+
+  showcaseMonth() {
+    const last = metricsDay(this.now());
+    const first = daysBefore(last, SHOWCASE_DAYS - 1);
+    const period = this.totals(first, last);
+    const parties = this.sql.get(`SELECT COALESCE(SUM(count), 0) AS reports, COALESCE(SUM(CAST(value AS INTEGER) * count), 0) AS seats
+      FROM metrics_daily_dimensions WHERE dimension = 'party_size' AND day >= ? AND day <= ?`, first, last);
+    return { first, last, rooms_created: period.rooms_created, successful_joins: period.room_joins,
+      parties_reported: parties.reports,
+      average_party_size: parties.reports > 0 ? Math.round(100 * parties.seats / parties.reports) / 100 : null,
+      rooms_with_guest: period.rooms_with_guest };
+  }
+
+  showcaseLifetime() {
+    return this.sql.get(`SELECT COALESCE(SUM(sessions), 0) AS sessions, MIN(CASE WHEN sessions > 0 THEN day END) AS since
+      FROM metrics_daily`);
+  }
+
+  classUsage(first, last) {
+    return this.sql.all(`SELECT value AS class, SUM(count) AS count FROM metrics_daily_dimensions
+      WHERE dimension = 'character' AND day >= ? AND day <= ? GROUP BY value ORDER BY count DESC, value`, first, last);
   }
 
   // Early Story Online rooms created and guest joins since the columns exist; the dashboard sums them, never a period.

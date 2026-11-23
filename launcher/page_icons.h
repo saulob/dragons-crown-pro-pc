@@ -25,6 +25,9 @@ struct FileIconAsset {
 inline constexpr FileIconAsset kAppearanceIcon{"appearance.svg", 0.88f};
 inline constexpr FileIconAsset kInventoryIcon{"inventory.svg", 0.88f};
 inline constexpr FileIconAsset kBackIcon{"back.svg", 0.84f};
+inline constexpr FileIconAsset kDownloadIcon{"download.svg", 0.88f};
+inline constexpr FileIconAsset kWifiIcon{"wifi.svg", 0.88f};
+inline constexpr FileIconAsset kAvatarIcon{"avatar.svg", 0.88f};
 
 std::span<const PageIconAsset> PageIconAssets();
 const PageIconAsset* FindPageIcon(PageId page);

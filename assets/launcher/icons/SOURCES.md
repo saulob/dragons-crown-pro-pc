@@ -37,7 +37,7 @@ colours. The files' contents are unchanged.
 
 ## CC0
 
-CC0 asks for no attribution; the sources are kept for provenance. `appearance.svg` and `inventory.svg` are the artwork of
+CC0 asks for no attribution; the sources are kept for provenance. `download.svg`, `wifi.svg` and `avatar.svg` are the icons of Home's lifetime statistics. `appearance.svg` and `inventory.svg` are the artwork of
 the Editor's Edit Appearance and Edit Inventory buttons, and are drawn in the button's text colour.
 
 | File | Title | Source | License |
@@ -52,6 +52,10 @@ the Editor's Edit Appearance and Edit Inventory buttons, and are drawn in the bu
 | `controls.svg` | Keyboard | https://www.svgrepo.com/svg/524665/keyboard | CC0 |
 | `trophies.svg` | Achievements | https://www.svgrepo.com/svg/304482/achievements | CC0 |
 | `about.svg` | About | https://www.svgrepo.com/svg/486929/about | CC0 |
+| `home.svg` | Home 4 | https://www.svgrepo.com/svg/521156/home-4 | CC0 |
+| `download.svg` | Download Minimalistic | https://www.svgrepo.com/svg/525324/download-minimalistic | CC0 |
+| `wifi.svg` | Wifi Medium | https://www.svgrepo.com/svg/511213/wifi-medium | CC0 |
+| `avatar.svg` | Avatar | https://www.svgrepo.com/svg/374551/avatar | CC0 |
 
 ## Changes from the downloaded files
 

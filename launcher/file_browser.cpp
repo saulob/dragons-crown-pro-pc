@@ -108,7 +108,7 @@ std::vector<Place> StandardPlaces(const fs::path& program_folder) {
     AddIfFolder(places, "Program folder", program_folder);
     const fs::path home = HomeFolder();
     if (!home.empty()) {
-        AddIfFolder(places, "Home", home);
+        AddIfFolder(places, "Home folder", home);
         for (const char* name : {"Downloads", "Desktop", "Documents"}) {
             AddIfFolder(places, name, home / name);
         }

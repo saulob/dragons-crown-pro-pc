@@ -234,6 +234,58 @@ piped (`dragons_crown_pro.exe --check-game | Out-Host`) or, otherwise, the paren
 Windows GUI executable, a shell does not wait for it: to read the exit code use `Start-Process -Wait -PassThru` (PowerShell) or
 `start /wait` (cmd).
 
+## Home
+
+Home is the first sidebar page and the page the launcher opens on: the project in numbers, and a quick start.
+
+- **Hero**: three lifetime totals side by side, each with an icon, and PLAY, ONLINE LOBBY and MANAGE GAME on the right.
+  They wrap or shrink at narrow widths.
+- **Downloads**: the sum of `download_count` over the assets of every published GitHub release of
+  `saulob/dragons-crown-pro-pc` (drafts are skipped; `.sha256`, `.sha512`, `.sha1`, `.md5`, `.sig`, `.asc`, `.minisig`
+  files and `SHA256SUMS`/`CHECKSUMS` manifests are not downloads). It is cached for 30 minutes in
+  `user/home_stats.cache`, and an earlier value stays shown while GitHub cannot be reached. It does not depend on the
+  online service.
+- **Online sessions since launch** (`lifetime.sessions`): the sum of the dashboard's Sessions over every day the service
+  has kept, so a reconnect inside the 10-minute window is still the same session. **Players since launch**
+  (`lifetime.players`): the number of distinct online accounts the service has registered, one per account however
+  often it connects. Both come from the same `/stats` request, and a service without them shows dashes while
+  Downloads and everything else still work.
+- **Right now**: Players online now, Players playing online, Open online games and Peak players today. **Today**: Online
+  sessions today, Online games created today and Players joined today. **Last 30 days**: Multiplayer sessions. They
+  come from the online service's anonymous aggregate statistics, `GET /stats` (server/lobby/README.md), and are the
+  dashboard's own counters under player-facing names:
+
+  | Home | `/stats` field | Dashboard |
+  |---|---|---|
+  | Players online now | `live.online` | Online now |
+  | Players playing online | `live.in_rooms` | In rooms (players holding a seat in an online game) |
+  | Open online games | `live.open_rooms` | Open rooms |
+  | Peak players today | `live.peak_today` | Peak today |
+  | Online sessions today | `today.sessions` | Sessions today |
+  | Online games created today | `today.rooms_created` | Rooms today |
+  | Players joined today | `today.joins` | Joins today (not unique players) |
+  | Multiplayer sessions | `last_30_days.rooms_with_guest` | Rooms with a guest, 30 days: online games that ended with at least one guest in them |
+
+  A number the service cannot read is a dash, never zero, and the page says "Live statistics unavailable" until the whole
+  answer is complete. One request fills every number; it is repeated at most once a minute while Home is shown, and not
+  at all while another page is open (five minutes after a failure).
+- **Most played classes**: the classes of the party snapshots clients reported in the last 30 days (the dashboard's
+  "Characters in parties"), most played first, up to six, each with its share. It counts class appearances in reported
+  multiplayer parties, not unique players. Every face is the one the Editor shows, rendered from the installed game's
+  archives on a worker thread (`launcher/home_portraits.cpp`, the Editor's `CharacterArt`). Without a readable game the
+  classes are listed as text only.
+- **PLAY** is the footer's PLAY. Without a ready game the button is **INSTALL GAME** and opens Play. **ONLINE LOBBY**
+  opens the Online page, where the Lobby is; **MANAGE GAME** opens Play. Play stays the page for installing, reinstalling
+  and Show this launcher.
+- The artwork behind the page (`assets/launcher/home_background.png`) is drawn only inside Home's content panel, by the
+  page backdrop hook that `gpu/patches/trg-launcher/0018-page-backdrop.patch` adds to TRG Launcher. It is cropped to
+  the panel anchored to the right so the kingdom stays in view, scaled to the exact pixels shown, and darkened more on
+  the left, where the numbers are (`launcher/home_art.h`). Without the file the panel is plain.
+
+Reading these numbers is a plain HTTPS request off the UI thread: it never turns on Online play, never signs in, never
+lists you in the Lobby, never creates a session or counts as Online now, and does not change any setting. Without a
+network Home shows the last known downloads and dashes for the rest; PLAY works either way.
+
 ## Save and Play
 
 - **Save** writes the pending settings and keeps the launcher open. **Quit** closes without saving.
@@ -920,7 +972,7 @@ Play). The launcher closes before the game starts, so its input cannot reach the
 ## Window and display scaling
 
 SDL3 runs the process per-monitor-v2 DPI aware (also declared in the manifest). The launcher is 1280 × 720 logical (at
-least 900 × 580, the height at which all twelve sidebar pages fit at the compact row), scaled by the display's content
+least 900 × 610, the height at which all thirteen sidebar pages fit at the compact row), scaled by the display's content
 scale and capped to 90% of the usable area, so at 225% it is 2880 × 1620 pixels on a
 4K display. Window sizes are real pixels. A saved launcher position that no display shows any more is ignored and the
 window is centred on the primary display.

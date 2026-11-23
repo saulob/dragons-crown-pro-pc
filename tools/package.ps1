@@ -72,7 +72,7 @@ $AngleLicenceSha256 = ($AnglePin.Files | Where-Object { $_.Name -eq 'LICENSE' })
 $AngleLinkedLicences = @('spirv-tools', 'vulkan-loader', 'VulkanMemoryAllocator', 'xxhash')
 
 $RootFiles = @('dragons_crown_pro.exe', 'trg-updater.exe', 'README.txt', 'LICENSE.txt')
-$AssetFiles = @('assets\launcher\header-art.png', 'assets\launcher\sponsor-heart.png')
+$AssetFiles = @('assets\launcher\header-art.png', 'assets\launcher\home_background.png', 'assets\launcher\sponsor-heart.png')
 $ForbiddenNames = @('game', 'user', 'logs', 'cache', 'build', 'prepared', 'extracted', 'image', 'sce_sys', 'sce_module',
     'eboot.bin', 'param.sfo', 'dcp.ini', 'boot.bin', 'content.bin', 'image.json', 'imports.json', 'symbols')
 $ForbiddenPatterns = @('*.pkg', '*.pdb', '*.debug', '*.log', '*.dmp', '*.ini', '*.bin', '*.self', '*.sprx', '*.prx',
@@ -317,7 +317,7 @@ Write-Text (Join-Path $stage 'README.txt') $readme
 Write-Step 'Staging the launcher images'
 $asset_dir = Join-Path $stage 'assets\launcher'
 New-Item -ItemType Directory -Force $asset_dir | Out-Null
-foreach ($image in @('header-art.png', 'sponsor-heart.png')) {
+foreach ($image in @('header-art.png', 'home_background.png', 'sponsor-heart.png')) {
     $source = Join-Path $root "assets\launcher\$image"
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { Stop-Tool "Missing launcher image: $source" }
     Copy-Item -LiteralPath $source $asset_dir

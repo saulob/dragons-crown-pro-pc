@@ -26,6 +26,7 @@
 #include "trg/launcher.h"
 #include "trg/platform.h"
 
+#include "character_art.h"
 #include "controller_prompts.h"
 #include "game_patches.h"
 #include "dcp_accent.h"
@@ -41,6 +42,8 @@
 #include "install_source.h"
 #include "game_process.h"
 #include "header_art.h"
+#include "home_art.h"
+#include "home_page.h"
 #include "host.h"
 #include "incident_page.h"
 #include "launcher_quit.h"
@@ -405,6 +408,7 @@ public:
         if (LoadLauncherImage("header-art.png", header_art_image_)) {
             header_art_aspect_ = float(header_art_image_.width) / float(header_art_image_.height);
         }
+        LoadLauncherImage("home_background.png", home_art_image_);
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
         online_page_ = std::make_unique<OnlinePage>(UserDir());
@@ -429,6 +433,15 @@ public:
             net::OnlineConfig online = ReadOnlineConfig(settings_.file());
             net::apply_environment(online);
             incident_page_->CheckReports(online);
+            home_page_ = std::make_unique<HomePage>(
+                home::HomeSources{home::kReleasesUrl, home::StatsUrlForLobby(online.lobby), UserDir() / "home_stats.cache"},
+                shots ? home::Fetch() : home::HttpFetch(std::string("DragonsCrownProPC-Launcher/") + DCP_PORT_VERSION),
+                HomeHooks{[this] { return files_ == GameFileState::kValid; }, [this] { launcher_->RequestPlay(); },
+                          [this] { GoTo(PageId::kPlay); }, [this] { GoTo(PageId::kOnline); },
+                          [this] { return ArtSourcesOf(paths_.app0, build_ ? build_->regional_archive : nullptr); },
+                          [this](const uint8_t* rgba, int width, int height) { return host_.CreateTexture(rgba, width, height); },
+                          [this](ImTextureID texture) { host_.DestroyTexture(texture); },
+                          [this](const FileIconAsset& icon, int pixels) { return FileIconTexture(icon, pixels); }});
         }
         trg::SetTranslator(&TranslateLauncherText);
         localization::SetActiveLanguage(settings_.Get(kTextLanguageKey, text_languages_.front().key));
@@ -479,6 +492,7 @@ public:
             }
         }
         launcher_.reset();
+        home_page_.reset();
         trophy_page_.reset();
         online_page_.reset();
         host_.Close();
@@ -493,6 +507,7 @@ private:
         PollPrompts();
         PollUpdate();
         PollOnline();
+        home_page_->Tick(launcher_->page() == PageIndex(PageId::kHome));
         KeepCheatsOffOnline();
         NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
@@ -739,13 +754,13 @@ private:
         }
         c.can_play = [this] {
             if (install_.running()) {
-                return trg::PlayCheck{false, "Wait for the installation to finish.", 0};
+                return trg::PlayCheck{false, "Wait for the installation to finish.", PageIndex(PageId::kPlay)};
             }
             if (prompts_.running()) {
-                return trg::PlayCheck{false, "Wait for the game file changes to finish.", 0};
+                return trg::PlayCheck{false, "Wait for the game file changes to finish.", PageIndex(PageId::kPlay)};
             }
             if (files_ != GameFileState::kValid) {
-                return trg::PlayCheck{false, "The game files are not ready: see the Play page.", 0};
+                return trg::PlayCheck{false, "The game files are not ready: see the Play page.", PageIndex(PageId::kPlay)};
             }
             if (online_page_ && online_page_->PlayNeedsTest(settings_)) {
                 if (play_attempts_.Pressed(ImGui::GetFrameCount())) online_page_->PointToConnectionTest();
@@ -774,6 +789,36 @@ private:
         return header_art_;
     }
 
+    ImTextureID HomeArtTexture(int width, int height) {
+        if (width != home_art_width_ || height != home_art_height_) {
+            home_art_width_ = width;
+            home_art_height_ = height;
+            host_.DestroyTexture(home_art_);
+            const std::vector<uint8_t> rgba = home::RenderHomeBackground(home_art_image_.rgba.data(), home_art_image_.width,
+                                                                         home_art_image_.height, width, height);
+            home_art_ = rgba.empty() ? ImTextureID{} : host_.CreateTexture(rgba.data(), width, height);
+        }
+        return home_art_;
+    }
+
+    void DrawHomeBackdrop(ImDrawList* draw, ImVec2 min, ImVec2 max) {
+        const float framebuffer = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
+        const ImTextureID texture = HomeArtTexture(static_cast<int>((max.x - min.x) * framebuffer + 0.5f),
+                                                   static_cast<int>((max.y - min.y) * framebuffer + 0.5f));
+        if (texture == ImTextureID{}) {
+            return;
+        }
+        const float rounding = ImGui::GetStyle().ChildRounding;
+        const std::vector<HeaderArtStrip> strips = SplitHeaderArt({min.x, min.y, max.x, max.y});
+        for (size_t i = 0; i < strips.size(); ++i) {
+            ImDrawFlags corners = ImDrawFlags_RoundCornersNone;
+            if (i == 0) corners = ImDrawFlags_RoundCornersLeft;
+            if (i + 1 == strips.size()) corners = corners == ImDrawFlags_RoundCornersLeft ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersRight;
+            draw->AddImageRounded(ImTextureRef(texture), ImVec2(strips[i].min_x, min.y), ImVec2(strips[i].max_x, max.y),
+                                  ImVec2(strips[i].min_u, 0.0f), ImVec2(strips[i].max_u, 1.0f), IM_COL32_WHITE, rounding, corners);
+        }
+    }
+
     ImTextureID PageIconTexture(PageId page, int pixels) {
         const auto [icon, is_new] = page_icons_.try_emplace({page, pixels});
         if (is_new) {
@@ -788,9 +833,26 @@ private:
         return icon->second;
     }
 
+    ImTextureID FileIconTexture(const FileIconAsset& asset, int pixels) {
+        const auto [icon, is_new] = file_icons_.try_emplace({asset.file, pixels});
+        if (is_new) {
+            const std::vector<uint8_t> rgba = RenderFileIcon(asset, pixels);
+            if (!rgba.empty()) {
+                icon->second = host_.CreateTexture(rgba.data(), pixels, pixels);
+            }
+        }
+        return icon->second;
+    }
+
     trg::Page MakePage(PageId page) {
         const std::string name(PageName(page));
         switch (page) {
+        case PageId::kHome: {
+            trg::Page home{name, "Dragon's Crown Pro PC in numbers", [this](trg::Ui& ui) { home_page_->Draw(ui); }, nullptr,
+                           nullptr};
+            home.backdrop = [this](ImDrawList* draw, ImVec2 min, ImVec2 max, float) { DrawHomeBackdrop(draw, min, max); };
+            return home;
+        }
         case PageId::kPlay:
             return {name, "Check the game files and start playing.", [this](trg::Ui& ui) { PagePlay(ui); },
                     [this] { return files_ != GameFileState::kValid; }, nullptr};
@@ -949,10 +1011,14 @@ private:
         }
     }
 
-    void GoTo(PageId page) {
+    static int PageIndex(PageId page) {
         const auto found = std::find(std::begin(kPageOrder), std::end(kPageOrder), page);
-        if (found != std::end(kPageOrder)) {
-            launcher_->GoToPage(static_cast<int>(found - std::begin(kPageOrder)));
+        return found == std::end(kPageOrder) ? -1 : static_cast<int>(found - std::begin(kPageOrder));
+    }
+
+    void GoTo(PageId page) {
+        if (const int index = PageIndex(page); index >= 0) {
+            launcher_->GoToPage(index);
         }
     }
 
@@ -1751,13 +1817,19 @@ private:
     int header_art_width_ = 0;
     int header_art_height_ = 0;
     ImTextureID sponsor_icon_{};
+    DcpPng::Image home_art_image_;
+    ImTextureID home_art_{};
+    int home_art_width_ = 0;
+    int home_art_height_ = 0;
     std::map<std::pair<PageId, int>, ImTextureID> page_icons_;
+    std::map<std::pair<std::string, int>, ImTextureID> file_icons_;
     float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;
     trg::Fonts fonts_;
     std::unique_ptr<trg::Launcher> launcher_;
     std::unique_ptr<trg::update::UpdateController> updater_;
+    std::unique_ptr<HomePage> home_page_;
     std::unique_ptr<TrophyPage> trophy_page_;
     std::unique_ptr<OnlinePage> online_page_;
     SaveSelection save_selection_;
