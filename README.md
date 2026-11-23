@@ -12,7 +12,9 @@
 
 </div>
 
-<img width="1941" height="1156" alt="2026-10-14_23-43" src="https://github.com/user-attachments/assets/984433e5-1bd8-498a-949c-68815e73b901" />
+<img width="1080" height="644" alt="image" src="https://github.com/user-attachments/assets/984433e5-1bd8-498a-949c-68815e73b901" />
+<img width="1080" height="644" alt="image" src="https://github.com/user-attachments/assets/445e75dc-4c10-41d0-afe2-dba49a77f6aa" />
+
 
 ## Features
 
@@ -63,6 +65,10 @@ Boss Battle is a new mode made for this PC port. It is not part of the original 
 - **Online (experimental)**: with Online Play on, the host opens Boss Battle and friends join the host's Boss Battle room from the Network Menu; the host chooses the boss and starts the fight. Only the host needs the option, and each player keeps their own campaign and statistics.
 - Available on the USA (1.00, 1.01), Japanese (1.00, 1.02, 1.03) and Asia / Hong Kong 1.00 builds. The Asia / Hong Kong 1.02 and European 1.03 builds do not offer it yet, because their executables could not be checked.
 
+<img width="1080" height="637" alt="image" src="https://github.com/user-attachments/assets/26ce31a6-92b4-4d3e-8112-7d345c1000a3" />
+<img width="1080" height="631" alt="image" src="https://github.com/user-attachments/assets/b7a4b4f4-9422-4160-89bb-1ee8f968076f" />
+
+
 See [docs/LAUNCHER.md](docs/LAUNCHER.md) and [docs/ONLINE.md](docs/ONLINE.md#boss-battle-online-experimental) for the details.
 
 ## Online Co-op
@@ -78,6 +84,8 @@ Dragon's Crown Pro includes Online Co-op. Add your friends with a Friend Code, t
 > To reach Online Co-op faster, turn on **Story Skip Offer** and **Tutorial Skip Offer** on the launcher's **Gameplay** page before creating a new character. The game then lets that character skip the tutorial and start from the second half of the story. Existing characters are not affected.
 >
 > **Early Story Online** (experimental, Off by default, on the launcher's **Online** page) is a different approach: it opens online play for the host right after the opening tutorial, so the first story stage can be played with friends, with the host's story shared and every guest keeping their own saved progress. Only the host needs the option. Early story rooms are friends/join-code only. It is untested in real multiplayer sessions, so treat it as experimental.
+
+<img width="1080" height="630" alt="image" src="https://github.com/user-attachments/assets/e499b084-16fb-4cc6-95b8-7fa1a78004b5" />
 
 ### Playing online
 
@@ -103,6 +111,9 @@ Both players need **Online play** On. With it Off, the game runs offline exactly
 - **Keyboard and mouse**: press **T** (rebindable on the Controls page), pick with the mouse or the direction keys, send with the left mouse button, cancel with Escape or the right mouse button.
 - It opens with Online Play on, in a room of at least two players. The message appears in the sender's greeting balloon, in each player's own Menu & Subtitles language. One message every 2 seconds per player.
 - Only a message number travels, never text. The online service counts how often each of the eight messages is used, with no player, room or time attached. See [docs/ONLINE.md](docs/ONLINE.md#comms-wheel).
+
+<img width="1080" height="633" alt="image" src="https://github.com/user-attachments/assets/f2de8669-311c-4cf5-8cfb-bb5ef4073dd3" />
+<img width="1080" height="634" alt="image" src="https://github.com/user-attachments/assets/782870ed-7072-4922-972b-728fb74a4944" />
 
 ### Ping and frame counter
 
@@ -336,9 +347,8 @@ The game runs at its own 60 frames per second unless the Frame rate setting asks
 
 ## Screenshots
 
-<img width="1962" height="1170" alt="2026-10-14_23-45" src="https://github.com/user-attachments/assets/91c30616-e700-478f-a56b-c286344e6502" />
-<img width="1935" height="1161" alt="2026-10-14_23-44_1" src="https://github.com/user-attachments/assets/3f9fbc08-a505-4caa-8346-d5560b82d94d" />
-
+<img width="1080" height="630" alt="image" src="https://github.com/user-attachments/assets/91c30616-e700-478f-a56b-c286344e6502" />
+<img width="1080" height="630" alt="image" src="https://github.com/user-attachments/assets/3f9fbc08-a505-4caa-8346-d5560b82d94d" />
 
 ## Reporting problems
 
