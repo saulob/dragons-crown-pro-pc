@@ -265,8 +265,8 @@ void TestHitMapping() {
 }
 
 void TestKeyBinding() {
-    CHECK(DCP_KEY_HOTKEY_COMMS_WHEEL == DCP_KEY_HOTKEY_EXIT_GAME - 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 1 &&
-          DCP_KEY_HOTKEY_COMMS_WHEEL >= DCP_KEY_FIRST_HOTKEY);
+    CHECK(DCP_KEY_HOTKEY_COMMS_WHEEL == DCP_KEY_HOTKEY_EXIT_GAME - 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 2 &&
+          DCP_KEY_HOTKEY_CHARACTER_HIGHLIGHT == DCP_KEY_COUNT - 1 && DCP_KEY_HOTKEY_COMMS_WHEEL >= DCP_KEY_FIRST_HOTKEY);
     CHECK(!std::strcmp(dcp_key_actions[DCP_KEY_HOTKEY_COMMS_WHEEL].ini_key, "hotkey_comms_wheel"));
     CHECK(!std::strcmp(dcp_key_actions[DCP_KEY_HOTKEY_COMMS_WHEEL].label, "Comms Wheel"));
     DcpKeyMap map;

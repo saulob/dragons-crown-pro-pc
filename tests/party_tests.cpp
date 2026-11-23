@@ -296,6 +296,57 @@ void TestHookInstall() {
     size_t outside_site = 0;
     for (uint64_t i = 0; i < size; ++i) outside_site += (i < site || i >= site + 6) && image[i] != before[i];
     CHECK(outside_site == 0);
+    // The native hook goes in once: a second install finds the jump, not the entry, and changes nothing.
+    const std::vector<uint8_t> installed = image;
+    CHECK(!party_hook_install_located(image.data(), size, entry, &good, image.data() + stubs, stub_bytes));
+    CHECK(image == installed);
+}
+
+unsigned g_first = 0, g_second = 0, g_third = 0;
+uint64_t g_first_unit = 0, g_second_unit = 0;
+void First(uint64_t unit) { ++g_first; g_first_unit = unit; }
+void Second(uint64_t unit) { ++g_second; g_second_unit = unit; }
+void Third(uint64_t) { ++g_third; }
+
+void TestUnitListeners() {
+    party_hook_clear_unit_listeners();
+    g_first = g_second = g_third = 0;
+    party_hook_notify_listeners(7);
+    CHECK(g_first == 0 && g_second == 0);
+
+    CHECK(party_hook_add_unit_listener(First) == 1);
+    CHECK(party_hook_add_unit_listener(Second) == 1);
+    party_hook_notify_listeners(0x1234);
+    CHECK(g_first == 1 && g_second == 1 && g_first_unit == 0x1234 && g_second_unit == 0x1234);
+
+    CHECK(party_hook_add_unit_listener(First) == 0 && party_hook_add_unit_listener(nullptr) == 0);
+    party_hook_notify_listeners(0x55);
+    CHECK(g_first == 2 && g_second == 2);
+
+    party_hook_clear_unit_listeners();
+    g_first = g_second = 0;
+    CHECK(party_hook_add_unit_listener(Second) == 1 && party_hook_add_unit_listener(First) == 1);
+    party_hook_notify_listeners(9);
+    CHECK(g_first == 1 && g_second == 1 && g_first_unit == 9 && g_second_unit == 9);
+
+    party_hook_remove_unit_listener(First);
+    party_hook_notify_listeners(10);
+    CHECK(g_first == 1 && g_second == 2);
+    party_hook_remove_unit_listener(First);
+    party_hook_remove_unit_listener(nullptr);
+    CHECK(party_hook_add_unit_listener(First) == 1);
+    party_hook_notify_listeners(11);
+    CHECK(g_first == 2 && g_second == 3);
+
+    party_hook_clear_unit_listeners();
+    unsigned added = 0;
+    void (*const all[])(uint64_t) = {First, Second, Third};
+    for (auto* listener : all) added += static_cast<unsigned>(party_hook_add_unit_listener(listener));
+    CHECK(added == 3 && PARTY_HOOK_LISTENERS >= 4);
+    party_hook_clear_unit_listeners();
+    g_first = 0;
+    party_hook_notify_listeners(1);
+    CHECK(g_first == 0);
 }
 
 void TestSources() {
@@ -369,6 +420,7 @@ int main() {
     TestReporter();
     TestGates();
     TestHookInstall();
+    TestUnitListeners();
     TestSources();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

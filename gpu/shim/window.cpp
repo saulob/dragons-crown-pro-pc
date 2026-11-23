@@ -6,6 +6,8 @@
 #include <cstring>
 #include <vector>
 #include <SDL3/SDL.h>
+#include "character_highlight.h"
+#include "character_highlight_core.h"
 #include "common/assert.h"
 #include "dcp_displays.h"
 #include "dcp_exit_shortcut.h"
@@ -503,6 +505,48 @@ void WindowSDL::UpdateExitChord() {
     }
 }
 
+extern "C" int runtime_pad_player_of_instance(uint32_t instance);
+
+namespace {
+
+SDL_GamepadButton SdlButton(dcp::highlight::PadButton button) {
+    using dcp::highlight::PadButton;
+    switch (button) {
+    case PadButton::Back: return SDL_GAMEPAD_BUTTON_BACK;
+    case PadButton::LeftStick: return SDL_GAMEPAD_BUTTON_LEFT_STICK;
+    case PadButton::RightStick: return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+    case PadButton::LeftShoulder: return SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+    case PadButton::RightShoulder: return SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+    }
+    return SDL_GAMEPAD_BUTTON_INVALID;
+}
+
+} // namespace
+
+// Window thread. The chosen two-button chord on a controller toggles the highlight of the local player that controller drives.
+void WindowSDL::UpdateHighlightChord() {
+    const int chord = DcpSettings::Get().character_highlight_chord;
+    if (chord < 0 || chord >= dcp::highlight::kChordOff || (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) == 0) {
+        highlight_chord_down.clear();
+        return;
+    }
+    const auto& buttons = dcp::highlight::kChords[static_cast<size_t>(chord)];
+    for (const auto& entry : pad_activity) {
+        SDL_Gamepad* const gamepad = SDL_GetGamepadFromID(entry.first);
+        if (!gamepad) {
+            highlight_chord_down.erase(entry.first);
+            continue;
+        }
+        const bool down = SDL_GetGamepadButton(gamepad, SdlButton(buttons.first)) &&
+                          SDL_GetGamepadButton(gamepad, SdlButton(buttons.second));
+        bool& was_down = highlight_chord_down[entry.first];
+        if (down && !was_down) {
+            character_highlight_toggle_pad(runtime_pad_player_of_instance(entry.first));
+        }
+        was_down = down;
+    }
+}
+
 // Window thread. A DCP_MOTION_HELD_* mask of the mouse and opened-gamepad buttons held right now.
 unsigned WindowSDL::HeldButtons() const {
     unsigned held = dcp_mouse_any_held(dcp_mouse_global()) ? DCP_MOTION_HELD_MOUSE : 0u;
@@ -698,13 +742,16 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
             const bool hud_key = event.key.scancode == DcpPing::kFpsKey || event.key.scancode == DcpPing::kPingKey;
-            const bool host_shortcut =
-                window_shortcut || hud_key || event.key.scancode == DcpSettings::Get().menu_key;
+            const bool highlight_shortcut = event.key.scancode == DcpSettings::Get().character_highlight_key;
+            const bool host_shortcut = window_shortcut || hud_key || highlight_shortcut ||
+                                       event.key.scancode == DcpSettings::Get().menu_key;
             const DcpPing::HudKey hud =
                 DcpPing::HudKeyFor(event.key.scancode, event.key.repeat, runtime_online_play_enabled() != 0);
             auto& settings = DcpSettings::Get();
             if (window_shortcut && !event.key.repeat) {
                 ToggleBorderless();
+            } else if (highlight_shortcut && !event.key.repeat) {
+                character_highlight_toggle_local(0);
             } else if (hud == DcpPing::HudKey::Fps) {
                 settings.show_fps = !settings.show_fps;
             } else if (hud == DcpPing::HudKey::Ping) {
@@ -744,6 +791,7 @@ bool WindowSDL::PollEvents() {
         }
     }
     UpdateExitChord();
+    UpdateHighlightChord();
     UpdateMouseCapture();
     UpdateCursor();
     return is_open;

@@ -2534,7 +2534,7 @@ void TestControllerExitShortcutSettings(const fs::path& base) {
     CHECK(shortcut == 1 && hotkey == 1 && std::string(kControllerExitShortcutKey) == "controller_exit_shortcut");
     CHECK(std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].ini_key) == "hotkey_exit_game" &&
           std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].label) == "Exit Game" &&
-          dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].default_scancode == SDL_SCANCODE_F9 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 1);
+          dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].default_scancode == SDL_SCANCODE_F9 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 2);
 
     // Default F9, rebind, reset; the key is a saved name the runtime reads at start.
     {

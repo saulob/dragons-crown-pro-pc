@@ -2,6 +2,7 @@
 #include "dcp_settings.h"
 #include "dcp_frame_pacing.h"
 #include "dcp_graphics.h"
+#include "character_highlight_core.h"
 #include "dcp_keys.h"
 #include "dcp_renderer.h"
 #include "dcp_voice.h"
@@ -118,6 +119,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.mouse_controls = ParseBool(value, v.mouse_controls);
     } else if (key == "enable_boss_battle") {
         v.enable_boss_battle = ParseBool(value, v.enable_boss_battle);
+    } else if (key == dcp::highlight::kChordKey) {
+        if (const int chord = dcp::highlight::ChordFromName(value); chord >= 0) v.character_highlight_chord = chord;
     } else if (key == "unlock_gallery") {
         v.unlock_gallery = ParseBool(value, v.unlock_gallery);
     } else if (key == "story_skip_offer") {
@@ -131,7 +134,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "frame_rate") {
         v.frame_rate = DcpFramePacing::ParseFrameRate(value);
     } else if (const int scancode = dcp_key_from_name(value.c_str()); scancode != 0) {
-        std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key, &v.comms_key, &v.exit_key};
+        std::atomic<int>* const hotkeys[] = {&v.menu_key, &v.window_mode_key, &v.comms_key, &v.exit_key, &v.character_highlight_key};
         static_assert(std::size(hotkeys) == DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY, "one setting per port hotkey");
         for (int i = 0; i < DCP_KEY_COUNT - DCP_KEY_FIRST_HOTKEY; ++i) {
             if (key == dcp_key_actions[DCP_KEY_FIRST_HOTKEY + i].ini_key) {

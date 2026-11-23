@@ -292,7 +292,7 @@ void TestConfigFile() {
 
 void TestKeyboardMappingsUnchanged() {
     // The keyboard layout and the saved key names are what they were before the mouse bindings existed.
-    CHECK(DCP_KEY_COUNT == 29 && DCP_KEY_FIRST_HOTKEY == 25 && DCP_KEY_HOTKEY_EXIT_GAME == 28);
+    CHECK(DCP_KEY_COUNT == 30 && DCP_KEY_FIRST_HOTKEY == 25 && DCP_KEY_HOTKEY_EXIT_GAME == 28 && DCP_KEY_HOTKEY_CHARACTER_HIGHLIGHT == 29);
     DcpKeyMap keys;
     dcp_keys_defaults(&keys);
     CHECK(keys.scancode[DCP_KEY_LEFT_STICK_UP] == dcp_key_from_name("w") && keys.scancode[DCP_KEY_LEFT_STICK_LEFT] == dcp_key_from_name("a"));
@@ -329,7 +329,7 @@ void TestKeyboardMappingsUnchanged() {
 }
 
 void TestExitGameHotkey() {
-    CHECK(DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_HOTKEY_COMMS_WHEEL + 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 1);
+    CHECK(DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_HOTKEY_COMMS_WHEEL + 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 2);
     CHECK(std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].ini_key) == "hotkey_exit_game" &&
           std::string(dcp_key_actions[DCP_KEY_HOTKEY_EXIT_GAME].label) == "Exit Game");
     DcpKeyMap keys;

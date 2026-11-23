@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "character_highlight_draw.h"
 #include "common/recursive_lock.h"
 #include "dcp_narrow_water_reader.h"
 #include "dcp_water_diag.h"
@@ -15,6 +16,7 @@
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
+#include "video_core/renderer_vulkan/vk_highlight_mask.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -191,6 +193,13 @@ private:
     void EliminateFastClear();
 
     void UpdateDynamicState(const GraphicsPipeline* pipeline, bool is_indexed) const;
+    int HighlightSlotForDraw() const;
+    bool HighlightContinuesEarly(const GraphicsPipeline* pipeline) const;
+    bool HighlightGroupContinues(int slot) const;
+    void StartHighlightGroup(int slot, const GraphicsPipeline* pipeline, const RenderState& state);
+    void RecordHighlightMask(const GraphicsPipeline* pipeline, bool is_indexed, u32 num_indices,
+                             u32 num_instances, u32 first_vertex, u32 first_instance);
+    void FlushHighlightOutline();
     void UpdateViewportScissorState() const;
     void UpdateDepthStencilState() const;
     /// dcp: the squaring pipeline of a scaled MIN/MAX blend when this draw can use it.
@@ -343,6 +352,24 @@ private:
     u32 set_write_index{};
     Pipeline::DescriptorWrites set_writes;
     Shader::PushData push_data;
+
+    struct HighlightGroup {
+        bool active = false;
+        int slot = -1;
+        VideoCore::ImageId color{};
+        VideoCore::ImageId depth{};
+        RenderState target{};
+        vk::Format color_format = vk::Format::eUndefined;
+        vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1;
+        std::array<uint32_t, 4> color_swizzle = dcp::highlight::kIdentityColorSwizzle;
+        VAddr color_address{};
+        VAddr depth_address{};
+        VAddr atlas_address{};
+        CharacterHighlightMask::Extent* mask = nullptr;
+        bool clear_mask = true;
+    } highlight;
+    unsigned highlight_announced{};
+    CharacterHighlightMask highlight_mask;
 
     // dcp: bindings point at their description instead of copying it (a hot spot): into
     // image_desc_cache for memoized lookups (pinned for the current BindTextures call), else

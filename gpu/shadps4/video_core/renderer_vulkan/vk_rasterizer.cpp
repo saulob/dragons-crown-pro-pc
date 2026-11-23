@@ -3,6 +3,8 @@
 
 #include <chrono>
 #include <xxhash.h>
+#include "character_highlight.h"
+#include "character_highlight_draw.h"
 #include "dcp_amd_water_fix.h"
 #include "dcp_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -66,7 +68,8 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
       pipeline_cache{instance, scheduler, liverpool, buffer_cache.GetSparsePageShift()},
       host_markers_enabled{EmulatorSettings.IsVkHostMarkersEnabled()},
-      guest_markers_enabled{EmulatorSettings.IsVkGuestMarkersEnabled()} {
+      guest_markers_enabled{EmulatorSettings.IsVkGuestMarkersEnabled()},
+      highlight_mask{instance, scheduler} {
     // Before the rasterizer is bound: Liverpool enqueues buffers only once it sees it.
     draw_prep = std::make_unique<DrawPreparation>(pipeline_cache);
     scene_targets = std::make_unique<SceneTargets>(instance, scheduler, runtime, texture_cache);
@@ -299,6 +302,7 @@ static std::pair<u32, u32> GetDrawOffsets(
 }
 
 void Rasterizer::EliminateFastClear() {
+    FlushHighlightOutline();
     auto& col_buf = Regs().color_buffers[0];
     if (!col_buf || !col_buf.info.fast_clear) {
         return;
@@ -973,6 +977,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     }
     bind_prepared = used_prepared;
 
+    if (highlight.active && !HighlightContinuesEarly(pipeline)) {
+        FlushHighlightOutline();
+    }
     PrepareRenderState(pipeline);
     const PreparedDraw* draw_prepared = bind_prepared;
     // dcp: vertex and index buffers are resolved while the helper binds textures (their
@@ -988,7 +995,25 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (water_diag.Active()) {
         CaptureWaterDiagLayouts(pipeline);
     }
+    const int highlight_slot = HighlightSlotForDraw();
+    if (highlight.active && !HighlightGroupContinues(highlight_slot)) {
+        FlushHighlightOutline();
+    }
     const auto state = BeginRendering(pipeline);
+    if (highlight.active && (state.num_color_attachments == 0 || state.num_layers != 1)) {
+        FlushHighlightOutline();
+    } else if (highlight.active && (state.width != highlight.target.width ||
+                                   state.height != highlight.target.height)) {
+        highlight.target = state;
+        FlushHighlightOutline();
+    }
+    if (highlight_slot >= 0) {
+        if (highlight.active) {
+            highlight.target = state;
+        } else {
+            StartHighlightGroup(highlight_slot, pipeline, state);
+        }
+    }
     if (water_diag.Active()) {
         ReportWaterDiag(pipeline);
     }
@@ -1029,6 +1054,10 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const u32 first_vertex = vertex_offset;
     const u32 first_instance = instance_offset;
     const bool skip_water_reader = SkipsNarrowWaterReader(pipeline);
+    if (highlight.active && highlight.slot == highlight_slot && !skip_water_reader) {
+        RecordHighlightMask(pipeline, is_indexed, num_indices, num_instances, first_vertex,
+                            first_instance);
+    }
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         if (skip_water_reader) {
             return;
@@ -1101,6 +1130,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
 
 void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_indexed,
                                     const IndirectDraw& indirect) {
+    FlushHighlightOutline();
     if (DrawPipe::OnStageB()) {
         FrameCapture::Poll();
         scheduler.PopPendingOperations();
@@ -1205,6 +1235,7 @@ void Rasterizer::DispatchDirect() {
 }
 
 void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
+    FlushHighlightOutline();
     FrameCapture::Poll();
     scheduler.PopPendingOperations();
 
@@ -1272,6 +1303,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
 
 void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr address,
                                         u32 size) {
+    FlushHighlightOutline();
     scheduler.PopPendingOperations();
     const u32 offset = 0;
 
@@ -1304,6 +1336,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
 
 u64 Rasterizer::Flush() {
     DrainDrawPipe();
+    FlushHighlightOutline();
     const u64 current_tick = scheduler.CurrentTick();
     SubmitInfo info{};
     scheduler.Flush(info);
@@ -1312,6 +1345,7 @@ u64 Rasterizer::Flush() {
 
 void Rasterizer::Finish() {
     DrainDrawPipe();
+    FlushHighlightOutline();
     scheduler.Finish();
 }
 
@@ -2858,6 +2892,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
 }
 
 void Rasterizer::Resolve() {
+    FlushHighlightOutline();
     const auto& mrt0_hint = CbExtent(0);
     const auto& mrt1_hint = CbExtent(1);
     VideoCore::TextureCache::ImageDesc mrt0_desc{Regs().color_buffers[0], mrt0_hint};
@@ -2874,6 +2909,7 @@ void Rasterizer::Resolve() {
 }
 
 void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
+    FlushHighlightOutline();
     auto& regs = Regs();
 
     auto read_desc = VideoCore::TextureCache::ImageDesc(
@@ -2902,6 +2938,9 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 
 void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) {
     DrainDrawPipe();
+    if (IsGpuSideThread()) {
+        FlushHighlightOutline();
+    }
     ASSERT_MSG(address % 4 == 0 && num_bytes % 4 == 0,
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
@@ -2923,6 +2962,9 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
+    if (IsGpuSideThread()) {
+        FlushHighlightOutline();
+    }
     if (!dst_gds && !buffer_cache.IsRegionGpuModified(dst, num_bytes)) {
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
@@ -2963,6 +3005,9 @@ u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {
 
 bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
     DrainDrawPipe();
+    if (IsGpuSideThread()) {
+        FlushHighlightOutline();
+    }
     if (!IsMapped(addr, size)) {
         // Not GPU mapped memory, can skip invalidation logic entirely.
         return false;
@@ -2975,6 +3020,9 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
 
 bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
     DrainDrawPipe();
+    if (IsGpuSideThread()) {
+        FlushHighlightOutline();
+    }
     if (!InvalidateMemory(addr, 8, assume_locks)) {
         return false;
     }
@@ -2984,6 +3032,9 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
 
 bool Rasterizer::ReadMemory(VAddr addr, u64 size, bool assume_locks) {
     DrainDrawPipe();
+    if (IsGpuSideThread()) {
+        FlushHighlightOutline();
+    }
     if (!IsMapped(addr, size)) {
         // Not GPU mapped memory, can skip invalidation logic entirely.
         return false;
@@ -2998,6 +3049,9 @@ bool Rasterizer::ReadMemory(VAddr addr, u64 size, bool assume_locks) {
 
 void Rasterizer::ProcessDownloadImages() {
     DrainDrawPipe();
+    if (IsGpuSideThread()) {
+        FlushHighlightOutline();
+    }
     texture_cache.ProcessDownloadImages();
 }
 
@@ -3029,6 +3083,9 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     DrainDrawPipe();
+    if (IsGpuSideThread()) {
+        FlushHighlightOutline();
+    }
     buffer_cache.InvalidateMemory(addr, size);
     texture_cache.UnmapMemory(addr, size);
     {
@@ -3049,6 +3106,207 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool
                              instance.IsDynamicColorWriteMaskSupported(),
                              instance.IsAttachmentFeedbackLoopLayoutSupported(),
                              [&](auto&& command) { scheduler.Record(std::move(command)); });
+}
+
+int Rasterizer::HighlightSlotForDraw() const {
+    int slot = -1;
+    for (const VideoCore::ImageId id : bound_images) {
+        if (!id) {
+            continue;
+        }
+        const int next = character_highlight_slot_for_image(id.index);
+        if (next < 0) {
+            continue;
+        }
+        if (slot >= 0 && slot != next) {
+            return -1;
+        }
+        slot = next;
+    }
+    return slot;
+}
+
+bool Rasterizer::HighlightContinuesEarly(const GraphicsPipeline* pipeline) const {
+    const auto& regs = Regs();
+    const VAddr depth =
+        GetEffectiveDepthStencilState(regs).needs_attachment ? regs.depth_buffer.DepthAddress() : 0;
+    if (regs.color_buffers[0].Address() != highlight.color_address ||
+        depth != highlight.depth_address) {
+        return false;
+    }
+    if (!highlight.atlas_address) {
+        return true;
+    }
+    for (const Shader::Info* stage : pipeline->GetStages()) {
+        if (!stage) {
+            continue;
+        }
+        for (const auto& image : stage->images) {
+            const AmdGpu::Image sharp = image.GetSharp(*stage);
+            if (!sharp.Valid()) {
+                continue;
+            }
+            const VAddr address = sharp.Address();
+            if (address == highlight.atlas_address ||
+                character_highlight_slot_for_address(address) == highlight.slot) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool Rasterizer::HighlightGroupContinues(int slot) const {
+    return highlight.active && highlight.mask && slot >= 0 && slot == highlight.slot &&
+           cb_descs[0].first == highlight.color && db_desc.first == highlight.depth;
+}
+
+void Rasterizer::StartHighlightGroup(int slot, const GraphicsPipeline* pipeline,
+                                     const RenderState& state) {
+    highlight = {};
+    if (slot < 0 || state.num_color_attachments == 0 || state.num_layers != 1 ||
+        !cb_descs[0].first) {
+        return;
+    }
+    CharacterHighlightMask::Extent* extent = highlight_mask.Acquire(state.width, state.height);
+    if (!extent) {
+        return;
+    }
+    const auto& column = pipeline->GetGraphicsKey().color_buffers[0];
+    highlight.active = true;
+    highlight.slot = slot;
+    highlight.color = cb_descs[0].first;
+    highlight.depth = db_desc.first;
+    highlight.target = state;
+    highlight.color_format = instance.GetSupportedFormat(
+        LiverpoolToVK::SurfaceFormat(column.data_format, column.num_format),
+        vk::FormatFeatureFlagBits2::eColorAttachment);
+    const auto& key = pipeline->GetGraphicsKey();
+    highlight.samples = key.color_samples[0]
+                            ? LiverpoolToVK::NumSamples(key.color_samples[0],
+                                                        instance.GetColorSampleCounts())
+                            : vk::SampleCountFlagBits::e1;
+    for (size_t i = 0; i < highlight.color_swizzle.size(); ++i) {
+        highlight.color_swizzle[i] = static_cast<uint32_t>(column.swizzle.array[i]);
+    }
+    highlight.color_address = Regs().color_buffers[0].Address();
+    highlight.depth_address = db_desc.first ? Regs().depth_buffer.DepthAddress() : 0;
+    for (const VideoCore::ImageId id : bound_images) {
+        if (id && character_highlight_slot_for_image(id.index) == slot) {
+            highlight.atlas_address = texture_cache.GetImage(id).info.guest_address;
+            break;
+        }
+    }
+    highlight.mask = extent;
+    highlight.clear_mask = true;
+}
+
+void Rasterizer::RecordHighlightMask(const GraphicsPipeline* pipeline, bool is_indexed,
+                                     u32 num_indices, u32 num_instances, u32 first_vertex,
+                                     u32 first_instance) {
+    if (!highlight.mask) {
+        return;
+    }
+    const auto* fragment = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    if (fragment) {
+        for (const auto& image : fragment->images) {
+            if (image.is_written) {
+                return;
+            }
+        }
+        for (const auto& buffer : fragment->buffers) {
+            if (buffer.is_written) {
+                return;
+            }
+        }
+    }
+    const bool uses_depth = pipeline->HighlightMaskUsesDepth();
+    if (uses_depth && !highlight.target.depth_stencil_attachment.has_depth) {
+        return;
+    }
+    const vk::Pipeline mask_pipeline = pipeline->HighlightMaskPipeline();
+    if (!mask_pipeline) {
+        return;
+    }
+
+    scheduler.EndRendering();
+    highlight_mask.TransitionToAttachment(*highlight.mask);
+
+    RenderState mask_state{};
+    mask_state.width = highlight.target.width;
+    mask_state.height = highlight.target.height;
+    mask_state.num_layers = 1;
+    mask_state.num_color_attachments = 1;
+    mask_state.color_attachments[0] = {
+        .image_view = *highlight.mask->view,
+        .image_layout = vk::ImageLayout::eColorAttachmentOptimal,
+        .clear_value = {},
+        .is_clear = highlight.clear_mask ? 1u : 0u,
+    };
+    if (uses_depth) {
+        auto depth = highlight.target.depth_stencil_attachment;
+        depth.depth_clear = false;
+        depth.is_clear = depth.has_depth; // clear flags share the union: keep only has_depth
+        mask_state.depth_stencil_attachment = depth;
+    }
+    scheduler.BeginRendering(mask_state);
+
+    auto& dynamic_state = scheduler.GetDynamicState();
+    const bool depth_write = dynamic_state.depth_write_enabled;
+    const bool stencil_test = dynamic_state.stencil_test_enabled;
+    const ColorWriteMasks color_masks = dynamic_state.color_write_masks;
+    const bool dynamic_color_mask = instance.IsDynamicColorWriteMaskSupported();
+    ColorWriteMasks mask_masks{};
+    mask_masks[0] = vk::ColorComponentFlagBits::eA;
+    scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, mask_pipeline);
+        cmdbuf.setDepthWriteEnable(false);
+        cmdbuf.setStencilTestEnable(false);
+        if (dynamic_color_mask) {
+            cmdbuf.setColorWriteMaskEXT(0, mask_masks);
+        }
+        if (is_indexed) {
+            cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
+        } else {
+            cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
+        }
+    });
+
+    RenderState restore = highlight.target;
+    for (auto& attachment : restore.color_attachments) {
+        attachment.is_clear = 0;
+    }
+    restore.depth_stencil_attachment.depth_clear = false;
+    restore.depth_stencil_attachment.stencil_clear = false;
+    scheduler.BeginRendering(restore);
+    scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        cmdbuf.setDepthWriteEnable(depth_write);
+        cmdbuf.setStencilTestEnable(stencil_test);
+        if (dynamic_color_mask) {
+            cmdbuf.setColorWriteMaskEXT(0, color_masks);
+        }
+    });
+    highlight.clear_mask = false;
+}
+
+void Rasterizer::FlushHighlightOutline() {
+    if (!highlight.active) {
+        return;
+    }
+    if (highlight.mask && !highlight.clear_mask) {
+        const float pixels = dcp::highlight::OutlinePixels(highlight.target.height);
+        if (pixels > 0.0f &&
+            highlight_mask.Composite(highlight.target, highlight.color_format, highlight.samples,
+                                     *highlight.mask, highlight.slot, highlight.color_swizzle,
+                                     pixels)) {
+            const unsigned bit = 1u << std::min(highlight.slot, CHARACTER_HIGHLIGHT_PLAYERS - 1);
+            if ((highlight_announced & bit) == 0) {
+                std::printf("Character Highlight: outline active slot=%d\n", highlight.slot);
+                highlight_announced |= bit;
+            }
+        }
+    }
+    highlight = {};
 }
 
 void Rasterizer::UpdateViewportScissorState() const {

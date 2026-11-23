@@ -4,6 +4,7 @@
 #include <xxhash.h>
 #include "video_core/amdgpu/liverpool.h"
 
+#include "character_highlight.h"
 #include "dcp_amd_water_fix.h"
 #include "dcp_toggles.h"
 #include "common/assert.h"
@@ -1242,6 +1243,8 @@ void TextureCache::RegisterImage(ImageId image_id) {
                "Trying to register an already registered image");
     image.flags |= ImageFlagBits::Registered;
     ++registry_generation;
+    character_highlight_image_registered(image_id.index, image.info.guest_address, image.info.guest_size,
+                                         image.info.size.width, image.info.size.height);
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
@@ -1277,6 +1280,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
                "Trying to unregister an already unregistered image");
     image.flags &= ~ImageFlagBits::Registered;
     ++registry_generation;
+    character_highlight_image_unregistered(image_id.index);
     lru_cache.Free(image.lru_id);
     total_used_memory -= Common::AlignUp(image.info.guest_size, 1024);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {

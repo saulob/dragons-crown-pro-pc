@@ -101,6 +101,13 @@ static void touch_click(PadData *d, int right) {
 static DcpPadOwners owners;
 static int owners_ready;
 static int free_slot(void) { return dcp_pad_owners_free_slot(&owners); }
+
+int runtime_pad_player_of_instance(uint32_t instance) {
+    pthread_mutex_lock(&lock);
+    const int slot = owners_ready ? dcp_pad_owners_slot_of(&owners,instance) : -1;
+    pthread_mutex_unlock(&lock);
+    return slot;
+}
 /* Never logged: the path can carry a device serial on some platforms. */
 static uint64_t device_identity(SDL_JoystickID id) {
     uint64_t hash=1469598103934665603ull;

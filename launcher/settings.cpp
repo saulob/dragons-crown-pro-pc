@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "character_highlight_core.h"
 #include "dcp_keys.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
@@ -66,6 +67,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kTutorialSkipOfferKey, "0"},
     {kUnlockGalleryKey, "0"},
     {kEnableBossBattleKey, "0"},
+    {kControllerCharacterHighlightKey, "back+r3"},
     {kUnlockLabyrinthKey, "0"},
     {kUnlockUltimateTowerKey, "0"},
     {kOnlineEnabledKey, "0"},
@@ -141,6 +143,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (const std::string mouse_key(key); dcp_mouse_setting_key(mouse_key.c_str())) {
         return dcp_mouse_setting_value_valid(mouse_key.c_str(), std::string(value).c_str()) != 0;
+    }
+    if (key == kControllerCharacterHighlightKey) {
+        return highlight::ChordFromName(value) >= 0;
     }
     if (key == kDisplayModeKey) {
         return one_of({"windowed", "borderless"});

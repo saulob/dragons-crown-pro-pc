@@ -20,13 +20,11 @@ struct HostMemory {
     uint8_t U8(uint64_t address) const { return Load<uint8_t>(address); }
 };
 
-void (*g_listener)(uint64_t) = nullptr;
+void (*g_listeners[PARTY_HOOK_LISTENERS])(uint64_t) = {};
 
 void Record(uint64_t unit) {
     dcp::party::Observe(HostMemory{}, unit, dcp::party::NowMs(), dcp::party::SharedUnits());
-    if (g_listener) {
-        g_listener(unit);
-    }
+    party_hook_notify_listeners(unit);
 }
 
 void GUEST_HOOK_ABI PartyTickHook(GuestRegs* regs) {
@@ -64,8 +62,44 @@ extern "C" void party_hook_observe_unit(uint64_t unit) {
     Record(unit);
 }
 
-extern "C" void party_hook_set_unit_listener(void (*listener)(uint64_t unit)) {
-    g_listener = listener;
+extern "C" int party_hook_add_unit_listener(void (*listener)(uint64_t unit)) {
+    if (!listener) {
+        return 0;
+    }
+    for (auto* slot : g_listeners) {
+        if (slot == listener) {
+            return 0;
+        }
+    }
+    for (auto*& slot : g_listeners) {
+        if (!slot) {
+            slot = listener;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+extern "C" void party_hook_remove_unit_listener(void (*listener)(uint64_t unit)) {
+    for (auto*& slot : g_listeners) {
+        if (slot == listener) {
+            slot = nullptr;
+        }
+    }
+}
+
+extern "C" void party_hook_clear_unit_listeners(void) {
+    for (auto*& slot : g_listeners) {
+        slot = nullptr;
+    }
+}
+
+extern "C" void party_hook_notify_listeners(uint64_t unit) {
+    for (auto* listener : g_listeners) {
+        if (listener) {
+            listener(unit);
+        }
+    }
 }
 
 extern "C" int party_hook_install_located(uint8_t* image, uint64_t size, uint64_t entry, const DcpPartySites* sites,

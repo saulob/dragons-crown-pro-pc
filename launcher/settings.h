@@ -74,6 +74,8 @@ inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";
 inline constexpr char kUnlockGalleryKey[] = "unlock_gallery";
 // The Boss Battle row of the Dragon's Haven Inn menu (src/boss_battle.h); Off by default.
 inline constexpr char kEnableBossBattleKey[] = "enable_boss_battle";
+// The controller chord that toggles Character Highlight for the player its controller drives (src/character_highlight_core.h).
+inline constexpr char kControllerCharacterHighlightKey[] = "controller_character_highlight";
 // Labyrinth of Chaos, and Ultimate with Tower of Mirages, once the Stables are open (src/endgame_unlocks.h).
 inline constexpr char kUnlockLabyrinthKey[] = "unlock_labyrinth";
 inline constexpr char kUnlockUltimateTowerKey[] = "unlock_ultimate_tower";

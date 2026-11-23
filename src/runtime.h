@@ -57,6 +57,8 @@ void runtime_pad_set_settings(const char *settings_file);
 void runtime_pad_set_rumble(int enabled);
 /* 1 when the slot is Player 1 or has a live gamepad; 0 for a slot the game may drive with AI. */
 int runtime_pad_slot_human(int slot);
+/* The player (0..3) the controller with this SDL instance id drives, -1 when it has none. */
+int runtime_pad_player_of_instance(uint32_t instance);
 uintptr_t runtime_pad_resolve(const char *name);
 void runtime_pad_report(void);
 void runtime_sema_report(void);

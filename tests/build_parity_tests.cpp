@@ -1691,7 +1691,7 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
         CHECK(comms_bridge_install(online.data(), size, entry, &comms, stubs, comms_bridge_stub_bytes()) == 1);
         CHECK(comms_bridge_active() == 1 && online[comms.text_call] == 0xe9 && online[party.tick] == 0xe9);
         comms_bridge_attach(nullptr, nullptr);
-        party_hook_set_unit_listener(nullptr);
+        party_hook_clear_unit_listeners();
         result.quick_chat = party_found && g_failures == comms_before;
     }
 

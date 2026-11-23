@@ -362,6 +362,8 @@ use the same defaults).
 | `controller_rumble` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `controller_exit_shortcut` | 1, 0 | 1 | at game start; L1 + R1 + Options held 2 seconds on one controller closes the game |
 | `hotkey_exit_game` | a key name | `f9` | at game start; closes the game like the title's Exit Game row |
+| `hotkey_character_highlight` | a key name | `f7` | at game start; toggles Character Highlight for the primary local player |
+| `controller_character_highlight` | `back+r3`, `back+l3`, `l1+r3`, `r1+l3`, `off` | `back+r3` | at game start; this chord on a controller toggles Character Highlight for the player that controller drives |
 | `mouse_controls` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `unlock_gallery` | 1, 0 | 0 | at game start |
@@ -1078,3 +1080,7 @@ prompts, and with PlayStation (original) saved starts it with the original ones.
    Xbox.". Play: the tutorial and menus show A/B/X/Y, LB/RB, MENU and VIEW. Set PlayStation (original): the archives
    are back to their original size and the `.undo` files are gone. Reinstall the game with Xbox chosen: it is
    re-applied after the install.
+
+### Character Highlight
+
+A shortcut feature with no Gameplay setting. The key (**Port hotkeys**, F7 by default) toggles a colored outline around Player 1; the **Character Highlight** choice in **Controller shortcuts** (`View / Back + R3` by default, or `View / Back + L3`, `L1 + R3`, `R1 + L3`, Off) toggles it for the player the controller that pressed it drives. Every player starts Off in every session; the state is never saved. It is a local visual effect only, offline and online: it outlines the characters this client controls on this screen, is never sent to another client, and never outlines another player. The key toggles the primary local player (the first seat this client owns, which on an online guest can be the second party slot), a controller toggles the local player it drives. Colors follow the party slot: first red, second blue, third green, fourth yellow. Custom looks made with the Appearance Editor are recognised for the local players. The outline is matched by the character's exact atlas, so two local players with the same class and look cannot be told apart: that atlas is left without an outline and the log says `shared atlas ambiguous`.

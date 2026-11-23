@@ -1,5 +1,8 @@
 #include "boot_image.h"
 
+#include <cstdio>
+#include "atlas_signatures.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -840,6 +843,9 @@ void Build(const std::filesystem::path& game, const std::filesystem::path& out) 
     WriteFile(out / "boot.bin", boot.data(), boot.size());
     WriteFile(out / "image.json", json.data(), json.size());
     WriteFile(out / "content.bin", content.data(), content.size());
+    if (const std::string atlas = BuildAtlasSignatures(game, out); !atlas.empty()) {
+        std::fprintf(stderr, "Atlas signatures not written: %s\n", atlas.c_str());
+    }
 }
 
 } // namespace

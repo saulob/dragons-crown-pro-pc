@@ -60,6 +60,7 @@
 #include "online_view.h"
 #include "problem_dialog.h"
 #include "prompts_patch.h"
+#include "character_highlight_core.h"
 #include "settings.h"
 #include "shift_key.h"
 #include "text_languages.h"
@@ -216,6 +217,9 @@ constexpr char kBossBattleUnverifiedText[] = "Not available for this build yet: 
 constexpr char kEnableBossBattleHelp[] =
     "Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fights there never change campaign "
     "progress. Online, only the host needs this option; guests with a compatible version join automatically.";
+constexpr char kCharacterHighlightChordHelp[] =
+    "Highlights your locally controlled character on this screen only: the chord on a controller outlines the player it "
+    "drives, and again turns it off. Never shared online; every session starts with it off.";
 constexpr char kUnlockLabyrinthHelp[] =
     "Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.";
 constexpr char kUnlockUltimateTowerHelp[] =
@@ -1352,6 +1356,12 @@ private:
         if (ui.Section("Controller shortcuts", true)) {
             ui.Info("Options menu", "L3 + R3");
             ui.Toggle("Controller Exit Shortcut", kControllerExitShortcutHelp, kControllerExitShortcutKey, true, "Off", "On");
+            std::vector<trg::Option> chords;
+            for (const auto& chord : dcp::highlight::kChords) {
+                chords.push_back({chord.name, chord.label});
+            }
+            ui.Choice("Character Highlight", kCharacterHighlightChordHelp, dcp::highlight::kChordKey,
+                      dcp::highlight::kChords[dcp::highlight::kDefaultChord].name, chords);
         }
     }
 

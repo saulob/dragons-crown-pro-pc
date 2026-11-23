@@ -627,6 +627,12 @@ Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fight
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu opens. Fights there never change campaign progress. Online, only the host needs this option; guests with a compatible version join automatically.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. Vale a partir da próxima vez que o menu da taverna abrir. As lutas ali nunca alteram o progresso da campanha. Online, só o anfitrião precisa desta opção; convidados com versão compatível entram automaticamente.
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu opens. Fights there never change campaign progress. Online, only the host needs this option.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. Vale a partir da próxima vez que o menu da taverna abrir. As lutas ali nunca alteram o progresso da campanha. Online, só o anfitrião precisa desta opção.
 Boss Battle	Batalha de Chefes
+Character Highlight	Destaque do personagem
+View / Back + R3	View / Back + R3
+View / Back + L3	View / Back + L3
+L1 + R3	L1 + R3
+R1 + L3	R1 + L3
+Highlights your locally controlled character on this screen only: the chord on a controller outlines the player it drives, and again turns it off. Never shared online; every session starts with it off.	Destaca somente o personagem controlado localmente nesta tela: o atalho no controle contorna o jogador que ele controla, e de novo desliga. Nunca é compartilhado online; toda sessão começa desligada.
 Unlock Labyrinth of Chaos	Desbloquear Labirinto do Caos
 Unlock Ultimate + Tower of Mirages	Desbloquear Supremo + Torre das Miragens
 Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.	Abre o Labirinto do Caos assim que os Estábulos estiverem disponíveis. Andares, recompensas e progresso continuam sendo os do próprio jogo.

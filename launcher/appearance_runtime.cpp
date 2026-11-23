@@ -1,5 +1,7 @@
 #include "appearance_runtime.h"
 
+#include "character_highlight.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -273,6 +275,7 @@ std::optional<CustomOverlay> BuildCustomOverlay(const std::filesystem::path& arc
             error.clear();
             continue;
         }
+        character_highlight_add_custom_atlas(instance.entry.c_str(), int(klass), instance.instance.base, textures->atlas.data(), textures->atlas.size());
         added.emplace_back(instance.entry, std::move(textures->atlas));
         AppearanceInstance served{};
         std::memcpy(served.identity, instance.identity.data(), kCharIdentityBytes);

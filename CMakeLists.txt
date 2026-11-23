@@ -40,7 +40,8 @@ find_package(Freetype REQUIRED)
 find_package(Threads REQUIRED)
 
 # Keyboard and mouse bindings and the mouse and touch input state shared by the launcher, the runtime pad and the video core.
-add_library(dcp_keys STATIC src/dcp_keys.c src/dcp_mouse.c src/dcp_touchscreen.c src/dcp_pointer_motion.c src/dcp_pad_owner.c)
+add_library(dcp_keys STATIC src/character_highlight.cpp src/dcp_keys.c src/dcp_mouse.c src/dcp_touchscreen.c src/dcp_pointer_motion.c src/dcp_pad_owner.c)
+set_target_properties(dcp_keys PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp_keys PUBLIC src)
 target_link_libraries(dcp_keys PUBLIC SDL3::SDL3)
 target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
@@ -235,6 +236,12 @@ target_include_directories(dcp-simulate-crash-tests PRIVATE src)
 target_compile_definitions(dcp-simulate-crash-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-simulate-crash-tests PRIVATE -Wall -Wextra -Werror)
 
+# Character Highlight: setting, F7 hotkey, atlas signature table and the runtime image match (tools/test.ps1).
+add_executable(dcp-character-highlight-tests EXCLUDE_FROM_ALL tests/character_highlight_tests.cpp gpu/shim/dcp_settings.cpp)
+set_target_properties(dcp-character-highlight-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-character-highlight-tests PRIVATE src launcher tests gpu/shim)
+target_compile_definitions(dcp-character-highlight-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(dcp-character-highlight-tests PRIVATE dcp_launcher_core dcp_keys)
 add_executable(dcp-skip-intro-tests EXCLUDE_FROM_ALL tests/skip_intro_tests.c src/skip_intro.c src/guest_hook.c)
 target_include_directories(dcp-skip-intro-tests PRIVATE src)
 target_compile_definitions(dcp-skip-intro-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

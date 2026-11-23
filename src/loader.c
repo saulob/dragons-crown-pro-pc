@@ -22,6 +22,7 @@
 #include "appearance_hooks.h"
 #include "appearance_session.h"
 #include "endgame_unlocks.h"
+#include "character_highlight.h"
 #include "kraken_fix.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -640,6 +641,11 @@ static const char *command_line(int argc, char **argv) {
     return line;
 #endif
 }
+static uint32_t highlight_look(int slot, uint64_t record, int klass, int color, int owner) {
+    if (owner==1) return dcp_remote_appearance_of(slot,klass,color) ? CHARACTER_HIGHLIGHT_REMOTE_CUSTOM : CHARACTER_HIGHLIGHT_NATIVE_LOOK;
+    const AppearanceInstance *instance=appearance_instance_of_record(record,klass,color);
+    return instance && instance->entry[0] ? character_highlight_custom_key(instance->entry) : CHARACTER_HIGHLIGHT_NATIVE_LOOK;
+}
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     /* tools\build.ps1: the launcher's boot image builder on a prepared game folder, without starting anything. */
@@ -811,7 +817,14 @@ int main(int argc, char **argv) {
     runtime_pad_set_settings(settings_file);
     runtime_pad_set_rumble(dcp_controller_rumble(settings_file));
     runtime_cheats_set_slot_human(runtime_cheat_seat_human);
-    if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);
+    {
+        char atlas_table[4200];
+        snprintf(atlas_table,sizeof(atlas_table),"%s/atlas-signatures.txt",paths.image_dir);
+        character_highlight_set_look_resolver(highlight_look);
+        character_highlight_load_table(atlas_table);
+        character_highlight_set_forward(discord_presence ? party_hook_observe_unit : NULL);
+        runtime_cheats_set_player_observer(character_highlight_observe_unit);
+    }
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file), dcp_saved_damage_taken(settings_file),
@@ -1177,11 +1190,12 @@ int main(int argc, char **argv) {
         system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
                                  system_type_stub_bytes,runtime_online_system_type);
     if (known_build && runtime_online_active() && !runtime_cheats_hooks_wanted(1)) {
-        if (party_located)
-            party_hook_install_located(image,size,entry,&party_sites,
-                                       image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes,
-                                       party_stub_bytes);
-        else printf("Party: not reported, %s\n",party_failure);
+        if (party_located) {
+            if (party_hook_install_located(image,size,entry,&party_sites,
+                                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes,
+                                           party_stub_bytes))
+                party_hook_add_unit_listener(character_highlight_observe_local_unit);
+        } else printf("Party: not reported, %s\n",party_failure);
     }
     const int skip_intro_applied=skip_intro_install(image,size,entry,known_build ? build_key : NULL,skip_intro_requested,
                                                     image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes,
@@ -1240,7 +1254,7 @@ int main(int argc, char **argv) {
         if (!party_located) printf("Comms Wheel: not active, the player unit tick was not located\n");
         else if (!comms_bridge_locate(image,size,&comms_sites)) printf("Comms Wheel: not active, the greeting balloon was not located\n");
         else if (comms_bridge_install(image,size,entry,&comms_sites,image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area,comms_stub_area))
-            party_hook_set_unit_listener(comms_bridge_unit_tick);
+            party_hook_add_unit_listener(comms_bridge_unit_tick);
     }
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,
