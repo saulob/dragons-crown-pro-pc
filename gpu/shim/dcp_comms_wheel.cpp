@@ -215,10 +215,15 @@ void Draw(float display_width, float display_height, float ui_scale) {
 
 extern "C" void dcpgpu_comms_wheel_step(const DcpCommsPadIn* in, DcpCommsPadOut* out) {
     using namespace DcpCommsWheel;
+    static_assert(DCP_COMMS_PAD_BACK == dcp::comms::kPadBack);
+    static_assert(DCP_COMMS_PAD_L1 == dcp::comms::kPadL1);
+    static_assert(DCP_COMMS_PAD_R1 == dcp::comms::kPadR1);
+    static_assert(DCP_COMMS_PAD_DPAD_UP == dcp::comms::kPadDpadUp);
     Inputs inputs;
     inputs.now_ms = NowMs();
     inputs.available = in->available != 0;
-    inputs.pad_up = in->dpad_up != 0;
+    inputs.pad_buttons = in->pad_buttons;
+    inputs.controller_shortcut = DcpSettings::Get().comms_wheel_chord;
     inputs.stick_x = (static_cast<float>(in->right_x) - 128.0f) / 127.5f;
     inputs.stick_y = (static_cast<float>(in->right_y) - 128.0f) / 127.5f;
     inputs.circle = in->circle != 0;
@@ -237,6 +242,7 @@ extern "C" void dcpgpu_comms_wheel_step(const DcpCommsPadIn* in, DcpCommsPadOut*
     g_mouse.Read(inputs.mouse_x, inputs.mouse_y);
     const Outputs result = g_driver.Step(inputs);
     out->hide_dpad_up = result.hide_pad_up;
+    out->hide_pad_buttons = result.hide_pad_buttons;
     out->hide_cross = result.hide_confirm;
     out->hide_circle = result.hide_circle;
     out->neutral_right_stick = result.neutral_right_stick;

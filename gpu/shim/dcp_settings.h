@@ -74,6 +74,8 @@ struct Values {
         exit_key{SDL_SCANCODE_F9}, character_highlight_key{SDL_SCANCODE_F7};
     // Character Highlight: the controller chord (character_highlight_core.h kChords); the on/off state is per player and never saved.
     std::atomic<int> character_highlight_chord{0};
+    // Comms Wheel controller shortcut (dcp_comms.h kControllerShortcuts); default is View / Back + D-pad Up.
+    std::atomic<int> comms_wheel_chord{0};
     // Whether L1 + R1 + Options held for two seconds closes the game (src/dcp_exit_shortcut.h); read at start.
     std::atomic<bool> controller_exit_shortcut{true};
 };

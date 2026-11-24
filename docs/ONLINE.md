@@ -421,9 +421,12 @@ duration and Player 1 to 4 colour are the game's; only the text it carries is re
 in its own Menu & Subtitles language (`src/comms_text.c`, the same ten languages as Boss Battle), so an English player
 reads "Need help" while a Brazilian Portuguese player reads "Preciso de ajuda".
 
-- **Controller.** Press D-pad Up once: the wheel opens and stays open. Move the right stick to pick a sector (the pick
-  stays when the stick returns to the centre), press Cross (A) to send and close, or Circle (B) to close without sending.
-  While the wheel is open the game sees no D-pad Up, right stick, Cross or Circle.
+- **Controller.** Press the configured Controller Comms Wheel Shortcut (**View / Back + D-pad Up** by default; configurable
+  in Controls > Controller shortcuts to `View / Back + D-pad Up`, `L1 + D-pad Up`, `R1 + D-pad Up`, legacy `D-pad Up`, or
+  `Off`) once: the wheel opens and stays open. Bare D-pad directions pass to the game unchanged unless `D-pad Up` is
+  explicitly selected. Move the right stick to pick a sector (the pick stays when the stick returns to the centre), press
+  Cross (A) to send and close, or Circle (B) to close without sending. While the wheel is open the game sees no opener
+  buttons, D-pad Up, right stick, Cross or Circle.
 - **Keyboard and mouse.** Press the Comms Wheel key (T by default, rebindable in Controls) once: the wheel opens and stays
   open. Pick with the mouse or with the direction keys (the left and right stick keys, WASD and the arrows by default),
   send with the left mouse button or the Cross key, cancel with Escape or the right mouse button. While the wheel is open

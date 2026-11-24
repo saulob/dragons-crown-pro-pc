@@ -613,6 +613,13 @@ static int exit_game_accept_down(const PadData *d) {
  * owns the direction keys. */
 static void apply_comms_wheel(PadData *d) {
     SDL_Gamepad *g=slots[0].gamepad;
+    uint8_t pad_buttons=0;
+    if (g) {
+        if (SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_BACK)) pad_buttons|=DCP_COMMS_PAD_BACK;
+        if (SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) pad_buttons|=DCP_COMMS_PAD_L1;
+        if (SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) pad_buttons|=DCP_COMMS_PAD_R1;
+        if (SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_DPAD_UP)) pad_buttons|=DCP_COMMS_PAD_DPAD_UP;
+    }
     const bool *k=SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
     int nav=0;
     if (k) {
@@ -621,11 +628,17 @@ static void apply_comms_wheel(PadData *d) {
         nav|=(k[keys.scancode[DCP_KEY_LEFT_STICK_LEFT]] || k[keys.scancode[DCP_KEY_RIGHT_STICK_LEFT]]) ? 4 : 0;
         nav|=(k[keys.scancode[DCP_KEY_LEFT_STICK_RIGHT]] || k[keys.scancode[DCP_KEY_RIGHT_STICK_RIGHT]]) ? 8 : 0;
     }
-    const DcpCommsPadIn in={g && SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_DPAD_UP),comms_session_available(),
+    const DcpCommsPadIn in={pad_buttons,comms_session_available(),
                             d->right_x,d->right_y,(d->buttons & BTN_CIRCLE)!=0,(d->buttons & BTN_CROSS)!=0,nav};
     DcpCommsPadOut out;
     dcpgpu_comms_wheel_step(&in,&out);
     if (out.hide_dpad_up) d->buttons&=~BTN_UP;
+    if (out.hide_pad_buttons & DCP_COMMS_PAD_BACK) {
+        d->buttons&=~BTN_TOUCHPAD;
+        if (!pointer_owns_touch) { memset(d->touches,0,sizeof(d->touches)); d->touch_count=0; }
+    }
+    if (out.hide_pad_buttons & DCP_COMMS_PAD_L1) d->buttons&=~BTN_L1;
+    if (out.hide_pad_buttons & DCP_COMMS_PAD_R1) d->buttons&=~BTN_R1;
     if (out.hide_cross) d->buttons&=~BTN_CROSS;
     if (out.hide_circle) d->buttons&=~BTN_CIRCLE;
     if (out.neutral_right_stick) d->right_x=d->right_y=128;

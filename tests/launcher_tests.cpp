@@ -39,6 +39,7 @@
 #include "game_patches.h"
 #include "cpk_patch.h"
 #include "dcp_cheats.h"
+#include "dcp_comms.h"
 #include "dcp_launcher.h"
 #include "startup_phase.h"
 #include "dcp_graphics.h"
@@ -2603,6 +2604,63 @@ void TestControllerExitShortcutSettings(const fs::path& base) {
     // The runtime side is host-level: the setting comes from the video core's settings, no build, hook or locator.
     const std::string pad = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "runtime_pad.c");
     CHECK(pad.find("dcp_exit_chord_down(dcpgpu_controller_exit_shortcut(),") != std::string::npos);
+}
+
+void TestControllerCommsWheelShortcutSettings(const fs::path& base) {
+    const fs::path file = base / "controller_comms_wheel_DCP_TWGQWK" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kControllerCommsWheelKey && setting.default_value == "back+dpad_up";
+    }
+    CHECK(managed == 1 && std::string(kControllerCommsWheelKey) == dcp::comms::kControllerShortcutKey);
+    for (const auto& choice : dcp::comms::kControllerShortcuts) {
+        CHECK(IsValidSetting(kControllerCommsWheelKey, choice.name));
+    }
+    CHECK(!IsValidSetting(kControllerCommsWheelKey, "l3+r3") && !IsValidSetting(kControllerCommsWheelKey, "banana"));
+
+    // Old v1.4.0 config without controller_comms_wheel gets the safe default, not bare D-pad Up.
+    WriteAll(file, "hotkey_comms_wheel = t\n");
+    {
+        const LauncherSettings upgraded(file);
+        CHECK(upgraded.Get(kControllerCommsWheelKey, "back+dpad_up") == "back+dpad_up");
+    }
+    DcpSettings::Values upgraded_values;
+    CHECK(DcpSettings::Read(file.string(), upgraded_values) &&
+          upgraded_values.comms_wheel_chord == dcp::comms::kDefaultControllerShortcut);
+    {
+        LauncherSettings settings(file);
+        settings.Set(kControllerCommsWheelKey, "off");
+        CHECK(settings.Save());
+    }
+    CHECK(WrittenValue(ReadAll(file), kControllerCommsWheelKey, "off"));
+    {
+        const LauncherSettings reloaded(file);
+        CHECK(reloaded.Get(kControllerCommsWheelKey) == "off");
+    }
+    DcpSettings::Values values;
+    CHECK(DcpSettings::Read(file.string(), values) && values.comms_wheel_chord == dcp::comms::kControllerShortcutOff);
+    {
+        LauncherSettings settings(file);
+        ResetKeys(settings);
+        CHECK(settings.Get(kControllerCommsWheelKey) == "off");
+        settings.ResetToDefaults();
+        CHECK(settings.Get(kControllerCommsWheelKey) == "back+dpad_up");
+    }
+
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t section = launcher.find("ui.Section(\"Controller shortcuts\", true)");
+    const size_t row = launcher.find("ui.Choice(\"Controller Comms Wheel Shortcut\",", section);
+    CHECK(section != std::string::npos && row != std::string::npos && section < row);
+
+    const std::string portuguese = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    for (const char* line : {"Controller Comms Wheel Shortcut\tAtalho da roda de comunicação pelo controle\n",
+                             "View / Back + D-pad Up\tView / Back + Direcional cima\n",
+                             "L1 + D-pad Up\tL1 + Direcional cima\n",
+                             "R1 + D-pad Up\tR1 + Direcional cima\n",
+                             "D-pad Up\tDirecional cima\n"}) {
+        CHECK(portuguese.find(line) != std::string::npos);
+    }
 }
 
 void TestSkipOfferSettings(const fs::path& base) {
@@ -11274,6 +11332,7 @@ int main(int argc, char** argv) {
     TestSkipIntroSettings(base);
     TestControllerRumbleSettings(base);
     TestControllerExitShortcutSettings(base);
+    TestControllerCommsWheelShortcutSettings(base);
     TestUnlockGallerySettings(base);
     TestEnableBossBattleSettings(base);
     TestEndgameUnlockSettings(base);

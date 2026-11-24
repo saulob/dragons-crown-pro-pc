@@ -3,6 +3,7 @@
 #include "dcp_frame_pacing.h"
 #include "dcp_graphics.h"
 #include "character_highlight_core.h"
+#include "dcp_comms.h"
 #include "dcp_keys.h"
 #include "dcp_renderer.h"
 #include "dcp_voice.h"
@@ -121,6 +122,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.enable_boss_battle = ParseBool(value, v.enable_boss_battle);
     } else if (key == dcp::highlight::kChordKey) {
         if (const int chord = dcp::highlight::ChordFromName(value); chord >= 0) v.character_highlight_chord = chord;
+    } else if (key == dcp::comms::kControllerShortcutKey) {
+        if (const int chord = dcp::comms::ControllerShortcutFromName(value); chord >= 0) v.comms_wheel_chord = chord;
     } else if (key == "unlock_gallery") {
         v.unlock_gallery = ParseBool(value, v.unlock_gallery);
     } else if (key == "story_skip_offer") {

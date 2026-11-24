@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "character_highlight_core.h"
+#include "dcp_comms.h"
 #include "dcp_keys.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
@@ -68,6 +69,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kUnlockGalleryKey, "0"},
     {kEnableBossBattleKey, "0"},
     {kControllerCharacterHighlightKey, "back+r3"},
+    {kControllerCommsWheelKey, "back+dpad_up"},
     {kUnlockLabyrinthKey, "0"},
     {kUnlockUltimateTowerKey, "0"},
     {kOnlineEnabledKey, "0"},
@@ -146,6 +148,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     }
     if (key == kControllerCharacterHighlightKey) {
         return highlight::ChordFromName(value) >= 0;
+    }
+    if (key == kControllerCommsWheelKey) {
+        return comms::ControllerShortcutFromName(value) >= 0;
     }
     if (key == kDisplayModeKey) {
         return one_of({"windowed", "borderless"});

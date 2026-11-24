@@ -33,6 +33,7 @@
 #include "editor_page.h"
 #include "dcp_png.h"
 #include "dcp_cheats.h"
+#include "dcp_comms.h"
 #include "dcp_displays.h"
 #include "dcp_graphics.h"
 #include "dcp_resolution.h"
@@ -180,6 +181,8 @@ constexpr char kVoiceLanguageHelp[] =
 constexpr char kControllerRumbleHelp[] = "Off disables controller vibration. Applies at the next game start.";
 constexpr char kControllerExitShortcutHelp[] =
     "Hold L1 + R1 + Options for 2 seconds to close the game. Applies at the next game start.";
+constexpr char kControllerCommsWheelHelp[] =
+    "Opens the Comms Wheel in online rooms. Bare D-pad Up stays normal game input unless D-pad Up is selected. Applies at the next game start.";
 constexpr char kMouseControlsEnabledHelp[] = "Enables mouse buttons, wheel and pointer controls during gameplay.";
 constexpr char kMouseControlsHelp[] =
     "Used together with the keyboard and the controller while Mouse Controls is On. Each mouse button presses one "
@@ -1356,6 +1359,12 @@ private:
         if (ui.Section("Controller shortcuts", true)) {
             ui.Info("Options menu", "L3 + R3");
             ui.Toggle("Controller Exit Shortcut", kControllerExitShortcutHelp, kControllerExitShortcutKey, true, "Off", "On");
+            std::vector<trg::Option> comms_chords;
+            for (const auto& chord : dcp::comms::kControllerShortcuts) {
+                comms_chords.push_back({chord.name, chord.label});
+            }
+            ui.Choice("Controller Comms Wheel Shortcut", kControllerCommsWheelHelp, dcp::comms::kControllerShortcutKey,
+                      dcp::comms::kControllerShortcuts[dcp::comms::kDefaultControllerShortcut].name, comms_chords);
             std::vector<trg::Option> chords;
             for (const auto& chord : dcp::highlight::kChords) {
                 chords.push_back({chord.name, chord.label});

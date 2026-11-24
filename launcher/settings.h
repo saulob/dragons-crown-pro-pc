@@ -76,6 +76,8 @@ inline constexpr char kUnlockGalleryKey[] = "unlock_gallery";
 inline constexpr char kEnableBossBattleKey[] = "enable_boss_battle";
 // The controller chord that toggles Character Highlight for the player its controller drives (src/character_highlight_core.h).
 inline constexpr char kControllerCharacterHighlightKey[] = "controller_character_highlight";
+// The controller shortcut that opens the Comms Wheel in online rooms (src/dcp_comms.h).
+inline constexpr char kControllerCommsWheelKey[] = "controller_comms_wheel";
 // Labyrinth of Chaos, and Ultimate with Tower of Mirages, once the Stables are open (src/endgame_unlocks.h).
 inline constexpr char kUnlockLabyrinthKey[] = "unlock_labyrinth";
 inline constexpr char kUnlockUltimateTowerKey[] = "unlock_ultimate_tower";

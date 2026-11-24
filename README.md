@@ -100,7 +100,7 @@ Both players need **Online play** On. With it Off, the game runs offline exactly
 
 ### Comms Wheel (Quick Chat)
 
-- **Controller**: press **D-pad Up** to open the wheel, pick a message with the right stick, **Cross (A)** sends it and **Circle (B)** closes the wheel.
+- **Controller**: press **View / Back + D-pad Up** (configurable under Controls > Controller shortcuts, including **L1 + D-pad Up**, **R1 + D-pad Up**, legacy **D-pad Up**, or **Off**) to open the wheel, pick a message with the right stick, **Cross (A)** sends it and **Circle (B)** closes the wheel.
 - **Keyboard and mouse**: press **T** (rebindable on the Controls page), pick with the mouse or the direction keys, send with the left mouse button, cancel with Escape or the right mouse button.
 - It opens with Online Play on, in a room of at least two players. The message appears in the sender's greeting balloon, in each player's own Menu & Subtitles language. One message every 2 seconds per player.
 - Only a message number travels, never text. The online service counts how often each of the eight messages is used, with no player, room or time attached. See [docs/ONLINE.md](docs/ONLINE.md#comms-wheel).

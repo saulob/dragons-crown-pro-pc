@@ -28,7 +28,8 @@ inline constexpr uint64_t kVisibleMs = 250;
 struct Inputs {
     uint64_t now_ms = 0;
     bool available = false;
-    bool pad_up = false;
+    uint8_t pad_buttons = 0;
+    int controller_shortcut = dcp::comms::kDefaultControllerShortcut;
     float stick_x = 0.0f, stick_y = 0.0f; // right stick, down positive
     bool confirm = false;                 // Cross held, from the pad or its key
     bool circle = false;
@@ -40,6 +41,7 @@ struct Inputs {
 
 struct Outputs {
     bool hide_pad_up = false;
+    uint8_t hide_pad_buttons = 0;
     bool hide_confirm = false;
     bool hide_circle = false;
     bool neutral_right_stick = false;
@@ -74,7 +76,8 @@ public:
 
         dcp::comms::WheelInput wheel;
         wheel.available = in.available;
-        wheel.pad_up = in.pad_up;
+        wheel.pad_buttons = in.pad_buttons;
+        wheel.controller_shortcut = in.controller_shortcut;
         wheel.key_down = in.key_down;
         wheel.stick_x = in.stick_x;
         wheel.stick_y = in.stick_y;
@@ -90,6 +93,7 @@ public:
         Outputs result;
         result.send = out.send;
         result.hide_pad_up = out.hide_pad_up;
+        result.hide_pad_buttons = out.hide_pad_buttons;
         result.hide_confirm = out.hide_confirm;
         result.hide_circle = out.hide_cancel;
         result.neutral_right_stick = out.hide_right_stick;

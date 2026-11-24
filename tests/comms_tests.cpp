@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 
+#include "character_highlight_core.h"
 #include "comms_bridge.h"
 #include "comms_text.h"
 #include "dcp_comms.h"
+#include "dcp_pad_buttons.h"
 
 using namespace dcp::comms;
 
@@ -87,10 +89,10 @@ static void TestSectors() {
     }
 }
 
-static WheelInput Pad(bool up, float x = 0, float y = 0, bool available = true) {
+static WheelInput Pad(bool chord_down, float x = 0, float y = 0, bool available = true) {
     WheelInput in;
     in.available = available;
-    in.pad_up = up;
+    in.pad_buttons = chord_down ? static_cast<uint8_t>(kPadBack | kPadDpadUp) : 0;
     in.stick_x = x;
     in.stick_y = y;
     return in;
@@ -169,7 +171,7 @@ static void TestControllerCancelAndEmptyConfirm() {
     WheelInput open = Pad(true);
     open.confirm_held = open.cancel_held = true;
     held.Step(open);
-    open.pad_up = false;
+    open.pad_buttons = 0;
     open.stick_y = -1;
     out = held.Step(open);
     CHECK(out.open && out.selected == 0);
@@ -691,6 +693,114 @@ static void TestLocateRealImages() {
     }
 }
 
+static void TestControllerShortcutDCP_TWGQWK() {
+    // Default is a safe chord, not bare D-pad Up.
+    const ControllerShortcut& def = ControllerShortcutAt(kDefaultControllerShortcut);
+    CHECK(std::string(def.name) == "back+dpad_up");
+    CHECK(def.modifier != PadButton::kNone && def.trigger == PadButton::kDpadUp);
+    CHECK(ShortcutMask(kDefaultControllerShortcut) == static_cast<uint8_t>(kPadBack | kPadDpadUp));
+    CHECK(ControllerShortcutFromName("back+dpad_up") == kDefaultControllerShortcut);
+    CHECK(ControllerShortcutFromName("dpad_up") == kControllerShortcutLegacyDpadUp);
+    CHECK(ControllerShortcutFromName("off") == kControllerShortcutOff);
+    CHECK(ControllerShortcutFromName("banana") == -1);
+
+    // Plain D-pad Up/Down/Left/Right pass through unchanged while closed under the default shortcut.
+    WheelController wheel;
+    WheelInput dpad_up;
+    dpad_up.available = true;
+    dpad_up.pad_buttons = kPadDpadUp;
+    WheelOutput out = wheel.Step(dpad_up);
+    CHECK(!out.open && !out.hide_pad_up && out.hide_pad_buttons == 0 && !out.hide_confirm && !out.hide_cancel &&
+          !out.hide_right_stick);
+
+    // Simulate all four D-pad directions passing through PadData bits while closed.
+    for (const uint32_t dir : {BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT}) {
+        uint32_t buttons = dir;
+        WheelInput in;
+        in.available = true;
+        in.pad_buttons = (dir == BTN_UP) ? kPadDpadUp : 0;
+        const WheelOutput step = wheel.Step(in);
+        if (step.hide_pad_up) buttons &= ~BTN_UP;
+        CHECK(!step.open && buttons == dir);
+    }
+
+    // Configured safe chord opens the wheel, hides opener buttons, and is edge-triggered.
+    WheelInput chord;
+    chord.available = true;
+    chord.pad_buttons = static_cast<uint8_t>(kPadBack | kPadDpadUp);
+    out = wheel.Step(chord);
+    CHECK(out.open && out.source == Source::kController && out.hide_pad_up &&
+          out.hide_pad_buttons == static_cast<uint8_t>(kPadBack | kPadDpadUp));
+
+    // Holding the chord while cancelling does not immediately reopen the wheel.
+    WheelInput cancel_while_held = chord;
+    cancel_while_held.cancel_held = true;
+    out = wheel.Step(cancel_while_held);
+    CHECK(!out.open && out.hide_pad_up && out.hide_pad_buttons == static_cast<uint8_t>(kPadBack | kPadDpadUp));
+    out = wheel.Step(chord);
+    CHECK(!out.open && out.hide_pad_up && out.hide_pad_buttons == static_cast<uint8_t>(kPadBack | kPadDpadUp));
+
+    // Releasing only one button does not re-arm; releasing both re-arms and allows a new activation.
+    WheelInput partial;
+    partial.available = true;
+    partial.pad_buttons = kPadBack;
+    out = wheel.Step(partial);
+    CHECK(!out.open && !out.hide_pad_up && out.hide_pad_buttons == kPadBack);
+    out = wheel.Step(chord);
+    CHECK(!out.open);
+    WheelInput released;
+    released.available = true;
+    out = wheel.Step(released);
+    CHECK(!out.open && !out.hide_pad_up && out.hide_pad_buttons == 0);
+    out = wheel.Step(chord);
+    CHECK(out.open && out.source == Source::kController);
+
+    // Already held before becoming available does not accidentally open when available turns true.
+    WheelController preheld;
+    WheelInput before = chord;
+    before.available = false;
+    CHECK(!preheld.Step(before).open);
+    CHECK(!preheld.Step(chord).open);
+    CHECK(!preheld.Step(released).open);
+    CHECK(preheld.Step(chord).open);
+
+    // Off prevents any controller input from opening Comms Wheel; keyboard Comms Wheel still works.
+    WheelController off_wheel;
+    WheelInput off_in;
+    off_in.available = true;
+    off_in.controller_shortcut = kControllerShortcutOff;
+    off_in.pad_buttons = static_cast<uint8_t>(kPadBack | kPadL1 | kPadR1 | kPadDpadUp);
+    out = off_wheel.Step(off_in);
+    CHECK(!out.open && !out.hide_pad_up && out.hide_pad_buttons == 0);
+    off_in.key_down = true;
+    out = off_wheel.Step(off_in);
+    CHECK(out.open && out.source == Source::kKeyboard);
+
+    // Legacy D-pad Up opens only when explicitly selected.
+    WheelController legacy;
+    WheelInput legacy_in;
+    legacy_in.available = true;
+    legacy_in.controller_shortcut = kControllerShortcutLegacyDpadUp;
+    legacy_in.pad_buttons = kPadDpadUp;
+    out = legacy.Step(legacy_in);
+    CHECK(out.open && out.source == Source::kController && out.hide_pad_up && out.hide_pad_buttons == kPadDpadUp);
+
+    // Buttons from two different controllers never combine into one chord.
+    const std::array<uint8_t, 2> split_pads = {kPadBack, kPadDpadUp};
+    CHECK(!AnyControllerHoldsShortcut(kDefaultControllerShortcut, split_pads));
+    const std::array<uint8_t, 2> same_pad = {static_cast<uint8_t>(kPadBack | kPadDpadUp), 0};
+    CHECK(AnyControllerHoldsShortcut(kDefaultControllerShortcut, same_pad));
+
+    // Character Highlight chords remain independent of Comms Wheel shortcuts.
+    for (const auto& hl_chord : dcp::highlight::kChords) {
+        if (std::string(hl_chord.name) == "off") continue;
+        for (const auto& comms_chord : kControllerShortcuts) {
+            CHECK(std::string(hl_chord.name) != std::string(comms_chord.name));
+        }
+    }
+    std::printf("DCP-TWGQWK core shortcut regression passed\n");
+}
+
 int main() {
     TestIds();
     TestLayout();
@@ -698,6 +808,7 @@ int main() {
     TestControllerLatches();
     TestHeldOpenerStaysHidden();
     TestControllerCancelAndEmptyConfirm();
+    TestControllerShortcutDCP_TWGQWK();
     TestKeyboardLatches();
     TestKeyboardCancel();
     TestKeyboardNavigation();

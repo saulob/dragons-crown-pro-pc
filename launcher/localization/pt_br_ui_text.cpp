@@ -354,6 +354,12 @@ Exit Game	Sair do jogo
 Controller shortcuts	Atalhos do controle
 Controller Exit Shortcut	Atalho de saída pelo controle
 Hold L1 + R1 + Options for 2 seconds to close the game. Applies at the next game start.	Segure L1 + R1 + Options por 2 segundos para fechar o jogo. Vale a partir do próximo início do jogo.
+Controller Comms Wheel Shortcut	Atalho da roda de comunicação pelo controle
+Opens the Comms Wheel in online rooms. Bare D-pad Up stays normal game input unless D-pad Up is selected. Applies at the next game start.	Abre a roda de comunicação em salas online. O direcional para cima sozinho continua sendo comando normal do jogo, a menos que Direcional cima seja selecionado. Vale a partir do próximo início do jogo.
+View / Back + D-pad Up	View / Back + Direcional cima
+L1 + D-pad Up	L1 + Direcional cima
+R1 + D-pad Up	R1 + Direcional cima
+D-pad Up	Direcional cima
 This open source PC port is maintained and developed in my free time. If you enjoy the project and would like to support its continued development, you can sponsor my work on GitHub.	Este port para PC de código aberto é mantido e desenvolvido no meu tempo livre. Se você gosta do projeto e quer apoiar seu desenvolvimento contínuo, pode patrocinar meu trabalho pelo GitHub.
 Support is completely optional and helps support ongoing improvements and future projects.	O apoio é totalmente opcional e ajuda no desenvolvimento de melhorias e novos projetos.
 Dragon's Crown Pro for PlayStation 4, running natively on this PC. The game itself is not included; it runs from the user's own copy.	Dragon's Crown Pro para PlayStation 4, rodando nativamente neste PC. O jogo em si não está incluído; ele roda a partir da cópia do próprio usuário.

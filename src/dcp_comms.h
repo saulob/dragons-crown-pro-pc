@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 namespace dcp::comms {
 
@@ -71,35 +72,108 @@ constexpr bool WheelAvailable(bool online_enabled, int room_members, bool bridge
     return online_enabled && room_members >= kMinPlayers && bridge_active && own_unit_running;
 }
 
-// Modal input: one press of D-pad Up (controller) or of the wheel key (keyboard) opens the wheel and it stays open until
-// a message is confirmed or the wheel is cancelled. The controller picks with the right stick and confirms with Cross; the
-// keyboard picks with the mouse or the direction keys and confirms with the left mouse button or the Cross key.
+// Modal input: one press of the configured controller shortcut or of the wheel key opens the wheel until confirmed or cancelled.
 enum class Source : uint8_t { kNone, kController, kKeyboard };
+
+enum class PadButton : uint8_t { kNone, kBack, kLeftShoulder, kRightShoulder, kDpadUp };
+
+inline constexpr uint8_t kPadBack = 1u << 0;
+inline constexpr uint8_t kPadL1 = 1u << 1;
+inline constexpr uint8_t kPadR1 = 1u << 2;
+inline constexpr uint8_t kPadDpadUp = 1u << 3;
+
+struct ControllerShortcut {
+    const char* name;
+    const char* label;
+    PadButton modifier;
+    PadButton trigger;
+};
+
+inline constexpr std::array<ControllerShortcut, 5> kControllerShortcuts = {{
+    {"back+dpad_up", "View / Back + D-pad Up", PadButton::kBack, PadButton::kDpadUp},
+    {"l1+dpad_up", "L1 + D-pad Up", PadButton::kLeftShoulder, PadButton::kDpadUp},
+    {"r1+dpad_up", "R1 + D-pad Up", PadButton::kRightShoulder, PadButton::kDpadUp},
+    {"dpad_up", "D-pad Up", PadButton::kNone, PadButton::kDpadUp},
+    {"off", "Off", PadButton::kNone, PadButton::kNone},
+}};
+inline constexpr char kControllerShortcutKey[] = "controller_comms_wheel";
+inline constexpr int kDefaultControllerShortcut = 0;
+inline constexpr int kControllerShortcutLegacyDpadUp = 3;
+inline constexpr int kControllerShortcutOff = 4;
+
+inline int ControllerShortcutFromName(std::string_view name) {
+    for (size_t i = 0; i < kControllerShortcuts.size(); ++i) {
+        if (name == kControllerShortcuts[i].name) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+constexpr const ControllerShortcut& ControllerShortcutAt(int index) {
+    if (index < 0 || static_cast<size_t>(index) >= kControllerShortcuts.size()) {
+        return kControllerShortcuts[static_cast<size_t>(kDefaultControllerShortcut)];
+    }
+    return kControllerShortcuts[static_cast<size_t>(index)];
+}
+
+constexpr uint8_t PadButtonBit(PadButton button) {
+    switch (button) {
+    case PadButton::kNone: return 0;
+    case PadButton::kBack: return kPadBack;
+    case PadButton::kLeftShoulder: return kPadL1;
+    case PadButton::kRightShoulder: return kPadR1;
+    case PadButton::kDpadUp: return kPadDpadUp;
+    }
+    return 0;
+}
+
+constexpr uint8_t ShortcutMask(int shortcut) {
+    const ControllerShortcut& s = ControllerShortcutAt(shortcut);
+    return static_cast<uint8_t>(PadButtonBit(s.modifier) | PadButtonBit(s.trigger));
+}
+
+constexpr bool ShortcutActive(int shortcut, uint8_t pad_buttons) {
+    const uint8_t mask = ShortcutMask(shortcut);
+    return mask != 0 && (pad_buttons & mask) == mask;
+}
+
+template <size_t N>
+constexpr bool AnyControllerHoldsShortcut(int shortcut, const std::array<uint8_t, N>& pads) {
+    for (const uint8_t pad : pads) {
+        if (ShortcutActive(shortcut, pad)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 inline constexpr uint8_t kNavUp = 1, kNavDown = 2, kNavLeft = 4, kNavRight = 8;
 
 struct WheelInput {
-    bool available = false;   // an online room of at least two players, no modal game UI
-    bool pad_up = false;      // D-pad Up held
-    bool key_down = false;    // the wheel key held
-    float stick_x = 0.0f, stick_y = 0.0f; // right stick, screen coordinates
-    float mouse_x = 0.0f, mouse_y = 0.0f; // mouse offset from the wheel centre, same units
-    uint8_t nav = 0;          // direction keys held (kNav*)
-    bool confirm_held = false; // Cross held, from the pad or its key
-    bool cancel_held = false;  // Circle held
-    bool click = false;       // left mouse button pressed since the last step
-    bool cancel_click = false; // Escape or right mouse button pressed since the last step
+    bool available = false;
+    uint8_t pad_buttons = 0;
+    int controller_shortcut = kDefaultControllerShortcut;
+    bool key_down = false;
+    float stick_x = 0.0f, stick_y = 0.0f;
+    float mouse_x = 0.0f, mouse_y = 0.0f;
+    uint8_t nav = 0;
+    bool confirm_held = false;
+    bool cancel_held = false;
+    bool click = false;
+    bool cancel_click = false;
 };
 
 struct WheelOutput {
     bool open = false;
-    int selected = -1; // sector, -1 for none
-    int send = -1;     // message id to send now
+    int selected = -1;
+    int send = -1;
     bool hide_pad_up = false;
+    uint8_t hide_pad_buttons = 0;
     bool hide_confirm = false;
     bool hide_cancel = false;
     bool hide_right_stick = false;
-    bool hide_keyboard_axes = false; // the keyboard session owns the direction keys
+    bool hide_keyboard_axes = false;
     Source source = Source::kNone;
 };
 
@@ -108,9 +182,16 @@ public:
     explicit WheelController(float dead_zone = kStickDeadZone) : dead_zone_(dead_zone) {}
 
     WheelOutput Step(const WheelInput& in) {
-        const bool pad_pressed = in.pad_up && !prev_pad_up_;
+        const uint8_t chord_mask = ShortcutMask(in.controller_shortcut);
+        const uint8_t held_chord = static_cast<uint8_t>(in.pad_buttons & chord_mask);
+        const bool chord_down = chord_mask != 0 && held_chord == chord_mask;
+        const bool pad_pressed = pad_armed_ && chord_down;
+        if (chord_down) {
+            pad_armed_ = false;
+        } else if (held_chord == 0) {
+            pad_armed_ = true;
+        }
         const bool key_pressed = in.key_down && !prev_key_down_;
-        prev_pad_up_ = in.pad_up;
         prev_key_down_ = in.key_down;
 
         WheelOutput out;
@@ -121,7 +202,8 @@ public:
             }
             Open(pad_pressed ? Source::kController : Source::kKeyboard, in);
             if (source_ == Source::kController) {
-                held_pad_up_ = true;
+                held_pad_up_ = (chord_mask & kPadDpadUp) != 0;
+                held_pad_buttons_ = chord_mask;
             }
         } else if (!in.available) {
             Close();
@@ -158,6 +240,7 @@ public:
         source_ = Source::kNone;
         selected_ = -1;
         held_pad_up_ = held_cross_ = held_circle_ = false;
+        held_pad_buttons_ = 0;
     }
 
 private:
@@ -204,6 +287,7 @@ private:
     WheelOutput Hidden(WheelOutput out) const {
         const bool open = source_ != Source::kNone;
         out.hide_pad_up = open || held_pad_up_;
+        out.hide_pad_buttons = held_pad_buttons_;
         out.hide_confirm = open || held_cross_;
         out.hide_cancel = open || held_circle_;
         return out;
@@ -211,7 +295,8 @@ private:
 
     // A button the wheel took stays hidden from the game until it is let go.
     void Release(const WheelInput& in) {
-        held_pad_up_ = held_pad_up_ && in.pad_up;
+        held_pad_up_ = held_pad_up_ && ((in.pad_buttons & kPadDpadUp) != 0);
+        held_pad_buttons_ = static_cast<uint8_t>(held_pad_buttons_ & in.pad_buttons);
         held_cross_ = held_cross_ && in.confirm_held;
         held_circle_ = held_circle_ && in.cancel_held;
     }
@@ -219,8 +304,9 @@ private:
     Source source_ = Source::kNone;
     int selected_ = -1;
     int last_stick_ = -1, last_mouse_ = -1;
-    bool prev_pad_up_ = false, prev_key_down_ = false, prev_confirm_ = false, prev_cancel_ = false;
+    bool pad_armed_ = true, prev_key_down_ = false, prev_confirm_ = false, prev_cancel_ = false;
     bool held_pad_up_ = false, held_cross_ = false, held_circle_ = false;
+    uint8_t held_pad_buttons_ = 0;
     uint8_t prev_nav_ = 0;
     float dead_zone_;
 };
