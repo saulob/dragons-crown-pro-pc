@@ -895,9 +895,19 @@ The character's name, up to 8 letters.	O nome do personagem, ate 8 letras.
 Level	Nivel
 Skill Points	Pontos de habilidade
 Skill points available to spend.	Pontos de habilidade disponiveis para gastar.
+Gold	Ouro
+Gold belongs to this save data	Ouro pertence a este save
+Stats	Atributos
 Current HP	HP atual
 Current hit points; at most the maximum.	Pontos de vida atuais; no maximo o maximo.
 Maximum hit points.	Pontos de vida maximos.
+STR (Strength)	STR (Força)
+CON (Constitution)	CON (Constituição)
+DEX (Dexterity)	DEX (Destreza)
+INT (Intelligence)	INT (Inteligência)
+MGR (Magic Resistance)	MGR (Resistência Mágica)
+LUC (Luck)	LUC (Sorte)
+Could not write the character stats; nothing was applied.	Não foi possível gravar os atributos do personagem; nada foi aplicado.
 Difficulty	Dificuldade
 Difficulty belongs to this character and can be changed here	A dificuldade pertence a este personagem e pode ser alterada aqui
 Normal	Normal

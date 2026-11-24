@@ -117,34 +117,35 @@ bool Restore(const std::filesystem::path& path, const std::optional<std::vector<
     return store.Parse(*previous) && store.Save();
 }
 
-bool RestoreHp(const std::filesystem::path& path, const std::optional<std::vector<uint8_t>>& previous) {
+bool RestoreOverrides(const std::filesystem::path& path, const std::optional<std::vector<uint8_t>>& previous) {
     std::error_code ec;
     if (!previous) {
         std::filesystem::remove(path, ec);
         return !std::filesystem::exists(path, ec);
     }
-    HpOverrideStore store(path);
+    CharacterOverrideStore store(path);
     return store.Parse(*previous) && store.Save();
 }
 
 } // namespace
 
 ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved,
-                      const HpOverrideStore* hp_working, HpOverrideStore* hp_saved) {
+                      const CharacterOverrideStore* override_working, CharacterOverrideStore* override_saved) {
     ApplyOutcome outcome;
     const bool custom_dirty = !(working == saved);
-    const bool hp_dirty = hp_working && hp_saved && !(*hp_working == *hp_saved);
+    const bool override_dirty = override_working && override_saved && !(*override_working == *override_saved);
     const std::optional<std::vector<uint8_t>> prev_custom = custom_dirty ? Snapshot(saved.path()) : std::nullopt;
-    const std::optional<std::vector<uint8_t>> prev_hp = hp_dirty ? Snapshot(hp_saved->path()) : std::nullopt;
+    const std::optional<std::vector<uint8_t>> prev_override =
+        override_dirty ? Snapshot(override_saved->path()) : std::nullopt;
     auto rollback = [&]() {
         bool ok = true;
         if (outcome.custom_written) {
             ok &= Restore(saved.path(), prev_custom);
             outcome.custom_written = false;
         }
-        if (outcome.hp_written) {
-            ok &= RestoreHp(hp_saved->path(), prev_hp);
-            outcome.hp_written = false;
+        if (outcome.override_written) {
+            ok &= RestoreOverrides(override_saved->path(), prev_override);
+            outcome.override_written = false;
         }
         outcome.rolled_back = ok;
     };
@@ -155,18 +156,18 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
         }
         outcome.custom_written = true;
     }
-    if (hp_dirty) {
-        if (!hp_working->Save()) {
-            outcome.hp_failed = true;
+    if (override_dirty) {
+        if (!override_working->Save()) {
+            outcome.override_failed = true;
             if (outcome.custom_written) rollback();
             return outcome;
         }
-        outcome.hp_written = true;
+        outcome.override_written = true;
     }
     if (edit && edit->dirty()) {
         outcome.save = edit->Apply();
         if (outcome.save != SaveEdit::Result::kApplied) {
-            if (outcome.custom_written || outcome.hp_written) rollback();
+            if (outcome.custom_written || outcome.override_written) rollback();
             return outcome;
         }
     }
@@ -178,12 +179,12 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
             outcome.custom_failed = true;
         }
     }
-    if (hp_dirty) {
-        HpOverrideStore reread(hp_saved->path());
-        if (reread.Load() && reread == *hp_working) {
-            *hp_saved = *hp_working;
+    if (override_dirty) {
+        CharacterOverrideStore reread(override_saved->path());
+        if (reread.Load() && reread == *override_working) {
+            *override_saved = *override_working;
         } else {
-            outcome.hp_failed = true;
+            outcome.override_failed = true;
         }
     }
     return outcome;

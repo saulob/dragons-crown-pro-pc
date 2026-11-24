@@ -98,6 +98,7 @@ inline constexpr NumberRange kGoldRange{0, int(kMaxGold)};
 inline constexpr NumberRange kLevelRange{kMinLevel, kMaxLevel};
 inline constexpr NumberRange kSkillPointRange{0, kMaxSkillPoints};
 inline constexpr NumberRange kHpRange{0, kMaxHp};
+inline constexpr NumberRange kCharacterStatRange{0, kMaxCharacterStat};
 
 int ClampNumber(int value, NumberRange range);
 // The value a drag of `pixels` from `anchor` reaches at one unit per pixel, kept inside the range.

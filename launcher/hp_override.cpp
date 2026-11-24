@@ -8,7 +8,9 @@ namespace dcp {
 namespace {
 
 constexpr uint32_t kMagic = 0x4F484344; // "DCHO"
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2;
+constexpr uint32_t kVersionHpOnly = 1;
+constexpr size_t kStoredValues = 7;
 
 void Put16(std::vector<uint8_t>& out, uint16_t value) {
     out.push_back(uint8_t(value));
@@ -104,14 +106,81 @@ bool WriteAtomic(const std::filesystem::path& path, const std::vector<uint8_t>& 
     return !ec;
 }
 
+uint16_t FieldValue(const CharacterOverride& entry, size_t index) {
+    switch (index) {
+    case 0: return entry.max_hp;
+    case 1: return entry.strength;
+    case 2: return entry.constitution;
+    case 3: return entry.dexterity;
+    case 4: return entry.intelligence;
+    case 5: return entry.magic_resistance;
+    default: return entry.luck;
+    }
+}
+
+void SetFieldValue(CharacterOverride& entry, size_t index, uint16_t value) {
+    switch (index) {
+    case 0: entry.max_hp = value; break;
+    case 1: entry.strength = value; break;
+    case 2: entry.constitution = value; break;
+    case 3: entry.dexterity = value; break;
+    case 4: entry.intelligence = value; break;
+    case 5: entry.magic_resistance = value; break;
+    default: entry.luck = value; break;
+    }
+}
+
 } // namespace
 
-std::filesystem::path HpOverrideStorePath(const std::filesystem::path& user_dir) {
+uint16_t CharacterOverride::Value(uint16_t field) const {
+    switch (field) {
+    case CHARACTER_OVERRIDE_MAX_HP: return max_hp;
+    case CHARACTER_OVERRIDE_STRENGTH: return strength;
+    case CHARACTER_OVERRIDE_CONSTITUTION: return constitution;
+    case CHARACTER_OVERRIDE_DEXTERITY: return dexterity;
+    case CHARACTER_OVERRIDE_INTELLIGENCE: return intelligence;
+    case CHARACTER_OVERRIDE_MAGIC_RESISTANCE: return magic_resistance;
+    default: return luck;
+    }
+}
+
+void CharacterOverride::Set(uint16_t field, uint16_t value) {
+    present |= field;
+    switch (field) {
+    case CHARACTER_OVERRIDE_MAX_HP: max_hp = value; break;
+    case CHARACTER_OVERRIDE_STRENGTH: strength = value; break;
+    case CHARACTER_OVERRIDE_CONSTITUTION: constitution = value; break;
+    case CHARACTER_OVERRIDE_DEXTERITY: dexterity = value; break;
+    case CHARACTER_OVERRIDE_INTELLIGENCE: intelligence = value; break;
+    case CHARACTER_OVERRIDE_MAGIC_RESISTANCE: magic_resistance = value; break;
+    default: luck = value; break;
+    }
+}
+
+void CharacterOverride::Clear(uint16_t field) {
+    present &= uint16_t(~field);
+    switch (field) {
+    case CHARACTER_OVERRIDE_MAX_HP: max_hp = 0; break;
+    case CHARACTER_OVERRIDE_STRENGTH: strength = 0; break;
+    case CHARACTER_OVERRIDE_CONSTITUTION: constitution = 0; break;
+    case CHARACTER_OVERRIDE_DEXTERITY: dexterity = 0; break;
+    case CHARACTER_OVERRIDE_INTELLIGENCE: intelligence = 0; break;
+    case CHARACTER_OVERRIDE_MAGIC_RESISTANCE: magic_resistance = 0; break;
+    default: luck = 0; break;
+    }
+}
+
+std::filesystem::path CharacterOverrideStorePath(const std::filesystem::path& user_dir) {
     return user_dir / "character_overrides.dat";
 }
 
-void SyncHpOverrides(HpOverrideStore& store, const SaveModel& working, const SaveModel& persisted,
-                     std::string_view title_id, std::string_view save_dir) {
+void SyncCharacterOverrides(CharacterOverrideStore& store, const SaveModel& working, const SaveModel& persisted,
+                            std::string_view title_id, std::string_view save_dir) {
+    const auto sync = [](CharacterOverride& next, uint16_t field, uint16_t value, uint16_t before, bool zero_clears) {
+        if (value == before) return;
+        if (zero_clears && value == 0) next.Clear(field);
+        else next.Set(field, value);
+    };
     for (int slot = 0; slot < int(kDataSlotCount); ++slot) {
         const DataSlotView* before = persisted.Slot(slot);
         const DataSlotView* after = working.Slot(slot);
@@ -120,52 +189,88 @@ void SyncHpOverrides(HpOverrideStore& store, const SaveModel& working, const Sav
             const CharacterView& character = after->characters[index];
             if (!character.present) continue;
             const CustomKey key{std::string(title_id), std::string(save_dir), slot, index, character.klass};
-            if (!store.Get(key) && character.hp_max == before->characters[index].hp_max) continue;
-            store.Set(key, character.hp_max > 0 ? std::optional<uint16_t>(character.hp_max) : std::nullopt);
+            CharacterOverride next = store.Get(key).value_or(CharacterOverride{});
+            const CharacterView& old = before->characters[index];
+            sync(next, CHARACTER_OVERRIDE_MAX_HP, character.hp_max, old.hp_max, true);
+            sync(next, CHARACTER_OVERRIDE_STRENGTH, character.stats.strength, old.stats.strength, false);
+            sync(next, CHARACTER_OVERRIDE_CONSTITUTION, character.stats.constitution, old.stats.constitution, false);
+            sync(next, CHARACTER_OVERRIDE_DEXTERITY, character.stats.dexterity, old.stats.dexterity, false);
+            sync(next, CHARACTER_OVERRIDE_INTELLIGENCE, character.stats.intelligence, old.stats.intelligence, false);
+            sync(next, CHARACTER_OVERRIDE_MAGIC_RESISTANCE, character.stats.magic_resistance,
+                 old.stats.magic_resistance, false);
+            sync(next, CHARACTER_OVERRIDE_LUCK, character.stats.luck, old.stats.luck, false);
+            if (next.Any()) store.Set(key, next);
+            else store.Clear(key);
         }
     }
 }
 
-std::vector<uint8_t> HpOverrideStore::Serialize() const {
+std::vector<uint8_t> CharacterOverrideStore::Serialize() const {
     std::vector<uint8_t> out;
     Put32(out, kMagic);
     Put32(out, kVersion);
     Put32(out, uint32_t(entries_.size()));
-    for (const auto& [key, max_hp] : entries_) {
+    for (const auto& [key, entry] : entries_) {
         PutText(out, key.Text());
-        Put16(out, max_hp);
+        Put16(out, entry.present);
+        for (size_t i = 0; i < kStoredValues; ++i) Put16(out, FieldValue(entry, i));
     }
     return out;
 }
 
-bool HpOverrideStore::Parse(std::span<const uint8_t> bytes) {
+bool CharacterOverrideStore::Parse(std::span<const uint8_t> bytes) {
     Cursor in(bytes);
     uint32_t magic = 0, version = 0, count = 0;
     if (!in.U32(magic) || magic != kMagic || !in.U32(version) || !in.U32(count)) {
-        error_ = "unrecognized HP override data";
+        error_ = "unrecognized character override data";
         return false;
     }
-    if (version != kVersion) {
-        error_ = "HP override file version " + std::to_string(version) + " is not supported";
+    if (version != kVersion && version != kVersionHpOnly) {
+        error_ = "character override file version " + std::to_string(version) + " is not supported";
         return false;
     }
-    std::vector<std::pair<CustomKey, uint16_t>> entries;
+    std::vector<std::pair<CustomKey, CharacterOverride>> entries;
     for (uint32_t i = 0; i < count; ++i) {
         std::string key_text;
-        uint16_t max_hp = 0;
-        if (!in.Text(key_text) || !in.U16(max_hp)) {
-            error_ = "HP override file is truncated";
+        if (!in.Text(key_text)) {
+            error_ = "character override file is truncated";
             return false;
         }
         const std::optional<CustomKey> key = ParseKey(key_text);
-        if (!key || max_hp == 0) {
-            error_ = "HP override file has a malformed entry";
+        if (!key) {
+            error_ = "character override file has a malformed entry";
             return false;
         }
-        entries.emplace_back(*key, max_hp);
+        CharacterOverride entry;
+        if (version == kVersionHpOnly) {
+            uint16_t max_hp = 0;
+            if (!in.U16(max_hp) || max_hp == 0) {
+                error_ = "character override file is truncated";
+                return false;
+            }
+            entry.Set(CHARACTER_OVERRIDE_MAX_HP, max_hp);
+        } else {
+            if (!in.U16(entry.present) || (entry.present & ~CHARACTER_OVERRIDE_ALL) != 0) {
+                error_ = "character override file has a malformed entry";
+                return false;
+            }
+            for (size_t field = 0; field < kStoredValues; ++field) {
+                uint16_t value = 0;
+                if (!in.U16(value)) {
+                    error_ = "character override file is truncated";
+                    return false;
+                }
+                if (entry.present & (1u << field)) SetFieldValue(entry, field, value);
+            }
+            if (!entry.Any()) {
+                error_ = "character override file has a malformed entry";
+                return false;
+            }
+        }
+        entries.emplace_back(*key, entry);
     }
     if (!in.done()) {
-        error_ = "HP override file has trailing data";
+        error_ = "character override file has trailing data";
         return false;
     }
     entries_ = std::move(entries);
@@ -173,7 +278,7 @@ bool HpOverrideStore::Parse(std::span<const uint8_t> bytes) {
     return true;
 }
 
-bool HpOverrideStore::Load() {
+bool CharacterOverrideStore::Load() {
     entries_.clear();
     error_.clear();
     std::error_code ec;
@@ -183,7 +288,7 @@ bool HpOverrideStore::Load() {
     return Parse(bytes);
 }
 
-bool HpOverrideStore::Save() const {
+bool CharacterOverrideStore::Save() const {
     if (!error_.empty()) return false;
     std::error_code ec;
     if (entries_.empty()) {
@@ -193,23 +298,23 @@ bool HpOverrideStore::Save() const {
     return WriteAtomic(path_, Serialize());
 }
 
-std::optional<uint16_t> HpOverrideStore::Get(const CustomKey& key) const {
-    for (const auto& [stored, max_hp] : entries_) {
-        if (stored == key) return max_hp;
+std::optional<CharacterOverride> CharacterOverrideStore::Get(const CustomKey& key) const {
+    for (const auto& [stored, entry] : entries_) {
+        if (stored == key) return entry;
     }
     return std::nullopt;
 }
 
-void HpOverrideStore::Set(const CustomKey& key, std::optional<uint16_t> max_hp) {
-    const bool remove = !max_hp || *max_hp == 0;
+void CharacterOverrideStore::Set(const CustomKey& key, std::optional<CharacterOverride> override) {
+    const bool remove = !override || !override->Any();
     for (auto it = entries_.begin(); it != entries_.end(); ++it) {
         if (it->first == key) {
             if (remove) entries_.erase(it);
-            else it->second = *max_hp;
+            else it->second = *override;
             return;
         }
     }
-    if (!remove) entries_.emplace_back(key, *max_hp);
+    if (!remove) entries_.emplace_back(key, *override);
 }
 
 } // namespace dcp

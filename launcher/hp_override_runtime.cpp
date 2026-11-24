@@ -37,17 +37,24 @@ bool Identifiable(const uint8_t* id) {
     return !all(0) && !all(0xCC);
 }
 
+bool SameOverride(const CharacterOverrideEntry& a, const CharacterOverrideEntry& b) {
+    return a.klass == b.klass && a.present == b.present && a.max_hp == b.max_hp && a.strength == b.strength &&
+           a.constitution == b.constitution && a.dexterity == b.dexterity && a.intelligence == b.intelligence &&
+           a.magic_resistance == b.magic_resistance && a.luck == b.luck;
+}
+
 } // namespace
 
-std::vector<HpOverrideEntry> PlanHpOverrides(const HpOverrideStore& store, const std::vector<DiscoveredSave>& saves,
-                                             std::string_view title_id, std::vector<std::string>& notes) {
+std::vector<CharacterOverrideEntry> PlanCharacterOverrides(const CharacterOverrideStore& store,
+                                                           const std::vector<DiscoveredSave>& saves,
+                                                           std::string_view title_id, std::vector<std::string>& notes) {
     struct Planned {
         CustomKey key;
-        HpOverrideEntry entry{};
+        CharacterOverrideEntry entry{};
     };
     std::vector<Planned> planned;
-    for (const auto& [key, max_hp] : store.entries()) {
-        if (key.title_id != title_id || max_hp == 0) continue;
+    for (const auto& [key, override] : store.entries()) {
+        if (key.title_id != title_id || !override.Any()) continue;
         const SaveModel* model = nullptr;
         const CharacterView* character = SavedCharacter(saves, key, &model);
         if (!character) {
@@ -57,7 +64,14 @@ std::vector<HpOverrideEntry> PlanHpOverrides(const HpOverrideStore& store, const
         Planned item;
         item.key = key;
         item.entry.klass = uint8_t(key.klass);
-        item.entry.max_hp = max_hp;
+        item.entry.present = override.present;
+        item.entry.max_hp = override.max_hp;
+        item.entry.strength = override.strength;
+        item.entry.constitution = override.constitution;
+        item.entry.dexterity = override.dexterity;
+        item.entry.intelligence = override.intelligence;
+        item.entry.magic_resistance = override.magic_resistance;
+        item.entry.luck = override.luck;
         std::memcpy(item.entry.identity, model->bytes().data() + character->record_offset + kCharIdentity,
                     kCharIdentityBytes);
         if (!Identifiable(item.entry.identity)) {
@@ -73,16 +87,16 @@ std::vector<HpOverrideEntry> PlanHpOverrides(const HpOverrideStore& store, const
         for (size_t n = 1; n < indices.size(); ++n) {
             const Planned& first = planned[indices.front()];
             const Planned& other = planned[indices[n]];
-            const bool same = first.entry.max_hp == other.entry.max_hp && first.entry.klass == other.entry.klass;
+            const bool same = SameOverride(first.entry, other.entry);
             dropped[indices[n]] = true;
             if (!same) {
                 dropped[indices.front()] = true;
                 notes.push_back(first.key.Text() + " and " + other.key.Text() +
-                                " are the same character with different HP overrides; left native");
+                                " are the same character with different overrides; left native");
             }
         }
     }
-    std::vector<HpOverrideEntry> result;
+    std::vector<CharacterOverrideEntry> result;
     for (size_t i = 0; i < planned.size(); ++i) {
         if (!dropped[i]) result.push_back(planned[i].entry);
     }
@@ -91,20 +105,20 @@ std::vector<HpOverrideEntry> PlanHpOverrides(const HpOverrideStore& store, const
 
 } // namespace dcp
 
-extern "C" size_t dcp_character_hp_overrides(const char* image_dir, const char* user_dir,
-                                             const HpOverrideEntry** entries, char* message, size_t message_size) {
+extern "C" size_t dcp_character_overrides(const char* image_dir, const char* user_dir,
+                                          const CharacterOverrideEntry** entries, char* message, size_t message_size) {
     using namespace dcp;
-    static std::vector<HpOverrideEntry> retained;
+    static std::vector<CharacterOverrideEntry> retained;
     retained.clear();
     if (entries) *entries = nullptr;
     if (message && message_size) *message = '\0';
     const GameBuild* build = BuildOfImageDir(image_dir);
     if (!build || !user_dir) return 0;
     const std::filesystem::path user = PathFromUtf8(user_dir);
-    HpOverrideStore store(HpOverrideStorePath(user));
+    CharacterOverrideStore store(CharacterOverrideStorePath(user));
     std::vector<std::string> notes;
     if (store.Load()) {
-        retained = PlanHpOverrides(store, DiscoverSaves(user, build->title_id), build->title_id, notes);
+        retained = PlanCharacterOverrides(store, DiscoverSaves(user, build->title_id), build->title_id, notes);
     } else {
         notes.push_back(store.error());
     }

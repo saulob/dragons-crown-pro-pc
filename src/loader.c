@@ -630,24 +630,25 @@ static void install_custom_appearance(const char *image_dir, const char *app0, c
     }
     printf("Appearance runtime: %zu custom character(s)\n",instance_count);
 }
-static void install_hp_overrides(const char *build_key, const char *image_dir, const char *user_dir,
-                                 uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs, size_t stubs_size) {
+static void install_character_overrides(const char *build_key, const char *image_dir, const char *user_dir,
+                                        uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs,
+                                        size_t stubs_size) {
     char message[1024]="";
-    const HpOverrideEntry *entries=NULL;
-    const size_t count=dcp_character_hp_overrides(image_dir,user_dir,&entries,message,sizeof(message));
-    if (*message) printf("Character HP override: %s\n",message);
+    const CharacterOverrideEntry *entries=NULL;
+    const size_t count=dcp_character_overrides(image_dir,user_dir,&entries,message,sizeof(message));
+    if (*message) printf("Character override: %s\n",message);
     if (!count || !entries) return;
-    printf("Character HP override: loaded %zu custom character(s)\n",count);
-    HpOverrideSites sites;
-    if (!stubs_size || !hp_override_hooks_locate(image,size,&sites)) {
-        printf("Character HP override unavailable for %s: stat recalculation sites not found\n",
+    printf("Character stat overrides: loaded %zu custom character(s)\n",count);
+    CharacterOverrideSites sites;
+    if (!stubs_size || !character_override_hooks_locate(image,size,&sites)) {
+        printf("Character override unavailable for %s: stat recalculation sites not found\n",
                build_key && *build_key ? build_key : "unknown");
         return;
     }
-    hp_override_hooks_set_entries(entries,count);
-    if (!hp_override_hooks_install(image,size,entry,&sites,stubs,stubs_size)) {
-        hp_override_hooks_set_entries(NULL,0);
-        printf("Character HP override unavailable for %s: hook installation failed\n",
+    character_override_hooks_set_entries(entries,count);
+    if (!character_override_hooks_install(image,size,entry,&sites,stubs,stubs_size)) {
+        character_override_hooks_set_entries(NULL,0);
+        printf("Character override unavailable for %s: hook installation failed\n",
                build_key && *build_key ? build_key : "unknown");
     }
 }
@@ -1016,9 +1017,9 @@ int main(int argc, char **argv) {
                                        kraken_fix_stub_area;
     const size_t appearance_stub_area = known_build ? appearance_hooks_stub_bytes() : 0;
     const size_t comms_stub_area = known_build && runtime_online_active() ? comms_bridge_stub_bytes() : 0;
-    const size_t hp_override_stub_area = known_build ? hp_override_hooks_stub_bytes() : 0;
+    const size_t character_override_stub_area = known_build ? character_override_hooks_stub_bytes() : 0;
     const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area +
-                                         comms_stub_area + hp_override_stub_area);
+                                         comms_stub_area + character_override_stub_area);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -1280,10 +1281,10 @@ int main(int argc, char **argv) {
         else if (comms_bridge_install(image,size,entry,&comms_sites,image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area,comms_stub_area))
             party_hook_add_unit_listener(comms_bridge_unit_tick);
     }
-    if (hp_override_stub_area) {
-        install_hp_overrides(build_key,paths.image_dir,user_dir ? user_dir : "user",image,size,entry,
-                             image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area+comms_stub_area,
-                             hp_override_stub_area);
+    if (character_override_stub_area) {
+        install_character_overrides(build_key,paths.image_dir,user_dir ? user_dir : "user",image,size,entry,
+                                    image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area+comms_stub_area,
+                                    character_override_stub_area);
     }
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,

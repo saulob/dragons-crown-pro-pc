@@ -30,6 +30,12 @@ inline constexpr size_t kCharacterOffset = 0xA400;     // first record within a 
 // Character record field offsets (relative to the record start).
 inline constexpr size_t kCharHpCurrent = 0xDC;         // u16 little-endian
 inline constexpr size_t kCharHpMax = 0xE0;             // u16 little-endian
+inline constexpr size_t kCharStrength = 0xE8;          // u16 little-endian
+inline constexpr size_t kCharIntelligence = 0xEA;      // u16 little-endian
+inline constexpr size_t kCharDexterity = 0xEC;         // u16 little-endian
+inline constexpr size_t kCharLuck = 0xEE;              // u16 little-endian
+inline constexpr size_t kCharConstitution = 0xF0;      // u16 little-endian
+inline constexpr size_t kCharMagicResistance = 0xF2;   // u16 little-endian
 inline constexpr size_t kCharSkillPoints = 0xF4;       // u16 little-endian
 inline constexpr size_t kCharLevel = 0xF6;             // u8; stored = displayed level - 1
 inline constexpr size_t kCharClass = 0xF7;             // u8
@@ -46,6 +52,7 @@ inline constexpr int kMinLevel = 1;
 inline constexpr int kMaxLevel = 255;
 inline constexpr int kMaxSkillPoints = 255;
 inline constexpr int kMaxHp = 65535;
+inline constexpr int kMaxCharacterStat = 65535;
 inline constexpr uint32_t kMaxGold = 99999999;
 
 inline constexpr int kNativeColorCount = 5;
@@ -70,6 +77,16 @@ constexpr std::array<CharacterClass, 6> kCharacterClasses = {
 std::string_view ClassName(CharacterClass klass);
 CharacterClass ClassFromId(uint8_t id);
 
+struct CharacterStats {
+    uint16_t strength = 0;
+    uint16_t constitution = 0;
+    uint16_t dexterity = 0;
+    uint16_t intelligence = 0;
+    uint16_t magic_resistance = 0;
+    uint16_t luck = 0;
+    bool operator==(const CharacterStats& other) const = default;
+};
+
 // A character as shown and edited; offsets point into the working byte buffer.
 struct CharacterView {
     size_t record_offset = 0; // absolute offset of the record in the buffer
@@ -79,6 +96,7 @@ struct CharacterView {
     uint16_t skill_points = 0;
     uint16_t hp_current = 0;
     uint16_t hp_max = 0;
+    CharacterStats stats;
     std::string name;         // UTF-8
     CharacterClass klass = CharacterClass::kFighter;
     uint8_t color = 0;        // native colour preset as stored; valid is 0..4
@@ -120,6 +138,7 @@ public:
     bool SetLevel(int slot, int character, int displayed_level);
     bool SetSkillPoints(int slot, int character, int skill_points);
     bool SetHp(int slot, int character, uint16_t current, uint16_t max);
+    bool SetStats(int slot, int character, const CharacterStats& stats);
     bool SetName(int slot, int character, std::string_view utf8_name);
     // The native colour preset the game's own Edit character screen writes.
     bool SetColor(int slot, int character, int color);

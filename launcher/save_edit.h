@@ -55,18 +55,19 @@ struct ApplyOutcome {
     SaveEdit::Result save = SaveEdit::Result::kNothingToApply;
     bool custom_written = false;
     bool custom_failed = false;
-    bool hp_written = false;
-    bool hp_failed = false;
+    bool override_written = false;
+    bool override_failed = false;
     bool rolled_back = false; // sidecar files were put back after another half could not be written
     bool ok() const {
-        return !custom_failed && !hp_failed &&
+        return !custom_failed && !override_failed &&
                (save == SaveEdit::Result::kApplied || save == SaveEdit::Result::kNothingToApply);
     }
 };
 
 // Writes the sidecar files, then the save; when any step fails, prior sidecar files are put back so neither half is
-// reported applied on its own. `saved` and `hp_saved` follow what is on disk afterwards.
+// reported applied on its own. `saved` and `override_saved` follow what is on disk afterwards.
 ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved,
-                      const HpOverrideStore* hp_working = nullptr, HpOverrideStore* hp_saved = nullptr);
+                      const CharacterOverrideStore* override_working = nullptr,
+                      CharacterOverrideStore* override_saved = nullptr);
 
 } // namespace dcp

@@ -335,9 +335,9 @@ target_compile_definitions(dcp-appearance-online-tests PRIVATE DCP_SOURCE_DIR="$
 set_target_properties(dcp-appearance-online-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-appearance-online-tests PRIVATE -Wall -Wextra)
 
-# DCP-UTGYFH: persistent per-character HP overrides, anti-Infinite-Health semantics, and real CUSA10209 1.00 native hooks.
-add_executable(dcp-hp-override-tests EXCLUDE_FROM_ALL ../tests/hp_override_tests.cpp)
-target_link_libraries(dcp-hp-override-tests PRIVATE dcp_launcher_core)
-target_compile_definitions(dcp-hp-override-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-set_target_properties(dcp-hp-override-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-target_compile_options(dcp-hp-override-tests PRIVATE -Wall -Wextra)
+# F3K8S: persistent per-character stat overrides, native fallback per field, and real build hooks.
+add_executable(dcp-character-override-tests EXCLUDE_FROM_ALL ../tests/character_override_tests.cpp)
+target_link_libraries(dcp-character-override-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-character-override-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-character-override-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-character-override-tests PRIVATE -Wall -Wextra)

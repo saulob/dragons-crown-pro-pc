@@ -40,6 +40,7 @@
 #include "appearance_hooks.h"
 #include "appearance_loader.h"
 #include "appearance_runtime.h"
+#include "build_scan.h"
 #include "character_art.h"
 #include "cpk_fixture.h"
 #include "cpk_patch.h"
@@ -84,6 +85,12 @@ void ProgressStep(const char* label) {
 void PutU16(std::vector<uint8_t>& bytes, size_t offset, uint16_t value) {
     bytes[offset] = static_cast<uint8_t>(value);
     bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+uint32_t ReadU32At(const std::vector<uint8_t>& bytes, size_t offset) {
+    uint32_t value = 0;
+    for (size_t i = 0; i < 4; ++i) value |= uint32_t(bytes[offset + i]) << (8 * i);
+    return value;
 }
 
 void PutU32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value) {
@@ -1150,7 +1157,7 @@ void TestEditorSections() {
     CHECK(choice != std::string::npos && choice < line && line < list);
     CHECK(flow.find("SelectedBuild()->build->label") != std::string::npos && flow.find("FriendlyBuildText") == std::string::npos);
     for (const char* gone : {"DrawBuild", "DrawSave(", "DrawDataSlot", "DrawTransfer", "Tr(\"Game Build\")", "select_build",
-                             "SelectBuild", "Tr(\"Gold\")", "kGoldRange", "Tr(\"Save path\")", "Tr(\"Savedata folder\")",
+                             "SelectBuild", "Tr(\"Save path\")", "Tr(\"Savedata folder\")",
                              "Tr(\"Modified\")", "InfoGrid", "SaveChoiceLabel", "BuildChoiceLabel", "Save 1", "select_save", "SelectSave", "save_loader",
                              "Loading characters", "Headgear", "HeadgearRow"}) {
         CHECK(page.find(gone) == std::string::npos);
@@ -1334,6 +1341,96 @@ void TestApplyAll(const fs::path& base) {
     CHECK(saved == committed);
     CustomStore restored(CustomStorePath(user));
     CHECK(restored.Load() && restored == committed);
+}
+
+bool GoldNativeReaderIn(const fs::path& eboot) {
+    std::vector<uint8_t> file;
+    if (!ReadBytes(eboot, file)) return false;
+    const scan::ExecutableInfo info = scan::ParseExecutable(file);
+    if (!info.valid || !info.mappable) return false;
+    scan::MappedImage image;
+    std::string error;
+    if (!scan::MapExecutable(file, info, 0, image, error)) return false;
+    size_t total = 0;
+    const auto reader = scan::FindPattern(image, "8B 80 38 F2 0A 00 5D C3", 4, total);
+    const auto add = scan::FindPattern(image, "41 03 86 38 F2 0A 00", 4, total);
+    const auto store = scan::FindPattern(image, "41 89 86 38 F2 0A 00", 4, total);
+    const auto cap = scan::FindPattern(image, "3D FF E0 F5 05", 4, total);
+    const auto cap_mov = scan::FindPattern(image, "B9 FF E0 F5 05", 4, total);
+    return !reader.empty() && !add.empty() && !store.empty() && !cap.empty() && !cap_mov.empty();
+}
+
+bool TestGoldNativeReader() {
+#ifdef DCP_SOURCE_DIR
+    const fs::path source = DCP_SOURCE_DIR;
+    int checked = 0;
+    for (const fs::path& eboot : {source / "game" / "extracted" / "base" / "eboot.bin",
+                                  source / "game" / "prepared" / "CUSA10209-1.00" / "eboot.bin"}) {
+        if (!fs::exists(eboot)) continue;
+        if (!GoldNativeReaderIn(eboot)) return false;
+        ++checked;
+    }
+    return checked > 0;
+#else
+    return true;
+#endif
+}
+
+void TestGoldEditing(const fs::path& base) {
+    const fs::path user = base / "gold_user";
+    const SaveModel model = ModelWithColors({{1, 0}, {4, 2}});
+    const std::vector<uint8_t> original(model.bytes().begin(), model.bytes().end());
+    const fs::path file = WriteEditableSave(user, original);
+
+    SaveEdit edit = OpenEdit(user);
+    CHECK(edit.persisted().Slot(0)->gold == 100);
+    CHECK(edit.persisted().Slot(1)->gold == 7757);
+    const CharacterView before = *edit.persisted().Character(0, 0);
+
+    CHECK(edit.working().SetGold(0, 2356557));
+    CHECK(edit.Apply() == SaveEdit::Result::kApplied);
+    std::vector<uint8_t> on_disk;
+    CHECK(ReadBytes(file, on_disk));
+    CHECK(ReadU32At(on_disk, kDataSlotGoldOffset) == 2356557);
+    const SaveModel reopened = SaveModel::FromFile(file);
+    CHECK(reopened.valid() && reopened.crc_valid());
+    CHECK(reopened.Slot(0)->gold == 2356557);
+    CHECK(reopened.Slot(1)->gold == 7757);
+    CHECK(reopened.Character(0, 0)->name == before.name);
+    CHECK(reopened.Character(0, 0)->difficulty == before.difficulty);
+    CHECK(reopened.Character(0, 0)->level_stored == before.level_stored);
+    CHECK(reopened.Character(0, 0)->skill_points == before.skill_points);
+    CHECK(reopened.Character(0, 0)->hp_current == before.hp_current);
+    CHECK(reopened.Character(0, 0)->hp_max == before.hp_max);
+    CHECK(reopened.Character(0, 0)->stats == before.stats);
+
+    // The value belongs to the DATA slot, not the selected character: character B reads the same field.
+    CHECK(reopened.Character(0, 1) && reopened.Slot(0)->gold == 2356557);
+
+    SaveEdit discarded = OpenEdit(user);
+    CHECK(discarded.working().SetGold(0, 999));
+    discarded.Discard();
+    CHECK(discarded.working().Slot(0)->gold == 2356557);
+    CHECK(SaveModel::FromFile(file).Slot(0)->gold == 2356557);
+
+    SaveEdit minimum = OpenEdit(user);
+    CHECK(minimum.working().SetGold(0, 0));
+    CHECK(minimum.Apply() == SaveEdit::Result::kApplied);
+    CHECK(SaveModel::FromFile(file).Slot(0)->gold == 0);
+
+    SaveEdit maximum = OpenEdit(user);
+    CHECK(maximum.working().SetGold(0, kMaxGold));
+    CHECK(maximum.Apply() == SaveEdit::Result::kApplied);
+    std::vector<uint8_t> max_bytes;
+    CHECK(ReadBytes(file, max_bytes));
+    CHECK(ReadU32At(max_bytes, kDataSlotGoldOffset) == uint32_t(kMaxGold));
+    CHECK(SaveModel::FromFile(file).Slot(0)->gold == uint32_t(kMaxGold));
+
+    SaveEdit clamped = OpenEdit(user);
+    CHECK(!clamped.working().SetGold(0, uint32_t(kMaxGold) + 1));
+    CHECK(ClampNumber(123456789, kGoldRange) == kMaxGold);
+    CHECK(ParseNumber("999999999999", kGoldRange) == kMaxGold);
+    CHECK(TestGoldNativeReader());
 }
 
 void TestRecolor() {
@@ -2762,7 +2859,7 @@ void TestEditorCharacterNavigation(const fs::path& base) {
     CHECK(list_body.find("SelectedSlot()->characters") != std::string::npos && editor_body.find("SelectedSlot()->characters") == std::string::npos);
     CHECK(editor_body.find("Tr(\"Back to Characters\")") != std::string::npos && editor_body.find("nav_.Back()") != std::string::npos);
     CHECK(editor_body.find("Tr(\"Back to Characters\")") < editor_body.find("DrawArt("));
-    CHECK(editor_body.find("Tr(\"Gold\")") == std::string::npos && editor_body.find("gold") == std::string::npos);
+    CHECK(editor_body.find("Tr(\"Gold\")") != std::string::npos && editor_body.find("SetGold(selected_slot_") != std::string::npos);
     CHECK(editor_body.find("ApplyChanges") == std::string::npos && editor_body.find("edit_->Apply") == std::string::npos);
     CHECK(editor_body.find("InputText(\"##name\"") != std::string::npos && editor_body.find("NumberControl(ui, \"name\"") == std::string::npos);
     CHECK(header.find("CharacterNav nav_;") != std::string::npos);
@@ -2870,9 +2967,31 @@ void TestEditorResponsiveLayout() {
 void TestEditorNumberControlLook() {
     CHECK(kNumberGlyphRatio >= 0.45f && kNumberGlyphThickness >= 2.0f);
     CHECK(NumberHasThumb(kLevelRange) && NumberHasThumb(kSkillPointRange) && NumberHasThumb(kHpRange) && NumberHasThumb({0, 300}));
-    CHECK(!NumberHasThumb(kGoldRange)); // gold is dragged by small relative steps, never by position
     CHECK(kNumberThumbMinWidth >= 12.0f); // Level 1 still shows a real handle
     CHECK(StepNumber(1000, 1, kGoldRange) == 1001 && StepNumber(1000, -1, kGoldRange) == 999); // a huge range keeps single steps
+
+    const auto gold_span = [](float min, float max, int value, float grab) {
+        return SliderGrabSpan(min, max, kGoldRange, value, grab);
+    };
+    const Span gold_zero = gold_span(0.0f, 1000.0f, 0, kNumberThumbMinWidth);
+    const Span gold_one = gold_span(0.0f, 1000.0f, 1, kNumberThumbMinWidth);
+    const Span gold_low = gold_span(0.0f, 1000.0f, 443837, kNumberThumbMinWidth);
+    const Span gold_middle = gold_span(0.0f, 1000.0f, 50000000, kNumberThumbMinWidth);
+    const Span gold_max = gold_span(0.0f, 1000.0f, kMaxGold, kNumberThumbMinWidth);
+    CHECK(gold_zero.min >= 0.0f && gold_max.max <= 1000.0f);
+    CHECK(gold_one.min >= gold_zero.min && gold_one.min - gold_zero.min < 0.01f); // visible at the minimum edge
+    CHECK(gold_low.min > gold_zero.min + 1.0f); // 443837 is not collapsed by integer division
+    CHECK(std::abs((gold_middle.min + gold_middle.max) * 0.5f - 500.0f) < 0.5f);
+    CHECK((gold_max.min + gold_max.max) * 0.5f > 950.0f);
+    const float gold_width = gold_zero.max - gold_zero.min;
+    for (const Span span : {gold_one, gold_low, gold_middle, gold_max})
+        CHECK(std::abs((span.max - span.min) - gold_width) < 0.01f); // a constant-width marker
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const Span span = gold_span(0.0f, 1000.0f * scale, 50000000, kNumberThumbMinWidth * scale);
+        CHECK(std::abs((span.min + span.max) * 0.5f - 500.0f * scale) < 1.0f);
+        CHECK(std::abs((span.max - span.min) - kNumberThumbMinWidth * scale) < 0.01f);
+    }
+
 #ifdef DCP_SOURCE_DIR
     const std::string page = ReadSource("launcher/editor_page.cpp");
     const size_t start = page.find("bool EditorPage::NumberControl(");
@@ -2883,6 +3002,7 @@ void TestEditorNumberControlLook() {
     CHECK(control.find("StepNumber(*value, -1, range)") != std::string::npos && control.find("StepNumber(*value, 1, range)") != std::string::npos);
     CHECK(control.find("##minus") < control.find("SliderInt(\"##value\"") && control.find("SliderInt(\"##value\"") < control.find("##plus"));
     CHECK(control.find("DragInt(\"##value\", &shown, drag_speed") != std::string::npos);
+    CHECK(control.find("const bool thumb = positional_marker || NumberHasThumb(range);") != std::string::npos);
     CHECK(control.find("ImGuiStyleVar_GrabMinSize, grab_min") != std::string::npos && control.find("grab_min = kNumberThumbMinWidth * scale") != std::string::npos);
     CHECK(control.find("ProgressFraction") == std::string::npos && control.find("AddRectFilled") == std::string::npos);
     CHECK(control.find("InvisibleButton") == std::string::npos && control.find("drag_remainder_") == std::string::npos);
@@ -2891,7 +3011,11 @@ void TestEditorNumberControlLook() {
     CHECK(control.find("SetTooltip") == std::string::npos);
     CHECK(page.find("Drag to adjust") == std::string::npos);
     CHECK(ReadSource("launcher/localization/pt_br_ui_text.cpp").find("Drag to adjust") == std::string::npos);
-    CHECK(Count(page, "NumberControl(ui, ") == 5); // Level, Skill Points, Current HP, Max HP share it; there is no Gold
+    CHECK(Count(page, "NumberControl(ui, ") == 7); // Gold, Level, Skill Points, HP and the stat rows share it
+    const size_t editor_start = page.find("void EditorPage::DrawCharacterEditor(");
+    const std::string editor = page.substr(editor_start, page.find("\n}\n", editor_start) - editor_start);
+    CHECK(editor.find("NumberControl(ui, \"gold\", &gold, kGoldRange, 0.25f, changed_style(gold_changed), true)") !=
+          std::string::npos);
 #endif
 }
 
@@ -2955,7 +3079,8 @@ void TestEditorDirtyFields() {
     CHECK(page.find("saved->hp_current != character.hp_current") != std::string::npos);
     CHECK(page.find("saved->hp_max != character.hp_max") != std::string::npos);
     CHECK(page.find("FieldStyleFor(saved->name, character.name)") != std::string::npos);
-    CHECK(page.find("gold") == std::string::npos);
+    CHECK(page.find("edit_->persisted().Slot(selected_slot_)") != std::string::npos);
+    CHECK(page.find("SetGold(selected_slot_") != std::string::npos);
     CHECK(page.find("edit_->persisted()") != std::string::npos);
 #endif
 }
@@ -3018,7 +3143,7 @@ void TestEditorHeaderRow() {
     const size_t portrait = editor.find("DrawArt(");
     CHECK(back != std::string::npos && title != std::string::npos);
     CHECK(title < back && back < portrait);
-    CHECK(editor.find("ui.Heading(") == std::string::npos);
+    CHECK(Count(editor, "ui.Heading(") == 1 && editor.find("ui.Heading(Tr(\"Stats\"));") != std::string::npos);
     CHECK(editor.find("LayoutCharacterSummary(") != std::string::npos);
     CHECK(page.find("DrawChanges(ui);") < page.find("DrawCharacter(ui);"));
     const size_t row_start = page.find("void EditorPage::DrawChanges(");
@@ -3202,21 +3327,48 @@ void TestEditorFixedLayout() {
     const size_t level = editor.find("NumberControl(ui, \"level\"");
     const size_t row_skill = editor.find("ui.Row(Tr(\"Skill Points\")");
     const size_t skill = editor.find("NumberControl(ui, \"skill_points\"");
+    const size_t row_gold = editor.find("ui.Row(Tr(\"Gold\")");
+    const size_t gold = editor.find("NumberControl(ui, \"gold\"");
+    const size_t row_stats = editor.find("ui.Heading(Tr(\"Stats\"));");
     const size_t row_current = editor.find("ui.Row(Tr(\"Current HP\")");
     const size_t current = editor.find("NumberControl(ui, \"hp_current\"");
     const size_t row_max = editor.find("ui.Row(Tr(\"Max HP\")");
     const size_t maximum = editor.find("NumberControl(ui, \"hp_max\"");
+    const size_t row_str = editor.find("stat_row(Tr(\"STR (Strength)\")");
+    const size_t row_con = editor.find("stat_row(Tr(\"CON (Constitution)\")");
+    const size_t row_dex = editor.find("stat_row(Tr(\"DEX (Dexterity)\")");
+    const size_t row_int = editor.find("stat_row(Tr(\"INT (Intelligence)\")");
+    const size_t row_mgr = editor.find("stat_row(Tr(\"MGR (Magic Resistance)\")");
+    const size_t row_luc = editor.find("stat_row(Tr(\"LUC (Luck)\")");
     const size_t end_rows = editor.find("ui.EndRows();");
     CHECK(row_name != std::string::npos && row_name < name && name < row_level && row_level < level);
-    CHECK(level < row_skill && row_skill < skill && skill < row_current && row_current < current);
-    CHECK(current < row_max && row_max < maximum && maximum < end_rows);
-    // Max HP is the only HP authority: no separate override control or reset-to-native action exists.
+    CHECK(level < row_skill && row_skill < skill && skill < row_gold && row_gold < gold && gold < row_stats);
+    CHECK(row_stats < row_current);
+    CHECK(row_current < current && current < row_max && row_max < maximum && maximum < row_str);
+    CHECK(row_str < row_con && row_con < row_dex && row_dex < row_int && row_int < row_mgr && row_mgr < row_luc);
+    CHECK(row_luc < end_rows);
+    for (const char* control : {"stat_strength", "stat_constitution", "stat_dexterity", "stat_intelligence",
+                                "stat_magic_resistance", "stat_luck"}) {
+        CHECK(editor.find(std::string("\"") + control + "\"") != std::string::npos);
+    }
+    // The numeric fields are the only authority: no separate override control or reset-to-native action exists.
     CHECK(editor.find("HP Override") == std::string::npos && editor.find("Use Game Value") == std::string::npos);
+    CHECK(editor.find("Reset Override") == std::string::npos && editor.find("Auto") == std::string::npos);
     CHECK(page.find("HP Override") == std::string::npos && page.find("Use Game Value") == std::string::npos);
-    CHECK(Count(editor, "ui.Row(") == 5 && Count(editor, "ui.EndRows();") == 1);
+    CHECK(Count(editor, "ui.Row(") == 7 && Count(editor, "stat_row(") == 6 && Count(editor, "ui.EndRows();") == 1);
     CHECK(editor.find("ui.Row(Tr(\"Level\"));") != std::string::npos);
     CHECK(editor.find("stored value is level minus one") == std::string::npos);
-    CHECK(ReadSource("launcher/localization/pt_br_ui_text.cpp").find("stored value is level minus one") == std::string::npos);
+    const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
+    CHECK(portuguese.find("stored value is level minus one") == std::string::npos);
+    for (const char* text : {"\nGold\tOuro\n", "\nGold belongs to this save data\tOuro pertence a este save\n",
+                             "\nStats\tAtributos\n", "\nSTR (Strength)\tSTR (For\xC3\xA7" "a)\n",
+                             "\nCON (Constitution)\tCON (Constitui\xC3\xA7\xC3\xA3" "o)\n",
+                             "\nDEX (Dexterity)\tDEX (Destreza)\n",
+                             "\nINT (Intelligence)\tINT (Intelig\xC3\xAAncia)\n",
+                             "\nMGR (Magic Resistance)\tMGR (Resist\xC3\xAAncia M\xC3\xA1gica)\n",
+                             "\nLUC (Luck)\tLUC (Sorte)\n"}) {
+        CHECK(portuguese.find(text) != std::string::npos);
+    }
     CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(editor.find("Button(Tr(\"Back to Characters\"), ") == std::string::npos);
     CHECK(page.find("1.35f") == std::string::npos && page.find("* 1.2f") == std::string::npos);
@@ -7855,6 +8007,7 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
         {"editor-apply-discard", false,
          [&] {
              TestApplyAll(base);
+             TestGoldEditing(base);
              TestEditorDirtyFields();
              TestEditorBuildChoice();
              TestEditorNumbers();

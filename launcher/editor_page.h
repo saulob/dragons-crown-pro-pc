@@ -54,7 +54,8 @@ public:
     void Refresh();
 
     bool dirty() const {
-        return (edit_ && edit_->dirty()) || !(custom_working_ == custom_saved_) || !(hp_working_ == hp_saved_);
+        return (edit_ && edit_->dirty()) || !(custom_working_ == custom_saved_) ||
+               !(override_working_ == override_saved_);
     }
     // A reason Play/Quit must wait (empty when clean), for the launcher gate.
     std::string DirtyReason() const;
@@ -118,7 +119,8 @@ private:
     void DrawCharacter(trg::Ui& ui);
     void DrawCharacterList(trg::Ui& ui);
     void DrawCharacterEditor(trg::Ui& ui);
-    bool NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed, FieldStyle style);
+    bool NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed, FieldStyle style,
+                       bool positional_marker = false);
     void DrawAppearance(trg::Ui& ui);
     void DrawInventory(trg::Ui& ui);
     void DrawInventorySummary(trg::Ui& ui, const CharacterView& character, const CharacterView* saved);
@@ -179,8 +181,8 @@ private:
     CustomStore custom_saved_;
     CustomStore custom_working_;
     std::string custom_error_;
-    HpOverrideStore hp_saved_;
-    HpOverrideStore hp_working_;
+    CharacterOverrideStore override_saved_;
+    CharacterOverrideStore override_working_;
     std::string selected_part_;
     bool confirm_reset_custom_ = false;
     std::mt19937 random_{std::random_device{}()};

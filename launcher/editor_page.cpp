@@ -38,7 +38,7 @@ EditorPage::EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::
                        std::function<std::string()> message_suffix, const SaveSelection* selection)
     : host_(host), user_dir_(std::move(user_dir)), game_(std::move(game)), message_suffix_(std::move(message_suffix)),
       selection_(selection), custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)),
-      hp_saved_(HpOverrideStorePath(user_dir_)), hp_working_(HpOverrideStorePath(user_dir_)) {}
+      override_saved_(CharacterOverrideStorePath(user_dir_)), override_working_(CharacterOverrideStorePath(user_dir_)) {}
 
 const EditorBuild* EditorPage::SelectedBuild() const {
     return selected_build_ < builds_.size() ? &builds_[selected_build_] : nullptr;
@@ -107,8 +107,8 @@ void EditorPage::Refresh() {
     }
     custom_error_ = custom_saved_.Load() ? std::string() : custom_saved_.error();
     custom_working_ = custom_saved_;
-    hp_saved_.Load();
-    hp_working_ = hp_saved_;
+    override_saved_.Load();
+    override_working_ = override_saved_;
     confirm_reset_custom_ = false;
     SyncNameBuffer();
 }
@@ -177,12 +177,14 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     }
     const ApplyOutcome outcome =
         [&] {
-            HpOverrideStore hp_next = hp_working_;
-            if (edit_ && hp_saved_.error().empty()) {
+            CharacterOverrideStore override_next = override_working_;
+            if (edit_ && override_saved_.error().empty()) {
                 if (const DiscoveredSave* save = SelectedSave())
-                    SyncHpOverrides(hp_next, edit_->working(), edit_->persisted(), save->title_id, save->dir_name);
+                    SyncCharacterOverrides(override_next, edit_->working(), edit_->persisted(), save->title_id,
+                                           save->dir_name);
             }
-            return ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_, &hp_next, &hp_saved_);
+            return ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_, &override_next,
+                            &override_saved_);
         }();
     if (outcome.ok()) {
         typed_.Clear();
@@ -190,7 +192,7 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
         KeepSearchMatchingSavedItem();
         if (edit_ && selected_save_ >= 0) saves_[selected_save_].model = edit_->persisted();
         custom_working_ = custom_saved_;
-        hp_working_ = hp_saved_;
+        override_working_ = override_saved_;
         confirm_reset_custom_ = false;
         SyncNameBuffer();
         ui.SetStatus(Tr("Changes applied."), 4.0);
@@ -200,8 +202,8 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
         ui.SetStatus(Tr("Could not write the custom appearance; nothing was applied."), 8.0);
         return;
     }
-    if (outcome.hp_failed) {
-        ui.SetStatus(Tr("Could not write the character HP; nothing was applied."), 8.0);
+    if (outcome.override_failed) {
+        ui.SetStatus(Tr("Could not write the character stats; nothing was applied."), 8.0);
         return;
     }
     switch (outcome.save) {
@@ -247,7 +249,7 @@ void EditorPage::DiscardChanges(trg::Ui& ui) {
     typed_.Clear();
     typing_.End();
     custom_working_ = custom_saved_;
-    hp_working_ = hp_saved_;
+    override_working_ = override_saved_;
     confirm_reset_custom_ = false;
     SyncNameBuffer();
     ui.SetStatus(Tr("Changes discarded."), 4.0);
@@ -465,7 +467,8 @@ void EditorPage::DrawSaveData(trg::Ui& ui) {
     }
 }
 
-bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed, FieldStyle style) {
+bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed,
+                               FieldStyle style, bool positional_marker) {
     ImGui::PushID(id);
     const int initial = *value;
     const float scale = ui.scale();
@@ -519,7 +522,7 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
         const float grab_min = kNumberThumbMinWidth * scale;
         ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, grab_min);
         constexpr ImGuiSliderFlags flags = ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput;
-        const bool thumb = NumberHasThumb(range);
+        const bool thumb = positional_marker || NumberHasThumb(range);
         if (thumb) {
             ImGui::SliderInt("##value", &shown, range.min, range.max, "", flags);
         } else {
@@ -760,9 +763,36 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
         edit_->working().SetSkillPoints(selected_slot_, selected_character_, skill_points);
     }
 
+    const DataSlotView* data_slot = SelectedSlot();
+    const DataSlotView* saved_data_slot = edit_ ? edit_->persisted().Slot(selected_slot_) : nullptr;
+    ui.Row(Tr("Gold"), Tr("Gold belongs to this save data"));
+    int gold = data_slot ? int(data_slot->gold) : 0;
+    const bool gold_changed = saved_data_slot && data_slot && saved_data_slot->gold != data_slot->gold;
+    if (NumberControl(ui, "gold", &gold, kGoldRange, 0.25f, changed_style(gold_changed), true)) {
+        edit_->working().SetGold(selected_slot_, uint32_t(gold));
+    }
+
+    ui.Heading(Tr("Stats"));
+
     const std::optional<CustomKey> key = CurrentKey();
-    const std::optional<uint16_t> hp_override = key ? hp_working_.Get(*key) : std::nullopt;
-    const std::optional<uint16_t> hp_override_saved = key ? hp_saved_.Get(*key) : std::nullopt;
+    const std::optional<CharacterOverride> saved_override = key ? override_saved_.Get(*key) : std::nullopt;
+    const auto override_field_changed = [&](uint16_t field) {
+        if (!key) return false;
+        const std::optional<CharacterOverride> current = override_working_.Get(*key);
+        const bool before = saved_override && saved_override->Has(field);
+        const bool now = current && current->Has(field);
+        if (before != now) return true;
+        return before && current->Value(field) != saved_override->Value(field);
+    };
+    const auto set_override_field = [&](uint16_t field, uint16_t value, bool clear_when_native) {
+        if (!key) return;
+        CharacterOverride next = override_working_.Get(*key).value_or(CharacterOverride{});
+        if (clear_when_native) next.Clear(field);
+        else next.Set(field, value);
+        if (next.Any()) override_working_.Set(*key, next);
+        else override_working_.Clear(*key);
+    };
+
     const HpValues hp{character.hp_current, character.hp_max};
     ui.Row(Tr("Current HP"));
     int hp_current = hp.current;
@@ -774,15 +804,36 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
 
     ui.Row(Tr("Max HP"));
     int hp_max = hp.max;
-    const bool hp_max_changed = (saved && saved->hp_max != character.hp_max) || hp_override != hp_override_saved;
+    const bool hp_max_changed = (saved && saved->hp_max != character.hp_max) || override_field_changed(CHARACTER_OVERRIDE_MAX_HP);
     if (NumberControl(ui, "hp_max", &hp_max, kHpRange, 0.25f, changed_style(hp_max_changed))) {
         const HpValues next = WithMaxHp(hp, hp_max);
         edit_->working().SetHp(selected_slot_, selected_character_, uint16_t(next.current), uint16_t(next.max));
-        if (key) {
-            if (!hp_override_saved && saved && next.max == saved->hp_max) hp_working_.Clear(*key);
-            else hp_working_.Set(*key, next.max > 0 ? std::optional<uint16_t>(uint16_t(next.max)) : std::nullopt);
-        }
+        const bool was_native = !saved_override || !saved_override->Has(CHARACTER_OVERRIDE_MAX_HP);
+        set_override_field(CHARACTER_OVERRIDE_MAX_HP, uint16_t(next.max),
+                           next.max == 0 || (was_native && saved && next.max == saved->hp_max));
     }
+
+    const auto stat_row = [&](const char* label, const char* id, uint16_t field, uint16_t CharacterStats::*member) {
+        ui.Row(label);
+        int value = character.stats.*member;
+        const bool changed = (saved && saved->stats.*member != character.stats.*member) || override_field_changed(field);
+        if (!NumberControl(ui, id, &value, kCharacterStatRange, 0.25f, changed_style(changed))) return;
+        CharacterStats stats = character.stats;
+        stats.*member = uint16_t(value);
+        edit_->working().SetStats(selected_slot_, selected_character_, stats);
+        const bool was_native = !saved_override || !saved_override->Has(field);
+        set_override_field(field, uint16_t(value), was_native && saved && uint16_t(value) == saved->stats.*member);
+    };
+
+    stat_row(Tr("STR (Strength)"), "stat_strength", CHARACTER_OVERRIDE_STRENGTH, &CharacterStats::strength);
+    stat_row(Tr("CON (Constitution)"), "stat_constitution", CHARACTER_OVERRIDE_CONSTITUTION,
+             &CharacterStats::constitution);
+    stat_row(Tr("DEX (Dexterity)"), "stat_dexterity", CHARACTER_OVERRIDE_DEXTERITY, &CharacterStats::dexterity);
+    stat_row(Tr("INT (Intelligence)"), "stat_intelligence", CHARACTER_OVERRIDE_INTELLIGENCE,
+             &CharacterStats::intelligence);
+    stat_row(Tr("MGR (Magic Resistance)"), "stat_magic_resistance", CHARACTER_OVERRIDE_MAGIC_RESISTANCE,
+             &CharacterStats::magic_resistance);
+    stat_row(Tr("LUC (Luck)"), "stat_luck", CHARACTER_OVERRIDE_LUCK, &CharacterStats::luck);
     ui.EndRows();
 }
 
