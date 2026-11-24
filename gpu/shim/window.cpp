@@ -72,7 +72,12 @@ int DirectTouchDevices() {
 }
 
 void LogTouchRoute(DcpTouchRouteEvent event) {
-    const DcpTouchRouteInfo route{SDL_GetCurrentVideoDriver(), DcpPresent::GamescopeSession() ? 1 : 0, DirectTouchDevices()};
+    const DcpTouchRouteInfo route{SDL_GetCurrentVideoDriver(),
+                                  DcpPresent::GamescopeSession() ? 1 : 0,
+                                  DirectTouchDevices(),
+                                  g_gamescope_touch.Roots(),
+                                  g_gamescope_touch.CompositorRoot() ? 1 : 0,
+                                  int(g_gamescope_touch.Failure())};
     char line[DCP_TOUCH_ROUTE_LINE_SIZE];
     if (dcp_touch_route_note(&g_touch_route_log, event, &route, line, sizeof(line))) {
         std::puts(line);
@@ -96,10 +101,10 @@ void ClaimGamescopeTouch() {
     }
     switch (g_gamescope_touch.Acquire()) {
     case DcpGamescopeTouch::Result::Applied:
-        LogTouchRoute(DCP_TOUCH_ROUTE_FALLBACK_USED);
+        LogTouchRoute(DCP_TOUCH_ROUTE_CLAIMED);
         break;
     case DcpGamescopeTouch::Result::Unavailable:
-        LogTouchRoute(DCP_TOUCH_ROUTE_FALLBACK_FAILED);
+        LogTouchRoute(DCP_TOUCH_ROUTE_CLAIM_FAILED);
         break;
     case DcpGamescopeTouch::Result::Unchanged:
         break;
@@ -632,8 +637,9 @@ bool WindowSDL::PollEvents() {
     RefreshTitle();
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     cursor.SetMouseControls(dcp_mouse_enabled(dcp_mouse_global()) != 0);
-    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0) {
-        g_gamescope_touch.Maintain(SDL_GetTicks());
+    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0 &&
+        g_gamescope_touch.Maintain(SDL_GetTicks())) {
+        LogTouchRoute(DCP_TOUCH_ROUTE_REASSERT);
     }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {

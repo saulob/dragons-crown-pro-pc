@@ -637,22 +637,23 @@ void TestTouchscreenUnchanged() {
     // The touch-made mouse events never reached the trackpad pointer.
     CHECK(d.CountTrackpad("trackpad_mouse_fallback_used") == 0 && d.CountTrackpad("trackpad_pointer_interaction") == 0);
 
-    // The route lines of DCP-8G6HDU keep their exact form.
+    // The route lines of DCP-8G6HDU keep their exact form; the claim names its roots.
     DcpTouchRouteLog log{};
     char line[DCP_TOUCH_ROUTE_LINE_SIZE];
-    const DcpTouchRouteInfo route{"x11", 1, 1};
+    const DcpTouchRouteInfo route{"x11", 1, 1, 2, 1, DCP_TOUCH_CLAIM_NO_X11};
     CHECK(dcp_touch_route_note(&log, DCP_TOUCH_ROUTE_READY, &route, line, sizeof(line)) &&
           std::string(line) == "Touchscreen telemetry: event=touch_route_ready video=x11 gamescope=yes direct_devices=1 count=1");
-    CHECK(dcp_touch_route_note(&log, DCP_TOUCH_ROUTE_FALLBACK_USED, &route, line, sizeof(line)) &&
-          std::string(line) == "Touchscreen telemetry: event=touchscreen_fallback_used source=gamescope count=1");
+    CHECK(dcp_touch_route_note(&log, DCP_TOUCH_ROUTE_CLAIMED, &route, line, sizeof(line)) &&
+          std::string(line) == "Touchscreen telemetry: event=gamescope_touch_claim roots=2 compositor=yes count=1");
 
     // Passthrough ownership is the touchscreen route's alone.
     DcpTouchGamescopeEnv env{1, 1, ":1", nullptr};
     CHECK(dcp_touch_gamescope_wanted(&env));
     uint32_t value = 0;
-    DcpTouchModeState mode{};
-    CHECK(dcp_touch_mode_claim(&mode, 0, 0, &value) == DCP_TOUCH_MODE_WRITE && value == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
-    CHECK(dcp_touch_mode_release(&mode, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == DCP_TOUCH_MODE_WRITE &&
+    DcpTouchModeRoot mode{};
+    dcp_touch_mode_claim(&mode, 0, 0);
+    CHECK(mode.owned && mode.saved == DCP_GAMESCOPE_TOUCH_LEFT);
+    CHECK(dcp_touch_mode_release(&mode, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 1 &&
           value == DCP_GAMESCOPE_TOUCH_LEFT);
     const std::string gamescope_touch = ReadSource("src/dcp_touch_gamescope.h");
     CHECK(!Contains(gamescope_touch, "trackpad") && !Contains(gamescope_touch, "SteamDeck"));
