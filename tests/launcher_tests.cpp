@@ -11101,13 +11101,20 @@ void TestLauncherLocalization() {
     }
     const UiTextTable& table = PortugueseBrazilUiText();
     CHECK(table.errors.empty());
-    std::set<std::string> english;
-    for (const UiTextRow& row : table.rows) {
+    std::map<std::string, size_t> english;
+    for (size_t i = 0; i < table.rows.size(); ++i) {
+        const UiTextRow& row = table.rows[i];
         CHECK(!row.english.empty());
         CHECK(!row.text.empty());
         CHECK(ValidUtf8Text(row.english));
         CHECK(ValidUtf8Text(row.text));
-        CHECK(english.insert(row.english).second);
+        const auto [it, inserted] = english.emplace(row.english, i);
+        if (!inserted) {
+            std::printf("duplicate English key \"%s\" at rows %zu (\"%s\") and %zu (\"%s\")\n",
+                        row.english.c_str(), it->second + 1, table.rows[it->second].text.c_str(),
+                        i + 1, row.text.c_str());
+        }
+        CHECK(inserted);
     }
 
     SetActiveLanguage(kPortugueseBrazilKey);

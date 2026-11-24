@@ -6,6 +6,7 @@
 #   tools/build.sh --clean    delete build/cmake/linux first
 #   tools/build.sh --test     also build and run the focused tests
 #   tools/build.sh --editor   build and run only the Character Editor release tests (no game build)
+#   tools/build.sh --launcher build and run only the launcher tests (no game build)
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
 #
 # Missing tools or libraries are listed; packaging/linux/ci-deps.sh installs them on Ubuntu 20.04 (the release baseline).
@@ -13,15 +14,16 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=$root/build/cmake/linux
 config=RelWithDebInfo
-clean=0 test=0 editor=0 run=0
+clean=0 test=0 editor=0 launcher=0 run=0
 loader_args=()
 while (($#)); do
     case $1 in
         --clean) clean=1 ;;
         --test) test=1 ;;
         --editor) editor=1 ;;
+        --launcher) launcher=1 ;;
         --run) run=1; shift; loader_args=("$@"); break ;;
-        -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -108,6 +110,13 @@ if ((editor)); then
     "$build_dir/bin/dcp-inventory-editor-tests"
     step 'Running the F3K8S character stat override tests'
     "$build_dir/bin/dcp-character-override-tests"
+    exit 0
+fi
+if ((launcher)); then
+    step 'Building the launcher tests'
+    ninja -C "$build_dir" dcp-launcher-tests
+    step 'Running the launcher tests'
+    "$build_dir/bin/dcp-launcher-tests"
     exit 0
 fi
 step 'Building'

@@ -3,7 +3,10 @@
   Builds and runs the focused headless tests, and prints the supported-build parity summary. It is the gate to pass before
   committing parity work: no window, no game launch, no production network (a development lobby on loopback at most).
 .PARAMETER SkipLinux
-  Does not run the Linux network tests through WSL.
+  Does not run the Linux tests through WSL.
+.PARAMETER Full
+  Runs the complete release and parity test matrix across all registered suites (for CODE REVIEW FINAL). Without -Full or a
+  specific focused switch, tools\test.ps1 runs only the current default development focus.
 .PARAMETER BossBattleOnline
   Builds and runs only the Boss Battle Online focused suites (visitor lifecycle, handoff, Early Story handoff, Boss Battle Online, Boss Battle, Boss
   Battle menu, Early Story, feature locators, build parity) and reports their result alone.
@@ -79,7 +82,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor)
+param([switch]$SkipLinux, [switch]$Full, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 . (Join-Path $PSScriptRoot '_progress.ps1')
@@ -301,6 +304,15 @@ function Invoke-LinuxLauncherSyntax {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', "$root/tools/test-linux-launcher.sh", $root) $true
 }
 
+function Invoke-LinuxLauncherTests {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --launcher 2>&1") $true
+}
+
 function Invoke-LinuxEditorGate {
     if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
@@ -474,6 +486,9 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
+$defaultFocusName = 'launcher-localization'
+$defaultFocusSuites = @('dcp-launcher-tests')
+$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
@@ -530,14 +545,20 @@ if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
     $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Block { Invoke-LinuxEditorGate }
     $requiredSuites = $editorReleaseSuites
-} else {
+} elseif ($Full) {
     Sync-GpuDependencies
+} else {
+    $tests = @(
+        (Test-Step 'launcher tests (localization uniqueness and launcher core)' 'dcp-launcher-tests' -Capture),
+        (Test-Step 'Linux launcher tests (WSL: tools/build.sh --launcher, builds and runs only dcp-launcher-tests; skipped without WSL)' -Block { Invoke-LinuxLauncherTests })
+    )
+    $requiredSuites = $defaultFocusSuites
 }
 
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } else {
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
 & ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
@@ -731,6 +752,27 @@ if ($EditorTranslation -or $EditorRelease) {
         exit 1
     }
     Write-Host 'Character Editor tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($useDefaultFocus) {
+    $coreChecks = @($captured['dcp-launcher-tests'] | Where-Object { $_ -match '^\d+ checks, \d+ failed$' }) | Select-Object -First 1
+    $linuxLauncher = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux launcher tests*' } | Select-Object -First 1
+    Write-Host ''
+    Write-Host "Focused development run ($defaultFocusName; pass -Full for the complete release matrix):" -ForegroundColor Cyan
+    Write-Host ('  Windows dcp-launcher-tests: {0}' -f $(if ($failed.Contains('dcp-launcher-tests')) { "FAIL ($(Format-ExitCode $exitCodes['dcp-launcher-tests']))" } elseif ($coreChecks) { "PASS ($coreChecks)" } else { 'PASS' })) -ForegroundColor $(if ($failed.Contains('dcp-launcher-tests')) { 'Red' } else { 'Green' })
+    if ($linuxLauncher -and $skipped.ContainsKey($linuxLauncher)) {
+        Write-Host "  Linux dcp-launcher-tests:   SKIPPED ($($skipped[$linuxLauncher]))" -ForegroundColor Yellow
+    } elseif ($linuxLauncher -and $failed.Contains($linuxLauncher)) {
+        Write-Host "  Linux dcp-launcher-tests:   FAIL ($(Format-ExitCode $exitCodes[$linuxLauncher]))" -ForegroundColor Red
+    } elseif ($linuxLauncher) {
+        $linuxChecks = @($captured[$linuxLauncher] | Where-Object { $_ -match '^\d+ checks, \d+ failed$' }) | Select-Object -First 1
+        Write-Host ('  Linux dcp-launcher-tests:   PASS{0}' -f $(if ($linuxChecks) { " ($linuxChecks)" } else { '' })) -ForegroundColor Green
+    }
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Focused tests ($defaultFocusName) passed." -ForegroundColor Green
     exit 0
 }
 $parityOutput = @($captured['dcp-build-parity-tests'])

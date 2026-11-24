@@ -895,7 +895,6 @@ The character's name, up to 8 letters.	O nome do personagem, ate 8 letras.
 Level	Nivel
 Skill Points	Pontos de habilidade
 Skill points available to spend.	Pontos de habilidade disponiveis para gastar.
-Gold	Ouro
 Gold belongs to this save data	Ouro pertence a este save
 Stats	Atributos
 Current HP	HP atual
