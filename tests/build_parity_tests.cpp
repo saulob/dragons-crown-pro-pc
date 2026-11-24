@@ -853,7 +853,9 @@ void TestGateConsistency() {
                                    "build_(check.build)",                  "build = *build_",
                                    "const bool known = build_ && files_ == GameFileState::kValid;",
                                    "known ? build_->title_id : \"\"",
-                                   "EditorGame{RootsOf(paths_), build_}"};
+                                   "EditorGame{RootsOf(paths_), build_}",
+                                   "[this] { return build_; },",
+                                   "ArtSourcesOf(paths_.app0, build_ ? build_->regional_archive : nullptr)"};
     std::map<std::string, int> seen;
     size_t line_start = 0, unknown = 0;
     const std::regex word("\\bbuild_\\b");

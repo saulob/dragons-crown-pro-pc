@@ -281,7 +281,7 @@ void TestKeyBinding() {
     const std::string settings = ReadSource("gpu/shim/dcp_settings.h");
     CHECK(settings.find("comms_key{SDL_SCANCODE_T}") != std::string::npos);
     const std::string settings_cpp = ReadSource("gpu/shim/dcp_settings.cpp");
-    CHECK(settings_cpp.find("&v.window_mode_key, &v.comms_key, &v.exit_key}") != std::string::npos);
+    CHECK(settings_cpp.find("&v.window_mode_key, &v.comms_key, &v.exit_key, &v.character_highlight_key}") != std::string::npos);
     for (const char* file : {"gpu/shim/dcp_comms_wheel.cpp", "gpu/shim/dcp_comms_wheel.h", "src/runtime_pad.c", "gpu/shim/dcp_overlay.cpp"}) {
         CHECK(ReadSource(file).find("SDL_SCANCODE_T") == std::string::npos);
     }

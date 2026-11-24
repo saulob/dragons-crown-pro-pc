@@ -110,7 +110,7 @@ if ((editor)); then
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-save-editor-tests dcp-inventory-editor-tests dcp-test-progress-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-comms-wheel-ui-tests dcp-runtime-tests dcp-sigpipe-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-test-progress-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-comms-wheel-ui-tests dcp-runtime-tests dcp-sigpipe-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -138,6 +138,8 @@ if ((test)); then
     "$build_dir/bin/dcp-system-type-tests"
     step 'Running the online party snapshot tests'
     "$build_dir/bin/dcp-party-tests"
+    step 'Running the DCP-YYM3TL online Inn report-adventurers thread lifecycle tests'
+    "$build_dir/bin/dcp-thread-lifecycle-tests"
     step 'Running the Comms Wheel tests'
     "$build_dir/bin/dcp-comms-tests"
     step 'Running the Comms Wheel session tests (rules, telemetry batching, the real send entry point)'
@@ -164,6 +166,8 @@ if ((test)); then
     "$build_dir/bin/dcp-test-progress-tests"
     step 'Running the Character Editor release groups (saves, identity, looks, art, composition with the translation overlay)'
     "$build_dir/bin/dcp-save-editor-tests" release
+    step 'Running the Save page tests'
+    "$build_dir/bin/dcp-save-page-tests"
     step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the mouse input tests (full mouse rebinding, Pointer Control Hold / Always On, Steam Deck trackpad behavior, touchscreen behavior, controller ownership)'
@@ -217,6 +221,8 @@ if ((test)); then
     "$build_dir/bin/dcp-rtc-tests"
     step 'Running the Skip Offer tests (synthetic and local boot images)'
     "$build_dir/bin/dcp-skip-offers-tests"
+    step 'Running the item attack cap tests'
+    "$build_dir/bin/dcp-item-attack-cap-tests"
     step 'Running the Skip Intro tests (startup logos, opening movie, first boot, title transition, all builds)'
     "$build_dir/bin/dcp-skip-intro-tests"
     step 'Running the Character Highlight tests (setting, F7 hotkey, atlas signature table, runtime image match)'

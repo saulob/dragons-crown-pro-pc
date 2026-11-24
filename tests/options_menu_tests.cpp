@@ -752,7 +752,8 @@ void TestLauncherParity() {
         "show_ping",
         "show_in_lobby", "early_story_online",
         "dcp_japanese_npc_voices",
-        "controller_exit_shortcut"};
+        "controller_exit_shortcut",
+        "controller_character_highlight"};
     const auto has = [](const std::vector<std::string>& list, const std::string& key) {
         return std::find(list.begin(), list.end(), key) != list.end();
     };

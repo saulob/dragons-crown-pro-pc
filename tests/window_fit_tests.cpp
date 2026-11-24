@@ -379,10 +379,12 @@ void TestExitSourcesShareTheCloseRequest() {
     CHECK(window.find("dcp_exit_chord_forget(&exit_chord, event.gdevice.which);") != std::string::npos);
     CHECK(window.find("dcp_exit_chord_clear(&exit_chord);") != std::string::npos);
     CHECK(window.find("SDL_GetTicks()") != std::string::npos);
-    CHECK(window.find("    UpdateExitChord();\n    UpdateMouseCapture();") != std::string::npos);
+    CHECK(window.find("    UpdateExitChord();\n    UpdateHighlightChord();\n    UpdateMouseCapture();") != std::string::npos);
     // It judges each controller from its own buttons, by SDL's standard names: no vendor ids, no Guide, Share or Touchpad.
     const size_t update = window.find("void WindowSDL::UpdateExitChord()");
-    const std::string tick = window.substr(update, end - update);
+    const size_t update_end = window.find("\n}\n", update);
+    CHECK(update != std::string::npos && update_end != std::string::npos && update_end < end);
+    const std::string tick = window.substr(update, update_end - update);
     CHECK(CountOf(tick, "SDL_GetGamepadButton(gamepad, ") == 3);
     CHECK(tick.find("SDL_GAMEPAD_BUTTON_LEFT_SHOULDER") != std::string::npos &&
           tick.find("SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER") != std::string::npos &&
@@ -429,7 +431,7 @@ void TestExitSettingsAreHostLevel() {
           settings.find("controller_exit_shortcut{true}") != std::string::npos);
     const std::string reader = ReadSource("gpu/shim/dcp_settings.cpp");
     CHECK(reader.find("key == \"controller_exit_shortcut\"") != std::string::npos);
-    CHECK(reader.find("&v.window_mode_key, &v.comms_key, &v.exit_key}") != std::string::npos);
+    CHECK(reader.find("&v.window_mode_key, &v.comms_key, &v.exit_key, &v.character_highlight_key}") != std::string::npos);
     // Not a game feature: no build, locator, hook, language or Online Play test anywhere in the shortcut code.
     const std::string policy = ReadSource("src/dcp_exit_shortcut.h");
     for (const char* forbidden : {"cusa", "CUSA", "locator", "online", "language", "feature", "rva", "guest"}) {

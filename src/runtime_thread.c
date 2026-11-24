@@ -402,22 +402,16 @@ static ABI int32_t thread_detach(GuestThread *t) {
     return 0;
 }
 /* No cancellation points are implemented: a host-side async cancel could unwind through guest frames with no
- * registered unwind info. Leaving the Inn's tavern cancels an ally-loading thread that, on a slow host, is still
- * running; this gives it 2s to finish naturally and otherwise leaves it running rather than killing the game. */
+ * registered unwind info. The game's ally-loading thread is detached, so its join cannot wait for it; cancel must,
+ * or the Inn frees the object while the worker is still using it. */
 static ABI int32_t thread_cancel(GuestThread *t) {
     if (!find_thread(t)) return ERR(3);
+    if (t==current) return ERR(11);
     pthread_once(&finished_cond_once,finished_cond_init);
-    struct timespec deadline;
-    clock_gettime(WAIT_CLOCK,&deadline);
-    deadline.tv_sec+=2;
     pthread_mutex_lock(&lock);
     if (t->finished) { pthread_mutex_unlock(&lock); return ERR(3); }
-    int timed_out=0;
-    while (!t->finished && !timed_out)
-        timed_out=pthread_cond_timedwait(&finished_cond,&lock,&deadline)==ETIMEDOUT;
-    int still_running=!t->finished;
+    while (!t->finished) pthread_cond_wait(&finished_cond,&lock);
     pthread_mutex_unlock(&lock);
-    if (still_running) puts("Runtime: scePthreadCancel: thread still running after the 2s grace period, left to finish on its own");
     return 0;
 }
 static ABI __attribute__((noreturn)) void thread_exit(void *value) {
