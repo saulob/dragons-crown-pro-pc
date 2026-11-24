@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "appearance_custom.h"
+#include "hp_override.h"
 #include "save_data.h"
 #include "save_discovery.h"
 
@@ -54,14 +55,18 @@ struct ApplyOutcome {
     SaveEdit::Result save = SaveEdit::Result::kNothingToApply;
     bool custom_written = false;
     bool custom_failed = false;
-    bool rolled_back = false; // the custom file was put back after the save could not be written
+    bool hp_written = false;
+    bool hp_failed = false;
+    bool rolled_back = false; // sidecar files were put back after another half could not be written
     bool ok() const {
-        return !custom_failed && (save == SaveEdit::Result::kApplied || save == SaveEdit::Result::kNothingToApply);
+        return !custom_failed && !hp_failed &&
+               (save == SaveEdit::Result::kApplied || save == SaveEdit::Result::kNothingToApply);
     }
 };
 
-// Writes the custom looks, then the save; when the save cannot be written the previous custom file is put back, so
-// neither half is reported applied on its own. `saved` follows what is on disk afterwards.
-ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved);
+// Writes the sidecar files, then the save; when any step fails, prior sidecar files are put back so neither half is
+// reported applied on its own. `saved` and `hp_saved` follow what is on disk afterwards.
+ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved,
+                      const HpOverrideStore* hp_working = nullptr, HpOverrideStore* hp_saved = nullptr);
 
 } // namespace dcp

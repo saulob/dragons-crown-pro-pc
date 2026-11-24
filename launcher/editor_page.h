@@ -17,6 +17,7 @@
 #include "appearance_loader.h"
 #include "character_art.h"
 #include "editor_model.h"
+#include "hp_override.h"
 #include "inventory_data.h"
 #include "inventory_model.h"
 #include "item_catalog.h"
@@ -52,7 +53,9 @@ public:
 
     void Refresh();
 
-    bool dirty() const { return (edit_ && edit_->dirty()) || !(custom_working_ == custom_saved_); }
+    bool dirty() const {
+        return (edit_ && edit_->dirty()) || !(custom_working_ == custom_saved_) || !(hp_working_ == hp_saved_);
+    }
     // A reason Play/Quit must wait (empty when clean), for the launcher gate.
     std::string DirtyReason() const;
 
@@ -176,6 +179,8 @@ private:
     CustomStore custom_saved_;
     CustomStore custom_working_;
     std::string custom_error_;
+    HpOverrideStore hp_saved_;
+    HpOverrideStore hp_working_;
     std::string selected_part_;
     bool confirm_reset_custom_ = false;
     std::mt19937 random_{std::random_device{}()};

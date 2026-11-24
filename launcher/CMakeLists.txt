@@ -36,12 +36,13 @@ add_library(dcp_launcher_core STATIC atlas_signatures.cpp boot_image.cpp build_d
     feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp home_art.cpp home_community.cpp home_portraits.cpp home_stats.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp voice_language_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     save_edit.cpp save_backup.cpp save_data.cpp inventory_data.cpp modifier_values.cpp item_catalog.cpp inventory_model.cpp save_discovery.cpp save_import.cpp save_page_model.cpp save_sfo.cpp save_zip.cpp save_ps3.cpp save_ps3_layout.cpp crypto_hmac.cpp game_texture.cpp game_mbs.cpp
     sprite_render.cpp character_art.cpp editor_model.cpp appearance_custom.cpp appearance_runtime.cpp appearance_loader.cpp fighter_horns.cpp fighter_bare_head.cpp
+    hp_override.cpp hp_override_runtime.cpp
     appearance_remote.cpp ${PROJECT_SOURCE_DIR}/src/appearance_net.cpp updater/json.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp
-    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/default_message_hook.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c ${PROJECT_SOURCE_DIR}/src/appearance_hooks.c
+    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/default_message_hook.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c ${PROJECT_SOURCE_DIR}/src/appearance_hooks.c ${PROJECT_SOURCE_DIR}/src/hp_override_hooks.c
     ${PROJECT_SOURCE_DIR}/src/guest_hook.c)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_ui_text dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
@@ -333,3 +334,10 @@ target_link_libraries(dcp-appearance-online-tests PRIVATE dcp_launcher_core)
 target_compile_definitions(dcp-appearance-online-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 set_target_properties(dcp-appearance-online-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-appearance-online-tests PRIVATE -Wall -Wextra)
+
+# DCP-UTGYFH: persistent per-character HP overrides, anti-Infinite-Health semantics, and real CUSA10209 1.00 native hooks.
+add_executable(dcp-hp-override-tests EXCLUDE_FROM_ALL ../tests/hp_override_tests.cpp)
+target_link_libraries(dcp-hp-override-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-hp-override-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-hp-override-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-hp-override-tests PRIVATE -Wall -Wextra)

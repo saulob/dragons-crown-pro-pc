@@ -99,6 +99,7 @@ set(DCP_RUNTIME_SOURCES
     src/appearance_hooks.c
     src/appearance_net.cpp
     src/appearance_session.cpp
+    src/hp_override_hooks.c
     src/default_message_hook.c
     src/guest_hook.c
     src/inn_layout.c

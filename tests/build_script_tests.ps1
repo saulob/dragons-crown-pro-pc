@@ -143,6 +143,26 @@ foreach ($required in @('dcp-test-progress-tests', 'dcp-runtime-overlay-tests') 
     }
 }
 
+$repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$cmakeText = @(Get-ChildItem -LiteralPath $repo -Recurse -Filter 'CMakeLists.txt' -File | Where-Object {
+        $_.FullName -notmatch '\\third_party\\' -and $_.FullName -notmatch '\\(build|dist|android)\\' } |
+        ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n"
+foreach ($variable in 'CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES', 'CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES',
+    'CMAKE_C_STANDARD_INCLUDE_DIRECTORIES', 'CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES') {
+    if ($cmakeText.Contains($variable)) {
+        Write-Host "FAIL: project CMake passes $variable as an include path; Clang must own its standard-header order"
+        $failures++
+    }
+}
+foreach ($module in [regex]::Matches($cmakeText, 'pkg_check_modules\(\s*(\w+)\b[^)]*\bIMPORTED_TARGET\b')) {
+    $target = "PkgConfig::$($module.Groups[1].Value)"
+    $cleared = 'set_target_properties\(\s*' + [regex]::Escape($target) + '\s+PROPERTIES\s+INTERFACE_INCLUDE_DIRECTORIES\s+""\s*\)'
+    if ($cmakeText -notmatch $cleared) {
+        Write-Host "FAIL: $target keeps pkg-config's prefix include dir in the compile line; that leading -isystem hides libc++'s C headers"
+        $failures++
+    }
+}
+
 if ($failures -gt 0) {
     exit 1
 }

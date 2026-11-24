@@ -37,7 +37,8 @@ ImTextureID EditorPage::ButtonIconTexture(ButtonIcon icon, int pixels) {
 EditorPage::EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
                        std::function<std::string()> message_suffix, const SaveSelection* selection)
     : host_(host), user_dir_(std::move(user_dir)), game_(std::move(game)), message_suffix_(std::move(message_suffix)),
-      selection_(selection), custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)) {}
+      selection_(selection), custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)),
+      hp_saved_(HpOverrideStorePath(user_dir_)), hp_working_(HpOverrideStorePath(user_dir_)) {}
 
 const EditorBuild* EditorPage::SelectedBuild() const {
     return selected_build_ < builds_.size() ? &builds_[selected_build_] : nullptr;
@@ -106,6 +107,8 @@ void EditorPage::Refresh() {
     }
     custom_error_ = custom_saved_.Load() ? std::string() : custom_saved_.error();
     custom_working_ = custom_saved_;
+    hp_saved_.Load();
+    hp_working_ = hp_saved_;
     confirm_reset_custom_ = false;
     SyncNameBuffer();
 }
@@ -172,13 +175,22 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     if (!dirty()) {
         return;
     }
-    const ApplyOutcome outcome = ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_);
+    const ApplyOutcome outcome =
+        [&] {
+            HpOverrideStore hp_next = hp_working_;
+            if (edit_ && hp_saved_.error().empty()) {
+                if (const DiscoveredSave* save = SelectedSave())
+                    SyncHpOverrides(hp_next, edit_->working(), edit_->persisted(), save->title_id, save->dir_name);
+            }
+            return ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_, &hp_next, &hp_saved_);
+        }();
     if (outcome.ok()) {
         typed_.Clear();
         typing_.End();
         KeepSearchMatchingSavedItem();
         if (edit_ && selected_save_ >= 0) saves_[selected_save_].model = edit_->persisted();
         custom_working_ = custom_saved_;
+        hp_working_ = hp_saved_;
         confirm_reset_custom_ = false;
         SyncNameBuffer();
         ui.SetStatus(Tr("Changes applied."), 4.0);
@@ -186,6 +198,10 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     }
     if (outcome.custom_failed) {
         ui.SetStatus(Tr("Could not write the custom appearance; nothing was applied."), 8.0);
+        return;
+    }
+    if (outcome.hp_failed) {
+        ui.SetStatus(Tr("Could not write the character HP; nothing was applied."), 8.0);
         return;
     }
     switch (outcome.save) {
@@ -231,6 +247,7 @@ void EditorPage::DiscardChanges(trg::Ui& ui) {
     typed_.Clear();
     typing_.End();
     custom_working_ = custom_saved_;
+    hp_working_ = hp_saved_;
     confirm_reset_custom_ = false;
     SyncNameBuffer();
     ui.SetStatus(Tr("Changes discarded."), 4.0);
@@ -743,6 +760,9 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
         edit_->working().SetSkillPoints(selected_slot_, selected_character_, skill_points);
     }
 
+    const std::optional<CustomKey> key = CurrentKey();
+    const std::optional<uint16_t> hp_override = key ? hp_working_.Get(*key) : std::nullopt;
+    const std::optional<uint16_t> hp_override_saved = key ? hp_saved_.Get(*key) : std::nullopt;
     const HpValues hp{character.hp_current, character.hp_max};
     ui.Row(Tr("Current HP"));
     int hp_current = hp.current;
@@ -754,10 +774,14 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
 
     ui.Row(Tr("Max HP"));
     int hp_max = hp.max;
-    const bool hp_max_changed = saved && saved->hp_max != character.hp_max;
+    const bool hp_max_changed = (saved && saved->hp_max != character.hp_max) || hp_override != hp_override_saved;
     if (NumberControl(ui, "hp_max", &hp_max, kHpRange, 0.25f, changed_style(hp_max_changed))) {
         const HpValues next = WithMaxHp(hp, hp_max);
         edit_->working().SetHp(selected_slot_, selected_character_, uint16_t(next.current), uint16_t(next.max));
+        if (key) {
+            if (!hp_override_saved && saved && next.max == saved->hp_max) hp_working_.Clear(*key);
+            else hp_working_.Set(*key, next.max > 0 ? std::optional<uint16_t>(uint16_t(next.max)) : std::nullopt);
+        }
     }
     ui.EndRows();
 }

@@ -117,12 +117,37 @@ bool Restore(const std::filesystem::path& path, const std::optional<std::vector<
     return store.Parse(*previous) && store.Save();
 }
 
+bool RestoreHp(const std::filesystem::path& path, const std::optional<std::vector<uint8_t>>& previous) {
+    std::error_code ec;
+    if (!previous) {
+        std::filesystem::remove(path, ec);
+        return !std::filesystem::exists(path, ec);
+    }
+    HpOverrideStore store(path);
+    return store.Parse(*previous) && store.Save();
+}
+
 } // namespace
 
-ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved) {
+ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved,
+                      const HpOverrideStore* hp_working, HpOverrideStore* hp_saved) {
     ApplyOutcome outcome;
     const bool custom_dirty = !(working == saved);
-    const std::optional<std::vector<uint8_t>> previous = custom_dirty ? Snapshot(saved.path()) : std::nullopt;
+    const bool hp_dirty = hp_working && hp_saved && !(*hp_working == *hp_saved);
+    const std::optional<std::vector<uint8_t>> prev_custom = custom_dirty ? Snapshot(saved.path()) : std::nullopt;
+    const std::optional<std::vector<uint8_t>> prev_hp = hp_dirty ? Snapshot(hp_saved->path()) : std::nullopt;
+    auto rollback = [&]() {
+        bool ok = true;
+        if (outcome.custom_written) {
+            ok &= Restore(saved.path(), prev_custom);
+            outcome.custom_written = false;
+        }
+        if (outcome.hp_written) {
+            ok &= RestoreHp(hp_saved->path(), prev_hp);
+            outcome.hp_written = false;
+        }
+        outcome.rolled_back = ok;
+    };
     if (custom_dirty) {
         if (!working.Save()) {
             outcome.custom_failed = true;
@@ -130,13 +155,18 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
         }
         outcome.custom_written = true;
     }
+    if (hp_dirty) {
+        if (!hp_working->Save()) {
+            outcome.hp_failed = true;
+            if (outcome.custom_written) rollback();
+            return outcome;
+        }
+        outcome.hp_written = true;
+    }
     if (edit && edit->dirty()) {
         outcome.save = edit->Apply();
         if (outcome.save != SaveEdit::Result::kApplied) {
-            if (custom_dirty) {
-                outcome.rolled_back = Restore(saved.path(), previous);
-                outcome.custom_written = false;
-            }
+            if (outcome.custom_written || outcome.hp_written) rollback();
             return outcome;
         }
     }
@@ -146,6 +176,14 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
             saved = working;
         } else {
             outcome.custom_failed = true;
+        }
+    }
+    if (hp_dirty) {
+        HpOverrideStore reread(hp_saved->path());
+        if (reread.Load() && reread == *hp_working) {
+            *hp_saved = *hp_working;
+        } else {
+            outcome.hp_failed = true;
         }
     }
     return outcome;

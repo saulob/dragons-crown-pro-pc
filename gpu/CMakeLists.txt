@@ -14,6 +14,9 @@ find_package(tsl-robin-map REQUIRED)
 find_package(Zydis REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash)
+# libxxhash's include root is the toolchain prefix, which Clang already searches after its libc++ headers. Passed as an
+# imported-target include it becomes a leading -isystem, hiding libc++'s <ctype.h> wrappers behind the MinGW C headers.
+set_target_properties(PkgConfig::XXHASH PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "")
 find_package(SDL3 REQUIRED CONFIG)
 find_package(PNG REQUIRED)
 find_program(GLSLANG_COMPILER NAMES glslang glslangValidator REQUIRED)

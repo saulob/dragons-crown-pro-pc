@@ -7,6 +7,7 @@
 
 #include "appearance_hooks.h"
 #include "feature_sites.h"
+#include "hp_override_hooks.h"
 
 #include "cyrillic_glyphs.h"
 #include "dcp_resolution.h"
@@ -100,6 +101,10 @@ const char *dcp_custom_appearance(const char *image_dir, const char *app0, const
                                   uint64_t base_length, const DcpFilePatch *base_patches, size_t base_count, uint64_t *length,
                                   DcpFilePatch **patches, size_t *count, const AppearanceInstance **instances,
                                   size_t *instance_count, char *message, size_t message_size);
+
+/* Persisted per-character Max HP overrides for the build's title; returns the count of active entries. */
+size_t dcp_character_hp_overrides(const char *image_dir, const char *user_dir, const HpOverrideEntry **entries,
+                                  char *message, size_t message_size);
 
 /* Swaps the bytes the guest reads for one patch of an overlaid file (runtime_file_overlay_replace). */
 typedef int (*DcpOverlayReplace)(const char *guest, uint64_t offset, uint64_t size, const void *data);

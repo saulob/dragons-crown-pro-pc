@@ -3210,6 +3210,9 @@ void TestEditorFixedLayout() {
     CHECK(row_name != std::string::npos && row_name < name && name < row_level && row_level < level);
     CHECK(level < row_skill && row_skill < skill && skill < row_current && row_current < current);
     CHECK(current < row_max && row_max < maximum && maximum < end_rows);
+    // Max HP is the only HP authority: no separate override control or reset-to-native action exists.
+    CHECK(editor.find("HP Override") == std::string::npos && editor.find("Use Game Value") == std::string::npos);
+    CHECK(page.find("HP Override") == std::string::npos && page.find("Use Game Value") == std::string::npos);
     CHECK(Count(editor, "ui.Row(") == 5 && Count(editor, "ui.EndRows();") == 1);
     CHECK(editor.find("ui.Row(Tr(\"Level\"));") != std::string::npos);
     CHECK(editor.find("stored value is level minus one") == std::string::npos);
