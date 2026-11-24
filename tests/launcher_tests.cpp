@@ -9297,6 +9297,80 @@ void TestVisualPatchFallback(const fs::path& base) {
     fs::remove(base / "visual_fallback.cpk");
 }
 
+void TestPtBrManualVisualPatches() {
+    auto inflate = [](const TranslationFile& file) -> std::vector<uint8_t> {
+        if (file.size < 4) return {};
+        const uint32_t size = uint32_t(file.data[0]) | uint32_t(file.data[1]) << 8 |
+                              uint32_t(file.data[2]) << 16 | uint32_t(file.data[3]) << 24;
+        if (size == 0 || size > (64u << 20)) return {};
+        std::vector<uint8_t> out(size);
+        uLongf dest = size;
+        if (uncompress(out.data(), &dest, file.data + 4, uLong(file.size - 4)) != Z_OK || dest != size) return {};
+        return out;
+    };
+
+    const std::vector<TranslationFile> english_slot = PtBrVisualPatches(VisualSet::kEnglishSlot);
+    const std::vector<TranslationFile> base_stage = PtBrVisualPatches(VisualSet::kBaseStage);
+    CHECK(english_slot.size() + base_stage.size() == PtBrVisualPatches().size());
+    for (const TranslationFile& file : base_stage) {
+        CHECK(std::string_view(file.name).starts_with("base-"));
+        CHECK(std::string_view(file.name).find("manual-") == std::string_view::npos);
+    }
+
+    int manual_count = 0;
+    bool checked_page2 = false;
+    bool checked_page9 = false;
+    bool checked_page10 = false;
+    for (const TranslationFile& file : english_slot) {
+        const std::string_view name(file.name);
+        if (!name.starts_with("manual-us-")) continue;
+        ++manual_count;
+        const std::vector<uint8_t> raw = inflate(file);
+        CHECK(!raw.empty());
+        const std::optional<BlockPatch> parsed = ParseBlockPatch(raw);
+        CHECK(parsed && parsed->targets.size() == 1);
+        if (!parsed || parsed->targets.size() != 1) continue;
+        const BlockPatchTarget& target = parsed->targets[0];
+        CHECK(target.size > 0 && !target.runs.empty());
+        bool in_bounds = true;
+        for (const BlockRun& run : target.runs) {
+            if (run.offset + 16u > target.size) {
+                in_bounds = false;
+                break;
+            }
+        }
+        CHECK(in_bounds);
+        if (name == "manual-us-009.dcpx.z") {
+            checked_page9 = true;
+            CHECK(target.name == "other/US_manual_009.ftx");
+            CHECK(target.crc_before == 0x179aa324u);
+            CHECK(target.crc_after == 0x0bbd4170u);
+            CHECK(target.runs.size() == 75299u);
+        } else if (name == "manual-us-002.dcpx.z") {
+            checked_page2 = true;
+            CHECK(target.name == "other/US_manual_002.ftx");
+            CHECK(target.crc_before == 0x4e391b1cu);
+            CHECK(target.crc_after == 0x2dcbee99u);
+            CHECK(target.runs.size() == 85318u);
+        } else if (name == "manual-us-010.dcpx.z") {
+            checked_page10 = true;
+            CHECK(target.name == "other/US_manual_010.ftx");
+            CHECK(target.crc_before == 0x92be5fe9u);
+            CHECK(target.crc_after == 0x7094160bu);
+            CHECK(target.runs.size() == 51526u);
+        }
+    }
+    CHECK(manual_count == 11);
+    CHECK(checked_page2 && checked_page9 && checked_page10);
+
+    for (const GameBuild& build : SupportedBuilds()) {
+        const TranslationProfile& profile = *build.translation;
+        const std::string_view title = build.title_id;
+        const bool keeps_own_manual = title == "CUSA07001" || title == "CUSA10209";
+        CHECK(profile.visuals == (keeps_own_manual ? VisualSet::kBaseStage : VisualSet::kEnglishSlot));
+    }
+}
+
 void TestFileBrowser(const fs::path& base) {
     const fs::path root = base / "browser";
     fs::create_directories(root / "Zeta");
@@ -11341,6 +11415,12 @@ int main(int argc, char** argv) {
         std::printf("GROUP|launcher-renderer|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "manual-visual") {
+        TestPtBrManualVisualPatches();
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-manual-visual|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "localization") {
         const fs::path base = fs::temp_directory_path() / ("dcp_launcher_l10n_" + std::to_string(getpid()));
         fs::remove_all(base);
@@ -11469,6 +11549,7 @@ int main(int argc, char** argv) {
     TestTranslationAcrossSlots(base);
     TestInGameUiText();
     TestVisualPatchFallback(base);
+    TestPtBrManualVisualPatches();
     TestSafeMode(base);
     TestBuilds(base);
     TestCusa10209Graphics(base);

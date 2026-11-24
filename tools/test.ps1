@@ -331,6 +331,55 @@ function Invoke-LinuxVulkanPipelineTests {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --vulkan-pipeline 2>&1") $true
 }
 
+function Find-ImagingPython {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($cmd in @(Get-Command python -All -ErrorAction SilentlyContinue)) {
+        if ($cmd.Source -and -not $candidates.Contains($cmd.Source)) { $candidates.Add($cmd.Source) }
+    }
+    $pyRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+    if (Test-Path -LiteralPath $pyRoot) {
+        foreach ($exe in @(Get-ChildItem -LiteralPath $pyRoot -Filter python.exe -Recurse -Depth 2 -ErrorAction SilentlyContinue)) {
+            if (-not $candidates.Contains($exe.FullName)) { $candidates.Add($exe.FullName) }
+        }
+    }
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        foreach ($exe in $candidates) {
+            & $exe -c "import numpy, PIL" *> $null
+            if ($LASTEXITCODE -eq 0) { return $exe }
+        }
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
+    return $null
+}
+
+function Invoke-PtBrManualVisualChecks {
+    $py = Find-ImagingPython
+    if (-not $py) { return Skipped 'no Python with numpy and Pillow is installed' }
+    $out = New-Object System.Collections.Generic.List[string]
+    $checks = @(
+        @((Join-Path $script:RepoRoot 'scripts\localization\visual_assets.py'), 'validate', '--manuals-only'),
+        @((Join-Path $script:RepoRoot 'scripts\localization\manual_repairs.py'), 'check')
+    )
+    foreach ($checkArgs in $checks) {
+        $r = Invoke-Native $py $checkArgs $true $script:RepoRoot
+        foreach ($line in @($r.Lines) + @($r.Hidden)) { $out.Add($line) }
+        if ($r.Code -ne 0) { return @{ Code = $r.Code; Lines = @($out); Hidden = @(); Skip = '' } }
+    }
+    @{ Code = 0; Lines = @($out); Hidden = @(); Skip = '' }
+}
+
+function Invoke-LinuxManualVisualTests {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --manual-visual 2>&1") $true
+}
+
 function Invoke-PtBrLocalizationChecks {
     $py = Get-Command python -ErrorAction SilentlyContinue
     if (-not $py) { return Skipped 'python is not installed' }
@@ -526,8 +575,8 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'Issue #88 PT-BR text'
-$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-text-tests')
+$defaultFocusName = 'Issue #90 PT-BR manual visuals'
+$defaultFocusSuites = @('dcp-launcher-tests')
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
@@ -589,11 +638,10 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @(
-        (Test-Step 'PT-BR localization checks (ptbr.py selftest, validate, parity)' -Block { Invoke-PtBrLocalizationChecks } -Key 'ptbr.py localization checks'),
-        (Test-Step 'launcher localization tests (PT-BR, EN, RU translation overlays, issue #88 plurals/EventMsg 220, supported-build parity)' 'dcp-launcher-tests' -Capture `
-            -Key 'dcp-launcher-tests localization' -Arguments @('localization')),
-        (Test-Step 'text tests (text dialog, system font set, composed Latin glyphs)' 'dcp-text-tests'),
-        (Test-Step 'Linux localization and text tests (WSL: tools/build.sh --localization; skipped without WSL)' -Block { Invoke-LinuxLocalizationTests })
+        (Test-Step 'PT-BR manual visual checks (visual_assets.py validate --manuals-only, manual_repairs.py check)' -Block { Invoke-PtBrManualVisualChecks } -Key 'pt-BR manual visual checks'),
+        (Test-Step 'launcher manual visual tests (embedded manual DCPX, Issue #90 pages 2/9/10 CRCs, regional manual policy)' 'dcp-launcher-tests' -Capture `
+            -Key 'dcp-launcher-tests manual-visual' -Arguments @('manual-visual')),
+        (Test-Step 'Linux manual visual tests (WSL: tools/build.sh --manual-visual; skipped without WSL)' -Block { Invoke-LinuxManualVisualTests })
     )
     $requiredSuites = $defaultFocusSuites
 }
@@ -798,7 +846,7 @@ if ($EditorTranslation -or $EditorRelease) {
     exit 0
 }
 if ($useDefaultFocus) {
-    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux localization and text tests*' } | Select-Object -First 1
+    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux *' } | Select-Object -First 1
     Write-Host ''
     Write-Host "Focused development run ($defaultFocusName; pass -Full for the complete release matrix):" -ForegroundColor Cyan
     foreach ($test in $tests) {
@@ -809,11 +857,11 @@ if ($useDefaultFocus) {
         Write-Host ("  Windows {0}: {1}" -f $name, $status) -ForegroundColor $color
     }
     if ($linuxFocus -and $skipped.ContainsKey($linuxFocus)) {
-        Write-Host "  Linux localization and text tests: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
+        Write-Host "  ${linuxFocus}: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
     } elseif ($linuxFocus -and $failed.Contains($linuxFocus)) {
-        Write-Host "  Linux localization and text tests: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
+        Write-Host "  ${linuxFocus}: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
     } elseif ($linuxFocus) {
-        Write-Host '  Linux localization and text tests: PASS' -ForegroundColor Green
+        Write-Host "  ${linuxFocus}: PASS" -ForegroundColor Green
     }
     if ($failed.Count -gt 0) {
         Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
