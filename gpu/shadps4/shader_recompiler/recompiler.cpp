@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include "common/logging/classes.h"
 #include "shader_recompiler/frontend/control_flow_graph.h"
 #include "shader_recompiler/frontend/decode.h"
@@ -142,6 +143,29 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     Shader::Optimization::DeadCodeEliminationPass(program);
     if (info.sw_stage == SwStage::Fragment && profile.needs_integer_interpolation_fix) {
         Shader::Optimization::InterpolatedIntegerPass(program);
+    }
+    if (info.sw_stage == SwStage::Fragment) {
+        auto& summary = info.interp_summary;
+        const u32 count = std::min<u32>(runtime_info.hw.fs.num_inputs, IR::NumParams);
+        for (u32 i = 0; i < count; ++i) {
+            if (runtime_info.hw.fs.inputs[i].IsDefault()) {
+                continue;
+            }
+            const auto [primary, auxiliary] = info.fs_interpolation[i];
+            if (primary == Qualifier::Flat) {
+                ++summary.flat_count;
+            } else if (primary == Qualifier::Smooth) {
+                ++summary.smooth_count;
+            } else if (primary == Qualifier::NoPerspective) {
+                ++summary.nopersp_count;
+            }
+            if (auxiliary == Qualifier::Centroid || auxiliary == Qualifier::Sample) {
+                ++summary.centroid_or_sample_count;
+            }
+        }
+        if (runtime_info.hw.fs.addr_flags.persp_pull_model_ena) {
+            summary.flags |= 4u;
+        }
     }
     Shader::Optimization::CollectShaderInfoPass(program, profile);
     Shader::IR::DumpProgram(program, info);

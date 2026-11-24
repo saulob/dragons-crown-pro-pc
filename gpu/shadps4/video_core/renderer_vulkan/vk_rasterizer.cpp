@@ -56,7 +56,8 @@ void InitAmdWaterFix(const Instance& instance) {
     DcpAmdWaterFix::State().Init(vendor);
     std::printf("GPU: experimental AMD water workaround %s (vendor %#06x, %s)\n",
                 DcpAmdWaterFix::State().On() ? "on" : "off", vendor,
-                instance.IsAttachmentFeedbackLoopLayoutSupported() ? "feedback loop layout" : "General layout");
+                instance.IsAttachmentFeedbackLoopLayoutSupported() ? "feedback loop layout"
+                                                                   : "snapshot fallback");
 }
 } // namespace
 
@@ -73,6 +74,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     // Before the rasterizer is bound: Liverpool enqueues buffers only once it sees it.
     draw_prep = std::make_unique<DrawPreparation>(pipeline_cache);
     scene_targets = std::make_unique<SceneTargets>(instance, scheduler, runtime, texture_cache);
+    feedback_snapshots = std::make_unique<FeedbackSnapshots>(instance, scheduler, runtime);
     if (!EmulatorSettings.IsNullGPU()) {
         liverpool->BindRasterizer(this);
     }
@@ -81,6 +83,15 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     GpuProfiler::Init(instance, scheduler);
     InitAmdWaterFix(instance);
     water_diag.Init(instance.GetVendorID());
+    issue84_diag.Init(instance.GetVendorID());
+    if (issue84_diag.Enabled()) {
+        std::printf("Issue84 diag: active vendor=%#06x feedback_layout_only=%s "
+                    "provoking_per_pipeline=%s depth_bounds=%s\n",
+                    instance.GetVendorID(),
+                    instance.IsAttachmentFeedbackLoopLayoutOnlyAvailable() ? "yes" : "no",
+                    instance.IsProvokingVertexModePerPipelineSupported() ? "yes" : "no",
+                    instance.IsDepthBoundsSupported() ? "yes" : "no");
+    }
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
@@ -1041,7 +1052,18 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
+    const bool next_provoking_last =
+        pipeline->GetGraphicsKey().provoking_vtx_last == AmdGpu::ProvokingVtxLast::Last;
+    if (GpuCompat::NeedsProvokingVertexPassBreak(
+            instance.IsProvokingVertexSupported(),
+            instance.IsProvokingVertexModePerPipelineSupported(),
+            has_active_provoking_last && scheduler.IsRenderingWith(state), active_provoking_last,
+            next_provoking_last)) {
+        scheduler.EndRendering();
+    }
     scheduler.BeginRendering(state);
+    has_active_provoking_last = true;
+    active_provoking_last = next_provoking_last;
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
@@ -1050,6 +1072,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const vk::Pipeline handle = pipeline->Handle();
     const vk::Pipeline square = SquarePass(*pipeline);
     const u32 num_indices = regs.num_indices;
+    if (issue84_diag.Active()) {
+        ReportIssue84Diag(pipeline, is_indexed, num_indices);
+    }
     const u32 num_instances = regs.num_instances.NumInstances();
     const u32 first_vertex = vertex_offset;
     const u32 first_instance = instance_offset;
@@ -1179,7 +1204,21 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
+    const bool next_provoking_last =
+        pipeline->GetGraphicsKey().provoking_vtx_last == AmdGpu::ProvokingVtxLast::Last;
+    if (GpuCompat::NeedsProvokingVertexPassBreak(
+            instance.IsProvokingVertexSupported(),
+            instance.IsProvokingVertexModePerPipelineSupported(),
+            has_active_provoking_last && scheduler.IsRenderingWith(state), active_provoking_last,
+            next_provoking_last)) {
+        scheduler.EndRendering();
+    }
     scheduler.BeginRendering(state);
+    has_active_provoking_last = true;
+    active_provoking_last = next_provoking_last;
+    if (issue84_diag.Active()) {
+        ReportIssue84Diag(pipeline, is_indexed, 0);
+    }
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
                                  : sizeof(VkDrawIndirectCommand)));
@@ -1439,7 +1478,9 @@ bool Rasterizer::TexturesBindableOnHelper(const Shader::Info& stage,
             image = &texture_cache.GetImage(image_id);
         }
         if (image->binding.needs_rebind || !texture_cache.IsUpToDate(image_id) ||
-            scene_targets->Tracks(image->image_uid)) {
+            scene_targets->Tracks(image->image_uid) ||
+            (!instance.IsAttachmentFeedbackLoopLayoutSupported() && image->binding.is_target &&
+             !image->info.props.is_depth)) {
             return false;
         }
     }
@@ -1485,6 +1526,9 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
 
     pipeline_is_compute = pipeline->IsCompute();
     water_fix = DcpAmdWaterFix::State().On();
+    feedback_snapshots->BeginDraw();
+    issue84_snapshot_used = false;
+    issue84_sample_layout = 0;
     set_write_index = 0;
     set_writes.clear();
     buffer_infos.clear();
@@ -2304,18 +2348,39 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                     continue;
                 }
             }
-            // The image is either bound as storage in a separate descriptor or bound as render
-            // target in feedback loop. Depth images are excluded because they can't be bound as
-            // storage and feedback loop doesn't make sense for them
-            if ((binding.force_general || binding.is_target) && !image.info.props.is_depth) {
-                if (instance.IsAttachmentFeedbackLoopLayoutSupported() && image.binding.is_target) {
-                    barrier |= runtime.Transit(
-                        &image, vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT,
-                        vk::PipelineStageFlagBits2::eAllGraphics, vk::AccessFlagBits2::eShaderRead);
-                } else {
+            const auto state_route = GpuCompat::ChoosePipelineState(instance.GetGpuCapabilities());
+            const auto sample_action = GpuCompat::ChooseTargetSampleAction(
+                state_route, binding.is_target, is_storage, binding.force_general,
+                image.info.props.is_depth);
+            if (sample_action == GpuCompat::TargetSampleAction::SnapshotCopy) {
+                const vk::ImageView snapshot_view =
+                    feedback_snapshots->Capture(image, image_id, desc.view_info);
+                image.binding.sampled_snapshot = 1u;
+                image.usage.texture = 1u;
+                issue84_snapshot_used = true;
+                issue84_sample_layout = u32(vk::ImageLayout::eShaderReadOnlyOptimal);
+                if (FrameCapture::Active()) {
+                    FrameCapture::Sampled(image.info, false);
+                }
+                image_infos.emplace_back(VK_NULL_HANDLE, snapshot_view,
+                                         vk::ImageLayout::eShaderReadOnlyOptimal);
+                set_ok = false;
+                continue;
+            }
+            if (sample_action == GpuCompat::TargetSampleAction::FeedbackLoopLayout) {
+                barrier |= runtime.Transit(
+                    &image, vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT,
+                    vk::PipelineStageFlagBits2::eAllGraphics, vk::AccessFlagBits2::eShaderRead);
+            } else if (sample_action == GpuCompat::TargetSampleAction::StorageGeneral) {
+                if (binding.force_general || binding.is_target) {
                     barrier |= runtime.Transit(
                         &image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eAllCommands,
                         vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite);
+                } else {
+                    barrier |= runtime.Transit(
+                        &image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eAllCommands,
+                        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite,
+                        desc.view_info.range);
                 }
             } else if (image.info.props.is_depth && binding.is_target &&
                        DcpAmdWaterFix::SharesDepthLayout(water_fix, true, depth_target_writes)) {
@@ -2323,19 +2388,15 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                                            vk::PipelineStageFlagBits2::eAllGraphics,
                                            vk::AccessFlagBits2::eShaderRead);
             } else {
-                if (is_storage) {
-                    barrier |= runtime.Transit(
-                        &image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eAllCommands,
-                        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite,
-                        desc.view_info.range);
-                } else {
-                    const auto new_layout = image.info.props.is_depth
-                                                ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
-                                                : vk::ImageLayout::eShaderReadOnlyOptimal;
-                    barrier |= runtime.Transit(
-                        &image, new_layout, vk::PipelineStageFlagBits2::eAllCommands,
-                        vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
-                }
+                const auto new_layout = image.info.props.is_depth
+                                            ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
+                                            : vk::ImageLayout::eShaderReadOnlyOptimal;
+                barrier |= runtime.Transit(
+                    &image, new_layout, vk::PipelineStageFlagBits2::eAllCommands,
+                    vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
+            }
+            if (issue84_diag.Active() && binding.is_target) {
+                issue84_sample_layout = u32(image.backing->state.layout);
             }
             image.usage.storage |= is_storage;
             image.usage.texture |= !is_storage;
@@ -2678,6 +2739,88 @@ void Rasterizer::ReportWaterDiag(const GraphicsPipeline* pipeline) {
     }
 }
 
+void Rasterizer::ReportIssue84Diag(const GraphicsPipeline* pipeline, bool is_indexed,
+                                   u32 vertex_count) {
+    const u32 frame = DcpWaterDiag::Frame();
+    const u32 draw = issue84_diag.NextDraw(frame);
+    const auto& key = pipeline->GetGraphicsKey();
+    const auto& regs = Regs();
+    const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+
+    DcpIssue84Diag::DrawInfo info{};
+    info.frame = frame;
+    info.draw = draw;
+    info.vs_hash = pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash;
+    info.ps_hash = ps ? ps->pgm_hash : 0;
+    info.pipeline_hash = std::hash<GraphicsPipelineKey>{}(key);
+    info.prim_type = static_cast<u32>(key.prim_type);
+    info.vertex_count = vertex_count;
+    info.indexed = is_indexed;
+    info.provoking_last = key.provoking_vtx_last == AmdGpu::ProvokingVtxLast::Last;
+    info.num_render_targets = static_cast<u8>(key.num_color_attachments);
+    info.feedback_loop_supported = instance.IsAttachmentFeedbackLoopLayoutSupported();
+    info.snapshot_used = issue84_snapshot_used;
+    info.sample_layout = issue84_sample_layout;
+
+    for (u32 i = 0; i < key.num_color_attachments && i < AmdGpu::NUM_COLOR_BUFFERS; ++i) {
+        info.color_write_masks |= (static_cast<u32>(key.write_masks[i]) & 0xfu) << (i * 4);
+        if (key.blend_controls[i].enable) {
+            info.blend_enable_mask |= static_cast<u8>(1u << i);
+        }
+    }
+    if (key.num_color_attachments > 0) {
+        info.blend_cb0_src = static_cast<u8>(key.blend_controls[0].color_src_factor);
+        info.blend_cb0_dst = static_cast<u8>(key.blend_controls[0].color_dst_factor);
+        info.blend_cb0_op = static_cast<u8>(key.blend_controls[0].color_func);
+    }
+    const auto ds = GetEffectiveDepthStencilState(regs);
+    info.depth_stencil_bits = static_cast<u8>((ds.depth_test_enable ? 1u : 0u) |
+                                              (ds.depth_write_enable ? 2u : 0u) |
+                                              (ds.stencil_test_enable ? 4u : 0u) |
+                                              (ds.depth_bounds_enable ? 8u : 0u));
+
+    const u32 num_color = std::bit_width(key.mrt_mask);
+    for (u32 cb = 0; cb < num_color; ++cb) {
+        if (!cb_descs[cb].first) {
+            continue;
+        }
+        const auto& img = texture_cache.GetImage(cb_descs[cb].first);
+        if (img.binding.is_bound) {
+            info.target_layout = u32(img.backing->state.layout);
+            if (!img.binding.sampled_snapshot) {
+                info.hazard = DcpIssue84Diag::Hazard::Color;
+            }
+            break;
+        }
+    }
+    if (info.hazard == DcpIssue84Diag::Hazard::None && !info.snapshot_used && db_desc.first) {
+        const auto& depth_img = texture_cache.GetImage(db_desc.first);
+        if (depth_img.binding.is_bound && depth_target_writes) {
+            info.hazard = DcpIssue84Diag::Hazard::Depth;
+            info.target_layout = u32(depth_img.backing->state.layout);
+        }
+    }
+    if (info.target_layout == 0 && num_color > 0 && cb_descs[0].first) {
+        info.target_layout = u32(texture_cache.GetImage(cb_descs[0].first).backing->state.layout);
+    }
+
+    if (ps) {
+        info.interp_flat = ps->interp_summary.flat_count;
+        info.interp_smooth = ps->interp_summary.smooth_count;
+        info.interp_nopersp = ps->interp_summary.nopersp_count;
+        info.interp_centroid_or_sample = ps->interp_summary.centroid_or_sample_count;
+        info.interp_integer_fix = ps->interp_summary.integer_fix_count;
+        info.interp_flags = ps->interp_summary.flags;
+    }
+
+    if (const auto event = DcpIssue84Diag::Classify(info)) {
+        issue84_diag.Report(*event, [](const char* line) {
+            std::printf("%s\n", line);
+            std::fflush(stdout);
+        });
+    }
+}
+
 RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     attachment_feedback_loop = false;
     const auto& regs = Regs();
@@ -2723,6 +2866,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     state.height = instance.GetMaxFramebufferHeight();
     state.num_layers = std::numeric_limits<u16>::max();
     state.num_color_attachments = std::bit_width(key.mrt_mask);
+    const auto state_route = GpuCompat::ChoosePipelineState(instance.GetGpuCapabilities());
     for (auto cb = 0u; cb < state.num_color_attachments; ++cb) {
         auto& [image_id, desc] = cb_descs[cb];
         if (!image_id) {
@@ -2747,7 +2891,8 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
 
         if (reduced) {
             // The native image is resolved lazily when a shader/copy actually reads it.
-        } else if (image->binding.is_bound) {
+        } else if (GpuCompat::UsesFeedbackLoopAttachment(state_route, image->binding.is_bound,
+                                                         image->binding.sampled_snapshot)) {
             ASSERT_MSG(!image->binding.force_general,
                        "Having image both as storage and render target is unsupported");
             runtime.FlushBarriers();

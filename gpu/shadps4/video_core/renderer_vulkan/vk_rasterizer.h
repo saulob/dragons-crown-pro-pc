@@ -5,6 +5,7 @@
 
 #include "character_highlight_draw.h"
 #include "common/recursive_lock.h"
+#include "dcp_issue84_diag.h"
 #include "dcp_narrow_water_reader.h"
 #include "dcp_water_diag.h"
 #include "common/shared_first_mutex.h"
@@ -13,6 +14,7 @@
 #include "video_core/renderer_backend.h"
 #include "video_core/renderer_vulkan/vk_bind_helper.h"
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
+#include "video_core/renderer_vulkan/vk_feedback_snapshot.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
@@ -160,6 +162,7 @@ private:
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
     void CaptureWaterDiagLayouts(const GraphicsPipeline* pipeline);
     void ReportWaterDiag(const GraphicsPipeline* pipeline);
+    void ReportIssue84Diag(const GraphicsPipeline* pipeline, bool is_indexed, u32 vertex_count);
     bool SkipsNarrowWaterReader(const GraphicsPipeline* pipeline);
     /// dcp: a draw continuing the open render pass with the same inputs gets the same render
     /// state (RenderStateMemo); nothing can have broken the pass in between (barriers, copies and
@@ -330,6 +333,7 @@ private:
     PipelineCache pipeline_cache;
     std::unique_ptr<DrawPreparation> draw_prep;
     std::unique_ptr<SceneTargets> scene_targets;
+    std::unique_ptr<FeedbackSnapshots> feedback_snapshots;
     bool scene_started = false;
     std::array<float, 2> target_scale{1.0f, 1.0f}; ///< pass drawn into scaled scene targets
     const bool host_markers_enabled;
@@ -487,6 +491,11 @@ private:
     DcpWaterDiag::Monitor water_diag;
     /// Layouts of the sampled targets once the textures were bound (cb, then depth).
     std::array<u32, AmdGpu::NUM_COLOR_BUFFERS + 1> water_diag_layouts{};
+    DcpIssue84Diag::Monitor issue84_diag;
+    bool issue84_snapshot_used{};
+    u32 issue84_sample_layout{};
+    bool has_active_provoking_last{};
+    bool active_provoking_last{};
     // dcp: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).
     static inline thread_local const AmdGpu::Regs* stage_regs = nullptr;

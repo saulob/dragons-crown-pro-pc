@@ -144,6 +144,7 @@ public:
         u32 is_target : 1;
         u32 needs_rebind : 1;
         u32 force_general : 1;
+        u32 sampled_snapshot : 1;
     } binding{};
     struct {
         u32 texture : 1;

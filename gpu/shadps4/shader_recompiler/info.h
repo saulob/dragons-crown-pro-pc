@@ -71,6 +71,17 @@ struct InfoPersistent {
     HwStage hw_stage;
     SwStage sw_stage;
 
+    struct InterpolationSummary {
+        u8 flat_count{};
+        u8 smooth_count{};
+        u8 nopersp_count{};
+        u8 centroid_or_sample_count{};
+        u8 integer_fix_count{};
+        u8 flags{}; // bit 0: mov_non_p0 fallback, bit 1: mixed_param, bit 2: pull_model
+        u16 reserved{};
+    };
+    InterpolationSummary interp_summary{};
+
     u8 mrt_mask{};
     bool has_fetch_shader{};
     bool has_bitwise_xor{};

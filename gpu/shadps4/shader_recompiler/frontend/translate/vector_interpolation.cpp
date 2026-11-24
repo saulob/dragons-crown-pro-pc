@@ -82,7 +82,11 @@ void Translator::V_INTERP_P2_F32(const GcnInst& inst) {
     }
     ASSERT(!attr.is_flat);
     if (!profile.needs_manual_interpolation) {
-        interp = GetInterpolation(vgpr_to_interp[inst.src[0].code]);
+        const auto next = GetInterpolation(vgpr_to_interp[inst.src[0].code]);
+        if (interp.primary != Qualifier::None && interp.primary != next.primary) {
+            info.interp_summary.flags |= 2u;
+        }
+        interp = next;
         SetDst(inst.dst[0], ir.GetAttribute(attrib, inst.control.vintrp.chan));
         return;
     }
@@ -116,6 +120,12 @@ void Translator::V_INTERP_MOV_F32(const GcnInst& inst) {
         }
         SetDst(inst.dst[0], result);
     } else {
+        if (src_select != 2) {
+            info.interp_summary.flags |= 1u;
+        }
+        if (interp.primary != Qualifier::None && interp.primary != Qualifier::Flat) {
+            info.interp_summary.flags |= 2u;
+        }
         interp.primary = Qualifier::Flat;
         SetDst(inst.dst[0], ir.GetAttribute(attrib, inst.control.vintrp.chan));
     }

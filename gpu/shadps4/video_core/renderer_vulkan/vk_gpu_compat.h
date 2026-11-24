@@ -71,6 +71,46 @@ constexpr PipelineStateRoute ChoosePipelineState(const Capabilities& caps) {
     };
 }
 
+enum class TargetSampleAction {
+    NormalSample,
+    StorageGeneral,
+    FeedbackLoopLayout,
+    SnapshotCopy,
+};
+
+// Without VK_EXT_attachment_feedback_loop_layout, sampling an active color attachment in GENERAL
+// layout is undefined behavior (and breaks TBDR tile memory coherency). Sample a pre-draw copy.
+constexpr TargetSampleAction ChooseTargetSampleAction(const PipelineStateRoute& route,
+                                                      bool is_target, bool is_storage,
+                                                      bool force_general, bool is_depth) {
+    if (is_storage) {
+        return TargetSampleAction::StorageGeneral;
+    }
+    if (is_depth) {
+        return TargetSampleAction::NormalSample;
+    }
+    if (is_target && !force_general) {
+        return route.feedback_loop ? TargetSampleAction::FeedbackLoopLayout
+                                   : TargetSampleAction::SnapshotCopy;
+    }
+    if (force_general) {
+        return TargetSampleAction::StorageGeneral;
+    }
+    return TargetSampleAction::NormalSample;
+}
+
+constexpr bool UsesFeedbackLoopAttachment(const PipelineStateRoute& route, bool is_bound,
+                                          bool sampled_snapshot) {
+    return route.feedback_loop ? is_bound : (is_bound && !sampled_snapshot);
+}
+
+constexpr bool NeedsProvokingVertexPassBreak(bool provoking_supported, bool per_pipeline_supported,
+                                             bool active_rendering, bool current_last,
+                                             bool next_last) {
+    return provoking_supported && !per_pipeline_supported && active_rendering &&
+           current_last != next_last;
+}
+
 constexpr bool ForceColorSamplesToDepth(const Capabilities& caps, bool all_color_samples_same,
                                         bool depth_mismatch) {
     return (!all_color_samples_same && !caps.mixed_any_samples) ||

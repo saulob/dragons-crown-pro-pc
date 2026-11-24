@@ -513,6 +513,7 @@ $tests = @(
     (Test-Step 'AMD water workaround tests (vendor defaults, no hotkey)' 'dcp-amd-water-tests'),
     (Test-Step 'pipeline cache tests (seal, identity, warm-up mode, recovery, build gate)' 'dcp-pipeline-cache-tests'),
     (Test-Step 'GPU compatibility tests (interpolation route, integer fix, dynamic state, feedback loop, mixed samples)' 'dcp-gpu-compat-tests'),
+    (Test-Step 'Issue #84 Adreno regression tests (feedback snapshot fallback, provoking pass break, static pipeline key audit, cache invalidation, diagnostics)' 'dcp-issue84-tests'),
     (Test-Step 'water diagnostics tests (AMD only, deduplication, cap)' 'dcp-water-diag-tests'),
     (Test-Step 'narrow water reader tests (16:10 skip, 16:9 and ultrawide untouched, signature)' 'dcp-narrow-water-reader-tests'),
     (Test-Step 'save-data tests (mounts, Japanese startup save hook)' 'dcp-savedata-tests' -Parity),
@@ -575,8 +576,8 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'Issue #90 PT-BR manual visuals'
-$defaultFocusSuites = @('dcp-launcher-tests')
+$defaultFocusName = 'Issue #84 Adreno Vulkan compatibility'
+$defaultFocusSuites = @('dcp-gpu-compat-tests', 'dcp-pipeline-cache-tests', 'dcp-issue84-tests')
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
@@ -637,12 +638,7 @@ if ($BossBattleOnline) {
 } elseif ($Full) {
     Sync-GpuDependencies
 } else {
-    $tests = @(
-        (Test-Step 'PT-BR manual visual checks (visual_assets.py validate --manuals-only, manual_repairs.py check)' -Block { Invoke-PtBrManualVisualChecks } -Key 'pt-BR manual visual checks'),
-        (Test-Step 'launcher manual visual tests (embedded manual DCPX, Issue #90 pages 2/9/10 CRCs, regional manual policy)' 'dcp-launcher-tests' -Capture `
-            -Key 'dcp-launcher-tests manual-visual' -Arguments @('manual-visual')),
-        (Test-Step 'Linux manual visual tests (WSL: tools/build.sh --manual-visual; skipped without WSL)' -Block { Invoke-LinuxManualVisualTests })
-    )
+    $tests = @($tests | Where-Object { $defaultFocusSuites -contains $_.Exe })
     $requiredSuites = $defaultFocusSuites
 }
 
@@ -650,7 +646,7 @@ Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
 if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {

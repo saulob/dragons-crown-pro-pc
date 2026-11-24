@@ -7,6 +7,7 @@
 // truncation of an interpolated value is scaled by 1 + 2^-16 first: it restores the exact
 // integer, and moves other values by far less than a pixel's gradient.
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include "shader_recompiler/info.h"
@@ -63,6 +64,8 @@ void InterpolatedIntegerPass(IR::Program& program) {
         }
     }
     if (patched) {
+        program.info.interp_summary.integer_fix_count =
+            static_cast<u8>(std::min<u32>(patched, 255u));
         static std::atomic<u32> shaders{0};
         const u32 count = shaders.fetch_add(1, std::memory_order_relaxed) + 1;
         if (count <= 32) {

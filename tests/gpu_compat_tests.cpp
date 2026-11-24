@@ -330,7 +330,8 @@ void TestShaderPaths() {
     const std::string translate = ReadSource("gpu/shadps4/shader_recompiler/frontend/translate/translate.cpp");
     CHECK(Contains(translate, "if (profile.supports_amd_shader_explicit_vertex_parameter ||\n                    profile.supports_fragment_shader_barycentric) {\n                    ir.SetVectorReg(IR::VectorReg(vreg), ir.GetAttribute(attrib, comp));"));
     const std::string vintrp = ReadSource("gpu/shadps4/shader_recompiler/frontend/translate/vector_interpolation.cpp");
-    CHECK(Contains(vintrp, "if (!profile.needs_manual_interpolation) {\n        interp = GetInterpolation(vgpr_to_interp[inst.src[0].code]);\n        SetDst(inst.dst[0], ir.GetAttribute(attrib, inst.control.vintrp.chan));"));
+    CHECK(Contains(vintrp, "const auto next = GetInterpolation(vgpr_to_interp[inst.src[0].code]);"));
+    CHECK(Contains(vintrp, "SetDst(inst.dst[0], ir.GetAttribute(attrib, inst.control.vintrp.chan));"));
     CHECK(Contains(vintrp, "interp.primary = Qualifier::Flat;"));
 
     const std::string emit = ReadSource("gpu/shadps4/shader_recompiler/backend/spirv/emit_spirv_context_get_set.cpp");
@@ -339,6 +340,8 @@ void TestShaderPaths() {
     const std::string serialization =
         ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_serialization.cpp");
     CHECK(Contains(serialization, "ShaderBinaryVersion = 8u;"));
+    CHECK(Contains(serialization, "ShaderMetaVersion = 8u;"));
+    CHECK(Contains(serialization, "PipelineKeyVersion = 6u;"));
 }
 
 } // namespace
