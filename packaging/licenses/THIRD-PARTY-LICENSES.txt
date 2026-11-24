@@ -40,6 +40,11 @@ Noto Sans TC 2.004 (embedded font; stands in for the PS4 Chinese system font set
                             SIL Open Font License 1.1. Copyright 2014-2021 Adobe.                licenses\NotoSansTC
                             NotoSansTC-Regular.otf unmodified from https://github.com/notofonts/noto-cjk,
                             Sans/SubsetOTF/TC at commit f8d157532fbfaeda587e826d4cd5b21a49186f7c.
+Noto Sans KR 2.004 (embedded font; stands in for the PS4 system font set when the text is Korean; the
+                            Hangul in localization/ko/font/hangul.glyphs.z are drawn with Noto Sans CJK KR)
+                            SIL Open Font License 1.1. Copyright 2014-2021 Adobe.                licenses\NotoSansKR
+                            NotoSansKR-Regular.otf unmodified from https://github.com/notofonts/noto-cjk,
+                            Sans/SubsetOTF/KR at commit 165c01b46ea533872e002e0785ff17e44f6d97d8.
 Dear ImGui 1.92.9b          MIT. Copyright (c) 2014-2025 Omar Cornut.                            licenses\imgui
 magic_enum                  MIT. Copyright (c) 2019 - 2024 Daniil Goncharov.                     licenses\magic_enum
 miniz                       MIT. Copyright 2013-2014 RAD Game Tools and Valve Software;

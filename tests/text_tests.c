@@ -378,6 +378,75 @@ static void test_font_set(void) {
     CHECK(font.memory_term(memory) == FONT_OK);
 }
 
+/* The port's Korean: only the European system font set opens the embedded Noto Sans KR, and only while Korean is the
+ * Menu & Subtitles language. Every other set and language keeps its font. */
+static void test_korean_font_set(void) {
+    if (!resolve_font()) return;
+    static unsigned char region[4096];
+    unsigned char memory[64];
+    void *library = NULL, *renderer = NULL;
+    CHECK(font.memory_init(memory, region, sizeof(region), NULL, NULL, NULL, NULL) == FONT_OK);
+    CHECK(font.create_library(memory, font.select_library(0), 0, &library) == FONT_OK && library);
+    CHECK(font.create_renderer(memory, font.select_renderer(0), 0, &renderer) == FONT_OK && renderer);
+    const OpenDetail detail = {.tag = 0xfd2, .unique_id = 1};
+    const uint32_t hangul[] = {0xAC00 /* 가 */, 0xBBA8 /* 메 */, 0xD55C /* 한 */};
+
+    runtime_font_set_korean(1);
+    void *set = NULL;
+    CHECK(font.open_set(library, FONTSET_SST_STD_EUROPEAN_JPCJK, 2, &detail, &set) == FONT_OK && set);
+    if (set) {
+        CHECK(font.bind(set, renderer) == FONT_OK);
+        CHECK(font.set_scale(set, 24.0f, 24.0f) == FONT_OK);
+        Layout layout = {0};
+        CHECK(font.horizontal_layout(set, &layout) == FONT_OK && layout.b > layout.a);
+        CHECK(font.setup_render_scale(set, 24.0f * 24.0f / layout.b, 24.0f * 24.0f / layout.b) == FONT_OK);
+        font.surface_init(surface, pixels, SURFACE, 1, SURFACE, SURFACE);
+        int inked = 0;
+        CHECK(render(set, 'A', &inked) == FONT_OK && inked > 0);
+        for (size_t i = 0; i < sizeof(hangul) / sizeof(*hangul); ++i) {
+            const int drawn = render(set, hangul[i], &inked) == FONT_OK && inked > 0;
+            CHECK(drawn);
+            if (!drawn) printf("  Korean U+%04X from the European set\n", (unsigned)hangul[i]);
+        }
+        CHECK(font.close(set) == FONT_OK);
+        set = NULL;
+    }
+
+    /* The Chinese set stays Noto Sans TC: the Korean flag is only for the European set. */
+    void *chinese = NULL;
+    CHECK(font.open_set(library, FONTSET_SST_STD_SCHINESE_GBCJK, 2, &detail, &chinese) == FONT_OK && chinese);
+    if (chinese) {
+        CHECK(font.bind(chinese, renderer) == FONT_OK && font.set_scale(chinese, 24.0f, 24.0f) == FONT_OK);
+        Layout layout = {0};
+        CHECK(font.horizontal_layout(chinese, &layout) == FONT_OK && layout.b > layout.a);
+        CHECK(font.setup_render_scale(chinese, 24.0f * 24.0f / layout.b, 24.0f * 24.0f / layout.b) == FONT_OK);
+        font.surface_init(surface, pixels, SURFACE, 1, SURFACE, SURFACE);
+        int inked = 0;
+        CHECK(render(chinese, 0x89D2 /* 角 */, &inked) == FONT_OK && inked > 0);
+        CHECK(render(chinese, 0xAC00, &inked) == ERR_NO_SUPPORT_GLYPH && inked == 0);
+        CHECK(font.close(chinese) == FONT_OK);
+    }
+
+    /* Back to every other language: the European set is Noto Sans again, without Hangul. */
+    runtime_font_set_korean(0);
+    set = NULL;
+    CHECK(font.open_set(library, FONTSET_SST_STD_EUROPEAN_JPCJK, 2, &detail, &set) == FONT_OK && set);
+    if (set) {
+        CHECK(font.bind(set, renderer) == FONT_OK && font.set_scale(set, 24.0f, 24.0f) == FONT_OK);
+        Layout layout = {0};
+        CHECK(font.horizontal_layout(set, &layout) == FONT_OK && layout.b > layout.a);
+        CHECK(font.setup_render_scale(set, 24.0f * 24.0f / layout.b, 24.0f * 24.0f / layout.b) == FONT_OK);
+        font.surface_init(surface, pixels, SURFACE, 1, SURFACE, SURFACE);
+        int inked = 0;
+        CHECK(render(set, 'A', &inked) == FONT_OK && inked > 0);
+        CHECK(render(set, 0xAC00, &inked) == ERR_NO_SUPPORT_GLYPH && inked == 0);
+        CHECK(font.close(set) == FONT_OK);
+    }
+    CHECK(font.destroy_library(&library) == FONT_OK);
+    CHECK(font.destroy_renderer(&renderer) == FONT_OK);
+    CHECK(font.memory_term(memory) == FONT_OK);
+}
+
 /* sceFontOpenFontMemory keeps working on guest-owned font data (the game opens its own font this way). */
 static void test_font_memory(const char *path) {
     FILE *file = fopen(path, "rb");
@@ -637,6 +706,7 @@ int main(void) {
     runtime_start(1);
     test_ime_panel_size();
     test_font_set();
+    test_korean_font_set();
     test_font_memory(DCP_SOURCE_DIR "/gpu/third_party/fonts/DejaVuSans.ttf");
     test_composed_letters();
     printf("text tests: %d checks, %d failures\n", checks, failures);

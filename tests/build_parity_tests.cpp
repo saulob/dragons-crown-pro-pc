@@ -39,6 +39,7 @@
 #include "fms_sheet.h"
 #include "net/json.h"
 #include "game_translation.h"
+#include "hangul_glyphs.h"
 #include "latin_glyphs.h"
 #include "gallery_unlock.h"
 #include "kraken_fix.h"
@@ -530,7 +531,7 @@ void TestContract() {
         CHECK(caps.startup_save == row->startup_save);
         CHECK(caps.languages == row->languages);
         CHECK(caps.translations ==
-              (NativeEnglish(*row) ? "brazilian_portuguese russian" : "english brazilian_portuguese russian"));
+              (NativeEnglish(*row) ? "korean brazilian_portuguese russian" : "english brazilian_portuguese russian"));
         g_scope = "contract";
     }
     for (const Contract& row : kContracts) {
@@ -1016,7 +1017,7 @@ void TestEuropeBuild() {
           caps.skip_intro == Mapping::kSignature && caps.menu_buttons == Mapping::kSignature &&
           caps.unlock_gallery == Mapping::kSignature && caps.system_type == Mapping::kSignature &&
           caps.lzcnt == Mapping::kSignature && caps.startup_save == Mapping::kTable);
-    CHECK(caps.languages == kWestern && caps.translations == "brazilian_portuguese russian");
+    CHECK(caps.languages == kWestern && caps.translations == "korean brazilian_portuguese russian");
     CHECK(europe->features_by_signature && europe->resolution_by_signature && europe->check_prompt_fit);
     CHECK(!Listed(ultrawide_records, *europe));
 
@@ -1915,6 +1916,81 @@ void CheckPreparedRussian(const GameBuild& build, const fs::path& game) {
     CHECK(messages == 366);
 }
 
+// Korean on a real game: the official Korean corpus over the English slot, the Hangul syllables drawn into the main font
+// and their pages added to the executable's glyph table after proving every cell was a kanji's.
+void CheckPreparedKorean(const GameBuild& build, const fs::path& game) {
+    const TranslationProfile& profile = *build.translation;
+    if (KoreanTranslationFiles().empty() || profile.hangul.entry.empty()) return;
+    const TextLanguage& language = ResolveTextLanguage(&build, kKoreanKey);
+    CHECK(language.translation == kPortKorean && language.ps4_id == 1 && language.suffix == "US");
+    TranslationRecipe recipe{language.suffix, KoreanTranslationFiles()};
+    recipe.text_key = "ko";
+    recipe.same_arguments = true;
+    recipe.hangul = &profile.hangul;
+    recipe.hangul_glyphs = KoreanGlyphs();
+    recipe.mark_archive = game / "DRACRO.CPK";
+    recipe.glyph_table = true;
+    recipe.french_layouts = profile.visuals == VisualSet::kEnglishSlot;
+    const ArchiveTranslation result = TranslateArchive(game / profile.archive, recipe);
+    CHECK(result.error.empty() && result.overlay);
+    CHECK(result.corpus == 11953 && result.translated == 11953 && result.refused == 0 && !result.folded);
+    CHECK(result.sheets == 13 && result.hangul_glyphs.size() == 1075 && !result.latin_glyphs);
+    CHECK(result.cyrillic_metrics.empty());
+    std::printf("KOREAN|%s|%zu of %zu records, %zu sheets, %zu syllables\n", build.label, result.translated, result.corpus,
+                result.sheets, result.hangul_glyphs.size());
+    if (!result.overlay || result.hangul_glyphs.empty()) return;
+    size_t system = 0, quests = 0;
+    for (const auto& [offset, data] : result.overlay->patches) {
+        (void)offset;
+        const std::optional<FmsSheet> sheet = ParseFms(data);
+        if (!sheet) continue;
+        if (sheet->records.size() == EXIT_GAME_SYSTEM_MSG_COUNT) {
+            ++system;
+            std::vector<uint8_t> patched = data;
+            const ExitGameLanguage* found = nullptr;
+            CHECK(exit_game_text_patch(patched.data(), patched.size(), &found) == EXIT_GAME_TEXT_PATCHED);
+            CHECK(found && found->key == kKoreanKey && std::string_view(found->row) == "Exit Game");
+            const std::optional<FmsSheet> after = ParseFms(patched);
+            CHECK(after && found && after->records[EXIT_GAME_ROW_RECORD] == found->row);
+        } else if (sheet->records.size() == 200) {
+            ++quests;
+            CHECK(!sheet->records[160].empty() && !sheet->records[161].empty());
+        }
+    }
+    CHECK(system == 1 && quests == 1);
+
+    BootImage image;
+    if (!LoadBootImage(build, image)) return;
+    const uint8_t* pages = font_glyph_pages(image.bytes.data(), image.bytes.size(), profile.hangul.probe);
+    CHECK(pages != nullptr);
+    if (!pages) return;
+    CHECK(hangul_glyphs_fit(image.bytes.data(), image.bytes.size(), pages, result.hangul_glyphs.data(),
+                            result.hangul_glyphs.size()) == 1);
+    std::vector<uint64_t> pointers;
+    for (unsigned high = 0; high < 256; ++high) {
+        uint64_t pointer = 0;
+        std::memcpy(&pointer, pages + size_t(high) * 8, 8);
+        pointers.push_back(pointer);
+    }
+    CHECK(hangul_glyphs_install(image.bytes.data(), image.bytes.size(), pages, result.hangul_glyphs.data(),
+                                result.hangul_glyphs.size()) == 1);
+    // The page the game reads: the install's own storage, addressed by the pointer the table now holds.
+    uint64_t korean_page = 0;
+    std::memcpy(&korean_page, pages + size_t(HANGUL_FIRST_PAGE) * 8, 8);
+    CHECK(korean_page != 0);
+    if (korean_page) {
+        const uint8_t* first = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(korean_page));
+        CHECK((first[0] | first[1] << 8) == result.hangul_glyphs.front().cell);
+        CHECK(first[2] == result.hangul_glyphs.front().width && first[3] == result.hangul_glyphs.front().spacing);
+    }
+    for (unsigned high = 0; high < 256; ++high) {
+        if (high >= HANGUL_FIRST_PAGE && high <= HANGUL_LAST_PAGE) continue;
+        uint64_t pointer = 0;
+        std::memcpy(&pointer, pages + size_t(high) * 8, 8);
+        CHECK(pointer == pointers[high]);
+    }
+}
+
 void CheckPreparedTranslation(const GameBuild& build, const fs::path& game) {
     const TranslationProfile& profile = *build.translation;
     if (PtBrTranslationFiles().empty()) return;
@@ -2146,6 +2222,7 @@ FixtureReport CheckFixtures(const GameBuild& build) {
         CHECK(SameLanguages(InstalledTextLanguages(prepared, &build), TextLanguagesOf(&build)));
         CheckPreparedEnglish(build, prepared);
         CheckPreparedRussian(build, prepared);
+        CheckPreparedKorean(build, prepared);
         CHECK(build.regional_archive == nullptr || fs::is_regular_file(prepared / build.regional_archive));
         for (const int language : {int(DCP_VOICE_ENGLISH), int(DCP_VOICE_JAPANESE)}) {
             const unsigned banks = VoiceLanguageCategories(prepared, language);
@@ -2182,7 +2259,20 @@ FixtureReport CheckFixtures(const GameBuild& build) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // dcp-build-parity-tests korean: the Korean profile contract and the real Korean corpus of every prepared folder.
+    if (argc == 2 && std::string_view(argv[1]) == "korean") {
+        TestContract();
+        TestEuropeBuild();
+        for (const GameBuild& build : SupportedBuilds()) {
+            g_scope = build.label;
+            const fs::path prepared = fs::path(DCP_SOURCE_DIR) / "game" / "prepared" / build.folder;
+            if (fs::is_directory(prepared)) CheckPreparedKorean(build, prepared);
+        }
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|parity-korean|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     TestContract();
     TestGlobalFeatures();
     TestSkipIntroLanguages();

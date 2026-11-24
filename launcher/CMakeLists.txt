@@ -33,7 +33,7 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
 add_library(dcp_launcher_core STATIC atlas_signatures.cpp boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp headless.cpp install_source.cpp
-    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp home_art.cpp home_community.cpp home_portraits.cpp home_stats.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp voice_language_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp home_art.cpp home_community.cpp home_portraits.cpp home_stats.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp hangul_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c ${PROJECT_SOURCE_DIR}/src/hangul_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp voice_language_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     save_edit.cpp save_backup.cpp save_data.cpp inventory_data.cpp modifier_values.cpp item_catalog.cpp inventory_model.cpp save_discovery.cpp save_import.cpp save_page_model.cpp save_sfo.cpp save_zip.cpp save_ps3.cpp save_ps3_layout.cpp crypto_hmac.cpp game_texture.cpp game_mbs.cpp
     sprite_render.cpp character_art.cpp editor_model.cpp appearance_custom.cpp appearance_runtime.cpp appearance_loader.cpp fighter_horns.cpp fighter_bare_head.cpp
     hp_override.cpp hp_override_runtime.cpp
@@ -129,6 +129,10 @@ endfunction()
 dcp_embed_folder(kRuTranslation ru_sheets localization/ru/sheets/*.json)
 dcp_embed_folder(kRuSources ru_sources localization/ru/sources/*.json)
 dcp_embed_folder(kRuFont ru_font localization/ru/font/*.glyphs.z)
+
+# The Korean translation (localization/ko): its sheets and the Hangul syllables drawn for the main font atlas.
+dcp_embed_folder(kKoTranslation ko_sheets localization/ko/sheets/*.json)
+dcp_embed_folder(kKoFont ko_font localization/ko/font/*.glyphs.z)
 
 # The PT-BR visual patches (localization/pt-BR/visual/*.dcpx.z) as a table of byte arrays, game_translation.h.
 file(GLOB DCP_PTBR_VISUAL_PATCHES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/visual/*.dcpx.z)
@@ -238,6 +242,14 @@ target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core trg_launcher_
 target_include_directories(dcp-launcher-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 set_target_properties(dcp-launcher-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-launcher-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Korean Menu & Subtitles language (tools/test.ps1 and tools/build.sh --korean-localization): the
+# USA and European profiles, the corpus, the Hangul atlas and glyph table. The local USA game folder is read only.
+add_executable(dcp-korean-localization-tests EXCLUDE_FROM_ALL ../tests/korean_localization_tests.cpp)
+target_link_libraries(dcp-korean-localization-tests PRIVATE dcp_launcher_core ZLIB::ZLIB)
+target_compile_definitions(dcp-korean-localization-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-korean-localization-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-korean-localization-tests PRIVATE -Wall -Wextra)
 
 # Unsupported-build diagnostics: SELF parsing, signature scan, relations, classification and report, on synthetic images
 # (plus the local game fixtures under game\prepared when present).

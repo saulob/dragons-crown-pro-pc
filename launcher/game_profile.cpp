@@ -107,10 +107,12 @@ constexpr TextLanguage kAsiaLanguages[] = {{"traditional_chinese", "Traditional 
 // The Japanese executables never read the system language: their only text is DRACRO.CPK's unsuffixed sheets.
 constexpr TextLanguage kJapaneseLanguages[] = {{"japanese", "Japanese", 0, {}}};
 
-// Brazilian Portuguese is the port's translation of a native slot (game_translation.h): the game runs in that language.
+// Brazilian Portuguese, Korean and Russian are the port's translations of a native slot (game_translation.h): the game
+// runs in that language. Korean draws its Hangul into the main font over kanji cells (src/hangul_glyphs.h).
 constexpr TextLanguage kWesternOffered[] = {
     {"english", "English", 1, "US"}, {"french", "French", 2, "FR"}, {"german", "German", 4, "DE"},
-    {"italian", "Italian", 5, "IT"}, {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
+    {"italian", "Italian", 5, "IT"}, {kKoreanKey, "Korean", 1, "US", kPortKorean},
+    {kPortugueseBrazilKey, "Portuguese (Brazil)", 1, "US", "pt-BR"},
     {kRussianKey, "Russian", 1, "US", kPortRussian}, {"spanish", "Spanish", 3, "ES"},
 };
 // English shares the native key: a build with its own English slot plays that, the others the port's own text.
@@ -123,10 +125,11 @@ constexpr TextLanguage kJapaneseOffered[] = {kJapaneseLanguages[0], {kEnglishKey
 
 // The USA and European fonts take the Russian letters where the fan package draws them, over kana; U+3060 is one of them.
 constexpr CyrillicFont kKanaCyrillic = {"other/fontUTF16.ftx", 0x3060, CYRILLIC_CELLS_KANA};
+// U+4E9C (亜) is in the USA and European main fonts only; their kanji cells take the Hangul.
 constexpr TranslationProfile kUsaTranslation = {kWesternOffered, "DRACRO_US.CPK", {}, {}, 0, "DRACRO_US.CPK",
-                                                VisualSet::kEnglishSlot, kKanaCyrillic};
+                                                VisualSet::kEnglishSlot, kKanaCyrillic, {"other/fontUTF16.ftx", 0x4E9C}};
 constexpr TranslationProfile kEuropeTranslation = {kWesternOffered, "DRACRO_EU.CPK", {}, {}, 0, "DRACRO_EU.CPK",
-                                                   VisualSet::kEnglishSlot, kKanaCyrillic};
+                                                   VisualSet::kEnglishSlot, kKanaCyrillic, {"other/fontUTF16.ftx", 0x4E9C}};
 constexpr TranslationProfile kJapanTranslation = {kJapaneseOffered, "DRACRO.CPK", "JP", "other/fontUTF16.ftx", 0x4F53,
                                                   "DRACRO.CPK", VisualSet::kBaseStage,
                                                   {"other/fontUTF16.ftx", 0x4F53, CYRILLIC_CELLS_FREE}};

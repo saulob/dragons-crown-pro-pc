@@ -34,6 +34,7 @@
 #include "boss_battle_text.h"
 #include "boss_battle_record.h"
 #include "cyrillic_glyphs.h"
+#include "hangul_glyphs.h"
 #include "latin_glyphs.h"
 #include "system_type_hook.h"
 #include "party_hook.h"
@@ -529,7 +530,7 @@ static int install_cyrillic_glyphs(uint8_t *image, size_t size, const uint8_t *p
 }
 /* A port-side Menu & Subtitles language: its translated message sheets served over the slot's archive. A build whose
  * font lacks the letters gets them in its glyph table; the sheets show Portuguese unaccented when the table cannot be
- * found, and Russian is not served at all. */
+ * found, and Russian and Korean are not served at all. */
 static void install_text_translation(const char *settings_file, const char *image_dir, const char *app0, uint8_t *image, size_t size,
                                      uint64_t entry, uint8_t *message_stubs, size_t message_stub_bytes) {
     char message[1024]="";
@@ -538,21 +539,36 @@ static void install_text_translation(const char *settings_file, const char *imag
     size_t count=0;
     unsigned cyrillic_probe=0;
     const CyrillicCells cyrillic=(CyrillicCells)dcp_text_cyrillic_cells(settings_file,image_dir,app0,&cyrillic_probe);
-    const unsigned probe=cyrillic ? cyrillic_probe : dcp_text_font_probe(settings_file,image_dir,app0);
+    const HangulGlyph *hangul_glyphs=NULL;
+    size_t hangul_count=0;
+    const unsigned hangul=cyrillic ? 0 : dcp_text_hangul_probe(settings_file,image_dir,app0,&hangul_glyphs,&hangul_count);
+    const unsigned probe=cyrillic ? cyrillic_probe : hangul ? hangul : dcp_text_font_probe(settings_file,image_dir,app0);
     const uint8_t *glyph_pages=probe ? font_glyph_pages(image,size,(uint16_t)probe) : NULL;
     const uint8_t *glyph_page=font_glyph_page(image,size,glyph_pages,0);
-    const int glyph_table=cyrillic ? cyrillic_glyphs_fit(image,size,glyph_pages,cyrillic) : latin_glyphs_fit(image,size,glyph_page);
+    /* The Hangul cells are checked here, before anything is served: a table that cannot hold them leaves Korean native. */
+    const int glyph_table=cyrillic ? cyrillic_glyphs_fit(image,size,glyph_pages,cyrillic)
+                             : hangul ? hangul_glyphs_fit(image,size,glyph_pages,hangul_glyphs,hangul_count)
+                                      : latin_glyphs_fit(image,size,glyph_page);
     int glyphs_composed=0;
     const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message),
                                              glyph_table,&glyphs_composed);
     if (archive) {
-        if (!overlay_archive(archive,length,patches,count))
-            snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid)",archive);
-        else {
-            if (glyphs_composed && cyrillic && !install_cyrillic_glyphs(image,size,glyph_pages,cyrillic))
-                printf("Menu & Subtitles: the Cyrillic letters could not be added to the glyph table\n");
-            if (glyphs_composed && !cyrillic && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
-            default_message_install(image,size,entry,dcp_text_default_bone,dcp_text_native_default_bone,message_stubs,message_stub_bytes);
+        int hangul_installed=1;
+        if (glyphs_composed && hangul &&
+            !hangul_glyphs_install(image,size,glyph_pages,hangul_glyphs,hangul_count)) {
+            hangul_installed=0;
+            snprintf(message,sizeof(message),"Korean unavailable (the Hangul syllables could not be added to its glyph table), showing English");
+        }
+        if (hangul_installed) {
+            if (!overlay_archive(archive,length,patches,count))
+                snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid)",archive);
+            else {
+                if (glyphs_composed && cyrillic && !install_cyrillic_glyphs(image,size,glyph_pages,cyrillic))
+                    printf("Menu & Subtitles: the Cyrillic letters could not be added to the glyph table\n");
+                if (glyphs_composed && hangul) runtime_font_set_korean(1);
+                if (glyphs_composed && !cyrillic && !hangul && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
+                default_message_install(image,size,entry,dcp_text_default_bone,dcp_text_native_default_bone,message_stubs,message_stub_bytes);
+            }
         }
     }
     const char *stage=dcp_text_stage_overlay(&length,&patches,&count);

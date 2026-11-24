@@ -499,10 +499,10 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   | Build | Languages |
   | --- | --- |
-  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
+  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `korean`, `brazilian_portuguese`, `russian`, `spanish`) |
   | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, English, Portuguese (Brazil), Russian (`japanese`, `english`, `brazilian_portuguese`, `russian`): the executable does not read the system language |
   | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, English, Portuguese (Brazil), Russian (`traditional_chinese`, `korean`, `english`, `brazilian_portuguese`, `russian`) |
-  | CUSA10487 1.03 Europe | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
+  | CUSA10487 1.03 Europe | English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `korean`, `brazilian_portuguese`, `russian`, `spanish`) |
 
   Portuguese (Brazil) is the port's own translation, not a language of the game, so it is offered on every supported
   build and a saved choice survives switching builds. The game runs in a native slot and the port serves translated
@@ -572,11 +572,27 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   fonts have Cyrillic in every region. The launcher, the F1 options, the F10 overlay and the online screens stay in
   English: the fan translation has no text for them. Exit Game shows `Выйти`. See `localization/ru/README.md`.
 
+  Korean on the USA and European builds is the game's official Korean translation, contributed by dyumadel
+  ([PR #87](https://github.com/saulob/dragons-crown-pro-pc/pull/87)), built into the port from `localization/ko`. Its
+  message sheets are the USA ones record for record, so each USA record takes the Korean at its index (11,953 records in
+  13 sheets; the 39 challenge quests the Korean release never translated and the staff roll stay in English). It is
+  served over the English slot like Portuguese (Brazil), and, as for Russian, a record must share only the slot's printf
+  conversions and buttons. The USA and European fonts have no Hangul: `launcher/hangul_font.cpp` draws the 1,075
+  syllables the text uses (drawn with Noto Sans CJK KR) into atlas cells only a kanji uses, as the official Korean font
+  puts its Hangul where the Japanese font has kanji, and `src/hangul_glyphs.c` adds their code pages (U+AC00–U+D7A3) to
+  the executable's glyph table after proving every such cell is listed by kanji only. When the glyph file, the font or
+  the table cannot take them, Korean is not served at all: the launcher says why and the game keeps its English text
+  (`Menu & Subtitles: Korean unavailable (...)`); no missing squares are ever shown. The character messages are drawn by
+  the system font: while Korean is selected, the European set opens the embedded Noto Sans KR instead of Noto Sans. Every
+  other language, system font set and the Asia/Hong Kong build's native Korean are unaffected. The launcher, the F1
+  options, the F10 overlay and the online screens stay in English; the Korean release has no text for them. See
+  `localization/ko/README.md`.
+
   For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
   is offered wherever the native slot is complete, like Portuguese (Brazil); the 1.01 update's own Russian text in its
   US slot is not taken over (see USA builds). `DRACRO_EU.CPK` has a UK slot beside the US one, as `DRACRO_US.CPK` does; it is
-  not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
+  not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. A saved
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language Korean unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. It never changes the spoken voices: Voice Language does.

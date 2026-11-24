@@ -29,6 +29,8 @@ inline constexpr std::string_view kEnglishKey = "english";
 inline constexpr std::string_view kPortEnglish = "en"; // TextLanguage::translation of the port's English text
 inline constexpr std::string_view kRussianKey = "russian";
 inline constexpr std::string_view kPortRussian = "ru";
+inline constexpr std::string_view kKoreanKey = "korean";
+inline constexpr std::string_view kPortKorean = "ko";
 
 // A system language the game can be told for its menus and subtitles; a build lists the ones its executable maps.
 struct TextLanguage {
@@ -49,6 +51,12 @@ struct CyrillicFont {
     int cells;              // CyrillicCells
 };
 
+// Where the build's main font takes the Hangul syllables of the port's Korean (src/hangul_glyphs.h); empty entry: not offered.
+struct HangulFont {
+    std::string_view entry; // the main font in the profile's archive
+    uint16_t probe;         // a character only that font has in its executable
+};
+
 // How the port's translation is served on a build. One profile serves every build sharing its archive and sheets.
 struct TranslationProfile {
     std::span<const TextLanguage> offered; // the native languages and the port's, as the launcher lists them
@@ -59,6 +67,7 @@ struct TranslationProfile {
     const char* visual_archive;            // the archive holding the stage files the visual patches target
     VisualSet visuals;
     CyrillicFont cyrillic;
+    HangulFont hangul = {};
 };
 
 struct GameBuild {

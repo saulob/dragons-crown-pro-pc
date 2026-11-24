@@ -11,6 +11,7 @@
 
 #include "cyrillic_glyphs.h"
 #include "dcp_resolution.h"
+#include "hangul_glyphs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -142,6 +143,13 @@ unsigned dcp_text_font_probe(const char *settings_file, const char *image_dir, c
 int dcp_text_cyrillic_cells(const char *settings_file, const char *image_dir, const char *app0, unsigned *probe);
 /* After dcp_text_translation: the glyph table metrics of the Russian letters drawn into the font; NULL when none were. */
 const CyrillicMetrics *dcp_text_cyrillic_metrics(size_t *count);
+
+/* The character font_glyph_pages needs when the saved language is the port's Korean on a build whose font takes the
+ * Hangul syllables, and those syllables; 0 otherwise. */
+unsigned dcp_text_hangul_probe(const char *settings_file, const char *image_dir, const char *app0,
+                               const HangulGlyph **glyphs, size_t *count);
+/* After dcp_text_translation: the Hangul syllables drawn into the font, as their glyph table entries; NULL when none were. */
+const HangulGlyph *dcp_text_hangul_glyphs(size_t *count);
 
 /* Tells the launcher's text the saved language, before the game starts. */
 void dcp_activate_text_language(const char *settings_file, const char *image_dir, const char *app0);
