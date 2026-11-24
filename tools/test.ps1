@@ -331,6 +331,28 @@ function Invoke-LinuxVulkanPipelineTests {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --vulkan-pipeline 2>&1") $true
 }
 
+function Invoke-PtBrLocalizationChecks {
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { return Skipped 'python is not installed' }
+    $script = Join-Path $script:RepoRoot 'scripts\localization\ptbr.py'
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($cmd in @('selftest', 'validate', 'parity')) {
+        $r = Invoke-Native $py.Source @($script, $cmd) $true $script:RepoRoot
+        foreach ($line in @($r.Lines) + @($r.Hidden)) { $out.Add($line) }
+        if ($r.Code -ne 0) { return @{ Code = $r.Code; Lines = @($out); Hidden = @(); Skip = '' } }
+    }
+    @{ Code = 0; Lines = @($out); Hidden = @(); Skip = '' }
+}
+
+function Invoke-LinuxLocalizationTests {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --localization 2>&1") $true
+}
+
 function Invoke-LinuxEditorGate {
     if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
@@ -504,8 +526,8 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'DCP-TKXB2V'
-$defaultFocusSuites = @('dcp-gpu-compat-tests', 'dcp-pipeline-cache-tests', 'dcp-present-tests', 'dcp-frame-pacing-tests')
+$defaultFocusName = 'Issue #88 PT-BR text'
+$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-text-tests')
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
@@ -566,8 +588,13 @@ if ($BossBattleOnline) {
 } elseif ($Full) {
     Sync-GpuDependencies
 } else {
-    $tests = @($tests | Where-Object { $defaultFocusSuites -contains $_.Exe })
-    $tests += Test-Step 'Linux Vulkan pipeline and presenter tests (WSL: tools/build.sh --vulkan-pipeline; skipped without WSL)' -Block { Invoke-LinuxVulkanPipelineTests }
+    $tests = @(
+        (Test-Step 'PT-BR localization checks (ptbr.py selftest, validate, parity)' -Block { Invoke-PtBrLocalizationChecks } -Key 'ptbr.py localization checks'),
+        (Test-Step 'launcher localization tests (PT-BR, EN, RU translation overlays, issue #88 plurals/EventMsg 220, supported-build parity)' 'dcp-launcher-tests' -Capture `
+            -Key 'dcp-launcher-tests localization' -Arguments @('localization')),
+        (Test-Step 'text tests (text dialog, system font set, composed Latin glyphs)' 'dcp-text-tests'),
+        (Test-Step 'Linux localization and text tests (WSL: tools/build.sh --localization; skipped without WSL)' -Block { Invoke-LinuxLocalizationTests })
+    )
     $requiredSuites = $defaultFocusSuites
 }
 
@@ -771,19 +798,22 @@ if ($EditorTranslation -or $EditorRelease) {
     exit 0
 }
 if ($useDefaultFocus) {
-    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux Vulkan pipeline and presenter tests*' } | Select-Object -First 1
+    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux localization and text tests*' } | Select-Object -First 1
     Write-Host ''
     Write-Host "Focused development run ($defaultFocusName; pass -Full for the complete release matrix):" -ForegroundColor Cyan
-    foreach ($suite in $defaultFocusSuites) {
-        $status = if ($failed.Contains($suite)) { "FAIL ($(Format-ExitCode $exitCodes[$suite]))" } else { 'PASS' }
-        Write-Host ("  Windows {0}: {1}" -f $suite, $status) -ForegroundColor $(if ($failed.Contains($suite)) { 'Red' } else { 'Green' })
+    foreach ($test in $tests) {
+        $name = Get-TestName $test
+        if ($name -like 'Linux *') { continue }
+        $status = if ($skipped.ContainsKey($name)) { "SKIPPED ($($skipped[$name]))" } elseif ($failed.Contains($name)) { "FAIL ($(Format-ExitCode $exitCodes[$name]))" } else { 'PASS' }
+        $color = if ($skipped.ContainsKey($name)) { 'Yellow' } elseif ($failed.Contains($name)) { 'Red' } else { 'Green' }
+        Write-Host ("  Windows {0}: {1}" -f $name, $status) -ForegroundColor $color
     }
     if ($linuxFocus -and $skipped.ContainsKey($linuxFocus)) {
-        Write-Host "  Linux Vulkan pipeline and presenter tests: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
+        Write-Host "  Linux localization and text tests: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
     } elseif ($linuxFocus -and $failed.Contains($linuxFocus)) {
-        Write-Host "  Linux Vulkan pipeline and presenter tests: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
+        Write-Host "  Linux localization and text tests: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
     } elseif ($linuxFocus) {
-        Write-Host '  Linux Vulkan pipeline and presenter tests: PASS' -ForegroundColor Green
+        Write-Host '  Linux localization and text tests: PASS' -ForegroundColor Green
     }
     if ($failed.Count -gt 0) {
         Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red

@@ -8813,6 +8813,45 @@ void CheckRegionalWording(std::string_view source, const ArchiveTranslation& res
     CHECK(served[504] == "Controle do Cursor @#(53)");
 }
 
+void CheckIssue88PtBrText(const ArchiveTranslation& result, const std::vector<std::string>& sys_native,
+                          const std::vector<std::string>& event_native) {
+    const std::optional<FmsSheet> sys = ServedSystemMsg(result, sys_native.size());
+    CHECK(sys && sys->records.size() == sys_native.size());
+    if (sys) {
+        const auto& r = sys->records;
+        CHECK(r[307] == "Missão");
+        CHECK(r[1452] == "Agora você pode selecionar @c(13)Missões@/c.");
+        CHECK(r[1453].find("aceitar @c(13)Missões@/c") != std::string::npos);
+        CHECK(r[1453].find("Concluir @c(13)Missões@/c") != std::string::npos);
+        CHECK(r[728].find("@c(13)Missões@/c") != std::string::npos);
+        CHECK(r[729] == "Você não pode aceitar mais @c(13)Missões@/c.");
+        CHECK(r[771] == "Você não aceitou nenhuma ##(COLOR_C_QUEST).");
+        CHECK(r[1058] == "Aceitar @c(13)Missões@/c.");
+        CHECK(r[1059].find("@c(13)Missões@/c") != std::string::npos);
+        CHECK(r[1067].find("@c(13)Missão/Missões@/c") != std::string::npos);
+        CHECK(r[1183].find("aceitar @c(13)Missões@/c") != std::string::npos);
+        CHECK(r[1251] == "Você não tem nenhuma ##(COLOR_C_QUEST).");
+        CHECK(r[1447].find("concluir @c(13)Missões@/c") != std::string::npos);
+        CHECK(r[1436].find("@c(19)Pontos de Vida@/c") != std::string::npos);
+        CHECK(r[1438].find("@c(19)Pontos de Vida@/c") != std::string::npos);
+        CHECK(r[1439].find("@c(19)Pontos de Vida@/c") != std::string::npos);
+        for (const std::string& row : r) {
+            CHECK(row.find("Missãos") == std::string::npos);
+            CHECK(row.find("##(COLOR_C_QUEST)@c(13)s@/c") == std::string::npos);
+            CHECK(row.find("##(COLOR_LP)@c(19)s@/c") == std::string::npos);
+        }
+    }
+    const std::optional<FmsSheet> ev = ServedSystemMsg(result, event_native.size());
+    CHECK(ev && ev->records.size() == event_native.size());
+    if (ev) {
+        const std::string& msg = ev->records[220];
+        const size_t nl = msg.find('\n');
+        CHECK(nl != std::string::npos && msg.find('\n', nl + 1) == std::string::npos);
+        CHECK(msg == "Ele diz que foi encarregado de cuidar do laboratório na ausência de Wallace,\n"
+                     "mas está sendo atacado por usuários de magia malevolente.");
+    }
+}
+
 // A stored message is translated at display time only when it is one of the slot's own defaults: every default of every
 // class and category must differ from its served text, and no served text may be another default of the slot.
 void CheckStoredDefaults(const ArchiveTranslation& result) {
@@ -8986,6 +9025,7 @@ void TestTranslationAcrossSlots(const fs::path& base) {
         if (!fs::exists(game / profile.archive) || PtBrTranslationFiles().empty()) continue;
         const TextLanguage& language = ResolveTextLanguage(item.build, kPortugueseBrazilKey);
         TranslationRecipe actual{language.suffix, PtBrTranslationFiles()};
+        actual.same_arguments = true;
         if (!profile.source.empty()) actual.adapted_texts = actual.source = PtBrSource(profile.source);
         actual.font_entry = profile.font_entry;
         actual.mark_archive = game / "DRACRO.CPK";
@@ -9002,6 +9042,11 @@ void TestTranslationAcrossSlots(const fs::path& base) {
         CHECK(native.has_value());
         if (native) CheckServedSystemMsg(result, native->records);
         if (native && !profile.source.empty()) CheckRegionalWording(profile.source, result, native->records);
+        const std::string event = language.suffix.empty() ? "msgsheet/EventMsg.fms" : "msgsheet/EventMsg_" + std::string(language.suffix) + ".fms";
+        const CpkEntry* event_found = slot.Find(event);
+        const std::optional<FmsSheet> event_native = event_found ? ParseFms(slot.Read(*event_found)) : std::nullopt;
+        CHECK(event_native.has_value());
+        if (native && event_native) CheckIssue88PtBrText(result, native->records, event_native->records);
         const std::string bone = language.suffix.empty() ? "msgsheet/DefaultBone.fms" : "msgsheet/DefaultBone_" + std::string(language.suffix) + ".fms";
         const CpkEntry* bone_entry = slot.Find(bone);
         const std::optional<FmsSheet> bone_native = bone_entry ? ParseFms(slot.Read(*bone_entry)) : std::nullopt;
@@ -11294,6 +11339,25 @@ int main(int argc, char** argv) {
         InGroup("renderer", TestLauncherPresentation);
         std::printf("%d checks, %d failed\n", g_checks, g_failures);
         std::printf("GROUP|launcher-renderer|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "localization") {
+        const fs::path base = fs::temp_directory_path() / ("dcp_launcher_l10n_" + std::to_string(getpid()));
+        fs::remove_all(base);
+        fs::create_directories(base);
+        TestInstalledTextLanguages(base);
+        TestTextLanguageSwitching(base);
+        TestBuiltInEnglish(base);
+        TestBuiltInRussian(base);
+        TestGameTranslation(base);
+        TestLatinGlyphs();
+        TestTranslationAcrossSlots(base);
+        TestInGameUiText();
+        TestLauncherLocalization();
+        std::error_code ec;
+        fs::remove_all(base, ec);
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-localization|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
 

@@ -915,6 +915,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     TranslationRecipe recipe{language.suffix, {}};
     if (language.translation == "pt-BR") {
         recipe.files = PtBrTranslationFiles();
+        recipe.same_arguments = true;
         if (same_archive) recipe.visual_patches = visuals;
         if (!profile.source.empty()) recipe.adapted_texts = recipe.source = PtBrSource(profile.source);
         recipe.font_entry = profile.font_entry;

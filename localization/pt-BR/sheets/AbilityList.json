@@ -9,7 +9,7 @@
     {"index": 5, "source_sha256": "35b84f5c477511d806ca39a51e622a9637939add8358188460802457edf5d36e", "pt_br": "Concede uma chance de usar armas temporárias sem reduzir o \nnúmero de usos."},
     {"index": 6, "source_sha256": "1846eb6f0625a30b5d7bd38372cce75ab390e5f2f8ec4b4bcfe0099a43ce9953", "pt_br": "Reduz o tempo de recarga entre o uso de itens."},
     {"index": 7, "source_sha256": "040eda1c58c3966d4f019bca4f9777b329e5ec8689e9bfe894d280a347a11c2d", "pt_br": "Aumenta o número de esquivas (@#(5)) seguidas que você pode realizar.\n"},
-    {"index": 8, "source_sha256": "973e979364bd33c85ee8267b1f1d0f78b51ae99277c0cf4b7d6bab621de1d877", "pt_br": "Aumenta o número de slots de itens nos ##(CUSTOMSET)s."},
+    {"index": 8, "source_sha256": "973e979364bd33c85ee8267b1f1d0f78b51ae99277c0cf4b7d6bab621de1d877", "pt_br": "Aumenta o número de slots de itens nas ##(CUSTOMSET)s."},
     {"index": 9, "source_sha256": "3cb8ff821513e802f2d0c1d8b3d3b26411b457ed6d3fd891ec5afb25a444e788", "pt_br": "Aumenta a duração de ataques aéreos. Pressione @#(25) rapidamente para ativar."},
     {"index": 10, "source_sha256": "8400c912a3c125e00e5b4d221eac49f41335620afc5616116aa4f577aba7cf6e", "pt_br": "Dispara ondas que rastejam pelo chão. Ative com @#(42)+@#(25)."},
     {"index": 11, "source_sha256": "1e08278107019c6f4d6b30db69c49444330f71a13d3d023f4f5e100a5d029a78", "pt_br": "Adiciona onda de choque ao ataque em mergulho. \nPressione @#(43)＋@#(25) no ar para ativar."},
