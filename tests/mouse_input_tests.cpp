@@ -2581,7 +2581,8 @@ void TestPointerModeSetting() {
     CHECK(!dcp_mouse_pointer_active(live.state) && !live.Read().touch);
     dcp_mouse_set_pointer_mode(live.state, DCP_POINTER_MODE_ALWAYS_ON);
     CHECK(dcp_mouse_pointer_active(live.state));
-    live.Read();
+    CHECK(!live.Read().touch);
+    live.Move(20.0f, 0.0f);
     CHECK(live.Read().touch);
     dcp_mouse_set_pointer_mode(live.state, DCP_POINTER_MODE_HOLD);
     CHECK(!dcp_mouse_pointer_active(live.state));
@@ -2604,9 +2605,10 @@ std::vector<DcpMouseSample> StrokeSamples(Rig& rig, int reads) {
 void TestAlwaysOnMovesThePointer() {
     Rig rig(DCP_POINTER_MODE_ALWAYS_ON);
     CHECK(dcp_mouse_pointer_active(rig.state) && dcp_mouse_capture_wanted(rig.state));
-    // It lands without any button: one read with no finger, so the game sees a landing and not a jump.
+    // Idle Always On leaves the touch surface free so the game's right-stick pointer still works; motion lands it.
     DcpMouseSample sample = rig.Read();
     CHECK(sample.pointer && !sample.touch && sample.buttons == 0);
+    rig.Move(20.0f, 0.0f);
     sample = rig.Read();
     CHECK(sample.pointer && sample.touch && sample.x == kCenterX && sample.y == kCenterY && sample.buttons == 0);
 
@@ -2636,10 +2638,13 @@ void TestAlwaysOnMovesThePointer() {
     Rig always(DCP_POINTER_MODE_ALWAYS_ON);
     Rig held;
     held.Down(DCP_MOUSE_MIDDLE);
-    for (int i = 0; i < 2; ++i) {
-        always.Read();
-        held.Read();
-    }
+    always.Read();
+    always.Move(1.0f, 0.0f);
+    always.Read();
+    always.Read();
+    held.Move(1.0f, 0.0f);
+    held.Read();
+    held.Read();
     const std::vector<DcpMouseSample> a = StrokeSamples(always, 400);
     const std::vector<DcpMouseSample> h = StrokeSamples(held, 400);
     int differences = 0, lifted = 0;
@@ -2679,7 +2684,7 @@ void TestAlwaysOnInteractionAndButtons() {
     // Left is the Pointer Interaction: it never becomes Square while Always On owns the mouse.
     rig.Down(DCP_MOUSE_LEFT);
     DcpMouseSample sample = rig.Read();
-    CHECK(sample.buttons == BTN_TOUCHPAD && sample.touch);
+    CHECK(sample.buttons == BTN_TOUCHPAD && !sample.touch);
     rig.Up(DCP_MOUSE_LEFT);
     CHECK(rig.Read().buttons == 0);
     rig.Down(DCP_MOUSE_LEFT);
@@ -2693,7 +2698,7 @@ void TestAlwaysOnInteractionAndButtons() {
     // Pointer Control's own button is not needed and is an ordinary button: unbound it does nothing, bound it presses.
     rig.Down(DCP_MOUSE_MIDDLE);
     sample = rig.Read();
-    CHECK(sample.buttons == 0 && sample.touch && dcp_mouse_pointer_active(rig.state));
+    CHECK(sample.buttons == 0 && !sample.touch && dcp_mouse_pointer_active(rig.state));
     rig.Up(DCP_MOUSE_MIDDLE);
     Rig bound(DCP_POINTER_MODE_ALWAYS_ON);
     bound.map.button[DCP_MOUSE_CROSS] = DCP_MOUSE_MIDDLE;
@@ -2703,13 +2708,14 @@ void TestAlwaysOnInteractionAndButtons() {
     bound.Down(DCP_MOUSE_MIDDLE);
     bound.Down(DCP_MOUSE_X1);
     sample = bound.Read();
-    CHECK(sample.buttons == (BTN_CROSS | BTN_SQUARE) && sample.touch);
+    CHECK(sample.buttons == (BTN_CROSS | BTN_SQUARE) && !sample.touch);
 
     // The saved Pointer Control button can be anything, even nothing, in Always On.
     Rig none(DCP_POINTER_MODE_ALWAYS_ON);
     none.map.button[DCP_MOUSE_POINTER_CONTROL] = DCP_MOUSE_NONE;
     none.Configure();
     none.Read();
+    none.Move(15.0f, 0.0f);
     CHECK(none.Read().touch);
 
     // A remapped Pointer Interaction owns the new button, and Left is ordinary again.
@@ -2782,18 +2788,19 @@ void TestAlwaysOnSuspendsAndResumes() {
     dcp_mouse_block(rig.state, 0);
     CHECK(tracker.Update(Frame{true, true, false, false}) == std::optional<bool>(true));
     CHECK(!rig.Read().touch);
+    rig.Move(20.0f, 0.0f);
     CHECK(rig.Read().touch);
 
     // A release with nothing blocking (closing, a mode switch before the settle starts) lands the finger again, not as a jump.
     Rig again(DCP_POINTER_MODE_ALWAYS_ON);
-    again.Read();
     again.Read();
     again.Move(200, 0);
     CHECK(again.Read().touch);
     dcp_mouse_release_all(again.state);
     DcpMouseSample sample = again.Read();
     CHECK(sample.pointer && !sample.touch);
-    CHECK(again.Read().touch && again.Read().x == kCenterX);
+    again.Move(10, 0);
+    CHECK(again.Read().touch && again.Read().x > kCenterX);
 }
 
 void TestAlwaysOnWithMouseControlsOff() {
@@ -2943,12 +2950,14 @@ void TestControllerTouchpadCoexistence() {
     CHECK(!dcp_mouse_pointer_active(rig.state));
     dcp_mouse_controller_surface(rig.state, 0);
     rig.Read();
+    rig.Move(20, 0);
     CHECK(dcp_mouse_pointer_active(rig.state) && rig.Read().touch);
 
     // The controller's buttons, sticks and triggers never reach the pointer: it only hears about touches. A touchscreen
     // contact takes the surface the same way, and gives it back.
     Rig screen(DCP_POINTER_MODE_ALWAYS_ON);
     screen.Read();
+    screen.Move(20, 0);
     CHECK(screen.Read().touch);
     dcp_mouse_screen_surface(screen.state, 1);
     CHECK(!dcp_mouse_pointer_active(screen.state));

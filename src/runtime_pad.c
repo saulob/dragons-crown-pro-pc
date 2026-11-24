@@ -379,6 +379,9 @@ static void sample_host(int slot, PadData *d) {
     DcpMouseSample mouse={0};
     DcpTouchSample screen={0};
     if (slot==0) {
+        const bool right_stick=g && (abs(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTX))>=7849 ||
+                                     abs(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTY))>=7849);
+        dcp_mouse_controller_stick(dcp_mouse_global(),right_stick);
         dcp_mouse_controller_surface(dcp_mouse_global(),pad_surface_touched(g));
         dcp_mouse_trackpad_pads(dcp_mouse_global(),native_trackpads(),valve_touchpads(g)>1 && pad_surface_touched(g));
         dcp_mouse_sample(dcp_mouse_global(),&mouse);

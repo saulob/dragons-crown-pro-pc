@@ -7,6 +7,7 @@
 #   tools/build.sh --test     also build and run the focused tests
 #   tools/build.sh --editor   build and run only the Character Editor release tests (no game build)
 #   tools/build.sh --launcher build and run only the launcher tests (no game build)
+#   tools/build.sh --steam-deck-input build and run only the Steam Deck input tests (no game build)
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
 #
 # Missing tools or libraries are listed; packaging/linux/ci-deps.sh installs them on Ubuntu 20.04 (the release baseline).
@@ -14,7 +15,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=$root/build/cmake/linux
 config=RelWithDebInfo
-clean=0 test=0 editor=0 launcher=0 run=0
+clean=0 test=0 editor=0 launcher=0 steam_deck_input=0 run=0
 loader_args=()
 while (($#)); do
     case $1 in
@@ -22,8 +23,9 @@ while (($#)); do
         --test) test=1 ;;
         --editor) editor=1 ;;
         --launcher) launcher=1 ;;
+        --steam-deck-input) steam_deck_input=1 ;;
         --run) run=1; shift; loader_args=("$@"); break ;;
-        -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -117,6 +119,21 @@ if ((launcher)); then
     ninja -C "$build_dir" dcp-launcher-tests
     step 'Running the launcher tests'
     "$build_dir/bin/dcp-launcher-tests"
+    exit 0
+fi
+if ((steam_deck_input)); then
+    step 'Building the Steam Deck input tests'
+    ninja -C "$build_dir" dcp-steam-deck-trackpad-tests dcp-mouse-tests dcp-cursor-tests dcp-touchscreen-steamos-tests dcp-sdl-compat-tests
+    step 'Running the Steam Deck trackpad tests'
+    "$build_dir/bin/dcp-steam-deck-trackpad-tests"
+    step 'Running the mouse input tests'
+    "$build_dir/bin/dcp-mouse-tests"
+    step 'Running the cursor visibility tests'
+    "$build_dir/bin/dcp-cursor-tests"
+    step 'Running the SteamOS touchscreen tests'
+    "$build_dir/bin/dcp-touchscreen-steamos-tests"
+    step 'Running the SDL compat tests'
+    "$build_dir/bin/dcp-sdl-compat-tests"
     exit 0
 fi
 step 'Building'

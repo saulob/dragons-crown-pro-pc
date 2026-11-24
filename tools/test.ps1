@@ -313,6 +313,15 @@ function Invoke-LinuxLauncherTests {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --launcher 2>&1") $true
 }
 
+function Invoke-LinuxSteamDeckInputTests {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --steam-deck-input 2>&1") $true
+}
+
 function Invoke-LinuxEditorGate {
     if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
@@ -486,8 +495,8 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'launcher-localization'
-$defaultFocusSuites = @('dcp-launcher-tests')
+$defaultFocusName = 'DCP-LMHFKP'
+$defaultFocusSuites = @('dcp-steam-deck-trackpad-tests', 'dcp-mouse-tests', 'dcp-cursor-tests', 'dcp-touchscreen-steamos-tests', 'dcp-sdl-compat-tests')
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
@@ -548,10 +557,8 @@ if ($BossBattleOnline) {
 } elseif ($Full) {
     Sync-GpuDependencies
 } else {
-    $tests = @(
-        (Test-Step 'launcher tests (localization uniqueness and launcher core)' 'dcp-launcher-tests' -Capture),
-        (Test-Step 'Linux launcher tests (WSL: tools/build.sh --launcher, builds and runs only dcp-launcher-tests; skipped without WSL)' -Block { Invoke-LinuxLauncherTests })
-    )
+    $tests = @($tests | Where-Object { $defaultFocusSuites -contains $_.Exe })
+    $tests += Test-Step 'Linux Steam Deck input tests (WSL: tools/build.sh --steam-deck-input; skipped without WSL)' -Block { Invoke-LinuxSteamDeckInputTests }
     $requiredSuites = $defaultFocusSuites
 }
 
@@ -755,18 +762,19 @@ if ($EditorTranslation -or $EditorRelease) {
     exit 0
 }
 if ($useDefaultFocus) {
-    $coreChecks = @($captured['dcp-launcher-tests'] | Where-Object { $_ -match '^\d+ checks, \d+ failed$' }) | Select-Object -First 1
-    $linuxLauncher = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux launcher tests*' } | Select-Object -First 1
+    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux Steam Deck input tests*' } | Select-Object -First 1
     Write-Host ''
     Write-Host "Focused development run ($defaultFocusName; pass -Full for the complete release matrix):" -ForegroundColor Cyan
-    Write-Host ('  Windows dcp-launcher-tests: {0}' -f $(if ($failed.Contains('dcp-launcher-tests')) { "FAIL ($(Format-ExitCode $exitCodes['dcp-launcher-tests']))" } elseif ($coreChecks) { "PASS ($coreChecks)" } else { 'PASS' })) -ForegroundColor $(if ($failed.Contains('dcp-launcher-tests')) { 'Red' } else { 'Green' })
-    if ($linuxLauncher -and $skipped.ContainsKey($linuxLauncher)) {
-        Write-Host "  Linux dcp-launcher-tests:   SKIPPED ($($skipped[$linuxLauncher]))" -ForegroundColor Yellow
-    } elseif ($linuxLauncher -and $failed.Contains($linuxLauncher)) {
-        Write-Host "  Linux dcp-launcher-tests:   FAIL ($(Format-ExitCode $exitCodes[$linuxLauncher]))" -ForegroundColor Red
-    } elseif ($linuxLauncher) {
-        $linuxChecks = @($captured[$linuxLauncher] | Where-Object { $_ -match '^\d+ checks, \d+ failed$' }) | Select-Object -First 1
-        Write-Host ('  Linux dcp-launcher-tests:   PASS{0}' -f $(if ($linuxChecks) { " ($linuxChecks)" } else { '' })) -ForegroundColor Green
+    foreach ($suite in $defaultFocusSuites) {
+        $status = if ($failed.Contains($suite)) { "FAIL ($(Format-ExitCode $exitCodes[$suite]))" } else { 'PASS' }
+        Write-Host ("  Windows {0}: {1}" -f $suite, $status) -ForegroundColor $(if ($failed.Contains($suite)) { 'Red' } else { 'Green' })
+    }
+    if ($linuxFocus -and $skipped.ContainsKey($linuxFocus)) {
+        Write-Host "  Linux Steam Deck input tests: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
+    } elseif ($linuxFocus -and $failed.Contains($linuxFocus)) {
+        Write-Host "  Linux Steam Deck input tests: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
+    } elseif ($linuxFocus) {
+        Write-Host '  Linux Steam Deck input tests: PASS' -ForegroundColor Green
     }
     if ($failed.Count -gt 0) {
         Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red

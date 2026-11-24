@@ -130,6 +130,21 @@ void PublishTrackpadEnv() {
     dcp_mouse_set_trackpad_env(dcp_mouse_global(), &env, mice);
 }
 
+void NoteInputEvent(uint64_t& counter, const char* event) {
+    if (dcp_trackpad_count_due(++counter)) {
+        std::printf("Input telemetry: event=%s count=%llu\n", event, static_cast<unsigned long long>(counter));
+    }
+}
+
+uint64_t g_sdl_mouse_motion_count = 0;
+uint64_t g_cursor_controller_owner_count = 0;
+
+void NoteControllerCursorOwner(const DcpCursor::State& cursor) {
+    if (cursor.LastDevice() == DcpCursor::Device::Mouse) {
+        NoteInputEvent(g_cursor_controller_owner_count, "cursor_owner_controller");
+    }
+}
+
 } // namespace
 
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, GraphicsApi api)
@@ -688,6 +703,7 @@ bool WindowSDL::PollEvents() {
             continue;
         }
         if (controller_activity && !ui) {
+            NoteControllerCursorOwner(cursor);
             cursor.ControllerActivity();
         }
         if (DcpTouchRoute::IsFingerEvent(event)) {
@@ -702,6 +718,7 @@ bool WindowSDL::PollEvents() {
         switch (event.type) {
         case SDL_EVENT_MOUSE_MOTION:
             if (!ui && !touch_mouse) {
+                NoteInputEvent(g_sdl_mouse_motion_count, "sdl_mouse_motion_received");
                 cursor.MouseMoved();
                 const float to_game = SDL_GetWindowPixelDensity(window) * dcp_mouse_game_scale(GetWidth(), GetHeight());
                 dcp_mouse_motion(dcp_mouse_global(), event.motion.xrel * to_game, event.motion.yrel * to_game);

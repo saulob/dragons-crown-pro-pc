@@ -581,6 +581,7 @@ void TestControllerUnchanged() {
     CHECK(!read.pointer_touch);
     for (int i = 0; i < 3; ++i) CHECK(!d.Sample().pointer_touch);
     d.PadUp();
+    d.Sample();
     d.Motion(10.0f, 0.0f);
     CHECK(d.Land().pointer_touch);
     CHECK(Engaged(d));
@@ -716,6 +717,7 @@ void TestCursorOwnership() {
     d.Frame();
     CHECK(!d.HostCursorVisible() && !dcp_mouse_pointer_active(d.mouse));
     d.PadUp();
+    d.Sample();
     d.Motion(8.0f, 0.0f);
     d.Frame();
     CHECK(!d.HostCursorVisible() && d.Land().pointer_touch);
@@ -834,8 +836,9 @@ void TestRouteTelemetry() {
     d.Press(SDL_BUTTON_LEFT, true);
     d.Sample();
     CHECK(d.HasTrackpadLine("event=trackpad_mouse_fallback_used count=1"));
+    CHECK(d.HasTrackpadLine("event=trackpad_synthetic_touch_active count=1"));
     CHECK(d.HasTrackpadLine("event=trackpad_pointer_interaction count=1"));
-    CHECK(d.Trackpad().size() == 3);
+    CHECK(d.Trackpad().size() == 4);
 
     // The route changes once if a native pad appears, and is not repeated.
     d.pads = 2;
@@ -896,9 +899,10 @@ void TestTelemetryBoundsAndPrivacy() {
         d.Frame();
     }
     const std::vector<std::string> lines = d.Trackpad();
-    CHECK(lines.size() <= 12);
+    CHECK(lines.size() <= 16);
     CHECK(d.CountTrackpad("trackpad_route_ready") == 1);
     CHECK(d.CountTrackpad("trackpad_mouse_fallback_used") >= 3 && d.CountTrackpad("trackpad_mouse_fallback_used") <= 4);
+    CHECK(d.CountTrackpad("trackpad_synthetic_touch_active") >= 3 && d.CountTrackpad("trackpad_synthetic_touch_active") <= 4);
     CHECK(d.CountTrackpad("trackpad_pointer_interaction") >= 3 && d.CountTrackpad("trackpad_pointer_interaction") <= 4);
     std::set<std::string> unique(lines.begin(), lines.end());
     CHECK(unique.size() == lines.size());
@@ -906,7 +910,7 @@ void TestTelemetryBoundsAndPrivacy() {
     const std::regex allowed(
         "^Trackpad telemetry: event=trackpad_(route_ready|route_updated) steamdeck=(yes|no) gamescope=(yes|no) native_touchpads=[0-9] "
         "mice=[0-9] mode=(none|native|mouse_fallback) count=1$|"
-        "^Trackpad telemetry: event=trackpad_(native_used|mouse_fallback_used|pointer_interaction) count=[1-9]0*$|"
+        "^Trackpad telemetry: event=trackpad_(native_used|mouse_fallback_used|pointer_interaction|synthetic_touch_active|yielded_to_stick) count=[1-9]0*$|"
         "^Trackpad telemetry: event=trackpad_unavailable reason=(not_gaming_mode|setting_off|mouse_controls_off) count=[1-9]0*$");
     for (const std::string& line : lines) {
         CHECK(std::regex_match(line, allowed));
@@ -1040,6 +1044,97 @@ void TestDocs() {
     }
 }
 
+void TestDcpLmhfkpRegression() {
+    // Models dragons_crown_pro_013.log: Steam Deck Gaming Mode, Steam Virtual Gamepad (native_touchpads=0),
+    // 6 mouse devices, trackpad=auto -> mouse_fallback, tested under both Always On and Hold.
+    for (const int mode : {DCP_POINTER_MODE_ALWAYS_ON, DCP_POINTER_MODE_HOLD}) {
+        Deck d({.pointer_mode = mode, .native = 0, .mice = 6});
+        CHECK(Engaged(d));
+        CHECK(d.HasTrackpadLine(
+            "event=trackpad_route_ready steamdeck=yes gamescope=yes native_touchpads=0 mice=6 mode=mouse_fallback count=1"));
+
+        // Startup block/settle followed by resume must leave the touch surface free when no mouse motion occurs,
+        // so the game's right-stick pointer path (CUSA10454 0x39b115) is not suppressed by a parked idle finger.
+        d.overlay = true;
+        d.Frame();
+        CHECK(!d.Sample().pointer_touch);
+        d.overlay = false;
+        d.Frame();
+        for (int i = 0; i < 10; ++i) {
+            const Deck::Read idle = d.Sample();
+            CHECK(idle.pointer && !idle.pointer_touch && idle.buttons == 0);
+        }
+
+        // Controller activity before trackpad motion does not block later trackpad motion from taking ownership.
+        d.cursor.ControllerActivity();
+        d.Frame();
+        CHECK(Engaged(d) && dcp_mouse_pointer_active(d.mouse));
+
+        // First accepted trackpad motion creates an active synthetic DS4 touch route and moves the pointer.
+        d.Motion(40.0f, 20.0f);
+        const Deck::Read landed = d.Land();
+        CHECK(landed.pointer && landed.pointer_touch);
+        d.Motion(50.0f, 0.0f);
+        const Deck::Read moved = d.Sample();
+        CHECK(moved.pointer_touch && moved.x > landed.x);
+        CHECK(d.HasTrackpadLine("event=trackpad_mouse_fallback_used count=1"));
+        CHECK(d.HasTrackpadLine("event=trackpad_synthetic_touch_active count=1"));
+
+        // Right-stick deflection while trackpad is idle lifts the synthetic touch immediately without breaking the route.
+        dcp_mouse_controller_stick(d.mouse, 1);
+        const Deck::Read yielded = d.Sample();
+        CHECK(yielded.pointer && !yielded.pointer_touch);
+        CHECK(d.HasTrackpadLine("event=trackpad_yielded_to_stick count=1"));
+        CHECK(Engaged(d) && dcp_mouse_pointer_active(d.mouse));
+
+        // Trackpad recovers immediately on the next motion after yielding to right stick.
+        d.Motion(30.0f, 0.0f);
+        const Deck::Read recovered = d.Land();
+        CHECK(recovered.pointer_touch);
+
+        // Idle timeout also lifts the synthetic finger automatically after motion stops.
+        bool lifted = false;
+        for (int i = 0; i < 10; ++i) {
+            if (!d.Sample().pointer_touch) {
+                lifted = true;
+                break;
+            }
+        }
+        CHECK(lifted);
+
+        // Focus loss/regain and overlay open/close preserve clean recovery.
+        d.focused = false;
+        d.Frame();
+        CHECK(!dcp_mouse_pointer_active(d.mouse));
+        d.focused = true;
+        d.Frame();
+        CHECK(!d.Sample().pointer_touch);
+        d.Motion(25.0f, 0.0f);
+        CHECK(d.Land().pointer_touch);
+
+        // Touchscreen contact temporarily owns the touch surface, then trackpad recovers.
+        d.Finger(SDL_EVENT_FINGER_DOWN, 0.3f, 0.3f);
+        CHECK(d.Sample().screen_touch);
+        d.Finger(SDL_EVENT_FINGER_UP, 0.3f, 0.3f, 700);
+        for (int i = 0; i < 6; ++i) d.Sample();
+        d.Motion(20.0f, 0.0f);
+        CHECK(d.Land().pointer_touch);
+    }
+
+    // External mouse with Steam Deck Trackpad Off stays ordinary Hold.
+    Deck off({.setting = DCP_TRACKPAD_OFF, .pointer_mode = DCP_POINTER_MODE_HOLD, .native = 0, .mice = 6});
+    CHECK(!Engaged(off) && !dcp_mouse_pointer_active(off.mouse));
+    off.Motion(30.0f, 0.0f);
+    CHECK(!off.Sample().pointer_touch);
+
+    // DCP_TOUCH_GAMESCOPE wiring remains intact.
+    const std::string window = ReadSource("gpu/shim/window.cpp");
+    CHECK(Contains(window, "DCP_TOUCH_GAMESCOPE") && Contains(window, "sdl_mouse_motion_received") &&
+          Contains(window, "cursor_owner_controller"));
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    CHECK(Contains(pad, "dcp_mouse_controller_stick("));
+}
+
 } // namespace
 
 int main() {
@@ -1065,6 +1160,7 @@ int main() {
     TestSetting();
     TestWindowAndPadWiring();
     TestDocs();
+    TestDcpLmhfkpRegression();
     std::printf("steam deck trackpad tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
