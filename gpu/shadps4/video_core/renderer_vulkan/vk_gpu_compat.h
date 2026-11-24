@@ -77,6 +77,30 @@ constexpr bool ForceColorSamplesToDepth(const Capabilities& caps, bool all_color
            (all_color_samples_same && depth_mismatch && !caps.mixed_depth_samples);
 }
 
+constexpr bool NeedsMixedSamplesInfo(const PipelineStateRoute& route,
+                                     std::uint32_t rasterization_samples,
+                                     const std::uint32_t* color_samples,
+                                     std::uint32_t color_attachment_count,
+                                     bool has_depth_stencil, std::uint32_t depth_samples) {
+    if (!route.mixed_samples_info) {
+        return false;
+    }
+    const std::uint32_t raster = rasterization_samples ? rasterization_samples : 1u;
+    for (std::uint32_t i = 0; i < color_attachment_count; ++i) {
+        const std::uint32_t samples = color_samples[i] ? color_samples[i] : 1u;
+        if (samples != raster) {
+            return true;
+        }
+    }
+    if (has_depth_stencil) {
+        const std::uint32_t depth = depth_samples ? depth_samples : 1u;
+        if (depth != raster) {
+            return true;
+        }
+    }
+    return false;
+}
+
 constexpr const char* InterpolationName(Interpolation interpolation) {
     switch (interpolation) {
     case Interpolation::AmdExplicit:

@@ -19,6 +19,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "common/elf_info.h"
+#include "dcp_present.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
@@ -304,19 +305,33 @@ GraphicsPipeline::GraphicsPipeline(
     }
 
     std::array<vk::SampleCountFlagBits, AmdGpu::NUM_COLOR_BUFFERS> color_samples;
-    std::ranges::transform(key.color_samples, color_samples.begin(), [&instance](u8 num_samples) {
-        return num_samples ? LiverpoolToVK::NumSamples(num_samples, instance.GetColorSampleCounts())
-                           : vk::SampleCountFlagBits::e1;
-    });
+    std::array<u32, AmdGpu::NUM_COLOR_BUFFERS> color_sample_bits{};
+    for (u32 i = 0; i < AmdGpu::NUM_COLOR_BUFFERS; ++i) {
+        const u8 num_samples = key.color_samples[i];
+        color_samples[i] =
+            num_samples ? LiverpoolToVK::NumSamples(num_samples, instance.GetColorSampleCounts())
+                        : vk::SampleCountFlagBits::e1;
+        color_sample_bits[i] = static_cast<u32>(color_samples[i]);
+    }
+    const vk::SampleCountFlagBits depth_samples =
+        LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts());
+    const bool has_depth_stencil =
+        key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid ||
+        key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid;
+    // Only attach VkAttachmentSampleCountInfoAMD when sample counts actually differ; uniform-sample
+    // pipelines inherit rasterizationSamples and avoid unsupported pNext recording in Steam Fossilize.
+    const bool attach_mixed_samples = GpuCompat::NeedsMixedSamplesInfo(
+        state_route, static_cast<u32>(sdata.multisampling.rasterizationSamples),
+        color_sample_bits.data(), key.num_color_attachments, has_depth_stencil,
+        static_cast<u32>(depth_samples));
     const vk::AttachmentSampleCountInfoAMD mixed_samples = {
         .colorAttachmentCount = key.num_color_attachments,
         .pColorAttachmentSamples = color_samples.data(),
-        .depthStencilAttachmentSamples =
-            LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts()),
+        .depthStencilAttachmentSamples = depth_samples,
     };
 
     const vk::PipelineRenderingCreateInfo pipeline_rendering_ci = {
-        .pNext = state_route.mixed_samples_info ? &mixed_samples : nullptr,
+        .pNext = attach_mixed_samples ? &mixed_samples : nullptr,
         .colorAttachmentCount = key.num_color_attachments,
         .pColorAttachmentFormats = color_formats.data(),
         .depthAttachmentFormat = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid
@@ -472,6 +487,7 @@ GraphicsPipeline::GraphicsPipeline(
                                                  hash, pass, debug_str,
                                                  vk::to_string(clean_result))};
     };
+    const auto driver_started = Clock::now();
     pipeline = create(pipeline_info, "");
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 
@@ -484,12 +500,17 @@ GraphicsPipeline::GraphicsPipeline(
         square_pipeline = create(square_info, " squaring pass");
         SetObjectName(device, *square_pipeline, "Graphics Pipeline {} squaring pass", debug_str);
     }
+    const u64 driver_ns = NsSince(driver_started);
     mask_vertex_attributes = sdata.vertex_attributes;
     mask_vertex_bindings = sdata.vertex_bindings;
     mask_vertex_divisors = sdata.divisors;
     mask_has_vertex_bindings = !sdata.vertex_bindings.empty();
-    g_dcp_pipeline_total_ns += NsSince(started);
+    const u64 total_ns = NsSince(started);
+    g_dcp_pipeline_total_ns += total_ns;
     ++g_dcp_pipelines_built;
+    DcpPresent::RecordPipelineStall("pipeline_create", static_cast<std::int64_t>(total_ns / 1000000),
+                                    static_cast<std::int64_t>(driver_ns / 1000000),
+                                    attach_mixed_samples, preloading);
 }
 
 GraphicsPipeline::~GraphicsPipeline() {

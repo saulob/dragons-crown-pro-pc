@@ -8,6 +8,7 @@
 #   tools/build.sh --editor   build and run only the Character Editor release tests (no game build)
 #   tools/build.sh --launcher build and run only the launcher tests (no game build)
 #   tools/build.sh --steam-deck-input build and run only the Steam Deck input tests (no game build)
+#   tools/build.sh --vulkan-pipeline  build and run only the Vulkan pipeline and presenter tests (no game build)
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
 #
 # Missing tools or libraries are listed; packaging/linux/ci-deps.sh installs them on Ubuntu 20.04 (the release baseline).
@@ -15,7 +16,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=$root/build/cmake/linux
 config=RelWithDebInfo
-clean=0 test=0 editor=0 launcher=0 steam_deck_input=0 run=0
+clean=0 test=0 editor=0 launcher=0 steam_deck_input=0 vulkan_pipeline=0 run=0
 loader_args=()
 while (($#)); do
     case $1 in
@@ -24,8 +25,9 @@ while (($#)); do
         --editor) editor=1 ;;
         --launcher) launcher=1 ;;
         --steam-deck-input) steam_deck_input=1 ;;
+        --vulkan-pipeline) vulkan_pipeline=1 ;;
         --run) run=1; shift; loader_args=("$@"); break ;;
-        -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -134,6 +136,19 @@ if ((steam_deck_input)); then
     "$build_dir/bin/dcp-touchscreen-steamos-tests"
     step 'Running the SDL compat tests'
     "$build_dir/bin/dcp-sdl-compat-tests"
+    exit 0
+fi
+if ((vulkan_pipeline)); then
+    step 'Building the Vulkan pipeline and presenter tests'
+    ninja -C "$build_dir" dcp-gpu-compat-tests dcp-pipeline-cache-tests dcp-present-tests dcp-frame-pacing-tests
+    step 'Running the GPU compatibility tests'
+    "$build_dir/bin/dcp-gpu-compat-tests"
+    step 'Running the pipeline cache tests'
+    "$build_dir/bin/dcp-pipeline-cache-tests"
+    step 'Running the present tests'
+    "$build_dir/bin/dcp-present-tests"
+    step 'Running the frame pacing tests'
+    "$build_dir/bin/dcp-frame-pacing-tests"
     exit 0
 fi
 step 'Building'

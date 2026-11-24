@@ -322,6 +322,15 @@ function Invoke-LinuxSteamDeckInputTests {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --steam-deck-input 2>&1") $true
 }
 
+function Invoke-LinuxVulkanPipelineTests {
+    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
+    $distro = Find-LinuxDistro
+    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
+    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
+    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --vulkan-pipeline 2>&1") $true
+}
+
 function Invoke-LinuxEditorGate {
     if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
@@ -495,8 +504,8 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'DCP-LMHFKP'
-$defaultFocusSuites = @('dcp-steam-deck-trackpad-tests', 'dcp-mouse-tests', 'dcp-cursor-tests', 'dcp-touchscreen-steamos-tests', 'dcp-sdl-compat-tests')
+$defaultFocusName = 'DCP-TKXB2V'
+$defaultFocusSuites = @('dcp-gpu-compat-tests', 'dcp-pipeline-cache-tests', 'dcp-present-tests', 'dcp-frame-pacing-tests')
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
@@ -558,7 +567,7 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @($tests | Where-Object { $defaultFocusSuites -contains $_.Exe })
-    $tests += Test-Step 'Linux Steam Deck input tests (WSL: tools/build.sh --steam-deck-input; skipped without WSL)' -Block { Invoke-LinuxSteamDeckInputTests }
+    $tests += Test-Step 'Linux Vulkan pipeline and presenter tests (WSL: tools/build.sh --vulkan-pipeline; skipped without WSL)' -Block { Invoke-LinuxVulkanPipelineTests }
     $requiredSuites = $defaultFocusSuites
 }
 
@@ -762,7 +771,7 @@ if ($EditorTranslation -or $EditorRelease) {
     exit 0
 }
 if ($useDefaultFocus) {
-    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux Steam Deck input tests*' } | Select-Object -First 1
+    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux Vulkan pipeline and presenter tests*' } | Select-Object -First 1
     Write-Host ''
     Write-Host "Focused development run ($defaultFocusName; pass -Full for the complete release matrix):" -ForegroundColor Cyan
     foreach ($suite in $defaultFocusSuites) {
@@ -770,11 +779,11 @@ if ($useDefaultFocus) {
         Write-Host ("  Windows {0}: {1}" -f $suite, $status) -ForegroundColor $(if ($failed.Contains($suite)) { 'Red' } else { 'Green' })
     }
     if ($linuxFocus -and $skipped.ContainsKey($linuxFocus)) {
-        Write-Host "  Linux Steam Deck input tests: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
+        Write-Host "  Linux Vulkan pipeline and presenter tests: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
     } elseif ($linuxFocus -and $failed.Contains($linuxFocus)) {
-        Write-Host "  Linux Steam Deck input tests: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
+        Write-Host "  Linux Vulkan pipeline and presenter tests: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
     } elseif ($linuxFocus) {
-        Write-Host '  Linux Steam Deck input tests: PASS' -ForegroundColor Green
+        Write-Host '  Linux Vulkan pipeline and presenter tests: PASS' -ForegroundColor Green
     }
     if ($failed.Count -gt 0) {
         Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
