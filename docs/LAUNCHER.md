@@ -117,14 +117,16 @@ and graphics card are never replaced because the probe failed, and **Renderer** 
 entry points, the instance version, a bare instance and the physical devices, one step at a time, and reports the first that
 fails: loader missing, Vulkan older than 1.3, no driver, instance or enumeration error, or no usable card. Nothing in it asserts
 or ends the process for what Vulkan lacks. It leaves the shared Vulkan dispatcher as it found it, keeps the loader module
-mapped, and runs once, after the launcher window is shown. A driver that ends the process inside the probe cannot be caught by a
+mapped, and runs once, after the launcher window is shown and has drawn its first frames (at least three frames and half a
+second), so the pause it causes falls on a complete page. A driver that ends the process inside the probe cannot be caught by a
 result code: the probe writes `gpu_probe.pending` into the user folder first and removes it afterwards, so the next start sees
 the file, skips the probe (the Graphics card row says so) and the launcher opens; delete the file to ask again. A driver that
 hangs inside the probe still freezes the launcher window, which is why software recovery mode skips it.
 
 **Log lines** (`Launcher: startup: ...`, flushed as they are written): `renderer requested=... order=...`, `renderer trying=...`,
 `renderer attempt=... result=ok|failed stage=pin|create|first_frame|imgui_backend reason=...`, `renderer effective=... fallback=0|1
-fallback_reason=...`, `failed kind=sdl_video|no_display|window|renderer detail=... phase=...`, `game renderer setting=...`, `vulkan probe
+fallback_reason=...`, `failed kind=sdl_video|no_display|window|renderer detail=... phase=...`, `game renderer setting=...`, `home cache downloads=loaded|missing
+service=loaded|missing|expired`, `home refresh started|completed source=downloads|service ...`, `vulkan probe
 starting`, `vulkan probe status=... api=... code=... devices=... usable=...`, and the startup phase of a crash report
 (`Crash: startup phase:`). The CPU check lines (`CPU: missing ...`) and the game's own `Renderer:` and `GPU:` lines are separate,
 which tells a processor failure, an SDL video failure, a Direct3D 11 or software failure, a Vulkan probe failure and a game
@@ -296,6 +298,10 @@ Home is the first sidebar page and the page the launcher opens on: the project i
   files and `SHA256SUMS`/`CHECKSUMS` manifests are not downloads). It is cached for 30 minutes in
   `user/home_stats.cache`, and an earlier value stays shown while GitHub cannot be reached. It does not depend on the
   online service.
+- **First frame.** The cached Downloads value and the cached online statistics (`user/home_service.cache`: counters and class
+  names only, kept for up to six hours) are read before the window is shown and drawn on its first frame. The requests only
+  refresh them: a failed refresh keeps what was shown and never overwrites the cache. Without a usable cache the numbers show
+  a dash, and a loading placeholder appears only for a request still pending after three quarters of a second.
 - **Online sessions since launch** (`lifetime.sessions`): the sum of the dashboard's Sessions over every day the service
   has kept, so a reconnect inside the 10-minute window is still the same session. **Players since launch**
   (`lifetime.players`): the number of distinct online accounts the service has registered, one per account however

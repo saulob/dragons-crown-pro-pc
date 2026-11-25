@@ -449,7 +449,9 @@ public:
             net::apply_environment(online);
             incident_page_->CheckReports(online);
             home_page_ = std::make_unique<HomePage>(
-                home::HomeSources{home::kReleasesUrl, home::StatsUrlForLobby(online.lobby), UserDir() / "home_stats.cache"},
+                home::HomeSources{home::kReleasesUrl, home::StatsUrlForLobby(online.lobby), UserDir() / "home_stats.cache",
+                                  UserDir() / "home_service.cache",
+                                  [](std::string_view note) { Log("startup: %.*s", int(note.size()), note.data()); }},
                 shots ? home::Fetch() : home::HttpFetch(std::string("DragonsCrownProPC-Launcher/") + DCP_PORT_VERSION),
                 HomeHooks{[this] { return files_ == GameFileState::kValid; }, [this] { launcher_->RequestPlay(); },
                           [this] { GoTo(PageId::kPlay); }, [this] { GoTo(PageId::kOnline); },
@@ -471,9 +473,11 @@ public:
         host_.EndFrame(LauncherTheme().bg);
         host_.Show();
         Log("shown");
-        DetectGraphics();
         dcp_startup_phase("launcher running");
 
+        const double shown_at = ImGui::GetTime();
+        int frames_shown = 0;
+        bool graphics_pending = true;
         while (outcome == Outcome::kRunning) {
             if (!host_.WaitForFrame()) {
                 outcome = Outcome::kQuit;
@@ -495,6 +499,10 @@ public:
                 ++frames_;
             }
             host_.EndFrame(LauncherTheme().bg, shot.empty() ? nullptr : shot.c_str());
+            if (graphics_pending && GraphicsProbeDue(++frames_shown, ImGui::GetTime() - shown_at)) {
+                graphics_pending = false;
+                DetectGraphics();
+            }
         }
         dcp_startup_phase("launcher loop ended");
         if (!skip_finish_save_) {
@@ -724,6 +732,7 @@ private:
             break;
         case GraphicsCards::State::kNotAsked: break;
         }
+        dcp_startup_phase("launcher running");
     }
 
     void NormalizeGraphicsCard() {

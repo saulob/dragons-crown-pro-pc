@@ -24,6 +24,14 @@ struct GraphicsCards {
 
 inline constexpr char kGpuProbeMarker[] = "gpu_probe.pending";
 
+// The probe runs on the UI thread and freezes the window while it does, so it waits until the launcher has drawn a few
+// complete frames.
+inline constexpr int kProbeAfterFrames = 3;
+inline constexpr double kProbeAfterSeconds = 0.5;
+inline bool GraphicsProbeDue(int frames_shown, double seconds_shown) {
+    return frames_shown >= kProbeAfterFrames && seconds_shown >= kProbeAfterSeconds;
+}
+
 // Asks Vulkan for the cards once. `skip` leaves Vulkan alone (software recovery). The marker file exists only while the
 // probe runs: a driver that ends the process inside it leaves the marker, and the next start does not ask again.
 inline GraphicsCards DetectGraphicsCards(bool skip, const std::filesystem::path& marker, const std::function<void()>& before,

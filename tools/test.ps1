@@ -45,11 +45,10 @@
   saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
   The normal run includes both.
 .DESCRIPTION
-  The default run is the current focus, N7Q4L (issue #75, direct P2P endpoint): address classification, endpoint selection, the
-  STUN mapping, the Connection test, the direct and relay transport and its failure paths (dcp-net-tests), the Matching2 and
-  Rudp entry points and the endpoint paths a public lobby takes (dcp-online-hle-tests), the Connection test in the launcher
-  and the Options menu, the Worker tests of endpoints, their abuse limits, resumes and the relay and, through WSL, the same
-  net test groups on Linux. Every other group stays under -Full.
+  The default run is the current focus, V6H2K (launcher startup visual state): the Home statistics and their caches, the launcher
+  startup order and source contract, the renderer fallback and presentation groups, the Vulkan probe scenarios and the graphics card
+  list (dcp-launcher-tests, dcp-launcher-startup-tests), the updater's network behaviour (dcp-update-network-tests) and the
+  launcher static gate. Every other group stays under -Full.
 
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -481,16 +480,14 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'N7Q4L direct P2P endpoint, issue #75'
-$defaultFocusSuites = @('dcp-net-tests', 'dcp-online-hle-tests', 'dcp-options-menu-tests', 'dcp-launcher-tests')
-$focusNetGroups = @('foundations', 'address-classification', 'endpoint-selection', 'stun-mapping', 'connection-test', 'direct', 'relay-codec', 'relay-fallback',
-                    'failure-paths', 'transport-quality', 'protocol', 'lobby-binary')
-$focusEndpointPaths = @('endpoint path IPv6', 'endpoint path IPv4', 'endpoint path issue 75')
+$defaultFocusName = 'V6H2K launcher startup visual state'
+$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-launcher-startup-tests', 'dcp-update-network-tests')
 # The result line each focused selector must print: a selector that finds nothing to check (or prints nothing) is a failure.
 $defaultFocusGroups = [ordered]@{
-    'dcp-net-tests online'               = @($focusNetGroups | Where-Object { $_ -ne 'lobby-binary' } | ForEach-Object { "GROUP|$_|PASS" })
-    'dcp-launcher-tests connection-test' = @('GROUP|launcher-connection-test|PASS')
-    'Worker tests (endpoints)'           = @('# fail 0')
+    'dcp-launcher-tests home-startup'  = @('GROUP|launcher-home-startup|PASS')
+    'dcp-launcher-tests startup'       = @('GROUP|launcher-startup|PASS')
+    'dcp-launcher-tests renderer'      = @('GROUP|launcher-renderer|PASS')
+    'dcp-launcher-startup-tests logic' = @('GROUP|launcher-startup-logic|PASS')
 }
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
@@ -555,17 +552,17 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @(
-        (Test-Step 'online tests (endpoint selection, STUN mapping, Connection test, P2P transport, relay fallback, failure paths; binary WebSocket against a loopback lobby)' 'dcp-net-tests' -Capture -Quiet -Lobby -Timing `
-            -Key 'dcp-net-tests online' -Arguments $focusNetGroups)
-        ($tests | Where-Object { $_.Exe -eq 'dcp-online-hle-tests' -and -not $_.Key })
-        ($tests | Where-Object { $focusEndpointPaths -contains $_.Key })
-        (Test-Step 'Connection test in the Options menu (report lines, verdicts, Portuguese text)' 'dcp-options-menu-tests')
-        (Test-Step 'Connection test in the launcher (every line and verdict translated)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests connection-test' -Arguments @('connection-test'))
-        (Test-Step 'Worker tests (node --test: lobby protocol and endpoints, abuse limits, resume, relay, write budget, compatibility)' `
-            -Block { Invoke-WorkerTests @('lobby', 'abuse', 'resume', 'relay', 'write_budget', 'compatibility', 'persistence', 'worker') } -Key 'Worker tests (endpoints)')
-        (Test-Step 'Linux network tests (WSL: POSIX sockets, the same net test groups; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-net.sh' $focusNetGroups } `
-            -Key 'Linux network tests (WSL)' -Nominal 120)
+        (Test-Step 'Home statistics and startup order (caches before the first frame, placeholders, refresh, updater independence)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests home-startup' -Arguments @('home-startup'))
+        (Test-Step 'launcher startup source contract (renderer, Show, Vulkan probe order)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests startup' -Arguments @('startup'))
+        (Test-Step 'launcher renderer and presentation' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests renderer' -Arguments @('renderer'))
+        (Test-Step 'launcher startup without Vulkan (renderer fallback, recovery option, Vulkan probe scenarios, graphics card list, probe timing)' 'dcp-launcher-startup-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-startup-tests logic')
+        ($tests | Where-Object { $_.Exe -eq 'dcp-update-network-tests' })
+        (Test-Step 'launcher static gate (source hygiene, TRG patch chain, compiler warnings, Windows and Linux syntax-only compiles)' -Script 'tests\launcher_gate_tests.ps1' -Capture `
+            -Arguments (@('-BuildDir', $buildDir) + @(if ($SkipLinux) { '-SkipLinux' })))
     )
     $requiredSuites = $defaultFocusSuites
 }

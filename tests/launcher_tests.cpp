@@ -3038,14 +3038,15 @@ void TestLauncherStartup() {
     const std::string loader = ReadAll(source / "src" / "loader.c");
     const std::string header = ReadAll(source / "launcher" / "dcp_launcher.h");
 
-    // The window and its renderer come first; Vulkan is asked once the launcher is on screen, never in Open.
+    // The window and its renderer come first; Vulkan is asked after the launcher is on screen and has drawn, never in Open.
     const std::string run = Between(app, "bool Run(Outcome& outcome) {", "Outcome Frame() {");
     const size_t opened = run.find("host_.Open(options)");
     const size_t shown = run.find("host_.Show();");
     const size_t detected = run.find("DetectGraphics();");
     const size_t loop = run.find("while (outcome == Outcome::kRunning) {");
     CHECK(opened != std::string::npos && shown != std::string::npos && detected != std::string::npos && loop != std::string::npos);
-    CHECK(opened < shown && shown < detected && detected < loop);
+    CHECK(opened < shown && shown < loop && loop < detected);
+    CHECK(run.find("GraphicsProbeDue(++frames_shown", loop) < detected);
     CHECK(run.find("dcp_gpu_probe(") == std::string::npos && run.find("ListGpuNames") == std::string::npos);
     CHECK(app.find("dcp_gpu_names") == std::string::npos && header.find("dcp_gpu_names") == std::string::npos);
     CHECK(app.find("dcp_gpu_probe(&probe)") != std::string::npos && app.find("dcp_gpu_probe(") == app.rfind("dcp_gpu_probe("));
@@ -5847,6 +5848,251 @@ void TestHomeCacheAndRefresh() {
     }
     std::error_code ec;
     fs::remove_all(base, ec);
+}
+
+// V6H2K: the first visible Home frame is complete from local state; the network only refreshes it.
+struct GatedHomeNetwork {
+    std::shared_ptr<std::atomic<bool>> open = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<bool>> fail = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<int>> calls = std::make_shared<std::atomic<int>>(0);
+    std::string releases_page = "[" + ReleaseJson(false, {{"game.zip", 80000}}) + "]";
+
+    home::Fetch fetch() const {
+        return [open = open, fail = fail, calls = calls, page = releases_page](const std::string& url, std::string& body, trg::Task&) {
+            ++*calls;
+            for (int i = 0; i < 5000 && !*open; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (*fail) return std::string("The server answered 503.");
+            body = url.find("/stats") != std::string::npos ? std::string(kStatsJson) : page;
+            return std::string();
+        };
+    }
+};
+
+bool SameService(const home::ServiceStats& a, const home::ServiceStats& b) {
+    const auto classes = [](const home::ServiceStats& s) {
+        std::vector<std::pair<std::string, int64_t>> rows;
+        if (s.month && s.month->classes) {
+            for (const home::ClassCount& row : *s.month->classes) rows.emplace_back(row.name, row.count);
+        }
+        return rows;
+    };
+    const bool live = a.live.has_value() == b.live.has_value() &&
+                      (!a.live || (a.live->online_now == b.live->online_now && a.live->playing_online == b.live->playing_online &&
+                                   a.live->open_games == b.live->open_games && a.live->peak_today == b.live->peak_today));
+    const bool today = a.today.has_value() == b.today.has_value() &&
+                       (!a.today || (a.today->online_sessions == b.today->online_sessions && a.today->games_created == b.today->games_created &&
+                                     a.today->players_joined == b.today->players_joined));
+    const bool month = a.month.has_value() == b.month.has_value() &&
+                       (!a.month || (a.month->multiplayer_sessions == b.month->multiplayer_sessions &&
+                                     a.month->classes.has_value() == b.month->classes.has_value() && classes(a) == classes(b)));
+    const bool lifetime = a.lifetime.has_value() == b.lifetime.has_value() &&
+                          (!a.lifetime || (a.lifetime->sessions == b.lifetime->sessions && a.lifetime->players == b.lifetime->players));
+    return live && today && month && lifetime;
+}
+
+home::ServiceStats CachedServiceSample() {
+    home::ServiceStats stats = *home::ParseServiceStats(kStatsJson);
+    stats.live->online_now = 99;
+    stats.lifetime = home::LifetimeStats{4000, 1500};
+    return stats;
+}
+
+// Ticks the page until `done`, for up to three seconds.
+template <typename Done>
+bool TickUntil(home::HomeStats& stats, double now, int64_t unix_now, Done done) {
+    for (int i = 0; i < 3000; ++i) {
+        stats.Tick(now, unix_now, true);
+        if (done(stats.view())) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return false;
+}
+
+void TestHomeStartupCache() {
+    using namespace home;
+    const fs::path base = fs::temp_directory_path() / ("dcp_home_startup_" + std::to_string(getpid()));
+    fs::remove_all(base);
+    fs::create_directories(base);
+    const fs::path downloads_file = base / "home_stats.cache", service_file = base / "home_service.cache";
+    constexpr int64_t kNow = 1700000000;
+
+    CHECK(PlaceholderDue(true, kPlaceholderDelaySeconds) && !PlaceholderDue(true, kPlaceholderDelaySeconds - 0.01));
+    CHECK(!PlaceholderDue(false, 100.0) && !PlaceholderDue(true, 0.0));
+
+    // Missing and corrupt caches read as nothing and never throw.
+    CHECK(!ReadServiceCache(service_file));
+    for (const char* garbage : {"", "fetched=5\n", "live.online=3\n", "fetched=5\nlive.online=x\n", "fetched=5\nlive.online=-1\n",
+                                "fetched=5\nmonth.classes=1\nclass.Dragon=3\n", "fetched=5\nmonth.classes=1\nclass.Elf=0\n",
+                                "fetched=99999999999999999999\nlive.online=1\n", "fetched=5\nlifetime.sessions=4\n", "\x01\x02\x03 binary"}) {
+        WriteAll(base / "garbage.cache", garbage);
+        CHECK(!ReadServiceCache(base / "garbage.cache"));
+    }
+
+    // What is stored reads back unchanged and holds only counters and class names.
+    const ServiceStats sample = CachedServiceSample();
+    CHECK(WriteServiceCache(service_file, {sample, kNow - 7200}));
+    const std::optional<ServiceCache> stored = ReadServiceCache(service_file);
+    CHECK(stored && stored->fetched_unix == kNow - 7200 && SameService(stored->stats, sample));
+    CHECK(!fs::exists(base / "home_service.cache.part"));
+    {
+        std::istringstream in(ReadAll(service_file));
+        std::string line;
+        while (std::getline(in, line)) {
+            const size_t equals = line.find('=');
+            CHECK(equals != std::string::npos && line.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ._") == equals);
+            CHECK(!line.substr(equals + 1).empty() && line.substr(equals + 1).find_first_not_of("0123456789") == std::string::npos);
+        }
+    }
+
+    // A valid cache is on the first frame before any request finishes, even a stale one, and nothing resets it.
+    {
+        CHECK(WriteDownloadsCache(downloads_file, {71993, kNow - 100}));
+        GatedHomeNetwork network;
+        std::vector<std::string> notes;
+        HomeStats stats({kReleasesUrl, "https://lobby.example/stats", downloads_file, service_file, [&](std::string_view note) { notes.emplace_back(note); }},
+                        network.fetch());
+        CHECK(stats.view().downloads && *stats.view().downloads == 71993);
+        stats.Tick(100.0, kNow, true);
+        CHECK(stats.view().service && SameService(*stats.view().service, sample));
+        CHECK(!stats.view().service_loading && !stats.view().service_placeholder && !stats.view().service_failed);
+        CHECK(!stats.view().service_updated_at && !stats.view().downloads_loading && !stats.view().downloads_placeholder);
+        for (int i = 0; i < 200 && *network.calls < 1; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        CHECK(*network.calls >= 1);
+        for (const double later : {100.5, 102.0, 130.0}) {
+            stats.Tick(later, kNow, true);
+            CHECK(stats.view().service && stats.view().service->live && stats.view().service->live->online_now == 99);
+            CHECK(!stats.view().service_loading && !stats.view().service_placeholder && !stats.view().service_failed);
+            CHECK(stats.view().downloads && *stats.view().downloads == 71993);
+        }
+        *network.open = true;
+        CHECK(TickUntil(stats, 131.0, kNow + 1, [](const HomeView& view) {
+            return view.service && view.service->live && view.service->live->online_now == 14 && view.service_updated_at;
+        }));
+        CHECK(!stats.view().service_failed && stats.view().service->complete());
+        CHECK(ReadServiceCache(service_file) && ReadServiceCache(service_file)->fetched_unix == kNow + 1 &&
+              ReadServiceCache(service_file)->stats.live->online_now == 14);
+        CHECK(std::count(notes.begin(), notes.end(), "home cache downloads=loaded service=loaded") == 1);
+        CHECK(std::count(notes.begin(), notes.end(), "home refresh started source=service") == 1);
+        CHECK(std::count(notes.begin(), notes.end(), "home refresh completed source=service result=ok") == 1);
+    }
+
+    // A cache younger than the refresh interval is shown as just updated and is not fetched again.
+    {
+        CHECK(WriteServiceCache(service_file, {sample, kNow - 10}));
+        GatedHomeNetwork network;
+        *network.open = true;
+        HomeStats stats({kReleasesUrl, "https://lobby.example/stats", downloads_file, service_file}, network.fetch());
+        stats.Tick(100.0, kNow, true);
+        CHECK(stats.view().service && stats.view().service_updated_at && !stats.view().service_loading);
+        stats.Tick(101.0, kNow + 1, true);
+        CHECK(stats.view().service->live->online_now == 99 && *network.calls == 0);
+    }
+
+    // An expired cache, one from the future and a missing one show nothing; the placeholder waits before it appears.
+    for (const int64_t age : {int64_t(kServiceCacheMaxAgeSeconds) + 1, int64_t(-5)}) {
+        CHECK(WriteServiceCache(service_file, {sample, kNow - age}));
+        GatedHomeNetwork network;
+        std::vector<std::string> notes;
+        HomeStats stats({kReleasesUrl, "https://lobby.example/stats", base / ("none" + std::to_string(age) + ".cache"), service_file,
+                         [&](std::string_view note) { notes.emplace_back(note); }},
+                        network.fetch());
+        stats.Tick(10.0, kNow, true);
+        CHECK(!stats.view().service && stats.view().service_loading && !stats.view().service_placeholder);
+        CHECK(!stats.view().downloads && stats.view().downloads_loading && !stats.view().downloads_placeholder);
+        stats.Tick(10.0 + kPlaceholderDelaySeconds - 0.05, kNow, true);
+        CHECK(!stats.view().service_placeholder && !stats.view().downloads_placeholder);
+        stats.Tick(10.0 + kPlaceholderDelaySeconds, kNow, true);
+        CHECK(stats.view().service_placeholder && stats.view().downloads_placeholder);
+        *network.open = true;
+        CHECK(TickUntil(stats, 12.0, kNow, [](const HomeView& view) { return view.service && view.downloads; }));
+        CHECK(!stats.view().service_placeholder && !stats.view().downloads_placeholder && *stats.view().downloads == 80000);
+        CHECK(std::count(notes.begin(), notes.end(), "home cache service=expired") == 1);
+    }
+    {
+        GatedHomeNetwork network;
+        *network.open = true;
+        HomeStats stats({kReleasesUrl, "https://lobby.example/stats", base / "dl_absent.cache", base / "absent.cache"}, network.fetch());
+        stats.Tick(1.0, kNow, true);
+        CHECK(!stats.view().service && stats.view().service_loading && !stats.view().service_placeholder);
+        CHECK(TickUntil(stats, 1.2, kNow, [](const HomeView& view) { return view.service.has_value(); }));
+        CHECK(ReadServiceCache(base / "absent.cache") && ReadServiceCache(base / "absent.cache")->fetched_unix == kNow);
+    }
+
+    // A failed refresh keeps what the cache showed and never overwrites it with anything.
+    {
+        CHECK(WriteServiceCache(service_file, {sample, kNow - 3600}));
+        GatedHomeNetwork network;
+        *network.open = true;
+        *network.fail = true;
+        std::vector<std::string> notes;
+        HomeStats stats({kReleasesUrl, "https://lobby.example/stats", downloads_file, service_file, [&](std::string_view note) { notes.emplace_back(note); }},
+                        network.fetch());
+        CHECK(TickUntil(stats, 5.0, kNow, [](const HomeView& view) { return view.service_failed; }));
+        CHECK(stats.view().service && SameService(*stats.view().service, sample) && !stats.view().service_loading);
+        CHECK(ReadServiceCache(service_file) && ReadServiceCache(service_file)->fetched_unix == kNow - 3600 &&
+              SameService(ReadServiceCache(service_file)->stats, sample));
+        CHECK(stats.view().downloads && *stats.view().downloads == 71993);
+        CHECK(std::count(notes.begin(), notes.end(), "home refresh completed source=service result=failed") == 1);
+    }
+
+    // No service cache path: nothing is stored and the page still loads.
+    {
+        const fs::path folder = base / "no_service_cache";
+        GatedHomeNetwork network;
+        *network.open = true;
+        HomeStats stats({kReleasesUrl, "https://lobby.example/stats", folder / "dl.cache"}, network.fetch());
+        CHECK(TickUntil(stats, 1.0, kNow, [](const HomeView& view) { return view.service.has_value() && view.downloads.has_value(); }));
+        CHECK(std::distance(fs::directory_iterator(folder), fs::directory_iterator()) == 1 && fs::exists(folder / "dl.cache"));
+    }
+    std::error_code ec;
+    fs::remove_all(base, ec);
+}
+
+// V6H2K: what the first visible launcher frame is made of, in source order. Not tied to line numbers.
+void TestHomeStartupOrder() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string app = ReadAll(source / "launcher" / "launcher.cpp");
+    const std::string page = ReadAll(source / "launcher" / "home_page.cpp");
+    const std::string stats = ReadAll(source / "launcher" / "home_stats.cpp");
+    const std::string run = Between(app, "bool Run(Outcome& outcome) {", "Outcome Frame() {");
+    const size_t show = run.find("host_.Show();");
+    const size_t loop = run.find("while (outcome == Outcome::kRunning) {");
+    CHECK(show != std::string::npos && loop != std::string::npos && show < loop);
+
+    // Everything local the first frame draws is ready before the window is shown.
+    for (const char* local : {"host_.Open(options)", "LoadSystemFonts", "\"header-art.png\"", "\"home_background.png\"", "std::make_unique<HomePage>",
+                              "home_service.cache", "SetTranslator", "SetActiveLanguage", "std::make_unique<trg::Launcher>", "ApplySavedPatches();",
+                              "host_.BeginFrame();", "outcome = Frame();", "host_.EndFrame("}) {
+        const size_t at = run.find(local);
+        CHECK(at != std::string::npos && at < show);
+    }
+    CHECK(run.find("host_.EndFrame(") < show && run.find("outcome = Frame();") < run.find("host_.EndFrame("));
+
+    // The window is not held back by a request: the updater starts before it, nothing waits for it, and its poll leaves Home alone.
+    const size_t check = run.find("updater_->StartCheck();");
+    CHECK(check != std::string::npos && check < show);
+    CHECK(run.substr(0, show).find("Wait(") == std::string::npos && run.substr(0, show).find(".join(") == std::string::npos &&
+          run.substr(0, show).find("future") == std::string::npos);
+    const std::string poll = Between(app, "void PollUpdate() {", "bool HandleUpdateAction(");
+    CHECK(poll.find("updater_->Poll()") != std::string::npos && poll.find("home_") == std::string::npos);
+    const std::string frame = Between(app, "Outcome Frame() {", "std::filesystem::path InstallDir() const {");
+    CHECK(frame.find("PollUpdate();") < frame.find("home_page_->Tick(") && frame.find("home_page_->Tick(") < frame.find("launcher_->Frame()"));
+
+    // Vulkan and the network follow the shown window and never gate what Home draws.
+    CHECK(run.find("DetectGraphics();") > loop);
+    CHECK(Between(app, "void DetectGraphics() {", "void NormalizeGraphicsCard() {").find("home_") == std::string::npos);
+
+    // Both caches are read when the page is built, before its first Tick; a placeholder only follows a wait.
+    const std::string constructor = Between(stats, "HomeStats::HomeStats(", "HomeStats::~HomeStats()");
+    CHECK(constructor.find("ReadDownloadsCache(") != std::string::npos && constructor.find("ReadServiceCache(") != std::string::npos);
+    CHECK(page.find("view.downloads_placeholder") != std::string::npos && page.find("view().service_placeholder") != std::string::npos);
+    CHECK(page.find("downloads_loading") == std::string::npos && page.find("service_loading") == std::string::npos);
+    const std::string tick = Between(stats, "void HomeStats::Tick(", "void HomeStats::StartDownloads()");
+    CHECK(tick.find("UseCachedService(") < tick.find("Collect(") && tick.find("Collect(") < tick.find("StartDownloads()"));
+    CHECK(stats.find("view_.service.reset") == std::string::npos && stats.find("view_.downloads.reset") == std::string::npos &&
+          stats.find("view_ = ") == std::string::npos);
 }
 
 void TestHomePageWiring() {
@@ -11780,6 +12026,8 @@ int main(int argc, char** argv) {
         InGroup("home", TestHomeDownloads);
         InGroup("home", TestHomeServiceStats);
         InGroup("home", TestHomeCacheAndRefresh);
+        InGroup("home", TestHomeStartupCache);
+        InGroup("home", TestHomeStartupOrder);
         InGroup("home", TestHomePageWiring);
         InGroup("home", TestHomeArt);
         InGroup("home", TestHomeCommunity);
@@ -11795,6 +12043,18 @@ int main(int argc, char** argv) {
         InGroup("home", TestLauncherDpiLayout);
         InGroup("home", TestLauncherLocalization);
         std::printf("GROUP|launcher-home|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "home-startup") {
+        InGroup("home-startup", TestHomeDownloads);
+        InGroup("home-startup", TestHomeServiceStats);
+        InGroup("home-startup", TestHomeCacheAndRefresh);
+        InGroup("home-startup", TestHomeStartupCache);
+        InGroup("home-startup", TestHomeStartupOrder);
+        InGroup("home-startup", TestHomePageWiring);
+        InGroup("home-startup", TestHomeLifetime);
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-home-startup|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
     if (argc == 2 && std::string(argv[1]) == "renderer") {
@@ -11936,6 +12196,8 @@ int main(int argc, char** argv) {
     InGroup("home", TestHomeDownloads);
     InGroup("home", TestHomeServiceStats);
     InGroup("home", TestHomeCacheAndRefresh);
+    InGroup("home", TestHomeStartupCache);
+    InGroup("home", TestHomeStartupOrder);
     InGroup("home", TestHomePageWiring);
     InGroup("home", TestHomeArt);
     InGroup("home", TestHomeCommunity);

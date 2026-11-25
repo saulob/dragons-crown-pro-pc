@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace trg {
@@ -23,6 +24,8 @@ inline constexpr int kMaxReleasePages = 10;
 inline constexpr double kDownloadsTtlSeconds = 30 * 60;
 inline constexpr double kServiceTtlSeconds = 60;
 inline constexpr double kRetryAfterFailureSeconds = 5 * 60;
+inline constexpr double kServiceCacheMaxAgeSeconds = 6 * 60 * 60;
+inline constexpr double kPlaceholderDelaySeconds = 0.75;
 
 // A release asset people download to play: checksum and signature files are not.
 bool CountsAsDownload(std::string_view asset_name);
@@ -82,6 +85,17 @@ struct DownloadsCache {
 std::optional<DownloadsCache> ReadDownloadsCache(const std::filesystem::path& file);
 bool WriteDownloadsCache(const std::filesystem::path& file, const DownloadsCache& cache);
 
+// The last answer of the service, kept so the next start shows numbers at once. Aggregates only.
+struct ServiceCache {
+    ServiceStats stats;
+    int64_t fetched_unix = 0;
+};
+std::optional<ServiceCache> ReadServiceCache(const std::filesystem::path& file);
+bool WriteServiceCache(const std::filesystem::path& file, const ServiceCache& cache);
+
+// A loading placeholder shows only for a request that is still pending after a short wait.
+bool PlaceholderDue(bool loading, double waited_seconds);
+
 // When a source is fetched again: after its TTL, or after a pause once a request failed.
 struct Freshness {
     std::optional<double> fetched_at;
@@ -97,16 +111,25 @@ using Fetch = std::function<std::string(const std::string& url, std::string& bod
 Fetch HttpFetch(std::string user_agent);
 
 struct HomeSources {
-    std::string releases_url = kReleasesUrl;
+    HomeSources(std::string releases = kReleasesUrl, std::string stats = "", std::filesystem::path downloads = {},
+                std::filesystem::path service = {}, std::function<void(std::string_view)> notes = {})
+        : releases_url(std::move(releases)), stats_url(std::move(stats)), downloads_cache(std::move(downloads)),
+          service_cache(std::move(service)), note(std::move(notes)) {}
+
+    std::string releases_url;
     std::string stats_url;  // "" leaves the multiplayer numbers out
     std::filesystem::path downloads_cache;
+    std::filesystem::path service_cache;  // "" keeps the multiplayer numbers from being stored
+    std::function<void(std::string_view)> note;  // startup diagnostics; never receives a value
 };
 
 struct HomeView {
     std::optional<uint64_t> downloads;
     bool downloads_loading = false;
+    bool downloads_placeholder = false;
     std::optional<ServiceStats> service;
     bool service_loading = false;
+    bool service_placeholder = false;
     bool service_failed = false;  // the last request failed or came back incomplete; `service` keeps what is known
     std::optional<double> service_updated_at;
 };
@@ -127,6 +150,9 @@ private:
     void StartDownloads();
     void StartService();
     void Collect(double now, int64_t now_unix);
+    void UseCachedService(double now, int64_t now_unix);
+    void Note(std::string_view text) const;
+    void NoteOnce(int source, int step, std::string_view text);
 
     HomeSources sources_;
     Fetch fetch_;
@@ -136,6 +162,10 @@ private:
     std::shared_ptr<Request> downloads_request_;
     std::shared_ptr<Request> service_request_;
     std::optional<int64_t> cached_unix_;
+    std::optional<ServiceCache> cached_service_;
+    double downloads_started_ = 0;
+    double service_started_ = 0;
+    bool noted_[2][2] = {};  // source x (started, finished): each is reported once
 };
 
 } // namespace dcp::home

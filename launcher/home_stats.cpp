@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <exception>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -78,6 +79,42 @@ std::optional<std::vector<Row>> ParseRows(const Value* list, const char* key, Va
 
 std::optional<std::vector<ClassCount>> ParseClasses(const Value* list) {
     return ParseRows<ClassCount>(list, "class", IsClassName);
+}
+
+std::optional<int64_t> CacheNumber(const std::string& value) {
+    if (value.empty() || value.size() > 18 || value.find_first_not_of("0123456789") != std::string::npos) {
+        return std::nullopt;
+    }
+    return std::stoll(value);
+}
+
+bool WriteTextAtomically(const std::filesystem::path& file, const std::string& text) {
+    std::error_code ec;
+    if (file.has_parent_path()) {
+        std::filesystem::create_directories(file.parent_path(), ec);
+    }
+    std::filesystem::path part = file;
+    part += ".part";
+    {
+        std::ofstream out(part, std::ios::binary | std::ios::trunc);
+        out << text;
+        if (!out.flush()) {
+            std::filesystem::remove(part, ec);
+            return false;
+        }
+    }
+    std::filesystem::rename(part, file, ec);
+    if (ec) {
+        std::filesystem::remove(part, ec);
+        return false;
+    }
+    return true;
+}
+
+void AppendCount(std::string& text, const std::string& key, const std::optional<int64_t>& value) {
+    if (value) {
+        text += key + "=" + std::to_string(*value) + "\n";
+    }
 }
 
 // "https://host[:port]" of an address, lower case; "" when it has none.
@@ -239,27 +276,103 @@ std::optional<DownloadsCache> ReadDownloadsCache(const std::filesystem::path& fi
 }
 
 bool WriteDownloadsCache(const std::filesystem::path& file, const DownloadsCache& cache) {
-    std::error_code ec;
-    if (file.has_parent_path()) {
-        std::filesystem::create_directories(file.parent_path(), ec);
+    return WriteTextAtomically(file, "downloads=" + std::to_string(cache.downloads) + "\nfetched=" + std::to_string(cache.fetched_unix) + "\n");
+}
+
+std::optional<ServiceCache> ReadServiceCache(const std::filesystem::path& file) {
+    std::ifstream in(file);
+    if (!in) {
+        return std::nullopt;
     }
-    std::filesystem::path part = file;
-    part += ".part";
-    {
-        std::ofstream out(part, std::ios::binary | std::ios::trunc);
-        out << "downloads=" << cache.downloads << "\nfetched=" << cache.fetched_unix << "\n";
-        if (!out.flush()) {
-            std::filesystem::remove(part, ec);
-            return false;
+    std::map<std::string, int64_t> numbers;
+    std::vector<ClassCount> classes;
+    std::string line;
+    while (std::getline(in, line)) {
+        const size_t equals = line.find('=');
+        if (equals == std::string::npos) {
+            continue;
+        }
+        const std::string key = line.substr(0, equals);
+        const std::optional<int64_t> value = CacheNumber(line.substr(equals + 1));
+        if (!value) {
+            return std::nullopt;
+        }
+        if (key.rfind("class.", 0) == 0) {
+            const std::string name = key.substr(6);
+            if (!IsClassName(name) || *value <= 0) {
+                return std::nullopt;
+            }
+            classes.push_back({name, *value});
+        } else {
+            numbers[key] = *value;
         }
     }
-    std::filesystem::rename(part, file, ec);
-    if (ec) {
-        std::filesystem::remove(part, ec);
-        return false;
+    const auto number = [&](const char* key) -> std::optional<int64_t> {
+        const auto found = numbers.find(key);
+        return found == numbers.end() ? std::nullopt : std::optional<int64_t>(found->second);
+    };
+    const std::optional<int64_t> fetched = number("fetched");
+    if (!fetched) {
+        return std::nullopt;
     }
-    return true;
+    ServiceStats stats;
+    const LiveStats live{number("live.online"), number("live.in_rooms"), number("live.open_rooms"), number("live.peak_today")};
+    if (live.online_now || live.playing_online || live.open_games || live.peak_today) {
+        stats.live = live;
+    }
+    const TodayStats today{number("today.sessions"), number("today.rooms_created"), number("today.joins")};
+    if (today.online_sessions || today.games_created || today.players_joined) {
+        stats.today = today;
+    }
+    MonthStats month{number("month.rooms_with_guest"), std::nullopt};
+    if (number("month.classes")) {
+        month.classes = classes;
+    }
+    if (month.multiplayer_sessions || month.classes) {
+        stats.month = month;
+    }
+    const LifetimeStats lifetime{number("lifetime.sessions"), number("lifetime.players")};
+    if (lifetime.sessions || lifetime.players) {
+        stats.lifetime = lifetime;
+    }
+    if (!stats.live && !stats.today && !stats.month) {
+        return std::nullopt;
+    }
+    return ServiceCache{stats, *fetched};
 }
+
+bool WriteServiceCache(const std::filesystem::path& file, const ServiceCache& cache) {
+    const ServiceStats& stats = cache.stats;
+    std::string text;
+    AppendCount(text, "fetched", cache.fetched_unix);
+    if (stats.live) {
+        AppendCount(text, "live.online", stats.live->online_now);
+        AppendCount(text, "live.in_rooms", stats.live->playing_online);
+        AppendCount(text, "live.open_rooms", stats.live->open_games);
+        AppendCount(text, "live.peak_today", stats.live->peak_today);
+    }
+    if (stats.today) {
+        AppendCount(text, "today.sessions", stats.today->online_sessions);
+        AppendCount(text, "today.rooms_created", stats.today->games_created);
+        AppendCount(text, "today.joins", stats.today->players_joined);
+    }
+    if (stats.month) {
+        AppendCount(text, "month.rooms_with_guest", stats.month->multiplayer_sessions);
+        if (stats.month->classes) {
+            text += "month.classes=1\n";
+            for (const ClassCount& row : *stats.month->classes) {
+                AppendCount(text, "class." + row.name, row.count);
+            }
+        }
+    }
+    if (stats.lifetime) {
+        AppendCount(text, "lifetime.sessions", stats.lifetime->sessions);
+        AppendCount(text, "lifetime.players", stats.lifetime->players);
+    }
+    return WriteTextAtomically(file, text);
+}
+
+bool PlaceholderDue(bool loading, double waited_seconds) { return loading && waited_seconds >= kPlaceholderDelaySeconds; }
 
 bool RefreshDue(const Freshness& freshness, double now, double ttl) {
     if (freshness.failed_at && (!freshness.fetched_at || *freshness.failed_at >= *freshness.fetched_at)) {
@@ -307,13 +420,45 @@ struct HomeStats::Request {
 };
 
 HomeStats::HomeStats(HomeSources sources, Fetch fetch) : sources_(std::move(sources)), fetch_(std::move(fetch)) {
-    if (const std::optional<DownloadsCache> cached = ReadDownloadsCache(sources_.downloads_cache)) {
-        view_.downloads = cached->downloads;
-        cached_unix_ = cached->fetched_unix;
+    const std::optional<DownloadsCache> downloads = ReadDownloadsCache(sources_.downloads_cache);
+    if (downloads) {
+        view_.downloads = downloads->downloads;
+        cached_unix_ = downloads->fetched_unix;
     }
+    if (!sources_.service_cache.empty()) {
+        cached_service_ = ReadServiceCache(sources_.service_cache);
+    }
+    Note(std::string("home cache downloads=") + (downloads ? "loaded" : "missing") + " service=" +
+         (cached_service_ ? "loaded" : "missing"));
 }
 
 HomeStats::~HomeStats() = default;
+
+void HomeStats::Note(std::string_view text) const {
+    if (sources_.note) {
+        sources_.note(text);
+    }
+}
+
+void HomeStats::NoteOnce(int source, int step, std::string_view text) {
+    if (!std::exchange(noted_[source][step], true)) {
+        Note(text);
+    }
+}
+
+void HomeStats::UseCachedService(double now, int64_t now_unix) {
+    const int64_t age = now_unix - cached_service_->fetched_unix;
+    if (age >= 0 && age <= static_cast<int64_t>(kServiceCacheMaxAgeSeconds)) {
+        view_.service = cached_service_->stats;
+        if (age < static_cast<int64_t>(kServiceTtlSeconds)) {
+            service_.fetched_at = now - static_cast<double>(age);
+            view_.service_updated_at = service_.fetched_at;
+        }
+    } else {
+        Note("home cache service=expired");
+    }
+    cached_service_.reset();
+}
 
 void HomeStats::Tick(double now, int64_t now_unix, bool visible) {
     if (cached_unix_) {
@@ -323,17 +468,24 @@ void HomeStats::Tick(double now, int64_t now_unix, bool visible) {
         }
         cached_unix_.reset();
     }
+    if (cached_service_) {
+        UseCachedService(now, now_unix);
+    }
     Collect(now, now_unix);
     if (visible && fetch_) {
         if (!downloads_request_ && RefreshDue(downloads_, now, kDownloadsTtlSeconds)) {
+            downloads_started_ = now;
             StartDownloads();
         }
         if (!service_request_ && !sources_.stats_url.empty() && RefreshDue(service_, now, kServiceTtlSeconds)) {
+            service_started_ = now;
             StartService();
         }
     }
     view_.downloads_loading = downloads_request_ != nullptr && !view_.downloads;
     view_.service_loading = service_request_ != nullptr && !view_.service;
+    view_.downloads_placeholder = PlaceholderDue(view_.downloads_loading, now - downloads_started_);
+    view_.service_placeholder = PlaceholderDue(view_.service_loading, now - service_started_);
 }
 
 void HomeStats::StartDownloads() {
@@ -360,6 +512,7 @@ void HomeStats::StartDownloads() {
         });
     if (started) {
         downloads_request_ = std::move(request);
+        NoteOnce(0, 0, "home refresh started source=downloads");
     }
 }
 
@@ -376,6 +529,7 @@ void HomeStats::StartService() {
         });
     if (started) {
         service_request_ = std::move(request);
+        NoteOnce(1, 0, "home refresh started source=service");
     }
 }
 
@@ -383,28 +537,35 @@ void HomeStats::Collect(double now, int64_t now_unix) {
     if (downloads_request_) {
         const trg::Task::State state = downloads_request_->task->Finish();
         if (state != trg::Task::State::kIdle) {
-            if (state == trg::Task::State::kDone && *downloads_request_->downloads) {
+            const bool ok = state == trg::Task::State::kDone && *downloads_request_->downloads;
+            if (ok) {
                 view_.downloads = **downloads_request_->downloads;
                 downloads_.fetched_at = now;
                 WriteDownloadsCache(sources_.downloads_cache, {*view_.downloads, now_unix});
             } else {
                 downloads_.failed_at = now;
             }
+            NoteOnce(0, 1, ok ? "home refresh completed source=downloads result=ok" : "home refresh completed source=downloads result=failed");
             downloads_request_.reset();
         }
     }
     if (service_request_) {
         const trg::Task::State state = service_request_->task->Finish();
         if (state != trg::Task::State::kIdle) {
-            if (state == trg::Task::State::kDone && *service_request_->service) {
+            const bool ok = state == trg::Task::State::kDone && *service_request_->service;
+            if (ok) {
                 view_.service = **service_request_->service;
                 view_.service_updated_at = now;
                 view_.service_failed = !view_.service->complete();
                 service_.fetched_at = now;
+                if (!sources_.service_cache.empty()) {
+                    WriteServiceCache(sources_.service_cache, {*view_.service, now_unix});
+                }
             } else {
                 view_.service_failed = true;
                 service_.failed_at = now;
             }
+            NoteOnce(1, 1, ok ? "home refresh completed source=service result=ok" : "home refresh completed source=service result=failed");
             service_request_.reset();
         }
     }

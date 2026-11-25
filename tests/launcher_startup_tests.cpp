@@ -407,6 +407,15 @@ void TestGraphicsCards() {
     fs::remove_all(folder);
 }
 
+// V6H2K: the probe freezes the UI thread, so it waits for a few complete frames after the window is shown.
+void TestProbeWaitsForShownFrames() {
+    CHECK(!GraphicsProbeDue(0, 0.0) && !GraphicsProbeDue(1, 0.02));
+    CHECK(!GraphicsProbeDue(kProbeAfterFrames - 1, kProbeAfterSeconds + 1.0));
+    CHECK(!GraphicsProbeDue(kProbeAfterFrames + 100, kProbeAfterSeconds - 0.001));
+    CHECK(GraphicsProbeDue(kProbeAfterFrames, kProbeAfterSeconds));
+    CHECK(GraphicsProbeDue(kProbeAfterFrames + 1, kProbeAfterSeconds + 3.0));
+}
+
 } // namespace
 
 int main() {
@@ -415,6 +424,7 @@ int main() {
     TestRendererSelection();
     TestVulkanProbe();
     TestGraphicsCards();
+    TestProbeWaitsForShownFrames();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     std::printf("GROUP|launcher-startup-logic|%s\n", g_failures == 0 ? "PASS" : "FAIL");
     return g_failures ? 1 : 0;

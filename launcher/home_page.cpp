@@ -51,7 +51,7 @@ void ShadowedText(ImDrawList* draw, ImFont* font, float size, ImVec2 at, ImU32 c
 
 void Skeleton(ImDrawList* draw, ImVec2 min, ImVec2 max, const trg::Theme& theme, float rounding) {
     const float pulse = 0.5f + 0.5f * std::sin(float(ImGui::GetTime()) * 3.0f);
-    draw->AddRectFilled(min, max, trg::Col(theme.text, 0.10f + 0.08f * pulse), rounding);
+    draw->AddRectFilled(min, max, trg::Col(theme.text, 0.05f + 0.04f * pulse), rounding);
 }
 
 void Panel(ImDrawList* draw, ImVec2 min, ImVec2 max, const trg::Theme& theme, float scale, float fill_alpha,
@@ -349,7 +349,7 @@ void HomePage::DrawHero(trg::Ui& ui, float width, float density, bool ready, con
     ImDrawList* draw = ImGui::GetWindowDrawList();
     Panel(draw, origin, ImVec2(origin.x + width, origin.y + hero.height), theme, s, 0.55f, 0.50f);
 
-    const bool loading = view.downloads_loading && !view.downloads;
+    const bool loading = view.downloads_placeholder;
     const float stats_left = origin.x + hero.pad * 1.2f;
     const float stats_top = origin.y + hero.pad + (hero.stacked ? 0.0f : (hero.height - hero.pad * 2 - hero.stats_h) * 0.5f);
     const int pixels = int(hero.icon_px);
@@ -439,7 +439,7 @@ void HomePage::DrawCardGrid(trg::Ui& ui, ImVec2 origin, const CardLayout& cards,
     const float s = ui.scale();
     const trg::Theme& theme = ui.theme();
     const trg::Fonts& fonts = ui.fonts();
-    const bool loading = stats_.view().service_loading;
+    const bool loading = stats_.view().service_placeholder;
     const float text_w = std::max(1.0f, cards.width - cards.pad * 2);
     ImGui::PushFont(fonts.bold, cards.number_size);
     ImFont* number_font = ImGui::GetFont();
