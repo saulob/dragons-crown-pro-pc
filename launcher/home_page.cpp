@@ -407,15 +407,27 @@ void HomePage::DrawHero(trg::Ui& ui, float width, float density, bool ready, con
     }
     const float half = (button_w - hero.gap) * 0.5f;
     ImGui::SetCursorScreenPos(ImVec2(actions_x, actions_top + hero.action_h + hero.gap));
+    // Secondary actions get a thin border in the label color so they stay visible over the hero artwork.
+    // The border color is constant across hover/active, so those states keep the same outline.
+    const auto secondary_button = [&](const char* label, float w) {
+        ImVec4 border = theme.text;
+        border.w *= 0.55f;
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, std::max(1.0f, std::floor(s)));
+        ImGui::PushStyleColor(ImGuiCol_Border, border);
+        const bool clicked = ImGui::Button(label, ImVec2(w, hero.small_h));
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        return clicked;
+    };
     if (play) {
-        if (ImGui::Button(Tr("ONLINE LOBBY"), ImVec2(half, hero.small_h)) && hooks_.open_online_page) {
+        if (secondary_button(Tr("ONLINE LOBBY"), half) && hooks_.open_online_page) {
             hooks_.open_online_page();
         }
         ImGui::SetCursorScreenPos(ImVec2(actions_x + half + hero.gap, actions_top + hero.action_h + hero.gap));
-        if (ImGui::Button(Tr("MANAGE GAME"), ImVec2(half, hero.small_h)) && hooks_.open_play_page) {
+        if (secondary_button(Tr("MANAGE GAME"), half) && hooks_.open_play_page) {
             hooks_.open_play_page();
         }
-    } else if (ImGui::Button(Tr("ONLINE LOBBY"), ImVec2(button_w, hero.small_h)) && hooks_.open_online_page) {
+    } else if (secondary_button(Tr("ONLINE LOBBY"), button_w) && hooks_.open_online_page) {
         hooks_.open_online_page();
     }
     ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + hero.height));
