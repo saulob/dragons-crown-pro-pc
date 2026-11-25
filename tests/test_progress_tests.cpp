@@ -8,15 +8,19 @@
 #include <fstream>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "test_progress.h"
+#include "test_shards.h"
 
 namespace fs = std::filesystem;
 using namespace dcp::testprogress;
+namespace testshards = dcp::testshards;
 
 namespace {
 
@@ -329,7 +333,7 @@ std::vector<std::pair<std::string, bool>> EditorGroupTable() {
     const size_t end = source.find("// Runs the named groups", start);
     if (start == std::string::npos || end == std::string::npos) return table;
     const std::string body = source.substr(start, end - start);
-    static const std::regex entry("\\{\"((?:editor-|appearance-)[a-z-]+)\",\\s*(true|false)");
+    static const std::regex entry("(?:SingleUnit\\(|\\{)\"((?:editor-|appearance-)[a-z-]+)\",\\s*(true|false|[0-9]+)");
     for (auto it = std::sregex_iterator(body.begin(), body.end(), entry); it != std::sregex_iterator(); ++it) {
         table.emplace_back((*it)[1].str(), (*it)[2].str() == "true");
     }
@@ -344,7 +348,7 @@ std::vector<std::pair<std::string, bool>> EditorGroupTable() {
 void TestModeGroupCounts() {
     const auto table = EditorGroupTable();
 #ifdef DCP_SOURCE_DIR
-    CHECK(table.size() == 14); // release and all
+    CHECK(table.size() == 15); // release and all
     size_t quick = 0;
     for (const auto& [name, needs_game] : table) quick += needs_game ? 0 : 1;
     CHECK(quick > 0 && quick < table.size());
@@ -392,10 +396,182 @@ int Simulate(bool runner) {
     return 0;
 }
 
+// ---- tests/test_shards.h
+
+// Units whose "work" only ends when the test says so, guarding a resource two of them must never hold at once.
+void TestShardScheduling() {
+    using testshards::Result;
+    using testshards::Unit;
+    std::vector<Unit> units;
+    for (int i = 0; i < 12; ++i) units.push_back({"learn" + std::to_string(i % 3) + "/" + std::to_string(i), {}, i});
+    units.push_back({"uses", {"learn0/0", "learn1/1"}, 1000});
+    units.push_back({"throws", {}, 500});
+    units.push_back({"after-throws", {"throws"}, 1});
+    units.push_back({"a-waits-b", {"b-waits-a"}, 1});
+    units.push_back({"b-waits-a", {"a-waits-b"}, 1});
+    units.push_back({"unknown-dependency", {"not in the list"}, 1});
+
+    for (const int jobs : {1, 3, 8, 64}) {
+        std::mutex mutex;
+        std::set<std::string> held, ended;
+        std::vector<std::string> order;
+        int running = 0, peak = 0, clashes = 0;
+        const auto run = [&](const Unit& unit) {
+            const std::string folder = "folder of " + unit.id;
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                clashes += !held.insert(folder).second;
+                for (const std::string& id : unit.after) {
+                    if (id.find("waits") == std::string::npos && id != "not in the list") clashes += !ended.count(id);
+                }
+                order.push_back(unit.id);
+                peak = std::max(peak, ++running);
+            }
+            std::this_thread::yield();
+            std::lock_guard<std::mutex> lock(mutex);
+            --running;
+            held.erase(folder);
+            ended.insert(unit.id);
+            if (unit.id == "throws") throw std::runtime_error("boom");
+            Result result;
+            result.exit_code = 0;
+            result.output = unit.id;
+            return result;
+        };
+        size_t finished = 0;
+        testshards::Scheduler scheduler(units, run, [&](size_t index, const Result& result) {
+            ++finished;
+            CHECK(index < units.size() && result.ran);
+        });
+        const std::vector<Result> results = scheduler.Run(jobs);
+        CHECK(results.size() == units.size() && finished == units.size() && order.size() == units.size());
+        CHECK(std::set<std::string>(order.begin(), order.end()).size() == units.size()); // each exactly once
+        CHECK(peak <= std::min<int>(jobs, int(units.size())) && clashes == 0 && running == 0);
+        CHECK(scheduler.Running().empty() && scheduler.Finished() == units.size());
+        for (size_t i = 0; i < results.size(); ++i) {
+            if (units[i].id == "throws") CHECK(results[i].exit_code == -1 && Contains(results[i].output, "boom"));
+            else CHECK(results[i].exit_code == 0 && results[i].output == units[i].id); // a result stays with its unit
+        }
+        if (jobs == 1) CHECK(order.front() == "throws" && order[1] == "learn2/11"); // the heaviest ready unit first
+    }
+    // Memory: what runs together fits the budget, and a unit that never fits runs alone.
+    std::vector<Unit> heavy;
+    for (int i = 0; i < 10; ++i) heavy.push_back({"m" + std::to_string(i), {}, 1, i == 7 ? 5000 : 300 + i});
+    std::mutex mutex;
+    long long used = 0, peak = 0;
+    int running = 0, alone = 0, over = 0;
+    testshards::Scheduler bounded(heavy, [&](const Unit& unit) {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++running;
+            used += unit.memory_mb;
+            if (unit.memory_mb > 1000) alone += running == 1;
+            else over += used > 1000;
+            peak = std::max(peak, used);
+        }
+        std::this_thread::yield();
+        std::lock_guard<std::mutex> lock(mutex);
+        --running;
+        used -= unit.memory_mb;
+        return Result{0, "", 0, false};
+    });
+    for (const Result& result : bounded.Run(8, 1000)) CHECK(result.ran && result.exit_code == 0);
+    CHECK(over == 0 && alone == 1 && peak == 5000 && used == 0);
+    const testshards::Memory memory = testshards::PhysicalMemoryMb();
+    CHECK(memory.total > 500 && memory.available > 0 && memory.available <= memory.total);
+    CHECK(testshards::MemoryBudgetMb({32000, 20000}) == 14000 && testshards::MemoryBudgetMb({32000, 1000}) == 8000 && testshards::MemoryBudgetMb({0, 0}) == 0);
+    testshards::Scheduler none({}, [](const Unit&) { return Result{}; });
+    CHECK(none.Run(4).empty());
+}
+
+// Two units overlap when two jobs are allowed: each waits for the other to have started.
+void TestShardOverlap() {
+    std::mutex mutex;
+    std::condition_variable both;
+    int started = 0, overlapped = 0;
+    testshards::Scheduler scheduler({{"one", {}, 1}, {"two", {}, 1}}, [&](const testshards::Unit&) {
+        std::unique_lock<std::mutex> lock(mutex);
+        ++started;
+        both.notify_all();
+        overlapped += both.wait_for(lock, std::chrono::seconds(20), [&] { return started == 2; });
+        return testshards::Result{0, "", 0, false};
+    });
+    scheduler.Run(2);
+    CHECK(overlapped == 2);
+}
+
+void TestShardProcess(const char* self) {
+    std::vector<std::string> lines;
+    const int code = testshards::RunProcess(self, {"echo", "two words", "last"}, [&](const std::string& line) { lines.push_back(line); });
+    CHECK(code == 7);
+    CHECK(lines == (std::vector<std::string>{"out two words", "err last", "no line end"}));
+    std::atomic<int> good{0};
+    testshards::Scheduler scheduler({{"a", {}, 1}, {"b", {}, 1}, {"c", {}, 1}, {"d", {}, 1}}, [&](const testshards::Unit& unit) {
+        std::vector<std::string> own;
+        testshards::Result result;
+        result.exit_code = testshards::RunProcess(self, {"echo", unit.id, unit.id}, [&](const std::string& line) { own.push_back(line); });
+        good += own == std::vector<std::string>{"out " + unit.id, "err " + unit.id, "no line end"}; // no line of another child
+        return result;
+    });
+    for (const testshards::Result& result : scheduler.Run(4)) CHECK(result.exit_code == 7);
+    CHECK(good == 4);
+}
+
+void TestShardJobs() {
+    const auto with = [](const char* value) {
+#ifdef _WIN32
+        _putenv_s("DCP_TEST_JOBS", value);
+#else
+        if (*value) setenv("DCP_TEST_JOBS", value, 1);
+        else unsetenv("DCP_TEST_JOBS");
+#endif
+        return testshards::JobsFromEnvironment();
+    };
+    const char* before = std::getenv("DCP_TEST_JOBS");
+    const std::string saved = before ? before : "";
+    CHECK(with("") == 1 && with("1") == 1 && with("4") == 4 && with("99") == 8 && with("0") == 1 && with("-3") == 1 && with("many") == 1);
+    with(saved.c_str());
+}
+
+// Every group keeps its units: what the sequential suite runs is what the processes run.
+void TestEditorUnits() {
+    std::ifstream in(fs::path(DCP_SOURCE_DIR) / "tests" / "save_editor_tests.cpp", std::ios::binary);
+    std::stringstream text;
+    text << in.rdbuf();
+    const std::string source = text.str();
+    const auto body = [&](const char* signature) {
+        const size_t from = source.find(signature);
+        return from == std::string::npos ? std::string() : source.substr(from, source.find("\n}\n", from) - from);
+    };
+    for (const char* test : {"TestAmazonParts", "TestSorceressParts", "TestSorceressSplit", "TestFighterParts", "TestFighterHelmetAndHorns", "TestFighterBareHead",
+                             "TestFighterHelmetContexts", "TestDwarfParts", "TestDwarfHeadAndGear", "TestWizardParts", "TestElfParts", "TestElfMaterials",
+                             "TestClassWeapons", "TestEveryPartHides", "TestFeather", "TestNoHeadgear", "TestFighterHornBuild(", "TestFighterHornBuildsPresent",
+                             "TestAppearancePrepare", "TestPartCacheVersion"}) {
+        CHECK(Contains(body("RealPartsUnits("), test));
+    }
+    for (const char* test : {"TestRealCustomOverlay", "TestRealHelmetHiddenOverlay", "TestRemoteLookParity", "TestCustomBaseInvariant"}) {
+        CHECK(Contains(body("RealOverlayUnits("), test));
+    }
+    for (const char* test : {"TestRealArt", "TestRealCustom"}) CHECK(Contains(body("RealArtUnits("), test));
+    for (const char* test : {"TestCompositionRules", "TestCompositionMatrix", "SupportedBuilds()"}) CHECK(Contains(body("TranslationUnits("), test));
+    CHECK(Contains(body("int RunEditorGroups("), "for (const EditorUnit& unit : group.units)") && Contains(body("int RunSharded("), "for (const EditorUnit& unit : groups[g].units)"));
+}
+
+// What TestShardProcess starts: both streams, a line without an end and an exit code of its own.
+int Echo(const char* out, const char* err) {
+    std::printf("out %s\n", out);
+    std::fflush(stdout);
+    std::fprintf(stderr, "err %s\n", err);
+    std::fflush(stderr);
+    std::printf("no line end");
+    return 7;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "simulate") == 0) return Simulate(argc > 2 && std::strcmp(argv[2], "runner") == 0);
+    if (argc > 3 && std::strcmp(argv[1], "echo") == 0) return Echo(argv[2], argv[3]);
     TestFormatting();
     TestRunnerLines();
     TestStandaloneLines();
@@ -407,6 +583,11 @@ int main(int argc, char** argv) {
     TestHistoryFile();
     TestHeartbeat();
     TestModeGroupCounts();
+    TestShardScheduling();
+    TestShardOverlap();
+    TestShardProcess(argv[0]);
+    TestShardJobs();
+    TestEditorUnits();
     std::printf("GROUP|test-progress|%s|checks=%d|ms=0\n", g_failures ? "FAIL" : "PASS", g_checks);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

@@ -163,6 +163,68 @@ foreach ($module in [regex]::Matches($cmakeText, 'pkg_check_modules\(\s*(\w+)\b[
     }
 }
 
+foreach ($helper in 'tools\_progress.ps1', 'tools\_test_history.ps1', 'tools\_test_runner.ps1', 'tests\progress_script_tests.ps1', 'tests\test_runner_tests.ps1') {
+    $null = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $helper), [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) {
+        Write-Host "FAIL: $helper does not parse ($($errors.Count) errors)"
+        $failures++
+    }
+}
+
+# Full: which groups leave the main list, and that its clock and history cannot miss the build or land in the source tree.
+$testText = Get-Content -Raw -LiteralPath $testScript
+$laneSteps = @($commands | Where-Object { $_.GetCommandName() -eq 'Test-Step' -and $_.Extent.Text -match "-Lane '([a-z]+)'" } |
+        ForEach-Object { if ($_.Extent.Text -match "-Key '([^']+)'") { $key = $Matches[1] } else { $key = '?' }; if ($_.Extent.Text -match "-Lane '([a-z]+)'") { "$($Matches[1]): $key" } })
+$expectedLanes = 'editor: dcp-save-editor-tests release', 'linux: Linux network tests (WSL)', 'linux: Linux gate (WSL)'
+if (@(Compare-Object $laneSteps $expectedLanes).Count) {
+    Write-Host "FAIL: the groups that run beside the main list are: $($laneSteps -join '; '). A new one needs proof that it shares nothing writable"
+    $failures++
+}
+foreach ($exe in 'dcp-net-tests', 'dcp-online-hle-tests', 'dcp-update-network-tests', 'dcp-frame-pacing-tests', 'dcp-present-tests', 'dcp-copy-pool-tests', 'dcp-thread-lifecycle-tests',
+    'dcp-opengl-perf-tests', 'dcp-incident-upload-tests') {
+    $steps = @($commands | Where-Object { $_.GetCommandName() -eq 'Test-Step' -and $_.Extent.Text.Contains("'$exe'") -and -not $_.Extent.Text.Contains('early-story-session') })
+    if ($steps.Count -eq 0 -or @($steps | Where-Object { $_.Extent.Text -notmatch '-Timing\b' }).Count) {
+        Write-Host "FAIL: $exe measures real time, so its Full step needs -Timing"
+        $failures++
+    }
+}
+$clockAt = $testText.IndexOf('$script:Clock = [Diagnostics.Stopwatch]::StartNew()')
+if ($clockAt -lt 0 -or $clockAt -gt $testText.IndexOf("'_common.ps1'")) {
+    Write-Host 'FAIL: the total time must start before anything else test.ps1 does'
+    $failures++
+}
+if (-not $testText.Contains("'build\test-history\timings.json'")) {
+    Write-Host 'FAIL: the timing history belongs in build\test-history, which Git ignores'
+    $failures++
+}
+
+$buildSh = Get-Content -Raw -LiteralPath (Join-Path $repo 'tools\build.sh')
+$gate = $buildSh.Substring($buildSh.IndexOf("((test)) && targets+=("))
+$gateTargets = @([regex]::Matches($gate.Substring(0, $gate.IndexOf(')', $gate.IndexOf('targets+=('))), 'dcp-[a-z0-9-]+-tests') | ForEach-Object { $_.Value })
+$gateRuns = @([regex]::Matches($gate, '(?m)^    run_test .*"\$build_dir/bin/(dcp-[a-z0-9-]+-tests)"') | ForEach-Object { $_.Groups[1].Value })
+foreach ($target in $gateTargets) {
+    $count = @($gateRuns | Where-Object { $_ -eq $target }).Count
+    $expected = if ($target -in 'dcp-save-editor-tests', 'dcp-incident-upload-tests') { 0 } else { 1 } # start_editor; needs a lobby
+    if ($count -ne $expected) {
+        Write-Host "FAIL: build.sh --test runs $target $count times instead of $expected"
+        $failures++
+    }
+}
+$start = $gate.IndexOf("`n    start_editor`n")
+$wait = $gate.IndexOf("`n    wait_editor`n")
+$verdict = $gate.IndexOf("`n    check_editor`n")
+if ($start -lt 0 -or $wait -lt $start -or $verdict -lt $gate.LastIndexOf('    run_test ') -or $gateTargets.Count -lt 70) {
+    Write-Host 'FAIL: build.sh --test must start the Character Editor groups, wait for them and fail after the last test when they failed'
+    $failures++
+}
+foreach ($target in 'dcp-net-tests', 'dcp-update-network-tests', 'dcp-online-hle-tests', 'dcp-frame-pacing-tests', 'dcp-present-tests', 'dcp-copy-pool-tests', 'dcp-thread-lifecycle-tests',
+    'dcp-opengl-perf-tests', 'dcp-sigpipe-tests') {
+    if ($gate.IndexOf("bin/$target`"") -lt $wait) {
+        Write-Host "FAIL: build.sh --test runs $target, which measures real time, beside the Character Editor groups"
+        $failures++
+    }
+}
+
 if ($failures -gt 0) {
     exit 1
 }

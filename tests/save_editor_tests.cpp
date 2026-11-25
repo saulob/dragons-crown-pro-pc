@@ -59,6 +59,7 @@
 #include "save_import.h"
 #include "sprite_render.h"
 #include "test_progress.h"
+#include "test_shards.h"
 #include "trg/layout.h"
 
 namespace fs = std::filesystem;
@@ -68,7 +69,6 @@ namespace {
 
 std::atomic<int> g_checks{0};
 int g_failures = 0;
-testprogress::Reporter* g_progress = nullptr;
 
 void Check(bool condition, const char* what, int line) {
     g_checks.fetch_add(1, std::memory_order_relaxed);
@@ -79,8 +79,25 @@ void Check(bool condition, const char* what, int line) {
 }
 #define CHECK(condition) Check((condition), #condition, __LINE__)
 
-void ProgressStep(const char* label) {
-    if (g_progress) g_progress->Step(label);
+// Region maps learned once per run, shared by the units that only use them. TestRealCustom learns and publishes them.
+fs::path g_region_store;
+
+void CopyRegionFiles(const fs::path& from, const fs::path& to, CharacterClass klass) {
+    std::error_code ec;
+    fs::create_directories(to, ec);
+    const std::string mark = "_" + std::string(ClassName(klass)) + "_";
+    for (const auto& entry : fs::directory_iterator(from, ec)) {
+        const std::string name = entry.path().filename().string();
+        if (name.find(mark) == std::string::npos || name.size() < 4 || name.substr(name.size() - 4) != ".bin" || fs::exists(to / name, ec)) continue;
+        const fs::path partial = to / (name + ".partial");
+        fs::copy_file(entry.path(), partial, fs::copy_options::overwrite_existing, ec);
+        if (!ec) fs::rename(partial, to / name, ec);
+    }
+}
+
+fs::path PrimedRegions(const fs::path& cache, std::initializer_list<CharacterClass> classes) {
+    for (const CharacterClass klass : classes) CopyRegionFiles(g_region_store, cache, klass);
+    return cache;
 }
 
 void PutU16(std::vector<uint8_t>& bytes, size_t offset, uint16_t value) {
@@ -1202,10 +1219,10 @@ void TestEditorSections() {
         CHECK(portuguese.find(dead) == std::string::npos);
     }
     for (const char* text : {"Part Color\t", "Edit Appearance\t", "Unable to load appearance\t", "Invalid appearance value\t",
-                             "Asset unavailable\t", "Loading appearance...\tCarregando apar\xC3\xAAncia...\n"}) {
+                             "Asset unavailable\t", "\nColor\tCor\n", "Loading appearance...\tCarregando apar\xC3\xAAncia...\n"}) {
         CHECK(portuguese.find(text) != std::string::npos);
     }
-    for (const char* dead : {"\nCurrent Color\t", "\nSaved Color\t", "\nColor\t", "\nChoose Custom to edit"}) {
+    for (const char* dead : {"\nCurrent Color\t", "\nSaved Color\t", "\nChoose Custom to edit"}) {
         CHECK(portuguese.find(dead) == std::string::npos);
     }
 #endif
@@ -1537,8 +1554,8 @@ void TestRegionMapFile() {
     CHECK(!ParseRegionMap(broken, "game"));
 }
 
-// The installed USA game: Custom on every class, every part, through the preview and the in-game atlas.
-void TestRealCustom(const fs::path& base, const fs::path& source_dir) {
+// The installed USA game: Custom on one class, every part, through the preview and the in-game atlas.
+void TestRealCustom(const fs::path& base, const fs::path& source_dir, CharacterClass klass) {
     const fs::path app0 = source_dir / "game" / "prepared" / "v1.03";
     std::error_code ec;
     if (!fs::is_regular_file(app0 / "DRACRO.CPK", ec)) {
@@ -1546,14 +1563,15 @@ void TestRealCustom(const fs::path& base, const fs::path& source_dir) {
         return;
     }
     CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
-    sources.cache_dir = base / "region_cache";
+    sources.cache_dir = base / "learn_cache" / std::string(ClassName(klass));
+    fs::remove_all(sources.cache_dir);
     CharacterArt art(sources);
     CpkArchive cpk;
     CHECK(cpk.Open(app0 / "DRACRO.CPK"));
-    for (const CharacterClass klass : kCharacterClasses) {
+    {
         const std::vector<RegionMap>* maps = art.Regions(klass);
         CHECK(maps != nullptr && maps->size() == BodySurfacesOf(klass).size());
-        if (!maps) continue;
+        if (!maps) return;
         std::vector<std::vector<uint8_t>> packs;
         for (int color = 0; color < kNativeColorCount; ++color) {
             packs.push_back(cpk.Read(*cpk.Find(AtlasName(klass, color))));
@@ -1562,7 +1580,10 @@ void TestRealCustom(const fs::path& base, const fs::path& source_dir) {
         // Learned once, then read back identically from the cache.
         CharacterArt cached(sources);
         const std::vector<RegionMap>* again = cached.Regions(klass);
-        CHECK(again && again->front().region == maps->front().region);
+        CHECK(again && again->size() == maps->size() && std::ranges::equal(*again, *maps, [](const RegionMap& a, const RegionMap& b) {
+            return a.width == b.width && a.height == b.height && a.region == b.region && a.pieces == b.pieces;
+        }));
+        CopyRegionFiles(sources.cache_dir, g_region_store, klass);
 
         const SpriteImage native = *art.Preview(klass, 0);
         std::map<std::string_view, size_t> visible;
@@ -2252,7 +2273,7 @@ void TestRealCustomOverlay(const fs::path& base, const fs::path& source_dir) {
     CHECK(planned.size() == 3);
 
     CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
-    sources.cache_dir = base / "region_cache";
+    sources.cache_dir = PrimedRegions(base / "region_cache", {CharacterClass::kAmazon, CharacterClass::kFighter});
     CharacterArt art(sources);
     CHECK(!BuildCustomOverlay(archive_path, {}, art, notes));
     const std::optional<CustomOverlay> built = BuildCustomOverlay(archive_path, planned, art, notes);
@@ -2376,7 +2397,7 @@ void TestCustomOverrideModel(const fs::path& base) {
 #endif
 }
 
-void TestCustomBaseInvariant(const fs::path& base, const fs::path& source_dir) {
+void TestCustomBaseInvariant(const fs::path& base, const fs::path& source_dir, CharacterClass klass) {
     const fs::path app0 = source_dir / "game" / "prepared" / "v1.03";
     std::error_code ec;
     if (!fs::is_regular_file(app0 / "DRACRO.CPK", ec)) {
@@ -2384,15 +2405,15 @@ void TestCustomBaseInvariant(const fs::path& base, const fs::path& source_dir) {
         return;
     }
     CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
-    sources.cache_dir = base / "region_cache";
+    sources.cache_dir = PrimedRegions(base / "region_cache", {klass});
     CharacterArt art(sources);
     CpkArchive cpk;
     CHECK(cpk.Open(app0 / "DRACRO.CPK"));
     size_t exact_previews = 0, exact_atlases = 0;
-    for (const CharacterClass klass : kCharacterClasses) {
+    {
         const std::vector<RegionMap>* maps = art.Regions(klass);
         CHECK(maps != nullptr);
-        if (!maps) continue;
+        if (!maps) return;
         std::vector<std::vector<uint8_t>> packs;
         for (int color = 0; color < kNativeColorCount; ++color) packs.push_back(cpk.Read(*cpk.Find(AtlasName(klass, color))));
         const std::span<const BodySurface> bodies = BodySurfacesOf(klass);
@@ -2496,8 +2517,9 @@ void TestCustomBaseInvariant(const fs::path& base, const fs::path& source_dir) {
             }
         }
     }
-    CHECK(exact_previews == size_t(6 * kNativeColorCount) && exact_atlases == size_t(6 * kNativeColorCount)); // 30 of 30
-    std::printf("custom zero-override equals native: %zu/30 previews, %zu/30 atlases\n", exact_previews, exact_atlases);
+    CHECK(exact_previews == size_t(kNativeColorCount) && exact_atlases == size_t(kNativeColorCount));
+    std::printf("%s: custom zero-override equals native: %zu/%d previews, %zu/%d atlases\n", std::string(ClassName(klass)).c_str(), exact_previews,
+                kNativeColorCount, exact_atlases, kNativeColorCount);
 }
 
 void TestColorPickerModel() {
@@ -2657,7 +2679,7 @@ void TestFeather(const fs::path& base, const fs::path& source_dir) {
         return;
     }
     CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
-    sources.cache_dir = base / "region_cache";
+    sources.cache_dir = PrimedRegions(base / "region_cache", {CharacterClass::kAmazon});
     CharacterArt art(sources);
     CpkArchive cpk;
     CHECK(cpk.Open(app0 / "DRACRO.CPK"));
@@ -3605,7 +3627,8 @@ void TestAppearanceUx() {
                              "TextUnformatted(character.name", "TextUnformatted(Tr(ClassName("}) {
         CHECK(appearance_view.find(dead) == std::string::npos);
     }
-    CHECK(page.find("Tr(\"Color\")") == std::string::npos && page.find("Current Color") == std::string::npos);
+    CHECK(Count(page, "Tr(\"Color\")") == 1 && FunctionBody(page, "std::string EditorPage::ColorName(").find("Tr(\"Color\")") != std::string::npos);
+    CHECK(page.find("Current Color") == std::string::npos);
     CHECK(appearance_view.find("DrawIdentity(ui, ImGui::GetCursorScreenPos(), identity, identity_size.y);") < appearance_view.find("DrawCustom(ui, character, look);"));
     const std::string identity = FunctionBody(page, "void EditorPage::DrawIdentity(");
     CHECK(identity.find("ui.fonts().semibold") < identity.find("identity.name") && identity.find("identity.parts") != std::string::npos);
@@ -4712,14 +4735,13 @@ SpriteImage RenderGamePose(CpkArchive& cpk, const std::vector<RegionMap>& maps, 
     return RenderSprite(request);
 }
 
-// For every class, every Selected Part and every base colour: Hidden clears the part's own texels on the atlas the game
+// For one class, every Selected Part and every base colour: Hidden clears the part's own texels on the atlas the game
 // is served and nothing else; the preview changes; Shown again and Reset Part give back the native preview.
-void TestEveryPartHides(CharacterArt& art, CpkArchive& cpk) {
-    size_t audited = 0;
-    for (const CharacterClass klass : kCharacterClasses) {
+void TestEveryPartHides(CharacterArt& art, CpkArchive& cpk, CharacterClass klass) {
+    {
         const std::vector<RegionMap>* maps = art.Regions(klass);
         CHECK(maps != nullptr);
-        if (!maps) continue;
+        if (!maps) return;
         const std::span<const WeaponTexture> weapons = WeaponTexturesOf(klass);
         for (int color = 0; color < kNativeColorCount; ++color) {
             const BodyAtlas atlas = ReadBodyAtlas(cpk, klass, color);
@@ -4790,9 +4812,8 @@ void TestEveryPartHides(CharacterArt& art, CpkArchive& cpk) {
                 CHECK(reset.Find(key) == nullptr && art.CustomPreview(klass, color, reset)->rgba == native.rgba);
             }
         }
-        audited += CustomPartsOf(klass).size();
     }
-    std::printf("Every selectable part hides: %zu parts in %zu classes\n", audited, std::size(kCharacterClasses));
+    std::printf("Every selectable part hides: %zu parts of the %s\n", CustomPartsOf(klass).size(), std::string(ClassName(klass)).c_str());
 }
 
 // Texels some preset draws, and their owner, in one helmet sprite of the Fighter's atlas.
@@ -4943,14 +4964,19 @@ size_t HelmetRuleProblems(const Mbs& model);
 
 // The Helmet and Horns of every local build with the Fighter's art: atlases and models are compared by content, and each
 // build learns its own ownership. Builds without local files are named.
-void TestFighterHornBuilds(const fs::path& base, const fs::path& source_dir) {
+struct LocalBuild {
+    const char* name;
+    std::vector<fs::path> archives;
+
+    bool Present() const {
+        std::error_code ec;
+        return std::all_of(archives.begin(), archives.end(), [&](const fs::path& archive) { return fs::is_regular_file(archive, ec); });
+    }
+};
+std::vector<LocalBuild> FighterHornBuilds(const fs::path& source_dir) {
     const fs::path prepared = source_dir / "game" / "prepared";
     const fs::path us101 = source_dir / "build" / "research" / "archaeology" / "data" / "RU101" / "DRACRO_US.CPK";
-    struct LocalBuild {
-        const char* name;
-        std::vector<fs::path> archives;
-    };
-    const std::vector<LocalBuild> builds = {
+    return {
         {"CUSA10454 1.00 USA", {prepared / "v1.03" / "DRACRO_US.CPK", prepared / "v1.03" / "DRACRO.CPK"}},
         {"CUSA10454 1.01 USA", {us101, prepared / "v1.03" / "DRACRO.CPK"}},
         {"CUSA07001 1.00 Japan", {prepared / "CUSA07001-1.00" / "DRACRO.CPK"}},
@@ -4959,22 +4985,21 @@ void TestFighterHornBuilds(const fs::path& base, const fs::path& source_dir) {
         {"CUSA10209 1.00 Asia/Hong Kong", {prepared / "CUSA10209-1.00" / "DRACRO_CK.CPK", prepared / "CUSA10209-1.00" / "DRACRO.CPK"}},
         {"CUSA10209 1.02 Asia/Hong Kong", {prepared / "CUSA10209-1.02" / "DRACRO_PATCH_CK.CPK", prepared / "CUSA10209-1.02" / "DRACRO.CPK"}},
     };
+}
+
+void TestFighterHornBuild(const fs::path& base, const fs::path& source_dir, size_t index) {
+    const LocalBuild build = FighterHornBuilds(source_dir)[index];
+    if (!build.Present()) {
+        std::printf("%s: no local files, Helmet/Horns not validated on it\n", build.name);
+        return;
+    }
     const CharacterClass klass = CharacterClass::kFighter;
     std::vector<std::string> entries = {GameModelName(klass), "PLAYER/FIGHTER00_SELECT.MBS"};
     for (int color = 0; color < kNativeColorCount; ++color) entries.push_back(AtlasName(klass, color));
-    std::optional<std::vector<std::vector<uint8_t>>> reference;
-    size_t checked = 0;
-    for (const LocalBuild& build : builds) {
-        std::error_code ec;
-        const bool present = std::all_of(build.archives.begin(), build.archives.end(),
-                                         [&](const fs::path& archive) { return fs::is_regular_file(archive, ec); });
-        if (!present) {
-            std::printf("%s: no local files, Helmet/Horns not validated on it\n", build.name);
-            continue;
-        }
+    {
         CharacterArtSources sources;
         sources.archives = build.archives;
-        sources.cache_dir = base / "horn_builds" / std::to_string(checked);
+        sources.cache_dir = base / "horn_builds" / std::to_string(index);
         fs::remove_all(sources.cache_dir);
         std::vector<std::unique_ptr<CpkArchive>> open;
         for (const fs::path& archive : build.archives) {
@@ -4993,12 +5018,13 @@ void TestFighterHornBuilds(const fs::path& base, const fs::path& source_dir) {
             CHECK(!bytes.empty());
             contents.push_back(std::move(bytes));
         }
-        if (!reference) reference = contents;
-        std::printf("%s: Fighter model and atlases %s the first build's\n", build.name, contents == *reference ? "identical to" : "DIFFER from");
+        uint64_t hash = 0;
+        for (const std::vector<uint8_t>& bytes : contents) hash = hash * 31 + Fnv1a(bytes);
+        std::printf("%s: Fighter model and atlases %016llx\n", build.name, static_cast<unsigned long long>(hash));
         CharacterArt art(sources);
         const std::vector<RegionMap>* maps = art.Regions(klass);
         CHECK(maps != nullptr);
-        if (!maps) continue;
+        if (!maps) return;
         std::vector<FtxSurface> presets;
         for (int color = 0; color < kNativeColorCount; ++color) presets.push_back(*ReadFtxSurface(contents[size_t(2 + color)], 0));
         CheckHornOwnership(build.name, maps->front(), presets);
@@ -5016,9 +5042,12 @@ void TestFighterHornBuilds(const fs::path& base, const fs::path& source_dir) {
         std::printf("%s: helmet copies %s, %zu off-head helmet records, %zu atlases copied\n", build.name, with_copies ? "made" : "NOT made",
                     off_head, copied_atlases);
         CHECK(with_copies && off_head == 65 && copied_atlases == size_t(kNativeColorCount));
-        ++checked;
     }
-    CHECK(checked >= 6);
+}
+
+void TestFighterHornBuildsPresent(const fs::path& source_dir) {
+    const std::vector<LocalBuild> builds = FighterHornBuilds(source_dir);
+    CHECK(std::count_if(builds.begin(), builds.end(), [](const LocalBuild& build) { return build.Present(); }) >= 6);
 }
 
 // Helmet and Horns through the preview and the served atlas, in every Base Color: hiding, colouring, Random and Reset
@@ -5726,7 +5755,7 @@ void TestRealHelmetHiddenOverlay(const fs::path& base, const fs::path& source_di
     const std::vector<CustomInstance> planned = PlanCustomInstances(store, DiscoverSaves(user, "CUSA10454"), "CUSA10454", notes);
     CHECK(planned.size() == 3);
     CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
-    sources.cache_dir = base / "region_cache";
+    sources.cache_dir = PrimedRegions(base / "region_cache", {CharacterClass::kFighter, CharacterClass::kAmazon});
     CharacterArt art(sources);
     const std::optional<CustomOverlay> built = BuildCustomOverlay(archive_path, planned, art, notes);
     CHECK(built && built->runtime.size() == 3);
@@ -5815,7 +5844,7 @@ void TestRemoteLookParity(const fs::path& base, const fs::path& source_dir) {
     const std::vector<CustomInstance> planned = PlanCustomInstances(store, DiscoverSaves(user, "CUSA10454"), "CUSA10454", notes);
     CHECK(planned.size() == 3);
     CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
-    sources.cache_dir = base / "region_cache";
+    sources.cache_dir = PrimedRegions(base / "region_cache", {CharacterClass::kFighter, CharacterClass::kElf});
     CharacterArt art(sources);
     const std::optional<CustomOverlay> built = BuildCustomOverlay(archive_path, planned, art, notes, &*plan);
     CHECK(built && built->runtime.size() == 3 && built->remote.size() == plan->size() && built->helmet_copies);
@@ -7426,7 +7455,8 @@ void TestWeaponEntries() {
     CHECK(CustomLookHash(plain) != CustomLookHash(armed));
 }
 
-void TestPartMapping(const fs::path& base, const fs::path& source_dir) {
+void WithPartArt(const fs::path& base, const fs::path& source_dir, std::initializer_list<CharacterClass> classes,
+                 const std::function<void(CharacterArt&, CpkArchive&)>& test) {
     const fs::path app0 = source_dir / "game" / "prepared" / "v1.03";
     std::error_code ec;
     if (!fs::is_regular_file(app0 / "DRACRO.CPK", ec)) {
@@ -7434,42 +7464,12 @@ void TestPartMapping(const fs::path& base, const fs::path& source_dir) {
         return;
     }
     CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
-    sources.cache_dir = base / "part_cache";
+    sources.cache_dir = PrimedRegions(base / "part_cache", classes);
     CharacterArt art(sources);
     CpkArchive cpk;
     CHECK(cpk.Open(app0 / "DRACRO.CPK"));
-    ProgressStep("Amazon parts");
-    TestAmazonParts(art, cpk);
-    ProgressStep("Sorceress parts");
-    TestSorceressParts(art, cpk);
-    ProgressStep("Sorceress split");
-    TestSorceressSplit(art, cpk);
-    ProgressStep("Fighter parts");
-    TestFighterParts(art, cpk);
-    ProgressStep("Fighter helmet and horns");
-    TestFighterHelmetAndHorns(art, cpk);
-    ProgressStep("Fighter bare head");
-    TestFighterBareHead(art, cpk);
-    ProgressStep("Fighter helmet contexts");
-    TestFighterHelmetContexts(art, cpk);
-    ProgressStep("Dwarf parts");
-    TestDwarfParts(art, cpk);
-    ProgressStep("Dwarf head and gear");
-    TestDwarfHeadAndGear(art, cpk);
-    ProgressStep("Wizard parts");
-    TestWizardParts(art, cpk);
-    ProgressStep("Elf parts");
-    TestElfParts(art, cpk);
-    ProgressStep("Elf materials");
-    TestElfMaterials(art, cpk);
-    ProgressStep("Class weapons");
-    TestClassWeapons(art);
-    ProgressStep("Every part hides");
-    TestEveryPartHides(art, cpk);
+    test(art, cpk);
 }
-
-constexpr int kPartMappingSteps = 14;
-constexpr int kRealPartsSteps = 5 + kPartMappingSteps;
 
 void TestCompactSummary() {
     for (const float scale : {1.0f, 1.5f, 2.25f}) {
@@ -7783,10 +7783,25 @@ bool TranslationTouchesSharedArchive(const GameBuild& build, const TextLanguage&
     return shared == profile.archive || (language.translation == "pt-BR" && shared == profile.visual_archive);
 }
 
+// The reserved textures of a look (2 GB of archive space) are registered with one shared buffer of zeros: they stay
+// reserved here, so nothing is copied for them. No registered range may overlap another.
 ArchiveOverlay OverlayOfRegistered(uint64_t length, const DcpFilePatch* patches, size_t count) {
     ArchiveOverlay overlay;
     overlay.length = length;
-    for (size_t i = 0; i < count; ++i) overlay.patches.emplace_back(patches[i].offset, std::vector<uint8_t>(patches[i].data, patches[i].data + patches[i].size));
+    std::map<const uint8_t*, size_t> uses;
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;
+    for (size_t i = 0; i < count; ++i) {
+        ++uses[patches[i].data];
+        ranges.emplace_back(patches[i].offset, patches[i].offset + patches[i].size);
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (uses[patches[i].data] > 1) overlay.reserved.push_back({"reserved", patches[i].offset, patches[i].size});
+        else overlay.patches.emplace_back(patches[i].offset, std::vector<uint8_t>(patches[i].data, patches[i].data + patches[i].size));
+    }
+    std::sort(ranges.begin(), ranges.end());
+    bool disjoint = true;
+    for (size_t i = 1; i < ranges.size(); ++i) disjoint &= ranges[i - 1].second <= ranges[i].first;
+    CHECK(disjoint);
     return overlay;
 }
 
@@ -7827,6 +7842,8 @@ std::string RealCombination(const fs::path& base, const fs::path& source_dir, co
     CHECK(translation.has_value() == touches);
 
     const fs::path user = root / "user";
+    const fs::path learned = base / "composition_regions" / build.folder; // a player's languages share one user folder
+    CopyRegionFiles(learned, EditorCacheDir(user), CharacterClass::kAmazon);
     WriteSaveFor(user, build.title_id, "SAVEDATA00", SaveWithCharacters({{1, 3}, {1, 3}}));
     CustomStore store(CustomStorePath(user));
     store.Set({build.title_id, "SAVEDATA00", 0, 0, CharacterClass::kAmazon}, HairLook({30, 90, 230}));
@@ -7865,6 +7882,7 @@ std::string RealCombination(const fs::path& base, const fs::path& source_dir, co
     CHECK(look.ok && look.instances.size() == 2);
     CHECK(look.message.find("texture sets reserved for other players' looks") != std::string::npos);
     if (!look.ok) return "FAIL";
+    CopyRegionFiles(EditorCacheDir(user), learned, CharacterClass::kAmazon);
 
     const uint64_t floor = translation ? translation->length : fs::file_size(archive_path);
     CHECK(LayerProblem(look.layer, floor).empty());
@@ -7918,12 +7936,12 @@ std::string RealCombination(const fs::path& base, const fs::path& source_dir, co
     return g_failures == failures_before ? "PASS" : "FAIL";
 }
 
-// One row per supported build and language: the combination is composed on a synthetic archive, and on the real one when
-// the game is installed here. An omitted build or language cannot pass unnoticed.
-void TestCompositionMatrix(const fs::path& base, const fs::path& source_dir) {
+// One row per language of a supported build: the combination is composed on a synthetic archive, and on the real one when
+// the game is installed here. EditorGroups makes one unit per supported build, so an omitted build cannot pass unnoticed.
+void TestCompositionMatrix(const fs::path& base, const fs::path& source_dir, const GameBuild& build) {
     const SyntheticArchive archive = MakeSyntheticArchive(base / "matrix");
     size_t rows = 0;
-    for (const GameBuild& build : SupportedBuilds()) {
+    {
         bool baseline = false;
         for (const TextLanguage& language : TextLanguagesOf(&build)) {
             const bool touches = TranslationTouchesSharedArchive(build, language);
@@ -7945,18 +7963,17 @@ void TestCompositionMatrix(const fs::path& base, const fs::path& source_dir) {
             ++rows;
         }
     }
-    CHECK(rows >= SupportedBuilds().size());
+    CHECK(rows >= 1);
 }
 
-void RunAppearanceTranslation(const fs::path& base, const char* source_dir) {
+void TestCompositionRules(const fs::path& base, const fs::path& source_dir) {
     const fs::path dir = base / "composition";
     TestCompositionAppearanceOnly(dir);
     TestCompositionTranslationOnly(dir);
     TestCompositionBothLayers(dir);
     TestCompositionSameEntry(dir);
     TestCompositionFailure(dir);
-    TestCompositionLoader(source_dir ? fs::path(source_dir) : fs::path());
-    TestCompositionMatrix(base, source_dir ? fs::path(source_dir) : fs::path());
+    TestCompositionLoader(source_dir);
 }
 
 // One row per supported build: the Editor finds, parses and attributes a save under the build's title id.
@@ -8054,10 +8071,18 @@ void TestPortugueseColorNames(const fs::path& base, const fs::path& source) {
     }
 }
 
-struct EditorGroup {
-    const char* name;
-    bool needs_game;
+// A group is a list of units. Run one after another they are the sequential suite; under DCP_TEST_JOBS each is a process.
+struct EditorUnit {
+    std::string name;
+    int weight; // relative cost, heaviest first
+    std::vector<std::string> after;
     std::function<void()> run;
+};
+
+struct EditorGroup {
+    std::string name;
+    bool needs_game;
+    std::vector<EditorUnit> units;
 };
 
 bool GameDataPresent(const fs::path& source) {
@@ -8065,11 +8090,92 @@ bool GameDataPresent(const fs::path& source) {
            fs::is_regular_file(source / "build" / "image" / "v1.03" / "image.json");
 }
 
+std::string LearnUnit(CharacterClass klass) { return "editor-real-art/custom-" + std::string(ClassName(klass)); }
+
+std::vector<std::string> LearnUnits(std::initializer_list<CharacterClass> classes) {
+    std::vector<std::string> ids;
+    for (const CharacterClass klass : classes) ids.push_back(LearnUnit(klass));
+    return ids;
+}
+
+std::vector<EditorUnit> TranslationUnits(const fs::path& base, const fs::path& source) {
+    std::vector<EditorUnit> units;
+    units.push_back({"rules", 2, {}, [=] { TestCompositionRules(base, source); }});
+    for (const GameBuild& build : SupportedBuilds()) {
+        const bool real = fs::is_regular_file(source / "game" / "prepared" / build.folder / "DRACRO.CPK");
+        units.push_back({std::string(build.title_id) + "-" + build.version, real ? 20 : 2, {}, [=, &build] { TestCompositionMatrix(base, source, build); }});
+    }
+    return units;
+}
+
+std::vector<EditorUnit> RealArtUnits(const fs::path& base, const fs::path& source) {
+    std::vector<EditorUnit> units;
+    units.push_back({"presets", 10, {}, [=] { TestRealArt(source); }});
+    for (const CharacterClass klass : kCharacterClasses) { // the maps every other real unit waits for
+        units.push_back({"custom-" + std::string(ClassName(klass)), 1000, {}, [=] { TestRealCustom(base, source, klass); }});
+    }
+    return units;
+}
+
+std::vector<EditorUnit> RealOverlayUnits(const fs::path& base, const fs::path& source) {
+    using enum CharacterClass;
+    std::vector<EditorUnit> units;
+    units.push_back({"saved-looks", 20, LearnUnits({kAmazon, kFighter}), [=] { TestRealCustomOverlay(base, source); }});
+    units.push_back({"helmet-hidden", 25, LearnUnits({kAmazon, kFighter}), [=] { TestRealHelmetHiddenOverlay(base, source); }});
+    units.push_back({"remote-parity", 25, LearnUnits({kFighter, kElf}), [=] { TestRemoteLookParity(base, source); }});
+    for (const CharacterClass klass : kCharacterClasses) {
+        units.push_back({"base-" + std::string(ClassName(klass)), 30, {LearnUnit(klass)}, [=] { TestCustomBaseInvariant(base, source, klass); }});
+    }
+    return units;
+}
+
+std::vector<EditorUnit> RealPartsUnits(const fs::path& base, const fs::path& source) {
+    using enum CharacterClass;
+    std::vector<EditorUnit> units;
+    units.push_back({"feather", 5, {LearnUnit(kAmazon)}, [=] { TestFeather(base, source); }});
+    units.push_back({"no-headgear", 1, {}, [=] { TestNoHeadgear(base, source); }});
+    units.push_back({"horns-builds", 1, {}, [=] { TestFighterHornBuildsPresent(source); }});
+    const std::vector<LocalBuild> builds = FighterHornBuilds(source);
+    for (size_t i = 0; i < builds.size(); ++i) {
+        std::string name = "horns-" + std::string(builds[i].name);
+        std::replace_if(name.begin(), name.end(), [](char c) { return c == ' ' || c == '/'; }, '-');
+        units.push_back({name, builds[i].Present() ? 25 : 1, {}, [=] { TestFighterHornBuild(base, source, i); }});
+    }
+    units.push_back({"preparation", 15, {}, [=] { TestAppearancePrepare(base, source); }});
+    units.push_back({"cache-version", 25, {}, [=] { TestPartCacheVersion(base, source); }});
+    const auto add = [&](const char* name, int weight, CharacterClass klass, void (*test)(CharacterArt&, CpkArchive&)) {
+        units.push_back({name, weight, {LearnUnit(klass)}, [=] { WithPartArt(base, source, {klass}, test); }});
+    };
+    add("amazon", 30, kAmazon, TestAmazonParts);
+    add("sorceress", 12, kSorceress, TestSorceressParts);
+    add("sorceress-split", 8, kSorceress, TestSorceressSplit);
+    add("fighter", 50, kFighter, TestFighterParts);
+    add("fighter-helmet-horns", 25, kFighter, TestFighterHelmetAndHorns);
+    add("fighter-bare-head", 33, kFighter, TestFighterBareHead);
+    add("fighter-contexts", 63, kFighter, TestFighterHelmetContexts);
+    add("dwarf", 80, kDwarf, TestDwarfParts);
+    add("dwarf-head", 16, kDwarf, TestDwarfHeadAndGear);
+    add("wizard", 40, kWizard, TestWizardParts);
+    add("elf", 40, kElf, TestElfParts);
+    add("elf-materials", 30, kElf, TestElfMaterials);
+    for (const CharacterClass klass : kCharacterClasses) {
+        units.push_back({"hides-" + std::string(ClassName(klass)), 40, {LearnUnit(klass)},
+                         [=] { WithPartArt(base, source, {klass}, [=](CharacterArt& art, CpkArchive& cpk) { TestEveryPartHides(art, cpk, klass); }); }});
+    }
+    units.push_back({"weapons", 10, LearnUnits({kFighter, kAmazon, kElf, kDwarf, kSorceress, kWizard}), [=] {
+                         WithPartArt(base, source, {kFighter, kAmazon, kElf, kDwarf, kSorceress, kWizard},
+                                     [](CharacterArt& art, CpkArchive&) { TestClassWeapons(art); });
+                     }});
+    return units;
+}
+
+EditorGroup SingleUnit(const char* name, int weight, std::function<void()> run) { return {name, false, {{"all", weight, {}, std::move(run)}}}; }
+
 std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& source) {
     return {
-        {"editor-save-parse", false, [&] { TestCrc32(); TestParseValid(); TestInvalidCrc(); TestTruncated(); TestSlots(); TestCharacters(); TestSaveProfiles(base, source); }},
-        {"editor-save-write", false,
-         [&] {
+        SingleUnit("editor-save-parse", 6, [=] { TestCrc32(); TestParseValid(); TestInvalidCrc(); TestTruncated(); TestSlots(); TestCharacters(); TestSaveProfiles(base, source); }),
+        SingleUnit("editor-save-write", 3,
+         [=] {
              TestEdits();
              TestSerializeRecomputesCrc();
              TestAtomicWrite(base);
@@ -8084,32 +8190,32 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestDifficultyEdit(base);
              TestDifficultyRealSave(source);
              TestDifficultyPage();
-         }},
-        {"editor-isolation", false,
-         [&] {
+         }),
+        SingleUnit("editor-isolation", 1,
+         [=] {
              TestDiscovery(base);
              TestEditorModel(base);
              TestEditorCharacterNavigation(base);
              TestEditorNavigationModel();
-         }},
-        {"editor-apply-discard", false,
-         [&] {
+         }),
+        SingleUnit("editor-apply-discard", 2,
+         [=] {
              TestApplyAll(base);
              TestGoldEditing(base);
              TestEditorDirtyFields();
              TestEditorBuildChoice();
              TestEditorNumbers();
-         }},
-        {"editor-identity", false,
-         [&] {
+         }),
+        SingleUnit("editor-identity", 1,
+         [=] {
              TestInstanceKeys();
              TestRuntimeInstances(base);
              TestCustomStore(base);
              TestAppearanceHandlers();
              TestAppearanceStubs();
-         }},
-        {"editor-looks", false,
-         [&] {
+         }),
+        SingleUnit("editor-looks", 1,
+         [=] {
              TestCustomOverrideModel(base);
              TestAppearanceLooks();
              TestAppearanceLoader();
@@ -8121,8 +8227,8 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestWeaponEntries();
              TestColorPickerModel();
              TestRegionMapFile();
-         }},
-        {"editor-art", false,
+         }),
+        SingleUnit("editor-art", 1,
          [] {
              TestBc7Decode();
              TestFtxDecode();
@@ -8130,9 +8236,9 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestSpriteRender();
              TestNativeColor();
              TestBc7Encode();
-         }},
-        {"editor-localization", false, [&] { TestPortugueseColorNames(base, source); }},
-        {"editor-ui-model", false,
+         }),
+        SingleUnit("editor-localization", 1, [=] { TestPortugueseColorNames(base, source); }),
+        SingleUnit("editor-ui-model", 1,
          [] {
              TestAppearanceUx();
              TestEditorSections();
@@ -8148,35 +8254,25 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestSaveDataText();
              TestIdentityHeaderLayout();
              TestCompactSummary();
-         }},
-        {"appearance-translation", false, [&] { RunAppearanceTranslation(base, source.empty() ? nullptr : source.string().c_str()); }},
-        {"editor-real-save", true, [&] { TestRealSave(source); }},
-        {"editor-real-art", true, [&] { TestRealArt(source); TestRealCustom(base, source); }},
-        {"editor-real-hooks", true, [&] { TestAppearanceSites(source); }},
-        {"editor-real-overlay", true,
-         [&] {
-             TestRealCustomOverlay(base, source);
-             TestRealHelmetHiddenOverlay(base, source);
-             TestRemoteLookParity(base, source);
-             TestCustomBaseInvariant(base, source);
-         }},
-        {"editor-real-parts", true,
-         [&] {
-             if (g_progress) g_progress->SetSteps(kRealPartsSteps);
-             ProgressStep("Feather");
-             TestFeather(base, source);
-             ProgressStep("No headgear");
-             TestNoHeadgear(base, source);
-             ProgressStep("Fighter horns on every build");
-             TestFighterHornBuilds(base, source);
-             ProgressStep("Appearance preparation");
-             TestAppearancePrepare(base, source);
-             TestPartMapping(base, source);
-             ProgressStep("Part cache version");
-             TestPartCacheVersion(base, source);
-         }},
+         }),
+        {"appearance-translation", false, TranslationUnits(base, source)},
+        {"editor-real-save", true, {{"all", 1, {}, [=] { TestRealSave(source); }}}},
+        {"editor-real-art", true, RealArtUnits(base, source)},
+        {"editor-real-hooks", true, {{"all", 1, {}, [=] { TestAppearanceSites(source); }}}},
+        {"editor-real-overlay", true, RealOverlayUnits(base, source)},
+        {"editor-real-parts", true, RealPartsUnits(base, source)},
     };
 }
+
+long long MsSince(std::chrono::steady_clock::time_point started) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+}
+
+testprogress::State UnitState(const EditorGroup& group, bool data, int failures) {
+    return failures ? testprogress::State::kFail : group.needs_game && !data ? testprogress::State::kNoData : testprogress::State::kPass;
+}
+
+fs::path HistoryPath(const std::string& mode) { return fs::temp_directory_path() / "dcp_test_progress" / ("save-editor-" + mode + ".txt"); }
 
 // Runs the named groups (all when `selected` is empty) and prints one GROUP line each; returns the failures.
 int RunEditorGroups(const fs::path& base, const fs::path& source, const std::set<std::string>& selected, const std::string& mode) {
@@ -8187,44 +8283,260 @@ int RunEditorGroups(const fs::path& base, const fs::path& source, const std::set
     for (const EditorGroup& group : groups) {
         if (selected.empty() || selected.count(group.name)) options.groups.push_back(group.name);
     }
-    const fs::path history_path = fs::temp_directory_path() / "dcp_test_progress" / ("save-editor-" + mode + ".txt");
+    const fs::path history_path = HistoryPath(mode);
     options.history = testprogress::LoadHistory(history_path);
     options.runner = testprogress::RunnerProgressRequested();
     options.interval_ms = testprogress::DefaultIntervalMs(options.runner, testprogress::StdoutInteractive());
     options.checks = [] { return int64_t(g_checks.load(std::memory_order_relaxed)); };
     testprogress::Reporter reporter(std::move(options));
-    g_progress = &reporter;
     reporter.StartHeartbeat();
     for (const EditorGroup& group : groups) {
         if (!selected.empty() && !selected.count(group.name)) continue;
         const int checks = g_checks, failures = g_failures;
         reporter.BeginGroup(group.name);
+        if (group.units.size() > 1) reporter.SetSteps(int(group.units.size()));
         const auto started = std::chrono::steady_clock::now();
-        group.run();
-        const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-        const testprogress::State state = g_failures != failures ? testprogress::State::kFail
-                                          : group.needs_game && !data ? testprogress::State::kNoData : testprogress::State::kPass;
+        for (const EditorUnit& unit : group.units) {
+            const auto unit_started = std::chrono::steady_clock::now();
+            if (group.units.size() > 1) reporter.Step(unit.name);
+            unit.run();
+            if (group.units.size() > 1) std::printf("STEP|%s|%s|ms=%lld\n", group.name.c_str(), unit.name.c_str(), MsSince(unit_started));
+        }
+        const long long ms = MsSince(started);
+        const testprogress::State state = UnitState(group, data, g_failures - failures);
         reporter.EndGroup(state, g_checks - checks, ms);
         std::printf("%s\n", testprogress::FormatGroupLine(group.name, state, g_checks - checks, ms).c_str());
         std::fflush(stdout);
     }
     reporter.Finish(history_path);
-    g_progress = nullptr;
     return g_failures;
+}
+
+// One unit in this process, for RunSharded: its output, then the UNIT line that proves it ran to its end.
+int RunEditorUnit(const fs::path& base, const fs::path& source, const std::string& id) {
+    for (const EditorGroup& group : EditorGroups(base, source)) {
+        for (const EditorUnit& unit : group.units) {
+            if (group.name + "/" + unit.name != id) continue;
+            testprogress::Reporter::Options options;
+            options.suite = "unit";
+            options.groups = {id};
+            options.runner = true;
+            options.interval_ms = 1'000;
+            options.checks = [] { return int64_t(g_checks.load(std::memory_order_relaxed)); };
+            testprogress::Reporter reporter(std::move(options));
+            reporter.BeginGroup(id);
+            reporter.StartHeartbeat();
+            const auto started = std::chrono::steady_clock::now();
+            unit.run();
+            const long long ms = MsSince(started);
+            reporter.StopHeartbeat();
+            std::printf("UNIT|%s|%s|checks=%d|ms=%lld\n", id.c_str(), testprogress::StateName(UnitState(group, GameDataPresent(source), g_failures)), g_checks.load(), ms);
+            return g_failures ? 1 : 0;
+        }
+    }
+    std::printf("unknown unit %s\n", id.c_str());
+    return 2;
+}
+
+// Measured peaks, rounded up.
+int UnitMemoryMb(const EditorGroup& group, const EditorUnit& unit) {
+    const auto named = [&](const char* prefix) { return unit.name.rfind(prefix, 0) == 0; };
+    if (!group.needs_game) return unit.weight >= 20 ? 1300 : 150;
+    if (named("elf-materials")) return 1050;
+    if (named("custom-")) return 850;
+    if (named("horns-") || unit.name == "dwarf" || named("cache-version")) return unit.weight > 1 ? 750 : 150;
+    return unit.weight < 15 ? 450 : 600;
+}
+
+struct UnitReport {
+    testprogress::State state = testprogress::State::kFail;
+    long long checks = 0;
+    long long ms = 0;
+    bool complete = false;
+};
+
+// The release groups, each unit in a process and a temporary folder of its own. Output is printed whole, in the order of
+// the groups, so it reads the same on every run.
+int RunSharded(const std::string& program, const fs::path& work, const fs::path& source, const std::string& mode, int jobs) {
+    const std::vector<EditorGroup> groups = EditorGroups(work, source);
+    std::vector<testshards::Unit> units;
+    std::vector<size_t> owner;
+    for (size_t g = 0; g < groups.size(); ++g) {
+        for (const EditorUnit& unit : groups[g].units) {
+            units.push_back({groups[g].name + "/" + unit.name, unit.after, unit.weight, UnitMemoryMb(groups[g], unit)});
+            owner.push_back(g);
+        }
+    }
+    const fs::path store = work / "region_store";
+    fs::create_directories(store);
+    const bool runner = testprogress::RunnerProgressRequested();
+    const testprogress::History history = testprogress::LoadHistory(HistoryPath(mode));
+    int64_t expected = 0;
+    for (const EditorGroup& group : groups) {
+        const auto known = history.find(group.name);
+        if (known == history.end()) { expected = 0; break; }
+        expected += known->second.checks;
+    }
+    const long long memory_mb = testshards::MemoryBudgetMb();
+    std::printf("Character Editor: %zu units in %zu groups, %d at a time within %lld MB\n", units.size(), groups.size(), jobs, memory_mb);
+
+    std::mutex mutex;
+    std::map<std::string, int64_t> live_checks;
+    std::vector<UnitReport> reports(units.size());
+    std::vector<long long> first(groups.size(), -1), last(groups.size(), 0);
+    std::vector<std::string> output(units.size());
+    const auto started = std::chrono::steady_clock::now();
+    const auto run = [&](const testshards::Unit& unit) {
+        const size_t index = size_t(&*std::find_if(units.begin(), units.end(), [&](const testshards::Unit& u) { return u.id == unit.id; }) - units.data());
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (first[owner[index]] < 0) first[owner[index]] = MsSince(started);
+        }
+        const fs::path folder = work / ("u" + std::to_string(index));
+        fs::create_directories(folder);
+        testshards::Result result;
+        UnitReport report;
+        const std::string unit_mark = "UNIT|" + unit.id + "|";
+        result.exit_code = testshards::RunProcess(program, {"unit", unit.id, folder.string(), store.string()}, [&](const std::string& line) {
+            long long checks = 0;
+            char state[16] = "";
+            if (std::sscanf(line.c_str(), "@@dcp-progress checks=%lld", &checks) == 1) {
+                std::lock_guard<std::mutex> lock(mutex);
+                live_checks[unit.id] = checks;
+            } else if (line.rfind(unit_mark, 0) == 0 && std::sscanf(line.c_str() + unit_mark.size(), "%15[^|]|checks=%lld|ms=%lld", state, &report.checks, &report.ms) == 3) {
+                report.complete = true;
+                report.state = std::string_view(state) == "PASS" ? testprogress::State::kPass
+                               : std::string_view(state) == "NO_DATA" ? testprogress::State::kNoData : testprogress::State::kFail;
+            } else {
+                result.output += line + "\n";
+            }
+        });
+        if (!report.complete || result.exit_code != 0) {
+            report.state = testprogress::State::kFail;
+            char note[256];
+            std::snprintf(note, sizeof note, "FAIL unit %s: exit code %d%s\n", unit.id.c_str(), result.exit_code, report.complete ? "" : ", no result line");
+            result.output += note;
+        }
+        std::error_code ec;
+        fs::remove_all(folder, ec);
+        std::lock_guard<std::mutex> lock(mutex);
+        live_checks[unit.id] = report.checks;
+        reports[index] = report;
+        output[index] = result.output;
+        last[owner[index]] = MsSince(started);
+        return result;
+    };
+    std::vector<size_t> left(groups.size());
+    for (const size_t g : owner) ++left[g];
+    size_t printed = 0;
+    std::vector<testprogress::Record> records(groups.size());
+    testshards::Scheduler scheduler(units, run, [&](size_t index, const testshards::Result&) {
+        std::lock_guard<std::mutex> lock(mutex);
+        --left[owner[index]];
+        for (; printed < groups.size() && left[printed] == 0; ++printed) {
+            testprogress::Record& record = records[printed];
+            record = {groups[printed].name, testprogress::State::kPass, 0, last[printed] - first[printed]};
+            long long work_ms = 0;
+            for (size_t i = 0; i < units.size(); ++i) {
+                if (owner[i] != printed) continue;
+                std::fputs(output[i].c_str(), stdout);
+                if (groups[printed].units.size() > 1) std::printf("STEP|%s|%s|ms=%lld\n", record.name.c_str(), groups[printed].units[i - size_t(std::find(owner.begin(), owner.end(), printed) - owner.begin())].name.c_str(), reports[i].ms);
+                record.checks += reports[i].checks;
+                work_ms += reports[i].ms;
+                if (reports[i].state == testprogress::State::kFail) record.state = testprogress::State::kFail;
+                else if (reports[i].state == testprogress::State::kNoData && record.state == testprogress::State::kPass) record.state = testprogress::State::kNoData;
+            }
+            std::printf("%s|units=%zu|work_ms=%lld\n", testprogress::FormatGroupLine(record.name, record.state, record.checks, record.ms).c_str(),
+                        groups[printed].units.size(), work_ms);
+            std::fflush(stdout);
+        }
+    });
+
+    std::atomic<bool> done{false};
+    std::thread heartbeat([&] {
+        const int64_t interval = testprogress::DefaultIntervalMs(runner, testprogress::StdoutInteractive());
+        auto shown = std::chrono::steady_clock::now();
+        while (!done) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (MsSince(shown) < interval) continue;
+            shown = std::chrono::steady_clock::now();
+            std::string running;
+            for (const std::string& id : scheduler.Running()) running += (running.empty() ? "" : ", ") + id.substr(id.find('/') + 1);
+            const size_t finished = scheduler.Finished();
+            std::lock_guard<std::mutex> lock(mutex);
+            int64_t checks = 0;
+            for (const auto& [id, count] : live_checks) checks += count;
+            const std::string detail = std::to_string(finished) + "/" + std::to_string(units.size()) + " units: " + running;
+            if (runner) {
+                std::printf("@@dcp-progress checks=%lld%s detail=%s\n", static_cast<long long>(checks),
+                            expected > 0 ? (" total=" + std::to_string(expected) + " estimate=1").c_str() : "", detail.c_str());
+            } else {
+                std::printf("RUNNING Character Editor %s | %s | checks %s\n", testprogress::FormatElapsed(MsSince(started)).c_str(), detail.c_str(),
+                            testprogress::FormatCount(checks).c_str());
+            }
+            std::fflush(stdout);
+        }
+    });
+    const std::vector<testshards::Result> results = scheduler.Run(jobs, memory_mb);
+    done = true;
+    heartbeat.join();
+
+    testprogress::History merged = history;
+    int failures = 0;
+    std::printf("Character Editor timing\n");
+    for (const testprogress::Record& record : records) {
+        std::printf("  %-36s %-8s %8s  %s checks\n", record.name.c_str(), testprogress::StateName(record.state), testprogress::FormatDuration(record.ms).c_str(),
+                    testprogress::FormatCount(record.checks).c_str());
+        g_checks += int(record.checks);
+        if (record.state == testprogress::State::kFail) ++failures;
+        else if (record.state == testprogress::State::kPass && record.ms > 0) merged[record.name] = {record.checks, record.ms};
+    }
+    std::printf("  %-36s %-8s %8s\n", "Total", "", testprogress::FormatElapsed(MsSince(started)).c_str());
+    std::vector<size_t> slowest(units.size());
+    for (size_t i = 0; i < slowest.size(); ++i) slowest[i] = i;
+    std::stable_sort(slowest.begin(), slowest.end(), [&](size_t a, size_t b) { return reports[a].ms > reports[b].ms; });
+    std::printf("  Slowest units:\n");
+    for (size_t i = 0; i < slowest.size() && i < 5; ++i) {
+        std::printf("  %zu. %-48s %s\n", i + 1, units[slowest[i]].id.c_str(), testprogress::FormatDuration(reports[slowest[i]].ms).c_str());
+    }
+    for (size_t i = 0; i < units.size(); ++i) {
+        if (!results[i].ran) {
+            std::printf("FAIL unit %s never ran\n", units[i].id.c_str());
+            ++failures;
+        }
+    }
+    if (failures == 0) testprogress::SaveHistory(HistoryPath(mode), merged);
+    g_failures += failures;
+    return failures;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    const fs::path base = fs::temp_directory_path() / "dcp_save_editor_tests";
-    fs::remove_all(base);
-    fs::create_directories(base);
+    const std::string mode = argc > 1 ? argv[1] : "all";
 #ifdef DCP_SOURCE_DIR
     const fs::path source = DCP_SOURCE_DIR;
 #else
     const fs::path source;
 #endif
-    const std::string mode = argc > 1 ? argv[1] : "all";
+    if (mode == "unit" && argc == 5) {
+#ifdef _WIN32
+        _putenv_s("TMP", argv[3]);
+        _putenv_s("TEMP", argv[3]);
+#else
+        setenv("TMPDIR", argv[3], 1);
+#endif
+        g_region_store = argv[4];
+        const fs::path base = fs::temp_directory_path() / "dcp_save_editor_tests";
+        fs::create_directories(base);
+        return RunEditorUnit(base, source, argv[2]);
+    }
+    const int jobs = testshards::JobsFromEnvironment();
+    const bool sharded = mode == "release" && jobs > 1;
+    const fs::path base = fs::temp_directory_path() / (sharded ? "dcp_save_editor_shards" : "dcp_save_editor_tests");
+    fs::remove_all(base);
+    fs::create_directories(base);
+    g_region_store = base / "region_store";
     g_synthetic_only = argc > 2 && std::strcmp(argv[2], "synthetic") == 0;
     std::set<std::string> selected;
     if (mode == "appearance-translation") {
@@ -8238,11 +8550,19 @@ int main(int argc, char** argv) {
         for (const EditorGroup& group : EditorGroups(base, source)) {
             if (!group.needs_game) selected.insert(group.name);
         }
+    } else if (mode == "units") {
+        for (const EditorGroup& group : EditorGroups(base, source)) {
+            for (const EditorUnit& unit : group.units) std::printf("%s/%s\n", group.name.c_str(), unit.name.c_str());
+        }
+        fs::remove_all(base);
+        return 0;
     } else if (mode != "all") {
-        std::printf("usage: dcp-save-editor-tests [all | release | quick | localization | appearance-translation [synthetic]]\n");
+        std::printf("usage: dcp-save-editor-tests [all | release | quick | localization | appearance-translation [synthetic] | units]\n"
+                    "DCP_TEST_JOBS=N runs the release units in N processes at a time.\n");
         return 2;
     }
-    RunEditorGroups(base, source, selected, mode);
+    if (sharded) RunSharded(argv[0], base, source, mode, jobs);
+    else RunEditorGroups(base, source, selected, mode);
     std::error_code cleanup;
     fs::remove_all(base, cleanup);
     std::printf("%d checks, %d failed\n", g_checks.load(), g_failures);

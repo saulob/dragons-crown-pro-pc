@@ -1,6 +1,7 @@
 // The production entry points the wheel calls (comms_session_send / available, and the pump hook the online runtime
 // drives), linked from the real src/comms_session.cpp. Only the runtime behind them is stubbed.
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -85,7 +86,7 @@ std::string Source(const char* relative) {
     return text.str();
 }
 
-const char* const kLog = "comms_runtime_test.log";
+const std::string kLog = (std::filesystem::temp_directory_path() / "dcp_comms_runtime_test.log").string();
 std::string Captured;
 
 std::string LogText() {
@@ -213,7 +214,7 @@ void TestWheelReachesOnlyTheCanonicalSend() {
 } // namespace
 
 int main() {
-    std::freopen(kLog, "wb", stdout);
+    std::freopen(kLog.c_str(), "wb", stdout);
     TestProductionSendCountsOnce();
     TestEveryIdCountsOnce();
     TestReceiveCountsNothing();

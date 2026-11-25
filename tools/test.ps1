@@ -6,7 +6,11 @@
   Does not run the Linux tests through WSL.
 .PARAMETER Full
   Runs the complete release and parity test matrix across all registered suites (for CODE REVIEW FINAL). Without -Full or a
-  specific focused switch, tools\test.ps1 runs only the current default development focus.
+  specific focused switch, tools\test.ps1 runs only the current default development focus. The Character Editor release
+  groups and the Linux groups run beside the other Windows groups.
+.PARAMETER FullSequential
+  The same groups as -Full, strictly one after another and with the Character Editor groups in one process: the diagnostic
+  fallback when a failure could come from groups running side by side.
 .PARAMETER BossBattleOnline
   Builds and runs only the Boss Battle Online focused suites (visitor lifecycle, handoff, Early Story handoff, Boss Battle Online, Boss Battle, Boss
   Battle menu, Early Story, feature locators, build parity) and reports their result alone.
@@ -50,6 +54,11 @@
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
   incrementally.
 
+  Progress: every line shows the finished groups, the running group and its time, the total time since this script started,
+  the ETA and the finish time. The ETA is the sum of what each remaining group took in its recent passing runs
+  (build\test-history\timings.json, local and disposable); it is marked as low confidence while that history is missing.
+  DCP_TEST_JOBS sets how many Character Editor units run at a time (default: a quarter of the processors, at most 8).
+
   Every test runs even after one fails; the exit code is non-zero when any of them failed. The tests that decide the
   supported-build parity contract (the profile and capability matrix, update archives and languages, render size, True
   Ultrawide, LZCNT, System type, Skip Offers, startup save and cheat mappings, Online Play structure, unknown builds) are
@@ -87,22 +96,19 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$Full, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor)
+param([switch]$SkipLinux, [switch]$Full, [switch]$FullSequential, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor)
 
+$script:Clock = [Diagnostics.Stopwatch]::StartNew()
+$script:StartClock = [datetime]::Now
 . (Join-Path $PSScriptRoot '_common.ps1')
+. (Join-Path $PSScriptRoot '_test_history.ps1')
 . (Join-Path $PSScriptRoot '_progress.ps1')
+. (Join-Path $PSScriptRoot '_test_runner.ps1')
+if ($FullSequential) { $Full = $true }
 $tc = Resolve-Toolchain 'auto'
 $env:PATH = "$($tc.Bin);$env:PATH"
 $buildDir = Join-Path $script:RepoRoot 'build\cmake\clang64'
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'build.ninja'))) { Stop-Tool 'Run tools\build.ps1 first: it configures the build.' }
-
-function Test-Step([string]$Title, [string]$Exe = '', [string]$Script = '', [switch]$Parity, [switch]$Capture,
-                   [switch]$Quiet, [switch]$Lobby, [scriptblock]$Block = $null, [string]$Key = '', [string[]]$Arguments = @(),
-                   [string[]]$Requires = @(), [string[]]$Forbids = @()) {
-    [pscustomobject]@{ Title = $Title; Exe = $Exe; Script = $Script; Parity = [bool]$Parity; Capture = [bool]$Capture
-                       Quiet = [bool]$Quiet; Lobby = [bool]$Lobby; Block = $Block; Key = $Key; Arguments = $Arguments
-                       Requires = $Requires; Forbids = $Forbids }
-}
 
 function Get-Node {
     $node = Get-Command node -ErrorAction SilentlyContinue
@@ -112,17 +118,8 @@ function Get-Node {
     return $node.Source
 }
 
-function Format-ExitCode([long]$Code) {
-    'exit code {0}, 0x{1:X8}' -f $Code, [uint32]($Code -band 0xFFFFFFFFL)
-}
-
-function Get-TestName($Test) { if ($Test.Key) { $Test.Key } elseif ($Test.Exe) { $Test.Exe } elseif ($Test.Script) { $Test.Script } else { $Test.Title } }
-
-function Skipped([string]$Reason) { [pscustomobject]@{ Code = 0; Skip = $Reason; Lines = @() } }
-
-
 $requiredEditorGroups = 'editor-save-parse', 'editor-save-write', 'editor-isolation', 'editor-apply-discard', 'editor-identity', 'editor-looks',
-                        'editor-art', 'editor-ui-model', 'appearance-translation', 'editor-real-save', 'editor-real-art', 'editor-real-hooks',
+                        'editor-art', 'editor-localization', 'editor-ui-model', 'appearance-translation', 'editor-real-save', 'editor-real-art', 'editor-real-hooks',
                         'editor-real-overlay', 'editor-real-parts'
 
 # One platform's Character Editor output: the GROUP lines of dcp-save-editor-tests, the APPEARANCE_TRANSLATION rows
@@ -263,16 +260,6 @@ function Invoke-WorkerTests {
     Invoke-Native $node @('--no-warnings', '--test', '--test-reporter=tap', 'test/*.test.js') $true (Join-Path $script:RepoRoot 'server\lobby')
 }
 
-# A log line the player's report depends on, missing or present where it must not be.
-function Get-LogProblems($Test, [string[]]$Lines) {
-    foreach ($text in $Test.Requires) {
-        if (-not ($Lines | Where-Object { $_.Contains($text) })) { "missing log line: $text" }
-    }
-    foreach ($text in $Test.Forbids) {
-        if ($Lines | Where-Object { $_.Contains($text) }) { "forbidden log line: $text" }
-    }
-}
-
 function Find-LinuxDistro {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $null }
     foreach ($name in @(& wsl.exe -l -q 2>$null | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ })) {
@@ -282,31 +269,34 @@ function Find-LinuxDistro {
     return $null
 }
 
-function Invoke-LinuxNetTests {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', "$root/tools/test-linux-net.sh", $root) $true
+# The distribution and the repository's path in it, looked up once per run.
+$script:LinuxTarget = $null
+function Get-LinuxTarget {
+    if ($script:LinuxTarget) { return $script:LinuxTarget }
+    $target = [pscustomobject]@{ Distro = ''; Root = ''; Skip = '' }
+    if ($SkipLinux) { $target.Skip = 'skipped with -SkipLinux' }
+    elseif (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { $target.Skip = 'WSL is not installed' }
+    else {
+        $target.Distro = Find-LinuxDistro
+        if ($target.Distro) { $target.Root = (& wsl.exe -d $target.Distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim() }
+        else { $target.Skip = 'no WSL distribution has g++ and the OpenSSL headers' }
+    }
+    $script:LinuxTarget = $target
+    return $target
 }
 
-function Invoke-LinuxGate {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --test 2>&1") $true
+function Get-LinuxScriptCommand([string]$Script) {
+    $target = Get-LinuxTarget
+    if ($target.Skip) { return Skipped $target.Skip }
+    [pscustomobject]@{ Skip = ''; File = 'wsl.exe'; Arguments = @('-d', $target.Distro, '--exec', 'bash', "$($target.Root)/tools/$Script", $target.Root) }
 }
 
-function Invoke-LinuxLauncherSyntax {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', "$root/tools/test-linux-launcher.sh", $root) $true
+function Get-LinuxBuildCommand([string]$Option) {
+    $target = Get-LinuxTarget
+    if ($target.Skip) { return Skipped $target.Skip }
+    $jobs = if ($FullSequential) { 'DCP_TEST_JOBS=1 ' } else { '' }
+    [pscustomobject]@{ Skip = ''; File = 'wsl.exe'
+                       Arguments = @('-d', $target.Distro, '--exec', 'bash', '-c', "cd '$($target.Root)' && ${jobs}DCP_TEST_PROGRESS=1 bash tools/build.sh $Option 2>&1") }
 }
 
 function Find-ImagingPython {
@@ -362,68 +352,6 @@ function Invoke-PtBrLocalizationChecks {
     @{ Code = 0; Lines = @($out); Hidden = @(); Skip = '' }
 }
 
-function Invoke-LinuxEditorGate {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --editor 2>&1") $true
-}
-
-$quietLines = '^(GROUP\||MATRIX\||APPEARANCE_TRANSLATION\||runtime overlay tests:|appearance online tests:|ONLINE-BUILD\||LINUX-NET\||FAIL|OK |FAILED|.*STATIC PARITY|.*RUNTIME DATA|.*skipped|# (tests|pass|fail|skipped))'
-function ConvertTo-ArgumentString([string[]]$Arguments) {
-    ($Arguments | ForEach-Object { if ($_ -match '[\s"]' -or $_ -eq '') { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' } else { $_ } }) -join ' '
-}
-
-# Runs a program with stdout and stderr merged. Its lines are written as they arrive (with Quiet only result lines and a
-# timing table; the rest is returned in Hidden for a failure report), and while it runs the step's progress line is refreshed
-# on a timer. "@@dcp-progress" lines from instrumented suites feed the check count and are not part of Lines.
-function Invoke-Native([string]$File, [string[]]$Arguments = @(), [bool]$Quiet = $false, [string]$WorkingDirectory = '') {
-    $info = New-Object System.Diagnostics.ProcessStartInfo
-    $info.FileName = $File
-    if ($WorkingDirectory) { $info.WorkingDirectory = $WorkingDirectory }
-    $info.Arguments = ConvertTo-ArgumentString $Arguments
-    $info.UseShellExecute = $false
-    $info.RedirectStandardOutput = $true
-    $info.RedirectStandardError = $true
-    $info.CreateNoWindow = $true
-    $info.EnvironmentVariables['DCP_TEST_PROGRESS'] = '1'
-    $lines = New-Object System.Collections.Generic.List[string]
-    $hidden = New-Object System.Collections.Generic.List[string]
-    try { $process = [System.Diagnostics.Process]::Start($info) }
-    catch { return [pscustomobject]@{ Code = -1; Skip = ''; Lines = @("could not start ${File}: $($_.Exception.Message)"); Hidden = @(); Streamed = $false } }
-    try {
-        $readers = @($process.StandardOutput, $process.StandardError)
-        $pending = @($readers[0].ReadLineAsync(), $readers[1].ReadLineAsync())
-        $inTable = $false
-        while ($pending[0] -or $pending[1]) {
-            $active = @($pending | Where-Object { $_ })
-            $index = [System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]$active, 500)
-            if ($index -ge 0) {
-                $slot = [Array]::IndexOf($pending, $active[$index])
-                $line = $pending[$slot].Result
-                if ($null -eq $line) { $pending[$slot] = $null }
-                else {
-                    $pending[$slot] = $readers[$slot].ReadLineAsync()
-                    $child = ConvertFrom-ChildProgress $line
-                    if ($child) { $null = Set-ProgressChecks $script:Progress $script:Clock.Elapsed.TotalSeconds $child.Checks $child.Expected $child.Estimate $child.Detail }
-                    else {
-                        $lines.Add($line)
-                        if ($line -cmatch '^.+ timing$') { $inTable = $true } elseif ($inTable -and -not $line.StartsWith('  ')) { $inTable = $false }
-                        if (-not $Quiet -or $inTable -or $line -cmatch $quietLines) { Clear-ProgressLine $script:Progress; Write-Host $line } else { $hidden.Add($line) }
-                    }
-                }
-            }
-            $null = Update-Progress $script:Progress $script:Clock.Elapsed.TotalSeconds
-        }
-        $process.WaitForExit()
-        return [pscustomobject]@{ Code = $process.ExitCode; Skip = ''; Lines = $lines.ToArray(); Hidden = $hidden.ToArray(); Streamed = $true }
-    } finally {
-        $process.Dispose()
-    }
-}
-
 $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
                   'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-character-highlight-tests', 'dcp-gallery-unlock-tests', 'dcp-kraken-fix-tests', 'dcp-endgame-unlocks-tests', 'dcp-thread-lifecycle-tests',
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
@@ -438,21 +366,21 @@ $tests = @(
     (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings, and the launcher UI groups: icons, licenses, header art, DPI layout, scrollbar gutter, separators, sidebar, navigation, renderer)' 'dcp-launcher-tests' -Parity -Capture),
     (Test-Step 'launcher static gate (source hygiene, TRG patch chain, compiler warnings, Windows and Linux syntax-only compiles)' -Script 'tests\launcher_gate_tests.ps1' -Capture `
         -Arguments (@('-BuildDir', $buildDir) + @(if ($SkipLinux) { '-SkipLinux' }))),
-    (Test-Step 'PT-BR localization checks (ptbr.py selftest, validate, parity)' -Block { Invoke-PtBrLocalizationChecks } -Capture),
-    (Test-Step 'PT-BR manual visual checks (visual_assets.py validate --manuals-only, manual_repairs.py check)' -Block { Invoke-PtBrManualVisualChecks } -Capture),
+    (Test-Step 'PT-BR localization checks (ptbr.py selftest, validate, parity)' -Block { Invoke-PtBrLocalizationChecks } -Capture -Key 'PT-BR localization checks'),
+    (Test-Step 'PT-BR manual visual checks (visual_assets.py validate --manuals-only, manual_repairs.py check)' -Block { Invoke-PtBrManualVisualChecks } -Capture -Key 'PT-BR manual visual checks'),
     (Test-Step 'unsupported-build diagnostics tests (direct package analysis, one-shot report, loader validators, edge cases)' 'dcp-build-diagnostics-tests' -Parity),
     (Test-Step 'build feature parity tests (contract, update parity, mappings, unknown builds)' 'dcp-build-parity-tests' -Parity -Capture),
     (Test-Step 'feature locator tests (Cheats, Voice Language, True Ultrawide: real and relocated images, synthetic images, known builds only)' 'dcp-feature-sites-tests' -Parity),
     (Test-Step 'trophy tests' 'dcp-trophy-tests'),
     (Test-Step 'bug report tests (log choice, privacy filter, preview equals request, crash dump pairing and Attach crash report)' 'dcp-incident-tests' -Parity),
-    (Test-Step 'bug report crash dump upload tests (one Report ID for a report and its dump, log-only report, unsendable dump, resumed retry, receipt guard, on the loopback lobby)' 'dcp-incident-upload-tests' -Capture -Quiet -Lobby),
+    (Test-Step 'bug report crash dump upload tests (one Report ID for a report and its dump, log-only report, unsendable dump, resumed retry, receipt guard, on the loopback lobby)' 'dcp-incident-upload-tests' -Capture -Quiet -Lobby -Timing),
     (Test-Step 'Windows crash dump tests (dump path, session log pairing, collision, headless minidump write; no crash, no dialog)' 'dcp-crash-dump-tests'),
     (Test-Step 'cheat tests' 'dcp-cheats-tests' -Parity),
     (Test-Step 'Kraken crash fix tests (tentacle null mast: faulting sequence in every supported build, patch, null path, refusals)' 'dcp-kraken-fix-tests' -Parity),
     (Test-Step 'Voice language tests (issue #69: player, resurrected characters, narrator, NPCs, enemies, allies, all builds; narrator off alone)' 'dcp-voice-tests' -Parity),
     (Test-Step 'online System type hook tests' 'dcp-system-type-tests' -Parity),
     (Test-Step 'online party snapshot tests' 'dcp-party-tests' -Parity),
-    (Test-Step 'DCP-YYM3TL online Inn report-adventurers lifecycle (detached ally loader: cancel waits for the worker before its owner is freed)' 'dcp-thread-lifecycle-tests'),
+    (Test-Step 'DCP-YYM3TL online Inn report-adventurers lifecycle (detached ally loader: cancel waits for the worker before its owner is freed)' 'dcp-thread-lifecycle-tests' -Timing),
     (Test-Step 'Comms Wheel tests (message ids, radial layout, hold input, wire body, limits, every language, usage counts, balloon bridge on synthetic and local boot images)' 'dcp-comms-tests' -Parity),
     (Test-Step 'Comms Wheel session tests (rules, telemetry batching, the real send entry point)' 'dcp-comms-session-tests'),
     (Test-Step 'Comms Wheel production send tests (one accepted send, one count)' 'dcp-comms-session-runtime-tests'),
@@ -468,9 +396,9 @@ $tests = @(
     (Test-Step 'Steam Deck trackpad tests (native touchpad, automatic pointer, click routing, mouse/controller/touchscreen regression)' 'dcp-steam-deck-trackpad-tests' -Parity),
     (Test-Step 'window fit tests' 'dcp-window-tests'),
     (Test-Step 'SDL compat tests (Proton/Wine HIDAPI default, Steam Wayland window backend)' 'dcp-sdl-compat-tests'),
-    (Test-Step 'present tests (swapchain images, present mode, flip pacing)' 'dcp-present-tests'),
-    (Test-Step 'frame pacing tests (Frame rate setting, repeat cadence, limiter)' 'dcp-frame-pacing-tests'),
-    (Test-Step 'copy pool tests (epoch accounting, stale epoch report, callback order)' 'dcp-copy-pool-tests'),
+    (Test-Step 'present tests (swapchain images, present mode, flip pacing)' 'dcp-present-tests' -Timing),
+    (Test-Step 'frame pacing tests (Frame rate setting, repeat cadence, limiter)' 'dcp-frame-pacing-tests' -Timing),
+    (Test-Step 'copy pool tests (epoch accounting, stale epoch report, callback order)' 'dcp-copy-pool-tests' -Timing),
     (Test-Step 'Options menu tests (chord, close gate, live and restart settings, dcp.ini, Online Play lock)' 'dcp-options-menu-tests'),
     (Test-Step 'Comms Wheel UI tests (input glue, layout, key binding)' 'dcp-comms-wheel-ui-tests'),
     (Test-Step 'AMD water workaround tests (vendor defaults, no hotkey)' 'dcp-amd-water-tests'),
@@ -483,19 +411,20 @@ $tests = @(
     (Test-Step 'runtime file overlay tests (borrowed patch data, read observer, swapped data, layered overlays)' 'dcp-runtime-overlay-tests' -Capture -Quiet),
     (Test-Step 'online appearance tests (recipe, room session, remote textures, seat-aware hooks)' 'dcp-appearance-online-tests' -Capture -Quiet),
     (Test-Step 'Character Editor release groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model, composition with the translation overlay, real archives)' 'dcp-save-editor-tests' -Parity -Capture -Quiet `
-        -Key 'dcp-save-editor-tests release' -Arguments @('release')),
+        -Key 'dcp-save-editor-tests release' -Arguments @('release') -Lane 'editor' -Nominal 240),
     (Test-Step 'Save page tests (overview, DATA slots, backups, export, import, restore, PS3/Vita detection, Editor invalidation, page routing)' 'dcp-save-page-tests'),
     (Test-Step 'Inventory Editor tests (item records, catalog, edits, safety, Apply and Discard, navigation, page structure, Portuguese text)' 'dcp-inventory-editor-tests'),
     (Test-Step 'F3K8S Character stat override tests (per-field Apply semantics, STR/CON/DEX/INT/MGR/LUC live and status overrides, native fallback for untouched stats, Max HP and anti-Infinite-Health regressions, identity/multiplayer isolation, sidecar compatibility, native CUSA10454 1.00 and CUSA10209 1.00 paths)' 'dcp-character-override-tests'),
     (Test-Step 'test progress reporter tests (percentage, bar, ETA, check counts, timing table, redirected output, injected clock)' 'dcp-test-progress-tests'),
     (Test-Step 'test progress runner tests (tools\_progress.ps1 on synthetic time: bar, percentage, ETA, spinner line, redirected output, timing)' -Script 'tests\progress_script_tests.ps1' -Capture),
+    (Test-Step 'test runner tests (tools\_test_runner.ps1 and tools\_test_history.ps1: lanes, buffered output, failures, interrupted groups, history file)' -Script 'tests\test_runner_tests.ps1' -Capture -Timing),
     (Test-Step 'tiling tests (GPU tile layouts and addresses)' 'dcp-tiling-tests'),
     (Test-Step 'renderer selection tests (Auto, Vulkan, OpenGL, requirements)' 'dcp-renderer-selection-tests'),
     (Test-Step 'OpenGL backend tests (detiler, emitted GLSL through glslang, no context)' 'dcp-opengl-backend-tests'),
-    (Test-Step 'OpenGL fast path tests (write watch with real faults, state tracker, stream ring, no context)' 'dcp-opengl-perf-tests'),
+    (Test-Step 'OpenGL fast path tests (write watch with real faults, state tracker, stream ring, no context)' 'dcp-opengl-perf-tests' -Timing),
     (Test-Step 'ANGLE dependency tests (pin, cache, extraction, DLL staging, package checks, no network)' -Script 'tests\angle_dependency_tests.ps1'),
     (Test-Step 'updater tests' 'dcp-update-tests'),
-    (Test-Step 'updater network tests (504, dropped connections, stalls, redirects, retries on a loopback server)' 'dcp-update-network-tests'),
+    (Test-Step 'updater network tests (504, dropped connections, stalls, redirects, retries on a loopback server)' 'dcp-update-network-tests' -Timing),
     (Test-Step 'updater helper tests' 'dcp-update-helper-tests'),
     (Test-Step 'RTC tests (Win32 file time)' 'dcp-rtc-tests'),
     (Test-Step 'Skip Offer tests (synthetic and local boot images)' 'dcp-skip-offers-tests' -Parity),
@@ -519,21 +448,25 @@ $tests = @(
     (Test-Step 'Exit Game tests (title text, four-row menu hooks, install checks)' 'dcp-exit-game-tests'),
     (Test-Step 'Title layout tests (four-row art patch, synthetic layouts)' 'dcp-title-layout-tests'),
     (Test-Step 'Simulated crash trigger tests (DCP_SIMULATE_CRASH parsing and wiring; nothing crashes)' 'dcp-simulate-crash-tests'),
-    (Test-Step 'online tests (JSON, identity, STUN, peer transport, relay fallback, mixed rooms, failure paths, Connection test; binary WebSocket against a loopback lobby)' 'dcp-net-tests' -Capture -Quiet -Lobby),
+    (Test-Step 'online tests (JSON, identity, STUN, peer transport, relay fallback, mixed rooms, failure paths, Connection test; binary WebSocket against a loopback lobby)' 'dcp-net-tests' -Capture -Quiet -Lobby -Timing),
     (Test-Step 'online build tests (every supported build''s online imports, structural relay parity, one lobby game, cheat lock)' 'dcp-online-builds-tests' -Parity -Capture -Quiet -Lobby),
-    (Test-Step 'Worker tests (node --test: lobby protocol, relay routing, limits, cleanup, compatibility)' -Block { Invoke-WorkerTests }),
-    (Test-Step 'Linux network tests (WSL: POSIX WebSocket, the same net tests; skipped without WSL)' -Block { Invoke-LinuxNetTests }),
-    (Test-Step 'Linux gate (WSL: tools/build.sh --test, the authoritative Linux build and test run; skipped without WSL)' -Block { Invoke-LinuxGate }),
+    (Test-Step 'Worker tests (node --test: lobby protocol, relay routing, limits, cleanup, compatibility)' -Block { Invoke-WorkerTests } -Key 'Worker tests (node --test)'),
+    (Test-Step 'Linux network tests (WSL: POSIX WebSocket, the same net tests; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-net.sh' } `
+        -Key 'Linux network tests (WSL)' -Lane 'linux' -Nominal 180),
+    (Test-Step 'Linux gate (WSL: tools/build.sh --test, the authoritative Linux build and test run; skipped without WSL)' -Command { Get-LinuxBuildCommand '--test --keep-image' } `
+        -Key 'Linux gate (WSL)' -Lane 'linux' -Nominal 900),
+    (Test-Step 'Linux boot image (WSL: tools/build.sh --image, the built Linux loader updates build/image when it is out of date; skipped without WSL)' `
+        -Command { Get-LinuxBuildCommand '--image' } -Key 'Linux boot image (WSL)' -Final -Nominal 10),
     (Test-Step 'relay source hygiene (no debug logs, no force option, no build or Windows dependency, protocols unchanged)' -Script 'tests\relay_hygiene_tests.ps1'),
     (Test-Step 'online test instance script tests (-Build, with -WhatIf only)' -Script 'tests\online_instance_tests.ps1'),
     (Test-Step 'build.ps1 waits for every loader run (a Windows-subsystem program needs the pipe)' -Script 'tests\build_script_tests.ps1'),
-    (Test-Step 'online HLE tests (Matching2, libSceNet and Rudp entry points against the loopback lobby)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby),
-    (Test-Step 'online endpoint path, lobby sees global IPv6 (fallback report, late and early STUN, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby `
+    (Test-Step 'online HLE tests (Matching2, libSceNet and Rudp entry points against the loopback lobby)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby -Timing),
+    (Test-Step 'online endpoint path, lobby sees global IPv6 (fallback report, late and early STUN, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby -Timing `
         -Key 'endpoint path IPv6' -Arguments @('--endpoint-scenario', '2001:db8:1::10') `
         -Requires @('it sees 2001:db8:1::10', 'public endpoint unavailable, relay fallback', 'reporting public STUN endpoint 198.51.100.25:41000',
                     'lobby has observed 2001:db8:1::10, public 198.51.100.25:41000', 'lobby has observed 2001:db8:1::10, public 198.51.100.25:41001') `
         -Forbids @('reporting LAN endpoint', 'LAN lobby')),
-    (Test-Step 'online endpoint path, lobby sees public IPv4 (no claim, STUN port, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby `
+    (Test-Step 'online endpoint path, lobby sees public IPv4 (no claim, STUN port, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby -Timing `
         -Key 'endpoint path IPv4' -Arguments @('--endpoint-scenario', '203.0.113.9') `
         -Requires @('reporting public STUN endpoint 203.0.113.9:41001', 'lobby has 203.0.113.9:41001') `
         -Forbids @('reporting LAN endpoint', 'LAN lobby', 'lobby has observed')),
@@ -578,7 +511,8 @@ if ($BossBattleOnline) {
     $tests = @(
         (Test-Step 'headless command interface (dcp-launcher-tests headless: --install, --check-game, skipped-launcher patches)' 'dcp-launcher-tests' -Capture `
             -Key 'dcp-launcher-tests headless' -Arguments @('headless')),
-        (Test-Step 'Linux launcher syntax (WSL: g++ -fsyntax-only on the portable launcher sources; skipped without WSL)' -Block { Invoke-LinuxLauncherSyntax })
+        (Test-Step 'Linux launcher syntax (WSL: g++ -fsyntax-only on the portable launcher sources; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-launcher.sh' } `
+            -Key 'Linux launcher syntax (WSL)' -Nominal 30)
     )
     $requiredSuites = $headlessCliSuites
 } elseif ($EditorTranslation) {
@@ -603,7 +537,8 @@ if ($BossBattleOnline) {
     $requiredSuites = $inventoryEditorSuites
 } elseif ($EditorRelease) {
     $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
-    $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Block { Invoke-LinuxEditorGate }
+    $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Command { Get-LinuxBuildCommand '--editor' } `
+        -Key 'Linux Character Editor release groups (WSL)' -Nominal 400
     $requiredSuites = $editorReleaseSuites
 } elseif ($Full) {
     Sync-GpuDependencies
@@ -615,7 +550,8 @@ if ($BossBattleOnline) {
             -Key 'dcp-inventory-editor-tests localization' -Arguments @('localization')),
         (Test-Step 'Appearance Portuguese (Brazil) colour names (a synthetic archive: every class and preset, English and other languages unchanged)' 'dcp-save-editor-tests' -Capture -Quiet `
             -Key 'dcp-save-editor-tests localization' -Arguments @('localization')),
-        (Test-Step 'Linux launcher syntax (WSL: g++ -fsyntax-only on the shared launcher sources and the Editor tests; skipped without WSL)' -Block { Invoke-LinuxLauncherSyntax })
+        (Test-Step 'Linux launcher syntax (WSL: g++ -fsyntax-only on the shared launcher sources and the Editor tests; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-launcher.sh' } `
+            -Key 'Linux launcher syntax (WSL)' -Nominal 30)
     )
     $requiredSuites = $defaultFocusSuites
 }
@@ -634,6 +570,7 @@ foreach ($suite in $requiredSuites) {
     if (-not ($tests | Where-Object { $_.Exe -eq $suite })) { Stop-Tool "$suite is a required suite but is not in the test list." }
 }
 
+$script:BuildSeconds = $script:Clock.Elapsed.TotalSeconds
 $failed = New-Object System.Collections.Generic.List[string]
 $parityFailed = New-Object System.Collections.Generic.List[string]
 $captured = @{}
@@ -643,13 +580,22 @@ $lobby = $null
 $lobbyProblem = ''
 $lobbySkip = ''
 $finishedRun = $false
-$script:Clock = [Diagnostics.Stopwatch]::StartNew()
+$mode = if ($FullSequential) { 'full-sequential' } elseif ($Full) { 'full' } elseif ($useDefaultFocus) { 'default' } else { @($PSBoundParameters.Keys | Where-Object { $_ -ne 'SkipLinux' -and $PSBoundParameters[$_] })[0] }
+$parallel = $Full -and -not $FullSequential
+$script:History = New-TestHistory (Join-Path $script:RepoRoot 'build\test-history\timings.json')
 $interactive = Test-InteractiveConsole
-$script:Progress = New-ProgressReporter @($tests | ForEach-Object { Get-TestName $_ }) 0 $interactive {
+$groups = @($tests | ForEach-Object {
+        $estimate = Get-DurationEstimate $script:History $_.Platform $mode (Get-TestName $_) $_.Nominal
+        New-ProgressGroup (Get-TestName $_) $_.Platform $(if ($parallel) { $_.Lane } else { 'main' }) ([int]($parallel -and ($_.Timing -or $_.Final))) $estimate.Seconds $estimate.Known $estimate.Previous
+    })
+$script:Progress = New-ProgressReporter $groups 0 $interactive {
     param([string]$Text, [bool]$NoNewline)
     if ($NoNewline) { Write-Host $Text -NoNewline } else { Write-Host $Text }
-}
-Write-Host $(if ($interactive) { 'Progress: animated line (set DCP_TEST_ANIMATE=0 for plain lines)' } else { 'Progress: plain RUNNING lines every 15 s (set DCP_TEST_ANIMATE=1 to force the animated line)' }) -ForegroundColor DarkGray
+} 0 $script:StartClock
+Write-Host $(if ($interactive) { 'Progress: animated line (set DCP_TEST_ANIMATE=0 for plain lines)' } else { 'Progress: plain RUNNING lines every 30 s (set DCP_TEST_ANIMATE=1 to force the animated line)' }) -ForegroundColor DarkGray
+$previousJobs = $env:DCP_TEST_JOBS
+if ($FullSequential) { $env:DCP_TEST_JOBS = '1' }
+elseif (-not $env:DCP_TEST_JOBS) { $env:DCP_TEST_JOBS = "$([Math]::Max(1, [Math]::Min(8, [Math]::Floor([Environment]::ProcessorCount / 4))))" }
 $previousLobbyUrl = $env:DCP_TEST_LOBBY
 Remove-Item Env:\DCP_TEST_LOBBY -ErrorAction SilentlyContinue
 try {
@@ -669,57 +615,14 @@ try {
             Write-Host "SKIPPED: the lobby-backed tests need a development lobby ($lobbySkip)." -ForegroundColor Yellow
         }
     }
-    $stepIndex = 0
-    foreach ($test in $tests) {
-        $stepIndex++
-        $name = Get-TestName $test
-        Start-ProgressGroup $script:Progress $name $script:Clock.Elapsed.TotalSeconds
-        Write-Step "[$stepIndex/$($tests.Count)] Running the $($test.Title)"
-        $code = 0
-        $run = $null
-        if ($test.Block) {
-            $run = & $test.Block
-            if ($run.Skip) {
-                $skipped[$name] = $run.Skip
-                Clear-ProgressLine $script:Progress
-                Write-Host "    SKIPPED: $($run.Skip)" -ForegroundColor Yellow
-                Complete-ProgressGroup $script:Progress 'SKIPPED' $script:Clock.Elapsed.TotalSeconds
-                continue
-            }
-            $captured[$name] = $run.Lines
-            $code = $run.Code
-        } elseif ($test.Script) {
-            $run = Invoke-Native 'powershell' (@('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $script:RepoRoot $test.Script)) + $test.Arguments) $false
-            $code = $run.Code
-            if ($test.Capture) { $captured[$name] = $run.Lines }
-        } else {
-            $run = Invoke-Native (Join-Path $buildDir "bin\$($test.Exe).exe") $test.Arguments ($test.Capture -and $test.Quiet)
-            $code = $run.Code
-            if ($test.Capture) {
-                $captured[$name] = $run.Lines
-                $problems = @(if ($env:DCP_TEST_LOBBY) { Get-LogProblems $test $run.Lines })
-                if ($problems -and -not $code) { $code = 1 }
-                $problems | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-            }
-        }
-        Clear-ProgressLine $script:Progress
-        if ($code -ne 0) {
-            $run.Hidden | ForEach-Object { Write-Host $_ }
-            $failed.Add($name)
-            if ($test.Parity) { $parityFailed.Add($name) }
-            $exitCodes[$name] = $code
-            Write-Host "    FAIL: $name ($(Format-ExitCode $code))" -ForegroundColor Red
-        } else {
-            Write-Host '    PASS' -ForegroundColor Green
-        }
-        Complete-ProgressGroup $script:Progress $(if ($code -ne 0) { 'FAIL' } else { 'PASS' }) $script:Clock.Elapsed.TotalSeconds (Get-FinalCheckCount @($run.Lines))
-    }
+    Invoke-TestList $tests $parallel
     $finishedRun = $true
 } finally {
+    Stop-LiveNative
+    if ($null -ne $previousJobs) { $env:DCP_TEST_JOBS = $previousJobs } else { Remove-Item Env:\DCP_TEST_JOBS -ErrorAction SilentlyContinue }
     Clear-ProgressLine $script:Progress
     Write-Host ''
-    Format-TimingSummary $script:Progress $script:Clock.Elapsed.TotalSeconds | ForEach-Object { Write-Host $_ }
-    if (-not $finishedRun) { Write-Host 'Run interrupted before the last group finished.' -ForegroundColor Yellow }
+    Write-RunReport $finishedRun
     if ($lobby -and $lobby.Process) {
         Stop-Process -Id $lobby.Process.Id -Force -ErrorAction SilentlyContinue
         $lobby.Process.WaitForExit(5000) | Out-Null
