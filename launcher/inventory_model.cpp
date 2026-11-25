@@ -35,9 +35,27 @@ int CategoryOrder(const InventoryRow& row) {
 
 int LocationOrder(const ItemRef& ref) { return ref.storage() ? 99 : ref.set; }
 
+// The letter each Latin-1 letter U+00C0..U+00FF sorts and searches as; 0 for a sign.
+constexpr char kLatin1Base[] =
+    "AAAAAAACEEEEIIIIDNOOOOO\0OUUUUY\0saaaaaaaceeeeiiiidnooooo\0ouuuuy\0y";
+static_assert(sizeof(kLatin1Base) == 65, "one base letter for each of the 64 letters");
+
+// The name in the form a search and the name sort compare: lower case, accents removed.
 std::string SortName(const std::string& name) {
-    std::string key = name;
-    for (char& ch : key) ch = (ch >= 'A' && ch <= 'Z') ? char(ch - 'A' + 'a') : ch;
+    std::string key;
+    key.reserve(name.size());
+    for (size_t i = 0; i < name.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(name[i]);
+        if (ch == 0xC3 && i + 1 < name.size() && (static_cast<unsigned char>(name[i + 1]) & 0xC0) == 0x80) {
+            const char base = kLatin1Base[static_cast<unsigned char>(name[i + 1]) - 0x80];
+            if (base) {
+                key += (base >= 'A' && base <= 'Z') ? char(base - 'A' + 'a') : base;
+                ++i;
+                continue;
+            }
+        }
+        key += (ch >= 'A' && ch <= 'Z') ? char(ch - 'A' + 'a') : char(ch);
+    }
     return key;
 }
 
@@ -186,19 +204,26 @@ bool NameMatchesSearch(const std::string& name, const std::string& search) {
 
 std::string SearchKeptAfterSave(const SaveModel& saved, const ItemRef& item, const ItemCatalog& catalog, const std::string& search) {
     const ItemRecord record = ReadItem(saved.bytes(), item);
-    return record.state == ItemState::kEmpty || NameMatchesSearch(ItemDisplayName(record, catalog), search) ? search : std::string();
+    const ItemCatalog* english = catalog.English();
+    const bool matches = record.state == ItemState::kEmpty || NameMatchesSearch(ItemDisplayName(record, catalog), search) ||
+                         (english && NameMatchesSearch(ItemDisplayName(record, *english), search));
+    return matches ? search : std::string();
 }
 
 InventoryList BuildInventoryList(const SaveModel& working, const SaveModel& persisted, int slot, int character,
                                  const ItemCatalog& catalog, const InventoryQuery& query) {
     const std::string needle = SortName(query.search);
+    const ItemCatalog* english = catalog.English();
     InventoryList list;
     for (InventoryRow& row : ReadRows(working, persisted, slot, character, catalog)) {
         const InventoryGroup group = row.malformed ? InventoryGroup::kOther : GroupOf(row.definition);
         // An item with pending edits also matches by the name it has in the save, so editing never makes it vanish.
         const auto matches = [&](const std::string& name) { return SortName(name).find(needle) != std::string::npos; };
-        const bool found = needle.empty() || matches(row.name) ||
-                           (row.changed && matches(ItemDisplayName(ReadItem(persisted.bytes(), row.ref), catalog)));
+        const auto matches_record = [&](const ItemRecord& record) {
+            return matches(ItemDisplayName(record, catalog)) || (english && matches(ItemDisplayName(record, *english)));
+        };
+        const bool found = needle.empty() || matches(row.name) || (english && matches_record(ReadItem(working.bytes(), row.ref))) ||
+                           (row.changed && matches_record(ReadItem(persisted.bytes(), row.ref)));
         if (group == query.group && found) {
             list.rows.push_back(std::move(row));
         }

@@ -25,7 +25,7 @@ enum class InventorySort { kName, kCategory, kLevel, kRank };
 
 struct InventoryQuery {
     InventoryGroup group = InventoryGroup::kWeaponsShields;
-    std::string search; // matched case-insensitively against the displayed name
+    std::string search; // matched without case or accents against the displayed name, and the English one when it differs
     InventorySort sort = InventorySort::kName;
     bool operator==(const InventoryQuery&) const = default;
 };
@@ -72,7 +72,7 @@ InventoryList BuildInventoryList(const SaveModel& working, const SaveModel& pers
 InventoryList BuildInventoryList(const SaveModel& working, const SaveModel& persisted, int slot, int character,
                                  const ItemCatalog& catalog, const InventoryQuery& query);
 
-// Whether a name contains the search, ignoring case; an empty search matches everything.
+// Whether a name contains the search, ignoring case and accents; an empty search matches everything.
 bool NameMatchesSearch(const std::string& name, const std::string& search);
 // The search to keep once `saved` holds the item: unchanged while the item's saved name still matches, else empty.
 std::string SearchKeptAfterSave(const SaveModel& saved, const ItemRef& item, const ItemCatalog& catalog, const std::string& search);

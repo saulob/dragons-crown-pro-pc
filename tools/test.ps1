@@ -41,6 +41,11 @@
   saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
   The normal run includes both.
 .DESCRIPTION
+  The default run is the current focus: the launcher's Portuguese (Brazil) text (dcp-launcher-tests ptbr-editor), the Inventory
+  Editor's names, modifiers, search and sort (dcp-inventory-editor-tests localization), the Appearance colour names
+  (dcp-save-editor-tests localization) and the Linux syntax of the shared sources; the real-save and permutation matrices stay
+  under -Full.
+
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
   incrementally.
@@ -535,8 +540,14 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'Korean Menu & Subtitles (USA and Europe)'
-$defaultFocusSuites = @('dcp-korean-localization-tests', 'dcp-launcher-tests', 'dcp-build-parity-tests', 'dcp-text-tests')
+$defaultFocusName = 'launcher Portuguese (Brazil) localization'
+$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-inventory-editor-tests', 'dcp-save-editor-tests')
+# The result line each focused selector must print: a selector that finds nothing to check (or prints nothing) is a failure.
+$defaultFocusGroups = [ordered]@{
+    'dcp-launcher-tests ptbr-editor'           = @('GROUP|launcher-ptbr-editor|PASS')
+    'dcp-inventory-editor-tests localization' = @('GROUP|inventory-localization|PASS', 'GROUP|inventory-ui|PASS')
+    'dcp-save-editor-tests localization'      = @('GROUP|editor-localization|PASS')
+}
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
@@ -598,12 +609,13 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @(
-        (Test-Step 'Korean localization tests (USA and Europe profiles, corpus, Hangul atlas and glyph table; the local USA folder is read only)' 'dcp-korean-localization-tests'),
-        (Test-Step 'Korean launcher tests (language lists, saved Korean across builds, Europe profile and record refusal, voice choices, PT-BR and Russian regression)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests korean' -Arguments @('korean')),
-        (Test-Step 'Korean build parity (the contract, the Europe profile, and the real USA corpus and glyph table of every prepared folder)' 'dcp-build-parity-tests' -Capture -Quiet `
-            -Key 'dcp-build-parity-tests korean' -Arguments @('korean')),
-        (Test-Step 'Text tests (system font set: Noto Sans KR only for the port Korean, every other language unchanged)' 'dcp-text-tests')
+        (Test-Step 'Launcher Portuguese (Brazil) text (duplicate keys, accents, class names and the game''s terms, Editor strings, English and other languages unchanged)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests ptbr-editor' -Arguments @('ptbr-editor')),
+        (Test-Step 'Inventory Editor Portuguese (Brazil) names (the game''s sheets through the shared lookup, composed names, modifiers, colours, search, sort, fallbacks, identity and save bytes, DPI layout)' 'dcp-inventory-editor-tests' -Capture -Quiet `
+            -Key 'dcp-inventory-editor-tests localization' -Arguments @('localization')),
+        (Test-Step 'Appearance Portuguese (Brazil) colour names (a synthetic archive: every class and preset, English and other languages unchanged)' 'dcp-save-editor-tests' -Capture -Quiet `
+            -Key 'dcp-save-editor-tests localization' -Arguments @('localization')),
+        (Test-Step 'Linux launcher syntax (WSL: g++ -fsyntax-only on the shared launcher sources and the Editor tests; skipped without WSL)' -Block { Invoke-LinuxLauncherSyntax })
     )
     $requiredSuites = $defaultFocusSuites
 }
@@ -808,6 +820,14 @@ if ($EditorTranslation -or $EditorRelease) {
     exit 0
 }
 if ($useDefaultFocus) {
+    foreach ($key in $defaultFocusGroups.Keys) {
+        foreach ($group in $defaultFocusGroups[$key]) {
+            if (-not (@($captured[$key]) | Where-Object { "$_".StartsWith($group) })) {
+                Write-Host "FAIL: $key did not print $group" -ForegroundColor Red
+                if (-not $failed.Contains($key)) { $failed.Add($key); $exitCodes[$key] = 1 }
+            }
+        }
+    }
     $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux *' } | Select-Object -First 1
     Write-Host ''
     Write-Host "Focused development run ($defaultFocusName; pass -Full for the complete release matrix):" -ForegroundColor Cyan

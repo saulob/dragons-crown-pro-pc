@@ -486,6 +486,67 @@ const TranslationFile* PtBrSource(std::string_view source) { return SourceIn({kP
 const TranslationFile* EnglishSource(std::string_view source) { return SourceIn({kEnSources, kEnSourcesCount}, source); }
 const TranslationFile* RussianSource(std::string_view source) { return SourceIn({kRuSources, kRuSourcesCount}, source); }
 
+std::vector<std::string> TranslatedSheetRecords(std::string_view translation, const TranslationProfile& profile,
+                                                std::string_view sheet, std::vector<std::string> native) {
+    const bool portuguese = translation == kPortPortugueseBrazil;
+    const bool english = translation == kPortEnglish && !profile.source.empty();
+    if (!portuguese && !english) return native;
+    const std::span<const TranslationFile> files = portuguese ? PtBrTranslationFiles() : EnglishTranslationFiles();
+    const std::string file_name = std::string(sheet) + ".json";
+    const auto file = std::find_if(files.begin(), files.end(),
+                                   [&](const TranslationFile& candidate) { return std::string_view(candidate.name) == file_name; });
+    if (file == files.end()) return native;
+    const std::optional<net::Json> json =
+        net::Json::parse(std::string_view(reinterpret_cast<const char*>(file->data), file->size), 8);
+    if (!json || !json->is_object() || !(*json)["entries"].is_array()) return native;
+
+    std::optional<SourceMap> source;
+    std::optional<DroppedButtons> dropped;
+    std::optional<AdaptedTexts> adapted;
+    if (!profile.source.empty()) {
+        const TranslationFile* map = PtBrSource(profile.source);
+        if (!map || !(source = ParseSourceMap(*map))) return native;
+        if (english) {
+            const TranslationFile* delta = EnglishSource(profile.source);
+            if (!delta || !ApplySourceDelta(*source, *delta) || !(dropped = ParseDroppedButtons(*delta))) return native;
+        } else if (!(adapted = ParseAdaptedTexts(*map))) {
+            return native;
+        }
+    }
+    static const SourceHashes kNoHashes;
+    const SourceHashes* mapped = nullptr;
+    if (source) {
+        const auto found = source->find(sheet);
+        mapped = found == source->end() ? &kNoHashes : &found->second;
+    }
+    const std::string_view text_key = portuguese ? "pt_br" : "en";
+    const std::string sheet_name(sheet);
+    const std::set<size_t>* dropped_here = nullptr;
+    if (dropped) {
+        const auto found = dropped->find(sheet);
+        if (found != dropped->end()) dropped_here = &found->second;
+    }
+    std::vector<std::string> records = native;
+    std::vector<bool> done(native.size());
+    for (const net::Json& item : (*json)["entries"].items()) {
+        const std::vector<size_t> indices = Indices(item["index"]);
+        const net::Json& hash = item["source_sha256"];
+        const net::Json& text = item[text_key];
+        if (indices.empty() || !hash.is_string() || !text.is_string()) continue;
+        for (const size_t index : indices) {
+            const std::string& wording = WordingFor(adapted ? &*adapted : nullptr, sheet_name, index, text.as_string());
+            const bool buttons_dropped = dropped_here && dropped_here->count(index);
+            if (!RecordProblem(sheet, native, index, hash.as_string(), wording, mapped, portuguese, buttons_dropped).empty() ||
+                done[index]) {
+                continue;
+            }
+            done[index] = true;
+            records[index] = wording;
+        }
+    }
+    return records;
+}
+
 std::string FoldLatinLetters(std::string_view text) {
     std::string out;
     out.reserve(text.size());

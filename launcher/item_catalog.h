@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -70,8 +71,10 @@ struct EffectText {
 class ItemCatalog {
 public:
     ItemCatalog() = default;
-    // `words` are the ten SystemMsg entries from 1485 the game may put before an item name.
-    ItemCatalog(std::vector<std::string> items, std::vector<std::string> effects, std::vector<std::string> words = {});
+    // `words` are the ten SystemMsg entries from 1485 the game may put before an item name. `mark_value_gaps`: a modifier whose
+    // value stands inside its sentence keeps a "..." there, as a language that words it that way needs.
+    ItemCatalog(std::vector<std::string> items, std::vector<std::string> effects, std::vector<std::string> words = {},
+                bool mark_value_gaps = false);
 
     bool loaded() const { return !items_.empty(); }
     // The item list's name for a definition, or "" when the list has none.
@@ -82,15 +85,25 @@ public:
     std::string Word(uint8_t index) const;
     // The name of an Items entry (definition 112), which its first modifier id selects; "" outside 373..531.
     std::string ItemsEntryName(uint16_t id) const;
+    // The same sheets in English, so a search by English name keeps finding the item while another language is shown;
+    // nullptr when the names shown are the English ones.
+    void SetEnglish(ItemCatalog english);
+    const ItemCatalog* English() const { return english_.get(); }
 
 private:
     std::vector<std::string> items_;
     std::vector<std::string> effects_;
     std::vector<std::string> words_;
+    bool mark_value_gaps_ = false;
+    std::shared_ptr<const ItemCatalog> english_;
 };
 
 // The name words of the SystemMsg sheet (entries 1485..1494), in the order an item's word byte selects them.
 std::vector<std::string> NameWords(const std::vector<std::string>& system_messages);
+
+// The catalog of the sheets in message language `suffix` with the port's `translation` laid over them. A translated catalog
+// also holds the English names (ItemCatalog::English).
+ItemCatalog LoadItemCatalog(CharacterArt& art, const std::string& suffix, const std::string& translation);
 
 // Everything the Inventory Editor reads from the game files, prepared once per game folder and language.
 struct ItemAssets {
@@ -106,7 +119,8 @@ std::string UnknownEffectName(uint16_t id);
 std::string TrimText(std::string text);
 // The text with @c(n) and @/c removed, "%d" shown as "?" and the full-width percent sign as "%".
 std::string CleanEffectText(std::string text);
-// The modifier's name: its text without the value, its sign and its percent sign.
-std::string ModifierName(const std::string& text);
+// The modifier's name: its text without the value, its sign and its percent sign. `mark_value_gaps` keeps a "..." where a
+// value stood inside a sentence ("Chance of ... to poison").
+std::string ModifierName(const std::string& text, bool mark_value_gaps = false);
 
 } // namespace dcp

@@ -20,6 +20,7 @@ namespace dcp {
 
 class CpkArchive;
 struct Mbs;
+struct TranslationProfile;
 
 // The layers of a lost-weapon model that form its picture: one copy of the weapon, without trail or ghosts.
 std::vector<uint32_t> ItemPictureLayers(const Mbs& mbs);
@@ -36,6 +37,7 @@ std::string NativeColorAtlas(CharacterClass klass, int color);
 struct CharacterArtSources {
     std::vector<std::filesystem::path> archives; // searched in order for each entry
     std::filesystem::path cache_dir;              // where learned custom regions are kept; nothing kept when empty
+    const TranslationProfile* translation = nullptr; // how the build serves the port's translations; none: sheets as installed
 };
 
 // The archives of an installed game folder: the update archive, the build's regional archive, then the base one.
@@ -63,10 +65,13 @@ public:
     // The class's custom regions, learned once from its five atlases; nothing when the game files are unreadable.
     const std::vector<RegionMap>* Regions(CharacterClass klass);
     // The native preset name from the SystemMsg sheet of language `suffix` (msgsheet/SystemMsg_<suffix>.fms), falling back
-    // to the unsuffixed and US sheets; empty when no sheet has it or the colour is outside 0..4.
-    std::string ColorName(CharacterClass klass, int color, const std::string& suffix);
+    // to the unsuffixed and US sheets, as the port's `translation` shows it; empty when no sheet has it or the colour is
+    // outside 0..4.
+    std::string ColorName(CharacterClass klass, int color, const std::string& suffix, const std::string& translation = {});
     // The records of msgsheet/<sheet>_<suffix>.fms with the same fallbacks; empty when no archive has the sheet.
     const std::vector<std::string>& Sheet(const std::string& sheet, const std::string& suffix);
+    // Sheet with the port's `translation` laid over it (game_translation.h); Sheet itself when there is none.
+    const std::vector<std::string>& TranslatedSheet(const std::string& sheet, const std::string& suffix, const std::string& translation);
 
     // The cropped images of the animations of stage/<stage>.mbs (Menu or Interface); a name the game files do not have is
     // left out.
@@ -119,6 +124,7 @@ private:
     std::map<CharacterClass, std::optional<std::vector<RegionMap>>> regions_;
     std::optional<CustomRender> custom_;
     std::map<std::string, std::vector<std::string>> sheets_;
+    std::map<std::string, std::vector<std::string>> translated_sheets_;
     std::string error_;
 };
 

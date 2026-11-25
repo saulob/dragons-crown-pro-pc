@@ -839,40 +839,40 @@ Log after privacy filtering	Log depois do filtro de privacidade
 Editor	Editor
 Save Data	Dados de save
 Character	Personagem
-Appearance	Aparencia
+Appearance	Aparência
 Progression	Progresso
 Equipment	Equipamento
-Apply Changes	Aplicar alteracoes
-Unsaved changes	Alteracoes nao salvas
-You have unsaved changes. Apply them, discard them, or cancel.	Voce tem alteracoes nao salvas. Aplique, descarte ou cancele.
+Apply Changes	Aplicar alterações
+Unsaved changes	Alterações não salvas
+You have unsaved changes. Apply them, discard them, or cancel.	Você tem alterações não salvas. Aplique, descarte ou cancele.
 Select save	Selecionar save
 None	Nenhum
 Current	Atual
 Modified	Modificado
 Characters	Personagens
 DATA slot	Slot DATA
-The three DATA records inside SAVE0.DAT. Gold belongs to the DATA slot, not to a character.	Os tres registros DATA dentro do SAVE0.DAT. O ouro pertence ao slot DATA, nao a um personagem.
-The gold of this DATA slot, up to 99,999,999.	O ouro deste slot DATA, ate 99.999.999.
+The three DATA records inside SAVE0.DAT. Gold belongs to the DATA slot, not to a character.	Os três registros DATA dentro do SAVE0.DAT. O ouro pertence ao slot DATA, não a um personagem.
+The gold of this DATA slot, up to 99,999,999.	O ouro deste slot DATA, até 99.999.999.
 Import and Backup	Importar e backup
 Select a Dragon's Crown save	Selecione um save de Dragon's Crown
 Save files	Arquivos de save
-Import rejected	Importacao recusada
+Import rejected	Importação recusada
 unknown error	erro desconhecido
 Import folder	Importar pasta
 Import folder...	Importar pasta...
 Select a savedata folder	Selecione uma pasta de savedata
 Detected source	Origem detectada
 Destination	Destino
-Confirm Import	Confirmar importacao
+Confirm Import	Confirmar importação
 Select a save first.	Selecione um save primeiro.
-Import failed	Falha na importacao
+Import failed	Falha na importação
 Save imported.	Save importado.
 Create backup	Criar backup
 Copy this save into the backup folder, dated and never overwritten.	Copia este save para a pasta de backup, com data e sem sobrescrever.
 Backup created.	Backup criado.
-Could not create the backup.	Nao foi possivel criar o backup.
+Could not create the backup.	Não foi possível criar o backup.
 Open backup folder	Abrir pasta de backup
-Backups are stored in the user folder, under save_backups.	Os backups ficam na pasta do usuario, em save_backups.
+Backups are stored in the user folder, under save_backups.	Os backups ficam na pasta do usuário, em save_backups.
 Restore	Restaurar
 No backups yet.	Nenhum backup ainda.
 Restore backup	Restaurar backup
@@ -882,30 +882,30 @@ Restore failed	Falha ao restaurar
 Backup restored.	Backup restaurado.
 Select a save and DATA slot first.	Selecione um save e um slot DATA primeiro.
 Selecting a character never writes to the save.	Selecionar um personagem nunca grava no save.
-Select a character to edit it. Nothing is written until Apply Changes.	Selecione um personagem para editar. Nada e gravado ate Aplicar alteracoes.
+Select a character to edit it. Nothing is written until Apply Changes.	Selecione um personagem para editar. Nada é gravado até Aplicar alterações.
 Back to Characters	Voltar aos personagens
-Lv	Nv
+Lv	NV
 Choose a character	Escolha um personagem
 No character selected.	Nenhum personagem selecionado.
 Name	Nome
 Class	Classe
 Slot	Slot
 Character Editor	Editor de personagem
-The character's name, up to 8 letters.	O nome do personagem, ate 8 letras.
-Level	Nivel
-Skill Points	Pontos de habilidade
-Skill points available to spend.	Pontos de habilidade disponiveis para gastar.
+The character's name, up to 8 letters.	O nome do personagem, até 8 letras.
+Level	Nível
+Skill Points	Pontos de Habilidade
+Skill points available to spend.	Pontos de habilidade disponíveis para gastar.
 Gold belongs to this save data	Ouro pertence a este save
-Stats	Atributos
+Stats	Status
 Current HP	HP atual
-Current hit points; at most the maximum.	Pontos de vida atuais; no maximo o maximo.
-Maximum hit points.	Pontos de vida maximos.
-STR (Strength)	STR (Força)
+Current hit points; at most the maximum.	Pontos de vida atuais; no máximo igual ao máximo.
+Maximum hit points.	Pontos de vida máximos.
+STR (Strength)	FOR (Força)
 CON (Constitution)	CON (Constituição)
-DEX (Dexterity)	DEX (Destreza)
+DEX (Dexterity)	DES (Destreza)
 INT (Intelligence)	INT (Inteligência)
-MGR (Magic Resistance)	MGR (Resistência Mágica)
-LUC (Luck)	LUC (Sorte)
+MGR (Magic Resistance)	RM (Resistência Mágica)
+LUC (Luck)	SOR (Sorte)
 Could not write the character stats; nothing was applied.	Não foi possível gravar os atributos do personagem; nada foi aplicado.
 Difficulty	Dificuldade
 Difficulty belongs to this character and can be changed here	A dificuldade pertence a este personagem e pode ser alterada aqui
@@ -915,29 +915,29 @@ Infernal	Infernal
 Ultimate	Supremo
 Select a character first.	Selecione um personagem primeiro.
 Owned by	Pertence a
-Difficulty, story progress, the Labyrinth of Chaos and the Tower of Mirages are shown as they become proven. Gold is edited under Save; it belongs to the DATA slot.	Dificuldade, progresso da historia, o Labirinto do Caos e a Torre de Miragens aparecem quando forem comprovados. O ouro e editado em Save; pertence ao slot DATA.
-Equipment and inventory are read-only in this version. Editing them safely needs the full item-record layout, which is not yet proven.	Equipamento e inventario sao somente leitura nesta versao. Editar com seguranca exige o layout completo dos itens, ainda nao comprovado.
-The changes are not valid and were not saved.	As alteracoes nao sao validas e nao foram salvas.
-Could not create a backup; the save was not changed.	Nao foi possivel criar um backup; o save nao foi alterado.
-Could not write the save; the original was left untouched.	Nao foi possivel gravar o save; o original foi mantido intacto.
-Changes applied.	Alteracoes aplicadas.
-Changes discarded.	Alteracoes descartadas.
+Difficulty, story progress, the Labyrinth of Chaos and the Tower of Mirages are shown as they become proven. Gold is edited under Save; it belongs to the DATA slot.	Dificuldade, progresso da história, o Labirinto do Caos e a Torre de Miragens aparecem quando forem comprovados. O ouro é editado em Save; pertence ao slot DATA.
+Equipment and inventory are read-only in this version. Editing them safely needs the full item-record layout, which is not yet proven.	Equipamento e inventário são somente leitura nesta versão. Editar com segurança exige o layout completo dos itens, ainda não comprovado.
+The changes are not valid and were not saved.	As alterações não são válidas e não foram salvas.
+Could not create a backup; the save was not changed.	Não foi possível criar um backup; o save não foi alterado.
+Could not write the save; the original was left untouched.	Não foi possível gravar o save; o original foi mantido intacto.
+Changes applied.	Alterações aplicadas.
+Changes discarded.	Alterações descartadas.
 Fighter	Guerreiro
 Amazon	Amazona
-Elf	Elfo
-Dwarf	Anao
+Elf	Elfa
+Dwarf	Anão
 Wizard	Mago
 Sorceress	Feiticeira
-Discard Changes	Descartar alteracoes
-The Editor has unapplied changes. Use Apply Changes or Discard Changes on the Editor page first.	O Editor tem alteracoes nao aplicadas. Use Aplicar alteracoes ou Descartar alteracoes na pagina Editor primeiro.
-Asset unavailable	Arte indisponivel
+Discard Changes	Descartar alterações
+The Editor has unapplied changes. Use Apply Changes or Discard Changes on the Editor page first.	O Editor tem alterações não aplicadas. Use Aplicar alterações ou Descartar alterações na página Editor primeiro.
+Asset unavailable	Arte indisponível
 Reset Part	Restaurar parte
-Hiding it can show areas the game never paints.	Esconder pode mostrar areas que o jogo nunca pinta.
-Saved custom looks could not be read.	Nao foi possivel ler as aparencias personalizadas salvas.
+Hiding it can show areas the game never paints.	Esconder pode mostrar áreas que o jogo nunca pinta.
+Saved custom looks could not be read.	Não foi possível ler as aparências personalizadas salvas.
 Armor	Armadura
 Engraved Trim	Acabamento gravado
-Crest	Brasao
-Crest Accent	Detalhe do brasao
+Crest	Brasão
+Crest Accent	Detalhe do brasão
 Face	Rosto
 Hood	Capuz
 Horns	Chifres
@@ -952,43 +952,44 @@ Staff	Cajado
 Eyes	Olhos
 Bust Lace	Renda do busto
 Sleeve Frills	Babados das mangas
-Random	Aleatoria
-All Colors Random	Todas as cores aleatorias
-Gives every part a new color; visibility and the base color stay.	Da uma cor nova a cada parte; a visibilidade e a cor base ficam.
+Random	Aleatório
+All Colors Random	Todas as cores aleatórias
+Gives every part a new color; visibility and the base color stay.	Dá uma cor nova a cada parte; a visibilidade e a cor base ficam.
 Leather	Couro
 Skin	Pele
 Boots & Gauntlets	Botas e manoplas
-Bikini	Biquini
+Bikini	Biquíni
 Hood & Cape	Capuz e capa
-Tunic	Tunica
+Tunic	Túnica
 Collar	Gola
 Shorts	Shorts
-Laces & Trim	Cadarcos e acabamento
+Laces & Trim	Cadarços e acabamento
 Quiver	Aljava
 Arrows	Flechas
 Boots	Botas
-Accessories	Acessorios
+Accessories	Acessórios
 Beard	Barba
 Cape	Capa curta
 Helmet	Elmo
 Wrist Guards	Braceletes
 Belt	Cinto
 Dress	Vestido
-Hat	Chapeu
+Hat	Chapéu
 Bodice	Corpete
 Eye	Olho
-Hat Band	Faixa do chapeu
+Hat Band	Faixa do chapéu
 Robe	Manto
-Trousers	Calcas
+Trousers	Calças
 Pendant	Pingente
 Gloves	Luvas
-Compatible with PS4, PS3 and PS Vita saves.	Compativel com saves de PS4, PS3 e PS Vita.
+Compatible with PS4, PS3 and PS Vita saves.	Compatível com saves de PS4, PS3 e PS Vita.
 Import a complete save folder.	Importa uma pasta de save completa.
 Base Color	Cor base
-The native color the custom changes are drawn over.	A cor nativa sobre a qual as mudancas personalizadas sao desenhadas.
+Color	Cor
+The native color the custom changes are drawn over.	A cor nativa sobre a qual as mudanças personalizadas são desenhadas.
 Selected Part	Parte selecionada
 Click the character, or choose a part here.	Clique no personagem ou escolha uma parte aqui.
-Recolors the part and keeps its painted shading.	Muda a cor da parte e mantem o sombreado pintado.
+Recolors the part and keeps its painted shading.	Muda a cor da parte e mantém o sombreado pintado.
 Visibility	Visibilidade
 Part Visibility	Visibilidade da parte
 Part Color	Cor da parte
@@ -1019,45 +1020,45 @@ This save could not be loaded.	Não foi possível carregar este save.
 Unable to load appearance	Não foi possível carregar a aparência
 Back to Character Editor	Voltar ao editor de personagem
 Reset Custom	Restaurar personalizado
-Removes every custom change and shows the base color again.	Remove todas as mudancas personalizadas e volta a mostrar a cor base.
-Remove every custom change of this character?	Remover todas as mudancas personalizadas deste personagem?
-Remove changes	Remover mudancas
-Keep changes	Manter mudancas
-Could not write the custom appearance; nothing was applied.	Nao foi possivel gravar a aparencia personalizada; nada foi aplicado.
+Removes every custom change and shows the base color again.	Remove todas as mudanças personalizadas e volta a mostrar a cor base.
+Remove every custom change of this character?	Remover todas as mudanças personalizadas deste personagem?
+Remove changes	Remover mudanças
+Keep changes	Manter mudanças
+Could not write the custom appearance; nothing was applied.	Não foi possível gravar a aparência personalizada; nada foi aplicado.
 Hair	Cabelo
 Tattoo	Tatuagem
 Feather	Pena
 bytes	bytes
-Valid	Valido
+Valid	Válido
 Missing	Ausente
-Different version	Versao diferente
+Different version	Versão diferente
 Read error	Erro de leitura
 Writes SAVE0.DAT after making a backup.	Grava o SAVE0.DAT depois de fazer um backup.
 Restores the saved values.	Restaura os valores salvos.
-Apply or discard the pending changes first.	Aplique ou descarte as alteracoes pendentes primeiro.
-No installed game build was found. Install the game first; every title's saves are listed below.	Nenhuma build instalada do jogo foi encontrada. Instale o jogo primeiro; os saves de todos os titulos aparecem abaixo.
-Apply or discard the pending changes to switch build.	Aplique ou descarte as alteracoes pendentes para trocar de build.
-Version	Versao
+Apply or discard the pending changes first.	Aplique ou descarte as alterações pendentes primeiro.
+No installed game build was found. Install the game first; every title's saves are listed below.	Nenhuma build instalada do jogo foi encontrada. Instale o jogo primeiro; os saves de todos os títulos aparecem abaixo.
+Apply or discard the pending changes to switch build.	Aplique ou descarte as alterações pendentes para trocar de build.
+Version	Versão
 Prepared image	Imagem preparada
 Language archive	Arquivo de idioma
-Executable	Executavel
-No save was found for this build's title. Start the game once, or import a save below.	Nenhum save foi encontrado para o titulo desta build. Inicie o jogo uma vez ou importe um save abaixo.
-Saves of this build's title. SAVEDATA00 is the folder the game keeps SAVE0.DAT in.	Saves do titulo desta build. SAVEDATA00 e a pasta onde o jogo guarda o SAVE0.DAT.
+Executable	Executável
+No save was found for this build's title. Start the game once, or import a save below.	Nenhum save foi encontrado para o título desta build. Inicie o jogo uma vez ou importe um save abaixo.
+Saves of this build's title. SAVEDATA00 is the folder the game keeps SAVE0.DAT in.	Saves do título desta build. SAVEDATA00 é a pasta onde o jogo guarda o SAVE0.DAT.
 Save path	Caminho do save
 Savedata folder	Pasta savedata
 CRC32	CRC32
 SAVE0.DAT size	Tamanho do SAVE0.DAT
-This save is not valid. Restore a backup or import a save below.	Este save nao e valido. Restaure um backup ou importe um save abaixo.
+This save is not valid. Restore a backup or import a save below.	Este save não é válido. Restaure um backup ou importe um save abaixo.
 DATA Slot	Slot DATA
-DATA 1 to 3 are the three records inside SAVE0.DAT. They are not the SAVEDATA folders.	DATA 1 a 3 sao os tres registros dentro do SAVE0.DAT. Nao sao as pastas SAVEDATA.
-Gold belongs to the DATA slot, not to a character.	O ouro pertence ao slot DATA, nao a um personagem.
+DATA 1 to 3 are the three records inside SAVE0.DAT. They are not the SAVEDATA folders.	DATA 1 a 3 são os três registros dentro do SAVE0.DAT. Não são as pastas SAVEDATA.
+Gold belongs to the DATA slot, not to a character.	O ouro pertence ao slot DATA, não a um personagem.
 Primary character	Personagem principal
 DATA slots	Slots DATA
-Invalid appearance value	Valor de aparencia invalido
-A character has an invalid appearance value. Pick a color for it, then Apply Changes.	Um personagem tem um valor de aparencia invalido. Escolha uma cor para ele e depois use Aplicar alteracoes.
-The preview draws the default weapon, not the equipped one.	A previa mostra a arma padrao, nao a equipada.
-Each class is painted in five colors. A color changes hair, skin, clothing and armor together; it is the same color the game's Edit character screen sets.	Cada classe tem cinco cores. Uma cor muda cabelo, pele, roupa e armadura juntos; e a mesma cor que a tela Editar personagem do jogo define.
-Character art unavailable	Arte do personagem indisponivel
+Invalid appearance value	Valor de aparência inválido
+A character has an invalid appearance value. Pick a color for it, then Apply Changes.	Um personagem tem um valor de aparência inválido. Escolha uma cor para ele e depois use Aplicar alterações.
+The preview draws the default weapon, not the equipped one.	A prévia mostra a arma padrão, não a equipada.
+Each class is painted in five colors. A color changes hair, skin, clothing and armor together; it is the same color the game's Edit character screen sets.	Cada classe tem cinco cores. Uma cor muda cabelo, pele, roupa e armadura juntos; é a mesma cor que a tela Editar personagem do jogo define.
+Character art unavailable	Arte do personagem indisponível
 Saves	Saves
 Your SAVE0.DAT files: overview, backups, export, import and restore.	Seus arquivos SAVE0.DAT: visão geral, backups, exportação, importação e restauração.
 Characters, appearance and inventory.	Personagens, aparência e inventário.
@@ -1219,7 +1220,7 @@ Durability	Durabilidade
 All	Todos
 Attack min	Ataque mín.
 Attack max	Ataque máx.
-Rank	Rank
+Rank	Ranque
 Loading inventory...	Carregando inventário...
 This character and DATA slot have no items.	Este personagem e este slot DATA não têm itens.
 Required level	Nível necessário
@@ -1237,6 +1238,14 @@ This item cannot be changed.	Este item não pode ser alterado.
 An inventory change is not valid and was not saved.	Uma alteração de inventário não é válida e não foi salva.
 Unknown item %s	Item desconhecido %s
 Unknown modifier %s	Modificador desconhecido %s
+Special item (%s)	Item especial (%s)
+Show	Mostrar
+Save archive (ZIP, RAR)	Arquivo compactado (ZIP, RAR)
+Japan	Japão
+Europe	Europa
+Asia	Ásia
+Asia/Hong Kong	Ásia/Hong Kong
+Korea	Coreia
 The current HP cannot be higher than the maximum HP.	O HP atual não pode ser maior que o HP máximo.
 Max durability	Durabilidade máxima
 Category	Categoria
@@ -1244,7 +1253,7 @@ Weapons / Shields	Armas / Escudos
 Search items...	Pesquisar itens...
 Search	Pesquisar
 Sort	Ordenar
-Equipment level	Nível do equipamento
+Equipment level	Nível do Equipamento
 Bag	Bolsa
 This category has no items.	Esta categoria não tem itens.
 No items match the search.	Nenhum item corresponde à pesquisa.

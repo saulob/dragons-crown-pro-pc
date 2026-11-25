@@ -1,9 +1,11 @@
 #include "item_catalog.h"
 
 #include <array>
+#include <cctype>
 #include <cstdio>
 
 #include "character_art.h"
+#include "game_profile.h"
 #include "inventory_data.h"
 #include "modifier_values.h"
 
@@ -256,13 +258,23 @@ std::string CleanEffectText(std::string text) {
     return TrimText(std::move(out));
 }
 
-std::string ModifierName(const std::string& text) {
+namespace {
+
+bool SentenceContinues(const std::string& text, size_t at) {
+    while (at < text.size() && text[at] == ' ') ++at;
+    return at < text.size() && (static_cast<unsigned char>(text[at]) >= 0x80 || std::isalpha(static_cast<unsigned char>(text[at])));
+}
+
+} // namespace
+
+std::string ModifierName(const std::string& text, bool mark_value_gaps) {
     std::string out;
     for (size_t i = 0; i < text.size();) {
         if (text[i] == '?') {
             while (!out.empty() && (out.back() == '+' || out.back() == '-')) out.pop_back();
             ++i;
             if (i < text.size() && text[i] == '%') ++i;
+            if (mark_value_gaps && !TrimText(out).empty() && SentenceContinues(text, i)) out += " ... ";
             continue;
         }
         out += text[i++];
@@ -276,14 +288,29 @@ std::string ModifierName(const std::string& text) {
     return TrimText(std::move(collapsed));
 }
 
-ItemCatalog::ItemCatalog(std::vector<std::string> items, std::vector<std::string> effects, std::vector<std::string> words)
-    : items_(std::move(items)), effects_(std::move(effects)), words_(std::move(words)) {}
+ItemCatalog::ItemCatalog(std::vector<std::string> items, std::vector<std::string> effects, std::vector<std::string> words,
+                         bool mark_value_gaps)
+    : items_(std::move(items)), effects_(std::move(effects)), words_(std::move(words)), mark_value_gaps_(mark_value_gaps) {}
+
+void ItemCatalog::SetEnglish(ItemCatalog english) { english_ = std::make_shared<const ItemCatalog>(std::move(english)); }
 
 std::vector<std::string> NameWords(const std::vector<std::string>& system_messages) {
     constexpr size_t kFirstWord = 1485;
     std::vector<std::string> words;
     for (size_t i = 0; i < size_t(kNameWordCount) && kFirstWord + i < system_messages.size(); ++i) words.push_back(system_messages[kFirstWord + i]);
     return words;
+}
+
+ItemCatalog LoadItemCatalog(CharacterArt& art, const std::string& suffix, const std::string& translation) {
+    const auto read = [&](const std::string& shown) {
+        return ItemCatalog(art.TranslatedSheet("ItemList", suffix, shown), art.TranslatedSheet("CustomItem", suffix, shown),
+                           NameWords(art.TranslatedSheet("SystemMsg", suffix, shown)), shown == kPortPortugueseBrazil);
+    };
+    ItemCatalog catalog = read(translation);
+    if (!translation.empty() && art.sources().translation) {
+        catalog.SetEnglish(read(art.sources().translation->source.empty() ? std::string() : std::string(kPortEnglish)));
+    }
+    return catalog;
 }
 
 std::string ItemCatalog::Word(uint8_t index) const { return index < words_.size() ? TrimText(words_[index]) : std::string(); }
@@ -326,7 +353,7 @@ EffectText ItemCatalog::Effect(uint16_t id) const {
     if (!index || *index >= effects_.size()) return {};
     std::string text = CleanEffectText(effects_[*index]);
     if (text.empty()) return {};
-    std::string name = ModifierName(text);
+    std::string name = ModifierName(text, mark_value_gaps_);
     const bool has_value = text.find('?') != std::string::npos;
     return {std::move(text), std::move(name), PercentAfterValue(effects_[*index], ModifierSpecOf(id)->slot), has_value, true};
 }

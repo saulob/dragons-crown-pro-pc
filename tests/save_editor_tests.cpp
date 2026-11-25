@@ -51,6 +51,7 @@
 #include "game_profile.h"
 #include "game_texture.h"
 #include "localization/ui_text.h"
+#include "project_sheets.h"
 #include "save_backup.h"
 #include "save_data.h"
 #include "save_discovery.h"
@@ -755,6 +756,20 @@ void TestRealArt(const fs::path& source_dir) {
         CHECK(art.ColorName(klass, kNativeColorCount, "US").empty());
     }
     CHECK(rendered == 30);
+
+    // Portuguese (Brazil) shows the translation's own colour names; English and the other slots are unchanged.
+    CharacterArtSources translated_sources = ArtSourcesOf(app0, "DRACRO_US.CPK");
+    for (const GameBuild& build : SupportedBuilds()) {
+        if (!translated_sources.translation && build.translation->source.empty()) translated_sources.translation = build.translation;
+    }
+    CharacterArt translated(translated_sources);
+    const char* const dwarf_portuguese[] = {"Branco Marfim", "Vermelho Carmesim", "Ébano Escuro", "Marrom Cedro", "Amarelo Âmbar"};
+    for (int color = 0; color < kNativeColorCount; ++color) {
+        CHECK(translated.ColorName(CharacterClass::kDwarf, color, "US", "pt-BR") == dwarf_portuguese[color]);
+        CHECK(translated.ColorName(CharacterClass::kDwarf, color, "US") == names[int(CharacterClass::kDwarf)][color]);
+        CHECK(translated.ColorName(CharacterClass::kDwarf, color, "FR", "pt-BR") == translated.ColorName(CharacterClass::kDwarf, color, "FR")); // another slot keeps its text
+    }
+    CHECK(translated.ColorName(CharacterClass::kDwarf, kNativeColorCount, "US", "pt-BR").empty());
 
     CHECK(art.ColorName(CharacterClass::kAmazon, 0, "FR") == "Blond platine");
     CHECK(art.ColorName(CharacterClass::kAmazon, 0, "ES") == "Rubio platino");
@@ -3361,12 +3376,12 @@ void TestEditorFixedLayout() {
     const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
     CHECK(portuguese.find("stored value is level minus one") == std::string::npos);
     for (const char* text : {"\nGold\tOuro\n", "\nGold belongs to this save data\tOuro pertence a este save\n",
-                             "\nStats\tAtributos\n", "\nSTR (Strength)\tSTR (For\xC3\xA7" "a)\n",
+                             "\nStats\tStatus\n", "\nSTR (Strength)\tFOR (For\xC3\xA7" "a)\n",
                              "\nCON (Constitution)\tCON (Constitui\xC3\xA7\xC3\xA3" "o)\n",
-                             "\nDEX (Dexterity)\tDEX (Destreza)\n",
+                             "\nDEX (Dexterity)\tDES (Destreza)\n",
                              "\nINT (Intelligence)\tINT (Intelig\xC3\xAAncia)\n",
-                             "\nMGR (Magic Resistance)\tMGR (Resist\xC3\xAAncia M\xC3\xA1gica)\n",
-                             "\nLUC (Luck)\tLUC (Sorte)\n"}) {
+                             "\nMGR (Magic Resistance)\tRM (Resist\xC3\xAAncia M\xC3\xA1gica)\n",
+                             "\nLUC (Luck)\tSOR (Sorte)\n"}) {
         CHECK(portuguese.find(text) != std::string::npos);
     }
     CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
@@ -7966,6 +7981,79 @@ void TestSaveProfiles(const fs::path& base, const fs::path& source) {
     }
 }
 
+// The Appearance page's colour names come out of the archive the Editor reads, in the language the launcher shows: a
+// synthetic USA archive holding the project's English SystemMsg, with the Portuguese (Brazil) translation laid over it.
+std::string SystemMsgSheet(const std::vector<std::string>& records) {
+    std::string out("FMSB\0\0\0\0", 8);
+    cpk_build::Le32(out, 0x20);
+    out += std::string(8, '\0');
+    cpk_build::Le32(out, uint32_t(records.size()));
+    out += '\x03';
+    out += std::string(7 + records.size() * 8, '\0');
+    for (const std::string& record : records) out += record + '\0';
+    out.resize((out.size() + 15) / 16 * 16, '\0');
+    const uint32_t size = uint32_t(out.size() - 0x20);
+    for (int i = 0; i < 4; ++i) out[size_t(4 + i)] = char(size >> (8 * i));
+    return out + "FEOC" + std::string(12, '\0');
+}
+
+void TestPortugueseColorNames(const fs::path& base, const fs::path& source) {
+    if (source.empty() || !project_sheets::Present(source, {"SystemMsg"})) {
+        std::printf("localization sheets not present, skipping the Portuguese colour names\n");
+        return;
+    }
+    const GameBuild* usa = nullptr;
+    for (const GameBuild& build : SupportedBuilds()) {
+        if (!usa && build.translation && build.translation->source.empty()) usa = &build;
+    }
+    CHECK(usa != nullptr);
+    if (!usa) return;
+    const project_sheets::Sheet system = project_sheets::Load(source, "SystemMsg");
+    const std::string sheet = SystemMsgSheet(system.english);
+    const std::string archive = cpk_build::BuildCpkWith({{"msgsheet/SystemMsg_US.fms", sheet}});
+    const fs::path folder = base / "pt_colors";
+    fs::create_directories(folder);
+    WriteBytes(folder / "DRACRO_US.CPK", std::vector<uint8_t>(archive.begin(), archive.end()));
+    CharacterArtSources sources;
+    sources.archives = {folder / "DRACRO_US.CPK"};
+    sources.translation = usa->translation;
+    CharacterArt art(sources);
+    const std::string pt(kPortPortugueseBrazil);
+
+    const char* const dwarf[] = {"Branco Marfim", "Vermelho Carmesim", "Ébano Escuro", "Marrom Cedro", "Amarelo Âmbar"};
+    const auto trimmed = [](std::string text) {
+        while (!text.empty() && text.back() == ' ') text.pop_back();
+        return text;
+    };
+    for (const CharacterClass klass : kCharacterClasses) {
+        for (int color = 0; color < kNativeColorCount; ++color) {
+            const size_t id = size_t(NativeColorMessage(klass, color));
+            const std::string english = trimmed(system.english[id]);
+            const std::string portuguese = trimmed(project_sheets::Text(system, id));
+            CHECK(!english.empty() && !portuguese.empty() && english != portuguese);
+            CHECK(art.ColorName(klass, color, "US") == english);                       // English stays as installed
+            CHECK(art.ColorName(klass, color, "US", pt) == portuguese);               // the game's own Portuguese name
+            CHECK(art.ColorName(klass, color, "US", "ko") == english);                // another port language is not laid over it
+            CHECK(art.ColorName(klass, color, "US") == english);                      // and Portuguese left no state behind
+            CHECK(art.ColorName(klass, color, "", pt) == portuguese);                  // the unsuffixed lookup falls back to the USA sheet
+            if (klass == CharacterClass::kDwarf) CHECK(portuguese == dwarf[color]);
+        }
+    }
+    CHECK(art.ColorName(CharacterClass::kDwarf, kNativeColorCount, "US", pt).empty() && art.ColorName(CharacterClass::kDwarf, -1, "US", pt).empty());
+
+    // No translation profile: the sheets stay as installed whatever language is asked for.
+    CharacterArtSources plain;
+    plain.archives = sources.archives;
+    CharacterArt untranslated(plain);
+    CHECK(untranslated.ColorName(CharacterClass::kDwarf, 0, "US", pt) == "Ivory White");
+
+    // Colour indices and the saved appearance are not part of the name: the same value picks the same preset in both languages.
+    for (int color = 0; color < kNativeColorCount; ++color) {
+        CHECK(NativeColorMessage(CharacterClass::kDwarf, color) == 881 + color);
+        CHECK(NativeColorAtlas(CharacterClass::kDwarf, color) == "PLAYER/DWARF0" + std::to_string(color) + ".FTX");
+    }
+}
+
 struct EditorGroup {
     const char* name;
     bool needs_game;
@@ -8043,6 +8131,7 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestNativeColor();
              TestBc7Encode();
          }},
+        {"editor-localization", false, [&] { TestPortugueseColorNames(base, source); }},
         {"editor-ui-model", false,
          [] {
              TestAppearanceUx();
@@ -8140,6 +8229,8 @@ int main(int argc, char** argv) {
     std::set<std::string> selected;
     if (mode == "appearance-translation") {
         selected = {"appearance-translation"};
+    } else if (mode == "localization") {
+        selected = {"editor-localization"};
     } else if (mode == "release") {
         for (const EditorGroup& group : EditorGroups(base, source)) selected.insert(group.name);
     } else if (mode == "quick") {
@@ -8148,7 +8239,7 @@ int main(int argc, char** argv) {
             if (!group.needs_game) selected.insert(group.name);
         }
     } else if (mode != "all") {
-        std::printf("usage: dcp-save-editor-tests [all | release | quick | appearance-translation [synthetic]]\n");
+        std::printf("usage: dcp-save-editor-tests [all | release | quick | localization | appearance-translation [synthetic]]\n");
         return 2;
     }
     RunEditorGroups(base, source, selected, mode);

@@ -91,6 +91,12 @@ struct TranslationRecipe {
     const TranslationFile* hangul_glyphs = nullptr;   // and the syllables
 };
 
+// The records of `sheet` as the game shows them in the port's `translation` (pt-BR, or en on a slot not in English): the slot's
+// `native` records with every translated record the overlay would accept. The other records, other languages and an
+// unreadable translation leave `native` as it is.
+std::vector<std::string> TranslatedSheetRecords(std::string_view translation, const TranslationProfile& profile,
+                                                std::string_view sheet, std::vector<std::string> native);
+
 ArchiveTranslation TranslateArchive(const std::filesystem::path& archive, const TranslationRecipe& recipe);
 ArchiveTranslation TranslateArchive(const std::filesystem::path& archive, std::string_view suffix,
                                     std::span<const TranslationFile> files,

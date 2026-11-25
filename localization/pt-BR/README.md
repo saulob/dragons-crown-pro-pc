@@ -21,7 +21,10 @@ The Japanese and Asia/Hong Kong fonts have no accented letters. They are compose
 font (`launcher/latin_font.cpp`, `src/latin_glyphs.c`); see the Menu & Subtitles section of `docs/LAUNCHER.md`.
 
 The launcher UI, the F1 options, the F10 overlay and the online screens are translated in code
-(`launcher/localization/`). The translation is based on the work of Marcelo - Uma Ficha, used with permission.
+(`launcher/localization/`). The Editor's item names, modifier texts and appearance colours are not copied there: they are
+read from these sheets (`ItemList`, `CustomItem`, `SystemMsg`), and the class, difficulty and stat terms of the launcher's
+own table follow the game's records (`dcp-launcher-tests ptbr-editor` compares them). The translation is based on the work
+of Marcelo - Uma Ficha, used with permission.
 
 DefaultBone holds the 366 character message records (1635-1640 and the 15 variants of each class and category
 in 1641-2048); names and the blocks' markers stay the game's own. Each line keeps at most 30 UTF-16 units, the

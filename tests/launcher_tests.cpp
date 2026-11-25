@@ -69,11 +69,14 @@
 #include "home_community.h"
 #include "home_portraits.h"
 #include "home_stats.h"
+#include "appearance_custom.h"
 #include "localization/ui_text.h"
+#include "save_data.h"
 #include <zlib.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include "net/identity.h"
+#include "project_sheets.h"
 #include "net/online_config.h"
 #include "net/online_version.h"
 #include "online_client.h"
@@ -11376,6 +11379,146 @@ void TestLauncherLocalization() {
     SetActiveLanguage("english");
 }
 
+// The Portuguese (Brazil) text of the Editor pages: accents, the game's own terms, and the source's Tr literals.
+std::map<size_t, std::string> ProjectPtBrMessages(const char* sheet) {
+    return project_sheets::Entries(fs::path(DCP_SOURCE_DIR) / "localization" / "pt-BR" / "sheets" / (std::string(sheet) + ".json"), "pt_br");
+}
+
+std::string WithoutTrailingSpaces(std::string text) {
+    while (!text.empty() && text.back() == ' ') text.pop_back();
+    return text;
+}
+
+std::vector<std::string> TrLiteralsOf(const std::string& text) {
+    std::vector<std::string> found;
+    for (size_t at = text.find("Tr(\""); at != std::string::npos; at = text.find("Tr(\"", at + 1)) {
+        if (at > 0 && (std::isalnum(static_cast<unsigned char>(text[at - 1])) || text[at - 1] == '_')) continue;
+        std::string literal;
+        size_t i = at + 3;
+        while (i < text.size() && text[i] == '"') {
+            ++i;
+            while (i < text.size() && text[i] != '"') {
+                if (text[i] == '\\' && i + 1 < text.size()) ++i;
+                literal += text[i++];
+            }
+            ++i;
+            while (i < text.size() && (text[i] == ' ' || text[i] == '\n')) ++i;
+        }
+        found.push_back(literal);
+    }
+    return found;
+}
+
+void TestPtBrEditorText() {
+    using namespace localization;
+    const UiTextTable& table = PortugueseBrazilUiText();
+    CHECK(table.errors.empty());
+
+    // Portuguese is written with its accents: no row holds a word in its ASCII-only spelling.
+    static const std::set<std::string> kAsciiSpellings = {
+        "nao", "sao", "voce", "alteracoes", "alteracao", "mudancas", "mudanca", "aparencia", "aparencias", "pagina", "paginas",
+        "versao", "versoes", "nivel", "niveis", "possivel", "valido", "validos", "invalido", "invalida", "invalidos", "inventario",
+        "importacao", "exportacao", "configuracoes", "configuracao", "opcoes", "opcao", "seguranca", "historia", "titulo",
+        "titulos", "executavel", "usuario", "usuarios", "padrao", "previa", "tunica", "calcas", "chapeu", "biquini", "cadarcos",
+        "brasao", "acessorios", "aleatoria", "aleatorio", "anao", "compativel", "disponivel", "disponiveis", "indisponivel",
+        "descricao", "informacao", "atencao", "conexao", "ultima", "ultimo", "proximo", "unico", "minimo", "maximo", "tres",
+        "ate", "tambem", "numero", "codigo", "area", "areas", "memoria", "instalacao", "atualizacao", "restauracao", "selecao",
+        "excecao", "gravacao", "duracao", "pontuacao", "operacao", "funcao", "acao", "acoes", "indice", "periodo", "tecnico",
+        "basico", "grafico", "graficos", "aplicacao", "diretorio", "relatorio", "relatorios", "navegacao", "resolucao"};
+    for (const UiTextRow& row : table.rows) {
+        std::string word;
+        const auto check_word = [&] {
+            std::string lower;
+            for (const char ch : word) lower += char(std::tolower(static_cast<unsigned char>(ch)));
+            if (kAsciiSpellings.contains(lower)) std::printf("ASCII-only Portuguese \"%s\" in \"%s\"\n", word.c_str(), row.text.c_str());
+            CHECK(!kAsciiSpellings.contains(lower));
+            word.clear();
+        };
+        for (const char ch : row.text) {
+            if (std::isalpha(static_cast<unsigned char>(ch))) word += ch;
+            else if (!word.empty()) check_word();
+        }
+        if (!word.empty()) check_word();
+    }
+
+    // The game's own terms are the game's own Portuguese records.
+    const std::map<size_t, std::string> system = ProjectPtBrMessages("SystemMsg");
+    CHECK(system.size() > 1000);
+    const auto game = [&](size_t index) {
+        const auto found = system.find(index);
+        return found == system.end() ? std::string("<missing>") : WithoutTrailingSpaces(found->second);
+    };
+    SetActiveLanguage(kPortugueseBrazilKey);
+    const std::pair<const char*, size_t> classes[] = {{"Fighter", 280}, {"Amazon", 281}, {"Elf", 282}, {"Dwarf", 283}, {"Sorceress", 284}, {"Wizard", 285}};
+    for (const auto& [english, index] : classes) {
+        CHECK(std::string(Tr(english)) == game(index));
+        CHECK(std::string(Tr(english)) == game(index + 188)); // the second list of class names
+    }
+    CHECK(std::string(Tr("Elf")) == "Elfa" && std::string(Tr("Dwarf")) == "Anão");
+    const std::pair<const char*, size_t> terms[] = {
+        {"Normal", 226}, {"Hard", 227}, {"Infernal", 229}, {"Ultimate", 231}, {"Bag", 301}, {"Equipment", 305}, {"Items", 560},
+        {"Accessories", 562}, {"Durability", 621}, {"Rank", 616}, {"Equipment level", 773}, {"Level", 1022}, {"Gold", 1079},
+        {"Lv", 69}, {"Stats", 1223}, {"Character", 68}, {"None", 569}, {"Random", 1163}, {"Boots", 577}, {"Gloves", 579},
+        {"Belt", 574}, {"Shield", 583}, {"Sword", 582}};
+    for (const auto& [english, index] : terms) {
+        if (std::string(Tr(english)) != game(index)) std::printf("\"%s\" is \"%s\", the game has \"%s\"\n", english, Tr(english), game(index).c_str());
+        CHECK(std::string(Tr(english)) == game(index));
+    }
+    // The stats keep the abbreviations the game's status screen shows, spelled out after them.
+    const std::pair<const char*, size_t> stats[] = {{"STR (Strength)", 600}, {"DEX (Dexterity)", 602}, {"LUC (Luck)", 603}, {"MGR (Magic Resistance)", 605}};
+    for (const auto& [english, index] : stats) CHECK(std::string(Tr(english)).starts_with(game(index) + " ("));
+    CHECK(std::string(Tr("CON (Constitution)")).starts_with("CON (") && std::string(Tr("INT (Intelligence)")).starts_with("INT ("));
+    CHECK(std::string(Tr("Current HP")) == "HP atual" && std::string(Tr("Max HP")) == "HP máximo");
+    for (const char* label : {"Apply Changes", "Discard Changes", "Unsaved changes", "Base Color", "Selected Part", "Part Color", "Part Visibility",
+                              "Appearance", "Edit Appearance", "Edit Inventory", "Inventory Editor", "Required level", "Search items...", "Sort"}) {
+        CHECK(std::string(Tr(label)) != label);
+    }
+    CHECK(std::string(Tr("Apply Changes")) == "Aplicar alterações" && std::string(Tr("Discard Changes")) == "Descartar alterações");
+    CHECK(TrValue("Special item (SKILL_RESETITEM)") == "Item especial (SKILL_RESETITEM)" && TrValue("Unknown item 0x1a4") == "Item desconhecido 0x1a4");
+
+    // Switching between English and Portuguese follows the setting; the other languages show the launcher's English text.
+    for (const char* key : {"english", "korean", "russian", "japanese", "traditional_chinese"}) {
+        SetActiveLanguage(key);
+        CHECK(std::string(Tr("Apply Changes")) == "Apply Changes" && std::string(Tr("Dwarf")) == "Dwarf" && std::string(Tr("Rank")) == "Rank");
+    }
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(Tr("Dwarf")) == "Anão");
+    SetActiveLanguage("english");
+    CHECK(std::string(Tr("Dwarf")) == "Dwarf");
+
+    // Every text the Editor pages draw through Tr, and every appearance part, has a Portuguese row.
+    std::set<std::string> english;
+    for (const UiTextRow& row : table.rows) english.insert(row.english);
+    for (const char* file : {"launcher/editor_page.cpp", "launcher/editor_inventory.cpp", "launcher/editor_model.cpp", "launcher/save_page.cpp"}) {
+        const std::string text = ReadAll(fs::path(DCP_SOURCE_DIR) / file);
+        CHECK(!text.empty());
+        for (const std::string& literal : TrLiteralsOf(text)) {
+            if (!english.contains(literal)) std::printf("missing Portuguese text in %s: %s\n", file, literal.c_str());
+            CHECK(english.contains(literal));
+        }
+    }
+    size_t parts = 0;
+    for (const CharacterClass klass : kCharacterClasses) {
+        for (const CustomPart& part : CustomPartsOf(klass)) {
+            if (!english.contains(std::string(part.label))) std::printf("missing Portuguese part: %s\n", std::string(part.label).c_str());
+            CHECK(english.contains(std::string(part.label)));
+            ++parts;
+        }
+    }
+    CHECK(parts > 30);
+
+    // The Editor and the Inventory Editor take their sheets from the shared translated lookup, Portuguese only.
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    CHECK(launcher.find("language.translation == kPortPortugueseBrazil") != std::string::npos);
+    const std::string inventory = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "editor_inventory.cpp");
+    CHECK(inventory.find("LoadItemCatalog(art, language.suffix, language.translation)") != std::string::npos);
+    CHECK(inventory.find("language.suffix + \"|\" + language.translation") != std::string::npos);
+    CHECK(inventory.find("SortComboWidth(scale)") != std::string::npos && inventory.find("ImGui::SetTooltip(\"%s\", name.c_str())") != std::string::npos);
+    const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "editor_page.cpp");
+    CHECK(page.find("art_->ColorName(klass, color, language.suffix, language.translation)") != std::string::npos);
+    CHECK(page.find("sources.translation = build ? build->build->translation : nullptr;") != std::string::npos);
+}
+
 void TestFileDialogLabel() {
     using namespace localization;
     trg::SetTranslator(+[](const char* text) { return Tr(text); });
@@ -11539,6 +11682,13 @@ int main(int argc, char** argv) {
         std::printf("GROUP|launcher-korean|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "ptbr-editor") {
+        TestLauncherLocalization();
+        TestPtBrEditorText();
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-ptbr-editor|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "localization") {
         const fs::path base = fs::temp_directory_path() / ("dcp_launcher_l10n_" + std::to_string(getpid()));
         fs::remove_all(base);
@@ -11552,6 +11702,7 @@ int main(int argc, char** argv) {
         TestTranslationAcrossSlots(base);
         TestInGameUiText();
         TestLauncherLocalization();
+        TestPtBrEditorText();
         std::error_code ec;
         fs::remove_all(base, ec);
         std::printf("%d checks, %d failed\n", g_checks, g_failures);
@@ -11679,6 +11830,7 @@ int main(int argc, char** argv) {
     TestLegacyMarker(base);
     TestInstalledGameName(base);
     TestLauncherLocalization();
+    TestPtBrEditorText();
     TestFileDialogLabel();
     TestTextWithValues();
     TestActivation(base);

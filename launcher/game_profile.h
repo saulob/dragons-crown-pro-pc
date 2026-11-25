@@ -27,6 +27,7 @@ struct PackageLayer {
 inline constexpr std::string_view kPortugueseBrazilKey = "brazilian_portuguese";
 inline constexpr std::string_view kEnglishKey = "english";
 inline constexpr std::string_view kPortEnglish = "en"; // TextLanguage::translation of the port's English text
+inline constexpr std::string_view kPortPortugueseBrazil = "pt-BR";
 inline constexpr std::string_view kRussianKey = "russian";
 inline constexpr std::string_view kPortRussian = "ru";
 inline constexpr std::string_view kKoreanKey = "korean";

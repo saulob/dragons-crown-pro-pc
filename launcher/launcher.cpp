@@ -422,8 +422,10 @@ public:
         editor_page_ = std::make_unique<EditorPage>(
             host_, UserDir(), [this] { return EditorGame{RootsOf(paths_), build_}; },
             [this] {
-                return std::string(
-                    ResolveTextLanguage(text_languages_, settings_.Get(kTextLanguageKey, text_languages_.front().key)).suffix);
+                const TextLanguage& language =
+                    ResolveTextLanguage(text_languages_, settings_.Get(kTextLanguageKey, text_languages_.front().key));
+                const bool portuguese = language.translation == kPortPortugueseBrazil;
+                return EditorLanguage{std::string(language.suffix), portuguese ? std::string(language.translation) : std::string()};
             },
             &save_selection_);
         save_page_ = std::make_unique<SavePage>(UserDir(), save_selection_, SavePageHooks{
@@ -1007,9 +1009,9 @@ private:
         std::string picked;
         if (pick == SavePick::kImportPs4File) {
             picked = trg::BrowseForFile(Tr("Choose a SAVE0.DAT or an archive of a PS4 save"),
-                                        {{"Dragon's Crown save (SAVE0.DAT)", "SAVE0.DAT"}, {"Save archive (ZIP, RAR)", "*.zip;*.rar"}});
+                                        {{Tr("Dragon's Crown save (SAVE0.DAT)"), "SAVE0.DAT"}, {Tr("Save archive (ZIP, RAR)"), "*.zip;*.rar"}});
         } else if (pick == SavePick::kImportPs3File) {
-            picked = trg::BrowseForFile(Tr("Choose an archive of a PS3 save"), {{"Save archive (ZIP, RAR)", "*.zip;*.rar"}});
+            picked = trg::BrowseForFile(Tr("Choose an archive of a PS3 save"), {{Tr("Save archive (ZIP, RAR)"), "*.zip;*.rar"}});
         } else {
             picked = trg::BrowseForFolder(Tr(folder_title));
         }

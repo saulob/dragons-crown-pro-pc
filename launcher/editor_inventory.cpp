@@ -57,6 +57,17 @@ const char* SortLabel(InventorySort sort) {
     return "Rank";
 }
 
+std::string SortPreview(InventorySort sort) { return std::string(Tr("Sort")) + ": " + Tr(SortLabel(sort)); }
+
+// The sort box keeps its usual width, and grows when the longest "Sort: <mode>" text of the active language needs more.
+float SortComboWidth(float scale) {
+    float widest = 0.0f;
+    for (const InventorySort sort : {InventorySort::kName, InventorySort::kCategory, InventorySort::kLevel, InventorySort::kRank}) {
+        widest = std::max(widest, ImGui::CalcTextSize(SortPreview(sort).c_str()).x);
+    }
+    return std::max(190.0f * scale, widest + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f);
+}
+
 void PushItemId(const ItemRef& ref) {
     ImGui::PushID(ref.slot);
     ImGui::PushID(ref.character);
@@ -163,8 +174,8 @@ const ItemCatalog& EditorPage::Catalog() const { return catalog_; }
 // CharacterArt, and the future joins in the destructor, so the job never outlives the page.
 bool EditorPage::CatalogReady() {
     if (!art_) return true;
-    const std::string suffix = message_suffix_ ? message_suffix_() : std::string();
-    const std::string key = art_root_.string() + "|" + suffix;
+    const EditorLanguage language = language_ ? language_() : EditorLanguage{};
+    const std::string key = art_root_.string() + "|" + language.suffix + "|" + language.translation;
     if (key == catalog_key_) return true;
     if (catalog_job_.valid()) {
         if (catalog_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return false;
@@ -179,10 +190,9 @@ bool EditorPage::CatalogReady() {
         }
     }
     catalog_job_key_ = key;
-    catalog_job_ = std::async(std::launch::async, [sources = art_->sources(), suffix] {
+    catalog_job_ = std::async(std::launch::async, [sources = art_->sources(), language] {
         CharacterArt art(sources);
-        return ItemAssets{ItemCatalog(art.Sheet("ItemList", suffix), art.Sheet("CustomItem", suffix), NameWords(art.Sheet("SystemMsg", suffix))),
-                          LoadItemIcons(art)};
+        return ItemAssets{LoadItemCatalog(art, language.suffix, language.translation), LoadItemIcons(art)};
     });
     return false;
 }
@@ -241,12 +251,13 @@ void EditorPage::DrawInventory(trg::Ui& ui) {
         ImGui::EndCombo();
     }
     ImGui::SameLine(0.0f, gap);
-    ImGui::SetNextItemWidth(std::max(120.0f * scale, ImGui::GetContentRegionAvail().x - 190.0f * scale - gap));
+    const float sort_width = SortComboWidth(scale);
+    ImGui::SetNextItemWidth(std::max(120.0f * scale, ImGui::GetContentRegionAvail().x - sort_width - gap));
     ImGui::InputTextWithHint("##inventory_search", Tr("Search items..."), inventory_search_, sizeof(inventory_search_));
     inventory_query_.search = inventory_search_;
     ImGui::SameLine(0.0f, gap);
     ImGui::SetNextItemWidth(-FLT_MIN);
-    if (ImGui::BeginCombo("##inventory_sort", (std::string(Tr("Sort")) + ": " + Tr(SortLabel(inventory_query_.sort))).c_str())) {
+    if (ImGui::BeginCombo("##inventory_sort", SortPreview(inventory_query_.sort).c_str())) {
         for (const InventorySort sort : {InventorySort::kName, InventorySort::kCategory, InventorySort::kLevel, InventorySort::kRank}) {
             if (ImGui::Selectable(Tr(SortLabel(sort)), sort == inventory_query_.sort)) inventory_query_.sort = sort;
         }
@@ -280,6 +291,7 @@ void EditorPage::DrawInventoryList(trg::Ui& ui, const InventoryList& list, float
         PushItemId(row.ref);
         const bool is_selected = inventory_selection_.item && *inventory_selection_.item == row.ref;
         if (ImGui::Selectable("##row", is_selected, 0, ImVec2(0.0f, icon + pad * 2.0f))) inventory_selection_.Select(row.ref);
+        const bool hovered = ImGui::IsItemHovered();
         const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
         ImDrawList* draw = ImGui::GetWindowDrawList();
         DrawItemIcon(draw, ImVec2(min.x + pad, min.y + pad), icon, row.definition, row.category, ImGui::GetColorU32(ui.theme().dim));
@@ -290,6 +302,7 @@ void EditorPage::DrawInventoryList(trg::Ui& ui, const InventoryList& list, float
         const std::string origin = row.malformed ? std::string(Tr("Not understood")) : WhereLabel(row.ref, row.twin);
         const float origin_width = ImGui::CalcTextSize(origin.c_str()).x;
         const float name_end = min.x + pad * 2.0f + icon + ImGui::CalcTextSize(name.c_str()).x;
+        if (hovered && name_end > max.x - pad) ImGui::SetTooltip("%s", name.c_str());
         if (name_end + origin_width + pad * 3.0f < max.x) {
             draw->AddText(ImVec2(max.x - origin_width - pad, text_y), ImGui::GetColorU32(ui.theme().dim), origin.c_str());
         }

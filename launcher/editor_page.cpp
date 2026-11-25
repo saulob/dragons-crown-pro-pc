@@ -35,8 +35,8 @@ ImTextureID EditorPage::ButtonIconTexture(ButtonIcon icon, int pixels) {
 }
 
 EditorPage::EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
-                       std::function<std::string()> message_suffix, const SaveSelection* selection)
-    : host_(host), user_dir_(std::move(user_dir)), game_(std::move(game)), message_suffix_(std::move(message_suffix)),
+                       std::function<EditorLanguage()> language, const SaveSelection* selection)
+    : host_(host), user_dir_(std::move(user_dir)), game_(std::move(game)), language_(std::move(language)),
       selection_(selection), custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)),
       override_saved_(CharacterOverrideStorePath(user_dir_)), override_working_(CharacterOverrideStorePath(user_dir_)) {}
 
@@ -69,6 +69,7 @@ void EditorPage::UseArtOf(const EditorBuild* build) {
     preview_crops_.clear();
     CharacterArtSources sources = ArtSourcesOf(root, build ? build->build->regional_archive : nullptr);
     sources.cache_dir = EditorCacheDir(user_dir_);
+    sources.translation = build ? build->build->translation : nullptr;
     art_.emplace(std::move(sources));
     art_root_ = root;
     catalog_key_.clear();
@@ -130,7 +131,11 @@ const CharacterView* EditorPage::PersistedCharacter() const {
 }
 
 std::string EditorPage::ColorName(CharacterClass klass, int color) {
-    return art_ ? art_->ColorName(klass, color, message_suffix_ ? message_suffix_() : std::string()) : std::string();
+    if (!art_) return {};
+    const EditorLanguage language = language_ ? language_() : EditorLanguage{};
+    std::string name = art_->ColorName(klass, color, language.suffix, language.translation);
+    if (name.empty() && color >= 0 && color < kNativeColorCount) name = std::string(Tr("Color")) + " " + std::to_string(color + 1);
+    return name;
 }
 
 void EditorPage::SyncNameBuffer() {

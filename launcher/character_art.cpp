@@ -10,6 +10,7 @@
 #include "fms_sheet.h"
 #include "game_mbs.h"
 #include "game_texture.h"
+#include "game_translation.h"
 
 namespace dcp {
 namespace {
@@ -524,10 +525,20 @@ const std::vector<std::string>& CharacterArt::Sheet(const std::string& sheet, co
     return records;
 }
 
-std::string CharacterArt::ColorName(CharacterClass klass, int color, const std::string& suffix) {
+const std::vector<std::string>& CharacterArt::TranslatedSheet(const std::string& sheet, const std::string& suffix,
+                                                              const std::string& translation) {
+    if (translation.empty() || !sources_.translation) return Sheet(sheet, suffix);
+    const std::string key = sheet + "_" + suffix + "|" + translation;
+    const auto cached = translated_sheets_.find(key);
+    if (cached != translated_sheets_.end()) return cached->second;
+    std::vector<std::string> records = TranslatedSheetRecords(translation, *sources_.translation, sheet, Sheet(sheet, suffix));
+    return translated_sheets_.emplace(key, std::move(records)).first->second;
+}
+
+std::string CharacterArt::ColorName(CharacterClass klass, int color, const std::string& suffix, const std::string& translation) {
     const int id = NativeColorMessage(klass, color);
     if (id < 0) return {};
-    const std::vector<std::string>& records = Sheet("SystemMsg", suffix);
+    const std::vector<std::string>& records = TranslatedSheet("SystemMsg", suffix, translation);
     if (size_t(id) >= records.size()) return {};
     std::string name = records[size_t(id)];
     while (!name.empty() && name.back() == ' ') name.pop_back();

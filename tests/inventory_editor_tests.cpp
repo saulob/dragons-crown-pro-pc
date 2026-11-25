@@ -22,11 +22,14 @@
 #include "character_art.h"
 #include "game_mbs.h"
 #include "editor_model.h"
+#include "game_profile.h"
+#include "game_translation.h"
 #include "inventory_data.h"
 #include "inventory_model.h"
 #include "item_catalog.h"
 #include "localization/ui_text.h"
 #include "modifier_values.h"
+#include "project_sheets.h"
 #include "save_backup.h"
 #include "save_data.h"
 #include "save_discovery.h"
@@ -789,6 +792,231 @@ void TestCatalog(const fs::path& source) {
     } else {
         std::printf("localization sheets not present, skipping their check\n");
     }
+}
+
+// ---- Portuguese (Brazil) ----
+
+using ProjectSheet = project_sheets::Sheet;
+
+ProjectSheet LoadProjectSheet(const fs::path& source, const char* sheet) { return project_sheets::Load(source, sheet); }
+
+const GameBuild* BuildWithEnglishSlot() {
+    for (const GameBuild& build : SupportedBuilds()) {
+        if (build.translation && build.translation->source.empty()) return &build;
+    }
+    return nullptr;
+}
+
+const GameBuild* BuildWithSource(std::string_view source) {
+    for (const GameBuild& build : SupportedBuilds()) {
+        if (build.translation && build.translation->source == source) return &build;
+    }
+    return nullptr;
+}
+
+std::string ProjectText(const ProjectSheet& sheet, size_t index) { return project_sheets::Text(sheet, index); }
+
+// The name the game composes from the project's own Portuguese records: the word or prefix, then the item list's name.
+std::string ComposedFromProject(const ItemRecord& record, const ProjectSheet& items, const ProjectSheet& effects, const ProjectSheet& system) {
+    if (record.definition == kModifierNamedDefinition) {
+        return CleanEffectText(ProjectText(effects, size_t(record.effects.front().id) + 1865));
+    }
+    const std::string name = TrimText(ProjectText(items, record.definition));
+    if (!IsGear(record.definition)) return name;
+    if (record.name_word != 0xFF) return TrimText(ProjectText(system, 1485 + size_t(record.name_word))) + " " + name;
+    if (const std::optional<size_t> index = NamePrefixIndex(record)) {
+        const std::string prefix = TrimText(ProjectText(effects, *index));
+        if (!prefix.empty() && prefix.find_first_of("%@") == std::string::npos) return prefix + " " + name;
+    }
+    return name;
+}
+
+void TestPortugueseNames(const fs::path& source) {
+    if (!project_sheets::Present(source, {"ItemList", "CustomItem", "SystemMsg"})) {
+        std::printf("localization sheets not present, skipping the Portuguese name check\n");
+        return;
+    }
+    const GameBuild* usa = BuildWithEnglishSlot();
+    CHECK(usa != nullptr);
+    if (!usa) return;
+    const TranslationProfile& profile = *usa->translation;
+    const ProjectSheet items = LoadProjectSheet(source, "ItemList"), effects = LoadProjectSheet(source, "CustomItem"),
+                       system = LoadProjectSheet(source, "SystemMsg");
+    const std::vector<std::string> pt_items = TranslatedSheetRecords(kPortPortugueseBrazil, profile, "ItemList", items.english);
+    const std::vector<std::string> pt_effects = TranslatedSheetRecords(kPortPortugueseBrazil, profile, "CustomItem", effects.english);
+    const std::vector<std::string> pt_system = TranslatedSheetRecords(kPortPortugueseBrazil, profile, "SystemMsg", system.english);
+
+    // Every record of the project's Portuguese sheets is what the shared lookup serves, for the three sheets of a name.
+    size_t compared = 0;
+    for (const auto& [index, text] : items.portuguese) {
+        CHECK(index < pt_items.size() && pt_items[index] == text);
+        ++compared;
+    }
+    for (const auto& [index, text] : effects.portuguese) {
+        CHECK(index < pt_effects.size() && pt_effects[index] == text);
+        ++compared;
+    }
+    for (const auto& [index, text] : system.portuguese) {
+        if (index >= 109 && index <= 225) continue; // the tag keys are never translated
+        CHECK(index < pt_system.size() && pt_system[index] == text);
+        ++compared;
+    }
+    CHECK(compared > 5000);
+    CHECK(pt_items.size() == items.english.size() && pt_effects.size() == effects.english.size() && pt_system.size() == system.english.size());
+    CHECK(pt_items[283] == "Martelo de Rocha" && pt_items[349] == "Broquel" && pt_items[445] == "Botas de Couro");
+    CHECK(pt_items[112] == "%s"); // the Items entry's placeholder has no translation
+
+    ItemCatalog portuguese(pt_items, pt_effects, NameWords(pt_system), true);
+    const ItemCatalog english(items.english, effects.english, NameWords(system.english));
+    portuguese.SetEnglish(english);
+    CHECK(english.English() == nullptr && portuguese.English() != nullptr);
+    CHECK(portuguese.Word(0) == "Abençoado" && portuguese.Word(9) == "Deformado" && english.Word(0) == "Gifted");
+    CHECK(portuguese.ItemName(283) == "Martelo de Rocha" && english.ItemName(283) == "Rock Hammer");
+
+    // The composed names are the game's own records, in the order the game puts them.
+    const SaveModel model = SaveModel::FromBytes(MakeInventorySave());
+    size_t named = 0;
+    for (const ItemRecord& record : ReadStorage(model.bytes(), 0)) {
+        if (record.state != ItemState::kValid || record.definition >= items.english.size() || record.definition == 600) continue;
+        CHECK(ItemDisplayName(record, portuguese) == ComposedFromProject(record, items, effects, system));
+        ++named;
+    }
+    for (const ItemRecord& record : ReadEquipment(model.bytes(), 0, 0)) {
+        if (record.state != ItemState::kValid || record.definition >= items.english.size()) continue;
+        CHECK(ItemDisplayName(record, portuguese) == ComposedFromProject(record, items, effects, system));
+        ++named;
+    }
+    CHECK(named >= 8);
+    const auto name = [&](const ItemRef& ref) { return ItemDisplayName(ReadItem(model.bytes(), ref), portuguese); };
+    CHECK(name({0, -1, 0, 2}) == "Broquel");
+    CHECK(name({0, -1, 0, 0}) == "do Demônio Martelo de Rocha");
+    CHECK(name({0, -1, 0, 3}) == "Pergaminho do Renascimento");
+    CHECK(ItemDisplayName(ReadItem(model.bytes(), {0, -1, 0, 0}), english) == "Demon's Rock Hammer");
+
+    // Modifier names are the translated sheet's text without its value.
+    CHECK(portuguese.Effect(0x12).known && portuguese.Effect(0x12).name == "Dano mágico" && portuguese.Effect(0x12).percent);
+    CHECK(portuguese.Effect(0x2A).name == "Chance de derrubar");
+    CHECK(portuguese.Effect(0x00).name == "Chance de ... de envenenar inimigos" && portuguese.Effect(0x00).percent);
+    CHECK(english.Effect(0x00).name == "Poison enemy chance");
+    CHECK(ModifierName("Chance de ?% de envenenar inimigos") == "Chance de de envenenar inimigos");
+    CHECK(ModifierName("Chance de ?% de envenenar inimigos", true) == "Chance de ... de envenenar inimigos");
+    CHECK(ModifierName("Ouro obtido +?%, Dano causado -?%", true) == "Ouro obtido, Dano causado");
+    CHECK(ModifierName("?% do Dano recebido convertido em MP", true) == "do Dano recebido convertido em MP");
+    CHECK(ModifierName("Dano mágico +?%", true) == "Dano mágico" && ModifierName("Poison enemy ?% chance", true) == "Poison enemy ... chance");
+    CHECK(ModifierName("Poison enemy ?% chance") == "Poison enemy chance");
+
+    // Presentation only: the same records, edits and bytes whichever language the names are in.
+    const Bytes before(model.bytes().begin(), model.bytes().end());
+    for (const ItemRecord& record : ReadStorage(model.bytes(), 0)) {
+        const ItemDetail shown = DescribeItem(model, model, record.ref, portuguese);
+        const ItemDetail plain = DescribeItem(model, model, record.ref, english);
+        CHECK(shown.present == plain.present);
+        if (!shown.present) continue;
+        CHECK(shown.record.definition == plain.record.definition && shown.record.durability == plain.record.durability &&
+              shown.record.durability_max == plain.record.durability_max && shown.record.grade == plain.record.grade);
+        CHECK(shown.record.effects.size() == plain.record.effects.size() && shown.modifiers.size() == plain.modifiers.size());
+        for (size_t i = 0; i < shown.modifiers.size() && i < plain.modifiers.size(); ++i) {
+            CHECK(shown.modifiers[i].stored == plain.modifiers[i].stored && shown.modifiers[i].shown == plain.modifiers[i].shown &&
+                  shown.modifiers[i].slot == plain.modifiers[i].slot && shown.modifiers[i].percent == plain.modifiers[i].percent);
+        }
+        CHECK(shown.category == plain.category && shown.level == plain.level && shown.durability == plain.durability);
+    }
+    const InventoryList shown_list = BuildInventoryList(model, model, 0, 0, portuguese);
+    const InventoryList plain_list = BuildInventoryList(model, model, 0, 0, english);
+    CHECK(shown_list.rows.size() == plain_list.rows.size() && !shown_list.rows.empty());
+    std::set<std::tuple<int, int, int, int>> shown_refs, plain_refs;
+    for (const InventoryRow& row : shown_list.rows) shown_refs.insert({row.ref.slot, row.ref.character, row.ref.set, row.ref.index});
+    for (const InventoryRow& row : plain_list.rows) plain_refs.insert({row.ref.slot, row.ref.character, row.ref.set, row.ref.index});
+    CHECK(shown_refs == plain_refs);
+    CHECK(Bytes(model.bytes().begin(), model.bytes().end()) == before);
+
+    // The appearance colours: the game's Portuguese names, for every class and preset.
+    const char* const dwarf[] = {"Branco Marfim", "Vermelho Carmesim", "Ébano Escuro", "Marrom Cedro", "Amarelo Âmbar"};
+    for (const CharacterClass klass : kCharacterClasses) {
+        for (int color = 0; color < kNativeColorCount; ++color) {
+            const int id = NativeColorMessage(klass, color);
+            CHECK(id >= 871 && id <= 900);
+            if (id < 871 || id > 900) continue;
+            const std::string shown_name = TrimText(pt_system[size_t(id)]);
+            CHECK(shown_name == TrimText(ProjectText(system, size_t(id))));
+            CHECK(!shown_name.empty() && shown_name != TrimText(system.english[size_t(id)]));
+            if (klass == CharacterClass::kDwarf) CHECK(shown_name == dwarf[color]);
+        }
+    }
+}
+
+void TestPortugueseFallbacks(const fs::path& source) {
+    if (!project_sheets::Present(source, {"ItemList", "CustomItem", "SystemMsg"})) {
+        std::printf("localization sheets not present, skipping the Portuguese fallback check\n");
+        return;
+    }
+    const GameBuild* usa = BuildWithEnglishSlot();
+    const GameBuild* japan = BuildWithSource("JP");
+    CHECK(usa != nullptr && japan != nullptr);
+    if (!usa || !japan) return;
+    const ProjectSheet items = LoadProjectSheet(source, "ItemList");
+    const std::string pt(kPortPortugueseBrazil);
+
+    // A sheet, a language or a record the translation cannot serve stays as installed.
+    CHECK(TranslatedSheetRecords(pt, *usa->translation, "NoSuchSheet", items.english) == items.english);
+    CHECK(TranslatedSheetRecords("ko", *usa->translation, "ItemList", items.english) == items.english);
+    CHECK(TranslatedSheetRecords("ru", *usa->translation, "ItemList", items.english) == items.english);
+    CHECK(TranslatedSheetRecords("", *usa->translation, "ItemList", items.english) == items.english);
+    CHECK(TranslatedSheetRecords(pt, *usa->translation, "ItemList", {}).empty());
+    std::vector<std::string> edited = items.english;
+    edited[283] += " ";
+    const std::vector<std::string> kept = TranslatedSheetRecords(pt, *usa->translation, "ItemList", edited);
+    CHECK(kept[283] == edited[283] && kept[284] == "Martelo Marcial");
+    const std::vector<std::string> other = TranslatedSheetRecords(pt, *japan->translation, "ItemList", items.english); // another slot's hashes
+    CHECK(other[283] == items.english[283] && other[349] == items.english[349]);
+    CHECK(TranslatedSheetRecords(std::string(kPortEnglish), *usa->translation, "ItemList", items.english) == items.english);
+
+    // Names never come out blank: a catalog without the translated sheets falls back to the base name or a stand-in.
+    const SaveModel model = SaveModel::FromBytes(MakeInventorySave());
+    const ItemRecord hammer = ReadItem(model.bytes(), {0, -1, 0, 0});
+    CHECK(ItemDisplayName(hammer, ItemCatalog(kept, {}, {}, true)) == "Rock Hammer");
+    CHECK(ItemDisplayName(hammer, ItemCatalog({}, {}, {}, true)) == "Unknown item 0x11b");
+    CHECK(ItemCatalog().English() == nullptr && ItemCatalog().Effect(0x12).name.empty());
+}
+
+void TestPortugueseSearchAndSort() {
+    CHECK(NameMatchesSearch("Poção de Cura", "pocao") && NameMatchesSearch("Poção de Cura", "POÇÃO") && NameMatchesSearch("Poção", "Poção"));
+    CHECK(NameMatchesSearch("Dano mágico", "magico") && NameMatchesSearch("Açúcar", "acucar") && !NameMatchesSearch("Poção", "pocoes"));
+    CHECK(NameMatchesSearch("Rock Hammer", "ROCK") && !NameMatchesSearch("Rock Hammer", "rocha"));
+
+    // Names sort by what the user reads: an accented letter sorts as its base letter.
+    std::vector<std::string> names = FixtureItems();
+    names[279] = "Zebra";
+    names[283] = "Ábaco";
+    names[284] = "Çedilha";
+    names[349] = "Escudo";
+    const SaveModel model = SaveModel::FromBytes(MakeInventorySave());
+    InventoryQuery query;
+    query.group = InventoryGroup::kWeaponsShields;
+    query.sort = InventorySort::kName;
+    const InventoryList sorted = BuildInventoryList(model, model, 0, 0, ItemCatalog(names, {}), query);
+    std::vector<std::string> order;
+    for (const InventoryRow& row : sorted.rows) order.push_back(row.name);
+    CHECK(order.size() >= 4);
+    const auto at = [&](const char* name) { return std::find(order.begin(), order.end(), name) - order.begin(); };
+    CHECK(at("Ábaco") < at("Çedilha") && at("Çedilha") < at("Escudo") && at("Escudo") < at("Zebra"));
+
+    // A search matches the displayed name, and the English name too while another language is shown.
+    ItemCatalog shown(names, {});
+    const ItemCatalog english(FixtureItems(), {});
+    query.search = "abaco";
+    CHECK(BuildInventoryList(model, model, 0, 0, shown, query).rows.size() == 1);
+    query.search = "rock hammer";
+    CHECK(BuildInventoryList(model, model, 0, 0, shown, query).rows.empty());
+    shown.SetEnglish(english);
+    const InventoryList by_english = BuildInventoryList(model, model, 0, 0, shown, query);
+    CHECK(by_english.rows.size() == 1 && by_english.rows.front().name == "Ábaco");
+    query.search = "ABACO";
+    CHECK(BuildInventoryList(model, model, 0, 0, shown, query).rows.size() == 1);
+    query.search = "rock hammer";
+    CHECK(SearchKeptAfterSave(model, {0, -1, 0, 0}, shown, query.search) == query.search);
+    CHECK(SearchKeptAfterSave(model, {0, -1, 0, 10}, shown, query.search).empty());
+    CHECK(BuildInventoryList(model, model, 0, 0, english, query).rows.size() == 1); // English alone is unchanged
 }
 
 // ---- Edits ----
@@ -3962,10 +4190,12 @@ int main(int argc, char** argv) {
     const fs::path source;
 #endif
     const bool quick = argc > 1 && std::strcmp(argv[1], "quick") == 0;
+    const bool localization_only = argc > 1 && std::strcmp(argv[1], "localization") == 0;
     const std::vector<Group> groups = {
         {"inventory-location", TestLocation},
         {"inventory-parse", [] { TestParse(); TestListGroups(); TestLocationFilter(); }},
         {"inventory-catalog", [&] { TestCatalog(source); }},
+        {"inventory-localization", [&] { TestPortugueseNames(source); TestPortugueseFallbacks(source); TestPortugueseSearchAndSort(); }},
         {"inventory-edit", [] { TestDurabilityMath(); TestEditDurability(); TestDurabilityBound(); TestMaxDurability(); TestSliderEditing(); TestAttackAndLevelIndependent(); TestSorting(); TestQuery(); TestClassCompatibility(); TestAttack(); TestScrollReset(); TestNames(); TestModifierEdit(); TestModifierNames(); TestEditLevel(); TestIsolation(); TestDetail(); }},
         {"inventory-safety", [] { TestMalformed(); TestUnknownPreserved(); TestValidateChanges(); TestMutations(); }},
         {"inventory-transaction", [&] { TestTransaction(base); TestFailures(base); TestNavigationAndSwitching(base); TestHp(base); TestHpScope(base); TestDuplicateIdentity(base); TestSavePaths(base, source); TestItemsEntries(); TestGameLimits(); TestDuplicateMaxed(base); TestEffectiveLimits(base); TestRenameKeepsRow(base); TestSearchKeptAfterSave(base); TestInputPaths(base); TestTypedCommit(); TestFieldIsolation(base); TestEditedState(base); TestTypedTransactions(base); TestModifierDisplay(); TestModifierFullRange(); TestDexRecords(); TestListedModifiers(base); TestRequiredLevelRoundTrip(base); TestModifierSlots(base); }},
@@ -3974,6 +4204,7 @@ int main(int argc, char** argv) {
         {"inventory-real-saves", [&] { if (!quick) TestRealSaves(source, base); }},
     };
     for (const Group& group : groups) {
+        if (localization_only && std::strcmp(group.name, "inventory-localization") != 0 && std::strcmp(group.name, "inventory-ui") != 0) continue;
         const int checks_before = g_checks;
         const int failures_before = g_failures;
         group.run();
