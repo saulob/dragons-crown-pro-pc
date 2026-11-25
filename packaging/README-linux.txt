@@ -194,6 +194,10 @@ PLAYING
   (X11 sessions), start the AppImage with the option --launcher, or use the
   "Show launcher" action of its desktop entry. On the Steam Deck: Steam > the
   game's Properties > Launch Options: --launcher; remove it again afterwards.
+- If the launcher window does not open, start the AppImage with
+  --launcher --launcher-renderer software. It draws the launcher with software
+  rendering for that start only and skips the Vulkan graphics card check; the
+  game's Renderer setting is not changed.
 
 
 WHERE THINGS ARE

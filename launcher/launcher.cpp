@@ -42,12 +42,14 @@
 #include "game_install.h"
 #include "install_source.h"
 #include "game_process.h"
+#include "graphics_cards.h"
 #include "header_art.h"
 #include "home_art.h"
 #include "home_page.h"
 #include "host.h"
 #include "incident_page.h"
 #include "launcher_quit.h"
+#include "launcher_renderer.h"
 #include "localization/ui_text.h"
 #include "options.h"
 #include "package_browser.h"
@@ -235,12 +237,6 @@ constexpr char kAllowOverlayProgramsHelp[] =
 
 enum class PatchAction { kPrompts, kSafeMode, kRestore };
 
-std::vector<std::string> ListGpuNames() {
-    char names[16][256] = {};
-    const int count = dcp_gpu_names(names, 16);
-    return {names, names + count};
-}
-
 trg::Theme LauncherTheme() {
     trg::Theme theme = trg::Theme::Midnight().WithAccent(kAccent);
     // Warnings stay red-orange so they are never mistaken for the gold accent.
@@ -379,6 +375,14 @@ bool StartGameProcess(const DcpLauncherConfig& config, std::string& error) {
 
 enum class Outcome { kRunning, kPlay, kQuit };
 
+std::string RequestedRenderer(const DcpLauncherConfig& config) {
+    return config.launcher_renderer && *config.launcher_renderer ? config.launcher_renderer : std::string(kLauncherRendererAuto);
+}
+
+bool SoftwareRecovery(const DcpLauncherConfig& config) {
+    return RequestedRenderer(config) == kLauncherRendererSoftware;
+}
+
 class LauncherApp {
 public:
     LauncherApp(const DcpLauncherConfig& config, LauncherSettings& settings, GamePaths paths, GameCheck check)
@@ -387,7 +391,9 @@ public:
 
     bool game_process_started() const { return game_process_started_; }
 
-    // Runs the launcher window until Play or Quit. False when no window could be opened.
+    const std::string& failure_text() const { return host_.FailureText(); }
+
+    // Runs the launcher window until Play or Quit. False when no window could be opened; failure_text says why.
     bool Run(Outcome& outcome) {
         HostOptions options;
         options.title = kGameTitle;
@@ -398,12 +404,12 @@ public:
         // DCP_LAUNCHER_SHOTS=<folder> (tests/launcher_shots.cpp): every page into the folder, hidden, then quit.
         const char* shots = std::getenv("DCP_LAUNCHER_SHOTS");
         options.hidden = shots != nullptr;
+        options.renderer = RequestedRenderer(config_);
         dcp_startup_phase("launcher opening");
         if (!host_.Open(options)) {
             return false;
         }
         displays_ = ListDisplays();
-        gpu_names_ = DcpGraphics::GpuChoices(ListGpuNames());
         prompts_installed_ = InstalledPrompts();
         xbox_available_ = build_ && XboxPromptsAvailable(paths_.app0, *build_, XboxPromptsPatch());
         voice_languages_ = VoiceLanguagesOffered(paths_.app0, build_);
@@ -465,6 +471,7 @@ public:
         host_.EndFrame(LauncherTheme().bg);
         host_.Show();
         Log("shown");
+        DetectGraphics();
         dcp_startup_phase("launcher running");
 
         while (outcome == Outcome::kRunning) {
@@ -696,6 +703,26 @@ private:
         }
         if (settings_.Get(kAspectRatioKey, kDefaultAspectRatio) != kDefaultAspectRatio) {
             settings_.Set(kAspectRatioKey, kDefaultAspectRatio);
+        }
+    }
+
+    void DetectGraphics() {
+        dcp_startup_phase("launcher graphics card detection");
+        cards_ = DetectGraphicsCards(
+            SoftwareRecovery(config_), UserDir() / kGpuProbeMarker, [] { Log("startup: vulkan probe starting"); std::fflush(nullptr); },
+            [] {
+                DcpGpuProbe probe;
+                dcp_gpu_probe(&probe);
+                return probe;
+            });
+        gpu_names_ = cards_.names;
+        switch (cards_.state) {
+        case GraphicsCards::State::kSkipped: Log("startup: vulkan probe skipped, software recovery mode"); break;
+        case GraphicsCards::State::kInterrupted: Log("startup: vulkan probe skipped, the last one did not finish (%s)", kGpuProbeMarker); break;
+        case GraphicsCards::State::kProbed:
+            Log("startup: gpu enumeration %zu usable card(s)", cards_.names.size());
+            break;
+        case GraphicsCards::State::kNotAsked: break;
         }
     }
 
@@ -1197,7 +1224,7 @@ private:
 
     void GraphicsCardCombo() {
         if (gpu_names_.empty()) {
-            ImGui::TextUnformatted(Tr("No graphics card found"));
+            ImGui::TextUnformatted(Tr(GraphicsCardsProblem(cards_)));
             return;
         }
         const std::string current = settings_.Get(kGraphicsCardKey);
@@ -1847,6 +1874,7 @@ private:
     float header_art_aspect_ = kHeaderArtAspect;
     std::vector<Display> displays_;
     std::vector<std::string> gpu_names_;
+    GraphicsCards cards_;
     trg::Fonts fonts_;
     std::unique_ptr<trg::Launcher> launcher_;
     std::unique_ptr<trg::update::UpdateController> updater_;
@@ -1882,16 +1910,33 @@ private:
     bool game_process_started_ = false;
 };
 
-DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const char* advice) {
+std::string FailureReport(const char* topic, const char* cause, const char* advice) {
+    return std::string(topic) + ": " + cause + " " + advice;
+}
+
+// The launcher window could not open: the player is told through the system's own message box, and no game starts.
+DcpLauncherResult ReportLauncherFailure(const std::string& detail, bool software_tried) {
+    std::fprintf(stderr, "Launcher: could not open its window (%s); the game was not started\n", detail.c_str());
+    std::string text = detail + "\n\nThe game was not started.";
+    if (!software_tried) {
+        text += "\nTo open the launcher with software rendering, run this program with: --launcher --launcher-renderer software";
+    }
+    ShowNativeError(kPortTitle, text);
+    return DCP_LAUNCHER_BLOCKED;
+}
+
+DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const char* advice, const char* renderer) {
     LauncherHost host;
     HostOptions options;
+    options.renderer = renderer && *renderer ? renderer : std::string(kLauncherRendererAuto);
     options.title = kPortTitle;
     options.width = 640;
     options.height = 300;
     options.min_width = 360;
     options.min_height = 220;
     if (!host.Open(options)) {
-        std::fprintf(stderr, "%s: %s %s\n", topic, cause, advice);
+        std::fprintf(stderr, "%s\n", FailureReport(topic, cause, advice).c_str());
+        ShowNativeError(kPortTitle, FailureReport(topic, cause, advice));
         return DCP_LAUNCHER_BLOCKED;
     }
     const trg::Fonts fonts = trg::LoadSystemFonts(18.0f);
@@ -1915,7 +1960,7 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherS
     localization::SetActiveLanguage(settings.Get(kTextLanguageKey, "english"));
     char cause[320] = "", advice[320] = "";
     if (config.check_graphics && !config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
-        return ExplainInWindow("Graphics", cause, advice);
+        return ExplainInWindow("Graphics", cause, advice, config.launcher_renderer);
     }
     if (!SeparateGameProcess(config, settings)) {
         return DCP_LAUNCHER_PLAY;
@@ -1924,7 +1969,7 @@ DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherS
     if (StartGameProcess(config, error)) {
         return DCP_LAUNCHER_GAME_STARTED;
     }
-    return ExplainInWindow("Launcher", "Could not start the game.", TrValue(error).c_str());
+    return ExplainInWindow("Launcher", "Could not start the game.", TrValue(error).c_str(), config.launcher_renderer);
 }
 
 constexpr char kSavedPatchesFailed[] =
@@ -1943,7 +1988,7 @@ DcpLauncherResult PlayWithSavedPatches(const DcpLauncherConfig& config, const La
                 run.result.detail.empty() ? "" : ": ", run.result.detail.c_str());
         }
         if (!run.result.ok) {
-            return ExplainInWindow("Launcher", kSavedPatchesFailed, kSavedPatchesAdvice);
+            return ExplainInWindow("Launcher", kSavedPatchesFailed, kSavedPatchesAdvice, config.launcher_renderer);
         }
     }
     return PlayOrExplain(config, settings);
@@ -1967,15 +2012,24 @@ extern "C" DcpLauncherResult dcp_launcher_run(const DcpLauncherConfig* config) {
     Log("settings file %s", Utf8(settings.file()).c_str());
     Log("opening: %s%s%s", ready ? "game ready" : "game files not ready", show_setting ? ", show_launcher on" : "",
         shift ? ", Shift held or --launcher" : "");
+    Log("startup: game renderer setting=%s", settings.Get(kRendererKey, kDefaultRenderer).c_str());
 
     LauncherApp app(*config, settings, paths, check);
     Outcome outcome = Outcome::kRunning;
     if (!app.Run(outcome)) {
-        std::fprintf(stderr, "Launcher: could not open its window; %s\n", ready ? "starting the game" : "game files are not ready");
-        return ready ? PlayWithSavedPatches(*config, settings, paths, check) : DCP_LAUNCHER_QUIT;
+        return ReportLauncherFailure(app.failure_text(), SoftwareRecovery(*config));
     }
     if (app.game_process_started()) {
         return DCP_LAUNCHER_GAME_STARTED;
     }
     return outcome == Outcome::kPlay ? DCP_LAUNCHER_PLAY : DCP_LAUNCHER_QUIT;
+}
+
+extern "C" int dcp_launcher_renderer_known(const char* value) {
+#ifdef _WIN32
+    constexpr bool windows = true;
+#else
+    constexpr bool windows = false;
+#endif
+    return value && dcp::ParseLauncherRenderer(value, windows) ? 1 : 0;
 }

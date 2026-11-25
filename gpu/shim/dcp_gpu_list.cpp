@@ -2,99 +2,124 @@
 // The launcher's list of Vulkan devices the renderer can use (the Graphics card row), and the check that Vulkan can run
 // the renderer at all.
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
-
-#include <fmt/format.h>
+#include <vector>
 
 #include "common/types.h"
+#include "dcp_gpu_probe.h"
 #include "dcp_renderer.h"
 #include "dcp_settings.h"
-#include "sdl_window.h"
+#include "dcp_vulkan_probe.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 namespace {
 
-struct VulkanProblem {
-    std::string cause;
-    std::string advice;
+// Kept for the life of the process: the game's own instance loads the same driver modules afterwards.
+std::unique_ptr<vk::detail::DynamicLoader> g_loader;
+
+// The probe loads its commands into the shared dispatcher; it is put back as found so no command of the destroyed probe
+// instance stays in it.
+class VulkanSource final : public DcpVulkanProbe::Source {
+public:
+    VulkanSource() : saved_(VULKAN_HPP_DEFAULT_DISPATCHER) {}
+    ~VulkanSource() override {
+        instance_.reset();
+        VULKAN_HPP_DEFAULT_DISPATCHER = saved_;
+    }
+
+    bool OpenLoader() override {
+        if (!g_loader || !g_loader->success()) {
+            g_loader = std::make_unique<vk::detail::DynamicLoader>();
+        }
+        return g_loader->success();
+    }
+
+    bool LoadEntryPoints() override {
+        const auto get_proc = g_loader->getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
+        if (!get_proc) {
+            return false;
+        }
+        VULKAN_HPP_DEFAULT_DISPATCHER.init(get_proc);
+        return true;
+    }
+
+    bool QueryInstanceVersion(u32& version, int& code) override {
+        version = VK_API_VERSION_1_0;
+        if (!VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumerateInstanceVersion) {
+            return true;
+        }
+        const auto [result, value] = vk::enumerateInstanceVersion();
+        code = static_cast<int>(result);
+        if (result != vk::Result::eSuccess) {
+            return false;
+        }
+        version = value;
+        return true;
+    }
+
+    DcpVulkanProbe::InstanceOutcome CreateInstance(int& code) override {
+        auto [result, instance] = Vulkan::CreateProbeInstance();
+        code = static_cast<int>(result);
+        if (result == vk::Result::eErrorIncompatibleDriver) {
+            return DcpVulkanProbe::InstanceOutcome::IncompatibleDriver;
+        }
+        if (result != vk::Result::eSuccess) {
+            return DcpVulkanProbe::InstanceOutcome::Failed;
+        }
+        instance_ = std::move(instance);
+        return DcpVulkanProbe::InstanceOutcome::Created;
+    }
+
+    bool EnumerateDevices(std::vector<DcpVulkanProbe::Device>& devices, int& code) override {
+        const auto [result, physical_devices] = instance_->enumeratePhysicalDevices();
+        code = static_cast<int>(result);
+        if (result != vk::Result::eSuccess) {
+            return false;
+        }
+        for (const vk::PhysicalDevice physical : physical_devices) {
+            devices.push_back({physical.getProperties().deviceName.data(), Vulkan::IsDeviceUsable(physical)});
+        }
+        return true;
+    }
+
+private:
+    vk::detail::DispatchLoaderDynamic saved_;
+    vk::UniqueInstance instance_;
 };
 
-// The renderer's own requirements, asked without its assertions, which end the process with no word to the player.
-std::optional<VulkanProblem> FindVulkanProblem() {
-    using namespace Vulkan;
-    static std::unique_ptr<vk::detail::DynamicLoader> loader;
-    if (!loader || !loader->success()) {
-        loader = std::make_unique<vk::detail::DynamicLoader>();
-    }
-    if (!loader->success()) {
-        return VulkanProblem{"Vulkan is not installed on this system.",
-                             "Install your graphics driver's Vulkan support and try again."};
-    }
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(loader->getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
-    u32 version = VK_API_VERSION_1_0;
-    if (VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumerateInstanceVersion) {
-        const auto [result, value] = vk::enumerateInstanceVersion();
-        if (result == vk::Result::eSuccess) {
-            version = value;
-        }
-    }
-    const u32 major = VK_VERSION_MAJOR(TargetVulkanApiVersion), minor = VK_VERSION_MINOR(TargetVulkanApiVersion);
-    if (version < TargetVulkanApiVersion) {
-        return VulkanProblem{fmt::format("This system's Vulkan runtime supports only {}.{}, but Vulkan {}.{} or newer "
-                                         "is required.",
-                                         VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version), major, minor),
-                             "Update your graphics driver and Vulkan runtime, and try again."};
-    }
-    const VulkanProblem no_driver{"No Vulkan graphics driver was found.",
-                                  "Install or update your graphics driver and try again."};
-    auto [result, instance] = CreateProbeInstance();
-    if (result == vk::Result::eErrorIncompatibleDriver) {
-        return no_driver;
-    }
-    if (result != vk::Result::eSuccess) {
-        return VulkanProblem{fmt::format("Vulkan could not be started ({}).", vk::to_string(result)),
-                             "Update your graphics driver and try again."};
-    }
-    const auto [devices_result, devices] = instance->enumeratePhysicalDevices();
-    if (devices_result != vk::Result::eSuccess || devices.empty()) {
-        return no_driver;
-    }
-    if (std::ranges::none_of(devices, IsDeviceUsable)) {
-        return VulkanProblem{fmt::format("No graphics card here supports Vulkan {}.{} with the features the game "
-                                         "needs.",
-                                         major, minor),
-                             "Update your graphics driver and try again."};
-    }
-    return std::nullopt;
-}
-
 // A success is remembered; a failure is asked again, as the player may install a driver and press Play again.
-std::optional<VulkanProblem> CheckVulkan() {
-    static bool usable = false;
+DcpVulkanProbe::Report ProbeVulkan() {
+    static std::mutex lock;
+    static std::optional<DcpVulkanProbe::Report> usable;
+    const std::lock_guard guard(lock);
     if (usable) {
-        return std::nullopt;
+        return *usable;
     }
-    auto problem = FindVulkanProblem();
-    usable = !problem;
-    return problem;
+    VulkanSource source;
+    DcpVulkanProbe::Report report = DcpVulkanProbe::Run(source, Vulkan::TargetVulkanApiVersion);
+    if (report.available()) {
+        usable = report;
+    }
+    return report;
 }
 
 } // namespace
 
 extern "C" int dcp_check_vulkan(char* cause, size_t cause_size, char* advice, size_t advice_size) {
-    const auto problem = CheckVulkan();
-    if (!problem) {
+    const DcpVulkanProbe::Report report = ProbeVulkan();
+    if (report.available()) {
         return 1;
     }
-    std::printf("Graphics: %s %s\n", problem->cause.c_str(), problem->advice.c_str());
-    std::snprintf(cause, cause_size, "%s", problem->cause.c_str());
-    std::snprintf(advice, advice_size, "%s", problem->advice.c_str());
+    const DcpVulkanProbe::Problem problem = DcpVulkanProbe::Describe(report, Vulkan::TargetVulkanApiVersion);
+    std::printf("Graphics: %s %s\n", problem.cause.c_str(), problem.advice.c_str());
+    std::snprintf(cause, cause_size, "%s", problem.cause.c_str());
+    std::snprintf(advice, advice_size, "%s", problem.advice.c_str());
     return 0;
 }
 
@@ -115,37 +140,15 @@ extern "C" int dcp_check_renderer(const char* settings_file, char* cause, size_t
     }
 }
 
-extern "C" int dcp_gpu_names(char (*names)[256], int max) {
-    using namespace Vulkan;
-#ifndef _WIN32
-    if (CheckVulkan()) {
-        return 0;
+extern "C" void dcp_gpu_probe(DcpGpuProbe* out) {
+    const DcpVulkanProbe::Report report = ProbeVulkan();
+    std::printf("%s\n", DcpVulkanProbe::SummaryLine(report).c_str());
+    std::fflush(nullptr);
+    std::memset(out, 0, sizeof(*out));
+    out->status = static_cast<int>(report.status);
+    out->api_version = report.api_version;
+    out->code = report.code;
+    for (const std::string& name : DcpVulkanProbe::UsableNames(report, DCP_GPU_PROBE_MAX)) {
+        std::snprintf(out->names[out->count++], sizeof(out->names[0]), "%s", name.c_str());
     }
-#endif
-    int count = 0;
-    {
-        auto instance = CreateInstance(Frontend::WindowSystemType::Headless, false, false);
-        if (!instance) {
-            return 0;
-        }
-        const auto [result, devices] = instance->enumeratePhysicalDevices();
-        if (result != vk::Result::eSuccess) {
-            return 0;
-        }
-        for (const auto& device : devices) {
-            if (count == max || !IsDeviceUsable(device)) {
-                continue;
-            }
-            const auto properties = device.getProperties();
-            const char* name = properties.deviceName.data();
-            bool known = false;
-            for (int i = 0; i < count; ++i) {
-                known |= !std::strcmp(names[i], name);
-            }
-            if (!known) {
-                std::snprintf(names[count++], 256, "%s", name);
-            }
-        }
-    }
-    return count;
 }

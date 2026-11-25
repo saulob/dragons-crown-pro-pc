@@ -10,7 +10,8 @@ Graphics, Gameplay, Online, Cheats, Controls, Trophies and About.
 reserved and before the boot image is read. The only other executable is the Windows update helper, `trg-updater.exe`. The loader
 passes a graphics check to the launcher: the processor check on Windows, the processor check and `dcp_check_vulkan` on Linux. Play
 runs it (the launcher itself needs no Vulkan) and, if it fails, `launcher/problem_dialog.cpp` explains why and the launcher stays
-open. The graphics card list comes from a headless Vulkan instance on both platforms (empty on Linux when Vulkan is unusable).
+open. The graphics card list comes from a non-fatal Vulkan probe that runs after the launcher window is shown (see
+[Launcher without Vulkan](#launcher-without-vulkan)); a system without usable Vulkan gets an empty list and a working launcher.
 
 The launcher cannot live in the game's own window: the Vulkan presenter and its Dear ImGui context are created by the
 guest, and a missing game has no guest at all. So it opens a window of its own (SDL3, an SDL renderer, Dear ImGui) and
@@ -19,7 +20,7 @@ exist at a time. The Dear ImGui copy is the one compiled into the video core lib
 
 With **Allow overlay programs** on (Windows only), the game does not run in the launcher's process. Play (or a start
 without the launcher) creates a new `dragons_crown_pro.exe` with the same arguments minus `--launcher`,
-`--dcp-skip-launcher` and `--log`, plus the internal `--dcp-game --log <this run's log>` (`launcher/game_process.cpp`).
+`--dcp-skip-launcher`, `--launcher-renderer <name>` and `--log`, plus the internal `--dcp-game --log <this run's log>` (`launcher/game_process.cpp`).
 It is created suspended; the launcher process writes its last log line, lets go of the log, resumes it and exits. The
 game process never runs the launcher, so it never starts another one; it continues the same log and inherits the
 environment and working folder. Overlay and injection tools then attach to a clean game process instead of one that
@@ -77,7 +78,57 @@ The two settings that live in the game archives, Controller prompts and Arachnop
 launcher opens or not (`PlanSavedPatches` and `SetGamePatches`, `launcher/game_patches.cpp`): a run that skips the launcher applies them
 before it starts the game, and stops with an explanation, without starting the game, if they cannot be applied. Everything else that
 `dcp.ini` chooses is read by the loader on every run and changes no game file. `--check-imports` and `--cpu-only` never open it. The launcher is the only recovery path, so it cannot be hidden
-while the game files are not valid. If its window cannot be opened, the game starts when the files are valid.
+while the game files are not valid. If its window cannot be opened, nothing starts: a message box of the system says why and
+the process exits with code 1 (see [Launcher without Vulkan](#launcher-without-vulkan)). Turning the launcher off or `--dcp-skip-launcher`
+still starts the game directly.
+
+## Launcher without Vulkan
+
+The launcher never needs Vulkan. Its own window is drawn by an SDL renderer and Dear ImGui; the game's renderer (the **Renderer**
+setting) is a separate choice that the launcher only edits.
+
+**Launcher renderer.** The order is Direct3D 11 then SDL's software renderer on Windows (`d3d11.dll` and `dxgi.dll` stay pinned
+for Direct3D 11, issue #45), and SDL's first working renderer then software on Linux. A renderer counts as opened only after
+its window, the renderer itself, one texture upload, clear, draw and present, and the Dear ImGui backends all succeeded; any
+failure there releases everything that attempt created and the next renderer is tried (`launcher/launcher_renderer.h`,
+`LauncherHost::OpenRenderer` in `launcher/host.cpp`). Direct3D 11 is not required to be a modern feature level. If no renderer
+opens, a message box of the system (Windows `MessageBoxW`, SDL's message box on Linux) lists what failed and the process exits
+with code 1; the game is not started and the log is kept.
+
+**Software recovery mode.** For a system where the launcher does not open at all, start the program with the launcher forced and
+SDL's software renderer:
+
+```
+dragons_crown_pro.exe --launcher --launcher-renderer software
+```
+
+`--launcher-renderer` takes `auto` (the default order above), `software`, or on Windows `direct3d11` (that renderer only, with no
+fallback, for diagnosing it). It is checked before anything else starts, applies to the launcher windows of that run only, is never
+written to `dcp.ini`, and is not passed to the game process. Software recovery mode also skips the Vulkan graphics card probe, so
+the Graphics card row says detection is off; every other setting, including **Renderer**, can be changed and saved normally. A
+shortcut with the option (Properties > Target on Windows, Launch Options on Steam) keeps the mode between starts.
+
+**Game renderer.** `renderer` in `user\dcp.ini` is `vulkan` (the default and the supported renderer), `auto`, `opengl` or, on Windows,
+`d3d11`; `auto` uses Vulkan and OpenGL when this system cannot run Vulkan. OpenGL and Direct3D 11 are experimental and render only
+part of the game's features. The launcher's Graphics page and the Renderer row stay available without Vulkan, the saved renderer
+and graphics card are never replaced because the probe failed, and **Renderer** takes effect the next time the game starts.
+
+**Vulkan probe.** `dcp_gpu_probe` (`gpu/shim/dcp_gpu_list.cpp`, logic in `gpu/shim/dcp_vulkan_probe.h`) asks for the loader, its
+entry points, the instance version, a bare instance and the physical devices, one step at a time, and reports the first that
+fails: loader missing, Vulkan older than 1.3, no driver, instance or enumeration error, or no usable card. Nothing in it asserts
+or ends the process for what Vulkan lacks. It leaves the shared Vulkan dispatcher as it found it, keeps the loader module
+mapped, and runs once, after the launcher window is shown. A driver that ends the process inside the probe cannot be caught by a
+result code: the probe writes `gpu_probe.pending` into the user folder first and removes it afterwards, so the next start sees
+the file, skips the probe (the Graphics card row says so) and the launcher opens; delete the file to ask again. A driver that
+hangs inside the probe still freezes the launcher window, which is why software recovery mode skips it.
+
+**Log lines** (`Launcher: startup: ...`, flushed as they are written): `renderer requested=... order=...`, `renderer trying=...`,
+`renderer attempt=... result=ok|failed stage=pin|create|first_frame|imgui_backend reason=...`, `renderer effective=... fallback=0|1
+fallback_reason=...`, `failed kind=sdl_video|no_display|window|renderer detail=... phase=...`, `game renderer setting=...`, `vulkan probe
+starting`, `vulkan probe status=... api=... code=... devices=... usable=...`, and the startup phase of a crash report
+(`Crash: startup phase:`). The CPU check lines (`CPU: missing ...`) and the game's own `Renderer:` and `GPU:` lines are separate,
+which tells a processor failure, an SDL video failure, a Direct3D 11 or software failure, a Vulkan probe failure and a game
+renderer failure apart.
 
 ## Game files
 
@@ -430,7 +481,7 @@ vertex descriptor validation and the 10% stick dead zone are not exposed.
   a device; a device must meet the renderer's Vulkan version, extension and robustness2 requirements), by its exact Vulkan
   name. The first listed device is the default. A name that is not there any more, or not usable, falls back to the first
   usable device, and the launcher saves that name when you press Play. The game's log shows `GPU: selected <name>`, then
-  `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window uses Direct3D 11 on Windows (d3d11.dll and dxgi.dll stay loaded until the process exits; SDL's software renderer when Direct3D 11 is unavailable) and SDL's first working renderer on Linux.
+  `GPU: Vulkan device <name>`. It is the game's device; the launcher's own window is drawn separately (Direct3D 11, then SDL's software renderer, on Windows; SDL's first working renderer, then software, on Linux). Without usable Vulkan the row says so and the saved card is kept.
 - **VSync**: On is FIFO (the stable default). Off uses Mailbox, else Immediate.
 - **Presentation**: Letterbox (the default) or Stretch. It controls how the finished frame fits the window or display when
   their shape differs: Letterbox keeps the frame's aspect ratio with bars, Stretch fills the window and may distort the

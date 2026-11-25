@@ -45,10 +45,11 @@
   saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
   The normal run includes both.
 .DESCRIPTION
-  The default run is the current focus: the launcher's Portuguese (Brazil) text (dcp-launcher-tests ptbr-editor), the Inventory
-  Editor's names, modifiers, search and sort (dcp-inventory-editor-tests localization), the Appearance colour names
-  (dcp-save-editor-tests localization) and the Linux syntax of the shared sources; the real-save and permutation matrices stay
-  under -Full.
+  The default run is the current focus, G8K2W (the launcher opens without Vulkan): the launcher renderer fallback, the Vulkan probe
+  and the graphics card list on scripted systems (dcp-launcher-startup-tests), the launcher renderer and startup source
+  groups and the headless command interface (dcp-launcher-tests renderer, startup, headless), the game renderer settings
+  (dcp-renderer-selection-tests) and, through WSL, the syntax of the shared launcher sources plus the startup logic compiled
+  and run with g++. Every other group stays under -Full.
 
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -355,7 +356,7 @@ function Invoke-PtBrLocalizationChecks {
 $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
                   'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-character-highlight-tests', 'dcp-gallery-unlock-tests', 'dcp-kraken-fix-tests', 'dcp-endgame-unlocks-tests', 'dcp-thread-lifecycle-tests',
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
-                  'dcp-launcher-tests', 'dcp-korean-localization-tests', 'dcp-issue84-tests', 'dcp-item-attack-cap-tests',
+                  'dcp-launcher-tests', 'dcp-launcher-startup-tests', 'dcp-korean-localization-tests', 'dcp-issue84-tests', 'dcp-item-attack-cap-tests',
                   'dcp-save-editor-tests', 'dcp-save-page-tests', 'dcp-inventory-editor-tests', 'dcp-character-override-tests'
 $requiredBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
                   'CUSA10209 1.00 Asia/Hong Kong'
@@ -364,6 +365,7 @@ $blockedBuilds = 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
 $tests = @(
     (Test-Step 'Windows memory tests (sparse backing, commitment, aliases, release)' 'dcp-memory-windows-tests'),
     (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings, and the launcher UI groups: icons, licenses, header art, DPI layout, scrollbar gutter, separators, sidebar, navigation, renderer)' 'dcp-launcher-tests' -Parity -Capture),
+    (Test-Step 'launcher startup without Vulkan (G8K2W: renderer fallback, recovery option, Vulkan probe scenarios, graphics card list)' 'dcp-launcher-startup-tests'),
     (Test-Step 'launcher static gate (source hygiene, TRG patch chain, compiler warnings, Windows and Linux syntax-only compiles)' -Script 'tests\launcher_gate_tests.ps1' -Capture `
         -Arguments (@('-BuildDir', $buildDir) + @(if ($SkipLinux) { '-SkipLinux' }))),
     (Test-Step 'PT-BR localization checks (ptbr.py selftest, validate, parity)' -Block { Invoke-PtBrLocalizationChecks } -Capture -Key 'PT-BR localization checks'),
@@ -473,13 +475,15 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'launcher Portuguese (Brazil) localization'
-$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-inventory-editor-tests', 'dcp-save-editor-tests')
+$defaultFocusName = 'G8K2W launcher without Vulkan'
+$defaultFocusSuites = @('dcp-launcher-startup-tests', 'dcp-launcher-tests', 'dcp-renderer-selection-tests')
 # The result line each focused selector must print: a selector that finds nothing to check (or prints nothing) is a failure.
 $defaultFocusGroups = [ordered]@{
-    'dcp-launcher-tests ptbr-editor'           = @('GROUP|launcher-ptbr-editor|PASS')
-    'dcp-inventory-editor-tests localization' = @('GROUP|inventory-localization|PASS', 'GROUP|inventory-ui|PASS')
-    'dcp-save-editor-tests localization'      = @('GROUP|editor-localization|PASS')
+    'dcp-launcher-startup-tests'     = @('GROUP|launcher-startup-logic|PASS')
+    'dcp-launcher-tests startup'     = @('GROUP|launcher-startup|PASS')
+    'dcp-launcher-tests renderer'    = @('GROUP|launcher-renderer|PASS')
+    'dcp-launcher-tests headless'    = @('GROUP|launcher-headless-cli|PASS')
+    'dcp-renderer-selection-tests'   = @('renderer selection tests:')
 }
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
@@ -544,13 +548,15 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @(
-        (Test-Step 'Launcher Portuguese (Brazil) text (duplicate keys, accents, class names and the game''s terms, Editor strings, English and other languages unchanged)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests ptbr-editor' -Arguments @('ptbr-editor')),
-        (Test-Step 'Inventory Editor Portuguese (Brazil) names (the game''s sheets through the shared lookup, composed names, modifiers, colours, search, sort, fallbacks, identity and save bytes, DPI layout)' 'dcp-inventory-editor-tests' -Capture -Quiet `
-            -Key 'dcp-inventory-editor-tests localization' -Arguments @('localization')),
-        (Test-Step 'Appearance Portuguese (Brazil) colour names (a synthetic archive: every class and preset, English and other languages unchanged)' 'dcp-save-editor-tests' -Capture -Quiet `
-            -Key 'dcp-save-editor-tests localization' -Arguments @('localization')),
-        (Test-Step 'Linux launcher syntax (WSL: g++ -fsyntax-only on the shared launcher sources and the Editor tests; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-launcher.sh' } `
+        (Test-Step 'launcher startup logic (renderer fallback and recovery option, Vulkan probe scenarios, graphics card list; scripted systems, no window)' 'dcp-launcher-startup-tests' -Capture -Quiet),
+        (Test-Step 'launcher startup wiring (Vulkan after the window, probe never asserts, launcher failure starts nothing, CLI option, diagnostics, game renderer settings)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests startup' -Arguments @('startup')),
+        (Test-Step 'launcher renderer (Direct3D 11 with the issue #45 pins, software fallback, first frame, teardown, present stall telemetry, frame cap)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests renderer' -Arguments @('renderer')),
+        (Test-Step 'headless command interface (--install, --check-game, skipped-launcher patches)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests headless' -Arguments @('headless')),
+        (Test-Step 'game renderer selection (Vulkan, Auto, OpenGL, Direct3D 11 values and policy)' 'dcp-renderer-selection-tests' -Capture),
+        (Test-Step 'Linux launcher syntax and startup logic (WSL: g++ -fsyntax-only on the shared launcher sources and the Editor tests, then the startup logic compiled and run; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-launcher.sh' } `
             -Key 'Linux launcher syntax (WSL)' -Nominal 30)
     )
     $requiredSuites = $defaultFocusSuites
@@ -560,7 +566,7 @@ Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
 if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-korean-localization-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-launcher-startup-tests dcp-korean-localization-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
@@ -1043,6 +1049,7 @@ $launcherSummary = [ordered]@{
     'Sidebar EN/PT-BR' = Get-LauncherRow @('launcher-sidebar')
     'Navigation coherence' = Get-LauncherRow @('launcher-navigation')
     'DCP-RFWKVY renderer' = Get-LauncherRow @('launcher-renderer')
+    'G8K2W startup' = Get-LauncherRow @('launcher-startup')
     'Headless CLI' = Get-LauncherRow @('launcher-headless-cli')
     'TRG patch chain' = Get-LauncherRow @('launcher-patches')
     'Compiler warnings' = Get-LauncherRow @('launcher-warnings')

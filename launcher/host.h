@@ -10,6 +10,7 @@
 #include <imgui.h>
 
 #include "frame_pacer.h"
+#include "launcher_renderer.h"
 #include "placement.h"
 
 struct SDL_Renderer;
@@ -26,7 +27,11 @@ struct HostOptions {
     int min_height = 610; // every sidebar page fits at the compact row height
     std::optional<WindowPlacement> restore;  // used when it lies on a display
     bool hidden = false;                     // page screenshots without showing the window
+    std::string renderer = std::string(kLauncherRendererAuto); // --launcher-renderer; never saved
 };
+
+// A message box of the system itself, for when no renderer opens. Independent of SDL's renderers and of Vulkan.
+void ShowNativeError(const std::string& title, const std::string& text);
 
 class LauncherHost {
 public:
@@ -35,8 +40,9 @@ public:
     LauncherHost(const LauncherHost&) = delete;
     LauncherHost& operator=(const LauncherHost&) = delete;
 
-    // False when no window or renderer could be created; nothing is left open then.
+    // False when no window or renderer could be created; nothing is left open then and FailureText says why.
     bool Open(const HostOptions& options);
+    const std::string& FailureText() const { return failure_text_; }
     // Shows the window once its first frame has been drawn. Does nothing when it was opened hidden.
     void Show();
     void Close();
@@ -61,6 +67,12 @@ public:
     const std::optional<WindowPlacement>& Restored() const { return restored_; }
 
 private:
+    struct Geometry;
+    bool Fail(StartupFailure failure, const std::string& detail);
+    SDL_Window* OpenWindow(const HostOptions& options, const Geometry& geometry);
+    std::optional<RendererFailure> OpenRenderer(const HostOptions& options, const Geometry& geometry, std::string_view name);
+    std::optional<RendererFailure> ProbeFirstFrame();
+    void ReleaseWindow();
     bool PumpEvents();
     bool Minimized() const;
     void ConfigureVsync();
@@ -71,6 +83,10 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     ImGuiContext* imgui_ = nullptr;
     std::vector<SDL_Texture*> textures_;
+    bool sdl_backend_ = false;
+    bool renderer_backend_ = false;
+    int pinned_modules_ = 0;
+    std::string failure_text_;
     bool video_ = false;
     bool gamepad_ = false;
     bool hidden_ = false;

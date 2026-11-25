@@ -53,7 +53,9 @@ renderer.
 `dcpgpu_init` (`gpu/shim/dcpgpu.cpp`) resolves the setting through `gpu/shim/dcp_renderer.h`, and the factory in
 `video_core/renderer_factory.cpp` creates the presenter behind `video_core/renderer_backend.h`, the only boundary the GPU
 front end (Liverpool, VideoOut, guest memory) sees. A window is created for one renderer, so Auto decides before there is a
-window: it asks `dcp_check_vulkan` what Vulkan can do and uses OpenGL when that fails. A Vulkan device that passes the
+window: it asks `dcp_check_vulkan` what Vulkan can do and uses OpenGL when that fails. The launcher's own window never uses
+Vulkan, OpenGL or the game's renderer: see [Launcher without Vulkan](LAUNCHER.md#launcher-without-vulkan) for its renderer
+order and the `--launcher-renderer` recovery option. A Vulkan device that passes the
 check and still fails to start is not caught. Vulkan and OpenGL chosen by name never fall back.
 
 `video_core/renderer_opengl` targets OpenGL 3.3 core, which every shader in the game's cache fits:

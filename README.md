@@ -245,7 +245,7 @@ Windows may warn the first time you run the program, because the release is not 
 
 ## The launcher
 
-The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
+The launcher opens before the game. Your choices are saved to `user\dcp.ini`. To turn the launcher off, set **Show this launcher** to **Off** on the Play page. Hold **Shift** while starting to bring it back (on Linux, also with `--launcher`, see [Linux and Steam Deck](#linux-and-steam-deck)). If the launcher does not open on your system, start `dragons_crown_pro.exe --launcher --launcher-renderer software` to draw it with software rendering; the option applies to that start only and is never saved (see [launcher without Vulkan](docs/LAUNCHER.md#launcher-without-vulkan)). The launcher works the same on both platforms (Allow overlay programs is Windows-only); on Linux the folder paths below use `/` instead of a backslash.
 
 ### Play
 - **Install game...** from your `.pkg` file or an already extracted game folder, with the Title ID, version and `eboot.bin` checks, and **Reinstall game...**

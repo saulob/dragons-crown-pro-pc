@@ -55,6 +55,7 @@
 #include "file_browser.h"
 #include "frame_pacer.h"
 #include "launcher_renderer.h"
+#include "dcp_renderer.h"
 #include "fms_sheet.h"
 #include "game_files.h"
 #include "game_install.h"
@@ -2868,7 +2869,8 @@ void TestOverlayProgramsSetting(const fs::path& base) {
 void TestGameProcess() {
     // The game process keeps the paths and options, never the launcher's own choices, and continues this run's log.
     const std::vector<std::string> launcher = {"boot.bin", "--launcher", "--user", "D:\\Games\\DCP\\user", "--log",
-                                               "old.log", "--dcp-skip-launcher", "--strict-imports", "--dcp-game"};
+                                               "old.log", "--dcp-skip-launcher", "--launcher-renderer", "software",
+                                               "--strict-imports", "--dcp-game"};
     const std::vector<std::string> game = GameProcessArguments(launcher, "D:\\logs\\dragons_crown_pro_042.log");
     const std::vector<std::string> expected = {"boot.bin", "--user", "D:\\Games\\DCP\\user", "--strict-imports",
                                                "--dcp-game", "--log", "D:\\logs\\dragons_crown_pro_042.log"};
@@ -2954,36 +2956,58 @@ void TestLauncherRenderer() {
           RendererModulesToPin("opengl").empty());
 
     const std::string host = ReadAll(source / "launcher" / "host.cpp");
-    const std::string create = Between(host, "SDL_Renderer* CreateLauncherRenderer(", "} // namespace");
-    CHECK(!create.empty());
-    CHECK(create.find("LauncherRendererOrder(kWindows)") != std::string::npos);
-    const size_t pin = create.find("PinRendererModules(name, pinned)");
-    const size_t skip = create.find("continue;", pin);
-    const size_t made = create.find("SDL_CreateRenderer(window,", pin);
-    CHECK(pin != std::string::npos && skip != std::string::npos && made != std::string::npos && pin < skip && skip < made);
-    CHECK(create.find("fallback = i > 0;") != std::string::npos);
+    const std::string open = Between(host, "std::optional<RendererFailure> LauncherHost::OpenRenderer(", "bool LauncherHost::Open(");
+    CHECK(!open.empty());
+    const size_t pin = open.find("PinRendererModules(name, pinned_modules_)");
+    const size_t pin_skip = open.find("return RendererFailure{RendererStage::kPin", pin);
+    const size_t window = open.find("OpenWindow(options, geometry)", pin);
+    const size_t made = open.find("SDL_CreateRenderer(window_,", window);
+    const size_t first_frame = open.find("ProbeFirstFrame()", made);
+    const size_t vsync = open.find("ConfigureVsync();", first_frame);
+    const size_t imgui_sdl = open.find("ImGui_ImplSDL3_InitForSDLRenderer(", vsync);
+    const size_t imgui_renderer = open.find("ImGui_ImplSDLRenderer3_Init(", imgui_sdl);
+    CHECK(pin != std::string::npos && pin_skip != std::string::npos && made != std::string::npos && imgui_renderer != std::string::npos);
+    CHECK(pin < pin_skip && pin_skip < window && window < made && made < first_frame && first_frame < vsync &&
+          vsync < imgui_sdl && imgui_sdl < imgui_renderer);
+    const std::string opener = Between(host, "bool LauncherHost::Open(", "// On a Windows GDI window");
+    CHECK(opener.find("SelectLauncherRenderer(") != std::string::npos);
+    CHECK(opener.find("options.renderer, kWindows,") != std::string::npos);
+    CHECK(opener.find("[this] { ReleaseWindow(); }") != std::string::npos);
     CHECK(host.find("SDL_CreateRenderer(") == host.rfind("SDL_CreateRenderer("));
     CHECK(host.find("SDL_HINT_RENDER_DRIVER") == std::string::npos);
+    const std::string probe_frame = Between(host, "LauncherHost::ProbeFirstFrame() {", "std::optional<RendererFailure> LauncherHost::OpenRenderer(");
+    for (const char* step : {"SDL_CreateTexture(", "SDL_UpdateTexture(", "SDL_RenderClear(", "SDL_RenderTexture(", "SDL_RenderPresent("}) {
+        CHECK(probe_frame.find(step) != std::string::npos);
+    }
+    CHECK(probe_frame.find("SDL_DestroyTexture(texture);") != std::string::npos);
+    std::string host_lower = host;
+    std::transform(host_lower.begin(), host_lower.end(), host_lower.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    CHECK(host_lower.find("vulkan") == std::string::npos && host_lower.find("sdl_window_opengl") == std::string::npos);
     const std::string pin_module = Between(host, "bool PinModule(std::string_view name) {", "int64_t ThreadCpuNs()");
     CHECK(pin_module.find("LoadLibraryW(") != std::string::npos);
     CHECK(pin_module.find("GET_MODULE_HANDLE_EX_FLAG_PIN") != std::string::npos);
     CHECK(host.find("FreeLibrary") == std::string::npos);
-    CHECK(host.find("RendererSelectedLine(renderer_name_, fallback, pinned)") != std::string::npos);
+    CHECK(host.find("RendererSelectedLine(renderer_name_, selection.fallback, pinned_modules_)") != std::string::npos);
     CHECK(host.find("Launcher: window %dx%d at %.2fx display scale, %s renderer") != std::string::npos);
     CHECK(RendererSelectedLine("direct3d11", false, 2) ==
           "Launcher telemetry: renderer_selected renderer=direct3d11 fallback=0 pinned_modules=2");
     CHECK(RendererSelectedLine("software", true, 2) ==
           "Launcher telemetry: renderer_selected renderer=software fallback=1 pinned_modules=2");
 
-    // Teardown stays textures, ImGui, renderer, window, SDL, and the game starts only after the host closed.
+    // Teardown stays textures, ImGui, renderer, window, SDL, and the game starts only after the host closed. A failed
+    // attempt runs the same release before the next renderer is tried.
+    const std::string release = Between(host, "void LauncherHost::ReleaseWindow() {", "void LauncherHost::Close() {");
+    const size_t textures = release.find("SDL_DestroyTexture(texture);");
+    const size_t renderer_backend = release.find("ImGui_ImplSDLRenderer3_Shutdown();");
+    const size_t sdl_backend = release.find("ImGui_ImplSDL3_Shutdown();");
+    const size_t imgui = release.find("ImGui::DestroyContext(imgui_);");
+    const size_t renderer = release.find("SDL_DestroyRenderer(renderer_);");
+    const size_t window_destroyed = release.find("SDL_DestroyWindow(window_);");
+    CHECK(textures != std::string::npos && textures < renderer_backend && renderer_backend < sdl_backend &&
+          sdl_backend < imgui && imgui < renderer && renderer < window_destroyed);
+    CHECK(release.find("if (renderer_backend_) {") != std::string::npos && release.find("if (sdl_backend_) {") != std::string::npos);
     const std::string close = Between(host, "void LauncherHost::Close() {", "bool LauncherHost::PumpEvents()");
-    const size_t textures = close.find("SDL_DestroyTexture(texture);");
-    const size_t imgui = close.find("ImGui::DestroyContext(imgui_);");
-    const size_t renderer = close.find("SDL_DestroyRenderer(renderer_);");
-    const size_t window = close.find("SDL_DestroyWindow(window_);");
-    const size_t quit = close.find("SDL_Quit();");
-    CHECK(textures != std::string::npos && textures < imgui && imgui < renderer && renderer < window && window < quit &&
-          quit != std::string::npos);
+    CHECK(close.find("ReleaseWindow();") != std::string::npos && close.find("ReleaseWindow();") < close.find("SDL_Quit();"));
     const std::string app = ReadAll(source / "launcher" / "launcher.cpp");
     const std::string run = Between(app, "bool Run(Outcome& outcome) {", "Outcome Frame() {");
     const size_t loop_end = run.find("dcp_startup_phase(\"launcher loop ended\");");
@@ -3001,6 +3025,121 @@ void TestLauncherRenderer() {
     // The game's renderer is Vulkan, so the launcher's choice never reaches the GPU shim.
     const std::string shim = ReadAll(source / "gpu" / "shim" / "window.cpp");
     CHECK(shim.find("SDL_SOFTWARE_RENDERER") == std::string::npos && shim.find("direct3d11") == std::string::npos);
+}
+
+// G8K2W: the launcher opens whatever Vulkan offers. Source order and wiring; the logic itself is in
+// tests/launcher_startup_tests.cpp.
+void TestLauncherStartup() {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string app = ReadAll(source / "launcher" / "launcher.cpp");
+    const std::string host = ReadAll(source / "launcher" / "host.cpp");
+    const std::string list = ReadAll(source / "gpu" / "shim" / "dcp_gpu_list.cpp");
+    const std::string platform = ReadAll(source / "gpu" / "shadps4" / "video_core" / "renderer_vulkan" / "vk_platform.cpp");
+    const std::string loader = ReadAll(source / "src" / "loader.c");
+    const std::string header = ReadAll(source / "launcher" / "dcp_launcher.h");
+
+    // The window and its renderer come first; Vulkan is asked once the launcher is on screen, never in Open.
+    const std::string run = Between(app, "bool Run(Outcome& outcome) {", "Outcome Frame() {");
+    const size_t opened = run.find("host_.Open(options)");
+    const size_t shown = run.find("host_.Show();");
+    const size_t detected = run.find("DetectGraphics();");
+    const size_t loop = run.find("while (outcome == Outcome::kRunning) {");
+    CHECK(opened != std::string::npos && shown != std::string::npos && detected != std::string::npos && loop != std::string::npos);
+    CHECK(opened < shown && shown < detected && detected < loop);
+    CHECK(run.find("dcp_gpu_probe(") == std::string::npos && run.find("ListGpuNames") == std::string::npos);
+    CHECK(app.find("dcp_gpu_names") == std::string::npos && header.find("dcp_gpu_names") == std::string::npos);
+    CHECK(app.find("dcp_gpu_probe(&probe)") != std::string::npos && app.find("dcp_gpu_probe(") == app.rfind("dcp_gpu_probe("));
+    const std::string detect = Between(app, "void DetectGraphics() {", "void NormalizeGraphicsCard() {");
+    const std::string entry_log = Between(app, "extern \"C\" DcpLauncherResult dcp_launcher_run(", "\n}\n");
+    CHECK(detect.find("SoftwareRecovery(config_)") != std::string::npos && detect.find("kGpuProbeMarker") != std::string::npos);
+    CHECK(detect.find("vulkan probe starting") != std::string::npos && detect.find("std::fflush(nullptr)") != std::string::npos);
+    CHECK(detect.find("Set(") == std::string::npos);
+    CHECK(entry_log.find("game renderer setting=%s\", settings.Get(kRendererKey, kDefaultRenderer)") != std::string::npos);
+    CHECK(entry_log.find("game renderer setting") < entry_log.find("LauncherApp app("));
+    CHECK(host.find("dcp_gpu_probe") == std::string::npos && host.find("vk::") == std::string::npos);
+
+    // The probe never reaches the renderer's asserting instance, and leaves the shared dispatcher as it found it.
+    CHECK(list.find("CreateInstance(Frontend") == std::string::npos && list.find("CreateProbeInstance()") != std::string::npos);
+    CHECK(list.find("ASSERT") == std::string::npos && list.find("UNREACHABLE") == std::string::npos);
+    CHECK(list.find("saved_(VULKAN_HPP_DEFAULT_DISPATCHER)") != std::string::npos);
+    CHECK(list.find("VULKAN_HPP_DEFAULT_DISPATCHER = saved_;") != std::string::npos);
+    CHECK(list.find("instance_.reset();") < list.find("VULKAN_HPP_DEFAULT_DISPATCHER = saved_;"));
+    CHECK(list.find("g_loader.reset") == std::string::npos && list.find("std::mutex") != std::string::npos);
+    CHECK(list.find("DcpVulkanProbe::Run(source, Vulkan::TargetVulkanApiVersion)") != std::string::npos);
+    CHECK(list.find("dcp_check_vulkan") != std::string::npos && list.find("DcpVulkanProbe::Describe(report") != std::string::npos);
+    const std::string probe_instance =
+        Between(platform, "vk::ResultValue<vk::UniqueInstance> CreateProbeInstance() {", "vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback");
+    CHECK(!probe_instance.empty() && probe_instance.find("ASSERT") == std::string::npos);
+    CHECK(platform.find("ASSERT_MSG(available_version >= TargetVulkanApiVersion") != std::string::npos);
+
+    // A card list that could not be made leaves the saved card alone.
+    const std::string normalize = Between(app, "void NormalizeGraphicsCard() {", "PromptStyle InstalledPrompts() const {");
+    CHECK(normalize.find("if (found >= 0 && gpu_names_[found] != current) {") != std::string::npos);
+    CHECK(DcpGraphics::ResolveGpuByName({}, "AMD Radeon RX 580") == -1);
+    CHECK(app.find("Tr(GraphicsCardsProblem(cards_))") != std::string::npos);
+    const std::string ptbr = ReadAll(source / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    for (const char* text : {"No graphics card found", "Vulkan is not available on this system", "This system does not support Vulkan 1.3",
+                             "Graphics card detection is off in software recovery mode",
+                             "Graphics card detection was skipped (it did not finish last time)"}) {
+        CHECK(ptbr.find(std::string("\n") + text + "\t") != std::string::npos);
+    }
+
+    // A launcher that cannot open says so and starts nothing; skipping the launcher on purpose still plays.
+    const std::string entry = Between(app, "extern \"C\" DcpLauncherResult dcp_launcher_run(", "\n}\n");
+    const std::string failed = Between(entry, "if (!app.Run(outcome)) {", "}");
+    CHECK(failed.find("ReportLauncherFailure(app.failure_text(), SoftwareRecovery(*config))") != std::string::npos);
+    CHECK(failed.find("PlayWithSavedPatches") == std::string::npos && failed.find("PlayOrExplain") == std::string::npos &&
+          failed.find("DCP_LAUNCHER_PLAY") == std::string::npos);
+    const std::string report = Between(app, "DcpLauncherResult ReportLauncherFailure(", "DcpLauncherResult ExplainInWindow(");
+    CHECK(report.find("ShowNativeError(") != std::string::npos && report.find("return DCP_LAUNCHER_BLOCKED;") != std::string::npos);
+    CHECK(report.find("DCP_LAUNCHER_PLAY") == std::string::npos && report.find("--launcher --launcher-renderer software") != std::string::npos);
+    const size_t bypass = entry.find("if (!LauncherWanted(ready, show_setting, shift, config->skip_once != 0)) {");
+    CHECK(bypass != std::string::npos &&
+          entry.find("return PlayWithSavedPatches(*config, settings, paths, check);", bypass) < entry.find("LauncherApp app("));
+    CHECK(loader.find("if (launched==DCP_LAUNCHER_BLOCKED) exit(1);") != std::string::npos);
+    CHECK(loader.find("if (launched==DCP_LAUNCHER_BLOCKED) exit(1);") < loader.find("launched==DCP_LAUNCHER_GAME_STARTED"));
+    CHECK(host.find("MessageBoxW(nullptr") != std::string::npos);
+    const std::string explain = Between(app, "DcpLauncherResult ExplainInWindow(", "DcpLauncherResult PlayOrExplain(");
+    CHECK(explain.find("ShowNativeError(") != std::string::npos && explain.find("options.renderer =") != std::string::npos);
+
+    // --launcher-renderer: parsed and checked before anything starts, never saved, never given to the game.
+    const size_t parsed = loader.find("\"--launcher-renderer\"");
+    CHECK(parsed != std::string::npos && parsed < loader.find("dcp_resolve_paths(&request,&paths)"));
+    CHECK(loader.find("dcp_launcher_renderer_known(argv[i+1])") != std::string::npos);
+    CHECK(loader.find("game_process,log_started ? log_path : NULL,launcher_renderer}") != std::string::npos);
+    CHECK(loader.find("[--launcher-renderer %s]") != std::string::npos);
+    CHECK(header.find("const char *launcher_renderer;") != std::string::npos && header.find("int dcp_launcher_renderer_known(") != std::string::npos);
+    const std::string requested = Between(app, "std::string RequestedRenderer(", "class LauncherApp {");
+    CHECK(requested.find("settings") == std::string::npos && requested.find("Set(") == std::string::npos);
+    CHECK(app.find("settings_.Set(kRendererKey") == std::string::npos && app.find("SetBool(kRendererKey") == std::string::npos);
+    const std::vector<std::string> game = GameProcessArguments({"--launcher", "--launcher-renderer", "software", "--user", "u"}, "");
+    CHECK((game == std::vector<std::string>{"--user", "u", kGameProcessArgument}));
+
+    // Startup diagnostics: every step is a line of its own, flushed before the next driver call.
+    for (const char* part : {"RendererRequestLine(options.renderer, kWindows)", "RendererAttemptLine(", "RendererResultLine(selection)",
+                             "StartupFailureLine(failure, detail)", "Launcher: startup: renderer trying=",
+                             "dcp_startup_phase(\"launcher renderer selection\")", "std::fflush(nullptr);"}) {
+        CHECK(host.find(part) != std::string::npos);
+    }
+    CHECK(host.find("renderer trying=") < host.find("OpenRenderer(options, geometry, name)"));
+    CHECK(list.find("SummaryLine(report)") != std::string::npos);
+
+    // The game's renderer setting is the same list, default and Auto policy as before.
+    std::vector<std::string> keys;
+    for (const RendererChoice& choice : kRendererChoices) {
+        keys.emplace_back(choice.key);
+    }
+#ifdef _WIN32
+    CHECK((keys == std::vector<std::string>{"auto", "vulkan", "opengl", "d3d11"}));
+#else
+    CHECK((keys == std::vector<std::string>{"auto", "vulkan", "opengl"}));
+#endif
+    CHECK(std::string(kRendererKey) == "renderer" && std::string(kDefaultRenderer) == "vulkan");
+    CHECK(DcpRenderer::Resolve(DcpRenderer::Auto, false, "no Vulkan").backend == DcpRenderer::Backend::OpenGL);
+    CHECK(DcpRenderer::Resolve(DcpRenderer::Auto, true, "").backend == DcpRenderer::Backend::Vulkan);
+    CHECK(DcpRenderer::Resolve(DcpRenderer::Vulkan, false, "no Vulkan").backend == DcpRenderer::Backend::Vulkan);
+    CHECK(DcpRenderer::Resolve(DcpRenderer::OpenGL, false, "").backend == DcpRenderer::Backend::OpenGL);
+    CHECK(DcpRenderer::Resolve(DcpRenderer::Direct3D11, false, "").backend == DcpRenderer::Backend::Direct3D11);
 }
 
 void TestCheatSettings(const fs::path& base) {
@@ -5395,7 +5534,7 @@ void TestLauncherPresentation() {
     CHECK(pump != std::string::npos && ready != std::string::npos && pump < ready && ready < wait.find("SDL_DelayNS("));
     CHECK(wait.find("SDL_Delay(kMinimizedSleepMs)") != std::string::npos && wait.find("monitor_.Waited(") != std::string::npos);
     CHECK(wait.find("SDL_RenderPresent") == std::string::npos);
-    CHECK(host.find("SDL_RenderPresent(renderer_)") == host.rfind("SDL_RenderPresent(renderer_)"));
+    CHECK(host.find("SDL_RenderPresent(renderer_);") == host.rfind("SDL_RenderPresent(renderer_);")); // the probe's is a condition
     const std::string end_frame = Between(host, "void LauncherHost::EndFrame(", "bool LauncherHost::Fullscreen()");
     const size_t presenting = end_frame.find("const int64_t presenting = NowNs();");
     const size_t present = end_frame.find("SDL_RenderPresent(renderer_);");
@@ -10944,13 +11083,13 @@ void TestSkippedLauncherPatches() {
     CHECK(count("PlanSavedPatches(settings_, paths_.app0, *build_, XboxPromptsPatch())") == 1);
     CHECK(count("StartPatches(plan.prompts, plan.safe_mode, PatchAction::kRestore)") == 1);
     CHECK(count("PromptPatchInstalled") == 0 && count("SavedPromptStyle") == 0);
-    CHECK(count("PlayWithSavedPatches(*config, settings, paths, check)") == 2);
+    CHECK(count("PlayWithSavedPatches(*config, settings, paths, check)") == 1);
     CHECK(count("return PlayOrExplain(*config, settings);") == 0);
     const size_t play = launcher.find("DcpLauncherResult PlayWithSavedPatches(");
     const size_t fail = launcher.find("if (!run.result.ok) {", play);
     const size_t go = launcher.find("return PlayOrExplain(config, settings);", play);
     CHECK(play != std::string::npos && fail != std::string::npos && go != std::string::npos && fail < go);
-    CHECK(launcher.find("return ExplainInWindow(\"Launcher\", kSavedPatchesFailed, kSavedPatchesAdvice);", fail) < go);
+    CHECK(launcher.find("return ExplainInWindow(\"Launcher\", kSavedPatchesFailed, kSavedPatchesAdvice, config.launcher_renderer);", fail) < go);
 
     std::error_code ec;
     fs::remove_all(base, ec);
@@ -11657,6 +11796,12 @@ int main(int argc, char** argv) {
         std::printf("GROUP|launcher-renderer|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "startup") {
+        InGroup("startup", TestLauncherStartup);
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-startup|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "manual-visual") {
         TestPtBrManualVisualPatches();
         std::printf("%d checks, %d failed\n", g_checks, g_failures);
@@ -11800,6 +11945,7 @@ int main(int argc, char** argv) {
     InGroup("parity", TestSharedLauncherSource);
     InGroup("renderer", TestLauncherRenderer);
     InGroup("renderer", TestLauncherPresentation);
+    InGroup("startup", TestLauncherStartup);
     InGroup("headless-cli", TestHeadlessCli);
     InGroup("headless-cli", TestSkippedLauncherPatches);
     TestKeyBindings(base);

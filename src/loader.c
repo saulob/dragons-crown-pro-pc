@@ -692,6 +692,11 @@ static uint32_t highlight_look(int slot, uint64_t record, int klass, int color, 
     const AppearanceInstance *instance=appearance_instance_of_record(record,klass,color);
     return instance && instance->entry[0] ? character_highlight_custom_key(instance->entry) : CHARACTER_HIGHLIGHT_NATIVE_LOOK;
 }
+#ifdef _WIN32
+#define LAUNCHER_RENDERER_NAMES "auto|software|direct3d11"
+#else
+#define LAUNCHER_RENDERER_NAMES "auto|software"
+#endif
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     /* tools\build.ps1: the launcher's boot image builder on a prepared game folder, without starting anything. */
@@ -725,7 +730,7 @@ int main(int argc, char **argv) {
     int cpu_only = 0, strict_imports = 0, check_imports = 0;
     unsigned timeout_seconds = 0;
     int skip_launcher = 0, force_launcher = 0, game_child = 0;
-    const char *boot=NULL, *content_profile=NULL, *app0=NULL, *user_dir=NULL, *logs_dir=NULL, *log_file=NULL;
+    const char *boot=NULL, *content_profile=NULL, *app0=NULL, *user_dir=NULL, *logs_dir=NULL, *log_file=NULL, *launcher_renderer=NULL;
     int first_option = 1;
     if (argc > 1 && strncmp(argv[1], "--", 2)) { boot = argv[1]; first_option = 2; }
     for (int i = first_option; i < argc; ++i) {
@@ -739,10 +744,17 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--log") && i+1<argc) log_file=argv[++i];
         else if (!strcmp(argv[i], "--dcp-skip-launcher")) skip_launcher = 1;
         else if (!strcmp(argv[i], "--launcher")) force_launcher = 1;
+        else if (!strcmp(argv[i], "--launcher-renderer")) {
+            if (i+1>=argc || !dcp_launcher_renderer_known(argv[i+1])) {
+                fprintf(stderr, "--launcher-renderer needs one of: %s\n", LAUNCHER_RENDERER_NAMES);
+                return 1;
+            }
+            launcher_renderer=argv[++i];
+        }
         else if (!strcmp(argv[i], "--dcp-game")) game_child = 1;
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
         else {
-            fprintf(stderr, "Unknown option: %s\nUsage: %s [boot.bin] [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--logs dir] [--log file] [--dcp-skip-launcher] [--launcher] [--timeout seconds]\n       %s --install <PKG or extracted game folder>\n       %s --check-game\n", argv[i], argv[0], argv[0], argv[0]);
+            fprintf(stderr, "Unknown option: %s\nUsage: %s [boot.bin] [--cpu-only] [--strict-imports] [--check-imports] [--content-profile file] [--app0 dir] [--user dir] [--logs dir] [--log file] [--dcp-skip-launcher] [--launcher] [--launcher-renderer %s] [--timeout seconds]\n       %s --install <PKG or extracted game folder>\n       %s --check-game\n", argv[i], argv[0], LAUNCHER_RENDERER_NAMES, argv[0], argv[0]);
             return 1;
         }
     }
@@ -795,7 +807,7 @@ int main(int argc, char **argv) {
         check_graphics=system_usable;
 #endif
         DcpLauncherConfig launcher={app0,paths.image_dir,user_dir,settings_file,log_folder,skip_launcher,force_launcher,check_graphics,
-                                    game_process,log_started ? log_path : NULL};
+                                    game_process,log_started ? log_path : NULL,launcher_renderer};
         dcp_startup_phase("launcher handoff");
         DcpLauncherResult launched=dcp_launcher_run(&launcher);
         dcp_startup_phase("launcher returned");

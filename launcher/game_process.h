@@ -19,7 +19,7 @@ inline constexpr bool kSeparateGameProcessAvailable = false;
 bool SeparateGameProcessWanted(bool overlays_allowed, bool available = kSeparateGameProcessAvailable);
 
 // launcher_arguments: this process's arguments, without the program. The game process gets them without the ones that
-// choose the launcher or the log, then --dcp-game and, when log_file is set, --log <log_file> (it continues that log).
+// choose the launcher, its renderer or the log, then --dcp-game and, when log_file is set, --log <log_file> (it continues that log).
 std::vector<std::string> GameProcessArguments(const std::vector<std::string>& launcher_arguments,
                                               const std::string& log_file);
 

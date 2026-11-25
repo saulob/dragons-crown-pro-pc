@@ -10,6 +10,7 @@
 #include "hp_override_hooks.h"
 
 #include "cyrillic_glyphs.h"
+#include "dcp_gpu_probe.h"
 #include "dcp_resolution.h"
 #include "hangul_glyphs.h"
 
@@ -32,7 +33,12 @@ typedef struct {
     DcpGraphicsCheck check_graphics; /* NULL: Play does not check; see dcp_check_vulkan */
     int game_process;          /* Windows: with Allow overlay programs on, Play starts the game as a process of its own */
     const char *log_file;      /* this run's log, continued by the game process; NULL when there is none */
+    const char *launcher_renderer; /* --launcher-renderer: "auto", "software" or "direct3d11"; NULL is "auto". Only the
+                                    * launcher's own window; never saved and never passed to the game */
 } DcpLauncherConfig;
+
+/* 1 when `value` is a --launcher-renderer value this system has. */
+int dcp_launcher_renderer_known(const char *value);
 
 /* NULL asks for the default, which is relative to the executable (launcher/paths.h). */
 typedef struct {
@@ -227,10 +233,6 @@ void dcp_log_settings_summary(const char *settings_file, const char *image_dir, 
  * it runs. A process that could not be started is ended. */
 int dcp_resume_game_process(void);
 
-/* Fills `names` with the distinct names of the Vulkan devices the renderer can use and returns how many (none without a
- * usable Vulkan on Linux); enumerates only, no device is created. */
-int dcp_gpu_names(char (*names)[256], int max);
-
 /* A DcpGraphicsCheck: 1 when Vulkan can run the renderer. Otherwise logs why and returns 0. It asks again on every call
  * until it succeeds, so a driver installed meanwhile is found. */
 int dcp_check_vulkan(char *cause, size_t cause_size, char *advice, size_t advice_size);
@@ -301,7 +303,8 @@ typedef enum {
 } DcpLauncherResult;
 
 /* Shows the launcher when its rules say so (game files not ready, "Show this launcher" on, or Shift held) and returns
- * once the player pressed Play or quit. Returns DCP_LAUNCHER_PLAY at once when it is not shown.
+ * once the player pressed Play or quit. Returns DCP_LAUNCHER_PLAY at once when it is not shown. A launcher that cannot open
+ * any renderer says so in a message box of the system and returns DCP_LAUNCHER_BLOCKED: the game is not started.
  * While check_graphics fails, Play is refused: the launcher says why and stays open. A launcher that is not shown
  * explains in a window of its own and returns DCP_LAUNCHER_BLOCKED.
  * With game_process and Allow overlay programs on, Play creates the game process instead and returns

@@ -26,11 +26,19 @@ done
 for unit in tests/save_editor_tests.cpp tests/save_page_tests.cpp tests/inventory_editor_tests.cpp; do
     check -DDCP_SOURCE_DIR="\"$root\"" "$unit"
 done
-for header in trg/layout.h trg/page_navigation.h frame_pacer.h launcher_renderer.h; do
+for header in trg/layout.h trg/page_navigation.h frame_pacer.h launcher_renderer.h graphics_cards.h dcp_vulkan_probe.h; do
     printf '#include <%s>\n' "$header" > "$work/header_$count.cpp"
     check "$work/header_$count.cpp"
 done
 wait
+# The startup logic is pure: it is compiled for real and run, so the Linux renderer order and fallback are executed here.
+startup_ok=1
+g++ -std=c++20 -Wall -Wextra -Ilauncher -Isrc -Igpu/shim tests/launcher_startup_tests.cpp -o "$work/startup_tests" > "$work/startup_build.txt" 2>&1 || startup_ok=0
+if [ "$startup_ok" = 1 ]; then "$work/startup_tests" > "$work/startup_run.txt" 2>&1 || startup_ok=0; fi
+cat "$work"/startup_build.txt "$work"/startup_run.txt 2> /dev/null
+grep -q 'warning:' "$work/startup_build.txt" && startup_ok=0
+echo "LINUX-LAUNCHER|startup-logic|$([ "$startup_ok" = 1 ] && echo PASS || echo FAIL)"
+[ "$startup_ok" = 1 ] || failed=1
 cat "$work"/*.log
 compgen -G "$work/*.failed" > /dev/null && failed=1
 grep -q 'warning:' "$work"/*.log && failed=1

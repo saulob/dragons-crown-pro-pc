@@ -65,7 +65,7 @@ std::vector<std::string> GameProcessArguments(const std::vector<std::string>& la
                                               const std::string& log_file) {
     std::vector<std::string> arguments;
     for (size_t i = 0; i < launcher_arguments.size(); ++i) {
-        if (launcher_arguments[i] == "--log") {
+        if (launcher_arguments[i] == "--log" || launcher_arguments[i] == "--launcher-renderer") {
             ++i;
         } else if (!ChoosesLauncher(launcher_arguments[i])) {
             arguments.push_back(launcher_arguments[i]);

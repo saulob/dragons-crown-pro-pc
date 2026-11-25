@@ -112,6 +112,10 @@ Open the launcher to change them, or see the log.	Abra o launcher para alterá-l
 . Install the game files first.	. Instale os arquivos do jogo primeiro.
 Install failed:\s	Falha na instalação:\s
 No graphics card found	Nenhuma placa de vídeo encontrada
+Vulkan is not available on this system	O Vulkan não está disponível neste sistema
+This system does not support Vulkan 1.3	Este sistema não oferece suporte ao Vulkan 1.3
+Graphics card detection is off in software recovery mode	A detecção de placa de vídeo está desativada no modo de recuperação por software
+Graphics card detection was skipped (it did not finish last time)	A detecção de placa de vídeo foi ignorada (não terminou da última vez)
 Select your Dragon's Crown Pro package	Selecione o pacote de Dragon's Crown Pro
 Select your Dragon's Crown Pro extracted game folder	Selecione a pasta extraída de Dragon's Crown Pro
 From PKG...	De um PKG...
