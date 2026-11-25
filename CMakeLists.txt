@@ -102,6 +102,7 @@ set(DCP_RUNTIME_SOURCES
     src/hp_override_hooks.c
     src/default_message_hook.c
     src/guest_hook.c
+    src/touch_absolute.c
     src/inn_layout.c
     src/title_layout.c
     src/runtime.c
@@ -351,6 +352,14 @@ target_compile_options(dcp-isa-tests PRIVATE -Wall -Wextra -Werror)
 add_executable(dcp-module-history-tests EXCLUDE_FROM_ALL tests/module_history_tests.c src/module_history.c src/call_site.c src/startup_phase.c)
 target_include_directories(dcp-module-history-tests PRIVATE src)
 target_compile_options(dcp-module-history-tests PRIVATE -Wall -Wextra -Werror)
+
+# The touchscreen pointer: option-read sites, the mode while the screen is touched, the screen-to-surface mapping against
+# the game's Absolute position arithmetic, and every refusal (tools/test.ps1); not part of the default build.
+add_executable(dcp-touch-absolute-tests EXCLUDE_FROM_ALL tests/touch_absolute_tests.cpp src/touch_absolute.c src/guest_hook.c)
+set_target_properties(dcp-touch-absolute-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-touch-absolute-tests PRIVATE src)
+target_compile_definitions(dcp-touch-absolute-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-touch-absolute-tests PRIVATE -Wall -Wextra -Werror)
 
 # Focused tests of the Kraken tentacle null mast fix: the faulting sequence in every supported build, the patch, the null
 # path and every refusal (tools/test.ps1); not part of the default build.

@@ -209,6 +209,9 @@ constexpr char kPointerInteractionHelp[] =
     "Pointer Control.";
 constexpr char kPointerSensitivityHelp[] = "Controls how fast mouse movement moves the game's pointer.";
 constexpr char kWheelHelp[] = "The button a wheel step presses. Off by default.";
+constexpr char kTouchscreenModeHelp[] =
+    "\"DS4 trackpad\" makes the touchscreen mimic the DS4 trackpad behavior, where dragging your finger moves the cursor. "
+    "\"Touchscreen\" mode makes the cursor follow where you touch the screen.";
 constexpr char kSkipIntroHelp[] = "Skip startup logos and the opening movie and go straight to the title screen";
 constexpr char kJapaneseMenuButtonsHelp[] =
     "Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat "
@@ -1252,6 +1255,8 @@ private:
                      voices);
         }
         ui.Toggle("Skip Intro", kSkipIntroHelp, kSkipIntroKey, false, "Off", "On");
+        ui.Combo("Touchscreen mode", kTouchscreenModeHelp, kTouchscreenModeKey, kTouchscreenModeDirect,
+                 {{kTouchscreenModeTrackpad, "DS4 trackpad"}, {kTouchscreenModeDirect, "Touchscreen"}});
         std::vector<trg::Option> frame_rates;
         for (const int fps : {30, 60, 90, 120, 144, 165, 240, 0}) {
             frame_rates.push_back({std::to_string(fps), FrameRateLabel(fps)});

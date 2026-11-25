@@ -64,6 +64,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kMouseSensitivityKey, "100"},
     {kMousePointerModeKey, "hold"},
     {kMouseSteamDeckTrackpadKey, "auto"},
+    {kTouchscreenModeKey, kTouchscreenModeDirect},
     {kStorySkipOfferKey, "0"},
     {kTutorialSkipOfferKey, "0"},
     {kUnlockGalleryKey, "0"},
@@ -444,6 +445,12 @@ extern "C" int dcp_skip_intro(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return settings.GetBool(kSkipIntroKey, false) ? 1 : 0;
+}
+
+extern "C" int dcp_touchscreen_direct(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    return settings.Get(kTouchscreenModeKey, kTouchscreenModeDirect) == kTouchscreenModeTrackpad ? 0 : 1;
 }
 
 extern "C" int dcp_japanese_menu_buttons(const char* settings_file) {

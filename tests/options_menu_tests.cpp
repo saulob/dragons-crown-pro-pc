@@ -738,6 +738,7 @@ void TestLauncherParity() {
         "arachnophobia_safe_mode",
         "allow_overlay_programs",
         "mouse_steam_deck_trackpad",
+        "touchscreen_mode",
         "launcher_x",
         "launcher_y",
         "launcher_width",

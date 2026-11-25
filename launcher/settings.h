@@ -65,6 +65,11 @@ inline constexpr char kControllerExitShortcutKey[] = "controller_exit_shortcut";
 inline constexpr char kMouseControlsKey[] = "mouse_controls";
 inline constexpr char kMouseSensitivityKey[] = "mouse_pointer_sensitivity";
 inline constexpr char kMousePointerModeKey[] = "mouse_pointer_mode";
+// How a touchscreen moves the game's pointer (src/touch_absolute.h): "touchscreen" (the default) puts it under the finger,
+// "ds4_trackpad" moves it like the DualShock 4 touchpad, by how far the finger drags.
+inline constexpr char kTouchscreenModeKey[] = "touchscreen_mode";
+inline constexpr char kTouchscreenModeDirect[] = "touchscreen";
+inline constexpr char kTouchscreenModeTrackpad[] = "ds4_trackpad";
 // Steam Deck Gaming Mode: Auto drives the game's pointer from the trackpad without holding Pointer Control (src/dcp_trackpad.h).
 inline constexpr char kMouseSteamDeckTrackpadKey[] = "mouse_steam_deck_trackpad";
 // The game's own story skip and tutorial questions for every new character (src/skip_offers.h).

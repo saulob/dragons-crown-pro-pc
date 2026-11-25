@@ -25,6 +25,7 @@
 #include "endgame_unlocks.h"
 #include "character_highlight.h"
 #include "kraken_fix.h"
+#include "touch_absolute.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
 #include "exit_game_hook.h"
@@ -1036,12 +1037,14 @@ int main(int argc, char **argv) {
     const unsigned endgame_requested=endgame_unlocks_wanted(dcp_endgame_unlocks(settings_file));
     const size_t endgame_stub_area = known_build && endgame_requested ? endgame_unlocks_stub_bytes() : 0;
     const size_t kraken_fix_stub_area = known_build ? kraken_fix_stub_bytes() : 0;
+    const int touchscreen_direct=dcp_touchscreen_direct(settings_file);
+    const size_t touch_absolute_stub_area = known_build && touchscreen_direct ? touch_absolute_stub_bytes() : 0;
     const int lzcnt_rewrite = lzcnt_compat_needed(isa_host_features()) || getenv("DCP_EMULATE_LZCNT");
     const size_t lzcnt_stub_bytes = lzcnt_rewrite ? lzcnt_compat_stub_bytes() : 0;
     const size_t message_stub_offset = cheat_stub_bytes + save_stub_bytes + voice_stub_bytes + system_type_stub_bytes +
                                        ultrawide_stub_bytes + lzcnt_stub_bytes + party_stub_bytes + exit_game_stub_bytes + skip_intro_stub_area +
                                        gallery_unlock_stub_area + early_story_stub_area + boss_battle_stub_area + endgame_stub_area +
-                                       kraken_fix_stub_area;
+                                       kraken_fix_stub_area + touch_absolute_stub_area;
     const size_t appearance_stub_area = known_build ? appearance_hooks_stub_bytes() : 0;
     const size_t comms_stub_area = known_build && runtime_online_active() ? comms_bridge_stub_bytes() : 0;
     const size_t character_override_stub_area = known_build ? character_override_hooks_stub_bytes() : 0;
@@ -1291,6 +1294,10 @@ int main(int argc, char **argv) {
     kraken_fix_install(image,size,entry,known_build ? build_key : NULL,
                        image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area+boss_battle_stub_area+endgame_stub_area,
                        kraken_fix_stub_area);
+    if (!touchscreen_direct) puts("Touchscreen pointer: DS4 trackpad (Touchscreen mode setting)");
+    else touch_absolute_install(image,size,entry,known_build ? build_key : NULL,
+                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area+gallery_unlock_stub_area+early_story_stub_area+boss_battle_stub_area+endgame_stub_area+kraken_fix_stub_area,
+                           touch_absolute_stub_area);
     printf("DCP: render resolution %dx%d (%s)%s\n",render_target.width,render_target.height,render_resolution->key,
            render_target.pro_memory ? ", PS4 Pro memory path" : "");
     printf("DCP: Aspect ratio: %s, render target %dx%d\n",aspect_ratio->name,render_target.width,render_target.height);

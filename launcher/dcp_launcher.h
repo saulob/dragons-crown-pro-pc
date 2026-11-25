@@ -176,6 +176,9 @@ int dcp_true_ultrawide(const char *settings_file);
 
 /* 1 when the settings file skips the startup logos and the opening (skip_intro; 0 by default). */
 int dcp_skip_intro(const char *settings_file);
+/* 1 when a touchscreen puts the game's pointer under the finger (touchscreen_mode = touchscreen, the default); 0 for
+ * ds4_trackpad, which moves it like the DualShock 4 touchpad. */
+int dcp_touchscreen_direct(const char *settings_file);
 
 /* 1 when the settings file asks for Circle to confirm in the menus (japanese_menu_buttons; 0 by default). */
 int dcp_japanese_menu_buttons(const char *settings_file);

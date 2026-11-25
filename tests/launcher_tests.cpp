@@ -2176,6 +2176,43 @@ void TestSkipIntroSettings(const fs::path& base) {
     CHECK(loader.find("skip_intro_wanted(dcp_skip_intro(settings_file))") != std::string::npos);
 }
 
+// Touchscreen mode: Touchscreen by default, DS4 trackpad only when chosen, a Gameplay row after Skip Intro, and the loader
+// leaves the touchscreen pointer hooks out for DS4 trackpad.
+void TestTouchscreenModeSettings(const fs::path& base) {
+    const fs::path file = base / "touchscreen_mode" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kTouchscreenModeKey && setting.default_value == kTouchscreenModeDirect;
+    }
+    CHECK(managed == 1);
+    CHECK(dcp_touchscreen_direct(nullptr) == 1 && dcp_touchscreen_direct(file.string().c_str()) == 1);
+    WriteAll(file, "touchscreen_mode = ds4_trackpad\n");
+    CHECK(dcp_touchscreen_direct(file.string().c_str()) == 0);
+    WriteAll(file, "touchscreen_mode = touchscreen\n");
+    CHECK(dcp_touchscreen_direct(file.string().c_str()) == 1);
+    WriteAll(file, "touchscreen_mode = banana\n");
+    CHECK(dcp_touchscreen_direct(file.string().c_str()) == 1);
+    {
+        LauncherSettings settings(file);
+        settings.Set(kTouchscreenModeKey, kTouchscreenModeTrackpad);
+        CHECK(settings.Save());
+        CHECK(dcp_touchscreen_direct(file.string().c_str()) == 0);
+        settings.ResetToDefaults();
+        CHECK(settings.Get(kTouchscreenModeKey) == kTouchscreenModeDirect);
+    }
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t row = launcher.find("ui.Combo(\"Touchscreen mode\", kTouchscreenModeHelp, kTouchscreenModeKey, kTouchscreenModeDirect,");
+    CHECK(row != std::string::npos && row > launcher.find("ui.Toggle(\"Skip Intro\"") && row < launcher.find("ui.Combo(\"Frame rate\""));
+    CHECK(launcher.find("{{kTouchscreenModeTrackpad, \"DS4 trackpad\"}, {kTouchscreenModeDirect, \"Touchscreen\"}}") != std::string::npos);
+    const std::string ptbr = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "localization" / "pt_br_ui_text.cpp");
+    for (const char* text : {"Touchscreen mode\t", "DS4 trackpad\t", "\nTouchscreen\t", "\"DS4 trackpad\" makes the touchscreen"}) {
+        CHECK(ptbr.find(text) != std::string::npos);
+    }
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("const int touchscreen_direct=dcp_touchscreen_direct(settings_file);") != std::string::npos);
+}
+
 // The one gallery option: Off by default, in the Gameplay page after the skip offers, offered only where the Gallery
 // list builder is validated, and no other gallery switch anywhere in the product.
 void TestEarlyStoryOnlineSetting(const fs::path& base) {
@@ -11599,6 +11636,7 @@ int main(int argc, char** argv) {
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestSkipIntroSettings(base);
+    TestTouchscreenModeSettings(base);
     TestControllerRumbleSettings(base);
     TestControllerExitShortcutSettings(base);
     TestControllerCommsWheelShortcutSettings(base);

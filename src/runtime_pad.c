@@ -16,6 +16,7 @@
 #include "dcp_pointer_motion.h"
 #include "dcp_trackpad.h"
 #include "dcp_touchscreen.h"
+#include "touch_absolute.h"
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
 #include "exit_game_hook.h"
@@ -345,12 +346,15 @@ static int native_trackpads(void) {
     for (int slot=0;slot<MAX_PADS;++slot) total+=valve_touchpads(slots[slot].gamepad);
     return total;
 }
-/* A finger on the screen owns the touch surface while it is down. */
+/* A finger on the screen owns the touch surface while it is down. With the touchscreen pointer installed, the point is
+ * the one the game's Absolute position mode puts under the finger. */
 static void merge_touchscreen(PadData *d, const DcpTouchSample *screen) {
     d->buttons|=screen->buttons;
     if (screen->touch) {
+        uint16_t x=screen->x, y=screen->y;
+        touch_absolute_remap(&x,&y);
         memset(d->touches,0,sizeof(d->touches));
-        d->touches[0]=(PadTouch){.x=screen->x,.y=screen->y,.id=screen->id};
+        d->touches[0]=(PadTouch){.x=x,.y=y,.id=screen->id};
         d->touch_count=1;
     }
 }
@@ -374,6 +378,7 @@ static void sample_host(int slot, PadData *d) {
     d->connected=slot_connected(slot);
     d->connected_count=slots[slot].connected_count ? slots[slot].connected_count : d->connected;
     pointer_owns_touch=0;
+    if (slot==0) touch_absolute_set_contact(0);
     if (dcpgpu_overlay_captures_input()) return; /* settings menu open: neutral input */
     const bool *k=slot==0 && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
     DcpMouseSample mouse={0};
@@ -388,6 +393,7 @@ static void sample_host(int slot, PadData *d) {
         dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);
         if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);
         pointer_owns_touch=mouse.pointer || screen.touch;
+        touch_absolute_set_contact(screen.touch);
         dcp_mouse_screen_surface(dcp_mouse_global(),screen.touch);
     }
     load_button_maps();

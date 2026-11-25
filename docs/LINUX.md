@@ -93,8 +93,16 @@ roots, the game's and the one Steam uses, and Steam writes its own Left mode the
 the game therefore asks for Passthrough through libX11 on its own display and on any other local Gamescope root it can
 discover, and rewrites it about once a second; a write is needed even when the game's own root still reads Passthrough,
 because the competing write lands on the other root. Each root's previous value is restored on focus loss and on exit,
-and a value Steam changed in the meantime is left alone. A physical touchscreen is then the DualShock 4 touch surface: a
-contact is a touchpad contact and a short tap is a touchpad click; it moves no host cursor and presses no mouse button.
+and a value Steam changed in the meantime is left alone. A physical touchscreen is then a direct touchscreen: the
+game's red hand pointer jumps to where the finger lands and follows it while it drags, and a short tap is a touchpad click
+there; it moves no host cursor and presses no mouse button. The game reaches the touchscreen as a DualShock 4 touch surface,
+and while a finger is on the screen the pointer update reads its Touch Pad Cursor Control option as Absolute position
+(the saved option is untouched, and Disable still disables the touch cursor), with the screen point mapped to the surface
+point that mode puts under the finger. **Touchscreen mode** on the launcher's Gameplay page (`touchscreen_mode`) chooses this,
+`touchscreen` (the default), or `ds4_trackpad`, which leaves the touchscreen as a DualShock 4 touchpad that moves the
+pointer by how far the finger drags (the log then shows `Touchscreen pointer: DS4 trackpad`). The log shows
+`Touchscreen pointer: direct`; on a build where the pointer update is
+not found it says `Touchscreen pointer: touchpad style` and the touchscreen follows that option like a touchpad.
 Mice, the Steam Deck trackpads and Steam Virtual Gamepads are unchanged. `DCP_TOUCH_GAMESCOPE=0` in the environment keeps
 Gamescope's own touch handling. The log shows `Touchscreen telemetry: event=touch_route_ready video=<wayland|x11>
 gamescope=<yes|no> direct_devices=<n>`, then `gamescope_touch_claim roots=<n> compositor=<yes|no>` (or

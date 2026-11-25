@@ -619,6 +619,10 @@ Cannot create the update workspace.	Não foi possível criar a área de trabalho
 Automatic installation is not available in this build.	A instalação automática não está disponível nesta compilação.
 The update test checksum is not valid.	O checksum de teste da atualização não é válido.
 Skip Intro	Pular introdução
+Touchscreen mode	Modo da tela sensível ao toque
+DS4 trackpad	Touchpad do DS4
+Touchscreen	Tela sensível ao toque
+"DS4 trackpad" makes the touchscreen mimic the DS4 trackpad behavior, where dragging your finger moves the cursor. "Touchscreen" mode makes the cursor follow where you touch the screen.	"Touchpad do DS4" faz a tela sensível ao toque imitar o touchpad do DS4: arrastar o dedo move o cursor. O modo "Tela sensível ao toque" faz o cursor seguir o ponto da tela que você toca.
 Controller Rumble	Vibração do controle
 Off disables controller vibration.	Desligado desativa a vibração do controle.
 Off disables controller vibration. Applies at the next game start.	Desligado desativa a vibração do controle. Vale a partir do próximo início do jogo.
