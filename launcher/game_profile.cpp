@@ -384,6 +384,10 @@ const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view
     return ResolveTextLanguage(TextLanguagesOf(build), key);
 }
 
+const TextLanguage& LauncherDisplayLanguage(const GameBuild* build, std::string_view key) {
+    return ResolveTextLanguage(build, key == kPortugueseBrazilKey ? kPortugueseBrazilKey : kEnglishKey);
+}
+
 std::string SupportedBuildsText() {
     const std::span<const GameBuild> builds = SupportedBuilds();
     std::string text;

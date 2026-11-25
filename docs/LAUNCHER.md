@@ -575,11 +575,16 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   It covers the game text, the launcher, the F1 options, the F10 overlay and the online screens. Text the port has no
   translation of stays in the slot's language: trophy text and the credits are the build's own.
 
-  The Editor shows the game's own words in that language: equipment names, name words, modifier texts and the appearance
-  colours are the translated records of `ItemList`, `CustomItem` and `SystemMsg`, laid over the slot's sheets by the same
-  hash checks the game's overlay uses (`TranslatedSheetRecords`, `launcher/game_translation.h`), so a name reads as it does in
-  the game. Searching an item also matches its English name, and sorting and searching ignore accents. Only presentation
-  changes: item definitions, modifier ids, colour indices and the save bytes are the same in every language.
+  The launcher itself is shown in English or Portuguese (Brazil) only (`launcher_language`, no Options row). Choosing
+  English or Portuguese (Brazil) in Menu & Subtitles sets it; any other game language changes the game and leaves the
+  launcher as it was, English when nothing was chosen before. Voice Language never changes it.
+
+  The Editor shows the game's own words in the launcher language: equipment names, name words, modifier texts and the
+  appearance colours are the records of `ItemList`, `CustomItem` and `SystemMsg`, in English or translated into
+  Portuguese (Brazil), laid over the slot's sheets by the same hash checks the game's overlay uses
+  (`TranslatedSheetRecords`, `launcher/game_translation.h`), so a name reads as it does in the game. Searching an item also
+  matches its English name, and sorting and searching ignore accents. Only presentation changes: item definitions,
+  modifier ids, colour indices and the save bytes are the same in every language.
 
   The DefaultBone character messages are translated too. While a character is being created, an empty message row
   shows the default it will receive (src/default_message_hook.c): the variant previewed for a class is held and given

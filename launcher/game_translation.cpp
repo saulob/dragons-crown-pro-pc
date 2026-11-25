@@ -165,25 +165,6 @@ bool Formatted(const std::vector<std::string>& tokens) {
                        [](const std::string& t) { return (IsPrintf(t) && t[1] != ' ') || t == "%%"; });
 }
 
-bool ValidUtf8(std::string_view text) {
-    for (size_t i = 0; i < text.size();) {
-        const auto c = static_cast<unsigned char>(text[i]);
-        const size_t n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 0;
-        if (!n || i + n > text.size() || (n == 2 && c < 0xc2)) return false;
-        uint32_t cp = n == 1 ? c : c & (0x7f >> n);
-        for (size_t k = 1; k < n; ++k) {
-            const auto b = static_cast<unsigned char>(text[i + k]);
-            if ((b & 0xc0) != 0x80) return false;
-            cp = cp << 6 | (b & 0x3f);
-        }
-        if ((n == 3 && cp < 0x800) || (n == 4 && (cp < 0x10000 || cp > 0x10ffff)) || (cp >= 0xd800 && cp < 0xe000)) {
-            return false;
-        }
-        i += n;
-    }
-    return true;
-}
-
 std::string Sha256Hex(std::string_view text) {
     uint8_t digest[32];
     if (!crypto::Sha256(reinterpret_cast<const uint8_t*>(text.data()), text.size(), digest)) return {};
@@ -314,7 +295,7 @@ std::string RecordProblem(std::string_view sheet, const std::vector<std::string>
     } else if (Sha256Hex(records[index]) != source_sha256) {
         return "the English record changed";
     }
-    if (!ValidUtf8(text)) return "not UTF-8";
+    if (!IsValidUtf8(text)) return "not UTF-8";
     if (std::any_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 && c != '\n'; })) {
         return "a control character";
     }
@@ -947,7 +928,7 @@ extern "C" void dcp_activate_text_language(const char* settings_file, const char
     const GameBuild* build = BuildOfImageDir(image_dir);
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
-    localization::SetActiveLanguage(ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).key);
+    localization::SetActiveLanguage(LauncherLanguageKey(settings, ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).key));
 }
 
 namespace dcp {
@@ -1049,7 +1030,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     const std::filesystem::path folder = PathFromUtf8(app0 ? app0 : "");
     const std::vector<TextLanguage> languages = InstalledTextLanguages(folder, build);
     const TextLanguage& language = ResolveTextLanguage(languages, settings.Get(kTextLanguageKey));
-    localization::SetActiveLanguage(language.key);
+    localization::SetActiveLanguage(LauncherLanguageKey(settings, language.key));
     second_overlay.reset();
     served_default_bone = nullptr;
     served_native_default_bone = nullptr;

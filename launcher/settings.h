@@ -38,6 +38,8 @@ inline constexpr char kRendererKey[] = "renderer";
 inline constexpr char kAntiAliasingKey[] = "smaa";
 inline constexpr char kAnisotropyKey[] = "anisotropy";
 inline constexpr char kTextLanguageKey[] = "text_language";
+// The language of the launcher itself, English or Portuguese (Brazil); no Options row. See LauncherLanguageKey.
+inline constexpr char kLauncherLanguageKey[] = "launcher_language";
 // Frames per second reaching the screen (30, 60, 90, 120, 144, 165, 240; 0 is Unlimited); the game's logic stays at 59.94 Hz
 // and a rate above 60 shows the last frame again (gpu/shim/dcp_frame_pacing.h).
 inline constexpr char kFrameRateKey[] = "frame_rate";
@@ -173,6 +175,12 @@ bool TurnCheatsOff(trg::SettingsStore& settings);
 // A saved text_language that is not one of `languages` (not empty) becomes the first of them. True when it changed
 // (pending until Save).
 bool NormalizeTextLanguage(trg::SettingsStore& settings, std::span<const TextLanguage> languages);
+
+// The launcher shows only English and Portuguese (Brazil). Menu & Subtitles (`game_language_key`) changes it only when it
+// is one of those two; any other game language leaves the remembered one, English when there is none.
+std::string_view LauncherLanguageKey(const trg::SettingsStore& settings, std::string_view game_language_key);
+// Remembers the launcher language that `game_language_key` sets. True when it changed (pending until Save).
+bool RememberLauncherLanguage(trg::SettingsStore& settings, std::string_view game_language_key);
 
 // The launcher opens when the game files are not ready, or when the setting is On or Shift is held, unless it was
 // skipped once. A game that is not ready always shows it: it is where the files are installed.

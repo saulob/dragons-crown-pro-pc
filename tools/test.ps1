@@ -494,11 +494,14 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'K8R3M issue #86 Kraken Damage Multiplier'
-$defaultFocusSuites = @('dcp-cheats-tests', 'dcp-kraken-fix-tests', 'dcp-feature-sites-tests')
+$defaultFocusName = 'K9F4LX issue #89 launcher language isolation'
+$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-inventory-editor-tests', 'dcp-save-editor-tests', 'dcp-options-menu-tests')
 # The result line each focused selector must print: a selector that finds nothing to check (or prints nothing) is a failure.
 $defaultFocusGroups = [ordered]@{
-    'dcp-cheats-tests' = @('GROUP|issue86-kraken-damage|PASS')
+    'dcp-launcher-tests launcher-language' = @('GROUP|launcher-language|PASS')
+    'dcp-inventory-editor-tests localization' = @('GROUP|inventory-localization|PASS', 'GROUP|inventory-ui|PASS')
+    'dcp-save-editor-tests localization' = @('GROUP|editor-localization|PASS')
+    'launcher language production compile' = @('GROUP|launcher-language-compile|PASS')
 }
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor -or $GamescopePacing -or $TouchscreenMode)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
@@ -580,9 +583,15 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @(
-        (Test-Step 'cheat tests (issue #86: Damage Multiplier on every Kraken part, generic enemies, Chimera, hook tables)' 'dcp-cheats-tests' -Capture -Quiet `
-            -Key 'dcp-cheats-tests')
-        ($tests | Where-Object { $_.Exe -in 'dcp-kraken-fix-tests', 'dcp-feature-sites-tests' })
+        (Test-Step 'launcher language (dcp-launcher-tests launcher-language: English or Portuguese (Brazil) whatever Menu & Subtitles is, settings, game process, Editor sheets)' 'dcp-launcher-tests' -Capture `
+            -Key 'dcp-launcher-tests launcher-language' -Arguments @('launcher-language'))
+        (Test-Step 'Inventory Editor names and modifiers in the launcher language (dcp-inventory-editor-tests localization)' 'dcp-inventory-editor-tests' -Capture `
+            -Key 'dcp-inventory-editor-tests localization' -Arguments @('localization'))
+        (Test-Step 'Appearance Editor colour names in the launcher language (dcp-save-editor-tests localization)' 'dcp-save-editor-tests' -Capture `
+            -Key 'dcp-save-editor-tests localization' -Arguments @('localization'))
+        ($tests | Where-Object { $_.Exe -eq 'dcp-options-menu-tests' })
+        (Test-Step 'launcher language production sources (object compile with the build flags, zero warnings, nothing linked)' -Script 'tests\touchscreen_compile_tests.ps1' -Capture `
+            -Key 'launcher language production compile' -Arguments @('-BuildDir', $buildDir, '-Group', 'launcher-language') -Nominal 60)
     )
     $requiredSuites = $defaultFocusSuites
 }

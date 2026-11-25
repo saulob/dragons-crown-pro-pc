@@ -43,7 +43,7 @@ struct EditorGame {
     const GameBuild* configured = nullptr;
 };
 
-// The language of the game's message sheets: the slot's suffix and, for Portuguese (Brazil), the port's translation over it.
+// The sheets the Editor reads names from: the launcher language's slot suffix and the port's translation over it, if any.
 struct EditorLanguage {
     std::string suffix;
     std::string translation;
@@ -51,8 +51,8 @@ struct EditorLanguage {
 
 class EditorPage {
 public:
-    // `game` says where the builds are and which one the launcher runs; `language` names the SystemMsg language the game
-    // uses (msgsheet/SystemMsg_<suffix>.fms) and the port's translation shown over it. `selection` is the save the Save
+    // `game` says where the builds are and which one the launcher runs; `language` names the launcher language's sheets
+    // (msgsheet/SystemMsg_<suffix>.fms) and the port's translation shown over it. `selection` is the save the Save
     // page chose; when that page replaces a save, the Editor reloads before it can write again.
     EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
                std::function<EditorLanguage()> language, const SaveSelection* selection = nullptr);

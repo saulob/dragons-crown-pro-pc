@@ -1,13 +1,22 @@
-# Compiles the production sources of Touchscreen Mode into throwaway objects with the build's own commands: zero warnings,
-# nothing linked, the build directory untouched. Prints GROUP|touchscreen-compile|PASS or FAIL.
+# Compiles the production sources of Touchscreen Mode (or of the launcher language, -Group launcher-language) into throwaway
+# objects with the build's own commands: zero warnings, nothing linked, the build directory untouched. Prints
+# GROUP|<group>-compile|PASS or FAIL.
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$BuildDir)
+param([Parameter(Mandatory)][string]$BuildDir, [ValidateSet('touchscreen', 'launcher-language')][string]$Group = 'touchscreen')
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'tools\_common.ps1')
 $ErrorActionPreference = 'Continue'
 Set-StrictMode -Off
 
+$languageUnits = @(
+    @{ Source = 'launcher/launcher.cpp'; Target = 'dcp_launcher' }
+    @{ Source = 'launcher/settings.cpp'; Target = 'dcp_launcher_core' }
+    @{ Source = 'launcher/game_profile.cpp'; Target = 'dcp_launcher_core' }
+    @{ Source = 'launcher/game_translation.cpp'; Target = 'dcp_launcher_core' }
+    @{ Source = 'launcher/character_art.cpp'; Target = 'dcp_launcher_core' }
+    @{ Source = 'launcher/item_catalog.cpp'; Target = 'dcp_launcher_core' }
+)
 $units = @(
     @{ Source = 'src/loader.c'; Target = 'dragons_crown_pro' }
     @{ Source = 'src/runtime_pad.c'; Target = 'dragons_crown_pro' }
@@ -16,6 +25,7 @@ $units = @(
     @{ Source = 'launcher/settings.cpp'; Target = 'dcp_launcher_core' }
     @{ Source = 'launcher/launcher.cpp'; Target = 'dcp_launcher' }
 )
+if ($Group -eq 'launcher-language') { $units = $languageUnits }
 
 $failures = 0
 $json = (& ninja -C $BuildDir -t compdb 2>$null | Out-String)
@@ -60,5 +70,5 @@ try {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
 if ($entries.Count -eq 0) { $failures++; Write-Host 'FAIL: ninja -t compdb gave no compile commands' }
-Write-Host "GROUP|touchscreen-compile|$(if ($failures) { 'FAIL' } else { 'PASS' })"
+Write-Host "GROUP|$Group-compile|$(if ($failures) { 'FAIL' } else { 'PASS' })"
 exit $(if ($failures) { 1 } else { 0 })

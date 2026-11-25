@@ -12009,7 +12009,8 @@ void TestPtBrEditorText() {
 
     // The Editor and the Inventory Editor take their sheets from the shared translated lookup, Portuguese only.
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
-    CHECK(launcher.find("language.translation == kPortPortugueseBrazil") != std::string::npos);
+    CHECK(launcher.find("LauncherDisplayLanguage(build_, LauncherLanguage())") != std::string::npos);
+    CHECK(launcher.find("language.translation == kPortPortugueseBrazil") == std::string::npos);
     const std::string inventory = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "editor_inventory.cpp");
     CHECK(inventory.find("LoadItemCatalog(art, language.suffix, language.translation)") != std::string::npos);
     CHECK(inventory.find("language.suffix + \"|\" + language.translation") != std::string::npos);
@@ -12017,6 +12018,158 @@ void TestPtBrEditorText() {
     const std::string page = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "editor_page.cpp");
     CHECK(page.find("art_->ColorName(klass, color, language.suffix, language.translation)") != std::string::npos);
     CHECK(page.find("sources.translation = build ? build->build->translation : nullptr;") != std::string::npos);
+}
+
+// The launcher is English or Portuguese (Brazil) whatever Menu & Subtitles is; the game language is never rewritten.
+void TestLauncherLanguageIsolation(const fs::path& base) {
+    using namespace localization;
+    const fs::path folder = base / "launcher_language";
+    fs::remove_all(folder);
+    const fs::path file = folder / "dcp.ini";
+    const std::string ini = file.string();
+    WriteAll(folder / "us" / "image.json", std::string("{\n  \"title_id\": \"CUSA10454\",\n  \"eboot_sha256\": \"") + kUs.eboot_sha256 + "\"\n}");
+    WriteAll(folder / "asia" / "image.json", std::string("{\n  \"title_id\": \"CUSA10209\",\n  \"eboot_sha256\": \"") + kCk.eboot_sha256 + "\",\n  \"app_ver\": \"01.02\"\n}");
+    const std::string us = (folder / "us").string();
+    const std::string asia = (folder / "asia").string();
+
+    const std::string_view english = kEnglishKey, portuguese = kPortugueseBrazilKey;
+    const char* const unsupported[] = {"korean", "traditional_chinese", "japanese", "russian", "french", "german", "italian", "spanish"};
+    CHECK(IsValidSetting(kLauncherLanguageKey, "english") && IsValidSetting(kLauncherLanguageKey, "brazilian_portuguese"));
+    CHECK(!IsValidSetting(kLauncherLanguageKey, "korean") && !IsValidSetting(kLauncherLanguageKey, "traditional_chinese"));
+
+    // The authoritative rule, for every remembered language and every game language, known to the launcher or not.
+    for (const std::string_view remembered : {english, portuguese}) {
+        for (const char* game : {"korean", "traditional_chinese", "japanese", "russian", "french", "german", "italian", "spanish", "a_future_language"}) {
+            WriteAll(file, "launcher_language=" + std::string(remembered) + "\n");
+            LauncherSettings settings(file);
+            CHECK(LauncherLanguageKey(settings, game) == remembered);
+            CHECK(!RememberLauncherLanguage(settings, game));
+            CHECK(settings.Get(kLauncherLanguageKey) == remembered);
+        }
+        for (const std::string_view game : {english, portuguese}) {
+            WriteAll(file, "launcher_language=" + std::string(remembered) + "\n");
+            LauncherSettings settings(file);
+            CHECK(LauncherLanguageKey(settings, game) == game);
+            CHECK(RememberLauncherLanguage(settings, game) == (game != remembered));
+            CHECK(settings.Get(kLauncherLanguageKey) == game && LauncherLanguageKey(settings, "korean") == game);
+        }
+    }
+    // Nothing remembered, or something the launcher cannot show: English.
+    for (const char* content : {"", "launcher_language=korean\n", "launcher_language=traditional_chinese\n", "launcher_language=\n"}) {
+        WriteAll(file, content);
+        const LauncherSettings settings(file);
+        for (const char* game : unsupported) CHECK(LauncherLanguageKey(settings, game) == english);
+    }
+
+    // Menu & Subtitles as the launcher applies it: the saved game language resolved for the build, then the launcher's.
+    const auto choose = [&](LauncherSettings& settings, const GameBuild* build, std::string_view key) {
+        settings.Set(kTextLanguageKey, std::string(key));
+        const std::string_view game = ResolveTextLanguage(build, settings.Get(kTextLanguageKey)).key;
+        RememberLauncherLanguage(settings, game);
+        return LauncherLanguageKey(settings, game);
+    };
+    for (const GameBuild& build : SupportedBuilds()) {
+        for (const TextLanguage& game : TextLanguagesOf(&build)) {
+            const bool sets = game.key == english || game.key == portuguese;
+            for (const std::string_view start : {english, portuguese}) {
+                WriteAll(file, "launcher_language=" + std::string(start) + "\n");
+                LauncherSettings settings(file);
+                CHECK(choose(settings, &build, game.key) == (sets ? game.key : start));
+                CHECK(settings.Get(kTextLanguageKey) == game.key); // the game language is what was chosen, untouched
+                CHECK(settings.Save());
+                const LauncherSettings reread(file);
+                CHECK(reread.Get(kTextLanguageKey) == game.key && LauncherLanguageKey(reread, game.key) == (sets ? game.key : start));
+            }
+        }
+    }
+
+    // The examples in a row: Korean leaves English and Portuguese as they are; English and Portuguese switch.
+    WriteAll(file, "text_language=english\n");
+    LauncherSettings settings(file);
+    CHECK(choose(settings, &kCk100, "english") == english);
+    CHECK(choose(settings, &kCk100, "korean") == english);
+    CHECK(choose(settings, &kCk100, "brazilian_portuguese") == portuguese);
+    CHECK(choose(settings, &kCk100, "korean") == portuguese && choose(settings, &kCk100, "traditional_chinese") == portuguese);
+    CHECK(choose(settings, &kCk100, "russian") == portuguese && settings.Get(kTextLanguageKey) == "russian");
+    CHECK(choose(settings, &kCk100, "english") == english && choose(settings, &kCk100, "traditional_chinese") == english);
+    CHECK(settings.Save() && WrittenValue(ReadAll(file), "launcher_language", "english") &&
+          WrittenValue(ReadAll(file), "text_language", "traditional_chinese"));
+
+    // A first start whose saved game language the launcher cannot show opens in English; Portuguese carries over.
+    for (const char* game : {"korean", "traditional_chinese", "russian", "japanese"}) {
+        WriteAll(file, std::string("text_language=") + game + "\n");
+        const LauncherSettings fresh(file);
+        CHECK(LauncherLanguageKey(fresh, ResolveTextLanguage(&kCk100, fresh.Get(kTextLanguageKey)).key) == english);
+    }
+    WriteAll(file, "text_language=brazilian_portuguese\n");
+    LauncherSettings upgraded(file);
+    CHECK(LauncherLanguageKey(upgraded, ResolveTextLanguage(&kCk100, upgraded.Get(kTextLanguageKey)).key) == portuguese);
+    CHECK(RememberLauncherLanguage(upgraded, portuguese) && upgraded.Save() && WrittenValue(ReadAll(file), "launcher_language", "brazilian_portuguese"));
+
+    // Voice Language never reaches it.
+    for (const char* voice : {"default", "english", "japanese"}) {
+        WriteAll(file, "launcher_language=brazilian_portuguese\ntext_language=korean\n");
+        LauncherSettings voiced(file);
+        voiced.Set(kVoiceLanguageKey, voice);
+        CHECK(LauncherLanguageKey(voiced, "korean") == portuguese && !RememberLauncherLanguage(voiced, "korean"));
+        CHECK(voiced.Get(kLauncherLanguageKey) == "brazilian_portuguese" && voiced.Get(kTextLanguageKey) == "korean");
+    }
+
+    // The game still reads its own language: slots and ids come from text_language alone.
+    WriteAll(file, "launcher_language=brazilian_portuguese\ntext_language=korean\n");
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 9 && dcp_text_language(ini.c_str(), us.c_str(), nullptr) == 1);
+    CHECK(dcp_text_language_is_portuguese_brazil(ini.c_str(), asia.c_str(), nullptr) == 0);
+    WriteAll(file, "launcher_language=english\ntext_language=traditional_chinese\n");
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10);
+    WriteAll(file, "launcher_language=english\ntext_language=brazilian_portuguese\n");
+    CHECK(dcp_text_language(ini.c_str(), asia.c_str(), nullptr) == 10 && dcp_text_language_is_portuguese_brazil(ini.c_str(), asia.c_str(), nullptr) == 1);
+
+    // The text drawn follows the launcher language in the game process as well.
+    WriteAll(file, "launcher_language=brazilian_portuguese\ntext_language=korean\n");
+    dcp_activate_text_language(ini.c_str(), asia.c_str(), nullptr);
+    CHECK(PortugueseBrazilSelected() && std::string(Tr("Play")) == "Jogar");
+    WriteAll(file, "launcher_language=english\ntext_language=korean\n");
+    dcp_activate_text_language(ini.c_str(), asia.c_str(), nullptr);
+    CHECK(!PortugueseBrazilSelected() && std::string(Tr("Play")) == "Play");
+    WriteAll(file, "text_language=korean\n");
+    dcp_activate_text_language(ini.c_str(), asia.c_str(), nullptr);
+    CHECK(!PortugueseBrazilSelected());
+    WriteAll(file, "launcher_language=english\ntext_language=brazilian_portuguese\n");
+    dcp_activate_text_language(ini.c_str(), asia.c_str(), nullptr);
+    CHECK(PortugueseBrazilSelected());
+    SetActiveLanguage("english");
+
+    // The sheets the Editor reads names from: the build's English or Portuguese entry, never the game language's.
+    for (const GameBuild& build : SupportedBuilds()) {
+        const TextLanguage& shown_english = LauncherDisplayLanguage(&build, english);
+        const TextLanguage& shown_portuguese = LauncherDisplayLanguage(&build, portuguese);
+        CHECK(shown_english.key == english && shown_portuguese.key == portuguese);
+        CHECK(shown_english.translation == (OffersPortEnglish(&build) ? kPortEnglish : std::string_view()));
+        CHECK(shown_portuguese.translation == kPortPortugueseBrazil && shown_english.suffix == shown_portuguese.suffix);
+        for (const char* game : unsupported) {
+            const TextLanguage& shown = LauncherDisplayLanguage(&build, game);
+            CHECK(shown.key == english && shown.suffix == shown_english.suffix && shown.translation == shown_english.translation);
+        }
+    }
+    CHECK(LauncherDisplayLanguage(&kCk100, english).suffix == "CT" && LauncherDisplayLanguage(&kCk100, english).translation == kPortEnglish);
+    CHECK(LauncherDisplayLanguage(&kUs, english).suffix == "US" && LauncherDisplayLanguage(&kUs, english).translation.empty());
+    CHECK(LauncherDisplayLanguage(&kJp100, english).translation == kPortEnglish && LauncherDisplayLanguage(nullptr, portuguese).key == english);
+
+    // One decision path: every place that sets the launcher's text goes through it.
+    const fs::path source(DCP_SOURCE_DIR);
+    for (const char* name : {"launcher.cpp", "game_translation.cpp"}) {
+        const std::string text = ReadAll(source / "launcher" / name);
+        size_t calls = 0, through_rule = 0;
+        for (size_t at = text.find("SetActiveLanguage("); at != std::string::npos; at = text.find("SetActiveLanguage(", at + 1)) {
+            ++calls;
+            through_rule += text.compare(at + 18, 16, "LauncherLanguage") == 0;
+        }
+        CHECK(calls > 0 && calls == through_rule);
+    }
+    const std::string frame = ReadAll(source / "launcher" / "launcher.cpp");
+    CHECK(frame.find("RememberLauncherLanguage(settings_, GameLanguageKey())") != std::string::npos);
+    CHECK(frame.find("localization::SetActiveLanguage(settings_.Get(kTextLanguageKey") == std::string::npos);
+    fs::remove_all(folder);
 }
 
 void TestFileDialogLabel() {
@@ -12235,6 +12388,19 @@ int main(int argc, char** argv) {
         std::printf("GROUP|launcher-ptbr-editor|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "launcher-language") {
+        const fs::path base = fs::temp_directory_path() / ("dcp_launcher_language_" + std::to_string(getpid()));
+        fs::remove_all(base);
+        fs::create_directories(base);
+        TestLauncherLanguageIsolation(base);
+        TestLauncherLocalization();
+        TestPtBrEditorText();
+        std::error_code ec;
+        fs::remove_all(base, ec);
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-language|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "connection-test") {
         TestLauncherLocalization();
         TestTextWithValues();
@@ -12390,6 +12556,7 @@ int main(int argc, char** argv) {
     TestInstalledGameName(base);
     TestLauncherLocalization();
     TestPtBrEditorText();
+    TestLauncherLanguageIsolation(base);
     TestFileDialogLabel();
     TestTextWithValues();
     TestActivation(base);

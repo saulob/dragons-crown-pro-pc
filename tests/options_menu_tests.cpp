@@ -733,6 +733,7 @@ void TestLauncherParity() {
         "monitor",
         "graphics_card",
         "text_language",
+        "launcher_language",
         "detailed_logging",
         "controller_prompts",
         "arachnophobia_safe_mode",

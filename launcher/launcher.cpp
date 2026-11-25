@@ -433,10 +433,8 @@ public:
         editor_page_ = std::make_unique<EditorPage>(
             host_, UserDir(), [this] { return EditorGame{RootsOf(paths_), build_}; },
             [this] {
-                const TextLanguage& language =
-                    ResolveTextLanguage(text_languages_, settings_.Get(kTextLanguageKey, text_languages_.front().key));
-                const bool portuguese = language.translation == kPortPortugueseBrazil;
-                return EditorLanguage{std::string(language.suffix), portuguese ? std::string(language.translation) : std::string()};
+                const TextLanguage& language = LauncherDisplayLanguage(build_, LauncherLanguage());
+                return EditorLanguage{std::string(language.suffix), std::string(language.translation)};
             },
             &save_selection_);
         save_page_ = std::make_unique<SavePage>(UserDir(), save_selection_, SavePageHooks{
@@ -466,7 +464,7 @@ public:
                           [this](const FileIconAsset& icon, int pixels) { return FileIconTexture(icon, pixels); }});
         }
         trg::SetTranslator(&TranslateLauncherText);
-        localization::SetActiveLanguage(settings_.Get(kTextLanguageKey, text_languages_.front().key));
+        localization::SetActiveLanguage(LauncherLanguage());
         launcher_ = std::make_unique<trg::Launcher>(MakeConfig());
         updater_ = std::make_unique<trg::update::UpdateController>(MakeUpdateConfig(InstallDir()));
         updater_->StartCheck();
@@ -541,7 +539,8 @@ private:
         NormalizeGraphicsCard();
         NormalizeGraphicsSettings();
         NormalizeTextLanguage(settings_, text_languages_);
-        localization::SetActiveLanguage(settings_.Get(kTextLanguageKey, text_languages_.front().key));
+        RememberLauncherLanguage(settings_, GameLanguageKey());
+        localization::SetActiveLanguage(LauncherLanguage());
         if (play_.starting() && ImGui::GetTime() - play_started_ >= kPlayFeedbackSeconds) {
             if (!SeparateGameProcess(config_, settings_)) {
                 return Outcome::kPlay;
@@ -696,6 +695,12 @@ private:
         Log("this system cannot run the game, staying open");
         return false;
     }
+
+    std::string_view GameLanguageKey() const {
+        return ResolveTextLanguage(text_languages_, settings_.Get(kTextLanguageKey, text_languages_.front().key)).key;
+    }
+
+    std::string_view LauncherLanguage() const { return LauncherLanguageKey(settings_, GameLanguageKey()); }
 
     void Recheck() {
         const GameCheck check = CheckAndLog(paths_);
@@ -1983,7 +1988,7 @@ DcpLauncherResult ExplainInWindow(const char* topic, const char* cause, const ch
 
 // Play without the launcher on screen: the same checks, explained in a window of its own.
 DcpLauncherResult PlayOrExplain(const DcpLauncherConfig& config, const LauncherSettings& settings) {
-    localization::SetActiveLanguage(settings.Get(kTextLanguageKey, "english"));
+    localization::SetActiveLanguage(LauncherLanguageKey(settings, settings.Get(kTextLanguageKey, "english")));
     char cause[320] = "", advice[320] = "";
     if (config.check_graphics && !config.check_graphics(cause, sizeof(cause), advice, sizeof(advice))) {
         return ExplainInWindow("Graphics", cause, advice, config.launcher_renderer);

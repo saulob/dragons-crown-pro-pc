@@ -169,6 +169,8 @@ inline bool TrueUltrawideAvailable(const GameBuild* build) {
 const TextLanguage& ResolveTextLanguage(std::span<const TextLanguage> languages, std::string_view key);
 // The build's language for a saved key; the build's default when the key is not one of its languages.
 const TextLanguage& ResolveTextLanguage(const GameBuild* build, std::string_view key);
+// The build's entry for the launcher language `key` (kEnglishKey or kPortugueseBrazilKey); English for any other key.
+const TextLanguage& LauncherDisplayLanguage(const GameBuild* build, std::string_view key);
 
 std::string SupportedBuildsText();
 

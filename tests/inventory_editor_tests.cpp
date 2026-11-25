@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "character_art.h"
+#include "cpk_fixture.h"
 #include "game_mbs.h"
 #include "editor_model.h"
 #include "game_profile.h"
@@ -34,6 +35,7 @@
 #include "save_data.h"
 #include "save_discovery.h"
 #include "save_edit.h"
+#include "utf8.h"
 #include "trg/layout.h"
 
 namespace fs = std::filesystem;
@@ -977,6 +979,116 @@ void TestPortugueseFallbacks(const fs::path& source) {
     CHECK(ItemDisplayName(hammer, ItemCatalog(kept, {}, {}, true)) == "Rock Hammer");
     CHECK(ItemDisplayName(hammer, ItemCatalog({}, {}, {}, true)) == "Unknown item 0x11b");
     CHECK(ItemCatalog().English() == nullptr && ItemCatalog().Effect(0x12).name.empty());
+}
+
+bool CleanText(const std::string& text) {
+    return text.find("\xEF\xBF\xBD") == std::string::npos && IsValidUtf8(text);
+}
+
+// The catalog the Editor shows is read through the launcher language (English or Portuguese), never the game language:
+// the Asia/Hong Kong build's Korean sheets are not what an Editor in either language reads.
+void TestLauncherLanguageCatalogs(const fs::path& source) {
+    const fs::path app0 = source / "game" / "prepared" / "CUSA10209-1.00";
+    const GameBuild* asia = nullptr;
+    for (const GameBuild& build : SupportedBuilds()) {
+        if (std::string_view(build.title_id) == "CUSA10209" && std::string_view(build.version) == "1.00") asia = &build;
+    }
+    std::error_code ec;
+    if (!asia || !project_sheets::Present(source, {"ItemList", "CustomItem", "SystemMsg"}) ||
+        !fs::is_regular_file(app0 / "DRACRO_CK.CPK", ec)) {
+        std::printf("Asia/Hong Kong folder or localization sheets not present, skipping the launcher language catalogs\n");
+        return;
+    }
+    const ProjectSheet items = LoadProjectSheet(source, "ItemList"), effects = LoadProjectSheet(source, "CustomItem"),
+                       system = LoadProjectSheet(source, "SystemMsg");
+    CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_CK.CPK");
+    sources.translation = asia->translation;
+    CharacterArt art(sources);
+
+    const TextLanguage& shown_english = LauncherDisplayLanguage(asia, kEnglishKey);
+    const TextLanguage& shown_portuguese = LauncherDisplayLanguage(asia, kPortugueseBrazilKey);
+    const std::string english_suffix(shown_english.suffix), english_translation(shown_english.translation);
+    const ItemCatalog english =
+        LoadItemCatalog(art, english_suffix, english_translation);
+    const ItemCatalog portuguese = LoadItemCatalog(art, std::string(shown_portuguese.suffix), std::string(shown_portuguese.translation));
+
+    // The game language's own sheets are Korean: that is what the Editor read before.
+    const std::vector<std::string>& korean = art.Sheet("ItemList", "KR");
+    CHECK(korean.size() > 445 && korean[445] != "Leather Boots" && korean[445].find_first_of("\xE1\xEA\xEB\xEC\xED") != std::string::npos);
+
+    // English: the project's own English text for every gear name and every modifier the game words.
+    CHECK(english.loaded() && english.English() == nullptr);
+    CHECK(english.ItemName(283) == "Rock Hammer" && english.ItemName(445) == "Leather Boots" && english.Word(0) == "Gifted");
+    size_t names = 0, wordings = 0;
+    for (uint32_t id = kFirstWeapon; id < kEndGear; ++id) {
+        const std::string name = english.ItemName(id);
+        CHECK(CleanText(name) && name == TrimText(items.english[id]));
+        for (const char c : name) CHECK(static_cast<unsigned char>(c) < 0x80);
+        ++names;
+    }
+    for (uint16_t id = 0; id < 0x100; ++id) {
+        const EffectText effect = english.Effect(id);
+        if (!effect.known) continue;
+        CHECK(CleanText(effect.name) && CleanText(effect.text));
+        for (const char c : effect.text) CHECK(static_cast<unsigned char>(c) < 0x80);
+        ++wordings;
+    }
+    CHECK(names == kEndGear - kFirstWeapon && wordings > 50);
+    CHECK(english.Effect(0x12).name == "Magic damage" && english.Effect(0x2A).text == "Knockdown chance +?%");
+
+    // Portuguese: the project's Portuguese text, with the English names behind it for a search.
+    CHECK(portuguese.English() != nullptr && portuguese.English()->ItemName(283) == "Rock Hammer");
+    CHECK(portuguese.ItemName(283) == "Martelo de Rocha" && portuguese.Effect(0x12).name == "Dano mágico");
+    for (const auto& [index, text] : items.portuguese) {
+        if (index >= kFirstWeapon && index < kEndGear) CHECK(portuguese.ItemName(uint32_t(index)) == TrimText(text));
+    }
+    for (uint32_t id = kFirstWeapon; id < kEndGear; ++id) CHECK(CleanText(portuguese.ItemName(id)) && !portuguese.ItemName(id).empty());
+
+    // Every record either catalog is made from is valid UTF-8 and carries no replacement character.
+    for (const char* sheet : {"ItemList", "CustomItem", "SystemMsg"}) {
+        for (const std::string& translation : {std::string(), english_translation, std::string(shown_portuguese.translation)}) {
+            for (const std::string& record : art.TranslatedSheet(sheet, english_suffix, translation)) CHECK(CleanText(record));
+        }
+    }
+}
+
+// A record that is not UTF-8 never reaches the Editor: the US sheet's text stands in, or nothing.
+void TestMalformedSheetRecords(const fs::path& base) {
+    const fs::path folder = base / "malformed_sheets";
+    fs::create_directories(folder);
+    const auto sheet = [](std::vector<std::string> records) {
+        std::string out("FMSB\0\0\0\0", 8);
+        cpk_build::Le32(out, 0x20);
+        out += std::string(8, '\0');
+        cpk_build::Le32(out, uint32_t(records.size()));
+        out += '\x03';
+        out += std::string(7 + records.size() * 8, '\0');
+        for (const std::string& record : records) out += record + '\0';
+        out.resize((out.size() + 15) / 16 * 16, '\0');
+        const uint32_t size = uint32_t(out.size() - 0x20);
+        for (int i = 0; i < 4; ++i) out[size_t(4 + i)] = char(size >> (8 * i));
+        return out + "FEOC" + std::string(12, '\0');
+    };
+    const std::vector<std::string> english = {"Sword", "Axe", "Bow", "Shield"};
+    const std::vector<std::string> broken = {"Espada", "Hache\xFF\xFE", "\xC3(", "Bouclier"};
+    for (const bool with_english : {true, false}) {
+        std::vector<std::pair<std::string, std::string>> files = {{"msgsheet/ItemList_FR.fms", sheet(broken)}};
+        if (with_english) files.push_back({"msgsheet/ItemList_US.fms", sheet(english)});
+        const std::string archive = cpk_build::BuildCpkWith(files);
+        const fs::path path = folder / (with_english ? "with_english.cpk" : "without_english.cpk");
+        std::ofstream(path, std::ios::binary).write(archive.data(), std::streamsize(archive.size()));
+        CharacterArtSources sources;
+        sources.archives = {path};
+        CharacterArt art(sources);
+        const std::vector<std::string>& records = art.Sheet("ItemList", "FR");
+        CHECK(records.size() == 4);
+        if (records.size() != 4) continue;
+        CHECK(records[0] == "Espada" && records[3] == "Bouclier");
+        CHECK(records[1] == (with_english ? "Axe" : "") && records[2] == (with_english ? "Bow" : ""));
+        for (const std::string& record : records) CHECK(CleanText(record));
+        const ItemCatalog catalog = LoadItemCatalog(art, "FR", "");
+        CHECK(CleanText(catalog.ItemName(1)) && CleanText(catalog.ItemName(2)));
+    }
 }
 
 void TestPortugueseSearchAndSort() {
@@ -4195,7 +4307,7 @@ int main(int argc, char** argv) {
         {"inventory-location", TestLocation},
         {"inventory-parse", [] { TestParse(); TestListGroups(); TestLocationFilter(); }},
         {"inventory-catalog", [&] { TestCatalog(source); }},
-        {"inventory-localization", [&] { TestPortugueseNames(source); TestPortugueseFallbacks(source); TestPortugueseSearchAndSort(); }},
+        {"inventory-localization", [&] { TestPortugueseNames(source); TestPortugueseFallbacks(source); TestLauncherLanguageCatalogs(source); TestMalformedSheetRecords(base); TestPortugueseSearchAndSort(); }},
         {"inventory-edit", [] { TestDurabilityMath(); TestEditDurability(); TestDurabilityBound(); TestMaxDurability(); TestSliderEditing(); TestAttackAndLevelIndependent(); TestSorting(); TestQuery(); TestClassCompatibility(); TestAttack(); TestScrollReset(); TestNames(); TestModifierEdit(); TestModifierNames(); TestEditLevel(); TestIsolation(); TestDetail(); }},
         {"inventory-safety", [] { TestMalformed(); TestUnknownPreserved(); TestValidateChanges(); TestMutations(); }},
         {"inventory-transaction", [&] { TestTransaction(base); TestFailures(base); TestNavigationAndSwitching(base); TestHp(base); TestHpScope(base); TestDuplicateIdentity(base); TestSavePaths(base, source); TestItemsEntries(); TestGameLimits(); TestDuplicateMaxed(base); TestEffectiveLimits(base); TestRenameKeepsRow(base); TestSearchKeptAfterSave(base); TestInputPaths(base); TestTypedCommit(); TestFieldIsolation(base); TestEditedState(base); TestTypedTransactions(base); TestModifierDisplay(); TestModifierFullRange(); TestDexRecords(); TestListedModifiers(base); TestRequiredLevelRoundTrip(base); TestModifierSlots(base); }},

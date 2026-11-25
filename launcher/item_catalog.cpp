@@ -307,7 +307,7 @@ ItemCatalog LoadItemCatalog(CharacterArt& art, const std::string& suffix, const 
                            NameWords(art.TranslatedSheet("SystemMsg", suffix, shown)), shown == kPortPortugueseBrazil);
     };
     ItemCatalog catalog = read(translation);
-    if (!translation.empty() && art.sources().translation) {
+    if (!translation.empty() && translation != kPortEnglish && art.sources().translation) {
         catalog.SetEnglish(read(art.sources().translation->source.empty() ? std::string() : std::string(kPortEnglish)));
     }
     return catalog;

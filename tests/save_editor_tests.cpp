@@ -8071,6 +8071,72 @@ void TestPortugueseColorNames(const fs::path& base, const fs::path& source) {
     }
 }
 
+// The Base Color names are read through the launcher language, never the game language: on the Asia/Hong Kong build
+// the Korean and Chinese slots hold text the launcher's font cannot draw.
+void TestLauncherLanguageColorNames(const fs::path& base, const fs::path& source) {
+    const fs::path app0 = source / "game" / "prepared" / "CUSA10209-1.00";
+    const GameBuild* asia = nullptr;
+    for (const GameBuild& build : SupportedBuilds()) {
+        if (std::string_view(build.title_id) == "CUSA10209" && std::string_view(build.version) == "1.00") asia = &build;
+    }
+    std::error_code ec;
+    if (source.empty() || !asia || !project_sheets::Present(source, {"SystemMsg"}) || !fs::is_regular_file(app0 / "DRACRO_CK.CPK", ec)) {
+        std::printf("Asia/Hong Kong folder or localization sheets not present, skipping the launcher language colour names\n");
+        return;
+    }
+    const project_sheets::Sheet system = project_sheets::Load(source, "SystemMsg");
+    CharacterArtSources sources = ArtSourcesOf(app0, "DRACRO_CK.CPK");
+    sources.translation = asia->translation;
+    CharacterArt art(sources);
+    const TextLanguage& english = LauncherDisplayLanguage(asia, kEnglishKey);
+    const TextLanguage& portuguese = LauncherDisplayLanguage(asia, kPortugueseBrazilKey);
+    const auto trimmed = [](std::string text) {
+        while (!text.empty() && text.back() == ' ') text.pop_back();
+        return text;
+    };
+    const auto ascii = [](const std::string& text) {
+        return !text.empty() && std::all_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; });
+    };
+    for (const CharacterClass klass : kCharacterClasses) {
+        for (int color = 0; color < kNativeColorCount; ++color) {
+            const size_t id = size_t(NativeColorMessage(klass, color));
+            const std::string shown_english = art.ColorName(klass, color, std::string(english.suffix), std::string(english.translation));
+            const std::string shown_portuguese = art.ColorName(klass, color, std::string(portuguese.suffix), std::string(portuguese.translation));
+            CHECK(shown_english == trimmed(system.english[id]) && ascii(shown_english));
+            CHECK(shown_portuguese == trimmed(project_sheets::Text(system, id)) && !shown_portuguese.empty());
+            CHECK(shown_portuguese.find("\xEF\xBF\xBD") == std::string::npos);
+            // The game's own Korean and Chinese names are different text, and never what the Editor shows.
+            const std::string korean = art.ColorName(klass, color, "KR");
+            CHECK(!korean.empty() && korean != shown_english && korean != shown_portuguese && !ascii(korean));
+        }
+    }
+}
+
+// A name that is not UTF-8 never reaches the Base Color list: the US sheet's name stands in, or the caller's own label.
+void TestMalformedColorNames(const fs::path& base) {
+    const fs::path folder = base / "malformed_colors";
+    fs::create_directories(folder);
+    std::vector<std::string> english(901), french(901);
+    for (size_t i = 0; i < english.size(); ++i) english[i] = french[i] = "Name " + std::to_string(i);
+    const size_t first = size_t(NativeColorMessage(CharacterClass::kDwarf, 0));
+    french[first] = "Rouge\xFF\xFE";
+    french[first + 1] = "Cuivr\xC3";
+    french[first + 2] = "Ébène";
+    for (const bool with_english : {true, false}) {
+        std::vector<std::pair<std::string, std::string>> files = {{"msgsheet/SystemMsg_FR.fms", SystemMsgSheet(french)}};
+        if (with_english) files.push_back({"msgsheet/SystemMsg_US.fms", SystemMsgSheet(english)});
+        const std::string archive = cpk_build::BuildCpkWith(files);
+        const fs::path path = folder / (with_english ? "with_english.cpk" : "without_english.cpk");
+        WriteBytes(path, std::vector<uint8_t>(archive.begin(), archive.end()));
+        CharacterArtSources sources;
+        sources.archives = {path};
+        CharacterArt art(sources);
+        CHECK(art.ColorName(CharacterClass::kDwarf, 0, "FR") == (with_english ? english[first] : std::string()));
+        CHECK(art.ColorName(CharacterClass::kDwarf, 1, "FR") == (with_english ? english[first + 1] : std::string()));
+        CHECK(art.ColorName(CharacterClass::kDwarf, 2, "FR") == "Ébène" && art.ColorName(CharacterClass::kDwarf, 3, "FR") == french[first + 3]);
+    }
+}
+
 // A group is a list of units. Run one after another they are the sequential suite; under DCP_TEST_JOBS each is a process.
 struct EditorUnit {
     std::string name;
@@ -8237,7 +8303,7 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestNativeColor();
              TestBc7Encode();
          }),
-        SingleUnit("editor-localization", 1, [=] { TestPortugueseColorNames(base, source); }),
+        SingleUnit("editor-localization", 1, [=] { TestPortugueseColorNames(base, source); TestLauncherLanguageColorNames(base, source); TestMalformedColorNames(base); }),
         SingleUnit("editor-ui-model", 1,
          [] {
              TestAppearanceUx();

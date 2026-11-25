@@ -47,6 +47,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kAntiAliasingKey, "0"},
     {kAnisotropyKey, "0"},
     {kTextLanguageKey, "english"},
+    {kLauncherLanguageKey, "english"},
     {kFrameRateKey, "60"},
     {kShowFpsTitleKey, "0"},
     {kShowResolutionTitleKey, "0"},
@@ -167,6 +168,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
             return std::any_of(languages.begin(), languages.end(),
                                [&](const TextLanguage& language) { return value == language.key; });
         });
+    }
+    if (key == kLauncherLanguageKey) {
+        return one_of({kEnglishKey, kPortugueseBrazilKey});
     }
     if (key == kFrameRateKey) {
         return one_of({"30", "60", "90", "120", "144", "165", "240", "0"});
@@ -343,6 +347,29 @@ bool NormalizeTextLanguage(trg::SettingsStore& settings, std::span<const TextLan
         return false;
     }
     settings.Set(kTextLanguageKey, std::string(effective));
+    return true;
+}
+
+namespace {
+
+bool SetsLauncherLanguage(std::string_view game_language_key) {
+    return game_language_key == kEnglishKey || game_language_key == kPortugueseBrazilKey;
+}
+
+} // namespace
+
+std::string_view LauncherLanguageKey(const trg::SettingsStore& settings, std::string_view game_language_key) {
+    if (SetsLauncherLanguage(game_language_key)) {
+        return game_language_key;
+    }
+    return settings.Get(kLauncherLanguageKey) == kPortugueseBrazilKey ? kPortugueseBrazilKey : kEnglishKey;
+}
+
+bool RememberLauncherLanguage(trg::SettingsStore& settings, std::string_view game_language_key) {
+    if (!SetsLauncherLanguage(game_language_key) || settings.Get(kLauncherLanguageKey) == game_language_key) {
+        return false;
+    }
+    settings.Set(kLauncherLanguageKey, std::string(game_language_key));
     return true;
 }
 

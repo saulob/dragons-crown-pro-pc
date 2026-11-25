@@ -68,7 +68,8 @@ public:
     // to the unsuffixed and US sheets, as the port's `translation` shows it; empty when no sheet has it or the colour is
     // outside 0..4.
     std::string ColorName(CharacterClass klass, int color, const std::string& suffix, const std::string& translation = {});
-    // The records of msgsheet/<sheet>_<suffix>.fms with the same fallbacks; empty when no archive has the sheet.
+    // The records of msgsheet/<sheet>_<suffix>.fms with the same fallbacks; empty when no archive has the sheet. A record
+    // that is not UTF-8 is the US sheet's, or empty.
     const std::vector<std::string>& Sheet(const std::string& sheet, const std::string& suffix);
     // Sheet with the port's `translation` laid over it (game_translation.h); Sheet itself when there is none.
     const std::vector<std::string>& TranslatedSheet(const std::string& sheet, const std::string& suffix, const std::string& translation);
@@ -113,6 +114,8 @@ private:
         CustomLook look;
         SpriteImage image;
     };
+
+    std::optional<std::vector<std::string>> ReadSheet(const std::string& entry);
 
     CharacterArtSources sources_;
     std::vector<std::unique_ptr<CpkArchive>> archives_;

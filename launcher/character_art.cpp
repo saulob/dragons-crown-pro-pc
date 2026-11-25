@@ -11,6 +11,7 @@
 #include "game_mbs.h"
 #include "game_texture.h"
 #include "game_translation.h"
+#include "utf8.h"
 
 namespace dcp {
 namespace {
@@ -502,6 +503,15 @@ void CharacterArt::Adopt(CharacterArt&& prepared, CharacterClass klass) {
     }
 }
 
+std::optional<std::vector<std::string>> CharacterArt::ReadSheet(const std::string& entry) {
+    for (const auto& archive : archives_) {
+        if (const CpkEntry* found = archive->Find(entry)) {
+            if (std::optional<FmsSheet> parsed = ParseFms(archive->Read(*found))) return std::move(parsed->records);
+        }
+    }
+    return std::nullopt;
+}
+
 const std::vector<std::string>& CharacterArt::Sheet(const std::string& sheet, const std::string& suffix) {
     const std::string key = sheet + "_" + suffix;
     const auto cached = sheets_.find(key);
@@ -513,13 +523,16 @@ const std::vector<std::string>& CharacterArt::Sheet(const std::string& sheet, co
     entries.push_back("msgsheet/" + sheet + ".fms");
     entries.push_back("msgsheet/" + sheet + "_US.fms");
     for (const std::string& entry : entries) {
-        for (const auto& archive : archives_) {
-            if (const CpkEntry* found = archive->Find(entry)) {
-                if (const std::optional<FmsSheet> parsed = ParseFms(archive->Read(*found))) {
-                    records = parsed->records;
-                    return records;
-                }
-            }
+        if (std::optional<std::vector<std::string>> read = ReadSheet(entry)) {
+            records = std::move(*read);
+            break;
+        }
+    }
+    const auto invalid = [](const std::string& text) { return !IsValidUtf8(text); };
+    if (std::any_of(records.begin(), records.end(), invalid)) {
+        const std::optional<std::vector<std::string>> english = ReadSheet("msgsheet/" + sheet + "_US.fms");
+        for (size_t i = 0; i < records.size(); ++i) {
+            if (invalid(records[i])) records[i] = english && i < english->size() && !invalid((*english)[i]) ? (*english)[i] : std::string();
         }
     }
     return records;
